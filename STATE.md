@@ -46,6 +46,11 @@ The following ADRs must be authored and decided during Phase 1 spec crystallizat
 - **ADR-004 (proposed):** @include resolution semantics — relative vs. absolute paths, cycle detection, source-span propagation across files
 - **ADR-005 (proposed):** Web-preview architecture — embedded server (axum?), websocket protocol, canvas renderer choice, hot-reload semantics
 - **ADR-006 (proposed):** IR shape — does the same IR feed PPTX + PDF + HTML + canvas, or do we have format-specific lowering passes?
+- **ADR-007 (proposed):** MSRV policy and ooxmlsdk integration — covers the 1.85→1.88 bump and version-pinning policy. HIGH severity per preflight. Must be decided before any crate implementing ooxmlsdk is started.
+- **ADR-008 (proposed):** Web-preview canvas renderer architecture — is the canvas renderer the HTML exporter's output piped to a browser canvas, a separate IR-to-canvas renderer, or an SVG-intermediate approach? Distinct from ADR-005. Determines whether slideforge-html must be dual-use (static export + live preview).
+- **ADR-009 (proposed):** Error recovery semantics — what does the parser do when it sees a malformed slide? Partial AST? Error continuation? Recovery hints? What IR is produced on partial parse, and is layout/export attempted?
+- **ADR-010 (proposed):** IR stability and exporter plugin contract — is the IR a stable internal contract that 3rd-party exporters can target? Is there a first-class plugin interface? Is `slideforge-ffi` the intended external exporter surface?
+- **ADR-011 (proposed):** WCAG AA tooling choice — pa11y vs. playwright+axe vs. lighthouse CLI. Must be decided before web-preview story is decomposed; affects CI design and HTML exporter output requirements.
 
 ## Quality Bar (Non-Negotiable)
 
@@ -87,7 +92,7 @@ Declared 2026-05-23. v1.0 release is gated on ALL rows below — no "ship and po
 - 2026-05-23 — **Q4 — Brand template format:** BIDIRECTIONAL BRIDGE in v1.0. Both `.pptx` and `.toml` accepted as input. Plus a new CLI command `slideforge extract-brand <template.pptx> -o brand.toml` that scans an existing `.pptx` and emits a deterministic `.toml` manifest. Plus FULL SYNTHESIS in v1.0 — given only a `.toml` (no base `.pptx`), slideforge generates a complete valid `.pptx` brand scaffold from scratch (theme XML, slide master, all 11 slide layouts, notes master, handout master, relationships, content types, embedded logo media). This is a major scope expansion vs. the seed's "load template" approach.
 - 2026-05-23 — **Q5 — PDF/HTML exporters scope:** All three exporters (PPTX + PDF + HTML) ship in v1.0. NOT deferred to v1.x. PDF backend choice (Typst-as-backend vs. direct printpdf/lopdf) is an OPEN ADR for the architect (ADR-003).
 - 2026-05-23 — **Q6 — Python binding API style:** DSL-only. Python integration means Python builds `.sf` strings and shells out to the `slideforge` CLI binary; NO pyo3 dict-based API in v1.0. pyo3 deferred indefinitely unless explicit user demand surfaces.
-- 2026-05-23 — **Q7 — Live preview architecture:** Typst-style web preview. `slideforge watch` runs an embedded web server with websocket reload and a canvas-based renderer (likely reusing the HTML exporter from Q5 as the underlying renderer). NOT just-rebuild-pptx. NOT browser-tab-HTML-only. NOT defer.
+- 2026-05-23 — **Q7 — Live preview architecture:** Typst-style web preview. `slideforge watch` runs an embedded web server with websocket reload and a canvas-based renderer. Whether the canvas renderer shares code with the HTML exporter or stands alone is OPEN — see ADR-008 (architect to decide in Phase 1). NOT just-rebuild-pptx. NOT browser-tab-HTML-only. NOT defer.
 - 2026-05-23 — **SCOPE EXPANSION NOTE:** The 7 answers represent a ~2× scope expansion vs. seed Section 6 Phase 2-4 estimates. Specifically: full brand synthesis (Q4) is roughly equivalent in size to "all 23 slide types"; PDF+HTML+web-preview in v1.0 (Q5, Q7) adds another major chunk. The seed's phased plan needs to be re-scoped by the product-owner during Phase 1 PRD work — do NOT just transcribe seed §6 verbatim into the PRD.
 - 2026-05-23 — Production-grade-from-day-1 declared. All VSDD Phase 6 formal hardening gates are non-negotiable for v1.0. CI/CD matrix built in Phase 1 before feature stories begin. v1.0 must meet full 7-dimension convergence.
 
@@ -108,4 +113,4 @@ market_intel:
 _(None yet)_
 
 ## Next Action
-Market intelligence assessment complete (GO recommendation, commit bcabaa8). Awaiting human approval of GO verdict. After human confirms: run validate-brief on the now-amended product-brief.md, then enter phase-1-spec-crystallization with CI/CD matrix expansion as the first sub-step.
+Pre-Phase-1 planning burst complete (2026-05-23). Brief sharded into 9 companion files. Visual parity contract locked. ADR list expanded to ADR-001..ADR-011. Spikes register created (S1..S13). Q7 "likely" wording removed; ADR-008 opened. Human approval of market intel GO verdict still required. After approval: enter phase-1-spec-crystallization with CI/CD matrix expansion as the first sub-step. Phase 1 architect must close S1 (ooxmlsdk coverage), S5 (brand synthesis layout taxonomy), S6 (multi-renderer parity baseline), and ADR-007 (MSRV policy) before implementation stories begin.
