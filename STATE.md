@@ -23,9 +23,9 @@ last_updated: 2026-05-23
 | Phase | Status | Gate |
 |-------|--------|------|
 | Pre-Pipeline (toolchain preflight) | PENDING | — |
-| Market Intelligence | PENDING | Human reviews GO/CAUTION/STOP |
+| Market Intelligence | COMPLETE — GO | Human reviews GO/CAUTION/STOP |
 | Phase 0 (Codebase Ingestion) | N/A — scaffolding is empty stubs, brief is canonical | — |
-| Phase 1 (Spec Crystallization) | BLOCKED | Awaiting human answers to 7 Open Questions (seed §11) |
+| Phase 1 (Spec Crystallization) | READY — pending human GO approval on market intel | Awaiting human confirmation of GO verdict |
 | Phase 2 (Story Decomposition) | PENDING | — |
 | Phase 3 (TDD Implementation) | PENDING | — |
 | Phase 4 (Holdout Eval) | PENDING | — |
@@ -91,8 +91,21 @@ Declared 2026-05-23. v1.0 release is gated on ALL rows below — no "ship and po
 - 2026-05-23 — **SCOPE EXPANSION NOTE:** The 7 answers represent a ~2× scope expansion vs. seed Section 6 Phase 2-4 estimates. Specifically: full brand synthesis (Q4) is roughly equivalent in size to "all 23 slide types"; PDF+HTML+web-preview in v1.0 (Q5, Q7) adds another major chunk. The seed's phased plan needs to be re-scoped by the product-owner during Phase 1 PRD work — do NOT just transcribe seed §6 verbatim into the PRD.
 - 2026-05-23 — Production-grade-from-day-1 declared. All VSDD Phase 6 formal hardening gates are non-negotiable for v1.0. CI/CD matrix built in Phase 1 before feature stories begin. v1.0 must meet full 7-dimension convergence.
 
+## Market Intel Gate
+```yaml
+market_intel:
+  recommendation: GO
+  confidence: medium
+  assessed_at: 2026-05-23
+  assessor: business-analyst
+  artifact: .factory/planning/market-intel-2026-05-23.md
+  commit: bcabaa8
+  human_decision: pending
+  notes: ""
+```
+
 ## Drift Items
 _(None yet)_
 
 ## Next Action
-Toolchain preflight (dx-engineer) and market-intelligence-assessment (business-analyst) are running in parallel. After both return, run validate-brief on the now-amended product-brief.md, then enter phase-1-spec-crystallization with CI/CD matrix expansion as the first sub-step.
+Market intelligence assessment complete (GO recommendation, commit bcabaa8). Awaiting human approval of GO verdict. After human confirms: run validate-brief on the now-amended product-brief.md, then enter phase-1-spec-crystallization with CI/CD matrix expansion as the first sub-step.
