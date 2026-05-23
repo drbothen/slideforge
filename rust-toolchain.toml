@@ -1,0 +1,12 @@
+# Pin the toolchain used by the slideforge workspace.
+#
+# We pin to the stable channel rather than a specific version so that
+# new stable releases are picked up automatically. The MSRV (1.85) is
+# enforced separately via `rust-version = "1.85"` in each crate's
+# Cargo.toml and via clippy.toml's `msrv` setting.
+
+[toolchain]
+channel = "stable"
+components = ["rustfmt", "clippy"]
+targets = []  # Add platform-specific targets here for cross-compilation if needed
+profile = "minimal"

@@ -1,0 +1,36 @@
+# Rust build artifacts
+/target/
+**/*.rs.bk
+**/target/
+
+# Cargo.lock policy: COMMIT it (slideforge produces binaries via slideforge-cli).
+# Library-only crates would not commit this; we do.
+# !Cargo.lock
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# insta snapshot test pending files (the .snap files ARE committed; .snap.new
+# are pending review and should be reviewed and committed/rejected, not gitignored).
+# *.snap.new
+
+# Misc
+*.pdb
+*.log
+
+# Distribution outputs (these are created by release scripts, not committed).
+/dist/
+/releases/
+
+# Coverage artifacts
+/coverage/
+*.profraw
+*.profdata

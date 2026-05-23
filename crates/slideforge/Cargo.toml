@@ -1,0 +1,23 @@
+[package]
+name = "slideforge"
+description = "Compile a structured DSL into branded PowerPoint presentations"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+readme = "../../README.md"
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+slideforge-syntax = { workspace = true }
+slideforge-eval = { workspace = true }
+slideforge-layout = { workspace = true }
+slideforge-pptx = { workspace = true }
+slideforge-validate = { workspace = true }
+miette = { workspace = true }
+thiserror = { workspace = true }

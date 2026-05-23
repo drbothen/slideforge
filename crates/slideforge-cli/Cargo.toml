@@ -1,0 +1,23 @@
+[package]
+name = "slideforge-cli"
+description = "Command-line interface for slideforge"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "../../README.md"
+
+[[bin]]
+name = "slideforge"
+path = "src/main.rs"
+
+[dependencies]
+slideforge = { workspace = true }
+clap = { workspace = true }
+miette = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
