@@ -81,6 +81,7 @@ Declared 2026-05-23. v1.0 release is gated on ALL rows below — no "ship and po
 4. **Timeline expectation:** v1.0 takes real engineering time. The factory executes rigorously, not fast.
 
 ## Decisions Log
+- 2026-05-23 — Pre-Phase-1 research burst complete. 7 research threads (R1-R7) covering Python reference behaviors, brand template patterns, DSL competitor pain, OOXML foundations, WCAG AA for slides, IR prior art, and composition/mixins. DSL design questions doc (25 questions) produced with proposed defaults. Awaiting human review.
 - 2026-05-23 — Workspace resolved to `/Users/jmagady/Dev/slideforge`
 - 2026-05-23 — Mode: greenfield (scaffolding pre-applied counts as Phase 0 stub)
 - 2026-05-23 — `factory-artifacts` orphan branch + worktree initialized (commit 562ccab)
@@ -113,4 +114,4 @@ market_intel:
 _(None yet)_
 
 ## Next Action
-Pre-Phase-1 planning burst complete (2026-05-23). Brief sharded into 9 companion files. Visual parity contract locked. ADR list expanded to ADR-001..ADR-011. Spikes register created (S1..S13). Q7 "likely" wording removed; ADR-008 opened. Human approval of market intel GO verdict still required. After approval: enter phase-1-spec-crystallization with CI/CD matrix expansion as the first sub-step. Phase 1 architect must close S1 (ooxmlsdk coverage), S5 (brand synthesis layout taxonomy), S6 (multi-renderer parity baseline), and ADR-007 (MSRV policy) before implementation stories begin.
+Human to review dsl-design-questions.md (25 proposed defaults). After accept/amend, proceed to Phase 1 spec crystallization.
