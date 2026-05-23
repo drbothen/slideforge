@@ -695,6 +695,18 @@ The following architectural decisions MUST be addressed during Phase 1 spec crys
 
 The 7 answers represent a ~2x scope expansion vs. seed Section 6 Phase 2-4 estimates. Specifically: full brand synthesis (Q4) is roughly equivalent in size to "all 23 slide types"; PDF + HTML + web-preview in v1.0 (Q5, Q7) adds another major chunk. The seed's phased plan MUST be re-scoped by the product-owner during Phase 1 PRD work. Do NOT transcribe seed §6 verbatim into the PRD.
 
+### §11.A.1 Quality Bar (declared 2026-05-23)
+
+**Production-grade from day 1** is now a binding constraint for v1.0. All gates enumerated in `STATE.md > Quality Bar` apply. Key downstream consequences for spec/architecture work:
+
+- Architect MUST design with formal verification in mind from the start (pure-core boundaries, Kani-amenable function signatures).
+- Architect MUST include security and supply-chain ADRs in the Phase 1 deliverable set.
+- Architect MUST define the multi-renderer parity test matrix as part of the architecture doc.
+- Product-owner MUST include performance budgets (< 500ms cold, < 50ms incremental) as NFRs with measurable gates.
+- Product-owner MUST include accessibility (WCAG AA on web preview) as a binding NFR.
+- Story-writer MUST decompose CI/CD matrix expansion as Phase 1 stories (NOT deferred to Phase 4 polish).
+- Per-story-delivery includes adversarial review + security review + demo evidence for EVERY story without exception.
+
 ---
 
 ## Section 12: Agent Factory Instructions

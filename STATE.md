@@ -47,6 +47,34 @@ The following ADRs must be authored and decided during Phase 1 spec crystallizat
 - **ADR-005 (proposed):** Web-preview architecture — embedded server (axum?), websocket protocol, canvas renderer choice, hot-reload semantics
 - **ADR-006 (proposed):** IR shape — does the same IR feed PPTX + PDF + HTML + canvas, or do we have format-specific lowering passes?
 
+## Quality Bar (Non-Negotiable)
+
+Declared 2026-05-23. v1.0 release is gated on ALL rows below — no "ship and polish later" tolerated.
+
+| Dimension | Day-1 Gate |
+|-----------|-----------|
+| Spec convergence | 3 clean adversarial passes on PRD + architecture before Phase 2 starts |
+| Tests | Every public API has unit tests; snapshot tests per slide type; integration tests for CLI; fuzz harness in CI |
+| Implementation | `#![forbid(unsafe_code)]` (except FFI if added); zero `.unwrap()` outside tests; `clippy::pedantic` clean; `#![warn(missing_docs)]` enforced on public APIs |
+| Verification | Kani proofs for pure-core functions in `slideforge-syntax` and `slideforge-eval`; `cargo-fuzz` harness; `cargo-mutants` mutation testing in CI with documented score budget |
+| Visual parity | Snapshot tests against rendered XML; CI renders sample decks in headless LibreOffice + screenshots; visual diff against fixtures |
+| Performance | < 500ms cold build for 25-slide deck enforced in CI as a benchmark gate (criterion + bench regression check); incremental rebuild < 50ms |
+| Documentation | rustdoc on every public item; published to docs.rs on release; user-facing DSL reference book; every ADR signed off |
+| Security | `cargo audit` + `cargo deny` in CI; signed release artifacts; SBOM generation per release; semgrep or CodeQL scan per PR; security-reviewer agent on every PR |
+| Supply chain | All production-crate deps pinned with `=`; `Cargo.lock` committed; `rust-toolchain.toml` pinned; reproducible builds verified |
+| Multi-platform | macOS arm64+x86_64, Linux x86_64+arm64, Windows x86_64 binaries from v1.0; cross-platform CI matrix |
+| Multi-renderer parity | Synthesized .pptx must render correctly in PowerPoint (Office), Keynote, Google Slides, LibreOffice — verified via automated rendering + visual diff in CI |
+| Observability | `tracing` instrumentation throughout the pipeline; structured logs; opentelemetry-compatible export hooks |
+| Accessibility | Web preview (Q7) audited against WCAG AA via accessibility-auditor on every PR touching the preview |
+| Convergence gate | Full 7-dimension convergence check (spec/tests/impl/verify/visual/perf/docs) before release |
+| Holdout eval | Mean satisfaction >= 0.85, must-pass >= 0.6 (factory default — non-negotiable for v1.0) |
+
+### Implications
+1. **No "ship it, polish later" PRs.** Every merge to default branch goes through full per-story-delivery flow with adversarial review, security review, and demo evidence.
+2. **Phase 6 formal hardening is non-optional** for v1.0 — Kani + fuzz + mutation testing must all green-light.
+3. **CI/CD matrix is built in Phase 1**, before any feature stories start. dx-engineer + devops-engineer expand `.github/workflows/ci.yml` into a full matrix (clippy + fmt + test + bench + audit + deny + mutants + fuzz smoke + cross-platform build + LibreOffice render-test + accessibility) as part of phase-1-cicd-setup.
+4. **Timeline expectation:** v1.0 takes real engineering time. The factory executes rigorously, not fast.
+
 ## Decisions Log
 - 2026-05-23 — Workspace resolved to `/Users/jmagady/Dev/slideforge`
 - 2026-05-23 — Mode: greenfield (scaffolding pre-applied counts as Phase 0 stub)
@@ -61,9 +89,10 @@ The following ADRs must be authored and decided during Phase 1 spec crystallizat
 - 2026-05-23 — **Q6 — Python binding API style:** DSL-only. Python integration means Python builds `.sf` strings and shells out to the `slideforge` CLI binary; NO pyo3 dict-based API in v1.0. pyo3 deferred indefinitely unless explicit user demand surfaces.
 - 2026-05-23 — **Q7 — Live preview architecture:** Typst-style web preview. `slideforge watch` runs an embedded web server with websocket reload and a canvas-based renderer (likely reusing the HTML exporter from Q5 as the underlying renderer). NOT just-rebuild-pptx. NOT browser-tab-HTML-only. NOT defer.
 - 2026-05-23 — **SCOPE EXPANSION NOTE:** The 7 answers represent a ~2× scope expansion vs. seed Section 6 Phase 2-4 estimates. Specifically: full brand synthesis (Q4) is roughly equivalent in size to "all 23 slide types"; PDF+HTML+web-preview in v1.0 (Q5, Q7) adds another major chunk. The seed's phased plan needs to be re-scoped by the product-owner during Phase 1 PRD work — do NOT just transcribe seed §6 verbatim into the PRD.
+- 2026-05-23 — Production-grade-from-day-1 declared. All VSDD Phase 6 formal hardening gates are non-negotiable for v1.0. CI/CD matrix built in Phase 1 before feature stories begin. v1.0 must meet full 7-dimension convergence.
 
 ## Drift Items
 _(None yet)_
 
 ## Next Action
-Run toolchain preflight (dx-engineer) and market-intelligence-assessment (business-analyst) in parallel, then validate-brief, then Phase 1.
+Toolchain preflight (dx-engineer) and market-intelligence-assessment (business-analyst) are running in parallel. After both return, run validate-brief on the now-amended product-brief.md, then enter phase-1-spec-crystallization with CI/CD matrix expansion as the first sub-step.
