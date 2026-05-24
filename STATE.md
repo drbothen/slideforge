@@ -81,6 +81,7 @@ Declared 2026-05-23. v1.0 release is gated on ALL rows below — no "ship and po
 4. **Timeline expectation:** v1.0 takes real engineering time. The factory executes rigorously, not fast.
 
 ## Decisions Log
+- 2026-05-24 — Q16-Q25 LOCKED (10 decisions). Full package model v1.0 (Q19), Cargo-style workspace + .sfconfig cascade (Q20), auto-apply defaults (Q21), ~30 reserved keywords (Q22), chumsky error recovery (Q23), 11-level precedence chain (Q25). ALL 25 DSL DESIGN QUESTIONS COMPLETE. DSL fully specified for Phase 1.
 - 2026-05-24 — Q4-Q15 LOCKED (12 decisions). Template overlay, CLI-driven output, a11y compile-time, shape DSL v1.0, 11 inline formats, universal interpolation, universal set, multiple variant inheritance, fragment includes, 3 comment styles, @if/@elif/@else all scopes, inline+registry assets. Canonical: planning/q4-q15-decisions.md.
 - 2026-05-24 — Q3 LOCKED. Plugin-first architecture. 10 extensibility surfaces. Dog-food everything. 7 data source plugins bundled (JSON/CSV/YAML/TOML/HTTP/Excel/SQLite). Mermaid ships v1.0. 18 crates. Canonical: planning/q3-decision-final.md.
 - 2026-05-24 — Q2 LOCKED. 31 built-in slide types (23 seed + 8 new: chart/toc/agenda/quote/grid/bio/diagram/team). Parametric aliases. Reserved component syntax for v2. Canonical: planning/q2-decision-final.md.
@@ -118,4 +119,4 @@ market_intel:
 _(None yet)_
 
 ## Next Action
-Q1-Q15 locked (15/25 decisions complete). Proceed to Q16-Q25 (Tier 3 polish). 10 remaining questions.
+ALL 25 DSL design questions decided. 14 research threads (R1-R14) completed. Ready to enter Phase 1 Spec Crystallization. Next: commit this state, then dispatch business-analyst for L2 domain spec + architect for spike work (S1-S6) + devops-engineer for CI/CD matrix expansion.

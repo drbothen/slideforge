@@ -137,3 +137,33 @@ The 7 answers represent a ~2x scope expansion vs. seed Section 6 Phase 2-4 estim
 - Q14: @if/@elif/@else at all scopes
 
 **Canonical reference:** `.factory/planning/q4-q15-decisions.md`
+
+### §11.A.6 Q16-Q25 Decisions — Locked (2026-05-24)
+
+**Questions decided:** Q16 (DSL versioning), Q17 (strict mode), Q18 (i18n/RTL), Q19 (package model), Q20 (workspace + cascade), Q21 (auto-apply defaults), Q22 (reserved keywords), Q23 (error recovery), Q24 (mixin v2 direction), Q25 (merge semantics).
+
+**Key decisions:**
+- Q19: Full Level 4 package model (git-based, lockfile, @import) ships in v1.0 — adds slideforge-package crate
+- Q20: Cargo-style workspace + .sfconfig cascade with slideforge config explain provenance
+- Q21: Auto-apply defaults/ directory (convention over configuration)
+- Q22: ~30 keywords reserved for future expansion
+- Q23: chumsky error accumulation with spans, hints, and error-slide placeholders in watch mode
+- Q25: 11-level precedence chain, not configurable
+
+**Canonical reference:** `.factory/planning/q16-q25-decisions.md`
+
+---
+
+## ALL 25 DSL DESIGN QUESTIONS COMPLETE (2026-05-24)
+
+All decisions from the original `dsl-design-questions.md` have been resolved through human review with research backing (R1-R14). The DSL is fully specified for Phase 1 architecture work.
+
+**Decision documents:**
+- `.factory/planning/q1-decision-final.md` — Q1 (computation + product scope + roadmap)
+- `.factory/planning/q2-decision-final.md` — Q2 (31 types + aliases + components)
+- `.factory/planning/q3-decision-final.md` — Q3 (plugin-first architecture)
+- `.factory/planning/q4-q15-decisions.md` — Q4-Q15 (template + output + a11y + inline + variants + includes + ...)
+- `.factory/planning/q16-q25-decisions.md` — Q16-Q25 (versioning + packages + workspace + errors + merge)
+
+**Research backing:**
+R1-R14 (14 research documents in `.factory/planning/`)
