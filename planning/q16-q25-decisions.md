@@ -29,6 +29,53 @@ Full Level 4 package model in v1.0:
 - New keyword: `@import` (resolves from installed packages)
 - Cache: `~/.slideforge/packages/` (global) or `.slideforge/packages/` (project-local)
 
+### Package manifest format (slideforge-package.toml)
+```toml
+[package]
+name = "1898-slides"
+version = "1.2.0"
+description = "1898 & Co. standard slide catalog"
+authors = ["Joshua Magady <josh.magady@1898.com>"]
+license = "MIT"
+repository = "https://github.com/1898/slides"
+slideforge_version = "1"
+
+[exports]
+slides = ["catalog/*.sf"]
+aliases = ["aliases/*.sf"]
+defaults = ["defaults/*.sf"]
+brand = "brand.toml"
+assets = ["assets/*"]
+sections = ["sections/*.sf"]
+
+[dependencies]
+# packages can depend on other packages
+mssp-common = { git = "https://github.com/mssp-tools/common", tag = "v1.0.0" }
+```
+
+### Lockfile format (sf.lock)
+```toml
+[[package]]
+name = "1898-slides"
+version = "1.2.0"
+source = "git+https://github.com/1898/slides?tag=v1.2.0"
+commit = "abc123def456789"
+checksum = "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+
+[[package]]
+name = "mssp-common"
+version = "1.0.0"
+source = "git+https://github.com/mssp-tools/common?tag=v1.0.0"
+commit = "789def012345678"
+checksum = "sha256:..."
+```
+
+### @import vs @include
+| Directive | Resolves from | Use case |
+|-----------|--------------|----------|
+| `@include "path.sf"` | Local filesystem (relative to source, then include_paths) | Local files, project-internal sharing |
+| `@import "package/item"` | Installed packages (sf.lock resolution) | Cross-project sharing, versioned packages |
+
 ## Q20: Hierarchical project config — LOCKED
 Cargo-style explicit workspace + thin .sfconfig cascade:
 - `slideforge.toml` at workspace root: `[workspace]` with `members`, `defaults`, `packages`, `variants`
@@ -38,6 +85,45 @@ Cargo-style explicit workspace + thin .sfconfig cascade:
 - `slideforge build --workspace` builds all members
 - `slideforge build --workspace --changed` for CI optimization
 - Research: R14 (planning/workspace-model-research.md)
+
+### .sfconfig allowed fields
+```toml
+# Only these fields are allowed in .sfconfig (small surface area):
+[defaults]
+output_dir = "output/incidents/"
+template = "templates/incident-template.pptx"
+brand = "brands/incident-brand.toml"
+lang = "en-US"
+
+[set.severity_cards]
+color_high = "red"
+color_medium = "orange"
+color_low = "green"
+
+[set.chart]
+color = "brand.primary"
+
+[vars]
+department = "Security Operations"
+classification = "CONFIDENTIAL"
+
+[variants.exec]
+exclude_tags = ["internal"]
+```
+
+### slideforge config explain output
+```
+$ slideforge config explain incident-briefs/inc-2026-0320.sf
+
+  brand = "brands/incident-brand.toml"    # from: .sfconfig (incident-briefs/)
+  lang = "en-US"                          # from: workspace (slideforge.toml)
+  output_dir = "output/incidents/"        # from: .sfconfig (incident-briefs/)
+  set.severity_cards.color_high = "red"   # from: .sfconfig (incident-briefs/)
+  set.severity_cards.color_medium = "orange" # from: .sfconfig (incident-briefs/)
+  vars.department = "Security Operations" # from: .sfconfig (incident-briefs/)
+  variants.exec.exclude_tags = ["internal"] # from: .sfconfig (incident-briefs/)
+  packages.1898-slides = "v1.2.0"         # from: workspace (slideforge.toml)
+```
 
 ## Q21: Defaults directory — LOCKED
 Auto-apply (Hugo-style). Files in `defaults/` named `<slide_type>.sf` auto-apply as set rules to all workspace members. Precedence: bottom of the chain (any more-specific set wins). Opt-out: `ignore_defaults: [type]` in deck metadata. `slideforge config explain` shows auto-applied defaults with provenance.

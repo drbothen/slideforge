@@ -102,3 +102,119 @@ crates/
 ## Dog-Fooding Guarantee
 
 Every bundled plugin uses the same trait API that external plugins will use. If any bundled plugin needs to bypass the API, the API is wrong and must be fixed. The built-in plugins ARE the test suite for the plugin API.
+
+## Trait Signatures (Rust)
+
+These are the canonical trait definitions that live in `slideforge-plugin-api`. Every bundled AND external plugin implements one of these.
+
+```rust
+/// Data source plugin — fetches data from external source
+pub trait DataSource: Send + Sync {
+    fn id(&self) -> &str;
+    fn from_config(config: &SourceConfig) -> Result<Box<dyn DataSource>> where Self: Sized;
+    fn fetch(&self) -> Result<Value>;
+    fn supports_watch(&self) -> bool;
+    fn watch(&self, on_change: Box<dyn Fn() + Send>) -> Result<WatchHandle>;
+}
+
+/// Exporter plugin — produces output in a specific format
+pub trait Exporter: Send + Sync {
+    fn id(&self) -> &str;
+    fn export(&self, deck: &Deck, laid_out: &LaidOutDeck,
+              brand: &Brand, opts: &ExportOptions) -> Result<Vec<u8>>;
+}
+
+/// Chart renderer plugin — produces SVG from a chart specification
+pub trait ChartRenderer: Send + Sync {
+    fn id(&self) -> &str;
+    fn render(&self, spec: &ChartSpec, brand: &Brand) -> Result<SvgData>;
+    fn supported_types(&self) -> &[ChartType];
+}
+
+/// Diagram renderer plugin — produces SVG from diagram source
+pub trait DiagramRenderer: Send + Sync {
+    fn id(&self) -> &str;
+    fn render(&self, source: &str, lang: DiagramLang) -> Result<SvgData>;
+    fn supported_langs(&self) -> &[DiagramLang];
+}
+
+/// Validator plugin — checks content for issues
+pub trait Validator: Send + Sync {
+    fn id(&self) -> &str;
+    fn validate(&self, deck: &Deck, brand: &Brand) -> Vec<Diagnostic>;
+    fn severity(&self) -> Severity;
+}
+
+/// Math renderer plugin — converts LaTeX to target format
+pub trait MathRenderer: Send + Sync {
+    fn id(&self) -> &str;
+    fn to_mathml(&self, latex: &str) -> Result<String>;
+    fn to_omml(&self, latex: &str) -> Result<String>;
+    fn to_html(&self, latex: &str) -> Result<String>;
+}
+
+/// Brand provider plugin — loads/synthesizes/extracts brand config
+pub trait BrandProvider: Send + Sync {
+    fn id(&self) -> &str;
+    fn load(&self, config: &BrandConfig) -> Result<Brand>;
+    fn synthesize_pptx(&self, brand: &Brand) -> Result<Vec<u8>>;
+    fn synthesize_docx(&self, brand: &Brand) -> Result<Vec<u8>>;
+    fn extract(&self, file_bytes: &[u8], format: TemplateFormat) -> Result<BrandToml>;
+}
+
+/// Slide type plugin — defines visual pattern + layout rules
+pub trait SlideType: Send + Sync {
+    fn id(&self) -> &str;
+    fn layout(&self, slide: &Slide, brand: &Brand, canvas: &Canvas) -> Result<LaidOutSlide>;
+    fn validate(&self, slide: &Slide) -> Vec<Diagnostic>;
+    fn required_fields(&self) -> &[FieldSpec];
+}
+```
+
+## Plugin Registry Assembly (v1.0)
+
+```rust
+/// In slideforge/src/registry.rs
+pub fn default_registry() -> PluginRegistry {
+    let mut r = PluginRegistry::new();
+
+    // Data sources
+    r.register_data_source(Box::new(JsonDataSource));
+    r.register_data_source(Box::new(CsvDataSource));
+    r.register_data_source(Box::new(YamlDataSource));
+    r.register_data_source(Box::new(TomlDataSource));
+    r.register_data_source(Box::new(HttpDataSource));
+    r.register_data_source(Box::new(ExcelDataSource));
+    r.register_data_source(Box::new(SqliteDataSource));
+
+    // Exporters
+    r.register_exporter(Box::new(PptxExporter));
+    r.register_exporter(Box::new(DocxExporter));
+    r.register_exporter(Box::new(PdfExporter));
+    r.register_exporter(Box::new(HtmlExporter));
+    r.register_exporter(Box::new(PreviewServer));
+
+    // Renderers
+    r.register_chart_renderer(Box::new(PlottersRenderer));
+    r.register_diagram_renderer(Box::new(MermaidRenderer));
+    r.register_math_renderer(Box::new(PulldownLatexRenderer));
+
+    // Validators
+    r.register_validator(Box::new(CanvasOverflowValidator));
+    r.register_validator(Box::new(WcagContrastValidator));
+    r.register_validator(Box::new(ColorNameValidator));
+    r.register_validator(Box::new(AltTextValidator));
+    r.register_validator(Box::new(BulletLengthValidator));
+    r.register_validator(Box::new(WeightNormValidator));
+
+    // Brand
+    r.register_brand_provider(Box::new(FileBrandProvider));
+
+    // Slide types (31)
+    r.register_slide_type(Box::new(TitleSlideType));
+    r.register_slide_type(Box::new(ContentSlideType));
+    // ... all 31 ...
+
+    r
+}
+```
