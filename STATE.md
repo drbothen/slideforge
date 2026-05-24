@@ -2,121 +2,151 @@
 project: slideforge
 mode: greenfield
 created: 2026-05-23
-current_phase: phase-1-spec-crystallization-pending-preflight
-status: READY_FOR_PHASE_1
-last_updated: 2026-05-23
+current_phase: phase-1-spec-crystallization
+status: READY_TO_START_PHASE_1
+last_updated: 2026-05-24
 ---
 
-# Slideforge Factory State
+# Slideforge — Factory State
 
-## Pipeline Mode
-**Greenfield** — new Rust + DSL PowerPoint generator project. Scaffolding pre-applied (Cargo workspace + 7 crate stubs already committed on main @ e44aacd).
+## What Is This Project?
+slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. It generates branded .pptx, .docx, .pdf, .html, and a live web preview from a single indentation-significant DSL (.sf files) with data binding, iteration, conditionals, and a plugin-first architecture.
 
-## Workspace
-- Repo: `/Users/jmagady/Dev/slideforge`
-- Factory worktree: `.factory/` on branch `factory-artifacts`
-- Brief: `.factory/specs/product-brief.md` (canonical) — sourced from `.factory/seed/PROJECT-SEED.md`
-- Reference materials: `.factory/seed/reference/` (Python implementation — IMMUTABLE source-of-truth for visual behavior)
+**Tagline:** "Branded documents from structured data — one source, every format."
 
-## Phase Status
+**Repository:** https://github.com/drbothen/slideforge
+**Workspace:** /Users/jmagady/Dev/slideforge
+**Factory worktree:** .factory/ on branch `factory-artifacts`
 
-| Phase | Status | Gate |
-|-------|--------|------|
-| Pre-Pipeline (toolchain preflight) | PENDING | — |
-| Market Intelligence | COMPLETE — GO | Human reviews GO/CAUTION/STOP |
-| Phase 0 (Codebase Ingestion) | N/A — scaffolding is empty stubs, brief is canonical | — |
-| Phase 1 (Spec Crystallization) | READY — pending human GO approval on market intel | Awaiting human confirmation of GO verdict |
-| Phase 2 (Story Decomposition) | PENDING | — |
-| Phase 3 (TDD Implementation) | PENDING | — |
-| Phase 4 (Holdout Eval) | PENDING | — |
-| Phase 5 (Adversarial) | PENDING | — |
-| Phase 6 (Hardening) | PENDING | — |
-| Phase 7 (Convergence) | PENDING | — |
+## Current Status: READY TO START PHASE 1
 
-## Open Questions (BLOCKING Phase 1)
-RESOLVED 2026-05-23 — see Decisions Log below for the 7 answers.
+All pre-Phase-1 work is complete:
+- All factory bootstrapped (worktree, STATE.md, seed ingested)
+- All Market intelligence: GO (medium confidence)
+- All Toolchain preflight: PASS-WITH-NOTES (MSRV bump needed: 1.85->1.88)
+- All Brief validated and sharded (608-word slim core + 10 modular specs)
+- All 25 DSL design questions decided (Q1-Q25)
+- All 14 research threads completed (R1-R14)
+- All Quality bar locked (production-grade-from-day-1)
+- All decisions reconciled and consistent across documents
 
-## Open Architecture Questions (for Phase 1 architect)
+## What to Do Next (Phase 1 Spec Crystallization)
 
-The following ADRs must be authored and decided during Phase 1 spec crystallization:
+### Immediate first actions (dispatch in parallel):
+1. **business-analyst** -> L2 domain spec (entities, relationships, processes, invariants)
+   - Input: .factory/specs/product-brief.md + .factory/planning/q1-decision-final.md
+2. **architect** -> Spike S1 (ooxmlsdk PPTX coverage validation — code + binaries, real .pptx generated)
+   - Input: .factory/planning/ooxml-foundations.md + .factory/planning/brand-template-patterns.md
+3. **dx-engineer/devops-engineer** -> Bump MSRV 1.85->1.88 in Cargo.toml + ci.yml
 
-- **ADR-001 (proposed):** Brand synthesis approach — full-from-scratch OOXML generation; document layout taxonomy that maps 23 slide types to slideLayoutN.xml files; placeholder positioning model; theme XML generation strategy
-- **ADR-002 (proposed):** Multi-renderer snapshot test matrix — PowerPoint + Keynote + Google Slides + LibreOffice headless rendering parity guarantees
-- **ADR-003 (proposed):** PDF backend choice (Typst-as-backend mirroring office2pdf, OR direct PDF via printpdf/lopdf, OR HTML→PDF via headless browser)
-- **ADR-004 (proposed):** @include resolution semantics — relative vs. absolute paths, cycle detection, source-span propagation across files
-- **ADR-005 (proposed):** Web-preview architecture — embedded server (axum?), websocket protocol, canvas renderer choice, hot-reload semantics
-- **ADR-006 (proposed):** IR shape — does the same IR feed PPTX + PDF + HTML + canvas, or do we have format-specific lowering passes?
-- **ADR-007 (proposed):** MSRV policy and ooxmlsdk integration — covers the 1.85→1.88 bump and version-pinning policy. HIGH severity per preflight. Must be decided before any crate implementing ooxmlsdk is started.
-- **ADR-008 (proposed):** Web-preview canvas renderer architecture — is the canvas renderer the HTML exporter's output piped to a browser canvas, a separate IR-to-canvas renderer, or an SVG-intermediate approach? Distinct from ADR-005. Determines whether slideforge-html must be dual-use (static export + live preview).
-- **ADR-009 (proposed):** Error recovery semantics — what does the parser do when it sees a malformed slide? Partial AST? Error continuation? Recovery hints? What IR is produced on partial parse, and is layout/export attempted?
-- **ADR-010 (proposed):** IR stability and exporter plugin contract — is the IR a stable internal contract that 3rd-party exporters can target? Is there a first-class plugin interface? Is `slideforge-ffi` the intended external exporter surface?
-- **ADR-011 (proposed):** WCAG AA tooling choice — pa11y vs. playwright+axe vs. lighthouse CLI. Must be decided before web-preview story is decomposed; affects CI design and HTML exporter output requirements.
+### Phase 1 full sequence:
+| Step | Agent | Output | Depends on |
+|------|-------|--------|-----------|
+| P1-01 | business-analyst | L2 domain spec | — |
+| P1-02 | product-owner | L3 PRD with BC-S.SS.NNN behavioral contracts | P1-01 |
+| P1-03a | architect | Spikes S1-S6 (code + binaries) | — |
+| P1-03b | architect | Architecture doc + ADR-001..014 | P1-02 + P1-03a |
+| P1-04 | product-owner | PRD revision from architect feedback | P1-03b |
+| P1-05 | ux-designer | UX spec (CLI + web preview wireframes) | P1-02 |
+| P1-06 | devops-engineer | CI/CD matrix expansion | P1-03a (MSRV bump) |
+| P1-07 | adversary | Adversarial spec review (3 clean passes) | P1-03b + P1-04 + P1-05 + P1-06 |
+| P1-08 | consistency-validator | Cross-doc consistency audit | P1-07 |
+| P1-09 | HUMAN | Approval gate | P1-08 |
+
+### Key constraints for Phase 1 agents:
+- Spike depth: CODE + BINARIES (not design-only). Real .pptx files generated. Real parsers built.
+- Production-grade quality bar: see "Quality Bar" section below
+- Plugin-first architecture: 10 extensibility surfaces, 19 crates
+- 31 slide types (not 23 — the original seed is superseded)
+- All 5 output formats (PPTX, DOCX, PDF, HTML, web preview) are v1.0 scope
+
+## Decision Documents (canonical references)
+
+| Document | Scope | Lines |
+|----------|-------|-------|
+| planning/q1-decision-final.md | Computation, formats, registers, charts, math, brand, roadmap | ~615 |
+| planning/q2-decision-final.md | 31 types, aliases, components, DSL syntax per type | ~340 |
+| planning/q3-decision-final.md | Plugin-first architecture, 10 surfaces, trait signatures, registry | ~220 |
+| planning/q4-q15-decisions.md | Template binding, output, a11y, shape DSL, inline, variants, includes, comments, conditionals, assets | ~229 |
+| planning/q16-q25-decisions.md | Versioning, strict mode, i18n, packages, workspace, defaults, keywords, errors, mixins, merge | ~162 |
+
+## Research Documents (foundation for Phase 1)
+
+| ID | File | Key finding |
+|----|------|-------------|
+| R1 | planning/python-reference-deep-read.md | 23 types catalogued, silent fallbacks, string-prefix bold = anti-pattern |
+| R2 | planning/brand-template-patterns.md | 31 layouts needed, clrMap inheritance, element ordering strict |
+| R3 | planning/dsl-competitor-analysis.md | 70+ citations, #1 differentiator = brand-template-first |
+| R4 | planning/ooxml-foundations.md | ooxmlsdk = serializer only, element ordering enforced |
+| R5 | planning/wcag-for-slides.md | 23 criteria, SVG > canvas for a11y, axe-core |
+| R6 | planning/ir-prior-art.md | Two-IR model, Pandoc ADT + Typst Frame, Hash-stable |
+| R7 | planning/composition-prior-art.md | set rules + variants, no user components v1.0 |
+| R8 | planning/writing-register-research.md | notes != report (McKinsey/NIST/military confirm) |
+| R9 | planning/document-content-vocabulary.md | 67 elements, 19 v1.0-core, charts SVG |
+| R10 | planning/pptx-element-taxonomy.md | 160+ elements, 35 v1.0-core, charts biggest gap |
+| R11 | planning/math-latex-research.md | $...$ + @{var}, pulldown-latex -> OMML |
+| R12 | planning/template-binding-research.md | Overlay v1.0, multi-master v2, Google Slides degrades |
+| R13 | planning/raw-escape-hatch-research.md | No raw to users, shape DSL instead, Typst's philosophy |
+| R14 | planning/workspace-model-research.md | Cargo-style workspace + .sfconfig cascade |
+
+## Spikes (architect must resolve in Phase 1)
+
+| ID | Spike | Severity | Depth |
+|----|-------|----------|-------|
+| S1 | ooxmlsdk PPTX coverage validation | HIGH (blocking) | Code + binaries |
+| S2 | PDF backend evaluation | HIGH | Code + binaries |
+| S3 | WCAG AA tooling choice | MEDIUM | Code + binaries |
+| S4 | chumsky 0.10 indentation parser | MEDIUM | Code + binaries |
+| S5 | Brand synthesis layout taxonomy | HIGH | Code + binaries |
+| S6 | Multi-renderer parity baseline | HIGH | Code + binaries |
+| S14 | Mermaid diagram rendering engine | HIGH | Code + binaries |
+
+## ADRs (architect must produce in Phase 1)
+
+ADR-001 through ADR-014 (see planning/q1-decision-final.md Section 0 and specs/decisions-applied.md for the full list).
 
 ## Quality Bar (Non-Negotiable)
 
-Declared 2026-05-23. v1.0 release is gated on ALL rows below — no "ship and polish later" tolerated.
+Production-grade-from-day-1. Key gates:
+- `#![forbid(unsafe_code)]` (except FFI if added)
+- Zero `.unwrap()` outside tests
+- `clippy::pedantic` clean
+- `#![warn(missing_docs)]` on public APIs
+- Kani proofs for pure-core functions
+- cargo-fuzz harness in CI
+- cargo-mutants with documented kill-rate budget
+- WCAG AA on web preview + HTML
+- PDF/UA-1 on PDF
+- Multi-renderer visual parity (PowerPoint, Keynote, Google Slides, LibreOffice)
+- < 500ms cold build, < 50ms incremental (25-slide deck)
+- Signed releases + SBOM
+- cargo audit + cargo deny in CI
+- Cross-platform binaries (macOS arm64+x86_64, Linux x86_64+arm64, Windows x86_64)
 
-| Dimension | Day-1 Gate |
-|-----------|-----------|
-| Spec convergence | 3 clean adversarial passes on PRD + architecture before Phase 2 starts |
-| Tests | Every public API has unit tests; snapshot tests per slide type; integration tests for CLI; fuzz harness in CI |
-| Implementation | `#![forbid(unsafe_code)]` (except FFI if added); zero `.unwrap()` outside tests; `clippy::pedantic` clean; `#![warn(missing_docs)]` enforced on public APIs |
-| Verification | Kani proofs for pure-core functions in `slideforge-syntax` and `slideforge-eval`; `cargo-fuzz` harness; `cargo-mutants` mutation testing in CI with documented score budget |
-| Visual parity | Snapshot tests against rendered XML; CI renders sample decks in headless LibreOffice + screenshots; visual diff against fixtures |
-| Performance | < 500ms cold build for 25-slide deck enforced in CI as a benchmark gate (criterion + bench regression check); incremental rebuild < 50ms |
-| Documentation | rustdoc on every public item; published to docs.rs on release; user-facing DSL reference book; every ADR signed off |
-| Security | `cargo audit` + `cargo deny` in CI; signed release artifacts; SBOM generation per release; semgrep or CodeQL scan per PR; security-reviewer agent on every PR |
-| Supply chain | All production-crate deps pinned with `=`; `Cargo.lock` committed; `rust-toolchain.toml` pinned; reproducible builds verified |
-| Multi-platform | macOS arm64+x86_64, Linux x86_64+arm64, Windows x86_64 binaries from v1.0; cross-platform CI matrix |
-| Multi-renderer parity | Synthesized .pptx must render correctly in PowerPoint (Office), Keynote, Google Slides, LibreOffice — verified via automated rendering + visual diff in CI |
-| Observability | `tracing` instrumentation throughout the pipeline; structured logs; opentelemetry-compatible export hooks |
-| Accessibility | Web preview (Q7) audited against WCAG AA via accessibility-auditor on every PR touching the preview |
-| Convergence gate | Full 7-dimension convergence check (spec/tests/impl/verify/visual/perf/docs) before release |
-| Holdout eval | Mean satisfaction >= 0.85, must-pass >= 0.6 (factory default — non-negotiable for v1.0) |
+## Version Roadmap (summary)
 
-### Implications
-1. **No "ship it, polish later" PRs.** Every merge to default branch goes through full per-story-delivery flow with adversarial review, security review, and demo evidence.
-2. **Phase 6 formal hardening is non-optional** for v1.0 — Kani + fuzz + mutation testing must all green-light.
-3. **CI/CD matrix is built in Phase 1**, before any feature stories start. dx-engineer + devops-engineer expand `.github/workflows/ci.yml` into a full matrix (clippy + fmt + test + bench + audit + deny + mutants + fuzz smoke + cross-platform build + LibreOffice render-test + accessibility) as part of phase-1-cicd-setup.
-4. **Timeline expectation:** v1.0 takes real engineering time. The factory executes rigorously, not fast.
+- **v1.0**: Data-reactive DSL (rungs 1-9), 31 slide types, 5 output formats, 3 writing registers, plugin-first (10 surfaces, 19 crates), charts (plotters), math ($...$+@{var}), Mermaid diagrams, full package model, workspace, shape DSL, brand bridge (bidirectional PPTX+DOCX), WCAG AA, production-grade
+- **v1.x**: More chart types, figure auto-numbering, DOCX Level 2, comemo incremental, slideforge fmt
+- **v2**: User-defined functions, SmartArt, animations, native OOXML charts, plugin connectors, mixins, components, LaTeX/Beamer output, AI-assisted content, presentation mode
+- **v3**: Morph transitions, video export, multi-document pipeline, marketplace, collaboration
 
-## Decisions Log
-- 2026-05-24 — Q16-Q25 LOCKED (10 decisions). Full package model v1.0 (Q19), Cargo-style workspace + .sfconfig cascade (Q20), auto-apply defaults (Q21), ~30 reserved keywords (Q22), chumsky error recovery (Q23), 11-level precedence chain (Q25). ALL 25 DSL DESIGN QUESTIONS COMPLETE. DSL fully specified for Phase 1.
-- 2026-05-24 — Q4-Q15 LOCKED (12 decisions). Template overlay, CLI-driven output, a11y compile-time, shape DSL v1.0, 11 inline formats, universal interpolation, universal set, multiple variant inheritance, fragment includes, 3 comment styles, @if/@elif/@else all scopes, inline+registry assets. Canonical: planning/q4-q15-decisions.md.
-- 2026-05-24 — Q3 LOCKED. Plugin-first architecture. 10 extensibility surfaces. Dog-food everything. 7 data source plugins bundled (JSON/CSV/YAML/TOML/HTTP/Excel/SQLite). Mermaid ships v1.0. 18 crates. Canonical: planning/q3-decision-final.md.
-- 2026-05-24 — Q2 LOCKED. 31 built-in slide types (23 seed + 8 new: chart/toc/agenda/quote/grid/bio/diagram/team). Parametric aliases. Reserved component syntax for v2. Canonical: planning/q2-decision-final.md.
-- 2026-05-24 — Q1 LOCKED. Computation: data-reactive declarative (rungs 1-9). 5 output formats (pptx/docx/pdf/html/preview). 3 writing registers (notes/report/detail). Math via $...$+@{var}. Charts via SVG/plotters. Brand bridge bidirectional for pptx+docx. 13 crates (updated to 18 in Q3). Full roadmap v1.0→v3. Canonical: planning/q1-decision-final.md. 11 research threads (R1-R11) completed.
-- 2026-05-23 — Pre-Phase-1 research burst complete. 7 research threads (R1-R7) covering Python reference behaviors, brand template patterns, DSL competitor pain, OOXML foundations, WCAG AA for slides, IR prior art, and composition/mixins. DSL design questions doc (25 questions) produced with proposed defaults. Awaiting human review.
-- 2026-05-23 — Workspace resolved to `/Users/jmagady/Dev/slideforge`
-- 2026-05-23 — Mode: greenfield (scaffolding pre-applied counts as Phase 0 stub)
-- 2026-05-23 — `factory-artifacts` orphan branch + worktree initialized (commit 562ccab)
-- 2026-05-23 — Seed bundle relocated from `main:seed/` to `factory-artifacts:.factory/seed/`
-- 2026-05-23 — Canonical brief established at `.factory/specs/product-brief.md`
-- 2026-05-23 — **Q1 — Project name:** `slideforge` (confirmed; matches scaffolding crate names crates/slideforge*; no rename required)
-- 2026-05-23 — **Q2 — DSL syntax style:** Indentation-significant (YAML/Python-like). chumsky semantic-indentation parser. NOT brace-delimited.
-- 2026-05-23 — **Q3 — Multi-file project support:** `@include "path.sf"` directives supported. Affects parser (source-span tracking across files), eval (resolution + cycle detection), and project config (`slideforge.toml`).
-- 2026-05-23 — **Q4 — Brand template format:** BIDIRECTIONAL BRIDGE in v1.0. Both `.pptx` and `.toml` accepted as input. Plus a new CLI command `slideforge extract-brand <template.pptx> -o brand.toml` that scans an existing `.pptx` and emits a deterministic `.toml` manifest. Plus FULL SYNTHESIS in v1.0 — given only a `.toml` (no base `.pptx`), slideforge generates a complete valid `.pptx` brand scaffold from scratch (theme XML, slide master, all 11 slide layouts, notes master, handout master, relationships, content types, embedded logo media). This is a major scope expansion vs. the seed's "load template" approach.
-- 2026-05-23 — **Q5 — PDF/HTML exporters scope:** All three exporters (PPTX + PDF + HTML) ship in v1.0. NOT deferred to v1.x. PDF backend choice (Typst-as-backend vs. direct printpdf/lopdf) is an OPEN ADR for the architect (ADR-003).
-- 2026-05-23 — **Q6 — Python binding API style:** DSL-only. Python integration means Python builds `.sf` strings and shells out to the `slideforge` CLI binary; NO pyo3 dict-based API in v1.0. pyo3 deferred indefinitely unless explicit user demand surfaces.
-- 2026-05-23 — **Q7 — Live preview architecture:** Typst-style web preview. `slideforge watch` runs an embedded web server with websocket reload and a canvas-based renderer. Whether the canvas renderer shares code with the HTML exporter or stands alone is OPEN — see ADR-008 (architect to decide in Phase 1). NOT just-rebuild-pptx. NOT browser-tab-HTML-only. NOT defer.
-- 2026-05-23 — **SCOPE EXPANSION NOTE:** The 7 answers represent a ~2× scope expansion vs. seed Section 6 Phase 2-4 estimates. Specifically: full brand synthesis (Q4) is roughly equivalent in size to "all 23 slide types"; PDF+HTML+web-preview in v1.0 (Q5, Q7) adds another major chunk. The seed's phased plan needs to be re-scoped by the product-owner during Phase 1 PRD work — do NOT just transcribe seed §6 verbatim into the PRD.
-- 2026-05-23 — Production-grade-from-day-1 declared. All VSDD Phase 6 formal hardening gates are non-negotiable for v1.0. CI/CD matrix built in Phase 1 before feature stories begin. v1.0 must meet full 7-dimension convergence.
+## Decisions Log (chronological)
 
-## Market Intel Gate
-```yaml
-market_intel:
-  recommendation: GO
-  confidence: medium
-  assessed_at: 2026-05-23
-  assessor: business-analyst
-  artifact: .factory/planning/market-intel-2026-05-23.md
-  commit: bcabaa8
-  human_decision: pending
-  notes: ""
-```
+- 2026-05-23 — Workspace resolved, mode: greenfield
+- 2026-05-23 — factory-artifacts branch + worktree initialized
+- 2026-05-23 — Seed ingested, canonical brief at specs/product-brief.md
+- 2026-05-23 — 7 Open Questions answered (slideforge / indented / @include / both+extract+full-synthesis / all-3-exporters / DSL-only Python / Typst-web-preview)
+- 2026-05-23 — Production-grade-from-day-1 declared
+- 2026-05-23 — Market intelligence: GO
+- 2026-05-23 — Toolchain preflight: PASS-WITH-NOTES
+- 2026-05-23 — Brief validated, sharded, parity contract locked
+- 2026-05-24 — Q1 LOCKED (data-reactive, 5 formats, 3 registers, charts, math, plugin-first, brand bridge)
+- 2026-05-24 — Q2 LOCKED (31 types, aliases, reserved components)
+- 2026-05-24 — Q3 LOCKED (plugin-first, 10 surfaces, dog-food, Mermaid v1.0)
+- 2026-05-24 — Q4-Q15 LOCKED (template overlay, a11y, shape DSL, interpolation, variants, fragments, etc.)
+- 2026-05-24 — Q16-Q25 LOCKED (packages, workspace, defaults, keywords, errors, merge)
+- 2026-05-24 — ALL 25 DSL DESIGN QUESTIONS COMPLETE
+- 2026-05-24 — Reconciliation pass: all docs consistent
 
 ## Drift Items
-_(None yet)_
-
-## Next Action
-ALL 25 DSL design questions decided. 14 research threads (R1-R14) completed. Ready to enter Phase 1 Spec Crystallization. Next: commit this state, then dispatch business-analyst for L2 domain spec + architect for spike work (S1-S6) + devops-engineer for CI/CD matrix expansion.
+_(None)_
