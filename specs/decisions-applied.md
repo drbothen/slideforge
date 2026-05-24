@@ -84,3 +84,24 @@ The 7 answers represent a ~2x scope expansion vs. seed Section 6 Phase 2-4 estim
 - Product-owner MUST include accessibility (WCAG AA on web preview) as a binding NFR.
 - Story-writer MUST decompose CI/CD matrix expansion as Phase 1 stories (NOT deferred to Phase 4 polish).
 - Per-story-delivery includes adversarial review + security review + demo evidence for EVERY story without exception.
+
+---
+
+### §11.A.2 Q1 Decision — Locked (2026-05-24)
+
+**Original question:** "Does the DSL have computation?"
+
+**Final answer:** Q1 expanded during discussion into the foundational product scope decision. The complete decision is documented in `.factory/planning/q1-decision-final.md` (13 sections, version roadmap through v3).
+
+**Key decisions:**
+- Computation: Data-reactive declarative (rungs 1-9). User-defined functions in v2.
+- Output formats: PPTX + DOCX + PDF + HTML + web preview (5 formats in v1.0)
+- Writing registers: `notes` (presenter) + `report` (reader) + `detail` (document-only) — three separate fields, linguistically distinct
+- Document section types: ~15 (10 auto-generated from slide data + 5 document-only manual sections)
+- Charts: SVG via plotters crate. Native OOXML ChartML in v2.
+- Math: $...$ / $$...$$ with mode-based parsing. {{ }} disabled in math; @{var} enabled. LaTeX → OMML via pulldown-latex + mml2omml.xsl.
+- Brand bridge: bidirectional for BOTH .pptx AND .docx. Unified brand.toml.
+- LaTeX/Beamer: v2 output format (slideforge-latex exporter crate)
+- Crate layout: 13 crates (added slideforge-docx, slideforge-data, slideforge-brand, slideforge-preview)
+
+**Canonical reference:** `.factory/planning/q1-decision-final.md`
