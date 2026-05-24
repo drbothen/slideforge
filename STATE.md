@@ -81,6 +81,7 @@ Declared 2026-05-23. v1.0 release is gated on ALL rows below — no "ship and po
 4. **Timeline expectation:** v1.0 takes real engineering time. The factory executes rigorously, not fast.
 
 ## Decisions Log
+- 2026-05-24 — Q4-Q15 LOCKED (12 decisions). Template overlay, CLI-driven output, a11y compile-time, shape DSL v1.0, 11 inline formats, universal interpolation, universal set, multiple variant inheritance, fragment includes, 3 comment styles, @if/@elif/@else all scopes, inline+registry assets. Canonical: planning/q4-q15-decisions.md.
 - 2026-05-24 — Q3 LOCKED. Plugin-first architecture. 10 extensibility surfaces. Dog-food everything. 7 data source plugins bundled (JSON/CSV/YAML/TOML/HTTP/Excel/SQLite). Mermaid ships v1.0. 18 crates. Canonical: planning/q3-decision-final.md.
 - 2026-05-24 — Q2 LOCKED. 31 built-in slide types (23 seed + 8 new: chart/toc/agenda/quote/grid/bio/diagram/team). Parametric aliases. Reserved component syntax for v2. Canonical: planning/q2-decision-final.md.
 - 2026-05-24 — Q1 LOCKED. Computation: data-reactive declarative (rungs 1-9). 5 output formats (pptx/docx/pdf/html/preview). 3 writing registers (notes/report/detail). Math via $...$+@{var}. Charts via SVG/plotters. Brand bridge bidirectional for pptx+docx. 13 crates (updated to 18 in Q3). Full roadmap v1.0→v3. Canonical: planning/q1-decision-final.md. 11 research threads (R1-R11) completed.
@@ -117,4 +118,4 @@ market_intel:
 _(None yet)_
 
 ## Next Action
-Q1-Q3 locked. Proceed to Q4 (Per-slide vs. deck-level template binding). 22 remaining DSL design questions.
+Q1-Q15 locked (15/25 decisions complete). Proceed to Q16-Q25 (Tier 3 polish). 10 remaining questions.

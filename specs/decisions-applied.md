@@ -121,3 +121,19 @@ The 7 answers represent a ~2x scope expansion vs. seed Section 6 Phase 2-4 estim
 **Final answer:** Plugin-first architecture from day 1. 10 extensibility surfaces (DataSource, Exporter, ChartRenderer, DiagramRenderer, Validator, MathRenderer, BrandProvider, SlideType, SectionType, InlineFormat). All functionality goes through plugin traits — dog-food everything. v1.0 bundles 7 data source plugins (JSON/CSV/YAML/TOML/HTTP/Excel/SQLite), 5 exporter plugins, plotters charts, Mermaid diagrams, pulldown-latex+KaTeX math, 31 slide types, all validators. v2 adds dynamic plugin loading. 18-crate layout with slideforge-plugin-api as the foundation.
 
 **Canonical reference:** `.factory/planning/q3-decision-final.md`
+
+### §11.A.5 Q4-Q15 Decisions — Locked (2026-05-24)
+
+**Questions decided:** Q4 (template binding), Q5 (output targets), Q6 (accessibility), Q7 (raw escape + shape DSL), Q8 (inline formatting), Q9 (interpolation rules), Q10 (set universality), Q11 (variant inheritance), Q12 (@include depth), Q13 (comments), Q14 (conditionals), Q15 (asset references).
+
+**Key decisions:**
+- Q4: deck-level brand + brand_overlay, multi-master v2
+- Q7: shape DSL ships v1.0 (no raw XML to users)
+- Q8: 11 inline formatting elements in v1.0 (including sup/sub/del/highlight)
+- Q9: interpolation works in @include paths (evaluation order dependency)
+- Q11: full multiple variant inheritance in v1.0
+- Q12: fragment includes inside slide fields (cross-file spans)
+- Q13: three comment styles (line, block, doc)
+- Q14: @if/@elif/@else at all scopes
+
+**Canonical reference:** `.factory/planning/q4-q15-decisions.md`
