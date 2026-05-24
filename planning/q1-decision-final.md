@@ -134,10 +134,24 @@ R8 research confirmed: talk tracks and reports are "linguistically irreconcilabl
 
 ---
 
-## Section 4: Slide Types (23)
+## Section 4: Slide Types (31)
 
-All 23 from the seed, unchanged:
+31 built-in types in v1.0 (23 original seed + 8 new added in Q2). See q2-decision-final.md for full details.
+
+### Original 23 (from seed)
 title, content, two_column, content_stat, stat_callout, stats_summary, highlight, highlight_boxes, split_contrast, card_rows, severity_cards, numbered_actions, vertical_timeline, horizontal_timeline, enhanced_table, table, status, progress_bar, metric_tree, formula, weighted_composite, end, key_metrics (alias for stat_callout)
+
+### 8 New Types (added in Q2)
+| Type | Description |
+|------|-------------|
+| chart | Full-slide data chart from @data. SVG via plotters. |
+| toc | Auto-generated table of contents. |
+| agenda | Meeting agenda with items, times, owners. |
+| quote | Full-slide testimonial/pull-quote. |
+| grid | Multi-column/multi-row flexible layout. |
+| bio | Speaker/team member profile. |
+| diagram | Full-slide Mermaid diagram rendering (SVG). Ships v1.0. |
+| team | Team roster grid. |
 
 ---
 
@@ -281,23 +295,30 @@ Reserved for v1.x/v2: `^sup^` (superscript), `~sub~` (subscript), `~~del~~` (str
 
 ---
 
-## Section 12: Crate Layout (13 crates)
+## Section 12: Crate Layout (18 crates)
+
+Plugin-first architecture (Q3 decision). All functionality runs through plugin traits in `slideforge-plugin-api`. See q3-decision-final.md for full details.
 
 ```
 crates/
-├── slideforge/           # Main library (re-exports)
-├── slideforge-cli/       # CLI binary
-├── slideforge-syntax/    # Parser (chumsky) — DSL → AST
-├── slideforge-eval/      # AST → semantic IR (Deck)
-├── slideforge-layout/    # Semantic IR → LaidOutDeck
-├── slideforge-pptx/      # PPTX exporter (ooxmlsdk)
-├── slideforge-docx/      # DOCX exporter (ooxmlsdk)
-├── slideforge-pdf/       # PDF exporter (HTML → Chrome --print-to-pdf)
-├── slideforge-html/      # HTML exporter
-├── slideforge-validate/  # Content validation + WCAG + brand contrast
-├── slideforge-data/      # Data binding (JSON/CSV/HTTP fetch)
-├── slideforge-brand/     # Brand bridge (.pptx/.docx ↔ .toml ↔ synthesis)
-└── slideforge-preview/   # Web preview server (axum + websocket + SVG)
+├── slideforge-plugin-api/ # THE foundation — all 10 trait definitions
+├── slideforge/            # Main library — assembles PluginRegistry
+├── slideforge-cli/        # CLI binary
+├── slideforge-syntax/     # Parser (chumsky) — DSL → AST (core, NOT a plugin)
+├── slideforge-eval/       # AST → semantic IR (Deck) (core, NOT a plugin)
+├── slideforge-layout/     # Semantic IR → LaidOutDeck (core, NOT a plugin)
+├── slideforge-pptx/       # Bundled Exporter plugin (ooxmlsdk)
+├── slideforge-docx/       # Bundled Exporter plugin (ooxmlsdk)
+├── slideforge-pdf/        # Bundled Exporter plugin (HTML → Chrome --print-to-pdf)
+├── slideforge-html/       # Bundled Exporter plugin
+├── slideforge-preview/    # Bundled Exporter/preview plugin (axum + websocket + SVG)
+├── slideforge-data/       # Bundled DataSource plugins (json/csv/yaml/toml/http/xlsx/sqlite)
+├── slideforge-charts/     # Bundled ChartRenderer plugin (plotters)
+├── slideforge-diagrams/   # Bundled DiagramRenderer plugin (mermaid, ships v1.0)
+├── slideforge-math/       # Bundled MathRenderer plugin (pulldown-latex + KaTeX)
+├── slideforge-validate/   # Bundled Validator plugins (WCAG + brand contrast)
+├── slideforge-brand/      # Bundled BrandProvider plugin (.pptx/.docx ↔ .toml ↔ synthesis)
+└── slideforge-types/      # Bundled SlideType + SectionType plugins (31 types)
 ```
 
 ---
@@ -308,8 +329,10 @@ crates/
 *A data-reactive branded document platform. One source, every format.*
 
 Everything in Sections 1-12 above, plus:
-- 23 opinionated slide types from the seed
+- 31 opinionated slide types (23 seed + 8 new: chart/toc/agenda/quote/grid/bio/diagram/team)
 - ~15 document section types (auto-generated + manual)
+- Plugin-first architecture: 10 extensibility surfaces, all bundled plugins dog-food the same traits as future external plugins
+- Mermaid diagram rendering ships in v1.0 via the DiagramRenderer plugin (Spike S14 determines implementation approach)
 - Production-grade quality bar: Kani proofs, cargo-fuzz, cargo-mutants, WCAG AA, multi-renderer visual parity, signed releases, SBOM
 - CI/CD matrix: clippy + fmt + test + bench + audit + deny + mutants + fuzz smoke + cross-platform + LibreOffice render + accessibility
 - CLI: `slideforge build`, `slideforge watch`, `slideforge extract-brand`
@@ -319,9 +342,7 @@ Everything in Sections 1-12 above, plus:
 - More chart types (box-whisker, waterfall, funnel, treemap, sunburst)
 - Figure auto-numbering + table of figures
 - Nested lists, definition lists
-- Mermaid diagram integration (mermaid-rs or headless rendering)
 - DOCX Level 2 (proper flow layout, formatted detail sub-sections, heading hierarchy)
-- New slide types: toc (auto-generated), agenda
 - comemo incremental compilation (< 50ms incremental rebuilds)
 - slideforge fmt (canonical formatter, deterministic round-trip)
 - slideforge lint (standalone linter)
@@ -336,9 +357,10 @@ Everything in Sections 1-12 above, plus:
 - Progressive bullet reveal animation (entrance: one-by-one on click)
 - Zoom sections (non-linear navigation — PowerPoint desktop only)
 - Native OOXML charts (ChartML — editable in Office)
-- Plugin data connectors (Grafana, Datadog, PagerDuty, Jira, Salesforce)
+- Dynamic plugin loading (WASI modules / shared libraries via `slideforge plugin install`)
+- Plugin data connectors (Grafana, Datadog, PagerDuty, Jira, Salesforce) — builds on the DataSource trait shipping in v1.0
 - Mixin syntax: @mixin / @include with parameters
-- Component/parameterized slide types
+- Component/parameterized slide types (reserved syntax ships in v1.0 parser; implementation in v2)
 - Library/package model (installable slide kits)
 - Equation auto-numbering + {{ eqref(n) }}
 - Bibliography/citations (BibTeX integration)

@@ -81,7 +81,9 @@ Declared 2026-05-23. v1.0 release is gated on ALL rows below — no "ship and po
 4. **Timeline expectation:** v1.0 takes real engineering time. The factory executes rigorously, not fast.
 
 ## Decisions Log
-- 2026-05-24 — Q1 LOCKED. Computation: data-reactive declarative (rungs 1-9). 5 output formats (pptx/docx/pdf/html/preview). 3 writing registers (notes/report/detail). Math via $...$+@{var}. Charts via SVG/plotters. Brand bridge bidirectional for pptx+docx. 13 crates. Full roadmap v1.0→v3. Canonical: planning/q1-decision-final.md. 11 research threads (R1-R11) completed.
+- 2026-05-24 — Q3 LOCKED. Plugin-first architecture. 10 extensibility surfaces. Dog-food everything. 7 data source plugins bundled (JSON/CSV/YAML/TOML/HTTP/Excel/SQLite). Mermaid ships v1.0. 18 crates. Canonical: planning/q3-decision-final.md.
+- 2026-05-24 — Q2 LOCKED. 31 built-in slide types (23 seed + 8 new: chart/toc/agenda/quote/grid/bio/diagram/team). Parametric aliases. Reserved component syntax for v2. Canonical: planning/q2-decision-final.md.
+- 2026-05-24 — Q1 LOCKED. Computation: data-reactive declarative (rungs 1-9). 5 output formats (pptx/docx/pdf/html/preview). 3 writing registers (notes/report/detail). Math via $...$+@{var}. Charts via SVG/plotters. Brand bridge bidirectional for pptx+docx. 13 crates (updated to 18 in Q3). Full roadmap v1.0→v3. Canonical: planning/q1-decision-final.md. 11 research threads (R1-R11) completed.
 - 2026-05-23 — Pre-Phase-1 research burst complete. 7 research threads (R1-R7) covering Python reference behaviors, brand template patterns, DSL competitor pain, OOXML foundations, WCAG AA for slides, IR prior art, and composition/mixins. DSL design questions doc (25 questions) produced with proposed defaults. Awaiting human review.
 - 2026-05-23 — Workspace resolved to `/Users/jmagady/Dev/slideforge`
 - 2026-05-23 — Mode: greenfield (scaffolding pre-applied counts as Phase 0 stub)
@@ -115,4 +117,4 @@ market_intel:
 _(None yet)_
 
 ## Next Action
-Q1 locked. Proceed to Q2 (Custom/composed slide types?). 24 remaining DSL design questions to decide.
+Q1-Q3 locked. Proceed to Q4 (Per-slide vs. deck-level template binding). 22 remaining DSL design questions.

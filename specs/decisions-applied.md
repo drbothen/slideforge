@@ -105,3 +105,19 @@ The 7 answers represent a ~2x scope expansion vs. seed Section 6 Phase 2-4 estim
 - Crate layout: 13 crates (added slideforge-docx, slideforge-data, slideforge-brand, slideforge-preview)
 
 **Canonical reference:** `.factory/planning/q1-decision-final.md`
+
+### §11.A.3 Q2 Decision — Locked (2026-05-24)
+
+**Original question:** "Custom / composed slide types?"
+
+**Final answer:** A+B+C+D. 31 built-in types (23 seed + 8 new: chart, toc, agenda, quote, grid, bio, diagram, team). Parametric aliases via `alias name = type:`. Reserved component/extends/inherits for v2. Composition via @include + sequential slides.
+
+**Canonical reference:** `.factory/planning/q2-decision-final.md`
+
+### §11.A.4 Q3 Decision — Locked (2026-05-24)
+
+**Original question:** "Data binding mechanism?"
+
+**Final answer:** Plugin-first architecture from day 1. 10 extensibility surfaces (DataSource, Exporter, ChartRenderer, DiagramRenderer, Validator, MathRenderer, BrandProvider, SlideType, SectionType, InlineFormat). All functionality goes through plugin traits — dog-food everything. v1.0 bundles 7 data source plugins (JSON/CSV/YAML/TOML/HTTP/Excel/SQLite), 5 exporter plugins, plotters charts, Mermaid diagrams, pulldown-latex+KaTeX math, 31 slide types, all validators. v2 adds dynamic plugin loading. 18-crate layout with slideforge-plugin-api as the foundation.
+
+**Canonical reference:** `.factory/planning/q3-decision-final.md`
