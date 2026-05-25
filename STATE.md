@@ -3,13 +3,17 @@ project: slideforge
 mode: greenfield
 created: 2026-05-23
 current_phase: phase-1-spec-crystallization
-status: IN_PROGRESS_PHASE_1
+status: READY_FOR_ADVERSARIAL_REVIEW
 last_updated: 2026-05-24
 prd_bcs: 101
 prd_hs: 15
 prd_supplements: 4
 spikes_resolved: 7
 spikes_total: 7
+dtu_required: false
+dtu_assessment: 2026-05-24
+dtu_clones_built: n/a
+dtu_services: []
 ---
 
 # Slideforge — Factory State
@@ -23,9 +27,9 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. It generates branded .p
 **Workspace:** /Users/jmagady/Dev/slideforge
 **Factory worktree:** .factory/ on branch `factory-artifacts`
 
-## Current Status: PHASE 1 IN PROGRESS (2026-05-24)
+## Current Status: READY FOR ADVERSARIAL REVIEW (2026-05-24)
 
-Architecture (P1-03b) + UX spec (P1-06) + feasibility (P1-05) DONE. 14 ADRs, 15 VPs, 16 UX files committed. BC-1.03.005 added. Next: DTU assessment + CI/CD matrix (P1-07), then adversarial review (P1-08, 3-clean required).
+All pre-adversarial Phase 1 steps complete. DTU: not required (no external clones needed). Gene transfusion: behavioral-only (75 behaviors classified, no code ported). CI/CD: 3 workflows committed (ci.yml, release.yml, security.yml), 5-platform matrix, supply-chain audit, visual-diff gate. Next: P1-09 adversarial spec review — 3 consecutive clean passes required before Phase 2.
 
 ## Phase 1 Progress (as of 2026-05-24)
 
@@ -47,10 +51,10 @@ Architecture (P1-03b) + UX spec (P1-06) + feasibility (P1-05) DONE. 14 ADRs, 15 
 | P1-04 | product-owner | DONE | PRD complete — 101 BCs, 15 HS, 4 supplements, all spikes resolved |
 | P1-05 | architect | DONE | P1-05 (feasibility): PASS-WITH-NOTES — all 5 notes addressed; BC-1.03.005 added |
 | P1-06 | ux-designer | DONE | .factory/specs/ux-spec/ (UX-INDEX + 10 screens + 5 flows); .factory/specs/verification-properties/ (VP-INDEX + 7 VPs) |
-| P1-07 | devops-engineer | IN_PROGRESS | CI/CD matrix expansion — DTU assessment + CI/CD setup in progress |
-| P1-08 | adversary | NOT_STARTED | 3 clean passes — blocked on P1-07 complete |
-| P1-09 | consistency-validator | NOT_STARTED | Cross-doc audit — blocked on P1-08 (3-clean) |
-| P1-10 | HUMAN | NOT_STARTED | Approval gate — blocked on P1-09 |
+| P1-07 | devops-engineer | DONE | DTU: not required; gene-transfusion: behavioral-only (75 behaviors); CI/CD: 3 workflows, 5-platform matrix |
+| P1-09 | adversary | NOT_STARTED | 3 clean passes — READY TO START |
+| P1-10 | consistency-validator | NOT_STARTED | Cross-doc audit — blocked on P1-09 (3-clean) |
+| P1-11 | HUMAN | NOT_STARTED | Approval gate — blocked on P1-10 |
 
 ### Spike Verdicts (ALL 7 RESOLVED)
 
@@ -82,11 +86,21 @@ Architecture (P1-03b) + UX spec (P1-06) + feasibility (P1-05) DONE. 14 ADRs, 15 
 
 ### What to do next (resume instructions)
 
-1. **P1-07 — DTU assessment**: assess DTU requirement for external services (mermaid-rs-renderer, LibreOffice headless, etc.).
-2. **P1-07 — CI/CD matrix**: dispatch devops-engineer for full CI matrix (cross-platform, formal verification gates, snapshot tests).
-3. **P1-08 — Adversarial review**: dispatch adversary AFTER P1-07 complete. Must achieve 3 consecutive clean passes.
-4. **P1-09 — Consistency audit**: dispatch consistency-validator AFTER P1-08 passes 3-clean.
-5. **P1-10 — Human approval gate**: human review AFTER P1-09 complete.
+1. **P1-09 — Adversarial spec review**: dispatch adversary against ALL Phase 1 specs. Must achieve 3 consecutive clean passes (BC-5.39.001). Scope: domain-spec, PRD + supplements, architecture + ADRs, UX spec, VPs, cicd-setup, dtu-assessment, gene-transfusion-assessment.
+2. **P1-10 — Consistency audit**: dispatch consistency-validator AFTER P1-09 passes 3-clean.
+3. **P1-11 — Human approval gate**: human review AFTER P1-10 complete, then Phase 2 begins.
+
+**Adversary scope checklist for P1-09:**
+- .factory/specs/domain-spec/ (12 files)
+- .factory/specs/prd.md + 4 supplements
+- .factory/specs/behavioral-contracts/ (BC-INDEX + all BC files)
+- .factory/specs/architecture/ (ARCH-INDEX + 12 sections + 14 ADRs + feasibility)
+- .factory/specs/ux-spec/ (UX-INDEX + 10 screens + 5 flows)
+- .factory/specs/verification-properties/ (VP-INDEX + 7 VPs)
+- .factory/specs/dtu-assessment.md
+- .factory/specs/gene-transfusion-assessment.md
+- .factory/specs/cicd-setup.md
+- .factory/planning/spikes/ (all 7 resolved spikes)
 
 ## Decision Documents (canonical references)
 
@@ -192,6 +206,10 @@ Production-grade-from-day-1. Key gates:
 - 2026-05-24 — P1-03b ARCHITECTURE COMPLETE: ARCH-INDEX + 12 section files + 14 ADRs (ADR-001–ADR-014) + module-criticality.md + feasibility-report
 - 2026-05-24 — P1-06 UX SPEC COMPLETE: UX-INDEX + 10 screens (SCR-001–SCR-010) + 5 flows (FLOW-001–FLOW-005); 7 VPs (VP-001–VP-008) + VP-INDEX
 - 2026-05-24 — BC-1.03.005 ADDED: mermaid-rs-renderer version-pinning contract (feasibility note 5)
+- 2026-05-24 — P1-07 DTU ASSESSMENT COMPLETE: DTU_REQUIRED=false — all external services (mermaid-rs-renderer, LibreOffice headless, axe-core) are pure crate deps or test tools; no clone infrastructure required
+- 2026-05-24 — P1-07 GENE TRANSFUSION COMPLETE: behavioral-only — 75 behaviors classified from Python reference; 0 code ported; Rust implementation starts from scratch with spec as truth
+- 2026-05-24 — P1-07 CI/CD SETUP COMPLETE: 3 workflows (ci.yml expanded, release.yml new, security.yml new); 5-platform matrix (macOS arm64+x86_64, Linux x86_64+musl, Windows x86_64); cargo-deny, nextest, criterion gate, visual-diff.py, SBOM stub — all committed to main
+- 2026-05-24 — ALL PRE-ADVERSARIAL STEPS COMPLETE: STATUS → READY_FOR_ADVERSARIAL_REVIEW
 
 ## Drift Items
 _(None)_
