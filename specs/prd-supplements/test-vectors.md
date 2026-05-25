@@ -73,7 +73,7 @@ vars:
   component: "my-component"
 ```
 
-**Expected:** E-PAR-008: `'component' is reserved for component-based reuse (planned v2+)`.
+**Expected:** E-PAR-008: `Variable name 'component' collides with reserved keyword at <file>:<line>:<col>. Choose a different name.`
 Exit 1.
 
 ---

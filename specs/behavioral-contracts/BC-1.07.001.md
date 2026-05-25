@@ -43,7 +43,7 @@ The filtered subset forms the output deck.
 
 1. The output deck contains only slides matching the filter criteria: slides whose tags intersect with `include_tags` (when specified) and do not intersect with `exclude_tags`.
 2. Slide order is preserved from the source deck.
-3. Build exits with code 0 on success (even if zero slides result — see BC-1.07.005 for the warning).
+3. Build exits with code 0 when at least one slide survives filtering. See BC-1.07.005 for zero-slide handling.
 
 ## Invariants
 
@@ -58,7 +58,7 @@ The filtered subset forms the output deck.
 | EC-001 | Variant with only `include_tags: ["exec"]`; slides without tags | Untagged slides excluded (include_tags means explicit opt-in) |
 | EC-002 | Variant with only `exclude_tags: ["internal"]`; slides without tags | Untagged slides included (exclude is opt-out only) |
 | EC-003 | Slide tagged both `exec` and `internal`; variant includes exec, excludes internal | Slide excluded — exclude takes precedence |
-| EC-004 | `--variant` flag without a variants: block | E-EVL-005: variant not declared; exit 2 |
+| EC-004 | `--variant` flag without a variants: block | E-CFG-001: variant not declared; exit 4 |
 
 ## Canonical Test Vectors
 
@@ -66,7 +66,7 @@ The filtered subset forms the output deck.
 |-------|----------------|----------|
 | 10 slides, 5 tagged `exec`; exec variant with `include_tags: ["exec"]` | 5-slide output | happy-path |
 | 10 slides, 3 tagged `internal`; exec variant with `exclude_tags: ["internal"]` | 7-slide output | happy-path |
-| All slides excluded by variant filters | Warning per BC-1.07.005; exit 1 in strict mode | boundary |
+| All slides excluded by variant filters | Warning per BC-1.07.005; exit 2 in strict mode | boundary |
 
 ## Verification Properties
 

@@ -21,8 +21,8 @@ type coercion (DI-004). Q1 decision established a nine-rung computation ladder.
 
 The computation model supports exactly rungs 1-9 in v1.0:
 1. Static literals (strings, numbers, booleans)
-2. Variable assignments (`@set name = value`)
-3. External data binding (`@data name = file.json`)
+2. Variable assignments (`vars:` block declaration)
+3. External data binding (`@data name from "file.json"`)
 4. `{{ expr }}` interpolation with arithmetic and pipe filters (~15 built-in functions)
 5. Conditional rendering (`@if/@elif/@else`)
 6. Collection iteration (`@for item in collection`)
@@ -49,5 +49,5 @@ the parsed AST and data-source values. All data fetching happens BEFORE evaluati
 `slideforge-data`. The evaluator receives data as `Value` structs — no I/O in eval.
 
 **v2 extension path:** User-defined functions (`@fn`) and mixins (`@mixin`) are reserved
-keywords (DI-021). Attempting to use them in v1.0 produces E-PAR-XXX with a message
+keywords (DI-021). Attempting to use them in v1.0 produces E-PAR-006 with a message
 naming the v2 feature. This prevents silent misinterpretation.

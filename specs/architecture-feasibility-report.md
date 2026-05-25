@@ -32,7 +32,7 @@ prd_version: "1.0"
 
 ## Executive Summary
 
-The slideforge v1.0 PRD (99 BCs across 5 bounded contexts) is architecturally feasible.
+The slideforge v1.0 PRD (109 BCs across 5 bounded contexts) is architecturally feasible.
 Every technology choice has been validated by a resolved spike (S1–S6, S14). The proposed
 20-crate workspace, Two-IR model, plugin-first design, and six-stage pipeline (Parse →
 Evaluate → Validate → Brand → Layout → Export) can deliver all P0 BCs within the stated NFR targets. Three
@@ -177,10 +177,8 @@ both are present in the synthesized XML."
 
 ### Note 5 — PRD BC count discrepancy (minor)
 
-BC-INDEX.md Section Summary shows 99 BCs total. PRD Section 2 states "Total: 99 BCs —
-71 P0, 28 P1, 0 P2." However, the PRD Section 7 traceability matrix contains 99 rows.
-These counts are consistent. The discrepancy with the prior reference to "101 behavioral
-contracts" in the task prompt is not reflected in the actual BC-INDEX.md (which shows 99).
+BC-INDEX.md Section Summary shows 109 BCs total (71 P0, 38 P1). PRD Section 7
+traceability matrix must contain 109 rows. Counts are consistent with BC-INDEX.md.
 No action required — the PRD and BC-INDEX agree.
 
 ---

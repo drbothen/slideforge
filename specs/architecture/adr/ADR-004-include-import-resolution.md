@@ -23,11 +23,11 @@ semantics and must be resolved differently. Cycles must be detected and rejected
 located relative to the including file's directory, read from disk (in the lexer phase,
 before the chumsky parser), and inlined as token stream. Cycle detection uses a stack of
 currently-open file paths; any attempt to include a path already on the stack is a
-compile error (E-INC-001) with the full cycle path shown.
+compile error (E-PAR-004) with the full cycle path shown.
 
 **`@import`:** Resolved in `slideforge-eval` after package installation. `@import` refers
 to an installed package (from `sf.lock`). Resolution fails with a descriptive install hint
-(E-IMP-001) if the package is not installed. Cycles in `@import` chains are detected at
+(E-PKG-001) if the package is not installed. Cycles in `@import` chains are detected at
 package installation time, not at eval time.
 
 ## Consequences
@@ -44,4 +44,4 @@ package installation time, not at eval time.
 - The span of an `@include` error points to the `@include` directive in the including file,
   plus a secondary label pointing to where the cycle begins.
 - `@import` resolution must check `sf.lock` before disk; if lock says package is present
-  but installation directory is missing, produce E-IMP-002 (package corrupted, re-install).
+  but installation directory is missing, produce E-PKG-003 (package integrity error, re-install).
