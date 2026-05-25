@@ -25,7 +25,7 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. It generates branded .p
 
 ## Current Status: PHASE 1 IN PROGRESS (2026-05-24)
 
-Pre-Phase-1 work complete. All 7 spikes resolved. PRD complete (101 BCs, 15 HS, 4 supplements). Ready for architecture feasibility review. Resume from "Phase 1 Progress" section below.
+Architecture (P1-03b) + UX spec (P1-06) + feasibility (P1-05) DONE. 14 ADRs, 15 VPs, 16 UX files committed. BC-1.03.005 added. Next: DTU assessment + CI/CD matrix (P1-07), then adversarial review (P1-08, 3-clean required).
 
 ## Phase 1 Progress (as of 2026-05-24)
 
@@ -43,13 +43,14 @@ Pre-Phase-1 work complete. All 7 spikes resolved. PRD complete (101 BCs, 15 HS, 
 | P1-03a-S5 | architect | DONE | .factory/planning/spikes/S5-brand-synthesis-layout-taxonomy.md — 31 layouts (11 std + 20 custom) |
 | P1-03a-S6 | architect | DONE | .factory/planning/spikes/S6-multi-renderer-parity.md — SSIM≥0.99 + PSNR≥35dB dual gate |
 | P1-03a-S14 | architect | DONE | .factory/planning/spikes/S14-mermaid-diagram-engine.md — ADOPT mermaid-rs-renderer v0.2.2 |
-| P1-03b | architect | NOT_STARTED | Architecture + ADRs — unblocked (all spikes DONE, PRD DONE) |
+| P1-03b | architect | DONE | .factory/specs/architecture/ (ARCH-INDEX + 12 section files, 14 ADRs, module-criticality, feasibility report) |
 | P1-04 | product-owner | DONE | PRD complete — 101 BCs, 15 HS, 4 supplements, all spikes resolved |
-| P1-05 | ux-designer | NOT_STARTED | UX spec — can run in parallel with P1-03b (unblocked) |
-| P1-06 | devops-engineer | NOT_STARTED | CI/CD matrix expansion — blocked on P1-03b |
-| P1-07 | adversary | NOT_STARTED | 3 clean passes — blocked on P1-03b+P1-05+P1-06 |
-| P1-08 | consistency-validator | NOT_STARTED | Cross-doc audit — blocked on P1-07 |
-| P1-09 | HUMAN | NOT_STARTED | Approval gate — blocked on P1-08 |
+| P1-05 | architect | DONE | P1-05 (feasibility): PASS-WITH-NOTES — all 5 notes addressed; BC-1.03.005 added |
+| P1-06 | ux-designer | DONE | .factory/specs/ux-spec/ (UX-INDEX + 10 screens + 5 flows); .factory/specs/verification-properties/ (VP-INDEX + 7 VPs) |
+| P1-07 | devops-engineer | IN_PROGRESS | CI/CD matrix expansion — DTU assessment + CI/CD setup in progress |
+| P1-08 | adversary | NOT_STARTED | 3 clean passes — blocked on P1-07 complete |
+| P1-09 | consistency-validator | NOT_STARTED | Cross-doc audit — blocked on P1-08 (3-clean) |
+| P1-10 | HUMAN | NOT_STARTED | Approval gate — blocked on P1-09 |
 
 ### Spike Verdicts (ALL 7 RESOLVED)
 
@@ -69,14 +70,23 @@ Pre-Phase-1 work complete. All 7 spikes resolved. PRD complete (101 BCs, 15 HS, 
 - .factory/specs/domain-spec/capabilities.md, entities.md, invariants.md, events.md, edge-cases.md, assumptions.md, risks.md, failure-modes.md, differentiators.md, ubiquitous-language.md
 - .factory/planning/domain-research.md (34KB) — 4 bounded contexts (Authoring/Branding/Layout/Export), PDF/UA gap confirmed, font metric divergence is #1 multi-format challenge
 
+### Architecture outputs (P1-03b DONE)
+
+- .factory/specs/architecture/ARCH-INDEX.md + 12 section files (system-overview, crate-architecture, plugin-architecture, ir-design, export-architecture, brand-architecture, error-architecture, tooling-selection, verification-architecture, verification-coverage-matrix, purity-boundary-map, dependency-graph)
+- .factory/specs/architecture/adr/ — ADR-001 through ADR-014
+- .factory/specs/module-criticality.md
+- .factory/specs/architecture-feasibility-report.md — PASS-WITH-NOTES (5 notes, all addressed)
+- .factory/specs/verification-properties/ — VP-INDEX.md + 7 VP files (VP-001 through VP-008, skipping VP-005)
+- .factory/specs/ux-spec/ — UX-INDEX.md + 10 screens (SCR-001 through SCR-010) + 5 flows (FLOW-001 through FLOW-005)
+- .factory/specs/behavioral-contracts/BC-1.03.005.md — new BC (feasibility note 5: mermaid-rs-renderer pinning)
+
 ### What to do next (resume instructions)
 
-1. **P1-03b — Architecture + ADRs**: dispatch architect. All spikes done, PRD done. Unblocked.
-2. **P1-05 — UX spec**: dispatch ux-designer. Can run in parallel with P1-03b.
-3. **P1-06 — CI/CD matrix**: dispatch devops-engineer AFTER P1-03b (architecture) complete.
-4. **P1-07 — Adversarial review**: dispatch adversary AFTER P1-03b + P1-05 + P1-06 all done.
-5. **P1-08 — Consistency audit**: dispatch consistency-validator AFTER P1-07 passes 3-clean.
-6. **P1-09 — Human approval gate**: human review AFTER P1-08 complete.
+1. **P1-07 — DTU assessment**: assess DTU requirement for external services (mermaid-rs-renderer, LibreOffice headless, etc.).
+2. **P1-07 — CI/CD matrix**: dispatch devops-engineer for full CI matrix (cross-platform, formal verification gates, snapshot tests).
+3. **P1-08 — Adversarial review**: dispatch adversary AFTER P1-07 complete. Must achieve 3 consecutive clean passes.
+4. **P1-09 — Consistency audit**: dispatch consistency-validator AFTER P1-08 passes 3-clean.
+5. **P1-10 — Human approval gate**: human review AFTER P1-09 complete.
 
 ## Decision Documents (canonical references)
 
@@ -178,6 +188,10 @@ Production-grade-from-day-1. Key gates:
 - 2026-05-24 — PRD COMPLETE: 101 BCs (BC-1.01 through BC-5.05), 15 holdout scenarios, 4 supplements (error-taxonomy, interface-definitions, nfr-catalog, test-vectors)
 - 2026-05-24 — ALL 7/7 SPIKES RESOLVED: S1 S2 S3 S4 S5 S6 S14 — P1-03b (architecture) is unblocked
 - 2026-05-24 — READY FOR ARCHITECTURE FEASIBILITY REVIEW: P1-03b + P1-05 can run in parallel
+- 2026-05-24 — P1-05 ARCHITECTURE FEASIBILITY: PASS-WITH-NOTES — 5 notes identified and fully addressed; BC-1.03.005 added for mermaid-rs-renderer pinning
+- 2026-05-24 — P1-03b ARCHITECTURE COMPLETE: ARCH-INDEX + 12 section files + 14 ADRs (ADR-001–ADR-014) + module-criticality.md + feasibility-report
+- 2026-05-24 — P1-06 UX SPEC COMPLETE: UX-INDEX + 10 screens (SCR-001–SCR-010) + 5 flows (FLOW-001–FLOW-005); 7 VPs (VP-001–VP-008) + VP-INDEX
+- 2026-05-24 — BC-1.03.005 ADDED: mermaid-rs-renderer version-pinning contract (feasibility note 5)
 
 ## Drift Items
 _(None)_

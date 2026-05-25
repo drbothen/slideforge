@@ -51,6 +51,7 @@ traces_to: domain-spec/L2-INDEX.md
 | BC-1.03.002 | Load @data from HTTP/HTTPS URL at compile time | P0 | active | [BC-1.03.002.md](BC-1.03.002.md) |
 | BC-1.03.003 | Fail with structured error on missing field access | P0 | active | [BC-1.03.003.md](BC-1.03.003.md) |
 | BC-1.03.004 | Support --offline flag to skip HTTP sources | P1 | active | [BC-1.03.004.md](BC-1.03.004.md) |
+| BC-1.03.005 | HTTP Domain Allowlist Enforcement (SSRF Prevention) | P1 | active | [BC-1.03.005.md](BC-1.03.005.md) |
 
 ### 1.04 — Iteration over Data Collections (CAP-004)
 
@@ -303,12 +304,12 @@ traces_to: domain-spec/L2-INDEX.md
 
 | Section | Subsection | BCs |
 |---------|-----------|-----|
-| 1 — Authoring | 1.01–1.15 | 50 |
+| 1 — Authoring | 1.01–1.15 | 51 |
 | 2 — Branding | 2.01–2.02 | 8 |
 | 3 — Layout | 3.01–3.05 | 11 |
 | 4 — Export | 4.01–4.03 | 15 |
 | 5 — Cross-cutting | 5.01–5.05 | 15 |
-| **Total** | | **99** |
+| **Total** | | **100** |
 
 ---
 
