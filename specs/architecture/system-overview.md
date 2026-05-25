@@ -23,10 +23,10 @@ slideforge compiles a single `.sf` source file through six sequential stages:
     ▼ [SS-02] slideforge-eval  ← @data sources (SS-10 slideforge-data)
   Deck IR (semantic, pre-layout)
     │
-    ▼ [SS-03] slideforge-brand  ← brand.toml or .pptx template
+    ▼ [SS-04] slideforge-brand  ← brand.toml or .pptx template
   Deck + Brand
     │
-    ▼ [SS-04] slideforge-validate
+    ▼ [SS-03] slideforge-validate
   Validated Deck (all compile-time checks pass; brand palette available for contrast checks)
     │
     ▼ [SS-05] slideforge-layout (31 SlideType plugins from SS-15)
