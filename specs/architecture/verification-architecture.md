@@ -20,7 +20,7 @@ in pure-core crates.
 | Module | Property | Kani Proof |
 |--------|----------|-----------|
 | slideforge-syntax | Tab detection produces error with byte-accurate span | VP-001 |
-| slideforge-validate | Alt-missing produces error before parse completion | VP-002 |
+| slideforge-validate | Alt-missing produces error before layout (in validation stage) | VP-002 |
 | slideforge-syntax | @for over bounded collection always terminates | VP-003 |
 | slideforge-eval | No implicit coercion: "1.10" string stays string | VP-004 |
 | slideforge-eval | Integer arithmetic in {{ expr }} cannot overflow given i64 bounds | VP-005 |

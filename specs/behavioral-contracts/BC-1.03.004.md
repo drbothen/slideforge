@@ -81,7 +81,7 @@ missing-variable errors, it prevents the HTTP request.
 |-------|-------|
 | L2 Capability | CAP-003 ("Data Binding from External Sources") per capabilities.md §CAP-003 |
 | Capability Anchor Justification | CAP-003 ("Data Binding from External Sources") per capabilities.md §CAP-003 — the --offline flag is a specified mode of the data binding capability |
-| Architecture Module | slideforge-eval crate — data source resolver (filled by architect) |
+| Architecture Module | slideforge-data crate — DataSource plugin (SS-10) |
 | Stories | (filled by story-writer) |
 
 ## Related BCs
