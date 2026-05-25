@@ -59,7 +59,6 @@ Some effectful crates contain pure subsets eligible for Kani proof:
 
 | Crate | Pure Subfunction | Kani Candidate |
 |-------|-----------------|---------------|
-| slideforge-brand | `BrandValidator::check_theme_pairs()` | Yes (VP-007) |
 | slideforge-pdf | `emu_to_pt()`, `ir_y_to_pdf_y()` | Yes (VP-006) |
 | slideforge-pptx | `opc_postprocess::inject_default_entries()` | Proptest |
 | slideforge-diagrams | `normalize_svg_for_pptx()` (usvg, pure after font load) | Proptest |

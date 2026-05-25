@@ -41,6 +41,16 @@ property-based testing provides strong guarantees.
 | slideforge-brand | 12-slot palette round-trip: synthesize → extract → same colors | proptest |
 | slideforge-pptx | Every synthesized PPTX is a valid ZIP with [Content_Types].xml | proptest |
 
+### Fuzz Targets (Phase 6)
+
+Parser and evaluator fuzz harnesses using `cargo-fuzz`. Run on Linux CI; results
+inform robustness of the pure-core pipeline entry points.
+
+| Module | Property | Tool | Phase |
+|--------|----------|------|-------|
+| slideforge-syntax | Parser fuzz: any input terminates and produces errors or AST (VP-014) | cargo-fuzz | P6 |
+| slideforge-eval | Eval fuzz: any valid AST terminates eval within time bound (VP-015) | cargo-fuzz | P6 |
+
 ### Test Sufficient (integration + snapshot)
 
 UI logic, CLI behavior, non-critical rendering paths.
@@ -66,7 +76,13 @@ Must pass before v1.0 release (formal-verifier gate):
 ## P1 Verification Properties (Phase 6 stretch goals)
 
 - VP-005: Integer arithmetic bounds in eval
-- proptest suites for parser, eval, layout, brand round-trip
+- VP-009: Parse of valid .sf source produces non-empty AST (proptest)
+- VP-010: Variable scoping: outer @for vars visible in inner @for scope (proptest)
+- VP-011: LaidOutDeck slide count equals Deck slide count (proptest)
+- VP-012: 12-slot palette round-trip: synthesize → extract → same colors (proptest)
+- VP-013: Every synthesized PPTX is valid ZIP with [Content_Types].xml (proptest)
+- VP-014: Parser fuzz: any input terminates and produces errors or AST (fuzz)
+- VP-015: Eval fuzz: any valid AST terminates eval within time bound (fuzz)
 
 ## Tooling (ADR-011, Feasibility Notes)
 

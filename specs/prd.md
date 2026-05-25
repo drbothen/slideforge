@@ -260,8 +260,8 @@ Options (build):
 
 ## Section 5: Error Taxonomy
 
-> **Authoritative error catalog:** `.factory/specs/prd-supplements/error-taxonomy.md` (42 error
-> codes across 9 categories: E-PAR, E-EVL, E-DAT, E-LAY, E-EXP, E-BRD, E-PKG, E-CFG, E-A11).
+> **Authoritative error catalog:** `.factory/specs/prd-supplements/error-taxonomy.md` (53 active
+> error codes (3 retired) across 9 categories: E-PAR, E-EVL, E-DAT, E-LAY, E-EXP, E-BRD, E-PKG, E-CFG, E-A11).
 > The supplement supersedes any inline table here per CLAUDE.md precedence (PRD supplements
 > supersede PRD prose for the same surface area). Key error codes referenced in behavioral
 > contracts trace to this catalog.
