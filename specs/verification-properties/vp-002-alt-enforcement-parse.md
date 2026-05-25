@@ -1,8 +1,8 @@
 ---
 document_type: verification-property
 vp_id: VP-002
-title: Alt-missing produces error before parse completion
-module: slideforge-syntax
+title: Alt-missing produces error before layout (in validation stage)
+module: slideforge-validate
 tool: Kani
 phase: P6
 priority: P0
@@ -11,7 +11,7 @@ bc_trace: [BC-5.01.001, DI-001]
 traces_to: .factory/specs/verification-properties/VP-INDEX.md
 ---
 
-# VP-002: Alt-Missing Produces Error Before Parse Completion
+# VP-002: Alt-Missing Produces Error Before Layout (in Validation Stage)
 
 ## Property Statement
 
@@ -39,7 +39,7 @@ Kani can model-check this over a bounded document structure (≤ 10 slides, ≤ 
 ## Proof Harness Skeleton
 
 ```rust
-// crates/slideforge-syntax/src/proofs/alt_enforcement.rs
+// crates/slideforge-validate/src/proofs/alt_enforcement.rs
 #[cfg(kani)]
 mod proofs {
     use super::*;
@@ -61,5 +61,5 @@ mod proofs {
 
 ## Test Coverage (before Phase 6)
 
-Concrete unit test in `slideforge-syntax/src/parser.rs`:
+Concrete unit test in `slideforge-validate/src/validator.rs`:
 `test_image_without_alt_is_error`. Confirmed pattern from S3 spike.

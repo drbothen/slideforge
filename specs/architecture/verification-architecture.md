@@ -56,7 +56,7 @@ UI logic, CLI behavior, non-critical rendering paths.
 
 Must pass before v1.0 release (formal-verifier gate):
 - VP-001: Tab detection byte span accuracy
-- VP-002: Alt enforcement pre-parse
+- VP-002: Alt-missing produces error before layout (in validation stage)
 - VP-003: @for termination
 - VP-004: No implicit coercion
 - VP-006: PDF coordinate mapping
