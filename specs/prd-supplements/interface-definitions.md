@@ -226,8 +226,8 @@ printed. The JSON object has the following structure:
     "total_ms": 342,
     "parse_ms": 45,
     "evaluate_ms": 12,
-    "validate_ms": 8,
     "brand_ms": 14,
+    "validate_ms": 8,
     "layout_ms": 89,
     "export_ms": 196
   }

@@ -3,7 +3,7 @@ project: slideforge
 mode: greenfield
 created: 2026-05-23
 current_phase: phase-1-spec-crystallization
-status: ADVERSARIAL_PASS_12_FIXED_PASS_13_PENDING
+status: CONSISTENCY_VALIDATOR_SWEEP_PENDING
 last_updated: 2026-05-25
 prd_bcs: 109
 prd_hs: 15
@@ -27,9 +27,9 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. It generates branded .p
 **Workspace:** /Users/jmagady/Dev/slideforge
 **Factory worktree:** .factory/ on branch `factory-artifacts`
 
-## Current Status: ADVERSARIAL PASS 12 FIXED — PASS 13 PENDING — STREAK 0/3 (2026-05-25)
+## Current Status: ADVERSARIAL PASS 13 FIXED — CONSISTENCY VALIDATOR SWEEP PENDING — STREAK 0/3 (2026-05-25)
 
-Adversarial Pass 12 returned 1 finding (1H) — fixed. VP-007 BC trace corrected (mis-anchor to contrast formula BC instead of contrast BCs). Finding trajectory: 17→12→10→6→2→2→0→2→1→3→3→1. Total fixed: 59. Streak reset to 0/3. Next: dispatch adversary for Pass 13.
+Adversarial Pass 13 returned 3 findings (3M) — all fixed. FM-011 rewritten for pdf-writer/krilla (Chrome ref removed); pipeline order corrected Brand→Validate in system-overview.md; HS must-pass count updated 10→11, threshold 6→7 in HS-INDEX.md; timing field order corrected in interface-definitions.md. Finding trajectory: 17→12→10→6→2→2→0→2→1→3→3→1→3. Total fixed: 62. Streak reset to 0/3. Next: consistency-validator comprehensive sweep, then adversary Pass 14.
 
 ## Phase 1 Progress (as of 2026-05-24)
 
@@ -52,8 +52,8 @@ Adversarial Pass 12 returned 1 finding (1H) — fixed. VP-007 BC trace corrected
 | P1-05 | architect | DONE | P1-05 (feasibility): PASS-WITH-NOTES — all 5 notes addressed; BC-1.03.005 added |
 | P1-06 | ux-designer | DONE | .factory/specs/ux-spec/ (UX-INDEX + 10 screens + 5 flows); .factory/specs/verification-properties/ (VP-INDEX + 7 VPs) |
 | P1-07 | devops-engineer | DONE | DTU: not required; gene-transfusion: behavioral-only (75 behaviors); CI/CD: 3 workflows, 5-platform matrix |
-| P1-09 | adversary | IN_PROGRESS | Pass 1 DONE (17→0), Pass 2 DONE (12→0), Pass 3 DONE (10→0), Pass 4 DONE (6→0), Pass 5 DONE (2→0), Pass 6 DONE (2→0), Pass 7 CLEAN (0), Pass 8 DONE (2→0, streak reset), Pass 9 DONE (1→0, streak reset), Pass 10 DONE (3→0, streak reset), Pass 11 DONE (3→0, streak reset), Pass 12 DONE (1→0, streak reset) — streak 0/3 — Pass 13 next |
-| P1-10 | consistency-validator | NOT_STARTED | Cross-doc audit — blocked on P1-09 (3-clean) |
+| P1-09 | adversary | IN_PROGRESS | Pass 1 DONE (17→0), Pass 2 DONE (12→0), Pass 3 DONE (10→0), Pass 4 DONE (6→0), Pass 5 DONE (2→0), Pass 6 DONE (2→0), Pass 7 CLEAN (0), Pass 8 DONE (2→0, streak reset), Pass 9 DONE (1→0, streak reset), Pass 10 DONE (3→0, streak reset), Pass 11 DONE (3→0, streak reset), Pass 12 DONE (1→0, streak reset), Pass 13 DONE (3→0, streak reset) — streak 0/3 — Pass 14 next (after consistency-validator sweep) |
+| P1-10 | consistency-validator | PENDING | Comprehensive sweep dispatching — blocked on P1-09 streak; running opportunistically before Pass 14 |
 | P1-11 | HUMAN | NOT_STARTED | Approval gate — blocked on P1-10 |
 
 ### Spike Verdicts (ALL 7 RESOLVED)
@@ -86,11 +86,11 @@ Adversarial Pass 12 returned 1 finding (1H) — fixed. VP-007 BC trace corrected
 
 ### What to do next (resume instructions)
 
-1. **P1-09 — Adversarial Pass 13**: dispatch adversary for Pass 13 (fresh context). Pass 12 returned 1 finding (1H) — fixed (VP-007 BC trace corrected). Streak reset to 0/3. Finding trajectory: 17→12→10→6→2→2→0→2→1→3→3→1. Must achieve 3 consecutive clean passes (BC-5.39.001). Need 3 clean passes from here. Scope unchanged: domain-spec, PRD + supplements, architecture + ADRs, UX spec, VPs, cicd-setup, dtu-assessment, gene-transfusion-assessment.
-2. **P1-10 — Consistency audit**: dispatch consistency-validator AFTER P1-09 passes 3-clean.
-3. **P1-11 — Human approval gate**: human review AFTER P1-10 complete, then Phase 2 begins.
+1. **P1-10 — Consistency-validator sweep**: dispatch consistency-validator for comprehensive cross-document sweep (ID anchors, counts, naming consistency, BC/VP cross-references). Run before Pass 14 to fix any propagation gaps proactively.
+2. **P1-09 — Adversarial Pass 14**: dispatch adversary for Pass 14 (fresh context) after consistency sweep is applied. Finding trajectory: 17→12→10→6→2→2→0→2→1→3→3→1→3. Must achieve 3 consecutive clean passes (BC-5.39.001). Streak currently 0/3.
+3. **P1-11 — Human approval gate**: human review AFTER P1-09 reaches 3-clean and P1-10 complete, then Phase 2 begins.
 
-**Adversary scope checklist for P1-09 Pass 13:**
+**Adversary scope checklist for P1-09 Pass 14:**
 - .factory/specs/domain-spec/ (12 files)
 - .factory/specs/prd.md + 4 supplements
 - .factory/specs/behavioral-contracts/ (BC-INDEX + all BC files)
@@ -222,6 +222,7 @@ Production-grade-from-day-1. Key gates:
 - 2026-05-25 — ADVERSARIAL PASS 10 COMPLETE: 3 findings (3M) — all resolved. VP-002 moved to module-criticality.md purity table; slideforge-html classified and added to module-criticality.md, purity-boundary-map.md, and crate-architecture.md; PRD error table deferred to error-taxonomy supplement (drift-proof pattern, consistent with NFR deferral). Finding trajectory: 17→12→10→6→2→2→0→2→1→3. Total fixed: 55. STREAK RESET: 0/3 — Pass 11 dispatching.
 - 2026-05-25 — ADVERSARIAL PASS 11 COMPLETE: 3 findings (1H, 2M) — all resolved. VP-014/VP-015 fuzz sections added to verification-architecture.md (all 15 VPs now confirmed); BrandValidator row removed from purity-boundary-map.md (all 20 crates confirmed); PRD error count corrected 42→53 in prd.md. Finding trajectory: 17→12→10→6→2→2→0→2→1→3→3. Total fixed: 58. STREAK RESET: 0/3 — Pass 12 dispatching.
 - 2026-05-25 — ADVERSARIAL PASS 12 COMPLETE: 1 finding (1H) — resolved. VP-007 BC trace corrected (mis-anchor to contrast formula BC instead of contrast BCs); VP-007 file and VP-INDEX BC traceability column updated. Finding trajectory: 17→12→10→6→2→2→0→2→1→3→3→1. Total fixed: 59. STREAK RESET: 0/3 — Pass 13 dispatching.
+- 2026-05-25 — ADVERSARIAL PASS 13 COMPLETE: 3 findings (3M) — all resolved. FM-011 rewritten for pdf-writer/krilla (Chrome reference removed from failure-modes.md); pipeline stage order corrected (Brand→Validate) in system-overview.md; HS must-pass count updated 10→11 + threshold 6→7 in HS-INDEX.md; timing field order corrected in interface-definitions.md. Finding trajectory: 17→12→10→6→2→2→0→2→1→3→3→1→3. Total fixed: 62. STREAK RESET: 0/3 — consistency-validator sweep next, then Pass 14.
 
 ## Drift Items
 _(None)_

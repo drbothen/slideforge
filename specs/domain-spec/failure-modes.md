@@ -127,13 +127,19 @@ disable the specific slide feature (shapes, math) to isolate the offending eleme
 
 ---
 
-### FM-011: PDF Export — Chrome Headless Unavailable
+### FM-011: PDF Export — pdf-writer/krilla Rendering Failure
 
-**Trigger:** Chrome/Chromium binary not available on the build host when PDF export
-is requested.
-**Observable:** Export error: "PDF export requires Chrome. Set SLIDEFORGE_CHROME_PATH
-or install Chrome/Chromium."
-**Recovery:** Install Chrome, or set `SLIDEFORGE_CHROME_PATH` environment variable.
+**Trigger:** SlideTagEngine fails to produce a valid structure tree, krilla encounters
+a path rendering error (e.g., malformed glyph outline, unsupported curve type), or
+font subsetting fails (missing glyph table, corrupt font data, or font license
+restriction blocking embedding).
+**Observable:** Export error E-EXP-003 with specific pdf-writer/krilla error details,
+including the affected slide index, the operation that failed (structure-tree, path,
+or font-subset), and the underlying library error message.
+**Recovery:** Check that all fonts declared in brand.toml are embeddable and available
+on the build host. Verify krilla version compatibility with the pinned pdf-writer
+version in Cargo.lock. If the error is not reproducible with a font or brand change,
+report the bug with a minimal reproduction `.sf` file.
 
 ---
 

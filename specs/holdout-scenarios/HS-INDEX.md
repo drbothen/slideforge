@@ -38,8 +38,8 @@ traces_to: .factory/specs/prd.md
 | HS-014 | python-pptx migration — existing Python dict deck rewritten in .sf | migration UX | ASM-008 | NO |
 | HS-015 | Watch mode HTTP failure — API goes down mid-session | resilience | FM-005, DEC-007 | NO |
 
-Must-Pass count: 10 of 15 scenarios.
-Target: ≥ 0.60 must-pass pass rate = at least 6 of 10 must-pass scenarios pass.
+Must-Pass count: 11 of 15 scenarios.
+Target: ≥ 0.60 must-pass pass rate = at least 7 of 11 must-pass scenarios pass.
 
 ---
 
