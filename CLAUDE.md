@@ -277,6 +277,21 @@ cargo insta test --check --workspace
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 ```
 
+### TDD Inner Loop Discipline
+
+When iterating through a TDD fix-burst (closing multiple findings in sequence), use the cheapest verification that proves what you need. Match the tool to the question:
+
+| Question | Command | Time (warm) |
+|---|---|---|
+| Did my single fix make its target test pass? | `cargo nextest run -p <crate> -E 'test(<test_name>)'` | < 1s after build |
+| Did my fix break anything in this crate? | `cargo nextest run -p <crate> --no-fail-fast` | 10-30s |
+| See ALL failing tests at once (don't stop at first) | `cargo nextest run -p <crate> --no-fail-fast` | 30-60s |
+| Final pre-push gate (workspace canonical) | `just check` | 1min warm / 5-8min cold |
+
+**Common anti-pattern:** running `just check` (full workspace) between every TDD fix in a multi-finding burst. For a 10-fix burst this burns 10-50 minutes. Reserve `just check` for ONCE at end of fix-burst before declaring done.
+
+**Auto-iteration:** `cargo watch -x 'nextest run -p <crate> --no-fail-fast'` re-runs on save.
+
 ### Planned Build Commands (Phase 3+)
 
 ```bash
@@ -291,6 +306,34 @@ just kani-local     # Kani proofs
 just fuzz-local slideforge-syntax parse_fuzz  # cargo-fuzz
 just mutants        # mutation testing
 ```
+
+### Formal Verification (Phase 6)
+
+Verification properties will have Kani proofs in `crates/slideforge-syntax/src/proofs/` and `crates/slideforge-eval/src/proofs/`. The architecture must be Kani-amenable from day 1:
+
+- Pure functions (no side effects) are provable; impure functions are not
+- IR types implement `Hash + Eq + Clone` (required for comemo AND for Kani bounded-model checking)
+- Integer EMUs (not `f64`) enable exact arithmetic proofs
+- Parser error recovery is bounded (no infinite loops — provably terminating)
+
+**Platform support:** Kani is **Linux/macOS only**. Windows contributors rely on concrete unit tests + CI's Linux/macOS proof job.
+
+VP coverage layers (when Phase 6 activates):
+- **Kani proof** (formal, exhaustive within bounds) — Linux/macOS only
+- **Concrete unit tests** (specific points, deterministic) — all platforms
+- **Fuzz targets** (random exploration) — Linux CI smoke + nightly long-run
+- **Mutation testing** (cargo-mutants kill-rate budget) — all platforms
+
+### Implementer Discipline: No-Ignored-Test Rationalization (SID-1)
+
+When no failing test drives a spec-required behavior because integration tests are `#[ignore]`'d (e.g., requires LibreOffice headless, or requires a .pptx template fixture):
+
+1. This is NOT justification to defer the behavior
+2. The correct response: add a unit test in the production module's `#[cfg(test)] mod tests` block that drives the behavior WITHOUT the external dependency (mock or stub at the boundary)
+3. The unit test must actually exercise the production code path
+4. `#[ignore]`'d integration test must include a code comment citing the blocking dependency
+5. "Deferred to non-ignored test" is ONLY valid if a SPECIFIC story ID and SPECIFIC test name are cited
+6. Implementer must self-check this before declaring a Red Gate test pass
 
 ---
 
@@ -313,6 +356,83 @@ just mutants        # mutation testing
 - **NEVER skip hooks** (`--no-verify`, `--no-gpg-sign`). If a hook fails, fix the underlying issue.
 - **NEVER force-push to `main`.** Force-push to `develop` requires explicit human approval.
 - **NEVER use destructive operations as a first-line response.** Prefer `git stash`, `git reset --soft`, worktree isolation.
+
+### Operational tips
+- **Heredoc workaround:** large commit-message heredocs are sometimes blocked by hook payload limits. When `git commit -m "$(cat <<'EOF' ... EOF)"` fails, write the message to `/tmp/<file>` and use `git commit -F /tmp/<file>`.
+- **Soft reset for recovery, never `--hard`.** `git -C .factory reset --soft HEAD~N` preserves the working tree state; re-author as a single combined commit.
+- **`git stash` for in-progress work** when context-switching between worktrees.
+- **Factory-artifacts branch is local-only by default** — orchestrator does NOT push factory-artifacts to remote without explicit user authorization (exception: during planning/bootstrap phases where we've been pushing).
+
+---
+
+## Operational Discipline TDs
+
+These project-wide operational rules layer onto the canonical principle. Enforced by the factory-dispatcher hook chain:
+
+- **TD-VSDD-053 — Single-commit-per-burst.** Each logical burst → ONE commit in `.factory/`. Multi-commit chains (HEAD and HEAD^ both containing "backfill" / "Stage 1" / "Stage 2") trigger `MULTI_COMMIT_CHAIN_NOT_ALLOWED`. Recovery: `git -C .factory reset --soft HEAD~N` then re-author as single commit.
+
+- **TD-VSDD-059 — Paper-fix detection.** State-manager and adversary must verify every claimed closure has a load-bearing test or assertion, not just a doc-comment or rename. Implementer self-disclosure of risk severity is NOT authoritative — adversary independently verifies.
+
+- **TD-VSDD-060 — Sibling-site sweep on value changes.** When changing a function signature, constant, or canonical identifier, grep for ALL callsites in the same crate (and adjacent crates if `pub`) before committing.
+
+- **BC-5.39.001 — 3-CLEAN convergence protocol.** Adversarial cascades require three consecutive clean passes for convergence; any finding resets the streak to 0/3. Applies to both LOCAL and PR-LEVEL cascades.
+
+  **CLEAN (strict)** = ZERO findings of ANY severity. Required for streak advancement.
+  **CLEAN (PR-merge)** = ZERO findings of CRIT + HIGH + MED (LOW/OBS non-blocking). PR-merge gate only; does NOT advance streak.
+
+  Adversary CLEAN reports MUST specify both criteria explicitly:
+  ```
+  CLEAN (strict): yes/no
+  CLEAN (PR-merge): yes/no
+  ```
+
+---
+
+## Factory Hook Diagnostics
+
+When `Agent` tool dispatches fail with errors like:
+
+```
+PreToolUse:Agent hook error: [...factory-dispatcher]: factory-dispatcher trace=<UUID> event=PreToolUse tool=Agent host_abi=1 matched_tiers=N plugins_run=N total_ms=N block_intent=true exit_code=2
+```
+
+— the factory-dispatcher hook chain blocked the dispatch. The error message carries NO human-readable reason — only a trace UUID. To diagnose:
+
+### Step 1 — Locate the dispatcher log
+
+```
+.factory/logs/dispatcher-internal-YYYY-MM-DD.jsonl
+```
+
+### Step 2 — Find the block reason
+
+```bash
+grep '<TRACE-UUID>' .factory/logs/dispatcher-internal-$(date +%Y-%m-%d).jsonl
+```
+
+Look for `plugin.log` entries with `level: warn` — those carry the human-readable block reason.
+
+### Step 3 — Common blockers and recovery
+
+| Blocker | Detection | Recovery |
+|---------|-----------|----------|
+| **Multi-commit chain (TD-VSDD-053)** | HEAD and HEAD^ both have "backfill" / "Stage 1" / "Stage 2" | `git -C .factory reset --soft HEAD~N`; re-author as one commit; `--force-with-lease` push (requires human approval) |
+| **SHA drift** | STATE.md cites a develop SHA that doesn't match `git rev-parse origin/develop` | Update via state-manager dispatch |
+| **In-progress narrative** | STATE.md decision log has an open phase without closure | Add closure row via state-manager |
+| **factory-artifacts dirty** | `git -C .factory status --porcelain` is non-empty | Commit/discard pending changes via state-manager |
+
+### Step 4 — Going-forward discipline
+
+- **Bundle backfills.** Stage all files THEN commit ONCE. Never two state-manager dispatches in a row both producing "backfill" commits.
+- **Single-commit-per-burst.** Each logical burst → one commit in `.factory/`.
+- **Soft-reset for recovery, never `--hard`.**
+- **Force-push always needs user approval.**
+
+### Hook source locations (read-only reference)
+
+- Dispatcher binary: `~/.claude/plugins/cache/claude-mp/vsdd-factory/<version>/hooks/dispatcher/bin/<platform>/factory-dispatcher`
+- Hook registry: `~/.claude/plugins/cache/claude-mp/vsdd-factory/<version>/hooks-registry.toml`
+- Hook plugins (WASM): `~/.claude/plugins/cache/claude-mp/vsdd-factory/<version>/hook-plugins/*.wasm`
 
 ---
 
