@@ -240,7 +240,7 @@ Options (build):
 ## Section 4: Non-Functional Requirements
 
 > **Authoritative NFR registry:** `.factory/specs/prd-supplements/nfr-catalog.md` (35 NFRs
-> across 7 categories). The catalog supersedes any inline table here per CLAUDE.md precedence
+> across 8 categories). The catalog supersedes any inline table here per CLAUDE.md precedence
 > (PRD supplements supersede PRD prose for the same surface area).
 >
 > Key targets for quick reference (IDs are from nfr-catalog.md):
@@ -260,49 +260,14 @@ Options (build):
 
 ## Section 5: Error Taxonomy
 
-> Full catalog at `.factory/specs/prd-supplements/error-taxonomy.md`.
-
-### Error Code Convention
-
-```
-E-<CAT>-<NNN>
-  CAT = subsystem abbreviation (3 chars): PAR, EVL, DAT, LAY, EXP, BRD, PKG, CFG, A11
-  NNN = sequential within category (001-999)
-```
-
-### Error Categories
-
-| Category | Abbreviation | Severity Model | Exit Code |
-|---------|-------------|---------------|-----------|
-| Parse | PAR | Always fatal (exit 1) | 1 |
-| Evaluation | EVL | Fatal in strict; warning in warn-only | 2 |
-| Data source | DAT | Fatal in strict; placeholder in warn-only | 2 |
-| Layout | LAY | Warning by default (CanvasOverflow); fatal only in --strict-overflow | 2 |
-| Export | EXP | Always fatal (exit 3) | 3 |
-| Brand | BRD | Fatal for missing brand; warning for inferred slots | 4 |
-| Package | PKG | Fatal for missing package; warning for lockfile | 5 |
-| Configuration | CFG | Fatal (exit 4) | 4 |
-| Accessibility | A11 | Fatal in strict; warning in warn-only | 2 |
-
-### Selected High-Priority Errors
-
-| Code | Message Format | Severity |
-|------|---------------|---------|
-| E-PAR-001 | `Unexpected indentation at <file>:<line>:<col>. Expected <N> spaces, found <M>.` | Fatal |
-| E-PAR-002 | `Include cycle detected: <path1> → <path2> → ... → <path1>` | Fatal |
-| E-PAR-003 | `Reserved keyword '<word>' is reserved for <feature> (planned v2+)` | Fatal |
-| E-EVL-001 | `Undefined variable '{{ <name> }}' at <file>:<line>:<col>. Active scope: [<vars>]` | Fatal |
-| E-EVL-002 | `Type mismatch: <expr> expects <type>, got <actual>` | Fatal |
-| E-DAT-001 | `Data source fetch failed: <url> → HTTP <code>. Use --offline to skip.` | Fatal |
-| E-DAT-002 | `Missing field '<path>' in data source '<name>' at <file>:<line>:<col>` | Fatal |
-| E-LAY-001 | `CanvasOverflow: slide '<title>' field '<field>' overflows by ~<N> EMU` | Warning |
-| E-EXP-001 | `PPTX serialization error at element <path>: <detail>` | Fatal |
-| E-BRD-001 | `Brand file not found: <path>` | Fatal |
-| E-BRD-002 | `Brand color slot '<slot>' inferred as <color> (from <source>). Review in brand.toml.` | Warning |
-| E-A11-001 | `Missing alt text on <element-type> at <file>:<line>:<col>. Add alt "..." or decorative: true` | Fatal |
-| E-A11-002 | `Missing label on color-coded element '<type>' at <file>:<line>:<col>. Add label "..."` | Fatal |
-| E-PKG-001 | `Package '<name>' not found in sf.lock. Run: slideforge package install <repo>` | Fatal |
-| E-CFG-001 | `Variant '<name>' not defined. Defined variants: [<list>]` | Fatal |
+> **Authoritative error catalog:** `.factory/specs/prd-supplements/error-taxonomy.md` (42 error
+> codes across 9 categories: E-PAR, E-EVL, E-DAT, E-LAY, E-EXP, E-BRD, E-PKG, E-CFG, E-A11).
+> The supplement supersedes any inline table here per CLAUDE.md precedence (PRD supplements
+> supersede PRD prose for the same surface area). Key error codes referenced in behavioral
+> contracts trace to this catalog.
+>
+> Error code convention: `E-<CAT>-<NNN>` where CAT is the 3-char subsystem abbreviation and
+> NNN is sequential within the category (001-999).
 
 ---
 

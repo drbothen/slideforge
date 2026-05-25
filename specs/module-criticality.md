@@ -23,9 +23,9 @@ or broken accessibility. Formal verification (Kani) applies to their pure-core f
 
 | Crate | Justification |
 |-------|--------------|
-| slideforge-syntax | DSL parsing is the entry point for every user interaction. Parse errors with wrong spans, tab-detection failures, or alt-enforcement gaps corrupt the entire pipeline. VPs VP-001, VP-002, VP-003, VP-009, VP-014. |
+| slideforge-syntax | DSL parsing is the entry point for every user interaction. Parse errors with wrong spans or tab-detection failures corrupt the entire pipeline. VPs VP-001, VP-003, VP-009, VP-014. |
 | slideforge-eval | Type system and variable evaluation. Implicit coercion (DI-004) or scope bugs (DI-006) produce silently wrong slide content. VPs VP-004, VP-005, VP-010, VP-015. |
-| slideforge-validate | Owns ALL compile-time validation — alt text, color contrast, canvas overflow. A bug here silently ships inaccessible documents. VPs VP-007, VP-008. |
+| slideforge-validate | Owns ALL compile-time validation — alt text, color contrast, canvas overflow. A bug here silently ships inaccessible documents. VPs VP-002, VP-007, VP-008. |
 
 ---
 
@@ -57,6 +57,7 @@ but mutation testing ensures the logic is genuinely exercised.
 | slideforge-math | LaTeX transformation. Output is verified by downstream format-specific tests; mutation testing ensures formula correctness. |
 | slideforge-pdf | PDF coordinate mapping (VP-006 — CRITICAL subset). Structure tree construction verified by veraPDF gate. Overall crate is MEDIUM because veraPDF provides the authoritative correctness signal. |
 | slideforge-docx | DOCX serialization. Snapshot tests cover correctness; mutation testing ensures register (notes/report/detail) routing is correct. |
+| slideforge-html | HTML exporter; peer to slideforge-docx. Snapshot tests cover correctness; axe-core/playwright provides the authoritative WCAG correctness signal. |
 
 ---
 

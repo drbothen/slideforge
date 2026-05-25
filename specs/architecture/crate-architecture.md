@@ -47,7 +47,7 @@ until Phase 3 gates pass.
 | Classification | Rule | Crates |
 |---------------|------|--------|
 | Pure Core | Deterministic, no I/O, Kani-amenable | slideforge-syntax, slideforge-eval, slideforge-validate, slideforge-layout, slideforge-charts, slideforge-math, slideforge-plugin-api, slideforge-types |
-| Effectful Shell | Has I/O, network, or filesystem | slideforge-brand, slideforge-pptx, slideforge-docx, slideforge-pdf, slideforge-preview, slideforge-data, slideforge-package, slideforge-config, slideforge-cli, slideforge, slideforge-diagrams |
+| Effectful Shell | Has I/O, network, or filesystem | slideforge-brand, slideforge-pptx, slideforge-docx, slideforge-pdf, slideforge-html, slideforge-preview, slideforge-data, slideforge-package, slideforge-config, slideforge-cli, slideforge, slideforge-diagrams |
 
 `slideforge-diagrams` is classified Effectful because of the cold font DB scan
 (fontdb memory-mapped font files), even though the rendering logic itself is pure.

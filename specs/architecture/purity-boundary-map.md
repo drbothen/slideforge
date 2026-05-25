@@ -35,6 +35,7 @@ state. Tested via integration and snapshot tests; not formally proven.
 | slideforge-pptx | Effectful shell | Serialization to bytes is pure; ZIP writing to disk is effectful |
 | slideforge-docx | Effectful shell | Same pattern as slideforge-pptx |
 | slideforge-pdf | Effectful shell | Font file reads are I/O; coordinate mapping and structure tree are pure |
+| slideforge-html | Effectful shell | HTML page generation, file writing — effectful |
 | slideforge-preview | Effectful shell | axum TCP server, WebSocket, file serving — fully effectful |
 | slideforge-data | Effectful shell | All data sources: file reads, HTTP requests — fully effectful |
 | slideforge-diagrams | Effectful shell | fontdb system font scan (mmap, I/O on cold start) |
