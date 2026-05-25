@@ -61,7 +61,7 @@ traces_to: .factory/specs/architecture/ARCH-INDEX.md
 | VP-004 | BC-1.02.003, DI-004 |
 | VP-005 | BC-1.02.001, DI-004 |
 | VP-006 | BC-4.03.005, DI-010 |
-| VP-007 | BC-5.01.003, DI-002 |
+| VP-007 | BC-4.01.004, BC-4.03.003 |
 | VP-008 | BC-5.01.001, DI-001 |
 | VP-009 | BC-1.01.001, DI-018 |
 | VP-010 | BC-1.02.005 |

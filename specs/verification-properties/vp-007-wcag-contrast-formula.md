@@ -7,7 +7,7 @@ tool: Kani
 phase: P6
 priority: P0
 status: draft
-bc_trace: [BC-5.01.003, DI-002]
+bc_trace: [BC-4.01.004, BC-4.03.003]
 traces_to: .factory/specs/verification-properties/VP-INDEX.md
 ---
 
@@ -26,10 +26,13 @@ And for any two colors with luminance L1 ≥ L2:
 
 ## Motivation
 
-DI-002: color-coded elements must have text labels. S3 spike identified this as a
-Kani candidate. The WCAG 2.x spec uses 0.04045 (not 0.03928 from some older references).
-Using the wrong threshold changes contrast ratios by < 0.5% in practice but must be
-correct per spec. The formula is a pure math function with documented invariants.
+BC-4.01.004 requires all brand color values to pass WCAG AA contrast ratio checks;
+BC-4.03.003 requires all body text to meet 4.5:1 contrast ratio. Both contracts depend
+on the correctness of the contrast ratio formula (WCAG 1.4.3 Contrast — not 1.4.1 Use
+of Color). S3 spike identified this as a Kani candidate. The WCAG 2.x spec uses 0.04045
+(not 0.03928 from some older references). Using the wrong threshold changes contrast
+ratios by < 0.5% in practice but must be correct per spec. The formula is a pure math
+function with documented invariants.
 
 ## Feasibility Assessment
 
