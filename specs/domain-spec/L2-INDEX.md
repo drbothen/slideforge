@@ -40,9 +40,9 @@ sections:
 
 slideforge is a data-reactive branded document platform that compiles a single
 indentation-significant DSL source (.sf files) into multiple output formats
-(PPTX, DOCX, PDF, HTML, web preview) through a four-stage pipeline
-(Parse → Evaluate → Layout → Export) with a plugin-first architecture and
-compile-time accessibility enforcement.
+(PPTX, DOCX, PDF, HTML, web preview) through a six-stage pipeline
+(Parse → Evaluate → Validate → Brand → Layout → Export) with a plugin-first
+architecture and compile-time accessibility enforcement.
 
 ---
 
@@ -93,9 +93,9 @@ compile-time accessibility enforcement.
 
 | Priority | Count | CAP Items |
 |----------|-------|-----------|
-| P0 (must-have) | 18 | CAP-001 through CAP-018 |
+| P0 (must-have) | 20 | CAP-001 through CAP-018 + CAP-029 + CAP-030 |
 | P1 (should-have) | 8 | CAP-019 through CAP-026 |
-| P2 (nice-to-have) | 4 | CAP-027 through CAP-030 |
+| P2 (nice-to-have) | 2 | CAP-027, CAP-028 |
 
 ---
 

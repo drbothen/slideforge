@@ -95,7 +95,7 @@ the user should run. This covers DEC-019 from the domain edge-case catalog.
 
 ## Architecture Anchors
 
-- `architecture/authoring-subsystem.md` — @import package resolution
+- `architecture/system-overview.md` — @import package resolution
 
 ## Story Anchor
 

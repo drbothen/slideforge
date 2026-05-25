@@ -110,8 +110,8 @@ diagrams are embedded as `<svg>` with `role="img"` and appropriate `<title>` ele
 
 ## Architecture Anchors
 
-- `architecture/export-subsystem.md#html` — static HTML export design
-- `architecture/cross-cutting.md#accessibility-validation` — WCAG AA enforcement pipeline
+- `architecture/export-architecture.md#html` — static HTML export design
+- `architecture/plugin-architecture.md#accessibility-validation` — WCAG AA enforcement pipeline
 
 ## Story Anchor
 

@@ -95,7 +95,7 @@ the correct alternative.
 
 ## Architecture Anchors
 
-- `architecture/authoring-subsystem.md#reserved-keywords` — full reserved keyword table (DI-021)
+- `architecture/system-overview.md#reserved-keywords` — full reserved keyword table (DI-021)
 
 ## Story Anchor
 

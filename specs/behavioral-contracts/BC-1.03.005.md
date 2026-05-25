@@ -110,8 +110,8 @@ and HTTPS schemes.
 
 ## Architecture Anchors
 
-- `architecture/authoring-subsystem.md#data-binding` — HTTP DataSource plugin surface
-- `architecture/authoring-subsystem.md#security` — SSRF prevention, allowlist enforcement point
+- `architecture/system-overview.md#data-binding` — HTTP DataSource plugin surface
+- `architecture/system-overview.md#security` — SSRF prevention, allowlist enforcement point
 
 ## Story Anchor
 

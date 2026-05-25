@@ -91,7 +91,7 @@ which template pattern was used. This covers DEC-006 from the domain edge-case c
 
 ## Architecture Anchors
 
-- `architecture/authoring-subsystem.md` — dynamic include path resolution
+- `architecture/system-overview.md` — dynamic include path resolution
 
 ## Story Anchor
 

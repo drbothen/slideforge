@@ -93,7 +93,7 @@ document section). The `@if / @elif / @else:` syntax is consistent across all sc
 
 ## Architecture Anchors
 
-- `architecture/authoring-subsystem.md#computation-model` — conditional rendering design
+- `architecture/system-overview.md#computation-model` — conditional rendering design
 
 ## Story Anchor
 

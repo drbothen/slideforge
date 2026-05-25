@@ -12,7 +12,7 @@ traces_to: ARCH-INDEX.md
 
 ## Pipeline
 
-slideforge compiles a single `.sf` source file through four sequential stages:
+slideforge compiles a single `.sf` source file through six sequential stages:
 
 ```
 .sf source
@@ -29,7 +29,7 @@ slideforge compiles a single `.sf` source file through four sequential stages:
     ▼ [SS-04] slideforge-brand  ← brand.toml or .pptx template
   Deck + Brand
     │
-    ▼ [SS-05] slideforge-layout (31 SlideType plugins from SS-19)
+    ▼ [SS-05] slideforge-layout (31 SlideType plugins from SS-15)
   LaidOutDeck IR (geometric, post-layout)
     │
     ├──▶ [SS-06] slideforge-pptx  → output.pptx
@@ -43,11 +43,11 @@ LaidOutDeck IR are the three integration points between subsystems.
 
 ## Bounded Contexts
 
-The four domain bounded contexts map directly to pipeline stages:
+The four domain bounded contexts map to the six pipeline stages:
 
-| Bounded Context | Pipeline Stage | Stable Contract |
-|----------------|---------------|----------------|
-| Authoring | Parse + Evaluate | Deck IR |
+| Bounded Context | Pipeline Stages | Stable Contract |
+|----------------|----------------|----------------|
+| Authoring | Parse + Evaluate + Validate | Deck IR (validated) |
 | Branding | Brand loading (side input) | Brand struct |
 | Layout | Layout | LaidOutDeck IR |
 | Export | Export | Output bytes per format |

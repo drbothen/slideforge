@@ -92,7 +92,7 @@ not configurable — there is no `--allow-tabs` flag.
 
 ## Architecture Anchors
 
-- `architecture/authoring-subsystem.md` — lexer tab-rejection rule
+- `architecture/system-overview.md` — lexer tab-rejection rule
 
 ## Story Anchor
 

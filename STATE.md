@@ -3,9 +3,9 @@ project: slideforge
 mode: greenfield
 created: 2026-05-23
 current_phase: phase-1-spec-crystallization
-status: READY_FOR_ADVERSARIAL_REVIEW
+status: ADVERSARIAL_PASS_2_PENDING
 last_updated: 2026-05-24
-prd_bcs: 101
+prd_bcs: 109
 prd_hs: 15
 prd_supplements: 4
 spikes_resolved: 7
@@ -27,9 +27,9 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. It generates branded .p
 **Workspace:** /Users/jmagady/Dev/slideforge
 **Factory worktree:** .factory/ on branch `factory-artifacts`
 
-## Current Status: READY FOR ADVERSARIAL REVIEW (2026-05-24)
+## Current Status: ADVERSARIAL PASS 2 PENDING (2026-05-24)
 
-All pre-adversarial Phase 1 steps complete. DTU: not required (no external clones needed). Gene transfusion: behavioral-only (75 behaviors classified, no code ported). CI/CD: 3 workflows committed (ci.yml, release.yml, security.yml), 5-platform matrix, supply-chain audit, visual-diff gate. Next: P1-09 adversarial spec review — 3 consecutive clean passes required before Phase 2.
+Adversarial Pass 1 complete — 17 findings (4C, 6H, 7M) ALL RESOLVED. 95 architecture anchors fixed across 95+ BC files, 7 new BCs added (total: 109), six-stage pipeline formalized, 20-crate workspace updated. Convergence streak: 0/3 (Pass 1 had findings — streak reset). Next: dispatch adversary for Pass 2 (fresh context).
 
 ## Phase 1 Progress (as of 2026-05-24)
 
@@ -39,7 +39,7 @@ All pre-adversarial Phase 1 steps complete. DTU: not required (no external clone
 |------|-------|--------|--------|
 | P1-00 | devops-engineer | DONE | MSRV 1.85→1.88 in rust-toolchain.toml + Cargo.toml + ci.yml |
 | P1-01 | business-analyst | DONE | .factory/specs/domain-spec/ (12 files, L2-INDEX.md) |
-| P1-02 | product-owner | DONE | .factory/specs/prd.md + 4 supplements + 101 BCs (BC-INDEX.md) + 15 holdout scenarios |
+| P1-02 | product-owner | DONE | .factory/specs/prd.md + 4 supplements + 109 BCs (BC-INDEX.md) + 15 holdout scenarios |
 | P1-03a-S1 | architect | DONE | .factory/planning/spikes/S1-ooxmlsdk-pptx-coverage.md — ADOPT-WITH-WORKAROUNDS (55/57 PASS, 2 workarounds) |
 | P1-03a-S2 | architect | DONE | .factory/planning/spikes/S2-pdf-backend-evaluation.md — ADOPT pdf-writer + krilla |
 | P1-03a-S3 | architect | DONE | .factory/planning/spikes/S3-wcag-tooling-choice.md — axe-core/playwright + veraPDF + custom OOXML linter |
@@ -48,11 +48,11 @@ All pre-adversarial Phase 1 steps complete. DTU: not required (no external clone
 | P1-03a-S6 | architect | DONE | .factory/planning/spikes/S6-multi-renderer-parity.md — SSIM≥0.99 + PSNR≥35dB dual gate |
 | P1-03a-S14 | architect | DONE | .factory/planning/spikes/S14-mermaid-diagram-engine.md — ADOPT mermaid-rs-renderer v0.2.2 |
 | P1-03b | architect | DONE | .factory/specs/architecture/ (ARCH-INDEX + 12 section files, 14 ADRs, module-criticality, feasibility report) |
-| P1-04 | product-owner | DONE | PRD complete — 101 BCs, 15 HS, 4 supplements, all spikes resolved |
+| P1-04 | product-owner | DONE | PRD complete — 109 BCs, 15 HS, 4 supplements, all spikes resolved |
 | P1-05 | architect | DONE | P1-05 (feasibility): PASS-WITH-NOTES — all 5 notes addressed; BC-1.03.005 added |
 | P1-06 | ux-designer | DONE | .factory/specs/ux-spec/ (UX-INDEX + 10 screens + 5 flows); .factory/specs/verification-properties/ (VP-INDEX + 7 VPs) |
 | P1-07 | devops-engineer | DONE | DTU: not required; gene-transfusion: behavioral-only (75 behaviors); CI/CD: 3 workflows, 5-platform matrix |
-| P1-09 | adversary | NOT_STARTED | 3 clean passes — READY TO START |
+| P1-09 | adversary | IN_PROGRESS | Pass 1 DONE (17 findings, all fixed) — streak 0/3 — Pass 2 launching |
 | P1-10 | consistency-validator | NOT_STARTED | Cross-doc audit — blocked on P1-09 (3-clean) |
 | P1-11 | HUMAN | NOT_STARTED | Approval gate — blocked on P1-10 |
 
@@ -86,7 +86,7 @@ All pre-adversarial Phase 1 steps complete. DTU: not required (no external clone
 
 ### What to do next (resume instructions)
 
-1. **P1-09 — Adversarial spec review**: dispatch adversary against ALL Phase 1 specs. Must achieve 3 consecutive clean passes (BC-5.39.001). Scope: domain-spec, PRD + supplements, architecture + ADRs, UX spec, VPs, cicd-setup, dtu-assessment, gene-transfusion-assessment.
+1. **P1-09 — Adversarial Pass 2**: dispatch adversary for Pass 2 (fresh context). Pass 1 complete — 17 findings all fixed. Streak 0/3. Must achieve 3 consecutive clean passes (BC-5.39.001). Scope unchanged: domain-spec, PRD + supplements, architecture + ADRs, UX spec, VPs, cicd-setup, dtu-assessment, gene-transfusion-assessment.
 2. **P1-10 — Consistency audit**: dispatch consistency-validator AFTER P1-09 passes 3-clean.
 3. **P1-11 — Human approval gate**: human review AFTER P1-10 complete, then Phase 2 begins.
 
@@ -167,7 +167,7 @@ Production-grade-from-day-1. Key gates:
 
 ## Version Roadmap (summary)
 
-- **v1.0**: Data-reactive DSL (rungs 1-9), 31 slide types, 5 output formats, 3 writing registers, plugin-first (10 surfaces, 19 crates), charts (plotters), math ($...$+@{var}), Mermaid diagrams, full package model, workspace, shape DSL, brand bridge (bidirectional PPTX+DOCX), WCAG AA, production-grade
+- **v1.0**: Data-reactive DSL (rungs 1-9), 31 slide types, 5 output formats, 3 writing registers, plugin-first (10 surfaces, 20 crates), charts (plotters), math ($...$+@{var}), Mermaid diagrams, full package model, workspace, shape DSL, brand bridge (bidirectional PPTX+DOCX), WCAG AA, production-grade
 - **v1.x**: More chart types, figure auto-numbering, DOCX Level 2, comemo incremental, slideforge fmt
 - **v2**: User-defined functions, SmartArt, animations, native OOXML charts, plugin connectors, mixins, components, LaTeX/Beamer output, AI-assisted content, presentation mode
 - **v3**: Morph transitions, video export, multi-document pipeline, marketplace, collaboration
@@ -200,6 +200,7 @@ Production-grade-from-day-1. Key gates:
 - 2026-05-24 — Spike S1 RESOLVED: ADOPT-WITH-WORKAROUNDS — ooxmlsdk 0.6.1; 55/57 PASS; 2 workarounds identified
 - 2026-05-24 — Spike S4 RESOLVED: VIABLE-WITH-CAVEATS — hybrid hand-written lexer + chumsky 0.10 via Stream
 - 2026-05-24 — PRD COMPLETE: 101 BCs (BC-1.01 through BC-5.05), 15 holdout scenarios, 4 supplements (error-taxonomy, interface-definitions, nfr-catalog, test-vectors)
+- 2026-05-24 — ADVERSARIAL PASS 1 COMPLETE: 17 findings (4C, 6H, 7M) — all resolved. 95 architecture anchors fixed; 7 new BCs added (BC-1.03.006, BC-1.03.007, BC-5.03.004–006, BC-5.06.001–002); BC total → 109 (71 P0, 38 P1). Six-stage pipeline formalized; 20-crate workspace confirmed; Exporter trait timing fields + flag composition; E-BRD-005/E-CFG-007/E-CFG-008 added; E-CFG-003 retired; HS-012 + SCR-001 + ADR-007 updated; CAP-017 Chrome → pdf-writer. Streak: 0/3 — Pass 2 dispatching.
 - 2026-05-24 — ALL 7/7 SPIKES RESOLVED: S1 S2 S3 S4 S5 S6 S14 — P1-03b (architecture) is unblocked
 - 2026-05-24 — READY FOR ARCHITECTURE FEASIBILITY REVIEW: P1-03b + P1-05 can run in parallel
 - 2026-05-24 — P1-05 ARCHITECTURE FEASIBILITY: PASS-WITH-NOTES — 5 notes identified and fully addressed; BC-1.03.005 added for mermaid-rs-renderer pinning

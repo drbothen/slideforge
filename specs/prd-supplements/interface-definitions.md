@@ -52,8 +52,8 @@ Options:
   --variant <NAME>        Build a named variant declared in variants: block
                           Type: string matching a variant name in the source
                           Error if not found: E-CFG-001
-  --warn-only             Promote validation errors to warnings
-                          Cannot be combined with --strict-overflow
+  --warn-only             Promote all validation errors to warnings (except overflow
+                          when --strict-overflow is also active; see §5.1 interaction rules)
   --offline               Skip HTTP data sources; use only file-based sources
                           Error if sf.lock absent with deps: E-PKG-001
   --template <FILE>       Override brand template
@@ -105,7 +105,43 @@ Options:
 **Effect:** Resolves repo, downloads manifest, writes to slideforge.toml [dependencies],
 updates sf.lock with SHA-256 checksum. Fails if URL unreachable (E-PKG-002).
 
-### 1.5 `slideforge extract-brand` — Extract Brand from Template
+### 1.5 `slideforge init` — Scaffold a New Project
+
+```
+slideforge init [NAME] [OPTIONS]
+
+Arguments:
+  [NAME]                  Optional project directory name.
+                          If omitted, scaffolds in the current directory.
+                          If provided, creates <NAME>/ directory first.
+                          Type: valid directory name (no path separators)
+
+Options:
+  --force                 Overwrite existing scaffold files.
+                          CAUTION: destructive — existing deck.sf and
+                          slideforge.toml will be overwritten.
+                          Without --force, fails with E-CFG-008 if
+                          slideforge.toml exists.
+  --template <NAME>       Named scaffold template to use.
+                          Type: string matching a bundled template name
+                          Values: default (only bundled template in v1.0)
+                          Default: default
+```
+
+**Effect:** Creates a buildable starter project:
+- `deck.sf` — main presentation source with 3 example slides
+- `brand.toml` — brand configuration placeholder (edit with your colors)
+- `slideforge.toml` — project configuration
+- `assets/` — directory for images and data files
+- `dist/` — output directory (included in generated .gitignore)
+
+Prints a file manifest and "get started" next-step instructions.
+The generated `deck.sf` must build successfully without modification.
+
+**Error if target directory not writable:** E-EXP-007.
+**Error if slideforge.toml already exists (without --force):** E-CFG-008.
+
+### 1.6 `slideforge extract-brand` — Extract Brand from Template
 
 ```
 slideforge extract-brand <TEMPLATE> [--output <FILE>]
@@ -121,7 +157,7 @@ Options:
 typography settings, and logo references. Writes brand.toml. Warns for any
 inferred or missing values.
 
-### 1.6 `slideforge config explain` — Configuration Provenance
+### 1.7 `slideforge config explain` — Configuration Provenance
 
 ```
 slideforge config explain [KEY] [--workspace-root <DIR>]
@@ -190,6 +226,8 @@ printed. The JSON object has the following structure:
     "total_ms": 342,
     "parse_ms": 45,
     "evaluate_ms": 12,
+    "validate_ms": 8,
+    "brand_ms": 14,
     "layout_ms": 89,
     "export_ms": 196
   }
@@ -295,14 +333,27 @@ height_emu = 5143500   # 5.625 inches
 
 ## 5. Flag Interaction Rules
 
-### 5.1 Mutually Exclusive Flags
+### 5.1 Mutually Exclusive and Composing Flags
 
 | Flag A | Flag B | Behavior |
 |--------|--------|----------|
 | `<SOURCE>` (positional) | `--workspace` | Error E-CFG-002: cannot specify source file and --workspace together |
-| `--warn-only` | `--strict-overflow` | Error E-CFG-003: contradictory validation modes |
 | `--quiet` | `--verbose` | Error E-CFG-004: contradictory verbosity |
 | `--quiet` | `--json` | `--json` wins; no prose output in either case |
+
+**`--warn-only` + `--strict-overflow` interaction (composing, not exclusive):**
+
+These two flags compose correctly — they address different error scopes:
+- `--warn-only` promotes ALL validation errors to warnings EXCEPT canvas overflow when
+  `--strict-overflow` is also active. Non-overflow validation errors (accessibility,
+  type errors, etc.) become warnings and allow output to be written.
+- `--strict-overflow` applies only to `E-LAY-001` canvas overflow: it promotes overflow
+  from degraded (warning) to broken (fatal, exit 2).
+- Together: non-overflow errors are warnings; overflow is still fatal. This is the
+  correct behavior for "warn on minor issues but hard-fail on layout overflow."
+
+E-CFG-003 is retired. The combination `--warn-only --strict-overflow` is valid and
+produces the scoped behavior described above. No error is emitted for this combination.
 
 ### 5.2 Flag Override Rules
 
@@ -337,11 +388,11 @@ pub trait DataSource: Send + Sync {
     fn fetch(&self, uri: &str, opts: &FetchOptions) -> Result<DataValue, DataError>;
 }
 
-/// Exporter — produces output bytes from LaidOutDeck
+/// Exporter — produces output bytes from Deck + LaidOutDeck + Brand
 pub trait Exporter: Send + Sync {
     fn id(&self) -> &str;
     fn extension(&self) -> &str;  // e.g., "pptx"
-    fn export(&self, deck: &LaidOutDeck, opts: &ExportOptions) -> Result<Vec<u8>, ExportError>;
+    fn export(&self, deck: &Deck, laid_out: &LaidOutDeck, brand: &Brand, opts: &ExportOptions) -> Result<Vec<u8>, ExportError>;
 }
 
 /// ChartRenderer — produces SVG from chart spec

@@ -22,8 +22,8 @@ traces_to: L2-INDEX.md
 ## Processing Stages (Build-Time Events)
 
 The slideforge build pipeline is event-driven in the sense that each stage completion
-triggers the next. Domain events here describe state transitions in the four-stage pipeline
-(Parse → Evaluate → Layout → Export) and in watch mode.
+triggers the next. Domain events here describe state transitions in the six-stage pipeline
+(Parse → Evaluate → Validate → Brand → Layout → Export) and in watch mode.
 
 ---
 

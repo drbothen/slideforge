@@ -93,7 +93,7 @@ E-PAR-008. This covers DEC-010 from the domain edge-case catalog.
 
 ## Architecture Anchors
 
-- `architecture/authoring-subsystem.md` — keyword collision check during parse
+- `architecture/system-overview.md` — keyword collision check during parse
 
 ## Story Anchor
 

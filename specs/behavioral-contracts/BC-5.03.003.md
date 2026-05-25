@@ -102,7 +102,7 @@ declared but not locked. The warning directs the user to run `slideforge package
 
 ## Architecture Anchors
 
-- `architecture/cross-cutting.md#package-management` — lock file presence check at project load
+- `architecture/plugin-architecture.md#package-management` — lock file presence check at project load
 
 ## Story Anchor
 

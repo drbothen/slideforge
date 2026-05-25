@@ -42,7 +42,7 @@ No recursion paths exist. Kani can prove termination for `@for` over bounded col
 **No implicit coercion (DI-004):** The lexer preserves `"1.10"` as a string token (not
 float). `true`/`false` are boolean keywords. All other tokens are strings until the
 evaluator explicitly converts. Type conversion requires explicit pipe filters (e.g.,
-`| to_int`). Wrong-type usage is E-TYP-NNN.
+`| to_int`). Wrong-type usage is E-EVL-003 (canonical prefix: E-EVL-NNN).
 
 **Evaluator is pure (purity-boundary-map.md):** The evaluator resolves expressions from
 the parsed AST and data-source values. All data fetching happens BEFORE evaluation, in

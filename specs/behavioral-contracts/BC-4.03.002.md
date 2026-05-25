@@ -107,7 +107,7 @@ infeasible. This BC specifies the implementation constraint, not just the output
 
 ## Architecture Anchors
 
-- `architecture/export-subsystem.md#pdf` — pdf-writer + krilla + SlideTagEngine design (Spike S2)
+- `architecture/export-architecture.md#pdf` — pdf-writer + krilla + SlideTagEngine design (Spike S2)
 
 ## Story Anchor
 

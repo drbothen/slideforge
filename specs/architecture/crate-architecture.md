@@ -10,7 +10,7 @@ traces_to: ARCH-INDEX.md
 
 # Crate Architecture
 
-## 19-Crate Workspace
+## 20-Crate Workspace
 
 The workspace uses Cargo resolver 3, edition 2024. All crates enforce
 `#![forbid(unsafe_code)]`. Production dependencies use `=` version pinning.
@@ -18,7 +18,7 @@ The workspace uses Cargo resolver 3, edition 2024. All crates enforce
 ```
 crates/
 ├── slideforge-plugin-api/   # [SS-14] 10 trait surfaces — pure types, no I/O
-├── slideforge-types/        # [SS-15] Deck, LaidOutDeck, Brand, Value — pure types
+├── slideforge-types/        # [SS-15] Deck, LaidOutDeck, Brand, Value + 31 SlideType impls — pure types
 ├── slideforge-syntax/       # [SS-01] Lexer + chumsky parser → Typed AST — PURE CORE
 ├── slideforge-eval/         # [SS-02] Expression eval, type checking — PURE CORE
 ├── slideforge-validate/     # [SS-03] All compile-time validation — PURE CORE

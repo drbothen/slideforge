@@ -93,7 +93,7 @@ in the DSL reference documentation.
 
 ## Architecture Anchors
 
-- `architecture/authoring-subsystem.md#math-mode` — MathRenderer supported command list
+- `architecture/system-overview.md#math-mode` — MathRenderer supported command list
 
 ## Story Anchor
 

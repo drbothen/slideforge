@@ -97,7 +97,7 @@ is no fallback to empty string or "undefined" sentinel.
 
 ## Architecture Anchors
 
-- `architecture/authoring-subsystem.md#evaluation-scope` — scope chain resolution
+- `architecture/system-overview.md#evaluation-scope` — scope chain resolution
 
 ## Story Anchor
 

@@ -104,7 +104,7 @@ one repository.
 
 ## Architecture Anchors
 
-- `architecture/cross-cutting.md#workspace` — workspace discovery and multi-deck build design
+- `architecture/plugin-architecture.md#workspace` — workspace discovery and multi-deck build design
 
 ## Story Anchor
 

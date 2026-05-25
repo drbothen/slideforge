@@ -98,7 +98,7 @@ This pure mathematical conversion is provably correct via Kani.
 
 ## Architecture Anchors
 
-- `architecture/export-subsystem.md#coordinate-mapping` — EMU-to-PDF conversion (Spike S2)
+- `architecture/export-architecture.md#coordinate-mapping` — EMU-to-PDF conversion (Spike S2)
 
 ## Story Anchor
 

@@ -94,7 +94,7 @@ the planned feature it is reserved for, and a suggestion if applicable.
 
 ## Architecture Anchors
 
-- `architecture/authoring-subsystem.md` — reserved keyword table
+- `architecture/system-overview.md` — reserved keyword table
 
 ## Story Anchor
 

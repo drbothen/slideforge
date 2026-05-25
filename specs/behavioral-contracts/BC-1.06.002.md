@@ -91,7 +91,7 @@ domain edge-case catalog.
 
 ## Architecture Anchors
 
-- `architecture/authoring-subsystem.md` — include graph cycle detection (DFS-based)
+- `architecture/system-overview.md` — include graph cycle detection (DFS-based)
 
 ## Story Anchor
 

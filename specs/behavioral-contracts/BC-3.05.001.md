@@ -122,7 +122,7 @@ Per output format:
 ## Architecture Anchors
 
 - `architecture/layout-subsystem.md#inline-format` — Inline enum definition and 11 variant types
-- `architecture/pipeline.md#export` — per-format inline rendering
+- `architecture/system-overview.md#export` — per-format inline rendering
 
 ## Story Anchor
 

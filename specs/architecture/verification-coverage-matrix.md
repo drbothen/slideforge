@@ -18,7 +18,7 @@ traces_to: ARCH-INDEX.md
 | VP ID | Description | Module | Tool | Phase | Priority |
 |-------|-------------|--------|------|-------|---------|
 | VP-001 | Tab detection byte span accuracy | slideforge-syntax | Kani | P6 | P0 |
-| VP-002 | Alt-missing produces error before parse completion | slideforge-syntax | Kani | P6 | P0 |
+| VP-002 | Alt-missing produces error before parse completion | slideforge-validate | Kani | P6 | P0 |
 | VP-003 | @for over bounded collection always terminates | slideforge-syntax | Kani | P6 | P0 |
 | VP-004 | No implicit coercion: "1.10" stays string | slideforge-eval | Kani | P6 | P0 |
 | VP-005 | Integer arithmetic in {{ expr }} no overflow | slideforge-eval | Kani | P6 | P1 |
@@ -37,9 +37,9 @@ traces_to: ARCH-INDEX.md
 
 | Module | Kani | Proptest | Fuzz | Integration | Total |
 |--------|------|----------|------|-------------|-------|
-| slideforge-syntax | 3 | 1 | 1 | 0 | 5 |
+| slideforge-syntax | 2 | 1 | 1 | 0 | 4 |
 | slideforge-eval | 2 | 1 | 1 | 0 | 4 |
-| slideforge-validate | 2 | 0 | 0 | 0 | 2 |
+| slideforge-validate | 3 | 0 | 0 | 0 | 3 |
 | slideforge-layout | 0 | 1 | 0 | 0 | 1 |
 | slideforge-brand | 0 | 1 | 0 | 0 | 1 |
 | slideforge-pptx | 0 | 1 | 0 | 0 | 1 |

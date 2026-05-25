@@ -106,7 +106,7 @@ a configurable interval (default: 60s). The re-evaluation runs in warn-only mode
 
 ## Architecture Anchors
 
-- `architecture/cross-cutting.md#watch-mode` — file watcher + debounce + re-evaluation pipeline
+- `architecture/plugin-architecture.md#watch-mode` — file watcher + debounce + re-evaluation pipeline
 
 ## Story Anchor
 

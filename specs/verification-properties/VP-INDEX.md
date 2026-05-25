@@ -34,7 +34,7 @@ traces_to: .factory/specs/architecture/ARCH-INDEX.md
 | VP ID | Description | Module | Tool | Phase | Priority | Status |
 |-------|-------------|--------|------|-------|---------|--------|
 | VP-001 | Tab detection byte span accuracy | slideforge-syntax | Kani | P6 | P0 | draft |
-| VP-002 | Alt-missing produces error before parse completion | slideforge-syntax | Kani | P6 | P0 | draft |
+| VP-002 | Alt-missing produces error before parse completion | slideforge-validate | Kani | P6 | P0 | draft |
 | VP-003 | @for over bounded collection always terminates | slideforge-syntax | Kani | P6 | P0 | draft |
 | VP-004 | No implicit coercion: "1.10" stays string | slideforge-eval | Kani | P6 | P0 | draft |
 | VP-005 | Integer arithmetic in {{ expr }} no overflow | slideforge-eval | Kani | P6 | P1 | draft |

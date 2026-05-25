@@ -94,7 +94,7 @@ pinpoint the specific line of the diagram definition that is malformed.
 
 ## Architecture Anchors
 
-- `architecture/authoring-subsystem.md#diagram-renderer` — error reporting from mermaid-rs-renderer
+- `architecture/system-overview.md#diagram-renderer` — error reporting from mermaid-rs-renderer
 
 ## Story Anchor
 

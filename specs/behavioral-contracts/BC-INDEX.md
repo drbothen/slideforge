@@ -52,6 +52,8 @@ traces_to: domain-spec/L2-INDEX.md
 | BC-1.03.003 | Fail with structured error on missing field access | P0 | active | [BC-1.03.003.md](BC-1.03.003.md) |
 | BC-1.03.004 | Support --offline flag to skip HTTP sources | P1 | active | [BC-1.03.004.md](BC-1.03.004.md) |
 | BC-1.03.005 | HTTP Domain Allowlist Enforcement (SSRF Prevention) | P1 | active | [BC-1.03.005.md](BC-1.03.005.md) |
+| BC-1.03.006 | Load @data from Excel (.xlsx) spreadsheet at compile time | P1 | active | [BC-1.03.006.md](BC-1.03.006.md) |
+| BC-1.03.007 | Load @data from SQLite database via parameterized query at compile time | P1 | active | [BC-1.03.007.md](BC-1.03.007.md) |
 
 ### 1.04 — Iteration over Data Collections (CAP-004)
 
@@ -279,6 +281,9 @@ traces_to: domain-spec/L2-INDEX.md
 | BC-5.03.001 | slideforge package install adds dep to slideforge.toml and sf.lock with sha256 | P1 | active | [BC-5.03.001.md](BC-5.03.001.md) |
 | BC-5.03.002 | @import of package not in sf.lock fails with install hint | P1 | active | [BC-5.03.002.md](BC-5.03.002.md) |
 | BC-5.03.003 | sf.lock missing for project with deps produces build warning | P1 | active | [BC-5.03.003.md](BC-5.03.003.md) |
+| BC-5.03.004 | slideforge package list shows all installed packages with versions and lock status | P1 | active | [BC-5.03.004.md](BC-5.03.004.md) |
+| BC-5.03.005 | slideforge package remove removes package from slideforge.toml and sf.lock | P1 | active | [BC-5.03.005.md](BC-5.03.005.md) |
+| BC-5.03.006 | slideforge package verify checks all packages against sf.lock SHA-256 checksums | P1 | active | [BC-5.03.006.md](BC-5.03.006.md) |
 
 ### 5.04 — Workspace Configuration (CAP-026)
 
@@ -298,18 +303,25 @@ traces_to: domain-spec/L2-INDEX.md
 | BC-5.05.004 | File watcher event loss produces CLI warning; force-rebuild available | P1 | active | [BC-5.05.004.md](BC-5.05.004.md) |
 | BC-5.05.005 | WebSocket connection drop from web preview reconnects automatically | P1 | active | [BC-5.05.005.md](BC-5.05.005.md) |
 
+### 5.06 — Project Init / Scaffolding (CAP-026)
+
+| BC ID | Title | Priority | Status | File |
+|-------|-------|----------|--------|------|
+| BC-5.06.001 | slideforge init scaffolds a buildable starter project in the target directory | P1 | active | [BC-5.06.001.md](BC-5.06.001.md) |
+| BC-5.06.002 | slideforge init rejects existing project without --force (E-CFG-008) | P1 | active | [BC-5.06.002.md](BC-5.06.002.md) |
+
 ---
 
 ## Summary Counts
 
-| Section | Subsection | BCs |
-|---------|-----------|-----|
-| 1 — Authoring | 1.01–1.15 | 51 |
-| 2 — Branding | 2.01–2.02 | 8 |
-| 3 — Layout | 3.01–3.05 | 11 |
-| 4 — Export | 4.01–4.03 | 15 |
-| 5 — Cross-cutting | 5.01–5.05 | 15 |
-| **Total** | | **100** |
+| Section | Subsection | BCs | P0 | P1 |
+|---------|-----------|-----|----|----|
+| 1 — Authoring | 1.01–1.15 | 53 | 37 | 16 |
+| 2 — Branding | 2.01–2.02 | 8 | 6 | 2 |
+| 3 — Layout | 3.01–3.05 | 12 | 9 | 3 |
+| 4 — Export | 4.01–4.03 | 13 | 12 | 1 |
+| 5 — Cross-cutting | 5.01–5.06 | 23 | 7 | 16 |
+| **Total** | | **109** | **71** | **38** |
 
 ---
 

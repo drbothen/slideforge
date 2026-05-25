@@ -93,8 +93,8 @@ to the brand-load phase of the pipeline.
 
 ## Architecture Anchors
 
-- `architecture/authoring-subsystem.md#brand-load` — brand token resolution phase
-- `architecture/pipeline.md` — Evaluate phase ordering: brand load precedes set rule evaluation
+- `architecture/system-overview.md#brand-load` — brand token resolution phase
+- `architecture/system-overview.md` — Evaluate phase ordering: brand load precedes set rule evaluation
 
 ## Story Anchor
 

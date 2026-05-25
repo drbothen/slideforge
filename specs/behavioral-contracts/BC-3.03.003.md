@@ -67,7 +67,7 @@ authoring workflows where broken slides should not block the rest of the deck.
 | EC-002 | All slides have errors | Output file contains N error-slide placeholders; still written; exit 0 |
 | EC-003 | --warn-only with a parse error (E-PAR-*) | Parse error is fatal regardless; build halts at parse stage; no output |
 | EC-004 | Error-slide placeholder position in PPTX | The error-slide uses the Blank layout (no content overflows); error text as a large centered text shape |
-| EC-005 | `--warn-only` + `--strict-overflow` | E-CFG-003 contradictory flags; build fails immediately |
+| EC-005 | `--warn-only` + `--strict-overflow` | Flags compose: overflow remains fatal (exit 2); all other validation errors are demoted to warnings. No E-CFG-003 emitted. |
 
 ## Canonical Test Vectors
 
@@ -102,7 +102,7 @@ authoring workflows where broken slides should not block the rest of the deck.
 
 ## Architecture Anchors
 
-- `architecture/pipeline.md#warn-only` — warn-only mode output gate logic
+- `architecture/system-overview.md#warn-only` — warn-only mode output gate logic
 
 ## Story Anchor
 

@@ -106,8 +106,8 @@ format.
 
 ## Architecture Anchors
 
-- `architecture/export-subsystem.md#pptx-accessibility` — PPTX accessibility metadata embedding
-- `architecture/cross-cutting.md#accessibility-validation` — compile-time enforcement (upstream)
+- `architecture/export-architecture.md#pptx-accessibility` — PPTX accessibility metadata embedding
+- `architecture/plugin-architecture.md#accessibility-validation` — compile-time enforcement (upstream)
 
 ## Story Anchor
 

@@ -95,7 +95,7 @@ invariant required for the < 500ms cold build guarantee and for formal verificat
 
 ## Architecture Anchors
 
-- `architecture/authoring-subsystem.md#computation-model` — rungs 1-9 design
+- `architecture/system-overview.md#computation-model` — rungs 1-9 design
 
 ## Story Anchor
 

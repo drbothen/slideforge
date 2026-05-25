@@ -94,7 +94,7 @@ YAML, and TOML. The loaded data is bound to the declared name and is accessible 
 
 ## Architecture Anchors
 
-- `architecture/authoring-subsystem.md#data-binding` — DataSource plugin surface
+- `architecture/system-overview.md#data-binding` — DataSource plugin surface
 
 ## Story Anchor
 

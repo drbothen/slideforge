@@ -102,7 +102,7 @@ terminal.
 
 ## Architecture Anchors
 
-- `architecture/cross-cutting.md#watch-mode` — file watcher overflow handling and force-rebuild
+- `architecture/plugin-architecture.md#watch-mode` — file watcher overflow handling and force-rebuild
 
 ## Story Anchor
 

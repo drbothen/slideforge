@@ -94,7 +94,7 @@ default for domains not in the `[data].allowed_domains` allowlist in `slideforge
 
 ## Architecture Anchors
 
-- `architecture/authoring-subsystem.md#data-binding` — HTTP DataSource plugin surface
+- `architecture/system-overview.md#data-binding` — HTTP DataSource plugin surface
 
 ## Story Anchor
 

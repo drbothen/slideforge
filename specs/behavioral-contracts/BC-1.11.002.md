@@ -93,7 +93,7 @@ position. This applies in both strict mode (warning + non-zero exit) and warn-on
 
 ## Architecture Anchors
 
-- `architecture/authoring-subsystem.md#chart-renderer` — empty data guard in ChartRenderer
+- `architecture/system-overview.md#chart-renderer` — empty data guard in ChartRenderer
 
 ## Story Anchor
 

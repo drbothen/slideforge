@@ -101,8 +101,8 @@ is then consumed by the PPTX exporter to apply the brand to synthesized slides.
 
 ## Architecture Anchors
 
-- `architecture/branding-subsystem.md#loading` — brand loading from existing .pptx/.docx
-- `architecture/pipeline.md` — brand resolution as a pre-export stage
+- `architecture/brand-architecture.md#loading` — brand loading from existing .pptx/.docx
+- `architecture/system-overview.md` — brand resolution as a pre-export stage
 
 ## Story Anchor
 

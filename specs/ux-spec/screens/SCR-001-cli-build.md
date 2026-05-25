@@ -160,7 +160,7 @@ default mode but without ANSI codes. Plain text, machine-readable line structure
 | Combination | Behavior |
 |-------------|---------|
 | `<SOURCE>` + `--workspace` | E-CFG-002 (exit 64): mutually exclusive |
-| `--warn-only` + `--strict-overflow` | E-CFG-003 (exit 64): contradictory |
+| `--warn-only` + `--strict-overflow` | Valid combination: overflow remains fatal; all other validation errors are warnings |
 | `--quiet` + `--verbose` | E-CFG-004 (exit 64): contradictory |
 | `--quiet` + `--json` | `--json` wins; no prose output |
 | `--template` + `brand.template` in config | CLI flag wins |

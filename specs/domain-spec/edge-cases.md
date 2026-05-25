@@ -224,4 +224,4 @@ package install github.com/1898/slides").
 in the deck's `variants:` block.
 Expected: compile error with the undefined variant name. Build does not fall back to
 the default (no-variant) build. Error lists defined variants to help the user.
-**Traces to:** CAP-007, DI-022.
+**Traces to:** CAP-007, DI-017.

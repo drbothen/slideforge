@@ -60,11 +60,10 @@ axum process but this is a local development feature, not a deployed service.
 | SS-12 | Charts | slideforge-charts | Pure core. plotters SVG generation. |
 | SS-13 | Math | slideforge-math | Pure core. LaTeX transformation. |
 | SS-14 | Plugin API | slideforge-plugin-api | Pure types. 10 trait surfaces. |
-| SS-15 | IR Types | slideforge-types | Pure types. Hash + Eq + Clone on all. |
+| SS-15 | IR Types + Slide Type Impls | slideforge-types | Pure types. Hash + Eq + Clone on all. Includes 31 SlideType trait implementations as a logical module within the crate. |
 | SS-16 | Package Mgmt | slideforge-package | Effectful shell. Git + sf.lock. |
 | SS-17 | Workspace Config | slideforge-config | Effectful shell. File I/O only. |
 | SS-18 | CLI Orchestrator | slideforge-cli | Effectful shell. All lifecycle I/O. |
-| SS-19 | Slide Type Impls | slideforge-types | 31 SlideType implementations. |
 
 ---
 
@@ -72,8 +71,8 @@ axum process but this is a local development feature, not a deployed service.
 
 | Section | File | Primary Consumer | Purpose |
 |---------|------|-----------------|---------|
-| System Overview | system-overview.md | All | Four-stage pipeline, bounded contexts, data flow |
-| Crate Architecture | crate-architecture.md | implementer, devops | 19-crate workspace, dependency graph, purity boundaries |
+| System Overview | system-overview.md | All | Six-stage pipeline (Parse→Evaluate→Validate→Brand→Layout→Export), bounded contexts, data flow |
+| Crate Architecture | crate-architecture.md | implementer, devops | 20-crate workspace, dependency graph, purity boundaries |
 | Plugin Architecture | plugin-architecture.md | implementer, story-writer | 10 surfaces, trait signatures, registry pattern |
 | IR Design | ir-design.md | implementer | Deck + LaidOutDeck, type constraints, EMU system |
 | Error Architecture | error-architecture.md | implementer, test-writer | Error propagation, span threading, miette rendering |

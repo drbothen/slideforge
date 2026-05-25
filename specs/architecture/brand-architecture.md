@@ -68,16 +68,29 @@ synthesized brand palette (S3: `BrandValidator::check_theme_pairs()`). This is
 a pure function operating on the `Brand` struct — Kani-amenable.
 
 The 12 OOXML theme color slots must all be populated (DI-015). A brand with missing
-color slots is a compile error (E-BRN-001).
+color slots is a compile error (E-BRD-005).
 
 ## Color Slot Mapping
 
-| ECMA-376 Slot | brand.toml Key | Semantic Meaning |
-|--------------|---------------|-----------------|
-| dk1 | text_primary | Primary text (dark) |
-| lt1 | background | Page/slide background |
-| dk2 | text_secondary | Secondary text, brand primary |
-| lt2 | surface_alt | Alternate surface background |
-| accent1-6 | brand_primary, brand_secondary, accent_3-6 | Brand palette |
-| hlink | hyperlink | Hyperlink color |
-| folHlink | hyperlink_visited | Visited hyperlink |
+The `brand.toml` keys are the ECMA-376 slot names exactly (dk1, lt1, etc.) as defined
+in `interface-definitions.md §4.2`. Semantic meanings are documented below as comments
+for human readers — they are NOT the key names.
+
+| ECMA-376 Slot | brand.toml Key (actual) | Semantic Meaning |
+|--------------|------------------------|-----------------|
+| dk1 | dk1 | Primary text (dark) |
+| lt1 | lt1 | Page/slide background |
+| dk2 | dk2 | Secondary text, brand primary |
+| lt2 | lt2 | Alternate surface background |
+| acc1 | acc1 | Brand primary accent |
+| acc2 | acc2 | Brand secondary accent |
+| acc3 | acc3 | Accent 3 |
+| acc4 | acc4 | Accent 4 (typically danger/red) |
+| acc5 | acc5 | Accent 5 |
+| acc6 | acc6 | Accent 6 |
+| hlink | hlink | Hyperlink color |
+| folHlink | folHlink | Visited hyperlink color |
+
+The `[colors.semantic]` block in brand.toml provides optional aliases
+(e.g., `danger = "EF4444"`) consumed by the DSL as `brand.danger`. These are
+additive and do NOT replace the 12 required ECMA-376 slots.

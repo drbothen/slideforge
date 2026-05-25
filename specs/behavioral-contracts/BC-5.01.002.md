@@ -103,7 +103,7 @@ DEC-008 (all elements on a slide may be legitimately decorative).
 
 ## Architecture Anchors
 
-- `architecture/cross-cutting.md#accessibility-validation` — decorative element handling
+- `architecture/plugin-architecture.md#accessibility-validation` — decorative element handling
 
 ## Story Anchor
 

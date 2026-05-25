@@ -99,7 +99,7 @@ is emitted in both strict and warn-only modes. Non-English content in a deck wit
 
 ## Architecture Anchors
 
-- `architecture/cross-cutting.md#accessibility-validation` — lang declaration handling
+- `architecture/plugin-architecture.md#accessibility-validation` — lang declaration handling
 
 ## Story Anchor
 

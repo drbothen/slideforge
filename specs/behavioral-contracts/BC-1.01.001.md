@@ -101,8 +101,8 @@ and metadata.
 
 ## Architecture Anchors
 
-- `architecture/authoring-subsystem.md` — chumsky 0.10 parser combinator design
-- `architecture/pipeline.md` — Parse stage in the four-stage pipeline
+- `architecture/system-overview.md` — chumsky 0.10 parser combinator design
+- `architecture/system-overview.md` — Parse stage in the six-stage pipeline
 
 ## Story Anchor
 

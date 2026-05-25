@@ -20,7 +20,7 @@ a single build, not one at a time.
 
 Errors are classified by the PRD Section 5 taxonomy. Each error code has a severity:
 - **Fatal (strict mode):** Build produces NO output. All accessibility errors (E-A11-NNN),
-  type errors (E-TYP-NNN), and undefined variable errors (E-VAR-NNN) are fatal.
+  evaluation errors (E-EVL-NNN), and data-source errors (E-DAT-NNN) are fatal.
 - **Warning (warn-only mode):** Build produces output with error-slide placeholders
   for slides that could not be parsed or validated.
 
@@ -43,9 +43,9 @@ Each crate owns a `thiserror`-derived error enum:
 | Crate | Error Enum | Category Prefix |
 |-------|-----------|----------------|
 | slideforge-syntax | `ParseError` | E-PAR-NNN |
-| slideforge-eval | `EvalError` | E-TYP-NNN, E-VAR-NNN, E-DAT-NNN |
+| slideforge-eval | `EvalError` | E-EVL-NNN, E-DAT-NNN |
 | slideforge-validate | `ValidationError` | E-A11-NNN, E-LAY-NNN, E-CFG-NNN |
-| slideforge-brand | `BrandError` | E-BRN-NNN |
+| slideforge-brand | `BrandError` | E-BRD-NNN |
 | slideforge-pptx | `PptxError` | E-EXP-NNN |
 | slideforge-pdf | `PdfError` | E-EXP-NNN |
 

@@ -96,7 +96,7 @@ the preset field values.
 
 ## Architecture Anchors
 
-- `architecture/authoring-subsystem.md#aliases` — alias parse-time expansion design
+- `architecture/system-overview.md#aliases` — alias parse-time expansion design
 
 ## Story Anchor
 

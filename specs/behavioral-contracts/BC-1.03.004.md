@@ -91,7 +91,7 @@ missing-variable errors, it prevents the HTTP request.
 
 ## Architecture Anchors
 
-- `architecture/authoring-subsystem.md#data-binding` — offline mode flag handling
+- `architecture/system-overview.md#data-binding` — offline mode flag handling
 
 ## Story Anchor
 

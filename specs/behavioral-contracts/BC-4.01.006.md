@@ -102,7 +102,7 @@ referenced via relationships.
 
 ## Architecture Anchors
 
-- `architecture/export-subsystem.md#pptx` — required OOXML parts list (Spike S6 BUG-002)
+- `architecture/export-architecture.md#pptx` — required OOXML parts list (Spike S6 BUG-002)
 
 ## Story Anchor
 

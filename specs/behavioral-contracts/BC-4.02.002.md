@@ -110,7 +110,7 @@ CAP-011 for DOCX output.
 
 ## Architecture Anchors
 
-- `architecture/export-subsystem.md#docx` — auto-generated section design
+- `architecture/export-architecture.md#docx` — auto-generated section design
 - `architecture/plugin-architecture.md#section-type` — SectionType plugin trait
 
 ## Story Anchor

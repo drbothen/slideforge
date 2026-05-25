@@ -93,7 +93,7 @@ file:line:col span showing the expected and actual space count.
 
 ## Architecture Anchors
 
-- `architecture/authoring-subsystem.md` — chumsky 0.10 indentation-significant grammar
+- `architecture/system-overview.md` — chumsky 0.10 indentation-significant grammar
 
 ## Story Anchor
 

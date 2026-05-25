@@ -104,8 +104,8 @@ format is consumed. The propagation is a semantic requirement, not a cosmetic on
 
 ## Architecture Anchors
 
-- `architecture/cross-cutting.md#accessibility-validation` — language propagation pipeline
-- `architecture/irmodel.md` — LaidOutDeck.lang field as single source of truth
+- `architecture/plugin-architecture.md#accessibility-validation` — language propagation pipeline
+- `architecture/ir-design.md` — LaidOutDeck.lang field as single source of truth
 
 ## Story Anchor
 

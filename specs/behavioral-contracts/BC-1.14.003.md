@@ -96,7 +96,7 @@ context.
 
 ## Architecture Anchors
 
-- `architecture/pipeline.md#register-routing` — register tag routing in pipeline stages
+- `architecture/system-overview.md#register-routing` — register tag routing in pipeline stages
 
 ## Story Anchor
 

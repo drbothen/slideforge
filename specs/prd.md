@@ -54,8 +54,9 @@ from version-controlled source.
 
 slideforge is a data-reactive branded document platform that compiles a single
 indentation-significant DSL (`.sf` files) into `.pptx`, `.docx`, `.pdf`, `.html`,
-and a live web preview through a four-stage pipeline (Parse → Evaluate → Layout →
-Export) with a plugin-first architecture and compile-time accessibility enforcement.
+and a live web preview through a six-stage pipeline (Parse → Evaluate → Validate →
+Brand → Layout → Export) with a plugin-first architecture and compile-time accessibility
+enforcement.
 
 A single `.sf` file is the only source. Brand configuration is loaded from existing
 `.pptx` templates or synthesized from `brand.toml`. Output is deterministic,
@@ -111,7 +112,7 @@ Writing Registers, Diagnostics.
 |-----------|-----|----|----|
 | 1.01 DSL Source Parsing | 6 | 6 | 0 |
 | 1.02 Variable Interpolation | 5 | 5 | 0 |
-| 1.03 Data Binding | 4 | 3 | 1 |
+| 1.03 Data Binding | 7 | 3 | 4 |
 | 1.04 Iteration | 3 | 3 | 0 |
 | 1.05 Conditionals | 2 | 2 | 0 |
 | 1.06 Multi-File Composition | 4 | 3 | 1 |
@@ -156,11 +157,12 @@ Writing Registers, Diagnostics.
 |-----------|-----|----|----|
 | 5.01 Accessibility Validation | 5 | 5 | 0 |
 | 5.02 Plugin Architecture | 2 | 2 | 0 |
-| 5.03 Package Management | 3 | 0 | 3 |
+| 5.03 Package Management | 6 | 0 | 6 |
 | 5.04 Workspace Configuration | 3 | 0 | 3 |
 | 5.05 Watch Mode | 5 | 0 | 5 |
+| 5.06 Project Init / Scaffolding | 2 | 0 | 2 |
 
-**Total: 99 BCs — 71 P0, 28 P1, 0 P2.**
+**Total: 109 BCs — 71 P0, 38 P1, 0 P2.**
 
 ---
 
@@ -176,6 +178,7 @@ slideforge <COMMAND> [OPTIONS]
 Commands:
   build           Compile .sf source to output format(s)
   watch           Watch .sf source and data sources; live-reload web preview
+  init            Scaffold a new slideforge project with starter files
   package         Manage content packages (install, list, remove, verify)
   config          Inspect and explain workspace configuration
   extract-brand   Extract brand.toml from an existing .pptx or .docx template
@@ -340,6 +343,9 @@ E-<CAT>-<NNN>
 | BC-1.03.002 | CAP-003 | P0 | functional | integration |
 | BC-1.03.003 | CAP-003 | P0 | error-handling | unit |
 | BC-1.03.004 | CAP-003 | P1 | functional | integration |
+| BC-1.03.005 | CAP-003 | P1 | security | integration |
+| BC-1.03.006 | CAP-003 | P1 | functional | integration |
+| BC-1.03.007 | CAP-003 | P1 | functional | integration |
 | BC-1.04.001 | CAP-004 | P0 | functional | unit + integration |
 | BC-1.04.002 | CAP-004 | P0 | edge-case | unit |
 | BC-1.04.003 | CAP-004 | P0 | invariant | kani |
@@ -418,6 +424,9 @@ E-<CAT>-<NNN>
 | BC-5.03.001 | CAP-025 | P1 | functional | integration |
 | BC-5.03.002 | CAP-025 | P1 | error-handling | unit |
 | BC-5.03.003 | CAP-025 | P1 | functional | unit |
+| BC-5.03.004 | CAP-025 | P1 | functional | unit |
+| BC-5.03.005 | CAP-025 | P1 | functional | integration |
+| BC-5.03.006 | CAP-025 | P1 | functional | integration |
 | BC-5.04.001 | CAP-026 | P1 | functional | integration |
 | BC-5.04.002 | CAP-026 | P1 | functional | unit |
 | BC-5.04.003 | CAP-026 | P1 | functional | integration |
@@ -426,6 +435,8 @@ E-<CAT>-<NNN>
 | BC-5.05.003 | CAP-027 | P1 | edge-case | integration |
 | BC-5.05.004 | CAP-027 | P1 | failure-mode | integration |
 | BC-5.05.005 | CAP-027 | P1 | failure-mode | manual |
+| BC-5.06.001 | CAP-026 | P1 | functional | integration |
+| BC-5.06.002 | CAP-026 | P1 | error-handling | unit |
 
 ---
 

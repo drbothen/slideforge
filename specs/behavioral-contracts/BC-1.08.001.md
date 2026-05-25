@@ -94,7 +94,7 @@ chain: slide-level values win over set rules.
 
 ## Architecture Anchors
 
-- `architecture/authoring-subsystem.md#set-rules` — set rule precedence and evaluation order
+- `architecture/system-overview.md#set-rules` — set rule precedence and evaluation order
 
 ## Story Anchor
 

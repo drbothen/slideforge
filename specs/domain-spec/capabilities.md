@@ -190,7 +190,7 @@ registers as narrative body content, auto-generating document sections from slid
 
 ## CAP-017: PDF, HTML, and Web Preview Export
 
-Produce PDF (tagged, PDF/UA-1 compliant via HTML → Chrome pipeline), static HTML
+Produce PDF (tagged, PDF/UA-1 compliant via pdf-writer + krilla + SlideTagEngine), static HTML
 (WCAG AA via axe-core), and a live web preview (axum + websocket + SVG canvas) from
 the same laid-out deck IR.
 

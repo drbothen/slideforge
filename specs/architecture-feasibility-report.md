@@ -34,8 +34,8 @@ prd_version: "1.0"
 
 The slideforge v1.0 PRD (99 BCs across 5 bounded contexts) is architecturally feasible.
 Every technology choice has been validated by a resolved spike (S1–S6, S14). The proposed
-19-crate workspace, Two-IR model, plugin-first design, and four-stage pipeline (Parse →
-Evaluate → Layout → Export) can deliver all P0 BCs within the stated NFR targets. Three
+20-crate workspace, Two-IR model, plugin-first design, and six-stage pipeline (Parse →
+Evaluate → Validate → Brand → Layout → Export) can deliver all P0 BCs within the stated NFR targets. Three
 architectural notes require design attention before Phase 3 begins: the experimental status
 of krilla's tagged PDF layer, the need for a `slideforge-validate` crate to own compile-time
 accessibility enforcement (the BCs split this ownership ambiguously), and a clarification on

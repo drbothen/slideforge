@@ -106,8 +106,8 @@ This supports all 23 Mermaid diagram types covered by mermaid-rs-renderer v0.2.2
 
 ## Architecture Anchors
 
-- `architecture/authoring-subsystem.md#diagram-renderer` — MermaidRenderer + DiagramRenderer trait
-- `architecture/authoring-subsystem.md#spike-s14` — mermaid-rs-renderer selection rationale
+- `architecture/system-overview.md#diagram-renderer` — MermaidRenderer + DiagramRenderer trait
+- `architecture/system-overview.md#spike-s14` — mermaid-rs-renderer selection rationale
 
 ## Story Anchor
 

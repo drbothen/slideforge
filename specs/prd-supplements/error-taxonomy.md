@@ -112,6 +112,7 @@ Fatal for missing brand (exit 4). Warnings for inferred color slots (build conti
 | E-BRD-002 | broken | 4 | `Cannot parse brand template '<path>': <detail>. File may be corrupted or not a valid PPTX/TOML.` | CAP-018, FM-007 |
 | E-BRD-003 | cosmetic | 0 | `Brand color slot '<slot>' inferred as #<hex> (derived from <source-color>). Review in brand.toml to confirm.` | DI-015, CAP-018, DEC-016 |
 | E-BRD-004 | cosmetic | 0 | `Font '<font-name>' not available on this build host. Using '<fallback>' (panose: [<class>]). Text metrics may differ.` | CAP-018, FM-009 |
+| E-BRD-005 | broken | 4 | `Brand is missing required color slot '<slot>'. All 12 OOXML theme color slots must be populated. Add '<slot>' to brand.toml [colors].` | DI-015, CAP-018 |
 
 ---
 
@@ -136,10 +137,12 @@ Fatal (exit 4).
 |------|---------|------|---------------|-----------|
 | E-CFG-001 | broken | 4 | `Variant '<name>' not defined in deck. Defined variants: [<list>]. Did you mean '<closest>'?` | DI-022, CAP-007, DEC-020 |
 | E-CFG-002 | broken | 64 | `Cannot specify both a source file and --workspace. Use one or the other.` | CAP-026 |
-| E-CFG-003 | broken | 64 | `Flags --warn-only and --strict-overflow are contradictory and cannot be used together.` | CAP-022 |
+| E-CFG-003 | ~~retired~~ | — | ~~Flags --warn-only and --strict-overflow are contradictory~~. RETIRED: these flags compose correctly (see interface-definitions.md §5.1). No error is emitted. | — |
 | E-CFG-004 | broken | 64 | `Flags --quiet and --verbose are contradictory.` | CAP-030 |
 | E-CFG-005 | broken | 4 | `slideforge.toml [workspace] not found in '<dir>' or any parent directory.` | CAP-026 |
 | E-CFG-006 | broken | 4 | `.sfconfig at '<path>' is malformed: <detail>` | CAP-026 |
+| E-CFG-007 | broken | 64 | `Package list/remove/verify subcommand requires a project with slideforge.toml. None found in '<dir>' or any parent.` | CAP-025 |
+| E-CFG-008 | broken | 4 | `slideforge.toml already exists in '<dir>'. Run with --force to overwrite (CAUTION: destructive), or remove slideforge.toml first.` | CAP-026 |
 
 ---
 

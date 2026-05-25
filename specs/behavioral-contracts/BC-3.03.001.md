@@ -64,7 +64,7 @@ promotes it to a blocking error. This covers DEC-013.
 |----|-------------|-------------------|
 | EC-001 | Multiple slides all overflow (DEC-013 at scale) | All E-LAY-001 warnings accumulated; all output produced; warnings listed at end |
 | EC-002 | Overflow on a slide that is @if-excluded | No warning (the slide is not in the evaluated Deck IR) |
-| EC-003 | --strict-overflow + --warn-only flags used together | E-CFG-003 (contradictory flags); build fails immediately |
+| EC-003 | --strict-overflow + --warn-only flags used together | Flags compose: overflow remains fatal (E-LAY-001 as error, exit 2); all other validation errors are demoted to warnings. No E-CFG-003 emitted. |
 | EC-004 | Overflow in watch mode | Warning shown in web preview overlay and CLI; rendering continues with truncation |
 
 ## Canonical Test Vectors
@@ -74,7 +74,7 @@ promotes it to a blocking error. This covers DEC-013.
 | `slide content:` with 20 bullet points that exceed the body placeholder | E-LAY-001 warning with slide title, "bullets" field, EMU estimate; output written; exit 0 | happy-path |
 | Same deck with `--strict-overflow` | E-LAY-001 as blocking error; no output; exit 2 | edge-case |
 | Deck with no overflow | 0 E-LAY-001 warnings; output written; exit 0 | happy-path |
-| `--strict-overflow` + `--warn-only` | E-CFG-003 contradictory flags error | error |
+| `--strict-overflow` + `--warn-only` | Overflow is fatal (exit 2); all other validation errors are warnings | edge-case |
 
 ## Verification Properties
 

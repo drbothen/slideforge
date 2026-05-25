@@ -98,8 +98,8 @@ representations are derived.
 
 ## Architecture Anchors
 
-- `architecture/authoring-subsystem.md#math-mode` — MathRenderer plugin trait
-- `architecture/pipeline.md` — math rendering stage in the export phase
+- `architecture/system-overview.md#math-mode` — MathRenderer plugin trait
+- `architecture/system-overview.md` — math rendering stage in the export phase
 
 ## Story Anchor
 

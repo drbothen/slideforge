@@ -102,7 +102,7 @@ This is the primary debugging tool for cascade configuration and is required per
 
 ## Architecture Anchors
 
-- `architecture/cross-cutting.md#workspace` — config explain design
+- `architecture/plugin-architecture.md#workspace` — config explain design
 
 ## Story Anchor
 

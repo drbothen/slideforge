@@ -91,7 +91,7 @@ a no-variant build. This covers DEC-020 from the domain edge-case catalog.
 
 ## Architecture Anchors
 
-- `architecture/authoring-subsystem.md#variant-resolution` — CLI variant flag handling
+- `architecture/system-overview.md#variant-resolution` — CLI variant flag handling
 
 ## Story Anchor
 

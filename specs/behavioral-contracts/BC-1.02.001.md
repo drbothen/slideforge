@@ -98,7 +98,7 @@ converted to string for embedding in the output.
 
 ## Architecture Anchors
 
-- `architecture/authoring-subsystem.md#expression-evaluator` — expression evaluation design
+- `architecture/system-overview.md#expression-evaluator` — expression evaluation design
 
 ## Story Anchor
 

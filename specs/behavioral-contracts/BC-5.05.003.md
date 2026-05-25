@@ -104,7 +104,7 @@ undefined-variable error but occurs at poll time. This covers DEC-018.
 
 ## Architecture Anchors
 
-- `architecture/cross-cutting.md#watch-mode` — schema change detection during polling
+- `architecture/plugin-architecture.md#watch-mode` — schema change detection during polling
 
 ## Story Anchor
 

@@ -97,7 +97,7 @@ shared as if it were correct.
 
 ## Architecture Anchors
 
-- `architecture/pipeline.md#output-gate` — strict mode output gate
+- `architecture/system-overview.md#output-gate` — strict mode output gate
 
 ## Story Anchor
 

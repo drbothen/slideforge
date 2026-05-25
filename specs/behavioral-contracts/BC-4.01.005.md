@@ -102,7 +102,7 @@ empirically during Spike S6 and are required to avoid corrupt PPTX in some rende
 
 ## Architecture Anchors
 
-- `architecture/export-subsystem.md#pptx` — slide ID and master ID assignment (Spike S6 BUG-006)
+- `architecture/export-architecture.md#pptx` — slide ID and master ID assignment (Spike S6 BUG-006)
 
 ## Story Anchor
 

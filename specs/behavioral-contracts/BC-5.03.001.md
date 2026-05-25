@@ -108,7 +108,7 @@ checksum of the package archive. This provides reproducible builds per DI-019.
 
 ## Architecture Anchors
 
-- `architecture/cross-cutting.md#package-management` — package install and lock file design
+- `architecture/plugin-architecture.md#package-management` — package install and lock file design
 
 ## Story Anchor
 

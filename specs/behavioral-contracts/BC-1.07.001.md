@@ -94,7 +94,7 @@ The filtered subset forms the output deck.
 
 ## Architecture Anchors
 
-- `architecture/authoring-subsystem.md#variant-resolution` — variant filter algorithm
+- `architecture/system-overview.md#variant-resolution` — variant filter algorithm
 
 ## Story Anchor
 

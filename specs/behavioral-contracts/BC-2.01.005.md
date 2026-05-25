@@ -107,8 +107,8 @@ layouts (CL-01 and CL-11) carry `clrMapOvr` overrides.
 
 ## Architecture Anchors
 
-- `architecture/branding-subsystem.md#layout-taxonomy` — 31-layout taxonomy (Spike S5)
-- `architecture/branding-subsystem.md#synthesis` — BrandSynthesizer API and two-phase template application
+- `architecture/brand-architecture.md#layout-taxonomy` — 31-layout taxonomy (Spike S5)
+- `architecture/brand-architecture.md#synthesis` — BrandSynthesizer API and two-phase template application
 
 ## Story Anchor
 

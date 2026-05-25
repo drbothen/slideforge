@@ -94,8 +94,8 @@ semantically meaningful defaults that adapt to the active brand and data context
 
 ## Architecture Anchors
 
-- `architecture/authoring-subsystem.md#set-rules` — set rule expression evaluation
-- `architecture/authoring-subsystem.md#brand-load` — brand token resolution order
+- `architecture/system-overview.md#set-rules` — set rule expression evaluation
+- `architecture/system-overview.md#brand-load` — brand token resolution order
 
 ## Story Anchor
 

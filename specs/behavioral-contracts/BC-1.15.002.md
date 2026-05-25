@@ -94,7 +94,7 @@ cycle that competitor tools impose.
 
 ## Architecture Anchors
 
-- `architecture/authoring-subsystem.md#error-accumulation` — chumsky error recovery design
+- `architecture/system-overview.md#error-accumulation` — chumsky error recovery design
 
 ## Story Anchor
 

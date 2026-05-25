@@ -93,7 +93,7 @@ Variables, set rules, aliases, and slide blocks from the included file are all i
 
 ## Architecture Anchors
 
-- `architecture/authoring-subsystem.md` — @include resolution at parse time
+- `architecture/system-overview.md` — @include resolution at parse time
 
 ## Story Anchor
 
