@@ -84,7 +84,7 @@ their own error entry (error accumulation per DI-018).
 | L2 Capability | CAP-010 ("31 Built-in Slide Types") per capabilities.md §CAP-010 |
 | Capability Anchor Justification | CAP-010 ("31 Built-in Slide Types") per capabilities.md §CAP-010 — field enforcement via SlideType trait is the central mechanism of CAP-010; error reporting with field name is the required user experience for the compile-time contract |
 | L2 Domain Invariants | DI-017 (strict mode: no output on validation error), DI-018 (error accumulation in one pass) |
-| Architecture Module | slideforge-eval crate — required-field validation pass (filled by architect) |
+| Architecture Module | slideforge-validate crate — required-field validation pass (SS-03) |
 | Stories | (filled by story-writer) |
 
 ## Related BCs

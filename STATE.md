@@ -3,7 +3,7 @@ project: slideforge
 mode: greenfield
 created: 2026-05-23
 current_phase: phase-1-spec-crystallization
-status: ADVERSARIAL_STREAK_1_OF_3
+status: ADVERSARIAL_PASS_9_PENDING
 last_updated: 2026-05-25
 prd_bcs: 109
 prd_hs: 15
@@ -27,9 +27,9 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. It generates branded .p
 **Workspace:** /Users/jmagady/Dev/slideforge
 **Factory worktree:** .factory/ on branch `factory-artifacts`
 
-## Current Status: ADVERSARIAL STREAK 1/3 — PASS 7 CLEAN (2026-05-25)
+## Current Status: ADVERSARIAL PASS 9 PENDING — STREAK RESET 0/3 (2026-05-25)
 
-Adversarial Pass 7 CLEAN (strict) — ZERO findings. Streak: 1/3. Finding trajectory: 17→12→10→6→2→2→0. Total findings fixed across 6 non-clean passes: 49. Next: dispatch adversary for Pass 8 (need 2 more clean passes for convergence at BC-5.39.001).
+Adversarial Pass 8 returned 2 findings (2M): frontmatter `verfication_priority` typo in BC-3.03.004 and incorrect `module: slideforge-eval` on 6 BCs (should be `slideforge-validate`). Both fixed. Proactive sweep fixed 5 additional sibling BCs with same module error (BC-3.01.001, BC-3.01.002, BC-5.01.001–004). Streak reset to 0/3. Finding trajectory: 17→12→10→6→2→2→0→2. Total edits: 56 (49 previously + 2 reported + 5 preventive). Next: dispatch adversary for Pass 9.
 
 ## Phase 1 Progress (as of 2026-05-24)
 
@@ -52,7 +52,7 @@ Adversarial Pass 7 CLEAN (strict) — ZERO findings. Streak: 1/3. Finding trajec
 | P1-05 | architect | DONE | P1-05 (feasibility): PASS-WITH-NOTES — all 5 notes addressed; BC-1.03.005 added |
 | P1-06 | ux-designer | DONE | .factory/specs/ux-spec/ (UX-INDEX + 10 screens + 5 flows); .factory/specs/verification-properties/ (VP-INDEX + 7 VPs) |
 | P1-07 | devops-engineer | DONE | DTU: not required; gene-transfusion: behavioral-only (75 behaviors); CI/CD: 3 workflows, 5-platform matrix |
-| P1-09 | adversary | IN_PROGRESS | Pass 1 DONE (17→0), Pass 2 DONE (12→0), Pass 3 DONE (10→0), Pass 4 DONE (6→0), Pass 5 DONE (2→0), Pass 6 DONE (2→0), Pass 7 CLEAN (0) — streak 1/3 — Pass 8 next |
+| P1-09 | adversary | IN_PROGRESS | Pass 1 DONE (17→0), Pass 2 DONE (12→0), Pass 3 DONE (10→0), Pass 4 DONE (6→0), Pass 5 DONE (2→0), Pass 6 DONE (2→0), Pass 7 CLEAN (0), Pass 8 DONE (2→0, streak reset) — streak 0/3 — Pass 9 next |
 | P1-10 | consistency-validator | NOT_STARTED | Cross-doc audit — blocked on P1-09 (3-clean) |
 | P1-11 | HUMAN | NOT_STARTED | Approval gate — blocked on P1-10 |
 
@@ -86,11 +86,11 @@ Adversarial Pass 7 CLEAN (strict) — ZERO findings. Streak: 1/3. Finding trajec
 
 ### What to do next (resume instructions)
 
-1. **P1-09 — Adversarial Pass 8**: dispatch adversary for Pass 8 (fresh context). Pass 7 CLEAN — ZERO findings. Streak 1/3. Finding trajectory: 17→12→10→6→2→2→0. Must achieve 3 consecutive clean passes (BC-5.39.001). Need 2 more. Scope unchanged: domain-spec, PRD + supplements, architecture + ADRs, UX spec, VPs, cicd-setup, dtu-assessment, gene-transfusion-assessment.
+1. **P1-09 — Adversarial Pass 9**: dispatch adversary for Pass 9 (fresh context). Pass 8 returned 2 findings — fixed + 5 preventive sweep fixes applied. Streak reset to 0/3. Finding trajectory: 17→12→10→6→2→2→0→2. Must achieve 3 consecutive clean passes (BC-5.39.001). Need 3 clean passes from here. Scope unchanged: domain-spec, PRD + supplements, architecture + ADRs, UX spec, VPs, cicd-setup, dtu-assessment, gene-transfusion-assessment.
 2. **P1-10 — Consistency audit**: dispatch consistency-validator AFTER P1-09 passes 3-clean.
 3. **P1-11 — Human approval gate**: human review AFTER P1-10 complete, then Phase 2 begins.
 
-**Adversary scope checklist for P1-09 Pass 8:**
+**Adversary scope checklist for P1-09 Pass 9:**
 - .factory/specs/domain-spec/ (12 files)
 - .factory/specs/prd.md + 4 supplements
 - .factory/specs/behavioral-contracts/ (BC-INDEX + all BC files)
@@ -217,6 +217,7 @@ Production-grade-from-day-1. Key gates:
 - 2026-05-25 — ADVERSARIAL PASS 5 COMPLETE: 2 findings (0C, 2H) — all resolved. BC-1.03.004 module anchor fixed; VP-002 description corrected in VP-INDEX.md + verification-architecture.md + verification-coverage-matrix.md. Finding trajectory: 17→12→10→6→2 (strong convergence, zero CRITICALs). Total fixed across 5 passes: 47. Streak: 0/3 — Pass 6 dispatching.
 - 2026-05-25 — ADVERSARIAL PASS 6 COMPLETE: 2 findings (0M, 1L) — both resolved. Single root cause: VP-002 propagation gap (vp-002-alt-enforcement-parse.md 5 field updates + verification-architecture.md 1 bullet fix). Finding trajectory: 17→12→10→6→2→2. Total fixed across 6 passes: 49. Streak: 0/3 — Pass 7 dispatching.
 - 2026-05-25 — ADVERSARIAL PASS 7 CLEAN: ZERO findings. CLEAN (strict): yes. CLEAN (PR-merge): yes. Finding trajectory: 17→12→10→6→2→2→0. Total fixed across 6 non-clean passes: 49. Streak: 1/3 — Pass 8 dispatching.
+- 2026-05-25 — ADVERSARIAL PASS 8 COMPLETE: 2 findings (2M) — both resolved + 5 preventive sweep fixes. BC-3.03.004 frontmatter typo (`verfication_priority` → `verification_priority`); BC-3.03.004, BC-3.01.001, BC-3.01.002, BC-5.01.001–004 module corrected (`slideforge-eval` → `slideforge-validate`). Finding trajectory: 17→12→10→6→2→2→0→2. Total edits: 56. STREAK RESET: 0/3 — Pass 9 dispatching.
 
 ## Drift Items
 _(None)_

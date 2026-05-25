@@ -91,7 +91,7 @@ DEC-008 (all elements on a slide may be legitimately decorative).
 | L2 Capability | CAP-020 ("Accessibility Validation") per capabilities.md §CAP-020 |
 | Capability Anchor Justification | CAP-020 ("Accessibility Validation") per capabilities.md §CAP-020 — "decorative: true opts out" is part of the alt text enforcement contract in CAP-020 |
 | L2 Domain Invariants | DI-001 (alt text required OR decorative: true — this BC specifies the decorative path) |
-| Architecture Module | slideforge-eval or slideforge-validate crate (filled by architect) |
+| Architecture Module | slideforge-validate crate (SS-03) |
 | Stories | (filled by story-writer) |
 
 ## Related BCs

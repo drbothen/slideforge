@@ -88,7 +88,7 @@ post-processing. The error is fatal in strict mode.
 | L2 Capability | CAP-020 ("Accessibility Validation") per capabilities.md §CAP-020 |
 | Capability Anchor Justification | CAP-020 ("Accessibility Validation") per capabilities.md §CAP-020 — "alt '...' on all visual elements (images, charts, diagrams) ... compile error if absent" is the exact language of CAP-020 |
 | L2 Domain Invariants | DI-001 (alt text required on all visual elements) |
-| Architecture Module | slideforge-eval or slideforge-validate crate (filled by architect) |
+| Architecture Module | slideforge-validate crate (SS-03) |
 | Stories | (filled by story-writer) |
 
 ## Related BCs

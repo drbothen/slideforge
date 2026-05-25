@@ -89,7 +89,7 @@ is emitted in both strict and warn-only modes. Non-English content in a deck wit
 | L2 Capability | CAP-020 ("Accessibility Validation") per capabilities.md §CAP-020 |
 | Capability Anchor Justification | CAP-020 ("Accessibility Validation") per capabilities.md §CAP-020 — "lang 'en-US' at deck level" with lint warning if absent is the exact language of CAP-020 |
 | L2 Domain Invariants | DI-003 (deck language must be declared; propagates to all output formats) |
-| Architecture Module | slideforge-eval or slideforge-validate crate (filled by architect) |
+| Architecture Module | slideforge-validate crate (SS-03) |
 | Stories | (filled by story-writer) |
 
 ## Related BCs

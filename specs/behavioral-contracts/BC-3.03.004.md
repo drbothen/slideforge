@@ -16,7 +16,7 @@ lifecycle_status: active
 introduced: v1.0.0
 modified: []
 deprecated: null
-departed_by: null
+deprecated_by: null
 replacement: null
 retired: null
 removed: null
@@ -86,7 +86,7 @@ A deck must contain at least one slide to be valid. This covers DEC-011.
 | L2 Capability | CAP-022 ("Compile-Time Content Validation") per capabilities.md §CAP-022 |
 | Capability Anchor Justification | CAP-022 ("Compile-Time Content Validation") per capabilities.md §CAP-022 — zero-slide detection is an instance of "strict mode: validation errors produce no output"; DEC-011 explicitly names zero-slide decks |
 | L2 Domain Invariants | DI-017 (strict mode produces no output on validation error) |
-| Architecture Module | slideforge-eval crate — post-evaluation slide count check (filled by architect) |
+| Architecture Module | slideforge-validate crate — post-evaluation slide count check (SS-03) |
 | Stories | (filled by story-writer) |
 
 ## Related BCs

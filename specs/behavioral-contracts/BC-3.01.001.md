@@ -89,7 +89,7 @@ and non-empty. Missing required fields are compile errors, not runtime warnings.
 | L2 Capability | CAP-010 ("31 Built-in Slide Types") per capabilities.md §CAP-010 |
 | Capability Anchor Justification | CAP-010 ("31 Built-in Slide Types") per capabilities.md §CAP-010 — "Each type enforces its own required fields and layout rules via the SlideType plugin trait" is the verbatim description of what this BC specifies |
 | L2 Domain Invariants | DI-008 (all bundled plugins must use plugin trait APIs) |
-| Architecture Module | slideforge-eval crate — slide validation pass; slideforge-plugin-api crate — SlideType trait (filled by architect) |
+| Architecture Module | slideforge-validate crate — slide validation pass (SS-03); slideforge-plugin-api crate — SlideType trait |
 | Stories | (filled by story-writer) |
 
 ## Related BCs
