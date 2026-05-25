@@ -112,7 +112,7 @@ Fatal for missing brand (exit 4). Warnings for inferred color slots (build conti
 | E-BRD-002 | broken | 4 | `Cannot parse brand template '<path>': <detail>. File may be corrupted or not a valid PPTX/TOML.` | CAP-018, FM-007 |
 | E-BRD-003 | cosmetic | 0 | `Brand color slot '<slot>' inferred as #<hex> (derived from <source-color>). Review in brand.toml to confirm.` | DI-015, CAP-018, DEC-016 |
 | E-BRD-004 | cosmetic | 0 | `Font '<font-name>' not available on this build host. Using '<fallback>' (panose: [<class>]). Text metrics may differ.` | CAP-018, FM-009 |
-| E-BRD-005 | broken | 4 | `Brand is missing required color slot '<slot>'. All 12 OOXML theme color slots must be populated. Add '<slot>' to brand.toml [colors].` | DI-015, CAP-018 |
+| ~~E-BRD-005~~ | ~~retired~~ | — | ~~Brand is missing required color slot '\<slot\>'. All 12 OOXML theme color slots must be populated. Add '\<slot\>' to brand.toml [colors].~~ RETIRED: brand synthesis always infers missing color slots via the derivation algorithm (BC-2.01.004, E-BRD-003 warning). No execution path produces a fatal missing-slot error — all missing slots are synthesized, never fatal. | ~~DI-015, CAP-018~~ |
 
 ---
 

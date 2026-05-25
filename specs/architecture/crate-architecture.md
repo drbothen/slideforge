@@ -84,4 +84,4 @@ Seven crates exist in `workspace.members` as stubs:
 `slideforge`, `slideforge-cli`, `slideforge-syntax`, `slideforge-eval`,
 `slideforge-layout`, `slideforge-pptx`, `slideforge-validate`.
 
-Remaining 12 crates are created during Phase 3 story delivery.
+Remaining 13 crates are created during Phase 3 story delivery.

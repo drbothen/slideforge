@@ -239,24 +239,22 @@ Options (build):
 
 ## Section 4: Non-Functional Requirements
 
-> Full catalog with numerical targets at `.factory/specs/prd-supplements/nfr-catalog.md`.
-
-| NFR-ID | Category | Requirement | Target | Validation |
-|--------|---------|-------------|--------|-----------|
-| NFR-001 | Performance | Cold build time for 25-slide deck | < 500ms | CI benchmark (criterion) |
-| NFR-002 | Performance | Incremental rebuild (watch mode, 1 slide change) | < 50ms | CI benchmark |
-| NFR-003 | Visual Parity | PPTX rendered by LibreOffice vs reference PNG | SSIM ≥ 0.99 AND PSNR ≥ 35dB | GitHub Actions visual regression job |
-| NFR-004 | Accessibility | PDF output passes veraPDF --flavour ua1 | Zero violations | CI veraPDF gate |
-| NFR-005 | Accessibility | HTML/web preview passes axe-core WCAG AA | Zero critical violations | @axe-core/playwright in CI |
-| NFR-006 | Security | No CVEs in production dependencies | Zero high/critical | cargo audit + cargo deny in CI |
-| NFR-007 | Security | Package sha256 integrity verified on use | 100% verified | Unit test |
-| NFR-008 | Compatibility | Cross-platform binary: macOS arm64+x86_64, Linux x86_64+arm64, Windows x86_64 | All platforms compile and pass tests | CI matrix |
-| NFR-009 | Code Quality | Zero .unwrap() in non-test code | Zero occurrences | clippy::pedantic CI gate |
-| NFR-010 | Code Quality | clippy::pedantic clean with documented exceptions | Zero undocumented suppression | CI clippy gate |
-| NFR-011 | Observability | All pipeline stages emit structured tracing spans | 100% stage coverage | tracing instrumentation audit |
-| NFR-012 | Supply Chain | All production crate deps pinned with = | 100% pinned | grep Cargo.toml |
-| NFR-013 | Holdout Eval | Mean user satisfaction score on Phase 4 holdout | ≥ 0.85 | Phase 4 holdout evaluator |
-| NFR-014 | Holdout Eval | Must-pass scenarios pass | ≥ 0.60 | Phase 4 holdout evaluator |
+> **Authoritative NFR registry:** `.factory/specs/prd-supplements/nfr-catalog.md` (35 NFRs
+> across 7 categories). The catalog supersedes any inline table here per CLAUDE.md precedence
+> (PRD supplements supersede PRD prose for the same surface area).
+>
+> Key targets for quick reference (IDs are from nfr-catalog.md):
+>
+> | NFR-ID | Category | Requirement | Target |
+> |--------|---------|-------------|--------|
+> | NFR-001 | Performance | Cold build time for 25-slide deck | < 500ms |
+> | NFR-002 | Performance | Incremental rebuild (watch mode, 1 slide change) | < 50ms |
+> | NFR-007 | Visual Parity | PPTX SSIM vs reference PNG (LibreOffice) | ≥ 0.99 per slide |
+> | NFR-008 | Visual Parity | PPTX PSNR vs reference PNG (LibreOffice) | ≥ 35dB per slide |
+> | NFR-012 | Accessibility | PDF/UA-1 compliance (veraPDF) | Zero violations |
+>
+> For the full 35-NFR catalog with validation methods, risk sources, and per-category
+> groupings, see `.factory/specs/prd-supplements/nfr-catalog.md`.
 
 ---
 

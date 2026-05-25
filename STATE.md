@@ -3,8 +3,8 @@ project: slideforge
 mode: greenfield
 created: 2026-05-23
 current_phase: phase-1-spec-crystallization
-status: ADVERSARIAL_PASS_4_PENDING
-last_updated: 2026-05-24
+status: ADVERSARIAL_PASS_5_PENDING
+last_updated: 2026-05-25
 prd_bcs: 109
 prd_hs: 15
 prd_supplements: 4
@@ -27,9 +27,9 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. It generates branded .p
 **Workspace:** /Users/jmagady/Dev/slideforge
 **Factory worktree:** .factory/ on branch `factory-artifacts`
 
-## Current Status: ADVERSARIAL PASS 4 PENDING (2026-05-24)
+## Current Status: ADVERSARIAL PASS 5 PENDING (2026-05-25)
 
-Adversarial Pass 3 complete — 10 findings (0C, 3H, 5M, 2L) ALL RESOLVED. Exit code standardized in BC-1.07.001; HS-004/005/006/007/012/015 field names and error codes corrected; ADR-004 error code prefixes fixed; ADR-007 DSL syntax and placeholder error code updated; VP-INDEX VP-005 trace corrected; architecture-feasibility-report BC count updated; test-vectors TV-1.3 message format fixed. Finding trajectory: 17→12→10 (converging, zero CRITICALs in Pass 3). Convergence streak: 0/3 (Pass 3 had findings — streak not advanced). Next: dispatch adversary for Pass 4 (fresh context).
+Adversarial Pass 4 complete — 6 findings (0C, 1H, 5M) ALL RESOLVED. NFR table IDs reconciled in prd.md (deferral note replaced stale content); BC-2.01.004 brand field names corrected; HS-006 related_bcs updated; E-BRD-005 retired in error-taxonomy.md + reference removed from brand-architecture.md; DEC-016 field names fixed in edge-cases.md; ASM-007 invalidated in assumptions.md; R-003 mitigated in risks.md; crate-architecture.md 12→13 arithmetic corrected. Finding trajectory: 17→12→10→6 (accelerating convergence, zero CRITICALs in Pass 4). Total findings fixed across 4 passes: 45. Convergence streak: 0/3 (Pass 4 had findings — streak not advanced). Next: dispatch adversary for Pass 5 (fresh context).
 
 ## Phase 1 Progress (as of 2026-05-24)
 
@@ -52,7 +52,7 @@ Adversarial Pass 3 complete — 10 findings (0C, 3H, 5M, 2L) ALL RESOLVED. Exit 
 | P1-05 | architect | DONE | P1-05 (feasibility): PASS-WITH-NOTES — all 5 notes addressed; BC-1.03.005 added |
 | P1-06 | ux-designer | DONE | .factory/specs/ux-spec/ (UX-INDEX + 10 screens + 5 flows); .factory/specs/verification-properties/ (VP-INDEX + 7 VPs) |
 | P1-07 | devops-engineer | DONE | DTU: not required; gene-transfusion: behavioral-only (75 behaviors); CI/CD: 3 workflows, 5-platform matrix |
-| P1-09 | adversary | IN_PROGRESS | Pass 1 DONE (17→0), Pass 2 DONE (12→0), Pass 3 DONE (10→0) — streak 0/3 — Pass 4 launching |
+| P1-09 | adversary | IN_PROGRESS | Pass 1 DONE (17→0), Pass 2 DONE (12→0), Pass 3 DONE (10→0), Pass 4 DONE (6→0) — streak 0/3 — Pass 5 launching |
 | P1-10 | consistency-validator | NOT_STARTED | Cross-doc audit — blocked on P1-09 (3-clean) |
 | P1-11 | HUMAN | NOT_STARTED | Approval gate — blocked on P1-10 |
 
@@ -86,11 +86,11 @@ Adversarial Pass 3 complete — 10 findings (0C, 3H, 5M, 2L) ALL RESOLVED. Exit 
 
 ### What to do next (resume instructions)
 
-1. **P1-09 — Adversarial Pass 4**: dispatch adversary for Pass 4 (fresh context). Pass 3 complete — 10 findings (0C, 3H, 5M, 2L) all fixed. Finding trajectory: 17→12→10 (decreasing, zero CRITICALs). Streak 0/3. Must achieve 3 consecutive clean passes (BC-5.39.001). Scope unchanged: domain-spec, PRD + supplements, architecture + ADRs, UX spec, VPs, cicd-setup, dtu-assessment, gene-transfusion-assessment.
+1. **P1-09 — Adversarial Pass 5**: dispatch adversary for Pass 5 (fresh context). Pass 4 complete — 6 findings (0C, 1H, 5M) all fixed. Finding trajectory: 17→12→10→6 (accelerating, zero CRITICALs). Total fixed: 45. Streak 0/3. Must achieve 3 consecutive clean passes (BC-5.39.001). Scope unchanged: domain-spec, PRD + supplements, architecture + ADRs, UX spec, VPs, cicd-setup, dtu-assessment, gene-transfusion-assessment.
 2. **P1-10 — Consistency audit**: dispatch consistency-validator AFTER P1-09 passes 3-clean.
 3. **P1-11 — Human approval gate**: human review AFTER P1-10 complete, then Phase 2 begins.
 
-**Adversary scope checklist for P1-09 Pass 4:**
+**Adversary scope checklist for P1-09 Pass 5:**
 - .factory/specs/domain-spec/ (12 files)
 - .factory/specs/prd.md + 4 supplements
 - .factory/specs/behavioral-contracts/ (BC-INDEX + all BC files)
@@ -213,6 +213,7 @@ Production-grade-from-day-1. Key gates:
 - 2026-05-24 — ALL PRE-ADVERSARIAL STEPS COMPLETE: STATUS → READY_FOR_ADVERSARIAL_REVIEW
 - 2026-05-24 — ADVERSARIAL PASS 2 COMPLETE: 12 findings (1C, 4H, 6M, 1L) — all resolved. Phantom anchors eliminated across 80+ BC files; trait signatures reconciled in plugin-architecture.md + error-architecture.md; ARCH-INDEX updated; L2-INDEX.md, error-taxonomy, nfr-catalog, test-vectors corrected; HS-003 + HS-015 fixed. Finding trajectory: 17→12. Streak: 0/3 — Pass 3 dispatching.
 - 2026-05-24 — ADVERSARIAL PASS 3 COMPLETE: 10 findings (0C, 3H, 5M, 2L) — all resolved. Exit code standardized (BC-1.07.001); HS-004/005/006/007/012/015 field names + error codes corrected; ADR-004 error code prefixes fixed; ADR-007 DSL syntax + placeholder error code updated; VP-INDEX VP-005 trace corrected; architecture-feasibility-report BC count updated; test-vectors TV-1.3 message format fixed. Finding trajectory: 17→12→10 (zero CRITICALs). Streak: 0/3 — Pass 4 dispatching.
+- 2026-05-25 — ADVERSARIAL PASS 4 COMPLETE: 6 findings (0C, 1H, 5M) — all resolved. NFR table IDs reconciled (prd.md); BC-2.01.004 brand field names corrected; HS-006 related_bcs updated; E-BRD-005 retired (error-taxonomy.md + brand-architecture.md); DEC-016 field names fixed (edge-cases.md); ASM-007 invalidated (assumptions.md); R-003 mitigated (risks.md); crate-architecture.md 12→13 arithmetic corrected. Finding trajectory: 17→12→10→6 (accelerating, zero CRITICALs). Total fixed across 4 passes: 45. Streak: 0/3 — Pass 5 dispatching.
 
 ## Drift Items
 _(None)_

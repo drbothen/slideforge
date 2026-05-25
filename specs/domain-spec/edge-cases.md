@@ -175,7 +175,7 @@ the diagram source block and a hint. Error slide placeholder in watch mode.
 
 ## DEC-016: brand.toml Missing a Required Color Slot
 
-A brand.toml that defines `primary` and `accent1` but not `dk1`, `lt1`, etc.
+A brand.toml that defines `acc1` and `acc2` but not `dk1`, `lt1`, etc.
 Expected: Brand synthesizer fills in all 12 OOXML scheme color slots using sensible
 defaults derived from the declared colors (e.g., `dk1` = darkest declared color).
 A warning lists the inferred slots so the user can review them.

@@ -46,7 +46,7 @@ color slot edge case).
 2. For each inferred slot, exactly one E-BRD-003 cosmetic warning is emitted naming
    the slot and the source color it was derived from.
 3. Inferred slots use deterministic logic: dk1 = darkest declared color; lt1 = white
-   (#FFFFFF); dk2 = brand_primary if declared, else dk1 lightened 20%; remaining acc
+   (#FFFFFF); dk2 = acc1 if declared, else dk1 lightened 20%; remaining acc
    slots filled from brand accent colors or Material-palette-derived variants.
 4. The brand.toml file is NOT modified (inference is in-memory only).
 5. Build exits with code 0.
@@ -71,7 +71,7 @@ color slot edge case).
 
 | Input | Expected Output | Category |
 |-------|----------------|----------|
-| brand.toml: `[colors] brand_primary = "#003766"` only | BrandTemplate with 12 colors; 11 E-BRD-003 warnings (all slots except acc1 inferred); exit 0 | happy-path |
+| brand.toml: `[colors] acc1 = "#003766"` only | BrandTemplate with 12 colors; 11 E-BRD-003 warnings (all slots except acc1 inferred); exit 0 | happy-path |
 | brand.toml: `[colors]` section present but empty | 12 E-BRD-003 warnings; default palette used; exit 0 | edge-case |
 | brand.toml: all 12 colors declared | BrandTemplate with exact colors; 0 warnings; exit 0 | happy-path |
 

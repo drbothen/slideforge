@@ -67,8 +67,10 @@ not in S5 prototype).
 synthesized brand palette (S3: `BrandValidator::check_theme_pairs()`). This is
 a pure function operating on the `Brand` struct — Kani-amenable.
 
-The 12 OOXML theme color slots must all be populated (DI-015). A brand with missing
-color slots is a compile error (E-BRD-005).
+The 12 OOXML theme color slots must all be populated (DI-015). Missing color slots
+are synthesized via the derivation algorithm — each inferred slot emits one E-BRD-003
+cosmetic warning; no slot triggers a fatal error. (E-BRD-005 was retired: see
+error-taxonomy.md §Brand Errors.)
 
 ## Color Slot Mapping
 
