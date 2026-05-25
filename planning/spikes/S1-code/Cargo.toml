@@ -1,0 +1,15 @@
+[package]
+name = "s1-ooxmlsdk-coverage"
+version = "0.1.0"
+edition = "2024"
+# Standalone spike binary — NOT part of the slideforge workspace.
+
+[workspace]  # Isolate from parent workspace
+
+[[bin]]
+name = "s1_coverage"
+path = "src/main.rs"
+
+[dependencies]
+ooxmlsdk = "0.6"
+zip = "2"

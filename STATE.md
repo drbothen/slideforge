@@ -3,7 +3,7 @@ project: slideforge
 mode: greenfield
 created: 2026-05-23
 current_phase: phase-1-spec-crystallization
-status: READY_TO_START_PHASE_1
+status: IN_PROGRESS_PHASE_1
 last_updated: 2026-05-24
 ---
 
@@ -18,47 +18,65 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. It generates branded .p
 **Workspace:** /Users/jmagady/Dev/slideforge
 **Factory worktree:** .factory/ on branch `factory-artifacts`
 
-## Current Status: READY TO START PHASE 1
+## Current Status: PHASE 1 IN PROGRESS (2026-05-24)
 
-All pre-Phase-1 work is complete:
-- All factory bootstrapped (worktree, STATE.md, seed ingested)
-- All Market intelligence: GO (medium confidence)
-- All Toolchain preflight: PASS-WITH-NOTES (MSRV bump needed: 1.85->1.88)
-- All Brief validated and sharded (608-word slim core + 10 modular specs)
-- All 25 DSL design questions decided (Q1-Q25)
-- All 14 research threads completed (R1-R14)
-- All Quality bar locked (production-grade-from-day-1)
-- All decisions reconciled and consistent across documents
+Pre-Phase-1 work complete. Phase 1 actively running. Resume from "Phase 1 Progress" section below.
 
-## What to Do Next (Phase 1 Spec Crystallization)
+## Phase 1 Progress (as of 2026-05-24)
 
-### Immediate first actions (dispatch in parallel):
-1. **business-analyst** -> L2 domain spec (entities, relationships, processes, invariants)
-   - Input: .factory/specs/product-brief.md + .factory/planning/q1-decision-final.md
-2. **architect** -> Spike S1 (ooxmlsdk PPTX coverage validation — code + binaries, real .pptx generated)
-   - Input: .factory/planning/ooxml-foundations.md + .factory/planning/brand-template-patterns.md
-3. **dx-engineer/devops-engineer** -> Bump MSRV 1.85->1.88 in Cargo.toml + ci.yml
+### Phase 1 Step Status
 
-### Phase 1 full sequence:
-| Step | Agent | Output | Depends on |
-|------|-------|--------|-----------|
-| P1-01 | business-analyst | L2 domain spec | — |
-| P1-02 | product-owner | L3 PRD with BC-S.SS.NNN behavioral contracts | P1-01 |
-| P1-03a | architect | Spikes S1-S6 (code + binaries) | — |
-| P1-03b | architect | Architecture doc + ADR-001..014 | P1-02 + P1-03a |
-| P1-04 | product-owner | PRD revision from architect feedback | P1-03b |
-| P1-05 | ux-designer | UX spec (CLI + web preview wireframes) | P1-02 |
-| P1-06 | devops-engineer | CI/CD matrix expansion | P1-03a (MSRV bump) |
-| P1-07 | adversary | Adversarial spec review (3 clean passes) | P1-03b + P1-04 + P1-05 + P1-06 |
-| P1-08 | consistency-validator | Cross-doc consistency audit | P1-07 |
-| P1-09 | HUMAN | Approval gate | P1-08 |
+| Step | Agent | Status | Output |
+|------|-------|--------|--------|
+| P1-00 | devops-engineer | DONE | MSRV 1.85→1.88 in rust-toolchain.toml + Cargo.toml + ci.yml |
+| P1-01 | business-analyst | DONE | .factory/specs/domain-spec/ (12 files, L2-INDEX.md) |
+| P1-02 | product-owner | IN_PROGRESS | L3 PRD + BCs — LAUNCHING NOW (L2 ready) |
+| P1-03a-S1 | architect | IN_PROGRESS | S1 code exists (.factory/planning/spikes/S1-code/). No report. Re-running. |
+| P1-03a-S2 | architect | DONE | .factory/planning/spikes/S2-pdf-backend-evaluation.md + S2-code/ |
+| P1-03a-S3 | architect | DONE | .factory/planning/spikes/S3-wcag-tooling-choice.md + S3-code/ |
+| P1-03a-S4 | architect | IN_PROGRESS | S4 code exists (.factory/planning/spikes/S4-code/). No report. Re-running. |
+| P1-03a-S5 | architect | DONE | .factory/planning/spikes/S5-brand-synthesis-layout-taxonomy.md + S5-code/ |
+| P1-03a-S6 | architect | DONE | .factory/planning/spikes/S6-multi-renderer-parity.md + S6-code/ |
+| P1-03a-S14 | architect | DONE | .factory/planning/spikes/S14-mermaid-diagram-engine.md + S14-code/ |
+| P1-03b | architect | NOT_STARTED | Architecture + ADRs — blocked on P1-02 + all spikes DONE |
+| P1-04 | product-owner | NOT_STARTED | PRD revision — blocked on P1-03b |
+| P1-05 | ux-designer | NOT_STARTED | UX spec — blocked on P1-02 |
+| P1-06 | devops-engineer | NOT_STARTED | CI/CD matrix expansion — blocked on P1-03b |
+| P1-07 | adversary | NOT_STARTED | 3 clean passes — blocked on P1-03b+P1-04+P1-05+P1-06 |
+| P1-08 | consistency-validator | NOT_STARTED | Cross-doc audit — blocked on P1-07 |
+| P1-09 | HUMAN | NOT_STARTED | Approval gate — blocked on P1-08 |
 
-### Key constraints for Phase 1 agents:
-- Spike depth: CODE + BINARIES (not design-only). Real .pptx files generated. Real parsers built.
-- Production-grade quality bar: see "Quality Bar" section below
-- Plugin-first architecture: 10 extensibility surfaces, 19 crates
-- 31 slide types (not 23 — the original seed is superseded)
-- All 5 output formats (PPTX, DOCX, PDF, HTML, web preview) are v1.0 scope
+### Spike Verdicts (resolved)
+
+| ID | Verdict | Key decision |
+|----|---------|-------------|
+| S2 | ADOPT pdf-writer + krilla | PDF/UA-1 decisive. Custom SlideTagEngine on pdf-writer/krilla. |
+| S3 | axe-core/playwright + veraPDF + custom OOXML linter | Web preview MUST use SVG not canvas. chumsky validate() confirmed for error accumulation. |
+| S5 | 31 layouts (11 standard + 20 custom) | 31 types → 20 custom layouts (many-to-one). Dark: clrMapOvr + explicit solidFill fallback. |
+| S6 | SSIM≥0.99 + PSNR≥35dB dual gate | visual-parity-contract.md SSIM 0.97 is too lenient — must update to ≥0.99. Render: PPTX→PDF(LO Still)→PNG(300 DPI). |
+| S14 | ADOPT mermaid-rs-renderer v0.2.2 | 65µs–3ms/diagram, pure SVG, 8/8 diagram types pass, PPTX-safe without post-processing. |
+
+### Spikes still in-progress
+
+| ID | Code status | Missing | Action |
+|----|------------|---------|--------|
+| S1 | .factory/planning/spikes/S1-code/src/main.rs (1,454 lines). Did NOT compile. | Spike report | Re-running architect: fix compile + write report. |
+| S4 | .factory/planning/spikes/S4-code/src/ (6 files, 1,539 lines). Compiled (s4_bench, s4_demo). | Spike report | Re-running architect: test binaries + write report. |
+
+### Domain Spec (L2) outputs
+
+- .factory/specs/domain-spec/L2-INDEX.md — 30 CAPs, 22 DIs, 20 DECs, 14 ASMs, 16 Rs, 18 FMs
+- .factory/specs/domain-spec/capabilities.md, entities.md, invariants.md, events.md, edge-cases.md, assumptions.md, risks.md, failure-modes.md, differentiators.md, ubiquitous-language.md
+- .factory/planning/domain-research.md (34KB) — 4 bounded contexts (Authoring/Branding/Layout/Export), PDF/UA gap confirmed, font metric divergence is #1 multi-format challenge
+
+### What to do next (resume instructions)
+
+1. **S1 re-run**: dispatch architect with S1-code/ to fix compile errors and write S1 spike report
+2. **S4 re-run**: dispatch architect with S4-code/ to run binaries and write S4 spike report
+3. **PRD launch**: dispatch product-owner with L2 domain spec + all Q decisions to produce L3 PRD + BCs
+4. **Architecture + ADRs**: dispatch architect AFTER (PRD complete) AND (S1+S4 reports done)
+5. **UX spec**: dispatch ux-designer after PRD draft exists
+6. **CI/CD expansion**: dispatch devops-engineer after architecture is done
 
 ## Decision Documents (canonical references)
 
@@ -147,6 +165,17 @@ Production-grade-from-day-1. Key gates:
 - 2026-05-24 — Q16-Q25 LOCKED (packages, workspace, defaults, keywords, errors, merge)
 - 2026-05-24 — ALL 25 DSL DESIGN QUESTIONS COMPLETE
 - 2026-05-24 — Reconciliation pass: all docs consistent
+- 2026-05-24 — PHASE 1 STARTED: devops-engineer bumped MSRV to 1.88 (clean build verified)
+- 2026-05-24 — Domain research completed (34KB); 4 bounded contexts confirmed; font metric divergence = #1 multi-format risk
+- 2026-05-24 — Spike S2 RESOLVED: ADOPT pdf-writer + krilla (PDF/UA-1 decisive axis)
+- 2026-05-24 — Spike S3 RESOLVED: axe-core/playwright + veraPDF + custom OOXML linter
+- 2026-05-24 — Spike S5 RESOLVED: 31 layouts (11 standard + 20 custom); dark: clrMapOvr + solidFill fallback
+- 2026-05-24 — Spike S6 RESOLVED: SSIM≥0.99 + PSNR≥35dB dual gate; visual-parity-contract.md SSIM 0.97 threshold is stale — must be updated to ≥0.99 when architecture agent runs
+- 2026-05-24 — Spike S14 RESOLVED: ADOPT mermaid-rs-renderer v0.2.2 (65µs–3ms/diagram, pure SVG, 8/8 types)
+- 2026-05-24 — L2 Domain Spec COMPLETE (12 files; 30 CAPs, 22 DIs, 20 DECs, 14 ASMs, 16 Rs, 18 FMs)
+- 2026-05-24 — Spike S1 IN_PROGRESS: code exists but did not compile; re-running architect
+- 2026-05-24 — Spike S4 IN_PROGRESS: code compiled but no report; re-running architect
+- 2026-05-24 — PRD LAUNCHING: dispatching product-owner (L2 domain spec ready)
 
 ## Drift Items
 _(None)_

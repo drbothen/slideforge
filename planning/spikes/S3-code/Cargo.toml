@@ -1,0 +1,25 @@
+[package]
+name = "s3-wcag-tooling"
+version = "0.1.0"
+edition = "2024"
+# Standalone spike binary — NOT part of the slideforge workspace.
+
+[workspace]  # Isolate from parent workspace
+
+[[bin]]
+name = "s3_contrast"
+path = "src/contrast.rs"
+
+[[bin]]
+name = "s3_ooxml_lint"
+path = "src/ooxml_lint.rs"
+
+[[bin]]
+name = "s3_parser_alt"
+path = "src/parser_alt.rs"
+
+[dependencies]
+# OOXML (zip-based .pptx parsing)
+zip = "2"
+# Chumsky parser for DSL prototype
+chumsky = "0.10"

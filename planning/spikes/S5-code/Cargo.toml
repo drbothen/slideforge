@@ -1,0 +1,27 @@
+[package]
+name = "s5-brand-synthesis"
+version = "0.1.0"
+edition = "2024"
+# Standalone spike binary — NOT part of the slideforge workspace.
+# Purpose: Validates brand synthesis and extraction prototype for S5.
+
+[workspace]  # Isolate from parent workspace
+
+[[bin]]
+name = "s5_synthesize"
+path = "src/synthesize.rs"
+
+[[bin]]
+name = "s5_extract"
+path = "src/extract.rs"
+
+[[bin]]
+name = "s5_validate_layouts"
+path = "src/validate_layouts.rs"
+
+[dependencies]
+zip = "2"
+quick-xml = { version = "0.37", features = ["serialize"] }
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+uuid = { version = "1", features = ["v4"] }

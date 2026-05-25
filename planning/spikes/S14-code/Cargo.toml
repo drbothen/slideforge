@@ -1,0 +1,25 @@
+[workspace]
+
+[package]
+name = "s14-mermaid-spike"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Spike S14: Mermaid Diagram Engine evaluation
+# Tests mermaid-rs-renderer (Option A) + mmdc timing baseline (Option C)
+
+[dependencies]
+mermaid-rs-renderer = { version = "0.2.2", default-features = false }
+thiserror = "2"
+anyhow = "1"
+
+[dev-dependencies]
+criterion = { version = "0.8", features = ["html_reports"] }
+
+[[bench]]
+name = "render_bench"
+harness = false
+
+# Note: selkie-rs v0.3.0 is an alternative dep; add if evaluating independently
+# selkie-rs = "0.3.0"

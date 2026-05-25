@@ -1,0 +1,15 @@
+{
+  "name": "s3-axe-core-spike",
+  "version": "0.1.0",
+  "description": "S3 spike: axe-core + Playwright accessibility testing for slideforge web preview and HTML export",
+  "private": true,
+  "scripts": {
+    "test": "playwright test",
+    "test:a11y": "playwright test --grep @a11y"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.10.1",
+    "@playwright/test": "^1.49.0",
+    "typescript": "^5.7.2"
+  }
+}

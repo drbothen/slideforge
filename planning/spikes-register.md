@@ -14,11 +14,11 @@ Time-boxed research/investigation tasks that resolve uncertainty before committi
 | ID | Spike | Severity | Time-box | Owner | Output | Status |
 |----|-------|----------|----------|-------|--------|--------|
 | S1 | ooxmlsdk PPTX coverage validation | HIGH (blocking) | 2 days | architect | ADR-001 input | OPEN |
-| S2 | PDF backend evaluation | HIGH | 2 days | architect | ADR-003 input | OPEN |
-| S3 | WCAG AA tooling choice | MEDIUM | 1 day | architect | ADR-011 input | OPEN |
+| S2 | PDF backend evaluation | HIGH | 2 days | architect | ADR-003 input | RESOLVED 2026-05-24 — see spikes/S2-pdf-backend-evaluation.md; ADR-003 input: pdf-writer+krilla |
+| S3 | WCAG AA tooling choice | MEDIUM | 1 day | architect | ADR-011 input | RESOLVED 2026-05-24 — see spikes/S3-wcag-tooling-choice.md; ADR-011 input: axe-core/playwright + veraPDF (Docker) + custom OOXML linter + PAC 2024 (manual) |
 | S4 | chumsky 0.10 indentation parser viability | MEDIUM | 2 days | architect | ADR-009 input | OPEN |
-| S5 | Brand synthesis layout taxonomy | HIGH | 3 days | architect | ADR-001 input | OPEN |
-| S6 | Multi-renderer parity baseline + CI infra | HIGH | 3 days | architect + devops | ADR-002 input | OPEN |
+| S5 | Brand synthesis layout taxonomy | HIGH | 3 days | architect | ADR-001 input | RESOLVED 2026-05-24 — 31 layouts (11 standard + 20 custom), working .pptx synthesis + extraction prototypes in Rust, see spikes/S5-brand-synthesis-layout-taxonomy.md |
+| S6 | Multi-renderer parity baseline + CI infra | HIGH | 3 days | architect + devops | ADR-002 input | RESOLVED 2026-05-24 — see spikes/S6-multi-renderer-parity.md; ADR-002 input: LO-Still 25.8.7 + PPTX→PDF→PNG pipeline + SSIM≥0.99/PSNR≥35dB dual gate + Git storage |
 
 ## Phase 2 Spikes (Story Decomposition)
 
@@ -33,6 +33,7 @@ Time-boxed research/investigation tasks that resolve uncertainty before committi
 | ID | Spike | Severity | Time-box | Owner | Output | Status |
 |----|-------|----------|----------|-------|--------|--------|
 | S13 | MSSP incident-brief reference port to .sf | MEDIUM | 3 days | implementer | Flagship launch deck + Phase 4 holdout scenario seed | OPEN |
+| S14 | Mermaid diagram rendering engine | HIGH (blocking for `slide diagram:`) | 2 days | architect | ADR-014 input | RESOLVED 2026-05-24 — see spikes/S14-mermaid-diagram-engine.md; ADR-014 input: mermaid-rs-renderer v0.2.2 (Option A) |
 
 ## Phase 4 Spikes (Polish)
 
