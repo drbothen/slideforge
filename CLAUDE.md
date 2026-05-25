@@ -82,6 +82,34 @@ This principle binds every AI agent operating on this project. It overrides any 
 - **It does not mean "no asks of the human."** Genuine human decisions should be surfaced. The principle forbids deferring WORK; it does not forbid surfacing DECISIONS.
 - **It does not mean "infinite scope expansion."** If the fix requires new architecture decisions, surface it cleanly and request scope expansion.
 
+### Quality Bar (Non-Negotiable Gates for v1.0 Release)
+
+Declared 2026-05-23. v1.0 release is gated on ALL rows below — no "ship and polish later" tolerated.
+
+| Dimension | Day-1 Gate |
+|-----------|-----------|
+| Spec convergence | 3 clean adversarial passes on PRD + architecture before Phase 2 starts |
+| Tests | Every public API has unit tests; snapshot tests per slide type; integration tests for CLI; fuzz harness in CI |
+| Implementation | `#![forbid(unsafe_code)]` (except FFI if added); zero `.unwrap()` outside tests; `clippy::pedantic` clean; `#![warn(missing_docs)]` enforced on public APIs |
+| Verification | Kani proofs for pure-core functions in `slideforge-syntax` and `slideforge-eval`; `cargo-fuzz` harness; `cargo-mutants` mutation testing in CI with documented score budget |
+| Visual parity | Snapshot tests against rendered XML; CI renders sample decks in headless LibreOffice + screenshots; visual diff against fixtures |
+| Performance | < 500ms cold build for 25-slide deck enforced in CI as a benchmark gate (criterion + bench regression check); incremental rebuild < 50ms |
+| Documentation | rustdoc on every public item; published to docs.rs on release; user-facing DSL reference book; every ADR signed off |
+| Security | `cargo audit` + `cargo deny` in CI; signed release artifacts; SBOM generation per release; semgrep or CodeQL scan per PR; security-reviewer agent on every PR |
+| Supply chain | All production-crate deps pinned with `=`; `Cargo.lock` committed; `rust-toolchain.toml` pinned; reproducible builds verified |
+| Multi-platform | macOS arm64+x86_64, Linux x86_64+arm64, Windows x86_64 binaries from v1.0; cross-platform CI matrix |
+| Multi-renderer parity | Synthesized .pptx must render correctly in PowerPoint (Office), Keynote, Google Slides, LibreOffice — verified via automated rendering + visual diff in CI |
+| Observability | `tracing` instrumentation throughout the pipeline; structured logs; opentelemetry-compatible export hooks |
+| Accessibility | Web preview audited against WCAG AA via `@axe-core/playwright` on every PR touching the preview; PDF passes `veraPDF` for PDF/UA-1; PPTX passes custom OOXML linter + Microsoft Accessibility Checker (manual per-release) |
+| Convergence gate | Full 7-dimension convergence check (spec/tests/impl/verify/visual/perf/docs) before release |
+| Holdout eval | Mean satisfaction ≥ 0.85, must-pass ≥ 0.6 (factory default — non-negotiable for v1.0) |
+
+#### Implications
+1. **No "ship it, polish later" PRs.** Every merge goes through full per-story-delivery flow with adversarial review, security review, and demo evidence.
+2. **Phase 6 formal hardening is non-optional** for v1.0 — Kani + fuzz + mutation testing must all green-light.
+3. **CI/CD matrix is built in Phase 1**, before any feature stories start.
+4. **Timeline expectation:** v1.0 takes real engineering time. The factory executes rigorously, not fast.
+
 ### Companion Principle — Correct Agent Routing
 
 "Fix in scope" works ONLY when paired with correct agent routing. Agents own their domain. The orchestrator owns routing.
