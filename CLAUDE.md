@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-> **Toolchain:** Rust stable (per `rust-toolchain.toml`), edition 2024, resolver 3. Components: rustfmt, clippy. Cross-compile targets (planned): aarch64-apple-darwin, x86_64-apple-darwin, x86_64-unknown-linux-gnu, x86_64-unknown-linux-musl, x86_64-pc-windows-msvc. 19-crate workspace (7 scaffolded, 12 to be created during Phase 1-3).
+> **Toolchain:** Rust stable (per `rust-toolchain.toml`), edition 2024, resolver 3. Components: rustfmt, clippy. Cross-compile targets (planned): aarch64-apple-darwin, x86_64-apple-darwin, x86_64-unknown-linux-gnu, x86_64-unknown-linux-musl, x86_64-pc-windows-msvc. 20-crate workspace (7 scaffolded, 13 to be created during Phase 1-3).
 
 ---
 
@@ -472,7 +472,7 @@ These are the highest-impact decisions from the 25 Q&A session. Full details in 
 | **Output formats** | PPTX + DOCX + PDF + HTML + web preview — all from one .sf file |
 | **Writing registers** | `notes` (presenter), `report` (reader), `detail` (document-only) — linguistically distinct |
 | **Slide types** | 31 built-in (23 seed + chart/toc/agenda/quote/grid/bio/diagram/team) |
-| **Architecture** | Plugin-first: 10 extensibility surfaces, 19 crates, dog-food everything |
+| **Architecture** | Plugin-first: 10 extensibility surfaces, 20 crates, dog-food everything |
 | **Math** | `$...$` / `$$...$$` LaTeX with mode-based parsing + `@{var}` math interpolation |
 | **Charts** | SVG via `plotters` crate (pure Rust, all formats) |
 | **Brand** | Bidirectional bridge for BOTH .pptx and .docx + full synthesis from .toml |
