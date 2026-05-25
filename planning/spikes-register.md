@@ -13,10 +13,10 @@ Time-boxed research/investigation tasks that resolve uncertainty before committi
 
 | ID | Spike | Severity | Time-box | Owner | Output | Status |
 |----|-------|----------|----------|-------|--------|--------|
-| S1 | ooxmlsdk PPTX coverage validation | HIGH (blocking) | 2 days | architect | ADR-001 input | OPEN |
+| S1 | ooxmlsdk PPTX coverage validation | HIGH (blocking) | 2 days | architect | ADR-001 input | RESOLVED 2026-05-24 — see spikes/S1-ooxmlsdk-pptx-coverage.md; ADR-001 input: ADOPT ooxmlsdk 0.6.1; 55/57 PASS, 2 workarounds (table raw-XML embed, no Default in Content_Types); |
 | S2 | PDF backend evaluation | HIGH | 2 days | architect | ADR-003 input | RESOLVED 2026-05-24 — see spikes/S2-pdf-backend-evaluation.md; ADR-003 input: pdf-writer+krilla |
 | S3 | WCAG AA tooling choice | MEDIUM | 1 day | architect | ADR-011 input | RESOLVED 2026-05-24 — see spikes/S3-wcag-tooling-choice.md; ADR-011 input: axe-core/playwright + veraPDF (Docker) + custom OOXML linter + PAC 2024 (manual) |
-| S4 | chumsky 0.10 indentation parser viability | MEDIUM | 2 days | architect | ADR-009 input | OPEN |
+| S4 | chumsky 0.10 indentation parser viability | MEDIUM | 2 days | architect | ADR-009 input | RESOLVED 2026-05-24 — see spikes/S4-chumsky-indentation-parser.md; ADR-009 input: hybrid hand-written lexer + chumsky 0.10 parser via Stream; VIABLE-WITH-CAVEATS |
 | S5 | Brand synthesis layout taxonomy | HIGH | 3 days | architect | ADR-001 input | RESOLVED 2026-05-24 — 31 layouts (11 standard + 20 custom), working .pptx synthesis + extraction prototypes in Rust, see spikes/S5-brand-synthesis-layout-taxonomy.md |
 | S6 | Multi-renderer parity baseline + CI infra | HIGH | 3 days | architect + devops | ADR-002 input | RESOLVED 2026-05-24 — see spikes/S6-multi-renderer-parity.md; ADR-002 input: LO-Still 25.8.7 + PPTX→PDF→PNG pipeline + SSIM≥0.99/PSNR≥35dB dual gate + Git storage |
 
