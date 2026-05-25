@@ -54,8 +54,8 @@ from version-controlled source.
 
 slideforge is a data-reactive branded document platform that compiles a single
 indentation-significant DSL (`.sf` files) into `.pptx`, `.docx`, `.pdf`, `.html`,
-and a live web preview through a six-stage pipeline (Parse → Evaluate → Validate →
-Brand → Layout → Export) with a plugin-first architecture and compile-time accessibility
+and a live web preview through a six-stage pipeline (Parse → Evaluate → Brand →
+Validate → Layout → Export) with a plugin-first architecture and compile-time accessibility
 enforcement.
 
 A single `.sf` file is the only source. Brand configuration is loaded from existing

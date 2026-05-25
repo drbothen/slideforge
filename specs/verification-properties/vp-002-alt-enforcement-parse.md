@@ -15,12 +15,13 @@ traces_to: .factory/specs/verification-properties/VP-INDEX.md
 
 ## Property Statement
 
-For any parsed `VisualElement` (image, chart, diagram) where the `alt` field is absent
-AND `decorative: true` is absent, the parse result's error set must be non-empty and
-contain at least one diagnostic of kind `MissingAlt`.
+For any `Deck` containing a `VisualElement` (image, chart, diagram) where the `alt`
+field is absent AND `decorative: true` is absent, calling `validate(&deck, &brand)`
+MUST return a non-empty `Vec<Diagnostic>` containing at least one entry of kind
+`ValidationErrorKind::MissingAlt`.
 
-Formally: `∀ ast: Document where ast.contains_visual_element_without_alt()`,
-`parse_output.errors.any(|e| e.kind == MissingAlt)`.
+Formally: `∀ deck: Deck where deck.contains_visual_element_without_alt()`,
+`validate(&deck, &brand).any(|e| e.kind == ValidationErrorKind::MissingAlt)`.
 
 ## Motivation
 
@@ -31,10 +32,13 @@ with a missing alt is still rejected.
 
 ## Feasibility Assessment
 
-Feasible. The chumsky `validate()` mechanism emits non-terminal errors without stopping
-the parse (confirmed in S3 spike: 5/5 tests pass). The property is a boolean check over
-the AST node's `alt_text` field, which is a discriminated union `AltText::Text(s) | AltText::Decorative`.
-Kani can model-check this over a bounded document structure (≤ 10 slides, ≤ 5 visual elements per slide).
+Feasible. The `slideforge-validate` crate's `validate(&deck, &brand)` is a pure
+function over the `Deck` IR — no I/O, no parser invocation. It inspects each
+`VisualElement`'s `alt_text` field, which is a discriminated union
+`AltText::Text(s) | AltText::Decorative`, and emits `ValidationErrorKind::MissingAlt`
+diagnostics without short-circuiting. Kani can model-check this over a bounded
+document structure (≤ 10 slides, ≤ 5 visual elements per slide). The S3 spike
+confirmed 5/5 validation tests pass with this structural pattern.
 
 ## Proof Harness Skeleton
 
@@ -46,15 +50,28 @@ mod proofs {
 
     #[kani::proof]
     #[kani::unwind(20)]
-    fn missing_alt_produces_error() {
-        // Construct a minimal document with one image lacking alt text
-        let source = "slide content:\n  image: photo.png\n";
-        let result = parse(source);
-        // Image without alt or decorative MUST produce a MissingAlt error
-        let has_missing_alt = result.errors.iter().any(|e| {
-            matches!(e.kind, ParseErrorKind::MissingAlt)
+    fn missing_alt_produces_validation_error() {
+        // Construct a minimal Deck with one image lacking alt text (no decorative flag)
+        let deck = Deck::with_single_image_no_alt();
+        let brand = Brand::default();
+        let diagnostics = validate(&deck, &brand);
+        // Image without alt or decorative MUST produce a MissingAlt validation error
+        let has_missing_alt = diagnostics.iter().any(|e| {
+            matches!(e.kind, ValidationErrorKind::MissingAlt)
         });
         kani::assert!(has_missing_alt);
+    }
+
+    #[kani::proof]
+    fn decorative_image_passes_validation() {
+        // A decorative image (decorative: true) must NOT produce a MissingAlt error
+        let deck = Deck::with_single_image_decorative();
+        let brand = Brand::default();
+        let diagnostics = validate(&deck, &brand);
+        let has_missing_alt = diagnostics.iter().any(|e| {
+            matches!(e.kind, ValidationErrorKind::MissingAlt)
+        });
+        kani::assert!(!has_missing_alt);
     }
 }
 ```

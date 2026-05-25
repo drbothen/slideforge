@@ -281,7 +281,8 @@ Manage dependencies in `slideforge.toml`, lock in `sf.lock`. Import package cont
 
 Declare multi-deck workspaces in `slideforge.toml`, apply family-specific overrides via
 `.sfconfig` cascade (max 3 levels), build all members with `slideforge build --workspace`.
-Inspect configuration provenance with `slideforge config explain`.
+Inspect configuration provenance with `slideforge config explain`. Scaffold new projects
+and workspaces via `slideforge init`.
 
 **Priority:** P1 | **Grounding:** q16-q25-decisions.md Q20, Q21.
 

@@ -1,7 +1,7 @@
 ---
 document_type: verification-property
 vp_id: VP-008
-title: Alt diagnostic invariant — image with empty alt always produces diagnostic
+title: "Alt diagnostic invariant: image with empty alt always produces diagnostic"
 module: slideforge-validate
 tool: Kani
 phase: P6

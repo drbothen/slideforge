@@ -1,7 +1,7 @@
 ---
 document_type: verification-property
 vp_id: VP-004
-title: No implicit coercion — "1.10" stays string
+title: 'No implicit coercion: "1.10" stays string'
 module: slideforge-eval
 tool: Kani
 phase: P6

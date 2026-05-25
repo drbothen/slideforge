@@ -1,7 +1,7 @@
 ---
 document_type: verification-property
 vp_id: VP-006
-title: EMU-to-PDF coordinate mapping correct Y-axis flip no overflow
+title: "EMU-to-PDF coordinate mapping: correct Y-axis flip, no overflow"
 module: slideforge-pdf
 tool: Kani
 phase: P6

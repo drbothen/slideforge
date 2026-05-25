@@ -79,7 +79,7 @@ axum process but this is a local development feature, not a deployed service.
 
 | Section | File | Primary Consumer | Purpose |
 |---------|------|-----------------|---------|
-| System Overview | system-overview.md | All | Six-stage pipeline (Parse→Evaluate→Validate→Brand→Layout→Export), bounded contexts, data flow |
+| System Overview | system-overview.md | All | Six-stage pipeline (Parse→Evaluate→Brand→Validate→Layout→Export), bounded contexts, data flow |
 | Crate Architecture | crate-architecture.md | implementer, devops | 20-crate workspace, dependency graph, purity boundaries |
 | Plugin Architecture | plugin-architecture.md | implementer, story-writer | 10 surfaces, trait signatures, registry pattern |
 | IR Design | ir-design.md | implementer | Deck + LaidOutDeck, type constraints, EMU system |

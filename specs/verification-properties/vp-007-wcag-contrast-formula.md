@@ -1,7 +1,7 @@
 ---
 document_type: verification-property
 vp_id: VP-007
-title: WCAG contrast formula correct luminance linearization
+title: "WCAG contrast formula: correct luminance linearization (0.04045)"
 module: slideforge-validate
 tool: Kani
 phase: P6
@@ -11,7 +11,7 @@ bc_trace: [BC-4.01.004, BC-4.03.003]
 traces_to: .factory/specs/verification-properties/VP-INDEX.md
 ---
 
-# VP-007: WCAG Contrast Formula Correct Luminance Linearization
+# VP-007: WCAG Contrast Formula: Correct Luminance Linearization (0.04045)
 
 ## Property Statement
 
