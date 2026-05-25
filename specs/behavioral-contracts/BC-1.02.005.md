@@ -91,7 +91,7 @@ same name. This covers DEC-017 from the domain edge-case catalog.
 
 ## Architecture Anchors
 
-- `architecture/system-overview.md#evaluation-scope` — scope chain resolution
+- `architecture/system-overview.md` — scope chain resolution
 
 ## Story Anchor
 

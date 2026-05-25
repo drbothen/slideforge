@@ -100,7 +100,7 @@ text metrics may differ.
 
 ## Architecture Anchors
 
-- `architecture/brand-architecture.md#font-resolution` — font availability check and fallback chain
+- `architecture/brand-architecture.md` — font availability check and fallback chain
 
 ## Story Anchor
 

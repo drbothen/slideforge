@@ -106,7 +106,7 @@ into a connected formal document automatically.
 
 ## Architecture Anchors
 
-- `architecture/layout-subsystem.md#section-types` — SectionType trait and auto-generation logic
+- `architecture/crate-architecture.md` — SectionType trait and auto-generation logic
 
 ## Story Anchor
 

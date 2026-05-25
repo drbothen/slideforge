@@ -98,7 +98,7 @@ This implements the SQLite variant of the DataSource plugin surface per CAP-003.
 | L2 Capability | CAP-003 ("Data Binding from External Sources") per capabilities.md §CAP-003 |
 | Capability Anchor Justification | CAP-003 ("Data Binding from External Sources") per capabilities.md §CAP-003 — "Load structured data at compile time from JSON files, CSV files, YAML files, TOML files, HTTP/HTTPS URLs, Excel spreadsheets, and SQLite databases" explicitly names SQLite databases as a supported source |
 | L2 Domain Invariants | DI-004 (no implicit type coercion — SQLite type mapping is explicit and deterministic) |
-| Architecture Module | slideforge-eval crate — DataSource plugin, sqlite variant (filled by architect) |
+| Architecture Module | slideforge-data crate — DataSource plugin (SS-10) |
 | Stories | (filled by story-writer) |
 
 ## Related BCs
@@ -110,7 +110,7 @@ This implements the SQLite variant of the DataSource plugin surface per CAP-003.
 
 ## Architecture Anchors
 
-- `architecture/authoring-subsystem.md#data-binding` — DataSource plugin surface
+- `architecture/system-overview.md` — DataSource plugin surface
 
 ## Story Anchor
 

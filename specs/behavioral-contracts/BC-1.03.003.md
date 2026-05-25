@@ -92,7 +92,7 @@ DEC-002 from the domain edge-case catalog.
 
 ## Architecture Anchors
 
-- `architecture/system-overview.md#data-binding` — field access error handling
+- `architecture/system-overview.md` — field access error handling
 
 ## Story Anchor
 

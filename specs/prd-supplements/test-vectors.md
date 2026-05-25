@@ -73,7 +73,7 @@ vars:
   component: "my-component"
 ```
 
-**Expected:** E-PAR-006: `'component' is reserved for component-based reuse (planned v2+)`.
+**Expected:** E-PAR-008: `'component' is reserved for component-based reuse (planned v2+)`.
 Exit 1.
 
 ---

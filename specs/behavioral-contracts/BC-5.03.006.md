@@ -101,7 +101,7 @@ This enforces the supply-chain integrity guarantee per DI-019 and R-012.
 
 ## Architecture Anchors
 
-- `architecture/cross-cutting.md#package-management` — package install and lock file design
+- `architecture/plugin-architecture.md` — package install and lock file design
 
 ## Story Anchor
 

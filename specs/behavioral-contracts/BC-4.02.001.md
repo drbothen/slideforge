@@ -110,7 +110,7 @@ mechanism for the "one source, PPTX + DOCX report" value proposition.
 
 ## Architecture Anchors
 
-- `architecture/export-architecture.md#docx` — DOCX serialization design
+- `architecture/export-architecture.md` — DOCX serialization design
 - `architecture/ir-design.md` — Two-IR model (writing register routing)
 
 ## Story Anchor

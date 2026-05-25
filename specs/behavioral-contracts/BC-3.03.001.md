@@ -100,7 +100,7 @@ promotes it to a blocking error. This covers DEC-013.
 
 ## Architecture Anchors
 
-- `architecture/layout-subsystem.md#overflow-detection` — overflow estimation algorithm
+- `architecture/crate-architecture.md` — overflow estimation algorithm
 
 ## Story Anchor
 

@@ -97,7 +97,7 @@ and a formal written report.
 
 ## Architecture Anchors
 
-- `architecture/system-overview.md#register-routing` — register tag routing in pipeline stages
+- `architecture/system-overview.md` — register tag routing in pipeline stages
 
 ## Story Anchor
 

@@ -99,8 +99,7 @@ color slot edge case).
 
 ## Architecture Anchors
 
-- `architecture/brand-architecture.md#synthesis` — color slot derivation algorithm
-- `architecture/brand-architecture.md#layout-taxonomy` — 31 layout taxonomy (Spike S5)
+- `architecture/brand-architecture.md` — color slot derivation algorithm and 31 layout taxonomy (Spike S5)
 
 ## Story Anchor
 

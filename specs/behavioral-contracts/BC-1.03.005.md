@@ -100,7 +100,7 @@ and HTTPS schemes.
 | Risk Source | R-011 ("HTTP data source plugin fetches attacker-controlled URLs, potentially enabling SSRF") per risks.md |
 | NFR Source | NFR-019 ("HTTP data source URL allowlist enforced: No requests to non-allowlisted domains when allowlist configured") per nfr-catalog.md |
 | Error Code | E-DAT-006 per error-taxonomy.md: `HTTP source '<url>' blocked by allowed_domains policy. Add domain to [data].allowed_domains in slideforge.toml.` |
-| Architecture Module | slideforge-eval crate — DataSource HTTP plugin (filled by architect) |
+| Architecture Module | slideforge-data crate — DataSource plugin (SS-10) |
 | Stories | (filled by story-writer) |
 
 ## Related BCs
@@ -110,8 +110,7 @@ and HTTPS schemes.
 
 ## Architecture Anchors
 
-- `architecture/system-overview.md#data-binding` — HTTP DataSource plugin surface
-- `architecture/system-overview.md#security` — SSRF prevention, allowlist enforcement point
+- `architecture/system-overview.md` — HTTP DataSource plugin surface and SSRF prevention, allowlist enforcement point
 
 ## Story Anchor
 

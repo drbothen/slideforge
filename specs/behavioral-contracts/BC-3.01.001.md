@@ -100,7 +100,7 @@ and non-empty. Missing required fields are compile errors, not runtime warnings.
 
 ## Architecture Anchors
 
-- `architecture/layout-subsystem.md#slide-type-trait` — SlideType trait API definition
+- `architecture/crate-architecture.md` — SlideType trait API definition
 
 ## Story Anchor
 

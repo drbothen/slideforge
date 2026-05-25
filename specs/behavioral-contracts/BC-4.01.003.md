@@ -106,7 +106,7 @@ target renderers.
 
 ## Architecture Anchors
 
-- `architecture/export-architecture.md#pptx` — PPTX structural requirements
+- `architecture/export-architecture.md` — PPTX structural requirements
 
 ## Story Anchor
 

@@ -94,7 +94,7 @@ value proposition.
 
 ## Architecture Anchors
 
-- `architecture/system-overview.md#register-routing` — register routing through pipeline stages
+- `architecture/system-overview.md` — register routing through pipeline stages
 
 ## Story Anchor
 

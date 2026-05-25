@@ -97,7 +97,7 @@ case catalog.
 
 ## Architecture Anchors
 
-- `architecture/system-overview.md#variant-resolution` — zero-slide variant detection
+- `architecture/system-overview.md` — zero-slide variant detection
 
 ## Story Anchor
 

@@ -104,7 +104,7 @@ and required `alt` (accessibility description). The shape is rendered as an expl
 
 ## Architecture Anchors
 
-- `architecture/layout-subsystem.md#shape-dsl` — shape block parsing and EMU conversion
+- `architecture/crate-architecture.md` — shape block parsing and EMU conversion
 
 ## Story Anchor
 

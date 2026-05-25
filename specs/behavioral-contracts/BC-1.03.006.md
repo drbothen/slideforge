@@ -93,7 +93,7 @@ extends the DataSource plugin surface with XLSX format support per CAP-003.
 | L2 Capability | CAP-003 ("Data Binding from External Sources") per capabilities.md §CAP-003 |
 | Capability Anchor Justification | CAP-003 ("Data Binding from External Sources") per capabilities.md §CAP-003 — "Load structured data at compile time from JSON files, CSV files, YAML files, TOML files, HTTP/HTTPS URLs, Excel spreadsheets, and SQLite databases" explicitly names Excel spreadsheets as a supported source |
 | L2 Domain Invariants | DI-004 (no implicit type coercion — XLSX cell types preserved as-is) |
-| Architecture Module | slideforge-eval crate — DataSource plugin, xlsx variant (filled by architect) |
+| Architecture Module | slideforge-data crate — DataSource plugin (SS-10) |
 | Stories | (filled by story-writer) |
 
 ## Related BCs
@@ -105,7 +105,7 @@ extends the DataSource plugin surface with XLSX format support per CAP-003.
 
 ## Architecture Anchors
 
-- `architecture/authoring-subsystem.md#data-binding` — DataSource plugin surface
+- `architecture/system-overview.md` — DataSource plugin surface
 
 ## Story Anchor
 

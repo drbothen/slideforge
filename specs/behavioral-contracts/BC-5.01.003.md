@@ -101,7 +101,7 @@ not what the visual element is.
 
 ## Architecture Anchors
 
-- `architecture/plugin-architecture.md#accessibility-validation` — color-coded element label enforcement
+- `architecture/plugin-architecture.md` — color-coded element label enforcement
 
 ## Story Anchor
 

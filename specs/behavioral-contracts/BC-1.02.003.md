@@ -95,7 +95,7 @@ in competitor tools and in the R3 research on DSL pain points.
 
 ## Architecture Anchors
 
-- `architecture/system-overview.md#type-system` — type model description
+- `architecture/system-overview.md` — type model description
 
 ## Story Anchor
 

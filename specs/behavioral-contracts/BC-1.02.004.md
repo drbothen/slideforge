@@ -92,7 +92,7 @@ edge-case catalog.
 
 ## Architecture Anchors
 
-- `architecture/system-overview.md#lexer-modes` — text mode vs math mode lexer state machine
+- `architecture/system-overview.md` — text mode vs math mode lexer state machine
 
 ## Story Anchor
 

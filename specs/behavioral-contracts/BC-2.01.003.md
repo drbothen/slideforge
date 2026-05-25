@@ -99,7 +99,7 @@ brand_primary, etc.), extracts heading/body font names, and copies the logo imag
 
 ## Architecture Anchors
 
-- `architecture/brand-architecture.md#extraction` — brand extraction algorithm (Spike S5 Part 4)
+- `architecture/brand-architecture.md` — brand extraction algorithm (Spike S5 Part 4)
 
 ## Story Anchor
 

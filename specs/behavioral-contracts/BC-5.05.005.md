@@ -103,8 +103,8 @@ immediately up-to-date. The user does not need to manually refresh the page.
 
 ## Architecture Anchors
 
-- `architecture/export-architecture.md#web-preview` — WebSocket client reconnection logic
-- `architecture/plugin-architecture.md#watch-mode` — watch mode reliability
+- `architecture/export-architecture.md` — WebSocket client reconnection logic
+- `architecture/plugin-architecture.md` — watch mode reliability
 
 ## Story Anchor
 

@@ -99,7 +99,7 @@ becomes a compile-time error on the next build).
 
 ## Architecture Anchors
 
-- `architecture/cross-cutting.md#package-management` — package install and lock file design
+- `architecture/plugin-architecture.md` — package install and lock file design
 
 ## Story Anchor
 

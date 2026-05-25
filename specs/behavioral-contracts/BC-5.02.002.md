@@ -92,7 +92,7 @@ the trait API is enhanced — the bypass is not the solution.
 
 ## Architecture Anchors
 
-- `architecture/plugin-architecture.md#dog-fooding` — dog-fooding guarantee specification
+- `architecture/plugin-architecture.md` — dog-fooding guarantee specification
 
 ## Story Anchor
 

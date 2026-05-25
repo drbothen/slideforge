@@ -92,7 +92,7 @@ value used as a condition without explicit conversion is a type error.
 
 ## Architecture Anchors
 
-- `architecture/system-overview.md#type-system` — type model for conditions
+- `architecture/system-overview.md` — type model for conditions
 
 ## Story Anchor
 

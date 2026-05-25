@@ -83,7 +83,7 @@ YAML, and TOML. The loaded data is bound to the declared name and is accessible 
 | L2 Capability | CAP-003 ("Data Binding from External Sources") per capabilities.md §CAP-003 |
 | Capability Anchor Justification | CAP-003 ("Data Binding from External Sources") per capabilities.md §CAP-003 — local file loading is the primary data binding mechanism |
 | L2 Domain Invariants | DI-004 (no implicit type coercion — YAML booleans stay as strings) |
-| Architecture Module | slideforge-eval crate — DataSource plugin (filled by architect) |
+| Architecture Module | slideforge-data crate — DataSource plugin (SS-10) |
 | Stories | (filled by story-writer) |
 
 ## Related BCs
@@ -94,7 +94,7 @@ YAML, and TOML. The loaded data is bound to the declared name and is accessible 
 
 ## Architecture Anchors
 
-- `architecture/system-overview.md#data-binding` — DataSource plugin surface
+- `architecture/system-overview.md` — DataSource plugin surface
 
 ## Story Anchor
 

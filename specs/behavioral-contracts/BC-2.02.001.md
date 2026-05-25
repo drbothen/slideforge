@@ -104,7 +104,7 @@ customization mechanism for multi-client or multi-audience decks.
 
 ## Architecture Anchors
 
-- `architecture/brand-architecture.md#overlay` — per-slide brand overlay application
+- `architecture/brand-architecture.md` — per-slide brand overlay application
 
 ## Story Anchor
 

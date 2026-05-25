@@ -20,7 +20,8 @@ a single build, not one at a time.
 
 Errors are classified by the PRD Section 5 taxonomy. Each error code has a severity:
 - **Fatal (strict mode):** Build produces NO output. All accessibility errors (E-A11-NNN),
-  evaluation errors (E-EVL-NNN), and data-source errors (E-DAT-NNN) are fatal.
+  evaluation errors (E-EVL-NNN), data-source errors (E-DAT-NNN), and configuration
+  errors (E-CFG-NNN) are fatal.
 - **Warning (warn-only mode):** Build produces output with error-slide placeholders
   for slides that could not be parsed or validated.
 
@@ -40,14 +41,28 @@ Span recovery in the chumsky pipeline (S4 finding):
 
 Each crate owns a `thiserror`-derived error enum:
 
-| Crate | Error Enum | Category Prefix |
-|-------|-----------|----------------|
-| slideforge-syntax | `ParseError` | E-PAR-NNN |
-| slideforge-eval | `EvalError` | E-EVL-NNN, E-DAT-NNN |
-| slideforge-validate | `ValidationError` | E-A11-NNN, E-LAY-NNN, E-CFG-NNN |
-| slideforge-brand | `BrandError` | E-BRD-NNN |
-| slideforge-pptx | `PptxError` | E-EXP-NNN |
-| slideforge-pdf | `PdfError` | E-EXP-NNN |
+| Crate | Error Enum | Category Prefix | Notes |
+|-------|-----------|----------------|-------|
+| slideforge-syntax | `SyntaxError` | E-PAR-NNN | |
+| slideforge-eval | `EvalError` | E-EVL-NNN | Pure core only — no data I/O |
+| slideforge-data | `DataError` | E-DAT-NNN | Data source I/O lives in SS-10, not eval |
+| slideforge-validate | `ValidateError` | E-A11-NNN, E-LAY-NNN | Compile-time checks; SS-03 |
+| slideforge-config | `ConfigError` | E-CFG-NNN | Workspace/CLI config I/O; SS-17 |
+| slideforge-brand | `BrandError` | E-BRD-NNN | |
+| slideforge-pptx | `PptxError` | E-EXP-NNN (PPTX) | |
+| slideforge-docx | `DocxError` | E-EXP-NNN (DOCX) | |
+| slideforge-pdf | `PdfError` | E-EXP-NNN (PDF) | |
+| slideforge-html (preview) | `HtmlError` | E-EXP-NNN (HTML/preview) | |
+| slideforge-package | `PackageError` | E-PKG-NNN | |
+
+Rationale for P2 finding resolution (FINDING-P2-011):
+- E-DAT-NNN moved from `slideforge-eval` to `slideforge-data` (SS-10). `slideforge-eval` is
+  pure core with no data I/O; data source errors occur during data loading, which is
+  slideforge-data's responsibility.
+- E-CFG-NNN moved from `slideforge-validate` to `slideforge-config` (SS-17). Configuration
+  errors (missing variant, missing workspace root, malformed .sfconfig) are config-level
+  concerns, not validation concerns. `slideforge-validate` owns compile-time semantic
+  checks (accessibility, layout overflow), not CLI/workspace configuration errors.
 
 ## CLI Rendering (miette)
 

@@ -94,7 +94,7 @@ via miette/ariadne with colored source-code pointers in terminal output.
 
 ## Architecture Anchors
 
-- `architecture/system-overview.md#error-reporting` — miette Diagnostic trait + ariadne rendering
+- `architecture/system-overview.md` — miette Diagnostic trait + ariadne rendering
 
 ## Story Anchor
 

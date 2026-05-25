@@ -100,7 +100,7 @@ post-processing. The error is fatal in strict mode.
 
 ## Architecture Anchors
 
-- `architecture/plugin-architecture.md#accessibility-validation` — compile-time accessibility enforcement
+- `architecture/plugin-architecture.md` — compile-time accessibility enforcement
 
 ## Story Anchor
 

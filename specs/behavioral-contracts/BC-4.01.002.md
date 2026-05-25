@@ -100,8 +100,8 @@ reference PNG. This threshold was empirically validated in Spike S6 — the prio
 
 ## Architecture Anchors
 
-- `architecture/export-architecture.md#visual-regression` — CI visual parity gate design (Spike S6)
-- `architecture/visual-parity-contract.md` — threshold specification
+- `architecture/export-architecture.md` — CI visual parity gate design (Spike S6)
+- `specs/visual-parity-contract.md` — threshold specification
 
 ## Story Anchor
 

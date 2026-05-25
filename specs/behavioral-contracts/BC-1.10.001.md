@@ -98,7 +98,7 @@ are rendered by the MathRenderer plugin to the appropriate output format.
 
 ## Architecture Anchors
 
-- `architecture/system-overview.md#math-mode` — mode-based parser design
+- `architecture/system-overview.md` — mode-based parser design
 
 ## Story Anchor
 

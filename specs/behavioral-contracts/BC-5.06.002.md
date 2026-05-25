@@ -95,7 +95,7 @@ not deleted.
 
 ## Architecture Anchors
 
-- `architecture/plugin-architecture.md#init-scaffolding` — project scaffolding design
+- `architecture/plugin-architecture.md` — project scaffolding design
 
 ## Story Anchor
 

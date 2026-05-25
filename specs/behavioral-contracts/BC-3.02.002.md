@@ -101,7 +101,7 @@ web preview. They can contain rich inline formatting, `report` register sub-bloc
 
 ## Architecture Anchors
 
-- `architecture/layout-subsystem.md#section-types` — SectionType trait and manual section blocks
+- `architecture/crate-architecture.md` — SectionType trait and manual section blocks
 
 ## Story Anchor
 

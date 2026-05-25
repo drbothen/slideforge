@@ -103,7 +103,7 @@ the browser until the data source recovers. This covers DEC-007.
 
 ## Architecture Anchors
 
-- `architecture/plugin-architecture.md#watch-mode` — HTTP data source failure handling
+- `architecture/plugin-architecture.md` — HTTP data source failure handling
 
 ## Story Anchor
 

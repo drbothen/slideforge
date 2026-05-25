@@ -102,7 +102,7 @@ authoring workflows where broken slides should not block the rest of the deck.
 
 ## Architecture Anchors
 
-- `architecture/system-overview.md#warn-only` — warn-only mode output gate logic
+- `architecture/system-overview.md` — warn-only mode output gate logic
 
 ## Story Anchor
 

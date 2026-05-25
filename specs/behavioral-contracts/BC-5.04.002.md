@@ -103,7 +103,7 @@ for client-facing decks, another for internal) without duplicating configuration
 
 ## Architecture Anchors
 
-- `architecture/plugin-architecture.md#workspace` — .sfconfig cascade design (Q20, Q21)
+- `architecture/plugin-architecture.md` — .sfconfig cascade design (Q20, Q21)
 
 ## Story Anchor
 

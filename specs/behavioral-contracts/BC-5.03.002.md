@@ -99,7 +99,7 @@ This covers DEC-019.
 
 ## Architecture Anchors
 
-- `architecture/plugin-architecture.md#package-management` — @import resolution and sf.lock lookup
+- `architecture/plugin-architecture.md` — @import resolution and sf.lock lookup
 
 ## Story Anchor
 

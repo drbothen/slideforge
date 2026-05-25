@@ -109,7 +109,7 @@ primary_consumers: [architect, performance-engineer]
 
 | NFR-ID | Category | Requirement | Numerical Target | Validation Method | Risk Source |
 |--------|---------|-------------|-----------------|------------------|------------|
-| NFR-032 | Observability | All 4 pipeline stages (Parse/Evaluate/Layout/Export) emit tracing spans | 4 spans present per build | tracing instrumentation audit (test helper: span_counter) | CLAUDE.md quality bar |
+| NFR-032 | Observability | All 6 pipeline stages (Parse/Evaluate/Validate/Brand/Layout/Export) emit tracing spans | 6 spans present per build | tracing instrumentation audit (test helper: span_counter) | CLAUDE.md quality bar |
 | NFR-033 | Observability | Structured diagnostic JSON output complete and valid | JSON parses without error; all fields present | Unit test: parse JSON output for every test fixture | CLAUDE.md quality bar |
 
 ---

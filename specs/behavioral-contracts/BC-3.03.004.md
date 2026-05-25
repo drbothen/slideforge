@@ -96,7 +96,7 @@ A deck must contain at least one slide to be valid. This covers DEC-011.
 
 ## Architecture Anchors
 
-- `architecture/system-overview.md#validation` — zero-slide validation check
+- `architecture/system-overview.md` — zero-slide validation check
 
 ## Story Anchor
 

@@ -90,7 +90,7 @@ production case. This covers DEC-001 from the domain edge-case catalog.
 
 ## Architecture Anchors
 
-- `architecture/system-overview.md#computation-model` — empty iteration handling
+- `architecture/system-overview.md` — empty iteration handling
 
 ## Story Anchor
 

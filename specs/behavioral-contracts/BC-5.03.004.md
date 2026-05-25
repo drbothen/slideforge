@@ -98,7 +98,7 @@ This gives users full visibility into their dependency state without inspecting 
 
 ## Architecture Anchors
 
-- `architecture/plugin-architecture.md#package-management` — package install and lock file design
+- `architecture/plugin-architecture.md` — package install and lock file design
 
 ## Story Anchor
 

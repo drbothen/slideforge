@@ -97,7 +97,7 @@ produced. This is a fail-closed behavior: no partial output is written on cycle 
 
 ## Architecture Anchors
 
-- `architecture/system-overview.md#include-resolution` — include graph traversal
+- `architecture/system-overview.md` — include graph traversal
 
 ## Story Anchor
 

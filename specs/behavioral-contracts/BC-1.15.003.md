@@ -102,8 +102,7 @@ warnings (cosmetic severity) are always advisory — they never prevent output.
 
 ## Architecture Anchors
 
-- `architecture/system-overview.md#error-reporting` — severity tier definitions and exit code mapping
-- `architecture/system-overview.md` — output gate in the final pipeline stage
+- `architecture/system-overview.md` — severity tier definitions, exit code mapping, and output gate in the final pipeline stage
 
 ## Story Anchor
 

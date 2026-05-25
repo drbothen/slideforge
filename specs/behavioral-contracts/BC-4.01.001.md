@@ -107,7 +107,7 @@ Keynote, Google Slides, and LibreOffice without schema errors or missing content
 
 ## Architecture Anchors
 
-- `architecture/export-architecture.md#pptx` — PPTX serialization design
+- `architecture/export-architecture.md` — PPTX serialization design
 - `architecture/ir-design.md` — Two-IR model (Deck + LaidOutDeck)
 
 ## Story Anchor

@@ -97,7 +97,7 @@ The error is accumulated with all other parse errors before the build halts.
 
 ## Architecture Anchors
 
-- `architecture/layout-subsystem.md#slide-type-registry` — registration of 31 built-in types
+- `architecture/crate-architecture.md` — registration of 31 built-in types
 
 ## Story Anchor
 

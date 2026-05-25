@@ -95,7 +95,7 @@ document order.
 
 ## Architecture Anchors
 
-- `architecture/system-overview.md#computation-model` — iteration design
+- `architecture/system-overview.md` — iteration design
 
 ## Story Anchor
 

@@ -93,8 +93,8 @@ use `brand_overlay:` to switch themes or masters is a compile error.
 
 ## Architecture Anchors
 
-- `architecture/brand-architecture.md#single-master` — DI-016 single master invariant
-- `architecture/system-overview.md#pptx-relationships` — layout-to-master relationship graph
+- `architecture/brand-architecture.md` — DI-016 single master invariant
+- `architecture/system-overview.md` — layout-to-master relationship graph
 
 ## Story Anchor
 

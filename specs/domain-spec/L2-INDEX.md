@@ -94,8 +94,8 @@ architecture and compile-time accessibility enforcement.
 | Priority | Count | CAP Items |
 |----------|-------|-----------|
 | P0 (must-have) | 20 | CAP-001 through CAP-018 + CAP-029 + CAP-030 |
-| P1 (should-have) | 8 | CAP-019 through CAP-026 |
-| P2 (nice-to-have) | 2 | CAP-027, CAP-028 |
+| P1 (should-have) | 10 | CAP-019 through CAP-028 |
+| P2 (nice-to-have) | 0 | (none — all capabilities are at least P1) |
 
 ---
 
@@ -125,9 +125,12 @@ All capabilities in capabilities.md are grounded in the following product brief 
 - **CAP-001 to CAP-009** (DSL + computation): grounded in product-brief.md §5, q1-decision-final.md §1 (computation rungs 1-9)
 - **CAP-010 to CAP-014** (slide types + aliases): grounded in q1-decision-final.md §4, q2-decision-final.md Layers A+B
 - **CAP-015 to CAP-017** (output formats): grounded in q1-decision-final.md §2 (5 output formats), product-brief.md §2
-- **CAP-018 to CAP-020** (brand/template): grounded in q1-decision-final.md §10 (brand bridge), q4-q15-decisions.md Q4
-- **CAP-021 to CAP-024** (plugin + validation): grounded in q3-decision-final.md §2 (10 surfaces), q4-q15-decisions.md Q6
-- **CAP-025 to CAP-027** (workspace + packages): grounded in q16-q25-decisions.md Q19, Q20, Q21
-- **CAP-028 to CAP-030** (watch + preview + CLI): grounded in q1-decision-final.md §0 (live data-reactive), q16-q25-decisions.md Q17
+- **CAP-018 to CAP-019** (brand/template): grounded in q1-decision-final.md §10 (brand bridge), q4-q15-decisions.md Q4
+- **CAP-020** (accessibility validation): grounded in q4-q15-decisions.md Q6, product-brief.md §2
+- **CAP-021 to CAP-024** (plugin + validation): grounded in q3-decision-final.md §2 (10 surfaces), q4-q15-decisions.md Q6, Q7, Q8
+- **CAP-025 to CAP-027** (workspace + packages + watch mode): grounded in q16-q25-decisions.md Q19, Q20, Q21, Q17
+- **CAP-028** (DSL versioning): grounded in q16-q25-decisions.md Q16
+- **CAP-029** (writing registers): grounded in q1-decision-final.md §3
+- **CAP-030** (diagnostic reporting): grounded in q16-q25-decisions.md Q17, Q23
 
 All invariants in invariants.md are grounded as domain rules, not implementation constraints, as documented per invariant entry.

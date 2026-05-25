@@ -95,7 +95,7 @@ their own error entry (error accumulation per DI-018).
 
 ## Architecture Anchors
 
-- `architecture/layout-subsystem.md#slide-type-trait` — required-field error format
+- `architecture/crate-architecture.md` — required-field error format
 
 ## Story Anchor
 

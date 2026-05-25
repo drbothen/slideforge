@@ -121,8 +121,8 @@ Per output format:
 
 ## Architecture Anchors
 
-- `architecture/layout-subsystem.md#inline-format` — Inline enum definition and 11 variant types
-- `architecture/system-overview.md#export` — per-format inline rendering
+- `architecture/crate-architecture.md` — Inline enum definition and 11 variant types
+- `architecture/system-overview.md` — per-format inline rendering
 
 ## Story Anchor
 

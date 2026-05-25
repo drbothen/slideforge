@@ -107,8 +107,8 @@ page reload. This is the primary developer workflow for iterative deck authoring
 
 ## Architecture Anchors
 
-- `architecture/export-architecture.md#web-preview` — axum+WebSocket+SVG preview design
-- `architecture/plugin-architecture.md#watch-mode` — file watcher + debounce + WebSocket pipeline
+- `architecture/export-architecture.md` — axum+WebSocket+SVG preview design
+- `architecture/plugin-architecture.md` — file watcher + debounce + WebSocket pipeline
 
 ## Story Anchor
 

@@ -97,8 +97,7 @@ cause rendering failures in Office applications.
 
 ## Architecture Anchors
 
-- `architecture/system-overview.md#diagram-renderer` — usvg normalization pipeline
-- `architecture/system-overview.md#spike-s14` — mermaid-rs-renderer + usvg integration
+- `architecture/system-overview.md` — usvg normalization pipeline and mermaid-rs-renderer + usvg integration (Spike S14)
 
 ## Story Anchor
 

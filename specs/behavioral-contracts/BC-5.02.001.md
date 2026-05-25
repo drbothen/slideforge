@@ -110,8 +110,7 @@ SectionType, InlineFormat.
 
 ## Architecture Anchors
 
-- `architecture/plugin-architecture.md` — 10 extensibility surfaces and trait definitions
-- `architecture/plugin-architecture.md#dog-fooding` — bundled plugin requirements
+- `architecture/plugin-architecture.md` — 10 extensibility surfaces, trait definitions, and bundled plugin requirements
 
 ## Story Anchor
 

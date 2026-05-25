@@ -109,7 +109,7 @@ images are not acceptable. The implementation uses pdf-writer + krilla + a custo
 
 ## Architecture Anchors
 
-- `architecture/export-architecture.md#pdf` — pdf-writer + krilla + SlideTagEngine design (Spike S2)
+- `architecture/export-architecture.md` — pdf-writer + krilla + SlideTagEngine design (Spike S2)
 
 ## Story Anchor
 

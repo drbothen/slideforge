@@ -90,8 +90,7 @@ do not know about.
 
 ## Architecture Anchors
 
-- `architecture/system-overview.md#aliases` — alias field validation design
-- `architecture/system-overview.md#slide-types` — SlideType trait field set definition
+- `architecture/system-overview.md` — alias field validation design and SlideType trait field set definition
 
 ## Story Anchor
 

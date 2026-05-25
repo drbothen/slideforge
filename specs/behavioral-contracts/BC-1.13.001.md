@@ -96,7 +96,7 @@ versions.
 
 ## Architecture Anchors
 
-- `architecture/system-overview.md#versioning` — parser version gate design
+- `architecture/system-overview.md` — parser version gate design
 
 ## Story Anchor
 

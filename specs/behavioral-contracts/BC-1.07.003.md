@@ -91,7 +91,7 @@ infinite evaluation loops.
 
 ## Architecture Anchors
 
-- `architecture/system-overview.md#variant-resolution` — variant merge semantics
+- `architecture/system-overview.md` — variant merge semantics
 
 ## Story Anchor
 

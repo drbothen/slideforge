@@ -68,19 +68,30 @@ this rule is a CI blocking error.
 
 ## Key Trait Signatures
 
+The following signatures are canonical — taken directly from `interface-definitions.md §6`,
+which supersedes any earlier draft in architecture docs (CLAUDE.md precedence rule).
+
 ```rust
+/// Exporter — produces output bytes from Deck + LaidOutDeck + Brand
 pub trait Exporter: Send + Sync {
     fn id(&self) -> &str;
+    fn extension(&self) -> &str;  // e.g., "pptx"
     fn export(&self, deck: &Deck, laid_out: &LaidOutDeck,
-              brand: &Brand, opts: &ExportOptions) -> Result<Vec<u8>>;
+              brand: &Brand, opts: &ExportOptions) -> Result<Vec<u8>, ExportError>;
 }
 
+/// SlideType — defines visual pattern and layout for a slide kind
 pub trait SlideType: Send + Sync {
     fn id(&self) -> &str;
-    fn layout(&self, slide: &Slide, brand: &Brand, canvas: &Canvas) -> Result<LaidOutSlide>;
-    fn validate(&self, slide: &Slide) -> Vec<Diagnostic>;
-    fn required_fields(&self) -> &[FieldSpec];
+    fn required_fields(&self) -> &[FieldDef];
+    fn optional_fields(&self) -> &[FieldDef];
+    fn layout_name(&self) -> &str;  // OOXML layout name
+    fn lay_out(&self, slide: &Slide, brand: &Brand, canvas: Canvas) -> Result<LaidOutSlide, LayoutError>;
 }
 ```
 
-Full trait signatures are in `interface-definitions.md §6` and `q3-decision-final.md`.
+Changes from earlier draft (P2 finding resolution):
+- `Exporter`: added `extension()` method; changed return type to `Result<Vec<u8>, ExportError>` (explicit error type).
+- `SlideType`: renamed `layout()` → `lay_out()`; changed `&Canvas` → `Canvas`; changed `Result<LaidOutSlide>` → `Result<LaidOutSlide, LayoutError>`; changed `&[FieldSpec]` → `&[FieldDef]`; removed `validate()` (not in interface-definitions.md — validation is owned by `slideforge-validate` / SS-03); added `optional_fields()` and `layout_name()` methods.
+
+Full trait signatures for all 10 surfaces in `interface-definitions.md §6`.

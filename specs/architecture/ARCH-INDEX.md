@@ -65,6 +65,14 @@ axum process but this is a local development feature, not a deployed service.
 | SS-17 | Workspace Config | slideforge-config | Effectful shell. File I/O only. |
 | SS-18 | CLI Orchestrator | slideforge-cli | Effectful shell. All lifecycle I/O. |
 
+> **Note on SS-ID vs crate counts:** The Subsystem Registry lists 18 SS-IDs. The Cargo
+> workspace contains 20 crates. The discrepancy is accounted for by: (1) `slideforge-html`
+> (the HTML exporter) shares SS-09 with `slideforge-preview` — both are HTML/preview
+> surface concerns; (2) the root `slideforge` crate has no SS-ID because it is a thin
+> re-export facade that assembles the plugin registry from the subsystem crates and
+> exposes the public library API. No code lives in the root crate beyond registry
+> construction. Total workspace crates: 20.
+
 ---
 
 ## Document Map

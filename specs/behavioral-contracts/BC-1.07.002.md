@@ -95,7 +95,7 @@ case catalog.
 
 ## Architecture Anchors
 
-- `architecture/system-overview.md#variant-resolution` — 11-level precedence chain
+- `architecture/system-overview.md` — 11-level precedence chain
 
 ## Story Anchor
 

@@ -83,7 +83,7 @@ default for domains not in the `[data].allowed_domains` allowlist in `slideforge
 |-------|-------|
 | L2 Capability | CAP-003 ("Data Binding from External Sources") per capabilities.md §CAP-003 |
 | Capability Anchor Justification | CAP-003 ("Data Binding from External Sources") per capabilities.md §CAP-003 — HTTP URL loading is explicitly listed in CAP-003 |
-| Architecture Module | slideforge-eval crate — DataSource HTTP plugin (filled by architect) |
+| Architecture Module | slideforge-data crate — DataSource plugin (SS-10) |
 | Stories | (filled by story-writer) |
 
 ## Related BCs
@@ -94,7 +94,7 @@ default for domains not in the `[data].allowed_domains` allowlist in `slideforge
 
 ## Architecture Anchors
 
-- `architecture/system-overview.md#data-binding` — HTTP DataSource plugin surface
+- `architecture/system-overview.md` — HTTP DataSource plugin surface
 
 ## Story Anchor
 

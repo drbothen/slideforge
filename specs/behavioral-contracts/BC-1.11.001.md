@@ -98,7 +98,7 @@ as a media part, inlined or as `<img>` in HTML, and rendered to paths for PDF.
 
 ## Architecture Anchors
 
-- `architecture/system-overview.md#chart-renderer` — ChartRenderer plugin + plotters integration
+- `architecture/system-overview.md` — ChartRenderer plugin + plotters integration
 
 ## Story Anchor
 
