@@ -1,0 +1,32 @@
+# cargo-nextest configuration for slideforge.
+#
+# Profiles:
+#   default — local development (fast feedback, retry on flakes allowed)
+#   ci      — CI runs (no retries, JUnit output for test reporting)
+#
+# Run locally: cargo nextest run
+# Run CI:      cargo nextest run --profile ci
+
+[profile.default]
+# Local dev: show output for failures only.
+failure-output = "immediate"
+success-output = "never"
+# Allow one retry on flaky tests locally (filesystem-dependent integration tests).
+retries = 1
+
+[profile.ci]
+# CI: no retries (flaky = broken).
+retries = 0
+# Show output immediately on failure so the CI log is readable without
+# having to scroll to the end.
+failure-output = "immediate"
+success-output = "never"
+# Emit JUnit XML for GitHub Actions test reporting integration.
+# Output file is written to target/nextest/ci/junit.xml.
+# Archived as a workflow artifact if the test job enables that step.
+junit = { path = "junit.xml" }
+
+[profile.ci.junit]
+# Include slow tests in the JUnit output for triage.
+store-success-output = false
+store-failure-output = true

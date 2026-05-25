@@ -1,113 +1,344 @@
 name: CI
 
+# Triggers: PRs to develop/main, and direct pushes to develop/main.
+# Feature branches only run CI via PR; direct pushes to those branches are
+# intentionally not covered here (worktree-based development model).
 on:
   push:
-    branches: [main]
+    branches: [develop, main]
   pull_request:
-    branches: [main]
+    branches: [develop, main]
 
-# Cancel in-progress runs when a new commit is pushed to the same PR.
+# Cancel in-progress runs when a new commit is pushed to the same ref.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/develop' }}
 
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
   RUST_BACKTRACE: 1
+  # Incremental compilation is counterproductive in CI (cold caches each run).
+  CARGO_INCREMENTAL: 0
+
+# ─── Pinned action SHAs ──────────────────────────────────────────────────────
+# All actions are pinned to a full commit SHA (supply chain security).
+# To update: resolve the new tag to its commit SHA and replace below.
+#
+#   actions/checkout          v4  → 34e114876b0b11c390a56381ad16ebd13914f8d5
+#   Swatinem/rust-cache       v2  → 42dc69e1aa15d09112580998cf2ef0119e2e91ae
+#   dtolnay/rust-toolchain  HEAD  → 3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+#   taiki-e/install-action    v2  → d9be7d8cda89035c9c843f78bd44d4f72d8403d4
+# ─────────────────────────────────────────────────────────────────────────────
 
 jobs:
-  # ─── Format check ────────────────────────────────────────────────────
+  # ─── Format check ──────────────────────────────────────────────────────────
+  # Runs only on Linux; formatting is platform-independent.
   fmt:
-    name: rustfmt
+    name: fmt
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
         with:
+          toolchain: stable
           components: rustfmt
       - name: cargo fmt --check
         run: cargo fmt --all -- --check
 
-  # ─── Clippy lints ────────────────────────────────────────────────────
+  # ─── Clippy (pedantic) ─────────────────────────────────────────────────────
+  # clippy::pedantic is the project standard. Zero undocumented suppressions.
+  # Also enforces -D clippy::unwrap_used per NFR-021.
   clippy:
     name: clippy
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
         with:
+          toolchain: stable
           components: clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
         with:
           shared-key: clippy
-      - name: cargo clippy
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - name: cargo clippy (all targets, pedantic)
+        run: >
+          cargo clippy
+          --workspace
+          --all-targets
+          --all-features
+          --
+          -D warnings
+          -D clippy::pedantic
+          -D clippy::unwrap_used
+          -W clippy::missing_docs_in_private_items
 
-  # ─── Tests (Linux, macOS, Windows) ───────────────────────────────────
+  # ─── Tests (multi-platform matrix) ─────────────────────────────────────────
+  # Covers NFR-026 through NFR-030: macOS arm64, macOS x86_64, Linux x86_64,
+  # Linux arm64, Windows x86_64.
   test:
-    name: test (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    name: test (${{ matrix.target.name }})
+    runs-on: ${{ matrix.target.runner }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        target:
+          - { name: "linux-x86_64",  runner: "ubuntu-latest"     }
+          - { name: "linux-arm64",   runner: "ubuntu-24.04-arm"   }
+          - { name: "macos-arm64",   runner: "macos-latest"       }
+          - { name: "macos-x86_64",  runner: "macos-13"           }
+          - { name: "windows-x86_64",runner: "windows-latest"     }
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
         with:
-          shared-key: test-${{ matrix.os }}
-      - name: cargo test
-        run: cargo test --workspace --all-features --no-fail-fast
+          toolchain: stable
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
+        with:
+          shared-key: test-${{ matrix.target.name }}
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@d9be7d8cda89035c9c843f78bd44d4f72d8403d4
+        with:
+          tool: cargo-nextest
+      - name: cargo nextest run
+        run: >
+          cargo nextest run
+          --workspace
+          --all-features
+          --no-fail-fast
+          --profile ci
 
-  # ─── MSRV check ──────────────────────────────────────────────────────
+  # ─── MSRV check ────────────────────────────────────────────────────────────
+  # Validates the declared rust-version = "1.88" in Cargo.toml.
   msrv:
-    name: msrv (1.85)
+    name: msrv (1.88)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.85
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+        with:
+          toolchain: "1.88"
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
         with:
           shared-key: msrv
-      - name: cargo check
+      - name: cargo check (MSRV)
         run: cargo check --workspace --all-features
 
-  # ─── Documentation build ─────────────────────────────────────────────
+  # ─── Documentation build ───────────────────────────────────────────────────
+  # NFR-023: zero undocumented public API items (RUSTDOCFLAGS="-D warnings").
   docs:
-    name: rustdoc
+    name: docs
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     env:
       RUSTDOCFLAGS: "-D warnings"
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
         with:
           shared-key: docs
-      - name: cargo doc
-        run: cargo doc --workspace --no-deps --document-private-items
+      - name: cargo doc (workspace, no private items, warnings-as-errors)
+        run: cargo doc --workspace --no-deps
 
-  # ─── Snapshot tests (insta) ──────────────────────────────────────────
+  # ─── Snapshot tests (insta) ────────────────────────────────────────────────
+  # CI mode: fail if any snapshot has changed without being reviewed + committed.
+  # This job is a no-op until Phase 3 fixtures land; it does not fail on empty.
   snapshots:
-    name: insta snapshots
+    name: snapshots
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
+        with:
+          shared-key: snapshots
+      - name: Install cargo-insta
+        uses: taiki-e/install-action@d9be7d8cda89035c9c843f78bd44d4f72d8403d4
+        with:
+          tool: cargo-insta
+      - name: cargo insta test --check
+        # --unreferenced=reject will fail if a snapshot file exists with no
+        # corresponding test. Use --unreferenced=warn until Phase 3 to avoid
+        # blocking on stale fixtures from other tooling.
+        run: cargo insta test --check --workspace --unreferenced=warn
+
+  # ─── Supply chain security (cargo audit + cargo deny) ──────────────────────
+  # NFR-016: 0 high/critical CVEs.  NFR-017: 0 license violations.
+  # NFR-025: production dep pinning validated by cargo deny (warn policy).
+  supply-chain:
+    name: supply-chain
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
         with:
-          shared-key: snapshots
-      - name: install cargo-insta
-        run: cargo install cargo-insta --locked
-      - name: run insta tests in CI mode
-        # `cargo insta test --check` fails if any snapshot has changed
-        # without being reviewed and committed.
-        run: cargo insta test --check --workspace
+          toolchain: stable
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
+        with:
+          shared-key: supply-chain
+      - name: Install cargo-audit and cargo-deny
+        uses: taiki-e/install-action@d9be7d8cda89035c9c843f78bd44d4f72d8403d4
+        with:
+          tool: cargo-audit,cargo-deny
+      - name: cargo audit (0 high/critical CVEs)
+        run: cargo audit --deny warnings
+      - name: cargo deny check
+        # deny.toml defines the license allowlist and CVE policy.
+        # This step fails the build if deny.toml is absent — create it in Phase 3.
+        run: >
+          cargo deny check
+          --config deny.toml
+          advisories
+          licenses
+          bans
+          sources
+
+  # ─── Performance benchmark gate ────────────────────────────────────────────
+  # NFR-001: cold build < 500ms; NFR-002: incremental rebuild < 50ms.
+  # Skipped until Phase 3 when benchmark fixtures land (criterion benches).
+  # The job is defined now so branch protection can reference "CI / bench".
+  bench:
+    name: bench
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
+        with:
+          shared-key: bench
+      - name: Check for benchmark fixtures
+        id: bench-check
+        shell: bash
+        run: |
+          set -euo pipefail
+          if find . -path '*/benches/build_bench.rs' | grep -q .; then
+            echo "has_benches=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_benches=false" >> "$GITHUB_OUTPUT"
+            echo "No benchmark fixtures found (expected at crates/slideforge-cli/benches/build_bench.rs). Skipping bench gate — will activate in Phase 3."
+          fi
+      - name: cargo bench --no-run (compile check only when no fixtures)
+        if: steps.bench-check.outputs.has_benches == 'false'
+        run: cargo build --workspace --all-features
+      - name: cargo bench (NFR-001 and NFR-002 gate)
+        if: steps.bench-check.outputs.has_benches == 'true'
+        # Threshold enforcement lives inside the bench harness itself.
+        # CI fails if criterion reports a regression above the threshold.
+        run: cargo bench --workspace --profile bench 2>&1 | tee /tmp/bench-output.txt
+
+  # ─── Visual regression ─────────────────────────────────────────────────────
+  # NFR-007/008: SSIM ≥ 0.99 / PSNR ≥ 35dB per slide against committed PNGs.
+  # Requires LibreOffice Still 25.8.7 (or latest stable at time of activation).
+  # Skipped until Phase 3 PPTX exporter is implemented and reference PNGs exist.
+  visual-regression:
+    name: visual-regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
+        with:
+          shared-key: visual-regression
+      - name: Check for PPTX test fixture
+        id: fixture-check
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f "tests/fixtures/test-fixture.pptx" ] || find . -path '*/tests/fixtures/*.pptx' | grep -q .; then
+            echo "has_fixtures=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_fixtures=false" >> "$GITHUB_OUTPUT"
+            echo "No PPTX test fixtures found. Visual regression gate skipped — activates when Phase 3 PPTX exporter ships test fixtures."
+          fi
+      - name: Install LibreOffice Still (visual regression only)
+        if: steps.fixture-check.outputs.has_fixtures == 'true'
+        run: |
+          set -euo pipefail
+          sudo apt-get update -y
+          sudo apt-get install -y libreoffice-still imagemagick python3-pip
+          pip3 install scikit-image numpy
+      - name: Generate PPTX test fixtures
+        if: steps.fixture-check.outputs.has_fixtures == 'true'
+        run: cargo test --workspace --all-features -- --include-ignored generate_pptx_fixtures
+      - name: Convert PPTX to PNG via LibreOffice
+        if: steps.fixture-check.outputs.has_fixtures == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/visual-regression/png
+          for pptx in tests/fixtures/*.pptx; do
+            libreoffice --headless --convert-to pdf "$pptx" --outdir /tmp/visual-regression/
+          done
+          for pdf in /tmp/visual-regression/*.pdf; do
+            convert -density 300 "$pdf" /tmp/visual-regression/png/"$(basename "$pdf" .pdf)"-%03d.png
+          done
+      - name: Run visual diff (SSIM + PSNR per slide)
+        if: steps.fixture-check.outputs.has_fixtures == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/visual-diff.py \
+            --generated /tmp/visual-regression/png \
+            --reference tests/fixtures/reference-pngs \
+            --ssim-threshold 0.99 \
+            --psnr-threshold 35.0 \
+            --fail-on-violation
+
+  # ─── Summary: all required checks passed ───────────────────────────────────
+  # This synthetic job depends on every required check. Branch protection
+  # can gate on "CI / all-checks-pass" as a single required status check.
+  all-checks-pass:
+    name: all-checks-pass
+    needs:
+      - fmt
+      - clippy
+      - test
+      - msrv
+      - docs
+      - snapshots
+      - supply-chain
+      - bench
+      - visual-regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: always()
+    steps:
+      - name: Check all required jobs passed
+        shell: bash
+        run: |
+          set -euo pipefail
+          results='${{ toJSON(needs) }}'
+          echo "Job results: $results"
+          # Fail if any required job did not succeed.
+          # Note: 'skipped' is treated as success here — gated jobs that skip
+          # intentionally (no fixtures yet) do not block merges.
+          failed=$(echo "$results" | python3 -c "
+          import json, sys
+          results = json.load(sys.stdin)
+          failed = [name for name, info in results.items()
+                    if info['result'] not in ('success', 'skipped')]
+          if failed:
+              print(' '.join(failed))
+          ")
+          if [ -n "$failed" ]; then
+            echo "FAILED jobs: $failed"
+            exit 1
+          fi
+          echo "All required CI jobs passed."

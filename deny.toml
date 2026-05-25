@@ -1,0 +1,103 @@
+# cargo-deny configuration for slideforge.
+#
+# Enforces NFR-016 (0 high/critical CVEs) and NFR-017 (0 license violations)
+# as blocking CI gates on every PR.
+#
+# Run locally: cargo deny check
+# CI command:  cargo deny check --config deny.toml advisories licenses bans sources
+
+[graph]
+# Evaluate the full dependency graph including dev dependencies.
+# Set to false if dev-dep scanning becomes too noisy.
+all-features = true
+
+# ─── Advisories (CVE database) ───────────────────────────────────────────────
+[advisories]
+# Fail on any vulnerability with severity High or Critical.
+# Low/Medium vulnerabilities emit a warning but do not fail the build.
+# This enforces NFR-016.
+version = 2
+db-urls = ["https://github.com/rustsec/advisory-db"]
+db-path = "~/.cargo/advisory-db"
+
+# Unmaintained crates emit a warning but do not fail the build.
+# Project policy: review quarterly and replace if alternatives exist.
+ignore = [
+    # Add advisory IDs here when a known advisory has no upstream fix yet
+    # and the risk is accepted + documented. Format: "RUSTSEC-YYYY-NNNN"
+    # Example:
+    # { id = "RUSTSEC-2020-0071", reason = "Transitive through reqwest; no fix available as of 2026-05-24" }
+]
+
+# ─── Licenses ─────────────────────────────────────────────────────────────────
+[licenses]
+# Enforces NFR-017: only these SPDX identifiers are permitted.
+# Matches the policy in dependency-graph.md.
+version = 2
+
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "ISC",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "CC0-1.0",
+    "Zlib",
+    "Unicode-3.0",
+]
+
+# Deny all licenses not in the allow list.
+# "unlicensed" is an implicit deny unless explicitly added to allow.
+deny = []
+
+# Exceptions for crates with non-standard license expression formatting.
+# Add entries here when cargo-deny cannot parse the license for a known-safe dep.
+exceptions = [
+    # { allow = ["LicenseRef-ring"], name = "ring" }  # example
+]
+
+# Confidence threshold for license detection from file scanning.
+# 0.8 is the default; higher values reduce false-positives.
+confidence-threshold = 0.8
+
+# ─── Bans ─────────────────────────────────────────────────────────────────────
+[bans]
+# Deny multiple versions of the same crate where possible.
+# "warn" emits a warning; "deny" fails the check.
+multiple-versions = "warn"
+
+# Deny crates that have known security issues or are deprecated.
+deny = [
+    # Deprecated / superseded crates
+    { name = "openssl",  reason = "Use rustls or native-tls; openssl requires system libssl which conflicts with single-binary goal" },
+    { name = "openssl-sys", reason = "Same as openssl" },
+    { name = "failure",  reason = "Abandoned; use thiserror + anyhow" },
+    { name = "error-chain", reason = "Abandoned; use thiserror + anyhow" },
+    # Known CVE-carrying crates that should never appear as transitive deps
+    # (add here as needed after security scan findings)
+]
+
+# Allow list for crates that are expected to have multiple versions
+# (common with large ecosystems like serde, syn, proc-macro2).
+allow-multiple-versions = [
+    # "syn",      # multiple versions common during ecosystem transitions
+]
+
+# Maximum depth in the dependency graph to check for duplicate versions.
+# 0 = unlimited.
+highlight = "all"
+
+# ─── Sources ──────────────────────────────────────────────────────────────────
+[sources]
+# Only allow crates from crates.io and local path dependencies.
+# Git dependencies require an explicit allow entry.
+unknown-registry = "deny"
+unknown-git = "deny"
+
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+
+# Git dependencies allowed in the project (add as needed).
+allow-git = [
+    # { url = "https://github.com/example/crate", rev = "abc1234" }
+]

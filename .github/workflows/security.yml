@@ -1,0 +1,332 @@
+name: Security
+
+# Runs on two triggers:
+#   1. Weekly schedule — catches CVEs introduced via upstream advisories.
+#   2. Every PR — catches CVEs introduced by dependency changes.
+#
+# On PR trigger: findings are posted as a PR comment.
+# On schedule trigger: findings open a GitHub Issue (if any are found).
+on:
+  pull_request:
+    branches: [develop, main]
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "**/Cargo.toml"
+      - "deny.toml"
+  schedule:
+    # Weekly on Monday at 06:00 UTC
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Reason for manual trigger"
+        required: false
+        default: "manual security scan"
+
+permissions:
+  contents: read
+  pull-requests: write    # post PR comment on findings
+  issues: write           # open issue on scheduled findings
+  security-events: write  # upload SARIF to GitHub Security tab (CodeQL)
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  CARGO_INCREMENTAL: 0
+
+# ─── Pinned action SHAs ──────────────────────────────────────────────────────
+#   actions/checkout          v4  → 34e114876b0b11c390a56381ad16ebd13914f8d5
+#   dtolnay/rust-toolchain  HEAD  → 3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+#   Swatinem/rust-cache       v2  → 42dc69e1aa15d09112580998cf2ef0119e2e91ae
+#   taiki-e/install-action    v2  → d9be7d8cda89035c9c843f78bd44d4f72d8403d4
+#   github/codeql-action      v3  → fee9466b8957867761f2d78f922ab084e3e2dd17
+#   actions/github-script     v7  → f28e40c7f34bde8b3046d885e986cb6290c5673b
+# ─────────────────────────────────────────────────────────────────────────────
+
+jobs:
+  # ─── CVE and license audit ──────────────────────────────────────────────────
+  # NFR-016: 0 high/critical CVEs.  NFR-017: 0 license violations.
+  audit:
+    name: audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
+        with:
+          shared-key: security-audit
+      - name: Install cargo-audit and cargo-deny
+        uses: taiki-e/install-action@d9be7d8cda89035c9c843f78bd44d4f72d8403d4
+        with:
+          tool: cargo-audit,cargo-deny
+
+      # cargo audit: fail on any high or critical CVE.
+      - name: cargo audit (advisories)
+        id: cargo-audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo audit --json 2>&1 | tee /tmp/audit-output.json
+          # cargo audit exits non-zero on vulnerabilities; capture for reporting.
+        continue-on-error: true
+
+      # cargo deny: full check (advisories + licenses + bans + sources).
+      - name: cargo deny check (all)
+        id: cargo-deny
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo deny check \
+            --config deny.toml \
+            advisories \
+            licenses \
+            bans \
+            sources \
+            2>&1 | tee /tmp/deny-output.txt
+        continue-on-error: true
+
+      # Fail the job if either tool found high/critical issues.
+      - name: Evaluate audit results
+        shell: bash
+        run: |
+          set -euo pipefail
+          AUDIT_EXIT="${{ steps.cargo-audit.outcome }}"
+          DENY_EXIT="${{ steps.cargo-deny.outcome }}"
+          echo "cargo-audit outcome: ${AUDIT_EXIT}"
+          echo "cargo-deny outcome:  ${DENY_EXIT}"
+          if [ "${AUDIT_EXIT}" != "success" ] || [ "${DENY_EXIT}" != "success" ]; then
+            echo "Security audit found violations. See step logs above."
+            exit 1
+          fi
+          echo "No security violations found."
+
+      # On PR: post a comment with the findings summary.
+      - name: Post PR comment on audit failure
+        if: failure() && github.event_name == 'pull_request'
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b
+        with:
+          script: |
+            const fs = require('fs');
+            let auditOut = '';
+            let denyOut = '';
+            try { auditOut = fs.readFileSync('/tmp/audit-output.json', 'utf8'); } catch (_) {}
+            try { denyOut = fs.readFileSync('/tmp/deny-output.txt', 'utf8'); } catch (_) {}
+            const body = [
+              '## Security Audit Failure',
+              '',
+              'The security audit found violations. **This PR cannot merge until they are resolved.**',
+              '',
+              '### cargo audit',
+              '```',
+              auditOut.substring(0, 3000),
+              '```',
+              '',
+              '### cargo deny',
+              '```',
+              denyOut.substring(0, 3000),
+              '```',
+              '',
+              'See the [Security workflow run](' + context.payload.pull_request.html_url + '/checks) for full details.',
+            ].join('\n');
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body,
+            });
+
+      # On schedule: open an issue if violations were found.
+      - name: Open issue on scheduled scan failure
+        if: failure() && github.event_name == 'schedule'
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b
+        with:
+          script: |
+            const fs = require('fs');
+            let auditOut = '';
+            let denyOut = '';
+            try { auditOut = fs.readFileSync('/tmp/audit-output.json', 'utf8'); } catch (_) {}
+            try { denyOut = fs.readFileSync('/tmp/deny-output.txt', 'utf8'); } catch (_) {}
+            const today = new Date().toISOString().split('T')[0];
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `[Security] Dependency vulnerabilities found (${today})`,
+              body: [
+                '## Automated Weekly Security Scan — Findings',
+                '',
+                'The weekly cargo audit + cargo deny scan found security violations.',
+                '',
+                '**Action required:** Review and update affected dependencies.',
+                '',
+                '### cargo audit output',
+                '```',
+                auditOut.substring(0, 4000),
+                '```',
+                '',
+                '### cargo deny output',
+                '```',
+                denyOut.substring(0, 4000),
+                '```',
+              ].join('\n'),
+              labels: ['security', 'dependencies'],
+            });
+
+  # ─── Semgrep static analysis ────────────────────────────────────────────────
+  # Pattern scanning for common security anti-patterns in Rust code.
+  # Uploads SARIF to GitHub Advanced Security (if enabled on the repo).
+  semgrep:
+    name: semgrep
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Semgrep can run on all PRs and on schedule.
+    # Skip on automated dependency-only commits to reduce noise.
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          # Full history improves semgrep's diff-aware scanning.
+          fetch-depth: 0
+      - name: Run Semgrep (auto config — Rust ruleset)
+        id: semgrep
+        shell: bash
+        # semgrep is available as a pip package; install directly.
+        # Pin the version to prevent silent ruleset changes.
+        run: |
+          set -euo pipefail
+          pip3 install semgrep==1.90.0 --quiet
+          # Run with Rust-specific rules + generic security rules.
+          # Output in SARIF format for GitHub Security tab integration.
+          semgrep scan \
+            --config "p/rust" \
+            --config "p/secrets" \
+            --sarif \
+            --output /tmp/semgrep.sarif \
+            --error \
+            --severity WARNING \
+            . 2>&1 | tee /tmp/semgrep-output.txt || true
+          # Report exit code separately so we can upload SARIF regardless.
+          semgrep scan \
+            --config "p/rust" \
+            --config "p/secrets" \
+            --severity ERROR \
+            --error \
+            . 2>&1 | tee /tmp/semgrep-errors.txt
+        continue-on-error: true
+
+      - name: Upload SARIF results to GitHub Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@fee9466b8957867761f2d78f922ab084e3e2dd17
+        with:
+          sarif_file: /tmp/semgrep.sarif
+          category: semgrep
+        # This step may fail if GitHub Advanced Security is not enabled on the
+        # repo (feature requires GitHub Pro/Team/Enterprise or public repo).
+        continue-on-error: true
+
+      - name: Evaluate semgrep results
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXIT="${{ steps.semgrep.outcome }}"
+          if [ "${EXIT}" != "success" ]; then
+            echo "Semgrep found high-severity issues. See step output above."
+            cat /tmp/semgrep-errors.txt
+            exit 1
+          fi
+          echo "No high-severity semgrep findings."
+
+      - name: Post PR comment on semgrep failure
+        if: failure() && github.event_name == 'pull_request'
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b
+        with:
+          script: |
+            const fs = require('fs');
+            let out = '';
+            try { out = fs.readFileSync('/tmp/semgrep-errors.txt', 'utf8'); } catch (_) {}
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: [
+                '## Semgrep Security Findings',
+                '',
+                'Semgrep found high-severity issues that must be resolved before merge.',
+                '',
+                '```',
+                out.substring(0, 4000),
+                '```',
+              ].join('\n'),
+            });
+
+  # ─── Dependency pinning audit ───────────────────────────────────────────────
+  # NFR-025: all production crate deps must use `=` version pinning.
+  # This check inspects Cargo.toml workspace.dependencies for any non-pinned
+  # production dep and fails if found.
+  pinning-audit:
+    name: pinning-audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Verify production dependency pinning (NFR-025)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYEOF'
+          import re, sys, pathlib, tomllib
+
+          # Patterns that are acceptable for dev/test-only deps (not production).
+          DEV_ONLY = {"insta", "pretty_assertions", "proptest", "criterion", "kani"}
+
+          violations = []
+          for cargo_toml in pathlib.Path('.').rglob('Cargo.toml'):
+              if '.worktrees' in str(cargo_toml) or 'target' in str(cargo_toml):
+                  continue
+              try:
+                  data = tomllib.loads(cargo_toml.read_text())
+              except Exception:
+                  continue
+
+              def check_deps(deps_dict, section_name, source_file):
+                  if not deps_dict:
+                      return
+                  for dep_name, dep_spec in deps_dict.items():
+                      if dep_name in DEV_ONLY:
+                          continue
+                      # Skip workspace path deps (no version to pin)
+                      if isinstance(dep_spec, dict) and 'path' in dep_spec:
+                          continue
+                      # Extract version string
+                      if isinstance(dep_spec, str):
+                          version = dep_spec
+                      elif isinstance(dep_spec, dict):
+                          version = dep_spec.get('version', '')
+                      else:
+                          continue
+                      if not version:
+                          continue
+                      # Must start with '=' for exact pinning
+                      if not version.startswith('='):
+                          violations.append(f"{source_file}: [{section_name}] {dep_name} = \"{version}\" (must use = prefix)")
+
+              src = str(cargo_toml)
+              # Check workspace.dependencies (the authoritative location)
+              ws_deps = data.get('workspace', {}).get('dependencies', {})
+              check_deps(ws_deps, 'workspace.dependencies', src)
+              # Check per-crate [dependencies] (should use workspace = true, but verify)
+              check_deps(data.get('dependencies', {}), 'dependencies', src)
+
+          if violations:
+              print("NFR-025 VIOLATION: Production dependencies must use = version pinning.")
+              print("Found unpinned dependencies:")
+              for v in violations:
+                  print(f"  {v}")
+              print()
+              print("Fix: prefix version strings with '=' (e.g., version = \"=1.0.0\")")
+              sys.exit(1)
+          else:
+              print("NFR-025 PASS: All production dependencies use = version pinning.")
+          PYEOF

@@ -5,7 +5,7 @@
 
 # Minimum supported Rust version. Clippy warns about features
 # unavailable in this version.
-msrv = "1.85"
+msrv = "1.88"
 
 # Cognitive complexity threshold (default 25).
 # Parser combinator chains can exceed the default; we allow a bit more.
