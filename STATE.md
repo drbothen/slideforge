@@ -3,7 +3,7 @@ project: slideforge
 mode: greenfield
 created: 2026-05-23
 current_phase: phase-1-spec-crystallization
-status: ADVERSARIAL_STREAK_2_OF_3_PASS_17_PENDING
+status: PHASE_1_HUMAN_APPROVAL_PENDING
 last_updated: 2026-05-25
 cv_sweep_complete: true
 cv_findings_total: 6
@@ -31,9 +31,9 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. It generates branded .p
 **Workspace:** /Users/jmagady/Dev/slideforge
 **Factory worktree:** .factory/ on branch `factory-artifacts`
 
-## Current Status: ADVERSARIAL PASS 16 CLEAN — STREAK 2/3 — PASS 17 PENDING (2026-05-25)
+## Current Status: PHASE 1 ADVERSARIAL CONVERGENCE ACHIEVED — HUMAN APPROVAL GATE PENDING (2026-05-25)
 
-Adversarial Pass 16 returned ZERO findings. CLEAN (strict): yes. CLEAN (PR-merge): yes. Finding trajectory: 17→12→10→6→2→2→0→2→1→3→3→1→3→1→0→0. Total fixed: 69 (63 adversarial + 6 CV). Streak 2/3. Need 1 more clean pass for convergence. Next: adversary Pass 17 — FINAL PASS. If clean → CONVERGED → human approval gate.
+Adversarial Pass 17 returned ZERO findings. CLEAN (strict): yes. CLEAN (PR-merge): yes. Final streak: Passes 15–16–17 (3/3). BC-5.39.001 satisfied. Finding trajectory: 17→12→10→6→2→2→0→2→1→3→3→1→3→1→0→0→0. Total fixed: 69 (63 adversarial + 6 CV). P1-09 DONE — CONVERGED. Full convergence trajectory archived at `.factory/cycles/v0.1.0-phase-1-spec/convergence-trajectory.md`. **Next: P1-11 Human approval gate.**
 
 ## Phase 1 Progress (as of 2026-05-24)
 
@@ -56,9 +56,9 @@ Adversarial Pass 16 returned ZERO findings. CLEAN (strict): yes. CLEAN (PR-merge
 | P1-05 | architect | DONE | P1-05 (feasibility): PASS-WITH-NOTES — all 5 notes addressed; BC-1.03.005 added |
 | P1-06 | ux-designer | DONE | .factory/specs/ux-spec/ (UX-INDEX + 10 screens + 5 flows); .factory/specs/verification-properties/ (VP-INDEX + 7 VPs) |
 | P1-07 | devops-engineer | DONE | DTU: not required; gene-transfusion: behavioral-only (75 behaviors); CI/CD: 3 workflows, 5-platform matrix |
-| P1-09 | adversary | IN_PROGRESS | Pass 1 DONE (17→0), Pass 2 DONE (12→0), Pass 3 DONE (10→0), Pass 4 DONE (6→0), Pass 5 DONE (2→0), Pass 6 DONE (2→0), Pass 7 CLEAN (0), Pass 8 DONE (2→0, streak reset), Pass 9 DONE (1→0, streak reset), Pass 10 DONE (3→0, streak reset), Pass 11 DONE (3→0, streak reset), Pass 12 DONE (1→0, streak reset), Pass 13 DONE (3→0, streak reset), Pass 14 DONE (1→0, streak reset), Pass 15 CLEAN (0) — streak 1/3, Pass 16 CLEAN (0) — streak 2/3 — Pass 17 NEXT |
+| P1-09 | adversary | DONE — CONVERGED | 17 passes, 69 findings fixed (63 adversarial + 6 CV). Trajectory: 17→12→10→6→2→2→0→2→1→3→3→1→3→1→0→0→0. Final streak: Passes 15–16–17 (3/3). BC-5.39.001 satisfied 2026-05-25. |
 | P1-10 | consistency-validator | DONE | 6 findings (2H, 2M, 2L) — all fixed. Pipeline order ×6, L2 priorities, VP-005 file, VP titles ×4, VP-002 terminology, CAP-026 init |
-| P1-11 | HUMAN | NOT_STARTED | Approval gate — blocked on P1-10 |
+| P1-11 | HUMAN | PENDING | Human approval gate — all P1 steps complete. Review spec package, then approve Phase 2. |
 
 ### Spike Verdicts (ALL 7 RESOLVED)
 
@@ -90,20 +90,18 @@ Adversarial Pass 16 returned ZERO findings. CLEAN (strict): yes. CLEAN (PR-merge
 
 ### What to do next (resume instructions)
 
-1. **P1-09 — Adversarial Pass 17 (FINAL)**: dispatch adversary for Pass 17 (fresh context). Finding trajectory: 17→12→10→6→2→2→0→2→1→3→3→1→3→1→0→0. Must achieve 3 consecutive clean passes (BC-5.39.001). Streak currently 2/3. Need 1 more clean pass for convergence. If Pass 17 is CLEAN → CONVERGED → human approval gate.
-2. **P1-11 — Human approval gate**: human review AFTER P1-09 reaches 3-clean, then Phase 2 begins.
+1. **P1-11 — Human approval gate (CURRENT STEP)**: Phase 1 spec package is complete and has achieved adversarial convergence (3 consecutive clean passes, BC-5.39.001 satisfied). Human review of the full spec package, then approve to begin Phase 2 (story decomposition).
+2. **Phase 2 — Story Decomposition**: after human approval, dispatch `vsdd-factory:phase-2-story-decomposition`. Input: all Phase 1 specs. Output: stories, dependency graph, wave schedule, holdout scenarios.
 
-**Adversary scope checklist for P1-09 Pass 17:**
-- .factory/specs/domain-spec/ (12 files)
-- .factory/specs/prd.md + 4 supplements
-- .factory/specs/behavioral-contracts/ (BC-INDEX + all BC files)
-- .factory/specs/architecture/ (ARCH-INDEX + 12 sections + 14 ADRs + feasibility)
-- .factory/specs/ux-spec/ (UX-INDEX + 10 screens + 5 flows)
-- .factory/specs/verification-properties/ (VP-INDEX + 7 VPs)
-- .factory/specs/dtu-assessment.md
-- .factory/specs/gene-transfusion-assessment.md
-- .factory/specs/cicd-setup.md
-- .factory/planning/spikes/ (all 7 resolved spikes)
+**Phase 1 spec package for human review:**
+- `.factory/specs/domain-spec/` (12 files — 30 CAPs, 22 DIs, 20 DECs, 14 ASMs, 16 Rs, 18 FMs)
+- `.factory/specs/prd.md` + 4 supplements (error-taxonomy, interface-definitions, nfr-catalog, test-vectors)
+- `.factory/specs/behavioral-contracts/` (BC-INDEX + 109 BCs)
+- `.factory/specs/architecture/` (ARCH-INDEX + 12 sections + 14 ADRs + feasibility report)
+- `.factory/specs/ux-spec/` (UX-INDEX + 10 screens + 5 flows)
+- `.factory/specs/verification-properties/` (VP-INDEX + 8 VP files)
+- `.factory/planning/` (25 DSL decisions, 14 research docs, 7 resolved spikes)
+- Convergence trajectory: `.factory/cycles/v0.1.0-phase-1-spec/convergence-trajectory.md`
 
 ## Decision Documents (canonical references)
 
@@ -230,6 +228,7 @@ Production-grade-from-day-1. Key gates:
 - 2026-05-25 — ADVERSARIAL PASS 14 COMPLETE: 1 finding (1H) — resolved. SS-03/SS-04 subsystem labels swapped in system-overview.md pipeline diagram. Finding trajectory: 17→12→10→6→2→2→0→2→1→3→3→1→3→1. Total fixed: 69 (63 adversarial + 6 CV). STREAK RESET: 0/3 — Pass 15 dispatching.
 - 2026-05-25 — ADVERSARIAL PASS 15 CLEAN: ZERO findings. CLEAN (strict): yes. CLEAN (PR-merge): yes. Finding trajectory: 17→12→10→6→2→2→0→2→1→3→3→1→3→1→0. Total fixed: 69 (63 adversarial + 6 CV). STREAK: 1/3 — Pass 16 dispatching.
 - 2026-05-25 — ADVERSARIAL PASS 16 CLEAN: ZERO findings. CLEAN (strict): yes. CLEAN (PR-merge): yes. Finding trajectory: 17→12→10→6→2→2→0→2→1→3→3→1→3→1→0→0. Total fixed: 69 (63 adversarial + 6 CV). STREAK: 2/3 — Pass 17 dispatching (FINAL PASS — if clean → CONVERGED).
+- 2026-05-25 — ADVERSARIAL PASS 17 CLEAN: ZERO findings. CLEAN (strict): yes. CLEAN (PR-merge): yes. Finding trajectory: 17→12→10→6→2→2→0→2→1→3→3→1→3→1→0→0→0. Total fixed: 69 (63 adversarial + 6 CV). STREAK: 3/3 — CONVERGED per BC-5.39.001. P1-09 DONE. STATUS → PHASE_1_HUMAN_APPROVAL_PENDING.
 
 ## Drift Items
 _(None)_
