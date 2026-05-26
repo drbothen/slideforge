@@ -1,6 +1,6 @@
 [package]
 name = "slideforge-syntax"
-description = "Component crate for slideforge"
+description = "Lexer and parser for the slideforge DSL"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,5 +11,10 @@ homepage.workspace = true
 readme = "../../README.md"
 
 [dependencies]
-miette = { workspace = true }
+slideforge-types = { workspace = true }
+chumsky = { workspace = true }
 thiserror = { workspace = true }
+ordered-float = { workspace = true }
+
+[dev-dependencies]
+insta = { workspace = true }
