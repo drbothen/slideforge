@@ -52,8 +52,12 @@ stories:
     pr: 6
     merge_commit: f178c179
   STORY-008:
-    status: draft
+    status: merged
     wave: 1
+    started: 2026-05-26
+    merged: 2026-05-26
+    pr: 7
+    merge_commit: f283b840
   STORY-009:
     status: draft
     wave: 1
