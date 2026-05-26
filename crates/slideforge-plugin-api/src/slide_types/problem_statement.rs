@@ -1,6 +1,6 @@
-//! The `problem-statement` slide type — a problem definition slide.
+//! The `problem_statement` slide type — a problem definition slide.
 //!
-//! A `problem-statement` slide articulates the core problem being addressed.
+//! A `problem_statement` slide articulates the core problem being addressed.
 //! It has required `title` and `problem` fields, with an optional `impact`
 //! field to describe the consequences of the problem.
 //!
@@ -12,10 +12,12 @@ use slideforge_types::{Brand, LaidOutSlide, SLIDE_HEIGHT, SLIDE_WIDTH, Slide};
 
 use crate::traits::{Canvas, FieldDef, LayoutError, SlideType};
 
-/// The built-in `problem-statement` slide type.
+use super::common_optional_fields;
+
+/// The built-in `problem_statement` slide type.
 ///
 /// Required fields: `title`, `problem`.
-/// Optional fields: `impact`, `notes`, `footer`, `logo`, `tags`.
+/// Optional fields: `impact`, plus common optional fields (`report`, `detail`, etc.).
 ///
 /// Maps to the `"Title and Content"` OOXML layout.
 #[derive(Debug)]
@@ -28,6 +30,15 @@ impl ProblemStatementSlideType {
     /// Construct a new `ProblemStatementSlideType` with its canonical field definitions.
     #[must_use]
     pub fn new() -> Self {
+        let mut optional = vec![FieldDef {
+            name: Arc::from("impact"),
+            description: Arc::from(
+                "The business or human impact of the problem if left unsolved.",
+            ),
+            required: false,
+            default_value: None,
+        }];
+        optional.extend(common_optional_fields());
         Self {
             required: vec![
                 FieldDef {
@@ -45,40 +56,7 @@ impl ProblemStatementSlideType {
                     default_value: None,
                 },
             ],
-            optional: vec![
-                FieldDef {
-                    name: Arc::from("impact"),
-                    description: Arc::from(
-                        "The business or human impact of the problem if left unsolved.",
-                    ),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("notes"),
-                    description: Arc::from("Presenter notes for this slide."),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("footer"),
-                    description: Arc::from("Override footer text for this slide."),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("logo"),
-                    description: Arc::from("Override the brand logo for this slide."),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("tags"),
-                    description: Arc::from("User-defined tags for filtering and grouping."),
-                    required: false,
-                    default_value: None,
-                },
-            ],
+            optional,
         }
     }
 }
@@ -91,7 +69,7 @@ impl Default for ProblemStatementSlideType {
 
 impl SlideType for ProblemStatementSlideType {
     fn id(&self) -> &'static str {
-        "problem-statement"
+        "problem_statement"
     }
 
     fn required_fields(&self) -> &[FieldDef] {

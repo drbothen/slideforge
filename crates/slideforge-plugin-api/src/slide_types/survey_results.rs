@@ -1,6 +1,6 @@
-//! The `survey-results` slide type — a survey or poll results slide.
+//! The `survey_results` slide type — a survey or poll results slide.
 //!
-//! A `survey-results` slide displays findings from a survey, poll, or
+//! A `survey_results` slide displays findings from a survey, poll, or
 //! customer research study. Results can be provided as a structured list,
 //! chart data, or body blocks.
 //!
@@ -12,10 +12,12 @@ use slideforge_types::{Brand, LaidOutSlide, SLIDE_HEIGHT, SLIDE_WIDTH, Slide};
 
 use crate::traits::{Canvas, FieldDef, LayoutError, SlideType};
 
-/// The built-in `survey-results` slide type.
+use super::common_optional_fields;
+
+/// The built-in `survey_results` slide type.
 ///
 /// Required fields: `title`.
-/// Optional fields: `results`, `notes`, `footer`, `logo`, `tags`.
+/// Optional fields: `results`, plus common optional fields (`report`, `detail`, etc.).
 ///
 /// Maps to the `"Title and Content"` OOXML layout.
 #[derive(Debug)]
@@ -28,6 +30,15 @@ impl SurveyResultsSlideType {
     /// Construct a new `SurveyResultsSlideType` with its canonical field definitions.
     #[must_use]
     pub fn new() -> Self {
+        let mut optional = vec![FieldDef {
+            name: Arc::from("results"),
+            description: Arc::from(
+                "Structured survey results data. Can be provided as body blocks instead.",
+            ),
+            required: false,
+            default_value: None,
+        }];
+        optional.extend(common_optional_fields());
         Self {
             required: vec![FieldDef {
                 name: Arc::from("title"),
@@ -37,40 +48,7 @@ impl SurveyResultsSlideType {
                 required: true,
                 default_value: None,
             }],
-            optional: vec![
-                FieldDef {
-                    name: Arc::from("results"),
-                    description: Arc::from(
-                        "Structured survey results data. Can be provided as body blocks instead.",
-                    ),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("notes"),
-                    description: Arc::from("Presenter notes for this slide."),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("footer"),
-                    description: Arc::from("Override footer text for this slide."),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("logo"),
-                    description: Arc::from("Override the brand logo for this slide."),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("tags"),
-                    description: Arc::from("User-defined tags for filtering and grouping."),
-                    required: false,
-                    default_value: None,
-                },
-            ],
+            optional,
         }
     }
 }
@@ -83,7 +61,7 @@ impl Default for SurveyResultsSlideType {
 
 impl SlideType for SurveyResultsSlideType {
     fn id(&self) -> &'static str {
-        "survey-results"
+        "survey_results"
     }
 
     fn required_fields(&self) -> &[FieldDef] {

@@ -1,6 +1,6 @@
-//! The `two-col` slide type — a two-column comparison slide.
+//! The `two_col` slide type — a two-column comparison slide.
 //!
-//! A `two-col` slide presents content in two side-by-side columns, each with
+//! A `two_col` slide presents content in two side-by-side columns, each with
 //! its own heading and body. It maps to the `"Two Content"` PPTX layout.
 
 use std::sync::Arc;
@@ -9,10 +9,12 @@ use slideforge_types::{Brand, LaidOutSlide, SLIDE_HEIGHT, SLIDE_WIDTH, Slide};
 
 use crate::traits::{Canvas, FieldDef, LayoutError, SlideType};
 
-/// The built-in `two-col` slide type.
+use super::common_optional_fields;
+
+/// The built-in `two_col` slide type.
 ///
 /// Required fields: `title`, `left`, `right`.
-/// Optional fields: `notes`, `footer`, `logo`, `tags`.
+/// Optional fields: `report`, `detail`, plus common optional fields.
 ///
 /// Maps to the `"Two Content"` OOXML layout.
 #[derive(Debug)]
@@ -46,32 +48,7 @@ impl TwoColSlideType {
                     default_value: None,
                 },
             ],
-            optional: vec![
-                FieldDef {
-                    name: Arc::from("notes"),
-                    description: Arc::from("Presenter notes for this slide."),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("footer"),
-                    description: Arc::from("Override footer text for this slide."),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("logo"),
-                    description: Arc::from("Override the brand logo for this slide."),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("tags"),
-                    description: Arc::from("User-defined tags for filtering and grouping."),
-                    required: false,
-                    default_value: None,
-                },
-            ],
+            optional: common_optional_fields(),
         }
     }
 }
@@ -84,7 +61,7 @@ impl Default for TwoColSlideType {
 
 impl SlideType for TwoColSlideType {
     fn id(&self) -> &'static str {
-        "two-col"
+        "two_col"
     }
 
     fn required_fields(&self) -> &[FieldDef] {

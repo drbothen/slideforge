@@ -1,7 +1,7 @@
 //! The `toc` slide type — a table of contents slide.
 //!
 //! A `toc` slide shows the major sections of the presentation, typically
-//! auto-generated from `section-break` slides. Maps to the
+//! auto-generated from `section_break` slides. Maps to the
 //! `"Title and Content"` PPTX layout.
 
 use std::sync::Arc;
@@ -10,10 +10,12 @@ use slideforge_types::{Brand, LaidOutSlide, SLIDE_HEIGHT, SLIDE_WIDTH, Slide};
 
 use crate::traits::{Canvas, FieldDef, LayoutError, SlideType};
 
+use super::common_optional_fields;
+
 /// The built-in `toc` slide type.
 ///
 /// Required fields: `title`.
-/// Optional fields: `notes`, `footer`, `logo`, `tags`.
+/// Optional fields: common optional fields.
 ///
 /// Maps to the `"Title and Content"` OOXML layout.
 #[derive(Debug)]
@@ -35,32 +37,7 @@ impl TocSlideType {
                 required: true,
                 default_value: None,
             }],
-            optional: vec![
-                FieldDef {
-                    name: Arc::from("notes"),
-                    description: Arc::from("Presenter notes for this slide."),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("footer"),
-                    description: Arc::from("Override footer text for this slide."),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("logo"),
-                    description: Arc::from("Override the brand logo for this slide."),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("tags"),
-                    description: Arc::from("User-defined tags for filtering and grouping."),
-                    required: false,
-                    default_value: None,
-                },
-            ],
+            optional: common_optional_fields(),
         }
     }
 }

@@ -11,10 +11,12 @@ use slideforge_types::{Brand, LaidOutSlide, SLIDE_HEIGHT, SLIDE_WIDTH, Slide};
 
 use crate::traits::{Canvas, FieldDef, LayoutError, SlideType};
 
+use super::common_optional_fields;
+
 /// The built-in `matrix` slide type.
 ///
 /// Required fields: `title`.
-/// Optional fields: `cells`, `notes`, `footer`, `logo`, `tags`.
+/// Optional fields: `cells`, plus common optional fields (`report`, `detail`, etc.).
 ///
 /// Maps to the `"Title and Content"` OOXML layout.
 #[derive(Debug)]
@@ -27,48 +29,26 @@ impl MatrixSlideType {
     /// Construct a new `MatrixSlideType` with its canonical field definitions.
     #[must_use]
     pub fn new() -> Self {
+        let mut optional = vec![FieldDef {
+            name: Arc::from("cells"),
+            description: Arc::from(
+                "Grid cell content definitions. Structure depends on the matrix \
+                 dimensions. Can be provided as body blocks instead.",
+            ),
+            required: false,
+            default_value: None,
+        }];
+        optional.extend(common_optional_fields());
         Self {
             required: vec![FieldDef {
                 name: Arc::from("title"),
-                description: Arc::from("The slide title (e.g., \"Impact / Effort Matrix\")."),
+                description: Arc::from(
+                    "The slide title (e.g., \"Impact / Effort Matrix\").",
+                ),
                 required: true,
                 default_value: None,
             }],
-            optional: vec![
-                FieldDef {
-                    name: Arc::from("cells"),
-                    description: Arc::from(
-                        "Grid cell content definitions. Structure depends on the matrix \
-                         dimensions. Can be provided as body blocks instead.",
-                    ),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("notes"),
-                    description: Arc::from("Presenter notes for this slide."),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("footer"),
-                    description: Arc::from("Override footer text for this slide."),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("logo"),
-                    description: Arc::from("Override the brand logo for this slide."),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("tags"),
-                    description: Arc::from("User-defined tags for filtering and grouping."),
-                    required: false,
-                    default_value: None,
-                },
-            ],
+            optional,
         }
     }
 }

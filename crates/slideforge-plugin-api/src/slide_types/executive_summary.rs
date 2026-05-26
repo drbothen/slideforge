@@ -1,6 +1,6 @@
-//! The `executive-summary` slide type — a high-level executive overview slide.
+//! The `executive_summary` slide type — a high-level executive overview slide.
 //!
-//! An `executive-summary` slide distills the most critical information for
+//! An `executive_summary` slide distills the most critical information for
 //! executive stakeholders. It has a required `title` and `summary`, with an
 //! optional bullet list for supporting points.
 //!
@@ -12,10 +12,12 @@ use slideforge_types::{Brand, LaidOutSlide, SLIDE_HEIGHT, SLIDE_WIDTH, Slide};
 
 use crate::traits::{Canvas, FieldDef, LayoutError, SlideType};
 
-/// The built-in `executive-summary` slide type.
+use super::common_optional_fields;
+
+/// The built-in `executive_summary` slide type.
 ///
 /// Required fields: `title`, `summary`.
-/// Optional fields: `bullets`, `notes`, `footer`, `logo`, `tags`.
+/// Optional fields: `bullets`, plus common optional fields (`report`, `detail`, etc.).
 ///
 /// Maps to the `"Title and Content"` OOXML layout.
 #[derive(Debug)]
@@ -28,6 +30,15 @@ impl ExecutiveSummarySlideType {
     /// Construct a new `ExecutiveSummarySlideType` with its canonical field definitions.
     #[must_use]
     pub fn new() -> Self {
+        let mut optional = vec![FieldDef {
+            name: Arc::from("bullets"),
+            description: Arc::from(
+                "Supporting bullet points that elaborate on the summary.",
+            ),
+            required: false,
+            default_value: None,
+        }];
+        optional.extend(common_optional_fields());
         Self {
             required: vec![
                 FieldDef {
@@ -38,45 +49,14 @@ impl ExecutiveSummarySlideType {
                 },
                 FieldDef {
                     name: Arc::from("summary"),
-                    description: Arc::from("The one-paragraph executive summary (3-5 sentences)."),
+                    description: Arc::from(
+                        "The one-paragraph executive summary (3-5 sentences).",
+                    ),
                     required: true,
                     default_value: None,
                 },
             ],
-            optional: vec![
-                FieldDef {
-                    name: Arc::from("bullets"),
-                    description: Arc::from(
-                        "Supporting bullet points that elaborate on the summary.",
-                    ),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("notes"),
-                    description: Arc::from("Presenter notes for this slide."),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("footer"),
-                    description: Arc::from("Override footer text for this slide."),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("logo"),
-                    description: Arc::from("Override the brand logo for this slide."),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("tags"),
-                    description: Arc::from("User-defined tags for filtering and grouping."),
-                    required: false,
-                    default_value: None,
-                },
-            ],
+            optional,
         }
     }
 }
@@ -89,7 +69,7 @@ impl Default for ExecutiveSummarySlideType {
 
 impl SlideType for ExecutiveSummarySlideType {
     fn id(&self) -> &'static str {
-        "executive-summary"
+        "executive_summary"
     }
 
     fn required_fields(&self) -> &[FieldDef] {

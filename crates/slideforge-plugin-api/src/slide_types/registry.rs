@@ -9,9 +9,7 @@
 //!
 //! ## Default registry
 //!
-//! [`SlideTypeRegistry::default`] pre-registers all built-in slide types.
-//! The implementer will add the remaining 27 types in subsequent stories.
-//! Currently, 4 representative types are registered for Red Gate verification.
+//! [`SlideTypeRegistry::default`] pre-registers all 31 built-in slide types.
 //!
 //! ## Thread safety
 //!
@@ -103,9 +101,12 @@ impl SlideTypeRegistry {
     /// ```
     #[must_use]
     pub fn suggest(&self, unknown: &str) -> Option<&str> {
+        // Normalize to lowercase before distance comparison so that "CONTENT"
+        // and "Title" match the same as their lowercase equivalents (F-008).
+        let unknown_lower = unknown.to_lowercase();
         let mut best: Option<(&str, usize)> = None;
         for kw in &self.keywords {
-            let dist = strsim::levenshtein(unknown, kw.as_ref());
+            let dist = strsim::levenshtein(&unknown_lower, kw.as_ref());
             if dist <= 3 {
                 let is_better = match best {
                     None => true,
@@ -133,8 +134,9 @@ impl SlideTypeRegistry {
 impl Default for SlideTypeRegistry {
     /// Create a registry pre-populated with all 31 built-in slide types.
     ///
-    /// Registration order matches the canonical slide type table. Types are
-    /// accessible by keyword via [`Self::lookup_by_keyword`].
+    /// Registration order matches the canonical slide type table. All types
+    /// use underscore-separated keywords (e.g., `section_break`, `stat_callout`).
+    /// Types are accessible by keyword via [`Self::lookup_by_keyword`].
     fn default() -> Self {
         let mut r = Self::new();
         // Core presentation structure
@@ -205,35 +207,46 @@ pub fn validate_fields(slide: &Slide, slide_type: &dyn SlideType) -> Vec<Diagnos
     let known = known_field_names(slide_type);
 
     // Check all required fields: missing → E-VAL-101, empty string → E-VAL-102.
+    // Build the required field list once for use in diagnostic hints (F-010).
+    let required_list: Vec<&str> = slide_type
+        .required_fields()
+        .iter()
+        .map(|f| f.name.as_ref())
+        .collect();
+    let required_list_str = required_list.join(", ");
+    let type_id = slide_type.id();
+
     for field_def in slide_type.required_fields() {
         match slide.fields.get(field_def.name.as_ref()) {
             None => {
-                let slide_type_id = &slide.slide_type;
                 let field_name = &field_def.name;
                 diags.push(Diagnostic {
                     severity: DiagnosticSeverity::Error,
                     code: Arc::from("E-VAL-101"),
                     message: Arc::from(format!(
-                        "slide type '{slide_type_id}': required field '{field_name}' is missing"
+                        "Required field '{field_name}' missing on {type_id} slide. \
+                         Required fields for '{type_id}': [{required_list_str}]."
                     )),
                     span: slide.source_span.clone(),
                     hint: Some(Arc::from(format!(
-                        "add '{field_name}: <value>' to this slide block"
+                        "add '{field_name}: <value>' to this slide block. \
+                         Required fields for '{type_id}': [{required_list_str}]."
                     ))),
                 });
             },
             Some(FieldValue::Literal(Value::Str(s))) if s.is_empty() => {
-                let slide_type_id = &slide.slide_type;
                 let field_name = &field_def.name;
                 diags.push(Diagnostic {
                     severity: DiagnosticSeverity::Error,
                     code: Arc::from("E-VAL-102"),
                     message: Arc::from(format!(
-                        "slide type '{slide_type_id}': required field '{field_name}' must not be empty"
+                        "Required field '{field_name}' is empty on {type_id} slide. \
+                         Required fields for '{type_id}': [{required_list_str}]."
                     )),
                     span: slide.source_span.clone(),
                     hint: Some(Arc::from(format!(
-                        "provide a non-empty value for '{field_name}'"
+                        "provide a non-empty value for '{field_name}'. \
+                         Required fields for '{type_id}': [{required_list_str}]."
                     ))),
                 });
             },
@@ -351,7 +364,7 @@ mod tests {
         assert!(t.required_fields().is_empty());
     }
 
-    /// Exercises BC-1.03.001: `stat-callout` type has exactly 4 required fields.
+    /// Exercises BC-1.03.001: `stat_callout` type has exactly 4 required fields.
     #[test]
     fn test_bc_1_03_001_stat_callout_has_four_required_fields() {
         let t = StatCalloutSlideType::new();
@@ -367,7 +380,7 @@ mod tests {
         assert!(reg.lookup_by_keyword("title").is_some());
         assert!(reg.lookup_by_keyword("content").is_some());
         assert!(reg.lookup_by_keyword("blank").is_some());
-        assert!(reg.lookup_by_keyword("stat-callout").is_some());
+        assert!(reg.lookup_by_keyword("stat_callout").is_some());
     }
 
     /// Exercises BC-1.03.002: unknown keyword returns None.
@@ -427,7 +440,7 @@ mod tests {
         assert!(keywords.contains(&"title"));
         assert!(keywords.contains(&"content"));
         assert!(keywords.contains(&"blank"));
-        assert!(keywords.contains(&"stat-callout"));
+        assert!(keywords.contains(&"stat_callout"));
     }
 
     // ── AC-005: validate_fields accumulates all missing field diagnostics ─────
@@ -456,16 +469,16 @@ mod tests {
 
     // ── AC-006: validate_fields returns ALL errors, not just first ───────────
 
-    /// Exercises BC-1.03.006: `validate_fields` on `stat-callout` with zero
+    /// Exercises BC-1.03.006: `validate_fields` on `stat_callout` with zero
     /// fields returns 4 Error diagnostics (one per required field).
     ///
     /// FAILS at Red Gate: `validate_fields` is `todo!()`.
     #[test]
     fn test_bc_1_03_006_validate_fields_accumulates_all_errors() {
         let reg = SlideTypeRegistry::default();
-        let slide_type = reg.lookup_by_keyword("stat-callout").unwrap();
+        let slide_type = reg.lookup_by_keyword("stat_callout").unwrap();
         // Slide has no fields → all 4 required fields are missing.
-        let slide = make_slide("stat-callout", vec![]);
+        let slide = make_slide("stat_callout", vec![]);
         let diagnostics = validate_fields(&slide, slide_type);
         let error_count = diagnostics
             .iter()
@@ -542,7 +555,7 @@ mod tests {
 
     // ── AC-010: stat_callout has 4 required fields ───────────────────────────
 
-    /// Exercises BC-1.03.010: `stat-callout` has exactly 4 required fields
+    /// Exercises BC-1.03.010: `stat_callout` has exactly 4 required fields
     /// with the canonical names `stat_1`, `label_1`, `stat_2`, `label_2`.
     #[test]
     fn test_bc_1_03_010_stat_callout_required_field_names() {
@@ -620,14 +633,14 @@ mod tests {
         assert!(result.is_ok(), "content lay_out must return Ok");
     }
 
-    /// Exercises BC-1.03.012: `lay_out` returns `Ok` for `stat-callout`.
+    /// Exercises BC-1.03.012: `lay_out` returns `Ok` for `stat_callout`.
     #[test]
     fn test_bc_1_03_012_lay_out_returns_ok_for_stat_callout() {
         use crate::traits::Canvas;
 
         let t = StatCalloutSlideType::new();
         let slide = make_slide(
-            "stat-callout",
+            "stat_callout",
             vec![
                 ("stat_1", "93%"),
                 ("label_1", "Customer satisfaction"),
@@ -638,23 +651,15 @@ mod tests {
         let brand = make_stub_brand();
         let canvas = Canvas::default();
         let result = t.lay_out(&slide, &brand, canvas);
-        assert!(result.is_ok(), "stat-callout lay_out must return Ok");
+        assert!(result.is_ok(), "stat_callout lay_out must return Ok");
     }
 
     // ── AC-017: all_keywords().len() == N ────────────────────────────────────
 
     /// Exercises BC-1.03.017: `all_keywords()` length matches registration count.
-    ///
-    /// Currently 4 representative types are registered. The implementer will
-    /// raise this to 31 by adding the remaining types.
-    ///
-    /// FAILS at Red Gate: the assertion value (31) won't match until all 31
-    /// types are registered. The current default registers only 4.
     #[test]
     fn test_bc_1_03_017_all_keywords_len_equals_31() {
         let reg = SlideTypeRegistry::default();
-        // This MUST fail at Red Gate (only 4 are registered).
-        // Implementer brings this to green by registering all 31 types.
         assert_eq!(
             reg.all_keywords().len(),
             31,
@@ -662,6 +667,55 @@ mod tests {
              currently registers {}",
             reg.all_keywords().len()
         );
+    }
+
+    // ── F-008: suggest() case-insensitive matching ────────────────────────────
+
+    /// Exercises F-008: `suggest()` matches case-insensitively.
+    #[test]
+    fn test_suggest_case_insensitive() {
+        let reg = SlideTypeRegistry::default();
+        assert_eq!(reg.suggest("CONTENT"), Some("content"));
+        assert_eq!(reg.suggest("Title"), Some("title"));
+        assert_eq!(reg.suggest("BLANK"), Some("blank"));
+    }
+
+    // ── F-011: parameterized lay_out test for all 31 types ────────────────────
+
+    /// Exercises BC-1.03.012 for all 31 types: `lay_out` returns Ok for every
+    /// registered slide type (not just the 4 representative ones).
+    #[test]
+    fn test_all_31_types_lay_out_returns_ok() {
+        use crate::traits::Canvas;
+        use slideforge_types::{Brand, BrandFonts, BrandPalette, SourceSpan};
+
+        let brand = Brand {
+            name: Arc::from("stub"),
+            palette: BrandPalette {
+                primary: Arc::from("#000000"),
+                secondary: Arc::from("#ffffff"),
+                accent: Arc::from("#0000ff"),
+                neutral: Arc::from("#f5f5f5"),
+            },
+            fonts: BrandFonts {
+                heading: Arc::from("Calibri"),
+                body: Arc::from("Calibri"),
+                mono: Arc::from("Courier New"),
+            },
+            layouts: vec![],
+            span: SourceSpan::default(),
+        };
+
+        let reg = SlideTypeRegistry::default();
+        for kw in reg.all_keywords() {
+            let slide_type = reg.lookup_by_keyword(kw.as_ref()).unwrap();
+            let slide = make_slide(kw.as_ref(), vec![]);
+            let result = slide_type.lay_out(&slide, &brand, Canvas::default());
+            assert!(
+                result.is_ok(),
+                "lay_out() for '{kw}' must return Ok, got: {result:?}"
+            );
+        }
     }
 
     // ── Validate fields: clean slide produces no diagnostics ──────────────────

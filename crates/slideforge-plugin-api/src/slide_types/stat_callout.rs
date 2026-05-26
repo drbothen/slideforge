@@ -1,10 +1,10 @@
-//! The `stat-callout` slide type — a two-statistic highlight slide.
+//! The `stat_callout` slide type — a two-statistic highlight slide.
 //!
-//! A `stat-callout` slide displays two key statistics side-by-side, each with
+//! A `stat_callout` slide displays two key statistics side-by-side, each with
 //! a numeric value and a descriptive label. This is a high-impact slide type
 //! frequently used in executive summaries.
 //!
-//! The DSL keyword is `stat-callout` (with a hyphen).
+//! The DSL keyword is `stat_callout` (with an underscore).
 
 use std::sync::Arc;
 
@@ -12,10 +12,12 @@ use slideforge_types::{Brand, LaidOutSlide, SLIDE_HEIGHT, SLIDE_WIDTH, Slide};
 
 use crate::traits::{Canvas, FieldDef, LayoutError, SlideType};
 
-/// The built-in `stat-callout` slide type.
+use super::common_optional_fields;
+
+/// The built-in `stat_callout` slide type.
 ///
 /// Required fields: `stat_1`, `label_1`, `stat_2`, `label_2`.
-/// Optional fields: `title`, `context`.
+/// Optional fields: `stat_3`, `label_3`, plus common optional fields.
 ///
 /// Maps to the `"Two Content"` OOXML layout.
 #[derive(Debug)]
@@ -28,6 +30,25 @@ impl StatCalloutSlideType {
     /// Construct a new `StatCalloutSlideType` with its canonical field definitions.
     #[must_use]
     pub fn new() -> Self {
+        let mut optional = vec![
+            FieldDef {
+                name: Arc::from("stat_3"),
+                description: Arc::from(
+                    "An optional third statistic value (e.g., \"$4.2B\", \"93%\", \"12x\").",
+                ),
+                required: false,
+                default_value: None,
+            },
+            FieldDef {
+                name: Arc::from("label_3"),
+                description: Arc::from(
+                    "A short label describing what stat_3 measures (≤ 6 words).",
+                ),
+                required: false,
+                default_value: None,
+            },
+        ];
+        optional.extend(common_optional_fields());
         Self {
             required: vec![
                 FieldDef {
@@ -63,20 +84,7 @@ impl StatCalloutSlideType {
                     default_value: None,
                 },
             ],
-            optional: vec![
-                FieldDef {
-                    name: Arc::from("title"),
-                    description: Arc::from("Optional section title above the statistics."),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("context"),
-                    description: Arc::from("A short contextual note below the statistics."),
-                    required: false,
-                    default_value: None,
-                },
-            ],
+            optional,
         }
     }
 }
@@ -89,7 +97,7 @@ impl Default for StatCalloutSlideType {
 
 impl SlideType for StatCalloutSlideType {
     fn id(&self) -> &'static str {
-        "stat-callout"
+        "stat_callout"
     }
 
     fn required_fields(&self) -> &[FieldDef] {

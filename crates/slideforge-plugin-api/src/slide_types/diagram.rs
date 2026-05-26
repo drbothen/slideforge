@@ -2,7 +2,8 @@
 //!
 //! A `diagram` slide renders a diagram from Mermaid syntax (or another
 //! `DiagramRenderer` plugin) and places it on the slide. The `alt` field
-//! is required for WCAG AA compliance.
+//! is optional per spec and is included via common optional fields; authors
+//! should provide it for WCAG AA compliance on non-decorative diagrams.
 //!
 //! Maps to the `"Title and Content"` PPTX layout.
 
@@ -12,10 +13,13 @@ use slideforge_types::{Brand, LaidOutSlide, SLIDE_HEIGHT, SLIDE_WIDTH, Slide};
 
 use crate::traits::{Canvas, FieldDef, LayoutError, SlideType};
 
+use super::common_optional_fields;
+
 /// The built-in `diagram` slide type.
 ///
-/// Required fields: `title`, `diagram`, `alt`.
-/// Optional fields: `notes`, `footer`, `logo`, `decorative`, `tags`.
+/// Required fields: `title`, `diagram`.
+/// Optional fields: `report`, `detail`, plus common optional fields.
+/// Note: `alt` is included via common optional fields.
 ///
 /// Maps to the `"Title and Content"` OOXML layout.
 #[derive(Debug)]
@@ -45,51 +49,8 @@ impl DiagramSlideType {
                     required: true,
                     default_value: None,
                 },
-                FieldDef {
-                    name: Arc::from("alt"),
-                    description: Arc::from(
-                        "Accessibility alt text describing the diagram and its meaning. \
-                         Required for WCAG AA compliance.",
-                    ),
-                    required: true,
-                    default_value: None,
-                },
             ],
-            optional: vec![
-                FieldDef {
-                    name: Arc::from("decorative"),
-                    description: Arc::from(
-                        "When true, marks the diagram as decorative (empty alt in output). \
-                         Overrides the `alt` field.",
-                    ),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("notes"),
-                    description: Arc::from("Presenter notes for this slide."),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("footer"),
-                    description: Arc::from("Override footer text for this slide."),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("logo"),
-                    description: Arc::from("Override the brand logo for this slide."),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("tags"),
-                    description: Arc::from("User-defined tags for filtering and grouping."),
-                    required: false,
-                    default_value: None,
-                },
-            ],
+            optional: common_optional_fields(),
         }
     }
 }

@@ -1,6 +1,6 @@
-//! The `code-sample` slide type — a code listing slide.
+//! The `code_sample` slide type — a code listing slide.
 //!
-//! A `code-sample` slide displays source code with syntax highlighting.
+//! A `code_sample` slide displays source code with syntax highlighting.
 //! The `code` field is required; `language` specifies the syntax highlighting
 //! language (defaults to plain text if omitted).
 //!
@@ -12,10 +12,12 @@ use slideforge_types::{Brand, LaidOutSlide, SLIDE_HEIGHT, SLIDE_WIDTH, Slide};
 
 use crate::traits::{Canvas, FieldDef, LayoutError, SlideType};
 
-/// The built-in `code-sample` slide type.
+use super::common_optional_fields;
+
+/// The built-in `code_sample` slide type.
 ///
 /// Required fields: `title`, `code`.
-/// Optional fields: `language`, `notes`, `footer`, `logo`, `tags`.
+/// Optional fields: `language`, plus common optional fields.
 ///
 /// Maps to the `"Title and Content"` OOXML layout.
 #[derive(Debug)]
@@ -28,6 +30,16 @@ impl CodeSampleSlideType {
     /// Construct a new `CodeSampleSlideType` with its canonical field definitions.
     #[must_use]
     pub fn new() -> Self {
+        let mut optional = vec![FieldDef {
+            name: Arc::from("language"),
+            description: Arc::from(
+                "Programming language for syntax highlighting (e.g., \"rust\", \
+                 \"python\", \"typescript\"). Defaults to plain text.",
+            ),
+            required: false,
+            default_value: None,
+        }];
+        optional.extend(common_optional_fields());
         Self {
             required: vec![
                 FieldDef {
@@ -46,41 +58,7 @@ impl CodeSampleSlideType {
                     default_value: None,
                 },
             ],
-            optional: vec![
-                FieldDef {
-                    name: Arc::from("language"),
-                    description: Arc::from(
-                        "Programming language for syntax highlighting (e.g., \"rust\", \
-                         \"python\", \"typescript\"). Defaults to plain text.",
-                    ),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("notes"),
-                    description: Arc::from("Presenter notes for this slide."),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("footer"),
-                    description: Arc::from("Override footer text for this slide."),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("logo"),
-                    description: Arc::from("Override the brand logo for this slide."),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("tags"),
-                    description: Arc::from("User-defined tags for filtering and grouping."),
-                    required: false,
-                    default_value: None,
-                },
-            ],
+            optional,
         }
     }
 }
@@ -93,7 +71,7 @@ impl Default for CodeSampleSlideType {
 
 impl SlideType for CodeSampleSlideType {
     fn id(&self) -> &'static str {
-        "code-sample"
+        "code_sample"
     }
 
     fn required_fields(&self) -> &[FieldDef] {

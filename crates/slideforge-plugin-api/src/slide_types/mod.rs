@@ -7,21 +7,25 @@
 //! 2. **[`validate_fields`]** — accumulates all field-validation diagnostics
 //!    for a slide against its declared type schema.
 //! 3. **Individual slide type structs** — one per built-in type keyword.
-//!    Currently 4 of 31 are implemented (Red Gate state); the implementer
-//!    adds the remaining 27 as part of STORY-003.
+//!    All 31 built-in types are implemented as part of STORY-003.
 //! 4. **[`SLIDE_TYPE_REGISTRY`]** — a process-wide lazy singleton holding the
 //!    default registry for use by the evaluator and layout engine.
+//! 5. **[`common_optional_fields`]** — returns the universal optional fields
+//!    shared by all 31 slide types.
 //!
 //! ## Adding a new slide type
 //!
-//! 1. Create `crates/slideforge-types/src/slide_types/<name>.rs`
+//! 1. Create `crates/slideforge-plugin-api/src/slide_types/<name>.rs`
 //! 2. Implement `SlideType` for the new struct
 //! 3. `pub mod <name>;` in this file
 //! 4. Add `r.register(Box::new(<Name>SlideType::new()))` in
 //!    [`SlideTypeRegistry::default`]
 //! 5. Update the assertion in `test_bc_1_03_017_all_keywords_len_equals_31`
 
+use std::sync::Arc;
 use std::sync::LazyLock;
+
+use crate::traits::FieldDef;
 
 pub mod agenda;
 pub mod bio;
@@ -57,6 +61,97 @@ pub mod two_col;
 pub mod video;
 
 pub use registry::{SlideTypeRegistry, validate_fields};
+
+/// Returns the universal optional fields shared by all 31 built-in slide types.
+///
+/// These fields are accepted on every slide regardless of type. Individual
+/// slide types call this function and extend their type-specific optional
+/// fields with the result.
+///
+/// # Universal optional fields
+///
+/// | Field | Purpose |
+/// |-------|---------|
+/// | `notes` | Presenter notes (writing register) |
+/// | `report` | Reader-facing report register |
+/// | `detail` | Document-only detail register |
+/// | `tags` | User-defined tags for filtering and grouping |
+/// | `alt` | Accessibility alt text override at slide level |
+/// | `lang` | BCP-47 language tag override for this slide |
+/// | `decorative` | When true, marks the slide as decorative |
+/// | `footer` | Override footer text for this slide |
+/// | `logo` | Override the brand logo for this slide |
+#[must_use]
+pub fn common_optional_fields() -> Vec<FieldDef> {
+    vec![
+        FieldDef {
+            name: Arc::from("notes"),
+            description: Arc::from("Presenter notes for this slide (notes writing register)."),
+            required: false,
+            default_value: None,
+        },
+        FieldDef {
+            name: Arc::from("report"),
+            description: Arc::from(
+                "Reader-facing report content for this slide (report writing register).",
+            ),
+            required: false,
+            default_value: None,
+        },
+        FieldDef {
+            name: Arc::from("detail"),
+            description: Arc::from(
+                "Document-only detail content for this slide (detail writing register).",
+            ),
+            required: false,
+            default_value: None,
+        },
+        FieldDef {
+            name: Arc::from("tags"),
+            description: Arc::from("User-defined tags for filtering and grouping slides."),
+            required: false,
+            default_value: None,
+        },
+        FieldDef {
+            name: Arc::from("alt"),
+            description: Arc::from(
+                "Accessibility alt text override at the slide level. Overrides element-level alt.",
+            ),
+            required: false,
+            default_value: None,
+        },
+        FieldDef {
+            name: Arc::from("lang"),
+            description: Arc::from(
+                "BCP-47 language tag override for this slide (e.g., \"fr-FR\"). \
+                 Overrides the deck-level `lang` setting.",
+            ),
+            required: false,
+            default_value: None,
+        },
+        FieldDef {
+            name: Arc::from("decorative"),
+            description: Arc::from(
+                "When true, marks the slide as decorative (empty alt in accessibility output). \
+                 Overrides element-level `alt` fields.",
+            ),
+            required: false,
+            default_value: None,
+        },
+        FieldDef {
+            name: Arc::from("footer"),
+            description: Arc::from("Override footer text for this slide."),
+            required: false,
+            default_value: None,
+        },
+        FieldDef {
+            name: Arc::from("logo"),
+            description: Arc::from("Override the brand logo for this slide."),
+            required: false,
+            default_value: None,
+        },
+    ]
+}
 
 /// Process-wide lazy singleton of the default slide type registry.
 ///

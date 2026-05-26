@@ -6,14 +6,17 @@
 
 use std::sync::Arc;
 
-use slideforge_types::{Brand, LaidOutSlide, SLIDE_HEIGHT, SLIDE_WIDTH, Slide, Value};
+use slideforge_types::{Brand, LaidOutSlide, SLIDE_HEIGHT, SLIDE_WIDTH, Slide};
 
 use crate::traits::{Canvas, FieldDef, LayoutError, SlideType};
+
+use super::common_optional_fields;
 
 /// The built-in `content` slide type.
 ///
 /// Required fields: `title`.
-/// Optional fields: `layout`, `background`, `footer`, `notes`.
+/// Optional fields: `bullets`, `takeaway`, plus common optional fields
+/// (`notes`, `report`, `detail`, `tags`, `alt`, `lang`, `decorative`, `footer`, `logo`).
 ///
 /// Maps to the `"Title and Content"` OOXML layout.
 #[derive(Debug)]
@@ -26,6 +29,25 @@ impl ContentSlideType {
     /// Construct a new `ContentSlideType` with its canonical field definitions.
     #[must_use]
     pub fn new() -> Self {
+        let mut optional = vec![
+            FieldDef {
+                name: Arc::from("bullets"),
+                description: Arc::from(
+                    "Bullet list items for the slide body. Can be provided as body blocks instead.",
+                ),
+                required: false,
+                default_value: None,
+            },
+            FieldDef {
+                name: Arc::from("takeaway"),
+                description: Arc::from(
+                    "The key takeaway or call-to-action displayed at the bottom of the slide.",
+                ),
+                required: false,
+                default_value: None,
+            },
+        ];
+        optional.extend(common_optional_fields());
         Self {
             required: vec![FieldDef {
                 name: Arc::from("title"),
@@ -33,34 +55,7 @@ impl ContentSlideType {
                 required: true,
                 default_value: None,
             }],
-            optional: vec![
-                FieldDef {
-                    name: Arc::from("layout"),
-                    description: Arc::from(
-                        "Content layout variant: one-col (default), two-col, three-col.",
-                    ),
-                    required: false,
-                    default_value: Some(Value::Str(Arc::from("one-col"))),
-                },
-                FieldDef {
-                    name: Arc::from("background"),
-                    description: Arc::from("Override background color for this slide."),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("footer"),
-                    description: Arc::from("Override footer text for this slide."),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("notes"),
-                    description: Arc::from("Presenter notes for this slide."),
-                    required: false,
-                    default_value: None,
-                },
-            ],
+            optional,
         }
     }
 }

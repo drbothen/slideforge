@@ -12,10 +12,12 @@ use slideforge_types::{Brand, LaidOutSlide, SLIDE_HEIGHT, SLIDE_WIDTH, Slide};
 
 use crate::traits::{Canvas, FieldDef, LayoutError, SlideType};
 
+use super::common_optional_fields;
+
 /// The built-in `recommendation` slide type.
 ///
 /// Required fields: `title`, `recommendation`.
-/// Optional fields: `rationale`, `risk`, `notes`, `footer`, `logo`, `tags`.
+/// Optional fields: `rationale`, `risk`, plus common optional fields (`report`, `detail`, etc.).
 ///
 /// Maps to the `"Title and Content"` OOXML layout.
 #[derive(Debug)]
@@ -28,6 +30,25 @@ impl RecommendationSlideType {
     /// Construct a new `RecommendationSlideType` with its canonical field definitions.
     #[must_use]
     pub fn new() -> Self {
+        let mut optional = vec![
+            FieldDef {
+                name: Arc::from("rationale"),
+                description: Arc::from(
+                    "The reasoning or evidence supporting the recommendation.",
+                ),
+                required: false,
+                default_value: None,
+            },
+            FieldDef {
+                name: Arc::from("risk"),
+                description: Arc::from(
+                    "Key risks associated with the recommendation and mitigations.",
+                ),
+                required: false,
+                default_value: None,
+            },
+        ];
+        optional.extend(common_optional_fields());
         Self {
             required: vec![
                 FieldDef {
@@ -38,53 +59,14 @@ impl RecommendationSlideType {
                 },
                 FieldDef {
                     name: Arc::from("recommendation"),
-                    description: Arc::from("The specific action or decision being recommended."),
+                    description: Arc::from(
+                        "The specific action or decision being recommended.",
+                    ),
                     required: true,
                     default_value: None,
                 },
             ],
-            optional: vec![
-                FieldDef {
-                    name: Arc::from("rationale"),
-                    description: Arc::from(
-                        "The reasoning or evidence supporting the recommendation.",
-                    ),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("risk"),
-                    description: Arc::from(
-                        "Key risks associated with the recommendation and mitigations.",
-                    ),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("notes"),
-                    description: Arc::from("Presenter notes for this slide."),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("footer"),
-                    description: Arc::from("Override footer text for this slide."),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("logo"),
-                    description: Arc::from("Override the brand logo for this slide."),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("tags"),
-                    description: Arc::from("User-defined tags for filtering and grouping."),
-                    required: false,
-                    default_value: None,
-                },
-            ],
+            optional,
         }
     }
 }

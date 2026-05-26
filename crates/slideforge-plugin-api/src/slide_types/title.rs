@@ -9,10 +9,12 @@ use slideforge_types::{Brand, LaidOutSlide, SLIDE_HEIGHT, SLIDE_WIDTH, Slide};
 
 use crate::traits::{Canvas, FieldDef, LayoutError, SlideType};
 
+use super::common_optional_fields;
+
 /// The built-in `title` slide type.
 ///
 /// Required fields: `title`.
-/// Optional fields: `subtitle`, `speaker`, `date`.
+/// Optional fields: `subtitle`, `author`, `date`, plus common optional fields.
 ///
 /// Maps to the `"Title Slide"` OOXML layout.
 #[derive(Debug)]
@@ -25,6 +27,27 @@ impl TitleSlideType {
     /// Construct a new `TitleSlideType` with its canonical field definitions.
     #[must_use]
     pub fn new() -> Self {
+        let mut optional = vec![
+            FieldDef {
+                name: Arc::from("subtitle"),
+                description: Arc::from("A subtitle or deck description below the title."),
+                required: false,
+                default_value: None,
+            },
+            FieldDef {
+                name: Arc::from("author"),
+                description: Arc::from("The presenter or author name."),
+                required: false,
+                default_value: None,
+            },
+            FieldDef {
+                name: Arc::from("date"),
+                description: Arc::from("The presentation date."),
+                required: false,
+                default_value: None,
+            },
+        ];
+        optional.extend(common_optional_fields());
         Self {
             required: vec![FieldDef {
                 name: Arc::from("title"),
@@ -32,26 +55,7 @@ impl TitleSlideType {
                 required: true,
                 default_value: None,
             }],
-            optional: vec![
-                FieldDef {
-                    name: Arc::from("subtitle"),
-                    description: Arc::from("A subtitle or deck description below the title."),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("speaker"),
-                    description: Arc::from("The presenter name."),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("date"),
-                    description: Arc::from("The presentation date."),
-                    required: false,
-                    default_value: None,
-                },
-            ],
+            optional,
         }
     }
 }

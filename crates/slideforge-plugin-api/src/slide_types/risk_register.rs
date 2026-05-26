@@ -1,6 +1,6 @@
-//! The `risk-register` slide type — a structured risk register slide.
+//! The `risk_register` slide type — a structured risk register slide.
 //!
-//! A `risk-register` slide displays a table of identified risks with their
+//! A `risk_register` slide displays a table of identified risks with their
 //! likelihood, impact, and mitigation status.
 //!
 //! Maps to the `"Title and Content"` PPTX layout.
@@ -11,10 +11,12 @@ use slideforge_types::{Brand, LaidOutSlide, SLIDE_HEIGHT, SLIDE_WIDTH, Slide};
 
 use crate::traits::{Canvas, FieldDef, LayoutError, SlideType};
 
-/// The built-in `risk-register` slide type.
+use super::common_optional_fields;
+
+/// The built-in `risk_register` slide type.
 ///
 /// Required fields: `title`.
-/// Optional fields: `risks`, `notes`, `footer`, `logo`, `tags`.
+/// Optional fields: `risks`, plus common optional fields (`report`, `detail`, etc.).
 ///
 /// Maps to the `"Title and Content"` OOXML layout.
 #[derive(Debug)]
@@ -27,6 +29,16 @@ impl RiskRegisterSlideType {
     /// Construct a new `RiskRegisterSlideType` with its canonical field definitions.
     #[must_use]
     pub fn new() -> Self {
+        let mut optional = vec![FieldDef {
+            name: Arc::from("risks"),
+            description: Arc::from(
+                "List of risk entries. Each entry may include risk, likelihood, \
+                 impact, owner, and mitigation.",
+            ),
+            required: false,
+            default_value: None,
+        }];
+        optional.extend(common_optional_fields());
         Self {
             required: vec![FieldDef {
                 name: Arc::from("title"),
@@ -34,41 +46,7 @@ impl RiskRegisterSlideType {
                 required: true,
                 default_value: None,
             }],
-            optional: vec![
-                FieldDef {
-                    name: Arc::from("risks"),
-                    description: Arc::from(
-                        "List of risk entries. Each entry may include risk, likelihood, \
-                         impact, owner, and mitigation.",
-                    ),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("notes"),
-                    description: Arc::from("Presenter notes for this slide."),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("footer"),
-                    description: Arc::from("Override footer text for this slide."),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("logo"),
-                    description: Arc::from("Override the brand logo for this slide."),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("tags"),
-                    description: Arc::from("User-defined tags for filtering and grouping."),
-                    required: false,
-                    default_value: None,
-                },
-            ],
+            optional,
         }
     }
 }
@@ -81,7 +59,7 @@ impl Default for RiskRegisterSlideType {
 
 impl SlideType for RiskRegisterSlideType {
     fn id(&self) -> &'static str {
-        "risk-register"
+        "risk_register"
     }
 
     fn required_fields(&self) -> &[FieldDef] {

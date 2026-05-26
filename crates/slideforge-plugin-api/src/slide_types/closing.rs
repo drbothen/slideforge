@@ -9,10 +9,12 @@ use slideforge_types::{Brand, LaidOutSlide, SLIDE_HEIGHT, SLIDE_WIDTH, Slide};
 
 use crate::traits::{Canvas, FieldDef, LayoutError, SlideType};
 
+use super::common_optional_fields;
+
 /// The built-in `closing` slide type.
 ///
 /// Required fields: `title`.
-/// Optional fields: `call_to_action`, `contact`, `notes`, `footer`, `logo`, `tags`.
+/// Optional fields: `call_to_action`, `contact`, plus common optional fields.
 ///
 /// Maps to the `"Title Slide"` OOXML layout.
 #[derive(Debug)]
@@ -25,6 +27,25 @@ impl ClosingSlideType {
     /// Construct a new `ClosingSlideType` with its canonical field definitions.
     #[must_use]
     pub fn new() -> Self {
+        let mut optional = vec![
+            FieldDef {
+                name: Arc::from("call_to_action"),
+                description: Arc::from(
+                    "A prominent call to action displayed below the title.",
+                ),
+                required: false,
+                default_value: None,
+            },
+            FieldDef {
+                name: Arc::from("contact"),
+                description: Arc::from(
+                    "Contact information (email, website, social handles) for follow-up.",
+                ),
+                required: false,
+                default_value: None,
+            },
+        ];
+        optional.extend(common_optional_fields());
         Self {
             required: vec![FieldDef {
                 name: Arc::from("title"),
@@ -35,46 +56,7 @@ impl ClosingSlideType {
                 required: true,
                 default_value: None,
             }],
-            optional: vec![
-                FieldDef {
-                    name: Arc::from("call_to_action"),
-                    description: Arc::from("A prominent call to action displayed below the title."),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("contact"),
-                    description: Arc::from(
-                        "Contact information (email, website, social handles) for follow-up.",
-                    ),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("notes"),
-                    description: Arc::from("Presenter notes for this slide."),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("footer"),
-                    description: Arc::from("Override footer text for this slide."),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("logo"),
-                    description: Arc::from("Override the brand logo for this slide."),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("tags"),
-                    description: Arc::from("User-defined tags for filtering and grouping."),
-                    required: false,
-                    default_value: None,
-                },
-            ],
+            optional,
         }
     }
 }

@@ -11,10 +11,13 @@ use slideforge_types::{Brand, LaidOutSlide, SLIDE_HEIGHT, SLIDE_WIDTH, Slide};
 
 use crate::traits::{Canvas, FieldDef, LayoutError, SlideType};
 
+use super::common_optional_fields;
+
 /// The built-in `bio` slide type.
 ///
 /// Required fields: `name`, `title`, `bio`.
-/// Optional fields: `image`, `alt`, `notes`, `footer`, `logo`, `decorative`, `tags`.
+/// Optional fields: `image`, plus common optional fields
+/// (`notes`, `alt`, `decorative`, `tags`, `footer`, `logo`, etc.).
 ///
 /// Maps to the `"Two Content"` OOXML layout.
 #[derive(Debug)]
@@ -27,6 +30,13 @@ impl BioSlideType {
     /// Construct a new `BioSlideType` with its canonical field definitions.
     #[must_use]
     pub fn new() -> Self {
+        let mut optional = vec![FieldDef {
+            name: Arc::from("image"),
+            description: Arc::from("Path or URL to the person's photo."),
+            required: false,
+            default_value: None,
+        }];
+        optional.extend(common_optional_fields());
         Self {
             required: vec![
                 FieldDef {
@@ -50,55 +60,7 @@ impl BioSlideType {
                     default_value: None,
                 },
             ],
-            optional: vec![
-                FieldDef {
-                    name: Arc::from("image"),
-                    description: Arc::from("Path or URL to the person's photo."),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("alt"),
-                    description: Arc::from(
-                        "Accessibility alt text for the photo. Required when `image` is set \
-                         and `decorative` is false.",
-                    ),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("decorative"),
-                    description: Arc::from(
-                        "When true, marks the photo as decorative (empty alt text in output).",
-                    ),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("notes"),
-                    description: Arc::from("Presenter notes for this slide."),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("footer"),
-                    description: Arc::from("Override footer text for this slide."),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("logo"),
-                    description: Arc::from("Override the brand logo for this slide."),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("tags"),
-                    description: Arc::from("User-defined tags for filtering and grouping."),
-                    required: false,
-                    default_value: None,
-                },
-            ],
+            optional,
         }
     }
 }

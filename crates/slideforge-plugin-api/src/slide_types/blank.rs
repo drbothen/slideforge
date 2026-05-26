@@ -8,20 +8,27 @@ use slideforge_types::{Brand, LaidOutSlide, SLIDE_HEIGHT, SLIDE_WIDTH, Slide};
 
 use crate::traits::{Canvas, FieldDef, LayoutError, SlideType};
 
+use super::common_optional_fields;
+
 /// The built-in `blank` slide type.
 ///
 /// Required fields: none.
-/// Optional fields: none (all content via `shape:` blocks).
+/// Optional fields: common optional fields (`notes`, `tags`, `alt`, `lang`,
+/// `decorative`, `footer`, `logo`, `report`, `detail`).
 ///
 /// Maps to the `"Blank"` OOXML layout.
 #[derive(Debug)]
-pub struct BlankSlideType;
+pub struct BlankSlideType {
+    optional: Vec<FieldDef>,
+}
 
 impl BlankSlideType {
     /// Construct a new `BlankSlideType`.
     #[must_use]
     pub fn new() -> Self {
-        Self
+        Self {
+            optional: common_optional_fields(),
+        }
     }
 }
 
@@ -41,7 +48,7 @@ impl SlideType for BlankSlideType {
     }
 
     fn optional_fields(&self) -> &[FieldDef] {
-        &[]
+        &self.optional
     }
 
     fn layout_name(&self) -> &'static str {

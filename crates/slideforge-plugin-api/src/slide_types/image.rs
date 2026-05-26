@@ -12,10 +12,12 @@ use slideforge_types::{Brand, LaidOutSlide, SLIDE_HEIGHT, SLIDE_WIDTH, Slide};
 
 use crate::traits::{Canvas, FieldDef, LayoutError, SlideType};
 
+use super::common_optional_fields;
+
 /// The built-in `image` slide type.
 ///
 /// Required fields: `title`, `image`, `alt`.
-/// Optional fields: `caption`, `notes`, `footer`, `logo`, `decorative`, `tags`.
+/// Optional fields: `caption`, plus common optional fields.
 ///
 /// Maps to the `"Picture with Caption"` OOXML layout.
 #[derive(Debug)]
@@ -28,6 +30,15 @@ impl ImageSlideType {
     /// Construct a new `ImageSlideType` with its canonical field definitions.
     #[must_use]
     pub fn new() -> Self {
+        let mut optional = vec![FieldDef {
+            name: Arc::from("caption"),
+            description: Arc::from(
+                "A caption displayed below the image (visible to all viewers).",
+            ),
+            required: false,
+            default_value: None,
+        }];
+        optional.extend(common_optional_fields());
         Self {
             required: vec![
                 FieldDef {
@@ -38,7 +49,9 @@ impl ImageSlideType {
                 },
                 FieldDef {
                     name: Arc::from("image"),
-                    description: Arc::from("Path or URL to the image asset (PNG, JPEG, SVG, GIF)."),
+                    description: Arc::from(
+                        "Path or URL to the image asset (PNG, JPEG, SVG, GIF).",
+                    ),
                     required: true,
                     default_value: None,
                 },
@@ -52,49 +65,7 @@ impl ImageSlideType {
                     default_value: None,
                 },
             ],
-            optional: vec![
-                FieldDef {
-                    name: Arc::from("caption"),
-                    description: Arc::from(
-                        "A caption displayed below the image (visible to all viewers).",
-                    ),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("decorative"),
-                    description: Arc::from(
-                        "When true, marks the image as decorative (empty alt text in output, \
-                         PDF Artifact tag). Overrides the `alt` field.",
-                    ),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("notes"),
-                    description: Arc::from("Presenter notes for this slide."),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("footer"),
-                    description: Arc::from("Override footer text for this slide."),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("logo"),
-                    description: Arc::from("Override the brand logo for this slide."),
-                    required: false,
-                    default_value: None,
-                },
-                FieldDef {
-                    name: Arc::from("tags"),
-                    description: Arc::from("User-defined tags for filtering and grouping."),
-                    required: false,
-                    default_value: None,
-                },
-            ],
+            optional,
         }
     }
 }
