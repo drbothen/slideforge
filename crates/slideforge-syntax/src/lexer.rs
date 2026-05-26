@@ -346,10 +346,15 @@ impl<'src> LexerState<'src> {
                     self.pos += 1;
                     self.emit(Token::Colon, start);
                 },
-                Some(b'|') => {
+                Some(
+                    b'|' | b'+' | b'*' | b'/' | b'%' | b'=' | b'!' | b'<' | b'>' | b'&' | b'['
+                    | b']' | b'(' | b')' | b',' | b'.',
+                ) => self.scan_operator(),
+                Some(b'-') if !matches!(self.peek(1), Some(b'0'..=b'9')) => {
+                    // `-` not followed by a digit → subtraction operator.
                     let start = self.pos;
                     self.pos += 1;
-                    self.emit(Token::Pipe, start);
+                    self.emit(Token::Minus, start);
                 },
                 Some(b'-' | b'0'..=b'9') => self.scan_number(),
                 Some(b'a'..=b'z' | b'A'..=b'Z' | b'_') => self.scan_ident(),
@@ -375,6 +380,94 @@ impl<'src> LexerState<'src> {
                     self.pos += ch.len_utf8();
                 },
             }
+        }
+    }
+
+    /// Scan operator and bracket tokens (`+`, `-`, `*`, `/`, `%`, `==`, `!=`,
+    /// `<`, `<=`, `>`, `>=`, `!`, `&&`, `||`, `[`, `]`, `(`, `)`, `,`, `.`).
+    ///
+    /// Called from `scan_line_tokens` when the current byte is one of the
+    /// operator/bracket lead bytes. Advances `self.pos` and emits the token.
+    fn scan_operator(&mut self) {
+        let start = self.pos;
+        let byte = self
+            .current()
+            .expect("called only when current byte exists");
+        self.pos += 1;
+        match byte {
+            b'|' => {
+                if self.current() == Some(b'|') {
+                    self.pos += 1;
+                    self.emit(Token::Or, start);
+                } else {
+                    self.emit(Token::Pipe, start);
+                }
+            },
+            b'+' => self.emit(Token::Plus, start),
+            b'*' => self.emit(Token::Star, start),
+            b'/' => self.emit(Token::Slash, start),
+            b'%' => self.emit(Token::Percent, start),
+            b'=' => {
+                if self.current() == Some(b'=') {
+                    self.pos += 1;
+                    self.emit(Token::EqEq, start);
+                } else {
+                    // Bare `=` — not a valid token; emit error.
+                    let (line, col) = offset_to_line_col(start, &self.line_starts);
+                    self.errors.push(LexError::InvalidCharacter {
+                        file: Arc::clone(&self.file),
+                        line,
+                        col,
+                        ch: '=',
+                    });
+                }
+            },
+            b'!' => {
+                if self.current() == Some(b'=') {
+                    self.pos += 1;
+                    self.emit(Token::BangEq, start);
+                } else {
+                    self.emit(Token::Bang, start);
+                }
+            },
+            b'<' => {
+                if self.current() == Some(b'=') {
+                    self.pos += 1;
+                    self.emit(Token::LtEq, start);
+                } else {
+                    self.emit(Token::Lt, start);
+                }
+            },
+            b'>' => {
+                if self.current() == Some(b'=') {
+                    self.pos += 1;
+                    self.emit(Token::GtEq, start);
+                } else {
+                    self.emit(Token::Gt, start);
+                }
+            },
+            b'&' => {
+                if self.current() == Some(b'&') {
+                    self.pos += 1;
+                    self.emit(Token::And, start);
+                } else {
+                    // Bare `&` — not a valid token.
+                    let (line, col) = offset_to_line_col(start, &self.line_starts);
+                    self.errors.push(LexError::InvalidCharacter {
+                        file: Arc::clone(&self.file),
+                        line,
+                        col,
+                        ch: '&',
+                    });
+                }
+            },
+            b'[' => self.emit(Token::LBracket, start),
+            b']' => self.emit(Token::RBracket, start),
+            b'(' => self.emit(Token::LParen, start),
+            b')' => self.emit(Token::RParen, start),
+            b',' => self.emit(Token::Comma, start),
+            b'.' => self.emit(Token::Dot, start),
+            _ => unreachable!("scan_operator called only for operator lead bytes"),
         }
     }
 
@@ -728,6 +821,8 @@ impl<'src> LexerState<'src> {
         let tok = match text {
             "true" => Token::BoolLit(true),
             "false" => Token::BoolLit(false),
+            "and" => Token::And,
+            "or" => Token::Or,
             other => Token::Ident(Arc::from(other)),
         };
         self.emit(tok, start);

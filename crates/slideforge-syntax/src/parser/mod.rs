@@ -19,8 +19,11 @@
 //! `parse()` returns `Err(errors)`. Only when both lists are empty does it
 //! return `Ok(deck)`.
 
+pub mod control_flow;
 pub mod deck;
+pub mod expr;
 pub mod slide;
+pub mod template;
 
 use std::sync::Arc;
 
@@ -299,7 +302,11 @@ fn byte_offset_to_line_col(src: &str, offset: usize) -> (u32, u32) {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use crate::{ast::FieldValue, span::SourceMap};
+    use crate::{
+        ast::{BlockItem, FieldValue},
+        span::SourceMap,
+        template::TemplateChunk,
+    };
     use std::sync::Arc;
 
     /// Helper: add a file to a fresh [`SourceMap`] and call [`parse`].
@@ -325,7 +332,7 @@ mod tests {
             "minimal deck must parse without errors: {result:?}"
         );
         let deck = result.unwrap();
-        assert_eq!(deck.slides.len(), 1);
+        assert_eq!(deck.items.len(), 1, "must have 1 block item (the slide)");
         assert_eq!(deck.version.as_ref().map(|v| v.value().as_str()), Some("1"));
     }
 
@@ -421,10 +428,13 @@ mod tests {
 
     #[test]
     fn test_bc_1_01_001_empty_file_no_panic() {
-        // Must not panic. Returns Ok with empty slides or Err.
+        // Must not panic. Returns Ok with empty items or Err.
         let result = parse_str("");
         if let Ok(deck) = result {
-            assert!(deck.slides.is_empty(), "empty source must produce 0 slides");
+            assert!(
+                deck.items.is_empty(),
+                "empty source must produce 0 block items"
+            );
         }
         // Err is also acceptable (empty file may trigger parse errors)
     }
@@ -441,14 +451,20 @@ mod tests {
         let result = parse_str(src);
         assert!(result.is_ok(), "must parse without errors: {result:?}");
         let deck = result.unwrap();
-        let slide = deck.slides[0].value();
+        let BlockItem::Slide(slide_s) = &deck.items[0] else {
+            panic!("expected Slide block item");
+        };
+        let slide = slide_s.value();
         assert_eq!(slide.fields.len(), 2, "slide must have 2 fields");
         let title = slide
             .fields
             .iter()
             .find(|f| f.name.value() == "title")
             .expect("title field must exist");
-        assert_eq!(title.value.value(), &FieldValue::Str("Hello".to_string()));
+        assert_eq!(
+            title.value.value(),
+            &FieldValue::Template(vec![TemplateChunk::Literal("Hello".to_string())])
+        );
     }
 
     // ── AC-002: vars block parsed ─────────────────────────────────────────────
@@ -470,7 +486,7 @@ mod tests {
         assert_eq!(vb.entries[0].0.value(), "client");
         assert_eq!(
             vb.entries[0].1.value(),
-            &FieldValue::Str("Acme".to_string())
+            &FieldValue::Template(vec![TemplateChunk::Literal("Acme".to_string())])
         );
     }
 
@@ -506,20 +522,19 @@ mod tests {
         let deck = result.expect("must parse");
         let src_len = src.len();
         // Check that all string spans are within source bounds.
-        for slide_s in &deck.slides {
-            assert!(
-                slide_s.span().start <= src_len && slide_s.span().end <= src_len,
-                "slide span out of bounds"
-            );
-            for field in &slide_s.value().fields {
-                assert!(
-                    field.name.span().start <= src_len && field.name.span().end <= src_len,
-                    "field name span out of bounds"
-                );
-                assert!(
-                    field.value.span().start <= src_len && field.value.span().end <= src_len,
-                    "field value span out of bounds"
-                );
+        for item in &deck.items {
+            if let BlockItem::Slide(slide_s) = item {
+                assert!(slide_s.span().end <= src_len, "slide span out of bounds");
+                for field in &slide_s.value().fields {
+                    assert!(
+                        field.name.span().start <= src_len && field.name.span().end <= src_len,
+                        "field name span out of bounds"
+                    );
+                    assert!(
+                        field.value.span().start <= src_len && field.value.span().end <= src_len,
+                        "field value span out of bounds"
+                    );
+                }
             }
         }
     }

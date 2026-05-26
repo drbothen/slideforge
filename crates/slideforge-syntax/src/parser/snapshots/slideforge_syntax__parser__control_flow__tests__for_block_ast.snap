@@ -1,0 +1,172 @@
+---
+source: crates/slideforge-syntax/src/parser/control_flow.rs
+expression: deck
+---
+DeckNode {
+    version: Some(
+        Spanned(
+            "1",
+            Span {
+                file_id: 0,
+                start: 19,
+                end: 22,
+            },
+        ),
+    ),
+    lang: Some(
+        Spanned(
+            "en-US",
+            Span {
+                file_id: 0,
+                start: 28,
+                end: 35,
+            },
+        ),
+    ),
+    brand: None,
+    vars: [
+        VarsBlock {
+            entries: [
+                (
+                    Spanned(
+                        "items",
+                        Span {
+                            file_id: 0,
+                            start: 45,
+                            end: 50,
+                        },
+                    ),
+                    Spanned(
+                        Template(
+                            [
+                                Literal(
+                                    "placeholder",
+                                ),
+                            ],
+                        ),
+                        Span {
+                            file_id: 0,
+                            start: 52,
+                            end: 65,
+                        },
+                    ),
+                ),
+            ],
+        },
+    ],
+    set_rules: [],
+    items: [
+        For(
+            Spanned(
+                ForNode {
+                    binding: Spanned(
+                        "item",
+                        Span {
+                            file_id: 0,
+                            start: 72,
+                            end: 76,
+                        },
+                    ),
+                    collection: Spanned(
+                        Ident(
+                            "items",
+                        ),
+                        Span {
+                            file_id: 0,
+                            start: 67,
+                            end: 166,
+                        },
+                    ),
+                    body: [
+                        Slide(
+                            Spanned(
+                                SlideNode {
+                                    kind: Spanned(
+                                        "content",
+                                        Span {
+                                            file_id: 0,
+                                            start: 95,
+                                            end: 102,
+                                        },
+                                    ),
+                                    tags: [],
+                                    fields: [
+                                        FieldNode {
+                                            name: Spanned(
+                                                "title",
+                                                Span {
+                                                    file_id: 0,
+                                                    start: 108,
+                                                    end: 113,
+                                                },
+                                            ),
+                                            value: Spanned(
+                                                Template(
+                                                    [
+                                                        Expr(
+                                                            FieldAccess {
+                                                                base: Ident(
+                                                                    "item",
+                                                                ),
+                                                                field: "name",
+                                                            },
+                                                        ),
+                                                    ],
+                                                ),
+                                                Span {
+                                                    file_id: 0,
+                                                    start: 114,
+                                                    end: 131,
+                                                },
+                                            ),
+                                        },
+                                        FieldNode {
+                                            name: Spanned(
+                                                "body",
+                                                Span {
+                                                    file_id: 0,
+                                                    start: 136,
+                                                    end: 140,
+                                                },
+                                            ),
+                                            value: Spanned(
+                                                Template(
+                                                    [
+                                                        Expr(
+                                                            FieldAccess {
+                                                                base: Ident(
+                                                                    "item",
+                                                                ),
+                                                                field: "description",
+                                                            },
+                                                        ),
+                                                    ],
+                                                ),
+                                                Span {
+                                                    file_id: 0,
+                                                    start: 141,
+                                                    end: 165,
+                                                },
+                                            ),
+                                        },
+                                    ],
+                                    inline_items: [],
+                                },
+                                Span {
+                                    file_id: 0,
+                                    start: 89,
+                                    end: 166,
+                                },
+                            ),
+                        ),
+                    ],
+                },
+                Span {
+                    file_id: 0,
+                    start: 67,
+                    end: 166,
+                },
+            ),
+        ),
+    ],
+}

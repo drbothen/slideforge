@@ -22,10 +22,13 @@
 use chumsky::{input::ValueInput, prelude::*};
 
 use crate::{
-    ast::{DeckNode, FieldNode, FieldValue, SetRule, SlideNode, VarsBlock},
+    ast::{BlockItem, DeckNode, FieldNode, FieldValue, SetRule, SlideNode, VarsBlock},
     span::{Span, Spanned},
+    template::TemplateChunk,
     token::Token,
 };
+
+use super::{control_flow::block_item, template::template_value};
 
 // ─── Type aliases ─────────────────────────────────────────────────────────────
 
@@ -42,7 +45,11 @@ fn to_span(ss: SimpleSpan, file_id: u32) -> Span {
 
 // ─── Value parser ────────────────────────────────────────────────────────────
 
-/// Parser for a field value: string literal, integer, float, bool, or identifier.
+/// Parser for a field value: string literal (with template interpolation),
+/// integer, float, bool, or identifier.
+///
+/// String literals are parsed through `template_value()` so that `{{ expr }}`
+/// interpolation is supported. Template errors are emitted via `validate()`.
 ///
 /// On error, produces `FieldValue::Error` sentinel for recovery.
 fn value_parser<'src, I>()
@@ -50,13 +57,25 @@ fn value_parser<'src, I>()
 where
     I: ValueInput<'src, Token = Token, Span = TSpan>,
 {
-    select! {
-        Token::StringLit(s) = e => (FieldValue::Str(s.to_string()), e.span()),
+    // Template string: emit any E-PAR-004 errors via validate().
+    let template_val = template_value().validate(
+        move |(chunks, errs): (Vec<TemplateChunk>, Vec<String>), info, emitter| {
+            for msg in errs {
+                emitter.emit(Rich::custom(info.span(), msg));
+            }
+            (FieldValue::Template(chunks), info.span())
+        },
+    );
+
+    // Non-string field values.
+    let other_val = select! {
         Token::IntLit(n) = e => (FieldValue::Num(n), e.span()),
         Token::FloatLit(f) = e => (FieldValue::Float(f), e.span()),
         Token::BoolLit(b) = e => (FieldValue::Bool(b), e.span()),
         Token::Ident(s) = e => (FieldValue::Ident(s.to_string()), e.span()),
-    }
+    };
+
+    template_val.or(other_val)
 }
 
 // ─── Keyword matchers ─────────────────────────────────────────────────────────
@@ -95,6 +114,8 @@ where
 // ─── Field line parser ────────────────────────────────────────────────────────
 
 /// Parser for a single field assignment: `<name> <value> NEWLINE`.
+/// Superseded by `control_flow::field_line_cf` in STORY-007 (adds template support).
+#[allow(dead_code)]
 fn field_line_parser<'src, I>(
     file_id: u32,
 ) -> impl Parser<'src, I, FieldNode, extra::Err<Rich<'src, Token, TSpan>>> + Clone
@@ -115,6 +136,8 @@ where
 /// Parser for a `slide <type>:` block with indented fields.
 ///
 /// Pattern: `"slide" IDENT ":" INDENT field_line* DEDENT`
+/// Superseded by `control_flow::block_item` slide arm in STORY-007.
+#[allow(dead_code)]
 fn slide_block_parser<'src, I>(
     file_id: u32,
 ) -> impl Parser<'src, I, (SlideNode, TSpan), extra::Err<Rich<'src, Token, TSpan>>> + Clone
@@ -145,6 +168,7 @@ where
                     kind: Spanned::new(kind, to_span(kind_span, file_id)),
                     tags: Vec::new(),
                     fields,
+                    inline_items: Vec::new(),
                 },
                 slide_span,
             )
@@ -271,8 +295,8 @@ enum DeckItem {
     Vars(VarsBlock),
     /// A `set <type>: <field> <value>` rule.
     Set(SetRule),
-    /// A `slide <type>:` block, paired with its chumsky span.
-    Slide(SlideNode, TSpan),
+    /// A block item: `slide`, `@for`, or `@if` block.
+    Block(BlockItem),
 }
 
 // ─── Public deck parser ───────────────────────────────────────────────────────
@@ -295,20 +319,33 @@ where
     let brand = brand_decl_parser(file_id).map(DeckItem::Brand);
     let vars = vars_block_parser(file_id).map(DeckItem::Vars);
     let set = set_rule_parser(file_id).map(DeckItem::Set);
-    let slide = slide_block_parser(file_id).map(|(s, sp)| DeckItem::Slide(s, sp));
+    // Use block_item() to handle slide, @for, and @if at deck level.
+    let block = block_item(file_id).map(DeckItem::Block);
 
-    let item = version
-        .or(lang)
-        .or(brand)
-        .or(vars)
-        .or(set)
-        .or(slide)
-        .recover_with(skip_then_retry_until(
-            any()
-                .filter(|t| !matches!(t, Token::Newline | Token::Eof))
-                .ignored(),
-            just(Token::Newline).ignored(),
-        ));
+    // Orphan Dedent tokens can appear at deck level when a malformed indented
+    // block (e.g. a `@for` with a bad header) leaves its body's closing Dedents
+    // in the token stream. We silently consume them here to allow the parser to
+    // continue and report subsequent errors independently.
+    let orphan_dedent = just(Token::Dedent).ignored();
+
+    let item = orphan_dedent
+        .clone()
+        .repeated()
+        .ignore_then(
+            version
+                .or(lang)
+                .or(brand)
+                .or(vars)
+                .or(set)
+                .or(block)
+                .recover_with(skip_then_retry_until(
+                    any()
+                        .filter(|t| !matches!(t, Token::Newline | Token::Eof | Token::Dedent))
+                        .ignored(),
+                    just(Token::Newline).ignored(),
+                )),
+        )
+        .then_ignore(orphan_dedent.repeated());
 
     nl.clone()
         .repeated()
@@ -323,9 +360,7 @@ where
                     DeckItem::Brand(b) => deck.brand = Some(b),
                     DeckItem::Vars(vb) => deck.vars.push(vb),
                     DeckItem::Set(sr) => deck.set_rules.push(sr),
-                    DeckItem::Slide(s, sp) => {
-                        deck.slides.push(Spanned::new(s, to_span(sp, file_id)));
-                    },
+                    DeckItem::Block(bi) => deck.items.push(bi),
                 }
             }
             deck
@@ -382,7 +417,11 @@ mod tests {
         );
         assert_eq!(parse_err_count, 0, "parse errors must be 0");
         let deck = deck.expect("deck must parse successfully");
-        assert_eq!(deck.slides.len(), 1, "should have exactly 1 slide");
+        assert_eq!(
+            deck.items.len(),
+            1,
+            "should have exactly 1 block item (slide)"
+        );
         assert_eq!(deck.version.as_ref().map(|v| v.value().as_str()), Some("1"));
         assert_eq!(
             deck.lang.as_ref().map(|l| l.value().as_str()),
@@ -414,9 +453,12 @@ mod tests {
     #[test]
     fn test_bc_1_01_001_empty_file_no_panic() {
         let (deck, _lex_errs, _parse_errs) = parse_src("");
-        // Either Ok with empty slides or None — must not panic.
+        // Either Ok with empty items or None — must not panic.
         if let Some(d) = deck {
-            assert!(d.slides.is_empty(), "empty source must produce 0 slides");
+            assert!(
+                d.items.is_empty(),
+                "empty source must produce 0 block items"
+            );
         }
     }
 
@@ -424,6 +466,8 @@ mod tests {
 
     #[test]
     fn test_bc_1_01_001_slide_fields_captured() {
+        use crate::ast::BlockItem;
+        use crate::template::TemplateChunk;
         let src = concat!(
             "slide content:\n",
             "  title \"Hello\"\n",
@@ -433,8 +477,11 @@ mod tests {
         assert!(lex_errs.is_empty(), "lex errors: {lex_errs:?}");
         assert_eq!(parse_err_count, 0, "parse errors must be 0");
         let deck = deck.expect("must parse");
-        assert_eq!(deck.slides.len(), 1);
-        let slide = deck.slides[0].value();
+        assert_eq!(deck.items.len(), 1);
+        let BlockItem::Slide(slide_s) = &deck.items[0] else {
+            panic!("expected Slide item");
+        };
+        let slide = slide_s.value();
         assert_eq!(slide.fields.len(), 2, "slide must have 2 fields");
         let title_field = slide
             .fields
@@ -443,7 +490,7 @@ mod tests {
             .expect("title field must exist");
         assert_eq!(
             title_field.value.value(),
-            &FieldValue::Str("Hello".to_string())
+            &FieldValue::Template(vec![TemplateChunk::Literal("Hello".to_string())])
         );
         let footer_field = slide
             .fields
@@ -452,7 +499,7 @@ mod tests {
             .expect("footer field must exist");
         assert_eq!(
             footer_field.value.value(),
-            &FieldValue::Str("Slide 1".to_string())
+            &FieldValue::Template(vec![TemplateChunk::Literal("Slide 1".to_string())])
         );
     }
 
@@ -460,6 +507,7 @@ mod tests {
 
     #[test]
     fn test_bc_1_01_001_vars_block_parsed() {
+        use crate::template::TemplateChunk;
         // vars entries use IDENT ":" value syntax per the grammar spec.
         let src = concat!(
             "vars:\n",
@@ -477,7 +525,7 @@ mod tests {
         assert_eq!(vb.entries[0].0.value(), "client");
         assert_eq!(
             vb.entries[0].1.value(),
-            &FieldValue::Str("Acme".to_string())
+            &FieldValue::Template(vec![TemplateChunk::Literal("Acme".to_string())])
         );
     }
 
@@ -485,6 +533,7 @@ mod tests {
 
     #[test]
     fn test_bc_1_01_001_set_rule_parsed() {
+        use crate::template::TemplateChunk;
         let src = concat!(
             "set content: footer \"Default\"\n",
             "slide content:\n",
@@ -498,7 +547,10 @@ mod tests {
         let sr = &deck.set_rules[0];
         assert_eq!(sr.slide_type.value(), "content");
         assert_eq!(sr.field.value(), "footer");
-        assert_eq!(sr.value.value(), &FieldValue::Str("Default".to_string()));
+        assert_eq!(
+            sr.value.value(),
+            &FieldValue::Template(vec![TemplateChunk::Literal("Default".to_string())])
+        );
     }
 
     // ── AC-002: all deck metadata preserved ──────────────────────────────────

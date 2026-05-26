@@ -37,20 +37,27 @@
 
 pub mod ast;
 pub mod error;
+pub mod expr;
 pub mod lexer;
 pub mod lexer_error;
 pub mod parser;
 pub mod span;
+pub mod template;
 pub mod token;
 
 // Re-export the public API surface at the crate root for ergonomic use.
 
-pub use ast::{DeckNode, FieldNode, FieldValue, SetRule, SlideNode, VarsBlock};
+pub use ast::{
+    BlockItem, DeckNode, FieldNode, FieldValue, ForNode, IfNode, SectionNode, SetRule, SlideNode,
+    VarsBlock,
+};
 pub use error::SyntaxError;
+pub use expr::{BinOpKind, Expr, UnaryOpKind};
 pub use lexer::lex;
 pub use lexer_error::LexError;
 pub use parser::parse;
 pub use span::{SourceFile, SourceMap, Span, Spanned};
+pub use template::TemplateChunk;
 pub use token::{LexerMode, Token};
 
 // Note: `token::Spanned` (type alias for `(T, Range<usize>)`) is NOT re-exported

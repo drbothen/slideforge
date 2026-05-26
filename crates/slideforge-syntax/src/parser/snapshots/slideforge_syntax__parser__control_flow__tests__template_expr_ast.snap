@@ -1,0 +1,196 @@
+---
+source: crates/slideforge-syntax/src/parser/control_flow.rs
+expression: deck
+---
+DeckNode {
+    version: Some(
+        Spanned(
+            "1",
+            Span {
+                file_id: 0,
+                start: 19,
+                end: 22,
+            },
+        ),
+    ),
+    lang: Some(
+        Spanned(
+            "en-US",
+            Span {
+                file_id: 0,
+                start: 28,
+                end: 35,
+            },
+        ),
+    ),
+    brand: None,
+    vars: [
+        VarsBlock {
+            entries: [
+                (
+                    Spanned(
+                        "name",
+                        Span {
+                            file_id: 0,
+                            start: 45,
+                            end: 49,
+                        },
+                    ),
+                    Spanned(
+                        Template(
+                            [
+                                Literal(
+                                    "World",
+                                ),
+                            ],
+                        ),
+                        Span {
+                            file_id: 0,
+                            start: 51,
+                            end: 58,
+                        },
+                    ),
+                ),
+                (
+                    Spanned(
+                        "count",
+                        Span {
+                            file_id: 0,
+                            start: 61,
+                            end: 66,
+                        },
+                    ),
+                    Spanned(
+                        Num(
+                            42,
+                        ),
+                        Span {
+                            file_id: 0,
+                            start: 68,
+                            end: 70,
+                        },
+                    ),
+                ),
+            ],
+        },
+    ],
+    set_rules: [],
+    items: [
+        Slide(
+            Spanned(
+                SlideNode {
+                    kind: Spanned(
+                        "content",
+                        Span {
+                            file_id: 0,
+                            start: 78,
+                            end: 85,
+                        },
+                    ),
+                    tags: [],
+                    fields: [
+                        FieldNode {
+                            name: Spanned(
+                                "title",
+                                Span {
+                                    file_id: 0,
+                                    start: 89,
+                                    end: 94,
+                                },
+                            ),
+                            value: Spanned(
+                                Template(
+                                    [
+                                        Literal(
+                                            "Hello ",
+                                        ),
+                                        Expr(
+                                            Ident(
+                                                "name",
+                                            ),
+                                        ),
+                                    ],
+                                ),
+                                Span {
+                                    file_id: 0,
+                                    start: 95,
+                                    end: 113,
+                                },
+                            ),
+                        },
+                        FieldNode {
+                            name: Spanned(
+                                "body",
+                                Span {
+                                    file_id: 0,
+                                    start: 116,
+                                    end: 120,
+                                },
+                            ),
+                            value: Spanned(
+                                Template(
+                                    [
+                                        Literal(
+                                            "Count: ",
+                                        ),
+                                        Expr(
+                                            BinOp {
+                                                op: Add,
+                                                lhs: Ident(
+                                                    "count",
+                                                ),
+                                                rhs: Num(
+                                                    1,
+                                                ),
+                                            },
+                                        ),
+                                    ],
+                                ),
+                                Span {
+                                    file_id: 0,
+                                    start: 121,
+                                    end: 145,
+                                },
+                            ),
+                        },
+                        FieldNode {
+                            name: Spanned(
+                                "footer",
+                                Span {
+                                    file_id: 0,
+                                    start: 148,
+                                    end: 154,
+                                },
+                            ),
+                            value: Spanned(
+                                Template(
+                                    [
+                                        Expr(
+                                            Ident(
+                                                "name",
+                                            ),
+                                        ),
+                                        Literal(
+                                            " - Report",
+                                        ),
+                                    ],
+                                ),
+                                Span {
+                                    file_id: 0,
+                                    start: 155,
+                                    end: 176,
+                                },
+                            ),
+                        },
+                    ],
+                    inline_items: [],
+                },
+                Span {
+                    file_id: 0,
+                    start: 72,
+                    end: 177,
+                },
+            ),
+        ),
+    ],
+}

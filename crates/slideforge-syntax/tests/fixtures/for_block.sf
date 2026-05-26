@@ -1,0 +1,10 @@
+slideforge_version "1"
+lang "en-US"
+
+vars:
+  items: "placeholder"
+
+@for item in items:
+  slide content:
+    title "{{ item.name }}"
+    body "{{ item.description }}"

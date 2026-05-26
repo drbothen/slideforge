@@ -117,6 +117,53 @@ pub enum Token {
     /// `|` — pipe / variant separator.
     Pipe,
 
+    // ── Operator tokens ───────────────────────────────────────────────────
+    /// `+` — addition operator.
+    Plus,
+    /// `-` — subtraction operator (unary negation when not followed by digit).
+    Minus,
+    /// `*` — multiplication operator.
+    Star,
+    /// `/` — division operator.
+    Slash,
+    /// `%` — remainder operator.
+    Percent,
+    /// `==` — equality comparison.
+    EqEq,
+    /// `!=` — inequality comparison.
+    BangEq,
+    /// `<` — less-than comparison.
+    Lt,
+    /// `>` — greater-than comparison.
+    Gt,
+    /// `<=` — less-than-or-equal comparison.
+    LtEq,
+    /// `>=` — greater-than-or-equal comparison.
+    GtEq,
+    /// `!` — logical NOT (unary).
+    Bang,
+    /// `[` — list open bracket.
+    LBracket,
+    /// `]` — list close bracket.
+    RBracket,
+    /// `(` — grouping open parenthesis.
+    LParen,
+    /// `)` — grouping close parenthesis.
+    RParen,
+    /// `,` — separator (in list literals and filter args).
+    Comma,
+    /// `.` — field access separator.
+    Dot,
+    /// `&&` or the keyword `and` — logical AND.
+    And,
+    /// `||` or the keyword `or` — logical OR.
+    Or,
+    /// A reserved keyword that is not yet implemented.
+    ///
+    /// Used to emit E-PAR-006 for constructs planned for future versions
+    /// (e.g. `@while`).
+    ReservedKeyword(Arc<str>),
+
     // ── Structural tokens ─────────────────────────────────────────────────
     /// End of a logical line.
     Newline,
@@ -199,5 +246,39 @@ mod tests {
             Token::Dedent,
             Token::Eof,
         ];
+    }
+
+    #[test]
+    fn test_bc_1_04_001_operator_token_variants_constructible() {
+        // Verify all STORY-007 operator tokens are constructible and Hash+Eq.
+        use std::collections::HashSet;
+        let ops: Vec<Token> = vec![
+            Token::Plus,
+            Token::Minus,
+            Token::Star,
+            Token::Slash,
+            Token::Percent,
+            Token::EqEq,
+            Token::BangEq,
+            Token::Lt,
+            Token::Gt,
+            Token::LtEq,
+            Token::GtEq,
+            Token::Bang,
+            Token::LBracket,
+            Token::RBracket,
+            Token::LParen,
+            Token::RParen,
+            Token::Comma,
+            Token::Dot,
+            Token::And,
+            Token::Or,
+            Token::ReservedKeyword(Arc::from("@while")),
+        ];
+        let mut set = HashSet::new();
+        for op in &ops {
+            set.insert(op.clone());
+        }
+        assert_eq!(set.len(), ops.len(), "all operator tokens must be distinct");
     }
 }
