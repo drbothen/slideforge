@@ -27,7 +27,7 @@ use std::sync::Arc;
 struct TestDataSource;
 
 impl DataSource for TestDataSource {
-    fn id(&self) -> &str {
+    fn id(&self) -> &'static str {
         "test"
     }
 
@@ -39,11 +39,11 @@ impl DataSource for TestDataSource {
 struct TestExporter;
 
 impl Exporter for TestExporter {
-    fn id(&self) -> &str {
+    fn id(&self) -> &'static str {
         "test-export"
     }
 
-    fn extension(&self) -> &str {
+    fn extension(&self) -> &'static str {
         "test"
     }
 
@@ -61,7 +61,7 @@ impl Exporter for TestExporter {
 struct TestChartRenderer;
 
 impl ChartRenderer for TestChartRenderer {
-    fn id(&self) -> &str {
+    fn id(&self) -> &'static str {
         "test-chart"
     }
 
@@ -73,7 +73,7 @@ impl ChartRenderer for TestChartRenderer {
 struct TestDiagramRenderer;
 
 impl DiagramRenderer for TestDiagramRenderer {
-    fn id(&self) -> &str {
+    fn id(&self) -> &'static str {
         "test-diagram"
     }
 
@@ -85,7 +85,7 @@ impl DiagramRenderer for TestDiagramRenderer {
 struct TestValidator;
 
 impl Validator for TestValidator {
-    fn id(&self) -> &str {
+    fn id(&self) -> &'static str {
         "test-validator"
     }
 
@@ -97,7 +97,7 @@ impl Validator for TestValidator {
 struct TestMathRenderer;
 
 impl MathRenderer for TestMathRenderer {
-    fn id(&self) -> &str {
+    fn id(&self) -> &'static str {
         "test-math"
     }
 
@@ -109,7 +109,7 @@ impl MathRenderer for TestMathRenderer {
 struct TestBrandProvider;
 
 impl BrandProvider for TestBrandProvider {
-    fn id(&self) -> &str {
+    fn id(&self) -> &'static str {
         "test-brand"
     }
 
@@ -136,7 +136,7 @@ impl BrandProvider for TestBrandProvider {
 struct TestSlideType;
 
 impl SlideType for TestSlideType {
-    fn id(&self) -> &str {
+    fn id(&self) -> &'static str {
         "test-slide"
     }
 
@@ -148,7 +148,7 @@ impl SlideType for TestSlideType {
         &[]
     }
 
-    fn layout_name(&self) -> &str {
+    fn layout_name(&self) -> &'static str {
         "blank"
     }
 
@@ -170,7 +170,7 @@ impl SlideType for TestSlideType {
 struct TestSectionType;
 
 impl SectionType for TestSectionType {
-    fn id(&self) -> &str {
+    fn id(&self) -> &'static str {
         "test-section"
     }
 
@@ -182,7 +182,7 @@ impl SectionType for TestSectionType {
 struct TestInlineFormat;
 
 impl InlineFormat for TestInlineFormat {
-    fn id(&self) -> &str {
+    fn id(&self) -> &'static str {
         "test-inline"
     }
 
@@ -340,7 +340,7 @@ fn dog_food_all_10_surfaces_round_trip() {
     assert!(registry.lookup_inline_format("test-inline").is_some());
 }
 
-/// AC-014: PluginRegistry is Send + Sync — compile-time assertion.
+/// AC-014: `PluginRegistry` is Send + Sync — compile-time assertion.
 #[test]
 fn dog_food_registry_is_send_sync() {
     fn assert_send_sync<T: Send + Sync>() {}
