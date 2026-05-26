@@ -160,8 +160,11 @@ pub enum Token {
     Or,
     /// A reserved keyword that is not yet implemented.
     ///
-    /// Used to emit E-PAR-006 for constructs planned for future versions
-    /// (e.g. `@while`).
+    /// Planned for lexer-level detection of constructs reserved for future
+    /// versions (e.g. `@while`). Currently, `@while` is detected at the
+    /// parser level via `Token::At` + `Token::Ident("while")` in
+    /// `control_flow.rs`. This variant is kept for forward compatibility.
+    #[allow(dead_code)]
     ReservedKeyword(Arc<str>),
 
     // ── Structural tokens ─────────────────────────────────────────────────
