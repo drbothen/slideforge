@@ -525,10 +525,7 @@ where
                             // Emit E-PAR-011 with an alias-span approximation (0-offset).
                             emitter.emit(Rich::custom(
                                 SimpleSpan::from(0usize..0usize),
-                                format!(
-                                    "{err_msg} (in alias '{}')",
-                                    a.name.value()
-                                ),
+                                format!("{err_msg} (in alias '{}')", a.name.value()),
                             ));
                             // Do NOT register the invalid alias — drop it.
                         } else {
