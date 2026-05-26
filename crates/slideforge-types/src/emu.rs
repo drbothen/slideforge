@@ -4,7 +4,7 @@
 //! 914,400 EMU. One point equals 12,700 EMU. Using integers avoids floating-
 //! point non-determinism and enables exact arithmetic proofs in Phase 6 (Kani).
 
-use std::ops::{Add, Mul, Sub};
+use std::ops::{Add, Div, Mul, Neg, Sub};
 
 /// English Metric Unit — the canonical distance unit for OOXML.
 ///
@@ -156,6 +156,22 @@ impl Mul<Emu> for i64 {
     }
 }
 
+impl Div<i64> for Emu {
+    type Output = Self;
+
+    fn div(self, rhs: i64) -> Self {
+        Emu(self.0 / rhs)
+    }
+}
+
+impl Neg for Emu {
+    type Output = Self;
+
+    fn neg(self) -> Self {
+        Emu(-self.0)
+    }
+}
+
 impl std::fmt::Display for Emu {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}emu", self.0)
@@ -262,5 +278,71 @@ mod tests {
         assert!(Emu(100) < Emu(200));
         assert!(Emu(200) > Emu(100));
         assert_eq!(Emu(100), Emu(100));
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // STORY-004 AC-010 — Div<i64> and Neg
+    // ──────────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_bc_1_02_003_emu_div_scalar() {
+        assert_eq!(Emu(300) / 3, Emu(100));
+    }
+
+    #[test]
+    fn test_bc_1_02_003_emu_div_by_one() {
+        assert_eq!(Emu(914_400) / 1, Emu(914_400));
+    }
+
+    #[test]
+    fn test_bc_1_02_003_emu_neg() {
+        assert_eq!(-Emu(100), Emu(-100));
+    }
+
+    #[test]
+    fn test_bc_1_02_003_emu_neg_zero() {
+        assert_eq!(-Emu(0), Emu(0));
+    }
+
+    #[test]
+    fn test_bc_1_02_003_emu_neg_negative() {
+        assert_eq!(-Emu(-50), Emu(50));
+    }
+
+    /// AC-010: Standard 16:9 slide dimensions using arithmetic (10in × 5.625in
+    /// in terms of the canvas reference).
+    #[test]
+    fn test_bc_1_02_003_emu_canvas_width_ten_inches() {
+        // 10 inches = 9,144,000 EMU
+        assert_eq!(Emu::from_inches(10.0), Emu(9_144_000));
+        assert_eq!(Emu::from_inches(10.0), CANVAS_WIDTH);
+    }
+
+    /// `to_points` roundtrip — AC-011.
+    #[test]
+    fn test_bc_1_02_003_emu_to_points_roundtrip() {
+        let original = Emu::from_points(72.0); // 72pt = 1 inch
+        let back = original.to_points();
+        assert!(
+            (back - 72.0_f64).abs() < 0.001,
+            "to_points roundtrip failed: got {back}"
+        );
+    }
+
+    /// `to_inches` roundtrip — AC-011.
+    #[test]
+    fn test_bc_1_02_003_emu_to_inches_roundtrip() {
+        let original = Emu::from_inches(5.0);
+        let back = original.to_inches();
+        assert!(
+            (back - 5.0_f64).abs() < 1e-10,
+            "to_inches roundtrip failed: got {back}"
+        );
+    }
+
+    /// EC-004: `from_inches(0.0)` = Emu(0).
+    #[test]
+    fn test_bc_1_02_003_emu_from_inches_zero() {
+        assert_eq!(Emu::from_inches(0.0), Emu(0));
     }
 }
