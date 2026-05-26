@@ -22,12 +22,6 @@ use std::ops::{Add, Mul, Sub};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Emu(pub i64);
 
-/// One inch expressed in EMU.
-pub const EMU_PER_INCH: i64 = 914_400;
-
-/// One typographic point expressed in EMU.
-pub const EMU_PER_POINT: i64 = 12_700;
-
 /// Standard widescreen slide width (13.33 inches = 12,192,000 EMU).
 ///
 /// This is the PPTX default for widescreen (16:9) presentations.
@@ -49,6 +43,12 @@ pub const CANVAS_WIDTH: Emu = Emu(9_144_000);
 pub const CANVAS_HEIGHT: Emu = Emu(6_858_000);
 
 impl Emu {
+    /// English Metric Units per inch (914,400).
+    pub const EMU_PER_INCH: i64 = 914_400;
+
+    /// English Metric Units per point (12,700).
+    pub const EMU_PER_POINT: i64 = 12_700;
+
     /// Construct an `Emu` from a measurement in inches.
     ///
     /// The conversion is exact when `inches` is a simple fraction whose
@@ -64,7 +64,7 @@ impl Emu {
     #[must_use]
     #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
     pub fn from_inches(inches: f64) -> Self {
-        Emu((inches * (EMU_PER_INCH as f64)).round() as i64)
+        Emu((inches * (Self::EMU_PER_INCH as f64)).round() as i64)
     }
 
     /// Construct an `Emu` from a measurement in typographic points.
@@ -79,7 +79,7 @@ impl Emu {
     #[must_use]
     #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
     pub fn from_points(points: f64) -> Self {
-        Emu((points * (EMU_PER_POINT as f64)).round() as i64)
+        Emu((points * (Self::EMU_PER_POINT as f64)).round() as i64)
     }
 
     /// Return the raw `i64` value.
@@ -106,7 +106,7 @@ impl Emu {
     #[must_use]
     #[allow(clippy::cast_precision_loss)]
     pub fn to_inches(self) -> f64 {
-        (self.0 as f64) / (EMU_PER_INCH as f64)
+        (self.0 as f64) / (Self::EMU_PER_INCH as f64)
     }
 
     /// Convert to typographic points as an `f64`.
@@ -120,7 +120,7 @@ impl Emu {
     #[must_use]
     #[allow(clippy::cast_precision_loss)]
     pub fn to_points(self) -> f64 {
-        (self.0 as f64) / (EMU_PER_POINT as f64)
+        (self.0 as f64) / (Self::EMU_PER_POINT as f64)
     }
 }
 
@@ -241,19 +241,19 @@ mod tests {
 
     #[test]
     fn test_bc_1_01_001_emu_per_inch_constant() {
-        assert_eq!(EMU_PER_INCH, 914_400_i64);
+        assert_eq!(Emu::EMU_PER_INCH, 914_400_i64);
     }
 
     #[test]
     fn test_bc_1_01_001_emu_per_point_constant() {
-        assert_eq!(EMU_PER_POINT, 12_700_i64);
+        assert_eq!(Emu::EMU_PER_POINT, 12_700_i64);
     }
 
     #[test]
     #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
     fn test_bc_1_01_001_emu_roundtrip_inches() {
         let original = Emu::from_inches(2.5);
-        let roundtripped = (original.to_inches() * (EMU_PER_INCH as f64)).round() as i64;
+        let roundtripped = (original.to_inches() * (Emu::EMU_PER_INCH as f64)).round() as i64;
         assert_eq!(original.0, roundtripped);
     }
 

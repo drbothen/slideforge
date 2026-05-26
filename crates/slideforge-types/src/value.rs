@@ -20,6 +20,25 @@ use crate::ordered_map::OrderedMap;
 /// YAML-style implicit coercion (`NO` → bool, `1.10` → float) is a forbidden
 /// pattern in slideforge (R3 finding).
 ///
+/// The following compile-time guards enforce the no-coercion invariant.
+/// If anyone adds `impl From<bool> for Value` (or `From<i64>`, `From<&str>`),
+/// the corresponding `compile_fail` test below will break the build.
+///
+/// ```compile_fail
+/// use slideforge_types::Value;
+/// let _: Value = true.into(); // must not compile — no From<bool> for Value
+/// ```
+///
+/// ```compile_fail
+/// use slideforge_types::Value;
+/// let _: Value = 42_i64.into(); // must not compile — no From<i64> for Value
+/// ```
+///
+/// ```compile_fail
+/// use slideforge_types::Value;
+/// let _: Value = "hello".into(); // must not compile — no From<&str> for Value
+/// ```
+///
 /// ## Hash + Eq
 ///
 /// `Value` implements `Hash` and `Eq` because floating-point values are
