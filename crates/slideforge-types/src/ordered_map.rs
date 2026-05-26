@@ -25,8 +25,25 @@ use indexmap::IndexMap;
 ///
 /// Implements `Deref<Target = IndexMap<K, V>>` so all `IndexMap` methods are
 /// available without wrapping every call.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct OrderedMap<K: Hash + Eq, V>(pub IndexMap<K, V>);
+
+impl<K: Hash + Eq + PartialEq, V: PartialEq> PartialEq for OrderedMap<K, V> {
+    /// Order-sensitive equality: two maps are equal only if they have the same
+    /// key-value pairs in the same insertion order. This is consistent with
+    /// the order-sensitive `Hash` impl and reflects that field ordering is
+    /// semantically significant in slideforge (merge semantics, PPTX output order).
+    fn eq(&self, other: &Self) -> bool {
+        self.0.len() == other.0.len()
+            && self
+                .0
+                .iter()
+                .zip(other.0.iter())
+                .all(|((k1, v1), (k2, v2))| k1 == k2 && v1 == v2)
+    }
+}
+
+impl<K: Hash + Eq, V: Eq> Eq for OrderedMap<K, V> {}
 
 impl<K: Hash + Eq, V: Hash> Hash for OrderedMap<K, V> {
     fn hash<H: Hasher>(&self, state: &mut H) {
@@ -169,5 +186,27 @@ mod tests {
     fn test_bc_1_01_ordered_map_default_is_empty() {
         let m: OrderedMap<Arc<str>, i32> = OrderedMap::default();
         assert!(m.is_empty());
+    }
+
+    #[test]
+    fn test_ordered_map_eq_is_order_sensitive() {
+        let mut m1: OrderedMap<Arc<str>, i32> = OrderedMap::new();
+        m1.insert(Arc::from("a"), 1);
+        m1.insert(Arc::from("b"), 2);
+        let mut m2: OrderedMap<Arc<str>, i32> = OrderedMap::new();
+        m2.insert(Arc::from("b"), 2);
+        m2.insert(Arc::from("a"), 1);
+        assert_ne!(m1, m2, "same content different order must NOT be equal");
+    }
+
+    #[test]
+    fn test_ordered_map_eq_same_order_is_equal() {
+        let mut m1: OrderedMap<Arc<str>, i32> = OrderedMap::new();
+        m1.insert(Arc::from("a"), 1);
+        m1.insert(Arc::from("b"), 2);
+        let mut m2: OrderedMap<Arc<str>, i32> = OrderedMap::new();
+        m2.insert(Arc::from("a"), 1);
+        m2.insert(Arc::from("b"), 2);
+        assert_eq!(m1, m2, "same content same order must be equal");
     }
 }
