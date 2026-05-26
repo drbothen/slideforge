@@ -23,9 +23,10 @@ use crate::ordered_map::OrderedMap;
 /// ## Hash + Eq
 ///
 /// `Value` implements `Hash` and `Eq` because floating-point values are
-/// wrapped in [`OrderedFloat`], which provides a total order and consistent
-/// hashing for non-NaN `f64` values. NaN values can be stored in a `Value`
-/// but compare unequal to themselves (standard IEEE 754 behaviour).
+/// wrapped in [`OrderedFloat`], which provides a **total order** over all
+/// `f64` values, including NaN. Unlike raw `f64` (IEEE 754), two NaN values
+/// wrapped in `OrderedFloat` compare equal to each other and hash to the same
+/// bucket. This makes `Value` safe to use as a `HashMap` key.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Value {
     /// A string value. Uses `Arc<str>` for cheap cloning.
@@ -36,6 +37,11 @@ pub enum Value {
 
     /// A 64-bit floating-point value, wrapped in [`OrderedFloat`] so that
     /// `Value` can implement `Hash` and `Eq`.
+    ///
+    /// [`OrderedFloat`] provides a **total ordering** over all `f64` values,
+    /// including NaN. Crucially, `OrderedFloat::nan() == OrderedFloat::nan()`
+    /// is `true` (unlike raw `f64` where `NaN != NaN` per IEEE 754). Two NaN
+    /// values hash to the same bucket and compare equal.
     Float(OrderedFloat<f64>),
 
     /// A boolean value.
@@ -285,5 +291,44 @@ mod tests {
     fn test_bc_1_01_003_value_no_from_i64_impl() {
         let v = Value::Int(99);
         assert!(v.as_int().is_some());
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // EC-001 — NaN edge case: OrderedFloat gives total ordering (NaN == NaN)
+    // ──────────────────────────────────────────────────────────────────────────
+
+    /// EC-001: With `OrderedFloat`, `NaN == NaN` is `true` (total ordering).
+    /// This is the opposite of raw `f64` behavior (IEEE 754).
+    #[test]
+    fn test_bc_1_01_003_nan_ordered_float_eq() {
+        let nan1 = Value::Float(OrderedFloat(f64::NAN));
+        let nan2 = Value::Float(OrderedFloat(f64::NAN));
+        // OrderedFloat provides total ordering: NaN == NaN
+        assert_eq!(nan1, nan2, "OrderedFloat NaN must equal OrderedFloat NaN");
+    }
+
+    /// EC-001: NaN values can be inserted into a `HashSet` (requires Hash + Eq).
+    #[test]
+    fn test_bc_1_01_003_nan_hashset_insert() {
+        use std::collections::HashSet;
+        let mut set: HashSet<Value> = HashSet::new();
+        set.insert(Value::Float(OrderedFloat(f64::NAN)));
+        set.insert(Value::Float(OrderedFloat(f64::NAN)));
+        // Both insertions are the same key — set should have exactly one entry
+        assert_eq!(set.len(), 1, "two NaN values must hash to the same slot");
+    }
+
+    /// EC-001: Two NaN values wrapped in `OrderedFloat` hash to the same value.
+    #[test]
+    fn test_bc_1_01_003_nan_same_hash() {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        let nan1 = Value::Float(OrderedFloat(f64::NAN));
+        let nan2 = Value::Float(OrderedFloat(f64::NAN));
+        let mut h1 = DefaultHasher::new();
+        let mut h2 = DefaultHasher::new();
+        nan1.hash(&mut h1);
+        nan2.hash(&mut h2);
+        assert_eq!(h1.finish(), h2.finish(), "NaN values must hash identically");
     }
 }

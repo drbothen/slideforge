@@ -10,7 +10,6 @@
 use std::sync::Arc;
 
 use crate::math::MathNode;
-use crate::span::SourceSpan;
 
 /// An inline content node within a paragraph or bullet item.
 ///
@@ -36,29 +35,20 @@ pub enum InlineNode {
 
     /// A hyperlink with display content and target URL.
     Link {
-        /// The display content of the link.
-        content: Vec<InlineNode>,
+        /// The display content of the link (can be styled inline nodes).
+        text: Vec<InlineNode>,
         /// The target URL.
-        href: Arc<str>,
+        url: Arc<str>,
     },
 
     /// An inline math expression (LaTeX source).
     Math(MathNode),
 
-    /// A footnote reference. The footnote body is stored separately in the
-    /// slide's footnote registry (not yet defined in this story).
-    Footnote {
-        /// A unique label for this footnote within the slide.
-        label: Arc<str>,
-    },
+    /// A footnote. The content is stored inline as a sequence of inline nodes.
+    Footnote(Vec<InlineNode>),
 
-    /// A cross-reference to another slide or section.
-    Xref {
-        /// The target slide or section identifier.
-        target: Arc<str>,
-        /// Optional display text; if absent, the target title is used.
-        text: Option<Arc<str>>,
-    },
+    /// A cross-reference to another slide or section (by identifier string).
+    Xref(Arc<str>),
 
     /// Superscript text (e.g., exponents, ordinals).
     Superscript(Vec<InlineNode>),
@@ -70,12 +60,7 @@ pub enum InlineNode {
     Strikethrough(Vec<InlineNode>),
 
     /// Highlighted text (e.g., for callouts in review mode).
-    Highlight {
-        /// The content being highlighted.
-        content: Vec<InlineNode>,
-        /// Source location for this highlight node.
-        span: SourceSpan,
-    },
+    Highlight(Vec<InlineNode>),
 }
 
 impl InlineNode {
@@ -98,12 +83,12 @@ impl InlineNode {
             InlineNode::Code(_) => "Code",
             InlineNode::Link { .. } => "Link",
             InlineNode::Math(_) => "Math",
-            InlineNode::Footnote { .. } => "Footnote",
-            InlineNode::Xref { .. } => "Xref",
+            InlineNode::Footnote(_) => "Footnote",
+            InlineNode::Xref(_) => "Xref",
             InlineNode::Superscript(_) => "Superscript",
             InlineNode::Subscript(_) => "Subscript",
             InlineNode::Strikethrough(_) => "Strikethrough",
-            InlineNode::Highlight { .. } => "Highlight",
+            InlineNode::Highlight(_) => "Highlight",
         }
     }
 
@@ -128,14 +113,14 @@ mod tests {
             InlineNode::Bold(vec![]),
             InlineNode::Italic(vec![]),
             InlineNode::Code(Arc::from("fn foo() {}")),
-            InlineNode::Link { content: vec![], href: Arc::from("https://example.com") },
-            InlineNode::Math(MathNode { latex: Arc::from("x^2"), display: false, span: SourceSpan::default() }),
-            InlineNode::Footnote { label: Arc::from("fn1") },
-            InlineNode::Xref { target: Arc::from("slide-2"), text: None },
+            InlineNode::Link { text: vec![], url: Arc::from("https://example.com") },
+            InlineNode::Math(MathNode { latex: Arc::from("x^2"), display: false, span: crate::span::SourceSpan::default() }),
+            InlineNode::Footnote(vec![]),
+            InlineNode::Xref(Arc::from("slide-2")),
             InlineNode::Superscript(vec![]),
             InlineNode::Subscript(vec![]),
             InlineNode::Strikethrough(vec![]),
-            InlineNode::Highlight { content: vec![], span: SourceSpan::default() },
+            InlineNode::Highlight(vec![]),
         ]
     }
 

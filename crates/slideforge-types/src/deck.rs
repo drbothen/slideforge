@@ -24,14 +24,18 @@ use crate::value::Value;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DeckMetadata {
     /// The deck title (for the document title bar and DOCX cover page).
-    pub title: Arc<str>,
+    ///
+    /// `None` when the title is not specified in the frontmatter.
+    pub title: Option<Arc<str>>,
 
     /// The slideforge DSL version used to compile this deck.
     pub slideforge_version: Arc<str>,
 
     /// The primary language of the deck content (BCP-47, e.g., `"en-US"`).
-    /// Required at deck level (accessibility rule).
-    pub lang: Arc<str>,
+    ///
+    /// `None` when no language tag is provided. The accessibility validator
+    /// (STORY-003) enforces that `lang` is present for final export.
+    pub lang: Option<Arc<str>>,
 
     /// The deck author (for PDF metadata and DOCX properties).
     pub author: Option<Arc<str>>,
@@ -146,9 +150,9 @@ mod tests {
 
     fn make_metadata() -> DeckMetadata {
         DeckMetadata {
-            title: Arc::from("Test Deck"),
+            title: Some(Arc::from("Test Deck")),
             slideforge_version: Arc::from("0.1.0"),
-            lang: Arc::from("en-US"),
+            lang: Some(Arc::from("en-US")),
             author: None,
         }
     }
@@ -171,7 +175,7 @@ mod tests {
         let deck = make_deck();
         assert!(deck.slides.is_empty());
         assert!(deck.vars.is_empty());
-        assert_eq!(deck.metadata.title.as_ref(), "Test Deck");
+        assert_eq!(deck.metadata.title.as_deref(), Some("Test Deck"));
         assert!(deck.registers.is_empty());
     }
 
@@ -211,21 +215,34 @@ mod tests {
     #[test]
     fn test_bc_1_01_010_deck_metadata_fields() {
         let meta = make_metadata();
-        assert_eq!(meta.title.as_ref(), "Test Deck");
+        assert_eq!(meta.title.as_deref(), Some("Test Deck"));
         assert_eq!(meta.slideforge_version.as_ref(), "0.1.0");
-        assert_eq!(meta.lang.as_ref(), "en-US");
+        assert_eq!(meta.lang.as_deref(), Some("en-US"));
         assert!(meta.author.is_none());
     }
 
     #[test]
     fn test_bc_1_01_010_deck_metadata_with_author() {
         let meta = DeckMetadata {
-            title: Arc::from("My Deck"),
+            title: Some(Arc::from("My Deck")),
             slideforge_version: Arc::from("0.1.0"),
-            lang: Arc::from("en-US"),
+            lang: Some(Arc::from("en-US")),
             author: Some(Arc::from("Jane Doe")),
         };
         assert_eq!(meta.author.as_deref(), Some("Jane Doe"));
+    }
+
+    #[test]
+    fn test_bc_1_01_010_deck_metadata_none_title_lang() {
+        // AC-010: title and lang are Option — None is valid
+        let meta = DeckMetadata {
+            title: None,
+            slideforge_version: Arc::from("0.1.0"),
+            lang: None,
+            author: None,
+        };
+        assert!(meta.title.is_none());
+        assert!(meta.lang.is_none());
     }
 
     #[test]

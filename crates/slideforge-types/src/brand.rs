@@ -61,8 +61,8 @@ pub struct LayoutDefinition {
 /// loaded.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Brand {
-    /// The brand identifier (e.g., the organization name).
-    pub id: Arc<str>,
+    /// The brand name (e.g., the organization name).
+    pub name: Arc<str>,
     /// The color palette.
     pub palette: BrandPalette,
     /// The font configuration.
@@ -81,7 +81,7 @@ mod tests {
 
     fn make_brand() -> Brand {
         Brand {
-            id: Arc::from("acme"),
+            name: Arc::from("acme"),
             palette: BrandPalette {
                 primary: Arc::from("#003087"),
                 secondary: Arc::from("#0066CC"),
@@ -101,7 +101,7 @@ mod tests {
     #[test]
     fn test_bc_1_01_brand_fields() {
         let brand = make_brand();
-        assert_eq!(brand.id.as_ref(), "acme");
+        assert_eq!(brand.name.as_ref(), "acme");
         assert_eq!(brand.palette.primary.as_ref(), "#003087");
         assert_eq!(brand.fonts.heading.as_ref(), "Calibri Light");
     }

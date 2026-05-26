@@ -13,30 +13,36 @@ use crate::register::Register;
 use crate::span::SourceSpan;
 use crate::value::Value;
 
-/// An interpolated string part — either a literal or a variable reference.
+/// An interpolated string part — either a literal or an expression.
 ///
-/// Field values like titles may contain `{{ var }}` interpolations. Before
+/// Field values like titles may contain `{{ expr }}` interpolations. Before
 /// evaluation, they are stored as a `Vec<StringPart>`. After evaluation, they
 /// resolve to a plain `Arc<str>`.
+///
+/// The DSL supports full expressions inside `{{ }}`, not just variable names.
+/// For example: `{{ count + 1 }}`, `{{ name | upper }}`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum StringPart {
     /// A literal text fragment.
     Literal(Arc<str>),
-    /// A `{{ var }}` interpolation reference.
-    Var(Arc<str>),
+    /// A `{{ expr }}` expression fragment (full expression, not just a variable).
+    Expr(Arc<str>),
 }
 
-/// A field value in a slide header — either a [`Value`] or an interpolated
-/// string (sequence of [`StringPart`]).
+/// A field value in a slide header — either a literal [`Value`], a raw
+/// expression string, or an interpolated string (sequence of [`StringPart`]).
 ///
 /// Slide field values (e.g., `title`, `subtitle`, `speaker`) may be:
-/// - A plain `Value` (integer, boolean, null, etc.)
-/// - A string with optional `{{ var }}` interpolations (a `Vec<StringPart>`)
+/// - A plain `Value` (integer, boolean, null, etc.) — stored as `Literal`
+/// - A raw expression string (`{{ count + 1 }}`) — stored as `Expr`
+/// - A string with mixed literals and `{{ expr }}` parts — stored as `Interpolated`
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum FieldValue {
-    /// A resolved scalar value.
-    Value(Value),
-    /// An interpolated string (mix of literals and variable references).
+    /// A resolved scalar value (no further evaluation needed).
+    Literal(Value),
+    /// A raw expression string to be evaluated (e.g., `"{{ count + 1 }}"`).
+    Expr(Arc<str>),
+    /// An interpolated string (mix of literal fragments and expression fragments).
     Interpolated(Vec<StringPart>),
     /// An inline content sequence (for rich-text field values).
     Inlines(Vec<InlineNode>),
@@ -60,7 +66,10 @@ pub struct Slide {
     pub blocks: Vec<Block>,
 
     /// The writing register for register-gated content.
-    pub register: Register,
+    ///
+    /// `None` means the slide appears in all registers. A `Some(Register::Notes)`
+    /// value means the slide is gated to presenter-notes output only.
+    pub register: Option<Register>,
 
     /// User-defined tags for filtering and grouping.
     pub tags: Vec<Arc<str>>,
@@ -80,12 +89,12 @@ impl Slide {
     /// use std::sync::Arc;
     ///
     /// let mut fields = OrderedMap::new();
-    /// fields.insert(Arc::from("title"), FieldValue::Value(Value::Str(Arc::from("My Slide"))));
+    /// fields.insert(Arc::from("title"), FieldValue::Literal(Value::Str(Arc::from("My Slide"))));
     /// let slide = Slide {
     ///     slide_type: Arc::from("title"),
     ///     fields,
     ///     blocks: vec![],
-    ///     register: Register::Notes,
+    ///     register: None,
     ///     tags: vec![],
     ///     source_span: SourceSpan::default(),
     /// };
@@ -94,7 +103,7 @@ impl Slide {
     #[must_use]
     pub fn title_str(&self) -> Option<&str> {
         match self.fields.get("title") {
-            Some(FieldValue::Value(Value::Str(s))) => Some(s.as_ref()),
+            Some(FieldValue::Literal(Value::Str(s))) => Some(s.as_ref()),
             _ => None,
         }
     }
@@ -110,7 +119,7 @@ mod tests {
             slide_type: Arc::from("title"),
             fields: OrderedMap::new(),
             blocks: vec![],
-            register: Register::Notes,
+            register: None,
             tags: vec![],
             source_span: SourceSpan::default(),
         }
@@ -126,7 +135,7 @@ mod tests {
         assert_eq!(slide.slide_type.as_ref(), "title");
         assert!(slide.fields.is_empty());
         assert!(slide.blocks.is_empty());
-        assert_eq!(slide.register, Register::Notes);
+        assert!(slide.register.is_none());
         assert!(slide.tags.is_empty());
     }
 
@@ -164,7 +173,7 @@ mod tests {
         let mut slide = make_minimal_slide();
         slide
             .fields
-            .insert(Arc::from("title"), FieldValue::Value(Value::Str(Arc::from("Hello World"))));
+            .insert(Arc::from("title"), FieldValue::Literal(Value::Str(Arc::from("Hello World"))));
         assert_eq!(slide.title_str(), Some("Hello World"));
     }
 
@@ -181,19 +190,39 @@ mod tests {
     }
 
     #[test]
-    fn test_bc_1_01_002_string_part_var() {
-        let part = StringPart::Var(Arc::from("company_name"));
-        assert!(matches!(part, StringPart::Var(_)));
+    fn test_bc_1_01_002_string_part_expr() {
+        // StringPart::Expr holds a full expression (not just a var name)
+        let part = StringPart::Expr(Arc::from("count + 1"));
+        assert!(matches!(part, StringPart::Expr(_)));
     }
 
     #[test]
     fn test_bc_1_01_002_field_value_variants() {
-        let fv_value = FieldValue::Value(Value::Int(42));
+        let fv_literal = FieldValue::Literal(Value::Int(42));
+        let fv_expr = FieldValue::Expr(Arc::from("{{ count + 1 }}"));
         let fv_interpolated = FieldValue::Interpolated(vec![StringPart::Literal(Arc::from("hi"))]);
         let fv_inlines = FieldValue::Inlines(vec![]);
-        assert!(matches!(fv_value, FieldValue::Value(_)));
+        assert!(matches!(fv_literal, FieldValue::Literal(_)));
+        assert!(matches!(fv_expr, FieldValue::Expr(_)));
         assert!(matches!(fv_interpolated, FieldValue::Interpolated(_)));
         assert!(matches!(fv_inlines, FieldValue::Inlines(_)));
+    }
+
+    #[test]
+    fn test_bc_1_01_002_slide_register_is_option() {
+        // AC-002: register is Option<Register>
+        let slide_no_register = make_minimal_slide();
+        assert!(slide_no_register.register.is_none());
+
+        let slide_with_register = Slide {
+            slide_type: Arc::from("bullets"),
+            fields: OrderedMap::new(),
+            blocks: vec![],
+            register: Some(Register::Notes),
+            tags: vec![],
+            source_span: SourceSpan::default(),
+        };
+        assert_eq!(slide_with_register.register, Some(Register::Notes));
     }
 
     #[test]
