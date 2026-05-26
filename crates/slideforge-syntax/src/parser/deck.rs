@@ -26,6 +26,7 @@ use crate::{
         AliasNode, BlockItem, DeckNode, FieldNode, FieldValue, SetRule, SetRuleValue, SlideNode,
         VariantsBlock, VarsBlock,
     },
+    keywords::{classify_keyword, is_slide_type_keyword},
     known_fields::{known_fields, suggest_type},
     span::{Span, Spanned},
     template::TemplateChunk,
@@ -229,24 +230,53 @@ fn vars_block_parser<'src, I>(
 where
     I: ValueInput<'src, Token = Token, Span = TSpan>,
 {
+    // A single vars entry with name collision checking.
+    //
+    // AC-011/AC-013/AC-014: variable names that collide with slide type
+    // keywords (exact match) produce E-PAR-008 (VarNameCollision).
+    // The `raw` keyword also produces E-PAR-008 (not E-PAR-009) when used as
+    // a variable name, because the collision check fires before the raw-keyword
+    // check.
+    let vars_entry = any_ident()
+        .then_ignore(just(Token::Colon))
+        .then(value_parser())
+        .then_ignore(just(Token::Newline).or_not())
+        .validate(move |((name, name_span), (val, val_span)), info, emitter| {
+            // Check for keyword collision.
+            //
+            // Priority: slide-type keywords → E-PAR-008.
+            //           `raw` in RESERVED_KEYWORDS → still E-PAR-008 (AC-011).
+            //           Other structural keywords → also E-PAR-008.
+            let collision = if is_slide_type_keyword(&name) {
+                Some(format!(
+                    "E-PAR-008: '{name}' is a built-in slide type keyword and cannot \
+                     be used as a variable name. Use a different name, e.g. '{name}_data'."
+                ))
+            } else if classify_keyword(&name).is_some() {
+                // Structural keywords and `raw` all produce E-PAR-008 in vars context.
+                Some(format!(
+                    "E-PAR-008: '{name}' is a reserved keyword and cannot be used as \
+                     a variable name."
+                ))
+            } else {
+                None
+            };
+
+            if let Some(msg) = collision {
+                emitter.emit(Rich::custom(info.span(), msg));
+            }
+
+            (
+                Spanned::new(name, to_span(name_span, file_id)),
+                Spanned::new(val, to_span(val_span, file_id)),
+            )
+        });
+
     keyword("vars")
         .then_ignore(just(Token::Colon))
         .then_ignore(just(Token::Newline).or_not())
         .then_ignore(select! { Token::Indent(_) => () })
-        .then(
-            any_ident()
-                .then_ignore(just(Token::Colon))
-                .then(value_parser())
-                .then_ignore(just(Token::Newline).or_not())
-                .map(move |((name, name_span), (val, val_span))| {
-                    (
-                        Spanned::new(name, to_span(name_span, file_id)),
-                        Spanned::new(val, to_span(val_span, file_id)),
-                    )
-                })
-                .repeated()
-                .collect::<Vec<_>>(),
-        )
+        .then(vars_entry.repeated().collect::<Vec<_>>())
         .then_ignore(just(Token::Dedent))
         .map(|(_vars_kw_span, entries)| VarsBlock { entries })
 }

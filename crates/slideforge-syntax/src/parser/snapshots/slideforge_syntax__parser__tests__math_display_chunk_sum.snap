@@ -1,0 +1,7 @@
+---
+source: crates/slideforge-syntax/src/parser/mod.rs
+expression: chunk
+---
+MathDisplay(
+    "\\sum_{i=0}^{n} i",
+)

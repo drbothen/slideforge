@@ -15,6 +15,7 @@ chumsky = { workspace = true }
 thiserror = { workspace = true }
 miette = { workspace = true }
 ordered-float = { workspace = true }
+phf = { workspace = true }
 
 [dev-dependencies]
 insta = { workspace = true }

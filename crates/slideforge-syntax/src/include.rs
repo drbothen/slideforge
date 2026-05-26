@@ -166,6 +166,27 @@ pub fn evaluate_template_path(chunks: &[TemplateChunk], vars: &VarsScope) -> Str
                     out.push_str("{{ <expr> }}");
                 }
             },
+            // STORY-009: math chunks in @include paths are treated as opaque
+            // literals (a path inside a math region is pathological input — the
+            // validator will reject it).
+            TemplateChunk::MathInline(s) | TemplateChunk::MathDisplay(s) => {
+                out.push('$');
+                out.push_str(s);
+                out.push('$');
+            },
+            TemplateChunk::MathInterp(expr) => {
+                if let (crate::expr::Expr::Ident(name), Some(val)) = (
+                    expr,
+                    vars.get(if let crate::expr::Expr::Ident(n) = expr {
+                        n.as_str()
+                    } else {
+                        ""
+                    }),
+                ) {
+                    let _ = name; // bound by the outer pattern
+                    out.push_str(val);
+                }
+            },
         }
     }
     out

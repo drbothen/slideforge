@@ -33,7 +33,7 @@ use crate::{
     token::Token,
 };
 
-use super::{expr::expr, template::template_value};
+use super::{expr::expr, shape::shape_block, template::template_value};
 
 // ─── Type alias ───────────────────────────────────────────────────────────────
 
@@ -114,7 +114,44 @@ where
 
     let value_p = template_val.or(other_val);
 
-    any_ident()
+    // `shape:` block produces a FieldNode with name "shape" and FieldValue::Shape.
+    let shape_field = shape_block(file_id).map_with(move |(val, val_span), e| {
+        let block_span = e.span();
+        SlideBodyItem::Field(FieldNode {
+            name: Spanned::new("shape".to_string(), to_span(block_span, file_id)),
+            value: Spanned::new(val, to_span(val_span, file_id)),
+        })
+    });
+
+    // `raw` field rejection: `raw ...` at slide field position → E-PAR-009.
+    //
+    // The `raw` escape hatch (`raw pptx:`, `raw html:`, bare `raw`) is not
+    // available in user .sf files (AC-010). Reject it here so that the error
+    // message is specific rather than a generic parse failure.
+    let raw_rejected = select! { Token::Ident(s) = e if s.as_ref() == "raw" => e.span() }
+        .then_ignore(
+            any()
+                .filter(|t: &Token| !matches!(t, Token::Newline | Token::Dedent | Token::Eof))
+                .repeated(),
+        )
+        .then_ignore(just(Token::Newline).or_not())
+        .validate(|_span, info, emitter| {
+            emitter.emit(Rich::custom(
+                info.span(),
+                "E-PAR-009: 'raw' escape hatch is not available in user .sf files. \
+                 Use a 'shape:' block to embed custom shapes.",
+            ));
+        })
+        .map(move |()| {
+            // Produce a dummy field node to allow parsing to continue.
+            SlideBodyItem::Field(FieldNode {
+                name: Spanned::new("raw".to_string(), to_span(SimpleSpan::from(0..0), file_id)),
+                value: Spanned::new(FieldValue::Error, to_span(SimpleSpan::from(0..0), file_id)),
+            })
+        });
+
+    // Regular field line: `IDENT value NEWLINE`.
+    let regular_field = any_ident()
         .then(value_p)
         .then_ignore(just(Token::Newline).or_not())
         .map(move |((name, name_span), (val, val_span))| {
@@ -122,7 +159,10 @@ where
                 name: Spanned::new(name, to_span(name_span, file_id)),
                 value: Spanned::new(val, to_span(val_span, file_id)),
             })
-        })
+        });
+
+    // Priority: shape_block (starts with `shape:`) > raw_rejected > regular_field.
+    shape_field.or(raw_rejected).or(regular_field)
 }
 
 // ─── Public: recursive block_item ────────────────────────────────────────────
@@ -141,8 +181,52 @@ where
     I: ValueInput<'src, Token = Token, Span = TSpan>,
 {
     recursive(move |item| {
-        // ── @while rejection ─────────────────────────────────────────────────
+        // ── Reserved @-directive rejection (E-PAR-006) ───────────────────────
         // Must check before any valid `@` production.
+        //
+        // This matcher fires for `@fn`, `@mixin`, `@while`, `@match`, `@let`,
+        // `@macro`, `@import`, `@export`, `@type`, `@schema` — all directives
+        // that are in RESERVED_KEYWORDS with E-PAR-006 but are not yet
+        // implemented. Each emits E-PAR-006 so that the error conversion in
+        // `parser/mod.rs` can produce `SyntaxError::ReservedKeyword`.
+        let reserved_directive_rejected = just(Token::At)
+            .then(select! {
+                Token::Ident(s) if matches!(
+                    s.as_ref(),
+                    "fn" | "mixin" | "while" | "match" | "let" | "macro"
+                    | "import" | "export" | "type" | "schema"
+                ) => s.to_string()
+            })
+            .validate(|(_at, name), info, emitter| {
+                emitter.emit(Rich::custom(
+                    info.span(),
+                    format!(
+                        "E-PAR-006: '@{name}' is a reserved keyword — \
+                         this feature is planned for a future version of slideforge \
+                         and is not yet implemented."
+                    ),
+                ));
+                name
+            })
+            .then_ignore(
+                any()
+                    .filter(|t: &Token| !matches!(t, Token::Newline | Token::Dedent | Token::Eof))
+                    .repeated(),
+            )
+            .then_ignore(just(Token::Newline).or_not())
+            .map(move |_name| {
+                BlockItem::If(Spanned::new(
+                    IfNode {
+                        condition: Spanned::new(Expr::Error, zero_span(file_id)),
+                        then_body: vec![],
+                        elif_branches: vec![],
+                        else_body: None,
+                    },
+                    zero_span(file_id),
+                ))
+            });
+
+        // Keep `@while` separate for its more specific message.
         let while_rejected = just(Token::At)
             .then(keyword("while"))
             .validate(|(_at, span), info, emitter| {
@@ -214,7 +298,8 @@ where
 
         nl.clone()
             .ignore_then(
-                while_rejected
+                reserved_directive_rejected
+                    .or(while_rejected)
                     .or(elif_rejected)
                     .or(for_b)
                     .or(if_b)

@@ -1,0 +1,7 @@
+---
+source: crates/slideforge-syntax/src/parser/mod.rs
+expression: chunk
+---
+MathInline(
+    "x^2",
+)

@@ -1,0 +1,9 @@
+---
+source: crates/slideforge-syntax/src/parser/mod.rs
+expression: chunk
+---
+MathInterp(
+    Ident(
+        "base",
+    ),
+)
