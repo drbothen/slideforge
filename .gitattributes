@@ -1,0 +1,10 @@
+# Force LF line endings for snapshot files on all platforms.
+# Windows git with core.autocrlf=true would otherwise check out .snap files
+# with CRLF, causing insta snapshot comparisons to fail on Windows CI.
+*.snap text eol=lf
+
+# Rust source files use LF everywhere.
+*.rs text eol=lf
+
+# TOML config files use LF.
+*.toml text eol=lf

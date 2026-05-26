@@ -40,7 +40,7 @@ pub enum FieldValue {
     Float(ordered_float::OrderedFloat<f64>),
     /// A boolean literal (`true` or `false`).
     ///
-    /// Stored as a proper `bool` rather than an [`Ident`] so that the evaluator
+    /// Stored as a proper `bool` rather than a [`FieldValue::Ident`] so that the evaluator
     /// (STORY-007+) can distinguish `true`/`false` from user-defined identifiers
     /// at the AST level without string comparison.
     Bool(bool),
