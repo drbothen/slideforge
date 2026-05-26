@@ -410,10 +410,22 @@ impl<'src> LexerState<'src> {
                     // `\ñ` is 2 UTF-8 bytes) and corrupt the char-boundary
                     // invariant, causing a panic on the next `&self.src[pos..]`.
                     self.pos += 1; // skip `\`
-                    if let Some(s) = self.src.get(self.pos..)
-                        && let Some(ch) = s.chars().next()
-                    {
-                        self.pos += ch.len_utf8();
+                    // Do NOT consume a line terminator or EOF as the escaped
+                    // character: `"hello\` followed by newline must produce
+                    // UnterminatedString, not silently continue on the next
+                    // line.  Leave pos unchanged so the next loop iteration
+                    // hits the `\n` / `\r` / EOF branch and emits the error.
+                    match self.current() {
+                        None | Some(b'\n') => {
+                            // Let next iteration trigger unterminated-string.
+                        }
+                        _ => {
+                            if let Some(s) = self.src.get(self.pos..)
+                                && let Some(ch) = s.chars().next()
+                            {
+                                self.pos += ch.len_utf8();
+                            }
+                        }
                     }
                 }
                 Some(b'"') => {
@@ -1116,6 +1128,42 @@ mod tests {
         // parsing can continue (DI-018 error accumulation).
         let has_int_lit = tokens.iter().any(|(t, _)| matches!(t, Token::IntLit(_)));
         assert!(has_int_lit, "should still emit a recovery IntLit token");
+    }
+
+    // ── Backslash-before-newline must not bypass single-line enforcement ──
+
+    #[test]
+    fn test_backslash_before_newline_unterminated() {
+        // `"hello\` followed by a newline must produce UnterminatedString, NOT
+        // silently stitch lines together.  This guards against the escape-handler
+        // consuming `\n` as the "escaped character" and continuing on the next
+        // line, which would violate the DSL single-line string contract.
+        let src = "title \"hello\\\nworld\"\n";
+        let (_, errors) = lex_str(src);
+        assert!(
+            !errors.is_empty(),
+            "backslash before newline must produce at least one error"
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, LexError::UnterminatedString { .. })),
+            "expected UnterminatedString error, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn test_backslash_at_eof_unterminated() {
+        // `"hello\` with no following character at all must produce
+        // UnterminatedString, not loop indefinitely or panic.
+        let src = "title \"hello\\";
+        let (_, errors) = lex_str(src);
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, LexError::UnterminatedString { .. })),
+            "backslash at EOF must produce UnterminatedString; got: {errors:?}"
+        );
     }
 
     // ── Snapshot test ─────────────────────────────────────────────────────
