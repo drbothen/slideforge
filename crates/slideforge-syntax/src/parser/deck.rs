@@ -495,7 +495,7 @@ where
         .repeated()
         .ignore_then(item.padded_by(nl.repeated()).repeated().collect::<Vec<_>>())
         .then_ignore(just(Token::Eof).or_not())
-        .map(move |items| {
+        .validate(move |items, _info, emitter| {
             let mut deck = DeckNode::default();
             // Alias registry — local to this parse, consumed during expansion.
             let mut alias_reg = AliasRegistry::new();
@@ -516,8 +516,25 @@ where
                         deck.variants = Some(vb);
                     },
                     DeckItem::Alias(a) => {
-                        // Register the alias for subsequent slide expansion.
-                        alias_reg.register(a);
+                        // EC-006: reject alias-of-alias before registering.
+                        // Transitive aliasing (alias A = B where B is also an alias)
+                        // is not supported in v1.0. Check must happen at registration
+                        // time because the base_type parser runs before the AliasRegistry
+                        // has visibility into previously registered aliases.
+                        if let Some(err_msg) = alias_reg.check_alias_of_alias(a.base_type.value()) {
+                            // Emit E-PAR-011 with an alias-span approximation (0-offset).
+                            emitter.emit(Rich::custom(
+                                SimpleSpan::from(0usize..0usize),
+                                format!(
+                                    "{err_msg} (in alias '{}')",
+                                    a.name.value()
+                                ),
+                            ));
+                            // Do NOT register the invalid alias — drop it.
+                        } else {
+                            // Register the alias for subsequent slide expansion.
+                            alias_reg.register(a);
+                        }
                     },
                     DeckItem::Include(bi) => {
                         // @include placeholder — passed through for post-parse resolution.

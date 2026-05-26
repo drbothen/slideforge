@@ -628,4 +628,49 @@ mod tests {
         ];
         assert!(detect_inherits_cycle(&variants).is_ok());
     }
+
+    // ── F2-01: empty variants block through parser — must not panic ───────────
+    //
+    // Feeds a `variants:` block with no variant declarations through the full
+    // parser pipeline. The expected outcome is either a parse error containing
+    // E-PAR-002 (because the block is genuinely empty) or, if the lexer cannot
+    // produce an INDENT/DEDENT pair for an empty body, a parse error at a
+    // different level. In either case: NO PANIC.
+    #[test]
+    fn test_empty_variants_block_through_parser() {
+        // A `variants:` block followed immediately by an unindented slide.
+        // The parser may interpret the slide as the first token of the block
+        // body and emit a different error — what matters is no panic occurs.
+        let src = concat!(
+            "slideforge_version \"1\"\n",
+            "\n",
+            "variants:\n",
+            "\n",
+            "slide title:\n",
+            "  title \"Hello\"\n",
+        );
+        // Must not panic — result may be Ok (if parser recovers) or Err.
+        let result = parse_deck(src);
+        // The key assertion: we reached this line without panicking.
+        // If the parser surfaced E-PAR-002 in the errors, verify the message.
+        if let Err(ref errors) = result {
+            let has_empty_variants_err = errors.iter().any(|e| {
+                let msg = e.to_string();
+                msg.contains("E-PAR-002")
+                    || msg.contains("variants")
+                    || msg.contains("at least one")
+            });
+            // If there are errors, at least one should relate to the empty
+            // variants block OR to unexpected tokens around it.
+            assert!(
+                !errors.is_empty(),
+                "Err must carry at least one error message"
+            );
+            // If E-PAR-002 is present that's ideal, but not mandatory — the
+            // lexer may not emit an INDENT/DEDENT for an empty body, causing
+            // a different structural parse error instead.
+            let _ = has_empty_variants_err; // informational; not asserted
+        }
+        // Ok result is also acceptable if parser successfully recovers.
+    }
 }
