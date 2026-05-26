@@ -37,7 +37,13 @@ impl ScreenshotSlideType {
             required: false,
             default_value: None,
         }];
-        optional.extend(common_optional_fields());
+        // `alt` is required on screenshot slides; exclude it from the common optional
+        // fields to avoid duplicating it in required ∪ optional (F-P2-003).
+        optional.extend(
+            common_optional_fields()
+                .into_iter()
+                .filter(|f| f.name.as_ref() != "alt"),
+        );
         Self {
             required: vec![
                 FieldDef {

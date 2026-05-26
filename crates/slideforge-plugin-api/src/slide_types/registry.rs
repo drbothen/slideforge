@@ -255,18 +255,22 @@ pub fn validate_fields(slide: &Slide, slide_type: &dyn SlideType) -> Vec<Diagnos
     }
 
     // Check for unknown fields: not in required ∪ optional → W-VAL-103.
-    let slide_type_id = &slide.slide_type;
+    // Build known-field list once for the diagnostic message (F-P2-001 / AC-008).
+    let mut known_list: Vec<&str> = known.iter().map(std::convert::AsRef::as_ref).collect();
+    known_list.sort_unstable();
+    let known_list_str = known_list.join(", ");
     for key in slide.fields.keys() {
         if !known.contains(key.as_ref()) {
             diags.push(Diagnostic {
                 severity: DiagnosticSeverity::Warning,
                 code: Arc::from("W-VAL-103"),
                 message: Arc::from(format!(
-                    "slide type '{slide_type_id}': unknown field '{key}'"
+                    "Unknown field '{key}' for slide type '{type_id}'. \
+                     Known fields: [{known_list_str}]."
                 )),
                 span: slide.source_span.clone(),
                 hint: Some(Arc::from(format!(
-                    "remove '{key}' or check the field name for typos"
+                    "Valid fields for '{type_id}' are: {known_list_str}"
                 ))),
             });
         }
@@ -282,7 +286,6 @@ pub fn validate_fields(slide: &Slide, slide_type: &dyn SlideType) -> Vec<Diagnos
 /// Build the complete set of known field names (required ∪ optional) for a slide type.
 ///
 /// Used by [`validate_fields`] to identify fields not declared by the type.
-#[allow(dead_code)] // used by validate_fields implementation (STORY-003 implementer task)
 fn known_field_names(slide_type: &dyn SlideType) -> std::collections::HashSet<Arc<str>> {
     slide_type
         .required_fields()
@@ -518,7 +521,7 @@ mod tests {
     // ── AC-008: unknown field produces Warning diagnostic ─────────────────────
 
     /// Exercises BC-1.03.008: a field not in required or optional produces a
-    /// Warning diagnostic.
+    /// Warning diagnostic with the AC-008 message format.
     ///
     /// FAILS at Red Gate: `validate_fields` is `todo!()`.
     #[test]
@@ -528,11 +531,21 @@ mod tests {
         // Valid required field + one unknown field.
         let slide = make_slide("title", vec![("title", "Hello"), ("zzz_unknown", "value")]);
         let diagnostics = validate_fields(&slide, slide_type);
+        let warning = diagnostics
+            .iter()
+            .find(|d| d.severity == DiagnosticSeverity::Warning)
+            .expect("expected a Warning-severity diagnostic for unknown field 'zzz_unknown'");
+        // AC-008: message format must include "Known fields:"
         assert!(
-            diagnostics
-                .iter()
-                .any(|d| d.severity == DiagnosticSeverity::Warning),
-            "expected a Warning-severity diagnostic for unknown field 'zzz_unknown'"
+            warning.message.contains("Known fields:"),
+            "unknown-field message must list known fields; got: {}",
+            warning.message
+        );
+        // AC-008: message must name the unknown field
+        assert!(
+            warning.message.contains("zzz_unknown"),
+            "unknown-field message must name the unknown field; got: {}",
+            warning.message
         );
     }
 
@@ -716,6 +729,61 @@ mod tests {
                 "lay_out() for '{kw}' must return Ok, got: {result:?}"
             );
         }
+    }
+
+    // ── EC-005: stat_callout with partial fields ──────────────────────────────
+
+    /// Exercises EC-005: `validate_fields` on `stat_callout` with only 2 of 4
+    /// required fields provided emits exactly 2 Error diagnostics — one for
+    /// each missing required field (`stat_2`, `label_2`).
+    #[test]
+    fn test_ec_005_stat_callout_partial_fields() {
+        let reg = SlideTypeRegistry::default();
+        let slide_type = reg.lookup_by_keyword("stat_callout").unwrap();
+        // Provide only stat_1 and label_1; stat_2 and label_2 are missing.
+        let slide = make_slide(
+            "stat_callout",
+            vec![("stat_1", "93%"), ("label_1", "CSAT")],
+        );
+        let diags = validate_fields(&slide, slide_type);
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == DiagnosticSeverity::Error)
+            .collect();
+        assert_eq!(
+            errors.len(),
+            2,
+            "exactly 2 missing required fields (stat_2, label_2); got {} errors",
+            errors.len()
+        );
+        // Each error identifies exactly one missing field.
+        // The messages should collectively name stat_2 and label_2 as the
+        // missing fields, not stat_1 or label_1 (which are present).
+        let missing_names: Vec<&str> = errors
+            .iter()
+            .filter_map(|e| {
+                // Extract the field named in "Required field 'X' missing"
+                e.message
+                    .strip_prefix("Required field '")
+                    .and_then(|s| s.split('\'').next())
+            })
+            .collect();
+        assert!(
+            missing_names.contains(&"stat_2"),
+            "error must identify 'stat_2' as missing; got missing_names={missing_names:?}"
+        );
+        assert!(
+            missing_names.contains(&"label_2"),
+            "error must identify 'label_2' as missing; got missing_names={missing_names:?}"
+        );
+        assert!(
+            !missing_names.contains(&"stat_1"),
+            "present field 'stat_1' must not be identified as missing; got missing_names={missing_names:?}"
+        );
+        assert!(
+            !missing_names.contains(&"label_1"),
+            "present field 'label_1' must not be identified as missing; got missing_names={missing_names:?}"
+        );
     }
 
     // ── Validate fields: clean slide produces no diagnostics ──────────────────
