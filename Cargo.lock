@@ -719,7 +719,6 @@ dependencies = [
  "insta",
  "miette",
  "ordered-float",
- "slideforge-types",
  "thiserror",
 ]
 

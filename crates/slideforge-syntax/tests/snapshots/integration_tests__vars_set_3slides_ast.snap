@@ -51,8 +51,8 @@ DeckNode {
                         ),
                         Span {
                             file_id: 0,
-                            start: 75,
-                            end: 86,
+                            start: 76,
+                            end: 87,
                         },
                     ),
                 ),
@@ -61,8 +61,8 @@ DeckNode {
                         "year",
                         Span {
                             file_id: 0,
-                            start: 89,
-                            end: 93,
+                            start: 90,
+                            end: 94,
                         },
                     ),
                     Spanned(
@@ -71,8 +71,8 @@ DeckNode {
                         ),
                         Span {
                             file_id: 0,
-                            start: 94,
-                            end: 98,
+                            start: 96,
+                            end: 100,
                         },
                     ),
                 ),
@@ -81,8 +81,8 @@ DeckNode {
                         "presenter",
                         Span {
                             file_id: 0,
-                            start: 101,
-                            end: 110,
+                            start: 103,
+                            end: 112,
                         },
                     ),
                     Spanned(
@@ -91,8 +91,8 @@ DeckNode {
                         ),
                         Span {
                             file_id: 0,
-                            start: 111,
-                            end: 123,
+                            start: 114,
+                            end: 126,
                         },
                     ),
                 ),
@@ -105,16 +105,16 @@ DeckNode {
                 "content",
                 Span {
                     file_id: 0,
-                    start: 129,
-                    end: 136,
+                    start: 132,
+                    end: 139,
                 },
             ),
             field: Spanned(
                 "footer",
                 Span {
                     file_id: 0,
-                    start: 138,
-                    end: 144,
+                    start: 141,
+                    end: 147,
                 },
             ),
             value: Spanned(
@@ -123,8 +123,8 @@ DeckNode {
                 ),
                 Span {
                     file_id: 0,
-                    start: 145,
-                    end: 159,
+                    start: 148,
+                    end: 162,
                 },
             ),
         },
@@ -133,16 +133,16 @@ DeckNode {
                 "title",
                 Span {
                     file_id: 0,
-                    start: 164,
-                    end: 169,
+                    start: 167,
+                    end: 172,
                 },
             ),
             field: Spanned(
                 "footer",
                 Span {
                     file_id: 0,
-                    start: 171,
-                    end: 177,
+                    start: 174,
+                    end: 180,
                 },
             ),
             value: Spanned(
@@ -151,8 +151,8 @@ DeckNode {
                 ),
                 Span {
                     file_id: 0,
-                    start: 178,
-                    end: 189,
+                    start: 181,
+                    end: 192,
                 },
             ),
         },
@@ -164,8 +164,8 @@ DeckNode {
                     "title",
                     Span {
                         file_id: 0,
-                        start: 197,
-                        end: 202,
+                        start: 200,
+                        end: 205,
                     },
                 ),
                 tags: [],
@@ -175,8 +175,8 @@ DeckNode {
                             "title",
                             Span {
                                 file_id: 0,
-                                start: 206,
-                                end: 211,
+                                start: 209,
+                                end: 214,
                             },
                         ),
                         value: Spanned(
@@ -185,8 +185,8 @@ DeckNode {
                             ),
                             Span {
                                 file_id: 0,
-                                start: 212,
-                                end: 223,
+                                start: 215,
+                                end: 226,
                             },
                         ),
                     },
@@ -195,8 +195,8 @@ DeckNode {
                             "subtitle",
                             Span {
                                 file_id: 0,
-                                start: 226,
-                                end: 234,
+                                start: 229,
+                                end: 237,
                             },
                         ),
                         value: Spanned(
@@ -205,8 +205,8 @@ DeckNode {
                             ),
                             Span {
                                 file_id: 0,
-                                start: 235,
-                                end: 253,
+                                start: 238,
+                                end: 256,
                             },
                         ),
                     },
@@ -215,8 +215,8 @@ DeckNode {
                             "footer",
                             Span {
                                 file_id: 0,
-                                start: 256,
-                                end: 262,
+                                start: 259,
+                                end: 265,
                             },
                         ),
                         value: Spanned(
@@ -225,8 +225,8 @@ DeckNode {
                             ),
                             Span {
                                 file_id: 0,
-                                start: 263,
-                                end: 274,
+                                start: 266,
+                                end: 277,
                             },
                         ),
                     },
@@ -234,8 +234,8 @@ DeckNode {
             },
             Span {
                 file_id: 0,
-                start: 191,
-                end: 276,
+                start: 194,
+                end: 279,
             },
         ),
         Spanned(
@@ -244,8 +244,8 @@ DeckNode {
                     "content",
                     Span {
                         file_id: 0,
-                        start: 282,
-                        end: 289,
+                        start: 285,
+                        end: 292,
                     },
                 ),
                 tags: [],
@@ -255,8 +255,8 @@ DeckNode {
                             "title",
                             Span {
                                 file_id: 0,
-                                start: 293,
-                                end: 298,
+                                start: 296,
+                                end: 301,
                             },
                         ),
                         value: Spanned(
@@ -265,8 +265,8 @@ DeckNode {
                             ),
                             Span {
                                 file_id: 0,
-                                start: 299,
-                                end: 315,
+                                start: 302,
+                                end: 318,
                             },
                         ),
                     },
@@ -275,8 +275,8 @@ DeckNode {
                             "body",
                             Span {
                                 file_id: 0,
-                                start: 318,
-                                end: 322,
+                                start: 321,
+                                end: 325,
                             },
                         ),
                         value: Spanned(
@@ -285,8 +285,8 @@ DeckNode {
                             ),
                             Span {
                                 file_id: 0,
-                                start: 323,
-                                end: 356,
+                                start: 326,
+                                end: 359,
                             },
                         ),
                     },
@@ -295,8 +295,8 @@ DeckNode {
                             "footer",
                             Span {
                                 file_id: 0,
-                                start: 359,
-                                end: 365,
+                                start: 362,
+                                end: 368,
                             },
                         ),
                         value: Spanned(
@@ -305,8 +305,8 @@ DeckNode {
                             ),
                             Span {
                                 file_id: 0,
-                                start: 366,
-                                end: 380,
+                                start: 369,
+                                end: 383,
                             },
                         ),
                     },
@@ -314,8 +314,8 @@ DeckNode {
             },
             Span {
                 file_id: 0,
-                start: 276,
-                end: 382,
+                start: 279,
+                end: 385,
             },
         ),
         Spanned(
@@ -324,8 +324,8 @@ DeckNode {
                     "content",
                     Span {
                         file_id: 0,
-                        start: 388,
-                        end: 395,
+                        start: 391,
+                        end: 398,
                     },
                 ),
                 tags: [],
@@ -335,8 +335,8 @@ DeckNode {
                             "title",
                             Span {
                                 file_id: 0,
-                                start: 399,
-                                end: 404,
+                                start: 402,
+                                end: 407,
                             },
                         ),
                         value: Spanned(
@@ -345,8 +345,8 @@ DeckNode {
                             ),
                             Span {
                                 file_id: 0,
-                                start: 405,
-                                end: 417,
+                                start: 408,
+                                end: 420,
                             },
                         ),
                     },
@@ -355,8 +355,8 @@ DeckNode {
                             "body",
                             Span {
                                 file_id: 0,
-                                start: 420,
-                                end: 424,
+                                start: 423,
+                                end: 427,
                             },
                         ),
                         value: Spanned(
@@ -365,8 +365,8 @@ DeckNode {
                             ),
                             Span {
                                 file_id: 0,
-                                start: 425,
-                                end: 443,
+                                start: 428,
+                                end: 446,
                             },
                         ),
                     },
@@ -375,8 +375,8 @@ DeckNode {
                             "footer",
                             Span {
                                 file_id: 0,
-                                start: 446,
-                                end: 452,
+                                start: 449,
+                                end: 455,
                             },
                         ),
                         value: Spanned(
@@ -385,8 +385,8 @@ DeckNode {
                             ),
                             Span {
                                 file_id: 0,
-                                start: 453,
-                                end: 467,
+                                start: 456,
+                                end: 470,
                             },
                         ),
                     },
@@ -394,8 +394,8 @@ DeckNode {
             },
             Span {
                 file_id: 0,
-                start: 382,
-                end: 468,
+                start: 385,
+                end: 471,
             },
         ),
     ],

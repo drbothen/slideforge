@@ -206,9 +206,10 @@ fn test_bc_1_01_001_slide_fields_captured() {
 
 #[test]
 fn test_bc_1_01_001_vars_block_parsed() {
+    // vars entries use IDENT ":" value syntax per the grammar spec.
     let src = concat!(
         "vars:\n",
-        "  client \"Acme\"\n",
+        "  client: \"Acme\"\n",
         "slide title:\n",
         "  title \"Test\"\n",
     );
@@ -299,6 +300,34 @@ fn test_bc_1_01_002_snapshot_2_indent_errors() {
     assert!(result.is_err(), "2_indent_errors.sf must produce errors");
     let errors = result.unwrap_err();
     insta::assert_debug_snapshot!("two_indent_errors", errors);
+}
+
+// ─── AC-006: dedent misalignment → E-PAR-001 ─────────────────────────────────
+
+#[test]
+fn test_bc_1_01_002_dedent_misalignment() {
+    // Establish a 4-space indentation inside a slide block, then "dedent" to
+    // 1 space — which is between 0 and 4 on the indent stack.  The lexer
+    // must emit IndentationInconsistency (→ E-PAR-001) because 1 does not
+    // match any level in the indent stack ([0, 4]).
+    let src = concat!(
+        "slide content:\n",
+        "    title \"Good\"\n", // 4-space indent → establishes level 4
+        " bad_indent \"v\"\n",  // 1-space dedent → between 0 and 4 → error
+    );
+    let result = parse_str(src);
+    assert!(
+        result.is_err(),
+        "dedent to 1 space (between 0 and 4) must emit E-PAR-001; got Ok"
+    );
+    let errors = result.unwrap_err();
+    let has_indent_err = errors
+        .iter()
+        .any(|e| matches!(e, SyntaxError::IndentError { .. }));
+    assert!(
+        has_indent_err,
+        "must contain an IndentError (E-PAR-001) for the misaligned dedent; got: {errors:?}"
+    );
 }
 
 // ─── EC-002: metadata only, no slides ────────────────────────────────────────

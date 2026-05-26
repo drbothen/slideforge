@@ -3,9 +3,9 @@ lang "en-US"
 brand "corporate.pptx"
 
 vars:
-  client "Acme Corp"
-  year 2024
-  presenter "Jane Smith"
+  client: "Acme Corp"
+  year: 2024
+  presenter: "Jane Smith"
 
 set content: footer "Confidential"
 set title: footer "Acme Corp"

@@ -12,7 +12,7 @@
 //! version_decl ::= "slideforge_version" STRING NEWLINE
 //! lang_decl    ::= "lang" STRING NEWLINE
 //! brand_decl   ::= "brand" STRING NEWLINE
-//! vars_block   ::= "vars" ":" INDENT (IDENT value NEWLINE)+ DEDENT
+//! vars_block   ::= "vars" ":" INDENT (IDENT ":" value NEWLINE)+ DEDENT
 //! set_rule     ::= "set" IDENT ":" IDENT value NEWLINE
 //! slide_block  ::= "slide" IDENT ":" INDENT (field_line)+ DEDENT
 //! field_line   ::= IDENT value NEWLINE
@@ -20,6 +20,8 @@
 //! ```
 
 use chumsky::{input::ValueInput, prelude::*};
+
+use ordered_float::OrderedFloat;
 
 use crate::{
     ast::{DeckNode, FieldNode, FieldValue, SetRule, SlideNode, VarsBlock},
@@ -53,7 +55,8 @@ where
     select! {
         Token::StringLit(s) = e => (FieldValue::Str(s.to_string()), e.span()),
         Token::IntLit(n) = e => (FieldValue::Num(n), e.span()),
-        Token::BoolLit(b) = e => (FieldValue::Ident(b.to_string()), e.span()),
+        Token::FloatLit(f) = e => (FieldValue::Float(OrderedFloat(f.0)), e.span()),
+        Token::BoolLit(b) = e => (FieldValue::Bool(b), e.span()),
         Token::Ident(s) = e => (FieldValue::Ident(s.to_string()), e.span()),
     }
 }
@@ -167,6 +170,7 @@ where
         .then_ignore(select! { Token::Indent(_) => () })
         .then(
             any_ident()
+                .then_ignore(just(Token::Colon))
                 .then(value_parser())
                 .then_ignore(just(Token::Newline).or_not())
                 .map(move |((name, name_span), (val, val_span))| {
@@ -458,9 +462,10 @@ mod tests {
 
     #[test]
     fn test_bc_1_01_001_vars_block_parsed() {
+        // vars entries use IDENT ":" value syntax per the grammar spec.
         let src = concat!(
             "vars:\n",
-            "  client \"Acme\"\n",
+            "  client: \"Acme\"\n",
             "slide title:\n",
             "  title \"Test\"\n",
         );

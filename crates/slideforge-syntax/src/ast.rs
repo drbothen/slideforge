@@ -33,6 +33,17 @@ pub enum FieldValue {
     Str(String),
     /// An integer literal.
     Num(i64),
+    /// A floating-point literal.
+    ///
+    /// Uses [`ordered_float::OrderedFloat`] so that `FieldValue` remains
+    /// `Hash + Eq`, which is required for comemo cache compatibility (ADR-013).
+    Float(ordered_float::OrderedFloat<f64>),
+    /// A boolean literal (`true` or `false`).
+    ///
+    /// Stored as a proper `bool` rather than an [`Ident`] so that the evaluator
+    /// (STORY-007+) can distinguish `true`/`false` from user-defined identifiers
+    /// at the AST level without string comparison.
+    Bool(bool),
     /// An unquoted bare identifier.
     Ident(String),
     /// Sentinel produced by the error-recovery path when a value could not be parsed.
@@ -163,6 +174,9 @@ mod tests {
     fn test_bc_1_01_001_field_value_variants_all_constructible() {
         let _ = FieldValue::Str("s".to_string());
         let _ = FieldValue::Num(42);
+        let _ = FieldValue::Float(ordered_float::OrderedFloat(1.5_f64));
+        let _ = FieldValue::Bool(true);
+        let _ = FieldValue::Bool(false);
         let _ = FieldValue::Ident("foo".to_string());
         let _ = FieldValue::Error;
     }

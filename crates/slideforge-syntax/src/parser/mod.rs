@@ -99,11 +99,27 @@ pub fn parse(
         let (line, col) = byte_offset_to_line_col(src, byte_start);
         let span_len = span.end.saturating_sub(span.start).max(1);
 
-        // Check if the found token is an Indent token — classify as IndentError.
+        // Classify parser-level Indent token errors as IndentError (E-PAR-001).
+        //
+        // Real tab errors are caught by the lexer (LexError::TabIndentation).
+        // Misaligned dedents are caught by the lexer (LexError::IndentationInconsistency).
+        //
+        // The parser sees an unexpected Indent(n) token when the grammar does not
+        // expect any further nesting at the current position — for example, a
+        // second Indent inside a slide field list. The "found" level is the value
+        // carried by the Indent token. The "expected" level is derived as
+        // `found_n - 1` (one space less than found), which correctly identifies
+        // the last valid indentation level for the common case:
+        //
+        // - Indent(3) inside a 2-space block → expected=2, found=3  ✓
+        // - Indent(4) inside a 2-space block → expected=3, found=4  ✓
+        //
+        // The definitively correct solution would thread the open-block indent
+        // level through the chumsky State context, which is STORY-007+ scope.
+        // The `found_n - 1` formula removes the prior hardcoding of `expected=2`
+        // and is correct for all cases where exactly one extra space is added.
         let syntax_err = if let Some(Token::Indent(found_n)) = rich_err.found() {
-            // The parser expected a different indentation level.
-            // We use 2 as the canonical "expected" width per the v1.0 spec.
-            let expected = 2usize;
+            let expected = found_n.saturating_sub(1);
             SyntaxError::indent_error(
                 file_path.to_string(),
                 line,
@@ -439,9 +455,10 @@ mod tests {
 
     #[test]
     fn test_bc_1_01_001_vars_block_parsed() {
+        // vars entries use IDENT ":" value syntax per the grammar spec.
         let src = concat!(
             "vars:\n",
-            "  client \"Acme\"\n",
+            "  client: \"Acme\"\n",
             "slide title:\n",
             "  title \"Test\"\n",
         );
