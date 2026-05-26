@@ -1,0 +1,22 @@
+[package]
+name = "slideforge-plugin-api"
+description = "Plugin trait API for slideforge — the 10 extension surfaces all bundled and external plugins implement"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "../../README.md"
+keywords.workspace = true
+categories.workspace = true
+
+[lib]
+name = "slideforge_plugin_api"
+
+[dependencies]
+# Only allowed workspace dep for this leaf crate: slideforge-types.
+# All production deps pinned with `=` per supply-chain policy.
+slideforge-types.workspace = true
+thiserror = "=2.0.12"
