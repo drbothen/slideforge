@@ -53,20 +53,35 @@ Phase 1 Spec Crystallization: COMPLETE and APPROVED (2026-05-25).
 
 ### Immediate first action
 
-Start Wave 1 delivery. The per-story delivery flow is:
-1. test-writer: stubs → 2. test-writer: failing tests → 3. implementer: TDD →
-4. adversary: 3-CLEAN per story → 5. demo-recorder: per-AC demos → 6. push →
-7. pr-manager: full 9-step PR process → 8. worktree cleanup
+Continue Wave 1 delivery. 8 of 14 stories merged. Per-story delivery flow:
+1. test-writer: stubs + tests → 2. implementer: TDD →
+3. adversary: 3-CLEAN per story → 4. push → PR → CI → merge → cleanup
 
-### Wave 1 Stories (14 stories, 85 points)
+### Wave 1 Remaining Stories (6 of 14, all unblocked)
 
-Internal sequencing:
-- STORY-001 first (IR core types)
-- STORY-002 after 001 (plugin trait API)
-- STORY-003 + STORY-004 + STORY-005 after 001+002
-- STORY-006 after 005
-- STORY-007-010 after 006 (parser chain)
-- STORY-051-054 independent CI stories (parallel with all)
+| Story | Points | Crate | Deps Met? |
+|-------|--------|-------|-----------|
+| STORY-009 Parser: math/shape/version | 5 | slideforge-syntax | ✅ (007) |
+| STORY-010 Error Accumulation + Diagnostics | 5 | slideforge-syntax | ✅ (007) |
+| STORY-003 31 SlideType Implementations | 8 | slideforge-types | ✅ (001+002) |
+| STORY-051 CI: fmt+clippy+nextest matrix | 5 | devops | ✅ (independent) |
+| STORY-052 CI: Visual Regression | 5 | devops | ✅ (independent) |
+| STORY-053 CI: Supply-Chain Audit | 5 | devops | ✅ (independent) |
+| STORY-054 CI: Release Pipeline | 8 | devops | ✅ (independent) |
+
+### Wave 1 Completed Stories (8 of 14)
+
+| Story | PR | Tests | Adversarial |
+|-------|-----|-------|-------------|
+| STORY-001 IR Core Types | #1 | 157 | 6p, 3/3 |
+| STORY-002 Plugin Trait API | #2 | 106 | 4p, 3/3 |
+| STORY-004 Value System + EMU | #3 | 212 | 4p, 3/3 |
+| STORY-005 Lexer + Tokenization | #4 | 45 | 6p, 3/3 |
+| STORY-006 Parser Core | #5 | 101 | 5p, 3/3 |
+| STORY-007 Control Flow + Expr | #6 | 142 | 4p, 3/3 |
+| STORY-008 Includes/Variants/Aliases | #7 | 183 | 4p, 3/3 |
+
+Cumulative: ~15,000+ lines, 900+ tests, 7 PRs on develop.
 
 ### Key inputs for Phase 3
 
@@ -97,7 +112,7 @@ Internal sequencing:
 | Planning (25 DSL decisions) | DONE 2026-05-24 | q1–q25 decision docs + 14 research threads |
 | Phase 1: Spec Crystallization | DONE — APPROVED 2026-05-25 | PRD (109 BCs, 15 HS, 4 supplements) + architecture (14 ADRs, 15 VPs, 20 crates) + UX spec (10 screens, 5 flows) + L2 domain spec (12 files) |
 | Phase 2: Story Decomposition | DONE — APPROVED 2026-05-25 | 71 stories, 21 epics, 6 waves, 437 pts. 22 adversarial passes, 3/3 clean. |
-| Phase 3: TDD Implementation | IN PROGRESS — Wave 1: STORY-001/002/004/005 merged (4/14), STORY-003/006 next | Per-story delivery |
+| Phase 3: TDD Implementation | IN PROGRESS — Wave 1: 8/14 merged (001/002/004/005/006/007/008). Remaining: 003/009/010/051-054. | Per-story delivery |
 | Phase 4: Holdout Evaluation | NOT STARTED | Per-wave holdout gates |
 | Phase 5: Adversarial Refinement | NOT STARTED | Post-implementation cascade |
 | Phase 6: Formal Hardening | NOT STARTED | Kani + fuzz + mutants + semgrep |
