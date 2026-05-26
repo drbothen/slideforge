@@ -59,11 +59,9 @@ pub use traits::{
     SectionBlock, SectionType, SlideType, Validator, ValidatorOptions,
 };
 
-// Compile-time assertion: PluginRegistry is Send + Sync.
-// This function is never called; it exists solely to prove the bound at
-// compile time and satisfy AC-014.
-#[allow(dead_code)]
-fn assert_registry_send_sync() {
+// Compile-time assertion: PluginRegistry is Send + Sync (AC-014).
+// Uses the const-fn pattern so it triggers no `dead_code` or `missing_docs` lint.
+const _: fn() = || {
     fn assert_send_sync<T: Send + Sync>() {}
     assert_send_sync::<PluginRegistry>();
-}
+};
