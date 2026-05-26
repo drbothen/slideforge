@@ -117,6 +117,7 @@ struct LexerState<'src> {
 }
 
 impl<'src> LexerState<'src> {
+    /// Create a new `LexerState` for the given source string and file name.
     fn new(src: &'src str, file: Arc<str>) -> Self {
         let line_starts = compute_line_starts(src);
         LexerState {
