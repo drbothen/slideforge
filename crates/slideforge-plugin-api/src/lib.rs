@@ -56,7 +56,7 @@ pub use traits::{
     DataSourceOptions, DiagramError, DiagramOptions, DiagramRenderer, Diagnostic,
     DiagnosticSeverity, ExportError, ExportOptions, Exporter, FieldDef, InlineError, InlineFormat,
     InlineOutputFormat, LayoutError, MathError, MathOutputFormat, MathRenderer, SectionBlock,
-    SectionType, SlideType, ValidatorError, ValidatorOptions, Validator,
+    SectionType, SlideType, ValidatorOptions, Validator,
     Canvas,
 };
 

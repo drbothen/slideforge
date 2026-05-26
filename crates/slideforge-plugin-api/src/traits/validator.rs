@@ -10,7 +10,6 @@
 use std::sync::Arc;
 
 use slideforge_types::{Deck, SourceSpan};
-use thiserror::Error;
 
 /// Severity level for a [`Diagnostic`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -65,20 +64,6 @@ pub struct ValidatorOptions {
     /// When `true`, WCAG AA contrast checks are skipped (for prototyping with
     /// custom brand colors that have not been finalized).
     pub skip_contrast_check: bool,
-}
-
-/// A validator error (returned when the validator itself fails, distinct from
-/// the diagnostics it produces for the deck content).
-#[derive(Debug, Error)]
-pub enum ValidatorError {
-    /// The validator encountered an internal error and could not complete.
-    #[error("validator '{id}' internal error: {message}")]
-    InternalError {
-        /// The validator plugin ID.
-        id: String,
-        /// Description of the internal error.
-        message: String,
-    },
 }
 
 /// A plugin that checks a [`Deck`] for content and accessibility issues.
@@ -153,12 +138,4 @@ mod tests {
         assert!(diag.hint.is_none());
     }
 
-    #[test]
-    fn test_bc_5_02_005_validator_error_internal() {
-        let err = ValidatorError::InternalError {
-            id: "overflow".to_owned(),
-            message: "failed to compute text metrics".to_owned(),
-        };
-        assert!(err.to_string().contains("internal error"));
-    }
 }

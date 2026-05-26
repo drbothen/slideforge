@@ -26,4 +26,4 @@ pub use inline_format::{InlineError, InlineFormat, InlineOutputFormat};
 pub use math_renderer::{MathError, MathOutputFormat, MathRenderer};
 pub use section_type::{SectionBlock, SectionType};
 pub use slide_type::{Canvas, FieldDef, LayoutError, SlideType};
-pub use validator::{Diagnostic, DiagnosticSeverity, ValidatorError, ValidatorOptions, Validator};
+pub use validator::{Diagnostic, DiagnosticSeverity, ValidatorOptions, Validator};
