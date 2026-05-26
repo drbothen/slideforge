@@ -70,8 +70,8 @@ pub struct FieldNode {
 ///
 /// ```sf
 /// vars:
-///   client "Acme Corp"
-///   year 2024
+///   client: "Acme Corp"
+///   year: 2024
 /// ```
 ///
 /// Each entry is a `(name, value)` pair. Duplicate keys are allowed at the

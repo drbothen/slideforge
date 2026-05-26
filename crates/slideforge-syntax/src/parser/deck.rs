@@ -16,12 +16,10 @@
 //! set_rule     ::= "set" IDENT ":" IDENT value NEWLINE
 //! slide_block  ::= "slide" IDENT ":" INDENT (field_line)+ DEDENT
 //! field_line   ::= IDENT value NEWLINE
-//! value        ::= STRING | NUMBER | IDENT
+//! value        ::= STRING | INT | FLOAT | BOOL | IDENT
 //! ```
 
 use chumsky::{input::ValueInput, prelude::*};
-
-use ordered_float::OrderedFloat;
 
 use crate::{
     ast::{DeckNode, FieldNode, FieldValue, SetRule, SlideNode, VarsBlock},
@@ -55,7 +53,7 @@ where
     select! {
         Token::StringLit(s) = e => (FieldValue::Str(s.to_string()), e.span()),
         Token::IntLit(n) = e => (FieldValue::Num(n), e.span()),
-        Token::FloatLit(f) = e => (FieldValue::Float(OrderedFloat(f.0)), e.span()),
+        Token::FloatLit(f) = e => (FieldValue::Float(f), e.span()),
         Token::BoolLit(b) = e => (FieldValue::Bool(b), e.span()),
         Token::Ident(s) = e => (FieldValue::Ident(s.to_string()), e.span()),
     }
