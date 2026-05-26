@@ -1,0 +1,11 @@
+slideforge_version "1"
+lang "en-US"
+
+vars:
+  name: "World"
+  count: 42
+
+slide content:
+  title "Hello {{ name }}"
+  body "Count: {{ count + 1 }}"
+  footer "{{ name }} - Report"

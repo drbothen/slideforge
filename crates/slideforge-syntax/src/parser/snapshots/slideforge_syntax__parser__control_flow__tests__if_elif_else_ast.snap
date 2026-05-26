@@ -1,0 +1,299 @@
+---
+source: crates/slideforge-syntax/src/parser/control_flow.rs
+expression: deck
+---
+DeckNode {
+    version: Some(
+        Spanned(
+            "1",
+            Span {
+                file_id: 0,
+                start: 19,
+                end: 22,
+            },
+        ),
+    ),
+    lang: Some(
+        Spanned(
+            "en-US",
+            Span {
+                file_id: 0,
+                start: 28,
+                end: 35,
+            },
+        ),
+    ),
+    brand: None,
+    vars: [],
+    set_rules: [],
+    items: [
+        If(
+            Spanned(
+                IfNode {
+                    condition: Spanned(
+                        BinOp {
+                            op: Eq,
+                            lhs: Ident(
+                                "env",
+                            ),
+                            rhs: Str(
+                                "prod",
+                            ),
+                        },
+                        Span {
+                            file_id: 0,
+                            start: 37,
+                            end: 367,
+                        },
+                    ),
+                    then_body: [
+                        Slide(
+                            Spanned(
+                                SlideNode {
+                                    kind: Spanned(
+                                        "warning",
+                                        Span {
+                                            file_id: 0,
+                                            start: 64,
+                                            end: 71,
+                                        },
+                                    ),
+                                    tags: [],
+                                    fields: [
+                                        FieldNode {
+                                            name: Spanned(
+                                                "title",
+                                                Span {
+                                                    file_id: 0,
+                                                    start: 77,
+                                                    end: 82,
+                                                },
+                                            ),
+                                            value: Spanned(
+                                                Template(
+                                                    [
+                                                        Literal(
+                                                            "Production Environment",
+                                                        ),
+                                                    ],
+                                                ),
+                                                Span {
+                                                    file_id: 0,
+                                                    start: 83,
+                                                    end: 107,
+                                                },
+                                            ),
+                                        },
+                                        FieldNode {
+                                            name: Spanned(
+                                                "body",
+                                                Span {
+                                                    file_id: 0,
+                                                    start: 112,
+                                                    end: 116,
+                                                },
+                                            ),
+                                            value: Spanned(
+                                                Template(
+                                                    [
+                                                        Literal(
+                                                            "This deck is for production use.",
+                                                        ),
+                                                    ],
+                                                ),
+                                                Span {
+                                                    file_id: 0,
+                                                    start: 117,
+                                                    end: 151,
+                                                },
+                                            ),
+                                        },
+                                    ],
+                                    inline_items: [],
+                                },
+                                Span {
+                                    file_id: 0,
+                                    start: 58,
+                                    end: 152,
+                                },
+                            ),
+                        ),
+                    ],
+                    elif_branches: [
+                        (
+                            Spanned(
+                                BinOp {
+                                    op: Eq,
+                                    lhs: Ident(
+                                        "env",
+                                    ),
+                                    rhs: Str(
+                                        "staging",
+                                    ),
+                                },
+                                Span {
+                                    file_id: 0,
+                                    start: 152,
+                                    end: 263,
+                                },
+                            ),
+                            [
+                                Slide(
+                                    Spanned(
+                                        SlideNode {
+                                            kind: Spanned(
+                                                "info",
+                                                Span {
+                                                    file_id: 0,
+                                                    start: 184,
+                                                    end: 188,
+                                                },
+                                            ),
+                                            tags: [],
+                                            fields: [
+                                                FieldNode {
+                                                    name: Spanned(
+                                                        "title",
+                                                        Span {
+                                                            file_id: 0,
+                                                            start: 194,
+                                                            end: 199,
+                                                        },
+                                                    ),
+                                                    value: Spanned(
+                                                        Template(
+                                                            [
+                                                                Literal(
+                                                                    "Staging Environment",
+                                                                ),
+                                                            ],
+                                                        ),
+                                                        Span {
+                                                            file_id: 0,
+                                                            start: 200,
+                                                            end: 221,
+                                                        },
+                                                    ),
+                                                },
+                                                FieldNode {
+                                                    name: Spanned(
+                                                        "body",
+                                                        Span {
+                                                            file_id: 0,
+                                                            start: 226,
+                                                            end: 230,
+                                                        },
+                                                    ),
+                                                    value: Spanned(
+                                                        Template(
+                                                            [
+                                                                Literal(
+                                                                    "This deck is for staging use.",
+                                                                ),
+                                                            ],
+                                                        ),
+                                                        Span {
+                                                            file_id: 0,
+                                                            start: 231,
+                                                            end: 262,
+                                                        },
+                                                    ),
+                                                },
+                                            ],
+                                            inline_items: [],
+                                        },
+                                        Span {
+                                            file_id: 0,
+                                            start: 178,
+                                            end: 263,
+                                        },
+                                    ),
+                                ),
+                            ],
+                        ),
+                    ],
+                    else_body: Some(
+                        [
+                            Slide(
+                                Spanned(
+                                    SlideNode {
+                                        kind: Spanned(
+                                            "info",
+                                            Span {
+                                                file_id: 0,
+                                                start: 278,
+                                                end: 282,
+                                            },
+                                        ),
+                                        tags: [],
+                                        fields: [
+                                            FieldNode {
+                                                name: Spanned(
+                                                    "title",
+                                                    Span {
+                                                        file_id: 0,
+                                                        start: 288,
+                                                        end: 293,
+                                                    },
+                                                ),
+                                                value: Spanned(
+                                                    Template(
+                                                        [
+                                                            Literal(
+                                                                "Development Environment",
+                                                            ),
+                                                        ],
+                                                    ),
+                                                    Span {
+                                                        file_id: 0,
+                                                        start: 294,
+                                                        end: 319,
+                                                    },
+                                                ),
+                                            },
+                                            FieldNode {
+                                                name: Spanned(
+                                                    "body",
+                                                    Span {
+                                                        file_id: 0,
+                                                        start: 324,
+                                                        end: 328,
+                                                    },
+                                                ),
+                                                value: Spanned(
+                                                    Template(
+                                                        [
+                                                            Literal(
+                                                                "This deck is for local development.",
+                                                            ),
+                                                        ],
+                                                    ),
+                                                    Span {
+                                                        file_id: 0,
+                                                        start: 329,
+                                                        end: 366,
+                                                    },
+                                                ),
+                                            },
+                                        ],
+                                        inline_items: [],
+                                    },
+                                    Span {
+                                        file_id: 0,
+                                        start: 272,
+                                        end: 367,
+                                    },
+                                ),
+                            ),
+                        ],
+                    ),
+                },
+                Span {
+                    file_id: 0,
+                    start: 37,
+                    end: 367,
+                },
+            ),
+        ),
+    ],
+}

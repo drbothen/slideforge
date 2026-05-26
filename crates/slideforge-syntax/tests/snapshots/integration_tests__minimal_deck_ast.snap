@@ -35,66 +35,77 @@ DeckNode {
     ),
     vars: [],
     set_rules: [],
-    slides: [
-        Spanned(
-            SlideNode {
-                kind: Spanned(
-                    "title",
-                    Span {
-                        file_id: 0,
-                        start: 64,
-                        end: 69,
-                    },
-                ),
-                tags: [],
-                fields: [
-                    FieldNode {
-                        name: Spanned(
-                            "title",
-                            Span {
-                                file_id: 0,
-                                start: 73,
-                                end: 78,
-                            },
-                        ),
-                        value: Spanned(
-                            Str(
-                                "Hello World",
+    items: [
+        Slide(
+            Spanned(
+                SlideNode {
+                    kind: Spanned(
+                        "title",
+                        Span {
+                            file_id: 0,
+                            start: 64,
+                            end: 69,
+                        },
+                    ),
+                    tags: [],
+                    fields: [
+                        FieldNode {
+                            name: Spanned(
+                                "title",
+                                Span {
+                                    file_id: 0,
+                                    start: 73,
+                                    end: 78,
+                                },
                             ),
-                            Span {
-                                file_id: 0,
-                                start: 79,
-                                end: 92,
-                            },
-                        ),
-                    },
-                    FieldNode {
-                        name: Spanned(
-                            "subtitle",
-                            Span {
-                                file_id: 0,
-                                start: 95,
-                                end: 103,
-                            },
-                        ),
-                        value: Spanned(
-                            Str(
-                                "An Introduction",
+                            value: Spanned(
+                                Template(
+                                    [
+                                        Literal(
+                                            "Hello World",
+                                        ),
+                                    ],
+                                ),
+                                Span {
+                                    file_id: 0,
+                                    start: 79,
+                                    end: 92,
+                                },
                             ),
-                            Span {
-                                file_id: 0,
-                                start: 104,
-                                end: 121,
-                            },
-                        ),
-                    },
-                ],
-            },
-            Span {
-                file_id: 0,
-                start: 58,
-                end: 122,
-            },
+                        },
+                        FieldNode {
+                            name: Spanned(
+                                "subtitle",
+                                Span {
+                                    file_id: 0,
+                                    start: 95,
+                                    end: 103,
+                                },
+                            ),
+                            value: Spanned(
+                                Template(
+                                    [
+                                        Literal(
+                                            "An Introduction",
+                                        ),
+                                    ],
+                                ),
+                                Span {
+                                    file_id: 0,
+                                    start: 104,
+                                    end: 121,
+                                },
+                            ),
+                        },
+                    ],
+                    inline_items: [],
+                },
+                Span {
+                    file_id: 0,
+                    start: 58,
+                    end: 122,
+                },
+            ),
         ),
     ],
 }

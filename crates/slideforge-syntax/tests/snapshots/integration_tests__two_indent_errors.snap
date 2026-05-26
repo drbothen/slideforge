@@ -21,11 +21,12 @@ expression: errors
             length: 3,
         },
     },
-    UnexpectedToken {
+    IndentError {
         file: "test.sf",
-        line: 8,
+        line: 10,
         col: 1,
-        message: "ExpectedFound { expected: ['Newline', something else, 'Eof', end of input], found: Some(Dedent) }",
+        expected: 2,
+        found: 3,
         src: NamedSource {
             name: "test.sf",
             source: "<redacted>",
@@ -33,9 +34,9 @@ expression: errors
         ,
         at: SourceSpan {
             offset: SourceOffset(
-                104,
+                133,
             ),
-            length: 1,
+            length: 3,
         },
     },
 ]

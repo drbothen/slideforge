@@ -1,0 +1,15 @@
+slideforge_version "1"
+lang "en-US"
+
+@if env == "prod":
+  slide warning:
+    title "Production Environment"
+    body "This deck is for production use."
+@elif env == "staging":
+  slide info:
+    title "Staging Environment"
+    body "This deck is for staging use."
+@else:
+  slide info:
+    title "Development Environment"
+    body "This deck is for local development."

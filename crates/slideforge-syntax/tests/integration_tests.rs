@@ -14,10 +14,11 @@
 use std::sync::Arc;
 
 use slideforge_syntax::{
-    ast::{DeckNode, FieldValue},
+    ast::{BlockItem, DeckNode, FieldValue},
     error::SyntaxError,
     parse,
     span::SourceMap,
+    template::TemplateChunk,
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -54,7 +55,11 @@ fn test_bc_1_01_001_minimal_deck_parses_ok() {
         "minimal deck must parse without errors; got: {result:?}"
     );
     let deck = result.unwrap();
-    assert_eq!(deck.slides.len(), 1, "must have exactly 1 slide");
+    assert_eq!(
+        deck.items.len(),
+        1,
+        "must have exactly 1 block item (the slide)"
+    );
     assert_eq!(
         deck.version.as_ref().map(|v| v.value().as_str()),
         Some("1"),
@@ -171,7 +176,10 @@ fn test_bc_1_01_001_empty_file_no_panic() {
     // Must not panic. May return Ok with 0 slides or Err — both are acceptable.
     let result = parse_str("");
     if let Ok(deck) = result {
-        assert!(deck.slides.is_empty(), "empty source must produce 0 slides");
+        assert!(
+            deck.items.is_empty(),
+            "empty source must produce 0 block items"
+        );
     }
     // If Err, that is also fine — the zero-slide validation error is STORY-016.
 }
@@ -188,7 +196,10 @@ fn test_bc_1_01_001_slide_fields_captured() {
     let result = parse_str(src);
     assert!(result.is_ok(), "must parse: {result:?}");
     let deck = result.unwrap();
-    let slide = deck.slides[0].value();
+    let BlockItem::Slide(slide_s) = &deck.items[0] else {
+        panic!("expected Slide block item");
+    };
+    let slide = slide_s.value();
     assert_eq!(slide.fields.len(), 2, "slide must capture 2 fields");
 
     let title = slide
@@ -196,7 +207,10 @@ fn test_bc_1_01_001_slide_fields_captured() {
         .iter()
         .find(|f| f.name.value() == "title")
         .expect("title field must exist");
-    assert_eq!(title.value.value(), &FieldValue::Str("Hello".to_string()));
+    assert_eq!(
+        title.value.value(),
+        &FieldValue::Template(vec![TemplateChunk::Literal("Hello".to_string())])
+    );
 
     let footer = slide
         .fields
@@ -205,7 +219,7 @@ fn test_bc_1_01_001_slide_fields_captured() {
         .expect("footer field must exist");
     assert_eq!(
         footer.value.value(),
-        &FieldValue::Str("Slide 1".to_string())
+        &FieldValue::Template(vec![TemplateChunk::Literal("Slide 1".to_string())])
     );
 }
 
@@ -229,7 +243,7 @@ fn test_bc_1_01_001_vars_block_parsed() {
     assert_eq!(vb.entries[0].0.value(), "client");
     assert_eq!(
         vb.entries[0].1.value(),
-        &FieldValue::Str("Acme".to_string())
+        &FieldValue::Template(vec![TemplateChunk::Literal("Acme".to_string())])
     );
 }
 
@@ -249,7 +263,10 @@ fn test_bc_1_01_001_set_rule_parsed() {
     let sr = &deck.set_rules[0];
     assert_eq!(sr.slide_type.value(), "content");
     assert_eq!(sr.field.value(), "footer");
-    assert_eq!(sr.value.value(), &FieldValue::Str("Default".to_string()));
+    assert_eq!(
+        sr.value.value(),
+        &FieldValue::Template(vec![TemplateChunk::Literal("Default".to_string())])
+    );
 }
 
 // ─── AC-004: all spans in bounds ─────────────────────────────────────────────
@@ -261,22 +278,24 @@ fn test_bc_1_01_001_all_spans_in_bounds() {
     let (src, _) = parse_fixture("vars_set_3slides.sf"); // re-read for len
     let src_len = src.len();
     let deck = result.unwrap();
-    for slide_s in &deck.slides {
-        assert!(
-            slide_s.span().end <= src_len,
-            "slide span.end {} > src_len {}",
-            slide_s.span().end,
-            src_len
-        );
-        for field in &slide_s.value().fields {
+    for item in &deck.items {
+        if let BlockItem::Slide(slide_s) = item {
             assert!(
-                field.name.span().end <= src_len,
-                "field name span out of bounds"
+                slide_s.span().end <= src_len,
+                "slide span.end {} > src_len {}",
+                slide_s.span().end,
+                src_len
             );
-            assert!(
-                field.value.span().end <= src_len,
-                "field value span out of bounds"
-            );
+            for field in &slide_s.value().fields {
+                assert!(
+                    field.name.span().end <= src_len,
+                    "field name span out of bounds"
+                );
+                assert!(
+                    field.value.span().end <= src_len,
+                    "field value span out of bounds"
+                );
+            }
         }
     }
 }
@@ -345,7 +364,7 @@ fn test_bc_1_01_001_metadata_only_no_slides() {
     let result = parse_str(src);
     // Must not panic and must produce Ok (zero-slide validation is STORY-016).
     if let Ok(deck) = result {
-        assert!(deck.slides.is_empty());
+        assert!(deck.items.is_empty());
         assert_eq!(deck.version.as_ref().map(|v| v.value().as_str()), Some("1"));
     }
     // Err is also acceptable.
@@ -382,7 +401,10 @@ fn test_float_field_value_parsed() {
     );
     let result = parse_str(src);
     let deck = result.expect("float field must parse without errors");
-    let slide = deck.slides[0].value();
+    let BlockItem::Slide(slide_s) = &deck.items[0] else {
+        panic!("expected Slide");
+    };
+    let slide = slide_s.value();
     let ratio_field = slide
         .fields
         .iter()
@@ -407,7 +429,10 @@ fn test_bool_field_value_parsed() {
     );
     let result = parse_str(src);
     let deck = result.expect("bool field must parse without errors");
-    let slide = deck.slides[0].value();
+    let BlockItem::Slide(slide_s) = &deck.items[0] else {
+        panic!("expected Slide");
+    };
+    let slide = slide_s.value();
     let active_field = slide
         .fields
         .iter()
