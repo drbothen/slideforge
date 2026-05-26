@@ -175,6 +175,14 @@ impl<'src> LexerState<'src> {
 
     /// Scan one logical line: indentation, then tokens until newline / EOF.
     fn scan_line(&mut self) {
+        // ── Step 0: strip a leading `\r` (Windows `\r\n` line endings) ──
+        // The `\r` is consumed silently; only the `\n` is treated as the
+        // line terminator so that Windows files produce identical token
+        // streams to Unix files.
+        if self.current() == Some(b'\r') {
+            self.pos += 1;
+        }
+
         // ── Step 1: scan leading whitespace (indentation) ───────────────
         let indent_start = self.pos;
         let mut indent_spaces: usize = 0;
@@ -208,15 +216,24 @@ impl<'src> LexerState<'src> {
         // If the line is blank or a comment, skip indentation processing.
         match self.current() {
             None => return,
-            Some(b'\n') => {
-                // Blank line — consume the newline and return.
-                self.pos += 1;
+            Some(b'\r' | b'\n') => {
+                // Blank line (Unix `\n` or Windows `\r\n`).
+                // Skip `\r` if present, then the `\n`.
+                if self.current() == Some(b'\r') {
+                    self.pos += 1;
+                }
+                if self.current() == Some(b'\n') {
+                    self.pos += 1;
+                }
                 return;
             }
             Some(b'#') => {
-                // Comment line — skip all bytes up to (not including) the newline,
-                // then consume the newline.
-                while matches!(self.current(), Some(b) if b != b'\n') {
+                // Comment line — skip all bytes up to (not including) the
+                // line terminator, then consume it (handling `\r\n`).
+                while matches!(self.current(), Some(b) if b != b'\n' && b != b'\r') {
+                    self.pos += 1;
+                }
+                if self.current() == Some(b'\r') {
                     self.pos += 1;
                 }
                 if self.current() == Some(b'\n') {
@@ -285,6 +302,13 @@ impl<'src> LexerState<'src> {
                     // emit pending Dedents and Eof.
                     return;
                 }
+                Some(b'\r') => {
+                    // Bare `\r` mid-line (unusual) or the `\r` in a `\r\n`
+                    // pair that wasn't consumed by `scan_line`.  Skip it; the
+                    // `\n` will be seen on the next iteration and emit the
+                    // `Newline` token as usual.
+                    self.pos += 1;
+                }
                 Some(b'\n') => {
                     let start = self.pos;
                     self.pos += 1;
@@ -292,8 +316,8 @@ impl<'src> LexerState<'src> {
                     return;
                 }
                 Some(b'#') => {
-                    // Comment: skip to end of line.
-                    while matches!(self.current(), Some(b) if b != b'\n') {
+                    // Comment: skip to end of line (including any `\r`).
+                    while matches!(self.current(), Some(b) if b != b'\n' && b != b'\r') {
                         self.pos += 1;
                     }
                 }
@@ -331,10 +355,14 @@ impl<'src> LexerState<'src> {
                 Some(other) => {
                     // Any byte that doesn't start a recognized token.
                     let (line, col) = self.line_col();
-                    // Decode the full char (may be multi-byte UTF-8).
-                    let ch = self.src[self.pos..]
-                        .chars()
-                        .next()
+                    // Decode the full char (may be multi-byte UTF-8).  Use
+                    // `get` to avoid panicking if `pos` is not on a char
+                    // boundary; fall back to interpreting the raw byte as a
+                    // Latin-1 scalar value so we advance at least one byte.
+                    let ch = self
+                        .src
+                        .get(self.pos..)
+                        .and_then(|s| s.chars().next())
                         .unwrap_or(other as char);
                     self.errors.push(LexError::InvalidCharacter {
                         file: Arc::clone(&self.file),
@@ -376,10 +404,16 @@ impl<'src> LexerState<'src> {
                     return;
                 }
                 Some(b'\\') => {
-                    // Escape sequence — skip two bytes.
-                    self.pos += 1;
-                    if self.current().is_some() {
-                        self.pos += 1;
+                    // Escape sequence — skip the backslash, then skip the
+                    // FULL escaped character as a UTF-8 code-point.  A bare
+                    // `self.pos += 1` would split multi-byte sequences (e.g.
+                    // `\ñ` is 2 UTF-8 bytes) and corrupt the char-boundary
+                    // invariant, causing a panic on the next `&self.src[pos..]`.
+                    self.pos += 1; // skip `\`
+                    if let Some(s) = self.src.get(self.pos..)
+                        && let Some(ch) = s.chars().next()
+                    {
+                        self.pos += ch.len_utf8();
                     }
                 }
                 Some(b'"') => {
@@ -390,8 +424,13 @@ impl<'src> LexerState<'src> {
                     return;
                 }
                 Some(_) => {
-                    // Advance by one full Unicode code-point.
-                    let ch = self.src[self.pos..].chars().next().unwrap();
+                    // Advance by one full Unicode code-point.  Use a safe
+                    // get + chars().next() to avoid panicking if `pos` somehow
+                    // lands on a non-char boundary (defensive guard).
+                    let Some(ch) = self.src.get(self.pos..).and_then(|s| s.chars().next())
+                    else {
+                        break;
+                    };
                     self.pos += ch.len_utf8();
                 }
             }
@@ -443,18 +482,30 @@ impl<'src> LexerState<'src> {
     ///
     /// Emits a `MathContent` token, then the closing delimiter token, then
     /// resets the mode.
+    ///
+    /// This function is **iterative**, not recursive.  Recursion was removed
+    /// to satisfy EC-009 (iterative, not recursive) and to prevent stack
+    /// overflow on deeply-nested `@{...}` interpolations inside long math
+    /// blocks.  When `@{...}` is found, we emit content + `AtBrace`, scan the
+    /// interpolation body, then `continue` the outer loop from the new
+    /// position instead of calling `scan_math_content` again.
     fn scan_math_content(&mut self, single: bool) {
-        let content_start = self.pos;
         let (open_line, open_col) = self.line_col();
+        // `segment_start` tracks the beginning of the current raw-math slice.
+        // It is reset to `self.pos` each time we emit a `MathContent` chunk
+        // (after an `@{...}` interpolation or at the start of the function).
+        let mut segment_start = self.pos;
 
         loop {
             match self.current() {
                 None => {
                     // EOF without closing delimiter.
-                    let content = &self.src[content_start..self.pos];
+                    let content = &self.src[segment_start..self.pos];
                     if !content.is_empty() {
-                        self.tokens
-                            .push((Token::MathContent(Arc::from(content)), content_start..self.pos));
+                        self.tokens.push((
+                            Token::MathContent(Arc::from(content)),
+                            segment_start..self.pos,
+                        ));
                     }
                     self.errors.push(LexError::UnterminatedMath {
                         file: Arc::clone(&self.file),
@@ -467,14 +518,14 @@ impl<'src> LexerState<'src> {
                 Some(b'$') if single => {
                     // Potential closing `$` for inline math.
                     if self.peek(1) == Some(b'$') {
-                        // This is `$$` — not our closing delimiter; emit as content.
+                        // This is `$$` — not our closing delimiter; treat as content.
                         self.pos += 2;
                     } else {
-                        let content = &self.src[content_start..self.pos];
+                        let content = &self.src[segment_start..self.pos];
                         if !content.is_empty() {
                             self.tokens.push((
                                 Token::MathContent(Arc::from(content)),
-                                content_start..self.pos,
+                                segment_start..self.pos,
                             ));
                         }
                         let close_start = self.pos;
@@ -487,11 +538,11 @@ impl<'src> LexerState<'src> {
                 Some(b'$') if !single => {
                     // Potential closing `$$` for display math.
                     if self.peek(1) == Some(b'$') {
-                        let content = &self.src[content_start..self.pos];
+                        let content = &self.src[segment_start..self.pos];
                         if !content.is_empty() {
                             self.tokens.push((
                                 Token::MathContent(Arc::from(content)),
-                                content_start..self.pos,
+                                segment_start..self.pos,
                             ));
                         }
                         let close_start = self.pos;
@@ -503,28 +554,31 @@ impl<'src> LexerState<'src> {
                     self.pos += 1;
                 }
                 Some(b'@') if self.peek(1) == Some(b'{') => {
-                    // `@{` inside math — emit content so far + AtBrace.
-                    if self.pos > content_start {
-                        let content = &self.src[content_start..self.pos];
+                    // `@{` inside math — emit content accumulated so far,
+                    // emit `AtBrace`, scan the interpolation body, then
+                    // continue the loop (iterative, not recursive).
+                    if self.pos > segment_start {
+                        let content = &self.src[segment_start..self.pos];
                         self.tokens.push((
                             Token::MathContent(Arc::from(content)),
-                            content_start..self.pos,
+                            segment_start..self.pos,
                         ));
                     }
                     let ab_start = self.pos;
                     self.pos += 2;
                     self.emit(Token::AtBrace, ab_start);
-                    // Scan interpolation body up to `}`.
                     self.scan_interpolation_body();
-                    // Resume math content after the `}`.
-                    // Tail-recurse by re-entering the loop from the new position.
-                    // content_start is stale — we need to restart from current pos.
-                    // We achieve this by recursing into a fresh scan_math_content.
-                    self.scan_math_content(single);
-                    return;
+                    // Reset the segment start to resume accumulating math
+                    // content after the closing `}` of the interpolation.
+                    segment_start = self.pos;
+                    // `continue` — re-enter the loop without recursing.
                 }
                 Some(_) => {
-                    let ch = self.src[self.pos..].chars().next().unwrap();
+                    // Advance by one full Unicode code-point.
+                    let Some(ch) = self.src.get(self.pos..).and_then(|s| s.chars().next())
+                    else {
+                        break;
+                    };
                     self.pos += ch.len_utf8();
                 }
             }
@@ -549,7 +603,11 @@ impl<'src> LexerState<'src> {
                 Some(b'0'..=b'9' | b'-') => self.scan_number(),
                 Some(b'"') => self.scan_string(),
                 Some(_) => {
-                    let ch = self.src[self.pos..].chars().next().unwrap();
+                    // Advance by one full Unicode code-point.
+                    let Some(ch) = self.src.get(self.pos..).and_then(|s| s.chars().next())
+                    else {
+                        break;
+                    };
                     self.pos += ch.len_utf8();
                 }
             }
@@ -622,12 +680,28 @@ impl<'src> LexerState<'src> {
                 self.pos += 1;
             }
             let text = &self.src[start..self.pos];
+            // f64 parsing: the only failure mode is a NaN/Infinity literal,
+            // which cannot arise from digit-only input.  Overflow produces
+            // f64::INFINITY rather than an error; we preserve that as-is
+            // since there is no meaningful recovery value.
             let val: f64 = text.parse().unwrap_or(0.0);
             self.emit(Token::FloatLit(ordered_float::OrderedFloat(val)), start);
         } else {
             let text = &self.src[start..self.pos];
-            let val: i64 = text.parse().unwrap_or(0);
-            self.emit(Token::IntLit(val), start);
+            if let Ok(val) = text.parse::<i64>() {
+                self.emit(Token::IntLit(val), start);
+            } else {
+                // Integer too large for i64 — emit an error and use 0 as a
+                // recovery value so that scanning continues (DI-018).
+                let (line, col) = offset_to_line_col(start, &self.line_starts);
+                self.errors.push(LexError::NumberOverflow {
+                    file: Arc::clone(&self.file),
+                    line,
+                    col,
+                    text: Arc::from(text),
+                });
+                self.emit(Token::IntLit(0), start);
+            }
         }
     }
 
@@ -982,6 +1056,66 @@ mod tests {
         assert!(errors.is_empty(), "got errors: {errors:?}");
         let has_at_brace = tokens.iter().any(|(t, _)| matches!(t, Token::AtBrace));
         assert!(has_at_brace, "should produce AtBrace inside math mode");
+    }
+
+    // ── FIX-001: UTF-8 multi-byte escape in string literals ──────────────
+
+    /// Regression test for F-001: `\` followed by a multi-byte UTF-8
+    /// character must not panic.  Previously the lexer advanced `pos` by
+    /// exactly 1 after the backslash, which could land on a non-char
+    /// boundary and cause a panic on the next `&src[pos..]` slice.
+    #[test]
+    fn test_escape_multibyte_utf8() {
+        // `ñ` is U+00F1, encoded as 0xC3 0xB1 (2 bytes).
+        // The escaped sequence `\ñ` must be skipped without panicking.
+        let src = "title \"hello\\ñworld\"\n";
+        let (tokens, errors) = lex_str(src);
+        assert!(errors.is_empty(), "multi-byte UTF-8 escape must not produce errors, got: {errors:?}");
+        let has_string = tokens.iter().any(|(t, _)| {
+            if let Token::StringLit(s) = t {
+                s.contains("hello") && s.contains("world")
+            } else {
+                false
+            }
+        });
+        assert!(has_string, "should produce a StringLit containing the content around the escape");
+    }
+
+    // ── FIX-003: Windows \r\n line endings ───────────────────────────────
+
+    /// Windows files use `\r\n` as line terminators.  The lexer must produce
+    /// the same token stream as the equivalent Unix (`\n`) file — no errors
+    /// and no extra tokens.
+    #[test]
+    fn test_windows_line_endings() {
+        let unix_src = "title \"hello\"\n";
+        let windows_src = "title \"hello\"\r\n";
+        let (unix_tokens, unix_errors) = lex_str(unix_src);
+        let (win_tokens, win_errors) = lex_str(windows_src);
+        assert!(unix_errors.is_empty(), "unix: unexpected errors: {unix_errors:?}");
+        assert!(win_errors.is_empty(), "windows: unexpected errors: {win_errors:?}");
+        // Token kinds must match (spans differ due to the extra `\r` byte, so
+        // we compare only the token variants, not the byte ranges).
+        let unix_kinds: Vec<_> = unix_tokens.iter().map(|(t, _)| format!("{t:?}")).collect();
+        let win_kinds: Vec<_> = win_tokens.iter().map(|(t, _)| format!("{t:?}")).collect();
+        assert_eq!(unix_kinds, win_kinds, "Windows and Unix line endings must produce identical token streams");
+    }
+
+    // ── FIX-004: Integer overflow produces LexError, not silent 0 ────────
+
+    /// An integer literal that does not fit in `i64` must produce a
+    /// `LexError::NumberOverflow` error rather than silently clamping to `0`.
+    #[test]
+    fn test_number_overflow() {
+        // 10^22 — well beyond i64::MAX (≈ 9.2 × 10^18).
+        let src = "count 9999999999999999999999\n";
+        let (tokens, errors) = lex_str(src);
+        let has_overflow = errors.iter().any(|e| matches!(e, LexError::NumberOverflow { .. }));
+        assert!(has_overflow, "overflowing integer literal must produce NumberOverflow error, got: {errors:?}");
+        // A recovery `IntLit(0)` should still be in the token stream so that
+        // parsing can continue (DI-018 error accumulation).
+        let has_int_lit = tokens.iter().any(|(t, _)| matches!(t, Token::IntLit(_)));
+        assert!(has_int_lit, "should still emit a recovery IntLit token");
     }
 
     // ── Snapshot test ─────────────────────────────────────────────────────

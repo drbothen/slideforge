@@ -109,6 +109,28 @@ pub enum LexError {
         /// The offending character.
         ch: char,
     },
+
+    /// A numeric literal was too large to be represented in its target type.
+    ///
+    /// For integer literals this means the value does not fit in [`i64`].
+    /// For floating-point literals this would mean the value rounds to
+    /// ±infinity, which `f64` handles gracefully — so in practice this
+    /// variant is only emitted for overflowing integer literals.
+    ///
+    /// The lexer emits `0` as a recovery value and continues scanning so
+    /// that subsequent errors can still be accumulated in a single pass
+    /// (DI-018 error accumulation).
+    #[error("Number overflow at {file}:{line}:{col}: literal '{text}' does not fit in i64.")]
+    NumberOverflow {
+        /// Source file path.
+        file: Arc<str>,
+        /// One-based line number.
+        line: u32,
+        /// One-based column number of the first digit.
+        col: u32,
+        /// The literal text that overflowed.
+        text: Arc<str>,
+    },
 }
 
 #[cfg(test)]
