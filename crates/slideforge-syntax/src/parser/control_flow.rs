@@ -205,7 +205,7 @@ where
                 Token::Ident(s) if matches!(
                     s.as_ref(),
                     "fn" | "mixin" | "while" | "match" | "let" | "macro"
-                    | "import" | "export" | "type" | "schema"
+                    | "import" | "export" | "type" | "schema" | "yield"
                 ) => s.to_string()
             })
             .validate(|(_at, name), info, emitter| {
@@ -1053,6 +1053,32 @@ mod tests {
             msg.contains("elif") || msg.contains("E-PAR-002")
         });
         assert!(has_elif_err, "error must mention @elif; got: {errors:?}");
+    }
+
+    // ── BC-1.09.006: @yield reserved keyword → E-PAR-006 ────────────────────
+
+    /// BC-1.09.006: `@yield items:` must produce E-PAR-006 (`ReservedKeyword`),
+    /// not a generic E-PAR-002. `yield` is reserved for a future version.
+    #[test]
+    fn test_bc_1_09_006_at_yield_directive_rejected_with_e_par_006() {
+        let src = concat!(
+            "slideforge_version \"1\"\n",
+            "@yield items:\n",
+            "  field \"value\"\n",
+        );
+        let result = parse_str(src);
+        assert!(
+            result.is_err(),
+            "@yield must be rejected with E-PAR-006, not parse successfully"
+        );
+        let errors = result.unwrap_err();
+        let has_reserved = errors
+            .iter()
+            .any(|e| matches!(e, crate::error::SyntaxError::ReservedKeyword { .. }));
+        assert!(
+            has_reserved,
+            "@yield must produce ReservedKeyword (E-PAR-006), not E-PAR-002; got: {errors:?}"
+        );
     }
 
     // ── EC-004: duplicate @else ───────────────────────────────────────────────

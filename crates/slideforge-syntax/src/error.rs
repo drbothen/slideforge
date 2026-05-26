@@ -161,8 +161,9 @@ pub enum SyntaxError {
     /// 31 built-in slide type keywords (e.g. `title`, `content`, `chart`).
     /// This would cause ambiguity during evaluation.
     ///
-    /// Note: the `raw` keyword produces [`SyntaxError::RawKeyword`]
-    /// (E-PAR-009), not this variant, when used in a `vars:` block.
+    /// Note: the `raw` keyword produces `VarNameCollision` (E-PAR-008) when
+    /// used as a variable name in a `vars:` block — the variable name
+    /// collision check fires before the raw-keyword check (AC-011).
     #[error(
         "Variable name '{name}' at {file}:{line}:{col} collides with a slide type keyword: {message}"
     )]

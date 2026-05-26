@@ -134,6 +134,34 @@ where
         .then_ignore(just(Token::Newline).or_not())
         .map(|(s, sp)| ShapeFieldItem::Alt(s, sp));
 
+    // Raw keyword rejection inside shape: block — E-PAR-009.
+    //
+    // The `raw` escape hatch (`raw`, `raw_pptx`, `raw_html`, `raw_xml`,
+    // `raw_docx`) is not available in user .sf files (AC-010). Reject it with
+    // E-PAR-009 before the generic unknown_field path can produce E-PAR-002.
+    let raw_in_shape = select! {
+        Token::Ident(s) = e if matches!(
+            s.as_ref(),
+            "raw" | "raw_pptx" | "raw_html" | "raw_xml" | "raw_docx"
+        ) => (s.to_string(), e.span())
+    }
+        .then(
+            any()
+                .filter(|t: &Token| !matches!(t, Token::Newline | Token::Dedent))
+                .repeated(),
+        )
+        .then_ignore(just(Token::Newline).or_not())
+        .validate(|((name, _span), _rest), info, emitter| {
+            emitter.emit(Rich::custom(
+                info.span(),
+                format!(
+                    "E-PAR-009: '{name}' keyword is not available in user .sf files. \
+                     Use the shape: DSL instead."
+                ),
+            ));
+        })
+        .map(|()| None::<ShapeFieldItem>);
+
     // Unknown field — skip the name + value + newline (error recovery).
     let unknown_field = any_ident
         .then(
@@ -157,7 +185,8 @@ where
         .or(alt_field)
         .map(Some);
 
-    let shape_field = recognized_field.or(unknown_field);
+    // Priority: recognized fields > raw rejection (E-PAR-009) > generic unknown (E-PAR-002).
+    let shape_field = recognized_field.or(raw_in_shape).or(unknown_field);
 
     // The full `shape:` block.
     select! { Token::Ident(s) = e if s.as_ref() == "shape" => e.span() }
@@ -411,31 +440,29 @@ mod tests {
 
     #[test]
     fn test_bc_1_09_009_shape_block_raw_field_emits_e_par_009() {
-        // EC-005: a `raw` field name inside a shape: block must produce E-PAR-009.
+        // EC-005: a `raw` field name inside a shape: block must produce E-PAR-009
+        // (RawKeyword), not E-PAR-002 (generic unknown field).
         // The `raw` identifier is reserved across all contexts — including shape
-        // blocks. It is NOT a known shape field name, so it falls through to the
-        // unknown_field path which emits E-PAR-002. However, the keyword table
-        // classifies `raw` as E-PAR-009, so the field_line_cf path in
-        // control_flow.rs catches it at the slide-field level via raw_rejected.
-        //
-        // This test uses `raw` as a slide-level field — NOT inside shape — to
-        // verify the E-PAR-009 path that the shape block inherits through the
-        // slide body parser.
+        // blocks. The shape block parser has a dedicated raw-rejection path that
+        // fires before the generic unknown_field fallback.
         let src = concat!(
             "slide content:\n",
             "  shape:\n",
             "    raw \"value\"\n",
         );
         let result = parse_str(src);
-        // `raw` inside shape: is an unknown field — emits E-PAR-002 (unknown
-        // field) rather than E-PAR-009 (the shape block parser doesn't have a
-        // dedicated raw-rejection path). Either error code is acceptable; the
-        // key invariant is that parsing does NOT succeed silently.
-        //
-        // The shape block's `unknown_field` arm catches `raw` and emits E-PAR-002.
         assert!(
             result.is_err(),
             "raw field inside shape: block must produce an error; got Ok"
+        );
+        let errors = result.unwrap_err();
+        let has_raw_keyword_err = errors
+            .iter()
+            .any(|e| matches!(e, SyntaxError::RawKeyword { .. }));
+        assert!(
+            has_raw_keyword_err,
+            "raw inside shape: block must produce E-PAR-009 (RawKeyword), not E-PAR-002; \
+             got: {errors:?}"
         );
     }
 

@@ -295,12 +295,38 @@ fn pre_parse_version_gate(
     errors: &mut Vec<SyntaxError>,
 ) -> VersionGateResult {
     // Scan token pairs: Ident("slideforge_version") followed by StringLit(ver).
+    //
+    // EC-002: if `slideforge_version` appears AFTER a `slide` token has been
+    // seen, it is a misplaced declaration — emit E-PAR-010 fatal and return.
+    let mut slide_seen = false;
     let mut i = 0usize;
     while i < tokens.len() {
-        let (tok, _span) = &tokens[i];
+        let (tok, span) = &tokens[i];
+
+        // Track whether we have seen any `slide` keyword so far.
+        if let Token::Ident(name) = tok
+            && name.as_ref() == "slide"
+        {
+            slide_seen = true;
+        }
+
         if let Token::Ident(name) = tok
             && name.as_ref() == "slideforge_version"
         {
+            // EC-002: version declaration after a slide block is a fatal error.
+            if slide_seen {
+                errors.push(SyntaxError::version_error(
+                    file_path.to_string(),
+                    "E-PAR-010: version declaration must appear in deck metadata at top of file \
+                     — 'slideforge_version' found after a slide block"
+                        .to_string(),
+                    true,
+                    src.to_string(),
+                    span.start,
+                ));
+                return VersionGateResult::FatalVersionError;
+            }
+
             // Look for the StringLit immediately after (skipping nothing —
             // the lexer emits them consecutively on the same line).
             if let Some((Token::StringLit(ver), ver_span)) = tokens.get(i + 1) {
@@ -1383,32 +1409,28 @@ mod tests {
         insta::assert_debug_snapshot!("math_interp_chunk_base", chunk);
     }
 
-    // ── EC-002 (adversary): slideforge_version after slide block → no repeat ──
+    // ── EC-002: slideforge_version after slide block → E-PAR-010 fatal ────────
 
     #[test]
-    fn test_bc_1_09_010_version_decl_after_slide_is_ignored() {
-        // EC-002: `slideforge_version "1"` appearing AFTER a slide block is not
-        // a fatal error but the version node in DeckNode may be None (the deck
-        // parser only captures the version in the header position).
-        // The test verifies no crash and no spurious VersionError.
+    fn test_bc_1_09_010_version_after_slide_is_fatal() {
+        // EC-002: `slideforge_version "1"` appearing AFTER a slide block must be
+        // a fatal error (E-PAR-010). The version declaration must appear in deck
+        // metadata at the top of the file — placing it after slides is invalid.
         let src = concat!(
             "slide title:\n",
-            "  title \"First\"\n",
+            "  title \"Hello\"\n",
             "slideforge_version \"1\"\n",
         );
         let result = parse_str(src);
-        // Version after a slide is a misplaced declaration. May parse or may
-        // produce an unexpected-token error, but must NOT produce a fatal
-        // VersionError (E-PAR-010) — the pre-parse gate already ran.
-        if let Err(errors) = &result {
-            let has_fatal_version_error = errors.iter().any(|e| {
-                matches!(e, SyntaxError::VersionError { is_fatal: true, .. })
-            });
-            assert!(
-                !has_fatal_version_error,
-                "version decl after slide must not produce a fatal E-PAR-010; got: {errors:?}"
-            );
-        }
+        assert!(result.is_err(), "version after slide must be fatal");
+        let errors = result.unwrap_err();
+        let has_version_error = errors
+            .iter()
+            .any(|e| matches!(e, SyntaxError::VersionError { .. }));
+        assert!(
+            has_version_error,
+            "must produce E-PAR-010 for misplaced version; got: {errors:?}"
+        );
     }
 
     // ── EC-006: comment containing the word 'raw' → no error ─────────────────
