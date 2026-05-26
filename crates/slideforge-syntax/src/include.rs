@@ -529,8 +529,9 @@ mod tests {
         let _ = entry_id;
 
         // Build a deck with one @include placeholder.
-        let include_path = "/tmp/test_header_include_inlines.sf";
-        let path_chunks = vec![TemplateChunk::Literal(include_path.to_string())];
+        let tmp = std::env::temp_dir();
+        let include_path = tmp.join("test_header_include_inlines.sf");
+        let path_chunks = vec![TemplateChunk::Literal(include_path.display().to_string())];
         let include_item = make_include_item(path_chunks);
 
         let deck = DeckNode {
@@ -551,17 +552,10 @@ mod tests {
 
         // We need a real canonical path for the resolver.
         // Write a temp file to get a canonical path.
-        std::fs::write(include_path, &header_src).unwrap();
+        std::fs::write(&include_path, &header_src).unwrap();
         let vars = VarsScope::new();
-        let result = resolve_includes(
-            deck,
-            &mut sm,
-            &file_loader,
-            vars,
-            PathBuf::from("/tmp"),
-            "entry.sf",
-        );
-        std::fs::remove_file(include_path).ok();
+        let result = resolve_includes(deck, &mut sm, &file_loader, vars, tmp, "entry.sf");
+        std::fs::remove_file(&include_path).ok();
 
         let resolved = result.expect("@include of existing file must succeed");
         assert_eq!(
