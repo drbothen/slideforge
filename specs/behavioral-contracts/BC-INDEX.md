@@ -217,6 +217,14 @@ traces_to: domain-spec/L2-INDEX.md
 |-------|-------|----------|--------|------|
 | BC-3.05.001 | All 11 inline format types render to correct output per format (bold, italic, code, link, math, footnote, xref, super, sub, strike, highlight) | P1 | active | [BC-3.05.001.md](BC-3.05.001.md) |
 
+### 3.06 — Core Layout Transformation: Deck → LaidOutDeck (CAP-010)
+
+| BC ID | Title | Priority | Status | File |
+|-------|-------|----------|--------|------|
+| BC-3.06.001 | Layout Transformation Preserves Slide Count | P0 | active | [BC-3.06.001.md](BC-3.06.001.md) |
+| BC-3.06.002 | Layout Transformation Is Deterministic (Same Inputs Produce Identical LaidOutDeck) | P0 | active | [BC-3.06.002.md](BC-3.06.002.md) |
+| BC-3.06.003 | All Positioned Elements Have Valid Non-Negative EMU Coordinates Within Slide Bounds | P0 | active | [BC-3.06.003.md](BC-3.06.003.md) |
+
 ---
 
 ## Section 4: Export Bounded Context
@@ -318,10 +326,10 @@ traces_to: domain-spec/L2-INDEX.md
 |---------|-----------|-----|----|----|
 | 1 — Authoring | 1.01–1.15 | 53 | 37 | 16 |
 | 2 — Branding | 2.01–2.02 | 8 | 6 | 2 |
-| 3 — Layout | 3.01–3.05 | 12 | 9 | 3 |
+| 3 — Layout | 3.01–3.06 | 15 | 12 | 3 |
 | 4 — Export | 4.01–4.03 | 13 | 12 | 1 |
 | 5 — Cross-cutting | 5.01–5.06 | 23 | 7 | 16 |
-| **Total** | | **109** | **71** | **38** |
+| **Total** | | **112** | **74** | **38** |
 
 ---
 
@@ -337,9 +345,9 @@ traces_to: domain-spec/L2-INDEX.md
 | DI-006 | BC-1.02.002, BC-1.03.003 |
 | DI-007 | BC-1.01.004, BC-1.06.002 |
 | DI-008 | BC-5.02.001, BC-5.02.002 |
-| DI-009 | BC-4.01.001, BC-4.03.002 |
-| DI-010 | BC-4.03.005 |
-| DI-011 | BC-4.01.001 |
+| DI-009 | BC-3.06.001, BC-3.06.002, BC-3.06.003, BC-4.01.001, BC-4.02.001, BC-4.03.002 |
+| DI-010 | BC-3.06.003, BC-4.03.005 |
+| DI-011 | BC-3.06.001, BC-3.06.002, BC-3.06.003, BC-4.01.001 |
 | DI-012 | BC-4.01.001, BC-4.02.001, BC-4.03.001 |
 | DI-013 | BC-4.01.002 |
 | DI-014 | BC-4.03.001 |

@@ -3,16 +3,21 @@ project: slideforge
 mode: greenfield
 created: 2026-05-23
 current_phase: phase-2-story-decomposition
-status: READY_TO_START_PHASE_2
+status: PHASE_2_COMPLETE_AWAITING_APPROVAL
 last_updated: 2026-05-25
 phase_1_approved: 2026-05-25
 phase_1_convergence: "17 passes, 69 findings, 3/3 clean (passes 15-16-17)"
+phase_2_convergence: "22 passes, 96+ findings, 3/3 clean (passes 20-21-22)"
 prd_bcs: 109
 prd_hs: 15
 prd_vps: 15
 prd_supplements: 4
 spikes_resolved: 7
 spikes_total: 7
+total_stories: 71
+total_points: 437
+total_waves: 6
+total_epics: 21
 dtu_required: false
 dtu_assessment: 2026-05-24
 dtu_clones_built: n/a
@@ -31,45 +36,25 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. It generates branded .p
 **Workspace:** /Users/jmagady/Dev/slideforge
 **Factory worktree:** .factory/ on branch `factory-artifacts`
 
-## Current Status: READY TO START PHASE 2 (Story Decomposition)
+## Current Status: PHASE 2 COMPLETE — AWAITING HUMAN APPROVAL
+
+Phase 2 Story Decomposition: COMPLETE and pending approval (2026-05-25).
+- 71 stories decomposed from 112 BCs across 21 epics, 6 waves, 437 total points
+- remove-uncertainty skill applied to all 71 stories (library versions validated via Perplexity/Context7; 50+ version fixes)
+- Consistency validation: 22 findings found and fixed
+- 22 adversarial passes, 96+ findings fixed, 3 consecutive clean passes (BC-5.39.001 satisfied)
 
 Phase 1 Spec Crystallization: COMPLETE and APPROVED (2026-05-25).
-- 17 adversarial passes, 69 findings fixed, 3 consecutive clean passes (BC-5.39.001 satisfied)
+- 17 adversarial passes, 69 findings fixed, 3 consecutive clean passes
 - Convergence trajectory archived: .factory/cycles/v0.1.0-phase-1-spec/convergence-trajectory.md
-- Full decisions log archived: .factory/cycles/v0.1.0-phase-1-spec/decisions-log.md
 
-Phase 2 will decompose the PRD into epics, stories, dependency graph, and wave schedule.
+## What to Do Next (Phase 3 TDD Implementation)
 
-## What to Do Next (Phase 2 Story Decomposition)
+Human approval required before Phase 3 begins.
 
-### Immediate first action
-
-Dispatch `vsdd-factory:story-writer` (or invoke skill `/vsdd-factory:decompose-stories`):
-- Input: all Phase 1 specs in .factory/specs/
-- Output: .factory/stories/ (STORY-INDEX.md, per-story files, epics.md, dependency-graph.md, wave-schedule.md)
-
-### Phase 2 full sequence
-
-| Step | Agent | Output | Depends on |
-|------|-------|--------|-----------|
-| P2-01 | story-writer | Epics, stories, dependency graph, wave schedule | Phase 1 specs |
-| P2-02 | consistency-validator | Cross-doc validation (BC→story tracing) | P2-01 |
-| P2-03 | adversary | Adversarial story review (3 clean passes) | P2-02 |
-| P2-04 | state-manager | Commit Phase 2 artifacts | P2-03 |
-| P2-05 | HUMAN | Approval gate | P2-04 |
-
-### Key inputs for Phase 2
-
-| Input | Contents |
-|-------|---------|
-| .factory/specs/prd.md | PRD index |
-| .factory/specs/behavioral-contracts/BC-INDEX.md | 109 BCs → stories |
-| .factory/specs/architecture/ARCH-INDEX.md | 20-crate workspace → story scoping |
-| .factory/specs/prd-supplements/nfr-catalog.md | 35 NFRs → story acceptance criteria |
-| .factory/specs/verification-properties/VP-INDEX.md | 15 VPs → Phase 6 stories |
-| .factory/specs/ux-spec/UX-INDEX.md | 10 screens → UI stories |
-| .factory/specs/holdout-scenarios/HS-INDEX.md | 15 scenarios → wave holdout gates |
-| .factory/specs/module-criticality.md | Crate priorities → wave ordering |
+Once approved, dispatch `vsdd-factory:orchestrator` to start Phase 3:
+- Per-story delivery via the sub-workflow: stubs → failing tests → TDD green → LOCAL adversary 3-CLEAN → demo-recorder → push → pr-manager → squash-merge → state-manager post-merge burst
+- Wave 1 stories first (foundation crates: workspace, types, syntax, eval)
 
 ## Phase Progress
 
@@ -79,7 +64,7 @@ Dispatch `vsdd-factory:story-writer` (or invoke skill `/vsdd-factory:decompose-s
 | Market intelligence | DONE 2026-05-23 | GO with medium confidence |
 | Planning (25 DSL decisions) | DONE 2026-05-24 | q1–q25 decision docs + 14 research threads |
 | Phase 1: Spec Crystallization | DONE — APPROVED 2026-05-25 | PRD (109 BCs, 15 HS, 4 supplements) + architecture (14 ADRs, 15 VPs, 20 crates) + UX spec (10 screens, 5 flows) + L2 domain spec (12 files) |
-| Phase 2: Story Decomposition | READY TO START | Epics, stories, dependency graph, wave schedule |
+| Phase 2: Story Decomposition | DONE — AWAITING APPROVAL 2026-05-25 | 71 stories, 21 epics, 6 waves, 437 points. 22 adversarial passes, 3/3 clean (passes 20-21-22). |
 | Phase 3: TDD Implementation | NOT STARTED | Per-story delivery |
 | Phase 4: Holdout Evaluation | NOT STARTED | Per-wave holdout gates |
 | Phase 5: Adversarial Refinement | NOT STARTED | Post-implementation cascade |
@@ -103,6 +88,18 @@ Dispatch `vsdd-factory:story-writer` (or invoke skill `/vsdd-factory:decompose-s
 | P1-10 | consistency-validator | DONE | 6 findings (2H, 2M, 2L) — all fixed |
 | P1-11 | HUMAN | APPROVED 2026-05-25 | Phase 2 authorized |
 
+## Phase 2 Step Status (DONE — AWAITING APPROVAL)
+
+| Step | Agent | Status | Output |
+|------|-------|--------|--------|
+| P2-01 | story-writer | DONE | epics.md, STORY-INDEX.md, dependency-graph.md, wave-schedule.md + 71 story files |
+| P2-01b | story-writer | DONE | All 71 individual story specs written (11 bursts) |
+| P2-01c | research-agent | DONE | remove-uncertainty on all 71 stories (6 wave batches, 50+ version fixes) |
+| P2-02 | consistency-validator | DONE | 22 findings found and fixed |
+| P2-03 | adversary | DONE — CONVERGED | 22 passes, 96+ findings fixed, 3/3 clean (passes 20-21-22) |
+| P2-04 | state-manager | DONE | This commit |
+| P2-05 | HUMAN | PENDING | Approval gate |
+
 ## Decisions Log (milestones only — full log in cycles/v0.1.0-phase-1-spec/decisions-log.md)
 
 - 2026-05-23 — Workspace resolved, mode: greenfield
@@ -115,6 +112,8 @@ Dispatch `vsdd-factory:story-writer` (or invoke skill `/vsdd-factory:decompose-s
 - 2026-05-24 — UX SPEC COMPLETE (10 screens, 5 flows)
 - 2026-05-25 — ADVERSARIAL CONVERGENCE (17 passes, 69 findings, 3/3 clean)
 - 2026-05-25 — PHASE 1 APPROVED — Phase 2 authorized
+- 2026-05-25 — PHASE 2 CONVERGED (22 passes, 96+ findings, 3/3 clean — passes 20-21-22)
+- 2026-05-25 — PHASE 2 COMPLETE — Awaiting human approval for Phase 3
 
 ## Decision Documents (canonical references)
 

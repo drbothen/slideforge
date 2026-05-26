@@ -47,7 +47,7 @@ not deleted.
 
 ## Invariants
 
-1. Without `--force`, no filesystem mutation occurs when `slideforge.toml` exists. (DI-009)
+1. Without `--force`, no filesystem mutation occurs when `slideforge.toml` exists.
 2. With `--force`, only the four scaffold files (`deck.sf`, `brand.toml`, `slideforge.toml`,
    `.gitignore`) are overwritten. The `assets/` directory and all user files are preserved.
 3. Error message references the actual path where slideforge.toml was found.
@@ -84,7 +84,7 @@ not deleted.
 |-------|-------|
 | L2 Capability | CAP-026 ("Cargo-Style Workspace Configuration") per capabilities.md §CAP-026 |
 | Capability Anchor Justification | CAP-026 ("Cargo-Style Workspace Configuration") per capabilities.md §CAP-026 — slideforge.toml is the project/workspace configuration file; protecting it from accidental overwrite is a workspace integrity concern |
-| L2 Domain Invariants | DI-009 (output atomicity — no partial state written on error) |
+| L2 Domain Invariants | (none — filesystem safety is a self-contained postcondition of this BC) |
 | Architecture Module | slideforge-cli init subcommand (filled by architect) |
 | Stories | (filled by story-writer) |
 

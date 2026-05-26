@@ -59,7 +59,7 @@ A file manifest and next-step instructions are printed to stdout.
    and at least one slide with required fields populated.
 2. No existing files in the target directory are modified without `--force`.
 3. If creation of any scaffold file fails mid-operation (e.g., disk full), partially
-   created files are cleaned up (atomic: all or nothing). (DI-009 — export atomicity)
+   created files are cleaned up (atomic: all or nothing).
 4. `--force` overwrites `deck.sf` and `slideforge.toml` but does NOT delete files
    not created by init (user data is preserved).
 
@@ -97,7 +97,7 @@ A file manifest and next-step instructions are printed to stdout.
 |-------|-------|
 | L2 Capability | CAP-026 ("Cargo-Style Workspace Configuration") per capabilities.md §CAP-026 |
 | Capability Anchor Justification | CAP-026 ("Cargo-Style Workspace Configuration") per capabilities.md §CAP-026 — init creates the slideforge.toml that is the entry point for workspace and project configuration |
-| L2 Domain Invariants | DI-003 (lang required at deck level — generated deck.sf must include lang "en-US"), DI-009 (output atomicity) |
+| L2 Domain Invariants | DI-003 (lang required at deck level — generated deck.sf must include lang "en-US") |
 | Architecture Module | slideforge-cli init subcommand (filled by architect) |
 | Stories | (filled by story-writer) |
 
