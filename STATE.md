@@ -37,7 +37,7 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. It generates branded .p
 **Workspace:** /Users/jmagady/Dev/slideforge
 **Factory worktree:** .factory/ on branch `factory-artifacts`
 
-## Current Status: Phase 3 IN PROGRESS — Wave 1: STORY-001 + STORY-002 merged, STORY-003/004 next
+## Current Status: Phase 3 IN PROGRESS — Wave 1: STORY-001/002/004 merged, STORY-005 in adversarial review
 
 Phase 2 Story Decomposition: COMPLETE and APPROVED (2026-05-25).
 - 71 stories decomposed from 112 BCs across 21 epics, 6 waves, 437 total points
@@ -97,7 +97,7 @@ Internal sequencing:
 | Planning (25 DSL decisions) | DONE 2026-05-24 | q1–q25 decision docs + 14 research threads |
 | Phase 1: Spec Crystallization | DONE — APPROVED 2026-05-25 | PRD (109 BCs, 15 HS, 4 supplements) + architecture (14 ADRs, 15 VPs, 20 crates) + UX spec (10 screens, 5 flows) + L2 domain spec (12 files) |
 | Phase 2: Story Decomposition | DONE — APPROVED 2026-05-25 | 71 stories, 21 epics, 6 waves, 437 pts. 22 adversarial passes, 3/3 clean. |
-| Phase 3: TDD Implementation | IN PROGRESS — Wave 1: STORY-001 + STORY-002 merged, STORY-003/004 next | Per-story delivery |
+| Phase 3: TDD Implementation | IN PROGRESS — Wave 1: STORY-001/002/004 merged, STORY-005 in adversarial review | Per-story delivery |
 | Phase 4: Holdout Evaluation | NOT STARTED | Per-wave holdout gates |
 | Phase 5: Adversarial Refinement | NOT STARTED | Post-implementation cascade |
 | Phase 6: Formal Hardening | NOT STARTED | Kani + fuzz + mutants + semgrep |
@@ -150,6 +150,7 @@ Internal sequencing:
 - 2026-05-25 — PHASE 3 STARTED — Wave 1, STORY-001 (IR Core Types) in progress
 - 2026-05-26 — STORY-001 MERGED (PR #1, b46f9929) — IR Core Types, 157 tests, 6 adversarial passes (20→6→1→0→0→0), 3/3 clean
 - 2026-05-26 — STORY-002 MERGED (PR #2, ae344a83) — Plugin Trait API, 10 surfaces, 106 tests, 4 adversarial passes (6→0→0→0), 3/3 clean
+- 2026-05-26 — STORY-004 MERGED (PR #3, 2489e8d8) — Value System + EMU Types, 212 tests, 4 adversarial passes (3→0→0→0), 3/3 clean
 
 ## Decision Documents (canonical references)
 

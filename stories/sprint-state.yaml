@@ -24,11 +24,16 @@ stories:
     status: draft
     wave: 1
   STORY-004:
-    status: draft
+    status: merged
     wave: 1
+    started: 2026-05-26
+    merged: 2026-05-26
+    pr: 3
+    merge_commit: 2489e8d8
   STORY-005:
-    status: draft
+    status: in_progress
     wave: 1
+    started: 2026-05-26
   STORY-006:
     status: draft
     wave: 1
