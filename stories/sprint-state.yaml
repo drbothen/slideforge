@@ -45,9 +45,12 @@ stories:
     pr: 5
     merge_commit: 769bf8e3
   STORY-007:
-    status: in_progress
-    started: 2026-05-26
+    status: merged
     wave: 1
+    started: 2026-05-26
+    merged: 2026-05-26
+    pr: 6
+    merge_commit: f178c179
   STORY-008:
     status: draft
     wave: 1

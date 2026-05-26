@@ -37,7 +37,7 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. It generates branded .p
 **Workspace:** /Users/jmagady/Dev/slideforge
 **Factory worktree:** .factory/ on branch `factory-artifacts`
 
-## Current Status: Phase 3 IN PROGRESS — Wave 1: STORY-001/002/004/005 merged (4/14), STORY-003/006 next
+## Current Status: Phase 3 IN PROGRESS — Wave 1: 7/14 merged (001/002/004/005/006/007), STORY-003/008/009/010 next
 
 Phase 2 Story Decomposition: COMPLETE and APPROVED (2026-05-25).
 - 71 stories decomposed from 112 BCs across 21 epics, 6 waves, 437 total points
@@ -153,6 +153,7 @@ Internal sequencing:
 - 2026-05-26 — STORY-004 MERGED (PR #3, 2489e8d8) — Value System + EMU Types, 212 tests, 4 adversarial passes (3→0→0→0), 3/3 clean
 - 2026-05-26 — STORY-005 MERGED (PR #4, cc04ba50) — Lexer + Mode-Based Tokenization, 45 tests, 6 adversarial passes (7→1→0→0→0→0), 3/3 clean
 - 2026-05-26 — STORY-006 MERGED (PR #5, 769bf8e3) — Parser Core (deck/slide/fields/indentation), 101 tests, 5 adversarial passes (7→4→0→0→0), 3/3 clean
+- 2026-05-26 — STORY-007 MERGED (PR #6, f178c179) — @for, @if/@elif/@else, expression parser, template interpolation, 142 tests, 4 adversarial passes (2→0→0→0), 3/3 clean
 
 ## Decision Documents (canonical references)
 
