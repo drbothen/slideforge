@@ -1,0 +1,100 @@
+---
+source: crates/slideforge-syntax/tests/integration_tests.rs
+expression: deck
+---
+DeckNode {
+    version: Some(
+        Spanned(
+            "1",
+            Span {
+                file_id: 0,
+                start: 19,
+                end: 22,
+            },
+        ),
+    ),
+    lang: Some(
+        Spanned(
+            "en-US",
+            Span {
+                file_id: 0,
+                start: 28,
+                end: 35,
+            },
+        ),
+    ),
+    brand: Some(
+        Spanned(
+            "default.pptx",
+            Span {
+                file_id: 0,
+                start: 42,
+                end: 56,
+            },
+        ),
+    ),
+    vars: [],
+    set_rules: [],
+    slides: [
+        Spanned(
+            SlideNode {
+                kind: Spanned(
+                    "title",
+                    Span {
+                        file_id: 0,
+                        start: 64,
+                        end: 69,
+                    },
+                ),
+                tags: [],
+                fields: [
+                    FieldNode {
+                        name: Spanned(
+                            "title",
+                            Span {
+                                file_id: 0,
+                                start: 73,
+                                end: 78,
+                            },
+                        ),
+                        value: Spanned(
+                            Str(
+                                "Hello World",
+                            ),
+                            Span {
+                                file_id: 0,
+                                start: 79,
+                                end: 92,
+                            },
+                        ),
+                    },
+                    FieldNode {
+                        name: Spanned(
+                            "subtitle",
+                            Span {
+                                file_id: 0,
+                                start: 95,
+                                end: 103,
+                            },
+                        ),
+                        value: Spanned(
+                            Str(
+                                "An Introduction",
+                            ),
+                            Span {
+                                file_id: 0,
+                                start: 104,
+                                end: 121,
+                            },
+                        ),
+                    },
+                ],
+            },
+            Span {
+                file_id: 0,
+                start: 58,
+                end: 122,
+            },
+        ),
+    ],
+}

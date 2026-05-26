@@ -1,0 +1,402 @@
+---
+source: crates/slideforge-syntax/tests/integration_tests.rs
+expression: deck
+---
+DeckNode {
+    version: Some(
+        Spanned(
+            "1",
+            Span {
+                file_id: 0,
+                start: 19,
+                end: 22,
+            },
+        ),
+    ),
+    lang: Some(
+        Spanned(
+            "en-US",
+            Span {
+                file_id: 0,
+                start: 28,
+                end: 35,
+            },
+        ),
+    ),
+    brand: Some(
+        Spanned(
+            "corporate.pptx",
+            Span {
+                file_id: 0,
+                start: 42,
+                end: 58,
+            },
+        ),
+    ),
+    vars: [
+        VarsBlock {
+            entries: [
+                (
+                    Spanned(
+                        "client",
+                        Span {
+                            file_id: 0,
+                            start: 68,
+                            end: 74,
+                        },
+                    ),
+                    Spanned(
+                        Str(
+                            "Acme Corp",
+                        ),
+                        Span {
+                            file_id: 0,
+                            start: 76,
+                            end: 87,
+                        },
+                    ),
+                ),
+                (
+                    Spanned(
+                        "year",
+                        Span {
+                            file_id: 0,
+                            start: 90,
+                            end: 94,
+                        },
+                    ),
+                    Spanned(
+                        Num(
+                            2024,
+                        ),
+                        Span {
+                            file_id: 0,
+                            start: 96,
+                            end: 100,
+                        },
+                    ),
+                ),
+                (
+                    Spanned(
+                        "presenter",
+                        Span {
+                            file_id: 0,
+                            start: 103,
+                            end: 112,
+                        },
+                    ),
+                    Spanned(
+                        Str(
+                            "Jane Smith",
+                        ),
+                        Span {
+                            file_id: 0,
+                            start: 114,
+                            end: 126,
+                        },
+                    ),
+                ),
+            ],
+        },
+    ],
+    set_rules: [
+        SetRule {
+            slide_type: Spanned(
+                "content",
+                Span {
+                    file_id: 0,
+                    start: 132,
+                    end: 139,
+                },
+            ),
+            field: Spanned(
+                "footer",
+                Span {
+                    file_id: 0,
+                    start: 141,
+                    end: 147,
+                },
+            ),
+            value: Spanned(
+                Str(
+                    "Confidential",
+                ),
+                Span {
+                    file_id: 0,
+                    start: 148,
+                    end: 162,
+                },
+            ),
+        },
+        SetRule {
+            slide_type: Spanned(
+                "title",
+                Span {
+                    file_id: 0,
+                    start: 167,
+                    end: 172,
+                },
+            ),
+            field: Spanned(
+                "footer",
+                Span {
+                    file_id: 0,
+                    start: 174,
+                    end: 180,
+                },
+            ),
+            value: Spanned(
+                Str(
+                    "Acme Corp",
+                ),
+                Span {
+                    file_id: 0,
+                    start: 181,
+                    end: 192,
+                },
+            ),
+        },
+    ],
+    slides: [
+        Spanned(
+            SlideNode {
+                kind: Spanned(
+                    "title",
+                    Span {
+                        file_id: 0,
+                        start: 200,
+                        end: 205,
+                    },
+                ),
+                tags: [],
+                fields: [
+                    FieldNode {
+                        name: Spanned(
+                            "title",
+                            Span {
+                                file_id: 0,
+                                start: 209,
+                                end: 214,
+                            },
+                        ),
+                        value: Spanned(
+                            Str(
+                                "Q4 Review",
+                            ),
+                            Span {
+                                file_id: 0,
+                                start: 215,
+                                end: 226,
+                            },
+                        ),
+                    },
+                    FieldNode {
+                        name: Spanned(
+                            "subtitle",
+                            Span {
+                                file_id: 0,
+                                start: 229,
+                                end: 237,
+                            },
+                        ),
+                        value: Spanned(
+                            Str(
+                                "Fiscal Year 2024",
+                            ),
+                            Span {
+                                file_id: 0,
+                                start: 238,
+                                end: 256,
+                            },
+                        ),
+                    },
+                    FieldNode {
+                        name: Spanned(
+                            "footer",
+                            Span {
+                                file_id: 0,
+                                start: 259,
+                                end: 265,
+                            },
+                        ),
+                        value: Spanned(
+                            Str(
+                                "Acme Corp",
+                            ),
+                            Span {
+                                file_id: 0,
+                                start: 266,
+                                end: 277,
+                            },
+                        ),
+                    },
+                ],
+            },
+            Span {
+                file_id: 0,
+                start: 194,
+                end: 279,
+            },
+        ),
+        Spanned(
+            SlideNode {
+                kind: Spanned(
+                    "content",
+                    Span {
+                        file_id: 0,
+                        start: 285,
+                        end: 292,
+                    },
+                ),
+                tags: [],
+                fields: [
+                    FieldNode {
+                        name: Spanned(
+                            "title",
+                            Span {
+                                file_id: 0,
+                                start: 296,
+                                end: 301,
+                            },
+                        ),
+                        value: Spanned(
+                            Str(
+                                "Key Highlights",
+                            ),
+                            Span {
+                                file_id: 0,
+                                start: 302,
+                                end: 318,
+                            },
+                        ),
+                    },
+                    FieldNode {
+                        name: Spanned(
+                            "body",
+                            Span {
+                                file_id: 0,
+                                start: 321,
+                                end: 325,
+                            },
+                        ),
+                        value: Spanned(
+                            Str(
+                                "Revenue grew 20% year-over-year",
+                            ),
+                            Span {
+                                file_id: 0,
+                                start: 326,
+                                end: 359,
+                            },
+                        ),
+                    },
+                    FieldNode {
+                        name: Spanned(
+                            "footer",
+                            Span {
+                                file_id: 0,
+                                start: 362,
+                                end: 368,
+                            },
+                        ),
+                        value: Spanned(
+                            Str(
+                                "Confidential",
+                            ),
+                            Span {
+                                file_id: 0,
+                                start: 369,
+                                end: 383,
+                            },
+                        ),
+                    },
+                ],
+            },
+            Span {
+                file_id: 0,
+                start: 279,
+                end: 385,
+            },
+        ),
+        Spanned(
+            SlideNode {
+                kind: Spanned(
+                    "content",
+                    Span {
+                        file_id: 0,
+                        start: 391,
+                        end: 398,
+                    },
+                ),
+                tags: [],
+                fields: [
+                    FieldNode {
+                        name: Spanned(
+                            "title",
+                            Span {
+                                file_id: 0,
+                                start: 402,
+                                end: 407,
+                            },
+                        ),
+                        value: Spanned(
+                            Str(
+                                "Next Steps",
+                            ),
+                            Span {
+                                file_id: 0,
+                                start: 408,
+                                end: 420,
+                            },
+                        ),
+                    },
+                    FieldNode {
+                        name: Spanned(
+                            "body",
+                            Span {
+                                file_id: 0,
+                                start: 423,
+                                end: 427,
+                            },
+                        ),
+                        value: Spanned(
+                            Str(
+                                "Plan for Q1 2025",
+                            ),
+                            Span {
+                                file_id: 0,
+                                start: 428,
+                                end: 446,
+                            },
+                        ),
+                    },
+                    FieldNode {
+                        name: Spanned(
+                            "footer",
+                            Span {
+                                file_id: 0,
+                                start: 449,
+                                end: 455,
+                            },
+                        ),
+                        value: Spanned(
+                            Str(
+                                "Confidential",
+                            ),
+                            Span {
+                                file_id: 0,
+                                start: 456,
+                                end: 470,
+                            },
+                        ),
+                    },
+                ],
+            },
+            Span {
+                file_id: 0,
+                start: 385,
+                end: 471,
+            },
+        ),
+    ],
+}

@@ -717,8 +717,8 @@ version = "0.1.0"
 dependencies = [
  "chumsky",
  "insta",
+ "miette",
  "ordered-float",
- "slideforge-types",
  "thiserror",
 ]
 
