@@ -41,7 +41,6 @@ type TSpan = SimpleSpan;
 ///
 /// Used by the shape block parser when constructing `Spanned<T>` nodes.
 /// Declared here so the implementer can use it without re-deriving it.
-#[allow(dead_code)] // Stub — implementation will use this in shape_block()
 fn to_span(ss: SimpleSpan, file_id: u32) -> Span {
     Span::new(file_id, ss.start, ss.end)
 }
