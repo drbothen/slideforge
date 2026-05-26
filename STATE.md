@@ -2,10 +2,11 @@
 project: slideforge
 mode: greenfield
 created: 2026-05-23
-current_phase: phase-2-story-decomposition
-status: PHASE_2_COMPLETE_AWAITING_APPROVAL
+current_phase: phase-3-tdd-implementation
+status: READY_TO_START_PHASE_3
 last_updated: 2026-05-25
 phase_1_approved: 2026-05-25
+phase_2_approved: 2026-05-25
 phase_1_convergence: "17 passes, 69 findings, 3/3 clean (passes 15-16-17)"
 phase_2_convergence: "22 passes, 96+ findings, 3/3 clean (passes 20-21-22)"
 prd_bcs: 109
@@ -36,9 +37,9 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. It generates branded .p
 **Workspace:** /Users/jmagady/Dev/slideforge
 **Factory worktree:** .factory/ on branch `factory-artifacts`
 
-## Current Status: PHASE 2 COMPLETE — AWAITING HUMAN APPROVAL
+## Current Status: READY TO START PHASE 3 (TDD Implementation)
 
-Phase 2 Story Decomposition: COMPLETE and pending approval (2026-05-25).
+Phase 2 Story Decomposition: COMPLETE and APPROVED (2026-05-25).
 - 71 stories decomposed from 112 BCs across 21 epics, 6 waves, 437 total points
 - remove-uncertainty skill applied to all 71 stories (library versions validated via Perplexity/Context7; 50+ version fixes)
 - Consistency validation: 22 findings found and fixed
@@ -50,11 +51,42 @@ Phase 1 Spec Crystallization: COMPLETE and APPROVED (2026-05-25).
 
 ## What to Do Next (Phase 3 TDD Implementation)
 
-Human approval required before Phase 3 begins.
+### Immediate first action
 
-Once approved, dispatch `vsdd-factory:orchestrator` to start Phase 3:
-- Per-story delivery via the sub-workflow: stubs → failing tests → TDD green → LOCAL adversary 3-CLEAN → demo-recorder → push → pr-manager → squash-merge → state-manager post-merge burst
-- Wave 1 stories first (foundation crates: workspace, types, syntax, eval)
+Start Wave 1 delivery. The per-story delivery flow is:
+1. test-writer: stubs → 2. test-writer: failing tests → 3. implementer: TDD →
+4. adversary: 3-CLEAN per story → 5. demo-recorder: per-AC demos → 6. push →
+7. pr-manager: full 9-step PR process → 8. worktree cleanup
+
+### Wave 1 Stories (14 stories, 85 points)
+
+Internal sequencing:
+- STORY-001 first (IR core types)
+- STORY-002 after 001 (plugin trait API)
+- STORY-003 + STORY-004 + STORY-005 after 001+002
+- STORY-006 after 005
+- STORY-007-010 after 006 (parser chain)
+- STORY-051-054 independent CI stories (parallel with all)
+
+### Key inputs for Phase 3
+
+| Input | Location |
+|-------|----------|
+| Story files | .factory/stories/stories/STORY-NNN-*.md |
+| Story index | .factory/stories/STORY-INDEX.md |
+| Wave schedule | .factory/stories/wave-schedule.md |
+| Dependency graph | .factory/stories/dependency-graph.md |
+| BC specs | .factory/specs/behavioral-contracts/ |
+| Architecture | .factory/specs/architecture/ |
+| Sprint state | .factory/stories/sprint-state.yaml (create on first story start) |
+
+### Phase 3 full sequence
+
+| Step | Agent | Output | Depends on |
+|------|-------|--------|-----------|
+| Per-story | test-writer → implementer → adversary → demo-recorder → pr-manager | Merged story branches | Story file + deps complete |
+| Wave gate | wave-gate skill | Integration validation | All stories in wave merged |
+| Repeat | Next wave | Until Wave 5 (Wave 6 is Phase 6) | Prior wave gate PASS |
 
 ## Phase Progress
 
@@ -64,8 +96,8 @@ Once approved, dispatch `vsdd-factory:orchestrator` to start Phase 3:
 | Market intelligence | DONE 2026-05-23 | GO with medium confidence |
 | Planning (25 DSL decisions) | DONE 2026-05-24 | q1–q25 decision docs + 14 research threads |
 | Phase 1: Spec Crystallization | DONE — APPROVED 2026-05-25 | PRD (109 BCs, 15 HS, 4 supplements) + architecture (14 ADRs, 15 VPs, 20 crates) + UX spec (10 screens, 5 flows) + L2 domain spec (12 files) |
-| Phase 2: Story Decomposition | DONE — AWAITING APPROVAL 2026-05-25 | 71 stories, 21 epics, 6 waves, 437 points. 22 adversarial passes, 3/3 clean (passes 20-21-22). |
-| Phase 3: TDD Implementation | NOT STARTED | Per-story delivery |
+| Phase 2: Story Decomposition | DONE — APPROVED 2026-05-25 | 71 stories, 21 epics, 6 waves, 437 pts. 22 adversarial passes, 3/3 clean. |
+| Phase 3: TDD Implementation | READY TO START | Per-story delivery |
 | Phase 4: Holdout Evaluation | NOT STARTED | Per-wave holdout gates |
 | Phase 5: Adversarial Refinement | NOT STARTED | Post-implementation cascade |
 | Phase 6: Formal Hardening | NOT STARTED | Kani + fuzz + mutants + semgrep |
@@ -98,7 +130,7 @@ Once approved, dispatch `vsdd-factory:orchestrator` to start Phase 3:
 | P2-02 | consistency-validator | DONE | 22 findings found and fixed |
 | P2-03 | adversary | DONE — CONVERGED | 22 passes, 96+ findings fixed, 3/3 clean (passes 20-21-22) |
 | P2-04 | state-manager | DONE | This commit |
-| P2-05 | HUMAN | PENDING | Approval gate |
+| P2-05 | HUMAN | APPROVED 2026-05-25 | Phase 3 authorized |
 
 ## Decisions Log (milestones only — full log in cycles/v0.1.0-phase-1-spec/decisions-log.md)
 
@@ -114,6 +146,7 @@ Once approved, dispatch `vsdd-factory:orchestrator` to start Phase 3:
 - 2026-05-25 — PHASE 1 APPROVED — Phase 2 authorized
 - 2026-05-25 — PHASE 2 CONVERGED (22 passes, 96+ findings, 3/3 clean — passes 20-21-22)
 - 2026-05-25 — PHASE 2 COMPLETE — Awaiting human approval for Phase 3
+- 2026-05-25 — PHASE 2 APPROVED — Phase 3 authorized
 
 ## Decision Documents (canonical references)
 
