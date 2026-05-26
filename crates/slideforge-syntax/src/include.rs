@@ -64,7 +64,7 @@ pub type VarsScope = HashMap<String, String>;
 
 // ─── IncludeError ─────────────────────────────────────────────────────────────
 
-/// Error type returned by [`resolve_include`] and [`resolve_all_includes`].
+/// Error type returned by [`resolve_includes`].
 #[derive(Debug, Clone)]
 pub enum IncludeError {
     /// The included file was not found (`E-PAR-005`).

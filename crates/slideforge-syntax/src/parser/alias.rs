@@ -26,7 +26,7 @@
 //!
 //! # Field Validation
 //!
-//! Alias bodies are validated against the [`known_fields`](crate::known_fields)
+//! Alias bodies are validated against the [`known_fields()`](crate::known_fields())
 //! registry. A field name not in the base type's known fields produces E-PAR-011.
 //!
 //! # Error Codes
