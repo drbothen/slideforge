@@ -481,7 +481,8 @@ impl SyntaxError {
     /// downcasting.
     #[must_use]
     pub fn severity(&self) -> ParseSeverity {
-        todo!("STORY-010: severity() — all E-PAR-* return Fatal")
+        // All E-PAR-* error variants are fatal — no E-PAR-* code is ever a warning.
+        ParseSeverity::Fatal
     }
 
     /// Extract the `(file, line, col)` triple from a `SyntaxError` variant for
@@ -540,6 +541,14 @@ impl Ord for SyntaxError {
 /// but is not used in the validation itself — validity depends only on the
 /// source text.
 ///
+/// # Validation rules
+///
+/// * `line` must be ≥ 1 (1-based).
+/// * `col` must be ≥ 1 (1-based).
+/// * `line` must be ≤ the total number of lines in `source`.
+/// * `col` must be ≤ the character count of that line + 1 (one-past-end is
+///   valid for end-of-line positions, e.g. a zero-length span at EOL).
+///
 /// # Parameters
 ///
 /// * `file` — the source file path (not used in the check, present for
@@ -548,8 +557,37 @@ impl Ord for SyntaxError {
 /// * `col` — 1-based column number.
 /// * `source` — the full source text to validate against.
 #[must_use]
-pub fn span_is_valid(_file: &str, _line: u32, _col: u32, _source: &str) -> bool {
-    todo!("STORY-010: span_is_valid — validate line/col against source bounds")
+pub fn span_is_valid(_file: &str, line: u32, col: u32, source: &str) -> bool {
+    // Reject 0-based or negative coordinates (u32 can't be negative, but 0 is invalid).
+    if line == 0 || col == 0 {
+        return false;
+    }
+
+    // Collect the character lengths of each line (excluding the trailing '\n').
+    // A source ending without '\n' still counts as a complete line.
+    let lines: Vec<&str> = source.split('\n').collect();
+
+    // `split('\n')` on "abc\n" produces ["abc", ""] — the trailing empty string
+    // is a phantom line created by the trailing newline.  We want to treat the
+    // source as having exactly the number of *non-phantom* lines.
+    //
+    // Rule: trim a single trailing empty element produced by a terminal '\n'.
+    let line_count = if source.ends_with('\n') && lines.last().is_some_and(|l| l.is_empty()) {
+        lines.len().saturating_sub(1)
+    } else {
+        lines.len()
+    };
+
+    let line_idx = line as usize; // 1-based → used directly for bound check
+    if line_idx > line_count {
+        return false;
+    }
+
+    // Retrieve the actual source line (0-based index).
+    let line_str = lines[line_idx - 1];
+    // col is allowed up to len + 1 (one-past-end for EOL positions).
+    let max_col = line_str.chars().count() + 1;
+    col as usize <= max_col
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────

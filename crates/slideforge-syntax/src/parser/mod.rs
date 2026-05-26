@@ -90,12 +90,28 @@ pub struct ParseResult {
 ///   usable.
 #[must_use]
 pub fn parse_checked(
-    _src: &str,
-    _file_id: u32,
-    _source_map: &SourceMap,
-    _sink: &mut crate::sink::DiagnosticSink,
+    src: &str,
+    file_id: u32,
+    source_map: &SourceMap,
+    sink: &mut crate::sink::DiagnosticSink,
 ) -> Option<DeckNode> {
-    todo!("STORY-010: parse_checked() — sink-based error accumulation entry point")
+    match parse(src, file_id, source_map) {
+        Ok(result) => {
+            // Push any non-fatal warnings (e.g., missing slideforge_version)
+            // into the sink even on a successful parse.
+            for warning in result.warnings {
+                sink.push(warning);
+            }
+            Some(result.deck)
+        }
+        Err(errors) => {
+            // Push all fatal errors into the sink and signal failure via None.
+            for error in errors {
+                sink.push(error);
+            }
+            None
+        }
+    }
 }
 
 /// Parse a `.sf` source string into a typed AST.

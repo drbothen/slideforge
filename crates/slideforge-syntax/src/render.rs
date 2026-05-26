@@ -35,7 +35,6 @@ use crate::sink::DiagnosticSink;
 /// ```
 pub struct DiagnosticRenderer {
     /// Whether to emit ANSI color escape codes in the output.
-    #[allow(dead_code)] // stub field — read by render_all() once implemented
     use_color: bool,
 }
 
@@ -46,8 +45,8 @@ impl DiagnosticRenderer {
     /// suppressed in the output. When `true`, miette's graphical handler
     /// renders colored source snippets.
     #[must_use]
-    pub fn new(_use_color: bool) -> Self {
-        todo!("STORY-010: DiagnosticRenderer::new()")
+    pub fn new(use_color: bool) -> Self {
+        Self { use_color }
     }
 
     /// Render all diagnostics from `sink` to `writer`, in source order.
@@ -61,10 +60,33 @@ impl DiagnosticRenderer {
     /// Returns `Err` if any write to `writer` fails.
     pub fn render_all(
         &self,
-        _sink: &DiagnosticSink,
-        _writer: &mut dyn std::io::Write,
+        sink: &DiagnosticSink,
+        writer: &mut dyn std::io::Write,
     ) -> std::io::Result<()> {
-        todo!("STORY-010: DiagnosticRenderer::render_all()")
+        for diag in sink.errors() {
+            // Render the diagnostic to a String buffer via miette's handler,
+            // then write that buffer to the provided writer.
+            let rendered = if self.use_color {
+                // Graphical handler produces colored ANSI output.
+                let handler = miette::GraphicalReportHandler::new();
+                let mut buf = String::new();
+                // `render_report` writes into `fmt::Write`, so we use a String.
+                // We ignore format errors here because String::write_str never fails.
+                let _ = handler.render_report(&mut buf, diag.as_ref());
+                buf
+            } else {
+                // Naratable handler produces plain-text output without ANSI codes.
+                let handler = miette::NarratableReportHandler::new();
+                let mut buf = String::new();
+                let _ = handler.render_report(&mut buf, diag.as_ref());
+                buf
+            };
+
+            writer.write_all(rendered.as_bytes())?;
+            // Separator newline between diagnostics.
+            writer.write_all(b"\n")?;
+        }
+        Ok(())
     }
 }
 

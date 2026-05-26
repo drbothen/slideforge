@@ -9,6 +9,11 @@
 //! so that any crate that implements [`miette::Diagnostic`] can be pushed
 //! without coupling `slideforge-syntax` to every error type.
 //!
+//! Severity is captured eagerly at push time (while the concrete type is still
+//! available) and stored in a parallel `Vec<ParseSeverity>`.  This lets
+//! [`DiagnosticSink::has_fatal`] and [`DiagnosticSink::max_severity`] operate
+//! in O(n) without downcasting.
+//!
 //! # Thread Safety
 //!
 //! `DiagnosticSink` is `Send + Sync` because every stored diagnostic is
@@ -65,36 +70,61 @@ pub type BoxDiagnostic = Box<dyn miette::Diagnostic + Send + Sync>;
 /// assert!(sink.is_empty());
 /// ```
 pub struct DiagnosticSink {
-    #[allow(dead_code)] // stub field — read by all DiagnosticSink methods once implemented
+    /// Type-erased diagnostics in push order.
     diagnostics: Vec<BoxDiagnostic>,
+    /// Severity for each entry in `diagnostics`, captured eagerly at push
+    /// time.  Always the same length as `diagnostics`.
+    severities: Vec<ParseSeverity>,
 }
 
 impl DiagnosticSink {
     /// Construct an empty sink.
     #[must_use]
     pub fn new() -> Self {
-        todo!("STORY-010: DiagnosticSink::new()")
+        Self {
+            diagnostics: Vec::new(),
+            severities: Vec::new(),
+        }
     }
 
     /// Push a diagnostic into the sink.
     ///
-    /// The diagnostic is type-erased and appended to the internal list.
+    /// Severity is determined at push time while the concrete type `D` is still
+    /// available.  For [`crate::SyntaxError`] values, severity is obtained via
+    /// [`crate::SyntaxError::severity`].  For any other diagnostic type the
+    /// severity defaults to [`ParseSeverity::Error`] (conservative).
+    ///
     /// The sink never truncates — all 100 errors from a pathological input
     /// will be retained (AC-011).
-    pub fn push(&mut self, _err: impl miette::Diagnostic + Send + Sync + 'static) {
-        todo!("STORY-010: DiagnosticSink::push()")
+    pub fn push<D>(&mut self, err: D)
+    where
+        D: miette::Diagnostic + Send + Sync + 'static,
+    {
+        // Capture severity before type-erasure by downcasting while the
+        // concrete type `D` is still visible.  This avoids any need to
+        // downcast the BoxDiagnostic at query time.
+        use std::any::Any;
+        let severity = if let Some(se) = (&err as &dyn Any).downcast_ref::<crate::SyntaxError>() {
+            se.severity()
+        } else {
+            // Conservative default for non-SyntaxError diagnostics.
+            ParseSeverity::Error
+        };
+
+        self.severities.push(severity);
+        self.diagnostics.push(Box::new(err));
     }
 
     /// Return `true` if no diagnostics have been pushed.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        todo!("STORY-010: DiagnosticSink::is_empty()")
+        self.diagnostics.is_empty()
     }
 
     /// Return the number of diagnostics in the sink.
     #[must_use]
     pub fn len(&self) -> usize {
-        todo!("STORY-010: DiagnosticSink::len()")
+        self.diagnostics.len()
     }
 
     /// Return `true` if any diagnostic has [`ParseSeverity::Fatal`] severity.
@@ -103,7 +133,7 @@ impl DiagnosticSink {
     /// `Some(DeckNode)` or `None`.
     #[must_use]
     pub fn has_fatal(&self) -> bool {
-        todo!("STORY-010: DiagnosticSink::has_fatal()")
+        self.severities.contains(&ParseSeverity::Fatal)
     }
 
     /// Return a slice of all accumulated diagnostics.
@@ -112,7 +142,7 @@ impl DiagnosticSink {
     /// errors in source order).
     #[must_use]
     pub fn errors(&self) -> &[BoxDiagnostic] {
-        todo!("STORY-010: DiagnosticSink::errors()")
+        &self.diagnostics
     }
 
     /// Serialise all diagnostics to a [`serde_json::Value`] array.
@@ -126,7 +156,32 @@ impl DiagnosticSink {
     /// Never panics — all fields are converted via `to_string` or `None`.
     #[must_use]
     pub fn to_json(&self) -> serde_json::Value {
-        todo!("STORY-010: DiagnosticSink::to_json()")
+        let entries: Vec<serde_json::Value> = self
+            .diagnostics
+            .iter()
+            .zip(self.severities.iter())
+            .map(|(diag, sev)| {
+                let code = diag
+                    .code()
+                    .map_or(serde_json::Value::Null, |c| {
+                        serde_json::Value::String(c.to_string())
+                    });
+                let message = serde_json::Value::String(diag.to_string());
+                let help = diag
+                    .help()
+                    .map_or(serde_json::Value::Null, |h| {
+                        serde_json::Value::String(h.to_string())
+                    });
+                let severity = serde_json::Value::String(format!("{sev:?}"));
+                serde_json::json!({
+                    "code": code,
+                    "message": message,
+                    "help": help,
+                    "severity": severity,
+                })
+            })
+            .collect();
+        serde_json::Value::Array(entries)
     }
 
     /// Return the maximum [`ParseSeverity`] across all diagnostics, or `None`
@@ -135,7 +190,7 @@ impl DiagnosticSink {
     /// Relies on [`ParseSeverity`]'s `Ord` impl (`Warning < Error < Fatal`).
     #[must_use]
     pub fn max_severity(&self) -> Option<ParseSeverity> {
-        todo!("STORY-010: DiagnosticSink::max_severity()")
+        self.severities.iter().copied().max()
     }
 }
 
@@ -150,7 +205,7 @@ impl IntoIterator for DiagnosticSink {
     type IntoIter = std::vec::IntoIter<BoxDiagnostic>;
 
     fn into_iter(self) -> Self::IntoIter {
-        todo!("STORY-010: DiagnosticSink::into_iter()")
+        self.diagnostics.into_iter()
     }
 }
 
