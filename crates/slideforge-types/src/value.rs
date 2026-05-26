@@ -40,6 +40,11 @@ use crate::type_kind::TypeKind;
 /// let _: Value = "hello".into(); // must not compile — no From<&str> for Value
 /// ```
 ///
+/// ```compile_fail
+/// use slideforge_types::Value;
+/// let _: Value = 1.0_f64.into(); // must not compile — no From<f64> for Value
+/// ```
+///
 /// ## Hash + Eq
 ///
 /// `Value` implements `Hash` and `Eq` because floating-point values are

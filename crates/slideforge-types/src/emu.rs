@@ -159,6 +159,9 @@ impl Mul<Emu> for i64 {
 impl Div<i64> for Emu {
     type Output = Self;
 
+    /// # Panics
+    ///
+    /// Panics if `rhs` is zero (standard integer division behavior).
     fn div(self, rhs: i64) -> Self {
         Emu(self.0 / rhs)
     }
@@ -344,5 +347,12 @@ mod tests {
     #[test]
     fn test_bc_1_02_003_emu_from_inches_zero() {
         assert_eq!(Emu::from_inches(0.0), Emu(0));
+    }
+
+    /// Division by zero panics with standard Rust integer behavior.
+    #[test]
+    #[should_panic(expected = "divide by zero")]
+    fn emu_div_by_zero_panics() {
+        let _ = Emu(100) / 0;
     }
 }
