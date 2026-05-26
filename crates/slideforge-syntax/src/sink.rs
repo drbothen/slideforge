@@ -21,23 +21,32 @@
 //!
 //! # JSON Export
 //!
-//! [`DiagnosticSink::to_json`] produces a [`serde_json::Value`] array. Each
-//! element has the following fields:
+//! [`DiagnosticSink::to_json`] produces a [`serde_json::Value`] object with
+//! the following schema:
 //!
 //! ```json
 //! {
-//!   "code": "E-PAR-001",
-//!   "message": "Unexpected indentation …",
-//!   "help": "Use exactly 2 spaces …",
-//!   "severity": "Fatal"
+//!   "diagnostics": [{
+//!     "error_code": "E-PAR-001",
+//!     "severity": "fatal",
+//!     "file": "deck.sf",
+//!     "line": 5,
+//!     "col": 3,
+//!     "message": "Unexpected indentation …",
+//!     "hint": "Use exactly 2 spaces …"
+//!   }],
+//!   "total": 1,
+//!   "has_fatal": true
 //! }
 //! ```
 //!
-//! The `"severity"` field is the `Debug` representation of [`ParseSeverity`].
-//! Callers must not rely on the exact string — it may be normalised to lower
-//! case in a future version.
+//! `"severity"` is always lowercase (`"fatal"`, `"error"`, or `"warning"`).
+//! For [`crate::SyntaxError`] diagnostics the `file`, `line`, and `col` fields
+//! are extracted directly from the variant fields.  For any other diagnostic
+//! type the position falls back to `"<unknown>"` / `0` / `0`.
 
 use crate::error::ParseSeverity;
+use crate::span::SourceMap;
 
 // ─── BoxDiagnostic ───────────────────────────────────────────────────────────
 
@@ -75,6 +84,11 @@ pub struct DiagnosticSink {
     /// Severity for each entry in `diagnostics`, captured eagerly at push
     /// time.  Always the same length as `diagnostics`.
     severities: Vec<ParseSeverity>,
+    /// Source position `(file, line, col)` for each entry, captured eagerly at
+    /// push time while the concrete type is still available.  Always the same
+    /// length as `diagnostics`.  Entries for unknown diagnostic types default to
+    /// `("<unknown>", 0, 0)`.
+    positions: Vec<(String, u32, u32)>,
 }
 
 impl DiagnosticSink {
@@ -84,6 +98,7 @@ impl DiagnosticSink {
         Self {
             diagnostics: Vec::new(),
             severities: Vec::new(),
+            positions: Vec::new(),
         }
     }
 
@@ -100,18 +115,44 @@ impl DiagnosticSink {
     where
         D: miette::Diagnostic + Send + Sync + 'static,
     {
-        // Capture severity before type-erasure by downcasting while the
-        // concrete type `D` is still visible.  This avoids any need to
-        // downcast the BoxDiagnostic at query time.
+        // Capture severity and position before type-erasure by downcasting
+        // while the concrete type `D` is still visible.  This avoids any need
+        // to downcast the BoxDiagnostic at query time.
         use std::any::Any;
-        let severity = if let Some(se) = (&err as &dyn Any).downcast_ref::<crate::SyntaxError>() {
-            se.severity()
-        } else {
-            // Conservative default for non-SyntaxError diagnostics.
-            ParseSeverity::Error
-        };
+        let (severity, position) =
+            if let Some(se) = (&err as &dyn Any).downcast_ref::<crate::SyntaxError>() {
+                (se.severity(), se.sort_position())
+            } else {
+                // Conservative defaults for non-SyntaxError diagnostics.
+                (ParseSeverity::Error, ("<unknown>".to_owned(), 0u32, 0u32))
+            };
 
         self.severities.push(severity);
+        self.positions.push(position);
+        self.diagnostics.push(Box::new(err));
+    }
+
+    /// Push a diagnostic into the sink with an explicit severity override.
+    ///
+    /// This is useful for non-[`crate::SyntaxError`] diagnostics where the
+    /// caller knows the correct severity at push time (e.g., a warning-level
+    /// diagnostic from a validator plugin).
+    ///
+    /// The sink never truncates — all errors are retained (AC-011).
+    pub fn push_with_severity<D>(&mut self, err: D, severity: ParseSeverity)
+    where
+        D: miette::Diagnostic + Send + Sync + 'static,
+    {
+        use std::any::Any;
+        let position =
+            if let Some(se) = (&err as &dyn Any).downcast_ref::<crate::SyntaxError>() {
+                se.sort_position()
+            } else {
+                ("<unknown>".to_owned(), 0u32, 0u32)
+            };
+
+        self.severities.push(severity);
+        self.positions.push(position);
         self.diagnostics.push(Box::new(err));
     }
 
@@ -145,43 +186,88 @@ impl DiagnosticSink {
         &self.diagnostics
     }
 
-    /// Serialise all diagnostics to a [`serde_json::Value`] array.
+    /// Serialise all diagnostics to a [`serde_json::Value`] object.
     ///
-    /// Each element has the keys `"code"`, `"message"`, `"help"`, and
-    /// `"severity"`. Missing fields (e.g. `help` returning `None`) are
-    /// serialised as `null`.
+    /// # Schema
+    ///
+    /// ```json
+    /// {
+    ///   "diagnostics": [{
+    ///     "error_code": "E-PAR-001",
+    ///     "severity": "fatal",
+    ///     "file": "deck.sf",
+    ///     "line": 5,
+    ///     "col": 3,
+    ///     "message": "…",
+    ///     "hint": "…"
+    ///   }],
+    ///   "total": N,
+    ///   "has_fatal": true
+    /// }
+    /// ```
+    ///
+    /// `"severity"` is lowercase (`"fatal"`, `"error"`, or `"warning"`).
+    /// `"hint"` is `null` when the diagnostic has no help text.
+    /// For [`crate::SyntaxError`] diagnostics, `"file"`, `"line"`, and
+    /// `"col"` are extracted from the variant fields.  For all other types
+    /// the position falls back to `"<unknown>"` / `0` / `0`.
+    ///
+    /// `source_map` is accepted for forward-compatibility with multi-file
+    /// diagnostics that store only a [`crate::span::Span`] (file ID + byte
+    /// offset).  In the current implementation, position is read directly
+    /// from [`crate::SyntaxError`] variant fields so the map is not consulted
+    /// for those; it is available for unknown diagnostic types that may carry
+    /// span information resolvable via the map.
     ///
     /// # Panics
     ///
     /// Never panics — all fields are converted via `to_string` or `None`.
     #[must_use]
-    pub fn to_json(&self) -> serde_json::Value {
+    pub fn to_json(&self, _source_map: &SourceMap) -> serde_json::Value {
+        // positions, severities, and diagnostics are all the same length —
+        // maintained by the push and push_with_severity methods.
         let entries: Vec<serde_json::Value> = self
             .diagnostics
             .iter()
             .zip(self.severities.iter())
-            .map(|(diag, sev)| {
-                let code = diag
+            .zip(self.positions.iter())
+            .map(|((diag, sev), (file, line, col))| {
+                let error_code = diag
                     .code()
                     .map_or(serde_json::Value::Null, |c| {
                         serde_json::Value::String(c.to_string())
                     });
                 let message = serde_json::Value::String(diag.to_string());
-                let help = diag
+                let hint = diag
                     .help()
                     .map_or(serde_json::Value::Null, |h| {
                         serde_json::Value::String(h.to_string())
                     });
-                let severity = serde_json::Value::String(format!("{sev:?}"));
+                let severity_str = match sev {
+                    ParseSeverity::Fatal => "fatal",
+                    ParseSeverity::Error => "error",
+                    ParseSeverity::Warning => "warning",
+                };
+
                 serde_json::json!({
-                    "code": code,
+                    "error_code": error_code,
+                    "severity": severity_str,
+                    "file": file,
+                    "line": line,
+                    "col": col,
                     "message": message,
-                    "help": help,
-                    "severity": severity,
+                    "hint": hint,
                 })
             })
             .collect();
-        serde_json::Value::Array(entries)
+
+        let total = entries.len();
+        let has_fatal = self.has_fatal();
+        serde_json::json!({
+            "diagnostics": entries,
+            "total": total,
+            "has_fatal": has_fatal,
+        })
     }
 
     /// Return the maximum [`ParseSeverity`] across all diagnostics, or `None`
@@ -213,8 +299,10 @@ impl IntoIterator for DiagnosticSink {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
-    use crate::SyntaxError;
+    use crate::{span::SourceMap, SyntaxError};
 
     // Helper: build a cheap SyntaxError for sink testing.
     fn make_error(line: u32, col: u32) -> SyntaxError {
@@ -227,6 +315,13 @@ mod tests {
             "  bad\n".to_string(),
             0,
         )
+    }
+
+    // Helper: build a SourceMap with one file (used when to_json() is called).
+    fn make_source_map() -> SourceMap {
+        let mut sm = SourceMap::new();
+        sm.add_file(Arc::from("test.sf"), Arc::from("  bad\n"));
+        sm
     }
 
     // ── AC-008: push / is_empty / has_fatal / errors / IntoIterator ──────────
@@ -345,31 +440,148 @@ mod tests {
 
     // ── AC-014: to_json() produces valid JSON with required fields ────────────
 
-    /// AC-014: `to_json()` returns an array where each element has `"code"`,
-    /// `"message"`, `"help"`, and `"severity"` keys.
+    /// AC-014: `to_json()` returns a wrapper object with `"diagnostics"`,
+    /// `"total"`, and `"has_fatal"` keys; each diagnostic entry has
+    /// `"error_code"`, `"severity"`, `"file"`, `"line"`, `"col"`,
+    /// `"message"`, and `"hint"` keys.
     #[test]
     fn test_bc_1_10_014_to_json_has_required_keys() {
+        let sm = make_source_map();
         let mut sink = DiagnosticSink::new();
         sink.push(make_error(1, 1));
-        let json = sink.to_json();
-        let arr = json.as_array().expect("to_json() must return a JSON array");
-        assert!(!arr.is_empty(), "array must have at least one entry");
+        let json = sink.to_json(&sm);
+        // Top-level wrapper keys.
+        assert!(
+            json.get("diagnostics").is_some(),
+            "to_json() must have 'diagnostics' key"
+        );
+        assert!(
+            json.get("total").is_some(),
+            "to_json() must have 'total' key"
+        );
+        assert!(
+            json.get("has_fatal").is_some(),
+            "to_json() must have 'has_fatal' key"
+        );
+        // Per-diagnostic keys.
+        let arr = json["diagnostics"]
+            .as_array()
+            .expect("'diagnostics' must be an array");
+        assert!(!arr.is_empty(), "diagnostics array must have at least one entry");
         let entry = &arr[0];
+        assert!(entry.get("error_code").is_some(), "entry must have 'error_code'");
+        assert!(entry.get("severity").is_some(), "entry must have 'severity'");
+        assert!(entry.get("file").is_some(), "entry must have 'file'");
+        assert!(entry.get("line").is_some(), "entry must have 'line'");
+        assert!(entry.get("col").is_some(), "entry must have 'col'");
+        assert!(entry.get("message").is_some(), "entry must have 'message'");
+        assert!(entry.get("hint").is_some(), "entry must have 'hint'");
+    }
+
+    /// AC-014: severity field in `to_json()` output is lowercase.
+    #[test]
+    fn test_bc_1_10_014_to_json_severity_is_lowercase() {
+        let sm = make_source_map();
+        let mut sink = DiagnosticSink::new();
+        sink.push(make_error(1, 1));
+        let json = sink.to_json(&sm);
+        let arr = json["diagnostics"].as_array().expect("must be array");
+        let sev = arr[0]["severity"].as_str().expect("severity must be string");
+        assert_eq!(sev, "fatal", "severity must be lowercase 'fatal'; got: {sev}");
+    }
+
+    /// AC-014: `to_json()` total and `has_fatal` fields are correct.
+    #[test]
+    fn test_bc_1_10_014_to_json_total_and_has_fatal() {
+        let sm = make_source_map();
+        let mut sink = DiagnosticSink::new();
+        sink.push(make_error(1, 1));
+        sink.push(make_error(2, 3));
+        let json = sink.to_json(&sm);
+        assert_eq!(json["total"].as_u64(), Some(2), "'total' must be 2");
+        assert_eq!(json["has_fatal"].as_bool(), Some(true), "'has_fatal' must be true");
+    }
+
+    /// AC-014: file/line/col extracted from `SyntaxError` into `to_json()` output.
+    #[test]
+    fn test_bc_1_10_014_to_json_file_line_col_extracted() {
+        let sm = make_source_map();
+        let mut sink = DiagnosticSink::new();
+        sink.push(make_error(5, 3));
+        let json = sink.to_json(&sm);
+        let arr = json["diagnostics"].as_array().expect("must be array");
+        let entry = &arr[0];
+        assert_eq!(
+            entry["file"].as_str(),
+            Some("test.sf"),
+            "'file' must be 'test.sf'"
+        );
+        assert_eq!(entry["line"].as_u64(), Some(5), "'line' must be 5");
+        assert_eq!(entry["col"].as_u64(), Some(3), "'col' must be 3");
+    }
+
+    // ── AC-014: error_code key uses spec name ────────────────────────────────
+
+    /// AC-014: the per-entry key for the diagnostic code is `"error_code"`,
+    /// not `"code"`.
+    #[test]
+    fn test_bc_1_10_014_to_json_uses_error_code_key() {
+        let sm = make_source_map();
+        let mut sink = DiagnosticSink::new();
+        sink.push(make_error(1, 1));
+        let json = sink.to_json(&sm);
+        let arr = json["diagnostics"].as_array().expect("must be array");
+        let entry = &arr[0];
+        // "error_code" must exist, "code" must NOT exist.
         assert!(
-            entry.get("code").is_some(),
-            "each entry must have a 'code' key"
+            entry.get("error_code").is_some(),
+            "entry must have 'error_code' key (not 'code')"
         );
         assert!(
-            entry.get("message").is_some(),
-            "each entry must have a 'message' key"
+            entry.get("code").is_none(),
+            "entry must NOT have a 'code' key (renamed to 'error_code')"
+        );
+    }
+
+    /// AC-014: the per-entry key for help text is `"hint"`, not `"help"`.
+    #[test]
+    fn test_bc_1_10_014_to_json_uses_hint_key() {
+        let sm = make_source_map();
+        let mut sink = DiagnosticSink::new();
+        sink.push(make_error(1, 1));
+        let json = sink.to_json(&sm);
+        let arr = json["diagnostics"].as_array().expect("must be array");
+        let entry = &arr[0];
+        // "hint" must exist, "help" must NOT exist.
+        assert!(
+            entry.get("hint").is_some(),
+            "entry must have 'hint' key (not 'help')"
         );
         assert!(
-            entry.get("help").is_some(),
-            "each entry must have a 'help' key"
+            entry.get("help").is_none(),
+            "entry must NOT have a 'help' key (renamed to 'hint')"
+        );
+    }
+
+    // ── AC-009: push_with_severity ───────────────────────────────────────────
+
+    /// AC-009: `push_with_severity` stores the explicit severity rather than
+    /// auto-detecting it from the concrete type.
+    #[test]
+    fn test_push_with_severity_stores_explicit_severity() {
+        let mut sink = DiagnosticSink::new();
+        // Push a SyntaxError (normally Fatal) with an explicit Warning override.
+        // This exercises the push_with_severity path, not the push path.
+        sink.push_with_severity(make_error(1, 1), ParseSeverity::Warning);
+        assert_eq!(sink.len(), 1, "sink must have 1 entry");
+        assert_eq!(
+            sink.max_severity(),
+            Some(ParseSeverity::Warning),
+            "max_severity must be Warning when pushed with Warning"
         );
         assert!(
-            entry.get("severity").is_some(),
-            "each entry must have a 'severity' key"
+            !sink.has_fatal(),
+            "has_fatal must be false when only Warning diagnostics are present"
         );
     }
 
@@ -377,9 +589,10 @@ mod tests {
 
     /// EC-001: a freshly created empty sink satisfies all expected invariants:
     /// `is_empty()`, `!has_fatal()`, `max_severity() == None`, and
-    /// `to_json()` produces an empty JSON array.
+    /// `to_json()` produces a wrapper object with `"total": 0`.
     #[test]
     fn test_ec001_empty_sink() {
+        let sm = make_source_map();
         let sink = DiagnosticSink::new();
         assert!(sink.is_empty(), "new sink must be empty");
         assert!(!sink.has_fatal(), "new sink must not have fatal errors");
@@ -388,22 +601,33 @@ mod tests {
             None,
             "new sink max_severity must be None"
         );
-        let json = sink.to_json();
-        let arr = json.as_array().expect("to_json() must return JSON array");
-        assert_eq!(arr.len(), 0, "empty sink to_json must have 0 entries");
+        let json = sink.to_json(&sm);
+        assert_eq!(
+            json["total"].as_u64(),
+            Some(0),
+            "empty sink to_json must have total:0"
+        );
+        assert_eq!(
+            json["has_fatal"].as_bool(),
+            Some(false),
+            "empty sink to_json must have has_fatal:false"
+        );
+        let arr = json["diagnostics"].as_array().expect("'diagnostics' must be array");
+        assert_eq!(arr.len(), 0, "empty sink to_json must have 0 diagnostic entries");
     }
 
     /// AC-014: `to_json()` output is valid JSON (parseable by `serde_json`).
     #[test]
     fn test_bc_1_10_014_to_json_is_valid_json() {
+        let sm = make_source_map();
         let mut sink = DiagnosticSink::new();
         sink.push(make_error(1, 1));
-        let json = sink.to_json();
+        let json = sink.to_json(&sm);
         // If serde_json::Value round-trips through its Display without panic
         // then the value is valid JSON.
         let serialised = json.to_string();
         let reparsed: serde_json::Value =
             serde_json::from_str(&serialised).expect("to_json output must be valid JSON");
-        assert!(reparsed.is_array());
+        assert!(reparsed.is_object(), "to_json output must be a JSON object");
     }
 }

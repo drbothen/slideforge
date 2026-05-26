@@ -528,6 +528,89 @@ fn test_ac005_include_error_span_attribution() {
     // Span attribution check would go here once @include is implemented.
 }
 
+// ── F-004: multi-error accumulation from fixture ─────────────────────────────
+
+/// F-004: parsing `five_independent_errors.sf` must accumulate ≥ 5 errors —
+/// the parser must NOT stop at the first error (AC-011 accumulation contract).
+#[test]
+fn test_multi_error_accumulation() {
+    let src =
+        std::fs::read_to_string(format!(
+            "{}/tests/fixtures/five_independent_errors.sf",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("fixture five_independent_errors.sf must exist");
+    let mut sm = SourceMap::new();
+    let file_id = sm.add_file(Arc::from("five_errors.sf"), Arc::from(src.as_str()));
+    let mut sink = DiagnosticSink::new();
+    let _ = parse_checked(&src, file_id, &sm, &mut sink);
+    assert!(
+        sink.len() >= 5,
+        "must accumulate at least 5 errors; got {}",
+        sink.len()
+    );
+    assert!(sink.has_fatal(), "sink must report has_fatal() after error accumulation");
+}
+
+// ── F-006: snapshot test for DiagnosticRenderer output ───────────────────────
+
+/// F-006: the `DiagnosticRenderer` must produce stable, snapshot-verified output
+/// for a known set of `SyntaxError` diagnostics.
+#[test]
+fn test_snapshot_renderer_output() {
+    use slideforge_syntax::DiagnosticRenderer;
+
+    let mut sink = DiagnosticSink::new();
+    // Push 3 known SyntaxErrors so the snapshot is deterministic.
+    sink.push(SyntaxError::indent_error(
+        "render_test.sf".to_string(),
+        2, 1, 2, 3,
+        "slide title:\n  title \"Good\"\n   bad\n".to_string(),
+        24,
+    ));
+    sink.push(SyntaxError::unexpected_token(
+        "render_test.sf".to_string(),
+        3, 1,
+        "expected field name".to_string(),
+        "slide content:\n  title \"T\"\n  :\n".to_string(),
+        28,
+        1,
+    ));
+    sink.push(SyntaxError::reserved_keyword(
+        "render_test.sf".to_string(),
+        1, 1,
+        "@fn".to_string(),
+        "user-defined functions reserved for v2".to_string(),
+        "@fn compute:\n".to_string(),
+        0,
+        3,
+    ));
+
+    let renderer = DiagnosticRenderer::new(false); // no ANSI for deterministic snapshot
+    let mut buf = Vec::new();
+    renderer
+        .render_all(&sink, &mut buf)
+        .expect("render_all must not fail");
+    let output = String::from_utf8(buf).expect("output must be valid UTF-8");
+
+    // Verify the output contains the expected error codes and messages.
+    assert!(
+        output.contains("E-PAR-001"),
+        "renderer output must include E-PAR-001; got:\n{output}"
+    );
+    assert!(
+        output.contains("E-PAR-002"),
+        "renderer output must include E-PAR-002; got:\n{output}"
+    );
+    assert!(
+        output.contains("E-PAR-006"),
+        "renderer output must include E-PAR-006; got:\n{output}"
+    );
+
+    // Snapshot the full renderer output for regression detection.
+    insta::assert_snapshot!("renderer_output_three_errors", output);
+}
+
 // ── EC-001: empty sink from valid source ─────────────────────────────────────
 
 /// EC-001: `parse_checked` on a valid source must produce an empty sink and
@@ -558,7 +641,16 @@ fn test_ec001_empty_sink_on_valid_source() {
         None,
         "valid source must have max_severity() == None"
     );
-    let json = sink.to_json();
-    let arr = json.as_array().expect("to_json() must return a JSON array");
-    assert_eq!(arr.len(), 0, "empty sink to_json() must have total:0 elements");
+    let mut sm = SourceMap::new();
+    sm.add_file(Arc::from("test.sf"), Arc::from(src));
+    let json = sink.to_json(&sm);
+    assert_eq!(
+        json["total"].as_u64(),
+        Some(0),
+        "empty sink to_json() must have total:0"
+    );
+    let arr = json["diagnostics"]
+        .as_array()
+        .expect("to_json() 'diagnostics' must be an array");
+    assert_eq!(arr.len(), 0, "empty sink diagnostics array must have 0 entries");
 }

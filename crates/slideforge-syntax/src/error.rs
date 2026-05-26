@@ -475,14 +475,34 @@ impl SyntaxError {
 
     /// Return the severity of this error.
     ///
-    /// All E-PAR-* variants are [`ParseSeverity::Fatal`]. This method exists
-    /// so that [`crate::DiagnosticSink::max_severity`] and
+    /// Most E-PAR-* variants are [`ParseSeverity::Fatal`]. The exception is
+    /// [`SyntaxError::VersionError`] with `is_fatal: false`, which carries
+    /// [`ParseSeverity::Warning`] severity (e.g., a missing-version advisory).
+    ///
+    /// This method exists so that [`crate::DiagnosticSink::max_severity`] and
     /// [`crate::DiagnosticSink::has_fatal`] can make severity decisions without
     /// downcasting.
     #[must_use]
     pub fn severity(&self) -> ParseSeverity {
-        // All E-PAR-* error variants are fatal — no E-PAR-* code is ever a warning.
-        ParseSeverity::Fatal
+        match self {
+            Self::VersionError { is_fatal: false, .. } => ParseSeverity::Warning,
+            _ => ParseSeverity::Fatal,
+        }
+    }
+
+    /// Extract the `(file, line, col)` triple from this error for display and
+    /// sorting purposes.
+    ///
+    /// `VersionError` and `UnexpectedEof` carry no `line`/`col` field, so they
+    /// return `(file, 0, 0)`.
+    ///
+    /// Returns owned `String` values so that the caller does not hold a borrow
+    /// into `self`. For position-only ordering, [`SyntaxError`] implements
+    /// [`Ord`] directly.
+    #[must_use]
+    pub fn sort_position(&self) -> (String, u32, u32) {
+        let (file, line, col) = self.sort_key();
+        (file.to_owned(), line, col)
     }
 
     /// Extract the `(file, line, col)` triple from a `SyntaxError` variant for
@@ -512,7 +532,15 @@ impl SyntaxError {
 
 impl PartialEq for SyntaxError {
     fn eq(&self, other: &Self) -> bool {
-        self.sort_key() == other.sort_key()
+        // Two SyntaxErrors are equal only when they are the same variant AND
+        // occupy the same (file, line, col) position.  Comparing by position
+        // alone (the previous implementation) was semantically wrong: different
+        // error types at the same source location would compare as equal, which
+        // violates the `Eq` contract (reflexivity is preserved but substitution
+        // was not — a `VarNameCollision` and an `IndentError` at line 3 col 1
+        // would have been considered equal).
+        std::mem::discriminant(self) == std::mem::discriminant(other)
+            && self.sort_key() == other.sort_key()
     }
 }
 
