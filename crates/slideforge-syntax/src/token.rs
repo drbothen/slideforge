@@ -70,7 +70,6 @@ pub enum LexerMode {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Token {
     // ── Value-carrying tokens ─────────────────────────────────────────────
-
     /// An unquoted identifier or keyword (`title`, `slide`, `for`, …).
     Ident(Arc<str>),
 
@@ -94,7 +93,6 @@ pub enum Token {
     MathContent(Arc<str>),
 
     // ── Punctuation / delimiter tokens ────────────────────────────────────
-
     /// The `@` character — directive prefix.
     At,
 
@@ -120,7 +118,6 @@ pub enum Token {
     Pipe,
 
     // ── Structural tokens ─────────────────────────────────────────────────
-
     /// End of a logical line.
     Newline,
 

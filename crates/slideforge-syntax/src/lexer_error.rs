@@ -146,7 +146,10 @@ mod tests {
             byte_offset: 42,
         };
         let msg = e.to_string();
-        assert!(msg.contains("deck.sf:3:1"), "message must include file:line:col");
+        assert!(
+            msg.contains("deck.sf:3:1"),
+            "message must include file:line:col"
+        );
         assert!(
             msg.contains("spaces for indentation"),
             "message must mention spaces requirement"

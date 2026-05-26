@@ -194,7 +194,7 @@ impl<'src> LexerState<'src> {
                 Some(b' ') => {
                     self.pos += 1;
                     indent_spaces += 1;
-                }
+                },
                 Some(b'\t') => {
                     // Tab in leading whitespace — record error, skip the byte.
                     let (line, col) = self.line_col();
@@ -208,7 +208,7 @@ impl<'src> LexerState<'src> {
                     had_tab = true;
                     // Do NOT count tabs toward indent_spaces — treat them as
                     // zero-width so the indent stack stays consistent.
-                }
+                },
                 _ => break,
             }
         }
@@ -226,7 +226,7 @@ impl<'src> LexerState<'src> {
                     self.pos += 1;
                 }
                 return;
-            }
+            },
             Some(b'#') => {
                 // Comment line — skip all bytes up to (not including) the
                 // line terminator, then consume it (handling `\r\n`).
@@ -240,8 +240,8 @@ impl<'src> LexerState<'src> {
                     self.pos += 1;
                 }
                 return;
-            }
-            _ => {}
+            },
+            _ => {},
         }
 
         // ── Step 2: emit Indent / Dedent tokens ─────────────────────────
@@ -301,32 +301,32 @@ impl<'src> LexerState<'src> {
                     // EOF inside line — no Newline token needed; `run()` will
                     // emit pending Dedents and Eof.
                     return;
-                }
+                },
                 Some(b'\r') => {
                     // Bare `\r` mid-line (unusual) or the `\r` in a `\r\n`
                     // pair that wasn't consumed by `scan_line`.  Skip it; the
                     // `\n` will be seen on the next iteration and emit the
                     // `Newline` token as usual.
                     self.pos += 1;
-                }
+                },
                 Some(b'\n') => {
                     let start = self.pos;
                     self.pos += 1;
                     self.tokens.push((Token::Newline, start..self.pos));
                     return;
-                }
+                },
                 Some(b'#') => {
                     // Comment: skip to end of line (including any `\r`).
                     while matches!(self.current(), Some(b) if b != b'\n' && b != b'\r') {
                         self.pos += 1;
                     }
-                }
+                },
                 Some(b' ' | b'\t') => {
                     // Inline whitespace (spaces / tabs *between* tokens on a
                     // line are not indentation and are silently skipped; tabs
                     // here are fine per AC-004 semantics for mid-line content).
                     self.pos += 1;
-                }
+                },
                 Some(b'"') => self.scan_string(),
                 Some(b'$') => self.scan_dollar(),
                 Some(b'@') => self.scan_at(),
@@ -339,17 +339,17 @@ impl<'src> LexerState<'src> {
                         self.pos += 1;
                     }
                     self.emit(Token::CloseBrace, start);
-                }
+                },
                 Some(b':') => {
                     let start = self.pos;
                     self.pos += 1;
                     self.emit(Token::Colon, start);
-                }
+                },
                 Some(b'|') => {
                     let start = self.pos;
                     self.pos += 1;
                     self.emit(Token::Pipe, start);
-                }
+                },
                 Some(b'-' | b'0'..=b'9') => self.scan_number(),
                 Some(b'a'..=b'z' | b'A'..=b'Z' | b'_') => self.scan_ident(),
                 Some(other) => {
@@ -372,7 +372,7 @@ impl<'src> LexerState<'src> {
                     });
                     // Advance past this code-point.
                     self.pos += ch.len_utf8();
-                }
+                },
             }
         }
     }
@@ -402,7 +402,7 @@ impl<'src> LexerState<'src> {
                     self.tokens
                         .push((Token::StringLit(Arc::from(content)), start..self.pos));
                     return;
-                }
+                },
                 Some(b'\\') => {
                     // Escape sequence — skip the backslash, then skip the
                     // FULL escaped character as a UTF-8 code-point.  A bare
@@ -418,33 +418,32 @@ impl<'src> LexerState<'src> {
                     match self.current() {
                         None | Some(b'\n') => {
                             // Let next iteration trigger unterminated-string.
-                        }
+                        },
                         _ => {
                             if let Some(s) = self.src.get(self.pos..)
                                 && let Some(ch) = s.chars().next()
                             {
                                 self.pos += ch.len_utf8();
                             }
-                        }
+                        },
                     }
-                }
+                },
                 Some(b'"') => {
                     let content = &self.src[content_start..self.pos];
                     self.pos += 1; // consume closing `"`
                     self.tokens
                         .push((Token::StringLit(Arc::from(content)), start..self.pos));
                     return;
-                }
+                },
                 Some(_) => {
                     // Advance by one full Unicode code-point.  Use a safe
                     // get + chars().next() to avoid panicking if `pos` somehow
                     // lands on a non-char boundary (defensive guard).
-                    let Some(ch) = self.src.get(self.pos..).and_then(|s| s.chars().next())
-                    else {
+                    let Some(ch) = self.src.get(self.pos..).and_then(|s| s.chars().next()) else {
                         break;
                     };
                     self.pos += ch.len_utf8();
-                }
+                },
             }
         }
     }
@@ -462,13 +461,13 @@ impl<'src> LexerState<'src> {
                     // Closing `$$` — return to Text mode.
                     self.mode = LexerMode::Text;
                     self.emit(Token::DollarDouble, start);
-                }
+                },
                 LexerMode::Text | LexerMode::Math => {
                     // Opening `$$`.
                     self.mode = LexerMode::MathDisplay;
                     self.emit(Token::DollarDouble, start);
                     self.scan_math_content(false);
-                }
+                },
             }
         } else {
             // Single `$` — inline math.
@@ -477,13 +476,13 @@ impl<'src> LexerState<'src> {
                     // Closing `$` — return to Text mode.
                     self.mode = LexerMode::Text;
                     self.emit(Token::DollarSingle, start);
-                }
+                },
                 LexerMode::Text | LexerMode::MathDisplay => {
                     // Opening `$`.
                     self.mode = LexerMode::Math;
                     self.emit(Token::DollarSingle, start);
                     self.scan_math_content(true);
-                }
+                },
             }
         }
     }
@@ -526,7 +525,7 @@ impl<'src> LexerState<'src> {
                     });
                     self.mode = LexerMode::Text;
                     return;
-                }
+                },
                 Some(b'$') if single => {
                     // Potential closing `$` for inline math.
                     if self.peek(1) == Some(b'$') {
@@ -546,7 +545,7 @@ impl<'src> LexerState<'src> {
                         self.emit(Token::DollarSingle, close_start);
                         return;
                     }
-                }
+                },
                 Some(b'$') if !single => {
                     // Potential closing `$$` for display math.
                     if self.peek(1) == Some(b'$') {
@@ -564,7 +563,7 @@ impl<'src> LexerState<'src> {
                         return;
                     }
                     self.pos += 1;
-                }
+                },
                 Some(b'@') if self.peek(1) == Some(b'{') => {
                     // `@{` inside math — emit content accumulated so far,
                     // emit `AtBrace`, scan the interpolation body, then
@@ -584,15 +583,14 @@ impl<'src> LexerState<'src> {
                     // content after the closing `}` of the interpolation.
                     segment_start = self.pos;
                     // `continue` — re-enter the loop without recursing.
-                }
+                },
                 Some(_) => {
                     // Advance by one full Unicode code-point.
-                    let Some(ch) = self.src.get(self.pos..).and_then(|s| s.chars().next())
-                    else {
+                    let Some(ch) = self.src.get(self.pos..).and_then(|s| s.chars().next()) else {
                         break;
                     };
                     self.pos += ch.len_utf8();
-                }
+                },
             }
         }
     }
@@ -607,21 +605,20 @@ impl<'src> LexerState<'src> {
                     self.pos += 1;
                     self.emit(Token::CloseBrace, start);
                     return;
-                }
+                },
                 Some(b' ' | b'\t') => {
                     self.pos += 1;
-                }
+                },
                 Some(b'a'..=b'z' | b'A'..=b'Z' | b'_') => self.scan_ident(),
                 Some(b'0'..=b'9' | b'-') => self.scan_number(),
                 Some(b'"') => self.scan_string(),
                 Some(_) => {
                     // Advance by one full Unicode code-point.
-                    let Some(ch) = self.src.get(self.pos..).and_then(|s| s.chars().next())
-                    else {
+                    let Some(ch) = self.src.get(self.pos..).and_then(|s| s.chars().next()) else {
                         break;
                     };
                     self.pos += ch.len_utf8();
-                }
+                },
             }
         }
     }
@@ -799,7 +796,10 @@ mod tests {
         let has_string_lit = tokens
             .iter()
             .any(|(t, _)| matches!(t, Token::StringLit(s) if s.contains('\t')));
-        assert!(has_string_lit, "token stream should contain StringLit with tab");
+        assert!(
+            has_string_lit,
+            "token stream should contain StringLit with tab"
+        );
     }
 
     // ── AC-005 — tab inside comment ───────────────────────────────────────
@@ -832,8 +832,13 @@ mod tests {
         // Line 3: 2-space indent — dedent but 2 is not on stack [0, 4], produces IndentationInconsistency
         let src = "\tfield1: val\n    field2: val\n  field3: val\n";
         let (_, errors) = lex_str(src);
-        assert!(errors.len() >= 2, "should have both tab and indentation errors; got {errors:?}");
-        let has_tab = errors.iter().any(|e| matches!(e, LexError::TabIndentation { .. }));
+        assert!(
+            errors.len() >= 2,
+            "should have both tab and indentation errors; got {errors:?}"
+        );
+        let has_tab = errors
+            .iter()
+            .any(|e| matches!(e, LexError::TabIndentation { .. }));
         let has_indent = errors
             .iter()
             .any(|e| matches!(e, LexError::IndentationInconsistency { .. }));
@@ -848,9 +853,11 @@ mod tests {
         let src = "title\n";
         let (tokens, errors) = lex_str(src);
         assert!(errors.is_empty());
-        assert!(tokens
-            .iter()
-            .any(|(t, _)| matches!(t, Token::Ident(s) if s.as_ref() == "title")));
+        assert!(
+            tokens
+                .iter()
+                .any(|(t, _)| matches!(t, Token::Ident(s) if s.as_ref() == "title"))
+        );
     }
 
     #[test]
@@ -858,7 +865,11 @@ mod tests {
         let src = "true\n";
         let (tokens, errors) = lex_str(src);
         assert!(errors.is_empty());
-        assert!(tokens.iter().any(|(t, _)| matches!(t, Token::BoolLit(true))));
+        assert!(
+            tokens
+                .iter()
+                .any(|(t, _)| matches!(t, Token::BoolLit(true)))
+        );
     }
 
     #[test]
@@ -866,7 +877,11 @@ mod tests {
         let src = "false\n";
         let (tokens, errors) = lex_str(src);
         assert!(errors.is_empty());
-        assert!(tokens.iter().any(|(t, _)| matches!(t, Token::BoolLit(false))));
+        assert!(
+            tokens
+                .iter()
+                .any(|(t, _)| matches!(t, Token::BoolLit(false)))
+        );
     }
 
     #[test]
@@ -950,7 +965,9 @@ mod tests {
         );
         let has_dollar_single = tokens.iter().any(|(t, _)| matches!(t, Token::DollarSingle));
         assert!(has_dollar_single, "should produce DollarSingle token");
-        let has_math_content = tokens.iter().any(|(t, _)| matches!(t, Token::MathContent(_)));
+        let has_math_content = tokens
+            .iter()
+            .any(|(t, _)| matches!(t, Token::MathContent(_)));
         assert!(has_math_content, "should produce MathContent token");
     }
 
@@ -1056,7 +1073,10 @@ mod tests {
                 LexError::UnterminatedMath { .. } | LexError::UnterminatedString { .. }
             )
         });
-        assert!(has_error, "unterminated math should produce error, got: {errors:?}");
+        assert!(
+            has_error,
+            "unterminated math should produce error, got: {errors:?}"
+        );
     }
 
     // ── @{ in math mode ───────────────────────────────────────────────────
@@ -1082,7 +1102,10 @@ mod tests {
         // The escaped sequence `\ñ` must be skipped without panicking.
         let src = "title \"hello\\ñworld\"\n";
         let (tokens, errors) = lex_str(src);
-        assert!(errors.is_empty(), "multi-byte UTF-8 escape must not produce errors, got: {errors:?}");
+        assert!(
+            errors.is_empty(),
+            "multi-byte UTF-8 escape must not produce errors, got: {errors:?}"
+        );
         let has_string = tokens.iter().any(|(t, _)| {
             if let Token::StringLit(s) = t {
                 s.contains("hello") && s.contains("world")
@@ -1090,7 +1113,10 @@ mod tests {
                 false
             }
         });
-        assert!(has_string, "should produce a StringLit containing the content around the escape");
+        assert!(
+            has_string,
+            "should produce a StringLit containing the content around the escape"
+        );
     }
 
     // ── FIX-003: Windows \r\n line endings ───────────────────────────────
@@ -1104,13 +1130,22 @@ mod tests {
         let windows_src = "title \"hello\"\r\n";
         let (unix_tokens, unix_errors) = lex_str(unix_src);
         let (win_tokens, win_errors) = lex_str(windows_src);
-        assert!(unix_errors.is_empty(), "unix: unexpected errors: {unix_errors:?}");
-        assert!(win_errors.is_empty(), "windows: unexpected errors: {win_errors:?}");
+        assert!(
+            unix_errors.is_empty(),
+            "unix: unexpected errors: {unix_errors:?}"
+        );
+        assert!(
+            win_errors.is_empty(),
+            "windows: unexpected errors: {win_errors:?}"
+        );
         // Token kinds must match (spans differ due to the extra `\r` byte, so
         // we compare only the token variants, not the byte ranges).
         let unix_kinds: Vec<_> = unix_tokens.iter().map(|(t, _)| format!("{t:?}")).collect();
         let win_kinds: Vec<_> = win_tokens.iter().map(|(t, _)| format!("{t:?}")).collect();
-        assert_eq!(unix_kinds, win_kinds, "Windows and Unix line endings must produce identical token streams");
+        assert_eq!(
+            unix_kinds, win_kinds,
+            "Windows and Unix line endings must produce identical token streams"
+        );
     }
 
     // ── FIX-004: Integer overflow produces LexError, not silent 0 ────────
@@ -1122,8 +1157,13 @@ mod tests {
         // 10^22 — well beyond i64::MAX (≈ 9.2 × 10^18).
         let src = "count 9999999999999999999999\n";
         let (tokens, errors) = lex_str(src);
-        let has_overflow = errors.iter().any(|e| matches!(e, LexError::NumberOverflow { .. }));
-        assert!(has_overflow, "overflowing integer literal must produce NumberOverflow error, got: {errors:?}");
+        let has_overflow = errors
+            .iter()
+            .any(|e| matches!(e, LexError::NumberOverflow { .. }));
+        assert!(
+            has_overflow,
+            "overflowing integer literal must produce NumberOverflow error, got: {errors:?}"
+        );
         // A recovery `IntLit(0)` should still be in the token stream so that
         // parsing can continue (DI-018 error accumulation).
         let has_int_lit = tokens.iter().any(|(t, _)| matches!(t, Token::IntLit(_)));
@@ -1179,7 +1219,10 @@ slide title:
   title "Hello"
 "#;
         let (tokens, errors) = lex_str(src);
-        assert!(errors.is_empty(), "minimal deck should have no lex errors, got: {errors:?}");
+        assert!(
+            errors.is_empty(),
+            "minimal deck should have no lex errors, got: {errors:?}"
+        );
         insta::assert_debug_snapshot!("minimal_deck_tokens", tokens);
     }
 }
