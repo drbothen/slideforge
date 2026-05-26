@@ -1,0 +1,194 @@
+//! [`DataSource`] trait — fetches external data for use in slideforge expressions.
+//!
+//! A `DataSource` plugin resolves a URI (e.g., `"data/sales.json"`) and returns a
+//! [`Value`] that the evaluator can bind to a variable. Built-in implementations
+//! handle JSON, CSV, YAML, TOML, `SQLite`, HTTP, and XLSX. External plugins can
+//! add more source types without modifying the core.
+
+use slideforge_types::Value;
+use thiserror::Error;
+
+/// Options passed to [`DataSource::load`] at evaluation time.
+///
+/// This struct carries per-call configuration that may differ between
+/// evaluations of the same data source plugin (e.g., query parameters,
+/// timeout overrides, or authentication headers for HTTP sources).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+pub struct DataSourceOptions {
+    /// Optional timeout in milliseconds. `None` means use the plugin default.
+    pub timeout_ms: Option<u64>,
+
+    /// Optional authentication token for sources that require it (e.g., HTTP
+    /// APIs). The interpretation is plugin-specific.
+    pub auth_token: Option<std::sync::Arc<str>>,
+
+    /// Optional query string or filter expression. Interpretation is
+    /// plugin-specific (e.g., a SQL `WHERE` clause for `SQLite` sources).
+    pub query: Option<std::sync::Arc<str>>,
+}
+
+/// Error returned by [`DataSource::load`] when data cannot be fetched or parsed.
+#[derive(Debug, Error)]
+pub enum DataSourceError {
+    /// The URI scheme or format is not supported by this plugin.
+    #[error("unsupported URI scheme or format: {uri}")]
+    UnsupportedUri {
+        /// The URI that could not be resolved.
+        uri: String,
+    },
+
+    /// The data at the URI could not be parsed as the expected format.
+    #[error("data parse error for '{uri}': {message}")]
+    ParseError {
+        /// The URI of the source that failed to parse.
+        uri: String,
+        /// A human-readable description of the parse failure.
+        message: String,
+    },
+
+    /// An I/O error occurred while reading the data (e.g., file not found,
+    /// network timeout).
+    #[error("I/O error for '{uri}': {message}")]
+    IoError {
+        /// The URI that produced the I/O error.
+        uri: String,
+        /// Description of the I/O failure.
+        message: String,
+    },
+
+    /// Authentication failed for the data source.
+    #[error("authentication failed for '{uri}'")]
+    AuthError {
+        /// The URI for which authentication failed.
+        uri: String,
+    },
+}
+
+/// A plugin that fetches external data and returns a [`Value`] to the evaluator.
+///
+/// Implement this trait to add new data source types (e.g., a custom database
+/// connector, a REST API client, or a proprietary file format reader). Register
+/// your implementation with [`crate::PluginRegistry::register_data_source`].
+///
+/// ## Thread safety
+///
+/// All implementations must be `Send + Sync` because the plugin registry is
+/// constructed once at process start and shared across threads.
+///
+/// ## Example
+///
+/// ```rust
+/// use slideforge_plugin_api::{DataSource, DataSourceError, DataSourceOptions};
+/// use slideforge_types::Value;
+///
+/// struct NullSource;
+///
+/// impl DataSource for NullSource {
+///     fn id(&self) -> &str { "null" }
+///     fn load(&self, _uri: &str, _opts: &DataSourceOptions) -> Result<Value, DataSourceError> {
+///         Ok(Value::Null)
+///     }
+/// }
+/// ```
+pub trait DataSource: Send + Sync {
+    /// A unique identifier for this data source plugin.
+    ///
+    /// The identifier is used to look up the plugin in the [`crate::PluginRegistry`]
+    /// and to map `@data` URIs to the correct implementation. Convention:
+    /// lowercase ASCII with hyphens (e.g., `"json"`, `"csv"`, `"http"`).
+    fn id(&self) -> &str;
+
+    /// Load data from `uri` and return the result as a [`Value`].
+    ///
+    /// The `uri` is the raw string from the `@data` directive in the `.sf`
+    /// source file. Implementations should parse the URI, fetch the data,
+    /// and return the resolved value.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DataSourceError`] when the URI cannot be resolved, the data
+    /// cannot be parsed, or an I/O error occurs.
+    fn load(&self, uri: &str, opts: &DataSourceOptions) -> Result<Value, DataSourceError>;
+}
+
+#[cfg(test)]
+#[allow(clippy::unnecessary_literal_bound)]
+mod tests {
+    use super::*;
+
+    /// Compile-time assertion: `dyn DataSource` is `Send + Sync`.
+    fn assert_send_sync<T: Send + Sync + ?Sized>() {}
+
+    #[test]
+    fn test_bc_5_02_001_data_source_trait_is_send_sync() {
+        assert_send_sync::<dyn DataSource>();
+    }
+
+    #[test]
+    fn test_bc_5_02_001_data_source_options_default() {
+        let opts = DataSourceOptions::default();
+        assert!(opts.timeout_ms.is_none());
+        assert!(opts.auth_token.is_none());
+        assert!(opts.query.is_none());
+    }
+
+    #[test]
+    fn test_bc_5_02_001_data_source_error_unsupported_uri() {
+        let err = DataSourceError::UnsupportedUri {
+            uri: "unknown://foo".to_owned(),
+        };
+        assert!(err.to_string().contains("unsupported"));
+    }
+
+    #[test]
+    fn test_bc_5_02_001_data_source_error_parse_error() {
+        let err = DataSourceError::ParseError {
+            uri: "data.json".to_owned(),
+            message: "invalid JSON".to_owned(),
+        };
+        assert!(err.to_string().contains("parse error"));
+    }
+
+    #[test]
+    fn test_bc_5_02_001_data_source_error_io_error() {
+        let err = DataSourceError::IoError {
+            uri: "data.csv".to_owned(),
+            message: "file not found".to_owned(),
+        };
+        assert!(err.to_string().contains("I/O error"));
+    }
+
+    #[test]
+    fn test_bc_5_02_001_data_source_error_auth_error() {
+        let err = DataSourceError::AuthError {
+            uri: "https://api.example.com".to_owned(),
+        };
+        assert!(err.to_string().contains("authentication failed"));
+    }
+
+    struct StubDataSource;
+
+    impl DataSource for StubDataSource {
+        fn id(&self) -> &str {
+            "stub"
+        }
+
+        fn load(&self, _uri: &str, _opts: &DataSourceOptions) -> Result<Value, DataSourceError> {
+            Ok(Value::Null)
+        }
+    }
+
+    #[test]
+    fn test_bc_5_02_001_data_source_id_method() {
+        let src = StubDataSource;
+        assert_eq!(src.id(), "stub");
+    }
+
+    #[test]
+    fn test_bc_5_02_001_data_source_load_returns_ok() {
+        let src = StubDataSource;
+        let opts = DataSourceOptions::default();
+        let result = src.load("test://stub", &opts);
+        assert!(result.is_ok());
+    }
+}

@@ -7,6 +7,7 @@
 resolver = "3"
 members = [
     "crates/slideforge-types",
+    "crates/slideforge-plugin-api",
     "crates/slideforge",
     "crates/slideforge-cli",
     "crates/slideforge-syntax",
@@ -60,6 +61,7 @@ pretty_assertions = "1"
 
 # Internal workspace crates (referenced as path dependencies from each crate).
 slideforge-types = { path = "crates/slideforge-types", version = "0.1.0" }
+slideforge-plugin-api = { path = "crates/slideforge-plugin-api", version = "0.1.0" }
 slideforge = { path = "crates/slideforge", version = "0.1.0" }
 slideforge-syntax = { path = "crates/slideforge-syntax", version = "0.1.0" }
 slideforge-eval = { path = "crates/slideforge-eval", version = "0.1.0" }

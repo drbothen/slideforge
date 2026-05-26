@@ -469,6 +469,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "slideforge-plugin-api"
+version = "0.1.0"
+dependencies = [
+ "slideforge-types",
+ "thiserror",
+]
+
+[[package]]
 name = "slideforge-pptx"
 version = "0.1.0"
 dependencies = [
