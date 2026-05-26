@@ -392,7 +392,7 @@ mod tests {
 
     struct StubSlideType;
     impl SlideType for StubSlideType {
-        fn id(&self) -> &str {
+        fn id(&self) -> &'static str {
             "stub-slide"
         }
         fn required_fields(&self) -> &[crate::traits::FieldDef] {
@@ -401,7 +401,7 @@ mod tests {
         fn optional_fields(&self) -> &[crate::traits::FieldDef] {
             &[]
         }
-        fn layout_name(&self) -> &str {
+        fn layout_name(&self) -> &'static str {
             "blank"
         }
         fn lay_out(

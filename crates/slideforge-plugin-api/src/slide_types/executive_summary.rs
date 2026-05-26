@@ -1,0 +1,121 @@
+//! The `executive-summary` slide type — a high-level executive overview slide.
+//!
+//! An `executive-summary` slide distills the most critical information for
+//! executive stakeholders. It has a required `title` and `summary`, with an
+//! optional bullet list for supporting points.
+//!
+//! Maps to the `"Title and Content"` PPTX layout.
+
+use std::sync::Arc;
+
+use slideforge_types::{Brand, LaidOutSlide, SLIDE_HEIGHT, SLIDE_WIDTH, Slide};
+
+use crate::traits::{Canvas, FieldDef, LayoutError, SlideType};
+
+/// The built-in `executive-summary` slide type.
+///
+/// Required fields: `title`, `summary`.
+/// Optional fields: `bullets`, `notes`, `footer`, `logo`, `tags`.
+///
+/// Maps to the `"Title and Content"` OOXML layout.
+#[derive(Debug)]
+pub struct ExecutiveSummarySlideType {
+    required: Vec<FieldDef>,
+    optional: Vec<FieldDef>,
+}
+
+impl ExecutiveSummarySlideType {
+    /// Construct a new `ExecutiveSummarySlideType` with its canonical field definitions.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            required: vec![
+                FieldDef {
+                    name: Arc::from("title"),
+                    description: Arc::from("The slide title (e.g., \"Executive Summary\")."),
+                    required: true,
+                    default_value: None,
+                },
+                FieldDef {
+                    name: Arc::from("summary"),
+                    description: Arc::from("The one-paragraph executive summary (3-5 sentences)."),
+                    required: true,
+                    default_value: None,
+                },
+            ],
+            optional: vec![
+                FieldDef {
+                    name: Arc::from("bullets"),
+                    description: Arc::from(
+                        "Supporting bullet points that elaborate on the summary.",
+                    ),
+                    required: false,
+                    default_value: None,
+                },
+                FieldDef {
+                    name: Arc::from("notes"),
+                    description: Arc::from("Presenter notes for this slide."),
+                    required: false,
+                    default_value: None,
+                },
+                FieldDef {
+                    name: Arc::from("footer"),
+                    description: Arc::from("Override footer text for this slide."),
+                    required: false,
+                    default_value: None,
+                },
+                FieldDef {
+                    name: Arc::from("logo"),
+                    description: Arc::from("Override the brand logo for this slide."),
+                    required: false,
+                    default_value: None,
+                },
+                FieldDef {
+                    name: Arc::from("tags"),
+                    description: Arc::from("User-defined tags for filtering and grouping."),
+                    required: false,
+                    default_value: None,
+                },
+            ],
+        }
+    }
+}
+
+impl Default for ExecutiveSummarySlideType {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SlideType for ExecutiveSummarySlideType {
+    fn id(&self) -> &'static str {
+        "executive-summary"
+    }
+
+    fn required_fields(&self) -> &[FieldDef] {
+        &self.required
+    }
+
+    fn optional_fields(&self) -> &[FieldDef] {
+        &self.optional
+    }
+
+    fn layout_name(&self) -> &'static str {
+        "Title and Content"
+    }
+
+    fn lay_out(
+        &self,
+        _slide: &Slide,
+        _brand: &Brand,
+        _canvas: Canvas,
+    ) -> Result<LaidOutSlide, LayoutError> {
+        // Stub: returns an empty LaidOutSlide. Full geometric layout in Phase 3.
+        Ok(LaidOutSlide {
+            width: SLIDE_WIDTH,
+            height: SLIDE_HEIGHT,
+            elements: vec![],
+            slide_index: 0,
+        })
+    }
+}

@@ -32,7 +32,7 @@ impl Default for BlankSlideType {
 }
 
 impl SlideType for BlankSlideType {
-    fn id(&self) -> &str {
+    fn id(&self) -> &'static str {
         "blank"
     }
 
@@ -44,7 +44,7 @@ impl SlideType for BlankSlideType {
         &[]
     }
 
-    fn layout_name(&self) -> &str {
+    fn layout_name(&self) -> &'static str {
         "Blank"
     }
 

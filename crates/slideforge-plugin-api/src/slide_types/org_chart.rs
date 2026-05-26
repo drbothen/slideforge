@@ -1,50 +1,54 @@
-//! The `content` slide type — a general-purpose body slide.
+//! The `org-chart` slide type — an organizational chart slide.
 //!
-//! A `content` slide has a required `title` and a flexible body area that
-//! can hold bullets, paragraphs, or mixed inline content. This is the most
-//! common slide type in a presentation.
+//! An `org-chart` slide displays a hierarchical organization chart.
+//! Nodes can be provided as a structured list or as Mermaid diagram syntax
+//! via the body.
+//!
+//! Maps to the `"Title and Content"` PPTX layout.
 
 use std::sync::Arc;
 
-use slideforge_types::{Brand, LaidOutSlide, SLIDE_HEIGHT, SLIDE_WIDTH, Slide, Value};
+use slideforge_types::{Brand, LaidOutSlide, SLIDE_HEIGHT, SLIDE_WIDTH, Slide};
 
 use crate::traits::{Canvas, FieldDef, LayoutError, SlideType};
 
-/// The built-in `content` slide type.
+/// The built-in `org-chart` slide type.
 ///
 /// Required fields: `title`.
-/// Optional fields: `layout`, `background`, `footer`, `notes`.
+/// Optional fields: `nodes`, `notes`, `footer`, `logo`, `tags`.
 ///
 /// Maps to the `"Title and Content"` OOXML layout.
 #[derive(Debug)]
-pub struct ContentSlideType {
+pub struct OrgChartSlideType {
     required: Vec<FieldDef>,
     optional: Vec<FieldDef>,
 }
 
-impl ContentSlideType {
-    /// Construct a new `ContentSlideType` with its canonical field definitions.
+impl OrgChartSlideType {
+    /// Construct a new `OrgChartSlideType` with its canonical field definitions.
     #[must_use]
     pub fn new() -> Self {
         Self {
             required: vec![FieldDef {
                 name: Arc::from("title"),
-                description: Arc::from("The slide title shown in the title area."),
+                description: Arc::from("The slide title (e.g., \"Organizational Structure\")."),
                 required: true,
                 default_value: None,
             }],
             optional: vec![
                 FieldDef {
-                    name: Arc::from("layout"),
+                    name: Arc::from("nodes"),
                     description: Arc::from(
-                        "Content layout variant: one-col (default), two-col, three-col.",
+                        "Hierarchical node definitions for the org chart. Each node may \
+                         include name, title, image, and parent reference. Can be provided \
+                         as a Mermaid diagram in the body instead.",
                     ),
                     required: false,
-                    default_value: Some(Value::Str(Arc::from("one-col"))),
+                    default_value: None,
                 },
                 FieldDef {
-                    name: Arc::from("background"),
-                    description: Arc::from("Override background color for this slide."),
+                    name: Arc::from("notes"),
+                    description: Arc::from("Presenter notes for this slide."),
                     required: false,
                     default_value: None,
                 },
@@ -55,8 +59,14 @@ impl ContentSlideType {
                     default_value: None,
                 },
                 FieldDef {
-                    name: Arc::from("notes"),
-                    description: Arc::from("Presenter notes for this slide."),
+                    name: Arc::from("logo"),
+                    description: Arc::from("Override the brand logo for this slide."),
+                    required: false,
+                    default_value: None,
+                },
+                FieldDef {
+                    name: Arc::from("tags"),
+                    description: Arc::from("User-defined tags for filtering and grouping."),
                     required: false,
                     default_value: None,
                 },
@@ -65,15 +75,15 @@ impl ContentSlideType {
     }
 }
 
-impl Default for ContentSlideType {
+impl Default for OrgChartSlideType {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl SlideType for ContentSlideType {
+impl SlideType for OrgChartSlideType {
     fn id(&self) -> &'static str {
-        "content"
+        "org-chart"
     }
 
     fn required_fields(&self) -> &[FieldDef] {
@@ -94,7 +104,7 @@ impl SlideType for ContentSlideType {
         _brand: &Brand,
         _canvas: Canvas,
     ) -> Result<LaidOutSlide, LayoutError> {
-        // Stub: returns an empty LaidOutSlide. Full implementation in Phase 3.
+        // Stub: returns an empty LaidOutSlide. Full geometric layout in Phase 3.
         Ok(LaidOutSlide {
             width: SLIDE_WIDTH,
             height: SLIDE_HEIGHT,

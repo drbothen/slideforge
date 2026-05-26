@@ -23,14 +23,38 @@
 
 use std::sync::LazyLock;
 
+pub mod agenda;
+pub mod bio;
 pub mod blank;
+pub mod chart;
+pub mod closing;
+pub mod code_sample;
+pub mod comparison;
 pub mod content;
+pub mod diagram;
+pub mod executive_summary;
+pub mod financials;
+pub mod image;
+pub mod kpi_dashboard;
+pub mod matrix;
+pub mod org_chart;
+pub mod problem_statement;
+pub mod process_flow;
+pub mod quote;
+pub mod recommendation;
 pub mod registry;
+pub mod risk_register;
+pub mod roadmap;
+pub mod screenshot;
+pub mod section_break;
 pub mod stat_callout;
+pub mod survey_results;
+pub mod team;
+pub mod timeline;
 pub mod title;
-// NOTE: The implementer will add the remaining 27 type modules here.
-// Do NOT add todo!()-body modules — add them only when the implementation
-// is complete and tests pass.
+pub mod toc;
+pub mod two_col;
+pub mod video;
 
 pub use registry::{SlideTypeRegistry, validate_fields};
 

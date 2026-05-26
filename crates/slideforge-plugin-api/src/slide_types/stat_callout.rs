@@ -88,7 +88,7 @@ impl Default for StatCalloutSlideType {
 }
 
 impl SlideType for StatCalloutSlideType {
-    fn id(&self) -> &str {
+    fn id(&self) -> &'static str {
         "stat-callout"
     }
 
@@ -100,7 +100,7 @@ impl SlideType for StatCalloutSlideType {
         &self.optional
     }
 
-    fn layout_name(&self) -> &str {
+    fn layout_name(&self) -> &'static str {
         "Two Content"
     }
 

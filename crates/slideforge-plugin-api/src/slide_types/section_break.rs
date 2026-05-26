@@ -1,50 +1,50 @@
-//! The `content` slide type — a general-purpose body slide.
+//! The `section-break` slide type — a section divider slide.
 //!
-//! A `content` slide has a required `title` and a flexible body area that
-//! can hold bullets, paragraphs, or mixed inline content. This is the most
-//! common slide type in a presentation.
+//! A `section-break` slide signals the start of a new major section in the
+//! presentation. It has a required `title` and an optional `subtitle`.
+//! It maps to the `"Section Header"` PPTX layout.
 
 use std::sync::Arc;
 
-use slideforge_types::{Brand, LaidOutSlide, SLIDE_HEIGHT, SLIDE_WIDTH, Slide, Value};
+use slideforge_types::{Brand, LaidOutSlide, SLIDE_HEIGHT, SLIDE_WIDTH, Slide};
 
 use crate::traits::{Canvas, FieldDef, LayoutError, SlideType};
 
-/// The built-in `content` slide type.
+/// The built-in `section-break` slide type.
 ///
 /// Required fields: `title`.
-/// Optional fields: `layout`, `background`, `footer`, `notes`.
+/// Optional fields: `subtitle`, `notes`, `footer`, `logo`.
 ///
-/// Maps to the `"Title and Content"` OOXML layout.
+/// Maps to the `"Section Header"` OOXML layout.
 #[derive(Debug)]
-pub struct ContentSlideType {
+pub struct SectionBreakSlideType {
     required: Vec<FieldDef>,
     optional: Vec<FieldDef>,
 }
 
-impl ContentSlideType {
-    /// Construct a new `ContentSlideType` with its canonical field definitions.
+impl SectionBreakSlideType {
+    /// Construct a new `SectionBreakSlideType` with its canonical field definitions.
     #[must_use]
     pub fn new() -> Self {
         Self {
             required: vec![FieldDef {
                 name: Arc::from("title"),
-                description: Arc::from("The slide title shown in the title area."),
+                description: Arc::from("The section title displayed prominently on the divider."),
                 required: true,
                 default_value: None,
             }],
             optional: vec![
                 FieldDef {
-                    name: Arc::from("layout"),
+                    name: Arc::from("subtitle"),
                     description: Arc::from(
-                        "Content layout variant: one-col (default), two-col, three-col.",
+                        "An optional subtitle or brief description of the section.",
                     ),
                     required: false,
-                    default_value: Some(Value::Str(Arc::from("one-col"))),
+                    default_value: None,
                 },
                 FieldDef {
-                    name: Arc::from("background"),
-                    description: Arc::from("Override background color for this slide."),
+                    name: Arc::from("notes"),
+                    description: Arc::from("Presenter notes for this slide."),
                     required: false,
                     default_value: None,
                 },
@@ -55,8 +55,14 @@ impl ContentSlideType {
                     default_value: None,
                 },
                 FieldDef {
-                    name: Arc::from("notes"),
-                    description: Arc::from("Presenter notes for this slide."),
+                    name: Arc::from("logo"),
+                    description: Arc::from("Override the brand logo for this slide."),
+                    required: false,
+                    default_value: None,
+                },
+                FieldDef {
+                    name: Arc::from("tags"),
+                    description: Arc::from("User-defined tags for filtering and grouping."),
                     required: false,
                     default_value: None,
                 },
@@ -65,15 +71,15 @@ impl ContentSlideType {
     }
 }
 
-impl Default for ContentSlideType {
+impl Default for SectionBreakSlideType {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl SlideType for ContentSlideType {
+impl SlideType for SectionBreakSlideType {
     fn id(&self) -> &'static str {
-        "content"
+        "section-break"
     }
 
     fn required_fields(&self) -> &[FieldDef] {
@@ -85,7 +91,7 @@ impl SlideType for ContentSlideType {
     }
 
     fn layout_name(&self) -> &'static str {
-        "Title and Content"
+        "Section Header"
     }
 
     fn lay_out(
@@ -94,7 +100,7 @@ impl SlideType for ContentSlideType {
         _brand: &Brand,
         _canvas: Canvas,
     ) -> Result<LaidOutSlide, LayoutError> {
-        // Stub: returns an empty LaidOutSlide. Full implementation in Phase 3.
+        // Stub: returns an empty LaidOutSlide. Full geometric layout in Phase 3.
         Ok(LaidOutSlide {
             width: SLIDE_WIDTH,
             height: SLIDE_HEIGHT,

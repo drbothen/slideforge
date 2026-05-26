@@ -24,14 +24,22 @@ use std::sync::Arc;
 
 use slideforge_types::Slide;
 
-use crate::traits::{Diagnostic, SlideType};
-// DiagnosticSeverity and FieldDef are used in validate_fields (todo!) and known_field_names.
-#[allow(unused_imports)]
-use crate::traits::{DiagnosticSeverity, FieldDef};
+use crate::traits::{Diagnostic, DiagnosticSeverity, SlideType};
+use slideforge_types::{FieldValue, Value};
 
 use super::{
-    blank::BlankSlideType, content::ContentSlideType, stat_callout::StatCalloutSlideType,
-    title::TitleSlideType,
+    agenda::AgendaSlideType, bio::BioSlideType, blank::BlankSlideType, chart::ChartSlideType,
+    closing::ClosingSlideType, code_sample::CodeSampleSlideType, comparison::ComparisonSlideType,
+    content::ContentSlideType, diagram::DiagramSlideType,
+    executive_summary::ExecutiveSummarySlideType, financials::FinancialsSlideType,
+    image::ImageSlideType, kpi_dashboard::KpiDashboardSlideType, matrix::MatrixSlideType,
+    org_chart::OrgChartSlideType, problem_statement::ProblemStatementSlideType,
+    process_flow::ProcessFlowSlideType, quote::QuoteSlideType,
+    recommendation::RecommendationSlideType, risk_register::RiskRegisterSlideType,
+    roadmap::RoadmapSlideType, screenshot::ScreenshotSlideType,
+    section_break::SectionBreakSlideType, stat_callout::StatCalloutSlideType,
+    survey_results::SurveyResultsSlideType, team::TeamSlideType, timeline::TimelineSlideType,
+    title::TitleSlideType, toc::TocSlideType, two_col::TwoColSlideType, video::VideoSlideType,
 };
 
 /// The runtime registry of all registered slide types.
@@ -94,8 +102,23 @@ impl SlideTypeRegistry {
     /// // "flibbertigibbet" → None
     /// ```
     #[must_use]
-    pub fn suggest(&self, _unknown: &str) -> Option<&str> {
-        todo!("implement Levenshtein suggestion using strsim::levenshtein — STORY-003 implementer task")
+    pub fn suggest(&self, unknown: &str) -> Option<&str> {
+        let mut best: Option<(&str, usize)> = None;
+        for kw in &self.keywords {
+            let dist = strsim::levenshtein(unknown, kw.as_ref());
+            if dist <= 3 {
+                let is_better = match best {
+                    None => true,
+                    Some((best_kw, best_dist)) => {
+                        dist < best_dist || (dist == best_dist && kw.as_ref() < best_kw)
+                    },
+                };
+                if is_better {
+                    best = Some((kw.as_ref(), dist));
+                }
+            }
+        }
+        best.map(|(kw, _)| kw)
     }
 
     /// Return the complete list of registered type keywords.
@@ -108,15 +131,52 @@ impl SlideTypeRegistry {
 }
 
 impl Default for SlideTypeRegistry {
-    /// Create a registry pre-populated with the 4 representative built-in types.
+    /// Create a registry pre-populated with all 31 built-in slide types.
     ///
-    /// The implementer will add the remaining 27 types as part of STORY-003.
+    /// Registration order matches the canonical slide type table. Types are
+    /// accessible by keyword via [`Self::lookup_by_keyword`].
     fn default() -> Self {
         let mut r = Self::new();
+        // Core presentation structure
         r.register(Box::new(TitleSlideType::new()));
+        r.register(Box::new(SectionBreakSlideType::new()));
         r.register(Box::new(ContentSlideType::new()));
+        r.register(Box::new(TwoColSlideType::new()));
+        r.register(Box::new(ImageSlideType::new()));
         r.register(Box::new(BlankSlideType::new()));
+        // Navigation and overview
+        r.register(Box::new(AgendaSlideType::new()));
+        r.register(Box::new(TocSlideType::new()));
+        // People and quotes
+        r.register(Box::new(QuoteSlideType::new()));
+        r.register(Box::new(TeamSlideType::new()));
+        r.register(Box::new(BioSlideType::new()));
+        // Analysis and strategy
+        r.register(Box::new(ExecutiveSummarySlideType::new()));
+        r.register(Box::new(ProblemStatementSlideType::new()));
+        r.register(Box::new(RecommendationSlideType::new()));
+        r.register(Box::new(RiskRegisterSlideType::new()));
+        r.register(Box::new(TimelineSlideType::new()));
         r.register(Box::new(StatCalloutSlideType::new()));
+        r.register(Box::new(ComparisonSlideType::new()));
+        r.register(Box::new(ProcessFlowSlideType::new()));
+        r.register(Box::new(MatrixSlideType::new()));
+        // Financial and metrics
+        r.register(Box::new(FinancialsSlideType::new()));
+        r.register(Box::new(KpiDashboardSlideType::new()));
+        // Data visualization
+        r.register(Box::new(ChartSlideType::new()));
+        r.register(Box::new(DiagramSlideType::new()));
+        // Media and technical
+        r.register(Box::new(ScreenshotSlideType::new()));
+        r.register(Box::new(CodeSampleSlideType::new()));
+        r.register(Box::new(VideoSlideType::new()));
+        // Research and organizational
+        r.register(Box::new(SurveyResultsSlideType::new()));
+        r.register(Box::new(OrgChartSlideType::new()));
+        r.register(Box::new(RoadmapSlideType::new()));
+        // Closing
+        r.register(Box::new(ClosingSlideType::new()));
         r
     }
 }
@@ -140,8 +200,66 @@ impl Default for SlideTypeRegistry {
 /// * `slide` — The semantic slide to validate.
 /// * `slide_type` — The registered slide type to validate against.
 #[must_use]
-pub fn validate_fields(_slide: &Slide, _slide_type: &dyn SlideType) -> Vec<Diagnostic> {
-    todo!("implement validate_fields — STORY-003 implementer task")
+pub fn validate_fields(slide: &Slide, slide_type: &dyn SlideType) -> Vec<Diagnostic> {
+    let mut diags = Vec::new();
+    let known = known_field_names(slide_type);
+
+    // Check all required fields: missing → E-VAL-101, empty string → E-VAL-102.
+    for field_def in slide_type.required_fields() {
+        match slide.fields.get(field_def.name.as_ref()) {
+            None => {
+                let slide_type_id = &slide.slide_type;
+                let field_name = &field_def.name;
+                diags.push(Diagnostic {
+                    severity: DiagnosticSeverity::Error,
+                    code: Arc::from("E-VAL-101"),
+                    message: Arc::from(format!(
+                        "slide type '{slide_type_id}': required field '{field_name}' is missing"
+                    )),
+                    span: slide.source_span.clone(),
+                    hint: Some(Arc::from(format!(
+                        "add '{field_name}: <value>' to this slide block"
+                    ))),
+                });
+            },
+            Some(FieldValue::Literal(Value::Str(s))) if s.is_empty() => {
+                let slide_type_id = &slide.slide_type;
+                let field_name = &field_def.name;
+                diags.push(Diagnostic {
+                    severity: DiagnosticSeverity::Error,
+                    code: Arc::from("E-VAL-102"),
+                    message: Arc::from(format!(
+                        "slide type '{slide_type_id}': required field '{field_name}' must not be empty"
+                    )),
+                    span: slide.source_span.clone(),
+                    hint: Some(Arc::from(format!(
+                        "provide a non-empty value for '{field_name}'"
+                    ))),
+                });
+            },
+            _ => {},
+        }
+    }
+
+    // Check for unknown fields: not in required ∪ optional → W-VAL-103.
+    let slide_type_id = &slide.slide_type;
+    for key in slide.fields.keys() {
+        if !known.contains(key.as_ref()) {
+            diags.push(Diagnostic {
+                severity: DiagnosticSeverity::Warning,
+                code: Arc::from("W-VAL-103"),
+                message: Arc::from(format!(
+                    "slide type '{slide_type_id}': unknown field '{key}'"
+                )),
+                span: slide.source_span.clone(),
+                hint: Some(Arc::from(format!(
+                    "remove '{key}' or check the field name for typos"
+                ))),
+            });
+        }
+    }
+
+    diags
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -178,10 +296,7 @@ mod tests {
     fn make_slide(slide_type: &str, fields: Vec<(&str, &str)>) -> Slide {
         let mut field_map = OrderedMap::new();
         for (k, v) in fields {
-            field_map.insert(
-                Arc::from(k),
-                FieldValue::Literal(Value::Str(Arc::from(v))),
-            );
+            field_map.insert(Arc::from(k), FieldValue::Literal(Value::Str(Arc::from(v))));
         }
         Slide {
             slide_type: Arc::from(slide_type),
@@ -304,7 +419,11 @@ mod tests {
     #[test]
     fn test_bc_1_03_004_all_keywords_contains_registered_types() {
         let reg = SlideTypeRegistry::default();
-        let keywords: Vec<&str> = reg.all_keywords().iter().map(|s| s.as_ref()).collect();
+        let keywords: Vec<&str> = reg
+            .all_keywords()
+            .iter()
+            .map(std::convert::AsRef::as_ref)
+            .collect();
         assert!(keywords.contains(&"title"));
         assert!(keywords.contains(&"content"));
         assert!(keywords.contains(&"blank"));
@@ -328,9 +447,11 @@ mod tests {
             !diagnostics.is_empty(),
             "expected at least one diagnostic for missing required field"
         );
-        assert!(diagnostics
-            .iter()
-            .any(|d| d.severity == DiagnosticSeverity::Error));
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.severity == DiagnosticSeverity::Error)
+        );
     }
 
     // ── AC-006: validate_fields returns ALL errors, not just first ───────────
@@ -408,7 +529,11 @@ mod tests {
     #[test]
     fn test_bc_1_03_009_content_type_required_field_is_title() {
         let t = ContentSlideType::new();
-        let req: Vec<&str> = t.required_fields().iter().map(|f| f.name.as_ref()).collect();
+        let req: Vec<&str> = t
+            .required_fields()
+            .iter()
+            .map(|f| f.name.as_ref())
+            .collect();
         assert!(
             req.contains(&"title"),
             "content type must have 'title' as a required field"
@@ -418,11 +543,15 @@ mod tests {
     // ── AC-010: stat_callout has 4 required fields ───────────────────────────
 
     /// Exercises BC-1.03.010: `stat-callout` has exactly 4 required fields
-    /// with the canonical names stat_1, label_1, stat_2, label_2.
+    /// with the canonical names `stat_1`, `label_1`, `stat_2`, `label_2`.
     #[test]
     fn test_bc_1_03_010_stat_callout_required_field_names() {
         let t = StatCalloutSlideType::new();
-        let req: Vec<&str> = t.required_fields().iter().map(|f| f.name.as_ref()).collect();
+        let req: Vec<&str> = t
+            .required_fields()
+            .iter()
+            .map(|f| f.name.as_ref())
+            .collect();
         assert_eq!(req.len(), 4);
         assert!(req.contains(&"stat_1"));
         assert!(req.contains(&"label_1"));
@@ -436,8 +565,16 @@ mod tests {
     #[test]
     fn test_bc_1_03_011_title_type_has_only_title_required() {
         let t = TitleSlideType::new();
-        let req: Vec<&str> = t.required_fields().iter().map(|f| f.name.as_ref()).collect();
-        assert_eq!(req.len(), 1, "title type must have exactly 1 required field");
+        let req: Vec<&str> = t
+            .required_fields()
+            .iter()
+            .map(|f| f.name.as_ref())
+            .collect();
+        assert_eq!(
+            req.len(),
+            1,
+            "title type must have exactly 1 required field"
+        );
         assert_eq!(req[0], "title");
     }
 
@@ -454,7 +591,7 @@ mod tests {
         let brand = make_stub_brand();
         let canvas = Canvas::default();
         let result = t.lay_out(&slide, &brand, canvas);
-        assert!(result.is_ok(), "lay_out must return Ok, got {:?}", result);
+        assert!(result.is_ok(), "lay_out must return Ok, got {result:?}");
     }
 
     /// Exercises BC-1.03.012: `lay_out` returns `Ok` for `blank` (no required fields).

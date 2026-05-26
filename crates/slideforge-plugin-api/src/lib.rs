@@ -52,7 +52,7 @@ pub mod traits;
 // Consumers can write `use slideforge_plugin_api::DataSource;` without
 // the module path.
 pub use registry::PluginRegistry;
-pub use slide_types::{SlideTypeRegistry, validate_fields, SLIDE_TYPE_REGISTRY};
+pub use slide_types::{SLIDE_TYPE_REGISTRY, SlideTypeRegistry, validate_fields};
 pub use traits::{
     BrandError, BrandProvider, BrandSource, Canvas, ChartError, ChartRenderer, DataSource,
     DataSourceError, DataSourceOptions, Diagnostic, DiagnosticSeverity, DiagramError,
