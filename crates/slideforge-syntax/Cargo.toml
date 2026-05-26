@@ -16,6 +16,9 @@ thiserror = { workspace = true }
 miette = { workspace = true }
 ordered-float = { workspace = true }
 phf = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 
 [dev-dependencies]
 insta = { workspace = true }
+serde_json = { workspace = true }

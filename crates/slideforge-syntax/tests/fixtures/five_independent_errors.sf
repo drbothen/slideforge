@@ -1,0 +1,16 @@
+slideforge_version "1"
+slide title:
+  title "Good"
+   indent_err_1 "error 1"
+slide content:
+  body "Good"
+   indent_err_2 "error 2"
+slide content:
+  title "Good"
+   indent_err_3 "error 3"
+slide content:
+  footer "Good"
+   indent_err_4 "error 4"
+slide content:
+  notes "Good"
+   indent_err_5 "error 5"

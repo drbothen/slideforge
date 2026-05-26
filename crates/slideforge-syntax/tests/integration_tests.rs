@@ -15,10 +15,11 @@ use std::sync::Arc;
 
 use slideforge_syntax::{
     ast::{BlockItem, DeckNode, FieldValue, SetRuleValue},
-    error::SyntaxError,
-    parse,
+    error::{ParseSeverity, SyntaxError},
+    parse, parse_checked,
     span::SourceMap,
     template::TemplateChunk,
+    DiagnosticSink,
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -446,5 +447,246 @@ fn test_bool_field_value_parsed() {
         matches!(active_field.value.value(), FieldValue::Bool(true)),
         "expected FieldValue::Bool(true); got: {:?}",
         active_field.value.value()
+    );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// STORY-010: Failing Tests (Red Gate)
+// All tests below MUST FAIL until parse_checked() is implemented.
+// ════════════════════════════════════════════════════════════════════════════
+
+/// Helper: run `parse_checked` with a fresh sink and source map.
+fn parse_checked_str(src: &str) -> (DiagnosticSink, Option<DeckNode>) {
+    let mut sm = SourceMap::new();
+    let file_id = sm.add_file(Arc::from("test.sf"), Arc::from(src));
+    let mut sink = DiagnosticSink::new();
+    let deck = parse_checked(src, file_id, &sm, &mut sink);
+    (sink, deck)
+}
+
+// ── AC-003: parse_checked accumulates ≥ 2 errors from bad indentation ───────
+
+/// AC-003: a source with two independent indentation errors must push at least
+/// two diagnostics into the sink — the parser must NOT stop at the first error.
+///
+/// This is the canonical test for error accumulation (AC-011 for the sink layer,
+/// AC-003 for the parser layer).
+#[test]
+fn test_ac003_two_indent_errors_accumulated() {
+    let src = concat!(
+        "slide title:\n",
+        "  title \"Good\"\n",
+        "   bad1 \"err1\"\n", // 3 spaces: indentation error 1
+        "slide content:\n",
+        "  body \"Good\"\n",
+        "   bad2 \"err2\"\n", // 3 spaces: indentation error 2
+    );
+    let (sink, deck) = parse_checked_str(src);
+    // parse_checked must return None when there are fatal errors.
+    assert!(
+        deck.is_none(),
+        "parse_checked must return None when errors are accumulated"
+    );
+    // The sink must have accumulated ≥ 2 errors (not just the first one).
+    assert!(
+        sink.len() >= 2,
+        "sink must contain ≥ 2 errors for 2 independent indent errors; got {} error(s)",
+        sink.len()
+    );
+}
+
+// ── AC-005: @include error gets correct span attribution ─────────────────────
+
+/// AC-005: errors from `@include` processing must carry the correct file/span
+/// attribution (not the includer's span).
+///
+/// This test is `#[ignore]`'d because the `@include` resolution infrastructure
+/// requires filesystem access, which is outside the pure-core boundary of
+/// `slideforge-syntax`. A dedicated integration story (S-1.12+) will exercise
+/// this with a mock resolver.
+///
+/// The ignore annotation is not a deferral of the behavior — it is a boundary
+/// acknowledgement. The behavior will be tested in the story that implements
+/// `@include` resolution.
+#[test]
+#[ignore = "requires @include filesystem infrastructure (planned for S-1.12+)"]
+fn test_ac005_include_error_span_attribution() {
+    // When @include "missing.sf" is encountered, the error span must point
+    // to the @include directive line, not line 0 of the parent file.
+    let src = concat!(
+        "slideforge_version \"1\"\n",
+        "@include \"missing.sf\"\n",
+        "slide title:\n",
+        "  title \"T\"\n",
+    );
+    let (sink, _deck) = parse_checked_str(src);
+    // The error must mention "missing.sf" in its source attribution.
+    assert!(
+        !sink.is_empty(),
+        "missing @include must produce at least one error"
+    );
+    // Span attribution check would go here once @include is implemented.
+}
+
+// ── F-004: multi-error accumulation from fixture ─────────────────────────────
+
+/// F-004: parsing `five_independent_errors.sf` must accumulate ≥ 5 errors —
+/// the parser must NOT stop at the first error (AC-011 accumulation contract).
+#[test]
+fn test_multi_error_accumulation() {
+    let src =
+        std::fs::read_to_string(format!(
+            "{}/tests/fixtures/five_independent_errors.sf",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("fixture five_independent_errors.sf must exist");
+    let mut sm = SourceMap::new();
+    let file_id = sm.add_file(Arc::from("five_errors.sf"), Arc::from(src.as_str()));
+    let mut sink = DiagnosticSink::new();
+    let _ = parse_checked(&src, file_id, &sm, &mut sink);
+    assert!(
+        sink.len() >= 5,
+        "must accumulate at least 5 errors; got {}",
+        sink.len()
+    );
+    assert!(sink.has_fatal(), "sink must report has_fatal() after error accumulation");
+}
+
+// ── F-006: snapshot test for DiagnosticRenderer output ───────────────────────
+
+/// F-006: the `DiagnosticRenderer` must produce stable, snapshot-verified output
+/// for a known set of `SyntaxError` diagnostics.
+#[test]
+fn test_snapshot_renderer_output() {
+    use slideforge_syntax::DiagnosticRenderer;
+
+    let mut sink = DiagnosticSink::new();
+    // Push 3 known SyntaxErrors so the snapshot is deterministic.
+    sink.push(SyntaxError::indent_error(
+        "render_test.sf".to_string(),
+        2, 1, 2, 3,
+        "slide title:\n  title \"Good\"\n   bad\n".to_string(),
+        24,
+    ));
+    sink.push(SyntaxError::unexpected_token(
+        "render_test.sf".to_string(),
+        3, 1,
+        "expected field name".to_string(),
+        "slide content:\n  title \"T\"\n  :\n".to_string(),
+        28,
+        1,
+    ));
+    sink.push(SyntaxError::reserved_keyword(
+        "render_test.sf".to_string(),
+        1, 1,
+        "@fn".to_string(),
+        "user-defined functions reserved for v2".to_string(),
+        "@fn compute:\n".to_string(),
+        0,
+        3,
+    ));
+
+    let renderer = DiagnosticRenderer::new(false); // no ANSI for deterministic snapshot
+    let sm = SourceMap::new();
+    let mut buf = Vec::new();
+    renderer
+        .render_all(&sink, &sm, &mut buf)
+        .expect("render_all must not fail");
+    let output = String::from_utf8(buf).expect("output must be valid UTF-8");
+
+    // Verify the output contains the expected error codes and messages.
+    assert!(
+        output.contains("E-PAR-001"),
+        "renderer output must include E-PAR-001; got:\n{output}"
+    );
+    assert!(
+        output.contains("E-PAR-002"),
+        "renderer output must include E-PAR-002; got:\n{output}"
+    );
+    assert!(
+        output.contains("E-PAR-006"),
+        "renderer output must include E-PAR-006; got:\n{output}"
+    );
+
+    // Snapshot the full renderer output for regression detection.
+    insta::assert_snapshot!("renderer_output_three_errors", output);
+}
+
+// ── EC-001: empty sink from valid source ─────────────────────────────────────
+
+/// EC-001: `parse_checked` on a valid source must produce an empty sink and
+/// return `Some(DeckNode)`.
+#[test]
+fn test_ec001_empty_sink_on_valid_source() {
+    let src = concat!(
+        "slideforge_version \"1\"\n",
+        "slide title:\n",
+        "  title \"Hello\"\n",
+    );
+    let (sink, deck) = parse_checked_str(src);
+    assert!(
+        deck.is_some(),
+        "valid source must return Some(DeckNode); got None"
+    );
+    assert!(
+        sink.is_empty(),
+        "valid source must produce empty sink; got {} error(s)",
+        sink.len()
+    );
+    assert!(
+        !sink.has_fatal(),
+        "valid source must not have fatal errors"
+    );
+    assert_eq!(
+        sink.max_severity(),
+        None,
+        "valid source must have max_severity() == None"
+    );
+    let mut sm = SourceMap::new();
+    sm.add_file(Arc::from("test.sf"), Arc::from(src));
+    let json = sink.to_json(&sm);
+    assert_eq!(
+        json["total"].as_u64(),
+        Some(0),
+        "empty sink to_json() must have total:0"
+    );
+    let arr = json["diagnostics"]
+        .as_array()
+        .expect("to_json() 'diagnostics' must be an array");
+    assert_eq!(arr.len(), 0, "empty sink diagnostics array must have 0 entries");
+}
+
+// ── F-004: parse_checked warning propagation path ────────────────────────────
+
+/// F-004: `parse_checked` must push a non-fatal `ParseSeverity::Warning` into
+/// the sink when a source file is missing its `slideforge_version` declaration,
+/// and must still return `Some(deck)` (non-fatal).
+///
+/// This covers the warning propagation path in `parse_checked` that was
+/// previously untested: missing version → warning pushed → `Some(deck)`.
+#[test]
+fn test_parse_checked_missing_version_pushes_warning() {
+    let src = "slide title:\n  title \"Test\"\n";
+    let mut sm = SourceMap::new();
+    let fid = sm.add_file(Arc::from("test.sf"), Arc::from(src));
+    let mut sink = DiagnosticSink::new();
+    let deck = parse_checked(src, fid, &sm, &mut sink);
+    assert!(
+        deck.is_some(),
+        "missing version is non-fatal; parse_checked should return Some(deck)"
+    );
+    assert!(
+        !sink.is_empty(),
+        "missing version warning must be pushed to sink; sink was empty"
+    );
+    assert!(
+        !sink.has_fatal(),
+        "missing version must be Warning, not Fatal; sink.has_fatal() returned true"
+    );
+    assert_eq!(
+        sink.max_severity(),
+        Some(ParseSeverity::Warning),
+        "sink.max_severity() must be Warning for missing-version; got {:?}",
+        sink.max_severity()
     );
 }

@@ -64,6 +64,56 @@ pub struct ParseResult {
     pub warnings: Vec<SyntaxError>,
 }
 
+/// Parse a `.sf` source string into a typed AST, accumulating all diagnostics
+/// into a [`crate::DiagnosticSink`].
+///
+/// This is the sink-based entry point for STORY-010's error accumulation
+/// infrastructure. All parse-time diagnostics (fatal and non-fatal) are pushed
+/// into `sink`. The function returns `Some(DeckNode)` when the parse produced
+/// a usable AST (i.e., no fatal errors were encountered), or `None` when any
+/// fatal error is present.
+///
+/// # Parameters
+///
+/// * `src` — the full text of the `.sf` file.
+/// * `file_id` — the ID of this file in the `source_map`.
+/// * `source_map` — the registry of source files (used for diagnostic
+///   construction).
+/// * `sink` — the diagnostic accumulator. All errors and warnings are pushed
+///   here; the sink is never cleared by this function.
+///
+/// # Returns
+///
+/// * `Some(DeckNode)` — the parse succeeded with zero fatal errors; warnings
+///   may have been pushed to `sink`.
+/// * `None` — at least one fatal error was pushed to `sink`; the AST is not
+///   usable.
+#[must_use]
+pub fn parse_checked(
+    src: &str,
+    file_id: u32,
+    source_map: &SourceMap,
+    sink: &mut crate::sink::DiagnosticSink,
+) -> Option<DeckNode> {
+    match parse(src, file_id, source_map) {
+        Ok(result) => {
+            // Push any non-fatal warnings (e.g., missing slideforge_version)
+            // into the sink even on a successful parse.
+            for warning in result.warnings {
+                sink.push(warning);
+            }
+            Some(result.deck)
+        }
+        Err(errors) => {
+            // Push all fatal errors into the sink and signal failure via None.
+            for error in errors {
+                sink.push(error);
+            }
+            None
+        }
+    }
+}
+
 /// Parse a `.sf` source string into a typed AST.
 ///
 /// Returns `Ok(ParseResult)` if parsing succeeds with zero fatal errors.

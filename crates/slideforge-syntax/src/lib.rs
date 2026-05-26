@@ -44,6 +44,8 @@ pub mod known_fields;
 pub mod lexer;
 pub mod lexer_error;
 pub mod parser;
+pub mod render;
+pub mod sink;
 pub mod span;
 pub mod template;
 pub mod token;
@@ -54,7 +56,7 @@ pub use ast::{
     AliasNode, BlockItem, DeckNode, FieldNode, FieldValue, ForNode, IfNode, SectionNode, SetRule,
     SetRuleValue, ShapeNode, SlideNode, TemplateValue, VariantNode, VariantsBlock, VarsBlock,
 };
-pub use error::SyntaxError;
+pub use error::{ParseSeverity, SyntaxError};
 pub use expr::{BinOpKind, Expr, UnaryOpKind};
 pub use include::{resolve_includes, vars_scope_from_deck};
 pub use keywords::{
@@ -63,7 +65,9 @@ pub use keywords::{
 pub use known_fields::known_fields;
 pub use lexer::lex;
 pub use lexer_error::LexError;
-pub use parser::{parse, ParseResult};
+pub use parser::{parse, parse_checked, ParseResult};
+pub use render::DiagnosticRenderer;
+pub use sink::{BoxDiagnostic, DiagnosticSink};
 pub use span::{SourceFile, SourceMap, Span, Spanned};
 pub use template::TemplateChunk;
 pub use token::{LexerMode, Token};

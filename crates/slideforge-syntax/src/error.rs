@@ -9,8 +9,43 @@
 //! The parser accumulates all errors before returning. Callers receive a
 //! `Vec<SyntaxError>` — never a single error. The [`crate::parse`] function
 //! only returns `Err(errors)` when the vec is non-empty.
+//!
+//! # Severity
+//!
+//! Every [`SyntaxError`] has a [`ParseSeverity`] accessible via
+//! [`SyntaxError::severity`]. All E-PAR-* variants return
+//! [`ParseSeverity::Fatal`]. Future warning-only variants will return
+//! [`ParseSeverity::Warning`].
+//!
+//! # Span Validation
+//!
+//! Use [`span_is_valid`] to check whether a `(file, line, col)` triple is
+//! a valid position within a source string before constructing a diagnostic.
 
 use miette::{Diagnostic, NamedSource, SourceSpan};
+
+// ─── ParseSeverity ───────────────────────────────────────────────────────────
+
+/// The severity level of a diagnostic produced by the parser.
+///
+/// Variants are ordered from least to most severe so that comparisons are
+/// natural: `Warning < Error < Fatal`.
+///
+/// # Usage
+///
+/// Call [`SyntaxError::severity`] to retrieve the severity of any error
+/// variant. The [`crate::DiagnosticSink`] uses this to implement
+/// [`crate::DiagnosticSink::has_fatal`] and
+/// [`crate::DiagnosticSink::max_severity`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ParseSeverity {
+    /// Non-fatal advisory — the parse succeeds even if warnings are present.
+    Warning,
+    /// A recoverable error — parsing may continue after accumulation.
+    Error,
+    /// A fatal error — the parse result is unusable.
+    Fatal,
+}
 
 // ─── SyntaxError ─────────────────────────────────────────────────────────────
 
@@ -437,6 +472,173 @@ impl SyntaxError {
     pub fn is_always_fatal(&self) -> bool {
         matches!(self, Self::VersionError { is_fatal: true, .. })
     }
+
+    /// Return the severity of this error.
+    ///
+    /// Most E-PAR-* variants are [`ParseSeverity::Fatal`]. The exception is
+    /// [`SyntaxError::VersionError`] with `is_fatal: false`, which carries
+    /// [`ParseSeverity::Warning`] severity (e.g., a missing-version advisory).
+    ///
+    /// This method exists so that [`crate::DiagnosticSink::max_severity`] and
+    /// [`crate::DiagnosticSink::has_fatal`] can make severity decisions without
+    /// downcasting.
+    #[must_use]
+    pub fn severity(&self) -> ParseSeverity {
+        match self {
+            Self::VersionError { is_fatal: false, .. } => ParseSeverity::Warning,
+            _ => ParseSeverity::Fatal,
+        }
+    }
+
+    /// Extract the `(file, line, col)` triple from this error for display and
+    /// sorting purposes.
+    ///
+    /// `VersionError` and `UnexpectedEof` carry no `line`/`col` field, so they
+    /// return `(file, 0, 0)`.
+    ///
+    /// Returns owned `String` values so that the caller does not hold a borrow
+    /// into `self`. For position-only ordering, [`SyntaxError`] implements
+    /// [`Ord`] directly.
+    #[must_use]
+    pub fn sort_position(&self) -> (String, u32, u32) {
+        let (file, line, col) = self.sort_key();
+        (file.to_owned(), line, col)
+    }
+
+    /// Extract the `(file, line, col)` triple from a `SyntaxError` variant for
+    /// ordering purposes.
+    ///
+    /// `VersionError` and `UnexpectedEof` carry no `line`/`col` field, so they
+    /// sort to `(file, 0, 0)`.
+    fn sort_key(&self) -> (&str, u32, u32) {
+        match self {
+            Self::IndentError { file, line, col, .. }
+            | Self::UnexpectedToken { file, line, col, .. }
+            | Self::ReservedKeyword { file, line, col, .. }
+            | Self::VarNameCollision { file, line, col, .. }
+            | Self::RawKeyword { file, line, col, .. } => (file.as_str(), *line, *col),
+            Self::UnexpectedEof { file, .. } | Self::VersionError { file, .. } => {
+                (file.as_str(), 0, 0)
+            }
+        }
+    }
+
+    /// Returns a stable numeric discriminant for each variant.
+    ///
+    /// Used in [`Ord`] to break ties when two errors share the same source
+    /// position. The tag is stable across compilations as long as the variant
+    /// list does not change order — adding a new variant must assign the next
+    /// sequential tag.
+    fn variant_tag(&self) -> u8 {
+        match self {
+            Self::IndentError { .. } => 0,
+            Self::UnexpectedToken { .. } => 1,
+            Self::UnexpectedEof { .. } => 2,
+            Self::ReservedKeyword { .. } => 3,
+            Self::VarNameCollision { .. } => 4,
+            Self::RawKeyword { .. } => 5,
+            Self::VersionError { .. } => 6,
+        }
+    }
+}
+
+// ─── Ordering ─────────────────────────────────────────────────────────────────
+//
+// SyntaxError is ordered by (file, line, col) so that a sorted Vec<SyntaxError>
+// presents diagnostics in source order. NamedSource and SourceSpan do not
+// implement Ord, so we implement manually.
+
+impl PartialEq for SyntaxError {
+    fn eq(&self, other: &Self) -> bool {
+        // Two SyntaxErrors are equal only when they are the same variant AND
+        // occupy the same (file, line, col) position.  Comparing by position
+        // alone (the previous implementation) was semantically wrong: different
+        // error types at the same source location would compare as equal, which
+        // violates the `Eq` contract (reflexivity is preserved but substitution
+        // was not — a `VarNameCollision` and an `IndentError` at line 3 col 1
+        // would have been considered equal).
+        std::mem::discriminant(self) == std::mem::discriminant(other)
+            && self.sort_key() == other.sort_key()
+    }
+}
+
+impl Eq for SyntaxError {}
+
+impl PartialOrd for SyntaxError {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for SyntaxError {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        // Primary key: source position (file, line, col).
+        // Secondary key: variant discriminant so that Ord is consistent with
+        // PartialEq — `a.cmp(&b) == Equal` implies `a == b`.
+        self.sort_key()
+            .cmp(&other.sort_key())
+            .then_with(|| self.variant_tag().cmp(&other.variant_tag()))
+    }
+}
+
+// ─── span_is_valid ────────────────────────────────────────────────────────────
+
+/// Check whether a `(file, line, col)` triple is a valid position in `source`.
+///
+/// Returns `true` when the 1-based `line` and `col` are within the bounds of
+/// the source string. Returns `false` for any out-of-bounds position.
+///
+/// The `file` parameter is accepted for API symmetry with the error constructors
+/// but is not used in the validation itself — validity depends only on the
+/// source text.
+///
+/// # Validation rules
+///
+/// * `line` must be ≥ 1 (1-based).
+/// * `col` must be ≥ 1 (1-based).
+/// * `line` must be ≤ the total number of lines in `source`.
+/// * `col` must be ≤ the character count of that line + 1 (one-past-end is
+///   valid for end-of-line positions, e.g. a zero-length span at EOL).
+///
+/// # Parameters
+///
+/// * `file` — the source file path (not used in the check, present for
+///   symmetry with the error constructor API).
+/// * `line` — 1-based line number.
+/// * `col` — 1-based column number.
+/// * `source` — the full source text to validate against.
+#[must_use]
+pub fn span_is_valid(_file: &str, line: u32, col: u32, source: &str) -> bool {
+    // Reject 0-based or negative coordinates (u32 can't be negative, but 0 is invalid).
+    if line == 0 || col == 0 {
+        return false;
+    }
+
+    // Collect the character lengths of each line (excluding the trailing '\n').
+    // A source ending without '\n' still counts as a complete line.
+    let lines: Vec<&str> = source.split('\n').collect();
+
+    // `split('\n')` on "abc\n" produces ["abc", ""] — the trailing empty string
+    // is a phantom line created by the trailing newline.  We want to treat the
+    // source as having exactly the number of *non-phantom* lines.
+    //
+    // Rule: trim a single trailing empty element produced by a terminal '\n'.
+    let line_count = if source.ends_with('\n') && lines.last().is_some_and(|l| l.is_empty()) {
+        lines.len().saturating_sub(1)
+    } else {
+        lines.len()
+    };
+
+    let line_idx = line as usize; // 1-based → used directly for bound check
+    if line_idx > line_count {
+        return false;
+    }
+
+    // Retrieve the actual source line (0-based index).
+    let line_str = lines[line_idx - 1];
+    // col is allowed up to len + 1 (one-past-end for EOL positions).
+    let max_col = line_str.chars().count() + 1;
+    col as usize <= max_col
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -718,5 +920,278 @@ mod tests {
         );
         let help = e.help();
         assert!(help.is_some(), "RawKeyword must have help text");
+    }
+
+    // ════════════════════════════════════════════════════════════════════════════
+    // STORY-010: Failing tests (Red Gate) — AC-001, AC-002, AC-004, AC-006
+    // All tests below MUST FAIL until severity() and span_is_valid() are
+    // implemented.
+    // ════════════════════════════════════════════════════════════════════════════
+
+    // ── AC-001: every SyntaxError variant has source_code().is_some() ────────
+
+    /// AC-001: every variant must carry source code for miette rendering.
+    ///
+    /// This test constructs one instance of each variant and asserts that
+    /// `miette::Diagnostic::source_code()` returns `Some(...)`.
+    #[test]
+    fn test_ac001_all_variants_have_source_code() {
+        use miette::Diagnostic;
+
+        let variants: Vec<SyntaxError> = vec![
+            SyntaxError::indent_error(
+                "a.sf".to_string(), 1, 1, 2, 3,
+                "  bad\n".to_string(), 0,
+            ),
+            SyntaxError::unexpected_token(
+                "a.sf".to_string(), 1, 1,
+                "desc".to_string(), "tok\n".to_string(), 0, 3,
+            ),
+            SyntaxError::unexpected_eof(
+                "a.sf".to_string(), "msg".to_string(), "x".to_string(),
+            ),
+            SyntaxError::reserved_keyword(
+                "a.sf".to_string(), 1, 1,
+                "@fn".to_string(), "reserved".to_string(),
+                "@fn\n".to_string(), 0, 3,
+            ),
+            SyntaxError::var_name_collision(
+                "a.sf".to_string(), 1, 1,
+                "chart".to_string(), "collision".to_string(),
+                "chart\n".to_string(), 0, 5,
+            ),
+            SyntaxError::raw_keyword(
+                "a.sf".to_string(), 1, 1,
+                "raw not allowed".to_string(),
+                "raw\n".to_string(), 0, 3,
+            ),
+            SyntaxError::version_error(
+                "a.sf".to_string(), "v2 incompatible".to_string(),
+                true, "slideforge_version \"2\"\n".to_string(), 0,
+            ),
+        ];
+
+        for variant in &variants {
+            let sc = variant.source_code();
+            assert!(
+                sc.is_some(),
+                "variant {variant:?} must have source_code(); got None"
+            );
+        }
+    }
+
+    /// AC-001: every variant must have non-empty help text.
+    #[test]
+    fn test_ac001_all_variants_have_help() {
+        use miette::Diagnostic;
+
+        let variants: Vec<SyntaxError> = vec![
+            SyntaxError::indent_error(
+                "a.sf".to_string(), 1, 1, 2, 3,
+                "  bad\n".to_string(), 0,
+            ),
+            SyntaxError::unexpected_token(
+                "a.sf".to_string(), 1, 1,
+                "desc".to_string(), "tok\n".to_string(), 0, 3,
+            ),
+            SyntaxError::unexpected_eof(
+                "a.sf".to_string(), "msg".to_string(), "x".to_string(),
+            ),
+            SyntaxError::reserved_keyword(
+                "a.sf".to_string(), 1, 1,
+                "@fn".to_string(), "reserved".to_string(),
+                "@fn\n".to_string(), 0, 3,
+            ),
+            SyntaxError::var_name_collision(
+                "a.sf".to_string(), 1, 1,
+                "chart".to_string(), "collision".to_string(),
+                "chart\n".to_string(), 0, 5,
+            ),
+            SyntaxError::raw_keyword(
+                "a.sf".to_string(), 1, 1,
+                "raw not allowed".to_string(),
+                "raw\n".to_string(), 0, 3,
+            ),
+            SyntaxError::version_error(
+                "a.sf".to_string(), "v2 incompatible".to_string(),
+                true, "slideforge_version \"2\"\n".to_string(), 0,
+            ),
+        ];
+
+        for variant in &variants {
+            let help_opt = variant.help();
+            assert!(
+                help_opt.is_some(),
+                "variant must have help text; got None for: {variant:?}"
+            );
+            let help_str = help_opt.map(|h| h.to_string()).unwrap_or_default();
+            assert!(
+                !help_str.is_empty(),
+                "help text must not be empty for: {variant:?}"
+            );
+        }
+    }
+
+    // ── AC-002: span_is_valid happy path ─────────────────────────────────────
+
+    /// AC-002: a valid (file, line, col) triple within bounds returns `true`.
+    #[test]
+    fn test_ac002_span_is_valid_happy_path() {
+        // Source has 3 lines; line 2, col 3 is within bounds.
+        let source = "line one\nline two\nline three\n";
+        assert!(
+            span_is_valid("file.sf", 2, 3, source),
+            "line 2, col 3 must be valid in a 3-line source"
+        );
+    }
+
+    /// AC-002: a (line, col) past the end of the source returns `false`.
+    #[test]
+    fn test_ac002_span_is_valid_out_of_bounds() {
+        // Source has 1 line with 8 characters; line 10, col 1 is out of bounds.
+        let source = "one line\n";
+        assert!(
+            !span_is_valid("file.sf", 10, 1, source),
+            "line 10 must be out of bounds for a 1-line source"
+        );
+    }
+
+    /// AC-002: col past the end of the line returns `false`.
+    #[test]
+    fn test_ac002_span_is_valid_col_out_of_bounds() {
+        // Source has 1 line "abc\n" — 3 visible chars. Col 100 is out of bounds.
+        let source = "abc\n";
+        assert!(
+            !span_is_valid("file.sf", 1, 100, source),
+            "col 100 must be out of bounds for 'abc\\n'"
+        );
+    }
+
+    /// AC-002: line 0 (below minimum 1-based line) returns `false`.
+    #[test]
+    fn test_ac002_span_is_valid_line_zero_is_invalid() {
+        let source = "abc\n";
+        assert!(
+            !span_is_valid("file.sf", 0, 1, source),
+            "line 0 must be invalid (lines are 1-based)"
+        );
+    }
+
+    /// AC-002: col 0 (below minimum 1-based col) returns `false`.
+    #[test]
+    fn test_ac002_span_is_valid_col_zero_is_invalid() {
+        let source = "abc\n";
+        assert!(
+            !span_is_valid("file.sf", 1, 0, source),
+            "col 0 must be invalid (columns are 1-based)"
+        );
+    }
+
+    // ── AC-004: SyntaxError sorts by (file, line, col) ───────────────────────
+
+    /// AC-004: sorting a vec of `SyntaxError`s produces ascending (file, line, col)
+    /// order.
+    #[test]
+    fn test_ac004_error_ordering() {
+        let e1 = SyntaxError::indent_error(
+            "a.sf".to_string(), 5, 1, 2, 3, "  bad\n".to_string(), 0,
+        );
+        let e2 = SyntaxError::indent_error(
+            "a.sf".to_string(), 2, 1, 2, 3, "  bad\n".to_string(), 0,
+        );
+        let e3 = SyntaxError::indent_error(
+            "a.sf".to_string(), 3, 1, 2, 3, "  bad\n".to_string(), 0,
+        );
+        let mut errors = [e1, e2, e3];
+        errors.sort();
+        let lines: Vec<u32> = errors.iter().map(|e| {
+            match e {
+                SyntaxError::IndentError { line, .. } => *line,
+                _ => 0,
+            }
+        }).collect();
+        assert_eq!(
+            lines, vec![2, 3, 5],
+            "errors must sort in ascending line order; got: {lines:?}"
+        );
+    }
+
+    // ── AC-006: all E-PAR-* variants return ParseSeverity::Fatal ─────────────
+
+    /// AC-006: `SyntaxError::severity()` returns `Fatal` for every E-PAR-*
+    /// variant. This drives `DiagnosticSink::has_fatal()` and
+    /// `DiagnosticSink::max_severity()`.
+    #[test]
+    fn test_ac006_all_par_errors_fatal() {
+        let variants: Vec<SyntaxError> = vec![
+            SyntaxError::indent_error(
+                "a.sf".to_string(), 1, 1, 2, 3,
+                "  bad\n".to_string(), 0,
+            ),
+            SyntaxError::unexpected_token(
+                "a.sf".to_string(), 1, 1,
+                "desc".to_string(), "tok\n".to_string(), 0, 3,
+            ),
+            SyntaxError::unexpected_eof(
+                "a.sf".to_string(), "msg".to_string(), "x".to_string(),
+            ),
+            SyntaxError::reserved_keyword(
+                "a.sf".to_string(), 1, 1,
+                "@fn".to_string(), "reserved".to_string(),
+                "@fn\n".to_string(), 0, 3,
+            ),
+            SyntaxError::var_name_collision(
+                "a.sf".to_string(), 1, 1,
+                "chart".to_string(), "collision".to_string(),
+                "chart\n".to_string(), 0, 5,
+            ),
+            SyntaxError::raw_keyword(
+                "a.sf".to_string(), 1, 1,
+                "raw not allowed".to_string(),
+                "raw\n".to_string(), 0, 3,
+            ),
+            SyntaxError::version_error(
+                "a.sf".to_string(), "v2 incompatible".to_string(),
+                true, "slideforge_version \"2\"\n".to_string(), 0,
+            ),
+        ];
+
+        for variant in &variants {
+            assert_eq!(
+                variant.severity(),
+                ParseSeverity::Fatal,
+                "every E-PAR-* variant must have severity Fatal; failed for: {variant:?}"
+            );
+        }
+    }
+
+    // ── F-003: VersionError non-fatal → Warning severity ─────────────────────
+    //
+    // AC-006 documents that `VersionError(is_fatal=false)` returns
+    // `ParseSeverity::Warning`, not `ParseSeverity::Fatal`.  The "all variants
+    // are Fatal" test above only covers the `is_fatal=true` case.  This test
+    // explicitly documents and guards the exception.
+
+    /// F-003: `VersionError` with `is_fatal=false` must return
+    /// `ParseSeverity::Warning`, not `ParseSeverity::Fatal`.
+    ///
+    /// This is the AC-006 non-fatal path: a missing-version warning can be
+    /// demoted from fatal to warning (e.g. for a future `--warn-only` flag).
+    #[test]
+    fn test_version_error_non_fatal_returns_warning_severity() {
+        let e = SyntaxError::version_error(
+            "test.sf".to_string(),
+            "missing version".to_string(),
+            false,                   // is_fatal = false → Warning
+            "slide title:\n".to_string(),
+            0,
+        );
+        assert_eq!(
+            e.severity(),
+            ParseSeverity::Warning,
+            "VersionError(is_fatal=false) must return ParseSeverity::Warning; \
+             got {:?}",
+            e.severity()
+        );
     }
 }
