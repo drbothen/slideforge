@@ -263,6 +263,7 @@ impl PluginRegistry {
 
 #[cfg(test)]
 #[allow(clippy::unnecessary_literal_bound)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::traits::{
