@@ -47,9 +47,8 @@ allow = [
     "Unicode-3.0",
 ]
 
-# Deny all licenses not in the allow list.
-# "unlicensed" is an implicit deny unless explicitly added to allow.
-deny = []
+# Note: licenses not in the allow list above are implicitly denied.
+# The separate 'deny' key was removed in cargo-deny 0.19.7 (see PR #611).
 
 # Exceptions for crates with non-standard license expression formatting.
 # Add entries here when cargo-deny cannot parse the license for a known-safe dep.
@@ -78,10 +77,11 @@ deny = [
     # (add here as needed after security scan findings)
 ]
 
-# Allow list for crates that are expected to have multiple versions
+# Skip list for crates that are expected to have multiple versions
 # (common with large ecosystems like serde, syn, proc-macro2).
-allow-multiple-versions = [
-    # "syn",      # multiple versions common during ecosystem transitions
+# Use `skip = [{ name = "syn" }]` to allow a specific crate's duplicates.
+skip = [
+    # { name = "syn" },  # example: allow multiple versions during ecosystem transitions
 ]
 
 # Maximum depth in the dependency graph to check for duplicate versions.

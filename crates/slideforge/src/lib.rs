@@ -1,6 +1,6 @@
 //! # slideforge
 //!
-//! Compile a structured DSL into branded PowerPoint presentations.
+//! Compile a structured DSL into branded `PowerPoint` presentations.
 //!
 //! This crate is the main entry point. It re-exports the public surface of
 //! the workspace's component crates ([`slideforge_syntax`],
