@@ -128,6 +128,8 @@ pub enum Token {
     Slash,
     /// `%` — remainder operator.
     Percent,
+    /// `=` — assignment / alias declaration separator.
+    Eq,
     /// `==` — equality comparison.
     EqEq,
     /// `!=` — inequality comparison.
@@ -261,6 +263,7 @@ mod tests {
             Token::Star,
             Token::Slash,
             Token::Percent,
+            Token::Eq,
             Token::EqEq,
             Token::BangEq,
             Token::Lt,

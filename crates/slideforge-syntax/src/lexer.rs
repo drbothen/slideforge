@@ -412,14 +412,8 @@ impl<'src> LexerState<'src> {
                     self.pos += 1;
                     self.emit(Token::EqEq, start);
                 } else {
-                    // Bare `=` — not a valid token; emit error.
-                    let (line, col) = offset_to_line_col(start, &self.line_starts);
-                    self.errors.push(LexError::InvalidCharacter {
-                        file: Arc::clone(&self.file),
-                        line,
-                        col,
-                        ch: '=',
-                    });
+                    // Bare `=` — used in `alias <name> = <type>:` declarations.
+                    self.emit(Token::Eq, start);
                 }
             },
             b'!' => {

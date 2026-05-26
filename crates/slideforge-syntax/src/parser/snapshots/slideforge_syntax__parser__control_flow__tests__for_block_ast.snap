@@ -55,6 +55,8 @@ DeckNode {
         },
     ],
     set_rules: [],
+    variants: None,
+    variant_names: [],
     items: [
         For(
             Spanned(

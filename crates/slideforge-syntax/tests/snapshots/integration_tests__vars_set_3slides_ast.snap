@@ -173,6 +173,8 @@ DeckNode {
             ),
         },
     ],
+    variants: None,
+    variant_names: [],
     items: [
         Slide(
             Spanned(

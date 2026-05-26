@@ -22,13 +22,22 @@
 use chumsky::{input::ValueInput, prelude::*};
 
 use crate::{
-    ast::{BlockItem, DeckNode, FieldNode, FieldValue, SetRule, SlideNode, VarsBlock},
+    ast::{
+        AliasNode, BlockItem, DeckNode, FieldNode, FieldValue, SetRule, SetRuleValue, SlideNode,
+        VariantsBlock, VarsBlock,
+    },
+    known_fields::{known_fields, suggest_type},
     span::{Span, Spanned},
     template::TemplateChunk,
     token::Token,
 };
 
-use super::{control_flow::block_item, template::template_value};
+use super::{
+    alias::{AliasRegistry, alias_decl},
+    control_flow::block_item,
+    template::template_value,
+    variants::variants_block,
+};
 
 // ─── Type aliases ─────────────────────────────────────────────────────────────
 
@@ -73,6 +82,40 @@ where
         Token::FloatLit(f) = e => (FieldValue::Float(f), e.span()),
         Token::BoolLit(b) = e => (FieldValue::Bool(b), e.span()),
         Token::Ident(s) = e => (FieldValue::Ident(s.to_string()), e.span()),
+    };
+
+    template_val.or(other_val)
+}
+
+/// Parser for a `set` rule value: string literal (with template interpolation),
+/// integer, float, bool, or identifier.
+///
+/// Identical in surface syntax to `value_parser()` but produces [`SetRuleValue`]
+/// so that `set` rules carry a distinct type from field values.
+///
+/// BC-1.08.002: `{{ brand.footer }}` is parsed as
+/// `SetRuleValue::Template([TemplateChunk::Expr(Expr::FieldAccess { base:
+/// Ident("brand"), field: "footer" })])`. The expression parser handles this
+/// naturally via field-access syntax — no special `BrandRef` token is needed.
+fn set_rule_value_parser<'src, I>()
+-> impl Parser<'src, I, (SetRuleValue, TSpan), extra::Err<Rich<'src, Token, TSpan>>> + Clone
+where
+    I: ValueInput<'src, Token = Token, Span = TSpan>,
+{
+    let template_val = template_value().validate(
+        move |(chunks, errs): (Vec<TemplateChunk>, Vec<String>), info, emitter| {
+            for msg in errs {
+                emitter.emit(Rich::custom(info.span(), msg));
+            }
+            (SetRuleValue::Template(chunks), info.span())
+        },
+    );
+
+    let other_val = select! {
+        Token::IntLit(n) = e => (SetRuleValue::Num(n), e.span()),
+        Token::FloatLit(f) = e => (SetRuleValue::Float(f), e.span()),
+        Token::BoolLit(b) = e => (SetRuleValue::Bool(b), e.span()),
+        Token::Ident(s) = e => (SetRuleValue::Ident(s.to_string()), e.span()),
     };
 
     template_val.or(other_val)
@@ -213,9 +256,18 @@ where
 /// Parser for a `set <type>: <field> <value>` rule.
 ///
 /// Pattern: `"set" IDENT ":" IDENT value NEWLINE`
+///
+/// STORY-008: The value is now parsed as [`SetRuleValue`] (not [`FieldValue`])
+/// so that `set` rule values are clearly distinguished from slide field values.
+/// Brand references like `{{ brand.footer }}` are stored as
+/// `SetRuleValue::Template([TemplateChunk::Expr(FieldAccess { ... })])` and
+/// are NOT evaluated at parse time (BC-1.08.003).
+///
+/// BC-1.08.001 (EC-001): `set unknown_type: field "x"` emits E-PAR-007
+/// "Unknown slide type '`unknown_type`'. Did you mean '...'?" via `validate()`.
 fn set_rule_parser<'src, I>(
     file_id: u32,
-) -> impl Parser<'src, I, SetRule, extra::Err<Rich<'src, Token, TSpan>>> + Clone
+) -> impl Parser<'src, I, Option<SetRule>, extra::Err<Rich<'src, Token, TSpan>>> + Clone
 where
     I: ValueInput<'src, Token = Token, Span = TSpan>,
 {
@@ -223,20 +275,78 @@ where
         .then(any_ident())
         .then_ignore(just(Token::Colon))
         .then(any_ident())
-        .then(value_parser())
+        .then(set_rule_value_parser())
         .then_ignore(just(Token::Newline).or_not())
-        .map(
+        .validate(
             move |(
                 ((_set_kw_span, (slide_type, type_span)), (field, field_span)),
                 (val, val_span),
-            )| {
-                SetRule {
+            ),
+                  info,
+                  emitter| {
+                // E-PAR-007: validate slide type.
+                if known_fields(&slide_type).is_none() {
+                    let suggestion = suggest_type(&slide_type)
+                        .map_or_else(String::new, |s| format!(" Did you mean '{s}'?"));
+                    emitter.emit(Rich::custom(
+                        info.span(),
+                        format!("E-PAR-007: Unknown slide type '{slide_type}'. {suggestion}"),
+                    ));
+                    return None;
+                }
+                Some(SetRule {
                     slide_type: Spanned::new(slide_type, to_span(type_span, file_id)),
                     field: Spanned::new(field, to_span(field_span, file_id)),
                     value: Spanned::new(val, to_span(val_span, file_id)),
-                }
+                })
             },
         )
+}
+
+// ─── @include directive parser ────────────────────────────────────────────────
+
+/// Parser for an `@include "path.sf"` directive.
+///
+/// The directive is represented as a synthetic `BlockItem::Slide` with
+/// `kind == "@include"` and a single `FieldNode` containing the path template.
+/// This intermediate representation is consumed by [`crate::include::resolve_includes`]
+/// after the initial parse.
+///
+/// BC-1.06.001: The path may contain `{{ expr }}` interpolation (resolved at
+/// include-expansion time against the current vars scope).
+fn include_directive_parser<'src, I>(
+    file_id: u32,
+) -> impl Parser<'src, I, BlockItem, extra::Err<Rich<'src, Token, TSpan>>> + Clone
+where
+    I: ValueInput<'src, Token = Token, Span = TSpan>,
+{
+    just(Token::At)
+        .ignore_then(keyword("include"))
+        .then(template_value().validate(
+            move |(chunks, errs): (Vec<TemplateChunk>, Vec<String>), info, emitter| {
+                for msg in errs {
+                    emitter.emit(Rich::custom(info.span(), msg));
+                }
+                (FieldValue::Template(chunks), info.span())
+            },
+        ))
+        .then_ignore(just(Token::Newline).or_not())
+        .map_with(move |(_kw_span, (path_val, path_span)), e| {
+            let slide_span = e.span();
+            // Represent @include as a synthetic slide with kind "@include".
+            BlockItem::Slide(Spanned::new(
+                SlideNode {
+                    kind: Spanned::new("@include".to_string(), to_span(slide_span, file_id)),
+                    tags: vec![],
+                    fields: vec![FieldNode {
+                        name: Spanned::new("path".to_string(), to_span(path_span, file_id)),
+                        value: Spanned::new(path_val, to_span(path_span, file_id)),
+                    }],
+                    inline_items: vec![],
+                },
+                to_span(slide_span, file_id),
+            ))
+        })
 }
 
 // ─── Deck metadata parsers ───────────────────────────────────────────────────
@@ -293,8 +403,18 @@ enum DeckItem {
     Brand(Spanned<String>),
     /// A `vars:` block.
     Vars(VarsBlock),
-    /// A `set <type>: <field> <value>` rule.
+    /// A `set <type>: <field> <value>` rule (valid type).
     Set(SetRule),
+    /// A `set` rule with an unknown type — already emitted E-PAR-007; discard.
+    SetErr,
+    /// A `variants:` block.
+    Variants(VariantsBlock),
+    /// An `alias <name> = <type>: ...` declaration (will be expanded).
+    Alias(AliasNode),
+    /// An alias declaration with errors — already emitted; discard.
+    AliasErr,
+    /// An `@include "path"` directive (synthetic placeholder for resolution).
+    Include(BlockItem),
     /// A block item: `slide`, `@for`, or `@if` block.
     Block(BlockItem),
 }
@@ -305,6 +425,15 @@ enum DeckItem {
 ///
 /// Returns a chumsky parser that consumes a [`ValueInput`] token stream and
 /// produces a [`DeckNode`].
+///
+/// # STORY-008 Additions
+///
+/// - `variants:` block → populates `DeckNode.variants` and `DeckNode.variant_names`.
+/// - `alias` declarations → registered in `AliasRegistry`; subsequent `slide
+///   <alias_name>:` blocks are expanded at parse time.
+/// - `@include "path.sf"` directives → emitted as synthetic `BlockItem::Slide`
+///   placeholders for post-parse resolution by [`crate::include::resolve_includes`].
+/// - `set` rules with unknown slide types → E-PAR-007 emitted via `validate()`.
 pub fn deck_parser<'src, I>(
     file_id: u32,
 ) -> impl Parser<'src, I, DeckNode, extra::Err<Rich<'src, Token, TSpan>>> + Clone
@@ -318,7 +447,19 @@ where
     let lang = lang_decl_parser(file_id).map(DeckItem::Lang);
     let brand = brand_decl_parser(file_id).map(DeckItem::Brand);
     let vars = vars_block_parser(file_id).map(DeckItem::Vars);
-    let set = set_rule_parser(file_id).map(DeckItem::Set);
+    let set = set_rule_parser(file_id).map(|opt| match opt {
+        Some(sr) => DeckItem::Set(sr),
+        None => DeckItem::SetErr,
+    });
+    // STORY-008: variants block
+    let variants = variants_block(file_id).map(|(vb, _cycle_err)| DeckItem::Variants(vb));
+    // STORY-008: alias declarations
+    let alias = alias_decl(file_id).map(|opt| match opt {
+        Some(a) => DeckItem::Alias(a),
+        None => DeckItem::AliasErr,
+    });
+    // STORY-008: @include directive
+    let include = include_directive_parser(file_id).map(DeckItem::Include);
     // Use block_item() to handle slide, @for, and @if at deck level.
     let block = block_item(file_id).map(DeckItem::Block);
 
@@ -337,6 +478,9 @@ where
                 .or(brand)
                 .or(vars)
                 .or(set)
+                .or(variants)
+                .or(alias)
+                .or(include)
                 .or(block)
                 .recover_with(skip_then_retry_until(
                     any()
@@ -351,8 +495,11 @@ where
         .repeated()
         .ignore_then(item.padded_by(nl.repeated()).repeated().collect::<Vec<_>>())
         .then_ignore(just(Token::Eof).or_not())
-        .map(move |items| {
+        .validate(move |items, _info, emitter| {
             let mut deck = DeckNode::default();
+            // Alias registry — local to this parse, consumed during expansion.
+            let mut alias_reg = AliasRegistry::new();
+
             for item in items {
                 match item {
                     DeckItem::Version(v) => deck.version = Some(v),
@@ -360,11 +507,130 @@ where
                     DeckItem::Brand(b) => deck.brand = Some(b),
                     DeckItem::Vars(vb) => deck.vars.push(vb),
                     DeckItem::Set(sr) => deck.set_rules.push(sr),
-                    DeckItem::Block(bi) => deck.items.push(bi),
+                    DeckItem::SetErr | DeckItem::AliasErr => {}, // already reported (E-PAR-007 / E-PAR-006 / E-PAR-011)
+                    DeckItem::Variants(vb) => {
+                        // Register all variant names for CLI validation (BC-1.07.004).
+                        for v in &vb.variants {
+                            deck.variant_names.push(v.name.value().clone());
+                        }
+                        deck.variants = Some(vb);
+                    },
+                    DeckItem::Alias(a) => {
+                        // EC-006: reject alias-of-alias before registering.
+                        // Transitive aliasing (alias A = B where B is also an alias)
+                        // is not supported in v1.0. Check must happen at registration
+                        // time because the base_type parser runs before the AliasRegistry
+                        // has visibility into previously registered aliases.
+                        if let Some(err_msg) = alias_reg.check_alias_of_alias(a.base_type.value()) {
+                            // Emit E-PAR-011 with an alias-span approximation (0-offset).
+                            emitter.emit(Rich::custom(
+                                SimpleSpan::from(0usize..0usize),
+                                format!("{err_msg} (in alias '{}')", a.name.value()),
+                            ));
+                            // Do NOT register the invalid alias — drop it.
+                        } else {
+                            // Register the alias for subsequent slide expansion.
+                            alias_reg.register(a);
+                        }
+                    },
+                    DeckItem::Include(bi) => {
+                        // @include placeholder — passed through for post-parse resolution.
+                        deck.items.push(bi);
+                    },
+                    DeckItem::Block(bi) => {
+                        // Expand alias references in slide blocks.
+                        let expanded = expand_block_item(bi, &alias_reg);
+                        deck.items.push(expanded);
+                    },
                 }
             }
             deck
         })
+}
+
+// ─── Alias expansion helper ───────────────────────────────────────────────────
+
+/// Expand alias references inside a `BlockItem`.
+///
+/// For `BlockItem::Slide` items whose `kind` matches a registered alias name,
+/// the slide is replaced with the expanded `SlideNode` (base type + merged fields).
+/// Other `BlockItem` variants are returned unchanged.
+///
+/// Recursively processes `@for` and `@if` body items.
+fn expand_block_item(item: BlockItem, reg: &AliasRegistry) -> BlockItem {
+    match item {
+        BlockItem::Slide(spanned) => {
+            let alias_name = spanned.value().kind.value().clone();
+            if reg.contains(&alias_name) {
+                // Expand the alias.
+                let span = spanned.span();
+                let kind_span = spanned.value().kind.span();
+                let file_id = kind_span.file_id;
+                let explicit_fields = spanned.into_parts().0.fields;
+                if let Some(expanded_slide) =
+                    reg.expand(&alias_name, explicit_fields, kind_span, file_id)
+                {
+                    return BlockItem::Slide(Spanned::new(expanded_slide, span));
+                }
+                // reg.contains() was true but reg.expand() returned None — this is
+                // logically unreachable, but we must return something.
+                // Return an empty error-recovery slide.
+                return BlockItem::Slide(Spanned::new(
+                    SlideNode {
+                        kind: Spanned::new(alias_name, kind_span),
+                        tags: vec![],
+                        fields: vec![],
+                        inline_items: vec![],
+                    },
+                    span,
+                ));
+            }
+            // No alias match — return unchanged.
+            BlockItem::Slide(spanned)
+        },
+        BlockItem::For(spanned) => {
+            let span = spanned.span();
+            let mut for_node = spanned.into_parts().0;
+            let expanded_body: Vec<BlockItem> = for_node
+                .body
+                .drain(..)
+                .map(|bi| expand_block_item(bi, reg))
+                .collect();
+            for_node.body = expanded_body;
+            BlockItem::For(Spanned::new(for_node, span))
+        },
+        BlockItem::If(spanned) => {
+            let span = spanned.span();
+            let mut if_node = spanned.into_parts().0;
+            let expanded_then: Vec<BlockItem> = if_node
+                .then_body
+                .drain(..)
+                .map(|bi| expand_block_item(bi, reg))
+                .collect();
+            if_node.then_body = expanded_then;
+            let expanded_elif: Vec<(_, Vec<BlockItem>)> = if_node
+                .elif_branches
+                .drain(..)
+                .map(|(cond, body)| {
+                    (
+                        cond,
+                        body.into_iter()
+                            .map(|bi| expand_block_item(bi, reg))
+                            .collect(),
+                    )
+                })
+                .collect();
+            if_node.elif_branches = expanded_elif;
+            let expanded_else = if_node.else_body.map(|body| {
+                body.into_iter()
+                    .map(|bi| expand_block_item(bi, reg))
+                    .collect()
+            });
+            if_node.else_body = expanded_else;
+            BlockItem::If(Spanned::new(if_node, span))
+        },
+        BlockItem::Section(_) => item, // sections don't contain slides
+    }
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -533,6 +799,7 @@ mod tests {
 
     #[test]
     fn test_bc_1_01_001_set_rule_parsed() {
+        use crate::ast::SetRuleValue;
         use crate::template::TemplateChunk;
         let src = concat!(
             "set content: footer \"Default\"\n",
@@ -549,7 +816,7 @@ mod tests {
         assert_eq!(sr.field.value(), "footer");
         assert_eq!(
             sr.value.value(),
-            &FieldValue::Template(vec![TemplateChunk::Literal("Default".to_string())])
+            &SetRuleValue::Template(vec![TemplateChunk::Literal("Default".to_string())])
         );
     }
 
