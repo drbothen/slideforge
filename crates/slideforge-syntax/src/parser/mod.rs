@@ -64,6 +64,40 @@ pub struct ParseResult {
     pub warnings: Vec<SyntaxError>,
 }
 
+/// Parse a `.sf` source string into a typed AST, accumulating all diagnostics
+/// into a [`crate::DiagnosticSink`].
+///
+/// This is the sink-based entry point for STORY-010's error accumulation
+/// infrastructure. All parse-time diagnostics (fatal and non-fatal) are pushed
+/// into `sink`. The function returns `Some(DeckNode)` when the parse produced
+/// a usable AST (i.e., no fatal errors were encountered), or `None` when any
+/// fatal error is present.
+///
+/// # Parameters
+///
+/// * `src` — the full text of the `.sf` file.
+/// * `file_id` — the ID of this file in the `source_map`.
+/// * `source_map` — the registry of source files (used for diagnostic
+///   construction).
+/// * `sink` — the diagnostic accumulator. All errors and warnings are pushed
+///   here; the sink is never cleared by this function.
+///
+/// # Returns
+///
+/// * `Some(DeckNode)` — the parse succeeded with zero fatal errors; warnings
+///   may have been pushed to `sink`.
+/// * `None` — at least one fatal error was pushed to `sink`; the AST is not
+///   usable.
+#[must_use]
+pub fn parse_checked(
+    _src: &str,
+    _file_id: u32,
+    _source_map: &SourceMap,
+    _sink: &mut crate::sink::DiagnosticSink,
+) -> Option<DeckNode> {
+    todo!("STORY-010: parse_checked() — sink-based error accumulation entry point")
+}
+
 /// Parse a `.sf` source string into a typed AST.
 ///
 /// Returns `Ok(ParseResult)` if parsing succeeds with zero fatal errors.

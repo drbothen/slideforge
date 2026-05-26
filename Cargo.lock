@@ -783,6 +783,8 @@ dependencies = [
  "miette",
  "ordered-float",
  "phf",
+ "serde",
+ "serde_json",
  "thiserror",
 ]
 
