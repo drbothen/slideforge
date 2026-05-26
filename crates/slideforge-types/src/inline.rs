@@ -113,8 +113,15 @@ mod tests {
             InlineNode::Bold(vec![]),
             InlineNode::Italic(vec![]),
             InlineNode::Code(Arc::from("fn foo() {}")),
-            InlineNode::Link { text: vec![], url: Arc::from("https://example.com") },
-            InlineNode::Math(MathNode { latex: Arc::from("x^2"), display: false, span: crate::span::SourceSpan::default() }),
+            InlineNode::Link {
+                text: vec![],
+                url: Arc::from("https://example.com"),
+            },
+            InlineNode::Math(MathNode {
+                latex: Arc::from("x^2"),
+                display: false,
+                span: crate::span::SourceSpan::default(),
+            }),
             InlineNode::Footnote(vec![]),
             InlineNode::Xref(Arc::from("slide-2")),
             InlineNode::Superscript(vec![]),
@@ -129,7 +136,11 @@ mod tests {
         // Every variant is constructed above; any missing variant would be a
         // compiler warning or explicit count mismatch.
         let variants = all_variants();
-        assert_eq!(variants.len(), 12, "InlineNode has 12 variants, not 11 — check the spec");
+        assert_eq!(
+            variants.len(),
+            12,
+            "InlineNode has 12 variants, not 11 — check the spec"
+        );
         // NOTE: The story spec says 11 variants, but the enum has 12 entries
         // because the original list in the prompt says:
         //   Plain, Bold, Italic, Code, Link, Math, Footnote, Xref,
@@ -202,7 +213,7 @@ mod tests {
             InlineNode::Bold(children) => {
                 assert_eq!(children.len(), 1);
                 assert_eq!(children[0], inner);
-            }
+            },
             _ => panic!("expected Bold"),
         }
     }

@@ -21,12 +21,12 @@ retries = 0
 # having to scroll to the end.
 failure-output = "immediate"
 success-output = "never"
+
+[profile.ci.junit]
 # Emit JUnit XML for GitHub Actions test reporting integration.
 # Output file is written to target/nextest/ci/junit.xml.
 # Archived as a workflow artifact if the test job enables that step.
-junit = { path = "junit.xml" }
-
-[profile.ci.junit]
-# Include slow tests in the JUnit output for triage.
+path = "junit.xml"
+# Include failure output in JUnit XML for triage (success output omitted to keep artifacts small).
 store-success-output = false
 store-failure-output = true

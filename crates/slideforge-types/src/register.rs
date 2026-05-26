@@ -178,6 +178,9 @@ mod tests {
     fn test_bc_1_01_007_register_sorted() {
         let mut registers = vec![Register::Detail, Register::Notes, Register::Report];
         registers.sort();
-        assert_eq!(registers, vec![Register::Notes, Register::Report, Register::Detail]);
+        assert_eq!(
+            registers,
+            vec![Register::Notes, Register::Report, Register::Detail]
+        );
     }
 }

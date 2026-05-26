@@ -43,7 +43,11 @@ impl MathNode {
     /// ```
     #[must_use]
     pub fn inline(latex: Arc<str>, span: SourceSpan) -> Self {
-        MathNode { latex, display: false, span }
+        MathNode {
+            latex,
+            display: false,
+            span,
+        }
     }
 
     /// Construct a new display (block) math node.
@@ -58,7 +62,11 @@ impl MathNode {
     /// ```
     #[must_use]
     pub fn display(latex: Arc<str>, span: SourceSpan) -> Self {
-        MathNode { latex, display: true, span }
+        MathNode {
+            latex,
+            display: true,
+            span,
+        }
     }
 }
 

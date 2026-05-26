@@ -78,10 +78,11 @@ deny = [
     # (add here as needed after security scan findings)
 ]
 
-# Allow list for crates that are expected to have multiple versions
+# Skip list for crates that are expected to have multiple versions
 # (common with large ecosystems like serde, syn, proc-macro2).
-allow-multiple-versions = [
-    # "syn",      # multiple versions common during ecosystem transitions
+# Use `skip = [{ name = "syn" }]` to allow a specific crate's duplicates.
+skip = [
+    # { name = "syn" },  # example: allow multiple versions during ecosystem transitions
 ]
 
 # Maximum depth in the dependency graph to check for duplicate versions.

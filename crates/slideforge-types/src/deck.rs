@@ -312,7 +312,8 @@ mod tests {
     #[test]
     fn test_bc_1_01_001_deck_vars_field() {
         let mut deck = make_deck();
-        deck.vars.insert(Arc::from("company"), Value::Str(Arc::from("Acme Corp")));
+        deck.vars
+            .insert(Arc::from("company"), Value::Str(Arc::from("Acme Corp")));
         assert_eq!(
             deck.vars.get("company").and_then(Value::as_str),
             Some("Acme Corp")

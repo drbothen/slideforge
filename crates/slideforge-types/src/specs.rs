@@ -146,7 +146,11 @@ mod tests {
     #[test]
     fn test_bc_1_01_specs_all_implement_hash() {
         use std::collections::HashSet;
-        let chart = ChartSpec { chart_type: Arc::from("pie"), alt: Arc::from("x"), span: SourceSpan::default() };
+        let chart = ChartSpec {
+            chart_type: Arc::from("pie"),
+            alt: Arc::from("x"),
+            span: SourceSpan::default(),
+        };
         let mut set: HashSet<ChartSpec> = HashSet::new();
         set.insert(chart);
         assert_eq!(set.len(), 1);
@@ -154,7 +158,11 @@ mod tests {
 
     #[test]
     fn test_bc_1_01_specs_all_implement_clone() {
-        let spec = ImageSpec { path: Arc::from("a.png"), alt: Arc::from("a"), span: SourceSpan::default() };
+        let spec = ImageSpec {
+            path: Arc::from("a.png"),
+            alt: Arc::from("a"),
+            span: SourceSpan::default(),
+        };
         let spec2 = spec.clone();
         assert_eq!(spec, spec2);
     }

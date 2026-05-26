@@ -45,7 +45,12 @@ impl SourceSpan {
     /// ```
     #[must_use]
     pub fn new(file: Arc<str>, line: u32, col: u32, byte_offset: usize) -> Self {
-        SourceSpan { file, line, col, byte_offset }
+        SourceSpan {
+            file,
+            line,
+            col,
+            byte_offset,
+        }
     }
 
     /// Return `true` if this span represents an unknown / synthetic location.

@@ -171,9 +171,10 @@ mod tests {
     #[test]
     fn test_bc_1_01_002_slide_title_str_present() {
         let mut slide = make_minimal_slide();
-        slide
-            .fields
-            .insert(Arc::from("title"), FieldValue::Literal(Value::Str(Arc::from("Hello World"))));
+        slide.fields.insert(
+            Arc::from("title"),
+            FieldValue::Literal(Value::Str(Arc::from("Hello World"))),
+        );
         assert_eq!(slide.title_str(), Some("Hello World"));
     }
 

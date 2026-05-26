@@ -207,7 +207,7 @@ mod tests {
         // Use a non-standard value to avoid the clippy::approx_constant lint.
         let val = 1.234_567_89_f64;
         let v = Value::Float(OrderedFloat(val));
-        assert!((v.as_float().unwrap() - val).abs() < 1e-10);
+        assert!((v.as_float().expect("Value::Float variant must return Some") - val).abs() < 1e-10);
     }
 
     #[test]
@@ -219,7 +219,12 @@ mod tests {
     #[test]
     fn test_bc_1_01_003_value_list_variant() {
         let v = Value::List(vec![Value::Int(1), Value::Int(2)]);
-        assert_eq!(v.as_list().unwrap().len(), 2);
+        assert_eq!(
+            v.as_list()
+                .expect("Value::List variant must return Some")
+                .len(),
+            2
+        );
     }
 
     #[test]

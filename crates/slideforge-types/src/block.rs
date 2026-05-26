@@ -120,7 +120,10 @@ mod tests {
 
     fn all_content_block_variants() -> Vec<ContentBlock> {
         vec![
-            ContentBlock::Text(TextBlock { inlines: vec![], span: SourceSpan::default() }),
+            ContentBlock::Text(TextBlock {
+                inlines: vec![],
+                span: SourceSpan::default(),
+            }),
             ContentBlock::Bullets(vec![]),
             ContentBlock::Chart(ChartSpec {
                 chart_type: Arc::from("bar"),
@@ -205,7 +208,11 @@ mod tests {
 
     #[test]
     fn test_bc_1_01_005_bullet_item_nested() {
-        let child = BulletItem { inlines: vec![], children: vec![], span: SourceSpan::default() };
+        let child = BulletItem {
+            inlines: vec![],
+            children: vec![],
+            span: SourceSpan::default(),
+        };
         let parent = BulletItem {
             inlines: vec![],
             children: vec![child],
