@@ -14,7 +14,7 @@
 use std::sync::Arc;
 
 use slideforge_syntax::{
-    ast::{BlockItem, DeckNode, FieldValue},
+    ast::{BlockItem, DeckNode, FieldValue, SetRuleValue},
     error::SyntaxError,
     parse,
     span::SourceMap,
@@ -263,9 +263,10 @@ fn test_bc_1_01_001_set_rule_parsed() {
     let sr = &deck.set_rules[0];
     assert_eq!(sr.slide_type.value(), "content");
     assert_eq!(sr.field.value(), "footer");
+    // STORY-008: SetRule.value is now SetRuleValue, not FieldValue.
     assert_eq!(
         sr.value.value(),
-        &FieldValue::Template(vec![TemplateChunk::Literal("Default".to_string())])
+        &SetRuleValue::Template(vec![TemplateChunk::Literal("Default".to_string())])
     );
 }
 

@@ -10,6 +10,7 @@
 //! - Optional deck metadata (`slideforge_version`, `lang`, `brand`).
 //! - Zero or more [`VarsBlock`] entries (global variable definitions).
 //! - Zero or more [`SetRule`] entries (default field overrides per slide type).
+//! - An optional [`VariantsBlock`] (named audience variants).
 //! - One or more [`BlockItem`] entries (slides, `@for` blocks, `@if` blocks).
 //!
 //! Each [`SlideNode`] holds a slide type keyword and a list of [`FieldNode`]
@@ -22,6 +23,17 @@
 //! - [`IfNode`]: represents an `@if/@elif/@else` conditional block.
 //! - [`FieldValue::Template`]: replaces `FieldValue::Str` for string values
 //!   containing `{{ expr }}` interpolation.
+//!
+//! # STORY-008 Additions
+//!
+//! - [`VariantsBlock`]: top-level `variants:` block with named audience variants.
+//! - [`VariantNode`]: a single named variant with `include_tags`, `exclude_tags`,
+//!   `vars`, and optional `inherits` fields.
+//! - [`AliasNode`]: an `alias <name> = <type>: ...` declaration (before expansion).
+//! - [`SetRuleValue`]: replaces `FieldValue` in [`SetRule`] so that `set` rules
+//!   can carry a `BrandRef` without conflating with field values.
+//! - [`DeckNode::variants`]: the parsed `VariantsBlock`, if present.
+//! - [`DeckNode::variant_names`]: all declared variant names (for validation).
 
 use crate::expr::Expr;
 use crate::span::Spanned;
@@ -107,24 +119,71 @@ pub struct VarsBlock {
     pub entries: Vec<(Spanned<String>, Spanned<FieldValue>)>,
 }
 
+// ─── SetRuleValue ─────────────────────────────────────────────────────────────
+
+/// The value in a `set` rule.
+///
+/// Distinguished from [`FieldValue`] because `set` rules may contain
+/// `brand.*` field-access references that must NOT be evaluated at parse time.
+/// The evaluator (STORY-011) resolves `BrandRef` after brand loading completes.
+///
+/// BC-1.08.002: `set` rules support `{{ }}` interpolation (→ `Template`) and
+/// `brand.*` references (→ stored as `Template` with `Expr::FieldAccess{base:
+/// Ident("brand"), field}` — no special `BrandRef` variant needed at parse time
+/// since `{{ brand.footer }}` is a legitimate template expression).
+///
+/// # Design Note
+///
+/// `set content: footer "{{ brand.footer }}"` is parsed as:
+/// `SetRuleValue::Template([TemplateChunk::Expr(Expr::FieldAccess { base:
+/// Ident("brand"), field: "footer" })])`.
+///
+/// The `brand.*` reference is stored as-is — the expression parser naturally
+/// produces `Expr::FieldAccess` for `brand.footer`. Evaluation is deferred.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum SetRuleValue {
+    /// A template string: zero or more [`TemplateChunk`]s.
+    ///
+    /// Used for both plain string values and `{{ expr }}` interpolations,
+    /// including `{{ brand.footer }}` brand-ref style accesses.
+    Template(Vec<TemplateChunk>),
+    /// An integer literal.
+    Num(i64),
+    /// A floating-point literal.
+    Float(ordered_float::OrderedFloat<f64>),
+    /// A boolean literal.
+    Bool(bool),
+    /// An unquoted bare identifier.
+    Ident(String),
+    /// Sentinel produced by error recovery.
+    Error,
+}
+
 // ─── SetRule ─────────────────────────────────────────────────────────────────
 
 /// A `set` rule that overrides a field's default value for a slide type.
 ///
-/// ```sf
+/// ```text
 /// set content: footer "Confidential"
+/// set content: footer "{{ brand.footer }}"
 /// ```
 ///
 /// This means: for all `slide content:` blocks, the `footer` field defaults to
-/// `"Confidential"` unless overridden in the slide itself.
+/// the given value unless overridden in the slide itself.
+///
+/// # STORY-008: `SetRuleValue`
+///
+/// The `value` field is now `Spanned<SetRuleValue>` (not `Spanned<FieldValue>`)
+/// to cleanly represent the distinction between field values and set-rule
+/// values (which may carry brand references evaluated after brand loading).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SetRule {
     /// The slide type that this rule applies to (e.g. `"content"`).
     pub slide_type: Spanned<String>,
     /// The field being given a default (e.g. `"footer"`).
     pub field: Spanned<String>,
-    /// The default value.
-    pub value: Spanned<FieldValue>,
+    /// The default value (template string, number, bool, or brand ref expression).
+    pub value: Spanned<SetRuleValue>,
 }
 
 // ─── SlideNode ───────────────────────────────────────────────────────────────
@@ -267,12 +326,106 @@ pub enum BlockItem {
     Section(Spanned<SectionNode>),
 }
 
+// ─── VariantNode ─────────────────────────────────────────────────────────────
+
+/// A single named audience variant inside a `variants:` block.
+///
+/// ```text
+/// variants:
+///   exec:
+///     include_tags: [executive]
+///     vars:
+///       color: "navy"
+///   internal:
+///     exclude_tags: [confidential]
+///     inherits: "exec"
+/// ```
+///
+/// # STORY-008
+///
+/// The evaluator (STORY-011) applies the variant's `include_tags` / `exclude_tags`
+/// filters and merges `vars` into the active scope. This node is purely structural
+/// — no filtering or vars-merging occurs at parse time.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct VariantNode {
+    /// The variant name (e.g. `"exec"`, `"internal"`).
+    pub name: Spanned<String>,
+    /// Slides whose tags include ALL of these tags are kept; all others removed.
+    pub include_tags: Vec<Spanned<String>>,
+    /// Slides whose tags include ANY of these tags are removed.
+    pub exclude_tags: Vec<Spanned<String>>,
+    /// Variant-scoped variable overrides (merged on top of deck-level vars).
+    pub vars: Vec<(Spanned<String>, Spanned<FieldValue>)>,
+    /// Optional name of another variant to inherit from.
+    ///
+    /// Cycle detection (`exec` ↔ `internal`) is performed at parse time and
+    /// results in E-VAR-001.
+    pub inherits: Option<Spanned<String>>,
+}
+
+// ─── VariantsBlock ───────────────────────────────────────────────────────────
+
+/// A `variants:` block with one or more named audience variants.
+///
+/// ```text
+/// variants:
+///   exec:
+///     include_tags: [executive]
+///   internal:
+///     exclude_tags: [confidential]
+/// ```
+///
+/// At most one `variants:` block is valid per deck; duplicate blocks are an
+/// error at the eval stage (STORY-011). The parser collects all of them but the
+/// evaluator enforces the uniqueness invariant.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct VariantsBlock {
+    /// The named variants, in source order.
+    pub variants: Vec<VariantNode>,
+}
+
+// ─── AliasNode ───────────────────────────────────────────────────────────────
+
+/// An `alias <name> = <base_type>: <preset_fields>` declaration.
+///
+/// ```text
+/// alias exec_title = title:
+///   footer "Internal Only"
+/// ```
+///
+/// After parse, the `AliasNode` is consumed by the alias expansion pass
+/// (inside `IncludeResolver` / deck post-processing). It does **not** appear
+/// in the final `DeckNode` — aliases are fully expanded so that `slide
+/// exec_title:` in the source becomes `slide title:` with `footer` preset.
+///
+/// The `AliasNode` is exposed in the AST as an intermediate form so that tests
+/// can exercise the alias-declaration parsing independently of expansion.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct AliasNode {
+    /// The user-defined alias name (e.g. `"exec_title"`).
+    ///
+    /// Must NOT collide with a built-in slide type (→ E-PAR-006).
+    pub name: Spanned<String>,
+    /// The base slide type being aliased (e.g. `"title"`).
+    pub base_type: Spanned<String>,
+    /// The preset field assignments for this alias.
+    ///
+    /// All field names must be valid fields of `base_type` (→ E-PAR-011 if not).
+    pub preset_fields: Vec<FieldNode>,
+}
+
 // ─── DeckNode ────────────────────────────────────────────────────────────────
 
 /// The top-level AST node representing an entire `.sf` file.
 ///
 /// All fields are optional at the parse level. Required-field enforcement is
 /// delegated to the validation stage (STORY-016).
+///
+/// # STORY-008 Additions
+///
+/// - `variants`: the optional `variants:` block, if present in source.
+/// - `variant_names`: all declared variant names, collected for use by the
+///   `--variant` CLI flag validator (BC-1.07.004).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct DeckNode {
     /// `slideforge_version "1"` declaration, if present.
@@ -285,6 +438,16 @@ pub struct DeckNode {
     pub vars: Vec<VarsBlock>,
     /// All `set` rules, in source order.
     pub set_rules: Vec<SetRule>,
+    /// The optional `variants:` block (STORY-008).
+    ///
+    /// At most one `variants:` block is expected per deck; the evaluator enforces
+    /// the uniqueness invariant.
+    pub variants: Option<VariantsBlock>,
+    /// All declared variant names, in source order (STORY-008).
+    ///
+    /// Used by the CLI (`--variant <name>`) to validate the supplied name
+    /// without traversing `variants.variants`.
+    pub variant_names: Vec<String>,
     /// All top-level block items (slides, `@for`, `@if` blocks), in source
     /// order.
     ///
@@ -301,6 +464,7 @@ pub struct DeckNode {
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::expr::{BinOpKind, Expr};
@@ -361,6 +525,9 @@ mod tests {
         assert!(d.set_rules.is_empty());
         // STORY-007: items replaces slides
         assert!(d.items.is_empty());
+        // STORY-008: variants fields default to None/empty
+        assert!(d.variants.is_none());
+        assert!(d.variant_names.is_empty());
     }
 
     #[test]
@@ -393,13 +560,125 @@ mod tests {
             slide_type: Spanned::new("content".to_string(), dummy_span()),
             field: Spanned::new("footer".to_string(), dummy_span()),
             value: Spanned::new(
-                FieldValue::Template(vec![TemplateChunk::Literal("Conf".to_string())]),
+                SetRuleValue::Template(vec![TemplateChunk::Literal("Conf".to_string())]),
                 dummy_span(),
             ),
         };
         let r2 = r.clone();
         assert_eq!(r, r2);
         let _ = format!("{r:?}");
+    }
+
+    // ── STORY-008: SetRuleValue ────────────────────────────────────────────────
+
+    #[test]
+    fn test_bc_1_08_001_set_rule_value_hash_eq_clone_debug() {
+        let v = SetRuleValue::Template(vec![TemplateChunk::Literal("Conf".to_string())]);
+        let v2 = v.clone();
+        assert_eq!(v, v2);
+        let _ = format!("{v:?}");
+        let mut set = HashSet::new();
+        set.insert(v);
+        assert_eq!(set.len(), 1);
+    }
+
+    #[test]
+    fn test_bc_1_08_001_set_rule_value_all_variants_constructible() {
+        let _ = SetRuleValue::Template(vec![TemplateChunk::Literal("x".to_string())]);
+        let _ = SetRuleValue::Num(42);
+        let _ = SetRuleValue::Float(ordered_float::OrderedFloat(1.5_f64));
+        let _ = SetRuleValue::Bool(true);
+        let _ = SetRuleValue::Ident("foo".to_string());
+        let _ = SetRuleValue::Error;
+    }
+
+    // ── STORY-008: VariantNode ────────────────────────────────────────────────
+
+    #[test]
+    fn test_bc_1_07_001_variant_node_hash_eq_clone_debug() {
+        let v = VariantNode {
+            name: Spanned::new("exec".to_string(), dummy_span()),
+            include_tags: vec![Spanned::new("executive".to_string(), dummy_span())],
+            exclude_tags: vec![],
+            vars: vec![],
+            inherits: None,
+        };
+        let v2 = v.clone();
+        assert_eq!(v, v2);
+        let _ = format!("{v:?}");
+        let mut set = HashSet::new();
+        set.insert(v);
+        assert_eq!(set.len(), 1);
+    }
+
+    // ── STORY-008: VariantsBlock ──────────────────────────────────────────────
+
+    #[test]
+    fn test_bc_1_07_001_variants_block_hash_eq_clone_debug() {
+        let vb = VariantsBlock {
+            variants: vec![VariantNode {
+                name: Spanned::new("exec".to_string(), dummy_span()),
+                include_tags: vec![],
+                exclude_tags: vec![],
+                vars: vec![],
+                inherits: None,
+            }],
+        };
+        let vb2 = vb.clone();
+        assert_eq!(vb, vb2);
+        let _ = format!("{vb:?}");
+    }
+
+    // ── STORY-008: AliasNode ──────────────────────────────────────────────────
+
+    #[test]
+    fn test_bc_1_09_001_alias_node_hash_eq_clone_debug() {
+        let a = AliasNode {
+            name: Spanned::new("exec_title".to_string(), dummy_span()),
+            base_type: Spanned::new("title".to_string(), dummy_span()),
+            preset_fields: vec![FieldNode {
+                name: Spanned::new("footer".to_string(), dummy_span()),
+                value: Spanned::new(
+                    FieldValue::Template(vec![TemplateChunk::Literal("Internal".to_string())]),
+                    dummy_span(),
+                ),
+            }],
+        };
+        let a2 = a.clone();
+        assert_eq!(a, a2);
+        let _ = format!("{a:?}");
+        let mut set = HashSet::new();
+        set.insert(a);
+        assert_eq!(set.len(), 1);
+    }
+
+    // ── STORY-008: DeckNode variant fields ────────────────────────────────────
+
+    #[test]
+    fn test_bc_1_07_004_deck_node_variant_names_field() {
+        let mut d = DeckNode::default();
+        assert!(d.variant_names.is_empty());
+        d.variant_names.push("exec".to_string());
+        d.variant_names.push("internal".to_string());
+        assert_eq!(d.variant_names.len(), 2);
+        assert_eq!(d.variant_names[0], "exec");
+    }
+
+    #[test]
+    fn test_bc_1_07_001_deck_node_variants_field() {
+        let mut d = DeckNode::default();
+        assert!(d.variants.is_none());
+        d.variants = Some(VariantsBlock {
+            variants: vec![VariantNode {
+                name: Spanned::new("exec".to_string(), dummy_span()),
+                include_tags: vec![],
+                exclude_tags: vec![],
+                vars: vec![],
+                inherits: None,
+            }],
+        });
+        assert!(d.variants.is_some());
+        assert_eq!(d.variants.as_ref().unwrap().variants.len(), 1);
     }
 
     #[test]

@@ -19,11 +19,13 @@
 //! `parse()` returns `Err(errors)`. Only when both lists are empty does it
 //! return `Ok(deck)`.
 
+pub mod alias;
 pub mod control_flow;
 pub mod deck;
 pub mod expr;
 pub mod slide;
 pub mod template;
+pub mod variants;
 
 use std::sync::Arc;
 

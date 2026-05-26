@@ -26,6 +26,8 @@ DeckNode {
     brand: None,
     vars: [],
     set_rules: [],
+    variants: None,
+    variant_names: [],
     items: [
         If(
             Spanned(

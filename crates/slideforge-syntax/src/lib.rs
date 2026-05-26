@@ -38,6 +38,8 @@
 pub mod ast;
 pub mod error;
 pub mod expr;
+pub mod include;
+pub mod known_fields;
 pub mod lexer;
 pub mod lexer_error;
 pub mod parser;
@@ -48,11 +50,13 @@ pub mod token;
 // Re-export the public API surface at the crate root for ergonomic use.
 
 pub use ast::{
-    BlockItem, DeckNode, FieldNode, FieldValue, ForNode, IfNode, SectionNode, SetRule, SlideNode,
-    VarsBlock,
+    AliasNode, BlockItem, DeckNode, FieldNode, FieldValue, ForNode, IfNode, SectionNode, SetRule,
+    SetRuleValue, SlideNode, VariantNode, VariantsBlock, VarsBlock,
 };
 pub use error::SyntaxError;
 pub use expr::{BinOpKind, Expr, UnaryOpKind};
+pub use include::{resolve_includes, vars_scope_from_deck};
+pub use known_fields::known_fields;
 pub use lexer::lex;
 pub use lexer_error::LexError;
 pub use parser::parse;
