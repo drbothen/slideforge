@@ -1,0 +1,7 @@
+slideforge_version "1"
+lang "en-US"
+brand "default.pptx"
+
+slide title:
+  title "Hello World"
+  subtitle "An Introduction"

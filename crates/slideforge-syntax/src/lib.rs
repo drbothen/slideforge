@@ -1,45 +1,59 @@
 //! `slideforge-syntax` — lexer and parser for the slideforge DSL.
 //!
-//! This crate converts raw `.sf` source text into a typed token stream and,
-//! in later stories (STORY-006 through STORY-009), into a full abstract syntax
-//! tree (AST). The pipeline stage is:
+//! This crate converts raw `.sf` source text into a typed token stream and a
+//! full abstract syntax tree (AST). The pipeline stage is:
 //!
 //! ```text
 //! .sf source text
 //!   → [slideforge-syntax::lex]   → Vec<Spanned<Token>>
-//!   → [slideforge-syntax::parse] → Ast  (STORY-006+)
+//!   → [slideforge-syntax::parse] → DeckNode
 //!   → [slideforge-eval]          → Deck
 //! ```
-//!
-//! # Current Status (STORY-005)
-//!
-//! The lexer layer is fully implemented. The parser layer (`parse`, `ast`)
-//! will be added in STORY-006 through STORY-009.
 //!
 //! # Architecture Constraints (SS-01)
 //!
 //! `slideforge-syntax` is **Pure Core** — it performs no I/O, no filesystem
 //! access, and no network calls. The caller (typically `slideforge-cli`) is
 //! responsible for reading the `.sf` file and passing the in-memory string to
-//! [`lex`].
+//! [`lex`] or [`parse`].
 //!
 //! # Error Accumulation (DI-018)
 //!
-//! The [`lex`] function accumulates **all** lexer errors in a single pass and
-//! returns them alongside the (possibly partial) token stream. It never panics
-//! or fails fast on the first error.
+//! Both the lexer and the parser accumulate **all** errors in a single pass.
+//! [`lex`] returns `(tokens, lex_errors)`. [`parse`] converts all lex errors
+//! and parse errors into [`SyntaxError`]s and returns them as a single
+//! `Vec<SyntaxError>`.
+//!
+//! # Source Spans
+//!
+//! All AST nodes carry a [`Span`] identifying their position in the source
+//! file by byte offset. The [`SourceMap`] associates file IDs with file paths
+//! and text for use in diagnostic rendering.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 
+pub mod ast;
+pub mod error;
 pub mod lexer;
 pub mod lexer_error;
+pub mod parser;
+pub mod span;
 pub mod token;
 
 // Re-export the public API surface at the crate root for ergonomic use.
 
+pub use ast::{DeckNode, FieldNode, FieldValue, SetRule, SlideNode, VarsBlock};
+pub use error::SyntaxError;
 pub use lexer::lex;
 pub use lexer_error::LexError;
-pub use token::{LexerMode, Spanned, Token};
+pub use parser::parse;
+pub use span::{SourceFile, SourceMap, Span, Spanned};
+pub use token::{LexerMode, Token};
+
+// Note: `token::Spanned` (type alias for `(T, Range<usize>)`) is NOT re-exported
+// here to avoid name collision with `span::Spanned` (the struct).
+// Callers that need the lexer's `Spanned<T>` type should use `token::Spanned`
+// or `crate::token::Spanned` directly.

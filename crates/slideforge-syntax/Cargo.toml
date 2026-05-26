@@ -14,6 +14,7 @@ readme = "../../README.md"
 slideforge-types = { workspace = true }
 chumsky = { workspace = true }
 thiserror = { workspace = true }
+miette = { workspace = true }
 ordered-float = { workspace = true }
 
 [dev-dependencies]

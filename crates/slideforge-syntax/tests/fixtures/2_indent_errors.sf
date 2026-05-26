@@ -1,0 +1,10 @@
+slideforge_version "1"
+lang "en-US"
+
+slide title:
+  title "Good"
+   bad_indent "3 spaces instead of 2"
+
+slide content:
+  body "Good"
+   bad_again "another 3-space indent"
