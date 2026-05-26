@@ -7,9 +7,12 @@ last_updated: 2026-05-25
 
 stories:
   STORY-001:
-    status: in_progress
+    status: merged
     wave: 1
     started: 2026-05-25
+    merged: 2026-05-26
+    pr: 1
+    merge_commit: b46f9929
   STORY-002:
     status: draft
     wave: 1

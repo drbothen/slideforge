@@ -4,7 +4,7 @@ mode: greenfield
 created: 2026-05-23
 current_phase: phase-3-tdd-implementation
 status: IN_PROGRESS
-last_updated: 2026-05-25
+last_updated: 2026-05-26
 phase_1_approved: 2026-05-25
 phase_2_approved: 2026-05-25
 phase_1_convergence: "17 passes, 69 findings, 3/3 clean (passes 15-16-17)"
@@ -37,7 +37,7 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. It generates branded .p
 **Workspace:** /Users/jmagady/Dev/slideforge
 **Factory worktree:** .factory/ on branch `factory-artifacts`
 
-## Current Status: Phase 3 IN PROGRESS — Wave 1, STORY-001 started
+## Current Status: Phase 3 IN PROGRESS — Wave 1, STORY-001 merged, STORY-002 next
 
 Phase 2 Story Decomposition: COMPLETE and APPROVED (2026-05-25).
 - 71 stories decomposed from 112 BCs across 21 epics, 6 waves, 437 total points
@@ -97,7 +97,7 @@ Internal sequencing:
 | Planning (25 DSL decisions) | DONE 2026-05-24 | q1–q25 decision docs + 14 research threads |
 | Phase 1: Spec Crystallization | DONE — APPROVED 2026-05-25 | PRD (109 BCs, 15 HS, 4 supplements) + architecture (14 ADRs, 15 VPs, 20 crates) + UX spec (10 screens, 5 flows) + L2 domain spec (12 files) |
 | Phase 2: Story Decomposition | DONE — APPROVED 2026-05-25 | 71 stories, 21 epics, 6 waves, 437 pts. 22 adversarial passes, 3/3 clean. |
-| Phase 3: TDD Implementation | IN PROGRESS — Wave 1, STORY-001 | Per-story delivery |
+| Phase 3: TDD Implementation | IN PROGRESS — Wave 1, STORY-001 merged, STORY-002 next | Per-story delivery |
 | Phase 4: Holdout Evaluation | NOT STARTED | Per-wave holdout gates |
 | Phase 5: Adversarial Refinement | NOT STARTED | Post-implementation cascade |
 | Phase 6: Formal Hardening | NOT STARTED | Kani + fuzz + mutants + semgrep |
@@ -148,6 +148,7 @@ Internal sequencing:
 - 2026-05-25 — PHASE 2 COMPLETE — Awaiting human approval for Phase 3
 - 2026-05-25 — PHASE 2 APPROVED — Phase 3 authorized
 - 2026-05-25 — PHASE 3 STARTED — Wave 1, STORY-001 (IR Core Types) in progress
+- 2026-05-26 — STORY-001 MERGED (PR #1, b46f9929) — IR Core Types, 157 tests, 6 adversarial passes (20→6→1→0→0→0), 3/3 clean
 
 ## Decision Documents (canonical references)
 
