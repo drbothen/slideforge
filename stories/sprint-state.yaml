@@ -1,0 +1,51 @@
+---
+current_wave: 1
+current_phase: 3
+pipeline_status: IN_PROGRESS
+last_updated: 2026-05-25
+---
+
+stories:
+  STORY-001:
+    status: in_progress
+    wave: 1
+    started: 2026-05-25
+  STORY-002:
+    status: draft
+    wave: 1
+  STORY-003:
+    status: draft
+    wave: 1
+  STORY-004:
+    status: draft
+    wave: 1
+  STORY-005:
+    status: draft
+    wave: 1
+  STORY-006:
+    status: draft
+    wave: 1
+  STORY-007:
+    status: draft
+    wave: 1
+  STORY-008:
+    status: draft
+    wave: 1
+  STORY-009:
+    status: draft
+    wave: 1
+  STORY-010:
+    status: draft
+    wave: 1
+  STORY-051:
+    status: draft
+    wave: 1
+  STORY-052:
+    status: draft
+    wave: 1
+  STORY-053:
+    status: draft
+    wave: 1
+  STORY-054:
+    status: draft
+    wave: 1
