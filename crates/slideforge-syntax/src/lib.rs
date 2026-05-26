@@ -39,6 +39,7 @@ pub mod ast;
 pub mod error;
 pub mod expr;
 pub mod include;
+pub mod keywords;
 pub mod known_fields;
 pub mod lexer;
 pub mod lexer_error;
@@ -51,15 +52,18 @@ pub mod token;
 
 pub use ast::{
     AliasNode, BlockItem, DeckNode, FieldNode, FieldValue, ForNode, IfNode, SectionNode, SetRule,
-    SetRuleValue, SlideNode, VariantNode, VariantsBlock, VarsBlock,
+    SetRuleValue, ShapeNode, SlideNode, TemplateValue, VariantNode, VariantsBlock, VarsBlock,
 };
 pub use error::SyntaxError;
 pub use expr::{BinOpKind, Expr, UnaryOpKind};
 pub use include::{resolve_includes, vars_scope_from_deck};
+pub use keywords::{
+    classify_keyword, is_directive_keyword, is_slide_type_keyword, is_structural_keyword,
+};
 pub use known_fields::known_fields;
 pub use lexer::lex;
 pub use lexer_error::LexError;
-pub use parser::parse;
+pub use parser::{parse, ParseResult};
 pub use span::{SourceFile, SourceMap, Span, Spanned};
 pub use template::TemplateChunk;
 pub use token::{LexerMode, Token};

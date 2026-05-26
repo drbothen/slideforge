@@ -1,0 +1,14 @@
+slideforge_version "1"
+lang "en-US"
+
+slide title:
+  title "Reserved Keyword Reference"
+  body "This file documents reserved DSL keywords."
+
+slide content:
+  title "Implemented directives"
+  body "@for, @if, @elif, @else, @include, @data are implemented in v1."
+
+slide content:
+  title "Reserved for future use"
+  body "@fn, @mixin, @while, @match, @macro are reserved for v2+."

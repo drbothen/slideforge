@@ -42,6 +42,7 @@ use chumsky::{input::ValueInput, prelude::*};
 
 use crate::{
     ast::{AliasNode, FieldNode, FieldValue, SlideNode},
+    keywords::classify_keyword,
     known_fields::{all_slide_types, known_fields},
     span::{Span, Spanned},
     template::TemplateChunk,
@@ -163,6 +164,21 @@ where
                         format!(
                             "E-PAR-006: alias name '{alias_name}' collides with a built-in slide type; \
                              choose a different name"
+                        ),
+                    ));
+                    return None;
+                }
+
+                // BC-1.09.001 / AC-013: alias name must not collide with a
+                // reserved keyword. The keyword registry covers ~45 entries
+                // including `raw*` variants (E-PAR-009) and future-reserved
+                // identifiers like `component`, `extends`, `macro` (E-PAR-006).
+                if let Some((code, desc)) = classify_keyword(&alias_name) {
+                    emitter.emit(Rich::custom(
+                        info.span(),
+                        format!(
+                            "{code}: alias name '{alias_name}' collides with reserved keyword \
+                             ({desc}); choose a different name"
                         ),
                     ));
                     return None;
@@ -325,7 +341,7 @@ mod tests {
     fn parse_deck(src: &str) -> Result<DeckNode, Vec<crate::error::SyntaxError>> {
         let mut sm = SourceMap::new();
         let file_id = sm.add_file(Arc::from("test.sf"), Arc::from(src));
-        crate::parser::parse(src, file_id, &sm)
+        crate::parser::parse(src, file_id, &sm).map(|pr| pr.deck)
     }
 
     fn dummy_span() -> Span {
@@ -432,6 +448,60 @@ mod tests {
         assert!(
             has_par006,
             "error must reference E-PAR-006 or 'collides'; got: {errors:?}"
+        );
+    }
+
+    // ── BC-1.09.001: alias name collides with reserved keyword ─────────────
+
+    #[test]
+    fn test_bc_1_09_001_alias_raw_name_rejected() {
+        // `alias raw = title:` must be rejected — `raw` is a reserved keyword.
+        let src = concat!(
+            "slideforge_version \"1\"\n",
+            "alias raw = title:\n",
+            "  footer \"x\"\n",
+            "slide title:\n",
+            "  title \"Test\"\n",
+        );
+        let result = parse_deck(src);
+        assert!(
+            result.is_err(),
+            "alias name 'raw' must be rejected as reserved keyword"
+        );
+        let errors = result.unwrap_err();
+        let has_keyword_err = errors.iter().any(|e| {
+            let msg = e.to_string();
+            msg.contains("E-PAR-009") || msg.contains("reserved keyword")
+        });
+        assert!(
+            has_keyword_err,
+            "error must reference reserved keyword collision; got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn test_bc_1_09_001_alias_component_name_rejected() {
+        // `alias component = title:` must be rejected — `component` is reserved (v2+).
+        let src = concat!(
+            "slideforge_version \"1\"\n",
+            "alias component = title:\n",
+            "  footer \"x\"\n",
+            "slide title:\n",
+            "  title \"Test\"\n",
+        );
+        let result = parse_deck(src);
+        assert!(
+            result.is_err(),
+            "alias name 'component' must be rejected as reserved keyword"
+        );
+        let errors = result.unwrap_err();
+        let has_keyword_err = errors.iter().any(|e| {
+            let msg = e.to_string();
+            msg.contains("E-PAR-006") || msg.contains("reserved keyword")
+        });
+        assert!(
+            has_keyword_err,
+            "error must reference E-PAR-006 for reserved keyword; got: {errors:?}"
         );
     }
 

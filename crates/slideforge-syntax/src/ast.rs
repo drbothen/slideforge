@@ -34,10 +34,27 @@
 //!   can carry a `BrandRef` without conflating with field values.
 //! - [`DeckNode::variants`]: the parsed `VariantsBlock`, if present.
 //! - [`DeckNode::variant_names`]: all declared variant names (for validation).
+//!
+//! # STORY-009 Additions
+//!
+//! - [`ShapeNode`]: a `shape:` block with `type`, `position`, `fill`, `text`,
+//!   and `alt` fields parsed into a typed struct.  Appears inside a
+//!   [`SlideNode`] as a new [`FieldValue::Shape`] variant so that the
+//!   evaluator can place arbitrary shapes on a slide.
 
 use crate::expr::Expr;
 use crate::span::Spanned;
 use crate::template::TemplateChunk;
+
+// ─── TemplateValue ───────────────────────────────────────────────────────────
+
+/// A parsed template string: a sequence of [`TemplateChunk`]s.
+///
+/// This is the canonical representation for any field value that could contain
+/// `{{ expr }}` interpolation, `$...$` / `$$...$$` math regions, or plain text.
+/// It is separate from the raw `Vec<TemplateChunk>` so that trait bounds
+/// (`Hash + Eq + Clone + Debug`) are easily satisfied.
+pub type TemplateValue = Vec<TemplateChunk>;
 
 // ─── FieldValue ──────────────────────────────────────────────────────────────
 
@@ -83,8 +100,70 @@ pub enum FieldValue {
     Bool(bool),
     /// An unquoted bare identifier.
     Ident(String),
+    /// A `shape:` block value.
+    ///
+    /// Produced when a `shape:` block is encountered inside a slide body. The
+    /// `FieldNode` name is the synthetic string `"shape"`.
+    ///
+    /// # STORY-009
+    ///
+    /// This variant enables the evaluator to place arbitrary shapes on a slide
+    /// without conflating them with string or numeric field values.
+    Shape(Box<ShapeNode>),
     /// Sentinel produced by the error-recovery path when a value could not be parsed.
     Error,
+}
+
+// ─── ShapeNode ───────────────────────────────────────────────────────────────
+
+/// A `shape:` block inside a slide.
+///
+/// ```sf
+/// slide content:
+///   shape:
+///     type "rectangle"
+///     position "50,50,200,100"
+///     fill "#0070C0"
+///     text "Click here"
+///     alt "A blue rectangle labelled Click here"
+/// ```
+///
+/// # Fields
+///
+/// All five fields are optional at parse time.  The validator (STORY-016)
+/// enforces that `alt` is present unless `decorative: true` is set on the
+/// enclosing slide.
+///
+/// # STORY-009
+///
+/// This node is produced by `parser/shape.rs::shape_block()` and stored as
+/// [`FieldValue::Shape`] inside a [`FieldNode`] with the synthetic name
+/// `"shape"`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ShapeNode {
+    /// The shape type keyword (e.g. `"rectangle"`, `"circle"`, `"line"`).
+    ///
+    /// Stored as-is; the validator resolves it against the allowed type set.
+    pub shape_type: Option<Spanned<String>>,
+
+    /// The position and size specification: `"x,y,width,height"` in EMU units
+    /// or a named anchor keyword (e.g. `"center"`, `"full-bleed"`).
+    pub position: Option<Spanned<String>>,
+
+    /// The fill color or token reference (e.g. `"#0070C0"`, `"brand.accent"`).
+    pub fill: Option<Spanned<String>>,
+
+    /// The text content of the shape, as a parsed template value.
+    ///
+    /// May contain `{{ expr }}` interpolation and math regions — the full
+    /// [`TemplateValue`] representation is used here.
+    pub text: Option<Spanned<TemplateValue>>,
+
+    /// Accessibility label for the shape.
+    ///
+    /// `None` at parse time does NOT mean the shape is decorative — the
+    /// validator enforces `alt` presence unless `decorative: true` is set.
+    pub alt: Option<Spanned<String>>,
 }
 
 // ─── FieldNode ───────────────────────────────────────────────────────────────
@@ -827,5 +906,104 @@ mod tests {
             panic!("expected List");
         };
         assert!(elems.is_empty());
+    }
+
+    // ── STORY-009: ShapeNode and FieldValue::Shape ────────────────────────────
+
+    #[test]
+    fn test_bc_1_09_009_shape_node_all_fields_constructible() {
+        // AC-009: ShapeNode must be constructible with all five fields set.
+        let span = dummy_span();
+        let node = ShapeNode {
+            shape_type: Some(Spanned::new("rectangle".to_string(), span)),
+            position: Some(Spanned::new("50,50,200,100".to_string(), span)),
+            fill: Some(Spanned::new("#0070C0".to_string(), span)),
+            text: Some(Spanned::new(
+                vec![TemplateChunk::Literal("Click here".to_string())],
+                span,
+            )),
+            alt: Some(Spanned::new(
+                "A blue rectangle labelled Click here".to_string(),
+                span,
+            )),
+        };
+        assert_eq!(node.shape_type.as_ref().unwrap().value(), "rectangle");
+        assert_eq!(node.position.as_ref().unwrap().value(), "50,50,200,100");
+        assert_eq!(node.fill.as_ref().unwrap().value(), "#0070C0");
+        assert!(node.text.is_some());
+        assert_eq!(
+            node.alt.as_ref().unwrap().value(),
+            "A blue rectangle labelled Click here"
+        );
+    }
+
+    #[test]
+    fn test_bc_1_09_009_shape_node_all_none_is_valid_at_parse_time() {
+        // AC-009: all fields are optional at parse time (validator enforces alt later).
+        let node = ShapeNode {
+            shape_type: None,
+            position: None,
+            fill: None,
+            text: None,
+            alt: None,
+        };
+        assert!(node.shape_type.is_none());
+        assert!(node.position.is_none());
+        assert!(node.fill.is_none());
+        assert!(node.text.is_none());
+        assert!(node.alt.is_none());
+    }
+
+    #[test]
+    fn test_bc_1_09_009_shape_node_derives_hash_eq_clone_debug() {
+        // AC-015: ShapeNode must implement Hash + Eq + Clone + Debug.
+        let node = ShapeNode {
+            shape_type: None,
+            position: None,
+            fill: None,
+            text: None,
+            alt: None,
+        };
+        let node2 = node.clone();
+        assert_eq!(node, node2);
+        let _ = format!("{node:?}");
+        let mut set = HashSet::new();
+        set.insert(node);
+        assert_eq!(set.len(), 1);
+    }
+
+    #[test]
+    fn test_bc_1_09_009_field_value_shape_variant_hash_eq_clone_debug() {
+        // AC-015: FieldValue::Shape must implement Hash + Eq + Clone + Debug.
+        let node = ShapeNode {
+            shape_type: None,
+            position: None,
+            fill: None,
+            text: None,
+            alt: None,
+        };
+        let fv = FieldValue::Shape(Box::new(node));
+        let fv2 = fv.clone();
+        assert_eq!(fv, fv2);
+        let _ = format!("{fv:?}");
+        let mut set = HashSet::new();
+        set.insert(fv);
+        assert_eq!(set.len(), 1);
+    }
+
+    #[test]
+    fn test_bc_1_09_009_field_value_shape_is_distinct_from_other_variants() {
+        // FieldValue::Shape must not equal FieldValue::Ident("shape") or Template.
+        let shape_fv = FieldValue::Shape(Box::new(ShapeNode {
+            shape_type: None,
+            position: None,
+            fill: None,
+            text: None,
+            alt: None,
+        }));
+        let ident_fv = FieldValue::Ident("shape".to_string());
+        assert_ne!(shape_fv, ident_fv);
+        let template_fv = FieldValue::Template(vec![TemplateChunk::Literal("shape".to_string())]);
+        assert_ne!(shape_fv, template_fv);
     }
 }

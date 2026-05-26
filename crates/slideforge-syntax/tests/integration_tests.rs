@@ -24,10 +24,13 @@ use slideforge_syntax::{
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /// Parse a source string, adding it to a fresh [`SourceMap`].
+///
+/// Returns the inner `DeckNode` on success (ignoring warnings) so that
+/// existing tests don't need to unwrap a `ParseResult` at every call site.
 fn parse_str(src: &str) -> Result<DeckNode, Vec<SyntaxError>> {
     let mut sm = SourceMap::new();
     let file_id = sm.add_file(Arc::from("test.sf"), Arc::from(src));
-    parse(src, file_id, &sm)
+    parse(src, file_id, &sm).map(|pr| pr.deck)
 }
 
 /// Parse a fixture file (relative to `tests/fixtures/`).
