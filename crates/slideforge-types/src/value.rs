@@ -470,10 +470,7 @@ mod tests {
         let cases = [
             (Value::Str(Arc::from("")), crate::TypeKind::Str),
             (Value::Int(0), crate::TypeKind::Int),
-            (
-                Value::Float(OrderedFloat(0.0)),
-                crate::TypeKind::Float,
-            ),
+            (Value::Float(OrderedFloat(0.0)), crate::TypeKind::Float),
             (Value::Bool(false), crate::TypeKind::Bool),
             (Value::List(vec![]), crate::TypeKind::List),
             (Value::Map(OrderedMap::new()), crate::TypeKind::Map),
@@ -556,7 +553,11 @@ mod tests {
     fn test_bc_1_02_003_as_bool_does_not_coerce_str() {
         // Value::Str("true") must NOT become Some(true)
         let v = Value::Str(Arc::from("true"));
-        assert_eq!(v.as_bool(), None, "Str(\"true\") must not coerce to Some(true)");
+        assert_eq!(
+            v.as_bool(),
+            None,
+            "Str(\"true\") must not coerce to Some(true)"
+        );
     }
 
     #[test]
