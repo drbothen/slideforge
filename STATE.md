@@ -152,6 +152,7 @@ Internal sequencing:
 - 2026-05-26 — STORY-002 MERGED (PR #2, ae344a83) — Plugin Trait API, 10 surfaces, 106 tests, 4 adversarial passes (6→0→0→0), 3/3 clean
 - 2026-05-26 — STORY-004 MERGED (PR #3, 2489e8d8) — Value System + EMU Types, 212 tests, 4 adversarial passes (3→0→0→0), 3/3 clean
 - 2026-05-26 — STORY-005 MERGED (PR #4, cc04ba50) — Lexer + Mode-Based Tokenization, 45 tests, 6 adversarial passes (7→1→0→0→0→0), 3/3 clean
+- 2026-05-26 — STORY-006 MERGED (PR #5, 769bf8e3) — Parser Core (deck/slide/fields/indentation), 101 tests, 5 adversarial passes (7→4→0→0→0), 3/3 clean
 
 ## Decision Documents (canonical references)
 
