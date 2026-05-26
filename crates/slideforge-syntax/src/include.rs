@@ -387,13 +387,15 @@ impl<'a> IncludeResolver<'a> {
         self.visited.remove(&canonical);
 
         match sub_deck {
-            Ok(mut included_deck) => {
+            Ok(parse_result) => {
                 // Recursively resolve any @include directives in the included file.
                 // We need to update base_dir to the directory of the included file.
                 let old_base_dir = self.base_dir.clone();
                 if let Some(parent) = canonical.parent() {
                     self.base_dir = parent.to_path_buf();
                 }
+
+                let mut included_deck = parse_result.deck;
 
                 // Recurse only if the included deck has items that might contain @include.
                 let items = if included_deck.items.iter().any(

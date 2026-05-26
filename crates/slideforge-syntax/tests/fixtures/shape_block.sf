@@ -1,0 +1,17 @@
+slideforge_version "1"
+lang "en-US"
+
+slide content:
+  title "Shape Block Fixture"
+  shape:
+    type "rectangle"
+    position "50,50,200,100"
+    fill "#0070C0"
+    text "Click here"
+    alt "A blue rectangle labelled Click here"
+
+slide content:
+  title "Partial Shape"
+  shape:
+    type "circle"
+    alt "A decorative circle"

@@ -1,0 +1,10 @@
+slideforge_version "1"
+lang "en-US"
+
+vars:
+  client: "Acme Corp"
+  region: "EMEA"
+
+slide title:
+  title "{{ client }} Presentation"
+  subtitle "{{ region }} Q1 Review"

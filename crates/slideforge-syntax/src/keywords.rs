@@ -55,8 +55,13 @@ static RESERVED_KEYWORDS: phf::Map<&'static str, (&'static str, &'static str)> =
     "@export"   => ("E-PAR-006", "export declarations (planned for slideforge v2)"),
     "@type"     => ("E-PAR-006", "type declarations (planned for slideforge v2)"),
     "@schema"   => ("E-PAR-006", "schema declarations (planned for slideforge v2)"),
-    // ── Raw escape hatch (E-PAR-009 — use RawKeyword error, not ReservedKeyword) ──
+    "@yield"    => ("E-PAR-006", "generator-style yield (planned for slideforge v3)"),
+    // ── Raw escape hatch variants (E-PAR-009 — forbidden in user .sf files) ─
     "raw"       => ("E-PAR-009", "raw escape hatch (not available in user .sf files)"),
+    "raw_pptx"  => ("E-PAR-009", "raw PPTX escape hatch (not available in user .sf files)"),
+    "raw_html"  => ("E-PAR-009", "raw HTML escape hatch (not available in user .sf files)"),
+    "raw_xml"   => ("E-PAR-009", "raw XML escape hatch (not available in user .sf files)"),
+    "raw_docx"  => ("E-PAR-009", "raw DOCX escape hatch (not available in user .sf files)"),
     // ── Structural deck-level keywords (E-PAR-006 when used as identifier) ─
     "slideforge_version" => ("E-PAR-006", "deck version declaration"),
     "lang"      => ("E-PAR-006", "deck language declaration"),
@@ -68,6 +73,28 @@ static RESERVED_KEYWORDS: phf::Map<&'static str, (&'static str, &'static str)> =
     "slide"     => ("E-PAR-006", "slide block keyword"),
     "section"   => ("E-PAR-006", "section block keyword"),
     "shape"     => ("E-PAR-006", "shape block keyword"),
+    // ── Reserved bare identifiers (E-PAR-006 — reserved for future use) ──
+    "component" => ("E-PAR-006", "reusable components (planned for slideforge v2)"),
+    "extends"   => ("E-PAR-006", "type extension (planned for slideforge v2)"),
+    "import_as" => ("E-PAR-006", "aliased imports (planned for slideforge v2)"),
+    "macro"     => ("E-PAR-006", "macro system (planned for slideforge v2)"),
+    "template"  => ("E-PAR-006", "template system (planned for slideforge v2)"),
+    "override"  => ("E-PAR-006", "override mechanism (planned for slideforge v2)"),
+    "abstract"  => ("E-PAR-006", "reserved; unused"),
+    "interface" => ("E-PAR-006", "reserved; unused"),
+    "module"    => ("E-PAR-006", "module system (planned for slideforge v2)"),
+    "namespace" => ("E-PAR-006", "reserved; unused"),
+    "type"      => ("E-PAR-006", "type definition (non-alias use) (planned for slideforge v2)"),
+    "enum"      => ("E-PAR-006", "reserved; unused"),
+    "struct"    => ("E-PAR-006", "reserved; unused"),
+    "impl"      => ("E-PAR-006", "reserved; unused"),
+    "trait"     => ("E-PAR-006", "reserved; unused"),
+    "use"       => ("E-PAR-006", "reserved; unused"),
+    "match"     => ("E-PAR-006", "pattern matching (planned for slideforge v2)"),
+    "let"       => ("E-PAR-006", "reserved; unused"),
+    "mut"       => ("E-PAR-006", "reserved; unused"),
+    "ref"       => ("E-PAR-006", "reserved; unused"),
+    "const"     => ("E-PAR-006", "constants (planned for slideforge v2)"),
 };
 
 // ─── Slide-type keyword table ─────────────────────────────────────────────────

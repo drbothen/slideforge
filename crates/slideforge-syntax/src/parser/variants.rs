@@ -430,7 +430,7 @@ mod tests {
     fn parse_deck(src: &str) -> Result<DeckNode, Vec<crate::error::SyntaxError>> {
         let mut sm = SourceMap::new();
         let file_id = sm.add_file(Arc::from("test.sf"), Arc::from(src));
-        crate::parser::parse(src, file_id, &sm)
+        crate::parser::parse(src, file_id, &sm).map(|pr| pr.deck)
     }
 
     // ── AC-004: two variants with include/exclude tags ────────────────────────

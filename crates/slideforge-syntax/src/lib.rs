@@ -63,7 +63,7 @@ pub use keywords::{
 pub use known_fields::known_fields;
 pub use lexer::lex;
 pub use lexer_error::LexError;
-pub use parser::parse;
+pub use parser::{parse, ParseResult};
 pub use span::{SourceFile, SourceMap, Span, Spanned};
 pub use template::TemplateChunk;
 pub use token::{LexerMode, Token};

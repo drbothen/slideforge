@@ -1,0 +1,10 @@
+slideforge_version "1"
+lang "en-US"
+
+slide title:
+  title "Version Gate Fixture"
+  body "This file tests that slideforge_version 1 is accepted."
+
+slide content:
+  title "Slide Two"
+  body "A second slide to ensure multi-slide parsing works correctly."

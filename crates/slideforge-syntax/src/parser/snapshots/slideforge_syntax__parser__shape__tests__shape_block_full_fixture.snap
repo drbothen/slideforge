@@ -1,0 +1,60 @@
+---
+source: crates/slideforge-syntax/src/parser/shape.rs
+expression: node
+---
+ShapeNode {
+    shape_type: Some(
+        Spanned(
+            "rectangle",
+            Span {
+                file_id: 0,
+                start: 0,
+                end: 1,
+            },
+        ),
+    ),
+    position: Some(
+        Spanned(
+            "50,50,200,100",
+            Span {
+                file_id: 0,
+                start: 0,
+                end: 1,
+            },
+        ),
+    ),
+    fill: Some(
+        Spanned(
+            "#0070C0",
+            Span {
+                file_id: 0,
+                start: 0,
+                end: 1,
+            },
+        ),
+    ),
+    text: Some(
+        Spanned(
+            [
+                Literal(
+                    "Click here",
+                ),
+            ],
+            Span {
+                file_id: 0,
+                start: 0,
+                end: 1,
+            },
+        ),
+    ),
+    alt: Some(
+        Spanned(
+            "A blue rectangle labelled Click here",
+            Span {
+                file_id: 0,
+                start: 0,
+                end: 1,
+            },
+        ),
+    ),
+}

@@ -45,6 +45,15 @@ fn empty_interpolation_msg() -> String {
         .to_string()
 }
 
+/// Produce an E-PAR-004 error message for an unterminated math block.
+fn unterminated_math_msg(is_display: bool) -> String {
+    if is_display {
+        "E-PAR-004: unterminated `$$` math block — missing closing `$$`".to_string()
+    } else {
+        "E-PAR-004: unterminated `$` math block — missing closing `$`".to_string()
+    }
+}
+
 // ─── Template string splitter ────────────────────────────────────────────────
 
 /// Represents one segment of a raw template string.
@@ -64,6 +73,13 @@ enum RawChunk<'s> {
     /// Inner content of a `$$...$$` display math region (raw LaTeX, may
     /// contain [`MathInterpSegment`] sub-chunks).
     MathDisplay(Vec<MathSegment<'s>>),
+    /// A `$` or `$$` with no matching closing delimiter — error case (E-PAR-004).
+    UnterminatedMath {
+        /// Whether this was a display (`$$`) or inline (`$`) delimiter.
+        is_display: bool,
+        /// The content between the opening delimiter and end-of-string.
+        content: Vec<MathSegment<'s>>,
+    },
 }
 
 /// A segment inside a math region.
@@ -109,10 +125,13 @@ fn split_template(s: &str) -> Vec<RawChunk<'_>> {
                 chunks.push(RawChunk::MathDisplay(segs));
                 pos = rel + 2;
             } else {
-                // Unterminated `$$` — emit rest as empty display math.
+                // Unterminated `$$` — emit as an error chunk (E-PAR-004).
                 let math_content = &s[content_start..];
                 let segs = parse_math_segments(math_content);
-                chunks.push(RawChunk::MathDisplay(segs));
+                chunks.push(RawChunk::UnterminatedMath {
+                    is_display: true,
+                    content: segs,
+                });
                 pos = len;
             }
             lit_start = pos;
@@ -133,10 +152,13 @@ fn split_template(s: &str) -> Vec<RawChunk<'_>> {
                 chunks.push(RawChunk::MathInline(segs));
                 pos = close + 1;
             } else {
-                // Unterminated `$` — emit rest as empty inline math.
+                // Unterminated `$` — emit as an error chunk (E-PAR-004).
                 let math_content = &s[content_start..];
                 let segs = parse_math_segments(math_content);
-                chunks.push(RawChunk::MathInline(segs));
+                chunks.push(RawChunk::UnterminatedMath {
+                    is_display: false,
+                    content: segs,
+                });
                 pos = len;
             }
             lit_start = pos;
@@ -427,6 +449,13 @@ where
                 },
                 RawChunk::MathDisplay(segs) => {
                     process_math_segments(segs, true, &mut chunks, &mut errors);
+                },
+                RawChunk::UnterminatedMath { is_display, content } => {
+                    // Emit E-PAR-004 for the unterminated delimiter, then
+                    // produce a math chunk with the partial content so that
+                    // error recovery produces a meaningful AST.
+                    errors.push(unterminated_math_msg(is_display));
+                    process_math_segments(content, is_display, &mut chunks, &mut errors);
                 },
             }
         }

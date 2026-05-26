@@ -2,7 +2,7 @@
 //!
 //! This module exposes the public [`parse`] function that takes a `.sf` source
 //! string, lexes it, and runs the chumsky 0.10 parser over the resulting token
-//! stream, returning a typed [`DeckNode`] or accumulated [`SyntaxError`]s.
+//! stream, returning a typed [`ParseResult`] or accumulated [`SyntaxError`]s.
 //!
 //! # Pipeline
 //!
@@ -10,14 +10,20 @@
 //! &str (source)
 //!   → lex()                     → (Vec<Spanned<Token>>, Vec<LexError>)
 //!   → deck_parser().parse(...)  → (Option<DeckNode>, Vec<Rich<Token>>)
-//!   → error conversion          → Result<DeckNode, Vec<SyntaxError>>
+//!   → error conversion          → Result<ParseResult, Vec<SyntaxError>>
 //! ```
 //!
 //! # Error Accumulation (DI-018)
 //!
 //! Lex errors and parse errors are both collected. If either list is non-empty,
 //! `parse()` returns `Err(errors)`. Only when both lists are empty does it
-//! return `Ok(deck)`.
+//! return `Ok(ParseResult { deck, warnings })`.
+//!
+//! # Warnings
+//!
+//! Non-fatal diagnostics (e.g., missing `slideforge_version`) are returned in
+//! `ParseResult::warnings` even on a successful parse. Fatal errors cause an
+//! `Err` return; warnings never do.
 
 pub mod alias;
 pub mod control_flow;
@@ -43,11 +49,29 @@ use self::deck::deck_parser;
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
+/// The successful result of parsing a `.sf` source file.
+///
+/// On a successful parse, `parse()` returns `Ok(ParseResult)`.
+/// * `deck` — the typed AST.
+/// * `warnings` — non-fatal diagnostics accumulated during parsing (e.g., a
+///   missing `slideforge_version` declaration).  The parse succeeded even if
+///   this list is non-empty.
+#[derive(Debug, Clone)]
+pub struct ParseResult {
+    /// The parsed AST.
+    pub deck: DeckNode,
+    /// Non-fatal diagnostics (E-PAR-010 missing-version warning, etc.).
+    pub warnings: Vec<SyntaxError>,
+}
+
 /// Parse a `.sf` source string into a typed AST.
 ///
-/// Returns `Ok(DeckNode)` if parsing succeeds with zero errors.
-/// Returns `Err(errors)` if one or more parse errors were accumulated.
+/// Returns `Ok(ParseResult)` if parsing succeeds with zero fatal errors.
+/// Returns `Err(errors)` if one or more fatal parse errors were accumulated.
 /// Never panics on valid UTF-8 input.
+///
+/// Non-fatal diagnostics (e.g., missing `slideforge_version`) are returned in
+/// [`ParseResult::warnings`] on a successful parse.
 ///
 /// # Parameters
 ///
@@ -65,7 +89,7 @@ pub fn parse(
     src: &str,
     file_id: u32,
     source_map: &SourceMap,
-) -> Result<DeckNode, Vec<SyntaxError>> {
+) -> Result<ParseResult, Vec<SyntaxError>> {
     // Phase 1: lex the source string.
     let file_path = source_map
         .get(file_id)
@@ -79,7 +103,23 @@ pub fn parse(
         .map(|e| lex_error_to_syntax_error(e, src))
         .collect();
 
-    // Phase 3: run the chumsky parser over the token stream.
+    // Phase 3: Pre-parse version gate (BC-1.13.001 / AC-002 fail-fast).
+    //
+    // Scan the token stream for `slideforge_version` before running the full
+    // chumsky parser. A forward-incompatible version (major != 1) is a fatal
+    // error — return immediately without running the chumsky parser.
+    //
+    // Token layout:  Ident("slideforge_version")  StringLit(ver)  Newline
+    let version_gate_result =
+        pre_parse_version_gate(src, &tokens, &file_path, &mut errors);
+
+    if version_gate_result == VersionGateResult::FatalVersionError {
+        // AC-002: a forward-incompatible version was detected.  No further
+        // parsing occurs (BC-1.13.001 postcondition 1).
+        return Err(errors);
+    }
+
+    // Phase 4: run the chumsky parser over the token stream.
     // Convert lexer spans (Range<usize>) to chumsky SimpleSpan.
     // We build an owned vec of (Token, SimpleSpan) and parse from a slice of it.
     let spanned_tokens: Vec<(Token, SimpleSpan)> = tokens
@@ -96,7 +136,7 @@ pub fn parse(
 
     let (deck_opt, parse_errors) = deck_parser(file_id).parse(input).into_output_errors();
 
-    // Phase 4: convert chumsky Rich errors to SyntaxError.
+    // Phase 5: convert chumsky Rich errors to SyntaxError.
     // When the found token is `Indent(n)`, classify as IndentError (E-PAR-001)
     // since it means the parser encountered an unexpected indentation level.
     for rich_err in parse_errors {
@@ -192,77 +232,122 @@ pub fn parse(
         errors.push(syntax_err);
     }
 
-    // Phase 5: version gate (E-PAR-010).
-    //
-    // Validates the declared version when present. Missing version is a warning
-    // emitted only when the source contains a non-trivial deck (at least one slide).
-    //
-    // Design note: `parse()` returns `Err` for ANY accumulated error, including
-    // version warnings. This means:
-    //
-    // - `slideforge_version "2"` → fatal E-PAR-010 error
-    // - `slideforge_version "0"` → fatal E-PAR-010 error
-    // - `slideforge_version "abc"` → E-PAR-010 error
-    // - `slideforge_version "  "` → E-PAR-010 error
-    // - Missing version + slides present → E-PAR-010 warning (fatal=false)
-    // - Missing version + no slides → no error (e.g., empty file)
-    //
-    // BC-1.09.010: missing version emits E-PAR-010.
-    if let Some(deck) = &deck_opt
-        && let Some(version_node) = &deck.version
-    {
-        let ver_str = version_node.value().trim().to_string();
-        // Parse the major version component (everything before the first `.`).
-        let major_str = ver_str.split('.').next().unwrap_or("");
-        let is_whitespace_only = ver_str.trim().is_empty();
-        let is_non_numeric = major_str.parse::<u64>().is_err();
-
-        if is_whitespace_only || is_non_numeric {
-            // Non-numeric or whitespace-only — always fatal.
-            errors.push(SyntaxError::version_error(
-                file_path.to_string(),
-                format!(
-                    "E-PAR-010: invalid version string '{ver_str}' — \
-                     the version must be a numeric major version, e.g. \"1\""
-                ),
-                true,
-                src.to_string(),
-                0,
-            ));
-        } else {
-            let major: u64 = major_str.parse().unwrap_or(0);
-            if major != 1 {
-                // Numeric but wrong major version (e.g. "0", "2", "3").
-                errors.push(SyntaxError::version_error(
-                    file_path.to_string(),
-                    format!(
-                        "E-PAR-010: forward-incompatible version '{ver_str}' — \
-                         this build of slideforge supports version 1.x only"
-                    ),
-                    true, // always fatal for wrong major version
-                    src.to_string(),
-                    0,
-                ));
-            }
-        }
-        // Note: missing version is intentionally NOT checked here. The spec
-        // (BC-1.09.010) requires a missing-version E-PAR-010 error, but
-        // implementing it would break the existing test suite — numerous
-        // pre-STORY-009 tests omit `slideforge_version` and expect `Ok`.
-        // Resolving this contradiction requires updating those older tests to
-        // include `slideforge_version "1"`, which is outside STORY-009 scope.
-        // The missing-version gate will be activated in a follow-up story once
-        // all callers of `parse()` have been updated to include the declaration.
-    }
-
     // Phase 6: gate on error count.
     if !errors.is_empty() {
         return Err(errors);
     }
 
-    // Phase 7: return the AST. If parse produced no errors but also no output
-    // (e.g. empty file), return a default empty DeckNode.
-    Ok(deck_opt.unwrap_or_default())
+    // Phase 7: accumulate warnings.
+    //
+    // Missing `slideforge_version` is a non-fatal warning per BC-1.09.010 /
+    // BC-1.13.001 postcondition 2.  Emit it when the source contains slides.
+    let mut warnings: Vec<SyntaxError> = Vec::new();
+    let deck = deck_opt.unwrap_or_default();
+    if version_gate_result == VersionGateResult::MissingVersion && !deck.items.is_empty() {
+        warnings.push(SyntaxError::version_error(
+            file_path.to_string(),
+            "E-PAR-010: missing slideforge_version declaration — \
+             add 'slideforge_version \"1\"' as the first line of your .sf file"
+                .to_string(),
+            false, // non-fatal: missing version is a warning, not a hard error
+            src.to_string(),
+            0,
+        ));
+    }
+
+    // Phase 8: return the AST with any accumulated warnings.
+    Ok(ParseResult { deck, warnings })
+}
+
+// ─── Version gate ────────────────────────────────────────────────────────────
+
+/// Result of the pre-parse version gate scan.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum VersionGateResult {
+    /// Version is present and compatible (major == 1).
+    Compatible,
+    /// Version is present but incompatible — a fatal error was pushed.
+    FatalVersionError,
+    /// No version declaration was found.
+    MissingVersion,
+}
+
+/// Scan the raw token stream (before the chumsky parse) for a
+/// `slideforge_version` declaration.
+///
+/// If found with a forward-incompatible major version (≠ 1), pushes a fatal
+/// [`SyntaxError::VersionError`] to `errors` and returns
+/// [`VersionGateResult::FatalVersionError`].
+///
+/// If found and compatible, returns [`VersionGateResult::Compatible`] —
+/// no error is pushed.
+///
+/// If not found, returns [`VersionGateResult::MissingVersion`] — the caller
+/// is responsible for emitting the non-fatal E-PAR-010 warning after the
+/// chumsky parse succeeds.
+///
+/// This implements the **fail-fast version gate** described in BC-1.13.001:
+/// AC-002 "no further parsing occurs" when an incompatible version is declared.
+fn pre_parse_version_gate(
+    src: &str,
+    tokens: &[(Token, std::ops::Range<usize>)],
+    file_path: &str,
+    errors: &mut Vec<SyntaxError>,
+) -> VersionGateResult {
+    // Scan token pairs: Ident("slideforge_version") followed by StringLit(ver).
+    let mut i = 0usize;
+    while i < tokens.len() {
+        let (tok, _span) = &tokens[i];
+        if let Token::Ident(name) = tok
+            && name.as_ref() == "slideforge_version"
+        {
+            // Look for the StringLit immediately after (skipping nothing —
+            // the lexer emits them consecutively on the same line).
+            if let Some((Token::StringLit(ver), ver_span)) = tokens.get(i + 1) {
+                    let ver_str = ver.trim().to_string();
+                    let major_str = ver_str.split('.').next().unwrap_or("");
+                    let is_whitespace_only = ver_str.trim().is_empty();
+                    let is_non_numeric = major_str.parse::<u64>().is_err();
+
+                    if is_whitespace_only || is_non_numeric {
+                        errors.push(SyntaxError::version_error(
+                            file_path.to_string(),
+                            format!(
+                                "E-PAR-010: invalid version string '{ver_str}' — \
+                                 the version must be a numeric major version, e.g. \"1\""
+                            ),
+                            true,
+                            src.to_string(),
+                            ver_span.start,
+                        ));
+                        return VersionGateResult::FatalVersionError;
+                    }
+
+                    let major: u64 = major_str.parse().unwrap_or(0);
+                    if major != 1 {
+                        errors.push(SyntaxError::version_error(
+                            file_path.to_string(),
+                            format!(
+                                "E-PAR-010: forward-incompatible version '{ver_str}' — \
+                                 this build of slideforge supports version 1.x only"
+                            ),
+                            true,
+                            src.to_string(),
+                            ver_span.start,
+                        ));
+                        return VersionGateResult::FatalVersionError;
+                    }
+
+                    // Major == 1: compatible.
+                    return VersionGateResult::Compatible;
+                }
+                // slideforge_version with no following string — unusual; let
+                // the chumsky parser generate the appropriate error.
+                return VersionGateResult::Compatible;
+            }
+        i += 1;
+    }
+    VersionGateResult::MissingVersion
 }
 
 // ─── Internal helpers ────────────────────────────────────────────────────────
@@ -431,7 +516,7 @@ mod tests {
     use std::sync::Arc;
 
     /// Helper: add a file to a fresh [`SourceMap`] and call [`parse`].
-    fn parse_str(src: &str) -> Result<DeckNode, Vec<SyntaxError>> {
+    fn parse_str(src: &str) -> Result<ParseResult, Vec<SyntaxError>> {
         let mut sm = SourceMap::new();
         let file_id = sm.add_file(Arc::from("test.sf"), Arc::from(src));
         parse(src, file_id, &sm)
@@ -452,7 +537,7 @@ mod tests {
             result.is_ok(),
             "minimal deck must parse without errors: {result:?}"
         );
-        let deck = result.unwrap();
+        let deck = result.unwrap().deck;
         assert_eq!(deck.items.len(), 1, "must have 1 block item (the slide)");
         assert_eq!(deck.version.as_ref().map(|v| v.value().as_str()), Some("1"));
     }
@@ -470,7 +555,11 @@ mod tests {
         );
         let r1 = parse_str(src);
         let r2 = parse_str(src);
-        assert_eq!(r1.ok(), r2.ok(), "same source must produce identical ASTs");
+        assert_eq!(
+            r1.ok().map(|p| p.deck),
+            r2.ok().map(|p| p.deck),
+            "same source must produce identical ASTs"
+        );
     }
 
     // ── AC-005: indent error single ────────────────────────────────────────────
@@ -551,9 +640,9 @@ mod tests {
     fn test_bc_1_01_001_empty_file_no_panic() {
         // Must not panic. Returns Ok with empty items or Err.
         let result = parse_str("");
-        if let Ok(deck) = result {
+        if let Ok(pr) = result {
             assert!(
-                deck.items.is_empty(),
+                pr.deck.items.is_empty(),
                 "empty source must produce 0 block items"
             );
         }
@@ -571,7 +660,7 @@ mod tests {
         );
         let result = parse_str(src);
         assert!(result.is_ok(), "must parse without errors: {result:?}");
-        let deck = result.unwrap();
+        let deck = result.unwrap().deck;
         let BlockItem::Slide(slide_s) = &deck.items[0] else {
             panic!("expected Slide block item");
         };
@@ -601,7 +690,7 @@ mod tests {
         );
         let result = parse_str(src);
         assert!(result.is_ok(), "must parse: {result:?}");
-        let deck = result.unwrap();
+        let deck = result.unwrap().deck;
         assert_eq!(deck.vars.len(), 1);
         let vb = &deck.vars[0];
         assert_eq!(vb.entries[0].0.value(), "client");
@@ -622,7 +711,7 @@ mod tests {
         );
         let result = parse_str(src);
         assert!(result.is_ok(), "must parse: {result:?}");
-        let deck = result.unwrap();
+        let deck = result.unwrap().deck;
         assert_eq!(deck.set_rules.len(), 1);
         assert_eq!(deck.set_rules[0].slide_type.value(), "content");
         assert_eq!(deck.set_rules[0].field.value(), "footer");
@@ -640,7 +729,7 @@ mod tests {
             "  body \"World\"\n",
         );
         let result = parse_str(src);
-        let deck = result.expect("must parse");
+        let deck = result.expect("must parse").deck;
         let src_len = src.len();
         // Check that all string spans are within source bounds.
         for item in &deck.items {
@@ -681,7 +770,7 @@ mod tests {
         );
         let result = parse_str(src);
         assert!(result.is_ok(), "version 1 must be accepted: {result:?}");
-        let deck = result.unwrap();
+        let deck = result.unwrap().deck;
         assert_eq!(
             deck.version.as_ref().map(|v| v.value().as_str()),
             Some("1"),
@@ -715,28 +804,36 @@ mod tests {
         );
     }
 
-    // ── AC-003: Missing version → version field is None ────────────────────────
+    // ── AC-003: Missing version → E-PAR-010 warning (non-fatal) ─────────────
     //
-    // Per BC-1.13.001 postcondition 2, a missing `slideforge_version` declaration
-    // is a WARNING, not a fatal error. The parser returns Ok with version: None.
-    // When warning infrastructure is added (Phase 5 scope), this test will be
-    // extended to verify the warning is emitted. For now, we verify the parse
-    // succeeds and version is None — the correct non-fatal behavior.
+    // Per BC-1.09.010 / BC-1.13.001 postcondition 2, a missing
+    // `slideforge_version` declaration is a non-fatal WARNING.  The parser
+    // returns Ok (parse succeeds), but ParseResult::warnings contains a
+    // VersionError with is_fatal=false.
 
     #[test]
     fn test_bc_1_09_010_missing_version_parses_ok_with_none() {
         // AC-003: a deck with no `slideforge_version` parses successfully;
-        // DeckNode.version is None. Warning emission deferred to warning infra.
+        // DeckNode.version is None AND warnings contain E-PAR-010.
         let src = concat!("slide title:\n", "  title \"No version\"\n",);
         let result = parse_str(src);
         assert!(
             result.is_ok(),
             "missing version is a warning per BC-1.13.001 — parse must succeed; got: {result:?}"
         );
-        let deck = result.unwrap();
+        let pr = result.unwrap();
         assert!(
-            deck.version.is_none(),
+            pr.deck.version.is_none(),
             "version must be None when slideforge_version is absent"
+        );
+        let has_version_warning = pr
+            .warnings
+            .iter()
+            .any(|e| matches!(e, SyntaxError::VersionError { is_fatal: false, .. }));
+        assert!(
+            has_version_warning,
+            "missing version must emit E-PAR-010 warning (non-fatal); got warnings: {:?}",
+            pr.warnings
         );
     }
 
@@ -788,7 +885,7 @@ mod tests {
         let src = concat!("slide title:\n", "  title \"$x^2$\"\n",);
         let result = parse_str(src);
         assert!(result.is_ok(), "math inline must parse: {result:?}");
-        let deck = result.unwrap();
+        let deck = result.unwrap().deck;
         let BlockItem::Slide(slide_s) = &deck.items[0] else {
             panic!("expected Slide");
         };
@@ -822,7 +919,7 @@ mod tests {
         let src = concat!("slide content:\n", "  body \"$$\\\\sum_{i=0}^{n} i$$\"\n",);
         let result = parse_str(src);
         assert!(result.is_ok(), "math display must parse: {result:?}");
-        let deck = result.unwrap();
+        let deck = result.unwrap().deck;
         let BlockItem::Slide(slide_s) = &deck.items[0] else {
             panic!("expected Slide");
         };
@@ -853,7 +950,7 @@ mod tests {
         let src = concat!("slide title:\n", "  title \"$@{base}^2$\"\n",);
         let result = parse_str(src);
         assert!(result.is_ok(), "math with @{{}} must parse: {result:?}");
-        let deck = result.unwrap();
+        let deck = result.unwrap().deck;
         let BlockItem::Slide(slide_s) = &deck.items[0] else {
             panic!("expected Slide");
         };
@@ -886,7 +983,7 @@ mod tests {
             result.is_ok(),
             "{{ }} in math must parse (as literal): {result:?}"
         );
-        let deck = result.unwrap();
+        let deck = result.unwrap().deck;
         let BlockItem::Slide(slide_s) = &deck.items[0] else {
             panic!("expected Slide");
         };
@@ -1083,8 +1180,9 @@ mod tests {
         // but must NOT silently parse as a plain string.
         let src = concat!("slide title:\n", "  title \"$$\"\n",);
         let result = parse_str(src);
-        if let Ok(deck) = result {
+        if let Ok(pr) = result {
             // If it parsed OK, the chunk must be an empty MathInline, not a Literal.
+            let deck = pr.deck;
             let BlockItem::Slide(slide_s) = &deck.items[0] else {
                 panic!("expected Slide");
             };
@@ -1118,7 +1216,8 @@ mod tests {
         let result = parse_str(src);
         // May be an error or a degraded parse — must not silently succeed with
         // the outer dollar signs treated as normal text-mode literal.
-        if let Ok(deck) = result {
+        if let Ok(pr) = result {
+            let deck = pr.deck;
             let BlockItem::Slide(slide_s) = &deck.items[0] else {
                 panic!("expected Slide");
             };
@@ -1282,5 +1381,106 @@ mod tests {
         // Snapshot test: MathInterp(Expr::Ident("base")) must render consistently.
         let chunk = TemplateChunk::MathInterp(Expr::Ident("base".to_string()));
         insta::assert_debug_snapshot!("math_interp_chunk_base", chunk);
+    }
+
+    // ── EC-002 (adversary): slideforge_version after slide block → no repeat ──
+
+    #[test]
+    fn test_bc_1_09_010_version_decl_after_slide_is_ignored() {
+        // EC-002: `slideforge_version "1"` appearing AFTER a slide block is not
+        // a fatal error but the version node in DeckNode may be None (the deck
+        // parser only captures the version in the header position).
+        // The test verifies no crash and no spurious VersionError.
+        let src = concat!(
+            "slide title:\n",
+            "  title \"First\"\n",
+            "slideforge_version \"1\"\n",
+        );
+        let result = parse_str(src);
+        // Version after a slide is a misplaced declaration. May parse or may
+        // produce an unexpected-token error, but must NOT produce a fatal
+        // VersionError (E-PAR-010) — the pre-parse gate already ran.
+        if let Err(errors) = &result {
+            let has_fatal_version_error = errors.iter().any(|e| {
+                matches!(e, SyntaxError::VersionError { is_fatal: true, .. })
+            });
+            assert!(
+                !has_fatal_version_error,
+                "version decl after slide must not produce a fatal E-PAR-010; got: {errors:?}"
+            );
+        }
+    }
+
+    // ── EC-006: comment containing the word 'raw' → no error ─────────────────
+
+    #[test]
+    fn test_bc_1_09_009_comment_with_raw_word_no_error() {
+        // EC-006: A comment containing the word `raw` must NOT produce E-PAR-009.
+        // The `raw` keyword is only rejected at field-name position; inside a
+        // `#`-comment it must be ignored entirely.
+        let src = concat!(
+            "slideforge_version \"1\"\n",
+            "# raw OOXML here\n",
+            "slide title:\n",
+            "  title \"Test\"\n",
+        );
+        let result = parse_str(src);
+        assert!(
+            result.is_ok(),
+            "comment containing 'raw' must NOT produce any error; got: {result:?}"
+        );
+    }
+
+    // ── EC-007: two var-name collisions accumulated ───────────────────────────
+
+    #[test]
+    fn test_bc_1_09_008_two_var_collisions_accumulated() {
+        // EC-007: two vars entries with reserved slide-type names must produce
+        // ≥ 2 VarNameCollision errors (accumulation, not fail-fast).
+        let src = concat!(
+            "slideforge_version \"1\"\n",
+            "vars:\n",
+            "  title: \"My Deck\"\n",
+            "  chart: \"data\"\n",
+            "slide title:\n",
+            "  title \"Test\"\n",
+        );
+        let result = parse_str(src);
+        assert!(
+            result.is_err(),
+            "two var collisions must produce Err; got Ok"
+        );
+        let errors = result.unwrap_err();
+        let collision_count = errors
+            .iter()
+            .filter(|e| matches!(e, SyntaxError::VarNameCollision { .. }))
+            .count();
+        assert!(
+            collision_count >= 2,
+            "must accumulate >= 2 VarNameCollision errors; got {collision_count}: {errors:?}"
+        );
+    }
+
+    // ── EC-008: raw_pptx as field name → E-PAR-009 ───────────────────────────
+
+    #[test]
+    fn test_bc_1_09_009_raw_pptx_variant_rejected_with_e_par_009() {
+        // EC-008: `raw_pptx "value"` as a slide field name must be rejected.
+        // The `raw_pptx` identifier is in RESERVED_KEYWORDS with E-PAR-009.
+        // The field-line parser's raw_rejected arm catches `raw` prefix tokens;
+        // `raw_pptx` is a single identifier and must be caught by keyword check.
+        let src = concat!(
+            "slideforge_version \"1\"\n",
+            "slide content:\n",
+            "  raw_pptx \"<a:sp/>\"\n",
+        );
+        let result = parse_str(src);
+        // raw_pptx is a reserved identifier — must NOT parse as a plain field.
+        // The parser may produce E-PAR-009 or E-PAR-002 depending on how the
+        // field-line combinator handles it; Ok is NOT acceptable.
+        assert!(
+            result.is_err(),
+            "raw_pptx as field name must be rejected; got Ok"
+        );
     }
 }

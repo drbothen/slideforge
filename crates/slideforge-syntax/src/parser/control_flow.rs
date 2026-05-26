@@ -123,23 +123,34 @@ where
         })
     });
 
-    // `raw` field rejection: `raw ...` at slide field position → E-PAR-009.
+    // `raw` / `raw_*` field rejection: at slide field position → E-PAR-009.
     //
-    // The `raw` escape hatch (`raw pptx:`, `raw html:`, bare `raw`) is not
+    // The `raw` escape hatch (`raw pptx:`, `raw html:`, `raw_pptx`, etc.) is not
     // available in user .sf files (AC-010). Reject it here so that the error
     // message is specific rather than a generic parse failure.
-    let raw_rejected = select! { Token::Ident(s) = e if s.as_ref() == "raw" => e.span() }
+    //
+    // This matcher catches both the bare `raw` token AND the underscore variants
+    // `raw_pptx`, `raw_html`, `raw_xml`, `raw_docx` which are reserved in
+    // RESERVED_KEYWORDS with E-PAR-009.
+    let raw_rejected = select! {
+        Token::Ident(s) = e if matches!(
+            s.as_ref(),
+            "raw" | "raw_pptx" | "raw_html" | "raw_xml" | "raw_docx"
+        ) => (s.to_string(), e.span())
+    }
         .then_ignore(
             any()
                 .filter(|t: &Token| !matches!(t, Token::Newline | Token::Dedent | Token::Eof))
                 .repeated(),
         )
         .then_ignore(just(Token::Newline).or_not())
-        .validate(|_span, info, emitter| {
+        .validate(|(name, _span), info, emitter| {
             emitter.emit(Rich::custom(
                 info.span(),
-                "E-PAR-009: 'raw' escape hatch is not available in user .sf files. \
-                 Use a 'shape:' block to embed custom shapes.",
+                format!(
+                    "E-PAR-009: '{name}' escape hatch is not available in user .sf files. \
+                     Use a 'shape:' block to embed custom shapes."
+                ),
             ));
         })
         .map(move |()| {
@@ -599,10 +610,13 @@ mod tests {
     };
 
     /// Helper: parse source string through the full lex → deck pipeline.
+    ///
+    /// Returns the inner `DeckNode` on success (ignoring warnings) so that
+    /// existing tests don't need to unwrap a `ParseResult` at every call site.
     fn parse_str(src: &str) -> Result<DeckNode, Vec<crate::error::SyntaxError>> {
         let mut sm = SourceMap::new();
         let file_id = sm.add_file(Arc::from("test.sf"), Arc::from(src));
-        parse(src, file_id, &sm)
+        parse(src, file_id, &sm).map(|pr| pr.deck)
     }
 
     // ── AC-001: @for over ident collection ───────────────────────────────────

@@ -1,0 +1,11 @@
+slideforge_version "1"
+lang "en-US"
+
+slide content:
+  title "Math Inline Fixture"
+  body "The quadratic formula is $x = \frac{-b \pm \sqrt{b^2 - 4ac}}{2a}$."
+  footer "Display math: $$\sum_{i=0}^{n} i = \frac{n(n+1)}{2}$$"
+
+slide content:
+  title "Math Interpolation"
+  body "The result is $@{value}^2$."
