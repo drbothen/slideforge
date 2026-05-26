@@ -47,9 +47,8 @@ allow = [
     "Unicode-3.0",
 ]
 
-# Deny all licenses not in the allow list.
-# "unlicensed" is an implicit deny unless explicitly added to allow.
-deny = []
+# Note: licenses not in the allow list above are implicitly denied.
+# The separate 'deny' key was removed in cargo-deny 0.19.7 (see PR #611).
 
 # Exceptions for crates with non-standard license expression formatting.
 # Add entries here when cargo-deny cannot parse the license for a known-safe dep.
