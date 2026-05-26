@@ -40,15 +40,25 @@ use crate::traits::{
 /// include `Send + Sync`. See the compile-time assertion in this module.
 #[derive(Default)]
 pub struct PluginRegistry {
+    /// Registered data source plugins.
     data_sources: Vec<Box<dyn DataSource + Send + Sync>>,
+    /// Registered exporter plugins.
     exporters: Vec<Box<dyn Exporter + Send + Sync>>,
+    /// Registered chart renderer plugins.
     chart_renderers: Vec<Box<dyn ChartRenderer + Send + Sync>>,
+    /// Registered diagram renderer plugins.
     diagram_renderers: Vec<Box<dyn DiagramRenderer + Send + Sync>>,
+    /// Registered validator plugins.
     validators: Vec<Box<dyn Validator + Send + Sync>>,
+    /// Registered math renderer plugins.
     math_renderers: Vec<Box<dyn MathRenderer + Send + Sync>>,
+    /// Registered brand provider plugins.
     brand_providers: Vec<Box<dyn BrandProvider + Send + Sync>>,
+    /// Registered slide type plugins.
     slide_types: Vec<Box<dyn SlideType + Send + Sync>>,
+    /// Registered section type plugins.
     section_types: Vec<Box<dyn SectionType + Send + Sync>>,
+    /// Registered inline format plugins.
     inline_formats: Vec<Box<dyn InlineFormat + Send + Sync>>,
 }
 
