@@ -6,6 +6,7 @@
 [workspace]
 resolver = "3"
 members = [
+    "crates/slideforge-types",
     "crates/slideforge",
     "crates/slideforge-cli",
     "crates/slideforge-syntax",
@@ -48,7 +49,9 @@ walkdir = "2"
 notify = "6"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-thiserror = "1"
+thiserror = "2"
+ordered-float = "4"
+indexmap = { version = "2", features = ["std"] }
 anyhow = "1"
 
 # Testing
@@ -56,6 +59,7 @@ insta = "1"
 pretty_assertions = "1"
 
 # Internal workspace crates (referenced as path dependencies from each crate).
+slideforge-types = { path = "crates/slideforge-types", version = "0.1.0" }
 slideforge = { path = "crates/slideforge", version = "0.1.0" }
 slideforge-syntax = { path = "crates/slideforge-syntax", version = "0.1.0" }
 slideforge-eval = { path = "crates/slideforge-eval", version = "0.1.0" }
