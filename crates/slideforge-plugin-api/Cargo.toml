@@ -16,7 +16,7 @@ categories.workspace = true
 name = "slideforge_plugin_api"
 
 [dependencies]
-# Only allowed workspace dep for this leaf crate: slideforge-types.
 # All production deps pinned with `=` per supply-chain policy.
 slideforge-types.workspace = true
 thiserror = "=2.0.12"
+strsim = { workspace = true }

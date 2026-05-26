@@ -763,6 +763,7 @@ name = "slideforge-plugin-api"
 version = "0.1.0"
 dependencies = [
  "slideforge-types",
+ "strsim",
  "thiserror",
 ]
 
