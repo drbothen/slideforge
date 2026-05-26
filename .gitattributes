@@ -8,3 +8,6 @@
 
 # TOML config files use LF.
 *.toml text eol=lf
+
+# DSL fixture/source files must use LF for byte-offset-sensitive tests.
+*.sf text eol=lf
