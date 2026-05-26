@@ -39,10 +39,12 @@ pub mod error;
 pub mod inline;
 pub mod math;
 pub mod ordered_map;
+pub mod precedence;
 pub mod register;
 pub mod slide;
 pub mod span;
 pub mod specs;
+pub mod type_kind;
 pub mod value;
 
 // Re-export the most commonly used types at the crate root for ergonomics.
@@ -56,8 +58,10 @@ pub use error::TypeError;
 pub use inline::InlineNode;
 pub use math::MathNode;
 pub use ordered_map::OrderedMap;
+pub use precedence::MergePrecedence;
 pub use register::Register;
 pub use slide::{FieldValue, Slide, StringPart};
 pub use span::SourceSpan;
 pub use specs::{ChartSpec, DiagramSpec, ImageSpec, ShapeSpec, TableSpec};
+pub use type_kind::TypeKind;
 pub use value::Value;

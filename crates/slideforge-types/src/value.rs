@@ -10,6 +10,7 @@ use std::sync::Arc;
 use ordered_float::OrderedFloat;
 
 use crate::ordered_map::OrderedMap;
+use crate::type_kind::TypeKind;
 
 /// A runtime value produced by the slideforge evaluator.
 ///
@@ -37,6 +38,11 @@ use crate::ordered_map::OrderedMap;
 /// ```compile_fail
 /// use slideforge_types::Value;
 /// let _: Value = "hello".into(); // must not compile — no From<&str> for Value
+/// ```
+///
+/// ```compile_fail
+/// use slideforge_types::Value;
+/// let _: Value = 1.0_f64.into(); // must not compile — no From<f64> for Value
 /// ```
 ///
 /// ## Hash + Eq
@@ -180,9 +186,86 @@ impl Value {
             Value::Null => "null",
         }
     }
+
+    /// Return the [`TypeKind`] discriminant of this value.
+    ///
+    /// Used by the evaluator to format type-error messages (E-EVL-003) such as
+    /// `"expected integer, got string"` without cloning the full value.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use slideforge_types::{Value, TypeKind};
+    /// use std::sync::Arc;
+    ///
+    /// assert_eq!(Value::Str(Arc::from("hello")).type_kind(), TypeKind::Str);
+    /// assert_eq!(Value::Int(42).type_kind(), TypeKind::Int);
+    /// assert_eq!(Value::Null.type_kind(), TypeKind::Null);
+    /// ```
+    #[must_use]
+    pub fn type_kind(&self) -> TypeKind {
+        match self {
+            Value::Str(_) => TypeKind::Str,
+            Value::Int(_) => TypeKind::Int,
+            Value::Float(_) => TypeKind::Float,
+            Value::Bool(_) => TypeKind::Bool,
+            Value::List(_) => TypeKind::List,
+            Value::Map(_) => TypeKind::Map,
+            Value::Null => TypeKind::Null,
+        }
+    }
+
+    /// Evaluates the truthiness of a value for use in `@if` condition evaluation.
+    ///
+    /// This method does NOT perform type coercion. It is an explicit truthiness
+    /// check that is only called by the evaluator when processing an `@if`
+    /// condition. The evaluator explicitly calls `.is_truthy()` — it is never
+    /// called implicitly during arithmetic or comparison.
+    ///
+    /// Per BC-1.02.003: a string value like `"NO"` evaluates to truthy
+    /// (non-empty string), NOT to false. Use `@if var == false` to compare a
+    /// boolean, not `@if var`.
+    ///
+    /// | Variant | Truthy when |
+    /// |---------|-------------|
+    /// | `Bool(b)` | `b` is `true` |
+    /// | `Int(n)` | `n != 0` |
+    /// | `Float(f)` | `f != 0.0` (NaN is truthy — see EC-001) |
+    /// | `Str(s)` | `s` is non-empty |
+    /// | `List(l)` | `l` is non-empty |
+    /// | `Map(m)` | `m` is non-empty |
+    /// | `Null` | always `false` |
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use slideforge_types::Value;
+    /// use std::sync::Arc;
+    ///
+    /// assert!(Value::Bool(true).is_truthy());
+    /// assert!(!Value::Bool(false).is_truthy());
+    /// assert!(Value::Int(1).is_truthy());
+    /// assert!(!Value::Int(0).is_truthy());
+    /// assert!(Value::Str(Arc::from("NO")).is_truthy()); // "NO" is truthy — non-empty string
+    /// assert!(!Value::Str(Arc::from("")).is_truthy());
+    /// assert!(!Value::Null.is_truthy());
+    /// ```
+    #[must_use]
+    pub fn is_truthy(&self) -> bool {
+        match self {
+            Value::Bool(b) => *b,
+            Value::Int(n) => *n != 0,
+            Value::Float(f) => f.0 != 0.0,
+            Value::Str(s) => !s.is_empty(),
+            Value::List(l) => !l.is_empty(),
+            Value::Map(m) => !m.is_empty(),
+            Value::Null => false,
+        }
+    }
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 
@@ -354,5 +437,161 @@ mod tests {
         nan1.hash(&mut h1);
         nan2.hash(&mut h2);
         assert_eq!(h1.finish(), h2.finish(), "NaN values must hash identically");
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // STORY-004 AC-002 — "NO" stays "NO", never coerced to Bool(false)
+    // ──────────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_bc_1_02_003_str_no_stays_str() {
+        let v = Value::Str(Arc::from("NO"));
+        assert_ne!(v, Value::Bool(false));
+        assert_eq!(v.type_kind(), crate::TypeKind::Str);
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // STORY-004 AC-003 — "1.10" precision preserved
+    // ──────────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_bc_1_02_003_float_precision_preserved() {
+        // "1.10" must not become "1.1" (BC-1.02.003 postcondition 3)
+        let s = "1.10";
+        let v = Value::Str(Arc::from(s));
+        assert_eq!(v.as_str().unwrap(), "1.10");
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // STORY-004 AC-005 — type_kind() correct for all 7 Value variants
+    // ──────────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_bc_1_02_003_type_kind_all_variants() {
+        let cases = [
+            (Value::Str(Arc::from("")), crate::TypeKind::Str),
+            (Value::Int(0), crate::TypeKind::Int),
+            (Value::Float(OrderedFloat(0.0)), crate::TypeKind::Float),
+            (Value::Bool(false), crate::TypeKind::Bool),
+            (Value::List(vec![]), crate::TypeKind::List),
+            (Value::Map(OrderedMap::new()), crate::TypeKind::Map),
+            (Value::Null, crate::TypeKind::Null),
+        ];
+        for (v, expected) in cases {
+            assert_eq!(v.type_kind(), expected, "type_kind mismatch for {v:?}");
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // STORY-004 AC-006 — is_truthy() for all variants
+    // ──────────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_bc_1_02_003_is_truthy_bool() {
+        assert!(Value::Bool(true).is_truthy());
+        assert!(!Value::Bool(false).is_truthy());
+    }
+
+    #[test]
+    fn test_bc_1_02_003_is_truthy_int() {
+        assert!(Value::Int(1).is_truthy());
+        assert!(Value::Int(-1).is_truthy());
+        assert!(!Value::Int(0).is_truthy());
+    }
+
+    #[test]
+    fn test_bc_1_02_003_is_truthy_float() {
+        assert!(Value::Float(OrderedFloat(1.0)).is_truthy());
+        assert!(Value::Float(OrderedFloat(-1.0)).is_truthy());
+        assert!(!Value::Float(OrderedFloat(0.0)).is_truthy());
+    }
+
+    /// EC-001: NaN is truthy (OrderedFloat(NaN) != 0.0 is true).
+    #[test]
+    fn test_bc_1_02_003_is_truthy_nan_is_truthy() {
+        // With OrderedFloat, NaN != 0.0 evaluates to true, so NaN is truthy.
+        assert!(
+            Value::Float(OrderedFloat(f64::NAN)).is_truthy(),
+            "NaN must be truthy (EC-001)"
+        );
+    }
+
+    #[test]
+    fn test_bc_1_02_003_is_truthy_str() {
+        assert!(Value::Str(Arc::from("x")).is_truthy());
+        // "NO" is truthy — non-empty string, no coercion
+        assert!(Value::Str(Arc::from("NO")).is_truthy());
+        // EC-002: empty string is falsy
+        assert!(!Value::Str(Arc::from("")).is_truthy());
+    }
+
+    #[test]
+    fn test_bc_1_02_003_is_truthy_list() {
+        assert!(Value::List(vec![Value::Int(1)]).is_truthy());
+        // EC-003: non-empty list even if contents are Null
+        assert!(Value::List(vec![Value::Null]).is_truthy());
+        assert!(!Value::List(vec![]).is_truthy());
+    }
+
+    #[test]
+    fn test_bc_1_02_003_is_truthy_map() {
+        let mut m = OrderedMap::new();
+        m.insert(Arc::from("k"), Value::Null);
+        assert!(Value::Map(m).is_truthy());
+        assert!(!Value::Map(OrderedMap::new()).is_truthy());
+    }
+
+    #[test]
+    fn test_bc_1_02_003_is_truthy_null() {
+        assert!(!Value::Null.is_truthy());
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // STORY-004 AC-012 — as_bool() does not coerce
+    // ──────────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_bc_1_02_003_as_bool_does_not_coerce_str() {
+        // Value::Str("true") must NOT become Some(true)
+        let v = Value::Str(Arc::from("true"));
+        assert_eq!(
+            v.as_bool(),
+            None,
+            "Str(\"true\") must not coerce to Some(true)"
+        );
+    }
+
+    #[test]
+    fn test_bc_1_02_003_as_bool_does_not_coerce_int() {
+        // Value::Int(1) must NOT become Some(true)
+        let v = Value::Int(1);
+        assert_eq!(v.as_bool(), None, "Int(1) must not coerce to Some(true)");
+    }
+
+    #[test]
+    fn test_bc_1_02_003_as_bool_returns_some_for_bool() {
+        assert_eq!(Value::Bool(true).as_bool(), Some(true));
+        assert_eq!(Value::Bool(false).as_bool(), Some(false));
+    }
+
+    #[test]
+    fn test_bc_1_02_003_as_str_does_not_coerce_int() {
+        assert_eq!(Value::Int(42).as_str(), None);
+    }
+
+    #[test]
+    fn test_bc_1_02_003_as_int_does_not_coerce_float() {
+        // Float should not coerce to Int
+        assert_eq!(Value::Float(OrderedFloat(1.0)).as_int(), None);
+    }
+
+    #[test]
+    fn test_bc_1_02_003_as_float_unwraps_ordered_float() {
+        // as_float() should return the inner f64, not the OrderedFloat wrapper.
+        // Use a value that is NOT an approximation of a well-known constant.
+        let val = 1.234_567_89_f64;
+        let v = Value::Float(OrderedFloat(val));
+        let f = v.as_float().expect("Float variant must return Some");
+        assert!((f - val).abs() < 1e-10);
     }
 }
