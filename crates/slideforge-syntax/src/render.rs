@@ -28,10 +28,12 @@ use crate::sink::DiagnosticSink;
 ///
 /// ```no_run
 /// use slideforge_syntax::{DiagnosticRenderer, DiagnosticSink};
+/// use slideforge_syntax::span::SourceMap;
 ///
 /// let sink = DiagnosticSink::new();
+/// let sm = SourceMap::new();
 /// let renderer = DiagnosticRenderer::new(false);
-/// renderer.render_all(&sink, &mut std::io::stderr()).unwrap();
+/// renderer.render_all(&sink, &sm, &mut std::io::stderr()).unwrap();
 /// ```
 pub struct DiagnosticRenderer {
     /// Whether to emit ANSI color escape codes in the output.
@@ -55,12 +57,17 @@ impl DiagnosticRenderer {
     /// followed by a newline separator. If the sink is empty, nothing is
     /// written to `writer`.
     ///
+    /// The `_source_map` parameter is accepted for future use — later phases
+    /// will use it to resolve `FileId` references back to file paths and
+    /// source text when generating richer diagnostic output.
+    ///
     /// # Errors
     ///
     /// Returns `Err` if any write to `writer` fails.
     pub fn render_all(
         &self,
         sink: &DiagnosticSink,
+        _source_map: &crate::span::SourceMap,
         writer: &mut dyn std::io::Write,
     ) -> std::io::Result<()> {
         for diag in sink.errors() {
@@ -95,7 +102,7 @@ impl DiagnosticRenderer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{DiagnosticSink, SyntaxError};
+    use crate::{span::SourceMap, DiagnosticSink, SyntaxError};
 
     /// Helper: build a cheap `SyntaxError` for renderer testing.
     fn make_error(line: u32, col: u32) -> SyntaxError {
@@ -119,9 +126,10 @@ mod tests {
         let mut sink = DiagnosticSink::new();
         sink.push(make_error(1, 1));
         let renderer = DiagnosticRenderer::new(false);
+        let sm = SourceMap::new();
         let mut buf = Vec::new();
         renderer
-            .render_all(&sink, &mut buf)
+            .render_all(&sink, &sm, &mut buf)
             .expect("render_all must not fail");
         let output = String::from_utf8_lossy(&buf);
         assert!(
@@ -142,9 +150,10 @@ mod tests {
         sink.push(make_error(1, 1));
         sink.push(make_error(3, 5));
         let renderer = DiagnosticRenderer::new(false);
+        let sm = SourceMap::new();
         let mut buf = Vec::new();
         renderer
-            .render_all(&sink, &mut buf)
+            .render_all(&sink, &sm, &mut buf)
             .expect("render_all must not fail");
         let output = String::from_utf8_lossy(&buf);
         // The output for line-1 error must appear before the output for line-3.
@@ -165,9 +174,10 @@ mod tests {
     fn test_ac009_empty_sink_no_output() {
         let sink = DiagnosticSink::new();
         let renderer = DiagnosticRenderer::new(false);
+        let sm = SourceMap::new();
         let mut buf = Vec::new();
         renderer
-            .render_all(&sink, &mut buf)
+            .render_all(&sink, &sm, &mut buf)
             .expect("render_all on empty sink must not fail");
         assert!(
             buf.is_empty(),

@@ -522,6 +522,24 @@ impl SyntaxError {
             }
         }
     }
+
+    /// Returns a stable numeric discriminant for each variant.
+    ///
+    /// Used in [`Ord`] to break ties when two errors share the same source
+    /// position. The tag is stable across compilations as long as the variant
+    /// list does not change order — adding a new variant must assign the next
+    /// sequential tag.
+    fn variant_tag(&self) -> u8 {
+        match self {
+            Self::IndentError { .. } => 0,
+            Self::UnexpectedToken { .. } => 1,
+            Self::UnexpectedEof { .. } => 2,
+            Self::ReservedKeyword { .. } => 3,
+            Self::VarNameCollision { .. } => 4,
+            Self::RawKeyword { .. } => 5,
+            Self::VersionError { .. } => 6,
+        }
+    }
 }
 
 // ─── Ordering ─────────────────────────────────────────────────────────────────
@@ -554,7 +572,12 @@ impl PartialOrd for SyntaxError {
 
 impl Ord for SyntaxError {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.sort_key().cmp(&other.sort_key())
+        // Primary key: source position (file, line, col).
+        // Secondary key: variant discriminant so that Ord is consistent with
+        // PartialEq — `a.cmp(&b) == Equal` implies `a == b`.
+        self.sort_key()
+            .cmp(&other.sort_key())
+            .then_with(|| self.variant_tag().cmp(&other.variant_tag()))
     }
 }
 
@@ -1140,5 +1163,35 @@ mod tests {
                 "every E-PAR-* variant must have severity Fatal; failed for: {variant:?}"
             );
         }
+    }
+
+    // ── F-003: VersionError non-fatal → Warning severity ─────────────────────
+    //
+    // AC-006 documents that `VersionError(is_fatal=false)` returns
+    // `ParseSeverity::Warning`, not `ParseSeverity::Fatal`.  The "all variants
+    // are Fatal" test above only covers the `is_fatal=true` case.  This test
+    // explicitly documents and guards the exception.
+
+    /// F-003: `VersionError` with `is_fatal=false` must return
+    /// `ParseSeverity::Warning`, not `ParseSeverity::Fatal`.
+    ///
+    /// This is the AC-006 non-fatal path: a missing-version warning can be
+    /// demoted from fatal to warning (e.g. for a future `--warn-only` flag).
+    #[test]
+    fn test_version_error_non_fatal_returns_warning_severity() {
+        let e = SyntaxError::version_error(
+            "test.sf".to_string(),
+            "missing version".to_string(),
+            false,                   // is_fatal = false → Warning
+            "slide title:\n".to_string(),
+            0,
+        );
+        assert_eq!(
+            e.severity(),
+            ParseSeverity::Warning,
+            "VersionError(is_fatal=false) must return ParseSeverity::Warning; \
+             got {:?}",
+            e.severity()
+        );
     }
 }

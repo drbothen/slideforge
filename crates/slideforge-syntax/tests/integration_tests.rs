@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use slideforge_syntax::{
     ast::{BlockItem, DeckNode, FieldValue, SetRuleValue},
-    error::SyntaxError,
+    error::{ParseSeverity, SyntaxError},
     parse, parse_checked,
     span::SourceMap,
     template::TemplateChunk,
@@ -587,9 +587,10 @@ fn test_snapshot_renderer_output() {
     ));
 
     let renderer = DiagnosticRenderer::new(false); // no ANSI for deterministic snapshot
+    let sm = SourceMap::new();
     let mut buf = Vec::new();
     renderer
-        .render_all(&sink, &mut buf)
+        .render_all(&sink, &sm, &mut buf)
         .expect("render_all must not fail");
     let output = String::from_utf8(buf).expect("output must be valid UTF-8");
 
@@ -653,4 +654,39 @@ fn test_ec001_empty_sink_on_valid_source() {
         .as_array()
         .expect("to_json() 'diagnostics' must be an array");
     assert_eq!(arr.len(), 0, "empty sink diagnostics array must have 0 entries");
+}
+
+// ── F-004: parse_checked warning propagation path ────────────────────────────
+
+/// F-004: `parse_checked` must push a non-fatal `ParseSeverity::Warning` into
+/// the sink when a source file is missing its `slideforge_version` declaration,
+/// and must still return `Some(deck)` (non-fatal).
+///
+/// This covers the warning propagation path in `parse_checked` that was
+/// previously untested: missing version → warning pushed → `Some(deck)`.
+#[test]
+fn test_parse_checked_missing_version_pushes_warning() {
+    let src = "slide title:\n  title \"Test\"\n";
+    let mut sm = SourceMap::new();
+    let fid = sm.add_file(Arc::from("test.sf"), Arc::from(src));
+    let mut sink = DiagnosticSink::new();
+    let deck = parse_checked(src, fid, &sm, &mut sink);
+    assert!(
+        deck.is_some(),
+        "missing version is non-fatal; parse_checked should return Some(deck)"
+    );
+    assert!(
+        !sink.is_empty(),
+        "missing version warning must be pushed to sink; sink was empty"
+    );
+    assert!(
+        !sink.has_fatal(),
+        "missing version must be Warning, not Fatal; sink.has_fatal() returned true"
+    );
+    assert_eq!(
+        sink.max_severity(),
+        Some(ParseSeverity::Warning),
+        "sink.max_severity() must be Warning for missing-version; got {:?}",
+        sink.max_severity()
+    );
 }
