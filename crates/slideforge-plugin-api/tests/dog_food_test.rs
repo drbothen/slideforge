@@ -8,14 +8,14 @@
 
 use slideforge_plugin_api::{
     BrandError, BrandProvider, BrandSource, Canvas, ChartError, ChartRenderer, DataSource,
-    DataSourceError, DataSourceOptions, DiagramError, DiagramOptions, DiagramRenderer, Diagnostic,
+    DataSourceError, DataSourceOptions, Diagnostic, DiagramError, DiagramOptions, DiagramRenderer,
     ExportError, ExportOptions, Exporter, FieldDef, InlineError, InlineFormat, InlineOutputFormat,
     LayoutError, MathError, MathOutputFormat, MathRenderer, PluginRegistry, SectionBlock,
     SectionType, SlideType, Validator, ValidatorOptions,
 };
 use slideforge_types::{
-    Brand, BrandFonts, BrandPalette, ChartSpec, Deck, InlineNode, LaidOutDeck,
-    LaidOutSlide, MathNode, Slide, SourceSpan, Value,
+    Brand, BrandFonts, BrandPalette, ChartSpec, Deck, InlineNode, LaidOutDeck, LaidOutSlide,
+    MathNode, Slide, SourceSpan, Value,
 };
 use std::sync::Arc;
 
@@ -186,7 +186,11 @@ impl InlineFormat for TestInlineFormat {
         "test-inline"
     }
 
-    fn render(&self, _node: &InlineNode, _format: InlineOutputFormat) -> Result<String, InlineError> {
+    fn render(
+        &self,
+        _node: &InlineNode,
+        _format: InlineOutputFormat,
+    ) -> Result<String, InlineError> {
         Ok(String::new())
     }
 }

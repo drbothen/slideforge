@@ -282,11 +282,7 @@ mod tests {
         fn id(&self) -> &str {
             "stub-data"
         }
-        fn load(
-            &self,
-            _uri: &str,
-            _opts: &DataSourceOptions,
-        ) -> Result<Value, DataSourceError> {
+        fn load(&self, _uri: &str, _opts: &DataSourceOptions) -> Result<Value, DataSourceError> {
             Ok(Value::Null)
         }
     }
@@ -325,11 +321,7 @@ mod tests {
         fn id(&self) -> &str {
             "stub-diagram"
         }
-        fn render(
-            &self,
-            _source: &str,
-            _opts: &DiagramOptions,
-        ) -> Result<Vec<u8>, DiagramError> {
+        fn render(&self, _source: &str, _opts: &DiagramOptions) -> Result<Vec<u8>, DiagramError> {
             Ok(vec![])
         }
     }
@@ -665,11 +657,7 @@ mod tests {
         fn id(&self) -> &str {
             "stub-data" // same id as StubDataSource
         }
-        fn load(
-            &self,
-            _uri: &str,
-            _opts: &DataSourceOptions,
-        ) -> Result<Value, DataSourceError> {
+        fn load(&self, _uri: &str, _opts: &DataSourceOptions) -> Result<Value, DataSourceError> {
             Ok(Value::Int(42)) // returns different value to detect which plugin is used
         }
     }

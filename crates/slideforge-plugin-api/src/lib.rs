@@ -52,12 +52,11 @@ pub mod traits;
 // the module path.
 pub use registry::PluginRegistry;
 pub use traits::{
-    BrandError, BrandProvider, BrandSource, ChartError, ChartRenderer, DataSource, DataSourceError,
-    DataSourceOptions, DiagramError, DiagramOptions, DiagramRenderer, Diagnostic,
-    DiagnosticSeverity, ExportError, ExportOptions, Exporter, FieldDef, InlineError, InlineFormat,
-    InlineOutputFormat, LayoutError, MathError, MathOutputFormat, MathRenderer, SectionBlock,
-    SectionType, SlideType, ValidatorOptions, Validator,
-    Canvas,
+    BrandError, BrandProvider, BrandSource, Canvas, ChartError, ChartRenderer, DataSource,
+    DataSourceError, DataSourceOptions, Diagnostic, DiagnosticSeverity, DiagramError,
+    DiagramOptions, DiagramRenderer, ExportError, ExportOptions, Exporter, FieldDef, InlineError,
+    InlineFormat, InlineOutputFormat, LayoutError, MathError, MathOutputFormat, MathRenderer,
+    SectionBlock, SectionType, SlideType, Validator, ValidatorOptions,
 };
 
 // Compile-time assertion: PluginRegistry is Send + Sync.

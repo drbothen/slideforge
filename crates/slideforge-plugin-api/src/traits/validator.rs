@@ -137,5 +137,4 @@ mod tests {
         };
         assert!(diag.hint.is_none());
     }
-
 }

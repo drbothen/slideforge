@@ -11,7 +11,7 @@
 
 use std::sync::Arc;
 
-use slideforge_types::{Brand, Emu, LaidOutSlide, Slide, Value, SLIDE_HEIGHT, SLIDE_WIDTH};
+use slideforge_types::{Brand, Emu, LaidOutSlide, SLIDE_HEIGHT, SLIDE_WIDTH, Slide, Value};
 use thiserror::Error;
 
 /// Describes a content field accepted by a [`SlideType`].
@@ -74,7 +74,9 @@ pub enum LayoutError {
     },
 
     /// A field value has the wrong type for this slide type.
-    #[error("slide type '{slide_type}': field '{field}' expected {expected_type}, got {actual_type}")]
+    #[error(
+        "slide type '{slide_type}': field '{field}' expected {expected_type}, got {actual_type}"
+    )]
     FieldTypeMismatch {
         /// The slide type keyword.
         slide_type: String,
