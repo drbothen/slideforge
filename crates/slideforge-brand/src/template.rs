@@ -324,7 +324,12 @@ mod tests {
         assert_eq!(logo.bytes.len(), 4);
     }
 
-    /// BC-2.01.001 AC-006 — layout_names stored as Vec<Arc<str>>.
+    /// BC-2.01.001 AC-006 — layout_names stored as Vec<Arc<str>> using ZIP-internal paths.
+    ///
+    /// `layout_names` stores the ZIP-internal path of each slide layout XML file
+    /// (e.g., `"ppt/slideLayouts/slideLayout1.xml"`), not friendly semantic names.
+    /// These paths are produced by the loader's layout discovery step and consumed
+    /// by STORY-023 for layout-to-taxonomy mapping.
     #[test]
     fn test_bc_2_01_001_layout_names_stored_correctly() {
         let template = BrandTemplate {
@@ -336,13 +341,21 @@ mod tests {
             logo: None,
             footer_text: None,
             layout_names: vec![
-                Arc::from("Title Slide"),
-                Arc::from("Title and Content"),
-                Arc::from("Two Content"),
+                Arc::from("ppt/slideLayouts/slideLayout1.xml"),
+                Arc::from("ppt/slideLayouts/slideLayout2.xml"),
+                Arc::from("ppt/slideLayouts/slideLayout3.xml"),
             ],
         };
         assert_eq!(template.layout_names.len(), 3);
-        assert_eq!(template.layout_names[0].as_ref(), "Title Slide");
+        // Values are ZIP-internal paths, not friendly semantic names.
+        assert_eq!(
+            template.layout_names[0].as_ref(),
+            "ppt/slideLayouts/slideLayout1.xml"
+        );
+        assert_eq!(
+            template.layout_names[2].as_ref(),
+            "ppt/slideLayouts/slideLayout3.xml"
+        );
     }
 
     /// DI-015 — COLOR_SLOT_NAMES constant has exactly 12 entries.

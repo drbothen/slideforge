@@ -906,6 +906,84 @@ mod tests {
         );
     }
 
+    /// BC-2.01.001 AC-006 — layout discovery: PPTX with two slideLayout*.xml files and
+    /// a .rels file reports both layout paths and excludes the .rels entry.
+    ///
+    /// Builds a ZIP that contains:
+    /// - `ppt/theme/theme1.xml` (12 colors) — triggers PPTX detection
+    /// - `ppt/slideLayouts/slideLayout1.xml` — must appear in layout_names
+    /// - `ppt/slideLayouts/slideLayout2.xml` — must appear in layout_names
+    /// - `ppt/slideLayouts/_rels/slideLayout1.xml.rels` — must NOT appear in layout_names
+    ///
+    /// Asserts the two ZIP paths are present and the .rels path is absent (FINDING-001).
+    #[test]
+    fn test_bc_2_01_001_layout_discovery_includes_layouts_excludes_rels() {
+        use std::io::Write;
+
+        let zip_bytes = {
+            let mut buf = Vec::new();
+            let cursor = std::io::Cursor::new(&mut buf);
+            let mut zw = zip::ZipWriter::new(cursor);
+            let opts = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Stored);
+
+            // Theme (required for PPTX detection and color parsing).
+            zw.start_file(PPTX_THEME_PATH, opts).unwrap();
+            zw.write_all(MINIMAL_THEME_XML.as_bytes()).unwrap();
+
+            // Two slide layout XML files.
+            zw.start_file("ppt/slideLayouts/slideLayout1.xml", opts).unwrap();
+            zw.write_all(b"<p:sldLayout/>").unwrap();
+            zw.start_file("ppt/slideLayouts/slideLayout2.xml", opts).unwrap();
+            zw.write_all(b"<p:sldLayout/>").unwrap();
+
+            // A .rels file that must be excluded from layout_names.
+            zw.start_file("ppt/slideLayouts/_rels/slideLayout1.xml.rels", opts).unwrap();
+            zw.write_all(b"<Relationships/>").unwrap();
+
+            // Minimal content types.
+            zw.start_file("[Content_Types].xml", opts).unwrap();
+            zw.write_all(b"<?xml version=\"1.0\" encoding=\"UTF-8\"?><Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"/>").unwrap();
+
+            zw.finish().unwrap();
+            buf
+        };
+
+        let path = write_temp_file(&zip_bytes, "pptx");
+        let loader = BrandLoader::new();
+        let ctx = BrandLoadContext::for_test();
+
+        let result = loader.load_template(&path, &ctx);
+        let _ = std::fs::remove_file(&path);
+
+        let template = result.expect("PPTX with slide layouts must load without error");
+
+        // Both layout XML paths must be present.
+        let names: Vec<&str> = template.layout_names.iter().map(|s| s.as_ref()).collect();
+        assert!(
+            names.contains(&"ppt/slideLayouts/slideLayout1.xml"),
+            "layout_names must contain 'ppt/slideLayouts/slideLayout1.xml', got: {names:?}"
+        );
+        assert!(
+            names.contains(&"ppt/slideLayouts/slideLayout2.xml"),
+            "layout_names must contain 'ppt/slideLayouts/slideLayout2.xml', got: {names:?}"
+        );
+
+        // The .rels file must be excluded.
+        assert!(
+            !names.contains(&"ppt/slideLayouts/_rels/slideLayout1.xml.rels"),
+            "layout_names must NOT contain .rels paths, got: {names:?}"
+        );
+
+        // Exactly two layouts discovered.
+        assert_eq!(
+            template.layout_names.len(),
+            2,
+            "expected 2 layout names, got {}: {names:?}",
+            template.layout_names.len()
+        );
+    }
+
     /// FINDING-001 — BrandProvider::load() returns ValidationError for TOML sources
     /// (not yet implemented — STORY-023 scope).
     #[test]
