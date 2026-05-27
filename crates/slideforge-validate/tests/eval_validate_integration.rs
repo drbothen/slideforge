@@ -164,7 +164,7 @@ fn test_eval_validate_lang_present_no_e_a11_003() {
 /// eval-produced deck that had no lang declaration.
 ///
 /// This tests the full recommended pipeline:
-///   eval_deck → LangValidator.validate (emits E-A11-003) → inject_lang_default
+///   `eval_deck` → `LangValidator.validate` (emits E-A11-003) → `inject_lang_default`
 ///
 /// After injection, `deck.metadata.lang` must be `Some("en")`.
 #[test]
@@ -248,7 +248,7 @@ fn test_eval_produced_slides_have_empty_blocks_f004() {
 
 // ─── Zero-slide integration ──────────────────────────────────────────────────
 
-/// Cross-crate: eval_deck with 0 items → ZeroSlideValidator emits E-LAY-002.
+/// Cross-crate: `eval_deck` with 0 items → `ZeroSlideValidator` emits E-LAY-002.
 #[test]
 fn test_eval_validate_zero_slide_deck() {
     use slideforge_validate::ZeroSlideValidator;
@@ -275,7 +275,7 @@ fn test_eval_validate_zero_slide_deck() {
     );
 }
 
-/// Cross-crate: eval_deck with slides → ZeroSlideValidator emits nothing.
+/// Cross-crate: `eval_deck` with slides → `ZeroSlideValidator` emits nothing.
 #[test]
 fn test_eval_validate_non_empty_deck_no_zero_slide_error() {
     use slideforge_validate::ZeroSlideValidator;
@@ -296,7 +296,7 @@ fn test_eval_validate_non_empty_deck_no_zero_slide_error() {
 
 // ─── Lang propagation integration ────────────────────────────────────────────
 
-/// Cross-crate: eval_deck propagates `lang "en-US"` to DeckMetadata.lang.
+/// Cross-crate: `eval_deck` propagates `lang "en-US"` to `DeckMetadata.lang`.
 ///
 /// This is a round-trip test: DeckNode.lang → eval_deck → Deck.metadata.lang.
 #[test]
