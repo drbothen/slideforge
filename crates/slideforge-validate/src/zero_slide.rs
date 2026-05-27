@@ -65,9 +65,7 @@ mod tests {
     use std::sync::Arc;
 
     use slideforge_plugin_api::{DiagnosticSeverity, Validator, ValidatorOptions};
-    use slideforge_types::{
-        Deck, DeckMetadata, OrderedMap, Slide, SourceSpan,
-    };
+    use slideforge_types::{Deck, DeckMetadata, OrderedMap, Slide, SourceSpan};
 
     use super::{E_LAY_002, ZeroSlideValidator};
 
@@ -137,11 +135,7 @@ mod tests {
     fn test_zero_slide_severity_is_error() {
         let deck = make_deck(vec![]);
         let diags = ZeroSlideValidator.validate(&deck, &default_opts());
-        assert_eq!(
-            diags.len(),
-            1,
-            "expected 1 diagnostic; got {diags:?}"
-        );
+        assert_eq!(diags.len(), 1, "expected 1 diagnostic; got {diags:?}");
         assert_eq!(
             diags[0].severity,
             DiagnosticSeverity::Error,

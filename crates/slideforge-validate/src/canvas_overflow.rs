@@ -186,8 +186,7 @@ mod tests {
     use slideforge_plugin_api::{DiagnosticSeverity, Validator, ValidatorOptions};
     use slideforge_types::{
         Block, BulletItem, ContentBlock, Deck, DeckMetadata, InlineNode, OrderedMap, Slide,
-        SourceSpan,
-        block::TextBlock,
+        SourceSpan, block::TextBlock,
     };
 
     use super::{
