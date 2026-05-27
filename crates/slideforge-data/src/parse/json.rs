@@ -20,6 +20,12 @@ fn json_value_to_sf(v: serde_json::Value) -> Value {
         serde_json::Value::Number(n) => {
             if let Some(i) = n.as_i64() {
                 Value::Int(i)
+            } else if n.as_u64().is_some() {
+                // u64 value that overflows i64 (large positive integer).
+                // Store as Str to preserve precision: f64 can only represent
+                // integers exactly up to 2^53, so casting here would silently
+                // lose digits for values like 9_999_999_999_999_999_999.
+                Value::Str(Arc::from(n.to_string().as_str()))
             } else if let Some(f) = n.as_f64() {
                 Value::Float(OrderedFloat(f))
             } else {
@@ -43,6 +49,15 @@ fn json_value_to_sf(v: serde_json::Value) -> Value {
 }
 
 /// Parse a JSON string and return the root [`Value`].
+///
+/// # Number representation
+///
+/// Numbers without a fractional part that fit in [`i64`] become [`Value::Int`].
+/// Numbers that fit in [`u64`] but not [`i64`] (large positive integers such as
+/// `9_999_999_999_999_999_999`) are preserved as [`Value::Str`] to avoid
+/// [`f64`] precision loss — JSON integers beyond 2^53 cannot be represented
+/// exactly as double-precision floats.
+/// All other fractional or out-of-range numbers become [`Value::Float`].
 ///
 /// # Errors
 ///
@@ -199,5 +214,31 @@ mod tests {
             matches!(map.get("f"), Some(Value::Float(_))),
             "fractional 7.5 must be Value::Float"
         );
+    }
+
+    /// test_BC_5_03_003_parse_json_large_u64_stays_str — integers beyond i64::MAX that fit
+    /// in u64 must become Value::Str to preserve precision (FINDING-007).
+    ///
+    /// JSON numbers beyond 2^53 cannot be represented exactly as f64. To avoid
+    /// silent precision loss, we keep them as their string representation.
+    #[test]
+    fn test_bc_5_03_003_parse_json_large_u64_stays_str() {
+        // 9_999_999_999_999_999_999 > i64::MAX (9_223_372_036_854_775_807) but fits in u64.
+        let src = r#"{"big": 9999999999999999999}"#;
+        let value = parse_json(src, "test.json").expect("must parse");
+        let map = value.as_map().expect("must be map");
+        let big = map.get("big").expect("big field must be present");
+        // Must be a Str, not a Float — preserves all 19 significant digits.
+        assert!(
+            matches!(big, Value::Str(_)),
+            "u64-range integer must become Value::Str to preserve precision, got: {big:?}"
+        );
+        if let Value::Str(s) = big {
+            assert_eq!(
+                s.as_ref(),
+                "9999999999999999999",
+                "string representation must be exact"
+            );
+        }
     }
 }

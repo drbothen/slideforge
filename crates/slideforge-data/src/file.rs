@@ -74,12 +74,23 @@ impl FileDataSource {
 
         // Enforce path containment when base_dir is provided.
         if let Some(base) = base_dir {
-            // Canonicalize both to resolve symlinks and `..` components.
-            // We use a best-effort approach: if canonicalization fails because
-            // the file doesn't exist yet, we fall through to the read step
-            // which will produce the appropriate FileNotFound error.
-            if let (Ok(canonical_resolved), Ok(canonical_base)) =
-                (resolved.canonicalize(), base.canonicalize())
+            // base_dir MUST be canonicalizable. If it cannot be resolved (e.g., the
+            // directory does not exist), that is a caller error and we fail fast.
+            // This prevents a bypass where an unresolvable base_dir would silently
+            // skip the containment check and allow path traversal.
+            let canonical_base = base.canonicalize().map_err(|e| {
+                DataError::io_error(
+                    Arc::from(base.to_string_lossy().as_ref()),
+                    Arc::from(
+                        format!("base_dir cannot be canonicalized: {e}").as_str(),
+                    ),
+                )
+            })?;
+
+            // The target file may not exist yet (that is fine — the read below will
+            // produce FileNotFound). Only check containment if canonicalization of the
+            // resolved path succeeds (i.e., the file currently exists on disk).
+            if let Ok(canonical_resolved) = resolved.canonicalize()
                 && !canonical_resolved.starts_with(&canonical_base)
             {
                 let path_str: Arc<str> = Arc::from(resolved.to_string_lossy().as_ref());
@@ -133,10 +144,15 @@ impl DataSource for FileDataSource {
         "file"
     }
 
+    /// Load a file from a URI.
+    ///
+    /// The [`DataSource`] trait does not receive a `base_dir`, so this method
+    /// passes `None` and performs **no path containment check**. Callers that
+    /// need containment enforcement (e.g., the evaluator processing an `@data`
+    /// directive) MUST use [`FileDataSource::load_path`] directly with the
+    /// project root as `base_dir`.
     fn load(&self, uri: &str, _opts: &DataSourceOptions) -> Result<Value, DataSourceError> {
         let path = Path::new(uri);
-        // The DataSource::load trait does not receive a base_dir, so we pass None.
-        // Callers that need path containment should use load_path directly.
         self.load_path(path, None).map_err(|e| match e {
             DataError::FileNotFound { path, .. } => DataSourceError::IoError {
                 uri: uri.to_owned(),
@@ -341,6 +357,22 @@ mod tests {
                 panic!("path traversal must not succeed silently");
             }
         }
+    }
+
+    /// test_BC_5_03_007_base_dir_nonexistent_fails — non-canonicalizable base_dir must return Err,
+    /// not silently skip the path containment check (FINDING-001).
+    #[test]
+    fn test_bc_5_03_007_base_dir_nonexistent_fails() {
+        let src = loader();
+        let nonexistent_base = Path::new("/tmp/__slideforge_nonexistent_base_dir_12345");
+        let result = src.load_path(Path::new("data.json"), Some(nonexistent_base));
+        let err = result.expect_err("unresolvable base_dir must return Err");
+        // Must be an I/O error — the base_dir cannot be canonicalized.
+        assert_eq!(
+            err.code(),
+            "E-DAT-004",
+            "base_dir canonicalization failure must return E-DAT-004"
+        );
     }
 
     /// test_BC_5_03_007_relative_path_resolved_against_base_dir — relative path uses base_dir.

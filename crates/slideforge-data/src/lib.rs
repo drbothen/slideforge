@@ -28,7 +28,6 @@
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 
-pub mod context;
 pub mod error;
 pub mod file;
 pub mod format;

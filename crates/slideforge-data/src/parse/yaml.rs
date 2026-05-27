@@ -146,6 +146,58 @@ mod tests {
         );
     }
 
+    /// test_BC_5_03_005_parse_yaml_yes_upper_stays_string — `YES` (uppercase) must remain a string.
+    ///
+    /// YAML 1.1 treats `YES` as `true`; YAML 1.2 does not. slideforge uses YAML 1.2 semantics.
+    #[test]
+    fn test_bc_5_03_005_parse_yaml_yes_upper_stays_string() {
+        let src = "flag: YES";
+        let value = parse_yaml(src, "test.yaml").expect("must parse");
+        let map = value.as_map().expect("must be map");
+        let flag = map.get("flag").expect("flag must be present");
+        assert_eq!(flag, &Value::Str(Arc::from("YES")), "'YES' must be Str");
+    }
+
+    /// test_BC_5_03_005_parse_yaml_on_upper_stays_string — `ON` must remain a string.
+    #[test]
+    fn test_bc_5_03_005_parse_yaml_on_upper_stays_string() {
+        let src = "flag: ON";
+        let value = parse_yaml(src, "test.yaml").expect("must parse");
+        let map = value.as_map().expect("must be map");
+        let flag = map.get("flag").expect("flag must be present");
+        assert_eq!(flag, &Value::Str(Arc::from("ON")), "'ON' must be Str");
+    }
+
+    /// test_BC_5_03_005_parse_yaml_no_upper_stays_string — `NO` must remain a string.
+    #[test]
+    fn test_bc_5_03_005_parse_yaml_no_upper_stays_string() {
+        let src = "flag: NO";
+        let value = parse_yaml(src, "test.yaml").expect("must parse");
+        let map = value.as_map().expect("must be map");
+        let flag = map.get("flag").expect("flag must be present");
+        assert_eq!(flag, &Value::Str(Arc::from("NO")), "'NO' must be Str");
+    }
+
+    /// test_BC_5_03_005_parse_yaml_off_lower_stays_string — `off` must remain a string.
+    #[test]
+    fn test_bc_5_03_005_parse_yaml_off_lower_stays_string() {
+        let src = "flag: off";
+        let value = parse_yaml(src, "test.yaml").expect("must parse");
+        let map = value.as_map().expect("must be map");
+        let flag = map.get("flag").expect("flag must be present");
+        assert_eq!(flag, &Value::Str(Arc::from("off")), "'off' must be Str");
+    }
+
+    /// test_BC_5_03_005_parse_yaml_off_upper_stays_string — `OFF` must remain a string.
+    #[test]
+    fn test_bc_5_03_005_parse_yaml_off_upper_stays_string() {
+        let src = "flag: OFF";
+        let value = parse_yaml(src, "test.yaml").expect("must parse");
+        let map = value.as_map().expect("must be map");
+        let flag = map.get("flag").expect("flag must be present");
+        assert_eq!(flag, &Value::Str(Arc::from("OFF")), "'OFF' must be Str");
+    }
+
     /// test_BC_5_03_005_parse_yaml_true_is_bool — canonical `true` must become Value::Bool(true).
     #[test]
     fn test_bc_5_03_005_parse_yaml_true_is_bool() {

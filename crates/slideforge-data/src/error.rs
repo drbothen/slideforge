@@ -95,13 +95,15 @@ pub enum DataError {
     ///
     /// Error code: `E-DAT-003` (sub-case of parse/format error).
     #[error(
-        "[{code}] unsupported format: '{extension}' — supported: json, csv, yaml, yml, toml"
+        "[{code}] unsupported format: '{extension}' — supported: json, csv, yaml, yml, toml (at {span})"
     )]
     UnsupportedFormat {
         /// The error code constant (`E-DAT-003`).
         code: &'static str,
         /// The file extension that was not recognized.
         extension: Arc<str>,
+        /// The source location that referenced this path.
+        span: SourceSpan,
     },
 
     /// A generic I/O error that is not a simple file-not-found.
@@ -240,11 +242,58 @@ impl DataError {
     }
 
     /// Construct a [`DataError::UnsupportedFormat`] with the canonical error code.
+    ///
+    /// Uses `SourceSpan::default()` as the span; callers with span information
+    /// should use [`DataError::unsupported_format_at`].
     #[must_use]
     pub fn unsupported_format(extension: impl Into<Arc<str>>) -> Self {
         DataError::UnsupportedFormat {
             code: E_DAT_003,
             extension: extension.into(),
+            span: SourceSpan::default(),
+        }
+    }
+
+    /// Construct a [`DataError::UnsupportedFormat`] with a source span.
+    #[must_use]
+    pub fn unsupported_format_at(extension: impl Into<Arc<str>>, span: SourceSpan) -> Self {
+        DataError::UnsupportedFormat {
+            code: E_DAT_003,
+            extension: extension.into(),
+            span,
+        }
+    }
+
+    /// Attach a [`SourceSpan`] to this error, replacing the default span.
+    ///
+    /// Intended for use at the evaluator boundary, where the evaluator knows
+    /// the span of the `@data` directive but the data layer does not. Example:
+    ///
+    /// ```
+    /// # use slideforge_data::DataError;
+    /// # use slideforge_types::SourceSpan;
+    /// # use std::sync::Arc;
+    /// let err = DataError::file_not_found("/tmp/missing.json");
+    /// let span = SourceSpan::new(Arc::from("deck.sf"), 5, 3, 100);
+    /// let err_with_span = err.with_span(span);
+    /// ```
+    #[must_use]
+    pub fn with_span(self, new_span: SourceSpan) -> Self {
+        match self {
+            DataError::FileNotFound { code, path, .. } => {
+                DataError::FileNotFound { code, path, span: new_span }
+            }
+            DataError::ParseError { code, path, format, reason, .. } => {
+                DataError::ParseError { code, path, format, reason, span: new_span }
+            }
+            DataError::FieldNotFound { code, field, source_name, .. } => {
+                DataError::FieldNotFound { code, field, source_name, span: new_span }
+            }
+            DataError::UnsupportedFormat { code, extension, .. } => {
+                DataError::UnsupportedFormat { code, extension, span: new_span }
+            }
+            // Variants without a span field are returned unchanged.
+            other => other,
         }
     }
 
