@@ -40,12 +40,16 @@ impl Validator for ZeroSlideValidator {
 }
 
 /// Construct an `E-LAY-002` diagnostic for an empty deck.
+///
+/// Note: the filename is not included in this message because the [`Validator`]
+/// trait does not provide the source filename — only the [`Deck`] and its
+/// [`SourceSpan`] are available at validation time.
 fn make_zero_slide_error(span: &SourceSpan) -> Diagnostic {
     Diagnostic {
         severity: DiagnosticSeverity::Error,
         code: std::sync::Arc::from(E_LAY_002),
         message: std::sync::Arc::from(
-            "Deck contains zero slides. Add at least one slide before exporting.",
+            "Zero-slide deck: no slide blocks found. A deck must contain at least one slide.",
         ),
         span: span.clone(),
         hint: Some(std::sync::Arc::from(
@@ -203,6 +207,23 @@ mod tests {
         assert!(
             !diags[0].message.is_empty(),
             "E-LAY-002 message must be non-empty"
+        );
+    }
+
+    /// E-LAY-002 message must match the spec-prescribed prefix and phrasing.
+    #[test]
+    fn test_zero_slide_message_matches_spec() {
+        let deck = make_deck(vec![]);
+        let diags = ZeroSlideValidator.validate(&deck, &default_opts());
+        assert_eq!(diags.len(), 1);
+        let msg = diags[0].message.as_ref();
+        assert!(
+            msg.starts_with("Zero-slide deck:"),
+            "message should start with spec prefix, got: {msg}"
+        );
+        assert!(
+            msg.contains("at least one slide"),
+            "message should contain required phrasing, got: {msg}"
         );
     }
 

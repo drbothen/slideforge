@@ -13,7 +13,7 @@
 //! ## Overflow threshold
 //!
 //! The threshold is based on:
-//! - Standard body placeholder height: 4.74 inches = 4,343,400 EMU
+//! - Standard body placeholder height: 4,343,400 EMU (~4.75 inches)
 //! - Line height per bullet: 11pt body × 1.3 line-height = 14.3pt ≈ 181,610 EMU
 //! - At ≥ 24 bullets: estimated height exceeds placeholder → overflow
 //!
@@ -40,7 +40,7 @@ pub(crate) const E_LAY_001: &str = "E-LAY-001";
 
 /// Standard body placeholder height used for overflow estimation.
 ///
-/// Body placeholder height: 4.74 inches = 4,343,400 EMU.
+/// Body placeholder height: 4,343,400 EMU (~4.75 inches).
 /// This covers the usable body area for a standard 16:9 widescreen slide
 /// with a title bar at the top.
 pub(crate) const BODY_PLACEHOLDER_HEIGHT: Emu = Emu(4_343_400);
