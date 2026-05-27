@@ -502,6 +502,7 @@ mod tests {
             12,
             "invariant DI-015: must have exactly 12 color slots"
         );
+        assert!(template.logo.is_none(), "DOCX templates must not extract logo");
     }
 
     /// BC-2.01.001 EC-001 — non-existent path produces FileNotFound.
@@ -918,6 +919,42 @@ mod tests {
                 slideforge_plugin_api::BrandError::ValidationError { .. }
             ),
             "must be ValidationError for TOML source"
+        );
+    }
+
+    /// FINDING-004 — BrandProvider::load() maps a corrupt (non-ZIP) PPTX file to ParseError.
+    ///
+    /// Creates a temp file with random non-ZIP bytes and a `.pptx` extension, calls
+    /// `BrandProvider::load(BrandSource::PptxFile(path))`, and asserts the result is
+    /// `Err(TraitBrandError::ParseError { .. })`.
+    ///
+    /// This exercises the error-mapping path in the `BrandProvider` impl at the trait
+    /// boundary (not just `load_template` directly), closing FINDING-004.
+    #[test]
+    fn test_finding_004_brand_provider_load_pptx_corrupt_is_parse_error() {
+        use slideforge_plugin_api::BrandProvider;
+
+        // Random non-ZIP bytes — these will fail ZipArchive::new and produce ParseError.
+        let corrupt_bytes: &[u8] = b"THIS IS NOT A ZIP ARCHIVE AT ALL \x00\x01\x02\x03";
+        let path = write_temp_file(corrupt_bytes, "pptx");
+        let loader = BrandLoader::new();
+        let source = slideforge_plugin_api::BrandSource::PptxFile(
+            Arc::from(path.to_string_lossy().as_ref()),
+        );
+
+        let result = loader.load(&source);
+        let _ = std::fs::remove_file(&path);
+
+        assert!(
+            result.is_err(),
+            "BrandProvider::load must return Err for corrupt PPTX file"
+        );
+        assert!(
+            matches!(
+                result.unwrap_err(),
+                slideforge_plugin_api::BrandError::ParseError { .. }
+            ),
+            "corrupt PPTX file must produce BrandError::ParseError at the trait boundary (FINDING-004)"
         );
     }
 
