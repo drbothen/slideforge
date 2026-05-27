@@ -337,6 +337,8 @@ fn eval_arithmetic(
     sink: &mut DiagnosticSink,
 ) -> Option<Value> {
     match (lval, rval) {
+        // DI-004: no implicit coercion — both operands must be numeric.
+        // E-EVL-003 is raised below (fall-through arm) for any non-numeric type.
         (Value::Int(l), Value::Int(r)) => {
             let result = match op {
                 BinOpKind::Add => l.checked_add(*r).map(Value::Int),
@@ -431,6 +433,9 @@ fn eval_arithmetic(
             };
             Some(Value::Float(OrderedFloat(result)))
         },
+        // DI-004: no implicit coercion — E-EVL-003 for any non-numeric operand pair
+        // (e.g. Str × Int, Str × Float, Bool × Int). Strings are NEVER coerced to
+        // numbers silently; callers must use `| int` or `| float` explicitly.
         _ => push_error(
             sink,
             EvalError::TypeMismatch {
@@ -474,6 +479,9 @@ fn eval_ordering(
             };
             Some(Value::Bool(result))
         },
+        // DI-004: no implicit coercion — E-EVL-003 for incompatible type pairs.
+        // String × Bool, Int × Bool, etc. are all rejected here. There is no
+        // automatic widening or truthiness coercion.
         None => push_error(
             sink,
             EvalError::TypeMismatch {
@@ -500,6 +508,9 @@ fn eval_unaryop(
     match op {
         UnaryOpKind::Not => match val {
             Value::Bool(b) => Some(Value::Bool(!b)),
+            // DI-004: no implicit coercion — E-EVL-003 for non-bool operands.
+            // Str("true"), Str("yes"), Int(1) are NOT truthy; each must be
+            // explicitly compared: `{{ v == "true" }}` or `{{ v == 1 }}`.
             other => push_error(
                 sink,
                 EvalError::TypeMismatch {
