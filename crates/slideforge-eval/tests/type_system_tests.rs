@@ -103,7 +103,7 @@ fn deck_with_var_and_expr_title(
 /// BC-1.02.003 postcondition 1/2: `flag = "NO"` in a `vars:` block must remain
 /// the string `"NO"` when interpolated via `{{ flag }}`.
 ///
-/// YAML tools like PyYAML would coerce this to `false`. slideforge must not.
+/// YAML tools like `PyYAML` would coerce this to `false`. slideforge must not.
 /// Red Gate note: this test passes through `eval_deck` and asserts the EXACT
 /// string value stored in the slide's title field. It fails if the evaluator
 /// performs any coercion.
