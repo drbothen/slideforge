@@ -11,8 +11,13 @@
 //! | `E-A11-001` | Error | Visual element is missing alt text and is not marked decorative |
 //! | `W-A11-001` | Warning | Visual element has both alt text AND `decorative: true` (alt is ignored) |
 
-use slideforge_plugin_api::{Diagnostic, Validator, ValidatorOptions};
-use slideforge_types::Deck;
+use slideforge_plugin_api::{Diagnostic, DiagnosticSeverity, Validator, ValidatorOptions};
+use slideforge_types::{
+    Deck, SourceSpan,
+    specs::AltText,
+};
+
+use crate::utils::is_blank;
 
 /// Error code for a visual element missing alt text.
 ///
@@ -21,7 +26,6 @@ use slideforge_types::Deck;
 ///
 /// Used by the `validate()` implementation (STORY-015 implementer phase) and
 /// exercised directly by the test suite.
-#[allow(dead_code)] // used in validate() once implemented; exercised by tests now
 pub(crate) const E_A11_001: &str = "E-A11-001";
 
 /// Warning code emitted when a visual element has both alt text AND `decorative: true`.
@@ -32,7 +36,6 @@ pub(crate) const E_A11_001: &str = "E-A11-001";
 ///
 /// Used by the `validate()` implementation (STORY-015 implementer phase) and
 /// exercised directly by the test suite.
-#[allow(dead_code)] // used in validate() once implemented; exercised by tests now
 pub(crate) const W_A11_001: &str = "W-A11-001";
 
 /// Validates that all visual elements have alt text or are marked decorative.
@@ -52,15 +55,143 @@ impl Validator for AltTextValidator {
         "alt-text"
     }
 
-    fn validate(&self, _deck: &Deck, _opts: &ValidatorOptions) -> Vec<Diagnostic> {
-        // TODO(STORY-015): Walk all slides, check visual elements for alt text.
-        // For each slide in deck.slides:
-        //   For each block in slide.blocks:
-        //     Match on block.content:
-        //       Image/Chart/Diagram/Shape — check alt + decorative
-        //       Table — check alt (no decorative)
-        //       Text/Bullets/Math — skip (no alt needed)
-        todo!("Implement alt text validation (STORY-015 implementer phase)")
+    fn validate(&self, deck: &Deck, _opts: &ValidatorOptions) -> Vec<Diagnostic> {
+        use slideforge_types::ContentBlock;
+
+        let mut diagnostics: Vec<Diagnostic> = Vec::new();
+
+        for slide in &deck.slides {
+            for block in &slide.blocks {
+                match &block.content {
+                    ContentBlock::Image(spec) => {
+                        check_visual_element(
+                            spec.alt.as_ref(),
+                            spec.decorative,
+                            "image",
+                            &spec.span,
+                            &mut diagnostics,
+                        );
+                    }
+                    ContentBlock::Chart(spec) => {
+                        check_visual_element(
+                            spec.alt.as_ref(),
+                            spec.decorative,
+                            "chart",
+                            &spec.span,
+                            &mut diagnostics,
+                        );
+                    }
+                    ContentBlock::Diagram(spec) => {
+                        check_visual_element(
+                            spec.alt.as_ref(),
+                            spec.decorative,
+                            "diagram",
+                            &spec.span,
+                            &mut diagnostics,
+                        );
+                    }
+                    ContentBlock::Shape(spec) => {
+                        check_visual_element(
+                            spec.alt.as_ref(),
+                            spec.decorative,
+                            "shape",
+                            &spec.span,
+                            &mut diagnostics,
+                        );
+                    }
+                    ContentBlock::Table(spec) => {
+                        check_table_element(spec.alt.as_ref(), &spec.span, &mut diagnostics);
+                    }
+                    // Non-visual blocks: Text, Bullets, Math — no alt text required.
+                    ContentBlock::Text(_) | ContentBlock::Bullets(_) | ContentBlock::Math(_) => {}
+                }
+            }
+        }
+
+        diagnostics
+    }
+}
+
+/// Check a visual element with `decorative` support (Image, Chart, Diagram, Shape).
+///
+/// Logic (per AC-009, AC-006, AC-001 through AC-005):
+/// 1. If `decorative: true` AND `alt` is `Some(AltText::Provided(_))` → emit W-A11-001.
+/// 2. If `decorative: true` (regardless) → skip error check (decorative exemption).
+/// 3. If `alt` is `None` or blank `Provided` → emit E-A11-001.
+/// 4. If `alt` is valid `Provided` or `Decorative` enum variant → valid, no diagnostic.
+fn check_visual_element(
+    alt: Option<&AltText>,
+    decorative: bool,
+    element_type: &str,
+    span: &SourceSpan,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    // AC-009: both alt text AND decorative: true → warn that alt is ignored.
+    if decorative {
+        if let Some(AltText::Provided(_)) = alt {
+            diagnostics.push(make_warning(element_type, span));
+        }
+        // Decorative exemption: no E-A11-001 needed.
+        return;
+    }
+
+    // Non-decorative: check that alt text is present and non-blank.
+    let is_missing = match alt {
+        None => true,
+        Some(AltText::Provided(s)) => is_blank(s),
+        Some(AltText::Decorative) => false,
+    };
+
+    if is_missing {
+        diagnostics.push(make_error(element_type, span));
+    }
+}
+
+/// Check a table element (no `decorative` field — tables are always content).
+fn check_table_element(
+    alt: Option<&AltText>,
+    span: &SourceSpan,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let is_missing = match alt {
+        None => true,
+        Some(AltText::Provided(s)) => is_blank(s),
+        Some(AltText::Decorative) => false,
+    };
+
+    if is_missing {
+        diagnostics.push(make_error("table", span));
+    }
+}
+
+/// Construct an `E-A11-001` error diagnostic for a missing alt text.
+fn make_error(element_type: &str, span: &SourceSpan) -> Diagnostic {
+    Diagnostic {
+        severity: DiagnosticSeverity::Error,
+        code: std::sync::Arc::from(E_A11_001),
+        message: std::sync::Arc::from(format!(
+            "Missing alt text on {element_type} at {span}. \
+             Add alt \"...\" or mark decorative: true"
+        )),
+        span: span.clone(),
+        hint: Some(std::sync::Arc::from(
+            "All visual elements require alt text or decorative: true (DI-001)",
+        )),
+    }
+}
+
+/// Construct a `W-A11-001` warning diagnostic for conflicting alt + decorative.
+fn make_warning(element_type: &str, span: &SourceSpan) -> Diagnostic {
+    Diagnostic {
+        severity: DiagnosticSeverity::Warning,
+        code: std::sync::Arc::from(W_A11_001),
+        message: std::sync::Arc::from(format!(
+            "Alt text ignored for decorative {element_type} at {span}"
+        )),
+        span: span.clone(),
+        hint: Some(std::sync::Arc::from(
+            "Remove alt text or remove decorative: true",
+        )),
     }
 }
 
