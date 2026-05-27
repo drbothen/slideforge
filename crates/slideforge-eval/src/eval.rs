@@ -24,6 +24,7 @@ use crate::error::EvalError;
 use crate::expr::eval_expr;
 use crate::filters::format_float_display;
 use crate::for_eval::eval_block_items;
+use crate::include_cycle::{IncludeGraph, check_include_cycles};
 
 // ─── eval_expr_to_string ────────────────────────────────────────────────────
 
@@ -80,6 +81,11 @@ pub fn eval_expr_to_string(env: &Env, expr: &Expr, sink: &mut DiagnosticSink) ->
 
 /// Evaluate a fully-parsed [`DeckNode`] into a semantic [`Deck`] IR.
 ///
+/// **Callers with include graphs:** if the deck was assembled from multiple
+/// `.sf` files via `@include`, use [`eval_deck_with_cycle_check`] instead.
+/// That function runs the BC-1.06.002 cycle-detection pre-pass before
+/// delegating here — without it, a cyclic deck will not be caught.
+///
 /// This is the primary top-level entry point for the evaluator pipeline. It:
 ///
 /// 1. Collects all `vars:` block entries into an [`Env`] deck-level frame.
@@ -126,6 +132,11 @@ pub fn eval_deck(
 ///
 /// See [`eval_deck`] for the primary API. This function accepts an
 /// `active_variant` parameter for CLI `--variant` flag support (C02).
+///
+/// **Callers with include graphs:** prefer [`eval_deck_with_cycle_check`],
+/// which runs the BC-1.06.002 cycle-detection pre-pass before delegating
+/// here. Calling this function directly with a cyclic include graph will
+/// NOT catch the cycle — the pre-pass is the only guard.
 ///
 /// Set-rule defaults resolved here are currently stored in the returned [`Deck`]
 /// registers field (reserved); future stories will thread set-rules through the
@@ -260,6 +271,71 @@ pub fn eval_deck_with_variant(
         metadata,
         registers: OrderedMap::new(),
     })
+}
+
+/// Evaluate a fully-parsed [`DeckNode`] with include-cycle pre-pass.
+///
+/// This is the **full** top-level entry point for the evaluator pipeline when
+/// the caller has include-graph metadata (produced by the parser/include-resolver
+/// from STORY-008). It runs the include-cycle detection pre-pass **before** any
+/// expression evaluation begins, satisfying the Fail-Closed Invariant from
+/// BC-1.06.002:
+///
+/// > Cycle detection runs as a **pre-pass** on the include graph BEFORE any
+/// > expression evaluation begins. This ensures no partial evaluation of a
+/// > cyclic deck can occur.
+///
+/// If any E-PAR-004 diagnostics are pushed (cycle detected), this function
+/// returns `None` without evaluating the deck — the sink will contain the
+/// cycle diagnostics.
+///
+/// # Design: Fail-Closed and E-EVL-001 Accumulation
+///
+/// When a cycle is detected, this function returns `None` immediately after
+/// the pre-pass — it does NOT accumulate E-EVL-001 errors alongside E-PAR-004.
+/// This is intentional: per BC-1.06.002 invariant 1 ("fail-closed"), no partial
+/// evaluation of a cyclic deck can occur. Callers should inspect the sink for
+/// E-PAR-004 errors after a `None` return.
+///
+/// # Parameters
+///
+/// - `deck_node`: The parsed (merged) AST root.
+/// - `include_graph`: The include graph for the deck, mapping canonical file
+///   paths to the files each directly includes. Built by the parser during
+///   `@include` resolution.
+/// - `root_file`: The canonical path of the root `.sf` file (entry point).
+/// - `config`: Evaluation configuration.
+/// - `active_variant`: Optional variant name for CLI `--variant` flag.
+/// - `sink`: Accumulates all diagnostics.
+///
+/// # Returns
+///
+/// `None` if any cycle is detected (or any fatal diagnostic during evaluation),
+/// `Some(Deck)` otherwise.
+#[doc(alias = "eval_deck")]
+pub fn eval_deck_with_cycle_check(
+    deck_node: &DeckNode,
+    include_graph: &IncludeGraph,
+    root_file: &Arc<str>,
+    config: &EvalConfig,
+    active_variant: Option<&str>,
+    sink: &mut DiagnosticSink,
+) -> Option<Deck> {
+    // ── Pre-pass: include cycle detection (BC-1.06.002 Fail-Closed) ──
+    // Run before any expression evaluation. If cycles are detected, return None
+    // immediately — no partial evaluation of a cyclic deck can occur.
+    //
+    // Design rationale (FINDING-003): early return here means E-EVL-001 errors
+    // are NOT accumulated alongside E-PAR-004. This is intentional: BC-1.06.002
+    // invariant 1 requires that the evaluator is fail-closed — a cyclic deck
+    // must produce zero evaluation output. Callers inspect the sink for
+    // E-PAR-004 (cycle errors) after a None return.
+    if !check_include_cycles(root_file, include_graph, sink) {
+        return None;
+    }
+
+    // ── Delegate to the expression evaluator ──
+    eval_deck_with_variant(deck_node, config, active_variant, sink)
 }
 
 /// Evaluate a [`slideforge_syntax::FieldValue`] into a [`Value`] in the
@@ -1469,5 +1545,86 @@ mod tests {
             deck.is_some(),
             "eval_deck_with_variant must return Some for empty deck"
         );
+    }
+
+    // ─── FINDING-001: eval_deck_with_cycle_check integrates cycle pre-pass ────
+
+    /// FINDING-001: eval_deck_with_cycle_check must run include cycle detection
+    /// as a pre-pass before expression evaluation.
+    ///
+    /// A deck with a cyclic include graph must return None and push E-PAR-004
+    /// without evaluating any slides. This verifies the Fail-Closed invariant
+    /// from BC-1.06.002.
+    #[test]
+    fn test_eval_deck_with_cycle_check_rejects_cyclic_graph() {
+        use std::collections::HashMap;
+
+        use crate::eval_deck_with_cycle_check;
+        use crate::include_cycle::IncludeGraph;
+
+        // a 1-slide deck that would otherwise evaluate fine
+        let deck_node = minimal_deck_with_slides(&["content"]);
+        let config = default_config();
+
+        // Build a cyclic include graph: a.sf → b.sf → a.sf
+        let mut include_graph: IncludeGraph = HashMap::new();
+        include_graph.insert(Arc::from("a.sf"), vec![Arc::from("b.sf")]);
+        include_graph.insert(Arc::from("b.sf"), vec![Arc::from("a.sf")]);
+        let root = Arc::from("a.sf");
+
+        let mut sink = DiagnosticSink::new();
+        let deck =
+            eval_deck_with_cycle_check(&deck_node, &include_graph, &root, &config, None, &mut sink);
+
+        assert!(
+            deck.is_none(),
+            "eval_deck_with_cycle_check must return None for cyclic include graph"
+        );
+        assert!(
+            !sink.is_empty(),
+            "cyclic include graph must push E-PAR-004 to sink"
+        );
+        let code = sink.errors()[0]
+            .code()
+            .map(|c| c.to_string())
+            .unwrap_or_default();
+        assert_eq!(
+            code, "E-PAR-004",
+            "cyclic graph error must be E-PAR-004; got: {code}"
+        );
+    }
+
+    /// FINDING-001: eval_deck_with_cycle_check on a cycle-free graph evaluates normally.
+    #[test]
+    fn test_eval_deck_with_cycle_check_acyclic_evaluates() {
+        use std::collections::HashMap;
+
+        use crate::eval_deck_with_cycle_check;
+        use crate::include_cycle::IncludeGraph;
+
+        let deck_node = minimal_deck_with_slides(&["title"]);
+        let config = default_config();
+
+        // Acyclic graph: a.sf → b.sf (b.sf has no includes)
+        let mut include_graph: IncludeGraph = HashMap::new();
+        include_graph.insert(Arc::from("a.sf"), vec![Arc::from("b.sf")]);
+        include_graph.insert(Arc::from("b.sf"), vec![]);
+        let root = Arc::from("a.sf");
+
+        let mut sink = DiagnosticSink::new();
+        let deck =
+            eval_deck_with_cycle_check(&deck_node, &include_graph, &root, &config, None, &mut sink);
+
+        assert!(
+            deck.is_some(),
+            "eval_deck_with_cycle_check must return Some for acyclic include graph"
+        );
+        assert!(
+            sink.is_empty(),
+            "acyclic include graph must not push any diagnostics; got: {:?}",
+            sink.errors()
+        );
+        let deck = deck.unwrap();
+        assert_eq!(deck.slides.len(), 1, "evaluated deck must have 1 slide");
     }
 }

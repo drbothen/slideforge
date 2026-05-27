@@ -10,6 +10,7 @@
 //! | E-EVL-002 | (reserved — math context undefined) |
 //! | E-EVL-003 | `TypeMismatch`       |
 //! | E-EVL-004 | `FilterNotFound`     |
+//! | E-PAR-004 | `IncludeCycle`       |
 //! | E-DAT-005 | `FieldAccessFailed`  |
 //! | E-PAR-006 | `ReservedKeyword`    |
 //! | E-EVL-007 | `TooManySlides`      |
@@ -21,6 +22,22 @@ use std::sync::Arc;
 use miette::Diagnostic;
 use slideforge_types::SourceSpan;
 use thiserror::Error;
+
+// ─── Format helpers ──────────────────────────────────────────────────────────
+
+/// Format a cycle path as `"a.sf → b.sf → a.sf"` for error messages.
+///
+/// This is used in the `#[error(...)]` attribute of [`EvalError::IncludeCycle`].
+/// It must be a free function (not a method) because `thiserror`'s `#[error]`
+/// macro can only call free functions in format expressions.
+#[must_use]
+pub fn format_cycle_path(cycle_path: &[Arc<str>]) -> String {
+    cycle_path
+        .iter()
+        .map(std::convert::AsRef::as_ref)
+        .collect::<Vec<_>>()
+        .join(" → ")
+}
 
 // ─── EvalError ───────────────────────────────────────────────────────────────
 
@@ -189,6 +206,33 @@ pub enum EvalError {
         /// Source location of the deck or block that triggered the warning.
         span: SourceSpan,
     },
+
+    /// E-PAR-004: A circular `@include` chain was detected in the merged AST.
+    ///
+    /// The evaluator runs a DFS over the include graph (built from `@include`
+    /// metadata preserved in the merged deck node) as a pre-pass before any
+    /// expression evaluation begins (fail-closed: no partial evaluation of a
+    /// cyclic deck).
+    ///
+    /// `cycle_path` contains the canonical file paths that form the cycle, in
+    /// order: `["a.sf", "b.sf", "a.sf"]`. The last element repeats the first
+    /// to make the cycle explicit in the error message.
+    ///
+    /// Format: `Include cycle detected: a.sf → b.sf → a.sf`
+    #[error("Include cycle detected: {}", format_cycle_path(cycle_path))]
+    #[diagnostic(
+        code("E-PAR-004"),
+        help("Remove the circular @include to break the cycle")
+    )]
+    IncludeCycle {
+        /// The ordered list of file paths forming the cycle.
+        ///
+        /// The last element is the same as the first to make the cycle
+        /// explicit: `["a.sf", "b.sf", "a.sf"]`.
+        cycle_path: Vec<Arc<str>>,
+        /// Source location of the `@include` directive that closed the cycle.
+        span: SourceSpan,
+    },
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -340,6 +384,13 @@ mod tests {
         };
         let code = e_evl008.code().unwrap().to_string();
         assert_eq!(code, "E-EVL-008", "NotIterable must have code E-EVL-008");
+
+        let e_par004 = EvalError::IncludeCycle {
+            cycle_path: vec![Arc::from("a.sf"), Arc::from("b.sf"), Arc::from("a.sf")],
+            span: test_span(),
+        };
+        let code = e_par004.code().unwrap().to_string();
+        assert_eq!(code, "E-PAR-004", "IncludeCycle must have code E-PAR-004");
     }
 
     #[test]

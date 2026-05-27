@@ -215,7 +215,7 @@ pub fn eval_for_block<S: std::hash::BuildHasher>(
 /// `slide_node.inline_items` may contain element-scope `@for` and `@if` blocks.
 /// `@for` items are evaluated and their resulting sub-slides are recorded in the
 /// returned `Slide`'s `blocks` field.
-/// `@if` evaluation is deferred to STORY-013.
+/// `@if` evaluation delegates to [`crate::if_eval::eval_if_chain`] (STORY-013).
 pub fn eval_slide_node<S: std::hash::BuildHasher>(
     env: &Env,
     slide_node: &SlideNode,
@@ -339,7 +339,7 @@ pub fn eval_slide_node<S: std::hash::BuildHasher>(
 ///   inline items from `slide.inline_items` (I05)
 /// - [`BlockItem::For`] → [`eval_for_block`] (recursive)
 /// - [`BlockItem::If`] → condition evaluated and matching branch selected
-///   (delegated to future `if_eval` module in STORY-013)
+///   (delegated to [`crate::if_eval::eval_if_chain`], implemented in STORY-013)
 /// - [`BlockItem::Section`] → ignored for now (generates no slides)
 ///
 /// The `set_rule_defaults` map is threaded through to every `eval_slide_node`
@@ -382,9 +382,17 @@ pub fn eval_block_items<S: std::hash::BuildHasher>(
                             );
                             slides.extend(generated);
                         },
-                        BlockItem::If(_spanned_if) => {
-                            // TODO(STORY-013): @if evaluation inside slide body
-                            // is deferred to STORY-013 (conditional evaluation).
+                        BlockItem::If(spanned_if) => {
+                            // Delegate to @if evaluator (STORY-013).
+                            let if_node = spanned_if.value();
+                            let generated = crate::if_eval::eval_if_chain(
+                                env,
+                                if_node,
+                                set_rule_defaults,
+                                config,
+                                sink,
+                            );
+                            slides.extend(generated);
                         },
                         BlockItem::Slide(_) | BlockItem::Section(_) => {
                             // Nested slides inside a slide body are not valid;
@@ -406,9 +414,12 @@ pub fn eval_block_items<S: std::hash::BuildHasher>(
                 );
                 slides.extend(generated);
             },
-            BlockItem::If(_spanned_if) => {
-                // @if evaluation is delegated to STORY-013.
-                // For now: do nothing (no slides generated).
+            BlockItem::If(spanned_if) => {
+                // Delegate to the @if/@elif/@else evaluator (STORY-013).
+                let if_node = spanned_if.value();
+                let generated =
+                    crate::if_eval::eval_if_chain(env, if_node, set_rule_defaults, config, sink);
+                slides.extend(generated);
             },
             BlockItem::Section(_spanned_section) => {
                 // Section blocks generate no slides at the eval level.

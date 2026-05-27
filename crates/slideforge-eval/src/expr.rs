@@ -122,13 +122,20 @@ pub fn eval_expr(env: &Env, expr: &Expr, sink: &mut DiagnosticSink) -> Option<Va
 
         // ── Binary operations ────────────────────────────────────────────────
         Expr::BinOp { op, lhs, rhs } => {
-            // Evaluate both sides (accumulate both errors before returning None).
-            let lval = eval_expr(env, lhs, sink);
-            let rval = eval_expr(env, rhs, sink);
-            let (Some(lval), Some(rval)) = (lval, rval) else {
-                return None;
-            };
-            eval_binop(op, &lval, &rval, span, sink)
+            // && and || use short-circuit evaluation (EC-005 / BC-1.05.001 EC-005).
+            // All other binary ops evaluate both operands to accumulate all errors.
+            match op {
+                BinOpKind::And => eval_and(env, lhs, rhs, span, sink),
+                BinOpKind::Or => eval_or(env, lhs, rhs, span, sink),
+                _ => {
+                    let lval = eval_expr(env, lhs, sink);
+                    let rval = eval_expr(env, rhs, sink);
+                    let (Some(lval), Some(rval)) = (lval, rval) else {
+                        return None;
+                    };
+                    eval_binop(op, &lval, &rval, span, sink)
+                },
+            }
         },
 
         // ── Unary operations ─────────────────────────────────────────────────
@@ -193,6 +200,72 @@ pub fn eval_expr(env: &Env, expr: &Expr, sink: &mut DiagnosticSink) -> Option<Va
 
         // ── Error recovery sentinel ─────────────────────────────────────────
         Expr::Error => None,
+    }
+}
+
+// ─── eval_and / eval_or (short-circuit logical operators) ────────────────────
+
+/// Evaluate `lhs && rhs` with short-circuit semantics (EC-005).
+///
+/// If `lhs` evaluates to `Bool(false)`, returns `Bool(false)` immediately
+/// without evaluating `rhs`. This prevents spurious E-EVL-001 errors for
+/// undefined variables in the RHS when the LHS guard is already false —
+/// the key guard pattern: `@if flag && items | length > 0`.
+fn eval_and(
+    env: &Env,
+    lhs: &Expr,
+    rhs: &Expr,
+    span: SourceSpan,
+    sink: &mut DiagnosticSink,
+) -> Option<Value> {
+    let lval = eval_expr(env, lhs, sink)?;
+    match &lval {
+        Value::Bool(false) => Some(Value::Bool(false)),
+        Value::Bool(true) => {
+            let rval = eval_expr(env, rhs, sink)?;
+            eval_binop(&BinOpKind::And, &lval, &rval, span, sink)
+        },
+        _ => push_error(
+            sink,
+            EvalError::TypeMismatch {
+                message: format!(
+                    "&& requires two booleans, got {} and <rhs not evaluated>",
+                    lval.type_name()
+                ),
+                span,
+            },
+        ),
+    }
+}
+
+/// Evaluate `lhs || rhs` with short-circuit semantics (EC-005).
+///
+/// If `lhs` evaluates to `Bool(true)`, returns `Bool(true)` immediately
+/// without evaluating `rhs`.
+fn eval_or(
+    env: &Env,
+    lhs: &Expr,
+    rhs: &Expr,
+    span: SourceSpan,
+    sink: &mut DiagnosticSink,
+) -> Option<Value> {
+    let lval = eval_expr(env, lhs, sink)?;
+    match &lval {
+        Value::Bool(true) => Some(Value::Bool(true)),
+        Value::Bool(false) => {
+            let rval = eval_expr(env, rhs, sink)?;
+            eval_binop(&BinOpKind::Or, &lval, &rval, span, sink)
+        },
+        _ => push_error(
+            sink,
+            EvalError::TypeMismatch {
+                message: format!(
+                    "|| requires two booleans, got {} and <rhs not evaluated>",
+                    lval.type_name()
+                ),
+                span,
+            },
+        ),
     }
 }
 
@@ -919,6 +992,103 @@ mod tests {
         let result = eval_expr(&env, &expr, &mut sink);
         assert!(sink.is_empty(), "no errors expected for valid || operation");
         assert_eq!(result, Some(Value::Bool(true)));
+    }
+
+    // ── EC-005: short-circuit && / || ────────────────────────────────────────
+
+    /// EC-005: `false && undefined_var` — lhs is `Bool(false)` → short-circuit:
+    /// rhs (`undefined_var`) is NEVER evaluated, no E-EVL-001 produced.
+    ///
+    /// This is the BC-1.05.001 EC-005 guard pattern:
+    ///   `@if flag && items | length > 0:` where flag=false → no error for items.
+    #[test]
+    fn test_and_short_circuits_on_false_lhs() {
+        let env = env_with(&[("flag", Value::Bool(false))]);
+        let mut sink = DiagnosticSink::new();
+        let expr = Expr::BinOp {
+            op: BinOpKind::And,
+            lhs: Box::new(Expr::Ident("flag".to_string())),
+            rhs: Box::new(Expr::Ident("undefined_var".to_string())), // not in env
+        };
+        let result = eval_expr(&env, &expr, &mut sink);
+        assert_eq!(
+            result,
+            Some(Value::Bool(false)),
+            "false && <undefined> must short-circuit to Bool(false)"
+        );
+        assert!(
+            sink.is_empty(),
+            "false && <undefined> must NOT push E-EVL-001 (rhs not evaluated); got: {:?}",
+            sink.errors()
+        );
+    }
+
+    /// EC-005: `true && undefined_var` — lhs is `Bool(true)` → rhs IS evaluated →
+    /// E-EVL-001 for `undefined_var`.
+    #[test]
+    fn test_and_evaluates_rhs_when_lhs_true() {
+        let env = env_with(&[("flag", Value::Bool(true))]);
+        let mut sink = DiagnosticSink::new();
+        let expr = Expr::BinOp {
+            op: BinOpKind::And,
+            lhs: Box::new(Expr::Ident("flag".to_string())),
+            rhs: Box::new(Expr::Ident("undefined_var".to_string())),
+        };
+        let result = eval_expr(&env, &expr, &mut sink);
+        assert_eq!(
+            result, None,
+            "true && <undefined> must return None (rhs error)"
+        );
+        assert!(
+            !sink.is_empty(),
+            "true && <undefined> must push E-EVL-001 (rhs is evaluated)"
+        );
+    }
+
+    /// EC-005: `true || undefined_var` — lhs is Bool(true) → short-circuit:
+    /// rhs is NEVER evaluated, no E-EVL-001 produced.
+    #[test]
+    fn test_or_short_circuits_on_true_lhs() {
+        let env = env_with(&[("flag", Value::Bool(true))]);
+        let mut sink = DiagnosticSink::new();
+        let expr = Expr::BinOp {
+            op: BinOpKind::Or,
+            lhs: Box::new(Expr::Ident("flag".to_string())),
+            rhs: Box::new(Expr::Ident("undefined_var".to_string())),
+        };
+        let result = eval_expr(&env, &expr, &mut sink);
+        assert_eq!(
+            result,
+            Some(Value::Bool(true)),
+            "true || <undefined> must short-circuit to Bool(true)"
+        );
+        assert!(
+            sink.is_empty(),
+            "true || <undefined> must NOT push E-EVL-001 (rhs not evaluated); got: {:?}",
+            sink.errors()
+        );
+    }
+
+    /// EC-005: `false || undefined_var` — lhs is `Bool(false)` → rhs IS evaluated →
+    /// E-EVL-001 for `undefined_var`.
+    #[test]
+    fn test_or_evaluates_rhs_when_lhs_false() {
+        let env = env_with(&[("flag", Value::Bool(false))]);
+        let mut sink = DiagnosticSink::new();
+        let expr = Expr::BinOp {
+            op: BinOpKind::Or,
+            lhs: Box::new(Expr::Ident("flag".to_string())),
+            rhs: Box::new(Expr::Ident("undefined_var".to_string())),
+        };
+        let result = eval_expr(&env, &expr, &mut sink);
+        assert_eq!(
+            result, None,
+            "false || <undefined> must return None (rhs error)"
+        );
+        assert!(
+            !sink.is_empty(),
+            "false || <undefined> must push E-EVL-001 (rhs is evaluated)"
+        );
     }
 
     /// FINDING-P2-001: `Int(1) && Bool(true)` → `None` + `TypeMismatch` in sink
