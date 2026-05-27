@@ -271,7 +271,10 @@ mod tests {
     fn test_BC_5_01_004_inject_lang_default_sets_en_when_absent() {
         let mut deck = make_deck_with_lang(None);
         let injected = inject_lang_default(&mut deck);
-        assert!(injected, "inject_lang_default must return true when lang was None");
+        assert!(
+            injected,
+            "inject_lang_default must return true when lang was None"
+        );
         assert_eq!(
             deck.metadata.lang.as_deref(),
             Some("en"),
@@ -285,7 +288,10 @@ mod tests {
     fn test_BC_5_01_004_inject_lang_default_sets_en_when_empty() {
         let mut deck = make_deck_with_lang(Some(""));
         let injected = inject_lang_default(&mut deck);
-        assert!(injected, "inject_lang_default must return true when lang was empty");
+        assert!(
+            injected,
+            "inject_lang_default must return true when lang was empty"
+        );
         assert_eq!(
             deck.metadata.lang.as_deref(),
             Some("en"),
@@ -300,7 +306,10 @@ mod tests {
     fn test_BC_5_01_005_inject_lang_default_noop_when_present() {
         let mut deck = make_deck_with_lang(Some("en-US"));
         let injected = inject_lang_default(&mut deck);
-        assert!(!injected, "inject_lang_default must return false when lang already set");
+        assert!(
+            !injected,
+            "inject_lang_default must return false when lang already set"
+        );
         assert_eq!(
             deck.metadata.lang.as_deref(),
             Some("en-US"),

@@ -96,8 +96,7 @@ impl Validator for LabelCheckValidator {
                 let bg_hex = get_str_field(&slide.fields, "bg_color");
 
                 if let (Some(fg_str), Some(bg_str)) = (fg_hex, bg_hex)
-                    && let (Some(fg), Some(bg)) =
-                        (parse_hex_color(fg_str), parse_hex_color(bg_str))
+                    && let (Some(fg), Some(bg)) = (parse_hex_color(fg_str), parse_hex_color(bg_str))
                 {
                     // Use wcag_aa_passes with large_text=false: font-size is not
                     // available in Wave 2, so we always apply the 4.5:1 normal-text
