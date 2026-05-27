@@ -59,7 +59,7 @@ pub fn eval_expr_to_string(env: &Env, expr: &Expr, sink: &mut DiagnosticSink) ->
                 ParseSeverity::Error,
             );
             None
-        }
+        },
     }
 }
 
@@ -195,18 +195,21 @@ mod tests {
 
     // ── List/Map → error (FINDING-005) ───────────────────────────────────────
 
-    /// FINDING-005: eval_expr_to_string must return None + push error for List values.
+    /// FINDING-005: `eval_expr_to_string` must return None + push error for List values.
     #[test]
     fn test_eval_expr_to_string_list_returns_error() {
         let env = env_with(&[("items", Value::List(vec![Value::Int(1)]))]);
         let mut sink = DiagnosticSink::new();
         let expr = Expr::Ident("items".to_string());
         let result = eval_expr_to_string(&env, &expr, &mut sink);
-        assert!(result.is_none(), "List value must return None from eval_expr_to_string");
+        assert!(
+            result.is_none(),
+            "List value must return None from eval_expr_to_string"
+        );
         assert!(!sink.is_empty(), "List value must push a diagnostic");
     }
 
-    /// FINDING-005: eval_expr_to_string must return None + push error for Map values.
+    /// FINDING-005: `eval_expr_to_string` must return None + push error for Map values.
     #[test]
     fn test_eval_expr_to_string_map_returns_error() {
         use slideforge_types::OrderedMap;
@@ -216,7 +219,10 @@ mod tests {
         let mut sink = DiagnosticSink::new();
         let expr = Expr::Ident("obj".to_string());
         let result = eval_expr_to_string(&env, &expr, &mut sink);
-        assert!(result.is_none(), "Map value must return None from eval_expr_to_string");
+        assert!(
+            result.is_none(),
+            "Map value must return None from eval_expr_to_string"
+        );
         assert!(!sink.is_empty(), "Map value must push a diagnostic");
     }
 }

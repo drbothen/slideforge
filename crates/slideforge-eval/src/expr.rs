@@ -73,7 +73,7 @@ pub fn eval_expr(env: &Env, expr: &Expr, sink: &mut DiagnosticSink) -> Option<Va
                     },
                 )
             }
-        }
+        },
         Expr::Num(n) => Some(Value::Int(*n)),
         Expr::Float(f) => Some(Value::Float(*f)),
         Expr::Str(s) => Some(Value::Str(Arc::from(s.as_str()))),
@@ -91,11 +91,15 @@ pub fn eval_expr(env: &Env, expr: &Expr, sink: &mut DiagnosticSink) -> Option<Va
                         // Error already pushed to sink; continue evaluating
                         // remaining items so all errors are accumulated.
                         had_error = true;
-                    }
+                    },
                 }
             }
-            if had_error { None } else { Some(Value::List(collected)) }
-        }
+            if had_error {
+                None
+            } else {
+                Some(Value::List(collected))
+            }
+        },
         Expr::Map(entries) => {
             let mut map = slideforge_types::OrderedMap::new();
             let mut had_error = false;
@@ -103,10 +107,10 @@ pub fn eval_expr(env: &Env, expr: &Expr, sink: &mut DiagnosticSink) -> Option<Va
                 match eval_expr(env, val_expr, sink) {
                     Some(v) => {
                         map.insert(Arc::from(key.as_str()), v);
-                    }
+                    },
                     None => {
                         had_error = true;
-                    }
+                    },
                 }
             }
             if had_error {
@@ -114,7 +118,7 @@ pub fn eval_expr(env: &Env, expr: &Expr, sink: &mut DiagnosticSink) -> Option<Va
             } else {
                 Some(Value::Map(map))
             }
-        }
+        },
 
         // ── Binary operations ────────────────────────────────────────────────
         Expr::BinOp { op, lhs, rhs } => {
@@ -125,13 +129,13 @@ pub fn eval_expr(env: &Env, expr: &Expr, sink: &mut DiagnosticSink) -> Option<Va
                 return None;
             };
             eval_binop(op, &lval, &rval, span, sink)
-        }
+        },
 
         // ── Unary operations ─────────────────────────────────────────────────
         Expr::UnaryOp { op, operand } => {
             let val = eval_expr(env, operand, sink)?;
             eval_unaryop(op, val, span, sink)
-        }
+        },
 
         // ── Field access ─────────────────────────────────────────────────────
         Expr::FieldAccess { base, field } => {
@@ -150,7 +154,7 @@ pub fn eval_expr(env: &Env, expr: &Expr, sink: &mut DiagnosticSink) -> Option<Va
                             },
                         )
                     }
-                }
+                },
                 other => push_error(
                     sink,
                     EvalError::FieldAccessFailed {
@@ -160,7 +164,7 @@ pub fn eval_expr(env: &Env, expr: &Expr, sink: &mut DiagnosticSink) -> Option<Va
                     },
                 ),
             }
-        }
+        },
 
         // ── Pipe ────────────────────────────────────────────────────────────
         Expr::Pipe {
@@ -185,7 +189,7 @@ pub fn eval_expr(env: &Env, expr: &Expr, sink: &mut DiagnosticSink) -> Option<Va
                 Ok(v) => Some(v),
                 Err(e) => push_error(sink, e),
             }
-        }
+        },
 
         // ── Error recovery sentinel ─────────────────────────────────────────
         Expr::Error => None,
@@ -207,14 +211,14 @@ fn eval_binop(
         // ── Arithmetic ───────────────────────────────────────────────────────
         BinOpKind::Add | BinOpKind::Sub | BinOpKind::Mul | BinOpKind::Div | BinOpKind::Rem => {
             eval_arithmetic(op, lval, rval, span, sink)
-        }
+        },
 
         // ── Comparison ───────────────────────────────────────────────────────
         BinOpKind::Eq => Some(Value::Bool(lval == rval)),
         BinOpKind::Ne => Some(Value::Bool(lval != rval)),
         BinOpKind::Lt | BinOpKind::Le | BinOpKind::Gt | BinOpKind::Ge => {
             eval_ordering(op, lval, rval, span, sink)
-        }
+        },
 
         // ── Logical (short-circuit already happened at the Expr level since
         //    both operands are already evaluated — for now we just validate
@@ -270,13 +274,13 @@ fn eval_arithmetic(
                         return push_error(sink, EvalError::DivisionByZero { span });
                     }
                     l.checked_div(*r).map(Value::Int)
-                }
+                },
                 BinOpKind::Rem => {
                     if *r == 0 {
                         return push_error(sink, EvalError::DivisionByZero { span });
                     }
                     l.checked_rem(*r).map(Value::Int)
-                }
+                },
                 _ => unreachable!("only arithmetic ops dispatched here"),
             };
             result.or_else(|| {
@@ -288,7 +292,7 @@ fn eval_arithmetic(
                     },
                 )
             })
-        }
+        },
         (Value::Float(l), Value::Float(r)) => {
             let result = match op {
                 BinOpKind::Add => l.0 + r.0,
@@ -299,17 +303,17 @@ fn eval_arithmetic(
                         return push_error(sink, EvalError::DivisionByZero { span });
                     }
                     l.0 / r.0
-                }
+                },
                 BinOpKind::Rem => {
                     if r.0 == 0.0 {
                         return push_error(sink, EvalError::DivisionByZero { span });
                     }
                     l.0 % r.0
-                }
+                },
                 _ => unreachable!("only arithmetic ops dispatched here"),
             };
             Some(Value::Float(OrderedFloat(result)))
-        }
+        },
         (Value::Int(l), Value::Float(r)) => {
             let l_f = *l as f64;
             let result = match op {
@@ -321,17 +325,17 @@ fn eval_arithmetic(
                         return push_error(sink, EvalError::DivisionByZero { span });
                     }
                     l_f / r.0
-                }
+                },
                 BinOpKind::Rem => {
                     if r.0 == 0.0 {
                         return push_error(sink, EvalError::DivisionByZero { span });
                     }
                     l_f % r.0
-                }
+                },
                 _ => unreachable!(),
             };
             Some(Value::Float(OrderedFloat(result)))
-        }
+        },
         (Value::Float(l), Value::Int(r)) => {
             let r_f = *r as f64;
             let result = match op {
@@ -343,17 +347,17 @@ fn eval_arithmetic(
                         return push_error(sink, EvalError::DivisionByZero { span });
                     }
                     l.0 / r_f
-                }
+                },
                 BinOpKind::Rem => {
                     if r_f == 0.0 {
                         return push_error(sink, EvalError::DivisionByZero { span });
                     }
                     l.0 % r_f
-                }
+                },
                 _ => unreachable!(),
             };
             Some(Value::Float(OrderedFloat(result)))
-        }
+        },
         _ => push_error(
             sink,
             EvalError::TypeMismatch {
@@ -396,7 +400,7 @@ fn eval_ordering(
                 _ => unreachable!("only ordering ops dispatched here"),
             };
             Some(Value::Bool(result))
-        }
+        },
         None => push_error(
             sink,
             EvalError::TypeMismatch {
@@ -449,7 +453,10 @@ fn eval_unaryop(
             other => push_error(
                 sink,
                 EvalError::TypeMismatch {
-                    message: format!("unary - requires a numeric value, got {}", other.type_name()),
+                    message: format!(
+                        "unary - requires a numeric value, got {}",
+                        other.type_name()
+                    ),
                     span,
                 },
             ),
@@ -610,7 +617,10 @@ mod tests {
         let expr = Expr::Ident("greeting".to_string());
         let result = eval_expr(&env, &expr, &mut sink);
         assert_eq!(result, None, "undefined variable must return None");
-        assert!(!sink.is_empty(), "undefined variable must push a diagnostic");
+        assert!(
+            !sink.is_empty(),
+            "undefined variable must push a diagnostic"
+        );
     }
 
     // ── Undefined variable: scope list in diagnostic ──────────────────────────
@@ -706,7 +716,10 @@ mod tests {
             operand: Box::new(Expr::Num(i64::MIN)),
         };
         let result = eval_expr(&env, &expr, &mut sink);
-        assert!(result.is_none(), "negating i64::MIN must return None (overflow)");
+        assert!(
+            result.is_none(),
+            "negating i64::MIN must return None (overflow)"
+        );
         assert!(!sink.is_empty(), "negating i64::MIN must push a diagnostic");
     }
 
@@ -725,7 +738,10 @@ mod tests {
             Expr::Ident("z".to_string()),
         ]);
         let result = eval_expr(&env, &expr, &mut sink);
-        assert!(result.is_none(), "list with all undefined vars must return None");
+        assert!(
+            result.is_none(),
+            "list with all undefined vars must return None"
+        );
         assert_eq!(sink.len(), 3, "all 3 undefined vars should produce errors");
     }
 
@@ -761,7 +777,7 @@ mod tests {
         assert_eq!(result, Some(Value::Bool(true)));
     }
 
-    /// FINDING-P2-001: `Float(3.14) > Float(2.0)` → `Bool(true)`
+    /// FINDING-P2-001: `Float(3.5) > Float(2.0)` → `Bool(true)`
     #[test]
     fn test_comparison_gt_float() {
         use ordered_float::OrderedFloat;
@@ -769,7 +785,7 @@ mod tests {
         let mut sink = DiagnosticSink::new();
         let expr = Expr::BinOp {
             op: BinOpKind::Gt,
-            lhs: Box::new(Expr::Float(OrderedFloat(3.14))),
+            lhs: Box::new(Expr::Float(OrderedFloat(3.5))),
             rhs: Box::new(Expr::Float(OrderedFloat(2.0))),
         };
         let result = eval_expr(&env, &expr, &mut sink);
@@ -804,11 +820,14 @@ mod tests {
             rhs: Box::new(Expr::Str("b".to_string())),
         };
         let result = eval_expr(&env, &expr, &mut sink);
-        assert!(sink.is_empty(), "no errors expected for valid string comparison");
+        assert!(
+            sink.is_empty(),
+            "no errors expected for valid string comparison"
+        );
         assert_eq!(result, Some(Value::Bool(true)));
     }
 
-    /// FINDING-P2-001: `"hello" < Int(5)` → `None` + TypeMismatch in sink
+    /// FINDING-P2-001: `"hello" < Int(5)` → `None` + `TypeMismatch` in sink
     #[test]
     fn test_comparison_type_mismatch() {
         let env = empty_env();
@@ -902,7 +921,7 @@ mod tests {
         assert_eq!(result, Some(Value::Bool(true)));
     }
 
-    /// FINDING-P2-001: `Int(1) && Bool(true)` → `None` + TypeMismatch in sink
+    /// FINDING-P2-001: `Int(1) && Bool(true)` → `None` + `TypeMismatch` in sink
     #[test]
     fn test_logical_and_type_mismatch() {
         let env = empty_env();
@@ -949,7 +968,7 @@ mod tests {
         assert_eq!(result, Some(Value::Bool(true)));
     }
 
-    /// FINDING-P2-001: `!Int(42)` → `None` + TypeMismatch in sink
+    /// FINDING-P2-001: `!Int(42)` → `None` + `TypeMismatch` in sink
     #[test]
     fn test_unary_not_type_mismatch() {
         use slideforge_syntax::UnaryOpKind;
