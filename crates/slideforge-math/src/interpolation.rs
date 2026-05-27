@@ -81,10 +81,18 @@ pub fn substitute<S: BuildHasher>(
                     ));
                 }
             } else {
-                // Unclosed `@{` — emit as-is (best-effort recovery)
+                // Unclosed `@{` — emit as-is for best-effort recovery and
+                // push a diagnostic so the user knows what went wrong.
                 result.push('@');
                 result.push('{');
                 result.push_str(&var_name);
+                diags.push(MathDiagnostic::new(
+                    MathRendererError::ParseError {
+                        message: Arc::from("unclosed `@{` interpolation expression"),
+                        span: span.clone(),
+                    },
+                    span.clone(),
+                ));
             }
             continue;
         }
@@ -211,5 +219,22 @@ mod tests {
         let (result, diags) = substitute("", &vars, &SourceSpan::default());
         assert!(diags.is_empty());
         assert_eq!(result, "");
+    }
+
+    /// An unclosed `@{` interpolation must emit a ParseError diagnostic
+    /// whose message contains "unclosed".
+    #[test]
+    fn test_unclosed_at_brace_diagnostic() {
+        let vars = HashMap::new();
+        let (_, diags) = substitute("@{unclosed", &vars, &SourceSpan::default());
+        assert!(!diags.is_empty(), "expected a diagnostic for unclosed @{{");
+        let has_unclosed_diag = diags.iter().any(|d| {
+            matches!(&d.error, MathRendererError::ParseError { message, .. }
+                if message.contains("unclosed"))
+        });
+        assert!(
+            has_unclosed_diag,
+            "expected ParseError with 'unclosed' in message, got: {diags:?}"
+        );
     }
 }
