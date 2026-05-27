@@ -149,6 +149,16 @@ pub enum EvalError {
     /// current DSL produces this error.
     ///
     /// `hint` carries a correction suggestion (e.g., "Use @for instead of @while").
+    ///
+    /// # Defense-in-depth: dual detection with `slideforge-syntax`
+    ///
+    /// The parser (`slideforge-syntax`) also detects reserved keywords at parse
+    /// time and emits E-PAR-006 as a parse error. This eval-layer variant exists
+    /// as a fallback for reserved keywords that might reach the evaluator through
+    /// AST transformations or future features that bypass the parser (e.g., macros,
+    /// programmatic deck construction). Both layers share error code E-PAR-006
+    /// intentionally — the code is the stable user-visible identity regardless of
+    /// which layer detects the violation.
     #[error("reserved keyword `{keyword}` used at {span}")]
     #[diagnostic(code("E-PAR-006"), help("{hint}"))]
     ReservedKeyword {

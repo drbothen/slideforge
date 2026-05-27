@@ -48,9 +48,13 @@ use crate::filters::apply_filter;
 /// - [`EvalError::FilterNotFound`] — pipe references an unknown filter
 /// - [`EvalError::FieldAccessFailed`] — dot-access on non-map or missing field
 pub fn eval_expr(env: &Env, expr: &Expr, sink: &mut DiagnosticSink) -> Option<Value> {
-    // Use a default span for expressions that don't carry their own span yet.
-    // SourceMap threading is tracked as a future story (not yet scheduled).
-    // For now, all eval errors use SourceSpan::default().
+    // All eval errors currently use SourceSpan::default() (zero-origin spans).
+    //
+    // Known limitation: span threading through eval_deck → eval_expr → eval_for_block
+    // requires a SourceMap parameter to be propagated through the entire call chain.
+    // This is tracked as a Wave 3+ story. Until that story ships, all eval errors
+    // report zero-origin spans — source locations point to the beginning of the
+    // file rather than the actual expression site.
     let span = SourceSpan::default();
 
     match expr {

@@ -309,27 +309,43 @@ fn filter_float(val: &Value, span: SourceSpan) -> Result<Value, EvalError> {
     }
 }
 
-/// Convert any value to its string representation.
+/// Convert a scalar value to its string representation.
 ///
-/// This filter never errors — every [`Value`] has a string representation.
-/// The `Result` return type is kept for signature uniformity with other
-/// filter functions; the `Err` branch is unreachable.
-#[allow(clippy::unnecessary_wraps)]
-fn filter_string(val: &Value, _span: SourceSpan) -> Result<Value, EvalError> {
-    let s = value_to_display_string(val);
-    Ok(Value::Str(Arc::from(s.as_str())))
+/// Returns `Err(EvalError::TypeMismatch)` (E-EVL-003) when `val` is a
+/// [`Value::List`] or [`Value::Map`] — these types have no single useful string
+/// representation. Use `| join(", ")` to render a list as text, or dot-access
+/// to extract individual map fields.
+///
+/// This is consistent with [`crate::eval::eval_expr_to_string`], which also
+/// rejects List and Map with E-EVL-003 rather than silently producing a
+/// placeholder string.
+fn filter_string(val: &Value, span: SourceSpan) -> Result<Value, EvalError> {
+    match val {
+        Value::List(_) => Err(EvalError::TypeMismatch {
+            message: "| string cannot convert a list to text; use | join(\", \") to render list items as a string".to_string(),
+            span,
+        }),
+        Value::Map(_) => Err(EvalError::TypeMismatch {
+            message: "| string cannot convert a map to text; use dot-access (e.g. map.field) to extract individual fields".to_string(),
+            span,
+        }),
+        other => {
+            let s = value_to_display_string(other);
+            Ok(Value::Str(Arc::from(s.as_str())))
+        },
+    }
 }
 
-/// Produce a human-readable string representation of any [`Value`].
+/// Produce a human-readable string representation of a scalar [`Value`].
 ///
 /// Used by [`filter_string`] and [`filter_join`] for element coercion.
 ///
-/// # List and Map behavior
+/// # Note
 ///
-/// Applying `| string` to a [`Value::List`] produces `"[list]"` and to a
-/// [`Value::Map`] produces `"[map]"`. This is intentional placeholder behavior
-/// for DSL v1. To render list elements as a string, use `| join(", ")` instead.
-/// A richer representation (e.g., JSON-like) is deferred to a future story.
+/// This function handles only scalar types (`Str`, `Int`, `Float`, `Bool`,
+/// `Null`). List and Map are rejected with E-EVL-003 by [`filter_string`]
+/// before reaching this function. [`filter_join`] uses this for per-element
+/// coercion; individual list elements are expected to be scalars at that point.
 fn value_to_display_string(val: &Value) -> String {
     match val {
         Value::Str(s) => s.to_string(),
@@ -337,8 +353,8 @@ fn value_to_display_string(val: &Value) -> String {
         Value::Float(f) => format_float_display(f.0),
         Value::Bool(b) => b.to_string(),
         Value::Null => String::new(),
-        // Intentional placeholder: List and Map have no useful single-string
-        // representation at DSL v1. Use `| join(", ")` to render list items.
+        // List and Map are handled (rejected) by filter_string before reaching here.
+        // filter_join delegates element coercion here but list elements are scalars.
         Value::List(_) => "[list]".to_string(),
         Value::Map(_) => "[map]".to_string(),
     }
@@ -655,33 +671,43 @@ mod tests {
         assert_eq!(result, Value::Str(Arc::from("99")));
     }
 
-    /// Applying `| string` to a List produces `"[list]"` — intentional
-    /// placeholder behavior for DSL v1. Use `| join(", ")` to render items.
+    /// Applying `| string` to a List returns E-EVL-003 with a hint to use
+    /// `| join(", ")` instead of silently producing a placeholder string.
     #[test]
     fn test_filter_string_on_list_produces_placeholder() {
         let val = Value::List(vec![Value::Int(1), Value::Int(2)]);
-        let result = apply_filter("string", &val, &[], span()).unwrap();
-        assert_eq!(
-            result,
-            Value::Str(Arc::from("[list]")),
-            "| string on a List must produce \"[list]\" (DSL v1 placeholder)"
+        let result = apply_filter("string", &val, &[], span());
+        assert!(
+            matches!(result, Err(EvalError::TypeMismatch { .. })),
+            "| string on a List must return E-EVL-003 TypeMismatch (not a placeholder string); got: {result:?}"
         );
+        if let Err(EvalError::TypeMismatch { message, .. }) = result {
+            assert!(
+                message.contains("join"),
+                "E-EVL-003 hint must mention | join for list input; got: {message}"
+            );
+        }
     }
 
-    /// Applying `| string` to a Map produces `"[map]"` — intentional
-    /// placeholder behavior for DSL v1.
+    /// Applying `| string` to a Map returns E-EVL-003 with a hint to use
+    /// dot-access instead of silently producing a placeholder string.
     #[test]
     fn test_filter_string_on_map_produces_placeholder() {
         use slideforge_types::OrderedMap;
         let mut m = OrderedMap::new();
         m.insert(Arc::from("key"), Value::Str(Arc::from("value")));
         let val = Value::Map(m);
-        let result = apply_filter("string", &val, &[], span()).unwrap();
-        assert_eq!(
-            result,
-            Value::Str(Arc::from("[map]")),
-            "| string on a Map must produce \"[map]\" (DSL v1 placeholder)"
+        let result = apply_filter("string", &val, &[], span());
+        assert!(
+            matches!(result, Err(EvalError::TypeMismatch { .. })),
+            "| string on a Map must return E-EVL-003 TypeMismatch (not a placeholder string); got: {result:?}"
         );
+        if let Err(EvalError::TypeMismatch { message, .. }) = result {
+            assert!(
+                message.contains("dot-access") || message.contains("map.field"),
+                "E-EVL-003 hint must mention dot-access for map input; got: {message}"
+            );
+        }
     }
 
     // ── filter_join ──────────────────────────────────────────────────────────

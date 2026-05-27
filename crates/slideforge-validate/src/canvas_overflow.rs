@@ -130,11 +130,27 @@ fn count_bullets(slide: &Slide) -> usize {
         .sum()
 }
 
+/// Practical upper bound on bullets per slide.
+///
+/// Any bullet count above this value is clamped before the EMU multiplication
+/// to prevent `Emu * i64` overflow. 10,000 bullets is an absurdly large slide
+/// by any practical measure; the clamped result will still be detected as an
+/// overflow by the comparator.
+const MAX_BULLET_COUNT: usize = 10_000;
+
 /// Estimate the rendered height of a slide's bullet content in EMU.
 ///
 /// Uses `bullet_count × LINE_HEIGHT_PER_BULLET` as a conservative heuristic.
+///
+/// `bullet_count` is clamped to [`MAX_BULLET_COUNT`] before conversion to
+/// `i64` to prevent arithmetic overflow in the [`Emu`] multiplication. Any
+/// count above the cap is still large enough to trigger an overflow diagnostic.
 fn estimate_height(bullet_count: usize) -> Emu {
-    LINE_HEIGHT_PER_BULLET * i64::try_from(bullet_count).unwrap_or(i64::MAX)
+    // Clamp before conversion: i64::MAX as a multiplier would overflow Emu * i64.
+    let capped = bullet_count.min(MAX_BULLET_COUNT);
+    // Safety: MAX_BULLET_COUNT (10_000) << i64::MAX; the try_from cannot fail.
+    let count_i64 = i64::try_from(capped).unwrap_or(10_000_i64);
+    LINE_HEIGHT_PER_BULLET * count_i64
 }
 
 /// Extract the slide's title as a string for use in diagnostic messages.
@@ -542,6 +558,44 @@ mod tests {
         assert!(
             diags.is_empty(),
             "empty deck must produce 0 overflow diagnostics; got {diags:?}"
+        );
+    }
+
+    // ── Overflow safety: very large bullet count must not panic ────────────────
+
+    /// A bullet count well above `MAX_BULLET_COUNT` must not cause an arithmetic
+    /// overflow panic in debug mode or silent wrapping in release.
+    ///
+    /// The `estimate_height` function clamps the count to `MAX_BULLET_COUNT`
+    /// before converting to `i64`, preventing `Emu * i64::MAX` overflow. The
+    /// clamped count is still large enough to trigger an overflow diagnostic.
+    #[test]
+    fn test_overflow_very_large_bullet_count_no_panic() {
+        // 100_001 > MAX_BULLET_COUNT (10_000): exercises the clamp path.
+        // This is small enough to actually allocate in a test.
+        let deck = make_deck(vec![make_slide_with_bullets(100_001)]);
+        let diags = validator_default().validate(&deck, &default_opts());
+        assert_eq!(
+            diags.len(),
+            1,
+            "a large bullet count above MAX_BULLET_COUNT must produce exactly 1 E-LAY-001 (not panic); got {diags:?}"
+        );
+        assert_eq!(diags[0].code.as_ref(), E_LAY_001);
+    }
+
+    /// Verify that `estimate_height` with `usize::MAX` as input does not panic.
+    ///
+    /// This tests the clamp directly without allocating `usize::MAX` bullets.
+    #[test]
+    fn test_estimate_height_usize_max_no_panic() {
+        use super::{MAX_BULLET_COUNT, estimate_height};
+        // estimate_height must clamp MAX to MAX_BULLET_COUNT and not panic.
+        let h = estimate_height(usize::MAX);
+        // Result must equal estimate_height(MAX_BULLET_COUNT).
+        let expected = estimate_height(MAX_BULLET_COUNT);
+        assert_eq!(
+            h, expected,
+            "estimate_height(usize::MAX) must equal estimate_height(MAX_BULLET_COUNT)"
         );
     }
 }

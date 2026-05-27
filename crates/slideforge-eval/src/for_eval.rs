@@ -169,6 +169,11 @@ pub fn eval_for_block<S: std::hash::BuildHasher>(
 
     // Emit a large-deck warning if the generated count exceeds the threshold.
     // I04: Use LargeDeckWarning (not TooManySlides) for the lint warning.
+    //
+    // Strictly greater (>) because this is a soft warning — a deck AT the
+    // threshold is within the expected range and must not trigger a warning.
+    // The hard cap (TooManySlides) uses >= because the cap is a hard limit that
+    // must not be exceeded.
     if slides.len() > config.large_deck_warn_threshold {
         sink.push_with_severity(
             EvalError::LargeDeckWarning {
@@ -894,6 +899,75 @@ mod tests {
         assert!(
             !sink.has_fatal(),
             "large-collection warning must not be fatal"
+        );
+    }
+
+    // ─── LargeDeckWarning boundary: AT threshold == no warning; ABOVE == warning ──
+
+    /// A deck generating exactly `threshold` slides must NOT trigger a
+    /// LargeDeckWarning (`>` is strict — AT the threshold is within range).
+    #[test]
+    fn test_large_deck_warning_at_threshold_no_warning() {
+        let mut env = empty_env();
+        let mut sink = slideforge_syntax::DiagnosticSink::new();
+        let config = EvalConfig {
+            large_deck_warn_threshold: 3,
+            max_total_slides: None,
+        };
+
+        // Exactly 3 slides (== threshold): must produce NO warning.
+        let body = vec![slide_block_item("content")];
+        let collection = int_list_expr(&[1, 2, 3]);
+
+        let slides = eval_for_block(
+            &mut env,
+            "x",
+            &collection,
+            &body,
+            &empty_defaults(),
+            &config,
+            &mut sink,
+        );
+
+        assert_eq!(slides.len(), 3, "must produce exactly 3 slides");
+        assert!(
+            sink.is_empty(),
+            "a deck AT the threshold (3 == 3) must NOT trigger LargeDeckWarning"
+        );
+    }
+
+    /// A deck generating `threshold + 1` slides MUST trigger a LargeDeckWarning.
+    #[test]
+    fn test_large_deck_warning_above_threshold_triggers_warning() {
+        let mut env = empty_env();
+        let mut sink = slideforge_syntax::DiagnosticSink::new();
+        let config = EvalConfig {
+            large_deck_warn_threshold: 3,
+            max_total_slides: None,
+        };
+
+        // 4 slides (> threshold of 3): must produce a warning.
+        let body = vec![slide_block_item("content")];
+        let collection = int_list_expr(&[1, 2, 3, 4]);
+
+        let slides = eval_for_block(
+            &mut env,
+            "x",
+            &collection,
+            &body,
+            &empty_defaults(),
+            &config,
+            &mut sink,
+        );
+
+        assert_eq!(slides.len(), 4, "must produce exactly 4 slides");
+        assert!(
+            !sink.is_empty(),
+            "a deck ABOVE the threshold (4 > 3) must trigger LargeDeckWarning"
+        );
+        assert!(
+            !sink.has_fatal(),
+            "LargeDeckWarning must be a non-fatal warning (evaluation continues)"
         );
     }
 

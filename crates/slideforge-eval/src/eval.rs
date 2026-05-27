@@ -8,6 +8,20 @@
 //! [`eval_deck`] is the top-level entry point that takes a parsed [`DeckNode`]
 //! and produces a semantic [`Deck`] IR. It is implemented as a stub here and
 //! will be filled in during the TDD implementation phase.
+//!
+//! # Known limitation: zero-origin source spans
+//!
+//! All [`EvalError`](crate::error::EvalError) diagnostics currently report
+//! [`slideforge_types::SourceSpan::default()`] (zero-origin spans). This means
+//! error source locations point to the beginning of the file rather than the
+//! actual expression site.
+//!
+//! The definitive fix requires threading a `SourceMap` parameter through the
+//! entire evaluation call chain: `eval_deck` → `eval_for_block` → `eval_expr`.
+//! Each call site would need to pass the relevant span extracted from the AST
+//! node being evaluated. This is deferred to a Wave 3+ story (`SourceMap`
+//! threading). Until that story ships, span information in eval diagnostics is
+//! unavailable.
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
