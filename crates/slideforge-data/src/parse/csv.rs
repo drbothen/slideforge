@@ -228,6 +228,40 @@ mod tests {
         assert_eq!(row.len(), 2, "extra fields must be dropped: only 2 keys in map");
     }
 
+    /// test_BC_5_03_004_parse_csv_short_row_fills_null — row with fewer fields than headers fills
+    /// missing columns with Value::Null (FINDING-002).
+    ///
+    /// Input: `"a,b,c\n1"` — header row has 3 columns but the single data row has only 1 field.
+    /// Expected: row[0] has a="1", b=Null, c=Null.
+    ///
+    /// This guards against silent data loss: the caller must be able to distinguish "missing
+    /// field" (Null) from "present but empty" (also Null by the empty-cell rule), but both must
+    /// not panic or skip the key entirely.
+    #[test]
+    fn test_bc_5_03_004_parse_csv_short_row_fills_null() {
+        let src = "a,b,c\n1";
+        let value = parse_csv(src, "test.csv").expect("short row must parse without error");
+        let list = value.as_list().expect("must be Value::List");
+        assert_eq!(list.len(), 1, "one data row");
+
+        let row = list[0].as_map().expect("row must be Value::Map");
+        assert_eq!(
+            row.get("a"),
+            Some(&Value::Str(Arc::from("1"))),
+            "present field 'a' must be Str(\"1\")"
+        );
+        assert_eq!(
+            row.get("b"),
+            Some(&Value::Null),
+            "missing field 'b' must be Value::Null"
+        );
+        assert_eq!(
+            row.get("c"),
+            Some(&Value::Null),
+            "missing field 'c' must be Value::Null"
+        );
+    }
+
     /// test_BC_5_03_004_parse_csv_missing_header — empty string → DataError (no header row).
     #[test]
     fn test_bc_5_03_004_parse_csv_missing_header() {

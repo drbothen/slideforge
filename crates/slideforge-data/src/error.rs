@@ -109,7 +109,7 @@ pub enum DataError {
     /// A generic I/O error that is not a simple file-not-found.
     ///
     /// Error code: `E-DAT-004` (I/O error sub-case).
-    #[error("[{code}] I/O error reading '{path}': {message}")]
+    #[error("[{code}] I/O error reading '{path}': {message} (at {span})")]
     IoError {
         /// The error code constant (`E-DAT-004`).
         code: &'static str,
@@ -117,17 +117,21 @@ pub enum DataError {
         path: Arc<str>,
         /// Description of the I/O failure.
         message: Arc<str>,
+        /// The source location associated with this I/O error.
+        span: SourceSpan,
     },
 
     /// A file path escaped the project root (path traversal attempt blocked).
     ///
     /// Error code: `E-DAT-006` (security policy sub-case).
-    #[error("[{code}] path traversal blocked: '{path}' is outside base dir")]
+    #[error("[{code}] path traversal blocked: '{path}' is outside base dir (at {span})")]
     PathTraversalBlocked {
         /// The error code constant (`E-DAT-006`).
         code: &'static str,
         /// The path that was blocked.
         path: Arc<str>,
+        /// The source location associated with this path traversal attempt.
+        span: SourceSpan,
     },
 
     /// An SSRF attempt was blocked by the security policy.
@@ -292,27 +296,66 @@ impl DataError {
             DataError::UnsupportedFormat { code, extension, .. } => {
                 DataError::UnsupportedFormat { code, extension, span: new_span }
             }
+            DataError::IoError { code, path, message, .. } => {
+                DataError::IoError { code, path, message, span: new_span }
+            }
+            DataError::PathTraversalBlocked { code, path, .. } => {
+                DataError::PathTraversalBlocked { code, path, span: new_span }
+            }
             // Variants without a span field are returned unchanged.
             other => other,
         }
     }
 
     /// Construct a [`DataError::IoError`] with the canonical error code.
+    ///
+    /// Uses `SourceSpan::default()` as the span; callers with span information
+    /// should use [`DataError::io_error_at`].
     #[must_use]
     pub fn io_error(path: impl Into<Arc<str>>, message: impl Into<Arc<str>>) -> Self {
         DataError::IoError {
             code: E_DAT_004,
             path: path.into(),
             message: message.into(),
+            span: SourceSpan::default(),
+        }
+    }
+
+    /// Construct a [`DataError::IoError`] with a source span.
+    #[must_use]
+    pub fn io_error_at(
+        path: impl Into<Arc<str>>,
+        message: impl Into<Arc<str>>,
+        span: SourceSpan,
+    ) -> Self {
+        DataError::IoError {
+            code: E_DAT_004,
+            path: path.into(),
+            message: message.into(),
+            span,
         }
     }
 
     /// Construct a [`DataError::PathTraversalBlocked`] with the canonical error code.
+    ///
+    /// Uses `SourceSpan::default()` as the span; callers with span information
+    /// should use [`DataError::path_traversal_blocked_at`].
     #[must_use]
     pub fn path_traversal_blocked(path: impl Into<Arc<str>>) -> Self {
         DataError::PathTraversalBlocked {
             code: E_DAT_006,
             path: path.into(),
+            span: SourceSpan::default(),
+        }
+    }
+
+    /// Construct a [`DataError::PathTraversalBlocked`] with a source span.
+    #[must_use]
+    pub fn path_traversal_blocked_at(path: impl Into<Arc<str>>, span: SourceSpan) -> Self {
+        DataError::PathTraversalBlocked {
+            code: E_DAT_006,
+            path: path.into(),
+            span,
         }
     }
 
@@ -435,5 +478,62 @@ mod tests {
         assert!(msg.contains("json"), "hint must list json");
         assert!(msg.contains("csv"), "hint must list csv");
         assert!(msg.contains("toml"), "hint must list toml");
+    }
+
+    /// test_with_span_io_error — with_span() attaches span to IoError (FINDING-001).
+    ///
+    /// Previously IoError fell into the catch-all `other => other` arm and silently
+    /// discarded the span. Now it must be updated.
+    #[test]
+    fn test_with_span_io_error() {
+        let err = DataError::io_error("/tmp/data.csv", "permission denied");
+        let span = SourceSpan::new(Arc::from("deck.sf"), 10, 4, 200);
+        let err_with_span = err.with_span(span.clone());
+        // After with_span, the error must carry the provided span (visible in display string).
+        let msg = err_with_span.to_string();
+        assert!(msg.contains("deck.sf"), "with_span must embed the new file in IoError");
+        // Also verify the error code is preserved.
+        assert_eq!(err_with_span.code(), "E-DAT-004");
+    }
+
+    /// test_with_span_path_traversal_blocked — with_span() attaches span to PathTraversalBlocked.
+    ///
+    /// Previously PathTraversalBlocked fell into the catch-all arm. Now it must be updated.
+    #[test]
+    fn test_with_span_path_traversal_blocked() {
+        let err = DataError::path_traversal_blocked("../../etc/passwd");
+        let span = SourceSpan::new(Arc::from("deck.sf"), 7, 1, 50);
+        let err_with_span = err.with_span(span.clone());
+        let msg = err_with_span.to_string();
+        assert!(
+            msg.contains("deck.sf"),
+            "with_span must embed the new file in PathTraversalBlocked"
+        );
+        assert_eq!(err_with_span.code(), "E-DAT-006");
+    }
+
+    /// test_io_error_at_constructor — io_error_at() carries the provided span.
+    #[test]
+    fn test_io_error_at_constructor() {
+        let span = SourceSpan::new(Arc::from("slide.sf"), 3, 2, 80);
+        let err = DataError::io_error_at("/tmp/data.csv", "disk full", span);
+        assert_eq!(err.code(), "E-DAT-004");
+        let msg = err.to_string();
+        assert!(msg.contains("slide.sf"), "io_error_at span must appear in message");
+        assert!(msg.contains("disk full"));
+    }
+
+    /// test_path_traversal_blocked_at_constructor — path_traversal_blocked_at() carries the span.
+    #[test]
+    fn test_path_traversal_blocked_at_constructor() {
+        let span = SourceSpan::new(Arc::from("main.sf"), 2, 1, 30);
+        let err = DataError::path_traversal_blocked_at("../../secret", span);
+        assert_eq!(err.code(), "E-DAT-006");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("main.sf"),
+            "path_traversal_blocked_at span must appear in message"
+        );
+        assert!(msg.contains("secret"));
     }
 }

@@ -5,7 +5,7 @@
 //! dispatches to the appropriate parser in [`crate::parse`].
 
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 use slideforge_plugin_api::{DataSource, DataSourceError, DataSourceOptions};
@@ -40,6 +40,42 @@ use crate::DataError;
 /// - Path traversal → [`DataSourceError::IoError`] wrapping [`DataError::PathTraversalBlocked`]
 #[derive(Debug, Default)]
 pub struct FileDataSource;
+
+/// Lexically normalize a path by resolving `..` and `.` components.
+///
+/// This function does NOT touch the filesystem — it operates purely on the
+/// path string. This is used as a first-line path-traversal check: if the
+/// normalized path escapes the base directory lexically, we can reject it
+/// immediately without needing `canonicalize()` to succeed on the target file.
+///
+/// Behaviour on edge cases:
+/// - `..` at the root of a relative path is preserved (e.g. `../../foo` stays
+///   escaped and will NOT start with any non-escaping base).
+/// - `.` components are dropped.
+/// - Leading `CurDir`/`Prefix`/`RootDir` components are preserved.
+fn normalize_path(path: &Path) -> PathBuf {
+    let mut components: Vec<Component<'_>> = Vec::new();
+    for component in path.components() {
+        match component {
+            Component::ParentDir => {
+                // Only pop a normal component — never pop a root, prefix, or
+                // another `..`. If there's nothing to pop, keep the `..` so
+                // the resulting path still escapes its logical root.
+                match components.last() {
+                    Some(Component::Normal(_)) => {
+                        components.pop();
+                    }
+                    _ => {
+                        components.push(component);
+                    }
+                }
+            }
+            Component::CurDir => {} // `.` is always a no-op
+            other => components.push(other),
+        }
+    }
+    components.iter().collect()
+}
 
 impl FileDataSource {
     /// Construct a new [`FileDataSource`] plugin instance.
@@ -87,9 +123,38 @@ impl FileDataSource {
                 )
             })?;
 
-            // The target file may not exist yet (that is fine — the read below will
-            // produce FileNotFound). Only check containment if canonicalization of the
-            // resolved path succeeds (i.e., the file currently exists on disk).
+            // --- Lexical check (first line of defence) ---
+            //
+            // Normalize both paths without touching the filesystem, then check
+            // containment. This catches `../` traversal for NON-EXISTENT targets
+            // before we ever attempt to open the file.  Without this check an
+            // attacker could distinguish "file doesn't exist" from "file exists
+            // but is blocked" by observing which error variant is returned
+            // (FileNotFound vs PathTraversalBlocked) — leaking file-existence
+            // information for paths outside the sandbox.
+            //
+            // We anchor against `canonical_base` (symlinks resolved) so that
+            // macOS's `/var` → `/private/var` symlink doesn't cause false
+            // positives. For absolute input paths we normalize directly; for
+            // relative input paths we re-join against `canonical_base` so the
+            // comparison is always anchored on the same root.
+            let canonical_candidate: PathBuf = if path.is_absolute() {
+                path.to_path_buf()
+            } else {
+                canonical_base.join(path)
+            };
+            let normalized_resolved = normalize_path(&canonical_candidate);
+            let normalized_base = normalize_path(&canonical_base);
+            if !normalized_resolved.starts_with(&normalized_base) {
+                let path_str: Arc<str> = Arc::from(resolved.to_string_lossy().as_ref());
+                return Err(DataError::path_traversal_blocked(path_str));
+            }
+
+            // --- Filesystem check (second line of defence, handles symlinks) ---
+            //
+            // For files that already exist on disk, re-check after full
+            // canonicalization so that symlinks pointing outside the sandbox are
+            // also caught.
             if let Ok(canonical_resolved) = resolved.canonicalize()
                 && !canonical_resolved.starts_with(&canonical_base)
             {
@@ -111,7 +176,7 @@ impl FileDataSource {
 
         // Read the file contents, distinguishing NotFound from other I/O errors.
         let path_str: Arc<str> = Arc::from(resolved.to_string_lossy().as_ref());
-        let contents = std::fs::read_to_string(&resolved).map_err(|e| {
+        let raw_contents = std::fs::read_to_string(&resolved).map_err(|e| {
             if e.kind() == io::ErrorKind::NotFound {
                 DataError::file_not_found(Arc::clone(&path_str))
             } else {
@@ -119,12 +184,17 @@ impl FileDataSource {
             }
         })?;
 
+        // Strip a leading UTF-8 BOM (U+FEFF) if present.
+        // Excel on Windows exports CSV/TSV with a BOM, which corrupts the first
+        // column header with an invisible prefix. JSON parsers also reject a BOM.
+        let contents = raw_contents.strip_prefix('\u{FEFF}').unwrap_or(&raw_contents);
+
         // Dispatch to the appropriate parser.
         match format {
-            DataFormat::Json => json::parse_json(&contents, &path_str),
-            DataFormat::Csv => csv::parse_csv(&contents, &path_str),
-            DataFormat::Yaml => yaml::parse_yaml(&contents, &path_str),
-            DataFormat::Toml => toml::parse_toml(&contents, &path_str),
+            DataFormat::Json => json::parse_json(contents, &path_str),
+            DataFormat::Csv => csv::parse_csv(contents, &path_str),
+            DataFormat::Yaml => yaml::parse_yaml(contents, &path_str),
+            DataFormat::Toml => toml::parse_toml(contents, &path_str),
             DataFormat::Xlsx | DataFormat::Sqlite => {
                 let ext: Arc<str> = Arc::from(
                     resolved
@@ -387,5 +457,117 @@ mod tests {
         let result = src.load_path(Path::new("data.json"), Some(dir.path()));
         let value = result.expect("relative path with base_dir must resolve correctly");
         assert!(value.as_map().is_some(), "must be a map");
+    }
+
+    /// test_bom_stripped_json — JSON file with UTF-8 BOM (U+FEFF) prefix parses correctly.
+    ///
+    /// Excel on Windows and some editors prepend a BOM to UTF-8 files. Without BOM
+    /// stripping, `serde_json` rejects the file with an unexpected character error.
+    #[test]
+    fn test_bom_stripped_json() {
+        // UTF-8 BOM = 0xEF 0xBB 0xBF, followed by valid JSON.
+        let mut content = vec![0xEF_u8, 0xBB, 0xBF];
+        content.extend_from_slice(br#"{"answer": 42}"#);
+
+        let f = temp_file_with_suffix(".json", &content);
+        let src = loader();
+        let value = src
+            .load_path(f.path(), None)
+            .expect("JSON with BOM must parse without error");
+        let map = value.as_map().expect("result must be a map");
+        assert_eq!(
+            map.get("answer"),
+            Some(&Value::Int(42)),
+            "BOM must be stripped so JSON is parsed correctly"
+        );
+    }
+
+    /// test_traversal_blocked_nonexistent_file — lexical `../` traversal to non-existent file
+    /// must return PathTraversalBlocked (E-DAT-005), NOT FileNotFound (E-DAT-004).
+    ///
+    /// This is the FINDING-001 regression test. Before the fix, `canonicalize()` failed on
+    /// the non-existent target so the containment check was skipped, and the subsequent
+    /// `read_to_string` produced FileNotFound — leaking file-existence information.
+    #[test]
+    fn test_traversal_blocked_nonexistent_file() {
+        use tempfile::TempDir;
+        let dir = TempDir::new().expect("temp dir");
+        let src = loader();
+
+        // `../../nonexistent.json` lexically escapes base_dir regardless of whether
+        // the target exists on disk.
+        let traversal = Path::new("../../nonexistent_slideforge_test_12345.json");
+        let result = src.load_path(traversal, Some(dir.path()));
+        let err = result.expect_err("traversal to non-existent file must return Err");
+        assert_eq!(
+            err.code(),
+            "E-DAT-006",
+            "path traversal for non-existent file must return E-DAT-006 (PathTraversalBlocked), not E-DAT-004 (FileNotFound): {:?}",
+            err
+        );
+    }
+
+    /// test_traversal_blocked_existing_and_nonexistent_same_error — both existing and
+    /// non-existing out-of-sandbox paths must produce the same error variant (E-DAT-005).
+    ///
+    /// This prevents the file-existence oracle: an attacker must not be able to
+    /// distinguish "file exists outside sandbox" from "file doesn't exist outside sandbox"
+    /// by observing the error code.
+    #[test]
+    fn test_traversal_blocked_existing_and_nonexistent_same_error() {
+        use tempfile::TempDir;
+        let dir = TempDir::new().expect("temp dir");
+        let src = loader();
+
+        // Non-existent path outside sandbox.
+        let nonexistent = Path::new("../nonexistent_slideforge_oracle_test.json");
+        let err_nonexistent = src
+            .load_path(nonexistent, Some(dir.path()))
+            .expect_err("non-existent traversal must Err");
+
+        // /etc/passwd reliably exists on macOS/Linux and is definitely outside any TempDir.
+        let existing = Path::new("../../../etc/passwd.json");
+        let err_existing = src
+            .load_path(existing, Some(dir.path()))
+            .expect_err("existing traversal must Err");
+
+        assert_eq!(
+            err_nonexistent.code(),
+            "E-DAT-006",
+            "non-existent outside-sandbox file must return E-DAT-006 (PathTraversalBlocked)"
+        );
+        assert_eq!(
+            err_existing.code(),
+            "E-DAT-006",
+            "existing outside-sandbox file must return E-DAT-006 (same as non-existent — no oracle)"
+        );
+    }
+
+    /// test_bom_stripped_csv — CSV file with UTF-8 BOM prefix has clean column headers.
+    ///
+    /// A BOM prefix corrupts the first column name with an invisible U+FEFF character,
+    /// making header-based lookups fail silently. Stripping ensures clean headers.
+    #[test]
+    fn test_bom_stripped_csv() {
+        // UTF-8 BOM followed by a CSV with header "name" and one data row.
+        let mut content = vec![0xEF_u8, 0xBB, 0xBF];
+        content.extend_from_slice(b"name\nalice");
+
+        let f = temp_file_with_suffix(".csv", &content);
+        let src = loader();
+        let value = src
+            .load_path(f.path(), None)
+            .expect("CSV with BOM must parse without error");
+        let list = value.as_list().expect("CSV must produce list");
+        assert_eq!(list.len(), 1, "must have one data row");
+
+        // The first row must be a map whose key is exactly "name" (no BOM prefix).
+        let row = &list[0];
+        let row_map = row.as_map().expect("CSV row must be a map");
+        assert!(
+            row_map.contains_key("name"),
+            "column header must be 'name' (no invisible BOM prefix); got keys: {:?}",
+            row_map.keys().collect::<Vec<_>>()
+        );
     }
 }
