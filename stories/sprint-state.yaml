@@ -2,7 +2,7 @@
 current_wave: 1
 current_phase: 3
 pipeline_status: IN_PROGRESS
-last_updated: 2026-05-26
+last_updated: 2026-05-27
 ---
 
 stories:
@@ -21,8 +21,12 @@ stories:
     pr: 2
     merge_commit: ae344a83
   STORY-003:
-    status: draft
+    status: merged
     wave: 1
+    started: 2026-05-26
+    merged: 2026-05-27
+    pr: 10
+    merge_commit: 10345ab4
   STORY-004:
     status: merged
     wave: 1

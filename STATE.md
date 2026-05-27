@@ -4,7 +4,7 @@ mode: greenfield
 created: 2026-05-23
 current_phase: phase-3-tdd-implementation
 status: IN_PROGRESS
-last_updated: 2026-05-26
+last_updated: 2026-05-27
 phase_1_approved: 2026-05-25
 phase_2_approved: 2026-05-25
 phase_1_convergence: "17 passes, 69 findings, 3/3 clean (passes 15-16-17)"
@@ -37,7 +37,7 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. It generates branded .p
 **Workspace:** /Users/jmagady/Dev/slideforge
 **Factory worktree:** .factory/ on branch `factory-artifacts`
 
-## Current Status: Phase 3 IN PROGRESS — Wave 1: 9/14 merged (001/002/004/005/006/007/008/009/010), STORY-003 next
+## Current Status: Phase 3 IN PROGRESS — Wave 1: 10/14 merged (001/002/003/004/005/006/007/008/009/010), STORY-051 (CI) next
 
 Phase 2 Story Decomposition: COMPLETE and APPROVED (2026-05-25).
 - 71 stories decomposed from 112 BCs across 21 epics, 6 waves, 437 total points
@@ -57,22 +57,22 @@ Continue Wave 1 delivery. 9 of 14 stories merged. Per-story delivery flow:
 1. test-writer: stubs + tests → 2. implementer: TDD →
 3. adversary: 3-CLEAN per story → 4. push → PR → CI → merge → cleanup
 
-### Wave 1 Remaining Stories (5 of 14, all unblocked)
+### Wave 1 Remaining Stories (4 of 14, all unblocked)
 
 | Story | Points | Crate | Deps Met? |
 |-------|--------|-------|-----------|
-| STORY-003 31 SlideType Implementations | 8 | slideforge-types | ✅ (001+002) |
 | STORY-051 CI: fmt+clippy+nextest matrix | 5 | devops | ✅ (independent) |
 | STORY-052 CI: Visual Regression | 5 | devops | ✅ (independent) |
 | STORY-053 CI: Supply-Chain Audit | 5 | devops | ✅ (independent) |
 | STORY-054 CI: Release Pipeline | 8 | devops | ✅ (independent) |
 
-### Wave 1 Completed Stories (9 of 14)
+### Wave 1 Completed Stories (10 of 14)
 
 | Story | PR | Tests | Adversarial |
 |-------|-----|-------|-------------|
 | STORY-001 IR Core Types | #1 | 157 | 6p, 3/3 |
 | STORY-002 Plugin Trait API | #2 | 106 | 4p, 3/3 |
+| STORY-003 31 SlideType Implementations | #10 | 133 | 5p, 3/3 |
 | STORY-004 Value System + EMU | #3 | 212 | 4p, 3/3 |
 | STORY-005 Lexer + Tokenization | #4 | 45 | 6p, 3/3 |
 | STORY-006 Parser Core | #5 | 101 | 5p, 3/3 |
@@ -81,7 +81,7 @@ Continue Wave 1 delivery. 9 of 14 stories merged. Per-story delivery flow:
 | STORY-009 Parser: math/shape/version | #8 | 237 | 6p, 3/3 |
 | STORY-010 Error Accumulation + Diagnostics | #9 | 299 | 5p, 3/3 |
 
-Cumulative: ~20,000+ lines, 1436+ tests, 9 PRs on develop.
+Cumulative: ~24,000+ lines, 1569+ tests, 10 PRs on develop.
 
 ### Key inputs for Phase 3
 
@@ -112,7 +112,7 @@ Cumulative: ~20,000+ lines, 1436+ tests, 9 PRs on develop.
 | Planning (25 DSL decisions) | DONE 2026-05-24 | q1–q25 decision docs + 14 research threads |
 | Phase 1: Spec Crystallization | DONE — APPROVED 2026-05-25 | PRD (109 BCs, 15 HS, 4 supplements) + architecture (14 ADRs, 15 VPs, 20 crates) + UX spec (10 screens, 5 flows) + L2 domain spec (12 files) |
 | Phase 2: Story Decomposition | DONE — APPROVED 2026-05-25 | 71 stories, 21 epics, 6 waves, 437 pts. 22 adversarial passes, 3/3 clean. |
-| Phase 3: TDD Implementation | IN PROGRESS — Wave 1: 9/14 merged (001/002/004/005/006/007/008/009/010). Remaining: 003/051-054. | Per-story delivery |
+| Phase 3: TDD Implementation | IN PROGRESS — Wave 1: 10/14 merged (001-010). Remaining: 051-054 (CI stories). | Per-story delivery |
 | Phase 4: Holdout Evaluation | NOT STARTED | Per-wave holdout gates |
 | Phase 5: Adversarial Refinement | NOT STARTED | Post-implementation cascade |
 | Phase 6: Formal Hardening | NOT STARTED | Kani + fuzz + mutants + semgrep |
@@ -172,6 +172,7 @@ Cumulative: ~20,000+ lines, 1436+ tests, 9 PRs on develop.
 - 2026-05-26 — STORY-008 MERGED (PR #7, f283b840) — @include, variants, set rules, aliases, 183 tests, 4 adversarial passes (4→0→0→0), 3/3 clean
 - 2026-05-26 — STORY-009 MERGED (PR #8, b738d606) — Parser math mode, shape block, DSL versioning gate, keyword registry, 237 tests, 6 adversarial passes (12→4→1→0→0→0), 3/3 clean
 - 2026-05-26 — STORY-010 MERGED (PR #9, 96ecc49d) — Error accumulation, DiagnosticSink, DiagnosticRenderer, ParseSeverity, 299 tests, 5 adversarial passes (9→4→0→0→0), 3/3 clean
+- 2026-05-27 — STORY-003 MERGED (PR #10, 10345ab4) — 31 SlideType implementations in slideforge-plugin-api, SlideTypeRegistry with suggest + validate_fields, 133 tests, 5 adversarial passes (13→4→0→0→0), 3/3 clean
 
 ## Decision Documents (canonical references)
 
