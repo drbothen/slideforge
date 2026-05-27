@@ -18,7 +18,7 @@
 //! | **Slide** | Implemented | `BlockItem::If` at top level, dispatched by `eval_block_items` |
 //! | **Element** | Implemented | `BlockItem::If` in `slide_node.inline_items`, dispatched by `eval_block_items` |
 //! | **Section** | Implemented | `BlockItem::If` as a sibling of `BlockItem::Section`, same dispatch path as slide-scope |
-//! | **Field** | Blocked on parser | Requires `ExprNode::IfExpr { condition, then_val, else_val }` in the AST. The slideforge-syntax parser (STORY-008) does not yet produce `ExprNode::IfExpr` for `title @if is_draft: "DRAFT: ..." @else: "..."`. Field-scope `@if` will be implemented when the parser is extended (future story). |
+//! | **Field** | Blocked on parser | Requires `ExprNode::IfExpr { condition, then_val, else_val }` in the AST (STORY-013 spec §"@if at Field Scope"). The slideforge-syntax parser (STORY-007 / STORY-008) does not yet emit `ExprNode::IfExpr` for `title @if is_draft: "DRAFT: ..." @else: "..."`. Field-scope `@if` evaluator code will be added when the parser ships the new AST variant — tracked in the STORY-007 parser control-flow story scope. |
 //!
 //! # Lazy Evaluation Invariant
 //!
@@ -974,6 +974,94 @@ mod tests {
         assert_eq!(
             code, "E-EVL-003",
             "error code must be E-EVL-003 for Null condition; got: {code}"
+        );
+    }
+
+    // ─── FINDING-005: Value::List and Value::Map as condition → E-EVL-003 ──────
+
+    /// FINDING-005: `@if items:` where `items = Value::List(...)` → E-EVL-003.
+    ///
+    /// Lists are not implicitly truthy — they are a type error like Int or Str.
+    #[test]
+    fn test_if_list_condition_type_error() {
+        let mut env = env_with(&[(
+            "items",
+            Value::List(vec![Value::Int(1), Value::Int(2)]),
+        )]);
+        let mut sink = DiagnosticSink::new();
+        let config = default_config();
+
+        // @if items:   (items is List, not Bool → type error)
+        let if_node = simple_if_node(
+            Expr::Ident("items".to_string()),
+            vec![slide_block_item("content")],
+        );
+
+        let slides = eval_if_chain(&mut env, &if_node, &empty_defaults(), &config, &mut sink);
+
+        assert_eq!(
+            slides.len(),
+            0,
+            "List condition must produce 0 slides; got {}",
+            slides.len()
+        );
+        assert!(!sink.is_empty(), "List condition must push E-EVL-003 to sink");
+        let code = sink.errors()[0]
+            .code()
+            .map(|c| c.to_string())
+            .unwrap_or_default();
+        assert_eq!(
+            code, "E-EVL-003",
+            "error code must be E-EVL-003 for List condition; got: {code}"
+        );
+        // The message must mention 'List' so the user knows which type caused the error.
+        let msg = sink.errors()[0].to_string();
+        assert!(
+            msg.contains("List") || msg.contains("list"),
+            "E-EVL-003 message must mention 'List'; got: {msg}"
+        );
+    }
+
+    /// FINDING-005: `@if obj:` where `obj = Value::Map(...)` → E-EVL-003.
+    ///
+    /// Maps are not implicitly truthy — they are a type error like Int or Str.
+    #[test]
+    fn test_if_map_condition_type_error() {
+        use slideforge_types::OrderedMap;
+        let mut map = OrderedMap::new();
+        map.insert(Arc::from("key"), Value::Int(1));
+        let mut env = env_with(&[("obj", Value::Map(map))]);
+        let mut sink = DiagnosticSink::new();
+        let config = default_config();
+
+        // @if obj:   (obj is Map, not Bool → type error)
+        let if_node = simple_if_node(
+            Expr::Ident("obj".to_string()),
+            vec![slide_block_item("content")],
+        );
+
+        let slides = eval_if_chain(&mut env, &if_node, &empty_defaults(), &config, &mut sink);
+
+        assert_eq!(
+            slides.len(),
+            0,
+            "Map condition must produce 0 slides; got {}",
+            slides.len()
+        );
+        assert!(!sink.is_empty(), "Map condition must push E-EVL-003 to sink");
+        let code = sink.errors()[0]
+            .code()
+            .map(|c| c.to_string())
+            .unwrap_or_default();
+        assert_eq!(
+            code, "E-EVL-003",
+            "error code must be E-EVL-003 for Map condition; got: {code}"
+        );
+        // The message must mention 'Map' so the user knows which type caused the error.
+        let msg = sink.errors()[0].to_string();
+        assert!(
+            msg.contains("Map") || msg.contains("map"),
+            "E-EVL-003 message must mention 'Map'; got: {msg}"
         );
     }
 

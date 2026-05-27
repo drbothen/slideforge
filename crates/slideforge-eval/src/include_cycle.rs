@@ -90,8 +90,11 @@ pub type IncludeGraph = HashMap<Arc<str>, Vec<Arc<str>>>;
 /// runs in O(n + e).
 ///
 /// For AC-012: this implementation must handle include chains up to 200
-/// files deep without stack overflow. The DFS is iterative (not recursive)
-/// for large graphs to avoid system stack overflow.
+/// files deep without stack overflow. The DFS uses recursion (see
+/// [`check_node`]); the stack depth equals the include-chain depth. For
+/// 200-file chains, default Rust thread stacks (8 MB) provide ample
+/// headroom — each frame holds O(1) pointer-sized variables. An iterative
+/// fallback would only be needed for chains of thousands of files.
 ///
 /// # Parameters
 ///

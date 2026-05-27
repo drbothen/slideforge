@@ -81,6 +81,11 @@ pub fn eval_expr_to_string(env: &Env, expr: &Expr, sink: &mut DiagnosticSink) ->
 
 /// Evaluate a fully-parsed [`DeckNode`] into a semantic [`Deck`] IR.
 ///
+/// **Callers with include graphs:** if the deck was assembled from multiple
+/// `.sf` files via `@include`, use [`eval_deck_with_cycle_check`] instead.
+/// That function runs the BC-1.06.002 cycle-detection pre-pass before
+/// delegating here — without it, a cyclic deck will not be caught.
+///
 /// This is the primary top-level entry point for the evaluator pipeline. It:
 ///
 /// 1. Collects all `vars:` block entries into an [`Env`] deck-level frame.
@@ -127,6 +132,11 @@ pub fn eval_deck(
 ///
 /// See [`eval_deck`] for the primary API. This function accepts an
 /// `active_variant` parameter for CLI `--variant` flag support (C02).
+///
+/// **Callers with include graphs:** prefer [`eval_deck_with_cycle_check`],
+/// which runs the BC-1.06.002 cycle-detection pre-pass before delegating
+/// here. Calling this function directly with a cyclic include graph will
+/// NOT catch the cycle — the pre-pass is the only guard.
 ///
 /// Set-rule defaults resolved here are currently stored in the returned [`Deck`]
 /// registers field (reserved); future stories will thread set-rules through the
@@ -279,6 +289,14 @@ pub fn eval_deck_with_variant(
 /// returns `None` without evaluating the deck — the sink will contain the
 /// cycle diagnostics.
 ///
+/// # Design: Fail-Closed and E-EVL-001 Accumulation
+///
+/// When a cycle is detected, this function returns `None` immediately after
+/// the pre-pass — it does NOT accumulate E-EVL-001 errors alongside E-PAR-004.
+/// This is intentional: per BC-1.06.002 invariant 1 ("fail-closed"), no partial
+/// evaluation of a cyclic deck can occur. Callers should inspect the sink for
+/// E-PAR-004 errors after a `None` return.
+///
 /// # Parameters
 ///
 /// - `deck_node`: The parsed (merged) AST root.
@@ -294,6 +312,7 @@ pub fn eval_deck_with_variant(
 ///
 /// `None` if any cycle is detected (or any fatal diagnostic during evaluation),
 /// `Some(Deck)` otherwise.
+#[doc(alias = "eval_deck")]
 pub fn eval_deck_with_cycle_check(
     deck_node: &DeckNode,
     include_graph: &IncludeGraph,
@@ -305,6 +324,12 @@ pub fn eval_deck_with_cycle_check(
     // ── Pre-pass: include cycle detection (BC-1.06.002 Fail-Closed) ──
     // Run before any expression evaluation. If cycles are detected, return None
     // immediately — no partial evaluation of a cyclic deck can occur.
+    //
+    // Design rationale (FINDING-003): early return here means E-EVL-001 errors
+    // are NOT accumulated alongside E-PAR-004. This is intentional: BC-1.06.002
+    // invariant 1 requires that the evaluator is fail-closed — a cyclic deck
+    // must produce zero evaluation output. Callers inspect the sink for
+    // E-PAR-004 (cycle errors) after a None return.
     if !check_include_cycles(root_file, include_graph, sink) {
         return None;
     }
