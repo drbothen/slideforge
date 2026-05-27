@@ -73,6 +73,20 @@ pub fn relative_luminance(r: u8, g: u8, b: u8) -> f64 {
 ///
 /// The returned value is in the range `[1.0, 21.0]`.
 ///
+/// ## Rounding strategy
+///
+/// The raw IEEE 754 result is rounded to 10 decimal places before being
+/// returned. This eliminates floating-point noise (e.g., a ratio that is
+/// mathematically 4.5 but computed as `4.499_999_999_7` due to rounding error
+/// in the gamma-expansion step) while preserving all precision that is
+/// meaningful for WCAG comparisons (which are specified to at most 2 decimal
+/// places). In the astronomically unlikely case where the true ratio is
+/// exactly `4.4999_999_999X` and rounding maps it to 4.5, this may produce a
+/// false pass. This is an acceptable engineering trade-off because WCAG 2.1
+/// does not specify floating-point handling, and real-world colour pairs that
+/// sit this close to the threshold differ by sub-bit luminance values that are
+/// indistinguishable in practice.
+///
 /// # Arguments
 ///
 /// * `l1` — Relative luminance of the first colour (range `[0.0, 1.0]`).
@@ -83,6 +97,7 @@ pub fn contrast_ratio(l1: f64, l2: f64) -> f64 {
     let darker = l1.min(l2);
     // Round to 10 decimal places to eliminate IEEE 754 floating-point noise while
     // preserving all meaningful WCAG precision (ratios are compared at ≤ 2 d.p.).
+    // See the "Rounding strategy" section in the doc comment above.
     let raw = (lighter + 0.05) / (darker + 0.05);
     (raw * 1e10).round() / 1e10
 }
@@ -440,6 +455,35 @@ mod tests {
         assert!(
             wcag_aa_passes((204, 0, 0), (255, 255, 255), false),
             "#CC0000 on #FFFFFF must pass WCAG AA normal text (ratio ≈5.9 > 4.5)"
+        );
+    }
+
+    /// ADV-P02-LOW-002: Near-threshold RGB pairs exercise the full `wcag_aa_passes` pipeline.
+    ///
+    /// Uses two well-known grey-on-white pairs that straddle the 4.5:1 boundary:
+    ///
+    /// - `#767676` on `#FFFFFF`: contrast ≈ 4.54:1 — just **passes** AA normal text.
+    ///   Source: `WebAIM` contrast checker; widely cited as the "just-passing grey".
+    ///
+    /// - `#777777` on `#FFFFFF`: contrast ≈ 4.48:1 — just **fails** AA normal text.
+    ///   One luminance step darker than #767676 but crosses the 4.5 threshold.
+    ///
+    /// These values are chosen to verify that the full pipeline
+    /// (`relative_luminance` → `contrast_ratio` → threshold comparison) correctly
+    /// classifies both sides of the boundary using real sRGB channel bytes, not
+    /// pre-computed luminance values.
+    #[test]
+    fn test_near_threshold_rgb_full_pipeline() {
+        // #767676 (118, 118, 118) on #FFFFFF (255, 255, 255) — should PASS (≈4.54:1)
+        assert!(
+            wcag_aa_passes((118, 118, 118), (255, 255, 255), false),
+            "#767676 on #FFFFFF must PASS WCAG AA normal text (ratio ≈4.54 ≥ 4.5)"
+        );
+
+        // #777777 (119, 119, 119) on #FFFFFF (255, 255, 255) — should FAIL (≈4.48:1)
+        assert!(
+            !wcag_aa_passes((119, 119, 119), (255, 255, 255), false),
+            "#777777 on #FFFFFF must FAIL WCAG AA normal text (ratio ≈4.48 < 4.5)"
         );
     }
 }

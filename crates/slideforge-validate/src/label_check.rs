@@ -391,6 +391,18 @@ mod tests {
     }
 
     /// BC-5.01.003 AC-005 EC-004: 3 `status` slides, 2 missing `label` → 2× E-A11-002.
+    ///
+    /// ## IR model note (AC-005 wording vs. test structure)
+    ///
+    /// The story spec states "on one slide" to describe the scenario where multiple
+    /// color-coded elements are present simultaneously. In the slideforge IR model,
+    /// however, each color-coded element IS a separate `Slide` — there is no
+    /// sub-slide "element" concept at the validation layer. Accordingly, this test
+    /// correctly creates 3 separate `Slide` instances (one per color-coded status
+    /// element) rather than placing them inside a single slide. The behavioral
+    /// intent of AC-005 — that 2-of-3 failing elements each produce their own
+    /// E-A11-002 — is preserved exactly; only the IR framing differs from the
+    /// natural-language spec wording.
     #[test]
     fn test_BC_5_01_003_multiple_missing_labels() {
         let slide_ok = make_color_coded_slide("status", Some("Green: on track"), None, None, false);
