@@ -109,9 +109,10 @@ pub fn check_include_cycles(
 ) -> bool {
     let mut in_progress: HashSet<Arc<str>> = HashSet::new();
     let mut completed: HashSet<Arc<str>> = HashSet::new();
+    let mut path: Vec<Arc<str>> = Vec::new();
     let mut found_cycle = false;
 
-    check_node(root, graph, &mut in_progress, &mut completed, sink, &mut found_cycle);
+    check_node(root, graph, &mut in_progress, &mut completed, &mut path, sink, &mut found_cycle);
 
     !found_cycle
 }
@@ -120,6 +121,15 @@ pub fn check_include_cycles(
 ///
 /// Uses `in_progress` for back-edge detection (cycle) and `completed`
 /// for the diamond optimization (skip already-validated subtrees).
+///
+/// `path` is the ordered DFS stack: the sequence of files currently on the
+/// call stack from the root to `current` (inclusive). When a back-edge is
+/// found (child is already `in_progress`), we reconstruct the full cycle by
+/// slicing `path` from the position of the back-edge target through `current`,
+/// then appending the back-edge target again to show the closing edge.
+///
+/// Example: path = [a.sf, b.sf, c.sf], back-edge to a.sf →
+/// cycle = [a.sf, b.sf, c.sf, a.sf] (full path).
 ///
 /// This implementation is straightforward recursion. The stack depth equals
 /// the include-chain depth. For AC-012 (200-file chains), default Rust stack
@@ -132,6 +142,7 @@ fn check_node(
     graph: &IncludeGraph,
     in_progress: &mut HashSet<Arc<str>>,
     completed: &mut HashSet<Arc<str>>,
+    path: &mut Vec<Arc<str>>,
     sink: &mut DiagnosticSink,
     found_cycle: &mut bool,
 ) {
@@ -141,21 +152,35 @@ fn check_node(
     }
 
     in_progress.insert(current.clone());
+    path.push(current.clone());
 
     let includes = match graph.get(current.as_ref()) {
-        Some(list) => list.clone(),
-        None => vec![],
+        Some(list) => list.as_slice(),
+        None => &[],
     };
 
-    for child in &includes {
+    for child in includes {
         if in_progress.contains(child.as_ref()) {
             // Back-edge: cycle detected.
-            // Since `in_progress` is a HashSet (unordered), we emit a minimal cycle
-            // path: [child, current, child]. This satisfies the BC-1.06.002 postcondition:
-            // the message must contain both file names and show the cyclic edge.
-            // For a self-include (current == child), this produces [child, child, child],
-            // which contains "child" at least twice — satisfying the AC-010 assertion.
-            let cycle = vec![child.clone(), current.clone(), child.clone()];
+            // Reconstruct the full cycle path from `path`. Find where `child`
+            // first appears in the current DFS stack, then take everything from
+            // that position to the end (= `current`), then append `child` again
+            // to show the closing edge.
+            //
+            // For A→B→C→A: path = [A, B, C], child = A
+            //   → position of A = 0
+            //   → cycle = [A, B, C, A]   (full path showing all 3 unique nodes)
+            //
+            // For self-include deck.sf→deck.sf: path = [deck.sf], child = deck.sf
+            //   → position of deck.sf = 0
+            //   → cycle = [deck.sf, deck.sf]  (AC-010: exactly 2 occurrences)
+            let start_pos = path
+                .iter()
+                .position(|f| f.as_ref() == child.as_ref())
+                .unwrap_or(0);
+            let mut cycle: Vec<Arc<str>> = path[start_pos..].to_vec();
+            cycle.push(child.clone());
+
             sink.push_with_severity(
                 EvalError::IncludeCycle {
                     cycle_path: cycle,
@@ -165,10 +190,11 @@ fn check_node(
             );
             *found_cycle = true;
         } else {
-            check_node(child, graph, in_progress, completed, sink, found_cycle);
+            check_node(child, graph, in_progress, completed, path, sink, found_cycle);
         }
     }
 
+    path.pop();
     in_progress.remove(current.as_ref());
     completed.insert(current.clone());
 }
@@ -427,6 +453,62 @@ mod tests {
         assert_eq!(
             code, "E-PAR-004",
             "IncludeCycle error code must be E-PAR-004; got: {code}"
+        );
+    }
+
+    // ─── FINDING-002: 3-node cycle shows full path ───────────────────────────
+
+    /// FINDING-002: A→B→C→A cycle must produce cycle path [A, B, C, A], not [A, C, A].
+    ///
+    /// The previous implementation emitted [child, current, child] which skipped
+    /// intermediate nodes. This test verifies the full path is captured.
+    #[test]
+    fn test_three_node_cycle_full_path() {
+        let root = Arc::from("a.sf");
+        // a.sf → b.sf → c.sf → a.sf (3-node cycle)
+        let graph = make_graph(&[
+            ("a.sf", &["b.sf"]),
+            ("b.sf", &["c.sf"]),
+            ("c.sf", &["a.sf"]),
+        ]);
+        let mut sink = DiagnosticSink::new();
+
+        let ok = check_include_cycles(&root, &graph, &mut sink);
+
+        assert!(!ok, "3-node cycle a.sf→b.sf→c.sf→a.sf must return false");
+        assert!(!sink.is_empty(), "3-node cycle must push E-PAR-004 to sink");
+
+        let msg = sink.errors()[0].to_string();
+        // The cycle path must include all 3 unique nodes, not just 2.
+        assert!(
+            msg.contains("a.sf") && msg.contains("b.sf") && msg.contains("c.sf"),
+            "3-node cycle message must mention all 3 files (a.sf, b.sf, c.sf); got: {msg}"
+        );
+        // Full cycle: a.sf → b.sf → c.sf → a.sf
+        assert!(
+            msg.contains("a.sf → b.sf → c.sf → a.sf"),
+            "3-node cycle path must be 'a.sf → b.sf → c.sf → a.sf'; got: {msg}"
+        );
+    }
+
+    /// FINDING-005: Self-include deck.sf→deck.sf must show exactly 2 occurrences
+    /// of 'deck.sf' in the message (not 3 as the old [child, current, child] would produce).
+    #[test]
+    fn test_self_include_exactly_two_nodes() {
+        let root = Arc::from("deck.sf");
+        let graph = make_graph(&[("deck.sf", &["deck.sf"])]);
+        let mut sink = DiagnosticSink::new();
+
+        let ok = check_include_cycles(&root, &graph, &mut sink);
+
+        assert!(!ok, "self-include must return false");
+        assert!(!sink.is_empty(), "self-include must push E-PAR-004");
+
+        let msg = sink.errors()[0].to_string();
+        let count = msg.matches("deck.sf").count();
+        assert_eq!(
+            count, 2,
+            "self-include message must show 'deck.sf' exactly twice (deck.sf → deck.sf); got: {msg}"
         );
     }
 

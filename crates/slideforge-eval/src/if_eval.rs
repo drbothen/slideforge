@@ -9,6 +9,17 @@
 //!   as `{{ expr }}` (no implicit truthiness; only `Value::Bool` is accepted as a
 //!   condition; any other type is E-EVL-003).
 //!
+//! # AC-003: Scope Support Status
+//!
+//! AC-003 requires `@if` at four scopes. Current implementation status:
+//!
+//! | Scope   | Status    | Notes |
+//! |---------|-----------|-------|
+//! | **Slide** | Implemented | `BlockItem::If` at top level, dispatched by `eval_block_items` |
+//! | **Element** | Implemented | `BlockItem::If` in `slide_node.inline_items`, dispatched by `eval_block_items` |
+//! | **Section** | Implemented | `BlockItem::If` as a sibling of `BlockItem::Section`, same dispatch path as slide-scope |
+//! | **Field** | Blocked on parser | Requires `ExprNode::IfExpr { condition, then_val, else_val }` in the AST. The slideforge-syntax parser (STORY-008) does not yet produce `ExprNode::IfExpr` for `title @if is_draft: "DRAFT: ..." @else: "..."`. Field-scope `@if` will be implemented when the parser is extended (future story). |
+//!
 //! # Lazy Evaluation Invariant
 //!
 //! The evaluator MUST implement lazy branch evaluation: once a truthy branch is
@@ -36,6 +47,35 @@ use std::sync::Arc;
 use slideforge_syntax::error::ParseSeverity;
 use slideforge_syntax::{DiagnosticSink, IfNode};
 use slideforge_types::{Slide, SourceSpan, Value};
+
+// ─── span_to_source_span ────────────────────────────────────────────────────
+
+/// Convert a `slideforge_syntax::Span` to a `SourceSpan` carrying the byte
+/// offset of the condition expression.
+///
+/// At eval time, the evaluator operates on the merged AST without a live
+/// `SourceMap`. We can extract the `byte_offset` from the syntax span's
+/// `start` field, but we cannot resolve the file path or line/col without
+/// the `SourceMap`. We mark the file as `"<span:byte>"` with the byte offset
+/// embedded so that error messages carry at least partial location info.
+///
+/// Full `<file>:<line>:<col>` resolution is deferred to when the evaluator
+/// receives `SourceMap` context (a future story that threads `SourceMap` through
+/// the pipeline). Until then this is better than a zero-origin default.
+fn span_to_source_span(syntax_span: slideforge_syntax::span::Span) -> SourceSpan {
+    if syntax_span.start == 0 && syntax_span.end == 0 {
+        // Synthetic span from test helpers — return default (unknown).
+        SourceSpan::default()
+    } else {
+        // Carry the byte offset; mark file as "<byte:N>" for triage.
+        SourceSpan {
+            file: Arc::from(format!("<byte:{}>", syntax_span.start).as_str()),
+            line: 0,
+            col: 0,
+            byte_offset: syntax_span.start,
+        }
+    }
+}
 
 use crate::config::EvalConfig;
 use crate::env::Env;
@@ -86,7 +126,9 @@ pub fn eval_if_chain<S: std::hash::BuildHasher>(
     sink: &mut DiagnosticSink,
 ) -> Vec<Slide> {
     // Step 1: evaluate the @if condition.
-    match eval_bool_condition(env, if_node.condition.value(), SourceSpan::default(), sink) {
+    // Extract the condition's syntax span for error reporting (FINDING-006).
+    let if_span = span_to_source_span(if_node.condition.span());
+    match eval_bool_condition(env, if_node.condition.value(), if_span, sink) {
         None => {
             // Evaluation failed or type error — error already in sink; return empty.
             vec![]
@@ -99,7 +141,7 @@ pub fn eval_if_chain<S: std::hash::BuildHasher>(
         Some(false) => {
             // @if branch is false: try @elif branches in order (lazy).
             for (elif_condition_spanned, elif_body) in &if_node.elif_branches {
-                let elif_span = SourceSpan::default();
+                let elif_span = span_to_source_span(elif_condition_spanned.span());
                 match eval_bool_condition(env, elif_condition_spanned.value(), elif_span, sink) {
                     None => {
                         // Error in this elif condition — already in sink.
@@ -799,6 +841,218 @@ mod tests {
             slides.len()
         );
         assert!(sink.is_empty(), "no errors expected for @if false:");
+    }
+
+    // ─── FINDING-008: EC-003 — @if nested inside @for ────────────────────────
+
+    /// EC-003 / FINDING-008: `@for` body containing a `BlockItem::If` whose
+    /// condition references the loop variable.
+    ///
+    /// For each iteration of @for, the @if condition is evaluated in the
+    /// loop's inner scope (where the binding variable is set). Different
+    /// iterations may render different branches.
+    ///
+    /// Scenario:
+    ///   @for x in [1, 2, 3]:
+    ///     @if x > 1:
+    ///       slide content: title "gt1"
+    ///     @else:
+    ///       slide content: title "lte1"
+    ///
+    /// x=1: @if 1>1 → false → @else → "lte1"
+    /// x=2: @if 2>1 → true  → @if  → "gt1"
+    /// x=3: @if 3>1 → true  → @if  → "gt1"
+    ///
+    /// Expected output: 3 slides `["lte1", "gt1", "gt1"]`.
+    #[test]
+    fn test_BC_1_05_001_if_nested_in_for_ec003() {
+        use slideforge_syntax::{BinOpKind, Expr, ForNode};
+
+        let mut env = empty_env();
+        let mut sink = DiagnosticSink::new();
+        let config = default_config();
+
+        // Build `@if x > 1: slide content: title "gt1" @else: slide content: title "lte1"`
+        let condition = Expr::BinOp {
+            op: BinOpKind::Gt,
+            lhs: Box::new(Expr::Ident("x".to_string())),
+            rhs: Box::new(Expr::Num(1)),
+        };
+
+        // Reuse the existing module-level helper: make_slide_with_title("content", title)
+        let if_node = IfNode {
+            condition: Spanned::new(condition, dummy_span()),
+            then_body: vec![make_slide_with_title("content", "gt1")],
+            elif_branches: vec![],
+            else_body: Some(vec![make_slide_with_title("content", "lte1")]),
+        };
+
+        // Build @for x in [1, 2, 3]: containing the @if block
+        let for_body = vec![BlockItem::If(Spanned::new(if_node, dummy_span()))];
+        let for_node = ForNode {
+            binding: Spanned::new("x".to_string(), dummy_span()),
+            collection: Spanned::new(
+                Expr::List(vec![Expr::Num(1), Expr::Num(2), Expr::Num(3)]),
+                dummy_span(),
+            ),
+            body: for_body,
+        };
+
+        let slides = crate::for_eval::eval_for_block(
+            &mut env,
+            for_node.binding.value(),
+            for_node.collection.value(),
+            &for_node.body,
+            &empty_defaults(),
+            &config,
+            &mut sink,
+        );
+
+        assert_eq!(
+            slides.len(),
+            3,
+            "@for [1,2,3] with @if x>1 must produce 3 slides; got {}",
+            slides.len()
+        );
+        assert!(
+            sink.is_empty(),
+            "no errors expected for @if inside @for; got: {:?}",
+            sink.errors()
+        );
+        // x=1 → @else → "lte1"
+        assert_eq!(
+            slides[0].title_str(),
+            Some("lte1"),
+            "x=1: @if(1>1=false) → @else → 'lte1'; got: {:?}",
+            slides[0].title_str()
+        );
+        // x=2 → @if → "gt1"
+        assert_eq!(
+            slides[1].title_str(),
+            Some("gt1"),
+            "x=2: @if(2>1=true) → 'gt1'; got: {:?}",
+            slides[1].title_str()
+        );
+        // x=3 → @if → "gt1"
+        assert_eq!(
+            slides[2].title_str(),
+            Some("gt1"),
+            "x=3: @if(3>1=true) → 'gt1'; got: {:?}",
+            slides[2].title_str()
+        );
+    }
+
+    // ─── FINDING-007: Value::Null condition → E-EVL-003 ──────────────────────
+
+    /// FINDING-007: `@if v:` where `v = Value::Null` → E-EVL-003 (TypeMismatch).
+    ///
+    /// Null is not implicitly falsy — it is a type error like Int or Str.
+    #[test]
+    fn test_if_null_condition_type_error() {
+        let mut env = env_with(&[("v", Value::Null)]);
+        let mut sink = DiagnosticSink::new();
+        let config = default_config();
+
+        let if_node = simple_if_node(
+            Expr::Ident("v".to_string()),
+            vec![slide_block_item("content")],
+        );
+
+        let slides = eval_if_chain(&mut env, &if_node, &empty_defaults(), &config, &mut sink);
+
+        assert_eq!(
+            slides.len(),
+            0,
+            "Null condition must produce 0 slides; got {}",
+            slides.len()
+        );
+        assert!(!sink.is_empty(), "Null condition must push E-EVL-003 to sink");
+        let code = sink.errors()[0]
+            .code()
+            .map(|c| c.to_string())
+            .unwrap_or_default();
+        assert_eq!(
+            code, "E-EVL-003",
+            "error code must be E-EVL-003 for Null condition; got: {code}"
+        );
+    }
+
+    // ─── FINDING-004: AC-003 element-scope @if ────────────────────────────────
+
+    /// AC-003: @if at element scope — @if as an inline_item inside a slide body.
+    ///
+    /// A slide's `inline_items` can contain `BlockItem::If`. When the condition
+    /// is true, the @if's slides are appended after the primary slide.
+    ///
+    /// This exercises the element-scope @if path in `eval_block_items`.
+    #[test]
+    fn test_BC_1_05_001_if_element_scope() {
+        use slideforge_syntax::{FieldNode, FieldValue, TemplateChunk};
+
+        let mut env = env_with(&[("show", Value::Bool(true))]);
+        let mut sink = DiagnosticSink::new();
+        let config = default_config();
+        let defaults = empty_defaults();
+
+        // Build an inline @if block: `@if show: slide content: title "inline-slide"`
+        let inline_if = BlockItem::If(Spanned::new(
+            IfNode {
+                condition: Spanned::new(Expr::Ident("show".to_string()), dummy_span()),
+                then_body: vec![{
+                    let title_field = FieldNode {
+                        name: Spanned::new("title".to_string(), dummy_span()),
+                        value: Spanned::new(
+                            FieldValue::Template(vec![TemplateChunk::Literal(
+                                "inline-slide".to_string(),
+                            )]),
+                            dummy_span(),
+                        ),
+                    };
+                    BlockItem::Slide(Spanned::new(
+                        SlideNode {
+                            kind: Spanned::new("content".to_string(), dummy_span()),
+                            tags: vec![],
+                            fields: vec![title_field],
+                            inline_items: vec![],
+                        },
+                        dummy_span(),
+                    ))
+                }],
+                elif_branches: vec![],
+                else_body: None,
+            },
+            dummy_span(),
+        ));
+
+        // Primary slide with an inline @if in its inline_items.
+        let primary_slide = SlideNode {
+            kind: Spanned::new("title".to_string(), dummy_span()),
+            tags: vec![],
+            fields: vec![],
+            inline_items: vec![inline_if],
+        };
+
+        let items = vec![BlockItem::Slide(Spanned::new(primary_slide, dummy_span()))];
+        let slides =
+            crate::for_eval::eval_block_items(&mut env, &items, &defaults, &config, &mut sink);
+
+        // 1 primary slide + 1 from inline @if(show=true) = 2 total.
+        assert_eq!(
+            slides.len(),
+            2,
+            "element-scope @if(true) must add 1 inline slide; got {} total",
+            slides.len()
+        );
+        assert!(
+            sink.is_empty(),
+            "element-scope @if must not produce errors; got: {:?}",
+            sink.errors()
+        );
+        assert_eq!(
+            slides[1].title_str(),
+            Some("inline-slide"),
+            "inline slide title must be 'inline-slide'"
+        );
     }
 
     // ─── EC-002: all @elif false, no @else → 0 slides, no error ─────────────
