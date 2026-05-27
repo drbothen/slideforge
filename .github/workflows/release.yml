@@ -198,10 +198,85 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
+  # ─── Reproducible-build verification ───────────────────────────────────────
+  # NFR-025 (supply chain): confirm the linux-x86_64-gnu binary is bit-for-bit
+  # reproducible across two independent builds from the same source commit.
+  #
+  # Approach: download the artifact produced by the build job, then rebuild
+  # the same target from scratch in a fresh environment and compare SHA-256
+  # digests.  A mismatch indicates a non-deterministic build (timestamps,
+  # embedded paths, random seeds, etc.) that must be fixed before release.
+  #
+  # Only linux-x86_64-gnu is checked here because:
+  #   - Linux/glibc is the most-used target and the easiest to reproduce.
+  #   - macOS and Windows runners embed platform-specific signing metadata.
+  #   - musl and cross targets are verified indirectly via the same source.
+  reproducible-build:
+    name: reproducible-build
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Only run on real release tags, not on workflow_dispatch dry-runs.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+        with:
+          toolchain: stable
+          targets: x86_64-unknown-linux-gnu
+
+      # Deliberately do NOT use rust-cache here: reproducibility check must
+      # start from a clean state to catch environment-contamination issues.
+
+      - name: Download linux-x86_64 artifact from build job
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: binary-linux-x86_64
+          path: /tmp/first-build/
+
+      - name: Rebuild linux-x86_64 from source (fresh environment)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build \
+            --release \
+            --target x86_64-unknown-linux-gnu \
+            --package slideforge-cli \
+            --profile dist
+          mkdir -p /tmp/second-build
+          cp target/x86_64-unknown-linux-gnu/dist/${BINARY_NAME} \
+             /tmp/second-build/${BINARY_NAME}
+
+      - name: Compare SHA-256 hashes (reproducibility gate)
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          ARTIFACT="slideforge-${TAG}-linux-x86_64"
+
+          HASH1=$(sha256sum "/tmp/first-build/${ARTIFACT}" | awk '{print $1}')
+          HASH2=$(sha256sum "/tmp/second-build/${BINARY_NAME}" | awk '{print $1}')
+
+          echo "Build 1 SHA-256: ${HASH1}"
+          echo "Build 2 SHA-256: ${HASH2}"
+
+          if [ "${HASH1}" != "${HASH2}" ]; then
+            echo ""
+            echo "REPRODUCIBILITY FAILURE: SHA-256 digests do not match."
+            echo "The release binary is not bit-for-bit reproducible."
+            echo "Common causes: embedded build timestamps, non-deterministic"
+            echo "  codegen, or path-dependent debug info."
+            echo "Fix: investigate with 'diffoscope' on the two binaries."
+            exit 1
+          fi
+          echo ""
+          echo "REPRODUCIBILITY PASS: both builds produce identical SHA-256 (${HASH1})."
+
   # ─── Create GitHub Release ──────────────────────────────────────────────────
   release:
     name: create-release
-    needs: [build, sbom]
+    needs: [build, sbom, reproducible-build]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
