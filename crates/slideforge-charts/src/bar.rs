@@ -33,6 +33,22 @@ pub(crate) fn validate_data_finite(spec: &InternalChartSpec) -> Result<(), Chart
     Ok(())
 }
 
+/// Validate that all series in the spec have at least one data point.
+///
+/// FINDING-002 (Pass 3): A non-empty data vec where every series has zero points
+/// produces a degenerate chart (empty axes, invisible rendering). Reject early.
+///
+/// # Errors
+///
+/// Returns [`ChartError::MissingDataField`] with `field = "data.points"` if
+/// every series has an empty points vec.
+pub(crate) fn validate_points_non_empty(spec: &InternalChartSpec) -> Result<(), ChartError> {
+    if spec.data.iter().all(|s| s.points.is_empty()) {
+        return Err(ChartError::MissingDataField { field: Arc::from("data.points") });
+    }
+    Ok(())
+}
+
 /// Parse a CSS hex color string (e.g., `"#003766"`) into a plotters `RGBColor`.
 ///
 /// ## Fallback behavior (FINDING-009)
@@ -179,6 +195,8 @@ pub fn render_bar(spec: &InternalChartSpec) -> Result<String, ChartError> {
     if spec.data.is_empty() {
         return Err(ChartError::MissingDataField { field: Arc::from("data") });
     }
+    // FINDING-002 (Pass 3): Guard non-empty data vec with all-empty points.
+    validate_points_non_empty(spec)?;
     // FINDING-004: Validate all data points are finite.
     validate_data_finite(spec)?;
 

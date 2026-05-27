@@ -1097,6 +1097,80 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
+    // FINDING-002 (Pass 3): data vec with one series but empty points → error
+    // -----------------------------------------------------------------------
+
+    /// Build a spec where the data vec has one series but its points vec is empty.
+    fn empty_points_spec(chart_type: crate::types::ChartType) -> InternalChartSpec {
+        InternalChartSpec {
+            chart_type,
+            data: vec![DataSeries { name: Arc::from("empty"), points: vec![] }],
+            title: None,
+            x_label: None,
+            y_label: None,
+            alt: Arc::from("empty points"),
+            width: InternalChartSpec::DEFAULT_WIDTH,
+            height: InternalChartSpec::DEFAULT_HEIGHT,
+            accent_colors: vec![Arc::from("#003766")],
+            font_family: Arc::from("sans-serif"),
+        }
+    }
+
+    #[test]
+    fn test_f031_p3_002_bar_empty_points_returns_error() {
+        let spec = empty_points_spec(crate::types::ChartType::Bar);
+        let result = crate::bar::render_bar(&spec);
+        assert!(result.is_err(), "bar with empty points must return an error");
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("points") || msg.contains("data"),
+            "error must mention points/data; got: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_f031_p3_002_line_empty_points_returns_error() {
+        let spec = empty_points_spec(crate::types::ChartType::Line);
+        let result = crate::line::render_line(&spec);
+        assert!(result.is_err(), "line with empty points must return an error");
+    }
+
+    #[test]
+    fn test_f031_p3_002_scatter_empty_points_returns_error() {
+        let spec = empty_points_spec(crate::types::ChartType::Scatter);
+        let result = crate::scatter::render_scatter(&spec);
+        assert!(result.is_err(), "scatter with empty points must return an error");
+    }
+
+    #[test]
+    fn test_f031_p3_002_area_empty_points_returns_error() {
+        let spec = empty_points_spec(crate::types::ChartType::Area);
+        let result = crate::area::render_area(&spec);
+        assert!(result.is_err(), "area with empty points must return an error");
+    }
+
+    #[test]
+    fn test_f031_p3_002_histogram_empty_points_returns_error() {
+        let spec = empty_points_spec(crate::types::ChartType::Histogram);
+        let result = crate::histogram::render_histogram(&spec);
+        assert!(result.is_err(), "histogram with empty points must return an error");
+    }
+
+    #[test]
+    fn test_f031_p3_002_stacked_bar_empty_points_returns_error() {
+        let spec = empty_points_spec(crate::types::ChartType::StackedBar);
+        let result = crate::stacked_bar::render_stacked_bar(&spec);
+        assert!(result.is_err(), "stacked_bar with empty points must return an error");
+    }
+
+    #[test]
+    fn test_f031_p3_002_pie_empty_points_returns_error() {
+        let spec = empty_points_spec(crate::types::ChartType::Pie);
+        let result = crate::pie::render_pie(&spec);
+        assert!(result.is_err(), "pie with empty points must return an error");
+    }
+
+    // -----------------------------------------------------------------------
     // Snapshot tests — one per chart type with fixed 3-point data
     // -----------------------------------------------------------------------
 

@@ -28,6 +28,20 @@ use crate::types::{ChartError, InternalChartSpec};
 pub fn render_pie(spec: &InternalChartSpec) -> Result<String, ChartError> {
     // FINDING-004: Validate all data points are finite.
     crate::bar::validate_data_finite(spec)?;
+    // FINDING-002 (Pass 3): Guard non-empty data vec with all-empty points.
+    crate::bar::validate_points_non_empty(spec)?;
+
+    // FINDING-001 (Pass 3): Pie chart slices must be non-negative.
+    // Negative values produce visual garbage (overlapping arcs in wrong direction).
+    if let Some(series) = spec.data.first() {
+        for pt in &series.points {
+            if pt.value < 0.0 {
+                return Err(ChartError::RenderError {
+                    message: Arc::from("pie chart data must be non-negative"),
+                });
+            }
+        }
+    }
 
     let width = spec.width;
     let height = spec.height;
@@ -180,6 +194,59 @@ mod tests {
         let result = super::render_pie(&spec);
         let svg = result.unwrap();
         assert!(!svg.is_empty(), "two-slice all-zero pie must render");
+    }
+
+    /// FINDING-001 (Pass 3): Pie chart with a negative value must return ChartError.
+    #[test]
+    fn test_f031_p3_001_pie_negative_value_returns_error() {
+        let spec = InternalChartSpec {
+            chart_type: crate::types::ChartType::Pie,
+            data: vec![DataSeries {
+                name: Arc::from("sales"),
+                points: vec![
+                    DataPoint { label: Arc::from("A"), value: 50.0 },
+                    DataPoint { label: Arc::from("B"), value: -10.0 },
+                    DataPoint { label: Arc::from("C"), value: 30.0 },
+                ],
+            }],
+            title: None,
+            x_label: None,
+            y_label: None,
+            alt: Arc::from("negative pie"),
+            width: InternalChartSpec::DEFAULT_WIDTH,
+            height: InternalChartSpec::DEFAULT_HEIGHT,
+            accent_colors: vec![Arc::from("#003766")],
+            font_family: Arc::from("sans-serif"),
+        };
+        let result = super::render_pie(&spec);
+        assert!(result.is_err(), "pie chart with negative value must return an error");
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("non-negative") || msg.contains("negative"),
+            "error must mention non-negative; got: {msg}"
+        );
+    }
+
+    /// FINDING-001 (Pass 3): All-negative single-slice pie must also be rejected.
+    #[test]
+    fn test_f031_p3_001_pie_all_negative_returns_error() {
+        let spec = InternalChartSpec {
+            chart_type: crate::types::ChartType::Pie,
+            data: vec![DataSeries {
+                name: Arc::from("loss"),
+                points: vec![DataPoint { label: Arc::from("Q1"), value: -5.0 }],
+            }],
+            title: None,
+            x_label: None,
+            y_label: None,
+            alt: Arc::from("all negative pie"),
+            width: InternalChartSpec::DEFAULT_WIDTH,
+            height: InternalChartSpec::DEFAULT_HEIGHT,
+            accent_colors: vec![Arc::from("#003766")],
+            font_family: Arc::from("sans-serif"),
+        };
+        let result = super::render_pie(&spec);
+        assert!(result.is_err(), "all-negative pie must return an error");
     }
 
     /// FINDING-002: Verify the per-slice sweep computation is correct for all-zero input.
