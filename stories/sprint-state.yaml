@@ -77,14 +77,30 @@ stories:
     pr: 9
     merge_commit: 96ecc49d
   STORY-051:
-    status: draft
+    status: merged
     wave: 1
+    started: 2026-05-27
+    merged: 2026-05-27
+    pr: 11
+    merge_commit: 07c76565
   STORY-052:
-    status: draft
+    status: merged
     wave: 1
+    started: 2026-05-27
+    merged: 2026-05-27
+    pr: 11
+    merge_commit: 07c76565
   STORY-053:
-    status: draft
+    status: merged
     wave: 1
+    started: 2026-05-27
+    merged: 2026-05-27
+    pr: 11
+    merge_commit: 07c76565
   STORY-054:
-    status: draft
+    status: merged
     wave: 1
+    started: 2026-05-27
+    merged: 2026-05-27
+    pr: 11
+    merge_commit: 07c76565
