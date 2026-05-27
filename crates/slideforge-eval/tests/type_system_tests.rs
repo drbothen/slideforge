@@ -481,9 +481,10 @@ fn test_bc_1_02_003_int_in_condition_type_error() {
 /// The `@elif` condition is a Str — this MUST produce E-EVL-003.
 #[test]
 fn test_bc_1_02_003_string_in_elif_condition_type_error() {
-    // Build: @if true: (valid) @elif "some_string": (invalid — Str, not Bool)
+    // Build: @if false: (valid, not taken) @elif "some_string": (invalid — Str, not Bool)
+    // Note: @if must be false so lazy evaluation reaches the @elif branch.
     let if_node = IfNode {
-        condition: Spanned::new(Expr::Bool(true), dummy_span()),
+        condition: Spanned::new(Expr::Bool(false), dummy_span()),
         then_body: vec![],
         elif_branches: vec![(
             Spanned::new(Expr::Str("some_string".to_string()), dummy_span()),
@@ -524,9 +525,10 @@ fn test_bc_1_02_003_string_in_elif_condition_type_error() {
 /// produce E-EVL-003 (integer is not a boolean).
 #[test]
 fn test_bc_1_02_003_int_in_elif_condition_type_error() {
-    // Build: @if true: (valid) @elif 42: (invalid — Int, not Bool)
+    // Build: @if false: (valid, not taken) @elif 42: (invalid — Int, not Bool)
+    // Note: @if must be false so lazy evaluation reaches the @elif branch.
     let if_node = IfNode {
-        condition: Spanned::new(Expr::Bool(true), dummy_span()),
+        condition: Spanned::new(Expr::Bool(false), dummy_span()),
         then_body: vec![],
         elif_branches: vec![(Spanned::new(Expr::Num(42), dummy_span()), vec![])],
         else_body: None,
