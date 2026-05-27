@@ -960,7 +960,6 @@ mod tests {
     /// guarantee `font_available` returns false, driving the production construction path.
     #[test]
     fn test_finding_002_load_constructs_font_unavailable_for_missing_font() {
-        use std::io::Write;
         use std::sync::{Arc as StdArc, Mutex};
         use tracing_subscriber::layer::SubscriberExt as _;
 
@@ -1018,6 +1017,20 @@ mod tests {
         assert!(
             result.is_ok(),
             "font unavailability must not cause load to fail (FINDING-002)"
+        );
+
+        // AC-012: declared font names must be preserved even when fonts are unavailable.
+        // The template must store the original names from the theme XML, not the fallback names.
+        let template = result.unwrap();
+        assert_eq!(
+            template.fonts.heading.as_ref(),
+            "NonExistentHeadingFont_STORY022_TEST",
+            "AC-012: heading font name must be preserved even when font is unavailable on build host"
+        );
+        assert_eq!(
+            template.fonts.body.as_ref(),
+            "NonExistentBodyFont_STORY022_TEST",
+            "AC-012: body font name must be preserved even when font is unavailable on build host"
         );
 
         // The warning path was exercised (tracing::warn! fired with the constructed error).

@@ -134,7 +134,8 @@ pub fn parse_theme_fonts(xml_bytes: &[u8]) -> Result<BrandFonts, BrandError> {
 /// Uses a platform-specific directory scan:
 /// - macOS: `/System/Library/Fonts`, `/Library/Fonts`, `~/Library/Fonts`
 /// - Windows: `C:\Windows\Fonts`
-/// - Linux: `/usr/share/fonts`, `/usr/local/share/fonts`, `~/.fonts`
+/// - Linux: `/usr/share/fonts`, `/usr/local/share/fonts`, `~/.fonts` (legacy),
+///   `~/.local/share/fonts` (XDG Base Directory standard, modern)
 ///
 /// Returns `true` if any file matching the font name (case-insensitive exact
 /// stem match or name-hyphen/space prefix) is found. Returns `false` if the
@@ -220,6 +221,12 @@ pub fn resolve_fallback() -> Arc<str> {
 /// Returns platform-specific font search directories.
 ///
 /// Used by [`font_available`] to scope the directory scan.
+///
+/// Platform paths:
+/// - macOS: `/System/Library/Fonts`, `/Library/Fonts`, `~/Library/Fonts`
+/// - Windows: `C:\Windows\Fonts`
+/// - Linux: `/usr/share/fonts`, `/usr/local/share/fonts`, `~/.fonts` (legacy),
+///   `~/.local/share/fonts` (XDG Base Directory standard, modern)
 #[must_use]
 pub fn font_search_dirs() -> Vec<PathBuf> {
     if cfg!(target_os = "macos") {
@@ -240,7 +247,13 @@ pub fn font_search_dirs() -> Vec<PathBuf> {
             PathBuf::from("/usr/local/share/fonts"),
         ];
         if let Some(home) = dirs::home_dir() {
+            // ~/.fonts is the legacy XDG per-user font directory.
             dirs.push(home.join(".fonts"));
+        }
+        // ~/.local/share/fonts/ is the modern XDG Base Directory standard path
+        // (freedesktop.org spec) for per-user fonts on Linux.
+        if let Some(data_dir) = dirs::data_dir() {
+            dirs.push(data_dir.join("fonts"));
         }
         dirs
     }
