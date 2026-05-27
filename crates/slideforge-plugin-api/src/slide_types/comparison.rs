@@ -21,7 +21,9 @@ use super::common_optional_fields;
 /// Maps to the `"Two Content"` OOXML layout.
 #[derive(Debug)]
 pub struct ComparisonSlideType {
+    /// Required fields for the comparison slide type.
     required: Vec<FieldDef>,
+    /// Optional fields for the comparison slide type.
     optional: Vec<FieldDef>,
 }
 

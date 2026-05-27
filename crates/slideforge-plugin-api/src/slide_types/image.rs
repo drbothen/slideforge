@@ -22,7 +22,9 @@ use super::common_optional_fields;
 /// Maps to the `"Picture with Caption"` OOXML layout.
 #[derive(Debug)]
 pub struct ImageSlideType {
+    /// Required fields for the image slide type.
     required: Vec<FieldDef>,
+    /// Optional fields for the image slide type.
     optional: Vec<FieldDef>,
 }
 

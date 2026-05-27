@@ -19,6 +19,7 @@ use super::common_optional_fields;
 /// Maps to the `"Blank"` OOXML layout.
 #[derive(Debug)]
 pub struct BlankSlideType {
+    /// Optional fields for the blank slide type.
     optional: Vec<FieldDef>,
 }
 

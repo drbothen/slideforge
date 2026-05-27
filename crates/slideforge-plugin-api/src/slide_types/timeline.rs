@@ -20,7 +20,9 @@ use super::common_optional_fields;
 /// Maps to the `"Title and Content"` OOXML layout.
 #[derive(Debug)]
 pub struct TimelineSlideType {
+    /// Required fields for the timeline slide type.
     required: Vec<FieldDef>,
+    /// Optional fields for the timeline slide type.
     optional: Vec<FieldDef>,
 }
 

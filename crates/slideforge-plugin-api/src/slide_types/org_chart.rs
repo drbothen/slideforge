@@ -22,7 +22,9 @@ use super::common_optional_fields;
 /// Maps to the `"Title and Content"` OOXML layout.
 #[derive(Debug)]
 pub struct OrgChartSlideType {
+    /// Required fields for the org chart slide type.
     required: Vec<FieldDef>,
+    /// Optional fields for the org chart slide type.
     optional: Vec<FieldDef>,
 }
 

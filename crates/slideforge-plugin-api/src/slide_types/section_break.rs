@@ -20,7 +20,9 @@ use super::common_optional_fields;
 /// Maps to the `"Section Header"` OOXML layout.
 #[derive(Debug)]
 pub struct SectionBreakSlideType {
+    /// Required fields for the section break slide type.
     required: Vec<FieldDef>,
+    /// Optional fields for the section break slide type.
     optional: Vec<FieldDef>,
 }
 

@@ -302,6 +302,7 @@ fn known_field_names(slide_type: &dyn SlideType) -> std::collections::HashSet<Ar
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
+#[allow(clippy::missing_docs_in_private_items, clippy::unwrap_used)]
 mod tests {
     use super::*;
     use slideforge_types::{FieldValue, OrderedMap, Slide, SourceSpan, Value};

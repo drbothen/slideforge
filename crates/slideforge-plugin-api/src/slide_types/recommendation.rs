@@ -22,7 +22,9 @@ use super::common_optional_fields;
 /// Maps to the `"Title and Content"` OOXML layout.
 #[derive(Debug)]
 pub struct RecommendationSlideType {
+    /// Required fields for the recommendation slide type.
     required: Vec<FieldDef>,
+    /// Optional fields for the recommendation slide type.
     optional: Vec<FieldDef>,
 }
 

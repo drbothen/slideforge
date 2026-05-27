@@ -20,7 +20,9 @@ use super::common_optional_fields;
 /// Maps to the `"Title and Content"` OOXML layout.
 #[derive(Debug)]
 pub struct ProcessFlowSlideType {
+    /// Required fields for the process flow slide type.
     required: Vec<FieldDef>,
+    /// Optional fields for the process flow slide type.
     optional: Vec<FieldDef>,
 }
 

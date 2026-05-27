@@ -22,7 +22,9 @@ use super::common_optional_fields;
 /// Maps to the `"Title and Content"` OOXML layout.
 #[derive(Debug)]
 pub struct VideoSlideType {
+    /// Required fields for the video slide type.
     required: Vec<FieldDef>,
+    /// Optional fields for the video slide type.
     optional: Vec<FieldDef>,
 }
 

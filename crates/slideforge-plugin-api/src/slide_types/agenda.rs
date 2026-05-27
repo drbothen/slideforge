@@ -21,7 +21,9 @@ use super::common_optional_fields;
 /// Maps to the `"Title and Content"` OOXML layout.
 #[derive(Debug)]
 pub struct AgendaSlideType {
+    /// Required fields for the agenda slide type.
     required: Vec<FieldDef>,
+    /// Optional fields for the agenda slide type.
     optional: Vec<FieldDef>,
 }
 

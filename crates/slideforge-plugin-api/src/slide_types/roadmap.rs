@@ -21,7 +21,9 @@ use super::common_optional_fields;
 /// Maps to the `"Title and Content"` OOXML layout.
 #[derive(Debug)]
 pub struct RoadmapSlideType {
+    /// Required fields for the roadmap slide type.
     required: Vec<FieldDef>,
+    /// Optional fields for the roadmap slide type.
     optional: Vec<FieldDef>,
 }
 
