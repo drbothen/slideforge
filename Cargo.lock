@@ -786,6 +786,7 @@ dependencies = [
  "phf",
  "serde",
  "serde_json",
+ "strsim",
  "thiserror",
 ]
 

@@ -104,41 +104,51 @@ static RESERVED_KEYWORDS: phf::Map<&'static str, (&'static str, &'static str)> =
 /// Each of these is a valid `slide <type>:` introducer. Using any of them as a
 /// `vars:` entry name produces E-PAR-008 ([`SyntaxError::VarNameCollision`]).
 ///
-/// Source: q2-decision-final.md (BINDING — 23 original + 8 additional types).
+/// Source: `SlideTypeRegistry::default()` in `slideforge-plugin-api` — the single
+/// source of truth. This compile-time set must stay in sync with that runtime
+/// registry. Keywords use underscore separators (e.g., `section_break`, not
+/// `section-break`).
 static SLIDE_TYPE_KEYWORDS: phf::Set<&'static str> = phf::phf_set! {
-    // 23 original seed types
+    // Core presentation structure
     "title",
+    "section_break",
     "content",
-    "bullets",
-    "numbered",
-    "two_column",
+    "two_col",
     "image",
-    "big_number",
-    "comparison",
-    "timeline",
-    "process",
-    "statement",
     "blank",
-    "cover",
-    "divider",
-    "end",
-    "video",
-    "table",
-    "code",
-    "form",
-    "map",
-    "icons",
-    "profile",
-    "closing",
-    // 8 additional types (q2-decision-final.md)
-    "chart",
-    "toc",
+    // Navigation and overview
     "agenda",
+    "toc",
+    // People and quotes
     "quote",
-    "grid",
-    "bio",
-    "diagram",
     "team",
+    "bio",
+    // Analysis and strategy
+    "executive_summary",
+    "problem_statement",
+    "recommendation",
+    "risk_register",
+    "timeline",
+    "stat_callout",
+    "comparison",
+    "process_flow",
+    "matrix",
+    // Financial and metrics
+    "financials",
+    "kpi_dashboard",
+    // Data visualization
+    "chart",
+    "diagram",
+    // Media and technical
+    "screenshot",
+    "code_sample",
+    "video",
+    // Research and organizational
+    "survey_results",
+    "org_chart",
+    "roadmap",
+    // Closing
+    "closing",
 };
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -301,42 +311,57 @@ mod tests {
         assert_eq!(code, "E-PAR-009", "raw must map to E-PAR-009 (RawKeyword)");
     }
 
-    // is_slide_type_keyword: all 31 types recognized
+    // is_slide_type_keyword: all 31 registry types recognized
     #[test]
     fn test_bc_1_09_008_is_slide_type_keyword_all_31_types() {
+        // These are the exact 31 keywords registered in SlideTypeRegistry::default().
         let all_types = [
+            // Core presentation structure
             "title",
+            "section_break",
             "content",
-            "bullets",
-            "numbered",
-            "two_column",
+            "two_col",
             "image",
-            "big_number",
-            "comparison",
-            "timeline",
-            "process",
-            "statement",
             "blank",
-            "cover",
-            "divider",
-            "end",
-            "video",
-            "table",
-            "code",
-            "form",
-            "map",
-            "icons",
-            "profile",
-            "closing",
-            "chart",
-            "toc",
+            // Navigation and overview
             "agenda",
+            "toc",
+            // People and quotes
             "quote",
-            "grid",
-            "bio",
-            "diagram",
             "team",
+            "bio",
+            // Analysis and strategy
+            "executive_summary",
+            "problem_statement",
+            "recommendation",
+            "risk_register",
+            "timeline",
+            "stat_callout",
+            "comparison",
+            "process_flow",
+            "matrix",
+            // Financial and metrics
+            "financials",
+            "kpi_dashboard",
+            // Data visualization
+            "chart",
+            "diagram",
+            // Media and technical
+            "screenshot",
+            "code_sample",
+            "video",
+            // Research and organizational
+            "survey_results",
+            "org_chart",
+            "roadmap",
+            // Closing
+            "closing",
         ];
+        assert_eq!(
+            all_types.len(),
+            31,
+            "test vector must have exactly 31 types"
+        );
         for t in all_types {
             assert!(
                 is_slide_type_keyword(t),

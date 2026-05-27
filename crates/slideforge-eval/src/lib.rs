@@ -4,4 +4,5 @@
 //! at the repository root for the full project specification, and
 //! `seed/DSL-GRAMMAR.ebnf` for the formal grammar.
 
+#![forbid(unsafe_code)]
 #![warn(missing_docs)]

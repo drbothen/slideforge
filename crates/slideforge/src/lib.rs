@@ -13,6 +13,8 @@
 //! follows the specification in `seed/PROJECT-SEED.md` at the repository
 //! root. See that document and `seed/DSL-GRAMMAR.ebnf` before implementing.
 
+#![forbid(unsafe_code)]
 #![warn(missing_docs)]
+#![warn(clippy::pedantic)]
 
 // Re-exports will be added as component crates are implemented (Phase 1+).
