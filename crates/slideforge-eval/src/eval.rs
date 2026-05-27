@@ -11,13 +11,17 @@
 
 use std::sync::Arc;
 
-use slideforge_syntax::{DeckNode, DiagnosticSink, Expr};
-use slideforge_types::{Deck, Value};
+use indexmap::IndexMap;
+use slideforge_syntax::{DeckNode, DiagnosticSink, Expr, FieldValue, TemplateChunk};
+use slideforge_syntax::error::ParseSeverity;
+use slideforge_types::{Deck, DeckMetadata, OrderedMap, Value};
 
 use crate::config::EvalConfig;
 use crate::env::Env;
+use crate::error::EvalError;
 use crate::expr::eval_expr;
 use crate::filters::format_float_display;
+use crate::for_eval::eval_block_items;
 
 // ─── eval_expr_to_string ────────────────────────────────────────────────────
 
@@ -108,8 +112,108 @@ pub fn eval_deck(
     config: &EvalConfig,
     sink: &mut DiagnosticSink,
 ) -> Option<Deck> {
-    let _ = (deck_node, config, sink);
-    todo!("STORY-012: implement eval_deck — Red Gate stub")
+    // ── Step 1: Build deck-level variable environment from all vars: blocks ──
+    let mut deck_vars: IndexMap<Arc<str>, Value> = IndexMap::new();
+
+    for vars_block in &deck_node.vars {
+        for (name_spanned, value_spanned) in &vars_block.entries {
+            let var_name: Arc<str> = Arc::from(name_spanned.value().as_str());
+            let value = eval_field_value_to_value(value_spanned.value(), &Env::new(deck_vars.clone()), sink);
+            if let Some(v) = value {
+                deck_vars.insert(var_name, v);
+            }
+        }
+    }
+
+    let mut env = Env::new(deck_vars.clone());
+
+    // ── Step 2: Evaluate all top-level block items ──
+    let slides = eval_block_items(&mut env, &deck_node.items, config, sink);
+
+    // ── Step 3: Build deck metadata ──
+    let lang = deck_node.lang.as_ref().map(|l| Arc::from(l.value().as_str()));
+    let title = None; // Title is not present in DeckNode (comes from a slide); leave None.
+
+    let metadata = DeckMetadata {
+        title,
+        slideforge_version: Arc::from("0.1.0"),
+        lang,
+        author: None,
+    };
+
+    // ── Step 4: Build the Deck vars map (OrderedMap) ──
+    let mut deck_vars_ordered: OrderedMap<Arc<str>, Value> = OrderedMap::new();
+    for (k, v) in &deck_vars {
+        deck_vars_ordered.insert(k.clone(), v.clone());
+    }
+
+    Some(Deck {
+        slides,
+        vars: deck_vars_ordered,
+        metadata,
+        registers: OrderedMap::new(),
+    })
+}
+
+/// Evaluate a [`slideforge_syntax::FieldValue`] into a [`Value`] in the
+/// context of a given [`Env`].
+///
+/// Used by [`eval_deck`] to resolve vars block entries into concrete values.
+fn eval_field_value_to_value(
+    field_value: &FieldValue,
+    env: &Env,
+    sink: &mut DiagnosticSink,
+) -> Option<Value> {
+    match field_value {
+        FieldValue::Template(chunks) => {
+            let mut result = String::new();
+            let mut had_error = false;
+            for chunk in chunks {
+                match chunk {
+                    TemplateChunk::Literal(s) => result.push_str(s),
+                    TemplateChunk::Expr(expr) => {
+                        match eval_expr_to_string(env, expr, sink) {
+                            Some(s) => result.push_str(s.as_ref()),
+                            None => {
+                                had_error = true;
+                            },
+                        }
+                    },
+                    TemplateChunk::MathInline(_)
+                    | TemplateChunk::MathDisplay(_)
+                    | TemplateChunk::MathInterp(_) => {
+                        // Math chunks are stored as-is for now.
+                    },
+                }
+            }
+            if had_error { None } else { Some(Value::Str(Arc::from(result.as_str()))) }
+        },
+        FieldValue::Num(n) => Some(Value::Int(*n)),
+        FieldValue::Float(f) => Some(Value::Float(*f)),
+        FieldValue::Bool(b) => Some(Value::Bool(*b)),
+        FieldValue::Ident(name) => {
+            if let Some(v) = env.lookup(name) {
+                Some(v.clone())
+            } else {
+                let scope_list = env
+                    .all_names()
+                    .iter()
+                    .map(|n| n.as_ref().to_owned())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                sink.push_with_severity(
+                    EvalError::UndefinedVariable {
+                        name: Arc::from(name.as_str()),
+                        scope_list,
+                        span: slideforge_types::SourceSpan::default(),
+                    },
+                    ParseSeverity::Error,
+                );
+                None
+            }
+        },
+        FieldValue::Shape(_) | FieldValue::Error => None,
+    }
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────

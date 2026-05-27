@@ -31,11 +31,18 @@
 //! `ParseSeverity::Warning` is pushed into the sink. Evaluation continues
 //! normally.
 
-use slideforge_syntax::{BlockItem, DiagnosticSink, Expr, SlideNode};
-use slideforge_types::Slide;
+use std::sync::Arc;
+
+use indexmap::IndexMap;
+use slideforge_syntax::{BlockItem, DiagnosticSink, Expr, FieldValue, SlideNode, TemplateChunk};
+use slideforge_syntax::error::ParseSeverity;
+use slideforge_types::{OrderedMap, Slide, SourceSpan, Value};
 
 use crate::config::EvalConfig;
 use crate::env::Env;
+use crate::error::EvalError;
+use crate::eval::eval_expr_to_string;
+use crate::expr::eval_expr;
 
 // ─── eval_for_block ──────────────────────────────────────────────────────────
 
@@ -77,8 +84,70 @@ pub fn eval_for_block(
     config: &EvalConfig,
     sink: &mut DiagnosticSink,
 ) -> Vec<Slide> {
-    let _ = (env, var_name, collection_expr, body, config, sink);
-    todo!("STORY-012: implement eval_for_block — Red Gate stub")
+    // Evaluate the collection expression.
+    let Some(collection_val) = eval_expr(env, collection_expr, sink) else {
+        return vec![];
+    };
+
+    // Verify the collection is a list.
+    let list = match collection_val {
+        Value::List(items) => items,
+        other => {
+            sink.push_with_severity(
+                EvalError::NotIterable {
+                    value_type: Arc::from(other.type_name()),
+                    span: SourceSpan::default(),
+                },
+                ParseSeverity::Error,
+            );
+            return vec![];
+        },
+    };
+
+    let mut slides: Vec<Slide> = Vec::new();
+
+    for item in list {
+        // Check max_total_slides cap before generating more slides.
+        if let Some(max) = config.max_total_slides
+            && slides.len() >= max
+        {
+            sink.push_with_severity(
+                EvalError::TooManySlides {
+                    count: slides.len() + 1,
+                    max,
+                    span: SourceSpan::default(),
+                },
+                ParseSeverity::Error,
+            );
+            break;
+        }
+
+        // Push an inner scope with the loop binding variable.
+        let mut bindings: IndexMap<Arc<str>, Value> = IndexMap::new();
+        bindings.insert(Arc::from(var_name), item);
+        env.push_scope(bindings);
+
+        // Evaluate the body items in the inner scope.
+        let body_slides = eval_block_items(env, body, config, sink);
+        slides.extend(body_slides);
+
+        // Restore outer scope.
+        env.pop_scope();
+    }
+
+    // Emit a large-deck warning if the generated count exceeds the threshold.
+    if slides.len() > config.large_deck_warn_threshold {
+        sink.push_with_severity(
+            EvalError::TooManySlides {
+                count: slides.len(),
+                max: config.large_deck_warn_threshold,
+                span: SourceSpan::default(),
+            },
+            ParseSeverity::Warning,
+        );
+    }
+
+    slides
 }
 
 // ─── eval_slide_node ─────────────────────────────────────────────────────────
@@ -106,8 +175,101 @@ pub fn eval_slide_node(
     slide_node: &SlideNode,
     sink: &mut DiagnosticSink,
 ) -> Option<Slide> {
-    let _ = (env, slide_node, sink);
-    todo!("STORY-012: implement eval_slide_node — Red Gate stub")
+    let slide_type: Arc<str> = Arc::from(slide_node.kind.value().as_str());
+
+    let mut fields: OrderedMap<Arc<str>, slideforge_types::FieldValue> = OrderedMap::new();
+
+    for field_node in &slide_node.fields {
+        let field_name: Arc<str> = Arc::from(field_node.name.value().as_str());
+        let field_value = match field_node.value.value() {
+            FieldValue::Template(chunks) => {
+                // Evaluate each chunk and concatenate into a string.
+                let mut result = String::new();
+                let mut had_error = false;
+                for chunk in chunks {
+                    match chunk {
+                        TemplateChunk::Literal(s) => result.push_str(s),
+                        TemplateChunk::Expr(expr) => {
+                            match eval_expr_to_string(env, expr, sink) {
+                                Some(s) => result.push_str(s.as_ref()),
+                                None => {
+                                    had_error = true;
+                                },
+                            }
+                        },
+                        TemplateChunk::MathInline(_)
+                        | TemplateChunk::MathDisplay(_)
+                        | TemplateChunk::MathInterp(_) => {
+                            // Math chunks are stored as-is for now (future story).
+                        },
+                    }
+                }
+                if had_error {
+                    // Continue with partial result — error already in sink.
+                    slideforge_types::FieldValue::Literal(Value::Str(Arc::from(result.as_str())))
+                } else {
+                    slideforge_types::FieldValue::Literal(Value::Str(Arc::from(result.as_str())))
+                }
+            },
+            FieldValue::Num(n) => {
+                slideforge_types::FieldValue::Literal(Value::Int(*n))
+            },
+            FieldValue::Float(f) => {
+                slideforge_types::FieldValue::Literal(Value::Float(*f))
+            },
+            FieldValue::Bool(b) => {
+                slideforge_types::FieldValue::Literal(Value::Bool(*b))
+            },
+            FieldValue::Ident(name) => {
+                // Look up the identifier in env.
+                if let Some(v) = env.lookup(name) {
+                    slideforge_types::FieldValue::Literal(v.clone())
+                } else {
+                    let scope_list = env
+                        .all_names()
+                        .iter()
+                        .map(|n| n.as_ref().to_owned())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    sink.push_with_severity(
+                        EvalError::UndefinedVariable {
+                            name: Arc::from(name.as_str()),
+                            scope_list,
+                            span: SourceSpan::default(),
+                        },
+                        ParseSeverity::Error,
+                    );
+                    // Use Null as a fallback so we can continue.
+                    slideforge_types::FieldValue::Literal(Value::Null)
+                }
+            },
+            FieldValue::Shape(shape_node) => {
+                // Shape blocks are passed through for future story implementation.
+                let _ = shape_node;
+                slideforge_types::FieldValue::Literal(Value::Null)
+            },
+            FieldValue::Error => {
+                // Error sentinel — already in sink, skip this field.
+                continue;
+            },
+        };
+        fields.insert(field_name, field_value);
+    }
+
+    let tags: Vec<Arc<str>> = slide_node
+        .tags
+        .iter()
+        .map(|t| Arc::from(t.value().as_str()))
+        .collect();
+
+    Some(Slide {
+        slide_type,
+        fields,
+        blocks: vec![],
+        register: None,
+        tags,
+        source_span: SourceSpan::default(),
+    })
 }
 
 // ─── eval_block_items ────────────────────────────────────────────────────────
@@ -128,8 +290,38 @@ pub fn eval_block_items(
     config: &EvalConfig,
     sink: &mut DiagnosticSink,
 ) -> Vec<Slide> {
-    let _ = (env, items, config, sink);
-    todo!("STORY-012: implement eval_block_items — Red Gate stub")
+    let mut slides: Vec<Slide> = Vec::new();
+
+    for item in items {
+        match item {
+            BlockItem::Slide(spanned_slide) => {
+                if let Some(slide) = eval_slide_node(env, spanned_slide.value(), sink) {
+                    slides.push(slide);
+                }
+            },
+            BlockItem::For(spanned_for) => {
+                let for_node = spanned_for.value();
+                let generated = eval_for_block(
+                    env,
+                    for_node.binding.value(),
+                    for_node.collection.value(),
+                    &for_node.body,
+                    config,
+                    sink,
+                );
+                slides.extend(generated);
+            },
+            BlockItem::If(_spanned_if) => {
+                // @if evaluation is delegated to STORY-013.
+                // For now: do nothing (no slides generated).
+            },
+            BlockItem::Section(_spanned_section) => {
+                // Section blocks generate no slides at the eval level.
+            },
+        }
+    }
+
+    slides
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
