@@ -56,6 +56,14 @@ pub const DEFAULT_PAGE_HEIGHT: Emu = Emu(5_143_500);
 /// the brand selects the standard 4:3 aspect ratio.
 pub const STANDARD_4X3_PAGE_HEIGHT: Emu = Emu(6_858_000);
 
+/// A set of [`RegisterTag`] values for a laid-out slide.
+///
+/// `RegisterSet` is a named alias for `Vec<RegisterTag>` used in
+/// [`LaidOutSlide::register_tags`]. Using a named alias makes the field's
+/// semantic intent explicit at call sites and allows future change to a
+/// `SmallVec` or a bitset without breaking the public API.
+pub type RegisterSet = Vec<RegisterTag>;
+
 /// A writing register tag attached to a laid-out slide.
 ///
 /// `RegisterTag` identifies the output register(s) a slide belongs to,
@@ -146,8 +154,8 @@ pub struct LaidOutSlide {
     /// The register tags for this slide, derived from the semantic slide's
     /// [`slideforge_types::Slide::register`] field during layout.
     ///
-    /// An empty `Vec` means the slide is unregistered (appears in all outputs).
-    pub register_tags: Vec<RegisterTag>,
+    /// An empty [`RegisterSet`] means the slide is unregistered (appears in all outputs).
+    pub register_tags: RegisterSet,
 }
 
 /// A positioned content region within a laid-out slide.

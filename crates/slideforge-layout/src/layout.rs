@@ -37,7 +37,7 @@ use crate::regions::region_frames_for;
 use crate::text_flow::compute_text_flow;
 use crate::types::{
     DEFAULT_PAGE_HEIGHT, DEFAULT_PAGE_WIDTH, FrameContent, LaidOutDeck, LaidOutSlide, PageSize,
-    RegisterTag,
+    RegisterSet, RegisterTag,
 };
 
 /// Transform a fully evaluated `Deck` into a geometric `LaidOutDeck`.
@@ -75,7 +75,7 @@ use crate::types::{
 pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
     // EC-001: reject empty decks.
     if deck.slides.is_empty() {
-        return Err(LayoutError::EmptyDeck);
+        return Err(LayoutError::EmptyDeck { source_slide_index: 0 });
     }
 
     // AC-004: derive page size from brand's first layout definition, or fall
@@ -112,7 +112,7 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
         for (frame_index, frame) in frames.iter().enumerate() {
             if !frame.bbox.is_valid(page_size.width, page_size.height) {
                 return Err(LayoutError::InvalidBoundingBox {
-                    slide_index: source_index,
+                    source_slide_index: source_index,
                     frame_index,
                     bbox: frame.bbox,
                 });
@@ -165,7 +165,7 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
 
         // Derive register_tags from the semantic slide's register field.
         // An unregistered slide (register: None) produces an empty Vec.
-        let register_tags: Vec<RegisterTag> = match slide.register {
+        let register_tags: RegisterSet = match slide.register {
             Some(Register::Notes) => vec![RegisterTag::Notes],
             Some(Register::Report) => vec![RegisterTag::Report],
             Some(Register::Detail) => vec![RegisterTag::Detail],

@@ -186,7 +186,7 @@ mod tests {
         let brand = make_brand();
         let result = run(&deck, &brand);
         match result {
-            Err(LayoutError::EmptyDeck) => {
+            Err(LayoutError::EmptyDeck { .. }) => {
                 // Correct: empty deck rejected
             },
             Ok(lod) => panic!(

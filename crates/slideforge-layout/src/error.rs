@@ -24,8 +24,15 @@ pub enum LayoutError {
     /// A zero-slide deck cannot produce any layout output. The validation stage
     /// (STORY-016) should have rejected this before layout runs, but layout
     /// provides a defensive check per EC-001.
-    #[error("layout error: input deck contains zero slides")]
-    EmptyDeck,
+    ///
+    /// `source_slide_index` is always `0` for this variant (there are no slides
+    /// to index into), but is included for structural consistency with other
+    /// variants and to satisfy the field-uniformity requirement.
+    #[error("layout error: input deck contains zero slides (source_slide_index: {source_slide_index})")]
+    EmptyDeck {
+        /// Always `0` — included for structural consistency.
+        source_slide_index: usize,
+    },
 
     /// The number of slides in the produced `LaidOutDeck` does not match the
     /// number of slides in the input `Deck`.
@@ -61,10 +68,10 @@ pub enum LayoutError {
     /// Per AC-014 / BC-3.06.003, every bounding box must satisfy:
     /// `x >= 0`, `y >= 0`, `width > 0`, `height > 0`,
     /// `x + width <= page_width`, `y + height <= page_height`.
-    #[error("layout error: slide {slide_index} frame {frame_index}: invalid bounding box {bbox:?}")]
+    #[error("layout error: slide {source_slide_index} frame {frame_index}: invalid bounding box {bbox:?}")]
     InvalidBoundingBox {
         /// Zero-based index of the slide containing the invalid frame.
-        slide_index: usize,
+        source_slide_index: usize,
         /// Zero-based index of the frame within the slide.
         frame_index: usize,
         /// The offending bounding box.
@@ -86,7 +93,7 @@ mod tests {
     /// meaningful message.
     #[test]
     fn test_bc_3_06_001_error_empty_deck_variant_exists() {
-        let err = LayoutError::EmptyDeck;
+        let err = LayoutError::EmptyDeck { source_slide_index: 0 };
         let msg = err.to_string();
         assert!(
             msg.contains("zero slides"),
@@ -140,7 +147,7 @@ mod tests {
             height: Emu(500_000),
         };
         let err = LayoutError::InvalidBoundingBox {
-            slide_index: 2,
+            source_slide_index: 2,
             frame_index: 0,
             bbox,
         };
@@ -155,13 +162,13 @@ mod tests {
     #[test]
     fn test_bc_3_06_001_layout_error_implements_hash_eq_clone() {
         use std::collections::HashSet;
-        let err = LayoutError::EmptyDeck;
+        let err = LayoutError::EmptyDeck { source_slide_index: 0 };
         let err2 = err.clone();
         assert_eq!(err, err2);
 
         let mut set = HashSet::new();
-        set.insert(LayoutError::EmptyDeck);
-        set.insert(LayoutError::EmptyDeck); // duplicate
+        set.insert(LayoutError::EmptyDeck { source_slide_index: 0 });
+        set.insert(LayoutError::EmptyDeck { source_slide_index: 0 }); // duplicate
         assert_eq!(set.len(), 1);
     }
 }
