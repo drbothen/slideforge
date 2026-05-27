@@ -298,7 +298,7 @@ fn test_eval_validate_non_empty_deck_no_zero_slide_error() {
 
 /// Cross-crate: `eval_deck` propagates `lang "en-US"` to `DeckMetadata.lang`.
 ///
-/// This is a round-trip test: DeckNode.lang → eval_deck → Deck.metadata.lang.
+/// This is a round-trip test: `DeckNode.lang` → `eval_deck` → `Deck.metadata.lang`.
 #[test]
 fn test_eval_deck_lang_propagation() {
     let deck_node = deck_node_with_lang("en-US", &["title"]);
