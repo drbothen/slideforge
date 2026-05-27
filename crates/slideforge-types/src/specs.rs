@@ -120,8 +120,8 @@ pub struct TableSpec {
 
     /// Accessibility alt text / caption.
     ///
-    /// `None` means the author did not supply a caption; the validator emits
-    /// `E-A11-001`. Tables are never decorative.
+    /// `None` means the author did not supply a caption. Tables are non-visual
+    /// text content and are not subject to alt-text validation.
     pub alt: Option<AltText>,
 
     /// Source location.

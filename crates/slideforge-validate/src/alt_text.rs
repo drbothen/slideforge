@@ -21,8 +21,8 @@ use crate::utils::is_blank;
 
 /// Error code for a visual element missing alt text.
 ///
-/// Emitted for images, charts, diagrams, shapes, and tables that have neither
-/// valid alt text nor `decorative: true`.
+/// Emitted for images, charts, diagrams, and shapes that have neither valid alt
+/// text nor `decorative: true`.
 ///
 /// Used by the `validate()` implementation (STORY-015 implementer phase) and
 /// exercised directly by the test suite.
