@@ -138,6 +138,7 @@ pub fn substitute<S: BuildHasher>(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::error::MathRendererError;

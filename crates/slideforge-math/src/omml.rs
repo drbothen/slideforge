@@ -440,6 +440,7 @@ fn accent_char(kind: &AccentKind) -> &'static str {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::ast::{AccentKind, MathAst, MathMode, MathNode};

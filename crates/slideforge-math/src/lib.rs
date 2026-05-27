@@ -161,6 +161,7 @@ impl MathRenderer for MathRendererImpl {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use slideforge_plugin_api::MathError;

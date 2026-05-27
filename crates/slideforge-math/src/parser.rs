@@ -928,6 +928,7 @@ pub fn hint_for_command(cmd: &str) -> &'static str {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::ast::{MathMode, MathNode};
