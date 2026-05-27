@@ -97,8 +97,17 @@ pub fn parse_theme_colors(
                                 if attr.key.local_name().as_ref() == b"val"
                                     && let Ok(val) = std::str::from_utf8(&attr.value)
                                 {
-                                    let hex = Arc::from(format!("#{}", val.to_uppercase()).as_str());
-                                    found.insert(slot, ColorValue::Hex(hex));
+                                    if val.len() == 6 && val.chars().all(|c| c.is_ascii_hexdigit()) {
+                                        let hex = Arc::from(format!("#{}", val.to_uppercase()).as_str());
+                                        found.insert(slot, ColorValue::Hex(hex));
+                                    } else {
+                                        tracing::warn!(
+                                            slot,
+                                            val,
+                                            "srgbClr val is not a 6-character hex string; \
+                                             using default color for slot"
+                                        );
+                                    }
                                 }
                             }
                         }
@@ -108,8 +117,17 @@ pub fn parse_theme_colors(
                                 if attr.key.local_name().as_ref() == b"lastClr"
                                     && let Ok(val) = std::str::from_utf8(&attr.value)
                                 {
-                                    let hex = Arc::from(format!("#{}", val.to_uppercase()).as_str());
-                                    found.insert(slot, ColorValue::Hex(hex));
+                                    if val.len() == 6 && val.chars().all(|c| c.is_ascii_hexdigit()) {
+                                        let hex = Arc::from(format!("#{}", val.to_uppercase()).as_str());
+                                        found.insert(slot, ColorValue::Hex(hex));
+                                    } else {
+                                        tracing::warn!(
+                                            slot,
+                                            val,
+                                            "sysClr lastClr is not a 6-character hex string; \
+                                             using default color for slot"
+                                        );
+                                    }
                                 }
                             }
                         }
@@ -450,6 +468,102 @@ mod tests {
             slots[0].value.as_scheme_ref(),
             Some("dk1"),
             "schemeClr val='dk1' must produce SchemeRef(\"dk1\")"
+        );
+    }
+
+    /// FINDING-003 — srgbClr with an invalid (too-short) val uses default color and emits a warning.
+    ///
+    /// When `<a:srgbClr val="00FF"/>` (4 chars, not 6), the parser must NOT use
+    /// the invalid value. The slot must fall through to the default inference path,
+    /// producing a `MissingColorSlot` warning.
+    #[test]
+    fn test_finding_003_srgb_clr_invalid_short_hex_uses_default() {
+        // dk1 has val="00FF" — 4 hex chars, not 6; invalid.
+        let theme_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="InvalidHexTheme">
+  <a:themeElements>
+    <a:clrScheme name="InvalidHexScheme">
+      <a:dk1><a:srgbClr val="00FF"/></a:dk1>
+      <a:lt1><a:srgbClr val="FFFFFF"/></a:lt1>
+      <a:dk2><a:srgbClr val="003087"/></a:dk2>
+      <a:lt2><a:srgbClr val="F5F5F5"/></a:lt2>
+      <a:acc1><a:srgbClr val="0066CC"/></a:acc1>
+      <a:acc2><a:srgbClr val="FF6B35"/></a:acc2>
+      <a:acc3><a:srgbClr val="28A745"/></a:acc3>
+      <a:acc4><a:srgbClr val="FFC107"/></a:acc4>
+      <a:acc5><a:srgbClr val="6F42C1"/></a:acc5>
+      <a:acc6><a:srgbClr val="17A2B8"/></a:acc6>
+      <a:hlink><a:srgbClr val="0000EE"/></a:hlink>
+      <a:folHlink><a:srgbClr val="551A8B"/></a:folHlink>
+    </a:clrScheme>
+  </a:themeElements>
+</a:theme>"#;
+        let (slots, warnings) = parse_theme_colors(theme_xml.as_bytes())
+            .expect("invalid hex theme must parse without hard error");
+        // dk1 had invalid val — it must fall back to a MissingColorSlot warning + default.
+        assert_eq!(
+            warnings.len(),
+            1,
+            "invalid srgbClr val must produce exactly 1 MissingColorSlot warning, got: {warnings:?}"
+        );
+        assert!(
+            matches!(&warnings[0], BrandError::MissingColorSlot { slot_name, .. } if slot_name.as_ref() == "dk1"),
+            "MissingColorSlot warning must be for 'dk1', got: {:?}",
+            warnings[0]
+        );
+        // dk1 must use the default dark-gray fallback (not the 4-char invalid value).
+        assert_ne!(
+            slots[0].hex(),
+            Some("#00FF"),
+            "invalid 4-char hex must NOT be stored as hex value"
+        );
+        assert!(
+            slots[0].hex().is_some(),
+            "dk1 must still have a default hex color after invalid val"
+        );
+    }
+
+    /// FINDING-003 — srgbClr with non-hex characters (e.g. "ZZZZZZ") uses default color.
+    #[test]
+    fn test_finding_003_srgb_clr_invalid_non_hex_chars_uses_default() {
+        // dk1 has val="ZZZZZZ" — 6 chars but not hex digits; invalid.
+        let theme_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="NonHexTheme">
+  <a:themeElements>
+    <a:clrScheme name="NonHexScheme">
+      <a:dk1><a:srgbClr val="ZZZZZZ"/></a:dk1>
+      <a:lt1><a:srgbClr val="FFFFFF"/></a:lt1>
+      <a:dk2><a:srgbClr val="003087"/></a:dk2>
+      <a:lt2><a:srgbClr val="F5F5F5"/></a:lt2>
+      <a:acc1><a:srgbClr val="0066CC"/></a:acc1>
+      <a:acc2><a:srgbClr val="FF6B35"/></a:acc2>
+      <a:acc3><a:srgbClr val="28A745"/></a:acc3>
+      <a:acc4><a:srgbClr val="FFC107"/></a:acc4>
+      <a:acc5><a:srgbClr val="6F42C1"/></a:acc5>
+      <a:acc6><a:srgbClr val="17A2B8"/></a:acc6>
+      <a:hlink><a:srgbClr val="0000EE"/></a:hlink>
+      <a:folHlink><a:srgbClr val="551A8B"/></a:folHlink>
+    </a:clrScheme>
+  </a:themeElements>
+</a:theme>"#;
+        let (slots, warnings) = parse_theme_colors(theme_xml.as_bytes())
+            .expect("non-hex theme must parse without hard error");
+        // dk1 had "ZZZZZZ" (non-hex) — must produce a MissingColorSlot warning.
+        assert_eq!(
+            warnings.len(),
+            1,
+            "non-hex srgbClr val must produce exactly 1 MissingColorSlot warning, got: {warnings:?}"
+        );
+        // dk1 must not store "ZZZZZZ".
+        assert_ne!(
+            slots[0].hex().map(|s| s.to_uppercase()),
+            Some("#ZZZZZZ".to_owned()),
+            "invalid non-hex val must NOT be stored as hex value"
+        );
+        // dk1 must have the dark-gray default fallback.
+        assert!(
+            slots[0].hex().is_some(),
+            "dk1 must still have a default hex color after invalid val"
         );
     }
 

@@ -12,7 +12,7 @@
 //! - If `word/theme/theme1.xml` exists → DOCX.
 //! - If neither exists → [`BrandError::ParseError`] (E-BRD-002).
 
-use std::io::Read;
+use std::io::{ErrorKind, Read};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -59,9 +59,17 @@ impl BrandLoader {
         ctx: &BrandLoadContext,
     ) -> Result<BrandTemplate, BrandError> {
         // --- Step 1: Open the file ---
-        let file = std::fs::File::open(path).map_err(|_| BrandError::FileNotFound {
-            path: Arc::from(path.to_string_lossy().as_ref()),
-            span: ctx.span.clone(),
+        // Distinguish NotFound (E-BRD-001) from other I/O errors (E-BRD-002 with message).
+        let file = std::fs::File::open(path).map_err(|e| match e.kind() {
+            ErrorKind::NotFound => BrandError::FileNotFound {
+                path: Arc::from(path.to_string_lossy().as_ref()),
+                span: ctx.span.clone(),
+            },
+            _ => BrandError::ParseError {
+                path: Arc::from(path.to_string_lossy().as_ref()),
+                reason: Arc::from(e.to_string().as_str()),
+                span: ctx.span.clone(),
+            },
         })?;
 
         // --- Step 2: Open as ZIP ---
@@ -919,6 +927,39 @@ mod tests {
                 slideforge_plugin_api::BrandError::ValidationError { .. }
             ),
             "must be ValidationError for TOML source"
+        );
+    }
+
+    /// FINDING-002 — File::open error mapping preserves I/O error details.
+    ///
+    /// Verifies that:
+    /// 1. A non-existent file produces `BrandError::FileNotFound` (not `ParseError`).
+    /// 2. The `FileNotFound` error message contains the path.
+    ///
+    /// Non-NotFound I/O errors (e.g., permission denied) are mapped to `ParseError`
+    /// with the original error message preserved. We verify the mapping logic by
+    /// inspecting the `ErrorKind` dispatch: if the file does not exist, we get
+    /// `FileNotFound`; the `ParseError` path is exercised by the corrupt-file test.
+    #[test]
+    fn test_finding_002_file_open_error_maps_to_file_not_found() {
+        let loader = BrandLoader::new();
+        let ctx = BrandLoadContext::for_test();
+        let nonexistent = std::path::Path::new("/tmp/slideforge_nonexistent_finding002.pptx");
+
+        let result = loader.load_template(nonexistent, &ctx);
+
+        assert!(result.is_err(), "non-existent path must return an error");
+        let err = result.unwrap_err();
+        // Must be FileNotFound (not ParseError) for a missing file.
+        assert!(
+            matches!(err, BrandError::FileNotFound { .. }),
+            "missing file must produce FileNotFound, got: {err:?}"
+        );
+        // The error message must contain the path.
+        let msg = err.to_string();
+        assert!(
+            msg.contains("slideforge_nonexistent_finding002.pptx"),
+            "FileNotFound message must contain path, got: {msg}"
         );
     }
 

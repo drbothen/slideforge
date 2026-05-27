@@ -59,7 +59,7 @@ pub enum BrandError {
     /// This is a fatal error. The build exits with code 4.
     #[error(
         "E-BRD-002: Cannot parse brand template '{path}': {reason}. \
-         File may be corrupted or not a valid PPTX/TOML."
+         File may be corrupted or not a valid PPTX/DOCX."
     )]
     ParseError {
         /// The path of the file that failed to parse.
@@ -164,6 +164,28 @@ mod tests {
         assert!(
             msg.contains("E-BRD-002"),
             "error message must contain error code, got: {msg}"
+        );
+    }
+
+    /// FINDING-001 — ParseError message says "PPTX/DOCX", not "PPTX/TOML".
+    ///
+    /// The error message previously contained "PPTX/TOML" which was a copy-paste
+    /// error. The correct file types supported are PPTX and DOCX.
+    #[test]
+    fn test_finding_001_parse_error_says_docx_not_toml() {
+        let err = BrandError::ParseError {
+            path: Arc::from("brand.pptx"),
+            reason: Arc::from("not a ZIP archive"),
+            span: SourceSpan::default(),
+        };
+        let msg = err.to_string();
+        assert!(
+            msg.contains("DOCX"),
+            "ParseError message must contain 'DOCX', got: {msg}"
+        );
+        assert!(
+            !msg.contains("TOML"),
+            "ParseError message must NOT contain 'TOML', got: {msg}"
         );
     }
 

@@ -206,4 +206,101 @@ mod tests {
         assert_eq!(media_type_from_extension("PNG").as_ref(), "image/png");
         assert_eq!(media_type_from_extension("JPG").as_ref(), "image/jpeg");
     }
+
+    // ── FINDING-004: resolve_rels_target and normalize_path unit tests ────────
+
+    /// FINDING-004 — resolve_rels_target: absolute target path strips leading slash.
+    ///
+    /// An absolute target like `/ppt/media/image1.png` must be returned as
+    /// `ppt/media/image1.png` (no leading slash, no base prepended).
+    #[test]
+    fn test_finding_004_resolve_rels_target_absolute_path() {
+        let result = resolve_rels_target("/ppt/media/image1.png");
+        assert_eq!(
+            result, "ppt/media/image1.png",
+            "absolute target with leading '/' must be returned without the leading slash"
+        );
+    }
+
+    /// FINDING-004 — resolve_rels_target: relative target with `..` resolves correctly.
+    ///
+    /// Target `../media/image1.png` relative to `ppt/slideMasters/` must resolve
+    /// to `ppt/media/image1.png`.
+    #[test]
+    fn test_finding_004_resolve_rels_target_relative_single_dotdot() {
+        let result = resolve_rels_target("../media/image1.png");
+        assert_eq!(
+            result, "ppt/media/image1.png",
+            "relative '../media/image1.png' must resolve to 'ppt/media/image1.png'"
+        );
+    }
+
+    /// FINDING-004 — resolve_rels_target: relative target with multiple `..` segments.
+    ///
+    /// Target `../../media/image1.png` relative to `ppt/slideMasters/` must resolve
+    /// to `media/image1.png` (two levels up from `ppt/slideMasters/`).
+    #[test]
+    fn test_finding_004_resolve_rels_target_relative_multiple_dotdot() {
+        let result = resolve_rels_target("../../media/image1.png");
+        assert_eq!(
+            result, "media/image1.png",
+            "relative '../../media/image1.png' must resolve to 'media/image1.png'"
+        );
+    }
+
+    /// FINDING-004 — resolve_rels_target: target with no `..` is appended to base.
+    ///
+    /// Target `media/image1.png` (no `..`) relative to `ppt/slideMasters/` must
+    /// resolve to `ppt/slideMasters/media/image1.png`.
+    #[test]
+    fn test_finding_004_resolve_rels_target_relative_no_dotdot() {
+        let result = resolve_rels_target("media/image1.png");
+        assert_eq!(
+            result, "ppt/slideMasters/media/image1.png",
+            "relative target with no '..' must be resolved under ppt/slideMasters/"
+        );
+    }
+
+    /// FINDING-004 — normalize_path: excess `..` segments that exhaust all components
+    /// produce an empty string (no path components remain).
+    ///
+    /// e.g., `ppt/../..` — popping `ppt` then having no segment to pop for the
+    /// second `..` means no components remain → empty string.
+    #[test]
+    fn test_finding_004_normalize_path_excess_dotdot_segments() {
+        // "ppt/../.." → ppt is pushed, then popped by first .., second .. has nothing to pop.
+        let result = normalize_path("ppt/../..");
+        assert_eq!(
+            result, "",
+            "excess '..' segments must produce empty string (no components remain)"
+        );
+    }
+
+    /// FINDING-004 — normalize_path: path with no `..` segments returns the path unchanged.
+    #[test]
+    fn test_finding_004_normalize_path_no_dotdot() {
+        let result = normalize_path("ppt/media/image1.png");
+        assert_eq!(
+            result, "ppt/media/image1.png",
+            "path with no '..' segments must pass through unchanged"
+        );
+    }
+
+    /// FINDING-004 — find_image_target: `.rels` with no `Type` attribute returns None.
+    ///
+    /// A `<Relationship>` element missing the `Type` attribute must be skipped.
+    /// The function must return `None` when no valid image relationship exists.
+    #[test]
+    fn test_finding_004_find_image_target_no_type_attribute_returns_none() {
+        // Relationship element with no Type attribute.
+        let rels_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Target="../media/image1.png"/>
+</Relationships>"#;
+        let result = find_image_target(rels_xml);
+        assert!(
+            result.is_none(),
+            "Relationship with no Type attribute must return None, got: {result:?}"
+        );
+    }
 }
