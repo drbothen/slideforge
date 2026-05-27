@@ -436,28 +436,34 @@ mod tests {
 
     /// Write bytes to a temp file and return the path.
     ///
-    /// Uses a combination of nanosecond timestamp and thread ID to make the
-    /// filename unique under parallel test execution.
+    /// Uses a combination of process ID, nanosecond timestamp, and an
+    /// in-process atomic counter to guarantee uniqueness under parallel test
+    /// execution — including nextest, which runs tests concurrently within the
+    /// same process on the same OS thread.
     fn write_temp_file(bytes: &[u8], extension: &str) -> std::path::PathBuf {
         use std::io::Write;
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
         let dir = std::env::temp_dir();
-        // Combine nanosecond timestamp and thread ID for uniqueness under parallel tests.
-        let thread_id = format!("{:?}", std::thread::current().id());
-        let thread_hash: u64 = thread_id.bytes().fold(0u64, |acc, b| {
-            acc.wrapping_mul(31).wrapping_add(u64::from(b))
-        });
         let name = format!(
-            "slideforge_brand_test_{}_{:x}.{}",
+            "slideforge_brand_test_{}_{}_{}.{}",
+            std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_nanos(),
-            thread_hash,
+            seq,
             extension
         );
         let path = dir.join(name);
         let mut f = std::fs::File::create(&path).unwrap();
         f.write_all(bytes).unwrap();
+        // sync_all() issues fsync(2) to ensure the OS page cache has fully
+        // committed the bytes before the loader opens the same path.
+        // Required on macOS CI where concurrent test processes can observe
+        // a partially-written file via a stale page-cache entry.
+        f.sync_all().unwrap();
         path
     }
 

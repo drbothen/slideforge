@@ -320,6 +320,7 @@ pub fn region_frames_for(
 
 #[cfg(test)]
 #[allow(clippy::missing_docs_in_private_items)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::types::{DEFAULT_PAGE_HEIGHT, DEFAULT_PAGE_WIDTH};
