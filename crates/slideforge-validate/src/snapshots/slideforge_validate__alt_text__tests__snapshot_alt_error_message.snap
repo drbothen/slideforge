@@ -1,0 +1,5 @@
+---
+source: crates/slideforge-validate/src/alt_text.rs
+expression: "diags[0].message.as_ref()"
+---
+Missing alt text on image 'photo.png' at <unknown>. Add alt "..." or mark decorative: true

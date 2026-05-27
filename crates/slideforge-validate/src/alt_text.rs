@@ -10,6 +10,7 @@
 //! |------|----------|---------|
 //! | `E-A11-001` | Error | Visual element is missing alt text and is not marked decorative |
 //! | `W-A11-001` | Warning | Visual element has both alt text AND `decorative: true` (alt is ignored) |
+//! | `W-A11-002` | Warning | Table marked as decorative (tables are content, never decorative) |
 
 use slideforge_plugin_api::{Diagnostic, DiagnosticSeverity, Validator, ValidatorOptions};
 use slideforge_types::{
@@ -37,6 +38,13 @@ pub(crate) const E_A11_001: &str = "E-A11-001";
 /// Used by the `validate()` implementation (STORY-015 implementer phase) and
 /// exercised directly by the test suite.
 pub(crate) const W_A11_001: &str = "W-A11-001";
+
+/// Warning code emitted when a table is marked with `AltText::Decorative`.
+///
+/// Tables are always content elements — they convey structured data that screen
+/// readers must traverse. The `decorative` concept does not apply to tables.
+/// Authors should provide alt text describing the table content instead.
+pub(crate) const W_A11_002: &str = "W-A11-002";
 
 /// Validates that all visual elements have alt text or are marked decorative.
 ///
@@ -68,6 +76,7 @@ impl Validator for AltTextValidator {
                             spec.alt.as_ref(),
                             spec.decorative,
                             "image",
+                            spec.path.as_ref(),
                             &spec.span,
                             &mut diagnostics,
                         );
@@ -77,15 +86,23 @@ impl Validator for AltTextValidator {
                             spec.alt.as_ref(),
                             spec.decorative,
                             "chart",
+                            spec.chart_type.as_ref(),
                             &spec.span,
                             &mut diagnostics,
                         );
                     }
                     ContentBlock::Diagram(spec) => {
+                        // Truncate diagram source to first 30 chars for the identifier.
+                        let identifier: std::borrow::Cow<str> = if spec.source.len() > 30 {
+                            std::borrow::Cow::Owned(format!("{}…", &spec.source[..30]))
+                        } else {
+                            std::borrow::Cow::Borrowed(spec.source.as_ref())
+                        };
                         check_visual_element(
                             spec.alt.as_ref(),
                             spec.decorative,
                             "diagram",
+                            identifier.as_ref(),
                             &spec.span,
                             &mut diagnostics,
                         );
@@ -95,6 +112,7 @@ impl Validator for AltTextValidator {
                             spec.alt.as_ref(),
                             spec.decorative,
                             "shape",
+                            spec.shape_type.as_ref(),
                             &spec.span,
                             &mut diagnostics,
                         );
@@ -115,27 +133,50 @@ impl Validator for AltTextValidator {
 /// Check a visual element with `decorative` support (Image, Chart, Diagram, Shape).
 ///
 /// Logic (per AC-009, AC-006, AC-001 through AC-005):
-/// 1. If `decorative: true` AND `alt` is `Some(AltText::Provided(_))` → emit W-A11-001.
+///
+/// 1. If `decorative: true` AND `alt` is `Some(AltText::Provided(s))` where `s` is
+///    non-blank → emit W-A11-001 (non-empty alt is ignored).
+///    Empty/whitespace alt with `decorative: true` does NOT emit W-A11-001 because
+///    blank alt is not meaningful content worth warning about.
 /// 2. If `decorative: true` (regardless) → skip error check (decorative exemption).
 /// 3. If `alt` is `None` or blank `Provided` → emit E-A11-001.
 /// 4. If `alt` is valid `Provided` or `Decorative` enum variant → valid, no diagnostic.
+///
+/// ## Design note: dual decorative representation
+///
+/// The IR carries BOTH `decorative: bool` (from `decorative: true` keyword in DSL) AND
+/// `alt: Option<AltText>` (where `AltText::Decorative` can also express decorative intent).
+/// This dual representation is necessary to detect the AC-009 case: when the user writes
+/// BOTH `alt "..."` AND `decorative: true`, both fields are set and we can warn.
+///
+/// The contradictory state `alt: Some(AltText::Decorative)` with `decorative: false`
+/// is an internal IR state that should not arise from well-formed DSL input (the parser
+/// sets `decorative: false` only when the keyword is absent, and uses `AltText::Decorative`
+/// only as the enum-level representation of the same concept). If it does occur,
+/// `AltText::Decorative` wins — the element is treated as decorative with no error.
 fn check_visual_element(
     alt: Option<&AltText>,
     decorative: bool,
     element_type: &str,
+    identifier: &str,
     span: &SourceSpan,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    // AC-009: both alt text AND decorative: true → warn that alt is ignored.
+    // AC-009: both non-blank alt text AND decorative: true → warn that alt is ignored.
+    // Blank alt with decorative: true is silently accepted (blank alt is not meaningful).
     if decorative {
-        if let Some(AltText::Provided(_)) = alt {
-            diagnostics.push(make_warning(element_type, span));
+        if let Some(AltText::Provided(s)) = alt
+            && !is_blank(s)
+        {
+            diagnostics.push(make_warning(element_type, identifier, span));
         }
         // Decorative exemption: no E-A11-001 needed.
         return;
     }
 
     // Non-decorative: check that alt text is present and non-blank.
+    // AltText::Decorative (enum variant) wins — element is treated as valid even if
+    // `decorative: bool` is false. See design note on dual decorative representation above.
     let is_missing = match alt {
         None => true,
         Some(AltText::Provided(s)) => is_blank(s),
@@ -143,34 +184,64 @@ fn check_visual_element(
     };
 
     if is_missing {
-        diagnostics.push(make_error(element_type, span));
+        diagnostics.push(make_error(element_type, identifier, span));
     }
 }
 
 /// Check a table element (no `decorative` field — tables are always content).
+///
+/// Tables cannot be decorative because they convey structured data that must be
+/// accessible to screen reader users. If a table is marked with `AltText::Decorative`,
+/// a W-A11-002 warning is emitted and the table is still flagged as needing alt text.
 fn check_table_element(
     alt: Option<&AltText>,
     span: &SourceSpan,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    let is_missing = match alt {
-        None => true,
-        Some(AltText::Provided(s)) => is_blank(s),
-        Some(AltText::Decorative) => false,
-    };
-
-    if is_missing {
-        diagnostics.push(make_error("table", span));
+    match alt {
+        Some(AltText::Decorative) => {
+            // Tables are content elements, never decorative.
+            diagnostics.push(Diagnostic {
+                severity: DiagnosticSeverity::Warning,
+                code: std::sync::Arc::from(W_A11_002),
+                message: std::sync::Arc::from(format!(
+                    "Tables cannot be decorative at {span}. \
+                     Provide alt text describing the table content"
+                )),
+                span: span.clone(),
+                hint: Some(std::sync::Arc::from(
+                    "Replace decorative: true with alt \"...\" describing the table",
+                )),
+            });
+            // Still flag as needing alt text.
+            diagnostics.push(make_error("table", "table", span));
+        }
+        None => {
+            diagnostics.push(make_error("table", "table", span));
+        }
+        Some(AltText::Provided(s)) if is_blank(s) => {
+            diagnostics.push(make_error("table", "table", span));
+        }
+        Some(AltText::Provided(_)) => {
+            // Valid alt text — no diagnostic.
+        }
     }
 }
 
 /// Construct an `E-A11-001` error diagnostic for a missing alt text.
-fn make_error(element_type: &str, span: &SourceSpan) -> Diagnostic {
+///
+/// The `identifier` identifies the specific element:
+/// - Image: file path (e.g., `"photo.png"`)
+/// - Chart: chart type (e.g., `"bar"`)
+/// - Diagram: first 30 chars of source
+/// - Shape: shape type (e.g., `"rect"`)
+/// - Table: always `"table"`
+fn make_error(element_type: &str, identifier: &str, span: &SourceSpan) -> Diagnostic {
     Diagnostic {
         severity: DiagnosticSeverity::Error,
         code: std::sync::Arc::from(E_A11_001),
         message: std::sync::Arc::from(format!(
-            "Missing alt text on {element_type} at {span}. \
+            "Missing alt text on {element_type} '{identifier}' at {span}. \
              Add alt \"...\" or mark decorative: true"
         )),
         span: span.clone(),
@@ -180,13 +251,13 @@ fn make_error(element_type: &str, span: &SourceSpan) -> Diagnostic {
     }
 }
 
-/// Construct a `W-A11-001` warning diagnostic for conflicting alt + decorative.
-fn make_warning(element_type: &str, span: &SourceSpan) -> Diagnostic {
+/// Construct a `W-A11-001` warning diagnostic for conflicting non-blank alt + decorative.
+fn make_warning(element_type: &str, identifier: &str, span: &SourceSpan) -> Diagnostic {
     Diagnostic {
         severity: DiagnosticSeverity::Warning,
         code: std::sync::Arc::from(W_A11_001),
         message: std::sync::Arc::from(format!(
-            "Alt text ignored for decorative {element_type} at {span}"
+            "Alt text ignored for decorative {element_type} '{identifier}' at {span}"
         )),
         span: span.clone(),
         hint: Some(std::sync::Arc::from(
@@ -204,10 +275,10 @@ mod tests {
     use slideforge_plugin_api::{DiagnosticSeverity, ValidatorOptions, Validator};
     use slideforge_types::{
         Block, ContentBlock, Deck, DeckMetadata, OrderedMap, Slide, SourceSpan,
-        specs::{AltText, ChartSpec, DiagramSpec, ImageSpec, TableSpec},
+        specs::{AltText, ChartSpec, DiagramSpec, ImageSpec, ShapeSpec, TableSpec},
     };
 
-    use super::{AltTextValidator, E_A11_001, W_A11_001};
+    use super::{AltTextValidator, E_A11_001, W_A11_001, W_A11_002};
 
     // ── Deck/slide/block construction helpers ──────────────────────────────────
 
@@ -250,7 +321,7 @@ mod tests {
 
     fn make_image_block(alt: Option<AltText>, decorative: bool) -> Block {
         make_block(ContentBlock::Image(ImageSpec {
-            path: Arc::from("image.png"),
+            path: Arc::from("photo.png"),
             alt,
             decorative,
             span: SourceSpan::default(),
@@ -269,6 +340,15 @@ mod tests {
     fn make_diagram_block(alt: Option<AltText>, decorative: bool) -> Block {
         make_block(ContentBlock::Diagram(DiagramSpec {
             source: Arc::from("graph TD; A-->B"),
+            alt,
+            decorative,
+            span: SourceSpan::default(),
+        }))
+    }
+
+    fn make_shape_block(alt: Option<AltText>, decorative: bool) -> Block {
+        make_block(ContentBlock::Shape(ShapeSpec {
+            shape_type: Arc::from("rect"),
             alt,
             decorative,
             span: SourceSpan::default(),
@@ -403,7 +483,7 @@ mod tests {
     #[test]
     fn test_bc_5_03_015_alt_and_decorative_together() {
         // alt: Some(Provided("text")), decorative: true → 1 W-A11-001 warning
-        // Decorative wins, but the ignored alt text warrants a warning (AC-009).
+        // Decorative wins, but the ignored non-blank alt text warrants a warning (AC-009).
         let slide = make_slide(vec![make_image_block(
             Some(AltText::Provided(Arc::from("this alt will be ignored"))),
             true,
@@ -585,5 +665,162 @@ mod tests {
             diags[0].hint.is_some(),
             "E-A11-001 diagnostic must include a hint; got None"
         );
+    }
+
+    // ── Error message contains identifier (ADV-P01-HIGH-001) ──────────────────
+
+    #[test]
+    fn test_error_message_contains_identifier_image() {
+        // E-A11-001 for an image must include the file path as identifier
+        let deck = make_deck(vec![make_slide(vec![make_image_block(None, false)])]);
+        let diags = AltTextValidator.validate(&deck, &default_opts());
+        assert_eq!(diags.len(), 1);
+        assert!(
+            diags[0].message.contains("'photo.png'"),
+            "error message must contain the image path; got: {}",
+            diags[0].message
+        );
+    }
+
+    #[test]
+    fn test_error_message_contains_identifier_chart() {
+        // E-A11-001 for a chart must include the chart type as identifier
+        let deck = make_deck(vec![make_slide(vec![make_chart_block(None, false)])]);
+        let diags = AltTextValidator.validate(&deck, &default_opts());
+        assert_eq!(diags.len(), 1);
+        assert!(
+            diags[0].message.contains("'bar'"),
+            "error message must contain the chart type; got: {}",
+            diags[0].message
+        );
+    }
+
+    #[test]
+    fn test_error_message_contains_identifier_diagram() {
+        // E-A11-001 for a diagram must include truncated source as identifier
+        let deck = make_deck(vec![make_slide(vec![make_diagram_block(None, false)])]);
+        let diags = AltTextValidator.validate(&deck, &default_opts());
+        assert_eq!(diags.len(), 1);
+        assert!(
+            diags[0].message.contains("'graph TD; A-->B'"),
+            "error message must contain the diagram source; got: {}",
+            diags[0].message
+        );
+    }
+
+    #[test]
+    fn test_warning_message_contains_identifier() {
+        // W-A11-001 for an image must include the file path as identifier
+        let deck = make_deck(vec![make_slide(vec![make_image_block(
+            Some(AltText::Provided(Arc::from("ignored alt"))),
+            true,
+        )])]);
+        let diags = AltTextValidator.validate(&deck, &default_opts());
+        assert_eq!(diags.len(), 1);
+        assert_eq!(diags[0].code.as_ref(), W_A11_001);
+        assert!(
+            diags[0].message.contains("'photo.png'"),
+            "warning message must contain the image path; got: {}",
+            diags[0].message
+        );
+    }
+
+    // ── Shape missing alt (ADV-P01-MED-003) ───────────────────────────────────
+
+    #[test]
+    fn test_shape_missing_alt() {
+        // shape with alt: None, decorative: false → 1 E-A11-001
+        let deck = make_deck(vec![make_slide(vec![make_shape_block(None, false)])]);
+        let diags = AltTextValidator.validate(&deck, &default_opts());
+        assert_eq!(diags.len(), 1, "shape missing alt should produce 1 diagnostic; got {diags:?}");
+        assert_eq!(diags[0].code.as_ref(), E_A11_001);
+    }
+
+    // ── Blank alt with decorative — no warning (ADV-P01-MED-002) ─────────────
+
+    #[test]
+    fn test_blank_alt_with_decorative_no_warning() {
+        // decorative: true + alt: Some(Provided("")) → no warning
+        // Blank alt is not meaningful content, so no W-A11-001 is emitted.
+        let deck = make_deck(vec![make_slide(vec![make_image_block(
+            Some(AltText::Provided(Arc::from(""))),
+            true,
+        )])]);
+        let diags = AltTextValidator.validate(&deck, &default_opts());
+        assert!(
+            diags.is_empty(),
+            "blank alt with decorative: true should produce no diagnostic; got {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_whitespace_alt_with_decorative_no_warning() {
+        // decorative: true + alt: Some(Provided("   ")) → no warning (whitespace is blank)
+        let deck = make_deck(vec![make_slide(vec![make_image_block(
+            Some(AltText::Provided(Arc::from("   "))),
+            true,
+        )])]);
+        let diags = AltTextValidator.validate(&deck, &default_opts());
+        assert!(
+            diags.is_empty(),
+            "whitespace-only alt with decorative: true should produce no diagnostic; got {diags:?}"
+        );
+    }
+
+    // ── AltText::Decorative enum with decorative: false (ADV-P01-LOW-002) ─────
+
+    #[test]
+    fn test_alt_text_decorative_enum_with_decorative_false() {
+        // AltText::Decorative in the enum but decorative: false
+        // The enum wins — element is treated as decorative, no error.
+        // This is an internal IR state that should not arise from well-formed DSL input.
+        let deck = make_deck(vec![make_slide(vec![make_image_block(
+            Some(AltText::Decorative),
+            false,
+        )])]);
+        let diags = AltTextValidator.validate(&deck, &default_opts());
+        assert!(
+            diags.is_empty(),
+            "AltText::Decorative enum variant should be treated as valid even with decorative: false; got {diags:?}"
+        );
+    }
+
+    // ── Table decorative produces warning (ADV-P01-MED-005) ───────────────────
+
+    #[test]
+    fn test_table_decorative_produces_warning() {
+        // Table with alt: Some(AltText::Decorative) → W-A11-002 + E-A11-001
+        // Tables cannot be decorative; this is always an error path.
+        let deck = make_deck(vec![make_slide(vec![make_table_block(Some(
+            AltText::Decorative,
+        ))])]);
+        let diags = AltTextValidator.validate(&deck, &default_opts());
+        // Expect W-A11-002 (can't be decorative) and E-A11-001 (still needs alt text)
+        assert_eq!(
+            diags.len(),
+            2,
+            "table with AltText::Decorative should produce W-A11-002 + E-A11-001; got {diags:?}"
+        );
+        let codes: Vec<&str> = diags.iter().map(|d| d.code.as_ref()).collect();
+        assert!(
+            codes.contains(&W_A11_002),
+            "expected W-A11-002 in diagnostics; got {codes:?}"
+        );
+        assert!(
+            codes.contains(&E_A11_001),
+            "expected E-A11-001 in diagnostics; got {codes:?}"
+        );
+        let warning = diags.iter().find(|d| d.code.as_ref() == W_A11_002).unwrap();
+        assert_eq!(warning.severity, DiagnosticSeverity::Warning);
+    }
+
+    // ── Snapshot test (ADV-P01-MED-004) ───────────────────────────────────────
+
+    #[test]
+    fn test_snapshot_alt_error_message() {
+        let deck = make_deck(vec![make_slide(vec![make_image_block(None, false)])]);
+        let diags = AltTextValidator.validate(&deck, &default_opts());
+        assert_eq!(diags.len(), 1);
+        insta::assert_snapshot!(diags[0].message.as_ref());
     }
 }

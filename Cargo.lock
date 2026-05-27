@@ -804,10 +804,8 @@ name = "slideforge-validate"
 version = "0.1.0"
 dependencies = [
  "insta",
- "miette",
  "slideforge-plugin-api",
  "slideforge-types",
- "thiserror",
 ]
 
 [[package]]
