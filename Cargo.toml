@@ -15,6 +15,7 @@ members = [
     "crates/slideforge-layout",
     "crates/slideforge-pptx",
     "crates/slideforge-validate",
+    "crates/slideforge-data",
 ]
 
 # Crates that exist as scaffolding but are not built yet (Phase 4+).
@@ -70,6 +71,7 @@ slideforge-eval = { path = "crates/slideforge-eval", version = "0.1.0" }
 slideforge-layout = { path = "crates/slideforge-layout", version = "0.1.0" }
 slideforge-pptx = { path = "crates/slideforge-pptx", version = "0.1.0" }
 slideforge-validate = { path = "crates/slideforge-validate", version = "0.1.0" }
+slideforge-data = { path = "crates/slideforge-data", version = "0.1.0" }
 
 # Release profile tuned for binary size and runtime perf.
 [profile.release]

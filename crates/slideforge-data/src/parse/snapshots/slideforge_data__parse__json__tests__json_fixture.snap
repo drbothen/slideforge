@@ -1,0 +1,29 @@
+---
+source: crates/slideforge-data/src/parse/json.rs
+expression: value
+---
+Map(
+    OrderedMap(
+        {
+            "name": Str(
+                "Alice",
+            ),
+            "score": Int(
+                42,
+            ),
+            "active": Bool(
+                true,
+            ),
+            "tags": List(
+                [
+                    Str(
+                        "rust",
+                    ),
+                    Str(
+                        "data",
+                    ),
+                ],
+            ),
+        },
+    ),
+)

@@ -1,0 +1,44 @@
+---
+source: crates/slideforge-data/src/parse/toml.rs
+expression: value
+---
+Map(
+    OrderedMap(
+        {
+            "title": Str(
+                "Q1 Report",
+            ),
+            "slides": Int(
+                12,
+            ),
+            "active": Bool(
+                true,
+            ),
+            "ratio": Float(
+                1.78,
+            ),
+            "tags": List(
+                [
+                    Str(
+                        "revenue",
+                    ),
+                    Str(
+                        "growth",
+                    ),
+                ],
+            ),
+            "created": Str(
+                "1979-05-27T07:32:00Z",
+            ),
+            "meta": Map(
+                OrderedMap(
+                    {
+                        "author": Str(
+                            "Alice",
+                        ),
+                    },
+                ),
+            ),
+        },
+    ),
+)
