@@ -32,9 +32,7 @@ impl ImageSlideType {
     pub fn new() -> Self {
         let mut optional = vec![FieldDef {
             name: Arc::from("caption"),
-            description: Arc::from(
-                "A caption displayed below the image (visible to all viewers).",
-            ),
+            description: Arc::from("A caption displayed below the image (visible to all viewers)."),
             required: false,
             default_value: None,
         }];
@@ -55,9 +53,7 @@ impl ImageSlideType {
                 },
                 FieldDef {
                     name: Arc::from("image"),
-                    description: Arc::from(
-                        "Path or URL to the image asset (PNG, JPEG, SVG, GIF).",
-                    ),
+                    description: Arc::from("Path or URL to the image asset (PNG, JPEG, SVG, GIF)."),
                     required: true,
                     default_value: None,
                 },

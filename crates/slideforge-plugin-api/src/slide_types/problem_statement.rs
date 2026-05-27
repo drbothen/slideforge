@@ -32,9 +32,7 @@ impl ProblemStatementSlideType {
     pub fn new() -> Self {
         let mut optional = vec![FieldDef {
             name: Arc::from("impact"),
-            description: Arc::from(
-                "The business or human impact of the problem if left unsolved.",
-            ),
+            description: Arc::from("The business or human impact of the problem if left unsolved."),
             required: false,
             default_value: None,
         }];

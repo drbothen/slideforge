@@ -30,9 +30,7 @@ impl ClosingSlideType {
         let mut optional = vec![
             FieldDef {
                 name: Arc::from("call_to_action"),
-                description: Arc::from(
-                    "A prominent call to action displayed below the title.",
-                ),
+                description: Arc::from("A prominent call to action displayed below the title."),
                 required: false,
                 default_value: None,
             },

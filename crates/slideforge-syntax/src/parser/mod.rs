@@ -103,14 +103,14 @@ pub fn parse_checked(
                 sink.push(warning);
             }
             Some(result.deck)
-        }
+        },
         Err(errors) => {
             // Push all fatal errors into the sink and signal failure via None.
             for error in errors {
                 sink.push(error);
             }
             None
-        }
+        },
     }
 }
 
@@ -160,8 +160,7 @@ pub fn parse(
     // error — return immediately without running the chumsky parser.
     //
     // Token layout:  Ident("slideforge_version")  StringLit(ver)  Newline
-    let version_gate_result =
-        pre_parse_version_gate(src, &tokens, &file_path, &mut errors);
+    let version_gate_result = pre_parse_version_gate(src, &tokens, &file_path, &mut errors);
 
     if version_gate_result == VersionGateResult::FatalVersionError {
         // AC-002: a forward-incompatible version was detected.  No further
@@ -380,47 +379,47 @@ fn pre_parse_version_gate(
             // Look for the StringLit immediately after (skipping nothing —
             // the lexer emits them consecutively on the same line).
             if let Some((Token::StringLit(ver), ver_span)) = tokens.get(i + 1) {
-                    let ver_str = ver.trim().to_string();
-                    let major_str = ver_str.split('.').next().unwrap_or("");
-                    let is_whitespace_only = ver_str.trim().is_empty();
-                    let is_non_numeric = major_str.parse::<u64>().is_err();
+                let ver_str = ver.trim().to_string();
+                let major_str = ver_str.split('.').next().unwrap_or("");
+                let is_whitespace_only = ver_str.trim().is_empty();
+                let is_non_numeric = major_str.parse::<u64>().is_err();
 
-                    if is_whitespace_only || is_non_numeric {
-                        errors.push(SyntaxError::version_error(
-                            file_path.to_string(),
-                            format!(
-                                "E-PAR-010: invalid version string '{ver_str}' — \
+                if is_whitespace_only || is_non_numeric {
+                    errors.push(SyntaxError::version_error(
+                        file_path.to_string(),
+                        format!(
+                            "E-PAR-010: invalid version string '{ver_str}' — \
                                  the version must be a numeric major version, e.g. \"1\""
-                            ),
-                            true,
-                            src.to_string(),
-                            ver_span.start,
-                        ));
-                        return VersionGateResult::FatalVersionError;
-                    }
-
-                    let major: u64 = major_str.parse().unwrap_or(0);
-                    if major != 1 {
-                        errors.push(SyntaxError::version_error(
-                            file_path.to_string(),
-                            format!(
-                                "E-PAR-010: forward-incompatible version '{ver_str}' — \
-                                 this build of slideforge supports version 1.x only"
-                            ),
-                            true,
-                            src.to_string(),
-                            ver_span.start,
-                        ));
-                        return VersionGateResult::FatalVersionError;
-                    }
-
-                    // Major == 1: compatible.
-                    return VersionGateResult::Compatible;
+                        ),
+                        true,
+                        src.to_string(),
+                        ver_span.start,
+                    ));
+                    return VersionGateResult::FatalVersionError;
                 }
-                // slideforge_version with no following string — unusual; let
-                // the chumsky parser generate the appropriate error.
+
+                let major: u64 = major_str.parse().unwrap_or(0);
+                if major != 1 {
+                    errors.push(SyntaxError::version_error(
+                        file_path.to_string(),
+                        format!(
+                            "E-PAR-010: forward-incompatible version '{ver_str}' — \
+                                 this build of slideforge supports version 1.x only"
+                        ),
+                        true,
+                        src.to_string(),
+                        ver_span.start,
+                    ));
+                    return VersionGateResult::FatalVersionError;
+                }
+
+                // Major == 1: compatible.
                 return VersionGateResult::Compatible;
             }
+            // slideforge_version with no following string — unusual; let
+            // the chumsky parser generate the appropriate error.
+            return VersionGateResult::Compatible;
+        }
         i += 1;
     }
     VersionGateResult::MissingVersion
@@ -902,10 +901,15 @@ mod tests {
             pr.deck.version.is_none(),
             "version must be None when slideforge_version is absent"
         );
-        let has_version_warning = pr
-            .warnings
-            .iter()
-            .any(|e| matches!(e, SyntaxError::VersionError { is_fatal: false, .. }));
+        let has_version_warning = pr.warnings.iter().any(|e| {
+            matches!(
+                e,
+                SyntaxError::VersionError {
+                    is_fatal: false,
+                    ..
+                }
+            )
+        });
         assert!(
             has_version_warning,
             "missing version must emit E-PAR-010 warning (non-fatal); got warnings: {:?}",

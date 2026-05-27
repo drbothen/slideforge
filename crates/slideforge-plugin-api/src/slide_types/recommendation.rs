@@ -33,9 +33,7 @@ impl RecommendationSlideType {
         let mut optional = vec![
             FieldDef {
                 name: Arc::from("rationale"),
-                description: Arc::from(
-                    "The reasoning or evidence supporting the recommendation.",
-                ),
+                description: Arc::from("The reasoning or evidence supporting the recommendation."),
                 required: false,
                 default_value: None,
             },
@@ -59,9 +57,7 @@ impl RecommendationSlideType {
                 },
                 FieldDef {
                     name: Arc::from("recommendation"),
-                    description: Arc::from(
-                        "The specific action or decision being recommended.",
-                    ),
+                    description: Arc::from("The specific action or decision being recommended."),
                     required: true,
                     default_value: None,
                 },

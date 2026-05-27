@@ -31,9 +31,7 @@ impl ComparisonSlideType {
     pub fn new() -> Self {
         let mut optional = vec![FieldDef {
             name: Arc::from("criteria"),
-            description: Arc::from(
-                "Evaluation criteria dimensions used to compare the options.",
-            ),
+            description: Arc::from("Evaluation criteria dimensions used to compare the options."),
             required: false,
             default_value: None,
         }];

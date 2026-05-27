@@ -450,7 +450,10 @@ where
                 RawChunk::MathDisplay(segs) => {
                     process_math_segments(segs, true, &mut chunks, &mut errors);
                 },
-                RawChunk::UnterminatedMath { is_display, content } => {
+                RawChunk::UnterminatedMath {
+                    is_display,
+                    content,
+                } => {
                     // Emit E-PAR-004 for the unterminated delimiter, then
                     // produce a math chunk with the partial content so that
                     // error recovery produces a meaningful AST.

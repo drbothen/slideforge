@@ -95,9 +95,9 @@ impl SlideTypeRegistry {
     ///
     /// # Examples
     ///
-    /// ```ignore
-    /// // "conetnt" → Some("content")  (distance 2)
-    /// // "flibbertigibbet" → None
+    /// ```text
+    /// "conetnt"         → Some("content")  (distance 2)
+    /// "flibbertigibbet" → None             (distance > 3)
     /// ```
     #[must_use]
     pub fn suggest(&self, unknown: &str) -> Option<&str> {
@@ -741,10 +741,7 @@ mod tests {
         let reg = SlideTypeRegistry::default();
         let slide_type = reg.lookup_by_keyword("stat_callout").unwrap();
         // Provide only stat_1 and label_1; stat_2 and label_2 are missing.
-        let slide = make_slide(
-            "stat_callout",
-            vec![("stat_1", "93%"), ("label_1", "CSAT")],
-        );
+        let slide = make_slide("stat_callout", vec![("stat_1", "93%"), ("label_1", "CSAT")]);
         let diags = validate_fields(&slide, slide_type);
         let errors: Vec<_> = diags
             .iter()

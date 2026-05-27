@@ -42,9 +42,7 @@ impl MatrixSlideType {
         Self {
             required: vec![FieldDef {
                 name: Arc::from("title"),
-                description: Arc::from(
-                    "The slide title (e.g., \"Impact / Effort Matrix\").",
-                ),
+                description: Arc::from("The slide title (e.g., \"Impact / Effort Matrix\")."),
                 required: true,
                 default_value: None,
             }],

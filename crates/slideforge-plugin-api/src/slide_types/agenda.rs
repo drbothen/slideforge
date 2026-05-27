@@ -41,9 +41,7 @@ impl AgendaSlideType {
         Self {
             required: vec![FieldDef {
                 name: Arc::from("title"),
-                description: Arc::from(
-                    "The slide title (e.g., \"Today's Agenda\" or \"Agenda\").",
-                ),
+                description: Arc::from("The slide title (e.g., \"Today's Agenda\" or \"Agenda\")."),
                 required: true,
                 default_value: None,
             }],

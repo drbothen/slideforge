@@ -102,7 +102,7 @@ impl DiagnosticRenderer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{span::SourceMap, DiagnosticSink, SyntaxError};
+    use crate::{DiagnosticSink, SyntaxError, span::SourceMap};
 
     /// Helper: build a cheap `SyntaxError` for renderer testing.
     fn make_error(line: u32, col: u32) -> SyntaxError {

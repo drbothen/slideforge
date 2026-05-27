@@ -30,9 +30,7 @@ impl SectionBreakSlideType {
     pub fn new() -> Self {
         let mut optional = vec![FieldDef {
             name: Arc::from("subtitle"),
-            description: Arc::from(
-                "An optional subtitle or brief description of the section.",
-            ),
+            description: Arc::from("An optional subtitle or brief description of the section."),
             required: false,
             default_value: None,
         }];

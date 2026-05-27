@@ -32,9 +32,7 @@ impl ExecutiveSummarySlideType {
     pub fn new() -> Self {
         let mut optional = vec![FieldDef {
             name: Arc::from("bullets"),
-            description: Arc::from(
-                "Supporting bullet points that elaborate on the summary.",
-            ),
+            description: Arc::from("Supporting bullet points that elaborate on the summary."),
             required: false,
             default_value: None,
         }];
@@ -49,9 +47,7 @@ impl ExecutiveSummarySlideType {
                 },
                 FieldDef {
                     name: Arc::from("summary"),
-                    description: Arc::from(
-                        "The one-paragraph executive summary (3-5 sentences).",
-                    ),
+                    description: Arc::from("The one-paragraph executive summary (3-5 sentences)."),
                     required: true,
                     default_value: None,
                 },
