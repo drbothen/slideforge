@@ -323,6 +323,13 @@ fn filter_string(val: &Value, _span: SourceSpan) -> Result<Value, EvalError> {
 /// Produce a human-readable string representation of any [`Value`].
 ///
 /// Used by [`filter_string`] and [`filter_join`] for element coercion.
+///
+/// # List and Map behavior
+///
+/// Applying `| string` to a [`Value::List`] produces `"[list]"` and to a
+/// [`Value::Map`] produces `"[map]"`. This is intentional placeholder behavior
+/// for DSL v1. To render list elements as a string, use `| join(", ")` instead.
+/// A richer representation (e.g., JSON-like) is deferred to a future story.
 fn value_to_display_string(val: &Value) -> String {
     match val {
         Value::Str(s) => s.to_string(),
@@ -330,6 +337,8 @@ fn value_to_display_string(val: &Value) -> String {
         Value::Float(f) => format_float_display(f.0),
         Value::Bool(b) => b.to_string(),
         Value::Null => String::new(),
+        // Intentional placeholder: List and Map have no useful single-string
+        // representation at DSL v1. Use `| join(", ")` to render list items.
         Value::List(_) => "[list]".to_string(),
         Value::Map(_) => "[map]".to_string(),
     }
@@ -644,6 +653,35 @@ mod tests {
         let val = Value::Int(99);
         let result = apply_filter("string", &val, &[], span()).unwrap();
         assert_eq!(result, Value::Str(Arc::from("99")));
+    }
+
+    /// Applying `| string` to a List produces `"[list]"` — intentional
+    /// placeholder behavior for DSL v1. Use `| join(", ")` to render items.
+    #[test]
+    fn test_filter_string_on_list_produces_placeholder() {
+        let val = Value::List(vec![Value::Int(1), Value::Int(2)]);
+        let result = apply_filter("string", &val, &[], span()).unwrap();
+        assert_eq!(
+            result,
+            Value::Str(Arc::from("[list]")),
+            "| string on a List must produce \"[list]\" (DSL v1 placeholder)"
+        );
+    }
+
+    /// Applying `| string` to a Map produces `"[map]"` — intentional
+    /// placeholder behavior for DSL v1.
+    #[test]
+    fn test_filter_string_on_map_produces_placeholder() {
+        use slideforge_types::OrderedMap;
+        let mut m = OrderedMap::new();
+        m.insert(Arc::from("key"), Value::Str(Arc::from("value")));
+        let val = Value::Map(m);
+        let result = apply_filter("string", &val, &[], span()).unwrap();
+        assert_eq!(
+            result,
+            Value::Str(Arc::from("[map]")),
+            "| string on a Map must produce \"[map]\" (DSL v1 placeholder)"
+        );
     }
 
     // ── filter_join ──────────────────────────────────────────────────────────

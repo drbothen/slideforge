@@ -94,7 +94,7 @@ fn field_line_cf<'src, I>(
 where
     I: ValueInput<'src, Token = Token, Span = TSpan>,
 {
-    // Template string value with E-PAR-004 error emission.
+    // Template string value with E-PAR-012/E-PAR-013/E-PAR-014 error emission.
     let template_val = template_value().validate(
         move |(chunks, errs): (Vec<TemplateChunk>, Vec<String>), info, emitter| {
             for msg in errs {
@@ -1007,10 +1007,13 @@ mod tests {
         );
     }
 
-    // ── Template: malformed {{ without }} → E-PAR-004 ────────────────────────
+    // ── Template: malformed {{ without }} → E-PAR-012 ────────────────────────
 
-    /// Malformed `{{ name` (missing `}}`) must produce E-PAR-004 and
+    /// Malformed `{{ name` (missing `}}`) must produce E-PAR-012 and
     /// accumulate the error without panicking.
+    ///
+    /// Note: E-PAR-004 is owned by slideforge-eval (`IncludeCycle`); unterminated
+    /// interpolation uses E-PAR-012.
     #[test]
     fn test_bc_1_04_001_template_malformed_no_close() {
         let src = concat!("slide content:\n", "  title \"Hello {{ name\"\n",);
@@ -1022,15 +1025,15 @@ mod tests {
         let errors = result.unwrap_err();
         let has_template_err = errors.iter().any(|e| {
             let msg = e.to_string();
-            // E-PAR-004 or a message about unterminated/malformed interpolation.
-            msg.contains("E-PAR-004")
+            // E-PAR-012 or a message about unterminated/malformed interpolation.
+            msg.contains("E-PAR-012")
                 || msg.contains("interpolation")
                 || msg.contains("}}") // mentions the missing close
                 || msg.contains("unterminated")
         });
         assert!(
             has_template_err,
-            "must have an E-PAR-004 or interpolation error; got: {errors:?}"
+            "must have an E-PAR-012 or interpolation error; got: {errors:?}"
         );
     }
 
@@ -1160,26 +1163,29 @@ mod tests {
         );
     }
 
-    // ── EC-006: empty interpolation {{ }} → E-PAR-004 ────────────────────────
+    // ── EC-006: empty interpolation {{ }} → E-PAR-013 ────────────────────────
 
-    /// EC-006: `{{ }}` (empty interpolation) must produce E-PAR-004
+    /// EC-006: `{{ }}` (empty interpolation) must produce E-PAR-013
     /// "empty expression in `{{ }}`" and an `Expr::Error` sentinel.
+    ///
+    /// Note: E-PAR-004 is owned by slideforge-eval (`IncludeCycle`); empty
+    /// interpolation uses E-PAR-013.
     #[test]
     fn test_bc_1_04_001_empty_interpolation_produces_error() {
         let src = concat!("slide content:\n", "  title \"{{ }}\"\n",);
         let result = parse_str(src);
         assert!(
             result.is_err(),
-            "empty {{ }} interpolation must produce E-PAR-004"
+            "empty {{ }} interpolation must produce E-PAR-013"
         );
         let errors = result.unwrap_err();
         let has_empty_interp_err = errors.iter().any(|e| {
             let msg = e.to_string();
-            msg.contains("empty") || msg.contains("E-PAR-004") || msg.contains("interpolation")
+            msg.contains("empty") || msg.contains("E-PAR-013") || msg.contains("interpolation")
         });
         assert!(
             has_empty_interp_err,
-            "must have E-PAR-004 for empty interpolation; got: {errors:?}"
+            "must have E-PAR-013 for empty interpolation; got: {errors:?}"
         );
     }
 

@@ -15,8 +15,9 @@
 //!
 //! A malformed `{{ ... }}` (missing `}}`) produces
 //! `TemplateChunk::Expr(Expr::Error)` at the position of the failed chunk and
-//! accumulates E-PAR-004 into the error list. Scanning continues after the
-//! error.
+//! accumulates E-PAR-012 into the error list. An empty `{{ }}` accumulates
+//! E-PAR-013. An unterminated math block (`$`/`$$`) accumulates E-PAR-014.
+//! Scanning continues after each error.
 //!
 //! # STORY-009: Math mode chunks
 //!

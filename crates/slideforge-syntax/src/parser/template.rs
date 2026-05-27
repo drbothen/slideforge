@@ -16,8 +16,13 @@
 //!
 //! # Error Recovery
 //!
-//! A malformed `{{` without matching `}}` emits E-PAR-004 and treats the
-//! chunk as literal text, allowing parsing to continue (error accumulation).
+//! A malformed `{{` without matching `}}` emits E-PAR-012 and treats the
+//! chunk as an `Expr::Error` sentinel, allowing parsing to continue (error
+//! accumulation). An empty `{{ }}` emits E-PAR-013. An unterminated math
+//! block (`$` or `$$`) emits E-PAR-014.
+//!
+//! Note: E-PAR-004 is owned by slideforge-eval (`IncludeCycle`). These
+//! template-parsing codes (E-PAR-012 to E-PAR-014) are distinct.
 
 use std::sync::Arc;
 
@@ -34,23 +39,31 @@ type TSpan = SimpleSpan;
 
 // ─── Error message helpers ────────────────────────────────────────────────────
 
-/// Produce an E-PAR-004 error message for an unterminated `{{ ... }}`.
+/// Produce an E-PAR-012 error message for an unterminated `{{ ... }}`.
+///
+/// E-PAR-012 is the code for unterminated text-mode interpolation.
+/// (E-PAR-004 is reserved for `IncludeCycle` in slideforge-eval.)
 fn unterminated_interpolation_msg() -> String {
-    "E-PAR-004: unterminated `{{` interpolation — missing `}}` to close the expression".to_string()
-}
-
-/// Produce an E-PAR-004 error message for an empty `{{ }}`.
-fn empty_interpolation_msg() -> String {
-    "E-PAR-004: empty expression in `{{ }}` — an expression is required between `{{` and `}}`"
+    "E-PAR-012: unterminated `{{` interpolation — missing `}}` to close the expression"
         .to_string()
 }
 
-/// Produce an E-PAR-004 error message for an unterminated math block.
+/// Produce an E-PAR-013 error message for an empty `{{ }}`.
+///
+/// E-PAR-013 is the code for empty text-mode interpolation.
+fn empty_interpolation_msg() -> String {
+    "E-PAR-013: empty expression in `{{ }}` — an expression is required between `{{` and `}}`"
+        .to_string()
+}
+
+/// Produce an E-PAR-014 error message for an unterminated math block.
+///
+/// E-PAR-014 is the code for an unterminated `$...$` or `$$...$$` math delimiter.
 fn unterminated_math_msg(is_display: bool) -> String {
     if is_display {
-        "E-PAR-004: unterminated `$$` math block — missing closing `$$`".to_string()
+        "E-PAR-014: unterminated `$$` math block — missing closing `$$`".to_string()
     } else {
-        "E-PAR-004: unterminated `$` math block — missing closing `$`".to_string()
+        "E-PAR-014: unterminated `$` math block — missing closing `$`".to_string()
     }
 }
 
@@ -73,7 +86,7 @@ enum RawChunk<'s> {
     /// Inner content of a `$$...$$` display math region (raw LaTeX, may
     /// contain [`MathInterpSegment`] sub-chunks).
     MathDisplay(Vec<MathSegment<'s>>),
-    /// A `$` or `$$` with no matching closing delimiter — error case (E-PAR-004).
+    /// A `$` or `$$` with no matching closing delimiter — error case (E-PAR-014).
     UnterminatedMath {
         /// Whether this was a display (`$$`) or inline (`$`) delimiter.
         is_display: bool,
@@ -125,7 +138,7 @@ fn split_template(s: &str) -> Vec<RawChunk<'_>> {
                 chunks.push(RawChunk::MathDisplay(segs));
                 pos = rel + 2;
             } else {
-                // Unterminated `$$` — emit as an error chunk (E-PAR-004).
+                // Unterminated `$$` — emit as an error chunk (E-PAR-014).
                 let math_content = &s[content_start..];
                 let segs = parse_math_segments(math_content);
                 chunks.push(RawChunk::UnterminatedMath {
@@ -152,7 +165,7 @@ fn split_template(s: &str) -> Vec<RawChunk<'_>> {
                 chunks.push(RawChunk::MathInline(segs));
                 pos = close + 1;
             } else {
-                // Unterminated `$` — emit as an error chunk (E-PAR-004).
+                // Unterminated `$` — emit as an error chunk (E-PAR-014).
                 let math_content = &s[content_start..];
                 let segs = parse_math_segments(math_content);
                 chunks.push(RawChunk::UnterminatedMath {
@@ -286,7 +299,7 @@ fn parse_math_segments(content: &str) -> Vec<MathSegment<'_>> {
 ///
 /// Returns `Ok(Expr)` on success, or `Err(())` on lex/parse failure.
 /// The caller is responsible for converting errors to the appropriate
-/// E-PAR-004 `SyntaxError` entries.
+/// E-PAR-012/E-PAR-013 `SyntaxError` entries.
 fn parse_inner_expr(inner_src: &str) -> Result<Expr, ()> {
     use crate::lexer::lex;
     use chumsky::input::Input as _;
@@ -454,7 +467,7 @@ where
                     is_display,
                     content,
                 } => {
-                    // Emit E-PAR-004 for the unterminated delimiter, then
+                    // Emit E-PAR-014 for the unterminated delimiter, then
                     // produce a math chunk with the partial content so that
                     // error recovery produces a meaningful AST.
                     errors.push(unterminated_math_msg(is_display));

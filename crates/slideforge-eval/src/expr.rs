@@ -17,8 +17,9 @@
 //! story, a corresponding `BinOpKind::Concat` must be added to
 //! `slideforge-syntax` and this module must be updated.
 //!
-//! TODO(STORY-012): Implement `BinOpKind::Concat` / tilde operator once the
-//! parser gains the `~` token and `BinOpKind` gains the variant.
+//! TODO: Implement `BinOpKind::Concat` / tilde operator once the parser gains
+//! the `~` token and `BinOpKind` gains the variant. This is deferred to a
+//! future story (not yet scheduled).
 
 use std::sync::Arc;
 
@@ -48,8 +49,8 @@ use crate::filters::apply_filter;
 /// - [`EvalError::FieldAccessFailed`] — dot-access on non-map or missing field
 pub fn eval_expr(env: &Env, expr: &Expr, sink: &mut DiagnosticSink) -> Option<Value> {
     // Use a default span for expressions that don't carry their own span yet.
-    // STORY-012 will thread spans through the AST; until then we use a
-    // zero-origin default for error reporting.
+    // SourceMap threading is tracked as a future story (not yet scheduled).
+    // For now, all eval errors use SourceSpan::default().
     let span = SourceSpan::default();
 
     match expr {
