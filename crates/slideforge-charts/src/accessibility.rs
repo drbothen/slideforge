@@ -61,9 +61,12 @@ pub fn inject_aria_attributes(svg: &str, alt: &str) -> Result<ChartSvg, ChartErr
     })?;
 
     // Find the closing > of the opening tag. This must be after <svg.
-    let tag_close = svg[svg_start..].find('>').ok_or_else(|| ChartError::RenderError {
-        message: Arc::from("SVG opening tag is not properly closed"),
-    })? + svg_start;
+    let tag_close = svg[svg_start..]
+        .find('>')
+        .ok_or_else(|| ChartError::RenderError {
+            message: Arc::from("SVG opening tag is not properly closed"),
+        })?
+        + svg_start;
 
     let escaped_attr = xml_attr_escape(alt);
     let escaped_text = xml_text_escape(alt);
@@ -79,9 +82,8 @@ pub fn inject_aria_attributes(svg: &str, alt: &str) -> Result<ChartSvg, ChartErr
     // from_close starts with '>'.
     let rest = &from_close[1..]; // strip the original '>'
 
-    let result = format!(
-        r#"{before_close} aria-label="{escaped_attr}" role="img">{title_element}{rest}"#
-    );
+    let result =
+        format!(r#"{before_close} aria-label="{escaped_attr}" role="img">{title_element}{rest}"#);
 
     Ok(ChartSvg(result))
 }
@@ -144,8 +146,12 @@ mod tests {
         );
 
         // <title> content must also be escaped (text content context).
-        let title_start = content.find("<title>").expect("<title> element must be present");
-        let title_end = content.find("</title>").expect("</title> element must be present");
+        let title_start = content
+            .find("<title>")
+            .expect("<title> element must be present");
+        let title_end = content
+            .find("</title>")
+            .expect("</title> element must be present");
         let title_content = &content[title_start..title_end];
         assert!(
             title_content.contains("&lt;"),

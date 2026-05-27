@@ -20,7 +20,11 @@ use crate::types::{ChartError, InternalChartSpec};
 ///
 /// Returns [`ChartError`] if the data is invalid or the plotters backend
 /// fails to produce output.
-#[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss, clippy::cast_sign_loss)]
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss
+)]
 // Casting f64 coordinates to i32 for plotters drawing API:
 // - values are bounded to chart canvas size (< i32::MAX)
 // - truncation is intentional for pixel coordinates
@@ -46,9 +50,12 @@ pub fn render_pie(spec: &InternalChartSpec) -> Result<String, ChartError> {
     let width = spec.width;
     let height = spec.height;
 
-    let series = spec.data.first().ok_or_else(|| ChartError::MissingDataField {
-        field: Arc::from("data"),
-    })?;
+    let series = spec
+        .data
+        .first()
+        .ok_or_else(|| ChartError::MissingDataField {
+            field: Arc::from("data"),
+        })?;
 
     let total: f64 = series.points.iter().map(|p| p.value).sum();
     // If total is zero, treat all slices as equal.
@@ -107,8 +114,7 @@ pub fn render_pie(spec: &InternalChartSpec) -> Result<String, ChartError> {
 
                 // Approximate the arc with a polygon (N segments per slice).
                 // n_segments: clamp between 4 and 64 segments per slice.
-                let n_segments =
-                    ((sweep / (PI / 32.0)) as usize).clamp(4, 64);
+                let n_segments = ((sweep / (PI / 32.0)) as usize).clamp(4, 64);
                 let mut points: Vec<(i32, i32)> = Vec::with_capacity(n_segments + 2);
 
                 // Center of pie.
@@ -116,8 +122,7 @@ pub fn render_pie(spec: &InternalChartSpec) -> Result<String, ChartError> {
 
                 // Arc points.
                 for seg in 0..=n_segments {
-                    let angle =
-                        start_angle + (sweep * seg as f64 / n_segments as f64);
+                    let angle = start_angle + (sweep * seg as f64 / n_segments as f64);
                     let px = cx + radius * angle.cos();
                     let py = cy + radius * angle.sin();
                     points.push((px as i32, py as i32));
@@ -149,18 +154,28 @@ mod tests {
 
     fn all_zero_pie_spec(n: usize) -> InternalChartSpec {
         let points: Vec<DataPoint> = (0..n)
-            .map(|i| DataPoint { label: Arc::from(format!("s{i}").as_str()), value: 0.0 })
+            .map(|i| DataPoint {
+                label: Arc::from(format!("s{i}").as_str()),
+                value: 0.0,
+            })
             .collect();
         InternalChartSpec {
             chart_type: crate::types::ChartType::Pie,
-            data: vec![DataSeries { name: Arc::from("test"), points }],
+            data: vec![DataSeries {
+                name: Arc::from("test"),
+                points,
+            }],
             title: None,
             x_label: None,
             y_label: None,
             alt: Arc::from("zero pie"),
             width: InternalChartSpec::DEFAULT_WIDTH,
             height: InternalChartSpec::DEFAULT_HEIGHT,
-            accent_colors: vec![Arc::from("#003766"), Arc::from("#FF6F00"), Arc::from("#009E60")],
+            accent_colors: vec![
+                Arc::from("#003766"),
+                Arc::from("#FF6F00"),
+                Arc::from("#009E60"),
+            ],
             font_family: Arc::from("sans-serif"),
         }
     }
@@ -196,7 +211,7 @@ mod tests {
         assert!(!svg.is_empty(), "two-slice all-zero pie must render");
     }
 
-    /// FINDING-001 (Pass 3): Pie chart with a negative value must return ChartError.
+    /// FINDING-001 (Pass 3): Pie chart with a negative value must return `ChartError`.
     #[test]
     fn test_f031_p3_001_pie_negative_value_returns_error() {
         let spec = InternalChartSpec {
@@ -204,9 +219,18 @@ mod tests {
             data: vec![DataSeries {
                 name: Arc::from("sales"),
                 points: vec![
-                    DataPoint { label: Arc::from("A"), value: 50.0 },
-                    DataPoint { label: Arc::from("B"), value: -10.0 },
-                    DataPoint { label: Arc::from("C"), value: 30.0 },
+                    DataPoint {
+                        label: Arc::from("A"),
+                        value: 50.0,
+                    },
+                    DataPoint {
+                        label: Arc::from("B"),
+                        value: -10.0,
+                    },
+                    DataPoint {
+                        label: Arc::from("C"),
+                        value: 30.0,
+                    },
                 ],
             }],
             title: None,
@@ -219,7 +243,10 @@ mod tests {
             font_family: Arc::from("sans-serif"),
         };
         let result = super::render_pie(&spec);
-        assert!(result.is_err(), "pie chart with negative value must return an error");
+        assert!(
+            result.is_err(),
+            "pie chart with negative value must return an error"
+        );
         let msg = result.unwrap_err().to_string();
         assert!(
             msg.contains("non-negative") || msg.contains("negative"),
@@ -234,7 +261,10 @@ mod tests {
             chart_type: crate::types::ChartType::Pie,
             data: vec![DataSeries {
                 name: Arc::from("loss"),
-                points: vec![DataPoint { label: Arc::from("Q1"), value: -5.0 }],
+                points: vec![DataPoint {
+                    label: Arc::from("Q1"),
+                    value: -5.0,
+                }],
             }],
             title: None,
             x_label: None,

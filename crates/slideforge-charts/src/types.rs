@@ -170,7 +170,9 @@ pub enum ChartError {
     /// The requested chart type is not supported by this renderer.
     ///
     /// Maps to error class E-PAR-007.
-    #[error("unsupported chart type '{name}'; supported types: bar, line, pie, scatter, area, histogram, stacked-bar")]
+    #[error(
+        "unsupported chart type '{name}'; supported types: bar, line, pie, scatter, area, histogram, stacked-bar"
+    )]
     UnsupportedType {
         /// The unknown chart type keyword.
         name: Arc<str>,
@@ -260,21 +262,27 @@ mod tests {
 
     #[test]
     fn test_bc_1_11_001_chart_error_unsupported_type_message() {
-        let err = ChartError::UnsupportedType { name: Arc::from("radar") };
+        let err = ChartError::UnsupportedType {
+            name: Arc::from("radar"),
+        };
         assert!(err.to_string().contains("radar"));
         assert!(err.to_string().contains("unsupported chart type"));
     }
 
     #[test]
     fn test_bc_1_11_001_chart_error_missing_data_field_message() {
-        let err = ChartError::MissingDataField { field: Arc::from("x") };
+        let err = ChartError::MissingDataField {
+            field: Arc::from("x"),
+        };
         assert!(err.to_string().contains('x'));
         assert!(err.to_string().contains("missing required data field"));
     }
 
     #[test]
     fn test_bc_1_11_001_chart_error_render_error_message() {
-        let err = ChartError::RenderError { message: Arc::from("backend failure") };
+        let err = ChartError::RenderError {
+            message: Arc::from("backend failure"),
+        };
         assert!(err.to_string().contains("backend failure"));
     }
 
@@ -301,7 +309,10 @@ mod tests {
 
     #[test]
     fn test_bc_1_11_001_data_point_fields() {
-        let pt = DataPoint { label: Arc::from("Q1"), value: 42.0 };
+        let pt = DataPoint {
+            label: Arc::from("Q1"),
+            value: 42.0,
+        };
         assert_eq!(pt.label.as_ref(), "Q1");
         assert!((pt.value - 42.0).abs() < f64::EPSILON);
     }
@@ -311,8 +322,14 @@ mod tests {
         let series = DataSeries {
             name: Arc::from("Revenue"),
             points: vec![
-                DataPoint { label: Arc::from("Jan"), value: 100.0 },
-                DataPoint { label: Arc::from("Feb"), value: 120.0 },
+                DataPoint {
+                    label: Arc::from("Jan"),
+                    value: 100.0,
+                },
+                DataPoint {
+                    label: Arc::from("Feb"),
+                    value: 120.0,
+                },
             ],
         };
         assert_eq!(series.name.as_ref(), "Revenue");

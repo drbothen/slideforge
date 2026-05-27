@@ -44,7 +44,9 @@ pub(crate) fn validate_data_finite(spec: &InternalChartSpec) -> Result<(), Chart
 /// every series has an empty points vec.
 pub(crate) fn validate_points_non_empty(spec: &InternalChartSpec) -> Result<(), ChartError> {
     if spec.data.iter().all(|s| s.points.is_empty()) {
-        return Err(ChartError::MissingDataField { field: Arc::from("data.points") });
+        return Err(ChartError::MissingDataField {
+            field: Arc::from("data.points"),
+        });
     }
     Ok(())
 }
@@ -66,9 +68,7 @@ pub(crate) fn validate_points_non_empty(spec: &InternalChartSpec) -> Result<(), 
 /// function (e.g., in the brand-provider plugin).
 fn parse_hex_color(hex: &str) -> RGBColor {
     let stripped = hex.trim_start_matches('#');
-    if stripped.len() == 6
-        && stripped.chars().all(|c| c.is_ascii_hexdigit())
-    {
+    if stripped.len() == 6 && stripped.chars().all(|c| c.is_ascii_hexdigit()) {
         let r = u8::from_str_radix(&stripped[0..2], 16).unwrap_or(0);
         let g = u8::from_str_radix(&stripped[2..4], 16).unwrap_or(0);
         let b = u8::from_str_radix(&stripped[4..6], 16).unwrap_or(0);
@@ -195,7 +195,9 @@ pub(crate) fn compute_y_range(spec: &InternalChartSpec) -> (f64, f64) {
 pub fn render_bar(spec: &InternalChartSpec) -> Result<String, ChartError> {
     // FINDING-006: Guard empty data early.
     if spec.data.is_empty() {
-        return Err(ChartError::MissingDataField { field: Arc::from("data") });
+        return Err(ChartError::MissingDataField {
+            field: Arc::from("data"),
+        });
     }
     // FINDING-002 (Pass 3): Guard non-empty data vec with all-empty points.
     validate_points_non_empty(spec)?;
@@ -271,9 +273,10 @@ pub fn render_bar(spec: &InternalChartSpec) -> Result<String, ChartError> {
                 .collect();
 
             chart
-                .draw_series(data.iter().map(|(x, y)| {
-                    Rectangle::new([(*x, 0.0), (*x + 1, *y)], filled)
-                }))
+                .draw_series(
+                    data.iter()
+                        .map(|(x, y)| Rectangle::new([(*x, 0.0), (*x + 1, *y)], filled)),
+                )
                 .map_err(|e| ChartError::RenderError {
                     message: Arc::from(e.to_string().as_str()),
                 })?;
@@ -300,9 +303,18 @@ mod tests {
             data: vec![DataSeries {
                 name: Arc::from("Revenue"),
                 points: vec![
-                    DataPoint { label: Arc::from("Jan"), value: 100.0 },
-                    DataPoint { label: Arc::from("Feb"), value: 150.0 },
-                    DataPoint { label: Arc::from("Mar"), value: 120.0 },
+                    DataPoint {
+                        label: Arc::from("Jan"),
+                        value: 100.0,
+                    },
+                    DataPoint {
+                        label: Arc::from("Feb"),
+                        value: 150.0,
+                    },
+                    DataPoint {
+                        label: Arc::from("Mar"),
+                        value: 120.0,
+                    },
                 ],
             }],
             title: None,
@@ -349,7 +361,10 @@ mod tests {
             font_family: Arc::from("sans-serif"),
         };
         let result = super::render_bar(&spec);
-        assert!(result.is_err(), "empty data must return an error for bar chart");
+        assert!(
+            result.is_err(),
+            "empty data must return an error for bar chart"
+        );
         let err = result.unwrap_err();
         let msg = err.to_string();
         assert!(

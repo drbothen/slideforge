@@ -25,9 +25,7 @@ pub fn assert_no_forbidden_elements(svg: &str) -> Result<(), ChartError> {
     let svg_lower = svg.to_ascii_lowercase();
     if svg_lower.contains("<script") {
         return Err(ChartError::RenderError {
-            message: Arc::from(
-                "SVG contains forbidden <script> element — PPTX embedding not safe",
-            ),
+            message: Arc::from("SVG contains forbidden <script> element — PPTX embedding not safe"),
         });
     }
     if svg_lower.contains("<foreignobject") {
@@ -58,17 +56,20 @@ mod tests {
 
     #[test]
     fn test_bc_1_11_001_safety_rejects_script_element() {
-        let svg_with_script = r#"<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>"#;
+        let svg_with_script =
+            r#"<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>"#;
         let result = assert_no_forbidden_elements(svg_with_script);
         assert!(result.is_err(), "expected error for <script> element");
     }
 
     #[test]
     fn test_bc_1_11_001_safety_rejects_foreign_object() {
-        let svg_with_foreign =
-            r#"<svg xmlns="http://www.w3.org/2000/svg"><foreignObject width="100" height="100"><p>text</p></foreignObject></svg>"#;
+        let svg_with_foreign = r#"<svg xmlns="http://www.w3.org/2000/svg"><foreignObject width="100" height="100"><p>text</p></foreignObject></svg>"#;
         let result = assert_no_forbidden_elements(svg_with_foreign);
-        assert!(result.is_err(), "expected error for <foreignObject> element");
+        assert!(
+            result.is_err(),
+            "expected error for <foreignObject> element"
+        );
     }
 
     #[test]
@@ -99,6 +100,9 @@ mod tests {
     fn test_f031_008_safety_rejects_uppercase_foreign_object() {
         let svg_upper = r#"<svg><FOREIGNOBJECT width="100"><p>test</p></FOREIGNOBJECT></svg>"#;
         let result = assert_no_forbidden_elements(svg_upper);
-        assert!(result.is_err(), "uppercase <FOREIGNOBJECT> must be rejected");
+        assert!(
+            result.is_err(),
+            "uppercase <FOREIGNOBJECT> must be rejected"
+        );
     }
 }

@@ -7,7 +7,7 @@
 //! | Type | Module |
 //! |------|--------|
 //! | `bar` | [`bar`] |
-//! | `line` | [`line`] |
+//! | `line` | [`mod@line`] |
 //! | `pie` | [`pie`] |
 //! | `scatter` | [`scatter`] |
 //! | `area` | [`area`] |
@@ -226,9 +226,18 @@ mod tests {
         DataSeries {
             name: Arc::from(name),
             points: vec![
-                DataPoint { label: Arc::from("Jan"), value: 100.0 },
-                DataPoint { label: Arc::from("Feb"), value: 150.0 },
-                DataPoint { label: Arc::from("Mar"), value: 120.0 },
+                DataPoint {
+                    label: Arc::from("Jan"),
+                    value: 100.0,
+                },
+                DataPoint {
+                    label: Arc::from("Feb"),
+                    value: 150.0,
+                },
+                DataPoint {
+                    label: Arc::from("Mar"),
+                    value: 120.0,
+                },
             ],
         }
     }
@@ -382,56 +391,98 @@ mod tests {
     fn test_f031_003_bar_svg_has_px_dimensions() {
         let spec = make_spec(crate::types::ChartType::Bar);
         let svg = crate::bar::render_bar(&spec).unwrap();
-        assert!(svg.contains("width=\"800px\""), "bar SVG must have width=\"800px\"");
-        assert!(svg.contains("height=\"450px\""), "bar SVG must have height=\"450px\"");
+        assert!(
+            svg.contains("width=\"800px\""),
+            "bar SVG must have width=\"800px\""
+        );
+        assert!(
+            svg.contains("height=\"450px\""),
+            "bar SVG must have height=\"450px\""
+        );
     }
 
     #[test]
     fn test_f031_003_line_svg_has_px_dimensions() {
         let spec = make_spec(crate::types::ChartType::Line);
         let svg = crate::line::render_line(&spec).unwrap();
-        assert!(svg.contains("width=\"800px\""), "line SVG must have width=\"800px\"");
-        assert!(svg.contains("height=\"450px\""), "line SVG must have height=\"450px\"");
+        assert!(
+            svg.contains("width=\"800px\""),
+            "line SVG must have width=\"800px\""
+        );
+        assert!(
+            svg.contains("height=\"450px\""),
+            "line SVG must have height=\"450px\""
+        );
     }
 
     #[test]
     fn test_f031_003_pie_svg_has_px_dimensions() {
         let spec = make_spec(crate::types::ChartType::Pie);
         let svg = crate::pie::render_pie(&spec).unwrap();
-        assert!(svg.contains("width=\"800px\""), "pie SVG must have width=\"800px\"");
-        assert!(svg.contains("height=\"450px\""), "pie SVG must have height=\"450px\"");
+        assert!(
+            svg.contains("width=\"800px\""),
+            "pie SVG must have width=\"800px\""
+        );
+        assert!(
+            svg.contains("height=\"450px\""),
+            "pie SVG must have height=\"450px\""
+        );
     }
 
     #[test]
     fn test_f031_003_scatter_svg_has_px_dimensions() {
         let spec = make_spec(crate::types::ChartType::Scatter);
         let svg = crate::scatter::render_scatter(&spec).unwrap();
-        assert!(svg.contains("width=\"800px\""), "scatter SVG must have width=\"800px\"");
-        assert!(svg.contains("height=\"450px\""), "scatter SVG must have height=\"450px\"");
+        assert!(
+            svg.contains("width=\"800px\""),
+            "scatter SVG must have width=\"800px\""
+        );
+        assert!(
+            svg.contains("height=\"450px\""),
+            "scatter SVG must have height=\"450px\""
+        );
     }
 
     #[test]
     fn test_f031_003_area_svg_has_px_dimensions() {
         let spec = make_spec(crate::types::ChartType::Area);
         let svg = crate::area::render_area(&spec).unwrap();
-        assert!(svg.contains("width=\"800px\""), "area SVG must have width=\"800px\"");
-        assert!(svg.contains("height=\"450px\""), "area SVG must have height=\"450px\"");
+        assert!(
+            svg.contains("width=\"800px\""),
+            "area SVG must have width=\"800px\""
+        );
+        assert!(
+            svg.contains("height=\"450px\""),
+            "area SVG must have height=\"450px\""
+        );
     }
 
     #[test]
     fn test_f031_003_histogram_svg_has_px_dimensions() {
         let spec = make_spec(crate::types::ChartType::Histogram);
         let svg = crate::histogram::render_histogram(&spec).unwrap();
-        assert!(svg.contains("width=\"800px\""), "histogram SVG must have width=\"800px\"");
-        assert!(svg.contains("height=\"450px\""), "histogram SVG must have height=\"450px\"");
+        assert!(
+            svg.contains("width=\"800px\""),
+            "histogram SVG must have width=\"800px\""
+        );
+        assert!(
+            svg.contains("height=\"450px\""),
+            "histogram SVG must have height=\"450px\""
+        );
     }
 
     #[test]
     fn test_f031_003_stacked_bar_svg_has_px_dimensions() {
         let spec = make_spec(crate::types::ChartType::StackedBar);
         let svg = crate::stacked_bar::render_stacked_bar(&spec).unwrap();
-        assert!(svg.contains("width=\"800px\""), "stacked_bar SVG must have width=\"800px\"");
-        assert!(svg.contains("height=\"450px\""), "stacked_bar SVG must have height=\"450px\"");
+        assert!(
+            svg.contains("width=\"800px\""),
+            "stacked_bar SVG must have width=\"800px\""
+        );
+        assert!(
+            svg.contains("height=\"450px\""),
+            "stacked_bar SVG must have height=\"450px\""
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -444,7 +495,10 @@ mod tests {
             chart_type: crate::types::ChartType::Bar,
             data: vec![DataSeries {
                 name: Arc::from("test"),
-                points: vec![DataPoint { label: Arc::from("Q1"), value: f64::NAN }],
+                points: vec![DataPoint {
+                    label: Arc::from("Q1"),
+                    value: f64::NAN,
+                }],
             }],
             title: None,
             x_label: None,
@@ -470,7 +524,10 @@ mod tests {
             chart_type: crate::types::ChartType::Line,
             data: vec![DataSeries {
                 name: Arc::from("test"),
-                points: vec![DataPoint { label: Arc::from("Q1"), value: f64::INFINITY }],
+                points: vec![DataPoint {
+                    label: Arc::from("Q1"),
+                    value: f64::INFINITY,
+                }],
             }],
             title: None,
             x_label: None,
@@ -493,14 +550,20 @@ mod tests {
     fn test_f031_006_empty_data_line_returns_error() {
         let mut spec = make_spec(crate::types::ChartType::Line);
         spec.data = vec![];
-        assert!(crate::line::render_line(&spec).is_err(), "empty data must error for line");
+        assert!(
+            crate::line::render_line(&spec).is_err(),
+            "empty data must error for line"
+        );
     }
 
     #[test]
     fn test_f031_006_empty_data_area_returns_error() {
         let mut spec = make_spec(crate::types::ChartType::Area);
         spec.data = vec![];
-        assert!(crate::area::render_area(&spec).is_err(), "empty data must error for area");
+        assert!(
+            crate::area::render_area(&spec).is_err(),
+            "empty data must error for area"
+        );
     }
 
     #[test]
@@ -541,42 +604,60 @@ mod tests {
     fn test_bc_1_11_001_line_has_viewbox() {
         let spec = make_spec(crate::types::ChartType::Line);
         let svg = crate::line::render_line(&spec).unwrap();
-        assert!(svg.contains("viewBox=\"0 0 800 450\""), "line SVG viewBox missing");
+        assert!(
+            svg.contains("viewBox=\"0 0 800 450\""),
+            "line SVG viewBox missing"
+        );
     }
 
     #[test]
     fn test_bc_1_11_001_pie_has_viewbox() {
         let spec = make_spec(crate::types::ChartType::Pie);
         let svg = crate::pie::render_pie(&spec).unwrap();
-        assert!(svg.contains("viewBox=\"0 0 800 450\""), "pie SVG viewBox missing");
+        assert!(
+            svg.contains("viewBox=\"0 0 800 450\""),
+            "pie SVG viewBox missing"
+        );
     }
 
     #[test]
     fn test_bc_1_11_001_scatter_has_viewbox() {
         let spec = make_spec(crate::types::ChartType::Scatter);
         let svg = crate::scatter::render_scatter(&spec).unwrap();
-        assert!(svg.contains("viewBox=\"0 0 800 450\""), "scatter SVG viewBox missing");
+        assert!(
+            svg.contains("viewBox=\"0 0 800 450\""),
+            "scatter SVG viewBox missing"
+        );
     }
 
     #[test]
     fn test_bc_1_11_001_area_has_viewbox() {
         let spec = make_spec(crate::types::ChartType::Area);
         let svg = crate::area::render_area(&spec).unwrap();
-        assert!(svg.contains("viewBox=\"0 0 800 450\""), "area SVG viewBox missing");
+        assert!(
+            svg.contains("viewBox=\"0 0 800 450\""),
+            "area SVG viewBox missing"
+        );
     }
 
     #[test]
     fn test_bc_1_11_001_histogram_has_viewbox() {
         let spec = make_spec(crate::types::ChartType::Histogram);
         let svg = crate::histogram::render_histogram(&spec).unwrap();
-        assert!(svg.contains("viewBox=\"0 0 800 450\""), "histogram SVG viewBox missing");
+        assert!(
+            svg.contains("viewBox=\"0 0 800 450\""),
+            "histogram SVG viewBox missing"
+        );
     }
 
     #[test]
     fn test_bc_1_11_001_stacked_bar_has_viewbox() {
         let spec = make_spec(crate::types::ChartType::StackedBar);
         let svg = crate::stacked_bar::render_stacked_bar(&spec).unwrap();
-        assert!(svg.contains("viewBox=\"0 0 800 450\""), "stacked_bar SVG viewBox missing");
+        assert!(
+            svg.contains("viewBox=\"0 0 800 450\""),
+            "stacked_bar SVG viewBox missing"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -587,8 +668,8 @@ mod tests {
     fn test_bc_1_11_001_bar_has_aria_label() {
         let spec = make_spec(crate::types::ChartType::Bar);
         let raw_svg = crate::bar::render_bar(&spec).unwrap();
-        let svg = crate::accessibility::inject_aria_attributes(&raw_svg, spec.alt.as_ref())
-            .unwrap();
+        let svg =
+            crate::accessibility::inject_aria_attributes(&raw_svg, spec.alt.as_ref()).unwrap();
         assert!(
             svg.as_str().contains("aria-label="),
             "bar SVG must contain aria-label attribute"
@@ -599,54 +680,72 @@ mod tests {
     fn test_bc_1_11_001_line_has_aria_label() {
         let spec = make_spec(crate::types::ChartType::Line);
         let raw_svg = crate::line::render_line(&spec).unwrap();
-        let svg = crate::accessibility::inject_aria_attributes(&raw_svg, spec.alt.as_ref())
-            .unwrap();
-        assert!(svg.as_str().contains("aria-label="), "line SVG aria-label missing");
+        let svg =
+            crate::accessibility::inject_aria_attributes(&raw_svg, spec.alt.as_ref()).unwrap();
+        assert!(
+            svg.as_str().contains("aria-label="),
+            "line SVG aria-label missing"
+        );
     }
 
     #[test]
     fn test_bc_1_11_001_pie_has_aria_label() {
         let spec = make_spec(crate::types::ChartType::Pie);
         let raw_svg = crate::pie::render_pie(&spec).unwrap();
-        let svg = crate::accessibility::inject_aria_attributes(&raw_svg, spec.alt.as_ref())
-            .unwrap();
-        assert!(svg.as_str().contains("aria-label="), "pie SVG aria-label missing");
+        let svg =
+            crate::accessibility::inject_aria_attributes(&raw_svg, spec.alt.as_ref()).unwrap();
+        assert!(
+            svg.as_str().contains("aria-label="),
+            "pie SVG aria-label missing"
+        );
     }
 
     #[test]
     fn test_bc_1_11_001_scatter_has_aria_label() {
         let spec = make_spec(crate::types::ChartType::Scatter);
         let raw_svg = crate::scatter::render_scatter(&spec).unwrap();
-        let svg = crate::accessibility::inject_aria_attributes(&raw_svg, spec.alt.as_ref())
-            .unwrap();
-        assert!(svg.as_str().contains("aria-label="), "scatter SVG aria-label missing");
+        let svg =
+            crate::accessibility::inject_aria_attributes(&raw_svg, spec.alt.as_ref()).unwrap();
+        assert!(
+            svg.as_str().contains("aria-label="),
+            "scatter SVG aria-label missing"
+        );
     }
 
     #[test]
     fn test_bc_1_11_001_area_has_aria_label() {
         let spec = make_spec(crate::types::ChartType::Area);
         let raw_svg = crate::area::render_area(&spec).unwrap();
-        let svg = crate::accessibility::inject_aria_attributes(&raw_svg, spec.alt.as_ref())
-            .unwrap();
-        assert!(svg.as_str().contains("aria-label="), "area SVG aria-label missing");
+        let svg =
+            crate::accessibility::inject_aria_attributes(&raw_svg, spec.alt.as_ref()).unwrap();
+        assert!(
+            svg.as_str().contains("aria-label="),
+            "area SVG aria-label missing"
+        );
     }
 
     #[test]
     fn test_bc_1_11_001_histogram_has_aria_label() {
         let spec = make_spec(crate::types::ChartType::Histogram);
         let raw_svg = crate::histogram::render_histogram(&spec).unwrap();
-        let svg = crate::accessibility::inject_aria_attributes(&raw_svg, spec.alt.as_ref())
-            .unwrap();
-        assert!(svg.as_str().contains("aria-label="), "histogram SVG aria-label missing");
+        let svg =
+            crate::accessibility::inject_aria_attributes(&raw_svg, spec.alt.as_ref()).unwrap();
+        assert!(
+            svg.as_str().contains("aria-label="),
+            "histogram SVG aria-label missing"
+        );
     }
 
     #[test]
     fn test_bc_1_11_001_stacked_bar_has_aria_label() {
         let spec = make_spec(crate::types::ChartType::StackedBar);
         let raw_svg = crate::stacked_bar::render_stacked_bar(&spec).unwrap();
-        let svg = crate::accessibility::inject_aria_attributes(&raw_svg, spec.alt.as_ref())
-            .unwrap();
-        assert!(svg.as_str().contains("aria-label="), "stacked_bar SVG aria-label missing");
+        let svg =
+            crate::accessibility::inject_aria_attributes(&raw_svg, spec.alt.as_ref()).unwrap();
+        assert!(
+            svg.as_str().contains("aria-label="),
+            "stacked_bar SVG aria-label missing"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -658,15 +757,24 @@ mod tests {
         let spec = make_spec(crate::types::ChartType::Bar);
         let svg = crate::bar::render_bar(&spec).unwrap();
         assert!(!svg.contains("<script"), "bar SVG must not contain <script");
-        assert!(!svg.contains("<foreignObject"), "bar SVG must not contain <foreignObject");
+        assert!(
+            !svg.contains("<foreignObject"),
+            "bar SVG must not contain <foreignObject"
+        );
     }
 
     #[test]
     fn test_bc_1_11_001_line_no_script() {
         let spec = make_spec(crate::types::ChartType::Line);
         let svg = crate::line::render_line(&spec).unwrap();
-        assert!(!svg.contains("<script"), "line SVG must not contain <script");
-        assert!(!svg.contains("<foreignObject"), "line SVG must not contain <foreignObject");
+        assert!(
+            !svg.contains("<script"),
+            "line SVG must not contain <script"
+        );
+        assert!(
+            !svg.contains("<foreignObject"),
+            "line SVG must not contain <foreignObject"
+        );
     }
 
     #[test]
@@ -674,38 +782,62 @@ mod tests {
         let spec = make_spec(crate::types::ChartType::Pie);
         let svg = crate::pie::render_pie(&spec).unwrap();
         assert!(!svg.contains("<script"), "pie SVG must not contain <script");
-        assert!(!svg.contains("<foreignObject"), "pie SVG must not contain <foreignObject");
+        assert!(
+            !svg.contains("<foreignObject"),
+            "pie SVG must not contain <foreignObject"
+        );
     }
 
     #[test]
     fn test_bc_1_11_001_scatter_no_script() {
         let spec = make_spec(crate::types::ChartType::Scatter);
         let svg = crate::scatter::render_scatter(&spec).unwrap();
-        assert!(!svg.contains("<script"), "scatter SVG must not contain <script");
-        assert!(!svg.contains("<foreignObject"), "scatter SVG must not contain <foreignObject");
+        assert!(
+            !svg.contains("<script"),
+            "scatter SVG must not contain <script"
+        );
+        assert!(
+            !svg.contains("<foreignObject"),
+            "scatter SVG must not contain <foreignObject"
+        );
     }
 
     #[test]
     fn test_bc_1_11_001_area_no_script() {
         let spec = make_spec(crate::types::ChartType::Area);
         let svg = crate::area::render_area(&spec).unwrap();
-        assert!(!svg.contains("<script"), "area SVG must not contain <script");
-        assert!(!svg.contains("<foreignObject"), "area SVG must not contain <foreignObject");
+        assert!(
+            !svg.contains("<script"),
+            "area SVG must not contain <script"
+        );
+        assert!(
+            !svg.contains("<foreignObject"),
+            "area SVG must not contain <foreignObject"
+        );
     }
 
     #[test]
     fn test_bc_1_11_001_histogram_no_script() {
         let spec = make_spec(crate::types::ChartType::Histogram);
         let svg = crate::histogram::render_histogram(&spec).unwrap();
-        assert!(!svg.contains("<script"), "histogram SVG must not contain <script");
-        assert!(!svg.contains("<foreignObject"), "histogram SVG must not contain <foreignObject");
+        assert!(
+            !svg.contains("<script"),
+            "histogram SVG must not contain <script"
+        );
+        assert!(
+            !svg.contains("<foreignObject"),
+            "histogram SVG must not contain <foreignObject"
+        );
     }
 
     #[test]
     fn test_bc_1_11_001_stacked_bar_no_script() {
         let spec = make_spec(crate::types::ChartType::StackedBar);
         let svg = crate::stacked_bar::render_stacked_bar(&spec).unwrap();
-        assert!(!svg.contains("<script"), "stacked_bar SVG must not contain <script");
+        assert!(
+            !svg.contains("<script"),
+            "stacked_bar SVG must not contain <script"
+        );
         assert!(
             !svg.contains("<foreignObject"),
             "stacked_bar SVG must not contain <foreignObject"
@@ -728,7 +860,10 @@ mod tests {
         let color_strs: Vec<&str> = colors.iter().map(std::convert::AsRef::as_ref).collect();
         let brand_colors = ["#003766", "#FF6F00", "#009E60"];
         let any_present = brand_colors.iter().any(|bc| color_strs.contains(bc));
-        assert!(any_present, "brand colors must appear in extracted palette; got: {color_strs:?}");
+        assert!(
+            any_present,
+            "brand colors must appear in extracted palette; got: {color_strs:?}"
+        );
     }
 
     #[test]
@@ -754,7 +889,10 @@ mod tests {
         let spec = make_chart_spec("radar");
         let brand = make_brand_two_accents();
         let result = renderer.render(&spec, &brand);
-        assert!(result.is_err(), "render must fail for unknown chart type 'radar'");
+        assert!(
+            result.is_err(),
+            "render must fail for unknown chart type 'radar'"
+        );
         let err = result.unwrap_err();
         let msg = err.to_string();
         assert!(
@@ -777,7 +915,10 @@ mod tests {
         // The trait render() receives a skeleton ChartSpec with no series data.
         // It must return InvalidSpec indicating that data must be provided
         // through the eval pipeline's dispatch_and_process(InternalChartSpec).
-        assert!(result.is_err(), "render() with skeleton ChartSpec must return an error");
+        assert!(
+            result.is_err(),
+            "render() with skeleton ChartSpec must return an error"
+        );
         let msg = result.unwrap_err().to_string();
         assert!(
             msg.contains("data") || msg.contains("spec") || msg.contains("eval"),
@@ -795,7 +936,10 @@ mod tests {
             chart_type: crate::types::ChartType::Pie,
             data: vec![DataSeries {
                 name: Arc::from("Total"),
-                points: vec![DataPoint { label: Arc::from("All"), value: 100.0 }],
+                points: vec![DataPoint {
+                    label: Arc::from("All"),
+                    value: 100.0,
+                }],
             }],
             title: None,
             x_label: None,
@@ -851,9 +995,18 @@ mod tests {
             data: vec![DataSeries {
                 name: Arc::from("Loss"),
                 points: vec![
-                    DataPoint { label: Arc::from("Q1"), value: -50.0 },
-                    DataPoint { label: Arc::from("Q2"), value: -30.0 },
-                    DataPoint { label: Arc::from("Q3"), value: -80.0 },
+                    DataPoint {
+                        label: Arc::from("Q1"),
+                        value: -50.0,
+                    },
+                    DataPoint {
+                        label: Arc::from("Q2"),
+                        value: -30.0,
+                    },
+                    DataPoint {
+                        label: Arc::from("Q3"),
+                        value: -80.0,
+                    },
                 ],
             }],
             title: None,
@@ -914,8 +1067,8 @@ mod tests {
     #[test]
     fn test_f031_p2_001_bar_negative_data_renders_with_visible_range() {
         let spec = negative_data_spec(crate::types::ChartType::Bar);
-        let svg = crate::bar::render_bar(&spec)
-            .expect("all-negative bar data must render without error");
+        let svg =
+            crate::bar::render_bar(&spec).expect("all-negative bar data must render without error");
         assert!(!svg.is_empty(), "all-negative bar SVG must be non-empty");
         assert_svg_has_negative_axis_label(&svg, "bar");
     }
@@ -934,7 +1087,10 @@ mod tests {
         let spec = negative_data_spec(crate::types::ChartType::Scatter);
         let svg = crate::scatter::render_scatter(&spec)
             .expect("all-negative scatter data must render without error");
-        assert!(!svg.is_empty(), "all-negative scatter SVG must be non-empty");
+        assert!(
+            !svg.is_empty(),
+            "all-negative scatter SVG must be non-empty"
+        );
         assert_svg_has_negative_axis_label(&svg, "scatter");
     }
 
@@ -952,7 +1108,10 @@ mod tests {
         let spec = negative_data_spec(crate::types::ChartType::Histogram);
         let svg = crate::histogram::render_histogram(&spec)
             .expect("all-negative histogram data must render without error");
-        assert!(!svg.is_empty(), "all-negative histogram SVG must be non-empty");
+        assert!(
+            !svg.is_empty(),
+            "all-negative histogram SVG must be non-empty"
+        );
         assert_svg_has_negative_axis_label(&svg, "histogram");
     }
 
@@ -961,7 +1120,10 @@ mod tests {
         let spec = negative_data_spec(crate::types::ChartType::StackedBar);
         let svg = crate::stacked_bar::render_stacked_bar(&spec)
             .expect("all-negative stacked_bar data must render without error");
-        assert!(!svg.is_empty(), "all-negative stacked_bar SVG must be non-empty");
+        assert!(
+            !svg.is_empty(),
+            "all-negative stacked_bar SVG must be non-empty"
+        );
         assert_svg_has_negative_axis_label(&svg, "stacked_bar");
     }
 
@@ -978,7 +1140,10 @@ mod tests {
         let chart_svg = result.expect("dispatch_and_process must succeed for a valid bar spec");
 
         let svg = chart_svg.as_str();
-        assert!(!svg.is_empty(), "dispatch_and_process must return non-empty SVG");
+        assert!(
+            !svg.is_empty(),
+            "dispatch_and_process must return non-empty SVG"
+        );
 
         // Must have aria-label (injected by inject_aria_attributes).
         assert!(
@@ -995,14 +1160,20 @@ mod tests {
         );
 
         // Must NOT contain forbidden elements.
-        assert!(!svg.contains("<script"), "dispatch_and_process output must not contain <script");
+        assert!(
+            !svg.contains("<script"),
+            "dispatch_and_process output must not contain <script"
+        );
         assert!(
             !svg.contains("<foreignObject"),
             "dispatch_and_process output must not contain <foreignObject"
         );
 
         // Must be valid SVG (has root <svg> element).
-        assert!(svg.contains("<svg"), "dispatch_and_process output must contain <svg root element");
+        assert!(
+            svg.contains("<svg"),
+            "dispatch_and_process output must contain <svg root element"
+        );
     }
 
     /// Test that `dispatch_and_process` works for all 7 chart types.
@@ -1025,7 +1196,10 @@ mod tests {
                 panic!("dispatch_and_process failed for {chart_type:?}: {e}");
             });
             let svg = chart_svg.as_str();
-            assert!(!svg.is_empty(), "dispatch_and_process must return non-empty SVG for {chart_type:?}");
+            assert!(
+                !svg.is_empty(),
+                "dispatch_and_process must return non-empty SVG for {chart_type:?}"
+            );
             assert!(
                 svg.contains("aria-label="),
                 "dispatch_and_process output must contain aria-label for {chart_type:?}"
@@ -1045,8 +1219,14 @@ mod tests {
             data: vec![DataSeries {
                 name: Arc::from("Revenue"),
                 points: vec![
-                    DataPoint { label: Arc::from("Q1"), value: 100.0 },
-                    DataPoint { label: Arc::from("Q2"), value: 200.0 },
+                    DataPoint {
+                        label: Arc::from("Q1"),
+                        value: 100.0,
+                    },
+                    DataPoint {
+                        label: Arc::from("Q2"),
+                        value: 200.0,
+                    },
                 ],
             }],
             title: None,
@@ -1083,7 +1263,10 @@ mod tests {
         // safety::assert_no_forbidden_elements verifies this — but let's assert directly too:
         let svg_lower = svg.to_ascii_lowercase();
         // Strip all escaped sequences to see if any raw <script remains.
-        let unescaped_check = svg_lower.replace("&lt;", "").replace("&gt;", "").replace("&amp;", "");
+        let unescaped_check = svg_lower
+            .replace("&lt;", "")
+            .replace("&gt;", "")
+            .replace("&amp;", "");
         assert!(
             !unescaped_check.contains("<script"),
             "After removing escaped sequences, no literal <script> must remain in the SVG output"
@@ -1098,7 +1281,10 @@ mod tests {
     fn empty_points_spec(chart_type: crate::types::ChartType) -> InternalChartSpec {
         InternalChartSpec {
             chart_type,
-            data: vec![DataSeries { name: Arc::from("empty"), points: vec![] }],
+            data: vec![DataSeries {
+                name: Arc::from("empty"),
+                points: vec![],
+            }],
             title: None,
             x_label: None,
             y_label: None,
@@ -1114,7 +1300,10 @@ mod tests {
     fn test_f031_p3_002_bar_empty_points_returns_error() {
         let spec = empty_points_spec(crate::types::ChartType::Bar);
         let result = crate::bar::render_bar(&spec);
-        assert!(result.is_err(), "bar with empty points must return an error");
+        assert!(
+            result.is_err(),
+            "bar with empty points must return an error"
+        );
         let msg = result.unwrap_err().to_string();
         assert!(
             msg.contains("points") || msg.contains("data"),
@@ -1126,42 +1315,60 @@ mod tests {
     fn test_f031_p3_002_line_empty_points_returns_error() {
         let spec = empty_points_spec(crate::types::ChartType::Line);
         let result = crate::line::render_line(&spec);
-        assert!(result.is_err(), "line with empty points must return an error");
+        assert!(
+            result.is_err(),
+            "line with empty points must return an error"
+        );
     }
 
     #[test]
     fn test_f031_p3_002_scatter_empty_points_returns_error() {
         let spec = empty_points_spec(crate::types::ChartType::Scatter);
         let result = crate::scatter::render_scatter(&spec);
-        assert!(result.is_err(), "scatter with empty points must return an error");
+        assert!(
+            result.is_err(),
+            "scatter with empty points must return an error"
+        );
     }
 
     #[test]
     fn test_f031_p3_002_area_empty_points_returns_error() {
         let spec = empty_points_spec(crate::types::ChartType::Area);
         let result = crate::area::render_area(&spec);
-        assert!(result.is_err(), "area with empty points must return an error");
+        assert!(
+            result.is_err(),
+            "area with empty points must return an error"
+        );
     }
 
     #[test]
     fn test_f031_p3_002_histogram_empty_points_returns_error() {
         let spec = empty_points_spec(crate::types::ChartType::Histogram);
         let result = crate::histogram::render_histogram(&spec);
-        assert!(result.is_err(), "histogram with empty points must return an error");
+        assert!(
+            result.is_err(),
+            "histogram with empty points must return an error"
+        );
     }
 
     #[test]
     fn test_f031_p3_002_stacked_bar_empty_points_returns_error() {
         let spec = empty_points_spec(crate::types::ChartType::StackedBar);
         let result = crate::stacked_bar::render_stacked_bar(&spec);
-        assert!(result.is_err(), "stacked_bar with empty points must return an error");
+        assert!(
+            result.is_err(),
+            "stacked_bar with empty points must return an error"
+        );
     }
 
     #[test]
     fn test_f031_p3_002_pie_empty_points_returns_error() {
         let spec = empty_points_spec(crate::types::ChartType::Pie);
         let result = crate::pie::render_pie(&spec);
-        assert!(result.is_err(), "pie with empty points must return an error");
+        assert!(
+            result.is_err(),
+            "pie with empty points must return an error"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -1174,7 +1381,10 @@ mod tests {
             chart_type,
             data: vec![DataSeries {
                 name: Arc::from("Solo"),
-                points: vec![DataPoint { label: Arc::from("Jan"), value: 42.0 }],
+                points: vec![DataPoint {
+                    label: Arc::from("Jan"),
+                    value: 42.0,
+                }],
             }],
             title: None,
             x_label: None,
@@ -1193,7 +1403,10 @@ mod tests {
         let result = crate::line::render_line(&spec);
         let svg = result.expect("single-point line must produce valid SVG without panicking");
         assert!(!svg.is_empty(), "single-point line SVG must not be empty");
-        assert!(svg.contains("<svg"), "single-point line output must contain <svg root element");
+        assert!(
+            svg.contains("<svg"),
+            "single-point line output must contain <svg root element"
+        );
     }
 
     #[test]
@@ -1202,7 +1415,10 @@ mod tests {
         let result = crate::area::render_area(&spec);
         let svg = result.expect("single-point area must produce valid SVG without panicking");
         assert!(!svg.is_empty(), "single-point area SVG must not be empty");
-        assert!(svg.contains("<svg"), "single-point area output must contain <svg root element");
+        assert!(
+            svg.contains("<svg"),
+            "single-point area output must contain <svg root element"
+        );
     }
 
     // -----------------------------------------------------------------------

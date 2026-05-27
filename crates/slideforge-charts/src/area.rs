@@ -19,7 +19,9 @@ use crate::types::{ChartError, InternalChartSpec};
 pub fn render_area(spec: &InternalChartSpec) -> Result<String, ChartError> {
     // FINDING-006: Guard empty data early.
     if spec.data.is_empty() {
-        return Err(ChartError::MissingDataField { field: Arc::from("data") });
+        return Err(ChartError::MissingDataField {
+            field: Arc::from("data"),
+        });
     }
     // FINDING-002 (Pass 3): Guard non-empty data vec with all-empty points.
     crate::bar::validate_points_non_empty(spec)?;

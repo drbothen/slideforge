@@ -20,7 +20,9 @@ use crate::types::{ChartError, InternalChartSpec};
 pub fn render_stacked_bar(spec: &InternalChartSpec) -> Result<String, ChartError> {
     // FINDING-006: Guard empty data early.
     if spec.data.is_empty() {
-        return Err(ChartError::MissingDataField { field: Arc::from("data") });
+        return Err(ChartError::MissingDataField {
+            field: Arc::from("data"),
+        });
     }
     // FINDING-002 (Pass 3): Guard non-empty data vec with all-empty points.
     crate::bar::validate_points_non_empty(spec)?;
@@ -58,8 +60,16 @@ pub fn render_stacked_bar(spec: &InternalChartSpec) -> Result<String, ChartError
             stack_max = stack_max.max(pos_sum);
             stack_min = stack_min.min(neg_sum);
         }
-        let y_min = if stack_min < 0.0 { stack_min * 1.1 } else { 0.0 };
-        let y_max = if stack_max > 0.0 { stack_max * 1.1 } else { 0.0 };
+        let y_min = if stack_min < 0.0 {
+            stack_min * 1.1
+        } else {
+            0.0
+        };
+        let y_max = if stack_max > 0.0 {
+            stack_max * 1.1
+        } else {
+            0.0
+        };
         // Ensure non-degenerate range.
         let (y_min, y_max) = if (y_max - y_min).abs() < f64::EPSILON {
             (y_min - 1.0, y_min + 1.0)

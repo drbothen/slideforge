@@ -20,7 +20,9 @@ use crate::types::{ChartError, InternalChartSpec};
 pub fn render_histogram(spec: &InternalChartSpec) -> Result<String, ChartError> {
     // FINDING-006: Guard empty data early.
     if spec.data.is_empty() {
-        return Err(ChartError::MissingDataField { field: Arc::from("data") });
+        return Err(ChartError::MissingDataField {
+            field: Arc::from("data"),
+        });
     }
     // FINDING-002 (Pass 3): Guard non-empty data vec with all-empty points.
     crate::bar::validate_points_non_empty(spec)?;
@@ -39,9 +41,12 @@ pub fn render_histogram(spec: &InternalChartSpec) -> Result<String, ChartError> 
 
         // Use the first series as frequency data (histogram treats each bin as
         // a labeled bar with contiguous bins — no gaps between bars).
-        let series = spec.data.first().ok_or_else(|| ChartError::MissingDataField {
-            field: Arc::from("data"),
-        })?;
+        let series = spec
+            .data
+            .first()
+            .ok_or_else(|| ChartError::MissingDataField {
+                field: Arc::from("data"),
+            })?;
 
         // FINDING-001 (Pass 2): compute y-range from data, supporting negative values.
         // Histogram uses the first series only; build a single-series spec for compute_y_range.

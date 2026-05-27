@@ -21,7 +21,9 @@ use crate::types::{ChartError, InternalChartSpec};
 pub fn render_scatter(spec: &InternalChartSpec) -> Result<String, ChartError> {
     // FINDING-006: Guard empty data early.
     if spec.data.is_empty() {
-        return Err(ChartError::MissingDataField { field: Arc::from("data") });
+        return Err(ChartError::MissingDataField {
+            field: Arc::from("data"),
+        });
     }
     // FINDING-002 (Pass 3): Guard non-empty data vec with all-empty points.
     crate::bar::validate_points_non_empty(spec)?;
@@ -80,7 +82,10 @@ pub fn render_scatter(spec: &InternalChartSpec) -> Result<String, ChartError> {
                 .collect();
 
             chart
-                .draw_series(data.iter().map(|(x, y)| Circle::new((*x, *y), 5i32, color.filled())))
+                .draw_series(
+                    data.iter()
+                        .map(|(x, y)| Circle::new((*x, *y), 5i32, color.filled())),
+                )
                 .map_err(|e| ChartError::RenderError {
                     message: Arc::from(e.to_string().as_str()),
                 })?;
