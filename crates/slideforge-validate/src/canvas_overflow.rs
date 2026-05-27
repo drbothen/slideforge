@@ -54,7 +54,7 @@ pub(crate) const LINE_HEIGHT_PER_BULLET: Emu = Emu(181_610);
 /// Validates that bullet content does not visually overflow the body placeholder.
 ///
 /// Uses a heuristic EMU estimate: `bullet_count × LINE_HEIGHT_PER_BULLET`.
-/// When the estimate exceeds [`BODY_PLACEHOLDER_HEIGHT`], an `E-LAY-001`
+/// When the estimate exceeds `BODY_PLACEHOLDER_HEIGHT`, an `E-LAY-001`
 /// diagnostic is emitted for the slide.
 ///
 /// Severity is controlled by [`CanvasOverflowValidator::strict_overflow`]:

@@ -21,7 +21,7 @@
 /// iteration.
 ///
 /// In `Strict` mode, any `Error`-severity diagnostic produced by a registered
-/// [`crate::Validator`] causes the export pipeline to abort. In `WarnOnly`
+/// [`slideforge_plugin_api::Validator`] causes the export pipeline to abort. In `WarnOnly`
 /// mode, all diagnostics are reported but none block export.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ValidationMode {
