@@ -728,4 +728,303 @@ mod tests {
         assert!(result.is_none(), "list with all undefined vars must return None");
         assert_eq!(sink.len(), 3, "all 3 undefined vars should produce errors");
     }
+
+    // ── Comparison operators (eval_ordering) ─────────────────────────────────
+
+    /// FINDING-P2-001: `5 < 10` → `Bool(true)`
+    #[test]
+    fn test_comparison_lt_int() {
+        let env = empty_env();
+        let mut sink = DiagnosticSink::new();
+        let expr = Expr::BinOp {
+            op: BinOpKind::Lt,
+            lhs: Box::new(Expr::Num(5)),
+            rhs: Box::new(Expr::Num(10)),
+        };
+        let result = eval_expr(&env, &expr, &mut sink);
+        assert!(sink.is_empty(), "no errors expected for valid comparison");
+        assert_eq!(result, Some(Value::Bool(true)));
+    }
+
+    /// FINDING-P2-001: `10 <= 10` → `Bool(true)`
+    #[test]
+    fn test_comparison_le_equal() {
+        let env = empty_env();
+        let mut sink = DiagnosticSink::new();
+        let expr = Expr::BinOp {
+            op: BinOpKind::Le,
+            lhs: Box::new(Expr::Num(10)),
+            rhs: Box::new(Expr::Num(10)),
+        };
+        let result = eval_expr(&env, &expr, &mut sink);
+        assert!(sink.is_empty(), "no errors expected for valid comparison");
+        assert_eq!(result, Some(Value::Bool(true)));
+    }
+
+    /// FINDING-P2-001: `Float(3.14) > Float(2.0)` → `Bool(true)`
+    #[test]
+    fn test_comparison_gt_float() {
+        use ordered_float::OrderedFloat;
+        let env = empty_env();
+        let mut sink = DiagnosticSink::new();
+        let expr = Expr::BinOp {
+            op: BinOpKind::Gt,
+            lhs: Box::new(Expr::Float(OrderedFloat(3.14))),
+            rhs: Box::new(Expr::Float(OrderedFloat(2.0))),
+        };
+        let result = eval_expr(&env, &expr, &mut sink);
+        assert!(sink.is_empty(), "no errors expected for valid comparison");
+        assert_eq!(result, Some(Value::Bool(true)));
+    }
+
+    /// FINDING-P2-001: `Float(5.0) >= Int(5)` → `Bool(true)` (mixed-type ordering)
+    #[test]
+    fn test_comparison_ge_mixed() {
+        use ordered_float::OrderedFloat;
+        let env = empty_env();
+        let mut sink = DiagnosticSink::new();
+        let expr = Expr::BinOp {
+            op: BinOpKind::Ge,
+            lhs: Box::new(Expr::Float(OrderedFloat(5.0))),
+            rhs: Box::new(Expr::Num(5)),
+        };
+        let result = eval_expr(&env, &expr, &mut sink);
+        assert!(sink.is_empty(), "no errors expected for valid comparison");
+        assert_eq!(result, Some(Value::Bool(true)));
+    }
+
+    /// FINDING-P2-001: `"a" < "b"` → `Bool(true)` (string ordering)
+    #[test]
+    fn test_comparison_str() {
+        let env = empty_env();
+        let mut sink = DiagnosticSink::new();
+        let expr = Expr::BinOp {
+            op: BinOpKind::Lt,
+            lhs: Box::new(Expr::Str("a".to_string())),
+            rhs: Box::new(Expr::Str("b".to_string())),
+        };
+        let result = eval_expr(&env, &expr, &mut sink);
+        assert!(sink.is_empty(), "no errors expected for valid string comparison");
+        assert_eq!(result, Some(Value::Bool(true)));
+    }
+
+    /// FINDING-P2-001: `"hello" < Int(5)` → `None` + TypeMismatch in sink
+    #[test]
+    fn test_comparison_type_mismatch() {
+        let env = empty_env();
+        let mut sink = DiagnosticSink::new();
+        let expr = Expr::BinOp {
+            op: BinOpKind::Lt,
+            lhs: Box::new(Expr::Str("hello".to_string())),
+            rhs: Box::new(Expr::Num(5)),
+        };
+        let result = eval_expr(&env, &expr, &mut sink);
+        assert_eq!(result, None, "type mismatch in comparison must return None");
+        assert!(!sink.is_empty(), "type mismatch must push a diagnostic");
+    }
+
+    // ── Equality operators ────────────────────────────────────────────────────
+
+    /// FINDING-P2-001: `Int(5) == Int(5)` → `Bool(true)`
+    #[test]
+    fn test_equality_eq_int() {
+        let env = empty_env();
+        let mut sink = DiagnosticSink::new();
+        let expr = Expr::BinOp {
+            op: BinOpKind::Eq,
+            lhs: Box::new(Expr::Num(5)),
+            rhs: Box::new(Expr::Num(5)),
+        };
+        let result = eval_expr(&env, &expr, &mut sink);
+        assert!(sink.is_empty(), "no errors expected for equality check");
+        assert_eq!(result, Some(Value::Bool(true)));
+    }
+
+    /// FINDING-P2-001: `Int(5) != Int(6)` → `Bool(true)`
+    #[test]
+    fn test_equality_ne_int() {
+        let env = empty_env();
+        let mut sink = DiagnosticSink::new();
+        let expr = Expr::BinOp {
+            op: BinOpKind::Ne,
+            lhs: Box::new(Expr::Num(5)),
+            rhs: Box::new(Expr::Num(6)),
+        };
+        let result = eval_expr(&env, &expr, &mut sink);
+        assert!(sink.is_empty(), "no errors expected for not-equal check");
+        assert_eq!(result, Some(Value::Bool(true)));
+    }
+
+    /// FINDING-P2-001: `Str("a") == Str("a")` → `Bool(true)`
+    #[test]
+    fn test_equality_eq_str() {
+        let env = empty_env();
+        let mut sink = DiagnosticSink::new();
+        let expr = Expr::BinOp {
+            op: BinOpKind::Eq,
+            lhs: Box::new(Expr::Str("a".to_string())),
+            rhs: Box::new(Expr::Str("a".to_string())),
+        };
+        let result = eval_expr(&env, &expr, &mut sink);
+        assert!(sink.is_empty(), "no errors expected for string equality");
+        assert_eq!(result, Some(Value::Bool(true)));
+    }
+
+    // ── Logical operators ─────────────────────────────────────────────────────
+
+    /// FINDING-P2-001: `true && false` → `Bool(false)`
+    #[test]
+    fn test_logical_and_true_false() {
+        let env = empty_env();
+        let mut sink = DiagnosticSink::new();
+        let expr = Expr::BinOp {
+            op: BinOpKind::And,
+            lhs: Box::new(Expr::Bool(true)),
+            rhs: Box::new(Expr::Bool(false)),
+        };
+        let result = eval_expr(&env, &expr, &mut sink);
+        assert!(sink.is_empty(), "no errors expected for valid && operation");
+        assert_eq!(result, Some(Value::Bool(false)));
+    }
+
+    /// FINDING-P2-001: `false || true` → `Bool(true)`
+    #[test]
+    fn test_logical_or_false_true() {
+        let env = empty_env();
+        let mut sink = DiagnosticSink::new();
+        let expr = Expr::BinOp {
+            op: BinOpKind::Or,
+            lhs: Box::new(Expr::Bool(false)),
+            rhs: Box::new(Expr::Bool(true)),
+        };
+        let result = eval_expr(&env, &expr, &mut sink);
+        assert!(sink.is_empty(), "no errors expected for valid || operation");
+        assert_eq!(result, Some(Value::Bool(true)));
+    }
+
+    /// FINDING-P2-001: `Int(1) && Bool(true)` → `None` + TypeMismatch in sink
+    #[test]
+    fn test_logical_and_type_mismatch() {
+        let env = empty_env();
+        let mut sink = DiagnosticSink::new();
+        let expr = Expr::BinOp {
+            op: BinOpKind::And,
+            lhs: Box::new(Expr::Num(1)),
+            rhs: Box::new(Expr::Bool(true)),
+        };
+        let result = eval_expr(&env, &expr, &mut sink);
+        assert_eq!(result, None, "type mismatch in && must return None");
+        assert!(!sink.is_empty(), "type mismatch must push a diagnostic");
+    }
+
+    // ── Unary NOT ─────────────────────────────────────────────────────────────
+
+    /// FINDING-P2-001: `!true` → `Bool(false)`
+    #[test]
+    fn test_unary_not_true() {
+        use slideforge_syntax::UnaryOpKind;
+        let env = empty_env();
+        let mut sink = DiagnosticSink::new();
+        let expr = Expr::UnaryOp {
+            op: UnaryOpKind::Not,
+            operand: Box::new(Expr::Bool(true)),
+        };
+        let result = eval_expr(&env, &expr, &mut sink);
+        assert!(sink.is_empty(), "no errors expected for valid ! operation");
+        assert_eq!(result, Some(Value::Bool(false)));
+    }
+
+    /// FINDING-P2-001: `!false` → `Bool(true)`
+    #[test]
+    fn test_unary_not_false() {
+        use slideforge_syntax::UnaryOpKind;
+        let env = empty_env();
+        let mut sink = DiagnosticSink::new();
+        let expr = Expr::UnaryOp {
+            op: UnaryOpKind::Not,
+            operand: Box::new(Expr::Bool(false)),
+        };
+        let result = eval_expr(&env, &expr, &mut sink);
+        assert!(sink.is_empty(), "no errors expected for valid ! operation");
+        assert_eq!(result, Some(Value::Bool(true)));
+    }
+
+    /// FINDING-P2-001: `!Int(42)` → `None` + TypeMismatch in sink
+    #[test]
+    fn test_unary_not_type_mismatch() {
+        use slideforge_syntax::UnaryOpKind;
+        let env = empty_env();
+        let mut sink = DiagnosticSink::new();
+        let expr = Expr::UnaryOp {
+            op: UnaryOpKind::Not,
+            operand: Box::new(Expr::Num(42)),
+        };
+        let result = eval_expr(&env, &expr, &mut sink);
+        assert_eq!(result, None, "! on non-bool must return None");
+        assert!(!sink.is_empty(), "type mismatch must push a diagnostic");
+    }
+
+    // ── Mixed-type arithmetic ─────────────────────────────────────────────────
+
+    /// FINDING-P2-001: `Int(2) + Float(1.5)` → `Float(3.5)`
+    #[test]
+    fn test_arithmetic_int_plus_float() {
+        use ordered_float::OrderedFloat;
+        let env = empty_env();
+        let mut sink = DiagnosticSink::new();
+        let expr = Expr::BinOp {
+            op: BinOpKind::Add,
+            lhs: Box::new(Expr::Num(2)),
+            rhs: Box::new(Expr::Float(OrderedFloat(1.5))),
+        };
+        let result = eval_expr(&env, &expr, &mut sink);
+        assert!(sink.is_empty(), "no errors expected for int+float");
+        assert_eq!(result, Some(Value::Float(OrderedFloat(3.5))));
+    }
+
+    /// FINDING-P2-001: `Float(1.5) * Int(2)` → `Float(3.0)`
+    #[test]
+    fn test_arithmetic_float_mul_int() {
+        use ordered_float::OrderedFloat;
+        let env = empty_env();
+        let mut sink = DiagnosticSink::new();
+        let expr = Expr::BinOp {
+            op: BinOpKind::Mul,
+            lhs: Box::new(Expr::Float(OrderedFloat(1.5))),
+            rhs: Box::new(Expr::Num(2)),
+        };
+        let result = eval_expr(&env, &expr, &mut sink);
+        assert!(sink.is_empty(), "no errors expected for float*int");
+        assert_eq!(result, Some(Value::Float(OrderedFloat(3.0))));
+    }
+
+    // ── Map literal evaluation ────────────────────────────────────────────────
+
+    /// FINDING-P2-001: `Map { "k" => Num(1) }` → `Value::Map { "k" => Int(1) }`
+    #[test]
+    fn test_map_literal_eval() {
+        let env = empty_env();
+        let mut sink = DiagnosticSink::new();
+        let expr = Expr::Map(vec![("k".to_string(), Expr::Num(1))]);
+        let result = eval_expr(&env, &expr, &mut sink);
+        assert!(sink.is_empty(), "no errors expected for valid map literal");
+        let mut expected = OrderedMap::new();
+        expected.insert(Arc::from("k"), Value::Int(1));
+        assert_eq!(result, Some(Value::Map(expected)));
+    }
+
+    /// FINDING-P2-001: Map with an undefined variable value accumulates errors
+    #[test]
+    fn test_map_literal_error_accumulation() {
+        let env = empty_env();
+        let mut sink = DiagnosticSink::new();
+        // Two entries with undefined vars — both errors should be accumulated.
+        let expr = Expr::Map(vec![
+            ("a".to_string(), Expr::Ident("undefined_a".to_string())),
+            ("b".to_string(), Expr::Ident("undefined_b".to_string())),
+        ]);
+        let result = eval_expr(&env, &expr, &mut sink);
+        assert_eq!(result, None, "map with undefined vars must return None");
+        assert_eq!(sink.len(), 2, "both undefined vars should produce errors");
+    }
 }
