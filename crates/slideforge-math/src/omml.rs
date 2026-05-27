@@ -339,6 +339,10 @@ fn operator_to_unicode(name: &str) -> &'static str {
 /// gcd, dim, ker, deg, hom, mod) are typeset in roman (non-italic) style in
 /// standard mathematical notation. OMML achieves this with
 /// `<m:rPr><m:sty m:val="p"/></m:rPr>`.
+///
+/// NOTE: The parser currently only produces `Operator` nodes for `lim`, `max`,
+/// and `min`. The remaining entries are forward-looking for when more text
+/// operators are added to the parser's supported command set.
 fn is_text_operator(name: &str) -> bool {
     matches!(
         name,
