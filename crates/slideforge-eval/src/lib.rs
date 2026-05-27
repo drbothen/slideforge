@@ -1,10 +1,49 @@
-//! `slideforge-eval` — component crate for the slideforge workspace.
+//! `slideforge-eval` — expression evaluator and variable environment for the
+//! slideforge DSL.
 //!
-//! This crate is in initial scaffolding (Phase 0). See `seed/PROJECT-SEED.md`
-//! at the repository root for the full project specification, and
-//! `seed/DSL-GRAMMAR.ebnf` for the formal grammar.
+//! This crate implements Phase 3 STORY-011 (Expression Evaluator Core). It
+//! evaluates [`slideforge_syntax::Expr`] AST nodes in a scoped variable
+//! [`Env`], applying built-in filters via the `|` pipe operator, and
+//! accumulates all errors into a [`slideforge_syntax::DiagnosticSink`] without
+//! short-circuiting.
+//!
+//! # Pipeline position
+//!
+//! ```text
+//! .sf source
+//!   → slideforge-syntax::lex / parse → DeckNode (AST)
+//!   → slideforge-eval::eval_expr     → Value   (evaluated)
+//!   → slideforge-layout              → LaidOutDeck
+//!   → exporters (pptx / pdf / html)
+//! ```
+//!
+//! # Architecture Constraints (SS-02)
+//!
+//! `slideforge-eval` is **Pure Core** — it performs no I/O, no filesystem
+//! access, and no network calls. All side effects are delegated to the caller
+//! (typically `slideforge-cli` or `slideforge-layout`).
+//!
+//! # Error accumulation
+//!
+//! All public functions accept a `&mut DiagnosticSink` and push errors into it
+//! rather than returning `Err`. This follows the same accumulation discipline
+//! as `slideforge-syntax`.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
+
+pub mod env;
+pub mod error;
+pub mod eval;
+pub mod expr;
+pub mod filters;
+
+// ─── Public API re-exports ───────────────────────────────────────────────────
+
+pub use env::Env;
+pub use error::EvalError;
+pub use eval::eval_expr_to_string;
+pub use expr::eval_expr;
+pub use filters::{AVAILABLE_FILTERS, apply_filter};
