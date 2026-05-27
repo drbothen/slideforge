@@ -85,10 +85,50 @@ pub fn eval_if_chain<S: std::hash::BuildHasher>(
     config: &EvalConfig,
     sink: &mut DiagnosticSink,
 ) -> Vec<Slide> {
-    todo!(
-        "STORY-013: implement @if/@elif/@else evaluation (BC-1.05.001, BC-1.05.002); \
-         see if_eval.rs for algorithm specification"
-    )
+    // Step 1: evaluate the @if condition.
+    match eval_bool_condition(env, if_node.condition.value(), SourceSpan::default(), sink) {
+        None => {
+            // Evaluation failed or type error — error already in sink; return empty.
+            vec![]
+        },
+        Some(true) => {
+            // @if branch is truthy: evaluate and return its body. Lazy — skip all
+            // @elif and @else.
+            eval_block_items(env, &if_node.then_body, set_rule_defaults, config, sink)
+        },
+        Some(false) => {
+            // @if branch is false: try @elif branches in order (lazy).
+            for (elif_condition_spanned, elif_body) in &if_node.elif_branches {
+                let elif_span = SourceSpan::default();
+                match eval_bool_condition(env, elif_condition_spanned.value(), elif_span, sink) {
+                    None => {
+                        // Error in this elif condition — already in sink.
+                        // Per lazy evaluation: stop here (don't evaluate further branches).
+                        return vec![];
+                    },
+                    Some(true) => {
+                        // This @elif branch is truthy. Lazy — evaluate its body and return.
+                        return eval_block_items(
+                            env,
+                            elif_body,
+                            set_rule_defaults,
+                            config,
+                            sink,
+                        );
+                    },
+                    Some(false) => {
+                        // This @elif was false — continue to next @elif (lazy).
+                    },
+                }
+            }
+            // All conditions were false: evaluate @else body if present, else empty.
+            if let Some(else_body) = &if_node.else_body {
+                eval_block_items(env, else_body, set_rule_defaults, config, sink)
+            } else {
+                vec![]
+            }
+        },
+    }
 }
 
 // ─── eval_bool_condition ─────────────────────────────────────────────────────
@@ -108,10 +148,29 @@ fn eval_bool_condition(
     span: SourceSpan,
     sink: &mut DiagnosticSink,
 ) -> Option<bool> {
-    todo!(
-        "STORY-013: implement boolean condition type-check (BC-1.05.002); \
-         must push E-EVL-003 for non-Bool values (Int, Str, Null, List, Map)"
-    )
+    // Evaluate the expression. Returns None if evaluation itself fails (e.g.,
+    // undefined variable — E-EVL-001 already pushed to sink).
+    let value = eval_expr(env, condition, sink)?;
+
+    // BC-1.05.002: Only Value::Bool is a valid condition type.
+    // No implicit truthiness: Int(0), Int(1), Str("true"), Null are all errors.
+    match value {
+        Value::Bool(b) => Some(b),
+        other => {
+            sink.push_with_severity(
+                EvalError::TypeMismatch {
+                    message: format!(
+                        "condition expression evaluated to {}, not Bool; \
+                         use a comparison operator (==, !=, <, >, <=, >=) to produce a boolean",
+                        other.type_name()
+                    ),
+                    span,
+                },
+                ParseSeverity::Error,
+            );
+            None
+        },
+    }
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -119,6 +178,7 @@ fn eval_bool_condition(
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 #[allow(clippy::doc_markdown)]
+#[allow(non_snake_case)]
 mod tests {
     use std::collections::HashMap;
     use std::sync::Arc;

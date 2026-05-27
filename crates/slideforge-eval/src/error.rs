@@ -33,7 +33,7 @@ use thiserror::Error;
 pub fn format_cycle_path(cycle_path: &[Arc<str>]) -> String {
     cycle_path
         .iter()
-        .map(|s| s.as_ref())
+        .map(std::convert::AsRef::as_ref)
         .collect::<Vec<_>>()
         .join(" → ")
 }
