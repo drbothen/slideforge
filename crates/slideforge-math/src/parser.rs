@@ -520,37 +520,72 @@ impl<'a> LatexParser<'a> {
             }
 
             // ── Text/font commands ────────────────────────────────────────
-            // `\text{...}` produces a TextRun (upright/plain style in OMML).
-            // The other font commands (\mathrm, \mathbf, etc.) also produce
-            // upright text — they are all semantically "text in math mode".
-            "text" | "mathrm" | "mathbf" | "mathit" | "mathbb" => {
-                // Parse the braced argument as a flat string of text nodes.
-                // If the argument is a braced group, collect its Text children
-                // into a single TextRun; otherwise wrap the single atom.
+            // `\text{...}` and `\mathrm{...}` / `\mathbf{...}` produce a
+            // TextRun (upright/plain style in OMML). We scan the braced content
+            // character-by-character to preserve ALL characters including spaces
+            // — using `parse_group()` would incorrectly strip internal whitespace
+            // via `skip_whitespace()`.
+            //
+            // `\mathit{...}` is handled separately: math mode is already italic,
+            // so \mathit is a no-op style-wise. We emit the inner content as
+            // regular Text/Group nodes (not TextRun) to avoid incorrect OMML
+            // upright-text wrapping.
+            "text" | "mathrm" | "mathbf" | "mathbb" => {
                 self.skip_whitespace();
-                let text_content = if self.peek_byte() == Some(b'{') {
-                    // Parse the group and flatten inner Text nodes to a string.
-                    let inner_nodes = self.parse_group();
-                    let mut s = String::new();
-                    for n in &inner_nodes {
-                        match n {
-                            MathNode::Text(t) | MathNode::TextRun(t) => s.push_str(t),
+                if self.peek_byte() == Some(b'{') {
+                    // Scan the braced content raw, preserving spaces.
+                    self.pos += 1; // consume opening `{`
+                    let start = self.pos;
+                    let mut depth = 1usize;
+                    while self.pos < self.input.len() {
+                        match self.input.as_bytes()[self.pos] {
+                            b'{' => {
+                                depth += 1;
+                                self.pos += 1;
+                            }
+                            b'}' => {
+                                depth -= 1;
+                                if depth == 0 {
+                                    break;
+                                }
+                                self.pos += 1;
+                            }
                             _ => {
-                                // Non-text node inside \text{} — fall back to Group.
-                                return MathNode::Group(inner_nodes);
+                                self.pos += 1;
                             }
                         }
                     }
-                    s
+                    let content = &self.input[start..self.pos];
+                    // Consume closing `}`
+                    if self.peek_byte() == Some(b'}') {
+                        self.pos += 1;
+                    }
+                    MathNode::TextRun(Arc::from(content))
                 } else {
-                    // Single atom (no braces)
+                    // Single atom (no braces) — wrap it.
                     let atom = self.parse_single_atom();
-                    return match atom {
+                    match atom {
                         MathNode::Text(s) => MathNode::TextRun(s),
                         other => MathNode::Group(vec![other]),
-                    };
-                };
-                MathNode::TextRun(Arc::from(text_content.as_str()))
+                    }
+                }
+            }
+            // `\mathit{...}` — math mode is already italic; \mathit is a
+            // semantic no-op. Emit the inner nodes as regular Text/Group (NOT
+            // TextRun) so OMML does not wrap them in upright-text style.
+            "mathit" => {
+                self.skip_whitespace();
+                if self.peek_byte() == Some(b'{') {
+                    let inner_nodes = self.parse_group();
+                    if inner_nodes.len() == 1 {
+                        #[allow(clippy::unwrap_used)] // safe: len==1
+                        inner_nodes.into_iter().next().unwrap()
+                    } else {
+                        MathNode::Group(inner_nodes)
+                    }
+                } else {
+                    self.parse_single_atom()
+                }
             }
 
             // ── Unsupported command ───────────────────────────────────────
@@ -650,6 +685,11 @@ impl<'a> LatexParser<'a> {
     }
 
     /// Parse `\begin{align}...\end{align}` into `MathNode::Align`.
+    ///
+    /// The `&` column separator is consumed and discarded — since OMML
+    /// `<m:eqArr>` has no native column-tab concept, we merge all column
+    /// content within a row into a single flat node list. This avoids
+    /// `&` appearing as a literal `Text("&")` or XML `&amp;` in the AST.
     fn parse_align_env(&mut self, env: &str) -> MathNode {
         let mut rows: Vec<Vec<MathNode>> = Vec::new();
         let end_marker = format!("\\end{{{env}}}");
@@ -657,13 +697,27 @@ impl<'a> LatexParser<'a> {
         let end_marker_ed = "\\end{aligned}".to_owned();
 
         loop {
-            // Parse one row (until `\\` or `\end{...}`)
-            let row = self.parse_until(|p| {
-                p.rest().starts_with("\\\\")
-                    || p.rest().starts_with(&end_marker)
-                    || p.rest().starts_with(&end_marker_star)
-                    || p.rest().starts_with(&end_marker_ed)
-            });
+            // Parse all columns of one row, merging them into a single node list.
+            // Stop the inner loop at `\\` or `\end{...}`; also stop at `&` to
+            // consume it as a column separator (but do NOT include it in nodes).
+            let mut row: Vec<MathNode> = Vec::new();
+            loop {
+                let mut col = self.parse_until(|p| {
+                    p.peek_byte() == Some(b'&')
+                        || p.rest().starts_with("\\\\")
+                        || p.rest().starts_with(&end_marker)
+                        || p.rest().starts_with(&end_marker_star)
+                        || p.rest().starts_with(&end_marker_ed)
+                });
+                row.append(&mut col);
+                // If we stopped at `&`, consume it and continue to parse the
+                // next column of this row. Otherwise end the column loop.
+                if self.peek_byte() == Some(b'&') {
+                    self.pos += 1; // consume `&`, discard
+                } else {
+                    break;
+                }
+            }
             rows.push(row);
 
             if self.rest().starts_with("\\\\") {
@@ -1252,5 +1306,134 @@ mod tests {
             find_rightarrow(&ast.nodes),
             "expected Symbol(rightarrow) inside delimiter; got: {ast:?}"
         );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // FINDING-017 — \text{...} must preserve internal whitespace
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// `\text{hello world}` must produce `TextRun("hello world")` with the
+    /// internal space preserved — `parse_group()` was incorrectly stripping
+    /// whitespace inside the braces.
+    #[test]
+    fn test_text_preserves_spaces() {
+        let (ast, diags) = parse(r"\text{hello world}", MathMode::Inline, SourceSpan::default());
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+        let ast = ast.expect("expected successful parse");
+        let text_run = ast.nodes.iter().find_map(|n| {
+            if let MathNode::TextRun(s) = n { Some(s.as_ref()) } else { None }
+        });
+        assert_eq!(
+            text_run,
+            Some("hello world"),
+            "expected TextRun(\"hello world\") with preserved space; got: {ast:?}"
+        );
+    }
+
+    /// `\text{if and only if}` must produce `TextRun("if and only if")` with
+    /// all internal spaces preserved.
+    #[test]
+    fn test_text_complex() {
+        let (ast, diags) = parse(r"\text{if and only if}", MathMode::Inline, SourceSpan::default());
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+        let ast = ast.expect("expected successful parse");
+        let text_run = ast.nodes.iter().find_map(|n| {
+            if let MathNode::TextRun(s) = n { Some(s.as_ref()) } else { None }
+        });
+        assert_eq!(
+            text_run,
+            Some("if and only if"),
+            "expected TextRun(\"if and only if\"); got: {ast:?}"
+        );
+    }
+
+    /// `\mathrm{sin}` must produce `TextRun("sin")` (upright text).
+    #[test]
+    fn test_mathrm_preserves_spaces() {
+        let (ast, diags) = parse(r"\mathrm{sin}", MathMode::Inline, SourceSpan::default());
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+        let ast = ast.expect("expected successful parse");
+        let text_run = ast.nodes.iter().find_map(|n| {
+            if let MathNode::TextRun(s) = n { Some(s.as_ref()) } else { None }
+        });
+        assert_eq!(
+            text_run,
+            Some("sin"),
+            "expected TextRun(\"sin\"); got: {ast:?}"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // FINDING-018 — align environment must split on `&`, not include it as text
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// `\begin{align} a &= b \\ c &= d \end{align}` — verify that `&` does not
+    /// appear as a literal `&` or XML entity `&amp;` in any Text node.
+    #[test]
+    fn test_align_no_ampersand_in_ast() {
+        let (ast, diags) = parse(
+            r"\begin{align} a &= b \\ c &= d \end{align}",
+            MathMode::Display,
+            SourceSpan::default(),
+        );
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+        let ast = ast.expect("expected successful parse");
+
+        fn has_ampersand_text(nodes: &[MathNode]) -> bool {
+            for node in nodes {
+                match node {
+                    MathNode::Text(s) | MathNode::TextRun(s)
+                        if s.contains('&') || s.contains("&amp;") =>
+                    {
+                        return true;
+                    }
+                    MathNode::Align(rows) => {
+                        for row in rows {
+                            if has_ampersand_text(row) {
+                                return true;
+                            }
+                        }
+                    }
+                    MathNode::Group(inner) => {
+                        if has_ampersand_text(inner) {
+                            return true;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            false
+        }
+        assert!(
+            !has_ampersand_text(&ast.nodes),
+            "align AST must not contain literal '&' text nodes; got: {ast:?}"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // FINDING-018 (related) — \mathit should NOT produce TextRun
+    // Math mode is already italic; \mathit should pass through as regular Text
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// `\mathit{x}` must NOT produce a `TextRun` node. Since math mode is
+    /// already italic, \mathit is semantically equivalent to plain text.
+    /// It must produce `Text` nodes (not `TextRun`) to avoid incorrect OMML
+    /// upright-text wrapping.
+    #[test]
+    fn test_mathit_produces_text_not_textrun() {
+        let (ast, diags) = parse(r"\mathit{x}", MathMode::Inline, SourceSpan::default());
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+        let ast = ast.expect("expected successful parse");
+        // Must NOT contain a TextRun node
+        let has_text_run = ast.nodes.iter().any(|n| matches!(n, MathNode::TextRun(_)));
+        assert!(
+            !has_text_run,
+            "\\mathit must NOT produce TextRun (math is already italic); got: {ast:?}"
+        );
+        // Must contain Text or Group nodes
+        let has_text = ast.nodes.iter().any(|n| {
+            matches!(n, MathNode::Text(_) | MathNode::Group(_))
+        });
+        assert!(has_text, "expected Text or Group node from \\mathit; got: {ast:?}");
     }
 }

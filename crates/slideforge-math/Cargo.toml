@@ -17,7 +17,6 @@ description = "Math rendering engine for slideforge: LaTeX parser, @{var} interp
 slideforge-types = { workspace = true }
 slideforge-plugin-api = { workspace = true }
 thiserror = { workspace = true }
-tracing = { workspace = true }
 
 [dev-dependencies]
 insta = { version = "1", features = ["yaml"] }
