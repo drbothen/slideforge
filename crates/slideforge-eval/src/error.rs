@@ -175,7 +175,9 @@ pub enum EvalError {
     ///
     /// Distinguished from [`EvalError::TooManySlides`] (which is a hard error)
     /// by using a friendlier message and `ParseSeverity::Warning` severity.
-    #[error("deck has {count} slides, which exceeds the recommended maximum of {threshold}")]
+    #[error(
+        "Large iteration: @for over {count} items may produce a very large deck. Consider filtering data at source."
+    )]
     #[diagnostic(
         code("E-EVL-009"),
         help(
@@ -418,8 +420,12 @@ mod tests {
             "LargeDeckWarning message must mention count; got: {msg}"
         );
         assert!(
-            msg.contains("500"),
-            "LargeDeckWarning message must mention threshold; got: {msg}"
+            msg.contains("Large iteration"),
+            "LargeDeckWarning message must contain 'Large iteration' per AC-011; got: {msg}"
+        );
+        assert!(
+            msg.contains("filtering data at source"),
+            "LargeDeckWarning message must contain AC-011 guidance text; got: {msg}"
         );
     }
 

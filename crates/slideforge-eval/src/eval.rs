@@ -1043,6 +1043,8 @@ mod tests {
     ///
     /// `set content: footer "{{ brand.footer }}"` → the resolved value is
     /// `"__brand_ref:footer__"` (brand resolution deferred to brand stage).
+    /// End-to-end: a `content` slide without an explicit `footer` field must
+    /// receive the brand-ref placeholder as its footer value (AC-015).
     #[test]
     fn test_set_rule_brand_ref_preserved() {
         use slideforge_syntax::{SetRule, SetRuleValue};
@@ -1059,8 +1061,21 @@ mod tests {
             ),
         };
 
+        // Add a content slide without an explicit footer field.
+        // The set-rule default must inject the brand-ref placeholder.
+        let slide_item = BlockItem::Slide(Spanned::new(
+            SlideNode {
+                kind: Spanned::new("content".to_string(), dummy_span()),
+                tags: vec![],
+                fields: vec![], // no footer — set-rule injects the brand-ref
+                inline_items: vec![],
+            },
+            dummy_span(),
+        ));
+
         let deck_node = DeckNode {
             set_rules: vec![set_rule],
+            items: vec![slide_item],
             ..DeckNode::default()
         };
 
@@ -1077,6 +1092,29 @@ mod tests {
             "brand-ref set-rule must not push an error; got: {:?}",
             sink.errors()
         );
+
+        // End-to-end propagation: the content slide's footer must carry the
+        // brand-ref placeholder `"__brand_ref:footer__"` (AC-015).
+        let deck = deck.unwrap();
+        assert_eq!(deck.slides.len(), 1, "must have 1 slide");
+        let slide = &deck.slides[0];
+        let footer = slide.fields.get("footer");
+        assert!(
+            footer.is_some(),
+            "brand-ref set-rule must inject footer into the slide's fields (AC-015)"
+        );
+        match footer {
+            Some(slideforge_types::FieldValue::Literal(Value::Str(s))) => {
+                assert_eq!(
+                    s.as_ref(),
+                    "__brand_ref:footer__",
+                    "brand-ref placeholder must be '__brand_ref:footer__'; got: {s}"
+                );
+            },
+            other => panic!(
+                "footer must be Literal(Str('__brand_ref:footer__')); got: {other:?}"
+            ),
+        }
     }
 
     // ─── C02: variant vars tests ──────────────────────────────────────────────
@@ -1156,6 +1194,53 @@ mod tests {
             deck.slides[0].title_str(),
             Some("red"),
             "variant var color='red' must override deck var color='blue'"
+        );
+    }
+
+    // ─── C02: undefined variant name ─────────────────────────────────────────
+
+    /// C02: `eval_deck_with_variant` with an undefined variant name pushes an
+    /// error to the sink and returns `None`.
+    ///
+    /// The deck has no `variants:` block. Requesting variant `"nonexistent"`
+    /// must push an error (E-EVL-001 / UndefinedVariable) and cause
+    /// `eval_deck_with_variant` to return `None` (fatal or at least sink
+    /// contains an error that propagates).
+    #[test]
+    fn test_undefined_variant_name_produces_error() {
+        // Build a DeckNode with no variants block.
+        let slide_item = BlockItem::Slide(Spanned::new(
+            SlideNode {
+                kind: Spanned::new("content".to_string(), dummy_span()),
+                tags: vec![],
+                fields: vec![],
+                inline_items: vec![],
+            },
+            dummy_span(),
+        ));
+        let deck_node = DeckNode {
+            items: vec![slide_item],
+            variants: None,
+            variant_names: vec![], // no variants defined
+            ..DeckNode::default()
+        };
+
+        let config = default_config();
+        let mut sink = DiagnosticSink::new();
+
+        // Request a variant that doesn't exist.
+        let _deck = eval_deck_with_variant(&deck_node, &config, Some("nonexistent"), &mut sink);
+
+        // The sink must contain at least one error about the undefined variant.
+        assert!(
+            !sink.is_empty(),
+            "requesting an undefined variant must push a diagnostic to the sink"
+        );
+        // The error message must mention the variant name to aid the user.
+        let first_err = sink.errors()[0].to_string();
+        assert!(
+            first_err.contains("nonexistent"),
+            "error message must mention the undefined variant name 'nonexistent'; got: {first_err}"
         );
     }
 
