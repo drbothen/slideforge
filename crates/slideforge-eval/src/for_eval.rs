@@ -2,7 +2,7 @@
 //!
 //! # Span threading (STORY-012 systematic gap)
 //!
-//! All error paths in this module that construct [`EvalError`](crate::EvalError)
+//! All error paths in this module that construct [`EvalError`]
 //! use `SourceSpan::default()` for the `span` field. This is a **systematic
 //! limitation**: the AST nodes carry [`slideforge_syntax::span::Span`] (a byte-
 //! offset + `file_id` u32 tuple), while the IR error types require

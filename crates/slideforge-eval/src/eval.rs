@@ -112,7 +112,7 @@ pub fn eval_expr_to_string(env: &Env, expr: &Expr, sink: &mut DiagnosticSink) ->
 /// - [`EvalError::NotIterable`](crate::EvalError) — an `@for` collection is
 ///   not a list.
 /// - [`EvalError::TooManySlides`](crate::EvalError) — slide cap exceeded.
-/// - Any other [`EvalError`](crate::EvalError) variants from expression
+/// - Any other [`EvalError`] variants from expression
 ///   evaluation.
 pub fn eval_deck(
     deck_node: &DeckNode,

@@ -387,9 +387,9 @@ mod tests {
         );
     }
 
-    /// I04: LargeDeckWarning is a distinct variant from TooManySlides.
+    /// I04: `LargeDeckWarning` is a distinct variant from `TooManySlides`.
     ///
-    /// TooManySlides = hard error (cap exceeded), LargeDeckWarning = lint warning.
+    /// `TooManySlides` = hard error (cap exceeded), `LargeDeckWarning` = lint warning.
     #[test]
     fn test_i04_large_deck_warning_distinct_from_too_many_slides() {
         use miette::Diagnostic;
