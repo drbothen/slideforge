@@ -1,0 +1,716 @@
+//! Chart renderer plugin for slideforge.
+//!
+//! This crate implements the [`ChartRenderer`] plugin trait from
+//! `slideforge-plugin-api` using the `plotters` 0.3.7 crate with its
+//! `SVGBackend`. Seven chart types are supported in v1.0:
+//!
+//! | Type | Module |
+//! |------|--------|
+//! | `bar` | [`bar`] |
+//! | `line` | [`line`] |
+//! | `pie` | [`pie`] |
+//! | `scatter` | [`scatter`] |
+//! | `area` | [`area`] |
+//! | `histogram` | [`histogram`] |
+//! | `stacked-bar` | [`stacked_bar`] |
+//!
+//! ## Architecture Rules (STORY-031)
+//!
+//! - **No I/O**: All rendering is synchronous, pure, in-memory.
+//! - **No subprocess**: `plotters` is a pure-Rust library; no Node.js spawned.
+//! - **Plugin-first**: [`ChartRendererImpl`] uses ONLY the public
+//!   `slideforge_plugin_api::ChartRenderer` trait — no internal bypass.
+//! - **Forbidden deps**: This crate MUST NOT depend on any exporter,
+//!   `slideforge-data`, `slideforge-layout`, `slideforge-cli`,
+//!   `slideforge-syntax`, or `slideforge-eval`.
+
+#![forbid(unsafe_code)]
+#![warn(missing_docs)]
+#![warn(clippy::pedantic)]
+#![allow(clippy::module_name_repetitions)]
+
+pub mod accessibility;
+pub mod area;
+pub mod bar;
+pub mod histogram;
+pub mod line;
+pub mod pie;
+pub mod safety;
+pub mod scatter;
+pub mod stacked_bar;
+pub mod types;
+
+use std::sync::Arc;
+
+use slideforge_plugin_api::ChartRenderer;
+use slideforge_types::{Brand, ChartSpec};
+use tracing::instrument;
+
+use crate::types::{ChartError, ChartSvg, ChartType, DataPoint, DataSeries, InternalChartSpec};
+
+// Re-export primary types for crate consumers.
+pub use crate::types::{ChartType as SfChartType, InternalChartSpec as SfChartSpec};
+
+/// The default `ChartRenderer` plugin implementation for slideforge.
+///
+/// Uses the `plotters` 0.3.7 crate with its `SVGBackend` to render charts
+/// as self-contained SVG strings.
+#[derive(Debug, Default)]
+pub struct ChartRendererImpl;
+
+impl ChartRendererImpl {
+    /// Create a new [`ChartRendererImpl`].
+    #[must_use]
+    pub fn new() -> Self {
+        Self
+    }
+
+    /// Dispatch to the appropriate type-specific renderer and apply post-processing.
+    ///
+    /// Post-processing steps (in order):
+    /// 1. Type-specific renderer → raw SVG string
+    /// 2. [`safety::assert_no_forbidden_elements`]
+    /// 3. [`accessibility::inject_aria_attributes`]
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ChartError`] on render or post-processing failure.
+    fn dispatch_and_process(spec: &InternalChartSpec) -> Result<ChartSvg, ChartError> {
+        let raw_svg = match spec.chart_type {
+            ChartType::Bar => bar::render_bar(spec)?,
+            ChartType::Line => line::render_line(spec)?,
+            ChartType::Pie => pie::render_pie(spec)?,
+            ChartType::Scatter => scatter::render_scatter(spec)?,
+            ChartType::Area => area::render_area(spec)?,
+            ChartType::Histogram => histogram::render_histogram(spec)?,
+            ChartType::StackedBar => stacked_bar::render_stacked_bar(spec)?,
+        };
+
+        safety::assert_no_forbidden_elements(&raw_svg)?;
+        accessibility::inject_aria_attributes(&raw_svg, spec.alt.as_ref())
+    }
+}
+
+impl ChartRenderer for ChartRendererImpl {
+    fn id(&self) -> &'static str {
+        "plotters"
+    }
+
+    #[instrument(skip(self, spec, brand), fields(chart_type = %spec.chart_type))]
+    fn render(
+        &self,
+        spec: &ChartSpec,
+        brand: &Brand,
+    ) -> Result<Vec<u8>, slideforge_plugin_api::ChartError> {
+        let chart_type = ChartType::from_keyword(spec.chart_type.as_ref()).ok_or_else(|| {
+            slideforge_plugin_api::ChartError::UnsupportedChartType {
+                chart_type: spec.chart_type.as_ref().to_owned(),
+            }
+        })?;
+
+        let alt: Arc<str> = match &spec.alt {
+            Some(slideforge_types::specs::AltText::Provided(s)) => Arc::clone(s),
+            Some(slideforge_types::specs::AltText::Decorative) | None => Arc::from(""),
+        };
+
+        let accent_colors = extract_accent_colors(brand);
+        let font_family: Arc<str> = if brand.fonts.body.is_empty() {
+            Arc::from("sans-serif")
+        } else {
+            Arc::clone(&brand.fonts.body)
+        };
+
+        // The plugin API ChartSpec is a skeleton (no series data). We create a
+        // minimal InternalChartSpec with an empty data series and a placeholder
+        // data point so the renderer produces valid output. In the full pipeline,
+        // the eval layer binds data before calling this method.
+        let internal_spec = InternalChartSpec {
+            chart_type,
+            data: vec![DataSeries {
+                name: Arc::from("series"),
+                points: vec![DataPoint { label: Arc::from("item"), value: 1.0 }],
+            }],
+            title: None,
+            x_label: None,
+            y_label: None,
+            alt,
+            width: InternalChartSpec::DEFAULT_WIDTH,
+            height: InternalChartSpec::DEFAULT_HEIGHT,
+            accent_colors,
+            font_family,
+        };
+
+        let svg = Self::dispatch_and_process(&internal_spec).map_err(|e| {
+            slideforge_plugin_api::ChartError::RenderError {
+                message: e.to_string(),
+            }
+        })?;
+
+        Ok(svg.into_string().into_bytes())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers — color extraction from Brand
+// ---------------------------------------------------------------------------
+
+/// Extract the ordered accent color hex strings from a [`Brand`].
+///
+/// The brand's palette provides `primary`, `secondary`, `accent`, and `neutral`.
+/// For chart series coloring we use `accent` as the first accent color, then
+/// `primary` and `secondary` as additional series colors. If all are empty,
+/// the [`InternalChartSpec::FALLBACK_PALETTE`] is used instead.
+///
+/// This function always returns a non-empty Vec (falling back to the constant
+/// palette if needed).
+#[must_use]
+pub fn extract_accent_colors(brand: &Brand) -> Vec<Arc<str>> {
+    let mut colors: Vec<Arc<str>> = Vec::new();
+
+    // Collect non-empty color strings from the palette.
+    // Order: accent first (most visually distinctive), then primary, secondary.
+    for hex in [
+        brand.palette.accent.as_ref(),
+        brand.palette.primary.as_ref(),
+        brand.palette.secondary.as_ref(),
+    ] {
+        if !hex.is_empty() {
+            colors.push(Arc::from(hex));
+        }
+    }
+
+    if colors.is_empty() {
+        // Fall back to the built-in WCAG AA-compliant palette.
+        InternalChartSpec::FALLBACK_PALETTE
+            .iter()
+            .map(|s| Arc::from(*s))
+            .collect()
+    } else {
+        colors
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Test suite
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use std::sync::Arc;
+
+    use slideforge_plugin_api::ChartRenderer;
+    use slideforge_types::{
+        brand::{Brand, BrandFonts, BrandPalette},
+        span::SourceSpan,
+        specs::{AltText, ChartSpec},
+    };
+
+    use super::*;
+    use crate::types::{DataPoint, DataSeries, InternalChartSpec};
+
+    // -----------------------------------------------------------------------
+    // Test fixtures
+    // -----------------------------------------------------------------------
+
+    /// Three-point data series for use in all per-chart-type tests.
+    fn three_point_series(name: &str) -> DataSeries {
+        DataSeries {
+            name: Arc::from(name),
+            points: vec![
+                DataPoint { label: Arc::from("Jan"), value: 100.0 },
+                DataPoint { label: Arc::from("Feb"), value: 150.0 },
+                DataPoint { label: Arc::from("Mar"), value: 120.0 },
+            ],
+        }
+    }
+
+    /// Build a minimal [`InternalChartSpec`] for a given chart type.
+    fn make_spec(chart_type: crate::types::ChartType) -> InternalChartSpec {
+        InternalChartSpec {
+            chart_type,
+            data: vec![three_point_series("Revenue")],
+            title: None,
+            x_label: None,
+            y_label: None,
+            alt: Arc::from("Revenue chart"),
+            width: InternalChartSpec::DEFAULT_WIDTH,
+            height: InternalChartSpec::DEFAULT_HEIGHT,
+            accent_colors: vec![Arc::from("#003766")],
+            font_family: Arc::from("sans-serif"),
+        }
+    }
+
+    /// Build a [`Brand`] with two accent colors (for AC-003 tests).
+    fn make_brand_two_accents() -> Brand {
+        Brand {
+            name: Arc::from("acme"),
+            palette: BrandPalette {
+                primary: Arc::from("#003766"),
+                secondary: Arc::from("#FF6F00"),
+                accent: Arc::from("#009E60"),
+                neutral: Arc::from("#F5F5F5"),
+            },
+            fonts: BrandFonts {
+                heading: Arc::from("Calibri"),
+                body: Arc::from("Calibri"),
+                mono: Arc::from("Courier New"),
+            },
+            layouts: vec![],
+            span: SourceSpan::default(),
+        }
+    }
+
+    /// Build a [`Brand`] with an empty palette (all empty strings — triggers fallback).
+    fn make_brand_empty_palette() -> Brand {
+        Brand {
+            name: Arc::from("empty"),
+            palette: BrandPalette {
+                primary: Arc::from(""),
+                secondary: Arc::from(""),
+                accent: Arc::from(""),
+                neutral: Arc::from(""),
+            },
+            fonts: BrandFonts {
+                heading: Arc::from(""),
+                body: Arc::from(""),
+                mono: Arc::from(""),
+            },
+            layouts: vec![],
+            span: SourceSpan::default(),
+        }
+    }
+
+    fn make_chart_spec(chart_type: &str) -> ChartSpec {
+        ChartSpec {
+            chart_type: Arc::from(chart_type),
+            alt: Some(AltText::Provided(Arc::from("test chart"))),
+            decorative: false,
+            span: SourceSpan::default(),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // AC-001: ChartRenderer trait implementation
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_bc_1_11_001_ac001_chart_renderer_impl_id() {
+        let renderer = ChartRendererImpl::new();
+        assert_eq!(renderer.id(), "plotters");
+    }
+
+    #[test]
+    fn test_bc_1_11_001_ac001_chart_renderer_impl_is_send_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<ChartRendererImpl>();
+    }
+
+    // -----------------------------------------------------------------------
+    // AC-002: All 7 chart types produce valid SVG
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_bc_1_11_001_bar_produces_nonempty_svg() {
+        let spec = make_spec(crate::types::ChartType::Bar);
+        let result = crate::bar::render_bar(&spec);
+        let svg = result.unwrap();
+        assert!(!svg.is_empty(), "bar SVG must not be empty");
+    }
+
+    #[test]
+    fn test_bc_1_11_001_line_produces_nonempty_svg() {
+        let spec = make_spec(crate::types::ChartType::Line);
+        let result = crate::line::render_line(&spec);
+        let svg = result.unwrap();
+        assert!(!svg.is_empty(), "line SVG must not be empty");
+    }
+
+    #[test]
+    fn test_bc_1_11_001_pie_produces_nonempty_svg() {
+        let spec = make_spec(crate::types::ChartType::Pie);
+        let result = crate::pie::render_pie(&spec);
+        let svg = result.unwrap();
+        assert!(!svg.is_empty(), "pie SVG must not be empty");
+    }
+
+    #[test]
+    fn test_bc_1_11_001_scatter_produces_nonempty_svg() {
+        let spec = make_spec(crate::types::ChartType::Scatter);
+        let result = crate::scatter::render_scatter(&spec);
+        let svg = result.unwrap();
+        assert!(!svg.is_empty(), "scatter SVG must not be empty");
+    }
+
+    #[test]
+    fn test_bc_1_11_001_area_produces_nonempty_svg() {
+        let spec = make_spec(crate::types::ChartType::Area);
+        let result = crate::area::render_area(&spec);
+        let svg = result.unwrap();
+        assert!(!svg.is_empty(), "area SVG must not be empty");
+    }
+
+    #[test]
+    fn test_bc_1_11_001_histogram_produces_nonempty_svg() {
+        let spec = make_spec(crate::types::ChartType::Histogram);
+        let result = crate::histogram::render_histogram(&spec);
+        let svg = result.unwrap();
+        assert!(!svg.is_empty(), "histogram SVG must not be empty");
+    }
+
+    #[test]
+    fn test_bc_1_11_001_stacked_bar_produces_nonempty_svg() {
+        let spec = make_spec(crate::types::ChartType::StackedBar);
+        let result = crate::stacked_bar::render_stacked_bar(&spec);
+        let svg = result.unwrap();
+        assert!(!svg.is_empty(), "stacked_bar SVG must not be empty");
+    }
+
+    // -----------------------------------------------------------------------
+    // AC-004: viewBox and absolute dimensions
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_bc_1_11_001_bar_has_viewbox() {
+        let spec = make_spec(crate::types::ChartType::Bar);
+        let svg = crate::bar::render_bar(&spec).unwrap();
+        assert!(
+            svg.contains("viewBox=\"0 0 800 450\""),
+            "bar SVG must contain viewBox=\"0 0 800 450\"; got: {svg}"
+        );
+    }
+
+    #[test]
+    fn test_bc_1_11_001_line_has_viewbox() {
+        let spec = make_spec(crate::types::ChartType::Line);
+        let svg = crate::line::render_line(&spec).unwrap();
+        assert!(svg.contains("viewBox=\"0 0 800 450\""), "line SVG viewBox missing");
+    }
+
+    #[test]
+    fn test_bc_1_11_001_pie_has_viewbox() {
+        let spec = make_spec(crate::types::ChartType::Pie);
+        let svg = crate::pie::render_pie(&spec).unwrap();
+        assert!(svg.contains("viewBox=\"0 0 800 450\""), "pie SVG viewBox missing");
+    }
+
+    #[test]
+    fn test_bc_1_11_001_scatter_has_viewbox() {
+        let spec = make_spec(crate::types::ChartType::Scatter);
+        let svg = crate::scatter::render_scatter(&spec).unwrap();
+        assert!(svg.contains("viewBox=\"0 0 800 450\""), "scatter SVG viewBox missing");
+    }
+
+    #[test]
+    fn test_bc_1_11_001_area_has_viewbox() {
+        let spec = make_spec(crate::types::ChartType::Area);
+        let svg = crate::area::render_area(&spec).unwrap();
+        assert!(svg.contains("viewBox=\"0 0 800 450\""), "area SVG viewBox missing");
+    }
+
+    #[test]
+    fn test_bc_1_11_001_histogram_has_viewbox() {
+        let spec = make_spec(crate::types::ChartType::Histogram);
+        let svg = crate::histogram::render_histogram(&spec).unwrap();
+        assert!(svg.contains("viewBox=\"0 0 800 450\""), "histogram SVG viewBox missing");
+    }
+
+    #[test]
+    fn test_bc_1_11_001_stacked_bar_has_viewbox() {
+        let spec = make_spec(crate::types::ChartType::StackedBar);
+        let svg = crate::stacked_bar::render_stacked_bar(&spec).unwrap();
+        assert!(svg.contains("viewBox=\"0 0 800 450\""), "stacked_bar SVG viewBox missing");
+    }
+
+    // -----------------------------------------------------------------------
+    // AC-005: Accessibility — aria-label injected after full pipeline
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_bc_1_11_001_bar_has_aria_label() {
+        let spec = make_spec(crate::types::ChartType::Bar);
+        let raw_svg = crate::bar::render_bar(&spec).unwrap();
+        let svg = crate::accessibility::inject_aria_attributes(&raw_svg, spec.alt.as_ref())
+            .unwrap();
+        assert!(
+            svg.as_str().contains("aria-label="),
+            "bar SVG must contain aria-label attribute"
+        );
+    }
+
+    #[test]
+    fn test_bc_1_11_001_line_has_aria_label() {
+        let spec = make_spec(crate::types::ChartType::Line);
+        let raw_svg = crate::line::render_line(&spec).unwrap();
+        let svg = crate::accessibility::inject_aria_attributes(&raw_svg, spec.alt.as_ref())
+            .unwrap();
+        assert!(svg.as_str().contains("aria-label="), "line SVG aria-label missing");
+    }
+
+    #[test]
+    fn test_bc_1_11_001_pie_has_aria_label() {
+        let spec = make_spec(crate::types::ChartType::Pie);
+        let raw_svg = crate::pie::render_pie(&spec).unwrap();
+        let svg = crate::accessibility::inject_aria_attributes(&raw_svg, spec.alt.as_ref())
+            .unwrap();
+        assert!(svg.as_str().contains("aria-label="), "pie SVG aria-label missing");
+    }
+
+    #[test]
+    fn test_bc_1_11_001_scatter_has_aria_label() {
+        let spec = make_spec(crate::types::ChartType::Scatter);
+        let raw_svg = crate::scatter::render_scatter(&spec).unwrap();
+        let svg = crate::accessibility::inject_aria_attributes(&raw_svg, spec.alt.as_ref())
+            .unwrap();
+        assert!(svg.as_str().contains("aria-label="), "scatter SVG aria-label missing");
+    }
+
+    #[test]
+    fn test_bc_1_11_001_area_has_aria_label() {
+        let spec = make_spec(crate::types::ChartType::Area);
+        let raw_svg = crate::area::render_area(&spec).unwrap();
+        let svg = crate::accessibility::inject_aria_attributes(&raw_svg, spec.alt.as_ref())
+            .unwrap();
+        assert!(svg.as_str().contains("aria-label="), "area SVG aria-label missing");
+    }
+
+    #[test]
+    fn test_bc_1_11_001_histogram_has_aria_label() {
+        let spec = make_spec(crate::types::ChartType::Histogram);
+        let raw_svg = crate::histogram::render_histogram(&spec).unwrap();
+        let svg = crate::accessibility::inject_aria_attributes(&raw_svg, spec.alt.as_ref())
+            .unwrap();
+        assert!(svg.as_str().contains("aria-label="), "histogram SVG aria-label missing");
+    }
+
+    #[test]
+    fn test_bc_1_11_001_stacked_bar_has_aria_label() {
+        let spec = make_spec(crate::types::ChartType::StackedBar);
+        let raw_svg = crate::stacked_bar::render_stacked_bar(&spec).unwrap();
+        let svg = crate::accessibility::inject_aria_attributes(&raw_svg, spec.alt.as_ref())
+            .unwrap();
+        assert!(svg.as_str().contains("aria-label="), "stacked_bar SVG aria-label missing");
+    }
+
+    // -----------------------------------------------------------------------
+    // AC-006: No script or foreignObject
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_bc_1_11_001_bar_no_script() {
+        let spec = make_spec(crate::types::ChartType::Bar);
+        let svg = crate::bar::render_bar(&spec).unwrap();
+        assert!(!svg.contains("<script"), "bar SVG must not contain <script");
+        assert!(!svg.contains("<foreignObject"), "bar SVG must not contain <foreignObject");
+    }
+
+    #[test]
+    fn test_bc_1_11_001_line_no_script() {
+        let spec = make_spec(crate::types::ChartType::Line);
+        let svg = crate::line::render_line(&spec).unwrap();
+        assert!(!svg.contains("<script"), "line SVG must not contain <script");
+        assert!(!svg.contains("<foreignObject"), "line SVG must not contain <foreignObject");
+    }
+
+    #[test]
+    fn test_bc_1_11_001_pie_no_script() {
+        let spec = make_spec(crate::types::ChartType::Pie);
+        let svg = crate::pie::render_pie(&spec).unwrap();
+        assert!(!svg.contains("<script"), "pie SVG must not contain <script");
+        assert!(!svg.contains("<foreignObject"), "pie SVG must not contain <foreignObject");
+    }
+
+    #[test]
+    fn test_bc_1_11_001_scatter_no_script() {
+        let spec = make_spec(crate::types::ChartType::Scatter);
+        let svg = crate::scatter::render_scatter(&spec).unwrap();
+        assert!(!svg.contains("<script"), "scatter SVG must not contain <script");
+        assert!(!svg.contains("<foreignObject"), "scatter SVG must not contain <foreignObject");
+    }
+
+    #[test]
+    fn test_bc_1_11_001_area_no_script() {
+        let spec = make_spec(crate::types::ChartType::Area);
+        let svg = crate::area::render_area(&spec).unwrap();
+        assert!(!svg.contains("<script"), "area SVG must not contain <script");
+        assert!(!svg.contains("<foreignObject"), "area SVG must not contain <foreignObject");
+    }
+
+    #[test]
+    fn test_bc_1_11_001_histogram_no_script() {
+        let spec = make_spec(crate::types::ChartType::Histogram);
+        let svg = crate::histogram::render_histogram(&spec).unwrap();
+        assert!(!svg.contains("<script"), "histogram SVG must not contain <script");
+        assert!(!svg.contains("<foreignObject"), "histogram SVG must not contain <foreignObject");
+    }
+
+    #[test]
+    fn test_bc_1_11_001_stacked_bar_no_script() {
+        let spec = make_spec(crate::types::ChartType::StackedBar);
+        let svg = crate::stacked_bar::render_stacked_bar(&spec).unwrap();
+        assert!(!svg.contains("<script"), "stacked_bar SVG must not contain <script");
+        assert!(
+            !svg.contains("<foreignObject"),
+            "stacked_bar SVG must not contain <foreignObject"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // AC-003: Brand colors applied to series (tests via extract_accent_colors)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_bc_1_11_001_brand_colors_applied() {
+        // extract_accent_colors is a helper that builds the color list fed into
+        // InternalChartSpec. Verify that the brand's accent/primary/secondary
+        // colors appear in the extracted list.
+        let brand = make_brand_two_accents();
+        let colors = extract_accent_colors(&brand);
+        assert!(!colors.is_empty(), "accent colors must not be empty");
+        // At least one of the brand's palette colors must be present.
+        let color_strs: Vec<&str> = colors.iter().map(|c| c.as_ref()).collect();
+        let brand_colors = ["#003766", "#FF6F00", "#009E60"];
+        let any_present = brand_colors.iter().any(|bc| color_strs.contains(bc));
+        assert!(any_present, "brand colors must appear in extracted palette; got: {color_strs:?}");
+    }
+
+    #[test]
+    fn test_bc_1_11_001_fallback_palette_when_brand_empty() {
+        let brand = make_brand_empty_palette();
+        let colors = extract_accent_colors(&brand);
+        assert!(!colors.is_empty(), "fallback palette must be non-empty");
+        // Fallback palette first entry.
+        assert_eq!(
+            colors[0].as_ref(),
+            InternalChartSpec::FALLBACK_PALETTE[0],
+            "first fallback color must be the canonical default"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // AC-002: Unknown chart type error (EC-003)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_bc_1_11_001_unknown_type_error() {
+        let renderer = ChartRendererImpl::new();
+        let spec = make_chart_spec("radar");
+        let brand = make_brand_two_accents();
+        let result = renderer.render(&spec, &brand);
+        assert!(result.is_err(), "render must fail for unknown chart type 'radar'");
+        let err = result.unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("radar") || msg.contains("unsupported"),
+            "error message must mention 'radar' or 'unsupported'; got: {msg}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // EC-002: Pie chart with single slice
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_bc_1_11_001_pie_single_slice() {
+        let spec = InternalChartSpec {
+            chart_type: crate::types::ChartType::Pie,
+            data: vec![DataSeries {
+                name: Arc::from("Total"),
+                points: vec![DataPoint { label: Arc::from("All"), value: 100.0 }],
+            }],
+            title: None,
+            x_label: None,
+            y_label: None,
+            alt: Arc::from("single slice pie"),
+            width: InternalChartSpec::DEFAULT_WIDTH,
+            height: InternalChartSpec::DEFAULT_HEIGHT,
+            accent_colors: vec![Arc::from("#003766")],
+            font_family: Arc::from("sans-serif"),
+        };
+        let result = crate::pie::render_pie(&spec);
+        let svg = result.unwrap();
+        assert!(!svg.is_empty(), "single-slice pie SVG must not be empty");
+    }
+
+    // -----------------------------------------------------------------------
+    // AC-008: Brand font applied to axis labels
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_bc_1_11_001_brand_font_in_labels() {
+        // The chart renderer constructs TextStyle with the brand font family.
+        // We verify the font name appears in the rendered SVG (plotters renders
+        // font-family CSS on text elements).
+        let spec = InternalChartSpec {
+            chart_type: crate::types::ChartType::Bar,
+            data: vec![three_point_series("Revenue")],
+            title: Some(Arc::from("Brand Font Test")),
+            x_label: Some(Arc::from("Month")),
+            y_label: Some(Arc::from("Value")),
+            alt: Arc::from("test"),
+            width: InternalChartSpec::DEFAULT_WIDTH,
+            height: InternalChartSpec::DEFAULT_HEIGHT,
+            accent_colors: vec![Arc::from("#003766")],
+            font_family: Arc::from("Calibri"),
+        };
+        let svg = crate::bar::render_bar(&spec).unwrap();
+        assert!(
+            svg.contains("Calibri"),
+            "SVG must reference 'Calibri' font family in text elements; got: {}",
+            &svg[..svg.len().min(500)]
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Snapshot tests — one per chart type with fixed 3-point data
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_bc_1_11_001_snapshot_bar() {
+        let spec = make_spec(crate::types::ChartType::Bar);
+        let svg = crate::bar::render_bar(&spec).unwrap();
+        insta::assert_yaml_snapshot!("bar_svg", svg);
+    }
+
+    #[test]
+    fn test_bc_1_11_001_snapshot_line() {
+        let spec = make_spec(crate::types::ChartType::Line);
+        let svg = crate::line::render_line(&spec).unwrap();
+        insta::assert_yaml_snapshot!("line_svg", svg);
+    }
+
+    #[test]
+    fn test_bc_1_11_001_snapshot_pie() {
+        let spec = make_spec(crate::types::ChartType::Pie);
+        let svg = crate::pie::render_pie(&spec).unwrap();
+        insta::assert_yaml_snapshot!("pie_svg", svg);
+    }
+
+    #[test]
+    fn test_bc_1_11_001_snapshot_scatter() {
+        let spec = make_spec(crate::types::ChartType::Scatter);
+        let svg = crate::scatter::render_scatter(&spec).unwrap();
+        insta::assert_yaml_snapshot!("scatter_svg", svg);
+    }
+
+    #[test]
+    fn test_bc_1_11_001_snapshot_area() {
+        let spec = make_spec(crate::types::ChartType::Area);
+        let svg = crate::area::render_area(&spec).unwrap();
+        insta::assert_yaml_snapshot!("area_svg", svg);
+    }
+
+    #[test]
+    fn test_bc_1_11_001_snapshot_histogram() {
+        let spec = make_spec(crate::types::ChartType::Histogram);
+        let svg = crate::histogram::render_histogram(&spec).unwrap();
+        insta::assert_yaml_snapshot!("histogram_svg", svg);
+    }
+
+    #[test]
+    fn test_bc_1_11_001_snapshot_stacked_bar() {
+        let spec = make_spec(crate::types::ChartType::StackedBar);
+        let svg = crate::stacked_bar::render_stacked_bar(&spec).unwrap();
+        insta::assert_yaml_snapshot!("stacked_bar_svg", svg);
+    }
+}
