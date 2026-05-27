@@ -83,17 +83,18 @@ pub fn eval_expr(env: &Env, expr: &Expr, sink: &mut DiagnosticSink) -> Option<Va
         // ── Composites ───────────────────────────────────────────────────────
         Expr::List(items) => {
             let mut collected = Vec::with_capacity(items.len());
+            let mut had_error = false;
             for item in items {
                 match eval_expr(env, item, sink) {
                     Some(v) => collected.push(v),
                     None => {
-                        // Error already pushed; continue to accumulate all
-                        // errors but return None for the whole list.
-                        return None;
+                        // Error already pushed to sink; continue evaluating
+                        // remaining items so all errors are accumulated.
+                        had_error = true;
                     }
                 }
             }
-            Some(Value::List(collected))
+            if had_error { None } else { Some(Value::List(collected)) }
         }
         Expr::Map(entries) => {
             let mut map = slideforge_types::OrderedMap::new();
@@ -431,7 +432,19 @@ fn eval_unaryop(
             ),
         },
         UnaryOpKind::Neg => match val {
-            Value::Int(n) => Some(Value::Int(-n)),
+            Value::Int(n) => n.checked_neg().map_or_else(
+                || {
+                    push_error(
+                        sink,
+                        EvalError::TypeMismatch {
+                            message: "integer overflow: cannot negate minimum integer value"
+                                .to_string(),
+                            span,
+                        },
+                    )
+                },
+                |negated| Some(Value::Int(negated)),
+            ),
             Value::Float(f) => Some(Value::Float(OrderedFloat(-f.0))),
             other => push_error(
                 sink,
@@ -451,8 +464,6 @@ fn eval_unaryop(
 ///
 /// The sink accepts any type implementing `miette::Diagnostic + Send + Sync`.
 /// `EvalError` satisfies this bound.
-// Used by eval_expr once implemented (STORY-011 Green phase).
-#[allow(dead_code)]
 fn push_error(sink: &mut DiagnosticSink, err: EvalError) -> Option<Value> {
     use slideforge_syntax::error::ParseSeverity;
     sink.push_with_severity(err, ParseSeverity::Error);
@@ -680,5 +691,41 @@ mod tests {
         );
         assert_eq!(result, None, "push_error must always return None");
         assert_eq!(sink.len(), 1, "push_error must push exactly one diagnostic");
+    }
+
+    // ── Unary negation: i64::MIN overflow ────────────────────────────────────
+
+    /// FINDING-002: `-i64::MIN` must not panic; must return None + push an error.
+    #[test]
+    fn test_negation_overflow_i64_min() {
+        use slideforge_syntax::UnaryOpKind;
+        let env = empty_env();
+        let mut sink = DiagnosticSink::new();
+        let expr = Expr::UnaryOp {
+            op: UnaryOpKind::Neg,
+            operand: Box::new(Expr::Num(i64::MIN)),
+        };
+        let result = eval_expr(&env, &expr, &mut sink);
+        assert!(result.is_none(), "negating i64::MIN must return None (overflow)");
+        assert!(!sink.is_empty(), "negating i64::MIN must push a diagnostic");
+    }
+
+    // ── List: all errors accumulated, not short-circuit ──────────────────────
+
+    /// FINDING-003: a list with N undefined vars must accumulate N errors,
+    /// not stop at the first.
+    #[test]
+    fn test_list_error_accumulation() {
+        let env = empty_env();
+        let mut sink = DiagnosticSink::new();
+        // List with 3 undefined variables — should accumulate 3 errors.
+        let expr = Expr::List(vec![
+            Expr::Ident("x".to_string()),
+            Expr::Ident("y".to_string()),
+            Expr::Ident("z".to_string()),
+        ]);
+        let result = eval_expr(&env, &expr, &mut sink);
+        assert!(result.is_none(), "list with all undefined vars must return None");
+        assert_eq!(sink.len(), 3, "all 3 undefined vars should produce errors");
     }
 }

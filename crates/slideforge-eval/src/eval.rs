@@ -26,8 +26,8 @@ use crate::filters::format_float_display;
 /// | `Float(f)`   | decimal representation    |
 /// | `Bool(b)`    | `"true"` or `"false"`    |
 /// | `Null`       | `""` (empty string)      |
-/// | `List(_)`    | `"[list]"` placeholder   |
-/// | `Map(_)`     | `"[map]"` placeholder    |
+/// | `List(_)`    | Error: E-EVL-003 (use `\| join` to convert)  |
+/// | `Map(_)`     | Error: E-EVL-003 (use dot access for fields)  |
 ///
 /// Returns `None` if expression evaluation fails; the error is pushed to
 /// `sink` by the underlying [`crate::expr::eval_expr`] call.
@@ -191,5 +191,32 @@ mod tests {
         let result = eval_expr_to_string(&env, &expr, &mut sink);
         assert!(sink.is_empty());
         assert_eq!(result, Some(Arc::from("")));
+    }
+
+    // ── List/Map → error (FINDING-005) ───────────────────────────────────────
+
+    /// FINDING-005: eval_expr_to_string must return None + push error for List values.
+    #[test]
+    fn test_eval_expr_to_string_list_returns_error() {
+        let env = env_with(&[("items", Value::List(vec![Value::Int(1)]))]);
+        let mut sink = DiagnosticSink::new();
+        let expr = Expr::Ident("items".to_string());
+        let result = eval_expr_to_string(&env, &expr, &mut sink);
+        assert!(result.is_none(), "List value must return None from eval_expr_to_string");
+        assert!(!sink.is_empty(), "List value must push a diagnostic");
+    }
+
+    /// FINDING-005: eval_expr_to_string must return None + push error for Map values.
+    #[test]
+    fn test_eval_expr_to_string_map_returns_error() {
+        use slideforge_types::OrderedMap;
+        let mut map = OrderedMap::new();
+        map.insert(Arc::from("k"), Value::Int(1));
+        let env = env_with(&[("obj", Value::Map(map))]);
+        let mut sink = DiagnosticSink::new();
+        let expr = Expr::Ident("obj".to_string());
+        let result = eval_expr_to_string(&env, &expr, &mut sink);
+        assert!(result.is_none(), "Map value must return None from eval_expr_to_string");
+        assert!(!sink.is_empty(), "Map value must push a diagnostic");
     }
 }

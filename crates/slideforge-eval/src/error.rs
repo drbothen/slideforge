@@ -7,9 +7,9 @@
 //! | Code       | Variant              |
 //! |-----------|----------------------|
 //! | E-EVL-001 | `UndefinedVariable`  |
-//! | E-EVL-002 | `FilterNotFound`     |
+//! | E-EVL-002 | (reserved — math context undefined) |
 //! | E-EVL-003 | `TypeMismatch`       |
-//! | E-EVL-004 | `DivisionByZero`     |
+//! | E-EVL-004 | `FilterNotFound`     |
 //! | E-DAT-005 | `FieldAccessFailed`  |
 
 use std::sync::Arc;
@@ -60,13 +60,13 @@ pub enum EvalError {
         span: SourceSpan,
     },
 
-    /// E-EVL-002: A pipe expression referenced a filter function that does
+    /// E-EVL-004: A pipe expression referenced a filter function that does
     /// not exist in the built-in filter registry.
     ///
     /// `available` is a comma-separated list of the registered filter names.
     #[error("unknown filter `{name}` at {span}")]
     #[diagnostic(
-        code("E-EVL-002"),
+        code("E-EVL-004"),
         help("Available filters: {available}")
     )]
     FilterNotFound {
@@ -78,9 +78,11 @@ pub enum EvalError {
         span: SourceSpan,
     },
 
-    /// E-EVL-004: Integer or float division by zero was attempted.
+    /// E-EVL-003 (division by zero): Integer or float division by zero was
+    /// attempted. Classified under type error because the divisor has an
+    /// invalid value for the requested operation.
     #[error("division by zero at {span}")]
-    #[diagnostic(code("E-EVL-004"))]
+    #[diagnostic(code("E-EVL-003"))]
     DivisionByZero {
         /// Source location of the division expression.
         span: SourceSpan,
@@ -183,17 +185,17 @@ mod tests {
         let code = e003.code().unwrap().to_string();
         assert_eq!(code, "E-EVL-003", "TypeMismatch must have code E-EVL-003");
 
-        let e002 = EvalError::FilterNotFound {
+        let e004 = EvalError::FilterNotFound {
             name: Arc::from("x"),
             available: String::new(),
             span: test_span(),
         };
-        let code = e002.code().unwrap().to_string();
-        assert_eq!(code, "E-EVL-002", "FilterNotFound must have code E-EVL-002");
-
-        let e004 = EvalError::DivisionByZero { span: test_span() };
         let code = e004.code().unwrap().to_string();
-        assert_eq!(code, "E-EVL-004", "DivisionByZero must have code E-EVL-004");
+        assert_eq!(code, "E-EVL-004", "FilterNotFound must have code E-EVL-004");
+
+        let e003_div = EvalError::DivisionByZero { span: test_span() };
+        let code = e003_div.code().unwrap().to_string();
+        assert_eq!(code, "E-EVL-003", "DivisionByZero must have code E-EVL-003 (type error in expression)");
 
         let e_dat005 = EvalError::FieldAccessFailed {
             field: Arc::from("x"),
