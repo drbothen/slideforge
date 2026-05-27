@@ -41,6 +41,19 @@ use crate::error::EvalError;
 
 /// Sorted list of all built-in filter names, used to construct
 /// `EvalError::FilterNotFound.available` messages.
+///
+/// # DI-004 — `| bool` is deliberately absent
+///
+/// `| bool` is NOT in this list and MUST NOT be added. Boolean conversion via
+/// implicit coercion (`"true" → true`, `"yes" → true`, `"NO" → false`) is
+/// explicitly forbidden by BC-1.02.003 invariant 1.
+///
+/// The only valid boolean-producing path from a string is an explicit comparison:
+/// `{{ v == "true" }}` or `{{ v == "yes" }}`.
+///
+/// Note: the BC-1.02.003 text lists `| bool` in a filter table, but story spec
+/// AC-006 and architecture rule 2 override that text — `| bool` is forbidden.
+/// This registry is the authoritative source-of-truth for which filters exist.
 pub const AVAILABLE_FILTERS: &[&str] = &[
     "contains",
     "currency",

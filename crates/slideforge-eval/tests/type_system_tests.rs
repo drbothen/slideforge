@@ -452,6 +452,91 @@ fn test_bc_1_02_003_int_in_condition_type_error() {
     );
 }
 
+/// FINDING-P2-001 (adversary pass 2, STORY-014): `@elif "some_string":` must
+/// produce E-EVL-003.
+///
+/// The same DI-004 guard that rejects `@if "true":` must also reject
+/// `@elif "some_string":`. Previously the `BlockItem::If` handler type-checked
+/// only the main `@if` condition and left `elif_branches` unchecked.
+///
+/// This test constructs: `@if true: ... @elif "some_string": ...`
+/// The `@if` condition is a valid Bool, so no error from that arm.
+/// The `@elif` condition is a Str — this MUST produce E-EVL-003.
+#[test]
+fn test_bc_1_02_003_string_in_elif_condition_type_error() {
+    // Build: @if true: (valid) @elif "some_string": (invalid — Str, not Bool)
+    let if_node = IfNode {
+        condition: Spanned::new(Expr::Bool(true), dummy_span()),
+        then_body: vec![],
+        elif_branches: vec![(
+            Spanned::new(Expr::Str("some_string".to_string()), dummy_span()),
+            vec![BlockItem::Slide(Spanned::new(
+                SlideNode {
+                    kind: Spanned::new("content".to_string(), dummy_span()),
+                    tags: vec![],
+                    fields: vec![],
+                    inline_items: vec![],
+                },
+                dummy_span(),
+            ))],
+        )],
+        else_body: None,
+    };
+    let deck_node = DeckNode {
+        items: vec![BlockItem::If(Spanned::new(if_node, dummy_span()))],
+        ..DeckNode::default()
+    };
+
+    let mut sink = DiagnosticSink::new();
+    let _deck = eval_deck(&deck_node, &default_config(), &mut sink);
+
+    // DI-004: @elif with string condition must produce E-EVL-003.
+    assert!(
+        !sink.is_empty(),
+        "@elif with string condition 'some_string' must produce E-EVL-003 (FINDING-P2-001)"
+    );
+    let code = sink.errors()[0].code().map(|c| c.to_string());
+    assert_eq!(
+        code.as_deref(),
+        Some("E-EVL-003"),
+        "@elif string condition must produce E-EVL-003 (FINDING-P2-001, DI-004)"
+    );
+}
+
+/// FINDING-P2-001 (adversary pass 2, STORY-014): `@elif 42:` must also
+/// produce E-EVL-003 (integer is not a boolean).
+#[test]
+fn test_bc_1_02_003_int_in_elif_condition_type_error() {
+    // Build: @if true: (valid) @elif 42: (invalid — Int, not Bool)
+    let if_node = IfNode {
+        condition: Spanned::new(Expr::Bool(true), dummy_span()),
+        then_body: vec![],
+        elif_branches: vec![(
+            Spanned::new(Expr::Num(42), dummy_span()),
+            vec![],
+        )],
+        else_body: None,
+    };
+    let deck_node = DeckNode {
+        items: vec![BlockItem::If(Spanned::new(if_node, dummy_span()))],
+        ..DeckNode::default()
+    };
+
+    let mut sink = DiagnosticSink::new();
+    let _deck = eval_deck(&deck_node, &default_config(), &mut sink);
+
+    assert!(
+        !sink.is_empty(),
+        "@elif with integer condition 42 must produce E-EVL-003 (FINDING-P2-001)"
+    );
+    let code = sink.errors()[0].code().map(|c| c.to_string());
+    assert_eq!(
+        code.as_deref(),
+        Some("E-EVL-003"),
+        "@elif integer condition must produce E-EVL-003 (FINDING-P2-001, DI-004)"
+    );
+}
+
 // ─── BC-1.02.004 — ${{ seq }} disambiguation tests ──────────────────────────
 //
 // These tests require a `TemplateChunk::DollarInterp(Expr)` variant that does
@@ -1048,5 +1133,42 @@ fn test_ordering_string_vs_int_type_error() {
         code.as_deref(),
         Some("E-EVL-003"),
         "String < Int must produce E-EVL-003 (FINDING-005, BC-1.02.003 no-coercion invariant)"
+    );
+}
+
+/// FINDING-P2-002 (adversary pass 2, STORY-014): `"hello" != 42` must produce
+/// E-EVL-003, NOT silently return `Bool(true)`.
+///
+/// BC-1.02.003 no-coercion invariant: `!=` (not-equal) is the logical negation
+/// of `==`. Because `"hello" == 42` must produce E-EVL-003, `"hello" != 42`
+/// must also produce E-EVL-003 — not `Bool(true)` via "they are different types
+/// so they must be not-equal."
+///
+/// The same cross-type guard that rejects `Str == Int` must also reject
+/// `Str != Int`.
+#[test]
+fn test_string_ne_int_type_error() {
+    let env = slideforge_eval::Env::new(IndexMap::new());
+    let mut sink = DiagnosticSink::new();
+    let expr = Expr::BinOp {
+        op: BinOpKind::Ne,
+        lhs: Box::new(Expr::Str("hello".to_string())),
+        rhs: Box::new(Expr::Num(42)),
+    };
+    let result = eval_expr(&env, &expr, &mut sink);
+
+    assert_eq!(
+        result, None,
+        "Str != Int must return None (E-EVL-003), not Bool(true)"
+    );
+    assert!(
+        !sink.is_empty(),
+        "'\"hello\" != 42' must push E-EVL-003 (String vs Int comparison, FINDING-P2-002)"
+    );
+    let code = sink.errors()[0].code().map(|c| c.to_string());
+    assert_eq!(
+        code.as_deref(),
+        Some("E-EVL-003"),
+        "String != Int must produce E-EVL-003 (FINDING-P2-002, BC-1.02.003 no-coercion invariant)"
     );
 }
