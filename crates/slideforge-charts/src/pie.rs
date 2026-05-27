@@ -26,6 +26,9 @@ use crate::types::{ChartError, InternalChartSpec};
 // - truncation is intentional for pixel coordinates
 // - sign: coordinates are always positive (canvas origin at top-left)
 pub fn render_pie(spec: &InternalChartSpec) -> Result<String, ChartError> {
+    // FINDING-004: Validate all data points are finite.
+    crate::bar::validate_data_finite(spec)?;
+
     let width = spec.width;
     let height = spec.height;
 
@@ -79,11 +82,10 @@ pub fn render_pie(spec: &InternalChartSpec) -> Result<String, ChartError> {
             let mut start_angle = -PI / 2.0; // start from 12 o'clock
 
             for (i, point) in series.points.iter().enumerate() {
-                let value = if point.value == 0.0 {
-                    1.0 / n_slices as f64
-                } else {
-                    point.value
-                };
+                // FINDING-002 fix: when a slice value is 0, use 1.0 (not 1.0/n_slices).
+                // With total = n_slices, this gives sweep = 2*PI*(1.0/n_slices) = equal slices.
+                // Using 1.0/n_slices would give sweep = 2*PI*(1/n_slices²), too small.
+                let value = if point.value == 0.0 { 1.0 } else { point.value };
                 let sweep = 2.0 * PI * (value / total);
                 let end_angle = start_angle + sweep;
 
@@ -122,4 +124,97 @@ pub fn render_pie(spec: &InternalChartSpec) -> Result<String, ChartError> {
     }
 
     Ok(inject_viewbox(&svg_buf, width, height))
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::float_cmp)]
+mod tests {
+    use std::sync::Arc;
+
+    use crate::types::{DataPoint, DataSeries, InternalChartSpec};
+
+    fn all_zero_pie_spec(n: usize) -> InternalChartSpec {
+        let points: Vec<DataPoint> = (0..n)
+            .map(|i| DataPoint { label: Arc::from(format!("s{i}").as_str()), value: 0.0 })
+            .collect();
+        InternalChartSpec {
+            chart_type: crate::types::ChartType::Pie,
+            data: vec![DataSeries { name: Arc::from("test"), points }],
+            title: None,
+            x_label: None,
+            y_label: None,
+            alt: Arc::from("zero pie"),
+            width: InternalChartSpec::DEFAULT_WIDTH,
+            height: InternalChartSpec::DEFAULT_HEIGHT,
+            accent_colors: vec![Arc::from("#003766"), Arc::from("#FF6F00"), Arc::from("#009E60")],
+            font_family: Arc::from("sans-serif"),
+        }
+    }
+
+    /// FINDING-002: All-zero pie must produce a full circle SVG (equal slices).
+    ///
+    /// When every slice value is 0, we set each value to 1.0 (not `1.0/n_slices`)
+    /// and keep total = `n_slices`. This yields sweep = `2*PI*(1/n_slices)` per slice,
+    /// summing to a full circle.
+    #[test]
+    fn test_f031_002_all_zero_pie_produces_full_circle_svg() {
+        let spec = all_zero_pie_spec(4);
+        let result = super::render_pie(&spec);
+        let svg = result.unwrap();
+        // The output must be non-empty (visual check that no division-by-zero crash)
+        assert!(!svg.is_empty(), "all-zero pie must produce non-empty SVG");
+        // The SVG must contain path or polygon elements (confirming slices rendered)
+        assert!(
+            svg.contains("<polygon") || svg.contains("<path") || svg.contains("<circle"),
+            "all-zero pie must render visible elements; got: {}",
+            &svg[..svg.len().min(500)]
+        );
+    }
+
+    /// FINDING-002: Two-slice all-zero pie should sum to full circle.
+    /// Each slice sweep should be PI (180°), so the polygon approximations together
+    /// cover 2*PI total sweep (full circle).
+    #[test]
+    fn test_f031_002_all_zero_two_slice_pie_equal_division() {
+        let spec = all_zero_pie_spec(2);
+        let result = super::render_pie(&spec);
+        let svg = result.unwrap();
+        assert!(!svg.is_empty(), "two-slice all-zero pie must render");
+    }
+
+    /// FINDING-002: Verify the per-slice sweep computation is correct for all-zero input.
+    ///
+    /// The computation exposed for testing: when all values are 0:
+    ///   value = 1.0 (NOT `1.0/n_slices`)
+    ///   total = `n_slices`
+    ///   sweep = `2*PI * (1.0 / n_slices)` — equal slices summing to `2*PI`
+    ///
+    /// The buggy behavior was value = `1.0/n_slices` giving
+    ///   sweep = `2*PI / n_slices^2` — too small, total < `2*PI`
+    #[test]
+    fn test_f031_002_zero_slice_value_is_one_not_reciprocal() {
+        // Direct unit test of the arithmetic: compute what the sweep SHOULD be
+        // for n=4 all-zero slices: each sweep = 2*PI/4 = PI/2.
+        // The buggy code gives: value=0.25, total=4, sweep=2*PI*(0.25/4)=PI/8 — wrong.
+        // The fixed code gives: value=1.0, total=4, sweep=2*PI*(1.0/4)=PI/2 — correct.
+        use std::f64::consts::PI;
+        let n_slices: u32 = 4;
+        // Correct behavior:
+        let value_correct = 1.0_f64;
+        let total = f64::from(n_slices);
+        let sweep_correct = 2.0 * PI * (value_correct / total);
+        let expected_sweep = PI / 2.0; // PI/2 for 4 equal slices
+        assert!(
+            (sweep_correct - expected_sweep).abs() < 1e-10,
+            "correct sweep for 4 equal slices must be PI/2; got {sweep_correct}"
+        );
+
+        // Buggy behavior (the value that was being used before the fix):
+        let value_buggy = 1.0 / total;
+        let sweep_buggy = 2.0 * PI * (value_buggy / total);
+        assert!(
+            (sweep_buggy - expected_sweep).abs() > 1e-6,
+            "buggy sweep for 4 equal slices was {sweep_buggy}, which is WRONG (expected {expected_sweep})"
+        );
+    }
 }

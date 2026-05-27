@@ -19,6 +19,13 @@ use crate::types::{ChartError, InternalChartSpec};
 /// fails to produce output.
 #[allow(clippy::cast_possible_truncation)] // coordinate index cast: n_points bounded by data len
 pub fn render_line(spec: &InternalChartSpec) -> Result<String, ChartError> {
+    // FINDING-006: Guard empty data early.
+    if spec.data.is_empty() {
+        return Err(ChartError::MissingDataField { field: Arc::from("data") });
+    }
+    // FINDING-004: Validate all data points are finite.
+    crate::bar::validate_data_finite(spec)?;
+
     let width = spec.width;
     let height = spec.height;
 

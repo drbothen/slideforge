@@ -20,14 +20,17 @@ use crate::types::ChartError;
 /// Returns [`ChartError::RenderError`] if any forbidden element pattern is
 /// found in the SVG string.
 pub fn assert_no_forbidden_elements(svg: &str) -> Result<(), ChartError> {
-    if svg.contains("<script") {
+    // FINDING-008: Use case-insensitive check to catch <SCRIPT>, <Script>, etc.
+    // SVG 1.1 element names are case-sensitive but injections may use any case.
+    let svg_lower = svg.to_ascii_lowercase();
+    if svg_lower.contains("<script") {
         return Err(ChartError::RenderError {
             message: Arc::from(
                 "SVG contains forbidden <script> element — PPTX embedding not safe",
             ),
         });
     }
-    if svg.contains("<foreignObject") {
+    if svg_lower.contains("<foreignobject") {
         return Err(ChartError::RenderError {
             message: Arc::from(
                 "SVG contains forbidden <foreignObject> element — PPTX embedding not safe",
@@ -75,5 +78,27 @@ mod tests {
         let svg_lowercase = r#"<svg><script type="text/javascript">evil()</script></svg>"#;
         let result = assert_no_forbidden_elements(svg_lowercase);
         assert!(result.is_err());
+    }
+
+    /// FINDING-008: Safety check must be case-insensitive — reject <SCRIPT> and <Script>.
+    #[test]
+    fn test_f031_008_safety_rejects_uppercase_script() {
+        let svg_upper = "<svg><SCRIPT>evil()</SCRIPT></svg>";
+        let result = assert_no_forbidden_elements(svg_upper);
+        assert!(result.is_err(), "uppercase <SCRIPT> must be rejected");
+    }
+
+    #[test]
+    fn test_f031_008_safety_rejects_mixed_case_script() {
+        let svg_mixed = "<svg><Script>evil()</Script></svg>";
+        let result = assert_no_forbidden_elements(svg_mixed);
+        assert!(result.is_err(), "mixed-case <Script> must be rejected");
+    }
+
+    #[test]
+    fn test_f031_008_safety_rejects_uppercase_foreign_object() {
+        let svg_upper = r#"<svg><FOREIGNOBJECT width="100"><p>test</p></FOREIGNOBJECT></svg>"#;
+        let result = assert_no_forbidden_elements(svg_upper);
+        assert!(result.is_err(), "uppercase <FOREIGNOBJECT> must be rejected");
     }
 }

@@ -16,7 +16,6 @@ keywords = ["chart", "svg", "plotters", "visualization"]
 slideforge-types = { workspace = true }
 slideforge-plugin-api = { workspace = true }
 plotters = { workspace = true }
-quick-xml = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 

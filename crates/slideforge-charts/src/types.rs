@@ -268,7 +268,7 @@ mod tests {
     #[test]
     fn test_bc_1_11_001_chart_error_missing_data_field_message() {
         let err = ChartError::MissingDataField { field: Arc::from("x") };
-        assert!(err.to_string().contains("x"));
+        assert!(err.to_string().contains('x'));
         assert!(err.to_string().contains("missing required data field"));
     }
 

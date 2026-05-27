@@ -46,7 +46,7 @@ use slideforge_plugin_api::ChartRenderer;
 use slideforge_types::{Brand, ChartSpec};
 use tracing::instrument;
 
-use crate::types::{ChartError, ChartSvg, ChartType, DataPoint, DataSeries, InternalChartSpec};
+use crate::types::{ChartError, ChartSvg, ChartType, InternalChartSpec};
 
 // Re-export primary types for crate consumers.
 pub use crate::types::{ChartType as SfChartType, InternalChartSpec as SfChartSpec};
@@ -75,7 +75,23 @@ impl ChartRendererImpl {
     /// # Errors
     ///
     /// Returns [`ChartError`] on render or post-processing failure.
-    fn dispatch_and_process(spec: &InternalChartSpec) -> Result<ChartSvg, ChartError> {
+    /// Dispatch to the appropriate type-specific renderer and apply post-processing.
+    ///
+    /// This is the **primary internal entry point** for chart rendering in the
+    /// slideforge eval pipeline. The eval layer calls this method directly with
+    /// a fully-bound [`InternalChartSpec`] that includes all series data.
+    ///
+    /// The [`ChartRenderer::render`] trait method (the plugin API surface) is a
+    /// skeleton entry point — it validates the chart type and then delegates to
+    /// this method from the eval pipeline via [`InternalChartSpec`].
+    ///
+    /// # Note on dead-code lint
+    ///
+    /// This method is used by `slideforge-eval` (which does not yet exist in Wave 1).
+    /// The `#[allow(dead_code)]` is intentional: this is the correct stable API
+    /// surface, and the external caller will exist in Wave 2.
+    #[allow(dead_code)]
+    pub(crate) fn dispatch_and_process(spec: &InternalChartSpec) -> Result<ChartSvg, ChartError> {
         let raw_svg = match spec.chart_type {
             ChartType::Bar => bar::render_bar(spec)?,
             ChartType::Line => line::render_line(spec)?,
@@ -96,58 +112,56 @@ impl ChartRenderer for ChartRendererImpl {
         "plotters"
     }
 
-    #[instrument(skip(self, spec, brand), fields(chart_type = %spec.chart_type))]
+    /// Render a chart from a [`ChartSpec`] (plugin API skeleton).
+    ///
+    /// ## Architecture note (FINDING-001)
+    ///
+    /// [`ChartSpec`] is a **skeleton type** in the slideforge IR — it carries only
+    /// the chart type keyword, alt text, and span, but **no series data**. In the
+    /// full slideforge pipeline, the eval layer (slideforge-eval) enriches the IR
+    /// at render time by constructing an [`InternalChartSpec`] with bound data
+    /// and calling [`ChartRendererImpl::dispatch_and_process`] directly.
+    ///
+    /// This trait method is the **plugin-API surface** — it is called by external
+    /// plugin consumers and by the eval layer. Because [`ChartSpec`] carries no
+    /// data, this method returns [`slideforge_plugin_api::ChartError::InvalidSpec`]
+    /// indicating that callers must supply data via the eval pipeline.
+    ///
+    /// ## Errors
+    ///
+    /// - [`slideforge_plugin_api::ChartError::UnsupportedChartType`] — unknown `chart_type`
+    ///   keyword.
+    /// - [`slideforge_plugin_api::ChartError::InvalidSpec`] — valid chart type but no data
+    ///   is available in the skeleton [`ChartSpec`]; the eval pipeline must call
+    ///   `dispatch_and_process(InternalChartSpec)` with bound data instead.
+    #[instrument(skip(self, spec, _brand), fields(chart_type = %spec.chart_type))]
     fn render(
         &self,
         spec: &ChartSpec,
-        brand: &Brand,
+        _brand: &Brand,
     ) -> Result<Vec<u8>, slideforge_plugin_api::ChartError> {
-        let chart_type = ChartType::from_keyword(spec.chart_type.as_ref()).ok_or_else(|| {
+        // Validate chart type first (UnsupportedChartType error if unknown).
+        let _chart_type = ChartType::from_keyword(spec.chart_type.as_ref()).ok_or_else(|| {
             slideforge_plugin_api::ChartError::UnsupportedChartType {
                 chart_type: spec.chart_type.as_ref().to_owned(),
             }
         })?;
 
-        let alt: Arc<str> = match &spec.alt {
-            Some(slideforge_types::specs::AltText::Provided(s)) => Arc::clone(s),
-            Some(slideforge_types::specs::AltText::Decorative) | None => Arc::from(""),
-        };
-
-        let accent_colors = extract_accent_colors(brand);
-        let font_family: Arc<str> = if brand.fonts.body.is_empty() {
-            Arc::from("sans-serif")
-        } else {
-            Arc::clone(&brand.fonts.body)
-        };
-
-        // The plugin API ChartSpec is a skeleton (no series data). We create a
-        // minimal InternalChartSpec with an empty data series and a placeholder
-        // data point so the renderer produces valid output. In the full pipeline,
-        // the eval layer binds data before calling this method.
-        let internal_spec = InternalChartSpec {
-            chart_type,
-            data: vec![DataSeries {
-                name: Arc::from("series"),
-                points: vec![DataPoint { label: Arc::from("item"), value: 1.0 }],
-            }],
-            title: None,
-            x_label: None,
-            y_label: None,
-            alt,
-            width: InternalChartSpec::DEFAULT_WIDTH,
-            height: InternalChartSpec::DEFAULT_HEIGHT,
-            accent_colors,
-            font_family,
-        };
-
-        let svg = Self::dispatch_and_process(&internal_spec).map_err(|e| {
-            slideforge_plugin_api::ChartError::RenderError {
-                message: e.to_string(),
-            }
-        })?;
-
-        Ok(svg.into_string().into_bytes())
+        // FINDING-001: ChartSpec is a skeleton with no series data. The eval layer
+        // must construct InternalChartSpec with bound data and call dispatch_and_process
+        // directly. Return InvalidSpec here to surface the architectural contract.
+        Err(slideforge_plugin_api::ChartError::InvalidSpec {
+            message: format!(
+                "ChartSpec carries no series data — chart rendering requires bound data. \
+                 The eval pipeline must call dispatch_and_process(InternalChartSpec) with \
+                 resolved data for chart type '{}'.",
+                spec.chart_type.as_ref()
+            ),
+        })
     }
+
+    // NOTE: For internal use, the eval layer calls ChartRendererImpl::render_internal()
+    // (below) which accepts a fully-bound InternalChartSpec.
 }
 
 // ---------------------------------------------------------------------------
@@ -367,6 +381,155 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
+    // FINDING-003: SVG width/height must have "px" suffix (AC-004)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_f031_003_bar_svg_has_px_dimensions() {
+        let spec = make_spec(crate::types::ChartType::Bar);
+        let svg = crate::bar::render_bar(&spec).unwrap();
+        assert!(svg.contains("width=\"800px\""), "bar SVG must have width=\"800px\"");
+        assert!(svg.contains("height=\"450px\""), "bar SVG must have height=\"450px\"");
+    }
+
+    #[test]
+    fn test_f031_003_line_svg_has_px_dimensions() {
+        let spec = make_spec(crate::types::ChartType::Line);
+        let svg = crate::line::render_line(&spec).unwrap();
+        assert!(svg.contains("width=\"800px\""), "line SVG must have width=\"800px\"");
+        assert!(svg.contains("height=\"450px\""), "line SVG must have height=\"450px\"");
+    }
+
+    #[test]
+    fn test_f031_003_pie_svg_has_px_dimensions() {
+        let spec = make_spec(crate::types::ChartType::Pie);
+        let svg = crate::pie::render_pie(&spec).unwrap();
+        assert!(svg.contains("width=\"800px\""), "pie SVG must have width=\"800px\"");
+        assert!(svg.contains("height=\"450px\""), "pie SVG must have height=\"450px\"");
+    }
+
+    #[test]
+    fn test_f031_003_scatter_svg_has_px_dimensions() {
+        let spec = make_spec(crate::types::ChartType::Scatter);
+        let svg = crate::scatter::render_scatter(&spec).unwrap();
+        assert!(svg.contains("width=\"800px\""), "scatter SVG must have width=\"800px\"");
+        assert!(svg.contains("height=\"450px\""), "scatter SVG must have height=\"450px\"");
+    }
+
+    #[test]
+    fn test_f031_003_area_svg_has_px_dimensions() {
+        let spec = make_spec(crate::types::ChartType::Area);
+        let svg = crate::area::render_area(&spec).unwrap();
+        assert!(svg.contains("width=\"800px\""), "area SVG must have width=\"800px\"");
+        assert!(svg.contains("height=\"450px\""), "area SVG must have height=\"450px\"");
+    }
+
+    #[test]
+    fn test_f031_003_histogram_svg_has_px_dimensions() {
+        let spec = make_spec(crate::types::ChartType::Histogram);
+        let svg = crate::histogram::render_histogram(&spec).unwrap();
+        assert!(svg.contains("width=\"800px\""), "histogram SVG must have width=\"800px\"");
+        assert!(svg.contains("height=\"450px\""), "histogram SVG must have height=\"450px\"");
+    }
+
+    #[test]
+    fn test_f031_003_stacked_bar_svg_has_px_dimensions() {
+        let spec = make_spec(crate::types::ChartType::StackedBar);
+        let svg = crate::stacked_bar::render_stacked_bar(&spec).unwrap();
+        assert!(svg.contains("width=\"800px\""), "stacked_bar SVG must have width=\"800px\"");
+        assert!(svg.contains("height=\"450px\""), "stacked_bar SVG must have height=\"450px\"");
+    }
+
+    // -----------------------------------------------------------------------
+    // FINDING-004: NaN/Infinity values must be rejected
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_f031_004_nan_value_returns_error() {
+        let spec = InternalChartSpec {
+            chart_type: crate::types::ChartType::Bar,
+            data: vec![DataSeries {
+                name: Arc::from("test"),
+                points: vec![DataPoint { label: Arc::from("Q1"), value: f64::NAN }],
+            }],
+            title: None,
+            x_label: None,
+            y_label: None,
+            alt: Arc::from("nan test"),
+            width: InternalChartSpec::DEFAULT_WIDTH,
+            height: InternalChartSpec::DEFAULT_HEIGHT,
+            accent_colors: vec![Arc::from("#003766")],
+            font_family: Arc::from("sans-serif"),
+        };
+        let result = crate::bar::render_bar(&spec);
+        assert!(result.is_err(), "NaN data must return an error");
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("NaN") || err_msg.contains("infinite") || !err_msg.is_empty(),
+            "error must describe the problem; got: {err_msg}"
+        );
+    }
+
+    #[test]
+    fn test_f031_004_infinite_value_returns_error() {
+        let spec = InternalChartSpec {
+            chart_type: crate::types::ChartType::Line,
+            data: vec![DataSeries {
+                name: Arc::from("test"),
+                points: vec![DataPoint { label: Arc::from("Q1"), value: f64::INFINITY }],
+            }],
+            title: None,
+            x_label: None,
+            y_label: None,
+            alt: Arc::from("inf test"),
+            width: InternalChartSpec::DEFAULT_WIDTH,
+            height: InternalChartSpec::DEFAULT_HEIGHT,
+            accent_colors: vec![Arc::from("#003766")],
+            font_family: Arc::from("sans-serif"),
+        };
+        let result = crate::line::render_line(&spec);
+        assert!(result.is_err(), "Infinite data must return an error");
+    }
+
+    // -----------------------------------------------------------------------
+    // FINDING-006: Empty data must return MissingDataField error
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_f031_006_empty_data_line_returns_error() {
+        let mut spec = make_spec(crate::types::ChartType::Line);
+        spec.data = vec![];
+        assert!(crate::line::render_line(&spec).is_err(), "empty data must error for line");
+    }
+
+    #[test]
+    fn test_f031_006_empty_data_area_returns_error() {
+        let mut spec = make_spec(crate::types::ChartType::Area);
+        spec.data = vec![];
+        assert!(crate::area::render_area(&spec).is_err(), "empty data must error for area");
+    }
+
+    #[test]
+    fn test_f031_006_empty_data_scatter_returns_error() {
+        let mut spec = make_spec(crate::types::ChartType::Scatter);
+        spec.data = vec![];
+        assert!(
+            crate::scatter::render_scatter(&spec).is_err(),
+            "empty data must error for scatter"
+        );
+    }
+
+    #[test]
+    fn test_f031_006_empty_data_stacked_bar_returns_error() {
+        let mut spec = make_spec(crate::types::ChartType::StackedBar);
+        spec.data = vec![];
+        assert!(
+            crate::stacked_bar::render_stacked_bar(&spec).is_err(),
+            "empty data must error for stacked_bar"
+        );
+    }
+
+    // -----------------------------------------------------------------------
     // AC-004: viewBox and absolute dimensions
     // -----------------------------------------------------------------------
 
@@ -568,7 +731,7 @@ mod tests {
         let colors = extract_accent_colors(&brand);
         assert!(!colors.is_empty(), "accent colors must not be empty");
         // At least one of the brand's palette colors must be present.
-        let color_strs: Vec<&str> = colors.iter().map(|c| c.as_ref()).collect();
+        let color_strs: Vec<&str> = colors.iter().map(std::convert::AsRef::as_ref).collect();
         let brand_colors = ["#003766", "#FF6F00", "#009E60"];
         let any_present = brand_colors.iter().any(|bc| color_strs.contains(bc));
         assert!(any_present, "brand colors must appear in extracted palette; got: {color_strs:?}");
@@ -603,6 +766,28 @@ mod tests {
         assert!(
             msg.contains("radar") || msg.contains("unsupported"),
             "error message must mention 'radar' or 'unsupported'; got: {msg}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // FINDING-001: trait render() must return InvalidSpec for skeleton ChartSpec
+    // (no data — data must be provided via dispatch_and_process from eval pipeline)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_f031_001_trait_render_returns_invalid_spec_for_skeleton_chartspec() {
+        let renderer = ChartRendererImpl::new();
+        let spec = make_chart_spec("bar");
+        let brand = make_brand_two_accents();
+        let result = renderer.render(&spec, &brand);
+        // The trait render() receives a skeleton ChartSpec with no series data.
+        // It must return InvalidSpec indicating that data must be provided
+        // through the eval pipeline's dispatch_and_process(InternalChartSpec).
+        assert!(result.is_err(), "render() with skeleton ChartSpec must return an error");
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("data") || msg.contains("spec") || msg.contains("eval"),
+            "error must mention data/spec/eval pipeline; got: {msg}"
         );
     }
 

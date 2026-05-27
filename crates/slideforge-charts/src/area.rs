@@ -17,6 +17,13 @@ use crate::types::{ChartError, InternalChartSpec};
 /// Returns [`ChartError`] if the data is invalid or the plotters backend
 /// fails to produce output.
 pub fn render_area(spec: &InternalChartSpec) -> Result<String, ChartError> {
+    // FINDING-006: Guard empty data early.
+    if spec.data.is_empty() {
+        return Err(ChartError::MissingDataField { field: Arc::from("data") });
+    }
+    // FINDING-004: Validate all data points are finite.
+    crate::bar::validate_data_finite(spec)?;
+
     let width = spec.width;
     let height = spec.height;
 
