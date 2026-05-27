@@ -1,10 +1,23 @@
-//! `slideforge-validate` — component crate for the slideforge workspace.
+//! `slideforge-validate` — compile-time validation for the slideforge DSL.
 //!
-//! This crate is in initial scaffolding (Phase 0). See `seed/PROJECT-SEED.md`
-//! at the repository root for the full project specification, and
-//! `seed/DSL-GRAMMAR.ebnf` for the formal grammar.
+//! Validators check the semantic [`Deck`](slideforge_types::Deck) IR for
+//! content and accessibility issues before export. All validators implement
+//! the [`Validator`](slideforge_plugin_api::Validator) trait from
+//! `slideforge-plugin-api`.
+//!
+//! ## Built-in validators
+//!
+//! | Validator | ID | Description |
+//! |-----------|-----|-------------|
+//! | [`AltTextValidator`] | `"alt-text"` | Checks all visual elements for required alt text (WCAG 1.1.1) |
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
+
+mod alt_text;
+mod utils;
+
+pub use alt_text::AltTextValidator;
+pub use utils::is_blank;

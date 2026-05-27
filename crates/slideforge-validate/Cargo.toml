@@ -1,6 +1,6 @@
 [package]
 name = "slideforge-validate"
-description = "Component crate for slideforge"
+description = "Compile-time validation for the slideforge DSL — accessibility, overflow, WCAG AA"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,5 +11,10 @@ homepage.workspace = true
 readme = "../../README.md"
 
 [dependencies]
-miette = { workspace = true }
+slideforge-types = { workspace = true }
+slideforge-plugin-api = { workspace = true }
 thiserror = { workspace = true }
+miette = { workspace = true }
+
+[dev-dependencies]
+insta = { workspace = true }
