@@ -556,8 +556,10 @@ impl<'a> LatexParser<'a> {
                     "align" | "align*" | "aligned" => self.parse_align_env("align"),
                     "cases" => self.parse_cases_env(),
                     other => {
-                        // Unknown environment — produce diagnostic and skip
-                        if !is_supported_command(other) {
+                        // All non-{align,cases} environments are unsupported — always diagnose.
+                        // (The is_supported_command check was removed: command names like
+                        // "frac" being valid commands does NOT make \begin{frac} valid.)
+                        {
                             let cmd_span = self.span_at(cmd_start);
                             self.diags.push(MathDiagnostic::new(
                                 MathRendererError::UnsupportedCommand {
