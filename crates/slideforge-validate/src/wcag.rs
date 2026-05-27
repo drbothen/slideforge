@@ -102,8 +102,10 @@ pub fn contrast_ratio(l1: f64, l2: f64) -> f64 {
 /// the `#RRGGBB` format.
 #[must_use]
 pub fn parse_hex_color(hex: &str) -> Option<(u8, u8, u8)> {
-    // Accept only "#RRGGBB" — exactly 7 characters starting with '#'
-    if hex.len() != 7 || !hex.starts_with('#') {
+    // Accept only "#RRGGBB" — exactly 7 ASCII characters starting with '#'.
+    // The is_ascii() guard prevents byte-index slicing from panicking on
+    // multi-byte UTF-8 characters that happen to produce a 7-byte string.
+    if hex.len() != 7 || !hex.starts_with('#') || !hex.is_ascii() {
         return None;
     }
     let r = u8::from_str_radix(&hex[1..3], 16).ok()?;
@@ -321,6 +323,84 @@ mod tests {
     fn test_BC_5_01_003_parse_hex_empty_invalid() {
         let result = parse_hex_color("");
         assert_eq!(result, None, "empty string must return None");
+    }
+
+    // ── sRGB branch boundary at 0.04045 ───────────────────────────────────────
+
+    /// ADV-P01-LOW-001: sRGB boundary at c=0.04045 uses the linear branch.
+    ///
+    /// At exactly 0.04045 the condition `c <= 0.04045` is true, so:
+    /// `linear = 0.04045 / 12.92 ≈ 0.003130805`.
+    #[test]
+    fn test_BC_5_01_003_srgb_boundary_at_0_04045_linear_branch() {
+        let c = 0.04045_f64;
+        let result = srgb_component_to_linear(c);
+        let expected = c / 12.92;
+        assert!(
+            (result - expected).abs() < 1e-10,
+            "srgb_component_to_linear(0.04045) must use linear branch (c/12.92 = {expected}); got {result}"
+        );
+    }
+
+    /// ADV-P01-LOW-001: sRGB boundary just above 0.04045 uses the power-law branch.
+    ///
+    /// At c=0.04046 the condition `c <= 0.04045` is false, so:
+    /// `linear = ((0.04046 + 0.055) / 1.055).powf(2.4)`.
+    /// Near-continuity: the two results should be close (within 1e-5).
+    #[test]
+    fn test_BC_5_01_003_srgb_boundary_above_0_04045_power_branch() {
+        let c_below = 0.04045_f64;
+        let c_above = 0.04046_f64;
+        let result_below = srgb_component_to_linear(c_below);
+        let result_above = srgb_component_to_linear(c_above);
+        // Power-law branch formula for c_above:
+        let expected_above = ((c_above + 0.055) / 1.055).powf(2.4);
+        assert!(
+            (result_above - expected_above).abs() < 1e-10,
+            "srgb_component_to_linear(0.04046) must use power-law branch; got {result_above}"
+        );
+        // Near-continuity: the branch point must not introduce a large discontinuity.
+        assert!(
+            (result_above - result_below).abs() < 1e-5,
+            "sRGB branch point must be near-continuous: below={result_below}, above={result_above}"
+        );
+    }
+
+    // ── Hex colour parsing — lowercase ────────────────────────────────────────
+
+    /// ADV-P01-LOW-002: `parse_hex_color("#ff0000")` (lowercase) returns `Some((255, 0, 0))`.
+    #[test]
+    fn test_BC_5_01_003_parse_hex_lowercase() {
+        let result = parse_hex_color("#ff0000");
+        assert_eq!(
+            result,
+            Some((255_u8, 0_u8, 0_u8)),
+            "parse_hex_color(\"#ff0000\") must return Some((255, 0, 0)); got {result:?}"
+        );
+    }
+
+    /// ADV-P01-HIGH-001: `parse_hex_color` on a non-ASCII 7-byte string returns
+    /// `None` without panicking.
+    ///
+    /// `"#a\u{00E9}bcd"` is 7 bytes but contains a 2-byte UTF-8 sequence (é = U+00E9).
+    /// Byte-slicing into a multi-byte character would panic; the ASCII guard must
+    /// intercept this before any slicing occurs.
+    #[test]
+    fn test_BC_5_01_003_parse_hex_non_ascii_returns_none() {
+        // U+00E9 (é) encodes to 2 bytes in UTF-8: 0xC3 0xA9.
+        // "#a" + "\u{00E9}" + "bcd" = 1 + 1 + 2 + 3 = 7 bytes total.
+        let non_ascii = "#a\u{00E9}bcd";
+        assert_eq!(
+            non_ascii.len(),
+            7,
+            "test precondition: input must be exactly 7 bytes; got {}",
+            non_ascii.len()
+        );
+        let result = parse_hex_color(non_ascii);
+        assert_eq!(
+            result, None,
+            "parse_hex_color with non-ASCII 7-byte input must return None; got {result:?}"
+        );
     }
 
     // ── wcag_aa_passes ─────────────────────────────────────────────────────────

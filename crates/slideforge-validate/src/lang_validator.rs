@@ -36,9 +36,6 @@ use crate::utils::is_blank;
 ///
 /// `Info` severity — never blocks export, even in strict mode.
 /// Traces to BC-5.01.004.
-// Used in tests via `super::E_A11_003`. Rust dead_code lint does not count
-// cfg(test) usage, so we suppress it here.
-#[allow(dead_code)]
 pub(crate) const E_A11_003: &str = "E-A11-003";
 
 /// Validates the deck's `lang` field and emits `E-A11-003` if absent or blank.

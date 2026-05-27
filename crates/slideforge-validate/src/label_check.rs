@@ -22,22 +22,17 @@ use slideforge_plugin_api::{Diagnostic, DiagnosticSeverity, Validator, Validator
 use slideforge_types::{Deck, FieldValue, SourceSpan, Value};
 
 use crate::utils::is_blank;
-use crate::wcag::{contrast_ratio, parse_hex_color, relative_luminance};
+use crate::wcag::{parse_hex_color, wcag_aa_passes};
 
 /// Error code for a color-coded element with missing or blank label.
 ///
 /// Traces to BC-5.01.003.
-// Used in tests via `super::E_A11_002`. Rust dead_code lint does not count
-// cfg(test) usage, so we suppress it here.
-#[allow(dead_code)]
 pub(crate) const E_A11_002: &str = "E-A11-002";
 
 /// Warning code emitted when a color pair fails WCAG AA contrast.
 ///
 /// This is advisory only — it does not block export. Traces to BC-5.01.003
 /// (WCAG 1.4.3 Contrast Minimum).
-// Used in tests via `super::E_A11_004`. See E_A11_002 note above.
-#[allow(dead_code)]
 pub(crate) const E_A11_004: &str = "E-A11-004";
 
 /// Slide types that use color to convey meaning and therefore require a
@@ -104,12 +99,20 @@ impl Validator for LabelCheckValidator {
                     && let (Some(fg), Some(bg)) =
                         (parse_hex_color(fg_str), parse_hex_color(bg_str))
                 {
-                    let foreground_luminance = relative_luminance(fg.0, fg.1, fg.2);
-                    let background_luminance = relative_luminance(bg.0, bg.1, bg.2);
-                    let ratio = contrast_ratio(foreground_luminance, background_luminance);
-                    // Normal text threshold: 4.5:1 (large text 3.0:1 is not
-                    // detectable at Wave 2 — we have no font-size info yet).
-                    if ratio < 4.5 {
+                    // Use wcag_aa_passes with large_text=false: font-size is not
+                    // available in Wave 2, so we always apply the 4.5:1 normal-text
+                    // threshold. This eliminates threshold duplication with wcag.rs.
+                    if !wcag_aa_passes(fg, bg, false) {
+                        // Compute ratio for the warning message. The ratio must be
+                        // computed here only for display; the pass/fail decision
+                        // is delegated entirely to wcag_aa_passes above.
+                        let ratio = {
+                            use crate::wcag::{contrast_ratio, relative_luminance};
+                            contrast_ratio(
+                                relative_luminance(fg.0, fg.1, fg.2),
+                                relative_luminance(bg.0, bg.1, bg.2),
+                            )
+                        };
                         diagnostics.push(make_low_contrast_warning(
                             slide.slide_type.as_ref(),
                             ratio,
