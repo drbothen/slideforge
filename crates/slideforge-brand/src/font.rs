@@ -104,7 +104,11 @@ pub fn parse_theme_fonts(xml_bytes: &[u8]) -> Result<BrandFonts, BrandError> {
                     _ => {}
                 }
             }
-            Ok(Event::Eof) | Err(_) => break,
+            Ok(Event::Eof) => break,
+            Err(e) => {
+                tracing::warn!(error = %e, "XML parse error in theme1.xml font section; partial font data may be incomplete");
+                break;
+            }
             _ => {}
         }
         buf.clear();
@@ -405,5 +409,24 @@ mod tests {
             !font_stem_matches("helvetica", "arial"),
             "helvetica must not match 'arial'"
         );
+    }
+
+    /// FINDING-004 — truncated/malformed XML in font parsing does not panic.
+    ///
+    /// When the XML stream hits a parse error, the font parser logs via `tracing::warn!`
+    /// and falls back to Calibri for any missing font elements.
+    #[test]
+    fn test_finding_004_malformed_font_xml_returns_fallback() {
+        // Abruptly truncated XML that cuts off before the font elements.
+        let truncated_xml =
+            b"<?xml version=\"1.0\"?><a:theme xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"><a:themeElements><a:fontScheme name=\"T\"><a:majorFont><a:latin typeface=\"Calibri Light\"/><!-- abrupt";
+        let result = parse_theme_fonts(truncated_xml);
+        // Must not panic — falls back to defaults for any missing context.
+        assert!(result.is_ok(), "malformed XML must not produce a hard error in font parsing");
+        // Whatever was parsed (or fallback Calibri) must be returned.
+        let fonts = result.unwrap();
+        // We extracted majorFont before truncation, so heading might be Calibri Light.
+        // minorFont was not reached, so body falls back to Calibri.
+        assert_eq!(fonts.body.as_ref(), "Calibri", "body font falls back to Calibri after truncation");
     }
 }

@@ -92,6 +92,15 @@ pub enum BrandError {
     /// declared font name.
     ///
     /// This is a cosmetic warning. The build exits with code 0.
+    ///
+    /// ## PANOSE deviation note (FINDING-005)
+    ///
+    /// The error taxonomy's aspirational format for E-BRD-004 includes a
+    /// `(panose: [<class>])` suffix.  PANOSE data cannot be obtained from a
+    /// directory scan — it requires parsing the font binary (e.g., via
+    /// `font-kit` or the OS font API).  The current implementation performs a
+    /// name-based scan only and therefore omits the PANOSE field.
+    /// A full `font-kit`-based implementation is deferred to a future story.
     #[error(
         "E-BRD-004: Font '{font_name}' not available on this build host. \
          Using '{fallback}' for build-time metrics. Text metrics may differ."
@@ -202,5 +211,30 @@ mod tests {
             msg.contains("E-BRD-004"),
             "error message must contain error code, got: {msg}"
         );
+    }
+
+    /// FINDING-005 — E-BRD-004 message does NOT include PANOSE data.
+    ///
+    /// The error taxonomy's aspirational format includes `(panose: [<class>])`,
+    /// but PANOSE data is not available from a directory scan.  This test
+    /// verifies the message format is stable and does NOT include a PANOSE
+    /// field that we cannot populate.
+    #[test]
+    fn test_finding_005_font_unavailable_does_not_include_panose() {
+        let err = BrandError::FontUnavailable {
+            font_name: Arc::from("Calibri Light"),
+            fallback: Arc::from("Arial"),
+        };
+        let msg = err.to_string();
+        // Must NOT include "panose" — we cannot provide it without font binary parsing.
+        assert!(
+            !msg.contains("panose"),
+            "E-BRD-004 message must not include panose (not available from name-scan), \
+             got: {msg}"
+        );
+        // Must still include the required fields.
+        assert!(msg.contains("E-BRD-004"), "must have error code");
+        assert!(msg.contains("Calibri Light"), "must have font name");
+        assert!(msg.contains("Arial"), "must have fallback");
     }
 }

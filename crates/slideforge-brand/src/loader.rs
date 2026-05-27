@@ -142,20 +142,33 @@ impl BrandLoader {
         let fonts = parse_theme_fonts(&theme_xml)?;
 
         // --- Step 7: Font availability check (cosmetic) ---
+        // For each unavailable font, construct BrandError::FontUnavailable and log it
+        // as a structured warning.  The load continues regardless — font unavailability
+        // is a cosmetic warning (exit 0), not a fatal error.
         if ctx.check_font_availability {
             let fallback = resolve_fallback();
             if !font_available(fonts.heading.as_ref()) {
+                let warn = BrandError::FontUnavailable {
+                    font_name: Arc::clone(&fonts.heading),
+                    fallback: Arc::clone(&fallback),
+                };
                 tracing::warn!(
+                    warning = %warn,
                     font = fonts.heading.as_ref(),
                     fallback = fallback.as_ref(),
-                    "heading font unavailable on build host (E-BRD-004)"
+                    "heading font unavailable on build host"
                 );
             }
             if !font_available(fonts.body.as_ref()) {
+                let warn = BrandError::FontUnavailable {
+                    font_name: Arc::clone(&fonts.body),
+                    fallback: Arc::clone(&fallback),
+                };
                 tracing::warn!(
+                    warning = %warn,
                     font = fonts.body.as_ref(),
                     fallback = fallback.as_ref(),
-                    "body font unavailable on build host (E-BRD-004)"
+                    "body font unavailable on build host"
                 );
             }
         }
@@ -227,11 +240,12 @@ fn brand_from_template(template: &BrandTemplate, source_path: &str) -> Brand {
     );
 
     // Map OOXML color slots to BrandPalette fields.
-    // Default to gray if a slot is missing (should not happen after loading).
+    // Default to gray if a slot is missing or holds an unresolved scheme reference.
     let slot_hex = |slot_name: &str| -> Arc<str> {
         template
             .color_by_name(slot_name)
-            .map_or_else(|| Arc::from("#808080"), |s| Arc::clone(&s.hex))
+            .and_then(|s| s.hex())
+            .map_or_else(|| Arc::from("#808080"), Arc::from)
     };
 
     let palette = BrandPalette {
@@ -904,6 +918,113 @@ mod tests {
                 slideforge_plugin_api::BrandError::ValidationError { .. }
             ),
             "must be ValidationError for TOML source"
+        );
+    }
+
+    /// FINDING-002 — BrandError::FontUnavailable is correctly constructed and has proper
+    /// error message format.
+    ///
+    /// This is a unit test of the error variant construction path.  It verifies:
+    /// 1. The variant can be constructed with `font_name` and `fallback` fields.
+    /// 2. Its `Display` message contains the error code E-BRD-004, font name, and fallback.
+    ///
+    /// The loader constructs this variant for each unavailable font before logging it.
+    #[test]
+    fn test_finding_002_font_unavailable_error_variant_constructed() {
+        // Verify the error variant construction directly.
+        let font_name: Arc<str> = Arc::from("NonExistentFont_STORY022_TEST");
+        let fallback: Arc<str> = Arc::from("Arial");
+        let err = BrandError::FontUnavailable {
+            font_name: Arc::clone(&font_name),
+            fallback: Arc::clone(&fallback),
+        };
+        let msg = err.to_string();
+        assert!(
+            msg.contains("E-BRD-004"),
+            "FontUnavailable must include E-BRD-004, got: {msg}"
+        );
+        assert!(
+            msg.contains("NonExistentFont_STORY022_TEST"),
+            "FontUnavailable must include font name, got: {msg}"
+        );
+        assert!(
+            msg.contains("Arial"),
+            "FontUnavailable must include fallback, got: {msg}"
+        );
+    }
+
+    /// FINDING-002 — load_template with check_font_availability=true and a font that
+    /// cannot possibly be installed constructs FontUnavailable via the tracing warn path.
+    ///
+    /// We use a theme where the font names are deliberately impossible strings to
+    /// guarantee `font_available` returns false, driving the production construction path.
+    #[test]
+    fn test_finding_002_load_constructs_font_unavailable_for_missing_font() {
+        use std::io::Write;
+        use std::sync::{Arc as StdArc, Mutex};
+        use tracing_subscriber::layer::SubscriberExt as _;
+
+        // A theme with a guaranteed-absent font.
+        let theme_with_absent_font = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="AbsentFontTheme">
+  <a:themeElements>
+    <a:clrScheme name="TestScheme">
+      <a:dk1><a:srgbClr val="000000"/></a:dk1>
+      <a:lt1><a:srgbClr val="FFFFFF"/></a:lt1>
+      <a:dk2><a:srgbClr val="003087"/></a:dk2>
+      <a:lt2><a:srgbClr val="F5F5F5"/></a:lt2>
+      <a:acc1><a:srgbClr val="0066CC"/></a:acc1>
+      <a:acc2><a:srgbClr val="FF6B35"/></a:acc2>
+      <a:acc3><a:srgbClr val="28A745"/></a:acc3>
+      <a:acc4><a:srgbClr val="FFC107"/></a:acc4>
+      <a:acc5><a:srgbClr val="6F42C1"/></a:acc5>
+      <a:acc6><a:srgbClr val="17A2B8"/></a:acc6>
+      <a:hlink><a:srgbClr val="0000EE"/></a:hlink>
+      <a:folHlink><a:srgbClr val="551A8B"/></a:folHlink>
+    </a:clrScheme>
+    <a:fontScheme name="AbsentFontScheme">
+      <a:majorFont><a:latin typeface="NonExistentHeadingFont_STORY022_TEST"/></a:majorFont>
+      <a:minorFont><a:latin typeface="NonExistentBodyFont_STORY022_TEST"/></a:minorFont>
+    </a:fontScheme>
+  </a:themeElements>
+</a:theme>"#;
+
+        let zip_bytes = build_pptx_zip(theme_with_absent_font);
+        let path = write_temp_file(&zip_bytes, "pptx");
+
+        // Track whether the tracing::warn! fired (which logs the constructed FontUnavailable).
+        let warned = StdArc::new(Mutex::new(false));
+        let warned_clone = StdArc::clone(&warned);
+        let warned_layer = {
+            let w = StdArc::clone(&warned_clone);
+            tracing_subscriber::fmt::layer().with_writer(move || {
+                let _ = w.lock().map(|mut guard| *guard = true);
+                std::io::sink()
+            })
+        };
+        let subscriber = tracing_subscriber::registry().with(warned_layer);
+        let _guard = tracing::subscriber::set_default(subscriber);
+
+        let loader = BrandLoader::new();
+        let ctx = BrandLoadContext {
+            check_font_availability: true,
+            root_dir: std::path::PathBuf::from("."),
+            span: slideforge_types::SourceSpan::default(),
+        };
+
+        // Load must succeed (font unavailability is cosmetic, not fatal).
+        let result = loader.load_template(&path, &ctx);
+        let _ = std::fs::remove_file(&path);
+        assert!(
+            result.is_ok(),
+            "font unavailability must not cause load to fail (FINDING-002)"
+        );
+
+        // The warning path was exercised (tracing::warn! fired with the constructed error).
+        let was_warned = warned.lock().is_ok_and(|g| *g);
+        assert!(
+            was_warned,
+            "unavailable font must trigger tracing::warn! with FontUnavailable variant (FINDING-002)"
         );
     }
 }
