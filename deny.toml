@@ -45,6 +45,7 @@ allow = [
     "CC0-1.0",
     "Zlib",
     "Unicode-3.0",
+    "MPL-2.0",
 ]
 
 # Note: licenses not in the allow list above are implicitly denied.

@@ -124,11 +124,13 @@ impl BrandLoader {
 
         // --- Step 4: Read theme XML ---
         let theme_xml = {
-            let mut entry = zip.by_name(theme_path).map_err(|e| BrandError::ParseError {
-                path: Arc::from(path.to_string_lossy().as_ref()),
-                reason: Arc::from(e.to_string().as_str()),
-                span: ctx.span.clone(),
-            })?;
+            let mut entry = zip
+                .by_name(theme_path)
+                .map_err(|e| BrandError::ParseError {
+                    path: Arc::from(path.to_string_lossy().as_ref()),
+                    reason: Arc::from(e.to_string().as_str()),
+                    span: ctx.span.clone(),
+                })?;
             let mut buf = Vec::new();
             entry
                 .read_to_end(&mut buf)
@@ -295,33 +297,28 @@ impl BrandProvider for BrandLoader {
                 let file_path = std::path::Path::new(path.as_ref());
                 let ctx = BrandLoadContext {
                     check_font_availability: true,
-                    root_dir: file_path
-                        .parent()
-                        .map_or_else(
-                            || std::path::PathBuf::from("."),
-                            std::path::Path::to_path_buf,
-                        ),
+                    root_dir: file_path.parent().map_or_else(
+                        || std::path::PathBuf::from("."),
+                        std::path::Path::to_path_buf,
+                    ),
                     span: SourceSpan::default(),
                 };
-                let template =
-                    self.load_template(file_path, &ctx).map_err(|e| match e {
-                        BrandError::FileNotFound { path: p, .. } => {
-                            TraitBrandError::SourceNotFound {
-                                uri: p.as_ref().to_owned(),
-                            }
-                        }
-                        BrandError::ParseError { path: p, reason, .. } => {
-                            TraitBrandError::ParseError {
-                                uri: p.as_ref().to_owned(),
-                                message: reason.as_ref().to_owned(),
-                            }
-                        }
-                        other => TraitBrandError::ValidationError {
-                            message: other.to_string(),
-                        },
-                    })?;
+                let template = self.load_template(file_path, &ctx).map_err(|e| match e {
+                    BrandError::FileNotFound { path: p, .. } => TraitBrandError::SourceNotFound {
+                        uri: p.as_ref().to_owned(),
+                    },
+                    BrandError::ParseError {
+                        path: p, reason, ..
+                    } => TraitBrandError::ParseError {
+                        uri: p.as_ref().to_owned(),
+                        message: reason.as_ref().to_owned(),
+                    },
+                    other => TraitBrandError::ValidationError {
+                        message: other.to_string(),
+                    },
+                })?;
                 Ok(brand_from_template(&template, path))
-            }
+            },
             BrandSource::TomlFile(path) => {
                 // TOML brand file loading is implemented in STORY-023 (brand synthesis).
                 // For STORY-022 (brand extraction), TOML sources are not yet supported.
@@ -332,7 +329,7 @@ impl BrandProvider for BrandLoader {
                          TOML synthesis is implemented in STORY-023."
                     ),
                 })
-            }
+            },
         }
     }
 }
@@ -341,8 +338,8 @@ impl BrandProvider for BrandLoader {
 mod tests {
     use std::io::{Cursor, Write as _};
 
-    use zip::write::{SimpleFileOptions, ZipWriter};
     use zip::CompressionMethod;
+    use zip::write::{SimpleFileOptions, ZipWriter};
 
     use super::*;
     use crate::context::BrandLoadContext;
@@ -407,8 +404,7 @@ mod tests {
         {
             let cursor = Cursor::new(&mut buf);
             let mut zw = ZipWriter::new(cursor);
-            let opts = SimpleFileOptions::default()
-                .compression_method(CompressionMethod::Stored);
+            let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
             zw.start_file(PPTX_THEME_PATH, opts).unwrap();
             zw.write_all(theme_xml.as_bytes()).unwrap();
             // Add a minimal [Content_Types].xml so the ZIP is structurally valid.
@@ -427,8 +423,7 @@ mod tests {
         {
             let cursor = Cursor::new(&mut buf);
             let mut zw = ZipWriter::new(cursor);
-            let opts = SimpleFileOptions::default()
-                .compression_method(CompressionMethod::Stored);
+            let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
             zw.start_file(DOCX_THEME_PATH, opts).unwrap();
             zw.write_all(theme_xml.as_bytes()).unwrap();
             zw.start_file("[Content_Types].xml", opts).unwrap();
@@ -447,9 +442,9 @@ mod tests {
         let dir = std::env::temp_dir();
         // Combine nanosecond timestamp and thread ID for uniqueness under parallel tests.
         let thread_id = format!("{:?}", std::thread::current().id());
-        let thread_hash: u64 = thread_id
-            .bytes()
-            .fold(0u64, |acc, b| acc.wrapping_mul(31).wrapping_add(u64::from(b)));
+        let thread_hash: u64 = thread_id.bytes().fold(0u64, |acc, b| {
+            acc.wrapping_mul(31).wrapping_add(u64::from(b))
+        });
         let name = format!(
             "slideforge_brand_test_{}_{:x}.{}",
             std::time::SystemTime::now()
@@ -467,10 +462,10 @@ mod tests {
 
     // ─── Loader tests ──────────────────────────────────────────────────────────
 
-    /// BC-2.01.001 postcondition 1 — load_template on valid PPTX returns BrandTemplate with
+    /// BC-2.01.001 postcondition 1 — `load_template` on valid PPTX returns `BrandTemplate` with
     /// 12 color slots.
     ///
-    /// Test vector (BC-2.01.001 test vectors): valid PPTX → BrandTemplate, exit 0.
+    /// Test vector (BC-2.01.001 test vectors): valid PPTX → `BrandTemplate`, exit 0.
     #[test]
     fn test_bc_2_01_001_load_valid_pptx() {
         let zip_bytes = build_pptx_zip(MINIMAL_THEME_XML);
@@ -489,10 +484,10 @@ mod tests {
         );
     }
 
-    /// BC-2.01.001 postcondition 1 — load_template on valid DOCX returns BrandTemplate with
+    /// BC-2.01.001 postcondition 1 — `load_template` on valid DOCX returns `BrandTemplate` with
     /// 12 color slots.
     ///
-    /// Test vector (BC-2.01.001 test vectors): valid DOCX → BrandTemplate loaded from
+    /// Test vector (BC-2.01.001 test vectors): valid DOCX → `BrandTemplate` loaded from
     /// word/theme/theme1.xml; exit 0.
     #[test]
     fn test_bc_2_01_001_load_valid_docx() {
@@ -510,10 +505,13 @@ mod tests {
             12,
             "invariant DI-015: must have exactly 12 color slots"
         );
-        assert!(template.logo.is_none(), "DOCX templates must not extract logo");
+        assert!(
+            template.logo.is_none(),
+            "DOCX templates must not extract logo"
+        );
     }
 
-    /// BC-2.01.001 EC-001 — non-existent path produces FileNotFound.
+    /// BC-2.01.001 EC-001 — non-existent path produces `FileNotFound`.
     ///
     /// Test vector: "missing.pptx" → E-BRD-001; exit 4.
     #[test]
@@ -524,18 +522,18 @@ mod tests {
 
         let result = loader.load_template(nonexistent, &ctx);
 
+        assert!(result.is_err(), "non-existent path must return an error");
         assert!(
-            result.is_err(),
-            "non-existent path must return an error"
-        );
-        assert!(
-            matches!(result.as_ref().unwrap_err(), BrandError::FileNotFound { .. }),
+            matches!(
+                result.as_ref().unwrap_err(),
+                BrandError::FileNotFound { .. }
+            ),
             "expected BrandError::FileNotFound, got: {:?}",
             result.unwrap_err()
         );
     }
 
-    /// BC-2.01.001 EC-002 — corrupt file (random bytes) produces ParseError.
+    /// BC-2.01.001 EC-002 — corrupt file (random bytes) produces `ParseError`.
     ///
     /// Test vector: corrupt file (not a ZIP) → E-BRD-002; exit 4.
     #[test]
@@ -557,10 +555,10 @@ mod tests {
         );
     }
 
-    /// BC-2.01.001 EC-003 — template with 8 colors still produces 12-slot BrandTemplate
-    /// plus 4 MissingColorSlot warnings.
+    /// BC-2.01.001 EC-003 — template with 8 colors still produces 12-slot `BrandTemplate`
+    /// plus 4 `MissingColorSlot` warnings.
     ///
-    /// Test vector: 8-color template → BrandTemplate with 12 colors (4 inferred); 4 E-BRD-003 warnings.
+    /// Test vector: 8-color template → `BrandTemplate` with 12 colors (4 inferred); 4 E-BRD-003 warnings.
     #[test]
     fn test_bc_2_01_001_load_partial_colors() {
         let zip_bytes = build_pptx_zip(PARTIAL_THEME_XML);
@@ -571,7 +569,8 @@ mod tests {
         let result = loader.load_template(&path, &ctx);
         let _ = std::fs::remove_file(&path);
 
-        let template = result.expect("partial template must load (missing slots are warnings, not errors)");
+        let template =
+            result.expect("partial template must load (missing slots are warnings, not errors)");
         assert_eq!(
             template.colors.len(),
             12,
@@ -623,28 +622,27 @@ mod tests {
         let _ = fs::remove_file(&path);
 
         assert_eq!(
-            size_before,
-            size_after,
+            size_before, size_after,
             "invariant: source template file size must be unchanged after loading"
         );
     }
 
-    /// BC-2.01.001 — PPTX_THEME_PATH and DOCX_THEME_PATH constants are correct.
+    /// BC-2.01.001 — `PPTX_THEME_PATH` and `DOCX_THEME_PATH` constants are correct.
     #[test]
     fn test_bc_2_01_001_internal_path_constants() {
         assert_eq!(PPTX_THEME_PATH, "ppt/theme/theme1.xml");
         assert_eq!(DOCX_THEME_PATH, "word/theme/theme1.xml");
     }
 
-    /// BC-2.01.001 — BrandLoader implements BrandProvider with correct id.
+    /// BC-2.01.001 — `BrandLoader` implements `BrandProvider` with correct id.
     #[test]
     fn test_bc_2_01_001_brand_loader_provider_id() {
         let loader = BrandLoader::new();
         assert_eq!(loader.id(), "slideforge-brand/default");
     }
 
-    /// BC-2.01.006 AC-010 — when check_font_availability is true and a font is unavailable,
-    /// FontUnavailable warning is emitted (cosmetic, not fatal).
+    /// BC-2.01.006 AC-010 — when `check_font_availability` is true and a font is unavailable,
+    /// `FontUnavailable` warning is emitted (cosmetic, not fatal).
     ///
     /// We use a deliberately non-existent font name to guarantee unavailability.
     #[test]
@@ -679,7 +677,7 @@ mod tests {
     /// When the ZIP contains both `ppt/slideMasters/slideMaster1.xml` and
     /// `ppt/slideMasters/slideMaster2.xml`, the loader must:
     /// 1. Succeed (not error — multiple masters are a warning, not fatal).
-    /// 2. Emit a tracing::warn for the extra masters (verified via subscriber).
+    /// 2. Emit a `tracing::warn` for the extra masters (verified via subscriber).
     /// 3. Use only slideMaster1.xml for logo extraction.
     ///
     /// FINDING-003 (AC-009 / EC-004).
@@ -704,9 +702,11 @@ mod tests {
             zw.start_file(PPTX_THEME_PATH, opts).unwrap();
             zw.write_all(MINIMAL_THEME_XML.as_bytes()).unwrap();
             // Two slide masters.
-            zw.start_file("ppt/slideMasters/slideMaster1.xml", opts).unwrap();
+            zw.start_file("ppt/slideMasters/slideMaster1.xml", opts)
+                .unwrap();
             zw.write_all(b"<p:sldMaster/>").unwrap();
-            zw.start_file("ppt/slideMasters/slideMaster2.xml", opts).unwrap();
+            zw.start_file("ppt/slideMasters/slideMaster2.xml", opts)
+                .unwrap();
             zw.write_all(b"<p:sldMaster/>").unwrap();
             // Content types (minimal).
             zw.start_file("[Content_Types].xml", opts).unwrap();
@@ -722,12 +722,11 @@ mod tests {
         // Install a minimal tracing subscriber to capture the warning.
         let warned_layer = {
             let w = StdArc::clone(&warned_clone);
-            tracing_subscriber::fmt::layer()
-                .with_writer(move || {
-                    // Every write signals we emitted something.
-                    let _ = w.lock().map(|mut guard| *guard = true);
-                    std::io::sink()
-                })
+            tracing_subscriber::fmt::layer().with_writer(move || {
+                // Every write signals we emitted something.
+                let _ = w.lock().map(|mut guard| *guard = true);
+                std::io::sink()
+            })
         };
         let subscriber = tracing_subscriber::registry().with(warned_layer);
         let _guard = tracing::subscriber::set_default(subscriber);
@@ -828,9 +827,9 @@ mod tests {
         );
     }
 
-    /// FINDING-001 — BrandProvider::load() returns Brand for a valid PPTX source.
+    /// FINDING-001 — `BrandProvider::load()` returns Brand for a valid PPTX source.
     ///
-    /// Verifies the BrandProvider trait implementation (not the raw load_template).
+    /// Verifies the `BrandProvider` trait implementation (not the raw `load_template`).
     /// The Brand palette must map OOXML color slots correctly:
     /// - primary → dk2 (dark brand color)
     /// - secondary → acc1 (first accent)
@@ -843,9 +842,9 @@ mod tests {
         let zip_bytes = build_pptx_zip(MINIMAL_THEME_XML);
         let path = write_temp_file(&zip_bytes, "pptx");
         let loader = BrandLoader::new();
-        let source = slideforge_plugin_api::BrandSource::PptxFile(
-            Arc::from(path.to_string_lossy().as_ref()),
-        );
+        let source = slideforge_plugin_api::BrandSource::PptxFile(Arc::from(
+            path.to_string_lossy().as_ref(),
+        ));
 
         let result = loader.load(&source);
         let _ = std::fs::remove_file(&path);
@@ -854,7 +853,11 @@ mod tests {
         // Palette slots (from MINIMAL_THEME_XML):
         // dk2 = 003087, acc1 = 0066CC, acc2 = FF6B35, lt2 = F5F5F5
         assert_eq!(brand.palette.primary.as_ref(), "#003087", "primary = dk2");
-        assert_eq!(brand.palette.secondary.as_ref(), "#0066CC", "secondary = acc1");
+        assert_eq!(
+            brand.palette.secondary.as_ref(),
+            "#0066CC",
+            "secondary = acc1"
+        );
         assert_eq!(brand.palette.accent.as_ref(), "#FF6B35", "accent = acc2");
         assert_eq!(brand.palette.neutral.as_ref(), "#F5F5F5", "neutral = lt2");
         // Fonts from theme.
@@ -863,7 +866,7 @@ mod tests {
         assert_eq!(brand.fonts.mono.as_ref(), "Courier New");
     }
 
-    /// FINDING-001 — BrandProvider::load() returns Brand for a valid DOCX source.
+    /// FINDING-001 — `BrandProvider::load()` returns Brand for a valid DOCX source.
     #[test]
     fn test_bc_2_01_001_brand_provider_load_docx() {
         use slideforge_plugin_api::BrandProvider;
@@ -871,9 +874,9 @@ mod tests {
         let zip_bytes = build_docx_zip(MINIMAL_THEME_XML);
         let path = write_temp_file(&zip_bytes, "docx");
         let loader = BrandLoader::new();
-        let source = slideforge_plugin_api::BrandSource::DocxFile(
-            Arc::from(path.to_string_lossy().as_ref()),
-        );
+        let source = slideforge_plugin_api::BrandSource::DocxFile(Arc::from(
+            path.to_string_lossy().as_ref(),
+        ));
 
         let result = loader.load(&source);
         let _ = std::fs::remove_file(&path);
@@ -882,15 +885,15 @@ mod tests {
         assert_eq!(brand.palette.primary.as_ref(), "#003087", "primary = dk2");
     }
 
-    /// FINDING-001 — BrandProvider::load() returns SourceNotFound for missing PPTX.
+    /// FINDING-001 — `BrandProvider::load()` returns `SourceNotFound` for missing PPTX.
     #[test]
     fn test_bc_2_01_001_brand_provider_load_missing_file() {
         use slideforge_plugin_api::BrandProvider;
 
         let loader = BrandLoader::new();
-        let source = slideforge_plugin_api::BrandSource::PptxFile(
-            Arc::from("/tmp/slideforge_nonexistent_brand_9999999.pptx"),
-        );
+        let source = slideforge_plugin_api::BrandSource::PptxFile(Arc::from(
+            "/tmp/slideforge_nonexistent_brand_9999999.pptx",
+        ));
 
         let result = loader.load(&source);
         assert!(
@@ -911,9 +914,9 @@ mod tests {
     ///
     /// Builds a ZIP that contains:
     /// - `ppt/theme/theme1.xml` (12 colors) — triggers PPTX detection
-    /// - `ppt/slideLayouts/slideLayout1.xml` — must appear in layout_names
-    /// - `ppt/slideLayouts/slideLayout2.xml` — must appear in layout_names
-    /// - `ppt/slideLayouts/_rels/slideLayout1.xml.rels` — must NOT appear in layout_names
+    /// - `ppt/slideLayouts/slideLayout1.xml` — must appear in `layout_names`
+    /// - `ppt/slideLayouts/slideLayout2.xml` — must appear in `layout_names`
+    /// - `ppt/slideLayouts/_rels/slideLayout1.xml.rels` — must NOT appear in `layout_names`
     ///
     /// Asserts the two ZIP paths are present and the .rels path is absent (FINDING-001).
     #[test]
@@ -932,13 +935,16 @@ mod tests {
             zw.write_all(MINIMAL_THEME_XML.as_bytes()).unwrap();
 
             // Two slide layout XML files.
-            zw.start_file("ppt/slideLayouts/slideLayout1.xml", opts).unwrap();
+            zw.start_file("ppt/slideLayouts/slideLayout1.xml", opts)
+                .unwrap();
             zw.write_all(b"<p:sldLayout/>").unwrap();
-            zw.start_file("ppt/slideLayouts/slideLayout2.xml", opts).unwrap();
+            zw.start_file("ppt/slideLayouts/slideLayout2.xml", opts)
+                .unwrap();
             zw.write_all(b"<p:sldLayout/>").unwrap();
 
             // A .rels file that must be excluded from layout_names.
-            zw.start_file("ppt/slideLayouts/_rels/slideLayout1.xml.rels", opts).unwrap();
+            zw.start_file("ppt/slideLayouts/_rels/slideLayout1.xml.rels", opts)
+                .unwrap();
             zw.write_all(b"<Relationships/>").unwrap();
 
             // Minimal content types.
@@ -959,7 +965,11 @@ mod tests {
         let template = result.expect("PPTX with slide layouts must load without error");
 
         // Both layout XML paths must be present.
-        let names: Vec<&str> = template.layout_names.iter().map(|s| s.as_ref()).collect();
+        let names: Vec<&str> = template
+            .layout_names
+            .iter()
+            .map(std::convert::AsRef::as_ref)
+            .collect();
         assert!(
             names.contains(&"ppt/slideLayouts/slideLayout1.xml"),
             "layout_names must contain 'ppt/slideLayouts/slideLayout1.xml', got: {names:?}"
@@ -984,7 +994,7 @@ mod tests {
         );
     }
 
-    /// FINDING-001 — BrandProvider::load() returns ValidationError for TOML sources
+    /// FINDING-001 — `BrandProvider::load()` returns `ValidationError` for TOML sources
     /// (not yet implemented — STORY-023 scope).
     #[test]
     fn test_bc_2_01_001_brand_provider_load_toml_not_yet_supported() {
@@ -1008,7 +1018,7 @@ mod tests {
         );
     }
 
-    /// FINDING-002 — File::open error mapping preserves I/O error details.
+    /// FINDING-002 — `File::open` error mapping preserves I/O error details.
     ///
     /// Verifies that:
     /// 1. A non-existent file produces `BrandError::FileNotFound` (not `ParseError`).
@@ -1041,7 +1051,7 @@ mod tests {
         );
     }
 
-    /// FINDING-004 — BrandProvider::load() maps a corrupt (non-ZIP) PPTX file to ParseError.
+    /// FINDING-004 — `BrandProvider::load()` maps a corrupt (non-ZIP) PPTX file to `ParseError`.
     ///
     /// Creates a temp file with random non-ZIP bytes and a `.pptx` extension, calls
     /// `BrandProvider::load(BrandSource::PptxFile(path))`, and asserts the result is
@@ -1057,9 +1067,9 @@ mod tests {
         let corrupt_bytes: &[u8] = b"THIS IS NOT A ZIP ARCHIVE AT ALL \x00\x01\x02\x03";
         let path = write_temp_file(corrupt_bytes, "pptx");
         let loader = BrandLoader::new();
-        let source = slideforge_plugin_api::BrandSource::PptxFile(
-            Arc::from(path.to_string_lossy().as_ref()),
-        );
+        let source = slideforge_plugin_api::BrandSource::PptxFile(Arc::from(
+            path.to_string_lossy().as_ref(),
+        ));
 
         let result = loader.load(&source);
         let _ = std::fs::remove_file(&path);
@@ -1077,7 +1087,7 @@ mod tests {
         );
     }
 
-    /// FINDING-002 — BrandError::FontUnavailable is correctly constructed and has proper
+    /// FINDING-002 — `BrandError::FontUnavailable` is correctly constructed and has proper
     /// error message format.
     ///
     /// This is a unit test of the error variant construction path.  It verifies:
@@ -1109,8 +1119,8 @@ mod tests {
         );
     }
 
-    /// FINDING-002 — load_template with check_font_availability=true and a font that
-    /// cannot possibly be installed constructs FontUnavailable via the tracing warn path.
+    /// FINDING-002 — `load_template` with `check_font_availability=true` and a font that
+    /// cannot possibly be installed constructs `FontUnavailable` via the tracing warn path.
     ///
     /// We use a theme where the font names are deliberately impossible strings to
     /// guarantee `font_available` returns false, driving the production construction path.

@@ -97,8 +97,10 @@ pub fn parse_theme_colors(
                                 if attr.key.local_name().as_ref() == b"val"
                                     && let Ok(val) = std::str::from_utf8(&attr.value)
                                 {
-                                    if val.len() == 6 && val.chars().all(|c| c.is_ascii_hexdigit()) {
-                                        let hex = Arc::from(format!("#{}", val.to_uppercase()).as_str());
+                                    if val.len() == 6 && val.chars().all(|c| c.is_ascii_hexdigit())
+                                    {
+                                        let hex =
+                                            Arc::from(format!("#{}", val.to_uppercase()).as_str());
                                         found.insert(slot, ColorValue::Hex(hex));
                                     } else {
                                         tracing::warn!(
@@ -110,15 +112,17 @@ pub fn parse_theme_colors(
                                     }
                                 }
                             }
-                        }
+                        },
                         "sysClr" => {
                             // Use `lastClr` attribute as the resolved hex value.
                             for attr in e.attributes().flatten() {
                                 if attr.key.local_name().as_ref() == b"lastClr"
                                     && let Ok(val) = std::str::from_utf8(&attr.value)
                                 {
-                                    if val.len() == 6 && val.chars().all(|c| c.is_ascii_hexdigit()) {
-                                        let hex = Arc::from(format!("#{}", val.to_uppercase()).as_str());
+                                    if val.len() == 6 && val.chars().all(|c| c.is_ascii_hexdigit())
+                                    {
+                                        let hex =
+                                            Arc::from(format!("#{}", val.to_uppercase()).as_str());
                                         found.insert(slot, ColorValue::Hex(hex));
                                     } else {
                                         tracing::warn!(
@@ -130,7 +134,7 @@ pub fn parse_theme_colors(
                                     }
                                 }
                             }
-                        }
+                        },
                         "schemeClr" => {
                             // Relative scheme color reference (e.g., val="dk1", val="accent1").
                             // We cannot resolve the absolute hex without a rendering context,
@@ -152,27 +156,29 @@ pub fn parse_theme_colors(
                                     found.insert(slot, ColorValue::SchemeRef(scheme_ref));
                                 }
                             }
-                        }
-                        _ => {}
+                        },
+                        _ => {},
                     }
                 }
-            }
+            },
             Ok(Event::End(ref e)) => {
                 let local_name = e.local_name();
                 let name_str = std::str::from_utf8(local_name.as_ref()).unwrap_or("");
                 // If we close the current slot element, clear tracking.
-                if let Some(slot) = current_slot && name_str == slot {
+                if let Some(slot) = current_slot
+                    && name_str == slot
+                {
                     current_slot = None;
                 }
-            }
+            },
             // XML errors: log the error with context then treat as EOF.
             // We accumulate whatever data was extracted before the error.
             Ok(Event::Eof) => break,
             Err(e) => {
                 tracing::warn!(error = %e, "XML parse error in theme1.xml; partial color data may be incomplete");
                 break;
-            }
-            _ => {}
+            },
+            _ => {},
         }
         buf.clear();
     }
@@ -194,7 +200,10 @@ pub fn parse_theme_colors(
                     inferred_hex: Arc::clone(&inferred_hex),
                     derivation: Arc::from("default inference"),
                 });
-                tracing::warn!(slot = name, "OOXML color slot missing; using default inference");
+                tracing::warn!(
+                    slot = name,
+                    "OOXML color slot missing; using default inference"
+                );
                 ColorSlot {
                     name: Arc::from(name),
                     value: default_color_value_for_slot(name),
@@ -286,9 +295,9 @@ mod tests {
   </a:themeElements>
 </a:theme>"#;
 
-    /// BC-2.01.001 postcondition 1 — parse 12 sRGB colors → 12 ColorSlots, no warnings.
+    /// BC-2.01.001 postcondition 1 — parse 12 sRGB colors → 12 `ColorSlots`, no warnings.
     ///
-    /// Test vector: THEME_XML_12_SRGB → 12 slots, 0 warnings.
+    /// Test vector: `THEME_XML_12_SRGB` → 12 slots, 0 warnings.
     #[test]
     fn test_bc_2_01_001_parse_12_srgb_colors() {
         let result = parse_theme_colors(THEME_XML_12_SRGB.as_bytes());
@@ -315,7 +324,7 @@ mod tests {
 
     /// BC-2.01.001 AC-002 — sysClr uses `lastClr` attribute as hex value.
     ///
-    /// Test vector: THEME_XML_SYSCLR → dk1.hex == "#FFFFFF" (from lastClr="FFFFFF").
+    /// Test vector: `THEME_XML_SYSCLR` → dk1.hex == "#FFFFFF" (from lastClr="FFFFFF").
     #[test]
     fn test_bc_2_01_001_parse_sysclr_uses_lastclr() {
         let result = parse_theme_colors(THEME_XML_SYSCLR.as_bytes());
@@ -328,9 +337,9 @@ mod tests {
         );
     }
 
-    /// BC-2.01.001 EC-003 — template with only 8 colors produces 4 MissingColorSlot warnings.
+    /// BC-2.01.001 EC-003 — template with only 8 colors produces 4 `MissingColorSlot` warnings.
     ///
-    /// Test vector: THEME_XML_8_COLORS → 4 BrandError::MissingColorSlot warnings.
+    /// Test vector: `THEME_XML_8_COLORS` → 4 `BrandError::MissingColorSlot` warnings.
     #[test]
     fn test_bc_2_01_001_missing_slot_emits_warning() {
         let result = parse_theme_colors(THEME_XML_8_COLORS.as_bytes());
@@ -356,7 +365,7 @@ mod tests {
 
     /// BC-2.01.001 AC-002 / invariant 1 — colors returned in ECMA-376 sequential order.
     ///
-    /// Test vector: THEME_XML_12_SRGB → slots at positions 0-11 match COLOR_SLOT_NAMES.
+    /// Test vector: `THEME_XML_12_SRGB` → slots at positions 0-11 match `COLOR_SLOT_NAMES`.
     #[test]
     fn test_bc_2_01_001_color_order_preserved() {
         let result = parse_theme_colors(THEME_XML_12_SRGB.as_bytes());
@@ -373,9 +382,9 @@ mod tests {
         }
     }
 
-    /// BC-2.01.001 EC-003 — empty theme produces 12 MissingColorSlot warnings.
+    /// BC-2.01.001 EC-003 — empty theme produces 12 `MissingColorSlot` warnings.
     ///
-    /// Test vector: THEME_XML_EMPTY → 12 BrandError::MissingColorSlot warnings.
+    /// Test vector: `THEME_XML_EMPTY` → 12 `BrandError::MissingColorSlot` warnings.
     #[test]
     fn test_bc_2_01_001_empty_theme_all_missing() {
         let result = parse_theme_colors(THEME_XML_EMPTY.as_bytes());
@@ -398,7 +407,9 @@ mod tests {
         let result = parse_theme_colors(THEME_XML_12_SRGB.as_bytes());
         let (slots, _warnings) = result.expect("12-color theme must parse cleanly");
         for slot in &slots {
-            let hex = slot.hex().expect("all slots in THEME_XML_12_SRGB must be Hex variants");
+            let hex = slot
+                .hex()
+                .expect("all slots in THEME_XML_12_SRGB must be Hex variants");
             assert!(
                 hex.starts_with('#'),
                 "hex value must start with '#', got: {hex}"
@@ -418,11 +429,11 @@ mod tests {
         }
     }
 
-    /// BC-2.01.001 AC-002 — schemeClr elements store a ColorValue::SchemeRef with a warning.
+    /// BC-2.01.001 AC-002 — schemeClr elements store a `ColorValue::SchemeRef` with a warning.
     ///
     /// When a slot uses `<a:schemeClr val="dk1">` (a self-referential scheme color),
-    /// the parser stores `ColorValue::SchemeRef("dk1")` and emits a tracing::warn.
-    /// No MissingColorSlot warning is emitted — the slot IS present, just unresolved.
+    /// the parser stores `ColorValue::SchemeRef("dk1")` and emits a `tracing::warn`.
+    /// No `MissingColorSlot` warning is emitted — the slot IS present, just unresolved.
     #[test]
     fn test_bc_2_01_001_schemeclr_stored_as_reference() {
         use crate::template::ColorValue;
@@ -461,8 +472,15 @@ mod tests {
             "schemeClr slot must have ColorValue::SchemeRef variant, got: {:?}",
             slots[0].value
         );
-        assert!(!slots[0].is_resolved(), "schemeClr slot must not be resolved");
-        assert_eq!(slots[0].hex(), None, "schemeClr slot must return None from hex()");
+        assert!(
+            !slots[0].is_resolved(),
+            "schemeClr slot must not be resolved"
+        );
+        assert_eq!(
+            slots[0].hex(),
+            None,
+            "schemeClr slot must return None from hex()"
+        );
         // The scheme reference string must be the lowercase val attribute.
         assert_eq!(
             slots[0].value.as_scheme_ref(),
@@ -556,7 +574,7 @@ mod tests {
         );
         // dk1 must not store "ZZZZZZ".
         assert_ne!(
-            slots[0].hex().map(|s| s.to_uppercase()),
+            slots[0].hex().map(str::to_uppercase),
             Some("#ZZZZZZ".to_owned()),
             "invalid non-hex val must NOT be stored as hex value"
         );
@@ -583,11 +601,26 @@ mod tests {
     <!-- abrupt end with invalid bytes";
         let result = parse_theme_colors(truncated_xml);
         // Must not panic — must return partial data.
-        assert!(result.is_ok(), "malformed XML must not produce a hard error");
+        assert!(
+            result.is_ok(),
+            "malformed XML must not produce a hard error"
+        );
         let (slots, _warnings) = result.unwrap();
-        assert_eq!(slots.len(), 12, "invariant: always 12 slots even after XML error");
+        assert_eq!(
+            slots.len(),
+            12,
+            "invariant: always 12 slots even after XML error"
+        );
         // dk1 and lt1 were extracted before the error.
-        assert_eq!(slots[0].hex(), Some("#000000"), "dk1 must be extracted before truncation");
-        assert_eq!(slots[1].hex(), Some("#FFFFFF"), "lt1 must be extracted before truncation");
+        assert_eq!(
+            slots[0].hex(),
+            Some("#000000"),
+            "dk1 must be extracted before truncation"
+        );
+        assert_eq!(
+            slots[1].hex(),
+            Some("#FFFFFF"),
+            "lt1 must be extracted before truncation"
+        );
     }
 }

@@ -12,8 +12,7 @@ use std::sync::Arc;
 /// Position 0 is `dk1`, position 11 is `folHlink`. This order is enforced by
 /// BC-2.01.001 invariant 1 and DI-015.
 pub const COLOR_SLOT_NAMES: [&str; 12] = [
-    "dk1", "lt1", "dk2", "lt2", "acc1", "acc2", "acc3", "acc4", "acc5", "acc6", "hlink",
-    "folHlink",
+    "dk1", "lt1", "dk2", "lt2", "acc1", "acc2", "acc3", "acc4", "acc5", "acc6", "hlink", "folHlink",
 ];
 
 /// The resolved or unresolved color value stored in an OOXML theme color slot.
@@ -228,7 +227,7 @@ mod tests {
         ]
     }
 
-    /// BC-2.01.001 postcondition 1 — BrandTemplate can be constructed with all fields.
+    /// BC-2.01.001 postcondition 1 — `BrandTemplate` can be constructed with all fields.
     #[test]
     fn test_bc_2_01_001_brand_template_default_construction() {
         let template = BrandTemplate {
@@ -261,7 +260,11 @@ mod tests {
         };
         // The array type [ColorSlot; 12] enforces this at compile time, but we
         // also assert it at runtime to make it load-bearing per TD-VSDD-059.
-        assert_eq!(template.colors.len(), 12, "invariant DI-015: always 12 color slots");
+        assert_eq!(
+            template.colors.len(),
+            12,
+            "invariant DI-015: always 12 color slots"
+        );
     }
 
     /// BC-2.01.001 — color slot names match ECMA-376 sequential order.
@@ -279,7 +282,7 @@ mod tests {
         }
     }
 
-    /// BC-2.01.001 — color_by_name returns correct slot.
+    /// BC-2.01.001 — `color_by_name` returns correct slot.
     #[test]
     fn test_bc_2_01_001_color_by_name_lookup() {
         let template = BrandTemplate {
@@ -292,11 +295,13 @@ mod tests {
             footer_text: None,
             layout_names: vec![],
         };
-        let slot = template.color_by_name("acc1").expect("acc1 must be present");
+        let slot = template
+            .color_by_name("acc1")
+            .expect("acc1 must be present");
         assert_eq!(slot.hex(), Some("#0066CC"));
     }
 
-    /// BC-2.01.001 — color_by_name returns None for unknown slot.
+    /// BC-2.01.001 — `color_by_name` returns None for unknown slot.
     #[test]
     fn test_bc_2_01_001_color_by_name_unknown_returns_none() {
         let template = BrandTemplate {
@@ -324,7 +329,7 @@ mod tests {
         assert_eq!(logo.bytes.len(), 4);
     }
 
-    /// BC-2.01.001 AC-006 — layout_names stored as Vec<Arc<str>> using ZIP-internal paths.
+    /// BC-2.01.001 AC-006 — `layout_names` stored as Vec<Arc<str>> using ZIP-internal paths.
     ///
     /// `layout_names` stores the ZIP-internal path of each slide layout XML file
     /// (e.g., `"ppt/slideLayouts/slideLayout1.xml"`), not friendly semantic names.
@@ -358,15 +363,19 @@ mod tests {
         );
     }
 
-    /// DI-015 — COLOR_SLOT_NAMES constant has exactly 12 entries.
+    /// DI-015 — `COLOR_SLOT_NAMES` constant has exactly 12 entries.
     #[test]
     fn test_bc_2_01_001_color_slot_names_constant_length() {
-        assert_eq!(COLOR_SLOT_NAMES.len(), 12, "ECMA-376 defines exactly 12 theme color slots");
+        assert_eq!(
+            COLOR_SLOT_NAMES.len(),
+            12,
+            "ECMA-376 defines exactly 12 theme color slots"
+        );
     }
 
     // ─── FINDING-001: ColorValue enum tests ──────────────────────────────────
 
-    /// FINDING-001 — ColorValue::Hex is_resolved returns true.
+    /// FINDING-001 — `ColorValue::Hex` `is_resolved` returns true.
     #[test]
     fn test_finding_001_color_value_hex_is_resolved() {
         let v = ColorValue::Hex(Arc::from("#003087"));
@@ -375,7 +384,7 @@ mod tests {
         assert_eq!(v.as_scheme_ref(), None);
     }
 
-    /// FINDING-001 — ColorValue::SchemeRef is_resolved returns false.
+    /// FINDING-001 — `ColorValue::SchemeRef` `is_resolved` returns false.
     #[test]
     fn test_finding_001_color_value_scheme_ref_not_resolved() {
         let v = ColorValue::SchemeRef(Arc::from("dk1"));
@@ -384,7 +393,7 @@ mod tests {
         assert_eq!(v.as_scheme_ref(), Some("dk1"));
     }
 
-    /// FINDING-001 — ColorSlot::hex() returns Some for Hex variant.
+    /// FINDING-001 — `ColorSlot::hex()` returns Some for Hex variant.
     #[test]
     fn test_finding_001_color_slot_hex_method_hex_variant() {
         let slot = ColorSlot {
@@ -395,14 +404,18 @@ mod tests {
         assert!(slot.is_resolved());
     }
 
-    /// FINDING-001 — ColorSlot::hex() returns None for SchemeRef variant.
+    /// FINDING-001 — `ColorSlot::hex()` returns None for `SchemeRef` variant.
     #[test]
     fn test_finding_001_color_slot_hex_method_scheme_ref_variant() {
         let slot = ColorSlot {
             name: Arc::from("dk1"),
             value: ColorValue::SchemeRef(Arc::from("dk1")),
         };
-        assert_eq!(slot.hex(), None, "SchemeRef slot must return None from hex()");
+        assert_eq!(
+            slot.hex(),
+            None,
+            "SchemeRef slot must return None from hex()"
+        );
         assert!(!slot.is_resolved(), "SchemeRef slot must not be resolved");
     }
 }

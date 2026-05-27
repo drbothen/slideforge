@@ -6,7 +6,7 @@ use slideforge_types::SourceSpan;
 
 /// Runtime context for a brand loading operation.
 ///
-/// Passed to [`crate::loader::BrandLoader::load`] alongside the template path.
+/// Passed to [`crate::loader::BrandLoader::load_template`] alongside the template path.
 /// Controls font availability checking and provides the root directory for
 /// resolving relative paths.
 #[derive(Debug, Clone)]

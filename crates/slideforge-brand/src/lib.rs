@@ -1,6 +1,6 @@
 //! Brand loading and extraction for slideforge.
 //!
-//! This crate implements the [`BrandProvider`] plugin trait for loading brand
+//! This crate implements the `BrandProvider` plugin trait for loading brand
 //! configuration from existing `.pptx` and `.docx` template files.
 //!
 //! ## Overview

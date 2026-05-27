@@ -126,7 +126,7 @@ mod tests {
         assert_eq!(E_BRD_004, "E-BRD-004");
     }
 
-    /// BC-2.01.001 EC-001 — FileNotFound error message contains the path.
+    /// BC-2.01.001 EC-001 — `FileNotFound` error message contains the path.
     #[test]
     fn test_bc_2_01_001_file_not_found_message() {
         let err = BrandError::FileNotFound {
@@ -144,7 +144,7 @@ mod tests {
         );
     }
 
-    /// BC-2.01.001 EC-002 — ParseError message contains path, reason, and span.
+    /// BC-2.01.001 EC-002 — `ParseError` message contains path, reason, and span.
     #[test]
     fn test_bc_2_01_001_parse_error_message() {
         let err = BrandError::ParseError {
@@ -167,7 +167,7 @@ mod tests {
         );
     }
 
-    /// FINDING-001 — ParseError message says "PPTX/DOCX", not "PPTX/TOML".
+    /// FINDING-001 — `ParseError` message says "PPTX/DOCX", not "PPTX/TOML".
     ///
     /// The error message previously contained "PPTX/TOML" which was a copy-paste
     /// error. The correct file types supported are PPTX and DOCX.
@@ -189,7 +189,7 @@ mod tests {
         );
     }
 
-    /// BC-2.01.001 EC-003 / BC-2.01.004 — MissingColorSlot message contains slot name,
+    /// BC-2.01.001 EC-003 / BC-2.01.004 — `MissingColorSlot` message contains slot name,
     /// inferred hex, and derivation source.
     #[test]
     fn test_bc_2_01_001_missing_color_slot_message() {
@@ -213,7 +213,7 @@ mod tests {
         );
     }
 
-    /// BC-2.01.006 — FontUnavailable message contains font name and fallback.
+    /// BC-2.01.006 — `FontUnavailable` message contains font name and fallback.
     #[test]
     fn test_bc_2_01_006_font_unavailable_message() {
         let err = BrandError::FontUnavailable {

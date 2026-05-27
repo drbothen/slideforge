@@ -16,8 +16,7 @@ use zip::ZipArchive;
 use crate::template::LogoAsset;
 
 /// ZIP-internal path to the slide master 1 relationships file (PPTX only).
-pub const SLIDE_MASTER_RELS_PATH: &str =
-    "ppt/slideMasters/_rels/slideMaster1.xml.rels";
+pub const SLIDE_MASTER_RELS_PATH: &str = "ppt/slideMasters/_rels/slideMaster1.xml.rels";
 
 /// Extract a logo [`LogoAsset`] from a PPTX ZIP archive.
 ///
@@ -34,9 +33,7 @@ pub const SLIDE_MASTER_RELS_PATH: &str =
 ///
 /// This function only operates on PPTX archives. For DOCX, no logo extraction
 /// is performed (DOCX does not use the slide master concept).
-pub fn extract_logo<R: Read + std::io::Seek>(
-    zip: &mut ZipArchive<R>,
-) -> Option<LogoAsset> {
+pub fn extract_logo<R: Read + std::io::Seek>(zip: &mut ZipArchive<R>) -> Option<LogoAsset> {
     // Read the rels file from the ZIP.
     let rels_xml = {
         let mut entry = zip.by_name(SLIDE_MASTER_RELS_PATH).ok()?;
@@ -60,9 +57,7 @@ pub fn extract_logo<R: Read + std::io::Seek>(
         buf
     };
 
-    let ext = resolved_path
-        .rsplit_once('.')
-        .map_or("", |(_, e)| e);
+    let ext = resolved_path.rsplit_once('.').map_or("", |(_, e)| e);
     let media_type = media_type_from_extension(ext);
 
     Some(LogoAsset {
@@ -95,13 +90,13 @@ fn find_image_target(rels_xml: &[u8]) -> Option<String> {
                                 if let Ok(v) = std::str::from_utf8(&attr.value) {
                                     rel_type = Some(v.to_owned());
                                 }
-                            }
+                            },
                             "Target" => {
                                 if let Ok(v) = std::str::from_utf8(&attr.value) {
                                     target = Some(v.to_owned());
                                 }
-                            }
-                            _ => {}
+                            },
+                            _ => {},
                         }
                     }
                     if let (Some(rt), Some(tgt)) = (rel_type, target)
@@ -110,9 +105,9 @@ fn find_image_target(rels_xml: &[u8]) -> Option<String> {
                         return Some(tgt);
                     }
                 }
-            }
+            },
             Ok(Event::Eof) | Err(_) => break,
-            _ => {}
+            _ => {},
         }
         buf.clear();
     }
@@ -146,8 +141,8 @@ fn normalize_path(path: &str) -> String {
         match segment {
             ".." => {
                 parts.pop();
-            }
-            "." | "" => {}
+            },
+            "." | "" => {},
             s => parts.push(s),
         }
     }
@@ -174,7 +169,7 @@ pub fn media_type_from_extension(ext: &str) -> Arc<str> {
 mod tests {
     use super::*;
 
-    /// BC-2.01.001 AC-005 — SLIDE_MASTER_RELS_PATH is correct OOXML path.
+    /// BC-2.01.001 AC-005 — `SLIDE_MASTER_RELS_PATH` is correct OOXML path.
     #[test]
     fn test_bc_2_01_001_slide_master_rels_path() {
         assert_eq!(
@@ -183,7 +178,7 @@ mod tests {
         );
     }
 
-    /// BC-2.01.001 AC-005 — media_type_from_extension returns correct MIME types.
+    /// BC-2.01.001 AC-005 — `media_type_from_extension` returns correct MIME types.
     #[test]
     fn test_bc_2_01_001_media_type_from_extension() {
         assert_eq!(media_type_from_extension("png").as_ref(), "image/png");
@@ -200,7 +195,7 @@ mod tests {
         );
     }
 
-    /// BC-2.01.001 AC-005 — media_type_from_extension is case-insensitive.
+    /// BC-2.01.001 AC-005 — `media_type_from_extension` is case-insensitive.
     #[test]
     fn test_bc_2_01_001_media_type_case_insensitive() {
         assert_eq!(media_type_from_extension("PNG").as_ref(), "image/png");
@@ -209,7 +204,7 @@ mod tests {
 
     // ── FINDING-004: resolve_rels_target and normalize_path unit tests ────────
 
-    /// FINDING-004 — resolve_rels_target: absolute target path strips leading slash.
+    /// FINDING-004 — `resolve_rels_target`: absolute target path strips leading slash.
     ///
     /// An absolute target like `/ppt/media/image1.png` must be returned as
     /// `ppt/media/image1.png` (no leading slash, no base prepended).
@@ -222,7 +217,7 @@ mod tests {
         );
     }
 
-    /// FINDING-004 — resolve_rels_target: relative target with `..` resolves correctly.
+    /// FINDING-004 — `resolve_rels_target`: relative target with `..` resolves correctly.
     ///
     /// Target `../media/image1.png` relative to `ppt/slideMasters/` must resolve
     /// to `ppt/media/image1.png`.
@@ -235,7 +230,7 @@ mod tests {
         );
     }
 
-    /// FINDING-004 — resolve_rels_target: relative target with multiple `..` segments.
+    /// FINDING-004 — `resolve_rels_target`: relative target with multiple `..` segments.
     ///
     /// Target `../../media/image1.png` relative to `ppt/slideMasters/` must resolve
     /// to `media/image1.png` (two levels up from `ppt/slideMasters/`).
@@ -248,7 +243,7 @@ mod tests {
         );
     }
 
-    /// FINDING-004 — resolve_rels_target: target with no `..` is appended to base.
+    /// FINDING-004 — `resolve_rels_target`: target with no `..` is appended to base.
     ///
     /// Target `media/image1.png` (no `..`) relative to `ppt/slideMasters/` must
     /// resolve to `ppt/slideMasters/media/image1.png`.
@@ -261,7 +256,7 @@ mod tests {
         );
     }
 
-    /// FINDING-004 — normalize_path: excess `..` segments that exhaust all components
+    /// FINDING-004 — `normalize_path`: excess `..` segments that exhaust all components
     /// produce an empty string (no path components remain).
     ///
     /// e.g., `ppt/../..` — popping `ppt` then having no segment to pop for the
@@ -276,7 +271,7 @@ mod tests {
         );
     }
 
-    /// FINDING-004 — normalize_path: path with no `..` segments returns the path unchanged.
+    /// FINDING-004 — `normalize_path`: path with no `..` segments returns the path unchanged.
     #[test]
     fn test_finding_004_normalize_path_no_dotdot() {
         let result = normalize_path("ppt/media/image1.png");
@@ -286,7 +281,7 @@ mod tests {
         );
     }
 
-    /// FINDING-004 — find_image_target: `.rels` with no `Type` attribute returns None.
+    /// FINDING-004 — `find_image_target`: `.rels` with no `Type` attribute returns None.
     ///
     /// A `<Relationship>` element missing the `Type` attribute must be skipped.
     /// The function must return `None` when no valid image relationship exists.

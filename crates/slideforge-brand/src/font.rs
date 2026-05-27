@@ -52,10 +52,10 @@ pub fn parse_theme_fonts(xml_bytes: &[u8]) -> Result<BrandFonts, BrandError> {
                 match name_str {
                     "majorFont" => {
                         current_font_context = Some("major");
-                    }
+                    },
                     "minorFont" => {
                         current_font_context = Some("minor");
-                    }
+                    },
                     "latin" => {
                         if let Some(ctx) = current_font_context {
                             for attr in e.attributes().flatten() {
@@ -66,20 +66,22 @@ pub fn parse_theme_fonts(xml_bytes: &[u8]) -> Result<BrandFonts, BrandError> {
                                     match ctx {
                                         "major" => heading = Some(typeface),
                                         "minor" => body = Some(typeface),
-                                        _ => {}
+                                        _ => {},
                                     }
                                 }
                             }
                         }
-                    }
-                    _ => {}
+                    },
+                    _ => {},
                 }
-            }
+            },
             Ok(Event::Empty(ref e)) => {
                 let local_name = e.local_name();
                 let name_str = std::str::from_utf8(local_name.as_ref()).unwrap_or("");
 
-                if name_str == "latin" && let Some(ctx) = current_font_context {
+                if name_str == "latin"
+                    && let Some(ctx) = current_font_context
+                {
                     for attr in e.attributes().flatten() {
                         if attr.key.local_name().as_ref() == b"typeface"
                             && let Ok(val) = std::str::from_utf8(&attr.value)
@@ -88,28 +90,28 @@ pub fn parse_theme_fonts(xml_bytes: &[u8]) -> Result<BrandFonts, BrandError> {
                             match ctx {
                                 "major" => heading = Some(typeface),
                                 "minor" => body = Some(typeface),
-                                _ => {}
+                                _ => {},
                             }
                         }
                     }
                 }
-            }
+            },
             Ok(Event::End(ref e)) => {
                 let local_name = e.local_name();
                 let name_str = std::str::from_utf8(local_name.as_ref()).unwrap_or("");
                 match name_str {
                     "majorFont" | "minorFont" => {
                         current_font_context = None;
-                    }
-                    _ => {}
+                    },
+                    _ => {},
                 }
-            }
+            },
             Ok(Event::Eof) => break,
             Err(e) => {
                 tracing::warn!(error = %e, "XML parse error in theme1.xml font section; partial font data may be incomplete");
                 break;
-            }
-            _ => {}
+            },
+            _ => {},
         }
         buf.clear();
     }
@@ -304,7 +306,7 @@ mod tests {
 
     /// BC-2.01.001 AC-004 — extracts majorFont and minorFont typeface attributes.
     ///
-    /// Test vector: THEME_XML_WITH_FONTS → BrandFonts { heading: "Calibri Light", body: "Calibri" }.
+    /// Test vector: `THEME_XML_WITH_FONTS` → `BrandFonts` { heading: "Calibri Light", body: "Calibri" }.
     #[test]
     fn test_bc_2_01_001_parse_major_minor_fonts() {
         let fonts =
@@ -319,11 +321,11 @@ mod tests {
 
     /// BC-2.01.001 AC-004 — missing font elements fall back to "Calibri".
     ///
-    /// Test vector: THEME_XML_NO_FONTS → BrandFonts { heading: "Calibri", body: "Calibri" }.
+    /// Test vector: `THEME_XML_NO_FONTS` → `BrandFonts` { heading: "Calibri", body: "Calibri" }.
     #[test]
     fn test_bc_2_01_001_missing_fonts_fallback() {
-        let fonts =
-            parse_theme_fonts(THEME_XML_NO_FONTS.as_bytes()).expect("empty font section must parse");
+        let fonts = parse_theme_fonts(THEME_XML_NO_FONTS.as_bytes())
+            .expect("empty font section must parse");
         assert_eq!(
             fonts.heading.as_ref(),
             "Calibri",
@@ -339,12 +341,13 @@ mod tests {
     /// BC-2.01.001 AC-004 — Arial font extracted correctly when present.
     #[test]
     fn test_bc_2_01_001_parse_arial_font() {
-        let fonts = parse_theme_fonts(THEME_XML_ARIAL.as_bytes()).expect("Arial font XML must parse");
+        let fonts =
+            parse_theme_fonts(THEME_XML_ARIAL.as_bytes()).expect("Arial font XML must parse");
         assert_eq!(fonts.heading.as_ref(), "Arial");
         assert_eq!(fonts.body.as_ref(), "Arial");
     }
 
-    /// BC-2.01.006 invariant 3 — FALLBACK_CHAIN is deterministic and non-empty.
+    /// BC-2.01.006 invariant 3 — `FALLBACK_CHAIN` is deterministic and non-empty.
     #[test]
     fn test_bc_2_01_006_fallback_chain_non_empty() {
         assert!(
@@ -362,11 +365,14 @@ mod tests {
     #[test]
     fn test_bc_2_01_006_fallback_chain_order() {
         assert_eq!(FALLBACK_CHAIN[0], "Aptos", "first fallback must be Aptos");
-        assert_eq!(FALLBACK_CHAIN[1], "Calibri", "second fallback must be Calibri");
+        assert_eq!(
+            FALLBACK_CHAIN[1], "Calibri",
+            "second fallback must be Calibri"
+        );
         assert_eq!(FALLBACK_CHAIN[2], "Arial", "last fallback must be Arial");
     }
 
-    /// BC-2.01.006 — font_search_dirs returns a non-empty list.
+    /// BC-2.01.006 — `font_search_dirs` returns a non-empty list.
     #[test]
     fn test_bc_2_01_006_font_search_dirs_non_empty() {
         let dirs = font_search_dirs();
@@ -376,7 +382,7 @@ mod tests {
         );
     }
 
-    /// BC-2.01.006 — font_available returns a bool (does not panic).
+    /// BC-2.01.006 — `font_available` returns a bool (does not panic).
     ///
     /// We cannot assert the return value as it depends on build host font installation.
     /// The test verifies the function does not panic and returns a valid bool.
@@ -387,10 +393,10 @@ mod tests {
         let _result: bool = font_available("Arial");
     }
 
-    /// FINDING-013 — font_stem_matches uses exact or well-delimited prefix matching.
+    /// FINDING-013 — `font_stem_matches` uses exact or well-delimited prefix matching.
     ///
     /// Ensures that a broad font name like "Calibri" does not accidentally match
-    /// "CalibriBody" (no separator) while still matching "Calibri-Bold" and "Calibri Light".
+    /// "`CalibriBody`" (no separator) while still matching "Calibri-Bold" and "Calibri Light".
     #[test]
     fn test_bc_2_01_006_font_stem_matches_exact() {
         // Exact match.
@@ -435,11 +441,18 @@ mod tests {
             b"<?xml version=\"1.0\"?><a:theme xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"><a:themeElements><a:fontScheme name=\"T\"><a:majorFont><a:latin typeface=\"Calibri Light\"/><!-- abrupt";
         let result = parse_theme_fonts(truncated_xml);
         // Must not panic — falls back to defaults for any missing context.
-        assert!(result.is_ok(), "malformed XML must not produce a hard error in font parsing");
+        assert!(
+            result.is_ok(),
+            "malformed XML must not produce a hard error in font parsing"
+        );
         // Whatever was parsed (or fallback Calibri) must be returned.
         let fonts = result.unwrap();
         // We extracted majorFont before truncation, so heading might be Calibri Light.
         // minorFont was not reached, so body falls back to Calibri.
-        assert_eq!(fonts.body.as_ref(), "Calibri", "body font falls back to Calibri after truncation");
+        assert_eq!(
+            fonts.body.as_ref(),
+            "Calibri",
+            "body font falls back to Calibri after truncation"
+        );
     }
 }
