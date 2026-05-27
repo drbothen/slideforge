@@ -280,9 +280,18 @@ pub fn eval_deck_with_variant(
         .map(|l| Arc::from(l.value().as_str()));
     let title = None; // Title is not present in DeckNode (comes from a slide); leave None.
 
+    /// Fallback version string when the DSL file omits a `slideforge_version` declaration.
+    const FALLBACK_VERSION: &str = "0.1.0";
+
+    let version_str: Arc<str> = deck_node
+        .version
+        .as_ref()
+        .map(|v| Arc::from(v.value().as_str()))
+        .unwrap_or_else(|| Arc::from(FALLBACK_VERSION));
+
     let metadata = DeckMetadata {
         title,
-        slideforge_version: Arc::from("0.1.0"),
+        slideforge_version: version_str,
         lang,
         author: None,
     };

@@ -271,12 +271,9 @@ pub fn eval_slide_node<S: std::hash::BuildHasher>(
                         },
                     }
                 }
-                if had_error {
-                    // Continue with partial result — error already in sink.
-                    slideforge_types::FieldValue::Literal(Value::Str(Arc::from(result.as_str())))
-                } else {
-                    slideforge_types::FieldValue::Literal(Value::Str(Arc::from(result.as_str())))
-                }
+                // Error already accumulated in sink; use partial result for error-recovery.
+                let _ = had_error; // consumed above; used only for sink accumulation
+                slideforge_types::FieldValue::Literal(Value::Str(Arc::from(result.as_str())))
             },
             FieldValue::Num(n) => slideforge_types::FieldValue::Literal(Value::Int(*n)),
             FieldValue::Float(f) => slideforge_types::FieldValue::Literal(Value::Float(*f)),
