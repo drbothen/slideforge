@@ -40,8 +40,9 @@ impl MathDiagnostic {
 pub enum MathRendererError {
     /// A LaTeX command is not in the supported command set for slideforge.
     ///
-    /// Carries a correction hint for user-facing display.
-    #[error("unsupported LaTeX command `\\{command}`: {hint}")]
+    /// Carries a correction hint for user-facing display and a stable machine-
+    /// readable error code (`E-EXP-006`) for programmatic handling.
+    #[error("[{error_code}] unsupported LaTeX command `\\{command}`: {hint}")]
     UnsupportedCommand {
         /// The unsupported command name (without leading backslash).
         command: Arc<str>,
@@ -49,6 +50,8 @@ pub enum MathRendererError {
         span: SourceSpan,
         /// A human-readable correction hint surfaced to the user.
         hint: Arc<str>,
+        /// Stable error code for this class of error: always `"E-EXP-006"`.
+        error_code: &'static str,
     },
 
     /// A `@{var}` interpolation reference names a variable not in scope.

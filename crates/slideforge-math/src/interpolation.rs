@@ -16,6 +16,7 @@
 //!   placeholder is replaced with a `?` sentinel for parse continuity.
 
 use std::collections::HashMap;
+use std::hash::BuildHasher;
 use std::sync::Arc;
 
 use slideforge_types::SourceSpan;
@@ -36,91 +37,89 @@ use crate::error::{MathDiagnostic, MathRendererError};
 /// A tuple of `(substituted_source, Vec<MathDiagnostic>)`:
 /// - The first element is the LaTeX string with all `@{...}` references replaced.
 /// - The second element contains diagnostics for undefined variable references.
-pub fn substitute(
+#[must_use]
+pub fn substitute<S: BuildHasher>(
     latex: &str,
-    vars: &HashMap<Arc<str>, Arc<str>>,
-    span: SourceSpan,
+    vars: &HashMap<Arc<str>, Arc<str>, S>,
+    span: &SourceSpan,
 ) -> (String, Vec<MathDiagnostic>) {
     let mut result = String::with_capacity(latex.len());
     let mut diags: Vec<MathDiagnostic> = Vec::new();
     let mut chars = latex.char_indices().peekable();
 
-    while let Some((i, ch)) = chars.next() {
+    while let Some((_i, ch)) = chars.next() {
         // Detect `@{` — start of math-mode interpolation.
-        if ch == '@' {
-            if let Some((_, '{')) = chars.peek().copied() {
-                // Consume the `{`
-                chars.next();
-                // Collect the variable name up to the matching `}`
-                let mut var_name = String::new();
-                let mut closed = false;
-                for (_, vc) in chars.by_ref() {
-                    if vc == '}' {
-                        closed = true;
-                        break;
-                    }
-                    var_name.push(vc);
+        if ch == '@'
+            && let Some((_, '{')) = chars.peek().copied()
+        {
+            // Consume the `{`
+            chars.next();
+            // Collect the variable name up to the matching `}`
+            let mut var_name = String::new();
+            let mut closed = false;
+            for (_, vc) in chars.by_ref() {
+                if vc == '}' {
+                    closed = true;
+                    break;
                 }
-                if closed {
-                    let key: Arc<str> = Arc::from(var_name.as_str());
-                    if let Some(value) = vars.get(&key) {
-                        result.push_str(value);
-                    } else {
-                        // Replace with `?` sentinel so parsing can continue
-                        result.push('?');
-                        diags.push(MathDiagnostic::new(
-                            MathRendererError::UndefinedVariable {
-                                var_name: key,
-                                span: span.clone(),
-                            },
-                            span.clone(),
-                        ));
-                    }
-                } else {
-                    // Unclosed `@{` — emit as-is (best-effort recovery)
-                    result.push('@');
-                    result.push('{');
-                    result.push_str(&var_name);
-                }
-                continue;
+                var_name.push(vc);
             }
+            if closed {
+                let key: Arc<str> = Arc::from(var_name.as_str());
+                if let Some(value) = vars.get(&key) {
+                    result.push_str(value);
+                } else {
+                    // Replace with `?` sentinel so parsing can continue
+                    result.push('?');
+                    diags.push(MathDiagnostic::new(
+                        MathRendererError::UndefinedVariable {
+                            var_name: key,
+                            span: span.clone(),
+                        },
+                        span.clone(),
+                    ));
+                }
+            } else {
+                // Unclosed `@{` — emit as-is (best-effort recovery)
+                result.push('@');
+                result.push('{');
+                result.push_str(&var_name);
+            }
+            continue;
         }
 
         // Detect `{{` — double-brace text-mode syntax; leave as literal.
-        if ch == '{' {
-            if let Some((_, '{')) = chars.peek().copied() {
-                // Two consecutive `{` chars — pass them through verbatim.
-                // Consume ahead to collect until `}}`.
-                let start = i;
-                let _ = start;
-                result.push('{');
-                // We already peeked the second `{`. Consume it.
-                chars.next();
-                result.push('{');
-                // Copy everything up to and including `}}`
-                let mut inner = String::new();
-                let mut found_close = false;
-                while let Some((_, ic)) = chars.next() {
-                    if ic == '}' {
-                        if let Some((_, '}')) = chars.peek().copied() {
-                            chars.next();
-                            result.push_str(&inner);
-                            result.push('}');
-                            result.push('}');
-                            found_close = true;
-                            break;
-                        }
-                        inner.push(ic);
-                    } else {
-                        inner.push(ic);
+        if ch == '{'
+            && let Some((_, '{')) = chars.peek().copied()
+        {
+            // Two consecutive `{` chars — pass them through verbatim.
+            result.push('{');
+            // We already peeked the second `{`. Consume it.
+            chars.next();
+            result.push('{');
+            // Copy everything up to and including `}}`
+            let mut inner = String::new();
+            let mut found_close = false;
+            while let Some((_, ic)) = chars.next() {
+                if ic == '}' {
+                    if let Some((_, '}')) = chars.peek().copied() {
+                        chars.next();
+                        result.push_str(&inner);
+                        result.push('}');
+                        result.push('}');
+                        found_close = true;
+                        break;
                     }
+                    inner.push(ic);
+                } else {
+                    inner.push(ic);
                 }
-                if !found_close {
-                    // Unclosed `{{` — emit collected inner verbatim
-                    result.push_str(&inner);
-                }
-                continue;
             }
+            if !found_close {
+                // Unclosed `{{` — emit collected inner verbatim
+                result.push_str(&inner);
+            }
+            continue;
         }
 
         result.push(ch);
@@ -152,7 +151,7 @@ mod tests {
         let (result, diags) = substitute(
             r"\bar{x} = @{mean}",
             &vars,
-            SourceSpan::default(),
+            &SourceSpan::default(),
         );
         assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
         assert_eq!(result, r"\bar{x} = 4.2");
@@ -162,7 +161,7 @@ mod tests {
     #[test]
     fn test_bc_5_29_003_at_var_undefined() {
         let vars = HashMap::new();
-        let (_, diags) = substitute("@{missing}", &vars, SourceSpan::default());
+        let (_, diags) = substitute("@{missing}", &vars, &SourceSpan::default());
         assert!(!diags.is_empty(), "expected UndefinedVariable diagnostic");
         let has_undef = diags.iter().any(|d| {
             matches!(&d.error, MathRendererError::UndefinedVariable { var_name, .. }
@@ -175,7 +174,7 @@ mod tests {
     #[test]
     fn test_bc_5_29_003_double_brace_not_substituted() {
         let vars = vars_from(&[("arr", "replaced")]);
-        let (result, diags) = substitute("{{ arr }}", &vars, SourceSpan::default());
+        let (result, diags) = substitute("{{ arr }}", &vars, &SourceSpan::default());
         assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
         // Double-brace must be left as literal — NOT replaced
         assert_eq!(result, "{{ arr }}", "double-brace must not be substituted in math mode");
@@ -188,7 +187,7 @@ mod tests {
         let (result, diags) = substitute(
             r"\sqrt{@{a}^2 + @{b}^2}",
             &vars,
-            SourceSpan::default(),
+            &SourceSpan::default(),
         );
         assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
         assert_eq!(result, r"\sqrt{3^2 + 4^2}");
@@ -199,7 +198,7 @@ mod tests {
     fn test_bc_5_29_003_no_vars_unchanged() {
         let vars = HashMap::new();
         let latex = r"\frac{1}{2} + \sqrt{x}";
-        let (result, diags) = substitute(latex, &vars, SourceSpan::default());
+        let (result, diags) = substitute(latex, &vars, &SourceSpan::default());
         assert!(diags.is_empty());
         assert_eq!(result, latex);
     }
@@ -208,7 +207,7 @@ mod tests {
     #[test]
     fn test_bc_5_29_003_empty_string() {
         let vars = HashMap::new();
-        let (result, diags) = substitute("", &vars, SourceSpan::default());
+        let (result, diags) = substitute("", &vars, &SourceSpan::default());
         assert!(diags.is_empty());
         assert_eq!(result, "");
     }

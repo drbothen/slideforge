@@ -50,18 +50,18 @@ pub fn render(ast: &MathAst) -> Result<Vec<u8>, MathRendererError> {
     // (no attribute on them), which lets callers check `xml.contains("<m:oMath>")`.
     match ast.mode {
         MathMode::Display => {
-            out.push_str(&format!(
-                r#"<m:math xmlns:m="{OMML_NAMESPACE}"><m:oMathPara><m:oMath>"#
-            ));
+            out.push_str(
+                r#"<m:oMathPara xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math"><m:oMath>"#,
+            );
             render_nodes(&ast.nodes, &mut out);
-            out.push_str("</m:oMath></m:oMathPara></m:math>");
+            out.push_str("</m:oMath></m:oMathPara>");
         }
         MathMode::Inline => {
-            out.push_str(&format!(
-                r#"<m:math xmlns:m="{OMML_NAMESPACE}"><m:oMath>"#
-            ));
+            out.push_str(
+                r#"<m:oMath xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math">"#,
+            );
             render_nodes(&ast.nodes, &mut out);
-            out.push_str("</m:oMath></m:math>");
+            out.push_str("</m:oMath>");
         }
     }
 
@@ -139,9 +139,18 @@ fn render_node(node: &MathNode, out: &mut String) {
         }
 
         // ── Large operators → Unicode run ─────────────────────────────────
+        //
+        // Text-based operators (lim, max, min, etc.) must render in upright
+        // (plain) style using <m:rPr><m:sty m:val="p"/></m:rPr> so they appear
+        // in roman rather than italic — matching standard mathematical typography.
+        // Symbol operators (∑, ∏, ∫) do not carry this property.
         MathNode::Operator(name) => {
             let ch = operator_to_unicode(name);
-            out.push_str("<m:r><m:t>");
+            if is_text_operator(name) {
+                out.push_str(r#"<m:r><m:rPr><m:sty m:val="p"/></m:rPr><m:t>"#);
+            } else {
+                out.push_str("<m:r><m:t>");
+            }
             out.push_str(&xml_escape(ch));
             out.push_str("</m:t></m:r>");
         }
@@ -173,10 +182,10 @@ fn render_node(node: &MathNode, out: &mut String) {
         MathNode::Delimiter { left, right, inner } => {
             out.push_str("<m:d><m:dPr>");
             out.push_str("<m:begChr m:val=\"");
-            out.push_str(&xml_escape(left));
+            out.push_str(&xml_escape(unescape_delimiter(left)));
             out.push_str("\"/>");
             out.push_str("<m:endChr m:val=\"");
-            out.push_str(&xml_escape(right));
+            out.push_str(&xml_escape(unescape_delimiter(right)));
             out.push_str("\"/>");
             out.push_str("</m:dPr><m:e>");
             render_nodes(inner, out);
@@ -218,6 +227,27 @@ fn render_node(node: &MathNode, out: &mut String) {
     }
 }
 
+/// Strip LaTeX delimiter escapes so that OMML receives a bare character.
+///
+/// OMML `<m:begChr>` and `<m:endChr>` attributes expect a raw Unicode character,
+/// not a LaTeX escape sequence. For example `\{` must become `{` and `\.`
+/// (the null delimiter) must become an empty string.
+///
+/// | Input | Output |
+/// |-------|--------|
+/// | `\{`  | `{`    |
+/// | `\}`  | `}`    |
+/// | `\.`  | `""`   |
+/// | `(`   | `(`    |
+fn unescape_delimiter(s: &str) -> &str {
+    match s {
+        "\\{" => "{",
+        "\\}" => "}",
+        "\\." => "",
+        other => other,
+    }
+}
+
 /// Escape XML special characters.
 fn xml_escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
@@ -239,7 +269,7 @@ fn greek_to_unicode(name: &str) -> String {
     match name {
         "alpha" => "α".to_owned(), "beta" => "β".to_owned(),
         "gamma" => "γ".to_owned(), "delta" => "δ".to_owned(),
-        "epsilon" => "ε".to_owned(), "varepsilon" => "ε".to_owned(),
+        "epsilon" | "varepsilon" => "ε".to_owned(),
         "zeta" => "ζ".to_owned(), "eta" => "η".to_owned(),
         "theta" => "θ".to_owned(), "vartheta" => "ϑ".to_owned(),
         "iota" => "ι".to_owned(), "kappa" => "κ".to_owned(),
@@ -281,10 +311,25 @@ fn operator_to_unicode(name: &str) -> &'static str {
     }
 }
 
+/// Return `true` if `name` is a text-based operator that must render upright.
+///
+/// Text operators (lim, max, min, sin, cos, tan, log, ln, exp, det, sup, inf,
+/// gcd, dim, ker, deg, hom, mod) are typeset in roman (non-italic) style in
+/// standard mathematical notation. OMML achieves this with
+/// `<m:rPr><m:sty m:val="p"/></m:rPr>`.
+fn is_text_operator(name: &str) -> bool {
+    matches!(
+        name,
+        "lim" | "max" | "min" | "sin" | "cos" | "tan" | "log" | "ln"
+            | "exp" | "det" | "sup" | "inf" | "gcd" | "dim" | "ker"
+            | "deg" | "hom" | "mod"
+    )
+}
+
 /// Map a symbol command name to its Unicode character string.
 fn symbol_to_unicode(name: &str) -> &'static str {
     match name {
-        "cdot" => "·", "times" => "×", "infty" => "∞", "pm" => "±",
+        "cdot" => "·", "times" => "×", "div" => "÷", "infty" => "∞", "pm" => "±", "mp" => "∓",
         "leq" => "≤", "geq" => "≥", "neq" => "≠", "approx" => "≈",
         "equiv" => "≡", "in" => "∈", "notin" => "∉", "subset" => "⊂",
         "supset" => "⊃", "cup" => "∪", "cap" => "∩", "emptyset" => "∅",
@@ -357,8 +402,10 @@ mod tests {
         );
         let bytes = render(&ast).expect("render should succeed");
         let xml = String::from_utf8(bytes).expect("valid UTF-8");
+        // Root element is <m:oMathPara> with namespace attribute, so check
+        // for the tag prefix rather than the bare tag without attributes.
         assert!(
-            xml.contains("<m:oMathPara>"),
+            xml.contains("<m:oMathPara"),
             "display mode must use <m:oMathPara>, got: {xml}"
         );
     }
@@ -372,9 +419,10 @@ mod tests {
         );
         let bytes = render(&ast).expect("render should succeed");
         let xml = String::from_utf8(bytes).expect("valid UTF-8");
-        assert!(xml.contains("<m:oMath>"), "inline mode must use <m:oMath>, got: {xml}");
+        // Root element is <m:oMath> with namespace attribute.
+        assert!(xml.contains("<m:oMath"), "inline mode must use <m:oMath>, got: {xml}");
         assert!(
-            !xml.contains("<m:oMathPara>"),
+            !xml.contains("<m:oMathPara"),
             "inline mode must NOT use <m:oMathPara>, got: {xml}"
         );
     }
@@ -416,6 +464,124 @@ mod tests {
         let bytes = render(&ast).expect("render should succeed");
         let xml = String::from_utf8(bytes).expect("valid UTF-8");
         assert!(xml.contains("<m:r>"), "expected <m:r> run element in: {xml}");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // FINDING-006 — lim/max/min render upright, not italic
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// `lim` renders with `<m:rPr><m:sty m:val="p"/></m:rPr>` for upright style.
+    #[test]
+    fn test_finding_006_lim_renders_upright() {
+        let ast = MathAst::new(
+            MathMode::Inline,
+            vec![MathNode::Operator(Arc::from("lim"))],
+        );
+        let bytes = render(&ast).expect("render should succeed");
+        let xml = String::from_utf8(bytes).expect("valid UTF-8");
+        assert!(
+            xml.contains(r#"<m:sty m:val="p"/>"#),
+            "lim must render with upright style m:sty p; got: {xml}"
+        );
+        assert!(xml.contains("lim"), "must still contain the text 'lim'; got: {xml}");
+    }
+
+    /// Symbol operators (∑, ∏, ∫) do NOT carry the upright style property.
+    #[test]
+    fn test_finding_006_sum_does_not_get_upright_style() {
+        let ast = MathAst::new(
+            MathMode::Inline,
+            vec![MathNode::Operator(Arc::from("sum"))],
+        );
+        let bytes = render(&ast).expect("render should succeed");
+        let xml = String::from_utf8(bytes).expect("valid UTF-8");
+        // ∑ is a symbol, not a text operator — no rPr style needed
+        assert!(
+            !xml.contains(r#"<m:sty m:val="p"/>"#),
+            "∑ must not carry upright style; got: {xml}"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // FINDING-005 — delimiter escapes must be stripped before OMML output
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// `\left\{ ... \right\}` must render with bare `{` and `}` in OMML
+    /// `m:val` attributes, not with the LaTeX escape sequences `\{` / `\}`.
+    #[test]
+    fn test_finding_005_delimiter_escapes_stripped() {
+        let ast = MathAst::new(
+            MathMode::Inline,
+            vec![MathNode::Delimiter {
+                left: Arc::from("\\{"),
+                right: Arc::from("\\}"),
+                inner: vec![MathNode::Text(Arc::from("x"))],
+            }],
+        );
+        let bytes = render(&ast).expect("render should succeed");
+        let xml = String::from_utf8(bytes).expect("valid UTF-8");
+        // Must contain the bare character, not the LaTeX escape
+        assert!(
+            xml.contains(r#"m:val="{""#),
+            "expected bare '{{' in m:val attribute; got: {xml}"
+        );
+        assert!(
+            xml.contains(r#"m:val="}""#),
+            "expected bare '}}' in m:val attribute; got: {xml}"
+        );
+        // Must NOT contain the LaTeX escape sequence in the attribute
+        assert!(
+            !xml.contains(r#"m:val="\{""#),
+            "must not contain LaTeX escape \\{{ in m:val; got: {xml}"
+        );
+    }
+
+    /// `\left. ... \right.` (null delimiters) must produce empty `m:val` attributes.
+    #[test]
+    fn test_finding_005_null_delimiter_dot_becomes_empty() {
+        let ast = MathAst::new(
+            MathMode::Inline,
+            vec![MathNode::Delimiter {
+                left: Arc::from("\\."),
+                right: Arc::from("\\."),
+                inner: vec![MathNode::Text(Arc::from("x"))],
+            }],
+        );
+        let bytes = render(&ast).expect("render should succeed");
+        let xml = String::from_utf8(bytes).expect("valid UTF-8");
+        // Empty string delimiter → m:val=""
+        assert!(
+            xml.contains(r#"m:val="""#),
+            "expected empty m:val for null delimiter; got: {xml}"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // FINDING-004 — \div and \mp must render to correct Unicode in OMML
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// `\div` renders to the Unicode division sign ÷ in OMML.
+    #[test]
+    fn test_finding_004_div_renders_unicode() {
+        let ast = MathAst::new(
+            MathMode::Inline,
+            vec![MathNode::Symbol(Arc::from("div"))],
+        );
+        let bytes = render(&ast).expect("render should succeed");
+        let xml = String::from_utf8(bytes).expect("valid UTF-8");
+        assert!(xml.contains('÷'), "expected ÷ (U+00F7) in OMML for \\div; got: {xml}");
+    }
+
+    /// `\mp` renders to the Unicode minus-or-plus sign ∓ in OMML.
+    #[test]
+    fn test_finding_004_mp_renders_unicode() {
+        let ast = MathAst::new(
+            MathMode::Inline,
+            vec![MathNode::Symbol(Arc::from("mp"))],
+        );
+        let bytes = render(&ast).expect("render should succeed");
+        let xml = String::from_utf8(bytes).expect("valid UTF-8");
+        assert!(xml.contains('∓'), "expected ∓ (U+2213) in OMML for \\mp; got: {xml}");
     }
 
     /// An accent node renders to OMML with `<m:acc>`.

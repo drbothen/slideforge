@@ -21,7 +21,7 @@
 //! | Accents | `\hat`, `\bar`, `\tilde`, `\vec`, `\dot`, `\ddot` |
 //! | Greek | `\alpha` … `\omega`, `\Alpha` … `\Omega` |
 //! | Operators | `\sum`, `\prod`, `\int`, `\lim`, `\max`, `\min` |
-//! | Symbols | `\cdot`, `\times`, `\infty`, `\pm`, `\leq`, `\geq` |
+//! | Symbols | `\cdot`, `\times`, `\div`, `\infty`, `\pm`, `\mp`, `\leq`, `\geq` |
 //! | Spaces | `\,`, `\;`, `\quad`, `\qquad` |
 
 use std::sync::Arc;
@@ -51,6 +51,7 @@ use crate::error::{MathDiagnostic, MathRendererError};
 ///
 /// Returns diagnostics for unsupported commands, unmatched braces, and other
 /// structural errors. Never panics — all recoverable paths produce diagnostics.
+#[must_use]
 pub fn parse(
     latex: &str,
     mode: MathMode,
@@ -95,7 +96,7 @@ impl<'a> LatexParser<'a> {
     /// Skip ASCII whitespace.
     fn skip_whitespace(&mut self) {
         while self.pos < self.input.len()
-            && self.input.as_bytes().get(self.pos).map_or(false, |b| b.is_ascii_whitespace())
+            && self.input.as_bytes().get(self.pos).is_some_and(u8::is_ascii_whitespace)
         {
             self.pos += 1;
         }
@@ -106,22 +107,25 @@ impl<'a> LatexParser<'a> {
         self.input.as_bytes().get(self.pos).copied()
     }
 
-    /// Consume one byte and return the corresponding char.
-    fn consume_byte(&mut self) -> Option<char> {
-        let b = self.input.as_bytes().get(self.pos)?;
-        self.pos += 1;
-        Some(*b as char)
+    /// Consume one Unicode scalar value (char) from the input.
+    ///
+    /// Advances `self.pos` by the correct UTF-8 byte length of the consumed
+    /// character, avoiding corruption of multi-byte sequences.
+    fn consume_char(&mut self) -> Option<char> {
+        let ch = self.input[self.pos..].chars().next()?;
+        self.pos += ch.len_utf8();
+        Some(ch)
     }
 
     /// Parse a command name after a backslash (e.g. `\alpha` → `"alpha"`).
     fn parse_command_name(&mut self) -> &'a str {
         let start = self.pos;
         // Single non-alpha character command (e.g. `\,`)
-        if let Some(&b) = self.input.as_bytes().get(self.pos) {
-            if !b.is_ascii_alphabetic() {
-                self.pos += 1;
-                return &self.input[start..self.pos];
-            }
+        if let Some(&b) = self.input.as_bytes().get(self.pos)
+            && !b.is_ascii_alphabetic()
+        {
+            self.pos += 1;
+            return &self.input[start..self.pos];
         }
         while let Some(&b) = self.input.as_bytes().get(self.pos) {
             if b.is_ascii_alphabetic() {
@@ -196,7 +200,7 @@ impl<'a> LatexParser<'a> {
             MathNode::Operator(_) => {
                 // Check whether scripts follow before deciding
                 self.skip_whitespace();
-                let has_script = matches!(self.peek_byte(), Some(b'^') | Some(b'_'));
+                let has_script = matches!(self.peek_byte(), Some(b'^' | b'_'));
                 if has_script {
                     // Push the operator first, then attach scripts to an empty base
                     prev.push(node);
@@ -256,7 +260,7 @@ impl<'a> LatexParser<'a> {
                 self.dispatch_command(cmd)
             }
             _ => {
-                if let Some(ch) = self.consume_byte() {
+                if let Some(ch) = self.consume_char() {
                     MathNode::Text(Arc::from(ch.to_string().as_str()))
                 } else {
                     MathNode::Text(Arc::from(""))
@@ -284,11 +288,11 @@ impl<'a> LatexParser<'a> {
             }
             b'^' | b'_' => {
                 // Dangling script without base — produce a Text node
-                let ch = self.consume_byte()?;
+                let ch = self.consume_char()?;
                 Some(MathNode::Text(Arc::from(ch.to_string().as_str())))
             }
             _ => {
-                let ch = self.consume_byte()?;
+                let ch = self.consume_char()?;
                 Some(MathNode::Text(Arc::from(ch.to_string().as_str())))
             }
         }
@@ -349,17 +353,13 @@ impl<'a> LatexParser<'a> {
                 MathNode::Accent { kind: AccentKind::Ddot, inner: Box::new(inner) }
             }
 
-            // ── Greek lowercase ───────────────────────────────────────────
+            // ── Greek (lowercase and uppercase) ───────────────────────────
             "alpha" | "beta" | "gamma" | "delta" | "epsilon" | "varepsilon"
             | "zeta" | "eta" | "theta" | "vartheta" | "iota" | "kappa"
             | "lambda" | "mu" | "nu" | "xi" | "pi" | "varpi" | "rho"
             | "varrho" | "sigma" | "varsigma" | "tau" | "upsilon"
-            | "phi" | "varphi" | "chi" | "psi" | "omega" => {
-                MathNode::Greek(Arc::from(cmd))
-            }
-
-            // ── Greek uppercase ───────────────────────────────────────────
-            "Alpha" | "Beta" | "Gamma" | "Delta" | "Epsilon" | "Zeta"
+            | "phi" | "varphi" | "chi" | "psi" | "omega"
+            | "Alpha" | "Beta" | "Gamma" | "Delta" | "Epsilon" | "Zeta"
             | "Eta" | "Theta" | "Iota" | "Kappa" | "Lambda" | "Mu"
             | "Nu" | "Xi" | "Pi" | "Rho" | "Sigma" | "Tau" | "Upsilon"
             | "Phi" | "Chi" | "Psi" | "Omega" => {
@@ -372,7 +372,7 @@ impl<'a> LatexParser<'a> {
             }
 
             // ── Symbols ───────────────────────────────────────────────────
-            "cdot" | "times" | "infty" | "pm" | "leq" | "geq" | "neq"
+            "cdot" | "times" | "div" | "infty" | "pm" | "mp" | "leq" | "geq" | "neq"
             | "approx" | "equiv" | "in" | "notin" | "subset" | "supset"
             | "cup" | "cap" | "emptyset" | "forall" | "exists" | "partial"
             | "nabla" | "to" | "rightarrow" | "leftarrow" | "Rightarrow"
@@ -389,7 +389,7 @@ impl<'a> LatexParser<'a> {
                 self.skip_whitespace();
                 let left_delim = self.consume_delimiter_char();
                 // Parse content until `\right`
-                let inner = self.parse_until(|p| p.is_at_right());
+                let inner = self.parse_until(LatexParser::is_at_right);
                 // Consume `\right` + its delimiter
                 let right_delim = if self.peek_byte() == Some(b'\\') {
                     self.pos += 1;
@@ -427,6 +427,7 @@ impl<'a> LatexParser<'a> {
                                     command: Arc::from(other),
                                     span: self.span.clone(),
                                     hint: Arc::from(hint_for_command(other)),
+                                    error_code: "E-EXP-006",
                                 },
                                 self.span.clone(),
                             ));
@@ -462,6 +463,7 @@ impl<'a> LatexParser<'a> {
                         command: Arc::from(other),
                         span: self.span.clone(),
                         hint: Arc::from(hint_for_command(other)),
+                        error_code: "E-EXP-006",
                     },
                     self.span.clone(),
                 ));
@@ -470,10 +472,15 @@ impl<'a> LatexParser<'a> {
         }
     }
 
-    /// Return true when the parser is positioned at `\right`.
+    /// Return true when the parser is positioned at `\right` (the delimiter
+    /// command), NOT at `\rightarrow` or other commands that share the prefix.
+    ///
+    /// The check requires that the character after `\right` is NOT an ASCII
+    /// letter, so `\rightarrow` (alphabetic continuation) is excluded.
     fn is_at_right(&self) -> bool {
         let r = self.rest();
         r.starts_with("\\right")
+            && !r.as_bytes().get(6).is_some_and(u8::is_ascii_alphabetic)
     }
 
     /// Consume a single delimiter character (e.g. `(`, `)`, `[`, `]`, `\{`, `\}`).
@@ -484,15 +491,15 @@ impl<'a> LatexParser<'a> {
                 // `\{` or `\}` or `\.`
                 self.pos += 1;
                 let start = self.pos;
-                if let Some(&b) = self.input.as_bytes().get(self.pos) {
-                    if b == b'{' || b == b'}' || b == b'.' {
-                        self.pos += 1;
-                    }
+                if let Some(&b) = self.input.as_bytes().get(self.pos)
+                    && (b == b'{' || b == b'}' || b == b'.')
+                {
+                    self.pos += 1;
                 }
                 Arc::from(&self.input[start - 1..self.pos])
             }
             Some(_) => {
-                let ch = self.consume_byte().unwrap_or('(');
+                let ch = self.consume_char().unwrap_or('(');
                 Arc::from(ch.to_string().as_str())
             }
             None => Arc::from("("),
@@ -619,7 +626,7 @@ pub fn is_supported_command(cmd: &str) -> bool {
         // Operators
         "sum" | "prod" | "int" | "lim" | "max" | "min" |
         // Symbols
-        "cdot" | "times" | "infty" | "pm" | "leq" | "geq" | "neq" |
+        "cdot" | "times" | "div" | "infty" | "pm" | "mp" | "leq" | "geq" | "neq" |
         "approx" | "equiv" | "in" | "notin" | "subset" | "supset" |
         "cup" | "cap" | "emptyset" | "forall" | "exists" | "partial" |
         "nabla" | "to" | "rightarrow" | "leftarrow" | "Rightarrow" |
@@ -648,6 +655,8 @@ pub fn hint_for_command(cmd: &str) -> &'static str {
             "custom operator declarations require v2+",
         "include" | "input" =>
             "file inclusion is not supported inside math expressions",
+        "tikzpicture" =>
+            "TikZ drawings are not supported in v1.0",
         _ =>
             "this command is not in the slideforge v1.0 supported LaTeX subset",
     }
@@ -817,5 +826,147 @@ mod tests {
     #[test]
     fn test_bc_5_29_001_hint_for_newcommand() {
         assert!(hint_for_command("newcommand").contains("v2+"));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // FINDING-009 — tikzpicture-specific hint
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// `hint_for_command("tikzpicture")` returns a TikZ-specific message.
+    #[test]
+    fn test_finding_009_tikzpicture_hint() {
+        let hint = hint_for_command("tikzpicture");
+        assert!(
+            hint.contains("TikZ"),
+            "tikzpicture hint must mention TikZ; got: {hint}"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // FINDING-007 — UnsupportedCommand must carry error_code "E-EXP-006"
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// An unsupported command produces a diagnostic with error_code "E-EXP-006".
+    #[test]
+    fn test_finding_007_unsupported_command_has_error_code() {
+        let (_, diags) = parse(r"\badcmd", MathMode::Inline, SourceSpan::default());
+        let diag = diags.iter().find(|d| {
+            matches!(&d.error, MathRendererError::UnsupportedCommand { command, .. }
+                if command.as_ref() == "badcmd")
+        });
+        assert!(diag.is_some(), "expected UnsupportedCommand diagnostic");
+        if let Some(d) = diag {
+            if let MathRendererError::UnsupportedCommand { error_code, .. } = &d.error {
+                assert_eq!(*error_code, "E-EXP-006", "error_code must be E-EXP-006");
+            }
+        }
+    }
+
+    /// The Display impl includes the error code in the rendered string.
+    #[test]
+    fn test_finding_007_error_code_in_display() {
+        let (_, diags) = parse(r"\unknowncmd", MathMode::Inline, SourceSpan::default());
+        let diag = diags.iter().find(|d| {
+            matches!(&d.error, MathRendererError::UnsupportedCommand { .. })
+        });
+        assert!(diag.is_some(), "expected UnsupportedCommand diagnostic");
+        let msg = diag.unwrap().error.to_string();
+        assert!(
+            msg.contains("E-EXP-006"),
+            "Display output must include E-EXP-006; got: {msg}"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // FINDING-004 — \div and \mp must parse without diagnostics
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// `\div` parses to a Symbol node with no diagnostics.
+    #[test]
+    fn test_div_symbol_parses() {
+        let (ast, diags) = parse(r"a \div b", MathMode::Inline, SourceSpan::default());
+        assert!(diags.is_empty(), "unexpected diagnostics for \\div: {diags:?}");
+        let ast = ast.expect("expected successful parse");
+        let has_div = ast.nodes.iter().any(|n| matches!(n, MathNode::Symbol(s) if s.as_ref() == "div"));
+        assert!(has_div, "expected Symbol(div) node; got: {ast:?}");
+    }
+
+    /// `\mp` parses to a Symbol node with no diagnostics.
+    #[test]
+    fn test_mp_symbol_parses() {
+        let (ast, diags) = parse(r"x \mp y", MathMode::Inline, SourceSpan::default());
+        assert!(diags.is_empty(), "unexpected diagnostics for \\mp: {diags:?}");
+        let ast = ast.expect("expected successful parse");
+        let has_mp = ast.nodes.iter().any(|n| matches!(n, MathNode::Symbol(s) if s.as_ref() == "mp"));
+        assert!(has_mp, "expected Symbol(mp) node; got: {ast:?}");
+    }
+
+    /// `is_supported_command` recognizes `div` and `mp`.
+    #[test]
+    fn test_div_mp_are_supported_commands() {
+        assert!(is_supported_command("div"), "div must be in supported set");
+        assert!(is_supported_command("mp"), "mp must be in supported set");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // FINDING-003 — consume_char must handle multi-byte UTF-8 correctly
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Parsing an expression that contains multi-byte Unicode characters must
+    /// not corrupt the character or produce extra garbage Text nodes.
+    #[test]
+    fn test_consume_char_handles_multibyte_unicode() {
+        // "∑" (U+2211 N-ARY SUMMATION) is a 3-byte UTF-8 sequence.
+        // When used as a plain character in math (not as \sum), the parser
+        // must consume it as a single Text node without corruption.
+        let (ast, diags) = parse("∑ x", MathMode::Inline, SourceSpan::default());
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+        let ast = ast.expect("expected successful parse");
+        // The first text node must be exactly "∑" — not a garbled byte fragment
+        let first_text = ast.nodes.iter().find_map(|n| {
+            if let MathNode::Text(s) = n { Some(s.as_ref()) } else { None }
+        });
+        assert_eq!(first_text, Some("∑"), "expected '∑' as first Text node; got: {ast:?}");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // FINDING-001 — is_at_right must NOT match \rightarrow
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// `\left( f: A \rightarrow B \right)` must parse with `\rightarrow` as a
+    /// Symbol node inside the delimiter, not as a premature `\right` match.
+    #[test]
+    fn test_is_at_right_does_not_match_rightarrow() {
+        let (ast, diags) =
+            parse(r"\left( f: A \rightarrow B \right)", MathMode::Inline, SourceSpan::default());
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+        let ast = ast.expect("expected successful parse");
+        // Top-level node must be a Delimiter (not a partial/broken parse)
+        let has_delim = ast.nodes.iter().any(|n| matches!(n, MathNode::Delimiter { .. }));
+        assert!(has_delim, "expected Delimiter node; got: {ast:?}");
+        // The delimiter's inner nodes must contain a Symbol("rightarrow") node
+        fn find_rightarrow(nodes: &[MathNode]) -> bool {
+            for node in nodes {
+                match node {
+                    MathNode::Symbol(s) if s.as_ref() == "rightarrow" => return true,
+                    MathNode::Delimiter { inner, .. } => {
+                        if find_rightarrow(inner) {
+                            return true;
+                        }
+                    }
+                    MathNode::Group(inner) => {
+                        if find_rightarrow(inner) {
+                            return true;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            false
+        }
+        assert!(
+            find_rightarrow(&ast.nodes),
+            "expected Symbol(rightarrow) inside delimiter; got: {ast:?}"
+        );
     }
 }
