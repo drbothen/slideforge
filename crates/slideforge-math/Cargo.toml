@@ -1,0 +1,23 @@
+[package]
+name = "slideforge-math"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Math rendering engine for slideforge: LaTeX parser, @{var} interpolation, OMML/MathML output."
+
+[dependencies]
+slideforge-types = { workspace = true }
+slideforge-plugin-api = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+insta = { version = "1", features = ["yaml"] }
+

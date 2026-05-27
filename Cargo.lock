@@ -1314,6 +1314,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "slideforge-math"
+version = "0.1.0"
+dependencies = [
+ "insta",
+ "slideforge-plugin-api",
+ "slideforge-types",
+ "thiserror 2.0.12",
+]
+
+[[package]]
 name = "slideforge-plugin-api"
 version = "0.1.0"
 dependencies = [
