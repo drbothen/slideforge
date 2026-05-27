@@ -108,3 +108,13 @@ stories:
     merged: 2026-05-27
     pr: 11
     merge_commit: 07c76565
+  STORY-011:
+    status: pr-open
+    wave: 2
+    started: 2026-05-27
+    pr: 14
+  STORY-015:
+    status: pr-open
+    wave: 2
+    started: 2026-05-27
+    pr: 15

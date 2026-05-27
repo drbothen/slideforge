@@ -41,7 +41,7 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. It generates branded .p
 **Workspace:** /Users/jmagady/Dev/slideforge
 **Factory worktree:** .factory/ on branch `factory-artifacts`
 
-## Current Status: Phase 3 IN PROGRESS — Wave 1 COMPLETE + GATE PASSED. Wave 2 next.
+## Current Status: Phase 3 IN PROGRESS — Wave 1 COMPLETE. Wave 2 Batch 1 (STORY-011 + STORY-015) adversarial converged, PRs #14 #15 awaiting CI + merge.
 
 Phase 2 Story Decomposition: COMPLETE and APPROVED (2026-05-25).
 - 71 stories decomposed from 112 BCs across 21 epics, 6 waves, 437 total points
@@ -174,6 +174,8 @@ Cumulative: ~28,000+ lines, 644+ tests, 13 PRs on develop (11 story + 2 gate fix
 - 2026-05-27 — STORIES 051/052/053/054 MERGED (PR #11, 07c76565) — CI infrastructure: reproducible-build job, visual-regression fixtures, private doc compliance. Facade-mode validation of existing ci.yml, security.yml, release.yml.
 - 2026-05-27 — WAVE 1 GATE PASSED — 3 adversarial gate passes (7→4→0 findings), keyword + field name sync (PRs #12 #13), #![forbid(unsafe_code)] on all 9 crates, clippy::pedantic on all 9 crates
 - 2026-05-27 — WAVE 2 READY — next session starts Wave 2 delivery
+- 2026-05-27 — STORY-011 CONVERGED — Expression Evaluator Core, 75 tests, 5 adversarial passes (5→1→0→0→0), 3/3 clean (passes 3-4-5). PR #14 awaiting CI.
+- 2026-05-27 — STORY-015 CONVERGED — Alt Text Enforcement, 38 tests, 6 adversarial passes (9→2→1→0→0→0), 3/3 clean (passes 4-5-6). PR #15 awaiting CI.
 
 ## Decision Documents (canonical references)
 
