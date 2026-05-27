@@ -41,7 +41,11 @@
 /// WCAG 2.1 §1.4.3 / W3C Note "Relative Luminance Definition".
 #[must_use]
 pub fn srgb_component_to_linear(c: f64) -> f64 {
-    todo!("STORY-017: implement sRGB gamma expansion (c={c})")
+    if c <= 0.04045 {
+        c / 12.92
+    } else {
+        ((c + 0.055) / 1.055).powf(2.4)
+    }
 }
 
 /// Compute the relative luminance of an sRGB colour specified as integer
@@ -57,7 +61,10 @@ pub fn srgb_component_to_linear(c: f64) -> f64 {
 /// * `r`, `g`, `b` — Red, green, blue component bytes (0–255).
 #[must_use]
 pub fn relative_luminance(r: u8, g: u8, b: u8) -> f64 {
-    todo!("STORY-017: implement relative_luminance (r={r}, g={g}, b={b})")
+    let r_lin = srgb_component_to_linear(f64::from(r) / 255.0);
+    let g_lin = srgb_component_to_linear(f64::from(g) / 255.0);
+    let b_lin = srgb_component_to_linear(f64::from(b) / 255.0);
+    0.2126 * r_lin + 0.7152 * g_lin + 0.0722 * b_lin
 }
 
 /// Compute the WCAG 2.1 contrast ratio between two luminance values.
@@ -72,7 +79,12 @@ pub fn relative_luminance(r: u8, g: u8, b: u8) -> f64 {
 /// * `l2` — Relative luminance of the second colour (range `[0.0, 1.0]`).
 #[must_use]
 pub fn contrast_ratio(l1: f64, l2: f64) -> f64 {
-    todo!("STORY-017: implement contrast_ratio (l1={l1}, l2={l2})")
+    let lighter = l1.max(l2);
+    let darker = l1.min(l2);
+    // Round to 10 decimal places to eliminate IEEE 754 floating-point noise while
+    // preserving all meaningful WCAG precision (ratios are compared at ≤ 2 d.p.).
+    let raw = (lighter + 0.05) / (darker + 0.05);
+    (raw * 1e10).round() / 1e10
 }
 
 /// Parse a CSS hex colour string `#RRGGBB` into its component bytes.
@@ -90,7 +102,14 @@ pub fn contrast_ratio(l1: f64, l2: f64) -> f64 {
 /// the `#RRGGBB` format.
 #[must_use]
 pub fn parse_hex_color(hex: &str) -> Option<(u8, u8, u8)> {
-    todo!("STORY-017: implement parse_hex_color (hex={hex})")
+    // Accept only "#RRGGBB" — exactly 7 characters starting with '#'
+    if hex.len() != 7 || !hex.starts_with('#') {
+        return None;
+    }
+    let r = u8::from_str_radix(&hex[1..3], 16).ok()?;
+    let g = u8::from_str_radix(&hex[3..5], 16).ok()?;
+    let b = u8::from_str_radix(&hex[5..7], 16).ok()?;
+    Some((r, g, b))
 }
 
 /// Check whether a foreground/background colour pair satisfies WCAG AA.
@@ -106,7 +125,11 @@ pub fn parse_hex_color(hex: &str) -> Option<(u8, u8, u8)> {
 /// * `large_text` — `true` if the text qualifies as large (≥ 18pt or ≥ 14pt bold).
 #[must_use]
 pub fn wcag_aa_passes(fg: (u8, u8, u8), bg: (u8, u8, u8), large_text: bool) -> bool {
-    todo!("STORY-017: implement wcag_aa_passes (fg={fg:?}, bg={bg:?}, large_text={large_text})")
+    let foreground_luminance = relative_luminance(fg.0, fg.1, fg.2);
+    let background_luminance = relative_luminance(bg.0, bg.1, bg.2);
+    let ratio = contrast_ratio(foreground_luminance, background_luminance);
+    let threshold = if large_text { 3.0 } else { 4.5 };
+    ratio >= threshold
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -192,9 +215,9 @@ mod tests {
     /// BC-5.01.003: Contrast ratio 4.5:1 satisfies WCAG AA for normal text.
     ///
     /// Using luminance values that produce exactly 4.5:1:
-    /// (l_light + 0.05) / (l_dark + 0.05) = 4.5
-    /// l_light + 0.05 = 4.5 * (l_dark + 0.05)
-    /// Choose l_dark = 0.0: l_light = 4.5 * 0.05 - 0.05 = 0.225 - 0.05 = 0.175.
+    /// `(l_light + 0.05) / (l_dark + 0.05) = 4.5`
+    /// `l_light + 0.05 = 4.5 * (l_dark + 0.05)`
+    /// Choose `l_dark` = 0.0: `l_light` = 4.5 * 0.05 - 0.05 = 0.225 - 0.05 = 0.175.
     /// Verify: (0.175 + 0.05) / (0.0 + 0.05) = 0.225 / 0.05 = 4.5.
     #[test]
     fn test_BC_5_01_003_contrast_ratio_4_5() {

@@ -16,15 +16,13 @@
 //! | `E-A11-002` | Error | Color-coded element missing label or label is blank |
 //! | `E-A11-004` | Warning | Color pair fails WCAG AA contrast threshold |
 
-use slideforge_plugin_api::{Diagnostic, Validator, ValidatorOptions};
-use slideforge_types::{Deck, SourceSpan};
+use std::sync::Arc;
 
-// These imports will be used by the implementation (STORY-017 implementer phase).
-// Suppressed here because stub bodies use todo!() and don't reference them.
-#[allow(unused_imports)]
+use slideforge_plugin_api::{Diagnostic, DiagnosticSeverity, Validator, ValidatorOptions};
+use slideforge_types::{Deck, FieldValue, SourceSpan, Value};
+
 use crate::utils::is_blank;
-#[allow(unused_imports)]
-use crate::wcag::{parse_hex_color, wcag_aa_passes};
+use crate::wcag::{contrast_ratio, parse_hex_color, relative_luminance};
 
 /// Error code for a color-coded element with missing or blank label.
 ///
@@ -73,21 +71,100 @@ impl Validator for LabelCheckValidator {
         "label-check"
     }
 
-    fn validate(&self, _deck: &Deck, _opts: &ValidatorOptions) -> Vec<Diagnostic> {
-        todo!("STORY-017: implement LabelCheckValidator::validate")
+    fn validate(&self, deck: &Deck, opts: &ValidatorOptions) -> Vec<Diagnostic> {
+        let mut diagnostics: Vec<Diagnostic> = Vec::new();
+
+        for slide in &deck.slides {
+            // Only check slides whose type is in the color-coded register.
+            if !COLOR_CODED_TYPES.contains(&slide.slide_type.as_ref()) {
+                continue;
+            }
+
+            // Check label field — None or blank is a blocking E-A11-002.
+            // decorative: true does NOT exempt from the label requirement (AC-004).
+            let label_valid = match slide.fields.get("label") {
+                Some(FieldValue::Literal(Value::Str(s))) => !is_blank(s.as_ref()),
+                _ => false,
+            };
+
+            if !label_valid {
+                diagnostics.push(make_missing_label_error(
+                    slide.slide_type.as_ref(),
+                    &slide.source_span,
+                ));
+            }
+
+            // Check WCAG AA contrast if both hex fg/bg colors are declared.
+            // Brand palette references (non-hex strings) are skipped in Wave 2.
+            if !opts.skip_contrast_check {
+                let fg_hex = get_str_field(&slide.fields, "fg_color");
+                let bg_hex = get_str_field(&slide.fields, "bg_color");
+
+                if let (Some(fg_str), Some(bg_str)) = (fg_hex, bg_hex)
+                    && let (Some(fg), Some(bg)) =
+                        (parse_hex_color(fg_str), parse_hex_color(bg_str))
+                {
+                    let foreground_luminance = relative_luminance(fg.0, fg.1, fg.2);
+                    let background_luminance = relative_luminance(bg.0, bg.1, bg.2);
+                    let ratio = contrast_ratio(foreground_luminance, background_luminance);
+                    // Normal text threshold: 4.5:1 (large text 3.0:1 is not
+                    // detectable at Wave 2 — we have no font-size info yet).
+                    if ratio < 4.5 {
+                        diagnostics.push(make_low_contrast_warning(
+                            slide.slide_type.as_ref(),
+                            ratio,
+                            &slide.source_span,
+                        ));
+                    }
+                }
+            }
+        }
+
+        diagnostics
     }
 }
 
 /// Construct an `E-A11-002` error diagnostic for a missing or blank label.
-#[allow(dead_code)] // Used by implementation (STORY-017 implementer phase)
-fn make_missing_label_error(slide_type: &str, _span: &SourceSpan) -> Diagnostic {
-    todo!("STORY-017: implement make_missing_label_error (slide_type={slide_type})")
+fn make_missing_label_error(slide_type: &str, span: &SourceSpan) -> Diagnostic {
+    Diagnostic {
+        severity: DiagnosticSeverity::Error,
+        code: Arc::from(E_A11_002),
+        message: Arc::from(format!(
+            "Missing label on color-coded element '{slide_type}' at {span}. \
+             Color alone must not convey meaning. Add label \"...\"."
+        )),
+        span: span.clone(),
+        hint: Some(Arc::from(
+            "Color-coded slide types require label \"...\" (WCAG 1.4.1: Use of Color)",
+        )),
+    }
 }
 
 /// Construct an `E-A11-004` warning diagnostic for insufficient WCAG contrast.
-#[allow(dead_code)] // Used by implementation (STORY-017 implementer phase)
-fn make_low_contrast_warning(slide_type: &str, ratio: f64, _span: &SourceSpan) -> Diagnostic {
-    todo!("STORY-017: implement make_low_contrast_warning (slide_type={slide_type}, ratio={ratio})")
+fn make_low_contrast_warning(slide_type: &str, ratio: f64, span: &SourceSpan) -> Diagnostic {
+    Diagnostic {
+        severity: DiagnosticSeverity::Warning,
+        code: Arc::from(E_A11_004),
+        message: Arc::from(format!(
+            "Low WCAG contrast ratio {ratio:.2}:1 on '{slide_type}' (threshold 4.5:1 normal text). \
+             Increase contrast between fg_color and bg_color."
+        )),
+        span: span.clone(),
+        hint: Some(Arc::from(
+            "Use a color pair with contrast ratio ≥ 4.5:1 for normal text (WCAG 1.4.3)",
+        )),
+    }
+}
+
+/// Extract a string field value from `fields`, returning `None` if absent or not a plain string.
+fn get_str_field<'a>(
+    fields: &'a slideforge_types::OrderedMap<Arc<str>, FieldValue>,
+    key: &str,
+) -> Option<&'a str> {
+    match fields.get(key) {
+        Some(FieldValue::Literal(Value::Str(s))) => Some(s.as_ref()),
+        _ => None,
+    }
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────

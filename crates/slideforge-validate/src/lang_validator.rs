@@ -25,14 +25,11 @@
 //! |------|----------|---------|
 //! | `E-A11-003` | Info (cosmetic) | Missing or blank `lang` declaration; default "en" applied |
 
-use slideforge_plugin_api::{Diagnostic, Validator, ValidatorOptions};
+use std::sync::Arc;
+
+use slideforge_plugin_api::{Diagnostic, DiagnosticSeverity, Validator, ValidatorOptions};
 use slideforge_types::Deck;
 
-// These imports will be used by the implementation (STORY-017 implementer phase).
-// Suppressed here because stub bodies use todo!() and don't reference them.
-#[allow(unused_imports)]
-use std::sync::Arc;
-#[allow(unused_imports)]
 use crate::utils::is_blank;
 
 /// Cosmetic diagnostic code for a missing or blank `lang` declaration.
@@ -58,8 +55,29 @@ impl Validator for LangValidator {
         "lang"
     }
 
-    fn validate(&self, _deck: &Deck, _opts: &ValidatorOptions) -> Vec<Diagnostic> {
-        todo!("STORY-017: implement LangValidator::validate")
+    fn validate(&self, deck: &Deck, _opts: &ValidatorOptions) -> Vec<Diagnostic> {
+        let lang_missing = match &deck.metadata.lang {
+            None => true,
+            Some(lang) => is_blank(lang.as_ref()),
+        };
+
+        if lang_missing {
+            vec![Diagnostic {
+                severity: DiagnosticSeverity::Info,
+                code: Arc::from(E_A11_003),
+                message: Arc::from(
+                    "Missing lang declaration in deck metadata. Defaulting to \"en\". \
+                     Screen readers may mispronounce non-English content. \
+                     Add lang \"en-US\" (or appropriate BCP-47 tag).",
+                ),
+                span: slideforge_types::SourceSpan::default(),
+                hint: Some(Arc::from(
+                    "Add lang \"en-US\" at the top of your deck metadata block.",
+                )),
+            }]
+        } else {
+            vec![]
+        }
     }
 }
 
@@ -75,8 +93,18 @@ impl Validator for LangValidator {
 ///
 /// `true` if the default was injected (i.e., `lang` was absent or blank),
 /// `false` if `lang` was already valid.
-pub fn inject_lang_default(_deck: &mut Deck) -> bool {
-    todo!("STORY-017: implement inject_lang_default")
+pub fn inject_lang_default(deck: &mut Deck) -> bool {
+    let needs_default = match &deck.metadata.lang {
+        None => true,
+        Some(lang) => is_blank(lang.as_ref()),
+    };
+
+    if needs_default {
+        deck.metadata.lang = Some(Arc::from("en"));
+        true
+    } else {
+        false
+    }
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
