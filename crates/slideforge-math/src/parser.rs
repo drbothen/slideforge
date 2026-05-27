@@ -156,7 +156,11 @@ impl<'a> LatexParser<'a> {
     /// Skip ASCII whitespace.
     fn skip_whitespace(&mut self) {
         while self.pos < self.input.len()
-            && self.input.as_bytes().get(self.pos).is_some_and(u8::is_ascii_whitespace)
+            && self
+                .input
+                .as_bytes()
+                .get(self.pos)
+                .is_some_and(u8::is_ascii_whitespace)
         {
             self.pos += 1;
         }
@@ -232,7 +236,7 @@ impl<'a> LatexParser<'a> {
                     b'{' => {
                         open_count += 1;
                         self.pos += 1;
-                    }
+                    },
                     b'}' => {
                         open_count -= 1;
                         if open_count == 0 {
@@ -240,10 +244,10 @@ impl<'a> LatexParser<'a> {
                             break;
                         }
                         self.pos += 1;
-                    }
+                    },
                     _ => {
                         self.pos += 1;
-                    }
+                    },
                 }
             }
             self.depth -= 1;
@@ -318,7 +322,7 @@ impl<'a> LatexParser<'a> {
                 } else {
                     (false, node)
                 }
-            }
+            },
             _ => (false, node),
         };
         let _ = is_operator; // used implicitly by the logic above
@@ -333,7 +337,7 @@ impl<'a> LatexParser<'a> {
                         base: Box::new(base),
                         sup: Box::new(sup),
                     };
-                }
+                },
                 Some(b'_') => {
                     self.pos += 1;
                     let sub = self.parse_single_atom();
@@ -341,7 +345,7 @@ impl<'a> LatexParser<'a> {
                         base: Box::new(base),
                         sub: Box::new(sub),
                     };
-                }
+                },
                 _ => break,
             }
         }
@@ -363,20 +367,20 @@ impl<'a> LatexParser<'a> {
                 } else {
                     MathNode::Group(inner)
                 }
-            }
+            },
             Some(b'\\') => {
                 let cmd_start = self.pos; // position of the backslash
                 self.pos += 1; // consume `\`
                 let cmd = self.parse_command_name();
                 self.dispatch_command(cmd, cmd_start)
-            }
+            },
             _ => {
                 if let Some(ch) = self.consume_char() {
                     MathNode::Text(Arc::from(ch.to_string().as_str()))
                 } else {
                     MathNode::Text(Arc::from(""))
                 }
-            }
+            },
         }
     }
 
@@ -386,27 +390,27 @@ impl<'a> LatexParser<'a> {
             b'{' => {
                 let inner = self.parse_group();
                 Some(MathNode::Group(inner))
-            }
+            },
             b'}' => {
                 // Unmatched `}` — consume and skip
                 self.pos += 1;
                 None
-            }
+            },
             b'\\' => {
                 let cmd_start = self.pos; // position of the backslash
                 self.pos += 1; // consume `\`
                 let cmd = self.parse_command_name();
                 Some(self.dispatch_command(cmd, cmd_start))
-            }
+            },
             b'^' | b'_' => {
                 // Dangling script without base — produce a Text node
                 let ch = self.consume_char()?;
                 Some(MathNode::Text(Arc::from(ch.to_string().as_str())))
-            }
+            },
             _ => {
                 let ch = self.consume_char()?;
                 Some(MathNode::Text(Arc::from(ch.to_string().as_str())))
-            }
+            },
         }
     }
 
@@ -426,7 +430,7 @@ impl<'a> LatexParser<'a> {
                     num: Box::new(num_inner),
                     denom: Box::new(denom_inner),
                 }
-            }
+            },
             "sqrt" => {
                 let index = self.parse_optional_bracket().map(|nodes| {
                     Box::new(if nodes.len() == 1 {
@@ -441,60 +445,71 @@ impl<'a> LatexParser<'a> {
                     index,
                     radicand: Box::new(radicand),
                 }
-            }
+            },
 
             // ── Accents ───────────────────────────────────────────────────
             "hat" => {
                 let inner = self.parse_single_atom();
-                MathNode::Accent { kind: AccentKind::Hat, inner: Box::new(inner) }
-            }
+                MathNode::Accent {
+                    kind: AccentKind::Hat,
+                    inner: Box::new(inner),
+                }
+            },
             "bar" => {
                 let inner = self.parse_single_atom();
-                MathNode::Accent { kind: AccentKind::Bar, inner: Box::new(inner) }
-            }
+                MathNode::Accent {
+                    kind: AccentKind::Bar,
+                    inner: Box::new(inner),
+                }
+            },
             "tilde" => {
                 let inner = self.parse_single_atom();
-                MathNode::Accent { kind: AccentKind::Tilde, inner: Box::new(inner) }
-            }
+                MathNode::Accent {
+                    kind: AccentKind::Tilde,
+                    inner: Box::new(inner),
+                }
+            },
             "vec" => {
                 let inner = self.parse_single_atom();
-                MathNode::Accent { kind: AccentKind::Vec, inner: Box::new(inner) }
-            }
+                MathNode::Accent {
+                    kind: AccentKind::Vec,
+                    inner: Box::new(inner),
+                }
+            },
             "dot" => {
                 let inner = self.parse_single_atom();
-                MathNode::Accent { kind: AccentKind::Dot, inner: Box::new(inner) }
-            }
+                MathNode::Accent {
+                    kind: AccentKind::Dot,
+                    inner: Box::new(inner),
+                }
+            },
             "ddot" => {
                 let inner = self.parse_single_atom();
-                MathNode::Accent { kind: AccentKind::Ddot, inner: Box::new(inner) }
-            }
+                MathNode::Accent {
+                    kind: AccentKind::Ddot,
+                    inner: Box::new(inner),
+                }
+            },
 
             // ── Greek (lowercase and uppercase) ───────────────────────────
-            "alpha" | "beta" | "gamma" | "delta" | "epsilon" | "varepsilon"
-            | "zeta" | "eta" | "theta" | "vartheta" | "iota" | "kappa"
-            | "lambda" | "mu" | "nu" | "xi" | "pi" | "varpi" | "rho"
-            | "varrho" | "sigma" | "varsigma" | "tau" | "upsilon"
-            | "phi" | "varphi" | "chi" | "psi" | "omega"
-            | "Alpha" | "Beta" | "Gamma" | "Delta" | "Epsilon" | "Zeta"
-            | "Eta" | "Theta" | "Iota" | "Kappa" | "Lambda" | "Mu"
-            | "Nu" | "Xi" | "Pi" | "Rho" | "Sigma" | "Tau" | "Upsilon"
-            | "Phi" | "Chi" | "Psi" | "Omega" => {
-                MathNode::Greek(Arc::from(cmd))
-            }
+            "alpha" | "beta" | "gamma" | "delta" | "epsilon" | "varepsilon" | "zeta" | "eta"
+            | "theta" | "vartheta" | "iota" | "kappa" | "lambda" | "mu" | "nu" | "xi" | "pi"
+            | "varpi" | "rho" | "varrho" | "sigma" | "varsigma" | "tau" | "upsilon" | "phi"
+            | "varphi" | "chi" | "psi" | "omega" | "Alpha" | "Beta" | "Gamma" | "Delta"
+            | "Epsilon" | "Zeta" | "Eta" | "Theta" | "Iota" | "Kappa" | "Lambda" | "Mu" | "Nu"
+            | "Xi" | "Pi" | "Rho" | "Sigma" | "Tau" | "Upsilon" | "Phi" | "Chi" | "Psi"
+            | "Omega" => MathNode::Greek(Arc::from(cmd)),
 
             // ── Operators ─────────────────────────────────────────────────
-            "sum" | "prod" | "int" | "lim" | "max" | "min" => {
-                MathNode::Operator(Arc::from(cmd))
-            }
+            "sum" | "prod" | "int" | "lim" | "max" | "min" => MathNode::Operator(Arc::from(cmd)),
 
             // ── Symbols ───────────────────────────────────────────────────
-            "cdot" | "times" | "div" | "infty" | "pm" | "mp" | "leq" | "geq" | "neq"
-            | "approx" | "equiv" | "in" | "notin" | "subset" | "supset"
-            | "cup" | "cap" | "emptyset" | "forall" | "exists" | "partial"
-            | "nabla" | "to" | "rightarrow" | "leftarrow" | "Rightarrow"
-            | "Leftarrow" | "ldots" | "cdots" | "vdots" | "ddots" => {
+            "cdot" | "times" | "div" | "infty" | "pm" | "mp" | "leq" | "geq" | "neq" | "approx"
+            | "equiv" | "in" | "notin" | "subset" | "supset" | "cup" | "cap" | "emptyset"
+            | "forall" | "exists" | "partial" | "nabla" | "to" | "rightarrow" | "leftarrow"
+            | "Rightarrow" | "Leftarrow" | "ldots" | "cdots" | "vdots" | "ddots" => {
                 MathNode::Symbol(Arc::from(cmd))
-            }
+            },
 
             // ── Spaces ────────────────────────────────────────────────────
             "," | ";" | "quad" | "qquad" => MathNode::Space,
@@ -539,14 +554,18 @@ impl<'a> LatexParser<'a> {
                 } else {
                     Arc::from(")")
                 };
-                MathNode::Delimiter { left: left_delim, right: right_delim, inner }
-            }
+                MathNode::Delimiter {
+                    left: left_delim,
+                    right: right_delim,
+                    inner,
+                }
+            },
             "right" => {
                 // `\right` without matching `\left` — consume delimiter, emit text
                 self.skip_whitespace();
                 let _d = self.consume_delimiter_char();
                 MathNode::Text(Arc::from(")"))
-            }
+            },
 
             // ── Environments ─────────────────────────────────────────────
             "begin" => {
@@ -572,15 +591,15 @@ impl<'a> LatexParser<'a> {
                             ));
                         }
                         MathNode::Group(Vec::new())
-                    }
+                    },
                 }
-            }
+            },
             "end" => {
                 // Stray `\end{...}` — consume and ignore
                 self.skip_whitespace();
                 let _ = self.parse_env_name();
                 MathNode::Group(Vec::new())
-            }
+            },
 
             // ── Text/font commands ────────────────────────────────────────
             // `\text{...}` and `\mathrm{...}` / `\mathbf{...}` produce a
@@ -605,17 +624,17 @@ impl<'a> LatexParser<'a> {
                             b'{' => {
                                 depth += 1;
                                 self.pos += 1;
-                            }
+                            },
                             b'}' => {
                                 depth -= 1;
                                 if depth == 0 {
                                     break;
                                 }
                                 self.pos += 1;
-                            }
+                            },
                             _ => {
                                 self.pos += 1;
-                            }
+                            },
                         }
                     }
                     let content = &self.input[start..self.pos];
@@ -632,7 +651,7 @@ impl<'a> LatexParser<'a> {
                         other => MathNode::Group(vec![other]),
                     }
                 }
-            }
+            },
             // `\mathit{...}` — math mode is already italic; \mathit is a
             // semantic no-op. Emit the inner nodes as regular Text/Group (NOT
             // TextRun) so OMML does not wrap them in upright-text style.
@@ -649,7 +668,7 @@ impl<'a> LatexParser<'a> {
                 } else {
                     self.parse_single_atom()
                 }
-            }
+            },
 
             // ── Unsupported command ───────────────────────────────────────
             other => {
@@ -671,7 +690,7 @@ impl<'a> LatexParser<'a> {
                     cmd_span,
                 ));
                 MathNode::Group(Vec::new())
-            }
+            },
         }
     }
 
@@ -682,8 +701,7 @@ impl<'a> LatexParser<'a> {
     /// letter, so `\rightarrow` (alphabetic continuation) is excluded.
     fn is_at_right(&self) -> bool {
         let r = self.rest();
-        r.starts_with("\\right")
-            && !r.as_bytes().get(6).is_some_and(u8::is_ascii_alphabetic)
+        r.starts_with("\\right") && !r.as_bytes().get(6).is_some_and(u8::is_ascii_alphabetic)
     }
 
     /// Consume a single delimiter character or command (e.g. `(`, `)`, `[`, `]`,
@@ -710,7 +728,7 @@ impl<'a> LatexParser<'a> {
                             }
                         }
                         Arc::from(&self.input[backslash_pos..self.pos])
-                    }
+                    },
                     Some(_) => {
                         // Single non-alpha char (e.g. `{`, `}`, `.`, `|`).
                         // Advance by the full UTF-8 width of the character —
@@ -719,14 +737,14 @@ impl<'a> LatexParser<'a> {
                         let ch = self.input[self.pos..].chars().next().unwrap_or('\0');
                         self.pos += ch.len_utf8();
                         Arc::from(&self.input[backslash_pos..self.pos])
-                    }
+                    },
                     None => Arc::from("\\"),
                 }
-            }
+            },
             Some(_) => {
                 let ch = self.consume_char().unwrap_or('(');
                 Arc::from(ch.to_string().as_str())
-            }
+            },
             None => Arc::from("("),
         }
     }
@@ -891,18 +909,12 @@ pub fn is_supported_command(cmd: &str) -> bool {
 #[must_use]
 pub fn hint_for_command(cmd: &str) -> &'static str {
     match cmd {
-        "newcommand" | "renewcommand" | "def" | "let" =>
-            "user-defined macros require v2+",
-        "usepackage" =>
-            "\\usepackage is a document-level command; not valid in slideforge math",
-        "DeclareMathOperator" =>
-            "custom operator declarations require v2+",
-        "include" | "input" =>
-            "file inclusion is not supported inside math expressions",
-        "tikzpicture" =>
-            "TikZ drawings are not supported in v1.0",
-        _ =>
-            "this command is not in the slideforge v1.0 supported LaTeX subset",
+        "newcommand" | "renewcommand" | "def" | "let" => "user-defined macros require v2+",
+        "usepackage" => "\\usepackage is a document-level command; not valid in slideforge math",
+        "DeclareMathOperator" => "custom operator declarations require v2+",
+        "include" | "input" => "file inclusion is not supported inside math expressions",
+        "tikzpicture" => "TikZ drawings are not supported in v1.0",
+        _ => "this command is not in the slideforge v1.0 supported LaTeX subset",
     }
 }
 
@@ -924,7 +936,10 @@ mod tests {
         let ast = ast.expect("expected successful parse");
         assert_eq!(ast.mode, MathMode::Inline);
         // Must contain a Superscript node
-        let has_sup = ast.nodes.iter().any(|n| matches!(n, MathNode::Superscript { .. }));
+        let has_sup = ast
+            .nodes
+            .iter()
+            .any(|n| matches!(n, MathNode::Superscript { .. }));
         assert!(has_sup, "expected Superscript node in: {ast:?}");
     }
 
@@ -942,21 +957,28 @@ mod tests {
                     MathNode::Subscript { base, sub } => {
                         has_variant(std::slice::from_ref(base), pred)
                             || has_variant(std::slice::from_ref(sub), pred)
-                    }
+                    },
                     MathNode::Superscript { base, sup } => {
                         has_variant(std::slice::from_ref(base), pred)
                             || has_variant(std::slice::from_ref(sup), pred)
-                    }
+                    },
                     _ => false,
                 }
             })
         }
-        let (ast, diags) = parse(r"\sum_{i=0}^{n} i", MathMode::Display, SourceSpan::default());
+        let (ast, diags) = parse(
+            r"\sum_{i=0}^{n} i",
+            MathMode::Display,
+            SourceSpan::default(),
+        );
         assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
         let ast = ast.expect("expected successful parse");
         assert_eq!(ast.mode, MathMode::Display);
         // Must contain an Operator node for \sum
-        let has_sum = ast.nodes.iter().any(|n| matches!(n, MathNode::Operator(s) if s.as_ref() == "sum"));
+        let has_sum = ast
+            .nodes
+            .iter()
+            .any(|n| matches!(n, MathNode::Operator(s) if s.as_ref() == "sum"));
         assert!(has_sum, "expected Operator(sum) node in: {ast:?}");
         // Must have at least one Subscript and one Superscript
         assert!(
@@ -975,7 +997,10 @@ mod tests {
         let (ast, diags) = parse(r"\frac{a}{b}", MathMode::Inline, SourceSpan::default());
         assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
         let ast = ast.expect("expected successful parse");
-        let has_frac = ast.nodes.iter().any(|n| matches!(n, MathNode::Fraction { .. }));
+        let has_frac = ast
+            .nodes
+            .iter()
+            .any(|n| matches!(n, MathNode::Fraction { .. }));
         assert!(has_frac, "expected Fraction node in: {ast:?}");
     }
 
@@ -985,7 +1010,10 @@ mod tests {
         let (ast, diags) = parse(r"\sqrt{x}", MathMode::Inline, SourceSpan::default());
         assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
         let ast = ast.expect("expected successful parse");
-        let has_sqrt = ast.nodes.iter().any(|n| matches!(n, MathNode::Sqrt { index: None, .. }));
+        let has_sqrt = ast
+            .nodes
+            .iter()
+            .any(|n| matches!(n, MathNode::Sqrt { index: None, .. }));
         assert!(has_sqrt, "expected Sqrt{{index:None}} node in: {ast:?}");
     }
 
@@ -1000,7 +1028,11 @@ mod tests {
             .iter()
             .filter(|n| matches!(n, MathNode::Greek(_)))
             .collect();
-        assert_eq!(greek_nodes.len(), 2, "expected exactly 2 Greek nodes, got: {greek_nodes:?}");
+        assert_eq!(
+            greek_nodes.len(),
+            2,
+            "expected exactly 2 Greek nodes, got: {greek_nodes:?}"
+        );
     }
 
     /// An unknown LaTeX command produces a `MathRendererError::UnsupportedCommand` diagnostic.
@@ -1011,7 +1043,10 @@ mod tests {
         let has_unsupported = diags.iter().any(|d| {
             matches!(&d.error, MathRendererError::UnsupportedCommand { command, .. } if command.as_ref() == "undefinedcmd")
         });
-        assert!(has_unsupported, "expected UnsupportedCommand for \\undefinedcmd, got: {diags:?}");
+        assert!(
+            has_unsupported,
+            "expected UnsupportedCommand for \\undefinedcmd, got: {diags:?}"
+        );
     }
 
     /// Two unsupported commands in one expression produce two separate diagnostics
@@ -1036,11 +1071,18 @@ mod tests {
     /// `\newcommand` produces a specific hint about v2+ support.
     #[test]
     fn test_bc_1_10_001_newcommand_specific_hint() {
-        let (_, diags) = parse(r"\newcommand{\foo}{bar}", MathMode::Inline, SourceSpan::default());
+        let (_, diags) = parse(
+            r"\newcommand{\foo}{bar}",
+            MathMode::Inline,
+            SourceSpan::default(),
+        );
         let hint_diag = diags.iter().find(|d| {
             matches!(&d.error, MathRendererError::UnsupportedCommand { command, .. } if command.as_ref() == "newcommand")
         });
-        assert!(hint_diag.is_some(), "expected UnsupportedCommand for \\newcommand, got: {diags:?}");
+        assert!(
+            hint_diag.is_some(),
+            "expected UnsupportedCommand for \\newcommand, got: {diags:?}"
+        );
         let hint_diag = hint_diag.unwrap();
         if let MathRendererError::UnsupportedCommand { hint, .. } = &hint_diag.error {
             assert!(
@@ -1110,9 +1152,9 @@ mod tests {
     #[test]
     fn test_finding_007_error_code_in_display() {
         let (_, diags) = parse(r"\unknowncmd", MathMode::Inline, SourceSpan::default());
-        let diag = diags.iter().find(|d| {
-            matches!(&d.error, MathRendererError::UnsupportedCommand { .. })
-        });
+        let diag = diags
+            .iter()
+            .find(|d| matches!(&d.error, MathRendererError::UnsupportedCommand { .. }));
         assert!(diag.is_some(), "expected UnsupportedCommand diagnostic");
         let msg = diag.unwrap().error.to_string();
         assert!(
@@ -1129,9 +1171,15 @@ mod tests {
     #[test]
     fn test_div_symbol_parses() {
         let (ast, diags) = parse(r"a \div b", MathMode::Inline, SourceSpan::default());
-        assert!(diags.is_empty(), "unexpected diagnostics for \\div: {diags:?}");
+        assert!(
+            diags.is_empty(),
+            "unexpected diagnostics for \\div: {diags:?}"
+        );
         let ast = ast.expect("expected successful parse");
-        let has_div = ast.nodes.iter().any(|n| matches!(n, MathNode::Symbol(s) if s.as_ref() == "div"));
+        let has_div = ast
+            .nodes
+            .iter()
+            .any(|n| matches!(n, MathNode::Symbol(s) if s.as_ref() == "div"));
         assert!(has_div, "expected Symbol(div) node; got: {ast:?}");
     }
 
@@ -1139,9 +1187,15 @@ mod tests {
     #[test]
     fn test_mp_symbol_parses() {
         let (ast, diags) = parse(r"x \mp y", MathMode::Inline, SourceSpan::default());
-        assert!(diags.is_empty(), "unexpected diagnostics for \\mp: {diags:?}");
+        assert!(
+            diags.is_empty(),
+            "unexpected diagnostics for \\mp: {diags:?}"
+        );
         let ast = ast.expect("expected successful parse");
-        let has_mp = ast.nodes.iter().any(|n| matches!(n, MathNode::Symbol(s) if s.as_ref() == "mp"));
+        let has_mp = ast
+            .nodes
+            .iter()
+            .any(|n| matches!(n, MathNode::Symbol(s) if s.as_ref() == "mp"));
         assert!(has_mp, "expected Symbol(mp) node; got: {ast:?}");
     }
 
@@ -1168,9 +1222,17 @@ mod tests {
         let ast = ast.expect("expected successful parse");
         // The first text node must be exactly "∑" — not a garbled byte fragment
         let first_text = ast.nodes.iter().find_map(|n| {
-            if let MathNode::Text(s) = n { Some(s.as_ref()) } else { None }
+            if let MathNode::Text(s) = n {
+                Some(s.as_ref())
+            } else {
+                None
+            }
         });
-        assert_eq!(first_text, Some("∑"), "expected '∑' as first Text node; got: {ast:?}");
+        assert_eq!(
+            first_text,
+            Some("∑"),
+            "expected '∑' as first Text node; got: {ast:?}"
+        );
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -1205,11 +1267,7 @@ mod tests {
     /// `\left( x + y` (missing `\right`) must produce a "unmatched \\left" diagnostic.
     #[test]
     fn test_finding_015_unmatched_left_emits_diagnostic() {
-        let (_, diags) = parse(
-            r"\left( x + y",
-            MathMode::Inline,
-            SourceSpan::default(),
-        );
+        let (_, diags) = parse(r"\left( x + y", MathMode::Inline, SourceSpan::default());
         let has_unmatched = diags.iter().any(|d| {
             matches!(&d.error, MathRendererError::ParseError { message, .. }
                 if message.contains("unmatched") && message.contains("left"))
@@ -1270,7 +1328,12 @@ mod tests {
         let align = ast.nodes.iter().find(|n| matches!(n, MathNode::Align(_)));
         assert!(align.is_some(), "expected Align node; got: {ast:?}");
         if let Some(MathNode::Align(rows)) = align {
-            assert_eq!(rows.len(), 2, "expected 2 rows in align; got: {}", rows.len());
+            assert_eq!(
+                rows.len(),
+                2,
+                "expected 2 rows in align; got: {}",
+                rows.len()
+            );
         }
     }
 
@@ -1287,7 +1350,12 @@ mod tests {
         let cases = ast.nodes.iter().find(|n| matches!(n, MathNode::Cases(_)));
         assert!(cases.is_some(), "expected Cases node; got: {ast:?}");
         if let Some(MathNode::Cases(case_list)) = cases {
-            assert_eq!(case_list.len(), 2, "expected 2 cases; got: {}", case_list.len());
+            assert_eq!(
+                case_list.len(),
+                2,
+                "expected 2 cases; got: {}",
+                case_list.len()
+            );
         }
     }
 
@@ -1316,8 +1384,16 @@ mod tests {
         });
         assert!(delim.is_some(), "expected Delimiter node; got: {ast:?}");
         let (left, right) = delim.unwrap();
-        assert_eq!(left.as_ref(), "\\langle", "left delimiter must be \\langle; got: {left}");
-        assert_eq!(right.as_ref(), "\\rangle", "right delimiter must be \\rangle; got: {right}");
+        assert_eq!(
+            left.as_ref(),
+            "\\langle",
+            "left delimiter must be \\langle; got: {left}"
+        );
+        assert_eq!(
+            right.as_ref(),
+            "\\rangle",
+            "right delimiter must be \\rangle; got: {right}"
+        );
     }
 
     /// `\left\| x \right\|` parses to a Delimiter with left=`\|` and right=`\|`.
@@ -1339,8 +1415,16 @@ mod tests {
         });
         assert!(delim.is_some(), "expected Delimiter node; got: {ast:?}");
         let (left, right) = delim.unwrap();
-        assert_eq!(left.as_ref(), "\\|", "left delimiter must be \\|; got: {left}");
-        assert_eq!(right.as_ref(), "\\|", "right delimiter must be \\|; got: {right}");
+        assert_eq!(
+            left.as_ref(),
+            "\\|",
+            "left delimiter must be \\|; got: {left}"
+        );
+        assert_eq!(
+            right.as_ref(),
+            "\\|",
+            "right delimiter must be \\|; got: {right}"
+        );
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -1357,17 +1441,23 @@ mod tests {
                     MathNode::Symbol(s) if s.as_ref() == "rightarrow" => return true,
                     MathNode::Delimiter { inner, .. } if find_rightarrow(inner) => return true,
                     MathNode::Group(inner) if find_rightarrow(inner) => return true,
-                    _ => {}
+                    _ => {},
                 }
             }
             false
         }
-        let (ast, diags) =
-            parse(r"\left( f: A \rightarrow B \right)", MathMode::Inline, SourceSpan::default());
+        let (ast, diags) = parse(
+            r"\left( f: A \rightarrow B \right)",
+            MathMode::Inline,
+            SourceSpan::default(),
+        );
         assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
         let ast = ast.expect("expected successful parse");
         // Top-level node must be a Delimiter (not a partial/broken parse)
-        let has_delim = ast.nodes.iter().any(|n| matches!(n, MathNode::Delimiter { .. }));
+        let has_delim = ast
+            .nodes
+            .iter()
+            .any(|n| matches!(n, MathNode::Delimiter { .. }));
         assert!(has_delim, "expected Delimiter node; got: {ast:?}");
         // The delimiter's inner nodes must contain a Symbol("rightarrow") node
         assert!(
@@ -1385,11 +1475,19 @@ mod tests {
     /// whitespace inside the braces.
     #[test]
     fn test_text_preserves_spaces() {
-        let (ast, diags) = parse(r"\text{hello world}", MathMode::Inline, SourceSpan::default());
+        let (ast, diags) = parse(
+            r"\text{hello world}",
+            MathMode::Inline,
+            SourceSpan::default(),
+        );
         assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
         let ast = ast.expect("expected successful parse");
         let text_run = ast.nodes.iter().find_map(|n| {
-            if let MathNode::TextRun(s) = n { Some(s.as_ref()) } else { None }
+            if let MathNode::TextRun(s) = n {
+                Some(s.as_ref())
+            } else {
+                None
+            }
         });
         assert_eq!(
             text_run,
@@ -1402,11 +1500,19 @@ mod tests {
     /// all internal spaces preserved.
     #[test]
     fn test_text_complex() {
-        let (ast, diags) = parse(r"\text{if and only if}", MathMode::Inline, SourceSpan::default());
+        let (ast, diags) = parse(
+            r"\text{if and only if}",
+            MathMode::Inline,
+            SourceSpan::default(),
+        );
         assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
         let ast = ast.expect("expected successful parse");
         let text_run = ast.nodes.iter().find_map(|n| {
-            if let MathNode::TextRun(s) = n { Some(s.as_ref()) } else { None }
+            if let MathNode::TextRun(s) = n {
+                Some(s.as_ref())
+            } else {
+                None
+            }
         });
         assert_eq!(
             text_run,
@@ -1422,7 +1528,11 @@ mod tests {
         assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
         let ast = ast.expect("expected successful parse");
         let text_run = ast.nodes.iter().find_map(|n| {
-            if let MathNode::TextRun(s) = n { Some(s.as_ref()) } else { None }
+            if let MathNode::TextRun(s) = n {
+                Some(s.as_ref())
+            } else {
+                None
+            }
         });
         assert_eq!(
             text_run,
@@ -1435,6 +1545,30 @@ mod tests {
     // FINDING-018 — align environment must split on `&`, not include it as text
     // ─────────────────────────────────────────────────────────────────────────
 
+    fn has_ampersand_text(nodes: &[MathNode]) -> bool {
+        for node in nodes {
+            match node {
+                MathNode::Text(s) | MathNode::TextRun(s)
+                    if s.contains('&') || s.contains("&amp;") =>
+                {
+                    return true;
+                },
+                MathNode::Align(rows) => {
+                    for row in rows {
+                        if has_ampersand_text(row) {
+                            return true;
+                        }
+                    }
+                },
+                MathNode::Group(inner) if has_ampersand_text(inner) => {
+                    return true;
+                },
+                _ => {},
+            }
+        }
+        false
+    }
+
     /// `\begin{align} a &= b \\ c &= d \end{align}` — verify that `&` does not
     /// appear as a literal `&` or XML entity `&amp;` in any Text node.
     #[test]
@@ -1446,32 +1580,6 @@ mod tests {
         );
         assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
         let ast = ast.expect("expected successful parse");
-
-        fn has_ampersand_text(nodes: &[MathNode]) -> bool {
-            for node in nodes {
-                match node {
-                    MathNode::Text(s) | MathNode::TextRun(s)
-                        if s.contains('&') || s.contains("&amp;") =>
-                    {
-                        return true;
-                    }
-                    MathNode::Align(rows) => {
-                        for row in rows {
-                            if has_ampersand_text(row) {
-                                return true;
-                            }
-                        }
-                    }
-                    MathNode::Group(inner) => {
-                        if has_ampersand_text(inner) {
-                            return true;
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            false
-        }
         assert!(
             !has_ampersand_text(&ast.nodes),
             "align AST must not contain literal '&' text nodes; got: {ast:?}"
@@ -1495,9 +1603,9 @@ mod tests {
             !diags.is_empty(),
             "expected a diagnostic for \\é (backslash + non-ASCII); got none"
         );
-        let has_unsupported = diags.iter().any(|d| {
-            matches!(&d.error, MathRendererError::UnsupportedCommand { .. })
-        });
+        let has_unsupported = diags
+            .iter()
+            .any(|d| matches!(&d.error, MathRendererError::UnsupportedCommand { .. }));
         assert!(
             has_unsupported,
             "expected UnsupportedCommand diagnostic for \\é; got: {diags:?}"
@@ -1510,7 +1618,11 @@ mod tests {
     fn test_delimiter_non_ascii_no_panic() {
         // `\ü` is `\` followed by a 2-byte UTF-8 char — consume_delimiter_char
         // must advance by the full char width, not just 1 byte.
-        let (_, _diags) = parse(r"\left\ü x \right)", MathMode::Inline, SourceSpan::default());
+        let (_, _diags) = parse(
+            r"\left\ü x \right)",
+            MathMode::Inline,
+            SourceSpan::default(),
+        );
         // Reaching here means no panic — that is the primary invariant.
         // (The parse may or may not emit diagnostics depending on how the
         // non-ASCII delimiter is handled, but it must never panic.)
@@ -1537,10 +1649,14 @@ mod tests {
             "\\mathit must NOT produce TextRun (math is already italic); got: {ast:?}"
         );
         // Must contain Text or Group nodes
-        let has_text = ast.nodes.iter().any(|n| {
-            matches!(n, MathNode::Text(_) | MathNode::Group(_))
-        });
-        assert!(has_text, "expected Text or Group node from \\mathit; got: {ast:?}");
+        let has_text = ast
+            .nodes
+            .iter()
+            .any(|n| matches!(n, MathNode::Text(_) | MathNode::Group(_)));
+        assert!(
+            has_text,
+            "expected Text or Group node from \\mathit; got: {ast:?}"
+        );
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -1566,7 +1682,10 @@ mod tests {
             matches!(&d.error, MathRendererError::UnsupportedCommand { command, .. }
                 if command.as_ref() == "badcmd")
         });
-        assert!(cmd_diag.is_some(), "expected UnsupportedCommand for \\badcmd");
+        assert!(
+            cmd_diag.is_some(),
+            "expected UnsupportedCommand for \\badcmd"
+        );
         let cmd_diag = cmd_diag.unwrap();
         // The diagnostic span's byte_offset must be greater than the block's
         // byte_offset (100) — it must point INTO the math content, not at
@@ -1581,7 +1700,7 @@ mod tests {
     }
 
     /// When an unsupported command is the very first token in the math content,
-    /// its span byte_offset equals the block's byte_offset (offset 0 within block).
+    /// its span `byte_offset` equals the block's `byte_offset` (offset 0 within block).
     #[test]
     fn test_finding_022_diagnostic_span_at_block_start_when_cmd_is_first() {
         use std::sync::Arc;
@@ -1592,17 +1711,18 @@ mod tests {
             matches!(&d.error, MathRendererError::UnsupportedCommand { command, .. }
                 if command.as_ref() == "badcmd")
         });
-        assert!(cmd_diag.is_some(), "expected UnsupportedCommand for \\badcmd");
+        assert!(
+            cmd_diag.is_some(),
+            "expected UnsupportedCommand for \\badcmd"
+        );
         let cmd_diag = cmd_diag.unwrap();
         // The command is at position 0 within the math block, so the span's
         // byte_offset equals the block's byte_offset.
         assert_eq!(
-            cmd_diag.span.byte_offset,
-            span.byte_offset,
+            cmd_diag.span.byte_offset, span.byte_offset,
             "when command is at block start, span.byte_offset must equal block \
              byte_offset ({});  got {}",
-            span.byte_offset,
-            cmd_diag.span.byte_offset
+            span.byte_offset, cmd_diag.span.byte_offset
         );
     }
 }

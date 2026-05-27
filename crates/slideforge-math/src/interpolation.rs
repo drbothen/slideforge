@@ -157,11 +157,7 @@ mod tests {
     #[test]
     fn test_bc_1_10_001_at_var_substitution() {
         let vars = vars_from(&[("mean", "4.2")]);
-        let (result, diags) = substitute(
-            r"\bar{x} = @{mean}",
-            &vars,
-            &SourceSpan::default(),
-        );
+        let (result, diags) = substitute(r"\bar{x} = @{mean}", &vars, &SourceSpan::default());
         assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
         assert_eq!(result, r"\bar{x} = 4.2");
     }
@@ -176,7 +172,10 @@ mod tests {
             matches!(&d.error, MathRendererError::UndefinedVariable { var_name, .. }
                 if var_name.as_ref() == "missing")
         });
-        assert!(has_undef, "expected UndefinedVariable for 'missing', got: {diags:?}");
+        assert!(
+            has_undef,
+            "expected UndefinedVariable for 'missing', got: {diags:?}"
+        );
     }
 
     /// `{{ arr }}` double-brace syntax is NOT treated as interpolation in math mode.
@@ -186,18 +185,17 @@ mod tests {
         let (result, diags) = substitute("{{ arr }}", &vars, &SourceSpan::default());
         assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
         // Double-brace must be left as literal — NOT replaced
-        assert_eq!(result, "{{ arr }}", "double-brace must not be substituted in math mode");
+        assert_eq!(
+            result, "{{ arr }}",
+            "double-brace must not be substituted in math mode"
+        );
     }
 
     /// Multiple `@{var}` references in one expression are all substituted.
     #[test]
     fn test_bc_1_10_001_multiple_at_vars() {
         let vars = vars_from(&[("a", "3"), ("b", "4")]);
-        let (result, diags) = substitute(
-            r"\sqrt{@{a}^2 + @{b}^2}",
-            &vars,
-            &SourceSpan::default(),
-        );
+        let (result, diags) = substitute(r"\sqrt{@{a}^2 + @{b}^2}", &vars, &SourceSpan::default());
         assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
         assert_eq!(result, r"\sqrt{3^2 + 4^2}");
     }
@@ -221,7 +219,7 @@ mod tests {
         assert_eq!(result, "");
     }
 
-    /// An unclosed `@{` interpolation must emit a ParseError diagnostic
+    /// An unclosed `@{` interpolation must emit a `ParseError` diagnostic
     /// whose message contains "unclosed".
     #[test]
     fn test_unclosed_at_brace_diagnostic() {

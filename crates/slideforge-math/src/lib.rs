@@ -98,8 +98,7 @@ impl MathRendererImpl {
         // Step 1: resolve @{var} interpolations.
         // NOTE: we always proceed to parsing even if interpolation produced
         // diagnostics (FINDING-010: error accumulation must span both phases).
-        let (substituted, interp_diags) =
-            interpolation::substitute(latex, &self.vars, &span);
+        let (substituted, interp_diags) = interpolation::substitute(latex, &self.vars, &span);
 
         // Step 2: parse LaTeX → MathAst (runs even when interp had errors)
         let (ast_opt, parse_diags) = parser::parse(&substituted, mode, span);
@@ -108,10 +107,7 @@ impl MathRendererImpl {
         let all_diags: Vec<_> = interp_diags.into_iter().chain(parse_diags).collect();
 
         if !all_diags.is_empty() {
-            let messages: Vec<String> = all_diags
-                .iter()
-                .map(|d| d.error.to_string())
-                .collect();
+            let messages: Vec<String> = all_diags.iter().map(|d| d.error.to_string()).collect();
             return Err(MathError::SyntaxError {
                 message: messages.join("; "),
             });
@@ -159,7 +155,7 @@ impl MathRenderer for MathRendererImpl {
             MathOutputFormat::Omml => self.render_omml(node),
             MathOutputFormat::MathMl | MathOutputFormat::Pdf => {
                 Err(MathError::UnsupportedFormat { format })
-            }
+            },
         }
     }
 }
@@ -202,7 +198,10 @@ mod tests {
         assert!(!bytes.is_empty(), "OMML output must not be empty");
         let xml = String::from_utf8(bytes).expect("OMML must be valid UTF-8");
         // Root element is <m:oMath xmlns:m="..."> — check prefix not bare tag
-        assert!(xml.contains("<m:oMath"), "inline output must contain <m:oMath>");
+        assert!(
+            xml.contains("<m:oMath"),
+            "inline output must contain <m:oMath>"
+        );
     }
 
     /// `render(node, MathMl)` returns `UnsupportedFormat`.
@@ -212,7 +211,12 @@ mod tests {
         let node = inline_node("x");
         let result = renderer.render(&node, MathOutputFormat::MathMl);
         assert!(
-            matches!(result, Err(MathError::UnsupportedFormat { format: MathOutputFormat::MathMl })),
+            matches!(
+                result,
+                Err(MathError::UnsupportedFormat {
+                    format: MathOutputFormat::MathMl
+                })
+            ),
             "expected UnsupportedFormat(MathMl), got: {result:?}"
         );
     }
@@ -224,7 +228,12 @@ mod tests {
         let node = inline_node("x");
         let result = renderer.render(&node, MathOutputFormat::Pdf);
         assert!(
-            matches!(result, Err(MathError::UnsupportedFormat { format: MathOutputFormat::Pdf })),
+            matches!(
+                result,
+                Err(MathError::UnsupportedFormat {
+                    format: MathOutputFormat::Pdf
+                })
+            ),
             "expected UnsupportedFormat(Pdf), got: {result:?}"
         );
     }
@@ -238,7 +247,10 @@ mod tests {
         let bytes = result.expect("render_omml should succeed");
         let xml = String::from_utf8(bytes).expect("valid UTF-8");
         // Root element is <m:oMathPara xmlns:m="..."> — check prefix not bare tag
-        assert!(xml.contains("<m:oMathPara"), "display mode must use <m:oMathPara>");
+        assert!(
+            xml.contains("<m:oMathPara"),
+            "display mode must use <m:oMathPara>"
+        );
     }
 
     /// `MathRendererImpl` implements `MathRenderer` trait (`Send + Sync`).
@@ -261,7 +273,11 @@ mod tests {
         let mut vars = HashMap::new();
         vars.insert(Arc::from("n"), Arc::from("10"));
         let renderer = MathRendererImpl::with_vars(vars);
-        let result = renderer.parse(r"\sum_{i=0}^{@{n}}", MathMode::Inline, SourceSpan::default());
+        let result = renderer.parse(
+            r"\sum_{i=0}^{@{n}}",
+            MathMode::Inline,
+            SourceSpan::default(),
+        );
         // After substitution the source becomes \sum_{i=0}^{10} which is valid
         let ast = result.expect("parse with vars should succeed");
         assert!(!ast.nodes.is_empty());
@@ -286,7 +302,9 @@ mod tests {
         let msg = err.to_string();
         // The message should mention the undefined variable
         assert!(
-            msg.contains("undefined") || msg.contains("missing") || msg.contains("UndefinedVariable"),
+            msg.contains("undefined")
+                || msg.contains("missing")
+                || msg.contains("UndefinedVariable"),
             "error message must reference the undefined variable; got: {msg}"
         );
         // The message should also mention the unsupported command

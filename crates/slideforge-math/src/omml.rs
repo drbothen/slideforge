@@ -29,8 +29,7 @@ use crate::ast::{AccentKind, MathAst, MathMode, MathNode};
 use crate::error::MathRendererError;
 
 /// The XML namespace URI for OMML.
-pub const OMML_NAMESPACE: &str =
-    "http://schemas.openxmlformats.org/officeDocument/2006/math";
+pub const OMML_NAMESPACE: &str = "http://schemas.openxmlformats.org/officeDocument/2006/math";
 
 /// Render a [`MathAst`] to OMML XML bytes.
 ///
@@ -55,14 +54,14 @@ pub fn render(ast: &MathAst) -> Result<Vec<u8>, MathRendererError> {
             );
             render_nodes(&ast.nodes, &mut out);
             out.push_str("</m:oMath></m:oMathPara>");
-        }
+        },
         MathMode::Inline => {
             out.push_str(
                 r#"<m:oMath xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math">"#,
             );
             render_nodes(&ast.nodes, &mut out);
             out.push_str("</m:oMath>");
-        }
+        },
     }
 
     Ok(out.into_bytes())
@@ -83,14 +82,14 @@ fn render_node(node: &MathNode, out: &mut String) {
             out.push_str("<m:r><m:t>");
             out.push_str(&xml_escape(s));
             out.push_str("</m:t></m:r>");
-        }
+        },
 
         // ── Upright text run from \text{...} (plain/roman style) ──────────
         MathNode::TextRun(s) => {
             out.push_str(r#"<m:r><m:rPr><m:sty m:val="p"/></m:rPr><m:t>"#);
             out.push_str(&xml_escape(s));
             out.push_str("</m:t></m:r>");
-        }
+        },
 
         // ── Superscript: x^{2} ────────────────────────────────────────────
         MathNode::Superscript { base, sup } => {
@@ -99,7 +98,7 @@ fn render_node(node: &MathNode, out: &mut String) {
             out.push_str("</m:e><m:sup>");
             render_node(sup, out);
             out.push_str("</m:sup></m:sSup>");
-        }
+        },
 
         // ── Subscript: x_{i} ──────────────────────────────────────────────
         MathNode::Subscript { base, sub } => {
@@ -108,7 +107,7 @@ fn render_node(node: &MathNode, out: &mut String) {
             out.push_str("</m:e><m:sub>");
             render_node(sub, out);
             out.push_str("</m:sub></m:sSub>");
-        }
+        },
 
         // ── Fraction: \frac{a}{b} ─────────────────────────────────────────
         MathNode::Fraction { num, denom } => {
@@ -117,7 +116,7 @@ fn render_node(node: &MathNode, out: &mut String) {
             out.push_str("</m:num><m:den>");
             render_node(denom, out);
             out.push_str("</m:den></m:f>");
-        }
+        },
 
         // ── Square root / nth root ────────────────────────────────────────
         MathNode::Sqrt { index, radicand } => {
@@ -125,17 +124,17 @@ fn render_node(node: &MathNode, out: &mut String) {
             match index {
                 None => {
                     out.push_str(r#"<m:radPr><m:degHide m:val="1"/></m:radPr><m:deg/>"#);
-                }
+                },
                 Some(idx) => {
                     out.push_str("<m:radPr/><m:deg>");
                     render_node(idx, out);
                     out.push_str("</m:deg>");
-                }
+                },
             }
             out.push_str("<m:e>");
             render_node(radicand, out);
             out.push_str("</m:e></m:rad>");
-        }
+        },
 
         // ── Greek letters → Unicode run ───────────────────────────────────
         MathNode::Greek(name) => {
@@ -143,7 +142,7 @@ fn render_node(node: &MathNode, out: &mut String) {
             out.push_str("<m:r><m:t>");
             out.push_str(&xml_escape(&ch));
             out.push_str("</m:t></m:r>");
-        }
+        },
 
         // ── Large operators → Unicode run ─────────────────────────────────
         //
@@ -160,7 +159,7 @@ fn render_node(node: &MathNode, out: &mut String) {
             }
             out.push_str(&xml_escape(ch));
             out.push_str("</m:t></m:r>");
-        }
+        },
 
         // ── Math symbols → Unicode run ────────────────────────────────────
         MathNode::Symbol(name) => {
@@ -168,7 +167,7 @@ fn render_node(node: &MathNode, out: &mut String) {
             out.push_str("<m:r><m:t>");
             out.push_str(&xml_escape(ch));
             out.push_str("</m:t></m:r>");
-        }
+        },
 
         // ── Accent: \hat, \bar, \vec, etc. ───────────────────────────────
         MathNode::Accent { kind, inner } => {
@@ -178,12 +177,12 @@ fn render_node(node: &MathNode, out: &mut String) {
             out.push_str("\"/></m:accPr><m:e>");
             render_node(inner, out);
             out.push_str("</m:e></m:acc>");
-        }
+        },
 
         // ── Braced group: {a b c} → flatten ──────────────────────────────
         MathNode::Group(nodes) => {
             render_nodes(nodes, out);
-        }
+        },
 
         // ── Delimiter: \left( ... \right) ────────────────────────────────
         MathNode::Delimiter { left, right, inner } => {
@@ -197,7 +196,7 @@ fn render_node(node: &MathNode, out: &mut String) {
             out.push_str("</m:dPr><m:e>");
             render_nodes(inner, out);
             out.push_str("</m:e></m:d>");
-        }
+        },
 
         // ── Align environment ─────────────────────────────────────────────
         MathNode::Align(rows) => {
@@ -208,11 +207,13 @@ fn render_node(node: &MathNode, out: &mut String) {
                 out.push_str("</m:e>");
             }
             out.push_str("</m:eqArr>");
-        }
+        },
 
         // ── Cases environment ─────────────────────────────────────────────
         MathNode::Cases(cases) => {
-            out.push_str(r#"<m:d><m:dPr><m:begChr m:val="{"/><m:endChr m:val=""/></m:dPr><m:e><m:eqArr>"#);
+            out.push_str(
+                r#"<m:d><m:dPr><m:begChr m:val="{"/><m:endChr m:val=""/></m:dPr><m:e><m:eqArr>"#,
+            );
             for (lhs, rhs) in cases {
                 out.push_str("<m:e>");
                 render_nodes(lhs, out);
@@ -223,14 +224,12 @@ fn render_node(node: &MathNode, out: &mut String) {
                 out.push_str("</m:e>");
             }
             out.push_str("</m:eqArr></m:e></m:d>");
-        }
+        },
 
         // ── Space ─────────────────────────────────────────────────────────
         MathNode::Space => {
-            out.push_str(
-                r#"<m:r><m:rPr><m:sty m:val="p"/></m:rPr><m:t> </m:t></m:r>"#,
-            );
-        }
+            out.push_str(r#"<m:r><m:rPr><m:sty m:val="p"/></m:rPr><m:t> </m:t></m:r>"#);
+        },
     }
 }
 
@@ -289,32 +288,56 @@ fn xml_escape(s: &str) -> String {
 /// Map a Greek letter command name to its Unicode character string.
 fn greek_to_unicode(name: &str) -> String {
     match name {
-        "alpha" => "α".to_owned(), "beta" => "β".to_owned(),
-        "gamma" => "γ".to_owned(), "delta" => "δ".to_owned(),
+        "alpha" => "α".to_owned(),
+        "beta" => "β".to_owned(),
+        "gamma" => "γ".to_owned(),
+        "delta" => "δ".to_owned(),
         "epsilon" | "varepsilon" => "ε".to_owned(),
-        "zeta" => "ζ".to_owned(), "eta" => "η".to_owned(),
-        "theta" => "θ".to_owned(), "vartheta" => "ϑ".to_owned(),
-        "iota" => "ι".to_owned(), "kappa" => "κ".to_owned(),
-        "lambda" => "λ".to_owned(), "mu" => "μ".to_owned(),
-        "nu" => "ν".to_owned(), "xi" => "ξ".to_owned(),
-        "pi" => "π".to_owned(), "varpi" => "ϖ".to_owned(),
-        "rho" => "ρ".to_owned(), "varrho" => "ϱ".to_owned(),
-        "sigma" => "σ".to_owned(), "varsigma" => "ς".to_owned(),
-        "tau" => "τ".to_owned(), "upsilon" => "υ".to_owned(),
-        "phi" => "φ".to_owned(), "varphi" => "ϕ".to_owned(),
-        "chi" => "χ".to_owned(), "psi" => "ψ".to_owned(),
+        "zeta" => "ζ".to_owned(),
+        "eta" => "η".to_owned(),
+        "theta" => "θ".to_owned(),
+        "vartheta" => "ϑ".to_owned(),
+        "iota" => "ι".to_owned(),
+        "kappa" => "κ".to_owned(),
+        "lambda" => "λ".to_owned(),
+        "mu" => "μ".to_owned(),
+        "nu" => "ν".to_owned(),
+        "xi" => "ξ".to_owned(),
+        "pi" => "π".to_owned(),
+        "varpi" => "ϖ".to_owned(),
+        "rho" => "ρ".to_owned(),
+        "varrho" => "ϱ".to_owned(),
+        "sigma" => "σ".to_owned(),
+        "varsigma" => "ς".to_owned(),
+        "tau" => "τ".to_owned(),
+        "upsilon" => "υ".to_owned(),
+        "phi" => "φ".to_owned(),
+        "varphi" => "ϕ".to_owned(),
+        "chi" => "χ".to_owned(),
+        "psi" => "ψ".to_owned(),
         "omega" => "ω".to_owned(),
-        "Alpha" => "Α".to_owned(), "Beta" => "Β".to_owned(),
-        "Gamma" => "Γ".to_owned(), "Delta" => "Δ".to_owned(),
-        "Epsilon" => "Ε".to_owned(), "Zeta" => "Ζ".to_owned(),
-        "Eta" => "Η".to_owned(), "Theta" => "Θ".to_owned(),
-        "Iota" => "Ι".to_owned(), "Kappa" => "Κ".to_owned(),
-        "Lambda" => "Λ".to_owned(), "Mu" => "Μ".to_owned(),
-        "Nu" => "Ν".to_owned(), "Xi" => "Ξ".to_owned(),
-        "Pi" => "Π".to_owned(), "Rho" => "Ρ".to_owned(),
-        "Sigma" => "Σ".to_owned(), "Tau" => "Τ".to_owned(),
-        "Upsilon" => "Υ".to_owned(), "Phi" => "Φ".to_owned(),
-        "Chi" => "Χ".to_owned(), "Psi" => "Ψ".to_owned(),
+        "Alpha" => "Α".to_owned(),
+        "Beta" => "Β".to_owned(),
+        "Gamma" => "Γ".to_owned(),
+        "Delta" => "Δ".to_owned(),
+        "Epsilon" => "Ε".to_owned(),
+        "Zeta" => "Ζ".to_owned(),
+        "Eta" => "Η".to_owned(),
+        "Theta" => "Θ".to_owned(),
+        "Iota" => "Ι".to_owned(),
+        "Kappa" => "Κ".to_owned(),
+        "Lambda" => "Λ".to_owned(),
+        "Mu" => "Μ".to_owned(),
+        "Nu" => "Ν".to_owned(),
+        "Xi" => "Ξ".to_owned(),
+        "Pi" => "Π".to_owned(),
+        "Rho" => "Ρ".to_owned(),
+        "Sigma" => "Σ".to_owned(),
+        "Tau" => "Τ".to_owned(),
+        "Upsilon" => "Υ".to_owned(),
+        "Phi" => "Φ".to_owned(),
+        "Chi" => "Χ".to_owned(),
+        "Psi" => "Ψ".to_owned(),
         "Omega" => "Ω".to_owned(),
         other => other.to_owned(),
     }
@@ -346,23 +369,60 @@ fn operator_to_unicode(name: &str) -> &'static str {
 fn is_text_operator(name: &str) -> bool {
     matches!(
         name,
-        "lim" | "max" | "min" | "sin" | "cos" | "tan" | "log" | "ln"
-            | "exp" | "det" | "sup" | "inf" | "gcd" | "dim" | "ker"
-            | "deg" | "hom" | "mod"
+        "lim"
+            | "max"
+            | "min"
+            | "sin"
+            | "cos"
+            | "tan"
+            | "log"
+            | "ln"
+            | "exp"
+            | "det"
+            | "sup"
+            | "inf"
+            | "gcd"
+            | "dim"
+            | "ker"
+            | "deg"
+            | "hom"
+            | "mod"
     )
 }
 
 /// Map a symbol command name to its Unicode character string.
 fn symbol_to_unicode(name: &str) -> &'static str {
     match name {
-        "cdot" => "·", "times" => "×", "div" => "÷", "infty" => "∞", "pm" => "±", "mp" => "∓",
-        "leq" => "≤", "geq" => "≥", "neq" => "≠", "approx" => "≈",
-        "equiv" => "≡", "in" => "∈", "notin" => "∉", "subset" => "⊂",
-        "supset" => "⊃", "cup" => "∪", "cap" => "∩", "emptyset" => "∅",
-        "forall" => "∀", "exists" => "∃", "partial" => "∂", "nabla" => "∇",
-        "to" | "rightarrow" => "→", "leftarrow" => "←",
-        "Rightarrow" => "⇒", "Leftarrow" => "⇐",
-        "ldots" => "…", "cdots" => "⋯", "vdots" => "⋮", "ddots" => "⋱",
+        "cdot" => "·",
+        "times" => "×",
+        "div" => "÷",
+        "infty" => "∞",
+        "pm" => "±",
+        "mp" => "∓",
+        "leq" => "≤",
+        "geq" => "≥",
+        "neq" => "≠",
+        "approx" => "≈",
+        "equiv" => "≡",
+        "in" => "∈",
+        "notin" => "∉",
+        "subset" => "⊂",
+        "supset" => "⊃",
+        "cup" => "∪",
+        "cap" => "∩",
+        "emptyset" => "∅",
+        "forall" => "∀",
+        "exists" => "∃",
+        "partial" => "∂",
+        "nabla" => "∇",
+        "to" | "rightarrow" => "→",
+        "leftarrow" => "←",
+        "Rightarrow" => "⇒",
+        "Leftarrow" => "⇐",
+        "ldots" => "…",
+        "cdots" => "⋯",
+        "vdots" => "⋮",
+        "ddots" => "⋱",
         _ => "?",
     }
 }
@@ -422,10 +482,7 @@ mod tests {
     /// Display-mode output wraps the math in `<m:oMathPara>`.
     #[test]
     fn test_bc_1_10_003_omml_display_wraps_in_para() {
-        let ast = MathAst::new(
-            MathMode::Display,
-            vec![MathNode::Text(Arc::from("x"))],
-        );
+        let ast = MathAst::new(MathMode::Display, vec![MathNode::Text(Arc::from("x"))]);
         let bytes = render(&ast).expect("render should succeed");
         let xml = String::from_utf8(bytes).expect("valid UTF-8");
         // Root element is <m:oMathPara> with namespace attribute, so check
@@ -439,14 +496,14 @@ mod tests {
     /// Inline-mode output uses `<m:oMath>` but NOT `<m:oMathPara>`.
     #[test]
     fn test_bc_1_10_003_omml_inline_no_para() {
-        let ast = MathAst::new(
-            MathMode::Inline,
-            vec![MathNode::Text(Arc::from("y"))],
-        );
+        let ast = MathAst::new(MathMode::Inline, vec![MathNode::Text(Arc::from("y"))]);
         let bytes = render(&ast).expect("render should succeed");
         let xml = String::from_utf8(bytes).expect("valid UTF-8");
         // Root element is <m:oMath> with namespace attribute.
-        assert!(xml.contains("<m:oMath"), "inline mode must use <m:oMath>, got: {xml}");
+        assert!(
+            xml.contains("<m:oMath"),
+            "inline mode must use <m:oMath>, got: {xml}"
+        );
         assert!(
             !xml.contains("<m:oMathPara"),
             "inline mode must NOT use <m:oMathPara>, got: {xml}"
@@ -483,13 +540,13 @@ mod tests {
     /// A Greek letter renders to OMML as a run `<m:r>`.
     #[test]
     fn test_bc_1_10_003_omml_greek_letter() {
-        let ast = MathAst::new(
-            MathMode::Inline,
-            vec![MathNode::Greek(Arc::from("alpha"))],
-        );
+        let ast = MathAst::new(MathMode::Inline, vec![MathNode::Greek(Arc::from("alpha"))]);
         let bytes = render(&ast).expect("render should succeed");
         let xml = String::from_utf8(bytes).expect("valid UTF-8");
-        assert!(xml.contains("<m:r>"), "expected <m:r> run element in: {xml}");
+        assert!(
+            xml.contains("<m:r>"),
+            "expected <m:r> run element in: {xml}"
+        );
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -499,26 +556,23 @@ mod tests {
     /// `lim` renders with `<m:rPr><m:sty m:val="p"/></m:rPr>` for upright style.
     #[test]
     fn test_finding_006_lim_renders_upright() {
-        let ast = MathAst::new(
-            MathMode::Inline,
-            vec![MathNode::Operator(Arc::from("lim"))],
-        );
+        let ast = MathAst::new(MathMode::Inline, vec![MathNode::Operator(Arc::from("lim"))]);
         let bytes = render(&ast).expect("render should succeed");
         let xml = String::from_utf8(bytes).expect("valid UTF-8");
         assert!(
             xml.contains(r#"<m:sty m:val="p"/>"#),
             "lim must render with upright style m:sty p; got: {xml}"
         );
-        assert!(xml.contains("lim"), "must still contain the text 'lim'; got: {xml}");
+        assert!(
+            xml.contains("lim"),
+            "must still contain the text 'lim'; got: {xml}"
+        );
     }
 
     /// Symbol operators (∑, ∏, ∫) do NOT carry the upright style property.
     #[test]
     fn test_finding_006_sum_does_not_get_upright_style() {
-        let ast = MathAst::new(
-            MathMode::Inline,
-            vec![MathNode::Operator(Arc::from("sum"))],
-        );
+        let ast = MathAst::new(MathMode::Inline, vec![MathNode::Operator(Arc::from("sum"))]);
         let bytes = render(&ast).expect("render should succeed");
         let xml = String::from_utf8(bytes).expect("valid UTF-8");
         // ∑ is a symbol, not a text operator — no rPr style needed
@@ -612,25 +666,25 @@ mod tests {
     /// `\div` renders to the Unicode division sign ÷ in OMML.
     #[test]
     fn test_finding_004_div_renders_unicode() {
-        let ast = MathAst::new(
-            MathMode::Inline,
-            vec![MathNode::Symbol(Arc::from("div"))],
-        );
+        let ast = MathAst::new(MathMode::Inline, vec![MathNode::Symbol(Arc::from("div"))]);
         let bytes = render(&ast).expect("render should succeed");
         let xml = String::from_utf8(bytes).expect("valid UTF-8");
-        assert!(xml.contains('÷'), "expected ÷ (U+00F7) in OMML for \\div; got: {xml}");
+        assert!(
+            xml.contains('÷'),
+            "expected ÷ (U+00F7) in OMML for \\div; got: {xml}"
+        );
     }
 
     /// `\mp` renders to the Unicode minus-or-plus sign ∓ in OMML.
     #[test]
     fn test_finding_004_mp_renders_unicode() {
-        let ast = MathAst::new(
-            MathMode::Inline,
-            vec![MathNode::Symbol(Arc::from("mp"))],
-        );
+        let ast = MathAst::new(MathMode::Inline, vec![MathNode::Symbol(Arc::from("mp"))]);
         let bytes = render(&ast).expect("render should succeed");
         let xml = String::from_utf8(bytes).expect("valid UTF-8");
-        assert!(xml.contains('∓'), "expected ∓ (U+2213) in OMML for \\mp; got: {xml}");
+        assert!(
+            xml.contains('∓'),
+            "expected ∓ (U+2213) in OMML for \\mp; got: {xml}"
+        );
     }
 
     /// An accent node renders to OMML with `<m:acc>`.
@@ -762,26 +816,23 @@ mod tests {
     /// `\text{if}` must render with `<m:sty m:val="p"/>` (upright/plain style).
     #[test]
     fn test_finding_014_text_run_renders_upright() {
-        let ast = MathAst::new(
-            MathMode::Inline,
-            vec![MathNode::TextRun(Arc::from("if"))],
-        );
+        let ast = MathAst::new(MathMode::Inline, vec![MathNode::TextRun(Arc::from("if"))]);
         let bytes = render(&ast).expect("render should succeed");
         let xml = String::from_utf8(bytes).expect("valid UTF-8");
         assert!(
             xml.contains(r#"<m:sty m:val="p"/>"#),
             "\\text{{}} must render with upright style m:sty p; got: {xml}"
         );
-        assert!(xml.contains("if"), "must still contain the text 'if'; got: {xml}");
+        assert!(
+            xml.contains("if"),
+            "must still contain the text 'if'; got: {xml}"
+        );
     }
 
     /// Plain `Text` nodes (math identifiers) must NOT carry the upright style.
     #[test]
     fn test_finding_014_plain_text_node_is_italic() {
-        let ast = MathAst::new(
-            MathMode::Inline,
-            vec![MathNode::Text(Arc::from("x"))],
-        );
+        let ast = MathAst::new(MathMode::Inline, vec![MathNode::Text(Arc::from("x"))]);
         let bytes = render(&ast).expect("render should succeed");
         let xml = String::from_utf8(bytes).expect("valid UTF-8");
         // Plain text (math variable) must not have the upright style property
