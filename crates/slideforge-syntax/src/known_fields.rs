@@ -45,7 +45,7 @@
 ///
 /// assert!(known_fields("title").is_some());
 /// assert!(known_fields("unknown_type").is_none());
-/// assert!(known_fields("content").unwrap().contains(&"body"));
+/// assert!(known_fields("content").unwrap().contains(&"bullets"));
 /// ```
 #[must_use]
 #[allow(clippy::too_many_lines)] // 31 slide types × ~10 fields each — exhaustive lookup table, not logic
@@ -77,9 +77,8 @@ pub fn known_fields(slide_type: &str) -> Option<&'static [&'static str]> {
             // Type-specific
             "title",
             "subtitle",
-            "byline",
+            "author",
             "date",
-            "background",
         ]),
         "section_break" => Some(&[
             "tags",
@@ -105,9 +104,8 @@ pub fn known_fields(slide_type: &str) -> Option<&'static [&'static str]> {
             "footer",
             "logo",
             "title",
-            "body",
-            "subtitle",
-            "background",
+            "bullets",
+            "takeaway",
         ]),
         "two_col" => Some(&[
             "tags",
@@ -123,7 +121,8 @@ pub fn known_fields(slide_type: &str) -> Option<&'static [&'static str]> {
             "left",
             "right",
         ]),
-        "image" => Some(&[
+        // Both `image` and `screenshot` use: title, image (path), caption, plus common fields.
+        "image" | "screenshot" => Some(&[
             "tags",
             "notes",
             "report",
@@ -134,11 +133,8 @@ pub fn known_fields(slide_type: &str) -> Option<&'static [&'static str]> {
             "footer",
             "logo",
             "title",
-            "src",
+            "image",
             "caption",
-            "width",
-            "height",
-            "align",
         ]),
         "blank" => Some(&[
             "tags",
@@ -150,9 +146,8 @@ pub fn known_fields(slide_type: &str) -> Option<&'static [&'static str]> {
             "decorative",
             "footer",
             "logo",
-            "background",
         ]),
-        "agenda" | "toc" => Some(&[
+        "agenda" => Some(&[
             "tags",
             "notes",
             "report",
@@ -165,6 +160,18 @@ pub fn known_fields(slide_type: &str) -> Option<&'static [&'static str]> {
             "title",
             "items",
         ]),
+        "toc" => Some(&[
+            "tags",
+            "notes",
+            "report",
+            "detail",
+            "alt",
+            "lang",
+            "decorative",
+            "footer",
+            "logo",
+            "title",
+        ]),
         "quote" => Some(&[
             "tags",
             "notes",
@@ -175,10 +182,8 @@ pub fn known_fields(slide_type: &str) -> Option<&'static [&'static str]> {
             "decorative",
             "footer",
             "logo",
-            "text",
+            "quote",
             "attribution",
-            "role",
-            "background",
         ]),
         "team" => Some(&[
             "tags",
@@ -204,10 +209,9 @@ pub fn known_fields(slide_type: &str) -> Option<&'static [&'static str]> {
             "footer",
             "logo",
             "name",
-            "role",
-            "body",
-            "photo",
-            "links",
+            "title",
+            "bio",
+            "image",
         ]),
         "executive_summary" => Some(&[
             "tags",
@@ -276,7 +280,7 @@ pub fn known_fields(slide_type: &str) -> Option<&'static [&'static str]> {
             "footer",
             "logo",
             "title",
-            "events",
+            "milestones",
         ]),
         "stat_callout" => Some(&[
             "tags",
@@ -306,10 +310,9 @@ pub fn known_fields(slide_type: &str) -> Option<&'static [&'static str]> {
             "footer",
             "logo",
             "title",
-            "left_label",
-            "right_label",
-            "left_items",
-            "right_items",
+            "option_a",
+            "option_b",
+            "criteria",
         ]),
         "process_flow" => Some(&[
             "tags",
@@ -374,11 +377,8 @@ pub fn known_fields(slide_type: &str) -> Option<&'static [&'static str]> {
             "footer",
             "logo",
             "title",
+            "chart_type",
             "data",
-            "kind",
-            "x_label",
-            "y_label",
-            "caption",
         ]),
         "diagram" => Some(&[
             "tags",
@@ -391,22 +391,7 @@ pub fn known_fields(slide_type: &str) -> Option<&'static [&'static str]> {
             "footer",
             "logo",
             "title",
-            "source",
-            "caption",
-        ]),
-        "screenshot" => Some(&[
-            "tags",
-            "notes",
-            "report",
-            "detail",
-            "alt",
-            "lang",
-            "decorative",
-            "footer",
-            "logo",
-            "title",
-            "image",
-            "caption",
+            "diagram",
         ]),
         "code_sample" => Some(&[
             "tags",
@@ -433,10 +418,7 @@ pub fn known_fields(slide_type: &str) -> Option<&'static [&'static str]> {
             "footer",
             "logo",
             "title",
-            "src",
-            "caption",
-            "autoplay",
-            "loop",
+            "video_url",
         ]),
         "survey_results" => Some(&[
             "tags",
@@ -488,8 +470,7 @@ pub fn known_fields(slide_type: &str) -> Option<&'static [&'static str]> {
             "footer",
             "logo",
             "title",
-            "subtitle",
-            "cta",
+            "call_to_action",
             "contact",
         ]),
         _ => None,
@@ -590,11 +571,15 @@ mod tests {
     }
 
     #[test]
-    fn test_bc_1_09_002_known_fields_content_includes_body() {
+    fn test_bc_1_09_002_known_fields_content_includes_bullets() {
         let fields = known_fields("content").expect("content must be a known slide type");
         assert!(
-            fields.contains(&"body"),
-            "content type must have a 'body' field"
+            fields.contains(&"bullets"),
+            "content type must have a 'bullets' field"
+        );
+        assert!(
+            fields.contains(&"takeaway"),
+            "content type must have a 'takeaway' field"
         );
     }
 

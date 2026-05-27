@@ -60,7 +60,7 @@ pub use error::{ParseSeverity, SyntaxError};
 pub use expr::{BinOpKind, Expr, UnaryOpKind};
 pub use include::{resolve_includes, vars_scope_from_deck};
 pub use keywords::{
-    classify_keyword, is_directive_keyword, is_slide_type_keyword, is_structural_keyword,
+    classify_keyword, is_directive_keyword, is_reserved_bare_keyword, is_slide_type_keyword,
 };
 pub use known_fields::known_fields;
 pub use lexer::lex;

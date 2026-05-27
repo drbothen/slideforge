@@ -20,7 +20,7 @@
 //! - [`is_slide_type_keyword`] — `true` if `name` is one of the 31 built-in
 //!   slide types.
 //! - [`is_directive_keyword`] — `true` if `name` is a `@`-prefixed directive.
-//! - [`is_structural_keyword`] — `true` if `name` is a top-level DSL keyword.
+//! - [`is_reserved_bare_keyword`] — `true` if `name` is any non-`@`-prefixed reserved identifier.
 //!
 //! # STORY-009
 //!
@@ -225,27 +225,34 @@ pub fn is_directive_keyword(name: &str) -> bool {
         .is_some_and(|&(code, _)| code == "E-PAR-006")
 }
 
-/// Return `true` if `name` is a structural deck-level keyword.
+/// Return `true` if `name` is any non-`@`-prefixed reserved identifier.
 ///
-/// These keywords (`vars`, `set`, `alias`, `variants`, `section`, etc.) are
-/// used at the deck body level and must not be used as user identifiers.
+/// This covers ALL reserved bare identifiers including:
+/// - Structural deck-level keywords (`vars`, `set`, `alias`, `variants`, `section`, etc.)
+/// - Reserved future-feature identifiers (`component`, `extends`, `macro`, etc.)
+/// - The `raw` escape-hatch variants (`raw`, `raw_pptx`, `raw_html`, etc.)
+///
+/// Unlike [`is_slide_type_keyword`], slide-type keywords are not included.
+/// Unlike [`is_directive_keyword`], `@`-prefixed directives are not included.
 ///
 /// # Examples
 ///
 /// ```rust
-/// use slideforge_syntax::keywords::is_structural_keyword;
+/// use slideforge_syntax::keywords::is_reserved_bare_keyword;
 ///
-/// assert!(is_structural_keyword("vars"));
-/// assert!(is_structural_keyword("set"));
-/// assert!(!is_structural_keyword("title")); // slide type — not structural
-/// assert!(!is_structural_keyword("my_var")); // user identifier — safe
+/// assert!(is_reserved_bare_keyword("vars"));
+/// assert!(is_reserved_bare_keyword("set"));
+/// assert!(is_reserved_bare_keyword("raw"));
+/// assert!(is_reserved_bare_keyword("component"));
+/// assert!(!is_reserved_bare_keyword("title")); // slide type — not a reserved bare keyword
+/// assert!(!is_reserved_bare_keyword("my_var")); // user identifier — safe
 /// ```
 #[must_use]
-pub fn is_structural_keyword(name: &str) -> bool {
-    // Structural keywords are in RESERVED_KEYWORDS with E-PAR-006 and NO `@` prefix.
+pub fn is_reserved_bare_keyword(name: &str) -> bool {
+    // Reserved bare keywords are in RESERVED_KEYWORDS without an `@` prefix.
     RESERVED_KEYWORDS
         .get(name)
-        .is_some_and(|&(code, _)| code == "E-PAR-006")
+        .is_some_and(|&(code, _)| code == "E-PAR-006" || code == "E-PAR-009")
         && !name.starts_with('@')
 }
 
@@ -396,16 +403,26 @@ mod tests {
         );
     }
 
-    // is_structural_keyword: deck-level keywords recognized
+    // is_reserved_bare_keyword: all non-@-prefixed reserved identifiers recognized
     #[test]
-    fn test_bc_1_09_006_is_structural_keyword_vars_set_recognized() {
+    fn test_bc_1_09_006_is_reserved_bare_keyword_vars_set_recognized() {
         assert!(
-            is_structural_keyword("vars"),
-            "vars must be a structural keyword"
+            is_reserved_bare_keyword("vars"),
+            "vars must be a reserved bare keyword"
         );
         assert!(
-            is_structural_keyword("set"),
-            "set must be a structural keyword"
+            is_reserved_bare_keyword("set"),
+            "set must be a reserved bare keyword"
+        );
+        // raw variants are also reserved bare keywords (E-PAR-009)
+        assert!(
+            is_reserved_bare_keyword("raw"),
+            "raw must be a reserved bare keyword"
+        );
+        // future-feature reserved identifiers
+        assert!(
+            is_reserved_bare_keyword("component"),
+            "component must be a reserved bare keyword"
         );
     }
 
@@ -425,8 +442,8 @@ mod tests {
             "my_variable is not a directive"
         );
         assert!(
-            !is_structural_keyword("my_variable"),
-            "my_variable is not structural"
+            !is_reserved_bare_keyword("my_variable"),
+            "my_variable is not a reserved bare keyword"
         );
     }
 }
