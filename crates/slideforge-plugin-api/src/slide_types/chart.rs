@@ -26,7 +26,9 @@ use super::common_optional_fields;
 /// Maps to the `"Title and Content"` OOXML layout.
 #[derive(Debug)]
 pub struct ChartSlideType {
+    /// Required fields for the chart slide type.
     required: Vec<FieldDef>,
+    /// Optional fields for the chart slide type.
     optional: Vec<FieldDef>,
 }
 

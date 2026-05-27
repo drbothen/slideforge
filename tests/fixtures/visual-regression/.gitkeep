@@ -1,0 +1,17 @@
+# This directory holds committed reference PNG files for visual regression testing.
+#
+# Usage:
+#   - Reference PNGs are generated once from a known-good slideforge build and
+#     committed here as the ground truth.
+#   - CI renders the same test decks and compares against these references using
+#     scripts/visual-diff.py (SSIM >= 0.99 per NFR-007, PSNR >= 35 dB per NFR-008).
+#   - The visual-regression job in .github/workflows/ci.yml activates automatically
+#     when PPTX fixtures exist in tests/fixtures/*.pptx.
+#
+# To update reference PNGs (after intentional visual changes):
+#   1. Run slideforge against the test deck locally.
+#   2. Convert PPTX to PNG via LibreOffice headless.
+#   3. Run: python3 scripts/visual-diff.py --generated /tmp/actual --reference tests/fixtures/visual-regression
+#   4. If the new output is correct, copy the new PNGs here and commit.
+#
+# This .gitkeep file is removed automatically when the first reference PNG is added.

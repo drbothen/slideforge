@@ -21,7 +21,9 @@ use super::common_optional_fields;
 /// Maps to the `"Title and Content"` OOXML layout.
 #[derive(Debug)]
 pub struct MatrixSlideType {
+    /// Required fields for the matrix slide type.
     required: Vec<FieldDef>,
+    /// Optional fields for the matrix slide type.
     optional: Vec<FieldDef>,
 }
 
@@ -42,9 +44,7 @@ impl MatrixSlideType {
         Self {
             required: vec![FieldDef {
                 name: Arc::from("title"),
-                description: Arc::from(
-                    "The slide title (e.g., \"Impact / Effort Matrix\").",
-                ),
+                description: Arc::from("The slide title (e.g., \"Impact / Effort Matrix\")."),
                 required: true,
                 default_value: None,
             }],

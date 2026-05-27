@@ -24,7 +24,9 @@ use super::common_optional_fields;
 /// Maps to the `"Title and Content"` OOXML layout.
 #[derive(Debug)]
 pub struct DiagramSlideType {
+    /// Required fields for the diagram slide type.
     required: Vec<FieldDef>,
+    /// Optional fields for the diagram slide type.
     optional: Vec<FieldDef>,
 }
 

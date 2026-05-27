@@ -21,7 +21,9 @@ use super::common_optional_fields;
 /// Maps to the `"Two Content"` OOXML layout.
 #[derive(Debug)]
 pub struct ComparisonSlideType {
+    /// Required fields for the comparison slide type.
     required: Vec<FieldDef>,
+    /// Optional fields for the comparison slide type.
     optional: Vec<FieldDef>,
 }
 
@@ -31,9 +33,7 @@ impl ComparisonSlideType {
     pub fn new() -> Self {
         let mut optional = vec![FieldDef {
             name: Arc::from("criteria"),
-            description: Arc::from(
-                "Evaluation criteria dimensions used to compare the options.",
-            ),
+            description: Arc::from("Evaluation criteria dimensions used to compare the options."),
             required: false,
             default_value: None,
         }];

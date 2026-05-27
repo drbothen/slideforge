@@ -485,7 +485,9 @@ impl SyntaxError {
     #[must_use]
     pub fn severity(&self) -> ParseSeverity {
         match self {
-            Self::VersionError { is_fatal: false, .. } => ParseSeverity::Warning,
+            Self::VersionError {
+                is_fatal: false, ..
+            } => ParseSeverity::Warning,
             _ => ParseSeverity::Fatal,
         }
     }
@@ -512,14 +514,24 @@ impl SyntaxError {
     /// sort to `(file, 0, 0)`.
     fn sort_key(&self) -> (&str, u32, u32) {
         match self {
-            Self::IndentError { file, line, col, .. }
-            | Self::UnexpectedToken { file, line, col, .. }
-            | Self::ReservedKeyword { file, line, col, .. }
-            | Self::VarNameCollision { file, line, col, .. }
-            | Self::RawKeyword { file, line, col, .. } => (file.as_str(), *line, *col),
+            Self::IndentError {
+                file, line, col, ..
+            }
+            | Self::UnexpectedToken {
+                file, line, col, ..
+            }
+            | Self::ReservedKeyword {
+                file, line, col, ..
+            }
+            | Self::VarNameCollision {
+                file, line, col, ..
+            }
+            | Self::RawKeyword {
+                file, line, col, ..
+            } => (file.as_str(), *line, *col),
             Self::UnexpectedEof { file, .. } | Self::VersionError { file, .. } => {
                 (file.as_str(), 0, 0)
-            }
+            },
         }
     }
 
@@ -939,35 +951,52 @@ mod tests {
         use miette::Diagnostic;
 
         let variants: Vec<SyntaxError> = vec![
-            SyntaxError::indent_error(
-                "a.sf".to_string(), 1, 1, 2, 3,
-                "  bad\n".to_string(), 0,
-            ),
+            SyntaxError::indent_error("a.sf".to_string(), 1, 1, 2, 3, "  bad\n".to_string(), 0),
             SyntaxError::unexpected_token(
-                "a.sf".to_string(), 1, 1,
-                "desc".to_string(), "tok\n".to_string(), 0, 3,
+                "a.sf".to_string(),
+                1,
+                1,
+                "desc".to_string(),
+                "tok\n".to_string(),
+                0,
+                3,
             ),
-            SyntaxError::unexpected_eof(
-                "a.sf".to_string(), "msg".to_string(), "x".to_string(),
-            ),
+            SyntaxError::unexpected_eof("a.sf".to_string(), "msg".to_string(), "x".to_string()),
             SyntaxError::reserved_keyword(
-                "a.sf".to_string(), 1, 1,
-                "@fn".to_string(), "reserved".to_string(),
-                "@fn\n".to_string(), 0, 3,
+                "a.sf".to_string(),
+                1,
+                1,
+                "@fn".to_string(),
+                "reserved".to_string(),
+                "@fn\n".to_string(),
+                0,
+                3,
             ),
             SyntaxError::var_name_collision(
-                "a.sf".to_string(), 1, 1,
-                "chart".to_string(), "collision".to_string(),
-                "chart\n".to_string(), 0, 5,
+                "a.sf".to_string(),
+                1,
+                1,
+                "chart".to_string(),
+                "collision".to_string(),
+                "chart\n".to_string(),
+                0,
+                5,
             ),
             SyntaxError::raw_keyword(
-                "a.sf".to_string(), 1, 1,
+                "a.sf".to_string(),
+                1,
+                1,
                 "raw not allowed".to_string(),
-                "raw\n".to_string(), 0, 3,
+                "raw\n".to_string(),
+                0,
+                3,
             ),
             SyntaxError::version_error(
-                "a.sf".to_string(), "v2 incompatible".to_string(),
-                true, "slideforge_version \"2\"\n".to_string(), 0,
+                "a.sf".to_string(),
+                "v2 incompatible".to_string(),
+                true,
+                "slideforge_version \"2\"\n".to_string(),
+                0,
             ),
         ];
 
@@ -986,35 +1015,52 @@ mod tests {
         use miette::Diagnostic;
 
         let variants: Vec<SyntaxError> = vec![
-            SyntaxError::indent_error(
-                "a.sf".to_string(), 1, 1, 2, 3,
-                "  bad\n".to_string(), 0,
-            ),
+            SyntaxError::indent_error("a.sf".to_string(), 1, 1, 2, 3, "  bad\n".to_string(), 0),
             SyntaxError::unexpected_token(
-                "a.sf".to_string(), 1, 1,
-                "desc".to_string(), "tok\n".to_string(), 0, 3,
+                "a.sf".to_string(),
+                1,
+                1,
+                "desc".to_string(),
+                "tok\n".to_string(),
+                0,
+                3,
             ),
-            SyntaxError::unexpected_eof(
-                "a.sf".to_string(), "msg".to_string(), "x".to_string(),
-            ),
+            SyntaxError::unexpected_eof("a.sf".to_string(), "msg".to_string(), "x".to_string()),
             SyntaxError::reserved_keyword(
-                "a.sf".to_string(), 1, 1,
-                "@fn".to_string(), "reserved".to_string(),
-                "@fn\n".to_string(), 0, 3,
+                "a.sf".to_string(),
+                1,
+                1,
+                "@fn".to_string(),
+                "reserved".to_string(),
+                "@fn\n".to_string(),
+                0,
+                3,
             ),
             SyntaxError::var_name_collision(
-                "a.sf".to_string(), 1, 1,
-                "chart".to_string(), "collision".to_string(),
-                "chart\n".to_string(), 0, 5,
+                "a.sf".to_string(),
+                1,
+                1,
+                "chart".to_string(),
+                "collision".to_string(),
+                "chart\n".to_string(),
+                0,
+                5,
             ),
             SyntaxError::raw_keyword(
-                "a.sf".to_string(), 1, 1,
+                "a.sf".to_string(),
+                1,
+                1,
                 "raw not allowed".to_string(),
-                "raw\n".to_string(), 0, 3,
+                "raw\n".to_string(),
+                0,
+                3,
             ),
             SyntaxError::version_error(
-                "a.sf".to_string(), "v2 incompatible".to_string(),
-                true, "slideforge_version \"2\"\n".to_string(), 0,
+                "a.sf".to_string(),
+                "v2 incompatible".to_string(),
+                true,
+                "slideforge_version \"2\"\n".to_string(),
+                0,
             ),
         ];
 
@@ -1093,25 +1139,24 @@ mod tests {
     /// order.
     #[test]
     fn test_ac004_error_ordering() {
-        let e1 = SyntaxError::indent_error(
-            "a.sf".to_string(), 5, 1, 2, 3, "  bad\n".to_string(), 0,
-        );
-        let e2 = SyntaxError::indent_error(
-            "a.sf".to_string(), 2, 1, 2, 3, "  bad\n".to_string(), 0,
-        );
-        let e3 = SyntaxError::indent_error(
-            "a.sf".to_string(), 3, 1, 2, 3, "  bad\n".to_string(), 0,
-        );
+        let e1 =
+            SyntaxError::indent_error("a.sf".to_string(), 5, 1, 2, 3, "  bad\n".to_string(), 0);
+        let e2 =
+            SyntaxError::indent_error("a.sf".to_string(), 2, 1, 2, 3, "  bad\n".to_string(), 0);
+        let e3 =
+            SyntaxError::indent_error("a.sf".to_string(), 3, 1, 2, 3, "  bad\n".to_string(), 0);
         let mut errors = [e1, e2, e3];
         errors.sort();
-        let lines: Vec<u32> = errors.iter().map(|e| {
-            match e {
+        let lines: Vec<u32> = errors
+            .iter()
+            .map(|e| match e {
                 SyntaxError::IndentError { line, .. } => *line,
                 _ => 0,
-            }
-        }).collect();
+            })
+            .collect();
         assert_eq!(
-            lines, vec![2, 3, 5],
+            lines,
+            vec![2, 3, 5],
             "errors must sort in ascending line order; got: {lines:?}"
         );
     }
@@ -1124,35 +1169,52 @@ mod tests {
     #[test]
     fn test_ac006_all_par_errors_fatal() {
         let variants: Vec<SyntaxError> = vec![
-            SyntaxError::indent_error(
-                "a.sf".to_string(), 1, 1, 2, 3,
-                "  bad\n".to_string(), 0,
-            ),
+            SyntaxError::indent_error("a.sf".to_string(), 1, 1, 2, 3, "  bad\n".to_string(), 0),
             SyntaxError::unexpected_token(
-                "a.sf".to_string(), 1, 1,
-                "desc".to_string(), "tok\n".to_string(), 0, 3,
+                "a.sf".to_string(),
+                1,
+                1,
+                "desc".to_string(),
+                "tok\n".to_string(),
+                0,
+                3,
             ),
-            SyntaxError::unexpected_eof(
-                "a.sf".to_string(), "msg".to_string(), "x".to_string(),
-            ),
+            SyntaxError::unexpected_eof("a.sf".to_string(), "msg".to_string(), "x".to_string()),
             SyntaxError::reserved_keyword(
-                "a.sf".to_string(), 1, 1,
-                "@fn".to_string(), "reserved".to_string(),
-                "@fn\n".to_string(), 0, 3,
+                "a.sf".to_string(),
+                1,
+                1,
+                "@fn".to_string(),
+                "reserved".to_string(),
+                "@fn\n".to_string(),
+                0,
+                3,
             ),
             SyntaxError::var_name_collision(
-                "a.sf".to_string(), 1, 1,
-                "chart".to_string(), "collision".to_string(),
-                "chart\n".to_string(), 0, 5,
+                "a.sf".to_string(),
+                1,
+                1,
+                "chart".to_string(),
+                "collision".to_string(),
+                "chart\n".to_string(),
+                0,
+                5,
             ),
             SyntaxError::raw_keyword(
-                "a.sf".to_string(), 1, 1,
+                "a.sf".to_string(),
+                1,
+                1,
                 "raw not allowed".to_string(),
-                "raw\n".to_string(), 0, 3,
+                "raw\n".to_string(),
+                0,
+                3,
             ),
             SyntaxError::version_error(
-                "a.sf".to_string(), "v2 incompatible".to_string(),
-                true, "slideforge_version \"2\"\n".to_string(), 0,
+                "a.sf".to_string(),
+                "v2 incompatible".to_string(),
+                true,
+                "slideforge_version \"2\"\n".to_string(),
+                0,
             ),
         ];
 
@@ -1182,7 +1244,7 @@ mod tests {
         let e = SyntaxError::version_error(
             "test.sf".to_string(),
             "missing version".to_string(),
-            false,                   // is_fatal = false → Warning
+            false, // is_fatal = false → Warning
             "slide title:\n".to_string(),
             0,
         );

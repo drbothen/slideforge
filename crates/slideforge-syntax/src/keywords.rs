@@ -242,6 +242,7 @@ pub fn is_structural_keyword(name: &str) -> bool {
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
+#[allow(clippy::missing_docs_in_private_items, clippy::unwrap_used)]
 mod tests {
     use super::*;
 

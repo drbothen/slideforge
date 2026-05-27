@@ -65,7 +65,7 @@ pub use keywords::{
 pub use known_fields::known_fields;
 pub use lexer::lex;
 pub use lexer_error::LexError;
-pub use parser::{parse, parse_checked, ParseResult};
+pub use parser::{ParseResult, parse, parse_checked};
 pub use render::DiagnosticRenderer;
 pub use sink::{BoxDiagnostic, DiagnosticSink};
 pub use span::{SourceFile, SourceMap, Span, Spanned};

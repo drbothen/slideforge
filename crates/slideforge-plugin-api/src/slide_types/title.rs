@@ -19,7 +19,9 @@ use super::common_optional_fields;
 /// Maps to the `"Title Slide"` OOXML layout.
 #[derive(Debug)]
 pub struct TitleSlideType {
+    /// Required fields for the title slide type.
     required: Vec<FieldDef>,
+    /// Optional fields for the title slide type.
     optional: Vec<FieldDef>,
 }
 

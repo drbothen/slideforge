@@ -144,22 +144,22 @@ where
             "raw" | "raw_pptx" | "raw_html" | "raw_xml" | "raw_docx"
         ) => (s.to_string(), e.span())
     }
-        .then(
-            any()
-                .filter(|t: &Token| !matches!(t, Token::Newline | Token::Dedent))
-                .repeated(),
-        )
-        .then_ignore(just(Token::Newline).or_not())
-        .validate(|((name, _span), _rest), info, emitter| {
-            emitter.emit(Rich::custom(
-                info.span(),
-                format!(
-                    "E-PAR-009: '{name}' keyword is not available in user .sf files. \
+    .then(
+        any()
+            .filter(|t: &Token| !matches!(t, Token::Newline | Token::Dedent))
+            .repeated(),
+    )
+    .then_ignore(just(Token::Newline).or_not())
+    .validate(|((name, _span), _rest), info, emitter| {
+        emitter.emit(Rich::custom(
+            info.span(),
+            format!(
+                "E-PAR-009: '{name}' keyword is not available in user .sf files. \
                      Use the shape: DSL instead."
-                ),
-            ));
-        })
-        .map(|()| None::<ShapeFieldItem>);
+            ),
+        ));
+    })
+    .map(|()| None::<ShapeFieldItem>);
 
     // Unknown field — skip the name + value + newline (error recovery).
     let unknown_field = any_ident
@@ -444,11 +444,7 @@ mod tests {
         // The `raw` identifier is reserved across all contexts — including shape
         // blocks. The shape block parser has a dedicated raw-rejection path that
         // fires before the generic unknown_field fallback.
-        let src = concat!(
-            "slide content:\n",
-            "  shape:\n",
-            "    raw \"value\"\n",
-        );
+        let src = concat!("slide content:\n", "  shape:\n", "    raw \"value\"\n",);
         let result = parse_str(src);
         assert!(
             result.is_err(),

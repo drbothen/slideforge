@@ -21,7 +21,9 @@ use super::common_optional_fields;
 /// Maps to the `"Picture with Caption"` OOXML layout.
 #[derive(Debug)]
 pub struct ScreenshotSlideType {
+    /// Required fields for the screenshot slide type.
     required: Vec<FieldDef>,
+    /// Optional fields for the screenshot slide type.
     optional: Vec<FieldDef>,
 }
 

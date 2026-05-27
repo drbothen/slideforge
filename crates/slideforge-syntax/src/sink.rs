@@ -144,12 +144,11 @@ impl DiagnosticSink {
         D: miette::Diagnostic + Send + Sync + 'static,
     {
         use std::any::Any;
-        let position =
-            if let Some(se) = (&err as &dyn Any).downcast_ref::<crate::SyntaxError>() {
-                se.sort_position()
-            } else {
-                ("<unknown>".to_owned(), 0u32, 0u32)
-            };
+        let position = if let Some(se) = (&err as &dyn Any).downcast_ref::<crate::SyntaxError>() {
+            se.sort_position()
+        } else {
+            ("<unknown>".to_owned(), 0u32, 0u32)
+        };
 
         self.severities.push(severity);
         self.positions.push(position);
@@ -232,17 +231,13 @@ impl DiagnosticSink {
             .zip(self.severities.iter())
             .zip(self.positions.iter())
             .map(|((diag, sev), (file, line, col))| {
-                let error_code = diag
-                    .code()
-                    .map_or(serde_json::Value::Null, |c| {
-                        serde_json::Value::String(c.to_string())
-                    });
+                let error_code = diag.code().map_or(serde_json::Value::Null, |c| {
+                    serde_json::Value::String(c.to_string())
+                });
                 let message = serde_json::Value::String(diag.to_string());
-                let hint = diag
-                    .help()
-                    .map_or(serde_json::Value::Null, |h| {
-                        serde_json::Value::String(h.to_string())
-                    });
+                let hint = diag.help().map_or(serde_json::Value::Null, |h| {
+                    serde_json::Value::String(h.to_string())
+                });
                 let severity_str = match sev {
                     ParseSeverity::Fatal => "fatal",
                     ParseSeverity::Error => "error",
@@ -302,7 +297,7 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::{span::SourceMap, SyntaxError};
+    use crate::{SyntaxError, span::SourceMap};
 
     // Helper: build a cheap SyntaxError for sink testing.
     fn make_error(line: u32, col: u32) -> SyntaxError {
@@ -467,10 +462,19 @@ mod tests {
         let arr = json["diagnostics"]
             .as_array()
             .expect("'diagnostics' must be an array");
-        assert!(!arr.is_empty(), "diagnostics array must have at least one entry");
+        assert!(
+            !arr.is_empty(),
+            "diagnostics array must have at least one entry"
+        );
         let entry = &arr[0];
-        assert!(entry.get("error_code").is_some(), "entry must have 'error_code'");
-        assert!(entry.get("severity").is_some(), "entry must have 'severity'");
+        assert!(
+            entry.get("error_code").is_some(),
+            "entry must have 'error_code'"
+        );
+        assert!(
+            entry.get("severity").is_some(),
+            "entry must have 'severity'"
+        );
         assert!(entry.get("file").is_some(), "entry must have 'file'");
         assert!(entry.get("line").is_some(), "entry must have 'line'");
         assert!(entry.get("col").is_some(), "entry must have 'col'");
@@ -486,8 +490,13 @@ mod tests {
         sink.push(make_error(1, 1));
         let json = sink.to_json(&sm);
         let arr = json["diagnostics"].as_array().expect("must be array");
-        let sev = arr[0]["severity"].as_str().expect("severity must be string");
-        assert_eq!(sev, "fatal", "severity must be lowercase 'fatal'; got: {sev}");
+        let sev = arr[0]["severity"]
+            .as_str()
+            .expect("severity must be string");
+        assert_eq!(
+            sev, "fatal",
+            "severity must be lowercase 'fatal'; got: {sev}"
+        );
     }
 
     /// AC-014: `to_json()` total and `has_fatal` fields are correct.
@@ -499,7 +508,11 @@ mod tests {
         sink.push(make_error(2, 3));
         let json = sink.to_json(&sm);
         assert_eq!(json["total"].as_u64(), Some(2), "'total' must be 2");
-        assert_eq!(json["has_fatal"].as_bool(), Some(true), "'has_fatal' must be true");
+        assert_eq!(
+            json["has_fatal"].as_bool(),
+            Some(true),
+            "'has_fatal' must be true"
+        );
     }
 
     /// AC-014: file/line/col extracted from `SyntaxError` into `to_json()` output.
@@ -612,8 +625,14 @@ mod tests {
             Some(false),
             "empty sink to_json must have has_fatal:false"
         );
-        let arr = json["diagnostics"].as_array().expect("'diagnostics' must be array");
-        assert_eq!(arr.len(), 0, "empty sink to_json must have 0 diagnostic entries");
+        let arr = json["diagnostics"]
+            .as_array()
+            .expect("'diagnostics' must be array");
+        assert_eq!(
+            arr.len(),
+            0,
+            "empty sink to_json must have 0 diagnostic entries"
+        );
     }
 
     /// AC-014: `to_json()` output is valid JSON (parseable by `serde_json`).

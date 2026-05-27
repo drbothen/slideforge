@@ -19,7 +19,9 @@ use super::common_optional_fields;
 /// Maps to the `"Two Content"` OOXML layout.
 #[derive(Debug)]
 pub struct TwoColSlideType {
+    /// Required fields for the two-column slide type.
     required: Vec<FieldDef>,
+    /// Optional fields for the two-column slide type.
     optional: Vec<FieldDef>,
 }
 

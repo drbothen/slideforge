@@ -19,7 +19,9 @@ use super::common_optional_fields;
 /// Maps to the `"Title Slide"` OOXML layout.
 #[derive(Debug)]
 pub struct ClosingSlideType {
+    /// Required fields for the closing slide type.
     required: Vec<FieldDef>,
+    /// Optional fields for the closing slide type.
     optional: Vec<FieldDef>,
 }
 
@@ -30,9 +32,7 @@ impl ClosingSlideType {
         let mut optional = vec![
             FieldDef {
                 name: Arc::from("call_to_action"),
-                description: Arc::from(
-                    "A prominent call to action displayed below the title.",
-                ),
+                description: Arc::from("A prominent call to action displayed below the title."),
                 required: false,
                 default_value: None,
             },

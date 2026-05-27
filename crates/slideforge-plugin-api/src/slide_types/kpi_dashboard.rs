@@ -21,7 +21,9 @@ use super::common_optional_fields;
 /// Maps to the `"Title and Content"` OOXML layout.
 #[derive(Debug)]
 pub struct KpiDashboardSlideType {
+    /// Required fields for the KPI dashboard slide type.
     required: Vec<FieldDef>,
+    /// Optional fields for the KPI dashboard slide type.
     optional: Vec<FieldDef>,
 }
 

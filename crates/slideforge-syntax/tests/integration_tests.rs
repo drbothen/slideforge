@@ -14,12 +14,12 @@
 use std::sync::Arc;
 
 use slideforge_syntax::{
+    DiagnosticSink,
     ast::{BlockItem, DeckNode, FieldValue, SetRuleValue},
     error::{ParseSeverity, SyntaxError},
     parse, parse_checked,
     span::SourceMap,
     template::TemplateChunk,
-    DiagnosticSink,
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -534,12 +534,11 @@ fn test_ac005_include_error_span_attribution() {
 /// the parser must NOT stop at the first error (AC-011 accumulation contract).
 #[test]
 fn test_multi_error_accumulation() {
-    let src =
-        std::fs::read_to_string(format!(
-            "{}/tests/fixtures/five_independent_errors.sf",
-            env!("CARGO_MANIFEST_DIR")
-        ))
-        .expect("fixture five_independent_errors.sf must exist");
+    let src = std::fs::read_to_string(format!(
+        "{}/tests/fixtures/five_independent_errors.sf",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+    .expect("fixture five_independent_errors.sf must exist");
     let mut sm = SourceMap::new();
     let file_id = sm.add_file(Arc::from("five_errors.sf"), Arc::from(src.as_str()));
     let mut sink = DiagnosticSink::new();
@@ -549,7 +548,10 @@ fn test_multi_error_accumulation() {
         "must accumulate at least 5 errors; got {}",
         sink.len()
     );
-    assert!(sink.has_fatal(), "sink must report has_fatal() after error accumulation");
+    assert!(
+        sink.has_fatal(),
+        "sink must report has_fatal() after error accumulation"
+    );
 }
 
 // ── F-006: snapshot test for DiagnosticRenderer output ───────────────────────
@@ -564,13 +566,17 @@ fn test_snapshot_renderer_output() {
     // Push 3 known SyntaxErrors so the snapshot is deterministic.
     sink.push(SyntaxError::indent_error(
         "render_test.sf".to_string(),
-        2, 1, 2, 3,
+        2,
+        1,
+        2,
+        3,
         "slide title:\n  title \"Good\"\n   bad\n".to_string(),
         24,
     ));
     sink.push(SyntaxError::unexpected_token(
         "render_test.sf".to_string(),
-        3, 1,
+        3,
+        1,
         "expected field name".to_string(),
         "slide content:\n  title \"T\"\n  :\n".to_string(),
         28,
@@ -578,7 +584,8 @@ fn test_snapshot_renderer_output() {
     ));
     sink.push(SyntaxError::reserved_keyword(
         "render_test.sf".to_string(),
-        1, 1,
+        1,
+        1,
         "@fn".to_string(),
         "user-defined functions reserved for v2".to_string(),
         "@fn compute:\n".to_string(),
@@ -633,10 +640,7 @@ fn test_ec001_empty_sink_on_valid_source() {
         "valid source must produce empty sink; got {} error(s)",
         sink.len()
     );
-    assert!(
-        !sink.has_fatal(),
-        "valid source must not have fatal errors"
-    );
+    assert!(!sink.has_fatal(), "valid source must not have fatal errors");
     assert_eq!(
         sink.max_severity(),
         None,
@@ -653,7 +657,11 @@ fn test_ec001_empty_sink_on_valid_source() {
     let arr = json["diagnostics"]
         .as_array()
         .expect("to_json() 'diagnostics' must be an array");
-    assert_eq!(arr.len(), 0, "empty sink diagnostics array must have 0 entries");
+    assert_eq!(
+        arr.len(),
+        0,
+        "empty sink diagnostics array must have 0 entries"
+    );
 }
 
 // ── F-004: parse_checked warning propagation path ────────────────────────────

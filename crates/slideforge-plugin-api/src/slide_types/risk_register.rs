@@ -21,7 +21,9 @@ use super::common_optional_fields;
 /// Maps to the `"Title and Content"` OOXML layout.
 #[derive(Debug)]
 pub struct RiskRegisterSlideType {
+    /// Required fields for the risk register slide type.
     required: Vec<FieldDef>,
+    /// Optional fields for the risk register slide type.
     optional: Vec<FieldDef>,
 }
 

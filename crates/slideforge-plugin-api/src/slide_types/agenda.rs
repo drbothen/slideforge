@@ -21,7 +21,9 @@ use super::common_optional_fields;
 /// Maps to the `"Title and Content"` OOXML layout.
 #[derive(Debug)]
 pub struct AgendaSlideType {
+    /// Required fields for the agenda slide type.
     required: Vec<FieldDef>,
+    /// Optional fields for the agenda slide type.
     optional: Vec<FieldDef>,
 }
 
@@ -41,9 +43,7 @@ impl AgendaSlideType {
         Self {
             required: vec![FieldDef {
                 name: Arc::from("title"),
-                description: Arc::from(
-                    "The slide title (e.g., \"Today's Agenda\" or \"Agenda\").",
-                ),
+                description: Arc::from("The slide title (e.g., \"Today's Agenda\" or \"Agenda\")."),
                 required: true,
                 default_value: None,
             }],

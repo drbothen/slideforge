@@ -22,7 +22,9 @@ use super::common_optional_fields;
 /// Maps to the `"Two Content"` OOXML layout.
 #[derive(Debug)]
 pub struct BioSlideType {
+    /// Required fields for the bio slide type.
     required: Vec<FieldDef>,
+    /// Optional fields for the bio slide type.
     optional: Vec<FieldDef>,
 }
 

@@ -3,7 +3,7 @@
 //! This module provides:
 //!
 //! 1. **[`SlideTypeRegistry`]** — runtime dispatch from DSL keyword to
-//!    [`SlideType`] implementation, with typo suggestions.
+//!    [`SlideType`](crate::traits::SlideType) implementation, with typo suggestions.
 //! 2. **[`validate_fields`]** — accumulates all field-validation diagnostics
 //!    for a slide against its declared type schema.
 //! 3. **Individual slide type structs** — one per built-in type keyword.

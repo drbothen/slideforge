@@ -22,7 +22,9 @@ use super::common_optional_fields;
 /// Maps to the `"Title and Content"` OOXML layout.
 #[derive(Debug)]
 pub struct RecommendationSlideType {
+    /// Required fields for the recommendation slide type.
     required: Vec<FieldDef>,
+    /// Optional fields for the recommendation slide type.
     optional: Vec<FieldDef>,
 }
 
@@ -33,9 +35,7 @@ impl RecommendationSlideType {
         let mut optional = vec![
             FieldDef {
                 name: Arc::from("rationale"),
-                description: Arc::from(
-                    "The reasoning or evidence supporting the recommendation.",
-                ),
+                description: Arc::from("The reasoning or evidence supporting the recommendation."),
                 required: false,
                 default_value: None,
             },
@@ -59,9 +59,7 @@ impl RecommendationSlideType {
                 },
                 FieldDef {
                     name: Arc::from("recommendation"),
-                    description: Arc::from(
-                        "The specific action or decision being recommended.",
-                    ),
+                    description: Arc::from("The specific action or decision being recommended."),
                     required: true,
                     default_value: None,
                 },

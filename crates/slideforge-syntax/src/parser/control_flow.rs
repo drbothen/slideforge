@@ -138,28 +138,28 @@ where
             "raw" | "raw_pptx" | "raw_html" | "raw_xml" | "raw_docx"
         ) => (s.to_string(), e.span())
     }
-        .then_ignore(
-            any()
-                .filter(|t: &Token| !matches!(t, Token::Newline | Token::Dedent | Token::Eof))
-                .repeated(),
-        )
-        .then_ignore(just(Token::Newline).or_not())
-        .validate(|(name, _span), info, emitter| {
-            emitter.emit(Rich::custom(
-                info.span(),
-                format!(
-                    "E-PAR-009: '{name}' escape hatch is not available in user .sf files. \
+    .then_ignore(
+        any()
+            .filter(|t: &Token| !matches!(t, Token::Newline | Token::Dedent | Token::Eof))
+            .repeated(),
+    )
+    .then_ignore(just(Token::Newline).or_not())
+    .validate(|(name, _span), info, emitter| {
+        emitter.emit(Rich::custom(
+            info.span(),
+            format!(
+                "E-PAR-009: '{name}' escape hatch is not available in user .sf files. \
                      Use a 'shape:' block to embed custom shapes."
-                ),
-            ));
+            ),
+        ));
+    })
+    .map(move |()| {
+        // Produce a dummy field node to allow parsing to continue.
+        SlideBodyItem::Field(FieldNode {
+            name: Spanned::new("raw".to_string(), to_span(SimpleSpan::from(0..0), file_id)),
+            value: Spanned::new(FieldValue::Error, to_span(SimpleSpan::from(0..0), file_id)),
         })
-        .map(move |()| {
-            // Produce a dummy field node to allow parsing to continue.
-            SlideBodyItem::Field(FieldNode {
-                name: Spanned::new("raw".to_string(), to_span(SimpleSpan::from(0..0), file_id)),
-                value: Spanned::new(FieldValue::Error, to_span(SimpleSpan::from(0..0), file_id)),
-            })
-        });
+    });
 
     // Regular field line: `IDENT value NEWLINE`.
     let regular_field = any_ident()
