@@ -157,7 +157,7 @@ mod tests {
         assert_eq!(result, r"\bar{x} = 4.2");
     }
 
-    /// A reference to an undefined variable produces an UndefinedVariable diagnostic.
+    /// A reference to an undefined variable produces an `UndefinedVariable` diagnostic.
     #[test]
     fn test_bc_5_29_003_at_var_undefined() {
         let vars = HashMap::new();

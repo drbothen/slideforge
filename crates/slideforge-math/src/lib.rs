@@ -182,7 +182,7 @@ mod tests {
         TypesMathNode::display(Arc::from(latex), SourceSpan::default())
     }
 
-    /// parse() succeeds for a valid inline expression and returns the correct mode.
+    /// `parse()` succeeds for a valid inline expression and returns the correct mode.
     #[test]
     fn test_bc_5_29_005_math_renderer_parse_inline() {
         let renderer = MathRendererImpl::new();
@@ -192,7 +192,7 @@ mod tests {
         assert!(!ast.nodes.is_empty(), "AST should not be empty");
     }
 
-    /// render_omml() succeeds for a valid node and returns non-empty bytes.
+    /// `render_omml()` succeeds for a valid node and returns non-empty bytes.
     #[test]
     fn test_bc_5_29_005_math_renderer_render_omml() {
         let renderer = MathRendererImpl::new();
@@ -205,7 +205,7 @@ mod tests {
         assert!(xml.contains("<m:oMath"), "inline output must contain <m:oMath>");
     }
 
-    /// render(node, MathMl) returns UnsupportedFormat.
+    /// `render(node, MathMl)` returns `UnsupportedFormat`.
     #[test]
     fn test_bc_5_29_005_mathml_stub_returns_not_implemented() {
         let renderer = MathRendererImpl::new();
@@ -217,7 +217,7 @@ mod tests {
         );
     }
 
-    /// render(node, Pdf) returns UnsupportedFormat.
+    /// `render(node, Pdf)` returns `UnsupportedFormat`.
     #[test]
     fn test_bc_5_29_005_pdf_paths_stub_returns_not_implemented() {
         let renderer = MathRendererImpl::new();
@@ -229,7 +229,7 @@ mod tests {
         );
     }
 
-    /// display_node renders with <m:oMathPara> wrapper.
+    /// `display_node` renders with `<m:oMathPara>` wrapper.
     #[test]
     fn test_bc_5_29_005_display_mode_para_wrapper() {
         let renderer = MathRendererImpl::new();
@@ -241,21 +241,21 @@ mod tests {
         assert!(xml.contains("<m:oMathPara"), "display mode must use <m:oMathPara>");
     }
 
-    /// MathRendererImpl implements MathRenderer trait (Send + Sync).
+    /// `MathRendererImpl` implements `MathRenderer` trait (`Send + Sync`).
     #[test]
     fn test_bc_5_29_005_is_send_sync() {
         fn assert_send_sync<T: Send + Sync>() {}
         assert_send_sync::<MathRendererImpl>();
     }
 
-    /// id() returns the stable plugin identifier for this math renderer.
+    /// `id()` returns the stable plugin identifier for this math renderer.
     #[test]
     fn test_bc_5_29_005_renderer_id() {
         let renderer = MathRendererImpl::new();
         assert_eq!(renderer.id(), "pulldown-latex");
     }
 
-    /// with_vars() substitutes @{var} in an expression before parsing.
+    /// `with_vars()` substitutes `@{var}` in an expression before parsing.
     #[test]
     fn test_bc_5_29_005_with_vars_substitution() {
         let mut vars = HashMap::new();
@@ -271,7 +271,7 @@ mod tests {
     // FINDING-010 — Error accumulation: both interpolation AND parse diagnostics
     // ─────────────────────────────────────────────────────────────────────────
 
-    /// parse() with both an undefined @{var} AND an unsupported \command must
+    /// `parse()` with both an undefined `@{var}` AND an unsupported `\command` must
     /// return an error whose message contains BOTH diagnostics (not just the first).
     #[test]
     fn test_finding_010_both_interp_and_parse_errors_returned() {

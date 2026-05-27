@@ -809,14 +809,6 @@ mod tests {
     /// A display-mode sum with sub+superscript parses correctly.
     #[test]
     fn test_bc_5_29_001_parse_display_sum() {
-        let (ast, diags) = parse(r"\sum_{i=0}^{n} i", MathMode::Display, SourceSpan::default());
-        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
-        let ast = ast.expect("expected successful parse");
-        assert_eq!(ast.mode, MathMode::Display);
-        // Must contain an Operator node for \sum
-        let has_sum = ast.nodes.iter().any(|n| matches!(n, MathNode::Operator(s) if s.as_ref() == "sum"));
-        assert!(has_sum, "expected Operator(sum) node in: {ast:?}");
-        // Must have at least one Subscript and one Superscript
         fn has_variant(nodes: &[MathNode], pred: fn(&MathNode) -> bool) -> bool {
             nodes.iter().any(|n| {
                 if pred(n) {
@@ -837,6 +829,14 @@ mod tests {
                 }
             })
         }
+        let (ast, diags) = parse(r"\sum_{i=0}^{n} i", MathMode::Display, SourceSpan::default());
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+        let ast = ast.expect("expected successful parse");
+        assert_eq!(ast.mode, MathMode::Display);
+        // Must contain an Operator node for \sum
+        let has_sum = ast.nodes.iter().any(|n| matches!(n, MathNode::Operator(s) if s.as_ref() == "sum"));
+        assert!(has_sum, "expected Operator(sum) node in: {ast:?}");
+        // Must have at least one Subscript and one Superscript
         assert!(
             has_variant(&ast.nodes, |n| matches!(n, MathNode::Subscript { .. })),
             "expected Subscript node"
@@ -968,7 +968,7 @@ mod tests {
     // FINDING-007 — UnsupportedCommand must carry error_code "E-EXP-006"
     // ─────────────────────────────────────────────────────────────────────────
 
-    /// An unsupported command produces a diagnostic with error_code "E-EXP-006".
+    /// An unsupported command produces a diagnostic with `error_code` "E-EXP-006".
     #[test]
     fn test_finding_007_unsupported_command_has_error_code() {
         let (_, diags) = parse(r"\badcmd", MathMode::Inline, SourceSpan::default());
@@ -977,10 +977,10 @@ mod tests {
                 if command.as_ref() == "badcmd")
         });
         assert!(diag.is_some(), "expected UnsupportedCommand diagnostic");
-        if let Some(d) = diag {
-            if let MathRendererError::UnsupportedCommand { error_code, .. } = &d.error {
-                assert_eq!(*error_code, "E-EXP-006", "error_code must be E-EXP-006");
-            }
+        if let Some(MathRendererError::UnsupportedCommand { error_code, .. }) =
+            diag.map(|d| &d.error)
+        {
+            assert_eq!(*error_code, "E-EXP-006", "error_code must be E-EXP-006");
         }
     }
 
@@ -1103,8 +1103,8 @@ mod tests {
     //               a diagnostic rather than a stack overflow
     // ─────────────────────────────────────────────────────────────────────────
 
-    /// Deeply nested `{{{{...}}}}` beyond MAX_DEPTH must produce a diagnostic,
-    /// not a stack overflow or panic.
+    /// Deeply nested braces (300 levels) beyond `MAX_DEPTH` must produce a
+    /// diagnostic, not a stack overflow or panic.
     #[test]
     fn test_finding_013_deep_nesting_produces_diagnostic_not_panic() {
         // Build 300 levels of nesting — well beyond MAX_DEPTH = 256
@@ -1229,6 +1229,17 @@ mod tests {
     /// Symbol node inside the delimiter, not as a premature `\right` match.
     #[test]
     fn test_is_at_right_does_not_match_rightarrow() {
+        fn find_rightarrow(nodes: &[MathNode]) -> bool {
+            for node in nodes {
+                match node {
+                    MathNode::Symbol(s) if s.as_ref() == "rightarrow" => return true,
+                    MathNode::Delimiter { inner, .. } if find_rightarrow(inner) => return true,
+                    MathNode::Group(inner) if find_rightarrow(inner) => return true,
+                    _ => {}
+                }
+            }
+            false
+        }
         let (ast, diags) =
             parse(r"\left( f: A \rightarrow B \right)", MathMode::Inline, SourceSpan::default());
         assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
@@ -1237,25 +1248,6 @@ mod tests {
         let has_delim = ast.nodes.iter().any(|n| matches!(n, MathNode::Delimiter { .. }));
         assert!(has_delim, "expected Delimiter node; got: {ast:?}");
         // The delimiter's inner nodes must contain a Symbol("rightarrow") node
-        fn find_rightarrow(nodes: &[MathNode]) -> bool {
-            for node in nodes {
-                match node {
-                    MathNode::Symbol(s) if s.as_ref() == "rightarrow" => return true,
-                    MathNode::Delimiter { inner, .. } => {
-                        if find_rightarrow(inner) {
-                            return true;
-                        }
-                    }
-                    MathNode::Group(inner) => {
-                        if find_rightarrow(inner) {
-                            return true;
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            false
-        }
         assert!(
             find_rightarrow(&ast.nodes),
             "expected Symbol(rightarrow) inside delimiter; got: {ast:?}"
