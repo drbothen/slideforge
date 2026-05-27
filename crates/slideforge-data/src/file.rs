@@ -139,7 +139,20 @@ impl FileDataSource {
             // relative input paths we re-join against `canonical_base` so the
             // comparison is always anchored on the same root.
             let canonical_candidate: PathBuf = if path.is_absolute() {
-                path.to_path_buf()
+                // For absolute paths, resolve symlinks so the comparison is
+                // anchored on the same root as `canonical_base`.  On macOS,
+                // `TempDir` returns `/var/folders/…` but `canonicalize()` of
+                // the base returns `/private/var/folders/…` (because `/var` is
+                // a symlink to `/private/var`).  Using the raw absolute path
+                // here caused false-positive PathTraversalBlocked for legitimate
+                // absolute paths inside the sandbox.
+                //
+                // If the target does not yet exist, `canonicalize()` fails and
+                // we fall back to the raw path.  Non-existent absolute-path
+                // traversals are caught by the `starts_with` check that follows
+                // (the raw absolute path still cannot start with `canonical_base`
+                // if it genuinely escapes the sandbox).
+                path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
             } else {
                 canonical_base.join(path)
             };
@@ -483,7 +496,7 @@ mod tests {
     }
 
     /// test_traversal_blocked_nonexistent_file — lexical `../` traversal to non-existent file
-    /// must return PathTraversalBlocked (E-DAT-005), NOT FileNotFound (E-DAT-004).
+    /// must return PathTraversalBlocked (E-DAT-006), NOT FileNotFound (E-DAT-004).
     ///
     /// This is the FINDING-001 regression test. Before the fix, `canonicalize()` failed on
     /// the non-existent target so the containment check was skipped, and the subsequent
@@ -508,7 +521,7 @@ mod tests {
     }
 
     /// test_traversal_blocked_existing_and_nonexistent_same_error — both existing and
-    /// non-existing out-of-sandbox paths must produce the same error variant (E-DAT-005).
+    /// non-existing out-of-sandbox paths must produce the same error variant (E-DAT-006).
     ///
     /// This prevents the file-existence oracle: an attacker must not be able to
     /// distinguish "file exists outside sandbox" from "file doesn't exist outside sandbox"
@@ -540,6 +553,53 @@ mod tests {
             err_existing.code(),
             "E-DAT-006",
             "existing outside-sandbox file must return E-DAT-006 (same as non-existent — no oracle)"
+        );
+    }
+
+    /// test_absolute_path_inside_base_dir_succeeds — absolute path pointing into base_dir loads OK.
+    ///
+    /// Exercises the `path.is_absolute()` branch in the resolver (lines ~102-103) and the
+    /// corresponding lexical containment check (lines ~141-151) for an absolute path that IS
+    /// inside the sandbox.  Before FINDING-002 this code path had zero test coverage.
+    #[test]
+    fn test_absolute_path_inside_base_dir_succeeds() {
+        use tempfile::TempDir;
+        let dir = TempDir::new().expect("temp dir");
+        let json_path = dir.path().join("inside.json");
+        std::fs::write(&json_path, br#"{"ok": true}"#).expect("write temp json");
+
+        let src = loader();
+        // Pass the absolute path to a file that lives inside base_dir.
+        let result = src.load_path(&json_path, Some(dir.path()));
+        let value = result.expect("absolute path inside base_dir must succeed");
+        assert!(value.as_map().is_some(), "must be a map");
+    }
+
+    /// test_absolute_path_outside_base_dir_blocked — absolute path outside base_dir returns
+    /// E-DAT-006 (PathTraversalBlocked).
+    ///
+    /// Exercises the `path.is_absolute()` branch plus the lexical containment check for an
+    /// absolute path that escapes the sandbox.  Before FINDING-002 this code path was
+    /// untested, leaving a gap in the security regression suite.
+    #[test]
+    fn test_absolute_path_outside_base_dir_blocked() {
+        use tempfile::TempDir;
+        let sandbox = TempDir::new().expect("sandbox temp dir");
+        let outside = TempDir::new().expect("outside temp dir");
+
+        // Create a real JSON file in `outside` so the test is not confounded by
+        // FileNotFound — the containment check must fire before the read attempt.
+        let outside_json = outside.path().join("secret.json");
+        std::fs::write(&outside_json, br#"{"secret": 42}"#).expect("write outside json");
+
+        let src = loader();
+        // Pass the absolute path to a file OUTSIDE the sandbox with base_dir set to sandbox.
+        let result = src.load_path(&outside_json, Some(sandbox.path()));
+        let err = result.expect_err("absolute path outside base_dir must be blocked");
+        assert_eq!(
+            err.code(),
+            "E-DAT-006",
+            "absolute path outside sandbox must return E-DAT-006 (PathTraversalBlocked): {err:?}"
         );
     }
 
