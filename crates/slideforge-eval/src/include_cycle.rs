@@ -50,8 +50,8 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use slideforge_syntax::error::ParseSeverity;
 use slideforge_syntax::DiagnosticSink;
+use slideforge_syntax::error::ParseSeverity;
 use slideforge_types::SourceSpan;
 
 use crate::error::EvalError;
@@ -115,7 +115,15 @@ pub fn check_include_cycles(
     let mut path: Vec<Arc<str>> = Vec::new();
     let mut found_cycle = false;
 
-    check_node(root, graph, &mut in_progress, &mut completed, &mut path, sink, &mut found_cycle);
+    check_node(
+        root,
+        graph,
+        &mut in_progress,
+        &mut completed,
+        &mut path,
+        sink,
+        &mut found_cycle,
+    );
 
     !found_cycle
 }
@@ -193,7 +201,15 @@ fn check_node(
             );
             *found_cycle = true;
         } else {
-            check_node(child, graph, in_progress, completed, path, sink, found_cycle);
+            check_node(
+                child,
+                graph,
+                in_progress,
+                completed,
+                path,
+                sink,
+                found_cycle,
+            );
         }
     }
 
@@ -242,7 +258,10 @@ mod tests {
 
         let ok = check_include_cycles(&root, &graph, &mut sink);
 
-        assert!(ok, "single file with no includes must return true (no cycle)");
+        assert!(
+            ok,
+            "single file with no includes must return true (no cycle)"
+        );
         assert!(
             sink.is_empty(),
             "single file must produce no diagnostics; got: {:?}",
@@ -266,10 +285,7 @@ mod tests {
         let ok = check_include_cycles(&root, &graph, &mut sink);
 
         assert!(!ok, "direct cycle a.sf→b.sf→a.sf must return false");
-        assert!(
-            !sink.is_empty(),
-            "direct cycle must push E-PAR-004 to sink"
-        );
+        assert!(!sink.is_empty(), "direct cycle must push E-PAR-004 to sink");
         // Verify error code is E-PAR-004.
         let code = sink.errors()[0]
             .code()
@@ -306,7 +322,10 @@ mod tests {
 
         let ok = check_include_cycles(&root, &graph, &mut sink);
 
-        assert!(!ok, "self-include deck.sf→deck.sf must return false (cycle)");
+        assert!(
+            !ok,
+            "self-include deck.sf→deck.sf must return false (cycle)"
+        );
         assert!(!sink.is_empty(), "self-include must push E-PAR-004 to sink");
         let code = sink.errors()[0]
             .code()
@@ -396,10 +415,7 @@ mod tests {
         let mut graph: IncludeGraph = HashMap::new();
         for (file, includes) in &edges {
             let key: Arc<str> = Arc::from(file.as_str());
-            let value: Vec<Arc<str>> = includes
-                .iter()
-                .map(|s| Arc::from(s.as_str()))
-                .collect();
+            let value: Vec<Arc<str>> = includes.iter().map(|s| Arc::from(s.as_str())).collect();
             graph.insert(key, value);
         }
 

@@ -1573,14 +1573,8 @@ mod tests {
         let root = Arc::from("a.sf");
 
         let mut sink = DiagnosticSink::new();
-        let deck = eval_deck_with_cycle_check(
-            &deck_node,
-            &include_graph,
-            &root,
-            &config,
-            None,
-            &mut sink,
-        );
+        let deck =
+            eval_deck_with_cycle_check(&deck_node, &include_graph, &root, &config, None, &mut sink);
 
         assert!(
             deck.is_none(),
@@ -1618,14 +1612,8 @@ mod tests {
         let root = Arc::from("a.sf");
 
         let mut sink = DiagnosticSink::new();
-        let deck = eval_deck_with_cycle_check(
-            &deck_node,
-            &include_graph,
-            &root,
-            &config,
-            None,
-            &mut sink,
-        );
+        let deck =
+            eval_deck_with_cycle_check(&deck_node, &include_graph, &root, &config, None, &mut sink);
 
         assert!(
             deck.is_some(),

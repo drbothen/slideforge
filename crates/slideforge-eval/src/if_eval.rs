@@ -150,13 +150,7 @@ pub fn eval_if_chain<S: std::hash::BuildHasher>(
                     },
                     Some(true) => {
                         // This @elif branch is truthy. Lazy — evaluate its body and return.
-                        return eval_block_items(
-                            env,
-                            elif_body,
-                            set_rule_defaults,
-                            config,
-                            sink,
-                        );
+                        return eval_block_items(env, elif_body, set_rule_defaults, config, sink);
                     },
                     Some(false) => {
                         // This @elif was false — continue to next @elif (lazy).
@@ -978,7 +972,10 @@ mod tests {
             "Null condition must produce 0 slides; got {}",
             slides.len()
         );
-        assert!(!sink.is_empty(), "Null condition must push E-EVL-003 to sink");
+        assert!(
+            !sink.is_empty(),
+            "Null condition must push E-EVL-003 to sink"
+        );
         let code = sink.errors()[0]
             .code()
             .map(|c| c.to_string())
@@ -996,10 +993,7 @@ mod tests {
     /// Lists are not implicitly truthy — they are a type error like Int or Str.
     #[test]
     fn test_if_list_condition_type_error() {
-        let mut env = env_with(&[(
-            "items",
-            Value::List(vec![Value::Int(1), Value::Int(2)]),
-        )]);
+        let mut env = env_with(&[("items", Value::List(vec![Value::Int(1), Value::Int(2)]))]);
         let mut sink = DiagnosticSink::new();
         let config = default_config();
 
@@ -1017,7 +1011,10 @@ mod tests {
             "List condition must produce 0 slides; got {}",
             slides.len()
         );
-        assert!(!sink.is_empty(), "List condition must push E-EVL-003 to sink");
+        assert!(
+            !sink.is_empty(),
+            "List condition must push E-EVL-003 to sink"
+        );
         let code = sink.errors()[0]
             .code()
             .map(|c| c.to_string())
@@ -1060,7 +1057,10 @@ mod tests {
             "Map condition must produce 0 slides; got {}",
             slides.len()
         );
-        assert!(!sink.is_empty(), "Map condition must push E-EVL-003 to sink");
+        assert!(
+            !sink.is_empty(),
+            "Map condition must push E-EVL-003 to sink"
+        );
         let code = sink.errors()[0]
             .code()
             .map(|c| c.to_string())

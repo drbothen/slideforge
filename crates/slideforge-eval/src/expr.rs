@@ -1035,7 +1035,10 @@ mod tests {
             rhs: Box::new(Expr::Ident("undefined_var".to_string())),
         };
         let result = eval_expr(&env, &expr, &mut sink);
-        assert_eq!(result, None, "true && <undefined> must return None (rhs error)");
+        assert_eq!(
+            result, None,
+            "true && <undefined> must return None (rhs error)"
+        );
         assert!(
             !sink.is_empty(),
             "true && <undefined> must push E-EVL-001 (rhs is evaluated)"
@@ -1078,7 +1081,10 @@ mod tests {
             rhs: Box::new(Expr::Ident("undefined_var".to_string())),
         };
         let result = eval_expr(&env, &expr, &mut sink);
-        assert_eq!(result, None, "false || <undefined> must return None (rhs error)");
+        assert_eq!(
+            result, None,
+            "false || <undefined> must return None (rhs error)"
+        );
         assert!(
             !sink.is_empty(),
             "false || <undefined> must push E-EVL-001 (rhs is evaluated)"
