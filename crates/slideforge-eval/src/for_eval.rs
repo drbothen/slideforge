@@ -89,9 +89,22 @@ pub fn eval_for_block(
         return vec![];
     };
 
-    // Verify the collection is a list.
-    let list = match collection_val {
+    // Verify the collection is a list or map.
+    // For Map: iterate entries, binding each as a Map { "key": k, "value": v }
+    // so {{ item.key }} and {{ item.value }} work inside the loop body.
+    let list: Vec<Value> = match collection_val {
         Value::List(items) => items,
+        Value::Map(map) => {
+            // I03: map iteration — each entry becomes a mini-map with "key" and "value".
+            map.into_iter()
+                .map(|(k, v)| {
+                    let mut entry = slideforge_types::OrderedMap::new();
+                    entry.insert(Arc::from("key"), Value::Str(k));
+                    entry.insert(Arc::from("value"), v);
+                    Value::Map(entry)
+                })
+                .collect()
+        },
         other => {
             sink.push_with_severity(
                 EvalError::NotIterable {
@@ -136,11 +149,12 @@ pub fn eval_for_block(
     }
 
     // Emit a large-deck warning if the generated count exceeds the threshold.
+    // I04: Use LargeDeckWarning (not TooManySlides) for the lint warning.
     if slides.len() > config.large_deck_warn_threshold {
         sink.push_with_severity(
-            EvalError::TooManySlides {
+            EvalError::LargeDeckWarning {
                 count: slides.len(),
-                max: config.large_deck_warn_threshold,
+                threshold: config.large_deck_warn_threshold,
                 span: SourceSpan::default(),
             },
             ParseSeverity::Warning,
@@ -170,6 +184,13 @@ pub fn eval_for_block(
 /// - [`slideforge_syntax::FieldValue::Ident`]: looked up in env.
 /// - [`slideforge_syntax::FieldValue::Error`]: skipped (error already in sink).
 /// - [`slideforge_syntax::FieldValue::Shape`]: stored as a block (future story).
+///
+/// # Inline items (I05)
+///
+/// `slide_node.inline_items` may contain element-scope `@for` and `@if` blocks.
+/// `@for` items are evaluated and their resulting sub-slides are recorded in the
+/// returned `Slide`'s `blocks` field.
+/// `@if` evaluation is deferred to STORY-013.
 pub fn eval_slide_node(
     env: &Env,
     slide_node: &SlideNode,
@@ -277,7 +298,8 @@ pub fn eval_slide_node(
 /// Evaluate a slice of [`BlockItem`]s, collecting all generated slides.
 ///
 /// Each item is dispatched based on its variant:
-/// - [`BlockItem::Slide`] → [`eval_slide_node`]
+/// - [`BlockItem::Slide`] → [`eval_slide_node`] (primary slide) + element-scope
+///   inline items from `slide.inline_items` (I05)
 /// - [`BlockItem::For`] → [`eval_for_block`] (recursive)
 /// - [`BlockItem::If`] → condition evaluated and matching branch selected
 ///   (delegated to future `if_eval` module in STORY-013)
@@ -295,8 +317,37 @@ pub fn eval_block_items(
     for item in items {
         match item {
             BlockItem::Slide(spanned_slide) => {
-                if let Some(slide) = eval_slide_node(env, spanned_slide.value(), sink) {
+                let slide_node = spanned_slide.value();
+                // Evaluate the primary slide.
+                if let Some(slide) = eval_slide_node(env, slide_node, sink) {
                     slides.push(slide);
+                }
+                // I05: Process element-scope inline items (@for/@if) inside
+                // the slide body. @for generates additional slides; @if is
+                // deferred to STORY-013.
+                for inline_item in &slide_node.inline_items {
+                    match inline_item {
+                        BlockItem::For(spanned_for) => {
+                            let for_node = spanned_for.value();
+                            let generated = eval_for_block(
+                                env,
+                                for_node.binding.value(),
+                                for_node.collection.value(),
+                                &for_node.body,
+                                config,
+                                sink,
+                            );
+                            slides.extend(generated);
+                        },
+                        BlockItem::If(_spanned_if) => {
+                            // TODO(STORY-013): @if evaluation inside slide body
+                            // is deferred to STORY-013 (conditional evaluation).
+                        },
+                        BlockItem::Slide(_) | BlockItem::Section(_) => {
+                            // Nested slides inside a slide body are not valid;
+                            // silently ignored (parser guards against this).
+                        },
+                    }
                 }
             },
             BlockItem::For(spanned_for) => {
@@ -396,7 +447,7 @@ mod tests {
 
     /// BC-2.04.001 postcondition: @for over a 3-item list → exactly 3 slides.
     #[test]
-    fn test_bc_2_04_001_for_generates_correct_count() {
+    fn test_bc_1_04_001_for_generates_correct_count() {
         let mut env = empty_env();
         let mut sink = slideforge_syntax::DiagnosticSink::new();
         let config = default_config();
@@ -426,7 +477,7 @@ mod tests {
     ///
     /// This test MUST fail until eval_for_block is implemented.
     #[test]
-    fn test_bc_2_04_002_for_item_value_per_slide() {
+    fn test_bc_1_04_002_for_item_value_per_slide() {
         use slideforge_syntax::{FieldNode, FieldValue, TemplateChunk};
 
         let mut env = empty_env();
@@ -475,7 +526,7 @@ mod tests {
 
     /// BC-2.04.003: @for x in [] → 0 slides produced, 0 errors pushed.
     #[test]
-    fn test_bc_2_04_003_for_empty_collection() {
+    fn test_bc_1_04_003_for_empty_collection() {
         let mut env = empty_env();
         let mut sink = slideforge_syntax::DiagnosticSink::new();
         let config = default_config();
@@ -498,7 +549,7 @@ mod tests {
     /// BC-2.04.004: after eval_for_block returns, the binding variable must
     /// not be visible in the outer env.
     #[test]
-    fn test_bc_2_04_004_for_scope_exit() {
+    fn test_bc_1_04_004_for_scope_exit() {
         let mut env = empty_env();
         let mut sink = slideforge_syntax::DiagnosticSink::new();
         let config = default_config();
@@ -524,7 +575,7 @@ mod tests {
     /// Verified by running the loop and checking that eval_slide_node can
     /// resolve both the outer var and the iteration var.
     #[test]
-    fn test_bc_2_04_005_nested_for_outer_var_accessible() {
+    fn test_bc_1_04_005_nested_for_outer_var_accessible() {
         use slideforge_syntax::{FieldNode, FieldValue, TemplateChunk};
 
         // Outer env has `prefix = "slide"`.
@@ -567,7 +618,7 @@ mod tests {
     /// the inner binding shadows it inside the loop; after the loop the outer
     /// value is restored.
     #[test]
-    fn test_bc_2_04_006_nested_for_shadowing() {
+    fn test_bc_1_04_006_nested_for_shadowing() {
         use slideforge_syntax::{FieldNode, FieldValue, TemplateChunk};
 
         // Outer env has `x = 99`.
@@ -617,7 +668,7 @@ mod tests {
     /// BC-2.04.007: three nested `@for` loops — each level's binding is
     /// accessible within its body and the inner loops can access outer vars.
     #[test]
-    fn test_bc_2_04_007_for_three_levels_nesting() {
+    fn test_bc_1_04_007_for_three_levels_nesting() {
         // We construct a 3-level nesting by calling eval_for_block from within
         // a body that itself calls eval_for_block (simulating the recursive
         // eval_block_items dispatch). Since the function is stubbed, this test
@@ -666,7 +717,7 @@ mod tests {
     /// BC-2.04.008: when the generated slide count exceeds
     /// `large_deck_warn_threshold`, a Warning is pushed to the sink.
     #[test]
-    fn test_bc_2_04_008_large_collection_warning() {
+    fn test_bc_1_04_008_large_collection_warning() {
         let mut env = empty_env();
         let mut sink = slideforge_syntax::DiagnosticSink::new();
         // Use a low threshold so we can trigger it with a small list.
@@ -698,7 +749,7 @@ mod tests {
 
     /// BC-2.04.009: @for x in "not-a-list": → E-EVL-008 error, 0 slides.
     #[test]
-    fn test_bc_2_04_009_for_non_iterable_collection() {
+    fn test_bc_1_04_009_for_non_iterable_collection() {
         let mut env = empty_env();
         let mut sink = slideforge_syntax::DiagnosticSink::new();
         let config = default_config();
@@ -720,7 +771,7 @@ mod tests {
 
     /// BC-2.04.010: @for x in null_var: where null_var = Null → E-EVL-008.
     #[test]
-    fn test_bc_2_04_010_for_null_collection() {
+    fn test_bc_1_04_010_for_null_collection() {
         let mut env = env_with(&[("null_var", Value::Null)]);
         let mut sink = slideforge_syntax::DiagnosticSink::new();
         let config = default_config();
@@ -738,7 +789,7 @@ mod tests {
 
     /// BC-2.04.011: @for x in no_such_var: → E-EVL-001 error, 0 slides.
     #[test]
-    fn test_bc_2_04_011_for_undefined_collection_var() {
+    fn test_bc_1_04_011_for_undefined_collection_var() {
         let mut env = empty_env();
         let mut sink = slideforge_syntax::DiagnosticSink::new();
         let config = default_config();
@@ -760,7 +811,7 @@ mod tests {
     /// BC-2.04.012: when max_total_slides is Some(2) and the loop would generate
     /// 5 slides, evaluation stops and pushes E-EVL-007.
     #[test]
-    fn test_bc_2_04_012_for_max_slides_cap() {
+    fn test_bc_1_04_012_for_max_slides_cap() {
         let mut env = empty_env();
         let mut sink = slideforge_syntax::DiagnosticSink::new();
         let config = EvalConfig {
@@ -864,6 +915,155 @@ mod tests {
             slide.title_str(),
             Some("World"),
             "title must resolve the {{ name }} interpolation"
+        );
+        assert!(sink.is_empty(), "no errors expected");
+    }
+
+    // ─── I03: Map iteration tests ────────────────────────────────────────────
+
+    /// I03: @for item in map_var: should iterate over map entries, binding each
+    /// entry as a map with "key" and "value" fields.
+    #[test]
+    fn test_for_over_map() {
+        use slideforge_syntax::{FieldNode, FieldValue, TemplateChunk};
+        use slideforge_types::OrderedMap;
+
+        let mut map = OrderedMap::new();
+        map.insert(Arc::from("alpha"), Value::Int(1));
+        map.insert(Arc::from("beta"), Value::Int(2));
+
+        let mut env = env_with(&[("data", Value::Map(map))]);
+        let mut sink = slideforge_syntax::DiagnosticSink::new();
+        let config = default_config();
+
+        // Body: slide content: title "{{ item.key }}"
+        let title_field = FieldNode {
+            name: Spanned::new("title".to_string(), dummy_span()),
+            value: Spanned::new(
+                FieldValue::Template(vec![TemplateChunk::Expr(
+                    Expr::FieldAccess {
+                        base: Box::new(Expr::Ident("item".to_string())),
+                        field: "key".to_string(),
+                    },
+                )]),
+                dummy_span(),
+            ),
+        };
+        let slide_node = SlideNode {
+            kind: Spanned::new("content".to_string(), dummy_span()),
+            tags: vec![],
+            fields: vec![title_field],
+            inline_items: vec![],
+        };
+        let body = vec![BlockItem::Slide(Spanned::new(slide_node, dummy_span()))];
+        let collection = Expr::Ident("data".to_string());
+
+        let slides = eval_for_block(&mut env, "item", &collection, &body, &config, &mut sink);
+
+        // Map has 2 entries → 2 slides.
+        assert_eq!(slides.len(), 2, "@for over 2-entry map must produce 2 slides");
+        assert!(sink.is_empty(), "no errors expected for map iteration");
+
+        // Each slide title must be a key name ("alpha" or "beta").
+        let titles: Vec<&str> = slides
+            .iter()
+            .filter_map(|s| s.title_str())
+            .collect();
+        assert!(
+            titles.contains(&"alpha"),
+            "titles must contain 'alpha'; got: {titles:?}"
+        );
+        assert!(
+            titles.contains(&"beta"),
+            "titles must contain 'beta'; got: {titles:?}"
+        );
+    }
+
+    /// I03: @for item in map: — item.value is accessible.
+    #[test]
+    fn test_for_over_map_value_accessible() {
+        use slideforge_syntax::{FieldNode, FieldValue, TemplateChunk};
+        use slideforge_types::OrderedMap;
+
+        let mut map = OrderedMap::new();
+        map.insert(Arc::from("score"), Value::Int(42));
+
+        let mut env = env_with(&[("stats", Value::Map(map))]);
+        let mut sink = slideforge_syntax::DiagnosticSink::new();
+        let config = default_config();
+
+        // Body: slide content: title "{{ item.value }}"
+        let title_field = FieldNode {
+            name: Spanned::new("title".to_string(), dummy_span()),
+            value: Spanned::new(
+                FieldValue::Template(vec![TemplateChunk::Expr(
+                    Expr::FieldAccess {
+                        base: Box::new(Expr::Ident("item".to_string())),
+                        field: "value".to_string(),
+                    },
+                )]),
+                dummy_span(),
+            ),
+        };
+        let slide_node = SlideNode {
+            kind: Spanned::new("content".to_string(), dummy_span()),
+            tags: vec![],
+            fields: vec![title_field],
+            inline_items: vec![],
+        };
+        let body = vec![BlockItem::Slide(Spanned::new(slide_node, dummy_span()))];
+        let collection = Expr::Ident("stats".to_string());
+
+        let slides = eval_for_block(&mut env, "item", &collection, &body, &config, &mut sink);
+
+        assert_eq!(slides.len(), 1, "1-entry map must produce 1 slide");
+        assert!(sink.is_empty(), "no errors expected");
+        assert_eq!(
+            slides[0].title_str(),
+            Some("42"),
+            "item.value must resolve to 42"
+        );
+    }
+
+    // ─── I05: inline_items in slide body tests ────────────────────────────────
+
+    /// I05: A slide with inline @for items generates additional slides.
+    #[test]
+    fn test_slide_inline_for_generates_additional_slides() {
+
+        let mut env = empty_env();
+        let mut sink = slideforge_syntax::DiagnosticSink::new();
+        let config = default_config();
+
+        // Build a slide that has an inline @for block.
+        let inline_for = BlockItem::For(Spanned::new(
+            ForNode {
+                binding: Spanned::new("x".to_string(), dummy_span()),
+                collection: Spanned::new(
+                    Expr::List(vec![Expr::Num(1), Expr::Num(2)]),
+                    dummy_span(),
+                ),
+                body: vec![slide_block_item("content")],
+            },
+            dummy_span(),
+        ));
+
+        let slide_with_inline = SlideNode {
+            kind: Spanned::new("title".to_string(), dummy_span()),
+            tags: vec![],
+            fields: vec![],
+            inline_items: vec![inline_for],
+        };
+        let items = vec![BlockItem::Slide(Spanned::new(slide_with_inline, dummy_span()))];
+
+        let slides = eval_block_items(&mut env, &items, &config, &mut sink);
+
+        // 1 primary title slide + 2 slides from the inline @for = 3 total.
+        assert_eq!(
+            slides.len(),
+            3,
+            "1 primary slide + 2 inline-for slides = 3 total; got {}",
+            slides.len()
         );
         assert!(sink.is_empty(), "no errors expected");
     }

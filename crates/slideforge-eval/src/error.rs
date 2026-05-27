@@ -14,6 +14,7 @@
 //! | E-PAR-006 | `ReservedKeyword`    |
 //! | E-EVL-007 | `TooManySlides`      |
 //! | E-EVL-008 | `NotIterable`        |
+//! | E-EVL-009 | `LargeDeckWarning`   |
 
 use std::sync::Arc;
 
@@ -161,6 +162,30 @@ pub enum EvalError {
         /// The type name of the value that was not a list.
         value_type: Arc<str>,
         /// Source location of the collection expression.
+        span: SourceSpan,
+    },
+
+    /// E-EVL-009: The generated slide count exceeds the lint warning threshold.
+    ///
+    /// This is a **warning**, not an error — evaluation continues normally. It
+    /// is emitted when the deck produces more slides than
+    /// [`EvalConfig::large_deck_warn_threshold`](crate::EvalConfig).
+    ///
+    /// Distinguished from [`EvalError::TooManySlides`] (which is a hard error)
+    /// by using a friendlier message and `ParseSeverity::Warning` severity.
+    #[error("deck has {count} slides, which exceeds the recommended maximum of {threshold}")]
+    #[diagnostic(
+        code("E-EVL-009"),
+        help(
+            "Consider splitting the deck into multiple files, or increase large_deck_warn_threshold in EvalConfig"
+        )
+    )]
+    LargeDeckWarning {
+        /// The actual number of slides generated.
+        count: usize,
+        /// The warning threshold that was exceeded.
+        threshold: usize,
+        /// Source location of the deck or block that triggered the warning.
         span: SourceSpan,
     },
 }
@@ -365,5 +390,45 @@ mod tests {
             msg.contains("500"),
             "TooManySlides message must mention max; got: {msg}"
         );
+    }
+
+    /// I04: LargeDeckWarning is a distinct variant from TooManySlides.
+    ///
+    /// TooManySlides = hard error (cap exceeded), LargeDeckWarning = lint warning.
+    #[test]
+    fn test_i04_large_deck_warning_distinct_from_too_many_slides() {
+        use miette::Diagnostic;
+
+        let warn = EvalError::LargeDeckWarning {
+            count: 600,
+            threshold: 500,
+            span: test_span(),
+        };
+        let code = warn.code().unwrap().to_string();
+        assert_eq!(
+            code, "E-EVL-009",
+            "LargeDeckWarning must have code E-EVL-009"
+        );
+
+        let msg = format!("{warn}");
+        assert!(
+            msg.contains("600"),
+            "LargeDeckWarning message must mention count; got: {msg}"
+        );
+        assert!(
+            msg.contains("500"),
+            "LargeDeckWarning message must mention threshold; got: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_i04_large_deck_warning_constructible() {
+        let e = EvalError::LargeDeckWarning {
+            count: 600,
+            threshold: 500,
+            span: test_span(),
+        };
+        let msg = format!("{e}");
+        assert!(!msg.is_empty(), "LargeDeckWarning must produce a non-empty message");
     }
 }
