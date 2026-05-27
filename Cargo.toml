@@ -16,6 +16,7 @@ members = [
     "crates/slideforge-pptx",
     "crates/slideforge-validate",
     "crates/slideforge-data",
+    "crates/slideforge-brand",
 ]
 
 # Crates that exist as scaffolding but are not built yet (Phase 4+).
