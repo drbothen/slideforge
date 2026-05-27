@@ -556,7 +556,7 @@ fn test_bc_1_02_003_int_in_elif_condition_type_error() {
 // evaluation produces the wrong string (e.g. no "$" prefix).
 
 /// BC-1.02.004 postconditions 1/2/4 (AC-007): `${{ arr | currency }}` with
-/// `arr = 1000000` must evaluate to the string `"$1,000,000.00"`.
+/// `arr = 1000000` must evaluate to the string `"$1,000,000"`.
 ///
 /// The `${{` sequence is text-mode interpolation with a literal `$` prefix.
 /// Math mode is NOT activated. The `currency` filter formats the number; the
@@ -567,7 +567,7 @@ fn test_bc_1_02_003_int_in_elif_condition_type_error() {
 /// sequence and verifies the concatenated output. It FAILS because:
 /// 1. Without a `DollarInterp` chunk, there is no pipeline guarantee that `$`
 ///    is always prepended atomically.
-/// 2. The assertion checks the FULL spec-required string `"$1,000,000.00"`,
+/// 2. The assertion checks the FULL spec-required string `"$1,000,000"`,
 ///    which requires both the currency filter AND the `$` prefix to be correct.
 #[test]
 fn test_bc_1_02_004_dollar_interpolation_basic() {
@@ -589,11 +589,11 @@ fn test_bc_1_02_004_dollar_interpolation_basic() {
     let stat_field = FieldNode {
         name: Spanned::new("stat".to_string(), dummy_span()),
         value: Spanned::new(
-            // The spec requires "${{ arr | currency }}" to produce "$1,000,000.00".
+            // The spec requires "${{ arr | currency }}" to produce "$1,000,000".
             // Currently modelled as Literal("$") + Expr(arr | currency).
             // When DollarInterp is added, this should use:
             //   FieldValue::Template(vec![TemplateChunk::DollarInterp(arr_currency_expr)])
-            // For Red Gate, we assert the concatenation equals "$1,000,000.00".
+            // For Red Gate, we assert the concatenation equals "$1,000,000".
             FieldValue::Template(vec![
                 TemplateChunk::Literal("$".to_string()),
                 TemplateChunk::Expr(arr_currency_expr),
@@ -633,7 +633,7 @@ fn test_bc_1_02_004_dollar_interpolation_basic() {
     let deck = deck.expect("eval_deck must return Some");
     assert_eq!(deck.slides.len(), 1);
 
-    // The `stat` field must equal "$1,000,000.00" (dollar prefix + currency-formatted value).
+    // The `stat` field must equal "$1,000,000" (dollar prefix + currency-formatted value, no decimals for integer input).
     let stat_val = deck.slides[0].fields.get("stat");
     assert!(
         stat_val.is_some(),
