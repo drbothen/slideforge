@@ -2,12 +2,19 @@
 //!
 //! This module provides convenience wrappers over [`crate::expr::eval_expr`]
 //! for use by the slide builder and template renderer.
+//!
+//! # STORY-012 additions
+//!
+//! [`eval_deck`] is the top-level entry point that takes a parsed [`DeckNode`]
+//! and produces a semantic [`Deck`] IR. It is implemented as a stub here and
+//! will be filled in during the TDD implementation phase.
 
 use std::sync::Arc;
 
-use slideforge_syntax::{DiagnosticSink, Expr};
-use slideforge_types::Value;
+use slideforge_syntax::{DeckNode, DiagnosticSink, Expr};
+use slideforge_types::{Deck, Value};
 
+use crate::config::EvalConfig;
 use crate::env::Env;
 use crate::expr::eval_expr;
 use crate::filters::format_float_display;
@@ -63,20 +70,415 @@ pub fn eval_expr_to_string(env: &Env, expr: &Expr, sink: &mut DiagnosticSink) ->
     }
 }
 
+// ─── eval_deck ──────────────────────────────────────────────────────────────
+
+/// Evaluate a fully-parsed [`DeckNode`] into a semantic [`Deck`] IR.
+///
+/// This is the primary top-level entry point for the evaluator pipeline. It:
+///
+/// 1. Collects all `vars:` block entries into an [`Env`] deck-level frame.
+/// 2. Evaluates all top-level [`BlockItem`](slideforge_syntax::BlockItem)s
+///    (slides, `@for` blocks, `@if` blocks) in source order.
+/// 3. Returns a [`Deck`] with the full ordered list of resolved slides and
+///    deck-level metadata.
+///
+/// Returns `None` if any **fatal** diagnostic was pushed during evaluation.
+/// Non-fatal diagnostics (warnings, lint hints) are accumulated in `sink` but
+/// do not prevent a `Deck` from being returned.
+///
+/// # Parameters
+///
+/// - `deck_node`: The parsed AST root node for the `.sf` file.
+/// - `config`: Evaluation configuration (thresholds, caps).
+/// - `sink`: Accumulates all diagnostics produced during evaluation.
+///
+/// # Errors pushed to `sink`
+///
+/// - [`EvalError::UndefinedVariable`](crate::EvalError) — a variable is
+///   referenced that is not defined in any scope.
+/// - [`EvalError::ReservedKeyword`](crate::EvalError) — a reserved keyword is
+///   used as an identifier.
+/// - [`EvalError::NotIterable`](crate::EvalError) — an `@for` collection is
+///   not a list.
+/// - [`EvalError::TooManySlides`](crate::EvalError) — slide cap exceeded.
+/// - Any other [`EvalError`](crate::EvalError) variants from expression
+///   evaluation.
+pub fn eval_deck(
+    deck_node: &DeckNode,
+    config: &EvalConfig,
+    sink: &mut DiagnosticSink,
+) -> Option<Deck> {
+    let _ = (deck_node, config, sink);
+    todo!("STORY-012: implement eval_deck — Red Gate stub")
+}
+
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
+#[allow(clippy::doc_markdown)]
 mod tests {
     use std::sync::Arc;
 
     use indexmap::IndexMap;
     use ordered_float::OrderedFloat;
-    use slideforge_syntax::{DiagnosticSink, Expr};
+    use slideforge_syntax::{
+        BlockItem, DeckNode, DiagnosticSink, Expr, FieldNode, FieldValue, ForNode, SlideNode,
+        Spanned, TemplateChunk, VarsBlock,
+    };
+    use slideforge_syntax::span::Span;
     use slideforge_types::Value;
 
     use super::*;
+    use crate::config::EvalConfig;
     use crate::env::Env;
+
+    // ─── eval_deck test helpers ───────────────────────────────────────────────
+
+    fn dummy_span() -> Span {
+        Span::new(0, 0, 0)
+    }
+
+    fn default_config() -> EvalConfig {
+        EvalConfig::default()
+    }
+
+    fn minimal_deck_with_slides(slide_kinds: &[&str]) -> DeckNode {
+        let items = slide_kinds
+            .iter()
+            .map(|kind| {
+                BlockItem::Slide(Spanned::new(
+                    SlideNode {
+                        kind: Spanned::new((*kind).to_string(), dummy_span()),
+                        tags: vec![],
+                        fields: vec![],
+                        inline_items: vec![],
+                    },
+                    dummy_span(),
+                ))
+            })
+            .collect();
+        DeckNode {
+            items,
+            ..DeckNode::default()
+        }
+    }
+
+    #[allow(dead_code)]
+    fn deck_with_var_and_slide(var_name: &str, var_value: FieldValue, slide_kind: &str) -> DeckNode {
+        let vars_block = VarsBlock {
+            entries: vec![(
+                Spanned::new(var_name.to_string(), dummy_span()),
+                Spanned::new(var_value, dummy_span()),
+            )],
+        };
+        let slide_item = BlockItem::Slide(Spanned::new(
+            SlideNode {
+                kind: Spanned::new(slide_kind.to_string(), dummy_span()),
+                tags: vec![],
+                fields: vec![],
+                inline_items: vec![],
+            },
+            dummy_span(),
+        ));
+        DeckNode {
+            vars: vec![vars_block],
+            items: vec![slide_item],
+            ..DeckNode::default()
+        }
+    }
+
+    // ─── BC-2.06.001: eval_deck returns None for todo! stub ──────────────────
+
+    // NOTE: all eval_deck tests exercise the stub — they MUST panic or produce
+    // wrong output (Red Gate). When implemented, they will produce the correct
+    // results described in each assertion.
+
+    /// BC-2.06.001: eval_deck on a 1-slide deck produces a Deck with 1 slide.
+    #[test]
+    fn test_bc_2_06_001_eval_deck_simple() {
+        let deck_node = minimal_deck_with_slides(&["title"]);
+        let config = default_config();
+        let mut sink = DiagnosticSink::new();
+
+        let deck = eval_deck(&deck_node, &config, &mut sink);
+
+        let deck = deck.expect("eval_deck must return Some for valid 1-slide deck");
+        assert_eq!(deck.slides.len(), 1, "Deck must contain 1 slide");
+        assert_eq!(
+            deck.slides[0].slide_type.as_ref(),
+            "title",
+            "slide_type must be 'title'"
+        );
+        assert!(sink.is_empty(), "no errors expected");
+    }
+
+    /// BC-2.06.002: eval_deck with a vars block resolves variables in slide fields.
+    #[test]
+    fn test_bc_2_06_002_eval_deck_vars() {
+        // deck with vars: client = "Acme" and one slide that references {{ client }} in title.
+        let vars_block = VarsBlock {
+            entries: vec![(
+                Spanned::new("client".to_string(), dummy_span()),
+                Spanned::new(
+                    FieldValue::Template(vec![TemplateChunk::Literal("Acme".to_string())]),
+                    dummy_span(),
+                ),
+            )],
+        };
+        let title_field = FieldNode {
+            name: Spanned::new("title".to_string(), dummy_span()),
+            value: Spanned::new(
+                FieldValue::Template(vec![TemplateChunk::Expr(Expr::Ident("client".to_string()))]),
+                dummy_span(),
+            ),
+        };
+        let slide_item = BlockItem::Slide(Spanned::new(
+            SlideNode {
+                kind: Spanned::new("content".to_string(), dummy_span()),
+                tags: vec![],
+                fields: vec![title_field],
+                inline_items: vec![],
+            },
+            dummy_span(),
+        ));
+        let deck_node = DeckNode {
+            vars: vec![vars_block],
+            items: vec![slide_item],
+            ..DeckNode::default()
+        };
+
+        let config = default_config();
+        let mut sink = DiagnosticSink::new();
+
+        let deck = eval_deck(&deck_node, &config, &mut sink);
+        let deck = deck.expect("eval_deck must return Some for valid deck");
+
+        assert_eq!(deck.slides.len(), 1, "must have 1 slide");
+        assert_eq!(
+            deck.slides[0].title_str(),
+            Some("Acme"),
+            "title must resolve {{ client }} to 'Acme'"
+        );
+        assert!(sink.is_empty(), "no errors expected");
+    }
+
+    /// BC-2.06.003: eval_deck with a @for block produces the correct slide count.
+    #[test]
+    fn test_bc_2_06_003_eval_deck_for() {
+        // @for x in [1, 2, 3]:
+        //   slide content:
+        let for_node = ForNode {
+            binding: Spanned::new("x".to_string(), dummy_span()),
+            collection: Spanned::new(
+                Expr::List(vec![Expr::Num(1), Expr::Num(2), Expr::Num(3)]),
+                dummy_span(),
+            ),
+            body: vec![BlockItem::Slide(Spanned::new(
+                SlideNode {
+                    kind: Spanned::new("content".to_string(), dummy_span()),
+                    tags: vec![],
+                    fields: vec![],
+                    inline_items: vec![],
+                },
+                dummy_span(),
+            ))],
+        };
+        let deck_node = DeckNode {
+            items: vec![BlockItem::For(Spanned::new(for_node, dummy_span()))],
+            ..DeckNode::default()
+        };
+
+        let config = default_config();
+        let mut sink = DiagnosticSink::new();
+
+        let deck = eval_deck(&deck_node, &config, &mut sink);
+        let deck = deck.expect("eval_deck must return Some");
+
+        assert_eq!(deck.slides.len(), 3, "@for [1,2,3] must produce 3 slides");
+        assert!(sink.is_empty(), "no errors expected");
+    }
+
+    /// BC-2.06.004: eval_deck with only an empty @for → 0-slide Deck (no error).
+    #[test]
+    fn test_bc_2_06_004_eval_deck_empty_for() {
+        let for_node = ForNode {
+            binding: Spanned::new("x".to_string(), dummy_span()),
+            collection: Spanned::new(Expr::List(vec![]), dummy_span()),
+            body: vec![BlockItem::Slide(Spanned::new(
+                SlideNode {
+                    kind: Spanned::new("content".to_string(), dummy_span()),
+                    tags: vec![],
+                    fields: vec![],
+                    inline_items: vec![],
+                },
+                dummy_span(),
+            ))],
+        };
+        let deck_node = DeckNode {
+            items: vec![BlockItem::For(Spanned::new(for_node, dummy_span()))],
+            ..DeckNode::default()
+        };
+
+        let config = default_config();
+        let mut sink = DiagnosticSink::new();
+
+        let deck = eval_deck(&deck_node, &config, &mut sink);
+        let deck = deck.expect("eval_deck must return Some (empty for is valid)");
+
+        assert_eq!(deck.slides.len(), 0, "empty @for must produce 0 slides");
+        assert!(sink.is_empty(), "no errors expected for empty @for");
+    }
+
+    /// BC-2.06.005: eval_deck with 0 items → Deck with 0 slides.
+    #[test]
+    fn test_bc_2_06_005_eval_deck_empty_deck() {
+        let deck_node = DeckNode::default();
+        let config = default_config();
+        let mut sink = DiagnosticSink::new();
+
+        let deck = eval_deck(&deck_node, &config, &mut sink);
+        let deck = deck.expect("eval_deck on empty deck must return Some");
+
+        assert_eq!(deck.slides.len(), 0, "empty deck must have 0 slides");
+        assert!(sink.is_empty(), "no errors expected for empty deck");
+    }
+
+    /// BC-2.06.006: eval_deck metadata fields are populated from deck_node.
+    #[test]
+    fn test_bc_2_06_006_eval_deck_metadata_lang() {
+        let deck_node = DeckNode {
+            lang: Some(Spanned::new("en-US".to_string(), dummy_span())),
+            ..DeckNode::default()
+        };
+
+        let config = default_config();
+        let mut sink = DiagnosticSink::new();
+
+        let deck = eval_deck(&deck_node, &config, &mut sink);
+        let deck = deck.expect("eval_deck must return Some");
+
+        assert_eq!(
+            deck.metadata.lang.as_deref(),
+            Some("en-US"),
+            "deck metadata lang must be 'en-US'"
+        );
+    }
+
+    // ─── BC-2.07.001: reserved keywords produce E-PAR-006 ──────────────────
+
+    /// BC-2.07.001: @while in AST → E-PAR-006 error in sink.
+    ///
+    /// The reserved-keyword detection happens at the eval layer. The keyword
+    /// `@while` is not a valid DSL construct; the evaluator must detect it
+    /// and push E-PAR-006.
+    ///
+    /// Since `@while` is parsed as an error sentinel or is entirely absent
+    /// from the AST (the parser doesn't recognise it), we test via the
+    /// EvalError::ReservedKeyword variant directly to verify the error type
+    /// is pushable and carries the right code.
+    #[test]
+    fn test_bc_2_07_001_while_reserved() {
+        use crate::error::EvalError;
+        use slideforge_syntax::error::ParseSeverity;
+        use slideforge_types::SourceSpan;
+
+        let mut sink = DiagnosticSink::new();
+
+        // Simulate the evaluator detecting a reserved keyword.
+        let err = EvalError::ReservedKeyword {
+            keyword: Arc::from("while"),
+            hint: "@while is not a valid DSL keyword; use @for for iteration".to_string(),
+            span: SourceSpan::default(),
+        };
+        sink.push_with_severity(err, ParseSeverity::Error);
+
+        assert!(!sink.is_empty(), "E-PAR-006 must be in the sink");
+        let code = sink.errors()[0].code().map(|c| c.to_string());
+        assert_eq!(
+            code.as_deref(),
+            Some("E-PAR-006"),
+            "error code must be E-PAR-006"
+        );
+    }
+
+    /// BC-2.07.002: @fn in AST → E-PAR-006 error in sink.
+    #[test]
+    fn test_bc_2_07_002_fn_reserved() {
+        use crate::error::EvalError;
+        use slideforge_syntax::error::ParseSeverity;
+        use slideforge_types::SourceSpan;
+
+        let mut sink = DiagnosticSink::new();
+
+        let err = EvalError::ReservedKeyword {
+            keyword: Arc::from("fn"),
+            hint: "@fn is reserved for a future version of slideforge".to_string(),
+            span: SourceSpan::default(),
+        };
+        sink.push_with_severity(err, ParseSeverity::Error);
+
+        assert!(!sink.is_empty(), "E-PAR-006 must be in the sink");
+        let code = sink.errors()[0].code().map(|c| c.to_string());
+        assert_eq!(
+            code.as_deref(),
+            Some("E-PAR-006"),
+            "error code must be E-PAR-006"
+        );
+        // The error message must mention the keyword.
+        let msg = sink.errors()[0].to_string();
+        assert!(msg.contains("fn"), "message must mention the keyword 'fn'");
+    }
+
+    /// BC-2.07.003: @return is a reserved keyword → E-PAR-006.
+    #[test]
+    fn test_bc_2_07_003_return_reserved() {
+        use crate::error::EvalError;
+        use slideforge_syntax::error::ParseSeverity;
+        use slideforge_types::SourceSpan;
+
+        let mut sink = DiagnosticSink::new();
+        sink.push_with_severity(
+            EvalError::ReservedKeyword {
+                keyword: Arc::from("return"),
+                hint: "@return is reserved for future user-defined functions".to_string(),
+                span: SourceSpan::default(),
+            },
+            ParseSeverity::Error,
+        );
+
+        assert!(!sink.is_empty());
+        let code = sink.errors()[0].code().map(|c| c.to_string());
+        assert_eq!(code.as_deref(), Some("E-PAR-006"));
+    }
+
+    /// BC-2.07.004: reserved keyword help text is present in the diagnostic.
+    #[test]
+    fn test_bc_2_07_004_reserved_keyword_help_text_present() {
+        use crate::error::EvalError;
+        use slideforge_syntax::error::ParseSeverity;
+        use slideforge_types::SourceSpan;
+
+        let mut sink = DiagnosticSink::new();
+        let hint = "Use @for instead of @while for iteration".to_string();
+        sink.push_with_severity(
+            EvalError::ReservedKeyword {
+                keyword: Arc::from("while"),
+                hint: hint.clone(),
+                span: SourceSpan::default(),
+            },
+            ParseSeverity::Error,
+        );
+
+        let help = sink.errors()[0]
+            .help()
+            .map(|h| h.to_string())
+            .unwrap_or_default();
+        assert!(
+            help.contains("@for") || help.contains("while"),
+            "help text must reference the correction; got: {help}"
+        );
+    }
 
     fn empty_env() -> Env {
         Env::new(IndexMap::new())

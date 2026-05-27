@@ -1,18 +1,20 @@
 //! `slideforge-eval` — expression evaluator and variable environment for the
 //! slideforge DSL.
 //!
-//! This crate implements Phase 3 STORY-011 (Expression Evaluator Core). It
-//! evaluates [`slideforge_syntax::Expr`] AST nodes in a scoped variable
-//! [`Env`], applying built-in filters via the `|` pipe operator, and
-//! accumulates all errors into a [`slideforge_syntax::DiagnosticSink`] without
-//! short-circuiting.
+//! This crate implements Phase 3 STORY-011 (Expression Evaluator Core) and
+//! STORY-012 (Variable Scoping + `@for` Evaluation). It evaluates
+//! [`slideforge_syntax::Expr`] AST nodes in a scoped variable [`Env`],
+//! evaluates `@for` blocks into sequences of [`slideforge_types::Slide`]s,
+//! and aggregates a complete parsed [`slideforge_syntax::DeckNode`] into a
+//! semantic [`slideforge_types::Deck`] IR. All errors are accumulated into a
+//! [`slideforge_syntax::DiagnosticSink`] without short-circuiting.
 //!
 //! # Pipeline position
 //!
 //! ```text
 //! .sf source
 //!   → slideforge-syntax::lex / parse → DeckNode (AST)
-//!   → slideforge-eval::eval_expr     → Value   (evaluated)
+//!   → slideforge-eval::eval_deck     → Deck     (semantic IR)
 //!   → slideforge-layout              → LaidOutDeck
 //!   → exporters (pptx / pdf / html)
 //! ```
@@ -34,16 +36,20 @@
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 
+pub mod config;
 pub mod env;
 pub mod error;
 pub mod eval;
 pub mod expr;
 pub mod filters;
+pub mod for_eval;
 
 // ─── Public API re-exports ───────────────────────────────────────────────────
 
+pub use config::EvalConfig;
 pub use env::Env;
 pub use error::EvalError;
-pub use eval::eval_expr_to_string;
+pub use eval::{eval_deck, eval_expr_to_string};
 pub use expr::eval_expr;
 pub use filters::{AVAILABLE_FILTERS, apply_filter};
+pub use for_eval::{eval_block_items, eval_for_block, eval_slide_node};

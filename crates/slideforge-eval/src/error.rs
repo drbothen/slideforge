@@ -11,6 +11,9 @@
 //! | E-EVL-003 | `TypeMismatch`       |
 //! | E-EVL-004 | `FilterNotFound`     |
 //! | E-DAT-005 | `FieldAccessFailed`  |
+//! | E-PAR-006 | `ReservedKeyword`    |
+//! | E-EVL-007 | `TooManySlides`      |
+//! | E-EVL-008 | `NotIterable`        |
 
 use std::sync::Arc;
 
@@ -97,6 +100,67 @@ pub enum EvalError {
         /// The type of the value on which field access was attempted.
         parent_type: Arc<str>,
         /// Source location of the field access expression.
+        span: SourceSpan,
+    },
+
+    /// E-PAR-006: A reserved DSL keyword was used where a user-defined
+    /// identifier is expected.
+    ///
+    /// Keywords such as `@while`, `@fn`, `@return`, `@class`, and `@import`
+    /// are reserved for future DSL versions (Q1 decision). Using them in the
+    /// current DSL produces this error.
+    ///
+    /// `hint` carries a correction suggestion (e.g., "Use @for instead of @while").
+    #[error("reserved keyword `{keyword}` used at {span}")]
+    #[diagnostic(
+        code("E-PAR-006"),
+        help("{hint}")
+    )]
+    ReservedKeyword {
+        /// The reserved keyword that was encountered.
+        keyword: Arc<str>,
+        /// A human-readable correction hint.
+        hint: String,
+        /// Source location of the reserved keyword.
+        span: SourceSpan,
+    },
+
+    /// E-EVL-007: The `@for` loop (or the overall deck) would produce more
+    /// slides than the configured
+    /// [`EvalConfig::max_total_slides`](crate::EvalConfig) hard cap.
+    ///
+    /// This error is only produced when `max_total_slides` is `Some(n)` and
+    /// the limit is exceeded. It is NOT produced when the limit is `None`.
+    #[error("slide count {count} exceeds the configured maximum of {max} at {span}")]
+    #[diagnostic(
+        code("E-EVL-007"),
+        help("Reduce the collection size, or increase max_total_slides in EvalConfig")
+    )]
+    TooManySlides {
+        /// The number of slides that would have been produced.
+        count: usize,
+        /// The configured maximum.
+        max: usize,
+        /// Source location of the `@for` expression or deck node that triggered the cap.
+        span: SourceSpan,
+    },
+
+    /// E-EVL-008: The expression in `@for x in <expr>` evaluated to a value
+    /// that is not iterable (i.e., not a [`Value::List`](slideforge_types::Value)).
+    ///
+    /// Per BC-2.04.001: only `List` values are iterable. Scalars, maps, and
+    /// null are rejected with this error.
+    #[error("cannot iterate over `{value_type}` value at {span}: @for requires a list")]
+    #[diagnostic(
+        code("E-EVL-008"),
+        help(
+            "Wrap the value in a list literal `[{value_type}]` or ensure the variable holds a list"
+        )
+    )]
+    NotIterable {
+        /// The type name of the value that was not a list.
+        value_type: Arc<str>,
+        /// Source location of the collection expression.
         span: SourceSpan,
     },
 }
@@ -223,6 +287,83 @@ mod tests {
         assert_eq!(
             code, "E-DAT-005",
             "FieldAccessFailed must have code E-DAT-005"
+        );
+
+        let e_par006 = EvalError::ReservedKeyword {
+            keyword: Arc::from("while"),
+            hint: "Use @for instead".to_string(),
+            span: test_span(),
+        };
+        let code = e_par006.code().unwrap().to_string();
+        assert_eq!(
+            code, "E-PAR-006",
+            "ReservedKeyword must have code E-PAR-006"
+        );
+
+        let e_evl007 = EvalError::TooManySlides {
+            count: 1001,
+            max: 1000,
+            span: test_span(),
+        };
+        let code = e_evl007.code().unwrap().to_string();
+        assert_eq!(
+            code, "E-EVL-007",
+            "TooManySlides must have code E-EVL-007"
+        );
+
+        let e_evl008 = EvalError::NotIterable {
+            value_type: Arc::from("string"),
+            span: test_span(),
+        };
+        let code = e_evl008.code().unwrap().to_string();
+        assert_eq!(
+            code, "E-EVL-008",
+            "NotIterable must have code E-EVL-008"
+        );
+    }
+
+    #[test]
+    fn test_bc_2_12_001_reserved_keyword_message_contains_keyword() {
+        let e = EvalError::ReservedKeyword {
+            keyword: Arc::from("while"),
+            hint: "Use @for instead of @while".to_string(),
+            span: test_span(),
+        };
+        let msg = format!("{e}");
+        assert!(
+            msg.contains("while"),
+            "ReservedKeyword message must mention the keyword; got: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_bc_2_12_001_not_iterable_message_contains_type() {
+        let e = EvalError::NotIterable {
+            value_type: Arc::from("string"),
+            span: test_span(),
+        };
+        let msg = format!("{e}");
+        assert!(
+            msg.contains("string"),
+            "NotIterable message must mention the type name; got: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_bc_2_12_001_too_many_slides_message_contains_counts() {
+        let e = EvalError::TooManySlides {
+            count: 999,
+            max: 500,
+            span: test_span(),
+        };
+        let msg = format!("{e}");
+        assert!(
+            msg.contains("999"),
+            "TooManySlides message must mention count; got: {msg}"
+        );
+        assert!(
+            msg.contains("500"),
+            "TooManySlides message must mention max; got: {msg}"
         );
     }
 }
