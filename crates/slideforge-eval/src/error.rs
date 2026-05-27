@@ -10,6 +10,7 @@
 //! | E-EVL-002 | (reserved — math context undefined) |
 //! | E-EVL-003 | `TypeMismatch`       |
 //! | E-EVL-004 | `FilterNotFound`     |
+//! | E-PAR-004 | `IncludeCycle`       |
 //! | E-DAT-005 | `FieldAccessFailed`  |
 //! | E-PAR-006 | `ReservedKeyword`    |
 //! | E-EVL-007 | `TooManySlides`      |
@@ -383,6 +384,13 @@ mod tests {
         };
         let code = e_evl008.code().unwrap().to_string();
         assert_eq!(code, "E-EVL-008", "NotIterable must have code E-EVL-008");
+
+        let e_par004 = EvalError::IncludeCycle {
+            cycle_path: vec![Arc::from("a.sf"), Arc::from("b.sf"), Arc::from("a.sf")],
+            span: test_span(),
+        };
+        let code = e_par004.code().unwrap().to_string();
+        assert_eq!(code, "E-PAR-004", "IncludeCycle must have code E-PAR-004");
     }
 
     #[test]

@@ -571,6 +571,12 @@ mod tests {
             code, "E-EVL-003",
             "error code must be E-EVL-003; got: {code}"
         );
+        // Verify the message mentions the type name so the user knows what went wrong.
+        let msg = sink.errors()[0].to_string();
+        assert!(
+            msg.contains("Str") || msg.contains("string"),
+            "E-EVL-003 message for String condition must mention the type name ('Str' or 'string'); got: {msg}"
+        );
     }
 
     // ─── BC-1.05.002 postcondition 2: Int condition → E-EVL-003 ─────────────
@@ -612,6 +618,12 @@ mod tests {
         assert_eq!(
             code, "E-EVL-003",
             "error code must be E-EVL-003 for Int condition; got: {code}"
+        );
+        // Verify the message mentions the type name so the user knows what went wrong.
+        let msg = sink.errors()[0].to_string();
+        assert!(
+            msg.contains("Int") || msg.contains("int"),
+            "E-EVL-003 message for Int condition must mention the type name ('Int' or 'int'); got: {msg}"
         );
     }
 
