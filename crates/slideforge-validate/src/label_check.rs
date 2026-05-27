@@ -128,6 +128,14 @@ impl Validator for LabelCheckValidator {
 }
 
 /// Construct an `E-A11-002` error diagnostic for a missing or blank label.
+///
+/// # BC-5.01.003 postcondition 1 — identifier token
+///
+/// The BC postcondition specifies `<identifier>` in the error message, but the
+/// `Slide` IR has no identifier field — only `slide_type` and `source_span`.
+/// Story spec AC-001 adapted the message to use `slide_type` in place of
+/// `<identifier>`. This matches the available IR data; no information is lost
+/// because `slide_type` is the primary identifier for a color-coded slide.
 fn make_missing_label_error(slide_type: &str, span: &SourceSpan) -> Diagnostic {
     Diagnostic {
         severity: DiagnosticSeverity::Error,
