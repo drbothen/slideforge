@@ -41,7 +41,7 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. It generates branded .p
 **Workspace:** /Users/jmagady/Dev/slideforge
 **Factory worktree:** .factory/ on branch `factory-artifacts`
 
-## Current Status: Phase 3 IN PROGRESS — Wave 1 COMPLETE. Wave 2 Batches 1+2 MERGED (4/7 stories). Batch 3 next (STORY-013 + STORY-014 + STORY-017).
+## Current Status: Phase 3 IN PROGRESS — Wave 1 COMPLETE (14/14, gate PASSED). Wave 2 IN PROGRESS: 4/7 stories MERGED. Batch 3 next (STORY-013 + STORY-014 + STORY-017).
 
 Phase 2 Story Decomposition: COMPLETE and APPROVED (2026-05-25).
 - 71 stories decomposed from 112 BCs across 21 epics, 6 waves, 437 total points
@@ -53,27 +53,42 @@ Phase 1 Spec Crystallization: COMPLETE and APPROVED (2026-05-25).
 - 17 adversarial passes, 69 findings fixed, 3 consecutive clean passes
 - Convergence trajectory archived: .factory/cycles/v0.1.0-phase-1-spec/convergence-trajectory.md
 
-## What to Do Next (Phase 3 — Wave 2)
+## What to Do Next (Phase 3 — Wave 2 Batch 3)
 
 ### Immediate first action
 
-Wave 1 is COMPLETE (14/14 stories, gate PASSED). Start Wave 2 delivery.
+Wave 2 has 3 remaining stories (Batch 3). All dependencies are satisfied. Start delivery.
 
-The per-story delivery flow is:
-1. test-writer: stubs + failing tests (Red Gate)
-2. implementer: TDD (make tests pass)
-3. adversary: 3 consecutive clean passes (BC-5.39.001)
-4. push → PR → CI (12 checks) → squash-merge to develop → state update
+**Batch 3 stories (all can run in parallel):**
 
-### Wave 2 Stories
+| Story | Title | Crate | Points | Deps (all met) |
+|-------|-------|-------|--------|----------------|
+| STORY-013 | @if/@elif/@else Evaluation + @include Cycle Detection | slideforge-eval | 5 | STORY-012 ✅ |
+| STORY-014 | Type System: No Implicit Coercion + ${{ seq }} Disambiguation | slideforge-eval | 5 | STORY-011 ✅, STORY-012 ✅ |
+| STORY-017 | Color-Coded Label + WCAG Contrast Enforcement | slideforge-validate | 5 | STORY-016 ✅ |
 
-Check `.factory/stories/wave-schedule.md` for the Wave 2 story list. Wave 2 stories build
-the evaluator, data binding, and expression evaluation on top of the parser (Wave 1).
+Story specs:
+- `/Users/jmagady/Dev/slideforge/.factory/stories/stories/STORY-013-if-elif-include-cycle.md`
+- `/Users/jmagady/Dev/slideforge/.factory/stories/stories/STORY-014-no-implicit-coercion.md`
+- `/Users/jmagady/Dev/slideforge/.factory/stories/stories/STORY-017-wcag-contrast-label.md`
 
-All Wave 2 stories have their specs in `.factory/stories/stories/STORY-NNN-*.md`.
-Dependencies are tracked in `.factory/stories/dependency-graph.md`.
+### Per-story delivery flow
 
-### Key inputs for continuing Phase 3
+1. Create worktree: `git worktree add .worktrees/STORY-NNN -b feature/S-NNN develop`
+2. test-writer: stubs + failing tests (Red Gate)
+3. implementer: TDD (make tests pass)
+4. adversary: 3 consecutive clean passes (BC-5.39.001)
+5. push → PR → CI (17 checks) → squash-merge to develop → state update
+6. Clean up worktree
+
+### After Batch 3: Wave 2 Gate
+
+Once all 7 Wave 2 stories are merged, run the wave gate:
+- Full `cargo test --workspace` on develop
+- Adversarial wave-gate review (3-CLEAN required)
+- Verify no regressions in Wave 1 tests
+
+### Key inputs
 
 | Input | Location |
 |-------|----------|
@@ -88,18 +103,15 @@ Dependencies are tracked in `.factory/stories/dependency-graph.md`.
 ### develop branch state
 
 The `develop` branch is at commit `6022075e` with 17 merged PRs.
-Local develop MUST be synced: `git fetch origin develop && git branch -f develop origin/develop`
-(The local develop branch may be stale if the session was interrupted.)
+Sync before starting: `git fetch origin develop && git pull origin develop`
 
-### Phase 3 full sequence
+### Worktree state
 
-| Step | Agent | Output | Depends on |
-|------|-------|--------|-----------|
-| Per-story | test-writer → implementer → adversary → pr-manager | Merged story branches | Story file + deps complete |
-| Wave gate | wave-gate adversarial review | Integration validation | All stories in wave merged |
-| Repeat | Next wave | Until Wave 5 (Wave 6 is Phase 6) | Prior wave gate PASS |
+No active worktrees. Clean state — create fresh worktrees for Batch 3 stories.
 
-Cumulative: ~28,000+ lines, 644+ tests, 13 PRs on develop (11 story + 2 gate fixes).
+### Open PRs
+
+None. All previous PRs merged.
 
 ## Phase Progress
 
@@ -110,7 +122,7 @@ Cumulative: ~28,000+ lines, 644+ tests, 13 PRs on develop (11 story + 2 gate fix
 | Planning (25 DSL decisions) | DONE 2026-05-24 | q1–q25 decision docs + 14 research threads |
 | Phase 1: Spec Crystallization | DONE — APPROVED 2026-05-25 | PRD (109 BCs, 15 HS, 4 supplements) + architecture (14 ADRs, 15 VPs, 20 crates) + UX spec (10 screens, 5 flows) + L2 domain spec (12 files) |
 | Phase 2: Story Decomposition | DONE — APPROVED 2026-05-25 | 71 stories, 21 epics, 6 waves, 437 pts. 22 adversarial passes, 3/3 clean. |
-| Phase 3: TDD Implementation | IN PROGRESS — Wave 1: COMPLETE + GATE PASSED. Wave 2 next. | Per-story delivery |
+| Phase 3: TDD Implementation | IN PROGRESS — Wave 1: COMPLETE + GATE PASSED. Wave 2: 4/7 merged (Batch 3 remaining). | Per-story delivery |
 | Phase 4: Holdout Evaluation | NOT STARTED | Per-wave holdout gates |
 | Phase 5: Adversarial Refinement | NOT STARTED | Post-implementation cascade |
 | Phase 6: Formal Hardening | NOT STARTED | Kani + fuzz + mutants + semgrep |
@@ -144,6 +156,33 @@ Cumulative: ~28,000+ lines, 644+ tests, 13 PRs on develop (11 story + 2 gate fix
 | P2-03 | adversary | DONE — CONVERGED | 22 passes, 96+ findings fixed, 3/3 clean (passes 20-21-22) |
 | P2-04 | state-manager | DONE | This commit |
 | P2-05 | HUMAN | APPROVED 2026-05-25 | Phase 3 authorized |
+
+## Wave 2 Story Status (IN PROGRESS — 4/7 merged)
+
+| Story | Title | Crate | Tests | Adversary | PR | Status |
+|-------|-------|-------|-------|-----------|-----|--------|
+| STORY-011 | Expression Evaluator Core | slideforge-eval | 75 | 5 passes (5→1→0→0→0), 3/3 clean | #14 | ✅ MERGED (8c0f4915) |
+| STORY-012 | @for Evaluation + Scoping + Set-Rules + Variants | slideforge-eval | 124 | 6 passes (8→6→4→0→0→0), 3/3 clean | #16 | ✅ MERGED (5eaa81b2) |
+| STORY-013 | @if/@elif/@else + @include Cycle Detection | slideforge-eval | — | — | — | 🔲 NOT STARTED |
+| STORY-014 | Type System: No Implicit Coercion | slideforge-eval | — | — | — | 🔲 NOT STARTED |
+| STORY-015 | Alt Text Enforcement | slideforge-validate | 38 | 6 passes (9→2→1→0→0→0), 3/3 clean | #15 | ✅ MERGED (5d043eff) |
+| STORY-016 | Canvas Overflow + Zero-Slide + Validation Mode | slideforge-validate | 84 | 5 passes (10→3→0→0→0), 3/3 clean | #17 | ✅ MERGED (6022075e) |
+| STORY-017 | Color-Coded Label + WCAG Contrast | slideforge-validate | — | — | — | 🔲 NOT STARTED |
+
+**Wave 2 dependency chains:**
+- Chain A (eval): 011 → 012 → 013 (sequential); 014 depends on 011+012
+- Chain B (validate): 015 → 016 → 017 (sequential)
+- Batch 3 = {013, 014, 017} — all deps satisfied, all can run in parallel
+
+## Phase 3 full sequence
+
+| Step | Agent | Output | Depends on |
+|------|-------|--------|-----------|
+| Per-story | test-writer → implementer → adversary → pr-manager | Merged story branches | Story file + deps complete |
+| Wave gate | wave-gate adversarial review | Integration validation | All stories in wave merged |
+| Repeat | Next wave | Until Wave 5 (Wave 6 is Phase 6) | Prior wave gate PASS |
+
+Cumulative: ~34,000+ lines, 965+ tests, 17 PRs on develop (15 story + 2 gate fixes).
 
 ## Decisions Log (milestones only — full log in cycles/v0.1.0-phase-1-spec/decisions-log.md)
 
