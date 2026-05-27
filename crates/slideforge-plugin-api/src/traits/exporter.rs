@@ -5,7 +5,8 @@
 //! target format (e.g., `.pptx`, `.docx`, `.pdf`, `.html`). Built-in exporters
 //! cover all five v1.0 output formats. External plugins can add more.
 
-use slideforge_types::{Brand, Deck, LaidOutDeck};
+use slideforge_layout::LaidOutDeck;
+use slideforge_types::{Brand, Deck};
 use thiserror::Error;
 
 /// Options that control [`Exporter::export`] behavior.
@@ -77,7 +78,8 @@ pub enum ExportError {
 ///
 /// ```rust
 /// use slideforge_plugin_api::{Exporter, ExportError, ExportOptions};
-/// use slideforge_types::{Brand, Deck, LaidOutDeck};
+/// use slideforge_layout::LaidOutDeck;
+/// use slideforge_types::{Brand, Deck};
 ///
 /// struct NullExporter;
 ///

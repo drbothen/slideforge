@@ -5,7 +5,8 @@
 
 use std::sync::Arc;
 
-use slideforge_types::{Brand, LaidOutSlide, SLIDE_HEIGHT, SLIDE_WIDTH, Slide};
+use slideforge_layout::LaidOutSlide;
+use slideforge_types::{Brand, Slide};
 
 use crate::traits::{Canvas, FieldDef, LayoutError, SlideType};
 
@@ -80,16 +81,17 @@ impl SlideType for TwoColSlideType {
 
     fn lay_out(
         &self,
-        _slide: &Slide,
+        slide: &Slide,
         _brand: &Brand,
         _canvas: Canvas,
     ) -> Result<LaidOutSlide, LayoutError> {
         // Stub: returns an empty LaidOutSlide. Full geometric layout in Phase 3.
         Ok(LaidOutSlide {
-            width: SLIDE_WIDTH,
-            height: SLIDE_HEIGHT,
-            elements: vec![],
-            slide_index: 0,
+            source_index: 0,
+            slide_type_keyword: std::sync::Arc::clone(&slide.slide_type),
+            frames: vec![],
+            speaker_notes: None,
+            register_tags: vec![],
         })
     }
 }

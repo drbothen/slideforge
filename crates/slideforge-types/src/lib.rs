@@ -8,10 +8,10 @@
 //! The slideforge pipeline produces two intermediate representations:
 //!
 //! - [`Deck`] — semantic, pre-layout representation of slide content
-//! - [`LaidOutDeck`] — geometric, post-layout representation with positioned shapes
+//! - `LaidOutDeck` (in `slideforge-layout`) — geometric, post-layout representation with positioned shapes
 //!
 //! Exporters consume both: PPTX needs semantic info for placeholders;
-//! PDF/HTML operate off [`LaidOutDeck`].
+//! PDF/HTML operate off `LaidOutDeck`.
 //!
 //! ## Design Invariants
 //!
@@ -50,9 +50,7 @@ pub mod value;
 // Re-export the most commonly used types at the crate root for ergonomics.
 pub use block::{Block, BulletItem, ContentBlock, TextBlock};
 pub use brand::{Brand, BrandFonts, BrandPalette, LayoutDefinition};
-pub use deck::{
-    Deck, DeckMetadata, LaidOutContent, LaidOutDeck, LaidOutElement, LaidOutSlide, SemanticRole,
-};
+pub use deck::{Deck, DeckMetadata};
 pub use emu::{CANVAS_HEIGHT, CANVAS_WIDTH, Emu, SLIDE_HEIGHT, SLIDE_WIDTH};
 pub use error::TypeError;
 pub use inline::InlineNode;

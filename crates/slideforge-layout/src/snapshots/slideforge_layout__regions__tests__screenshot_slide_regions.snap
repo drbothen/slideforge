@@ -1,0 +1,44 @@
+---
+source: crates/slideforge-layout/src/regions.rs
+expression: frames
+---
+[
+    Frame {
+        bbox: BoundingBox {
+            x: Emu(
+                457200,
+            ),
+            y: Emu(
+                365760,
+            ),
+            width: Emu(
+                8229600,
+            ),
+            height: Emu(
+                685800,
+            ),
+        },
+        content: Empty,
+        text_flow: None,
+    },
+    Frame {
+        bbox: BoundingBox {
+            x: Emu(
+                457200,
+            ),
+            y: Emu(
+                1188720,
+            ),
+            width: Emu(
+                8229600,
+            ),
+            height: Emu(
+                3657600,
+            ),
+        },
+        content: Image {
+            alt: "",
+        },
+        text_flow: None,
+    },
+]
