@@ -122,14 +122,43 @@ mod tests {
 
     #[test]
     fn test_bc_1_11_001_accessibility_alt_text_escaping() {
-        // alt text with XML special chars should be escaped properly
+        // alt text with XML special chars must be escaped in both aria-label and <title>.
+        // FINDING-003: This test was previously a no-op — it must assert the escaped entities.
         let raw_svg = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 450" width="800px" height="450px"></svg>"#;
         let result = inject_aria_attributes(raw_svg, "Revenue < Cost & Profit > Zero");
         let svg = result.unwrap();
-        // aria-label attribute must use escaped form or equivalent
         let content = svg.as_str();
-        // At minimum the output must not cause XML parse failure
-        assert!(!content.is_empty());
+
+        // aria-label must contain XML-escaped entities (attribute context).
+        assert!(
+            content.contains("&lt;"),
+            "aria-label must escape '<' as '&lt;'; got: {content}"
+        );
+        assert!(
+            content.contains("&amp;"),
+            "aria-label must escape '&' as '&amp;'; got: {content}"
+        );
+        assert!(
+            content.contains("&gt;"),
+            "aria-label must escape '>' as '&gt;'; got: {content}"
+        );
+
+        // <title> content must also be escaped (text content context).
+        let title_start = content.find("<title>").expect("<title> element must be present");
+        let title_end = content.find("</title>").expect("</title> element must be present");
+        let title_content = &content[title_start..title_end];
+        assert!(
+            title_content.contains("&lt;"),
+            "<title> must escape '<' as '&lt;'; got title: {title_content}"
+        );
+        assert!(
+            title_content.contains("&amp;"),
+            "<title> must escape '&' as '&amp;'; got title: {title_content}"
+        );
+        assert!(
+            title_content.contains("&gt;"),
+            "<title> must escape '>' as '&gt;'; got title: {title_content}"
+        );
     }
 
     #[test]

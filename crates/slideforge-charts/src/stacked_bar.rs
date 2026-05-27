@@ -37,16 +37,33 @@ pub fn render_stacked_bar(spec: &InternalChartSpec) -> Result<String, ChartError
 
         let n_categories = spec.data.first().map_or(0, |s| s.points.len());
 
-        // For stacked bars, the y-max is the sum of all series values per category.
-        let y_max = (0..n_categories)
-            .map(|cat| {
-                spec.data
-                    .iter()
-                    .map(|s| s.points.get(cat).map_or(0.0, |p| p.value))
-                    .sum::<f64>()
-            })
-            .fold(0.0_f64, f64::max);
-        let y_max = if y_max > 0.0 { y_max * 1.1 } else { 1.0 };
+        // For stacked bars, compute y-range from column sums to represent the full
+        // stacked extent. FINDING-001 (Pass 2): support negative values by tracking
+        // both positive stack tops and negative stack bottoms per category.
+        let mut stack_min = 0.0_f64;
+        let mut stack_max = 0.0_f64;
+        for cat in 0..n_categories {
+            let mut pos_sum = 0.0_f64;
+            let mut neg_sum = 0.0_f64;
+            for series in &spec.data {
+                let v = series.points.get(cat).map_or(0.0, |p| p.value);
+                if v >= 0.0 {
+                    pos_sum += v;
+                } else {
+                    neg_sum += v;
+                }
+            }
+            stack_max = stack_max.max(pos_sum);
+            stack_min = stack_min.min(neg_sum);
+        }
+        let y_min = if stack_min < 0.0 { stack_min * 1.1 } else { 0.0 };
+        let y_max = if stack_max > 0.0 { stack_max * 1.1 } else { 0.0 };
+        // Ensure non-degenerate range.
+        let (y_min, y_max) = if (y_max - y_min).abs() < f64::EPSILON {
+            (y_min - 1.0, y_min + 1.0)
+        } else {
+            (y_min, y_max)
+        };
 
         let font_name = spec.font_family.as_ref();
 
@@ -60,7 +77,7 @@ pub fn render_stacked_bar(spec: &InternalChartSpec) -> Result<String, ChartError
             .margin(20u32)
             .x_label_area_size(40u32)
             .y_label_area_size(50u32)
-            .build_cartesian_2d(0u32..x_end, 0.0..y_max)
+            .build_cartesian_2d(0u32..x_end, y_min..y_max)
             .map_err(|e| ChartError::RenderError {
                 message: Arc::from(e.to_string().as_str()),
             })?;

@@ -34,13 +34,8 @@ pub fn render_area(spec: &InternalChartSpec) -> Result<String, ChartError> {
             message: Arc::from(e.to_string().as_str()),
         })?;
 
-        let max_val = spec
-            .data
-            .iter()
-            .flat_map(|s| s.points.iter())
-            .map(|p| p.value)
-            .fold(0.0_f64, f64::max);
-        let y_max = if max_val > 0.0 { max_val * 1.1 } else { 1.0 };
+        // FINDING-001 (Pass 2): compute y-range from data, supporting negative values.
+        let (y_min, y_max) = crate::bar::compute_y_range(spec);
 
         let n_points = spec.data.first().map_or(1, |s| s.points.len());
         let font_name = spec.font_family.as_ref();
@@ -55,7 +50,7 @@ pub fn render_area(spec: &InternalChartSpec) -> Result<String, ChartError> {
             .margin(20u32)
             .x_label_area_size(40u32)
             .y_label_area_size(50u32)
-            .build_cartesian_2d(0u32..x_end, 0.0..y_max)
+            .build_cartesian_2d(0u32..x_end, y_min..y_max)
             .map_err(|e| ChartError::RenderError {
                 message: Arc::from(e.to_string().as_str()),
             })?;

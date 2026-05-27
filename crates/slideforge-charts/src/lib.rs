@@ -847,6 +847,256 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
+    // FINDING-001 (Pass 2): All-negative data must produce visible charts
+    // -----------------------------------------------------------------------
+
+    /// Build an [`InternalChartSpec`] whose only series has all-negative values.
+    fn negative_data_spec(chart_type: crate::types::ChartType) -> InternalChartSpec {
+        InternalChartSpec {
+            chart_type,
+            data: vec![DataSeries {
+                name: Arc::from("Loss"),
+                points: vec![
+                    DataPoint { label: Arc::from("Q1"), value: -50.0 },
+                    DataPoint { label: Arc::from("Q2"), value: -30.0 },
+                    DataPoint { label: Arc::from("Q3"), value: -80.0 },
+                ],
+            }],
+            title: None,
+            x_label: None,
+            y_label: None,
+            alt: Arc::from("Negative chart"),
+            width: InternalChartSpec::DEFAULT_WIDTH,
+            height: InternalChartSpec::DEFAULT_HEIGHT,
+            accent_colors: vec![Arc::from("#003766")],
+            font_family: Arc::from("sans-serif"),
+        }
+    }
+
+    /// Verify that the SVG axis tick label `<text>` elements include a negative number,
+    /// proving the y-axis range extends below zero and the data is *visible* (not clipped).
+    ///
+    /// Plotters renders axis tick values as `<text>...</text>` content. We parse out the
+    /// text content (between `>` and `</text>`) and check at least one begins with "-".
+    /// This avoids false positives from negative transform/coordinate attributes.
+    fn assert_svg_has_negative_axis_label(svg: &str, chart_name: &str) {
+        let mut pos = 0;
+        let mut found = false;
+        while let Some(text_start) = svg[pos..].find("<text") {
+            let abs_start = pos + text_start;
+            // Find the `>` that closes the opening tag.
+            if let Some(rel_gt) = svg[abs_start..].find('>') {
+                let content_start = abs_start + rel_gt + 1;
+                // Find `</text>`.
+                if let Some(rel_end) = svg[content_start..].find("</text>") {
+                    let text_content = &svg[content_start..content_start + rel_end];
+                    let trimmed = text_content.trim();
+                    // Check if this text node is a negative number (starts with "-" + digit).
+                    if trimmed.starts_with('-')
+                        && trimmed.len() > 1
+                        && trimmed.as_bytes()[1].is_ascii_digit()
+                    {
+                        found = true;
+                        break;
+                    }
+                    pos = content_start + rel_end + 7; // skip past </text>
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+        assert!(
+            found,
+            "{chart_name}: all-negative data SVG must have at least one negative y-axis tick \
+             label (e.g. \"-50\"). Y-axis range must extend below zero so data is visible. \
+             Check that the renderer computes y_min from data, not hardcoded to 0.0. \
+             SVG first 800 chars: {}",
+            &svg[..svg.len().min(800)]
+        );
+    }
+
+    #[test]
+    fn test_f031_p2_001_bar_negative_data_renders_with_visible_range() {
+        let spec = negative_data_spec(crate::types::ChartType::Bar);
+        let svg = crate::bar::render_bar(&spec)
+            .expect("all-negative bar data must render without error");
+        assert!(!svg.is_empty(), "all-negative bar SVG must be non-empty");
+        assert_svg_has_negative_axis_label(&svg, "bar");
+    }
+
+    #[test]
+    fn test_f031_p2_001_line_negative_data_renders_with_visible_range() {
+        let spec = negative_data_spec(crate::types::ChartType::Line);
+        let svg = crate::line::render_line(&spec)
+            .expect("all-negative line data must render without error");
+        assert!(!svg.is_empty(), "all-negative line SVG must be non-empty");
+        assert_svg_has_negative_axis_label(&svg, "line");
+    }
+
+    #[test]
+    fn test_f031_p2_001_scatter_negative_data_renders_with_visible_range() {
+        let spec = negative_data_spec(crate::types::ChartType::Scatter);
+        let svg = crate::scatter::render_scatter(&spec)
+            .expect("all-negative scatter data must render without error");
+        assert!(!svg.is_empty(), "all-negative scatter SVG must be non-empty");
+        assert_svg_has_negative_axis_label(&svg, "scatter");
+    }
+
+    #[test]
+    fn test_f031_p2_001_area_negative_data_renders_with_visible_range() {
+        let spec = negative_data_spec(crate::types::ChartType::Area);
+        let svg = crate::area::render_area(&spec)
+            .expect("all-negative area data must render without error");
+        assert!(!svg.is_empty(), "all-negative area SVG must be non-empty");
+        assert_svg_has_negative_axis_label(&svg, "area");
+    }
+
+    #[test]
+    fn test_f031_p2_001_histogram_negative_data_renders_with_visible_range() {
+        let spec = negative_data_spec(crate::types::ChartType::Histogram);
+        let svg = crate::histogram::render_histogram(&spec)
+            .expect("all-negative histogram data must render without error");
+        assert!(!svg.is_empty(), "all-negative histogram SVG must be non-empty");
+        assert_svg_has_negative_axis_label(&svg, "histogram");
+    }
+
+    #[test]
+    fn test_f031_p2_001_stacked_bar_negative_data_renders_with_visible_range() {
+        let spec = negative_data_spec(crate::types::ChartType::StackedBar);
+        let svg = crate::stacked_bar::render_stacked_bar(&spec)
+            .expect("all-negative stacked_bar data must render without error");
+        assert!(!svg.is_empty(), "all-negative stacked_bar SVG must be non-empty");
+        assert_svg_has_negative_axis_label(&svg, "stacked_bar");
+    }
+
+    // -----------------------------------------------------------------------
+    // FINDING-002 (Pass 2): dispatch_and_process must be tested directly
+    // -----------------------------------------------------------------------
+
+    /// Test that `dispatch_and_process` produces valid SVG, aria-label, and no
+    /// forbidden elements for a standard `InternalChartSpec`.
+    #[test]
+    fn test_f031_p2_002_dispatch_and_process_bar_produces_valid_svg() {
+        let spec = make_spec(crate::types::ChartType::Bar);
+        let result = ChartRendererImpl::dispatch_and_process(&spec);
+        let chart_svg = result.expect("dispatch_and_process must succeed for a valid bar spec");
+
+        let svg = chart_svg.as_str();
+        assert!(!svg.is_empty(), "dispatch_and_process must return non-empty SVG");
+
+        // Must have aria-label (injected by inject_aria_attributes).
+        assert!(
+            svg.contains("aria-label="),
+            "dispatch_and_process output must contain aria-label attribute; got: {}",
+            &svg[..svg.len().min(400)]
+        );
+
+        // Must have role="img".
+        assert!(
+            svg.contains("role=\"img\""),
+            "dispatch_and_process output must contain role=\"img\"; got: {}",
+            &svg[..svg.len().min(400)]
+        );
+
+        // Must NOT contain forbidden elements.
+        assert!(!svg.contains("<script"), "dispatch_and_process output must not contain <script");
+        assert!(
+            !svg.contains("<foreignObject"),
+            "dispatch_and_process output must not contain <foreignObject"
+        );
+
+        // Must be valid SVG (has root <svg> element).
+        assert!(svg.contains("<svg"), "dispatch_and_process output must contain <svg root element");
+    }
+
+    /// Test that `dispatch_and_process` works for all 7 chart types.
+    #[test]
+    fn test_f031_p2_002_dispatch_and_process_all_chart_types() {
+        use crate::types::ChartType;
+
+        for chart_type in [
+            ChartType::Bar,
+            ChartType::Line,
+            ChartType::Pie,
+            ChartType::Scatter,
+            ChartType::Area,
+            ChartType::Histogram,
+            ChartType::StackedBar,
+        ] {
+            let spec = make_spec(chart_type.clone());
+            let result = ChartRendererImpl::dispatch_and_process(&spec);
+            let chart_svg = result.unwrap_or_else(|e| {
+                panic!("dispatch_and_process failed for {chart_type:?}: {e}");
+            });
+            let svg = chart_svg.as_str();
+            assert!(!svg.is_empty(), "dispatch_and_process must return non-empty SVG for {chart_type:?}");
+            assert!(
+                svg.contains("aria-label="),
+                "dispatch_and_process output must contain aria-label for {chart_type:?}"
+            );
+        }
+    }
+
+    /// Test that alt text containing `<script>` is safely escaped in the output.
+    ///
+    /// The `<script>` tag in alt text must be XML-escaped in the aria-label attribute
+    /// and `<title>` content — it must NOT appear as a literal `<script>` element.
+    /// The safety check (`assert_no_forbidden_elements`) must pass.
+    #[test]
+    fn test_f031_p2_002_dispatch_and_process_script_in_alt_text_is_escaped() {
+        let spec = InternalChartSpec {
+            chart_type: crate::types::ChartType::Bar,
+            data: vec![DataSeries {
+                name: Arc::from("Revenue"),
+                points: vec![
+                    DataPoint { label: Arc::from("Q1"), value: 100.0 },
+                    DataPoint { label: Arc::from("Q2"), value: 200.0 },
+                ],
+            }],
+            title: None,
+            x_label: None,
+            y_label: None,
+            // Alt text containing a <script> tag — must be escaped, not injected.
+            alt: Arc::from("Revenue <script>alert('xss')</script> chart"),
+            width: InternalChartSpec::DEFAULT_WIDTH,
+            height: InternalChartSpec::DEFAULT_HEIGHT,
+            accent_colors: vec![Arc::from("#003766")],
+            font_family: Arc::from("sans-serif"),
+        };
+
+        let result = ChartRendererImpl::dispatch_and_process(&spec);
+        let chart_svg = result.expect("dispatch_and_process must succeed even with script in alt");
+
+        let svg = chart_svg.as_str();
+
+        // The safety check must pass — no literal <script> element in the SVG.
+        // (The safety check runs BEFORE aria injection in dispatch_and_process,
+        // but the alt text escaping is done during aria injection.)
+        // Verify that `<script` does NOT appear as a tag in the output by
+        // checking the safety check logic: the aria-label value must be escaped.
+        assert!(
+            svg.contains("&lt;script&gt;") || svg.contains("&lt;script"),
+            "alt text with <script> must be XML-escaped in aria-label/title; \
+             literal <script> tag must not appear. Got aria-label area: {}",
+            &svg[..svg.len().min(600)]
+        );
+
+        // The SVG as a whole must not have a literal <script> element that would
+        // be executed in a browser. The escaped form is: &lt;script&gt;
+        // A literal `<script>` would only appear if escaping was bypassed.
+        // safety::assert_no_forbidden_elements verifies this — but let's assert directly too:
+        let svg_lower = svg.to_ascii_lowercase();
+        // Strip all escaped sequences to see if any raw <script remains.
+        let unescaped_check = svg_lower.replace("&lt;", "").replace("&gt;", "").replace("&amp;", "");
+        assert!(
+            !unescaped_check.contains("<script"),
+            "After removing escaped sequences, no literal <script> must remain in the SVG output"
+        );
+    }
+
+    // -----------------------------------------------------------------------
     // Snapshot tests — one per chart type with fixed 3-point data
     // -----------------------------------------------------------------------
 

@@ -130,6 +130,43 @@ pub(crate) fn inject_viewbox(svg: &str, width: u32, height: u32) -> String {
     format!("{before_svg}{svg_tag}{after_tag}")
 }
 
+/// Compute the y-axis range `(y_min, y_max)` from all data points in the spec.
+///
+/// FINDING-001 (Pass 2): The previous implementation hardcoded the lower bound at `0.0`,
+/// which caused all-negative data to fall below the visible chart area.
+///
+/// Rules:
+/// - `y_min`: if any value is negative, use `min_val * 1.1` (10% pad below); otherwise `0.0`.
+/// - `y_max`: if any value is positive, use `max_val * 1.1` (10% pad above); otherwise `1.0`.
+///   When all data is negative, `y_max` is set to `0.0` so the zero baseline stays visible.
+///
+/// The returned range is always non-degenerate (`y_min < y_max`).
+pub(crate) fn compute_y_range(spec: &InternalChartSpec) -> (f64, f64) {
+    let all_points: Vec<f64> = spec
+        .data
+        .iter()
+        .flat_map(|s| s.points.iter())
+        .map(|p| p.value)
+        .collect();
+
+    if all_points.is_empty() {
+        return (0.0, 1.0);
+    }
+
+    let min_val = all_points.iter().copied().fold(f64::INFINITY, f64::min);
+    let max_val = all_points.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+
+    let y_min = if min_val < 0.0 { min_val * 1.1 } else { 0.0 };
+    let y_max = if max_val > 0.0 { max_val * 1.1 } else { 0.0 };
+
+    // Ensure range is non-degenerate (min < max).
+    if (y_max - y_min).abs() < f64::EPSILON {
+        (y_min - 1.0, y_min + 1.0)
+    } else {
+        (y_min, y_max)
+    }
+}
+
 /// Render a vertical bar chart to an SVG string.
 ///
 /// # Errors
@@ -155,14 +192,8 @@ pub fn render_bar(spec: &InternalChartSpec) -> Result<String, ChartError> {
             message: Arc::from(e.to_string().as_str()),
         })?;
 
-        // Compute y-axis range from all data.
-        let max_val = spec
-            .data
-            .iter()
-            .flat_map(|s| s.points.iter())
-            .map(|p| p.value)
-            .fold(0.0_f64, f64::max);
-        let y_max = if max_val > 0.0 { max_val * 1.1 } else { 1.0 };
+        // Compute y-axis range from all data (FINDING-001 Pass 2: supports negative values).
+        let (y_min, y_max) = compute_y_range(spec);
 
         // Number of categories (x-axis buckets) from first series.
         let n_categories = spec.data.first().map_or(0, |s| s.points.len());
@@ -180,7 +211,7 @@ pub fn render_bar(spec: &InternalChartSpec) -> Result<String, ChartError> {
             .margin(20u32)
             .x_label_area_size(40u32)
             .y_label_area_size(50u32)
-            .build_cartesian_2d(0u32..x_range_end, 0.0..y_max)
+            .build_cartesian_2d(0u32..x_range_end, y_min..y_max)
             .map_err(|e| ChartError::RenderError {
                 message: Arc::from(e.to_string().as_str()),
             })?;

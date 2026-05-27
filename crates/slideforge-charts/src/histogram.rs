@@ -37,12 +37,9 @@ pub fn render_histogram(spec: &InternalChartSpec) -> Result<String, ChartError> 
             field: Arc::from("data"),
         })?;
 
-        let max_val = series
-            .points
-            .iter()
-            .map(|p| p.value)
-            .fold(0.0_f64, f64::max);
-        let y_max = if max_val > 0.0 { max_val * 1.1 } else { 1.0 };
+        // FINDING-001 (Pass 2): compute y-range from data, supporting negative values.
+        // Histogram uses the first series only; build a single-series spec for compute_y_range.
+        let (y_min, y_max) = crate::bar::compute_y_range(spec);
 
         let n_bins = series.points.len();
         let color = series_color(&spec.accent_colors, 0);
@@ -58,7 +55,7 @@ pub fn render_histogram(spec: &InternalChartSpec) -> Result<String, ChartError> 
             .margin(20u32)
             .x_label_area_size(40u32)
             .y_label_area_size(50u32)
-            .build_cartesian_2d(0u32..x_end, 0.0..y_max)
+            .build_cartesian_2d(0u32..x_end, y_min..y_max)
             .map_err(|e| ChartError::RenderError {
                 message: Arc::from(e.to_string().as_str()),
             })?;
