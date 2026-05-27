@@ -85,13 +85,7 @@ impl ChartRendererImpl {
     /// skeleton entry point — it validates the chart type and then delegates to
     /// this method from the eval pipeline via [`InternalChartSpec`].
     ///
-    /// # Note on dead-code lint
-    ///
-    /// This method is used by `slideforge-eval` (which does not yet exist in Wave 1).
-    /// The `#[allow(dead_code)]` is intentional: this is the correct stable API
-    /// surface, and the external caller will exist in Wave 2.
-    #[allow(dead_code)]
-    pub(crate) fn dispatch_and_process(spec: &InternalChartSpec) -> Result<ChartSvg, ChartError> {
+    pub fn dispatch_and_process(spec: &InternalChartSpec) -> Result<ChartSvg, ChartError> {
         let raw_svg = match spec.chart_type {
             ChartType::Bar => bar::render_bar(spec)?,
             ChartType::Line => line::render_line(spec)?,
@@ -1168,6 +1162,47 @@ mod tests {
         let spec = empty_points_spec(crate::types::ChartType::Pie);
         let result = crate::pie::render_pie(&spec);
         assert!(result.is_err(), "pie with empty points must return an error");
+    }
+
+    // -----------------------------------------------------------------------
+    // FINDING-002 (Pass 4): single-point line and area must produce valid SVG
+    // -----------------------------------------------------------------------
+
+    /// Build a spec with exactly one data point (single-element series).
+    fn single_point_spec(chart_type: crate::types::ChartType) -> InternalChartSpec {
+        InternalChartSpec {
+            chart_type,
+            data: vec![DataSeries {
+                name: Arc::from("Solo"),
+                points: vec![DataPoint { label: Arc::from("Jan"), value: 42.0 }],
+            }],
+            title: None,
+            x_label: None,
+            y_label: None,
+            alt: Arc::from("single point chart"),
+            width: InternalChartSpec::DEFAULT_WIDTH,
+            height: InternalChartSpec::DEFAULT_HEIGHT,
+            accent_colors: vec![Arc::from("#003766")],
+            font_family: Arc::from("sans-serif"),
+        }
+    }
+
+    #[test]
+    fn test_f031_p4_002_line_single_point_produces_valid_svg() {
+        let spec = single_point_spec(crate::types::ChartType::Line);
+        let result = crate::line::render_line(&spec);
+        let svg = result.expect("single-point line must produce valid SVG without panicking");
+        assert!(!svg.is_empty(), "single-point line SVG must not be empty");
+        assert!(svg.contains("<svg"), "single-point line output must contain <svg root element");
+    }
+
+    #[test]
+    fn test_f031_p4_002_area_single_point_produces_valid_svg() {
+        let spec = single_point_spec(crate::types::ChartType::Area);
+        let result = crate::area::render_area(&spec);
+        let svg = result.expect("single-point area must produce valid SVG without panicking");
+        assert!(!svg.is_empty(), "single-point area SVG must not be empty");
+        assert!(svg.contains("<svg"), "single-point area output must contain <svg root element");
     }
 
     // -----------------------------------------------------------------------

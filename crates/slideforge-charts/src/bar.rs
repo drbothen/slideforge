@@ -153,8 +153,10 @@ pub(crate) fn inject_viewbox(svg: &str, width: u32, height: u32) -> String {
 ///
 /// Rules:
 /// - `y_min`: if any value is negative, use `min_val * 1.1` (10% pad below); otherwise `0.0`.
-/// - `y_max`: if any value is positive, use `max_val * 1.1` (10% pad above); otherwise `1.0`.
-///   When all data is negative, `y_max` is set to `0.0` so the zero baseline stays visible.
+/// - `y_max`: if any value is positive, use `max_val * 1.1` (10% pad above); otherwise `0.0`.
+///   When all data is negative (or zero), `y_max` is set to `0.0` so the zero baseline stays
+///   visible. The non-degenerate guard below will widen a degenerate `(0.0, 0.0)` range to
+///   `(-1.0, 1.0)` when all values are exactly zero.
 ///
 /// The returned range is always non-degenerate (`y_min < y_max`).
 pub(crate) fn compute_y_range(spec: &InternalChartSpec) -> (f64, f64) {

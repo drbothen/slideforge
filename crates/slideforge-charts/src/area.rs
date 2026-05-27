@@ -42,7 +42,7 @@ pub fn render_area(spec: &InternalChartSpec) -> Result<String, ChartError> {
         let n_points = spec.data.first().map_or(1, |s| s.points.len());
         let font_name = spec.font_family.as_ref();
 
-        let x_end = u32::try_from(n_points.saturating_sub(1)).unwrap_or(u32::MAX);
+        let x_end = u32::try_from(n_points.saturating_sub(1).max(1)).unwrap_or(u32::MAX);
 
         let mut chart = ChartBuilder::on(&root)
             .caption(
