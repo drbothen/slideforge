@@ -9,8 +9,8 @@ use std::sync::Arc;
 use ordered_float::OrderedFloat;
 use slideforge_types::{OrderedMap, Value};
 
-use crate::format::DataFormat;
 use crate::DataError;
+use crate::format::DataFormat;
 
 /// Convert a [`toml::Value`] into a [`slideforge_types::Value`].
 fn toml_value_to_sf(v: toml::Value) -> Value {
@@ -22,18 +22,18 @@ fn toml_value_to_sf(v: toml::Value) -> Value {
         toml::Value::Array(arr) => {
             let items = arr.into_iter().map(toml_value_to_sf).collect();
             Value::List(items)
-        }
+        },
         toml::Value::Table(table) => {
             let mut map = OrderedMap::new();
             for (k, v) in table {
                 map.insert(Arc::from(k.as_str()), toml_value_to_sf(v));
             }
             Value::Map(map)
-        }
+        },
         toml::Value::Datetime(dt) => {
             // TOML has a native datetime type; serialize to ISO 8601 string.
             Value::Str(Arc::from(dt.to_string().as_str()))
-        }
+        },
     }
 }
 
@@ -58,7 +58,7 @@ mod tests {
 
     use super::*;
 
-    /// test_BC_5_03_006_parse_toml_happy_path — section with int, string, bool, float.
+    /// `test_BC_5_03_006_parse_toml_happy_path` — section with int, string, bool, float.
     #[test]
     fn test_bc_5_03_006_parse_toml_happy_path() {
         let src = r#"
@@ -99,7 +99,7 @@ score = 2.5
         );
     }
 
-    /// test_BC_5_03_006_parse_toml_datetime — TOML datetime → Value::Str with ISO 8601.
+    /// `test_BC_5_03_006_parse_toml_datetime` — TOML datetime → `Value::Str` with ISO 8601.
     ///
     /// TOML has a native datetime type; since `Value` has no datetime variant,
     /// datetimes must be serialized to ISO 8601 strings.
@@ -120,7 +120,7 @@ score = 2.5
         );
     }
 
-    /// test_BC_5_03_006_parse_toml_malformed — invalid TOML → DataError with E-DAT-003.
+    /// `test_BC_5_03_006_parse_toml_malformed` — invalid TOML → `DataError` with E-DAT-003.
     #[test]
     fn test_bc_5_03_006_parse_toml_malformed() {
         let src = "this is not = [valid toml";
@@ -129,7 +129,7 @@ score = 2.5
         assert_eq!(err.code(), "E-DAT-003");
     }
 
-    /// test_bc_5_03_006_parse_toml_snapshot — representative TOML fixture snapshot test.
+    /// `test_bc_5_03_006_parse_toml_snapshot` — representative TOML fixture snapshot test.
     ///
     /// Covers table, array, int, float, bool, string, and datetime in one fixture to catch
     /// any regression in the `toml_value_to_sf` conversion.
@@ -150,16 +150,13 @@ author = "Alice"
         insta::assert_debug_snapshot!(value);
     }
 
-    /// test_BC_5_03_006_parse_toml_flat_table — flat key-value pairs without sections.
+    /// `test_BC_5_03_006_parse_toml_flat_table` — flat key-value pairs without sections.
     #[test]
     fn test_bc_5_03_006_parse_toml_flat_table() {
         let src = "name = \"Alice\"\nage = 30\n";
         let value = parse_toml(src, "test.toml").expect("must parse");
         let root = value.as_map().expect("must be map");
-        assert_eq!(
-            root.get("name"),
-            Some(&Value::Str(Arc::from("Alice")))
-        );
+        assert_eq!(root.get("name"), Some(&Value::Str(Arc::from("Alice"))));
         assert_eq!(root.get("age"), Some(&Value::Int(30)));
     }
 }

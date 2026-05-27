@@ -67,7 +67,7 @@ impl DataFormat {
 mod tests {
     use super::*;
 
-    /// test_BC_5_03_002_from_extension — known extensions map to correct variants.
+    /// `test_BC_5_03_002_from_extension` — known extensions map to correct variants.
     #[test]
     fn test_bc_5_03_002_from_extension() {
         assert_eq!(DataFormat::from_extension("json"), Some(DataFormat::Json));
@@ -76,13 +76,13 @@ mod tests {
         assert_eq!(DataFormat::from_extension("toml"), Some(DataFormat::Toml));
     }
 
-    /// test_BC_5_03_002_from_extension_yml — `.yml` maps to Yaml (EC-008).
+    /// `test_BC_5_03_002_from_extension_yml` — `.yml` maps to Yaml (EC-008).
     #[test]
     fn test_bc_5_03_002_from_extension_yml() {
         assert_eq!(DataFormat::from_extension("yml"), Some(DataFormat::Yaml));
     }
 
-    /// test_BC_5_03_002_from_extension_unknown — unrecognized extension returns None.
+    /// `test_BC_5_03_002_from_extension_unknown` — unrecognized extension returns None.
     #[test]
     fn test_bc_5_03_002_from_extension_unknown() {
         assert_eq!(DataFormat::from_extension("txt"), None);
@@ -90,7 +90,7 @@ mod tests {
         assert_eq!(DataFormat::from_extension(""), None);
     }
 
-    /// test_BC_5_03_002_from_path — Path::from_path delegates to from_extension.
+    /// `test_BC_5_03_002_from_path` — `Path::from_path` delegates to `from_extension`.
     #[test]
     fn test_bc_5_03_002_from_path() {
         assert_eq!(
@@ -116,7 +116,7 @@ mod tests {
         assert_eq!(DataFormat::from_path(Path::new("data.txt")), None);
     }
 
-    /// test_BC_5_03_002_case_insensitive — extension matching is case-insensitive.
+    /// `test_BC_5_03_002_case_insensitive` — extension matching is case-insensitive.
     #[test]
     fn test_bc_5_03_002_case_insensitive() {
         assert_eq!(DataFormat::from_extension("JSON"), Some(DataFormat::Json));

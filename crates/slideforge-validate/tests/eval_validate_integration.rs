@@ -109,7 +109,10 @@ fn test_eval_validate_lang_missing_emits_e_a11_003() {
 
     let deck = eval_deck(&deck_node, &config, &mut sink)
         .expect("eval_deck must succeed for a valid 2-slide deck with no lang");
-    assert!(sink.is_empty(), "eval must not push any errors for this deck");
+    assert!(
+        sink.is_empty(),
+        "eval must not push any errors for this deck"
+    );
 
     // lang must be None on the eval-produced deck (no lang was declared).
     assert!(
@@ -141,8 +144,7 @@ fn test_eval_validate_lang_present_no_e_a11_003() {
     let config = default_config();
     let mut sink = slideforge_syntax::DiagnosticSink::new();
 
-    let deck = eval_deck(&deck_node, &config, &mut sink)
-        .expect("eval_deck must succeed");
+    let deck = eval_deck(&deck_node, &config, &mut sink).expect("eval_deck must succeed");
     assert!(sink.is_empty(), "eval must not push any errors");
     assert_eq!(
         deck.metadata.lang.as_deref(),
@@ -171,8 +173,7 @@ fn test_eval_validate_inject_lang_default_after_eval() {
     let config = default_config();
     let mut sink = slideforge_syntax::DiagnosticSink::new();
 
-    let mut deck = eval_deck(&deck_node, &config, &mut sink)
-        .expect("eval_deck must succeed");
+    let mut deck = eval_deck(&deck_node, &config, &mut sink).expect("eval_deck must succeed");
     assert!(sink.is_empty(), "eval must not push errors");
 
     // Step 1: validate — should emit E-A11-003.
@@ -184,7 +185,10 @@ fn test_eval_validate_inject_lang_default_after_eval() {
 
     // Step 2: inject default lang.
     let injected = inject_lang_default(&mut deck);
-    assert!(injected, "inject_lang_default must return true (lang was absent)");
+    assert!(
+        injected,
+        "inject_lang_default must return true (lang was absent)"
+    );
 
     // After injection, lang must be "en".
     assert_eq!(
@@ -219,8 +223,7 @@ fn test_eval_produced_slides_have_empty_blocks_f004() {
     let config = default_config();
     let mut sink = slideforge_syntax::DiagnosticSink::new();
 
-    let deck = eval_deck(&deck_node, &config, &mut sink)
-        .expect("eval_deck must succeed");
+    let deck = eval_deck(&deck_node, &config, &mut sink).expect("eval_deck must succeed");
     assert!(sink.is_empty(), "eval must not push errors");
 
     // Verify F-004: all eval-produced slides have empty blocks.
@@ -281,8 +284,7 @@ fn test_eval_validate_non_empty_deck_no_zero_slide_error() {
     let config = default_config();
     let mut sink = slideforge_syntax::DiagnosticSink::new();
 
-    let deck = eval_deck(&deck_node, &config, &mut sink)
-        .expect("eval_deck must succeed");
+    let deck = eval_deck(&deck_node, &config, &mut sink).expect("eval_deck must succeed");
     assert_eq!(deck.slides.len(), 1, "deck must have 1 slide");
 
     let diags = ZeroSlideValidator.validate(&deck, &default_opts());
@@ -303,8 +305,7 @@ fn test_eval_deck_lang_propagation() {
     let config = default_config();
     let mut sink = slideforge_syntax::DiagnosticSink::new();
 
-    let deck = eval_deck(&deck_node, &config, &mut sink)
-        .expect("eval_deck must succeed");
+    let deck = eval_deck(&deck_node, &config, &mut sink).expect("eval_deck must succeed");
     assert!(sink.is_empty(), "eval must not push errors");
 
     assert_eq!(
@@ -361,5 +362,8 @@ fn test_eval_deck_is_public_api() {
     let deck_node = DeckNode::default();
     let mut sink = slideforge_syntax::DiagnosticSink::new();
     let deck = eval_deck(&deck_node, &EvalConfig::default(), &mut sink);
-    assert!(deck.is_some(), "eval_deck public API must return Some for empty deck");
+    assert!(
+        deck.is_some(),
+        "eval_deck public API must return Some for empty deck"
+    );
 }

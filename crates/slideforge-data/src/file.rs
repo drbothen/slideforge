@@ -11,9 +11,9 @@ use std::sync::Arc;
 use slideforge_plugin_api::{DataSource, DataSourceError, DataSourceOptions};
 use slideforge_types::Value;
 
+use crate::DataError;
 use crate::format::DataFormat;
 use crate::parse::{csv, json, toml, yaml};
-use crate::DataError;
 
 /// The built-in file-based data source plugin.
 ///
@@ -64,13 +64,13 @@ fn normalize_path(path: &Path) -> PathBuf {
                 match components.last() {
                     Some(Component::Normal(_)) => {
                         components.pop();
-                    }
+                    },
                     _ => {
                         components.push(component);
-                    }
+                    },
                 }
-            }
-            Component::CurDir => {} // `.` is always a no-op
+            },
+            Component::CurDir => {}, // `.` is always a no-op
             other => components.push(other),
         }
     }
@@ -117,9 +117,7 @@ impl FileDataSource {
             let canonical_base = base.canonicalize().map_err(|e| {
                 DataError::io_error(
                     Arc::from(base.to_string_lossy().as_ref()),
-                    Arc::from(
-                        format!("base_dir cannot be canonicalized: {e}").as_str(),
-                    ),
+                    Arc::from(format!("base_dir cannot be canonicalized: {e}").as_str()),
                 )
             })?;
 
@@ -178,12 +176,8 @@ impl FileDataSource {
 
         // Determine format from extension before reading the file.
         let format = DataFormat::from_path(&resolved).ok_or_else(|| {
-            let ext: Arc<str> = Arc::from(
-                resolved
-                    .extension()
-                    .and_then(|e| e.to_str())
-                    .unwrap_or(""),
-            );
+            let ext: Arc<str> =
+                Arc::from(resolved.extension().and_then(|e| e.to_str()).unwrap_or(""));
             DataError::unsupported_format(ext)
         })?;
 
@@ -200,7 +194,9 @@ impl FileDataSource {
         // Strip a leading UTF-8 BOM (U+FEFF) if present.
         // Excel on Windows exports CSV/TSV with a BOM, which corrupts the first
         // column header with an invisible prefix. JSON parsers also reject a BOM.
-        let contents = raw_contents.strip_prefix('\u{FEFF}').unwrap_or(&raw_contents);
+        let contents = raw_contents
+            .strip_prefix('\u{FEFF}')
+            .unwrap_or(&raw_contents);
 
         // Dispatch to the appropriate parser.
         match format {
@@ -209,14 +205,10 @@ impl FileDataSource {
             DataFormat::Yaml => yaml::parse_yaml(contents, &path_str),
             DataFormat::Toml => toml::parse_toml(contents, &path_str),
             DataFormat::Xlsx | DataFormat::Sqlite => {
-                let ext: Arc<str> = Arc::from(
-                    resolved
-                        .extension()
-                        .and_then(|e| e.to_str())
-                        .unwrap_or(""),
-                );
+                let ext: Arc<str> =
+                    Arc::from(resolved.extension().and_then(|e| e.to_str()).unwrap_or(""));
                 Err(DataError::unsupported_format(ext))
-            }
+            },
         }
     }
 }
@@ -277,7 +269,7 @@ mod tests {
         FileDataSource::new()
     }
 
-    /// test_BC_5_03_007_file_not_found — non-existent path → DataError::FileNotFound with E-DAT-004.
+    /// `test_BC_5_03_007_file_not_found` — non-existent path → `DataError::FileNotFound` with E-DAT-004.
     #[test]
     fn test_bc_5_03_007_file_not_found() {
         let src = loader();
@@ -302,18 +294,20 @@ mod tests {
         f
     }
 
-    /// test_BC_5_03_007_file_format_dispatch_json — .json file dispatches to JSON parser.
+    /// `test_BC_5_03_007_file_format_dispatch_json` — .json file dispatches to JSON parser.
     #[test]
     fn test_bc_5_03_007_file_format_dispatch_json() {
         let f = temp_file_with_suffix(".json", br#"{"key": "value"}"#);
 
         let src = loader();
-        let value = src.load_path(f.path(), None).expect(".json file must parse");
+        let value = src
+            .load_path(f.path(), None)
+            .expect(".json file must parse");
         let map = value.as_map().expect("must be map");
         assert!(map.get("key").is_some(), "JSON key must be present");
     }
 
-    /// test_BC_5_03_007_file_format_dispatch_csv — .csv file dispatches to CSV parser.
+    /// `test_BC_5_03_007_file_format_dispatch_csv` — .csv file dispatches to CSV parser.
     #[test]
     fn test_bc_5_03_007_file_format_dispatch_csv() {
         let f = temp_file_with_suffix(".csv", b"col\nval");
@@ -324,17 +318,19 @@ mod tests {
         assert_eq!(list.len(), 1);
     }
 
-    /// test_BC_5_03_007_file_format_dispatch_yaml — .yaml file dispatches to YAML parser.
+    /// `test_BC_5_03_007_file_format_dispatch_yaml` — .yaml file dispatches to YAML parser.
     #[test]
     fn test_bc_5_03_007_file_format_dispatch_yaml() {
         let f = temp_file_with_suffix(".yaml", b"x: 1\n");
 
         let src = loader();
-        let value = src.load_path(f.path(), None).expect(".yaml file must parse");
+        let value = src
+            .load_path(f.path(), None)
+            .expect(".yaml file must parse");
         assert!(value.as_map().is_some(), "YAML must produce map");
     }
 
-    /// test_BC_5_03_007_file_format_dispatch_yml — .yml file dispatches to YAML parser (EC-008).
+    /// `test_BC_5_03_007_file_format_dispatch_yml` — .yml file dispatches to YAML parser (EC-008).
     #[test]
     fn test_bc_5_03_007_file_format_dispatch_yml() {
         let f = temp_file_with_suffix(".yml", b"x: 1\n");
@@ -344,17 +340,19 @@ mod tests {
         assert!(value.as_map().is_some(), ".yml must be treated as YAML");
     }
 
-    /// test_BC_5_03_007_file_format_dispatch_toml — .toml file dispatches to TOML parser.
+    /// `test_BC_5_03_007_file_format_dispatch_toml` — .toml file dispatches to TOML parser.
     #[test]
     fn test_bc_5_03_007_file_format_dispatch_toml() {
         let f = temp_file_with_suffix(".toml", b"x = 1\n");
 
         let src = loader();
-        let value = src.load_path(f.path(), None).expect(".toml file must parse");
+        let value = src
+            .load_path(f.path(), None)
+            .expect(".toml file must parse");
         assert!(value.as_map().is_some(), "TOML must produce map");
     }
 
-    /// test_BC_5_03_007_unsupported_extension — .txt file → DataError::UnsupportedFormat (E-DAT-003).
+    /// `test_BC_5_03_007_unsupported_extension` — .txt file → `DataError::UnsupportedFormat` (E-DAT-003).
     #[test]
     fn test_bc_5_03_007_unsupported_extension() {
         let f = temp_file_with_suffix(".txt", b"hello");
@@ -369,14 +367,14 @@ mod tests {
         );
     }
 
-    /// test_BC_5_03_007_datasource_trait_id — DataSource::id() returns "file".
+    /// `test_BC_5_03_007_datasource_trait_id` — `DataSource::id()` returns "file".
     #[test]
     fn test_bc_5_03_007_datasource_trait_id() {
         let src = loader();
         assert_eq!(src.id(), "file");
     }
 
-    /// test_BC_5_03_007_datasource_trait_load_missing — DataSource::load() maps to DataSourceError.
+    /// `test_BC_5_03_007_datasource_trait_load_missing` — `DataSource::load()` maps to `DataSourceError`.
     #[test]
     fn test_bc_5_03_007_datasource_trait_load_missing() {
         let src = loader();
@@ -389,7 +387,7 @@ mod tests {
         );
     }
 
-    /// test_BC_5_03_007_datasource_trait_load_unsupported — DataSource::load() maps to UnsupportedUri.
+    /// `test_BC_5_03_007_datasource_trait_load_unsupported` — `DataSource::load()` maps to `UnsupportedUri`.
     #[test]
     fn test_bc_5_03_007_datasource_trait_load_unsupported() {
         let f = temp_file_with_suffix(".txt", b"data");
@@ -404,7 +402,7 @@ mod tests {
         );
     }
 
-    /// test_BC_5_03_007_datasource_trait_load_json — DataSource::load() happy path for JSON.
+    /// `test_BC_5_03_007_datasource_trait_load_json` — `DataSource::load()` happy path for JSON.
     #[test]
     fn test_bc_5_03_007_datasource_trait_load_json() {
         let f = temp_file_with_suffix(".json", br#"{"answer": 42}"#);
@@ -421,7 +419,7 @@ mod tests {
         );
     }
 
-    /// test_BC_5_03_007_path_containment_blocks_traversal — `../` path outside base_dir is blocked.
+    /// `test_BC_5_03_007_path_containment_blocks_traversal` — `../` path outside `base_dir` is blocked.
     #[test]
     fn test_bc_5_03_007_path_containment_blocks_traversal() {
         use std::path::PathBuf;
@@ -435,14 +433,14 @@ mod tests {
         match result {
             // Any error variant is acceptable — traversal block, file not found,
             // or another I/O error. What is NOT acceptable is Ok.
-            Err(_) => {}
+            Err(_) => {},
             Ok(_) => {
                 panic!("path traversal must not succeed silently");
-            }
+            },
         }
     }
 
-    /// test_BC_5_03_007_base_dir_nonexistent_fails — non-canonicalizable base_dir must return Err,
+    /// `test_BC_5_03_007_base_dir_nonexistent_fails` — non-canonicalizable `base_dir` must return Err,
     /// not silently skip the path containment check (FINDING-001).
     #[test]
     fn test_bc_5_03_007_base_dir_nonexistent_fails() {
@@ -458,7 +456,7 @@ mod tests {
         );
     }
 
-    /// test_BC_5_03_007_relative_path_resolved_against_base_dir — relative path uses base_dir.
+    /// `test_BC_5_03_007_relative_path_resolved_against_base_dir` — relative path uses `base_dir`.
     #[test]
     fn test_bc_5_03_007_relative_path_resolved_against_base_dir() {
         use tempfile::TempDir;
@@ -472,7 +470,7 @@ mod tests {
         assert!(value.as_map().is_some(), "must be a map");
     }
 
-    /// test_bom_stripped_json — JSON file with UTF-8 BOM (U+FEFF) prefix parses correctly.
+    /// `test_bom_stripped_json` — JSON file with UTF-8 BOM (U+FEFF) prefix parses correctly.
     ///
     /// Excel on Windows and some editors prepend a BOM to UTF-8 files. Without BOM
     /// stripping, `serde_json` rejects the file with an unexpected character error.
@@ -495,12 +493,12 @@ mod tests {
         );
     }
 
-    /// test_traversal_blocked_nonexistent_file — lexical `../` traversal to non-existent file
-    /// must return PathTraversalBlocked (E-DAT-006), NOT FileNotFound (E-DAT-004).
+    /// `test_traversal_blocked_nonexistent_file` — lexical `../` traversal to non-existent file
+    /// must return `PathTraversalBlocked` (E-DAT-006), NOT `FileNotFound` (E-DAT-004).
     ///
     /// This is the FINDING-001 regression test. Before the fix, `canonicalize()` failed on
     /// the non-existent target so the containment check was skipped, and the subsequent
-    /// `read_to_string` produced FileNotFound — leaking file-existence information.
+    /// `read_to_string` produced `FileNotFound` — leaking file-existence information.
     #[test]
     fn test_traversal_blocked_nonexistent_file() {
         use tempfile::TempDir;
@@ -515,12 +513,11 @@ mod tests {
         assert_eq!(
             err.code(),
             "E-DAT-006",
-            "path traversal for non-existent file must return E-DAT-006 (PathTraversalBlocked), not E-DAT-004 (FileNotFound): {:?}",
-            err
+            "path traversal for non-existent file must return E-DAT-006 (PathTraversalBlocked), not E-DAT-004 (FileNotFound): {err:?}"
         );
     }
 
-    /// test_traversal_blocked_existing_and_nonexistent_same_error — both existing and
+    /// `test_traversal_blocked_existing_and_nonexistent_same_error` — both existing and
     /// non-existing out-of-sandbox paths must produce the same error variant (E-DAT-006).
     ///
     /// This prevents the file-existence oracle: an attacker must not be able to
@@ -556,7 +553,7 @@ mod tests {
         );
     }
 
-    /// test_absolute_path_inside_base_dir_succeeds — absolute path pointing into base_dir loads OK.
+    /// `test_absolute_path_inside_base_dir_succeeds` — absolute path pointing into `base_dir` loads OK.
     ///
     /// Exercises the `path.is_absolute()` branch in the resolver (lines ~102-103) and the
     /// corresponding lexical containment check (lines ~141-151) for an absolute path that IS
@@ -575,8 +572,8 @@ mod tests {
         assert!(value.as_map().is_some(), "must be a map");
     }
 
-    /// test_absolute_path_outside_base_dir_blocked — absolute path outside base_dir returns
-    /// E-DAT-006 (PathTraversalBlocked).
+    /// `test_absolute_path_outside_base_dir_blocked` — absolute path outside `base_dir` returns
+    /// E-DAT-006 (`PathTraversalBlocked`).
     ///
     /// Exercises the `path.is_absolute()` branch plus the lexical containment check for an
     /// absolute path that escapes the sandbox.  Before FINDING-002 this code path was
@@ -603,7 +600,7 @@ mod tests {
         );
     }
 
-    /// test_bom_stripped_csv — CSV file with UTF-8 BOM prefix has clean column headers.
+    /// `test_bom_stripped_csv` — CSV file with UTF-8 BOM prefix has clean column headers.
     ///
     /// A BOM prefix corrupts the first column name with an invisible U+FEFF character,
     /// making header-based lookups fail silently. Stripping ensures clean headers.

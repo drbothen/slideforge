@@ -9,8 +9,8 @@ use std::sync::Arc;
 use ordered_float::OrderedFloat;
 use slideforge_types::{OrderedMap, Value};
 
-use crate::format::DataFormat;
 use crate::DataError;
+use crate::format::DataFormat;
 
 /// Convert a [`serde_json::Value`] into a [`slideforge_types::Value`].
 fn json_value_to_sf(v: serde_json::Value) -> Value {
@@ -32,19 +32,19 @@ fn json_value_to_sf(v: serde_json::Value) -> Value {
                 // Fallback: render as string (should not occur with standard JSON)
                 Value::Str(Arc::from(n.to_string().as_str()))
             }
-        }
+        },
         serde_json::Value::String(s) => Value::Str(Arc::from(s.as_str())),
         serde_json::Value::Array(arr) => {
             let items = arr.into_iter().map(json_value_to_sf).collect();
             Value::List(items)
-        }
+        },
         serde_json::Value::Object(obj) => {
             let mut map = OrderedMap::new();
             for (k, v) in obj {
                 map.insert(Arc::from(k.as_str()), json_value_to_sf(v));
             }
             Value::Map(map)
-        }
+        },
     }
 }
 
@@ -79,7 +79,7 @@ mod tests {
 
     use super::*;
 
-    /// test_BC_5_03_003_snapshot_json_fixture — snapshot test for JSON parsing output (FINDING-008).
+    /// `test_BC_5_03_003_snapshot_json_fixture` — snapshot test for JSON parsing output (FINDING-008).
     ///
     /// Verifies that the JSON parser produces a stable, deterministic debug representation
     /// for a known fixture. Snapshot is checked via `cargo insta test`.
@@ -90,14 +90,14 @@ mod tests {
         assert_debug_snapshot!("json_fixture", value);
     }
 
-    /// test_BC_5_03_003_parse_json_happy_path — complete JSON object with all supported types.
+    /// `test_BC_5_03_003_parse_json_happy_path` — complete JSON object with all supported types.
     ///
     /// Input: `{"revenue": 42, "label": "Q1", "active": true, "score": 3.14, "items": [1, 2], "meta": null}`
     /// Expected: Map with correct Value variants per field.
     #[test]
+    #[allow(clippy::approx_constant)] // 3.14 is an intentional JSON test value, not PI
     fn test_bc_5_03_003_parse_json_happy_path() {
-        let src =
-            r#"{"revenue": 42, "label": "Q1", "active": true, "score": 3.14, "items": [1, 2], "meta": null}"#;
+        let src = r#"{"revenue": 42, "label": "Q1", "active": true, "score": 3.14, "items": [1, 2], "meta": null}"#;
         let result = parse_json(src, "test.json");
         let value = result.expect("happy-path JSON must parse without error");
 
@@ -128,9 +128,7 @@ mod tests {
 
         // score: 3.14 → Float(3.14)
         let score = map.get("score").expect("score field must be present");
-        let f = score
-            .as_float()
-            .expect("score must be Value::Float");
+        let f = score.as_float().expect("score must be Value::Float");
         assert!(
             (f - 3.14_f64).abs() < 1e-10,
             "score float must be approximately 3.14"
@@ -151,7 +149,7 @@ mod tests {
         );
     }
 
-    /// test_BC_5_03_003_parse_json_null_preservation — explicit null stays Value::Null, not empty string.
+    /// `test_BC_5_03_003_parse_json_null_preservation` — explicit null stays `Value::Null`, not empty string.
     #[test]
     fn test_bc_5_03_003_parse_json_null_preservation() {
         let src = r#"{"x": null}"#;
@@ -164,7 +162,7 @@ mod tests {
         );
     }
 
-    /// test_BC_5_03_003_parse_json_malformed — malformed JSON returns DataError::ParseError with E-DAT-003.
+    /// `test_BC_5_03_003_parse_json_malformed` — malformed JSON returns `DataError::ParseError` with E-DAT-003.
     #[test]
     fn test_bc_5_03_003_parse_json_malformed() {
         let src = "{broken";
@@ -181,7 +179,7 @@ mod tests {
         );
     }
 
-    /// test_BC_5_03_003_parse_json_empty_object — `{}` → Value::Map(empty).
+    /// `test_BC_5_03_003_parse_json_empty_object` — `{}` → `Value::Map(empty)`.
     #[test]
     fn test_bc_5_03_003_parse_json_empty_object() {
         let src = "{}";
@@ -190,7 +188,7 @@ mod tests {
         assert!(map.is_empty(), "empty JSON object must produce empty map");
     }
 
-    /// test_BC_5_03_003_parse_json_empty_array — `[]` → Value::List(empty).
+    /// `test_BC_5_03_003_parse_json_empty_array` — `[]` → `Value::List(empty)`.
     #[test]
     fn test_bc_5_03_003_parse_json_empty_array() {
         let src = "[]";
@@ -199,8 +197,8 @@ mod tests {
         assert!(list.is_empty(), "empty JSON array must produce empty list");
     }
 
-    /// test_BC_5_03_003_parse_json_integer_vs_float — integer JSON numbers become Value::Int,
-    /// fractional numbers become Value::Float.
+    /// `test_BC_5_03_003_parse_json_integer_vs_float` — integer JSON numbers become `Value::Int`,
+    /// fractional numbers become `Value::Float`.
     #[test]
     fn test_bc_5_03_003_parse_json_integer_vs_float() {
         let src = r#"{"n": 7, "f": 7.5}"#;
@@ -216,8 +214,8 @@ mod tests {
         );
     }
 
-    /// test_BC_5_03_003_parse_json_large_u64_stays_str — integers beyond i64::MAX that fit
-    /// in u64 must become Value::Str to preserve precision (FINDING-007).
+    /// `test_BC_5_03_003_parse_json_large_u64_stays_str` — integers beyond `i64::MAX` that fit
+    /// in u64 must become `Value::Str` to preserve precision (FINDING-007).
     ///
     /// JSON numbers beyond 2^53 cannot be represented exactly as f64. To avoid
     /// silent precision loss, we keep them as their string representation.

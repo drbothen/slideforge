@@ -284,24 +284,58 @@ impl DataError {
     #[must_use]
     pub fn with_span(self, new_span: SourceSpan) -> Self {
         match self {
-            DataError::FileNotFound { code, path, .. } => {
-                DataError::FileNotFound { code, path, span: new_span }
-            }
-            DataError::ParseError { code, path, format, reason, .. } => {
-                DataError::ParseError { code, path, format, reason, span: new_span }
-            }
-            DataError::FieldNotFound { code, field, source_name, .. } => {
-                DataError::FieldNotFound { code, field, source_name, span: new_span }
-            }
-            DataError::UnsupportedFormat { code, extension, .. } => {
-                DataError::UnsupportedFormat { code, extension, span: new_span }
-            }
-            DataError::IoError { code, path, message, .. } => {
-                DataError::IoError { code, path, message, span: new_span }
-            }
-            DataError::PathTraversalBlocked { code, path, .. } => {
-                DataError::PathTraversalBlocked { code, path, span: new_span }
-            }
+            DataError::FileNotFound { code, path, .. } => DataError::FileNotFound {
+                code,
+                path,
+                span: new_span,
+            },
+            DataError::ParseError {
+                code,
+                path,
+                format,
+                reason,
+                ..
+            } => DataError::ParseError {
+                code,
+                path,
+                format,
+                reason,
+                span: new_span,
+            },
+            DataError::FieldNotFound {
+                code,
+                field,
+                source_name,
+                ..
+            } => DataError::FieldNotFound {
+                code,
+                field,
+                source_name,
+                span: new_span,
+            },
+            DataError::UnsupportedFormat {
+                code, extension, ..
+            } => DataError::UnsupportedFormat {
+                code,
+                extension,
+                span: new_span,
+            },
+            DataError::IoError {
+                code,
+                path,
+                message,
+                ..
+            } => DataError::IoError {
+                code,
+                path,
+                message,
+                span: new_span,
+            },
+            DataError::PathTraversalBlocked { code, path, .. } => DataError::PathTraversalBlocked {
+                code,
+                path,
+                span: new_span,
+            },
             // Variants without a span field are returned unchanged.
             other => other,
         }
@@ -377,7 +411,7 @@ impl DataError {
 mod tests {
     use super::*;
 
-    /// test_BC_5_03_001_error_code_file_not_found — E-DAT-004 constant is correct.
+    /// `test_BC_5_03_001_error_code_file_not_found` — E-DAT-004 constant is correct.
     #[test]
     fn test_bc_5_03_001_error_code_file_not_found() {
         assert_eq!(E_DAT_004, "E-DAT-004");
@@ -387,7 +421,7 @@ mod tests {
         assert!(err.to_string().contains("missing.json"));
     }
 
-    /// test_BC_5_03_001_error_code_file_not_found_with_span — FileNotFound carries SourceSpan.
+    /// `test_BC_5_03_001_error_code_file_not_found_with_span` — `FileNotFound` carries `SourceSpan`.
     #[test]
     fn test_bc_5_03_001_error_code_file_not_found_with_span() {
         use std::sync::Arc;
@@ -397,7 +431,7 @@ mod tests {
         assert!(err.to_string().contains("E-DAT-004"));
     }
 
-    /// test_BC_5_03_001_error_code_parse_error — E-DAT-003 constant is correct.
+    /// `test_BC_5_03_001_error_code_parse_error` — E-DAT-003 constant is correct.
     #[test]
     fn test_bc_5_03_001_error_code_parse_error() {
         assert_eq!(E_DAT_003, "E-DAT-003");
@@ -407,7 +441,7 @@ mod tests {
         assert!(err.to_string().contains("unexpected token"));
     }
 
-    /// test_BC_5_03_001_error_code_field_not_found — E-DAT-005 constant is correct.
+    /// `test_BC_5_03_001_error_code_field_not_found` — E-DAT-005 constant is correct.
     #[test]
     fn test_bc_5_03_001_error_code_field_not_found() {
         assert_eq!(E_DAT_005, "E-DAT-005");
@@ -417,7 +451,7 @@ mod tests {
         assert!(err.to_string().contains("revenue"));
     }
 
-    /// test_BC_5_03_001_error_code_unsupported_format — E-DAT-003 constant is correct.
+    /// `test_BC_5_03_001_error_code_unsupported_format` — E-DAT-003 constant is correct.
     #[test]
     fn test_bc_5_03_001_error_code_unsupported_format() {
         assert_eq!(E_DAT_003, "E-DAT-003");
@@ -427,7 +461,7 @@ mod tests {
         assert!(err.to_string().contains(".txt"));
     }
 
-    /// test_BC_5_03_001_error_code_network_error — E-DAT-001/002 constants are correct.
+    /// `test_BC_5_03_001_error_code_network_error` — E-DAT-001/002 constants are correct.
     #[test]
     fn test_bc_5_03_001_error_code_network_error() {
         assert_eq!(E_DAT_001, "E-DAT-001");
@@ -440,7 +474,7 @@ mod tests {
         assert!(err.to_string().contains("E-DAT-001"));
     }
 
-    /// test_BC_5_03_001_error_code_ssrf_blocked — SsrfBlocked uses E-DAT-006.
+    /// `test_BC_5_03_001_error_code_ssrf_blocked` — `SsrfBlocked` uses E-DAT-006.
     #[test]
     fn test_bc_5_03_001_error_code_ssrf_blocked() {
         let err = DataError::SsrfBlocked {
@@ -452,7 +486,7 @@ mod tests {
         assert!(err.to_string().contains("169.254.169.254"));
     }
 
-    /// test_BC_5_03_001_error_code_io_error — IoError uses E-DAT-004.
+    /// `test_BC_5_03_001_error_code_io_error` — `IoError` uses E-DAT-004.
     #[test]
     fn test_bc_5_03_001_error_code_io_error() {
         let err = DataError::io_error("/tmp/data.csv", "permission denied");
@@ -461,7 +495,7 @@ mod tests {
         assert!(err.to_string().contains("permission denied"));
     }
 
-    /// test_BC_5_03_001_error_code_path_traversal — PathTraversalBlocked uses E-DAT-006.
+    /// `test_BC_5_03_001_error_code_path_traversal` — `PathTraversalBlocked` uses E-DAT-006.
     #[test]
     fn test_bc_5_03_001_error_code_path_traversal() {
         let err = DataError::path_traversal_blocked("../../etc/passwd");
@@ -470,7 +504,7 @@ mod tests {
         assert!(err.to_string().contains("etc/passwd"));
     }
 
-    /// test_BC_5_03_001_unsupported_format_hint — error message lists supported extensions.
+    /// `test_BC_5_03_001_unsupported_format_hint` — error message lists supported extensions.
     #[test]
     fn test_bc_5_03_001_unsupported_format_hint() {
         let err = DataError::unsupported_format("xls");
@@ -480,9 +514,9 @@ mod tests {
         assert!(msg.contains("toml"), "hint must list toml");
     }
 
-    /// test_with_span_io_error — with_span() attaches span to IoError (FINDING-001).
+    /// `test_with_span_io_error` — `with_span()` attaches span to `IoError` (FINDING-001).
     ///
-    /// Previously IoError fell into the catch-all `other => other` arm and silently
+    /// Previously `IoError` fell into the catch-all `other => other` arm and silently
     /// discarded the span. Now it must be updated.
     #[test]
     fn test_with_span_io_error() {
@@ -491,14 +525,17 @@ mod tests {
         let err_with_span = err.with_span(span.clone());
         // After with_span, the error must carry the provided span (visible in display string).
         let msg = err_with_span.to_string();
-        assert!(msg.contains("deck.sf"), "with_span must embed the new file in IoError");
+        assert!(
+            msg.contains("deck.sf"),
+            "with_span must embed the new file in IoError"
+        );
         // Also verify the error code is preserved.
         assert_eq!(err_with_span.code(), "E-DAT-004");
     }
 
-    /// test_with_span_path_traversal_blocked — with_span() attaches span to PathTraversalBlocked.
+    /// `test_with_span_path_traversal_blocked` — `with_span()` attaches span to `PathTraversalBlocked`.
     ///
-    /// Previously PathTraversalBlocked fell into the catch-all arm. Now it must be updated.
+    /// Previously `PathTraversalBlocked` fell into the catch-all arm. Now it must be updated.
     #[test]
     fn test_with_span_path_traversal_blocked() {
         let err = DataError::path_traversal_blocked("../../etc/passwd");
@@ -512,18 +549,21 @@ mod tests {
         assert_eq!(err_with_span.code(), "E-DAT-006");
     }
 
-    /// test_io_error_at_constructor — io_error_at() carries the provided span.
+    /// `test_io_error_at_constructor` — `io_error_at()` carries the provided span.
     #[test]
     fn test_io_error_at_constructor() {
         let span = SourceSpan::new(Arc::from("slide.sf"), 3, 2, 80);
         let err = DataError::io_error_at("/tmp/data.csv", "disk full", span);
         assert_eq!(err.code(), "E-DAT-004");
         let msg = err.to_string();
-        assert!(msg.contains("slide.sf"), "io_error_at span must appear in message");
+        assert!(
+            msg.contains("slide.sf"),
+            "io_error_at span must appear in message"
+        );
         assert!(msg.contains("disk full"));
     }
 
-    /// test_path_traversal_blocked_at_constructor — path_traversal_blocked_at() carries the span.
+    /// `test_path_traversal_blocked_at_constructor` — `path_traversal_blocked_at()` carries the span.
     #[test]
     fn test_path_traversal_blocked_at_constructor() {
         let span = SourceSpan::new(Arc::from("main.sf"), 2, 1, 30);

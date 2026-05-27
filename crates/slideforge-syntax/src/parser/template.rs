@@ -44,8 +44,7 @@ type TSpan = SimpleSpan;
 /// E-PAR-012 is the code for unterminated text-mode interpolation.
 /// (E-PAR-004 is reserved for `IncludeCycle` in slideforge-eval.)
 fn unterminated_interpolation_msg() -> String {
-    "E-PAR-012: unterminated `{{` interpolation — missing `}}` to close the expression"
-        .to_string()
+    "E-PAR-012: unterminated `{{` interpolation — missing `}}` to close the expression".to_string()
 }
 
 /// Produce an E-PAR-013 error message for an empty `{{ }}`.

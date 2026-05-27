@@ -19,8 +19,8 @@ use std::sync::Arc;
 use ordered_float::OrderedFloat;
 use slideforge_types::{OrderedMap, Value};
 
-use crate::format::DataFormat;
 use crate::DataError;
+use crate::format::DataFormat;
 
 /// Convert a [`serde_yaml_ng::Value`] into a [`slideforge_types::Value`].
 fn yaml_value_to_sf(v: serde_yaml_ng::Value) -> Value {
@@ -40,12 +40,12 @@ fn yaml_value_to_sf(v: serde_yaml_ng::Value) -> Value {
                 // Fallback: render as string (e.g. special float representations)
                 Value::Str(Arc::from(n.to_string().as_str()))
             }
-        }
+        },
         serde_yaml_ng::Value::String(s) => Value::Str(Arc::from(s.as_str())),
         serde_yaml_ng::Value::Sequence(seq) => {
             let items = seq.into_iter().map(yaml_value_to_sf).collect();
             Value::List(items)
-        }
+        },
         serde_yaml_ng::Value::Mapping(mapping) => {
             let mut map = OrderedMap::new();
             for (k, v) in mapping {
@@ -66,16 +66,16 @@ fn yaml_value_to_sf(v: serde_yaml_ng::Value) -> Value {
                             .trim()
                             .to_owned();
                         Arc::from(stripped.as_str())
-                    }
+                    },
                 };
                 map.insert(key, yaml_value_to_sf(v));
             }
             Value::Map(map)
-        }
+        },
         serde_yaml_ng::Value::Tagged(tagged) => {
             // Treat tagged values as their inner value
             yaml_value_to_sf(tagged.value)
-        }
+        },
     }
 }
 
@@ -100,7 +100,7 @@ mod tests {
 
     use super::*;
 
-    /// test_BC_5_03_005_parse_yaml_yes_stays_string — `YES` must remain a string.
+    /// `test_BC_5_03_005_parse_yaml_yes_stays_string` — `YES` must remain a string.
     ///
     /// R3 finding: YAML-style implicit coercion is forbidden in slideforge.
     /// `YES` is NOT a boolean in YAML 1.2.
@@ -122,7 +122,7 @@ mod tests {
         );
     }
 
-    /// test_BC_5_03_005_parse_yaml_on_stays_string — `on` must remain a string.
+    /// `test_BC_5_03_005_parse_yaml_on_stays_string` — `on` must remain a string.
     #[test]
     fn test_bc_5_03_005_parse_yaml_on_stays_string() {
         let src = "flag: on";
@@ -136,7 +136,7 @@ mod tests {
         );
     }
 
-    /// test_BC_5_03_005_parse_yaml_no_stays_string — `no` must remain a string.
+    /// `test_BC_5_03_005_parse_yaml_no_stays_string` — `no` must remain a string.
     #[test]
     fn test_bc_5_03_005_parse_yaml_no_stays_string() {
         let src = "flag: no";
@@ -150,7 +150,7 @@ mod tests {
         );
     }
 
-    /// test_BC_5_03_005_parse_yaml_yes_upper_stays_string — `YES` (uppercase) must remain a string.
+    /// `test_BC_5_03_005_parse_yaml_yes_upper_stays_string` — `YES` (uppercase) must remain a string.
     ///
     /// YAML 1.1 treats `YES` as `true`; YAML 1.2 does not. slideforge uses YAML 1.2 semantics.
     #[test]
@@ -162,7 +162,7 @@ mod tests {
         assert_eq!(flag, &Value::Str(Arc::from("YES")), "'YES' must be Str");
     }
 
-    /// test_BC_5_03_005_parse_yaml_on_upper_stays_string — `ON` must remain a string.
+    /// `test_BC_5_03_005_parse_yaml_on_upper_stays_string` — `ON` must remain a string.
     #[test]
     fn test_bc_5_03_005_parse_yaml_on_upper_stays_string() {
         let src = "flag: ON";
@@ -172,7 +172,7 @@ mod tests {
         assert_eq!(flag, &Value::Str(Arc::from("ON")), "'ON' must be Str");
     }
 
-    /// test_BC_5_03_005_parse_yaml_no_upper_stays_string — `NO` must remain a string.
+    /// `test_BC_5_03_005_parse_yaml_no_upper_stays_string` — `NO` must remain a string.
     #[test]
     fn test_bc_5_03_005_parse_yaml_no_upper_stays_string() {
         let src = "flag: NO";
@@ -182,7 +182,7 @@ mod tests {
         assert_eq!(flag, &Value::Str(Arc::from("NO")), "'NO' must be Str");
     }
 
-    /// test_BC_5_03_005_parse_yaml_off_lower_stays_string — `off` must remain a string.
+    /// `test_BC_5_03_005_parse_yaml_off_lower_stays_string` — `off` must remain a string.
     #[test]
     fn test_bc_5_03_005_parse_yaml_off_lower_stays_string() {
         let src = "flag: off";
@@ -192,7 +192,7 @@ mod tests {
         assert_eq!(flag, &Value::Str(Arc::from("off")), "'off' must be Str");
     }
 
-    /// test_BC_5_03_005_parse_yaml_off_upper_stays_string — `OFF` must remain a string.
+    /// `test_BC_5_03_005_parse_yaml_off_upper_stays_string` — `OFF` must remain a string.
     #[test]
     fn test_bc_5_03_005_parse_yaml_off_upper_stays_string() {
         let src = "flag: OFF";
@@ -202,7 +202,7 @@ mod tests {
         assert_eq!(flag, &Value::Str(Arc::from("OFF")), "'OFF' must be Str");
     }
 
-    /// test_BC_5_03_005_parse_yaml_true_is_bool — canonical `true` must become Value::Bool(true).
+    /// `test_BC_5_03_005_parse_yaml_true_is_bool` — canonical `true` must become `Value::Bool(true)`.
     #[test]
     fn test_bc_5_03_005_parse_yaml_true_is_bool() {
         let src = "flag: true";
@@ -216,7 +216,7 @@ mod tests {
         );
     }
 
-    /// test_BC_5_03_005_parse_yaml_false_is_bool — canonical `false` must become Value::Bool(false).
+    /// `test_BC_5_03_005_parse_yaml_false_is_bool` — canonical `false` must become `Value::Bool(false)`.
     #[test]
     fn test_bc_5_03_005_parse_yaml_false_is_bool() {
         let src = "flag: false";
@@ -230,7 +230,7 @@ mod tests {
         );
     }
 
-    /// test_BC_5_03_005_parse_yaml_happy_path — int and string fields parse correctly.
+    /// `test_BC_5_03_005_parse_yaml_happy_path` — int and string fields parse correctly.
     #[test]
     fn test_bc_5_03_005_parse_yaml_happy_path() {
         let src = "count: 5\nlabel: hello";
@@ -249,7 +249,7 @@ mod tests {
         );
     }
 
-    /// test_BC_5_03_005_parse_yaml_null_preserved — YAML `null` → Value::Null.
+    /// `test_BC_5_03_005_parse_yaml_null_preserved` — YAML `null` → `Value::Null`.
     #[test]
     fn test_bc_5_03_005_parse_yaml_null_preserved() {
         let src = "x: null";
@@ -262,7 +262,7 @@ mod tests {
         );
     }
 
-    /// test_BC_5_03_005_parse_yaml_malformed — invalid YAML → DataError with E-DAT-003.
+    /// `test_BC_5_03_005_parse_yaml_malformed` — invalid YAML → `DataError` with E-DAT-003.
     #[test]
     fn test_bc_5_03_005_parse_yaml_malformed() {
         let src = ":\t:invalid";
@@ -271,8 +271,8 @@ mod tests {
         assert_eq!(err.code(), "E-DAT-003");
     }
 
-    /// test_bc_5_03_005_parse_yaml_large_u64_stays_str — u64 value outside i64 range must become
-    /// Value::Str, not a lossy Value::Float (FINDING-001).
+    /// `test_bc_5_03_005_parse_yaml_large_u64_stays_str` — u64 value outside i64 range must become
+    /// `Value::Str`, not a lossy `Value::Float` (FINDING-001).
     ///
     /// A value like `9999999999999999999` cannot fit in i64 (max ~9.2e18) and must not be
     /// silently rounded to a float. The JSON parser has the same guard; YAML must match.
@@ -295,7 +295,7 @@ mod tests {
         );
     }
 
-    /// test_bc_5_03_005_parse_yaml_snapshot — representative YAML fixture snapshot test.
+    /// `test_bc_5_03_005_parse_yaml_snapshot` — representative YAML fixture snapshot test.
     ///
     /// Covers map, list, int, float, bool, string, and null in one fixture to catch
     /// any regression in the `yaml_value_to_sf` conversion.
@@ -315,7 +315,7 @@ meta: null
         insta::assert_debug_snapshot!(value);
     }
 
-    /// test_BC_5_03_005_parse_yaml_non_string_keys — integer and bool keys are converted to
+    /// `test_BC_5_03_005_parse_yaml_non_string_keys` — integer and bool keys are converted to
     /// string without a `---\n` prefix (FINDING-013).
     #[test]
     fn test_bc_5_03_005_parse_yaml_non_string_keys() {
@@ -335,7 +335,10 @@ meta: null
 
         // Bool key true → "true"
         let key_true = map.get("true");
-        assert!(key_true.is_some(), "bool key true must be accessible as \"true\"");
+        assert!(
+            key_true.is_some(),
+            "bool key true must be accessible as \"true\""
+        );
         assert_eq!(
             key_true,
             Some(&Value::Str(Arc::from("yes_value"))),

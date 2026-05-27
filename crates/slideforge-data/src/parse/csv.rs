@@ -10,8 +10,8 @@ use std::sync::Arc;
 
 use slideforge_types::{OrderedMap, Value};
 
-use crate::format::DataFormat;
 use crate::DataError;
+use crate::format::DataFormat;
 
 /// Parse a CSV string and return a [`Value::List`] of row maps.
 ///
@@ -42,10 +42,7 @@ pub fn parse_csv(source: &str, path: &str) -> Result<Value, DataError> {
         .map_err(|e| DataError::parse_error(path, DataFormat::Csv, e.to_string()))?
         .clone();
 
-    let headers: Vec<Arc<str>> = raw_headers
-        .iter()
-        .map(|h| Arc::from(h.trim()))
-        .collect();
+    let headers: Vec<Arc<str>> = raw_headers.iter().map(|h| Arc::from(h.trim())).collect();
 
     // Detect duplicate headers
     let mut seen: HashSet<&str> = HashSet::new();
@@ -63,7 +60,8 @@ pub fn parse_csv(source: &str, path: &str) -> Result<Value, DataError> {
     let mut rows: Vec<Value> = Vec::new();
 
     for result in reader.records() {
-        let record = result.map_err(|e| DataError::parse_error(path, DataFormat::Csv, e.to_string()))?;
+        let record =
+            result.map_err(|e| DataError::parse_error(path, DataFormat::Csv, e.to_string()))?;
         let mut map = OrderedMap::new();
 
         for (i, header) in headers.iter().enumerate() {
@@ -92,7 +90,7 @@ mod tests {
 
     use super::*;
 
-    /// test_BC_5_03_004_snapshot_csv_fixture — snapshot test for CSV parsing output (FINDING-008).
+    /// `test_BC_5_03_004_snapshot_csv_fixture` — snapshot test for CSV parsing output (FINDING-008).
     ///
     /// Verifies that the CSV parser produces a stable, deterministic debug representation
     /// for a known two-row fixture. Snapshot is checked via `cargo insta test`.
@@ -103,7 +101,7 @@ mod tests {
         assert_debug_snapshot!("csv_fixture", value);
     }
 
-    /// test_BC_5_03_004_parse_csv_happy_path — two-column CSV with two data rows.
+    /// `test_BC_5_03_004_parse_csv_happy_path` — two-column CSV with two data rows.
     ///
     /// Input: `"name,revenue\nAlice,100\nBob,200"`
     /// Expected: `Value::List` of 2 `Value::Map` rows.
@@ -140,7 +138,7 @@ mod tests {
         );
     }
 
-    /// test_BC_5_03_004_parse_csv_duplicate_headers — duplicate column names → DataError.
+    /// `test_BC_5_03_004_parse_csv_duplicate_headers` — duplicate column names → `DataError`.
     ///
     /// Per EC-006 and EC-007: duplicate header names must be rejected.
     #[test]
@@ -155,7 +153,7 @@ mod tests {
         );
     }
 
-    /// test_BC_5_03_004_parse_csv_headers_only — header row with no data rows → empty List.
+    /// `test_BC_5_03_004_parse_csv_headers_only` — header row with no data rows → empty List.
     #[test]
     fn test_bc_5_03_004_parse_csv_headers_only() {
         let src = "name,val\n";
@@ -167,7 +165,7 @@ mod tests {
         );
     }
 
-    /// test_BC_5_03_004_parse_csv_header_whitespace_trimming — headers with surrounding spaces are trimmed.
+    /// `test_BC_5_03_004_parse_csv_header_whitespace_trimming` — headers with surrounding spaces are trimmed.
     #[test]
     fn test_bc_5_03_004_parse_csv_header_whitespace_trimming() {
         let src = " name , val \nAlice,42";
@@ -186,7 +184,7 @@ mod tests {
         );
     }
 
-    /// test_BC_5_03_004_parse_csv_empty_cell_is_null — empty CSV cell → Value::Null (FINDING-009).
+    /// `test_BC_5_03_004_parse_csv_empty_cell_is_null` — empty CSV cell → `Value::Null` (FINDING-009).
     ///
     /// An empty cell (`"name,val\nAlice,\n"`) must produce `Value::Null` for the empty
     /// column, not an empty string.
@@ -209,7 +207,7 @@ mod tests {
         );
     }
 
-    /// test_BC_5_03_004_parse_csv_extra_fields_dropped — extra data fields beyond headers are
+    /// `test_BC_5_03_004_parse_csv_extra_fields_dropped` — extra data fields beyond headers are
     /// silently dropped (csv crate flexible mode, by design).
     ///
     /// This is intentional behavior: the `csv` crate's flexible reader drops extra fields.
@@ -225,11 +223,15 @@ mod tests {
         // Only "a" and "b" are accessible; the third value is dropped.
         assert_eq!(row.get("a"), Some(&Value::Str(Arc::from("1"))));
         assert_eq!(row.get("b"), Some(&Value::Str(Arc::from("2"))));
-        assert_eq!(row.len(), 2, "extra fields must be dropped: only 2 keys in map");
+        assert_eq!(
+            row.len(),
+            2,
+            "extra fields must be dropped: only 2 keys in map"
+        );
     }
 
-    /// test_BC_5_03_004_parse_csv_short_row_fills_null — row with fewer fields than headers fills
-    /// missing columns with Value::Null (FINDING-002).
+    /// `test_BC_5_03_004_parse_csv_short_row_fills_null` — row with fewer fields than headers fills
+    /// missing columns with `Value::Null` (FINDING-002).
     ///
     /// Input: `"a,b,c\n1"` — header row has 3 columns but the single data row has only 1 field.
     /// Expected: row[0] has a="1", b=Null, c=Null.
@@ -262,7 +264,7 @@ mod tests {
         );
     }
 
-    /// test_BC_5_03_004_parse_csv_missing_header — empty string → DataError (no header row).
+    /// `test_BC_5_03_004_parse_csv_missing_header` — empty string → `DataError` (no header row).
     #[test]
     fn test_bc_5_03_004_parse_csv_missing_header() {
         let src = "";
@@ -273,10 +275,10 @@ mod tests {
                 // Empty input — either empty list is OK
                 let list = v.as_list().expect("if Ok, must be List");
                 assert!(list.is_empty(), "empty CSV produces empty list");
-            }
+            },
             Err(e) => {
                 assert_eq!(e.code(), "E-DAT-003");
-            }
+            },
         }
     }
 }

@@ -1,6 +1,6 @@
 //! `DataSource` plugin implementations for slideforge.
 //!
-//! This crate provides the built-in [`DataSource`] plugin implementations
+//! This crate provides the built-in `DataSource` plugin implementations
 //! that load data from local files in JSON, CSV, YAML, and TOML formats.
 //!
 //! ## Supported formats
@@ -14,13 +14,13 @@
 //!
 //! ## Architecture
 //!
-//! All implementations conform to the [`DataSource`] trait defined in
+//! All implementations conform to the `DataSource` trait defined in
 //! `slideforge-plugin-api`. The file-based loader dispatches to per-format
 //! parsers in the [`parse`] module.
 //!
 //! ## Dog-fooding Guarantee (BC-5.02.002)
 //!
-//! `FileDataSource` implements [`DataSource`] using only the public plugin-api
+//! `FileDataSource` implements `DataSource` using only the public plugin-api
 //! traits. No internal bypass of the plugin system.
 
 #![forbid(unsafe_code)]

@@ -11,7 +11,7 @@
 //!
 //! # Known limitation: zero-origin source spans
 //!
-//! All [`EvalError`](crate::error::EvalError) diagnostics currently report
+//! All [`EvalError`] diagnostics currently report
 //! [`slideforge_types::SourceSpan::default()`] (zero-origin spans). This means
 //! error source locations point to the beginning of the file rather than the
 //! actual expression site.
@@ -161,6 +161,9 @@ pub fn eval_deck_with_variant(
     active_variant: Option<&str>,
     sink: &mut DiagnosticSink,
 ) -> Option<Deck> {
+    /// Fallback version string when the DSL file omits a `slideforge_version` declaration.
+    const FALLBACK_VERSION: &str = "0.1.0";
+
     // ── Step 1: Build deck-level variable environment from all vars: blocks ──
     let mut deck_vars: IndexMap<Arc<str>, Value> = IndexMap::new();
 
@@ -280,14 +283,10 @@ pub fn eval_deck_with_variant(
         .map(|l| Arc::from(l.value().as_str()));
     let title = None; // Title is not present in DeckNode (comes from a slide); leave None.
 
-    /// Fallback version string when the DSL file omits a `slideforge_version` declaration.
-    const FALLBACK_VERSION: &str = "0.1.0";
-
-    let version_str: Arc<str> = deck_node
-        .version
-        .as_ref()
-        .map(|v| Arc::from(v.value().as_str()))
-        .unwrap_or_else(|| Arc::from(FALLBACK_VERSION));
+    let version_str: Arc<str> = deck_node.version.as_ref().map_or_else(
+        || Arc::from(FALLBACK_VERSION),
+        |v| Arc::from(v.value().as_str()),
+    );
 
     let metadata = DeckMetadata {
         title,
