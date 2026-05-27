@@ -19,16 +19,35 @@ use std::sync::Arc;
 use slideforge_types::ContentBlock;
 pub use slideforge_types::Emu;
 
-/// The standard widescreen 16:9 page width (10 inches = 9,144,000 EMU).
+/// The default canvas width for the layout engine (10 inches = 9,144,000 EMU).
 ///
-/// This is the default canvas width used by the layout engine when the `Brand`
-/// does not specify custom dimensions (AC-004).
+/// This is the canvas width used by the layout engine when the active `Brand`
+/// does not specify custom dimensions (AC-004). It matches
+/// `slideforge_types::CANVAS_WIDTH` (9,144,000 EMU).
+///
+/// ## Relationship to PPTX native dimensions
+///
+/// The PPTX native slide width (`slideforge_types::SLIDE_WIDTH`) is
+/// 12,192,000 EMU (13.33 inches, the `PowerPoint` widescreen default). The
+/// layout engine operates at 9,144,000 EMU (10 inches) as its design canvas
+/// and the PPTX exporter scales coordinates to the PPTX native dimensions at
+/// export time. This distinction exists because the DSL design canvas matches
+/// the print-inch coordinate space (1 inch = 914,400 EMU), whereas PPTX
+/// encodes slides as 13.33 × 7.5 inches at the same 914,400 EMU/inch scale.
 pub const DEFAULT_PAGE_WIDTH: Emu = Emu(9_144_000);
 
-/// The standard widescreen 16:9 page height (5.625 inches = 5,143,500 EMU).
+/// The default canvas height for the layout engine (5.625 inches = 5,143,500 EMU).
 ///
-/// This is the default canvas height used by the layout engine when the `Brand`
+/// This is the canvas height used by the layout engine when the active `Brand`
 /// does not specify custom dimensions (AC-004).
+///
+/// ## Relationship to PPTX native dimensions
+///
+/// The PPTX native slide height (`slideforge_types::SLIDE_HEIGHT`) is
+/// 6,858,000 EMU (7.5 inches). The layout engine uses 5,143,500 EMU
+/// (5.625 inches) as its 16:9 design canvas height — a 3/4 scale of the PPTX
+/// native height. The PPTX exporter rescales all vertical coordinates by the
+/// ratio `SLIDE_HEIGHT / DEFAULT_PAGE_HEIGHT` (≈ 1.333) at export time.
 pub const DEFAULT_PAGE_HEIGHT: Emu = Emu(5_143_500);
 
 /// The standard 4:3 page height (7.5 inches = 6,858,000 EMU).
@@ -268,6 +287,16 @@ pub enum TextOverflow {
     /// The text fits within the bounding box without truncation or overflow.
     Fit,
     /// The text is longer than the bounding box allows; excess text is hidden.
+    ///
+    /// Reserved for STORY-027 (content-resolution wrapping mode). When a
+    /// slide is configured with `overflow: truncate`, the layout engine sets
+    /// this variant instead of [`TextOverflow::Overflow`]. The validator
+    /// suppresses the canvas-overflow warning for `Truncate` frames because
+    /// the author has explicitly opted in to clipping.
+    ///
+    /// Not produced by the current layout engine — all overflow currently
+    /// results in `TextOverflow::Overflow`. This variant exists in the type
+    /// to preserve exhaustive match coverage when STORY-027 activates it.
     Truncate,
     /// The text exceeds the bounding box height by `excess_emu`.
     ///

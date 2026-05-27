@@ -10,9 +10,10 @@
 //! - Character width estimate: `Emu(76_200)` = 1 inch / 12 chars at 12pt
 //!   (72 points/inch × 12pt = 1 inch → 1/12 chars per inch).
 //! - Line length: `floor(bbox.width / char_width_emu)` characters per line.
-//! - Line count: `ceil(text.chars().count() / chars_per_line)`.
+//! - Line count: `ceil(text.chars().count() / chars_per_line)` per paragraph,
+//!   summed across all `\n`-delimited paragraphs.
 //! - Frame height used: `line_count × line_height_emu` where
-//!   `line_height_emu = Emu(152_400)` (12pt × 1.5 leading = 18pt =
+//!   `line_height_emu = Emu(228_600)` (12pt × 1.5 leading = 18pt =
 //!   18 × 12,700 EMU).
 //! - Overflow: `used_height > bbox.height`.
 //!
@@ -71,8 +72,6 @@ pub fn compute_text_flow_with_char_width(
         };
     }
 
-    let char_count = text.chars().count();
-
     // How many characters fit on one line?
     // Guard against zero char_width to avoid division by zero.
     let chars_per_line: usize = if char_width_emu.0 <= 0 {
@@ -84,8 +83,28 @@ pub fn compute_text_flow_with_char_width(
         usize::try_from(cpp).unwrap_or(1).max(1)
     };
 
-    // Ceiling division: ceil(char_count / chars_per_line)
-    let line_count = char_count.div_ceil(chars_per_line);
+    // Split on newlines so each paragraph is counted as at least one line.
+    // This is the minimum line count — wrapping within each paragraph may
+    // add more lines.
+    let paragraph_line_count: usize = text
+        .lines()
+        .map(|paragraph| {
+            let char_count = paragraph.chars().count();
+            if char_count == 0 {
+                // An empty paragraph (e.g., a blank line between sections)
+                // still occupies one visual line.
+                1
+            } else {
+                char_count.div_ceil(chars_per_line)
+            }
+        })
+        .sum();
+
+    // `text.lines()` returns 0 items for empty strings, but we already
+    // handled the empty-string case above. For a non-empty string with no
+    // newlines this yields the same result as the previous single-paragraph
+    // calculation.
+    let line_count = paragraph_line_count.max(1);
 
     // Total height used by text.
     // i64::try_from(usize) is infallible on 64-bit targets and saturates to
@@ -226,5 +245,42 @@ mod tests {
         let tf = compute_text_flow_with_char_width(&text, bbox, Emu(100_000));
         assert_eq!(tf.line_count, 1);
         assert!(matches!(tf.overflow, TextOverflow::Fit));
+    }
+
+    /// MED-003 — Newlines in text force additional lines.
+    ///
+    /// A text with embedded `\n` characters must produce at least as many
+    /// lines as there are logical paragraphs (line breaks), regardless of
+    /// wrapping.
+    #[test]
+    fn test_bc_3_06_001_text_flow_newlines_count_as_lines() {
+        // 3 short lines separated by newlines — each line fits on 1 row.
+        // The frame is wide enough that wrapping never adds lines.
+        let text = "Hello\nWorld\nFoo";
+        let bbox = make_bbox(8_229_600, 685_800);
+        let tf = compute_text_flow(text, bbox);
+        // Must produce at least 3 lines (one per paragraph).
+        assert!(
+            tf.line_count >= 3,
+            "text with 2 newlines must produce >= 3 lines; got {}",
+            tf.line_count
+        );
+    }
+
+    /// MED-003 — Newlines in overflow scenario are accounted for.
+    ///
+    /// A text with many newlines in a very short frame must overflow.
+    #[test]
+    fn test_bc_3_06_001_text_flow_newlines_cause_overflow() {
+        // 10 short lines, each a single char, in a 1-line-tall frame.
+        let text = "a\nb\nc\nd\ne\nf\ng\nh\ni\nj";
+        let bbox = make_bbox(8_229_600, 228_600); // 1 line tall
+        let tf = compute_text_flow(text, bbox);
+        // 10 paragraphs must overflow a 1-line frame.
+        assert!(
+            matches!(tf.overflow, TextOverflow::Overflow { .. }),
+            "10-line text must overflow a 1-line frame; got {:?}",
+            tf.overflow
+        );
     }
 }
