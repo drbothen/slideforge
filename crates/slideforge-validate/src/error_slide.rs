@@ -17,7 +17,9 @@
 //! | `error_code` | The diagnostic code (e.g., `"E-LAY-002"`) |
 //! | `position` | 1-based slide position in the deck |
 
-use slideforge_types::Slide;
+use std::sync::Arc;
+
+use slideforge_types::{FieldValue, OrderedMap, Slide, SourceSpan, Value};
 
 /// The internal slide type identifier for error placeholder slides.
 ///
@@ -38,11 +40,35 @@ pub const ERROR_PLACEHOLDER_SLIDE_TYPE: &str = "__error_placeholder__";
 /// * `message` — A human-readable description of the error.
 /// * `position` — The 1-based index of the slide in the deck where the
 ///   error occurred. For deck-level errors (e.g., zero slides), pass `0`.
-pub fn error_slide_placeholder(_code: &str, _message: &str, _position: usize) -> Slide {
-    todo!(
-        "STORY-016 implementer: construct Slide with slide_type = ERROR_PLACEHOLDER_SLIDE_TYPE, \
-         title field = message, error_code field = code, position field = position"
-    )
+#[must_use]
+pub fn error_slide_placeholder(code: &str, message: &str, position: usize) -> Slide {
+    let mut fields: OrderedMap<Arc<str>, FieldValue> = OrderedMap::new();
+
+    fields.insert(
+        Arc::from("title"),
+        FieldValue::Literal(Value::Str(Arc::from(message))),
+    );
+    fields.insert(
+        Arc::from("error_code"),
+        FieldValue::Literal(Value::Str(Arc::from(code))),
+    );
+    // Store position as i64 per Value::Int — usize fits within i64 on all
+    // supported platforms (u64::MAX > i64::MAX is moot for slide positions).
+    #[allow(clippy::cast_possible_wrap)]
+    let position_i64 = position as i64;
+    fields.insert(
+        Arc::from("position"),
+        FieldValue::Literal(Value::Int(position_i64)),
+    );
+
+    Slide {
+        slide_type: Arc::from(ERROR_PLACEHOLDER_SLIDE_TYPE),
+        fields,
+        blocks: vec![],
+        register: None,
+        tags: vec![],
+        source_span: SourceSpan::default(),
+    }
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────

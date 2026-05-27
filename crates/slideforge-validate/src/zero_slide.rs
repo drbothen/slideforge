@@ -26,17 +26,20 @@ pub(crate) const E_LAY_002: &str = "E-LAY-002";
 pub struct ZeroSlideValidator;
 
 impl Validator for ZeroSlideValidator {
-    fn id(&self) -> &str {
+    fn id(&self) -> &'static str {
         "zero-slide"
     }
 
-    fn validate(&self, _deck: &Deck, _opts: &ValidatorOptions) -> Vec<Diagnostic> {
-        todo!("STORY-016 implementer: emit E-LAY-002 when deck.slides is empty")
+    fn validate(&self, deck: &Deck, _opts: &ValidatorOptions) -> Vec<Diagnostic> {
+        if deck.slides.is_empty() {
+            vec![make_zero_slide_error(&SourceSpan::default())]
+        } else {
+            vec![]
+        }
     }
 }
 
 /// Construct an `E-LAY-002` diagnostic for an empty deck.
-#[allow(dead_code)] // used by the implementer; present now for compile-time API review
 fn make_zero_slide_error(span: &SourceSpan) -> Diagnostic {
     Diagnostic {
         severity: DiagnosticSeverity::Error,

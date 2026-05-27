@@ -70,12 +70,34 @@ pub struct CanvasOverflowValidator {
 }
 
 impl Validator for CanvasOverflowValidator {
-    fn id(&self) -> &str {
+    fn id(&self) -> &'static str {
         "canvas-overflow"
     }
 
-    fn validate(&self, _deck: &Deck, _opts: &ValidatorOptions) -> Vec<Diagnostic> {
-        todo!("STORY-016 implementer: count bullets per slide, estimate height, emit E-LAY-001 when exceeded")
+    fn validate(&self, deck: &Deck, _opts: &ValidatorOptions) -> Vec<Diagnostic> {
+        let mut diagnostics: Vec<Diagnostic> = Vec::new();
+
+        for (index, slide) in deck.slides.iter().enumerate() {
+            let bullet_count = count_bullets(slide);
+            let estimated = estimate_height(bullet_count);
+            if estimated > BODY_PLACEHOLDER_HEIGHT {
+                let severity = if self.strict_overflow {
+                    DiagnosticSeverity::Error
+                } else {
+                    DiagnosticSeverity::Warning
+                };
+                // Use 1-based index in the message for user-facing display
+                diagnostics.push(make_overflow_diagnostic(
+                    index + 1,
+                    estimated,
+                    BODY_PLACEHOLDER_HEIGHT,
+                    severity,
+                    &slide.source_span,
+                ));
+            }
+        }
+
+        diagnostics
     }
 }
 
@@ -84,21 +106,27 @@ impl Validator for CanvasOverflowValidator {
 /// Nested bullet children are NOT counted separately — the heuristic treats
 /// each `BulletItem` at the top level as one line. Sub-bullets are included
 /// in the parent's line height implicitly.
-#[allow(dead_code)] // called by implementer; not yet wired
-fn count_bullets(_slide: &Slide) -> usize {
-    todo!("STORY-016 implementer: sum bullet counts across all ContentBlock::Bullets in slide.blocks")
+fn count_bullets(slide: &Slide) -> usize {
+    use slideforge_types::ContentBlock;
+
+    slide
+        .blocks
+        .iter()
+        .map(|block| match &block.content {
+            ContentBlock::Bullets(items) => items.len(),
+            _ => 0,
+        })
+        .sum()
 }
 
 /// Estimate the rendered height of a slide's bullet content in EMU.
 ///
 /// Uses `bullet_count × LINE_HEIGHT_PER_BULLET` as a conservative heuristic.
-#[allow(dead_code)] // called by implementer; not yet wired
-fn estimate_height(_bullet_count: usize) -> Emu {
-    todo!("STORY-016 implementer: multiply bullet_count by LINE_HEIGHT_PER_BULLET")
+fn estimate_height(bullet_count: usize) -> Emu {
+    LINE_HEIGHT_PER_BULLET * i64::try_from(bullet_count).unwrap_or(i64::MAX)
 }
 
 /// Construct an `E-LAY-001` diagnostic for an overflowing slide.
-#[allow(dead_code)] // called by implementer; not yet wired
 fn make_overflow_diagnostic(
     slide_index: usize,
     estimated_height: Emu,
