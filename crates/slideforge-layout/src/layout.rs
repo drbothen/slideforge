@@ -30,11 +30,15 @@
 
 use std::sync::Arc;
 
-use slideforge_types::{Brand, Deck, FieldValue, Value};
+use slideforge_types::{Brand, Deck, FieldValue, Register, Value};
 
 use crate::error::LayoutError;
 use crate::regions::region_frames_for;
-use crate::types::{LaidOutDeck, LaidOutSlide, PageSize, DEFAULT_PAGE_HEIGHT, DEFAULT_PAGE_WIDTH};
+use crate::text_flow::compute_text_flow;
+use crate::types::{
+    DEFAULT_PAGE_HEIGHT, DEFAULT_PAGE_WIDTH, FrameContent, LaidOutDeck, LaidOutSlide, PageSize,
+    RegisterTag,
+};
 
 /// Transform a fully evaluated `Deck` into a geometric `LaidOutDeck`.
 ///
@@ -96,10 +100,12 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
         let keyword_str: &str = slide_type_keyword.as_ref();
 
         // EC-002: unknown slide type → error.
-        let frames = region_frames_for(keyword_str, page_size.width, page_size.height)
-            .ok_or_else(|| LayoutError::UnknownSlideType {
-                source_slide_index: source_index,
-                slide_type_keyword: keyword_str.to_owned(),
+        let frames =
+            region_frames_for(keyword_str, page_size.width, page_size.height).ok_or_else(|| {
+                LayoutError::UnknownSlideType {
+                    source_slide_index: source_index,
+                    slide_type_keyword: keyword_str.to_owned(),
+                }
             })?;
 
         // BC-3.06.003: validate every bounding box produced by the region map.
@@ -113,19 +119,65 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
             }
         }
 
+        // NOTE: FrameContent variants in the frames produced by region_frames_for
+        // start as Empty/Image/Chart/Diagram placeholders. Richer content population
+        // (e.g., wiring slide body blocks into FrameContent::Body) is STORY-027
+        // scope. The region map establishes the geometric foundation; content
+        // resolution is a separate pass in Phase 3.
+        //
+        // MED-002: Compute text_flow for text-bearing frames.
+        // For title/subtitle frames, extract text from the slide's resolved fields
+        // to enable the canvas overflow validator (BC-3.03.001).
+        let frames: Vec<_> = frames
+            .into_iter()
+            .enumerate()
+            .map(|(frame_idx, mut frame)| {
+                let text: Option<&str> = match &frame.content {
+                    // For title-region frames (index 0), check slide "title" field.
+                    FrameContent::Empty if frame_idx == 0 => match slide.fields.get("title") {
+                        Some(FieldValue::Literal(Value::Str(s))) => Some(s.as_ref()),
+                        _ => None,
+                    },
+                    // For subtitle/body frames (index 1+), check "subtitle" then "body".
+                    FrameContent::Empty if frame_idx == 1 => match slide.fields.get("subtitle") {
+                        Some(FieldValue::Literal(Value::Str(s))) => Some(s.as_ref()),
+                        _ => match slide.fields.get("body") {
+                            Some(FieldValue::Literal(Value::Str(s))) => Some(s.as_ref()),
+                            _ => None,
+                        },
+                    },
+                    // Non-text frames (Image, Chart, Diagram, Shape) get no text_flow.
+                    _ => None,
+                };
+                if let Some(t) = text {
+                    frame.text_flow = Some(compute_text_flow(t, frame.bbox));
+                }
+                frame
+            })
+            .collect();
+
         // Extract speaker notes from the slide's "notes" field, if present and
         // resolved to a plain string value.
-        let speaker_notes: Option<Arc<str>> =
-            match slide.fields.get("notes") {
-                Some(FieldValue::Literal(Value::Str(s))) => Some(Arc::clone(s)),
-                _ => None,
-            };
+        let speaker_notes: Option<Arc<str>> = match slide.fields.get("notes") {
+            Some(FieldValue::Literal(Value::Str(s))) => Some(Arc::clone(s)),
+            _ => None,
+        };
+
+        // Derive register_tags from the semantic slide's register field.
+        // An unregistered slide (register: None) produces an empty Vec.
+        let register_tags: Vec<RegisterTag> = match slide.register {
+            Some(Register::Notes) => vec![RegisterTag::Notes],
+            Some(Register::Report) => vec![RegisterTag::Report],
+            Some(Register::Detail) => vec![RegisterTag::Detail],
+            None => vec![],
+        };
 
         laid_out_slides.push(LaidOutSlide {
             source_index,
             slide_type_keyword,
             frames,
             speaker_notes,
+            register_tags,
         });
     }
 

@@ -9,31 +9,33 @@ expression: frames
                 457200,
             ),
             y: Emu(
-                1737360,
+                457200,
             ),
             width: Emu(
-                8229600,
+                2743200,
             ),
             height: Emu(
-                1371600,
+                4114800,
             ),
         },
-        content: Empty,
+        content: Image {
+            alt: "",
+        },
         text_flow: None,
     },
     Frame {
         bbox: BoundingBox {
             x: Emu(
-                457200,
+                3657600,
             ),
             y: Emu(
-                3200400,
+                457200,
             ),
             width: Emu(
-                8229600,
+                5029200,
             ),
             height: Emu(
-                914400,
+                4114800,
             ),
         },
         content: Empty,

@@ -6,16 +6,16 @@ expression: frames
     Frame {
         bbox: BoundingBox {
             x: Emu(
-                457200,
+                914400,
             ),
             y: Emu(
-                1737360,
+                1188720,
             ),
             width: Emu(
-                8229600,
+                7315200,
             ),
             height: Emu(
-                1371600,
+                2286000,
             ),
         },
         content: Empty,
@@ -24,16 +24,16 @@ expression: frames
     Frame {
         bbox: BoundingBox {
             x: Emu(
-                457200,
+                914400,
             ),
             y: Emu(
-                3200400,
+                3657600,
             ),
             width: Emu(
-                8229600,
+                7315200,
             ),
             height: Emu(
-                914400,
+                685800,
             ),
         },
         content: Empty,

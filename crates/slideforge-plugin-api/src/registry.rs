@@ -281,9 +281,10 @@ mod tests {
         DiagramOptions, ExportError, ExportOptions, InlineError, InlineOutputFormat, LayoutError,
         MathError, MathOutputFormat, ValidatorOptions,
     };
+    use slideforge_layout::{LaidOutDeck, LaidOutSlide, PageSize};
     use slideforge_types::{
-        Brand, BrandFonts, BrandPalette, ChartSpec, Deck, DeckMetadata, InlineNode, LaidOutDeck,
-        LaidOutSlide, MathNode, OrderedMap, Slide, SourceSpan, Value,
+        Brand, BrandFonts, BrandPalette, ChartSpec, Deck, DeckMetadata, InlineNode, MathNode,
+        OrderedMap, Slide, SourceSpan, Value,
     };
 
     // ── Stub implementations for each surface ─────────────────────────────────
@@ -406,15 +407,16 @@ mod tests {
         }
         fn lay_out(
             &self,
-            _slide: &Slide,
+            slide: &Slide,
             _brand: &Brand,
-            canvas: crate::traits::Canvas,
+            _canvas: crate::traits::Canvas,
         ) -> Result<LaidOutSlide, LayoutError> {
             Ok(LaidOutSlide {
-                width: canvas.width,
-                height: canvas.height,
-                elements: vec![],
-                slide_index: 0,
+                source_index: 0,
+                slide_type_keyword: std::sync::Arc::clone(&slide.slide_type),
+                frames: vec![],
+                speaker_notes: None,
+                register_tags: vec![],
             })
         }
     }
@@ -461,8 +463,8 @@ mod tests {
 
     fn stub_laid_out_deck() -> LaidOutDeck {
         LaidOutDeck {
+            page_size: PageSize::default(),
             slides: vec![],
-            semantic: stub_deck(),
         }
     }
 

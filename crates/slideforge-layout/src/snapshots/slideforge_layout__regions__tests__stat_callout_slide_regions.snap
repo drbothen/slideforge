@@ -19,6 +19,7 @@ expression: frames
             ),
         },
         content: Empty,
+        text_flow: None,
     },
     Frame {
         bbox: BoundingBox {
@@ -36,6 +37,7 @@ expression: frames
             ),
         },
         content: Empty,
+        text_flow: None,
     },
     Frame {
         bbox: BoundingBox {
@@ -53,6 +55,7 @@ expression: frames
             ),
         },
         content: Empty,
+        text_flow: None,
     },
     Frame {
         bbox: BoundingBox {
@@ -70,6 +73,7 @@ expression: frames
             ),
         },
         content: Empty,
+        text_flow: None,
     },
     Frame {
         bbox: BoundingBox {
@@ -87,5 +91,6 @@ expression: frames
             ),
         },
         content: Empty,
+        text_flow: None,
     },
 ]

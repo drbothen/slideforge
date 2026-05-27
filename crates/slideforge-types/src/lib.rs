@@ -50,9 +50,7 @@ pub mod value;
 // Re-export the most commonly used types at the crate root for ergonomics.
 pub use block::{Block, BulletItem, ContentBlock, TextBlock};
 pub use brand::{Brand, BrandFonts, BrandPalette, LayoutDefinition};
-pub use deck::{
-    Deck, DeckMetadata, LaidOutContent, LaidOutDeck, LaidOutElement, LaidOutSlide, SemanticRole,
-};
+pub use deck::{Deck, DeckMetadata};
 pub use emu::{CANVAS_HEIGHT, CANVAS_WIDTH, Emu, SLIDE_HEIGHT, SLIDE_WIDTH};
 pub use error::TypeError;
 pub use inline::InlineNode;

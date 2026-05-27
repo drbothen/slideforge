@@ -1,18 +1,15 @@
-//! The two-IR model — [`Deck`] (semantic) and [`LaidOutDeck`] (geometric).
+//! The semantic pre-layout IR — [`Deck`] and [`DeckMetadata`].
 //!
-//! The slideforge pipeline transforms a parsed `.sf` file into:
+//! The slideforge pipeline transforms a parsed `.sf` file into a [`Deck`] —
+//! the semantic, pre-layout intermediate representation. Geometric layout
+//! is performed by `slideforge-layout`, which produces `LaidOutDeck`.
 //!
-//! 1. A [`Deck`] — semantic, pre-layout. Content with structure; no positions.
-//! 2. A [`LaidOutDeck`] — geometric, post-layout. Positioned shapes with EMU coords.
-//!
-//! Exporters consume both: PPTX uses the semantic IR for placeholder injection;
-//! PDF/HTML operate primarily from the laid-out IR.
+//! Exporters receive both IRs: the semantic `Deck` for placeholder resolution
+//! and the geometric `LaidOutDeck` for rendering.
 
 use std::sync::Arc;
 
 use crate::block::Block;
-use crate::emu::Emu;
-use crate::inline::InlineNode;
 use crate::ordered_map::OrderedMap;
 use crate::register::Register;
 use crate::slide::Slide;
@@ -66,85 +63,9 @@ pub struct Deck {
     pub registers: OrderedMap<Register, Vec<Block>>,
 }
 
-/// The semantic role of a laid-out element within its parent slide.
-///
-/// Layout engines and exporters use `SemanticRole` to decide which PPTX
-/// placeholder type (`ph type`) or PDF tag to apply.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum SemanticRole {
-    /// The primary slide title.
-    Title,
-    /// A subtitle or deck title on a title-slide.
-    Subtitle,
-    /// Body content placeholder.
-    Body,
-    /// A speaker notes placeholder (presenter view).
-    Notes,
-    /// A media element (image, chart, diagram).
-    Media,
-    /// A custom / uncategorized element.
-    Custom(Arc<str>),
-}
-
-/// The content of a positioned layout element.
-///
-/// `LaidOutContent` pairs inline or block content with its laid-out position.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum LaidOutContent {
-    /// A sequence of inline nodes (text run).
-    Inlines(Vec<InlineNode>),
-    /// A reference to a block in the semantic IR (chart, diagram, image, etc.).
-    BlockRef(usize),
-    /// An empty placeholder (present in the layout but no content yet assigned).
-    Empty,
-}
-
-/// A positioned element within a laid-out slide.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct LaidOutElement {
-    /// Horizontal position from slide left edge.
-    pub x: Emu,
-    /// Vertical position from slide top edge.
-    pub y: Emu,
-    /// Element width.
-    pub width: Emu,
-    /// Element height.
-    pub height: Emu,
-    /// The semantic role of this element.
-    pub role: SemanticRole,
-    /// The content to render in this element.
-    pub content: LaidOutContent,
-}
-
-/// A single slide in the geometric, post-layout IR.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct LaidOutSlide {
-    /// Slide width (typically [`crate::emu::SLIDE_WIDTH`]).
-    pub width: Emu,
-    /// Slide height (typically [`crate::emu::SLIDE_HEIGHT`]).
-    pub height: Emu,
-    /// The positioned elements on this slide.
-    pub elements: Vec<LaidOutElement>,
-    /// A back-reference to the semantic slide index in [`Deck::slides`].
-    pub slide_index: usize,
-}
-
-/// The geometric, post-layout intermediate representation of a presentation.
-///
-/// `LaidOutDeck` is produced by the layout engine from a [`Deck`]. It carries
-/// precise EMU coordinates for every element on every slide.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct LaidOutDeck {
-    /// The laid-out slides, one per entry in [`Deck::slides`].
-    pub slides: Vec<LaidOutSlide>,
-    /// Back-reference to the semantic IR.
-    pub semantic: Deck,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::emu::{SLIDE_HEIGHT, SLIDE_WIDTH};
     use crate::register::Register;
     use std::sync::Arc;
 
@@ -266,47 +187,6 @@ mod tests {
         let meta = make_metadata();
         let s = format!("{meta:?}");
         assert!(s.contains("DeckMetadata"));
-    }
-
-    // LaidOutDeck tests
-
-    #[test]
-    fn test_bc_1_01_001_laid_out_deck_fields() {
-        let deck = make_deck();
-        let lod = LaidOutDeck {
-            slides: vec![LaidOutSlide {
-                width: SLIDE_WIDTH,
-                height: SLIDE_HEIGHT,
-                elements: vec![],
-                slide_index: 0,
-            }],
-            semantic: deck,
-        };
-        assert_eq!(lod.slides.len(), 1);
-        assert_eq!(lod.slides[0].width, SLIDE_WIDTH);
-    }
-
-    #[test]
-    fn test_bc_1_01_001_laid_out_element_fields() {
-        let elem = LaidOutElement {
-            x: Emu(0),
-            y: Emu(0),
-            width: SLIDE_WIDTH,
-            height: Emu(914_400), // 1 inch
-            role: SemanticRole::Title,
-            content: LaidOutContent::Empty,
-        };
-        assert_eq!(elem.role, SemanticRole::Title);
-        assert_eq!(elem.content, LaidOutContent::Empty);
-    }
-
-    #[test]
-    fn test_bc_1_01_001_semantic_role_custom() {
-        let role = SemanticRole::Custom(Arc::from("logo"));
-        match &role {
-            SemanticRole::Custom(s) => assert_eq!(s.as_ref(), "logo"),
-            _ => panic!("expected Custom"),
-        }
     }
 
     #[test]

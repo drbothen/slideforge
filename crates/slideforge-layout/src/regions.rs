@@ -59,12 +59,8 @@ pub fn region_frames_for(
     // Compute scaling factors relative to the default 16:9 dimensions.
     // Region values are authored against the default page size.
     // For non-default page sizes, scale proportionally.
-    let sx = |raw_emu: i64| -> Emu {
-        Emu(raw_emu * page_width.0 / 9_144_000)
-    };
-    let sy = |raw_emu: i64| -> Emu {
-        Emu(raw_emu * page_height.0 / 5_143_500)
-    };
+    let sx = |raw_emu: i64| -> Emu { Emu(raw_emu * page_width.0 / 9_144_000) };
+    let sy = |raw_emu: i64| -> Emu { Emu(raw_emu * page_height.0 / 5_143_500) };
 
     let bbox = |x: i64, y: i64, w: i64, h: i64| -> BoundingBox {
         BoundingBox {
@@ -84,10 +80,12 @@ pub fn region_frames_for(
             Frame {
                 bbox: bbox(457_200, 1_600_200, 8_229_600, 1_143_000),
                 content: FrameContent::Empty,
+                text_flow: None,
             },
             Frame {
                 bbox: bbox(457_200, 2_743_200, 8_229_600, 914_400),
                 content: FrameContent::Empty,
+                text_flow: None,
             },
         ],
 
@@ -100,30 +98,19 @@ pub fn region_frames_for(
         //   recommendation, risk_register, timeline, process_flow, matrix,
         //   financials, kpi_dashboard, code_sample, survey_results, org_chart,
         //   roadmap
-        "content"
-        | "agenda"
-        | "toc"
-        | "team"
-        | "executive_summary"
-        | "problem_statement"
-        | "recommendation"
-        | "risk_register"
-        | "timeline"
-        | "process_flow"
-        | "matrix"
-        | "financials"
-        | "kpi_dashboard"
-        | "code_sample"
-        | "survey_results"
-        | "org_chart"
+        "content" | "agenda" | "toc" | "team" | "executive_summary" | "problem_statement"
+        | "recommendation" | "risk_register" | "timeline" | "process_flow" | "matrix"
+        | "financials" | "kpi_dashboard" | "code_sample" | "survey_results" | "org_chart"
         | "roadmap" => vec![
             Frame {
                 bbox: bbox(457_200, 365_760, 8_229_600, 685_800),
                 content: FrameContent::Empty,
+                text_flow: None,
             },
             Frame {
                 bbox: bbox(457_200, 1_188_720, 8_229_600, 3_657_600),
                 content: FrameContent::Empty,
+                text_flow: None,
             },
         ],
 
@@ -135,10 +122,12 @@ pub fn region_frames_for(
             Frame {
                 bbox: bbox(457_200, 1_737_360, 8_229_600, 1_371_600),
                 content: FrameContent::Empty,
+                text_flow: None,
             },
             Frame {
                 bbox: bbox(457_200, 3_200_400, 8_229_600, 914_400),
                 content: FrameContent::Empty,
+                text_flow: None,
             },
         ],
 
@@ -151,14 +140,17 @@ pub fn region_frames_for(
             Frame {
                 bbox: bbox(457_200, 365_760, 8_229_600, 685_800),
                 content: FrameContent::Empty,
+                text_flow: None,
             },
             Frame {
                 bbox: bbox(457_200, 1_188_720, 3_886_200, 3_657_600),
                 content: FrameContent::Empty,
+                text_flow: None,
             },
             Frame {
                 bbox: bbox(4_800_600, 1_188_720, 3_886_200, 3_657_600),
                 content: FrameContent::Empty,
+                text_flow: None,
             },
         ],
 
@@ -169,12 +161,14 @@ pub fn region_frames_for(
             Frame {
                 bbox: bbox(457_200, 365_760, 8_229_600, 685_800),
                 content: FrameContent::Empty,
+                text_flow: None,
             },
             Frame {
                 bbox: bbox(1_371_600, 1_188_720, 6_400_800, 3_657_600),
                 content: FrameContent::Image {
                     alt: std::sync::Arc::from(""),
                 },
+                text_flow: None,
             },
         ],
 
@@ -190,10 +184,12 @@ pub fn region_frames_for(
             Frame {
                 bbox: bbox(914_400, 1_188_720, 7_315_200, 2_286_000),
                 content: FrameContent::Empty,
+                text_flow: None,
             },
             Frame {
                 bbox: bbox(914_400, 3_657_600, 7_315_200, 685_800),
                 content: FrameContent::Empty,
+                text_flow: None,
             },
         ],
 
@@ -206,10 +202,12 @@ pub fn region_frames_for(
                 content: FrameContent::Image {
                     alt: std::sync::Arc::from(""),
                 },
+                text_flow: None,
             },
             Frame {
                 bbox: bbox(3_657_600, 457_200, 5_029_200, 4_114_800),
                 content: FrameContent::Empty,
+                text_flow: None,
             },
         ],
 
@@ -223,22 +221,27 @@ pub fn region_frames_for(
             Frame {
                 bbox: bbox(457_200, 274_320, 8_229_600, 685_800),
                 content: FrameContent::Empty,
+                text_flow: None,
             },
             Frame {
                 bbox: bbox(457_200, 1_371_600, 3_657_600, 2_286_000),
                 content: FrameContent::Empty,
+                text_flow: None,
             },
             Frame {
                 bbox: bbox(4_297_680, 1_371_600, 3_657_600, 2_286_000),
                 content: FrameContent::Empty,
+                text_flow: None,
             },
             Frame {
                 bbox: bbox(457_200, 3_657_600, 3_657_600, 685_800),
                 content: FrameContent::Empty,
+                text_flow: None,
             },
             Frame {
                 bbox: bbox(4_297_680, 3_657_600, 3_657_600, 685_800),
                 content: FrameContent::Empty,
+                text_flow: None,
             },
         ],
 
@@ -249,10 +252,12 @@ pub fn region_frames_for(
             Frame {
                 bbox: bbox(457_200, 365_760, 8_229_600, 685_800),
                 content: FrameContent::Empty,
+                text_flow: None,
             },
             Frame {
                 bbox: bbox(457_200, 1_188_720, 8_229_600, 3_657_600),
                 content: FrameContent::Chart,
+                text_flow: None,
             },
         ],
 
@@ -263,10 +268,12 @@ pub fn region_frames_for(
             Frame {
                 bbox: bbox(457_200, 365_760, 8_229_600, 685_800),
                 content: FrameContent::Empty,
+                text_flow: None,
             },
             Frame {
                 bbox: bbox(457_200, 1_188_720, 8_229_600, 3_657_600),
                 content: FrameContent::Diagram,
+                text_flow: None,
             },
         ],
 
@@ -277,12 +284,14 @@ pub fn region_frames_for(
             Frame {
                 bbox: bbox(457_200, 365_760, 8_229_600, 685_800),
                 content: FrameContent::Empty,
+                text_flow: None,
             },
             Frame {
                 bbox: bbox(457_200, 1_188_720, 8_229_600, 3_657_600),
                 content: FrameContent::Image {
                     alt: std::sync::Arc::from(""),
                 },
+                text_flow: None,
             },
         ],
 
@@ -293,10 +302,12 @@ pub fn region_frames_for(
             Frame {
                 bbox: bbox(457_200, 365_760, 8_229_600, 685_800),
                 content: FrameContent::Empty,
+                text_flow: None,
             },
             Frame {
                 bbox: bbox(1_371_600, 1_188_720, 6_400_800, 3_657_600),
                 content: FrameContent::Empty,
+                text_flow: None,
             },
         ],
 
@@ -320,7 +331,9 @@ mod tests {
 
     fn assert_all_valid(slide_type_keyword: &str) {
         let frames = region_frames_for(slide_type_keyword, DEFAULT_PAGE_WIDTH, DEFAULT_PAGE_HEIGHT)
-            .unwrap_or_else(|| panic!("region_frames_for returned None for '{slide_type_keyword}'"));
+            .unwrap_or_else(|| {
+                panic!("region_frames_for returned None for '{slide_type_keyword}'")
+            });
         for (i, frame) in frames.iter().enumerate() {
             assert!(
                 frame.bbox.is_valid(DEFAULT_PAGE_WIDTH, DEFAULT_PAGE_HEIGHT),
@@ -380,7 +393,7 @@ mod tests {
         assert!(frames.is_empty(), "blank slide must produce zero frames");
     }
 
-    /// AC-006 — stat_callout produces 5 frames.
+    /// AC-006 — `stat_callout` produces 5 frames.
     #[test]
     fn test_bc_3_06_002_stat_callout_slide_regions() {
         let frames = region_frames_for("stat_callout", DEFAULT_PAGE_WIDTH, DEFAULT_PAGE_HEIGHT)
@@ -393,7 +406,7 @@ mod tests {
         assert_all_valid("stat_callout");
     }
 
-    /// AC-006 — two_col produces 3 frames.
+    /// AC-006 — `two_col` produces 3 frames.
     #[test]
     fn test_bc_3_06_002_two_col_slide_regions() {
         let frames = region_frames_for("two_col", DEFAULT_PAGE_WIDTH, DEFAULT_PAGE_HEIGHT)
@@ -416,7 +429,7 @@ mod tests {
         );
     }
 
-    /// AC-014 — All 31 built-in slide types produce valid BoundingBoxes.
+    /// AC-014 — All 31 built-in slide types produce valid `BoundingBox`es.
     #[test]
     fn test_bc_3_06_003_all_slide_types_valid_bounding_boxes() {
         let known_types = [
@@ -473,7 +486,7 @@ mod tests {
         insta::assert_debug_snapshot!("content_slide_regions", frames);
     }
 
-    /// AC-006 — snapshot test for section_break slide region map.
+    /// AC-006 — snapshot test for `section_break` slide region map.
     #[test]
     fn test_bc_3_06_002_section_break_regions_snapshot() {
         let frames =
@@ -481,7 +494,7 @@ mod tests {
         insta::assert_debug_snapshot!("section_break_slide_regions", frames);
     }
 
-    /// AC-006 — snapshot test for stat_callout slide region map.
+    /// AC-006 — snapshot test for `stat_callout` slide region map.
     #[test]
     fn test_bc_3_06_002_stat_callout_regions_snapshot() {
         let frames =
@@ -494,6 +507,203 @@ mod tests {
     fn test_bc_3_06_002_chart_regions_snapshot() {
         let frames = region_frames_for("chart", DEFAULT_PAGE_WIDTH, DEFAULT_PAGE_HEIGHT).unwrap();
         insta::assert_debug_snapshot!("chart_slide_regions", frames);
+    }
+
+    /// AC-006 — snapshot test for closing slide region map.
+    #[test]
+    fn test_bc_3_06_002_closing_regions_snapshot() {
+        let frames = region_frames_for("closing", DEFAULT_PAGE_WIDTH, DEFAULT_PAGE_HEIGHT).unwrap();
+        insta::assert_debug_snapshot!("closing_slide_regions", frames);
+    }
+
+    /// AC-006 — snapshot test for `two_col` slide region map.
+    #[test]
+    fn test_bc_3_06_002_two_col_regions_snapshot() {
+        let frames = region_frames_for("two_col", DEFAULT_PAGE_WIDTH, DEFAULT_PAGE_HEIGHT).unwrap();
+        insta::assert_debug_snapshot!("two_col_slide_regions", frames);
+    }
+
+    /// AC-006 — snapshot test for comparison slide region map.
+    #[test]
+    fn test_bc_3_06_002_comparison_regions_snapshot() {
+        let frames =
+            region_frames_for("comparison", DEFAULT_PAGE_WIDTH, DEFAULT_PAGE_HEIGHT).unwrap();
+        insta::assert_debug_snapshot!("comparison_slide_regions", frames);
+    }
+
+    /// AC-006 — snapshot test for image slide region map.
+    #[test]
+    fn test_bc_3_06_002_image_regions_snapshot() {
+        let frames = region_frames_for("image", DEFAULT_PAGE_WIDTH, DEFAULT_PAGE_HEIGHT).unwrap();
+        insta::assert_debug_snapshot!("image_slide_regions", frames);
+    }
+
+    /// AC-006 — snapshot test for blank slide region map.
+    #[test]
+    fn test_bc_3_06_002_blank_regions_snapshot() {
+        let frames = region_frames_for("blank", DEFAULT_PAGE_WIDTH, DEFAULT_PAGE_HEIGHT).unwrap();
+        insta::assert_debug_snapshot!("blank_slide_regions", frames);
+    }
+
+    /// AC-006 — snapshot test for quote slide region map.
+    #[test]
+    fn test_bc_3_06_002_quote_regions_snapshot() {
+        let frames = region_frames_for("quote", DEFAULT_PAGE_WIDTH, DEFAULT_PAGE_HEIGHT).unwrap();
+        insta::assert_debug_snapshot!("quote_slide_regions", frames);
+    }
+
+    /// AC-006 — snapshot test for bio slide region map.
+    #[test]
+    fn test_bc_3_06_002_bio_regions_snapshot() {
+        let frames = region_frames_for("bio", DEFAULT_PAGE_WIDTH, DEFAULT_PAGE_HEIGHT).unwrap();
+        insta::assert_debug_snapshot!("bio_slide_regions", frames);
+    }
+
+    /// AC-006 — snapshot test for agenda slide region map.
+    #[test]
+    fn test_bc_3_06_002_agenda_regions_snapshot() {
+        let frames = region_frames_for("agenda", DEFAULT_PAGE_WIDTH, DEFAULT_PAGE_HEIGHT).unwrap();
+        insta::assert_debug_snapshot!("agenda_slide_regions", frames);
+    }
+
+    /// AC-006 — snapshot test for toc slide region map.
+    #[test]
+    fn test_bc_3_06_002_toc_regions_snapshot() {
+        let frames = region_frames_for("toc", DEFAULT_PAGE_WIDTH, DEFAULT_PAGE_HEIGHT).unwrap();
+        insta::assert_debug_snapshot!("toc_slide_regions", frames);
+    }
+
+    /// AC-006 — snapshot test for team slide region map.
+    #[test]
+    fn test_bc_3_06_002_team_regions_snapshot() {
+        let frames = region_frames_for("team", DEFAULT_PAGE_WIDTH, DEFAULT_PAGE_HEIGHT).unwrap();
+        insta::assert_debug_snapshot!("team_slide_regions", frames);
+    }
+
+    /// AC-006 — snapshot test for `executive_summary` slide region map.
+    #[test]
+    fn test_bc_3_06_002_executive_summary_regions_snapshot() {
+        let frames =
+            region_frames_for("executive_summary", DEFAULT_PAGE_WIDTH, DEFAULT_PAGE_HEIGHT)
+                .unwrap();
+        insta::assert_debug_snapshot!("executive_summary_slide_regions", frames);
+    }
+
+    /// AC-006 — snapshot test for `problem_statement` slide region map.
+    #[test]
+    fn test_bc_3_06_002_problem_statement_regions_snapshot() {
+        let frames =
+            region_frames_for("problem_statement", DEFAULT_PAGE_WIDTH, DEFAULT_PAGE_HEIGHT)
+                .unwrap();
+        insta::assert_debug_snapshot!("problem_statement_slide_regions", frames);
+    }
+
+    /// AC-006 — snapshot test for recommendation slide region map.
+    #[test]
+    fn test_bc_3_06_002_recommendation_regions_snapshot() {
+        let frames =
+            region_frames_for("recommendation", DEFAULT_PAGE_WIDTH, DEFAULT_PAGE_HEIGHT).unwrap();
+        insta::assert_debug_snapshot!("recommendation_slide_regions", frames);
+    }
+
+    /// AC-006 — snapshot test for `risk_register` slide region map.
+    #[test]
+    fn test_bc_3_06_002_risk_register_regions_snapshot() {
+        let frames =
+            region_frames_for("risk_register", DEFAULT_PAGE_WIDTH, DEFAULT_PAGE_HEIGHT).unwrap();
+        insta::assert_debug_snapshot!("risk_register_slide_regions", frames);
+    }
+
+    /// AC-006 — snapshot test for timeline slide region map.
+    #[test]
+    fn test_bc_3_06_002_timeline_regions_snapshot() {
+        let frames =
+            region_frames_for("timeline", DEFAULT_PAGE_WIDTH, DEFAULT_PAGE_HEIGHT).unwrap();
+        insta::assert_debug_snapshot!("timeline_slide_regions", frames);
+    }
+
+    /// AC-006 — snapshot test for `process_flow` slide region map.
+    #[test]
+    fn test_bc_3_06_002_process_flow_regions_snapshot() {
+        let frames =
+            region_frames_for("process_flow", DEFAULT_PAGE_WIDTH, DEFAULT_PAGE_HEIGHT).unwrap();
+        insta::assert_debug_snapshot!("process_flow_slide_regions", frames);
+    }
+
+    /// AC-006 — snapshot test for matrix slide region map.
+    #[test]
+    fn test_bc_3_06_002_matrix_regions_snapshot() {
+        let frames = region_frames_for("matrix", DEFAULT_PAGE_WIDTH, DEFAULT_PAGE_HEIGHT).unwrap();
+        insta::assert_debug_snapshot!("matrix_slide_regions", frames);
+    }
+
+    /// AC-006 — snapshot test for financials slide region map.
+    #[test]
+    fn test_bc_3_06_002_financials_regions_snapshot() {
+        let frames =
+            region_frames_for("financials", DEFAULT_PAGE_WIDTH, DEFAULT_PAGE_HEIGHT).unwrap();
+        insta::assert_debug_snapshot!("financials_slide_regions", frames);
+    }
+
+    /// AC-006 — snapshot test for `kpi_dashboard` slide region map.
+    #[test]
+    fn test_bc_3_06_002_kpi_dashboard_regions_snapshot() {
+        let frames =
+            region_frames_for("kpi_dashboard", DEFAULT_PAGE_WIDTH, DEFAULT_PAGE_HEIGHT).unwrap();
+        insta::assert_debug_snapshot!("kpi_dashboard_slide_regions", frames);
+    }
+
+    /// AC-006 — snapshot test for `code_sample` slide region map.
+    #[test]
+    fn test_bc_3_06_002_code_sample_regions_snapshot() {
+        let frames =
+            region_frames_for("code_sample", DEFAULT_PAGE_WIDTH, DEFAULT_PAGE_HEIGHT).unwrap();
+        insta::assert_debug_snapshot!("code_sample_slide_regions", frames);
+    }
+
+    /// AC-006 — snapshot test for `survey_results` slide region map.
+    #[test]
+    fn test_bc_3_06_002_survey_results_regions_snapshot() {
+        let frames =
+            region_frames_for("survey_results", DEFAULT_PAGE_WIDTH, DEFAULT_PAGE_HEIGHT).unwrap();
+        insta::assert_debug_snapshot!("survey_results_slide_regions", frames);
+    }
+
+    /// AC-006 — snapshot test for `org_chart` slide region map.
+    #[test]
+    fn test_bc_3_06_002_org_chart_regions_snapshot() {
+        let frames =
+            region_frames_for("org_chart", DEFAULT_PAGE_WIDTH, DEFAULT_PAGE_HEIGHT).unwrap();
+        insta::assert_debug_snapshot!("org_chart_slide_regions", frames);
+    }
+
+    /// AC-006 — snapshot test for roadmap slide region map.
+    #[test]
+    fn test_bc_3_06_002_roadmap_regions_snapshot() {
+        let frames = region_frames_for("roadmap", DEFAULT_PAGE_WIDTH, DEFAULT_PAGE_HEIGHT).unwrap();
+        insta::assert_debug_snapshot!("roadmap_slide_regions", frames);
+    }
+
+    /// AC-006 — snapshot test for diagram slide region map.
+    #[test]
+    fn test_bc_3_06_002_diagram_regions_snapshot() {
+        let frames = region_frames_for("diagram", DEFAULT_PAGE_WIDTH, DEFAULT_PAGE_HEIGHT).unwrap();
+        insta::assert_debug_snapshot!("diagram_slide_regions", frames);
+    }
+
+    /// AC-006 — snapshot test for screenshot slide region map.
+    #[test]
+    fn test_bc_3_06_002_screenshot_regions_snapshot() {
+        let frames =
+            region_frames_for("screenshot", DEFAULT_PAGE_WIDTH, DEFAULT_PAGE_HEIGHT).unwrap();
+        insta::assert_debug_snapshot!("screenshot_slide_regions", frames);
+    }
+
+    /// AC-006 — snapshot test for video slide region map.
+    #[test]
+    fn test_bc_3_06_002_video_regions_snapshot() {
+        let frames = region_frames_for("video", DEFAULT_PAGE_WIDTH, DEFAULT_PAGE_HEIGHT).unwrap();
+        insta::assert_debug_snapshot!("video_slide_regions", frames);
     }
 
     /// EC-003 — Non-default page size scales proportionally.

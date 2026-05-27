@@ -9,13 +9,13 @@ expression: frames
                 457200,
             ),
             y: Emu(
-                1737360,
+                365760,
             ),
             width: Emu(
                 8229600,
             ),
             height: Emu(
-                1371600,
+                685800,
             ),
         },
         content: Empty,
@@ -27,16 +27,18 @@ expression: frames
                 457200,
             ),
             y: Emu(
-                3200400,
+                1188720,
             ),
             width: Emu(
                 8229600,
             ),
             height: Emu(
-                914400,
+                3657600,
             ),
         },
-        content: Empty,
+        content: Image {
+            alt: "",
+        },
         text_flow: None,
     },
 ]

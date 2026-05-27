@@ -11,7 +11,8 @@
 
 use std::sync::Arc;
 
-use slideforge_types::{Brand, Emu, LaidOutSlide, SLIDE_HEIGHT, SLIDE_WIDTH, Slide, Value};
+use slideforge_layout::LaidOutSlide;
+use slideforge_types::{Brand, Emu, SLIDE_HEIGHT, SLIDE_WIDTH, Slide, Value};
 use thiserror::Error;
 
 /// Describes a content field accepted by a [`SlideType`].

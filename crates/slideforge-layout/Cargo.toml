@@ -1,6 +1,6 @@
 [package]
 name = "slideforge-layout"
-description = "Component crate for slideforge"
+description = "Core layout engine — transforms a semantic Deck into a geometric LaidOutDeck with EMU coordinates"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,6 +10,14 @@ repository.workspace = true
 homepage.workspace = true
 readme = "../../README.md"
 
+[lib]
+name = "slideforge_layout"
+
 [dependencies]
-miette = { workspace = true }
+# All production deps pinned with `=` per supply-chain policy.
+slideforge-types = { workspace = true }
 thiserror = { workspace = true }
+
+[dev-dependencies]
+insta = { version = "=1.47.2", features = ["yaml"] }
+proptest = "=1.5.0"

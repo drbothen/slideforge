@@ -129,7 +129,7 @@ mod tests {
     // AC-007 / EC-004 — TextFlow computation
     // ─────────────────────────────────────────────────────────────────────────
 
-    /// EC-004 — Empty text always produces TextOverflow::Fit with line_count 0.
+    /// EC-004 — Empty text always produces `TextOverflow::Fit` with `line_count` 0.
     #[test]
     fn test_bc_3_06_001_text_flow_empty_text_fits() {
         let bbox = make_bbox(8_229_600, 3_657_600);
@@ -153,18 +153,21 @@ mod tests {
             "short text must fit in a large frame; got {:?}",
             tf.overflow
         );
-        assert!(tf.line_count >= 1, "non-empty text must have line_count >= 1");
+        assert!(
+            tf.line_count >= 1,
+            "non-empty text must have line_count >= 1"
+        );
     }
 
-    /// AC-007 — Long text exceeding the frame produces TextOverflow::Overflow
-    /// with non-negative excess_emu.
+    /// AC-007 — Long text exceeding the frame produces `TextOverflow::Overflow`
+    /// with non-negative `excess_emu`.
     #[test]
     fn test_bc_3_06_001_text_flow_overflow_detected() {
         // Very narrow, very short frame — 2000 chars of text will overflow.
         let long_text: String = "a".repeat(2000);
         let narrow_bbox = make_bbox(
-            457_200,  // 0.5in wide
-            228_600,  // just 1 line tall
+            457_200, // 0.5in wide
+            228_600, // just 1 line tall
         );
         let tf = compute_text_flow(&long_text, narrow_bbox);
         match &tf.overflow {
@@ -179,7 +182,7 @@ mod tests {
         assert!(tf.line_count > 1, "long text must produce multiple lines");
     }
 
-    /// AC-007 — excess_emu is always non-negative.
+    /// AC-007 — `excess_emu` is always non-negative.
     #[test]
     fn test_bc_3_06_001_text_flow_excess_emu_non_negative() {
         let text = "x".repeat(500);
@@ -196,7 +199,7 @@ mod tests {
         assert!(tf.line_count > 0);
     }
 
-    /// ESTIMATED_CHAR_WIDTH_EMU constant is correct (76_200 EMU).
+    /// `ESTIMATED_CHAR_WIDTH_EMU` constant is correct (`76_200` EMU).
     #[test]
     fn test_bc_3_06_001_estimated_char_width_constant() {
         assert_eq!(ESTIMATED_CHAR_WIDTH_EMU, Emu(76_200));
@@ -213,7 +216,7 @@ mod tests {
         assert_eq!(tf.line_count, 1);
     }
 
-    /// TextFlow with custom char width behaves correctly.
+    /// `TextFlow` with custom char width behaves correctly.
     #[test]
     fn test_bc_3_06_001_text_flow_custom_char_width() {
         let text = "a".repeat(10);

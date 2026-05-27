@@ -6,6 +6,7 @@
 //! it proves the API surface is self-contained, not that the plugin does
 //! anything useful.
 
+use slideforge_layout::{LaidOutDeck, LaidOutSlide};
 use slideforge_plugin_api::{
     BrandError, BrandProvider, BrandSource, Canvas, ChartError, ChartRenderer, DataSource,
     DataSourceError, DataSourceOptions, Diagnostic, DiagramError, DiagramOptions, DiagramRenderer,
@@ -14,8 +15,8 @@ use slideforge_plugin_api::{
     SectionType, SlideType, Validator, ValidatorOptions,
 };
 use slideforge_types::{
-    Brand, BrandFonts, BrandPalette, ChartSpec, Deck, InlineNode, LaidOutDeck, LaidOutSlide,
-    MathNode, Slide, SourceSpan, Value,
+    Brand, BrandFonts, BrandPalette, ChartSpec, Deck, InlineNode, MathNode, Slide, SourceSpan,
+    Value,
 };
 use std::sync::Arc;
 
@@ -154,15 +155,16 @@ impl SlideType for TestSlideType {
 
     fn lay_out(
         &self,
-        _slide: &Slide,
+        slide: &Slide,
         _brand: &Brand,
-        canvas: Canvas,
+        _canvas: Canvas,
     ) -> Result<LaidOutSlide, LayoutError> {
         Ok(LaidOutSlide {
-            width: canvas.width,
-            height: canvas.height,
-            elements: vec![],
-            slide_index: 0,
+            source_index: 0,
+            slide_type_keyword: std::sync::Arc::clone(&slide.slide_type),
+            frames: vec![],
+            speaker_notes: None,
+            register_tags: vec![],
         })
     }
 }
