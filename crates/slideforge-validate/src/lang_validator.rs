@@ -1,23 +1,28 @@
 //! Lang declaration validator and default injector (STORY-017).
 //!
 //! [`LangValidator`] checks `DeckMetadata.lang` for the presence of a
-//! non-empty, non-whitespace BCP-47 language tag. If absent or blank, it:
+//! non-empty, non-whitespace BCP-47 language tag. If absent or blank, it emits
+//! an `E-A11-003` cosmetic diagnostic (severity [`DiagnosticSeverity::Info`],
+//! never blocking — exit 0 even in strict mode).
 //!
-//! 1. Emits an `E-A11-003` cosmetic diagnostic (severity [`DiagnosticSeverity::Info`],
-//!    never blocking — exit 0 even in strict mode).
-//! 2. Injects the default language tag `"en"` into `deck.metadata.lang`.
-//!
-//! This is the ONLY place where the lang default is injected. After this
-//! validator runs, all downstream code (layout engine, exporters) can treat
-//! `metadata.lang` as `Some("...")` — it is never `None` post-validation.
+//! The default language tag `"en"` is injected into `deck.metadata.lang` by
+//! the standalone free function [`inject_lang_default`], which the pipeline
+//! dispatcher calls AFTER the validator loop completes. After injection, all
+//! downstream code (layout engine, exporters) can treat `metadata.lang` as
+//! `Some("...")` — it is never `None` post-validation.
 //!
 //! ## Architecture note
 //!
 //! The [`Validator`] trait takes `&Deck` (immutable). Lang default injection
 //! requires `&mut Deck`. Therefore injection is implemented as a standalone
 //! free function [`inject_lang_default`] that the pipeline dispatcher calls
-//! before the trait dispatch loop. The trait method handles only diagnostic
-//! emission; the free function handles the mutation.
+//! AFTER the trait dispatch loop. The correct pipeline ordering is:
+//!
+//! 1. `LangValidator.validate(&deck, &opts)` — detects missing lang, emits E-A11-003
+//! 2. `inject_lang_default(&mut deck)` — sets the default `"en"` for downstream exporters
+//!
+//! Calling `inject_lang_default` first would cause `LangValidator.validate()`
+//! to see `lang` as already set and never emit E-A11-003.
 //!
 //! ## Error codes
 //!
@@ -41,8 +46,9 @@ pub(crate) const E_A11_003: &str = "E-A11-003";
 /// Validates the deck's `lang` field and emits `E-A11-003` if absent or blank.
 ///
 /// Does NOT inject the default (`"en"`) — that is done by [`inject_lang_default`]
-/// before the validator dispatch loop. This separation keeps the `Validator`
-/// trait immutable while still allowing the mutation to happen before layout.
+/// AFTER the validator dispatch loop completes. This separation keeps the
+/// `Validator` trait immutable while still allowing the mutation to happen
+/// before the layout/export phase.
 ///
 /// Register with [`slideforge_plugin_api::PluginRegistry::register_validator`].
 pub struct LangValidator;
@@ -81,8 +87,10 @@ impl Validator for LangValidator {
 /// Inject the `"en"` default lang value into `deck.metadata.lang` when the
 /// field is absent or blank.
 ///
-/// This function is called by the validation pipeline dispatcher BEFORE the
-/// trait-based validator loop runs. After it returns:
+/// This function is called by the validation pipeline dispatcher AFTER the
+/// trait-based validator loop runs. Calling it before the loop would cause
+/// [`LangValidator`] to see `lang` as already set and silently suppress the
+/// E-A11-003 diagnostic. After this function returns:
 /// - If `lang` was `None` or blank, it is now `Some(Arc::from("en"))`.
 /// - If `lang` was already set to a non-blank value, it is unchanged.
 ///
