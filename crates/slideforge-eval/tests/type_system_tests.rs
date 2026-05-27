@@ -26,7 +26,7 @@
 use std::sync::Arc;
 
 use indexmap::IndexMap;
-use slideforge_eval::{eval_deck, eval_expr, EvalConfig};
+use slideforge_eval::{EvalConfig, eval_deck, eval_expr};
 use slideforge_syntax::span::Span;
 use slideforge_syntax::{
     BinOpKind, BlockItem, DeckNode, DiagnosticSink, Expr, FieldNode, FieldValue, IfNode, SlideNode,
@@ -64,7 +64,11 @@ fn env_with_int(pairs: &[(&str, i64)]) -> slideforge_eval::Env {
 
 /// Build a `DeckNode` with a single `vars:` block and one slide whose `title`
 /// field is a template expression referencing the given `var_name`.
-fn deck_with_var_and_expr_title(var_name: &str, var_value: FieldValue, title_expr: Expr) -> DeckNode {
+fn deck_with_var_and_expr_title(
+    var_name: &str,
+    var_value: FieldValue,
+    title_expr: Expr,
+) -> DeckNode {
     let vars_block = VarsBlock {
         entries: vec![(
             Spanned::new(var_name.to_string(), dummy_span()),
@@ -227,7 +231,10 @@ fn test_bc_1_02_003_arith_string_rate_hint_mentions_float_filter() {
     };
     let result = eval_expr(&env, &expr, &mut sink);
     assert_eq!(result, None, "Str * Int must return None (E-EVL-003)");
-    assert!(!sink.is_empty(), "must push E-EVL-003 for string arithmetic");
+    assert!(
+        !sink.is_empty(),
+        "must push E-EVL-003 for string arithmetic"
+    );
 
     // BC-1.02.003 requires the error hint to suggest the `| float` conversion.
     // This assertion FAILS before implementation: current errors do not include
@@ -291,8 +298,15 @@ fn test_bc_1_02_003_explicit_int_conversion() {
         args: vec![],
     };
     let result = eval_expr(&env, &expr, &mut sink);
-    assert!(sink.is_empty(), "no errors expected for valid | int conversion");
-    assert_eq!(result, Some(Value::Int(42)), "v='42' | int must produce Int(42)");
+    assert!(
+        sink.is_empty(),
+        "no errors expected for valid | int conversion"
+    );
+    assert_eq!(
+        result,
+        Some(Value::Int(42)),
+        "v='42' | int must produce Int(42)"
+    );
 }
 
 /// BC-1.02.003 invariant 1 (AC-006): `{{ v | float }}` on `v = "3.14"` → `Float(3.14)`.
@@ -307,7 +321,10 @@ fn test_bc_1_02_003_explicit_float_conversion() {
         args: vec![],
     };
     let result = eval_expr(&env, &expr, &mut sink);
-    assert!(sink.is_empty(), "no errors expected for valid | float conversion");
+    assert!(
+        sink.is_empty(),
+        "no errors expected for valid | float conversion"
+    );
     match result {
         Some(Value::Float(f)) => {
             assert!(
@@ -511,10 +528,7 @@ fn test_bc_1_02_003_int_in_elif_condition_type_error() {
     let if_node = IfNode {
         condition: Spanned::new(Expr::Bool(true), dummy_span()),
         then_body: vec![],
-        elif_branches: vec![(
-            Spanned::new(Expr::Num(42), dummy_span()),
-            vec![],
-        )],
+        elif_branches: vec![(Spanned::new(Expr::Num(42), dummy_span()), vec![])],
         else_body: None,
     };
     let deck_node = DeckNode {
@@ -911,7 +925,10 @@ fn test_bc_1_02_003_int_string_concat_type_error() {
         rhs: Box::new(Expr::Ident("count".to_string())),
     };
     let result = eval_expr(&env, &expr, &mut sink);
-    assert_eq!(result, None, "Str + Int must return None (no implicit concat)");
+    assert_eq!(
+        result, None,
+        "Str + Int must return None (no implicit concat)"
+    );
     assert!(
         !sink.is_empty(),
         "Str + Int must push E-EVL-003 (use | string or ~ operator)"
@@ -1026,7 +1043,10 @@ fn test_bc_1_02_003_invariant_str_literal_never_becomes_int() {
     let mut sink = DiagnosticSink::new();
     let expr = Expr::Str("42".to_string());
     let result = eval_expr(&env, &expr, &mut sink);
-    assert!(sink.is_empty(), "Str literal '42' must not produce any error");
+    assert!(
+        sink.is_empty(),
+        "Str literal '42' must not produce any error"
+    );
     assert_eq!(
         result,
         Some(Value::Str(Arc::from("42"))),
@@ -1042,7 +1062,10 @@ fn test_bc_1_02_003_invariant_str_literal_never_becomes_bool() {
     let mut sink = DiagnosticSink::new();
     let expr = Expr::Str("true".to_string());
     let result = eval_expr(&env, &expr, &mut sink);
-    assert!(sink.is_empty(), "Str literal 'true' must not produce any error");
+    assert!(
+        sink.is_empty(),
+        "Str literal 'true' must not produce any error"
+    );
     assert_eq!(
         result,
         Some(Value::Str(Arc::from("true"))),
@@ -1058,7 +1081,10 @@ fn test_bc_1_02_003_invariant_str_no_never_becomes_bool_false() {
     let mut sink = DiagnosticSink::new();
     let expr = Expr::Str("NO".to_string());
     let result = eval_expr(&env, &expr, &mut sink);
-    assert!(sink.is_empty(), "Str literal 'NO' must not produce any error");
+    assert!(
+        sink.is_empty(),
+        "Str literal 'NO' must not produce any error"
+    );
     assert_eq!(
         result,
         Some(Value::Str(Arc::from("NO"))),

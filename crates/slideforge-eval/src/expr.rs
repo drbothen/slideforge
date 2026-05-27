@@ -581,7 +581,11 @@ fn eval_equality(
                     "equality comparison '{}' between {} and {} is a type error (DI-004, \
                      BC-1.02.003). No implicit coercion — both sides must be the same type. \
                      Use explicit conversion: {{ v | string }} or {{ v | int }}.",
-                    if matches!(op, BinOpKind::Eq) { "==" } else { "!=" },
+                    if matches!(op, BinOpKind::Eq) {
+                        "=="
+                    } else {
+                        "!="
+                    },
                     lval.type_name(),
                     rval.type_name(),
                 ),
