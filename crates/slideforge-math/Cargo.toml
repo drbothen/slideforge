@@ -1,0 +1,28 @@
+[package]
+name = "slideforge-math"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Math rendering engine for slideforge: LaTeX parser, @{var} interpolation, OMML/MathML output."
+
+[dependencies]
+slideforge-types = { workspace = true }
+slideforge-plugin-api = { workspace = true }
+# pulldown-latex: converts LaTeX to MathML; used by the MathRenderer implementation.
+# v0.7.1 is the latest stable release (confirmed 2026-05-27).
+pulldown-latex = "=0.7.1"
+quick-xml = "=0.36.0"
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+insta = { version = "1", features = ["yaml"] }
+pretty_assertions = { workspace = true }

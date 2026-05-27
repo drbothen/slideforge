@@ -1,0 +1,5 @@
+---
+source: crates/slideforge-math/src/omml.rs
+expression: xml
+---
+"<m:math xmlns:m=\"http://schemas.openxmlformats.org/officeDocument/2006/math\"><m:oMathPara><m:oMath><m:sSub><m:e><m:sSup><m:e><m:r><m:t>∑</m:t></m:r></m:e><m:sup><m:r><m:t>n</m:t></m:r></m:sup></m:sSup></m:e><m:sub><m:r><m:t>i</m:t></m:r><m:r><m:t>=</m:t></m:r><m:r><m:t>0</m:t></m:r></m:sub></m:sSub></m:oMath></m:oMathPara></m:math>"
