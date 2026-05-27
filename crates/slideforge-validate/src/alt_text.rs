@@ -10,7 +10,6 @@
 //! |------|----------|---------|
 //! | `E-A11-001` | Error | Visual element is missing alt text and is not marked decorative |
 //! | `W-A11-001` | Warning | Visual element has both alt text AND `decorative: true` (alt is ignored) |
-//! | `W-A11-002` | Warning | Table marked as decorative (tables are content, never decorative) |
 
 use slideforge_plugin_api::{Diagnostic, DiagnosticSeverity, Validator, ValidatorOptions};
 use slideforge_types::{
@@ -39,13 +38,6 @@ pub(crate) const E_A11_001: &str = "E-A11-001";
 /// exercised directly by the test suite.
 pub(crate) const W_A11_001: &str = "W-A11-001";
 
-/// Warning code emitted when a table is marked with `AltText::Decorative`.
-///
-/// Tables are always content elements — they convey structured data that screen
-/// readers must traverse. The `decorative` concept does not apply to tables.
-/// Authors should provide alt text describing the table content instead.
-pub(crate) const W_A11_002: &str = "W-A11-002";
-
 /// Validates that all visual elements have alt text or are marked decorative.
 ///
 /// Implements the WCAG 1.1.1 (Non-text Content) requirement. Every image,
@@ -53,7 +45,8 @@ pub(crate) const W_A11_002: &str = "W-A11-002";
 /// - Have a non-empty, non-whitespace `alt` text value, OR
 /// - Be explicitly marked `decorative: true`
 ///
-/// Tables are always content (never decorative) and must also have alt text.
+/// Non-visual blocks (Text, Bullets, Math, Table) are already readable content
+/// and do not require alt text.
 ///
 /// Register with [`slideforge_plugin_api::PluginRegistry::register_validator`].
 pub struct AltTextValidator;
@@ -92,12 +85,18 @@ impl Validator for AltTextValidator {
                         );
                     }
                     ContentBlock::Diagram(spec) => {
-                        // Truncate diagram source to first 30 chars for the identifier.
-                        let identifier: std::borrow::Cow<str> = if spec.source.len() > 30 {
-                            std::borrow::Cow::Owned(format!("{}…", &spec.source[..30]))
-                        } else {
-                            std::borrow::Cow::Borrowed(spec.source.as_ref())
-                        };
+                        // Truncate diagram source to first 30 *chars* (not bytes) for the
+                        // identifier. Using byte indexing (&source[..30]) would panic if byte 30
+                        // falls in the middle of a multi-byte UTF-8 character (e.g. CJK labels
+                        // in Mermaid diagrams). chars().take(30) is always char-boundary-safe.
+                        let identifier: std::borrow::Cow<str> =
+                            if spec.source.chars().count() > 30 {
+                                let truncated: String =
+                                    spec.source.chars().take(30).collect();
+                                std::borrow::Cow::Owned(format!("{truncated}…"))
+                            } else {
+                                std::borrow::Cow::Borrowed(spec.source.as_ref())
+                            };
                         check_visual_element(
                             spec.alt.as_ref(),
                             spec.decorative,
@@ -117,11 +116,13 @@ impl Validator for AltTextValidator {
                             &mut diagnostics,
                         );
                     }
-                    ContentBlock::Table(spec) => {
-                        check_table_element(spec.alt.as_ref(), &spec.span, &mut diagnostics);
-                    }
-                    // Non-visual blocks: Text, Bullets, Math — no alt text required.
-                    ContentBlock::Text(_) | ContentBlock::Bullets(_) | ContentBlock::Math(_) => {}
+                    // Non-visual blocks: Text, Bullets, Math, Table — no alt text required.
+                    // Tables are text content that is already readable by screen readers
+                    // (story spec, STORY-015 line 309). Alt text on tables is not validated.
+                    ContentBlock::Text(_)
+                    | ContentBlock::Bullets(_)
+                    | ContentBlock::Math(_)
+                    | ContentBlock::Table(_) => {}
                 }
             }
         }
@@ -188,54 +189,13 @@ fn check_visual_element(
     }
 }
 
-/// Check a table element (no `decorative` field — tables are always content).
-///
-/// Tables cannot be decorative because they convey structured data that must be
-/// accessible to screen reader users. If a table is marked with `AltText::Decorative`,
-/// a W-A11-002 warning is emitted and the table is still flagged as needing alt text.
-fn check_table_element(
-    alt: Option<&AltText>,
-    span: &SourceSpan,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    match alt {
-        Some(AltText::Decorative) => {
-            // Tables are content elements, never decorative.
-            diagnostics.push(Diagnostic {
-                severity: DiagnosticSeverity::Warning,
-                code: std::sync::Arc::from(W_A11_002),
-                message: std::sync::Arc::from(format!(
-                    "Tables cannot be decorative at {span}. \
-                     Provide alt text describing the table content"
-                )),
-                span: span.clone(),
-                hint: Some(std::sync::Arc::from(
-                    "Replace decorative: true with alt \"...\" describing the table",
-                )),
-            });
-            // Still flag as needing alt text.
-            diagnostics.push(make_error("table", "table", span));
-        }
-        None => {
-            diagnostics.push(make_error("table", "table", span));
-        }
-        Some(AltText::Provided(s)) if is_blank(s) => {
-            diagnostics.push(make_error("table", "table", span));
-        }
-        Some(AltText::Provided(_)) => {
-            // Valid alt text — no diagnostic.
-        }
-    }
-}
-
 /// Construct an `E-A11-001` error diagnostic for a missing alt text.
 ///
 /// The `identifier` identifies the specific element:
 /// - Image: file path (e.g., `"photo.png"`)
 /// - Chart: chart type (e.g., `"bar"`)
-/// - Diagram: first 30 chars of source
+/// - Diagram: first 30 chars of source (char-boundary-safe truncation)
 /// - Shape: shape type (e.g., `"rect"`)
-/// - Table: always `"table"`
 fn make_error(element_type: &str, identifier: &str, span: &SourceSpan) -> Diagnostic {
     Diagnostic {
         severity: DiagnosticSeverity::Error,
@@ -278,7 +238,7 @@ mod tests {
         specs::{AltText, ChartSpec, DiagramSpec, ImageSpec, ShapeSpec, TableSpec},
     };
 
-    use super::{AltTextValidator, E_A11_001, W_A11_001, W_A11_002};
+    use super::{AltTextValidator, E_A11_001, W_A11_001};
 
     // ── Deck/slide/block construction helpers ──────────────────────────────────
 
@@ -340,6 +300,19 @@ mod tests {
     fn make_diagram_block(alt: Option<AltText>, decorative: bool) -> Block {
         make_block(ContentBlock::Diagram(DiagramSpec {
             source: Arc::from("graph TD; A-->B"),
+            alt,
+            decorative,
+            span: SourceSpan::default(),
+        }))
+    }
+
+    fn make_diagram_block_with_source(
+        source: &str,
+        alt: Option<AltText>,
+        decorative: bool,
+    ) -> Block {
+        make_block(ContentBlock::Diagram(DiagramSpec {
+            source: Arc::from(source),
             alt,
             decorative,
             span: SourceSpan::default(),
@@ -526,16 +499,33 @@ mod tests {
     }
 
     #[test]
-    fn test_bc_5_03_015_table_missing_alt() {
-        // table with alt: None → 1 E-A11-001 (tables are never decorative)
+    fn test_bc_5_03_015_table_no_alt_required() {
+        // Tables are text content — no alt text validation is performed (story spec line 309).
+        // A table with no alt text must produce zero diagnostics.
         let slide = make_slide(vec![make_table_block(None)]);
         let deck = make_deck(vec![slide]);
         let diags = AltTextValidator.validate(&deck, &default_opts());
-        assert_eq!(
-            diags.len(),
-            1,
-            "table missing alt should produce 1 diagnostic; got {diags:?}"
+        assert!(
+            diags.is_empty(),
+            "tables are non-visual text content and must produce no diagnostics; got {diags:?}"
         );
+    }
+
+    // ── Unicode diagram source truncation does not panic (FINDING-001) ─────────
+
+    #[test]
+    fn test_diagram_unicode_source_no_panic() {
+        // Diagram source with multi-byte UTF-8 characters (CJK) exceeding 30 bytes.
+        // Byte-indexing at position 30 would panic mid-character; chars().take(30) is safe.
+        let source = "graph TD; A[\"日本語のラベル\"]-->B[\"中文標籤のテスト\"]";
+        let deck = make_deck(vec![make_slide(vec![make_diagram_block_with_source(
+            source,
+            None,
+            false,
+        )])]);
+        let diags = AltTextValidator.validate(&deck, &ValidatorOptions::default());
+        // Should produce E-A11-001 (missing alt) without panicking
+        assert_eq!(diags.len(), 1, "expected 1 E-A11-001 diagnostic; got {diags:?}");
         assert_eq!(diags[0].code.as_ref(), E_A11_001);
     }
 
@@ -783,35 +773,6 @@ mod tests {
             diags.is_empty(),
             "AltText::Decorative enum variant should be treated as valid even with decorative: false; got {diags:?}"
         );
-    }
-
-    // ── Table decorative produces warning (ADV-P01-MED-005) ───────────────────
-
-    #[test]
-    fn test_table_decorative_produces_warning() {
-        // Table with alt: Some(AltText::Decorative) → W-A11-002 + E-A11-001
-        // Tables cannot be decorative; this is always an error path.
-        let deck = make_deck(vec![make_slide(vec![make_table_block(Some(
-            AltText::Decorative,
-        ))])]);
-        let diags = AltTextValidator.validate(&deck, &default_opts());
-        // Expect W-A11-002 (can't be decorative) and E-A11-001 (still needs alt text)
-        assert_eq!(
-            diags.len(),
-            2,
-            "table with AltText::Decorative should produce W-A11-002 + E-A11-001; got {diags:?}"
-        );
-        let codes: Vec<&str> = diags.iter().map(|d| d.code.as_ref()).collect();
-        assert!(
-            codes.contains(&W_A11_002),
-            "expected W-A11-002 in diagnostics; got {codes:?}"
-        );
-        assert!(
-            codes.contains(&E_A11_001),
-            "expected E-A11-001 in diagnostics; got {codes:?}"
-        );
-        let warning = diags.iter().find(|d| d.code.as_ref() == W_A11_002).unwrap();
-        assert_eq!(warning.severity, DiagnosticSeverity::Warning);
     }
 
     // ── Snapshot test (ADV-P01-MED-004) ───────────────────────────────────────
