@@ -55,6 +55,7 @@ ordered-float = "=4.6.0"
 indexmap = { version = "=2.9.0", features = ["std"] }
 anyhow = "=1.0.102"
 phf = { version = "=0.11.3", features = ["macros"] }
+strsim = "=0.11.1"
 
 # Testing (dev-only — exempt from pinning-audit per DEV_ONLY allowlist)
 insta = "1"

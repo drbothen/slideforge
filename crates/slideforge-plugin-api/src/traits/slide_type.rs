@@ -125,7 +125,7 @@ pub enum LayoutError {
 pub trait SlideType: Send + Sync {
     /// A unique identifier for this slide type, matching the keyword used in
     /// `.sf` source (e.g., `"title"`, `"bullets"`, `"chart-bar"`).
-    fn id(&self) -> &str;
+    fn id(&self) -> &'static str;
 
     /// The set of required content fields for this slide type.
     ///
@@ -143,7 +143,7 @@ pub trait SlideType: Send + Sync {
     ///
     /// The layout name must match a layout defined in the brand's PPTX template
     /// or one of the 11 standard OOXML layout names.
-    fn layout_name(&self) -> &str;
+    fn layout_name(&self) -> &'static str;
 
     /// Compute the geometric layout for `slide` on the given `canvas`.
     ///
