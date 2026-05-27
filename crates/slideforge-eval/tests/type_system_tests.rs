@@ -1136,6 +1136,54 @@ fn test_ordering_string_vs_int_type_error() {
     );
 }
 
+/// FINDING-001 (adversary pass 3, STORY-014): `@if false:` must NOT produce
+/// E-EVL-003. `Bool` is the valid condition type for `@if`.
+///
+/// This is the negative / happy-path counterpart to the non-Bool tests above.
+/// BC-1.02.003 invariant 2 (DI-004) only rejects non-Bool conditions; a
+/// `Value::Bool(false)` condition is perfectly valid — the `@if` block simply
+/// evaluates to "condition not taken" (no slides generated). No E-EVL-003
+/// should be pushed.
+///
+/// Regression guard: if the type-check in `eval_block_items` were incorrectly
+/// broadened to reject all Bool values (or the `matches!` guard were inverted),
+/// this test would catch it.
+#[test]
+fn test_bc_1_02_003_bool_false_condition_no_type_error() {
+    // Build: @if false: slide content:
+    let if_node = IfNode {
+        condition: Spanned::new(Expr::Bool(false), dummy_span()),
+        then_body: vec![BlockItem::Slide(Spanned::new(
+            SlideNode {
+                kind: Spanned::new("content".to_string(), dummy_span()),
+                tags: vec![],
+                fields: vec![],
+                inline_items: vec![],
+            },
+            dummy_span(),
+        ))],
+        elif_branches: vec![],
+        else_body: None,
+    };
+    let deck_node = DeckNode {
+        items: vec![BlockItem::If(Spanned::new(if_node, dummy_span()))],
+        ..DeckNode::default()
+    };
+
+    let mut sink = DiagnosticSink::new();
+    let _deck = eval_deck(&deck_node, &default_config(), &mut sink);
+
+    // BC-1.02.003 invariant 2 (DI-004): Bool is the VALID condition type.
+    // @if false: must produce ZERO errors — Bool(false) is a legitimate
+    // @if condition; it means the branch is simply not taken.
+    assert!(
+        sink.is_empty(),
+        "@if with Bool(false) condition must produce ZERO diagnostics; \
+         Bool is the valid condition type — got: {:?}",
+        sink.errors()
+    );
+}
+
 /// FINDING-P2-002 (adversary pass 2, STORY-014): `"hello" != 42` must produce
 /// E-EVL-003, NOT silently return `Bool(true)`.
 ///

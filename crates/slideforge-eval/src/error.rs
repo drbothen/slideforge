@@ -69,10 +69,21 @@ pub enum EvalError {
     ///
     /// The `message` field contains the full human-readable description
     /// (e.g. `"expected int or float, got string"`).
+    ///
+    /// # Design note — hint text in `message`, not in miette `help`
+    ///
+    /// Hint text (e.g. `"| float"` conversion guidance) is embedded directly
+    /// in `message` rather than in the miette `help` attribute because the hint
+    /// is call-site-specific: arithmetic on a string variable suggests `| float`,
+    /// while an `@if` condition type error suggests an explicit comparison such as
+    /// `v == "true"`. A single static `help` string cannot accommodate this
+    /// variation. Call sites construct the full message with context-specific
+    /// guidance and embed it here.
     #[error("type mismatch at {span}: {message}")]
     #[diagnostic(code("E-EVL-003"))]
     TypeMismatch {
-        /// Full description of the type conflict.
+        /// Full description of the type conflict, including any call-site-specific
+        /// hint (e.g. `"| float"` or `"use an explicit comparison"`).
         message: String,
         /// Source location of the offending expression.
         span: SourceSpan,
