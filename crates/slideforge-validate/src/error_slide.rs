@@ -1,0 +1,192 @@
+//! Error-slide placeholder constructor (STORY-016).
+//!
+//! When the validation pipeline runs in watch mode and encounters errors, it
+//! can inject an error-slide placeholder into the output deck in place of
+//! (or alongside) the problematic slide. This gives authors immediate visual
+//! feedback in the live preview without blocking the export entirely.
+//!
+//! The placeholder slide uses the internal slide type `"__error_placeholder__"`
+//! which the layout engine and exporters recognise and render as a red-bordered
+//! error card.
+//!
+//! ## Fields set on the error slide
+//!
+//! | Field | Description |
+//! |-------|-------------|
+//! | `title` | Human-readable error description |
+//! | `error_code` | The diagnostic code (e.g., `"E-LAY-002"`) |
+//! | `position` | 1-based slide position in the deck |
+
+use slideforge_types::Slide;
+
+/// The internal slide type identifier for error placeholder slides.
+///
+/// This constant is intentionally not a real DSL slide type — users cannot
+/// create slides of this type directly. It is an IR-internal marker
+/// recognized by the layout engine and exporters.
+pub const ERROR_PLACEHOLDER_SLIDE_TYPE: &str = "__error_placeholder__";
+
+/// Construct an error-slide placeholder for the given diagnostic.
+///
+/// The returned [`Slide`] uses the internal type `"__error_placeholder__"`
+/// and carries the error code, message, and 1-based slide position as
+/// resolved field values.
+///
+/// # Arguments
+///
+/// * `code` — The diagnostic error code (e.g., `"E-LAY-002"`).
+/// * `message` — A human-readable description of the error.
+/// * `position` — The 1-based index of the slide in the deck where the
+///   error occurred. For deck-level errors (e.g., zero slides), pass `0`.
+pub fn error_slide_placeholder(_code: &str, _message: &str, _position: usize) -> Slide {
+    todo!(
+        "STORY-016 implementer: construct Slide with slide_type = ERROR_PLACEHOLDER_SLIDE_TYPE, \
+         title field = message, error_code field = code, position field = position"
+    )
+}
+
+// ─── Tests ────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use slideforge_types::{FieldValue, Value};
+
+    use super::{ERROR_PLACEHOLDER_SLIDE_TYPE, error_slide_placeholder};
+
+    // ── slide_type ─────────────────────────────────────────────────────────────
+
+    /// The placeholder slide must use the internal error type identifier.
+    #[test]
+    fn test_error_slide_has_error_type() {
+        let slide = error_slide_placeholder("E-LAY-002", "Deck contains zero slides", 0);
+        assert_eq!(
+            slide.slide_type.as_ref(),
+            ERROR_PLACEHOLDER_SLIDE_TYPE,
+            "error placeholder must have slide_type = '__error_placeholder__'"
+        );
+    }
+
+    // ── Required fields ────────────────────────────────────────────────────────
+
+    /// The placeholder slide must carry both `title` and `error_code` fields.
+    #[test]
+    fn test_error_slide_has_error_fields() {
+        let slide = error_slide_placeholder("E-LAY-002", "Deck contains zero slides", 0);
+        assert!(
+            slide.fields.contains_key("title"),
+            "error placeholder must have a 'title' field; fields: {:?}",
+            slide.fields
+        );
+        assert!(
+            slide.fields.contains_key("error_code"),
+            "error placeholder must have an 'error_code' field; fields: {:?}",
+            slide.fields
+        );
+    }
+
+    /// The `error_code` field value must match the code passed in.
+    #[test]
+    fn test_error_slide_error_code_matches() {
+        let slide = error_slide_placeholder("E-LAY-002", "Deck contains zero slides", 0);
+        let code_field = slide.fields.get("error_code");
+        let code_value = match code_field {
+            Some(FieldValue::Literal(Value::Str(s))) => Some(s.as_ref()),
+            _ => None,
+        };
+        assert_eq!(
+            code_value,
+            Some("E-LAY-002"),
+            "error_code field must be 'E-LAY-002'; got: {code_field:?}"
+        );
+    }
+
+    /// The `title` field must contain the error message text.
+    #[test]
+    fn test_error_slide_title_contains_message() {
+        let message = "Deck contains zero slides";
+        let slide = error_slide_placeholder("E-LAY-002", message, 0);
+        let title_field = slide.fields.get("title");
+        let title_value = match title_field {
+            Some(FieldValue::Literal(Value::Str(s))) => Some(s.as_ref()),
+            _ => None,
+        };
+        assert!(
+            title_value.is_some_and(|t| t.contains(message)),
+            "title field must contain the error message '{message}'; got: {title_field:?}"
+        );
+    }
+
+    /// The placeholder slide must have no content blocks.
+    #[test]
+    fn test_error_slide_has_no_blocks() {
+        let slide = error_slide_placeholder("E-LAY-002", "Deck contains zero slides", 0);
+        assert!(
+            slide.blocks.is_empty(),
+            "error placeholder must have no content blocks; got: {:?}",
+            slide.blocks
+        );
+    }
+
+    /// The placeholder slide must have no register gating.
+    #[test]
+    fn test_error_slide_has_no_register() {
+        let slide = error_slide_placeholder("E-LAY-002", "Deck contains zero slides", 0);
+        assert!(
+            slide.register.is_none(),
+            "error placeholder must not be register-gated"
+        );
+    }
+
+    // ── Position field ─────────────────────────────────────────────────────────
+
+    /// The placeholder must record the 1-based slide position.
+    #[test]
+    fn test_error_slide_position_field() {
+        let slide = error_slide_placeholder("E-LAY-001", "Overflow on slide 3", 3);
+        let pos_field = slide.fields.get("position");
+        let pos_value = match pos_field {
+            Some(FieldValue::Literal(Value::Int(n))) => Some(*n),
+            _ => None,
+        };
+        assert_eq!(
+            pos_value,
+            Some(3),
+            "position field must be Int(3); got: {pos_field:?}"
+        );
+    }
+
+    /// Position 0 (deck-level error) is valid and stored correctly.
+    #[test]
+    fn test_error_slide_position_zero() {
+        let slide = error_slide_placeholder("E-LAY-002", "Zero slides", 0);
+        let pos_field = slide.fields.get("position");
+        let pos_value = match pos_field {
+            Some(FieldValue::Literal(Value::Int(n))) => Some(*n),
+            _ => None,
+        };
+        assert_eq!(
+            pos_value,
+            Some(0),
+            "position field must be Int(0) for deck-level errors; got: {pos_field:?}"
+        );
+    }
+
+    // ── Different error codes ──────────────────────────────────────────────────
+
+    /// Works correctly with E-LAY-001 (overflow).
+    #[test]
+    fn test_error_slide_overflow_code() {
+        let slide = error_slide_placeholder("E-LAY-001", "Content overflows placeholder", 5);
+        assert_eq!(slide.slide_type.as_ref(), ERROR_PLACEHOLDER_SLIDE_TYPE);
+        let code_field = slide.fields.get("error_code");
+        let code_value = match code_field {
+            Some(FieldValue::Literal(Value::Str(s))) => Some(s.as_ref()),
+            _ => None,
+        };
+        assert_eq!(
+            code_value,
+            Some("E-LAY-001"),
+            "error_code must be 'E-LAY-001'; got: {code_field:?}"
+        );
+    }
+}
