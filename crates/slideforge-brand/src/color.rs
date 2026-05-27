@@ -221,6 +221,7 @@ pub fn parse_theme_colors(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::template::COLOR_SLOT_NAMES;

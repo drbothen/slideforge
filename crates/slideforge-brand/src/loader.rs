@@ -335,6 +335,7 @@ impl BrandProvider for BrandLoader {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use std::io::{Cursor, Write as _};
 

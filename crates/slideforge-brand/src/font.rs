@@ -262,6 +262,7 @@ pub fn font_search_dirs() -> Vec<PathBuf> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 
