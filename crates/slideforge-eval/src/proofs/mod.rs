@@ -17,8 +17,11 @@
 //! slideforge-eval` (with `--cfg kani`). Full proof correctness is deferred to
 //! STORY-067.
 
-#[cfg(kani)]
+// These submodule declarations do NOT need `#[cfg(kani)]` — the entire
+// `proofs` module is already gated with `#[cfg(kani)]` in `lib.rs`.
+// Individual proof functions inside each submodule also carry `#[cfg(kani)]`
+// on the function body. Triple-gating is redundant and was flagged in
+// adversary pass 1 (FINDING-006, STORY-014).
 pub mod no_coercion;
 
-#[cfg(kani)]
 pub mod no_overflow;

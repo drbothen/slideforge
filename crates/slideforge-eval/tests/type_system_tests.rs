@@ -558,9 +558,9 @@ fn test_bc_1_02_004_dollar_interpolation_basic() {
         Some(slideforge_types::FieldValue::Literal(Value::Str(s))) => {
             assert_eq!(
                 s.as_ref(),
-                "$1,000,000.00",
+                "$1,000,000",
                 "BC-1.02.004 AC-007: ${{{{ arr | currency }}}} with arr=1000000 must produce \
-                 '$1,000,000.00'; got: '{s}'"
+                 '$1,000,000' (integer input — no decimal places); got: '{s}'"
             );
         },
         other => panic!("stat field must be Literal(Str); got: {other:?}"),
@@ -762,6 +762,12 @@ fn test_bc_1_02_004_dollar_dollar_brace_is_math_mode_not_interpolation() {
     );
     // The title field must NOT have been resolved to "42" (n's integer value).
     // If it were, that would mean {{ n }} inside $$ was treated as text interpolation.
+    //
+    // FINDING-007 (adversary pass 1): the test previously only asserted != "42".
+    // A positive assertion is required: MathDisplay chunks contribute nothing to
+    // the evaluated string output (they are pass-through / no-op in the current
+    // string-building loop). So a template of [MathDisplay("{{ n }}")] produces
+    // the empty string "". This pins the concrete correct behavior.
     match title_val {
         Some(slideforge_types::FieldValue::Literal(Value::Str(s))) => {
             assert_ne!(
@@ -770,9 +776,15 @@ fn test_bc_1_02_004_dollar_dollar_brace_is_math_mode_not_interpolation() {
                 "BC-1.02.004 invariant 3: $${{{{ n }}}}$$ must NOT interpolate n=42; \
                  math display content is raw LaTeX, not text interpolation"
             );
-            // The value should be empty string (MathDisplay → no string content from eval)
-            // OR the raw LaTeX "{{ n }}" preserved as-is, depending on implementation.
-            // What it must NOT be is the evaluated value "42".
+            // Positive assertion: MathDisplay chunks are no-ops in the current
+            // string evaluator — they contribute zero characters. A template
+            // consisting solely of a MathDisplay chunk resolves to "".
+            assert_eq!(
+                s.as_ref(),
+                "",
+                "BC-1.02.004 invariant 3: $${{{{ n }}}}$$ template (MathDisplay-only) must \
+                 resolve to empty string \"\", not to any interpolated value; got: '{s}'"
+            );
         },
         // Other representations (e.g. a dedicated math field type in future IR)
         // are also acceptable as long as they don't resolve to "42".
@@ -966,5 +978,75 @@ fn test_bc_1_02_003_invariant_str_no_never_becomes_bool_false() {
         result,
         Some(Value::Str(Arc::from("NO"))),
         "Expr::Str('NO') must produce Value::Str('NO'), never Value::Bool(false) — DI-004"
+    );
+}
+
+/// FINDING-001 (adversary pass 1, STORY-014): `"42" == 42` must produce
+/// E-EVL-003, NOT silently return `Bool(false)`.
+///
+/// BC-1.02.003 invariant 1 (no-coercion): cross-type equality comparisons
+/// between non-numeric types are type errors. `String == Int` has no
+/// defined coercion path in slideforge — it must always be E-EVL-003.
+///
+/// Previously, `eval_equality` only rejected `Bool` cross-type comparisons,
+/// allowing `Str == Int` to fall through the same-type structural equality
+/// arm and silently return `Bool(false)`. This test pins the correct behavior.
+#[test]
+fn test_string_equals_int_type_error() {
+    let env = slideforge_eval::Env::new(IndexMap::new());
+    let mut sink = DiagnosticSink::new();
+    let expr = Expr::BinOp {
+        op: BinOpKind::Eq,
+        lhs: Box::new(Expr::Str("42".to_string())),
+        rhs: Box::new(Expr::Num(42)),
+    };
+    let result = eval_expr(&env, &expr, &mut sink);
+
+    assert_eq!(
+        result, None,
+        "Str == Int must return None (E-EVL-003), not Bool(false)"
+    );
+    assert!(
+        !sink.is_empty(),
+        "'\"42\" == 42' must push E-EVL-003 (String vs Int comparison)"
+    );
+    let code = sink.errors()[0].code().map(|c| c.to_string());
+    assert_eq!(
+        code.as_deref(),
+        Some("E-EVL-003"),
+        "String == Int must produce E-EVL-003 (FINDING-001, BC-1.02.003 no-coercion invariant)"
+    );
+}
+
+/// FINDING-005 (adversary pass 1, STORY-014): `"hello" < 5` must produce
+/// E-EVL-003, not silently fail or coerce.
+///
+/// BC-1.02.003 invariant 1 (no-coercion): ordering comparisons (`<`, `<=`,
+/// `>`, `>=`) between incompatible types must produce E-EVL-003. Strings
+/// cannot be ordered against integers without explicit conversion.
+#[test]
+fn test_ordering_string_vs_int_type_error() {
+    let env = slideforge_eval::Env::new(IndexMap::new());
+    let mut sink = DiagnosticSink::new();
+    let expr = Expr::BinOp {
+        op: BinOpKind::Lt,
+        lhs: Box::new(Expr::Str("hello".to_string())),
+        rhs: Box::new(Expr::Num(5)),
+    };
+    let result = eval_expr(&env, &expr, &mut sink);
+
+    assert_eq!(
+        result, None,
+        "Str < Int must return None (E-EVL-003), not Bool"
+    );
+    assert!(
+        !sink.is_empty(),
+        "'\"hello\" < 5' must push E-EVL-003 (String vs Int ordering comparison)"
+    );
+    let code = sink.errors()[0].code().map(|c| c.to_string());
+    assert_eq!(
+        code.as_deref(),
+        Some("E-EVL-003"),
+        "String < Int must produce E-EVL-003 (FINDING-005, BC-1.02.003 no-coercion invariant)"
     );
 }

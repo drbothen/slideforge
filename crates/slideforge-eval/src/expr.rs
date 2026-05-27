@@ -541,22 +541,46 @@ fn eval_equality(
     span: SourceSpan,
     sink: &mut DiagnosticSink,
 ) -> Option<Value> {
-    // DI-004: reject cross-type-family comparisons involving Bool.
-    // Comparing a Bool to any non-Bool is always E-EVL-003.
-    let is_bool_cross_type = match (lval, rval) {
-        (Value::Bool(_), Value::Bool(_)) => false, // same-type: allowed
-        (Value::Bool(_), _) | (_, Value::Bool(_)) => true, // cross-type: forbidden
-        _ => false,
+    // DI-004 (no-coercion invariant): reject ALL cross-type-family equality
+    // comparisons. The only allowed cross-type case is numeric widening:
+    // Int == Float / Float == Int. Every other cross-type pair is E-EVL-003.
+    //
+    // Permitted combinations:
+    //   Str  == Str    Int  == Int    Float == Float   Bool == Bool
+    //   Null == Null   List == List   Map   == Map
+    //   Int  == Float  Float == Int   (numeric widening)
+    //
+    // FINDING-001 (adversary pass 1): previously only Bool cross-type was
+    // rejected; all other cross-type pairs (e.g. Str == Int, Str == Null)
+    // silently returned Bool(false). That violates BC-1.02.003 invariant 1
+    // (no-coercion: type errors from coercion-free operations → E-EVL-003).
+    #[allow(clippy::unnested_or_patterns)]
+    // Unnested form is clearer here: each arm is a type-pair, not a nested OR.
+    // Nesting would produce `(Value::Int(_) | Value::Float(_), Value::Float(_))`
+    // which is less readable and would incorrectly match e.g. (Str, Float).
+    let is_cross_type = match (lval, rval) {
+        // Numeric widening (Int ↔ Float) and same-type pairs: allowed.
+        (Value::Int(_), Value::Float(_))
+        | (Value::Float(_), Value::Int(_))
+        | (Value::Str(_), Value::Str(_))
+        | (Value::Int(_), Value::Int(_))
+        | (Value::Float(_), Value::Float(_))
+        | (Value::Bool(_), Value::Bool(_))
+        | (Value::Null, Value::Null)
+        | (Value::List(_), Value::List(_))
+        | (Value::Map(_), Value::Map(_)) => false,
+        // All other combinations: cross-type → E-EVL-003.
+        _ => true,
     };
 
-    if is_bool_cross_type {
+    if is_cross_type {
         return push_error(
             sink,
             EvalError::TypeMismatch {
                 message: format!(
-                    "equality comparison '{}' between {} and {} is a type error (DI-004). \
-                     Booleans may only be compared to other booleans. \
-                     Use explicit conversion: {{ v == \"true\" }} or {{ v == 1 }}.",
+                    "equality comparison '{}' between {} and {} is a type error (DI-004, \
+                     BC-1.02.003). No implicit coercion — both sides must be the same type. \
+                     Use explicit conversion: {{ v | string }} or {{ v | int }}.",
                     if matches!(op, BinOpKind::Eq) { "==" } else { "!=" },
                     lval.type_name(),
                     rval.type_name(),
