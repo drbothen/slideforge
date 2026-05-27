@@ -132,11 +132,17 @@ impl<'a> LatexParser<'a> {
     /// Parse a command name after a backslash (e.g. `\alpha` → `"alpha"`).
     fn parse_command_name(&mut self) -> &'a str {
         let start = self.pos;
-        // Single non-alpha character command (e.g. `\,`)
+        // Single non-alpha character command (e.g. `\,`).
+        // Use char-width advancement to handle multi-byte UTF-8 correctly —
+        // a naive `self.pos += 1` would split a multi-byte sequence and cause
+        // a panic when the resulting slice index is not on a char boundary
+        // (FINDING-019).
         if let Some(&b) = self.input.as_bytes().get(self.pos)
             && !b.is_ascii_alphabetic()
         {
-            self.pos += 1;
+            // Advance by the full UTF-8 width of the character, not just 1 byte.
+            let ch = self.input[self.pos..].chars().next().unwrap_or('\0');
+            self.pos += ch.len_utf8();
             return &self.input[start..self.pos];
         }
         while let Some(&b) = self.input.as_bytes().get(self.pos) {
@@ -649,7 +655,11 @@ impl<'a> LatexParser<'a> {
                     }
                     Some(_) => {
                         // Single non-alpha char (e.g. `{`, `}`, `.`, `|`).
-                        self.pos += 1;
+                        // Advance by the full UTF-8 width of the character —
+                        // a naive `+= 1` would split a multi-byte sequence
+                        // and panic on the subsequent slice (FINDING-019).
+                        let ch = self.input[self.pos..].chars().next().unwrap_or('\0');
+                        self.pos += ch.len_utf8();
                         Arc::from(&self.input[backslash_pos..self.pos])
                     }
                     None => Arc::from("\\"),
@@ -1408,6 +1418,44 @@ mod tests {
             !has_ampersand_text(&ast.nodes),
             "align AST must not contain literal '&' text nodes; got: {ast:?}"
         );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // FINDING-019 — parse_command_name and consume_delimiter_char must not
+    //               panic on backslash + non-ASCII multi-byte UTF-8 characters
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// `\é` (backslash + U+00E9, a 2-byte UTF-8 char) must produce an
+    /// `UnsupportedCommand` diagnostic without panicking.
+    #[test]
+    fn test_backslash_non_ascii_no_panic() {
+        let (_, diags) = parse(r"\é", MathMode::Inline, SourceSpan::default());
+        // Must not panic — reaching here means no panic occurred.
+        // The non-ASCII char after `\` is not a recognized command name, so an
+        // UnsupportedCommand diagnostic must be emitted.
+        assert!(
+            !diags.is_empty(),
+            "expected a diagnostic for \\é (backslash + non-ASCII); got none"
+        );
+        let has_unsupported = diags.iter().any(|d| {
+            matches!(&d.error, MathRendererError::UnsupportedCommand { .. })
+        });
+        assert!(
+            has_unsupported,
+            "expected UnsupportedCommand diagnostic for \\é; got: {diags:?}"
+        );
+    }
+
+    /// `\left\ü x \right)` (backslash + U+00FC in delimiter position) must
+    /// produce a diagnostic without panicking.
+    #[test]
+    fn test_delimiter_non_ascii_no_panic() {
+        // `\ü` is `\` followed by a 2-byte UTF-8 char — consume_delimiter_char
+        // must advance by the full char width, not just 1 byte.
+        let (_, _diags) = parse(r"\left\ü x \right)", MathMode::Inline, SourceSpan::default());
+        // Reaching here means no panic — that is the primary invariant.
+        // (The parse may or may not emit diagnostics depending on how the
+        // non-ASCII delimiter is handled, but it must never panic.)
     }
 
     // ─────────────────────────────────────────────────────────────────────────
