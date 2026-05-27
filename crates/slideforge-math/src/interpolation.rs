@@ -75,6 +75,7 @@ pub fn substitute<S: BuildHasher>(
                         MathRendererError::UndefinedVariable {
                             var_name: key,
                             span: span.clone(),
+                            error_code: "E-EVL-002",
                         },
                         span.clone(),
                     ));
@@ -141,12 +142,12 @@ mod tests {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // BC-5.29.003 — @{var} substitution in math expressions
+    // BC-1.10.001 — @{var} substitution in math expressions
     // ─────────────────────────────────────────────────────────────────────────
 
     /// A defined variable is substituted correctly.
     #[test]
-    fn test_bc_5_29_003_at_var_substitution() {
+    fn test_bc_1_10_001_at_var_substitution() {
         let vars = vars_from(&[("mean", "4.2")]);
         let (result, diags) = substitute(
             r"\bar{x} = @{mean}",
@@ -159,7 +160,7 @@ mod tests {
 
     /// A reference to an undefined variable produces an `UndefinedVariable` diagnostic.
     #[test]
-    fn test_bc_5_29_003_at_var_undefined() {
+    fn test_bc_1_10_001_at_var_undefined() {
         let vars = HashMap::new();
         let (_, diags) = substitute("@{missing}", &vars, &SourceSpan::default());
         assert!(!diags.is_empty(), "expected UndefinedVariable diagnostic");
@@ -172,7 +173,7 @@ mod tests {
 
     /// `{{ arr }}` double-brace syntax is NOT treated as interpolation in math mode.
     #[test]
-    fn test_bc_5_29_003_double_brace_not_substituted() {
+    fn test_bc_1_10_001_double_brace_not_substituted() {
         let vars = vars_from(&[("arr", "replaced")]);
         let (result, diags) = substitute("{{ arr }}", &vars, &SourceSpan::default());
         assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
@@ -182,7 +183,7 @@ mod tests {
 
     /// Multiple `@{var}` references in one expression are all substituted.
     #[test]
-    fn test_bc_5_29_003_multiple_at_vars() {
+    fn test_bc_1_10_001_multiple_at_vars() {
         let vars = vars_from(&[("a", "3"), ("b", "4")]);
         let (result, diags) = substitute(
             r"\sqrt{@{a}^2 + @{b}^2}",
@@ -195,7 +196,7 @@ mod tests {
 
     /// An expression with no `@{...}` references is returned unchanged.
     #[test]
-    fn test_bc_5_29_003_no_vars_unchanged() {
+    fn test_bc_1_10_001_no_vars_unchanged() {
         let vars = HashMap::new();
         let latex = r"\frac{1}{2} + \sqrt{x}";
         let (result, diags) = substitute(latex, &vars, &SourceSpan::default());
@@ -205,7 +206,7 @@ mod tests {
 
     /// An empty string is returned unchanged with no diagnostics.
     #[test]
-    fn test_bc_5_29_003_empty_string() {
+    fn test_bc_1_10_001_empty_string() {
         let vars = HashMap::new();
         let (result, diags) = substitute("", &vars, &SourceSpan::default());
         assert!(diags.is_empty());

@@ -171,7 +171,7 @@ mod tests {
     use slideforge_types::{MathNode as TypesMathNode, SourceSpan};
 
     // ─────────────────────────────────────────────────────────────────────────
-    // BC-5.29.005 — MathRendererImpl public API
+    // BC-1.10.003 — MathRendererImpl public API
     // ─────────────────────────────────────────────────────────────────────────
 
     fn inline_node(latex: &str) -> TypesMathNode {
@@ -184,7 +184,7 @@ mod tests {
 
     /// `parse()` succeeds for a valid inline expression and returns the correct mode.
     #[test]
-    fn test_bc_5_29_005_math_renderer_parse_inline() {
+    fn test_bc_1_10_003_math_renderer_parse_inline() {
         let renderer = MathRendererImpl::new();
         let result = renderer.parse("E=mc^2", MathMode::Inline, SourceSpan::default());
         let ast = result.expect("parse should succeed for valid LaTeX");
@@ -194,7 +194,7 @@ mod tests {
 
     /// `render_omml()` succeeds for a valid node and returns non-empty bytes.
     #[test]
-    fn test_bc_5_29_005_math_renderer_render_omml() {
+    fn test_bc_1_10_003_math_renderer_render_omml() {
         let renderer = MathRendererImpl::new();
         let node = inline_node("x^2");
         let result = renderer.render_omml(&node);
@@ -207,7 +207,7 @@ mod tests {
 
     /// `render(node, MathMl)` returns `UnsupportedFormat`.
     #[test]
-    fn test_bc_5_29_005_mathml_stub_returns_not_implemented() {
+    fn test_bc_1_10_003_mathml_stub_returns_not_implemented() {
         let renderer = MathRendererImpl::new();
         let node = inline_node("x");
         let result = renderer.render(&node, MathOutputFormat::MathMl);
@@ -219,7 +219,7 @@ mod tests {
 
     /// `render(node, Pdf)` returns `UnsupportedFormat`.
     #[test]
-    fn test_bc_5_29_005_pdf_paths_stub_returns_not_implemented() {
+    fn test_bc_1_10_003_pdf_paths_stub_returns_not_implemented() {
         let renderer = MathRendererImpl::new();
         let node = inline_node("x");
         let result = renderer.render(&node, MathOutputFormat::Pdf);
@@ -231,7 +231,7 @@ mod tests {
 
     /// `display_node` renders with `<m:oMathPara>` wrapper.
     #[test]
-    fn test_bc_5_29_005_display_mode_para_wrapper() {
+    fn test_bc_1_10_003_display_mode_para_wrapper() {
         let renderer = MathRendererImpl::new();
         let node = display_node(r"\sum_{i=0}^n i");
         let result = renderer.render_omml(&node);
@@ -243,21 +243,21 @@ mod tests {
 
     /// `MathRendererImpl` implements `MathRenderer` trait (`Send + Sync`).
     #[test]
-    fn test_bc_5_29_005_is_send_sync() {
+    fn test_bc_1_10_003_is_send_sync() {
         fn assert_send_sync<T: Send + Sync>() {}
         assert_send_sync::<MathRendererImpl>();
     }
 
     /// `id()` returns the stable plugin identifier for this math renderer.
     #[test]
-    fn test_bc_5_29_005_renderer_id() {
+    fn test_bc_1_10_003_renderer_id() {
         let renderer = MathRendererImpl::new();
         assert_eq!(renderer.id(), "pulldown-latex");
     }
 
     /// `with_vars()` substitutes `@{var}` in an expression before parsing.
     #[test]
-    fn test_bc_5_29_005_with_vars_substitution() {
+    fn test_bc_1_10_003_with_vars_substitution() {
         let mut vars = HashMap::new();
         vars.insert(Arc::from("n"), Arc::from("10"));
         let renderer = MathRendererImpl::with_vars(vars);

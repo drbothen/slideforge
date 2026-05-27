@@ -382,12 +382,12 @@ mod tests {
     use std::sync::Arc;
 
     // ─────────────────────────────────────────────────────────────────────────
-    // BC-5.29.004 — OMML output for MathAst nodes
+    // BC-1.10.003 — OMML output for MathAst nodes
     // ─────────────────────────────────────────────────────────────────────────
 
     /// A superscript node renders to OMML with `<m:sSup>`.
     #[test]
-    fn test_bc_5_29_004_omml_superscript() {
+    fn test_bc_1_10_003_omml_superscript() {
         let ast = MathAst::new(
             MathMode::Inline,
             vec![MathNode::Superscript {
@@ -402,7 +402,7 @@ mod tests {
 
     /// A fraction node renders to OMML with `<m:f>`.
     #[test]
-    fn test_bc_5_29_004_omml_fraction() {
+    fn test_bc_1_10_003_omml_fraction() {
         let ast = MathAst::new(
             MathMode::Inline,
             vec![MathNode::Fraction {
@@ -417,7 +417,7 @@ mod tests {
 
     /// Display-mode output wraps the math in `<m:oMathPara>`.
     #[test]
-    fn test_bc_5_29_004_omml_display_wraps_in_para() {
+    fn test_bc_1_10_003_omml_display_wraps_in_para() {
         let ast = MathAst::new(
             MathMode::Display,
             vec![MathNode::Text(Arc::from("x"))],
@@ -434,7 +434,7 @@ mod tests {
 
     /// Inline-mode output uses `<m:oMath>` but NOT `<m:oMathPara>`.
     #[test]
-    fn test_bc_5_29_004_omml_inline_no_para() {
+    fn test_bc_1_10_003_omml_inline_no_para() {
         let ast = MathAst::new(
             MathMode::Inline,
             vec![MathNode::Text(Arc::from("y"))],
@@ -451,7 +451,7 @@ mod tests {
 
     /// OMML output carries the correct namespace URI.
     #[test]
-    fn test_bc_5_29_004_omml_namespace() {
+    fn test_bc_1_10_003_omml_namespace() {
         let ast = MathAst::new(MathMode::Inline, vec![MathNode::Text(Arc::from("1"))]);
         let bytes = render(&ast).expect("render should succeed");
         let xml = String::from_utf8(bytes).expect("valid UTF-8");
@@ -463,7 +463,7 @@ mod tests {
 
     /// A square-root node renders to OMML with `<m:rad>`.
     #[test]
-    fn test_bc_5_29_004_omml_sqrt() {
+    fn test_bc_1_10_003_omml_sqrt() {
         let ast = MathAst::new(
             MathMode::Inline,
             vec![MathNode::Sqrt {
@@ -478,7 +478,7 @@ mod tests {
 
     /// A Greek letter renders to OMML as a run `<m:r>`.
     #[test]
-    fn test_bc_5_29_004_omml_greek_letter() {
+    fn test_bc_1_10_003_omml_greek_letter() {
         let ast = MathAst::new(
             MathMode::Inline,
             vec![MathNode::Greek(Arc::from("alpha"))],
@@ -608,7 +608,7 @@ mod tests {
 
     /// An accent node renders to OMML with `<m:acc>`.
     #[test]
-    fn test_bc_5_29_004_omml_accent() {
+    fn test_bc_1_10_003_omml_accent() {
         let ast = MathAst::new(
             MathMode::Inline,
             vec![MathNode::Accent {
@@ -627,7 +627,7 @@ mod tests {
 
     /// Snapshot: `x^2` inline OMML.
     #[test]
-    fn test_bc_5_29_004_snapshot_superscript_x2() {
+    fn test_bc_1_10_003_snapshot_superscript_x2() {
         let ast = MathAst::new(
             MathMode::Inline,
             vec![MathNode::Superscript {
@@ -642,7 +642,7 @@ mod tests {
 
     /// Snapshot: `\frac{a}{b}` inline OMML.
     #[test]
-    fn test_bc_5_29_004_snapshot_fraction_ab() {
+    fn test_bc_1_10_003_snapshot_fraction_ab() {
         let ast = MathAst::new(
             MathMode::Inline,
             vec![MathNode::Fraction {
@@ -657,7 +657,7 @@ mod tests {
 
     /// Snapshot: display-mode `\sum_{i=0}^{n} i` OMML.
     #[test]
-    fn test_bc_5_29_004_snapshot_display_sum() {
+    fn test_bc_1_10_003_snapshot_display_sum() {
         let ast = MathAst::new(
             MathMode::Display,
             vec![MathNode::Subscript {
@@ -679,7 +679,7 @@ mod tests {
 
     /// Snapshot: `\sqrt{x^2 + y^2}` inline OMML.
     #[test]
-    fn test_bc_5_29_004_snapshot_sqrt_pythagorean() {
+    fn test_bc_1_10_003_snapshot_sqrt_pythagorean() {
         let ast = MathAst::new(
             MathMode::Inline,
             vec![MathNode::Sqrt {
@@ -802,7 +802,7 @@ mod tests {
 
     /// Snapshot: `\alpha + \beta` inline OMML.
     #[test]
-    fn test_bc_5_29_004_snapshot_greek_alpha_beta() {
+    fn test_bc_1_10_003_snapshot_greek_alpha_beta() {
         let ast = MathAst::new(
             MathMode::Inline,
             vec![

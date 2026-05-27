@@ -13,7 +13,7 @@ use thiserror::Error;
 /// A single diagnostic produced by the math parser or interpolator.
 ///
 /// Diagnostics accumulate across a parsing pass — the parser never stops on
-/// the first error (BC-5.29.002: error accumulation invariant).
+/// the first error (BC-1.10.002: error accumulation invariant).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MathDiagnostic {
     /// The underlying error.
@@ -55,12 +55,14 @@ pub enum MathRendererError {
     },
 
     /// A `@{var}` interpolation reference names a variable not in scope.
-    #[error("undefined variable `{var_name}` in math expression")]
+    #[error("[{error_code}] undefined variable `{var_name}` in math expression")]
     UndefinedVariable {
         /// The variable name referenced in the `@{{var_name}}` expression.
         var_name: Arc<str>,
         /// Source location of the `@{{...}}` token.
         span: SourceSpan,
+        /// Stable error code for this class of error: always `"E-EVL-002"`.
+        error_code: &'static str,
     },
 
     /// A general LaTeX parse error with a free-form description.

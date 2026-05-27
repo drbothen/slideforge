@@ -5,7 +5,7 @@
 //!
 //! ## Error accumulation
 //!
-//! The parser accumulates ALL errors in one pass (BC-5.29.002). It never stops
+//! The parser accumulates ALL errors in one pass (BC-1.10.002). It never stops
 //! on the first unsupported command. The returned
 //! `(Option<MathAst>, Vec<MathDiagnostic>)` pair lets callers decide whether to
 //! proceed with a partial AST or surface all diagnostics.
@@ -103,6 +103,54 @@ impl<'a> LatexParser<'a> {
     /// Remaining unparsed input.
     fn rest(&self) -> &'a str {
         &self.input[self.pos..]
+    }
+
+    /// Compute a [`SourceSpan`] that points to the current parser position
+    /// within the math block, rather than the span of the entire math block.
+    ///
+    /// The returned span has:
+    /// - The same `file` as the enclosing math expression span.
+    /// - `byte_offset` = enclosing span's `byte_offset` + `self.pos`.
+    /// - `line` and `col` approximated by counting newlines and columns from
+    ///   the start of the math content up to `self.pos`.
+    ///
+    /// This is used to produce diagnostics that point to the specific command
+    /// token, not the entire math expression.
+    fn span_at(&self, cmd_start: usize) -> SourceSpan {
+        // Walk the input up to cmd_start to compute line/col offsets.
+        let (delta_line, delta_col) = {
+            let slice = &self.input[..cmd_start];
+            let mut lines: u32 = 0;
+            let mut col: u32 = 0;
+            for ch in slice.chars() {
+                if ch == '\n' {
+                    lines += 1;
+                    col = 0;
+                } else {
+                    col += 1;
+                }
+            }
+            (lines, col)
+        };
+
+        let base = &self.span;
+        let new_line = if delta_line > 0 {
+            base.line.saturating_add(delta_line)
+        } else {
+            base.line
+        };
+        let new_col = if delta_line > 0 {
+            // After a newline, col resets to the new line's col offset.
+            delta_col + 1
+        } else {
+            base.col.saturating_add(delta_col)
+        };
+        SourceSpan::new(
+            Arc::clone(&base.file),
+            new_line,
+            new_col,
+            base.byte_offset.saturating_add(cmd_start),
+        )
     }
 
     /// Skip ASCII whitespace.
@@ -254,7 +302,7 @@ impl<'a> LatexParser<'a> {
     /// operator is pushed to the output list first (so it appears directly in
     /// `ast.nodes`), and any following `_` / `^` scripts are produced as
     /// `Subscript`/`Superscript` nodes with an empty group base. This matches
-    /// the BC-5.29.001 parser contract which requires the operator to be directly
+    /// the BC-1.10.001 parser contract which requires the operator to be directly
     /// visible in the top-level node list.
     fn apply_scripts(&mut self, mut prev: Vec<MathNode>, node: MathNode) -> Vec<MathNode> {
         // Large operators are pushed immediately so they appear at the top level.
@@ -317,9 +365,10 @@ impl<'a> LatexParser<'a> {
                 }
             }
             Some(b'\\') => {
+                let cmd_start = self.pos; // position of the backslash
                 self.pos += 1; // consume `\`
                 let cmd = self.parse_command_name();
-                self.dispatch_command(cmd)
+                self.dispatch_command(cmd, cmd_start)
             }
             _ => {
                 if let Some(ch) = self.consume_char() {
@@ -344,9 +393,10 @@ impl<'a> LatexParser<'a> {
                 None
             }
             b'\\' => {
+                let cmd_start = self.pos; // position of the backslash
                 self.pos += 1; // consume `\`
                 let cmd = self.parse_command_name();
-                Some(self.dispatch_command(cmd))
+                Some(self.dispatch_command(cmd, cmd_start))
             }
             b'^' | b'_' => {
                 // Dangling script without base — produce a Text node
@@ -361,8 +411,12 @@ impl<'a> LatexParser<'a> {
     }
 
     /// Dispatch a parsed command name to the correct `MathNode` variant.
+    ///
+    /// `cmd_start` is the byte offset of the leading backslash within `self.input`,
+    /// used to compute a precise [`SourceSpan`] that points to the command token
+    /// rather than the entire enclosing math block (FINDING-022).
     #[allow(clippy::too_many_lines)]
-    fn dispatch_command(&mut self, cmd: &'a str) -> MathNode {
+    fn dispatch_command(&mut self, cmd: &'a str, cmd_start: usize) -> MathNode {
         match cmd {
             // ── Structure ─────────────────────────────────────────────────
             "frac" => {
@@ -504,14 +558,15 @@ impl<'a> LatexParser<'a> {
                     other => {
                         // Unknown environment — produce diagnostic and skip
                         if !is_supported_command(other) {
+                            let cmd_span = self.span_at(cmd_start);
                             self.diags.push(MathDiagnostic::new(
                                 MathRendererError::UnsupportedCommand {
                                     command: Arc::from(other),
-                                    span: self.span.clone(),
+                                    span: cmd_span.clone(),
                                     hint: Arc::from(hint_for_command(other)),
                                     error_code: "E-EXP-006",
                                 },
-                                self.span.clone(),
+                                cmd_span,
                             ));
                         }
                         MathNode::Group(Vec::new())
@@ -603,14 +658,15 @@ impl<'a> LatexParser<'a> {
                 } else {
                     None
                 };
+                let cmd_span = self.span_at(cmd_start);
                 self.diags.push(MathDiagnostic::new(
                     MathRendererError::UnsupportedCommand {
                         command: Arc::from(other),
-                        span: self.span.clone(),
+                        span: cmd_span.clone(),
                         hint: Arc::from(hint_for_command(other)),
                         error_code: "E-EXP-006",
                     },
-                    self.span.clone(),
+                    cmd_span,
                 ));
                 MathNode::Group(Vec::new())
             }
@@ -855,12 +911,12 @@ mod tests {
     use crate::error::MathRendererError;
 
     // ─────────────────────────────────────────────────────────────────────────
-    // BC-5.29.001 — LaTeX parser produces correct MathAst nodes
+    // BC-1.10.001 — LaTeX parser produces correct MathAst nodes
     // ─────────────────────────────────────────────────────────────────────────
 
     /// A simple inline expression parses to Inline mode with a Superscript node.
     #[test]
-    fn test_bc_5_29_001_parse_inline_simple() {
+    fn test_bc_1_10_001_parse_inline_simple() {
         let (ast, diags) = parse("E = mc^2", MathMode::Inline, SourceSpan::default());
         assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
         let ast = ast.expect("expected successful parse");
@@ -872,7 +928,7 @@ mod tests {
 
     /// A display-mode sum with sub+superscript parses correctly.
     #[test]
-    fn test_bc_5_29_001_parse_display_sum() {
+    fn test_bc_1_10_001_parse_display_sum() {
         fn has_variant(nodes: &[MathNode], pred: fn(&MathNode) -> bool) -> bool {
             nodes.iter().any(|n| {
                 if pred(n) {
@@ -913,7 +969,7 @@ mod tests {
 
     /// `\frac{a}{b}` parses to a Fraction node.
     #[test]
-    fn test_bc_5_29_001_parse_fraction() {
+    fn test_bc_1_10_001_parse_fraction() {
         let (ast, diags) = parse(r"\frac{a}{b}", MathMode::Inline, SourceSpan::default());
         assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
         let ast = ast.expect("expected successful parse");
@@ -923,7 +979,7 @@ mod tests {
 
     /// `\sqrt{x}` parses to a Sqrt node with no index.
     #[test]
-    fn test_bc_5_29_001_parse_sqrt() {
+    fn test_bc_1_10_001_parse_sqrt() {
         let (ast, diags) = parse(r"\sqrt{x}", MathMode::Inline, SourceSpan::default());
         assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
         let ast = ast.expect("expected successful parse");
@@ -933,7 +989,7 @@ mod tests {
 
     /// `\alpha + \beta` parses to two Greek nodes.
     #[test]
-    fn test_bc_5_29_001_parse_greek() {
+    fn test_bc_1_10_001_parse_greek() {
         let (ast, diags) = parse(r"\alpha + \beta", MathMode::Inline, SourceSpan::default());
         assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
         let ast = ast.expect("expected successful parse");
@@ -947,7 +1003,7 @@ mod tests {
 
     /// An unknown LaTeX command produces a `MathRendererError::UnsupportedCommand` diagnostic.
     #[test]
-    fn test_bc_5_29_001_unsupported_command_error() {
+    fn test_bc_1_10_001_unsupported_command_error() {
         let (_, diags) = parse(r"\undefinedcmd{x}", MathMode::Inline, SourceSpan::default());
         assert!(!diags.is_empty(), "expected at least one diagnostic");
         let has_unsupported = diags.iter().any(|d| {
@@ -959,7 +1015,7 @@ mod tests {
     /// Two unsupported commands in one expression produce two separate diagnostics
     /// (error accumulation, not fail-fast).
     #[test]
-    fn test_bc_5_29_001_multiple_unsupported_accumulated() {
+    fn test_bc_1_10_001_multiple_unsupported_accumulated() {
         let (_, diags) = parse(
             r"\badcmd{x} + \anotherbad{y}",
             MathMode::Inline,
@@ -977,7 +1033,7 @@ mod tests {
 
     /// `\newcommand` produces a specific hint about v2+ support.
     #[test]
-    fn test_bc_5_29_001_newcommand_specific_hint() {
+    fn test_bc_1_10_001_newcommand_specific_hint() {
         let (_, diags) = parse(r"\newcommand{\foo}{bar}", MathMode::Inline, SourceSpan::default());
         let hint_diag = diags.iter().find(|d| {
             matches!(&d.error, MathRendererError::UnsupportedCommand { command, .. } if command.as_ref() == "newcommand")
@@ -997,20 +1053,20 @@ mod tests {
     // ─────────────────────────────────────────────────────────────────────────
 
     #[test]
-    fn test_bc_5_29_001_is_supported_command_known() {
+    fn test_bc_1_10_001_is_supported_command_known() {
         assert!(is_supported_command("frac"));
         assert!(is_supported_command("sum"));
         assert!(is_supported_command("alpha"));
     }
 
     #[test]
-    fn test_bc_5_29_001_is_supported_command_unknown() {
+    fn test_bc_1_10_001_is_supported_command_unknown() {
         assert!(!is_supported_command("undefinedcmd"));
         assert!(!is_supported_command("newcommand"));
     }
 
     #[test]
-    fn test_bc_5_29_001_hint_for_newcommand() {
+    fn test_bc_1_10_001_hint_for_newcommand() {
         assert!(hint_for_command("newcommand").contains("v2+"));
     }
 
@@ -1483,5 +1539,68 @@ mod tests {
             matches!(n, MathNode::Text(_) | MathNode::Group(_))
         });
         assert!(has_text, "expected Text or Group node from \\mathit; got: {ast:?}");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // FINDING-022 — Diagnostic spans must point to command position within
+    //               the math block, not position 0 / the entire block
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// When an unsupported command appears after some content, the diagnostic
+    /// span's `byte_offset` must be > 0 (i.e., it points into the math content,
+    /// not at the start of the block).
+    #[test]
+    fn test_finding_022_diagnostic_span_points_into_math_content() {
+        // The math block starts at byte_offset=100 in the enclosing .sf file.
+        // The unsupported command `\badcmd` appears after the leading text "x + ".
+        // "x + " is 4 bytes, plus 1 for the backslash = cmd_start at position 4
+        // inside the math content (relative), so the diagnostic's byte_offset
+        // should be 100 + 4 = 104 — not 100 (the block start).
+        use std::sync::Arc;
+        let span = SourceSpan::new(Arc::from("deck.sf"), 5, 10, 100);
+        let (_, diags) = parse(r"x + \badcmd", MathMode::Inline, span.clone());
+        assert!(!diags.is_empty(), "expected at least one diagnostic");
+        let cmd_diag = diags.iter().find(|d| {
+            matches!(&d.error, MathRendererError::UnsupportedCommand { command, .. }
+                if command.as_ref() == "badcmd")
+        });
+        assert!(cmd_diag.is_some(), "expected UnsupportedCommand for \\badcmd");
+        let cmd_diag = cmd_diag.unwrap();
+        // The diagnostic span's byte_offset must be greater than the block's
+        // byte_offset (100) — it must point INTO the math content, not at
+        // the beginning of the enclosing math block.
+        assert!(
+            cmd_diag.span.byte_offset > span.byte_offset,
+            "span.byte_offset ({}) must be > block start ({}) — diagnostic must \
+             point to the command, not the block start",
+            cmd_diag.span.byte_offset,
+            span.byte_offset
+        );
+    }
+
+    /// When an unsupported command is the very first token in the math content,
+    /// its span byte_offset equals the block's byte_offset (offset 0 within block).
+    #[test]
+    fn test_finding_022_diagnostic_span_at_block_start_when_cmd_is_first() {
+        use std::sync::Arc;
+        let span = SourceSpan::new(Arc::from("deck.sf"), 5, 10, 100);
+        let (_, diags) = parse(r"\badcmd", MathMode::Inline, span.clone());
+        assert!(!diags.is_empty(), "expected at least one diagnostic");
+        let cmd_diag = diags.iter().find(|d| {
+            matches!(&d.error, MathRendererError::UnsupportedCommand { command, .. }
+                if command.as_ref() == "badcmd")
+        });
+        assert!(cmd_diag.is_some(), "expected UnsupportedCommand for \\badcmd");
+        let cmd_diag = cmd_diag.unwrap();
+        // The command is at position 0 within the math block, so the span's
+        // byte_offset equals the block's byte_offset.
+        assert_eq!(
+            cmd_diag.span.byte_offset,
+            span.byte_offset,
+            "when command is at block start, span.byte_offset must equal block \
+             byte_offset ({});  got {}",
+            span.byte_offset,
+            cmd_diag.span.byte_offset
+        );
     }
 }
