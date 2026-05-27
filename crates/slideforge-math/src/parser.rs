@@ -74,10 +74,17 @@ pub fn parse(
 // Internal recursive-descent parser
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Internal recursive-descent parser for the supported LaTeX subset.
+///
+/// Created fresh for each call to [`parse`]. Not part of the public API.
 struct LatexParser<'a> {
+    /// The raw LaTeX source string being parsed.
     input: &'a str,
+    /// Current byte position within `input`. Always lands on a UTF-8 char boundary.
     pos: usize,
+    /// Source span of the enclosing math expression, used as the base for diagnostics.
     span: SourceSpan,
+    /// Accumulated diagnostics (errors and warnings). Never cleared mid-parse.
     diags: Vec<MathDiagnostic>,
     /// Current brace-nesting depth. Incremented on every `{` and decremented
     /// on every `}`. When depth would exceed [`MAX_DEPTH`], parsing of the
@@ -86,6 +93,7 @@ struct LatexParser<'a> {
 }
 
 impl<'a> LatexParser<'a> {
+    /// Construct a new parser at the start of `input`, anchored to `span`.
     fn new(input: &'a str, span: SourceSpan) -> Self {
         LatexParser {
             input,
@@ -96,6 +104,7 @@ impl<'a> LatexParser<'a> {
         }
     }
 
+    /// Consume the parser and return all accumulated diagnostics.
     fn into_diagnostics(self) -> Vec<MathDiagnostic> {
         self.diags
     }
