@@ -210,7 +210,7 @@ pub enum EvalError {
     /// E-PAR-004: A circular `@include` chain was detected in the merged AST.
     ///
     /// The evaluator runs a DFS over the include graph (built from `@include`
-    /// metadata preserved in the merged [`DeckNode`]) as a pre-pass before any
+    /// metadata preserved in the merged deck node) as a pre-pass before any
     /// expression evaluation begins (fail-closed: no partial evaluation of a
     /// cyclic deck).
     ///

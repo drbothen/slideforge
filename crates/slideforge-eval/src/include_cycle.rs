@@ -62,7 +62,7 @@ use crate::error::EvalError;
 /// directly includes via `@include`.
 ///
 /// Built by the parser/include-resolver (STORY-008) and passed to the
-/// evaluator alongside the merged `DeckNode`. The evaluator uses it to run
+/// evaluator alongside the merged deck node. The evaluator uses it to run
 /// the pre-pass cycle detection before expression evaluation begins.
 ///
 /// The `Arc<str>` keys are canonical file paths (e.g., `"/project/a.sf"`).
@@ -79,7 +79,7 @@ pub type IncludeGraph = HashMap<Arc<str>, Vec<Arc<str>>>;
 /// # Algorithm
 ///
 /// For each file in the graph that has not been visited:
-/// 1. Call [`check_node`] (recursive DFS).
+/// 1. Call `check_node` (recursive DFS).
 /// 2. On back-edge: push `EvalError::IncludeCycle` and continue collecting
 ///    all cycles (not just the first).
 ///
@@ -91,7 +91,7 @@ pub type IncludeGraph = HashMap<Arc<str>, Vec<Arc<str>>>;
 ///
 /// For AC-012: this implementation must handle include chains up to 200
 /// files deep without stack overflow. The DFS uses recursion (see
-/// [`check_node`]); the stack depth equals the include-chain depth. For
+/// `check_node`); the stack depth equals the include-chain depth. For
 /// 200-file chains, default Rust thread stacks (8 MB) provide ample
 /// headroom — each frame holds O(1) pointer-sized variables. An iterative
 /// fallback would only be needed for chains of thousands of files.
