@@ -20,19 +20,14 @@
 //! TODO(STORY-012): Implement `BinOpKind::Concat` / tilde operator once the
 //! parser gains the `~` token and `BinOpKind` gains the variant.
 
-// Imports used by the stub function bodies once implemented (STORY-011).
-// The `allow` attributes suppress unused-import warnings during the Red Gate phase.
-#[allow(unused_imports)]
 use std::sync::Arc;
 
-#[allow(unused_imports)]
+use ordered_float::OrderedFloat;
 use slideforge_syntax::{BinOpKind, DiagnosticSink, Expr, UnaryOpKind};
-#[allow(unused_imports)]
 use slideforge_types::{SourceSpan, Value};
 
 use crate::env::Env;
 use crate::error::EvalError;
-#[allow(unused_imports)]
 use crate::filters::apply_filter;
 
 // ─── eval_expr ───────────────────────────────────────────────────────────────
@@ -51,13 +46,402 @@ use crate::filters::apply_filter;
 /// - [`EvalError::DivisionByZero`] — integer or float division by zero
 /// - [`EvalError::FilterNotFound`] — pipe references an unknown filter
 /// - [`EvalError::FieldAccessFailed`] — dot-access on non-map or missing field
-pub fn eval_expr(
-    env: &Env,
-    expr: &Expr,
+pub fn eval_expr(env: &Env, expr: &Expr, sink: &mut DiagnosticSink) -> Option<Value> {
+    // Use a default span for expressions that don't carry their own span yet.
+    // STORY-012 will thread spans through the AST; until then we use a
+    // zero-origin default for error reporting.
+    let span = SourceSpan::default();
+
+    match expr {
+        // ── Terminals ────────────────────────────────────────────────────────
+        Expr::Ident(name) => {
+            if let Some(val) = env.lookup(name) {
+                Some(val.clone())
+            } else {
+                let scope_list = env
+                    .all_names()
+                    .iter()
+                    .map(|n| n.as_ref().to_owned())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                push_error(
+                    sink,
+                    EvalError::UndefinedVariable {
+                        name: Arc::from(name.as_str()),
+                        scope_list,
+                        span,
+                    },
+                )
+            }
+        }
+        Expr::Num(n) => Some(Value::Int(*n)),
+        Expr::Float(f) => Some(Value::Float(*f)),
+        Expr::Str(s) => Some(Value::Str(Arc::from(s.as_str()))),
+        Expr::Bool(b) => Some(Value::Bool(*b)),
+        Expr::Null => Some(Value::Null),
+
+        // ── Composites ───────────────────────────────────────────────────────
+        Expr::List(items) => {
+            let mut collected = Vec::with_capacity(items.len());
+            for item in items {
+                match eval_expr(env, item, sink) {
+                    Some(v) => collected.push(v),
+                    None => {
+                        // Error already pushed; continue to accumulate all
+                        // errors but return None for the whole list.
+                        return None;
+                    }
+                }
+            }
+            Some(Value::List(collected))
+        }
+        Expr::Map(entries) => {
+            let mut map = slideforge_types::OrderedMap::new();
+            let mut had_error = false;
+            for (key, val_expr) in entries {
+                match eval_expr(env, val_expr, sink) {
+                    Some(v) => {
+                        map.insert(Arc::from(key.as_str()), v);
+                    }
+                    None => {
+                        had_error = true;
+                    }
+                }
+            }
+            if had_error {
+                None
+            } else {
+                Some(Value::Map(map))
+            }
+        }
+
+        // ── Binary operations ────────────────────────────────────────────────
+        Expr::BinOp { op, lhs, rhs } => {
+            // Evaluate both sides (accumulate both errors before returning None).
+            let lval = eval_expr(env, lhs, sink);
+            let rval = eval_expr(env, rhs, sink);
+            let (Some(lval), Some(rval)) = (lval, rval) else {
+                return None;
+            };
+            eval_binop(op, &lval, &rval, span, sink)
+        }
+
+        // ── Unary operations ─────────────────────────────────────────────────
+        Expr::UnaryOp { op, operand } => {
+            let val = eval_expr(env, operand, sink)?;
+            eval_unaryop(op, val, span, sink)
+        }
+
+        // ── Field access ─────────────────────────────────────────────────────
+        Expr::FieldAccess { base, field } => {
+            let base_val = eval_expr(env, base, sink)?;
+            match &base_val {
+                Value::Map(map) => {
+                    if let Some(v) = map.get(field.as_str()) {
+                        Some(v.clone())
+                    } else {
+                        push_error(
+                            sink,
+                            EvalError::FieldAccessFailed {
+                                field: Arc::from(field.as_str()),
+                                parent_type: Arc::from("map"),
+                                span,
+                            },
+                        )
+                    }
+                }
+                other => push_error(
+                    sink,
+                    EvalError::FieldAccessFailed {
+                        field: Arc::from(field.as_str()),
+                        parent_type: Arc::from(other.type_name()),
+                        span,
+                    },
+                ),
+            }
+        }
+
+        // ── Pipe ────────────────────────────────────────────────────────────
+        Expr::Pipe {
+            lhs,
+            filter,
+            args: arg_exprs,
+        } => {
+            let lval = eval_expr(env, lhs, sink)?;
+            // Evaluate all filter arguments; accumulate errors.
+            let mut filter_args = Vec::with_capacity(arg_exprs.len());
+            let mut had_arg_error = false;
+            for arg_expr in arg_exprs {
+                match eval_expr(env, arg_expr, sink) {
+                    Some(v) => filter_args.push(v),
+                    None => had_arg_error = true,
+                }
+            }
+            if had_arg_error {
+                return None;
+            }
+            match apply_filter(filter, &lval, &filter_args, span) {
+                Ok(v) => Some(v),
+                Err(e) => push_error(sink, e),
+            }
+        }
+
+        // ── Error recovery sentinel ─────────────────────────────────────────
+        Expr::Error => None,
+    }
+}
+
+// ─── eval_binop ──────────────────────────────────────────────────────────────
+
+/// Evaluate a binary operation, pushing errors to `sink` and returning `None`
+/// on failure.
+fn eval_binop(
+    op: &BinOpKind,
+    lval: &Value,
+    rval: &Value,
+    span: SourceSpan,
     sink: &mut DiagnosticSink,
 ) -> Option<Value> {
-    let _ = (env, expr, sink);
-    todo!("STORY-011: implement eval_expr")
+    match op {
+        // ── Arithmetic ───────────────────────────────────────────────────────
+        BinOpKind::Add | BinOpKind::Sub | BinOpKind::Mul | BinOpKind::Div | BinOpKind::Rem => {
+            eval_arithmetic(op, lval, rval, span, sink)
+        }
+
+        // ── Comparison ───────────────────────────────────────────────────────
+        BinOpKind::Eq => Some(Value::Bool(lval == rval)),
+        BinOpKind::Ne => Some(Value::Bool(lval != rval)),
+        BinOpKind::Lt | BinOpKind::Le | BinOpKind::Gt | BinOpKind::Ge => {
+            eval_ordering(op, lval, rval, span, sink)
+        }
+
+        // ── Logical (short-circuit already happened at the Expr level since
+        //    both operands are already evaluated — for now we just validate
+        //    types and compute the result) ────────────────────────────────────
+        BinOpKind::And => match (lval, rval) {
+            (Value::Bool(l), Value::Bool(r)) => Some(Value::Bool(*l && *r)),
+            _ => push_error(
+                sink,
+                EvalError::TypeMismatch {
+                    message: format!(
+                        "&& requires two booleans, got {} and {}",
+                        lval.type_name(),
+                        rval.type_name()
+                    ),
+                    span,
+                },
+            ),
+        },
+        BinOpKind::Or => match (lval, rval) {
+            (Value::Bool(l), Value::Bool(r)) => Some(Value::Bool(*l || *r)),
+            _ => push_error(
+                sink,
+                EvalError::TypeMismatch {
+                    message: format!(
+                        "|| requires two booleans, got {} and {}",
+                        lval.type_name(),
+                        rval.type_name()
+                    ),
+                    span,
+                },
+            ),
+        },
+    }
+}
+
+/// Evaluate an arithmetic binary operation (`+`, `-`, `*`, `/`, `%`).
+#[allow(clippy::cast_precision_loss)] // i64→f64 for mixed-type arithmetic is intentional
+fn eval_arithmetic(
+    op: &BinOpKind,
+    lval: &Value,
+    rval: &Value,
+    span: SourceSpan,
+    sink: &mut DiagnosticSink,
+) -> Option<Value> {
+    match (lval, rval) {
+        (Value::Int(l), Value::Int(r)) => {
+            let result = match op {
+                BinOpKind::Add => l.checked_add(*r).map(Value::Int),
+                BinOpKind::Sub => l.checked_sub(*r).map(Value::Int),
+                BinOpKind::Mul => l.checked_mul(*r).map(Value::Int),
+                BinOpKind::Div => {
+                    if *r == 0 {
+                        return push_error(sink, EvalError::DivisionByZero { span });
+                    }
+                    l.checked_div(*r).map(Value::Int)
+                }
+                BinOpKind::Rem => {
+                    if *r == 0 {
+                        return push_error(sink, EvalError::DivisionByZero { span });
+                    }
+                    l.checked_rem(*r).map(Value::Int)
+                }
+                _ => unreachable!("only arithmetic ops dispatched here"),
+            };
+            result.or_else(|| {
+                push_error(
+                    sink,
+                    EvalError::TypeMismatch {
+                        message: "integer arithmetic overflow".to_string(),
+                        span,
+                    },
+                )
+            })
+        }
+        (Value::Float(l), Value::Float(r)) => {
+            let result = match op {
+                BinOpKind::Add => l.0 + r.0,
+                BinOpKind::Sub => l.0 - r.0,
+                BinOpKind::Mul => l.0 * r.0,
+                BinOpKind::Div => {
+                    if r.0 == 0.0 {
+                        return push_error(sink, EvalError::DivisionByZero { span });
+                    }
+                    l.0 / r.0
+                }
+                BinOpKind::Rem => {
+                    if r.0 == 0.0 {
+                        return push_error(sink, EvalError::DivisionByZero { span });
+                    }
+                    l.0 % r.0
+                }
+                _ => unreachable!("only arithmetic ops dispatched here"),
+            };
+            Some(Value::Float(OrderedFloat(result)))
+        }
+        (Value::Int(l), Value::Float(r)) => {
+            let l_f = *l as f64;
+            let result = match op {
+                BinOpKind::Add => l_f + r.0,
+                BinOpKind::Sub => l_f - r.0,
+                BinOpKind::Mul => l_f * r.0,
+                BinOpKind::Div => {
+                    if r.0 == 0.0 {
+                        return push_error(sink, EvalError::DivisionByZero { span });
+                    }
+                    l_f / r.0
+                }
+                BinOpKind::Rem => {
+                    if r.0 == 0.0 {
+                        return push_error(sink, EvalError::DivisionByZero { span });
+                    }
+                    l_f % r.0
+                }
+                _ => unreachable!(),
+            };
+            Some(Value::Float(OrderedFloat(result)))
+        }
+        (Value::Float(l), Value::Int(r)) => {
+            let r_f = *r as f64;
+            let result = match op {
+                BinOpKind::Add => l.0 + r_f,
+                BinOpKind::Sub => l.0 - r_f,
+                BinOpKind::Mul => l.0 * r_f,
+                BinOpKind::Div => {
+                    if r_f == 0.0 {
+                        return push_error(sink, EvalError::DivisionByZero { span });
+                    }
+                    l.0 / r_f
+                }
+                BinOpKind::Rem => {
+                    if r_f == 0.0 {
+                        return push_error(sink, EvalError::DivisionByZero { span });
+                    }
+                    l.0 % r_f
+                }
+                _ => unreachable!(),
+            };
+            Some(Value::Float(OrderedFloat(result)))
+        }
+        _ => push_error(
+            sink,
+            EvalError::TypeMismatch {
+                message: format!(
+                    "arithmetic operator requires numeric operands, got {} and {}",
+                    lval.type_name(),
+                    rval.type_name()
+                ),
+                span,
+            },
+        ),
+    }
+}
+
+/// Evaluate an ordering comparison (`<`, `<=`, `>`, `>=`).
+#[allow(clippy::cast_precision_loss)] // i64→f64 for mixed-type comparison is intentional
+fn eval_ordering(
+    op: &BinOpKind,
+    lval: &Value,
+    rval: &Value,
+    span: SourceSpan,
+    sink: &mut DiagnosticSink,
+) -> Option<Value> {
+    // Compare Int/Float values; use PartialOrd semantics.
+    let cmp_opt: Option<std::cmp::Ordering> = match (lval, rval) {
+        (Value::Int(l), Value::Int(r)) => Some(l.cmp(r)),
+        (Value::Float(l), Value::Float(r)) => l.partial_cmp(r),
+        (Value::Int(l), Value::Float(r)) => (*l as f64).partial_cmp(&r.0),
+        (Value::Float(l), Value::Int(r)) => l.0.partial_cmp(&(*r as f64)),
+        (Value::Str(l), Value::Str(r)) => Some(l.cmp(r)),
+        _ => None,
+    };
+    match cmp_opt {
+        Some(ord) => {
+            let result = match op {
+                BinOpKind::Lt => ord.is_lt(),
+                BinOpKind::Le => ord.is_le(),
+                BinOpKind::Gt => ord.is_gt(),
+                BinOpKind::Ge => ord.is_ge(),
+                _ => unreachable!("only ordering ops dispatched here"),
+            };
+            Some(Value::Bool(result))
+        }
+        None => push_error(
+            sink,
+            EvalError::TypeMismatch {
+                message: format!(
+                    "comparison requires compatible types, got {} and {}",
+                    lval.type_name(),
+                    rval.type_name()
+                ),
+                span,
+            },
+        ),
+    }
+}
+
+// ─── eval_unaryop ────────────────────────────────────────────────────────────
+
+/// Evaluate a unary operation (`!` or `-`).
+fn eval_unaryop(
+    op: &UnaryOpKind,
+    val: Value,
+    span: SourceSpan,
+    sink: &mut DiagnosticSink,
+) -> Option<Value> {
+    match op {
+        UnaryOpKind::Not => match val {
+            Value::Bool(b) => Some(Value::Bool(!b)),
+            other => push_error(
+                sink,
+                EvalError::TypeMismatch {
+                    message: format!("! requires a bool, got {}", other.type_name()),
+                    span,
+                },
+            ),
+        },
+        UnaryOpKind::Neg => match val {
+            Value::Int(n) => Some(Value::Int(-n)),
+            Value::Float(f) => Some(Value::Float(OrderedFloat(-f.0))),
+            other => push_error(
+                sink,
+                EvalError::TypeMismatch {
+                    message: format!("unary - requires a numeric value, got {}", other.type_name()),
+                    span,
+                },
+            ),
+        },
+    }
 }
 
 // ─── push_eval_error ─────────────────────────────────────────────────────────
@@ -105,7 +489,6 @@ mod tests {
 
     /// BC-2.02.001: `n * 2` with env `n=5` → `Value::Int(10)`
     #[test]
-    #[should_panic(expected = "STORY-011: implement eval_expr")]
     fn test_bc_2_02_001_arithmetic_mul() {
         let env = env_with(&[("n", Value::Int(5))]);
         let mut sink = DiagnosticSink::new();
@@ -123,7 +506,6 @@ mod tests {
 
     /// BC-2.02.004: `10 / 0` → `None` + sink has `DivisionByZero` diagnostic
     #[test]
-    #[should_panic(expected = "STORY-011: implement eval_expr")]
     fn test_bc_2_02_004_arithmetic_div_zero() {
         let env = empty_env();
         let mut sink = DiagnosticSink::new();
@@ -141,7 +523,6 @@ mod tests {
 
     /// BC-2.02.006: `item.price` with `item = Map { "price": Int(42) }` → `Some(Int(42))`
     #[test]
-    #[should_panic(expected = "STORY-011: implement eval_expr")]
     fn test_bc_2_02_006_dot_access() {
         let mut map = OrderedMap::new();
         map.insert(Arc::from("price"), Value::Int(42));
@@ -160,7 +541,6 @@ mod tests {
 
     /// BC-2.02.006: `item.missing` → `None` + sink has `FieldAccessFailed`
     #[test]
-    #[should_panic(expected = "STORY-011: implement eval_expr")]
     fn test_bc_2_02_006_dot_access_missing() {
         let mut map = OrderedMap::new();
         map.insert(Arc::from("price"), Value::Int(42));
@@ -179,7 +559,6 @@ mod tests {
 
     /// BC-2.02.007: `name | upper` with `name="world"` → `Some(Str("WORLD"))`
     #[test]
-    #[should_panic(expected = "STORY-011: implement eval_expr")]
     fn test_bc_2_02_007_pipe_chain() {
         let env = env_with(&[("name", Value::Str(Arc::from("world")))]);
         let mut sink = DiagnosticSink::new();
@@ -197,7 +576,6 @@ mod tests {
 
     /// BC-2.02.007: `name | bogus` → `None` + sink has `FilterNotFound`
     #[test]
-    #[should_panic(expected = "STORY-011: implement eval_expr")]
     fn test_bc_2_02_007_pipe_unknown_filter() {
         let env = env_with(&[("name", Value::Str(Arc::from("world")))]);
         let mut sink = DiagnosticSink::new();
@@ -215,7 +593,6 @@ mod tests {
 
     /// BC-2.02.002: `greeting` with empty env → `None` + sink has `UndefinedVariable`
     #[test]
-    #[should_panic(expected = "STORY-011: implement eval_expr")]
     fn test_bc_2_02_002_undefined_var() {
         let env = empty_env();
         let mut sink = DiagnosticSink::new();
@@ -229,7 +606,6 @@ mod tests {
 
     /// BC-2.02.002: diagnostic for undefined `c` in env {a, b} must mention a, b
     #[test]
-    #[should_panic(expected = "STORY-011: implement eval_expr")]
     fn test_bc_2_02_002_undefined_var_scope_listed() {
         let env = env_with(&[("a", Value::Int(1)), ("b", Value::Int(2))]);
         let mut sink = DiagnosticSink::new();
@@ -252,7 +628,6 @@ mod tests {
 
     /// BC-2.02.002: evaluating two undefined vars in sequence must accumulate both errors
     #[test]
-    #[should_panic(expected = "STORY-011: implement eval_expr")]
     fn test_bc_2_02_002_two_errors_accumulated() {
         let env = empty_env();
         let mut sink = DiagnosticSink::new();
@@ -278,7 +653,6 @@ mod tests {
 
     /// BC-2.02.003: `"NO" + 1` → `None` + sink has `TypeMismatch`
     #[test]
-    #[should_panic(expected = "STORY-011: implement eval_expr")]
     fn test_bc_2_02_003_type_mismatch_arith() {
         let env = empty_env();
         let mut sink = DiagnosticSink::new();

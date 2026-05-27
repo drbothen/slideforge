@@ -16,7 +16,7 @@ slideforge-syntax = { workspace = true }
 thiserror = { workspace = true }
 miette = { workspace = true }
 indexmap = "=2.9.0"
+ordered-float = { workspace = true }
 
 [dev-dependencies]
 insta = { workspace = true }
-ordered-float = { workspace = true }

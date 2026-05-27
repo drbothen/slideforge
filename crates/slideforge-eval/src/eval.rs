@@ -3,16 +3,14 @@
 //! This module provides convenience wrappers over [`crate::expr::eval_expr`]
 //! for use by the slide builder and template renderer.
 
-// Imports used by the stub function body once implemented (STORY-011).
-#[allow(unused_imports)]
 use std::sync::Arc;
 
-#[allow(unused_imports)]
 use slideforge_syntax::{DiagnosticSink, Expr};
-#[allow(unused_imports)]
 use slideforge_types::Value;
 
 use crate::env::Env;
+use crate::expr::eval_expr;
+use crate::filters::format_float_display;
 
 // ─── eval_expr_to_string ────────────────────────────────────────────────────
 
@@ -37,13 +35,32 @@ use crate::env::Env;
 /// # Errors pushed to `sink`
 ///
 /// Delegates entirely to [`crate::expr::eval_expr`].
-pub fn eval_expr_to_string(
-    env: &Env,
-    expr: &Expr,
-    sink: &mut DiagnosticSink,
-) -> Option<Arc<str>> {
-    let _ = (env, expr, sink);
-    todo!("STORY-011: implement eval_expr_to_string")
+pub fn eval_expr_to_string(env: &Env, expr: &Expr, sink: &mut DiagnosticSink) -> Option<Arc<str>> {
+    use crate::error::EvalError;
+    use slideforge_syntax::error::ParseSeverity;
+    use slideforge_types::SourceSpan;
+
+    let val = eval_expr(env, expr, sink)?;
+    match val {
+        Value::Str(s) => Some(s),
+        Value::Int(n) => Some(Arc::from(n.to_string().as_str())),
+        Value::Float(f) => Some(Arc::from(format_float_display(f.0).as_str())),
+        Value::Bool(b) => Some(Arc::from(if b { "true" } else { "false" })),
+        Value::Null => Some(Arc::from("")),
+        Value::List(_) | Value::Map(_) => {
+            sink.push_with_severity(
+                EvalError::TypeMismatch {
+                    message: format!(
+                        "cannot coerce {} to string for interpolation",
+                        val.type_name()
+                    ),
+                    span: SourceSpan::default(),
+                },
+                ParseSeverity::Error,
+            );
+            None
+        }
+    }
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -77,7 +94,6 @@ mod tests {
 
     /// BC-2.02.008: `Int(42)` coerces to `"42"`
     #[test]
-    #[should_panic(expected = "STORY-011: implement eval_expr_to_string")]
     fn test_bc_2_02_008_eval_expr_to_string_int() {
         let env = env_with(&[("n", Value::Int(42))]);
         let mut sink = DiagnosticSink::new();
@@ -91,7 +107,6 @@ mod tests {
 
     /// BC-2.02.008: `Str("hello")` coerces to `"hello"` (no quotes added)
     #[test]
-    #[should_panic(expected = "STORY-011: implement eval_expr_to_string")]
     fn test_bc_2_02_008_eval_expr_to_string_str() {
         let env = env_with(&[("msg", Value::Str(Arc::from("hello")))]);
         let mut sink = DiagnosticSink::new();
@@ -105,7 +120,6 @@ mod tests {
 
     /// BC-2.02.008: `Null` coerces to `""` (empty string, not "null")
     #[test]
-    #[should_panic(expected = "STORY-011: implement eval_expr_to_string")]
     fn test_bc_2_02_008_eval_expr_to_string_null() {
         let env = env_with(&[("nothing", Value::Null)]);
         let mut sink = DiagnosticSink::new();
@@ -118,7 +132,6 @@ mod tests {
     // ── Bool → "true"/"false" ────────────────────────────────────────────────
 
     #[test]
-    #[should_panic(expected = "STORY-011: implement eval_expr_to_string")]
     fn test_bc_2_02_008_eval_expr_to_string_bool_true() {
         let env = env_with(&[("flag", Value::Bool(true))]);
         let mut sink = DiagnosticSink::new();
@@ -129,7 +142,6 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "STORY-011: implement eval_expr_to_string")]
     fn test_bc_2_02_008_eval_expr_to_string_bool_false() {
         let env = env_with(&[("flag", Value::Bool(false))]);
         let mut sink = DiagnosticSink::new();
@@ -142,7 +154,6 @@ mod tests {
     // ── Float → decimal string ────────────────────────────────────────────────
 
     #[test]
-    #[should_panic(expected = "STORY-011: implement eval_expr_to_string")]
     fn test_bc_2_02_008_eval_expr_to_string_float() {
         // Use a value that is not an approximation of a well-known constant
         // (avoids clippy::approx_constant lint).
@@ -161,7 +172,6 @@ mod tests {
     // ── Undefined var → None + error ─────────────────────────────────────────
 
     #[test]
-    #[should_panic(expected = "STORY-011: implement eval_expr_to_string")]
     fn test_bc_2_02_008_eval_expr_to_string_undefined_var_returns_none() {
         let env = empty_env();
         let mut sink = DiagnosticSink::new();
@@ -174,7 +184,6 @@ mod tests {
     // ── Literal Null expr → empty string ──────────────────────────────────────
 
     #[test]
-    #[should_panic(expected = "STORY-011: implement eval_expr_to_string")]
     fn test_bc_2_02_008_eval_expr_to_string_literal_null() {
         let env = empty_env();
         let mut sink = DiagnosticSink::new();
