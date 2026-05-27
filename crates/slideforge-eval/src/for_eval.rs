@@ -216,6 +216,23 @@ pub fn eval_for_block<S: std::hash::BuildHasher>(
 /// `@for` items are evaluated and their resulting sub-slides are recorded in the
 /// returned `Slide`'s `blocks` field.
 /// `@if` evaluation delegates to [`crate::if_eval::eval_if_chain`] (STORY-013).
+///
+/// # Architectural note — `&Env` (immutable) vs `&mut Env`
+///
+/// This function takes `&Env` (shared reference) because it only evaluates
+/// **field values** on the slide's own fields — a purely read-only operation on
+/// the environment. Inline items within the slide body (which may contain `@for`
+/// or `@if` blocks that push/pop scope frames and therefore require mutation) are
+/// processed by [`eval_block_items`] **after** `eval_slide_node` returns, using
+/// the caller's `&mut Env`. The two phases are deliberately separated:
+///
+/// 1. `eval_slide_node(&env, ...)` — resolve field values (read-only env access).
+/// 2. `eval_block_items(&mut env, &slide_node.inline_items, ...)` — process any
+///    element-scope `@for`/`@if` blocks (mutable env access for scope push/pop).
+///
+/// If this function ever needs to process inline items **itself** (rather than
+/// delegating to the caller), the signature **must** change to `env: &mut Env`.
+/// The current split exists to keep field evaluation clean and side-effect-free.
 pub fn eval_slide_node<S: std::hash::BuildHasher>(
     env: &Env,
     slide_node: &SlideNode,
@@ -323,6 +340,12 @@ pub fn eval_slide_node<S: std::hash::BuildHasher>(
     Some(Slide {
         slide_type,
         fields,
+        // Block-level content (images, charts, diagrams, shapes) is populated
+        // by later pipeline stages (layout, PPTX generation, Waves 3+). In
+        // Wave 2, the evaluator only resolves field values. Validators that
+        // inspect `slide.blocks` (AltTextValidator, CanvasOverflowValidator)
+        // operate on `Deck` values produced by the layout stage, not directly
+        // from `eval_deck` output.
         blocks: vec![],
         register: None,
         tags,

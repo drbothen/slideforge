@@ -16,6 +16,7 @@
 //! | E-EVL-007 | `TooManySlides`      |
 //! | E-EVL-008 | `NotIterable`        |
 //! | E-EVL-009 | `LargeDeckWarning`   |
+//! | E-EVL-010 | `DivisionByZero`     |
 
 use std::sync::Arc;
 
@@ -104,11 +105,19 @@ pub enum EvalError {
         span: SourceSpan,
     },
 
-    /// E-EVL-003 (division by zero): Integer or float division by zero was
-    /// attempted. Classified under type error because the divisor has an
-    /// invalid value for the requested operation.
+    /// E-EVL-010: Integer or float division by zero was attempted.
+    ///
+    /// Assigned its own distinct code (separate from `E-EVL-003` / `TypeMismatch`)
+    /// because division-by-zero is a numeric domain error, not a type mismatch:
+    /// both operands may be correctly typed integers or floats, yet the operation
+    /// is still invalid due to the divisor's value. Distinguishing the two codes
+    /// allows tooling and downstream consumers to pattern-match on the specific
+    /// failure mode without inspecting error message text.
     #[error("division by zero at {span}")]
-    #[diagnostic(code("E-EVL-003"))]
+    #[diagnostic(
+        code("E-EVL-010"),
+        help("Ensure the divisor is non-zero before dividing, or guard with an @if check")
+    )]
     DivisionByZero {
         /// Source location of the division expression.
         span: SourceSpan,
@@ -352,11 +361,11 @@ mod tests {
         let code = e004.code().unwrap().to_string();
         assert_eq!(code, "E-EVL-004", "FilterNotFound must have code E-EVL-004");
 
-        let e003_div = EvalError::DivisionByZero { span: test_span() };
-        let code = e003_div.code().unwrap().to_string();
+        let e010_div = EvalError::DivisionByZero { span: test_span() };
+        let code = e010_div.code().unwrap().to_string();
         assert_eq!(
-            code, "E-EVL-003",
-            "DivisionByZero must have code E-EVL-003 (type error in expression)"
+            code, "E-EVL-010",
+            "DivisionByZero must have its own distinct code E-EVL-010 (not shared with TypeMismatch E-EVL-003)"
         );
 
         let e_dat005 = EvalError::FieldAccessFailed {

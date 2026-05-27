@@ -222,10 +222,24 @@ pub fn eval_deck_with_variant(
     let mut slides = eval_block_items(&mut env, &deck_node.items, &set_rule_defaults, config, sink);
 
     // ── Step 4b: Deck-level slide cap (F-P2-003 / AC-014) ──
-    // The per-@for cap in eval_for_block handles intra-loop excess. However,
-    // when multiple top-level @for blocks each produce slides below the cap,
-    // the combined total may still exceed `max_total_slides`. This deck-level
-    // check enforces the hard cap on the aggregate slide count.
+    //
+    // The per-`@for` cap inside `eval_for_block` handles intra-loop excess.
+    // However, when multiple top-level `@for` blocks each produce slides
+    // *below* the per-loop cap individually, the combined total may still
+    // exceed `max_total_slides`. This second gate enforces the hard cap on
+    // the aggregate slide count for the whole deck.
+    //
+    // # Soft-error pattern
+    //
+    // `TooManySlides` is pushed as `ParseSeverity::Error` (not `Fatal`), so
+    // `eval_deck` returns `Some(Deck)` with the slide list truncated to `max`.
+    // This is intentional: it allows warn-only mode (`--warn-only`) to still
+    // produce partial output for review rather than failing hard.
+    //
+    // **Downstream consumers MUST check `sink.has_errors()` to distinguish a
+    // clean deck from a truncated one.** A `Some(Deck)` return does NOT
+    // guarantee that `max_total_slides` was not exceeded — the sink may
+    // contain a non-fatal `TooManySlides` error indicating truncation.
     if let Some(max) = config.max_total_slides
         && slides.len() > max
     {

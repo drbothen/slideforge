@@ -19,3 +19,5 @@ slideforge-plugin-api = { workspace = true }
 
 [dev-dependencies]
 insta = { workspace = true }
+slideforge-eval = { workspace = true }
+slideforge-syntax = { workspace = true }
