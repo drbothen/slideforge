@@ -1,0 +1,25 @@
+[package]
+name = "slideforge-brand"
+description = "Brand loading and extraction for slideforge — reads .pptx/.docx OOXML theme data"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "../../README.md"
+
+[dependencies]
+quick-xml = "=0.36.0"
+zip = "=2.3.0"
+dirs = "=5.0.1"
+thiserror = { workspace = true }
+tracing = { workspace = true }
+slideforge-types = { workspace = true }
+slideforge-plugin-api = { workspace = true }
+
+[dev-dependencies]
+insta = { workspace = true }
+zip = "=2.3.0"
+tracing-subscriber = { workspace = true }
