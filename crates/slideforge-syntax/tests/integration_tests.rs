@@ -664,6 +664,47 @@ fn test_ec001_empty_sink_on_valid_source() {
     );
 }
 
+// ── F-WG-001: known_fields keyword count matches registry ────────────────────
+
+/// F-WG-001: `all_slide_types()` must return exactly 31 types that all have
+/// known fields. Also verifies the specific registry types called out in the
+/// wave-gate finding.
+#[test]
+fn test_slide_type_keywords_match_known_fields() {
+    use slideforge_syntax::known_fields::{all_slide_types, known_fields};
+    use std::collections::HashSet;
+
+    let kf_types: HashSet<&str> = all_slide_types().iter().copied().collect();
+    assert_eq!(
+        kf_types.len(),
+        31,
+        "all_slide_types() must return exactly 31 types; got {}",
+        kf_types.len()
+    );
+
+    // Every type in all_slide_types() must have known fields.
+    for &ty in all_slide_types() {
+        assert!(
+            known_fields(ty).is_some(),
+            "slide type '{ty}' from all_slide_types() must be in known_fields()"
+        );
+    }
+
+    // Verify registry types are present (F-WG-001 specific types).
+    for expected in &[
+        "section_break",
+        "two_col",
+        "stat_callout",
+        "process_flow",
+        "executive_summary",
+    ] {
+        assert!(
+            kf_types.contains(expected),
+            "missing from all_slide_types(): {expected}"
+        );
+    }
+}
+
 // ── F-004: parse_checked warning propagation path ────────────────────────────
 
 /// F-004: `parse_checked` must push a non-fatal `ParseSeverity::Warning` into

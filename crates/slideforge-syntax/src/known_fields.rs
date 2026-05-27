@@ -13,10 +13,18 @@
 //!
 //! # All 31 Slide Types
 //!
-//! Per the 25 Q&A planning decisions (q2-decision-final.md, BINDING):
-//! - 23 original seed types
-//! - 8 additional types: `chart`, `toc`, `agenda`, `quote`, `grid`, `bio`,
-//!   `diagram`, `team`
+//! Per the `SlideTypeRegistry` in `slideforge-plugin-api` (single source of truth):
+//! - Core: `title`, `section_break`, `content`, `two_col`, `image`, `blank`
+//! - Navigation: `agenda`, `toc`
+//! - People/quotes: `quote`, `team`, `bio`
+//! - Analysis/strategy: `executive_summary`, `problem_statement`, `recommendation`,
+//!   `risk_register`, `timeline`, `stat_callout`, `comparison`, `process_flow`,
+//!   `matrix`
+//! - Financial/metrics: `financials`, `kpi_dashboard`
+//! - Data visualization: `chart`, `diagram`
+//! - Media/technical: `screenshot`, `code_sample`, `video`
+//! - Research/org: `survey_results`, `org_chart`, `roadmap`
+//! - Closing: `closing`
 //!
 //! Common fields shared by all slide types: `tags`, `notes`, `report`, `detail`,
 //! `alt`, `lang`, `decorative`, `footer`, `logo`.
@@ -73,6 +81,19 @@ pub fn known_fields(slide_type: &str) -> Option<&'static [&'static str]> {
             "date",
             "background",
         ]),
+        "section_break" => Some(&[
+            "tags",
+            "notes",
+            "report",
+            "detail",
+            "alt",
+            "lang",
+            "decorative",
+            "footer",
+            "logo",
+            "title",
+            "subtitle",
+        ]),
         "content" => Some(&[
             "tags",
             "notes",
@@ -88,49 +109,7 @@ pub fn known_fields(slide_type: &str) -> Option<&'static [&'static str]> {
             "subtitle",
             "background",
         ]),
-        "section" => Some(&[
-            "tags",
-            "notes",
-            "report",
-            "detail",
-            "alt",
-            "lang",
-            "decorative",
-            "footer",
-            "logo",
-            "title",
-            "subtitle",
-            "background",
-        ]),
-        "bullets" => Some(&[
-            "tags",
-            "notes",
-            "report",
-            "detail",
-            "alt",
-            "lang",
-            "decorative",
-            "footer",
-            "logo",
-            "title",
-            "items",
-            "bullet_style",
-        ]),
-        "numbered" => Some(&[
-            "tags",
-            "notes",
-            "report",
-            "detail",
-            "alt",
-            "lang",
-            "decorative",
-            "footer",
-            "logo",
-            "title",
-            "items",
-            "start",
-        ]),
-        "two_column" => Some(&[
+        "two_col" => Some(&[
             "tags",
             "notes",
             "report",
@@ -161,167 +140,6 @@ pub fn known_fields(slide_type: &str) -> Option<&'static [&'static str]> {
             "height",
             "align",
         ]),
-        "full_image" => Some(&[
-            "tags",
-            "notes",
-            "report",
-            "detail",
-            "alt",
-            "lang",
-            "decorative",
-            "footer",
-            "logo",
-            "src",
-            "caption",
-            "overlay_title",
-        ]),
-        "statement" => Some(&[
-            "tags",
-            "notes",
-            "report",
-            "detail",
-            "alt",
-            "lang",
-            "decorative",
-            "footer",
-            "logo",
-            "text",
-            "attribution",
-            "background",
-        ]),
-        "stat" => Some(&[
-            "tags",
-            "notes",
-            "report",
-            "detail",
-            "alt",
-            "lang",
-            "decorative",
-            "footer",
-            "logo",
-            "title",
-            "stat",
-            "label",
-            "context",
-        ]),
-        "three_stats" => Some(&[
-            "tags",
-            "notes",
-            "report",
-            "detail",
-            "alt",
-            "lang",
-            "decorative",
-            "footer",
-            "logo",
-            "title",
-            "stat1",
-            "label1",
-            "stat2",
-            "label2",
-            "stat3",
-            "label3",
-        ]),
-        "comparison" => Some(&[
-            "tags",
-            "notes",
-            "report",
-            "detail",
-            "alt",
-            "lang",
-            "decorative",
-            "footer",
-            "logo",
-            "title",
-            "left_label",
-            "right_label",
-            "left_items",
-            "right_items",
-        ]),
-        "timeline" => Some(&[
-            "tags",
-            "notes",
-            "report",
-            "detail",
-            "alt",
-            "lang",
-            "decorative",
-            "footer",
-            "logo",
-            "title",
-            "events",
-        ]),
-        "process" => Some(&[
-            "tags",
-            "notes",
-            "report",
-            "detail",
-            "alt",
-            "lang",
-            "decorative",
-            "footer",
-            "logo",
-            "title",
-            "steps",
-        ]),
-        "code" => Some(&[
-            "tags",
-            "notes",
-            "report",
-            "detail",
-            "alt",
-            "lang",
-            "decorative",
-            "footer",
-            "logo",
-            "title",
-            "source",
-            "language",
-            "highlight_lines",
-        ]),
-        "table" => Some(&[
-            "tags",
-            "notes",
-            "report",
-            "detail",
-            "alt",
-            "lang",
-            "decorative",
-            "footer",
-            "logo",
-            "title",
-            "headers",
-            "rows",
-        ]),
-        "map" => Some(&[
-            "tags",
-            "notes",
-            "report",
-            "detail",
-            "alt",
-            "lang",
-            "decorative",
-            "footer",
-            "logo",
-            "title",
-            "region",
-            "highlights",
-        ]),
-        "closing" => Some(&[
-            "tags",
-            "notes",
-            "report",
-            "detail",
-            "alt",
-            "lang",
-            "decorative",
-            "footer",
-            "logo",
-            "title",
-            "subtitle",
-            "cta",
-            "contact",
-        ]),
         "blank" => Some(&[
             "tags",
             "notes",
@@ -333,33 +151,6 @@ pub fn known_fields(slide_type: &str) -> Option<&'static [&'static str]> {
             "footer",
             "logo",
             "background",
-        ]),
-        "divider" => Some(&[
-            "tags",
-            "notes",
-            "report",
-            "detail",
-            "alt",
-            "lang",
-            "decorative",
-            "footer",
-            "logo",
-            "title",
-            "background",
-        ]),
-        "callout" => Some(&[
-            "tags",
-            "notes",
-            "report",
-            "detail",
-            "alt",
-            "lang",
-            "decorative",
-            "footer",
-            "logo",
-            "title",
-            "body",
-            "kind",
         ]),
         "agenda" | "toc" => Some(&[
             "tags",
@@ -373,24 +164,6 @@ pub fn known_fields(slide_type: &str) -> Option<&'static [&'static str]> {
             "logo",
             "title",
             "items",
-        ]),
-        // ── Additional types (q2-decision-final.md) ───────────────────────────
-        "chart" => Some(&[
-            "tags",
-            "notes",
-            "report",
-            "detail",
-            "alt",
-            "lang",
-            "decorative",
-            "footer",
-            "logo",
-            "title",
-            "data",
-            "kind",
-            "x_label",
-            "y_label",
-            "caption",
         ]),
         "quote" => Some(&[
             "tags",
@@ -407,7 +180,7 @@ pub fn known_fields(slide_type: &str) -> Option<&'static [&'static str]> {
             "role",
             "background",
         ]),
-        "grid" => Some(&[
+        "team" => Some(&[
             "tags",
             "notes",
             "report",
@@ -418,8 +191,7 @@ pub fn known_fields(slide_type: &str) -> Option<&'static [&'static str]> {
             "footer",
             "logo",
             "title",
-            "items",
-            "columns",
+            "members",
         ]),
         "bio" => Some(&[
             "tags",
@@ -437,6 +209,177 @@ pub fn known_fields(slide_type: &str) -> Option<&'static [&'static str]> {
             "photo",
             "links",
         ]),
+        "executive_summary" => Some(&[
+            "tags",
+            "notes",
+            "report",
+            "detail",
+            "alt",
+            "lang",
+            "decorative",
+            "footer",
+            "logo",
+            "title",
+            "summary",
+            "bullets",
+        ]),
+        "problem_statement" => Some(&[
+            "tags",
+            "notes",
+            "report",
+            "detail",
+            "alt",
+            "lang",
+            "decorative",
+            "footer",
+            "logo",
+            "title",
+            "problem",
+            "impact",
+        ]),
+        "recommendation" => Some(&[
+            "tags",
+            "notes",
+            "report",
+            "detail",
+            "alt",
+            "lang",
+            "decorative",
+            "footer",
+            "logo",
+            "title",
+            "recommendation",
+            "rationale",
+            "risk",
+        ]),
+        "risk_register" => Some(&[
+            "tags",
+            "notes",
+            "report",
+            "detail",
+            "alt",
+            "lang",
+            "decorative",
+            "footer",
+            "logo",
+            "title",
+            "risks",
+        ]),
+        "timeline" => Some(&[
+            "tags",
+            "notes",
+            "report",
+            "detail",
+            "alt",
+            "lang",
+            "decorative",
+            "footer",
+            "logo",
+            "title",
+            "events",
+        ]),
+        "stat_callout" => Some(&[
+            "tags",
+            "notes",
+            "report",
+            "detail",
+            "alt",
+            "lang",
+            "decorative",
+            "footer",
+            "logo",
+            "stat_1",
+            "label_1",
+            "stat_2",
+            "label_2",
+            "stat_3",
+            "label_3",
+        ]),
+        "comparison" => Some(&[
+            "tags",
+            "notes",
+            "report",
+            "detail",
+            "alt",
+            "lang",
+            "decorative",
+            "footer",
+            "logo",
+            "title",
+            "left_label",
+            "right_label",
+            "left_items",
+            "right_items",
+        ]),
+        "process_flow" => Some(&[
+            "tags",
+            "notes",
+            "report",
+            "detail",
+            "alt",
+            "lang",
+            "decorative",
+            "footer",
+            "logo",
+            "title",
+            "steps",
+        ]),
+        "matrix" => Some(&[
+            "tags",
+            "notes",
+            "report",
+            "detail",
+            "alt",
+            "lang",
+            "decorative",
+            "footer",
+            "logo",
+            "title",
+            "cells",
+        ]),
+        "financials" => Some(&[
+            "tags",
+            "notes",
+            "report",
+            "detail",
+            "alt",
+            "lang",
+            "decorative",
+            "footer",
+            "logo",
+            "title",
+            "rows",
+        ]),
+        "kpi_dashboard" => Some(&[
+            "tags",
+            "notes",
+            "report",
+            "detail",
+            "alt",
+            "lang",
+            "decorative",
+            "footer",
+            "logo",
+            "title",
+            "kpis",
+        ]),
+        "chart" => Some(&[
+            "tags",
+            "notes",
+            "report",
+            "detail",
+            "alt",
+            "lang",
+            "decorative",
+            "footer",
+            "logo",
+            "title",
+            "data",
+            "kind",
+            "x_label",
+            "y_label",
+            "caption",
+        ]),
         "diagram" => Some(&[
             "tags",
             "notes",
@@ -451,7 +394,7 @@ pub fn known_fields(slide_type: &str) -> Option<&'static [&'static str]> {
             "source",
             "caption",
         ]),
-        "team" => Some(&[
+        "screenshot" => Some(&[
             "tags",
             "notes",
             "report",
@@ -462,10 +405,10 @@ pub fn known_fields(slide_type: &str) -> Option<&'static [&'static str]> {
             "footer",
             "logo",
             "title",
-            "members",
+            "image",
+            "caption",
         ]),
-        // ── Additional types commonly referenced in DSL docs ──────────────────
-        "warning" | "info" => Some(&[
+        "code_sample" => Some(&[
             "tags",
             "notes",
             "report",
@@ -476,7 +419,78 @@ pub fn known_fields(slide_type: &str) -> Option<&'static [&'static str]> {
             "footer",
             "logo",
             "title",
-            "body",
+            "code",
+            "language",
+        ]),
+        "video" => Some(&[
+            "tags",
+            "notes",
+            "report",
+            "detail",
+            "alt",
+            "lang",
+            "decorative",
+            "footer",
+            "logo",
+            "title",
+            "src",
+            "caption",
+            "autoplay",
+            "loop",
+        ]),
+        "survey_results" => Some(&[
+            "tags",
+            "notes",
+            "report",
+            "detail",
+            "alt",
+            "lang",
+            "decorative",
+            "footer",
+            "logo",
+            "title",
+            "results",
+        ]),
+        "org_chart" => Some(&[
+            "tags",
+            "notes",
+            "report",
+            "detail",
+            "alt",
+            "lang",
+            "decorative",
+            "footer",
+            "logo",
+            "title",
+            "nodes",
+        ]),
+        "roadmap" => Some(&[
+            "tags",
+            "notes",
+            "report",
+            "detail",
+            "alt",
+            "lang",
+            "decorative",
+            "footer",
+            "logo",
+            "title",
+            "phases",
+        ]),
+        "closing" => Some(&[
+            "tags",
+            "notes",
+            "report",
+            "detail",
+            "alt",
+            "lang",
+            "decorative",
+            "footer",
+            "logo",
+            "title",
+            "subtitle",
+            "cta",
+            "contact",
         ]),
         _ => None,
     }
@@ -484,54 +498,68 @@ pub fn known_fields(slide_type: &str) -> Option<&'static [&'static str]> {
 
 /// Return the list of all 31 built-in slide type names.
 ///
+/// These match exactly the keywords registered in `SlideTypeRegistry::default()`
+/// in `slideforge-plugin-api`. This function is the compile-time counterpart of
+/// the runtime registry's `all_keywords()` method.
+///
 /// This is used for error messages (e.g., "Did you mean X?") and for
 /// iterating over all known types.
 #[must_use]
 pub fn all_slide_types() -> &'static [&'static str] {
     &[
+        // Core presentation structure
         "title",
+        "section_break",
         "content",
-        "section",
-        "bullets",
-        "numbered",
-        "two_column",
+        "two_col",
         "image",
-        "full_image",
-        "statement",
-        "stat",
-        "three_stats",
-        "comparison",
-        "timeline",
-        "process",
-        "code",
-        "table",
-        "map",
-        "closing",
         "blank",
-        "divider",
-        "callout",
+        // Navigation and overview
         "agenda",
         "toc",
-        "chart",
+        // People and quotes
         "quote",
-        "grid",
-        "bio",
-        "diagram",
         "team",
-        "warning",
-        "info",
+        "bio",
+        // Analysis and strategy
+        "executive_summary",
+        "problem_statement",
+        "recommendation",
+        "risk_register",
+        "timeline",
+        "stat_callout",
+        "comparison",
+        "process_flow",
+        "matrix",
+        // Financial and metrics
+        "financials",
+        "kpi_dashboard",
+        // Data visualization
+        "chart",
+        "diagram",
+        // Media and technical
+        "screenshot",
+        "code_sample",
+        "video",
+        // Research and organizational
+        "survey_results",
+        "org_chart",
+        "roadmap",
+        // Closing
+        "closing",
     ]
 }
 
 /// Suggest the closest known slide type name to `given` (Levenshtein distance ≤ 3).
 ///
 /// Returns `None` if no type is close enough to be a useful suggestion.
+/// Uses `strsim::levenshtein` for accurate edit distance computation.
 #[must_use]
 pub fn suggest_type(given: &str) -> Option<&'static str> {
     all_slide_types()
         .iter()
         .filter_map(|&candidate| {
-            let dist = edit_distance(given, candidate);
+            let dist = strsim::levenshtein(given, candidate);
             if dist <= 3 {
                 Some((dist, candidate))
             } else {
@@ -540,33 +568,6 @@ pub fn suggest_type(given: &str) -> Option<&'static str> {
         })
         .min_by_key(|(dist, _)| *dist)
         .map(|(_, name)| name)
-}
-
-/// Compute the Levenshtein edit distance between two strings.
-fn edit_distance(a: &str, b: &str) -> usize {
-    let a_chars: Vec<char> = a.chars().collect();
-    let b_chars: Vec<char> = b.chars().collect();
-    let m = a_chars.len();
-    let n = b_chars.len();
-
-    let mut dp = vec![vec![0usize; n + 1]; m + 1];
-    #[allow(clippy::needless_range_loop)] // 2-D DP: row index required for cross-cell lookups
-    for i in 0..=m {
-        dp[i][0] = i;
-    }
-    #[allow(clippy::needless_range_loop)] // 2-D DP: column index required for cross-cell lookups
-    for j in 0..=n {
-        dp[0][j] = j;
-    }
-    for i in 1..=m {
-        for j in 1..=n {
-            let cost = usize::from(a_chars[i - 1] != b_chars[j - 1]);
-            dp[i][j] = (dp[i - 1][j] + 1)
-                .min(dp[i][j - 1] + 1)
-                .min(dp[i - 1][j - 1] + cost);
-        }
-    }
-    dp[m][n]
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -661,11 +662,30 @@ mod tests {
     }
 
     #[test]
-    fn test_known_fields_edit_distance_correctness() {
-        assert_eq!(edit_distance("abc", "abc"), 0);
-        assert_eq!(edit_distance("abc", "ab"), 1);
-        assert_eq!(edit_distance("abc", "axc"), 1);
-        assert_eq!(edit_distance("", "abc"), 3);
-        assert_eq!(edit_distance("abc", ""), 3);
+    fn test_known_fields_registry_types_present() {
+        // Verify the specific registry types called out in F-WG-001 are present.
+        for expected in &[
+            "section_break",
+            "two_col",
+            "stat_callout",
+            "process_flow",
+            "executive_summary",
+            "problem_statement",
+            "recommendation",
+            "risk_register",
+            "matrix",
+            "financials",
+            "kpi_dashboard",
+            "screenshot",
+            "code_sample",
+            "survey_results",
+            "org_chart",
+            "roadmap",
+        ] {
+            assert!(
+                known_fields(expected).is_some(),
+                "registry type '{expected}' must be in known_fields"
+            );
+        }
     }
 }
