@@ -1,6 +1,6 @@
 [package]
 name = "slideforge-eval"
-description = "Component crate for slideforge"
+description = "Expression evaluator and variable environment for the slideforge DSL"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,5 +11,12 @@ homepage.workspace = true
 readme = "../../README.md"
 
 [dependencies]
-miette = { workspace = true }
+slideforge-types = { workspace = true }
+slideforge-syntax = { workspace = true }
 thiserror = { workspace = true }
+miette = { workspace = true }
+indexmap = "=2.9.0"
+ordered-float = { workspace = true }
+
+[dev-dependencies]
+insta = { workspace = true }

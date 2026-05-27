@@ -746,7 +746,12 @@ dependencies = [
 name = "slideforge-eval"
 version = "0.1.0"
 dependencies = [
+ "indexmap",
+ "insta",
  "miette",
+ "ordered-float",
+ "slideforge-syntax",
+ "slideforge-types",
  "thiserror",
 ]
 
