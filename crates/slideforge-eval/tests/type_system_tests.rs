@@ -21,6 +21,7 @@
 
 #![allow(clippy::unwrap_used)] // tests may use unwrap
 #![allow(clippy::items_after_statements)]
+#![allow(clippy::approx_constant)] // 3.14 in tests is the literal value to test, not pi
 
 use std::sync::Arc;
 

@@ -416,6 +416,8 @@ pub fn eval_block_items<S: std::hash::BuildHasher>(
             },
             BlockItem::If(spanned_if) => {
                 // Delegate to the @if/@elif/@else evaluator (STORY-013).
+                // DI-004 type checking (BC-1.02.003) is handled inside eval_if_chain
+                // via eval_bool_condition — non-Bool conditions produce E-EVL-003.
                 let if_node = spanned_if.value();
                 let generated =
                     crate::if_eval::eval_if_chain(env, if_node, set_rule_defaults, config, sink);
