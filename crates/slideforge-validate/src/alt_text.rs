@@ -12,10 +12,7 @@
 //! | `W-A11-001` | Warning | Visual element has both alt text AND `decorative: true` (alt is ignored) |
 
 use slideforge_plugin_api::{Diagnostic, DiagnosticSeverity, Validator, ValidatorOptions};
-use slideforge_types::{
-    Deck, SourceSpan,
-    specs::AltText,
-};
+use slideforge_types::{Deck, SourceSpan, specs::AltText};
 
 use crate::utils::is_blank;
 
@@ -73,7 +70,7 @@ impl Validator for AltTextValidator {
                             &spec.span,
                             &mut diagnostics,
                         );
-                    }
+                    },
                     ContentBlock::Chart(spec) => {
                         check_visual_element(
                             spec.alt.as_ref(),
@@ -83,20 +80,19 @@ impl Validator for AltTextValidator {
                             &spec.span,
                             &mut diagnostics,
                         );
-                    }
+                    },
                     ContentBlock::Diagram(spec) => {
                         // Truncate diagram source to first 30 *chars* (not bytes) for the
                         // identifier. Using byte indexing (&source[..30]) would panic if byte 30
                         // falls in the middle of a multi-byte UTF-8 character (e.g. CJK labels
                         // in Mermaid diagrams). chars().take(30) is always char-boundary-safe.
-                        let identifier: std::borrow::Cow<str> =
-                            if spec.source.chars().count() > 30 {
-                                let truncated: String =
-                                    spec.source.chars().take(30).collect();
-                                std::borrow::Cow::Owned(format!("{truncated}…"))
-                            } else {
-                                std::borrow::Cow::Borrowed(spec.source.as_ref())
-                            };
+                        let identifier: std::borrow::Cow<str> = if spec.source.chars().count() > 30
+                        {
+                            let truncated: String = spec.source.chars().take(30).collect();
+                            std::borrow::Cow::Owned(format!("{truncated}…"))
+                        } else {
+                            std::borrow::Cow::Borrowed(spec.source.as_ref())
+                        };
                         check_visual_element(
                             spec.alt.as_ref(),
                             spec.decorative,
@@ -105,7 +101,7 @@ impl Validator for AltTextValidator {
                             &spec.span,
                             &mut diagnostics,
                         );
-                    }
+                    },
                     ContentBlock::Shape(spec) => {
                         check_visual_element(
                             spec.alt.as_ref(),
@@ -115,14 +111,14 @@ impl Validator for AltTextValidator {
                             &spec.span,
                             &mut diagnostics,
                         );
-                    }
+                    },
                     // Non-visual blocks: Text, Bullets, Math, Table — no alt text required.
                     // Tables are text content that is already readable by screen readers
                     // (story spec, STORY-015 line 309). Alt text on tables is not validated.
                     ContentBlock::Text(_)
                     | ContentBlock::Bullets(_)
                     | ContentBlock::Math(_)
-                    | ContentBlock::Table(_) => {}
+                    | ContentBlock::Table(_) => {},
                 }
             }
         }
@@ -232,7 +228,7 @@ fn make_warning(element_type: &str, identifier: &str, span: &SourceSpan) -> Diag
 mod tests {
     use std::sync::Arc;
 
-    use slideforge_plugin_api::{DiagnosticSeverity, ValidatorOptions, Validator};
+    use slideforge_plugin_api::{DiagnosticSeverity, Validator, ValidatorOptions};
     use slideforge_types::{
         Block, ContentBlock, Deck, DeckMetadata, OrderedMap, Slide, SourceSpan,
         specs::{AltText, ChartSpec, DiagramSpec, ImageSpec, ShapeSpec, TableSpec},
@@ -357,7 +353,11 @@ mod tests {
         let slide = make_slide(vec![make_image_block(None, false)]);
         let deck = make_deck(vec![slide]);
         let diags = AltTextValidator.validate(&deck, &default_opts());
-        assert_eq!(diags.len(), 1, "expected exactly 1 diagnostic, got {diags:?}");
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected exactly 1 diagnostic, got {diags:?}"
+        );
         assert_eq!(diags[0].code.as_ref(), E_A11_001);
         assert_eq!(diags[0].severity, DiagnosticSeverity::Error);
     }
@@ -388,7 +388,11 @@ mod tests {
         )]);
         let deck = make_deck(vec![slide]);
         let diags = AltTextValidator.validate(&deck, &default_opts());
-        assert_eq!(diags.len(), 1, "empty string alt should produce E-A11-001; got {diags:?}");
+        assert_eq!(
+            diags.len(),
+            1,
+            "empty string alt should produce E-A11-001; got {diags:?}"
+        );
         assert_eq!(diags[0].code.as_ref(), E_A11_001);
     }
 
@@ -420,7 +424,10 @@ mod tests {
         )]);
         let deck = make_deck(vec![slide]);
         let diags = AltTextValidator.validate(&deck, &default_opts());
-        assert!(diags.is_empty(), "valid alt should produce no diagnostics; got {diags:?}");
+        assert!(
+            diags.is_empty(),
+            "valid alt should produce no diagnostics; got {diags:?}"
+        );
     }
 
     // ── Decorative elements ────────────────────────────────────────────────────
@@ -480,7 +487,11 @@ mod tests {
         let slide = make_slide(vec![make_chart_block(None, false)]);
         let deck = make_deck(vec![slide]);
         let diags = AltTextValidator.validate(&deck, &default_opts());
-        assert_eq!(diags.len(), 1, "chart missing alt should produce 1 diagnostic; got {diags:?}");
+        assert_eq!(
+            diags.len(),
+            1,
+            "chart missing alt should produce 1 diagnostic; got {diags:?}"
+        );
         assert_eq!(diags[0].code.as_ref(), E_A11_001);
     }
 
@@ -519,13 +530,15 @@ mod tests {
         // Byte-indexing at position 30 would panic mid-character; chars().take(30) is safe.
         let source = "graph TD; A[\"日本語のラベル\"]-->B[\"中文標籤のテスト\"]";
         let deck = make_deck(vec![make_slide(vec![make_diagram_block_with_source(
-            source,
-            None,
-            false,
+            source, None, false,
         )])]);
         let diags = AltTextValidator.validate(&deck, &ValidatorOptions::default());
         // Should produce E-A11-001 (missing alt) without panicking
-        assert_eq!(diags.len(), 1, "expected 1 E-A11-001 diagnostic; got {diags:?}");
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected 1 E-A11-001 diagnostic; got {diags:?}"
+        );
         assert_eq!(diags[0].code.as_ref(), E_A11_001);
     }
 
@@ -620,7 +633,10 @@ mod tests {
         let slide = make_slide(vec![]);
         let deck = make_deck(vec![slide]);
         let diags = AltTextValidator.validate(&deck, &default_opts());
-        assert!(diags.is_empty(), "empty slide should produce no diagnostics");
+        assert!(
+            diags.is_empty(),
+            "empty slide should produce no diagnostics"
+        );
     }
 
     // ── Mixed valid/invalid ────────────────────────────────────────────────────
@@ -722,7 +738,11 @@ mod tests {
         // shape with alt: None, decorative: false → 1 E-A11-001
         let deck = make_deck(vec![make_slide(vec![make_shape_block(None, false)])]);
         let diags = AltTextValidator.validate(&deck, &default_opts());
-        assert_eq!(diags.len(), 1, "shape missing alt should produce 1 diagnostic; got {diags:?}");
+        assert_eq!(
+            diags.len(),
+            1,
+            "shape missing alt should produce 1 diagnostic; got {diags:?}"
+        );
         assert_eq!(diags[0].code.as_ref(), E_A11_001);
     }
 
