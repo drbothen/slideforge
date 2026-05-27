@@ -23,6 +23,10 @@ dtu_required: false
 dtu_assessment: 2026-05-24
 dtu_clones_built: n/a
 dtu_services: []
+wave_1_gate: "PASS 2026-05-27 — 3 gate passes, 11 findings fixed (keyword sync, field sync, crate attrs)"
+wave_1_completed: 2026-05-27
+develop_sha: "6b701176"
+develop_pr_count: 13
 ---
 
 # Slideforge — Factory State
@@ -37,7 +41,7 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. It generates branded .p
 **Workspace:** /Users/jmagady/Dev/slideforge
 **Factory worktree:** .factory/ on branch `factory-artifacts`
 
-## Current Status: Phase 3 IN PROGRESS — Wave 1: 14/14 COMPLETE. Wave gate next.
+## Current Status: Phase 3 IN PROGRESS — Wave 1 COMPLETE + GATE PASSED. Wave 2 next.
 
 Phase 2 Story Decomposition: COMPLETE and APPROVED (2026-05-25).
 - 71 stories decomposed from 112 BCs across 21 epics, 6 waves, 437 total points
@@ -49,34 +53,27 @@ Phase 1 Spec Crystallization: COMPLETE and APPROVED (2026-05-25).
 - 17 adversarial passes, 69 findings fixed, 3 consecutive clean passes
 - Convergence trajectory archived: .factory/cycles/v0.1.0-phase-1-spec/convergence-trajectory.md
 
-## What to Do Next (Phase 3 TDD Implementation)
+## What to Do Next (Phase 3 — Wave 2)
 
 ### Immediate first action
 
-Wave 1 COMPLETE — 14/14 stories merged. Wave gate is the next step.
+Wave 1 is COMPLETE (14/14 stories, gate PASSED). Start Wave 2 delivery.
 
-### Wave 1 Completed Stories (14 of 14)
+The per-story delivery flow is:
+1. test-writer: stubs + failing tests (Red Gate)
+2. implementer: TDD (make tests pass)
+3. adversary: 3 consecutive clean passes (BC-5.39.001)
+4. push → PR → CI (12 checks) → squash-merge to develop → state update
 
-| Story | PR | Tests | Adversarial |
-|-------|-----|-------|-------------|
-| STORY-001 IR Core Types | #1 | 157 | 6p, 3/3 |
-| STORY-002 Plugin Trait API | #2 | 106 | 4p, 3/3 |
-| STORY-003 31 SlideType Implementations | #10 | 133 | 5p, 3/3 |
-| STORY-004 Value System + EMU | #3 | 212 | 4p, 3/3 |
-| STORY-005 Lexer + Tokenization | #4 | 45 | 6p, 3/3 |
-| STORY-006 Parser Core | #5 | 101 | 5p, 3/3 |
-| STORY-007 Control Flow + Expr | #6 | 142 | 4p, 3/3 |
-| STORY-008 Includes/Variants/Aliases | #7 | 183 | 4p, 3/3 |
-| STORY-009 Parser: math/shape/version | #8 | 237 | 6p, 3/3 |
-| STORY-010 Error Accumulation + Diagnostics | #9 | 299 | 5p, 3/3 |
-| STORY-051 CI: fmt+clippy+nextest matrix | #11 | — | facade |
-| STORY-052 CI: Visual Regression | #11 | — | facade |
-| STORY-053 CI: Supply-Chain Audit | #11 | — | facade |
-| STORY-054 CI: Release Pipeline | #11 | — | facade |
+### Wave 2 Stories
 
-Cumulative: ~24,500+ lines, 1569+ tests, 11 PRs on develop.
+Check `.factory/stories/wave-schedule.md` for the Wave 2 story list. Wave 2 stories build
+the evaluator, data binding, and expression evaluation on top of the parser (Wave 1).
 
-### Key inputs for Phase 3
+All Wave 2 stories have their specs in `.factory/stories/stories/STORY-NNN-*.md`.
+Dependencies are tracked in `.factory/stories/dependency-graph.md`.
+
+### Key inputs for continuing Phase 3
 
 | Input | Location |
 |-------|----------|
@@ -84,17 +81,25 @@ Cumulative: ~24,500+ lines, 1569+ tests, 11 PRs on develop.
 | Story index | .factory/stories/STORY-INDEX.md |
 | Wave schedule | .factory/stories/wave-schedule.md |
 | Dependency graph | .factory/stories/dependency-graph.md |
+| Sprint state | .factory/stories/sprint-state.yaml |
 | BC specs | .factory/specs/behavioral-contracts/ |
 | Architecture | .factory/specs/architecture/ |
-| Sprint state | .factory/stories/sprint-state.yaml (create on first story start) |
+
+### develop branch state
+
+The `develop` branch is at commit `6b701176` with 13 merged PRs.
+Local develop MUST be synced: `git fetch origin develop && git branch -f develop origin/develop`
+(The local develop branch may be stale if the session was interrupted.)
 
 ### Phase 3 full sequence
 
 | Step | Agent | Output | Depends on |
 |------|-------|--------|-----------|
-| Per-story | test-writer → implementer → adversary → demo-recorder → pr-manager | Merged story branches | Story file + deps complete |
-| Wave gate | wave-gate skill | Integration validation | All stories in wave merged |
+| Per-story | test-writer → implementer → adversary → pr-manager | Merged story branches | Story file + deps complete |
+| Wave gate | wave-gate adversarial review | Integration validation | All stories in wave merged |
 | Repeat | Next wave | Until Wave 5 (Wave 6 is Phase 6) | Prior wave gate PASS |
+
+Cumulative: ~28,000+ lines, 644+ tests, 13 PRs on develop (11 story + 2 gate fixes).
 
 ## Phase Progress
 
@@ -105,7 +110,7 @@ Cumulative: ~24,500+ lines, 1569+ tests, 11 PRs on develop.
 | Planning (25 DSL decisions) | DONE 2026-05-24 | q1–q25 decision docs + 14 research threads |
 | Phase 1: Spec Crystallization | DONE — APPROVED 2026-05-25 | PRD (109 BCs, 15 HS, 4 supplements) + architecture (14 ADRs, 15 VPs, 20 crates) + UX spec (10 screens, 5 flows) + L2 domain spec (12 files) |
 | Phase 2: Story Decomposition | DONE — APPROVED 2026-05-25 | 71 stories, 21 epics, 6 waves, 437 pts. 22 adversarial passes, 3/3 clean. |
-| Phase 3: TDD Implementation | IN PROGRESS — Wave 1: 14/14 COMPLETE. Wave gate pending. | Per-story delivery |
+| Phase 3: TDD Implementation | IN PROGRESS — Wave 1: COMPLETE + GATE PASSED. Wave 2 next. | Per-story delivery |
 | Phase 4: Holdout Evaluation | NOT STARTED | Per-wave holdout gates |
 | Phase 5: Adversarial Refinement | NOT STARTED | Post-implementation cascade |
 | Phase 6: Formal Hardening | NOT STARTED | Kani + fuzz + mutants + semgrep |
@@ -167,6 +172,8 @@ Cumulative: ~24,500+ lines, 1569+ tests, 11 PRs on develop.
 - 2026-05-26 — STORY-010 MERGED (PR #9, 96ecc49d) — Error accumulation, DiagnosticSink, DiagnosticRenderer, ParseSeverity, 299 tests, 5 adversarial passes (9→4→0→0→0), 3/3 clean
 - 2026-05-27 — STORY-003 MERGED (PR #10, 10345ab4) — 31 SlideType implementations in slideforge-plugin-api, SlideTypeRegistry with suggest + validate_fields, 133 tests, 5 adversarial passes (13→4→0→0→0), 3/3 clean
 - 2026-05-27 — STORIES 051/052/053/054 MERGED (PR #11, 07c76565) — CI infrastructure: reproducible-build job, visual-regression fixtures, private doc compliance. Facade-mode validation of existing ci.yml, security.yml, release.yml.
+- 2026-05-27 — WAVE 1 GATE PASSED — 3 adversarial gate passes (7→4→0 findings), keyword + field name sync (PRs #12 #13), #![forbid(unsafe_code)] on all 9 crates, clippy::pedantic on all 9 crates
+- 2026-05-27 — WAVE 2 READY — next session starts Wave 2 delivery
 
 ## Decision Documents (canonical references)
 

@@ -1,8 +1,12 @@
 ---
-current_wave: 1
+current_wave: 2
 current_phase: 3
 pipeline_status: IN_PROGRESS
 last_updated: 2026-05-27
+wave_1_gate: PASS
+wave_1_gate_date: 2026-05-27
+wave_1_gate_passes: 3
+wave_1_gate_findings_fixed: 11
 ---
 
 stories:
