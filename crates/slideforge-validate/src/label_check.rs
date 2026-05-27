@@ -539,6 +539,37 @@ mod tests {
         assert_eq!(LabelCheckValidator.id(), "label-check");
     }
 
+    /// BC-5.01.003: `ValidatorOptions::skip_contrast_check = true` suppresses
+    /// E-A11-004 warnings even when fg/bg produce < 4.5:1 contrast.
+    ///
+    /// Same low-contrast setup as `test_BC_5_01_003_low_contrast_warning` (red on
+    /// white, ≈4.0:1), but with `skip_contrast_check: true`. The label is present
+    /// so E-A11-002 is also not emitted; the result must be zero diagnostics.
+    #[test]
+    fn test_BC_5_01_003_skip_contrast_check_suppresses_warning() {
+        let slide = make_color_coded_slide(
+            "severity_cards",
+            Some("HIGH"),    // valid label → no E-A11-002
+            Some("#FF0000"), // fg: red — ≈4.0:1 on white, would trigger E-A11-004
+            Some("#FFFFFF"), // bg: white
+            false,
+        );
+        let deck = make_deck(vec![slide]);
+        let opts = ValidatorOptions {
+            skip_contrast_check: true,
+            ..ValidatorOptions::default()
+        };
+        let diags = LabelCheckValidator.validate(&deck, &opts);
+        let contrast_warnings: Vec<_> = diags
+            .iter()
+            .filter(|d| d.code.as_ref() == E_A11_004)
+            .collect();
+        assert!(
+            contrast_warnings.is_empty(),
+            "skip_contrast_check: true must suppress all E-A11-004 warnings; got {diags:?}"
+        );
+    }
+
     /// BC-5.01.003 EC-009: Low contrast AND missing label on same slide →
     /// both E-A11-002 (error) and E-A11-004 (warning) are emitted.
     #[test]
