@@ -20,3 +20,10 @@ ordered-float = { workspace = true }
 
 [dev-dependencies]
 insta = { workspace = true }
+ordered-float = { workspace = true }
+
+[lints.rust]
+# `kani` is the cfg flag set by the Kani proof runner (Phase 6, STORY-067).
+# It is not a Cargo feature, so we explicitly declare it to silence the
+# unexpected_cfgs lint during regular cargo check / cargo test runs.
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }

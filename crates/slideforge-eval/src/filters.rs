@@ -41,6 +41,19 @@ use crate::error::EvalError;
 
 /// Sorted list of all built-in filter names, used to construct
 /// `EvalError::FilterNotFound.available` messages.
+///
+/// # DI-004 — `| bool` is deliberately absent
+///
+/// `| bool` is NOT in this list and MUST NOT be added. Boolean conversion via
+/// implicit coercion (`"true" → true`, `"yes" → true`, `"NO" → false`) is
+/// explicitly forbidden by BC-1.02.003 invariant 1.
+///
+/// The only valid boolean-producing path from a string is an explicit comparison:
+/// `{{ v == "true" }}` or `{{ v == "yes" }}`.
+///
+/// Note: the BC-1.02.003 text lists `| bool` in a filter table, but story spec
+/// AC-006 and architecture rule 2 override that text — `| bool` is forbidden.
+/// This registry is the authoritative source-of-truth for which filters exist.
 pub const AVAILABLE_FILTERS: &[&str] = &[
     "contains",
     "currency",
@@ -133,26 +146,43 @@ fn filter_lower(val: &Value, span: SourceSpan) -> Result<Value, EvalError> {
     }
 }
 
-/// Format a numeric value as a comma-separated currency string with two
-/// decimal places (e.g. `1234.5` → `"1,234.50"`).
+/// Format a numeric value as a comma-separated currency string.
+///
+/// - Integer input (`Value::Int`): no decimal places (e.g. `1000000` → `"1,000,000"`).
+/// - Float input (`Value::Float`): two decimal places (e.g. `1234.5` → `"1,234.50"`).
+///
+/// This follows AC-007 (BC-1.02.004): `arr = 1000000` / `"${{ arr | currency }}"` →
+/// `"$1,000,000"` — integer inputs must NOT have spurious `.00` appended.
 ///
 /// # Errors
 ///
 /// Returns [`EvalError::TypeMismatch`] if `val` is not [`Value::Int`] or
 /// [`Value::Float`].
-#[allow(clippy::cast_precision_loss)] // i64→f64 for currency formatting is acceptable
 fn filter_currency(val: &Value, span: SourceSpan) -> Result<Value, EvalError> {
-    let amount: f64 = match val {
-        Value::Int(n) => *n as f64,
-        Value::Float(f) => f.0,
-        other => {
-            return Err(EvalError::TypeMismatch {
-                message: format!("currency requires int or float, got {}", other.type_name()),
-                span,
-            });
-        },
+    match val {
+        Value::Int(n) => Ok(Value::Str(Arc::from(format_currency_int(*n).as_str()))),
+        Value::Float(f) => Ok(Value::Str(Arc::from(format_currency_float(f.0).as_str()))),
+        other => Err(EvalError::TypeMismatch {
+            message: format!("currency requires int or float, got {}", other.type_name()),
+            span,
+        }),
+    }
+}
+
+/// Format an integer as a comma-separated currency string with NO decimal places.
+///
+/// Example: `1000000` → `"1,000,000"`, `-1234` → `"-1,234"`.
+fn format_currency_int(n: i64) -> String {
+    let sign = if n < 0 { "-" } else { "" };
+    // u64::MAX > i64::MAX so abs() of any negative i64 except MIN fits.
+    // i64::MIN is -9_223_372_036_854_775_808 whose abs() overflows i64; handle separately.
+    let magnitude: u64 = if n == i64::MIN {
+        9_223_372_036_854_775_808_u64
+    } else {
+        n.unsigned_abs()
     };
-    Ok(Value::Str(Arc::from(format_currency(amount).as_str())))
+    let int_str = magnitude.to_string();
+    format!("{sign}{}", insert_thousands_separators(&int_str))
 }
 
 /// Format a `f64` as a comma-separated currency string with 2 decimal places.
@@ -161,25 +191,29 @@ fn filter_currency(val: &Value, span: SourceSpan) -> Result<Value, EvalError> {
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 // Truncation and sign-loss are acceptable here: `rounded.abs()` is always
 // non-negative and within u64 range for any currency value.
-fn format_currency(amount: f64) -> String {
+fn format_currency_float(amount: f64) -> String {
     // Round to 2 decimal places first.
     let rounded = (amount * 100.0).round() / 100.0;
     let integer_part = rounded.abs().floor() as u64;
     let frac_part = ((rounded.abs() - rounded.abs().floor()) * 100.0).round() as u64;
 
-    // Format the integer part with thousands separators.
-    let int_str = integer_part.to_string();
+    let int_formatted = insert_thousands_separators(&integer_part.to_string());
+    let sign = if amount < 0.0 { "-" } else { "" };
+    format!("{sign}{int_formatted}.{frac_part:02}")
+}
+
+/// Insert thousands separators (commas) into a decimal integer string.
+///
+/// Example: `"1000000"` → `"1,000,000"`.
+fn insert_thousands_separators(digits: &str) -> String {
     let mut with_commas = String::new();
-    for (i, ch) in int_str.chars().rev().enumerate() {
+    for (i, ch) in digits.chars().rev().enumerate() {
         if i > 0 && i % 3 == 0 {
             with_commas.push(',');
         }
         with_commas.push(ch);
     }
-    let int_formatted: String = with_commas.chars().rev().collect();
-
-    let sign = if amount < 0.0 { "-" } else { "" };
-    format!("{sign}{int_formatted}.{frac_part:02}")
+    with_commas.chars().rev().collect()
 }
 
 /// Round a float value to `args[0]` (Int) decimal places and render as a
@@ -550,14 +584,24 @@ mod tests {
     // ── filter_currency ───────────────────────────────────────────────────────
 
     #[test]
-    fn test_filter_currency() {
+    fn test_filter_currency_int_no_decimals() {
+        // AC-007 (BC-1.02.004): integer input → no decimal places.
         let val = Value::Int(1234);
         let result = apply_filter("currency", &val, &[], span()).unwrap();
-        assert_eq!(result, Value::Str(Arc::from("1,234.00")));
+        assert_eq!(result, Value::Str(Arc::from("1,234")));
     }
 
     #[test]
-    fn test_filter_currency_float() {
+    fn test_filter_currency_large_int() {
+        // AC-007 core case: 1,000,000 must format as "1,000,000" (not "1,000,000.00").
+        let val = Value::Int(1_000_000);
+        let result = apply_filter("currency", &val, &[], span()).unwrap();
+        assert_eq!(result, Value::Str(Arc::from("1,000,000")));
+    }
+
+    #[test]
+    fn test_filter_currency_float_has_decimals() {
+        // Float input → two decimal places, unchanged.
         let val = Value::Float(OrderedFloat(1234.5_f64));
         let result = apply_filter("currency", &val, &[], span()).unwrap();
         assert_eq!(result, Value::Str(Arc::from("1,234.50")));

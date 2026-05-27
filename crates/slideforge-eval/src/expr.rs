@@ -287,8 +287,11 @@ fn eval_binop(
         },
 
         // ── Comparison ───────────────────────────────────────────────────────
-        BinOpKind::Eq => Some(Value::Bool(lval == rval)),
-        BinOpKind::Ne => Some(Value::Bool(lval != rval)),
+        // DI-004: no implicit coercion — E-EVL-003 below.
+        // Cross-type equality (String == Bool, Int == Bool, etc.) is always a
+        // type error. Only values of the same type OR compatible numeric types
+        // (Int/Float) may be compared for equality. BC-1.02.003 postcondition 5.
+        BinOpKind::Eq | BinOpKind::Ne => eval_equality(op, lval, rval, span, sink),
         BinOpKind::Lt | BinOpKind::Le | BinOpKind::Gt | BinOpKind::Ge => {
             eval_ordering(op, lval, rval, span, sink)
         },
@@ -337,6 +340,8 @@ fn eval_arithmetic(
     sink: &mut DiagnosticSink,
 ) -> Option<Value> {
     match (lval, rval) {
+        // DI-004: no implicit coercion — both operands must be numeric.
+        // E-EVL-003 is raised below (fall-through arm) for any non-numeric type.
         (Value::Int(l), Value::Int(r)) => {
             let result = match op {
                 BinOpKind::Add => l.checked_add(*r).map(Value::Int),
@@ -431,17 +436,32 @@ fn eval_arithmetic(
             };
             Some(Value::Float(OrderedFloat(result)))
         },
-        _ => push_error(
-            sink,
-            EvalError::TypeMismatch {
-                message: format!(
-                    "arithmetic operator requires numeric operands, got {} and {}",
-                    lval.type_name(),
-                    rval.type_name()
-                ),
-                span,
-            },
-        ),
+        // DI-004: no implicit coercion — E-EVL-003 for any non-numeric operand pair
+        // (e.g. Str × Int, Str × Float, Bool × Int). Strings are NEVER coerced to
+        // numbers silently; callers must use `| int` or `| float` explicitly.
+        _ => {
+            // BC-1.02.003 postcondition 4: when a string operand is used in arithmetic,
+            // the error hint must suggest `| float` (or `| int`) as the explicit
+            // conversion path. This satisfies the test vector for EC-002.
+            let has_string = matches!(lval, Value::Str(_)) || matches!(rval, Value::Str(_));
+            let hint_suffix = if has_string {
+                " Use | float or | int for explicit conversion (e.g. {{ rate | float * 100 }})."
+            } else {
+                ""
+            };
+            push_error(
+                sink,
+                EvalError::TypeMismatch {
+                    message: format!(
+                        "arithmetic operator requires numeric operands, got {} and {}.{}",
+                        lval.type_name(),
+                        rval.type_name(),
+                        hint_suffix
+                    ),
+                    span,
+                },
+            )
+        },
     }
 }
 
@@ -474,6 +494,9 @@ fn eval_ordering(
             };
             Some(Value::Bool(result))
         },
+        // DI-004: no implicit coercion — E-EVL-003 for incompatible type pairs.
+        // String × Bool, Int × Bool, etc. are all rejected here. There is no
+        // automatic widening or truthiness coercion.
         None => push_error(
             sink,
             EvalError::TypeMismatch {
@@ -488,6 +511,108 @@ fn eval_ordering(
     }
 }
 
+// ─── eval_equality ───────────────────────────────────────────────────────────
+
+/// Evaluate an equality comparison (`==` or `!=`), rejecting cross-type
+/// comparisons that involve incompatible type families.
+///
+/// # DI-004 enforcement (BC-1.02.003 postcondition 5)
+///
+/// The following cross-type comparisons produce E-EVL-003:
+/// - `String == Bool` (e.g. `"NO" == false`)
+/// - `Bool == String`
+/// - `Bool == Int` / `Bool == Float`
+/// - `Int == Bool` / `Float == Bool`
+///
+/// The following cross-type comparisons are ALLOWED (numeric widening):
+/// - `Int == Float` / `Float == Int` (compare after widening)
+///
+/// Same-type comparisons are always allowed for `Str`, `Int`, `Float`,
+/// `Bool`, `Null`.
+///
+/// # Errors pushed to `sink`
+///
+/// - [`EvalError::TypeMismatch`] (E-EVL-003) for cross-type-family comparisons.
+#[allow(clippy::cast_precision_loss)] // i64→f64 for cross-type equality is intentional
+fn eval_equality(
+    op: &BinOpKind,
+    lval: &Value,
+    rval: &Value,
+    span: SourceSpan,
+    sink: &mut DiagnosticSink,
+) -> Option<Value> {
+    // DI-004 (no-coercion invariant): reject ALL cross-type-family equality
+    // comparisons. The only allowed cross-type case is numeric widening:
+    // Int == Float / Float == Int. Every other cross-type pair is E-EVL-003.
+    //
+    // Permitted combinations:
+    //   Str  == Str    Int  == Int    Float == Float   Bool == Bool
+    //   Null == Null   List == List   Map   == Map
+    //   Int  == Float  Float == Int   (numeric widening)
+    //
+    // FINDING-001 (adversary pass 1): previously only Bool cross-type was
+    // rejected; all other cross-type pairs (e.g. Str == Int, Str == Null)
+    // silently returned Bool(false). That violates BC-1.02.003 invariant 1
+    // (no-coercion: type errors from coercion-free operations → E-EVL-003).
+    #[allow(clippy::unnested_or_patterns)]
+    // Unnested form is clearer here: each arm is a type-pair, not a nested OR.
+    // Nesting would produce `(Value::Int(_) | Value::Float(_), Value::Float(_))`
+    // which is less readable and would incorrectly match e.g. (Str, Float).
+    let is_cross_type = match (lval, rval) {
+        // Numeric widening (Int ↔ Float) and same-type pairs: allowed.
+        (Value::Int(_), Value::Float(_))
+        | (Value::Float(_), Value::Int(_))
+        | (Value::Str(_), Value::Str(_))
+        | (Value::Int(_), Value::Int(_))
+        | (Value::Float(_), Value::Float(_))
+        | (Value::Bool(_), Value::Bool(_))
+        | (Value::Null, Value::Null)
+        | (Value::List(_), Value::List(_))
+        | (Value::Map(_), Value::Map(_)) => false,
+        // All other combinations: cross-type → E-EVL-003.
+        _ => true,
+    };
+
+    if is_cross_type {
+        return push_error(
+            sink,
+            EvalError::TypeMismatch {
+                message: format!(
+                    "equality comparison '{}' between {} and {} is a type error (DI-004, \
+                     BC-1.02.003). No implicit coercion — both sides must be the same type. \
+                     Use explicit conversion: {{ v | string }} or {{ v | int }}.",
+                    if matches!(op, BinOpKind::Eq) {
+                        "=="
+                    } else {
+                        "!="
+                    },
+                    lval.type_name(),
+                    rval.type_name(),
+                ),
+                span,
+            },
+        );
+    }
+
+    // Allow Int/Float cross-type equality (numeric widening).
+    // Use OrderedFloat comparison to match the existing `PartialEq` impl on Value,
+    // which compares floats via bitwise equality (same as ordered_float::OrderedFloat).
+    let result = match (lval, rval) {
+        // DI-004: Int==Float uses OrderedFloat wrapping for bitwise-exact comparison,
+        // consistent with how Value::PartialEq works.
+        (Value::Int(l), Value::Float(r)) => OrderedFloat(*l as f64) == *r,
+        (Value::Float(l), Value::Int(r)) => *l == OrderedFloat(*r as f64),
+        // Same-type structural equality (covers Str, Int, Float, Bool, Null, List, Map).
+        _ => lval == rval,
+    };
+
+    Some(Value::Bool(if matches!(op, BinOpKind::Eq) {
+        result
+    } else {
+        !result
+    }))
+}
+
 // ─── eval_unaryop ────────────────────────────────────────────────────────────
 
 /// Evaluate a unary operation (`!` or `-`).
@@ -500,6 +625,9 @@ fn eval_unaryop(
     match op {
         UnaryOpKind::Not => match val {
             Value::Bool(b) => Some(Value::Bool(!b)),
+            // DI-004: no implicit coercion — E-EVL-003 for non-bool operands.
+            // Str("true"), Str("yes"), Int(1) are NOT truthy; each must be
+            // explicitly compared: `{{ v == "true" }}` or `{{ v == 1 }}`.
             other => push_error(
                 sink,
                 EvalError::TypeMismatch {

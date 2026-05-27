@@ -48,6 +48,9 @@ pub mod for_eval;
 pub mod if_eval;
 pub mod include_cycle;
 
+#[cfg(kani)]
+pub mod proofs;
+
 // ─── Public API re-exports ───────────────────────────────────────────────────
 
 pub use config::EvalConfig;
