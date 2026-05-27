@@ -221,4 +221,27 @@ mod tests {
             "must emit exactly 1 E-LAY-002, not more; got {diags:?}"
         );
     }
+
+    // ── E-LAY-002 never demoted by warn-only (I06) ────────────────────────────
+
+    /// E-LAY-002 is always Error severity — not demotable by `WarnOnly` mode.
+    ///
+    /// The demotion decision belongs to the CLI, not the validator. The validator
+    /// always emits Error. If the CLI is in `WarnOnly` mode, it logs all diagnostics
+    /// but does not abort — however that is CLI behaviour, not validator behaviour.
+    /// The validator itself must always emit Error for E-LAY-002.
+    #[test]
+    fn test_zero_slide_warn_only_still_blocks() {
+        // Even in warn-only mode, E-LAY-002 is always Error severity.
+        // The validator emits Error regardless of the ValidatorOptions — the CLI
+        // decides whether to abort or merely report.
+        let deck = make_deck(vec![]);
+        let diags = ZeroSlideValidator.validate(&deck, &default_opts());
+        assert_eq!(diags.len(), 1);
+        assert_eq!(
+            diags[0].severity,
+            DiagnosticSeverity::Error,
+            "E-LAY-002 must be Error even in warn-only context — demotion is CLI responsibility"
+        );
+    }
 }

@@ -12,7 +12,7 @@
 //! | Code | Default severity | With `ValidationMode::WarnOnly` |
 //! |------|------------------|---------------------------------|
 //! | `E-LAY-001` | Error (when `strict_overflow: true`) / Warning | Warning |
-//! | `E-LAY-002` | Error | Warning |
+//! | `E-LAY-002` | Error | Error (never demoted) |
 
 /// Whether validation failures are hard errors or demoted to warnings.
 ///
@@ -68,7 +68,7 @@ impl Default for ValidationConfig {
 mod tests {
     use super::{ValidationConfig, ValidationMode};
 
-    /// BC-5.03.016: default ValidationConfig has Strict mode and strict_overflow = false.
+    /// BC-5.03.016: default `ValidationConfig` has Strict mode and `strict_overflow` = false.
     #[test]
     fn test_default_config() {
         let cfg = ValidationConfig::default();

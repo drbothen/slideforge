@@ -7,15 +7,15 @@
 //! height.
 //!
 //! This is a heuristic check — it cannot know the exact rendered dimensions
-//! before layout occurs, but it catches obvious overflow (e.g., 20 bullets
+//! before layout occurs, but it catches obvious overflow (e.g., 30 bullets
 //! on a single slide) at validation time before any export runs.
 //!
 //! ## Overflow threshold
 //!
 //! The threshold is based on:
-//! - Standard body placeholder height: ~4,500,000 EMU (≈ 4.9 inches)
-//! - Conservative line height: 457,200 EMU (≈ 0.5 inch per bullet at 36pt)
-//! - At ≥ 10 bullets: estimated height exceeds placeholder → overflow
+//! - Standard body placeholder height: 4.74 inches = 4,343,400 EMU
+//! - Line height per bullet: 11pt body × 1.3 line-height = 14.3pt ≈ 181,610 EMU
+//! - At ≥ 24 bullets: estimated height exceeds placeholder → overflow
 //!
 //! ## Severity
 //!
@@ -33,25 +33,23 @@
 use slideforge_plugin_api::{Diagnostic, DiagnosticSeverity, Validator, ValidatorOptions};
 use slideforge_types::{Deck, Emu, Slide, SourceSpan};
 
+use crate::ValidationConfig;
+
 /// Error code emitted when estimated content height exceeds the body placeholder.
 pub(crate) const E_LAY_001: &str = "E-LAY-001";
 
 /// Standard body placeholder height used for overflow estimation.
 ///
-/// Approximately 4.9 inches (≈ 4,500,000 EMU), which covers the usable body
-/// area for a standard 16:9 widescreen slide with a title.
-// The constants are used in tests and will be used by the implementer's
-// validate() body. The #[allow] is removed once validate() is implemented.
-#[allow(dead_code)]
-pub(crate) const BODY_PLACEHOLDER_HEIGHT: Emu = Emu(4_500_000);
+/// Body placeholder height: 4.74 inches = 4,343,400 EMU.
+/// This covers the usable body area for a standard 16:9 widescreen slide
+/// with a title bar at the top.
+pub(crate) const BODY_PLACEHOLDER_HEIGHT: Emu = Emu(4_343_400);
 
-/// Conservative per-bullet line height at 36pt (0.5 inch = 457,200 EMU).
+/// Per-bullet line height estimate: 11pt body × 1.3 line-height = 14.3pt ≈ 181,610 EMU.
 ///
-/// This is deliberately conservative — it accounts for line spacing, sub-bullets,
-/// and top/bottom padding. A slide with 10 bullets at this estimate reaches the
-/// threshold.
-#[allow(dead_code)]
-pub(crate) const LINE_HEIGHT_PER_BULLET: Emu = Emu(457_200);
+/// Calculated as 14.3pt × 12,700 EMU/pt = 181,610 EMU. At ≥ 24 bullets the
+/// estimated height exceeds the body placeholder and overflow is detected.
+pub(crate) const LINE_HEIGHT_PER_BULLET: Emu = Emu(181_610);
 
 /// Validates that bullet content does not visually overflow the body placeholder.
 ///
@@ -69,6 +67,19 @@ pub struct CanvasOverflowValidator {
     pub strict_overflow: bool,
 }
 
+impl CanvasOverflowValidator {
+    /// Construct a [`CanvasOverflowValidator`] from a [`ValidationConfig`].
+    ///
+    /// The `strict_overflow` field is taken directly from
+    /// [`ValidationConfig::strict_overflow`].
+    #[must_use]
+    pub fn from_config(config: &ValidationConfig) -> Self {
+        Self {
+            strict_overflow: config.strict_overflow,
+        }
+    }
+}
+
 impl Validator for CanvasOverflowValidator {
     fn id(&self) -> &'static str {
         "canvas-overflow"
@@ -77,7 +88,7 @@ impl Validator for CanvasOverflowValidator {
     fn validate(&self, deck: &Deck, _opts: &ValidatorOptions) -> Vec<Diagnostic> {
         let mut diagnostics: Vec<Diagnostic> = Vec::new();
 
-        for (index, slide) in deck.slides.iter().enumerate() {
+        for slide in &deck.slides {
             let bullet_count = count_bullets(slide);
             let estimated = estimate_height(bullet_count);
             if estimated > BODY_PLACEHOLDER_HEIGHT {
@@ -86,11 +97,11 @@ impl Validator for CanvasOverflowValidator {
                 } else {
                     DiagnosticSeverity::Warning
                 };
-                // Use 1-based index in the message for user-facing display
+                let title = slide_title(slide);
+                let overflow_emu = estimated - BODY_PLACEHOLDER_HEIGHT;
                 diagnostics.push(make_overflow_diagnostic(
-                    index + 1,
-                    estimated,
-                    BODY_PLACEHOLDER_HEIGHT,
+                    &title,
+                    overflow_emu,
                     severity,
                     &slide.source_span,
                 ));
@@ -126,20 +137,38 @@ fn estimate_height(bullet_count: usize) -> Emu {
     LINE_HEIGHT_PER_BULLET * i64::try_from(bullet_count).unwrap_or(i64::MAX)
 }
 
+/// Extract the slide's title as a string for use in diagnostic messages.
+///
+/// Returns the value of the `title` field if it is a resolved `Value::Str`,
+/// or falls back to the slide type keyword if the field is absent or unresolved.
+fn slide_title(slide: &Slide) -> String {
+    slide
+        .title_str()
+        .map_or_else(|| slide.slide_type.as_ref().to_owned(), str::to_owned)
+}
+
 /// Construct an `E-LAY-001` diagnostic for an overflowing slide.
+///
+/// The message format matches AC-001:
+/// `CanvasOverflow: slide '<title>' field 'bullets' overflows by ~<N> EMU (~<M>pt). ...`
 fn make_overflow_diagnostic(
-    slide_index: usize,
-    estimated_height: Emu,
-    capacity: Emu,
+    title: &str,
+    overflow_emu: Emu,
     severity: DiagnosticSeverity,
     span: &SourceSpan,
 ) -> Diagnostic {
+    // Precision loss is acceptable for the heuristic display of point values.
+    // EMU values used here are slide layout dimensions, well within f64 precision
+    // for human-readable diagnostic output.
+    #[allow(clippy::cast_precision_loss)]
+    let overflow_pt = overflow_emu.0 as f64 / 12_700.0;
     Diagnostic {
         severity,
         code: std::sync::Arc::from(E_LAY_001),
         message: std::sync::Arc::from(format!(
-            "Slide {slide_index}: estimated content height {estimated_height} exceeds \
-             body placeholder capacity {capacity} EMU. Reduce bullet count or font size."
+            "CanvasOverflow: slide '{title}' field 'bullets' overflows by ~{} EMU (~{overflow_pt:.1}pt). \
+             Consider reducing content or font size.",
+            overflow_emu.0,
         )),
         span: span.clone(),
         hint: Some(std::sync::Arc::from(
@@ -257,25 +286,25 @@ mod tests {
 
     // ── Threshold sanity: verify constants are self-consistent ────────────────
 
-    /// 10 bullets × 457,200 EMU = 4,572,000 > 4,500,000 → overflow at 10 bullets.
+    /// 24 bullets × 181,610 EMU = 4,358,640 > 4,343,400 → overflow at 24 bullets.
     #[test]
     fn test_bc_5_03_016_overflow_threshold_constants_are_consistent() {
-        let ten_bullets = LINE_HEIGHT_PER_BULLET * 10;
+        let twenty_four_bullets = LINE_HEIGHT_PER_BULLET * 24;
         assert!(
-            ten_bullets > BODY_PLACEHOLDER_HEIGHT,
-            "10 bullets must exceed placeholder height; \
-             10 × {LINE_HEIGHT_PER_BULLET} = {ten_bullets} vs {BODY_PLACEHOLDER_HEIGHT}"
+            twenty_four_bullets > BODY_PLACEHOLDER_HEIGHT,
+            "24 bullets must exceed placeholder height; \
+             24 × {LINE_HEIGHT_PER_BULLET} = {twenty_four_bullets} vs {BODY_PLACEHOLDER_HEIGHT}"
         );
     }
 
-    /// 5 bullets × 457,200 EMU = 2,286,000 < 4,500,000 → no overflow at 5 bullets.
+    /// 20 bullets × 181,610 EMU = 3,632,200 < 4,343,400 → no overflow at 20 bullets.
     #[test]
     fn test_bc_5_03_016_no_overflow_threshold_constants_are_consistent() {
-        let five_bullets = LINE_HEIGHT_PER_BULLET * 5;
+        let twenty_bullets = LINE_HEIGHT_PER_BULLET * 20;
         assert!(
-            five_bullets < BODY_PLACEHOLDER_HEIGHT,
-            "5 bullets must not exceed placeholder height; \
-             5 × {LINE_HEIGHT_PER_BULLET} = {five_bullets} vs {BODY_PLACEHOLDER_HEIGHT}"
+            twenty_bullets < BODY_PLACEHOLDER_HEIGHT,
+            "20 bullets must not exceed placeholder height; \
+             20 × {LINE_HEIGHT_PER_BULLET} = {twenty_bullets} vs {BODY_PLACEHOLDER_HEIGHT}"
         );
     }
 
@@ -329,15 +358,16 @@ mod tests {
 
     // ── Overflow cases ─────────────────────────────────────────────────────────
 
-    /// 20 bullets definitively overflow → 1 E-LAY-001 diagnostic.
+    /// 30 bullets definitively overflow → 1 E-LAY-001 diagnostic.
+    /// (30 × 181,610 = 5,448,300 > 4,343,400)
     #[test]
-    fn test_overflow_20_bullets() {
-        let deck = make_deck(vec![make_slide_with_bullets(20)]);
+    fn test_overflow_30_bullets() {
+        let deck = make_deck(vec![make_slide_with_bullets(30)]);
         let diags = validator_default().validate(&deck, &default_opts());
         assert_eq!(
             diags.len(),
             1,
-            "20 bullets must produce 1 E-LAY-001; got {diags:?}"
+            "30 bullets must produce 1 E-LAY-001; got {diags:?}"
         );
         assert_eq!(
             diags[0].code.as_ref(),
@@ -346,15 +376,15 @@ mod tests {
         );
     }
 
-    /// 10 bullets is exactly at the threshold (10 × 457,200 = 4,572,000 > 4,500,000).
+    /// 24 bullets is exactly at the threshold (24 × 181,610 = 4,358,640 > 4,343,400).
     #[test]
-    fn test_overflow_at_threshold_10_bullets() {
-        let deck = make_deck(vec![make_slide_with_bullets(10)]);
+    fn test_overflow_at_threshold_24_bullets() {
+        let deck = make_deck(vec![make_slide_with_bullets(24)]);
         let diags = validator_default().validate(&deck, &default_opts());
         assert_eq!(
             diags.len(),
             1,
-            "10 bullets (at threshold) must produce 1 E-LAY-001; got {diags:?}"
+            "24 bullets (at threshold) must produce 1 E-LAY-001; got {diags:?}"
         );
         assert_eq!(diags[0].code.as_ref(), E_LAY_001);
     }
@@ -364,7 +394,7 @@ mod tests {
     /// With `strict_overflow: false`, E-LAY-001 is a Warning.
     #[test]
     fn test_overflow_is_warning_default() {
-        let deck = make_deck(vec![make_slide_with_bullets(20)]);
+        let deck = make_deck(vec![make_slide_with_bullets(30)]);
         let diags = validator_default().validate(&deck, &default_opts());
         assert_eq!(diags.len(), 1, "expected 1 diagnostic; got {diags:?}");
         assert_eq!(
@@ -377,7 +407,7 @@ mod tests {
     /// With `strict_overflow: true`, E-LAY-001 is an Error.
     #[test]
     fn test_strict_overflow_is_error() {
-        let deck = make_deck(vec![make_slide_with_bullets(20)]);
+        let deck = make_deck(vec![make_slide_with_bullets(30)]);
         let diags = validator_strict().validate(&deck, &default_opts());
         assert_eq!(diags.len(), 1, "expected 1 diagnostic; got {diags:?}");
         assert_eq!(
@@ -390,12 +420,13 @@ mod tests {
     // ── Multi-slide accumulation ──────────────────────────────────────────────
 
     /// 3 slides all overflowing → 3 E-LAY-001 diagnostics (error accumulation).
+    /// Uses 30, 25, 24 bullets (all exceed the ~24-bullet threshold).
     #[test]
     fn test_overflow_multiple_slides() {
         let deck = make_deck(vec![
-            make_slide_with_bullets(20),
-            make_slide_with_bullets(15),
-            make_slide_with_bullets(12),
+            make_slide_with_bullets(30),
+            make_slide_with_bullets(25),
+            make_slide_with_bullets(24),
         ]);
         let diags = validator_default().validate(&deck, &default_opts());
         assert_eq!(
@@ -412,7 +443,7 @@ mod tests {
     #[test]
     fn test_overflow_one_of_two_slides() {
         let deck = make_deck(vec![
-            make_slide_with_bullets(20), // overflows
+            make_slide_with_bullets(30), // overflows (30 × 181,610 > 4,343,400)
             make_slide_with_bullets(3),  // clean
         ]);
         let diags = validator_default().validate(&deck, &default_opts());
@@ -426,10 +457,10 @@ mod tests {
 
     // ── Diagnostic message quality ─────────────────────────────────────────────
 
-    /// E-LAY-001 message must contain "EMU" (confirms EMU-based estimation).
+    /// E-LAY-001 message must contain "EMU" and match AC-001 format.
     #[test]
     fn test_overflow_message_has_emu_estimate() {
-        let deck = make_deck(vec![make_slide_with_bullets(20)]);
+        let deck = make_deck(vec![make_slide_with_bullets(30)]);
         let diags = validator_default().validate(&deck, &default_opts());
         assert_eq!(diags.len(), 1);
         assert!(
@@ -437,17 +468,68 @@ mod tests {
             "E-LAY-001 message must reference EMU units; got: {}",
             diags[0].message
         );
+        assert!(
+            diags[0].message.contains("CanvasOverflow"),
+            "E-LAY-001 message must start with 'CanvasOverflow'; got: {}",
+            diags[0].message
+        );
+        assert!(
+            diags[0].message.contains("field 'bullets'"),
+            "E-LAY-001 message must reference field 'bullets'; got: {}",
+            diags[0].message
+        );
     }
 
     /// E-LAY-001 must include a correction hint.
     #[test]
     fn test_overflow_has_hint() {
-        let deck = make_deck(vec![make_slide_with_bullets(20)]);
+        let deck = make_deck(vec![make_slide_with_bullets(30)]);
         let diags = validator_default().validate(&deck, &default_opts());
         assert_eq!(diags.len(), 1);
         assert!(
             diags[0].hint.is_some(),
             "E-LAY-001 must include a correction hint"
+        );
+    }
+
+    // ── Message format — AC-001 ────────────────────────────────────────────────
+
+    /// E-LAY-001 message format: `CanvasOverflow`: slide '<title>' field 'bullets' overflows by ~N EMU (~Mpt).
+    #[test]
+    fn test_overflow_message_format_with_title() {
+        // Slide with a title field set.
+        let mut slide = make_slide_with_bullets(30);
+        slide.fields.insert(
+            Arc::from("title"),
+            slideforge_types::FieldValue::Literal(slideforge_types::Value::Str(Arc::from(
+                "My Slide",
+            ))),
+        );
+        let deck = make_deck(vec![slide]);
+        let diags = validator_default().validate(&deck, &default_opts());
+        assert_eq!(diags.len(), 1);
+        let msg = diags[0].message.as_ref();
+        assert!(
+            msg.starts_with("CanvasOverflow: slide 'My Slide' field 'bullets' overflows by ~"),
+            "message must match AC-001 format; got: {msg}"
+        );
+        assert!(
+            msg.contains("pt)"),
+            "message must include point conversion; got: {msg}"
+        );
+    }
+
+    /// E-LAY-001 uses `slide_type` as title fallback when no title field is set.
+    #[test]
+    fn test_overflow_message_format_title_fallback() {
+        let slide = make_slide_with_bullets(30); // slide_type = "bullets", no title field
+        let deck = make_deck(vec![slide]);
+        let diags = validator_default().validate(&deck, &default_opts());
+        assert_eq!(diags.len(), 1);
+        let msg = diags[0].message.as_ref();
+        assert!(
+            msg.contains("slide 'bullets'"),
+            "message must use slide_type as title fallback; got: {msg}"
         );
     }
 

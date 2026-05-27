@@ -13,8 +13,10 @@
 //!
 //! | Field | Description |
 //! |-------|-------------|
-//! | `title` | Human-readable error description |
+//! | `title` | `"Error: <code>"` — machine-readable error card heading |
 //! | `error_code` | The diagnostic code (e.g., `"E-LAY-002"`) |
+//! | `error_message` | Human-readable description of the error |
+//! | `source_location` | Source file location (empty until span support is available) |
 //! | `position` | 1-based slide position in the deck |
 
 use std::sync::Arc;
@@ -46,11 +48,20 @@ pub fn error_slide_placeholder(code: &str, message: &str, position: usize) -> Sl
 
     fields.insert(
         Arc::from("title"),
-        FieldValue::Literal(Value::Str(Arc::from(message))),
+        FieldValue::Literal(Value::Str(Arc::from(format!("Error: {code}")))),
     );
     fields.insert(
         Arc::from("error_code"),
         FieldValue::Literal(Value::Str(Arc::from(code))),
+    );
+    fields.insert(
+        Arc::from("error_message"),
+        FieldValue::Literal(Value::Str(Arc::from(message))),
+    );
+    // `source_location` is empty until full span support is available.
+    fields.insert(
+        Arc::from("source_location"),
+        FieldValue::Literal(Value::Str(Arc::from(""))),
     );
     // Store position as i64 per Value::Int — usize fits within i64 on all
     // supported platforms (u64::MAX > i64::MAX is moot for slide positions).
@@ -94,7 +105,7 @@ mod tests {
 
     // ── Required fields ────────────────────────────────────────────────────────
 
-    /// The placeholder slide must carry both `title` and `error_code` fields.
+    /// The placeholder slide must carry all required fields per the schema.
     #[test]
     fn test_error_slide_has_error_fields() {
         let slide = error_slide_placeholder("E-LAY-002", "Deck contains zero slides", 0);
@@ -106,6 +117,16 @@ mod tests {
         assert!(
             slide.fields.contains_key("error_code"),
             "error placeholder must have an 'error_code' field; fields: {:?}",
+            slide.fields
+        );
+        assert!(
+            slide.fields.contains_key("error_message"),
+            "error placeholder must have an 'error_message' field; fields: {:?}",
+            slide.fields
+        );
+        assert!(
+            slide.fields.contains_key("source_location"),
+            "error placeholder must have a 'source_location' field; fields: {:?}",
             slide.fields
         );
     }
@@ -126,19 +147,50 @@ mod tests {
         );
     }
 
-    /// The `title` field must contain the error message text.
+    /// The `title` field must be `"Error: <code>"` (machine-readable heading).
     #[test]
-    fn test_error_slide_title_contains_message() {
-        let message = "Deck contains zero slides";
-        let slide = error_slide_placeholder("E-LAY-002", message, 0);
+    fn test_error_slide_title_is_error_code_format() {
+        let slide = error_slide_placeholder("E-LAY-002", "Deck contains zero slides", 0);
         let title_field = slide.fields.get("title");
         let title_value = match title_field {
             Some(FieldValue::Literal(Value::Str(s))) => Some(s.as_ref()),
             _ => None,
         };
+        assert_eq!(
+            title_value,
+            Some("Error: E-LAY-002"),
+            "title field must be 'Error: E-LAY-002'; got: {title_field:?}"
+        );
+    }
+
+    /// The `error_message` field must contain the human-readable error text.
+    #[test]
+    fn test_error_slide_error_message_contains_message() {
+        let message = "Deck contains zero slides";
+        let slide = error_slide_placeholder("E-LAY-002", message, 0);
+        let msg_field = slide.fields.get("error_message");
+        let msg_value = match msg_field {
+            Some(FieldValue::Literal(Value::Str(s))) => Some(s.as_ref()),
+            _ => None,
+        };
         assert!(
-            title_value.is_some_and(|t| t.contains(message)),
-            "title field must contain the error message '{message}'; got: {title_field:?}"
+            msg_value.is_some_and(|t| t.contains(message)),
+            "error_message field must contain '{message}'; got: {msg_field:?}"
+        );
+    }
+
+    /// The `source_location` field must be present (empty string until spans available).
+    #[test]
+    fn test_error_slide_source_location_field_present() {
+        let slide = error_slide_placeholder("E-LAY-002", "Deck contains zero slides", 0);
+        let loc_field = slide.fields.get("source_location");
+        let loc_value = match loc_field {
+            Some(FieldValue::Literal(Value::Str(s))) => Some(s.as_ref()),
+            _ => None,
+        };
+        assert!(
+            loc_value.is_some(),
+            "source_location field must be present; got: {loc_field:?}"
         );
     }
 
