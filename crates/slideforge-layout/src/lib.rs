@@ -67,8 +67,8 @@ mod tests {
     use std::sync::Arc;
 
     use slideforge_types::{
-        Brand, BrandFonts, BrandPalette, Deck, DeckMetadata, FieldValue, OrderedMap, Slide,
-        SourceSpan, Value,
+        Brand, BrandFonts, BrandPalette, Deck, DeckMetadata, FieldValue, OrderedMap, Register,
+        Slide, SourceSpan, Value,
     };
 
     use super::*;
@@ -406,6 +406,82 @@ mod tests {
         let mut set = HashSet::new();
         set.insert(result);
         assert_eq!(set.len(), 1);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // FINDING-001 — register_tags population
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// FINDING-001 — slide with `Register::Notes` produces `register_tags == [RegisterTag::Notes]`.
+    #[test]
+    fn test_bc_3_06_001_register_tags_notes() {
+        let slide = Slide {
+            slide_type: Arc::from("title"),
+            fields: OrderedMap::new(),
+            blocks: vec![],
+            register: Some(Register::Notes),
+            tags: vec![],
+            source_span: SourceSpan::default(),
+        };
+        let deck = make_deck(vec![slide]);
+        let brand = make_brand();
+        let result = run(&deck, &brand).expect("layout::run must succeed");
+        assert_eq!(
+            result.slides[0].register_tags,
+            vec![RegisterTag::Notes],
+            "slide with Register::Notes must produce register_tags == [RegisterTag::Notes]"
+        );
+    }
+
+    /// FINDING-001 — slide with `Register::Detail` produces `register_tags == [RegisterTag::Detail]`.
+    #[test]
+    fn test_bc_3_06_001_register_tags_detail() {
+        let slide = Slide {
+            slide_type: Arc::from("title"),
+            fields: OrderedMap::new(),
+            blocks: vec![],
+            register: Some(Register::Detail),
+            tags: vec![],
+            source_span: SourceSpan::default(),
+        };
+        let deck = make_deck(vec![slide]);
+        let brand = make_brand();
+        let result = run(&deck, &brand).expect("layout::run must succeed");
+        assert_eq!(
+            result.slides[0].register_tags,
+            vec![RegisterTag::Detail],
+            "slide with Register::Detail must produce register_tags == [RegisterTag::Detail]"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // FINDING-002 — speaker_notes extraction
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// FINDING-002 — slide with `notes` field set to a plain string populates `speaker_notes`.
+    #[test]
+    fn test_bc_3_06_001_speaker_notes_extracted_from_notes_field() {
+        let mut fields = OrderedMap::new();
+        fields.insert(
+            Arc::from("notes"),
+            FieldValue::Literal(Value::Str(Arc::from("My notes"))),
+        );
+        let slide = Slide {
+            slide_type: Arc::from("title"),
+            fields,
+            blocks: vec![],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+        };
+        let deck = make_deck(vec![slide]);
+        let brand = make_brand();
+        let result = run(&deck, &brand).expect("layout::run must succeed");
+        assert_eq!(
+            result.slides[0].speaker_notes,
+            Some(Arc::from("My notes")),
+            "slide with notes field must have speaker_notes populated"
+        );
     }
 
     // ─────────────────────────────────────────────────────────────────────────
