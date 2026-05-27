@@ -8,10 +8,10 @@
 //! The slideforge pipeline produces two intermediate representations:
 //!
 //! - [`Deck`] — semantic, pre-layout representation of slide content
-//! - [`LaidOutDeck`] — geometric, post-layout representation with positioned shapes
+//! - `LaidOutDeck` (in `slideforge-layout`) — geometric, post-layout representation with positioned shapes
 //!
 //! Exporters consume both: PPTX needs semantic info for placeholders;
-//! PDF/HTML operate off [`LaidOutDeck`].
+//! PDF/HTML operate off `LaidOutDeck`.
 //!
 //! ## Design Invariants
 //!

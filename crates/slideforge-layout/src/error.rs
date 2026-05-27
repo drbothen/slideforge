@@ -28,7 +28,9 @@ pub enum LayoutError {
     /// `source_slide_index` is always `0` for this variant (there are no slides
     /// to index into), but is included for structural consistency with other
     /// variants and to satisfy the field-uniformity requirement.
-    #[error("layout error: input deck contains zero slides (source_slide_index: {source_slide_index})")]
+    #[error(
+        "layout error: input deck contains zero slides (source_slide_index: {source_slide_index})"
+    )]
     EmptyDeck {
         /// Always `0` — included for structural consistency.
         source_slide_index: usize,
@@ -68,7 +70,9 @@ pub enum LayoutError {
     /// Per AC-014 / BC-3.06.003, every bounding box must satisfy:
     /// `x >= 0`, `y >= 0`, `width > 0`, `height > 0`,
     /// `x + width <= page_width`, `y + height <= page_height`.
-    #[error("layout error: slide {source_slide_index} frame {frame_index}: invalid bounding box {bbox:?}")]
+    #[error(
+        "layout error: slide {source_slide_index} frame {frame_index}: invalid bounding box {bbox:?}"
+    )]
     InvalidBoundingBox {
         /// Zero-based index of the slide containing the invalid frame.
         source_slide_index: usize,
@@ -93,7 +97,9 @@ mod tests {
     /// meaningful message.
     #[test]
     fn test_bc_3_06_001_error_empty_deck_variant_exists() {
-        let err = LayoutError::EmptyDeck { source_slide_index: 0 };
+        let err = LayoutError::EmptyDeck {
+            source_slide_index: 0,
+        };
         let msg = err.to_string();
         assert!(
             msg.contains("zero slides"),
@@ -162,13 +168,19 @@ mod tests {
     #[test]
     fn test_bc_3_06_001_layout_error_implements_hash_eq_clone() {
         use std::collections::HashSet;
-        let err = LayoutError::EmptyDeck { source_slide_index: 0 };
+        let err = LayoutError::EmptyDeck {
+            source_slide_index: 0,
+        };
         let err2 = err.clone();
         assert_eq!(err, err2);
 
         let mut set = HashSet::new();
-        set.insert(LayoutError::EmptyDeck { source_slide_index: 0 });
-        set.insert(LayoutError::EmptyDeck { source_slide_index: 0 }); // duplicate
+        set.insert(LayoutError::EmptyDeck {
+            source_slide_index: 0,
+        });
+        set.insert(LayoutError::EmptyDeck {
+            source_slide_index: 0,
+        }); // duplicate
         assert_eq!(set.len(), 1);
     }
 }

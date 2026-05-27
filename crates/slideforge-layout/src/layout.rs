@@ -75,7 +75,9 @@ use crate::types::{
 pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
     // EC-001: reject empty decks.
     if deck.slides.is_empty() {
-        return Err(LayoutError::EmptyDeck { source_slide_index: 0 });
+        return Err(LayoutError::EmptyDeck {
+            source_slide_index: 0,
+        });
     }
 
     // AC-004: derive page size from brand's first layout definition, or fall
