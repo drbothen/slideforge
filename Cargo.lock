@@ -1150,13 +1150,13 @@ name = "slideforge-brand"
 version = "0.1.0"
 dependencies = [
  "dirs",
- "indexmap",
  "insta",
  "quick-xml",
  "slideforge-plugin-api",
  "slideforge-types",
  "thiserror 2.0.12",
  "tracing",
+ "tracing-subscriber",
  "zip",
 ]
 

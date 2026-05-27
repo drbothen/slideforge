@@ -132,9 +132,14 @@ pub fn parse_theme_fonts(xml_bytes: &[u8]) -> Result<BrandFonts, BrandError> {
 /// - Windows: `C:\Windows\Fonts`
 /// - Linux: `/usr/share/fonts`, `/usr/local/share/fonts`, `~/.fonts`
 ///
-/// Returns `true` if any file matching the font name (case-insensitive prefix
-/// match) is found. Returns `false` if the font is not found or if the
-/// directories cannot be read.
+/// Returns `true` if any file matching the font name (case-insensitive exact
+/// stem match or name-hyphen/space prefix) is found. Returns `false` if the
+/// font is not found or if the directories cannot be read.
+///
+/// Matching rules (FINDING-013 — tighter than prefix):
+/// - Stem equals the font name exactly (e.g., `"arial"` == `"arial"`).
+/// - Stem starts with `"{name}-"` (e.g., `"calibri-bold"`).
+/// - Stem starts with `"{name} "` (e.g., `"calibri light"`).
 ///
 /// This is a best-effort check. A full implementation would use `font-kit`
 /// or system font enumeration APIs. The name-based scan is acceptable for v1.0
@@ -144,30 +149,32 @@ pub fn font_available(name: &str) -> bool {
     let lower_name = name.to_lowercase();
     for dir in font_search_dirs() {
         if let Ok(entries) = std::fs::read_dir(&dir) {
+            let mut subdirs: Vec<std::path::PathBuf> = Vec::new();
             for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    subdirs.push(path);
+                    continue;
+                }
                 let file_name = entry.file_name();
                 let fname_lower = file_name.to_string_lossy().to_lowercase();
-                // Case-insensitive prefix match: the file stem starts with the font name.
                 let stem = fname_lower
                     .rsplit_once('.')
                     .map_or(fname_lower.as_ref(), |(s, _)| s);
-                if stem.starts_with(lower_name.as_str()) {
+                if font_stem_matches(stem, &lower_name) {
                     return true;
                 }
             }
-        }
-        // Recurse one level into subdirectories (common on Linux).
-        if let Ok(entries) = std::fs::read_dir(&dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_dir() && let Ok(sub_entries) = std::fs::read_dir(&path) {
+            // Recurse one level into subdirectories (common on Linux).
+            for sub_dir in subdirs {
+                if let Ok(sub_entries) = std::fs::read_dir(&sub_dir) {
                     for sub_entry in sub_entries.flatten() {
                         let file_name = sub_entry.file_name();
                         let fname_lower = file_name.to_string_lossy().to_lowercase();
                         let stem = fname_lower
                             .rsplit_once('.')
                             .map_or(fname_lower.as_ref(), |(s, _)| s);
-                        if stem.starts_with(lower_name.as_str()) {
+                        if font_stem_matches(stem, &lower_name) {
                             return true;
                         }
                     }
@@ -176,6 +183,19 @@ pub fn font_available(name: &str) -> bool {
         }
     }
     false
+}
+
+/// Returns `true` if `stem` matches the `lower_name` font name.
+///
+/// Matching rules (FINDING-013):
+/// - Exact equality (`"arial"` matches `"arial"`).
+/// - Starts with `"{name}-"` (style suffix, e.g., `"calibri-bold"`).
+/// - Starts with `"{name} "` (space-separated variant, e.g., `"calibri light"`).
+#[must_use]
+fn font_stem_matches(stem: &str, lower_name: &str) -> bool {
+    stem == lower_name
+        || stem.starts_with(&format!("{lower_name}-"))
+        || stem.starts_with(&format!("{lower_name} "))
 }
 
 /// Resolve the first available fallback font from [`FALLBACK_CHAIN`].
@@ -348,5 +368,42 @@ mod tests {
         // "Arial" is universally installed — but we don't assert true here
         // because CI environments may lack fonts. We verify it returns a bool.
         let _result: bool = font_available("Arial");
+    }
+
+    /// FINDING-013 — font_stem_matches uses exact or well-delimited prefix matching.
+    ///
+    /// Ensures that a broad font name like "Calibri" does not accidentally match
+    /// "CalibriBody" (no separator) while still matching "Calibri-Bold" and "Calibri Light".
+    #[test]
+    fn test_bc_2_01_006_font_stem_matches_exact() {
+        // Exact match.
+        assert!(
+            font_stem_matches("arial", "arial"),
+            "exact match must return true"
+        );
+        // Hyphen-separated style suffix.
+        assert!(
+            font_stem_matches("calibri-bold", "calibri"),
+            "calibri-bold must match 'calibri'"
+        );
+        // Space-separated variant.
+        assert!(
+            font_stem_matches("calibri light", "calibri"),
+            "calibri light must match 'calibri'"
+        );
+        // No separator — must NOT match (FINDING-013 anti-pattern fix).
+        assert!(
+            !font_stem_matches("calibribody", "calibri"),
+            "calibribody must NOT match 'calibri' (no separator)"
+        );
+        assert!(
+            !font_stem_matches("arialnarrow", "arial"),
+            "arialnarrow must NOT match 'arial' (no separator)"
+        );
+        // Completely different name.
+        assert!(
+            !font_stem_matches("helvetica", "arial"),
+            "helvetica must not match 'arial'"
+        );
     }
 }

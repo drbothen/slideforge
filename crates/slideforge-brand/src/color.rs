@@ -108,6 +108,31 @@ pub fn parse_theme_colors(
                                 }
                             }
                         }
+                        "schemeClr" => {
+                            // Relative scheme color reference (e.g., val="dk1", val="accent1").
+                            // We cannot resolve the absolute hex without a rendering context,
+                            // so we store the scheme reference string with a warning.
+                            // AC-002: schemeClr with lumMod/tint/shade → extracted value
+                            // with inline warning.
+                            for attr in e.attributes().flatten() {
+                                if attr.key.local_name().as_ref() == b"val"
+                                    && let Ok(val) = std::str::from_utf8(&attr.value)
+                                {
+                                    tracing::warn!(
+                                        slot,
+                                        scheme_ref = val,
+                                        "schemeClr in theme1.xml color slot; \
+                                         storing scheme reference — actual hex may differ \
+                                         depending on the active theme"
+                                    );
+                                    // Store as "scheme:<val>" so callers know it is a reference.
+                                    let scheme_ref = Arc::from(
+                                        format!("scheme:{}", val.to_lowercase()).as_str(),
+                                    );
+                                    found.insert(slot, scheme_ref);
+                                }
+                            }
+                        }
                         _ => {}
                     }
                 }
@@ -138,13 +163,16 @@ pub fn parse_theme_colors(
                     hex: Arc::clone(hex),
                 }
             } else {
+                let inferred = default_color_for_slot(name);
                 warnings.push(BrandError::MissingColorSlot {
                     slot_name: Arc::from(name),
+                    inferred_hex: Arc::clone(&inferred),
+                    derivation: Arc::from("default inference"),
                 });
                 tracing::warn!(slot = name, "OOXML color slot missing; using default inference");
                 ColorSlot {
                     name: Arc::from(name),
-                    hex: default_color_for_slot(name),
+                    hex: inferred,
                 }
             }
         })
@@ -365,5 +393,53 @@ mod tests {
                 slot.hex
             );
         }
+    }
+
+    /// BC-2.01.001 AC-002 — schemeClr elements store a scheme reference with a warning.
+    ///
+    /// When a slot uses `<a:schemeClr val="dk1">` (a self-referential scheme color),
+    /// the parser stores `"scheme:dk1"` and emits a tracing::warn.
+    /// No MissingColorSlot warning is emitted — the slot IS present, just as a reference.
+    #[test]
+    fn test_bc_2_01_001_schemeclr_stored_as_reference() {
+        // A theme where dk1 uses schemeClr self-reference.
+        let theme_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="SchemeTheme">
+  <a:themeElements>
+    <a:clrScheme name="SchemeScheme">
+      <a:dk1><a:schemeClr val="dk1"/></a:dk1>
+      <a:lt1><a:srgbClr val="FFFFFF"/></a:lt1>
+      <a:dk2><a:srgbClr val="003087"/></a:dk2>
+      <a:lt2><a:srgbClr val="F5F5F5"/></a:lt2>
+      <a:acc1><a:srgbClr val="0066CC"/></a:acc1>
+      <a:acc2><a:srgbClr val="FF6B35"/></a:acc2>
+      <a:acc3><a:srgbClr val="28A745"/></a:acc3>
+      <a:acc4><a:srgbClr val="FFC107"/></a:acc4>
+      <a:acc5><a:srgbClr val="6F42C1"/></a:acc5>
+      <a:acc6><a:srgbClr val="17A2B8"/></a:acc6>
+      <a:hlink><a:srgbClr val="0000EE"/></a:hlink>
+      <a:folHlink><a:srgbClr val="551A8B"/></a:folHlink>
+    </a:clrScheme>
+  </a:themeElements>
+</a:theme>"#;
+        let result = parse_theme_colors(theme_xml.as_bytes());
+        let (slots, warnings) = result.expect("schemeClr theme must parse without hard error");
+        // dk1 uses schemeClr so it is present — no MissingColorSlot warning for dk1.
+        assert_eq!(
+            warnings.len(),
+            0,
+            "schemeClr is present (not missing), so no MissingColorSlot warnings expected"
+        );
+        // dk1 hex must start with "scheme:" prefix (AC-002 inline warning path).
+        assert!(
+            slots[0].hex.starts_with("scheme:"),
+            "schemeClr slot must store 'scheme:<val>' reference, got: {}",
+            slots[0].hex
+        );
+        assert_eq!(
+            slots[0].hex.as_ref(),
+            "scheme:dk1",
+            "schemeClr val='dk1' must produce hex='scheme:dk1'"
+        );
     }
 }
