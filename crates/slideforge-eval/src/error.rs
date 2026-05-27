@@ -147,10 +147,12 @@ pub enum EvalError {
     },
 
     /// E-EVL-008: The expression in `@for x in <expr>` evaluated to a value
-    /// that is not iterable (i.e., not a [`Value::List`](slideforge_types::Value)).
+    /// that is not iterable.
     ///
-    /// Per BC-2.04.001: only `List` values are iterable. Scalars, maps, and
-    /// null are rejected with this error.
+    /// Per BC-2.04.001: `List` and `Map` values are iterable. Scalars (`Int`,
+    /// `Float`, `Bool`, `Str`) and `Null` are rejected with this error. For
+    /// maps, each entry is bound as a two-field map `{ key, value }` inside
+    /// the loop body.
     #[error("cannot iterate over `{value_type}` value at {span}: @for requires a list")]
     #[diagnostic(
         code("E-EVL-008"),

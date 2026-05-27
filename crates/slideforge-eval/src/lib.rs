@@ -49,7 +49,7 @@ pub mod for_eval;
 pub use config::EvalConfig;
 pub use env::Env;
 pub use error::EvalError;
-pub use eval::{eval_deck, eval_expr_to_string};
+pub use eval::{eval_deck, eval_deck_with_variant, eval_expr_to_string};
 pub use expr::eval_expr;
 pub use filters::{AVAILABLE_FILTERS, apply_filter};
 pub use for_eval::{eval_block_items, eval_for_block, eval_slide_node};

@@ -166,9 +166,8 @@ pub fn eval_deck_with_variant(
             set_rule_defaults.insert((slide_type, field_name), v);
         }
     }
-    // set_rule_defaults is threaded to the layout stage in a future story.
-    // Until then, drop it to prevent unused-variable warnings.
-    drop(set_rule_defaults);
+    // set_rule_defaults is threaded to eval_block_items → eval_slide_node
+    // where defaults are applied to each slide's fields (AC-014 / C01).
 
     // ── Step 3: Apply active variant vars (C02) ──
     // Variant vars override deck-level vars (11-level precedence chain).
@@ -205,7 +204,26 @@ pub fn eval_deck_with_variant(
     }
 
     // ── Step 4: Evaluate all top-level block items ──
-    let slides = eval_block_items(&mut env, &deck_node.items, config, sink);
+    let mut slides = eval_block_items(&mut env, &deck_node.items, &set_rule_defaults, config, sink);
+
+    // ── Step 4b: Deck-level slide cap (F-P2-003 / AC-014) ──
+    // The per-@for cap in eval_for_block handles intra-loop excess. However,
+    // when multiple top-level @for blocks each produce slides below the cap,
+    // the combined total may still exceed `max_total_slides`. This deck-level
+    // check enforces the hard cap on the aggregate slide count.
+    if let Some(max) = config.max_total_slides
+        && slides.len() > max
+    {
+        sink.push_with_severity(
+            EvalError::TooManySlides {
+                count: slides.len(),
+                max,
+                span: SourceSpan::default(),
+            },
+            ParseSeverity::Error,
+        );
+        slides.truncate(max);
+    }
 
     // ── Step 5: I01 — Return None if any fatal diagnostic was pushed ──
     if sink.has_fatal() {
@@ -896,15 +914,11 @@ mod tests {
 
     // ─── C01: set-rule support tests ─────────────────────────────────────────
 
-    /// C01: set rules are evaluated and stored — their values are resolving correctly.
+    /// C01: set-rule default is applied to a slide that does not explicitly set the field.
     ///
-    /// `set content: footer "Confidential"` → the set-rule resolver evaluates
-    /// the value to `Value::Str("Confidential")` without errors.
-    ///
-    /// Note: set-rule *application* to slides (injecting defaults into slide fields)
-    /// is the concern of the layout/render stage once set_rule_defaults are threaded
-    /// through the pipeline. This test verifies the resolver itself doesn't crash
-    /// and the eval_deck call succeeds when set-rules are present.
+    /// `set content: footer "Confidential"` + a `content` slide with NO explicit
+    /// `footer` field → the slide's `footer` field must be `"Confidential"` after
+    /// evaluation (AC-014: set-rule injects the default into the slide IR).
     #[test]
     fn test_set_rule_applied_as_default() {
         use slideforge_syntax::{SetRule, SetRuleValue};
@@ -921,7 +935,7 @@ mod tests {
             SlideNode {
                 kind: Spanned::new("content".to_string(), dummy_span()),
                 tags: vec![],
-                fields: vec![], // no footer field — set-rule would supply the default
+                fields: vec![], // no footer field — set-rule supplies the default
                 inline_items: vec![],
             },
             dummy_span(),
@@ -935,10 +949,30 @@ mod tests {
         let config = default_config();
         let mut sink = DiagnosticSink::new();
 
-        // eval_deck must succeed (no errors) when a set-rule is present.
         let deck = eval_deck(&deck_node, &config, &mut sink);
         assert!(deck.is_some(), "eval_deck must return Some when set-rules are present");
         assert!(sink.is_empty(), "no errors expected for valid set-rule");
+
+        // AC-014: the set-rule default MUST be present in the slide's fields.
+        let deck = deck.unwrap();
+        assert_eq!(deck.slides.len(), 1, "must have 1 slide");
+        let slide = &deck.slides[0];
+        let footer = slide.fields.get("footer");
+        assert!(
+            footer.is_some(),
+            "set-rule default 'Confidential' must be injected into slide's footer field; got no footer"
+        );
+        // The value must be Value::Str("Confidential").
+        match footer {
+            Some(slideforge_types::FieldValue::Literal(Value::Str(s))) => {
+                assert_eq!(
+                    s.as_ref(),
+                    "Confidential",
+                    "set-rule default value must be 'Confidential'"
+                );
+            },
+            other => panic!("footer field must be Literal(Str('Confidential')); got: {other:?}"),
+        }
     }
 
     /// C01: A slide that explicitly sets a field overrides the set-rule default.
@@ -989,13 +1023,19 @@ mod tests {
         assert!(sink.is_empty(), "no errors expected");
 
         // Slide explicitly set footer = "Custom"; the set-rule default ("Default")
-        // must not overwrite it. The slide's field must be "Custom".
+        // must not overwrite it.
         let slide = &deck.slides[0];
         let footer = slide.fields.get("footer");
-        assert!(footer.is_some(), "slide must have a footer field");
-        // Verify the value is "Custom" (slide-level wins over set-rule).
-        if let Some(slideforge_types::FieldValue::Literal(Value::Str(s))) = footer {
-            assert_eq!(s.as_ref(), "Custom", "slide-level footer 'Custom' must win over set-rule default 'Default'");
+        assert!(footer.is_some(), "slide must have a footer field after eval");
+        match footer {
+            Some(slideforge_types::FieldValue::Literal(Value::Str(s))) => {
+                assert_eq!(
+                    s.as_ref(),
+                    "Custom",
+                    "slide-level footer 'Custom' must win over set-rule default 'Default'"
+                );
+            },
+            other => panic!("footer must be Literal(Str('Custom')); got: {other:?}"),
         }
     }
 
@@ -1210,5 +1250,99 @@ mod tests {
 
         // All 4 valid variants are constructible; no 5th "While" or "Fn" variant exists.
         assert_eq!(variants.len(), 4, "BlockItem must have exactly 4 variants (no While/Fn)");
+    }
+
+    // ─── F-P2-003: deck-level slide cap ──────────────────────────────────────
+
+    /// F-P2-003: max_total_slides is enforced at the deck level, not just per @for.
+    ///
+    /// Two @for blocks each producing 2 slides = 4 total. With max_total_slides=3,
+    /// the deck-level gate truncates to 3 and pushes TooManySlides.
+    #[test]
+    fn test_deck_level_max_total_slides_cap() {
+        // Two separate @for blocks:
+        //   @for x in [1, 2]: slide content:   → 2 slides
+        //   @for x in [3, 4]: slide content:   → 2 slides
+        // Combined: 4 slides. max_total_slides = 3 → must error + truncate.
+        let for_node_a = ForNode {
+            binding: Spanned::new("x".to_string(), dummy_span()),
+            collection: Spanned::new(
+                Expr::List(vec![Expr::Num(1), Expr::Num(2)]),
+                dummy_span(),
+            ),
+            body: vec![BlockItem::Slide(Spanned::new(
+                SlideNode {
+                    kind: Spanned::new("content".to_string(), dummy_span()),
+                    tags: vec![],
+                    fields: vec![],
+                    inline_items: vec![],
+                },
+                dummy_span(),
+            ))],
+        };
+        let for_node_b = ForNode {
+            binding: Spanned::new("x".to_string(), dummy_span()),
+            collection: Spanned::new(
+                Expr::List(vec![Expr::Num(3), Expr::Num(4)]),
+                dummy_span(),
+            ),
+            body: vec![BlockItem::Slide(Spanned::new(
+                SlideNode {
+                    kind: Spanned::new("content".to_string(), dummy_span()),
+                    tags: vec![],
+                    fields: vec![],
+                    inline_items: vec![],
+                },
+                dummy_span(),
+            ))],
+        };
+        let deck_node = DeckNode {
+            items: vec![
+                BlockItem::For(Spanned::new(for_node_a, dummy_span())),
+                BlockItem::For(Spanned::new(for_node_b, dummy_span())),
+            ],
+            ..DeckNode::default()
+        };
+
+        let config = EvalConfig {
+            large_deck_warn_threshold: 500,
+            max_total_slides: Some(3),
+        };
+        let mut sink = DiagnosticSink::new();
+
+        // eval_deck returns Some (non-fatal error) with truncated slides.
+        let deck = eval_deck(&deck_node, &config, &mut sink);
+        assert!(deck.is_some(), "eval_deck must return Some (TooManySlides is non-fatal by default)");
+
+        let deck = deck.unwrap();
+        // Deck-level gate truncates to max_total_slides.
+        assert!(
+            deck.slides.len() <= 3,
+            "deck must be truncated to max_total_slides=3; got {}",
+            deck.slides.len()
+        );
+        // TooManySlides error must have been pushed.
+        assert!(
+            !sink.is_empty(),
+            "TooManySlides error must be in the sink when deck cap is exceeded"
+        );
+    }
+
+    /// F-P2-003: eval_deck_with_variant is callable from the public API.
+    ///
+    /// This verifies the re-export (F-P2-005): `eval_deck_with_variant` must be
+    /// accessible from crate root via `slideforge_eval::eval_deck_with_variant`.
+    #[test]
+    fn test_eval_deck_with_variant_is_public() {
+        // This test will fail to compile if eval_deck_with_variant is not
+        // re-exported from lib.rs (F-P2-005).
+        use crate::eval_deck_with_variant;
+
+        let deck_node = DeckNode::default();
+        let config = default_config();
+        let mut sink = DiagnosticSink::new();
+        // None = no active variant (same as eval_deck).
+        let deck = eval_deck_with_variant(&deck_node, &config, None, &mut sink);
+        assert!(deck.is_some(), "eval_deck_with_variant must return Some for empty deck");
     }
 }

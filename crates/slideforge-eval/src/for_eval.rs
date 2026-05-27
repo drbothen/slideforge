@@ -1,5 +1,20 @@
 //! `@for` loop evaluation for the slideforge DSL.
 //!
+//! # Span threading (STORY-012 systematic gap)
+//!
+//! All error paths in this module that construct [`EvalError`](crate::EvalError)
+//! use `SourceSpan::default()` for the `span` field. This is a **systematic
+//! limitation**: the AST nodes carry [`slideforge_syntax::span::Span`] (a byte-
+//! offset + `file_id` u32 tuple), while the IR error types require
+//! [`slideforge_types::SourceSpan`] (file path + line + col). Bridging the two
+//! requires a [`SourceMap`](slideforge_syntax::span::SourceMap) lookup, which
+//! eval functions do not currently receive as a parameter.
+//!
+//! The one exception is `eval_for_block`'s `NotIterable` error, which extracts
+//! the collection expression's byte offset from the `Spanned<ForNode>` where
+//! available (via `collection_expr_span`). Full line/col resolution requires
+//! STORY-012 to thread a `SourceMap` reference through the evaluator call chain.
+//!
 //! This module implements the deck-level `@for item in collection:` iteration
 //! block (BC-2.04.001 through BC-2.04.010). For each element in the evaluated
 //! collection:
@@ -31,6 +46,7 @@
 //! `ParseSeverity::Warning` is pushed into the sink. Evaluation continues
 //! normally.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use indexmap::IndexMap;
@@ -51,7 +67,7 @@ use crate::expr::eval_expr;
 ///
 /// The function:
 /// 1. Evaluates `collection_expr` in the current `env`.
-/// 2. Verifies the result is a [`Value::List`]; pushes
+/// 2. Verifies the result is a [`Value::List`] or [`Value::Map`]; pushes
 ///    [`EvalError::NotIterable`](crate::EvalError) and returns `vec![]` if not.
 /// 3. Iterates over the list, pushing an inner scope frame for each element.
 /// 4. Evaluates the `body` block items in the inner scope, collecting slides.
@@ -68,6 +84,8 @@ use crate::expr::eval_expr;
 ///   `@for item in items:`).
 /// - `collection_expr`: The expression whose value is the collection to iterate.
 /// - `body`: The body block items to evaluate for each element.
+/// - `set_rule_defaults`: Set-rule defaults keyed by `(slide_type, field_name)`.
+///   Passed through to `eval_slide_node` for default injection.
 /// - `config`: Evaluation configuration (thresholds, caps).
 /// - `sink`: Accumulates all diagnostics produced during evaluation.
 ///
@@ -76,11 +94,12 @@ use crate::expr::eval_expr;
 /// A `Vec<Slide>` containing all slides produced by iterating over the
 /// collection and evaluating the body. Returns an empty `Vec` if the
 /// collection is empty or not iterable.
-pub fn eval_for_block(
+pub fn eval_for_block<S: std::hash::BuildHasher>(
     env: &mut Env,
     var_name: &str,
     collection_expr: &Expr,
     body: &[BlockItem],
+    set_rule_defaults: &HashMap<(Arc<str>, Arc<str>), Value, S>,
     config: &EvalConfig,
     sink: &mut DiagnosticSink,
 ) -> Vec<Slide> {
@@ -141,7 +160,7 @@ pub fn eval_for_block(
         env.push_scope(bindings);
 
         // Evaluate the body items in the inner scope.
-        let body_slides = eval_block_items(env, body, config, sink);
+        let body_slides = eval_block_items(env, body, set_rule_defaults, config, sink);
         slides.extend(body_slides);
 
         // Restore outer scope.
@@ -185,15 +204,22 @@ pub fn eval_for_block(
 /// - [`slideforge_syntax::FieldValue::Error`]: skipped (error already in sink).
 /// - [`slideforge_syntax::FieldValue::Shape`]: stored as a block (future story).
 ///
+/// Set-rule defaults (`set_rule_defaults`) are applied after explicit field
+/// evaluation: for each `(slide_type, field_name) -> default_value` entry, if
+/// the slide's type matches and the field has not been explicitly set, the
+/// default value is inserted. Explicit slide fields always win over set-rule
+/// defaults (AC-014 / BC-2.06.001).
+///
 /// # Inline items (I05)
 ///
 /// `slide_node.inline_items` may contain element-scope `@for` and `@if` blocks.
 /// `@for` items are evaluated and their resulting sub-slides are recorded in the
 /// returned `Slide`'s `blocks` field.
 /// `@if` evaluation is deferred to STORY-013.
-pub fn eval_slide_node(
+pub fn eval_slide_node<S: std::hash::BuildHasher>(
     env: &Env,
     slide_node: &SlideNode,
+    set_rule_defaults: &HashMap<(Arc<str>, Arc<str>), Value, S>,
     sink: &mut DiagnosticSink,
 ) -> Option<Slide> {
     let slide_type: Arc<str> = Arc::from(slide_node.kind.value().as_str());
@@ -277,6 +303,25 @@ pub fn eval_slide_node(
         fields.insert(field_name, field_value);
     }
 
+    // ── Apply set-rule defaults (AC-014 / C01) ──────────────────────────────
+    // For each set-rule default keyed by (slide_type, field_name):
+    // - If this slide's type matches (exact match)
+    // - AND the field has not already been explicitly set
+    // THEN insert the default value.
+    //
+    // Explicit slide-level fields always win (they were inserted above).
+    // This loop handles the "missing field gets a default" case.
+    for ((rule_slide_type, rule_field_name), default_value) in set_rule_defaults {
+        if rule_slide_type.as_ref() == slide_type.as_ref()
+            && !fields.contains_key(rule_field_name.as_ref())
+        {
+            fields.insert(
+                rule_field_name.clone(),
+                slideforge_types::FieldValue::Literal(default_value.clone()),
+            );
+        }
+    }
+
     let tags: Vec<Arc<str>> = slide_node
         .tags
         .iter()
@@ -305,10 +350,15 @@ pub fn eval_slide_node(
 ///   (delegated to future `if_eval` module in STORY-013)
 /// - [`BlockItem::Section`] → ignored for now (generates no slides)
 ///
+/// The `set_rule_defaults` map is threaded through to every `eval_slide_node`
+/// call so that set-rule defaults are applied consistently across all slides,
+/// including those generated inside `@for` loops.
+///
 /// Errors are accumulated into `sink` without short-circuiting.
-pub fn eval_block_items(
+pub fn eval_block_items<S: std::hash::BuildHasher>(
     env: &mut Env,
     items: &[BlockItem],
+    set_rule_defaults: &HashMap<(Arc<str>, Arc<str>), Value, S>,
     config: &EvalConfig,
     sink: &mut DiagnosticSink,
 ) -> Vec<Slide> {
@@ -319,7 +369,7 @@ pub fn eval_block_items(
             BlockItem::Slide(spanned_slide) => {
                 let slide_node = spanned_slide.value();
                 // Evaluate the primary slide.
-                if let Some(slide) = eval_slide_node(env, slide_node, sink) {
+                if let Some(slide) = eval_slide_node(env, slide_node, set_rule_defaults, sink) {
                     slides.push(slide);
                 }
                 // I05: Process element-scope inline items (@for/@if) inside
@@ -334,6 +384,7 @@ pub fn eval_block_items(
                                 for_node.binding.value(),
                                 for_node.collection.value(),
                                 &for_node.body,
+                                set_rule_defaults,
                                 config,
                                 sink,
                             );
@@ -357,6 +408,7 @@ pub fn eval_block_items(
                     for_node.binding.value(),
                     for_node.collection.value(),
                     &for_node.body,
+                    set_rule_defaults,
                     config,
                     sink,
                 );
@@ -414,6 +466,11 @@ mod tests {
         EvalConfig::default()
     }
 
+    /// Return an empty set-rule defaults map (no defaults to apply).
+    fn empty_defaults() -> HashMap<(Arc<str>, Arc<str>), Value> {
+        HashMap::new()
+    }
+
     /// Build a minimal SlideNode with no fields and no inline items.
     fn minimal_slide_node(kind: &str) -> SlideNode {
         SlideNode {
@@ -457,7 +514,7 @@ mod tests {
         let body = vec![slide_block_item("content")];
         let collection = int_list_expr(&[1, 2, 3]);
 
-        let slides = eval_for_block(&mut env, "x", &collection, &body, &config, &mut sink);
+        let slides = eval_for_block(&mut env, "x", &collection, &body, &empty_defaults(), &config, &mut sink);
 
         assert_eq!(
             slides.len(),
@@ -501,7 +558,7 @@ mod tests {
         let body = vec![BlockItem::Slide(Spanned::new(slide_node, dummy_span()))];
         let collection = int_list_expr(&[10, 20, 30]);
 
-        let slides = eval_for_block(&mut env, "x", &collection, &body, &config, &mut sink);
+        let slides = eval_for_block(&mut env, "x", &collection, &body, &empty_defaults(), &config, &mut sink);
 
         assert_eq!(slides.len(), 3, "must produce 3 slides");
         // Each slide's title must equal the corresponding element value.
@@ -534,7 +591,7 @@ mod tests {
         let body = vec![slide_block_item("content")];
         let collection = Expr::List(vec![]); // empty list
 
-        let slides = eval_for_block(&mut env, "x", &collection, &body, &config, &mut sink);
+        let slides = eval_for_block(&mut env, "x", &collection, &body, &empty_defaults(), &config, &mut sink);
 
         assert_eq!(
             slides.len(),
@@ -558,7 +615,7 @@ mod tests {
         let body = vec![slide_block_item("content")];
         let collection = int_list_expr(&[1]);
 
-        eval_for_block(&mut env, "item", &collection, &body, &config, &mut sink);
+        eval_for_block(&mut env, "item", &collection, &body, &empty_defaults(), &config, &mut sink);
 
         // After the loop, "item" must not be in scope.
         assert!(
@@ -603,7 +660,7 @@ mod tests {
 
         // @for x in [1, 2]: — body uses outer `prefix`, not x
         let collection = int_list_expr(&[1, 2]);
-        let slides = eval_for_block(&mut env, "x", &collection, &body, &config, &mut sink);
+        let slides = eval_for_block(&mut env, "x", &collection, &body, &empty_defaults(), &config, &mut sink);
 
         assert_eq!(slides.len(), 2, "must produce 2 slides");
         // Both slides must resolve `prefix` from the outer scope.
@@ -644,7 +701,7 @@ mod tests {
 
         // @for x in [7]: — inner x = 7 shadows outer x = 99
         let collection = int_list_expr(&[7]);
-        let slides = eval_for_block(&mut env, "x", &collection, &body, &config, &mut sink);
+        let slides = eval_for_block(&mut env, "x", &collection, &body, &empty_defaults(), &config, &mut sink);
 
         assert_eq!(slides.len(), 1, "must produce 1 slide");
         // Inside the loop, x = 7 (the iteration variable, not the outer x = 99).
@@ -701,7 +758,7 @@ mod tests {
         let collection = int_list_expr(&[1, 2]); // outer = 2 elements
 
         let slides =
-            eval_for_block(&mut env, "x", &collection, &outer_body, &config, &mut sink);
+            eval_for_block(&mut env, "x", &collection, &outer_body, &empty_defaults(), &config, &mut sink);
 
         // 2 outer × 1 middle × 1 inner = 2 slides
         assert_eq!(
@@ -730,7 +787,7 @@ mod tests {
         let body = vec![slide_block_item("content")];
         let collection = int_list_expr(&[1, 2, 3, 4, 5]);
 
-        let slides = eval_for_block(&mut env, "x", &collection, &body, &config, &mut sink);
+        let slides = eval_for_block(&mut env, "x", &collection, &body, &empty_defaults(), &config, &mut sink);
 
         assert_eq!(slides.len(), 5, "must still produce all 5 slides");
         // A warning diagnostic must be in the sink.
@@ -758,7 +815,7 @@ mod tests {
         let collection = Expr::Str("not-a-list".to_string());
         let body = vec![slide_block_item("content")];
 
-        let slides = eval_for_block(&mut env, "x", &collection, &body, &config, &mut sink);
+        let slides = eval_for_block(&mut env, "x", &collection, &body, &empty_defaults(), &config, &mut sink);
 
         assert_eq!(slides.len(), 0, "non-iterable must produce 0 slides");
         assert!(
@@ -779,7 +836,7 @@ mod tests {
         let collection = Expr::Ident("null_var".to_string());
         let body = vec![slide_block_item("content")];
 
-        let slides = eval_for_block(&mut env, "x", &collection, &body, &config, &mut sink);
+        let slides = eval_for_block(&mut env, "x", &collection, &body, &empty_defaults(), &config, &mut sink);
 
         assert_eq!(slides.len(), 0, "null collection must produce 0 slides");
         assert!(!sink.is_empty(), "null collection must push an error");
@@ -797,7 +854,7 @@ mod tests {
         let collection = Expr::Ident("no_such_var".to_string());
         let body = vec![slide_block_item("content")];
 
-        let slides = eval_for_block(&mut env, "x", &collection, &body, &config, &mut sink);
+        let slides = eval_for_block(&mut env, "x", &collection, &body, &empty_defaults(), &config, &mut sink);
 
         assert_eq!(slides.len(), 0, "undefined var must produce 0 slides");
         assert!(
@@ -822,7 +879,7 @@ mod tests {
         let body = vec![slide_block_item("content")];
         let collection = int_list_expr(&[1, 2, 3, 4, 5]); // would generate 5
 
-        let slides = eval_for_block(&mut env, "x", &collection, &body, &config, &mut sink);
+        let slides = eval_for_block(&mut env, "x", &collection, &body, &empty_defaults(), &config, &mut sink);
 
         // Must have stopped at 2 slides.
         assert!(
@@ -842,7 +899,7 @@ mod tests {
         let mut sink = slideforge_syntax::DiagnosticSink::new();
 
         let node = minimal_slide_node("bullets");
-        let slide = eval_slide_node(&env, &node, &mut sink);
+        let slide = eval_slide_node(&env, &node, &empty_defaults(), &mut sink);
 
         let slide = slide.expect("eval_slide_node must return Some for valid input");
         assert_eq!(
@@ -875,7 +932,7 @@ mod tests {
             inline_items: vec![],
         };
 
-        let slide = eval_slide_node(&env, &slide_node, &mut sink)
+        let slide = eval_slide_node(&env, &slide_node, &empty_defaults(), &mut sink)
             .expect("eval_slide_node must return Some for valid input");
         assert_eq!(
             slide.title_str(),
@@ -909,7 +966,7 @@ mod tests {
             inline_items: vec![],
         };
 
-        let slide = eval_slide_node(&env, &slide_node, &mut sink)
+        let slide = eval_slide_node(&env, &slide_node, &empty_defaults(), &mut sink)
             .expect("eval_slide_node must return Some");
         assert_eq!(
             slide.title_str(),
@@ -958,7 +1015,7 @@ mod tests {
         let body = vec![BlockItem::Slide(Spanned::new(slide_node, dummy_span()))];
         let collection = Expr::Ident("data".to_string());
 
-        let slides = eval_for_block(&mut env, "item", &collection, &body, &config, &mut sink);
+        let slides = eval_for_block(&mut env, "item", &collection, &body, &empty_defaults(), &config, &mut sink);
 
         // Map has 2 entries → 2 slides.
         assert_eq!(slides.len(), 2, "@for over 2-entry map must produce 2 slides");
@@ -1014,7 +1071,7 @@ mod tests {
         let body = vec![BlockItem::Slide(Spanned::new(slide_node, dummy_span()))];
         let collection = Expr::Ident("stats".to_string());
 
-        let slides = eval_for_block(&mut env, "item", &collection, &body, &config, &mut sink);
+        let slides = eval_for_block(&mut env, "item", &collection, &body, &empty_defaults(), &config, &mut sink);
 
         assert_eq!(slides.len(), 1, "1-entry map must produce 1 slide");
         assert!(sink.is_empty(), "no errors expected");
@@ -1056,7 +1113,7 @@ mod tests {
         };
         let items = vec![BlockItem::Slide(Spanned::new(slide_with_inline, dummy_span()))];
 
-        let slides = eval_block_items(&mut env, &items, &config, &mut sink);
+        let slides = eval_block_items(&mut env, &items, &empty_defaults(), &config, &mut sink);
 
         // 1 primary title slide + 2 slides from the inline @for = 3 total.
         assert_eq!(
@@ -1078,7 +1135,7 @@ mod tests {
         let config = default_config();
 
         let items = vec![slide_block_item("title")];
-        let slides = eval_block_items(&mut env, &items, &config, &mut sink);
+        let slides = eval_block_items(&mut env, &items, &empty_defaults(), &config, &mut sink);
 
         assert_eq!(slides.len(), 1, "single slide block item must produce 1 slide");
         assert!(sink.is_empty(), "no errors expected");
@@ -1098,7 +1155,7 @@ mod tests {
         );
         let items = vec![BlockItem::For(Spanned::new(for_node, dummy_span()))];
 
-        let slides = eval_block_items(&mut env, &items, &config, &mut sink);
+        let slides = eval_block_items(&mut env, &items, &empty_defaults(), &config, &mut sink);
 
         assert_eq!(
             slides.len(),
@@ -1126,7 +1183,7 @@ mod tests {
             slide_block_item("bullets"),                                 // 1 slide
         ];
 
-        let slides = eval_block_items(&mut env, &items, &config, &mut sink);
+        let slides = eval_block_items(&mut env, &items, &empty_defaults(), &config, &mut sink);
 
         assert_eq!(
             slides.len(),
