@@ -1,13 +1,15 @@
 //! `slideforge-eval` — expression evaluator and variable environment for the
 //! slideforge DSL.
 //!
-//! This crate implements Phase 3 STORY-011 (Expression Evaluator Core) and
-//! STORY-012 (Variable Scoping + `@for` Evaluation). It evaluates
+//! This crate implements Phase 3 STORY-011 (Expression Evaluator Core),
+//! STORY-012 (Variable Scoping + `@for` Evaluation), and STORY-013
+//! (`@if/@elif/@else` Evaluation + `@include` Cycle Detection). It evaluates
 //! [`slideforge_syntax::Expr`] AST nodes in a scoped variable [`Env`],
-//! evaluates `@for` blocks into sequences of [`slideforge_types::Slide`]s,
-//! and aggregates a complete parsed [`slideforge_syntax::DeckNode`] into a
-//! semantic [`slideforge_types::Deck`] IR. All errors are accumulated into a
-//! [`slideforge_syntax::DiagnosticSink`] without short-circuiting.
+//! evaluates `@for` and `@if/@elif/@else` blocks into sequences of
+//! [`slideforge_types::Slide`]s, and aggregates a complete parsed
+//! [`slideforge_syntax::DeckNode`] into a semantic [`slideforge_types::Deck`]
+//! IR. All errors are accumulated into a [`slideforge_syntax::DiagnosticSink`]
+//! without short-circuiting.
 //!
 //! # Pipeline position
 //!
@@ -43,6 +45,8 @@ pub mod eval;
 pub mod expr;
 pub mod filters;
 pub mod for_eval;
+pub mod if_eval;
+pub mod include_cycle;
 
 // ─── Public API re-exports ───────────────────────────────────────────────────
 
@@ -53,3 +57,5 @@ pub use eval::{eval_deck, eval_deck_with_variant, eval_expr_to_string};
 pub use expr::eval_expr;
 pub use filters::{AVAILABLE_FILTERS, apply_filter};
 pub use for_eval::{eval_block_items, eval_for_block, eval_slide_node};
+pub use if_eval::eval_if_chain;
+pub use include_cycle::{IncludeGraph, check_include_cycles};

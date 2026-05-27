@@ -22,6 +22,22 @@ use miette::Diagnostic;
 use slideforge_types::SourceSpan;
 use thiserror::Error;
 
+// ─── Format helpers ──────────────────────────────────────────────────────────
+
+/// Format a cycle path as `"a.sf → b.sf → a.sf"` for error messages.
+///
+/// This is used in the `#[error(...)]` attribute of [`EvalError::IncludeCycle`].
+/// It must be a free function (not a method) because `thiserror`'s `#[error]`
+/// macro can only call free functions in format expressions.
+#[must_use]
+pub fn format_cycle_path(cycle_path: &[Arc<str>]) -> String {
+    cycle_path
+        .iter()
+        .map(|s| s.as_ref())
+        .collect::<Vec<_>>()
+        .join(" → ")
+}
+
 // ─── EvalError ───────────────────────────────────────────────────────────────
 
 /// An error produced by the slideforge expression evaluator.
@@ -187,6 +203,33 @@ pub enum EvalError {
         /// The warning threshold that was exceeded.
         threshold: usize,
         /// Source location of the deck or block that triggered the warning.
+        span: SourceSpan,
+    },
+
+    /// E-PAR-004: A circular `@include` chain was detected in the merged AST.
+    ///
+    /// The evaluator runs a DFS over the include graph (built from `@include`
+    /// metadata preserved in the merged [`DeckNode`]) as a pre-pass before any
+    /// expression evaluation begins (fail-closed: no partial evaluation of a
+    /// cyclic deck).
+    ///
+    /// `cycle_path` contains the canonical file paths that form the cycle, in
+    /// order: `["a.sf", "b.sf", "a.sf"]`. The last element repeats the first
+    /// to make the cycle explicit in the error message.
+    ///
+    /// Format: `Include cycle detected: a.sf → b.sf → a.sf`
+    #[error("Include cycle detected: {}", format_cycle_path(cycle_path))]
+    #[diagnostic(
+        code("E-PAR-004"),
+        help("Remove the circular @include to break the cycle")
+    )]
+    IncludeCycle {
+        /// The ordered list of file paths forming the cycle.
+        ///
+        /// The last element is the same as the first to make the cycle
+        /// explicit: `["a.sf", "b.sf", "a.sf"]`.
+        cycle_path: Vec<Arc<str>>,
+        /// Source location of the `@include` directive that closed the cycle.
         span: SourceSpan,
     },
 }
