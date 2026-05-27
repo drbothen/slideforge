@@ -119,6 +119,7 @@ mod tests {
     // ──────────────────────────────────────────────────────────────────────────
 
     fn all_content_block_variants() -> Vec<ContentBlock> {
+        use crate::specs::AltText;
         vec![
             ContentBlock::Text(TextBlock {
                 inlines: vec![],
@@ -127,29 +128,33 @@ mod tests {
             ContentBlock::Bullets(vec![]),
             ContentBlock::Chart(ChartSpec {
                 chart_type: Arc::from("bar"),
-                alt: Arc::from("chart"),
+                alt: Some(AltText::Provided(Arc::from("chart"))),
+                decorative: false,
                 span: SourceSpan::default(),
             }),
             ContentBlock::Diagram(DiagramSpec {
                 source: Arc::from("graph TD; A-->B"),
-                alt: Arc::from("diagram"),
+                alt: Some(AltText::Provided(Arc::from("diagram"))),
+                decorative: false,
                 span: SourceSpan::default(),
             }),
             ContentBlock::Shape(ShapeSpec {
                 shape_type: Arc::from("rect"),
-                alt: Arc::from("shape"),
+                alt: Some(AltText::Provided(Arc::from("shape"))),
+                decorative: false,
                 span: SourceSpan::default(),
             }),
             ContentBlock::Math(MathNode::display(Arc::from("x^2"), SourceSpan::default())),
             ContentBlock::Image(ImageSpec {
                 path: Arc::from("image.png"),
-                alt: Arc::from("an image"),
+                alt: Some(AltText::Provided(Arc::from("an image"))),
+                decorative: false,
                 span: SourceSpan::default(),
             }),
             ContentBlock::Table(TableSpec {
                 headers: vec![],
                 rows: vec![],
-                alt: Arc::from("table"),
+                alt: Some(AltText::Provided(Arc::from("table"))),
                 span: SourceSpan::default(),
             }),
         ]

@@ -1,6 +1,6 @@
 [package]
 name = "slideforge-validate"
-description = "Component crate for slideforge"
+description = "Compile-time validation for the slideforge DSL — accessibility, overflow, WCAG AA"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,5 +11,11 @@ homepage.workspace = true
 readme = "../../README.md"
 
 [dependencies]
-miette = { workspace = true }
-thiserror = { workspace = true }
+slideforge-types = { workspace = true }
+# slideforge-validate uses slideforge-plugin-api's Diagnostic struct directly,
+# so no separate error enum is needed. thiserror and miette are intentionally
+# absent — errors are expressed via the plugin-api's Diagnostic type.
+slideforge-plugin-api = { workspace = true }
+
+[dev-dependencies]
+insta = { workspace = true }

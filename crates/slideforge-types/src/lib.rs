@@ -62,6 +62,6 @@ pub use precedence::MergePrecedence;
 pub use register::Register;
 pub use slide::{FieldValue, Slide, StringPart};
 pub use span::SourceSpan;
-pub use specs::{ChartSpec, DiagramSpec, ImageSpec, ShapeSpec, TableSpec};
+pub use specs::{AltText, ChartSpec, DiagramSpec, ImageSpec, ShapeSpec, TableSpec};
 pub use type_kind::TypeKind;
 pub use value::Value;
