@@ -33,10 +33,7 @@ pub enum EvalError {
     /// `scope_list` is a comma-separated summary of variables that ARE
     /// defined, to aid the user in finding typos.
     #[error("undefined variable `{name}` at {span}")]
-    #[diagnostic(
-        code("E-EVL-001"),
-        help("Defined variables in scope: {scope_list}")
-    )]
+    #[diagnostic(code("E-EVL-001"), help("Defined variables in scope: {scope_list}"))]
     UndefinedVariable {
         /// The name of the variable that was not found.
         name: Arc<str>,
@@ -65,10 +62,7 @@ pub enum EvalError {
     ///
     /// `available` is a comma-separated list of the registered filter names.
     #[error("unknown filter `{name}` at {span}")]
-    #[diagnostic(
-        code("E-EVL-004"),
-        help("Available filters: {available}")
-    )]
+    #[diagnostic(code("E-EVL-004"), help("Available filters: {available}"))]
     FilterNotFound {
         /// The filter name that was not found.
         name: Arc<str>,
@@ -93,7 +87,9 @@ pub enum EvalError {
     #[error("field `{field}` not found on `{parent_type}` at {span}")]
     #[diagnostic(
         code("E-DAT-005"),
-        help("Check that the field name is spelled correctly and that the variable holds a map value")
+        help(
+            "Check that the field name is spelled correctly and that the variable holds a map value"
+        )
     )]
     FieldAccessFailed {
         /// The field name that was not found.
@@ -124,7 +120,10 @@ mod tests {
             span: test_span(),
         };
         let msg = format!("{e}");
-        assert!(msg.contains("foo"), "error message must mention the variable name");
+        assert!(
+            msg.contains("foo"),
+            "error message must mention the variable name"
+        );
     }
 
     #[test]
@@ -134,7 +133,10 @@ mod tests {
             span: test_span(),
         };
         let msg = format!("{e}");
-        assert!(msg.contains("type mismatch"), "error message must say 'type mismatch'");
+        assert!(
+            msg.contains("type mismatch"),
+            "error message must say 'type mismatch'"
+        );
     }
 
     #[test]
@@ -145,14 +147,20 @@ mod tests {
             span: test_span(),
         };
         let msg = format!("{e}");
-        assert!(msg.contains("bogus"), "error message must mention the filter name");
+        assert!(
+            msg.contains("bogus"),
+            "error message must mention the filter name"
+        );
     }
 
     #[test]
     fn test_bc_2_01_001_eval_error_division_by_zero_constructible() {
         let e = EvalError::DivisionByZero { span: test_span() };
         let msg = format!("{e}");
-        assert!(msg.contains("division by zero"), "error message must mention division by zero");
+        assert!(
+            msg.contains("division by zero"),
+            "error message must mention division by zero"
+        );
     }
 
     #[test]
@@ -163,7 +171,10 @@ mod tests {
             span: test_span(),
         };
         let msg = format!("{e}");
-        assert!(msg.contains("price"), "error message must mention the field name");
+        assert!(
+            msg.contains("price"),
+            "error message must mention the field name"
+        );
     }
 
     #[test]
@@ -176,7 +187,10 @@ mod tests {
             span: test_span(),
         };
         let code = e001.code().unwrap().to_string();
-        assert_eq!(code, "E-EVL-001", "UndefinedVariable must have code E-EVL-001");
+        assert_eq!(
+            code, "E-EVL-001",
+            "UndefinedVariable must have code E-EVL-001"
+        );
 
         let e003 = EvalError::TypeMismatch {
             message: String::new(),
@@ -195,7 +209,10 @@ mod tests {
 
         let e003_div = EvalError::DivisionByZero { span: test_span() };
         let code = e003_div.code().unwrap().to_string();
-        assert_eq!(code, "E-EVL-003", "DivisionByZero must have code E-EVL-003 (type error in expression)");
+        assert_eq!(
+            code, "E-EVL-003",
+            "DivisionByZero must have code E-EVL-003 (type error in expression)"
+        );
 
         let e_dat005 = EvalError::FieldAccessFailed {
             field: Arc::from("x"),
@@ -203,6 +220,9 @@ mod tests {
             span: test_span(),
         };
         let code = e_dat005.code().unwrap().to_string();
-        assert_eq!(code, "E-DAT-005", "FieldAccessFailed must have code E-DAT-005");
+        assert_eq!(
+            code, "E-DAT-005",
+            "FieldAccessFailed must have code E-DAT-005"
+        );
     }
 }

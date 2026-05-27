@@ -150,7 +150,7 @@ fn filter_currency(val: &Value, span: SourceSpan) -> Result<Value, EvalError> {
                 message: format!("currency requires int or float, got {}", other.type_name()),
                 span,
             });
-        }
+        },
     };
     Ok(Value::Str(Arc::from(format_currency(amount).as_str())))
 }
@@ -197,7 +197,7 @@ fn filter_round(val: &Value, args: &[Value], span: SourceSpan) -> Result<Value, 
                 message: format!("round requires a float, got {}", other.type_name()),
                 span,
             });
-        }
+        },
     };
     let raw_decimals = match args.first() {
         Some(Value::Int(n)) => *n,
@@ -206,13 +206,13 @@ fn filter_round(val: &Value, args: &[Value], span: SourceSpan) -> Result<Value, 
                 message: format!("round argument must be an int, got {}", other.type_name()),
                 span,
             });
-        }
+        },
         None => {
             return Err(EvalError::TypeMismatch {
                 message: "round requires one argument (number of decimal places)".to_string(),
                 span,
             });
-        }
+        },
     };
     // Clamp to [0, 18] — powi takes i32 but 18 decimal places is the practical
     // precision limit for f64. The max(0) makes negative decimals behave as 0.
@@ -236,12 +236,13 @@ fn filter_int(val: &Value, span: SourceSpan) -> Result<Value, EvalError> {
     match val {
         Value::Int(n) => Ok(Value::Int(*n)),
         Value::Float(f) => Ok(Value::Int(f.0 as i64)),
-        Value::Str(s) => s.parse::<i64>().map(Value::Int).map_err(|_| {
-            EvalError::TypeMismatch {
+        Value::Str(s) => s
+            .parse::<i64>()
+            .map(Value::Int)
+            .map_err(|_| EvalError::TypeMismatch {
                 message: format!("cannot parse {s:?} as int"),
                 span,
-            }
-        }),
+            }),
         other => Err(EvalError::TypeMismatch {
             message: format!("int requires a string or float, got {}", other.type_name()),
             span,
@@ -330,7 +331,7 @@ fn filter_join(val: &Value, args: &[Value], span: SourceSpan) -> Result<Value, E
                 message: format!("join requires a list, got {}", other.type_name()),
                 span,
             });
-        }
+        },
     };
     let sep = match args.first() {
         Some(Value::Str(s)) => s.as_ref(),
@@ -339,13 +340,13 @@ fn filter_join(val: &Value, args: &[Value], span: SourceSpan) -> Result<Value, E
                 message: format!("join separator must be a string, got {}", other.type_name()),
                 span,
             });
-        }
+        },
         None => {
             return Err(EvalError::TypeMismatch {
                 message: "join requires one argument (separator string)".to_string(),
                 span,
             });
-        }
+        },
     };
     let parts: Vec<String> = items.iter().map(value_to_display_string).collect();
     Ok(Value::Str(Arc::from(parts.join(sep).as_str())))
@@ -365,13 +366,17 @@ fn filter_length(val: &Value, span: SourceSpan) -> Result<Value, EvalError> {
             // exist in memory (max usize ≤ i64::MAX on all supported platforms).
             #[allow(clippy::cast_possible_wrap)]
             Ok(Value::Int(len as i64))
-        }
-        Value::List(v) => {
+        },
+        Value::List(v) =>
+        {
             #[allow(clippy::cast_possible_wrap)]
             Ok(Value::Int(v.len() as i64))
-        }
+        },
         other => Err(EvalError::TypeMismatch {
-            message: format!("length requires a string or list, got {}", other.type_name()),
+            message: format!(
+                "length requires a string or list, got {}",
+                other.type_name()
+            ),
             span,
         }),
     }
@@ -432,11 +437,7 @@ fn filter_contains(val: &Value, args: &[Value], span: &SourceSpan) -> Result<Val
 ///
 /// Returns [`EvalError::TypeMismatch`] if `val` or `args[0]` is not a
 /// [`Value::Str`].
-fn filter_starts_with(
-    val: &Value,
-    args: &[Value],
-    span: &SourceSpan,
-) -> Result<Value, EvalError> {
+fn filter_starts_with(val: &Value, args: &[Value], span: &SourceSpan) -> Result<Value, EvalError> {
     let s = require_str(val, "starts_with", span)?;
     let prefix = require_str_arg(args, 0, "starts_with", span)?;
     Ok(Value::Bool(s.starts_with(prefix.as_ref())))
@@ -605,10 +606,7 @@ mod tests {
 
     #[test]
     fn test_filter_join() {
-        let val = Value::List(vec![
-            Value::Str(Arc::from("a")),
-            Value::Str(Arc::from("b")),
-        ]);
+        let val = Value::List(vec![Value::Str(Arc::from("a")), Value::Str(Arc::from("b"))]);
         let args = vec![Value::Str(Arc::from(", "))];
         let result = apply_filter("join", &val, &args, span()).unwrap();
         assert_eq!(result, Value::Str(Arc::from("a, b")));
@@ -694,10 +692,7 @@ mod tests {
     #[test]
     fn test_filter_replace() {
         let val = Value::Str(Arc::from("foo bar"));
-        let args = vec![
-            Value::Str(Arc::from("bar")),
-            Value::Str(Arc::from("baz")),
-        ];
+        let args = vec![Value::Str(Arc::from("bar")), Value::Str(Arc::from("baz"))];
         let result = apply_filter("replace", &val, &args, span()).unwrap();
         assert_eq!(result, Value::Str(Arc::from("foo baz")));
     }

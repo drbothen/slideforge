@@ -148,7 +148,11 @@ mod tests {
         // Pop inner scope — "b" should disappear; "a" should remain.
         env.pop_scope();
         assert_eq!(env.lookup("b"), None, "b must not be visible after pop");
-        assert_eq!(env.lookup("a"), Some(&Value::Int(1)), "a must persist after pop");
+        assert_eq!(
+            env.lookup("a"),
+            Some(&Value::Int(1)),
+            "a must persist after pop"
+        );
     }
 
     #[test]
@@ -198,7 +202,10 @@ mod tests {
 
         let names = env.all_names();
         let count_a = names.iter().filter(|n| n.as_ref() == "a").count();
-        assert_eq!(count_a, 1, "shadowed variable 'a' must appear only once in all_names");
+        assert_eq!(
+            count_a, 1,
+            "shadowed variable 'a' must appear only once in all_names"
+        );
         assert!(names.contains(&Arc::from("b")));
         assert!(names.contains(&Arc::from("c")));
     }
