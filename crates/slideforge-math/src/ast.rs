@@ -46,7 +46,16 @@ pub enum AccentKind {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum MathNode {
     /// A plain text token (identifier, digit, operator character).
+    ///
+    /// Rendered in math (italic) style by default.
     Text(Arc<str>),
+
+    /// An upright text run from `\text{...}` (roman/plain style, not italic).
+    ///
+    /// Distinct from [`MathNode::Text`] which represents math identifiers
+    /// (rendered italic). `TextRun` content appears in OMML with
+    /// `<m:sty m:val="p"/>` to produce upright/roman rendering.
+    TextRun(Arc<str>),
 
     /// Superscript: `base^{sup}`.
     Superscript {

@@ -78,9 +78,16 @@ fn render_nodes(nodes: &[MathNode], out: &mut String) {
 /// Render a single [`MathNode`] into `out`.
 fn render_node(node: &MathNode, out: &mut String) {
     match node {
-        // ── Plain text / identifiers / digits ──────────────────────────────
+        // ── Plain text / identifiers / digits (italic/math style) ─────────
         MathNode::Text(s) => {
             out.push_str("<m:r><m:t>");
+            out.push_str(&xml_escape(s));
+            out.push_str("</m:t></m:r>");
+        }
+
+        // ── Upright text run from \text{...} (plain/roman style) ──────────
+        MathNode::TextRun(s) => {
+            out.push_str(r#"<m:r><m:rPr><m:sty m:val="p"/></m:rPr><m:t>"#);
             out.push_str(&xml_escape(s));
             out.push_str("</m:t></m:r>");
         }
@@ -227,23 +234,38 @@ fn render_node(node: &MathNode, out: &mut String) {
     }
 }
 
-/// Strip LaTeX delimiter escapes so that OMML receives a bare character.
+/// Strip LaTeX delimiter escapes so that OMML receives a bare Unicode character.
 ///
 /// OMML `<m:begChr>` and `<m:endChr>` attributes expect a raw Unicode character,
 /// not a LaTeX escape sequence. For example `\{` must become `{` and `\.`
-/// (the null delimiter) must become an empty string.
+/// (the null delimiter) must become an empty string. Multi-char delimiters like
+/// `\langle` are mapped to their Unicode equivalents.
 ///
-/// | Input | Output |
-/// |-------|--------|
-/// | `\{`  | `{`    |
-/// | `\}`  | `}`    |
-/// | `\.`  | `""`   |
-/// | `(`   | `(`    |
+/// | Input      | Output |
+/// |------------|--------|
+/// | `\{`       | `{`    |
+/// | `\}`       | `}`    |
+/// | `\.`       | `""`   |
+/// | `\|`       | `‖`    |
+/// | `\langle`  | `⟨`    |
+/// | `\rangle`  | `⟩`    |
+/// | `\lfloor`  | `⌊`    |
+/// | `\rfloor`  | `⌋`    |
+/// | `\lceil`   | `⌈`    |
+/// | `\rceil`   | `⌉`    |
+/// | `(`        | `(`    |
 fn unescape_delimiter(s: &str) -> &str {
     match s {
         "\\{" => "{",
         "\\}" => "}",
         "\\." => "",
+        "\\|" => "‖",
+        "\\langle" => "⟨",
+        "\\rangle" => "⟩",
+        "\\lfloor" => "⌊",
+        "\\rfloor" => "⌋",
+        "\\lceil" => "⌈",
+        "\\rceil" => "⌉",
         other => other,
     }
 }
@@ -678,6 +700,104 @@ mod tests {
         let bytes = render(&ast).expect("render should succeed");
         let xml = String::from_utf8(bytes).expect("valid UTF-8");
         insta::assert_yaml_snapshot!("omml_sqrt_pythagorean", xml);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // FINDING-016 — \sqrt[3]{x} OMML snapshot for nth root
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Snapshot: `\sqrt[3]{x}` inline OMML (nth root with index).
+    #[test]
+    fn test_finding_016_snapshot_sqrt_cube_root() {
+        use crate::parser::parse;
+        let (ast, diags) = parse(
+            r"\sqrt[3]{x}",
+            crate::ast::MathMode::Inline,
+            slideforge_types::SourceSpan::default(),
+        );
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+        let ast = ast.expect("expected successful parse");
+        let bytes = render(&ast).expect("render should succeed");
+        let xml = String::from_utf8(bytes).expect("valid UTF-8");
+        // Must contain <m:rad> with an actual <m:deg> element (not degHide)
+        assert!(xml.contains("<m:rad>"), "expected <m:rad>; got: {xml}");
+        assert!(
+            !xml.contains(r#"m:val="1""#),
+            "nth root must NOT have degHide; got: {xml}"
+        );
+        insta::assert_yaml_snapshot!("omml_sqrt_cube_root", xml);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // FINDING-014 — \text{...} must render upright (plain style), not italic
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// `\text{if}` must render with `<m:sty m:val="p"/>` (upright/plain style).
+    #[test]
+    fn test_finding_014_text_run_renders_upright() {
+        let ast = MathAst::new(
+            MathMode::Inline,
+            vec![MathNode::TextRun(Arc::from("if"))],
+        );
+        let bytes = render(&ast).expect("render should succeed");
+        let xml = String::from_utf8(bytes).expect("valid UTF-8");
+        assert!(
+            xml.contains(r#"<m:sty m:val="p"/>"#),
+            "\\text{{}} must render with upright style m:sty p; got: {xml}"
+        );
+        assert!(xml.contains("if"), "must still contain the text 'if'; got: {xml}");
+    }
+
+    /// Plain `Text` nodes (math identifiers) must NOT carry the upright style.
+    #[test]
+    fn test_finding_014_plain_text_node_is_italic() {
+        let ast = MathAst::new(
+            MathMode::Inline,
+            vec![MathNode::Text(Arc::from("x"))],
+        );
+        let bytes = render(&ast).expect("render should succeed");
+        let xml = String::from_utf8(bytes).expect("valid UTF-8");
+        // Plain text (math variable) must not have the upright style property
+        assert!(
+            !xml.contains(r#"<m:sty m:val="p"/>"#),
+            "plain Text node must not carry upright style; got: {xml}"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // FINDING-012 — OMML snapshot tests for align and cases environments
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Snapshot: `\begin{align} a &= b \\ c &= d \end{align}` display OMML.
+    #[test]
+    fn test_finding_012_snapshot_align_two_rows() {
+        use crate::parser::parse;
+        let (ast, diags) = parse(
+            r"\begin{align} a &= b \\ c &= d \end{align}",
+            crate::ast::MathMode::Display,
+            slideforge_types::SourceSpan::default(),
+        );
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+        let ast = ast.expect("expected successful parse");
+        let bytes = render(&ast).expect("render should succeed");
+        let xml = String::from_utf8(bytes).expect("valid UTF-8");
+        insta::assert_yaml_snapshot!("omml_align_two_rows", xml);
+    }
+
+    /// Snapshot: `\begin{cases} x & y > 0 \\ -x & y \leq 0 \end{cases}` inline OMML.
+    #[test]
+    fn test_finding_012_snapshot_cases_two_entries() {
+        use crate::parser::parse;
+        let (ast, diags) = parse(
+            r"\begin{cases} x & y > 0 \\ -x & y \leq 0 \end{cases}",
+            crate::ast::MathMode::Inline,
+            slideforge_types::SourceSpan::default(),
+        );
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+        let ast = ast.expect("expected successful parse");
+        let bytes = render(&ast).expect("render should succeed");
+        let xml = String::from_utf8(bytes).expect("valid UTF-8");
+        insta::assert_yaml_snapshot!("omml_cases_two_entries", xml);
     }
 
     /// Snapshot: `\alpha + \beta` inline OMML.

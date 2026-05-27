@@ -1,0 +1,5 @@
+---
+source: crates/slideforge-math/src/omml.rs
+expression: xml
+---
+"<m:oMath xmlns:m=\"http://schemas.openxmlformats.org/officeDocument/2006/math\"><m:rad><m:radPr/><m:deg><m:r><m:t>3</m:t></m:r></m:deg><m:e><m:r><m:t>x</m:t></m:r></m:e></m:rad></m:oMath>"

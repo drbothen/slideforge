@@ -95,25 +95,20 @@ impl MathRendererImpl {
         mode: MathMode,
         span: slideforge_types::SourceSpan,
     ) -> Result<MathAst, MathError> {
-        // Step 1: resolve @{var} interpolations
+        // Step 1: resolve @{var} interpolations.
+        // NOTE: we always proceed to parsing even if interpolation produced
+        // diagnostics (FINDING-010: error accumulation must span both phases).
         let (substituted, interp_diags) =
             interpolation::substitute(latex, &self.vars, &span);
 
-        if !interp_diags.is_empty() {
-            let messages: Vec<String> = interp_diags
-                .iter()
-                .map(|d| d.error.to_string())
-                .collect();
-            return Err(MathError::SyntaxError {
-                message: messages.join("; "),
-            });
-        }
-
-        // Step 2: parse LaTeX → MathAst
+        // Step 2: parse LaTeX → MathAst (runs even when interp had errors)
         let (ast_opt, parse_diags) = parser::parse(&substituted, mode, span);
 
-        if !parse_diags.is_empty() {
-            let messages: Vec<String> = parse_diags
+        // Step 3: combine both diagnostic lists
+        let all_diags: Vec<_> = interp_diags.into_iter().chain(parse_diags).collect();
+
+        if !all_diags.is_empty() {
+            let messages: Vec<String> = all_diags
                 .iter()
                 .map(|d| d.error.to_string())
                 .collect();
@@ -270,5 +265,34 @@ mod tests {
         // After substitution the source becomes \sum_{i=0}^{10} which is valid
         let ast = result.expect("parse with vars should succeed");
         assert!(!ast.nodes.is_empty());
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // FINDING-010 — Error accumulation: both interpolation AND parse diagnostics
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// parse() with both an undefined @{var} AND an unsupported \command must
+    /// return an error whose message contains BOTH diagnostics (not just the first).
+    #[test]
+    fn test_finding_010_both_interp_and_parse_errors_returned() {
+        let renderer = MathRendererImpl::new(); // empty vars map
+        let result = renderer.parse(
+            r"@{undefined} + \unknowncmd",
+            MathMode::Inline,
+            SourceSpan::default(),
+        );
+        // Must be an error (both diagnostics)
+        let err = result.expect_err("expected error for undefined var + unsupported command");
+        let msg = err.to_string();
+        // The message should mention the undefined variable
+        assert!(
+            msg.contains("undefined") || msg.contains("missing") || msg.contains("UndefinedVariable"),
+            "error message must reference the undefined variable; got: {msg}"
+        );
+        // The message should also mention the unsupported command
+        assert!(
+            msg.contains("unknowncmd") || msg.contains("E-EXP-006") || msg.contains("unsupported"),
+            "error message must reference the unsupported command; got: {msg}"
+        );
     }
 }

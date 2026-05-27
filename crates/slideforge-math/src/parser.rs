@@ -31,6 +31,13 @@ use slideforge_types::SourceSpan;
 use crate::ast::{AccentKind, MathAst, MathMode, MathNode};
 use crate::error::{MathDiagnostic, MathRendererError};
 
+/// Maximum brace-nesting depth allowed by the parser.
+///
+/// When a group `{...}` would exceed this depth, a [`MathRendererError::ParseError`]
+/// diagnostic is emitted and the group is treated as empty to prevent runaway
+/// recursion or stack exhaustion.
+pub const MAX_DEPTH: usize = 256;
+
 /// Parse a LaTeX source string into a [`MathAst`].
 ///
 /// # Arguments
@@ -72,6 +79,10 @@ struct LatexParser<'a> {
     pos: usize,
     span: SourceSpan,
     diags: Vec<MathDiagnostic>,
+    /// Current brace-nesting depth. Incremented on every `{` and decremented
+    /// on every `}`. When depth would exceed [`MAX_DEPTH`], parsing of the
+    /// group is aborted and a diagnostic is emitted.
+    depth: usize,
 }
 
 impl<'a> LatexParser<'a> {
@@ -81,6 +92,7 @@ impl<'a> LatexParser<'a> {
             pos: 0,
             span,
             diags: Vec::new(),
+            depth: 0,
         }
     }
 
@@ -138,14 +150,58 @@ impl<'a> LatexParser<'a> {
     }
 
     /// Parse a braced group `{...}` and return the inner nodes.
+    ///
+    /// If the current depth would exceed [`MAX_DEPTH`], emit a diagnostic and
+    /// skip to the matching `}` without recursing, preventing stack exhaustion.
     fn parse_group(&mut self) -> Vec<MathNode> {
         // Consume the opening `{`
         self.pos += 1;
+        self.depth += 1;
+
+        if self.depth > MAX_DEPTH {
+            // Emit a depth-exceeded diagnostic.
+            self.diags.push(MathDiagnostic::new(
+                MathRendererError::ParseError {
+                    message: Arc::from(
+                        "brace nesting depth exceeded maximum allowed depth (256); \
+                         group content skipped",
+                    ),
+                    span: self.span.clone(),
+                },
+                self.span.clone(),
+            ));
+            // Skip to the matching `}` at this level without further recursion.
+            // We track our own brace count to find the correct closing brace.
+            let mut open_count = 1usize;
+            while self.pos < self.input.len() {
+                match self.input.as_bytes()[self.pos] {
+                    b'{' => {
+                        open_count += 1;
+                        self.pos += 1;
+                    }
+                    b'}' => {
+                        open_count -= 1;
+                        if open_count == 0 {
+                            self.pos += 1; // consume the closing `}`
+                            break;
+                        }
+                        self.pos += 1;
+                    }
+                    _ => {
+                        self.pos += 1;
+                    }
+                }
+            }
+            self.depth -= 1;
+            return Vec::new();
+        }
+
         let inner = self.parse_until(|p| p.peek_byte() == Some(b'}'));
         // Consume the closing `}` if present
         if self.peek_byte() == Some(b'}') {
             self.pos += 1;
         }
+        self.depth -= 1;
         inner
     }
 
@@ -389,7 +445,27 @@ impl<'a> LatexParser<'a> {
                 self.skip_whitespace();
                 let left_delim = self.consume_delimiter_char();
                 // Parse content until `\right`
+                let pre_inner_pos = self.pos;
                 let inner = self.parse_until(LatexParser::is_at_right);
+                // Detect unmatched \left: if we reached EOF without finding
+                // `\right`, emit a diagnostic.
+                let found_right = self.is_at_right();
+                if !found_right {
+                    // Only emit the diagnostic if we consumed any input while
+                    // searching (i.e., we were actually looking for a \right).
+                    let _ = pre_inner_pos; // suppress unused warning
+                    self.diags.push(MathDiagnostic::new(
+                        MathRendererError::ParseError {
+                            message: Arc::from(
+                                "unmatched \\left delimiter: no corresponding \\right found",
+                            ),
+                            span: self.span.clone(),
+                        },
+                        self.span.clone(),
+                    ));
+                    // Return the inner content as a group rather than a Delimiter
+                    return MathNode::Group(inner);
+                }
                 // Consume `\right` + its delimiter
                 let right_delim = if self.peek_byte() == Some(b'\\') {
                     self.pos += 1;
@@ -443,10 +519,38 @@ impl<'a> LatexParser<'a> {
                 MathNode::Group(Vec::new())
             }
 
-            // ── Text/font commands — flatten to Group ─────────────────────
+            // ── Text/font commands ────────────────────────────────────────
+            // `\text{...}` produces a TextRun (upright/plain style in OMML).
+            // The other font commands (\mathrm, \mathbf, etc.) also produce
+            // upright text — they are all semantically "text in math mode".
             "text" | "mathrm" | "mathbf" | "mathit" | "mathbb" => {
-                let inner = self.parse_single_atom();
-                MathNode::Group(vec![inner])
+                // Parse the braced argument as a flat string of text nodes.
+                // If the argument is a braced group, collect its Text children
+                // into a single TextRun; otherwise wrap the single atom.
+                self.skip_whitespace();
+                let text_content = if self.peek_byte() == Some(b'{') {
+                    // Parse the group and flatten inner Text nodes to a string.
+                    let inner_nodes = self.parse_group();
+                    let mut s = String::new();
+                    for n in &inner_nodes {
+                        match n {
+                            MathNode::Text(t) | MathNode::TextRun(t) => s.push_str(t),
+                            _ => {
+                                // Non-text node inside \text{} — fall back to Group.
+                                return MathNode::Group(inner_nodes);
+                            }
+                        }
+                    }
+                    s
+                } else {
+                    // Single atom (no braces)
+                    let atom = self.parse_single_atom();
+                    return match atom {
+                        MathNode::Text(s) => MathNode::TextRun(s),
+                        other => MathNode::Group(vec![other]),
+                    };
+                };
+                MathNode::TextRun(Arc::from(text_content.as_str()))
             }
 
             // ── Unsupported command ───────────────────────────────────────
@@ -483,20 +587,38 @@ impl<'a> LatexParser<'a> {
             && !r.as_bytes().get(6).is_some_and(u8::is_ascii_alphabetic)
     }
 
-    /// Consume a single delimiter character (e.g. `(`, `)`, `[`, `]`, `\{`, `\}`).
+    /// Consume a single delimiter character or command (e.g. `(`, `)`, `[`, `]`,
+    /// `\{`, `\}`, `\.`, `\|`, `\langle`, `\rangle`, `\lfloor`, `\rfloor`, etc.).
+    ///
+    /// When a `\` is followed by a letter, the full command name is consumed
+    /// (e.g., `\langle` → `"\\langle"`). When followed by a non-letter punctuation
+    /// character, only that one character is consumed (e.g., `\{` → `"\\{"`).
     fn consume_delimiter_char(&mut self) -> Arc<str> {
         self.skip_whitespace();
         match self.peek_byte() {
             Some(b'\\') => {
-                // `\{` or `\}` or `\.`
-                self.pos += 1;
-                let start = self.pos;
-                if let Some(&b) = self.input.as_bytes().get(self.pos)
-                    && (b == b'{' || b == b'}' || b == b'.')
-                {
-                    self.pos += 1;
+                // Mark the start of the `\` so we can return `\cmd` as a unit.
+                let backslash_pos = self.pos;
+                self.pos += 1; // consume `\`
+                match self.input.as_bytes().get(self.pos) {
+                    Some(&b) if b.is_ascii_alphabetic() => {
+                        // Multi-char command: consume all letters (e.g. `langle`).
+                        while let Some(&nb) = self.input.as_bytes().get(self.pos) {
+                            if nb.is_ascii_alphabetic() {
+                                self.pos += 1;
+                            } else {
+                                break;
+                            }
+                        }
+                        Arc::from(&self.input[backslash_pos..self.pos])
+                    }
+                    Some(_) => {
+                        // Single non-alpha char (e.g. `{`, `}`, `.`, `|`).
+                        self.pos += 1;
+                        Arc::from(&self.input[backslash_pos..self.pos])
+                    }
+                    None => Arc::from("\\"),
                 }
-                Arc::from(&self.input[start - 1..self.pos])
             }
             Some(_) => {
                 let ch = self.consume_char().unwrap_or('(');
@@ -927,6 +1049,176 @@ mod tests {
             if let MathNode::Text(s) = n { Some(s.as_ref()) } else { None }
         });
         assert_eq!(first_text, Some("∑"), "expected '∑' as first Text node; got: {ast:?}");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // FINDING-016 — \sqrt[n]{x} parses to Sqrt with index=Some
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// `\sqrt[3]{x}` parses to a Sqrt node with `index = Some(Text("3"))`.
+    #[test]
+    fn test_finding_016_sqrt_with_index() {
+        let (ast, diags) = parse(r"\sqrt[3]{x}", MathMode::Inline, SourceSpan::default());
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+        let ast = ast.expect("expected successful parse");
+        let sqrt_node = ast.nodes.iter().find_map(|n| {
+            if let MathNode::Sqrt { index, radicand } = n {
+                Some((index.clone(), radicand.clone()))
+            } else {
+                None
+            }
+        });
+        assert!(sqrt_node.is_some(), "expected Sqrt node; got: {ast:?}");
+        let (index, _radicand) = sqrt_node.unwrap();
+        assert!(
+            index.is_some(),
+            "expected Sqrt with index=Some for \\sqrt[3]{{x}}; got index=None"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // FINDING-015 — unmatched \left produces a diagnostic, not silent output
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// `\left( x + y` (missing `\right`) must produce a "unmatched \\left" diagnostic.
+    #[test]
+    fn test_finding_015_unmatched_left_emits_diagnostic() {
+        let (_, diags) = parse(
+            r"\left( x + y",
+            MathMode::Inline,
+            SourceSpan::default(),
+        );
+        let has_unmatched = diags.iter().any(|d| {
+            matches!(&d.error, MathRendererError::ParseError { message, .. }
+                if message.contains("unmatched") && message.contains("left"))
+        });
+        assert!(
+            has_unmatched,
+            "expected an 'unmatched \\\\left' ParseError diagnostic; got: {diags:?}"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // FINDING-013 — recursion depth limit: deeply nested braces must produce
+    //               a diagnostic rather than a stack overflow
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Deeply nested `{{{{...}}}}` beyond MAX_DEPTH must produce a diagnostic,
+    /// not a stack overflow or panic.
+    #[test]
+    fn test_finding_013_deep_nesting_produces_diagnostic_not_panic() {
+        // Build 300 levels of nesting — well beyond MAX_DEPTH = 256
+        let deep: String = "{".repeat(300) + "x" + &"}".repeat(300);
+        let (ast, diags) = parse(&deep, MathMode::Inline, SourceSpan::default());
+        // Must not panic (return normally)
+        // Must produce at least one diagnostic OR succeed with partial AST
+        // (the key invariant is: no stack overflow)
+        let _ = (ast, diags); // just reaching here is sufficient
+    }
+
+    /// A 300-level nested expression produces a recursion-depth diagnostic.
+    #[test]
+    fn test_finding_013_deep_nesting_emits_depth_exceeded_diagnostic() {
+        let deep: String = "{".repeat(300) + "x" + &"}".repeat(300);
+        let (_, diags) = parse(&deep, MathMode::Inline, SourceSpan::default());
+        let has_depth_error = diags.iter().any(|d| {
+            matches!(&d.error, MathRendererError::ParseError { message, .. }
+                if message.contains("depth"))
+        });
+        assert!(
+            has_depth_error,
+            "expected a recursion-depth ParseError diagnostic for 300-deep nesting; got: {diags:?}"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // FINDING-012 — align and cases environment parsing tests
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// `\begin{align} a &= b \\ c &= d \end{align}` parses to Align with 2 rows.
+    #[test]
+    fn test_finding_012_parse_align() {
+        let (ast, diags) = parse(
+            r"\begin{align} a &= b \\ c &= d \end{align}",
+            MathMode::Display,
+            SourceSpan::default(),
+        );
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+        let ast = ast.expect("expected successful parse");
+        let align = ast.nodes.iter().find(|n| matches!(n, MathNode::Align(_)));
+        assert!(align.is_some(), "expected Align node; got: {ast:?}");
+        if let Some(MathNode::Align(rows)) = align {
+            assert_eq!(rows.len(), 2, "expected 2 rows in align; got: {}", rows.len());
+        }
+    }
+
+    /// `\begin{cases} x & y > 0 \\ -x & y \leq 0 \end{cases}` parses to Cases.
+    #[test]
+    fn test_finding_012_parse_cases() {
+        let (ast, diags) = parse(
+            r"\begin{cases} x & y > 0 \\ -x & y \leq 0 \end{cases}",
+            MathMode::Inline,
+            SourceSpan::default(),
+        );
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+        let ast = ast.expect("expected successful parse");
+        let cases = ast.nodes.iter().find(|n| matches!(n, MathNode::Cases(_)));
+        assert!(cases.is_some(), "expected Cases node; got: {ast:?}");
+        if let Some(MathNode::Cases(case_list)) = cases {
+            assert_eq!(case_list.len(), 2, "expected 2 cases; got: {}", case_list.len());
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // FINDING-011 — consume_delimiter_char must handle multi-char backslash
+    //               delimiters like \langle, \rangle, \|, \lfloor, etc.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// `\left\langle x \right\rangle` parses to a Delimiter with left=`\langle`
+    /// and right=`\rangle` inner nodes.
+    #[test]
+    fn test_finding_011_langle_rangle_delimiter() {
+        let (ast, diags) = parse(
+            r"\left\langle x \right\rangle",
+            MathMode::Inline,
+            SourceSpan::default(),
+        );
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+        let ast = ast.expect("expected successful parse");
+        let delim = ast.nodes.iter().find_map(|n| {
+            if let MathNode::Delimiter { left, right, .. } = n {
+                Some((left.clone(), right.clone()))
+            } else {
+                None
+            }
+        });
+        assert!(delim.is_some(), "expected Delimiter node; got: {ast:?}");
+        let (left, right) = delim.unwrap();
+        assert_eq!(left.as_ref(), "\\langle", "left delimiter must be \\langle; got: {left}");
+        assert_eq!(right.as_ref(), "\\rangle", "right delimiter must be \\rangle; got: {right}");
+    }
+
+    /// `\left\| x \right\|` parses to a Delimiter with left=`\|` and right=`\|`.
+    #[test]
+    fn test_finding_011_norm_delimiter() {
+        let (ast, diags) = parse(
+            r"\left\| x \right\|",
+            MathMode::Inline,
+            SourceSpan::default(),
+        );
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+        let ast = ast.expect("expected successful parse");
+        let delim = ast.nodes.iter().find_map(|n| {
+            if let MathNode::Delimiter { left, right, .. } = n {
+                Some((left.clone(), right.clone()))
+            } else {
+                None
+            }
+        });
+        assert!(delim.is_some(), "expected Delimiter node; got: {ast:?}");
+        let (left, right) = delim.unwrap();
+        assert_eq!(left.as_ref(), "\\|", "left delimiter must be \\|; got: {left}");
+        assert_eq!(right.as_ref(), "\\|", "right delimiter must be \\|; got: {right}");
     }
 
     // ─────────────────────────────────────────────────────────────────────────
