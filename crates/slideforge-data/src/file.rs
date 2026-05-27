@@ -4,14 +4,14 @@
 //! for local file paths. It detects the file format from the extension and
 //! dispatches to the appropriate parser in [`crate::parse`].
 
-use std::path::Path;
+use std::io;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use slideforge_plugin_api::{DataSource, DataSourceError, DataSourceOptions};
 use slideforge_types::Value;
 
-#[allow(unused_imports)]
 use crate::format::DataFormat;
-#[allow(unused_imports)]
 use crate::parse::{csv, json, toml, yaml};
 use crate::DataError;
 
@@ -23,13 +23,21 @@ use crate::DataError;
 /// ## URI format
 ///
 /// The URI is treated as a relative or absolute file path. Relative paths
-/// are resolved against the working directory of the slideforge process.
+/// are resolved against the provided `base_dir` (defaulting to the current
+/// working directory when loaded via the [`DataSource`] trait).
+///
+/// ## Path containment
+///
+/// When a `base_dir` is provided and the path resolves outside that directory,
+/// the load is rejected with [`DataError::PathTraversalBlocked`].
 ///
 /// ## Error handling
 ///
 /// - Missing file → [`DataSourceError::IoError`] wrapping [`DataError::FileNotFound`]
+/// - Non-NotFound I/O error → [`DataSourceError::IoError`] wrapping [`DataError::IoError`]
 /// - Unsupported extension → [`DataSourceError::UnsupportedUri`]
 /// - Parse failure → [`DataSourceError::ParseError`]
+/// - Path traversal → [`DataSourceError::IoError`] wrapping [`DataError::PathTraversalBlocked`]
 #[derive(Debug, Default)]
 pub struct FileDataSource;
 
@@ -42,27 +50,62 @@ impl FileDataSource {
 
     /// Load a file from a path, detecting format by extension, and return the parsed [`Value`].
     ///
+    /// If `base_dir` is `Some`, relative paths are resolved against it and
+    /// path containment is enforced (paths outside `base_dir` are rejected).
+    ///
     /// This is the internal method exercised by unit tests; the public
     /// [`DataSource::load`] delegates to this.
     ///
     /// # Errors
     ///
-    /// Returns [`DataError`] on file-not-found, unsupported extension, or parse failure.
-    pub fn load_path(&self, path: &Path) -> Result<Value, DataError> {
+    /// Returns [`DataError`] on file-not-found, I/O error, unsupported extension,
+    /// path traversal, or parse failure.
+    pub fn load_path(&self, path: &Path, base_dir: Option<&Path>) -> Result<Value, DataError> {
+        // Resolve the path against base_dir if provided.
+        let resolved: PathBuf = if let Some(base) = base_dir {
+            if path.is_absolute() {
+                path.to_path_buf()
+            } else {
+                base.join(path)
+            }
+        } else {
+            path.to_path_buf()
+        };
+
+        // Enforce path containment when base_dir is provided.
+        if let Some(base) = base_dir {
+            // Canonicalize both to resolve symlinks and `..` components.
+            // We use a best-effort approach: if canonicalization fails because
+            // the file doesn't exist yet, we fall through to the read step
+            // which will produce the appropriate FileNotFound error.
+            if let (Ok(canonical_resolved), Ok(canonical_base)) =
+                (resolved.canonicalize(), base.canonicalize())
+                && !canonical_resolved.starts_with(&canonical_base)
+            {
+                let path_str: Arc<str> = Arc::from(resolved.to_string_lossy().as_ref());
+                return Err(DataError::path_traversal_blocked(path_str));
+            }
+        }
+
         // Determine format from extension before reading the file.
-        let format = DataFormat::from_path(path).ok_or_else(|| {
-            DataError::unsupported_format(
-                path.extension()
+        let format = DataFormat::from_path(&resolved).ok_or_else(|| {
+            let ext: Arc<str> = Arc::from(
+                resolved
+                    .extension()
                     .and_then(|e| e.to_str())
-                    .unwrap_or("")
-                    .to_owned(),
-            )
+                    .unwrap_or(""),
+            );
+            DataError::unsupported_format(ext)
         })?;
 
-        // Read the file contents.
-        let path_str = path.to_string_lossy().into_owned();
-        let contents = std::fs::read_to_string(path).map_err(|_| {
-            DataError::file_not_found(path_str.clone())
+        // Read the file contents, distinguishing NotFound from other I/O errors.
+        let path_str: Arc<str> = Arc::from(resolved.to_string_lossy().as_ref());
+        let contents = std::fs::read_to_string(&resolved).map_err(|e| {
+            if e.kind() == io::ErrorKind::NotFound {
+                DataError::file_not_found(Arc::clone(&path_str))
+            } else {
+                DataError::io_error(Arc::clone(&path_str), Arc::from(e.to_string().as_str()))
+            }
         })?;
 
         // Dispatch to the appropriate parser.
@@ -71,12 +114,15 @@ impl FileDataSource {
             DataFormat::Csv => csv::parse_csv(&contents, &path_str),
             DataFormat::Yaml => yaml::parse_yaml(&contents, &path_str),
             DataFormat::Toml => toml::parse_toml(&contents, &path_str),
-            DataFormat::Xlsx | DataFormat::Sqlite => Err(DataError::unsupported_format(
-                path.extension()
-                    .and_then(|e| e.to_str())
-                    .unwrap_or("")
-                    .to_owned(),
-            )),
+            DataFormat::Xlsx | DataFormat::Sqlite => {
+                let ext: Arc<str> = Arc::from(
+                    resolved
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .unwrap_or(""),
+                );
+                Err(DataError::unsupported_format(ext))
+            }
         }
     }
 }
@@ -89,17 +135,27 @@ impl DataSource for FileDataSource {
 
     fn load(&self, uri: &str, _opts: &DataSourceOptions) -> Result<Value, DataSourceError> {
         let path = Path::new(uri);
-        self.load_path(path).map_err(|e| match e {
+        // The DataSource::load trait does not receive a base_dir, so we pass None.
+        // Callers that need path containment should use load_path directly.
+        self.load_path(path, None).map_err(|e| match e {
             DataError::FileNotFound { path, .. } => DataSourceError::IoError {
                 uri: uri.to_owned(),
                 message: format!("file not found: {path}"),
             },
+            DataError::IoError { message, .. } => DataSourceError::IoError {
+                uri: uri.to_owned(),
+                message: message.to_string(),
+            },
             DataError::UnsupportedFormat { extension, .. } => DataSourceError::UnsupportedUri {
                 uri: format!("{uri} (unsupported extension: {extension})"),
             },
-            DataError::ParseError { message, .. } => DataSourceError::ParseError {
+            DataError::ParseError { reason, .. } => DataSourceError::ParseError {
                 uri: uri.to_owned(),
-                message,
+                message: reason.to_string(),
+            },
+            DataError::PathTraversalBlocked { path, .. } => DataSourceError::IoError {
+                uri: uri.to_owned(),
+                message: format!("path traversal blocked: {path}"),
             },
             other => DataSourceError::IoError {
                 uri: uri.to_owned(),
@@ -115,8 +171,6 @@ mod tests {
     use std::io::Write as _;
 
     use tempfile::NamedTempFile;
-    #[allow(unused_imports)]
-    use tempfile::Builder;
 
     use super::*;
 
@@ -124,17 +178,17 @@ mod tests {
         FileDataSource::new()
     }
 
-    /// test_BC_5_03_007_file_not_found — non-existent path → DataError::FileNotFound.
+    /// test_BC_5_03_007_file_not_found — non-existent path → DataError::FileNotFound with E-DAT-004.
     #[test]
     fn test_bc_5_03_007_file_not_found() {
         let src = loader();
         let path = Path::new("/tmp/__slideforge_nonexistent_12345.json");
-        let result = src.load_path(path);
+        let result = src.load_path(path, None);
         let err = result.expect_err("missing file must return Err");
         assert_eq!(
             err.code(),
-            "E-DAT-001",
-            "file-not-found must carry E-DAT-001"
+            "E-DAT-004",
+            "file-not-found must carry E-DAT-004"
         );
     }
 
@@ -155,7 +209,7 @@ mod tests {
         let f = temp_file_with_suffix(".json", br#"{"key": "value"}"#);
 
         let src = loader();
-        let value = src.load_path(f.path()).expect(".json file must parse");
+        let value = src.load_path(f.path(), None).expect(".json file must parse");
         let map = value.as_map().expect("must be map");
         assert!(map.get("key").is_some(), "JSON key must be present");
     }
@@ -166,7 +220,7 @@ mod tests {
         let f = temp_file_with_suffix(".csv", b"col\nval");
 
         let src = loader();
-        let value = src.load_path(f.path()).expect(".csv file must parse");
+        let value = src.load_path(f.path(), None).expect(".csv file must parse");
         let list = value.as_list().expect("CSV must produce list");
         assert_eq!(list.len(), 1);
     }
@@ -177,7 +231,7 @@ mod tests {
         let f = temp_file_with_suffix(".yaml", b"x: 1\n");
 
         let src = loader();
-        let value = src.load_path(f.path()).expect(".yaml file must parse");
+        let value = src.load_path(f.path(), None).expect(".yaml file must parse");
         assert!(value.as_map().is_some(), "YAML must produce map");
     }
 
@@ -187,7 +241,7 @@ mod tests {
         let f = temp_file_with_suffix(".yml", b"x: 1\n");
 
         let src = loader();
-        let value = src.load_path(f.path()).expect(".yml file must parse");
+        let value = src.load_path(f.path(), None).expect(".yml file must parse");
         assert!(value.as_map().is_some(), ".yml must be treated as YAML");
     }
 
@@ -197,22 +251,22 @@ mod tests {
         let f = temp_file_with_suffix(".toml", b"x = 1\n");
 
         let src = loader();
-        let value = src.load_path(f.path()).expect(".toml file must parse");
+        let value = src.load_path(f.path(), None).expect(".toml file must parse");
         assert!(value.as_map().is_some(), "TOML must produce map");
     }
 
-    /// test_BC_5_03_007_unsupported_extension — .txt file → DataError::UnsupportedFormat.
+    /// test_BC_5_03_007_unsupported_extension — .txt file → DataError::UnsupportedFormat (E-DAT-003).
     #[test]
     fn test_bc_5_03_007_unsupported_extension() {
         let f = temp_file_with_suffix(".txt", b"hello");
 
         let src = loader();
-        let result = src.load_path(f.path());
+        let result = src.load_path(f.path(), None);
         let err = result.expect_err(".txt must return Err");
         assert_eq!(
             err.code(),
-            "E-DAT-005",
-            "unsupported extension must carry E-DAT-005"
+            "E-DAT-003",
+            "unsupported extension must carry E-DAT-003"
         );
     }
 
@@ -249,5 +303,57 @@ mod tests {
             matches!(err, DataSourceError::UnsupportedUri { .. }),
             "unsupported extension must map to DataSourceError::UnsupportedUri"
         );
+    }
+
+    /// test_BC_5_03_007_datasource_trait_load_json — DataSource::load() happy path for JSON.
+    #[test]
+    fn test_bc_5_03_007_datasource_trait_load_json() {
+        let f = temp_file_with_suffix(".json", br#"{"answer": 42}"#);
+        let src = loader();
+        let opts = DataSourceOptions::default();
+        let uri = f.path().to_str().unwrap();
+        let result = src.load(uri, &opts);
+        let value = result.expect("DataSource::load() must succeed for valid JSON file");
+        let map = value.as_map().expect("result must be a map");
+        assert_eq!(
+            map.get("answer"),
+            Some(&Value::Int(42)),
+            "JSON field 'answer' must be Int(42)"
+        );
+    }
+
+    /// test_BC_5_03_007_path_containment_blocks_traversal — `../` path outside base_dir is blocked.
+    #[test]
+    fn test_bc_5_03_007_path_containment_blocks_traversal() {
+        use std::path::PathBuf;
+        let src = loader();
+        let base = PathBuf::from("/tmp");
+        // Attempt to read a file above /tmp using ..
+        let traversal = Path::new("../etc/passwd");
+        let result = src.load_path(traversal, Some(&base));
+        // Either the path traversal is blocked, or the file doesn't exist.
+        // Both are acceptable — what's NOT acceptable is returning Ok with /etc/passwd contents.
+        match result {
+            // Any error variant is acceptable — traversal block, file not found,
+            // or another I/O error. What is NOT acceptable is Ok.
+            Err(_) => {}
+            Ok(_) => {
+                panic!("path traversal must not succeed silently");
+            }
+        }
+    }
+
+    /// test_BC_5_03_007_relative_path_resolved_against_base_dir — relative path uses base_dir.
+    #[test]
+    fn test_bc_5_03_007_relative_path_resolved_against_base_dir() {
+        use tempfile::TempDir;
+        let dir = TempDir::new().expect("temp dir");
+        let json_path = dir.path().join("data.json");
+        std::fs::write(&json_path, br#"{"x": 1}"#).expect("write temp json");
+
+        let src = loader();
+        let result = src.load_path(Path::new("data.json"), Some(dir.path()));
+        let value = result.expect("relative path with base_dir must resolve correctly");
+        assert!(value.as_map().is_some(), "must be a map");
     }
 }

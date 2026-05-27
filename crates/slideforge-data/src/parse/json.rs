@@ -9,6 +9,7 @@ use std::sync::Arc;
 use ordered_float::OrderedFloat;
 use slideforge_types::{OrderedMap, Value};
 
+use crate::format::DataFormat;
 use crate::DataError;
 
 /// Convert a [`serde_json::Value`] into a [`slideforge_types::Value`].
@@ -49,18 +50,30 @@ fn json_value_to_sf(v: serde_json::Value) -> Value {
 /// input is not valid JSON.
 pub fn parse_json(source: &str, path: &str) -> Result<Value, DataError> {
     let raw: serde_json::Value = serde_json::from_str(source)
-        .map_err(|e| DataError::parse_error(path, e.to_string()))?;
+        .map_err(|e| DataError::parse_error(path, DataFormat::Json, e.to_string()))?;
     Ok(json_value_to_sf(raw))
 }
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
+    use insta::assert_debug_snapshot;
     #[allow(unused_imports)]
     use slideforge_types::OrderedMap;
     use std::sync::Arc;
 
     use super::*;
+
+    /// test_BC_5_03_003_snapshot_json_fixture — snapshot test for JSON parsing output (FINDING-008).
+    ///
+    /// Verifies that the JSON parser produces a stable, deterministic debug representation
+    /// for a known fixture. Snapshot is checked via `cargo insta test`.
+    #[test]
+    fn test_bc_5_03_003_snapshot_json_fixture() {
+        let src = r#"{"name": "Alice", "score": 42, "active": true, "tags": ["rust", "data"]}"#;
+        let value = parse_json(src, "fixture.json").expect("fixture must parse");
+        assert_debug_snapshot!("json_fixture", value);
+    }
 
     /// test_BC_5_03_003_parse_json_happy_path — complete JSON object with all supported types.
     ///

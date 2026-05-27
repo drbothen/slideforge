@@ -19,6 +19,7 @@ use std::sync::Arc;
 use ordered_float::OrderedFloat;
 use slideforge_types::{OrderedMap, Value};
 
+use crate::format::DataFormat;
 use crate::DataError;
 
 /// Convert a [`serde_yaml_ng::Value`] into a [`slideforge_types::Value`].
@@ -44,16 +45,24 @@ fn yaml_value_to_sf(v: serde_yaml_ng::Value) -> Value {
         serde_yaml_ng::Value::Mapping(mapping) => {
             let mut map = OrderedMap::new();
             for (k, v) in mapping {
-                // Keys are expected to be strings; convert others to string
+                // Keys are expected to be strings; convert others to their natural
+                // string representation without YAML document markers.
                 let key = match k {
                     serde_yaml_ng::Value::String(s) => Arc::from(s.as_str()),
-                    other => Arc::from(
-                        serde_yaml_ng::to_string(&other)
-                            .unwrap_or_default()
+                    serde_yaml_ng::Value::Number(n) => Arc::from(n.to_string().as_str()),
+                    serde_yaml_ng::Value::Bool(b) => Arc::from(if b { "true" } else { "false" }),
+                    serde_yaml_ng::Value::Null => Arc::from("null"),
+                    other => {
+                        // For sequences, mappings, or tagged values: serialize and
+                        // strip the YAML document-start marker (`---\n`) if present.
+                        let raw = serde_yaml_ng::to_string(&other).unwrap_or_default();
+                        let stripped = raw
+                            .strip_prefix("---\n")
+                            .unwrap_or(raw.as_str())
                             .trim()
-                            .to_string()
-                            .as_str(),
-                    ),
+                            .to_owned();
+                        Arc::from(stripped.as_str())
+                    }
                 };
                 map.insert(key, yaml_value_to_sf(v));
             }
@@ -74,7 +83,7 @@ fn yaml_value_to_sf(v: serde_yaml_ng::Value) -> Value {
 /// input is not valid YAML.
 pub fn parse_yaml(source: &str, path: &str) -> Result<Value, DataError> {
     let raw: serde_yaml_ng::Value = serde_yaml_ng::from_str(source)
-        .map_err(|e| DataError::parse_error(path, e.to_string()))?;
+        .map_err(|e| DataError::parse_error(path, DataFormat::Yaml, e.to_string()))?;
     Ok(yaml_value_to_sf(raw))
 }
 
@@ -204,5 +213,33 @@ mod tests {
         let result = parse_yaml(src, "bad.yaml");
         let err = result.expect_err("malformed YAML must return Err");
         assert_eq!(err.code(), "E-DAT-003");
+    }
+
+    /// test_BC_5_03_005_parse_yaml_non_string_keys — integer and bool keys are converted to
+    /// string without a `---\n` prefix (FINDING-013).
+    #[test]
+    fn test_bc_5_03_005_parse_yaml_non_string_keys() {
+        // YAML allows integer and boolean mapping keys
+        let src = "? 1\n: one\n? true\n: yes_value";
+        let value = parse_yaml(src, "test.yaml").expect("must parse");
+        let map = value.as_map().expect("must be map");
+
+        // Integer key 1 → "1" (no "---\n" prefix)
+        let key_1 = map.get("1");
+        assert!(key_1.is_some(), "integer key 1 must be accessible as \"1\"");
+        assert_eq!(
+            key_1,
+            Some(&Value::Str(Arc::from("one"))),
+            "value under integer key 1 must be \"one\""
+        );
+
+        // Bool key true → "true"
+        let key_true = map.get("true");
+        assert!(key_true.is_some(), "bool key true must be accessible as \"true\"");
+        assert_eq!(
+            key_true,
+            Some(&Value::Str(Arc::from("yes_value"))),
+            "value under bool key true must be \"yes_value\""
+        );
     }
 }

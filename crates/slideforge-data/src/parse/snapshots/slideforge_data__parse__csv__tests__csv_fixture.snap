@@ -1,0 +1,38 @@
+---
+source: crates/slideforge-data/src/parse/csv.rs
+expression: value
+---
+List(
+    [
+        Map(
+            OrderedMap(
+                {
+                    "product": Str(
+                        "Widget",
+                    ),
+                    "quantity": Str(
+                        "10",
+                    ),
+                    "price": Str(
+                        "9.99",
+                    ),
+                },
+            ),
+        ),
+        Map(
+            OrderedMap(
+                {
+                    "product": Str(
+                        "Gadget",
+                    ),
+                    "quantity": Str(
+                        "5",
+                    ),
+                    "price": Str(
+                        "24.95",
+                    ),
+                },
+            ),
+        ),
+    ],
+)

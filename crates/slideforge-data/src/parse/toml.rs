@@ -9,6 +9,7 @@ use std::sync::Arc;
 use ordered_float::OrderedFloat;
 use slideforge_types::{OrderedMap, Value};
 
+use crate::format::DataFormat;
 use crate::DataError;
 
 /// Convert a [`toml::Value`] into a [`slideforge_types::Value`].
@@ -44,7 +45,7 @@ fn toml_value_to_sf(v: toml::Value) -> Value {
 /// input is not valid TOML.
 pub fn parse_toml(source: &str, path: &str) -> Result<Value, DataError> {
     let raw: toml::Value = toml::from_str(source)
-        .map_err(|e| DataError::parse_error(path, e.to_string()))?;
+        .map_err(|e| DataError::parse_error(path, DataFormat::Toml, e.to_string()))?;
     Ok(toml_value_to_sf(raw))
 }
 
