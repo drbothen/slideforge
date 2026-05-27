@@ -30,10 +30,14 @@ fn yaml_value_to_sf(v: serde_yaml_ng::Value) -> Value {
         serde_yaml_ng::Value::Number(n) => {
             if let Some(i) = n.as_i64() {
                 Value::Int(i)
+            } else if n.as_u64().is_some() {
+                // u64 values that overflow i64 (e.g. 9999999999999999999) must be
+                // preserved as strings — not silently rounded via f64 (FINDING-001).
+                Value::Str(Arc::from(n.to_string().as_str()))
             } else if let Some(f) = n.as_f64() {
                 Value::Float(OrderedFloat(f))
             } else {
-                // Fallback: render as string (e.g. u64 overflow)
+                // Fallback: render as string (e.g. special float representations)
                 Value::Str(Arc::from(n.to_string().as_str()))
             }
         }
@@ -265,6 +269,50 @@ mod tests {
         let result = parse_yaml(src, "bad.yaml");
         let err = result.expect_err("malformed YAML must return Err");
         assert_eq!(err.code(), "E-DAT-003");
+    }
+
+    /// test_bc_5_03_005_parse_yaml_large_u64_stays_str — u64 value outside i64 range must become
+    /// Value::Str, not a lossy Value::Float (FINDING-001).
+    ///
+    /// A value like `9999999999999999999` cannot fit in i64 (max ~9.2e18) and must not be
+    /// silently rounded to a float. The JSON parser has the same guard; YAML must match.
+    #[test]
+    fn test_bc_5_03_005_parse_yaml_large_u64_stays_str() {
+        // 9999999999999999999 > i64::MAX (9223372036854775807) but fits in u64
+        let src = "big: 9999999999999999999";
+        let value = parse_yaml(src, "test.yaml").expect("must parse");
+        let map = value.as_map().expect("must be map");
+        let big = map.get("big").expect("big field must be present");
+        assert_eq!(
+            big,
+            &Value::Str(Arc::from("9999999999999999999")),
+            "u64-range integer outside i64 range must become Value::Str to preserve precision (FINDING-001)"
+        );
+        // Must NOT be a Float (which would lose precision)
+        assert!(
+            big.as_float().is_none(),
+            "large u64 must NOT become Value::Float (precision loss)"
+        );
+    }
+
+    /// test_bc_5_03_005_parse_yaml_snapshot — representative YAML fixture snapshot test.
+    ///
+    /// Covers map, list, int, float, bool, string, and null in one fixture to catch
+    /// any regression in the `yaml_value_to_sf` conversion.
+    #[test]
+    fn test_bc_5_03_005_parse_yaml_snapshot() {
+        let src = r#"
+title: "Q1 Report"
+slides: 12
+active: true
+ratio: 1.78
+tags:
+  - revenue
+  - growth
+meta: null
+"#;
+        let value = parse_yaml(src, "fixture.yaml").expect("must parse");
+        insta::assert_debug_snapshot!(value);
     }
 
     /// test_BC_5_03_005_parse_yaml_non_string_keys — integer and bool keys are converted to

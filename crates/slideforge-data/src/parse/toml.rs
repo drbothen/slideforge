@@ -129,6 +129,27 @@ score = 2.5
         assert_eq!(err.code(), "E-DAT-003");
     }
 
+    /// test_bc_5_03_006_parse_toml_snapshot — representative TOML fixture snapshot test.
+    ///
+    /// Covers table, array, int, float, bool, string, and datetime in one fixture to catch
+    /// any regression in the `toml_value_to_sf` conversion.
+    #[test]
+    fn test_bc_5_03_006_parse_toml_snapshot() {
+        let src = r#"
+title = "Q1 Report"
+slides = 12
+active = true
+ratio = 1.78
+tags = ["revenue", "growth"]
+created = 1979-05-27T07:32:00Z
+
+[meta]
+author = "Alice"
+"#;
+        let value = parse_toml(src, "fixture.toml").expect("must parse");
+        insta::assert_debug_snapshot!(value);
+    }
+
     /// test_BC_5_03_006_parse_toml_flat_table — flat key-value pairs without sections.
     #[test]
     fn test_bc_5_03_006_parse_toml_flat_table() {
