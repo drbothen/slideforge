@@ -258,7 +258,7 @@ fn unescape_delimiter(s: &str) -> &str {
     match s {
         "\\{" => "{",
         "\\}" => "}",
-        "\\." => "",
+        "\\." | "." => "", // null delimiter: both \left. and bare . map to empty
         "\\|" => "‖",
         "\\langle" => "⟨",
         "\\rangle" => "⟩",
@@ -579,6 +579,29 @@ mod tests {
         assert!(
             xml.contains(r#"m:val="""#),
             "expected empty m:val for null delimiter; got: {xml}"
+        );
+    }
+
+    /// Round-trip: `\left. x \right|` parsed then rendered — null delimiter
+    /// must produce `m:val=""` (not `m:val="."`).
+    #[test]
+    fn test_finding_100_null_delimiter_roundtrip() {
+        use crate::parser;
+        use slideforge_types::SourceSpan;
+
+        let span = SourceSpan::new(Arc::from("test.sf"), 1, 1, 0);
+        let (ast, diags) = parser::parse(r"\left. x \right|", MathMode::Inline, span);
+        assert!(diags.is_empty(), "expected no diagnostics: {diags:?}");
+        let ast = ast.expect("parser must return Some for valid input");
+        let bytes = render(&ast).expect("render should succeed");
+        let xml = String::from_utf8(bytes).expect("valid UTF-8");
+        assert!(
+            xml.contains(r#"m:val="""#),
+            "null delimiter \\left. must produce empty m:val; got: {xml}"
+        );
+        assert!(
+            xml.contains(r#"m:val="|""#),
+            "\\right| must produce m:val=\"|\"; got: {xml}"
         );
     }
 
