@@ -14,8 +14,8 @@ use std::fmt::Write as _;
 use std::sync::Arc;
 
 use indexmap::IndexMap;
-use slideforge_syntax::{DeckNode, DiagnosticSink, Expr, FieldValue, SetRuleValue, TemplateChunk};
 use slideforge_syntax::error::ParseSeverity;
+use slideforge_syntax::{DeckNode, DiagnosticSink, Expr, FieldValue, SetRuleValue, TemplateChunk};
 use slideforge_types::{Deck, DeckMetadata, OrderedMap, SourceSpan, Value};
 
 use crate::config::EvalConfig;
@@ -142,7 +142,11 @@ pub fn eval_deck_with_variant(
     for vars_block in &deck_node.vars {
         for (name_spanned, value_spanned) in &vars_block.entries {
             let var_name: Arc<str> = Arc::from(name_spanned.value().as_str());
-            let value = eval_field_value_to_value(value_spanned.value(), &Env::new(deck_vars.clone()), sink);
+            let value = eval_field_value_to_value(
+                value_spanned.value(),
+                &Env::new(deck_vars.clone()),
+                sink,
+            );
             if let Some(v) = value {
                 deck_vars.insert(var_name, v);
             }
@@ -172,11 +176,11 @@ pub fn eval_deck_with_variant(
     // ── Step 3: Apply active variant vars (C02) ──
     // Variant vars override deck-level vars (11-level precedence chain).
     if let Some(variant_name) = active_variant {
-        match deck_node.variants.as_ref().and_then(|vb| {
-            vb.variants
-                .iter()
-                .find(|v| v.name.value() == variant_name)
-        }) {
+        match deck_node
+            .variants
+            .as_ref()
+            .and_then(|vb| vb.variants.iter().find(|v| v.name.value() == variant_name))
+        {
             Some(variant) => {
                 // Evaluate the variant's vars and push them as an inner scope.
                 let mut variant_vars: IndexMap<Arc<str>, Value> = IndexMap::new();
@@ -231,7 +235,10 @@ pub fn eval_deck_with_variant(
     }
 
     // ── Step 6: Build deck metadata ──
-    let lang = deck_node.lang.as_ref().map(|l| Arc::from(l.value().as_str()));
+    let lang = deck_node
+        .lang
+        .as_ref()
+        .map(|l| Arc::from(l.value().as_str()));
     let title = None; // Title is not present in DeckNode (comes from a slide); leave None.
 
     let metadata = DeckMetadata {
@@ -271,13 +278,11 @@ fn eval_field_value_to_value(
             for chunk in chunks {
                 match chunk {
                     TemplateChunk::Literal(s) => result.push_str(s),
-                    TemplateChunk::Expr(expr) => {
-                        match eval_expr_to_string(env, expr, sink) {
-                            Some(s) => result.push_str(s.as_ref()),
-                            None => {
-                                had_error = true;
-                            },
-                        }
+                    TemplateChunk::Expr(expr) => match eval_expr_to_string(env, expr, sink) {
+                        Some(s) => result.push_str(s.as_ref()),
+                        None => {
+                            had_error = true;
+                        },
                     },
                     TemplateChunk::MathInline(_)
                     | TemplateChunk::MathDisplay(_)
@@ -286,7 +291,11 @@ fn eval_field_value_to_value(
                     },
                 }
             }
-            if had_error { None } else { Some(Value::Str(Arc::from(result.as_str()))) }
+            if had_error {
+                None
+            } else {
+                Some(Value::Str(Arc::from(result.as_str())))
+            }
         },
         FieldValue::Num(n) => Some(Value::Int(*n)),
         FieldValue::Float(f) => Some(Value::Float(*f)),
@@ -366,7 +375,11 @@ fn eval_set_rule_value(
                     },
                 }
             }
-            if had_error { None } else { Some(Value::Str(Arc::from(result.as_str()))) }
+            if had_error {
+                None
+            } else {
+                Some(Value::Str(Arc::from(result.as_str())))
+            }
         },
         SetRuleValue::Num(n) => Some(Value::Int(*n)),
         SetRuleValue::Float(f) => Some(Value::Float(*f)),
@@ -406,11 +419,11 @@ mod tests {
 
     use indexmap::IndexMap;
     use ordered_float::OrderedFloat;
+    use slideforge_syntax::span::Span;
     use slideforge_syntax::{
         BlockItem, DeckNode, DiagnosticSink, Expr, FieldNode, FieldValue, ForNode, SlideNode,
         Spanned, TemplateChunk, VarsBlock,
     };
-    use slideforge_syntax::span::Span;
     use slideforge_types::Value;
 
     use super::*;
@@ -449,7 +462,11 @@ mod tests {
     }
 
     #[allow(dead_code)]
-    fn deck_with_var_and_slide(var_name: &str, var_value: FieldValue, slide_kind: &str) -> DeckNode {
+    fn deck_with_var_and_slide(
+        var_name: &str,
+        var_value: FieldValue,
+        slide_kind: &str,
+    ) -> DeckNode {
         let vars_block = VarsBlock {
             entries: vec![(
                 Spanned::new(var_name.to_string(), dummy_span()),
@@ -950,7 +967,10 @@ mod tests {
         let mut sink = DiagnosticSink::new();
 
         let deck = eval_deck(&deck_node, &config, &mut sink);
-        assert!(deck.is_some(), "eval_deck must return Some when set-rules are present");
+        assert!(
+            deck.is_some(),
+            "eval_deck must return Some when set-rules are present"
+        );
         assert!(sink.is_empty(), "no errors expected for valid set-rule");
 
         // AC-014: the set-rule default MUST be present in the slide's fields.
@@ -1026,7 +1046,10 @@ mod tests {
         // must not overwrite it.
         let slide = &deck.slides[0];
         let footer = slide.fields.get("footer");
-        assert!(footer.is_some(), "slide must have a footer field after eval");
+        assert!(
+            footer.is_some(),
+            "slide must have a footer field after eval"
+        );
         match footer {
             Some(slideforge_types::FieldValue::Literal(Value::Str(s))) => {
                 assert_eq!(
@@ -1084,7 +1107,10 @@ mod tests {
 
         // eval_deck must succeed — brand.* refs are preserved, not failed.
         let deck = eval_deck(&deck_node, &config, &mut sink);
-        assert!(deck.is_some(), "eval_deck must return Some for brand-ref set-rule");
+        assert!(
+            deck.is_some(),
+            "eval_deck must return Some for brand-ref set-rule"
+        );
         // No error should be pushed for `brand.*` references in set-rules
         // (they are preserved as placeholders, not resolved at eval time).
         assert!(
@@ -1111,9 +1137,7 @@ mod tests {
                     "brand-ref placeholder must be '__brand_ref:footer__'; got: {s}"
                 );
             },
-            other => panic!(
-                "footer must be Literal(Str('__brand_ref:footer__')); got: {other:?}"
-            ),
+            other => panic!("footer must be Literal(Str('__brand_ref:footer__')); got: {other:?}"),
         }
     }
 
@@ -1187,7 +1211,11 @@ mod tests {
         // Evaluate with active variant "exec".
         let deck = eval_deck_with_variant(&deck_node, &config, Some("exec"), &mut sink);
         let deck = deck.expect("eval_deck_with_variant must return Some");
-        assert!(sink.is_empty(), "no errors expected; got: {:?}", sink.errors());
+        assert!(
+            sink.is_empty(),
+            "no errors expected; got: {:?}",
+            sink.errors()
+        );
 
         // With variant "exec", {{ color }} should resolve to "red" (not "blue").
         assert_eq!(
@@ -1298,8 +1326,8 @@ mod tests {
     /// compiler rejects any others (structural invariant, not runtime check).
     #[test]
     fn test_c03_block_item_has_no_reserved_keyword_variants() {
-        use slideforge_syntax::{BlockItem, IfNode, SectionNode, SlideNode, Spanned};
         use slideforge_syntax::span::Span;
+        use slideforge_syntax::{BlockItem, IfNode, SectionNode, SlideNode, Spanned};
 
         let span = Span::new(0, 0, 0);
 
@@ -1307,7 +1335,12 @@ mod tests {
         // variant, the exhaustive match in eval_block_items would fail to compile.
         let variants: Vec<BlockItem> = vec![
             BlockItem::Slide(Spanned::new(
-                SlideNode { kind: Spanned::new("title".to_string(), span), tags: vec![], fields: vec![], inline_items: vec![] },
+                SlideNode {
+                    kind: Spanned::new("title".to_string(), span),
+                    tags: vec![],
+                    fields: vec![],
+                    inline_items: vec![],
+                },
                 span,
             )),
             BlockItem::For(Spanned::new(
@@ -1328,13 +1361,20 @@ mod tests {
                 span,
             )),
             BlockItem::Section(Spanned::new(
-                SectionNode { kind: Spanned::new("intro".to_string(), span), fields: vec![] },
+                SectionNode {
+                    kind: Spanned::new("intro".to_string(), span),
+                    fields: vec![],
+                },
                 span,
             )),
         ];
 
         // All 4 valid variants are constructible; no 5th "While" or "Fn" variant exists.
-        assert_eq!(variants.len(), 4, "BlockItem must have exactly 4 variants (no While/Fn)");
+        assert_eq!(
+            variants.len(),
+            4,
+            "BlockItem must have exactly 4 variants (no While/Fn)"
+        );
     }
 
     // ─── F-P2-003: deck-level slide cap ──────────────────────────────────────
@@ -1351,10 +1391,7 @@ mod tests {
         // Combined: 4 slides. max_total_slides = 3 → must error + truncate.
         let for_node_a = ForNode {
             binding: Spanned::new("x".to_string(), dummy_span()),
-            collection: Spanned::new(
-                Expr::List(vec![Expr::Num(1), Expr::Num(2)]),
-                dummy_span(),
-            ),
+            collection: Spanned::new(Expr::List(vec![Expr::Num(1), Expr::Num(2)]), dummy_span()),
             body: vec![BlockItem::Slide(Spanned::new(
                 SlideNode {
                     kind: Spanned::new("content".to_string(), dummy_span()),
@@ -1367,10 +1404,7 @@ mod tests {
         };
         let for_node_b = ForNode {
             binding: Spanned::new("x".to_string(), dummy_span()),
-            collection: Spanned::new(
-                Expr::List(vec![Expr::Num(3), Expr::Num(4)]),
-                dummy_span(),
-            ),
+            collection: Spanned::new(Expr::List(vec![Expr::Num(3), Expr::Num(4)]), dummy_span()),
             body: vec![BlockItem::Slide(Spanned::new(
                 SlideNode {
                     kind: Spanned::new("content".to_string(), dummy_span()),
@@ -1397,7 +1431,10 @@ mod tests {
 
         // eval_deck returns Some (non-fatal error) with truncated slides.
         let deck = eval_deck(&deck_node, &config, &mut sink);
-        assert!(deck.is_some(), "eval_deck must return Some (TooManySlides is non-fatal by default)");
+        assert!(
+            deck.is_some(),
+            "eval_deck must return Some (TooManySlides is non-fatal by default)"
+        );
 
         let deck = deck.unwrap();
         // Deck-level gate truncates to max_total_slides.
@@ -1428,6 +1465,9 @@ mod tests {
         let mut sink = DiagnosticSink::new();
         // None = no active variant (same as eval_deck).
         let deck = eval_deck_with_variant(&deck_node, &config, None, &mut sink);
-        assert!(deck.is_some(), "eval_deck_with_variant must return Some for empty deck");
+        assert!(
+            deck.is_some(),
+            "eval_deck_with_variant must return Some for empty deck"
+        );
     }
 }

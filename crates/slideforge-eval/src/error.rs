@@ -113,10 +113,7 @@ pub enum EvalError {
     ///
     /// `hint` carries a correction suggestion (e.g., "Use @for instead of @while").
     #[error("reserved keyword `{keyword}` used at {span}")]
-    #[diagnostic(
-        code("E-PAR-006"),
-        help("{hint}")
-    )]
+    #[diagnostic(code("E-PAR-006"), help("{hint}"))]
     ReservedKeyword {
         /// The reserved keyword that was encountered.
         keyword: Arc<str>,
@@ -335,20 +332,14 @@ mod tests {
             span: test_span(),
         };
         let code = e_evl007.code().unwrap().to_string();
-        assert_eq!(
-            code, "E-EVL-007",
-            "TooManySlides must have code E-EVL-007"
-        );
+        assert_eq!(code, "E-EVL-007", "TooManySlides must have code E-EVL-007");
 
         let e_evl008 = EvalError::NotIterable {
             value_type: Arc::from("string"),
             span: test_span(),
         };
         let code = e_evl008.code().unwrap().to_string();
-        assert_eq!(
-            code, "E-EVL-008",
-            "NotIterable must have code E-EVL-008"
-        );
+        assert_eq!(code, "E-EVL-008", "NotIterable must have code E-EVL-008");
     }
 
     #[test]
@@ -437,6 +428,9 @@ mod tests {
             span: test_span(),
         };
         let msg = format!("{e}");
-        assert!(!msg.is_empty(), "LargeDeckWarning must produce a non-empty message");
+        assert!(
+            !msg.is_empty(),
+            "LargeDeckWarning must produce a non-empty message"
+        );
     }
 }

@@ -50,8 +50,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use indexmap::IndexMap;
-use slideforge_syntax::{BlockItem, DiagnosticSink, Expr, FieldValue, SlideNode, TemplateChunk};
 use slideforge_syntax::error::ParseSeverity;
+use slideforge_syntax::{BlockItem, DiagnosticSink, Expr, FieldValue, SlideNode, TemplateChunk};
 use slideforge_types::{OrderedMap, Slide, SourceSpan, Value};
 
 use crate::config::EvalConfig;
@@ -236,13 +236,11 @@ pub fn eval_slide_node<S: std::hash::BuildHasher>(
                 for chunk in chunks {
                     match chunk {
                         TemplateChunk::Literal(s) => result.push_str(s),
-                        TemplateChunk::Expr(expr) => {
-                            match eval_expr_to_string(env, expr, sink) {
-                                Some(s) => result.push_str(s.as_ref()),
-                                None => {
-                                    had_error = true;
-                                },
-                            }
+                        TemplateChunk::Expr(expr) => match eval_expr_to_string(env, expr, sink) {
+                            Some(s) => result.push_str(s.as_ref()),
+                            None => {
+                                had_error = true;
+                            },
                         },
                         TemplateChunk::MathInline(_)
                         | TemplateChunk::MathDisplay(_)
@@ -258,15 +256,9 @@ pub fn eval_slide_node<S: std::hash::BuildHasher>(
                     slideforge_types::FieldValue::Literal(Value::Str(Arc::from(result.as_str())))
                 }
             },
-            FieldValue::Num(n) => {
-                slideforge_types::FieldValue::Literal(Value::Int(*n))
-            },
-            FieldValue::Float(f) => {
-                slideforge_types::FieldValue::Literal(Value::Float(*f))
-            },
-            FieldValue::Bool(b) => {
-                slideforge_types::FieldValue::Literal(Value::Bool(*b))
-            },
+            FieldValue::Num(n) => slideforge_types::FieldValue::Literal(Value::Int(*n)),
+            FieldValue::Float(f) => slideforge_types::FieldValue::Literal(Value::Float(*f)),
+            FieldValue::Bool(b) => slideforge_types::FieldValue::Literal(Value::Bool(*b)),
             FieldValue::Ident(name) => {
                 // Look up the identifier in env.
                 if let Some(v) = env.lookup(name) {
@@ -436,8 +428,8 @@ mod tests {
     use std::sync::Arc;
 
     use indexmap::IndexMap;
-    use slideforge_syntax::{BlockItem, Expr, ForNode, SlideNode, Spanned};
     use slideforge_syntax::span::Span;
+    use slideforge_syntax::{BlockItem, Expr, ForNode, SlideNode, Spanned};
     use slideforge_types::Value;
 
     use super::*;
@@ -514,7 +506,15 @@ mod tests {
         let body = vec![slide_block_item("content")];
         let collection = int_list_expr(&[1, 2, 3]);
 
-        let slides = eval_for_block(&mut env, "x", &collection, &body, &empty_defaults(), &config, &mut sink);
+        let slides = eval_for_block(
+            &mut env,
+            "x",
+            &collection,
+            &body,
+            &empty_defaults(),
+            &config,
+            &mut sink,
+        );
 
         assert_eq!(
             slides.len(),
@@ -558,7 +558,15 @@ mod tests {
         let body = vec![BlockItem::Slide(Spanned::new(slide_node, dummy_span()))];
         let collection = int_list_expr(&[10, 20, 30]);
 
-        let slides = eval_for_block(&mut env, "x", &collection, &body, &empty_defaults(), &config, &mut sink);
+        let slides = eval_for_block(
+            &mut env,
+            "x",
+            &collection,
+            &body,
+            &empty_defaults(),
+            &config,
+            &mut sink,
+        );
 
         assert_eq!(slides.len(), 3, "must produce 3 slides");
         // Each slide's title must equal the corresponding element value.
@@ -591,7 +599,15 @@ mod tests {
         let body = vec![slide_block_item("content")];
         let collection = Expr::List(vec![]); // empty list
 
-        let slides = eval_for_block(&mut env, "x", &collection, &body, &empty_defaults(), &config, &mut sink);
+        let slides = eval_for_block(
+            &mut env,
+            "x",
+            &collection,
+            &body,
+            &empty_defaults(),
+            &config,
+            &mut sink,
+        );
 
         assert_eq!(
             slides.len(),
@@ -615,7 +631,15 @@ mod tests {
         let body = vec![slide_block_item("content")];
         let collection = int_list_expr(&[1]);
 
-        eval_for_block(&mut env, "item", &collection, &body, &empty_defaults(), &config, &mut sink);
+        eval_for_block(
+            &mut env,
+            "item",
+            &collection,
+            &body,
+            &empty_defaults(),
+            &config,
+            &mut sink,
+        );
 
         // After the loop, "item" must not be in scope.
         assert!(
@@ -644,9 +668,7 @@ mod tests {
         let title_field = FieldNode {
             name: Spanned::new("title".to_string(), dummy_span()),
             value: Spanned::new(
-                FieldValue::Template(vec![TemplateChunk::Expr(Expr::Ident(
-                    "prefix".to_string(),
-                ))]),
+                FieldValue::Template(vec![TemplateChunk::Expr(Expr::Ident("prefix".to_string()))]),
                 dummy_span(),
             ),
         };
@@ -660,13 +682,24 @@ mod tests {
 
         // @for x in [1, 2]: — body uses outer `prefix`, not x
         let collection = int_list_expr(&[1, 2]);
-        let slides = eval_for_block(&mut env, "x", &collection, &body, &empty_defaults(), &config, &mut sink);
+        let slides = eval_for_block(
+            &mut env,
+            "x",
+            &collection,
+            &body,
+            &empty_defaults(),
+            &config,
+            &mut sink,
+        );
 
         assert_eq!(slides.len(), 2, "must produce 2 slides");
         // Both slides must resolve `prefix` from the outer scope.
         assert_eq!(slides[0].title_str(), Some("slide"));
         assert_eq!(slides[1].title_str(), Some("slide"));
-        assert!(sink.is_empty(), "no errors expected; outer var must be visible");
+        assert!(
+            sink.is_empty(),
+            "no errors expected; outer var must be visible"
+        );
     }
 
     // ─── BC-2.04.006: inner var shadows outer same-name var ─────────────────
@@ -701,7 +734,15 @@ mod tests {
 
         // @for x in [7]: — inner x = 7 shadows outer x = 99
         let collection = int_list_expr(&[7]);
-        let slides = eval_for_block(&mut env, "x", &collection, &body, &empty_defaults(), &config, &mut sink);
+        let slides = eval_for_block(
+            &mut env,
+            "x",
+            &collection,
+            &body,
+            &empty_defaults(),
+            &config,
+            &mut sink,
+        );
 
         assert_eq!(slides.len(), 1, "must produce 1 slide");
         // Inside the loop, x = 7 (the iteration variable, not the outer x = 99).
@@ -757,8 +798,15 @@ mod tests {
         let outer_body = vec![BlockItem::For(Spanned::new(mid_for, dummy_span()))];
         let collection = int_list_expr(&[1, 2]); // outer = 2 elements
 
-        let slides =
-            eval_for_block(&mut env, "x", &collection, &outer_body, &empty_defaults(), &config, &mut sink);
+        let slides = eval_for_block(
+            &mut env,
+            "x",
+            &collection,
+            &outer_body,
+            &empty_defaults(),
+            &config,
+            &mut sink,
+        );
 
         // 2 outer × 1 middle × 1 inner = 2 slides
         assert_eq!(
@@ -766,7 +814,10 @@ mod tests {
             2,
             "3-level nesting with 2×1×1 iterations must produce 2 slides"
         );
-        assert!(sink.is_empty(), "no errors expected for valid 3-level nesting");
+        assert!(
+            sink.is_empty(),
+            "no errors expected for valid 3-level nesting"
+        );
     }
 
     // ─── BC-2.04.008: large collection warning ───────────────────────────────
@@ -787,7 +838,15 @@ mod tests {
         let body = vec![slide_block_item("content")];
         let collection = int_list_expr(&[1, 2, 3, 4, 5]);
 
-        let slides = eval_for_block(&mut env, "x", &collection, &body, &empty_defaults(), &config, &mut sink);
+        let slides = eval_for_block(
+            &mut env,
+            "x",
+            &collection,
+            &body,
+            &empty_defaults(),
+            &config,
+            &mut sink,
+        );
 
         assert_eq!(slides.len(), 5, "must still produce all 5 slides");
         // A warning diagnostic must be in the sink.
@@ -815,7 +874,15 @@ mod tests {
         let collection = Expr::Str("not-a-list".to_string());
         let body = vec![slide_block_item("content")];
 
-        let slides = eval_for_block(&mut env, "x", &collection, &body, &empty_defaults(), &config, &mut sink);
+        let slides = eval_for_block(
+            &mut env,
+            "x",
+            &collection,
+            &body,
+            &empty_defaults(),
+            &config,
+            &mut sink,
+        );
 
         assert_eq!(slides.len(), 0, "non-iterable must produce 0 slides");
         assert!(
@@ -836,7 +903,15 @@ mod tests {
         let collection = Expr::Ident("null_var".to_string());
         let body = vec![slide_block_item("content")];
 
-        let slides = eval_for_block(&mut env, "x", &collection, &body, &empty_defaults(), &config, &mut sink);
+        let slides = eval_for_block(
+            &mut env,
+            "x",
+            &collection,
+            &body,
+            &empty_defaults(),
+            &config,
+            &mut sink,
+        );
 
         assert_eq!(slides.len(), 0, "null collection must produce 0 slides");
         assert!(!sink.is_empty(), "null collection must push an error");
@@ -854,7 +929,15 @@ mod tests {
         let collection = Expr::Ident("no_such_var".to_string());
         let body = vec![slide_block_item("content")];
 
-        let slides = eval_for_block(&mut env, "x", &collection, &body, &empty_defaults(), &config, &mut sink);
+        let slides = eval_for_block(
+            &mut env,
+            "x",
+            &collection,
+            &body,
+            &empty_defaults(),
+            &config,
+            &mut sink,
+        );
 
         assert_eq!(slides.len(), 0, "undefined var must produce 0 slides");
         assert!(
@@ -879,7 +962,15 @@ mod tests {
         let body = vec![slide_block_item("content")];
         let collection = int_list_expr(&[1, 2, 3, 4, 5]); // would generate 5
 
-        let slides = eval_for_block(&mut env, "x", &collection, &body, &empty_defaults(), &config, &mut sink);
+        let slides = eval_for_block(
+            &mut env,
+            "x",
+            &collection,
+            &body,
+            &empty_defaults(),
+            &config,
+            &mut sink,
+        );
 
         // Must have stopped at 2 slides.
         assert!(
@@ -907,7 +998,10 @@ mod tests {
             "bullets",
             "slide_type must match the SlideNode kind"
         );
-        assert!(sink.is_empty(), "no errors expected for minimal valid slide");
+        assert!(
+            sink.is_empty(),
+            "no errors expected for minimal valid slide"
+        );
     }
 
     /// BC-2.03.002: eval_slide_node with a title field containing a literal string.
@@ -953,9 +1047,7 @@ mod tests {
         let title_field = FieldNode {
             name: Spanned::new("title".to_string(), dummy_span()),
             value: Spanned::new(
-                FieldValue::Template(vec![TemplateChunk::Expr(Expr::Ident(
-                    "name".to_string(),
-                ))]),
+                FieldValue::Template(vec![TemplateChunk::Expr(Expr::Ident("name".to_string()))]),
                 dummy_span(),
             ),
         };
@@ -997,12 +1089,10 @@ mod tests {
         let title_field = FieldNode {
             name: Spanned::new("title".to_string(), dummy_span()),
             value: Spanned::new(
-                FieldValue::Template(vec![TemplateChunk::Expr(
-                    Expr::FieldAccess {
-                        base: Box::new(Expr::Ident("item".to_string())),
-                        field: "key".to_string(),
-                    },
-                )]),
+                FieldValue::Template(vec![TemplateChunk::Expr(Expr::FieldAccess {
+                    base: Box::new(Expr::Ident("item".to_string())),
+                    field: "key".to_string(),
+                })]),
                 dummy_span(),
             ),
         };
@@ -1015,17 +1105,26 @@ mod tests {
         let body = vec![BlockItem::Slide(Spanned::new(slide_node, dummy_span()))];
         let collection = Expr::Ident("data".to_string());
 
-        let slides = eval_for_block(&mut env, "item", &collection, &body, &empty_defaults(), &config, &mut sink);
+        let slides = eval_for_block(
+            &mut env,
+            "item",
+            &collection,
+            &body,
+            &empty_defaults(),
+            &config,
+            &mut sink,
+        );
 
         // Map has 2 entries → 2 slides.
-        assert_eq!(slides.len(), 2, "@for over 2-entry map must produce 2 slides");
+        assert_eq!(
+            slides.len(),
+            2,
+            "@for over 2-entry map must produce 2 slides"
+        );
         assert!(sink.is_empty(), "no errors expected for map iteration");
 
         // Each slide title must be a key name ("alpha" or "beta").
-        let titles: Vec<&str> = slides
-            .iter()
-            .filter_map(|s| s.title_str())
-            .collect();
+        let titles: Vec<&str> = slides.iter().filter_map(|s| s.title_str()).collect();
         assert!(
             titles.contains(&"alpha"),
             "titles must contain 'alpha'; got: {titles:?}"
@@ -1053,12 +1152,10 @@ mod tests {
         let title_field = FieldNode {
             name: Spanned::new("title".to_string(), dummy_span()),
             value: Spanned::new(
-                FieldValue::Template(vec![TemplateChunk::Expr(
-                    Expr::FieldAccess {
-                        base: Box::new(Expr::Ident("item".to_string())),
-                        field: "value".to_string(),
-                    },
-                )]),
+                FieldValue::Template(vec![TemplateChunk::Expr(Expr::FieldAccess {
+                    base: Box::new(Expr::Ident("item".to_string())),
+                    field: "value".to_string(),
+                })]),
                 dummy_span(),
             ),
         };
@@ -1071,7 +1168,15 @@ mod tests {
         let body = vec![BlockItem::Slide(Spanned::new(slide_node, dummy_span()))];
         let collection = Expr::Ident("stats".to_string());
 
-        let slides = eval_for_block(&mut env, "item", &collection, &body, &empty_defaults(), &config, &mut sink);
+        let slides = eval_for_block(
+            &mut env,
+            "item",
+            &collection,
+            &body,
+            &empty_defaults(),
+            &config,
+            &mut sink,
+        );
 
         assert_eq!(slides.len(), 1, "1-entry map must produce 1 slide");
         assert!(sink.is_empty(), "no errors expected");
@@ -1087,7 +1192,6 @@ mod tests {
     /// I05: A slide with inline @for items generates additional slides.
     #[test]
     fn test_slide_inline_for_generates_additional_slides() {
-
         let mut env = empty_env();
         let mut sink = slideforge_syntax::DiagnosticSink::new();
         let config = default_config();
@@ -1111,7 +1215,10 @@ mod tests {
             fields: vec![],
             inline_items: vec![inline_for],
         };
-        let items = vec![BlockItem::Slide(Spanned::new(slide_with_inline, dummy_span()))];
+        let items = vec![BlockItem::Slide(Spanned::new(
+            slide_with_inline,
+            dummy_span(),
+        ))];
 
         let slides = eval_block_items(&mut env, &items, &empty_defaults(), &config, &mut sink);
 
@@ -1137,7 +1244,11 @@ mod tests {
         let items = vec![slide_block_item("title")];
         let slides = eval_block_items(&mut env, &items, &empty_defaults(), &config, &mut sink);
 
-        assert_eq!(slides.len(), 1, "single slide block item must produce 1 slide");
+        assert_eq!(
+            slides.len(),
+            1,
+            "single slide block item must produce 1 slide"
+        );
         assert!(sink.is_empty(), "no errors expected");
     }
 
@@ -1178,9 +1289,9 @@ mod tests {
             vec![slide_block_item("content")],
         );
         let items = vec![
-            slide_block_item("title"),                                   // 1 slide
-            BlockItem::For(Spanned::new(for_node, dummy_span())),        // 2 slides
-            slide_block_item("bullets"),                                 // 1 slide
+            slide_block_item("title"),                            // 1 slide
+            BlockItem::For(Spanned::new(for_node, dummy_span())), // 2 slides
+            slide_block_item("bullets"),                          // 1 slide
         ];
 
         let slides = eval_block_items(&mut env, &items, &empty_defaults(), &config, &mut sink);
