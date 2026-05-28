@@ -1053,7 +1053,7 @@ mod tests {
     /// BC-2.01.005 invariant 4 / AC-010 — no placeholder uses "Shape N" as its
     /// accessibility name (DI-001 accessibility requirement).
     #[test]
-    fn test_bc_2_01_005_layout_color_references_use_scheme_slots() {
+    fn test_bc_2_01_005_layout_placeholder_names_are_semantic() {
         let config = minimal_config_direct();
         let layouts = generate_all_layouts(&config);
         for (i, layout) in layouts.iter().enumerate() {

@@ -40,6 +40,7 @@
 //! | `E-BRD-002` | [`BrandError::ParseError`] | broken (exit 4) |
 //! | `E-BRD-003` | [`BrandError::MissingColorSlot`] | cosmetic (exit 0) |
 //! | `E-BRD-004` | [`BrandError::FontUnavailable`] | cosmetic (exit 0) |
+//! | `E-BRD-005` | [`BrandError::InvalidHexColor`] | cosmetic (exit 0) |
 //!
 //! ## Design Constraints
 //!
@@ -68,7 +69,7 @@ pub mod toml_schema;
 
 // Re-export the most commonly used types at the crate root.
 pub use context::BrandLoadContext;
-pub use error::{BrandError, E_BRD_001, E_BRD_002, E_BRD_003, E_BRD_004};
+pub use error::{BrandError, E_BRD_001, E_BRD_002, E_BRD_003, E_BRD_004, E_BRD_005};
 pub use layouts::{LayoutPlaceholder, SlideLayoutDef};
 pub use loader::BrandLoader;
 pub use synthesizer::BrandSynthesizer;

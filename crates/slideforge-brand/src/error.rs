@@ -8,6 +8,7 @@
 //! | `E-BRD-002` | [`BrandError::ParseError`] | broken (exit 4) |
 //! | `E-BRD-003` | [`BrandError::MissingColorSlot`] | cosmetic (exit 0) |
 //! | `E-BRD-004` | [`BrandError::FontUnavailable`] | cosmetic (exit 0) |
+//! | `E-BRD-005` | [`BrandError::InvalidHexColor`] | cosmetic (exit 0) |
 
 use std::sync::Arc;
 
@@ -31,6 +32,11 @@ pub const E_BRD_003: &str = "E-BRD-003";
 /// `E-BRD-004`: a declared font is not installed on the build host; the build
 /// continues with a fallback font for metrics only.
 pub const E_BRD_004: &str = "E-BRD-004";
+
+/// `E-BRD-005`: a hex color value in `brand.toml` is not valid 6-digit uppercase
+/// RGB hex (e.g. `#3B82F6`). Cosmetic warning — the invalid slot is treated as
+/// absent and inference continues with the remaining slots.
+pub const E_BRD_005: &str = "E-BRD-005";
 
 // ─── Error enum ──────────────────────────────────────────────────────────────
 
@@ -159,7 +165,7 @@ pub enum BrandError {
         reason: Arc<str>,
     },
 
-    /// `E-BRD-002` (synthesis) — a declared hex color value is not valid.
+    /// `E-BRD-005` — a declared hex color value in `brand.toml` is not valid.
     ///
     /// Cosmetic warning (exit 0). The invalid slot is treated as absent and
     /// inference continues with the remaining slots (see `inference.rs`). The
@@ -168,7 +174,7 @@ pub enum BrandError {
     ///
     /// Traces to AC-006 (BC-2.01.004 invariant 3).
     #[error(
-        "E-BRD-002: Invalid hex color '{value}' in brand.toml slot '{slot_name}'. \
+        "E-BRD-005: Invalid hex color '{value}' in brand.toml slot '{slot_name}'. \
          Use 6-digit uppercase hex RGB (e.g. '#3B82F6')."
     )]
     InvalidHexColor {
@@ -206,6 +212,7 @@ mod tests {
         assert_eq!(E_BRD_002, "E-BRD-002");
         assert_eq!(E_BRD_003, "E-BRD-003");
         assert_eq!(E_BRD_004, "E-BRD-004");
+        assert_eq!(E_BRD_005, "E-BRD-005");
     }
 
     /// BC-2.01.001 EC-001 — `FileNotFound` error message contains the path.

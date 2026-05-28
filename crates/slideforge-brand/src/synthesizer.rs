@@ -971,6 +971,76 @@ body = "Calibri"
                     }
                 }
             }
+
+            /// F-PASS5-LOW-2 — invalid hex in acc1 still yields deterministic results.
+            ///
+            /// Exercises BC-2.01.004 invariant 3 (AC-006): invalid hex values are
+            /// treated as absent and inference continues deterministically, emitting
+            /// an E-BRD-005 warning for each invalid slot.
+            ///
+            /// Strategy: fix `acc1` to a known-invalid string (e.g. `"garbage"`),
+            /// synthesize twice, and assert that both runs produce identical output
+            /// and identical warning counts.
+            #[test]
+            fn test_bc_2_01_004_invalid_hex_synthesis_is_deterministic(
+                invalid_acc1 in prop::string::string_regex("[^#][a-z]{5,10}").unwrap(),
+            ) {
+                let config = BrandConfig {
+                    colors: ColorConfig {
+                        dk1: None,
+                        lt1: None,
+                        dk2: None,
+                        lt2: None,
+                        acc1: Some(invalid_acc1),
+                        acc2: None,
+                        acc3: None,
+                        acc4: None,
+                        acc5: None,
+                        acc6: None,
+                        hlink: None,
+                        fol_hlink: None,
+                    },
+                    fonts: FontConfig {
+                        heading: "Calibri".to_owned(),
+                        body: "Calibri".to_owned(),
+                    },
+                    logo: Some(LogoConfig {
+                        path: "test.png".to_owned(),
+                    }),
+                    footer: FooterConfig {
+                        text: String::new(),
+                        show_slide_number: true,
+                        show_date: false,
+                    },
+                };
+
+                let r1 = BrandSynthesizer::synthesize(&config);
+                let r2 = BrandSynthesizer::synthesize(&config);
+
+                match (r1, r2) {
+                    (Ok((t1, w1)), Ok((t2, w2))) => {
+                        prop_assert_eq!(t1, t2,
+                            "synthesize must be deterministic even with invalid hex input");
+                        prop_assert_eq!(w1.len(), w2.len(),
+                            "warning count must be deterministic for same invalid-hex input");
+                        // At least one E-BRD-005 warning must be emitted for the invalid acc1
+                        let has_e_brd_005 = w1.iter().any(|w| {
+                            matches!(w, crate::error::BrandError::InvalidHexColor { .. })
+                        });
+                        prop_assert!(has_e_brd_005,
+                            "invalid hex acc1 must yield an E-BRD-005 (InvalidHexColor) warning; \
+                             got warnings: {w1:?}");
+                    }
+                    (Err(_), Err(_)) => {
+                        // Deterministic failure is also acceptable.
+                    }
+                    (Ok(_), Err(e)) | (Err(e), Ok(_)) => {
+                        prop_assert!(false,
+                            "synthesize produced inconsistent Ok/Err for same invalid-hex input: \
+                             {e:?}");
+                    }
+                }
+            }
         }
     }
 }
