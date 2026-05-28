@@ -116,6 +116,13 @@ pub fn render_pdf_paths(ast: &MathAst) -> Result<SvgPaths, MathError> {
 
     collect_paths(ast, &ast.nodes, &mut paths, &mut x, baseline_y)?;
 
+    // Secondary guard: a non-empty node list may still produce zero paths when
+    // it consists solely of empty Group nodes (F-S030-P5-L1). In that case
+    // emitting a degenerate SVG is no better than the empty-AST case above.
+    if paths.is_empty() {
+        return Err(MathError::EmptyAst);
+    }
+
     // Apply 1.2× scaling for display mode (finding I3).
     let (width_px, height_px) = if ast.mode == MathMode::Display {
         let w = (x.max(1) * DISPLAY_SCALE_NUM + DISPLAY_SCALE_DEN - 1) / DISPLAY_SCALE_DEN;

@@ -112,6 +112,10 @@ fn classify_text(s: &str) -> &'static str {
 }
 
 /// Return `true` if the token is a recognised math operator.
+///
+/// Fence characters (`(`, `)`, `[`, `]`, `{`, `}`) are included so that
+/// bare delimiter tokens—not wrapped in a `Delimiter` node—are classified
+/// as `<mo>` rather than `<mi>`. This matches the `MathML` 3 operator table.
 fn is_operator(s: &str) -> bool {
     matches!(
         s,
@@ -139,6 +143,12 @@ fn is_operator(s: &str) -> bool {
             | ":"
             | "!"
             | "|"
+            | "("
+            | ")"
+            | "["
+            | "]"
+            | "{"
+            | "}"
     )
 }
 
@@ -398,7 +408,11 @@ fn write_node(writer: &mut Writer<&mut Vec<u8>>, node: &MathNode) -> Result<(), 
         },
 
         MathNode::Space => {
-            // Render as thin space operator
+            // Render as `<mspace/>`. v1 limitation: no `width` attribute is
+            // emitted because the `Space` AST variant carries no width value.
+            // Adding width would require a parser-level change to store the
+            // original `\,` / `\;` / `\quad` token. Tracked as known gap in
+            // the v1 MathML output spec (F-S030-P5-L3).
             writer.write_event(Event::Start(BytesStart::new("mspace")))?;
             writer.write_event(Event::End(BytesEnd::new("mspace")))?;
         },
@@ -564,6 +578,12 @@ fn node_to_label(node: &MathNode, parts: &mut Vec<String>) {
         },
 
         MathNode::Delimiter { inner, .. } => {
+            // v1 limitation (F-S030-P5-L2): the `left` and `right` delimiter
+            // characters are dropped from the aria-label. The spec describes
+            // aria-label generation as a "best-effort heuristic" for the v1.0
+            // LaTeX subset; adding delimiter names (e.g. "open paren … close
+            // paren") requires unescaping + look-up that is deferred to a
+            // future polish story.
             for n in inner {
                 node_to_label(n, parts);
             }
@@ -1453,5 +1473,31 @@ mod tests {
         // The output XML must be well-formed (no raw < inside an attribute).
         assert_wellformed_xml(&output)
             .unwrap_or_else(|e| panic!("MathML with '<' in text must be well-formed XML: {e}"));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // F-S030-P5-M1 — fence characters classified as <mo>
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Bare parenthesis token `(` must be rendered as `<mo>(</mo>`, not
+    /// `<mi>(</mi>`, because parentheses are fence operators in `MathML` 3
+    /// (Appendix C operator table).
+    ///
+    /// Covers `(`, `)`, `[`, `]`, `{`, `}` via `is_operator`.
+    #[test]
+    fn test_bc_1_10_003_mathml_paren_is_operator() {
+        for token in &["(", ")", "[", "]", "{", "}"] {
+            let ast = inline_ast(vec![MathNode::Text(Arc::from(*token))]);
+            let output = render_mathml(&ast)
+                .unwrap_or_else(|e| panic!("render_mathml failed for {token}: {e}"));
+            assert!(
+                output.contains(&format!("<mo>{token}</mo>")),
+                "token '{token}' must render as <mo>{token}</mo>; got: {output}"
+            );
+            assert!(
+                !output.contains(&format!("<mi>{token}</mi>")),
+                "token '{token}' must NOT render as <mi>; got: {output}"
+            );
+        }
     }
 }
