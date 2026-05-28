@@ -25,10 +25,11 @@
 //! | `Cases`            | `<m:d>` with `\{` + `<m:eqArr>` |
 //! | `Space`            | `<m:r><m:rPr><m:sty m:val="p"/></m:rPr><m:t> </m:t></m:r>` |
 
-use crate::ast::{AccentKind, MathAst, MathMode, MathNode};
+use crate::ast::{MathAst, MathMode, MathNode};
 use crate::error::MathRendererError;
 use crate::symbols::{
-    greek_to_unicode_char, operator_to_unicode_char, symbol_to_unicode_char, unescape_delimiter,
+    greek_to_unicode_char, is_text_operator, operator_to_unicode_char, symbol_to_unicode_char,
+    unescape_delimiter,
 };
 
 /// The XML namespace URI for OMML.
@@ -210,7 +211,7 @@ fn render_node(node: &MathNode, out: &mut String) -> Result<(), MathRendererErro
 
         // ── Accent: \hat, \bar, \vec, etc. ───────────────────────────────
         MathNode::Accent { kind, inner } => {
-            let chr = accent_char(kind);
+            let chr = kind.omml_combining_char();
             out.push_str("<m:acc><m:accPr><m:chr m:val=\"");
             out.push_str(chr);
             out.push_str("\"/></m:accPr><m:e>");
@@ -287,52 +288,6 @@ fn xml_escape(s: &str) -> String {
         }
     }
     out
-}
-
-/// Return `true` if `name` is a text-based operator that must render upright.
-///
-/// Text operators (lim, max, min, sin, cos, tan, log, ln, exp, det, sup, inf,
-/// gcd, dim, ker, deg, hom, mod) are typeset in roman (non-italic) style in
-/// standard mathematical notation. OMML achieves this with
-/// `<m:rPr><m:sty m:val="p"/></m:rPr>`.
-///
-/// NOTE: The parser currently only produces `Operator` nodes for `lim`, `max`,
-/// and `min`. The remaining entries are forward-looking for when more text
-/// operators are added to the parser's supported command set.
-fn is_text_operator(name: &str) -> bool {
-    matches!(
-        name,
-        "lim"
-            | "max"
-            | "min"
-            | "sin"
-            | "cos"
-            | "tan"
-            | "log"
-            | "ln"
-            | "exp"
-            | "det"
-            | "sup"
-            | "inf"
-            | "gcd"
-            | "dim"
-            | "ker"
-            | "deg"
-            | "hom"
-            | "mod"
-    )
-}
-
-/// Map an accent kind to its OMML character value.
-fn accent_char(kind: &AccentKind) -> &'static str {
-    match kind {
-        AccentKind::Hat => "̂",
-        AccentKind::Bar => "̄",
-        AccentKind::Tilde => "̃",
-        AccentKind::Vec => "⃗",
-        AccentKind::Dot => "̇",
-        AccentKind::Ddot => "̈",
-    }
 }
 
 #[cfg(test)]
@@ -853,5 +808,63 @@ mod tests {
             result.is_err(),
             "OMML render with unknown symbol must return Err; got Ok"
         );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // F-S030-P4-M2 — sibling-site sweep: cot/sec/csc/arcsin/arccos/arctan
+    // must render as text operators (upright style) in all three renderers.
+    //
+    // These operators exist in `symbols::is_text_operator` but were absent
+    // from the private `is_text_operator` that previously lived in this file.
+    // Routing through `crate::symbols::is_text_operator` via the import
+    // ensures OMML, MathML, and PDF produce consistent upright-style output.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Each of `cot`, `sec`, `csc`, `arcsin`, `arccos`, `arctan` must render
+    /// as an upright text operator in OMML (`<m:sty m:val="p"/>`) and not
+    /// return `UnsupportedSymbol`.  All three renderers must succeed for these
+    /// names (cross-renderer parity, BC-1.10.003 invariant 6).
+    #[test]
+    fn test_bc_1_10_003_cross_renderer_text_operator_parity() {
+        use crate::mathml::render_mathml;
+        use crate::pdf_paths::render_pdf_paths;
+
+        let text_operators = ["cot", "sec", "csc", "arcsin", "arccos", "arctan"];
+
+        for name in &text_operators {
+            let ast = MathAst::new(MathMode::Inline, vec![MathNode::Operator(Arc::from(*name))]);
+
+            // ── OMML: must succeed and carry upright style ────────────────
+            let omml_bytes = render(&ast)
+                .unwrap_or_else(|e| panic!("OMML render of '\\{name}' must succeed; got: {e:?}"));
+            let omml_xml = String::from_utf8(omml_bytes).expect("valid UTF-8");
+            assert!(
+                omml_xml.contains(r#"<m:sty m:val="p"/>"#),
+                "OMML for '\\{name}' must carry upright style <m:sty m:val=\"p\"/>; got: {omml_xml}"
+            );
+            assert!(
+                omml_xml.contains(name),
+                "OMML for '\\{name}' must contain the operator text; got: {omml_xml}"
+            );
+
+            // ── MathML: must succeed and not return UnsupportedSymbol ─────
+            let mathml_result = render_mathml(&ast);
+            assert!(
+                mathml_result.is_ok(),
+                "MathML render of '\\{name}' must succeed; got: {mathml_result:?}"
+            );
+            let mathml_str = mathml_result.expect("checked above");
+            assert!(
+                mathml_str.contains(name),
+                "MathML for '\\{name}' must contain the operator text; got: {mathml_str}"
+            );
+
+            // ── PDF paths: must succeed and not return UnsupportedSymbol ──
+            let pdf_result = render_pdf_paths(&ast);
+            assert!(
+                pdf_result.is_ok(),
+                "PDF-paths render of '\\{name}' must succeed; got: {pdf_result:?}"
+            );
+        }
     }
 }
