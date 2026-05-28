@@ -98,6 +98,45 @@ fn test_load_brand_toml_missing_file_returns_error() {
     );
 }
 
+/// F-PASS3-OBS1 — `load_from_toml` with a TOML that has no `[colors]` section
+/// yields 12 `MissingColorSlot` warnings (one per slot).
+///
+/// This documents that `load_from_toml` propagates synthesis warnings through
+/// its return tuple, satisfying AC-005 for the TOML loading path.
+#[test]
+fn test_load_brand_toml_empty_colors_section_yields_12_warnings() {
+    let mut tmp = tempfile::NamedTempFile::new().expect("tempfile must be created");
+    std::io::Write::write_all(
+        &mut tmp,
+        br#"
+[logo]
+path = "logo.png"
+"#,
+    )
+    .expect("write to tempfile must succeed");
+
+    let path = tmp
+        .path()
+        .to_str()
+        .expect("tempfile path must be valid UTF-8");
+    let (template, warnings) = BrandSynthesizer::load_from_toml(path)
+        .expect("load_from_toml must succeed even with missing colors");
+
+    assert_eq!(
+        warnings.len(),
+        12,
+        "exactly 12 MissingColorSlot warnings expected when [colors] section is absent, got {}: {:?}",
+        warnings.len(),
+        warnings
+    );
+    // Template must still have 31 layouts (synthesis always generates them)
+    assert_eq!(
+        template.layouts.len(),
+        31,
+        "must have 31 layouts even when colors are inferred"
+    );
+}
+
 /// F-PASS2-L1 — `load_from_toml` with invalid TOML content returns `TomlParseError`.
 #[test]
 fn test_load_brand_toml_invalid_toml_returns_parse_error() {

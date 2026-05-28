@@ -386,10 +386,43 @@ fn write_dark_txbody(writer: &mut Writer<Cursor<Vec<u8>>>) {
         .write_event(Event::Empty(BytesStart::new("a:bodyPr")))
         .expect("write bodyPr");
 
-    // <a:lstStyle/>
+    // <a:lstStyle> with defRPr white defaults for lvl1pPr..lvl5pPr.
+    // Empty lstStyle causes LibreOffice 7.x to ignore clrMapOvr and render
+    // user-typed text in the default (dark) color. Explicit defRPr on each
+    // paragraph level forces white inheritance even with partial clrMapOvr
+    // support (R4 mitigation, F-PASS3-M1).
     writer
-        .write_event(Event::Empty(BytesStart::new("a:lstStyle")))
-        .expect("write lstStyle");
+        .write_event(Event::Start(BytesStart::new("a:lstStyle")))
+        .expect("write lstStyle start");
+    for lvl in 1..=5u8 {
+        let pp_tag = format!("a:lvl{lvl}pPr");
+        writer
+            .write_event(Event::Start(BytesStart::new(pp_tag.clone())))
+            .expect("write lvlNpPr start");
+        writer
+            .write_event(Event::Start(BytesStart::new("a:defRPr")))
+            .expect("write defRPr start");
+        writer
+            .write_event(Event::Start(BytesStart::new("a:solidFill")))
+            .expect("write solidFill start");
+        let mut srgb_def = BytesStart::new("a:srgbClr");
+        srgb_def.push_attribute(("val", "FFFFFF"));
+        writer
+            .write_event(Event::Empty(srgb_def))
+            .expect("write srgbClr");
+        writer
+            .write_event(Event::End(BytesEnd::new("a:solidFill")))
+            .expect("write solidFill end");
+        writer
+            .write_event(Event::End(BytesEnd::new("a:defRPr")))
+            .expect("write defRPr end");
+        writer
+            .write_event(Event::End(BytesEnd::new(&pp_tag)))
+            .expect("write lvlNpPr end");
+    }
+    writer
+        .write_event(Event::End(BytesEnd::new("a:lstStyle")))
+        .expect("write lstStyle end");
 
     // <a:p>
     writer
@@ -658,6 +691,21 @@ mod tests {
         assert!(
             xml.contains("srgbClr"),
             "dark layout XML must contain <a:srgbClr> for explicit white text"
+        );
+        // R4 mitigation (F-PASS3-M1): lstStyle must have defRPr defaults for all
+        // 5 paragraph levels so user-typed text on dark slides inherits white in
+        // LibreOffice 7.x (which has partial clrMapOvr support).
+        assert!(
+            xml.contains("defRPr"),
+            "dark layout XML must contain <a:defRPr> in lstStyle for LibreOffice white-text inheritance"
+        );
+        assert!(
+            xml.contains("lvl1pPr"),
+            "dark layout XML must contain <a:lvl1pPr> level defaults in lstStyle"
+        );
+        assert!(
+            xml.contains("lvl5pPr"),
+            "dark layout XML must contain all 5 level defaults (lvl1pPr..lvl5pPr) in lstStyle"
         );
     }
 

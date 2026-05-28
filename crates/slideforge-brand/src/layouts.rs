@@ -450,19 +450,34 @@ pub fn generate_all_layouts(_config: &BrandConfig) -> Vec<SlideLayoutDef> {
             ],
         ),
         // SL-11: Vertical Text
+        // AC-010 requires a title-type placeholder. For vertTx layout the heading
+        // sits at the right edge (OOXML vertTx convention): narrow column on the
+        // right, body spans the remaining left width.
         light_layout(
             11,
             "Vertical Text",
             "vertTx",
-            vec![LayoutPlaceholder {
-                ph_type: Arc::from("body"),
-                idx: 1,
-                accessibility_name: Arc::from("Vertical Text Area"),
-                x: TITLE_X,
-                y: TITLE_Y,
-                cx: TITLE_CX,
-                cy: BODY_CY,
-            }],
+            vec![
+                LayoutPlaceholder {
+                    ph_type: Arc::from("title"),
+                    idx: 0,
+                    accessibility_name: Arc::from("Vertical Text Heading"),
+                    // Right edge vertical title: x = slide_width - narrow_col, narrow col = 1371600 EMU
+                    x: 7_315_200,
+                    y: TITLE_Y,
+                    cx: 1_371_600,
+                    cy: BODY_CY,
+                },
+                LayoutPlaceholder {
+                    ph_type: Arc::from("body"),
+                    idx: 1,
+                    accessibility_name: Arc::from("Vertical Text Area"),
+                    x: TITLE_X,
+                    y: TITLE_Y,
+                    cx: 6_553_200,
+                    cy: BODY_CY,
+                },
+            ],
         ),
         // ── Custom layouts (CL-01..CL-20) ─────────────────────────────────────
 
@@ -501,10 +516,14 @@ pub fn generate_all_layouts(_config: &BrandConfig) -> Vec<SlideLayoutDef> {
             ],
         ),
         // CL-03: SF Quote
+        // AC-010 requires a title-type placeholder. The quote title sits at the top
+        // of the slide (standard title position), followed by the pullquote body and
+        // attribution body below.
         custom_layout(
             14,
             "SF Quote",
             vec![
+                title_ph("title", "Quote Title"),
                 LayoutPlaceholder {
                     ph_type: Arc::from("body"),
                     idx: 1,
@@ -1001,19 +1020,31 @@ mod tests {
     }
 
     /// BC-2.01.005 invariant 2 / AC-010 — every layout except Blank (SL-07) has at
-    /// least one placeholder.
+    /// least one placeholder with `ph_type` == `"title"` or `"ctrTitle"`.
+    ///
+    /// This test replaces `test_bc_2_01_005_non_blank_layouts_have_at_least_one_placeholder`
+    /// and adds the stronger constraint that a title-type placeholder must be present.
     #[test]
-    fn test_bc_2_01_005_non_blank_layouts_have_at_least_one_placeholder() {
+    fn test_bc_2_01_005_non_blank_layouts_have_title_placeholder() {
         let config = minimal_config_direct();
         let layouts = generate_all_layouts(&config);
         for (i, layout) in layouts.iter().enumerate() {
             if i == 6 {
-                // Blank layout — zero placeholders is correct
+                // Blank layout (SL-07) — zero placeholders is correct
                 continue;
             }
             assert!(
                 !layout.placeholders.is_empty(),
                 "layout index {i} ('{}') must have at least one placeholder",
+                layout.name
+            );
+            let has_title = layout
+                .placeholders
+                .iter()
+                .any(|ph| ph.ph_type.as_ref() == "title" || ph.ph_type.as_ref() == "ctrTitle");
+            assert!(
+                has_title,
+                "layout index {i} ('{}') must have at least one placeholder with ph_type == 'title' or 'ctrTitle' (AC-010)",
                 layout.name
             );
         }
