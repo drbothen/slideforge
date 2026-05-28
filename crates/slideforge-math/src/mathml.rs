@@ -23,6 +23,7 @@ use quick_xml::{
     events::{BytesEnd, BytesStart, BytesText, Event},
 };
 use slideforge_plugin_api::MathError;
+use tracing::instrument;
 
 use crate::MathAst;
 use crate::ast::{MathMode, MathNode};
@@ -58,6 +59,7 @@ const MATHML_NS: &str = "http://www.w3.org/1998/Math/MathML";
 /// serialised to `MathML`, [`MathError::EmptyCommandName`] if a
 /// Greek/Operator/Symbol node carries an empty command name, or
 /// [`MathError::UnsupportedSymbol`] if a command name has no Unicode mapping.
+#[instrument(skip(ast), fields(display_style = %match ast.mode { crate::ast::MathMode::Inline => "inline", crate::ast::MathMode::Display => "block" }, node_count = ast.nodes.len()))]
 pub fn render_mathml(ast: &MathAst) -> Result<String, MathError> {
     // Guard: an empty AST produces an empty <mrow>, which is not meaningful
     // output. Return EmptyAst for parity with render_pdf_paths (F-S030-P9-L1).
@@ -101,9 +103,11 @@ pub fn render_mathml(ast: &MathAst) -> Result<String, MathError> {
         .write_event(Event::End(BytesEnd::new("math")))
         .map_err(|e| xml_err(&e))?;
 
-    String::from_utf8(buf).map_err(|e| MathError::RenderError {
+    let result = String::from_utf8(buf).map_err(|e| MathError::RenderError {
         message: e.to_string(),
-    })
+    })?;
+    tracing::debug!(output_len = result.len(), "render_mathml succeeded");
+    Ok(result)
 }
 
 /// Classify a text token as a `MathML` element tag:
@@ -898,8 +902,6 @@ mod tests {
     /// root `<math xmlns="http://www.w3.org/1998/Math/MathML"` element, and
     /// contains rendered identifiers `<mi>x</mi>`, `<mi>y</mi>` and the
     /// operator `<mo>+</mo>`.
-    ///
-    /// RED GATE: fails until `render_mathml` is implemented (`todo!()` panics).
     #[test]
     fn test_bc_1_10_003_mathml_simple_expression() {
         let ast = inline_ast(vec![
@@ -927,8 +929,6 @@ mod tests {
     }
 
     /// `render_mathml` for `$x^2$` produces `<msup><mi>x</mi><mn>2</mn></msup>`.
-    ///
-    /// RED GATE: fails until `render_mathml` is implemented.
     #[test]
     fn test_bc_1_10_003_mathml_superscript() {
         let ast = inline_ast(vec![MathNode::Superscript {
@@ -951,8 +951,6 @@ mod tests {
     }
 
     /// `render_mathml` for `$x_2$` (subscript) produces `<msub>` element.
-    ///
-    /// RED GATE: fails until `render_mathml` is implemented.
     #[test]
     fn test_bc_1_10_003_mathml_subscript() {
         let ast = inline_ast(vec![MathNode::Subscript {
@@ -967,8 +965,6 @@ mod tests {
     }
 
     /// `render_mathml` for `$\frac{1}{2}$` produces `<mfrac>` element.
-    ///
-    /// RED GATE: fails until `render_mathml` is implemented.
     #[test]
     fn test_bc_1_10_003_mathml_fraction() {
         let ast = inline_ast(vec![MathNode::Fraction {
@@ -983,8 +979,6 @@ mod tests {
     }
 
     /// Inline math produces root `<math display="inline"` attribute.
-    ///
-    /// RED GATE: fails until `render_mathml` is implemented.
     #[test]
     fn test_bc_1_10_003_mathml_inline_uses_display_inline() {
         let ast = inline_ast(vec![MathNode::Text(Arc::from("x"))]);
@@ -1000,8 +994,6 @@ mod tests {
     }
 
     /// Display math (`$$...$$`) produces root `<math display="block"` attribute.
-    ///
-    /// RED GATE: fails until `render_mathml` is implemented.
     #[test]
     fn test_bc_1_10_003_mathml_display_uses_display_block() {
         let ast = display_ast(vec![MathNode::Text(Arc::from("x"))]);
@@ -1017,8 +1009,6 @@ mod tests {
     }
 
     /// `render_mathml` output for any expression contains a non-empty `aria-label`.
-    ///
-    /// RED GATE: fails until `render_mathml` is implemented.
     #[test]
     fn test_bc_1_10_003_mathml_has_aria_label() {
         let ast = inline_ast(vec![MathNode::Text(Arc::from("x"))]);
@@ -1040,8 +1030,6 @@ mod tests {
 
     /// `ast_to_aria_label` for `$E = mc^2$` returns a label containing
     /// "equals" and "squared" (semantic plain-text description).
-    ///
-    /// RED GATE: fails until `ast_to_aria_label` is implemented.
     #[test]
     fn test_bc_1_10_003_aria_label_for_pythagorean() {
         // AST for E = mc^2: nodes E, =, m, c^2
@@ -1067,8 +1055,6 @@ mod tests {
     }
 
     /// `ast_to_aria_label` for `$x + y$` returns a label containing "plus".
-    ///
-    /// RED GATE: fails until `ast_to_aria_label` is implemented.
     #[test]
     fn test_bc_1_10_003_aria_label_for_simple_sum() {
         let ast = inline_ast(vec![
@@ -1085,8 +1071,6 @@ mod tests {
     }
 
     /// `ast_to_aria_label` returns a non-empty string for any non-empty AST.
-    ///
-    /// RED GATE: fails until `ast_to_aria_label` is implemented.
     #[test]
     fn test_bc_1_10_003_aria_label_non_empty_for_non_empty_ast() {
         let ast = inline_ast(vec![MathNode::Text(Arc::from("x"))]);
@@ -1102,8 +1086,6 @@ mod tests {
     /// Finding I4: empty AST must NOT produce `aria-label=""` — screen readers
     /// announce empty attributes awkwardly.  The fallback is "empty math
     /// expression".
-    ///
-    /// RED GATE: fails until `ast_to_aria_label` is implemented.
     #[test]
     fn test_bc_1_10_003_aria_label_empty_ast_returns_fallback() {
         let ast = inline_ast(vec![]);
@@ -1187,8 +1169,6 @@ mod tests {
     /// `render_mathml` output is well-formed XML (all tags balance).
     ///
     /// Uses `quick-xml` event walk to confirm no unclosed tags.
-    ///
-    /// RED GATE: fails until `render_mathml` is implemented.
     #[test]
     fn test_bc_1_10_003_mathml_xml_is_wellformed() {
         let ast = inline_ast(vec![
@@ -1206,8 +1186,6 @@ mod tests {
     /// `render_mathml` output uses only `MathML` elements — no HTML tags.
     ///
     /// Checks that forbidden HTML elements (div, span, p, h1-h6) are absent.
-    ///
-    /// RED GATE: fails until `render_mathml` is implemented.
     #[test]
     fn test_bc_1_10_003_mathml_no_html_elements() {
         let ast = inline_ast(vec![MathNode::Text(Arc::from("x"))]);
@@ -1221,8 +1199,6 @@ mod tests {
     }
 
     /// `render_mathml` namespace declaration is exactly the W3C `MathML` URI.
-    ///
-    /// RED GATE: fails until `render_mathml` is implemented.
     #[test]
     fn test_bc_1_10_003_mathml_namespace_is_w3c_uri() {
         let ast = inline_ast(vec![MathNode::Text(Arc::from("x"))]);
@@ -1234,8 +1210,6 @@ mod tests {
     }
 
     /// `render_mathml` for `$\frac{1}{2}$` produces well-formed XML with `<mfrac>`.
-    ///
-    /// RED GATE: fails until `render_mathml` is implemented.
     #[test]
     fn test_bc_1_10_003_mathml_fraction_wellformed() {
         let ast = inline_ast(vec![MathNode::Fraction {
@@ -1249,8 +1223,6 @@ mod tests {
     }
 
     /// `render_mathml` for a `Sqrt` node produces `<msqrt>` or `<mroot>` element.
-    ///
-    /// RED GATE: fails until `render_mathml` is implemented.
     #[test]
     fn test_bc_1_10_003_mathml_sqrt_element() {
         let ast = inline_ast(vec![MathNode::Sqrt {
@@ -1269,8 +1241,6 @@ mod tests {
     // ─────────────────────────────────────────────────────────────────────────
 
     /// EC-001: Display math in `MathML` gets `display="block"` on root `<math>`.
-    ///
-    /// RED GATE: fails until `render_mathml` is implemented.
     #[test]
     fn test_bc_1_10_003_ec001_display_math_gets_block_attribute() {
         let ast = display_ast(vec![MathNode::Operator(Arc::from("sum"))]);
@@ -1291,8 +1261,6 @@ mod tests {
     /// The same [`MathAst`] can be passed to `render_mathml` twice without error.
     ///
     /// This exercises AC-004: `render_mathml` takes `&MathAst` (shared reference).
-    ///
-    /// RED GATE: fails until `render_mathml` is implemented.
     #[test]
     fn test_bc_1_10_003_mathml_ast_reusable_across_calls() {
         let ast = inline_ast(vec![MathNode::Text(Arc::from("x"))]);

@@ -60,6 +60,8 @@ pub mod symbols;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use tracing::instrument;
+
 pub use ast::{AccentKind, MathAst, MathMode, MathNode};
 pub use error::{MathDiagnostic, MathRendererError};
 pub use pdf_paths::SvgPaths;
@@ -173,6 +175,7 @@ impl MathRenderer for MathRendererImpl {
         "slideforge-builtin"
     }
 
+    #[instrument(skip(self, node), fields(target_format = ?format, latex_len = node.latex.len()))]
     fn render(&self, node: &TypesMathNode, format: MathOutputFormat) -> Result<Vec<u8>, MathError> {
         match format {
             MathOutputFormat::Omml => self.render_omml(node),
@@ -203,6 +206,8 @@ impl MathRenderer for MathRendererImpl {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
+    use tracing_test::traced_test;
+
     use super::*;
     use slideforge_types::{MathNode as TypesMathNode, SourceSpan};
 
@@ -246,8 +251,6 @@ mod tests {
 
     /// `render(node, MathMl)` dispatches through the trait to `render_mathml` and
     /// returns a UTF-8 string containing the `MathML` namespace and `display="inline"`.
-    ///
-    /// RED GATE: fails until STORY-030 implements `render_mathml` (todo!() panics).
     #[test]
     fn test_bc_1_10_003_renderer_dispatches_to_mathml_for_html() {
         let renderer = MathRendererImpl::new();
@@ -268,8 +271,6 @@ mod tests {
 
     /// `render(node, Pdf)` dispatches through the trait to `render_pdf_paths` and
     /// returns bytes that, as a string, contain an SVG root element and no `<text>`.
-    ///
-    /// RED GATE: fails until STORY-030 implements `render_pdf_paths` (todo!() panics).
     #[test]
     fn test_bc_1_10_003_renderer_dispatches_to_pdf_paths_for_pdf() {
         let renderer = MathRendererImpl::new();
@@ -367,6 +368,43 @@ mod tests {
         assert!(
             msg.contains("unknowncmd") || msg.contains("E-EXP-006") || msg.contains("unsupported"),
             "error message must reference the unsupported command; got: {msg}"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // OBS-1 — Tracing instrumentation: spans and events fire during render
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// `MathRendererImpl::render` emits at least one tracing span or event per
+    /// call (CLAUDE.md Quality Bar: "tracing instrumentation throughout the pipeline").
+    ///
+    /// Uses `#[traced_test]` from `tracing-test` to capture spans/events; verifies
+    /// that a `render_pdf_paths succeeded` debug event is emitted when rendering
+    /// a valid expression to `MathOutputFormat::Pdf`.
+    #[traced_test]
+    #[test]
+    fn test_obs1_tracing_spans_fire_during_render_pdf() {
+        let renderer = MathRendererImpl::new();
+        let node = inline_node("x");
+        let result = renderer.render(&node, MathOutputFormat::Pdf);
+        assert!(result.is_ok(), "render(Pdf) must succeed for 'x'");
+        assert!(
+            logs_contain("render_pdf_paths succeeded"),
+            "tracing debug event 'render_pdf_paths succeeded' must be emitted during Pdf render"
+        );
+    }
+
+    /// `MathRendererImpl::render` emits a tracing debug event for `MathML` output.
+    #[traced_test]
+    #[test]
+    fn test_obs1_tracing_spans_fire_during_render_mathml() {
+        let renderer = MathRendererImpl::new();
+        let node = inline_node("x");
+        let result = renderer.render(&node, MathOutputFormat::MathMl);
+        assert!(result.is_ok(), "render(MathMl) must succeed for 'x'");
+        assert!(
+            logs_contain("render_mathml succeeded"),
+            "tracing debug event 'render_mathml succeeded' must be emitted during MathML render"
         );
     }
 }

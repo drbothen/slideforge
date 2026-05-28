@@ -29,6 +29,7 @@
 //! - Integer EMUs for bounding-box dimensions (`i64`, 914 400 per inch).
 
 use slideforge_plugin_api::MathError;
+use tracing::instrument;
 
 use crate::MathAst;
 use crate::ast::{MathMode, MathNode};
@@ -100,6 +101,7 @@ pub struct SvgPaths(pub String);
 ///   an empty command name.
 /// - [`MathError::UnsupportedSymbol`] — a command name has no Unicode mapping.
 /// - [`MathError::RenderError`] — internal rendering failure.
+#[instrument(skip(ast), fields(node_count = ast.nodes.len(), display_mode = ?ast.mode))]
 pub fn render_pdf_paths(ast: &MathAst) -> Result<SvgPaths, MathError> {
     // Guard: an empty AST cannot produce meaningful vector-path output (L2).
     // Return EmptyAst rather than silently emitting a degenerate 1×16-px SVG.
@@ -185,6 +187,7 @@ pub fn render_pdf_paths(ast: &MathAst) -> Result<SvgPaths, MathError> {
     // width_emu and height_emu are encoded in the viewBox — callers that need EMU
     // dimensions parse the viewBox directly (see module-level doc).
     let _ = (width_emu, height_emu);
+    tracing::debug!(svg_len = svg.len(), "render_pdf_paths succeeded");
     Ok(SvgPaths(svg))
 }
 
@@ -679,8 +682,6 @@ mod tests {
     // ─────────────────────────────────────────────────────────────────────────
 
     /// `render_pdf_paths` succeeds for a simple expression and returns [`SvgPaths`].
-    ///
-    /// RED GATE: fails until `render_pdf_paths` is implemented.
     #[test]
     fn test_bc_1_10_003_pdf_paths_returns_svg_string() {
         let ast = inline_ast(vec![MathNode::Text(Arc::from("x"))]);
@@ -697,8 +698,6 @@ mod tests {
     /// `render_pdf_paths` SVG output contains zero `<text` elements.
     ///
     /// AC-003: No text characters — all glyphs must be path data.
-    ///
-    /// RED GATE: fails until `render_pdf_paths` is implemented.
     #[test]
     fn test_bc_1_10_003_pdf_paths_svg_has_no_text_elements() {
         let ast = inline_ast(vec![MathNode::Text(Arc::from("E"))]);
@@ -713,8 +712,6 @@ mod tests {
     /// `render_pdf_paths` SVG output contains zero `<image` elements.
     ///
     /// AC-003: Only `<path>` geometry; no embedded raster images.
-    ///
-    /// RED GATE: fails until `render_pdf_paths` is implemented.
     #[test]
     fn test_bc_1_10_003_pdf_paths_svg_has_no_image_elements() {
         let ast = inline_ast(vec![MathNode::Text(Arc::from("E"))]);
@@ -729,8 +726,6 @@ mod tests {
     /// `render_pdf_paths` SVG output contains at least one `<path` element.
     ///
     /// AC-003: All geometry is `<path d="...">` with absolute coordinates.
-    ///
-    /// RED GATE: fails until `render_pdf_paths` is implemented.
     #[test]
     fn test_bc_1_10_003_pdf_paths_svg_contains_path_elements() {
         let ast = inline_ast(vec![MathNode::Text(Arc::from("x"))]);
@@ -746,8 +741,6 @@ mod tests {
     ///
     /// BC-1.10.003 invariant: bounding box must have positive width and height.
     /// Since `SvgPaths` is a newtype, dimensions are read from the SVG viewBox.
-    ///
-    /// RED GATE: fails until `render_pdf_paths` is implemented.
     #[test]
     fn test_bc_1_10_003_pdf_paths_dimensions_positive() {
         let ast = inline_ast(vec![MathNode::Text(Arc::from("x"))]);
@@ -759,8 +752,6 @@ mod tests {
     }
 
     /// `render_pdf_paths` output SVG is well-formed XML.
-    ///
-    /// RED GATE: fails until `render_pdf_paths` is implemented.
     #[test]
     fn test_bc_1_10_003_pdf_paths_wellformed_xml() {
         let ast = inline_ast(vec![MathNode::Superscript {
@@ -795,8 +786,6 @@ mod tests {
 
     /// `render_pdf_paths` for a complex multi-node expression returns `Ok`,
     /// confirming the renderer handles all supported [`MathNode`] variants.
-    ///
-    /// RED GATE: fails until `render_pdf_paths` is implemented.
     #[test]
     fn test_bc_1_10_003_pdf_paths_complex_expression_succeeds() {
         // AST for: x^2 + y^2  (pythagorean-like expression)
@@ -826,8 +815,6 @@ mod tests {
 
     /// The same [`MathAst`] reference can be passed to `render_pdf_paths` twice
     /// and both calls return identical, deterministic output.
-    ///
-    /// RED GATE: fails until `render_pdf_paths` is implemented.
     #[test]
     fn test_bc_1_10_003_pdf_paths_ast_reusable_across_calls() {
         let ast = inline_ast(vec![MathNode::Text(Arc::from("x"))]);
