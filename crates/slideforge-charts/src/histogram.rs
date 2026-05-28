@@ -17,7 +17,7 @@ use crate::types::{ChartError, InternalChartSpec};
 ///
 /// Returns [`ChartError`] if the data is invalid or the plotters backend
 /// fails to produce output.
-pub fn render_histogram(spec: &InternalChartSpec) -> Result<String, ChartError> {
+pub(crate) fn render_histogram(spec: &InternalChartSpec) -> Result<String, ChartError> {
     // FINDING-006: Guard empty data early.
     if spec.data.is_empty() {
         return Err(ChartError::MissingDataField {

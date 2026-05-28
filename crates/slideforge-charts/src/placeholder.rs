@@ -379,6 +379,28 @@ mod tests {
         );
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // OBS-003 — Placeholder SVG passes the safety::assert_no_forbidden_elements check
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// OBS-003 — `build_error_slide_placeholder_svg` output passes the safety check.
+    ///
+    /// The placeholder SVG must not contain `<script>` or `<foreignObject>` elements,
+    /// as enforced by [`crate::safety::assert_no_forbidden_elements`]. This test
+    /// ensures the placeholder path is covered by the same safety gate as rendered
+    /// chart SVGs — any future change to the template that accidentally introduces
+    /// a forbidden element will be caught here.
+    #[test]
+    fn test_placeholder_svg_passes_safety_check() {
+        let svg = build_error_slide_placeholder_svg("Test Slide", "E-LAY-003", "test message");
+        assert!(
+            crate::safety::assert_no_forbidden_elements(&svg).is_ok(),
+            "placeholder SVG must pass the PPTX safety check (no <script> or <foreignObject>); \
+             got SVG: {}",
+            &svg[..svg.len().min(400)]
+        );
+    }
+
     /// MED-003 — Double-escape trap: `&amp;` input must not become `&amp;amp;`.
     ///
     /// If the input already contains `&amp;` (e.g., a string that was pre-escaped),

@@ -85,13 +85,16 @@ impl ChartRendererImpl {
     /// Returns [`ChartError::EmptyData`] when `spec.data` is empty (no series).
     /// Returns [`ChartError`] on render or post-processing failure.
     ///
-    /// This is the **primary internal entry point** for chart rendering in the
-    /// slideforge eval pipeline. The eval layer calls this method directly with
-    /// a fully-bound [`InternalChartSpec`] that includes all series data.
+    /// This is the **primary internal entry point** for chart rendering.
+    /// It will be the primary entry point called by the eval layer (STORY-055)
+    /// once the eval pipeline is wired — the eval layer will construct a
+    /// fully-bound [`InternalChartSpec`] with resolved series data and call
+    /// this method directly.
     ///
     /// The [`ChartRenderer::render`] trait method (the plugin API surface) is a
-    /// skeleton entry point — it validates the chart type and then delegates to
-    /// this method from the eval pipeline via [`InternalChartSpec`].
+    /// skeleton entry point — it validates the chart type and returns
+    /// [`slideforge_plugin_api::ChartError::InvalidSpec`] indicating that callers
+    /// must supply data via the eval pipeline's [`InternalChartSpec`].
     ///
     pub fn dispatch_and_process(spec: &InternalChartSpec) -> Result<ChartSvg, ChartError> {
         // BC-1.11.002 invariant 2: empty-data guard must run BEFORE renderer dispatch.
@@ -1606,6 +1609,14 @@ mod tests {
     /// 1. Empty spec → `ChartError::EmptyData`
     /// 2. Non-empty specs → `Ok(ChartSvg)` with valid SVG
     /// 3. Each renders independently (no cross-contamination)
+    ///
+    /// # Known scope limitation (OBS-002)
+    ///
+    /// This test exercises `dispatch_and_process` directly. It does NOT exercise
+    /// a real `DiagnosticSink` accumulating errors across multiple slides, because
+    /// `slideforge-charts` has no dependency on `slideforge-layout` or the eval
+    /// pipeline's `DiagnosticSink`. Full multi-slide `DiagnosticSink` integration
+    /// is covered by STORY-055 (eval-layer wiring).
     #[test]
     fn test_bc_1_11_002_multi_slide_one_empty_two_valid() {
         let empty_spec = InternalChartSpec {

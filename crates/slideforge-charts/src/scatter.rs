@@ -18,7 +18,7 @@ use crate::types::{ChartError, InternalChartSpec};
 /// Returns [`ChartError`] if required data fields are missing or the plotters
 /// backend fails to produce output.
 #[allow(clippy::cast_precision_loss)] // index-to-f64 cast: bounded by data length
-pub fn render_scatter(spec: &InternalChartSpec) -> Result<String, ChartError> {
+pub(crate) fn render_scatter(spec: &InternalChartSpec) -> Result<String, ChartError> {
     // FINDING-006: Guard empty data early.
     if spec.data.is_empty() {
         return Err(ChartError::MissingDataField {

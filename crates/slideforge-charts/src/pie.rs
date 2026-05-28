@@ -29,7 +29,7 @@ use crate::types::{ChartError, InternalChartSpec};
 // - values are bounded to chart canvas size (< i32::MAX)
 // - truncation is intentional for pixel coordinates
 // - sign: coordinates are always positive (canvas origin at top-left)
-pub fn render_pie(spec: &InternalChartSpec) -> Result<String, ChartError> {
+pub(crate) fn render_pie(spec: &InternalChartSpec) -> Result<String, ChartError> {
     // FINDING-004: Validate all data points are finite.
     crate::bar::validate_data_finite(spec)?;
     // FINDING-002 (Pass 3): Guard non-empty data vec with all-empty points.

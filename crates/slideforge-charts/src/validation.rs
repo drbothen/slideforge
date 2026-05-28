@@ -65,8 +65,8 @@ pub fn data_is_empty(data: &Value) -> bool {
 ///
 /// * `slide_title` — The title of the chart slide (for the human-readable message).
 /// * `expression` — The data binding expression from the DSL (e.g., `{{ kpis.monthly }}`).
-///   The expression is passed through as a function argument for callers that need it,
-///   but is NOT inlined into the message body (miette renders the span pointer separately).
+///   The expression is NOT inlined into the message body (miette renders the span pointer
+///   separately), but IS included in the hint text to make the remediation guidance actionable.
 /// * `span` — Source location of the `data` binding line in the `.sf` file.
 ///
 /// # Returns
@@ -75,26 +75,27 @@ pub fn data_is_empty(data: &Value) -> bool {
 /// - `code`: `E-LAY-003`
 /// - `severity`: [`DiagnosticSeverity::Error`]
 /// - `message`: `"Chart data is empty for slide '<slide_title>'. Rendering error-slide placeholder."`
-/// - `hint`: `"Ensure the data source contains at least one row."`
+/// - `hint`: `"Ensure '<expression>' contains at least one row."`
 /// - `span`: the provided `span` (miette renders the expression location as a source pointer)
 #[must_use]
 pub fn build_empty_data_diagnostic(
     slide_title: &str,
-    _expression: &str,
+    expression: &str,
     span: SourceSpan,
 ) -> Diagnostic {
     Diagnostic {
         severity: slideforge_plugin_api::DiagnosticSeverity::Error,
         code: std::sync::Arc::from(E_LAY_003),
-        // HIGH-004: canonical message format — expression NOT inlined; miette renders the
-        // span source pointer which points at the data binding expression directly.
+        // HIGH-004: canonical message format — expression NOT inlined in message body;
+        // miette renders the span source pointer which points at the data binding expression directly.
         message: std::sync::Arc::from(format!(
             "Chart data is empty for slide '{slide_title}'. Rendering error-slide placeholder."
         )),
         span,
-        hint: Some(std::sync::Arc::from(
-            "Ensure the data source contains at least one row.",
-        )),
+        // MEDIUM-001: expression is included in the hint to make remediation guidance actionable.
+        hint: Some(std::sync::Arc::from(format!(
+            "Ensure '{expression}' contains at least one row.",
+        ))),
     }
 }
 
@@ -324,9 +325,8 @@ mod tests {
 
     /// BC-1.11.002 AC-001 — Hint text is present and contains remediation guidance.
     ///
-    /// Per AC-001, the hint is: `"Ensure the data source contains at least one row."`
-    ///
-    /// Red Gate: fails until `build_empty_data_diagnostic` is implemented.
+    /// The hint format is: `"Ensure '<expression>' contains at least one row."`
+    /// The expression is embedded in the hint to make the guidance actionable.
     #[test]
     fn test_bc_1_11_002_diagnostic_hint_includes_remediation() {
         let span = SourceSpan::default();
@@ -335,8 +335,27 @@ mod tests {
             "E-LAY-003 diagnostic must include a correction hint (hint field must be Some)",
         );
         assert!(
-            hint.contains("data source") || hint.contains("at least one row"),
+            hint.contains("at least one row"),
             "hint must suggest remediation for empty data; got: {hint}"
+        );
+    }
+
+    /// MEDIUM-001 — Expression is included in the hint text for actionable guidance.
+    ///
+    /// The hint must embed the data binding expression so the user can identify
+    /// exactly which binding produced the empty result.
+    #[test]
+    fn test_bc_1_11_002_diagnostic_hint_includes_expression() {
+        let span = SourceSpan::default();
+        let expr = "{{ kpis.monthly }}";
+        let diag = build_empty_data_diagnostic("KPI Dashboard", expr, span);
+        let hint = diag
+            .hint
+            .as_ref()
+            .expect("hint must be Some for E-LAY-003 diagnostic");
+        assert!(
+            hint.contains(expr),
+            "hint must include the data binding expression '{expr}'; got: {hint}"
         );
     }
 

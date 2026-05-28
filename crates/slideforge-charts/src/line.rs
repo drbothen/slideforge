@@ -18,7 +18,7 @@ use crate::types::{ChartError, InternalChartSpec};
 /// Returns [`ChartError`] if the data is invalid or the plotters backend
 /// fails to produce output.
 #[allow(clippy::cast_possible_truncation)] // coordinate index cast: n_points bounded by data len
-pub fn render_line(spec: &InternalChartSpec) -> Result<String, ChartError> {
+pub(crate) fn render_line(spec: &InternalChartSpec) -> Result<String, ChartError> {
     // FINDING-006: Guard empty data early.
     if spec.data.is_empty() {
         return Err(ChartError::MissingDataField {
