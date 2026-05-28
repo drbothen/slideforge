@@ -82,7 +82,7 @@ pub struct DeckMetadata {
     ///
     /// When `Some`, the layout engine sorts the collected sections to match
     /// the declared order. Sections not listed appear at the end in default
-    /// order. Section names must match [`SectionKind`] display names
+    /// order. Section names must match `SectionKind` display names
     /// (`"executive_summary"`, `"risk_register"`) or the manual section type
     /// name (e.g., `"methodology"`).
     pub section_order: Option<Vec<Arc<str>>>,
@@ -116,7 +116,7 @@ pub struct Deck {
     /// (BC-3.02.002).
     ///
     /// In source order. The layout engine collects these into
-    /// [`GeneratedSection`]s with [`SectionSource::ManuallyAuthored`]. An
+    /// `GeneratedSection`s with `SectionSource::ManuallyAuthored`. An
     /// unrecognised type name returns `LayoutError::UnknownSectionType`.
     pub section_blocks: Vec<SectionBlock>,
 }
