@@ -266,15 +266,22 @@ fn place_node(
             // Translate command name to canonical Unicode glyph first.
             // Text-based operators (lim, max, min, …) have no Unicode-symbol
             // mapping and render as multiple Latin characters.
+            // Unknown names that are neither in the Unicode table nor recognised
+            // as text operators return UnsupportedSymbol — they must not fall
+            // through to per-letter rendering (F-S030-P2-H6).
             if let Some(ch) = operator_to_unicode_char(name) {
                 emit_glyph(ch, paths, *x, baseline_y - GLYPH_H);
                 *x += GLYPH_W + 1;
-            } else {
-                // Text operator: render each Latin character individually.
+            } else if is_text_operator(name) {
+                // Known text operator: render each Latin character individually.
                 for ch in name.chars() {
                     emit_glyph(ch, paths, *x, baseline_y - GLYPH_H);
                     *x += GLYPH_W + 1;
                 }
+            } else {
+                return Err(MathError::UnsupportedSymbol {
+                    name: name.to_string(),
+                });
             }
         },
 
@@ -405,6 +412,42 @@ fn place_node_at_scale(
         },
     }
     Ok(())
+}
+
+/// Return `true` if `name` is a known text-based operator.
+///
+/// Text operators (lim, max, min, sin, cos, tan, log, ln, exp, det, sup, inf,
+/// gcd, dim, ker, deg, hom, mod) render as multi-char Latin runs, not as a
+/// single Unicode glyph.  Any operator name not in this list and not in the
+/// `operator_to_unicode_char` table returns [`MathError::UnsupportedSymbol`].
+fn is_text_operator(name: &str) -> bool {
+    matches!(
+        name,
+        "lim"
+            | "max"
+            | "min"
+            | "sin"
+            | "cos"
+            | "tan"
+            | "log"
+            | "ln"
+            | "exp"
+            | "det"
+            | "sup"
+            | "inf"
+            | "gcd"
+            | "dim"
+            | "ker"
+            | "deg"
+            | "hom"
+            | "mod"
+            | "cot"
+            | "sec"
+            | "csc"
+            | "arcsin"
+            | "arccos"
+            | "arctan"
+    )
 }
 
 /// Emit a single glyph as a `<path>` element at position `(x, y)`.
@@ -1237,16 +1280,35 @@ mod tests {
 
     /// Render an unmapped `\xyzunknown` operator → must return `Err(UnsupportedSymbol)`.
     ///
-    /// Closes finding C5 (silent fallback on unknown symbols).
+    /// Closes finding C5 (silent fallback on unknown symbols) and F-S030-P2-H6
+    /// (operator unknown name must error, not fall through to Latin chars).
+    ///
+    /// Both `MathNode::Operator` and `MathNode::Symbol` with unrecognised names
+    /// must return `Err(MathError::UnsupportedSymbol)`.  Known text operators
+    /// (lim, max, min, sin, …) are the only allowed Latin-char fall-through.
     #[test]
     fn test_bc_1_10_003_pdf_unknown_command_errors() {
-        let ast = inline_ast(vec![MathNode::Operator(Arc::from("xyzunknown"))]);
-        let result = render_pdf_paths(&ast);
-        // Text operators (lim, max, …) are emitted as Latin chars — unknown
-        // symbols that are neither text-ops nor mapped should error.
-        // Note: our implementation treats "xyzunknown" as a text operator
-        // (falls through to the Latin char iteration path). To get an actual
-        // UnsupportedSymbol we need to use a Symbol node instead:
+        // Unknown Operator name must error.
+        let op_ast = inline_ast(vec![MathNode::Operator(Arc::from("xyzunknown"))]);
+        let op_result = render_pdf_paths(&op_ast);
+        assert!(
+            op_result.is_err(),
+            "MathNode::Operator with unknown name must return Err; got Ok"
+        );
+        match op_result {
+            Err(MathError::UnsupportedSymbol { .. }) => {}, // correct
+            other => panic!("expected MathError::UnsupportedSymbol for Operator, got: {other:?}"),
+        }
+
+        // Known text operator (lim) must NOT error — it renders as Latin chars.
+        let lim_ast = inline_ast(vec![MathNode::Operator(Arc::from("lim"))]);
+        let lim_result = render_pdf_paths(&lim_ast);
+        assert!(
+            lim_result.is_ok(),
+            "MathNode::Operator('lim') must succeed; got: {lim_result:?}"
+        );
+
+        // Unknown Symbol name must error.
         let sym_ast = inline_ast(vec![MathNode::Symbol(Arc::from("xyzunknown"))]);
         let sym_result = render_pdf_paths(&sym_ast);
         assert!(
@@ -1255,9 +1317,8 @@ mod tests {
         );
         match sym_result {
             Err(MathError::UnsupportedSymbol { .. }) => {}, // correct
-            other => panic!("expected MathError::UnsupportedSymbol, got: {other:?}"),
+            other => panic!("expected MathError::UnsupportedSymbol for Symbol, got: {other:?}"),
         }
-        let _ = result; // Operator unknown name falls through to Latin chars (acceptable)
     }
 
     /// Render `MathNode::Greek("")` → must return `Err(EmptyCommandName)`.

@@ -74,14 +74,6 @@ pub enum MathRendererError {
         span: SourceSpan,
     },
 
-    /// PDF path output still contains `<text>` elements after SVG normalisation.
-    ///
-    /// Returned when `usvg` normalisation cannot remove all `<text>` elements
-    /// from the intermediate SVG produced by the PDF path renderer (STORY-030,
-    /// EC-005). Callers should surface `E-EXP-004` to the user.
-    #[error("PDF path output contains residual <text> elements after SVG normalisation")]
-    TextRemainsInPathOutput,
-
     /// The requested operation is not yet implemented in this version.
     ///
     /// Used in stubs only — every `NotYetImplemented` path must have a
