@@ -27,6 +27,7 @@
 
 use crate::ast::{AccentKind, MathAst, MathMode, MathNode};
 use crate::error::MathRendererError;
+use crate::symbols::{greek_to_unicode_char, operator_to_unicode_char, symbol_to_unicode_char};
 
 /// The XML namespace URI for OMML.
 pub const OMML_NAMESPACE: &str = "http://schemas.openxmlformats.org/officeDocument/2006/math";
@@ -52,14 +53,14 @@ pub fn render(ast: &MathAst) -> Result<Vec<u8>, MathRendererError> {
             out.push_str(
                 r#"<m:oMathPara xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math"><m:oMath>"#,
             );
-            render_nodes(&ast.nodes, &mut out);
+            render_nodes(&ast.nodes, &mut out)?;
             out.push_str("</m:oMath></m:oMathPara>");
         },
         MathMode::Inline => {
             out.push_str(
                 r#"<m:oMath xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math">"#,
             );
-            render_nodes(&ast.nodes, &mut out);
+            render_nodes(&ast.nodes, &mut out)?;
             out.push_str("</m:oMath>");
         },
     }
@@ -68,14 +69,19 @@ pub fn render(ast: &MathAst) -> Result<Vec<u8>, MathRendererError> {
 }
 
 /// Render a slice of [`MathNode`]s into `out`.
-fn render_nodes(nodes: &[MathNode], out: &mut String) {
+fn render_nodes(nodes: &[MathNode], out: &mut String) -> Result<(), MathRendererError> {
     for node in nodes {
-        render_node(node, out);
+        render_node(node, out)?;
     }
+    Ok(())
 }
 
 /// Render a single [`MathNode`] into `out`.
-fn render_node(node: &MathNode, out: &mut String) {
+///
+/// Returns `Err(MathRendererError)` for empty command names or unrecognised
+/// symbols; the public [`render`] function propagates these as
+/// [`slideforge_plugin_api::MathError`].
+fn render_node(node: &MathNode, out: &mut String) -> Result<(), MathRendererError> {
     match node {
         // ── Plain text / identifiers / digits (italic/math style) ─────────
         MathNode::Text(s) => {
@@ -94,27 +100,27 @@ fn render_node(node: &MathNode, out: &mut String) {
         // ── Superscript: x^{2} ────────────────────────────────────────────
         MathNode::Superscript { base, sup } => {
             out.push_str("<m:sSup><m:e>");
-            render_node(base, out);
+            render_node(base, out)?;
             out.push_str("</m:e><m:sup>");
-            render_node(sup, out);
+            render_node(sup, out)?;
             out.push_str("</m:sup></m:sSup>");
         },
 
         // ── Subscript: x_{i} ──────────────────────────────────────────────
         MathNode::Subscript { base, sub } => {
             out.push_str("<m:sSub><m:e>");
-            render_node(base, out);
+            render_node(base, out)?;
             out.push_str("</m:e><m:sub>");
-            render_node(sub, out);
+            render_node(sub, out)?;
             out.push_str("</m:sub></m:sSub>");
         },
 
         // ── Fraction: \frac{a}{b} ─────────────────────────────────────────
         MathNode::Fraction { num, denom } => {
             out.push_str("<m:f><m:num>");
-            render_node(num, out);
+            render_node(num, out)?;
             out.push_str("</m:num><m:den>");
-            render_node(denom, out);
+            render_node(denom, out)?;
             out.push_str("</m:den></m:f>");
         },
 
@@ -127,45 +133,72 @@ fn render_node(node: &MathNode, out: &mut String) {
                 },
                 Some(idx) => {
                     out.push_str("<m:radPr/><m:deg>");
-                    render_node(idx, out);
+                    render_node(idx, out)?;
                     out.push_str("</m:deg>");
                 },
             }
             out.push_str("<m:e>");
-            render_node(radicand, out);
+            render_node(radicand, out)?;
             out.push_str("</m:e></m:rad>");
         },
 
-        // ── Greek letters → Unicode run ───────────────────────────────────
+        // ── Greek letters → Unicode run via canonical symbols table ──────
+        //
+        // All Greek glyphs are resolved through `symbols::greek_to_unicode_char`
+        // to guarantee cross-renderer Unicode equivalence (BC-1.10.003 inv. 6).
+        // An empty name or an unrecognised name returns an error rather than a
+        // silent "?" fallback.
         MathNode::Greek(name) => {
-            let ch = greek_to_unicode(name);
+            if name.is_empty() {
+                return Err(MathRendererError::EmptyCommandName);
+            }
+            let ch = greek_to_unicode_char(name).ok_or_else(|| MathRendererError::UnsupportedSymbol {
+                name: name.to_string().into(),
+            })?;
             out.push_str("<m:r><m:t>");
-            out.push_str(&xml_escape(&ch));
+            out.push_str(&xml_escape(&ch.to_string()));
             out.push_str("</m:t></m:r>");
         },
 
-        // ── Large operators → Unicode run ─────────────────────────────────
+        // ── Large operators → Unicode run via canonical symbols table ─────
         //
         // Text-based operators (lim, max, min, etc.) must render in upright
         // (plain) style using <m:rPr><m:sty m:val="p"/></m:rPr> so they appear
         // in roman rather than italic — matching standard mathematical typography.
         // Symbol operators (∑, ∏, ∫) do not carry this property.
+        // Unknown operators that are not in the text-operator list return an error.
         MathNode::Operator(name) => {
-            let ch = operator_to_unicode(name);
+            if name.is_empty() {
+                return Err(MathRendererError::EmptyCommandName);
+            }
             if is_text_operator(name) {
                 out.push_str(r#"<m:r><m:rPr><m:sty m:val="p"/></m:rPr><m:t>"#);
-            } else {
+                out.push_str(&xml_escape(name));
+                out.push_str("</m:t></m:r>");
+            } else if let Some(ch) = operator_to_unicode_char(name) {
                 out.push_str("<m:r><m:t>");
+                out.push_str(&xml_escape(&ch.to_string()));
+                out.push_str("</m:t></m:r>");
+            } else {
+                return Err(MathRendererError::UnsupportedSymbol {
+                    name: name.to_string().into(),
+                });
             }
-            out.push_str(&xml_escape(ch));
-            out.push_str("</m:t></m:r>");
         },
 
-        // ── Math symbols → Unicode run ────────────────────────────────────
+        // ── Math symbols → Unicode run via canonical symbols table ────────
+        //
+        // All symbols are resolved through `symbols::symbol_to_unicode_char`.
+        // An empty name or an unrecognised name returns an error.
         MathNode::Symbol(name) => {
-            let ch = symbol_to_unicode(name);
+            if name.is_empty() {
+                return Err(MathRendererError::EmptyCommandName);
+            }
+            let ch = symbol_to_unicode_char(name).ok_or_else(|| MathRendererError::UnsupportedSymbol {
+                name: name.to_string().into(),
+            })?;
             out.push_str("<m:r><m:t>");
-            out.push_str(&xml_escape(ch));
+            out.push_str(&xml_escape(&ch.to_string()));
             out.push_str("</m:t></m:r>");
         },
 
@@ -175,13 +208,13 @@ fn render_node(node: &MathNode, out: &mut String) {
             out.push_str("<m:acc><m:accPr><m:chr m:val=\"");
             out.push_str(chr);
             out.push_str("\"/></m:accPr><m:e>");
-            render_node(inner, out);
+            render_node(inner, out)?;
             out.push_str("</m:e></m:acc>");
         },
 
         // ── Braced group: {a b c} → flatten ──────────────────────────────
         MathNode::Group(nodes) => {
-            render_nodes(nodes, out);
+            render_nodes(nodes, out)?;
         },
 
         // ── Delimiter: \left( ... \right) ────────────────────────────────
@@ -194,7 +227,7 @@ fn render_node(node: &MathNode, out: &mut String) {
             out.push_str(&xml_escape(unescape_delimiter(right)));
             out.push_str("\"/>");
             out.push_str("</m:dPr><m:e>");
-            render_nodes(inner, out);
+            render_nodes(inner, out)?;
             out.push_str("</m:e></m:d>");
         },
 
@@ -203,7 +236,7 @@ fn render_node(node: &MathNode, out: &mut String) {
             out.push_str("<m:eqArr>");
             for row in rows {
                 out.push_str("<m:e>");
-                render_nodes(row, out);
+                render_nodes(row, out)?;
                 out.push_str("</m:e>");
             }
             out.push_str("</m:eqArr>");
@@ -216,10 +249,10 @@ fn render_node(node: &MathNode, out: &mut String) {
             );
             for (lhs, rhs) in cases {
                 out.push_str("<m:e>");
-                render_nodes(lhs, out);
+                render_nodes(lhs, out)?;
                 if !rhs.is_empty() {
                     out.push_str("<m:r><m:t> </m:t></m:r>");
-                    render_nodes(rhs, out);
+                    render_nodes(rhs, out)?;
                 }
                 out.push_str("</m:e>");
             }
@@ -231,6 +264,7 @@ fn render_node(node: &MathNode, out: &mut String) {
             out.push_str(r#"<m:r><m:rPr><m:sty m:val="p"/></m:rPr><m:t> </m:t></m:r>"#);
         },
     }
+    Ok(())
 }
 
 /// Strip LaTeX delimiter escapes so that OMML receives a bare Unicode character.
@@ -285,77 +319,6 @@ fn xml_escape(s: &str) -> String {
     out
 }
 
-/// Map a Greek letter command name to its Unicode character string.
-fn greek_to_unicode(name: &str) -> String {
-    match name {
-        "alpha" => "α".to_owned(),
-        "beta" => "β".to_owned(),
-        "gamma" => "γ".to_owned(),
-        "delta" => "δ".to_owned(),
-        "epsilon" | "varepsilon" => "ε".to_owned(),
-        "zeta" => "ζ".to_owned(),
-        "eta" => "η".to_owned(),
-        "theta" => "θ".to_owned(),
-        "vartheta" => "ϑ".to_owned(),
-        "iota" => "ι".to_owned(),
-        "kappa" => "κ".to_owned(),
-        "lambda" => "λ".to_owned(),
-        "mu" => "μ".to_owned(),
-        "nu" => "ν".to_owned(),
-        "xi" => "ξ".to_owned(),
-        "pi" => "π".to_owned(),
-        "varpi" => "ϖ".to_owned(),
-        "rho" => "ρ".to_owned(),
-        "varrho" => "ϱ".to_owned(),
-        "sigma" => "σ".to_owned(),
-        "varsigma" => "ς".to_owned(),
-        "tau" => "τ".to_owned(),
-        "upsilon" => "υ".to_owned(),
-        "phi" => "φ".to_owned(),
-        "varphi" => "ϕ".to_owned(),
-        "chi" => "χ".to_owned(),
-        "psi" => "ψ".to_owned(),
-        "omega" => "ω".to_owned(),
-        "Alpha" => "Α".to_owned(),
-        "Beta" => "Β".to_owned(),
-        "Gamma" => "Γ".to_owned(),
-        "Delta" => "Δ".to_owned(),
-        "Epsilon" => "Ε".to_owned(),
-        "Zeta" => "Ζ".to_owned(),
-        "Eta" => "Η".to_owned(),
-        "Theta" => "Θ".to_owned(),
-        "Iota" => "Ι".to_owned(),
-        "Kappa" => "Κ".to_owned(),
-        "Lambda" => "Λ".to_owned(),
-        "Mu" => "Μ".to_owned(),
-        "Nu" => "Ν".to_owned(),
-        "Xi" => "Ξ".to_owned(),
-        "Pi" => "Π".to_owned(),
-        "Rho" => "Ρ".to_owned(),
-        "Sigma" => "Σ".to_owned(),
-        "Tau" => "Τ".to_owned(),
-        "Upsilon" => "Υ".to_owned(),
-        "Phi" => "Φ".to_owned(),
-        "Chi" => "Χ".to_owned(),
-        "Psi" => "Ψ".to_owned(),
-        "Omega" => "Ω".to_owned(),
-        other => other.to_owned(),
-    }
-}
-
-/// Map an operator command name to its Unicode character string.
-fn operator_to_unicode(name: &str) -> &'static str {
-    match name {
-        "sum" => "∑",
-        "prod" => "∏",
-        "int" => "∫",
-        "lim" => "lim",
-        "max" => "max",
-        "min" => "min",
-        _ => "?",
-    }
-}
-
 /// Return `true` if `name` is a text-based operator that must render upright.
 ///
 /// Text operators (lim, max, min, sin, cos, tan, log, ln, exp, det, sup, inf,
@@ -388,43 +351,6 @@ fn is_text_operator(name: &str) -> bool {
             | "hom"
             | "mod"
     )
-}
-
-/// Map a symbol command name to its Unicode character string.
-fn symbol_to_unicode(name: &str) -> &'static str {
-    match name {
-        "cdot" => "·",
-        "times" => "×",
-        "div" => "÷",
-        "infty" => "∞",
-        "pm" => "±",
-        "mp" => "∓",
-        "leq" => "≤",
-        "geq" => "≥",
-        "neq" => "≠",
-        "approx" => "≈",
-        "equiv" => "≡",
-        "in" => "∈",
-        "notin" => "∉",
-        "subset" => "⊂",
-        "supset" => "⊃",
-        "cup" => "∪",
-        "cap" => "∩",
-        "emptyset" => "∅",
-        "forall" => "∀",
-        "exists" => "∃",
-        "partial" => "∂",
-        "nabla" => "∇",
-        "to" | "rightarrow" => "→",
-        "leftarrow" => "←",
-        "Rightarrow" => "⇒",
-        "Leftarrow" => "⇐",
-        "ldots" => "…",
-        "cdots" => "⋯",
-        "vdots" => "⋮",
-        "ddots" => "⋱",
-        _ => "?",
-    }
 }
 
 /// Map an accent kind to its OMML character value.

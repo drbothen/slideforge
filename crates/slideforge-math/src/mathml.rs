@@ -26,6 +26,7 @@ use slideforge_plugin_api::MathError;
 
 use crate::MathAst;
 use crate::ast::{MathMode, MathNode};
+use crate::symbols::{greek_to_unicode_char, operator_to_unicode_char, symbol_to_unicode_char};
 
 /// The W3C `MathML` namespace URI.
 const MATHML_NS: &str = "http://www.w3.org/1998/Math/MathML";
@@ -197,25 +198,64 @@ fn write_node(writer: &mut Writer<&mut Vec<u8>>, node: &MathNode) -> Result<(), 
         },
 
         MathNode::Operator(name) => {
-            // Map operator name to Unicode symbol where possible, else use
-            // the command name as text content.
-            let sym = operator_symbol(name);
+            // Map operator name to Unicode symbol where possible via the shared
+            // canonical symbols table (BC-1.10.003 inv. 6: cross-renderer equivalence).
+            // Text-based operators (lim, max, etc.) have no Unicode-symbol mapping
+            // and use the command name as literal text.
+            // Empty name returns error.
+            if name.is_empty() {
+                return Err(quick_xml::Error::Io(std::sync::Arc::new(
+                    std::io::Error::other("empty operator command name"),
+                )));
+            }
+            let sym_str;
+            let sym: &str = if let Some(ch) = operator_to_unicode_char(name) {
+                sym_str = ch.to_string();
+                &sym_str
+            } else {
+                // Text-based operator or other name used as literal text
+                name
+            };
             writer.write_event(Event::Start(BytesStart::new("mo")))?;
             writer.write_event(Event::Text(BytesText::new(sym)))?;
             writer.write_event(Event::End(BytesEnd::new("mo")))?;
         },
 
         MathNode::Greek(name) => {
-            let sym = greek_symbol(name);
+            // All Greek glyphs resolved through the shared canonical symbols table.
+            // Empty name returns error; unrecognised name returns error.
+            if name.is_empty() {
+                return Err(quick_xml::Error::Io(std::sync::Arc::new(
+                    std::io::Error::other("empty Greek command name"),
+                )));
+            }
+            let ch = greek_to_unicode_char(name).ok_or_else(|| {
+                quick_xml::Error::Io(std::sync::Arc::new(std::io::Error::other(format!(
+                    "unsupported Greek command: {name}"
+                ))))
+            })?;
+            let sym = ch.to_string();
             writer.write_event(Event::Start(BytesStart::new("mi")))?;
-            writer.write_event(Event::Text(BytesText::new(sym)))?;
+            writer.write_event(Event::Text(BytesText::new(&sym)))?;
             writer.write_event(Event::End(BytesEnd::new("mi")))?;
         },
 
         MathNode::Symbol(name) => {
-            let sym = misc_symbol(name);
+            // All symbols resolved through the shared canonical symbols table.
+            // Empty name returns error; unrecognised name returns error.
+            if name.is_empty() {
+                return Err(quick_xml::Error::Io(std::sync::Arc::new(
+                    std::io::Error::other("empty symbol command name"),
+                )));
+            }
+            let ch = symbol_to_unicode_char(name).ok_or_else(|| {
+                quick_xml::Error::Io(std::sync::Arc::new(std::io::Error::other(format!(
+                    "unsupported symbol command: {name}"
+                ))))
+            })?;
+            let sym = ch.to_string();
             writer.write_event(Event::Start(BytesStart::new("mo")))?;
-            writer.write_event(Event::Text(BytesText::new(sym)))?;
+            writer.write_event(Event::Text(BytesText::new(&sym)))?;
             writer.write_event(Event::End(BytesEnd::new("mo")))?;
         },
 
@@ -301,124 +341,6 @@ fn write_node(writer: &mut Writer<&mut Vec<u8>>, node: &MathNode) -> Result<(), 
     }
 
     Ok(())
-}
-
-/// Map an operator command name to its Unicode symbol.
-fn operator_symbol(name: &str) -> &str {
-    match name {
-        "sum" => "\u{2211}",  // ∑
-        "prod" => "\u{220F}", // ∏
-        "int" => "\u{222B}",  // ∫
-        "oint" => "\u{222E}", // ∮
-        "lim" => "lim",
-        "max" => "max",
-        "min" => "min",
-        "sup" => "sup",
-        "inf" => "inf",
-        "log" => "log",
-        "ln" => "ln",
-        "sin" => "sin",
-        "cos" => "cos",
-        "tan" => "tan",
-        "cot" => "cot",
-        "sec" => "sec",
-        "csc" => "csc",
-        "arcsin" => "arcsin",
-        "arccos" => "arccos",
-        "arctan" => "arctan",
-        "bigcup" => "\u{22C3}", // ⋃
-        "bigcap" => "\u{22C2}", // ⋂
-        "bigoplus" => "\u{2A01}",
-        "bigotimes" => "\u{2A02}",
-        _ => name,
-    }
-}
-
-/// Map a Greek letter command name to its Unicode character.
-fn greek_symbol(name: &str) -> &str {
-    match name {
-        "alpha" => "\u{03B1}",
-        "beta" => "\u{03B2}",
-        "gamma" => "\u{03B3}",
-        "delta" => "\u{03B4}",
-        "epsilon" | "varepsilon" => "\u{03B5}",
-        "zeta" => "\u{03B6}",
-        "eta" => "\u{03B7}",
-        "theta" => "\u{03B8}",
-        "vartheta" => "\u{03D1}",
-        "iota" => "\u{03B9}",
-        "kappa" => "\u{03BA}",
-        "lambda" => "\u{03BB}",
-        "mu" => "\u{03BC}",
-        "nu" => "\u{03BD}",
-        "xi" => "\u{03BE}",
-        "pi" => "\u{03C0}",
-        "varpi" => "\u{03D6}",
-        "rho" => "\u{03C1}",
-        "varrho" => "\u{03F1}",
-        "sigma" => "\u{03C3}",
-        "varsigma" => "\u{03C2}",
-        "tau" => "\u{03C4}",
-        "upsilon" => "\u{03C5}",
-        "phi" | "varphi" => "\u{03C6}",
-        "chi" => "\u{03C7}",
-        "psi" => "\u{03C8}",
-        "omega" => "\u{03C9}",
-        "Gamma" => "\u{0393}",
-        "Delta" => "\u{0394}",
-        "Theta" => "\u{0398}",
-        "Lambda" => "\u{039B}",
-        "Xi" => "\u{039E}",
-        "Pi" => "\u{03A0}",
-        "Sigma" => "\u{03A3}",
-        "Upsilon" => "\u{03A5}",
-        "Phi" => "\u{03A6}",
-        "Psi" => "\u{03A8}",
-        "Omega" => "\u{03A9}",
-        _ => name,
-    }
-}
-
-/// Map a miscellaneous symbol command name to its Unicode character.
-fn misc_symbol(name: &str) -> &str {
-    match name {
-        "cdot" => "\u{22C5}",              // ⋅
-        "times" => "\u{00D7}",             // ×
-        "div" => "\u{00F7}",               // ÷
-        "infty" => "\u{221E}",             // ∞
-        "pm" => "\u{00B1}",                // ±
-        "mp" => "\u{2213}",                // ∓
-        "leq" | "le" => "\u{2264}",        // ≤
-        "geq" | "ge" => "\u{2265}",        // ≥
-        "neq" | "ne" => "\u{2260}",        // ≠
-        "approx" => "\u{2248}",            // ≈
-        "equiv" => "\u{2261}",             // ≡
-        "in" => "\u{2208}",                // ∈
-        "notin" => "\u{2209}",             // ∉
-        "subset" => "\u{2282}",            // ⊂
-        "supset" => "\u{2283}",            // ⊃
-        "cup" => "\u{222A}",               // ∪
-        "cap" => "\u{2229}",               // ∩
-        "emptyset" => "\u{2205}",          // ∅
-        "forall" => "\u{2200}",            // ∀
-        "exists" => "\u{2203}",            // ∃
-        "partial" => "\u{2202}",           // ∂
-        "nabla" => "\u{2207}",             // ∇
-        "angle" => "\u{2220}",             // ∠
-        "rightarrow" | "to" => "\u{2192}", // →
-        "leftarrow" => "\u{2190}",         // ←
-        "Rightarrow" => "\u{21D2}",        // ⇒
-        "Leftarrow" => "\u{21D0}",         // ⇐
-        "Leftrightarrow" => "\u{21D4}",    // ⇔
-        "leftrightarrow" => "\u{2194}",    // ↔
-        "uparrow" => "\u{2191}",           // ↑
-        "downarrow" => "\u{2193}",         // ↓
-        "ldots" => "\u{2026}",             // …
-        "cdots" => "\u{22EF}",             // ⋯
-        "vdots" => "\u{22EE}",             // ⋮
-        "ddots" => "\u{22F1}",             // ⋱
-        _ => name,
-    }
 }
 
 /// Derive a plain-text aria label from a [`MathAst`].
