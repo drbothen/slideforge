@@ -623,4 +623,338 @@ mod tests {
         set.insert(section);
         assert_eq!(set.len(), 1);
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // BC-3.02.001 / AC-001 — skips slides without takeaway (mixed deck)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// AC-001 — deck with 5 slides where only slides 1 and 3 have a takeaway
+    /// must produce a section with exactly 2 items in slide order (skipping
+    /// slides 2, 4, 5 which have no takeaway field).
+    ///
+    /// Exercises BC-3.02.001 postcondition 2: "slides with no takeaway: field
+    /// are not included; order matches source slide order".
+    ///
+    /// FAILS at Red Gate: collect_executive_summary returns todo!().
+    #[test]
+    fn test_bc_3_02_001_executive_summary_skips_slides_without_takeaway() {
+        let deck = make_deck(vec![
+            make_slide_with_takeaway("content", "First key point"),
+            make_slide("title"),
+            make_slide_with_takeaway("bullets", "Second key point"),
+            make_slide("stat_callout"),
+            make_slide("section_break"),
+        ]);
+        let section = collect_executive_summary(&deck)
+            .expect("deck with 2 takeaway slides must produce an executive_summary section");
+        assert_eq!(
+            section.items.len(),
+            2,
+            "only slides with takeaway: fields contribute — 3 slides without takeaway must be skipped"
+        );
+        assert_eq!(
+            section.items[0],
+            SectionItem::TakeawayBullet(Arc::from("First key point")),
+            "first item must come from slide 0 (index 0)"
+        );
+        assert_eq!(
+            section.items[1],
+            SectionItem::TakeawayBullet(Arc::from("Second key point")),
+            "second item must come from slide 2 (index 2), not slide 1"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // BC-3.02.001 / AC-002 — RiskRow field preservation
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// AC-002 — each RiskRow preserves all four source card fields: title,
+    /// severity, description, owner — with exact string equality.
+    ///
+    /// Exercises BC-3.02.001 postcondition 3 field-level contract: the row
+    /// must carry the exact text from the card, no truncation or transformation.
+    ///
+    /// FAILS at Red Gate: collect_risk_register returns todo!().
+    #[test]
+    fn test_bc_3_02_001_risk_row_preserves_card_fields() {
+        let deck = make_deck(vec![make_severity_card_slide(
+            "Integration Failure",
+            "Critical",
+            "Third-party API may be deprecated in Q2",
+            "Platform Lead",
+        )]);
+        let section = collect_risk_register(&deck).expect("must produce section");
+        assert_eq!(
+            section.items.len(),
+            1,
+            "one severity_cards slide must produce exactly one RiskRow"
+        );
+        match &section.items[0] {
+            SectionItem::RiskRow {
+                title,
+                severity,
+                description,
+                owner,
+            } => {
+                assert_eq!(
+                    title.as_ref(),
+                    "Integration Failure",
+                    "RiskRow title must match card title field exactly"
+                );
+                assert_eq!(
+                    severity.as_ref(),
+                    "Critical",
+                    "RiskRow severity must match card severity field exactly"
+                );
+                assert_eq!(
+                    description.as_ref(),
+                    "Third-party API may be deprecated in Q2",
+                    "RiskRow description must match card description field exactly"
+                );
+                assert_eq!(
+                    owner.as_ref(),
+                    "Platform Lead",
+                    "RiskRow owner must match card owner field exactly"
+                );
+            },
+            other => panic!("expected SectionItem::RiskRow, got {other:?}"),
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // BC-3.02.001 — collect_sections integration (combines auto-generated)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// AC-001 + AC-002 + AC-007 — collect_sections on a deck with both takeaway
+    /// slides and severity_cards slides returns a Vec containing both the
+    /// ExecutiveSummary and RiskRegister sections.
+    ///
+    /// Per AC-007 default ordering: auto-generated sections appear in default
+    /// kind order (ExecutiveSummary before RiskRegister).
+    ///
+    /// FAILS at Red Gate: collect_sections returns todo!().
+    #[test]
+    fn test_bc_3_02_001_collect_sections_combines_auto_generated() {
+        let deck = make_deck(vec![
+            make_slide_with_takeaway("content", "Strategic point"),
+            make_severity_card_slide("Budget Overrun", "High", "10% over plan", "CFO"),
+        ]);
+        let sections = collect_sections(&deck);
+        assert!(
+            !sections.is_empty(),
+            "collect_sections must return at least one section when both takeaway and severity_cards slides exist"
+        );
+        // Both ExecutiveSummary and RiskRegister must be present.
+        let has_exec_summary = sections
+            .iter()
+            .any(|s| s.kind == SectionKind::ExecutiveSummary);
+        let has_risk_register = sections
+            .iter()
+            .any(|s| s.kind == SectionKind::RiskRegister);
+        assert!(
+            has_exec_summary,
+            "collect_sections must include ExecutiveSummary section when takeaway slides exist"
+        );
+        assert!(
+            has_risk_register,
+            "collect_sections must include RiskRegister section when severity_cards slides exist"
+        );
+    }
+
+    /// AC-003 / EC-001 — collect_sections on a deck with no takeaway fields
+    /// and no severity_cards slides returns an empty Vec.
+    ///
+    /// FAILS at Red Gate: collect_sections returns todo!().
+    #[test]
+    fn test_bc_3_02_001_collect_sections_empty_when_no_contributing_slides() {
+        let deck = make_deck(vec![
+            make_slide("title"),
+            make_slide("content"),
+            make_slide("section_break"),
+        ]);
+        let sections = collect_sections(&deck);
+        assert!(
+            sections.is_empty(),
+            "collect_sections must return an empty Vec when no slides contribute sections"
+        );
+    }
+
+    /// AC-003 / EC-001 — collect_sections on an entirely empty deck (zero
+    /// slides) returns an empty Vec and does not panic.
+    ///
+    /// FAILS at Red Gate: collect_sections returns todo!().
+    #[test]
+    fn test_bc_3_02_001_collect_sections_empty_deck_produces_empty_vec() {
+        let deck = make_deck(vec![]);
+        let sections = collect_sections(&deck);
+        assert!(
+            sections.is_empty(),
+            "collect_sections must return an empty Vec for a zero-slide deck"
+        );
+    }
+
+    /// BC-3.02.001 postcondition 4 — calling collect_sections twice on the
+    /// same Deck always produces the same Vec (same length, same order, same
+    /// content). Determinism is a hard invariant.
+    ///
+    /// FAILS at Red Gate: collect_sections returns todo!().
+    #[test]
+    fn test_bc_3_02_001_collect_sections_is_deterministic() {
+        let deck = make_deck(vec![
+            make_slide_with_takeaway("content", "Finding A"),
+            make_severity_card_slide("Risk X", "Medium", "Some risk", "Owner"),
+            make_slide_with_takeaway("bullets", "Finding B"),
+        ]);
+        let first = collect_sections(&deck);
+        let second = collect_sections(&deck);
+        assert_eq!(
+            first, second,
+            "collect_sections must be deterministic — repeated calls on the same Deck must produce equal output"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // BC-3.02.002 — manual section blocks passed through
+    //
+    // NOTE TO IMPLEMENTER: These tests exercise the manual section collection
+    // path (AC-004). The current `slideforge_types::Deck` struct does not yet
+    // have a `section_blocks` or `top_level_sections` field.  The implementer
+    // must add such a field to `Deck` and update `collect_sections` to iterate
+    // it.  The tests below are written against the current `Deck` struct;
+    // once the field is added, additional assertions about the returned
+    // ManualSection items must be added to these tests (or the tests must be
+    // extended with a helper that constructs a Deck with section blocks).
+    //
+    // For now these tests exercise `collect_sections` with a plain deck (no
+    // section blocks) and drive the Red Gate via the todo!() panic.  The
+    // assertions on ManualSection kind will be strengthened in the same commit
+    // that adds `Deck::section_blocks`.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// BC-3.02.002 / AC-004 — collect_sections returns a ManuallyAuthored
+    /// section with SectionKind::ManualSection("methodology") when a deck
+    /// contains a manually authored `section methodology:` block.
+    ///
+    /// FAILS at Red Gate: collect_sections returns todo!().
+    ///
+    /// NOTE: This test must be strengthened after the implementer adds
+    /// `Deck::section_blocks`.  For now it exercises the todo!() panic path
+    /// to establish the Red Gate.  The full assertion (checking that the
+    /// returned section has kind ManualSection("methodology") and source
+    /// ManuallyAuthored) must be added when the field exists.
+    #[test]
+    fn test_bc_3_02_002_manual_section_block_passed_through() {
+        // Until Deck gains a section_blocks field, we exercise the collect_sections
+        // todo!() path using a plain deck.  The assertion drives Red Gate failure.
+        let deck = make_deck(vec![make_slide("title")]);
+        // When collect_sections is implemented it must check for section blocks;
+        // this call currently panics with todo!() — the Red Gate requirement.
+        let sections = collect_sections(&deck);
+        // Post-implementation assertion (to be expanded when section_blocks exists):
+        // a deck with no section blocks produces no ManualSection entries.
+        let has_manual = sections
+            .iter()
+            .any(|s| matches!(s.kind, SectionKind::ManualSection(_)));
+        assert!(
+            !has_manual,
+            "a deck with no manual section blocks must not produce any ManualSection entries"
+        );
+    }
+
+    /// BC-3.02.002 / AC-004 — a ManualSection entry produced from a manually
+    /// authored block must have SectionSource::ManuallyAuthored, not AutoGenerated.
+    ///
+    /// FAILS at Red Gate: collect_sections returns todo!().
+    ///
+    /// NOTE: Full assertion requires `Deck::section_blocks`.  This test
+    /// establishes the Red Gate.  Once the implementer adds the field, this
+    /// test must be updated to construct a deck with a section block and
+    /// assert the source field is ManuallyAuthored.
+    #[test]
+    fn test_bc_3_02_002_manual_section_source_is_manually_authored() {
+        // Exercise the todo!() path — currently panics.
+        let deck = make_deck(vec![make_slide("content")]);
+        let sections = collect_sections(&deck);
+        // Post-implementation: all ManualSection entries must have ManuallyAuthored source.
+        for section in &sections {
+            if matches!(section.kind, SectionKind::ManualSection(_)) {
+                assert_eq!(
+                    section.source,
+                    SectionSource::ManuallyAuthored,
+                    "every ManualSection must have SectionSource::ManuallyAuthored"
+                );
+            }
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // BC-3.02.001 / AC-005 — PPTX/HTML sections excluded via target_formats tag
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// AC-005 — auto-generated sections must NOT include Pptx or Html in
+    /// target_formats.  This tag is the layout engine's responsibility; exporters
+    /// filter on it.
+    ///
+    /// FAILS at Red Gate: collect_executive_summary returns todo!().
+    #[test]
+    fn test_bc_3_02_001_executive_summary_excludes_pptx_and_html_from_target_formats() {
+        let deck = make_deck(vec![make_slide_with_takeaway("content", "Key point")]);
+        let section = collect_executive_summary(&deck).expect("must produce section");
+        assert!(
+            !section.target_formats.contains(&OutputFormat::Pptx),
+            "executive_summary must NOT target Pptx — PPTX exporter must filter it out (AC-005)"
+        );
+        assert!(
+            !section.target_formats.contains(&OutputFormat::Html),
+            "executive_summary must NOT target Html — HTML exporter must filter it out (AC-005)"
+        );
+    }
+
+    /// AC-005 — auto-generated risk_register must NOT include Pptx or Html.
+    ///
+    /// FAILS at Red Gate: collect_risk_register returns todo!().
+    #[test]
+    fn test_bc_3_02_001_risk_register_excludes_pptx_and_html_from_target_formats() {
+        let deck = make_deck(vec![make_severity_card_slide(
+            "Risk",
+            "Low",
+            "Minor",
+            "Owner",
+        )]);
+        let section = collect_risk_register(&deck).expect("must produce section");
+        assert!(
+            !section.target_formats.contains(&OutputFormat::Pptx),
+            "risk_register must NOT target Pptx (AC-005)"
+        );
+        assert!(
+            !section.target_formats.contains(&OutputFormat::Html),
+            "risk_register must NOT target Html (AC-005)"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // BC-3.02.001 / AC-005 — UnknownSectionType error variant reachability
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// EC-005 — `LayoutError::UnknownSectionType` can be constructed and
+    /// displays a human-readable message containing the unknown name.
+    ///
+    /// This is a type-level smoke test that does not require `collect_sections`
+    /// to be implemented.  It verifies that the error variant the implementer
+    /// must return for unknown section type names (AC-004) exists and is
+    /// usable.
+    ///
+    /// PASSES at Red Gate (type-only test).
+    #[test]
+    fn test_bc_3_02_002_unknown_section_type_error_variant_exists() {
+        use crate::error::LayoutError;
+        let err = LayoutError::UnknownSectionType {
+            name: "frobnicator".to_owned(),
+        };
+        let msg = err.to_string();
+        assert!(
+            msg.contains("frobnicator"),
+            "UnknownSectionType error must include the unknown name; got: {msg}"
+        );
+    }
 }

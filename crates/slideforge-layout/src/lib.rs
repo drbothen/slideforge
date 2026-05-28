@@ -489,6 +489,82 @@ mod tests {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // STORY-027 / BC-3.02.001 — layout::run populates LaidOutDeck.sections
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// AC-001 — `layout::run` on a deck with takeaway slides must produce a
+    /// `LaidOutDeck` whose `sections` Vec contains an `ExecutiveSummary` section.
+    ///
+    /// This is the integration test that wires the section collection pass into
+    /// the layout pipeline.  Currently `layout::run` seeds sections as
+    /// `Vec::new()` with a comment citing STORY-027; the implementer must
+    /// replace that placeholder with `collect_sections(&deck)`.
+    ///
+    /// FAILS at Red Gate: layout::run returns sections: Vec::new() (empty),
+    /// so the assertion `!result.sections.is_empty()` fails.
+    #[test]
+    fn test_layout_run_populates_sections_from_takeaway_slides() {
+        use slideforge_types::{Brand, BrandFonts, BrandPalette, SourceSpan};
+
+        let mut fields = slideforge_types::OrderedMap::new();
+        fields.insert(
+            Arc::from("takeaway"),
+            slideforge_types::FieldValue::Literal(slideforge_types::Value::Str(Arc::from(
+                "Layout integration takeaway",
+            ))),
+        );
+        let slide_with_takeaway = slideforge_types::Slide {
+            slide_type: Arc::from("content"),
+            fields,
+            blocks: vec![],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+        };
+        let deck = slideforge_types::Deck {
+            slides: vec![slide_with_takeaway],
+            vars: slideforge_types::OrderedMap::new(),
+            metadata: slideforge_types::DeckMetadata {
+                title: Some(Arc::from("Section Test Deck")),
+                slideforge_version: Arc::from("0.1.0"),
+                lang: Some(Arc::from("en-US")),
+                author: None,
+            },
+            registers: slideforge_types::OrderedMap::new(),
+        };
+        let brand = Brand {
+            name: Arc::from("test-brand"),
+            palette: BrandPalette {
+                primary: Arc::from("#003087"),
+                secondary: Arc::from("#0066CC"),
+                accent: Arc::from("#FF6B35"),
+                neutral: Arc::from("#F5F5F5"),
+            },
+            fonts: BrandFonts {
+                heading: Arc::from("Calibri"),
+                body: Arc::from("Calibri"),
+                mono: Arc::from("Courier New"),
+            },
+            layouts: vec![],
+            span: SourceSpan::default(),
+        };
+        let result = run(&deck, &brand).expect("layout::run must succeed for a content slide");
+        assert!(
+            !result.sections.is_empty(),
+            "LaidOutDeck.sections must be non-empty when the deck has takeaway slides \
+             (STORY-027: layout::run must call collect_sections)"
+        );
+        let has_exec = result
+            .sections
+            .iter()
+            .any(|s| s.kind == sections::SectionKind::ExecutiveSummary);
+        assert!(
+            has_exec,
+            "LaidOutDeck.sections must contain an ExecutiveSummary section when takeaway slides exist"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // VP-011 skeleton: proptest for slide count preservation
     // ─────────────────────────────────────────────────────────────────────────
 
