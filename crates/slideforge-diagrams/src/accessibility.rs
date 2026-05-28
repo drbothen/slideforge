@@ -74,6 +74,15 @@ pub fn inject_aria_attributes(svg: &str, alt_text: &str) -> Result<RawDiagramSvg
         })?
         + svg_start;
 
+    // The opening tag is svg[svg_start..=tag_close].
+    let opening_tag = &svg[svg_start..=tag_close];
+
+    // Guard: if aria-label= already exists in the opening tag, skip injection
+    // to avoid duplicate attributes (which are invalid in XML/SVG).
+    if opening_tag.contains("aria-label=") {
+        return Ok(RawDiagramSvg(svg.to_owned()));
+    }
+
     let escaped_attr = xml_attr_escape(alt_text);
     let escaped_text = xml_text_escape(alt_text);
     let title_element = format!("<title>{escaped_text}</title>");
@@ -236,6 +245,26 @@ mod tests {
         let not_svg = "not an svg string";
         let result = inject_aria_attributes(not_svg, "alt");
         assert!(result.is_err(), "must return error for non-SVG input");
+    }
+
+    #[test]
+    fn test_bc_1_12_001_accessibility_no_duplicate_aria_label_if_already_present() {
+        // Guard: if aria-label= already exists in the opening <svg> tag,
+        // inject_aria_attributes must not inject a second aria-label (XML
+        // duplicate attributes are invalid).
+        let svg_with_aria =
+            r#"<svg xmlns="http://www.w3.org/2000/svg" aria-label="existing" role="img"><title>existing</title></svg>"#;
+        let result = inject_aria_attributes(svg_with_aria, "new text");
+        let svg = result.unwrap();
+        let content = svg.as_str();
+        // Count occurrences of aria-label= — must be exactly 1.
+        let count = content.matches("aria-label=").count();
+        assert_eq!(count, 1, "must not inject duplicate aria-label; got {count} occurrences in: {content}");
+        // Must preserve the original aria-label value.
+        assert!(
+            content.contains(r#"aria-label="existing""#),
+            "must preserve original aria-label; got: {content}"
+        );
     }
 
     // -----------------------------------------------------------------------

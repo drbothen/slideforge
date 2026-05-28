@@ -490,6 +490,18 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_bc_1_12_001_flowchart_svg_has_height_attribute() {
+        // BC-1.12.001 postcondition 5: SVG root must have height attribute.
+        let source = "graph TD\n  A-->B";
+        let result = render_mermaid(source, "Flow");
+        let svg = result.expect("flowchart must render");
+        assert!(
+            svg.as_str().contains("height"),
+            "rendered SVG must contain height attribute"
+        );
+    }
+
     // -----------------------------------------------------------------------
     // No-panic safety: arbitrary input must not panic (BC-1.12.002 invariant)
     // -----------------------------------------------------------------------
@@ -497,7 +509,9 @@ mod tests {
     #[test]
     fn test_bc_1_12_001_render_no_panic_on_arbitrary_input() {
         // BC-1.12.002 VP: invalid diagram does not crash — returns structured error.
-        // Representative samples of arbitrary strings (not random — deterministic).
+        // Calling render_mermaid directly: if the function panics the test framework
+        // will catch the unwind and report a test failure with the panic message.
+        // We accept Ok or structured Err — the requirement is just: no panic.
         let inputs = [
             "!@#$%^&*()",
             "flowchart TD",  // valid header, no body
@@ -506,12 +520,8 @@ mod tests {
             "<xml>not mermaid</xml>",
         ];
         for input in &inputs {
-            // Must not panic; may return Ok or Err
-            let _result = std::panic::catch_unwind(|| render_mermaid(input, "test"));
-            // If catch_unwind returns Err, the test fails with panic message.
-            // We just call render_mermaid directly and accept Ok or structured Err.
-            // The real "no panic" test is that the code above completes without unwinding.
+            // May return Ok or Err — must NOT panic.
+            let _ = render_mermaid(input, "test");
         }
-        // All calls above completed without panic.
     }
 }

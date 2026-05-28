@@ -70,6 +70,19 @@ impl RawDiagramSvg {
 ///
 /// All variants carry an `error_code` field that maps to the error taxonomy.
 /// `MermaidSyntaxError` maps to **E-EXP-008** per BC-1.12.002.
+///
+/// ## Warn-only mode (AC-007)
+///
+/// The `--warn-only` flag (AC-007) enables a mode where diagram render failures
+/// produce an error-slide placeholder instead of aborting the build. This
+/// behavior is intentionally **NOT implemented in this crate**. The
+/// `slideforge-diagrams` crate always returns a structured `DiagramError` on
+/// failure. The caller — the eval layer (`slideforge-eval`) — inspects the
+/// error and decides whether to abort or substitute an `ErrorSlidePlaceholder`
+/// based on the current build mode. This separation preserves the single
+/// responsibility of the diagram renderer (render or fail) and the eval layer
+/// (apply build policy). The eval layer does not exist in STORY-033 scope; it
+/// will be implemented in the wave that adds `slideforge-eval` functionality.
 #[derive(Debug, Error)]
 pub enum DiagramError {
     /// The Mermaid source contains a syntax error.

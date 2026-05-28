@@ -68,6 +68,7 @@ mermaid-rs-renderer = { version = "=0.2.2", default-features = false }
 # Testing (dev-only — exempt from pinning-audit per DEV_ONLY allowlist)
 insta = "1"
 pretty_assertions = "1"
+criterion = { version = "0.5", features = ["html_reports"] }
 
 # Internal workspace crates (referenced as path dependencies from each crate).
 slideforge-types = { path = "crates/slideforge-types", version = "0.1.0" }

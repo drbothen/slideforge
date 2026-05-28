@@ -108,9 +108,26 @@ impl DiagramRenderer for DiagramRendererImpl {
     ///
     /// The plugin-api [`DiagramRenderer::render`] method accepts `source: &str`
     /// and `opts: &DiagramOptions`. The `opts` struct carries optional width,
-    /// height, theme, and background color. In v1.0, theme and background are
-    /// passed through as-is; width/height are informational (mermaid-rs-renderer
-    /// 0.2.2 determines SVG dimensions internally).
+    /// height, theme, and background color fields.
+    ///
+    /// **In v1.0, ALL fields in `DiagramOptions` are intentionally ignored.**
+    /// `mermaid-rs-renderer` 0.2.2 determines SVG dimensions, theme, and
+    /// background internally from the Mermaid source. There is no API to pass
+    /// width, height, theme, or background to the renderer at render time.
+    /// The `_opts` parameter is accepted to satisfy the trait signature for
+    /// future compatibility when the underlying renderer gains these controls.
+    ///
+    /// ## Accessibility (alt text)
+    ///
+    /// The [`DiagramRenderer`] trait has no `alt_text` parameter, so this method
+    /// passes an empty string to `render_diagram`. The resulting SVG will contain
+    /// `aria-label=""` and `<title></title>` (decorative-diagram semantics).
+    ///
+    /// **Alt text injection is the CALLER's responsibility.** In the full eval
+    /// pipeline, the eval layer calls [`DiagramRendererImpl::render_diagram`]
+    /// directly with the user-supplied `alt` text from the DSL source. Callers
+    /// using the plugin API trait directly must post-process the SVG bytes to
+    /// inject the correct `aria-label` and `<title>` values for their context.
     ///
     /// ## Errors
     ///
@@ -123,9 +140,10 @@ impl DiagramRenderer for DiagramRendererImpl {
         source: &str,
         _opts: &DiagramOptions,
     ) -> Result<Vec<u8>, slideforge_plugin_api::DiagramError> {
-        // The trait method uses empty string for alt text — the caller must
-        // inject alt text after calling render(). In the full eval pipeline,
-        // the eval layer calls render_diagram() directly with the AltText.
+        // The trait method uses empty string for alt text (decorative-diagram
+        // semantics). Callers that need alt text must use render_diagram() directly
+        // or post-process the SVG. In the eval pipeline, render_diagram() is called
+        // directly with the user-supplied AltText from DSL source.
         let raw_svg = Self::render_diagram(source, DiagramLang::Mermaid, "").map_err(|e| {
             match e {
                 DiagramError::MermaidSyntaxError {
@@ -230,12 +248,13 @@ mod tests {
     #[test]
     fn test_bc_1_12_001_render_no_panic_on_arbitrary_input() {
         // BC-1.12.002 VP: no panic on any string input to the full pipeline.
+        // Calling render_diagram directly: if the function panics the test framework
+        // catches the unwind and reports a test failure with the panic message.
+        // We accept Ok or structured Err — the requirement is: no panic.
         let inputs = ["", "   ", "!@#$%", "SELECT 1"];
         for input in &inputs {
             // May return Ok or Err — must NOT panic.
-            let _r = std::panic::catch_unwind(|| {
-                let _ = DiagramRendererImpl::render_diagram(input, DiagramLang::Mermaid, "test");
-            });
+            let _ = DiagramRendererImpl::render_diagram(input, DiagramLang::Mermaid, "test");
         }
     }
 
