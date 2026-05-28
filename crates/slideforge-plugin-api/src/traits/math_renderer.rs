@@ -3,10 +3,11 @@
 //! A `MathRenderer` plugin takes a [`MathNode`] (which carries the LaTeX source)
 //! and a target [`MathOutputFormat`] and produces the appropriate bytes:
 //! - [`MathOutputFormat::Omml`] — Office Open Math Markup Language (for PPTX/DOCX)
-//! - [`MathOutputFormat::MathMl`] — `MathML` 3 (for HTML and PDF)
-//! - [`MathOutputFormat::Pdf`] — PDF-embedded math (future use)
+//! - [`MathOutputFormat::MathMl`] — `MathML` Core Level 1 (for HTML)
+//! - [`MathOutputFormat::Pdf`] — PDF vector-path SVG (for PDF embedding)
 //!
-//! The built-in renderer uses `pulldown-latex` + `KaTeX` (via WASM). External
+//! The built-in renderer (`slideforge-math`) is a hand-written LaTeX subset
+//! parser with renderers for OMML, `MathML`, and PDF vector-path SVG. External
 //! plugins can substitute or augment the math rendering pipeline.
 
 use slideforge_types::MathNode;
@@ -15,18 +16,20 @@ use thiserror::Error;
 /// The output format for a math rendering operation.
 ///
 /// Each exporter requests the format appropriate for its output target:
-/// PPTX/DOCX exporters request `Omml`; HTML and PDF exporters request `MathMl`.
+/// PPTX/DOCX exporters request `Omml`; HTML exporters request `MathMl`;
+/// PDF exporters request `Pdf`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MathOutputFormat {
     /// Office Open Math Markup Language, the native math format for OOXML
     /// (PPTX and DOCX). Bytes are valid OMML XML.
     Omml,
 
-    /// `MathML` 3, the W3C standard math format for HTML and PDF. Bytes are
-    /// valid UTF-8 `MathML` XML.
+    /// `MathML` Core Level 1 (`http://www.w3.org/1998/Math/MathML`), the W3C
+    /// standard math format for HTML. Bytes are valid UTF-8 `MathML` XML.
     MathMl,
 
-    /// PDF-embedded math (reserved for direct PDF rendering in a future story).
+    /// PDF vector-path SVG bytes — all glyphs converted to `<path>` outlines,
+    /// no `<text>` elements. Implemented in STORY-030 by `pdf_paths::render_pdf_paths`.
     Pdf,
 }
 
@@ -63,13 +66,50 @@ pub enum MathError {
         /// Description of the rendering failure.
         message: String,
     },
+
+    /// PDF path output still contains `<text>` elements after SVG normalisation.
+    ///
+    /// Returned by `render_pdf_paths` (STORY-030) when `usvg` normalisation
+    /// cannot remove all `<text>` elements from the intermediate SVG, indicating
+    /// that the glyph outline engine did not fully convert a character to paths.
+    /// Callers should emit `E-EXP-004` in response (EC-005).
+    #[error("PDF path output contains residual <text> elements after SVG normalisation")]
+    TextRemainsInPathOutput,
+
+    /// A Greek, operator, or symbol command name was empty (zero-length string).
+    ///
+    /// Returned by the PDF path renderer when `MathNode::Greek`, `Operator`, or
+    /// `Symbol` carries an empty `Arc<str>`.  An empty command name has no
+    /// defined Unicode mapping and cannot produce a glyph (EC-005).
+    #[error("math command name is empty — cannot resolve Unicode glyph")]
+    EmptyCommandName,
+
+    /// A command name was not found in the Unicode symbol tables.
+    ///
+    /// The PDF path renderer only supports commands that have a canonical
+    /// Unicode mapping.  For text-based operators (`lim`, `max`, …) the Latin
+    /// characters are passed through directly; for everything else an explicit
+    /// mapping must exist in `symbols.rs`.
+    #[error("unsupported math symbol: \\{name}")]
+    UnsupportedSymbol {
+        /// The command name that has no Unicode mapping.
+        name: String,
+    },
+
+    /// The `MathAst` passed to `render_pdf_paths` contains zero nodes.
+    ///
+    /// An empty AST cannot produce meaningful vector-path output. Callers should
+    /// surface this as a user-visible error rather than silently emitting a
+    /// degenerate 1×16-px SVG (finding F-S030-P3-L2).
+    #[error("math expression is empty — no nodes to render")]
+    EmptyAst,
 }
 
 /// A plugin that renders a [`MathNode`] to bytes in a target math format.
 ///
-/// Math rendering is output-format-specific: PPTX/DOCX require OMML; HTML and
-/// PDF require `MathML`. The renderer is called once per math node per output
-/// format.
+/// Math rendering is output-format-specific: PPTX/DOCX require OMML; HTML
+/// requires `MathML` Core Level 1; PDF requires vector-path SVG. The renderer is
+/// called once per math node per output format.
 ///
 /// Register implementations with [`crate::PluginRegistry::register_math_renderer`].
 ///
@@ -77,7 +117,7 @@ pub enum MathError {
 ///
 /// All implementations must be `Send + Sync`.
 pub trait MathRenderer: Send + Sync {
-    /// A unique identifier for this math renderer (e.g., `"pulldown-latex"`).
+    /// A unique identifier for this math renderer (e.g., `"slideforge-builtin"`).
     fn id(&self) -> &str;
 
     /// Render `node` to bytes in the specified `format`.

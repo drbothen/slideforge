@@ -80,4 +80,21 @@ pub enum MathRendererError {
     /// failing test driving its implementation.
     #[error("not yet implemented")]
     NotYetImplemented,
+
+    /// A Greek, operator, or symbol command name was empty.
+    ///
+    /// An empty command name has no defined Unicode mapping and cannot
+    /// produce a glyph.
+    #[error("math command name is empty — cannot resolve Unicode glyph")]
+    EmptyCommandName,
+
+    /// A command name was not found in the Unicode symbol tables.
+    ///
+    /// The PDF path renderer only supports commands that have a canonical
+    /// Unicode mapping.
+    #[error("unsupported math symbol: \\{name}")]
+    UnsupportedSymbol {
+        /// The command name that has no Unicode mapping.
+        name: Arc<str>,
+    },
 }

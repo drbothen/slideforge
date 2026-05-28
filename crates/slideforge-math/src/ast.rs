@@ -131,9 +131,22 @@ pub enum MathNode {
     /// sequence of nodes in that row (columns separated by `&`).
     Align(Vec<Vec<MathNode>>),
 
-    /// A cases environment: `\begin{cases} lhs & rhs \\ ... \end{cases}`.
+    /// A cases environment: `\begin{cases} result & condition \\ ... \end{cases}`.
     ///
-    /// Each tuple is `(condition-nodes, result-nodes)`.
+    /// Each tuple is `(result-nodes, condition-nodes)`.  The parser stores the
+    /// expression appearing BEFORE the `&` column separator as `result` and the
+    /// expression AFTER `&` as `condition`.  This matches the LaTeX convention:
+    ///
+    /// ```text
+    /// \begin{cases}
+    ///   x   & \text{if } y > 0  \\
+    ///   -x  & \text{if } y \leq 0
+    /// \end{cases}
+    /// ```
+    ///
+    /// Here `x` / `-x` are the *results* and `y > 0` / `y \leq 0` are the
+    /// *conditions*. Renderers MUST emit result first and condition second to
+    /// match the expected left-to-right column order in the typeset output.
     Cases(Vec<(Vec<MathNode>, Vec<MathNode>)>),
 
     /// A horizontal space (from `\,`, `\;`, `\quad`, `\qquad`, etc.).
@@ -150,6 +163,47 @@ pub struct MathAst {
     pub mode: MathMode,
     /// The top-level sequence of parsed nodes.
     pub nodes: Vec<MathNode>,
+}
+
+impl AccentKind {
+    /// Return the Unicode combining character for use as the accent mark in
+    /// `MathML` `<mover>`.
+    ///
+    /// These are proper Unicode combining diacritical marks (Category Mn).
+    /// Using combining marks produces correct rendering in browsers and screen
+    /// readers; spacing variants (like `^` U+005E) are typographically wrong.
+    ///
+    /// | AccentKind | Char     | Unicode name |
+    /// |------------|----------|--------------|
+    /// | Hat        | U+0302   | COMBINING CIRCUMFLEX ACCENT |
+    /// | Bar        | U+0305   | COMBINING OVERLINE |
+    /// | Tilde      | U+0303   | COMBINING TILDE |
+    /// | Vec        | U+20D7   | COMBINING RIGHT ARROW ABOVE |
+    /// | Dot        | U+0307   | COMBINING DOT ABOVE |
+    /// | Ddot       | U+0308   | COMBINING DIAERESIS |
+    #[must_use]
+    pub fn mathml_combining_char(&self) -> &'static str {
+        match self {
+            AccentKind::Hat => "\u{0302}",   // ◌̂ COMBINING CIRCUMFLEX ACCENT
+            AccentKind::Bar => "\u{0305}",   // ◌̅ COMBINING OVERLINE
+            AccentKind::Tilde => "\u{0303}", // ◌̃ COMBINING TILDE
+            AccentKind::Vec => "\u{20D7}",   // ◌⃗ COMBINING RIGHT ARROW ABOVE
+            AccentKind::Dot => "\u{0307}",   // ◌̇ COMBINING DOT ABOVE
+            AccentKind::Ddot => "\u{0308}",  // ◌̈ COMBINING DIAERESIS
+        }
+    }
+
+    /// Return the Unicode combining character for use in OMML `<m:acc>`.
+    ///
+    /// OMML uses the same combining-mark approach as `MathML` for accent glyphs.
+    /// This method is an alias of [`AccentKind::mathml_combining_char`]; the
+    /// two-method design allows future divergence if OMML requires different
+    /// mapping without breaking `MathML`.
+    #[must_use]
+    pub fn omml_combining_char(&self) -> &'static str {
+        // Currently identical to MathML combining chars.
+        self.mathml_combining_char()
+    }
 }
 
 impl MathAst {

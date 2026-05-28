@@ -11,13 +11,29 @@ documentation.workspace = true
 readme.workspace = true
 keywords.workspace = true
 categories.workspace = true
-description = "Math rendering engine for slideforge: LaTeX parser, @{var} interpolation, OMML/MathML output."
+description = "Math rendering engine for slideforge: LaTeX parser, @{var} interpolation, OMML/MathML output, and PDF/SVG vector paths via embedded Latin Modern Math glyph outlines."
+include = ["src/**/*", "fonts/**", "README.md", "LICENSE*"]
 
 [dependencies]
 slideforge-types = { workspace = true }
 slideforge-plugin-api = { workspace = true }
 thiserror = { workspace = true }
+# quick-xml: MathML element serialisation (AC-001, STORY-030).
+quick-xml = { workspace = true }
+# usvg: SVG normalisation to remove <text> elements in PDF path output (AC-003, STORY-030).
+usvg = "=0.47.0"
+
+# ab_glyph: real font glyph outlines from Latin Modern Math OTF (AC-003, STORY-030 F-S030-P9-H2).
+ab_glyph = "=0.2.32"
+
+# tracing: structured observability per CLAUDE.md Quality Bar (OBS-1, STORY-030).
+tracing = { workspace = true }
 
 [dev-dependencies]
-insta = { version = "1", features = ["yaml"] }
-
+insta = { version = "=1.47.2", features = ["yaml"] }
+# sha2: SHA-256 digest for bundled font asset audit (test_bundled_font_sha256_matches_manifest).
+sha2 = "=0.11.0"
+# toml: parse MANIFEST.toml in font asset audit test.
+toml = "=0.8.23"
+# tracing-test: verify spans/events fire during render (OBS-1, STORY-030).
+tracing-test = "=0.2.5"

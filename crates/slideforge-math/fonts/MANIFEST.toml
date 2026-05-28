@@ -1,0 +1,15 @@
+# Latin Modern Math font — bundled binary asset audit trail
+# This file is read by `test_bundled_font_sha256_matches_manifest` in font_engine.rs
+# to ensure the embedded font has not been silently replaced or corrupted.
+
+[font]
+name        = "Latin Modern Math"
+filename    = "latinmodern-math.otf"
+version     = "1.959"
+sha256      = "6075562b771f8b82f0c179e363389684f2dd09de30038269e2628e504bd7be0f"
+size_bytes  = 733736
+source_url  = "https://www.gust.org.pl/projects/e-foundry/lm-math"
+license_spdx = "GUST-Font-License-1.0"
+license_file = "LICENSE-LatinModernMath.txt"
+copyright   = "Copyright 2012--2014 for Latin Modern Math OTF by B. Jackowski, P. Strzelczyk and P. Pianowski (on behalf of TeX Users Groups)."
+embedded_in = "src/font_engine.rs (via include_bytes!(\"../fonts/latinmodern-math.otf\"))"
