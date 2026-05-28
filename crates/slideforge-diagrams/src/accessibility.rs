@@ -62,17 +62,20 @@ fn xml_text_escape(s: &str) -> String {
 /// contain a root `<svg` element.
 pub fn inject_aria_attributes(svg: &str, alt_text: &str) -> Result<RawDiagramSvg, DiagramError> {
     // Find the opening <svg tag.
-    let svg_start = svg.find("<svg").ok_or_else(|| DiagramError::SvgPostProcessingError {
-        message: Arc::from("SVG string does not contain a root <svg> element"),
-    })?;
+    let svg_start = svg
+        .find("<svg")
+        .ok_or_else(|| DiagramError::SvgPostProcessingError {
+            message: Arc::from("SVG string does not contain a root <svg> element"),
+        })?;
 
     // Find the closing > of the opening tag. Must be after <svg.
-    let tag_close = svg[svg_start..]
-        .find('>')
-        .ok_or_else(|| DiagramError::SvgPostProcessingError {
-            message: Arc::from("SVG opening tag is not properly closed"),
-        })?
-        + svg_start;
+    let tag_close =
+        svg[svg_start..]
+            .find('>')
+            .ok_or_else(|| DiagramError::SvgPostProcessingError {
+                message: Arc::from("SVG opening tag is not properly closed"),
+            })?
+            + svg_start;
 
     // The opening tag is svg[svg_start..=tag_close].
     let opening_tag = &svg[svg_start..=tag_close];
@@ -115,9 +118,7 @@ pub fn assert_no_forbidden_elements(svg: &str) -> Result<(), DiagramError> {
     let lower = svg.to_ascii_lowercase();
     if lower.contains("<foreignobject") {
         return Err(DiagramError::SvgPostProcessingError {
-            message: Arc::from(
-                "SVG contains forbidden <foreignObject> element — not PPTX-safe",
-            ),
+            message: Arc::from("SVG contains forbidden <foreignObject> element — not PPTX-safe"),
         });
     }
     if lower.contains("<script") {
@@ -127,9 +128,7 @@ pub fn assert_no_forbidden_elements(svg: &str) -> Result<(), DiagramError> {
     }
     if lower.contains("@keyframes") {
         return Err(DiagramError::SvgPostProcessingError {
-            message: Arc::from(
-                "SVG contains forbidden @keyframes CSS animation — not PPTX-safe",
-            ),
+            message: Arc::from("SVG contains forbidden @keyframes CSS animation — not PPTX-safe"),
         });
     }
     Ok(())
@@ -146,12 +145,12 @@ mod tests {
 
     #[test]
     fn test_bc_1_12_001_accessibility_aria_label_injected() {
-        let raw_svg =
-            r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" width="800" height="600"></svg>"#;
+        let raw_svg = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" width="800" height="600"></svg>"#;
         let result = inject_aria_attributes(raw_svg, "Architecture Diagram");
         let svg = result.unwrap();
         assert!(
-            svg.as_str().contains(r#"aria-label="Architecture Diagram""#),
+            svg.as_str()
+                .contains(r#"aria-label="Architecture Diagram""#),
             "SVG must contain aria-label; got: {}",
             &svg.as_str()[..svg.as_str().len().min(300)]
         );
@@ -159,8 +158,7 @@ mod tests {
 
     #[test]
     fn test_bc_1_12_001_accessibility_role_img_injected() {
-        let raw_svg =
-            r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" width="800" height="600"></svg>"#;
+        let raw_svg = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" width="800" height="600"></svg>"#;
         let result = inject_aria_attributes(raw_svg, "Architecture Diagram");
         let svg = result.unwrap();
         assert!(
@@ -172,8 +170,7 @@ mod tests {
 
     #[test]
     fn test_bc_1_12_001_accessibility_title_element_injected() {
-        let raw_svg =
-            r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" width="800" height="600"></svg>"#;
+        let raw_svg = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" width="800" height="600"></svg>"#;
         let result = inject_aria_attributes(raw_svg, "Architecture Diagram");
         let svg = result.unwrap();
         assert!(
@@ -186,8 +183,7 @@ mod tests {
     #[test]
     fn test_bc_1_12_001_accessibility_decorative_empty_alt() {
         // AC-005: decorative diagram → aria-label="" and <title></title>
-        let raw_svg =
-            r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" width="800" height="600"></svg>"#;
+        let raw_svg = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" width="800" height="600"></svg>"#;
         let result = inject_aria_attributes(raw_svg, "");
         let svg = result.unwrap();
         assert!(
@@ -205,8 +201,7 @@ mod tests {
     #[test]
     fn test_bc_1_12_001_accessibility_alt_text_xml_escaped_in_aria_label() {
         // alt text with XML special chars must be escaped in aria-label
-        let raw_svg =
-            r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" width="800" height="600"></svg>"#;
+        let raw_svg = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" width="800" height="600"></svg>"#;
         let result = inject_aria_attributes(raw_svg, "Revenue < Cost & Profit > Zero");
         let svg = result.unwrap();
         let content = svg.as_str();
@@ -226,8 +221,7 @@ mod tests {
 
     #[test]
     fn test_bc_1_12_001_accessibility_alt_text_xml_escaped_in_title() {
-        let raw_svg =
-            r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" width="800" height="600"></svg>"#;
+        let raw_svg = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" width="800" height="600"></svg>"#;
         let result = inject_aria_attributes(raw_svg, "Revenue < Cost");
         let svg = result.unwrap();
         let content = svg.as_str();
@@ -252,14 +246,16 @@ mod tests {
         // Guard: if aria-label= already exists in the opening <svg> tag,
         // inject_aria_attributes must not inject a second aria-label (XML
         // duplicate attributes are invalid).
-        let svg_with_aria =
-            r#"<svg xmlns="http://www.w3.org/2000/svg" aria-label="existing" role="img"><title>existing</title></svg>"#;
+        let svg_with_aria = r#"<svg xmlns="http://www.w3.org/2000/svg" aria-label="existing" role="img"><title>existing</title></svg>"#;
         let result = inject_aria_attributes(svg_with_aria, "new text");
         let svg = result.unwrap();
         let content = svg.as_str();
         // Count occurrences of aria-label= — must be exactly 1.
         let count = content.matches("aria-label=").count();
-        assert_eq!(count, 1, "must not inject duplicate aria-label; got {count} occurrences in: {content}");
+        assert_eq!(
+            count, 1,
+            "must not inject duplicate aria-label; got {count} occurrences in: {content}"
+        );
         // Must preserve the original aria-label value.
         assert!(
             content.contains(r#"aria-label="existing""#),
@@ -298,7 +294,10 @@ mod tests {
         let result = assert_no_forbidden_elements(svg);
         assert!(result.is_err(), "SVG with <script> must be rejected");
         let msg = result.unwrap_err().to_string();
-        assert!(msg.contains("script"), "error must mention script; got: {msg}");
+        assert!(
+            msg.contains("script"),
+            "error must mention script; got: {msg}"
+        );
     }
 
     #[test]

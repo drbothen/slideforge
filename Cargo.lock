@@ -1630,7 +1630,6 @@ name = "slideforge-diagrams"
 version = "0.1.0"
 dependencies = [
  "criterion",
- "insta",
  "mermaid-rs-renderer",
  "slideforge-plugin-api",
  "thiserror 2.0.12",

@@ -35,10 +35,12 @@ pub mod types;
 use slideforge_plugin_api::{DiagramOptions, DiagramRenderer};
 use tracing::instrument;
 
-use crate::types::{DiagramLang, DiagramError, RawDiagramSvg};
+use crate::types::{DiagramError, DiagramLang, RawDiagramSvg};
 
 // Re-export primary types for crate consumers.
-pub use crate::types::{DiagramError as SfDiagramError, DiagramLang as SfDiagramLang, RawDiagramSvg as SfRawDiagramSvg};
+pub use crate::types::{
+    DiagramError as SfDiagramError, DiagramLang as SfDiagramLang, RawDiagramSvg as SfRawDiagramSvg,
+};
 
 /// The default `DiagramRenderer` plugin implementation for slideforge.
 ///
@@ -144,8 +146,8 @@ impl DiagramRenderer for DiagramRendererImpl {
         // semantics). Callers that need alt text must use render_diagram() directly
         // or post-process the SVG. In the eval pipeline, render_diagram() is called
         // directly with the user-supplied AltText from DSL source.
-        let raw_svg = Self::render_diagram(source, DiagramLang::Mermaid, "").map_err(|e| {
-            match e {
+        let raw_svg =
+            Self::render_diagram(source, DiagramLang::Mermaid, "").map_err(|e| match e {
                 DiagramError::MermaidSyntaxError {
                     message,
                     source_line,
@@ -162,19 +164,18 @@ impl DiagramRenderer for DiagramRendererImpl {
                     slideforge_plugin_api::DiagramError::UnsupportedFeature {
                         feature: format!("diagram language: {lang}"),
                     }
-                }
+                },
                 DiagramError::RenderError { message } => {
                     slideforge_plugin_api::DiagramError::RenderError {
                         message: message.to_string(),
                     }
-                }
+                },
                 DiagramError::SvgPostProcessingError { message } => {
                     slideforge_plugin_api::DiagramError::RenderError {
                         message: format!("SVG post-processing failed: {message}"),
                     }
-                }
-            }
-        })?;
+                },
+            })?;
         Ok(raw_svg.into_string().into_bytes())
     }
 }
@@ -224,7 +225,10 @@ mod tests {
         let result = DiagramRendererImpl::render_diagram(source, DiagramLang::Mermaid, "A to B");
         let svg = result.expect("DiagramRendererImpl must render flowchart without error");
         assert!(!svg.is_empty(), "rendered SVG must not be empty");
-        assert!(svg.as_str().contains("<svg"), "rendered SVG must contain <svg element");
+        assert!(
+            svg.as_str().contains("<svg"),
+            "rendered SVG must contain <svg element"
+        );
         assert!(
             svg.as_str().contains("aria-label="),
             "rendered SVG must contain aria-label"
@@ -242,7 +246,10 @@ mod tests {
             lang: std::sync::Arc::from("plantuml"),
         };
         let msg = err.to_string();
-        assert!(msg.contains("plantuml"), "error must mention the language; got: {msg}");
+        assert!(
+            msg.contains("plantuml"),
+            "error must mention the language; got: {msg}"
+        );
     }
 
     #[test]
@@ -272,7 +279,10 @@ mod tests {
         assert!(!bytes.is_empty(), "render must return non-empty bytes");
         // Bytes are UTF-8 SVG
         let svg = String::from_utf8(bytes).expect("render output must be valid UTF-8");
-        assert!(svg.contains("<svg"), "render output must be an SVG document");
+        assert!(
+            svg.contains("<svg"),
+            "render output must be an SVG document"
+        );
     }
 
     #[test]
@@ -293,20 +303,120 @@ mod tests {
         assert!(result.is_err(), "render of empty source must return error");
     }
 
+    // -----------------------------------------------------------------------
+    // Structural SVG property tests (platform-independent replacements for
+    // snapshot tests).
+    //
+    // Background: `mermaid-rs-renderer` uses font metrics that vary by platform
+    // (macOS vs Linux), producing different numeric dimensions in the SVG output
+    // (e.g. width="125.01209" on macOS vs different values on Linux). Insta
+    // snapshot tests that capture the full SVG string therefore fail in CI when
+    // the snapshots were captured on macOS and CI runs on Linux.
+    //
+    // These assertion-based tests check *structural* properties that are
+    // guaranteed to be platform-independent:
+    //   - `<svg` root element present
+    //   - Accessibility attributes injected (aria-label, role, <title>)
+    //   - viewBox, width, height attributes present
+    //   - Node labels visible in the SVG text
+    //   - No forbidden elements (foreignObject, script, @keyframes)
+    //
+    // The above properties are already partially covered by other tests in this
+    // module and in `renderer.rs`. These tests focus specifically on the
+    // flowchart-with-labelled-nodes and sequence-diagram scenarios from the
+    // former snapshots, ensuring the same behavioral guarantees without
+    // platform-dependent numeric values.
+    // -----------------------------------------------------------------------
+
     #[test]
-    fn test_bc_1_12_001_snapshot_flowchart_svg() {
+    fn test_bc_1_12_001_flowchart_with_labels_structural_properties() {
+        // Replaces former snapshot test `flowchart_svg`.
+        // Verifies structural SVG properties for a flowchart with labelled nodes.
         let source = "graph TD\n  A[Client] --> B[API]";
-        let result = DiagramRendererImpl::render_diagram(source, DiagramLang::Mermaid, "Architecture");
-        let svg = result.expect("snapshot test: flowchart must render");
-        insta::assert_yaml_snapshot!("flowchart_svg", svg.as_str());
+        let result =
+            DiagramRendererImpl::render_diagram(source, DiagramLang::Mermaid, "Architecture");
+        let svg = result.expect("flowchart with labels must render");
+        let s = svg.as_str();
+
+        // Root element
+        assert!(s.contains("<svg"), "output must be an SVG document");
+        // Dimensions (values are platform-dependent, but attributes must be present)
+        assert!(s.contains("viewBox"), "SVG must have viewBox");
+        assert!(s.contains("width"), "SVG must have width");
+        assert!(s.contains("height"), "SVG must have height");
+        // Accessibility injection
+        assert!(
+            s.contains("aria-label=\"Architecture\""),
+            "SVG must carry the injected aria-label"
+        );
+        assert!(s.contains("role=\"img\""), "SVG must have role=img");
+        assert!(
+            s.contains("<title>Architecture</title>"),
+            "SVG must have <title> matching alt text"
+        );
+        // Node label content visible in output
+        assert!(s.contains("Client"), "SVG must include 'Client' node label");
+        assert!(s.contains("API"), "SVG must include 'API' node label");
+        // Safety checks
+        assert!(
+            !s.to_ascii_lowercase().contains("<foreignobject"),
+            "SVG must not contain <foreignObject>"
+        );
+        assert!(
+            !s.to_ascii_lowercase().contains("<script"),
+            "SVG must not contain <script>"
+        );
+        assert!(
+            !s.to_ascii_lowercase().contains("@keyframes"),
+            "SVG must not contain @keyframes"
+        );
     }
 
     #[test]
-    fn test_bc_1_12_001_snapshot_sequence_svg() {
+    fn test_bc_1_12_001_sequence_diagram_structural_properties() {
+        // Replaces former snapshot test `sequence_svg`.
+        // Verifies structural SVG properties for a sequence diagram.
         let source = "sequenceDiagram\n  Alice->>Bob: Hello";
         let result =
             DiagramRendererImpl::render_diagram(source, DiagramLang::Mermaid, "Sequence diagram");
-        let svg = result.expect("snapshot test: sequenceDiagram must render");
-        insta::assert_yaml_snapshot!("sequence_svg", svg.as_str());
+        let svg = result.expect("sequenceDiagram must render");
+        let s = svg.as_str();
+
+        // Root element
+        assert!(s.contains("<svg"), "output must be an SVG document");
+        // Dimensions (values are platform-dependent, but attributes must be present)
+        assert!(s.contains("viewBox"), "SVG must have viewBox");
+        assert!(s.contains("width"), "SVG must have width");
+        assert!(s.contains("height"), "SVG must have height");
+        // Accessibility injection
+        assert!(
+            s.contains("aria-label=\"Sequence diagram\""),
+            "SVG must carry the injected aria-label"
+        );
+        assert!(s.contains("role=\"img\""), "SVG must have role=img");
+        assert!(
+            s.contains("<title>Sequence diagram</title>"),
+            "SVG must have <title> matching alt text"
+        );
+        // Participant labels and message content visible in output
+        assert!(s.contains("Alice"), "SVG must include 'Alice' participant");
+        assert!(s.contains("Bob"), "SVG must include 'Bob' participant");
+        assert!(
+            s.contains("Hello"),
+            "SVG must include 'Hello' message label"
+        );
+        // Safety checks
+        assert!(
+            !s.to_ascii_lowercase().contains("<foreignobject"),
+            "SVG must not contain <foreignObject>"
+        );
+        assert!(
+            !s.to_ascii_lowercase().contains("<script"),
+            "SVG must not contain <script>"
+        );
+        assert!(
+            !s.to_ascii_lowercase().contains("@keyframes"),
+            "SVG must not contain @keyframes"
+        );
     }
 }

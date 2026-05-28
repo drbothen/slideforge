@@ -7,12 +7,13 @@
 //!
 //! ## Gate (NFR-004)
 //!
-//! The benchmark must pass < 10ms on the CI Linux x86_64 runner.
+//! The benchmark must pass < 10ms on the CI Linux `x86_64` runner.
 //! Empirical from Spike S14: < 3ms typical for flowcharts.
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use slideforge_diagrams::renderer::render_mermaid;
 
+/// Benchmark function: warm render — measures per-call time after font DB is cached.
 fn warm_render_benchmark(c: &mut Criterion) {
     // Warm up: call once to force font DB initialization before measuring.
     let source = "graph TD\n  A-->B";

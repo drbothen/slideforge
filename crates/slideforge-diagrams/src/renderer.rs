@@ -186,16 +186,16 @@ fn validate_flowchart_brackets(lines: &[(usize, &str)]) -> Result<(), DiagramErr
             match ch {
                 '"' if !in_single_quote => {
                     in_double_quote = !in_double_quote;
-                }
+                },
                 '\'' if !in_double_quote => {
                     in_single_quote = !in_single_quote;
-                }
+                },
                 '[' if !in_double_quote && !in_single_quote => {
                     // Check if it's the special Mermaid `[*]` transition in
                     // stateDiagram (which we don't reach here because is_flowchart
                     // is only set for flowchart/graph diagrams).
                     depth += 1;
-                }
+                },
                 ']' if !in_double_quote && !in_single_quote => {
                     depth -= 1;
                     if depth < 0 {
@@ -206,8 +206,8 @@ fn validate_flowchart_brackets(lines: &[(usize, &str)]) -> Result<(), DiagramErr
                             col + 1,
                         )));
                     }
-                }
-                _ => {}
+                },
+                _ => {},
             }
         }
 
@@ -256,8 +256,8 @@ pub fn render_mermaid(source: &str, alt_text: &str) -> Result<RawDiagramSvg, Dia
     validate_mermaid_syntax(source)?;
 
     // Step 3: Render via mermaid-rs-renderer.
-    let raw_svg: String = mermaid_rs_renderer::render(source)
-        .map_err(|e| build_syntax_error(&e.to_string()))?;
+    let raw_svg: String =
+        mermaid_rs_renderer::render(source).map_err(|e| build_syntax_error(&e.to_string()))?;
 
     // Step 4: Assert no forbidden elements.
     assert_no_forbidden_elements(&raw_svg)?;
@@ -295,7 +295,10 @@ mod tests {
         let result = render_mermaid(source, "Sequence diagram");
         let svg = result.expect("sequenceDiagram must render without error");
         assert!(!svg.is_empty(), "sequenceDiagram SVG must not be empty");
-        assert!(svg.as_str().contains("<svg"), "sequenceDiagram output must have <svg element");
+        assert!(
+            svg.as_str().contains("<svg"),
+            "sequenceDiagram output must have <svg element"
+        );
     }
 
     #[test]
@@ -332,7 +335,10 @@ mod tests {
         // DEC-015: arrow to undefined node
         let source = "flowchart LR\n  A --> [broken";
         let result = render_mermaid(source, "broken diagram");
-        assert!(result.is_err(), "invalid Mermaid syntax must return an error");
+        assert!(
+            result.is_err(),
+            "invalid Mermaid syntax must return an error"
+        );
     }
 
     #[test]
@@ -368,7 +374,10 @@ mod tests {
     fn test_bc_1_12_002_whitespace_only_source_returns_empty_source_error() {
         // Whitespace-only is equivalent to empty
         let result = render_mermaid("   \n\t  ", "alt text");
-        assert!(result.is_err(), "whitespace-only source must return an error");
+        assert!(
+            result.is_err(),
+            "whitespace-only source must return an error"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -450,11 +459,17 @@ mod tests {
             ("graph TD\n  A-->B", "flowchart"),
             ("sequenceDiagram\n  Alice->>Bob: Hello", "sequenceDiagram"),
             ("gantt\n  section S1\n  Task :a1, 2026-01-01, 30d", "gantt"),
-            ("classDiagram\n  class Animal{\n    +String name\n  }", "classDiagram"),
+            (
+                "classDiagram\n  class Animal{\n    +String name\n  }",
+                "classDiagram",
+            ),
             ("stateDiagram-v2\n  [*] --> Running", "stateDiagram"),
             ("erDiagram\n  CUSTOMER ||--o{ ORDER : places", "erDiagram"),
             ("pie\n  title Pie\n  \"A\" : 42\n  \"B\" : 58", "pie"),
-            ("journey\n  title My day\n  section Morning\n  Wake up: 5: Me", "journey"),
+            (
+                "journey\n  title My day\n  section Morning\n  Wake up: 5: Me",
+                "journey",
+            ),
             ("gitGraph\n  commit\n  branch feature\n  commit", "gitGraph"),
         ];
 
@@ -662,12 +677,12 @@ mod tests {
                     !svg.is_empty(),
                     "if render succeeds it must produce non-empty SVG"
                 );
-            }
+            },
             Err(e) => {
                 // A structured error is also acceptable — what is NOT acceptable is a panic.
                 let msg = e.to_string();
                 assert!(!msg.is_empty(), "error message must not be empty");
-            }
+            },
         }
     }
 
@@ -683,7 +698,7 @@ mod tests {
         // We accept Ok or structured Err — the requirement is just: no panic.
         let inputs = [
             "!@#$%^&*()",
-            "flowchart TD",  // valid header, no body
+            "flowchart TD", // valid header, no body
             "1234567890",
             "SELECT * FROM table",
             "<xml>not mermaid</xml>",

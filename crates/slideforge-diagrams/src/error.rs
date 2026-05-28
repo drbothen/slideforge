@@ -86,7 +86,10 @@ mod tests {
     #[test]
     fn test_bc_1_12_002_extract_line_number_from_line_n_pattern() {
         // "line 3" pattern
-        assert_eq!(extract_source_line("parse error at line 3: unexpected token"), 3);
+        assert_eq!(
+            extract_source_line("parse error at line 3: unexpected token"),
+            3
+        );
     }
 
     #[test]
@@ -174,21 +177,30 @@ mod tests {
     fn test_bc_1_12_002_build_syntax_error_contains_e_exp_008() {
         let err = build_syntax_error("parse error at line 3: unexpected '['");
         let msg = err.to_string();
-        assert!(msg.contains("E-EXP-008"), "must contain E-EXP-008; got: {msg}");
+        assert!(
+            msg.contains("E-EXP-008"),
+            "must contain E-EXP-008; got: {msg}"
+        );
     }
 
     #[test]
     fn test_bc_1_12_002_build_syntax_error_line_number_extracted() {
         let err = build_syntax_error("parse error at line 5: broken arrow");
         let msg = err.to_string();
-        assert!(msg.contains("source line 5"), "must contain 'source line 5'; got: {msg}");
+        assert!(
+            msg.contains("source line 5"),
+            "must contain 'source line 5'; got: {msg}"
+        );
     }
 
     #[test]
     fn test_bc_1_12_002_build_syntax_error_line_fallback_when_not_found() {
         let err = build_syntax_error("some opaque error with no line");
         let msg = err.to_string();
-        assert!(msg.contains("source line 1"), "must fall back to source line 1; got: {msg}");
+        assert!(
+            msg.contains("source line 1"),
+            "must fall back to source line 1; got: {msg}"
+        );
     }
 
     #[test]

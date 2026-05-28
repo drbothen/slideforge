@@ -88,9 +88,7 @@ pub enum DiagramError {
     /// The Mermaid source contains a syntax error.
     ///
     /// Maps to **E-EXP-008**: "Diagram render failed … at source line N".
-    #[error(
-        "[{error_code}] Diagram render failed: {message} at source line {source_line}"
-    )]
+    #[error("[{error_code}] Diagram render failed: {message} at source line {source_line}")]
     MermaidSyntaxError {
         /// Human-readable error description from the renderer.
         message: Arc<str>,
@@ -143,8 +141,14 @@ mod tests {
 
     #[test]
     fn test_bc_1_12_001_diagram_lang_from_keyword_mermaid() {
-        assert_eq!(DiagramLang::from_keyword("mermaid"), Some(DiagramLang::Mermaid));
-        assert_eq!(DiagramLang::from_keyword("Mermaid"), Some(DiagramLang::Mermaid));
+        assert_eq!(
+            DiagramLang::from_keyword("mermaid"),
+            Some(DiagramLang::Mermaid)
+        );
+        assert_eq!(
+            DiagramLang::from_keyword("Mermaid"),
+            Some(DiagramLang::Mermaid)
+        );
     }
 
     #[test]
@@ -201,18 +205,36 @@ mod tests {
             error_code: "E-EXP-008",
         };
         let msg = err.to_string();
-        assert!(msg.contains("E-EXP-008"), "error must contain E-EXP-008; got: {msg}");
-        assert!(msg.contains("source line 3"), "error must contain source line 3; got: {msg}");
-        assert!(msg.contains("Undefined node 'B'"), "error must contain error message; got: {msg}");
+        assert!(
+            msg.contains("E-EXP-008"),
+            "error must contain E-EXP-008; got: {msg}"
+        );
+        assert!(
+            msg.contains("source line 3"),
+            "error must contain source line 3; got: {msg}"
+        );
+        assert!(
+            msg.contains("Undefined node 'B'"),
+            "error must contain error message; got: {msg}"
+        );
     }
 
     #[test]
     fn test_bc_1_12_002_diagram_error_empty_source_message() {
         let err = DiagramError::EmptySource;
         let msg = err.to_string();
-        assert!(msg.contains("E-EXP-008"), "EmptySource error must contain E-EXP-008; got: {msg}");
-        assert!(msg.contains("source line 1"), "EmptySource error must mention source line 1; got: {msg}");
-        assert!(msg.contains("empty"), "EmptySource error must contain 'empty'; got: {msg}");
+        assert!(
+            msg.contains("E-EXP-008"),
+            "EmptySource error must contain E-EXP-008; got: {msg}"
+        );
+        assert!(
+            msg.contains("source line 1"),
+            "EmptySource error must mention source line 1; got: {msg}"
+        );
+        assert!(
+            msg.contains("empty"),
+            "EmptySource error must contain 'empty'; got: {msg}"
+        );
     }
 
     #[test]
@@ -221,8 +243,14 @@ mod tests {
             lang: Arc::from("plantuml"),
         };
         let msg = err.to_string();
-        assert!(msg.contains("plantuml"), "error must mention the language; got: {msg}");
-        assert!(msg.contains("unsupported"), "error must say 'unsupported'; got: {msg}");
+        assert!(
+            msg.contains("plantuml"),
+            "error must mention the language; got: {msg}"
+        );
+        assert!(
+            msg.contains("unsupported"),
+            "error must say 'unsupported'; got: {msg}"
+        );
     }
 
     #[test]
@@ -231,8 +259,14 @@ mod tests {
             message: Arc::from("backend failure"),
         };
         let msg = err.to_string();
-        assert!(msg.contains("backend failure"), "error must contain message; got: {msg}");
-        assert!(msg.contains("failed"), "error must say 'failed'; got: {msg}");
+        assert!(
+            msg.contains("backend failure"),
+            "error must contain message; got: {msg}"
+        );
+        assert!(
+            msg.contains("failed"),
+            "error must say 'failed'; got: {msg}"
+        );
     }
 
     #[test]
@@ -241,6 +275,9 @@ mod tests {
             message: Arc::from("no <svg> element"),
         };
         let msg = err.to_string();
-        assert!(msg.contains("no <svg> element"), "error must contain message; got: {msg}");
+        assert!(
+            msg.contains("no <svg> element"),
+            "error must contain message; got: {msg}"
+        );
     }
 }

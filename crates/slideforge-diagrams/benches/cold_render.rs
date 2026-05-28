@@ -8,7 +8,7 @@
 //!
 //! ## Gate (NFR-003)
 //!
-//! The benchmark must pass < 200ms on the CI Linux x86_64 runner.
+//! The benchmark must pass < 200ms on the CI Linux `x86_64` runner.
 //! Empirical from Spike S14: 124ms on M-series Mac.
 //!
 //! ## Note
@@ -19,9 +19,10 @@
 //! overhead via `Criterion::new().measurement_time()` set low to focus on
 //! the first-call latency profile.
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use slideforge_diagrams::renderer::render_mermaid;
 
+/// Benchmark function: cold render — first call includes font DB initialization.
 fn cold_render_benchmark(c: &mut Criterion) {
     // A simple flowchart that exercises the full render path.
     let source = "graph TD\n  A-->B";
