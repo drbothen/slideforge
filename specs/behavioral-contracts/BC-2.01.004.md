@@ -108,3 +108,19 @@ color slot edge case).
 ## VP Anchors
 
 (filled after VP creation)
+
+## E-BRD-005 Semantic History
+
+E-BRD-005 was originally specified (Phase 1 PRD) as "missing required color slot" — a fatal
+error returned when a brand template lacked one of the 12 OOXML color slots. During Phase 3
+STORY-023 implementation, the inference algorithm in this BC made missing slots non-fatal (they
+are always inferred), so the original E-BRD-005 semantic became unreachable and E-BRD-005 was
+marked retired in `error-taxonomy.md`.
+
+STORY-023's Pass 11 fix burst introduced a hex-color validation check (`validate_hex` in
+`inference.rs`) that needed an error code; rather than allocating E-BRD-008, the retired
+E-BRD-005 was re-purposed for the new `BrandError::InvalidHexColor` semantic. The current spec
+in `error-taxonomy.md` row 115 reflects this active semantic.
+
+Cross-reference: `error-taxonomy.md` row 115, BC-2.01.005 (color inference), and
+`crates/slideforge-brand/src/error.rs` `E_BRD_005` constant.
