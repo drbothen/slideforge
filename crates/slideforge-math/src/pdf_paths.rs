@@ -384,7 +384,11 @@ fn place_node(
 /// Like [`place_node`] but renders the node at a scaled height.
 ///
 /// This is used for superscripts, subscripts, numerators, and denominators
-/// where the glyph height differs from `GLYPH_H`.
+/// where the glyph height differs from `GLYPH_H`.  The scaled width is
+/// proportional: `w = GLYPH_W * h / GLYPH_H`, clamped to a minimum of 4px.
+///
+/// Greek letters, operators, and symbols use [`emit_glyph_sized`] with the
+/// scaled dimensions so they shrink consistently with text glyphs (F-S030-P2-H7).
 fn place_node_at_scale(
     node: &MathNode,
     paths: &mut Vec<String>,
@@ -393,11 +397,13 @@ fn place_node_at_scale(
     h: i64,
 ) -> Result<(), MathError> {
     let baseline = top_y + h;
+    let scaled_w = (GLYPH_W * h / GLYPH_H.max(1)).max(4);
+    let scaled_step = scaled_w + 1;
     match node {
         MathNode::Text(s) | MathNode::TextRun(s) => {
             for ch in s.chars() {
-                emit_glyph_sized(ch, paths, *x, top_y, (GLYPH_W * 2 / 3).max(4), h.max(4));
-                *x += (GLYPH_W * 2 / 3 + 1).max(5);
+                emit_glyph_sized(ch, paths, *x, top_y, scaled_w, h.max(4));
+                *x += scaled_step;
             }
         },
         MathNode::Group(nodes) => {
@@ -405,9 +411,51 @@ fn place_node_at_scale(
                 place_node_at_scale(n, paths, x, top_y, h)?;
             }
         },
+        // Greek letters — resolved through the canonical symbols table.
+        MathNode::Greek(name) => {
+            if name.is_empty() {
+                return Err(MathError::EmptyCommandName);
+            }
+            let ch = greek_to_unicode_char(name).ok_or_else(|| MathError::UnsupportedSymbol {
+                name: name.to_string(),
+            })?;
+            emit_glyph_sized(ch, paths, *x, top_y, scaled_w, h.max(4));
+            *x += scaled_step;
+        },
+        // Symbol operators (∑, ∏, ∫, …) resolved through the canonical symbols table.
+        // Text operators fall through to multi-char rendering.
+        MathNode::Operator(name) => {
+            if name.is_empty() {
+                return Err(MathError::EmptyCommandName);
+            }
+            if let Some(ch) = operator_to_unicode_char(name) {
+                emit_glyph_sized(ch, paths, *x, top_y, scaled_w, h.max(4));
+                *x += scaled_step;
+            } else if is_text_operator(name) {
+                for ch in name.chars() {
+                    emit_glyph_sized(ch, paths, *x, top_y, scaled_w, h.max(4));
+                    *x += scaled_step;
+                }
+            } else {
+                return Err(MathError::UnsupportedSymbol {
+                    name: name.to_string(),
+                });
+            }
+        },
+        // Misc symbols resolved through the canonical symbols table.
+        MathNode::Symbol(name) => {
+            if name.is_empty() {
+                return Err(MathError::EmptyCommandName);
+            }
+            let ch = symbol_to_unicode_char(name).ok_or_else(|| MathError::UnsupportedSymbol {
+                name: name.to_string(),
+            })?;
+            emit_glyph_sized(ch, paths, *x, top_y, scaled_w, h.max(4));
+            *x += scaled_step;
+        },
         _ => {
-            // For complex nodes at scale, fall back to normal placement at the
-            // requested baseline
+            // For other complex nodes at scale (Superscript inside Superscript, etc.),
+            // fall back to normal placement at the requested baseline.
             place_node(node, paths, x, baseline)?;
         },
     }
@@ -1483,6 +1531,71 @@ mod tests {
         assert_ne!(
             pipe_svg, l_svg,
             "'|' must produce a DIFFERENT SVG than Latin 'l'"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // F-S030-P2-H7 — `place_node_at_scale` propagates scale to Greek/Operator/Symbol
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// A superscript containing a Greek letter must render with a SMALLER glyph
+    /// than the same Greek letter at the baseline.
+    ///
+    /// Before the fix, `place_node_at_scale` dispatched Greek/Operator/Symbol nodes
+    /// to the unscaled `place_node`, so the glyph had full `GLYPH_W` × `GLYPH_H`
+    /// dimensions regardless of the scale parameter.  After the fix, scaled
+    /// Greek/Operator/Symbol nodes use `emit_glyph_sized` with the proportional
+    /// width and the requested `h`.
+    #[test]
+    fn test_bc_1_10_003_pdf_superscript_greek_is_scaled() {
+        // `\alpha^{\gamma}` — superscript is a Greek letter
+        let ast_sup = inline_ast(vec![MathNode::Superscript {
+            base: Box::new(MathNode::Greek(Arc::from("alpha"))),
+            sup: Box::new(MathNode::Greek(Arc::from("gamma"))),
+        }]);
+        // Just `\gamma` at baseline
+        let ast_plain = inline_ast(vec![MathNode::Greek(Arc::from("gamma"))]);
+
+        let sup_svg = render_pdf_paths(&ast_sup)
+            .expect("superscript of Greek letter must render successfully")
+            .svg;
+        let plain_svg = render_pdf_paths(&ast_plain)
+            .expect("plain Greek letter must render successfully")
+            .svg;
+
+        // The SVGs should differ: the superscript version has TWO path elements
+        // (base α + scaled γ), the plain version has ONE.  More importantly, the
+        // `<path>` data strings differ because the superscript γ uses scaled
+        // dimensions while the plain γ uses full dimensions.
+        assert_ne!(
+            sup_svg, plain_svg,
+            "superscript γ SVG must differ from plain γ SVG (scale must be applied)"
+        );
+
+        // The composite SVG must have 2 path elements (one for α, one for scaled γ).
+        let path_count = sup_svg.matches("<path ").count();
+        assert_eq!(
+            path_count, 2,
+            "\\alpha^{{\\gamma}} must produce exactly 2 <path> elements; got {path_count}"
+        );
+    }
+
+    /// A superscript containing a symbol (`\\times`) renders scaled.
+    #[test]
+    fn test_bc_1_10_003_pdf_superscript_symbol_is_scaled() {
+        let ast = inline_ast(vec![MathNode::Superscript {
+            base: Box::new(MathNode::Text(Arc::from("x"))),
+            sup: Box::new(MathNode::Symbol(Arc::from("times"))),
+        }]);
+        let result = render_pdf_paths(&ast);
+        assert!(
+            result.is_ok(),
+            "x^{{\\times}} must render successfully; got: {result:?}"
+        );
+        let path_count = result.unwrap().svg.matches("<path ").count();
+        assert_eq!(
+            path_count, 2,
+            "x^{{\\times}} must produce exactly 2 <path> elements; got {path_count}"
         );
     }
 }
