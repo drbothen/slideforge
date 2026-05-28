@@ -1633,7 +1633,6 @@ dependencies = [
  "insta",
  "mermaid-rs-renderer",
  "slideforge-plugin-api",
- "slideforge-types",
  "thiserror 2.0.12",
  "tracing",
 ]

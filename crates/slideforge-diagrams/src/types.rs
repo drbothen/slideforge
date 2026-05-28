@@ -39,7 +39,7 @@ impl DiagramLang {
 
 /// A newtype wrapping the raw SVG string produced by the diagram renderer.
 ///
-/// This is the output of `DiagramRendererImpl::render_internal()` *before*
+/// This is the output of `DiagramRendererImpl::render_diagram()` *before*
 /// usvg normalization (STORY-034). Accessibility attributes (`aria-label`,
 /// `role="img"`, and a `<title>` child element) are injected by
 /// [`crate::accessibility::inject_aria_attributes`] before wrapping.
@@ -89,7 +89,7 @@ pub enum DiagramError {
     ///
     /// Maps to **E-EXP-008**: "Diagram render failed … at source line N".
     #[error(
-        "E-EXP-008: Diagram render failed: {message} at source line {source_line}"
+        "[{error_code}] Diagram render failed: {message} at source line {source_line}"
     )]
     MermaidSyntaxError {
         /// Human-readable error description from the renderer.
