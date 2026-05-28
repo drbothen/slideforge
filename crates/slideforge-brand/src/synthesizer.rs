@@ -38,7 +38,6 @@ use crate::error::BrandError;
 use crate::inference;
 use crate::layout_xml::{
     HANDOUT_MASTER_STUB, NOTES_MASTER_STUB, generate_content_types_layout_entries,
-    serialize_layout_to_xml,
 };
 use crate::layouts::generate_all_layouts;
 use crate::template::{
@@ -106,8 +105,11 @@ impl BrandSynthesizer {
     /// 1. Validate required fields (logo path — AC-004).
     /// 2. Build the 12-slot color palette via `inference::infer_missing_slots`.
     /// 3. Generate 31 layout definitions via `layouts::generate_all_layouts`.
-    /// 4. Serialize each layout to XML via `layout_xml::serialize_layout_to_xml`.
-    /// 5. Assemble the [`BrandTemplate`].
+    /// 4. Assemble the [`BrandTemplate`].
+    ///
+    /// Layout XML serialization is NOT performed here — the PPTX exporter
+    /// (STORY-037) calls `layout_xml::serialize_layout_to_xml` directly when
+    /// building each ZIP entry.
     ///
     /// # Errors
     ///
@@ -153,16 +155,10 @@ impl BrandSynthesizer {
         // Step 5: Generate 31 layout definitions
         let layouts = generate_all_layouts(config);
 
-        // Step 6: Serialize layout XML (STORY-037 will consume these)
-        // We store serialized XML for all layouts keyed by their index.
-        // The serialized XML bytes are stored on each layout via the BrandTemplate
-        // for consumption by the PPTX exporter.
-        // NOTE: For STORY-023, the XML is generated but not stored per-layout —
-        // the PPTX exporter (STORY-037) calls serialize_layout_to_xml directly.
-        // We validate serialization works by exercising it here.
-        for layout in &layouts {
-            let _xml = serialize_layout_to_xml(layout);
-        }
+        // Step 6: Layout XML serialization — called by STORY-037 PPTX exporter directly.
+        // The exporter calls serialize_layout_to_xml per layout when building the ZIP
+        // package. There is no need to exercise every layout here; the layout_xml
+        // unit tests cover serialization exhaustively.
 
         // Step 7: Generate Content_Types entries (AC-013)
         let content_types_layout_entries =
@@ -228,14 +224,87 @@ impl BrandProvider for BrandSynthesizer {
     /// Returns `slideforge_plugin_api::BrandError` on failure. All
     /// `slideforge_brand::BrandError` variants are mapped to the appropriate
     /// plugin-API error variant.
-    fn load(&self, _source: &BrandSource) -> Result<Brand, slideforge_plugin_api::BrandError> {
-        // Full routing implementation is in STORY-024 (Brand Extraction CLI).
-        // For STORY-023, we implement the synthesizer core; the BrandProvider
-        // routing is scaffolded here and will be completed when STORY-024
-        // defines the full BrandSource routing contract.
-        Err(slideforge_plugin_api::BrandError::ValidationError {
-            message: "BrandProvider::load routing not yet implemented — see STORY-024".to_owned(),
-        })
+    fn load(&self, source: &BrandSource) -> Result<Brand, slideforge_plugin_api::BrandError> {
+        match source {
+            BrandSource::TomlFile(path) => {
+                let (template, _warnings) = Self::load_from_toml(path.as_ref()).map_err(|e| {
+                    // Map slideforge-brand BrandError to plugin-api BrandError.
+                    match &e {
+                        crate::error::BrandError::TomlReadError { path, reason } => {
+                            slideforge_plugin_api::BrandError::IoError {
+                                uri: path.as_ref().to_owned(),
+                                message: reason.as_ref().to_owned(),
+                            }
+                        },
+                        crate::error::BrandError::TomlParseError { path, reason } => {
+                            slideforge_plugin_api::BrandError::ParseError {
+                                uri: path.as_ref().to_owned(),
+                                message: reason.as_ref().to_owned(),
+                            }
+                        },
+                        crate::error::BrandError::LogoRequired { .. } => {
+                            slideforge_plugin_api::BrandError::ValidationError {
+                                message: e.to_string(),
+                            }
+                        },
+                        _ => slideforge_plugin_api::BrandError::ValidationError {
+                            message: e.to_string(),
+                        },
+                    }
+                })?;
+
+                // Convert BrandTemplate → slideforge_types::Brand.
+                // BrandPalette maps to the first 4 ECMA-376 color slots:
+                //   slot 0 (dk1)  → primary
+                //   slot 1 (lt1)  → secondary
+                //   slot 2 (dk2)  → accent
+                //   slot 3 (lt2)  → neutral
+                //
+                // These are the canonical "theme-defining" colors per ECMA-376.
+                // Full 12-slot data is retained in BrandTemplate for the PPTX
+                // exporter (STORY-037); Brand carries the semantic palette only.
+                let primary = template.colors[0].hex().unwrap_or("#000000").to_owned();
+                let secondary = template.colors[1].hex().unwrap_or("#FFFFFF").to_owned();
+                let accent = template.colors[2].hex().unwrap_or("#808080").to_owned();
+                let neutral = template.colors[3].hex().unwrap_or("#F5F5F5").to_owned();
+
+                let brand = Brand {
+                    name: Arc::from("synthesized"),
+                    palette: slideforge_types::BrandPalette {
+                        primary: Arc::from(primary.as_str()),
+                        secondary: Arc::from(secondary.as_str()),
+                        accent: Arc::from(accent.as_str()),
+                        neutral: Arc::from(neutral.as_str()),
+                    },
+                    fonts: slideforge_types::BrandFonts {
+                        heading: Arc::clone(&template.fonts.heading),
+                        body: Arc::clone(&template.fonts.body),
+                        mono: Arc::from("Courier New"),
+                    },
+                    layouts: vec![],
+                    span: slideforge_types::SourceSpan::default(),
+                };
+                Ok(brand)
+            },
+            // PptxFile and DocxFile extraction are implemented in STORY-024.
+            // Return a clear, actionable error with the unsupported source type.
+            BrandSource::PptxFile(path) => {
+                Err(slideforge_plugin_api::BrandError::ValidationError {
+                    message: format!(
+                        "PPTX template extraction is not yet supported for '{path}'. \
+                         Use a brand.toml file (BrandSource::TomlFile) or wait for STORY-024."
+                    ),
+                })
+            },
+            BrandSource::DocxFile(path) => {
+                Err(slideforge_plugin_api::BrandError::ValidationError {
+                    message: format!(
+                        "DOCX template extraction is not yet supported for '{path}'. \
+                         Use a brand.toml file (BrandSource::TomlFile) or wait for STORY-024."
+                    ),
+                })
+            },
+        }
     }
 }
 
@@ -514,6 +583,180 @@ mod tests {
         assert_brand_provider::<BrandSynthesizer>();
     }
 
+    /// BC-2.01.005 / AC-005 — `synthesize` with empty `[colors]` section yields 12
+    /// `MissingColorSlot` warnings (one per slot) and returns 12 color slots.
+    ///
+    /// This is the synthesizer-level coverage for AC-005 (empty colors).
+    #[test]
+    fn test_bc_2_01_005_synthesize_empty_colors_yields_12_warnings() {
+        let config = BrandConfig {
+            colors: ColorConfig::default(), // all 12 slots absent
+            fonts: FontConfig {
+                heading: "Calibri".to_owned(),
+                body: "Calibri".to_owned(),
+            },
+            logo: Some(LogoConfig {
+                path: "test-logo.png".to_owned(),
+            }),
+            footer: FooterConfig::default(),
+        };
+        let (template, warnings) = BrandSynthesizer::synthesize(&config)
+            .expect("synthesize must succeed even with no colors");
+        assert_eq!(
+            warnings.len(),
+            12,
+            "AC-005: exactly 12 MissingColorSlot warnings expected when all slots absent"
+        );
+        assert!(
+            warnings
+                .iter()
+                .all(|w| matches!(w, BrandError::MissingColorSlot { .. })),
+            "AC-005: all warnings must be MissingColorSlot"
+        );
+        assert_eq!(
+            template.colors.len(),
+            12,
+            "AC-005: synthesized template must always have 12 color slots"
+        );
+        // All inferred slots must be resolved hex colors
+        for (i, slot) in template.colors.iter().enumerate() {
+            assert!(
+                slot.is_resolved(),
+                "AC-005: inferred color slot {i} ('{}') must be a resolved hex",
+                slot.name
+            );
+        }
+    }
+
+    /// F-PASS2-H1 — `BrandProvider::load(BrandSource::TomlFile)` returns `Ok(Brand)`.
+    ///
+    /// Writes a minimal brand.toml to a tempfile and calls `BrandSynthesizer::load`.
+    /// Verifies the returned `Brand` has the expected color palette slots populated.
+    #[test]
+    fn test_brand_provider_load_toml_file_returns_ok() {
+        use slideforge_plugin_api::BrandProvider as _;
+        use std::io::Write as _;
+        // Write a minimal brand.toml to a temp file.
+        let mut tmp = tempfile::NamedTempFile::new().expect("tempfile must be created");
+        writeln!(
+            tmp,
+            r##"
+[colors]
+dk1 = "#1F2937"
+lt1 = "#FFFFFF"
+acc1 = "#3B82F6"
+
+[logo]
+path = "logo.png"
+
+[fonts]
+heading = "Calibri"
+body = "Calibri"
+"##
+        )
+        .expect("write to tempfile must succeed");
+        let path = tmp
+            .path()
+            .to_str()
+            .expect("tempfile path must be valid UTF-8");
+
+        let synth = BrandSynthesizer;
+        let source = slideforge_plugin_api::BrandSource::TomlFile(Arc::from(path));
+        let brand = synth
+            .load(&source)
+            .expect("BrandProvider::load(TomlFile) must return Ok(Brand)");
+        // Verify the palette was populated from the color slots.
+        // slot 0 (dk1) → primary = "#1F2937"
+        assert_eq!(
+            brand.palette.primary.as_ref(),
+            "#1F2937",
+            "primary color must match dk1 from brand.toml"
+        );
+        // slot 1 (lt1) → secondary = "#FFFFFF"
+        assert_eq!(
+            brand.palette.secondary.as_ref(),
+            "#FFFFFF",
+            "secondary color must match lt1 from brand.toml"
+        );
+        // Fonts must be preserved
+        assert_eq!(
+            brand.fonts.heading.as_ref(),
+            "Calibri",
+            "heading font must match [fonts].heading from brand.toml"
+        );
+    }
+
+    /// F-PASS2-H1 — `BrandProvider::load(BrandSource::PptxFile)` returns `Err` with
+    /// a clear, actionable message referencing STORY-024.
+    #[test]
+    fn test_brand_provider_load_pptx_file_returns_err_pending_story_024() {
+        use slideforge_plugin_api::BrandProvider as _;
+        let synth = BrandSynthesizer;
+        let source = slideforge_plugin_api::BrandSource::PptxFile(Arc::from("template.pptx"));
+        let err = synth
+            .load(&source)
+            .expect_err("PptxFile must return Err (not yet supported)");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("PPTX") || msg.contains("pptx"),
+            "error message must mention PPTX, got: {msg}"
+        );
+        assert!(
+            msg.contains("STORY-024"),
+            "error message must reference STORY-024, got: {msg}"
+        );
+    }
+
+    /// F-PASS2-M4 — Snapshot-based determinism guard for color inference.
+    ///
+    /// Snapshots the inferred color palette for a fixed input on the dev platform.
+    /// CI running on Linux/macOS/Windows will catch cross-platform f32 HSL divergence
+    /// if the platform produces different output for the same input.
+    ///
+    /// The snapshot is blessed on the dev platform with `INSTA_UPDATE=unseen`.
+    #[test]
+    fn test_inference_snapshot_deterministic() {
+        use crate::toml_schema::{ColorConfig, FontConfig, FooterConfig, LogoConfig};
+        let config = BrandConfig {
+            colors: ColorConfig {
+                dk1: Some("#1F2937".to_owned()),
+                lt1: Some("#FFFFFF".to_owned()),
+                acc1: Some("#3B82F6".to_owned()),
+                // All other slots absent — will be inferred
+                ..ColorConfig::default()
+            },
+            fonts: FontConfig {
+                heading: "Calibri".to_owned(),
+                body: "Calibri".to_owned(),
+            },
+            logo: Some(LogoConfig {
+                path: "logo.png".to_owned(),
+            }),
+            footer: FooterConfig::default(),
+        };
+        let (template, warnings) =
+            BrandSynthesizer::synthesize(&config).expect("synthesize must succeed");
+
+        // Collect hex values for all 12 slots for snapshot comparison.
+        let hex_slots: Vec<(&str, &str)> = template
+            .colors
+            .iter()
+            .map(|s| (s.name.as_ref(), s.hex().unwrap_or("UNRESOLVED")))
+            .collect();
+        let warning_count = warnings.len();
+
+        // Render as a stable text snapshot for cross-platform determinism verification.
+        let snapshot_text = format!(
+            "warnings: {warning_count}\ncolors:\n{}",
+            hex_slots
+                .iter()
+                .map(|(name, hex)| format!("  {name}: {hex}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+        insta::assert_snapshot!("inference_snapshot_deterministic", snapshot_text);
+    }
+
     /// F13 — `BrandError::LogoRequired` now carries a `span` field.
     #[test]
     fn test_f13_logo_required_has_span_field() {
@@ -712,18 +955,9 @@ mod tests {
 
                 match (r1, r2) {
                     (Ok((t1, _)), Ok((t2, _))) => {
-                        prop_assert_eq!(t1.layouts.len(), t2.layouts.len(),
-                            "layout count must be deterministic");
-                        for i in 0..12 {
-                            let h1 = t1.colors[i].hex();
-                            let h2 = t2.colors[i].hex();
-                            prop_assert_eq!(h1, h2);
-                        }
-                        for i in 0..t1.layouts.len() {
-                            let n1 = t1.layouts[i].name.as_ref();
-                            let n2 = t2.layouts[i].name.as_ref();
-                            prop_assert_eq!(n1, n2);
-                        }
+                        // Full structural equality via derived PartialEq covers all fields:
+                        // colors (12 slots), fonts, logo, footer_text, layouts, master IDs, etc.
+                        prop_assert_eq!(t1, t2, "synthesize must be fully deterministic");
                     }
                     (Err(_), Err(_)) => {
                         // Both fail the same way — deterministic failure is also acceptable.

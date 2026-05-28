@@ -402,7 +402,7 @@ pub fn generate_all_layouts(_config: &BrandConfig) -> Vec<SlideLayoutDef> {
             "Picture with Caption",
             "picTx",
             vec![
-                title_ph("ctrTitle", "Picture Title"),
+                title_ph("title", "Picture Title"),
                 LayoutPlaceholder {
                     ph_type: Arc::from("pic"),
                     idx: 1,

@@ -1,0 +1,18 @@
+---
+source: crates/slideforge-brand/src/synthesizer.rs
+expression: snapshot_text
+---
+warnings: 9
+colors:
+  dk1: #1F2937
+  lt1: #FFFFFF
+  dk2: #3B82F6
+  lt2: #F9FAFB
+  acc1: #3B82F6
+  acc2: #523BF6
+  acc3: #AF3BF6
+  acc4: #F63BE0
+  acc5: #F63B82
+  acc6: #F6513B
+  hlink: #0F66F4
+  folHlink: #0A5BDF
