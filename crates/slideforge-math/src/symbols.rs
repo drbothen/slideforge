@@ -208,4 +208,37 @@ mod tests {
     fn test_unknown_greek_returns_none() {
         assert_eq!(greek_to_unicode_char("notAGreekLetter"), None);
     }
+
+    /// BC-1.10.003 invariant 6 — cross-renderer Unicode equivalence for `\varphi`.
+    ///
+    /// The canonical convention is: `\phi` → U+03C6 (φ, small phi) and
+    /// `\varphi` → U+03C6 (φ, same small phi). Both OMML, MathML, and the PDF
+    /// path renderer must produce U+03C6 for `MathNode::Greek("varphi")`.
+    ///
+    /// Previously OMML emitted U+03D5 (ϕ) — a distinct Unicode character —
+    /// while MathML and the PDF path renderer emitted U+03C6 (φ). The
+    /// DRY refactor through this module fixes the divergence.
+    #[test]
+    fn test_bc_1_10_003_varphi_canonical_unicode() {
+        let ch = greek_to_unicode_char("varphi").expect("varphi must map");
+        // varphi → φ (U+03C6), NOT ϕ (U+03D5)
+        // U+03C6 is the standard LaTeX \varphi character (small cursive phi).
+        // U+03D5 is phi symbol (used in some legacy OMML renderers but incorrect).
+        assert_eq!(
+            ch, '\u{03C6}',
+            "\\varphi must map to φ (U+03C6), not ϕ (U+03D5); got: U+{:04X}",
+            ch as u32
+        );
+    }
+
+    /// BC-1.10.003 invariant 6 — `\phi` also maps to U+03C6 (canonical small phi).
+    #[test]
+    fn test_bc_1_10_003_phi_canonical_unicode() {
+        let ch = greek_to_unicode_char("phi").expect("phi must map");
+        assert_eq!(
+            ch, '\u{03C6}',
+            "\\phi must map to φ (U+03C6); got: U+{:04X}",
+            ch as u32
+        );
+    }
 }

@@ -1,0 +1,5 @@
+---
+source: crates/slideforge-math/src/mathml.rs
+expression: output
+---
+"<math xmlns=\"http://www.w3.org/1998/Math/MathML\" display=\"inline\" aria-label=\"square root of x\"><mrow><msqrt><mi>x</mi></msqrt></mrow></math>"

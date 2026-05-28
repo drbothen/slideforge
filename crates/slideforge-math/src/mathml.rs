@@ -1103,4 +1103,123 @@ mod tests {
             "render_mathml must be deterministic for the same AST"
         );
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // BC-1.10.003 invariant 6 — Cross-renderer Unicode equivalence
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// `\varphi` produces U+03C6 (φ) in MathML, consistent with OMML and PDF.
+    #[test]
+    fn test_bc_1_10_003_mathml_varphi_is_u03c6() {
+        let ast = inline_ast(vec![MathNode::Greek(Arc::from("varphi"))]);
+        let output = render_mathml(&ast).expect("render must succeed for \\varphi");
+        assert!(
+            output.contains('\u{03C6}'),
+            "MathML for \\varphi must contain φ (U+03C6); got: {output}"
+        );
+        assert!(
+            !output.contains('\u{03D5}'),
+            "MathML for \\varphi must NOT contain ϕ (U+03D5); got: {output}"
+        );
+    }
+
+    /// `render_mathml` with empty Greek name returns `Err(MathError::RenderError)`.
+    #[test]
+    fn test_bc_1_10_003_mathml_empty_greek_returns_error() {
+        let ast = inline_ast(vec![MathNode::Greek(Arc::from(""))]);
+        let result = render_mathml(&ast);
+        assert!(
+            result.is_err(),
+            "MathML render with empty Greek name must return Err; got Ok"
+        );
+    }
+
+    /// `render_mathml` with empty symbol name returns `Err(MathError::RenderError)`.
+    #[test]
+    fn test_bc_1_10_003_mathml_empty_symbol_returns_error() {
+        let ast = inline_ast(vec![MathNode::Symbol(Arc::from(""))]);
+        let result = render_mathml(&ast);
+        assert!(
+            result.is_err(),
+            "MathML render with empty symbol name must return Err; got Ok"
+        );
+    }
+
+    /// `render_mathml` with empty operator name returns `Err(MathError::RenderError)`.
+    #[test]
+    fn test_bc_1_10_003_mathml_empty_operator_returns_error() {
+        let ast = inline_ast(vec![MathNode::Operator(Arc::from(""))]);
+        let result = render_mathml(&ast);
+        assert!(
+            result.is_err(),
+            "MathML render with empty operator name must return Err; got Ok"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // H-S030-P2-H3 — Insta snapshot tests for MathML output
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Snapshot: `x^2` inline MathML.
+    #[test]
+    fn snapshot_mathml_superscript_x2() {
+        let ast = inline_ast(vec![MathNode::Superscript {
+            base: Box::new(MathNode::Text(Arc::from("x"))),
+            sup: Box::new(MathNode::Text(Arc::from("2"))),
+        }]);
+        let output = render_mathml(&ast).expect("render must succeed for x^2");
+        insta::assert_yaml_snapshot!("mathml_superscript_x2", output);
+    }
+
+    /// Snapshot: `\frac{1}{2}` inline MathML.
+    #[test]
+    fn snapshot_mathml_fraction_half() {
+        let ast = inline_ast(vec![MathNode::Fraction {
+            num: Box::new(MathNode::Text(Arc::from("1"))),
+            denom: Box::new(MathNode::Text(Arc::from("2"))),
+        }]);
+        let output = render_mathml(&ast).expect("render must succeed for \\frac{1}{2}");
+        insta::assert_yaml_snapshot!("mathml_fraction_half", output);
+    }
+
+    /// Snapshot: `\sqrt{x}` inline MathML.
+    #[test]
+    fn snapshot_mathml_sqrt_x() {
+        let ast = inline_ast(vec![MathNode::Sqrt {
+            index: None,
+            radicand: Box::new(MathNode::Text(Arc::from("x"))),
+        }]);
+        let output = render_mathml(&ast).expect("render must succeed for \\sqrt{x}");
+        insta::assert_yaml_snapshot!("mathml_sqrt_x", output);
+    }
+
+    /// Snapshot: `\sum_{i=0}^{n}` display MathML.
+    #[test]
+    fn snapshot_mathml_display_sum() {
+        let ast = display_ast(vec![MathNode::Subscript {
+            base: Box::new(MathNode::Superscript {
+                base: Box::new(MathNode::Operator(Arc::from("sum"))),
+                sup: Box::new(MathNode::Text(Arc::from("n"))),
+            }),
+            sub: Box::new(MathNode::Group(vec![
+                MathNode::Text(Arc::from("i")),
+                MathNode::Text(Arc::from("=")),
+                MathNode::Text(Arc::from("0")),
+            ])),
+        }]);
+        let output = render_mathml(&ast).expect("render must succeed for display sum");
+        insta::assert_yaml_snapshot!("mathml_display_sum", output);
+    }
+
+    /// Snapshot: `\alpha + \beta` inline MathML.
+    #[test]
+    fn snapshot_mathml_greek_alpha_beta() {
+        let ast = inline_ast(vec![
+            MathNode::Greek(Arc::from("alpha")),
+            MathNode::Text(Arc::from("+")),
+            MathNode::Greek(Arc::from("beta")),
+        ]);
+        let output = render_mathml(&ast).expect("render must succeed for \\alpha + \\beta");
+        insta::assert_yaml_snapshot!("mathml_greek_alpha_beta", output);
+    }
 }

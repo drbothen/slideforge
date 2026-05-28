@@ -820,4 +820,68 @@ mod tests {
         let xml = String::from_utf8(bytes).expect("valid UTF-8");
         insta::assert_yaml_snapshot!("omml_greek_alpha_beta", xml);
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // BC-1.10.003 invariant 6 — Cross-renderer Unicode equivalence
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// `\varphi` produces U+03C6 (φ) in OMML, consistent with MathML and PDF.
+    ///
+    /// Previously OMML emitted U+03D5 (ϕ) — a distinct Unicode codepoint —
+    /// while the other two renderers emitted U+03C6 (φ). This test asserts
+    /// the fix: all renderers route through `symbols::greek_to_unicode_char`
+    /// which maps `"varphi"` → U+03C6.
+    #[test]
+    fn test_bc_1_10_003_omml_varphi_is_u03c6() {
+        let ast = MathAst::new(MathMode::Inline, vec![MathNode::Greek(Arc::from("varphi"))]);
+        let bytes = render(&ast).expect("render must succeed for \\varphi");
+        let xml = String::from_utf8(bytes).expect("valid UTF-8");
+        assert!(
+            xml.contains('\u{03C6}'),
+            "OMML for \\varphi must contain φ (U+03C6), not ϕ (U+03D5); got: {xml}"
+        );
+        assert!(
+            !xml.contains('\u{03D5}'),
+            "OMML for \\varphi must NOT contain ϕ (U+03D5); got: {xml}"
+        );
+    }
+
+    /// OMML `\varphi` empty-name returns `Err(EmptyCommandName)`.
+    #[test]
+    fn test_bc_1_10_003_omml_empty_greek_returns_error() {
+        let ast = MathAst::new(MathMode::Inline, vec![MathNode::Greek(Arc::from(""))]);
+        let result = render(&ast);
+        assert!(
+            result.is_err(),
+            "OMML render with empty Greek name must return Err; got Ok"
+        );
+    }
+
+    /// OMML `\xyzunknown` operator (not in symbols table) returns error.
+    #[test]
+    fn test_bc_1_10_003_omml_unknown_operator_returns_error() {
+        let ast = MathAst::new(
+            MathMode::Inline,
+            vec![MathNode::Operator(Arc::from("xyzunknown"))],
+        );
+        let result = render(&ast);
+        assert!(
+            result.is_err(),
+            "OMML render with unknown non-text operator must return Err; got Ok"
+        );
+    }
+
+    /// OMML `\xyzunknown` symbol (not in symbols table) returns error.
+    #[test]
+    fn test_bc_1_10_003_omml_unknown_symbol_returns_error() {
+        let ast = MathAst::new(
+            MathMode::Inline,
+            vec![MathNode::Symbol(Arc::from("xyzunknown"))],
+        );
+        let result = render(&ast);
+        assert!(
+            result.is_err(),
+            "OMML render with unknown symbol must return Err; got Ok"
+        );
+    }
 }
