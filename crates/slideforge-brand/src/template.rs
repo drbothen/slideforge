@@ -126,19 +126,69 @@ pub struct BrandFonts {
     pub body: Arc<str>,
 }
 
-/// A logo image extracted from the slide master relationships.
+/// A logo image extracted from the slide master relationships, or a deferred
+/// path reference for synthesized brands.
 ///
-/// Extracted from `ppt/slideMasters/_rels/slideMaster1.xml.rels` (PPTX only).
-/// The logo is optional — if no image relationship is found, [`BrandTemplate::logo`]
-/// is `None`.
+/// ## Variants
+///
+/// - [`LogoAsset::Loaded`]: bytes already in memory (from `.pptx`/`.docx` extraction).
+/// - [`LogoAsset::Deferred`]: path recorded during synthesis; bytes loaded on demand
+///   by the PPTX exporter (STORY-037) when building the ZIP package. This keeps
+///   [`BrandSynthesizer::synthesize`] pure (no filesystem I/O).
+///
+/// The logo is optional — if no `[logo]` section in `brand.toml` and no image
+/// relationship in the source template, [`BrandTemplate::logo`] is `None`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct LogoAsset {
-    /// Raw image bytes read from the ZIP archive.
-    pub bytes: Vec<u8>,
-    /// MIME type of the image (e.g., `"image/png"`, `"image/jpeg"`).
-    pub media_type: Arc<str>,
-    /// The ZIP-internal path of the image file (e.g., `"ppt/media/image1.png"`).
-    pub original_path: Arc<str>,
+pub enum LogoAsset {
+    /// Logo bytes already loaded into memory.
+    ///
+    /// Produced by [`crate::loader::BrandLoader`] when extracting from
+    /// a `.pptx` or `.docx` template (STORY-022).
+    Loaded {
+        /// Raw image bytes read from the ZIP archive.
+        bytes: Vec<u8>,
+        /// MIME type of the image (e.g., `"image/png"`, `"image/jpeg"`).
+        media_type: Arc<str>,
+        /// The ZIP-internal path of the image file (e.g., `"ppt/media/image1.png"`).
+        original_path: Arc<str>,
+    },
+    /// Logo path recorded for deferred loading by the PPTX exporter.
+    ///
+    /// Produced by [`crate::synthesizer::BrandSynthesizer::synthesize`] when
+    /// the `[logo]` section declares a path. The exporter reads the bytes from
+    /// the filesystem when building the output ZIP package (STORY-037).
+    Deferred {
+        /// File system path to the logo image (from `brand.toml` `[logo].path`).
+        path: Arc<str>,
+    },
+}
+
+impl LogoAsset {
+    /// Returns the raw bytes if this asset is [`LogoAsset::Loaded`], or `None`
+    /// if it is [`LogoAsset::Deferred`] (bytes not yet read from disk).
+    #[must_use]
+    pub fn loaded_bytes(&self) -> Option<&[u8]> {
+        match self {
+            Self::Loaded { bytes, .. } => Some(bytes),
+            Self::Deferred { .. } => None,
+        }
+    }
+
+    /// Returns the file path for a [`LogoAsset::Deferred`] asset, or `None`
+    /// if this is a [`LogoAsset::Loaded`] asset.
+    #[must_use]
+    pub fn deferred_path(&self) -> Option<&str> {
+        match self {
+            Self::Deferred { path } => Some(path.as_ref()),
+            Self::Loaded { .. } => None,
+        }
+    }
+
+    /// Returns `true` if this asset's bytes are already in memory.
+    #[must_use]
+    pub fn is_loaded(&self) -> bool {
+        matches!(self, Self::Loaded { .. })
+    }
 }
 
 /// OOXML master and layout ID constraints (BC-2.01.005 invariant 3 / AC-011).
@@ -383,13 +433,25 @@ mod tests {
     /// BC-2.01.001 AC-005 — logo is Option<LogoAsset>.
     #[test]
     fn test_bc_2_01_001_logo_asset_construction() {
-        let logo = LogoAsset {
+        let logo = LogoAsset::Loaded {
             bytes: vec![0x89, 0x50, 0x4E, 0x47],
             media_type: Arc::from("image/png"),
             original_path: Arc::from("ppt/media/image1.png"),
         };
-        assert_eq!(logo.media_type.as_ref(), "image/png");
-        assert_eq!(logo.bytes.len(), 4);
+        assert_eq!(logo.loaded_bytes().map(|b| b.len()), Some(4));
+        assert!(logo.is_loaded());
+        assert_eq!(logo.deferred_path(), None);
+    }
+
+    /// F5 — `LogoAsset::Deferred` carries the path and has no loaded bytes.
+    #[test]
+    fn test_logo_asset_deferred_variant() {
+        let logo = LogoAsset::Deferred {
+            path: Arc::from("brand.assets/logo.png"),
+        };
+        assert!(!logo.is_loaded());
+        assert_eq!(logo.deferred_path(), Some("brand.assets/logo.png"));
+        assert_eq!(logo.loaded_bytes(), None);
     }
 
     /// BC-2.01.001 AC-006 — `layout_names` stored as Vec<Arc<str>> using ZIP-internal paths.

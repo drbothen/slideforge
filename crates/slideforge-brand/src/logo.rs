@@ -60,7 +60,7 @@ pub fn extract_logo<R: Read + std::io::Seek>(zip: &mut ZipArchive<R>) -> Option<
     let ext = resolved_path.rsplit_once('.').map_or("", |(_, e)| e);
     let media_type = media_type_from_extension(ext);
 
-    Some(LogoAsset {
+    Some(LogoAsset::Loaded {
         bytes: image_bytes,
         media_type,
         original_path: Arc::from(resolved_path.as_str()),

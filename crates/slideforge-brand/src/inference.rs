@@ -29,6 +29,10 @@ use crate::error::BrandError;
 // ─── Public entry point ───────────────────────────────────────────────────────
 
 /// Slot name constants in ECMA-376 order (matches `COLOR_SLOT_NAMES` from template.rs).
+///
+/// Position 11 is `"folHlink"` (camelCase) — the canonical ECMA-376 OOXML name.
+/// The TOML field is `fol_hlink` (snake_case, via serde rename), but the color slot
+/// name stored in [`crate::template::ColorSlot`] and in BC-2.01.002 must be `"folHlink"`.
 const SLOT_NAMES: [&str; 12] = [
     "dk1",
     "lt1",
@@ -41,7 +45,7 @@ const SLOT_NAMES: [&str; 12] = [
     "acc5",
     "acc6",
     "hlink",
-    "fol_hlink",
+    "folHlink",
 ];
 
 /// Infer all 12 OOXML color slots from a partially-declared palette.

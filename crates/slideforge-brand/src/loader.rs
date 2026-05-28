@@ -822,22 +822,31 @@ mod tests {
 
         let template = result.expect("PPTX with logo must load without error");
 
-        // Logo must be Some.
+        // Logo must be Some and Loaded (bytes in memory from ZIP extraction).
         let logo = template.logo.expect("logo must be present (FINDING-012)");
-        assert_eq!(
-            logo.bytes, png_bytes,
-            "logo bytes must match the image1.png content"
-        );
-        assert_eq!(
-            logo.media_type.as_ref(),
-            "image/png",
-            "logo media type must be image/png for .png extension"
-        );
-        assert_eq!(
-            logo.original_path.as_ref(),
-            "ppt/media/image1.png",
-            "logo original_path must be the resolved ZIP-internal path"
-        );
+        match logo {
+            crate::template::LogoAsset::Loaded {
+                bytes,
+                media_type,
+                original_path,
+            } => {
+                assert_eq!(
+                    bytes, png_bytes,
+                    "logo bytes must match the image1.png content"
+                );
+                assert_eq!(
+                    media_type.as_ref(),
+                    "image/png",
+                    "logo media type must be image/png for .png extension"
+                );
+                assert_eq!(
+                    original_path.as_ref(),
+                    "ppt/media/image1.png",
+                    "logo original_path must be the resolved ZIP-internal path"
+                );
+            },
+            other => panic!("expected LogoAsset::Loaded from PPTX extraction, got: {other:?}"),
+        }
     }
 
     /// FINDING-001 — `BrandProvider::load()` returns Brand for a valid PPTX source.

@@ -42,7 +42,7 @@ use crate::layout_xml::{
 };
 use crate::layouts::generate_all_layouts;
 use crate::template::{
-    BrandFonts, BrandTemplate, COLOR_SLOT_NAMES, ColorSlot, ColorValue, MasterIds,
+    BrandFonts, BrandTemplate, COLOR_SLOT_NAMES, ColorSlot, ColorValue, LogoAsset, MasterIds,
 };
 use crate::toml_schema::BrandConfig;
 
@@ -82,7 +82,11 @@ impl BrandSynthesizer {
     /// - [`BrandError::TomlReadError`] if `path` does not exist or cannot be read.
     /// - [`BrandError::TomlParseError`] if the file content is not valid TOML.
     /// - Propagates all errors from [`BrandSynthesizer::synthesize`].
-    pub fn load_from_toml(path: &str) -> Result<BrandTemplate, BrandError> {
+    ///
+    /// On success, returns `(template, warnings)` — see [`BrandSynthesizer::synthesize`].
+    pub fn load_from_toml(
+        path: &str,
+    ) -> Result<(BrandTemplate, Vec<BrandError>), BrandError> {
         let content = std::fs::read_to_string(path).map_err(|e| BrandError::TomlReadError {
             path: Arc::from(path),
             reason: Arc::from(e.to_string().as_str()),
@@ -110,9 +114,14 @@ impl BrandSynthesizer {
     /// # Errors
     ///
     /// Returns `Err(BrandError)` for fatal conditions (e.g., missing logo path).
-    /// Color slot inference warnings are logged via `tracing::warn!` and do NOT
-    /// cause an error return — build continues with inferred values.
-    pub fn synthesize(config: &BrandConfig) -> Result<BrandTemplate, BrandError> {
+    ///
+    /// On success, returns `Ok((template, warnings))` where `warnings` contains
+    /// zero or more [`BrandError::MissingColorSlot`] entries for each color slot
+    /// that was absent in the config and was inferred (AC-002, AC-005, AC-007).
+    /// These are cosmetic warnings — the build continues with inferred values.
+    pub fn synthesize(
+        config: &BrandConfig,
+    ) -> Result<(BrandTemplate, Vec<BrandError>), BrandError> {
         // Step 1: Validate required fields (AC-004 — logo required)
         if config.logo.is_none() {
             return Err(BrandError::LogoRequired);
@@ -122,10 +131,6 @@ impl BrandSynthesizer {
         let declared = config.colors.as_slot_array();
         let mut warnings: Vec<BrandError> = Vec::new();
         let hex_slots = inference::infer_missing_slots(declared, &mut warnings);
-
-        // Log warnings (already emitted by infer_missing_slots via tracing::warn!)
-        // The warnings are pushed to `warnings` for the caller to inspect if needed,
-        // but we don't return them as errors — build continues (AC-002, AC-005).
 
         // Build ColorSlot array from inferred hex strings
         let colors = build_color_slots(&hex_slots);
@@ -168,10 +173,17 @@ impl BrandSynthesizer {
         // Step 9: Master IDs (AC-011)
         let master_ids = MasterIds::default();
 
-        Ok(BrandTemplate {
+        // Step 10: Carry logo path as a deferred-load asset (F5 fix).
+        // The bytes are NOT read here — synthesize() is a pure function with no I/O.
+        // The PPTX exporter (STORY-037) reads the bytes when building the ZIP package.
+        let logo = config.logo.as_ref().map(|l| LogoAsset::Deferred {
+            path: Arc::from(l.path.as_str()),
+        });
+
+        let template = BrandTemplate {
             colors,
             fonts,
-            logo: None, // Logo path stored in config; actual bytes loaded on demand by PPTX exporter
+            logo,
             footer_text,
             layout_names: vec![],
             layouts,
@@ -179,7 +191,8 @@ impl BrandSynthesizer {
             handout_master_stub,
             master_ids,
             content_types_layout_entries,
-        })
+        };
+        Ok((template, warnings))
     }
 }
 
@@ -318,9 +331,9 @@ mod tests {
     #[test]
     fn test_bc_2_01_002_invariant_synthesis_is_deterministic() {
         let config = full_12_color_config();
-        let t1 = BrandSynthesizer::synthesize(&config)
+        let (t1, _) = BrandSynthesizer::synthesize(&config)
             .expect("synthesize must succeed with full config");
-        let t2 = BrandSynthesizer::synthesize(&config).expect("second synthesize must succeed");
+        let (t2, _) = BrandSynthesizer::synthesize(&config).expect("second synthesize must succeed");
         // Color slots must be identical
         assert_eq!(
             t1.colors.len(),
@@ -353,7 +366,7 @@ mod tests {
     #[test]
     fn test_bc_2_01_002_synthesized_template_has_12_color_slots() {
         let config = full_12_color_config();
-        let result = BrandSynthesizer::synthesize(&config).expect("synthesize must succeed");
+        let (result, _) = BrandSynthesizer::synthesize(&config).expect("synthesize must succeed");
         assert_eq!(
             result.colors.len(),
             12,
@@ -365,7 +378,7 @@ mod tests {
     #[test]
     fn test_bc_2_01_005_synthesized_template_has_31_layouts() {
         let config = full_12_color_config();
-        let result = BrandSynthesizer::synthesize(&config).expect("synthesize must succeed");
+        let (result, _) = BrandSynthesizer::synthesize(&config).expect("synthesize must succeed");
         assert_eq!(
             result.layouts.len(),
             31,
@@ -377,7 +390,7 @@ mod tests {
     #[test]
     fn test_bc_2_01_005_ac011_master_id_is_2_pow_31() {
         let config = full_12_color_config();
-        let result = BrandSynthesizer::synthesize(&config).expect("synthesize must succeed");
+        let (result, _) = BrandSynthesizer::synthesize(&config).expect("synthesize must succeed");
         assert_eq!(
             result.master_ids.master_id,
             2u32.pow(31),
@@ -389,7 +402,7 @@ mod tests {
     #[test]
     fn test_bc_2_01_005_ac011_layout_id_start_is_2_pow_31_plus_1() {
         let config = full_12_color_config();
-        let result = BrandSynthesizer::synthesize(&config).expect("synthesize must succeed");
+        let (result, _) = BrandSynthesizer::synthesize(&config).expect("synthesize must succeed");
         assert_eq!(
             result.master_ids.layout_id_start,
             2u32.pow(31) + 1,
@@ -401,7 +414,7 @@ mod tests {
     #[test]
     fn test_bc_2_01_002_ac012_notes_master_stub_present() {
         let config = full_12_color_config();
-        let result = BrandSynthesizer::synthesize(&config).expect("synthesize must succeed");
+        let (result, _) = BrandSynthesizer::synthesize(&config).expect("synthesize must succeed");
         assert!(
             !result.notes_master_stub.is_empty(),
             "notes_master_stub must be non-empty in synthesized BrandTemplate"
@@ -416,7 +429,7 @@ mod tests {
     #[test]
     fn test_bc_2_01_002_ac012_handout_master_stub_present() {
         let config = full_12_color_config();
-        let result = BrandSynthesizer::synthesize(&config).expect("synthesize must succeed");
+        let (result, _) = BrandSynthesizer::synthesize(&config).expect("synthesize must succeed");
         assert!(
             !result.handout_master_stub.is_empty(),
             "handout_master_stub must be non-empty in synthesized BrandTemplate"
@@ -432,7 +445,7 @@ mod tests {
     #[test]
     fn test_bc_2_01_005_synthesize_produces_complete_brand_template() {
         let config = full_12_color_config();
-        let result = BrandSynthesizer::synthesize(&config)
+        let (result, _) = BrandSynthesizer::synthesize(&config)
             .expect("synthesize with logo + all 12 colors must succeed");
         // 12 color slots
         assert_eq!(result.colors.len(), 12, "must have 12 color slots");
@@ -461,7 +474,7 @@ mod tests {
     #[test]
     fn test_bc_2_01_005_synthesize_with_inferred_colors() {
         let config = minimal_config(); // only dk1, lt1, acc1 declared; 9 slots inferred
-        let result = BrandSynthesizer::synthesize(&config)
+        let (result, _) = BrandSynthesizer::synthesize(&config)
             .expect("synthesize with minimal config must succeed");
         // All 12 color slots must be present and populated
         assert_eq!(
@@ -496,6 +509,62 @@ mod tests {
     fn test_brand_synthesizer_implements_brand_provider() {
         fn assert_brand_provider<T: BrandProvider>() {}
         assert_brand_provider::<BrandSynthesizer>();
+    }
+
+    /// F4 — `synthesize` propagates MissingColorSlot warnings in the Ok tuple.
+    ///
+    /// When color slots are absent, the warnings must be programmatically visible
+    /// to the caller (not silently dropped). Spec line 246: return includes warnings.
+    #[test]
+    fn test_f4_synthesize_propagates_warnings_in_ok_tuple() {
+        let config = minimal_config(); // dk1, lt1, acc1 declared; 9 slots absent
+        let (_, warnings) = BrandSynthesizer::synthesize(&config)
+            .expect("synthesize must succeed with minimal config");
+        assert!(
+            !warnings.is_empty(),
+            "F4: warnings must be non-empty when color slots are inferred"
+        );
+        // All warnings must be MissingColorSlot variants
+        for w in &warnings {
+            assert!(
+                matches!(w, BrandError::MissingColorSlot { .. }),
+                "F4: all warnings must be BrandError::MissingColorSlot, got: {w:?}"
+            );
+        }
+    }
+
+    /// F4 — all-12-declared config produces zero warnings.
+    #[test]
+    fn test_f4_synthesize_no_warnings_when_all_12_declared() {
+        let config = full_12_color_config();
+        let (_, warnings) = BrandSynthesizer::synthesize(&config)
+            .expect("synthesize must succeed");
+        assert_eq!(
+            warnings.len(),
+            0,
+            "F4: zero warnings when all 12 color slots declared"
+        );
+    }
+
+    /// F5 — synthesized `BrandTemplate.logo` is `Some(LogoAsset::Deferred)`, not `None`.
+    ///
+    /// The PPTX exporter (STORY-037) reads the bytes from the declared path.
+    /// Synthesis itself must not return `None` when a logo path is declared.
+    #[test]
+    fn test_f5_synthesized_logo_is_some_deferred() {
+        let config = minimal_config(); // has logo path "test-logo.png"
+        let (result, _) = BrandSynthesizer::synthesize(&config)
+            .expect("synthesize must succeed");
+        let logo = result.logo.expect("F5: logo must be Some when [logo].path is declared");
+        assert!(
+            matches!(logo, crate::template::LogoAsset::Deferred { .. }),
+            "F5: synthesized logo must be LogoAsset::Deferred (not Loaded — no I/O in pure fn)"
+        );
+        assert_eq!(
+            logo.deferred_path(),
+            Some("test-logo.png"),
+            "F5: deferred path must match [logo].path from brand.toml"
+        );
     }
 
     // ─── VP-012: proptest — determinism round-trip ─────────────────────────────
@@ -595,7 +664,7 @@ mod tests {
                 let r2 = BrandSynthesizer::synthesize(&config);
 
                 match (r1, r2) {
-                    (Ok(t1), Ok(t2)) => {
+                    (Ok((t1, _)), Ok((t2, _))) => {
                         prop_assert_eq!(t1.layouts.len(), t2.layouts.len(),
                             "layout count must be deterministic");
                         for i in 0..12 {
