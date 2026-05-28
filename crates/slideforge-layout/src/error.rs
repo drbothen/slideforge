@@ -67,9 +67,11 @@ pub enum LayoutError {
 
     /// A manually authored `section <type>:` block has an unrecognised type name.
     ///
-    /// Supported section types are: `methodology`, `scope`, `approval`,
-    /// `appendix`, `glossary`. Any other name produces this error (AC-004 /
-    /// BC-3.02.002).
+    /// Supported section types are: `executive_summary`, `risk_register`,
+    /// `methodology`, `scope`, `approval`, `appendix`, `glossary`.
+    /// `executive_summary` and `risk_register` are allowed as manual overrides
+    /// (AC-006 / BC-3.02.001 EC-002).  Any other name produces this error
+    /// (AC-004 / BC-3.02.002).
     #[error("layout error: unknown section type '{name}'")]
     UnknownSectionType {
         /// The unrecognised section type name from the `.sf` source.
@@ -125,6 +127,36 @@ pub enum LayoutError {
         card_index: usize,
         /// The name of the missing or non-string field.
         field: String,
+    },
+
+    /// The `cards:` field on a `severity_cards` slide is present but holds a
+    /// wrong-typed `Literal` value (not a `List`).
+    ///
+    /// This is a type-error in the .sf source — `cards:` must be a YAML-style
+    /// list of maps, not a scalar or map at the top level (HIGH-003).
+    #[error(
+        "layout error: slide {slide_index}: 'cards' field has wrong type — expected List, \
+         found a non-List Literal value: {reason}"
+    )]
+    MalformedSeverityCards {
+        /// Zero-based index of the `severity_cards` slide.
+        slide_index: usize,
+        /// Human-readable description of the actual type found.
+        reason: String,
+    },
+
+    /// The `cards:` field on a `severity_cards` slide is an unresolved
+    /// non-Literal `FieldValue` (e.g., `Expr`, `Interpolated`, `Inlines`).
+    ///
+    /// The evaluator must resolve all field values before layout runs.
+    /// An unresolved `cards:` field indicates an evaluator bug (HIGH-003).
+    #[error(
+        "layout error: slide {slide_index}: 'cards' field is an unresolved FieldValue variant \
+         (expected Literal(List)); this indicates an evaluator bug"
+    )]
+    UnresolvedSeverityCards {
+        /// Zero-based index of the `severity_cards` slide.
+        slide_index: usize,
     },
 }
 

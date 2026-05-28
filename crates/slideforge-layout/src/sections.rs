@@ -34,13 +34,27 @@
 use std::sync::Arc;
 
 use slideforge_types::{Deck, OrderedMap, Register, Value};
+use tracing::warn;
 
 use crate::error::LayoutError;
 
 /// The set of section type names supported by manually authored sections
 /// (BC-3.02.002 AC-004).
-const SUPPORTED_MANUAL_SECTION_TYPES: &[&str] =
-    &["methodology", "scope", "approval", "appendix", "glossary"];
+///
+/// `executive_summary` and `risk_register` are included here because they
+/// can be manually authored to supersede the auto-generated equivalents
+/// (BC-3.02.001 EC-002 / AC-006).  When a manual block with one of these
+/// names is present, `collect_sections` fires the supersession path and
+/// suppresses the auto-generated section of the same kind.
+const SUPPORTED_MANUAL_SECTION_TYPES: &[&str] = &[
+    "executive_summary",
+    "risk_register",
+    "methodology",
+    "scope",
+    "approval",
+    "appendix",
+    "glossary",
+];
 
 /// The output format a section should be included in.
 ///
@@ -84,8 +98,14 @@ pub enum SectionKind {
 
     /// A manually authored section block from `section <type>:` DSL syntax.
     ///
-    /// Supported types: `methodology`, `scope`, `approval`, `appendix`,
-    /// `glossary`. The type name is stored here for plugin dispatch.
+    /// Supported types: `executive_summary`, `risk_register`, `methodology`,
+    /// `scope`, `approval`, `appendix`, `glossary`. The type name is stored
+    /// here for plugin dispatch.
+    ///
+    /// `executive_summary` and `risk_register` are special: when a manual block
+    /// with one of those names is present, `collect_sections` fires the
+    /// supersession rule (AC-006 / BC-3.02.001 EC-002) and suppresses the
+    /// auto-generated equivalent.
     ///
     /// ## Future extension (MED-002 / STORY-041 / STORY-042)
     ///
@@ -261,17 +281,38 @@ pub fn collect_sections(deck: &Deck) -> Result<Vec<GeneratedSection>, LayoutErro
 
     // ExecutiveSummary from takeaway fields — suppressed if a manual section of
     // the same kind is present (AC-006).
-    if !manual_section_names.contains("executive_summary")
-        && let Some(exec_summary) = collect_executive_summary(deck)?
-    {
+    if manual_section_names.contains("executive_summary") {
+        // AC-006 / BC-3.02.001 EC-002: manual executive_summary supersedes auto.
+        // Check if there would have been an auto-generated one to warn about.
+        let has_takeaways = deck
+            .slides
+            .iter()
+            .any(|s| s.register != Some(Register::Notes) && s.fields.contains_key("takeaway"));
+        if has_takeaways {
+            warn!(
+                "BC-3.02.001 EC-002: Auto-generated executive_summary overridden by explicit \
+                 section block"
+            );
+        }
+    } else if let Some(exec_summary) = collect_executive_summary(deck)? {
         auto_sections.push(exec_summary);
     }
 
     // RiskRegister from severity_cards slides — suppressed if a manual section
     // of the same kind is present (AC-006).
-    if !manual_section_names.contains("risk_register")
-        && let Some(risk_register) = collect_risk_register(deck)?
-    {
+    if manual_section_names.contains("risk_register") {
+        // AC-006 / BC-3.02.001 EC-002: manual risk_register supersedes auto.
+        let has_severity_cards = deck
+            .slides
+            .iter()
+            .any(|s| s.slide_type.as_ref() == "severity_cards");
+        if has_severity_cards {
+            warn!(
+                "BC-3.02.001 EC-002: Auto-generated risk_register overridden by explicit section \
+                 block"
+            );
+        }
+    } else if let Some(risk_register) = collect_risk_register(deck)? {
         auto_sections.push(risk_register);
     }
 
@@ -287,6 +328,20 @@ pub fn collect_sections(deck: &Deck) -> Result<Vec<GeneratedSection>, LayoutErro
             .enumerate()
             .map(|(i, name)| (name.as_ref(), i))
             .collect();
+
+        // OBS-005: warn if section_order names a section that wasn't collected.
+        let collected_keys: std::collections::HashSet<&str> =
+            result.iter().map(|s| s.kind.order_key()).collect();
+        for name in order {
+            if !collected_keys.contains(name.as_ref()) {
+                warn!(
+                    section_name = %name,
+                    "section_order names '{}' but no such section was collected — \
+                     check for missing slides or typo in section_order",
+                    name
+                );
+            }
+        }
 
         result.sort_by_key(|s| {
             order_map
@@ -316,18 +371,25 @@ fn collect_manual_sections(deck: &Deck) -> Result<Vec<GeneratedSection>, LayoutE
             });
         }
 
-        // Build items from the block body.
-        let items: Vec<SectionItem> = block
+        // Build ONE SectionItem::Custom containing all fields from the block body.
+        // HIGH-005: each manual section block produces exactly one Custom item
+        // whose map holds all key-value pairs (insertion order preserved via
+        // OrderedMap).  Previous code emitted one item per key — semantically
+        // wrong because it fragmented the section body into unrelated atoms.
+        let custom_map: OrderedMap<Arc<str>, Value> = block
             .body
             .iter()
-            .map(|(k, v)| {
-                let mut map = OrderedMap::new();
-                map.insert(Arc::clone(k), v.clone());
-                SectionItem::Custom(map)
-            })
+            .map(|(k, v)| (Arc::clone(k), v.clone()))
             .collect();
+        let items = vec![SectionItem::Custom(custom_map)];
 
-        let heading = humanize_section_name(name);
+        // OBS-002: if the section body has a "heading" key with a plain string
+        // value, use it as the section heading; otherwise fall back to the
+        // humanized section type name.
+        let heading: Arc<str> = match block.body.get("heading") {
+            Some(Value::Str(s)) => Arc::clone(s),
+            _ => humanize_section_name(name),
+        };
 
         sections.push(GeneratedSection {
             kind: SectionKind::ManualSection(Arc::clone(&block.name)),
@@ -463,10 +525,26 @@ pub fn collect_risk_register(deck: &Deck) -> Result<Option<GeneratedSection>, La
         }
 
         // Extract the `cards:` field, which must be a Value::List of Value::Maps.
-        // Slides with no cards field, Null, or a wrong type contribute no rows.
+        // HIGH-003: silent fallback removed — wrong types propagate as errors.
         let cards: &[Value] = match slide.fields.get("cards") {
             Some(FieldValue::Literal(Value::List(list))) => list.as_slice(),
-            _ => continue,
+            Some(FieldValue::Literal(_)) => {
+                return Err(LayoutError::MalformedSeverityCards {
+                    slide_index,
+                    reason: "expected List value for 'cards' field, found a non-List Literal"
+                        .to_owned(),
+                });
+            },
+            Some(_) => {
+                return Err(LayoutError::UnresolvedSeverityCards { slide_index });
+            },
+            None => {
+                return Err(LayoutError::MissingRiskCardField {
+                    slide_index,
+                    card_index: 0,
+                    field: "cards".to_owned(),
+                });
+            },
         };
 
         for (card_index, card) in cards.iter().enumerate() {
@@ -1643,6 +1721,566 @@ mod tests {
         assert!(
             msg.contains("severity"),
             "error message must mention field name; got: {msg}"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // CRIT-001 — executive_summary and risk_register as manual section types
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// CRIT-001 — `executive_summary` is now a supported manual section type.
+    /// A `section executive_summary:` block must NOT return UnknownSectionType.
+    #[test]
+    fn test_crit_001_executive_summary_accepted_as_manual_section_type() {
+        let block = SectionBlock {
+            name: Arc::from("executive_summary"),
+            body: OrderedMap::new(),
+            span: SourceSpan::default(),
+        };
+        let deck = make_deck_with_section_blocks(vec![], vec![block]);
+        let result = collect_sections(&deck);
+        assert!(
+            result.is_ok(),
+            "executive_summary must be accepted as a manual section type (CRIT-001); \
+             got: {:?}",
+            result.err()
+        );
+        let sections = result.unwrap();
+        assert!(
+            sections
+                .iter()
+                .any(|s| s.kind == SectionKind::ManualSection(Arc::from("executive_summary"))),
+            "sections must contain ManualSection(\"executive_summary\")"
+        );
+    }
+
+    /// CRIT-001 — `risk_register` is now a supported manual section type.
+    #[test]
+    fn test_crit_001_risk_register_accepted_as_manual_section_type() {
+        let block = SectionBlock {
+            name: Arc::from("risk_register"),
+            body: OrderedMap::new(),
+            span: SourceSpan::default(),
+        };
+        let deck = make_deck_with_section_blocks(vec![], vec![block]);
+        let result = collect_sections(&deck);
+        assert!(
+            result.is_ok(),
+            "risk_register must be accepted as a manual section type (CRIT-001); \
+             got: {:?}",
+            result.err()
+        );
+    }
+
+    /// AC-006 (rewrite, CRIT-001) — when a manual `executive_summary` section
+    /// block exists alongside takeaway slides, the manual section is retained
+    /// and the auto-generated ExecutiveSummary is suppressed.
+    #[test]
+    fn test_ac_006_manual_executive_summary_supersedes_auto_generated_rewrite() {
+        let block = SectionBlock {
+            name: Arc::from("executive_summary"),
+            body: OrderedMap::new(),
+            span: SourceSpan::default(),
+        };
+        let deck = make_deck_with_section_blocks(
+            vec![make_slide_with_takeaway("content", "Auto takeaway")],
+            vec![block],
+        );
+        let sections = collect_sections(&deck).expect("no error");
+        // Must have exactly one executive_summary — the manual one.
+        let exec_sections: Vec<_> = sections
+            .iter()
+            .filter(|s| {
+                s.kind == SectionKind::ExecutiveSummary
+                    || s.kind == SectionKind::ManualSection(Arc::from("executive_summary"))
+            })
+            .collect();
+        assert_eq!(
+            exec_sections.len(),
+            1,
+            "exactly one executive_summary must appear (manual supersedes auto); \
+             got: {:?}",
+            sections.iter().map(|s| &s.kind).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            exec_sections[0].source,
+            SectionSource::ManuallyAuthored,
+            "the retained executive_summary must be the manually authored one"
+        );
+        assert!(
+            matches!(
+                &exec_sections[0].kind,
+                SectionKind::ManualSection(name) if name.as_ref() == "executive_summary"
+            ),
+            "retained section kind must be ManualSection(\"executive_summary\")"
+        );
+        // Auto-generated ExecutiveSummary variant must be absent.
+        assert!(
+            !sections
+                .iter()
+                .any(|s| s.kind == SectionKind::ExecutiveSummary),
+            "auto-generated ExecutiveSummary must be suppressed when manual override present"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // CRIT-002 — supersession warning via tracing
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// CRIT-002 — when a manual executive_summary block supersedes the auto-
+    /// generated one, a `tracing::warn!` is emitted (BC-3.02.001 EC-002).
+    #[tracing_test::traced_test]
+    #[test]
+    fn test_crit_002_supersession_warning_emitted_for_executive_summary() {
+        let block = SectionBlock {
+            name: Arc::from("executive_summary"),
+            body: OrderedMap::new(),
+            span: SourceSpan::default(),
+        };
+        let deck = make_deck_with_section_blocks(
+            vec![make_slide_with_takeaway("content", "Takeaway")],
+            vec![block],
+        );
+        let _ = collect_sections(&deck).expect("collect_sections must succeed");
+        assert!(
+            logs_contain("executive_summary overridden"),
+            "supersession warning must mention 'executive_summary overridden'"
+        );
+    }
+
+    /// CRIT-002 — warning is NOT emitted when manual executive_summary exists
+    /// but there are no takeaway slides (nothing to suppress).
+    #[tracing_test::traced_test]
+    #[test]
+    fn test_crit_002_no_supersession_warning_when_no_takeaways() {
+        let block = SectionBlock {
+            name: Arc::from("executive_summary"),
+            body: OrderedMap::new(),
+            span: SourceSpan::default(),
+        };
+        // No takeaway slides — no auto-generated section would have been produced.
+        let deck = make_deck_with_section_blocks(vec![make_slide("title")], vec![block]);
+        let _ = collect_sections(&deck).expect("collect_sections must succeed");
+        assert!(
+            !logs_contain("executive_summary overridden"),
+            "supersession warning must NOT fire when no takeaway slides exist"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // HIGH-002 — insta snapshot test for collect_sections
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// HIGH-002 — insta debug snapshot of collect_sections output for a
+    /// representative deck with both takeaway and severity_cards slides.
+    ///
+    /// Uses `assert_debug_snapshot!` because `GeneratedSection` does not yet
+    /// derive `serde::Serialize` (that derives for doc-format serialization is
+    /// deferred to the exporter stories where JSON-serializable IR is needed).
+    #[test]
+    fn test_high_002_collect_sections_snapshot() {
+        let deck = make_deck(vec![
+            make_slide_with_takeaway("content", "Key finding A"),
+            make_slide_with_takeaway("bullets", "Key finding B"),
+            make_severity_card_slide("Budget Risk", "High", "May exceed by 15%", "CFO"),
+        ]);
+        let sections = collect_sections(&deck).expect("no error");
+        insta::assert_debug_snapshot!(sections);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // HIGH-003 — error propagation for malformed severity_cards fields
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// HIGH-003 — severity_cards slide with a non-List Literal `cards:` field
+    /// returns `LayoutError::MalformedSeverityCards`.
+    #[test]
+    fn test_high_003_malformed_severity_cards_wrong_type_returns_error() {
+        let mut fields = OrderedMap::new();
+        // cards: "not a list" — wrong type (a scalar string instead of list).
+        fields.insert(
+            Arc::from("cards"),
+            FieldValue::Literal(Value::Str(Arc::from("not a list"))),
+        );
+        let slide = Slide {
+            slide_type: Arc::from("severity_cards"),
+            fields,
+            blocks: vec![],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+        };
+        let deck = make_deck(vec![slide]);
+        let result = collect_risk_register(&deck);
+        assert!(
+            matches!(
+                result,
+                Err(LayoutError::MalformedSeverityCards { slide_index: 0, .. })
+            ),
+            "wrong-typed Literal 'cards' field must return MalformedSeverityCards; got: {result:?}"
+        );
+    }
+
+    /// HIGH-003 — severity_cards slide with an unresolved (Expr) `cards:` field
+    /// returns `LayoutError::UnresolvedSeverityCards`.
+    #[test]
+    fn test_high_003_unresolved_severity_cards_expr_returns_error() {
+        let mut fields = OrderedMap::new();
+        fields.insert(Arc::from("cards"), FieldValue::Expr(Arc::from("some_expr")));
+        let slide = Slide {
+            slide_type: Arc::from("severity_cards"),
+            fields,
+            blocks: vec![],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+        };
+        let deck = make_deck(vec![slide]);
+        let result = collect_risk_register(&deck);
+        assert!(
+            matches!(
+                result,
+                Err(LayoutError::UnresolvedSeverityCards { slide_index: 0 })
+            ),
+            "Expr 'cards' field must return UnresolvedSeverityCards; got: {result:?}"
+        );
+    }
+
+    /// HIGH-003 — severity_cards slide with no `cards:` field at all returns
+    /// `LayoutError::MissingRiskCardField` for the "cards" field.
+    #[test]
+    fn test_high_003_missing_cards_field_returns_error() {
+        // severity_cards slide with no `cards:` field at all.
+        let slide = Slide {
+            slide_type: Arc::from("severity_cards"),
+            fields: OrderedMap::new(),
+            blocks: vec![],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+        };
+        let deck = make_deck(vec![slide]);
+        let result = collect_risk_register(&deck);
+        assert!(
+            matches!(
+                result,
+                Err(LayoutError::MissingRiskCardField { ref field, .. })
+                if field == "cards"
+            ),
+            "missing 'cards' field must return MissingRiskCardField(field=cards); got: {result:?}"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // HIGH-005 — manual section body produces ONE Custom item with full map
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// HIGH-005 — a manual section block with multiple body fields produces
+    /// exactly ONE `SectionItem::Custom` containing all fields.
+    #[test]
+    fn test_high_005_manual_section_body_single_custom_item_with_full_map() {
+        let mut body = OrderedMap::new();
+        body.insert(Arc::from("author"), Value::Str(Arc::from("Alice")));
+        body.insert(Arc::from("version"), Value::Str(Arc::from("1.0")));
+        body.insert(Arc::from("date"), Value::Str(Arc::from("2026-01-01")));
+        let block = SectionBlock {
+            name: Arc::from("methodology"),
+            body,
+            span: SourceSpan::default(),
+        };
+        let deck = make_deck_with_section_blocks(vec![], vec![block]);
+        let sections = collect_sections(&deck).expect("no error");
+        let manual: Vec<_> = sections
+            .iter()
+            .filter(|s| matches!(&s.kind, SectionKind::ManualSection(_)))
+            .collect();
+        assert_eq!(manual.len(), 1, "one manual section expected");
+        // Must have exactly ONE Custom item.
+        assert_eq!(
+            manual[0].items.len(),
+            1,
+            "manual section with 3 body fields must produce exactly 1 SectionItem::Custom \
+             (HIGH-005 fix: one item with full map, not one item per key)"
+        );
+        // That item must be a Custom with all 3 keys.
+        match &manual[0].items[0] {
+            SectionItem::Custom(map) => {
+                assert_eq!(
+                    map.len(),
+                    3,
+                    "Custom item map must contain all 3 body fields"
+                );
+                assert!(map.contains_key("author"), "map must contain 'author'");
+                assert!(map.contains_key("version"), "map must contain 'version'");
+                assert!(map.contains_key("date"), "map must contain 'date'");
+            },
+            other => panic!("expected SectionItem::Custom, got {other:?}"),
+        }
+    }
+
+    /// HIGH-005 — an empty section block body produces ONE Custom item with an
+    /// empty map (not zero items).
+    #[test]
+    fn test_high_005_empty_manual_section_body_produces_single_empty_custom() {
+        let block = SectionBlock {
+            name: Arc::from("scope"),
+            body: OrderedMap::new(),
+            span: SourceSpan::default(),
+        };
+        let deck = make_deck_with_section_blocks(vec![], vec![block]);
+        let sections = collect_sections(&deck).expect("no error");
+        let manual: Vec<_> = sections
+            .iter()
+            .filter(|s| matches!(&s.kind, SectionKind::ManualSection(_)))
+            .collect();
+        assert_eq!(manual.len(), 1, "one manual section expected");
+        assert_eq!(
+            manual[0].items.len(),
+            1,
+            "empty body must still produce 1 SectionItem::Custom (with empty map)"
+        );
+        match &manual[0].items[0] {
+            SectionItem::Custom(map) => {
+                assert!(
+                    map.is_empty(),
+                    "Custom item map must be empty for empty body"
+                );
+            },
+            other => panic!("expected SectionItem::Custom, got {other:?}"),
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // HIGH-006 — target_formats invariant: ManualSection + RiskRegister sorted
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// HIGH-006 — ManualSection sections have target_formats in canonical order.
+    #[test]
+    fn test_manual_section_target_formats_sorted() {
+        let block = SectionBlock {
+            name: Arc::from("methodology"),
+            body: OrderedMap::new(),
+            span: SourceSpan::default(),
+        };
+        let deck = make_deck_with_section_blocks(vec![], vec![block]);
+        let sections = collect_sections(&deck).expect("no error");
+        let manual: Vec<_> = sections
+            .iter()
+            .filter(|s| matches!(&s.kind, SectionKind::ManualSection(_)))
+            .collect();
+        assert_eq!(manual.len(), 1);
+        let mut sorted = manual[0].target_formats.clone();
+        sorted.sort();
+        assert_eq!(
+            manual[0].target_formats, sorted,
+            "ManualSection target_formats must be sorted (HIGH-006)"
+        );
+    }
+
+    /// HIGH-006 — RiskRegister sections have target_formats in canonical order.
+    #[test]
+    fn test_risk_register_target_formats_sorted() {
+        let deck = make_deck(vec![make_severity_card_slide(
+            "Risk A", "High", "Desc", "Owner",
+        )]);
+        let section = collect_risk_register(&deck)
+            .expect("no error")
+            .expect("must produce section");
+        let mut sorted = section.target_formats.clone();
+        sorted.sort();
+        assert_eq!(
+            section.target_formats, sorted,
+            "RiskRegister target_formats must be sorted (HIGH-006)"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // OBS-002 — manual section heading override from "heading" body key
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// OBS-002 — a manual section block with a "heading" key in the body uses
+    /// that string as the section heading instead of the humanized type name.
+    #[test]
+    fn test_obs_002_manual_section_heading_override() {
+        let mut body = OrderedMap::new();
+        body.insert(
+            Arc::from("heading"),
+            Value::Str(Arc::from("Our Research Methodology")),
+        );
+        body.insert(Arc::from("content"), Value::Str(Arc::from("Details here")));
+        let block = SectionBlock {
+            name: Arc::from("methodology"),
+            body,
+            span: SourceSpan::default(),
+        };
+        let deck = make_deck_with_section_blocks(vec![], vec![block]);
+        let sections = collect_sections(&deck).expect("no error");
+        let manual: Vec<_> = sections
+            .iter()
+            .filter(|s| matches!(&s.kind, SectionKind::ManualSection(_)))
+            .collect();
+        assert_eq!(manual.len(), 1);
+        assert_eq!(
+            manual[0].heading.as_ref(),
+            "Our Research Methodology",
+            "heading must use the 'heading' body key when present (OBS-002)"
+        );
+    }
+
+    /// OBS-002 — a manual section block without a "heading" key falls back to
+    /// the humanized type name.
+    #[test]
+    fn test_obs_002_manual_section_heading_fallback() {
+        let block = SectionBlock {
+            name: Arc::from("methodology"),
+            body: OrderedMap::new(),
+            span: SourceSpan::default(),
+        };
+        let deck = make_deck_with_section_blocks(vec![], vec![block]);
+        let sections = collect_sections(&deck).expect("no error");
+        let manual: Vec<_> = sections
+            .iter()
+            .filter(|s| matches!(&s.kind, SectionKind::ManualSection(_)))
+            .collect();
+        assert_eq!(manual.len(), 1);
+        assert_eq!(
+            manual[0].heading.as_ref(),
+            "Methodology",
+            "heading must fall back to humanized type name when no 'heading' key (OBS-002)"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // OBS-003 — section_order stable sort produces specific order
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// OBS-003 — when `section_order:` names only some sections, the unlisted
+    /// sections appear at the end in their default order (manual before auto).
+    /// Stable sort preserves relative order: methodology (manual) before
+    /// executive_summary (auto) because manual sections are prepended first.
+    #[test]
+    fn test_obs_003_unlisted_sections_retain_default_order_after_section_order_sort() {
+        let block = SectionBlock {
+            name: Arc::from("methodology"),
+            body: OrderedMap::new(),
+            span: SourceSpan::default(),
+        };
+        let deck = make_deck_with_section_order(
+            vec![
+                make_slide_with_takeaway("content", "Key point"),
+                make_severity_card_slide("Risk A", "High", "Desc A", "Owner A"),
+            ],
+            vec![block],
+            // Only list risk_register — methodology and executive_summary go to end.
+            &["risk_register"],
+        );
+        let sections = collect_sections(&deck).expect("no error");
+        assert_eq!(sections.len(), 3, "must have 3 sections total");
+        // Listed: risk_register first.
+        assert_eq!(
+            sections[0].kind,
+            SectionKind::RiskRegister,
+            "risk_register (listed) must be first"
+        );
+        // Unlisted in default order: manual sections first (methodology), then auto (exec summary).
+        assert_eq!(
+            sections[1].kind,
+            SectionKind::ManualSection(Arc::from("methodology")),
+            "methodology (manual, unlisted) must be second — manual before auto in default order"
+        );
+        assert_eq!(
+            sections[2].kind,
+            SectionKind::ExecutiveSummary,
+            "executive_summary (auto, unlisted) must be third"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // OBS-005 — section_order unknown name warning
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// OBS-005 — section_order containing a name not in collected sections
+    /// emits a `tracing::warn!` diagnostic.
+    #[tracing_test::traced_test]
+    #[test]
+    fn test_obs_005_section_order_unknown_name_warns() {
+        // section_order references "nonexistent_section" — not in the deck.
+        let deck = make_deck_with_section_order(
+            vec![make_slide_with_takeaway("content", "Key point")],
+            vec![],
+            &["executive_summary", "nonexistent_section"],
+        );
+        let _ = collect_sections(&deck).expect("collect_sections must succeed");
+        assert!(
+            logs_contain("nonexistent_section"),
+            "warn must mention the unknown section name 'nonexistent_section'"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // BC-3.02.002 — all 7 supported section types (expanded list) accepted
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// BC-3.02.002 / CRIT-001 — all 7 supported section types (including
+    /// executive_summary and risk_register) are accepted without error.
+    #[test]
+    fn test_bc_3_02_002_all_seven_supported_section_types_accepted() {
+        for &type_name in &[
+            "executive_summary",
+            "risk_register",
+            "methodology",
+            "scope",
+            "approval",
+            "appendix",
+            "glossary",
+        ] {
+            let block = SectionBlock {
+                name: Arc::from(type_name),
+                body: OrderedMap::new(),
+                span: SourceSpan::default(),
+            };
+            let deck = make_deck_with_section_blocks(vec![], vec![block]);
+            assert!(
+                collect_sections(&deck).is_ok(),
+                "section type '{type_name}' must be accepted without error (CRIT-001)"
+            );
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // LayoutError new variants reachability
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// LayoutError::MalformedSeverityCards can be constructed and displays a
+    /// meaningful message.
+    #[test]
+    fn test_error_malformed_severity_cards_variant_exists() {
+        use crate::error::LayoutError;
+        let err = LayoutError::MalformedSeverityCards {
+            slide_index: 2,
+            reason: "expected List, found String".to_owned(),
+        };
+        let msg = err.to_string();
+        assert!(
+            msg.contains("wrong type") || msg.contains("expected List"),
+            "MalformedSeverityCards message must mention type mismatch; got: {msg}"
+        );
+        assert!(
+            msg.contains('2'),
+            "MalformedSeverityCards message must include slide index; got: {msg}"
+        );
+    }
+
+    /// LayoutError::UnresolvedSeverityCards can be constructed and displays a
+    /// meaningful message.
+    #[test]
+    fn test_error_unresolved_severity_cards_variant_exists() {
+        use crate::error::LayoutError;
+        let err = LayoutError::UnresolvedSeverityCards { slide_index: 3 };
+        let msg = err.to_string();
+        assert!(
+            msg.contains("unresolved") || msg.contains("FieldValue"),
+            "UnresolvedSeverityCards message must mention unresolved; got: {msg}"
         );
     }
 }

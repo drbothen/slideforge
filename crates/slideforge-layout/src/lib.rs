@@ -55,8 +55,8 @@ pub use error::LayoutError;
 pub use layout::run;
 pub use sections::{GeneratedSection, OutputFormat, SectionItem, SectionKind, SectionSource};
 pub use types::{
-    BoundingBox, Frame, FrameContent, LaidOutDeck, LaidOutSlide, PageSize, RegisterTag, TextFlow,
-    TextOverflow,
+    BoundingBox, Frame, FrameContent, LaidOutDeck, LaidOutSlide, PageSize, RegisterSet,
+    RegisterTag, TextFlow, TextOverflow,
 };
 
 #[cfg(test)]
