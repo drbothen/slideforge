@@ -10,8 +10,8 @@
 //! MathNode (raw LaTeX + span)
 //!   └─► substitute()  — @{var} interpolation
 //!         └─► parse()    — LaTeX → MathAst
-//!               └─► omml::render() / (future: mathml::render())
-//!                     └─► Vec<u8>  — OMML or MathML bytes
+//!               └─► omml::render() / mathml::render_mathml() / pdf_paths::render_pdf_paths()
+//!                     └─► Vec<u8>  — OMML, MathML, or SVG path bytes
 //! ```
 //!
 //! ## Supported outputs
@@ -19,8 +19,8 @@
 //! | Format | Status |
 //! |--------|--------|
 //! | [`MathOutputFormat::Omml`] | Implemented (STORY-029) |
-//! | [`MathOutputFormat::MathMl`] | Stub (STORY-030) |
-//! | [`MathOutputFormat::Pdf`] | Stub (STORY-030) |
+//! | [`MathOutputFormat::MathMl`] | Implemented (STORY-030) |
+//! | [`MathOutputFormat::Pdf`] | Implemented (STORY-030) |
 //!
 //! ## Implementation approach
 //!
@@ -138,8 +138,14 @@ impl MathRendererImpl {
             MathMode::Inline
         };
         let ast = self.parse(&node.latex, mode, node.span.clone())?;
-        omml::render(&ast).map_err(|e| MathError::RenderError {
-            message: e.to_string(),
+        omml::render(&ast).map_err(|e| match e {
+            MathRendererError::EmptyCommandName => MathError::EmptyCommandName,
+            MathRendererError::UnsupportedSymbol { name } => MathError::UnsupportedSymbol {
+                name: name.to_string(),
+            },
+            other => MathError::RenderError {
+                message: other.to_string(),
+            },
         })
     }
 }
@@ -153,7 +159,7 @@ impl Default for MathRendererImpl {
 impl MathRenderer for MathRendererImpl {
     #[allow(clippy::unnecessary_literal_bound)]
     fn id(&self) -> &str {
-        "pulldown-latex"
+        "slideforge-builtin"
     }
 
     fn render(&self, node: &TypesMathNode, format: MathOutputFormat) -> Result<Vec<u8>, MathError> {
@@ -296,10 +302,14 @@ mod tests {
     }
 
     /// `id()` returns the stable plugin identifier for this math renderer.
+    ///
+    /// The built-in renderer is identified as `"slideforge-builtin"` because
+    /// it uses the project's own hand-written LaTeX subset parser — not the
+    /// `pulldown-latex` crate (which is not a dependency).
     #[test]
     fn test_bc_1_10_003_renderer_id() {
         let renderer = MathRendererImpl::new();
-        assert_eq!(renderer.id(), "pulldown-latex");
+        assert_eq!(renderer.id(), "slideforge-builtin");
     }
 
     /// `with_vars()` substitutes `@{var}` in an expression before parsing.

@@ -69,8 +69,11 @@ const PDF_VERTICAL_PADDING_PX: i64 = 2;
 /// Produced by [`render_pdf_paths`]. The contained SVG has no `<text>` or
 /// `<image>` elements — only `<path>` elements with absolute coordinates.
 ///
-/// The struct also carries the bounding-box dimensions in EMUs so that PDF
-/// and PPTX exporters can position the math object without re-parsing the SVG.
+/// The struct also carries estimated bounding-box dimensions in EMUs. These
+/// are derived from the static glyph-layout pass and are a best-effort
+/// approximation — they reflect the bounding box computed by the renderer,
+/// not a parsed measurement of the final SVG viewBox. Exporters that need
+/// precise dimensions should parse the SVG `viewBox` attribute directly.
 ///
 /// ## Invariant
 ///

@@ -30,6 +30,17 @@ use crate::symbols::{
     greek_to_unicode_char, is_text_operator, operator_to_unicode_char, symbol_to_unicode_char,
 };
 
+/// Convert a `quick_xml` serialisation error into [`MathError::RenderError`].
+///
+/// Used by the `write_*` family of functions to convert `?` on
+/// `writer.write_event(...)` calls into `MathError`.
+#[inline]
+fn xml_err(e: &quick_xml::Error) -> MathError {
+    MathError::RenderError {
+        message: e.to_string(),
+    }
+}
+
 /// The W3C `MathML` namespace URI.
 const MATHML_NS: &str = "http://www.w3.org/1998/Math/MathML";
 
@@ -43,7 +54,9 @@ const MATHML_NS: &str = "http://www.w3.org/1998/Math/MathML";
 /// # Errors
 ///
 /// Returns [`MathError::RenderError`] if the AST cannot be serialised to
-/// `MathML`.
+/// `MathML`, [`MathError::EmptyCommandName`] if a Greek/Operator/Symbol node
+/// carries an empty command name, or [`MathError::UnsupportedSymbol`] if a
+/// command name has no Unicode mapping.
 pub fn render_mathml(ast: &MathAst) -> Result<String, MathError> {
     let mut buf: Vec<u8> = Vec::with_capacity(512);
     let mut writer = Writer::new(&mut buf);
@@ -63,34 +76,24 @@ pub fn render_mathml(ast: &MathAst) -> Result<String, MathError> {
 
     writer
         .write_event(Event::Start(root))
-        .map_err(|e| MathError::RenderError {
-            message: e.to_string(),
-        })?;
+        .map_err(|e| xml_err(&e))?;
 
     // Wrap all top-level nodes in an <mrow>
     writer
         .write_event(Event::Start(BytesStart::new("mrow")))
-        .map_err(|e| MathError::RenderError {
-            message: e.to_string(),
-        })?;
+        .map_err(|e| xml_err(&e))?;
 
     for node in &ast.nodes {
-        write_node(&mut writer, node).map_err(|e| MathError::RenderError {
-            message: e.to_string(),
-        })?;
+        write_node(&mut writer, node)?;
     }
 
     writer
         .write_event(Event::End(BytesEnd::new("mrow")))
-        .map_err(|e| MathError::RenderError {
-            message: e.to_string(),
-        })?;
+        .map_err(|e| xml_err(&e))?;
 
     writer
         .write_event(Event::End(BytesEnd::new("math")))
-        .map_err(|e| MathError::RenderError {
-            message: e.to_string(),
-        })?;
+        .map_err(|e| xml_err(&e))?;
 
     String::from_utf8(buf).map_err(|e| MathError::RenderError {
         message: e.to_string(),
@@ -115,7 +118,8 @@ fn classify_text(s: &str) -> &'static str {
 ///
 /// Fence characters (`(`, `)`, `[`, `]`, `{`, `}`) are included so that
 /// bare delimiter tokens—not wrapped in a `Delimiter` node—are classified
-/// as `<mo>` rather than `<mi>`. This matches the `MathML` 3 operator table.
+/// as `<mo>` rather than `<mi>`. This matches the `MathML` Core Level 1
+/// operator table.
 fn is_operator(s: &str) -> bool {
     matches!(
         s,
@@ -156,18 +160,30 @@ fn is_operator(s: &str) -> bool {
 fn write_align_node(
     writer: &mut Writer<&mut Vec<u8>>,
     rows: &[Vec<MathNode>],
-) -> Result<(), quick_xml::Error> {
-    writer.write_event(Event::Start(BytesStart::new("mtable")))?;
+) -> Result<(), MathError> {
+    writer
+        .write_event(Event::Start(BytesStart::new("mtable")))
+        .map_err(|e| xml_err(&e))?;
     for row in rows {
-        writer.write_event(Event::Start(BytesStart::new("mtr")))?;
-        writer.write_event(Event::Start(BytesStart::new("mtd")))?;
+        writer
+            .write_event(Event::Start(BytesStart::new("mtr")))
+            .map_err(|e| xml_err(&e))?;
+        writer
+            .write_event(Event::Start(BytesStart::new("mtd")))
+            .map_err(|e| xml_err(&e))?;
         for n in row {
             write_node(writer, n)?;
         }
-        writer.write_event(Event::End(BytesEnd::new("mtd")))?;
-        writer.write_event(Event::End(BytesEnd::new("mtr")))?;
+        writer
+            .write_event(Event::End(BytesEnd::new("mtd")))
+            .map_err(|e| xml_err(&e))?;
+        writer
+            .write_event(Event::End(BytesEnd::new("mtr")))
+            .map_err(|e| xml_err(&e))?;
     }
-    writer.write_event(Event::End(BytesEnd::new("mtable")))?;
+    writer
+        .write_event(Event::End(BytesEnd::new("mtable")))
+        .map_err(|e| xml_err(&e))?;
     Ok(())
 }
 
@@ -175,30 +191,56 @@ fn write_align_node(
 fn write_cases_node(
     writer: &mut Writer<&mut Vec<u8>>,
     cases: &[(Vec<MathNode>, Vec<MathNode>)],
-) -> Result<(), quick_xml::Error> {
-    writer.write_event(Event::Start(BytesStart::new("mrow")))?;
-    writer.write_event(Event::Start(BytesStart::new("mo")))?;
-    writer.write_event(Event::Text(BytesText::new("{")))?;
-    writer.write_event(Event::End(BytesEnd::new("mo")))?;
-    writer.write_event(Event::Start(BytesStart::new("mtable")))?;
+) -> Result<(), MathError> {
+    writer
+        .write_event(Event::Start(BytesStart::new("mrow")))
+        .map_err(|e| xml_err(&e))?;
+    writer
+        .write_event(Event::Start(BytesStart::new("mo")))
+        .map_err(|e| xml_err(&e))?;
+    writer
+        .write_event(Event::Text(BytesText::new("{")))
+        .map_err(|e| xml_err(&e))?;
+    writer
+        .write_event(Event::End(BytesEnd::new("mo")))
+        .map_err(|e| xml_err(&e))?;
+    writer
+        .write_event(Event::Start(BytesStart::new("mtable")))
+        .map_err(|e| xml_err(&e))?;
     for (result, condition) in cases {
-        writer.write_event(Event::Start(BytesStart::new("mtr")))?;
+        writer
+            .write_event(Event::Start(BytesStart::new("mtr")))
+            .map_err(|e| xml_err(&e))?;
         // Left column: result (the value, e.g. "x" or "-x")
-        writer.write_event(Event::Start(BytesStart::new("mtd")))?;
+        writer
+            .write_event(Event::Start(BytesStart::new("mtd")))
+            .map_err(|e| xml_err(&e))?;
         for n in result {
             write_node(writer, n)?;
         }
-        writer.write_event(Event::End(BytesEnd::new("mtd")))?;
+        writer
+            .write_event(Event::End(BytesEnd::new("mtd")))
+            .map_err(|e| xml_err(&e))?;
         // Right column: condition (the guard, e.g. "if y > 0")
-        writer.write_event(Event::Start(BytesStart::new("mtd")))?;
+        writer
+            .write_event(Event::Start(BytesStart::new("mtd")))
+            .map_err(|e| xml_err(&e))?;
         for n in condition {
             write_node(writer, n)?;
         }
-        writer.write_event(Event::End(BytesEnd::new("mtd")))?;
-        writer.write_event(Event::End(BytesEnd::new("mtr")))?;
+        writer
+            .write_event(Event::End(BytesEnd::new("mtd")))
+            .map_err(|e| xml_err(&e))?;
+        writer
+            .write_event(Event::End(BytesEnd::new("mtr")))
+            .map_err(|e| xml_err(&e))?;
     }
-    writer.write_event(Event::End(BytesEnd::new("mtable")))?;
-    writer.write_event(Event::End(BytesEnd::new("mrow")))?;
+    writer
+        .write_event(Event::End(BytesEnd::new("mtable")))
+        .map_err(|e| xml_err(&e))?;
+    writer
+        .write_event(Event::End(BytesEnd::new("mrow")))
+        .map_err(|e| xml_err(&e))?;
     Ok(())
 }
 
@@ -212,30 +254,50 @@ fn write_delimiter_node(
     left: &str,
     right: &str,
     inner: &[MathNode],
-) -> Result<(), quick_xml::Error> {
+) -> Result<(), MathError> {
     use crate::symbols::unescape_delimiter;
     let left_unesc = unescape_delimiter(left);
     let right_unesc = unescape_delimiter(right);
-    writer.write_event(Event::Start(BytesStart::new("mrow")))?;
+    writer
+        .write_event(Event::Start(BytesStart::new("mrow")))
+        .map_err(|e| xml_err(&e))?;
     if !left_unesc.is_empty() {
-        writer.write_event(Event::Start(BytesStart::new("mo")))?;
-        writer.write_event(Event::Text(BytesText::new(left_unesc)))?;
-        writer.write_event(Event::End(BytesEnd::new("mo")))?;
+        writer
+            .write_event(Event::Start(BytesStart::new("mo")))
+            .map_err(|e| xml_err(&e))?;
+        writer
+            .write_event(Event::Text(BytesText::new(left_unesc)))
+            .map_err(|e| xml_err(&e))?;
+        writer
+            .write_event(Event::End(BytesEnd::new("mo")))
+            .map_err(|e| xml_err(&e))?;
     }
     for n in inner {
         write_node(writer, n)?;
     }
     if !right_unesc.is_empty() {
-        writer.write_event(Event::Start(BytesStart::new("mo")))?;
-        writer.write_event(Event::Text(BytesText::new(right_unesc)))?;
-        writer.write_event(Event::End(BytesEnd::new("mo")))?;
+        writer
+            .write_event(Event::Start(BytesStart::new("mo")))
+            .map_err(|e| xml_err(&e))?;
+        writer
+            .write_event(Event::Text(BytesText::new(right_unesc)))
+            .map_err(|e| xml_err(&e))?;
+        writer
+            .write_event(Event::End(BytesEnd::new("mo")))
+            .map_err(|e| xml_err(&e))?;
     }
-    writer.write_event(Event::End(BytesEnd::new("mrow")))?;
+    writer
+        .write_event(Event::End(BytesEnd::new("mrow")))
+        .map_err(|e| xml_err(&e))?;
     Ok(())
 }
 
 /// Write a single [`MathNode`] as `MathML` into `writer`.
-fn write_node(writer: &mut Writer<&mut Vec<u8>>, node: &MathNode) -> Result<(), quick_xml::Error> {
+// Each `MathNode` variant produces several `write_event` calls (each now on
+// multiple lines for rustfmt compliance), which inflates line count beyond 150.
+// The function is a straightforward match — splitting it would obscure structure.
+#[allow(clippy::too_many_lines)]
+fn write_node(writer: &mut Writer<&mut Vec<u8>>, node: &MathNode) -> Result<(), MathError> {
     match node {
         MathNode::Text(s) => {
             // Empty text nodes are silently skipped — they carry no glyph
@@ -245,9 +307,15 @@ fn write_node(writer: &mut Writer<&mut Vec<u8>>, node: &MathNode) -> Result<(), 
                 return Ok(());
             }
             let tag = classify_text(s);
-            writer.write_event(Event::Start(BytesStart::new(tag)))?;
-            writer.write_event(Event::Text(BytesText::new(s)))?;
-            writer.write_event(Event::End(BytesEnd::new(tag)))?;
+            writer
+                .write_event(Event::Start(BytesStart::new(tag)))
+                .map_err(|e| xml_err(&e))?;
+            writer
+                .write_event(Event::Text(BytesText::new(s)))
+                .map_err(|e| xml_err(&e))?;
+            writer
+                .write_event(Event::End(BytesEnd::new(tag)))
+                .map_err(|e| xml_err(&e))?;
         },
 
         MathNode::TextRun(s) => {
@@ -256,143 +324,197 @@ fn write_node(writer: &mut Writer<&mut Vec<u8>>, node: &MathNode) -> Result<(), 
                 return Ok(());
             }
             // Upright/roman text in math — rendered as <mtext>
-            writer.write_event(Event::Start(BytesStart::new("mtext")))?;
-            writer.write_event(Event::Text(BytesText::new(s)))?;
-            writer.write_event(Event::End(BytesEnd::new("mtext")))?;
+            writer
+                .write_event(Event::Start(BytesStart::new("mtext")))
+                .map_err(|e| xml_err(&e))?;
+            writer
+                .write_event(Event::Text(BytesText::new(s)))
+                .map_err(|e| xml_err(&e))?;
+            writer
+                .write_event(Event::End(BytesEnd::new("mtext")))
+                .map_err(|e| xml_err(&e))?;
         },
 
         MathNode::Superscript { base, sup } => {
-            writer.write_event(Event::Start(BytesStart::new("msup")))?;
+            writer
+                .write_event(Event::Start(BytesStart::new("msup")))
+                .map_err(|e| xml_err(&e))?;
             write_node(writer, base)?;
             write_node(writer, sup)?;
-            writer.write_event(Event::End(BytesEnd::new("msup")))?;
+            writer
+                .write_event(Event::End(BytesEnd::new("msup")))
+                .map_err(|e| xml_err(&e))?;
         },
 
         MathNode::Subscript { base, sub } => {
-            writer.write_event(Event::Start(BytesStart::new("msub")))?;
+            writer
+                .write_event(Event::Start(BytesStart::new("msub")))
+                .map_err(|e| xml_err(&e))?;
             write_node(writer, base)?;
             write_node(writer, sub)?;
-            writer.write_event(Event::End(BytesEnd::new("msub")))?;
+            writer
+                .write_event(Event::End(BytesEnd::new("msub")))
+                .map_err(|e| xml_err(&e))?;
         },
 
         MathNode::Fraction { num, denom } => {
-            writer.write_event(Event::Start(BytesStart::new("mfrac")))?;
+            writer
+                .write_event(Event::Start(BytesStart::new("mfrac")))
+                .map_err(|e| xml_err(&e))?;
             write_node(writer, num)?;
             write_node(writer, denom)?;
-            writer.write_event(Event::End(BytesEnd::new("mfrac")))?;
+            writer
+                .write_event(Event::End(BytesEnd::new("mfrac")))
+                .map_err(|e| xml_err(&e))?;
         },
 
         MathNode::Sqrt {
             index: None,
             radicand,
         } => {
-            writer.write_event(Event::Start(BytesStart::new("msqrt")))?;
+            writer
+                .write_event(Event::Start(BytesStart::new("msqrt")))
+                .map_err(|e| xml_err(&e))?;
             write_node(writer, radicand)?;
-            writer.write_event(Event::End(BytesEnd::new("msqrt")))?;
+            writer
+                .write_event(Event::End(BytesEnd::new("msqrt")))
+                .map_err(|e| xml_err(&e))?;
         },
 
         MathNode::Sqrt {
             index: Some(n),
             radicand,
         } => {
-            writer.write_event(Event::Start(BytesStart::new("mroot")))?;
+            writer
+                .write_event(Event::Start(BytesStart::new("mroot")))
+                .map_err(|e| xml_err(&e))?;
             write_node(writer, radicand)?;
             write_node(writer, n)?;
-            writer.write_event(Event::End(BytesEnd::new("mroot")))?;
+            writer
+                .write_event(Event::End(BytesEnd::new("mroot")))
+                .map_err(|e| xml_err(&e))?;
         },
 
         MathNode::Operator(name) => {
             // Map operator name to Unicode symbol where possible via the shared
             // canonical symbols table (BC-1.10.003 inv. 6: cross-renderer equivalence).
-            // Empty name returns error.
+            // Empty name returns MathError::EmptyCommandName (parity with OMML/PDF).
             // Unknown names that are neither Unicode-symbol operators nor text operators
-            // return error (parity with OMML and PDF — no silent fallback, H4).
+            // return MathError::UnsupportedSymbol (no silent fallback, H4).
             if name.is_empty() {
-                return Err(quick_xml::Error::Io(std::sync::Arc::new(
-                    std::io::Error::other("empty operator command name"),
-                )));
+                return Err(MathError::EmptyCommandName);
             }
             if let Some(ch) = operator_to_unicode_char(name) {
                 // Unicode-symbol operator (∑, ∏, ∫, …) — emit as <mo>
                 let sym = ch.to_string();
-                writer.write_event(Event::Start(BytesStart::new("mo")))?;
-                writer.write_event(Event::Text(BytesText::new(&sym)))?;
-                writer.write_event(Event::End(BytesEnd::new("mo")))?;
+                writer
+                    .write_event(Event::Start(BytesStart::new("mo")))
+                    .map_err(|e| xml_err(&e))?;
+                writer
+                    .write_event(Event::Text(BytesText::new(&sym)))
+                    .map_err(|e| xml_err(&e))?;
+                writer
+                    .write_event(Event::End(BytesEnd::new("mo")))
+                    .map_err(|e| xml_err(&e))?;
             } else if is_text_operator(name) {
                 // Text-based operator (lim, max, sin, …) — emit as upright <mi>
                 // with mathvariant="normal" to request non-italic rendering per
                 // MathML Core and ISO 80000-2 typographic conventions (M5).
                 let mut mi = BytesStart::new("mi");
                 mi.push_attribute(("mathvariant", "normal"));
-                writer.write_event(Event::Start(mi))?;
-                writer.write_event(Event::Text(BytesText::new(name)))?;
-                writer.write_event(Event::End(BytesEnd::new("mi")))?;
+                writer
+                    .write_event(Event::Start(mi))
+                    .map_err(|e| xml_err(&e))?;
+                writer
+                    .write_event(Event::Text(BytesText::new(name)))
+                    .map_err(|e| xml_err(&e))?;
+                writer
+                    .write_event(Event::End(BytesEnd::new("mi")))
+                    .map_err(|e| xml_err(&e))?;
             } else {
-                // Unknown operator name — return error (no silent fallback, H4).
-                return Err(quick_xml::Error::Io(std::sync::Arc::new(
-                    std::io::Error::other(format!("unsupported operator command: {name}")),
-                )));
+                // Unknown operator name — return MathError::UnsupportedSymbol (no silent fallback, H4).
+                return Err(MathError::UnsupportedSymbol {
+                    name: name.to_string(),
+                });
             }
         },
 
         MathNode::Greek(name) => {
             // All Greek glyphs resolved through the shared canonical symbols table.
-            // Empty name returns error; unrecognised name returns error.
+            // Empty name → MathError::EmptyCommandName; unrecognised → MathError::UnsupportedSymbol.
             if name.is_empty() {
-                return Err(quick_xml::Error::Io(std::sync::Arc::new(
-                    std::io::Error::other("empty Greek command name"),
-                )));
+                return Err(MathError::EmptyCommandName);
             }
-            let ch = greek_to_unicode_char(name).ok_or_else(|| {
-                quick_xml::Error::Io(std::sync::Arc::new(std::io::Error::other(format!(
-                    "unsupported Greek command: {name}"
-                ))))
+            let ch = greek_to_unicode_char(name).ok_or_else(|| MathError::UnsupportedSymbol {
+                name: name.to_string(),
             })?;
             let sym = ch.to_string();
-            writer.write_event(Event::Start(BytesStart::new("mi")))?;
-            writer.write_event(Event::Text(BytesText::new(&sym)))?;
-            writer.write_event(Event::End(BytesEnd::new("mi")))?;
+            writer
+                .write_event(Event::Start(BytesStart::new("mi")))
+                .map_err(|e| xml_err(&e))?;
+            writer
+                .write_event(Event::Text(BytesText::new(&sym)))
+                .map_err(|e| xml_err(&e))?;
+            writer
+                .write_event(Event::End(BytesEnd::new("mi")))
+                .map_err(|e| xml_err(&e))?;
         },
 
         MathNode::Symbol(name) => {
             // All symbols resolved through the shared canonical symbols table.
-            // Empty name returns error; unrecognised name returns error.
+            // Empty name → MathError::EmptyCommandName; unrecognised → MathError::UnsupportedSymbol.
             if name.is_empty() {
-                return Err(quick_xml::Error::Io(std::sync::Arc::new(
-                    std::io::Error::other("empty symbol command name"),
-                )));
+                return Err(MathError::EmptyCommandName);
             }
-            let ch = symbol_to_unicode_char(name).ok_or_else(|| {
-                quick_xml::Error::Io(std::sync::Arc::new(std::io::Error::other(format!(
-                    "unsupported symbol command: {name}"
-                ))))
+            let ch = symbol_to_unicode_char(name).ok_or_else(|| MathError::UnsupportedSymbol {
+                name: name.to_string(),
             })?;
             let sym = ch.to_string();
-            writer.write_event(Event::Start(BytesStart::new("mo")))?;
-            writer.write_event(Event::Text(BytesText::new(&sym)))?;
-            writer.write_event(Event::End(BytesEnd::new("mo")))?;
+            writer
+                .write_event(Event::Start(BytesStart::new("mo")))
+                .map_err(|e| xml_err(&e))?;
+            writer
+                .write_event(Event::Text(BytesText::new(&sym)))
+                .map_err(|e| xml_err(&e))?;
+            writer
+                .write_event(Event::End(BytesEnd::new("mo")))
+                .map_err(|e| xml_err(&e))?;
         },
 
         MathNode::Accent { kind, inner } => {
             // Use <mover> with proper Unicode combining marks for correct typographic
             // rendering in browsers and screen readers (M1: accent parity).
             let combining = kind.mathml_combining_char();
-            writer.write_event(Event::Start(BytesStart::new("mover")))?;
+            writer
+                .write_event(Event::Start(BytesStart::new("mover")))
+                .map_err(|e| xml_err(&e))?;
             write_node(writer, inner)?;
             // The accent is emitted as an <mo> containing the combining mark.
             // MathML renderers apply the combining character over the base.
-            writer.write_event(Event::Start(BytesStart::new("mo")))?;
-            writer.write_event(Event::Text(BytesText::new(combining)))?;
-            writer.write_event(Event::End(BytesEnd::new("mo")))?;
-            writer.write_event(Event::End(BytesEnd::new("mover")))?;
+            writer
+                .write_event(Event::Start(BytesStart::new("mo")))
+                .map_err(|e| xml_err(&e))?;
+            writer
+                .write_event(Event::Text(BytesText::new(combining)))
+                .map_err(|e| xml_err(&e))?;
+            writer
+                .write_event(Event::End(BytesEnd::new("mo")))
+                .map_err(|e| xml_err(&e))?;
+            writer
+                .write_event(Event::End(BytesEnd::new("mover")))
+                .map_err(|e| xml_err(&e))?;
         },
 
         MathNode::Group(nodes) => {
-            writer.write_event(Event::Start(BytesStart::new("mrow")))?;
+            writer
+                .write_event(Event::Start(BytesStart::new("mrow")))
+                .map_err(|e| xml_err(&e))?;
             for n in nodes {
                 write_node(writer, n)?;
             }
-            writer.write_event(Event::End(BytesEnd::new("mrow")))?;
+            writer
+                .write_event(Event::End(BytesEnd::new("mrow")))
+                .map_err(|e| xml_err(&e))?;
         },
 
         MathNode::Delimiter { left, right, inner } => {
@@ -413,8 +535,12 @@ fn write_node(writer: &mut Writer<&mut Vec<u8>>, node: &MathNode) -> Result<(), 
             // Adding width would require a parser-level change to store the
             // original `\,` / `\;` / `\quad` token. Tracked as known gap in
             // the v1 MathML output spec (F-S030-P5-L3).
-            writer.write_event(Event::Start(BytesStart::new("mspace")))?;
-            writer.write_event(Event::End(BytesEnd::new("mspace")))?;
+            writer
+                .write_event(Event::Start(BytesStart::new("mspace")))
+                .map_err(|e| xml_err(&e))?;
+            writer
+                .write_event(Event::End(BytesEnd::new("mspace")))
+                .map_err(|e| xml_err(&e))?;
         },
     }
 
