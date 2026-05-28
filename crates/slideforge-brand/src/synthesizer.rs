@@ -954,10 +954,13 @@ body = "Calibri"
                 let r2 = BrandSynthesizer::synthesize(&config);
 
                 match (r1, r2) {
-                    (Ok((t1, _)), Ok((t2, _))) => {
+                    (Ok((t1, w1)), Ok((t2, w2))) => {
                         // Full structural equality via derived PartialEq covers all fields:
                         // colors (12 slots), fonts, logo, footer_text, layouts, master IDs, etc.
                         prop_assert_eq!(t1, t2, "synthesize must be fully deterministic");
+                        // Warning count must also be deterministic for identical inputs.
+                        prop_assert_eq!(w1.len(), w2.len(),
+                            "synthesize produced inconsistent warning counts for same input");
                     }
                     (Err(_), Err(_)) => {
                         // Both fail the same way — deterministic failure is also acceptable.

@@ -78,12 +78,6 @@ pub const NS_R: &str = "http://schemas.openxmlformats.org/officeDocument/2006/re
 /// - For dark layouts (`has_color_override = true`): `<p:clrMapOvr>` and
 ///   explicit white `<a:solidFill>` on all run elements (AC-009).
 ///
-/// # Note on master relationship
-///
-/// The actual relationship is written to the `.rels` file by the PPTX exporter
-/// (STORY-037). The `master_rel_id` parameter is kept for API forward-compatibility
-/// and is consumed by the exporter, not embedded in the XML itself.
-///
 /// # Panics
 ///
 /// In practice this function never panics. `quick_xml::Writer` with an in-memory

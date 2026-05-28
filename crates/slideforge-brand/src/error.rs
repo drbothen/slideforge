@@ -161,8 +161,10 @@ pub enum BrandError {
 
     /// `E-BRD-002` (synthesis) — a declared hex color value is not valid.
     ///
-    /// Fatal error (exit 4) for brand synthesis (the color is user-authored,
-    /// not inferred). A synthesized brand with an invalid hex cannot continue.
+    /// Cosmetic warning (exit 0). The invalid slot is treated as absent and
+    /// inference continues with the remaining slots (see `inference.rs`). The
+    /// build does NOT abort on an invalid hex — callers receive the error via
+    /// the warnings `Vec` returned alongside the synthesized `BrandTemplate`.
     ///
     /// Traces to AC-006 (BC-2.01.004 invariant 3).
     #[error(
