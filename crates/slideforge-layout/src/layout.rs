@@ -34,6 +34,7 @@ use slideforge_types::{Brand, Deck, FieldValue, Register, Value};
 
 use crate::error::LayoutError;
 use crate::regions::region_frames_for;
+use crate::sections::collect_sections;
 use crate::text_flow::compute_text_flow;
 use crate::types::{
     DEFAULT_PAGE_HEIGHT, DEFAULT_PAGE_WIDTH, FrameContent, LaidOutDeck, LaidOutSlide, PageSize,
@@ -193,15 +194,11 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
     }
 
     // STORY-027: Section collection pass.
-    // The actual collection logic is implemented in collect_sections (todo!() body).
-    // For now, sections is seeded as an empty Vec so that layout::run compiles and
-    // all STORY-026 tests remain green. The test-writer's STORY-027 tests will drive
-    // collect_sections to completion.
-    //
-    // NOTE: Do NOT call collect_sections here yet — its body is todo!() and would
-    // panic at runtime. The placeholder is an empty Vec until the implementer
-    // fills in collect_sections.
-    let sections = Vec::new();
+    // Collect all document sections (auto-generated + manual) from the deck.
+    // Auto-generated sections: ExecutiveSummary from takeaway fields, RiskRegister
+    // from severity_cards slides. Manual sections from section_blocks (when Deck gains
+    // that field). Supersession and ordering rules are applied inside collect_sections.
+    let sections = collect_sections(deck);
 
     Ok(LaidOutDeck {
         page_size,

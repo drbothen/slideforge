@@ -53,9 +53,7 @@ pub mod types;
 // Re-export the primary entry point and most-used types at crate root.
 pub use error::LayoutError;
 pub use layout::run;
-pub use sections::{
-    GeneratedSection, OutputFormat, SectionItem, SectionKind, SectionSource,
-};
+pub use sections::{GeneratedSection, OutputFormat, SectionItem, SectionKind, SectionSource};
 pub use types::{
     BoundingBox, Frame, FrameContent, LaidOutDeck, LaidOutSlide, PageSize, RegisterTag, TextFlow,
     TextOverflow,
@@ -500,7 +498,7 @@ mod tests {
     /// `Vec::new()` with a comment citing STORY-027; the implementer must
     /// replace that placeholder with `collect_sections(&deck)`.
     ///
-    /// FAILS at Red Gate: layout::run returns sections: Vec::new() (empty),
+    /// FAILS at Red Gate: `layout::run` returns sections: `Vec::new()` (empty),
     /// so the assertion `!result.sections.is_empty()` fails.
     #[test]
     fn test_layout_run_populates_sections_from_takeaway_slides() {

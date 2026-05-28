@@ -465,6 +465,7 @@ mod tests {
         LaidOutDeck {
             page_size: PageSize::default(),
             slides: vec![],
+            sections: vec![],
         }
     }
 
