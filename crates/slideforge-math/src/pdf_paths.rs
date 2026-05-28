@@ -32,7 +32,7 @@ use slideforge_plugin_api::MathError;
 
 use crate::MathAst;
 use crate::ast::{MathMode, MathNode};
-use crate::font_engine::GlyphEngine;
+use crate::font_engine::{self, GlyphEngine};
 use crate::symbols::{
     greek_to_unicode_char, is_text_operator, operator_to_unicode_char, symbol_to_unicode_char,
     unescape_delimiter,
@@ -107,8 +107,9 @@ pub fn render_pdf_paths(ast: &MathAst) -> Result<SvgPaths, MathError> {
         return Err(MathError::EmptyAst);
     }
 
-    // Construct the glyph engine once per render call (cheap — borrows static bytes).
-    let engine = GlyphEngine::new();
+    // Obtain the cached glyph engine — OTF bytes are parsed at most once per
+    // process lifetime (F-S030-P10-C2).
+    let engine = font_engine::engine();
 
     let mut paths: Vec<String> = Vec::new();
     let mut x: i64 = 0;
@@ -235,9 +236,7 @@ fn place_node(
             // Render sup raised above the baseline
             let sup_y = (baseline_y - GLYPH_H - SUP_OFFSET).max(0);
             let sup_h = GLYPH_H * 2 / 3;
-            let sup_start = *x;
             place_node_at_scale(engine, sup, paths, x, sup_y, sup_h)?;
-            let _ = sup_start; // used for layout tracking only
         },
 
         MathNode::Subscript { base, sub } => {

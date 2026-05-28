@@ -31,6 +31,16 @@
 //! [`pdf_paths`]; both are implemented in STORY-030.
 //! `pulldown-latex` is NOT a dependency — v1.0 uses only the supported subset
 //! defined by the behavioral contracts.
+//!
+//! ## Bundled font
+//!
+//! This crate embeds **Latin Modern Math** (version 1.959, 733 KB OTF) for
+//! PDF/SVG math glyph rendering. The font is distributed under the
+//! **GUST Font License (GFL) v1.0**, compatible with LPPL 1.3c or later.
+//! See [`fonts/LICENSE-LatinModernMath.txt`](../fonts/LICENSE-LatinModernMath.txt)
+//! for the complete license text, FONTLOG, copyright notice, and contributor
+//! list. An asset audit manifest with SHA-256 is at
+//! [`fonts/MANIFEST.toml`](../fonts/MANIFEST.toml).
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]

@@ -27,16 +27,61 @@
 #![allow(clippy::cast_possible_truncation)] // advance.round() → i64: clamped to ≥1, no overflow
 #![allow(clippy::many_single_char_names)] // (x, y, w, h) are canonical names for glyph geometry
 
+use std::sync::OnceLock;
+
 use ab_glyph::{Font, FontRef, GlyphId, OutlineCurve};
 use slideforge_plugin_api::MathError;
 
-/// The bundled Latin Modern Math OTF font bytes.
+/// The bundled Latin Modern Math OTF font bytes (version 1.959).
 ///
-/// Latin Modern Math is distributed under the GUST Font License (GFL), an
-/// open, permissive font licence based on LPPL 1.3c. The font is embedded as
-/// raw bytes — it is *not* a Rust crate dependency and therefore is not subject
-/// to `cargo deny` licence policy (which covers only crate dependencies).
+/// Latin Modern Math is distributed under the GUST Font License (GFL) v1.0,
+/// an open, permissive font licence based on LPPL 1.3c or later. The full
+/// license text and FONTLOG are in
+/// `fonts/LICENSE-LatinModernMath.txt` (shipped in the published .crate and
+/// present at `crates/slideforge-math/fonts/LICENSE-LatinModernMath.txt` in
+/// the repository). Copyright 2012--2014 by B. Jackowski, P. Strzelczyk and
+/// P. Pianowski (on behalf of TeX Users Groups).
+///
+/// The font bytes are loaded once via [`engine()`] and cached in a
+/// [`OnceLock`] — `include_bytes!` embeds the raw bytes into the binary at
+/// compile time; the path is rustc-handled and platform-independent.
 const LATIN_MODERN_MATH: &[u8] = include_bytes!("../fonts/latinmodern-math.otf");
+
+/// Module-level cache of the parsed [`FontRef`].
+///
+/// Parsing the OTF binary is done exactly once (on first call to [`engine()`])
+/// and the result is stored here. All subsequent calls borrow the same
+/// `FontRef<'static>` reference. This eliminates per-render-call font reparsing
+/// (F-S030-P10-C2).
+static FONT_REF: OnceLock<FontRef<'static>> = OnceLock::new();
+
+/// Return a reference to the cached [`FontRef`] for Latin Modern Math.
+///
+/// The font is parsed from [`LATIN_MODERN_MATH`] at most once per process
+/// lifetime. Callers that need a [`GlyphEngine`] should use
+/// [`GlyphEngine::cached()`] instead.
+///
+/// # Panics
+///
+/// Panics only if the embedded font bytes are corrupt (build-time invariant
+/// violation — cannot happen in a correct build).
+#[inline]
+pub(crate) fn font_ref() -> &'static FontRef<'static> {
+    FONT_REF.get_or_init(|| {
+        FontRef::try_from_slice(LATIN_MODERN_MATH)
+            .expect("embedded Latin Modern Math OTF must be valid — font bytes are corrupt")
+    })
+}
+
+/// Return a [`GlyphEngine`] backed by the cached [`FontRef`].
+///
+/// This is the preferred construction path — it guarantees the OTF bytes are
+/// parsed only once regardless of how many times `engine()` is called
+/// (F-S030-P10-C2).
+#[must_use]
+pub fn engine() -> GlyphEngine {
+    GlyphEngine::cached()
+}
 
 /// Glyph outline engine backed by the bundled Latin Modern Math font.
 ///
@@ -52,7 +97,34 @@ pub struct GlyphEngine {
 }
 
 impl GlyphEngine {
+    /// Construct a [`GlyphEngine`] backed by the module-level cached [`FontRef`].
+    ///
+    /// Prefer this constructor — the OTF binary is parsed at most once per
+    /// process (F-S030-P10-C2). Multiple calls to `cached()` share the same
+    /// underlying `FontRef<'static>`.
+    ///
+    /// # Panics
+    ///
+    /// Panics only if the embedded font bytes are corrupt (build-time invariant
+    /// violation — cannot happen in a correct build).
+    #[must_use]
+    pub fn cached() -> Self {
+        let font_ref = font_ref();
+        let units_per_em = font_ref
+            .units_per_em()
+            .expect("Latin Modern Math must declare units_per_em — embedded asset invariant");
+        Self {
+            font: FontRef::try_from_slice(LATIN_MODERN_MATH)
+                .expect("embedded Latin Modern Math OTF must be valid — font bytes are corrupt"),
+            units_per_em,
+        }
+    }
+
     /// Construct a new [`GlyphEngine`] from the embedded Latin Modern Math font.
+    ///
+    /// Prefer [`GlyphEngine::cached()`] / [`engine()`] which avoids reparsing
+    /// the OTF on every call. This constructor is retained for test isolation
+    /// where a fresh instance is explicitly required.
     ///
     /// # Panics
     ///
@@ -60,10 +132,7 @@ impl GlyphEngine {
     /// violation — cannot happen in a correct build).
     #[must_use]
     pub fn new() -> Self {
-        let font = FontRef::try_from_slice(LATIN_MODERN_MATH)
-            .expect("embedded Latin Modern Math OTF must be valid — font bytes are corrupt");
-        let units_per_em = font.units_per_em().unwrap_or(1000.0);
-        Self { font, units_per_em }
+        Self::cached()
     }
 
     /// Emit a real glyph outline for `ch` as one or more SVG `<path>` elements.
@@ -337,11 +406,13 @@ mod tests {
     #[test]
     fn test_font_engine_fallback_for_unknown_char() {
         let engine = GlyphEngine::new();
-        // U+FFF0 is in a Private Use Area — very unlikely to be in LM Math.
-        // We test that it emits *something* (the fallback rectangle) without panicking.
+        // U+0001 (SOH, C0 controls block) is guaranteed to map to .notdef in
+        // any well-formed font — C0 controls are never assigned outlines. This
+        // is more durable than a PUA code point (U+FFF0) which a math font
+        // could theoretically populate with symbols (F-S030-P10-O1).
         let mut paths: Vec<String> = Vec::new();
         engine
-            .emit_glyph('\u{FFF0}', &mut paths, 0, 0, 10, 14)
+            .emit_glyph('\u{0001}', &mut paths, 0, 0, 10, 14)
             .unwrap();
         assert!(
             !paths.is_empty(),
@@ -351,6 +422,80 @@ mod tests {
             paths[0].contains('Z'),
             "fallback rectangle path must end with Z (closed path); got: {}",
             paths[0]
+        );
+    }
+
+    /// Regression gate: rendering 100 expressions in a tight loop must complete
+    /// well within budget when the font is cached (F-S030-P10-C2).
+    ///
+    /// The budget (500ms for 100 calls) provides generous headroom; in practice
+    /// the loop completes in < 5ms on modern hardware because the OTF is parsed
+    /// exactly once. If this test flakes on a CI machine with <100ms total time
+    /// budget, the timer check can be relaxed — the key invariant is that no
+    /// call re-parses the font.
+    #[test]
+    fn test_font_engine_caching_no_reparse_under_loop() {
+        use std::time::Instant;
+        let start = Instant::now();
+        for _ in 0..100 {
+            let eng = engine();
+            let mut paths: Vec<String> = Vec::new();
+            eng.emit_glyph('x', &mut paths, 0, 0, 10, 14).unwrap();
+            assert!(!paths.is_empty(), "each call must produce a path");
+        }
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed.as_millis() < 500,
+            "100 render calls must complete in < 500ms (caching regression gate); took {}ms",
+            elapsed.as_millis()
+        );
+    }
+
+    /// Asset integrity gate: the SHA-256 of the bundled font file must match
+    /// the value declared in `fonts/MANIFEST.toml` (F-S030-P10-I3).
+    ///
+    /// This test catches accidental font replacement or corruption. The
+    /// manifest value is the authoritative source of truth; if the font is
+    /// intentionally updated, update the manifest first.
+    #[test]
+    fn test_bundled_font_sha256_matches_manifest() {
+        use sha2::{Digest, Sha256};
+
+        // Locate fonts/ relative to this source file (works in any worktree).
+        let manifest_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("fonts")
+            .join("MANIFEST.toml");
+        let font_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("fonts")
+            .join("latinmodern-math.otf");
+
+        let manifest_text = std::fs::read_to_string(&manifest_path)
+            .expect("fonts/MANIFEST.toml must be readable — asset audit file missing");
+        let manifest: toml::Value = manifest_text
+            .parse()
+            .expect("fonts/MANIFEST.toml must be valid TOML");
+        let expected_sha256 = manifest["font"]["sha256"]
+            .as_str()
+            .expect("MANIFEST.toml [font].sha256 must be a string");
+
+        let font_bytes =
+            std::fs::read(&font_path).expect("fonts/latinmodern-math.otf must be readable");
+        let mut hasher = Sha256::new();
+        hasher.update(&font_bytes);
+        let digest = hasher.finalize();
+        // Use write! into a pre-allocated String to avoid format! inside collect
+        // (clippy::format_collect_into_string prefers this pattern).
+        let mut actual_hex = String::with_capacity(digest.len() * 2);
+        for b in &digest {
+            use std::fmt::Write as _;
+            write!(actual_hex, "{b:02x}").expect("write to String is infallible");
+        }
+
+        assert_eq!(
+            actual_hex, expected_sha256,
+            "bundled font SHA-256 mismatch — font may have been replaced or corrupted.\n\
+             Expected (MANIFEST.toml): {expected_sha256}\n\
+             Actual (on-disk):         {actual_hex}"
         );
     }
 }

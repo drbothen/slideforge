@@ -11,7 +11,8 @@ documentation.workspace = true
 readme.workspace = true
 keywords.workspace = true
 categories.workspace = true
-description = "Math rendering engine for slideforge: LaTeX parser, @{var} interpolation, OMML/MathML output."
+description = "Math rendering engine for slideforge: LaTeX parser, @{var} interpolation, OMML/MathML output, and PDF/SVG vector paths via embedded Latin Modern Math glyph outlines."
+include = ["src/**/*", "fonts/**", "README.md", "LICENSE*"]
 
 [dependencies]
 slideforge-types = { workspace = true }
@@ -27,3 +28,7 @@ ab_glyph = "=0.2.32"
 
 [dev-dependencies]
 insta = { version = "=1.47.2", features = ["yaml"] }
+# sha2: SHA-256 digest for bundled font asset audit (test_bundled_font_sha256_matches_manifest).
+sha2 = "=0.11.0"
+# toml: parse MANIFEST.toml in font asset audit test.
+toml = "=0.8.23"
