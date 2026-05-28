@@ -105,7 +105,7 @@ Agent context budget: 200k tokens. This story is ~14.25% of budget — within li
 - [ ] **AC-004:** `BrandConfig.logo.path` is required when `brand.toml` is the brand source (not loaded from .pptx). If absent, `BrandError::LogoRequired { span: SourceSpan }` mapping to `E-BRD-001: logo path required in synthesized brand` is returned.
   (traces to BC-2.01.002 edge case EC-005 — missing logo is fatal for synthesized brand)
 
-- [ ] **AC-005:** Missing `[colors]` section entirely (completely empty `brand.toml`) produces 12 E-BRD-003 warnings and synthesizes the entire palette from the default baseline. Build continues.
+- [ ] **AC-005:** A `brand.toml` that omits the `[colors]` section entirely — including a literally-empty file (zero bytes) and a file with non-color sections only — produces exactly 12 E-BRD-003 warnings (one per slot) and synthesizes the entire palette from the default baseline. Build continues.
   (traces to BC-2.01.004 edge case EC-002 — empty brand.toml)
 
 - [ ] **AC-006:** All inferred colors are valid 6-digit uppercase hex RGB strings (e.g., `"#3B82F6"`). No alpha channel. No CSS named colors. No lowercase hex.
@@ -202,7 +202,7 @@ Key note from STORY-022: `quick-xml` SAX parsing is the preferred approach for r
 | All from STORY-022 | see STORY-022 | Reused |
 
 Dev dependencies:
-- `proptest = "=1.4"` — determinism property test (AC-007 and future VP-012)
+- `proptest = "=1.5.0"` — determinism property test (AC-007 and future VP-012)
 
 ## File Structure Requirements
 
