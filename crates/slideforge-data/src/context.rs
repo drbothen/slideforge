@@ -130,8 +130,10 @@ mod tests {
     /// and PASSES after the lowercase fix.
     #[test]
     fn test_bc_5_04_003_context_with_allowed_domains_normalizes_uppercase() {
-        let ctx = DataSourceContext::new()
-            .with_allowed_domains(vec![Arc::from("API.EXAMPLE.COM"), Arc::from("Data.Example.Com")]);
+        let ctx = DataSourceContext::new().with_allowed_domains(vec![
+            Arc::from("API.EXAMPLE.COM"),
+            Arc::from("Data.Example.Com"),
+        ]);
         let stored = ctx.allowed_domains.unwrap();
         assert_eq!(
             stored[0].as_ref(),

@@ -96,6 +96,15 @@ pub struct HttpDataSource {
     pub allowlist: AllowlistConfig,
 }
 
+/// Maximum response body size accepted from an HTTP source.
+///
+/// Responses larger than this are truncated and produce a [`DataSourceError::IoError`].
+/// This prevents unbounded memory consumption from large or malicious HTTP payloads.
+/// For data sets larger than 50 MB, use a file-based [`FileDataSource`] instead.
+///
+/// [`FileDataSource`]: crate::file::FileDataSource
+const MAX_BODY_BYTES: u64 = 50 * 1024 * 1024; // 50 MB
+
 impl HttpDataSource {
     /// Construct a new [`HttpDataSource`] for the given URL.
     ///
@@ -126,7 +135,7 @@ impl HttpDataSource {
         let allowlist = match &ctx.allowed_domains {
             // Route through AllowlistConfig::with_domains which normalizes to lowercase,
             // ensuring "API.EXAMPLE.COM" in slideforge.toml matches "api.example.com" URLs.
-            Some(domains) => AllowlistConfig::with_domains(domains.iter().map(|d| d.as_ref())),
+            Some(domains) => AllowlistConfig::with_domains(domains.iter().map(AsRef::as_ref)),
             None => AllowlistConfig::default(),
         };
         HttpDataSource {
@@ -196,7 +205,37 @@ impl DataSource for HttpDataSource {
     ///
     /// Returns [`DataSourceError`] on SSRF block, HTTP error, network error,
     /// unsupported content-type, or parse failure.
-    fn load(&self, uri: &str, _opts: &DataSourceOptions) -> Result<Value, DataSourceError> {
+    ///
+    /// # v1 Limitations
+    ///
+    /// The following [`DataSourceOptions`] fields are not yet honored and are
+    /// silently ignored (with a `tracing::warn!` logged when set):
+    /// - `auth_token` — authentication not yet implemented for HTTP sources
+    /// - `timeout_ms` — custom timeout not yet implemented; built-in 10s connect /
+    ///   30s read timeouts from [`build_agent`] are always used
+    /// - `query` — query parameter injection not yet implemented
+    fn load(&self, uri: &str, opts: &DataSourceOptions) -> Result<Value, DataSourceError> {
+        // v1 limitation: warn on non-default options that are not yet honored.
+        if opts.auth_token.is_some() {
+            tracing::warn!(
+                "HTTP source does not yet honor auth_token; the option is ignored. \
+                Authentication support is planned for a future release."
+            );
+        }
+        if opts.timeout_ms.is_some() {
+            tracing::warn!(
+                "HTTP source does not yet honor opts.timeout_ms; using built-in \
+                agent timeout (10s connect / 30s read). Custom timeout support is \
+                planned for a future release."
+            );
+        }
+        if opts.query.is_some() {
+            tracing::warn!(
+                "HTTP source does not yet honor query parameters; the option is ignored. \
+                Query parameter injection is planned for a future release."
+            );
+        }
+
         // Use uri as the primary URL; fall back to self.url for ergonomic constructor usage.
         let url_str: &str = if uri.is_empty() {
             self.url.as_ref()
@@ -257,12 +296,9 @@ impl DataSource for HttpDataSource {
             .trim()
             .to_lowercase();
 
-        // Read body with a hard size cap to prevent unbounded memory consumption.
-        // Responses larger than MAX_BODY_BYTES are truncated and produce a
-        // NetworkError — callers should use a file-based source for large payloads.
-        //
-        // v1 limitation: the cap applies to the raw byte stream before UTF-8 decoding.
-        const MAX_BODY_BYTES: u64 = 50 * 1024 * 1024; // 50 MB cap for HTTP responses
+        // Read body with a hard size cap (MAX_BODY_BYTES = 50 MB) to prevent unbounded
+        // memory consumption from large or malicious HTTP payloads. See module-level
+        // constant for the rationale and the v1 limitation note.
         let mut body = String::new();
         response
             .into_reader()
@@ -289,9 +325,31 @@ impl DataSource for HttpDataSource {
 ///
 /// Used internally by [`HttpDataSource::load`] to map the rich internal error
 /// type to the plugin API's error type at the boundary.
+///
+/// ## Mapping rationale
+///
+/// - `SsrfBlocked` → `ParseError`: A security policy rejection is NOT a transient
+///   network condition. Mapping to `IoError` (the former default) conflated "blocked by
+///   policy — do not retry" with "network blip — maybe retry". `ParseError` is not
+///   semantically perfect either, but it is the only variant with both `uri` and
+///   `message` fields, allowing the full E-DAT-006 remediation hint to surface to
+///   callers. Downstream code can discriminate `SsrfBlocked` from `NetworkError`
+///   and `HttpError` by matching on `ParseError` discriminant + inspecting the message
+///   for "E-DAT-006".
+/// - `ParseError` / `UnsupportedFormat` → `ParseError`: direct semantic match.
+/// - Everything else → `IoError`: network transport and HTTP status errors.
 #[must_use]
 fn data_error_to_source_error(uri: &str, err: &DataError) -> DataSourceError {
     match err {
+        DataError::SsrfBlocked { .. } => {
+            // Security policy rejection: map to ParseError (not IoError) so callers
+            // can distinguish "blocked — do not retry" from transient network failures.
+            // The message carries the full E-DAT-006 text with remediation hint.
+            DataSourceError::ParseError {
+                uri: uri.to_owned(),
+                message: err.to_string(),
+            }
+        },
         DataError::ParseError { .. } | DataError::UnsupportedFormat { .. } => {
             DataSourceError::ParseError {
                 uri: uri.to_owned(),
@@ -1013,6 +1071,44 @@ mod tests {
         );
     }
 
+    /// `test_bc_1_03_005_ssrf_maps_to_parse_error_not_io`
+    ///
+    /// F2: `SsrfBlocked` must map to `DataSourceError::ParseError` (not `IoError`).
+    /// A security policy block is NOT a transient network condition — mapping to
+    /// `IoError` conflates "blocked — do not retry" with "network blip — maybe retry".
+    /// Callers can discriminate SSRF from transport errors by matching on the
+    /// `ParseError` discriminant and checking for "E-DAT-006" in the message.
+    ///
+    /// Traces to BC-1.03.005 postcondition 2 (E-DAT-006 emitted) + F2 fix.
+    #[test]
+    fn test_bc_1_03_005_ssrf_maps_to_parse_error_not_io() {
+        let url = "http://169.254.169.254/metadata";
+        let config = AllowlistConfig {
+            domains: Some(vec![Arc::from("other.example.com")]),
+        };
+        let src = HttpDataSource::new(url).with_allowlist(config);
+        let opts = DataSourceOptions::default();
+        let result = src.load(url, &opts);
+        assert!(result.is_err(), "blocked domain must produce an error");
+        let err = result.unwrap_err();
+        // Must be ParseError, NOT IoError.
+        assert!(
+            matches!(err, DataSourceError::ParseError { .. }),
+            "SsrfBlocked must map to ParseError (not IoError) so callers can \
+            discriminate policy blocks from transient network failures; got: {err:?}"
+        );
+        // Message must still carry E-DAT-006 and remediation hint.
+        let msg = err.to_string();
+        assert!(
+            msg.contains("E-DAT-006"),
+            "ParseError from SSRF block must contain 'E-DAT-006'; got: {msg}"
+        );
+        assert!(
+            msg.contains("allowed_domains"),
+            "ParseError from SSRF block must contain remediation hint; got: {msg}"
+        );
+    }
+
     /// `test_BC_1_03_005_empty_allowlist_blocks_all_http`
     ///
     /// AC-004 + EC-006: `allowed_domains = []` blocks ALL HTTP/HTTPS sources.
@@ -1201,6 +1297,69 @@ mod tests {
             result.is_err(),
             "ftp:// scheme must be rejected by HttpDataSource"
         );
+    }
+
+    /// `test_bc_1_03_002_uppercase_file_scheme_rejected`
+    ///
+    /// F3: `FILE:///` (uppercase) must be rejected — validates that scheme
+    /// normalization via the `url` crate's `scheme()` handles uppercase inputs.
+    /// The `url` crate normalizes the scheme to lowercase before `scheme()` returns
+    /// it, so `FILE://` is caught by the same `scheme != "http" && scheme != "https"` check.
+    ///
+    /// Traces to BC-1.03.005 invariant 5 + AC-010.
+    #[test]
+    fn test_bc_1_03_002_uppercase_file_scheme_rejected() {
+        let src = HttpDataSource::new("FILE:///tmp/data.json");
+        let opts = DataSourceOptions::default();
+        let result = src.load("FILE:///tmp/data.json", &opts);
+        assert!(
+            result.is_err(),
+            "FILE:// (uppercase) scheme must be rejected by HttpDataSource"
+        );
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("E-DAT-003"),
+            "uppercase FILE:// rejection must carry error code E-DAT-003; got: {msg}"
+        );
+        assert!(
+            msg.to_lowercase().contains("file"),
+            "error message must mention 'file' scheme; got: {msg}"
+        );
+    }
+
+    /// `test_bc_1_03_002_format_hint_overrides_unrecognized_content_type`
+    ///
+    /// F4: `format_hint = Some(DataFormat::Json)` must override `Content-Type:
+    /// application/octet-stream` (unrecognized), allowing the body to be parsed
+    /// as JSON regardless of what the server claims.
+    ///
+    /// Traces to BC-1.03.002 AC-005 (`format_hint` always overrides content-type detection).
+    #[test]
+    fn test_bc_1_03_002_format_hint_overrides_unrecognized_content_type() {
+        // Server returns an unrecognized Content-Type with a valid JSON body.
+        let (addr, handle) = spawn_mock_server(200, "application/octet-stream", r#"{"x":1}"#);
+        let url = format!("http://127.0.0.1:{}/data", addr.port());
+        let src = HttpDataSource::new(url.as_str()).with_format(DataFormat::Json);
+        let opts = DataSourceOptions::default();
+        let result = src.load(&url, &opts);
+        handle.join().unwrap();
+        assert!(
+            result.is_ok(),
+            "format_hint=Json must override unrecognized Content-Type and parse \
+            successfully; got: {:?}",
+            result.err()
+        );
+        match result.unwrap() {
+            slideforge_types::Value::Map(ref m) => {
+                let x = m.get(&Arc::from("x")).expect("key 'x' must be present");
+                assert_eq!(
+                    *x,
+                    slideforge_types::Value::Int(1),
+                    "format_hint JSON parse must return x=1"
+                );
+            },
+            other => panic!("expected Value::Map from JSON parse, got {other:?}"),
+        }
     }
 
     // -----------------------------------------------------------------------
