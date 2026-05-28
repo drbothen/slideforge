@@ -108,7 +108,7 @@ fn font_db() -> Arc<usvg::fontdb::Database> {
         // back to scanning well-known font directories directly so that
         // <text> elements always survive usvg normalization.
         #[cfg(target_os = "linux")]
-        if db.len() == 0 {
+        if db.is_empty() {
             // Common Linux font directories. The most important are:
             // - /usr/share/fonts  (system-wide, present on Debian/Ubuntu/RHEL)
             // - /usr/local/share/fonts  (locally installed fonts)
@@ -129,6 +129,22 @@ fn font_db() -> Arc<usvg::fontdb::Database> {
 
         Arc::new(db)
     }))
+}
+
+/// Return the number of font faces currently loaded in the cached font database.
+///
+/// Exposed for diagnostic use in tests and CI log scraping (STORY-034 PR #30
+/// Linux investigation). Returns 0 if the font database has not yet been
+/// initialized (i.e., `usvg_normalize` has never been called in this process).
+///
+/// # Temporary
+///
+/// TEMPORARY: This function exists solely for diagnostic `eprintln!` instrumentation
+/// added in STORY-034 iteration 2 to diagnose why Mermaid node labels are dropped
+/// on Linux CI despite font installation. Will be removed in iteration 3 once
+/// the root cause is identified and fixed.
+pub fn font_db_face_count() -> usize {
+    FONT_DB.get().map_or(0, |db| db.len())
 }
 
 /// Normalize a [`RawDiagramSvg`] into a PPTX-safe [`NormalizedDiagramSvg`]

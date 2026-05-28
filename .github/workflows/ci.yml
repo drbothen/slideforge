@@ -63,6 +63,12 @@ jobs:
       - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
         with:
           shared-key: clippy
+      - name: Install core fonts (Linux only — required for usvg text normalization)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -y -q
+          sudo apt-get install -y -q fonts-dejavu-core fonts-noto-core
+          fc-cache -f
       - name: cargo clippy (all targets, pedantic)
         run: >
           cargo clippy
@@ -170,6 +176,12 @@ jobs:
       - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
         with:
           shared-key: snapshots
+      - name: Install core fonts (Linux only — required for usvg text normalization)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -y -q
+          sudo apt-get install -y -q fonts-dejavu-core fonts-noto-core
+          fc-cache -f
       - name: Install cargo-insta
         uses: taiki-e/install-action@d9be7d8cda89035c9c843f78bd44d4f72d8403d4
         with:
