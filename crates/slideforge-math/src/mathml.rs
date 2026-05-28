@@ -144,6 +144,12 @@ fn is_operator(s: &str) -> bool {
 fn write_node(writer: &mut Writer<&mut Vec<u8>>, node: &MathNode) -> Result<(), quick_xml::Error> {
     match node {
         MathNode::Text(s) => {
+            // Empty text nodes are silently skipped — they carry no glyph
+            // and emitting an empty <mi/> would produce ill-structured MathML
+            // (MathML Core requires at least one character for token elements).
+            if s.is_empty() {
+                return Ok(());
+            }
             let tag = classify_text(s);
             writer.write_event(Event::Start(BytesStart::new(tag)))?;
             writer.write_event(Event::Text(BytesText::new(s)))?;
@@ -151,6 +157,10 @@ fn write_node(writer: &mut Writer<&mut Vec<u8>>, node: &MathNode) -> Result<(), 
         },
 
         MathNode::TextRun(s) => {
+            // Empty text runs are silently skipped (same rationale as Text).
+            if s.is_empty() {
+                return Ok(());
+            }
             // Upright/roman text in math — rendered as <mtext>
             writer.write_event(Event::Start(BytesStart::new("mtext")))?;
             writer.write_event(Event::Text(BytesText::new(s)))?;

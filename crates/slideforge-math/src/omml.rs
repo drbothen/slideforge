@@ -152,8 +152,10 @@ fn render_node(node: &MathNode, out: &mut String) -> Result<(), MathRendererErro
             if name.is_empty() {
                 return Err(MathRendererError::EmptyCommandName);
             }
-            let ch = greek_to_unicode_char(name).ok_or_else(|| MathRendererError::UnsupportedSymbol {
-                name: name.to_string().into(),
+            let ch = greek_to_unicode_char(name).ok_or_else(|| {
+                MathRendererError::UnsupportedSymbol {
+                    name: name.to_string().into(),
+                }
             })?;
             out.push_str("<m:r><m:t>");
             out.push_str(&xml_escape(&ch.to_string()));
@@ -194,8 +196,10 @@ fn render_node(node: &MathNode, out: &mut String) -> Result<(), MathRendererErro
             if name.is_empty() {
                 return Err(MathRendererError::EmptyCommandName);
             }
-            let ch = symbol_to_unicode_char(name).ok_or_else(|| MathRendererError::UnsupportedSymbol {
-                name: name.to_string().into(),
+            let ch = symbol_to_unicode_char(name).ok_or_else(|| {
+                MathRendererError::UnsupportedSymbol {
+                    name: name.to_string().into(),
+                }
             })?;
             out.push_str("<m:r><m:t>");
             out.push_str(&xml_escape(&ch.to_string()));
