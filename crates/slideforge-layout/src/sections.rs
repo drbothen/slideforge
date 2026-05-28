@@ -364,10 +364,13 @@ fn collect_manual_sections(deck: &Deck) -> Result<Vec<GeneratedSection>, LayoutE
     for block in &deck.section_blocks {
         let name: &str = block.name.as_ref();
 
-        // AC-004: only recognised type names are allowed.
+        // AC-004: only recognised type names are allowed (BC-3.02.002 EC-001).
+        // The span from the section block is included in the error so that
+        // miette can render a colored source pointer to the offending line.
         if !SUPPORTED_MANUAL_SECTION_TYPES.contains(&name) {
             return Err(LayoutError::UnknownSectionType {
                 name: name.to_owned(),
+                span: block.span.clone(),
             });
         }
 
@@ -389,9 +392,15 @@ fn collect_manual_sections(deck: &Deck) -> Result<Vec<GeneratedSection>, LayoutE
         // whose map holds all key-value pairs (insertion order preserved via
         // OrderedMap).  Previous code emitted one item per key — semantically
         // wrong because it fragmented the section body into unrelated atoms.
+        //
+        // F-002 (Pass 4): The "heading" key is extracted above to set the section
+        // heading, so it must NOT also appear in the Custom map — it is a layout
+        // directive, not a content field.  Consumers of `SectionItem::Custom`
+        // (DOCX/PDF exporters) must not receive the same "heading" key twice.
         let custom_map: OrderedMap<Arc<str>, Value> = block
             .body
             .iter()
+            .filter(|(k, _)| k.as_ref() != "heading")
             .map(|(k, v)| (Arc::clone(k), v.clone()))
             .collect();
         let items = vec![SectionItem::Custom(custom_map)];
@@ -1322,7 +1331,7 @@ mod tests {
         assert!(
             matches!(
                 result,
-                Err(LayoutError::UnknownSectionType { name }) if name == "unknown_type"
+                Err(LayoutError::UnknownSectionType { ref name, .. }) if name == "unknown_type"
             ),
             "expected UnknownSectionType error for unrecognised section type"
         );
@@ -1414,17 +1423,23 @@ mod tests {
     // ─────────────────────────────────────────────────────────────────────────
 
     /// EC-005 — `LayoutError::UnknownSectionType` can be constructed and
-    /// displays a human-readable message containing the unknown name.
+    /// displays a human-readable message containing the unknown name and known
+    /// types list (BC-3.02.002 EC-001).
     #[test]
     fn test_bc_3_02_002_unknown_section_type_error_variant_exists() {
         use crate::error::LayoutError;
         let err = LayoutError::UnknownSectionType {
             name: "frobnicator".to_owned(),
+            span: SourceSpan::default(),
         };
         let msg = err.to_string();
         assert!(
             msg.contains("frobnicator"),
             "UnknownSectionType error must include the unknown name; got: {msg}"
+        );
+        assert!(
+            msg.contains("Known types"),
+            "UnknownSectionType error must include 'Known types' list (BC-3.02.002 EC-001); got: {msg}"
         );
     }
 
@@ -1955,6 +1970,96 @@ mod tests {
         );
     }
 
+    /// AC-006 (F-008) — when a manual `executive_summary` block with a non-empty
+    /// body supersedes the auto-generated executive summary (takeaway slides
+    /// present), the supersession fires AND the manual body content is preserved
+    /// in the resulting section's items.
+    ///
+    /// This verifies the full supersession path from AC-006: the manual block's
+    /// body content reaches the exporter via `items`, not the auto-generated
+    /// `TakeawayBullet` items from the slide `takeaway:` fields.
+    #[test]
+    fn test_ac_006_supersession_preserves_manual_body_content() {
+        // Manual executive_summary block with non-empty body content.
+        let mut body = OrderedMap::new();
+        body.insert(
+            Arc::from("summary"),
+            Value::Str(Arc::from("Manual executive summary text")),
+        );
+        body.insert(Arc::from("author"), Value::Str(Arc::from("Strategy Team")));
+        let block = SectionBlock {
+            name: Arc::from("executive_summary"),
+            body,
+            span: SourceSpan::default(),
+        };
+        // Two takeaway slides that would normally produce auto-generated bullets.
+        let deck = make_deck_with_section_blocks(
+            vec![
+                make_slide_with_takeaway("content", "Auto takeaway 1"),
+                make_slide_with_takeaway("bullets", "Auto takeaway 2"),
+            ],
+            vec![block],
+        );
+        let sections = collect_sections(&deck).expect("no error");
+
+        // Supersession must fire: exactly one executive_summary section, the manual one.
+        let exec_sections: Vec<_> = sections
+            .iter()
+            .filter(|s| {
+                s.kind == SectionKind::ExecutiveSummary
+                    || s.kind == SectionKind::ManualSection(Arc::from("executive_summary"))
+            })
+            .collect();
+        assert_eq!(
+            exec_sections.len(),
+            1,
+            "supersession must produce exactly one executive_summary section; got: {:?}",
+            sections.iter().map(|s| &s.kind).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            exec_sections[0].source,
+            SectionSource::ManuallyAuthored,
+            "retained section must be ManuallyAuthored"
+        );
+
+        // The manual body content must be in the items, not the auto-generated bullets.
+        assert_eq!(
+            exec_sections[0].items.len(),
+            1,
+            "manual executive_summary body must produce exactly one Custom item"
+        );
+        match &exec_sections[0].items[0] {
+            SectionItem::Custom(map) => {
+                assert!(
+                    map.contains_key("summary"),
+                    "Custom map must contain 'summary' key from manual body"
+                );
+                assert!(
+                    map.contains_key("author"),
+                    "Custom map must contain 'author' key from manual body"
+                );
+                // Auto-generated takeaway text must NOT appear in the items.
+                let has_takeaway_bullet = exec_sections[0]
+                    .items
+                    .iter()
+                    .any(|item| matches!(item, SectionItem::TakeawayBullet(_)));
+                assert!(
+                    !has_takeaway_bullet,
+                    "manual supersession must NOT include auto-generated TakeawayBullet items"
+                );
+            },
+            other => panic!("expected SectionItem::Custom, got {other:?}"),
+        }
+
+        // The auto-generated ExecutiveSummary must be absent (superseded).
+        assert!(
+            !sections
+                .iter()
+                .any(|s| s.kind == SectionKind::ExecutiveSummary),
+            "auto-generated ExecutiveSummary must be suppressed"
+        );
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // CRIT-002 — supersession warning via tracing
     // ─────────────────────────────────────────────────────────────────────────
@@ -2277,6 +2382,8 @@ mod tests {
 
     /// OBS-002 — a manual section block with a "heading" key in the body uses
     /// that string as the section heading instead of the humanized type name.
+    /// The "heading" key must NOT appear in the Custom map — it is a layout
+    /// directive consumed by the heading field, not a content field (F-002).
     #[test]
     fn test_obs_002_manual_section_heading_override() {
         let mut body = OrderedMap::new();
@@ -2302,6 +2409,27 @@ mod tests {
             "Our Research Methodology",
             "heading must use the 'heading' body key when present (OBS-002)"
         );
+        // F-002: "heading" key must NOT appear in the Custom map — it is a layout
+        // directive, not a content field for DOCX/PDF exporters.
+        assert_eq!(
+            manual[0].items.len(),
+            1,
+            "must have exactly one Custom item"
+        );
+        match &manual[0].items[0] {
+            SectionItem::Custom(map) => {
+                assert!(
+                    !map.contains_key("heading"),
+                    "custom_map must NOT contain 'heading' key — it is consumed as the section \
+                     heading, not passed to exporters as content (F-002)"
+                );
+                assert!(
+                    map.contains_key("content"),
+                    "custom_map must still contain the 'content' key"
+                );
+            },
+            other => panic!("expected SectionItem::Custom, got {other:?}"),
+        }
     }
 
     /// OBS-002 — a manual section block without a "heading" key falls back to

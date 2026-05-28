@@ -7,6 +7,7 @@
 use thiserror::Error;
 
 use crate::types::BoundingBox;
+use slideforge_types::SourceSpan;
 
 /// Errors produced by the layout engine.
 ///
@@ -71,11 +72,17 @@ pub enum LayoutError {
     /// `methodology`, `scope`, `approval`, `appendix`, `glossary`.
     /// `executive_summary` and `risk_register` are allowed as manual overrides
     /// (AC-006 / BC-3.02.001 EC-002).  Any other name produces this error
-    /// (AC-004 / BC-3.02.002).
-    #[error("layout error: unknown section type '{name}'")]
+    /// (AC-004 / BC-3.02.002 EC-001).
+    #[error(
+        "layout error: unknown section type '{name}' at {span:?}. \
+         Known types: [executive_summary, risk_register, methodology, scope, \
+         approval, appendix, glossary]"
+    )]
     UnknownSectionType {
         /// The unrecognised section type name from the `.sf` source.
         name: String,
+        /// Source location of the unrecognised `section <type>:` block.
+        span: SourceSpan,
     },
 
     /// A `BoundingBox` in the produced layout has invalid coordinates.
