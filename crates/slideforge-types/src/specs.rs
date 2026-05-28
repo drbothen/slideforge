@@ -8,6 +8,126 @@ use std::sync::Arc;
 
 use crate::span::SourceSpan;
 
+/// A usvg-normalized SVG string that is guaranteed PPTX-safe.
+///
+/// This type is the output of the mandatory normalization pass (STORY-034,
+/// BC-1.12.003) that runs after every successful diagram render. The normalized
+/// form guarantees:
+///
+/// - No `<foreignObject>` elements.
+/// - No `<script>` elements.
+/// - No CSS `@keyframes` or class-based `<style>` blocks.
+/// - Absolute pixel `width` and `height` on the root `<svg>` element.
+/// - No `<use>` elements (all `href="#symbol"` references inlined).
+///
+/// ## Placement in slideforge-types
+///
+/// `NormalizedDiagramSvg` lives in `slideforge-types` (a leaf crate with no
+/// workspace crate dependencies) so that both `slideforge-diagrams` (the
+/// producer) and `slideforge-layout` (the consumer) can reference it without
+/// creating a circular dependency.
+///
+/// `slideforge-diagrams` produces `NormalizedDiagramSvg` values via
+/// `usvg_normalize`. `slideforge-layout` stores them in
+/// `FrameContent::Diagram(NormalizedDiagramSvg)`.
+///
+/// ## IR compatibility
+///
+/// Uses `Arc<str>` (not `String`) so that cloning is cheap and the type
+/// satisfies `Hash + Eq + Clone` for comemo compatibility.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct NormalizedDiagramSvg(Arc<str>);
+
+impl NormalizedDiagramSvg {
+    /// Construct a `NormalizedDiagramSvg` from a pre-normalized SVG string.
+    ///
+    /// # Contract
+    ///
+    /// **The caller is responsible for ensuring the SVG has been normalized
+    /// through `slideforge-diagrams::usvg_normalize` before calling this
+    /// constructor.** The field is private to enforce that construction goes
+    /// through a named entry point rather than tuple-struct literal syntax
+    /// (`NormalizedDiagramSvg(raw_string)`), which makes the normalization
+    /// requirement explicit at every callsite.
+    ///
+    /// Within the slideforge pipeline:
+    /// - The **only legitimate production callsite** is
+    ///   `slideforge_diagrams::normalize::usvg_normalize`, which performs the
+    ///   full usvg round-trip before wrapping the result.
+    /// - Test code may call this constructor with synthetic SVG strings in
+    ///   unit tests that verify downstream consumers (layout, exporters), where
+    ///   the SVG content is controlled and normalization guarantees are
+    ///   asserted separately.
+    ///
+    /// **DO NOT CALL FROM EXPORTERS** — exporters receive `NormalizedDiagramSvg`
+    /// values produced by the diagram rendering pipeline and must not
+    /// construct them from raw strings.
+    #[must_use]
+    pub fn from_normalized_string(svg: Arc<str>) -> Self {
+        Self(svg)
+    }
+
+    /// Return a reference to the inner SVG string.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// Return `true` if the SVG string is non-empty.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Documentation of the placeholder contract for exporter consumers.
+    ///
+    /// Exporters that receive a [`NormalizedDiagramSvg`] value produced by
+    /// [`NormalizedDiagramSvg::empty_placeholder`] MUST call
+    /// [`NormalizedDiagramSvg::is_placeholder`] before embedding the SVG into
+    /// an output format. A placeholder is an empty string and is NOT a valid
+    /// PPTX-safe SVG. If `is_placeholder()` returns `true`, the exporter must
+    /// substitute an error-slide indicator instead.
+    ///
+    /// The eval layer is responsible for replacing placeholder values with
+    /// real [`NormalizedDiagramSvg`] values before exporters run. If a
+    /// placeholder reaches an exporter, it is a pipeline bug, not a user error.
+    pub const PLACEHOLDER_DOC: &'static str = "NormalizedDiagramSvg::empty_placeholder() returns an empty string. \
+         Exporters MUST check is_placeholder() before embedding. \
+         A placeholder reaching an exporter is a pipeline bug.";
+
+    /// Return an empty-string placeholder `NormalizedDiagramSvg` for use in
+    /// region-map templates and layout fixtures where the actual diagram SVG is
+    /// not yet available.
+    ///
+    /// # Safety Contract
+    ///
+    /// **Exporters MUST call [`is_placeholder`][Self::is_placeholder] before
+    /// embedding the returned value.** An empty-string placeholder is NOT a
+    /// valid PPTX-safe SVG. If `is_placeholder()` returns `true`, the exporter
+    /// must render an error-slide indicator instead of attempting to embed the
+    /// empty string.
+    ///
+    /// The eval layer replaces placeholder values with real
+    /// `NormalizedDiagramSvg` before exporters run. A placeholder that reaches
+    /// an exporter without being replaced is a pipeline bug.
+    ///
+    /// See [`PLACEHOLDER_DOC`][Self::PLACEHOLDER_DOC] for the full contract.
+    #[must_use]
+    pub fn empty_placeholder() -> Self {
+        Self(Arc::from(""))
+    }
+
+    /// Return `true` if this value is a placeholder (empty string) rather than
+    /// a real normalized SVG.
+    ///
+    /// Exporters MUST check this before embedding a `NormalizedDiagramSvg`.
+    /// See [`empty_placeholder`][Self::empty_placeholder] for the contract.
+    #[must_use]
+    pub fn is_placeholder(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
 /// The alt text state of a visual element.
 ///
 /// Visual elements (images, charts, diagrams, shapes) require alt text for
@@ -250,5 +370,42 @@ mod tests {
     fn test_bc_1_01_specs_alt_text_provided_variant() {
         let alt = AltText::Provided(Arc::from("a logo"));
         assert!(matches!(alt, AltText::Provided(_)));
+    }
+
+    // -----------------------------------------------------------------------
+    // NormalizedDiagramSvg placeholder helpers (F-MED-001)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_normalized_diagram_svg_is_placeholder_true_for_empty_placeholder() {
+        let p = NormalizedDiagramSvg::empty_placeholder();
+        assert!(
+            p.is_placeholder(),
+            "empty_placeholder() must return a value where is_placeholder() == true"
+        );
+    }
+
+    #[test]
+    fn test_normalized_diagram_svg_is_placeholder_false_for_real_svg() {
+        let svg = NormalizedDiagramSvg::from_normalized_string(Arc::from(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"100\" height=\"100\"/>",
+        ));
+        assert!(
+            !svg.is_placeholder(),
+            "a real SVG string must not be reported as a placeholder"
+        );
+    }
+
+    #[test]
+    fn test_normalized_diagram_svg_placeholder_doc_is_non_empty() {
+        // Ensures the contract constant is present and non-trivial.
+        assert!(
+            !NormalizedDiagramSvg::PLACEHOLDER_DOC.is_empty(),
+            "PLACEHOLDER_DOC must be a non-empty string"
+        );
+        assert!(
+            NormalizedDiagramSvg::PLACEHOLDER_DOC.contains("is_placeholder"),
+            "PLACEHOLDER_DOC must reference is_placeholder()"
+        );
     }
 }

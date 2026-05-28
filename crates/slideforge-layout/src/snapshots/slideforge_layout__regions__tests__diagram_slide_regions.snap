@@ -36,7 +36,11 @@ expression: frames
                 3657600,
             ),
         },
-        content: Diagram,
+        content: Diagram(
+            NormalizedDiagramSvg(
+                "",
+            ),
+        ),
         text_flow: None,
     },
 ]

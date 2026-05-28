@@ -21,7 +21,7 @@
 //! `x >= 0`, `y >= 0`, `width > 0`, `height > 0`,
 //! `x + width <= page_width`, `y + height <= page_height`.
 
-use crate::types::{BoundingBox, Emu, Frame, FrameContent};
+use crate::types::{BoundingBox, Emu, Frame, FrameContent, NormalizedDiagramSvg};
 
 /// Produce the canonical [`Frame`] list for a given slide type keyword on the
 /// given page dimensions.
@@ -277,7 +277,7 @@ pub fn region_frames_for(
             },
             Frame {
                 bbox: bbox(457_200, 1_188_720, 8_229_600, 3_657_600),
-                content: FrameContent::Diagram,
+                content: FrameContent::Diagram(NormalizedDiagramSvg::empty_placeholder()),
                 text_flow: None,
             },
         ],

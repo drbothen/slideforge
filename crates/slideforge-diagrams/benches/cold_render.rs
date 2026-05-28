@@ -1,15 +1,16 @@
-//! Criterion benchmark: cold diagram render time (font DB initialization).
+//! Criterion benchmark: cold diagram render + normalize time (font DB init).
 //!
-//! ## Purpose (AC-003 / NFR-003)
+//! ## Purpose (AC-008 / NFR-003)
 //!
-//! Measures the total time for the FIRST call to `render_mermaid` in a fresh
-//! process. The font database is initialized on the first call to
-//! `mermaid-rs-renderer`.
+//! Measures the total time for the FIRST call to the full diagram pipeline
+//! (`render_mermaid` + `usvg_normalize`) in a fresh process. The font database
+//! is initialized on the first call to `mermaid-rs-renderer`.
 //!
 //! ## Gate (NFR-003)
 //!
-//! The benchmark must pass < 200ms on the CI Linux `x86_64` runner.
-//! Empirical from Spike S14: 124ms on M-series Mac.
+//! The combined render + normalize pipeline must complete in < 200ms on the
+//! CI Linux `x86_64` runner. The usvg normalization step is expected to add
+//! < 1ms overhead (empirical from Spike S14), well within the budget.
 //!
 //! ## Note
 //!
@@ -19,18 +20,29 @@
 //! overhead via `Criterion::new().measurement_time()` set low to focus on
 //! the first-call latency profile.
 
-use criterion::{Criterion, criterion_group, criterion_main};
-use slideforge_diagrams::renderer::render_mermaid;
+// NOTE: Per AC-008, a < 1ms micro-benchmark isolating normalize-only
+// overhead is deferred to STORY-037 (PPTX exporter). Current benchmarks
+// measure combined render+normalize.
 
-/// Benchmark function: cold render — first call includes font DB initialization.
+use criterion::{Criterion, criterion_group, criterion_main};
+use slideforge_diagrams::{DiagramRendererImpl, types::DiagramLang};
+
+/// Benchmark function: cold render+normalize — first call includes font DB init.
+///
+/// Exercises the full diagram pipeline: `render_mermaid` + `usvg_normalize`
+/// (BC-1.12.003 invariant 1: normalization is mandatory after every render).
 fn cold_render_benchmark(c: &mut Criterion) {
-    // A simple flowchart that exercises the full render path.
+    // A simple flowchart that exercises the full render + normalize path.
     let source = "graph TD\n  A-->B";
 
-    c.bench_function("cold_flowchart_render", |b| {
+    c.bench_function("cold_flowchart_render_normalize", |b| {
         b.iter(|| {
-            render_mermaid(std::hint::black_box(source), "bench")
-                .expect("benchmark: flowchart must render without error")
+            DiagramRendererImpl::render_diagram(
+                std::hint::black_box(source),
+                DiagramLang::Mermaid,
+                "bench",
+            )
+            .expect("benchmark: flowchart render+normalize must succeed")
         });
     });
 }

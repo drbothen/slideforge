@@ -7,6 +7,21 @@
 # Run locally: cargo nextest run
 # Run CI:      cargo nextest run --profile ci
 
+# Test group for timing-sensitive tests that must not run concurrently.
+# cold_budget measures FONT_DB cold-path latency and is invalidated by CPU
+# contention from other tests running in parallel.  max-threads = 1 ensures
+# the cold_budget binary is never run at the same time as other tests.
+[test-groups.timing-sensitive]
+max-threads = 1
+
+[[profile.default.overrides]]
+# cold_budget is a timing-sensitive integration test that measures FONT_DB
+# cold-path latency. Running it concurrently with the rest of the workspace
+# causes CPU starvation and false positives. Assign it to the timing-sensitive
+# group so nextest serializes it against the rest of the workspace.
+filter = "binary_id(slideforge-diagrams::cold_budget)"
+test-group = "timing-sensitive"
+
 [profile.default]
 # Local dev: show output for failures only.
 failure-output = "immediate"

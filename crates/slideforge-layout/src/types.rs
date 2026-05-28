@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use slideforge_types::ContentBlock;
 pub use slideforge_types::Emu;
+pub use slideforge_types::NormalizedDiagramSvg;
 
 use crate::sections::GeneratedSection;
 
@@ -264,7 +265,13 @@ pub enum FrameContent {
     /// A chart rendered from a chart spec.
     Chart,
     /// A diagram rendered from a diagram source (e.g., Mermaid).
-    Diagram,
+    ///
+    /// Carries the PPTX-safe, usvg-normalized SVG payload produced by
+    /// `slideforge_diagrams::normalize::usvg_normalize` (BC-1.12.003 invariant 1).
+    /// The type system enforces that only a [`NormalizedDiagramSvg`] — never a
+    /// raw SVG string — can be stored in this frame, preventing un-normalized
+    /// SVG from reaching exporters.
+    Diagram(NormalizedDiagramSvg),
     /// A shape from the shape DSL.
     Shape,
     /// An empty placeholder (present in the layout but no content assigned).
@@ -575,7 +582,11 @@ mod tests {
             alt: Arc::from("A bar chart"),
         };
         let chart = FrameContent::Chart;
-        let diagram = FrameContent::Diagram;
+        // Construct a minimal NormalizedDiagramSvg for the Diagram variant test.
+        let normalized_svg = NormalizedDiagramSvg::from_normalized_string(Arc::from(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><title>test</title></svg>"#,
+        ));
+        let diagram = FrameContent::Diagram(normalized_svg);
         let shape = FrameContent::Shape;
         let empty = FrameContent::Empty;
 
@@ -584,7 +595,7 @@ mod tests {
         assert!(matches!(body, FrameContent::Body(_)));
         assert!(matches!(image, FrameContent::Image { .. }));
         assert!(matches!(chart, FrameContent::Chart));
-        assert!(matches!(diagram, FrameContent::Diagram));
+        assert!(matches!(diagram, FrameContent::Diagram(_)));
         assert!(matches!(shape, FrameContent::Shape));
         assert!(matches!(empty, FrameContent::Empty));
     }
@@ -629,6 +640,33 @@ mod tests {
         let mut set = HashSet::new();
         set.insert(p1);
         assert_eq!(set.len(), 1, "ErrorSlidePlaceholder must be hashable");
+    }
+
+    /// F-HIGH-003: `FrameContent::Diagram` must carry a `NormalizedDiagramSvg`
+    /// payload. This test verifies the type-level contract by constructing the
+    /// variant and extracting the payload.
+    #[test]
+    fn test_frame_content_diagram_carries_normalized_svg() {
+        use std::sync::Arc;
+
+        let svg_str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300" aria-label="test" role="img"><title>test</title><rect x="0" y="0" width="400" height="300"/></svg>"#;
+        let normalized = NormalizedDiagramSvg::from_normalized_string(Arc::from(svg_str));
+        let content = FrameContent::Diagram(normalized);
+
+        match content {
+            FrameContent::Diagram(svg) => {
+                assert!(
+                    svg.as_str().contains("<svg"),
+                    "FrameContent::Diagram payload must be an SVG; got: {}",
+                    svg.as_str()
+                );
+                assert!(
+                    svg.as_str().contains("<title>"),
+                    "FrameContent::Diagram payload must contain <title>"
+                );
+            },
+            other => panic!("expected FrameContent::Diagram, got: {other:?}"),
+        }
     }
 
     /// AC-003 — EMU values are correct for the 16:9 default constants.

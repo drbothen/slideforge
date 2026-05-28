@@ -1,10 +1,20 @@
 //! Core types for `slideforge-diagrams`.
 //!
-//! Defines [`DiagramLang`], [`RawDiagramSvg`], and [`DiagramError`].
+//! Defines [`DiagramLang`], [`RawDiagramSvg`], [`NormalizedDiagramSvg`], and
+//! [`DiagramError`].
+//!
+//! [`NormalizedDiagramSvg`] is re-exported from `slideforge-types` so that
+//! both `slideforge-diagrams` (producer) and `slideforge-layout` (consumer)
+//! reference the same type without a circular dependency.
 
 use std::sync::Arc;
 
+use miette::SourceSpan;
 use thiserror::Error;
+
+// Re-export NormalizedDiagramSvg from slideforge-types so that the canonical
+// definition is in the leaf crate and both diagrams + layout can use it.
+pub use slideforge_types::NormalizedDiagramSvg;
 
 /// The diagram source language.
 ///
@@ -127,6 +137,37 @@ pub enum DiagramError {
     SvgPostProcessingError {
         /// Description of the post-processing failure.
         message: Arc<str>,
+    },
+
+    /// usvg normalization failed on the raw SVG produced by the renderer.
+    ///
+    /// Maps to **E-EXP-004**: the diagram SVG could not be normalized into
+    /// PPTX-safe form because usvg rejected the input as malformed SVG. This
+    /// is not a user-authored syntax error (the user writes Mermaid source) —
+    /// it is a rendering pipeline failure where the underlying renderer produced
+    /// SVG that usvg cannot parse.
+    ///
+    /// In strict mode: exit code 3.
+    /// In warn-only mode: error-slide placeholder substituted.
+    ///
+    /// The `slide_title` field carries the diagram identifier (e.g., slide title
+    /// or diagram label) to aid debugging. The `span` field carries the byte
+    /// offset within the raw SVG where the parse failure occurred (if available
+    /// from usvg; otherwise a zero-length span at offset 0 is used).
+    #[error("[E-EXP-004] SVG normalization failed for diagram '{slide_title}': {cause}")]
+    SvgNormalizationFailed {
+        /// The slide title (or diagram alt-text label) identifying which diagram
+        /// could not be normalized. Matches the `slide_title` argument passed to
+        /// [`crate::normalize::usvg_normalize`].
+        slide_title: Arc<str>,
+        /// Human-readable description of the usvg parse/normalization failure.
+        cause: Arc<str>,
+        /// Byte offset span within the raw SVG where the failure was detected.
+        ///
+        /// Set to a zero-length span at offset 0 when usvg does not provide
+        /// positional information about the failure. For `usvg::Error::ParsingFailed`,
+        /// a synthetic offset encoding (row * 1000 + col) is used as an approximation.
+        span: SourceSpan,
     },
 }
 
@@ -279,5 +320,31 @@ mod tests {
             msg.contains("no <svg> element"),
             "error must contain message; got: {msg}"
         );
+    }
+
+    #[test]
+    fn test_bc_1_12_002_diagram_error_svg_normalization_failed_uses_slide_title() {
+        use miette::SourceSpan;
+        let err = DiagramError::SvgNormalizationFailed {
+            slide_title: Arc::from("My Diagram Slide"),
+            cause: Arc::from("usvg parse failed: some error"),
+            span: SourceSpan::from(0..0),
+        };
+        let msg = err.to_string();
+        assert!(
+            msg.contains("E-EXP-004"),
+            "SvgNormalizationFailed must contain E-EXP-004; got: {msg}"
+        );
+        assert!(
+            msg.contains("My Diagram Slide"),
+            "SvgNormalizationFailed must contain the slide_title; got: {msg}"
+        );
+        // Destructure to verify field name is slide_title (not source_id)
+        match err {
+            DiagramError::SvgNormalizationFailed { slide_title, .. } => {
+                assert_eq!(slide_title.as_ref(), "My Diagram Slide");
+            },
+            other => panic!("unexpected variant: {other:?}"),
+        }
     }
 }
