@@ -1971,9 +1971,11 @@ name = "slideforge-math"
 version = "0.1.0"
 dependencies = [
  "insta",
+ "quick-xml",
  "slideforge-plugin-api",
  "slideforge-types",
  "thiserror 2.0.18",
+ "usvg",
 ]
 
 [[package]]

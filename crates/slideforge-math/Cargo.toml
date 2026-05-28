@@ -17,6 +17,10 @@ description = "Math rendering engine for slideforge: LaTeX parser, @{var} interp
 slideforge-types = { workspace = true }
 slideforge-plugin-api = { workspace = true }
 thiserror = { workspace = true }
+# quick-xml: MathML element serialisation (AC-001, STORY-030).
+quick-xml = { workspace = true }
+# usvg: SVG normalisation to remove <text> elements in PDF path output (AC-003, STORY-030).
+usvg = "=0.47.0"
 
 [dev-dependencies]
 insta = { version = "1", features = ["yaml"] }

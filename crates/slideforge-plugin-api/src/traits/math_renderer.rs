@@ -63,6 +63,15 @@ pub enum MathError {
         /// Description of the rendering failure.
         message: String,
     },
+
+    /// PDF path output still contains `<text>` elements after SVG normalisation.
+    ///
+    /// Returned by `render_pdf_paths` (STORY-030) when `usvg` normalisation
+    /// cannot remove all `<text>` elements from the intermediate SVG, indicating
+    /// that the glyph outline engine did not fully convert a character to paths.
+    /// Callers should emit `E-EXP-004` in response (EC-005).
+    #[error("PDF path output contains residual <text> elements after SVG normalisation")]
+    TextRemainsInPathOutput,
 }
 
 /// A plugin that renders a [`MathNode`] to bytes in a target math format.
