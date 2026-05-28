@@ -277,7 +277,7 @@ pub fn region_frames_for(
             },
             Frame {
                 bbox: bbox(457_200, 1_188_720, 8_229_600, 3_657_600),
-                content: FrameContent::Diagram(NormalizedDiagramSvg::placeholder()),
+                content: FrameContent::Diagram(NormalizedDiagramSvg::empty_placeholder()),
                 text_flow: None,
             },
         ],
