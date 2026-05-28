@@ -190,8 +190,8 @@ pub enum BrandError {
     /// color validation (introduced in Pass-11 fix burst). The error-taxonomy.md spec
     /// has been updated to reflect this revised semantic.
     #[error(
-        "E-BRD-005: Invalid hex color '{value}' in brand.toml slot '{slot_name}'. \
-         Use 6-digit uppercase hex RGB (e.g. '#3B82F6')."
+        "E-BRD-005: Invalid hex color value '{value}' in brand.toml slot '{slot_name}'. \
+         Use 6-digit uppercase hex RGB (e.g. '#3B82F6'; case insensitive — uppercase or lowercase accepted)."
     )]
     InvalidHexColor {
         /// The OOXML color slot name (e.g., `"acc1"`).
@@ -390,6 +390,36 @@ mod tests {
         assert!(
             msg.contains("/tmp/brand"),
             "error message must contain brand dir, got: {msg}"
+        );
+    }
+
+    /// F-PASS16-MED-1 — E-BRD-005 message matches error-taxonomy.md row 115.
+    ///
+    /// Verifies the word "value" is present and the case-insensitivity note is
+    /// included, mirroring the `validate_hex` behaviour introduced in Pass-11.
+    #[test]
+    fn test_f_pass16_med_1_e_brd_005_message_matches_taxonomy() {
+        let err = BrandError::InvalidHexColor {
+            slot_name: Arc::from("acc1"),
+            value: Arc::from("zzzzzz"),
+        };
+        let msg = err.to_string();
+        assert!(
+            msg.contains("E-BRD-005"),
+            "must contain error code, got: {msg}"
+        );
+        assert!(
+            msg.contains("value"),
+            "must contain the word 'value', got: {msg}"
+        );
+        assert!(
+            msg.contains("case insensitive"),
+            "must contain case-insensitivity note, got: {msg}"
+        );
+        assert!(msg.contains("acc1"), "must contain slot name, got: {msg}");
+        assert!(
+            msg.contains("zzzzzz"),
+            "must contain the invalid value, got: {msg}"
         );
     }
 

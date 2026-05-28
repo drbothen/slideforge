@@ -7,6 +7,14 @@
 //! All fields are optional at the schema level. Required-field enforcement is
 //! performed by `BrandSynthesizer::synthesize` (BC-2.01.002 / BC-2.01.004).
 //!
+//! ## Strict-field validation
+//!
+//! All five public structs carry `#[serde(deny_unknown_fields)]`. This is a
+//! deliberate design choice aligned with the project's strict-mode-default
+//! posture (CLAUDE.md: "No YAML-style implicit type coercion"). Silently
+//! accepting unknown TOML keys (e.g. a typo like `acc01` instead of `acc1`)
+//! would hide user errors; serde rejects them with a descriptive parse error.
+//!
 //! ## Ownership design
 //!
 //! Schema structs use `String` (and `Option<String>`) for all string fields.
@@ -55,6 +63,7 @@ use serde::{Deserialize, Serialize};
 /// Use `toml::from_str("")` if you specifically need an all-`None` config for
 /// testing TOML parsing behavior.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BrandConfig {
     /// The `[colors]` section — 12 OOXML theme color slots.
     ///
@@ -127,6 +136,7 @@ impl Default for BrandConfig {
 /// All absent fields produce one `E-BRD-003` warning each and are inferred
 /// by the deterministic algorithm in `inference::infer_missing_slots`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ColorConfig {
     /// Dark 1 — primary dark color (e.g., text on light backgrounds).
     ///
@@ -231,6 +241,7 @@ impl ColorConfig {
 /// Specifies heading and body font typeface names. Both default to `"Calibri"`
 /// when absent (BC-2.01.002 postcondition — `[fonts]` optional with fallbacks).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct FontConfig {
     /// Heading font typeface name (maps to OOXML `<a:majorFont>`).
     ///
@@ -271,6 +282,7 @@ fn default_body_font() -> String {
 /// The `path` field is required for synthesized brands (AC-004). If absent,
 /// `BrandSynthesizer::synthesize` returns `BrandError::LogoRequired`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LogoConfig {
     /// File path to the logo image (e.g., `"brand.assets/logo.png"`).
     ///
@@ -285,6 +297,7 @@ pub struct LogoConfig {
 /// Controls the footer text and visibility flags applied to all slide layouts.
 /// All fields are optional with documented defaults.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct FooterConfig {
     /// Footer text string (e.g., `"Confidential"`).
     ///
@@ -582,6 +595,55 @@ mod tests {
         assert!(config.colors.dk1.is_none(), "empty TOML dk1 must be None");
         assert!(config.colors.acc1.is_none(), "empty TOML acc1 must be None");
         assert!(config.logo.is_none(), "empty TOML logo must be None");
+    }
+
+    /// F-PASS16-OBS-1 — unknown TOML fields are rejected by serde.
+    ///
+    /// All five schema structs carry `#[serde(deny_unknown_fields)]`. A typo
+    /// such as `acc01` (instead of `acc1`) must produce a parse error rather
+    /// than being silently ignored. This enforces the project's strict-mode-
+    /// default posture (CLAUDE.md: "No YAML-style implicit type coercion").
+    #[test]
+    fn test_toml_unknown_field_rejected() {
+        // Unknown top-level key
+        let bad_root = "name = \"Test\"\n[colors]\nacc1 = \"#FF0000\"\n";
+        let result: Result<BrandConfig, _> = toml::from_str(bad_root);
+        assert!(
+            result.is_err(),
+            "Unknown top-level field 'name' must be rejected by deny_unknown_fields"
+        );
+
+        // Typo in [colors] section — acc01 instead of acc1
+        let bad_colors = "[colors]\nacc01 = \"#FF0000\"\n";
+        let result: Result<BrandConfig, _> = toml::from_str(bad_colors);
+        assert!(
+            result.is_err(),
+            "Unknown [colors] field 'acc01' (typo of acc1) must be rejected"
+        );
+
+        // Unknown field in [fonts] section
+        let bad_fonts = "[fonts]\nheading = \"Arial\"\nweight = \"bold\"\n";
+        let result: Result<BrandConfig, _> = toml::from_str(bad_fonts);
+        assert!(
+            result.is_err(),
+            "Unknown [fonts] field 'weight' must be rejected"
+        );
+
+        // Unknown field in [logo] section
+        let bad_logo = "[logo]\npath = \"logo.png\"\nalt = \"My logo\"\n";
+        let result: Result<BrandConfig, _> = toml::from_str(bad_logo);
+        assert!(
+            result.is_err(),
+            "Unknown [logo] field 'alt' must be rejected"
+        );
+
+        // Unknown field in [footer] section
+        let bad_footer = "[footer]\ntext = \"Confidential\"\nalign = \"left\"\n";
+        let result: Result<BrandConfig, _> = toml::from_str(bad_footer);
+        assert!(
+            result.is_err(),
+            "Unknown [footer] field 'align' must be rejected"
+        );
     }
 
     /// F-PASS13-OBS-3 — TOML parser rejects duplicate keys per TOML §6.
