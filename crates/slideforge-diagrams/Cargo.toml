@@ -15,6 +15,7 @@ description = "Mermaid diagram renderer for slideforge — pure Rust, no Node.js
 
 [dependencies]
 slideforge-plugin-api = { workspace = true }
+slideforge-types = { workspace = true }
 mermaid-rs-renderer = { workspace = true }
 usvg = { workspace = true }
 thiserror = { workspace = true }

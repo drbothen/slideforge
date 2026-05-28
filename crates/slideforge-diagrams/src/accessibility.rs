@@ -11,39 +11,7 @@
 use std::sync::Arc;
 
 use crate::types::{DiagramError, RawDiagramSvg};
-
-/// Escape a string for use in an XML attribute value (double-quote delimited).
-///
-/// Replaces `&`, `<`, `>`, `"` with their XML entity equivalents.
-fn xml_attr_escape(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 8);
-    for ch in s.chars() {
-        match ch {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            _ => out.push(ch),
-        }
-    }
-    out
-}
-
-/// Escape a string for use as XML text content (inside element body).
-///
-/// Replaces `&`, `<`, `>` with their XML entity equivalents.
-fn xml_text_escape(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 8);
-    for ch in s.chars() {
-        match ch {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            _ => out.push(ch),
-        }
-    }
-    out
-}
+use crate::xml_escape::{xml_attr_escape, xml_text_escape};
 
 /// Inject ARIA accessibility attributes and a `<title>` element into a raw
 /// SVG string produced by `mermaid-rs-renderer`.
