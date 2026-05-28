@@ -28,6 +28,22 @@ use crate::error::BrandError;
 
 // ─── Public entry point ───────────────────────────────────────────────────────
 
+/// Slot name constants in ECMA-376 order (matches `COLOR_SLOT_NAMES` from template.rs).
+const SLOT_NAMES: [&str; 12] = [
+    "dk1",
+    "lt1",
+    "dk2",
+    "lt2",
+    "acc1",
+    "acc2",
+    "acc3",
+    "acc4",
+    "acc5",
+    "acc6",
+    "hlink",
+    "fol_hlink",
+];
+
 /// Infer all 12 OOXML color slots from a partially-declared palette.
 ///
 /// `declared` is a 12-element array of `Option<&str>` in ECMA-376 slot order:
@@ -46,10 +62,152 @@ use crate::error::BrandError;
 ///
 /// Does not panic. All inference falls back to hardcoded defaults.
 pub fn infer_missing_slots(
-    _declared: [Option<&str>; 12],
-    _warnings: &mut Vec<BrandError>,
+    declared: [Option<&str>; 12],
+    warnings: &mut Vec<BrandError>,
 ) -> [Arc<str>; 12] {
-    todo!()
+    // Fallback defaults
+    const DEFAULT_DK1: &str = "#1F2937";
+    const DEFAULT_LT1: &str = "#FFFFFF";
+    const DEFAULT_LT2: &str = "#F9FAFB";
+    const DEFAULT_ACC1: &str = "#3B82F6";
+
+    // Build results array — start by cloning declared values.
+    let mut result: [Option<Arc<str>>; 12] = [
+        None, None, None, None, None, None, None, None, None, None, None, None,
+    ];
+    for (i, v) in declared.iter().enumerate() {
+        if let Some(hex) = v {
+            result[i] = Some(Arc::from(*hex));
+        }
+    }
+
+    // Helper: emit warning and set inferred value.
+    let infer = |result: &mut [Option<Arc<str>>; 12],
+                 warnings: &mut Vec<BrandError>,
+                 idx: usize,
+                 value: &str,
+                 derivation: &str| {
+        tracing::warn!(
+            "E-BRD-003: Color slot '{}' not declared in brand.toml. Using inferred value '{}'.",
+            SLOT_NAMES[idx],
+            value,
+        );
+        warnings.push(BrandError::MissingColorSlot {
+            slot_name: Arc::from(SLOT_NAMES[idx]),
+            inferred_hex: Arc::from(value),
+            derivation: Arc::from(derivation),
+        });
+        result[idx] = Some(Arc::from(value));
+    };
+
+    // ── Index references ──
+    // 0 dk1, 1 lt1, 2 dk2, 3 lt2, 4 acc1, 5 acc2, 6 acc3, 7 acc4, 8 acc5, 9 acc6,
+    // 10 hlink, 11 fol_hlink
+
+    // Rule: dk1 — darkest declared color; fallback "#1F2937"
+    if result[0].is_none() {
+        let darkest = darkest_declared_owned(&declared);
+        infer(
+            &mut result,
+            warnings,
+            0,
+            &darkest,
+            "darkest declared color by luminance; fallback #1F2937",
+        );
+    }
+
+    // Rule: lt1 — always "#FFFFFF"
+    if result[1].is_none() {
+        infer(&mut result, warnings, 1, DEFAULT_LT1, "hardcoded #FFFFFF");
+    }
+
+    // Rule: acc1 — if still None, use default (needed for downstream rules)
+    // (no warning: acc1 may be user-declared; if not, it's inferred below)
+    let acc1_effective = if let Some(ref v) = result[4] {
+        v.as_ref().to_owned()
+    } else {
+        DEFAULT_ACC1.to_owned()
+    };
+
+    // Rule: dk2 — acc1 if declared; else dk1 lightened 20%
+    if result[2].is_none() {
+        let dk2_val = if result[4].is_some() {
+            // acc1 is declared — use acc1 value
+            acc1_effective.clone()
+        } else {
+            // acc1 not declared — lighten dk1 by 20%
+            let dk1_hex = result[0].as_ref().map_or(DEFAULT_DK1, |v| v.as_ref());
+            lighten_hex(dk1_hex, 0.20)
+        };
+        infer(
+            &mut result,
+            warnings,
+            2,
+            &dk2_val,
+            "acc1 if declared; else dk1 lightened 20%",
+        );
+    }
+
+    // Rule: lt2 — always "#F9FAFB"
+    if result[3].is_none() {
+        infer(
+            &mut result,
+            warnings,
+            3,
+            DEFAULT_LT2,
+            "hardcoded #F9FAFB near-white",
+        );
+    }
+
+    // Rule: acc1 — if absent, infer from default
+    if result[4].is_none() {
+        infer(
+            &mut result,
+            warnings,
+            4,
+            DEFAULT_ACC1,
+            "default accent baseline",
+        );
+    }
+
+    // Re-read acc1 for downstream rotations
+    let acc1_hex = result[4]
+        .as_ref()
+        .map_or(DEFAULT_ACC1, |v| v.as_ref())
+        .to_owned();
+
+    // Rule: acc2..acc6 — hue rotation 30°/60°/90°/120°/150° from acc1
+    let rotations: [f32; 5] = [30.0, 60.0, 90.0, 120.0, 150.0];
+    for (offset, &degrees) in rotations.iter().enumerate() {
+        let idx = 5 + offset; // acc2=5..acc6=9
+        if result[idx].is_none() {
+            let rotated = rotate_hue(&acc1_hex, degrees);
+            let derivation = format!("acc1 hue rotated {degrees}°");
+            infer(&mut result, warnings, idx, &rotated, &derivation);
+        }
+    }
+
+    // Rule: hlink — acc1 darkened 15%
+    if result[10].is_none() {
+        let hlink_val = darken_hex(&acc1_hex, 0.15);
+        infer(&mut result, warnings, 10, &hlink_val, "acc1 darkened 15%");
+    }
+
+    // Rule: fol_hlink — hlink darkened 10%
+    if result[11].is_none() {
+        let hlink_hex = result[10].as_ref().map_or("", |v| v.as_ref()).to_owned();
+        let fol_hlink_val = darken_hex(&hlink_hex, 0.10);
+        infer(
+            &mut result,
+            warnings,
+            11,
+            &fol_hlink_val,
+            "hlink darkened 10%",
+        );
+    }
+
+    // Unwrap all — every slot is now populated
+    result.map(|v| v.expect("all slots must be populated by inference"))
 }
 
 // ─── Color manipulation helpers ───────────────────────────────────────────────
@@ -61,36 +219,123 @@ pub fn infer_missing_slots(
 /// # Panics
 ///
 /// Panics in debug builds if `hex` is not a valid `"#RRGGBB"` string.
-#[allow(dead_code)]
-fn hex_to_hsl(_hex: &str) -> (f32, f32, f32) {
-    todo!()
+#[allow(clippy::many_single_char_names)]
+fn hex_to_hsl(hex: &str) -> (f32, f32, f32) {
+    // Parse #RRGGBB
+    let hex = hex.trim_start_matches('#');
+    // Safe parse: bad input returns black
+    let r = f32::from(u8::from_str_radix(&hex[..2], 16).unwrap_or(0)) / 255.0;
+    let g = f32::from(u8::from_str_radix(&hex[2..4], 16).unwrap_or(0)) / 255.0;
+    let b = f32::from(u8::from_str_radix(&hex[4..6], 16).unwrap_or(0)) / 255.0;
+
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let delta = max - min;
+
+    let l = f32::midpoint(max, min);
+
+    if delta < f32::EPSILON {
+        // Achromatic
+        return (0.0, 0.0, l);
+    }
+
+    let s = if l > 0.5 {
+        delta / (2.0 - max - min)
+    } else {
+        delta / (max + min)
+    };
+
+    let h = if (max - r).abs() < f32::EPSILON {
+        let mut h = (g - b) / delta;
+        if g < b {
+            h += 6.0;
+        }
+        h / 6.0 * 360.0
+    } else if (max - g).abs() < f32::EPSILON {
+        ((b - r) / delta + 2.0) / 6.0 * 360.0
+    } else {
+        ((r - g) / delta + 4.0) / 6.0 * 360.0
+    };
+
+    (h, s, l)
+}
+
+/// Helper for HSL-to-RGB conversion.
+fn hue_to_rgb(p: f32, q: f32, mut t: f32) -> f32 {
+    if t < 0.0 {
+        t += 1.0;
+    }
+    if t > 1.0 {
+        t -= 1.0;
+    }
+    if t < 1.0 / 6.0 {
+        return p + (q - p) * 6.0 * t;
+    }
+    if t < 1.0 / 2.0 {
+        return q;
+    }
+    if t < 2.0 / 3.0 {
+        return p + (q - p) * (2.0 / 3.0 - t) * 6.0;
+    }
+    p
 }
 
 /// Convert HSL components `(h°, s, l)` to an uppercase `"#RRGGBB"` hex string.
 ///
 /// `h` is in `[0.0, 360.0)`, `s` and `l` are in `[0.0, 1.0]`.
 /// The returned string is always 7 characters and uses uppercase hex digits.
-#[allow(dead_code)]
-fn hsl_to_hex(_h: f32, _s: f32, _l: f32) -> String {
-    todo!()
+#[allow(
+    clippy::many_single_char_names,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
+fn hsl_to_hex(hue: f32, sat: f32, lum: f32) -> String {
+    /// Convert a [0.0, 1.0] float channel to [0, 255] u8.
+    /// Safety: value is clamped before calling so truncation is safe.
+    fn to_byte(v: f32) -> u8 {
+        (v.clamp(0.0, 1.0) * 255.0).round() as u8
+    }
+
+    let (red, grn, blu) = if sat < f32::EPSILON {
+        // Achromatic
+        let v = to_byte(lum);
+        (v, v, v)
+    } else {
+        let q = if lum < 0.5 {
+            lum * (1.0 + sat)
+        } else {
+            lum + sat - lum * sat
+        };
+        let p = 2.0 * lum - q;
+        let h_norm = hue / 360.0;
+
+        let rv = to_byte(hue_to_rgb(p, q, h_norm + 1.0 / 3.0));
+        let gv = to_byte(hue_to_rgb(p, q, h_norm));
+        let bv = to_byte(hue_to_rgb(p, q, h_norm - 1.0 / 3.0));
+        (rv, gv, bv)
+    };
+
+    format!("#{red:02X}{grn:02X}{blu:02X}")
 }
 
 /// Darken a `"#RRGGBB"` hex color by `pct` of its current lightness.
 ///
 /// `pct` is in `[0.0, 1.0]` (e.g., `0.15` = darken by 15%).
 /// Returns an uppercase `"#RRGGBB"` string.
-#[allow(dead_code)]
-pub(crate) fn darken_hex(_hex: &str, _pct: f32) -> String {
-    todo!()
+#[allow(clippy::many_single_char_names)]
+pub(crate) fn darken_hex(hex: &str, pct: f32) -> String {
+    let (hue, sat, lum) = hex_to_hsl(hex);
+    hsl_to_hex(hue, sat, (lum * (1.0 - pct)).max(0.0))
 }
 
 /// Lighten a `"#RRGGBB"` hex color by `pct` towards white.
 ///
 /// `pct` is in `[0.0, 1.0]` (e.g., `0.20` = blend 20% towards white).
 /// Returns an uppercase `"#RRGGBB"` string.
-#[allow(dead_code)]
-pub(crate) fn lighten_hex(_hex: &str, _pct: f32) -> String {
-    todo!()
+#[allow(clippy::many_single_char_names)]
+pub(crate) fn lighten_hex(hex: &str, pct: f32) -> String {
+    let (hue, sat, lum) = hex_to_hsl(hex);
+    hsl_to_hex(hue, sat, (lum + (1.0 - lum) * pct).min(1.0))
 }
 
 /// Rotate the hue of a `"#RRGGBB"` hex color by `degrees`.
@@ -98,17 +343,47 @@ pub(crate) fn lighten_hex(_hex: &str, _pct: f32) -> String {
 /// `degrees` can be any value; it is reduced modulo 360 before application.
 /// Saturation and lightness are preserved.
 /// Returns an uppercase `"#RRGGBB"` string.
-#[allow(dead_code)]
-pub(crate) fn rotate_hue(_hex: &str, _degrees: f32) -> String {
-    todo!()
+#[allow(clippy::many_single_char_names)]
+pub(crate) fn rotate_hue(hex: &str, degrees: f32) -> String {
+    let (hue, sat, lum) = hex_to_hsl(hex);
+    hsl_to_hex((hue + degrees).rem_euclid(360.0), sat, lum)
 }
 
 /// Find the darkest color (by luminance) among declared slots.
 ///
 /// Returns `"#1F2937"` (the fallback dark) if `slots` contains no `Some` values.
-#[allow(dead_code)]
-fn darkest_declared(_slots: &[Option<&str>]) -> &'static str {
-    todo!()
+#[allow(clippy::many_single_char_names)]
+fn darkest_declared_owned(slots: &[Option<&str>; 12]) -> String {
+    /// Compute relative luminance (WCAG formula) for a hex color.
+    fn luminance(hex: &str) -> f32 {
+        let hex = hex.trim_start_matches('#');
+        let to_linear = |channel: u8| -> f32 {
+            let srgb = f32::from(channel) / 255.0;
+            if srgb <= 0.04045 {
+                srgb / 12.92
+            } else {
+                ((srgb + 0.055) / 1.055_f32).powf(2.4)
+            }
+        };
+        let red = u8::from_str_radix(&hex[..2], 16).unwrap_or(0);
+        let grn = u8::from_str_radix(&hex[2..4], 16).unwrap_or(0);
+        let blu = u8::from_str_radix(&hex[4..6], 16).unwrap_or(0);
+        0.2126 * to_linear(red) + 0.7152 * to_linear(grn) + 0.0722 * to_linear(blu)
+    }
+
+    let mut darkest: Option<(&str, f32)> = None;
+    for slot in slots.iter().flatten() {
+        let lum = luminance(slot);
+        match darkest {
+            None => darkest = Some((slot, lum)),
+            Some((_, prev_lum)) if lum < prev_lum => darkest = Some((slot, lum)),
+            _ => {},
+        }
+    }
+    match darkest {
+        Some((hex, _)) => hex.to_owned(),
+        None => "#1F2937".to_owned(),
+    }
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -135,7 +410,7 @@ mod tests {
             Some("#1D4ED8"),
         ];
         let mut warnings = Vec::new();
-        let _ = infer_missing_slots(declared, &mut warnings); // todo!() body — test will fail
+        let _ = infer_missing_slots(declared, &mut warnings);
         assert_eq!(warnings.len(), 0, "no warnings when all 12 declared");
     }
 
@@ -167,7 +442,11 @@ mod tests {
         let declared: [Option<&str>; 12] = [None; 12];
         let mut warnings = Vec::new();
         let _ = infer_missing_slots(declared, &mut warnings);
-        assert_eq!(warnings.len(), 12, "12 E-BRD-003 warnings for 12 absent slots");
+        assert_eq!(
+            warnings.len(),
+            12,
+            "12 E-BRD-003 warnings for 12 absent slots"
+        );
     }
 
     /// BC-2.01.004 / AC-003 — `dk2` inferred as `acc1` when `acc1` declared.
@@ -190,7 +469,11 @@ mod tests {
         let mut warnings = Vec::new();
         let result = infer_missing_slots(declared, &mut warnings);
         // dk2 should be acc1 value when acc1 is declared
-        assert_eq!(result[2].as_ref(), "#3B82F6", "dk2 should equal acc1 when acc1 declared");
+        assert_eq!(
+            result[2].as_ref(),
+            "#3B82F6",
+            "dk2 should equal acc1 when acc1 declared"
+        );
     }
 
     /// BC-2.01.004 / AC-003 — `acc2` has hue rotated 30° from `acc1`.
@@ -215,11 +498,16 @@ mod tests {
         let result = infer_missing_slots(declared, &mut warnings);
         // acc2 must differ from acc1 and be a valid uppercase hex color
         let acc2 = result[5].as_ref();
-        assert_ne!(acc2, "#3B82F6", "acc2 must differ from acc1 after 30° rotation");
+        assert_ne!(
+            acc2, "#3B82F6",
+            "acc2 must differ from acc1 after 30° rotation"
+        );
         assert!(acc2.starts_with('#'), "acc2 must start with #");
         assert_eq!(acc2.len(), 7, "acc2 must be 7-char #RRGGBB");
         assert!(
-            acc2[1..].chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit()),
+            acc2[1..]
+                .chars()
+                .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit()),
             "acc2 must be uppercase hex: {acc2}"
         );
     }
@@ -237,7 +525,9 @@ mod tests {
                 "slot {i}: expected #RRGGBB, got '{h}'"
             );
             assert!(
-                h[1..].chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit()),
+                h[1..]
+                    .chars()
+                    .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit()),
                 "slot {i}: hex must be uppercase, got '{h}'"
             );
         }
@@ -296,7 +586,7 @@ mod tests {
 
     // ─── New behavioral tests for Red Gate ────────────────────────────────────
 
-    /// BC-2.01.004 — all 12 slots provided → ColorScheme identical to input;
+    /// BC-2.01.004 — all 12 slots provided → `ColorScheme` identical to input;
     /// zero warnings emitted (EC-003).
     #[test]
     fn test_bc_2_01_004_all_12_slots_provided_no_change() {
@@ -317,13 +607,21 @@ mod tests {
         let mut warnings = Vec::new();
         let result = infer_missing_slots(declared, &mut warnings);
         // Zero warnings (EC-003: all 12 declared)
-        assert_eq!(warnings.len(), 0, "no E-BRD-003 warnings when all 12 declared");
+        assert_eq!(
+            warnings.len(),
+            0,
+            "no E-BRD-003 warnings when all 12 declared"
+        );
         // Returned values equal the declared input
         assert_eq!(result[0].as_ref(), "#1F2937", "dk1 must be unchanged");
         assert_eq!(result[1].as_ref(), "#FFFFFF", "lt1 must be unchanged");
         assert_eq!(result[4].as_ref(), "#3B82F6", "acc1 must be unchanged");
         assert_eq!(result[10].as_ref(), "#2563EB", "hlink must be unchanged");
-        assert_eq!(result[11].as_ref(), "#1D4ED8", "fol_hlink must be unchanged");
+        assert_eq!(
+            result[11].as_ref(),
+            "#1D4ED8",
+            "fol_hlink must be unchanged"
+        );
     }
 
     /// BC-2.01.004 / AC-003 — `lt2` is always `"#F9FAFB"` when absent (96% lightness
@@ -346,7 +644,11 @@ mod tests {
         ];
         let mut warnings = Vec::new();
         let result = infer_missing_slots(declared, &mut warnings);
-        assert_eq!(result[3].as_ref(), "#F9FAFB", "lt2 must be inferred as #F9FAFB");
+        assert_eq!(
+            result[3].as_ref(),
+            "#F9FAFB",
+            "lt2 must be inferred as #F9FAFB"
+        );
     }
 
     /// BC-2.01.004 / AC-003 — `dk1` inferred as darkest declared color when absent;
@@ -358,7 +660,10 @@ mod tests {
         let result = infer_missing_slots(declared, &mut warnings);
         // dk1 must use fallback when no colors at all
         let dk1 = result[0].as_ref();
-        assert_eq!(dk1, "#1F2937", "dk1 fallback when all slots absent must be #1F2937");
+        assert_eq!(
+            dk1, "#1F2937",
+            "dk1 fallback when all slots absent must be #1F2937"
+        );
     }
 
     /// BC-2.01.004 invariant — inference is deterministic (same input → same output).
@@ -418,7 +723,10 @@ mod tests {
         assert!(hlink.starts_with('#'), "hlink must start with #");
         assert_eq!(hlink.len(), 7, "hlink must be 7-char #RRGGBB");
         // Must be different from acc1 (darkened)
-        assert_ne!(hlink, "#3B82F6", "hlink must differ from acc1 (should be darkened)");
+        assert_ne!(
+            hlink, "#3B82F6",
+            "hlink must differ from acc1 (should be darkened)"
+        );
     }
 
     /// BC-2.01.004 — missing `[colors]` section (all None) produces 12 E-BRD-003
@@ -444,6 +752,7 @@ mod tests {
 
     /// BC-2.01.004 — acc2..acc6 are generated from acc1 with 30°/60°/90°/120°/150° rotations.
     #[test]
+    #[allow(clippy::similar_names)]
     fn test_bc_2_01_004_infer_missing_acc_slots_from_acc1() {
         let declared: [Option<&str>; 12] = [
             Some("#1F2937"),
@@ -465,14 +774,20 @@ mod tests {
         assert_eq!(acc1, "#3B82F6", "acc1 must not be changed");
         // acc2 (index 5) through acc6 (index 9) must each be distinct from acc1
         // and valid uppercase hex
-        for idx in 5..=9 {
-            let acc = result[idx].as_ref();
-            assert_ne!(acc, acc1, "acc slot {idx} must differ from acc1");
-            assert!(acc.starts_with('#'), "acc slot {idx} must start with #");
-            assert_eq!(acc.len(), 7, "acc slot {idx} must be 7-char #RRGGBB");
+        for (idx, slot) in result[5..=9].iter().enumerate() {
+            let slot_idx = idx + 5;
+            let acc = slot.as_ref();
+            assert_ne!(acc, acc1, "acc slot {slot_idx} must differ from acc1");
             assert!(
-                acc[1..].chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit()),
-                "acc slot {idx} must be uppercase hex"
+                acc.starts_with('#'),
+                "acc slot {slot_idx} must start with #"
+            );
+            assert_eq!(acc.len(), 7, "acc slot {slot_idx} must be 7-char #RRGGBB");
+            assert!(
+                acc[1..]
+                    .chars()
+                    .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit()),
+                "acc slot {slot_idx} must be uppercase hex"
             );
         }
         // acc2 through acc6 must also all be distinct from each other

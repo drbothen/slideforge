@@ -28,12 +28,22 @@
 //! | Missing `[logo]` section | `E-BRD-001` via `BrandError::LogoRequired` | fatal (exit 4) |
 //! | Absent color slot | [`BrandError::MissingColorSlot`] | warning (exit 0) |
 
+use std::sync::Arc;
+
 use slideforge_plugin_api::BrandProvider;
 use slideforge_plugin_api::BrandSource;
 use slideforge_types::Brand;
 
 use crate::error::BrandError;
-use crate::template::BrandTemplate;
+use crate::inference;
+use crate::layout_xml::{
+    HANDOUT_MASTER_STUB, NOTES_MASTER_STUB, generate_content_types_layout_entries,
+    serialize_layout_to_xml,
+};
+use crate::layouts::generate_all_layouts;
+use crate::template::{
+    BrandFonts, BrandTemplate, COLOR_SLOT_NAMES, ColorSlot, ColorValue, MasterIds,
+};
 use crate::toml_schema::BrandConfig;
 
 // ─── BrandSynthesizer ─────────────────────────────────────────────────────────
@@ -69,11 +79,20 @@ impl BrandSynthesizer {
     ///
     /// # Errors
     ///
-    /// - [`BrandError::FileNotFound`] if `path` does not exist.
-    /// - [`BrandError::ParseError`] if the file content is not valid TOML.
+    /// - [`BrandError::TomlReadError`] if `path` does not exist or cannot be read.
+    /// - [`BrandError::TomlParseError`] if the file content is not valid TOML.
     /// - Propagates all errors from [`BrandSynthesizer::synthesize`].
-    pub fn load_from_toml(_path: &str) -> Result<BrandTemplate, BrandError> {
-        todo!()
+    pub fn load_from_toml(path: &str) -> Result<BrandTemplate, BrandError> {
+        let content = std::fs::read_to_string(path).map_err(|e| BrandError::TomlReadError {
+            path: Arc::from(path),
+            reason: Arc::from(e.to_string().as_str()),
+        })?;
+        let config: BrandConfig =
+            toml::from_str(&content).map_err(|e| BrandError::TomlParseError {
+                path: Arc::from(path),
+                reason: Arc::from(e.to_string().as_str()),
+            })?;
+        Self::synthesize(&config)
     }
 
     /// Synthesize a [`BrandTemplate`] from an already-parsed [`BrandConfig`].
@@ -93,9 +112,86 @@ impl BrandSynthesizer {
     /// Returns `Err(BrandError)` for fatal conditions (e.g., missing logo path).
     /// Color slot inference warnings are logged via `tracing::warn!` and do NOT
     /// cause an error return — build continues with inferred values.
-    pub fn synthesize(_config: &BrandConfig) -> Result<BrandTemplate, BrandError> {
-        todo!()
+    pub fn synthesize(config: &BrandConfig) -> Result<BrandTemplate, BrandError> {
+        // Step 1: Validate required fields (AC-004 — logo required)
+        if config.logo.is_none() {
+            return Err(BrandError::LogoRequired);
+        }
+
+        // Step 2: Build 12-slot color palette (inference)
+        let declared = config.colors.as_slot_array();
+        let mut warnings: Vec<BrandError> = Vec::new();
+        let hex_slots = inference::infer_missing_slots(declared, &mut warnings);
+
+        // Log warnings (already emitted by infer_missing_slots via tracing::warn!)
+        // The warnings are pushed to `warnings` for the caller to inspect if needed,
+        // but we don't return them as errors — build continues (AC-002, AC-005).
+
+        // Build ColorSlot array from inferred hex strings
+        let colors = build_color_slots(&hex_slots);
+
+        // Step 3: Build fonts
+        let fonts = BrandFonts {
+            heading: Arc::from(config.fonts.heading.as_str()),
+            body: Arc::from(config.fonts.body.as_str()),
+        };
+
+        // Step 4: Footer text
+        let footer_text = if config.footer.text.is_empty() {
+            None
+        } else {
+            Some(Arc::from(config.footer.text.as_str()))
+        };
+
+        // Step 5: Generate 31 layout definitions
+        let layouts = generate_all_layouts(config);
+
+        // Step 6: Serialize layout XML (STORY-037 will consume these)
+        // We store serialized XML for all layouts keyed by their index.
+        // The serialized XML bytes are stored on each layout via the BrandTemplate
+        // for consumption by the PPTX exporter.
+        // NOTE: For STORY-023, the XML is generated but not stored per-layout —
+        // the PPTX exporter (STORY-037) calls serialize_layout_to_xml directly.
+        // We validate serialization works by exercising it here.
+        for layout in &layouts {
+            let _xml = serialize_layout_to_xml(layout, "rId1");
+        }
+
+        // Step 7: Generate Content_Types entries (AC-013)
+        let content_types_layout_entries =
+            Arc::from(generate_content_types_layout_entries(layouts.len()).as_str());
+
+        // Step 8: Master/handout stubs (AC-012)
+        let notes_master_stub = NOTES_MASTER_STUB.to_vec();
+        let handout_master_stub = HANDOUT_MASTER_STUB.to_vec();
+
+        // Step 9: Master IDs (AC-011)
+        let master_ids = MasterIds::default();
+
+        Ok(BrandTemplate {
+            colors,
+            fonts,
+            logo: None, // Logo path stored in config; actual bytes loaded on demand by PPTX exporter
+            footer_text,
+            layout_names: vec![],
+            layouts,
+            notes_master_stub,
+            handout_master_stub,
+            master_ids,
+            content_types_layout_entries,
+        })
     }
+}
+
+/// Build the `[ColorSlot; 12]` array from inferred hex strings.
+///
+/// Each slot is named per ECMA-376 order from `COLOR_SLOT_NAMES`.
+fn build_color_slots(hex_slots: &[Arc<str>; 12]) -> [ColorSlot; 12] {
+    // Use std::array::from_fn — stable in Rust 1.63+
+    std::array::from_fn(|i| ColorSlot {
+        name: Arc::from(COLOR_SLOT_NAMES[i]),
+        value: ColorValue::Hex(Arc::clone(&hex_slots[i])),
+    })
 }
 
 // ─── BrandProvider trait impl ─────────────────────────────────────────────────
@@ -117,11 +213,14 @@ impl BrandProvider for BrandSynthesizer {
     /// Returns `slideforge_plugin_api::BrandError` on failure. All
     /// `slideforge_brand::BrandError` variants are mapped to the appropriate
     /// plugin-API error variant.
-    fn load(
-        &self,
-        _source: &BrandSource,
-    ) -> Result<Brand, slideforge_plugin_api::BrandError> {
-        todo!()
+    fn load(&self, _source: &BrandSource) -> Result<Brand, slideforge_plugin_api::BrandError> {
+        // Full routing implementation is in STORY-024 (Brand Extraction CLI).
+        // For STORY-023, we implement the synthesizer core; the BrandProvider
+        // routing is scaffolded here and will be completed when STORY-024
+        // defines the full BrandSource routing contract.
+        Err(slideforge_plugin_api::BrandError::ValidationError {
+            message: "BrandProvider::load routing not yet implemented — see STORY-024".to_owned(),
+        })
     }
 }
 
@@ -130,7 +229,7 @@ impl BrandProvider for BrandSynthesizer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::toml_schema::{ColorConfig, FooterConfig, FontConfig, LogoConfig};
+    use crate::toml_schema::{ColorConfig, FontConfig, FooterConfig, LogoConfig};
 
     /// Construct a minimal config directly without calling todo!() helpers.
     fn minimal_config() -> BrandConfig {
@@ -205,9 +304,12 @@ mod tests {
             },
         };
         let result = BrandSynthesizer::synthesize(&config);
-        assert!(result.is_err(), "synthesize must fail when logo path absent");
+        assert!(
+            result.is_err(),
+            "synthesize must fail when logo path absent"
+        );
         match result.unwrap_err() {
-            BrandError::LogoRequired => {}
+            BrandError::LogoRequired => {},
             other => panic!("expected BrandError::LogoRequired, got: {other:?}"),
         }
     }
@@ -218,10 +320,13 @@ mod tests {
         let config = full_12_color_config();
         let t1 = BrandSynthesizer::synthesize(&config)
             .expect("synthesize must succeed with full config");
-        let t2 = BrandSynthesizer::synthesize(&config)
-            .expect("second synthesize must succeed");
+        let t2 = BrandSynthesizer::synthesize(&config).expect("second synthesize must succeed");
         // Color slots must be identical
-        assert_eq!(t1.colors.len(), t2.colors.len(), "color count must be equal");
+        assert_eq!(
+            t1.colors.len(),
+            t2.colors.len(),
+            "color count must be equal"
+        );
         for i in 0..12 {
             assert_eq!(
                 t1.colors[i].hex(),
@@ -248,8 +353,7 @@ mod tests {
     #[test]
     fn test_bc_2_01_002_synthesized_template_has_12_color_slots() {
         let config = full_12_color_config();
-        let result = BrandSynthesizer::synthesize(&config)
-            .expect("synthesize must succeed");
+        let result = BrandSynthesizer::synthesize(&config).expect("synthesize must succeed");
         assert_eq!(
             result.colors.len(),
             12,
@@ -261,8 +365,7 @@ mod tests {
     #[test]
     fn test_bc_2_01_005_synthesized_template_has_31_layouts() {
         let config = full_12_color_config();
-        let result = BrandSynthesizer::synthesize(&config)
-            .expect("synthesize must succeed");
+        let result = BrandSynthesizer::synthesize(&config).expect("synthesize must succeed");
         assert_eq!(
             result.layouts.len(),
             31,
@@ -274,8 +377,7 @@ mod tests {
     #[test]
     fn test_bc_2_01_005_ac011_master_id_is_2_pow_31() {
         let config = full_12_color_config();
-        let result = BrandSynthesizer::synthesize(&config)
-            .expect("synthesize must succeed");
+        let result = BrandSynthesizer::synthesize(&config).expect("synthesize must succeed");
         assert_eq!(
             result.master_ids.master_id,
             2u32.pow(31),
@@ -287,8 +389,7 @@ mod tests {
     #[test]
     fn test_bc_2_01_005_ac011_layout_id_start_is_2_pow_31_plus_1() {
         let config = full_12_color_config();
-        let result = BrandSynthesizer::synthesize(&config)
-            .expect("synthesize must succeed");
+        let result = BrandSynthesizer::synthesize(&config).expect("synthesize must succeed");
         assert_eq!(
             result.master_ids.layout_id_start,
             2u32.pow(31) + 1,
@@ -300,8 +401,7 @@ mod tests {
     #[test]
     fn test_bc_2_01_002_ac012_notes_master_stub_present() {
         let config = full_12_color_config();
-        let result = BrandSynthesizer::synthesize(&config)
-            .expect("synthesize must succeed");
+        let result = BrandSynthesizer::synthesize(&config).expect("synthesize must succeed");
         assert!(
             !result.notes_master_stub.is_empty(),
             "notes_master_stub must be non-empty in synthesized BrandTemplate"
@@ -316,8 +416,7 @@ mod tests {
     #[test]
     fn test_bc_2_01_002_ac012_handout_master_stub_present() {
         let config = full_12_color_config();
-        let result = BrandSynthesizer::synthesize(&config)
-            .expect("synthesize must succeed");
+        let result = BrandSynthesizer::synthesize(&config).expect("synthesize must succeed");
         assert!(
             !result.handout_master_stub.is_empty(),
             "handout_master_stub must be non-empty in synthesized BrandTemplate"
@@ -358,7 +457,7 @@ mod tests {
     }
 
     /// BC-2.01.005 — synthesize with minimal (inferred) colors → all 12 color slots
-    /// populated in BrandTemplate (some inferred).
+    /// populated in `BrandTemplate` (some inferred).
     #[test]
     fn test_bc_2_01_005_synthesize_with_inferred_colors() {
         let config = minimal_config(); // only dk1, lt1, acc1 declared; 9 slots inferred
@@ -401,9 +500,9 @@ mod tests {
 
     // ─── VP-012: proptest — determinism round-trip ─────────────────────────────
 
-    /// Exercises VP-012: palette determinism under randomised BrandConfig input.
+    /// Exercises VP-012: palette determinism under randomised `BrandConfig` input.
     ///
-    /// Strategy: arbitrary optional hex color strings → BrandConfig → synthesize
+    /// Strategy: arbitrary optional hex color strings → `BrandConfig` → synthesize
     /// twice with the same config → assert equal color hex values in both results.
     ///
     /// Generator produces valid `"#RRGGBB"` strings with uppercase hex digits to
@@ -441,10 +540,7 @@ mod tests {
 
         /// Generate an optional hex color (Some or None with equal probability).
         fn arb_opt_hex() -> impl Strategy<Value = Option<String>> {
-            prop_oneof![
-                Just(None),
-                arb_hex_color().prop_map(Some),
-            ]
+            prop_oneof![Just(None), arb_hex_color().prop_map(Some),]
         }
 
         proptest! {

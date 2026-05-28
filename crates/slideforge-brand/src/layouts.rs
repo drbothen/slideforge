@@ -116,6 +116,104 @@ pub struct LayoutPlaceholder {
     pub cy: i64,
 }
 
+// ─── EMU constants ────────────────────────────────────────────────────────────
+
+/// Standard title placeholder position and size (`PowerPoint` defaults, 16:9).
+const TITLE_X: i64 = 457_200;
+const TITLE_Y: i64 = 274_638;
+const TITLE_CX: i64 = 8_229_600;
+const TITLE_CY: i64 = 1_143_000;
+
+/// Standard body/content placeholder position and size.
+const BODY_X: i64 = 457_200;
+const BODY_Y: i64 = 1_600_200;
+const BODY_CX: i64 = 8_229_600;
+const BODY_CY: i64 = 3_543_300;
+
+/// Left half content (for two-column layouts): x=457200, cx=3962400
+const LEFT_X: i64 = 457_200;
+const LEFT_CX: i64 = 3_962_400;
+
+/// Right half content: x=4724400, cx=3962400
+const RIGHT_X: i64 = 4_724_400;
+const RIGHT_CX: i64 = 3_962_400;
+
+/// Two-column body Y and height.
+const TWO_COL_Y: i64 = 1_600_200;
+const TWO_COL_CY: i64 = 3_543_300;
+
+// ─── Builder helpers ──────────────────────────────────────────────────────────
+
+/// Build a title placeholder.
+fn title_ph(ph_type: &str, name: &str) -> LayoutPlaceholder {
+    LayoutPlaceholder {
+        ph_type: Arc::from(ph_type),
+        idx: 0,
+        accessibility_name: Arc::from(name),
+        x: TITLE_X,
+        y: TITLE_Y,
+        cx: TITLE_CX,
+        cy: TITLE_CY,
+    }
+}
+
+/// Build a body placeholder.
+fn body_ph(idx: u32, name: &str) -> LayoutPlaceholder {
+    LayoutPlaceholder {
+        ph_type: Arc::from("body"),
+        idx,
+        accessibility_name: Arc::from(name),
+        x: BODY_X,
+        y: BODY_Y,
+        cx: BODY_CX,
+        cy: BODY_CY,
+    }
+}
+
+/// Build a light (no color override) layout.
+fn light_layout(
+    index: usize,
+    name: &str,
+    ooxml_type: &str,
+    placeholders: Vec<LayoutPlaceholder>,
+) -> SlideLayoutDef {
+    SlideLayoutDef {
+        index,
+        name: Arc::from(name),
+        ooxml_type: Some(Arc::from(ooxml_type)),
+        placeholders,
+        has_color_override: false,
+        color_override_bg: None,
+        color_override_tx: None,
+    }
+}
+
+/// Build a custom (no OOXML type) light layout.
+fn custom_layout(index: usize, name: &str, placeholders: Vec<LayoutPlaceholder>) -> SlideLayoutDef {
+    SlideLayoutDef {
+        index,
+        name: Arc::from(name),
+        ooxml_type: None,
+        placeholders,
+        has_color_override: false,
+        color_override_bg: None,
+        color_override_tx: None,
+    }
+}
+
+/// Build a dark custom layout (with clrMapOvr).
+fn dark_layout(index: usize, name: &str, placeholders: Vec<LayoutPlaceholder>) -> SlideLayoutDef {
+    SlideLayoutDef {
+        index,
+        name: Arc::from(name),
+        ooxml_type: None,
+        placeholders,
+        has_color_override: true,
+        color_override_bg: Some(Arc::from("dk2")),
+        color_override_tx: Some(Arc::from("lt1")),
+    }
+}
+
 // ─── Public entry point ───────────────────────────────────────────────────────
 
 /// Generate all 31 slide layout definitions.
@@ -125,7 +223,8 @@ pub struct LayoutPlaceholder {
 /// are custom `SF *` layouts.
 ///
 /// `config` is used to parameterize layout geometry or color choices in the
-/// future; the current stub ignores it.
+/// future; the current implementation ignores it (layouts use standard
+/// `PowerPoint` default positions).
 ///
 /// # Contract
 ///
@@ -134,9 +233,528 @@ pub struct LayoutPlaceholder {
 /// - `result[11..31]` all have names starting with `"SF "` (BC-2.01.005 postcondition 3)
 /// - `result[6].placeholders.is_empty()` (Blank layout — AC-010)
 /// - `result[11].has_color_override && result[21].has_color_override` (AC-009)
+// The body is a declarative data initialiser for 31 layout definitions.
+// Splitting it into sub-functions would add artificial indirection without
+// improving readability. The line-count lint is suppressed here deliberately.
+#[allow(clippy::too_many_lines)]
 #[must_use]
 pub fn generate_all_layouts(_config: &BrandConfig) -> Vec<SlideLayoutDef> {
-    todo!()
+    vec![
+        // ── Standard layouts (SL-01..SL-11) ──────────────────────────────────
+
+        // SL-01: Title Slide
+        light_layout(
+            1,
+            "Title Slide",
+            "title",
+            vec![
+                title_ph("ctrTitle", "Title Placeholder"),
+                LayoutPlaceholder {
+                    ph_type: Arc::from("subTitle"),
+                    idx: 1,
+                    accessibility_name: Arc::from("Subtitle Placeholder"),
+                    x: TITLE_X,
+                    y: 1_600_200,
+                    cx: TITLE_CX,
+                    cy: 914_400,
+                },
+            ],
+        ),
+        // SL-02: Title and Content
+        light_layout(
+            2,
+            "Title and Content",
+            "obj",
+            vec![
+                title_ph("title", "Title"),
+                body_ph(1, "Content Placeholder"),
+            ],
+        ),
+        // SL-03: Section Header
+        light_layout(
+            3,
+            "Section Header",
+            "secHead",
+            vec![
+                title_ph("title", "Section Title"),
+                LayoutPlaceholder {
+                    ph_type: Arc::from("body"),
+                    idx: 1,
+                    accessibility_name: Arc::from("Section Description"),
+                    x: TITLE_X,
+                    y: 1_600_200,
+                    cx: TITLE_CX,
+                    cy: 914_400,
+                },
+            ],
+        ),
+        // SL-04: Two Content
+        light_layout(
+            4,
+            "Two Content",
+            "twoObj",
+            vec![
+                title_ph("title", "Title"),
+                LayoutPlaceholder {
+                    ph_type: Arc::from("body"),
+                    idx: 1,
+                    accessibility_name: Arc::from("Left Content"),
+                    x: LEFT_X,
+                    y: TWO_COL_Y,
+                    cx: LEFT_CX,
+                    cy: TWO_COL_CY,
+                },
+                LayoutPlaceholder {
+                    ph_type: Arc::from("body"),
+                    idx: 2,
+                    accessibility_name: Arc::from("Right Content"),
+                    x: RIGHT_X,
+                    y: TWO_COL_Y,
+                    cx: RIGHT_CX,
+                    cy: TWO_COL_CY,
+                },
+            ],
+        ),
+        // SL-05: Comparison
+        light_layout(
+            5,
+            "Comparison",
+            "twoColTx",
+            vec![
+                title_ph("title", "Title"),
+                LayoutPlaceholder {
+                    ph_type: Arc::from("body"),
+                    idx: 1,
+                    accessibility_name: Arc::from("Left Header"),
+                    x: LEFT_X,
+                    y: TWO_COL_Y,
+                    cx: LEFT_CX,
+                    cy: 571_500,
+                },
+                LayoutPlaceholder {
+                    ph_type: Arc::from("body"),
+                    idx: 2,
+                    accessibility_name: Arc::from("Left Content"),
+                    x: LEFT_X,
+                    y: 2_286_000,
+                    cx: LEFT_CX,
+                    cy: 2_743_200,
+                },
+                LayoutPlaceholder {
+                    ph_type: Arc::from("body"),
+                    idx: 3,
+                    accessibility_name: Arc::from("Right Header"),
+                    x: RIGHT_X,
+                    y: TWO_COL_Y,
+                    cx: RIGHT_CX,
+                    cy: 571_500,
+                },
+                LayoutPlaceholder {
+                    ph_type: Arc::from("body"),
+                    idx: 4,
+                    accessibility_name: Arc::from("Right Content"),
+                    x: RIGHT_X,
+                    y: 2_286_000,
+                    cx: RIGHT_CX,
+                    cy: 2_743_200,
+                },
+            ],
+        ),
+        // SL-06: Title Only
+        light_layout(
+            6,
+            "Title Only",
+            "titleOnly",
+            vec![title_ph("title", "Title")],
+        ),
+        // SL-07: Blank — zero placeholders (AC-010)
+        light_layout(7, "Blank", "blank", vec![]),
+        // SL-08: Content with Caption
+        light_layout(
+            8,
+            "Content with Caption",
+            "objTx",
+            vec![
+                title_ph("title", "Title"),
+                LayoutPlaceholder {
+                    ph_type: Arc::from("body"),
+                    idx: 1,
+                    accessibility_name: Arc::from("Content Area"),
+                    x: LEFT_X,
+                    y: BODY_Y,
+                    cx: 5_486_400,
+                    cy: BODY_CY,
+                },
+                LayoutPlaceholder {
+                    ph_type: Arc::from("body"),
+                    idx: 2,
+                    accessibility_name: Arc::from("Caption"),
+                    x: 6_096_000,
+                    y: BODY_Y,
+                    cx: 2_590_800,
+                    cy: BODY_CY,
+                },
+            ],
+        ),
+        // SL-09: Picture with Caption
+        light_layout(
+            9,
+            "Picture with Caption",
+            "picTx",
+            vec![
+                title_ph("ctrTitle", "Picture Title"),
+                LayoutPlaceholder {
+                    ph_type: Arc::from("pic"),
+                    idx: 1,
+                    accessibility_name: Arc::from("Picture Placeholder"),
+                    x: TITLE_X,
+                    y: 1_371_600,
+                    cx: TITLE_CX,
+                    cy: 2_743_200,
+                },
+                LayoutPlaceholder {
+                    ph_type: Arc::from("body"),
+                    idx: 2,
+                    accessibility_name: Arc::from("Caption Text"),
+                    x: TITLE_X,
+                    y: 4_343_400,
+                    cx: TITLE_CX,
+                    cy: 571_500,
+                },
+            ],
+        ),
+        // SL-10: Vertical Title and Text
+        light_layout(
+            10,
+            "Vertical Title and Text",
+            "vertTitleAndTx",
+            vec![
+                LayoutPlaceholder {
+                    ph_type: Arc::from("title"),
+                    idx: 0,
+                    accessibility_name: Arc::from("Vertical Title"),
+                    x: 7_315_200,
+                    y: TITLE_Y,
+                    cx: 1_371_600,
+                    cy: BODY_CY,
+                },
+                LayoutPlaceholder {
+                    ph_type: Arc::from("body"),
+                    idx: 1,
+                    accessibility_name: Arc::from("Vertical Content"),
+                    x: TITLE_X,
+                    y: TITLE_Y,
+                    cx: 6_553_200,
+                    cy: BODY_CY,
+                },
+            ],
+        ),
+        // SL-11: Vertical Text
+        light_layout(
+            11,
+            "Vertical Text",
+            "vertTx",
+            vec![LayoutPlaceholder {
+                ph_type: Arc::from("body"),
+                idx: 1,
+                accessibility_name: Arc::from("Vertical Text Area"),
+                x: TITLE_X,
+                y: TITLE_Y,
+                cx: TITLE_CX,
+                cy: BODY_CY,
+            }],
+        ),
+        // ── Custom layouts (CL-01..CL-20) ─────────────────────────────────────
+
+        // CL-01: SF Section Divider (DARK LAYOUT)
+        dark_layout(
+            12,
+            "SF Section Divider",
+            vec![
+                title_ph("title", "Section Title"),
+                LayoutPlaceholder {
+                    ph_type: Arc::from("body"),
+                    idx: 1,
+                    accessibility_name: Arc::from("Section Subtitle"),
+                    x: TITLE_X,
+                    y: 1_600_200,
+                    cx: TITLE_CX,
+                    cy: 914_400,
+                },
+            ],
+        ),
+        // CL-02: SF Stat Grid
+        custom_layout(
+            13,
+            "SF Stat Grid",
+            vec![
+                title_ph("title", "Stats Title"),
+                LayoutPlaceholder {
+                    ph_type: Arc::from("body"),
+                    idx: 1,
+                    accessibility_name: Arc::from("Statistics Grid"),
+                    x: BODY_X,
+                    y: BODY_Y,
+                    cx: BODY_CX,
+                    cy: BODY_CY,
+                },
+            ],
+        ),
+        // CL-03: SF Quote
+        custom_layout(
+            14,
+            "SF Quote",
+            vec![
+                LayoutPlaceholder {
+                    ph_type: Arc::from("body"),
+                    idx: 1,
+                    accessibility_name: Arc::from("Quote Text"),
+                    x: TITLE_X,
+                    y: 1_371_600,
+                    cx: TITLE_CX,
+                    cy: 2_286_000,
+                },
+                LayoutPlaceholder {
+                    ph_type: Arc::from("body"),
+                    idx: 2,
+                    accessibility_name: Arc::from("Quote Attribution"),
+                    x: TITLE_X,
+                    y: 3_886_200,
+                    cx: TITLE_CX,
+                    cy: 571_500,
+                },
+            ],
+        ),
+        // CL-04: SF Timeline
+        custom_layout(
+            15,
+            "SF Timeline",
+            vec![
+                title_ph("title", "Timeline Title"),
+                LayoutPlaceholder {
+                    ph_type: Arc::from("body"),
+                    idx: 1,
+                    accessibility_name: Arc::from("Timeline Content"),
+                    x: BODY_X,
+                    y: BODY_Y,
+                    cx: BODY_CX,
+                    cy: BODY_CY,
+                },
+            ],
+        ),
+        // CL-05: SF Agenda
+        custom_layout(
+            16,
+            "SF Agenda",
+            vec![
+                title_ph("title", "Agenda Title"),
+                body_ph(1, "Agenda Items"),
+            ],
+        ),
+        // CL-06: SF TOC
+        custom_layout(
+            17,
+            "SF TOC",
+            vec![
+                title_ph("title", "Table of Contents Title"),
+                body_ph(1, "TOC Items"),
+            ],
+        ),
+        // CL-07: SF Bio
+        custom_layout(
+            18,
+            "SF Bio",
+            vec![
+                title_ph("title", "Name"),
+                LayoutPlaceholder {
+                    ph_type: Arc::from("pic"),
+                    idx: 1,
+                    accessibility_name: Arc::from("Profile Photo"),
+                    x: LEFT_X,
+                    y: BODY_Y,
+                    cx: LEFT_CX,
+                    cy: LEFT_CX, // square crop
+                },
+                LayoutPlaceholder {
+                    ph_type: Arc::from("body"),
+                    idx: 2,
+                    accessibility_name: Arc::from("Biography Text"),
+                    x: RIGHT_X,
+                    y: BODY_Y,
+                    cx: RIGHT_CX,
+                    cy: TWO_COL_CY,
+                },
+            ],
+        ),
+        // CL-08: SF Team Grid
+        custom_layout(
+            19,
+            "SF Team Grid",
+            vec![title_ph("title", "Team Title"), body_ph(1, "Team Members")],
+        ),
+        // CL-09: SF Comparison Table
+        custom_layout(
+            20,
+            "SF Comparison Table",
+            vec![
+                title_ph("title", "Comparison Title"),
+                body_ph(1, "Comparison Table"),
+            ],
+        ),
+        // CL-10: SF Full-Bleed Image
+        custom_layout(
+            21,
+            "SF Full-Bleed Image",
+            vec![
+                LayoutPlaceholder {
+                    ph_type: Arc::from("pic"),
+                    idx: 1,
+                    accessibility_name: Arc::from("Full-Bleed Image"),
+                    x: 0,
+                    y: 0,
+                    cx: 9_144_000,
+                    cy: 5_143_500,
+                },
+                title_ph("title", "Image Caption"),
+            ],
+        ),
+        // CL-11: SF End Slide (DARK LAYOUT)
+        dark_layout(
+            22,
+            "SF End Slide",
+            vec![
+                title_ph("ctrTitle", "Closing Title"),
+                LayoutPlaceholder {
+                    ph_type: Arc::from("body"),
+                    idx: 1,
+                    accessibility_name: Arc::from("Closing Message"),
+                    x: TITLE_X,
+                    y: 1_828_800,
+                    cx: TITLE_CX,
+                    cy: 1_143_000,
+                },
+            ],
+        ),
+        // CL-12: SF Data
+        custom_layout(
+            23,
+            "SF Data",
+            vec![title_ph("title", "Data Title"), body_ph(1, "Data Content")],
+        ),
+        // CL-13: SF Diagram
+        custom_layout(
+            24,
+            "SF Diagram",
+            vec![
+                title_ph("title", "Diagram Title"),
+                LayoutPlaceholder {
+                    ph_type: Arc::from("body"),
+                    idx: 1,
+                    accessibility_name: Arc::from("Diagram Area"),
+                    x: BODY_X,
+                    y: BODY_Y,
+                    cx: BODY_CX,
+                    cy: BODY_CY,
+                },
+            ],
+        ),
+        // CL-14: SF Chart
+        custom_layout(
+            25,
+            "SF Chart",
+            vec![
+                title_ph("title", "Chart Title"),
+                LayoutPlaceholder {
+                    ph_type: Arc::from("body"),
+                    idx: 1,
+                    accessibility_name: Arc::from("Chart Area"),
+                    x: BODY_X,
+                    y: BODY_Y,
+                    cx: BODY_CX,
+                    cy: BODY_CY,
+                },
+            ],
+        ),
+        // CL-15: SF Map
+        custom_layout(
+            26,
+            "SF Map",
+            vec![
+                title_ph("title", "Map Title"),
+                LayoutPlaceholder {
+                    ph_type: Arc::from("body"),
+                    idx: 1,
+                    accessibility_name: Arc::from("Map Area"),
+                    x: BODY_X,
+                    y: BODY_Y,
+                    cx: BODY_CX,
+                    cy: BODY_CY,
+                },
+            ],
+        ),
+        // CL-16: SF Risk Register
+        custom_layout(
+            27,
+            "SF Risk Register",
+            vec![
+                title_ph("title", "Risk Register Title"),
+                body_ph(1, "Risk Items"),
+            ],
+        ),
+        // CL-17: SF Executive Summary
+        custom_layout(
+            28,
+            "SF Executive Summary",
+            vec![
+                title_ph("title", "Executive Summary Title"),
+                body_ph(1, "Summary Content"),
+            ],
+        ),
+        // CL-18: SF Two Column
+        custom_layout(
+            29,
+            "SF Two Column",
+            vec![
+                title_ph("title", "Title"),
+                LayoutPlaceholder {
+                    ph_type: Arc::from("body"),
+                    idx: 1,
+                    accessibility_name: Arc::from("Left Column"),
+                    x: LEFT_X,
+                    y: TWO_COL_Y,
+                    cx: LEFT_CX,
+                    cy: TWO_COL_CY,
+                },
+                LayoutPlaceholder {
+                    ph_type: Arc::from("body"),
+                    idx: 2,
+                    accessibility_name: Arc::from("Right Column"),
+                    x: RIGHT_X,
+                    y: TWO_COL_Y,
+                    cx: RIGHT_CX,
+                    cy: TWO_COL_CY,
+                },
+            ],
+        ),
+        // CL-19: SF Methodology
+        custom_layout(
+            30,
+            "SF Methodology",
+            vec![
+                title_ph("title", "Methodology Title"),
+                body_ph(1, "Methodology Steps"),
+            ],
+        ),
+        // CL-20: SF Appendix
+        custom_layout(
+            31,
+            "SF Appendix",
+            vec![
+                title_ph("title", "Appendix Title"),
+                body_ph(1, "Appendix Content"),
+            ],
+        ),
+    ]
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -145,8 +763,8 @@ pub fn generate_all_layouts(_config: &BrandConfig) -> Vec<SlideLayoutDef> {
 mod tests {
     use super::*;
 
-    /// Build a BrandConfig directly (without calling default_minimal() which is
-    /// todo!()) so layout tests can run purely against generate_all_layouts().
+    /// Build a `BrandConfig` directly (without calling `default_minimal()` which is
+    /// `todo!()`) so layout tests can run purely against `generate_all_layouts()`.
     fn minimal_config_direct() -> BrandConfig {
         BrandConfig {
             colors: crate::toml_schema::ColorConfig {
@@ -207,7 +825,7 @@ mod tests {
         }
     }
 
-    /// BC-2.01.005 postcondition 2 — standard layouts have correct ECMA-376 ooxml_type values.
+    /// BC-2.01.005 postcondition 2 — standard layouts have correct ECMA-376 `ooxml_type` values.
     #[test]
     fn test_bc_2_01_005_standard_layouts_have_ooxml_types() {
         let config = minimal_config_direct();
@@ -411,13 +1029,12 @@ mod tests {
             for ph in &layout.placeholders {
                 let name = ph.accessibility_name.as_ref();
                 // Must not match the forbidden "Shape N" pattern
-                let is_shape_n = name.starts_with("Shape ")
-                    && name[6..].chars().all(|c| c.is_ascii_digit());
+                let is_shape_n =
+                    name.starts_with("Shape ") && name[6..].chars().all(|c| c.is_ascii_digit());
                 assert!(
                     !is_shape_n,
                     "layout index {i} ('{}') has a placeholder with forbidden name '{}' (must not be 'Shape N')",
-                    layout.name,
-                    name
+                    layout.name, name
                 );
                 // Accessibility name must be non-empty
                 assert!(

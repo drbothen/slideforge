@@ -115,7 +115,6 @@ pub enum BrandError {
     },
 
     // ─── STORY-023 synthesis variants ─────────────────────────────────────────
-
     /// `E-BRD-001` (synthesis) — the `[logo]` section is absent in a
     /// synthesized brand's `brand.toml`.
     ///
@@ -132,9 +131,7 @@ pub enum BrandError {
     /// `E-BRD-001` (synthesis) — the `brand.toml` file could not be read.
     ///
     /// Fatal error (exit 4). `reason` carries the underlying I/O error message.
-    #[error(
-        "E-BRD-001: Cannot read brand.toml at '{path}': {reason}."
-    )]
+    #[error("E-BRD-001: Cannot read brand.toml at '{path}': {reason}.")]
     TomlReadError {
         /// Path of the file that could not be read.
         path: Arc<str>,

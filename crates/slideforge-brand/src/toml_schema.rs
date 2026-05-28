@@ -78,7 +78,18 @@ impl BrandConfig {
     /// inferred.
     #[must_use]
     pub fn default_minimal() -> Self {
-        todo!()
+        Self {
+            colors: ColorConfig {
+                dk1: Some("#1F2937".to_owned()),
+                acc1: Some("#3B82F6".to_owned()),
+                ..Default::default()
+            },
+            fonts: FontConfig::default(),
+            logo: Some(LogoConfig {
+                path: "brand.assets/logo.png".to_owned(),
+            }),
+            footer: FooterConfig::default(),
+        }
     }
 }
 
@@ -176,7 +187,20 @@ impl ColorConfig {
     /// Order: `[dk1, lt1, dk2, lt2, acc1, acc2, acc3, acc4, acc5, acc6, hlink, fol_hlink]`.
     #[must_use]
     pub fn as_slot_array(&self) -> [Option<&str>; 12] {
-        todo!()
+        [
+            self.dk1.as_deref(),
+            self.lt1.as_deref(),
+            self.dk2.as_deref(),
+            self.lt2.as_deref(),
+            self.acc1.as_deref(),
+            self.acc2.as_deref(),
+            self.acc3.as_deref(),
+            self.acc4.as_deref(),
+            self.acc5.as_deref(),
+            self.acc6.as_deref(),
+            self.hlink.as_deref(),
+            self.fol_hlink.as_deref(),
+        ]
     }
 }
 
@@ -203,7 +227,10 @@ pub struct FontConfig {
 
 impl Default for FontConfig {
     fn default() -> Self {
-        todo!()
+        Self {
+            heading: default_heading_font(),
+            body: default_body_font(),
+        }
     }
 }
 
@@ -260,7 +287,11 @@ pub struct FooterConfig {
 
 impl Default for FooterConfig {
     fn default() -> Self {
-        todo!()
+        Self {
+            text: default_footer_text(),
+            show_slide_number: default_show_slide_number(),
+            show_date: false,
+        }
     }
 }
 
@@ -315,7 +346,10 @@ mod tests {
         assert_eq!(config.colors.acc1.as_deref(), Some("#3B82F6"));
         assert_eq!(config.colors.fol_hlink.as_deref(), Some("#1D4ED8"));
         assert_eq!(config.fonts.heading.as_str(), "Aptos Display");
-        assert_eq!(config.logo.as_ref().map(|l| l.path.as_str()), Some("brand.assets/logo.png"));
+        assert_eq!(
+            config.logo.as_ref().map(|l| l.path.as_str()),
+            Some("brand.assets/logo.png")
+        );
         assert_eq!(config.footer.text.as_str(), "Confidential");
         assert!(config.footer.show_slide_number);
         assert!(!config.footer.show_date);
@@ -351,7 +385,10 @@ mod tests {
     fn test_bc_2_01_002_footer_defaults() {
         let config: BrandConfig = toml::from_str("").expect("should parse");
         assert_eq!(config.footer.text.as_str(), "");
-        assert!(config.footer.show_slide_number, "show_slide_number default is true");
+        assert!(
+            config.footer.show_slide_number,
+            "show_slide_number default is true"
+        );
         assert!(!config.footer.show_date, "show_date default is false");
     }
 
@@ -369,7 +406,7 @@ mod tests {
 
     // ─── New behavioral tests for Red Gate ────────────────────────────────────
 
-    /// BC-2.01.002 — parse_full_brand_toml: all 12 color fields, fonts, logo, footer
+    /// BC-2.01.002 — `parse_full_brand_toml`: all 12 color fields, fonts, logo, footer
     /// populated correctly from a complete brand.toml.
     #[test]
     fn test_bc_2_01_002_parse_full_brand_toml() {
@@ -413,7 +450,11 @@ mod tests {
         assert_eq!(config.colors.acc5.as_deref(), Some("#8B5CF6"), "acc5");
         assert_eq!(config.colors.acc6.as_deref(), Some("#EC4899"), "acc6");
         assert_eq!(config.colors.hlink.as_deref(), Some("#2563EB"), "hlink");
-        assert_eq!(config.colors.fol_hlink.as_deref(), Some("#1D4ED8"), "fol_hlink");
+        assert_eq!(
+            config.colors.fol_hlink.as_deref(),
+            Some("#1D4ED8"),
+            "fol_hlink"
+        );
         // Fonts
         assert_eq!(config.fonts.heading.as_str(), "Aptos Display");
         assert_eq!(config.fonts.body.as_str(), "Aptos");
@@ -428,12 +469,16 @@ mod tests {
         assert!(!config.footer.show_date);
     }
 
-    /// BC-2.01.002 — parse_minimal_brand_toml: only `[colors] dk1` → other fields None/default.
+    /// BC-2.01.002 — `parse_minimal_brand_toml`: only `[colors] dk1` → other fields None/default.
     #[test]
     fn test_bc_2_01_002_parse_minimal_brand_toml() {
         let toml_str = "[colors]\ndk1 = \"#1F2937\"\n";
         let config: BrandConfig = toml::from_str(toml_str).expect("should parse");
-        assert_eq!(config.colors.dk1.as_deref(), Some("#1F2937"), "dk1 must be set");
+        assert_eq!(
+            config.colors.dk1.as_deref(),
+            Some("#1F2937"),
+            "dk1 must be set"
+        );
         // All other color slots are absent
         assert!(config.colors.lt1.is_none(), "lt1 should be None");
         assert!(config.colors.acc1.is_none(), "acc1 should be None");
@@ -445,10 +490,8 @@ mod tests {
         assert!(config.logo.is_none(), "logo should be None when absent");
     }
 
-    /// BC-2.01.002 — as_slot_array returns the 12 slots in ECMA-376 order.
-    /// This test exercises the todo!() body — it must panic (Red Gate).
+    /// BC-2.01.002 — `as_slot_array` returns the 12 slots in ECMA-376 order.
     #[test]
-    #[should_panic(expected = "not yet implemented")]
     fn test_bc_2_01_002_color_config_as_slot_array_returns_12_in_order() {
         let toml_str = concat!(
             "[colors]\n",
@@ -475,14 +518,18 @@ mod tests {
         assert_eq!(slots[11], Some("#1D4ED8"), "index 11 = fol_hlink");
     }
 
-    /// BC-2.01.002 — `default_minimal()` constructs a BrandConfig usable by tests.
-    /// This test exercises the todo!() body — it must panic (Red Gate).
+    /// BC-2.01.002 — `default_minimal()` constructs a `BrandConfig` usable by tests.
     #[test]
-    #[should_panic(expected = "not yet implemented")]
     fn test_bc_2_01_002_default_minimal_is_callable() {
         let config = BrandConfig::default_minimal();
         // After implementation: acc1 = "#3B82F6", logo = Some(...), dk1 set
-        assert!(config.colors.acc1.is_some(), "default_minimal must have acc1");
-        assert!(config.logo.is_some(), "default_minimal must have a logo path");
+        assert!(
+            config.colors.acc1.is_some(),
+            "default_minimal must have acc1"
+        );
+        assert!(
+            config.logo.is_some(),
+            "default_minimal must have a logo path"
+        );
     }
 }
