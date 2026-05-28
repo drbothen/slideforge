@@ -109,10 +109,13 @@ Fatal for missing brand (exit 4). Warnings for inferred color slots (build conti
 | Code | Severity | Exit | Message Format | Traces To |
 |------|---------|------|---------------|-----------|
 | E-BRD-001 | broken | 4 | `Brand file not found: '<resolved-path>'. Check the template path in slideforge.toml or --template flag.` | CAP-018, FM-007 |
-| E-BRD-002 | broken | 4 | `Cannot parse brand template '<path>': <detail>. File may be corrupted or not a valid PPTX/TOML.` | CAP-018, FM-007 |
+| E-BRD-002 | broken | 4 | `Cannot parse brand template '<path>': <detail>. File may be corrupted or not a valid PPTX/DOCX.` | CAP-018, FM-007 |
 | E-BRD-003 | cosmetic | 0 | `Brand color slot '<slot>' inferred as #<hex> (derived from <source-color>). Review in brand.toml to confirm.` | DI-015, CAP-018, DEC-016 |
 | E-BRD-004 | cosmetic | 0 | `Font '<font-name>' not available on this build host. Using '<fallback>' (panose: [<class>]). Text metrics may differ.` | CAP-018, FM-009 |
-| ~~E-BRD-005~~ | ~~retired~~ | — | ~~Brand is missing required color slot '\<slot\>'. All 12 OOXML theme color slots must be populated. Add '\<slot\>' to brand.toml [colors].~~ RETIRED: brand synthesis always infers missing color slots via the derivation algorithm (BC-2.01.004, E-BRD-003 warning). No execution path produces a fatal missing-slot error — all missing slots are synthesized, never fatal. | ~~DI-015, CAP-018~~ |
+| E-BRD-005 | cosmetic | 0 | `Invalid hex color value '<value>' in brand.toml slot '<slot>'. Use 6-digit uppercase hex RGB (e.g. #3B82F6; case insensitive — uppercase or lowercase accepted).` | CAP-018, FM-007 |
+| E-BRD-007 | broken | 4 | `Logo path '<logo_path>' escapes the brand.toml directory '<brand_dir>'. The logo file must be inside (or beneath) the brand.toml directory.` | CAP-018, FM-007 |
+
+Note (E-BRD-005): The original semantic ("missing required color slot — fatal") was retired when the brand synthesis algorithm (BC-2.01.004) was designed to always infer missing slots (no execution path produces a fatal missing-slot error). The code number was subsequently reused for invalid hex color validation, added in the Pass-11 fix burst. The revised semantic is documented here; BC-2.01.004 and BC-2.01.005 describe the inference algorithm that makes the original missing-slot fatal error unreachable.
 
 ---
 
