@@ -9,11 +9,12 @@
 //!
 //! ## Design
 //!
-//! Functions return `Option<char>` rather than a fallback so that callers can
-//! decide the appropriate error behaviour for unknown names:
-//! - The PDF path renderer returns `MathError::UnsupportedSymbol`.
-//! - The `MathML` / OMML renderers fall back to emitting the command name as
-//!   literal text (preserving backwards-compatible behaviour).
+//! Functions return `Option<char>` rather than a fallback.  Callers MUST handle
+//! `None` by returning an error variant ([`slideforge_plugin_api::MathError::UnsupportedSymbol`]).
+//! All three renderers (OMML, `MathML`, PDF paths) follow this convention — they
+//! never silently fall back on unknown names.  The sole exception is the
+//! `is_text_operator` list: those command names intentionally render as multi-char
+//! Latin runs rather than a single Unicode glyph.
 
 /// Map a Greek-letter command name to its canonical Unicode scalar.
 ///
@@ -167,6 +168,90 @@ pub fn symbol_to_unicode_char(name: &str) -> Option<char> {
         "vdots" => Some('\u{22EE}'),             // ⋮
         "ddots" => Some('\u{22F1}'),             // ⋱
         _ => None,
+    }
+}
+
+/// Return `true` if `name` is a known text-based operator.
+///
+/// Text operators (`lim`, `max`, `min`, `sin`, `cos`, `tan`, `log`, `ln`,
+/// `exp`, `det`, `sup`, `inf`, `gcd`, `dim`, `ker`, `deg`, `hom`, `mod`,
+/// `cot`, `sec`, `csc`, `arcsin`, `arccos`, `arctan`) render as multiple
+/// upright Latin characters rather than as a single Unicode-symbol glyph.
+///
+/// Any operator name that is neither in this list nor in
+/// [`operator_to_unicode_char`] is unknown and all three renderers MUST return
+/// [`slideforge_plugin_api::MathError::UnsupportedSymbol`] for it.
+///
+/// This function is shared by OMML, `MathML`, and the PDF path renderer so
+/// that the text-operator list is maintained in one place.
+#[must_use]
+pub fn is_text_operator(name: &str) -> bool {
+    matches!(
+        name,
+        "lim"
+            | "max"
+            | "min"
+            | "sin"
+            | "cos"
+            | "tan"
+            | "log"
+            | "ln"
+            | "exp"
+            | "det"
+            | "sup"
+            | "inf"
+            | "gcd"
+            | "dim"
+            | "ker"
+            | "deg"
+            | "hom"
+            | "mod"
+            | "cot"
+            | "sec"
+            | "csc"
+            | "arcsin"
+            | "arccos"
+            | "arctan"
+    )
+}
+
+/// Strip LaTeX delimiter escapes so that renderers receive a bare Unicode character.
+///
+/// Renderers that produce `<mo>` (`MathML`) or attribute values (OMML) expect
+/// a raw Unicode character, not a LaTeX escape sequence. For example `\{` must
+/// become `{` and `\.` (the null delimiter) must become an empty string.
+/// Multi-char delimiters like `\langle` are mapped to their Unicode equivalents.
+///
+/// | Input       | Output |
+/// |-------------|--------|
+/// | `\{`        | `{`    |
+/// | `\}`        | `}`    |
+/// | `\.`        | `""`   |
+/// | `\|`        | `‖`    |
+/// | `\langle`   | `⟨`    |
+/// | `\rangle`   | `⟩`    |
+/// | `\lfloor`   | `⌊`    |
+/// | `\rfloor`   | `⌋`    |
+/// | `\lceil`    | `⌈`    |
+/// | `\rceil`    | `⌉`    |
+/// | `(`, `[`, etc. | unchanged |
+///
+/// This function is shared by OMML, `MathML`, and the PDF path renderer so
+/// that delimiter unescaping is consistent across all three outputs.
+#[must_use]
+pub fn unescape_delimiter(s: &str) -> &str {
+    match s {
+        "\\{" => "{",
+        "\\}" => "}",
+        "\\." | "." => "",   // null delimiter: both \left. and bare . map to empty
+        "\\|" => "\u{2016}", // ‖
+        "\\langle" => "\u{27E8}", // ⟨
+        "\\rangle" => "\u{27E9}", // ⟩
+        "\\lfloor" => "\u{230A}", // ⌊
+        "\\rfloor" => "\u{230B}", // ⌋
+        "\\lceil" => "\u{2308}", // ⌈
+        "\\rceil" => "\u{2309}", // ⌉
+        other => other,
     }
 }
 

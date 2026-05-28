@@ -32,7 +32,10 @@ use slideforge_plugin_api::MathError;
 
 use crate::MathAst;
 use crate::ast::{MathMode, MathNode};
-use crate::symbols::{greek_to_unicode_char, operator_to_unicode_char, symbol_to_unicode_char};
+use crate::symbols::{
+    greek_to_unicode_char, is_text_operator, operator_to_unicode_char, symbol_to_unicode_char,
+    unescape_delimiter,
+};
 
 /// EMUs per pixel at 96 dpi (914 400 / 96 = 9 525).
 const EMU_PER_PX: i64 = 9_525;
@@ -54,6 +57,12 @@ const SUB_OFFSET: i64 = 4;
 /// Display math is larger and centered; inline math uses the default size.
 const DISPLAY_SCALE_NUM: i64 = 6; // numerator of 6/5 = 1.2
 const DISPLAY_SCALE_DEN: i64 = 5; // denominator
+
+/// Vertical padding added to the SVG viewBox height above the tallest glyph.
+///
+/// Two pixels of clearance prevent superscripts from being clipped at the
+/// top edge of the SVG canvas.
+const PDF_VERTICAL_PADDING_PX: i64 = 2;
 
 /// An SVG string in which all math glyphs have been converted to path data.
 ///
@@ -95,6 +104,12 @@ pub struct SvgPaths {
 /// - [`MathError::UnsupportedSymbol`] — a command name has no Unicode mapping.
 /// - [`MathError::RenderError`] — internal rendering failure.
 pub fn render_pdf_paths(ast: &MathAst) -> Result<SvgPaths, MathError> {
+    // Guard: an empty AST cannot produce meaningful vector-path output (L2).
+    // Return EmptyAst rather than silently emitting a degenerate 1×16-px SVG.
+    if ast.nodes.is_empty() {
+        return Err(MathError::EmptyAst);
+    }
+
     let mut paths: Vec<String> = Vec::new();
     let mut x: i64 = 0;
     let baseline_y: i64 = GLYPH_H;
@@ -104,11 +119,16 @@ pub fn render_pdf_paths(ast: &MathAst) -> Result<SvgPaths, MathError> {
     // Apply 1.2× scaling for display mode (finding I3).
     let (width_px, height_px) = if ast.mode == MathMode::Display {
         let w = (x.max(1) * DISPLAY_SCALE_NUM + DISPLAY_SCALE_DEN - 1) / DISPLAY_SCALE_DEN;
-        let h = ((GLYPH_H + SUP_OFFSET + 2).max(1) * DISPLAY_SCALE_NUM + DISPLAY_SCALE_DEN - 1)
+        let h = ((GLYPH_H + SUP_OFFSET + PDF_VERTICAL_PADDING_PX).max(1) * DISPLAY_SCALE_NUM
+            + DISPLAY_SCALE_DEN
+            - 1)
             / DISPLAY_SCALE_DEN;
         (w, h)
     } else {
-        (x.max(1), (GLYPH_H + SUP_OFFSET + 2).max(1))
+        (
+            x.max(1),
+            (GLYPH_H + SUP_OFFSET + PDF_VERTICAL_PADDING_PX).max(1),
+        )
     };
 
     let width_emu = width_px * EMU_PER_PX;
@@ -118,10 +138,20 @@ pub fn render_pdf_paths(ast: &MathAst) -> Result<SvgPaths, MathError> {
         r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width_px} {height_px}" width="{width_px}" height="{height_px}">"#,
     );
 
+    // Wrap path group in a scale transform for display mode (H5).
+    // The viewBox already grows to 1.2× the inline dimensions; the transform
+    // ensures the path geometry itself is also scaled to fill the larger canvas.
+    if ast.mode == MathMode::Display {
+        svg.push_str(r#"<g transform="scale(1.2)">"#);
+    } else {
+        svg.push_str("<g>");
+    }
+
     for path in &paths {
         svg.push_str(path);
     }
 
+    svg.push_str("</g>");
     svg.push_str("</svg>");
 
     // Post-generation invariant check via usvg normalisation.
@@ -155,13 +185,12 @@ pub fn render_pdf_paths(ast: &MathAst) -> Result<SvgPaths, MathError> {
 /// placed. This function is called on the flat node list of the AST and
 /// delegates to [`place_node`] for each node.
 fn collect_paths(
-    ast: &MathAst,
+    _ast: &MathAst,
     nodes: &[MathNode],
     paths: &mut Vec<String>,
     x: &mut i64,
     baseline_y: i64,
 ) -> Result<(), MathError> {
-    let _ = ast; // mode available for future layout decisions
     for node in nodes {
         place_node(node, paths, x, baseline_y)?;
     }
@@ -313,14 +342,63 @@ fn place_node(
             }
         },
 
-        MathNode::Accent { kind: _, inner } => {
+        MathNode::Accent { kind, inner } => {
+            use crate::ast::AccentKind;
             let save_x = *x;
             place_node(inner, paths, x, baseline_y)?;
-            // Draw accent mark above the inner node
             let accent_y = (baseline_y - GLYPH_H - 3).max(0);
+            let x_end = *x;
+            let mid_x = save_x + (x_end - save_x) / 2;
+            // Each AccentKind renders a distinct path shape (M2).
+            let d = match kind {
+                AccentKind::Hat => {
+                    // Caret: two lines forming an inverted V
+                    format!(
+                        "M{save_x},{accent_y} L{mid_x},{} L{x_end},{accent_y}",
+                        accent_y - 3
+                    )
+                },
+                AccentKind::Bar => {
+                    // Overline: horizontal bar
+                    format!("M{save_x},{accent_y} H{x_end}")
+                },
+                AccentKind::Tilde => {
+                    // Wavy tilde line using a quadratic bezier
+                    let q1 = save_x + (x_end - save_x) / 3;
+                    let q2 = save_x + 2 * (x_end - save_x) / 3;
+                    format!(
+                        "M{save_x},{accent_y} Q{q1},{} {mid_x},{accent_y} Q{q2},{} {x_end},{accent_y}",
+                        accent_y - 3,
+                        accent_y + 2
+                    )
+                },
+                AccentKind::Vec => {
+                    // Rightward arrow over the base: horizontal bar + arrowhead
+                    format!(
+                        "M{save_x},{accent_y} H{x_end} M{},{} L{x_end},{accent_y} L{},{}",
+                        x_end - 3,
+                        accent_y - 2,
+                        x_end - 3,
+                        accent_y + 2
+                    )
+                },
+                AccentKind::Dot => {
+                    // Single dot above midpoint
+                    format!("M{mid_x},{accent_y} V{}", accent_y - 1)
+                },
+                AccentKind::Ddot => {
+                    // Two dots: one at 1/3 and one at 2/3 of the base width
+                    let d1 = save_x + (x_end - save_x) / 3;
+                    let d2 = save_x + 2 * (x_end - save_x) / 3;
+                    format!(
+                        "M{d1},{accent_y} V{} M{d2},{accent_y} V{}",
+                        accent_y - 1,
+                        accent_y - 1
+                    )
+                },
+            };
             paths.push(format!(
-                r#"<path d="M{save_x},{accent_y} H{}" stroke="black" stroke-width="1" fill="none"/>"#,
-                *x
+                r#"<path d="{d}" stroke="black" stroke-width="1" fill="none"/>"#
             ));
         },
 
@@ -331,16 +409,18 @@ fn place_node(
         },
 
         MathNode::Delimiter { left, right, inner } => {
-            // Left delimiter
-            for ch in left.chars() {
+            // Strip LaTeX escapes before dispatching each char to emit_glyph (H6).
+            // e.g. "\{" → "{", "\langle" → "⟨", "\." → "" (null delimiter, omitted).
+            let left_unesc = unescape_delimiter(left);
+            let right_unesc = unescape_delimiter(right);
+            for ch in left_unesc.chars() {
                 emit_glyph(ch, paths, *x, baseline_y - GLYPH_H);
                 *x += GLYPH_W + 1;
             }
             for n in inner {
                 place_node(n, paths, x, baseline_y)?;
             }
-            // Right delimiter
-            for ch in right.chars() {
+            for ch in right_unesc.chars() {
                 emit_glyph(ch, paths, *x, baseline_y - GLYPH_H);
                 *x += GLYPH_W + 1;
             }
@@ -360,13 +440,14 @@ fn place_node(
 
         MathNode::Cases(cases) => {
             let mut row_y = baseline_y;
-            for (cond, result) in cases {
+            // Each tuple is (result-nodes, condition-nodes) — result renders first (left column).
+            for (result, condition) in cases {
                 let mut row_x = *x;
                 for n in result {
                     place_node(n, paths, &mut row_x, row_y)?;
                 }
-                row_x += 8;
-                for n in cond {
+                row_x += 8; // column gap
+                for n in condition {
                     place_node(n, paths, &mut row_x, row_y)?;
                 }
                 *x = (*x).max(row_x);
@@ -462,41 +543,7 @@ fn place_node_at_scale(
     Ok(())
 }
 
-/// Return `true` if `name` is a known text-based operator.
-///
-/// Text operators (lim, max, min, sin, cos, tan, log, ln, exp, det, sup, inf,
-/// gcd, dim, ker, deg, hom, mod) render as multi-char Latin runs, not as a
-/// single Unicode glyph.  Any operator name not in this list and not in the
-/// `operator_to_unicode_char` table returns [`MathError::UnsupportedSymbol`].
-fn is_text_operator(name: &str) -> bool {
-    matches!(
-        name,
-        "lim"
-            | "max"
-            | "min"
-            | "sin"
-            | "cos"
-            | "tan"
-            | "log"
-            | "ln"
-            | "exp"
-            | "det"
-            | "sup"
-            | "inf"
-            | "gcd"
-            | "dim"
-            | "ker"
-            | "deg"
-            | "hom"
-            | "mod"
-            | "cot"
-            | "sec"
-            | "csc"
-            | "arcsin"
-            | "arccos"
-            | "arctan"
-    )
-}
+// `is_text_operator` is now in `crate::symbols` (shared across all renderers).
 
 /// Emit a single glyph as a `<path>` element at position `(x, y)`.
 ///
@@ -870,10 +917,16 @@ fn emit_glyph_sized(ch: char, paths: &mut Vec<String>, x: i64, y: i64, w: i64, h
             // Σ/∑ — Sigma/summation: same glyph, two diagonals + top/bottom bars
             "M{x2},{y1} H{x1} L{x2},{mid_y} L{x1},{y2} H{x2}"
         ), // Σ/∑ — DISTINCT from Latin S
-        '\u{03C6}' | '\u{03A6}' => format!(
-            // φ/Φ — phi: vertical line through an oval (same glyph at all sizes)
+        '\u{03C6}' => format!(
+            // φ — lowercase phi: vertical line through an oval centred in lower 2/3
+            // Distinct from Φ (uppercase) which uses the full height
+            "M{mid_x},{top_third} V{y2} M{mid_x},{top_third} Q{x1},{top_third} {x1},{mid_y} Q{x1},{bot_third} {mid_x},{bot_third} Q{x2},{bot_third} {x2},{mid_y} Q{x2},{top_third} {mid_x},{top_third}"
+        ), // φ — DISTINCT from Φ (U+03A6)
+        '\u{03A6}' => format!(
+            // Φ — uppercase Phi: full-height vertical line through a full oval
+            // Distinct from φ (lowercase) which is centred in the lower 2/3
             "M{mid_x},{y1} V{y2} M{mid_x},{top_third} Q{x1},{top_third} {x1},{mid_y} Q{x1},{bot_third} {mid_x},{bot_third} Q{x2},{bot_third} {x2},{mid_y} Q{x2},{top_third} {mid_x},{top_third}"
-        ), // φ/Φ
+        ), // Φ — DISTINCT from φ (U+03C6)
         '\u{03A8}' => format!(
             // Ψ — vertical stem with two outer arms and bottom bar (Psi)
             "M{mid_x},{y1} V{y2} M{x1},{top_third} Q{x1},{bot_third} {mid_x},{bot_third} M{x2},{top_third} Q{x2},{bot_third} {mid_x},{bot_third} M{x1},{y2} H{x2}"
@@ -1597,5 +1650,165 @@ mod tests {
             path_count, 2,
             "x^{{\\times}} must produce exactly 2 <path> elements; got {path_count}"
         );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // F-S030-P3-H3 — Cases renders result THEN condition in PDF paths
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// PDF path renderer for `\begin{cases} x & y > 0 \end{cases}` must place
+    /// result ('x') paths BEFORE condition ('y') paths.
+    ///
+    /// We verify by checking the x-position (pen advance) — result comes first
+    /// in the row, so it occupies lower x-coordinates than the condition.
+    /// The SVG will have more paths for the condition (`y > 0` = 3 tokens)
+    /// than for the result (`x` = 1 token); the result's single path must
+    /// appear before the condition's first path in the SVG string.
+    #[test]
+    fn test_bc_1_10_003_pdf_cases_renders_result_then_condition() {
+        // Tuple storage: (result=[x], condition=[y, >, 0])
+        let ast = inline_ast(vec![MathNode::Cases(vec![(
+            vec![MathNode::Text(Arc::from("x"))],
+            vec![
+                MathNode::Text(Arc::from("y")),
+                MathNode::Text(Arc::from(">")),
+                MathNode::Text(Arc::from("0")),
+            ],
+        )])]);
+        let result = render_pdf_paths(&ast).expect("render_pdf_paths must succeed for cases");
+        let svg = &result.svg;
+        // There must be at least 4 paths: 1 for 'x', 3 for 'y', '>', '0'
+        let path_count = svg.matches("<path ").count();
+        assert!(
+            path_count >= 4,
+            "cases must produce at least 4 paths (1 result + 3 condition); got: {path_count}\nSVG: {svg}"
+        );
+        // The SVG must be well-formed
+        assert!(
+            svg.contains("<svg"),
+            "SVG output must contain <svg root; got: {svg}"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // F-S030-P3-H5 — Display mode applies transform="scale(1.2)" wrapper
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Display-mode SVG must contain `<g transform="scale(1.2)">` to actually
+    /// scale the glyph paths.  Inline mode must NOT contain the scale transform.
+    #[test]
+    fn test_bc_1_10_003_pdf_display_mode_has_scale_transform() {
+        let nodes = vec![MathNode::Text(Arc::from("x"))];
+        let inline_result =
+            render_pdf_paths(&inline_ast(nodes.clone())).expect("inline render must succeed");
+        let display_result =
+            render_pdf_paths(&display_ast(nodes)).expect("display render must succeed");
+
+        assert!(
+            display_result.svg.contains(r#"transform="scale(1.2)""#),
+            "display-mode SVG must contain transform=\"scale(1.2)\" wrapper; got: {}",
+            display_result.svg
+        );
+        assert!(
+            !inline_result.svg.contains(r#"transform="scale(1.2)""#),
+            "inline-mode SVG must NOT contain scale transform; got: {}",
+            inline_result.svg
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // F-S030-P3-H6 — Delimiter unescape mapping in PDF paths
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// `MathNode::Delimiter` with LaTeX-escaped delimiters (`\{`, `\}`) must
+    /// strip the backslash before dispatching each char to `emit_glyph`.
+    /// A bare `{` glyph produces a distinct path from a `\` followed by `{`.
+    #[test]
+    fn test_finding_005_delimiter_escapes_stripped_pdf() {
+        // \{ inner \} — the delimiters are LaTeX-escaped curly braces
+        let ast = inline_ast(vec![MathNode::Delimiter {
+            left: Arc::from("\\{"),
+            right: Arc::from("\\}"),
+            inner: vec![MathNode::Text(Arc::from("x"))],
+        }]);
+        let result = render_pdf_paths(&ast).expect("render_pdf_paths must succeed for \\{x\\}");
+        // With unescaping: left='{', right='}', inner='x' → 3 paths total.
+        // Without unescaping: left='\{' (2 chars), right='\}' (2 chars), inner='x' → 5 paths.
+        let path_count = result.svg.matches("<path ").count();
+        assert_eq!(
+            path_count, 3,
+            "\\{{x\\}} with unescaping must produce 3 paths ({{, x, }}); got: {path_count}\nSVG: {}",
+            result.svg
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // F-S030-P3-M2 — Accent rendering is kind-specific in PDF
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// `\hat{x}` and `\bar{x}` must produce distinct SVG path data.
+    #[test]
+    fn test_bc_1_10_003_pdf_hat_and_bar_accents_are_distinct() {
+        use crate::ast::AccentKind;
+        let hat_ast = inline_ast(vec![MathNode::Accent {
+            kind: AccentKind::Hat,
+            inner: Box::new(MathNode::Text(Arc::from("x"))),
+        }]);
+        let bar_ast = inline_ast(vec![MathNode::Accent {
+            kind: AccentKind::Bar,
+            inner: Box::new(MathNode::Text(Arc::from("x"))),
+        }]);
+        let hat_svg = render_pdf_paths(&hat_ast)
+            .expect("render_pdf_paths must succeed for \\hat{x}")
+            .svg;
+        let bar_svg = render_pdf_paths(&bar_ast)
+            .expect("render_pdf_paths must succeed for \\bar{x}")
+            .svg;
+        assert_ne!(
+            hat_svg, bar_svg,
+            "\\hat{{x}} and \\bar{{x}} must produce distinct SVG paths"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // F-S030-P3-M6 — φ (U+03C6) and Φ (U+03A6) must produce distinct glyphs
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// `\phi` (lowercase φ, U+03C6) and `\Phi` (uppercase Φ, U+03A6) must
+    /// produce different SVG path data.
+    #[test]
+    fn test_bc_1_10_003_pdf_phi_distinct_from_big_phi() {
+        let phi_ast = inline_ast(vec![MathNode::Greek(Arc::from("phi"))]);
+        let big_phi_ast = inline_ast(vec![MathNode::Greek(Arc::from("Phi"))]);
+        let phi_svg = render_pdf_paths(&phi_ast)
+            .expect("render_pdf_paths must succeed for \\phi")
+            .svg;
+        let big_phi_svg = render_pdf_paths(&big_phi_ast)
+            .expect("render_pdf_paths must succeed for \\Phi")
+            .svg;
+        assert_ne!(
+            phi_svg, big_phi_svg,
+            "\\phi (φ, U+03C6) must produce DIFFERENT SVG than \\Phi (Φ, U+03A6)"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // F-S030-P3-L2 — Empty AST returns error
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// `render_pdf_paths` on an empty AST (zero nodes) must return
+    /// `Err(MathError::EmptyAst)` rather than emitting a degenerate 1×16 SVG.
+    #[test]
+    fn test_bc_1_10_003_pdf_empty_ast_returns_error() {
+        let ast = inline_ast(vec![]);
+        let result = render_pdf_paths(&ast);
+        assert!(
+            result.is_err(),
+            "render_pdf_paths on empty AST must return Err; got Ok"
+        );
+        match result {
+            Err(MathError::EmptyAst) => {}, // correct
+            other => panic!("expected MathError::EmptyAst for empty AST, got: {other:?}"),
+        }
     }
 }

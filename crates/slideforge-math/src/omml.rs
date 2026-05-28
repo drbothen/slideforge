@@ -27,7 +27,9 @@
 
 use crate::ast::{AccentKind, MathAst, MathMode, MathNode};
 use crate::error::MathRendererError;
-use crate::symbols::{greek_to_unicode_char, operator_to_unicode_char, symbol_to_unicode_char};
+use crate::symbols::{
+    greek_to_unicode_char, operator_to_unicode_char, symbol_to_unicode_char, unescape_delimiter,
+};
 
 /// The XML namespace URI for OMML.
 pub const OMML_NAMESPACE: &str = "http://schemas.openxmlformats.org/officeDocument/2006/math";
@@ -269,42 +271,6 @@ fn render_node(node: &MathNode, out: &mut String) -> Result<(), MathRendererErro
         },
     }
     Ok(())
-}
-
-/// Strip LaTeX delimiter escapes so that OMML receives a bare Unicode character.
-///
-/// OMML `<m:begChr>` and `<m:endChr>` attributes expect a raw Unicode character,
-/// not a LaTeX escape sequence. For example `\{` must become `{` and `\.`
-/// (the null delimiter) must become an empty string. Multi-char delimiters like
-/// `\langle` are mapped to their Unicode equivalents.
-///
-/// | Input      | Output |
-/// |------------|--------|
-/// | `\{`       | `{`    |
-/// | `\}`       | `}`    |
-/// | `\.`       | `""`   |
-/// | `\|`       | `‖`    |
-/// | `\langle`  | `⟨`    |
-/// | `\rangle`  | `⟩`    |
-/// | `\lfloor`  | `⌊`    |
-/// | `\rfloor`  | `⌋`    |
-/// | `\lceil`   | `⌈`    |
-/// | `\rceil`   | `⌉`    |
-/// | `(`        | `(`    |
-fn unescape_delimiter(s: &str) -> &str {
-    match s {
-        "\\{" => "{",
-        "\\}" => "}",
-        "\\." | "." => "", // null delimiter: both \left. and bare . map to empty
-        "\\|" => "‖",
-        "\\langle" => "⟨",
-        "\\rangle" => "⟩",
-        "\\lfloor" => "⌊",
-        "\\rfloor" => "⌋",
-        "\\lceil" => "⌈",
-        "\\rceil" => "⌉",
-        other => other,
-    }
 }
 
 /// Escape XML special characters.

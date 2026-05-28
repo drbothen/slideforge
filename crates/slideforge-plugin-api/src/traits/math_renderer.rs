@@ -92,6 +92,14 @@ pub enum MathError {
         /// The command name that has no Unicode mapping.
         name: String,
     },
+
+    /// The [`crate::MathAst`] passed to `render_pdf_paths` contains zero nodes.
+    ///
+    /// An empty AST cannot produce meaningful vector-path output. Callers should
+    /// surface this as a user-visible error rather than silently emitting a
+    /// degenerate 1×16-px SVG (finding F-S030-P3-L2).
+    #[error("math expression is empty — no nodes to render")]
+    EmptyAst,
 }
 
 /// A plugin that renders a [`MathNode`] to bytes in a target math format.

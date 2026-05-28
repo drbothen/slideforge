@@ -26,7 +26,9 @@ use slideforge_plugin_api::MathError;
 
 use crate::MathAst;
 use crate::ast::{MathMode, MathNode};
-use crate::symbols::{greek_to_unicode_char, operator_to_unicode_char, symbol_to_unicode_char};
+use crate::symbols::{
+    greek_to_unicode_char, is_text_operator, operator_to_unicode_char, symbol_to_unicode_char,
+};
 
 /// The W3C `MathML` namespace URI.
 const MATHML_NS: &str = "http://www.w3.org/1998/Math/MathML";
@@ -169,15 +171,17 @@ fn write_cases_node(
     writer.write_event(Event::Text(BytesText::new("{")))?;
     writer.write_event(Event::End(BytesEnd::new("mo")))?;
     writer.write_event(Event::Start(BytesStart::new("mtable")))?;
-    for (cond, result) in cases {
+    for (result, condition) in cases {
         writer.write_event(Event::Start(BytesStart::new("mtr")))?;
+        // Left column: result (the value, e.g. "x" or "-x")
         writer.write_event(Event::Start(BytesStart::new("mtd")))?;
         for n in result {
             write_node(writer, n)?;
         }
         writer.write_event(Event::End(BytesEnd::new("mtd")))?;
+        // Right column: condition (the guard, e.g. "if y > 0")
         writer.write_event(Event::Start(BytesStart::new("mtd")))?;
-        for n in cond {
+        for n in condition {
             write_node(writer, n)?;
         }
         writer.write_event(Event::End(BytesEnd::new("mtd")))?;
@@ -189,22 +193,33 @@ fn write_cases_node(
 }
 
 /// Write a `Delimiter` node as `<mrow><mo>l</mo>…<mo>r</mo></mrow>` into `writer`.
+///
+/// LaTeX-escaped delimiter strings (e.g. `\{`, `\langle`) are unescaped via
+/// [`crate::symbols::unescape_delimiter`] before emitting the `<mo>` character
+/// (finding F-S030-P3-H6: parity with OMML).
 fn write_delimiter_node(
     writer: &mut Writer<&mut Vec<u8>>,
     left: &str,
     right: &str,
     inner: &[MathNode],
 ) -> Result<(), quick_xml::Error> {
+    use crate::symbols::unescape_delimiter;
+    let left_unesc = unescape_delimiter(left);
+    let right_unesc = unescape_delimiter(right);
     writer.write_event(Event::Start(BytesStart::new("mrow")))?;
-    writer.write_event(Event::Start(BytesStart::new("mo")))?;
-    writer.write_event(Event::Text(BytesText::new(left)))?;
-    writer.write_event(Event::End(BytesEnd::new("mo")))?;
+    if !left_unesc.is_empty() {
+        writer.write_event(Event::Start(BytesStart::new("mo")))?;
+        writer.write_event(Event::Text(BytesText::new(left_unesc)))?;
+        writer.write_event(Event::End(BytesEnd::new("mo")))?;
+    }
     for n in inner {
         write_node(writer, n)?;
     }
-    writer.write_event(Event::Start(BytesStart::new("mo")))?;
-    writer.write_event(Event::Text(BytesText::new(right)))?;
-    writer.write_event(Event::End(BytesEnd::new("mo")))?;
+    if !right_unesc.is_empty() {
+        writer.write_event(Event::Start(BytesStart::new("mo")))?;
+        writer.write_event(Event::Text(BytesText::new(right_unesc)))?;
+        writer.write_event(Event::End(BytesEnd::new("mo")))?;
+    }
     writer.write_event(Event::End(BytesEnd::new("mrow")))?;
     Ok(())
 }
@@ -279,25 +294,35 @@ fn write_node(writer: &mut Writer<&mut Vec<u8>>, node: &MathNode) -> Result<(), 
         MathNode::Operator(name) => {
             // Map operator name to Unicode symbol where possible via the shared
             // canonical symbols table (BC-1.10.003 inv. 6: cross-renderer equivalence).
-            // Text-based operators (lim, max, etc.) have no Unicode-symbol mapping
-            // and use the command name as literal text.
             // Empty name returns error.
+            // Unknown names that are neither Unicode-symbol operators nor text operators
+            // return error (parity with OMML and PDF — no silent fallback, H4).
             if name.is_empty() {
                 return Err(quick_xml::Error::Io(std::sync::Arc::new(
                     std::io::Error::other("empty operator command name"),
                 )));
             }
-            let sym_str;
-            let sym: &str = if let Some(ch) = operator_to_unicode_char(name) {
-                sym_str = ch.to_string();
-                &sym_str
+            if let Some(ch) = operator_to_unicode_char(name) {
+                // Unicode-symbol operator (∑, ∏, ∫, …) — emit as <mo>
+                let sym = ch.to_string();
+                writer.write_event(Event::Start(BytesStart::new("mo")))?;
+                writer.write_event(Event::Text(BytesText::new(&sym)))?;
+                writer.write_event(Event::End(BytesEnd::new("mo")))?;
+            } else if is_text_operator(name) {
+                // Text-based operator (lim, max, sin, …) — emit as upright <mi>
+                // with mathvariant="normal" to request non-italic rendering per
+                // MathML Core and ISO 80000-2 typographic conventions (M5).
+                let mut mi = BytesStart::new("mi");
+                mi.push_attribute(("mathvariant", "normal"));
+                writer.write_event(Event::Start(mi))?;
+                writer.write_event(Event::Text(BytesText::new(name)))?;
+                writer.write_event(Event::End(BytesEnd::new("mi")))?;
             } else {
-                // Text-based operator or other name used as literal text
-                name
-            };
-            writer.write_event(Event::Start(BytesStart::new("mo")))?;
-            writer.write_event(Event::Text(BytesText::new(sym)))?;
-            writer.write_event(Event::End(BytesEnd::new("mo")))?;
+                // Unknown operator name — return error (no silent fallback, H4).
+                return Err(quick_xml::Error::Io(std::sync::Arc::new(
+                    std::io::Error::other(format!("unsupported operator command: {name}")),
+                )));
+            }
         },
 
         MathNode::Greek(name) => {
@@ -339,12 +364,15 @@ fn write_node(writer: &mut Writer<&mut Vec<u8>>, node: &MathNode) -> Result<(), 
         },
 
         MathNode::Accent { kind, inner } => {
-            // Use <mover> with appropriate accent character
-            let accent_char = crate::ast::AccentKind::accent_char(kind);
+            // Use <mover> with proper Unicode combining marks for correct typographic
+            // rendering in browsers and screen readers (M1: accent parity).
+            let combining = kind.mathml_combining_char();
             writer.write_event(Event::Start(BytesStart::new("mover")))?;
             write_node(writer, inner)?;
+            // The accent is emitted as an <mo> containing the combining mark.
+            // MathML renderers apply the combining character over the base.
             writer.write_event(Event::Start(BytesStart::new("mo")))?;
-            writer.write_event(Event::Text(BytesText::new(accent_char)))?;
+            writer.write_event(Event::Text(BytesText::new(combining)))?;
             writer.write_event(Event::End(BytesEnd::new("mo")))?;
             writer.write_event(Event::End(BytesEnd::new("mover")))?;
         },
@@ -550,12 +578,13 @@ fn node_to_label(node: &MathNode, parts: &mut Vec<String>) {
         },
 
         MathNode::Cases(cases) => {
-            for (cond, result) in cases {
+            // Each tuple is (result-nodes, condition-nodes) — result first, then "if", then condition.
+            for (result, condition) in cases {
                 for n in result {
                     node_to_label(n, parts);
                 }
                 parts.push("if".to_owned());
-                for n in cond {
+                for n in condition {
                     node_to_label(n, parts);
                 }
             }
@@ -651,24 +680,8 @@ fn symbol_spoken(name: &str) -> &str {
     }
 }
 
-// Add accent_char method to AccentKind — placed here as a standalone function
-// that delegates, since we cannot add methods to types from other modules
-// via impl blocks (we can since AccentKind is in our own crate).
-
-impl crate::ast::AccentKind {
-    /// Return the Unicode character used as the accent symbol in `MathML` `<mover>`.
-    #[must_use]
-    pub fn accent_char(kind: &crate::ast::AccentKind) -> &'static str {
-        match kind {
-            crate::ast::AccentKind::Hat => "\u{005E}",   // ^
-            crate::ast::AccentKind::Bar => "\u{00AF}",   // ¯
-            crate::ast::AccentKind::Tilde => "\u{007E}", // ~
-            crate::ast::AccentKind::Vec => "\u{2192}",   // →
-            crate::ast::AccentKind::Dot => "\u{02D9}",   // ˙
-            crate::ast::AccentKind::Ddot => "\u{00A8}",  // ¨
-        }
-    }
-}
+// `AccentKind::mathml_combining_char()` and `AccentKind::omml_combining_char()` are
+// defined in `crate::ast` so they are accessible to all renderers without duplication.
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
@@ -1257,5 +1270,188 @@ mod tests {
         ]);
         let output = render_mathml(&ast).expect("render must succeed for \\alpha + \\beta");
         insta::assert_yaml_snapshot!("mathml_greek_alpha_beta", output);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // F-S030-P3-H1/H2/H3 — Cases renders result THEN condition
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// `\begin{cases} x & y > 0 \\ -x & y \leq 0 \end{cases}` — `MathML` must
+    /// render the result column first (`x`, `-x`) then the condition column
+    /// (`y > 0`, `y ≤ 0`).  Each row of `<mtable>` must be:
+    /// `<mtr><mtd>result</mtd><mtd>condition</mtd></mtr>`.
+    #[test]
+    fn test_bc_1_10_003_mathml_cases_renders_result_then_condition() {
+        // AST for \begin{cases} x & y > 0 \\ -x & y \leq 0 \end{cases}
+        // Tuple storage: (result-nodes, condition-nodes) i.e. (lhs, rhs).
+        let ast = inline_ast(vec![MathNode::Cases(vec![
+            (
+                vec![MathNode::Text(Arc::from("x"))],
+                vec![
+                    MathNode::Text(Arc::from("y")),
+                    MathNode::Text(Arc::from(">")),
+                    MathNode::Text(Arc::from("0")),
+                ],
+            ),
+            (
+                vec![MathNode::Text(Arc::from("-x"))],
+                vec![
+                    MathNode::Text(Arc::from("y")),
+                    MathNode::Symbol(Arc::from("leq")),
+                    MathNode::Text(Arc::from("0")),
+                ],
+            ),
+        ])]);
+        let output = render_mathml(&ast).expect("render_mathml must succeed for cases expression");
+        // The output must contain an <mtr> that places the result before the condition.
+        // Concretely: <mtd>x</mtd> must appear before <mtd>y</mtd> in the first row.
+        let first_x = output.find("<mi>x</mi>").expect("must contain <mi>x</mi>");
+        let first_y = output.find("<mi>y</mi>").expect("must contain <mi>y</mi>");
+        assert!(
+            first_x < first_y,
+            "result 'x' must appear before condition 'y' in MathML cases output; got:\n{output}"
+        );
+        assert!(
+            output.contains("<mtable>"),
+            "cases must produce <mtable>; got: {output}"
+        );
+        assert!(
+            output.contains("<mtr>"),
+            "cases must produce <mtr> rows; got: {output}"
+        );
+        assert!(
+            output.contains("<mtd>"),
+            "cases must produce <mtd> cells; got: {output}"
+        );
+    }
+
+    /// Aria-label for cases expression must say "result if condition", not
+    /// "condition if result".
+    #[test]
+    fn test_bc_1_10_003_aria_label_cases_result_if_condition() {
+        // AST: \begin{cases} x & y > 0 \end{cases}
+        // Tuple: (result=[x], condition=[y, >, 0])
+        let ast = inline_ast(vec![MathNode::Cases(vec![(
+            vec![MathNode::Text(Arc::from("x"))],
+            vec![
+                MathNode::Text(Arc::from("y")),
+                MathNode::Text(Arc::from(">")),
+                MathNode::Text(Arc::from("0")),
+            ],
+        )])]);
+        let label = ast_to_aria_label(&ast);
+        // Must be: "x if y greater than 0" (result first, then "if", then condition)
+        // and NOT "y greater than 0 if x" (condition first)
+        let if_pos = label
+            .find("if")
+            .expect("aria-label for cases must contain 'if'");
+        let x_pos = label
+            .find('x')
+            .expect("aria-label for cases must contain 'x'");
+        assert!(
+            x_pos < if_pos,
+            "result 'x' must appear before 'if' in aria-label cases; got: {label}"
+        );
+        assert!(
+            label.contains("greater than"),
+            "aria-label must contain 'greater than' for condition; got: {label}"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // F-S030-P3-H4 — MathML unknown operator returns error (parity with OMML/PDF)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// `MathNode::Operator("xyzunknown")` — `MathML` must return Err, not silently
+    /// emit `<mo>xyzunknown</mo>`.  This achieves parity with OMML and PDF which
+    /// already return `MathError::UnsupportedSymbol` for unknown operators.
+    #[test]
+    fn test_bc_1_10_003_mathml_unknown_operator_returns_error() {
+        let ast = inline_ast(vec![MathNode::Operator(Arc::from("xyzunknown"))]);
+        let result = render_mathml(&ast);
+        assert!(
+            result.is_err(),
+            "MathML render with unknown operator name must return Err; got Ok with output: {:?}",
+            result.ok()
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // F-S030-P3-H6 — Delimiter unescape mapping in MathML
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// `MathNode::Delimiter` with LaTeX-escaped delimiters (`\{`, `\}`) must
+    /// strip the backslash and emit bare `{` / `}` as `MathML` `<mo>` characters.
+    #[test]
+    fn test_finding_005_delimiter_escapes_stripped_mathml() {
+        let ast = inline_ast(vec![MathNode::Delimiter {
+            left: Arc::from("\\{"),
+            right: Arc::from("\\}"),
+            inner: vec![MathNode::Text(Arc::from("x"))],
+        }]);
+        let output = render_mathml(&ast).expect("render_mathml must succeed for \\{x\\}");
+        // Must contain bare { and } as the delimiter content — no backslash in <mo>
+        // The <mo> element should contain "{" not "\{"
+        assert!(
+            output.contains("<mo>{</mo>") || output.contains("<mo>&#123;</mo>"),
+            "MathML must strip backslash from \\{{ delimiter; got: {output}"
+        );
+        assert!(
+            !output.contains("<mo>\\{</mo>"),
+            "MathML must not emit \\{{ with backslash in <mo>; got: {output}"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // F-S030-P3-M5 — Text operators use mathvariant="normal" in MathML
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// `MathNode::Operator("lim")` (a text operator) must produce
+    /// `<mi mathvariant="normal">lim</mi>` in `MathML`, not `<mo>lim</mo>`.
+    /// The `mathvariant="normal"` attribute requests upright (non-italic) rendering,
+    /// which is the typographic convention for function names.
+    #[test]
+    fn test_bc_1_10_003_mathml_text_operator_uses_mathvariant_normal() {
+        let ast = inline_ast(vec![MathNode::Operator(Arc::from("lim"))]);
+        let output = render_mathml(&ast).expect("render_mathml must succeed for \\lim");
+        assert!(
+            output.contains(r#"mathvariant="normal""#),
+            "text operator 'lim' must use mathvariant=\"normal\"; got: {output}"
+        );
+        assert!(
+            output.contains("lim"),
+            "output must contain the text 'lim'; got: {output}"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // F-S030-P3-L3 — TextRun preserves whitespace
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// `\text{a b c}` must produce `MathML` that preserves the spaces verbatim.
+    #[test]
+    fn test_bc_1_10_003_mathml_textrun_preserves_whitespace() {
+        let ast = inline_ast(vec![MathNode::TextRun(Arc::from("a b c"))]);
+        let output = render_mathml(&ast).expect("render_mathml must succeed for \\text{a b c}");
+        assert!(
+            output.contains("a b c"),
+            "MathML TextRun must preserve spaces in 'a b c'; got: {output}"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // F-S030-P3-L6 — aria-label XML escaping
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// `MathNode::Text("<")` must produce well-formed XML in the aria-label
+    /// attribute — angle brackets must be XML-escaped as `&lt;`.
+    #[test]
+    fn test_bc_1_10_003_aria_label_xml_escaping() {
+        let ast = inline_ast(vec![MathNode::Text(Arc::from("<"))]);
+        let output = render_mathml(&ast).expect("render_mathml must succeed for '<'");
+        // The aria-label value is placed in an XML attribute — quick_xml escapes it.
+        // The output XML must be well-formed (no raw < inside an attribute).
+        assert_wellformed_xml(&output)
+            .unwrap_or_else(|e| panic!("MathML with '<' in text must be well-formed XML: {e}"));
     }
 }
