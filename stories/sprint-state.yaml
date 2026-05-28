@@ -206,3 +206,10 @@ stories:
     merged: 2026-05-28
     pr: 26
     merge_commit: 218334f1
+  STORY-019:
+    status: merged
+    wave: 3
+    started: 2026-05-28
+    merged: 2026-05-28
+    pr: 27
+    merge_commit: 7bc71f9c

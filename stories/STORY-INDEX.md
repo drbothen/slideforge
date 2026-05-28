@@ -84,7 +84,7 @@ stories_merged: 0
 | Story ID | Epic | Title | BCs | Priority | Points | tdd_mode | Status |
 |----------|------|-------|-----|---------|--------|---------|--------|
 | [STORY-018](stories/STORY-018-datasource-file-formats.md) | EPIC-05 | DataSource: JSON/CSV/YAML/TOML File Loading | BC-1.03.001, BC-1.03.003 | P0 | 5 | strict | draft |
-| [STORY-019](stories/STORY-019-datasource-http-ssrf.md) | EPIC-05 | DataSource: HTTP/HTTPS + SSRF Allowlist | BC-1.03.002, BC-1.03.005 | P0 | 8 | strict | draft |
+| [STORY-019](stories/STORY-019-datasource-http-ssrf.md) | EPIC-05 | DataSource: HTTP/HTTPS + SSRF Allowlist | BC-1.03.002, BC-1.03.005 | P0 | 8 | strict | merged |
 | [STORY-020](stories/STORY-020-datasource-excel-sqlite.md) | EPIC-05 | DataSource: Excel (.xlsx) + SQLite | BC-1.03.006, BC-1.03.007 | P0 | 5 | strict | draft |
 | [STORY-021](stories/STORY-021-datasource-offline-errors.md) | EPIC-05 | DataSource: --offline Flag + Error Handling | BC-1.03.004 | P0 | 3 | strict | draft |
 | [STORY-022](stories/STORY-022-brand-load-extraction.md) | EPIC-06 | Brand Loading: .pptx/.docx Template Extraction | BC-2.01.001, BC-2.01.006 | P0 | 5 | strict | draft |
