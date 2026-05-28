@@ -29,7 +29,7 @@ use crate::types::{ChartError, InternalChartSpec};
 // - values are bounded to chart canvas size (< i32::MAX)
 // - truncation is intentional for pixel coordinates
 // - sign: coordinates are always positive (canvas origin at top-left)
-pub fn render_pie(spec: &InternalChartSpec) -> Result<String, ChartError> {
+pub(crate) fn render_pie(spec: &InternalChartSpec) -> Result<String, ChartError> {
     // FINDING-004: Validate all data points are finite.
     crate::bar::validate_data_finite(spec)?;
     // FINDING-002 (Pass 3): Guard non-empty data vec with all-empty points.
@@ -177,6 +177,9 @@ mod tests {
                 Arc::from("#009E60"),
             ],
             font_family: Arc::from("sans-serif"),
+            slide_title: Arc::from(""),
+            expression: Arc::from(""),
+            span: slideforge_types::SourceSpan::default(),
         }
     }
 
@@ -241,6 +244,9 @@ mod tests {
             height: InternalChartSpec::DEFAULT_HEIGHT,
             accent_colors: vec![Arc::from("#003766")],
             font_family: Arc::from("sans-serif"),
+            slide_title: Arc::from(""),
+            expression: Arc::from(""),
+            span: slideforge_types::SourceSpan::default(),
         };
         let result = super::render_pie(&spec);
         assert!(
@@ -274,6 +280,9 @@ mod tests {
             height: InternalChartSpec::DEFAULT_HEIGHT,
             accent_colors: vec![Arc::from("#003766")],
             font_family: Arc::from("sans-serif"),
+            slide_title: Arc::from(""),
+            expression: Arc::from(""),
+            span: slideforge_types::SourceSpan::default(),
         };
         let result = super::render_pie(&spec);
         assert!(result.is_err(), "all-negative pie must return an error");

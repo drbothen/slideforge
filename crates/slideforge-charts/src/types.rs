@@ -125,6 +125,21 @@ pub struct InternalChartSpec {
     /// not available in the rendering context, plotters falls back to its
     /// built-in font.
     pub font_family: Arc<str>,
+    /// The human-readable title of the chart slide, used in `ChartError::EmptyData`
+    /// and error-slide placeholder messages (BC-1.11.002 invariant 2).
+    ///
+    /// Defaults to `""` if not supplied by the eval pipeline.
+    pub slide_title: Arc<str>,
+    /// The data binding expression from the DSL (e.g., `"{{ kpis.monthly }}"`),
+    /// used in `ChartError::EmptyData` diagnostics (BC-1.11.002 AC-001).
+    ///
+    /// Defaults to `""` if not supplied by the eval pipeline.
+    pub expression: Arc<str>,
+    /// Source location of the data binding in the `.sf` file.
+    ///
+    /// Carried into `ChartError::EmptyData` for miette span rendering.
+    /// Defaults to [`slideforge_types::SourceSpan::default`] if not supplied.
+    pub span: slideforge_types::SourceSpan,
 }
 
 impl InternalChartSpec {
@@ -146,7 +161,7 @@ impl InternalChartSpec {
 /// The string is a complete, self-contained SVG document (no external
 /// references). Accessibility attributes (`aria-label`, `role="img"`, and a
 /// `<title>` child element) are injected by
-/// [`crate::accessibility::inject_aria_attributes`] before wrapping.
+/// `crate::accessibility::inject_aria_attributes` before wrapping.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ChartSvg(pub String);
 
@@ -193,6 +208,35 @@ pub enum ChartError {
     RenderError {
         /// Description of the failure.
         message: Arc<str>,
+    },
+
+    /// Chart data evaluated to an empty collection before `render()` was called.
+    ///
+    /// Maps to error code `E-LAY-003`. This variant is produced by the
+    /// empty-data guard in `crate::validation` when [`slideforge_types::Value::List`]
+    /// is empty. The guard runs BEFORE [`crate::ChartRendererImpl::dispatch_and_process`]
+    /// to satisfy BC-1.11.002 invariant 2 (renderer is never called with empty data).
+    ///
+    /// In strict mode: this error causes the build to fail (exit code 2, no output).
+    /// In warn-only mode: the caller produces a `slideforge_layout::FrameContent::ErrorSlidePlaceholder`.
+    ///
+    /// ## Canonical Display format (HIGH-004)
+    ///
+    /// `"E-LAY-003: Chart data is empty for slide '<title>'. Rendering error-slide placeholder."`
+    ///
+    /// The `expression` field is available to callers that need it (e.g., for building
+    /// diagnostics), but is NOT inlined in the Display string — miette renders the
+    /// `span` source pointer separately.
+    #[error(
+        "E-LAY-003: Chart data is empty for slide '{slide_title}'. Rendering error-slide placeholder."
+    )]
+    EmptyData {
+        /// The title of the chart slide where empty data was detected.
+        slide_title: Arc<str>,
+        /// The data binding expression from the DSL (e.g., `"{{ kpis.monthly }}"`).
+        expression: Arc<str>,
+        /// Source location of the data binding in the `.sf` file.
+        span: slideforge_types::SourceSpan,
     },
 }
 
@@ -284,6 +328,67 @@ mod tests {
             message: Arc::from("backend failure"),
         };
         assert!(err.to_string().contains("backend failure"));
+    }
+
+    /// BC-1.11.002 — `ChartError::EmptyData` variant exists with the correct fields.
+    ///
+    /// Red Gate: passes at stub time because the variant is a type-level stub
+    /// (it compiles). The real value is tested in `validation.rs` tests.
+    #[test]
+    fn test_bc_1_11_002_chart_error_empty_data_variant_exists() {
+        use slideforge_types::SourceSpan;
+
+        let err = ChartError::EmptyData {
+            slide_title: Arc::from("Revenue Chart"),
+            expression: Arc::from("{{ kpis.monthly }}"),
+            span: SourceSpan::default(),
+        };
+        let msg = err.to_string();
+        assert!(
+            msg.contains("E-LAY-003"),
+            "EmptyData error message must contain 'E-LAY-003'; got: {msg}"
+        );
+        assert!(
+            msg.contains("Revenue Chart"),
+            "EmptyData error message must contain the slide title; got: {msg}"
+        );
+    }
+
+    /// BC-1.11.002 AC-001 — `ChartError::EmptyData` Display impl uses canonical message.
+    ///
+    /// Traceability anchor: the named test for test vector 19 in STORY-032.
+    ///
+    /// HIGH-004 (adversarial pass): the canonical Display format is:
+    /// `"E-LAY-003: Chart data is empty for slide '<title>'. Rendering error-slide placeholder."`
+    ///
+    /// The `expression` field is NOT inlined in the message body; it is available on
+    /// the variant for callers that need it. Miette renders the `span` source pointer
+    /// as a separate code-snippet annotation.
+    #[test]
+    fn test_bc_1_11_002_chart_error_empty_data_displays_e_lay_003() {
+        use slideforge_types::SourceSpan;
+
+        let err = ChartError::EmptyData {
+            slide_title: Arc::from("Q3 Dashboard"),
+            expression: Arc::from("{{ kpis }}"),
+            span: SourceSpan::default(),
+        };
+        let display = err.to_string();
+        assert!(
+            display.contains("E-LAY-003"),
+            "ChartError::EmptyData Display must include 'E-LAY-003'; got: {display}"
+        );
+        assert!(
+            display.contains("Q3 Dashboard"),
+            "ChartError::EmptyData Display must include the slide title; got: {display}"
+        );
+        // HIGH-004: expression is NOT in the Display string (it is in the span/field).
+        // The canonical message is: "E-LAY-003: Chart data is empty for slide '<title>'.
+        // Rendering error-slide placeholder."
+        assert!(
+            display.contains("Rendering error-slide placeholder"),
+            "ChartError::EmptyData Display must include the canonical suffix; got: {display}"
+        );
     }
 
     #[test]

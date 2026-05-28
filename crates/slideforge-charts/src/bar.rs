@@ -192,7 +192,7 @@ pub(crate) fn compute_y_range(spec: &InternalChartSpec) -> (f64, f64) {
 /// Returns [`ChartError`] if the data is invalid or the plotters backend
 /// fails to produce output.
 #[allow(clippy::cast_possible_truncation)] // coordinate cast: chart dimensions < u32::MAX
-pub fn render_bar(spec: &InternalChartSpec) -> Result<String, ChartError> {
+pub(crate) fn render_bar(spec: &InternalChartSpec) -> Result<String, ChartError> {
     // FINDING-006: Guard empty data early.
     if spec.data.is_empty() {
         return Err(ChartError::MissingDataField {
@@ -325,6 +325,9 @@ mod tests {
             height: InternalChartSpec::DEFAULT_HEIGHT,
             accent_colors: vec![Arc::from("#003766")],
             font_family: Arc::from("sans-serif"),
+            slide_title: Arc::from(""),
+            expression: Arc::from(""),
+            span: slideforge_types::SourceSpan::default(),
         }
     }
 
@@ -359,6 +362,9 @@ mod tests {
             height: InternalChartSpec::DEFAULT_HEIGHT,
             accent_colors: vec![Arc::from("#003766")],
             font_family: Arc::from("sans-serif"),
+            slide_title: Arc::from(""),
+            expression: Arc::from(""),
+            span: slideforge_types::SourceSpan::default(),
         };
         let result = super::render_bar(&spec);
         assert!(
