@@ -4,7 +4,7 @@ mode: greenfield
 created: 2026-05-23
 current_phase: phase-3-tdd-implementation
 status: IN_PROGRESS
-last_updated: 2026-05-27
+last_updated: 2026-05-28
 phase_1_approved: 2026-05-25
 phase_2_approved: 2026-05-25
 phase_1_convergence: "17 passes, 69 findings, 3/3 clean (passes 15-16-17)"
@@ -27,9 +27,10 @@ wave_1_gate: "PASS 2026-05-27 — 3 gate passes, 11 findings fixed (keyword sync
 wave_1_completed: 2026-05-27
 wave_2_gate: "PASS 2026-05-27 — 11 gate passes, 19 findings fixed, 3/3 clean (passes 9-10-11)"
 wave_2_completed: 2026-05-27
-develop_sha: "e93432c3"
-develop_pr_count: 20
-workspace_tests: 992
+wave_3_batch_1_completed: 2026-05-28
+develop_sha: "218334f1"
+develop_pr_count: 26
+workspace_tests: 1483
 workspace_test_failures: 0
 ---
 
@@ -47,24 +48,35 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. It generates branded .p
 
 ## Current Status
 
-Phase 3 IN PROGRESS. Wave 1 COMPLETE (14/14 stories, gate PASSED 2026-05-27). Wave 2 COMPLETE (7/7 stories, gate PASSED 2026-05-27). **Wave 3 is next — 12 stories, NOT STARTED.**
+Phase 3 IN PROGRESS. Wave 1 COMPLETE (14/14 stories, gate PASSED). Wave 2 COMPLETE (7/7 stories, gate PASSED). **Wave 3 Batch 1 COMPLETE (6 stories merged, PRs #21-#26). Wave 3 Batch 2 is NEXT (8 stories, all dependencies satisfied).**
 
-develop branch: `e93432c3` (20 merged PRs, 992 tests, 0 failures, ~38,660 lines of Rust). No active worktrees. No open PRs.
+develop branch: `218334f1` (26 merged PRs, 1483 tests, 0 failures). No active worktrees. No open PRs.
 
-## What to Do Next: Wave 3
+## What to Do Next: Wave 3 Batch 2
 
-Wave 3 has 12 stories. All Wave 2 dependencies are satisfied. Read the wave schedule and story files, then begin per-story delivery.
+Wave 3 Batch 1 delivered 6 root stories (no intra-wave dependencies). All 8 Batch 2 stories can now start — their Batch 1 dependencies are merged.
 
-**Wave 3 stories (read `.factory/stories/wave-schedule.md` for batching/dependency order):**
+**Batch 2 stories:**
 
-| Story | Title | Crate | Points |
-|-------|-------|-------|--------|
-| See .factory/stories/wave-schedule.md | Wave 3 stories | Various | Various |
+| Story | Title | Crate | Depends On |
+|-------|-------|-------|------------|
+| STORY-019 | DataSource: HTTP/HTTPS + SSRF Allowlist | slideforge-data | STORY-018 |
+| STORY-020 | DataSource: Excel (.xlsx) + SQLite | slideforge-data | STORY-018 |
+| STORY-023 | Brand Synthesis: brand.toml → 31 Layouts + 12 OOXML Slots | slideforge-brand | STORY-022 |
+| STORY-027 | Layout: Document Section Generation (DOCX) | slideforge-layout | STORY-026 |
+| STORY-028 | Layout: shape: Block + Rich Inline Formatting | slideforge-layout | STORY-026 |
+| STORY-030 | Math: MathML (HTML) + Path-Based (PDF) Output | slideforge-math | STORY-029 |
+| STORY-032 | Chart: Empty Data Error-Slide Placeholder | slideforge-charts | STORY-031 + STORY-016 |
+| STORY-034 | SVG Normalization via usvg + Performance Gate | slideforge-diagrams | STORY-033 |
 
-**Key story files location:** `.factory/stories/stories/STORY-NNN-*.md`
-**Story index:** `.factory/stories/STORY-INDEX.md`
-**Dependency graph:** `.factory/stories/dependency-graph.md`
-**Sprint state:** `.factory/stories/sprint-state.yaml`
+**After Batch 2:** Batch 3 (3 stories — STORY-021, STORY-024, STORY-025) depends on Batch 2.
+
+**Key file references:**
+- Wave schedule + batching: `.factory/stories/wave-schedule.md`
+- Story specs: `.factory/stories/stories/STORY-NNN-*.md`
+- Story index: `.factory/stories/STORY-INDEX.md`
+- Dependency graph: `.factory/stories/dependency-graph.md`
+- Sprint state: `.factory/stories/sprint-state.yaml`
 
 ### Per-story delivery flow
 
@@ -72,7 +84,7 @@ Wave 3 has 12 stories. All Wave 2 dependencies are satisfied. Read the wave sche
 2. test-writer: stubs + failing tests (Red Gate — tests must FAIL before implementer starts)
 3. implementer: TDD (make tests pass, zero `.unwrap()`, clippy::pedantic clean)
 4. adversary: 3 consecutive clean passes (BC-5.39.001 — CLEAN strict = zero findings any severity)
-5. `git push origin feature/S-NNN` → PR targeting `develop` → CI (17+ checks) → squash-merge → state update
+5. `git push origin feature/S-NNN` → PR targeting `develop` → CI (17 checks) → squash-merge → state update
 6. Remove worktree: `git worktree remove .worktrees/STORY-NNN`
 
 ### After all Wave 3 stories merge: Wave 3 Gate
@@ -97,7 +109,7 @@ git fetch origin develop && git pull origin develop
 | Planning (25 DSL decisions) | DONE 2026-05-24 | q1–q25 decision docs + 14 research threads + 7/7 spikes resolved |
 | Phase 1: Spec Crystallization | DONE — APPROVED 2026-05-25 | PRD (109 BCs, 15 HS, 4 supplements) + architecture (14 ADRs, 15 VPs, 20 crates) + UX spec (10 screens, 5 flows) + L2 domain spec (12 files). 17 passes, 69 findings, 3/3 clean. |
 | Phase 2: Story Decomposition | DONE — APPROVED 2026-05-25 | 71 stories, 21 epics, 6 waves, 437 pts. 22 passes, 96+ findings, 3/3 clean. |
-| Phase 3: TDD Implementation | IN PROGRESS — Wave 1: COMPLETE + GATE PASSED. Wave 2: COMPLETE + GATE PASSED. Wave 3: NOT STARTED (next). | Per-story delivery |
+| Phase 3: TDD Implementation | IN PROGRESS — Wave 1: COMPLETE + GATE PASSED. Wave 2: COMPLETE + GATE PASSED. Wave 3: Batch 1 COMPLETE (6/17 stories, PRs #21-#26, 494 new tests). Batch 2 NEXT (8 stories). | Per-story delivery |
 | Phase 4: Holdout Evaluation | NOT STARTED | Per-wave holdout gates |
 | Phase 5: Adversarial Refinement | NOT STARTED | Post-implementation cascade |
 | Phase 6: Formal Hardening | NOT STARTED | Kani + fuzz + mutants + semgrep |
@@ -121,6 +133,21 @@ git fetch origin develop && git pull origin develop
 
 Wave 2 gate: 11 passes, 19 findings fixed, 3/3 clean (passes 9-10-11). Gate fix commits: 8d9b8952, 9dbb9592, e9c33fdc, 93ff4e5d, e93432c3. Key fixes: E-PAR-004 collision resolved, cross-crate integration tests added, EMU overflow capped, DivisionByZero reverted to E-EVL-003 per BC-1.02.001, DSL version propagated from AST.
 
+## Wave 3 Batch 1 Story Status (ALL MERGED — Batch 2 NEXT)
+
+6 root stories (no intra-wave dependencies), 494 new tests across 6 new crates. All 3/3 clean adversary convergence.
+
+| Story | Title | Crate | Tests | Adversary | PR | Commit |
+|-------|-------|-------|-------|-----------|-----|--------|
+| STORY-018 | DataSource: JSON/CSV/YAML/TOML File Loading | slideforge-data | 79 | 9 passes, 3/3 clean | #21 | 6d4d7c02 |
+| STORY-022 | Brand Loading: .pptx/.docx Template Extraction | slideforge-brand | 71 | 9 passes, 3/3 clean | #22 | de04e29a |
+| STORY-026 | Core Layout: Deck → LaidOutDeck, EMU System | slideforge-layout | 85 | 8 passes, 3/3 clean | #23 | 22d448c6 |
+| STORY-029 | Math Parser: $...$ / $$...$$ + @{var} + OMML Output | slideforge-math | 77 | 16 passes, 3/3 clean | #24 | 98c696f8 |
+| STORY-031 | Chart Renderer: bar/line/pie/scatter/area/histogram/stacked-bar | slideforge-charts | 108 | 7 passes, 3/3 clean | #25 | fece5bf2 |
+| STORY-033 | Diagram Renderer: Mermaid → PPTX-Safe SVG | slideforge-diagrams | 74 | 7 passes, 3/3 clean | #26 | 218334f1 |
+
+New crates added by Batch 1 (total workspace now 13 crates): slideforge-data, slideforge-brand, slideforge-layout, slideforge-math, slideforge-charts, slideforge-diagrams.
+
 ## Decisions Log (milestones)
 
 - 2026-05-23 — Workspace resolved, mode: greenfield
@@ -143,18 +170,21 @@ Wave 2 gate: 11 passes, 19 findings fixed, 3/3 clean (passes 9-10-11). Gate fix 
 - 2026-05-27 — STORY-014 MERGED (PR #19, b17819aa) — No-Implicit-Coercion + ${{ seq }}
 - 2026-05-27 — STORY-017 MERGED (PR #20, e8e31bab) — Color-Coded Label + WCAG Contrast + Lang
 - 2026-05-27 — WAVE 2 GATE PASSED — 11 gate passes, 19 findings fixed, 3/3 clean (passes 9-10-11)
+- 2026-05-27/28 — WAVE 3 BATCH 1 COMPLETE — 6 new crates (data, brand, layout, math, charts, diagrams), 494 new tests, 6 PRs merged (#21-#26, commits 6d4d7c02 → 218334f1)
 
 ## Session Resume Checkpoint
 
 | Field | Value |
 |-------|-------|
-| **Date** | 2026-05-27 |
-| **Position** | Phase 3, Wave 3 — NOT STARTED. All Wave 2 stories merged. Wave 2 gate passed. Ready to begin Wave 3 story delivery. |
-| **develop SHA** | e93432c3 |
-| **Workspace tests** | 992 passing, 0 failures, 3 ignored |
+| **Date** | 2026-05-28 |
+| **Position** | Phase 3, Wave 3 — Batch 1 COMPLETE (6/17 stories merged, PRs #21-#26). Batch 2 NEXT (8 stories, all dependencies satisfied). |
+| **develop SHA** | 218334f1 |
+| **Workspace tests** | 1483 passing, 0 failures |
+| **Workspace crates** | 13 (7 from Wave 1 + 6 new from Batch 1: data, brand, layout, math, charts, diagrams) |
 | **Active worktrees** | None |
 | **Open PRs** | None |
-| **Next action** | Read .factory/stories/wave-schedule.md for Wave 3 story list + batching, then begin per-story delivery |
+| **Batch 2 stories** | STORY-019, 020, 023, 027, 028, 030, 032, 034 — all can start immediately |
+| **Next action** | Read .factory/stories/wave-schedule.md for Wave 3 Batch 2 story details, then begin per-story delivery starting with STORY-019 or any Batch 2 story |
 
 ## Quality Bar (Non-Negotiable)
 

@@ -1,12 +1,19 @@
 ---
-current_wave: 2
+current_wave: 3
 current_phase: 3
 pipeline_status: IN_PROGRESS
-last_updated: 2026-05-27
+last_updated: 2026-05-28
 wave_1_gate: PASS
 wave_1_gate_date: 2026-05-27
 wave_1_gate_passes: 3
 wave_1_gate_findings_fixed: 11
+wave_2_gate: PASS
+wave_2_gate_date: 2026-05-27
+wave_2_gate_passes: 11
+wave_2_gate_findings_fixed: 19
+wave_3_batch_1_completed: 2026-05-28
+wave_3_batch_1_stories: 6
+wave_3_batch_1_tests_added: 494
 ---
 
 stories:
@@ -136,3 +143,66 @@ stories:
     merged: 2026-05-27
     pr: 17
     merge_commit: 6022075e
+  STORY-013:
+    status: merged
+    wave: 2
+    started: 2026-05-27
+    merged: 2026-05-27
+    pr: 18
+    merge_commit: dbcb694c
+  STORY-014:
+    status: merged
+    wave: 2
+    started: 2026-05-27
+    merged: 2026-05-27
+    pr: 19
+    merge_commit: b17819aa
+  STORY-017:
+    status: merged
+    wave: 2
+    started: 2026-05-27
+    merged: 2026-05-27
+    pr: 20
+    merge_commit: e8e31bab
+  STORY-018:
+    status: merged
+    wave: 3
+    started: 2026-05-27
+    merged: 2026-05-28
+    pr: 21
+    merge_commit: 6d4d7c02
+  STORY-022:
+    status: merged
+    wave: 3
+    started: 2026-05-27
+    merged: 2026-05-28
+    pr: 22
+    merge_commit: de04e29a
+  STORY-026:
+    status: merged
+    wave: 3
+    started: 2026-05-27
+    merged: 2026-05-28
+    pr: 23
+    merge_commit: 22d448c6
+  STORY-029:
+    status: merged
+    wave: 3
+    started: 2026-05-27
+    merged: 2026-05-28
+    pr: 24
+    merge_commit: 98c696f8
+  STORY-031:
+    status: merged
+    wave: 3
+    started: 2026-05-27
+    merged: 2026-05-28
+    pr: 25
+    merge_commit: fece5bf2
+  STORY-033:
+    status: merged
+    wave: 3
+    started: 2026-05-27
+    merged: 2026-05-28
+    pr: 26
+    merge_commit: 218334f1
