@@ -1,3 +1,7 @@
+// All `.expect()` calls in this module are against an in-memory `Cursor<Vec<u8>>`.
+// `quick_xml::Writer` never returns I/O errors for in-memory Cursors, so these
+// paths are infallible. A clippy::expect_used suppress here is correct.
+#![allow(clippy::expect_used)]
 //! OOXML XML serialization for individual slide layouts (BC-2.01.005).
 //!
 //! [`serialize_layout_to_xml`] converts a [`SlideLayoutDef`] to the complete
@@ -57,7 +61,9 @@ pub const HANDOUT_MASTER_STUB: &[u8] = b"\
 
 const NS_P: &str = "http://schemas.openxmlformats.org/presentationml/2006/main";
 const NS_A: &str = "http://schemas.openxmlformats.org/drawingml/2006/main";
-const NS_R: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+/// Relationship namespace — used by the PPTX exporter (STORY-037) when building
+/// `.rels` files. Not emitted in layout XML body (no r:-prefixed attributes used).
+pub const NS_R: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 
 // ─── XML serialization ────────────────────────────────────────────────────────
 
@@ -72,8 +78,11 @@ const NS_R: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relati
 /// - For dark layouts (`has_color_override = true`): `<p:clrMapOvr>` and
 ///   explicit white `<a:solidFill>` on all run elements (AC-009).
 ///
-/// `master_rel_id` is the relationship ID string pointing to the slide master
-/// (e.g., `"rId1"`). This is written into the `<p:sldLayout>` relationship.
+/// # Note on master relationship
+///
+/// The actual relationship is written to the `.rels` file by the PPTX exporter
+/// (STORY-037). The `master_rel_id` parameter is kept for API forward-compatibility
+/// and is consumed by the exporter, not embedded in the XML itself.
 ///
 /// # Panics
 ///
@@ -81,7 +90,7 @@ const NS_R: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relati
 /// `Cursor<Vec<u8>>` does not return I/O errors, so all `.expect("...")` calls
 /// are infallible. A panic would indicate a bug in `quick_xml` itself.
 #[must_use]
-pub fn serialize_layout_to_xml(def: &SlideLayoutDef, master_rel_id: &str) -> Vec<u8> {
+pub fn serialize_layout_to_xml(def: &SlideLayoutDef) -> Vec<u8> {
     let buf = Cursor::new(Vec::new());
     let mut writer = Writer::new(buf);
 
@@ -95,12 +104,14 @@ pub fn serialize_layout_to_xml(def: &SlideLayoutDef, master_rel_id: &str) -> Vec
         .expect("write xml decl");
 
     // <p:sldLayout> root element with namespaces
+    // xmlns:r is intentionally omitted — no r:-prefixed attributes are used in layout XML.
+    // The master relationship is expressed in the .rels sidecar, not in the layout body.
     let mut root = BytesStart::new("p:sldLayout");
     root.push_attribute(("xmlns:p", NS_P));
     root.push_attribute(("xmlns:a", NS_A));
-    root.push_attribute(("xmlns:r", NS_R));
-    // type attribute: standard layouts have OOXML type; custom layouts use "custom"
-    let ooxml_type_str = def.ooxml_type.as_deref().unwrap_or("custom").to_owned();
+    // type attribute: standard layouts use OOXML enum value; custom layouts use "cust"
+    // (ECMA-376 §19.7.13 ST_SlideLayoutType: valid value is "cust", not "custom").
+    let ooxml_type_str = def.ooxml_type.as_deref().unwrap_or("cust").to_owned();
     root.push_attribute(("type", ooxml_type_str.as_str()));
     // preserve attribute (required for layouts that should preserve master formatting)
     root.push_attribute(("preserve", "1"));
@@ -155,18 +166,15 @@ pub fn serialize_layout_to_xml(def: &SlideLayoutDef, master_rel_id: &str) -> Vec
         .write_event(Event::Empty(BytesStart::new("p:hf")))
         .expect("write hf");
 
-    // <p:txStyles> — text styles (required, minimal)
-    write_tx_styles(&mut writer);
+    // NOTE: <p:txStyles> is NOT emitted here.
+    // ECMA-376 §19.3.1.39: <p:txStyles> is a child of <p:sldMaster>, NOT <p:sldLayout>.
+    // Emitting it in layout XML produces schema-invalid output. Text styles for layouts
+    // are inherited from the slide master (generated in STORY-040).
 
     // </p:sldLayout>
     writer
         .write_event(Event::End(BytesEnd::new("p:sldLayout")))
         .expect("write sldLayout end");
-
-    // We store master_rel_id in a comment for the PPTX exporter to consume
-    // when building the .rels file. The actual relationship is in the .rels file,
-    // not in the layout XML itself. We use a trailing comment to carry the rId.
-    let _ = master_rel_id; // Referenced by PPTX exporter via .rels file generation
 
     writer.into_inner().into_inner()
 }
@@ -476,41 +484,6 @@ fn write_clr_map_ovr(writer: &mut Writer<Cursor<Vec<u8>>>) {
         .expect("write clrMapOvr end");
 }
 
-/// Write minimal `<p:txStyles>` required in layout XML by ECMA-376.
-fn write_tx_styles(writer: &mut Writer<Cursor<Vec<u8>>>) {
-    writer
-        .write_event(Event::Start(BytesStart::new("p:txStyles")))
-        .expect("write txStyles start");
-
-    // Minimal title style
-    writer
-        .write_event(Event::Start(BytesStart::new("p:titleStyle")))
-        .expect("write titleStyle start");
-    writer
-        .write_event(Event::End(BytesEnd::new("p:titleStyle")))
-        .expect("write titleStyle end");
-
-    // Minimal body style
-    writer
-        .write_event(Event::Start(BytesStart::new("p:bodyStyle")))
-        .expect("write bodyStyle start");
-    writer
-        .write_event(Event::End(BytesEnd::new("p:bodyStyle")))
-        .expect("write bodyStyle end");
-
-    // Minimal other style
-    writer
-        .write_event(Event::Start(BytesStart::new("p:otherStyle")))
-        .expect("write otherStyle start");
-    writer
-        .write_event(Event::End(BytesEnd::new("p:otherStyle")))
-        .expect("write otherStyle end");
-
-    writer
-        .write_event(Event::End(BytesEnd::new("p:txStyles")))
-        .expect("write txStyles end");
-}
-
 /// Generate the `[Content_Types].xml` registration string for all 31 layouts.
 ///
 /// Returns a `String` containing one `<Override PartName="...">` entry per
@@ -635,7 +608,7 @@ mod tests {
     #[test]
     fn test_layout_xml_serializes_with_valid_xml() {
         let layout = minimal_light_layout();
-        let xml_bytes = serialize_layout_to_xml(&layout, "rId1");
+        let xml_bytes = serialize_layout_to_xml(&layout);
         let xml = std::str::from_utf8(&xml_bytes).expect("output must be valid UTF-8");
         assert!(
             xml.contains("<p:sldLayout"),
@@ -657,7 +630,7 @@ mod tests {
     #[test]
     fn test_bc_2_01_005_dark_layout_xml_has_clr_map_ovr() {
         let layout = minimal_dark_layout();
-        let xml_bytes = serialize_layout_to_xml(&layout, "rId1");
+        let xml_bytes = serialize_layout_to_xml(&layout);
         let xml = std::str::from_utf8(&xml_bytes).expect("output must be valid UTF-8");
         assert!(
             xml.contains("clrMapOvr"),
@@ -675,7 +648,7 @@ mod tests {
     #[test]
     fn test_bc_2_01_005_dark_layout_xml_has_explicit_white_text() {
         let layout = minimal_dark_layout();
-        let xml_bytes = serialize_layout_to_xml(&layout, "rId1");
+        let xml_bytes = serialize_layout_to_xml(&layout);
         let xml = std::str::from_utf8(&xml_bytes).expect("output must be valid UTF-8");
         assert!(
             xml.contains("FFFFFF"),
@@ -692,7 +665,7 @@ mod tests {
     #[test]
     fn test_bc_2_01_005_layout_xml_uses_semantic_names() {
         let layout = minimal_light_layout();
-        let xml_bytes = serialize_layout_to_xml(&layout, "rId1");
+        let xml_bytes = serialize_layout_to_xml(&layout);
         let xml = std::str::from_utf8(&xml_bytes).expect("output must be valid UTF-8");
         // Must not contain the forbidden "Shape N" pattern
         assert!(
@@ -711,7 +684,7 @@ mod tests {
     #[test]
     fn test_bc_2_01_005_light_layout_xml_has_no_clr_map_ovr() {
         let layout = minimal_light_layout();
-        let xml_bytes = serialize_layout_to_xml(&layout, "rId1");
+        let xml_bytes = serialize_layout_to_xml(&layout);
         let xml = std::str::from_utf8(&xml_bytes).expect("output must be valid UTF-8");
         assert!(
             !xml.contains("clrMapOvr"),

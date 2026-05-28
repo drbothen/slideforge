@@ -154,7 +154,7 @@ impl BrandSynthesizer {
         // the PPTX exporter (STORY-037) calls serialize_layout_to_xml directly.
         // We validate serialization works by exercising it here.
         for layout in &layouts {
-            let _xml = serialize_layout_to_xml(layout, "rId1");
+            let _xml = serialize_layout_to_xml(layout);
         }
 
         // Step 7: Generate Content_Types entries (AC-013)
