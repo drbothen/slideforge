@@ -50,7 +50,7 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. It generates branded .p
 
 Phase 3 IN PROGRESS. Wave 1 COMPLETE (14/14 stories, gate PASSED). Wave 2 COMPLETE (7/7 stories, gate PASSED). Wave 3 Batch 1 COMPLETE (6 stories merged, PRs #21-#26). **Wave 3 Batch 2 IN PROGRESS (5/8 merged: STORY-019, 027, 032 + 2 earlier). 3 stories in-flight, 2 not started.**
 
-develop branch: `7641d4ea` (29 merged PRs, 1599 tests, 0 failures). 3 active worktrees (STORY-023, STORY-030, STORY-034). 0 open PRs.
+develop branch: `7641d4ea` (29 merged PRs, 1599 tests, 0 failures). 3 active worktrees (STORY-023, STORY-030, STORY-034). 1 open PR (PR #30 — STORY-034 CONFLICTING, needs rebase).
 
 ## Wave 3 Batch 2 Story Status
 
@@ -61,7 +61,7 @@ develop branch: `7641d4ea` (29 merged PRs, 1599 tests, 0 failures). 3 active wor
 | STORY-027 | Layout: DOCX Section Generation | MERGED | #29 | 7641d4ea | 8-pass adversary, 3/3 clean |
 | STORY-023 | Brand Synthesis: brand.toml → 31 Layouts | IN PROGRESS | — | 800b11d8 | Streak 2/3 CLEAN (passes 9,10) |
 | STORY-030 | Math MathML + PDF Paths | IN PROGRESS | — | fedf1ec3 | Post-font-engine refactor; next: pass 10 |
-| STORY-034 | SVG Normalization via usvg | IN PROGRESS | — | 92221f3d | 3/3 CONVERGED; PR creation pending |
+| STORY-034 | SVG Normalization via usvg | IN PROGRESS | #30 OPEN/CONFLICTING | 92221f3d | 3/3 CONVERGED; PR open, needs rebase |
 | STORY-020 | DataSource: Excel + SQLite | NOT STARTED | — | — | Depends on STORY-019 (merged) |
 | STORY-028 | Layout: shape: Block + Rich Inline | NOT STARTED | — | — | Depends on STORY-027 (merged) |
 
@@ -88,7 +88,7 @@ develop branch: `7641d4ea` (29 merged PRs, 1599 tests, 0 failures). 3 active wor
 - Convergence: 9 passes, **3/3 CONVERGED** — per-AC demos recorded in `docs/demo-evidence/STORY-034/`
 - Branch was rebased onto develop (to pick up STORY-019/027/032 merges); rebase complete and pushed
 - Implementation: NormalizedDiagramSvg newtype, usvg 0.47.0 + ab_glyph fonts, FrameContent::Diagram payload, cold-budget integration test in fresh process, snapshot test, idempotency guards
-- **Next: Check `gh pr list --head feature/S-034`. If PR exists with dirty CI → close and re-create. If no PR → `gh pr create`. Watch CI, merge when green.**
+- **Next: PR #30 is OPEN (opened 2026-05-28T16:00:24Z) but CONFLICTING. Diagnose conflict, rebase feature/S-034 onto develop, force-push (with human approval), watch CI, merge when green.**
 
 ## What to Do After In-Flight Stories Complete
 
@@ -135,7 +135,7 @@ git fetch origin develop && git pull origin develop
 | Planning (25 DSL decisions) | DONE 2026-05-24 | q1–q25 decision docs + 14 research threads + 7/7 spikes resolved |
 | Phase 1: Spec Crystallization | DONE — APPROVED 2026-05-25 | PRD (109 BCs, 15 HS, 4 supplements) + architecture (14 ADRs, 15 VPs, 20 crates) + UX spec (10 screens, 5 flows) + L2 domain spec (12 files). 17 passes, 69 findings, 3/3 clean. |
 | Phase 2: Story Decomposition | DONE — APPROVED 2026-05-25 | 71 stories, 21 epics, 6 waves, 437 pts. 22 passes, 96+ findings, 3/3 clean. |
-| Phase 3: TDD Implementation | IN PROGRESS — Wave 1: COMPLETE + GATE PASSED. Wave 2: COMPLETE + GATE PASSED. Wave 3: Batch 1 COMPLETE (6/17 stories, PRs #21-#26, 494 new tests). Batch 2: STORY-019 MERGED (PR #27, 7bc71f9c), STORY-032 MERGED (PR #28, 5ad267be), STORY-027 MERGED (PR #29, 7641d4ea). 3 in-flight (STORY-023 streak 2/3, STORY-030 post-font-engine pass 10 next, STORY-034 converged PR-pending). 2 not started (STORY-020, STORY-028). | Per-story delivery |
+| Phase 3: TDD Implementation | IN PROGRESS — Wave 1: COMPLETE + GATE PASSED. Wave 2: COMPLETE + GATE PASSED. Wave 3: Batch 1 COMPLETE (6/17 stories, PRs #21-#26, 494 new tests). Batch 2: STORY-019 MERGED (PR #27, 7bc71f9c), STORY-032 MERGED (PR #28, 5ad267be), STORY-027 MERGED (PR #29, 7641d4ea). 3 in-flight (STORY-023 streak 2/3, STORY-030 post-font-engine pass 10 next, STORY-034 converged PR #30 OPEN/CONFLICTING needs rebase). 2 not started (STORY-020, STORY-028). | Per-story delivery |
 | Phase 4: Holdout Evaluation | NOT STARTED | Per-wave holdout gates |
 | Phase 5: Adversarial Refinement | NOT STARTED | Post-implementation cascade |
 | Phase 6: Formal Hardening | NOT STARTED | Kani + fuzz + mutants + semgrep |
@@ -209,7 +209,7 @@ New crates added by Batch 1 (total workspace now 13 crates): slideforge-data, sl
 - 2026-05-28 — STORY-032 MERGED (PR #28, 5ad267be) — Chart empty-data placeholder, 7-pass adversary convergence
 - 2026-05-28 — STORY-027 MERGED (PR #29, 7641d4ea) — DOCX section generation (executive_summary + risk_register), 8-pass adversary convergence
 - 2026-05-28 — STORY-030 font engine refactor: ab_glyph 0.2.31 + embedded Latin Modern Math 733KB OTF (GFL/LPPL) replacing synthetic glyph match — authorized by user to fix Pass 9 HIGH findings; now at pass 10 threshold
-- 2026-05-28 — STORY-034 adversary 3/3 CONVERGED (9 passes); branch rebased onto develop (picks up STORY-019/027/032); PR creation pending
+- 2026-05-28 — STORY-034 adversary 3/3 CONVERGED (9 passes); branch rebased onto develop (picks up STORY-019/027/032); PR #30 OPEN (CONFLICTING, needs rebase)
 
 ## Session Resume Checkpoint
 
@@ -221,10 +221,10 @@ New crates added by Batch 1 (total workspace now 13 crates): slideforge-data, sl
 | **Workspace tests** | 1599 passing, 0 failures |
 | **Workspace crates** | 13 (7 from Wave 1 + 6 new from Batch 1: data, brand, layout, math, charts, diagrams) |
 | **Active worktrees** | `.worktrees/STORY-023` (feature/S-023, 800b11d8), `.worktrees/STORY-030` (feature/S-030, fedf1ec3), `.worktrees/STORY-034` (feature/S-034, 92221f3d) |
-| **Open PRs** | None (STORY-034 converged, PR not yet created) |
-| **In-flight stories** | STORY-023: streak 2/3 CLEAN, need 1 more pass. STORY-030: post-font-engine, next pass 10. STORY-034: 3/3 CONVERGED, create PR. |
+| **Open PRs** | 1 (PR #30 — STORY-034 CONFLICTING, needs rebase) |
+| **In-flight stories** | STORY-023: streak 2/3 CLEAN, need 1 more pass. STORY-030: post-font-engine, next pass 10. STORY-034: 3/3 CONVERGED, PR #30 OPEN/CONFLICTING. |
 | **Not-started stories** | STORY-020 (Excel+SQLite, dep STORY-019 merged), STORY-028 (shape:, dep STORY-027 merged) |
-| **Highest priority next actions** | 1. STORY-034: create PR (`gh pr create`) + watch CI + merge. 2. STORY-023: adversary pass 11 → if clean, push+demos+PR. 3. STORY-030: adversary pass 10 → continue 3-CLEAN. 4. After those 3 merge: start STORY-020 + STORY-028. |
+| **Highest priority next actions** | 1. STORY-034: diagnose conflict + rebase + force-push (human approval) + watch CI + merge. 2. STORY-023: adversary pass 11 → if clean, push+demos+PR. 3. STORY-030: adversary pass 10 → continue 3-CLEAN. 4. After those 3 merge: start STORY-020 + STORY-028. |
 
 ## Quality Bar (Non-Negotiable)
 

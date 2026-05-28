@@ -62,6 +62,10 @@ into a connected formal document automatically.
    it is not re-parsed from the source file.
 3. `report` register content in slides also flows into the DOCX body (per BC-1.14.002),
    separate from auto-generated sections.
+4. Slides with `register: notes` do NOT contribute to the auto-generated
+   `executive_summary`. The notes register is speaker-facing content and must not
+   leak into formal document output.  This is enforced in `collect_executive_summary`
+   (see MED-004 in `slideforge-layout/src/sections.rs`).
 
 ## Edge Cases
 

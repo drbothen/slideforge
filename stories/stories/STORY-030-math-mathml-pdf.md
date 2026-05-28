@@ -58,7 +58,7 @@ Complete the `MathRenderer` plugin by implementing the remaining two format rend
 
 | BC | Title | Covered ACs |
 |----|-------|-------------|
-| BC-1.10.003 | Math renders to OMML for PPTX/DOCX, MathML for HTML, paths for PDF | AC-001, AC-002, AC-003, AC-004 |
+| BC-1.10.003 | Math renders to OMML for PPTX/DOCX, MathML for HTML, paths for PDF | AC-001, AC-002, AC-003, AC-004, AC-005 |
 
 ## Acceptance Criteria
 

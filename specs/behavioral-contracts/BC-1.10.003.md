@@ -10,7 +10,7 @@ inputs: [domain-spec/L2-INDEX.md]
 input-hash: "[pending]"
 traces_to: domain-spec/L2-INDEX.md
 origin: greenfield
-subsystem: SS-TBD
+subsystem: SS-13
 capability: CAP-012
 lifecycle_status: active
 introduced: v1.0.0
@@ -88,7 +88,7 @@ representations are derived.
 | Capability Anchor Justification | CAP-012 ("Math and LaTeX Rendering") per capabilities.md §CAP-012 — "Produce OMML for PPTX/DOCX, MathML/KaTeX for HTML, vector paths for PDF" is verbatim from CAP-012 |
 | L2 Domain Invariants | DI-012 (single .sf source produces all formats consistently) |
 | Architecture Module | slideforge-math crate (filled by architect) |
-| Stories | (filled by story-writer) |
+| Stories | STORY-029, STORY-030 |
 
 ## Related BCs
 
