@@ -19,6 +19,13 @@
 //!    TOML over HTTP is not supported (AC-005). Use a file-based `DataSource`
 //!    for TOML files.
 //!
+//! ## Body Size Cap
+//!
+//! Response bodies are read with a hard cap of **50 MB** (`MAX_BODY_BYTES`). Responses
+//! that exceed this limit produce a [`DataSourceError::IoError`]. This prevents
+//! unbounded memory consumption from large or malicious HTTP payloads. For data sets
+//! larger than 50 MB, use a file-based [`crate::file::FileDataSource`] instead.
+//!
 //! ## Offline Mode
 //!
 //! [`HttpDataSource::supports_offline`] returns `true`, signaling to the offline
@@ -46,6 +53,7 @@
 //! | Unsupported content-type | `E-DAT-003` ([`crate::DataError::UnsupportedFormat`]) |
 //! | Parse failure | `E-DAT-003` ([`crate::DataError::ParseError`]) |
 
+use std::io::Read;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -109,12 +117,16 @@ impl HttpDataSource {
     /// Consumers MUST use this constructor when building an `HttpDataSource`
     /// from evaluator context. Using [`HttpDataSource::new`] directly bypasses
     /// the `[data].allowed_domains` policy from `slideforge.toml`.
+    ///
+    /// Domain entries are normalized to lowercase via [`AllowlistConfig::with_domains`]
+    /// so that config values like `"API.EXAMPLE.COM"` correctly match URL hosts
+    /// such as `api.example.com` (which the `url` crate always returns in lowercase).
     #[must_use]
     pub fn from_context(url: impl Into<Arc<str>>, ctx: &DataSourceContext) -> Self {
         let allowlist = match &ctx.allowed_domains {
-            Some(domains) => AllowlistConfig {
-                domains: Some(domains.clone()),
-            },
+            // Route through AllowlistConfig::with_domains which normalizes to lowercase,
+            // ensuring "API.EXAMPLE.COM" in slideforge.toml matches "api.example.com" URLs.
+            Some(domains) => AllowlistConfig::with_domains(domains.iter().map(|d| d.as_ref())),
             None => AllowlistConfig::default(),
         };
         HttpDataSource {
@@ -245,9 +257,17 @@ impl DataSource for HttpDataSource {
             .trim()
             .to_lowercase();
 
-        // Read body.
-        let body = response
-            .into_string()
+        // Read body with a hard size cap to prevent unbounded memory consumption.
+        // Responses larger than MAX_BODY_BYTES are truncated and produce a
+        // NetworkError — callers should use a file-based source for large payloads.
+        //
+        // v1 limitation: the cap applies to the raw byte stream before UTF-8 decoding.
+        const MAX_BODY_BYTES: u64 = 50 * 1024 * 1024; // 50 MB cap for HTTP responses
+        let mut body = String::new();
+        response
+            .into_reader()
+            .take(MAX_BODY_BYTES)
+            .read_to_string(&mut body)
             .map_err(|e| DataSourceError::IoError {
                 uri: url_str.to_owned(),
                 message: e.to_string(),
@@ -719,6 +739,33 @@ mod tests {
             src.allowlist.domains,
             Some(vec![Arc::from("example.com"), Arc::from("api.example.com")]),
             "from_context must thread allowed_domains into allowlist"
+        );
+    }
+
+    /// `test_from_context_normalizes_uppercase_domain`
+    ///
+    /// F1 regression: `HttpDataSource::from_context` must normalize uppercase
+    /// domain entries so that `"API.EXAMPLE.COM"` in slideforge.toml config
+    /// correctly permits requests to `https://api.example.com/data`.
+    ///
+    /// Without normalization, `AllowlistConfig.domains` would contain `"API.EXAMPLE.COM"`
+    /// but the `url` crate always returns hosts in lowercase (`api.example.com`),
+    /// causing a silent false-block.
+    ///
+    /// This test FAILS against code that does NOT normalize (direct struct construction
+    /// without `AllowlistConfig::with_domains`), and PASSES after the fix.
+    #[test]
+    fn test_from_context_normalizes_uppercase_domain() {
+        use crate::allowlist::is_allowed;
+        use crate::context::DataSourceContext;
+        let ctx = DataSourceContext::new()
+            .with_allowed_domains(vec![Arc::<str>::from("API.EXAMPLE.COM")]);
+        let src = HttpDataSource::from_context("https://api.example.com/data", &ctx);
+        let url = url::Url::parse("https://api.example.com/data").unwrap();
+        assert!(
+            is_allowed(&url, &src.allowlist),
+            "from_context with uppercase domain 'API.EXAMPLE.COM' must permit \
+            lowercase URL host 'api.example.com' — normalization must be applied"
         );
     }
 

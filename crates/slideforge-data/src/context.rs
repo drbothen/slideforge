@@ -64,10 +64,19 @@ impl DataSourceContext {
 
     /// Set the SSRF domain allowlist.
     ///
+    /// Each entry is **normalized to lowercase** before storing, ensuring that
+    /// user-supplied values like `"API.EXAMPLE.COM"` from `slideforge.toml` match
+    /// the lowercase host components returned by the `url` crate.
+    ///
     /// Returns `self` for chaining.
     #[must_use]
     pub fn with_allowed_domains(mut self, domains: Vec<Arc<str>>) -> Self {
-        self.allowed_domains = Some(domains);
+        self.allowed_domains = Some(
+            domains
+                .into_iter()
+                .map(|d| Arc::<str>::from(d.to_lowercase()))
+                .collect(),
+        );
         self
     }
 }
@@ -103,7 +112,36 @@ mod tests {
     #[test]
     fn test_bc_5_04_003_context_with_allowed_domains() {
         let domains = vec![Arc::from("example.com"), Arc::from("api.example.com")];
-        let ctx = DataSourceContext::new().with_allowed_domains(domains.clone());
-        assert_eq!(ctx.allowed_domains, Some(domains));
+        let ctx = DataSourceContext::new().with_allowed_domains(domains);
+        // Entries are stored lowercase — these are already lowercase, so unchanged.
+        assert_eq!(
+            ctx.allowed_domains,
+            Some(vec![Arc::from("example.com"), Arc::from("api.example.com")])
+        );
+    }
+
+    /// `test_BC_5_04_003_context_with_allowed_domains_normalizes_uppercase`
+    ///
+    /// F1 regression: `with_allowed_domains` must lowercase entries so that
+    /// user config values like `"API.EXAMPLE.COM"` (from slideforge.toml) correctly
+    /// match `api.example.com` URL hosts returned by the `url` crate.
+    ///
+    /// This test FAILS against code that stores entries without normalization,
+    /// and PASSES after the lowercase fix.
+    #[test]
+    fn test_bc_5_04_003_context_with_allowed_domains_normalizes_uppercase() {
+        let ctx = DataSourceContext::new()
+            .with_allowed_domains(vec![Arc::from("API.EXAMPLE.COM"), Arc::from("Data.Example.Com")]);
+        let stored = ctx.allowed_domains.unwrap();
+        assert_eq!(
+            stored[0].as_ref(),
+            "api.example.com",
+            "with_allowed_domains must lowercase uppercase entries"
+        );
+        assert_eq!(
+            stored[1].as_ref(),
+            "data.example.com",
+            "with_allowed_domains must lowercase mixed-case entries"
+        );
     }
 }
