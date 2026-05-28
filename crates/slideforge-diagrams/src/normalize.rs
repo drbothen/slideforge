@@ -131,22 +131,6 @@ fn font_db() -> Arc<usvg::fontdb::Database> {
     }))
 }
 
-/// Return the number of font faces currently loaded in the cached font database.
-///
-/// Exposed for diagnostic use in tests and CI log scraping (STORY-034 PR #30
-/// Linux investigation). Returns 0 if the font database has not yet been
-/// initialized (i.e., `usvg_normalize` has never been called in this process).
-///
-/// # Temporary
-///
-/// TEMPORARY: This function exists solely for diagnostic `eprintln!` instrumentation
-/// added in STORY-034 iteration 2 to diagnose why Mermaid node labels are dropped
-/// on Linux CI despite font installation. Will be removed in iteration 3 once
-/// the root cause is identified and fixed.
-pub fn font_db_face_count() -> usize {
-    FONT_DB.get().map_or(0, |db| db.len())
-}
-
 /// Normalize a [`RawDiagramSvg`] into a PPTX-safe [`NormalizedDiagramSvg`]
 /// using `usvg` 0.47.0.
 ///
@@ -211,8 +195,118 @@ pub fn usvg_normalize(
     // tests in tests/cold_budget.rs run in a fresh process (each `tests/*.rs`
     // file compiles to a separate binary) and therefore see an uninitialized
     // FONT_DB — this is the correct way to measure cold-path latency.
+    let db = font_db();
+    tracing::debug!(
+        fontdb_count = db.len(),
+        raw_svg_len = raw.as_str().len(),
+        "usvg_normalize: parsing raw SVG with fontdb",
+    );
     let opt = usvg::Options {
-        fontdb: font_db(),
+        fontdb: db,
+        font_resolver: usvg::FontResolver {
+            // Custom font selector: try the default resolution first (which
+            // iterates all CSS font families in order). If that fails — which
+            // happens on Linux CI where Mermaid's default theme requests
+            // font-family="'trebuchet ms', verdana, arial, sans-serif" but
+            // fontdb does case-sensitive name matching and those CSS-lowercase
+            // names don't match the proper-cased names stored in the installed
+            // font files — fall back explicitly to known-installed Linux fonts.
+            //
+            // Root cause (confirmed in iter-4):
+            //   mermaid-rs-renderer 0.2.2 theme.rs:87 emits:
+            //     font-family="'trebuchet ms', verdana, arial, sans-serif"
+            //   svgtypes parses quoted names preserving case → "trebuchet ms"
+            //   svgtypes parses unquoted idents preserving case → "verdana", "arial"
+            //   fontdb Query compares names with == (case-sensitive byte match)
+            //   Installed fonts: Liberation Sans, DejaVu Sans, Noto Sans
+            //   None of "trebuchet ms", "verdana", "arial" == "Liberation Sans" etc.
+            //   fontdb::Family::SansSerif → db.family_sans_serif = "Arial" (default)
+            //   "Arial" also doesn't match "Liberation Sans" → query returns None
+            //   usvg drops the <text> node entirely when select_font returns None
+            //
+            // Fix: extend the default resolver with known-good fallback names.
+            //
+            // This closure inlines the logic of usvg::FontResolver::default_font_selector()
+            // (not calling it to avoid a Box allocation on every font resolution) and
+            // appends an explicit fallback pass over known-installed Linux fonts when
+            // the CSS-family-list query returns None.
+            select_font: Box::new(|font, db| {
+                // --- Inline of default_font_selector start ---
+                // Map svgtypes::FontFamily variants to fontdb::Family variants.
+                let mut name_list: Vec<usvg::fontdb::Family<'_>> = font
+                    .families()
+                    .iter()
+                    .map(|f| match f {
+                        usvg::FontFamily::Serif => usvg::fontdb::Family::Serif,
+                        usvg::FontFamily::SansSerif => usvg::fontdb::Family::SansSerif,
+                        usvg::FontFamily::Cursive => usvg::fontdb::Family::Cursive,
+                        usvg::FontFamily::Fantasy => usvg::fontdb::Family::Fantasy,
+                        usvg::FontFamily::Monospace => usvg::fontdb::Family::Monospace,
+                        usvg::FontFamily::Named(s) => usvg::fontdb::Family::Name(s),
+                    })
+                    .collect();
+                // Append Serif as final generic fallback (mirrors default_font_selector).
+                name_list.push(usvg::fontdb::Family::Serif);
+
+                let weight = usvg::fontdb::Weight(font.weight());
+                let stretch = match font.stretch() {
+                    usvg::FontStretch::UltraCondensed => usvg::fontdb::Stretch::UltraCondensed,
+                    usvg::FontStretch::ExtraCondensed => usvg::fontdb::Stretch::ExtraCondensed,
+                    usvg::FontStretch::Condensed => usvg::fontdb::Stretch::Condensed,
+                    usvg::FontStretch::SemiCondensed => usvg::fontdb::Stretch::SemiCondensed,
+                    usvg::FontStretch::Normal => usvg::fontdb::Stretch::Normal,
+                    usvg::FontStretch::SemiExpanded => usvg::fontdb::Stretch::SemiExpanded,
+                    usvg::FontStretch::Expanded => usvg::fontdb::Stretch::Expanded,
+                    usvg::FontStretch::ExtraExpanded => usvg::fontdb::Stretch::ExtraExpanded,
+                    usvg::FontStretch::UltraExpanded => usvg::fontdb::Stretch::UltraExpanded,
+                };
+                let style = match font.style() {
+                    usvg::FontStyle::Normal => usvg::fontdb::Style::Normal,
+                    usvg::FontStyle::Italic => usvg::fontdb::Style::Italic,
+                    usvg::FontStyle::Oblique => usvg::fontdb::Style::Oblique,
+                };
+
+                let primary_query = usvg::fontdb::Query {
+                    families: &name_list,
+                    weight,
+                    stretch,
+                    style,
+                };
+                if let Some(id) = db.query(&primary_query) {
+                    return Some(id);
+                }
+                // --- Inline of default_font_selector end ---
+
+                // Attempt 2: explicit fallback to known-installed Linux fonts.
+                // These are present on GitHub Actions ubuntu-latest after
+                // `apt-get install fonts-dejavu-core fonts-noto-core fonts-liberation`.
+                // Prioritize Liberation Sans (Arial-metric-compatible) then DejaVu
+                // Sans, then Noto Sans, then FreeSans (fonts-freefont-ttf).
+                for family_name in &["Liberation Sans", "DejaVu Sans", "Noto Sans", "FreeSans"] {
+                    let fallback_query = usvg::fontdb::Query {
+                        families: &[usvg::fontdb::Family::Name(family_name)],
+                        weight,
+                        stretch,
+                        style,
+                    };
+                    if let Some(id) = db.query(&fallback_query) {
+                        tracing::debug!(
+                            requested_families = ?font.families(),
+                            fallback_family = family_name,
+                            "usvg font_resolver: default resolution failed, using fallback font",
+                        );
+                        return Some(id);
+                    }
+                }
+
+                tracing::warn!(
+                    requested_families = ?font.families(),
+                    "usvg font_resolver: no font found — text nodes may be dropped",
+                );
+                None
+            }),
+            select_fallback: usvg::FontResolver::default_fallback_selector(),
+        },
         ..usvg::Options::default()
     };
 
