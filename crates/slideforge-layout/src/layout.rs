@@ -25,8 +25,17 @@
 //! ## Purity (AC-008)
 //!
 //! `layout::run` is a **pure function**: no file I/O, no network access, no
-//! `tracing` spans, no `println!`, no random state. This purity makes it
-//! Kani-amenable (Phase 6) and enables full proptest coverage of VP-011.
+//! `println!`, no random state. This purity makes it Kani-amenable (Phase 6)
+//! and enables full proptest coverage of VP-011.
+//!
+//! **Note on tracing diagnostics:** `collect_sections` emits `tracing::warn!`
+//! events in two specific cases: (a) when a manual section supersedes an
+//! auto-generated one (BC-3.02.001 EC-002 diagnostic), and (b) when
+//! `section_order:` names a section that was not collected. These diagnostic
+//! emissions are documented side-effects — they do not affect the output value
+//! and do not block Kani analysis (tracing is a no-op in proof mode). The
+//! "no side effects" purity claim is narrowed to: no I/O, no mutable global
+//! state, and fully deterministic output for identical inputs.
 
 use std::sync::Arc;
 
@@ -34,6 +43,7 @@ use slideforge_types::{Brand, Deck, FieldValue, Register, Value};
 
 use crate::error::LayoutError;
 use crate::regions::region_frames_for;
+use crate::sections::collect_sections;
 use crate::text_flow::compute_text_flow;
 use crate::types::{
     DEFAULT_PAGE_HEIGHT, DEFAULT_PAGE_WIDTH, FrameContent, LaidOutDeck, LaidOutSlide, PageSize,
@@ -67,7 +77,10 @@ use crate::types::{
 ///
 /// # Purity (AC-008)
 ///
-/// This function is pure: no I/O, no side effects, no panics.
+/// This function is pure: no file I/O, no network access, no random state, no
+/// panics. `collect_sections` emits `tracing::warn!` diagnostic events in two
+/// cases (supersession notification and unknown `section_order` name); these are
+/// documented side-effects and do not affect the deterministic output value.
 ///
 /// # Errors
 ///
@@ -192,8 +205,22 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
         });
     }
 
+    // STORY-027: Section collection pass.
+    // Collect all document sections (auto-generated + manual) from the deck.
+    // Auto-generated sections: ExecutiveSummary from takeaway fields, RiskRegister
+    // from severity_cards slides. Manual sections from section_blocks.
+    // Supersession and ordering rules are applied inside collect_sections.
+    //
+    // Architectural note (HIGH-005): sections are collected unconditionally for
+    // ALL export targets and stored on LaidOutDeck. PPTX and HTML exporters
+    // filter by consulting GeneratedSection::target_formats; they skip sections
+    // where their format is not listed. This single-pass design means the layout
+    // IR is self-contained: exporters do not need to re-examine the Deck.
+    let sections = collect_sections(deck)?;
+
     Ok(LaidOutDeck {
         page_size,
         slides: laid_out_slides,
+        sections,
     })
 }

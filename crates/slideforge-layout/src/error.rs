@@ -7,6 +7,7 @@
 use thiserror::Error;
 
 use crate::types::BoundingBox;
+use slideforge_types::SourceSpan;
 
 /// Errors produced by the layout engine.
 ///
@@ -65,6 +66,25 @@ pub enum LayoutError {
         slide_type_keyword: String,
     },
 
+    /// A manually authored `section <type>:` block has an unrecognised type name.
+    ///
+    /// Supported section types are: `executive_summary`, `risk_register`,
+    /// `methodology`, `scope`, `approval`, `appendix`, `glossary`.
+    /// `executive_summary` and `risk_register` are allowed as manual overrides
+    /// (AC-006 / BC-3.02.001 EC-002).  Any other name produces this error
+    /// (AC-004 / BC-3.02.002 EC-001).
+    #[error(
+        "layout error: unknown section type '{name}' at {span}. \
+         Known types: [executive_summary, risk_register, methodology, scope, \
+         approval, appendix, glossary]"
+    )]
+    UnknownSectionType {
+        /// The unrecognised section type name from the `.sf` source.
+        name: String,
+        /// Source location of the unrecognised `section <type>:` block.
+        span: SourceSpan,
+    },
+
     /// A `BoundingBox` in the produced layout has invalid coordinates.
     ///
     /// Per AC-014 / BC-3.06.003, every bounding box must satisfy:
@@ -80,6 +100,70 @@ pub enum LayoutError {
         frame_index: usize,
         /// The offending bounding box.
         bbox: BoundingBox,
+    },
+
+    /// A `takeaway:` field value on a slide is not a resolved plain string.
+    ///
+    /// The layout stage expects the evaluator to have resolved all
+    /// `FieldValue::Expr` and `FieldValue::Interpolated` values before layout
+    /// runs. If an unresolved variant is encountered on a `takeaway:` field,
+    /// this error is returned (HIGH-002 / BC-3.02.001).
+    #[error(
+        "layout error: slide {source_slide_index}: takeaway field is unresolved \
+         (expected Literal(Str), found a non-literal FieldValue variant)"
+    )]
+    UnresolvedTakeaway {
+        /// Zero-based index of the slide with the unresolved takeaway.
+        source_slide_index: usize,
+    },
+
+    /// A required field is missing from a risk card entry.
+    ///
+    /// Each entry in the `cards:` list of a `severity_cards` slide must be a
+    /// `Value::Map` containing `title`, `severity`, `description`, and `owner`
+    /// keys. When a key is absent or not a plain string, this error is returned
+    /// (HIGH-001 / BC-3.02.001).
+    #[error(
+        "layout error: slide {slide_index}: risk card at index {card_index} is missing \
+         required field '{field}' (or it is not a plain string)"
+    )]
+    MissingRiskCardField {
+        /// Zero-based index of the `severity_cards` slide.
+        slide_index: usize,
+        /// Zero-based index of the card within the slide's `cards:` list.
+        card_index: usize,
+        /// The name of the missing or non-string field.
+        field: String,
+    },
+
+    /// The `cards:` field on a `severity_cards` slide is present but holds a
+    /// wrong-typed `Literal` value (not a `List`).
+    ///
+    /// This is a type-error in the .sf source — `cards:` must be a YAML-style
+    /// list of maps, not a scalar or map at the top level (HIGH-003).
+    #[error(
+        "layout error: slide {slide_index}: 'cards' field has wrong type — expected List, \
+         found a non-List Literal value: {reason}"
+    )]
+    MalformedSeverityCards {
+        /// Zero-based index of the `severity_cards` slide.
+        slide_index: usize,
+        /// Human-readable description of the actual type found.
+        reason: String,
+    },
+
+    /// The `cards:` field on a `severity_cards` slide is an unresolved
+    /// non-Literal `FieldValue` (e.g., `Expr`, `Interpolated`, `Inlines`).
+    ///
+    /// The evaluator must resolve all field values before layout runs.
+    /// An unresolved `cards:` field indicates an evaluator bug (HIGH-003).
+    #[error(
+        "layout error: slide {slide_index}: 'cards' field is an unresolved FieldValue variant \
+         (expected Literal(List)); this indicates an evaluator bug"
+    )]
+    UnresolvedSeverityCards {
+        /// Zero-based index of the `severity_cards` slide.
+        slide_index: usize,
     },
 }
 

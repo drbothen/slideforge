@@ -217,6 +217,7 @@ mod tests {
             slideforge_version: Arc::from("0.1.0"),
             lang: Some(Arc::from("en-US")),
             author: None,
+            section_order: None,
         }
     }
 
@@ -226,6 +227,7 @@ mod tests {
             vars: OrderedMap::new(),
             metadata: make_metadata(),
             registers: OrderedMap::new(),
+            section_blocks: vec![],
         }
     }
 

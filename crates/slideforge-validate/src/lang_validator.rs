@@ -135,8 +135,10 @@ mod tests {
                 slideforge_version: Arc::from("0.1.0"),
                 lang: lang.map(Arc::from),
                 author: None,
+                section_order: None,
             },
             registers: OrderedMap::new(),
+            section_blocks: vec![],
         }
     }
 

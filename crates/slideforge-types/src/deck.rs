@@ -1,4 +1,4 @@
-//! The semantic pre-layout IR — [`Deck`] and [`DeckMetadata`].
+//! The semantic pre-layout IR — [`Deck`], [`DeckMetadata`], and [`SectionBlock`].
 //!
 //! The slideforge pipeline transforms a parsed `.sf` file into a [`Deck`] —
 //! the semantic, pre-layout intermediate representation. Geometric layout
@@ -13,7 +13,48 @@ use crate::block::Block;
 use crate::ordered_map::OrderedMap;
 use crate::register::Register;
 use crate::slide::Slide;
+use crate::span::SourceSpan;
 use crate::value::Value;
+
+/// A manually authored document section block from `section <type>:` DSL syntax.
+///
+/// `SectionBlock` captures a `section <type>: ...` declaration at the deck
+/// level. It is stored on [`Deck::section_blocks`] and consumed by the layout
+/// engine's section collection pass (BC-3.02.002).
+///
+/// ## Supported section types
+///
+/// `executive_summary`, `risk_register`, `methodology`, `scope`, `approval`,
+/// `appendix`, `glossary`. An unrecognised type name produces
+/// `LayoutError::UnknownSectionType` at layout time.
+///
+/// `executive_summary` and `risk_register` are special: when a manual block
+/// with one of these names is present, the layout engine applies the
+/// supersession rule (BC-3.02.001 EC-002 / BC-3.02.002 AC-006) and suppresses
+/// the corresponding auto-generated section. The remaining five types
+/// (`methodology`, `scope`, `approval`, `appendix`, `glossary`) are purely
+/// manual sections with no auto-generated equivalent.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SectionBlock {
+    /// The section type name (e.g., `"methodology"`, `"scope"`).
+    pub name: Arc<str>,
+
+    /// Section content fields declared inside the block.
+    ///
+    /// Keys are field names; values are the resolved field values. Uses
+    /// [`OrderedMap`] to preserve insertion order (determinism requirement)
+    /// and satisfy the `Hash` bound on all IR types.
+    ///
+    /// NOTE: body uses `Value` (not `FieldValue`) so it cannot represent rich
+    /// inline formatting or nested `report:` sub-blocks today. BC-3.02.002
+    /// postcondition 1 and EC-004 require these capabilities; full support is
+    /// deferred to a future IR-extension story (cross-crate work needed to
+    /// introduce `FieldValue::Inlines` and nested `Vec<Block>` in `SectionBlock`).
+    pub body: OrderedMap<Arc<str>, Value>,
+
+    /// Source location of the `section <type>:` declaration.
+    pub span: SourceSpan,
+}
 
 /// Deck-level metadata.
 ///
@@ -36,6 +77,15 @@ pub struct DeckMetadata {
 
     /// The deck author (for PDF metadata and DOCX properties).
     pub author: Option<Arc<str>>,
+
+    /// Explicit section ordering override (AC-007 / BC-3.02.002).
+    ///
+    /// When `Some`, the layout engine sorts the collected sections to match
+    /// the declared order. Sections not listed appear at the end in default
+    /// order. Section names must match `SectionKind` display names
+    /// (`"executive_summary"`, `"risk_register"`) or the manual section type
+    /// name (e.g., `"methodology"`).
+    pub section_order: Option<Vec<Arc<str>>>,
 }
 
 /// The semantic, pre-layout intermediate representation of a presentation.
@@ -61,6 +111,14 @@ pub struct Deck {
     /// Register-gated content blocks at the deck level (e.g., a shared
     /// appendix visible only in the document export).
     pub registers: OrderedMap<Register, Vec<Block>>,
+
+    /// Manually authored section blocks from `section <type>:` DSL syntax
+    /// (BC-3.02.002).
+    ///
+    /// In source order. The layout engine collects these into
+    /// `GeneratedSection`s with `SectionSource::ManuallyAuthored`. An
+    /// unrecognised type name returns `LayoutError::UnknownSectionType`.
+    pub section_blocks: Vec<SectionBlock>,
 }
 
 #[cfg(test)]
@@ -75,6 +133,7 @@ mod tests {
             slideforge_version: Arc::from("0.1.0"),
             lang: Some(Arc::from("en-US")),
             author: None,
+            section_order: None,
         }
     }
 
@@ -84,6 +143,7 @@ mod tests {
             vars: OrderedMap::new(),
             metadata: make_metadata(),
             registers: OrderedMap::new(),
+            section_blocks: vec![],
         }
     }
 
@@ -149,6 +209,7 @@ mod tests {
             slideforge_version: Arc::from("0.1.0"),
             lang: Some(Arc::from("en-US")),
             author: Some(Arc::from("Jane Doe")),
+            section_order: None,
         };
         assert_eq!(meta.author.as_deref(), Some("Jane Doe"));
     }
@@ -161,6 +222,7 @@ mod tests {
             slideforge_version: Arc::from("0.1.0"),
             lang: None,
             author: None,
+            section_order: None,
         };
         assert!(meta.title.is_none());
         assert!(meta.lang.is_none());

@@ -456,8 +456,10 @@ mod tests {
                 slideforge_version: std::sync::Arc::from("0.1.0"),
                 lang: None,
                 author: None,
+                section_order: None,
             },
             registers: OrderedMap::new(),
+            section_blocks: vec![],
         }
     }
 
@@ -465,6 +467,7 @@ mod tests {
         LaidOutDeck {
             page_size: PageSize::default(),
             slides: vec![],
+            sections: vec![],
         }
     }
 
