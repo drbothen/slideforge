@@ -44,16 +44,20 @@ use crate::error::BrandError;
 
 /// Validate and normalise a user-declared hex color string from `brand.toml`.
 ///
-/// Accepts only `"#RRGGBB"` with 6 uppercase ASCII hex digits.
-/// Returns `Err(BrandError::InvalidHexColor)` for any invalid input including:
+/// Accepts `"#RRGGBB"` hex strings with 6 ASCII hex digits (upper or lowercase).
+/// Lowercase digits are accepted and normalised to uppercase on return
+/// (F-PASS11-LOW-4: user-typed lowercase hex like `"#3b82f6"` → `"#3B82F6"`).
+///
+/// Returns `Err(BrandError::InvalidHexColor)` for any structurally invalid input:
 /// - Named CSS colors (`"red"`)
-/// - Lowercase hex (`"#3b82f6"`)
 /// - Short hex (`"#3B82F"`, 5 hex digits)
 /// - Alpha hex (`"#3B82F6FF"`, 8 hex digits)
 /// - Empty string (`""`)
+/// - Non-hex digit in value body (`"#ZZZZZZ"`)
 ///
+/// All returned `Arc<str>` values are uppercase `"#RRGGBB"` (invariant 3).
 /// This is called for every user-declared slot before it enters the inference
-/// pipeline. Values that pass validation are stored as-is (already uppercase).
+/// pipeline. Values that pass validation are stored normalised to uppercase.
 pub(crate) fn validate_hex(slot_name: &str, value: &str) -> Result<Arc<str>, BrandError> {
     if value.len() != 7 || !value.starts_with('#') {
         return Err(BrandError::InvalidHexColor {
@@ -68,14 +72,9 @@ pub(crate) fn validate_hex(slot_name: &str, value: &str) -> Result<Arc<str>, Bra
             value: Arc::from(value),
         });
     }
-    // Reject lowercase hex digits (invariant 3: uppercase only).
-    if hex_digits.chars().any(|c| c.is_ascii_lowercase()) {
-        return Err(BrandError::InvalidHexColor {
-            slot_name: Arc::from(slot_name),
-            value: Arc::from(value),
-        });
-    }
-    Ok(Arc::from(value))
+    // Normalise to uppercase (F-PASS11-LOW-4): user-typed lowercase is accepted
+    // and stored as uppercase so that all downstream invariants (invariant 3) hold.
+    Ok(Arc::from(value.to_ascii_uppercase().as_str()))
 }
 
 // ─── Public entry point ───────────────────────────────────────────────────────
@@ -389,9 +388,16 @@ fn hsl_to_hex(hue: f32, sat: f32, lum: f32) -> String {
 /// Darken a `"#RRGGBB"` hex color by `pct` of its current lightness.
 ///
 /// `pct` is in `[0.0, 1.0]` (e.g., `0.15` = darken by 15%).
+/// Extreme inputs (`pct = 1.0`) silently clamp to `#000000` in release builds.
+/// In debug builds, an out-of-range `pct` triggers `debug_assert!` to surface
+/// unintentional misuse (F-PASS11-LOW-5).
 /// Returns an uppercase `"#RRGGBB"` string.
 #[allow(clippy::many_single_char_names)]
 pub(crate) fn darken_hex(hex: &str, pct: f32) -> String {
+    debug_assert!(
+        (0.0..=1.0).contains(&pct),
+        "darken_hex: percentage out of range: {pct} (expected 0.0..=1.0)"
+    );
     let (hue, sat, lum) = hex_to_hsl(hex);
     hsl_to_hex(hue, sat, (lum * (1.0 - pct)).max(0.0))
 }
@@ -399,9 +405,16 @@ pub(crate) fn darken_hex(hex: &str, pct: f32) -> String {
 /// Lighten a `"#RRGGBB"` hex color by `pct` towards white.
 ///
 /// `pct` is in `[0.0, 1.0]` (e.g., `0.20` = blend 20% towards white).
+/// Extreme inputs (`pct = 1.0`) silently clamp to `#FFFFFF` in release builds.
+/// In debug builds, an out-of-range `pct` triggers `debug_assert!` to surface
+/// unintentional misuse (F-PASS11-LOW-5).
 /// Returns an uppercase `"#RRGGBB"` string.
 #[allow(clippy::many_single_char_names)]
 pub(crate) fn lighten_hex(hex: &str, pct: f32) -> String {
+    debug_assert!(
+        (0.0..=1.0).contains(&pct),
+        "lighten_hex: percentage out of range: {pct} (expected 0.0..=1.0)"
+    );
     let (hue, sat, lum) = hex_to_hsl(hex);
     hsl_to_hex(hue, sat, (lum + (1.0 - lum) * pct).min(1.0))
 }
@@ -913,13 +926,41 @@ mod tests {
         );
     }
 
-    /// F6 — lowercase hex is rejected (invariant 3: uppercase only).
+    /// F-PASS11-LOW-4 — lowercase hex is accepted and normalised to uppercase.
+    ///
+    /// This test replaces the old rejection test. User-typed lowercase hex
+    /// (`"#3b82f6"`) is now accepted and stored as `"#3B82F6"`.
     #[test]
-    fn test_f6_validate_hex_rejects_lowercase_hex() {
-        let err = validate_hex("acc1", "#3b82f6").unwrap_err();
-        assert!(
-            matches!(err, crate::error::BrandError::InvalidHexColor { .. }),
-            "lowercase hex must produce InvalidHexColor, got: {err:?}"
+    fn test_validate_hex_accepts_lowercase_and_normalizes() {
+        let result = validate_hex("acc1", "#3b82f6")
+            .expect("F-PASS11-LOW-4: lowercase hex must be accepted and normalised");
+        assert_eq!(
+            result.as_ref(),
+            "#3B82F6",
+            "F-PASS11-LOW-4: lowercase hex must normalise to uppercase"
+        );
+    }
+
+    /// F-PASS11-LOW-4 — mixed-case hex is accepted and normalised to uppercase.
+    #[test]
+    fn test_validate_hex_accepts_mixed_case_and_normalizes() {
+        let result = validate_hex("acc1", "#3B82f6")
+            .expect("mixed-case hex must be accepted and normalised");
+        assert_eq!(
+            result.as_ref(),
+            "#3B82F6",
+            "mixed-case hex must normalise to uppercase"
+        );
+    }
+
+    /// F-PASS11-LOW-4 — uppercase hex passes through unchanged (idempotent).
+    #[test]
+    fn test_validate_hex_uppercase_passthrough() {
+        let result = validate_hex("acc1", "#3B82F6").expect("uppercase hex must pass through");
+        assert_eq!(
+            result.as_ref(),
+            "#3B82F6",
+            "uppercase hex must be returned unchanged"
         );
     }
 
@@ -989,6 +1030,55 @@ mod tests {
             "F6: dk1 must not be #000000 (silent black fallback)"
         );
         assert_ne!(dk1, "red", "F6: dk1 must not be the invalid 'red' value");
+    }
+
+    // ─── F-PASS11-LOW-5: darken_hex / lighten_hex clamp tests ────────────────
+
+    /// F-PASS11-LOW-5 — `darken_hex` with 0% is identity.
+    #[test]
+    fn test_darken_hex_zero_pct_is_identity() {
+        let result = darken_hex("#3B82F6", 0.0);
+        assert_eq!(
+            result, "#3B82F6",
+            "darken_hex with 0% must return input unchanged"
+        );
+    }
+
+    /// F-PASS11-LOW-5 — `lighten_hex` with 0% is identity.
+    #[test]
+    fn test_lighten_hex_zero_pct_is_identity() {
+        let result = lighten_hex("#3B82F6", 0.0);
+        assert_eq!(
+            result, "#3B82F6",
+            "lighten_hex with 0% must return input unchanged"
+        );
+    }
+
+    /// F-PASS11-LOW-5 — `darken_hex` with 100% produces black (release mode only).
+    ///
+    /// In debug mode, `debug_assert!` would fire for extreme inputs like `1.0`,
+    /// so this test is guarded by `#[cfg(not(debug_assertions))]`.
+    /// In release mode, the function clamps to `#000000`.
+    #[test]
+    #[cfg(not(debug_assertions))]
+    fn test_darken_hex_one_pct_is_black_in_release_only() {
+        let result = darken_hex("#FF0000", 1.0);
+        assert_eq!(
+            result, "#000000",
+            "darken_hex with 100% must clamp to #000000 in release mode"
+        );
+    }
+
+    /// F-PASS11-LOW-5 — `lighten_hex` with 100% produces white.
+    #[test]
+    fn test_lighten_hex_one_pct_is_white() {
+        // pct=1.0 is within [0.0, 1.0] — debug_assert! must NOT fire.
+        // In release, this clamps to #FFFFFF.
+        let result = lighten_hex("#000000", 1.0);
+        assert_eq!(
+            result, "#FFFFFF",
+            "lighten_hex with 100% must clamp to #FFFFFF"
+        );
     }
 
     /// OBS-1 / BC-2.01.004 invariant 1 — invalid hex slot produces exactly ONE warning.
