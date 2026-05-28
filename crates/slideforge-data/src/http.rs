@@ -227,7 +227,7 @@ impl DataSource for HttpDataSource {
     /// silently ignored (with a `tracing::warn!` logged when set):
     /// - `auth_token` — authentication not yet implemented for HTTP sources
     /// - `timeout_ms` — custom timeout not yet implemented; built-in 10s connect /
-    ///   30s read timeouts from [`build_agent`] are always used
+    ///   30s read timeouts from `build_agent` are always used
     /// - `query` — query parameter injection not yet implemented
     fn load(&self, uri: &str, opts: &DataSourceOptions) -> Result<Value, DataSourceError> {
         // v1 limitation: warn on non-default options that are not yet honored.
