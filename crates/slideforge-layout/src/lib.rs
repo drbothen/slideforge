@@ -70,7 +70,7 @@ mod tests {
 
     use slideforge_types::{
         Brand, BrandFonts, BrandPalette, Deck, DeckMetadata, FieldValue, OrderedMap, Register,
-        Slide, SourceSpan, Value,
+        SectionBlock, Slide, SourceSpan, Value,
     };
 
     use super::*;
@@ -563,6 +563,204 @@ mod tests {
         assert!(
             has_exec,
             "LaidOutDeck.sections must contain an ExecutiveSummary section when takeaway slides exist"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // HIGH-006 — layout-level integration tests for severity_cards, manual
+    // section blocks, and section_order
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Helper: make a `severity_cards` slide with a `Value::List` of cards.
+    fn make_severity_cards_slide(cards: Vec<(&str, &str, &str, &str)>) -> Slide {
+        let card_values: Vec<Value> = cards
+            .into_iter()
+            .map(|(title, severity, description, owner)| {
+                let mut m = OrderedMap::new();
+                m.insert(Arc::from("title"), Value::Str(Arc::from(title)));
+                m.insert(Arc::from("severity"), Value::Str(Arc::from(severity)));
+                m.insert(Arc::from("description"), Value::Str(Arc::from(description)));
+                m.insert(Arc::from("owner"), Value::Str(Arc::from(owner)));
+                Value::Map(m)
+            })
+            .collect();
+        let mut fields = OrderedMap::new();
+        fields.insert(
+            Arc::from("cards"),
+            FieldValue::Literal(Value::List(card_values)),
+        );
+        Slide {
+            slide_type: Arc::from("severity_cards"),
+            fields,
+            blocks: vec![],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+        }
+    }
+
+    /// Helper: make a slide with a takeaway field.
+    fn make_takeaway_slide(takeaway: &str) -> Slide {
+        let mut fields = OrderedMap::new();
+        fields.insert(
+            Arc::from("takeaway"),
+            FieldValue::Literal(Value::Str(Arc::from(takeaway))),
+        );
+        Slide {
+            slide_type: Arc::from("content"),
+            fields,
+            blocks: vec![],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+        }
+    }
+
+    /// HIGH-006 / CRIT-001 — `layout::run` on a deck containing one `severity_cards`
+    /// slide with 2 cards succeeds (no `UnknownSlideType`) and produces a
+    /// `RiskRegister` section with 2 `RiskRow` items.
+    #[test]
+    fn test_layout_run_with_severity_cards_slide() {
+        let deck = Deck {
+            slides: vec![
+                make_slide("title"),
+                make_severity_cards_slide(vec![
+                    ("Risk A", "High", "First risk", "Owner A"),
+                    ("Risk B", "Medium", "Second risk", "Owner B"),
+                ]),
+            ],
+            vars: OrderedMap::new(),
+            metadata: make_metadata(),
+            registers: OrderedMap::new(),
+            section_blocks: vec![],
+        };
+        let brand = make_brand();
+        let result = run(&deck, &brand).expect("layout::run must succeed for severity_cards slide");
+
+        // Slide count preserved.
+        assert_eq!(result.slides.len(), 2);
+
+        // RiskRegister section must be present with 2 rows.
+        let risk = result
+            .sections
+            .iter()
+            .find(|s| s.kind == sections::SectionKind::RiskRegister)
+            .expect("LaidOutDeck.sections must contain a RiskRegister section");
+
+        assert_eq!(
+            risk.items.len(),
+            2,
+            "RiskRegister must contain exactly 2 RiskRow items"
+        );
+    }
+
+    /// HIGH-006 — `layout::run` on a deck with manual `section_blocks` produces a
+    /// `ManualSection` in `LaidOutDeck.sections`. When a manual `executive_summary`
+    /// is also present, it supersedes the auto-generated one.
+    #[test]
+    fn test_layout_run_with_manual_section_blocks() {
+        // A manual executive_summary block + a takeaway slide.
+        // The manual block must supersede the auto-generated executive_summary.
+        let exec_block = SectionBlock {
+            name: Arc::from("executive_summary"),
+            body: {
+                let mut m = OrderedMap::new();
+                m.insert(
+                    Arc::from("heading"),
+                    Value::Str(Arc::from("Custom Executive Summary")),
+                );
+                m
+            },
+            span: SourceSpan::default(),
+        };
+        let methodology_block = SectionBlock {
+            name: Arc::from("methodology"),
+            body: OrderedMap::new(),
+            span: SourceSpan::default(),
+        };
+        let deck = Deck {
+            slides: vec![make_slide("title"), make_takeaway_slide("Key finding 1")],
+            vars: OrderedMap::new(),
+            metadata: make_metadata(),
+            registers: OrderedMap::new(),
+            section_blocks: vec![exec_block, methodology_block],
+        };
+        let brand = make_brand();
+        let result =
+            run(&deck, &brand).expect("layout::run must succeed with manual section blocks");
+
+        // Manual executive_summary must be present.
+        let has_manual_exec = result.sections.iter().any(|s| {
+            s.kind == sections::SectionKind::ManualSection(Arc::from("executive_summary"))
+        });
+        assert!(
+            has_manual_exec,
+            "manual executive_summary section must appear in LaidOutDeck.sections"
+        );
+
+        // Auto-generated executive_summary must be suppressed by supersession rule.
+        let has_auto_exec = result
+            .sections
+            .iter()
+            .any(|s| s.kind == sections::SectionKind::ExecutiveSummary);
+        assert!(
+            !has_auto_exec,
+            "auto-generated executive_summary must be suppressed when a manual one is present"
+        );
+
+        // Manual methodology must also be present.
+        let has_methodology = result
+            .sections
+            .iter()
+            .any(|s| s.kind == sections::SectionKind::ManualSection(Arc::from("methodology")));
+        assert!(
+            has_methodology,
+            "manual methodology section must appear in LaidOutDeck.sections"
+        );
+    }
+
+    /// HIGH-006 — `layout::run` on a deck with `section_order` metadata applies the
+    /// declared ordering to `LaidOutDeck.sections`.
+    #[test]
+    fn test_layout_run_with_section_order() {
+        // Without section_order: executive_summary first (default), risk_register second.
+        // With section_order = ["risk_register", "executive_summary"]: reversed.
+        let deck = Deck {
+            slides: vec![
+                make_takeaway_slide("Key finding"),
+                make_severity_cards_slide(vec![("SQL Injection", "High", "DB risk", "DBA")]),
+            ],
+            vars: OrderedMap::new(),
+            metadata: DeckMetadata {
+                title: Some(Arc::from("Test Deck")),
+                slideforge_version: Arc::from("0.1.0"),
+                lang: Some(Arc::from("en-US")),
+                author: None,
+                section_order: Some(vec![
+                    Arc::from("risk_register"),
+                    Arc::from("executive_summary"),
+                ]),
+            },
+            registers: OrderedMap::new(),
+            section_blocks: vec![],
+        };
+        let brand = make_brand();
+        let result = run(&deck, &brand).expect("layout::run must succeed with section_order");
+
+        assert_eq!(
+            result.sections.len(),
+            2,
+            "must have exactly 2 sections (risk_register + executive_summary)"
+        );
+        assert_eq!(
+            result.sections[0].kind,
+            sections::SectionKind::RiskRegister,
+            "risk_register must come first per section_order"
+        );
+        assert_eq!(
+            result.sections[1].kind,
+            sections::SectionKind::ExecutiveSummary,
+            "executive_summary must come second per section_order"
         );
     }
 

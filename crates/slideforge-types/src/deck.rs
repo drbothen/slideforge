@@ -24,9 +24,16 @@ use crate::value::Value;
 ///
 /// ## Supported section types
 ///
-/// `methodology`, `scope`, `approval`, `appendix`, `glossary`. An
-/// unrecognised type name produces `LayoutError::UnknownSectionType` at
-/// layout time.
+/// `executive_summary`, `risk_register`, `methodology`, `scope`, `approval`,
+/// `appendix`, `glossary`. An unrecognised type name produces
+/// `LayoutError::UnknownSectionType` at layout time.
+///
+/// `executive_summary` and `risk_register` are special: when a manual block
+/// with one of these names is present, the layout engine applies the
+/// supersession rule (BC-3.02.001 EC-002 / BC-3.02.002 AC-006) and suppresses
+/// the corresponding auto-generated section. The remaining five types
+/// (`methodology`, `scope`, `approval`, `appendix`, `glossary`) are purely
+/// manual sections with no auto-generated equivalent.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SectionBlock {
     /// The section type name (e.g., `"methodology"`, `"scope"`).
@@ -37,6 +44,12 @@ pub struct SectionBlock {
     /// Keys are field names; values are the resolved field values. Uses
     /// [`OrderedMap`] to preserve insertion order (determinism requirement)
     /// and satisfy the `Hash` bound on all IR types.
+    ///
+    /// NOTE: body uses `Value` (not `FieldValue`) so it cannot represent rich
+    /// inline formatting or nested `report:` sub-blocks today. BC-3.02.002
+    /// postcondition 1 and EC-004 require these capabilities; full support is
+    /// deferred to a future IR-extension story (cross-crate work needed to
+    /// introduce `FieldValue::Inlines` and nested `Vec<Block>` in `SectionBlock`).
     pub body: OrderedMap<Arc<str>, Value>,
 
     /// Source location of the `section <type>:` declaration.

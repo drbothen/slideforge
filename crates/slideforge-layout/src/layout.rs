@@ -25,8 +25,17 @@
 //! ## Purity (AC-008)
 //!
 //! `layout::run` is a **pure function**: no file I/O, no network access, no
-//! `tracing` spans, no `println!`, no random state. This purity makes it
-//! Kani-amenable (Phase 6) and enables full proptest coverage of VP-011.
+//! `println!`, no random state. This purity makes it Kani-amenable (Phase 6)
+//! and enables full proptest coverage of VP-011.
+//!
+//! **Note on tracing diagnostics:** `collect_sections` emits `tracing::warn!`
+//! events in two specific cases: (a) when a manual section supersedes an
+//! auto-generated one (BC-3.02.001 EC-002 diagnostic), and (b) when
+//! `section_order:` names a section that was not collected. These diagnostic
+//! emissions are documented side-effects — they do not affect the output value
+//! and do not block Kani analysis (tracing is a no-op in proof mode). The
+//! "no side effects" purity claim is narrowed to: no I/O, no mutable global
+//! state, and fully deterministic output for identical inputs.
 
 use std::sync::Arc;
 
@@ -68,7 +77,10 @@ use crate::types::{
 ///
 /// # Purity (AC-008)
 ///
-/// This function is pure: no I/O, no side effects, no panics.
+/// This function is pure: no file I/O, no network access, no random state, no
+/// panics. `collect_sections` emits `tracing::warn!` diagnostic events in two
+/// cases (supersession notification and unknown `section_order` name); these are
+/// documented side-effects and do not affect the deterministic output value.
 ///
 /// # Errors
 ///

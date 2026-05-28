@@ -311,15 +311,15 @@ pub enum TextOverflow {
     Fit,
     /// The text is longer than the bounding box allows; excess text is hidden.
     ///
-    /// Reserved for STORY-027 (content-resolution wrapping mode). When a
-    /// slide is configured with `overflow: truncate`, the layout engine sets
-    /// this variant instead of [`TextOverflow::Overflow`]. The validator
-    /// suppresses the canvas-overflow warning for `Truncate` frames because
-    /// the author has explicitly opted in to clipping.
+    /// When a slide is configured with `overflow: truncate`, the layout engine
+    /// sets this variant instead of [`TextOverflow::Overflow`]. The validator
+    /// suppresses the canvas-overflow warning for `Truncate` frames because the
+    /// author has explicitly opted in to clipping.
     ///
     /// Not produced by the current layout engine — all overflow currently
-    /// results in `TextOverflow::Overflow`. This variant exists in the type
-    /// to preserve exhaustive match coverage when STORY-027 activates it.
+    /// results in `TextOverflow::Overflow`. This variant exists in the type to
+    /// preserve exhaustive match coverage; it will be activated in the
+    /// content-resolution wrapping story (deferred to v1.x — story TBD).
     Truncate,
     /// The text exceeds the bounding box height by `excess_emu`.
     ///

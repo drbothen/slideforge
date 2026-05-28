@@ -371,6 +371,19 @@ fn collect_manual_sections(deck: &Deck) -> Result<Vec<GeneratedSection>, LayoutE
             });
         }
 
+        // OBS-003 / BC-3.02.002 EC-003: warn if the section body is empty.
+        // An empty body is valid (no compile error) but likely a DSL authoring
+        // mistake — the section block was declared with no content fields. The
+        // warning gives the author an actionable signal without failing the build.
+        if block.body.is_empty() {
+            warn!(
+                section_name = %name,
+                "BC-3.02.002 EC-003: section '{}' has empty body — \
+                 no content fields declared in the section block",
+                name
+            );
+        }
+
         // Build ONE SectionItem::Custom containing all fields from the block body.
         // HIGH-005: each manual section block produces exactly one Custom item
         // whose map holds all key-value pairs (insertion order preserved via
@@ -449,7 +462,15 @@ pub fn collect_executive_summary(deck: &Deck) -> Result<Option<GeneratedSection>
     let mut items: Vec<SectionItem> = Vec::new();
 
     for (slide_index, slide) in deck.slides.iter().enumerate() {
-        // MED-004: skip slides gated to the Notes register.
+        // OBS-002: The Notes-register filter comes FIRST — before the takeaway
+        // field check. This ordering is intentional: Notes-register slides are
+        // excluded from all document sections regardless of whether they have
+        // unresolved fields. If the Notes check came after the takeaway match,
+        // a Notes-register slide with an Expr takeaway would return
+        // UnresolvedTakeaway instead of being silently skipped — masking an
+        // evaluator bug rather than surfacing it. The current ordering is
+        // correct: Notes-register exclusion takes precedence over all other
+        // checks. MED-004 defines this rule.
         if slide.register == Some(Register::Notes) {
             continue;
         }
@@ -521,6 +542,15 @@ pub fn collect_risk_register(deck: &Deck) -> Result<Option<GeneratedSection>, La
 
     for (slide_index, slide) in deck.slides.iter().enumerate() {
         if slide.slide_type.as_ref() != "severity_cards" {
+            continue;
+        }
+
+        // HIGH-002: Notes-register slides are excluded from the risk register.
+        // BC-3.02.001 Invariant 4: the Notes-register exclusion rule applies to
+        // ALL auto-generated sections (executive_summary AND risk_register).
+        // Notes-register slides are presenter-only content and must not appear
+        // in document sections that are rendered to DOCX/PDF.
+        if slide.register == Some(Register::Notes) {
             continue;
         }
 
@@ -1551,26 +1581,128 @@ mod tests {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // HIGH-002 — Notes-register severity_cards slides excluded from risk_register
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// HIGH-002 — severity_cards slide with register: Notes must NOT contribute
+    /// to the risk_register section. BC-3.02.001 Invariant 4: the Notes-register
+    /// exclusion applies to ALL auto-generated sections.
+    #[test]
+    fn test_bc_3_02_001_notes_register_severity_cards_excluded_from_risk_register() {
+        // One Notes-register severity_cards slide + one non-Notes severity_cards slide.
+        let notes_slide = {
+            let card_values = vec![{
+                let mut m = OrderedMap::new();
+                m.insert(Arc::from("title"), Value::Str(Arc::from("Notes-only risk")));
+                m.insert(Arc::from("severity"), Value::Str(Arc::from("Low")));
+                m.insert(
+                    Arc::from("description"),
+                    Value::Str(Arc::from("Must not appear")),
+                );
+                m.insert(Arc::from("owner"), Value::Str(Arc::from("Nobody")));
+                Value::Map(m)
+            }];
+            let mut fields = OrderedMap::new();
+            fields.insert(
+                Arc::from("cards"),
+                FieldValue::Literal(Value::List(card_values)),
+            );
+            Slide {
+                slide_type: Arc::from("severity_cards"),
+                fields,
+                blocks: vec![],
+                register: Some(Register::Notes),
+                tags: vec![],
+                source_span: SourceSpan::default(),
+            }
+        };
+        let normal_slide =
+            make_severity_cards_slide_with_cards(vec![("SQL Injection", "High", "DB risk", "DBA")]);
+
+        let deck = make_deck(vec![notes_slide, normal_slide]);
+        let section = collect_risk_register(&deck)
+            .expect("no error")
+            .expect("deck with one non-Notes severity_cards slide must produce risk_register");
+
+        // Only the non-Notes card must appear.
+        assert_eq!(
+            section.items.len(),
+            1,
+            "Notes-register severity_cards slide must be excluded; only 1 non-Notes card expected"
+        );
+        match &section.items[0] {
+            SectionItem::RiskRow { title, .. } => {
+                assert_eq!(
+                    title.as_ref(),
+                    "SQL Injection",
+                    "wrong card in risk register"
+                );
+            },
+            other => panic!("expected RiskRow, got {other:?}"),
+        }
+    }
+
+    /// HIGH-002 — deck with ONLY Notes-register severity_cards slides produces no
+    /// risk_register section (returns Ok(None)).
+    #[test]
+    fn test_bc_3_02_001_all_notes_severity_cards_returns_none() {
+        let notes_slide = {
+            let card_values = vec![{
+                let mut m = OrderedMap::new();
+                m.insert(Arc::from("title"), Value::Str(Arc::from("Notes risk")));
+                m.insert(Arc::from("severity"), Value::Str(Arc::from("Low")));
+                m.insert(
+                    Arc::from("description"),
+                    Value::Str(Arc::from("Notes only")),
+                );
+                m.insert(Arc::from("owner"), Value::Str(Arc::from("Nobody")));
+                Value::Map(m)
+            }];
+            let mut fields = OrderedMap::new();
+            fields.insert(
+                Arc::from("cards"),
+                FieldValue::Literal(Value::List(card_values)),
+            );
+            Slide {
+                slide_type: Arc::from("severity_cards"),
+                fields,
+                blocks: vec![],
+                register: Some(Register::Notes),
+                tags: vec![],
+                source_span: SourceSpan::default(),
+            }
+        };
+
+        let deck = make_deck(vec![notes_slide]);
+        let result = collect_risk_register(&deck).expect("no error");
+        assert!(
+            result.is_none(),
+            "deck with only Notes-register severity_cards must return Ok(None)"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // AC-006 — supersession: manual section replaces auto-generated
     // ─────────────────────────────────────────────────────────────────────────
 
-    /// AC-006 — when both takeaway slides and a manual executive_summary section
-    /// exist, the manual section supersedes the auto-generated one.
+    /// AC-006 — when a manual section with a DIFFERENT key than the auto-generated
+    /// executive_summary is present, both appear in the output (no suppression).
+    ///
+    /// This test verifies the coexistence case: methodology (manual) and
+    /// executive_summary (auto) have different order_keys, so both survive.
+    /// The supersession rule only fires when manual and auto sections share the
+    /// same order_key (e.g., a manual "executive_summary" block suppresses the
+    /// auto-generated executive_summary). That path is covered by
+    /// `test_ac_006_manual_executive_summary_rewrite_supersedes`.
     #[test]
-    fn test_ac_006_manual_executive_summary_supersedes_auto_generated() {
+    fn test_ac_006_different_key_manual_does_not_suppress_auto() {
         let block = SectionBlock {
             name: Arc::from("methodology"),
             body: OrderedMap::new(),
             span: SourceSpan::default(),
         };
-        // Note: manual "executive_summary" would supersede the auto-generated one,
-        // but there is no ManualSection("executive_summary") type — that would be
-        // a custom type. The supersession check uses order_key().
-        // For this test we verify the mechanism: a manual section with the
-        // same order_key as an auto-generated one suppresses it.
-        // Since "executive_summary" is not in SUPPORTED_MANUAL_SECTION_TYPES (correct
-        // by spec), we use methodology + takeaway to check that manual sections
-        // appear and auto sections also appear when they have different order_keys.
+        // methodology (manual) + takeaway slide (auto executive_summary):
+        // different order_keys so both must appear.
         let deck = make_deck_with_section_blocks(
             vec![make_slide_with_takeaway("content", "Auto takeaway")],
             vec![block],
@@ -1864,6 +1996,51 @@ mod tests {
         assert!(
             !logs_contain("executive_summary overridden"),
             "supersession warning must NOT fire when no takeaway slides exist"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // OBS-003 — tracing::warn! for empty section body (BC-3.02.002 EC-003)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// OBS-003 — a manual section block with an empty body emits a
+    /// `tracing::warn!` diagnostic (BC-3.02.002 EC-003).
+    #[tracing_test::traced_test]
+    #[test]
+    fn test_obs_003_empty_section_body_emits_warn() {
+        let block = SectionBlock {
+            name: Arc::from("methodology"),
+            body: OrderedMap::new(), // empty body
+            span: SourceSpan::default(),
+        };
+        let deck = make_deck_with_section_blocks(vec![make_slide("title")], vec![block]);
+        let _ =
+            collect_sections(&deck).expect("collect_sections must succeed even with empty body");
+        assert!(
+            logs_contain("empty body"),
+            "tracing::warn! must be emitted for section with empty body (BC-3.02.002 EC-003)"
+        );
+    }
+
+    /// OBS-003 — a manual section block with a non-empty body does NOT emit
+    /// the empty-body warning.
+    #[tracing_test::traced_test]
+    #[test]
+    fn test_obs_003_non_empty_section_body_no_warn() {
+        let block = SectionBlock {
+            name: Arc::from("methodology"),
+            body: {
+                let mut m = OrderedMap::new();
+                m.insert(Arc::from("approach"), Value::Str(Arc::from("Agile")));
+                m
+            },
+            span: SourceSpan::default(),
+        };
+        let deck = make_deck_with_section_blocks(vec![make_slide("title")], vec![block]);
+        let _ = collect_sections(&deck).expect("collect_sections must succeed");
+        assert!(
+            !logs_contain("empty body"),
+            "empty-body warning must NOT fire when section has content"
         );
     }
 
