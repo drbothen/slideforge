@@ -26,6 +26,47 @@ use std::sync::Arc;
 
 use crate::error::BrandError;
 
+// ─── Hex validation ──────────────────────────────────────────────────────────
+
+/// Validate and normalise a user-declared hex color string from `brand.toml`.
+///
+/// Accepts only `"#RRGGBB"` with 6 uppercase ASCII hex digits.
+/// Returns `Err(BrandError::InvalidHexColor)` for any invalid input including:
+/// - Named CSS colors (`"red"`)
+/// - Lowercase hex (`"#3b82f6"`)
+/// - Short hex (`"#3B82F"`, 5 hex digits)
+/// - Alpha hex (`"#3B82F6FF"`, 8 hex digits)
+/// - Empty string (`""`)
+///
+/// This is called for every user-declared slot before it enters the inference
+/// pipeline. Values that pass validation are stored as-is (already uppercase).
+pub(crate) fn validate_hex(
+    slot_name: &str,
+    value: &str,
+) -> Result<Arc<str>, BrandError> {
+    if value.len() != 7 || !value.starts_with('#') {
+        return Err(BrandError::InvalidHexColor {
+            slot_name: Arc::from(slot_name),
+            value: Arc::from(value),
+        });
+    }
+    let hex_digits = &value[1..];
+    if !hex_digits.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(BrandError::InvalidHexColor {
+            slot_name: Arc::from(slot_name),
+            value: Arc::from(value),
+        });
+    }
+    // Reject lowercase hex digits (invariant 3: uppercase only).
+    if hex_digits.chars().any(|c| c.is_ascii_lowercase()) {
+        return Err(BrandError::InvalidHexColor {
+            slot_name: Arc::from(slot_name),
+            value: Arc::from(value),
+        });
+    }
+    Ok(Arc::from(value))
+}
+
 // ─── Public entry point ───────────────────────────────────────────────────────
 
 /// Slot name constants in ECMA-376 order (matches `COLOR_SLOT_NAMES` from template.rs).
@@ -75,13 +116,18 @@ pub fn infer_missing_slots(
     const DEFAULT_LT2: &str = "#F9FAFB";
     const DEFAULT_ACC1: &str = "#3B82F6";
 
-    // Build results array — start by cloning declared values.
+    // Build results array — validate and clone declared values.
+    // Invalid hex values produce BrandError::InvalidHexColor and are treated as absent
+    // (inference continues with the remaining slots).
     let mut result: [Option<Arc<str>>; 12] = [
         None, None, None, None, None, None, None, None, None, None, None, None,
     ];
     for (i, v) in declared.iter().enumerate() {
         if let Some(hex) = v {
-            result[i] = Some(Arc::from(*hex));
+            match validate_hex(SLOT_NAMES[i], hex) {
+                Ok(validated) => result[i] = Some(validated),
+                Err(e) => warnings.push(e),
+            }
         }
     }
 
@@ -109,8 +155,10 @@ pub fn infer_missing_slots(
     // 10 hlink, 11 fol_hlink
 
     // Rule: dk1 — darkest declared color; fallback "#1F2937"
+    // Use the post-validation `result` array so only valid uppercase hex values
+    // participate in the luminance comparison (F6/F8 fix).
     if result[0].is_none() {
-        let darkest = darkest_declared_owned(&declared);
+        let darkest = darkest_from_result(&result);
         infer(
             &mut result,
             warnings,
@@ -220,14 +268,19 @@ pub fn infer_missing_slots(
 ///
 /// `h` is in `[0.0, 360.0)`, `s` and `l` are in `[0.0, 1.0]`.
 ///
-/// # Panics
-///
-/// Panics in debug builds if `hex` is not a valid `"#RRGGBB"` string.
+/// Returns `(0.0, 0.0, 0.0)` (black) for any malformed input — this function is
+/// called from pure inference paths only, where all inputs have been validated
+/// by `validate_hex` at the entry point.
 #[allow(clippy::many_single_char_names)]
 fn hex_to_hsl(hex: &str) -> (f32, f32, f32) {
-    // Parse #RRGGBB
+    // Parse #RRGGBB — strip optional '#' prefix.
     let hex = hex.trim_start_matches('#');
-    // Safe parse: bad input returns black
+    // Guard: inputs shorter than 6 chars (e.g. from tests or edge cases) return black
+    // rather than panicking on out-of-bounds slice indexing (F9 fix).
+    if hex.len() < 6 {
+        return (0.0, 0.0, 0.0);
+    }
+    // Safe parse: bad input returns 0 (black component).
     let r = f32::from(u8::from_str_radix(&hex[..2], 16).unwrap_or(0)) / 255.0;
     let g = f32::from(u8::from_str_radix(&hex[2..4], 16).unwrap_or(0)) / 255.0;
     let b = f32::from(u8::from_str_radix(&hex[4..6], 16).unwrap_or(0)) / 255.0;
@@ -353,14 +406,26 @@ pub(crate) fn rotate_hue(hex: &str, degrees: f32) -> String {
     hsl_to_hex((hue + degrees).rem_euclid(360.0), sat, lum)
 }
 
-/// Find the darkest color (by luminance) among declared slots.
+/// Find the darkest color (by luminance) among post-validation result slots.
 ///
-/// Returns `"#1F2937"` (the fallback dark) if `slots` contains no `Some` values.
+/// Operates on the `[Option<Arc<str>>; 12]` result array (post-validation,
+/// so all values are valid uppercase `"#RRGGBB"` or `None`).
+///
+/// Returns `"#1F2937"` (the fallback dark) if all slots are `None`.
+/// The returned string is always uppercase (F8 fix).
 #[allow(clippy::many_single_char_names)]
-fn darkest_declared_owned(slots: &[Option<&str>; 12]) -> String {
+fn darkest_from_result(slots: &[Option<Arc<str>>; 12]) -> String {
     /// Compute relative luminance (WCAG formula) for a hex color.
+    ///
+    /// Returns `1.0` (maximum luminance, treated as "not dark") for any input
+    /// shorter than 6 hex digits, so short/invalid inputs are never chosen as
+    /// the darkest color — a safe fallback (F9 fix).
     fn luminance(hex: &str) -> f32 {
         let hex = hex.trim_start_matches('#');
+        // Guard: shorter than 6 chars → return max luminance (not dark).
+        if hex.len() < 6 {
+            return 1.0;
+        }
         let to_linear = |channel: u8| -> f32 {
             let srgb = f32::from(channel) / 255.0;
             if srgb <= 0.04045 {
@@ -375,17 +440,18 @@ fn darkest_declared_owned(slots: &[Option<&str>; 12]) -> String {
         0.2126 * to_linear(red) + 0.7152 * to_linear(grn) + 0.0722 * to_linear(blu)
     }
 
-    let mut darkest: Option<(&str, f32)> = None;
+    let mut darkest: Option<(Arc<str>, f32)> = None;
     for slot in slots.iter().flatten() {
-        let lum = luminance(slot);
+        let lum = luminance(slot.as_ref());
         match darkest {
-            None => darkest = Some((slot, lum)),
-            Some((_, prev_lum)) if lum < prev_lum => darkest = Some((slot, lum)),
+            None => darkest = Some((Arc::clone(slot), lum)),
+            Some((_, prev_lum)) if lum < prev_lum => darkest = Some((Arc::clone(slot), lum)),
             _ => {},
         }
     }
     match darkest {
-        Some((hex, _)) => hex.to_owned(),
+        // All values are already validated uppercase — return as-is (F8).
+        Some((hex, _)) => hex.as_ref().to_owned(),
         None => "#1F2937".to_owned(),
     }
 }
@@ -803,5 +869,111 @@ mod tests {
             5,
             "acc2..acc6 must all be distinct colors (different hue rotations)"
         );
+    }
+
+    // ─── F6: validate_hex tests ───────────────────────────────────────────────
+
+    /// F6 — valid uppercase hex passes validation.
+    #[test]
+    fn test_f6_validate_hex_valid_uppercase() {
+        assert!(validate_hex("acc1", "#3B82F6").is_ok());
+        assert!(validate_hex("dk1", "#1F2937").is_ok());
+        assert!(validate_hex("lt1", "#FFFFFF").is_ok());
+        assert!(validate_hex("lt2", "#F9FAFB").is_ok());
+    }
+
+    /// F6 — CSS named color is rejected.
+    #[test]
+    fn test_f6_validate_hex_rejects_named_color() {
+        let err = validate_hex("acc1", "red").unwrap_err();
+        assert!(
+            matches!(err, crate::error::BrandError::InvalidHexColor { .. }),
+            "named color must produce InvalidHexColor, got: {err:?}"
+        );
+    }
+
+    /// F6 — 5-char hex (short) is rejected.
+    #[test]
+    fn test_f6_validate_hex_rejects_short_hex() {
+        let err = validate_hex("acc1", "#3B82F").unwrap_err();
+        assert!(
+            matches!(err, crate::error::BrandError::InvalidHexColor { .. }),
+            "short hex must produce InvalidHexColor, got: {err:?}"
+        );
+    }
+
+    /// F6 — lowercase hex is rejected (invariant 3: uppercase only).
+    #[test]
+    fn test_f6_validate_hex_rejects_lowercase_hex() {
+        let err = validate_hex("acc1", "#3b82f6").unwrap_err();
+        assert!(
+            matches!(err, crate::error::BrandError::InvalidHexColor { .. }),
+            "lowercase hex must produce InvalidHexColor, got: {err:?}"
+        );
+    }
+
+    /// F6 — alpha hex (8 digits) is rejected.
+    #[test]
+    fn test_f6_validate_hex_rejects_alpha_hex() {
+        let err = validate_hex("acc1", "#3B82F6FF").unwrap_err();
+        assert!(
+            matches!(err, crate::error::BrandError::InvalidHexColor { .. }),
+            "alpha hex must produce InvalidHexColor, got: {err:?}"
+        );
+    }
+
+    /// F6 — empty string is rejected.
+    #[test]
+    fn test_f6_validate_hex_rejects_empty_string() {
+        let err = validate_hex("acc1", "").unwrap_err();
+        assert!(
+            matches!(err, crate::error::BrandError::InvalidHexColor { .. }),
+            "empty string must produce InvalidHexColor, got: {err:?}"
+        );
+    }
+
+    /// F6 — invalid hex value (non-hex digit) is rejected.
+    #[test]
+    fn test_f6_validate_hex_rejects_non_hex_digit() {
+        let err = validate_hex("acc1", "#ZZZZZZ").unwrap_err();
+        assert!(
+            matches!(err, crate::error::BrandError::InvalidHexColor { .. }),
+            "non-hex digit must produce InvalidHexColor, got: {err:?}"
+        );
+    }
+
+    /// F6 + F8 — invalid hex in declared slot produces warning (not silent black fallback).
+    #[test]
+    fn test_f6_invalid_declared_hex_produces_warning_not_silent_black() {
+        // "red" is not a valid hex — must produce InvalidHexColor warning,
+        // then dk1 is treated as absent and inferred (not silently set to black).
+        let declared: [Option<&str>; 12] = [
+            Some("red"), // invalid → warning + treated as absent
+            Some("#FFFFFF"),
+            None,
+            None,
+            Some("#3B82F6"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ];
+        let mut warnings = Vec::new();
+        let result = infer_missing_slots(declared, &mut warnings);
+        // Must have at least one InvalidHexColor warning for "red"
+        let has_invalid_hex = warnings
+            .iter()
+            .any(|w| matches!(w, crate::error::BrandError::InvalidHexColor { .. }));
+        assert!(
+            has_invalid_hex,
+            "F6: invalid hex 'red' must produce InvalidHexColor warning, got: {warnings:?}"
+        );
+        // dk1 must be inferred (not black #000000 and not "red")
+        let dk1 = result[0].as_ref();
+        assert_ne!(dk1, "#000000", "F6: dk1 must not be #000000 (silent black fallback)");
+        assert_ne!(dk1, "red", "F6: dk1 must not be the invalid 'red' value");
     }
 }
