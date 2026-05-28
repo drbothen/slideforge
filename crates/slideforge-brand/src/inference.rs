@@ -293,4 +293,196 @@ mod tests {
             "fol_hlink must differ from hlink after 10% darkening"
         );
     }
+
+    // ─── New behavioral tests for Red Gate ────────────────────────────────────
+
+    /// BC-2.01.004 — all 12 slots provided → ColorScheme identical to input;
+    /// zero warnings emitted (EC-003).
+    #[test]
+    fn test_bc_2_01_004_all_12_slots_provided_no_change() {
+        let declared: [Option<&str>; 12] = [
+            Some("#1F2937"),
+            Some("#FFFFFF"),
+            Some("#374151"),
+            Some("#F9FAFB"),
+            Some("#3B82F6"),
+            Some("#10B981"),
+            Some("#F59E0B"),
+            Some("#EF4444"),
+            Some("#8B5CF6"),
+            Some("#EC4899"),
+            Some("#2563EB"),
+            Some("#1D4ED8"),
+        ];
+        let mut warnings = Vec::new();
+        let result = infer_missing_slots(declared, &mut warnings);
+        // Zero warnings (EC-003: all 12 declared)
+        assert_eq!(warnings.len(), 0, "no E-BRD-003 warnings when all 12 declared");
+        // Returned values equal the declared input
+        assert_eq!(result[0].as_ref(), "#1F2937", "dk1 must be unchanged");
+        assert_eq!(result[1].as_ref(), "#FFFFFF", "lt1 must be unchanged");
+        assert_eq!(result[4].as_ref(), "#3B82F6", "acc1 must be unchanged");
+        assert_eq!(result[10].as_ref(), "#2563EB", "hlink must be unchanged");
+        assert_eq!(result[11].as_ref(), "#1D4ED8", "fol_hlink must be unchanged");
+    }
+
+    /// BC-2.01.004 / AC-003 — `lt2` is always `"#F9FAFB"` when absent (96% lightness
+    /// near-white fallback).
+    #[test]
+    fn test_bc_2_01_004_lt2_inferred_as_near_white() {
+        let declared: [Option<&str>; 12] = [
+            Some("#1F2937"),
+            Some("#FFFFFF"),
+            None,
+            None, // lt2 absent → must become "#F9FAFB"
+            Some("#3B82F6"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ];
+        let mut warnings = Vec::new();
+        let result = infer_missing_slots(declared, &mut warnings);
+        assert_eq!(result[3].as_ref(), "#F9FAFB", "lt2 must be inferred as #F9FAFB");
+    }
+
+    /// BC-2.01.004 / AC-003 — `dk1` inferred as darkest declared color when absent;
+    /// falls back to `"#1F2937"` when no colors declared.
+    #[test]
+    fn test_bc_2_01_004_dk1_inferred_fallback_when_no_colors_declared() {
+        let declared: [Option<&str>; 12] = [None; 12];
+        let mut warnings = Vec::new();
+        let result = infer_missing_slots(declared, &mut warnings);
+        // dk1 must use fallback when no colors at all
+        let dk1 = result[0].as_ref();
+        assert_eq!(dk1, "#1F2937", "dk1 fallback when all slots absent must be #1F2937");
+    }
+
+    /// BC-2.01.004 invariant — inference is deterministic (same input → same output).
+    #[test]
+    fn test_bc_2_01_004_inference_is_deterministic() {
+        let declared: [Option<&str>; 12] = [
+            Some("#1F2937"),
+            None,
+            None,
+            None,
+            Some("#3B82F6"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ];
+        let mut w1 = Vec::new();
+        let r1 = infer_missing_slots(declared, &mut w1);
+        let mut w2 = Vec::new();
+        let r2 = infer_missing_slots(declared, &mut w2);
+        // Every slot must be equal across two independent calls
+        for i in 0..12 {
+            assert_eq!(
+                r1[i].as_ref(),
+                r2[i].as_ref(),
+                "slot {i} must be deterministic across two identical calls"
+            );
+        }
+        assert_eq!(w1.len(), w2.len(), "warning count must be deterministic");
+    }
+
+    /// BC-2.01.004 / AC-003 — `hlink` defaults to `acc1` when `hlink` absent and
+    /// acc1 declared (hlink = acc1 darkened 15%).
+    #[test]
+    fn test_bc_2_01_004_hlink_defaults_to_acc1_darkened() {
+        let declared: [Option<&str>; 12] = [
+            Some("#1F2937"),
+            Some("#FFFFFF"),
+            None,
+            None,
+            Some("#3B82F6"), // acc1 = #3B82F6
+            None,
+            None,
+            None,
+            None,
+            None,
+            None, // hlink absent → acc1 darkened 15%
+            None,
+        ];
+        let mut warnings = Vec::new();
+        let result = infer_missing_slots(declared, &mut warnings);
+        // hlink at index 10 must be a valid #RRGGBB (the darkened acc1)
+        let hlink = result[10].as_ref();
+        assert!(hlink.starts_with('#'), "hlink must start with #");
+        assert_eq!(hlink.len(), 7, "hlink must be 7-char #RRGGBB");
+        // Must be different from acc1 (darkened)
+        assert_ne!(hlink, "#3B82F6", "hlink must differ from acc1 (should be darkened)");
+    }
+
+    /// BC-2.01.004 — missing `[colors]` section (all None) produces 12 E-BRD-003
+    /// warnings — one per inferred slot (EC-002).
+    #[test]
+    fn test_bc_2_01_004_no_required_slot_missing_section_produces_12_warnings() {
+        let declared: [Option<&str>; 12] = [None; 12];
+        let mut warnings = Vec::new();
+        let _ = infer_missing_slots(declared, &mut warnings);
+        assert_eq!(
+            warnings.len(),
+            12,
+            "empty [colors] section must produce exactly 12 E-BRD-003 warnings"
+        );
+        // Each warning must be a MissingColorSlot variant
+        for (i, warn) in warnings.iter().enumerate() {
+            assert!(
+                matches!(warn, crate::error::BrandError::MissingColorSlot { .. }),
+                "warning {i} must be BrandError::MissingColorSlot, got: {warn:?}"
+            );
+        }
+    }
+
+    /// BC-2.01.004 — acc2..acc6 are generated from acc1 with 30°/60°/90°/120°/150° rotations.
+    #[test]
+    fn test_bc_2_01_004_infer_missing_acc_slots_from_acc1() {
+        let declared: [Option<&str>; 12] = [
+            Some("#1F2937"),
+            Some("#FFFFFF"),
+            None,
+            None,
+            Some("#3B82F6"), // acc1 only; acc2..acc6 absent
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ];
+        let mut warnings = Vec::new();
+        let result = infer_missing_slots(declared, &mut warnings);
+        let acc1 = result[4].as_ref(); // should be the declared "#3B82F6"
+        assert_eq!(acc1, "#3B82F6", "acc1 must not be changed");
+        // acc2 (index 5) through acc6 (index 9) must each be distinct from acc1
+        // and valid uppercase hex
+        for idx in 5..=9 {
+            let acc = result[idx].as_ref();
+            assert_ne!(acc, acc1, "acc slot {idx} must differ from acc1");
+            assert!(acc.starts_with('#'), "acc slot {idx} must start with #");
+            assert_eq!(acc.len(), 7, "acc slot {idx} must be 7-char #RRGGBB");
+            assert!(
+                acc[1..].chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit()),
+                "acc slot {idx} must be uppercase hex"
+            );
+        }
+        // acc2 through acc6 must also all be distinct from each other
+        // (different hue rotations: 30°, 60°, 90°, 120°, 150°)
+        let accs: Vec<&str> = (5..=9).map(|i| result[i].as_ref()).collect();
+        let unique: std::collections::HashSet<&str> = accs.iter().copied().collect();
+        assert_eq!(
+            unique.len(),
+            5,
+            "acc2..acc6 must all be distinct colors (different hue rotations)"
+        );
+    }
 }

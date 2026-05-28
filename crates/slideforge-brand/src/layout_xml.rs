@@ -88,7 +88,52 @@ pub fn generate_content_types_layout_entries(_layout_count: usize) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
+    use crate::layouts::{LayoutPlaceholder, SlideLayoutDef};
+
+    /// Build a minimal non-dark layout for XML serialization tests.
+    fn minimal_light_layout() -> SlideLayoutDef {
+        SlideLayoutDef {
+            index: 1,
+            name: Arc::from("Title Slide"),
+            ooxml_type: Some(Arc::from("title")),
+            placeholders: vec![LayoutPlaceholder {
+                ph_type: Arc::from("ctrTitle"),
+                idx: 0,
+                accessibility_name: Arc::from("Title Placeholder"),
+                x: 457_200,
+                y: 274_638,
+                cx: 8_229_600,
+                cy: 1_143_000,
+            }],
+            has_color_override: false,
+            color_override_bg: None,
+            color_override_tx: None,
+        }
+    }
+
+    /// Build a dark layout (CL-01 equivalent) for XML serialization tests.
+    fn minimal_dark_layout() -> SlideLayoutDef {
+        SlideLayoutDef {
+            index: 12,
+            name: Arc::from("SF Section Divider"),
+            ooxml_type: None,
+            placeholders: vec![LayoutPlaceholder {
+                ph_type: Arc::from("title"),
+                idx: 0,
+                accessibility_name: Arc::from("Section Title"),
+                x: 457_200,
+                y: 274_638,
+                cx: 8_229_600,
+                cy: 1_143_000,
+            }],
+            has_color_override: true,
+            color_override_bg: Some(Arc::from("dk2")),
+            color_override_tx: Some(Arc::from("lt1")),
+        }
+    }
 
     /// AC-012 — `NOTES_MASTER_STUB` is non-empty valid XML bytes.
     #[test]
@@ -111,30 +156,117 @@ mod tests {
     }
 
     /// AC-013 — `generate_content_types_layout_entries` produces 31 Override entries.
+    /// Tests that todo!() body panics (Red Gate).
     #[test]
     fn test_bc_2_01_005_content_types_layout_entries_count() {
-        // Deferred until generate_content_types_layout_entries() is implemented.
-        // Expected: 31 <Override ...> lines, each with PartName="/ppt/slideLayouts/slideLayout{N}.xml"
+        let entries = generate_content_types_layout_entries(31);
+        // Must contain exactly 31 slideLayout path entries
+        let override_count = entries.matches("slideLayout").count();
+        assert_eq!(
+            override_count,
+            31,
+            "must generate 31 layout entries, got {override_count}"
+        );
+        // Each must reference the correct path pattern
+        for n in 1..=31u32 {
+            let expected_path = format!("/ppt/slideLayouts/slideLayout{n}.xml");
+            assert!(
+                entries.contains(&expected_path),
+                "content_types must contain PartName=\"{expected_path}\""
+            );
+        }
     }
 
-    /// BC-2.01.005 / AC-009 — dark layout XML contains clrMapOvr element.
+    /// serialize_layout_to_xml — output contains `<p:sldLayout>` root element.
+    /// Tests that todo!() body panics (Red Gate).
+    #[test]
+    fn test_layout_xml_serializes_with_valid_xml() {
+        let layout = minimal_light_layout();
+        let xml_bytes = serialize_layout_to_xml(&layout, "rId1");
+        let xml = std::str::from_utf8(&xml_bytes).expect("output must be valid UTF-8");
+        assert!(
+            xml.contains("<p:sldLayout"),
+            "output must contain <p:sldLayout> root element, got: {}",
+            &xml[..xml.len().min(200)]
+        );
+        // Must NOT contain raw browser-hostile elements
+        assert!(
+            !xml.contains("<foreignObject"),
+            "layout XML must not contain <foreignObject>"
+        );
+        assert!(
+            !xml.contains("<script"),
+            "layout XML must not contain <script>"
+        );
+    }
+
+    /// BC-2.01.005 / AC-009 — dark layout XML contains `clrMapOvr` element.
+    /// Tests that todo!() body panics (Red Gate).
     #[test]
     fn test_bc_2_01_005_dark_layout_xml_has_clr_map_ovr() {
-        // Deferred until serialize_layout_to_xml() is implemented.
-        // Expected: output contains "clrMapOvr" and "overrideClrMapping"
+        let layout = minimal_dark_layout();
+        let xml_bytes = serialize_layout_to_xml(&layout, "rId1");
+        let xml = std::str::from_utf8(&xml_bytes).expect("output must be valid UTF-8");
+        assert!(
+            xml.contains("clrMapOvr"),
+            "dark layout XML must contain 'clrMapOvr', got: {}",
+            &xml[..xml.len().min(300)]
+        );
+        assert!(
+            xml.contains("overrideClrMapping"),
+            "dark layout XML must contain 'overrideClrMapping'"
+        );
     }
 
-    /// BC-2.01.005 / AC-009 — dark layout XML contains explicit white text color.
+    /// BC-2.01.005 / AC-009 — dark layout XML contains explicit white text color
+    /// (`<a:srgbClr val="FFFFFF"/>`) for LibreOffice 7.x compatibility (R4 mitigation).
+    /// Tests that todo!() body panics (Red Gate).
     #[test]
     fn test_bc_2_01_005_dark_layout_xml_has_explicit_white_text() {
-        // Deferred until serialize_layout_to_xml() is implemented.
-        // Expected: output contains "<a:srgbClr val=\"FFFFFF\"/>"
+        let layout = minimal_dark_layout();
+        let xml_bytes = serialize_layout_to_xml(&layout, "rId1");
+        let xml = std::str::from_utf8(&xml_bytes).expect("output must be valid UTF-8");
+        assert!(
+            xml.contains("FFFFFF"),
+            "dark layout XML must contain explicit white text (FFFFFF), got: {}",
+            &xml[..xml.len().min(400)]
+        );
+        assert!(
+            xml.contains("srgbClr"),
+            "dark layout XML must contain <a:srgbClr> for explicit white text"
+        );
     }
 
-    /// AC-010 — layout XML uses semantic placeholder names, not "Shape N".
+    /// AC-010 — layout XML does NOT use "Shape N" placeholder names.
+    /// Tests that todo!() body panics (Red Gate).
     #[test]
     fn test_bc_2_01_005_layout_xml_uses_semantic_names() {
-        // Deferred until serialize_layout_to_xml() is implemented.
-        // Expected: no occurrence of r#"name="Shape "#
+        let layout = minimal_light_layout();
+        let xml_bytes = serialize_layout_to_xml(&layout, "rId1");
+        let xml = std::str::from_utf8(&xml_bytes).expect("output must be valid UTF-8");
+        // Must not contain the forbidden "Shape N" pattern
+        assert!(
+            !xml.contains(r#"name="Shape "#),
+            "layout XML must not use 'Shape N' accessibility names; got snippet: {}",
+            &xml[..xml.len().min(300)]
+        );
+        // The semantic name from the placeholder definition must appear
+        assert!(
+            xml.contains("Title Placeholder"),
+            "layout XML must contain the semantic accessibility name 'Title Placeholder'"
+        );
+    }
+
+    /// AC-010 — non-dark layout XML does NOT contain `clrMapOvr`.
+    /// Tests that todo!() body panics (Red Gate).
+    #[test]
+    fn test_bc_2_01_005_light_layout_xml_has_no_clr_map_ovr() {
+        let layout = minimal_light_layout();
+        let xml_bytes = serialize_layout_to_xml(&layout, "rId1");
+        let xml = std::str::from_utf8(&xml_bytes).expect("output must be valid UTF-8");
+        assert!(
+            !xml.contains("clrMapOvr"),
+            "non-dark layout XML must NOT contain clrMapOvr"
+        );
     }
 }

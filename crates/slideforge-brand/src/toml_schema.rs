@@ -366,4 +366,123 @@ mod tests {
         });
         // We only assert the method exists at compile time (covered by compilation).
     }
+
+    // ─── New behavioral tests for Red Gate ────────────────────────────────────
+
+    /// BC-2.01.002 — parse_full_brand_toml: all 12 color fields, fonts, logo, footer
+    /// populated correctly from a complete brand.toml.
+    #[test]
+    fn test_bc_2_01_002_parse_full_brand_toml() {
+        let toml_str = concat!(
+            "[colors]\n",
+            "dk1 = \"#1F2937\"\n",
+            "lt1 = \"#FFFFFF\"\n",
+            "dk2 = \"#374151\"\n",
+            "lt2 = \"#F9FAFB\"\n",
+            "acc1 = \"#3B82F6\"\n",
+            "acc2 = \"#10B981\"\n",
+            "acc3 = \"#F59E0B\"\n",
+            "acc4 = \"#EF4444\"\n",
+            "acc5 = \"#8B5CF6\"\n",
+            "acc6 = \"#EC4899\"\n",
+            "hlink = \"#2563EB\"\n",
+            "fol_hlink = \"#1D4ED8\"\n",
+            "\n",
+            "[fonts]\n",
+            "heading = \"Aptos Display\"\n",
+            "body = \"Aptos\"\n",
+            "\n",
+            "[logo]\n",
+            "path = \"brand.assets/logo.png\"\n",
+            "\n",
+            "[footer]\n",
+            "text = \"Confidential\"\n",
+            "show_slide_number = true\n",
+            "show_date = false\n",
+        );
+        let config: BrandConfig = toml::from_str(toml_str).expect("should parse");
+        // All 12 color slots are present
+        assert_eq!(config.colors.dk1.as_deref(), Some("#1F2937"), "dk1");
+        assert_eq!(config.colors.lt1.as_deref(), Some("#FFFFFF"), "lt1");
+        assert_eq!(config.colors.dk2.as_deref(), Some("#374151"), "dk2");
+        assert_eq!(config.colors.lt2.as_deref(), Some("#F9FAFB"), "lt2");
+        assert_eq!(config.colors.acc1.as_deref(), Some("#3B82F6"), "acc1");
+        assert_eq!(config.colors.acc2.as_deref(), Some("#10B981"), "acc2");
+        assert_eq!(config.colors.acc3.as_deref(), Some("#F59E0B"), "acc3");
+        assert_eq!(config.colors.acc4.as_deref(), Some("#EF4444"), "acc4");
+        assert_eq!(config.colors.acc5.as_deref(), Some("#8B5CF6"), "acc5");
+        assert_eq!(config.colors.acc6.as_deref(), Some("#EC4899"), "acc6");
+        assert_eq!(config.colors.hlink.as_deref(), Some("#2563EB"), "hlink");
+        assert_eq!(config.colors.fol_hlink.as_deref(), Some("#1D4ED8"), "fol_hlink");
+        // Fonts
+        assert_eq!(config.fonts.heading.as_str(), "Aptos Display");
+        assert_eq!(config.fonts.body.as_str(), "Aptos");
+        // Logo
+        assert_eq!(
+            config.logo.as_ref().map(|l| l.path.as_str()),
+            Some("brand.assets/logo.png")
+        );
+        // Footer
+        assert_eq!(config.footer.text.as_str(), "Confidential");
+        assert!(config.footer.show_slide_number);
+        assert!(!config.footer.show_date);
+    }
+
+    /// BC-2.01.002 — parse_minimal_brand_toml: only `[colors] dk1` → other fields None/default.
+    #[test]
+    fn test_bc_2_01_002_parse_minimal_brand_toml() {
+        let toml_str = "[colors]\ndk1 = \"#1F2937\"\n";
+        let config: BrandConfig = toml::from_str(toml_str).expect("should parse");
+        assert_eq!(config.colors.dk1.as_deref(), Some("#1F2937"), "dk1 must be set");
+        // All other color slots are absent
+        assert!(config.colors.lt1.is_none(), "lt1 should be None");
+        assert!(config.colors.acc1.is_none(), "acc1 should be None");
+        assert!(config.colors.hlink.is_none(), "hlink should be None");
+        // Fonts fall back to defaults
+        assert_eq!(config.fonts.heading.as_str(), "Calibri");
+        assert_eq!(config.fonts.body.as_str(), "Calibri");
+        // No logo
+        assert!(config.logo.is_none(), "logo should be None when absent");
+    }
+
+    /// BC-2.01.002 — as_slot_array returns the 12 slots in ECMA-376 order.
+    /// This test exercises the todo!() body — it must panic (Red Gate).
+    #[test]
+    #[should_panic(expected = "not yet implemented")]
+    fn test_bc_2_01_002_color_config_as_slot_array_returns_12_in_order() {
+        let toml_str = concat!(
+            "[colors]\n",
+            "dk1 = \"#1F2937\"\n",
+            "lt1 = \"#FFFFFF\"\n",
+            "dk2 = \"#374151\"\n",
+            "lt2 = \"#F9FAFB\"\n",
+            "acc1 = \"#3B82F6\"\n",
+            "acc2 = \"#10B981\"\n",
+            "acc3 = \"#F59E0B\"\n",
+            "acc4 = \"#EF4444\"\n",
+            "acc5 = \"#8B5CF6\"\n",
+            "acc6 = \"#EC4899\"\n",
+            "hlink = \"#2563EB\"\n",
+            "fol_hlink = \"#1D4ED8\"\n",
+        );
+        let config: BrandConfig = toml::from_str(toml_str).expect("should parse");
+        // as_slot_array() is todo!() — will panic (Red Gate)
+        let slots = config.colors.as_slot_array();
+        // ECMA-376 order: dk1, lt1, dk2, lt2, acc1..acc6, hlink, fol_hlink
+        assert_eq!(slots[0], Some("#1F2937"), "index 0 = dk1");
+        assert_eq!(slots[1], Some("#FFFFFF"), "index 1 = lt1");
+        assert_eq!(slots[4], Some("#3B82F6"), "index 4 = acc1");
+        assert_eq!(slots[11], Some("#1D4ED8"), "index 11 = fol_hlink");
+    }
+
+    /// BC-2.01.002 — `default_minimal()` constructs a BrandConfig usable by tests.
+    /// This test exercises the todo!() body — it must panic (Red Gate).
+    #[test]
+    #[should_panic(expected = "not yet implemented")]
+    fn test_bc_2_01_002_default_minimal_is_callable() {
+        let config = BrandConfig::default_minimal();
+        // After implementation: acc1 = "#3B82F6", logo = Some(...), dk1 set
+        assert!(config.colors.acc1.is_some(), "default_minimal must have acc1");
+        assert!(config.logo.is_some(), "default_minimal must have a logo path");
+    }
 }

@@ -145,71 +145,320 @@ pub fn generate_all_layouts(_config: &BrandConfig) -> Vec<SlideLayoutDef> {
 mod tests {
     use super::*;
 
-    fn minimal_config() -> BrandConfig {
-        BrandConfig::default_minimal()
+    /// Build a BrandConfig directly (without calling default_minimal() which is
+    /// todo!()) so layout tests can run purely against generate_all_layouts().
+    fn minimal_config_direct() -> BrandConfig {
+        BrandConfig {
+            colors: crate::toml_schema::ColorConfig {
+                acc1: Some("#3B82F6".to_owned()),
+                dk1: Some("#1F2937".to_owned()),
+                ..Default::default()
+            },
+            fonts: crate::toml_schema::FontConfig {
+                heading: "Calibri".to_owned(),
+                body: "Calibri".to_owned(),
+            },
+            logo: Some(crate::toml_schema::LogoConfig {
+                path: "test-logo.png".to_owned(),
+            }),
+            footer: crate::toml_schema::FooterConfig {
+                text: String::new(),
+                show_slide_number: true,
+                show_date: false,
+            },
+        }
     }
+
+    // NOTE: FontConfig::default() and FooterConfig::default() are todo!().
+    // We use direct construction above to avoid hitting those todo!() bodies.
 
     /// BC-2.01.005 postcondition 1 — exactly 31 layouts generated.
     #[test]
-    fn test_bc_2_01_005_generates_exactly_31_layouts() {
-        let _config = minimal_config();
-        // Deferred until BrandConfig::default_minimal() is implemented.
-        // Will call: generate_all_layouts(&config) and assert len == 31.
+    fn test_bc_2_01_005_generate_31_layouts() {
+        let config = minimal_config_direct();
+        let layouts = generate_all_layouts(&config);
+        assert_eq!(layouts.len(), 31, "must generate exactly 31 layouts");
     }
 
-    /// BC-2.01.005 postcondition 2 — SL-01..SL-11 have non-None `ooxml_type`.
+    /// BC-2.01.005 postcondition 2 — SL-01..SL-11 (indices 0–10) have non-None `ooxml_type`.
+    #[test]
+    fn test_bc_2_01_005_11_standard_layouts_present() {
+        let config = minimal_config_direct();
+        let layouts = generate_all_layouts(&config);
+        let standard_names = [
+            "Title Slide",
+            "Title and Content",
+            "Section Header",
+            "Two Content",
+            "Comparison",
+            "Title Only",
+            "Blank",
+            "Content with Caption",
+            "Picture with Caption",
+            "Vertical Title and Text",
+            "Vertical Text",
+        ];
+        for (i, expected_name) in standard_names.iter().enumerate() {
+            assert_eq!(
+                layouts[i].name.as_ref(),
+                *expected_name,
+                "layout index {i} (0-based) must be '{expected_name}'"
+            );
+        }
+    }
+
+    /// BC-2.01.005 postcondition 2 — standard layouts have correct ECMA-376 ooxml_type values.
     #[test]
     fn test_bc_2_01_005_standard_layouts_have_ooxml_types() {
-        // Deferred until generate_all_layouts() is implemented.
-        // Expected: layouts[0].ooxml_type == Some("title"), etc.
+        let config = minimal_config_direct();
+        let layouts = generate_all_layouts(&config);
+        let expected_types = [
+            "title",
+            "obj",
+            "secHead",
+            "twoObj",
+            "twoColTx",
+            "titleOnly",
+            "blank",
+            "objTx",
+            "picTx",
+            "vertTitleAndTx",
+            "vertTx",
+        ];
+        for (i, expected_type) in expected_types.iter().enumerate() {
+            assert_eq!(
+                layouts[i].ooxml_type.as_deref(),
+                Some(*expected_type),
+                "layout index {i} must have ooxml_type = Some(\"{expected_type}\")"
+            );
+        }
     }
 
-    /// BC-2.01.005 postcondition 3 — CL-01..CL-20 names start with "SF ".
+    /// BC-2.01.005 postcondition 3 — CL-01..CL-20 (indices 11–30) names start with "SF ".
     #[test]
-    fn test_bc_2_01_005_custom_layouts_have_sf_prefix() {
-        // Deferred until generate_all_layouts() is implemented.
-        // Expected: all layouts[11..31].name starts with "SF ".
+    fn test_bc_2_01_005_20_sf_custom_layouts_present() {
+        let config = minimal_config_direct();
+        let layouts = generate_all_layouts(&config);
+        let sf_names = [
+            "SF Section Divider",
+            "SF Stat Grid",
+            "SF Quote",
+            "SF Timeline",
+            "SF Agenda",
+            "SF TOC",
+            "SF Bio",
+            "SF Team Grid",
+            "SF Comparison Table",
+            "SF Full-Bleed Image",
+            "SF End Slide",
+            "SF Data",
+            "SF Diagram",
+            "SF Chart",
+            "SF Map",
+            "SF Risk Register",
+            "SF Executive Summary",
+            "SF Two Column",
+            "SF Methodology",
+            "SF Appendix",
+        ];
+        assert_eq!(
+            layouts[11..].len(),
+            20,
+            "must have exactly 20 SF custom layouts"
+        );
+        for (i, expected_name) in sf_names.iter().enumerate() {
+            let layout_idx = i + 11;
+            assert_eq!(
+                layouts[layout_idx].name.as_ref(),
+                *expected_name,
+                "layout index {layout_idx} must be '{expected_name}'"
+            );
+            assert!(
+                layouts[layout_idx].name.starts_with("SF "),
+                "layout index {layout_idx} name must start with 'SF '"
+            );
+        }
     }
 
-    /// BC-2.01.005 invariant 2 / AC-010 — Blank layout has zero placeholders.
+    /// BC-2.01.005 invariant 2 / AC-010 — Blank layout (SL-07, index 6) has zero placeholders.
     #[test]
     fn test_bc_2_01_005_blank_layout_has_zero_placeholders() {
-        // SL-07 (index 6 in 0-based) must have placeholders.len() == 0.
-        // Deferred until generate_all_layouts() is implemented.
+        let config = minimal_config_direct();
+        let layouts = generate_all_layouts(&config);
+        let blank = &layouts[6]; // SL-07 (0-based index 6)
+        assert_eq!(blank.name.as_ref(), "Blank", "index 6 must be Blank layout");
+        assert_eq!(
+            blank.placeholders.len(),
+            0,
+            "Blank layout must have zero placeholders"
+        );
     }
 
-    /// BC-2.01.005 / AC-009 — CL-01 has `has_color_override` = true and bg = "dk2".
+    /// BC-2.01.005 / AC-009 — CL-01 "SF Section Divider" (index 11) has dark color override.
     #[test]
     fn test_bc_2_01_005_cl01_section_divider_dark_layout() {
-        // layouts[11] (CL-01) must have has_color_override=true, color_override_bg=Some("dk2").
-        // Deferred until generate_all_layouts() is implemented.
+        let config = minimal_config_direct();
+        let layouts = generate_all_layouts(&config);
+        let cl01 = &layouts[11]; // CL-01 (0-based index 11)
+        assert_eq!(
+            cl01.name.as_ref(),
+            "SF Section Divider",
+            "index 11 must be SF Section Divider"
+        );
+        assert!(
+            cl01.has_color_override,
+            "SF Section Divider must have has_color_override = true"
+        );
+        assert_eq!(
+            cl01.color_override_bg.as_deref(),
+            Some("dk2"),
+            "SF Section Divider bg override must be 'dk2'"
+        );
+        assert_eq!(
+            cl01.color_override_tx.as_deref(),
+            Some("lt1"),
+            "SF Section Divider tx override must be 'lt1'"
+        );
     }
 
-    /// BC-2.01.005 / AC-009 — CL-11 has `has_color_override` = true.
+    /// BC-2.01.005 / AC-009 — CL-11 "SF End Slide" (index 21) has dark color override.
     #[test]
     fn test_bc_2_01_005_cl11_end_slide_dark_layout() {
-        // layouts[21] (CL-11) must have has_color_override=true.
-        // Deferred until generate_all_layouts() is implemented.
+        let config = minimal_config_direct();
+        let layouts = generate_all_layouts(&config);
+        let cl11 = &layouts[21]; // CL-11 (0-based index 21)
+        assert_eq!(
+            cl11.name.as_ref(),
+            "SF End Slide",
+            "index 21 must be SF End Slide"
+        );
+        assert!(
+            cl11.has_color_override,
+            "SF End Slide must have has_color_override = true"
+        );
+        assert_eq!(
+            cl11.color_override_bg.as_deref(),
+            Some("dk2"),
+            "SF End Slide bg override must be 'dk2'"
+        );
+        assert_eq!(
+            cl11.color_override_tx.as_deref(),
+            Some("lt1"),
+            "SF End Slide tx override must be 'lt1'"
+        );
     }
 
-    /// BC-2.01.005 — layout indices are 1-based and sequential.
+    /// BC-2.01.005 — layout indices are 1-based and sequential (1..=31).
     #[test]
     fn test_bc_2_01_005_layout_indices_are_sequential() {
-        // Expected: layouts[0].index == 1, layouts[30].index == 31.
-        // Deferred until generate_all_layouts() is implemented.
+        let config = minimal_config_direct();
+        let layouts = generate_all_layouts(&config);
+        assert_eq!(layouts[0].index, 1, "first layout must have index 1");
+        assert_eq!(layouts[30].index, 31, "last layout must have index 31");
+        for (i, layout) in layouts.iter().enumerate() {
+            assert_eq!(
+                layout.index,
+                i + 1,
+                "layout at position {i} must have 1-based index {}",
+                i + 1
+            );
+        }
     }
 
-    /// BC-2.01.005 — standard layout `ooxml_type` values are correct ECMA-376 strings.
+    /// BC-2.01.005 — non-dark layouts do NOT have color overrides.
     #[test]
-    fn test_bc_2_01_005_standard_layout_ooxml_type_values() {
-        // Expected: ["title","obj","secHead","twoObj","twoColTx","titleOnly",
-        //            "blank","objTx","picTx","vertTitleAndTx","vertTx"]
-        // Deferred until generate_all_layouts() is implemented.
+    fn test_bc_2_01_005_non_dark_layouts_have_no_color_override() {
+        let config = minimal_config_direct();
+        let layouts = generate_all_layouts(&config);
+        for (i, layout) in layouts.iter().enumerate() {
+            // Only indices 11 (CL-01) and 21 (CL-11) should be dark
+            if i != 11 && i != 21 {
+                assert!(
+                    !layout.has_color_override,
+                    "layout index {i} ('{}') must NOT have has_color_override = true",
+                    layout.name
+                );
+            }
+        }
     }
 
-    /// BC-2.01.005 invariant 4 / AC-010 — no placeholder has `accessibility_name` "Shape N".
+    /// BC-2.01.005 invariant 2 / AC-010 — every layout except Blank (SL-07) has at
+    /// least one placeholder.
     #[test]
-    fn test_bc_2_01_005_no_shape_n_accessibility_names() {
-        // Deferred until generate_all_layouts() is implemented.
+    fn test_bc_2_01_005_non_blank_layouts_have_at_least_one_placeholder() {
+        let config = minimal_config_direct();
+        let layouts = generate_all_layouts(&config);
+        for (i, layout) in layouts.iter().enumerate() {
+            if i == 6 {
+                // Blank layout — zero placeholders is correct
+                continue;
+            }
+            assert!(
+                !layout.placeholders.is_empty(),
+                "layout index {i} ('{}') must have at least one placeholder",
+                layout.name
+            );
+        }
+    }
+
+    /// BC-2.01.005 invariant 4 / AC-010 — no placeholder uses "Shape N" as its
+    /// accessibility name (DI-001 accessibility requirement).
+    #[test]
+    fn test_bc_2_01_005_layout_color_references_use_scheme_slots() {
+        let config = minimal_config_direct();
+        let layouts = generate_all_layouts(&config);
+        for (i, layout) in layouts.iter().enumerate() {
+            for ph in &layout.placeholders {
+                let name = ph.accessibility_name.as_ref();
+                // Must not match the forbidden "Shape N" pattern
+                let is_shape_n = name.starts_with("Shape ")
+                    && name[6..].chars().all(|c| c.is_ascii_digit());
+                assert!(
+                    !is_shape_n,
+                    "layout index {i} ('{}') has a placeholder with forbidden name '{}' (must not be 'Shape N')",
+                    layout.name,
+                    name
+                );
+                // Accessibility name must be non-empty
+                assert!(
+                    !name.is_empty(),
+                    "layout index {i} ('{}') has a placeholder with empty accessibility_name",
+                    layout.name
+                );
+            }
+        }
+    }
+
+    /// BC-2.01.005 — generation is deterministic (same config → same Vec ordering).
+    #[test]
+    fn test_bc_2_01_005_generation_deterministic() {
+        let config = minimal_config_direct();
+        let layouts_a = generate_all_layouts(&config);
+        let layouts_b = generate_all_layouts(&config);
+        assert_eq!(
+            layouts_a.len(),
+            layouts_b.len(),
+            "generate_all_layouts must be deterministic in length"
+        );
+        for (i, (a, b)) in layouts_a.iter().zip(layouts_b.iter()).enumerate() {
+            assert_eq!(
+                a.name.as_ref(),
+                b.name.as_ref(),
+                "layout index {i}: name must be deterministic"
+            );
+            assert_eq!(
+                a.index, b.index,
+                "layout index {i}: index field must be deterministic"
+            );
+            assert_eq!(
+                a.ooxml_type.as_deref(),
+                b.ooxml_type.as_deref(),
+                "layout index {i}: ooxml_type must be deterministic"
+            );
+            assert_eq!(
+                a.has_color_override, b.has_color_override,
+                "layout index {i}: has_color_override must be deterministic"
+            );
+        }
     }
 }
