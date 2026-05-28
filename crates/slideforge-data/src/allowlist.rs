@@ -52,8 +52,30 @@ pub struct AllowlistConfig {
 /// * `url` — The parsed URL to check.
 /// * `config` — The allowlist configuration to enforce.
 #[must_use]
-pub fn is_allowed(_url: &url::Url, _config: &AllowlistConfig) -> bool {
-    todo!()
+pub fn is_allowed(url: &url::Url, config: &AllowlistConfig) -> bool {
+    // No allowlist configured — permit all.
+    let Some(domains) = &config.domains else {
+        return true;
+    };
+
+    // Allowlist is present. If empty, fail-closed (block all).
+    if domains.is_empty() {
+        return false;
+    }
+
+    // Build the match key: "host" or "host:port" depending on whether the URL
+    // carries an explicit port component.
+    // URL with no host is always blocked when allowlist is set.
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    let domain_key = match url.port() {
+        Some(p) => format!("{host}:{p}"),
+        None => host.to_owned(),
+    };
+
+    // Exact match against each entry.
+    domains.iter().any(|d| d.as_ref() == domain_key)
 }
 
 #[cfg(test)]
@@ -76,10 +98,7 @@ mod tests {
             domains: Some(vec![Arc::from("api.example.com")]),
         };
         let url = url::Url::parse("https://api.example.com/data").unwrap();
-        assert!(
-            is_allowed(&url, &config),
-            "listed domain must be permitted"
-        );
+        assert!(is_allowed(&url, &config), "listed domain must be permitted");
     }
 
     /// `test_BC_1_03_005_blocked_domain`
