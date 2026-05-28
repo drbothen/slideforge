@@ -46,6 +46,11 @@ allow = [
     "Zlib",
     "Unicode-3.0",
     "MPL-2.0",
+    # CDLA-Permissive-2.0: used by webpki-roots (Mozilla CA certificate bundle data),
+    # a transitive dependency via ureq → webpki-roots. This is an OSI-compatible
+    # permissive license from the Community Data License Agreement family, appropriate
+    # for open datasets like CA certificate bundles.
+    "CDLA-Permissive-2.0",
 ]
 
 # Note: licenses not in the allow list above are implicitly denied.
