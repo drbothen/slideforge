@@ -96,7 +96,7 @@ pub enum MathError {
         name: String,
     },
 
-    /// The [`crate::MathAst`] passed to `render_pdf_paths` contains zero nodes.
+    /// The `MathAst` passed to `render_pdf_paths` contains zero nodes.
     ///
     /// An empty AST cannot produce meaningful vector-path output. Callers should
     /// surface this as a user-visible error rather than silently emitting a

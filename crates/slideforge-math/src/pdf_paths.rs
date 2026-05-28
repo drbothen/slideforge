@@ -58,7 +58,8 @@ const SUB_OFFSET: i64 = 4;
 ///
 /// Display math is larger and centered; inline math uses the default size.
 const DISPLAY_SCALE_NUM: i64 = 6; // numerator of 6/5 = 1.2
-const DISPLAY_SCALE_DEN: i64 = 5; // denominator
+/// Denominator of the display-mode scale factor (6/5 = 1.2×).
+const DISPLAY_SCALE_DEN: i64 = 5;
 
 /// Vertical padding added to the SVG viewBox height above the tallest glyph.
 ///
