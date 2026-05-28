@@ -144,8 +144,8 @@ impl BrandSynthesizer {
             let canonical_brand_dir_norm = strip_unc_prefix(&canonical_brand_dir);
             if !canonical_logo_norm.starts_with(&canonical_brand_dir_norm) {
                 return Err(BrandError::LogoOutsideBrandDir {
-                    logo_path: canonical_logo.to_string_lossy().into_owned(),
-                    brand_dir: canonical_brand_dir.to_string_lossy().into_owned(),
+                    logo_path: canonical_logo_norm.to_string_lossy().into_owned(),
+                    brand_dir: canonical_brand_dir_norm.to_string_lossy().into_owned(),
                 });
             }
         }

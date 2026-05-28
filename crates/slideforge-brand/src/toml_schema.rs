@@ -54,9 +54,6 @@ use serde::{Deserialize, Serialize};
 ///
 /// Use `toml::from_str("")` if you specifically need an all-`None` config for
 /// testing TOML parsing behavior.
-// #[non_exhaustive] for v1.0 SemVer hygiene; new fields may be added in minor releases
-// per CLAUDE.md Quality Bar Supply chain row.
-#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BrandConfig {
     /// The `[colors]` section — 12 OOXML theme color slots.
@@ -129,9 +126,6 @@ impl Default for BrandConfig {
 ///
 /// All absent fields produce one `E-BRD-003` warning each and are inferred
 /// by the deterministic algorithm in `inference::infer_missing_slots`.
-// #[non_exhaustive] for v1.0 SemVer hygiene; new fields may be added in minor releases
-// per CLAUDE.md Quality Bar Supply chain row.
-#[non_exhaustive]
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ColorConfig {
     /// Dark 1 — primary dark color (e.g., text on light backgrounds).
@@ -236,9 +230,6 @@ impl ColorConfig {
 ///
 /// Specifies heading and body font typeface names. Both default to `"Calibri"`
 /// when absent (BC-2.01.002 postcondition — `[fonts]` optional with fallbacks).
-// #[non_exhaustive] for v1.0 SemVer hygiene; new fields may be added in minor releases
-// per CLAUDE.md Quality Bar Supply chain row.
-#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FontConfig {
     /// Heading font typeface name (maps to OOXML `<a:majorFont>`).
@@ -279,9 +270,6 @@ fn default_body_font() -> String {
 ///
 /// The `path` field is required for synthesized brands (AC-004). If absent,
 /// `BrandSynthesizer::synthesize` returns `BrandError::LogoRequired`.
-// #[non_exhaustive] for v1.0 SemVer hygiene; new fields may be added in minor releases
-// per CLAUDE.md Quality Bar Supply chain row.
-#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LogoConfig {
     /// File path to the logo image (e.g., `"brand.assets/logo.png"`).
@@ -296,9 +284,6 @@ pub struct LogoConfig {
 ///
 /// Controls the footer text and visibility flags applied to all slide layouts.
 /// All fields are optional with documented defaults.
-// #[non_exhaustive] for v1.0 SemVer hygiene; new fields may be added in minor releases
-// per CLAUDE.md Quality Bar Supply chain row.
-#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FooterConfig {
     /// Footer text string (e.g., `"Confidential"`).

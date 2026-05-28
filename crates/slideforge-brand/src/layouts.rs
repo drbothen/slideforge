@@ -34,9 +34,6 @@ use crate::toml_schema::BrandConfig;
 /// Produced by [`generate_all_layouts`] and stored in [`crate::template::BrandTemplate`].
 /// The PPTX exporter (STORY-037) serializes each `SlideLayoutDef` to a
 /// `slideLayoutN.xml` file inside the OOXML ZIP package.
-// #[non_exhaustive] for v1.0 SemVer hygiene; new fields may be added in minor releases
-// per CLAUDE.md Quality Bar Supply chain row.
-#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SlideLayoutDef {
     /// 1-based layout index (1–31).
@@ -87,9 +84,6 @@ pub struct SlideLayoutDef {
 ///
 /// Used by the PPTX exporter (STORY-037) to generate `<p:sp>` placeholder
 /// elements inside `<p:spTree>` for each layout.
-// #[non_exhaustive] for v1.0 SemVer hygiene; new fields may be added in minor releases
-// per CLAUDE.md Quality Bar Supply chain row.
-#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LayoutPlaceholder {
     /// OOXML placeholder type string (e.g., `"ctrTitle"`, `"body"`, `"pic"`).

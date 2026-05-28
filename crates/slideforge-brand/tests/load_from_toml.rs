@@ -164,7 +164,9 @@ fn test_load_brand_toml_invalid_toml_returns_parse_error() {
         .expect("tempfile path must be valid UTF-8");
     let result = BrandSynthesizer::load_from_toml(path);
     assert!(result.is_err(), "load_from_toml must fail for invalid TOML");
-    let msg = result.expect_err("load_from_toml must fail for invalid TOML").to_string();
+    let msg = result
+        .expect_err("load_from_toml must fail for invalid TOML")
+        .to_string();
     assert!(
         msg.contains("E-BRD-002"),
         "error must be TomlParseError (E-BRD-002), got: {msg}"
