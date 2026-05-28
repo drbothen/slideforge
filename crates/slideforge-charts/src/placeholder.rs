@@ -20,6 +20,26 @@
 //! - Width: [`crate::types::InternalChartSpec::DEFAULT_WIDTH`] (800 px)
 //! - Height: [`crate::types::InternalChartSpec::DEFAULT_HEIGHT`] (450 px)
 
+/// XML-escape the five predefined XML entities in `s`.
+///
+/// Replaces `&`, `<`, `>`, `"`, and `'` with their XML entity equivalents.
+/// This ensures that user-controlled strings (slide titles, error messages)
+/// cannot inject raw XML into the SVG output.
+fn xml_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&apos;"),
+            other => out.push(other),
+        }
+    }
+    out
+}
+
 /// Build an error-slide placeholder SVG string.
 ///
 /// Produces a PPTX-safe, self-contained SVG that renders a light gray
@@ -48,11 +68,29 @@
 /// All user-supplied strings are XML-escaped before inclusion.
 #[must_use]
 pub fn build_error_slide_placeholder_svg(
-    _slide_title: &str,
-    _error_code: &str,
-    _message: &str,
+    slide_title: &str,
+    error_code: &str,
+    message: &str,
 ) -> String {
-    todo!()
+    let escaped_title = xml_escape(slide_title);
+    let escaped_code = xml_escape(error_code);
+    let escaped_msg = xml_escape(message);
+    let mut svg = String::new();
+    svg.push_str(r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" role="img" aria-label="Error placeholder for slide: "#);
+    svg.push_str(&escaped_title);
+    svg.push_str("\">\n");
+    svg.push_str("  <rect width=\"100%\" height=\"100%\" fill=\"#F3F4F6\" stroke=\"#9CA3AF\" stroke-width=\"2\"/>\n");
+    svg.push_str("  <text x=\"640\" y=\"300\" text-anchor=\"middle\" font-family=\"sans-serif\" font-size=\"24\" font-weight=\"bold\" fill=\"#374151\">");
+    svg.push_str(&escaped_code);
+    svg.push_str("</text>\n");
+    svg.push_str("  <text x=\"640\" y=\"350\" text-anchor=\"middle\" font-family=\"sans-serif\" font-size=\"20\" fill=\"#374151\">");
+    svg.push_str(&escaped_title);
+    svg.push_str("</text>\n");
+    svg.push_str("  <text x=\"640\" y=\"400\" text-anchor=\"middle\" font-family=\"sans-serif\" font-size=\"16\" fill=\"#6B7280\">");
+    svg.push_str(&escaped_msg);
+    svg.push_str("</text>\n");
+    svg.push_str("</svg>");
+    svg
 }
 
 #[cfg(test)]

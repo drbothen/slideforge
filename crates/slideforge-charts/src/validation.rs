@@ -49,8 +49,8 @@ pub const E_LAY_003: &str = "E-LAY-003";
 /// assert!(!data_is_empty(&Value::List(vec![Value::Int(1)])));
 /// ```
 #[must_use]
-pub fn data_is_empty(_data: &Value) -> bool {
-    todo!()
+pub fn data_is_empty(data: &Value) -> bool {
+    matches!(data, Value::List(items) if items.is_empty())
 }
 
 /// Build an `E-LAY-003` [`Diagnostic`] for an empty-data chart slide.
@@ -74,11 +74,22 @@ pub fn data_is_empty(_data: &Value) -> bool {
 /// - `span`: the provided `span`
 #[must_use]
 pub fn build_empty_data_diagnostic(
-    _slide_title: &str,
-    _expression: &str,
-    _span: SourceSpan,
+    slide_title: &str,
+    expression: &str,
+    span: SourceSpan,
 ) -> Diagnostic {
-    todo!()
+    Diagnostic {
+        severity: slideforge_plugin_api::DiagnosticSeverity::Error,
+        code: std::sync::Arc::from(E_LAY_003),
+        message: std::sync::Arc::from(format!(
+            "Chart data is empty for slide '{slide_title}' (expression: {expression}). \
+             Rendering error-slide placeholder."
+        )),
+        span,
+        hint: Some(std::sync::Arc::from(
+            "Ensure the data source contains at least one row.",
+        )),
+    }
 }
 
 #[cfg(test)]
