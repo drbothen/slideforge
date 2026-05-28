@@ -26,8 +26,9 @@ use slideforge_types::{SourceSpan, Value};
 /// This code is in the `E-LAY-*` class because the empty-data condition is
 /// detected at the layout / eval-pipeline stage, before the chart renderer
 /// plugin is invoked.
-// Used by tests and by the eval-layer integration (STORY-055). Dead-code lint
-// fires because production wiring is deferred to STORY-055.
+// Used by tests; intended for future eval-layer integration once visibility is
+// reconsidered (STORY-055). Dead-code lint fires because production wiring is
+// deferred to STORY-055.
 #[allow(dead_code)]
 pub const E_LAY_003: &str = "E-LAY-003";
 
@@ -50,7 +51,8 @@ pub const E_LAY_003: &str = "E-LAY-003";
 /// assert!(data_is_empty(&Value::List(vec![])));
 /// assert!(!data_is_empty(&Value::List(vec![Value::Int(1)])));
 /// ```
-// Used by tests and by the eval-layer integration (STORY-055).
+// Used by tests; intended for future eval-layer integration once visibility is
+// reconsidered (STORY-055).
 #[allow(dead_code)]
 #[must_use]
 pub fn data_is_empty(data: &Value) -> bool {
@@ -82,7 +84,8 @@ pub fn data_is_empty(data: &Value) -> bool {
 /// - `message`: `"Chart data is empty for slide '<slide_title>'. Rendering error-slide placeholder."`
 /// - `hint`: `"Ensure '<expression>' contains at least one row."`
 /// - `span`: the provided `span` (miette renders the expression location as a source pointer)
-// Used by tests and by the eval-layer integration (STORY-055).
+// Used by tests; intended for future eval-layer integration once visibility is
+// reconsidered (STORY-055).
 #[allow(dead_code)]
 #[must_use]
 pub fn build_empty_data_diagnostic(

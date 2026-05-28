@@ -23,9 +23,10 @@
 //! - **Forbidden deps**: This crate MUST NOT depend on any exporter,
 //!   `slideforge-data`, `slideforge-layout`, `slideforge-cli`,
 //!   `slideforge-syntax`, or `slideforge-eval`.
-//! - **Empty-data guard (STORY-032)**: The `validation::data_is_empty` check
-//!   runs BEFORE [`ChartRendererImpl::dispatch_and_process`] is called. No code
-//!   path in this crate passes empty data to the renderer.
+//! - **Empty-data guard (STORY-032)**: `dispatch_and_process` returns
+//!   `ChartError::EmptyData` when `spec.data` is empty, BEFORE any renderer
+//!   is invoked. The `validation::data_is_empty(&Value)` helper is intended
+//!   for an upstream eval-layer check on the raw `Value` (STORY-055).
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
@@ -1521,6 +1522,14 @@ mod tests {
             matches!(err, crate::types::ChartError::EmptyData { .. }),
             "error variant must be ChartError::EmptyData; got: {err:?}"
         );
+        // MED-002: assert EmptyData carries the correct expression and span fields.
+        if let crate::types::ChartError::EmptyData {
+            expression, span, ..
+        } = &err
+        {
+            assert_eq!(expression.as_ref(), "{{ kpis.monthly }}");
+            assert_eq!(span, &spec.span);
+        }
     }
 
     /// BC-1.11.002 postcondition 3 — warn-only caller builds `ErrorSlidePlaceholder` SVG.
@@ -1535,7 +1544,7 @@ mod tests {
     /// the caller would use. It does NOT import `slideforge-layout` types
     /// (no layout crate dependency from charts crate — architecture boundary).
     #[test]
-    fn test_bc_1_11_002_warn_only_substitutes_placeholder() {
+    fn test_bc_1_11_002_placeholder_constructible_from_empty_data_error() {
         let spec = InternalChartSpec {
             chart_type: crate::types::ChartType::Line,
             data: vec![], // empty
