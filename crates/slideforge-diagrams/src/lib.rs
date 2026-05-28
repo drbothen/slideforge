@@ -42,6 +42,7 @@ pub mod error;
 pub mod normalize;
 pub mod renderer;
 pub mod types;
+pub(crate) mod xml_escape;
 
 use slideforge_plugin_api::{DiagramOptions, DiagramRenderer};
 use tracing::instrument;
@@ -196,10 +197,10 @@ impl DiagramRenderer for DiagramRendererImpl {
                     }
                 },
                 DiagramError::SvgNormalizationFailed {
-                    source_id, cause, ..
+                    slide_title, cause, ..
                 } => slideforge_plugin_api::DiagramError::RenderError {
                     message: format!(
-                        "[E-EXP-004] SVG normalization failed for diagram '{source_id}': {cause}"
+                        "[E-EXP-004] SVG normalization failed for diagram '{slide_title}': {cause}"
                     ),
                 },
             })?;

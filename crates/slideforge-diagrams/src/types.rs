@@ -2,11 +2,19 @@
 //!
 //! Defines [`DiagramLang`], [`RawDiagramSvg`], [`NormalizedDiagramSvg`], and
 //! [`DiagramError`].
+//!
+//! [`NormalizedDiagramSvg`] is re-exported from `slideforge-types` so that
+//! both `slideforge-diagrams` (producer) and `slideforge-layout` (consumer)
+//! reference the same type without a circular dependency.
 
 use std::sync::Arc;
 
 use miette::SourceSpan;
 use thiserror::Error;
+
+// Re-export NormalizedDiagramSvg from slideforge-types so that the canonical
+// definition is in the leaf crate and both diagrams + layout can use it.
+pub use slideforge_types::NormalizedDiagramSvg;
 
 /// The diagram source language.
 ///
@@ -55,44 +63,6 @@ impl RawDiagramSvg {
         self.0
     }
 
-    /// Return a reference to the inner SVG string.
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-
-    /// Return `true` if the SVG string is non-empty.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-}
-
-/// A newtype wrapping the usvg-normalized SVG string produced by
-/// [`crate::normalize::usvg_normalize`].
-///
-/// This is the output of the mandatory normalization pass (STORY-034, BC-1.12.003)
-/// that runs after every successful [`RawDiagramSvg`] is produced. The normalized
-/// form is guaranteed to be PPTX-safe:
-///
-/// - No `<foreignObject>` elements (removed by usvg).
-/// - No `<script>` elements (removed by usvg).
-/// - No CSS `@keyframes` or class-based `<style>` blocks (inlined by usvg).
-/// - Absolute pixel `width` and `height` on the root element (computed from
-///   `viewBox` by usvg when the source SVG uses percentage dimensions).
-/// - No `<use>` elements (all `href="#symbol"` references inlined by usvg).
-///
-/// The type system enforces that exporters receive only [`NormalizedDiagramSvg`],
-/// never [`RawDiagramSvg`]. Passing raw SVG to an exporter is a compile error.
-///
-/// ## IR compatibility
-///
-/// `NormalizedDiagramSvg` uses `Arc<str>` (not `String`) so that cloning is
-/// cheap and the type satisfies `Hash + Eq + Clone` for comemo compatibility.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct NormalizedDiagramSvg(pub Arc<str>);
-
-impl NormalizedDiagramSvg {
     /// Return a reference to the inner SVG string.
     #[must_use]
     pub fn as_str(&self) -> &str {
@@ -180,21 +150,23 @@ pub enum DiagramError {
     /// In strict mode: exit code 3.
     /// In warn-only mode: error-slide placeholder substituted.
     ///
-    /// The `source_id` field carries the diagram identifier (e.g., slide title
+    /// The `slide_title` field carries the diagram identifier (e.g., slide title
     /// or diagram label) to aid debugging. The `span` field carries the byte
     /// offset within the raw SVG where the parse failure occurred (if available
     /// from usvg; otherwise a zero-length span at offset 0 is used).
-    #[error("[E-EXP-004] SVG normalization failed for diagram '{source_id}': {cause}")]
+    #[error("[E-EXP-004] SVG normalization failed for diagram '{slide_title}': {cause}")]
     SvgNormalizationFailed {
-        /// Identifier of the diagram whose SVG could not be normalized
-        /// (e.g., the slide title or diagram alt-text label).
-        source_id: Arc<str>,
+        /// The slide title (or diagram alt-text label) identifying which diagram
+        /// could not be normalized. Matches the `slide_title` argument passed to
+        /// [`crate::normalize::usvg_normalize`].
+        slide_title: Arc<str>,
         /// Human-readable description of the usvg parse/normalization failure.
         cause: Arc<str>,
         /// Byte offset span within the raw SVG where the failure was detected.
         ///
         /// Set to a zero-length span at offset 0 when usvg does not provide
-        /// positional information about the failure.
+        /// positional information about the failure. For `usvg::Error::ParsingFailed`,
+        /// a synthetic offset encoding (row * 1000 + col) is used as an approximation.
         span: SourceSpan,
     },
 }
@@ -348,5 +320,31 @@ mod tests {
             msg.contains("no <svg> element"),
             "error must contain message; got: {msg}"
         );
+    }
+
+    #[test]
+    fn test_bc_1_12_002_diagram_error_svg_normalization_failed_uses_slide_title() {
+        use miette::SourceSpan;
+        let err = DiagramError::SvgNormalizationFailed {
+            slide_title: Arc::from("My Diagram Slide"),
+            cause: Arc::from("usvg parse failed: some error"),
+            span: SourceSpan::from(0..0),
+        };
+        let msg = err.to_string();
+        assert!(
+            msg.contains("E-EXP-004"),
+            "SvgNormalizationFailed must contain E-EXP-004; got: {msg}"
+        );
+        assert!(
+            msg.contains("My Diagram Slide"),
+            "SvgNormalizationFailed must contain the slide_title; got: {msg}"
+        );
+        // Destructure to verify field name is slide_title (not source_id)
+        match err {
+            DiagramError::SvgNormalizationFailed { slide_title, .. } => {
+                assert_eq!(slide_title.as_ref(), "My Diagram Slide");
+            },
+            other => panic!("unexpected variant: {other:?}"),
+        }
     }
 }
