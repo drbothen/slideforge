@@ -72,6 +72,26 @@ pub enum MathError {
     /// Callers should emit `E-EXP-004` in response (EC-005).
     #[error("PDF path output contains residual <text> elements after SVG normalisation")]
     TextRemainsInPathOutput,
+
+    /// A Greek, operator, or symbol command name was empty (zero-length string).
+    ///
+    /// Returned by the PDF path renderer when `MathNode::Greek`, `Operator`, or
+    /// `Symbol` carries an empty `Arc<str>`.  An empty command name has no
+    /// defined Unicode mapping and cannot produce a glyph (EC-005).
+    #[error("math command name is empty — cannot resolve Unicode glyph")]
+    EmptyCommandName,
+
+    /// A command name was not found in the Unicode symbol tables.
+    ///
+    /// The PDF path renderer only supports commands that have a canonical
+    /// Unicode mapping.  For text-based operators (`lim`, `max`, …) the Latin
+    /// characters are passed through directly; for everything else an explicit
+    /// mapping must exist in `symbols.rs`.
+    #[error("unsupported math symbol: \\{name}")]
+    UnsupportedSymbol {
+        /// The command name that has no Unicode mapping.
+        name: String,
+    },
 }
 
 /// A plugin that renders a [`MathNode`] to bytes in a target math format.

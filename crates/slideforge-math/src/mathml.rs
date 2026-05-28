@@ -429,6 +429,9 @@ fn misc_symbol(name: &str) -> &str {
 ///
 /// For example, `E = mc^2` yields `"E equals m times c squared"`.
 ///
+/// Empty AST (no nodes) yields `"empty math expression"` rather than an empty
+/// string, so that the `aria-label` attribute is always non-empty (finding I4).
+///
 /// This function is pure (no I/O, no side effects) and is exported so that
 /// the PDF and PPTX exporters can attach the same accessible label to
 /// embedded math objects.
@@ -438,7 +441,49 @@ pub fn ast_to_aria_label(ast: &MathAst) -> String {
     for node in &ast.nodes {
         node_to_label(node, &mut parts);
     }
-    parts.join(" ")
+    // Insert "times" between adjacent single-letter math identifiers.
+    //
+    // AC-002: `E = mc^2` must yield "E equals m times c squared", not
+    // "E equals m c squared".  Two consecutive label parts are "adjacent
+    // identifiers" when both are single ASCII letters (math variables).
+    let parts = insert_times_between_adjacent_identifiers(parts);
+
+    if parts.is_empty() {
+        // Finding I4: empty AST must not produce aria-label="".
+        "empty math expression".to_owned()
+    } else {
+        parts.join(" ")
+    }
+}
+
+/// Returns `true` if a label part represents a single-letter math identifier.
+///
+/// Only single ASCII-letter parts (a–z, A–Z) are considered identifiers for
+/// the purposes of "times" insertion.  Operator words like "equals", "plus",
+/// numbers, and Greek-letter names (multi-char) are not identifiers.
+fn is_single_letter_identifier(s: &str) -> bool {
+    s.len() == 1 && s.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
+}
+
+/// Walk `parts` and insert "times" between any two consecutive parts that are
+/// both single-letter math identifiers (e.g. `["m", "c"]` → `["m", "times", "c"]`).
+fn insert_times_between_adjacent_identifiers(parts: Vec<String>) -> Vec<String> {
+    if parts.len() < 2 {
+        return parts;
+    }
+    let mut result = Vec::with_capacity(parts.len() * 2);
+    let mut iter = parts.into_iter().peekable();
+    while let Some(part) = iter.next() {
+        let is_id = is_single_letter_identifier(&part);
+        result.push(part);
+        if is_id
+            && let Some(next) = iter.peek()
+            && is_single_letter_identifier(next)
+        {
+            result.push("times".to_owned());
+        }
+    }
+    result
 }
 
 /// Recursively produce label parts from a [`MathNode`].
@@ -929,16 +974,86 @@ mod tests {
         );
     }
 
-    /// `ast_to_aria_label` for an empty AST returns an empty string (no panic).
+    /// `ast_to_aria_label` for an empty AST returns a non-empty fallback string.
+    ///
+    /// Finding I4: empty AST must NOT produce `aria-label=""` — screen readers
+    /// announce empty attributes awkwardly.  The fallback is "empty math
+    /// expression".
     ///
     /// RED GATE: fails until `ast_to_aria_label` is implemented.
     #[test]
-    fn test_bc_1_10_003_aria_label_empty_ast_returns_empty_string() {
+    fn test_bc_1_10_003_aria_label_empty_ast_returns_fallback() {
         let ast = inline_ast(vec![]);
         let label = ast_to_aria_label(&ast);
         assert!(
-            label.is_empty(),
-            "aria-label for empty AST must be empty string; got: {label}"
+            !label.is_empty(),
+            "aria-label for empty AST must not be empty string; got: {label}"
+        );
+        assert_eq!(
+            label, "empty math expression",
+            "aria-label for empty AST must be 'empty math expression'; got: {label}"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Finding I1 — aria-label "times" between adjacent identifiers
+    // Finding I4 — empty AST fallback label
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// `ast_to_aria_label` for `$E = mc^2$` yields "E equals m times c squared".
+    ///
+    /// AC-002 mandates that adjacent single-letter identifiers are connected
+    /// by "times" in the spoken label.
+    #[test]
+    fn test_i1_aria_label_times_between_adjacent_identifiers() {
+        // AST for E = mc^2: nodes E, =, m, c^2
+        let ast = inline_ast(vec![
+            MathNode::Text(Arc::from("E")),
+            MathNode::Text(Arc::from("=")),
+            MathNode::Text(Arc::from("m")),
+            MathNode::Superscript {
+                base: Box::new(MathNode::Text(Arc::from("c"))),
+                sup: Box::new(MathNode::Text(Arc::from("2"))),
+            },
+        ]);
+        let label = ast_to_aria_label(&ast);
+        assert_eq!(
+            label, "E equals m times c squared",
+            "aria-label for E=mc^2 must be 'E equals m times c squared'; got: {label}"
+        );
+    }
+
+    /// `ast_to_aria_label` for `$x + y$` does NOT insert "times" (an operator
+    /// already separates the identifiers).
+    #[test]
+    fn test_i1_aria_label_no_times_when_operator_separates() {
+        let ast = inline_ast(vec![
+            MathNode::Text(Arc::from("x")),
+            MathNode::Text(Arc::from("+")),
+            MathNode::Text(Arc::from("y")),
+        ]);
+        let label = ast_to_aria_label(&ast);
+        // "+" becomes "plus", so no "times" should appear
+        assert!(
+            !label.contains("times"),
+            "aria-label for x+y must not contain 'times'; got: {label}"
+        );
+        assert!(
+            label.contains("plus"),
+            "aria-label for x+y must contain 'plus'; got: {label}"
+        );
+    }
+
+    /// `ast_to_aria_label` for an empty AST returns the fallback "empty math expression".
+    ///
+    /// Finding I4: must never produce `aria-label=""`.
+    #[test]
+    fn test_i4_aria_label_empty_ast_returns_fallback_string() {
+        let ast = inline_ast(vec![]);
+        let label = ast_to_aria_label(&ast);
+        assert_eq!(
+            label, "empty math expression",
+            "empty AST must yield 'empty math expression'; got: {label}"
         );
     }
 

@@ -44,6 +44,7 @@ pub mod mathml;
 pub mod omml;
 pub mod parser;
 pub mod pdf_paths;
+pub mod symbols;
 
 use std::collections::HashMap;
 use std::sync::Arc;
