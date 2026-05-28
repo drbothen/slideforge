@@ -16,10 +16,13 @@ zip = "=2.3.0"
 dirs = "=5.0.1"
 thiserror = { workspace = true }
 tracing = { workspace = true }
+serde = { version = "=1.0.228", features = ["derive"] }
+toml = "=0.8.23"
 slideforge-types = { workspace = true }
 slideforge-plugin-api = { workspace = true }
 
 [dev-dependencies]
 insta = { workspace = true }
+proptest = "=1.5.0"
 zip = "=2.3.0"
 tracing-subscriber = { workspace = true }

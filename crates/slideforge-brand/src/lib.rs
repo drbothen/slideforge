@@ -40,12 +40,22 @@ pub mod color;
 pub mod context;
 pub mod error;
 pub mod font;
+pub mod inference;
+pub mod layout_xml;
+pub mod layouts;
 pub mod loader;
 pub mod logo;
+pub mod synthesizer;
 pub mod template;
+pub mod toml_schema;
 
 // Re-export the most commonly used types at the crate root.
 pub use context::BrandLoadContext;
 pub use error::{BrandError, E_BRD_001, E_BRD_002, E_BRD_003, E_BRD_004};
+pub use layouts::{LayoutPlaceholder, SlideLayoutDef};
 pub use loader::BrandLoader;
-pub use template::{BrandFonts, BrandTemplate, COLOR_SLOT_NAMES, ColorSlot, LogoAsset};
+pub use synthesizer::BrandSynthesizer;
+pub use template::{
+    BrandFonts, BrandTemplate, COLOR_SLOT_NAMES, ColorSlot, LogoAsset, MasterIds,
+};
+pub use toml_schema::{BrandConfig, ColorConfig, FontConfig, FooterConfig, LogoConfig};

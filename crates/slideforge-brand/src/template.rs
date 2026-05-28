@@ -141,10 +141,38 @@ pub struct LogoAsset {
     pub original_path: Arc<str>,
 }
 
-/// The complete brand template extracted from a `.pptx` or `.docx` file.
+/// OOXML master and layout ID constraints (BC-2.01.005 invariant 3 / AC-011).
 ///
-/// This struct is produced by [`crate::loader::BrandLoader`] and consumed by the
-/// PPTX exporter (STORY-037) and the brand synthesis pipeline (STORY-023).
+/// Slide master IDs start at `2^31`. Layout IDs start at `2^31 + 1` and
+/// increment by 1 per layout. Slide IDs in generated decks start at 256.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct MasterIds {
+    /// The slide master ID: always `2^31 = 2_147_483_648`.
+    pub master_id: u32,
+
+    /// The starting layout ID: always `2^31 + 1 = 2_147_483_649`.
+    pub layout_id_start: u32,
+
+    /// The starting slide ID for generated slides: always `256`.
+    pub slide_id_start: u32,
+}
+
+impl Default for MasterIds {
+    fn default() -> Self {
+        Self {
+            master_id: 2u32.pow(31),
+            layout_id_start: 2u32.pow(31) + 1,
+            slide_id_start: 256,
+        }
+    }
+}
+
+/// The complete brand template extracted from a `.pptx` or `.docx` file,
+/// or synthesized from a `brand.toml` (STORY-023).
+///
+/// This struct is produced by both [`crate::loader::BrandLoader`] (STORY-022)
+/// and [`crate::synthesizer::BrandSynthesizer`] (STORY-023), and consumed by
+/// the PPTX exporter (STORY-037).
 ///
 /// ## Color Slot Invariant
 ///
@@ -153,6 +181,12 @@ pub struct LogoAsset {
 /// fewer than 12 color slots, the missing slots are inferred and
 /// [`crate::error::BrandError::MissingColorSlot`] warnings are emitted. This is
 /// guaranteed by DI-015 (BC-2.01.001 invariant 1).
+///
+/// ## Layout Invariant (STORY-023)
+///
+/// For synthesized brands, `layouts` always contains exactly 31 entries
+/// (BC-2.01.005 postcondition 1). For loaded brands (from .pptx/.docx), the
+/// count reflects the source template.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BrandTemplate {
     /// All 12 OOXML scheme color slots in ECMA-376 sequential order.
@@ -165,7 +199,9 @@ pub struct BrandTemplate {
 
     /// Optional logo asset extracted from the slide master relationships.
     ///
-    /// `None` if no image relationship was found (EC-005 — not an error).
+    /// `None` if no image relationship was found (EC-005 — not an error for
+    /// loaded brands). For synthesized brands, a missing logo is a fatal error
+    /// (AC-004, BC-2.01.002 edge case EC-005).
     pub logo: Option<LogoAsset>,
 
     /// Optional footer text (from the deck-level footer field).
@@ -173,8 +209,39 @@ pub struct BrandTemplate {
 
     /// Slide layout XML names discovered in `ppt/slideLayouts/slideLayout*.xml`.
     ///
-    /// Used by STORY-023 to map layouts to the 31-type taxonomy.
+    /// For loaded brands (STORY-022): ZIP-internal paths.
+    /// For synthesized brands (STORY-023): not used — `layouts` field is populated instead.
     pub layout_names: Vec<Arc<str>>,
+
+    /// Structured layout definitions for all 31 slide layouts.
+    ///
+    /// Populated by [`crate::synthesizer::BrandSynthesizer`] (STORY-023).
+    /// Empty `Vec` for brands loaded from `.pptx`/`.docx` until STORY-037
+    /// adds layout extraction.
+    ///
+    /// Invariant for synthesized brands: `layouts.len() == 31` always.
+    pub layouts: Vec<crate::layouts::SlideLayoutDef>,
+
+    /// Serialized XML bytes for `notesMaster1.xml` (AC-012).
+    ///
+    /// Always populated for synthesized brands. Empty for loaded brands
+    /// until STORY-040 adds master extraction.
+    pub notes_master_stub: Vec<u8>,
+
+    /// Serialized XML bytes for `handoutMaster1.xml` (AC-012).
+    ///
+    /// Always populated for synthesized brands. Empty for loaded brands
+    /// until STORY-040 adds master extraction.
+    pub handout_master_stub: Vec<u8>,
+
+    /// OOXML master and layout ID constraints (AC-011, BC-2.01.005 invariant 3).
+    pub master_ids: MasterIds,
+
+    /// `[Content_Types].xml` registration fragment for all 31 layouts (AC-013).
+    ///
+    /// Contains one `<Override PartName="...">` entry per layout.
+    /// Populated by the synthesizer; empty for loaded brands.
+    pub content_types_layout_entries: Arc<str>,
 }
 
 impl BrandTemplate {
@@ -227,10 +294,9 @@ mod tests {
         ]
     }
 
-    /// BC-2.01.001 postcondition 1 — `BrandTemplate` can be constructed with all fields.
-    #[test]
-    fn test_bc_2_01_001_brand_template_default_construction() {
-        let template = BrandTemplate {
+    /// Helper: construct a minimal `BrandTemplate` for tests.
+    fn make_template() -> BrandTemplate {
+        BrandTemplate {
             colors: make_all_slots(),
             fonts: BrandFonts {
                 heading: Arc::from("Calibri Light"),
@@ -239,7 +305,18 @@ mod tests {
             logo: None,
             footer_text: None,
             layout_names: vec![],
-        };
+            layouts: vec![],
+            notes_master_stub: vec![],
+            handout_master_stub: vec![],
+            master_ids: MasterIds::default(),
+            content_types_layout_entries: Arc::from(""),
+        }
+    }
+
+    /// BC-2.01.001 postcondition 1 — `BrandTemplate` can be constructed with all fields.
+    #[test]
+    fn test_bc_2_01_001_brand_template_default_construction() {
+        let template = make_template();
         assert_eq!(template.colors.len(), 12);
         assert!(template.logo.is_none());
         assert!(template.footer_text.is_none());
@@ -248,16 +325,7 @@ mod tests {
     /// BC-2.01.001 invariant 1 — colors array always has exactly 12 entries.
     #[test]
     fn test_bc_2_01_001_invariant_always_12_color_slots() {
-        let template = BrandTemplate {
-            colors: make_all_slots(),
-            fonts: BrandFonts {
-                heading: Arc::from("Arial"),
-                body: Arc::from("Arial"),
-            },
-            logo: None,
-            footer_text: None,
-            layout_names: vec![],
-        };
+        let template = make_template();
         // The array type [ColorSlot; 12] enforces this at compile time, but we
         // also assert it at runtime to make it load-bearing per TD-VSDD-059.
         assert_eq!(
@@ -265,6 +333,19 @@ mod tests {
             12,
             "invariant DI-015: always 12 color slots"
         );
+    }
+
+    /// AC-011 — `MasterIds::default()` has correct OOXML-mandated values.
+    #[test]
+    fn test_bc_2_01_005_master_ids_default_values() {
+        let ids = MasterIds::default();
+        assert_eq!(ids.master_id, 2u32.pow(31), "master_id must be 2^31");
+        assert_eq!(
+            ids.layout_id_start,
+            2u32.pow(31) + 1,
+            "layout_id_start must be 2^31 + 1"
+        );
+        assert_eq!(ids.slide_id_start, 256, "slide_id_start must be 256");
     }
 
     /// BC-2.01.001 — color slot names match ECMA-376 sequential order.
@@ -285,16 +366,7 @@ mod tests {
     /// BC-2.01.001 — `color_by_name` returns correct slot.
     #[test]
     fn test_bc_2_01_001_color_by_name_lookup() {
-        let template = BrandTemplate {
-            colors: make_all_slots(),
-            fonts: BrandFonts {
-                heading: Arc::from("Arial"),
-                body: Arc::from("Arial"),
-            },
-            logo: None,
-            footer_text: None,
-            layout_names: vec![],
-        };
+        let template = make_template();
         let slot = template
             .color_by_name("acc1")
             .expect("acc1 must be present");
@@ -304,16 +376,7 @@ mod tests {
     /// BC-2.01.001 — `color_by_name` returns None for unknown slot.
     #[test]
     fn test_bc_2_01_001_color_by_name_unknown_returns_none() {
-        let template = BrandTemplate {
-            colors: make_all_slots(),
-            fonts: BrandFonts {
-                heading: Arc::from("Arial"),
-                body: Arc::from("Arial"),
-            },
-            logo: None,
-            footer_text: None,
-            layout_names: vec![],
-        };
+        let template = make_template();
         assert!(template.color_by_name("nonexistent").is_none());
     }
 
@@ -350,6 +413,11 @@ mod tests {
                 Arc::from("ppt/slideLayouts/slideLayout2.xml"),
                 Arc::from("ppt/slideLayouts/slideLayout3.xml"),
             ],
+            layouts: vec![],
+            notes_master_stub: vec![],
+            handout_master_stub: vec![],
+            master_ids: MasterIds::default(),
+            content_types_layout_entries: Arc::from(""),
         };
         assert_eq!(template.layout_names.len(), 3);
         // Values are ZIP-internal paths, not friendly semantic names.

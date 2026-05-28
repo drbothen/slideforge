@@ -17,6 +17,8 @@ use thiserror::Error;
 // ─── Error code constants ────────────────────────────────────────────────────
 
 /// `E-BRD-001`: brand file not found at the resolved path.
+///
+/// Also emitted when a synthesized brand is missing the required `[logo]` path.
 pub const E_BRD_001: &str = "E-BRD-001";
 
 /// `E-BRD-002`: the brand template file cannot be parsed (corrupt or not OOXML).
@@ -110,6 +112,81 @@ pub enum BrandError {
         font_name: Arc<str>,
         /// The fallback font name being used for metric calculations.
         fallback: Arc<str>,
+    },
+
+    // ─── STORY-023 synthesis variants ─────────────────────────────────────────
+
+    /// `E-BRD-001` (synthesis) — the `[logo]` section is absent in a
+    /// synthesized brand's `brand.toml`.
+    ///
+    /// This is a fatal error (exit 4) for synthesized brands. A synthesized
+    /// brand cannot embed a logo if no path is declared.
+    ///
+    /// Traces to BC-2.01.002 edge case EC-005 (AC-004).
+    #[error(
+        "E-BRD-001: Synthesized brand requires a logo path. \
+         Add a [logo] section with 'path = \"...\"' to brand.toml."
+    )]
+    LogoRequired,
+
+    /// `E-BRD-001` (synthesis) — the `brand.toml` file could not be read.
+    ///
+    /// Fatal error (exit 4). `reason` carries the underlying I/O error message.
+    #[error(
+        "E-BRD-001: Cannot read brand.toml at '{path}': {reason}."
+    )]
+    TomlReadError {
+        /// Path of the file that could not be read.
+        path: Arc<str>,
+        /// Human-readable I/O error description.
+        reason: Arc<str>,
+    },
+
+    /// `E-BRD-002` (synthesis) — the `brand.toml` file is not valid TOML.
+    ///
+    /// Fatal error (exit 4). `reason` carries the TOML parser error message.
+    #[error(
+        "E-BRD-002: Cannot parse brand.toml at '{path}': {reason}. \
+         File may contain invalid TOML syntax."
+    )]
+    TomlParseError {
+        /// Path of the file that failed to parse.
+        path: Arc<str>,
+        /// Human-readable parse error description.
+        reason: Arc<str>,
+    },
+
+    /// `E-BRD-002` (synthesis) — a declared hex color value is not valid.
+    ///
+    /// Fatal error (exit 4) for brand synthesis (the color is user-authored,
+    /// not inferred). A synthesized brand with an invalid hex cannot continue.
+    ///
+    /// Traces to AC-006 (BC-2.01.004 invariant 3).
+    #[error(
+        "E-BRD-002: Invalid hex color '{value}' in brand.toml slot '{slot_name}'. \
+         Use 6-digit uppercase hex RGB (e.g. '#3B82F6')."
+    )]
+    InvalidHexColor {
+        /// The OOXML color slot name (e.g., `"acc1"`).
+        slot_name: Arc<str>,
+        /// The invalid value that was declared.
+        value: Arc<str>,
+    },
+
+    /// `E-BRD-004` (synthesis) — a font name declared in `brand.toml`
+    /// is not installed on the build host.
+    ///
+    /// Cosmetic warning (exit 0). The OOXML output still writes the declared
+    /// font name. The build continues.
+    ///
+    /// Traces to BC-2.01.002 edge case EC-004 (AC-015, NFR-021).
+    #[error(
+        "E-BRD-004: Font '{font_name}' declared in brand.toml is not available \
+         on this build host. Build continues; output will use '{font_name}'."
+    )]
+    DeclaredFontUnavailable {
+        /// The font name declared in `brand.toml` that is not installed.
+        font_name: Arc<str>,
     },
 }
 

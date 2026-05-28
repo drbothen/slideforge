@@ -212,6 +212,12 @@ impl BrandLoader {
             logo,
             footer_text: None,
             layout_names,
+            // STORY-023 fields — not populated by the loader; synthesizer fills these.
+            layouts: vec![],
+            notes_master_stub: vec![],
+            handout_master_stub: vec![],
+            master_ids: crate::template::MasterIds::default(),
+            content_types_layout_entries: std::sync::Arc::from(""),
         })
     }
 }
