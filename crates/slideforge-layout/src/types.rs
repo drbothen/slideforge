@@ -267,7 +267,7 @@ pub enum FrameContent {
     /// A diagram rendered from a diagram source (e.g., Mermaid).
     ///
     /// Carries the PPTX-safe, usvg-normalized SVG payload produced by
-    /// [`slideforge_diagrams::normalize::usvg_normalize`] (BC-1.12.003 invariant 1).
+    /// `slideforge_diagrams::normalize::usvg_normalize` (BC-1.12.003 invariant 1).
     /// The type system enforces that only a [`NormalizedDiagramSvg`] — never a
     /// raw SVG string — can be stored in this frame, preventing un-normalized
     /// SVG from reaching exporters.
