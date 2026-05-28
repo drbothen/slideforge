@@ -207,7 +207,9 @@ pub fn usvg_normalize(
             }
         })?;
 
-    Ok(NormalizedDiagramSvg(Arc::from(enriched.as_str())))
+    Ok(NormalizedDiagramSvg::from_normalized_string(Arc::from(
+        enriched.as_str(),
+    )))
 }
 
 /// Extract a byte-position [`SourceSpan`] from a [`usvg::Error`], if available.
@@ -1084,16 +1086,26 @@ mod tests {
         let _ = usvg_normalize(&text_raw, "font-init");
 
         // Step 3: time the warm-path call with <text> elements.
-        let start = Instant::now();
-        let _ = usvg_normalize(&text_raw, "perf-test");
-        let elapsed = start.elapsed();
+        // Take the median of 5 samples to reduce sensitivity to OS scheduling
+        // jitter on CI runners. A single sample can flake on a loaded system
+        // even when the code is correct. Median suppresses outliers without
+        // hiding a genuine regression (which would show up in ALL samples).
+        let mut samples = Vec::with_capacity(5);
+        for _ in 0..5 {
+            let start = Instant::now();
+            let _ = usvg_normalize(&text_raw, "perf-test");
+            samples.push(start.elapsed());
+        }
+        samples.sort();
+        let median = samples[2]; // index 2 of 0..4 is the median
 
         assert!(
-            elapsed.as_millis() < 50,
-            "usvg_normalize warm path (font DB already loaded) must complete in < 50ms; \
-             actual: {}ms. This guards against per-call font-loading regressions. \
+            median.as_millis() < 50,
+            "usvg_normalize warm path (font DB already loaded) median latency must be < 50ms; \
+             median: {}ms (samples: {:?}). This guards against per-call font-loading regressions. \
              Use Criterion benches for precise measurement.",
-            elapsed.as_millis()
+            median.as_millis(),
+            samples
         );
     }
 
@@ -1224,5 +1236,27 @@ mod tests {
             "reinject must not add a second <title> when an attributed <title ...> already exists; \
              plain={plain_count}, attributed={attr_count}"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // F-LOW-002: snapshot test for normalization output (insta)
+    // -----------------------------------------------------------------------
+
+    /// Snapshot test for the normalized output of `usvg_normalize` on the
+    /// `simple_geometry_svg` fixture.
+    ///
+    /// This test pins the exact serialized form that usvg 0.47.0 produces for
+    /// a deterministic geometry-only input. If the usvg version or
+    /// normalization logic changes, the snapshot must be reviewed and updated
+    /// deliberately (`cargo insta review`).
+    ///
+    /// The `simple_geometry_svg` fixture is geometry-only (no `<text>`) so the
+    /// result is platform-independent — the font database is not consulted.
+    #[test]
+    fn snapshot_normalize_simple_geometry() {
+        let raw = RawDiagramSvg(test_fixtures::simple_geometry_svg().to_owned());
+        let normalized = usvg_normalize(&raw, "snapshot-test")
+            .expect("usvg_normalize must succeed for simple_geometry_svg fixture");
+        insta::assert_snapshot!(normalized.as_str());
     }
 }

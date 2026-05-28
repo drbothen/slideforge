@@ -583,7 +583,7 @@ mod tests {
         };
         let chart = FrameContent::Chart;
         // Construct a minimal NormalizedDiagramSvg for the Diagram variant test.
-        let normalized_svg = NormalizedDiagramSvg(Arc::from(
+        let normalized_svg = NormalizedDiagramSvg::from_normalized_string(Arc::from(
             r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><title>test</title></svg>"#,
         ));
         let diagram = FrameContent::Diagram(normalized_svg);

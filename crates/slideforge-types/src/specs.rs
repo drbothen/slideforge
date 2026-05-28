@@ -36,9 +36,37 @@ use crate::span::SourceSpan;
 /// Uses `Arc<str>` (not `String`) so that cloning is cheap and the type
 /// satisfies `Hash + Eq + Clone` for comemo compatibility.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct NormalizedDiagramSvg(pub Arc<str>);
+pub struct NormalizedDiagramSvg(Arc<str>);
 
 impl NormalizedDiagramSvg {
+    /// Construct a `NormalizedDiagramSvg` from a pre-normalized SVG string.
+    ///
+    /// # Contract
+    ///
+    /// **The caller is responsible for ensuring the SVG has been normalized
+    /// through `slideforge-diagrams::usvg_normalize` before calling this
+    /// constructor.** The field is private to enforce that construction goes
+    /// through a named entry point rather than tuple-struct literal syntax
+    /// (`NormalizedDiagramSvg(raw_string)`), which makes the normalization
+    /// requirement explicit at every callsite.
+    ///
+    /// Within the slideforge pipeline:
+    /// - The **only legitimate production callsite** is
+    ///   `slideforge_diagrams::normalize::usvg_normalize`, which performs the
+    ///   full usvg round-trip before wrapping the result.
+    /// - Test code may call this constructor with synthetic SVG strings in
+    ///   unit tests that verify downstream consumers (layout, exporters), where
+    ///   the SVG content is controlled and normalization guarantees are
+    ///   asserted separately.
+    ///
+    /// **DO NOT CALL FROM EXPORTERS** — exporters receive `NormalizedDiagramSvg`
+    /// values produced by the diagram rendering pipeline and must not
+    /// construct them from raw strings.
+    #[must_use]
+    pub fn from_normalized_string(svg: Arc<str>) -> Self {
+        Self(svg)
+    }
+
     /// Return a reference to the inner SVG string.
     #[must_use]
     pub fn as_str(&self) -> &str {
@@ -59,6 +87,10 @@ impl NormalizedDiagramSvg {
     /// real `NormalizedDiagramSvg` when the diagram is rendered. Exporters
     /// that receive a `FrameContent::Diagram` with a placeholder (empty string)
     /// must render an error-slide indicator.
+    ///
+    /// This constructor exists because the placeholder pattern is structurally
+    /// distinct from a normalized SVG (it is intentionally empty) and deserves
+    /// a dedicated name to make the intent clear at callsites.
     #[must_use]
     pub fn placeholder() -> Self {
         Self(Arc::from(""))
