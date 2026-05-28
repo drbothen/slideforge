@@ -15,6 +15,10 @@
 //!
 //! Empirical from Spike S14: < 3ms typical for flowcharts (render only).
 
+// NOTE: Per AC-008, a < 1ms micro-benchmark isolating normalize-only
+// overhead is deferred to STORY-037 (PPTX exporter). Current benchmarks
+// measure combined render+normalize.
+
 use criterion::{Criterion, criterion_group, criterion_main};
 use slideforge_diagrams::{DiagramRendererImpl, types::DiagramLang};
 
