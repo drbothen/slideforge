@@ -98,11 +98,8 @@ mod tests {
     /// Red Gate: fails until `build_error_slide_placeholder_svg` is implemented.
     #[test]
     fn test_bc_1_11_002_placeholder_svg_contains_error_code() {
-        let svg = build_error_slide_placeholder_svg(
-            "KPI Dashboard",
-            "E-LAY-003",
-            "Chart data is empty",
-        );
+        let svg =
+            build_error_slide_placeholder_svg("KPI Dashboard", "E-LAY-003", "Chart data is empty");
         assert!(
             svg.contains("E-LAY-003"),
             "placeholder SVG must render the error code; got: {}",
@@ -153,35 +150,52 @@ mod tests {
     /// Red Gate: fails until `build_error_slide_placeholder_svg` is implemented.
     #[test]
     fn test_bc_1_11_002_placeholder_svg_has_aria_label() {
-        let svg = build_error_slide_placeholder_svg(
-            "Revenue Chart",
-            "E-LAY-003",
-            "Chart data is empty",
-        );
+        let svg =
+            build_error_slide_placeholder_svg("Revenue Chart", "E-LAY-003", "Chart data is empty");
         assert!(
             svg.contains("aria-label"),
             "placeholder SVG must contain an aria-label attribute for accessibility"
         );
     }
 
-    /// BC-1.11.002 AC-004 — User-supplied strings with special XML chars are escaped.
+    /// BC-1.11.002 AC-004 / AC-005 — `slide_title` containing `<script>alert()</script>`
+    /// must be XML-escaped in the SVG output so no literal `<script>` element appears.
     ///
-    /// Ensures that `<`, `>`, `&` in `slide_title` or `message` are properly
-    /// XML-escaped so the SVG is well-formed.
+    /// This is the primary security assertion: user-controlled strings must never
+    /// be injected as raw XML. The test uses a title that is the worst-case XSS
+    /// payload (`<script>alert()</script>`) to verify the implementation escapes
+    /// `<`, `>`, and `&` characters before embedding them in SVG attributes or
+    /// text content.
     ///
     /// Red Gate: fails until `build_error_slide_placeholder_svg` is implemented.
     #[test]
-    fn test_bc_1_11_002_placeholder_svg_xml_escaping() {
+    fn test_bc_1_11_002_placeholder_xml_escapes_user_input() {
+        let malicious_title = "<script>alert('xss')</script>";
         let svg = build_error_slide_placeholder_svg(
-            "Slide <A & B>",
+            malicious_title,
             "E-LAY-003",
-            "Error: data < 1",
+            "Chart data is empty for this slide",
         );
-        // Must not contain unescaped < inside attribute values or text content.
-        // The <svg root element itself contains < so we check for specific unsafe patterns.
+
+        // The escaped form of < is &lt;. If the output contains &lt;script
+        // then the title was properly escaped.
         assert!(
-            !svg.contains("<A &"),
-            "unescaped '<A &' must not appear in placeholder SVG"
+            svg.contains("&lt;script") || svg.contains("&lt;SCRIPT"),
+            "slide_title '<script>...' must be XML-escaped to '&lt;script' in SVG; \
+             got first 600 chars: {}",
+            &svg[..svg.len().min(600)]
+        );
+
+        // There must be no literal unescaped <script element in the SVG output.
+        // We check case-insensitively because browsers parse HTML tags case-insensitively.
+        let lower = svg.to_ascii_lowercase();
+        // Remove any properly-escaped &lt; occurrences before checking for raw <script.
+        let without_escaped = lower.replace("&lt;", "").replace("&gt;", "");
+        assert!(
+            !without_escaped.contains("<script"),
+            "after removing &lt;/&gt; escapes, no literal <script> element must remain; \
+             SVG first 600 chars: {}",
+            &svg[..svg.len().min(600)]
         );
     }
 }

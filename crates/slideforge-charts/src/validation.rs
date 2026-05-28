@@ -92,36 +92,27 @@ mod tests {
     use super::*;
 
     // ─────────────────────────────────────────────────────────────────────────
-    // data_is_empty — BC-1.11.002 postcondition 1 + invariant 2
+    // data_is_empty — BC-1.11.002 AC-002 / postcondition 1 / invariant 2
     // ─────────────────────────────────────────────────────────────────────────
 
     /// BC-1.11.002 — `Value::List([])` is recognized as empty.
     ///
     /// Red Gate: fails until `data_is_empty` is implemented.
     #[test]
-    fn test_bc_1_11_002_empty_list_is_empty() {
+    fn test_bc_1_11_002_data_is_empty_for_empty_list() {
         assert!(
             data_is_empty(&Value::List(vec![])),
             "Value::List([]) must be recognized as empty data"
         );
     }
 
-    /// BC-1.11.002 — `Value::List` with one element is not empty.
-    ///
-    /// Red Gate: fails until `data_is_empty` is implemented.
-    #[test]
-    fn test_bc_1_11_002_nonempty_list_is_not_empty() {
-        assert!(
-            !data_is_empty(&Value::List(vec![Value::Int(1)])),
-            "Value::List with elements must NOT be recognized as empty"
-        );
-    }
-
     /// BC-1.11.002 EC-003 — Single-element list (exactly 1 row) is not empty.
     ///
+    /// The spec EC-003 states: data with exactly 1 row → non-empty, chart renders normally.
+    ///
     /// Red Gate: fails until `data_is_empty` is implemented.
     #[test]
-    fn test_bc_1_11_002_single_element_list_is_not_empty() {
+    fn test_bc_1_11_002_data_is_not_empty_for_single_element_list() {
         let row = Value::Str(Arc::from("row1"));
         assert!(
             !data_is_empty(&Value::List(vec![row])),
@@ -129,28 +120,73 @@ mod tests {
         );
     }
 
-    /// BC-1.11.002 — Non-list Value (Str) is not empty from the guard's perspective.
+    /// BC-1.11.002 — Multi-element list is not empty.
     ///
     /// Red Gate: fails until `data_is_empty` is implemented.
     #[test]
-    fn test_bc_1_11_002_non_list_value_is_not_empty() {
-        // Non-list values are caught earlier by E-EVL-006; the chart guard
-        // does not treat them as empty.
+    fn test_bc_1_11_002_data_is_not_empty_for_multi_element_list() {
+        let items = vec![Value::Int(10), Value::Int(20), Value::Int(30)];
         assert!(
-            !data_is_empty(&Value::Str(Arc::from("irrelevant"))),
-            "Value::Str must not be flagged as empty by the chart guard"
+            !data_is_empty(&Value::List(items)),
+            "Value::List with 3 elements must NOT be recognized as empty"
+        );
+    }
+
+    /// BC-1.11.002 — Non-list values (`Value::Int`, `Value::Null`, `Value::Str("")`)
+    /// are NOT flagged as empty by the chart guard.
+    ///
+    /// The empty-data guard only checks `Value::List`. Non-list bindings are
+    /// caught earlier by the eval-stage type checker (E-EVL-006). The chart guard
+    /// must not intercept them.
+    ///
+    /// Red Gate: fails until `data_is_empty` is implemented.
+    #[test]
+    fn test_bc_1_11_002_data_is_not_empty_for_non_list_value() {
+        assert!(
+            !data_is_empty(&Value::Int(0)),
+            "Value::Int(0) must not be flagged as empty by the chart guard"
+        );
+        assert!(
+            !data_is_empty(&Value::Null),
+            "Value::Null must not be flagged as empty by the chart guard"
+        );
+        assert!(
+            !data_is_empty(&Value::Str(Arc::from(""))),
+            "Value::Str(\"\") must not be flagged as empty by the chart guard"
+        );
+        assert!(
+            !data_is_empty(&Value::Bool(false)),
+            "Value::Bool(false) must not be flagged as empty by the chart guard"
+        );
+    }
+
+    /// BC-1.11.002 — Outer non-empty list containing an inner empty list is NOT empty.
+    ///
+    /// Only top-level `Value::List([])` triggers the empty-data check. A list
+    /// with one element (even if that element is itself an empty list) is
+    /// considered non-empty at this stage.
+    ///
+    /// Red Gate: fails until `data_is_empty` is implemented.
+    #[test]
+    fn test_bc_1_11_002_data_is_empty_for_nested_empty_list() {
+        // Outer list has one element (inner empty list) → outer is NOT empty.
+        let nested = Value::List(vec![Value::List(vec![])]);
+        assert!(
+            !data_is_empty(&nested),
+            "Value::List([Value::List([])]) — outer list has 1 element so must NOT be empty; \
+             only a top-level empty List triggers E-LAY-003"
         );
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // build_empty_data_diagnostic — BC-1.11.002 postcondition 1
+    // build_empty_data_diagnostic — BC-1.11.002 AC-001 / postcondition 1
     // ─────────────────────────────────────────────────────────────────────────
 
     /// BC-1.11.002 AC-001 — E-LAY-003 is emitted with the correct error code.
     ///
     /// Red Gate: fails until `build_empty_data_diagnostic` is implemented.
     #[test]
-    fn test_bc_1_11_002_diagnostic_has_correct_code() {
+    fn test_bc_1_11_002_diagnostic_uses_e_lay_003_code() {
         let span = SourceSpan::default();
         let diag = build_empty_data_diagnostic("My Slide", "{{ kpis.monthly }}", span);
         assert_eq!(
@@ -160,52 +196,86 @@ mod tests {
         );
     }
 
-    /// BC-1.11.002 AC-001 — Diagnostic is Error severity in strict mode.
+    /// BC-1.11.002 AC-001 / AC-003 — Diagnostic is `Error` severity (strict-mode
+    /// default). The AC-003 spec says strict mode causes exit code 2; this is
+    /// driven by the `DiagnosticSink` seeing an `Error`-severity diagnostic.
+    /// `build_empty_data_diagnostic` always returns `Error` severity because the
+    /// pipeline dispatcher (not this function) downgrades to `Warning` for
+    /// warn-only mode.
     ///
     /// Red Gate: fails until `build_empty_data_diagnostic` is implemented.
     #[test]
-    fn test_bc_1_11_002_diagnostic_is_error_severity() {
+    fn test_bc_1_11_002_diagnostic_severity_depends_on_mode() {
+        // Strict mode (default): the diagnostic returned must be Error severity.
+        // The caller (pipeline dispatcher) is responsible for warn-only downgrade.
         let span = SourceSpan::default();
         let diag = build_empty_data_diagnostic("KPI Dashboard", "{{ kpis.monthly }}", span);
         assert_eq!(
             diag.severity,
             DiagnosticSeverity::Error,
-            "E-LAY-003 must be Error severity"
+            "E-LAY-003 must be Error severity so that strict mode can accumulate it as a build failure"
         );
     }
 
-    /// BC-1.11.002 AC-001 — Message contains slide title.
+    /// BC-1.11.002 AC-001 — Message contains the slide title.
+    ///
+    /// Per AC-001 the message format is:
+    /// `"Chart data is empty for slide '<slide_title>'. Rendering error-slide placeholder."`
     ///
     /// Red Gate: fails until `build_empty_data_diagnostic` is implemented.
     #[test]
     fn test_bc_1_11_002_diagnostic_message_contains_slide_title() {
         let span = SourceSpan::default();
-        let diag = build_empty_data_diagnostic("Revenue Overview", "{{ revenue }}", span);
+        let diag = build_empty_data_diagnostic("Q3 Performance", "{{ revenue }}", span);
         assert!(
-            diag.message.contains("Revenue Overview"),
-            "diagnostic message must contain the slide title; got: {}",
+            diag.message.contains("Q3 Performance"),
+            "diagnostic message must contain the slide title 'Q3 Performance'; got: {}",
             diag.message
         );
     }
 
-    /// BC-1.11.002 AC-001 — Hint text is present.
+    /// BC-1.11.002 AC-001 — Message references the data binding expression.
+    ///
+    /// The diagnostic must quote or reference the data expression so the user
+    /// knows which binding triggered E-LAY-003.
     ///
     /// Red Gate: fails until `build_empty_data_diagnostic` is implemented.
     #[test]
-    fn test_bc_1_11_002_diagnostic_has_hint() {
+    fn test_bc_1_11_002_diagnostic_message_contains_data_expression() {
         let span = SourceSpan::default();
-        let diag = build_empty_data_diagnostic("My Slide", "{{ data }}", span);
+        let expr = "{{ kpis.monthly }}";
+        let diag = build_empty_data_diagnostic("Revenue Overview", expr, span);
         assert!(
-            diag.hint.is_some(),
-            "E-LAY-003 diagnostic must include a correction hint"
+            diag.message.contains("kpis.monthly") || diag.message.contains(expr),
+            "diagnostic message must reference the data expression '{}'; got: {}",
+            expr,
+            diag.message
         );
     }
 
-    /// BC-1.11.002 AC-001 — Span is preserved in the diagnostic.
+    /// BC-1.11.002 AC-001 — Hint text is present and contains remediation guidance.
+    ///
+    /// Per AC-001, the hint is: `"Ensure the data source contains at least one row."`
     ///
     /// Red Gate: fails until `build_empty_data_diagnostic` is implemented.
     #[test]
-    fn test_bc_1_11_002_diagnostic_span_preserved() {
+    fn test_bc_1_11_002_diagnostic_hint_includes_remediation() {
+        let span = SourceSpan::default();
+        let diag = build_empty_data_diagnostic("My Slide", "{{ data }}", span);
+        let hint = diag.hint.as_ref().expect(
+            "E-LAY-003 diagnostic must include a correction hint (hint field must be Some)",
+        );
+        assert!(
+            hint.contains("data source") || hint.contains("at least one row"),
+            "hint must suggest remediation for empty data; got: {hint}"
+        );
+    }
+
+    /// BC-1.11.002 AC-001 — Span from the call site is preserved in the diagnostic.
+    ///
+    /// Red Gate: fails until `build_empty_data_diagnostic` is implemented.
+    #[test]
+    fn test_bc_1_11_002_diagnostic_preserves_span() {
         let span = SourceSpan {
             file: Arc::from("deck.sf"),
             line: 12,

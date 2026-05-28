@@ -329,6 +329,35 @@ mod tests {
         );
     }
 
+    /// BC-1.11.002 AC-001 — `ChartError::EmptyData` Display impl includes `E-LAY-003`.
+    ///
+    /// Traceability anchor: the named test for test vector 19 in STORY-032.
+    ///
+    /// This test is structural (verifies the thiserror `#[error(...)]` template)
+    /// and passes at stub time. Its purpose is naming — providing a canonical
+    /// `test_BC_S_SS_NNN_xxx()` identifier for the `EmptyData` display assertion.
+    #[test]
+    fn test_bc_1_11_002_chart_error_empty_data_displays_e_lay_003() {
+        use slideforge_types::SourceSpan;
+
+        let err = ChartError::EmptyData {
+            slide_title: Arc::from("Q3 Dashboard"),
+            expression: Arc::from("{{ kpis }}"),
+            span: SourceSpan::default(),
+        };
+        let display = err.to_string();
+        assert!(
+            display.contains("E-LAY-003"),
+            "ChartError::EmptyData Display must include 'E-LAY-003'; got: {display}"
+        );
+        // Also verify that the expression appears in the Display output, per the
+        // thiserror template: "... (expression: {expression})"
+        assert!(
+            display.contains("kpis"),
+            "ChartError::EmptyData Display must include the expression; got: {display}"
+        );
+    }
+
     #[test]
     fn test_bc_1_11_001_fallback_palette_has_seven_colors() {
         assert_eq!(InternalChartSpec::FALLBACK_PALETTE.len(), 7);
