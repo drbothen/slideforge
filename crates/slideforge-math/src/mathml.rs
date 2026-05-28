@@ -18,9 +18,17 @@
 //! `<math>` element; display math (`MathMode::Display`) produces
 //! `display="block"`.
 
+use quick_xml::{
+    Writer,
+    events::{BytesEnd, BytesStart, BytesText, Event},
+};
 use slideforge_plugin_api::MathError;
 
 use crate::MathAst;
+use crate::ast::{MathMode, MathNode};
+
+/// The W3C `MathML` namespace URI.
+const MATHML_NS: &str = "http://www.w3.org/1998/Math/MathML";
 
 /// Render a [`MathAst`] to a `MathML` `<math>` element string.
 ///
@@ -32,10 +40,385 @@ use crate::MathAst;
 /// # Errors
 ///
 /// Returns [`MathError::RenderError`] if the AST cannot be serialised to
-/// `MathML`. In the stub implementation this path is unreachable (`todo!()`).
-#[allow(unused_variables)] // parameter used in implementation — stub only
+/// `MathML`.
 pub fn render_mathml(ast: &MathAst) -> Result<String, MathError> {
-    todo!("STORY-030: implement MathML renderer — see AC-001 and AC-002")
+    let mut buf: Vec<u8> = Vec::with_capacity(512);
+    let mut writer = Writer::new(&mut buf);
+
+    let aria_label = ast_to_aria_label(ast);
+
+    // Build root <math> element with namespace, display mode, and aria-label
+    let display_val = match ast.mode {
+        MathMode::Inline => "inline",
+        MathMode::Display => "block",
+    };
+
+    let mut root = BytesStart::new("math");
+    root.push_attribute(("xmlns", MATHML_NS));
+    root.push_attribute(("display", display_val));
+    root.push_attribute(("aria-label", aria_label.as_str()));
+
+    writer
+        .write_event(Event::Start(root))
+        .map_err(|e| MathError::RenderError {
+            message: e.to_string(),
+        })?;
+
+    // Wrap all top-level nodes in an <mrow>
+    writer
+        .write_event(Event::Start(BytesStart::new("mrow")))
+        .map_err(|e| MathError::RenderError {
+            message: e.to_string(),
+        })?;
+
+    for node in &ast.nodes {
+        write_node(&mut writer, node).map_err(|e| MathError::RenderError {
+            message: e.to_string(),
+        })?;
+    }
+
+    writer
+        .write_event(Event::End(BytesEnd::new("mrow")))
+        .map_err(|e| MathError::RenderError {
+            message: e.to_string(),
+        })?;
+
+    writer
+        .write_event(Event::End(BytesEnd::new("math")))
+        .map_err(|e| MathError::RenderError {
+            message: e.to_string(),
+        })?;
+
+    String::from_utf8(buf).map_err(|e| MathError::RenderError {
+        message: e.to_string(),
+    })
+}
+
+/// Classify a text token as a `MathML` element tag:
+/// - Digits (all chars are ASCII digits) → `"mn"` (number)
+/// - Operators (+, -, =, *, /, <, >, ≤, ≥, etc.) → `"mo"` (operator)
+/// - Everything else → `"mi"` (identifier)
+fn classify_text(s: &str) -> &'static str {
+    if s.chars().all(|c| c.is_ascii_digit() || c == '.') {
+        "mn"
+    } else if is_operator(s) {
+        "mo"
+    } else {
+        "mi"
+    }
+}
+
+/// Return `true` if the token is a recognised math operator.
+fn is_operator(s: &str) -> bool {
+    matches!(
+        s,
+        "+" | "-"
+            | "="
+            | "*"
+            | "/"
+            | "<"
+            | ">"
+            | "≤"
+            | "≥"
+            | "≠"
+            | "±"
+            | "×"
+            | "÷"
+            | "·"
+            | "∈"
+            | "∉"
+            | "⊂"
+            | "⊃"
+            | "∪"
+            | "∩"
+            | ","
+            | ";"
+            | ":"
+            | "!"
+            | "|"
+    )
+}
+
+/// Write a single [`MathNode`] as `MathML` into `writer`.
+fn write_node(writer: &mut Writer<&mut Vec<u8>>, node: &MathNode) -> Result<(), quick_xml::Error> {
+    match node {
+        MathNode::Text(s) => {
+            let tag = classify_text(s);
+            writer.write_event(Event::Start(BytesStart::new(tag)))?;
+            writer.write_event(Event::Text(BytesText::new(s)))?;
+            writer.write_event(Event::End(BytesEnd::new(tag)))?;
+        },
+
+        MathNode::TextRun(s) => {
+            // Upright/roman text in math — rendered as <mtext>
+            writer.write_event(Event::Start(BytesStart::new("mtext")))?;
+            writer.write_event(Event::Text(BytesText::new(s)))?;
+            writer.write_event(Event::End(BytesEnd::new("mtext")))?;
+        },
+
+        MathNode::Superscript { base, sup } => {
+            writer.write_event(Event::Start(BytesStart::new("msup")))?;
+            write_node(writer, base)?;
+            write_node(writer, sup)?;
+            writer.write_event(Event::End(BytesEnd::new("msup")))?;
+        },
+
+        MathNode::Subscript { base, sub } => {
+            writer.write_event(Event::Start(BytesStart::new("msub")))?;
+            write_node(writer, base)?;
+            write_node(writer, sub)?;
+            writer.write_event(Event::End(BytesEnd::new("msub")))?;
+        },
+
+        MathNode::Fraction { num, denom } => {
+            writer.write_event(Event::Start(BytesStart::new("mfrac")))?;
+            write_node(writer, num)?;
+            write_node(writer, denom)?;
+            writer.write_event(Event::End(BytesEnd::new("mfrac")))?;
+        },
+
+        MathNode::Sqrt {
+            index: None,
+            radicand,
+        } => {
+            writer.write_event(Event::Start(BytesStart::new("msqrt")))?;
+            write_node(writer, radicand)?;
+            writer.write_event(Event::End(BytesEnd::new("msqrt")))?;
+        },
+
+        MathNode::Sqrt {
+            index: Some(n),
+            radicand,
+        } => {
+            writer.write_event(Event::Start(BytesStart::new("mroot")))?;
+            write_node(writer, radicand)?;
+            write_node(writer, n)?;
+            writer.write_event(Event::End(BytesEnd::new("mroot")))?;
+        },
+
+        MathNode::Operator(name) => {
+            // Map operator name to Unicode symbol where possible, else use
+            // the command name as text content.
+            let sym = operator_symbol(name);
+            writer.write_event(Event::Start(BytesStart::new("mo")))?;
+            writer.write_event(Event::Text(BytesText::new(sym)))?;
+            writer.write_event(Event::End(BytesEnd::new("mo")))?;
+        },
+
+        MathNode::Greek(name) => {
+            let sym = greek_symbol(name);
+            writer.write_event(Event::Start(BytesStart::new("mi")))?;
+            writer.write_event(Event::Text(BytesText::new(sym)))?;
+            writer.write_event(Event::End(BytesEnd::new("mi")))?;
+        },
+
+        MathNode::Symbol(name) => {
+            let sym = misc_symbol(name);
+            writer.write_event(Event::Start(BytesStart::new("mo")))?;
+            writer.write_event(Event::Text(BytesText::new(sym)))?;
+            writer.write_event(Event::End(BytesEnd::new("mo")))?;
+        },
+
+        MathNode::Accent { kind, inner } => {
+            // Use <mover> with appropriate accent character
+            let accent_char = crate::ast::AccentKind::accent_char(kind);
+            writer.write_event(Event::Start(BytesStart::new("mover")))?;
+            write_node(writer, inner)?;
+            writer.write_event(Event::Start(BytesStart::new("mo")))?;
+            writer.write_event(Event::Text(BytesText::new(accent_char)))?;
+            writer.write_event(Event::End(BytesEnd::new("mo")))?;
+            writer.write_event(Event::End(BytesEnd::new("mover")))?;
+        },
+
+        MathNode::Group(nodes) => {
+            writer.write_event(Event::Start(BytesStart::new("mrow")))?;
+            for n in nodes {
+                write_node(writer, n)?;
+            }
+            writer.write_event(Event::End(BytesEnd::new("mrow")))?;
+        },
+
+        MathNode::Delimiter { left, right, inner } => {
+            // Produce <mrow><mo>left</mo>...inner...<mo>right</mo></mrow>
+            writer.write_event(Event::Start(BytesStart::new("mrow")))?;
+            writer.write_event(Event::Start(BytesStart::new("mo")))?;
+            writer.write_event(Event::Text(BytesText::new(left)))?;
+            writer.write_event(Event::End(BytesEnd::new("mo")))?;
+            for n in inner {
+                write_node(writer, n)?;
+            }
+            writer.write_event(Event::Start(BytesStart::new("mo")))?;
+            writer.write_event(Event::Text(BytesText::new(right)))?;
+            writer.write_event(Event::End(BytesEnd::new("mo")))?;
+            writer.write_event(Event::End(BytesEnd::new("mrow")))?;
+        },
+
+        MathNode::Align(rows) => {
+            // Render as <mtable> with rows and cells
+            writer.write_event(Event::Start(BytesStart::new("mtable")))?;
+            for row in rows {
+                writer.write_event(Event::Start(BytesStart::new("mtr")))?;
+                writer.write_event(Event::Start(BytesStart::new("mtd")))?;
+                for n in row {
+                    write_node(writer, n)?;
+                }
+                writer.write_event(Event::End(BytesEnd::new("mtd")))?;
+                writer.write_event(Event::End(BytesEnd::new("mtr")))?;
+            }
+            writer.write_event(Event::End(BytesEnd::new("mtable")))?;
+        },
+
+        MathNode::Cases(cases) => {
+            // Render cases as <mrow><mo>{</mo><mtable>...</mtable></mrow>
+            writer.write_event(Event::Start(BytesStart::new("mrow")))?;
+            writer.write_event(Event::Start(BytesStart::new("mo")))?;
+            writer.write_event(Event::Text(BytesText::new("{")))?;
+            writer.write_event(Event::End(BytesEnd::new("mo")))?;
+            writer.write_event(Event::Start(BytesStart::new("mtable")))?;
+            for (cond, result) in cases {
+                writer.write_event(Event::Start(BytesStart::new("mtr")))?;
+                writer.write_event(Event::Start(BytesStart::new("mtd")))?;
+                for n in result {
+                    write_node(writer, n)?;
+                }
+                writer.write_event(Event::End(BytesEnd::new("mtd")))?;
+                writer.write_event(Event::Start(BytesStart::new("mtd")))?;
+                for n in cond {
+                    write_node(writer, n)?;
+                }
+                writer.write_event(Event::End(BytesEnd::new("mtd")))?;
+                writer.write_event(Event::End(BytesEnd::new("mtr")))?;
+            }
+            writer.write_event(Event::End(BytesEnd::new("mtable")))?;
+            writer.write_event(Event::End(BytesEnd::new("mrow")))?;
+        },
+
+        MathNode::Space => {
+            // Render as thin space operator
+            writer.write_event(Event::Start(BytesStart::new("mspace")))?;
+            writer.write_event(Event::End(BytesEnd::new("mspace")))?;
+        },
+    }
+
+    Ok(())
+}
+
+/// Map an operator command name to its Unicode symbol.
+fn operator_symbol(name: &str) -> &str {
+    match name {
+        "sum" => "\u{2211}",  // ∑
+        "prod" => "\u{220F}", // ∏
+        "int" => "\u{222B}",  // ∫
+        "oint" => "\u{222E}", // ∮
+        "lim" => "lim",
+        "max" => "max",
+        "min" => "min",
+        "sup" => "sup",
+        "inf" => "inf",
+        "log" => "log",
+        "ln" => "ln",
+        "sin" => "sin",
+        "cos" => "cos",
+        "tan" => "tan",
+        "cot" => "cot",
+        "sec" => "sec",
+        "csc" => "csc",
+        "arcsin" => "arcsin",
+        "arccos" => "arccos",
+        "arctan" => "arctan",
+        "bigcup" => "\u{22C3}", // ⋃
+        "bigcap" => "\u{22C2}", // ⋂
+        "bigoplus" => "\u{2A01}",
+        "bigotimes" => "\u{2A02}",
+        _ => name,
+    }
+}
+
+/// Map a Greek letter command name to its Unicode character.
+fn greek_symbol(name: &str) -> &str {
+    match name {
+        "alpha" => "\u{03B1}",
+        "beta" => "\u{03B2}",
+        "gamma" => "\u{03B3}",
+        "delta" => "\u{03B4}",
+        "epsilon" | "varepsilon" => "\u{03B5}",
+        "zeta" => "\u{03B6}",
+        "eta" => "\u{03B7}",
+        "theta" => "\u{03B8}",
+        "vartheta" => "\u{03D1}",
+        "iota" => "\u{03B9}",
+        "kappa" => "\u{03BA}",
+        "lambda" => "\u{03BB}",
+        "mu" => "\u{03BC}",
+        "nu" => "\u{03BD}",
+        "xi" => "\u{03BE}",
+        "pi" => "\u{03C0}",
+        "varpi" => "\u{03D6}",
+        "rho" => "\u{03C1}",
+        "varrho" => "\u{03F1}",
+        "sigma" => "\u{03C3}",
+        "varsigma" => "\u{03C2}",
+        "tau" => "\u{03C4}",
+        "upsilon" => "\u{03C5}",
+        "phi" | "varphi" => "\u{03C6}",
+        "chi" => "\u{03C7}",
+        "psi" => "\u{03C8}",
+        "omega" => "\u{03C9}",
+        "Gamma" => "\u{0393}",
+        "Delta" => "\u{0394}",
+        "Theta" => "\u{0398}",
+        "Lambda" => "\u{039B}",
+        "Xi" => "\u{039E}",
+        "Pi" => "\u{03A0}",
+        "Sigma" => "\u{03A3}",
+        "Upsilon" => "\u{03A5}",
+        "Phi" => "\u{03A6}",
+        "Psi" => "\u{03A8}",
+        "Omega" => "\u{03A9}",
+        _ => name,
+    }
+}
+
+/// Map a miscellaneous symbol command name to its Unicode character.
+fn misc_symbol(name: &str) -> &str {
+    match name {
+        "cdot" => "\u{22C5}",              // ⋅
+        "times" => "\u{00D7}",             // ×
+        "div" => "\u{00F7}",               // ÷
+        "infty" => "\u{221E}",             // ∞
+        "pm" => "\u{00B1}",                // ±
+        "mp" => "\u{2213}",                // ∓
+        "leq" | "le" => "\u{2264}",        // ≤
+        "geq" | "ge" => "\u{2265}",        // ≥
+        "neq" | "ne" => "\u{2260}",        // ≠
+        "approx" => "\u{2248}",            // ≈
+        "equiv" => "\u{2261}",             // ≡
+        "in" => "\u{2208}",                // ∈
+        "notin" => "\u{2209}",             // ∉
+        "subset" => "\u{2282}",            // ⊂
+        "supset" => "\u{2283}",            // ⊃
+        "cup" => "\u{222A}",               // ∪
+        "cap" => "\u{2229}",               // ∩
+        "emptyset" => "\u{2205}",          // ∅
+        "forall" => "\u{2200}",            // ∀
+        "exists" => "\u{2203}",            // ∃
+        "partial" => "\u{2202}",           // ∂
+        "nabla" => "\u{2207}",             // ∇
+        "angle" => "\u{2220}",             // ∠
+        "rightarrow" | "to" => "\u{2192}", // →
+        "leftarrow" => "\u{2190}",         // ←
+        "Rightarrow" => "\u{21D2}",        // ⇒
+        "Leftarrow" => "\u{21D0}",         // ⇐
+        "Leftrightarrow" => "\u{21D4}",    // ⇔
+        "leftrightarrow" => "\u{2194}",    // ↔
+        "uparrow" => "\u{2191}",           // ↑
+        "downarrow" => "\u{2193}",         // ↓
+        "ldots" => "\u{2026}",             // …
+        "cdots" => "\u{22EF}",             // ⋯
+        "vdots" => "\u{22EE}",             // ⋮
+        "ddots" => "\u{22F1}",             // ⋱
+        _ => name,
+    }
 }
 
 /// Derive a plain-text aria label from a [`MathAst`].
@@ -50,9 +433,238 @@ pub fn render_mathml(ast: &MathAst) -> Result<String, MathError> {
 /// the PDF and PPTX exporters can attach the same accessible label to
 /// embedded math objects.
 #[must_use]
-#[allow(unused_variables)] // parameter used in implementation — stub only
 pub fn ast_to_aria_label(ast: &MathAst) -> String {
-    todo!("STORY-030: implement aria-label derivation from MathAst — see AC-002")
+    let mut parts: Vec<String> = Vec::new();
+    for node in &ast.nodes {
+        node_to_label(node, &mut parts);
+    }
+    parts.join(" ")
+}
+
+/// Recursively produce label parts from a [`MathNode`].
+fn node_to_label(node: &MathNode, parts: &mut Vec<String>) {
+    match node {
+        MathNode::Text(s) => {
+            let spoken = text_to_spoken(s);
+            parts.push(spoken.to_owned());
+        },
+
+        MathNode::TextRun(s) => {
+            parts.push(s.to_string());
+        },
+
+        MathNode::Superscript { base, sup } => {
+            // Check if sup is a simple number for "squared"/"cubed" shortcut
+            let sup_text = extract_simple_text(sup);
+            node_to_label(base, parts);
+            match sup_text {
+                Some("2") => parts.push("squared".to_owned()),
+                Some("3") => parts.push("cubed".to_owned()),
+                Some(n) => {
+                    parts.push("to the".to_owned());
+                    parts.push((*n).to_owned());
+                },
+                None => {
+                    parts.push("to the power".to_owned());
+                    node_to_label(sup, parts);
+                },
+            }
+        },
+
+        MathNode::Subscript { base, sub } => {
+            node_to_label(base, parts);
+            parts.push("sub".to_owned());
+            node_to_label(sub, parts);
+        },
+
+        MathNode::Fraction { num, denom } => {
+            node_to_label(num, parts);
+            parts.push("over".to_owned());
+            node_to_label(denom, parts);
+        },
+
+        MathNode::Sqrt {
+            index: None,
+            radicand,
+        } => {
+            parts.push("square root of".to_owned());
+            node_to_label(radicand, parts);
+        },
+
+        MathNode::Sqrt {
+            index: Some(idx),
+            radicand,
+        } => {
+            node_to_label(idx, parts);
+            parts.push("th root of".to_owned());
+            node_to_label(radicand, parts);
+        },
+
+        MathNode::Operator(name) => {
+            parts.push(operator_spoken(name).to_owned());
+        },
+
+        MathNode::Greek(name) => {
+            parts.push(name.to_string());
+        },
+
+        MathNode::Symbol(name) => {
+            parts.push(symbol_spoken(name).to_owned());
+        },
+
+        MathNode::Accent { kind, inner } => {
+            use crate::ast::AccentKind;
+            let accent_word = match kind {
+                AccentKind::Hat => "hat",
+                AccentKind::Bar => "bar",
+                AccentKind::Tilde => "tilde",
+                AccentKind::Vec => "vector",
+                AccentKind::Dot => "dot",
+                AccentKind::Ddot => "double dot",
+            };
+            parts.push(accent_word.to_owned());
+            node_to_label(inner, parts);
+        },
+
+        MathNode::Group(nodes) => {
+            for n in nodes {
+                node_to_label(n, parts);
+            }
+        },
+
+        MathNode::Delimiter { inner, .. } => {
+            for n in inner {
+                node_to_label(n, parts);
+            }
+        },
+
+        MathNode::Align(rows) => {
+            for row in rows {
+                for n in row {
+                    node_to_label(n, parts);
+                }
+            }
+        },
+
+        MathNode::Cases(cases) => {
+            for (cond, result) in cases {
+                for n in result {
+                    node_to_label(n, parts);
+                }
+                parts.push("if".to_owned());
+                for n in cond {
+                    node_to_label(n, parts);
+                }
+            }
+        },
+
+        MathNode::Space => {
+            // Silent space — do not add a spoken part
+        },
+    }
+}
+
+/// Extract the text content of a simple `MathNode::Text` or `MathNode::Group`
+/// containing a single `MathNode::Text`. Returns `None` for complex nodes.
+fn extract_simple_text(node: &MathNode) -> Option<&str> {
+    match node {
+        MathNode::Text(s) => Some(s),
+        MathNode::Group(nodes) if nodes.len() == 1 => {
+            if let MathNode::Text(s) = &nodes[0] {
+                Some(s)
+            } else {
+                None
+            }
+        },
+        _ => None,
+    }
+}
+
+/// Map a text token to its spoken English form.
+fn text_to_spoken(s: &str) -> &str {
+    match s {
+        "+" => "plus",
+        "-" => "minus",
+        "=" => "equals",
+        "*" => "times",
+        "/" => "divided by",
+        "<" => "less than",
+        ">" => "greater than",
+        "," => "comma",
+        _ => s,
+    }
+}
+
+/// Map an operator command name to its spoken English form.
+fn operator_spoken(name: &str) -> &str {
+    match name {
+        "sum" => "sum",
+        "prod" => "product",
+        "int" => "integral",
+        "oint" => "contour integral",
+        "lim" => "limit",
+        "max" => "maximum",
+        "min" => "minimum",
+        "log" => "log",
+        "ln" => "natural log",
+        "sin" => "sine",
+        "cos" => "cosine",
+        "tan" => "tangent",
+        _ => name,
+    }
+}
+
+/// Map a symbol command name to its spoken English form.
+fn symbol_spoken(name: &str) -> &str {
+    match name {
+        "cdot" | "times" => "times",
+        "div" => "divided by",
+        "infty" => "infinity",
+        "pm" => "plus or minus",
+        "mp" => "minus or plus",
+        "leq" | "le" => "less than or equal to",
+        "geq" | "ge" => "greater than or equal to",
+        "neq" | "ne" => "not equal to",
+        "approx" => "approximately",
+        "equiv" => "equivalent to",
+        "in" => "in",
+        "notin" => "not in",
+        "subset" => "subset of",
+        "supset" => "superset of",
+        "cup" => "union",
+        "cap" => "intersection",
+        "emptyset" => "empty set",
+        "forall" => "for all",
+        "exists" => "there exists",
+        "partial" => "partial",
+        "nabla" => "nabla",
+        "rightarrow" | "to" => "goes to",
+        "leftarrow" => "from",
+        "Rightarrow" => "implies",
+        "Leftarrow" => "implied by",
+        "Leftrightarrow" | "leftrightarrow" => "if and only if",
+        "ldots" | "cdots" | "vdots" | "ddots" => "dot dot dot",
+        _ => name,
+    }
+}
+
+// Add accent_char method to AccentKind — placed here as a standalone function
+// that delegates, since we cannot add methods to types from other modules
+// via impl blocks (we can since AccentKind is in our own crate).
+
+impl crate::ast::AccentKind {
+    /// Return the Unicode character used as the accent symbol in `MathML` `<mover>`.
+    #[must_use]
+    pub fn accent_char(kind: &crate::ast::AccentKind) -> &'static str {
+        match kind {
+            crate::ast::AccentKind::Hat => "\u{005E}",   // ^
+            crate::ast::AccentKind::Bar => "\u{00AF}",   // ¯
+            crate::ast::AccentKind::Tilde => "\u{007E}", // ~
+            crate::ast::AccentKind::Vec => "\u{2192}",   // →
+            crate::ast::AccentKind::Dot => "\u{02D9}",   // ˙
+            crate::ast::AccentKind::Ddot => "\u{00A8}",  // ¨
+        }
+    }
 }
 
 #[cfg(test)]
@@ -81,8 +693,8 @@ mod tests {
     ///
     /// Returns `Ok(())` if the XML is well-formed, `Err(msg)` otherwise.
     fn assert_wellformed_xml(xml: &str) -> Result<(), String> {
-        use quick_xml::events::Event;
         use quick_xml::Reader;
+        use quick_xml::events::Event;
 
         let mut reader = Reader::from_str(xml);
         let mut depth: i64 = 0;
