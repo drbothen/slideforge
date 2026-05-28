@@ -23,16 +23,49 @@ use std::sync::Arc;
 /// When `domains` is `Some`, only the listed domain strings are permitted.
 /// When `domains` is `None`, all domains are permitted (no restriction).
 ///
-/// Domain strings are compared to the host component of the request URL
-/// after lower-casing. Subdomains are NOT implicitly allowed by a parent
-/// domain entry — each permitted domain must be listed explicitly.
+/// Domain strings are stored and compared in **lowercase**. User-provided
+/// entries are normalized at construction so that `"API.EXAMPLE.COM"` and
+/// `"api.example.com"` are treated as the same entry.
+///
+/// Subdomains are NOT implicitly allowed by a parent domain entry — each
+/// permitted domain must be listed explicitly.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct AllowlistConfig {
     /// The list of permitted domains, or `None` to allow all domains.
     ///
-    /// Each entry is compared against the lower-cased host of the request URL.
+    /// Every entry is stored in lowercase. Comparisons are byte-for-byte
+    /// against the lower-cased host of the request URL (which `url::Url`
+    /// already returns in lowercase for DNS hostnames).
+    ///
     /// Example: `vec![Arc::from("api.example.com"), Arc::from("data.example.com")]`.
     pub domains: Option<Vec<Arc<str>>>,
+}
+
+impl AllowlistConfig {
+    /// Construct an [`AllowlistConfig`] from a list of domain strings.
+    ///
+    /// Each entry is **normalized to lowercase** so that user-provided entries
+    /// such as `"API.EXAMPLE.COM"` match URL hosts such as `api.example.com`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use slideforge_data::allowlist::AllowlistConfig;
+    ///
+    /// let config = AllowlistConfig::with_domains(vec!["API.EXAMPLE.COM"]);
+    /// let url = url::Url::parse("https://api.example.com/data").unwrap();
+    /// assert!(slideforge_data::allowlist::is_allowed(&url, &config));
+    /// ```
+    #[must_use]
+    pub fn with_domains(domains: impl IntoIterator<Item = impl AsRef<str>>) -> Self {
+        let normalized: Vec<Arc<str>> = domains
+            .into_iter()
+            .map(|d| Arc::<str>::from(d.as_ref().to_lowercase()))
+            .collect();
+        AllowlistConfig {
+            domains: Some(normalized),
+        }
+    }
 }
 
 /// Check whether a URL's host is permitted by the allowlist configuration.
@@ -42,8 +75,11 @@ pub struct AllowlistConfig {
 /// ## Rules
 ///
 /// - If `config.domains` is `None`, all URLs are allowed.
-/// - If `config.domains` is `Some(list)`, the URL host (lower-cased) must
-///   appear verbatim in the list.
+/// - If `config.domains` is `Some(list)`, the URL host must appear verbatim
+///   in the list. Both sides are already lowercase: `url::Url::host_str()`
+///   returns DNS hostnames in lowercase (per WHATWG URL spec), and
+///   [`AllowlistConfig::with_domains`] normalizes entries to lowercase at
+///   construction.
 /// - URLs without a host component (e.g., `file://`) are always blocked when
 ///   an allowlist is configured.
 ///
@@ -279,6 +315,36 @@ mod tests {
         assert!(
             !is_allowed(&url, &config),
             "empty allowlist must block localhost"
+        );
+    }
+
+    /// `test_BC_1_03_005_case_insensitive_user_entry`
+    ///
+    /// F3 fix: User-provided entries with uppercase letters must match URLs with
+    /// the same domain in lowercase.
+    ///
+    /// Test vector: domains=`["API.EXAMPLE.COM"]` (uppercase), URL=https://api.example.com/data → true
+    #[test]
+    fn test_bc_1_03_005_case_insensitive_user_entry() {
+        let config = AllowlistConfig::with_domains(["API.EXAMPLE.COM"]);
+        let url = url::Url::parse("https://api.example.com/data").unwrap();
+        assert!(
+            is_allowed(&url, &config),
+            "uppercase domain entry must match lowercase URL host after normalization"
+        );
+    }
+
+    /// `test_BC_1_03_005_with_domains_normalizes_mixed_case`
+    ///
+    /// `AllowlistConfig::with_domains` must normalize mixed-case entries to lowercase.
+    #[test]
+    fn test_bc_1_03_005_with_domains_normalizes_mixed_case() {
+        let config = AllowlistConfig::with_domains(["Api.Example.Com"]);
+        let domains = config.domains.unwrap();
+        assert_eq!(
+            domains[0].as_ref(),
+            "api.example.com",
+            "with_domains must lowercase all entries"
         );
     }
 }
