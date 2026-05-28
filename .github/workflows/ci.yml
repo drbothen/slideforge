@@ -67,7 +67,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update -y -q
-          sudo apt-get install -y -q fonts-dejavu-core fonts-noto-core
+          sudo apt-get install -y -q fonts-dejavu-core fonts-noto-core fonts-liberation
           fc-cache -f
       - name: cargo clippy (all targets, pedantic)
         run: >
@@ -111,7 +111,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update -y -q
-          sudo apt-get install -y -q fonts-dejavu-core fonts-noto-core
+          sudo apt-get install -y -q fonts-dejavu-core fonts-noto-core fonts-liberation
           fc-cache -f
       - name: Install cargo-nextest
         uses: taiki-e/install-action@d9be7d8cda89035c9c843f78bd44d4f72d8403d4
@@ -180,7 +180,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update -y -q
-          sudo apt-get install -y -q fonts-dejavu-core fonts-noto-core
+          sudo apt-get install -y -q fonts-dejavu-core fonts-noto-core fonts-liberation
           fc-cache -f
       - name: Install cargo-insta
         uses: taiki-e/install-action@d9be7d8cda89035c9c843f78bd44d4f72d8403d4

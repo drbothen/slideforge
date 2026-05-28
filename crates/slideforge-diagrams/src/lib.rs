@@ -382,24 +382,6 @@ mod tests {
             s.contains("<title>Architecture</title>"),
             "SVG must have <title> matching alt text"
         );
-        // TEMPORARY: diagnostic capture for STORY-034 PR #30 Linux investigation.
-        // These eprintlns will be removed in iteration 3 once the root cause of
-        // missing Mermaid labels on Linux CI is identified.
-        eprintln!(
-            "DIAG(flowchart): fontdb_face_count = {}",
-            crate::normalize::font_db_face_count()
-        );
-        eprintln!("DIAG(flowchart): SVG length = {}", s.len());
-        eprintln!("DIAG(flowchart): SVG contains <text = {}", s.contains("<text"));
-        eprintln!("DIAG(flowchart): SVG contains 'Client' = {}", s.contains("Client"));
-        eprintln!(
-            "DIAG(flowchart): SVG first 500 chars: {}",
-            &s.chars().take(500).collect::<String>()
-        );
-        eprintln!(
-            "DIAG(flowchart): SVG last 500 chars: {}",
-            &s.chars().rev().take(500).collect::<String>().chars().rev().collect::<String>()
-        );
         // Node label content visible in output
         assert!(s.contains("Client"), "SVG must include 'Client' node label");
         assert!(s.contains("API"), "SVG must include 'API' node label");
@@ -443,24 +425,6 @@ mod tests {
         assert!(
             s.contains("<title>Sequence diagram</title>"),
             "SVG must have <title> matching alt text"
-        );
-        // TEMPORARY: diagnostic capture for STORY-034 PR #30 Linux investigation.
-        // These eprintlns will be removed in iteration 3 once the root cause of
-        // missing Mermaid labels on Linux CI is identified.
-        eprintln!(
-            "DIAG(sequence): fontdb_face_count = {}",
-            crate::normalize::font_db_face_count()
-        );
-        eprintln!("DIAG(sequence): SVG length = {}", s.len());
-        eprintln!("DIAG(sequence): SVG contains <text = {}", s.contains("<text"));
-        eprintln!("DIAG(sequence): SVG contains 'Alice' = {}", s.contains("Alice"));
-        eprintln!(
-            "DIAG(sequence): SVG first 500 chars: {}",
-            &s.chars().take(500).collect::<String>()
-        );
-        eprintln!(
-            "DIAG(sequence): SVG last 500 chars: {}",
-            &s.chars().rev().take(500).collect::<String>().chars().rev().collect::<String>()
         );
         // Participant labels and message content visible in output
         assert!(s.contains("Alice"), "SVG must include 'Alice' participant");
