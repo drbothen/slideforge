@@ -65,6 +65,17 @@ pub enum LayoutError {
         slide_type_keyword: String,
     },
 
+    /// A manually authored `section <type>:` block has an unrecognised type name.
+    ///
+    /// Supported section types are: `methodology`, `scope`, `approval`,
+    /// `appendix`, `glossary`. Any other name produces this error (AC-004 /
+    /// BC-3.02.002).
+    #[error("layout error: unknown section type '{name}'")]
+    UnknownSectionType {
+        /// The unrecognised section type name from the `.sf` source.
+        name: String,
+    },
+
     /// A `BoundingBox` in the produced layout has invalid coordinates.
     ///
     /// Per AC-014 / BC-3.06.003, every bounding box must satisfy:

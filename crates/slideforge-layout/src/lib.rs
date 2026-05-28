@@ -46,12 +46,16 @@
 pub mod error;
 pub mod layout;
 pub mod regions;
+pub mod sections;
 pub mod text_flow;
 pub mod types;
 
 // Re-export the primary entry point and most-used types at crate root.
 pub use error::LayoutError;
 pub use layout::run;
+pub use sections::{
+    GeneratedSection, OutputFormat, SectionItem, SectionKind, SectionSource,
+};
 pub use types::{
     BoundingBox, Frame, FrameContent, LaidOutDeck, LaidOutSlide, PageSize, RegisterTag, TextFlow,
     TextOverflow,

@@ -19,6 +19,8 @@ use std::sync::Arc;
 use slideforge_types::ContentBlock;
 pub use slideforge_types::Emu;
 
+use crate::sections::GeneratedSection;
+
 /// The default canvas width for the layout engine (10 inches = 9,144,000 EMU).
 ///
 /// This is the canvas width used by the layout engine when the active `Brand`
@@ -94,12 +96,25 @@ pub enum RegisterTag {
 /// `slides.len()` MUST equal `Deck.slides.len()`. The layout engine returns
 /// [`crate::error::LayoutError::SlideCountMismatch`] rather than produce a
 /// deck with a different count.
+///
+/// ## Document sections (STORY-027 / BC-3.02.001 / BC-3.02.002)
+///
+/// `sections` holds the assembled document sections for DOCX and PDF output.
+/// The list is populated by [`crate::sections::collect_sections`] during
+/// `layout::run`. PPTX and HTML exporters filter out sections where their
+/// format is absent from [`crate::sections::GeneratedSection::target_formats`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LaidOutDeck {
     /// The page dimensions for all slides in this deck.
     pub page_size: PageSize,
     /// The laid-out slides, one per entry in [`slideforge_types::Deck::slides`].
     pub slides: Vec<LaidOutSlide>,
+    /// The assembled document sections for DOCX and PDF output.
+    ///
+    /// Populated by [`crate::sections::collect_sections`] during layout.
+    /// An empty `Vec` means the deck has no sections (no `takeaway:` fields,
+    /// no `severity_cards` slides, and no manual `section:` blocks).
+    pub sections: Vec<GeneratedSection>,
 }
 
 /// Slide page dimensions in EMU.
@@ -421,6 +436,7 @@ mod tests {
         let deck = LaidOutDeck {
             page_size: PageSize::default(),
             slides: vec![],
+            sections: vec![],
         };
         let deck2 = deck.clone();
         assert_eq!(deck, deck2);
