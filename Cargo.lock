@@ -1933,6 +1933,7 @@ dependencies = [
  "mermaid-rs-renderer",
  "miette",
  "slideforge-plugin-api",
+ "slideforge-types",
  "thiserror 2.0.18",
  "tracing",
  "usvg",

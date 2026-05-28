@@ -8,6 +8,63 @@ use std::sync::Arc;
 
 use crate::span::SourceSpan;
 
+/// A usvg-normalized SVG string that is guaranteed PPTX-safe.
+///
+/// This type is the output of the mandatory normalization pass (STORY-034,
+/// BC-1.12.003) that runs after every successful diagram render. The normalized
+/// form guarantees:
+///
+/// - No `<foreignObject>` elements.
+/// - No `<script>` elements.
+/// - No CSS `@keyframes` or class-based `<style>` blocks.
+/// - Absolute pixel `width` and `height` on the root `<svg>` element.
+/// - No `<use>` elements (all `href="#symbol"` references inlined).
+///
+/// ## Placement in slideforge-types
+///
+/// `NormalizedDiagramSvg` lives in `slideforge-types` (a leaf crate with no
+/// workspace crate dependencies) so that both `slideforge-diagrams` (the
+/// producer) and `slideforge-layout` (the consumer) can reference it without
+/// creating a circular dependency.
+///
+/// `slideforge-diagrams` produces `NormalizedDiagramSvg` values via
+/// `usvg_normalize`. `slideforge-layout` stores them in
+/// `FrameContent::Diagram(NormalizedDiagramSvg)`.
+///
+/// ## IR compatibility
+///
+/// Uses `Arc<str>` (not `String`) so that cloning is cheap and the type
+/// satisfies `Hash + Eq + Clone` for comemo compatibility.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct NormalizedDiagramSvg(pub Arc<str>);
+
+impl NormalizedDiagramSvg {
+    /// Return a reference to the inner SVG string.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// Return `true` if the SVG string is non-empty.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Return a placeholder `NormalizedDiagramSvg` for use in region-map
+    /// templates and layout fixtures where the actual diagram SVG is not yet
+    /// available.
+    ///
+    /// The placeholder is an empty string. The eval layer replaces it with the
+    /// real `NormalizedDiagramSvg` when the diagram is rendered. Exporters
+    /// that receive a `FrameContent::Diagram` with a placeholder (empty string)
+    /// must render an error-slide indicator.
+    #[must_use]
+    pub fn placeholder() -> Self {
+        Self(Arc::from(""))
+    }
+}
+
 /// The alt text state of a visual element.
 ///
 /// Visual elements (images, charts, diagrams, shapes) require alt text for
