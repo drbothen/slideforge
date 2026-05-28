@@ -829,7 +829,7 @@ mod tests {
     // BC-1.10.003 invariant 6 — Cross-renderer Unicode equivalence
     // ─────────────────────────────────────────────────────────────────────────
 
-    /// `\varphi` produces U+03C6 (φ) in OMML, consistent with MathML and PDF.
+    /// `\varphi` produces U+03C6 (φ) in OMML, consistent with `MathML` and PDF.
     ///
     /// Previously OMML emitted U+03D5 (ϕ) — a distinct Unicode codepoint —
     /// while the other two renderers emitted U+03C6 (φ). This test asserts

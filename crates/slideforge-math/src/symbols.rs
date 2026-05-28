@@ -212,11 +212,11 @@ mod tests {
     /// BC-1.10.003 invariant 6 — cross-renderer Unicode equivalence for `\varphi`.
     ///
     /// The canonical convention is: `\phi` → U+03C6 (φ, small phi) and
-    /// `\varphi` → U+03C6 (φ, same small phi). Both OMML, MathML, and the PDF
+    /// `\varphi` → U+03C6 (φ, same small phi). Both OMML, `MathML`, and the PDF
     /// path renderer must produce U+03C6 for `MathNode::Greek("varphi")`.
     ///
     /// Previously OMML emitted U+03D5 (ϕ) — a distinct Unicode character —
-    /// while MathML and the PDF path renderer emitted U+03C6 (φ). The
+    /// while `MathML` and the PDF path renderer emitted U+03C6 (φ). The
     /// DRY refactor through this module fixes the divergence.
     #[test]
     fn test_bc_1_10_003_varphi_canonical_unicode() {

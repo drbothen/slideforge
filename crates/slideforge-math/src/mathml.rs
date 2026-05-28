@@ -140,6 +140,75 @@ fn is_operator(s: &str) -> bool {
     )
 }
 
+/// Write an `Align` node as `<mtable>` rows into `writer`.
+fn write_align_node(
+    writer: &mut Writer<&mut Vec<u8>>,
+    rows: &[Vec<MathNode>],
+) -> Result<(), quick_xml::Error> {
+    writer.write_event(Event::Start(BytesStart::new("mtable")))?;
+    for row in rows {
+        writer.write_event(Event::Start(BytesStart::new("mtr")))?;
+        writer.write_event(Event::Start(BytesStart::new("mtd")))?;
+        for n in row {
+            write_node(writer, n)?;
+        }
+        writer.write_event(Event::End(BytesEnd::new("mtd")))?;
+        writer.write_event(Event::End(BytesEnd::new("mtr")))?;
+    }
+    writer.write_event(Event::End(BytesEnd::new("mtable")))?;
+    Ok(())
+}
+
+/// Write a `Cases` node as `<mrow><mo>{</mo><mtable>…</mtable></mrow>` into `writer`.
+fn write_cases_node(
+    writer: &mut Writer<&mut Vec<u8>>,
+    cases: &[(Vec<MathNode>, Vec<MathNode>)],
+) -> Result<(), quick_xml::Error> {
+    writer.write_event(Event::Start(BytesStart::new("mrow")))?;
+    writer.write_event(Event::Start(BytesStart::new("mo")))?;
+    writer.write_event(Event::Text(BytesText::new("{")))?;
+    writer.write_event(Event::End(BytesEnd::new("mo")))?;
+    writer.write_event(Event::Start(BytesStart::new("mtable")))?;
+    for (cond, result) in cases {
+        writer.write_event(Event::Start(BytesStart::new("mtr")))?;
+        writer.write_event(Event::Start(BytesStart::new("mtd")))?;
+        for n in result {
+            write_node(writer, n)?;
+        }
+        writer.write_event(Event::End(BytesEnd::new("mtd")))?;
+        writer.write_event(Event::Start(BytesStart::new("mtd")))?;
+        for n in cond {
+            write_node(writer, n)?;
+        }
+        writer.write_event(Event::End(BytesEnd::new("mtd")))?;
+        writer.write_event(Event::End(BytesEnd::new("mtr")))?;
+    }
+    writer.write_event(Event::End(BytesEnd::new("mtable")))?;
+    writer.write_event(Event::End(BytesEnd::new("mrow")))?;
+    Ok(())
+}
+
+/// Write a `Delimiter` node as `<mrow><mo>l</mo>…<mo>r</mo></mrow>` into `writer`.
+fn write_delimiter_node(
+    writer: &mut Writer<&mut Vec<u8>>,
+    left: &str,
+    right: &str,
+    inner: &[MathNode],
+) -> Result<(), quick_xml::Error> {
+    writer.write_event(Event::Start(BytesStart::new("mrow")))?;
+    writer.write_event(Event::Start(BytesStart::new("mo")))?;
+    writer.write_event(Event::Text(BytesText::new(left)))?;
+    writer.write_event(Event::End(BytesEnd::new("mo")))?;
+    for n in inner {
+        write_node(writer, n)?;
+    }
+    writer.write_event(Event::Start(BytesStart::new("mo")))?;
+    writer.write_event(Event::Text(BytesText::new(right)))?;
+    writer.write_event(Event::End(BytesEnd::new("mo")))?;
+    writer.write_event(Event::End(BytesEnd::new("mrow")))?;
+    Ok(())
+}
+
 /// Write a single [`MathNode`] as `MathML` into `writer`.
 fn write_node(writer: &mut Writer<&mut Vec<u8>>, node: &MathNode) -> Result<(), quick_xml::Error> {
     match node {
@@ -289,58 +358,15 @@ fn write_node(writer: &mut Writer<&mut Vec<u8>>, node: &MathNode) -> Result<(), 
         },
 
         MathNode::Delimiter { left, right, inner } => {
-            // Produce <mrow><mo>left</mo>...inner...<mo>right</mo></mrow>
-            writer.write_event(Event::Start(BytesStart::new("mrow")))?;
-            writer.write_event(Event::Start(BytesStart::new("mo")))?;
-            writer.write_event(Event::Text(BytesText::new(left)))?;
-            writer.write_event(Event::End(BytesEnd::new("mo")))?;
-            for n in inner {
-                write_node(writer, n)?;
-            }
-            writer.write_event(Event::Start(BytesStart::new("mo")))?;
-            writer.write_event(Event::Text(BytesText::new(right)))?;
-            writer.write_event(Event::End(BytesEnd::new("mo")))?;
-            writer.write_event(Event::End(BytesEnd::new("mrow")))?;
+            write_delimiter_node(writer, left, right, inner)?;
         },
 
         MathNode::Align(rows) => {
-            // Render as <mtable> with rows and cells
-            writer.write_event(Event::Start(BytesStart::new("mtable")))?;
-            for row in rows {
-                writer.write_event(Event::Start(BytesStart::new("mtr")))?;
-                writer.write_event(Event::Start(BytesStart::new("mtd")))?;
-                for n in row {
-                    write_node(writer, n)?;
-                }
-                writer.write_event(Event::End(BytesEnd::new("mtd")))?;
-                writer.write_event(Event::End(BytesEnd::new("mtr")))?;
-            }
-            writer.write_event(Event::End(BytesEnd::new("mtable")))?;
+            write_align_node(writer, rows)?;
         },
 
         MathNode::Cases(cases) => {
-            // Render cases as <mrow><mo>{</mo><mtable>...</mtable></mrow>
-            writer.write_event(Event::Start(BytesStart::new("mrow")))?;
-            writer.write_event(Event::Start(BytesStart::new("mo")))?;
-            writer.write_event(Event::Text(BytesText::new("{")))?;
-            writer.write_event(Event::End(BytesEnd::new("mo")))?;
-            writer.write_event(Event::Start(BytesStart::new("mtable")))?;
-            for (cond, result) in cases {
-                writer.write_event(Event::Start(BytesStart::new("mtr")))?;
-                writer.write_event(Event::Start(BytesStart::new("mtd")))?;
-                for n in result {
-                    write_node(writer, n)?;
-                }
-                writer.write_event(Event::End(BytesEnd::new("mtd")))?;
-                writer.write_event(Event::Start(BytesStart::new("mtd")))?;
-                for n in cond {
-                    write_node(writer, n)?;
-                }
-                writer.write_event(Event::End(BytesEnd::new("mtd")))?;
-                writer.write_event(Event::End(BytesEnd::new("mtr")))?;
-            }
-            writer.write_event(Event::End(BytesEnd::new("mtable")))?;
-            writer.write_event(Event::End(BytesEnd::new("mrow")))?;
+            write_cases_node(writer, cases)?;
         },
 
         MathNode::Space => {
@@ -1118,7 +1144,7 @@ mod tests {
     // BC-1.10.003 invariant 6 — Cross-renderer Unicode equivalence
     // ─────────────────────────────────────────────────────────────────────────
 
-    /// `\varphi` produces U+03C6 (φ) in MathML, consistent with OMML and PDF.
+    /// `\varphi` produces U+03C6 (φ) in `MathML`, consistent with OMML and PDF.
     #[test]
     fn test_bc_1_10_003_mathml_varphi_is_u03c6() {
         let ast = inline_ast(vec![MathNode::Greek(Arc::from("varphi"))]);
@@ -1170,7 +1196,7 @@ mod tests {
     // H-S030-P2-H3 — Insta snapshot tests for MathML output
     // ─────────────────────────────────────────────────────────────────────────
 
-    /// Snapshot: `x^2` inline MathML.
+    /// Snapshot: `x^2` inline `MathML`.
     #[test]
     fn snapshot_mathml_superscript_x2() {
         let ast = inline_ast(vec![MathNode::Superscript {
@@ -1181,7 +1207,7 @@ mod tests {
         insta::assert_yaml_snapshot!("mathml_superscript_x2", output);
     }
 
-    /// Snapshot: `\frac{1}{2}` inline MathML.
+    /// Snapshot: `\frac{1}{2}` inline `MathML`.
     #[test]
     fn snapshot_mathml_fraction_half() {
         let ast = inline_ast(vec![MathNode::Fraction {
@@ -1192,7 +1218,7 @@ mod tests {
         insta::assert_yaml_snapshot!("mathml_fraction_half", output);
     }
 
-    /// Snapshot: `\sqrt{x}` inline MathML.
+    /// Snapshot: `\sqrt{x}` inline `MathML`.
     #[test]
     fn snapshot_mathml_sqrt_x() {
         let ast = inline_ast(vec![MathNode::Sqrt {
@@ -1203,7 +1229,7 @@ mod tests {
         insta::assert_yaml_snapshot!("mathml_sqrt_x", output);
     }
 
-    /// Snapshot: `\sum_{i=0}^{n}` display MathML.
+    /// Snapshot: `\sum_{i=0}^{n}` display `MathML`.
     #[test]
     fn snapshot_mathml_display_sum() {
         let ast = display_ast(vec![MathNode::Subscript {
@@ -1221,7 +1247,7 @@ mod tests {
         insta::assert_yaml_snapshot!("mathml_display_sum", output);
     }
 
-    /// Snapshot: `\alpha + \beta` inline MathML.
+    /// Snapshot: `\alpha + \beta` inline `MathML`.
     #[test]
     fn snapshot_mathml_greek_alpha_beta() {
         let ast = inline_ast(vec![
