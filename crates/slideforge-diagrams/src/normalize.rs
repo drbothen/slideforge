@@ -25,24 +25,50 @@
 //! There is no bypass path. Exporters receive [`NormalizedDiagramSvg`]; the
 //! type system prevents them from receiving [`RawDiagramSvg`] directly.
 //!
-//! ## Implementation note
+//! ## Implementation
 //!
-//! The implementation is a `todo!()` stub. The full implementation will:
-//! 1. Call `usvg::Tree::from_str(raw_svg, &usvg::Options::default())` to parse.
-//! 2. Call `usvg::TreeWriting::to_string(&tree)` to re-serialize.
-//! 3. Wrap the result in [`NormalizedDiagramSvg`].
-//! 4. Run post-normalization debug assertions (AC-002 through AC-006).
+//! 1. Gate system font loading on presence of `<text` elements in the raw SVG
+//!    (keeps geometry-only paths fast; mermaid SVGs always have text).
+//! 2. Call `usvg::Tree::from_str(raw_svg, &opt)` to parse.
+//! 3. Call `tree.to_string(&WriteOptions { preserve_text: true, .. })` to re-serialize.
+//! 4. Re-inject `aria-label`, `role="img"`, `<title>`, and `viewBox` that usvg strips.
+//! 5. Run post-normalization debug assertions (AC-002 through AC-006).
 
+use std::fmt::Write as FmtWrite;
+use std::sync::{Arc, OnceLock};
+
+use miette::SourceSpan;
 use tracing::instrument;
 
 use crate::types::{DiagramError, NormalizedDiagramSvg, RawDiagramSvg};
+
+/// Lazily-initialized system font database for usvg text normalization.
+///
+/// Loading system fonts is expensive (50–300ms depending on platform). This
+/// `OnceLock` ensures the database is built exactly once per process, then
+/// reused for every subsequent `usvg_normalize` call (warm path < 1ms).
+///
+/// The `Arc<usvg::fontdb::Database>` wrapper is required by `usvg::Options`.
+static FONT_DB: OnceLock<Arc<usvg::fontdb::Database>> = OnceLock::new();
+
+/// Return a reference to the lazily-initialized system font database.
+///
+/// On the first call this loads all system fonts (one-time cost ~50–300ms).
+/// Subsequent calls return the cached database in O(1).
+fn font_db() -> Arc<usvg::fontdb::Database> {
+    Arc::clone(FONT_DB.get_or_init(|| {
+        let mut db = usvg::fontdb::Database::new();
+        db.load_system_fonts();
+        Arc::new(db)
+    }))
+}
 
 /// Normalize a [`RawDiagramSvg`] into a PPTX-safe [`NormalizedDiagramSvg`]
 /// using `usvg` 0.47.0.
 ///
 /// This is a **pure, synchronous** operation — no I/O, no network access.
 /// It parses the raw SVG through `usvg::Tree::from_str` and re-serializes
-/// via `usvg::TreeWriting::to_string`. usvg guarantees the following
+/// via `tree.to_string`. usvg guarantees the following
 /// transformations on the output (BC-1.12.003 postconditions):
 ///
 /// | Postcondition | Guarantee |
@@ -77,26 +103,78 @@ pub fn usvg_normalize(
     raw: &RawDiagramSvg,
     source_id: &str,
 ) -> Result<NormalizedDiagramSvg, DiagramError> {
-    // STORY-034: Full implementation.
-    // Steps:
-    // 1. Call usvg::Tree::from_str(raw.as_str(), &usvg::Options::default())
-    // 2. Call usvg::TreeWriting::to_string(&tree)
-    // 3. Wrap in NormalizedDiagramSvg(Arc::from(normalized_str))
-    // 4. Call debug_assert_post_normalization(&normalized_str) in debug builds
+    // Build usvg options, conditionally loading the system font database.
     //
-    // Error path: if usvg::Tree::from_str returns Err, return
-    // DiagramError::SvgNormalizationFailed { source_id, cause, span }.
+    // System fonts are required so that usvg preserves <text> elements as text
+    // (rather than converting them to outlined paths). Without fonts:
+    // - Node labels ("Client", "API") are lost from flowchart SVGs.
+    // - Participant names ("Alice", "Bob") are lost from sequence diagrams.
+    // - PPTX accessibility and screen-reader compatibility are broken.
     //
-    // The `raw` parameter and `source_id` are consumed in the real
-    // implementation. They are referenced here to suppress dead-code warnings
-    // on the parameter and to ensure the field is captured by `instrument`.
-    let _ = (raw, source_id);
-    todo!(
-        "STORY-034: implement usvg_normalize — \
-         parse raw SVG via usvg::Tree::from_str, re-serialize with \
-         usvg::TreeWriting::to_string, wrap in NormalizedDiagramSvg, \
-         and run post-normalization debug assertions (AC-002 through AC-006)."
-    )
+    // Font loading is gated on whether the raw SVG contains `<text` elements.
+    // For geometry-only SVGs (no text), we skip font loading entirely — this
+    // keeps the warm + no-text path under 1ms (NFR-003/004). SVGs produced by
+    // mermaid-rs-renderer always contain `<text`, so the gate is rarely false
+    // in production; the exception is test fixtures and degenerate inputs.
+    //
+    // The font_db() call is O(1) after the first call (the database is loaded
+    // once and cached in `FONT_DB` via OnceLock). The first call may take
+    // 50–300ms on systems with large font collections; subsequent calls are
+    // nanoseconds (Arc::clone of the cached Arc<Database>).
+    let opt = if raw.as_str().contains("<text") {
+        usvg::Options {
+            fontdb: font_db(),
+            ..usvg::Options::default()
+        }
+    } else {
+        usvg::Options::default()
+    };
+
+    // Parse the raw SVG through usvg. On failure, map to E-EXP-004.
+    let tree = usvg::Tree::from_str(raw.as_str(), &opt).map_err(|e| {
+        DiagramError::SvgNormalizationFailed {
+            source_id: Arc::from(source_id),
+            cause: Arc::from(format!("usvg parse failed: {e}").as_str()),
+            span: SourceSpan::from(0..0),
+        }
+    })?;
+
+    // Re-serialize the parsed tree back to SVG. This produces a normalized
+    // form with all usvg guarantees applied (no foreignObject, no script,
+    // no @keyframes, absolute dimensions, <use> resolved).
+    //
+    // `preserve_text: true` keeps <text> elements as-is instead of converting
+    // them to outlined paths. This is required for:
+    // 1. PPTX accessibility — text in <text> elements remains selectable/searchable.
+    // 2. Test assertions — node labels like "Client", "Alice" must remain in the SVG.
+    // 3. Smaller output — text-to-path expansion bloats file size significantly.
+    let write_opts = usvg::WriteOptions {
+        preserve_text: true,
+        ..usvg::WriteOptions::default()
+    };
+    let normalized_str = tree.to_string(&write_opts);
+
+    // Debug-only post-normalization assertions (AC-002 through AC-006).
+    // In release builds this compiles to nothing.
+    debug_assert_post_normalization(&normalized_str);
+
+    // Re-inject accessibility attributes and viewBox that usvg strips.
+    //
+    // usvg does not preserve non-SVG-standard attributes (aria-label, role)
+    // or <title> elements, and it emits absolute width/height without viewBox.
+    // These are required by BC-1.12.001 postcondition 7 (accessibility) and
+    // by downstream consumers that expect viewBox for layout computation.
+    //
+    // source_id is the alt_text passed through from render_diagram().
+    let enriched = reinject_accessibility_and_viewbox(&normalized_str, source_id).map_err(|e| {
+        DiagramError::SvgNormalizationFailed {
+            source_id: Arc::from(source_id),
+            cause: Arc::from(format!("post-normalization enrichment failed: {e}").as_str()),
+            span: SourceSpan::from(0..0),
+        }
+    })?;
+
+    Ok(NormalizedDiagramSvg(Arc::from(enriched.as_str())))
 }
 
 /// Run post-normalization debug assertions (AC-002 through AC-006).
@@ -114,15 +192,193 @@ pub fn usvg_normalize(
 /// | AC-004 | `@keyframes` (case-insensitive) |
 /// | AC-005 | `width="...%"` or `height="...%"` (percentage dimensions) |
 /// | AC-006 | `<use` (case-insensitive) |
-#[allow(dead_code)] // Called from usvg_normalize in debug builds once implemented.
-fn debug_assert_post_normalization(_normalized_svg: &str) {
-    todo!(
-        "STORY-034: implement debug_assert_post_normalization — \
-         check that normalized_svg does not contain <foreignObject>, \
-         <script>, @keyframes, percentage width/height, or <use> elements. \
-         Each violation is a debug_assert!(false, ...) panic. \
-         This function is only called in debug builds."
-    )
+fn debug_assert_post_normalization(normalized_svg: &str) {
+    let lower = normalized_svg.to_ascii_lowercase();
+
+    debug_assert!(
+        !lower.contains("<foreignobject"),
+        "usvg normalization regression: output contains <foreignObject> (AC-002). \
+         usvg 0.47.0 must always remove <foreignObject>. This is a bug in usvg or this function."
+    );
+
+    debug_assert!(
+        !lower.contains("<script"),
+        "usvg normalization regression: output contains <script> (AC-003). \
+         usvg 0.47.0 must always remove <script>. This is a bug in usvg or this function."
+    );
+
+    debug_assert!(
+        !lower.contains("@keyframes"),
+        "usvg normalization regression: output contains @keyframes (AC-004). \
+         usvg 0.47.0 must always strip CSS @keyframes. This is a bug in usvg or this function."
+    );
+
+    debug_assert!(
+        !contains_percentage_dimension_impl(normalized_svg),
+        "usvg normalization regression: output contains percentage width or height (AC-005). \
+         usvg 0.47.0 must resolve percentage dimensions to absolute pixels. \
+         This is a bug in usvg or this function."
+    );
+
+    debug_assert!(
+        !lower.contains("<use"),
+        "usvg normalization regression: output contains <use> elements (AC-006). \
+         usvg 0.47.0 must inline all <use href=\"#symbol\"> references. \
+         This is a bug in usvg or this function."
+    );
+}
+
+/// Returns `true` if the SVG string contains `width="...%"` or `height="...%"`.
+///
+/// Used by [`debug_assert_post_normalization`] and the test helper. Scans the
+/// full string for percentage-valued `width` or `height` attributes.
+fn contains_percentage_dimension_impl(svg: &str) -> bool {
+    let check = |attr: &str| -> bool {
+        let mut search = svg;
+        while let Some(pos) = search.find(attr) {
+            let after = &search[pos + attr.len()..];
+            // Skip optional whitespace
+            let value_start = after.trim_start_matches([' ', '\t']);
+            // Skip opening quote
+            let value = value_start
+                .strip_prefix('"')
+                .or_else(|| value_start.strip_prefix('\''))
+                .unwrap_or(value_start);
+            // Check if the value ends with %
+            let value_end = value.find(['"', '\'']).unwrap_or(value.len());
+            let attr_value = &value[..value_end];
+            if attr_value.trim_end().ends_with('%') {
+                return true;
+            }
+            search = &search[pos + 1..];
+        }
+        false
+    };
+    check("width=") || check("height=")
+}
+
+/// Re-inject accessibility attributes and a synthesized `viewBox` into a
+/// usvg-normalized SVG string.
+///
+/// usvg 0.47.0 strips `aria-label`, `role`, `<title>`, and `viewBox` during
+/// normalization because these are not part of its internal tree model. This
+/// function re-adds them so that the [`NormalizedDiagramSvg`] satisfies both
+/// BC-1.12.003 (PPTX-safe normalization) and BC-1.12.001 postcondition 7
+/// (WCAG AA accessibility).
+///
+/// ## Steps
+///
+/// 1. Parse out `width` and `height` values from the root `<svg>` opening tag.
+/// 2. Inject `viewBox="0 0 {width} {height}"` before the closing `>` of the tag.
+/// 3. Inject `aria-label="{alt_text}"` and `role="img"` attributes.
+/// 4. Insert `<title>{alt_text}</title>` as the first child of `<svg>`.
+///
+/// # Errors
+///
+/// Returns an error string if the SVG string does not contain a root `<svg` tag.
+fn reinject_accessibility_and_viewbox(
+    normalized_svg: &str,
+    alt_text: &str,
+) -> Result<String, &'static str> {
+    // Locate the root <svg opening tag.
+    let svg_start = normalized_svg
+        .find("<svg")
+        .ok_or("no <svg> root element in usvg-normalized output")?;
+
+    // Find the closing > of the opening <svg ... > tag.
+    // We look for > after svg_start. usvg emits well-formed SVG so this > is
+    // always present and belongs to the opening tag (not a child element).
+    let tag_relative_close = normalized_svg[svg_start..]
+        .find('>')
+        .ok_or("root <svg> tag is not properly closed in usvg-normalized output")?;
+    let tag_close = svg_start + tag_relative_close; // index of '>'
+
+    // Extract the opening tag to check if attributes are already present
+    // (idempotency guard — should never happen with usvg output, but defensive).
+    let opening_tag = &normalized_svg[svg_start..=tag_close];
+
+    // Parse `width` and `height` values from the opening tag for viewBox synthesis.
+    // usvg emits e.g. `width="100" height="200"`.
+    let width_str = extract_attr_value(opening_tag, "width").unwrap_or("0");
+    let height_str = extract_attr_value(opening_tag, "height").unwrap_or("0");
+
+    // Escape alt_text for XML attribute and text content.
+    let escaped_attr = xml_attr_escape(alt_text);
+    let escaped_text = xml_text_escape(alt_text);
+
+    // Build the injected additions (viewBox + aria + role, and <title> child).
+    // Use write! to avoid intermediate allocations (clippy::format_push_string).
+    let mut extra_attrs = String::new();
+
+    // Inject viewBox only if not already present.
+    if !opening_tag.contains("viewBox") {
+        let _ = write!(extra_attrs, r#" viewBox="0 0 {width_str} {height_str}""#);
+    }
+
+    // Inject accessibility attributes only if not already present.
+    if !opening_tag.contains("aria-label=") {
+        let _ = write!(extra_attrs, r#" aria-label="{escaped_attr}" role="img""#);
+    }
+
+    // Build the <title> child element.
+    let title_element = format!("<title>{escaped_text}</title>");
+
+    // Reconstruct the SVG:
+    //   [before tag_close][extra_attrs]>[title_element][rest]
+    let before_close = &normalized_svg[..tag_close];
+    let from_close = &normalized_svg[tag_close + 1..]; // skip the '>'
+
+    Ok(format!(
+        "{before_close}{extra_attrs}>{title_element}{from_close}"
+    ))
+}
+
+/// Escape a string for use in an XML attribute value (double-quote delimited).
+fn xml_attr_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 8);
+    for ch in s.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
+/// Escape a string for use as XML text content.
+fn xml_text_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 8);
+    for ch in s.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
+/// Extract the value of an attribute from an SVG opening tag string.
+///
+/// Handles both double-quoted and single-quoted attribute values.
+/// Returns `None` if the attribute is not found.
+fn extract_attr_value<'a>(tag: &'a str, attr_name: &str) -> Option<&'a str> {
+    // Look for: attr_name="..." or attr_name='...'
+    let needle = format!("{attr_name}=");
+    let pos = tag.find(needle.as_str())?;
+    let after = &tag[pos + needle.len()..];
+    // Determine quote character
+    let quote = after.chars().next()?;
+    if quote != '"' && quote != '\'' {
+        return None;
+    }
+    let value_start = &after[1..]; // skip opening quote
+    let end = value_start.find(quote)?;
+    Some(&value_start[..end])
 }
 
 #[cfg(test)]
@@ -202,12 +458,19 @@ mod tests {
 
     #[test]
     fn test_bc_1_12_003_usvg_normalize_stub_is_callable() {
+        // Now that the function is implemented (STORY-034 green gate), this test
+        // verifies the public API is callable and returns a structured result
+        // (not a panic). `<svg/>` has no width/height/viewBox so usvg returns
+        // InvalidSize — we get Err, not a panic.
         let raw = RawDiagramSvg("<svg/>".to_owned());
         let result = std::panic::catch_unwind(|| usvg_normalize(&raw, "test-diagram"));
         assert!(
-            result.is_err(),
-            "stub must panic with todo!() — Red Gate not satisfied"
+            result.is_ok(),
+            "usvg_normalize must not panic — must return Ok(Result<...>), not unwind"
         );
+        // The inner result may be Ok or Err depending on usvg's handling of <svg/>.
+        // Either way, no panic means the function is correctly wired.
+        let _ = result.unwrap();
     }
 
     // -----------------------------------------------------------------------
@@ -222,10 +485,7 @@ mod tests {
         let raw = RawDiagramSvg(test_fixtures::simple_rect_svg().to_owned());
         let result = usvg_normalize(&raw, "simple-rect");
         let normalized = result.expect("usvg_normalize must return Ok for a minimal valid SVG");
-        assert!(
-            !normalized.is_empty(),
-            "normalized SVG must not be empty"
-        );
+        assert!(!normalized.is_empty(), "normalized SVG must not be empty");
         assert!(
             normalized.as_str().contains("<svg"),
             "normalized SVG must contain the <svg root element; got: {}",
@@ -265,9 +525,7 @@ mod tests {
                 );
             },
             other => {
-                panic!(
-                    "expected SvgNormalizationFailed, got: {other:?}"
-                );
+                panic!("expected SvgNormalizationFailed, got: {other:?}");
             },
         }
     }
@@ -390,8 +648,7 @@ mod tests {
     #[test]
     fn test_bc_1_12_003_normalize_preserves_viewbox() {
         let raw = RawDiagramSvg(test_fixtures::simple_rect_svg().to_owned());
-        let normalized =
-            usvg_normalize(&raw, "viewbox-check").expect("simple SVG must normalize");
+        let normalized = usvg_normalize(&raw, "viewbox-check").expect("simple SVG must normalize");
         let s = normalized.as_str();
         let has_viewbox = s.contains("viewBox") || s.contains("viewbox");
         let has_width = s.contains("width");
@@ -531,36 +788,8 @@ mod tests {
     // -----------------------------------------------------------------------
 
     /// Returns `true` if the SVG string contains `width="...%"` or
-    /// `height="...%"` anywhere (a proxy for the root element having
-    /// percentage dimensions). Used by `test_bc_1_12_003_normalize_resolves_percentage_dimensions`.
-    ///
-    /// The check is conservative: it scans the entire string rather than
-    /// only the root element, which is safe because usvg-emitted SVGs do
-    /// not use percentage dimensions on inner elements.
+    /// `height="...%"` anywhere. Delegates to the module-level implementation.
     fn contains_percentage_dimension(svg: &str) -> bool {
-        // Match patterns like: width="100%", width='50%', height="100%"
-        let check = |attr: &str| -> bool {
-            let mut search = svg;
-            let needle = attr;
-            while let Some(pos) = search.find(needle) {
-                let after = &search[pos + needle.len()..];
-                // Skip optional whitespace
-                let value_start = after.trim_start_matches([' ', '\t']);
-                // Skip opening quote
-                let value = value_start
-                    .strip_prefix('"')
-                    .or_else(|| value_start.strip_prefix('\''))
-                    .unwrap_or(value_start);
-                // Check if the value ends with %
-                let value_end = value.find(['"', '\'']).unwrap_or(value.len());
-                let attr_value = &value[..value_end];
-                if attr_value.trim_end().ends_with('%') {
-                    return true;
-                }
-                search = &search[pos + 1..];
-            }
-            false
-        };
-        check("width=") || check("height=")
+        contains_percentage_dimension_impl(svg)
     }
 }
