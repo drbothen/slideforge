@@ -124,36 +124,51 @@ warn-only mode.
 
 Update Criterion benchmarks to measure the full pipeline: `render()` +
 `usvg_normalize()`. The combined time must still satisfy:
-- Cold (first call, includes font DB init): < 200ms total
+- Cold (first call, includes font DB init): < 200ms on Linux/macOS, < 500ms on Windows
+  (filesystem and AV overhead; CI Linux gate is the binding constraint)
 - Warm (subsequent calls, font DB cached): < 10ms total
 
 The usvg normalization step is expected to add < 1ms overhead (empirical from S14).
 If it exceeds 10% of the warm budget (1ms), flag for architect review.
 
+**< 1ms normalization overhead assertion:** A micro-benchmark enforcing the < 1ms
+normalization-only bound is deferred to STORY-037 (PPTX exporter), which will add
+a Criterion benchmark isolating `usvg_normalize()` without the render step. The
+current benchmarks measure the combined render+normalize pipeline, which is the
+binding CI gate. Tracking: see `cold_render.rs` and `warm_render.rs` bench comments.
+
 ### AC-009: NormalizedDiagramSvg stored in LaidOutDeck
 (traces to BC-1.12.003 invariant 2 — normalization before format embedding)
 
 `LaidOutSlide` stores `NormalizedDiagramSvg`, not `RawDiagramSvg`. The type change
-ensures all exporters work with normalized SVG. `NormalizedDiagramSvg(String)` is a
+ensures all exporters work with normalized SVG. `NormalizedDiagramSvg(Arc<str>)` is a
 distinct newtype from `RawDiagramSvg(String)` so that the type system prevents
-skipping normalization.
+skipping normalization. The `Arc<str>` inner type enables cheap cloning and satisfies
+`Hash + Eq + Clone` for comemo compatibility (see Two-IR Model in CLAUDE.md).
 
-## Tasks
+## Tasks (completed — reflects realized implementation)
 
-- [ ] Implement `usvg_normalize(raw: RawDiagramSvg) -> Result<NormalizedDiagramSvg, DiagramError>` in `src/normalize.rs`
-- [ ] Define `NormalizedDiagramSvg(String)` newtype in `src/types.rs`
-- [ ] Add `DiagramError::SvgNormalizationFailed { slide_title: Arc<str> }` variant
-- [ ] Add post-normalization assertions: no `foreignObject`, no `script`, no `<use`, no `%` dimensions
-- [ ] Update `DiagramRendererImpl::render()` to call `usvg_normalize` after `mermaid_rs_renderer::render()` succeeds
-- [ ] Update `LaidOutSlide` `FrameContent::DiagramSvg(...)` to use `NormalizedDiagramSvg`
-- [ ] Update Criterion benchmarks to measure full render + normalize pipeline
-- [ ] Write unit tests:
+- [x] Implement `usvg_normalize(raw: &RawDiagramSvg, slide_title: &str) -> Result<NormalizedDiagramSvg, DiagramError>` in `src/normalize.rs`
+  - Signature takes `&RawDiagramSvg` (borrow, not consume) + `slide_title: &str` for error context
+- [x] Define `NormalizedDiagramSvg(Arc<str>)` newtype in `crates/slideforge-types/src/specs.rs`
+  - Uses `Arc<str>` (not `String`) for cheap cloning and `Hash + Eq + Clone` (comemo compatibility)
+  - Constructor: `from_normalized_string(Arc<str>) -> Self`
+  - Helpers: `as_str()`, `is_empty()`, `empty_placeholder()`, `is_placeholder()`
+  - Contract constant: `PLACEHOLDER_DOC: &'static str`
+- [x] Add `DiagramError::SvgNormalizationFailed { slide_title: Arc<str>, cause: Arc<str>, span: SourceSpan }` variant
+- [x] Add post-normalization assertions: no `foreignObject`, no `script`, no `<use`, no `%` dimensions
+- [x] Update `DiagramRendererImpl::render_diagram()` to call `usvg_normalize` after render succeeds
+  - Public entry point is `render_diagram(source: &str, lang: DiagramLang, slide_title: &str)`
+- [x] `NormalizedDiagramSvg` stored in `FrameContent::Diagram(NormalizedDiagramSvg)` in `slideforge-layout`
+- [x] Update Criterion benchmarks to measure full render + normalize pipeline
+- [x] Write unit tests:
   - SVG with `<foreignObject>` → after normalization, no foreignObject
   - SVG with `width="100%"` → after normalization, width is absolute px
   - SVG with `<use href="#symbol">` → after normalization, no `<use>` elements
   - Malformed SVG → `DiagramError::SvgNormalizationFailed`
   - post-normalization assertion triggers (debug-only panic test)
-- [ ] Write `insta` snapshot test: flowchart SVG before vs after normalization
+- [x] Write `insta` snapshot test: flowchart SVG before vs after normalization
+- [x] Add `is_placeholder()` helper and `PLACEHOLDER_DOC` contract constant (F-MED-001)
 
 ## Previous Story Intelligence
 
