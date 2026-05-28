@@ -437,22 +437,31 @@ fn place_node(
         },
 
         MathNode::Align(rows) => {
+            // Snapshot the start x so every row begins at the same left column
+            // (F-S030-P7-M1: without the snapshot, row N starts at end of row N-1).
+            let start_x = *x;
             let mut row_y = baseline_y;
+            let mut max_row_end = *x;
             for row in rows {
-                let mut row_x = *x;
+                let mut row_x = start_x; // reset each row to the same left edge
                 for n in row {
                     place_node(n, paths, &mut row_x, row_y)?;
                 }
-                *x = (*x).max(row_x);
+                max_row_end = max_row_end.max(row_x);
                 row_y += GLYPH_H + 4;
             }
+            *x = max_row_end;
         },
 
         MathNode::Cases(cases) => {
+            // Snapshot the start x so every row begins at the same left column
+            // (F-S030-P7-M1: without the snapshot, row N starts at end of row N-1).
+            let start_x = *x;
             let mut row_y = baseline_y;
+            let mut max_row_end = *x;
             // Each tuple is (result-nodes, condition-nodes) — result renders first (left column).
             for (result, condition) in cases {
-                let mut row_x = *x;
+                let mut row_x = start_x; // reset each row to the same left edge
                 for n in result {
                     place_node(n, paths, &mut row_x, row_y)?;
                 }
@@ -460,9 +469,10 @@ fn place_node(
                 for n in condition {
                     place_node(n, paths, &mut row_x, row_y)?;
                 }
-                *x = (*x).max(row_x);
+                max_row_end = max_row_end.max(row_x);
                 row_y += GLYPH_H + 4;
             }
+            *x = max_row_end;
         },
 
         MathNode::Space => {
@@ -1820,5 +1830,122 @@ mod tests {
             Err(MathError::EmptyAst) => {}, // correct
             other => panic!("expected MathError::EmptyAst for empty AST, got: {other:?}"),
         }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // F-S030-P7-M1 — Cases/Align row alignment regression tests
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Helper: extract the x coordinate from the first `M` command in a `d="..."` attribute.
+    ///
+    /// Parses `<path d="Mx,y ..."` and returns `x` as `i64`.  Returns `None`
+    /// if the attribute is absent or the coordinate cannot be parsed.
+    fn first_path_x(svg: &str) -> Option<i64> {
+        // Find the first `<path ` element and extract its `d` attribute.
+        let path_start = svg.find("<path ")?;
+        let after_path = &svg[path_start..];
+        // Find `d="` within this element
+        let d_start = after_path.find(" d=\"")?;
+        let d_content = &after_path[d_start + 4..]; // skip ' d="'
+        // Find the closing quote
+        let d_end = d_content.find('"')?;
+        let d_attr = &d_content[..d_end];
+        // The first coordinate after `M` (or `m`)
+        let m_pos = d_attr.find(['M', 'm'])?;
+        let after_m = &d_attr[m_pos + 1..];
+        // x is up to the first `,`
+        let comma_pos = after_m.find(',')?;
+        let x_str = after_m[..comma_pos].trim();
+        x_str.parse::<i64>().ok()
+    }
+
+    /// Helper: extract the x coordinate from the Nth `<path ` element's first M command.
+    fn nth_path_x(svg: &str, n: usize) -> Option<i64> {
+        let mut remaining = svg;
+        let mut count = 0;
+        loop {
+            let pos = remaining.find("<path ")?;
+            if count == n {
+                return first_path_x(&remaining[pos..]);
+            }
+            remaining = &remaining[pos + 6..];
+            count += 1;
+        }
+    }
+
+    /// `MathNode::Cases` with two rows must start both rows at the same x
+    /// coordinate — row 1's first glyph must have the same x as row 0's first glyph.
+    ///
+    /// Without the F-S030-P7-M1 fix each row starts where the previous row ended,
+    /// producing a diagonal cascade instead of left-aligned columns.
+    #[test]
+    fn test_bc_1_10_003_pdf_cases_rows_aligned_at_same_x() {
+        // \begin{cases} x & y \\ -x & y \end{cases}
+        // Row 0: result=[x], condition=[y]
+        // Row 1: result=[-x], condition=[y]  (longer result — without fix, row 1 starts further right)
+        let ast = inline_ast(vec![MathNode::Cases(vec![
+            (
+                vec![MathNode::Text(Arc::from("x"))],
+                vec![MathNode::Text(Arc::from("y"))],
+            ),
+            (
+                vec![MathNode::Text(Arc::from("-x"))],
+                vec![MathNode::Text(Arc::from("y"))],
+            ),
+        ])]);
+        let result = render_pdf_paths(&ast).expect("render_pdf_paths must succeed for cases");
+        let svg = &result.svg;
+
+        // Row 0 first path x
+        let x_row0 = nth_path_x(svg, 0)
+            .unwrap_or_else(|| panic!("could not extract x from path 0 in:\n{svg}"));
+        // Row 1 first path x — 'x' row has 1 path, 'y' has 1 path; row 1 starts at path index 2
+        // (path 0 = 'x' result row0, path 1 = 'y' condition row0, path 2 = '-' result row1)
+        let x_row1 = nth_path_x(svg, 2)
+            .unwrap_or_else(|| panic!("could not extract x from path 2 in:\n{svg}"));
+
+        assert_eq!(
+            x_row0, x_row1,
+            "Cases: row 0 first glyph x ({x_row0}) must equal row 1 first glyph x ({x_row1})\n\
+             Bug F-S030-P7-M1: without fix, row N starts at end-x of row N-1.\nSVG: {svg}"
+        );
+    }
+
+    /// `MathNode::Align` with two rows must start both rows at the same x coordinate.
+    ///
+    /// Mirrors the Cases regression test — same root cause, different node variant.
+    #[test]
+    fn test_bc_1_10_003_pdf_align_rows_aligned_at_same_x() {
+        // \begin{align} x &= 1 \\ xy &= 2 \end{align}
+        // Row 0: [x, =, 1]
+        // Row 1: [x, y, =, 2]  (longer row — without fix, row 1 starts further right)
+        let ast = inline_ast(vec![MathNode::Align(vec![
+            vec![
+                MathNode::Text(Arc::from("x")),
+                MathNode::Text(Arc::from("=")),
+                MathNode::Text(Arc::from("1")),
+            ],
+            vec![
+                MathNode::Text(Arc::from("x")),
+                MathNode::Text(Arc::from("y")),
+                MathNode::Text(Arc::from("=")),
+                MathNode::Text(Arc::from("2")),
+            ],
+        ])]);
+        let result = render_pdf_paths(&ast).expect("render_pdf_paths must succeed for align");
+        let svg = &result.svg;
+
+        // Row 0 first path x (path 0 = 'x')
+        let x_row0 = nth_path_x(svg, 0)
+            .unwrap_or_else(|| panic!("could not extract x from path 0 in:\n{svg}"));
+        // Row 1 first path x — row 0 has 3 glyphs so row 1 starts at path index 3
+        let x_row1 = nth_path_x(svg, 3)
+            .unwrap_or_else(|| panic!("could not extract x from path 3 in:\n{svg}"));
+
+        assert_eq!(
+            x_row0, x_row1,
+            "Align: row 0 first glyph x ({x_row0}) must equal row 1 first glyph x ({x_row1})\n\
+             Bug F-S030-P7-M1: without fix, row N starts at end-x of row N-1.\nSVG: {svg}"
+        );
     }
 }
