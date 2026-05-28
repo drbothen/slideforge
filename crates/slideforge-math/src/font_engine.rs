@@ -129,37 +129,6 @@ pub struct GlyphEngine {
 }
 
 impl GlyphEngine {
-    /// Return the process-lifetime cached [`GlyphEngine`] instance.
-    ///
-    /// This is an alias for the module-level [`engine()`] function. The engine
-    /// is constructed at most once per process — `FontRef::try_from_slice` is
-    /// called exactly once regardless of how many times this method is called
-    /// (F-S030-P11-C1).
-    ///
-    /// # Panics
-    ///
-    /// Panics only if the embedded font bytes are corrupt (build-time invariant
-    /// violation — cannot happen in a correct build).
-    #[must_use]
-    pub fn cached() -> &'static Self {
-        engine()
-    }
-
-    /// Construct a new [`GlyphEngine`] from the embedded Latin Modern Math font.
-    ///
-    /// Prefer [`engine()`] / [`GlyphEngine::cached()`] which avoids reparsing
-    /// the OTF on every call. This constructor is retained for test isolation
-    /// where a fresh instance is explicitly required.
-    ///
-    /// # Panics
-    ///
-    /// Panics only if the embedded font bytes are corrupt (build-time invariant
-    /// violation — cannot happen in a correct build).
-    #[must_use]
-    pub fn new() -> &'static Self {
-        engine()
-    }
-
     /// Emit a real glyph outline for `ch` as one or more SVG `<path>` elements.
     ///
     /// The glyph is scaled to fit inside the cell `(x, y, w, h)` where `(x, y)`
@@ -380,14 +349,14 @@ mod tests {
 
     #[test]
     fn test_font_engine_constructs_successfully() {
-        let engine = GlyphEngine::new();
+        let engine = engine();
         // The engine must have a valid EM size (Latin Modern Math uses 1000 units/EM).
         assert!(engine.units_per_em > 0.0, "units_per_em must be positive");
     }
 
     #[test]
     fn test_font_engine_emit_latin_glyph_produces_path() {
-        let engine = GlyphEngine::new();
+        let engine = engine();
         let mut paths: Vec<String> = Vec::new();
         engine.emit_glyph('x', &mut paths, 0, 0, 10, 14).unwrap();
         assert!(
@@ -403,7 +372,7 @@ mod tests {
 
     #[test]
     fn test_font_engine_emit_greek_glyph_produces_path() {
-        let engine = GlyphEngine::new();
+        let engine = engine();
         let mut paths: Vec<String> = Vec::new();
         // γ (U+03B3 — Greek small letter gamma)
         engine
@@ -417,7 +386,7 @@ mod tests {
 
     #[test]
     fn test_font_engine_glyph_contains_bezier_curves() {
-        let engine = GlyphEngine::new();
+        let engine = engine();
         let mut paths: Vec<String> = Vec::new();
         engine.emit_glyph('E', &mut paths, 0, 0, 10, 14).unwrap();
         // A real font glyph outline for a capital letter should contain at least
@@ -432,7 +401,7 @@ mod tests {
 
     #[test]
     fn test_font_engine_gamma_distinct_from_latin_g() {
-        let engine = GlyphEngine::new();
+        let engine = engine();
         let mut gamma_paths: Vec<String> = Vec::new();
         let mut g_paths: Vec<String> = Vec::new();
         // γ (U+03B3) vs 'g' (U+0067)
@@ -448,7 +417,7 @@ mod tests {
 
     #[test]
     fn test_font_engine_advance_width_positive() {
-        let engine = GlyphEngine::new();
+        let engine = engine();
         let advance = engine.advance_width('x', 14, 10);
         assert!(
             advance > 0,
@@ -458,7 +427,7 @@ mod tests {
 
     #[test]
     fn test_font_engine_fallback_for_unknown_char() {
-        let engine = GlyphEngine::new();
+        let engine = engine();
         // U+0001 (SOH, C0 controls block) is guaranteed to map to .notdef in
         // any well-formed font — C0 controls are never assigned outlines. This
         // is more durable than a PUA code point (U+FFF0) which a math font
@@ -489,6 +458,11 @@ mod tests {
     #[test]
     fn test_font_engine_caching_no_reparse_under_loop() {
         use std::time::{Duration, Instant};
+        // Warm the OnceLock cache outside the timed window so the budget reflects
+        // only the per-call cost of accessing &'static GlyphEngine + emit_glyph.
+        // Without this, if this test runs first in the process, the cold OTF-parse
+        // (~50ms+) would be charged against the 50ms budget (F-S030-P12-L1).
+        let _warmup = engine();
         let start = Instant::now();
         for _ in 0..100 {
             let eng = engine();
