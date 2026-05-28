@@ -98,12 +98,23 @@ pub struct HttpDataSource {
 
 /// Maximum response body size accepted from an HTTP source.
 ///
-/// Responses larger than this are truncated and produce a [`DataSourceError::IoError`].
-/// This prevents unbounded memory consumption from large or malicious HTTP payloads.
-/// For data sets larger than 50 MB, use a file-based [`FileDataSource`] instead.
+/// Responses larger than this limit produce [`DataSourceError::IoError`] with error
+/// code `[E-DAT-002]`. This prevents unbounded memory consumption from large or
+/// malicious HTTP payloads. For data sets larger than 50 MB, use a file-based
+/// [`FileDataSource`] instead.
+///
+/// The detection strategy reads `MAX_BODY_BYTES + 1` bytes: if the reader yields more
+/// than `MAX_BODY_BYTES` bytes, the cap has been exceeded and the error is returned
+/// before the body is decoded or parsed. This guarantees the cap-exceeded condition
+/// is an observable, explicit error — never a silent truncation.
 ///
 /// [`FileDataSource`]: crate::file::FileDataSource
+#[cfg(not(test))]
 const MAX_BODY_BYTES: u64 = 50 * 1024 * 1024; // 50 MB
+
+/// Test override: 1 KB cap so tests run in microseconds, not seconds.
+#[cfg(test)]
+const MAX_BODY_BYTES: u64 = 1024; // 1 KB for tests only
 
 impl HttpDataSource {
     /// Construct a new [`HttpDataSource`] for the given URL.
@@ -296,18 +307,32 @@ impl DataSource for HttpDataSource {
             .trim()
             .to_lowercase();
 
-        // Read body with a hard size cap (MAX_BODY_BYTES = 50 MB) to prevent unbounded
-        // memory consumption from large or malicious HTTP payloads. See module-level
-        // constant for the rationale and the v1 limitation note.
-        let mut body = String::new();
+        // Read body with a hard size cap to prevent unbounded memory consumption from
+        // large or malicious HTTP payloads. We read MAX_BODY_BYTES + 1 bytes so that
+        // we can detect cap-exceeded: if the reader yields more than MAX_BODY_BYTES
+        // bytes, we return an explicit IoError rather than silently truncating.
+        let mut raw_buf = Vec::new();
         response
             .into_reader()
-            .take(MAX_BODY_BYTES)
-            .read_to_string(&mut body)
+            .take(MAX_BODY_BYTES + 1)
+            .read_to_end(&mut raw_buf)
             .map_err(|e| DataSourceError::IoError {
                 uri: url_str.to_owned(),
-                message: e.to_string(),
+                message: format!("[{E_DAT_002}] read error: {e}"),
             })?;
+        if raw_buf.len() as u64 > MAX_BODY_BYTES {
+            return Err(DataSourceError::IoError {
+                uri: url_str.to_owned(),
+                message: format!(
+                    "[{E_DAT_002}] response body exceeds {MAX_BODY_BYTES}-byte cap — \
+                    use a file-based DataSource for payloads larger than {MAX_BODY_BYTES} bytes"
+                ),
+            });
+        }
+        let body = String::from_utf8(raw_buf).map_err(|e| DataSourceError::IoError {
+            uri: url_str.to_owned(),
+            message: format!("[{E_DAT_002}] response body is not valid UTF-8: {e}"),
+        })?;
 
         // If format_hint is set, it always overrides content-type detection.
         let format = if let Some(hint) = self.format_hint {
@@ -626,14 +651,14 @@ mod tests {
         (addr, handle)
     }
 
-    /// Spawn a mock server that accepts up to `max_connections` connections and
-    /// counts each one via `counter`.
+    /// Spawn a TCP listener that accepts up to `max_connections` connections and
+    /// increments the provided `counter` for each. The listener polls in
+    /// non-blocking mode and exits after a **500 ms** hard timeout to allow tests
+    /// to assert "exactly N connections were attempted" without hanging.
     ///
-    /// The server uses a channel-based done signal to avoid the 200ms race window:
-    /// it polls until `done_rx` signals or a generous 5-second hard timeout elapses.
-    /// After the test sends on `done_tx`, the server stops accepting new connections.
-    ///
-    /// Returns `(addr, join_handle, done_tx)`.
+    /// Returns `(addr, join_handle)`. Call `join_handle.join().expect("listener thread
+    /// panicked")` after the SSRF check finishes; the listener exits on its own
+    /// deadline.
     fn spawn_counting_server(
         max_connections: usize,
         counter: Arc<AtomicUsize>,
@@ -644,9 +669,9 @@ mod tests {
         listener.set_nonblocking(true).expect("set_nonblocking");
         let handle = thread::spawn(move || {
             let mut accepted = 0;
-            // Hard 5-second timeout prevents the thread from hanging forever,
-            // while eliminating the 200ms race window of the previous design.
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            // 500 ms deadline — the synchronous load() call finishes in microseconds;
+            // we only need to confirm no late-arriving connection appears.
+            let deadline = std::time::Instant::now() + std::time::Duration::from_millis(500);
             while std::time::Instant::now() < deadline && accepted < max_connections.max(1) {
                 match listener.accept() {
                     Ok(_) => {
@@ -1752,6 +1777,75 @@ mod tests {
             counter_b.load(Ordering::SeqCst),
             0,
             "redirect target (server B, not in allowlist) must receive ZERO TCP connections"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // BC-1.03.002: body-size cap is enforced as an explicit error (F3 regression)
+    // -----------------------------------------------------------------------
+
+    /// `test_bc_1_03_002_body_size_cap_enforced`
+    ///
+    /// BC-1.03.002: A response body that exceeds `MAX_BODY_BYTES` must produce a
+    /// `DataSourceError::IoError` whose message contains "exceeds". The cap-exceeded
+    /// condition must never be silently truncated.
+    ///
+    /// This test uses the `#[cfg(test)]` override that sets `MAX_BODY_BYTES = 1024`,
+    /// so the mock server only needs to write 1025 bytes to trigger the cap — keeping
+    /// the test in millisecond range.
+    ///
+    /// Traces to BC-1.03.002 NFR (body size cap) + F3 regression coverage.
+    #[test]
+    fn test_bc_1_03_002_body_size_cap_enforced() {
+        use std::io::Write;
+
+        // Spawn a TCP server that sends MAX_BODY_BYTES + 1 bytes of valid UTF-8 JSON-ish
+        // data after valid HTTP headers. The +1 byte pushes the response over the cap.
+        let oversized_body: Vec<u8> = {
+            // Build a body of MAX_BODY_BYTES + 1 bytes of ASCII 'a' characters.
+            // This is valid UTF-8 and would parse fine if the cap weren't enforced.
+            // MAX_BODY_BYTES is 1024 in test mode so this is always in range for usize.
+            let n = usize::try_from(MAX_BODY_BYTES).expect("MAX_BODY_BYTES fits in usize") + 1;
+            std::iter::repeat_n(b'a', n).collect()
+        };
+        let oversized_body_len = oversized_body.len();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let handle = thread::spawn(move || {
+            let Ok((mut stream, _)) = listener.accept() else {
+                return;
+            };
+            let mut buf = [0u8; 4096];
+            let _ = stream.read(&mut buf);
+            // Write the HTTP response headers followed by the oversized body.
+            let headers = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {oversized_body_len}\r\nConnection: close\r\n\r\n",
+            );
+            let _ = stream.write_all(headers.as_bytes());
+            let _ = stream.write_all(&oversized_body);
+        });
+
+        let url = format!("http://127.0.0.1:{}/data.json", addr.port());
+        let src = HttpDataSource::new(url.as_str());
+        let opts = DataSourceOptions::default();
+        let result = src.load(&url, &opts);
+        handle.join().unwrap();
+
+        assert!(
+            result.is_err(),
+            "response body exceeding MAX_BODY_BYTES must produce an error, not succeed"
+        );
+        let err = result.unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("exceeds"),
+            "cap-exceeded error must contain 'exceeds'; got: {msg}"
+        );
+        assert!(
+            matches!(err, DataSourceError::IoError { .. }),
+            "cap-exceeded error must be IoError; got: {msg}"
         );
     }
 
