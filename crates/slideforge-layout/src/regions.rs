@@ -1,4 +1,4 @@
-//! Region maps for the 31 built-in slide types.
+//! Region maps for the 32 built-in slide types.
 //!
 //! A region map defines the canonical [`BoundingBox`] for each content frame
 //! within a slide type, computed relative to the default 16:9 widescreen page
@@ -41,9 +41,9 @@ use crate::types::{BoundingBox, Emu, Frame, FrameContent};
 /// A `Vec<Frame>` with `FrameContent::Empty` placeholders, ordered
 /// semantically (title before subtitle/body). The implementer will fill
 /// `FrameContent` variants with resolved content in `layout::run`.
-// This function is a data-driven region map for 31 built-in slide types.
+// This function is a data-driven region map for 32 built-in slide types.
 // Its length exceeds the clippy::too_many_lines limit by design — a match
-// over 31 named slide types is inherently long and is the correct structure
+// over 32 named slide types is inherently long and is the correct structure
 // for this data. Each arm is a named slide type with its canonical geometry.
 //
 // Several slide types share the standard two-region layout (title header +
@@ -95,13 +95,18 @@ pub fn region_frames_for(
         //
         // Slide types sharing this exact geometry:
         //   content, agenda, toc, team, executive_summary, problem_statement,
-        //   recommendation, risk_register, timeline, process_flow, matrix,
-        //   financials, kpi_dashboard, code_sample, survey_results, org_chart,
-        //   roadmap
+        //   recommendation, risk_register, severity_cards, timeline, process_flow,
+        //   matrix, financials, kpi_dashboard, code_sample, survey_results,
+        //   org_chart, roadmap
+        //
+        // severity_cards uses the same two-region geometry as risk_register: a
+        // title header and a full-width body region that lists the card entries.
+        // CRIT-001: must be registered here or layout::run returns
+        // LayoutError::UnknownSlideType before collect_risk_register is called.
         "content" | "agenda" | "toc" | "team" | "executive_summary" | "problem_statement"
-        | "recommendation" | "risk_register" | "timeline" | "process_flow" | "matrix"
-        | "financials" | "kpi_dashboard" | "code_sample" | "survey_results" | "org_chart"
-        | "roadmap" => vec![
+        | "recommendation" | "risk_register" | "severity_cards" | "timeline" | "process_flow"
+        | "matrix" | "financials" | "kpi_dashboard" | "code_sample" | "survey_results"
+        | "org_chart" | "roadmap" => vec![
             Frame {
                 bbox: bbox(457_200, 365_760, 8_229_600, 685_800),
                 content: FrameContent::Empty,
@@ -430,7 +435,7 @@ mod tests {
         );
     }
 
-    /// AC-014 — All 31 built-in slide types produce valid `BoundingBox`es.
+    /// AC-014 — All 32 built-in slide types produce valid `BoundingBox`es.
     #[test]
     fn test_bc_3_06_003_all_slide_types_valid_bounding_boxes() {
         let known_types = [
@@ -449,6 +454,7 @@ mod tests {
             "problem_statement",
             "recommendation",
             "risk_register",
+            "severity_cards",
             "timeline",
             "stat_callout",
             "comparison",
@@ -466,7 +472,7 @@ mod tests {
             "roadmap",
             "closing",
         ];
-        assert_eq!(known_types.len(), 31, "must cover all 31 built-in types");
+        assert_eq!(known_types.len(), 32, "must cover all 32 built-in types");
         for kw in known_types {
             assert_all_valid(kw);
         }
