@@ -118,7 +118,25 @@ impl BrandSynthesizer {
             }
         }
 
-        Self::synthesize(&config)
+        let (mut template, warnings) = Self::synthesize(&config)?;
+
+        // DEF-1 fix: resolve the deferred logo path relative to the brand.toml
+        // directory. `synthesize` stores the as-written relative path; here (in the
+        // effectful loader) we know the brand.toml directory and can produce the
+        // correct filesystem path for the PPTX exporter (STORY-037).
+        if let Some(crate::template::LogoAsset::Deferred {
+            path: ref mut logo_path,
+            ..
+        }) = template.logo
+        {
+            let brand_toml_dir = std::path::Path::new(path)
+                .parent()
+                .unwrap_or(std::path::Path::new("."));
+            let as_written = logo_path.clone();
+            *logo_path = brand_toml_dir.join(as_written);
+        }
+
+        Ok((template, warnings))
     }
 
     /// Synthesize a [`BrandTemplate`] from an already-parsed [`BrandConfig`].
@@ -199,8 +217,13 @@ impl BrandSynthesizer {
         // Step 10: Carry logo path as a deferred-load asset (F5 fix).
         // The bytes are NOT read here — synthesize() is a pure function with no I/O.
         // The PPTX exporter (STORY-037) reads the bytes when building the ZIP package.
+        //
+        // `path` is initialised to the as-written value here. `load_from_toml`
+        // replaces it with the resolved (brand.toml-relative) path after synthesis
+        // so that the PPTX exporter can open the file regardless of CWD (DEF-1 fix).
         let logo = config.logo.as_ref().map(|l| LogoAsset::Deferred {
-            path: Arc::from(l.path.as_str()),
+            path: std::path::PathBuf::from(l.path.as_str()),
+            original: Arc::from(l.path.as_str()),
         });
 
         let template = BrandTemplate {
@@ -889,6 +912,67 @@ body = "Calibri"
             logo.deferred_path(),
             Some("test-logo.png"),
             "F5: deferred path must match [logo].path from brand.toml"
+        );
+    }
+
+    /// DEF-1 — `load_from_toml` resolves the logo path relative to the brand.toml directory.
+    ///
+    /// After `load_from_toml`, `LogoAsset::Deferred.path` must be the resolved path
+    /// (i.e., `<brand.toml directory>/logo.png`), not the as-written relative string.
+    /// The as-written value is preserved in `original` (and returned by `deferred_path()`).
+    #[test]
+    fn test_def1_load_from_toml_resolves_logo_path_relative_to_brand_toml_dir() {
+        use std::io::Write as _;
+        let tmp_dir = tempfile::tempdir().expect("tempdir must be created");
+        let brand_toml_path = tmp_dir.path().join("brand.toml");
+        let logo_path = tmp_dir.path().join("logo.png");
+
+        std::fs::write(&logo_path, b"\x89PNG\r\n\x1a\n").expect("logo fixture write must succeed");
+
+        let mut tmp =
+            std::fs::File::create(&brand_toml_path).expect("brand.toml create must succeed");
+        writeln!(
+            tmp,
+            r##"
+[colors]
+dk1 = "#1F2937"
+lt1 = "#FFFFFF"
+acc1 = "#3B82F6"
+
+[logo]
+path = "logo.png"
+
+[fonts]
+heading = "Calibri"
+body = "Calibri"
+"##
+        )
+        .expect("write to brand.toml must succeed");
+
+        let path_str = brand_toml_path
+            .to_str()
+            .expect("brand.toml path must be valid UTF-8");
+        let (template, _) =
+            BrandSynthesizer::load_from_toml(path_str).expect("load_from_toml must succeed");
+
+        let logo = template
+            .logo
+            .expect("DEF-1: logo must be Some after load_from_toml");
+        // original (as-written) is preserved
+        assert_eq!(
+            logo.deferred_path(),
+            Some("logo.png"),
+            "DEF-1: original as-written path must be preserved in deferred_path()"
+        );
+        // resolved path must be relative to the brand.toml directory, not bare "logo.png"
+        let resolved = logo
+            .resolved_path()
+            .expect("DEF-1: resolved_path() must return Some for Deferred logo");
+        let expected_resolved = tmp_dir.path().join("logo.png");
+        assert_eq!(
+            resolved,
+            expected_resolved.as_path(),
+            "DEF-1: resolved path must be brand.toml-relative, got: {resolved:?}"
         );
     }
 

@@ -119,34 +119,45 @@ pub fn infer_missing_slots(
     // Build results array — validate and clone declared values.
     // Invalid hex values produce BrandError::InvalidHexColor and are treated as absent
     // (inference continues with the remaining slots).
+    // Track which slots had validation failures: a slot that was declared but invalid
+    // is "declared" in the BC-2.01.004 invariant sense — it must NOT also emit a
+    // MissingColorSlot warning (only one warning per slot, OBS-1 fix).
     let mut result: [Option<Arc<str>>; 12] = [
         None, None, None, None, None, None, None, None, None, None, None, None,
     ];
+    let mut had_validation_failure: [bool; 12] = [false; 12];
     for (i, v) in declared.iter().enumerate() {
         if let Some(hex) = v {
             match validate_hex(SLOT_NAMES[i], hex) {
                 Ok(validated) => result[i] = Some(validated),
-                Err(e) => warnings.push(e),
+                Err(e) => {
+                    warnings.push(e);
+                    had_validation_failure[i] = true;
+                },
             }
         }
     }
 
     // Helper: emit warning and set inferred value.
+    // Skips MissingColorSlot emission for slots that already received an
+    // InvalidHexColor warning (one warning per slot — BC-2.01.004 invariant 1).
     let infer = |result: &mut [Option<Arc<str>>; 12],
                  warnings: &mut Vec<BrandError>,
                  idx: usize,
                  value: &str,
                  derivation: &str| {
-        tracing::warn!(
-            "E-BRD-003: Color slot '{}' not declared in brand.toml. Using inferred value '{}'.",
-            SLOT_NAMES[idx],
-            value,
-        );
-        warnings.push(BrandError::MissingColorSlot {
-            slot_name: Arc::from(SLOT_NAMES[idx]),
-            inferred_hex: Arc::from(value),
-            derivation: Arc::from(derivation),
-        });
+        if !had_validation_failure[idx] {
+            tracing::warn!(
+                "E-BRD-003: Color slot '{}' not declared in brand.toml. Using inferred value '{}'.",
+                SLOT_NAMES[idx],
+                value,
+            );
+            warnings.push(BrandError::MissingColorSlot {
+                slot_name: Arc::from(SLOT_NAMES[idx]),
+                inferred_hex: Arc::from(value),
+                derivation: Arc::from(derivation),
+            });
+        }
         result[idx] = Some(Arc::from(value));
     };
 
@@ -978,5 +989,59 @@ mod tests {
             "F6: dk1 must not be #000000 (silent black fallback)"
         );
         assert_ne!(dk1, "red", "F6: dk1 must not be the invalid 'red' value");
+    }
+
+    /// OBS-1 / BC-2.01.004 invariant 1 — invalid hex slot produces exactly ONE warning.
+    ///
+    /// When a slot is declared but has an invalid value (e.g. `acc1 = "red"`), the
+    /// code must emit only the `InvalidHexColor` warning and suppress the subsequent
+    /// `MissingColorSlot` warning for the same slot. "Declared but invalid" counts as
+    /// "declared" for the invariant: one warning per slot, not two.
+    #[test]
+    fn test_obs1_invalid_hex_produces_exactly_one_warning_per_slot() {
+        // acc1 declared as invalid; all other optional slots absent.
+        // dk1 and lt1 are also absent (they will each produce a MissingColorSlot).
+        let declared: [Option<&str>; 12] = [
+            None,        // dk1 absent → MissingColorSlot (1 warning)
+            None,        // lt1 absent → MissingColorSlot (1 warning)
+            None,        // dk2 absent
+            None,        // lt2 absent
+            Some("red"), // acc1 INVALID → InvalidHexColor only (NOT also MissingColorSlot)
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ];
+        let mut warnings = Vec::new();
+        let _ = infer_missing_slots(declared, &mut warnings);
+
+        // Exactly one warning for the acc1 slot (InvalidHexColor), not two (InvalidHexColor + MissingColorSlot).
+        let invalid_hex_for_acc1 = warnings
+            .iter()
+            .filter(|w| {
+                matches!(w, crate::error::BrandError::InvalidHexColor { slot_name, .. }
+                    if slot_name.as_ref() == "acc1")
+            })
+            .count();
+        let missing_slot_for_acc1 = warnings
+            .iter()
+            .filter(|w| {
+                matches!(w, crate::error::BrandError::MissingColorSlot { slot_name, .. }
+                    if slot_name.as_ref() == "acc1")
+            })
+            .count();
+
+        assert_eq!(
+            invalid_hex_for_acc1, 1,
+            "OBS-1: exactly one InvalidHexColor warning for invalid acc1, got: {warnings:?}"
+        );
+        assert_eq!(
+            missing_slot_for_acc1, 0,
+            "OBS-1: MissingColorSlot must NOT be emitted for a slot that had InvalidHexColor \
+             (one warning per slot — BC-2.01.004 invariant 1), got: {warnings:?}"
+        );
     }
 }

@@ -157,9 +157,24 @@ pub enum LogoAsset {
     /// Produced by [`crate::synthesizer::BrandSynthesizer::synthesize`] when
     /// the `[logo]` section declares a path. The exporter reads the bytes from
     /// the filesystem when building the output ZIP package (STORY-037).
+    ///
+    /// `path` is the resolved (absolute or relative-to-cwd) path — suitable for
+    /// direct filesystem access. It is populated as the as-written path by
+    /// `synthesize` (pure) and resolved relative to the `brand.toml` directory
+    /// by `load_from_toml` (effectful) after synthesis.
+    ///
+    /// `original` is the as-written string from `brand.toml` `[logo].path` — used
+    /// for display, diagnostics, and the [`LogoAsset::deferred_path`] API.
     Deferred {
-        /// File system path to the logo image (from `brand.toml` `[logo].path`).
-        path: Arc<str>,
+        /// Resolved filesystem path to the logo image.
+        ///
+        /// Set to the as-written path by [`BrandSynthesizer::synthesize`]; resolved
+        /// to a path relative to the `brand.toml` directory by
+        /// [`BrandSynthesizer::load_from_toml`].
+        path: std::path::PathBuf,
+        /// The as-written path from `brand.toml` `[logo].path`, preserved for
+        /// display and diagnostics.
+        original: Arc<str>,
     },
 }
 
@@ -174,12 +189,30 @@ impl LogoAsset {
         }
     }
 
-    /// Returns the file path for a [`LogoAsset::Deferred`] asset, or `None`
-    /// if this is a [`LogoAsset::Loaded`] asset.
+    /// Returns the as-written path string for a [`LogoAsset::Deferred`] asset,
+    /// or `None` if this is a [`LogoAsset::Loaded`] asset.
+    ///
+    /// Returns the `original` field (as-written in `brand.toml`). For the resolved
+    /// filesystem path suitable for I/O, use [`LogoAsset::resolved_path`].
     #[must_use]
     pub fn deferred_path(&self) -> Option<&str> {
         match self {
-            Self::Deferred { path } => Some(path.as_ref()),
+            Self::Deferred { original, .. } => Some(original.as_ref()),
+            Self::Loaded { .. } => None,
+        }
+    }
+
+    /// Returns the resolved filesystem path for a [`LogoAsset::Deferred`] asset,
+    /// or `None` if this is a [`LogoAsset::Loaded`] asset.
+    ///
+    /// The path is resolved relative to the `brand.toml` directory by
+    /// [`BrandSynthesizer::load_from_toml`]. When created via
+    /// [`BrandSynthesizer::synthesize`] directly (pure path), this is the
+    /// as-written relative path.
+    #[must_use]
+    pub fn resolved_path(&self) -> Option<&std::path::Path> {
+        match self {
+            Self::Deferred { path, .. } => Some(path.as_path()),
             Self::Loaded { .. } => None,
         }
     }
@@ -447,10 +480,15 @@ mod tests {
     #[test]
     fn test_logo_asset_deferred_variant() {
         let logo = LogoAsset::Deferred {
-            path: Arc::from("brand.assets/logo.png"),
+            path: std::path::PathBuf::from("brand.assets/logo.png"),
+            original: Arc::from("brand.assets/logo.png"),
         };
         assert!(!logo.is_loaded());
         assert_eq!(logo.deferred_path(), Some("brand.assets/logo.png"));
+        assert_eq!(
+            logo.resolved_path(),
+            Some(std::path::Path::new("brand.assets/logo.png"))
+        );
         assert_eq!(logo.loaded_bytes(), None);
     }
 
