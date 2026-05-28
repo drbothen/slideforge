@@ -28,9 +28,9 @@ wave_1_completed: 2026-05-27
 wave_2_gate: "PASS 2026-05-27 — 11 gate passes, 19 findings fixed, 3/3 clean (passes 9-10-11)"
 wave_2_completed: 2026-05-27
 wave_3_batch_1_completed: 2026-05-28
-develop_sha: "0cb4b982"
-develop_pr_count: 30
-workspace_tests: 1670
+develop_sha: "19e79696"
+develop_pr_count: 31
+workspace_tests: 1672
 workspace_test_failures: 0
 ---
 
@@ -48,9 +48,9 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. It generates branded .p
 
 ## Current Status
 
-Phase 3 IN PROGRESS. Wave 1 COMPLETE (14/14 stories, gate PASSED). Wave 2 COMPLETE (7/7 stories, gate PASSED). Wave 3 Batch 1 COMPLETE (6 stories merged, PRs #21-#26). **Wave 3 Batch 2 IN PROGRESS (6/8 merged: STORY-019, 027, 032, 034 + 2 earlier from Batch 1's cross-listing). 2 stories in-flight (STORY-023, STORY-030), 2 not started.**
+Phase 3 IN PROGRESS. Wave 1 COMPLETE (14/14 stories, gate PASSED). Wave 2 COMPLETE (7/7 stories, gate PASSED). Wave 3 Batch 1 COMPLETE (6 stories merged, PRs #21-#26). **Wave 3 Batch 2 IN PROGRESS (7/8 merged: STORY-019, 027, 030, 032, 034 + 2 earlier). 1 in-flight (STORY-023, streak 2/3), 2 not started (STORY-020, STORY-028).**
 
-develop branch: `0cb4b982` (30 merged PRs, 1670 tests, 0 failures). 2 active worktrees (STORY-023, STORY-030). 0 open PRs.
+develop branch: `19e79696` (31 merged PRs, 1672 tests, 0 failures). 1 active worktree (STORY-023). 0 open PRs.
 
 ## Wave 3 Batch 2 Story Status
 
@@ -60,7 +60,7 @@ develop branch: `0cb4b982` (30 merged PRs, 1670 tests, 0 failures). 2 active wor
 | STORY-032 | Chart Empty Data Placeholder | MERGED | #28 | 5ad267be | 7-pass adversary, 3/3 clean |
 | STORY-027 | Layout: DOCX Section Generation | MERGED | #29 | 7641d4ea | 8-pass adversary, 3/3 clean |
 | STORY-023 | Brand Synthesis: brand.toml → 31 Layouts | IN PROGRESS | — | 800b11d8 | Streak 2/3 CLEAN (passes 9,10) |
-| STORY-030 | Math MathML + PDF Paths | IN PROGRESS | — | fedf1ec3 | Post-font-engine refactor; next: pass 10 |
+| STORY-030 | Math MathML + PDF Paths | MERGED | #31 | 19e79696 | 9 adversary iterations (Pass 9-17) incl. 2 paper-fix corrections (TD-VSDD-059): font-engine refactor (ab_glyph 0.2.31 + embedded LM Math 733KB OTF); paper-fix detection Pass 11 cache (OnceLock dead code); 3/3 CLEAN Pass 15/16/17 |
 | STORY-034 | SVG Normalization via usvg | MERGED | #30 | 0cb4b982 | 4 CI iterations (force-push rebase + usvg font_resolver fix for Linux Trebuchet MS substitution) |
 | STORY-020 | DataSource: Excel + SQLite | NOT STARTED | — | — | Depends on STORY-019 (merged) |
 | STORY-028 | Layout: shape: Block + Rich Inline | NOT STARTED | — | — | Depends on STORY-027 (merged) |
@@ -74,20 +74,11 @@ develop branch: `0cb4b982` (30 merged PRs, 1670 tests, 0 failures). 2 active wor
 - Key implementation: 31 OOXML layouts, 12 color slots with deterministic inference, brand.toml synthesis, ECMA-376-compliant XML serialization, dark layout defRPr defaults, hex validation, logo path resolution
 - **Next: Run Pass 11 adversary review. If CLEAN strict → push + demos + PR. If findings → fix burst → Pass 12.**
 
-### STORY-030 — Math MathML + PDF Paths (slideforge-math, 5pts M)
-- Worktree: `.worktrees/STORY-030/`  Branch: `feature/S-030`  SHA: `fedf1ec3`
-- Convergence: 9 passes done; Pass 9 had 2 HIGH findings now fixed:
-  - SvgPaths struct → newtype per spec AC-003
-  - Synthetic glyphs → real ab_glyph 0.2.31 with embedded Latin Modern Math font (733KB OTF, GFL/LPPL license)
-  - New `font_engine.rs` module replaces ~500-line synthetic glyph match
-- Tests 165/165 pass in slideforge-math; workspace 1599 pass
-- **Next: Run Pass 10 adversary review (post-font-engine). Continue 3-CLEAN convergence. After 3 CLEAN → per-AC demos + PR + merge.**
-
 ## What to Do After In-Flight Stories Complete
 
-**After STORY-023 + 030 merge:**
-- Start STORY-020 (DataSource: Excel + SQLite, depends on STORY-019)
-- Start STORY-028 (Layout: shape: Block + Rich Inline, depends on STORY-027)
+**After STORY-023 merge:**
+- Start STORY-020 (DataSource: Excel + SQLite, depends on STORY-019 — merged)
+- Start STORY-028 (Layout: shape: Block + Rich Inline, depends on STORY-027 — merged)
 - After Batch 2 fully merged: Batch 3 (STORY-021, 024, 025)
 
 **Key file references:**
@@ -128,7 +119,7 @@ git fetch origin develop && git pull origin develop
 | Planning (25 DSL decisions) | DONE 2026-05-24 | q1–q25 decision docs + 14 research threads + 7/7 spikes resolved |
 | Phase 1: Spec Crystallization | DONE — APPROVED 2026-05-25 | PRD (109 BCs, 15 HS, 4 supplements) + architecture (14 ADRs, 15 VPs, 20 crates) + UX spec (10 screens, 5 flows) + L2 domain spec (12 files). 17 passes, 69 findings, 3/3 clean. |
 | Phase 2: Story Decomposition | DONE — APPROVED 2026-05-25 | 71 stories, 21 epics, 6 waves, 437 pts. 22 passes, 96+ findings, 3/3 clean. |
-| Phase 3: TDD Implementation | IN PROGRESS — Wave 1: COMPLETE + GATE PASSED. Wave 2: COMPLETE + GATE PASSED. Wave 3: Batch 1 COMPLETE (6/17 stories, PRs #21-#26, 494 new tests). Batch 2: STORY-019 MERGED (PR #27, 7bc71f9c), STORY-032 MERGED (PR #28, 5ad267be), STORY-027 MERGED (PR #29, 7641d4ea), STORY-034 MERGED (PR #30, 0cb4b982). 2 in-flight (STORY-023 streak 2/3, STORY-030 post-font-engine pass 10 next). 2 not started (STORY-020, STORY-028). | Per-story delivery |
+| Phase 3: TDD Implementation | IN PROGRESS — Wave 1: COMPLETE + GATE PASSED. Wave 2: COMPLETE + GATE PASSED. Wave 3: Batch 1 COMPLETE (6/17 stories, PRs #21-#26, 494 new tests). Batch 2: 7/8 merged: STORY-019 (#27), STORY-027 (#29), STORY-030 (#31), STORY-032 (#28), STORY-034 (#30) + 2 Batch 1. 1 in-flight (STORY-023 streak 2/3). 2 not started (STORY-020, STORY-028). | Per-story delivery |
 | Phase 4: Holdout Evaluation | NOT STARTED | Per-wave holdout gates |
 | Phase 5: Adversarial Refinement | NOT STARTED | Post-implementation cascade |
 | Phase 6: Formal Hardening | NOT STARTED | Kani + fuzz + mutants + semgrep |
@@ -175,6 +166,7 @@ New crates added by Batch 1 (total workspace now 13 crates): slideforge-data, sl
 | STORY-032 | Chart Empty Data Placeholder | slideforge-charts | 146 | 7 passes (passes 5,6,7 CLEAN), 3/3 | #28 | 5ad267be |
 | STORY-027 | Layout: DOCX Section Generation | slideforge-layout | 48 | 8 passes, 3/3 clean | #29 | 7641d4ea |
 | STORY-034 | SVG Normalization via usvg | slideforge-diagrams | +71 | 9 passes, 3/3 clean (pre-merge adversary); 4 CI iterations post-3/3: rebase + clippy + cold_budget budget + Linux font fallback | #30 | 0cb4b982 |
+| STORY-030 | Math: MathML + PDF Paths | slideforge-math | +170 +2 traced_test (~172 net) | 9 iterations (Pass 9-17): font-engine refactor + Linux font_resolver insights from STORY-034 + 2 paper-fix corrections (TD-VSDD-059); 3/3 CLEAN Pass 15/16/17 | #31 | 19e79696 |
 
 ## Decisions Log (milestones)
 
@@ -210,21 +202,22 @@ New crates added by Batch 1 (total workspace now 13 crates): slideforge-data, sl
   - iter-3: fonts-liberation added to apt-get + diagnostic removed + cargo fmt — INSUFFICIENT (Liberation Sans Arial-compatible but not Trebuchet-compatible)
   - iter-4: ROOT CAUSE — Mermaid emits font-family="'trebuchet ms', verdana, arial, sans-serif"; usvg 0.47 lookup is case-sensitive byte-compare; doesn't implement CSS fallback chain. Fix: custom usvg::Options::font_resolver with fallback chain (Liberation Sans → DejaVu Sans → Noto Sans → FreeSans). + fonts-freefont-ttf for defense-in-depth. All 17 CI checks pass on c85e4a32.
 - 2026-05-28 — STORY-034 MERGED (PR #30 → squash → 0cb4b982). slideforge-diagrams now has post-rendering usvg normalization with PPTX-safe text preservation across all 4 platforms (macOS arm64, Linux x86_64, Linux arm64, Windows x86_64).
+- 2026-05-28 — STORY-030 (Math: MathML + PDF Paths) MERGED (PR #31 → squash → 19e79696). slideforge-math crate ships with: LaTeX → MathML for HTML output target; LaTeX → SvgPaths newtype (PDF/SVG vector glyphs via ab_glyph 0.2.31 + embedded Latin Modern Math 733KB OTF); GUST Font License v1.0 verbatim + MANIFEST.toml SHA-256 audit + LICENSE-LatinModernMath.txt; @{var} math-mode interpolation; tracing #[instrument] on MathRendererImpl::render, render_mathml, render_pdf_paths; 170 tests in slideforge-math + 2 traced_test load-bearing assertions. Convergence: 9 adversary iterations, 2 paper-fix corrections (TD-VSDD-059): Pass 10 SvgPaths newtype + ab_glyph integration; Pass 11 OnceLock cache was dead code (only used for units_per_em — font field still reparsed; corrected to true &'static GlyphEngine); 3/3 CLEAN Pass 15/16/17. PR #31 required 1 CI iteration (clippy missing_docs on DISPLAY_SCALE_DEN + broken intra-doc link slideforge_plugin_api → slideforge_math::MathAst, both 1-line fixes). Per-AC demo evidence in docs/demo-evidence/STORY-030/ (AC-001/002/003/004 .tape + .gif + .webm + evidence-report.md; AC-005 deferred to STORY-047).
 
 ## Session Resume Checkpoint
 
 | Field | Value |
 |-------|-------|
 | **Date** | 2026-05-28 |
-| **Position** | Phase 3, Wave 3 — Batch 2 IN PROGRESS (6/8 merged: STORY-019, 032, 027, 034 + 2 from Batch 1). 2 in-flight, 2 not-started. |
-| **develop SHA** | 0cb4b982 |
-| **Workspace tests** | 1670 passing, 0 failures |
+| **Position** | Phase 3, Wave 3 — Batch 2 IN PROGRESS (7/8 merged: STORY-019, 027, 030, 032, 034 + 2 from Batch 1). 1 in-flight, 2 not-started. |
+| **develop SHA** | 19e79696 |
+| **Workspace tests** | 1672 passing, 0 failures |
 | **Workspace crates** | 13 (7 from Wave 1 + 6 new from Batch 1: data, brand, layout, math, charts, diagrams) |
-| **Active worktrees** | `.worktrees/STORY-023` (feature/S-023, 800b11d8), `.worktrees/STORY-030` (feature/S-030, fedf1ec3) |
+| **Active worktrees** | `.worktrees/STORY-023` (feature/S-023, 800b11d8) |
 | **Open PRs** | 0 |
-| **In-flight stories** | STORY-023: streak 2/3 CLEAN, need 1 more pass. STORY-030: post-font-engine, next pass 10. |
+| **In-flight stories** | STORY-023: streak 2/3 CLEAN, need 1 more pass. |
 | **Not-started stories** | STORY-020 (Excel+SQLite, dep STORY-019 merged), STORY-028 (shape:, dep STORY-027 merged) |
-| **Highest priority next actions** | 1. STORY-023: run adversary pass 11 (streak 2/3 CLEAN, one more clean strict pass → push + per-AC demos + PR). 2. STORY-030: run adversary pass 10 (post-font-engine, fresh 3-CLEAN streak from 0/3). 3. After STORY-023 + STORY-030 merge: start STORY-020 (Excel + SQLite) + STORY-028 (shape: Block). |
+| **Highest priority next actions** | 1. STORY-023: adversary Pass 20 (streak 2/3 CLEAN; one more clean strict pass for 3/3 convergence) → push + per-AC demos + rebase + PR + merge. 2. After STORY-023 merge: start STORY-020 (Excel + SQLite DataSource, dep STORY-019 merged) + STORY-028 (shape: Block + Rich Inline, dep STORY-027 merged). 3. After Batch 2 fully merged: Batch 3 (STORY-021, 024, 025). |
 
 ## Quality Bar (Non-Negotiable)
 
