@@ -254,6 +254,41 @@ pub enum FrameContent {
     Shape,
     /// An empty placeholder (present in the layout but no content assigned).
     Empty,
+    /// An error-slide placeholder produced when a pipeline error occurs in
+    /// warn-only mode (e.g., empty chart data detected before rendering).
+    ///
+    /// This variant is produced instead of the normal chart/diagram content
+    /// when the pipeline encounters a recoverable error in
+    /// [`slideforge_validate::ValidationMode::WarnOnly`] mode. Exporters
+    /// (STORY-037 and later) render this as a light gray slide with the error
+    /// message overlaid as text.
+    ///
+    /// ## When produced
+    ///
+    /// Currently produced by the empty-data guard (STORY-032, BC-1.11.002
+    /// postcondition 3) when `Value::List([])` is detected before
+    /// `ChartRendererImpl::dispatch_and_process` is called.
+    ///
+    /// ## Exporter contract
+    ///
+    /// The `svg` field is a pre-rendered, PPTX-safe SVG string produced by
+    /// [`slideforge_charts::placeholder::build_error_slide_placeholder_svg`].
+    /// Exporters that do not support inline SVG fallback to rendering
+    /// `error_code` and `message` as plain text on a gray background.
+    ErrorSlidePlaceholder {
+        /// Pre-rendered error-slide SVG from
+        /// [`slideforge_charts::placeholder::build_error_slide_placeholder_svg`].
+        ///
+        /// Self-contained SVG; no external references. PPTX-safe (no `<script>`
+        /// or `<foreignObject>`).
+        svg: Arc<str>,
+        /// The title of the slide where the error occurred.
+        slide_title: Arc<str>,
+        /// The error taxonomy code (e.g., `"E-LAY-003"`).
+        error_code: Arc<str>,
+        /// Human-readable error message displayed on the placeholder slide.
+        message: Arc<str>,
+    },
 }
 
 /// Text-flow analysis result for a text frame.
@@ -536,6 +571,48 @@ mod tests {
         assert!(matches!(diagram, FrameContent::Diagram));
         assert!(matches!(shape, FrameContent::Shape));
         assert!(matches!(empty, FrameContent::Empty));
+    }
+
+    /// BC-1.11.002 AC-004 / STORY-032 — `FrameContent::ErrorSlidePlaceholder` variant exists
+    /// with `svg`, `slide_title`, `error_code`, and `message` fields.
+    ///
+    /// This test exercises the type in isolation — it does not depend on any
+    /// implementation in `slideforge-charts`.
+    #[test]
+    fn test_bc_1_11_002_error_slide_placeholder_variant_exists() {
+        use std::sync::Arc;
+
+        let placeholder = FrameContent::ErrorSlidePlaceholder {
+            svg: Arc::from("<svg/>"),
+            slide_title: Arc::from("Revenue Chart"),
+            error_code: Arc::from("E-LAY-003"),
+            message: Arc::from("Chart data is empty for slide 'Revenue Chart'"),
+        };
+        assert!(
+            matches!(placeholder, FrameContent::ErrorSlidePlaceholder { .. }),
+            "ErrorSlidePlaceholder variant must be pattern-matchable"
+        );
+    }
+
+    /// BC-1.11.002 AC-004 — `FrameContent::ErrorSlidePlaceholder` implements
+    /// `Clone + PartialEq + Eq + Hash` (comemo AC-010 requirement).
+    #[test]
+    fn test_bc_1_11_002_error_slide_placeholder_implements_hash_eq_clone() {
+        use std::collections::HashSet;
+        use std::sync::Arc;
+
+        let p1 = FrameContent::ErrorSlidePlaceholder {
+            svg: Arc::from("<svg/>"),
+            slide_title: Arc::from("Revenue Chart"),
+            error_code: Arc::from("E-LAY-003"),
+            message: Arc::from("Chart data is empty for slide 'Revenue Chart'"),
+        };
+        let p2 = p1.clone();
+        assert_eq!(p1, p2, "ErrorSlidePlaceholder must implement PartialEq");
+
+        let mut set = HashSet::new();
+        set.insert(p1);
+        assert_eq!(set.len(), 1, "ErrorSlidePlaceholder must be hashable");
     }
 
     /// AC-003 — EMU values are correct for the 16:9 default constants.

@@ -14,7 +14,7 @@
 //! | `histogram` | [`histogram`] |
 //! | `stacked-bar` | [`stacked_bar`] |
 //!
-//! ## Architecture Rules (STORY-031)
+//! ## Architecture Rules (STORY-031 / STORY-032)
 //!
 //! - **No I/O**: All rendering is synchronous, pure, in-memory.
 //! - **No subprocess**: `plotters` is a pure-Rust library; no Node.js spawned.
@@ -23,6 +23,9 @@
 //! - **Forbidden deps**: This crate MUST NOT depend on any exporter,
 //!   `slideforge-data`, `slideforge-layout`, `slideforge-cli`,
 //!   `slideforge-syntax`, or `slideforge-eval`.
+//! - **Empty-data guard (STORY-032)**: The [`validation::data_is_empty`] check
+//!   runs BEFORE [`ChartRendererImpl::dispatch_and_process`] is called. No code
+//!   path in this crate passes empty data to the renderer.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
@@ -35,10 +38,12 @@ pub mod bar;
 pub mod histogram;
 pub mod line;
 pub mod pie;
+pub mod placeholder;
 pub mod safety;
 pub mod scatter;
 pub mod stacked_bar;
 pub mod types;
+pub mod validation;
 
 use std::sync::Arc;
 

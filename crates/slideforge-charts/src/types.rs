@@ -194,6 +194,25 @@ pub enum ChartError {
         /// Description of the failure.
         message: Arc<str>,
     },
+
+    /// Chart data evaluated to an empty collection before `render()` was called.
+    ///
+    /// Maps to error code `E-LAY-003`. This variant is produced by the
+    /// empty-data guard in [`crate::validation`] when [`slideforge_types::Value::List`]
+    /// is empty. The guard runs BEFORE [`crate::ChartRendererImpl::dispatch_and_process`]
+    /// to satisfy BC-1.11.002 invariant 2 (renderer is never called with empty data).
+    ///
+    /// In strict mode: this error causes the build to fail (exit code 2, no output).
+    /// In warn-only mode: the caller produces a [`slideforge_layout::FrameContent::ErrorSlidePlaceholder`].
+    #[error("E-LAY-003: chart data is empty for slide '{slide_title}' (expression: {expression})")]
+    EmptyData {
+        /// The title of the chart slide where empty data was detected.
+        slide_title: Arc<str>,
+        /// The data binding expression from the DSL (e.g., `"{{ kpis.monthly }}"`).
+        expression: Arc<str>,
+        /// Source location of the data binding in the `.sf` file.
+        span: slideforge_types::SourceSpan,
+    },
 }
 
 #[cfg(test)]
@@ -284,6 +303,30 @@ mod tests {
             message: Arc::from("backend failure"),
         };
         assert!(err.to_string().contains("backend failure"));
+    }
+
+    /// BC-1.11.002 — `ChartError::EmptyData` variant exists with the correct fields.
+    ///
+    /// Red Gate: passes at stub time because the variant is a type-level stub
+    /// (it compiles). The real value is tested in `validation.rs` tests.
+    #[test]
+    fn test_bc_1_11_002_chart_error_empty_data_variant_exists() {
+        use slideforge_types::SourceSpan;
+
+        let err = ChartError::EmptyData {
+            slide_title: Arc::from("Revenue Chart"),
+            expression: Arc::from("{{ kpis.monthly }}"),
+            span: SourceSpan::default(),
+        };
+        let msg = err.to_string();
+        assert!(
+            msg.contains("E-LAY-003"),
+            "EmptyData error message must contain 'E-LAY-003'; got: {msg}"
+        );
+        assert!(
+            msg.contains("Revenue Chart"),
+            "EmptyData error message must contain the slide title; got: {msg}"
+        );
     }
 
     #[test]
