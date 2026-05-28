@@ -126,18 +126,16 @@ impl BrandSynthesizer {
             // Canonicalize both paths and verify the logo resides inside the brand dir.
             // We only canonicalize after confirming existence (above) so that
             // canonicalize does not fail on a non-existent file.
-            let canonical_logo = std::fs::canonicalize(&logo_path).map_err(|e| {
-                BrandError::TomlReadError {
+            let canonical_logo =
+                std::fs::canonicalize(&logo_path).map_err(|e| BrandError::TomlReadError {
                     path: Arc::from(logo_path.to_string_lossy().as_ref()),
                     reason: Arc::from(e.to_string().as_str()),
-                }
-            })?;
-            let canonical_brand_dir = std::fs::canonicalize(brand_toml_dir).map_err(|e| {
-                BrandError::TomlReadError {
+                })?;
+            let canonical_brand_dir =
+                std::fs::canonicalize(brand_toml_dir).map_err(|e| BrandError::TomlReadError {
                     path: Arc::from(brand_toml_dir.to_string_lossy().as_ref()),
                     reason: Arc::from(e.to_string().as_str()),
-                }
-            })?;
+                })?;
             if !canonical_logo.starts_with(&canonical_brand_dir) {
                 return Err(BrandError::LogoOutsideBrandDir {
                     logo_path: canonical_logo.to_string_lossy().into_owned(),
@@ -1015,7 +1013,7 @@ body = "Calibri"
 
     /// F-PASS11-LOW-3 — snapshot all 31 layouts as a determinism guard.
     ///
-    /// The three existing snapshots covered only dark/standard layout_xml variants.
+    /// The three existing snapshots covered only dark/standard `layout_xml` variants.
     /// This test snapshots the complete layout taxonomy: all 31 names, indices,
     /// OOXML types, and color-override flags. The insta snapshot serves as a
     /// regression guard — any change to `generate_all_layouts` that alters the
@@ -1023,30 +1021,30 @@ body = "Calibri"
     #[test]
     fn test_snapshot_all_31_layouts() {
         let config = full_12_color_config();
-        let (template, _) =
-            BrandSynthesizer::synthesize(&config).expect("synthesize must succeed");
+        let (template, _) = BrandSynthesizer::synthesize(&config).expect("synthesize must succeed");
         assert_eq!(template.layouts.len(), 31, "Expected 31 layouts");
 
-        let combined = template
+        let lines: Vec<String> = template
             .layouts
             .iter()
             .map(|l| {
                 format!(
-                    "=== {} (idx={}) type={:?} dark={} ===\n",
+                    "=== {} (idx={}) type={:?} dark={} ===",
                     l.name,
                     l.index,
                     l.ooxml_type.as_deref().unwrap_or("custom"),
                     l.has_color_override,
                 )
             })
-            .collect::<String>();
+            .collect();
+        let combined = lines.join("\n");
 
         insta::assert_snapshot!("all_31_layouts", combined);
     }
 
     // ─── F-PASS11-LOW-1: layout_names populated from layouts ─────────────────
 
-    /// F-PASS11-LOW-1 — synthesized BrandTemplate has layout_names populated from layouts.
+    /// F-PASS11-LOW-1 — synthesized [`BrandTemplate`] has `layout_names` populated from layouts.
     ///
     /// The dead-state finding required eliminating `layout_names: vec![]` when
     /// `layouts` has 31 entries. After the fix, `layout_names.len() == layouts.len()`
@@ -1054,8 +1052,7 @@ body = "Calibri"
     #[test]
     fn test_layout_names_populated_from_layouts() {
         let config = full_12_color_config();
-        let (template, _) =
-            BrandSynthesizer::synthesize(&config).expect("synthesize must succeed");
+        let (template, _) = BrandSynthesizer::synthesize(&config).expect("synthesize must succeed");
         assert_eq!(
             template.layout_names.len(),
             template.layouts.len(),
@@ -1096,7 +1093,8 @@ body = "Calibri"
         std::fs::create_dir_all(&brand_dir).expect("brand dir create must succeed");
         let brand_toml_path = brand_dir.join("brand.toml");
 
-        let mut f = std::fs::File::create(&brand_toml_path).expect("brand.toml create must succeed");
+        let mut f =
+            std::fs::File::create(&brand_toml_path).expect("brand.toml create must succeed");
         writeln!(
             f,
             r##"
@@ -1125,9 +1123,9 @@ body = "Calibri"
         );
         match result.unwrap_err() {
             BrandError::LogoOutsideBrandDir { .. } => {},
-            other => panic!(
-                "F-PASS11-MED-2: expected BrandError::LogoOutsideBrandDir, got: {other:?}"
-            ),
+            other => {
+                panic!("F-PASS11-MED-2: expected BrandError::LogoOutsideBrandDir, got: {other:?}")
+            },
         }
     }
 
@@ -1179,9 +1177,9 @@ body = "Calibri"
         );
         match result.unwrap_err() {
             BrandError::LogoOutsideBrandDir { .. } => {},
-            other => panic!(
-                "F-PASS11-MED-2: expected LogoOutsideBrandDir for symlink, got: {other:?}"
-            ),
+            other => {
+                panic!("F-PASS11-MED-2: expected LogoOutsideBrandDir for symlink, got: {other:?}")
+            },
         }
     }
 
