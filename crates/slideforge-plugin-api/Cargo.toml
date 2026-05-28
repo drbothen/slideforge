@@ -19,5 +19,5 @@ name = "slideforge_plugin_api"
 # All production deps pinned with `=` per supply-chain policy.
 slideforge-types.workspace = true
 slideforge-layout = { workspace = true }
-thiserror = "=2.0.12"
+thiserror = { workspace = true }
 strsim = { workspace = true }

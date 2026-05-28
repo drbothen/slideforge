@@ -14,6 +14,6 @@ categories.workspace = true
 
 [dependencies]
 # All production deps pinned with `=` per supply-chain policy.
-thiserror = "=2.0.12"
+thiserror = { workspace = true }
 ordered-float = "=4.6.0"
 indexmap = { version = "=2.9.0", features = ["std"] }
