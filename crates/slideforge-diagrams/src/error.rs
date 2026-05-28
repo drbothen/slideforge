@@ -26,6 +26,13 @@ pub fn extract_source_line(error_message: &str) -> u32 {
     let mut pos = 0;
     while let Some(rel) = lower[pos..].find("line") {
         let abs = pos + rel;
+        // Word-boundary guard: reject "line" when preceded by an alphanumeric
+        // character, which would indicate it is a suffix of a longer word such
+        // as "timeline", "outline", "deadline", etc.
+        if abs > 0 && lower.as_bytes()[abs - 1].is_ascii_alphanumeric() {
+            pos = abs + 1;
+            continue;
+        }
         // Skip past "line"
         let after = abs + 4;
         if after >= lower.len() {
@@ -114,6 +121,49 @@ mod tests {
     #[test]
     fn test_bc_1_12_002_extract_line_number_from_large_line_number() {
         assert_eq!(extract_source_line("syntax error at line 100"), 100);
+    }
+
+    // -----------------------------------------------------------------------
+    // FINDING-003: word-boundary check — "line" as suffix must not match
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_finding_003_timeline_word_is_not_a_line_reference() {
+        // "timeline: 3" contains "line" as a suffix of "timeline".
+        // The extractor must NOT return 3 — it should fall back to 1.
+        assert_eq!(
+            extract_source_line("timeline: 3"),
+            1,
+            "\"timeline: 3\" must not be mistaken for \"line 3\""
+        );
+    }
+
+    #[test]
+    fn test_finding_003_outline_word_is_not_a_line_reference() {
+        assert_eq!(
+            extract_source_line("outline: 7 sections"),
+            1,
+            "\"outline\" suffix must not match as a line number"
+        );
+    }
+
+    #[test]
+    fn test_finding_003_deadline_word_is_not_a_line_reference() {
+        assert_eq!(
+            extract_source_line("past deadline: 42"),
+            1,
+            "\"deadline\" suffix must not match as a line number"
+        );
+    }
+
+    #[test]
+    fn test_finding_003_standalone_line_still_matches() {
+        // "line" preceded by a space (non-alphanumeric) must still work.
+        assert_eq!(
+            extract_source_line("error at line 8"),
+            8,
+            "standalone \"line 8\" must still return 8"
+        );
     }
 
     // -----------------------------------------------------------------------
