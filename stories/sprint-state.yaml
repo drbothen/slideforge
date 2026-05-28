@@ -220,3 +220,31 @@ stories:
     merged: 2026-05-28
     pr: 28
     merge_commit: 5ad267be
+  STORY-027:
+    status: merged
+    wave: 3
+    started: 2026-05-28
+    merged: 2026-05-28
+    pr: 29
+    merge_commit: 7641d4ea
+  STORY-023:
+    status: in_progress
+    wave: 3
+    started: 2026-05-28
+    branch: feature/S-023
+    sha: 800b11d8
+    convergence: "2/3 CLEAN (passes 9, 10)"
+  STORY-030:
+    status: in_progress
+    wave: 3
+    started: 2026-05-28
+    branch: feature/S-030
+    sha: fedf1ec3
+    convergence: "post-font-engine refactor; next pass 10"
+  STORY-034:
+    status: in_progress
+    wave: 3
+    started: 2026-05-28
+    branch: feature/S-034
+    sha: 92221f3d
+    convergence: "3/3 CONVERGED; PR pending"

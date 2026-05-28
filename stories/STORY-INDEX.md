@@ -12,8 +12,8 @@ traces_to:
 total_stories: 71
 stories_written: 71
 stories_ready: 0
-stories_in_progress: 0
-stories_merged: 0
+stories_in_progress: 3
+stories_merged: 30
 ---
 
 # STORY-INDEX — slideforge v1.0
@@ -30,13 +30,13 @@ stories_merged: 0
 
 | Wave | Total | Draft | Ready | In-Progress | Merged | Blocked |
 |------|-------|-------|-------|-------------|--------|---------|
-| Wave 1 | 14 | 14 | 0 | 0 | 0 | 0 |
-| Wave 2 | 7 | 7 | 0 | 0 | 0 | 0 |
-| Wave 3 | 17 | 17 | 0 | 0 | 0 | 0 |
+| Wave 1 | 14 | 0 | 0 | 0 | 14 | 0 |
+| Wave 2 | 7 | 0 | 0 | 0 | 7 | 0 |
+| Wave 3 | 17 | 5 | 0 | 3 | 9 | 0 |
 | Wave 4 | 13 | 13 | 0 | 0 | 0 | 0 |
 | Wave 5 | 14 | 14 | 0 | 0 | 0 | 0 |
 | Wave 6 | 6 | 6 | 0 | 0 | 0 | 0 |
-| **Total** | **71** | **71** | **0** | **0** | **0** | **0** |
+| **Total** | **71** | **38** | **0** | **3** | **30** | **0** |
 
 ---
 
@@ -44,20 +44,20 @@ stories_merged: 0
 
 | Story ID | Epic | Title | BCs | Priority | Points | tdd_mode | Status |
 |----------|------|-------|-----|---------|--------|---------|--------|
-| [STORY-001](stories/STORY-001-ir-core-types.md) | EPIC-01 | IR Core Types (Deck, Slide, Value, ContentBlock) | — | P0 | 5 | strict | draft |
-| [STORY-002](stories/STORY-002-plugin-trait-api.md) | EPIC-01 | Plugin Trait API (all 10 surfaces) | BC-5.02.001, BC-5.02.002 | P0 | 5 | strict | draft |
-| [STORY-003](stories/STORY-003-slide-type-impls.md) | EPIC-01 | 31 SlideType Implementations | BC-3.01.001-003 | P0 | 8 | strict | draft |
-| [STORY-004](stories/STORY-004-value-system-emu.md) | EPIC-01 | Value System + EMU Types | BC-1.02.003 | P0 | 5 | strict | draft |
-| [STORY-005](stories/STORY-005-lexer-tokenization.md) | EPIC-02 | Lexer + Mode-Based Tokenization | BC-1.01.003 | P0 | 5 | strict | draft |
-| [STORY-006](stories/STORY-006-parser-core.md) | EPIC-02 | Parser Core: Deck, Slide, Fields, Indentation | BC-1.01.001, BC-1.01.002 | P0 | 8 | strict | draft |
-| [STORY-007](stories/STORY-007-parser-control-flow.md) | EPIC-02 | Parser: @for, @if/@elif/@else, {{ expr }} | BC-1.04.001, BC-1.05.001 | P0 | 8 | strict | draft |
-| [STORY-008](stories/STORY-008-parser-includes-variants.md) | EPIC-02 | Parser: @include, variants:, set rules, aliases | BC-1.01.004, BC-1.06.001+003, BC-1.07.001-005, BC-1.08.001-003, BC-1.09.001-002 | P0 | 8 | strict | draft |
-| [STORY-009](stories/STORY-009-parser-math-shape-version.md) | EPIC-02 | Parser: math delimiters, shape:, DSL versioning, diagnostics | BC-1.01.005-006, BC-1.09.001, BC-1.13.001, BC-3.04.002 | P0 | 5 | strict | draft |
-| [STORY-010](stories/STORY-010-error-accumulation-infra.md) | EPIC-02 | Error Accumulation + Diagnostic Infrastructure | BC-1.15.001, BC-1.15.002, BC-1.15.003 | P0 | 5 | strict | draft |
-| [STORY-051](stories/STORY-051-ci-matrix-lint.md) | EPIC-19 | CI: fmt + clippy + nextest (5-platform matrix) | — | P0 | 5 | facade | draft |
-| [STORY-052](stories/STORY-052-ci-visual-regression.md) | EPIC-19 | CI: Visual Regression (LibreOffice + SSIM/PSNR) | BC-4.01.002 | P0 | 5 | facade | draft |
-| [STORY-053](stories/STORY-053-ci-supply-chain-audit.md) | EPIC-19 | CI: Supply-Chain Audit (cargo audit + deny + SBOM) | — | P0 | 5 | facade | draft |
-| [STORY-054](stories/STORY-054-ci-release-pipeline.md) | EPIC-19 | CI: Release Pipeline + Signed Artifacts + Reproducible Builds | — | P0 | 8 | facade | draft |
+| [STORY-001](stories/STORY-001-ir-core-types.md) | EPIC-01 | IR Core Types (Deck, Slide, Value, ContentBlock) | — | P0 | 5 | strict | merged |
+| [STORY-002](stories/STORY-002-plugin-trait-api.md) | EPIC-01 | Plugin Trait API (all 10 surfaces) | BC-5.02.001, BC-5.02.002 | P0 | 5 | strict | merged |
+| [STORY-003](stories/STORY-003-slide-type-impls.md) | EPIC-01 | 31 SlideType Implementations | BC-3.01.001-003 | P0 | 8 | strict | merged |
+| [STORY-004](stories/STORY-004-value-system-emu.md) | EPIC-01 | Value System + EMU Types | BC-1.02.003 | P0 | 5 | strict | merged |
+| [STORY-005](stories/STORY-005-lexer-tokenization.md) | EPIC-02 | Lexer + Mode-Based Tokenization | BC-1.01.003 | P0 | 5 | strict | merged |
+| [STORY-006](stories/STORY-006-parser-core.md) | EPIC-02 | Parser Core: Deck, Slide, Fields, Indentation | BC-1.01.001, BC-1.01.002 | P0 | 8 | strict | merged |
+| [STORY-007](stories/STORY-007-parser-control-flow.md) | EPIC-02 | Parser: @for, @if/@elif/@else, {{ expr }} | BC-1.04.001, BC-1.05.001 | P0 | 8 | strict | merged |
+| [STORY-008](stories/STORY-008-parser-includes-variants.md) | EPIC-02 | Parser: @include, variants:, set rules, aliases | BC-1.01.004, BC-1.06.001+003, BC-1.07.001-005, BC-1.08.001-003, BC-1.09.001-002 | P0 | 8 | strict | merged |
+| [STORY-009](stories/STORY-009-parser-math-shape-version.md) | EPIC-02 | Parser: math delimiters, shape:, DSL versioning, diagnostics | BC-1.01.005-006, BC-1.09.001, BC-1.13.001, BC-3.04.002 | P0 | 5 | strict | merged |
+| [STORY-010](stories/STORY-010-error-accumulation-infra.md) | EPIC-02 | Error Accumulation + Diagnostic Infrastructure | BC-1.15.001, BC-1.15.002, BC-1.15.003 | P0 | 5 | strict | merged |
+| [STORY-051](stories/STORY-051-ci-matrix-lint.md) | EPIC-19 | CI: fmt + clippy + nextest (5-platform matrix) | — | P0 | 5 | facade | merged |
+| [STORY-052](stories/STORY-052-ci-visual-regression.md) | EPIC-19 | CI: Visual Regression (LibreOffice + SSIM/PSNR) | BC-4.01.002 | P0 | 5 | facade | merged |
+| [STORY-053](stories/STORY-053-ci-supply-chain-audit.md) | EPIC-19 | CI: Supply-Chain Audit (cargo audit + deny + SBOM) | — | P0 | 5 | facade | merged |
+| [STORY-054](stories/STORY-054-ci-release-pipeline.md) | EPIC-19 | CI: Release Pipeline + Signed Artifacts + Reproducible Builds | — | P0 | 8 | facade | merged |
 
 **Wave 1 total points: 85**
 
@@ -67,13 +67,13 @@ stories_merged: 0
 
 | Story ID | Epic | Title | BCs | Priority | Points | tdd_mode | Status |
 |----------|------|-------|-----|---------|--------|---------|--------|
-| [STORY-011](stories/STORY-011-expr-evaluator-core.md) | EPIC-03 | Expression Evaluator Core | BC-1.02.001, BC-1.02.002 | P0 | 8 | strict | draft |
-| [STORY-012](stories/STORY-012-scoping-for-iteration.md) | EPIC-03 | Variable Scoping + @for Evaluation + Termination | BC-1.02.005, BC-1.04.001-003, BC-1.07.002, BC-1.08.001-003 | P0 | 8 | strict | draft |
-| [STORY-013](stories/STORY-013-conditional-include-cycle.md) | EPIC-03 | @if/@elif/@else Evaluation + @include Cycle Detection | BC-1.05.001-002, BC-1.06.002 | P0 | 5 | strict | draft |
-| [STORY-014](stories/STORY-014-type-system-no-coercion.md) | EPIC-03 | Type System: No Implicit Coercion + ${{ seq }} Disambiguation | BC-1.02.003, BC-1.02.004 | P0 | 5 | strict | draft |
-| [STORY-015](stories/STORY-015-alt-text-enforcement.md) | EPIC-04 | Alt Text Enforcement | BC-5.01.001, BC-5.01.002 | P0 | 5 | strict | draft |
-| [STORY-016](stories/STORY-016-canvas-overflow-validation.md) | EPIC-04 | Canvas Overflow + Zero-Slide + Strict/Warn-Only Mode | BC-3.03.001-004 | P0 | 5 | strict | draft |
-| [STORY-017](stories/STORY-017-wcag-contrast-label-check.md) | EPIC-04 | Color-Coded Label + WCAG Contrast Enforcement | BC-5.01.003-005 | P0 | 5 | strict | draft |
+| [STORY-011](stories/STORY-011-expr-evaluator-core.md) | EPIC-03 | Expression Evaluator Core | BC-1.02.001, BC-1.02.002 | P0 | 8 | strict | merged |
+| [STORY-012](stories/STORY-012-scoping-for-iteration.md) | EPIC-03 | Variable Scoping + @for Evaluation + Termination | BC-1.02.005, BC-1.04.001-003, BC-1.07.002, BC-1.08.001-003 | P0 | 8 | strict | merged |
+| [STORY-013](stories/STORY-013-conditional-include-cycle.md) | EPIC-03 | @if/@elif/@else Evaluation + @include Cycle Detection | BC-1.05.001-002, BC-1.06.002 | P0 | 5 | strict | merged |
+| [STORY-014](stories/STORY-014-type-system-no-coercion.md) | EPIC-03 | Type System: No Implicit Coercion + ${{ seq }} Disambiguation | BC-1.02.003, BC-1.02.004 | P0 | 5 | strict | merged |
+| [STORY-015](stories/STORY-015-alt-text-enforcement.md) | EPIC-04 | Alt Text Enforcement | BC-5.01.001, BC-5.01.002 | P0 | 5 | strict | merged |
+| [STORY-016](stories/STORY-016-canvas-overflow-validation.md) | EPIC-04 | Canvas Overflow + Zero-Slide + Strict/Warn-Only Mode | BC-3.03.001-004 | P0 | 5 | strict | merged |
+| [STORY-017](stories/STORY-017-wcag-contrast-label-check.md) | EPIC-04 | Color-Coded Label + WCAG Contrast Enforcement | BC-5.01.003-005 | P0 | 5 | strict | merged |
 
 **Wave 2 total points: 41**
 
@@ -83,23 +83,23 @@ stories_merged: 0
 
 | Story ID | Epic | Title | BCs | Priority | Points | tdd_mode | Status |
 |----------|------|-------|-----|---------|--------|---------|--------|
-| [STORY-018](stories/STORY-018-datasource-file-formats.md) | EPIC-05 | DataSource: JSON/CSV/YAML/TOML File Loading | BC-1.03.001, BC-1.03.003 | P0 | 5 | strict | draft |
+| [STORY-018](stories/STORY-018-datasource-file-formats.md) | EPIC-05 | DataSource: JSON/CSV/YAML/TOML File Loading | BC-1.03.001, BC-1.03.003 | P0 | 5 | strict | merged |
 | [STORY-019](stories/STORY-019-datasource-http-ssrf.md) | EPIC-05 | DataSource: HTTP/HTTPS + SSRF Allowlist | BC-1.03.002, BC-1.03.005 | P0 | 8 | strict | merged |
 | [STORY-020](stories/STORY-020-datasource-excel-sqlite.md) | EPIC-05 | DataSource: Excel (.xlsx) + SQLite | BC-1.03.006, BC-1.03.007 | P0 | 5 | strict | draft |
 | [STORY-021](stories/STORY-021-datasource-offline-errors.md) | EPIC-05 | DataSource: --offline Flag + Error Handling | BC-1.03.004 | P0 | 3 | strict | draft |
-| [STORY-022](stories/STORY-022-brand-load-extraction.md) | EPIC-06 | Brand Loading: .pptx/.docx Template Extraction | BC-2.01.001, BC-2.01.006 | P0 | 5 | strict | draft |
-| [STORY-023](stories/STORY-023-brand-synthesis-layouts.md) | EPIC-06 | Brand Synthesis: brand.toml → 31 Layouts + 12 OOXML Slots | BC-2.01.002, BC-2.01.004-005 | P0 | 13 | strict | draft |
+| [STORY-022](stories/STORY-022-brand-load-extraction.md) | EPIC-06 | Brand Loading: .pptx/.docx Template Extraction | BC-2.01.001, BC-2.01.006 | P0 | 5 | strict | merged |
+| [STORY-023](stories/STORY-023-brand-synthesis-layouts.md) | EPIC-06 | Brand Synthesis: brand.toml → 31 Layouts + 12 OOXML Slots | BC-2.01.002, BC-2.01.004-005 | P0 | 13 | strict | in-progress |
 | [STORY-024](stories/STORY-024-brand-extract-cli.md) | EPIC-06 | Brand Extraction CLI (slideforge extract-brand) | BC-2.01.003 | P0 | 3 | strict | draft |
 | [STORY-025](stories/STORY-025-brand-overlay-per-slide.md) | EPIC-06 | Per-Slide brand_overlay: (No Master Switch Invariant) | BC-2.02.001-002 | P1 | 3 | strict | draft |
-| [STORY-026](stories/STORY-026-layout-core-emu.md) | EPIC-07 | Core Layout: Deck → LaidOutDeck, EMU System | BC-3.06.001, BC-3.06.002, BC-3.06.003 | P0 | 8 | strict | draft |
-| [STORY-027](stories/STORY-027-layout-docx-sections.md) | EPIC-07 | Layout: Document Section Generation (DOCX) | BC-3.02.001-002 | P0 | 5 | strict | draft |
+| [STORY-026](stories/STORY-026-layout-core-emu.md) | EPIC-07 | Core Layout: Deck → LaidOutDeck, EMU System | BC-3.06.001, BC-3.06.002, BC-3.06.003 | P0 | 8 | strict | merged |
+| [STORY-027](stories/STORY-027-layout-docx-sections.md) | EPIC-07 | Layout: Document Section Generation (DOCX) | BC-3.02.001-002 | P0 | 5 | strict | merged |
 | [STORY-028](stories/STORY-028-layout-shape-inline.md) | EPIC-07 | Layout: shape: Block + Rich Inline Formatting | BC-3.04.001, BC-3.05.001 | P1 | 5 | strict | draft |
-| [STORY-029](stories/STORY-029-math-parser-omml.md) | EPIC-10 | Math Parser: $...$ / $$...$$ + @{var} + OMML Output | BC-1.10.001-003 | P1 | 8 | strict | draft |
-| [STORY-030](stories/STORY-030-math-mathml-pdf.md) | EPIC-10 | Math: MathML (HTML) + Path-Based (PDF) Output | BC-1.10.003 | P1 | 5 | strict | draft |
-| [STORY-031](stories/STORY-031-chart-renderer-core.md) | EPIC-11 | Chart Renderer: bar/line/pie/scatter/area/histogram/stacked-bar | BC-1.11.001 | P1 | 8 | strict | draft |
+| [STORY-029](stories/STORY-029-math-parser-omml.md) | EPIC-10 | Math Parser: $...$ / $$...$$ + @{var} + OMML Output | BC-1.10.001-003 | P1 | 8 | strict | merged |
+| [STORY-030](stories/STORY-030-math-mathml-pdf.md) | EPIC-10 | Math: MathML (HTML) + Path-Based (PDF) Output | BC-1.10.003 | P1 | 5 | strict | in-progress |
+| [STORY-031](stories/STORY-031-chart-renderer-core.md) | EPIC-11 | Chart Renderer: bar/line/pie/scatter/area/histogram/stacked-bar | BC-1.11.001 | P1 | 8 | strict | merged |
 | [STORY-032](stories/STORY-032-chart-empty-data.md) | EPIC-11 | Chart: Empty Data Error-Slide Placeholder | BC-1.11.002 | P1 | 3 | strict | merged |
-| [STORY-033](stories/STORY-033-diagram-mermaid-render.md) | EPIC-12 | Diagram Renderer: Mermaid → PPTX-Safe SVG | BC-1.12.001-002 | P1 | 8 | strict | draft |
-| [STORY-034](stories/STORY-034-diagram-svg-normalize-perf.md) | EPIC-12 | SVG Normalization via usvg + Performance Gate | BC-1.12.003 | P1 | 5 | strict | draft |
+| [STORY-033](stories/STORY-033-diagram-mermaid-render.md) | EPIC-12 | Diagram Renderer: Mermaid → PPTX-Safe SVG | BC-1.12.001-002 | P1 | 8 | strict | merged |
+| [STORY-034](stories/STORY-034-diagram-svg-normalize-perf.md) | EPIC-12 | SVG Normalization via usvg + Performance Gate | BC-1.12.003 | P1 | 5 | strict | in-progress |
 
 **Wave 3 total points: 100**
 

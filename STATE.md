@@ -28,9 +28,9 @@ wave_1_completed: 2026-05-27
 wave_2_gate: "PASS 2026-05-27 — 11 gate passes, 19 findings fixed, 3/3 clean (passes 9-10-11)"
 wave_2_completed: 2026-05-27
 wave_3_batch_1_completed: 2026-05-28
-develop_sha: "5ad267be"
-develop_pr_count: 28
-workspace_tests: 1551
+develop_sha: "7641d4ea"
+develop_pr_count: 29
+workspace_tests: 1599
 workspace_test_failures: 0
 ---
 
@@ -48,28 +48,54 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. It generates branded .p
 
 ## Current Status
 
-Phase 3 IN PROGRESS. Wave 1 COMPLETE (14/14 stories, gate PASSED). Wave 2 COMPLETE (7/7 stories, gate PASSED). Wave 3 Batch 1 COMPLETE (6 stories merged, PRs #21-#26). **Wave 3 Batch 2 IN PROGRESS (2/8 merged: STORY-019 PR #27, STORY-032 PR #28). 6 stories remaining.**
+Phase 3 IN PROGRESS. Wave 1 COMPLETE (14/14 stories, gate PASSED). Wave 2 COMPLETE (7/7 stories, gate PASSED). Wave 3 Batch 1 COMPLETE (6 stories merged, PRs #21-#26). **Wave 3 Batch 2 IN PROGRESS (5/8 merged: STORY-019, 027, 032 + 2 earlier). 3 stories in-flight, 2 not started.**
 
-develop branch: `5ad267be` (28 merged PRs, 1551 tests, 0 failures). No active worktrees. No open PRs.
+develop branch: `7641d4ea` (29 merged PRs, 1599 tests, 0 failures). 3 active worktrees (STORY-023, STORY-030, STORY-034). 0 open PRs.
 
-## What to Do Next: Wave 3 Batch 2
+## Wave 3 Batch 2 Story Status
 
-Wave 3 Batch 1 delivered 6 root stories (no intra-wave dependencies). All 8 Batch 2 stories can now start — their Batch 1 dependencies are merged.
+| Story | Title | Status | PR | Commit | Notes |
+|-------|-------|--------|----|--------|-------|
+| STORY-019 | HTTP/HTTPS DataSource + SSRF | MERGED | #27 | 7bc71f9c | 9-pass adversary, 3/3 clean |
+| STORY-032 | Chart Empty Data Placeholder | MERGED | #28 | 5ad267be | 7-pass adversary, 3/3 clean |
+| STORY-027 | Layout: DOCX Section Generation | MERGED | #29 | 7641d4ea | 8-pass adversary, 3/3 clean |
+| STORY-023 | Brand Synthesis: brand.toml → 31 Layouts | IN PROGRESS | — | 800b11d8 | Streak 2/3 CLEAN (passes 9,10) |
+| STORY-030 | Math MathML + PDF Paths | IN PROGRESS | — | fedf1ec3 | Post-font-engine refactor; next: pass 10 |
+| STORY-034 | SVG Normalization via usvg | IN PROGRESS | — | 92221f3d | 3/3 CONVERGED; PR creation pending |
+| STORY-020 | DataSource: Excel + SQLite | NOT STARTED | — | — | Depends on STORY-019 (merged) |
+| STORY-028 | Layout: shape: Block + Rich Inline | NOT STARTED | — | — | Depends on STORY-027 (merged) |
 
-**Batch 2 stories:**
+## Resume Instructions for Each In-Flight Story
 
-| Story | Title | Crate | Depends On |
-|-------|-------|-------|------------|
-| STORY-019 | DataSource: HTTP/HTTPS + SSRF Allowlist | slideforge-data | STORY-018 |
-| STORY-020 | DataSource: Excel (.xlsx) + SQLite | slideforge-data | STORY-018 |
-| STORY-023 | Brand Synthesis: brand.toml → 31 Layouts + 12 OOXML Slots | slideforge-brand | STORY-022 |
-| STORY-027 | Layout: Document Section Generation (DOCX) | slideforge-layout | STORY-026 |
-| STORY-028 | Layout: shape: Block + Rich Inline Formatting | slideforge-layout | STORY-026 |
-| STORY-030 | Math: MathML (HTML) + Path-Based (PDF) Output | slideforge-math | STORY-029 |
-| STORY-032 | Chart: Empty Data Error-Slide Placeholder | slideforge-charts | STORY-031 + STORY-016 |
-| STORY-034 | SVG Normalization via usvg + Performance Gate | slideforge-diagrams | STORY-033 |
+### STORY-023 — Brand Synthesis (slideforge-brand, 13pts XL)
+- Worktree: `.worktrees/STORY-023/`  Branch: `feature/S-023`  SHA: `800b11d8`
+- Convergence: 10 passes, streak **2/3 CLEAN** (passes 9, 10); need 1 more clean strict pass
+- All known findings closed; tests pass 160/160 in slideforge-brand
+- Key implementation: 31 OOXML layouts, 12 color slots with deterministic inference, brand.toml synthesis, ECMA-376-compliant XML serialization, dark layout defRPr defaults, hex validation, logo path resolution
+- **Next: Run Pass 11 adversary review. If CLEAN strict → push + demos + PR. If findings → fix burst → Pass 12.**
 
-**After Batch 2:** Batch 3 (3 stories — STORY-021, STORY-024, STORY-025) depends on Batch 2.
+### STORY-030 — Math MathML + PDF Paths (slideforge-math, 5pts M)
+- Worktree: `.worktrees/STORY-030/`  Branch: `feature/S-030`  SHA: `fedf1ec3`
+- Convergence: 9 passes done; Pass 9 had 2 HIGH findings now fixed:
+  - SvgPaths struct → newtype per spec AC-003
+  - Synthetic glyphs → real ab_glyph 0.2.31 with embedded Latin Modern Math font (733KB OTF, GFL/LPPL license)
+  - New `font_engine.rs` module replaces ~500-line synthetic glyph match
+- Tests 165/165 pass in slideforge-math; workspace 1599 pass
+- **Next: Run Pass 10 adversary review (post-font-engine). Continue 3-CLEAN convergence. After 3 CLEAN → per-AC demos + PR + merge.**
+
+### STORY-034 — SVG Normalization via usvg (slideforge-diagrams, 5pts M)
+- Worktree: `.worktrees/STORY-034/`  Branch: `feature/S-034`  SHA: `92221f3d`
+- Convergence: 9 passes, **3/3 CONVERGED** — per-AC demos recorded in `docs/demo-evidence/STORY-034/`
+- Branch was rebased onto develop (to pick up STORY-019/027/032 merges); rebase complete and pushed
+- Implementation: NormalizedDiagramSvg newtype, usvg 0.47.0 + ab_glyph fonts, FrameContent::Diagram payload, cold-budget integration test in fresh process, snapshot test, idempotency guards
+- **Next: Check `gh pr list --head feature/S-034`. If PR exists with dirty CI → close and re-create. If no PR → `gh pr create`. Watch CI, merge when green.**
+
+## What to Do After In-Flight Stories Complete
+
+**After STORY-023 + 030 + 034 merge:**
+- Start STORY-020 (DataSource: Excel + SQLite, depends on STORY-019)
+- Start STORY-028 (Layout: shape: Block + Rich Inline, depends on STORY-027)
+- After Batch 2 fully merged: Batch 3 (STORY-021, 024, 025)
 
 **Key file references:**
 - Wave schedule + batching: `.factory/stories/wave-schedule.md`
@@ -109,7 +135,7 @@ git fetch origin develop && git pull origin develop
 | Planning (25 DSL decisions) | DONE 2026-05-24 | q1–q25 decision docs + 14 research threads + 7/7 spikes resolved |
 | Phase 1: Spec Crystallization | DONE — APPROVED 2026-05-25 | PRD (109 BCs, 15 HS, 4 supplements) + architecture (14 ADRs, 15 VPs, 20 crates) + UX spec (10 screens, 5 flows) + L2 domain spec (12 files). 17 passes, 69 findings, 3/3 clean. |
 | Phase 2: Story Decomposition | DONE — APPROVED 2026-05-25 | 71 stories, 21 epics, 6 waves, 437 pts. 22 passes, 96+ findings, 3/3 clean. |
-| Phase 3: TDD Implementation | IN PROGRESS — Wave 1: COMPLETE + GATE PASSED. Wave 2: COMPLETE + GATE PASSED. Wave 3: Batch 1 COMPLETE (6/17 stories, PRs #21-#26, 494 new tests). Batch 2: STORY-019 MERGED (PR #27, 7bc71f9c), STORY-032 MERGED (PR #28, 5ad267be), 6 remaining. | Per-story delivery |
+| Phase 3: TDD Implementation | IN PROGRESS — Wave 1: COMPLETE + GATE PASSED. Wave 2: COMPLETE + GATE PASSED. Wave 3: Batch 1 COMPLETE (6/17 stories, PRs #21-#26, 494 new tests). Batch 2: STORY-019 MERGED (PR #27, 7bc71f9c), STORY-032 MERGED (PR #28, 5ad267be), STORY-027 MERGED (PR #29, 7641d4ea). 3 in-flight (STORY-023 streak 2/3, STORY-030 post-font-engine pass 10 next, STORY-034 converged PR-pending). 2 not started (STORY-020, STORY-028). | Per-story delivery |
 | Phase 4: Holdout Evaluation | NOT STARTED | Per-wave holdout gates |
 | Phase 5: Adversarial Refinement | NOT STARTED | Post-implementation cascade |
 | Phase 6: Formal Hardening | NOT STARTED | Kani + fuzz + mutants + semgrep |
@@ -148,12 +174,13 @@ Wave 2 gate: 11 passes, 19 findings fixed, 3/3 clean (passes 9-10-11). Gate fix 
 
 New crates added by Batch 1 (total workspace now 13 crates): slideforge-data, slideforge-brand, slideforge-layout, slideforge-math, slideforge-charts, slideforge-diagrams.
 
-## Wave 3 Batch 2 Story Status (IN PROGRESS — STORY-019 + STORY-032 MERGED, 6 remaining)
+## Wave 3 Batch 2 Story Status (IN PROGRESS — STORY-019 + STORY-032 + STORY-027 MERGED; 3 in-flight, 2 not started)
 
 | Story | Title | Crate | Tests | Adversary | PR | Commit |
 |-------|-------|-------|-------|-----------|-----|--------|
 | STORY-019 | DataSource: HTTP/HTTPS + SSRF Allowlist | slideforge-data | 143 | 9 passes (20→8→5→6→3→6→0→0→0), 3/3 clean | #27 | 7bc71f9c |
 | STORY-032 | Chart Empty Data Placeholder | slideforge-charts | 146 | 7 passes (passes 5,6,7 CLEAN), 3/3 | #28 | 5ad267be |
+| STORY-027 | Layout: DOCX Section Generation | slideforge-layout | 48 | 8 passes, 3/3 clean | #29 | 7641d4ea |
 
 ## Decisions Log (milestones)
 
@@ -180,20 +207,24 @@ New crates added by Batch 1 (total workspace now 13 crates): slideforge-data, sl
 - 2026-05-27/28 — WAVE 3 BATCH 1 COMPLETE — 6 new crates (data, brand, layout, math, charts, diagrams), 494 new tests, 6 PRs merged (#21-#26, commits 6d4d7c02 → 218334f1)
 - 2026-05-28 — STORY-019 MERGED (PR #27, 7bc71f9c) — HTTP/HTTPS DataSource + SSRF allowlist (9-pass adversary, 49 findings fixed, defense-in-depth: allowlist before DNS + redirects(0) + body cap + scheme normalization)
 - 2026-05-28 — STORY-032 MERGED (PR #28, 5ad267be) — Chart empty-data placeholder, 7-pass adversary convergence
+- 2026-05-28 — STORY-027 MERGED (PR #29, 7641d4ea) — DOCX section generation (executive_summary + risk_register), 8-pass adversary convergence
+- 2026-05-28 — STORY-030 font engine refactor: ab_glyph 0.2.31 + embedded Latin Modern Math 733KB OTF (GFL/LPPL) replacing synthetic glyph match — authorized by user to fix Pass 9 HIGH findings; now at pass 10 threshold
+- 2026-05-28 — STORY-034 adversary 3/3 CONVERGED (9 passes); branch rebased onto develop (picks up STORY-019/027/032); PR creation pending
 
 ## Session Resume Checkpoint
 
 | Field | Value |
 |-------|-------|
 | **Date** | 2026-05-28 |
-| **Position** | Phase 3, Wave 3 — Batch 2 IN PROGRESS (2/8 merged: STORY-019, STORY-032). Next: STORY-020, 023, 027, 028, 030, 034. |
-| **develop SHA** | 5ad267be |
-| **Workspace tests** | 1551 passing, 0 failures |
+| **Position** | Phase 3, Wave 3 — Batch 2 IN PROGRESS (5/8 merged: STORY-019, 032, 027 + 2 from Batch 1). 3 in-flight, 2 not-started. |
+| **develop SHA** | 7641d4ea |
+| **Workspace tests** | 1599 passing, 0 failures |
 | **Workspace crates** | 13 (7 from Wave 1 + 6 new from Batch 1: data, brand, layout, math, charts, diagrams) |
-| **Active worktrees** | None |
-| **Open PRs** | None |
-| **Batch 2 stories** | STORY-019 MERGED, STORY-032 MERGED. Remaining: STORY-020, 023, 027, 028, 030, 034 |
-| **Next action** | Continue Wave 3 Batch 2 — deliver next story (STORY-023 / 027 / 030 / 034 are independent and can start; STORY-020 + 028 depend on same-crate sibling stories). |
+| **Active worktrees** | `.worktrees/STORY-023` (feature/S-023, 800b11d8), `.worktrees/STORY-030` (feature/S-030, fedf1ec3), `.worktrees/STORY-034` (feature/S-034, 92221f3d) |
+| **Open PRs** | None (STORY-034 converged, PR not yet created) |
+| **In-flight stories** | STORY-023: streak 2/3 CLEAN, need 1 more pass. STORY-030: post-font-engine, next pass 10. STORY-034: 3/3 CONVERGED, create PR. |
+| **Not-started stories** | STORY-020 (Excel+SQLite, dep STORY-019 merged), STORY-028 (shape:, dep STORY-027 merged) |
+| **Highest priority next actions** | 1. STORY-034: create PR (`gh pr create`) + watch CI + merge. 2. STORY-023: adversary pass 11 → if clean, push+demos+PR. 3. STORY-030: adversary pass 10 → continue 3-CLEAN. 4. After those 3 merge: start STORY-020 + STORY-028. |
 
 ## Quality Bar (Non-Negotiable)
 
