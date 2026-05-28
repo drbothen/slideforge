@@ -21,6 +21,20 @@
 //!
 //! All returned hex strings are in `"#RRGGBB"` format with uppercase hex
 //! digits. No alpha channel, no CSS named colors, no lowercase hex.
+//!
+//! ## f32 arithmetic and cross-platform determinism (F17)
+//!
+//! HSL color manipulation uses `f32` arithmetic. IEEE 754 `f32` is not
+//! guaranteed bit-for-bit identical across all platforms and compiler
+//! versions. In practice, the hue-rotation and lightness adjustments used
+//! here produce identical results on the `x86_64`, `aarch64`, and WASM targets
+//! tested during development, because the operations are simple and the
+//! compiler does not apply aggressive FP reassociation for `f32`.
+//!
+//! If strict cross-platform bit-exact color determinism is required in a
+//! future version, migrate to integer arithmetic (fixed-point HSL in
+//! [0, 3600] degrees / [0, 1000] saturation+lightness) or use a soft-float
+//! library. Tracked for future consideration but not blocking v1.0.
 
 use std::sync::Arc;
 
@@ -40,10 +54,7 @@ use crate::error::BrandError;
 ///
 /// This is called for every user-declared slot before it enters the inference
 /// pipeline. Values that pass validation are stored as-is (already uppercase).
-pub(crate) fn validate_hex(
-    slot_name: &str,
-    value: &str,
-) -> Result<Arc<str>, BrandError> {
+pub(crate) fn validate_hex(slot_name: &str, value: &str) -> Result<Arc<str>, BrandError> {
     if value.len() != 7 || !value.starts_with('#') {
         return Err(BrandError::InvalidHexColor {
             slot_name: Arc::from(slot_name),
@@ -72,21 +83,10 @@ pub(crate) fn validate_hex(
 /// Slot name constants in ECMA-376 order (matches `COLOR_SLOT_NAMES` from template.rs).
 ///
 /// Position 11 is `"folHlink"` (camelCase) — the canonical ECMA-376 OOXML name.
-/// The TOML field is `fol_hlink` (snake_case, via serde rename), but the color slot
+/// The TOML field is `fol_hlink` (`snake_case`, via serde rename), but the color slot
 /// name stored in [`crate::template::ColorSlot`] and in BC-2.01.002 must be `"folHlink"`.
 const SLOT_NAMES: [&str; 12] = [
-    "dk1",
-    "lt1",
-    "dk2",
-    "lt2",
-    "acc1",
-    "acc2",
-    "acc3",
-    "acc4",
-    "acc5",
-    "acc6",
-    "hlink",
-    "folHlink",
+    "dk1", "lt1", "dk2", "lt2", "acc1", "acc2", "acc3", "acc4", "acc5", "acc6", "hlink", "folHlink",
 ];
 
 /// Infer all 12 OOXML color slots from a partially-declared palette.
@@ -973,7 +973,10 @@ mod tests {
         );
         // dk1 must be inferred (not black #000000 and not "red")
         let dk1 = result[0].as_ref();
-        assert_ne!(dk1, "#000000", "F6: dk1 must not be #000000 (silent black fallback)");
+        assert_ne!(
+            dk1, "#000000",
+            "F6: dk1 must not be #000000 (silent black fallback)"
+        );
         assert_ne!(dk1, "red", "F6: dk1 must not be the invalid 'red' value");
     }
 }

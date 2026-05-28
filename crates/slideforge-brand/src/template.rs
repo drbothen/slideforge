@@ -438,7 +438,7 @@ mod tests {
             media_type: Arc::from("image/png"),
             original_path: Arc::from("ppt/media/image1.png"),
         };
-        assert_eq!(logo.loaded_bytes().map(|b| b.len()), Some(4));
+        assert_eq!(logo.loaded_bytes().map(<[u8]>::len), Some(4));
         assert!(logo.is_loaded());
         assert_eq!(logo.deferred_path(), None);
     }

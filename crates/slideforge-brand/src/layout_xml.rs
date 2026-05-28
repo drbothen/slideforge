@@ -691,4 +691,71 @@ mod tests {
             "non-dark layout XML must NOT contain clrMapOvr"
         );
     }
+
+    /// F2 — custom layout uses OOXML enum "cust" (not "custom").
+    #[test]
+    fn test_f2_custom_layout_type_is_cust_not_custom() {
+        let layout = minimal_dark_layout(); // ooxml_type = None → "cust"
+        let xml_bytes = serialize_layout_to_xml(&layout);
+        let xml = std::str::from_utf8(&xml_bytes).expect("output must be valid UTF-8");
+        assert!(
+            xml.contains("type=\"cust\""),
+            "custom layout must use type=\"cust\" (ECMA-376 §19.7.13), got: {}",
+            &xml[..xml.len().min(300)]
+        );
+        assert!(
+            !xml.contains("type=\"custom\""),
+            "custom layout must NOT use type=\"custom\" (not a valid ECMA-376 enum value)"
+        );
+    }
+
+    /// F2 — standard layout type is preserved as-is (e.g. "title").
+    #[test]
+    fn test_f2_standard_layout_type_is_preserved() {
+        let layout = minimal_light_layout(); // ooxml_type = Some("title")
+        let xml_bytes = serialize_layout_to_xml(&layout);
+        let xml = std::str::from_utf8(&xml_bytes).expect("output must be valid UTF-8");
+        assert!(
+            xml.contains("type=\"title\""),
+            "standard layout must preserve ooxml_type value, got: {}",
+            &xml[..xml.len().min(300)]
+        );
+    }
+
+    /// F1 — serialized layout XML must NOT contain `<p:txStyles>`.
+    ///
+    /// ECMA-376 §19.3.1.39: txStyles is only valid inside sldMaster, NOT sldLayout.
+    #[test]
+    fn test_f1_layout_xml_does_not_contain_txstyles() {
+        let layout = minimal_light_layout();
+        let xml_bytes = serialize_layout_to_xml(&layout);
+        let xml = std::str::from_utf8(&xml_bytes).expect("output must be valid UTF-8");
+        assert!(
+            !xml.contains("txStyles"),
+            "F1: layout XML must NOT contain txStyles (only valid in sldMaster), got: {xml}"
+        );
+    }
+
+    /// F11 — snapshot test of full standard layout XML.
+    ///
+    /// This snapshot would have caught both F1 (txStyles) and F2 (custom vs cust)
+    /// before they became adversarial findings. Blessed via `cargo insta accept`.
+    #[test]
+    fn test_f11_snapshot_standard_layout_xml() {
+        let layout = minimal_light_layout();
+        let xml_bytes = serialize_layout_to_xml(&layout);
+        let xml = std::str::from_utf8(&xml_bytes).expect("output must be valid UTF-8");
+        insta::assert_snapshot!("standard_layout_xml", xml);
+    }
+
+    /// F11 — snapshot test of full dark layout XML.
+    ///
+    /// Verifies clrMapOvr, explicit white text, and absence of txStyles.
+    #[test]
+    fn test_f11_snapshot_dark_layout_xml() {
+        let layout = minimal_dark_layout();
+        let xml_bytes = serialize_layout_to_xml(&layout);
+        let xml = std::str::from_utf8(&xml_bytes).expect("output must be valid UTF-8");
+        insta::assert_snapshot!("dark_layout_xml", xml);
+    }
 }

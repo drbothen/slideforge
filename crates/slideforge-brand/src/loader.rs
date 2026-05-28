@@ -845,7 +845,9 @@ mod tests {
                     "logo original_path must be the resolved ZIP-internal path"
                 );
             },
-            other => panic!("expected LogoAsset::Loaded from PPTX extraction, got: {other:?}"),
+            other @ crate::template::LogoAsset::Deferred { .. } => {
+                panic!("expected LogoAsset::Loaded from PPTX extraction, got: {other:?}")
+            },
         }
     }
 

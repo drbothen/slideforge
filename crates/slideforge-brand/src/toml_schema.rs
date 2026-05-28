@@ -392,19 +392,7 @@ mod tests {
         assert!(!config.footer.show_date, "show_date default is false");
     }
 
-    /// BC-2.01.002 — `ColorConfig::as_slot_array` API exists (stub check).
-    #[test]
-    fn test_bc_2_01_002_color_config_as_slot_array_exists() {
-        // as_slot_array() is todo!() — verify the type exists and the method is callable.
-        // This test will panic when the todo!() fires at runtime (Red Gate behavior).
-        let _ = std::panic::catch_unwind(|| {
-            let config = ColorConfig::default();
-            let _ = config.as_slot_array();
-        });
-        // We only assert the method exists at compile time (covered by compilation).
-    }
-
-    // ─── New behavioral tests for Red Gate ────────────────────────────────────
+    // ─── Behavioral tests ─────────────────────────────────────────────────────
 
     /// BC-2.01.002 — `parse_full_brand_toml`: all 12 color fields, fonts, logo, footer
     /// populated correctly from a complete brand.toml.
@@ -509,9 +497,8 @@ mod tests {
             "fol_hlink = \"#1D4ED8\"\n",
         );
         let config: BrandConfig = toml::from_str(toml_str).expect("should parse");
-        // as_slot_array() is todo!() — will panic (Red Gate)
         let slots = config.colors.as_slot_array();
-        // ECMA-376 order: dk1, lt1, dk2, lt2, acc1..acc6, hlink, fol_hlink
+        // ECMA-376 order: [dk1, lt1, dk2, lt2, acc1..acc6, hlink, fol_hlink]
         assert_eq!(slots[0], Some("#1F2937"), "index 0 = dk1");
         assert_eq!(slots[1], Some("#FFFFFF"), "index 1 = lt1");
         assert_eq!(slots[4], Some("#3B82F6"), "index 4 = acc1");

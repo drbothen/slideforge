@@ -126,7 +126,13 @@ pub enum BrandError {
         "E-BRD-001: Synthesized brand requires a logo path. \
          Add a [logo] section with 'path = \"...\"' to brand.toml."
     )]
-    LogoRequired,
+    LogoRequired {
+        /// Source location of the `brand "..."` or `brand.toml` declaration.
+        ///
+        /// May be `SourceSpan::default()` when invoked from a non-DSL context
+        /// (e.g., direct API call without a source file).
+        span: SourceSpan,
+    },
 
     /// `E-BRD-001` (synthesis) — the `brand.toml` file could not be read.
     ///

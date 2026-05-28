@@ -84,9 +84,7 @@ impl BrandSynthesizer {
     /// - Propagates all errors from [`BrandSynthesizer::synthesize`].
     ///
     /// On success, returns `(template, warnings)` — see [`BrandSynthesizer::synthesize`].
-    pub fn load_from_toml(
-        path: &str,
-    ) -> Result<(BrandTemplate, Vec<BrandError>), BrandError> {
+    pub fn load_from_toml(path: &str) -> Result<(BrandTemplate, Vec<BrandError>), BrandError> {
         let content = std::fs::read_to_string(path).map_err(|e| BrandError::TomlReadError {
             path: Arc::from(path),
             reason: Arc::from(e.to_string().as_str()),
@@ -123,8 +121,12 @@ impl BrandSynthesizer {
         config: &BrandConfig,
     ) -> Result<(BrandTemplate, Vec<BrandError>), BrandError> {
         // Step 1: Validate required fields (AC-004 — logo required)
-        if config.logo.is_none() {
-            return Err(BrandError::LogoRequired);
+        // Also reject empty path strings (F14: empty path passes is_none() check
+        // but is equally unusable — reject immediately).
+        if config.logo.as_ref().is_none_or(|l| l.path.is_empty()) {
+            return Err(BrandError::LogoRequired {
+                span: slideforge_types::SourceSpan::default(),
+            });
         }
 
         // Step 2: Build 12-slot color palette (inference)
@@ -244,7 +246,7 @@ mod tests {
     use super::*;
     use crate::toml_schema::{ColorConfig, FontConfig, FooterConfig, LogoConfig};
 
-    /// Construct a minimal config directly without calling todo!() helpers.
+    /// Construct a minimal config for tests with just the required fields populated.
     fn minimal_config() -> BrandConfig {
         BrandConfig {
             colors: ColorConfig {
@@ -322,7 +324,7 @@ mod tests {
             "synthesize must fail when logo path absent"
         );
         match result.unwrap_err() {
-            BrandError::LogoRequired => {},
+            BrandError::LogoRequired { .. } => {},
             other => panic!("expected BrandError::LogoRequired, got: {other:?}"),
         }
     }
@@ -333,7 +335,8 @@ mod tests {
         let config = full_12_color_config();
         let (t1, _) = BrandSynthesizer::synthesize(&config)
             .expect("synthesize must succeed with full config");
-        let (t2, _) = BrandSynthesizer::synthesize(&config).expect("second synthesize must succeed");
+        let (t2, _) =
+            BrandSynthesizer::synthesize(&config).expect("second synthesize must succeed");
         // Color slots must be identical
         assert_eq!(
             t1.colors.len(),
@@ -511,7 +514,51 @@ mod tests {
         assert_brand_provider::<BrandSynthesizer>();
     }
 
-    /// F4 — `synthesize` propagates MissingColorSlot warnings in the Ok tuple.
+    /// F13 — `BrandError::LogoRequired` now carries a `span` field.
+    #[test]
+    fn test_f13_logo_required_has_span_field() {
+        let err = BrandError::LogoRequired {
+            span: slideforge_types::SourceSpan::default(),
+        };
+        let msg = err.to_string();
+        assert!(
+            msg.contains("E-BRD-001"),
+            "LogoRequired must contain E-BRD-001"
+        );
+        assert!(
+            msg.contains("logo path"),
+            "LogoRequired message must mention logo path"
+        );
+    }
+
+    /// F14 — empty logo path string is rejected (produces `LogoRequired`, not `LogoAsset::Deferred`).
+    #[test]
+    fn test_f14_empty_logo_path_is_rejected() {
+        let config = BrandConfig {
+            colors: ColorConfig {
+                acc1: Some("#3B82F6".to_owned()),
+                ..Default::default()
+            },
+            fonts: FontConfig::default(),
+            logo: Some(LogoConfig {
+                path: String::new(), // empty path → must be rejected
+            }),
+            footer: FooterConfig::default(),
+        };
+        let result = BrandSynthesizer::synthesize(&config);
+        assert!(
+            result.is_err(),
+            "F14: empty logo path must be rejected (LogoRequired error)"
+        );
+        match result.unwrap_err() {
+            BrandError::LogoRequired { .. } => {},
+            other => {
+                panic!("F14: expected BrandError::LogoRequired for empty path, got: {other:?}")
+            },
+        }
+    }
+
+    /// F4 — `synthesize` propagates `MissingColorSlot` warnings in the Ok tuple.
     ///
     /// When color slots are absent, the warnings must be programmatically visible
     /// to the caller (not silently dropped). Spec line 246: return includes warnings.
@@ -537,8 +584,7 @@ mod tests {
     #[test]
     fn test_f4_synthesize_no_warnings_when_all_12_declared() {
         let config = full_12_color_config();
-        let (_, warnings) = BrandSynthesizer::synthesize(&config)
-            .expect("synthesize must succeed");
+        let (_, warnings) = BrandSynthesizer::synthesize(&config).expect("synthesize must succeed");
         assert_eq!(
             warnings.len(),
             0,
@@ -553,9 +599,10 @@ mod tests {
     #[test]
     fn test_f5_synthesized_logo_is_some_deferred() {
         let config = minimal_config(); // has logo path "test-logo.png"
-        let (result, _) = BrandSynthesizer::synthesize(&config)
-            .expect("synthesize must succeed");
-        let logo = result.logo.expect("F5: logo must be Some when [logo].path is declared");
+        let (result, _) = BrandSynthesizer::synthesize(&config).expect("synthesize must succeed");
+        let logo = result
+            .logo
+            .expect("F5: logo must be Some when [logo].path is declared");
         assert!(
             matches!(logo, crate::template::LogoAsset::Deferred { .. }),
             "F5: synthesized logo must be LogoAsset::Deferred (not Loaded — no I/O in pure fn)"

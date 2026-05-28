@@ -1,19 +1,36 @@
-//! Brand loading and extraction for slideforge.
+//! Brand loading and synthesis for slideforge.
 //!
-//! This crate implements the `BrandProvider` plugin trait for loading brand
-//! configuration from existing `.pptx` and `.docx` template files.
+//! This crate implements the `BrandProvider` plugin trait for:
 //!
-//! ## Overview
+//! - **Loading** brand configuration from existing `.pptx` and `.docx` template
+//!   files via [`BrandLoader`].
+//! - **Synthesizing** a complete brand from a `brand.toml` file via
+//!   [`BrandSynthesizer`].
 //!
-//! The primary entry point is [`BrandLoader`], which:
+//! ## Brand Loading ([`BrandLoader`])
 //!
-//! 1. Opens the `.pptx` or `.docx` file as a ZIP archive.
+//! [`BrandLoader`] opens a `.pptx` or `.docx` template and:
+//!
+//! 1. Opens the file as a ZIP archive.
 //! 2. Detects the file type from internal paths (`ppt/theme/theme1.xml` vs
 //!    `word/theme/theme1.xml`).
 //! 3. Extracts all 12 OOXML scheme color slots in ECMA-376 order.
 //! 4. Extracts heading and body font names.
 //! 5. Optionally detects and extracts a logo image.
 //! 6. Returns a [`BrandTemplate`] consumed by the layout and export stages.
+//!
+//! ## Brand Synthesis ([`BrandSynthesizer`])
+//!
+//! [`BrandSynthesizer`] synthesizes a complete [`BrandTemplate`] from a
+//! `brand.toml` file (STORY-023). The synthesis pipeline:
+//!
+//! 1. Validates the `[logo]` path (required for synthesized brands).
+//! 2. Applies deterministic color inference for any absent of the 12 OOXML
+//!    color slots (ac-003: hue rotation, lightness adjustment).
+//! 3. Generates 31 slide layout definitions.
+//! 4. Serializes each layout to OOXML XML via [`layout_xml::serialize_layout_to_xml`].
+//! 5. Returns `(BrandTemplate, Vec<BrandError>)` — the template plus any
+//!    cosmetic warnings for inferred color slots.
 //!
 //! ## Error Codes
 //!

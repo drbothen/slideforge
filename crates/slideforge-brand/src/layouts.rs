@@ -763,8 +763,8 @@ pub fn generate_all_layouts(_config: &BrandConfig) -> Vec<SlideLayoutDef> {
 mod tests {
     use super::*;
 
-    /// Build a `BrandConfig` directly (without calling `default_minimal()` which is
-    /// `todo!()`) so layout tests can run purely against `generate_all_layouts()`.
+    /// Build a `BrandConfig` directly for layout tests, exercising
+    /// `generate_all_layouts()` without filesystem dependencies.
     fn minimal_config_direct() -> BrandConfig {
         BrandConfig {
             colors: crate::toml_schema::ColorConfig {
@@ -787,8 +787,8 @@ mod tests {
         }
     }
 
-    // NOTE: FontConfig::default() and FooterConfig::default() are todo!().
-    // We use direct construction above to avoid hitting those todo!() bodies.
+    // FontConfig::default() and FooterConfig::default() use struct literals above
+    // to keep tests self-contained and independent of BrandConfig::default_minimal().
 
     /// BC-2.01.005 postcondition 1 — exactly 31 layouts generated.
     #[test]
