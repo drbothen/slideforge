@@ -6,13 +6,13 @@
 //!
 //! | Type | Module |
 //! |------|--------|
-//! | `bar` | [`bar`] |
-//! | `line` | [`mod@line`] |
-//! | `pie` | [`pie`] |
-//! | `scatter` | [`scatter`] |
-//! | `area` | [`area`] |
-//! | `histogram` | [`histogram`] |
-//! | `stacked-bar` | [`stacked_bar`] |
+//! | `bar` | `bar` |
+//! | `line` | `line` |
+//! | `pie` | `pie` |
+//! | `scatter` | `scatter` |
+//! | `area` | `area` |
+//! | `histogram` | `histogram` |
+//! | `stacked-bar` | `stacked_bar` |
 //!
 //! ## Architecture Rules (STORY-031 / STORY-032)
 //!
@@ -23,7 +23,7 @@
 //! - **Forbidden deps**: This crate MUST NOT depend on any exporter,
 //!   `slideforge-data`, `slideforge-layout`, `slideforge-cli`,
 //!   `slideforge-syntax`, or `slideforge-eval`.
-//! - **Empty-data guard (STORY-032)**: The [`validation::data_is_empty`] check
+//! - **Empty-data guard (STORY-032)**: The `validation::data_is_empty` check
 //!   runs BEFORE [`ChartRendererImpl::dispatch_and_process`] is called. No code
 //!   path in this crate passes empty data to the renderer.
 
@@ -32,18 +32,18 @@
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 
-pub mod accessibility;
-pub mod area;
-pub mod bar;
-pub mod histogram;
-pub mod line;
-pub mod pie;
+pub(crate) mod accessibility;
+pub(crate) mod area;
+pub(crate) mod bar;
+pub(crate) mod histogram;
+pub(crate) mod line;
+pub(crate) mod pie;
 pub mod placeholder;
-pub mod safety;
-pub mod scatter;
-pub mod stacked_bar;
+pub(crate) mod safety;
+pub(crate) mod scatter;
+pub(crate) mod stacked_bar;
 pub mod types;
-pub mod validation;
+pub(crate) mod validation;
 
 use std::sync::Arc;
 
@@ -51,10 +51,10 @@ use slideforge_plugin_api::ChartRenderer;
 use slideforge_types::{Brand, ChartSpec};
 use tracing::instrument;
 
-use crate::types::{ChartError, ChartSvg, ChartType, InternalChartSpec};
+use crate::types::{ChartSvg, ChartType, InternalChartSpec};
 
 // Re-export primary types for crate consumers.
-pub use crate::types::{ChartType as SfChartType, InternalChartSpec as SfChartSpec};
+pub use crate::types::{ChartError, ChartType as SfChartType, InternalChartSpec as SfChartSpec};
 
 /// The default `ChartRenderer` plugin implementation for slideforge.
 ///
@@ -77,8 +77,8 @@ impl ChartRendererImpl {
     ///    [`ChartError::EmptyData`] immediately if `spec.data` is empty,
     ///    before any renderer is called.
     /// 2. Type-specific renderer → raw SVG string
-    /// 3. [`safety::assert_no_forbidden_elements`]
-    /// 4. [`accessibility::inject_aria_attributes`]
+    /// 3. `safety::assert_no_forbidden_elements`
+    /// 4. `accessibility::inject_aria_attributes`
     ///
     /// # Errors
     ///

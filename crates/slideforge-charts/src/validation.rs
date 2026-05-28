@@ -3,7 +3,7 @@
 //! This module provides the precondition check that must run **before**
 //! [`crate::ChartRendererImpl::dispatch_and_process`] is called. If chart data
 //! is empty, the guard emits `E-LAY-003` and the caller decides whether to
-//! abort (strict mode) or produce an [`FrameContent::ErrorSlidePlaceholder`]
+//! abort (strict mode) or produce a `FrameContent::ErrorSlidePlaceholder`
 //! (warn-only mode).
 //!
 //! ## Architecture contract (BC-1.11.002 invariant 2)
@@ -26,6 +26,9 @@ use slideforge_types::{SourceSpan, Value};
 /// This code is in the `E-LAY-*` class because the empty-data condition is
 /// detected at the layout / eval-pipeline stage, before the chart renderer
 /// plugin is invoked.
+// Used by tests and by the eval-layer integration (STORY-055). Dead-code lint
+// fires because production wiring is deferred to STORY-055.
+#[allow(dead_code)]
 pub const E_LAY_003: &str = "E-LAY-003";
 
 /// Return `true` if `data` represents an empty collection.
@@ -47,6 +50,8 @@ pub const E_LAY_003: &str = "E-LAY-003";
 /// assert!(data_is_empty(&Value::List(vec![])));
 /// assert!(!data_is_empty(&Value::List(vec![Value::Int(1)])));
 /// ```
+// Used by tests and by the eval-layer integration (STORY-055).
+#[allow(dead_code)]
 #[must_use]
 pub fn data_is_empty(data: &Value) -> bool {
     match data {
@@ -77,6 +82,8 @@ pub fn data_is_empty(data: &Value) -> bool {
 /// - `message`: `"Chart data is empty for slide '<slide_title>'. Rendering error-slide placeholder."`
 /// - `hint`: `"Ensure '<expression>' contains at least one row."`
 /// - `span`: the provided `span` (miette renders the expression location as a source pointer)
+// Used by tests and by the eval-layer integration (STORY-055).
+#[allow(dead_code)]
 #[must_use]
 pub fn build_empty_data_diagnostic(
     slide_title: &str,

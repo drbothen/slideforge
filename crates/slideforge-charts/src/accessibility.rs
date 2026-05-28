@@ -54,7 +54,7 @@ fn xml_text_escape(s: &str) -> String {
 ///
 /// Returns [`ChartError::RenderError`] if the SVG string does not contain a
 /// root `<svg` element (which would indicate a plotters backend failure).
-pub fn inject_aria_attributes(svg: &str, alt: &str) -> Result<ChartSvg, ChartError> {
+pub(crate) fn inject_aria_attributes(svg: &str, alt: &str) -> Result<ChartSvg, ChartError> {
     // Find the opening <svg tag.
     let svg_start = svg.find("<svg").ok_or_else(|| ChartError::RenderError {
         message: Arc::from("SVG string does not contain a root <svg> element"),

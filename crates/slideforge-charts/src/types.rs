@@ -161,7 +161,7 @@ impl InternalChartSpec {
 /// The string is a complete, self-contained SVG document (no external
 /// references). Accessibility attributes (`aria-label`, `role="img"`, and a
 /// `<title>` child element) are injected by
-/// [`crate::accessibility::inject_aria_attributes`] before wrapping.
+/// `crate::accessibility::inject_aria_attributes` before wrapping.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ChartSvg(pub String);
 
@@ -213,12 +213,12 @@ pub enum ChartError {
     /// Chart data evaluated to an empty collection before `render()` was called.
     ///
     /// Maps to error code `E-LAY-003`. This variant is produced by the
-    /// empty-data guard in [`crate::validation`] when [`slideforge_types::Value::List`]
+    /// empty-data guard in `crate::validation` when [`slideforge_types::Value::List`]
     /// is empty. The guard runs BEFORE [`crate::ChartRendererImpl::dispatch_and_process`]
     /// to satisfy BC-1.11.002 invariant 2 (renderer is never called with empty data).
     ///
     /// In strict mode: this error causes the build to fail (exit code 2, no output).
-    /// In warn-only mode: the caller produces a [`slideforge_layout::FrameContent::ErrorSlidePlaceholder`].
+    /// In warn-only mode: the caller produces a `slideforge_layout::FrameContent::ErrorSlidePlaceholder`.
     ///
     /// ## Canonical Display format (HIGH-004)
     ///

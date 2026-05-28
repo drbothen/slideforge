@@ -1,7 +1,7 @@
 //! Error-slide placeholder SVG generation (STORY-032).
 //!
 //! When the chart pipeline is in warn-only mode and chart data is empty, the
-//! layout engine substitutes a [`FrameContent::ErrorSlidePlaceholder`] in place
+//! layout engine substitutes a `FrameContent::ErrorSlidePlaceholder` in place
 //! of the chart frame. This module generates the SVG content for that
 //! placeholder.
 //!
@@ -44,7 +44,7 @@ fn xml_escape(s: &str) -> String {
 ///
 /// Produces a PPTX-safe, self-contained SVG that renders a light gray
 /// background with the error code and message centered on screen. The output
-/// is suitable for embedding in a [`slideforge_layout::FrameContent::ErrorSlidePlaceholder`]
+/// is suitable for embedding in a `slideforge_layout::FrameContent::ErrorSlidePlaceholder`
 /// variant.
 ///
 /// # Arguments

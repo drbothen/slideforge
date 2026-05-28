@@ -19,7 +19,7 @@ use crate::types::ChartError;
 ///
 /// Returns [`ChartError::RenderError`] if any forbidden element pattern is
 /// found in the SVG string.
-pub fn assert_no_forbidden_elements(svg: &str) -> Result<(), ChartError> {
+pub(crate) fn assert_no_forbidden_elements(svg: &str) -> Result<(), ChartError> {
     // FINDING-008: Use case-insensitive check to catch <SCRIPT>, <Script>, etc.
     // SVG 1.1 element names are case-sensitive but injections may use any case.
     let svg_lower = svg.to_ascii_lowercase();

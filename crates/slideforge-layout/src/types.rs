@@ -259,7 +259,7 @@ pub enum FrameContent {
     ///
     /// This variant is produced instead of the normal chart/diagram content
     /// when the pipeline encounters a recoverable error in
-    /// [`slideforge_validate::ValidationMode::WarnOnly`] mode. Exporters
+    /// `slideforge_validate::ValidationMode::WarnOnly` mode. Exporters
     /// (STORY-037 and later) render this as a light gray slide with the error
     /// message overlaid as text.
     ///
@@ -272,12 +272,12 @@ pub enum FrameContent {
     /// ## Exporter contract
     ///
     /// The `svg` field is a pre-rendered, PPTX-safe SVG string produced by
-    /// [`slideforge_charts::placeholder::build_error_slide_placeholder_svg`].
+    /// `slideforge_charts::placeholder::build_error_slide_placeholder_svg`.
     /// Exporters that do not support inline SVG fallback to rendering
     /// `error_code` and `message` as plain text on a gray background.
     ErrorSlidePlaceholder {
         /// Pre-rendered error-slide SVG from
-        /// [`slideforge_charts::placeholder::build_error_slide_placeholder_svg`].
+        /// `slideforge_charts::placeholder::build_error_slide_placeholder_svg`.
         ///
         /// Self-contained SVG; no external references. PPTX-safe (no `<script>`
         /// or `<foreignObject>`).
