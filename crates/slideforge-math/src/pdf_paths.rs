@@ -755,14 +755,8 @@ mod tests {
         let paths = render_pdf_paths(&ast).expect("render_pdf_paths must succeed");
         let (w, h) = parse_viewbox_dims(&paths.0)
             .unwrap_or_else(|| panic!("SVG must have a parseable viewBox; got: {}", paths.0));
-        assert!(
-            w > 0,
-            "viewBox width must be positive; got: {w}"
-        );
-        assert!(
-            h > 0,
-            "viewBox height must be positive; got: {h}"
-        );
+        assert!(w > 0, "viewBox width must be positive; got: {w}");
+        assert!(h > 0, "viewBox height must be positive; got: {h}");
     }
 
     /// `render_pdf_paths` output SVG is well-formed XML.
@@ -820,8 +814,9 @@ mod tests {
         ]);
         let paths = render_pdf_paths(&ast).expect("render_pdf_paths must succeed for x^2+y^2");
         assert!(!paths.0.is_empty(), "SVG must not be empty");
-        let (w, h) = parse_viewbox_dims(&paths.0)
-            .unwrap_or_else(|| panic!("complex expression SVG must have viewBox; got: {}", paths.0));
+        let (w, h) = parse_viewbox_dims(&paths.0).unwrap_or_else(|| {
+            panic!("complex expression SVG must have viewBox; got: {}", paths.0)
+        });
         assert!(w > 0, "viewBox width must be positive");
         assert!(h > 0, "viewBox height must be positive");
     }

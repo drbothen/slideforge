@@ -23,7 +23,7 @@
 //! Characters without a glyph in Latin Modern Math fall back to a rectangular
 //! bounding-box marker path so the output is always non-empty.
 
-#![allow(clippy::cast_precision_loss)]    // i64 cell coords ≤ a few hundred pixels; f32 is exact
+#![allow(clippy::cast_precision_loss)] // i64 cell coords ≤ a few hundred pixels; f32 is exact
 #![allow(clippy::cast_possible_truncation)] // advance.round() → i64: clamped to ≥1, no overflow
 #![allow(clippy::many_single_char_names)] // (x, y, w, h) are canonical names for glyph geometry
 
@@ -268,7 +268,10 @@ mod tests {
         let engine = GlyphEngine::new();
         let mut paths: Vec<String> = Vec::new();
         engine.emit_glyph('x', &mut paths, 0, 0, 10, 14).unwrap();
-        assert!(!paths.is_empty(), "emit_glyph for 'x' must produce at least one path");
+        assert!(
+            !paths.is_empty(),
+            "emit_glyph for 'x' must produce at least one path"
+        );
         let svg_path = &paths[0];
         assert!(
             svg_path.contains("<path ") && svg_path.contains(" d=\""),
@@ -281,8 +284,13 @@ mod tests {
         let engine = GlyphEngine::new();
         let mut paths: Vec<String> = Vec::new();
         // γ (U+03B3 — Greek small letter gamma)
-        engine.emit_glyph('\u{03B3}', &mut paths, 0, 0, 10, 14).unwrap();
-        assert!(!paths.is_empty(), "emit_glyph for γ must produce at least one path");
+        engine
+            .emit_glyph('\u{03B3}', &mut paths, 0, 0, 10, 14)
+            .unwrap();
+        assert!(
+            !paths.is_empty(),
+            "emit_glyph for γ must produce at least one path"
+        );
     }
 
     #[test]
@@ -306,7 +314,9 @@ mod tests {
         let mut gamma_paths: Vec<String> = Vec::new();
         let mut g_paths: Vec<String> = Vec::new();
         // γ (U+03B3) vs 'g' (U+0067)
-        engine.emit_glyph('\u{03B3}', &mut gamma_paths, 0, 0, 10, 14).unwrap();
+        engine
+            .emit_glyph('\u{03B3}', &mut gamma_paths, 0, 0, 10, 14)
+            .unwrap();
         engine.emit_glyph('g', &mut g_paths, 0, 0, 10, 14).unwrap();
         assert_ne!(
             gamma_paths, g_paths,
@@ -318,7 +328,10 @@ mod tests {
     fn test_font_engine_advance_width_positive() {
         let engine = GlyphEngine::new();
         let advance = engine.advance_width('x', 14, 10);
-        assert!(advance > 0, "advance width for 'x' must be positive; got: {advance}");
+        assert!(
+            advance > 0,
+            "advance width for 'x' must be positive; got: {advance}"
+        );
     }
 
     #[test]
@@ -327,8 +340,13 @@ mod tests {
         // U+FFF0 is in a Private Use Area — very unlikely to be in LM Math.
         // We test that it emits *something* (the fallback rectangle) without panicking.
         let mut paths: Vec<String> = Vec::new();
-        engine.emit_glyph('\u{FFF0}', &mut paths, 0, 0, 10, 14).unwrap();
-        assert!(!paths.is_empty(), "fallback must emit a rectangle path for unknown char");
+        engine
+            .emit_glyph('\u{FFF0}', &mut paths, 0, 0, 10, 14)
+            .unwrap();
+        assert!(
+            !paths.is_empty(),
+            "fallback must emit a rectangle path for unknown char"
+        );
         assert!(
             paths[0].contains('Z'),
             "fallback rectangle path must end with Z (closed path); got: {}",
