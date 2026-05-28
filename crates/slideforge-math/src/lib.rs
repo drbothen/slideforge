@@ -39,6 +39,7 @@
 
 pub mod ast;
 pub mod error;
+pub mod font_engine;
 pub mod interpolation;
 pub mod mathml;
 pub mod omml;

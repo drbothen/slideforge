@@ -32,6 +32,7 @@ use slideforge_plugin_api::MathError;
 
 use crate::MathAst;
 use crate::ast::{MathMode, MathNode};
+use crate::font_engine::GlyphEngine;
 use crate::symbols::{
     greek_to_unicode_char, is_text_operator, operator_to_unicode_char, symbol_to_unicode_char,
     unescape_delimiter,
@@ -106,11 +107,14 @@ pub fn render_pdf_paths(ast: &MathAst) -> Result<SvgPaths, MathError> {
         return Err(MathError::EmptyAst);
     }
 
+    // Construct the glyph engine once per render call (cheap — borrows static bytes).
+    let engine = GlyphEngine::new();
+
     let mut paths: Vec<String> = Vec::new();
     let mut x: i64 = 0;
     let baseline_y: i64 = GLYPH_H;
 
-    collect_paths(ast, &ast.nodes, &mut paths, &mut x, baseline_y)?;
+    collect_paths(&engine, ast, &ast.nodes, &mut paths, &mut x, baseline_y)?;
 
     // Secondary guard: a non-empty node list may still produce zero paths when
     // it consists solely of empty Group nodes (F-S030-P5-L1). In that case
@@ -187,6 +191,7 @@ pub fn render_pdf_paths(ast: &MathAst) -> Result<SvgPaths, MathError> {
 /// placed. This function is called on the flat node list of the AST and
 /// delegates to [`place_node`] for each node.
 fn collect_paths(
+    engine: &GlyphEngine,
     _ast: &MathAst,
     nodes: &[MathNode],
     paths: &mut Vec<String>,
@@ -194,7 +199,7 @@ fn collect_paths(
     baseline_y: i64,
 ) -> Result<(), MathError> {
     for node in nodes {
-        place_node(node, paths, x, baseline_y)?;
+        place_node(engine, node, paths, x, baseline_y)?;
     }
     Ok(())
 }
@@ -210,6 +215,7 @@ fn collect_paths(
 /// when a Greek/Operator/Symbol node cannot be resolved to a Unicode glyph.
 #[allow(clippy::too_many_lines)]
 fn place_node(
+    engine: &GlyphEngine,
     node: &MathNode,
     paths: &mut Vec<String>,
     x: &mut i64,
@@ -218,27 +224,27 @@ fn place_node(
     match node {
         MathNode::Text(s) | MathNode::TextRun(s) => {
             for ch in s.chars() {
-                emit_glyph(ch, paths, *x, baseline_y - GLYPH_H);
-                *x += GLYPH_W + 1;
+                emit_glyph(engine, ch, paths, *x, baseline_y - GLYPH_H)?;
+                *x += engine.advance_width(ch, GLYPH_H, GLYPH_W) + 1;
             }
         },
 
         MathNode::Superscript { base, sup } => {
             // Render base at normal position
-            place_node(base, paths, x, baseline_y)?;
+            place_node(engine, base, paths, x, baseline_y)?;
             // Render sup raised above the baseline
             let sup_y = (baseline_y - GLYPH_H - SUP_OFFSET).max(0);
             let sup_h = GLYPH_H * 2 / 3;
             let sup_start = *x;
-            place_node_at_scale(sup, paths, x, sup_y, sup_h)?;
+            place_node_at_scale(engine, sup, paths, x, sup_y, sup_h)?;
             let _ = sup_start; // used for layout tracking only
         },
 
         MathNode::Subscript { base, sub } => {
-            place_node(base, paths, x, baseline_y)?;
+            place_node(engine, base, paths, x, baseline_y)?;
             let sub_y = baseline_y + SUB_OFFSET;
             let sub_h = GLYPH_H * 2 / 3;
-            place_node_at_scale(sub, paths, x, sub_y, sub_h)?;
+            place_node_at_scale(engine, sub, paths, x, sub_y, sub_h)?;
         },
 
         MathNode::Fraction { num, denom } => {
@@ -249,11 +255,11 @@ fn place_node(
 
             // Numerator above baseline
             let num_y = (baseline_y - GLYPH_H * 3 / 2).max(0);
-            place_node_at_scale(num, paths, &mut num_x, num_y, GLYPH_H * 2 / 3)?;
+            place_node_at_scale(engine, num, paths, &mut num_x, num_y, GLYPH_H * 2 / 3)?;
 
             // Denominator below baseline
             let denom_y = baseline_y;
-            place_node_at_scale(denom, paths, &mut denom_x, denom_y, GLYPH_H * 2 / 3)?;
+            place_node_at_scale(engine, denom, paths, &mut denom_x, denom_y, GLYPH_H * 2 / 3)?;
 
             let width = num_x.max(denom_x) - saved_x;
             // Fraction bar
@@ -276,11 +282,11 @@ fn place_node(
             *x += 8;
 
             if let Some(idx) = index {
-                place_node_at_scale(idx, paths, x, rad_y, GLYPH_H / 2)?;
+                place_node_at_scale(engine, idx, paths, x, rad_y, GLYPH_H / 2)?;
             }
 
             let content_start = *x;
-            place_node(radicand, paths, x, baseline_y)?;
+            place_node(engine, radicand, paths, x, baseline_y)?;
             let content_end = *x;
 
             // Overline above radicand
@@ -301,13 +307,13 @@ fn place_node(
             // as text operators return UnsupportedSymbol — they must not fall
             // through to per-letter rendering (F-S030-P2-H6).
             if let Some(ch) = operator_to_unicode_char(name) {
-                emit_glyph(ch, paths, *x, baseline_y - GLYPH_H);
-                *x += GLYPH_W + 1;
+                emit_glyph(engine, ch, paths, *x, baseline_y - GLYPH_H)?;
+                *x += engine.advance_width(ch, GLYPH_H, GLYPH_W) + 1;
             } else if is_text_operator(name) {
                 // Known text operator: render each Latin character individually.
                 for ch in name.chars() {
-                    emit_glyph(ch, paths, *x, baseline_y - GLYPH_H);
-                    *x += GLYPH_W + 1;
+                    emit_glyph(engine, ch, paths, *x, baseline_y - GLYPH_H)?;
+                    *x += engine.advance_width(ch, GLYPH_H, GLYPH_W) + 1;
                 }
             } else {
                 return Err(MathError::UnsupportedSymbol {
@@ -321,8 +327,8 @@ fn place_node(
                 return Err(MathError::EmptyCommandName);
             }
             if let Some(ch) = symbol_to_unicode_char(name) {
-                emit_glyph(ch, paths, *x, baseline_y - GLYPH_H);
-                *x += GLYPH_W + 1;
+                emit_glyph(engine, ch, paths, *x, baseline_y - GLYPH_H)?;
+                *x += engine.advance_width(ch, GLYPH_H, GLYPH_W) + 1;
             } else {
                 return Err(MathError::UnsupportedSymbol {
                     name: name.to_string(),
@@ -335,8 +341,8 @@ fn place_node(
                 return Err(MathError::EmptyCommandName);
             }
             if let Some(ch) = greek_to_unicode_char(name) {
-                emit_glyph(ch, paths, *x, baseline_y - GLYPH_H);
-                *x += GLYPH_W + 1;
+                emit_glyph(engine, ch, paths, *x, baseline_y - GLYPH_H)?;
+                *x += engine.advance_width(ch, GLYPH_H, GLYPH_W) + 1;
             } else {
                 return Err(MathError::UnsupportedSymbol {
                     name: name.to_string(),
@@ -347,7 +353,7 @@ fn place_node(
         MathNode::Accent { kind, inner } => {
             use crate::ast::AccentKind;
             let save_x = *x;
-            place_node(inner, paths, x, baseline_y)?;
+            place_node(engine, inner, paths, x, baseline_y)?;
             let accent_y = (baseline_y - GLYPH_H - 3).max(0);
             let x_end = *x;
             let mid_x = save_x + (x_end - save_x) / 2;
@@ -406,7 +412,7 @@ fn place_node(
 
         MathNode::Group(nodes) => {
             for n in nodes {
-                place_node(n, paths, x, baseline_y)?;
+                place_node(engine, n, paths, x, baseline_y)?;
             }
         },
 
@@ -416,15 +422,15 @@ fn place_node(
             let left_unesc = unescape_delimiter(left);
             let right_unesc = unescape_delimiter(right);
             for ch in left_unesc.chars() {
-                emit_glyph(ch, paths, *x, baseline_y - GLYPH_H);
-                *x += GLYPH_W + 1;
+                emit_glyph(engine, ch, paths, *x, baseline_y - GLYPH_H)?;
+                *x += engine.advance_width(ch, GLYPH_H, GLYPH_W) + 1;
             }
             for n in inner {
-                place_node(n, paths, x, baseline_y)?;
+                place_node(engine, n, paths, x, baseline_y)?;
             }
             for ch in right_unesc.chars() {
-                emit_glyph(ch, paths, *x, baseline_y - GLYPH_H);
-                *x += GLYPH_W + 1;
+                emit_glyph(engine, ch, paths, *x, baseline_y - GLYPH_H)?;
+                *x += engine.advance_width(ch, GLYPH_H, GLYPH_W) + 1;
             }
         },
 
@@ -437,7 +443,7 @@ fn place_node(
             for row in rows {
                 let mut row_x = start_x; // reset each row to the same left edge
                 for n in row {
-                    place_node(n, paths, &mut row_x, row_y)?;
+                    place_node(engine, n, paths, &mut row_x, row_y)?;
                 }
                 max_row_end = max_row_end.max(row_x);
                 row_y += GLYPH_H + 4;
@@ -455,11 +461,11 @@ fn place_node(
             for (result, condition) in cases {
                 let mut row_x = start_x; // reset each row to the same left edge
                 for n in result {
-                    place_node(n, paths, &mut row_x, row_y)?;
+                    place_node(engine, n, paths, &mut row_x, row_y)?;
                 }
                 row_x += 8; // column gap
                 for n in condition {
-                    place_node(n, paths, &mut row_x, row_y)?;
+                    place_node(engine, n, paths, &mut row_x, row_y)?;
                 }
                 max_row_end = max_row_end.max(row_x);
                 row_y += GLYPH_H + 4;
@@ -483,6 +489,7 @@ fn place_node(
 /// Greek letters, operators, and symbols use [`emit_glyph_sized`] with the
 /// scaled dimensions so they shrink consistently with text glyphs (F-S030-P2-H7).
 fn place_node_at_scale(
+    engine: &GlyphEngine,
     node: &MathNode,
     paths: &mut Vec<String>,
     x: &mut i64,
@@ -491,17 +498,16 @@ fn place_node_at_scale(
 ) -> Result<(), MathError> {
     let baseline = top_y + h;
     let scaled_w = (GLYPH_W * h / GLYPH_H.max(1)).max(4);
-    let scaled_step = scaled_w + 1;
     match node {
         MathNode::Text(s) | MathNode::TextRun(s) => {
             for ch in s.chars() {
-                emit_glyph_sized(ch, paths, *x, top_y, scaled_w, h.max(4));
-                *x += scaled_step;
+                emit_glyph_sized(engine, ch, paths, *x, top_y, scaled_w, h.max(4))?;
+                *x += engine.advance_width(ch, h.max(4), scaled_w) + 1;
             }
         },
         MathNode::Group(nodes) => {
             for n in nodes {
-                place_node_at_scale(n, paths, x, top_y, h)?;
+                place_node_at_scale(engine, n, paths, x, top_y, h)?;
             }
         },
         // Greek letters — resolved through the canonical symbols table.
@@ -512,8 +518,8 @@ fn place_node_at_scale(
             let ch = greek_to_unicode_char(name).ok_or_else(|| MathError::UnsupportedSymbol {
                 name: name.to_string(),
             })?;
-            emit_glyph_sized(ch, paths, *x, top_y, scaled_w, h.max(4));
-            *x += scaled_step;
+            emit_glyph_sized(engine, ch, paths, *x, top_y, scaled_w, h.max(4))?;
+            *x += engine.advance_width(ch, h.max(4), scaled_w) + 1;
         },
         // Symbol operators (∑, ∏, ∫, …) resolved through the canonical symbols table.
         // Text operators fall through to multi-char rendering.
@@ -522,12 +528,12 @@ fn place_node_at_scale(
                 return Err(MathError::EmptyCommandName);
             }
             if let Some(ch) = operator_to_unicode_char(name) {
-                emit_glyph_sized(ch, paths, *x, top_y, scaled_w, h.max(4));
-                *x += scaled_step;
+                emit_glyph_sized(engine, ch, paths, *x, top_y, scaled_w, h.max(4))?;
+                *x += engine.advance_width(ch, h.max(4), scaled_w) + 1;
             } else if is_text_operator(name) {
                 for ch in name.chars() {
-                    emit_glyph_sized(ch, paths, *x, top_y, scaled_w, h.max(4));
-                    *x += scaled_step;
+                    emit_glyph_sized(engine, ch, paths, *x, top_y, scaled_w, h.max(4))?;
+                    *x += engine.advance_width(ch, h.max(4), scaled_w) + 1;
                 }
             } else {
                 return Err(MathError::UnsupportedSymbol {
@@ -543,13 +549,13 @@ fn place_node_at_scale(
             let ch = symbol_to_unicode_char(name).ok_or_else(|| MathError::UnsupportedSymbol {
                 name: name.to_string(),
             })?;
-            emit_glyph_sized(ch, paths, *x, top_y, scaled_w, h.max(4));
-            *x += scaled_step;
+            emit_glyph_sized(engine, ch, paths, *x, top_y, scaled_w, h.max(4))?;
+            *x += engine.advance_width(ch, h.max(4), scaled_w) + 1;
         },
         _ => {
             // For other complex nodes at scale (Superscript inside Superscript, etc.),
             // fall back to normal placement at the requested baseline.
-            place_node(node, paths, x, baseline)?;
+            place_node(engine, node, paths, x, baseline)?;
         },
     }
     Ok(())
@@ -559,563 +565,41 @@ fn place_node_at_scale(
 
 /// Emit a single glyph as a `<path>` element at position `(x, y)`.
 ///
-/// The path is a glyph outline composed of rectangles and strokes that are
-/// unique to each character. This ensures the output is actual path data, not
-/// uniform rectangles, meeting AC-003's "path data" requirement.
-fn emit_glyph(ch: char, paths: &mut Vec<String>, x: i64, y: i64) {
-    emit_glyph_sized(ch, paths, x, y, GLYPH_W, GLYPH_H);
+/// Delegates to [`emit_glyph_sized`] with the default cell dimensions
+/// ([`GLYPH_W`] × [`GLYPH_H`]).
+fn emit_glyph(
+    engine: &GlyphEngine,
+    ch: char,
+    paths: &mut Vec<String>,
+    x: i64,
+    y: i64,
+) -> Result<(), MathError> {
+    emit_glyph_sized(engine, ch, paths, x, y, GLYPH_W, GLYPH_H)
 }
 
-/// Emit a glyph outline at a specific size.
+/// Emit a glyph outline for `ch` at the given cell `(x, y, w, h)`.
 ///
-/// Each character class gets a distinct path shape:
-/// - Digits: filled rectangular body with a notch to indicate the digit value
-/// - Uppercase Latin letters: stem + crossbar at varying heights
-/// - Lowercase Latin letters: shorter stem + ascender/descender hints
-/// - Greek Unicode letters: distinct shapes different from Latin equivalents
-/// - Operators: symbolic strokes
-/// - Other: bounding rectangle
+/// Delegates to [`GlyphEngine::emit_glyph`] which produces real Bézier-curve
+/// outlines from the bundled Latin Modern Math font. Every character in LM
+/// Math has a distinct outline; characters not present in the font fall back
+/// to a rectangular bounding-box marker so the path count is preserved.
 ///
-/// ## Design note on aliases
-///
-/// **No two distinct characters share the same match arm.**  Previous versions
-/// aliased visually-similar characters (e.g. `'U' | '∪'`, `'X' | '×'`);
-/// those aliases have been removed.  Every Unicode glyph has its own
-/// independent path so that glyph distinctness is guaranteed.
-#[allow(clippy::too_many_lines)]
-#[allow(clippy::many_single_char_names)]
-fn emit_glyph_sized(ch: char, paths: &mut Vec<String>, x: i64, y: i64, w: i64, h: i64) {
-    let x1 = x;
-    let y1 = y;
-    let x2 = x + w;
-    let y2 = y + h;
-    let mid_x = x + w / 2;
-    let mid_y = y + h / 2;
-    let top_third = y + h / 3;
-    let bot_third = y + 2 * h / 3;
-
-    // Each character gets a distinct set of strokes so the path data is
-    // semantically meaningful and distinguishable per-glyph.
-    let d = match ch {
-        // ── Digits ──────────────────────────────────────────────────────────
-        '0' => format!(
-            "M{x1},{top_third} Q{x1},{y1} {mid_x},{y1} Q{x2},{y1} {x2},{top_third} L{x2},{bot_third} Q{x2},{y2} {mid_x},{y2} Q{x1},{y2} {x1},{bot_third} Z"
-        ),
-        '1' => format!(
-            "M{mid_x},{y1} L{mid_x},{y2} M{},{mid_y} L{mid_x},{y1}",
-            x + w / 4
-        ),
-        '2' => format!(
-            "M{x1},{top_third} Q{x1},{y1} {mid_x},{y1} Q{x2},{y1} {x2},{top_third} Q{x2},{mid_y} {x1},{y2} L{x2},{y2}"
-        ),
-        '3' => format!("M{x1},{y1} H{x2} L{mid_x},{mid_y} H{x2} L{x1},{y2}"),
-        '4' => format!(
-            "M{},{y1} L{x1},{mid_y} H{x2} M{},{y1} V{y2}",
-            x + 3 * w / 4,
-            x + 3 * w / 4
-        ),
-        '5' => format!("M{x2},{y1} H{x1} V{mid_y} H{x2} Q{x2},{y2} {x1},{y2}"),
-        '6' => format!(
-            "M{x2},{y1} Q{x1},{y1} {x1},{mid_y} V{bot_third} Q{x1},{y2} {mid_x},{y2} Q{x2},{y2} {x2},{bot_third} Q{x2},{mid_y} {x1},{mid_y}"
-        ),
-        '7' => format!("M{x1},{y1} H{x2} L{x1},{y2}"),
-        '8' => format!(
-            "M{mid_x},{mid_y} Q{x1},{mid_y} {x1},{top_third} Q{x1},{y1} {mid_x},{y1} Q{x2},{y1} {x2},{top_third} Q{x2},{mid_y} {mid_x},{mid_y} Q{x1},{mid_y} {x1},{bot_third} Q{x1},{y2} {mid_x},{y2} Q{x2},{y2} {x2},{bot_third} Q{x2},{mid_y} {mid_x},{mid_y}"
-        ),
-        '9' => format!(
-            "M{x1},{y2} Q{x2},{y2} {x2},{mid_y} V{top_third} Q{x2},{y1} {mid_x},{y1} Q{x1},{y1} {x1},{top_third} Q{x1},{mid_y} {x2},{mid_y}"
-        ),
-
-        // ── Uppercase Latin letters ──────────────────────────────────────────
-        'A' | '\u{0391}' => format!(
-            "M{x1},{y2} L{mid_x},{y1} L{x2},{y2} M{},{mid_y} H{}",
-            x + w / 4,
-            x + 3 * w / 4
-        ),
-        'B' | '\u{0392}' => format!(
-            "M{x1},{y1} V{y2} H{} Q{x2},{y2} {x2},{bot_third} Q{x2},{mid_y} {x1},{mid_y} H{} Q{x2},{mid_y} {x2},{top_third} Q{x2},{y1} {x1},{y1}",
-            x + 3 * w / 4,
-            x + 3 * w / 4
-        ),
-        'C' => format!(
-            "M{x2},{top_third} Q{x2},{y1} {mid_x},{y1} Q{x1},{y1} {x1},{mid_y} Q{x1},{y2} {mid_x},{y2} Q{x2},{y2} {x2},{bot_third}"
-        ),
-        'D' => {
-            format!("M{x1},{y1} V{y2} H{mid_x} Q{x2},{y2} {x2},{mid_y} Q{x2},{y1} {mid_x},{y1} Z")
-        },
-        'E' | '\u{0395}' => format!(
-            "M{x2},{y1} H{x1} V{y2} H{x2} M{x1},{mid_y} H{}",
-            x + 3 * w / 4
-        ),
-        'F' => format!("M{x2},{y1} H{x1} V{y2} M{x1},{mid_y} H{}", x + 3 * w / 4),
-        'G' => format!(
-            "M{x2},{top_third} Q{x2},{y1} {mid_x},{y1} Q{x1},{y1} {x1},{mid_y} Q{x1},{y2} {mid_x},{y2} Q{x2},{y2} {x2},{bot_third} H{mid_x}"
-        ),
-        'H' | '\u{0397}' => format!("M{x1},{y1} V{y2} M{x2},{y1} V{y2} M{x1},{mid_y} H{x2}"),
-        'I' => format!("M{x1},{y1} H{x2} M{mid_x},{y1} V{y2} M{x1},{y2} H{x2}"),
-        'J' => {
-            format!("M{x2},{y1} V{bot_third} Q{x2},{y2} {mid_x},{y2} Q{x1},{y2} {x1},{bot_third}")
-        },
-        'K' | '\u{039A}' => format!("M{x1},{y1} V{y2} M{x2},{y1} L{x1},{mid_y} L{x2},{y2}"),
-        'L' => format!("M{x1},{y1} V{y2} H{x2}"),
-        'M' | '\u{039C}' => format!("M{x1},{y2} V{y1} L{mid_x},{mid_y} L{x2},{y1} V{y2}"),
-        'N' | '\u{039D}' => format!("M{x1},{y2} V{y1} L{x2},{y2} V{y1}"),
-        'O' => format!(
-            "M{mid_x},{y1} Q{x1},{y1} {x1},{mid_y} Q{x1},{y2} {mid_x},{y2} Q{x2},{y2} {x2},{mid_y} Q{x2},{y1} {mid_x},{y1} Z"
-        ),
-        'P' | '\u{03A1}' => format!(
-            "M{x1},{y2} V{y1} H{} Q{x2},{y1} {x2},{top_third} Q{x2},{mid_y} {x1},{mid_y}",
-            x + 3 * w / 4
-        ),
-        'Q' => format!(
-            "M{mid_x},{y1} Q{x1},{y1} {x1},{mid_y} Q{x1},{y2} {mid_x},{y2} Q{x2},{y2} {x2},{mid_y} Q{x2},{y1} {mid_x},{y1} Z M{},{} L{x2},{y2}",
-            x + 3 * w / 5,
-            y + 3 * h / 5
-        ),
-        'R' => format!(
-            "M{x1},{y2} V{y1} H{} Q{x2},{y1} {x2},{top_third} Q{x2},{mid_y} {x1},{mid_y} L{x2},{y2}",
-            x + 3 * w / 4
-        ),
-        'S' => format!(
-            "M{x2},{top_third} Q{x2},{y1} {mid_x},{y1} Q{x1},{y1} {x1},{top_third} Q{x1},{mid_y} {x2},{mid_y} Q{x2},{bot_third} {x2},{bot_third} Q{x2},{y2} {mid_x},{y2} Q{x1},{y2} {x1},{bot_third}"
-        ),
-        'T' | '\u{03A4}' => format!("M{x1},{y1} H{x2} M{mid_x},{y1} V{y2}"),
-        'U' | '\u{22C3}' => format!(
-            "M{x1},{y1} V{bot_third} Q{x1},{y2} {mid_x},{y2} Q{x2},{y2} {x2},{bot_third} V{y1}"
-        ),
-        'V' => format!("M{x1},{y1} L{mid_x},{y2} L{x2},{y1}"),
-        'W' => format!(
-            "M{x1},{y1} L{},{y2} L{mid_x},{mid_y} L{},{y2} L{x2},{y1}",
-            x + w / 4,
-            x + 3 * w / 4
-        ),
-        'X' | '\u{03A7}' => format!("M{x1},{y1} L{x2},{y2} M{x2},{y1} L{x1},{y2}"),
-        'Y' | '\u{03A5}' => {
-            format!("M{x1},{y1} L{mid_x},{mid_y} L{x2},{y1} M{mid_x},{mid_y} V{y2}")
-        },
-        'Z' | '\u{0396}' => format!("M{x1},{y1} H{x2} L{x1},{y2} H{x2}"),
-
-        // ── Lowercase Latin letters ──────────────────────────────────────────
-        'a' => format!(
-            "M{x2},{mid_y} Q{x2},{top_third} {mid_x},{top_third} Q{x1},{top_third} {x1},{mid_y} Q{x1},{y2} {mid_x},{y2} Q{x2},{y2} {x2},{bot_third} V{y2}"
-        ),
-        'b' => format!("M{x1},{y1} V{y2} Q{x1},{y2} {x2},{bot_third} Q{x2},{mid_y} {x1},{mid_y}"),
-        'c' => format!(
-            "M{x2},{mid_y} Q{x2},{top_third} {mid_x},{top_third} Q{x1},{top_third} {x1},{mid_y} Q{x1},{y2} {mid_x},{y2} Q{x2},{y2} {x2},{bot_third}"
-        ),
-        'd' => format!("M{x2},{y1} V{y2} Q{x2},{y2} {x1},{bot_third} Q{x1},{mid_y} {x2},{mid_y}"),
-        'e' => format!(
-            "M{x1},{mid_y} H{x2} Q{x2},{top_third} {mid_x},{top_third} Q{x1},{top_third} {x1},{mid_y} Q{x1},{y2} {mid_x},{y2} Q{x2},{y2} {x2},{bot_third}"
-        ),
-        'f' => format!("M{mid_x},{y2} V{top_third} Q{mid_x},{y1} {x2},{y1} M{x1},{mid_y} H{x2}"),
-        'g' => format!(
-            "M{x2},{top_third} Q{x2},{top_third} {mid_x},{top_third} Q{x1},{top_third} {x1},{mid_y} Q{x1},{y2} {mid_x},{y2} Q{x2},{y2} {x2},{mid_y} V{y2} Q{x2},{y2} {x1},{y2}"
-        ),
-        'h' => format!("M{x1},{y1} V{y2} M{x1},{mid_y} Q{x1},{top_third} {x2},{top_third} V{y2}"),
-        'i' => format!(
-            "M{mid_x},{mid_y} V{y2} M{mid_x},{} V{}",
-            y + h / 8,
-            y + h / 5
-        ),
-        'j' => format!(
-            "M{mid_x},{mid_y} V{y2} Q{mid_x},{y2} {x1},{y2} M{mid_x},{} V{}",
-            y + h / 8,
-            y + h / 5
-        ),
-        'k' => format!("M{x1},{y1} V{y2} M{x2},{mid_y} L{x1},{mid_y} L{x2},{y2}"),
-        // 'l' — lowercase el: a curved vertical with a small foot at the bottom
-        'l' => format!(
-            "M{mid_x},{y1} V{bot_third} Q{mid_x},{y2} {},{y2}",
-            x + w * 2 / 3
-        ),
-        'm' => format!(
-            "M{x1},{mid_y} V{y2} M{x1},{mid_y} Q{x1},{top_third} {mid_x},{top_third} V{y2} M{mid_x},{mid_y} Q{mid_x},{top_third} {x2},{top_third} V{y2}"
-        ),
-        'n' => {
-            format!("M{x1},{mid_y} V{y2} M{x1},{mid_y} Q{x1},{top_third} {x2},{top_third} V{y2}")
-        },
-        'o' => format!(
-            "M{mid_x},{top_third} Q{x1},{top_third} {x1},{mid_y} Q{x1},{y2} {mid_x},{y2} Q{x2},{y2} {x2},{mid_y} Q{x2},{top_third} {mid_x},{top_third} Z"
-        ),
-        'p' => format!(
-            "M{x1},{mid_y} V{y2} M{x1},{mid_y} Q{x1},{top_third} {x2},{top_third} Q{x2},{mid_y} {x1},{mid_y}"
-        ),
-        'q' => format!(
-            "M{x2},{mid_y} V{y2} M{x2},{mid_y} Q{x2},{top_third} {x1},{top_third} Q{x1},{mid_y} {x2},{mid_y}"
-        ),
-        'r' => format!("M{x1},{mid_y} V{y2} M{x1},{mid_y} Q{x1},{top_third} {x2},{top_third}"),
-        's' => format!(
-            "M{x2},{mid_y} Q{x2},{top_third} {mid_x},{top_third} Q{x1},{top_third} {x1},{mid_y} Q{x1},{bot_third} {x2},{bot_third} Q{x2},{y2} {mid_x},{y2} Q{x1},{y2} {x1},{bot_third}"
-        ),
-        't' => format!("M{mid_x},{y1} V{y2} M{x1},{top_third} H{x2}"),
-        'u' | '\u{03C5}' => format!(
-            "M{x1},{top_third} V{bot_third} Q{x1},{y2} {mid_x},{y2} Q{x2},{y2} {x2},{bot_third} V{top_third}"
-        ),
-        'v' | '\u{03BD}' => format!("M{x1},{top_third} L{mid_x},{y2} L{x2},{top_third}"),
-        'w' => format!(
-            "M{x1},{top_third} L{},{y2} L{mid_x},{bot_third} L{},{y2} L{x2},{top_third}",
-            x + w / 4,
-            x + 3 * w / 4
-        ),
-        'x' => format!("M{x1},{top_third} L{x2},{y2} M{x2},{top_third} L{x1},{y2}"),
-        'y' => format!(
-            "M{x1},{top_third} L{mid_x},{bot_third} L{x2},{top_third} M{mid_x},{bot_third} L{x1},{y2}"
-        ),
-        'z' => format!("M{x1},{top_third} H{x2} L{x1},{y2} H{x2}"),
-
-        // ── Common ASCII math operators / symbols ────────────────────────────
-        '+' => format!("M{mid_x},{y1} V{y2} M{x1},{mid_y} H{x2}"),
-        '-' => format!("M{x1},{mid_y} H{x2}"),
-        '=' => format!("M{x1},{top_third} H{x2} M{x1},{bot_third} H{x2}"),
-        '*' => format!(
-            "M{mid_x},{y1} V{y2} M{x1},{top_third} L{x2},{bot_third} M{x2},{top_third} L{x1},{bot_third}"
-        ),
-        '/' => format!("M{x2},{y1} L{x1},{y2}"),
-        '(' => format!("M{mid_x},{y1} Q{x1},{y1} {x1},{mid_y} Q{x1},{y2} {mid_x},{y2}"),
-        ')' => format!("M{mid_x},{y1} Q{x2},{y1} {x2},{mid_y} Q{x2},{y2} {mid_x},{y2}"),
-        '[' => format!("M{mid_x},{y1} H{x1} V{y2} H{mid_x}"),
-        ']' => format!("M{mid_x},{y1} H{x2} V{y2} H{mid_x}"),
-        '{' => format!(
-            "M{mid_x},{y1} Q{x1},{y1} {x1},{top_third} Q{x1},{mid_y} {x1},{mid_y} Q{x1},{mid_y} {x1},{bot_third} Q{x1},{y2} {mid_x},{y2}"
-        ),
-        '}' => format!(
-            "M{mid_x},{y1} Q{x2},{y1} {x2},{top_third} Q{x2},{mid_y} {x2},{mid_y} Q{x2},{mid_y} {x2},{bot_third} Q{x2},{y2} {mid_x},{y2}"
-        ),
-        '<' => format!("M{x2},{y1} L{x1},{mid_y} L{x2},{y2}"),
-        '>' => format!("M{x1},{y1} L{x2},{mid_y} L{x1},{y2}"),
-        ',' => format!("M{mid_x},{bot_third} Q{mid_x},{y2} {x1},{y2}"),
-        '.' => format!("M{mid_x},{y2} V{y2}"),
-        ':' => format!("M{mid_x},{top_third} V{top_third} M{mid_x},{bot_third} V{bot_third}"),
-        '^' => format!("M{x1},{mid_y} L{mid_x},{y1} L{x2},{mid_y}"),
-        '_' => format!("M{x1},{y2} H{x2}"),
-        '|' | '\u{0399}' => format!("M{mid_x},{y1} V{y2}"),
-        '!' => format!("M{mid_x},{y1} V{bot_third} M{mid_x},{y2} V{y2}"),
-
-        // ── Unicode Greek letters — each has a DISTINCT shape from Latin ─────
-        //
-        // These characters arrive after command-name → Unicode translation.
-        // Every glyph must be visually distinct from any Latin letter that
-        // shares a similar shape (gamma ≠ g, sigma ≠ s, delta ≠ d, etc.).
-        '\u{03B1}' => format!(
-            // α — two lobes connected at right: fish-shape
-            "M{x2},{top_third} Q{mid_x},{top_third} {x1},{mid_y} Q{x1},{y2} {mid_x},{y2} Q{x2},{y2} {x2},{bot_third} M{x2},{top_third} V{y2}"
-        ), // α
-        '\u{03B2}' => format!(
-            // β — vertical stem with two bumps (beta shape, not lowercase b)
-            "M{x1},{y1} V{y2} Q{x1},{y2} {x2},{bot_third} Q{x2},{mid_y} {x1},{mid_y} Q{x2},{mid_y} {x2},{top_third} Q{x2},{y1} {x1},{y1}"
-        ), // β
-        '\u{03B3}' => format!(
-            // γ — two arms sweeping down and merging to a single tail
-            "M{x1},{top_third} L{mid_x},{mid_y} L{x2},{top_third} M{mid_x},{mid_y} L{mid_x},{y2} Q{mid_x},{y2} {x1},{y2}"
-        ), // γ — DISTINCT from Latin g
-        '\u{03B4}' => format!(
-            // δ — small oval with a curved tail above
-            "M{mid_x},{y1} Q{x2},{y1} {x2},{top_third} Q{x2},{y1} {mid_x},{top_third} Q{x1},{top_third} {x1},{mid_y} Q{x1},{y2} {mid_x},{y2} Q{x2},{y2} {x2},{bot_third} Q{x2},{mid_y} {mid_x},{mid_y} Q{x1},{mid_y} {x1},{bot_third}"
-        ), // δ — DISTINCT from Latin d
-        '\u{03B5}' => format!(
-            // ε — two open arcs pointing left (epsilon shape, ≠ 'e')
-            "M{x2},{top_third} Q{x2},{y1} {mid_x},{y1} Q{x1},{y1} {x1},{mid_y} H{x2} M{x1},{mid_y} Q{x1},{y2} {mid_x},{y2} Q{x2},{y2} {x2},{bot_third}"
-        ), // ε
-        '\u{03B6}' => format!(
-            // ζ — top line, diagonal stroke, bottom curl
-            "M{x2},{y1} H{x1} L{x2},{bot_third} Q{x2},{y2} {x1},{y2}"
-        ), // ζ
-        '\u{03B7}' => format!(
-            // η — n-shape with descender below baseline
-            "M{x1},{mid_y} V{y2} M{x1},{mid_y} Q{x1},{top_third} {x2},{top_third} V{y2} Q{x2},{y2} {x1},{y2}"
-        ), // η — DISTINCT from Latin n
-        '\u{03B8}' | '\u{0398}' => format!(
-            // θ/Θ — oval with a horizontal bar through the middle
-            "M{mid_x},{y1} Q{x1},{y1} {x1},{mid_y} Q{x1},{y2} {mid_x},{y2} Q{x2},{y2} {x2},{mid_y} Q{x2},{y1} {mid_x},{y1} Z M{x1},{mid_y} H{x2}"
-        ), // θ/Θ
-        '\u{03D1}' => format!(
-            // ϑ — script theta: vertical stem + oval
-            "M{mid_x},{y1} V{mid_y} Q{mid_x},{y2} {x2},{y2} Q{x2},{mid_y} {mid_x},{mid_y} M{x1},{top_third} H{x2}"
-        ), // ϑ
-        '\u{03B9}' => format!(
-            // ι — simple vertical stroke shorter than full height (iota)
-            "M{mid_x},{top_third} V{y2}"
-        ), // ι
-        '\u{03BA}' => format!(
-            // κ — vertical stem + two diagonal arms (like k but different proportions)
-            "M{x1},{top_third} V{y2} M{x2},{top_third} L{},{mid_y} L{x2},{y2}",
-            x + w * 2 / 3
-        ), // κ
-        '\u{03BB}' => format!(
-            // λ — inverted V with right leg continuing down
-            "M{x1},{y1} L{mid_x},{mid_y} L{x2},{y2} M{mid_x},{mid_y} L{x1},{y2}"
-        ), // λ
-        '\u{03BC}' => format!(
-            // μ — like u but with left descender
-            "M{x1},{top_third} V{y2} M{x1},{top_third} V{bot_third} Q{x1},{y2} {mid_x},{y2} Q{x2},{y2} {x2},{bot_third} V{top_third}"
-        ), // μ — DISTINCT from Latin u
-        // ν (U+03BD) merged into 'v' | '\u{03BD}' above
-        '\u{03BE}' => format!(
-            // ξ — three horizontal lines with connecting curves (xi)
-            "M{x2},{y1} H{x1} M{x2},{mid_y} Q{x1},{mid_y} {x1},{bot_third} Q{x1},{y2} {x2},{y2} M{x2},{top_third} Q{x1},{top_third} {x1},{mid_y}"
-        ), // ξ
-        '\u{03C0}' => format!(
-            // π — horizontal top bar with two vertical legs
-            "M{x1},{top_third} H{x2} M{},{top_third} V{y2} M{},{top_third} V{y2}",
-            x + w / 4,
-            x + 3 * w / 4
-        ), // π
-        '\u{03D6}' => format!(
-            // ϖ — varpi: horizontal line + omega-like base
-            "M{x1},{top_third} H{x2} M{x1},{bot_third} Q{x1},{y2} {mid_x},{y2} Q{x2},{y2} {x2},{bot_third}"
-        ), // ϖ
-        '\u{03C1}' => format!(
-            // ρ — like p but with tail curving left (rho)
-            "M{x1},{y2} V{top_third} Q{x1},{top_third} {x2},{top_third} Q{x2},{mid_y} {x1},{mid_y} V{y2}"
-        ), // ρ — DISTINCT from Latin p
-        '\u{03F1}' => format!(
-            // ϱ — varrho: open oval with tail
-            "M{x2},{top_third} Q{x2},{y1} {mid_x},{y1} Q{x1},{y1} {x1},{mid_y} Q{x1},{y2} {mid_x},{y2} Q{x2},{y2} {x2},{mid_y} L{x1},{y2}"
-        ), // ϱ
-        '\u{03C3}' => format!(
-            // σ — oval with a horizontal tail to the right at the top (sigma)
-            "M{x2},{top_third} H{mid_x} Q{x1},{top_third} {x1},{mid_y} Q{x1},{y2} {mid_x},{y2} Q{x2},{y2} {x2},{mid_y} Q{x2},{top_third} {mid_x},{top_third}"
-        ), // σ — DISTINCT from Latin s
-        '\u{03C2}' => format!(
-            // ς — varsigma: like sigma but with a downward curl at the end
-            "M{x2},{top_third} Q{x2},{y1} {mid_x},{y1} Q{x1},{y1} {x1},{mid_y} Q{x1},{y2} {mid_x},{y2} Q{x2},{y2} {x2},{bot_third} Q{x2},{y2} {x1},{y2}"
-        ), // ς
-        '\u{03C4}' => format!(
-            // τ — horizontal bar with a curved descender in the middle (tau)
-            "M{x1},{top_third} H{x2} M{mid_x},{top_third} V{bot_third} Q{mid_x},{y2} {x1},{y2}"
-        ), // τ — DISTINCT from Latin t
-        // υ (U+03C5) merged into 'u' | '\u{03C5}' above
-        // φ (U+03C6) merged into '\u{03C6}' | '\u{03A6}' in the uppercase Greek section below
-        '\u{03C7}' => format!(
-            // χ — chi: two crossing curves (like x but longer below the baseline)
-            "M{x1},{top_third} Q{mid_x},{mid_y} {x2},{y2} M{x2},{top_third} Q{mid_x},{mid_y} {x1},{y2}"
-        ), // χ — DISTINCT from Latin x
-        '\u{03C8}' => format!(
-            // ψ — vertical stem with two outer wings and a bottom curl
-            "M{mid_x},{y1} V{y2} M{x1},{top_third} Q{x1},{bot_third} {mid_x},{bot_third} M{x2},{top_third} Q{x2},{bot_third} {mid_x},{bot_third}"
-        ), // ψ
-        '\u{03C9}' => format!(
-            // ω — omega: two rounded bumps joined at top
-            "M{x1},{top_third} Q{x1},{y2} {},{y2} Q{mid_x},{bot_third} {},{y2} Q{x2},{y2} {x2},{top_third}",
-            x + w / 3,
-            x + 2 * w / 3
-        ), // ω — DISTINCT from Latin w
-        // ── Uppercase Greek (unique shapes only — lookalikes merged into Latin arms above) ──
-        //
-        // Merged into Latin arms:
-        //   A/Α, B/Β, E/Ε, H/Η, K/Κ, M/Μ, N/Ν, P/Ρ, T/Τ, X/Χ, Y/Υ, Z/Ζ
-        // Merged into other Unicode arms:
-        //   Θ (→ θ/Θ), Ι (→ |/Ι), Κ (→ K/Κ), Τ (→ T/Τ), Υ (→ Y/Υ), Χ (→ X/Χ)
-        '\u{0393}' => format!(
-            // Γ — top horizontal + left vertical (Gamma shape)
-            "M{x2},{y1} H{x1} V{y2}"
-        ), // Γ
-        '\u{0394}' => format!(
-            // Δ — triangle pointing up (Delta)
-            "M{x1},{y2} L{mid_x},{y1} L{x2},{y2} Z"
-        ), // Δ
-        '\u{039B}' => format!(
-            // Λ — inverted V (Lambda)
-            "M{x1},{y2} L{mid_x},{y1} L{x2},{y2}"
-        ), // Λ
-        '\u{039E}' => format!(
-            // Ξ — three horizontal bars (Xi)
-            "M{x1},{y1} H{x2} M{},{mid_y} H{} M{x1},{y2} H{x2}",
-            x + w / 4,
-            x + 3 * w / 4
-        ), // Ξ
-        '\u{03A0}' | '\u{220F}' => format!("M{x1},{y2} V{y1} H{x2} V{y2}"), // Π / ∏ — same glyph
-        '\u{03A3}' | '\u{2211}' => format!(
-            // Σ/∑ — Sigma/summation: same glyph, two diagonals + top/bottom bars
-            "M{x2},{y1} H{x1} L{x2},{mid_y} L{x1},{y2} H{x2}"
-        ), // Σ/∑ — DISTINCT from Latin S
-        '\u{03C6}' => format!(
-            // φ — lowercase phi: vertical line through an oval centred in lower 2/3
-            // Distinct from Φ (uppercase) which uses the full height
-            "M{mid_x},{top_third} V{y2} M{mid_x},{top_third} Q{x1},{top_third} {x1},{mid_y} Q{x1},{bot_third} {mid_x},{bot_third} Q{x2},{bot_third} {x2},{mid_y} Q{x2},{top_third} {mid_x},{top_third}"
-        ), // φ — DISTINCT from Φ (U+03A6)
-        '\u{03A6}' => format!(
-            // Φ — uppercase Phi: full-height vertical line through a full oval
-            // Distinct from φ (lowercase) which is centred in the lower 2/3
-            "M{mid_x},{y1} V{y2} M{mid_x},{top_third} Q{x1},{top_third} {x1},{mid_y} Q{x1},{bot_third} {mid_x},{bot_third} Q{x2},{bot_third} {x2},{mid_y} Q{x2},{top_third} {mid_x},{top_third}"
-        ), // Φ — DISTINCT from φ (U+03C6)
-        '\u{03A8}' => format!(
-            // Ψ — vertical stem with two outer arms and bottom bar (Psi)
-            "M{mid_x},{y1} V{y2} M{x1},{top_third} Q{x1},{bot_third} {mid_x},{bot_third} M{x2},{top_third} Q{x2},{bot_third} {mid_x},{bot_third} M{x1},{y2} H{x2}"
-        ), // Ψ
-        '\u{03A9}' => format!(
-            // Ω — omega: two arcs joined at bottom with two serifs (Omega)
-            "M{x1},{y2} L{},{bot_third} Q{x1},{y1} {mid_x},{y1} Q{x2},{y1} {x2},{bot_third} L{x2},{y2}",
-            x + w / 4
-        ), // Ω
-
-        // ── Unicode math operators / symbols (from operator_to_unicode_char and symbol_to_unicode_char) ──
-        // Note: ∑ (U+2211) merged into Σ/∑ above; ∏ (U+220F) merged into Π/∏ above.
-        '\u{222B}' => format!("M{x2},{y1} Q{x1},{y1} {x1},{mid_y} Q{x1},{y2} {x2},{y2}"), // ∫
-        '\u{222E}' => format!(
-            // ∮ — contour integral: S-curve with a circle in the middle
-            "M{x2},{y1} Q{x1},{y1} {x1},{mid_y} Q{x1},{y2} {x2},{y2} M{mid_x},{mid_y} V{mid_y}"
-        ), // ∮
-        // ⋃ (U+22C3) merged into 'U' | '\u{22C3}' above (Capital U shape, full height)
-        '\u{22C2}' | '\u{2229}' => format!(
-            // ⋂/∩ — intersection (large/small): both use inverted-U path
-            "M{x1},{y2} V{top_third} Q{x1},{y1} {mid_x},{y1} Q{x2},{y1} {x2},{top_third} V{y2}"
-        ), // ⋂/∩
-        '\u{2A01}' => format!(
-            // ⨁ — circled plus (bigoplus)
-            "M{mid_x},{y1} Q{x1},{y1} {x1},{mid_y} Q{x1},{y2} {mid_x},{y2} Q{x2},{y2} {x2},{mid_y} Q{x2},{y1} {mid_x},{y1} Z M{x1},{mid_y} H{x2} M{mid_x},{y1} V{y2}"
-        ), // ⨁
-        '\u{2A02}' => format!(
-            // ⨂ — circled times (bigotimes)
-            "M{mid_x},{y1} Q{x1},{y1} {x1},{mid_y} Q{x1},{y2} {mid_x},{y2} Q{x2},{y2} {x2},{mid_y} Q{x2},{y1} {mid_x},{y1} Z M{x1},{y1} L{x2},{y2} M{x2},{y1} L{x1},{y2}"
-        ), // ⨂
-        '\u{221E}' => format!(
-            "M{mid_x},{mid_y} Q{x1},{y1} {x1},{mid_y} Q{x1},{y2} {mid_x},{mid_y} Q{x2},{y1} {x2},{mid_y} Q{x2},{y2} {mid_x},{mid_y}"
-        ), // ∞
-        '\u{00B1}' => format!("M{mid_x},{y1} V{mid_y} M{x1},{top_third} H{x2} M{x1},{y2} H{x2}"), // ±
-        '\u{00D7}' => format!(
-            // × — multiplication cross (DISTINCT from Latin X)
-            // X arms span the full box; × arms are shorter, centred in the inner 3/4
-            "M{},{} L{},{} M{},{} L{},{}",
-            x + w / 4,
-            y + h / 4,
-            x + 3 * w / 4,
-            y + 3 * h / 4,
-            x + 3 * w / 4,
-            y + h / 4,
-            x + w / 4,
-            y + 3 * h / 4
-        ), // × — DISTINCT from 'X'
-        '\u{00F7}' => format!(
-            "M{x1},{mid_y} H{x2} M{mid_x},{top_third} V{top_third} M{mid_x},{bot_third} V{bot_third}"
-        ), // ÷
-        '\u{2264}' => format!("M{x2},{y1} L{x1},{mid_y} L{x2},{y2} M{x1},{y2} H{x2}"), // ≤
-        '\u{2265}' => format!("M{x1},{y1} L{x2},{mid_y} L{x1},{y2} M{x1},{y2} H{x2}"), // ≥
-        '\u{2260}' => format!(
-            "M{x1},{mid_y} H{x2} M{},{top_third} L{},{bot_third} M{x1},{bot_third} H{x2}",
-            x + 3 * w / 4,
-            x + w / 4
-        ), // ≠
-        '\u{2248}' => format!(
-            "M{x1},{top_third} Q{mid_x},{y1} {x2},{top_third} M{x1},{bot_third} Q{mid_x},{mid_y} {x2},{bot_third}"
-        ), // ≈
-        '\u{2261}' => {
-            format!("M{x1},{top_third} H{x2} M{x1},{mid_y} H{x2} M{x1},{bot_third} H{x2}")
-        }, // ≡
-        '\u{2208}' => format!(
-            "M{x2},{top_third} Q{x2},{y1} {mid_x},{y1} Q{x1},{y1} {x1},{mid_y} Q{x1},{y2} {mid_x},{y2} Q{x2},{y2} {x2},{bot_third} M{x1},{mid_y} H{x2}"
-        ), // ∈
-        '\u{2209}' => format!(
-            // ∉ — not-in: ∈ with a diagonal strike-through
-            "M{x2},{top_third} Q{x2},{y1} {mid_x},{y1} Q{x1},{y1} {x1},{mid_y} Q{x1},{y2} {mid_x},{y2} Q{x2},{y2} {x2},{bot_third} M{x1},{mid_y} H{x2} M{x2},{y1} L{x1},{y2}"
-        ), // ∉
-        '\u{222A}' => format!(
-            // ∪ — small union: a low cup shape starting from mid_y, distinct from
-            // lowercase u/υ (which start at top_third) and ⋃/U (which start at y1).
-            "M{x1},{mid_y} V{bot_third} Q{x1},{y2} {mid_x},{y2} Q{x2},{y2} {x2},{bot_third} V{mid_y}"
-        ), // ∪ — DISTINCT from u/υ (top_third start) and U/⋃ (y1 start)
-        // ∩ (U+2229) merged into '\u{22C2}' | '\u{2229}' above
-        '\u{2282}' => format!(
-            // ⊂ — subset: open C-shape, DISTINCT from ∫ (which is S-shaped)
-            "M{x2},{top_third} Q{x2},{y1} {x1},{mid_y} Q{x2},{y2} {x2},{bot_third}"
-        ), // ⊂ — DISTINCT from ∫ (U+222B)
-        '\u{2283}' => format!(
-            // ⊃ — superset: reversed C
-            "M{x1},{top_third} Q{x1},{y1} {x2},{mid_y} Q{x1},{y2} {x1},{bot_third}"
-        ), // ⊃
-        '\u{2205}' => format!(
-            // ∅ — empty set: circle with diagonal strike
-            "M{mid_x},{y1} Q{x1},{y1} {x1},{mid_y} Q{x1},{y2} {mid_x},{y2} Q{x2},{y2} {x2},{mid_y} Q{x2},{y1} {mid_x},{y1} Z M{x2},{y1} L{x1},{y2}"
-        ), // ∅
-        '\u{2200}' => format!("M{x1},{y1} L{mid_x},{y2} L{x2},{y1} H{x1} M{x1},{mid_y} H{x2}"), // ∀
-        '\u{2203}' => format!("M{x2},{y1} H{x1} V{mid_y} H{x2} V{y2} H{x1}"),                   // ∃
-        '\u{2202}' => format!(
-            "M{x2},{top_third} Q{x2},{y1} {mid_x},{y1} Q{x1},{y1} {x1},{mid_y} Q{x1},{y2} {mid_x},{y2} Q{x2},{y2} {x2},{mid_y} Q{x2},{top_third} {x1},{top_third}"
-        ), // ∂
-        '\u{2207}' => format!("M{x1},{y1} L{mid_x},{y2} L{x2},{y1} Z"),                         // ∇
-        '\u{2220}' => {
-            format!("M{x1},{y2} L{x1},{y1} M{x1},{y2} H{x2} M{x1},{bot_third} L{x2},{y1}")
-        }, // ∠
-        '\u{2192}' => format!(
-            "M{x1},{mid_y} H{x2} M{},{top_third} L{x2},{mid_y} L{},{bot_third}",
-            x + 3 * w / 4,
-            x + 3 * w / 4
-        ), // →
-        '\u{2190}' => format!(
-            "M{x2},{mid_y} H{x1} M{},{top_third} L{x1},{mid_y} L{},{bot_third}",
-            x + w / 4,
-            x + w / 4
-        ), // ←
-        '\u{21D2}' => format!(
-            "M{x1},{top_third} H{} M{x1},{bot_third} H{} M{},{y1} L{x2},{mid_y} L{},{y2}",
-            x + 3 * w / 4,
-            x + 3 * w / 4,
-            x + 3 * w / 4,
-            x + 3 * w / 4
-        ), // ⇒
-        '\u{21D0}' => format!(
-            "M{x2},{top_third} H{} M{x2},{bot_third} H{} M{},{y1} L{x1},{mid_y} L{},{y2}",
-            x + w / 4,
-            x + w / 4,
-            x + w / 4,
-            x + w / 4
-        ), // ⇐
-        '\u{21D4}' => format!(
-            // ⇔ — biconditional: double-headed double arrow
-            "M{},{y1} L{x1},{mid_y} L{},{y2} M{},{y1} L{x2},{mid_y} L{},{y2} M{x1},{top_third} H{x2} M{x1},{bot_third} H{x2}",
-            x + w / 4,
-            x + w / 4,
-            x + 3 * w / 4,
-            x + 3 * w / 4
-        ), // ⇔
-        '\u{2194}' => format!(
-            // ↔ — left-right arrow
-            "M{x1},{mid_y} H{x2} M{},{top_third} L{x1},{mid_y} L{},{bot_third} M{},{top_third} L{x2},{mid_y} L{},{bot_third}",
-            x + w / 4,
-            x + w / 4,
-            x + 3 * w / 4,
-            x + 3 * w / 4
-        ), // ↔
-        '\u{2191}' => format!(
-            // ↑ — upward arrow
-            "M{mid_x},{y2} V{y1} M{x1},{top_third} L{mid_x},{y1} L{x2},{top_third}"
-        ), // ↑
-        '\u{2193}' => format!(
-            // ↓ — downward arrow
-            "M{mid_x},{y1} V{y2} M{x1},{bot_third} L{mid_x},{y2} L{x2},{bot_third}"
-        ), // ↓
-        '\u{22C5}' => format!("M{mid_x},{mid_y} V{mid_y}"), // ⋅ (dot)
-        '\u{2213}' => format!(
-            // ∓ — minus or plus (DISTINCT from ±)
-            "M{x1},{y1} H{x2} M{mid_x},{top_third} V{bot_third} M{x1},{y2} H{x2}"
-        ), // ∓
-        '\u{2026}' | '\u{22EF}' => format!(
-            // …/⋯ — ellipsis / centred ellipsis: same three-dot glyph
-            "M{},{mid_y} V{mid_y} M{mid_x},{mid_y} V{mid_y} M{},{mid_y} V{mid_y}",
-            x + w / 4,
-            x + 3 * w / 4
-        ), // …/⋯
-        '\u{22EE}' => format!(
-            // ⋮ — vertical ellipsis: three vertically-spaced dots
-            "M{mid_x},{y1} V{y1} M{mid_x},{mid_y} V{mid_y} M{mid_x},{y2} V{y2}"
-        ), // ⋮
-        '\u{22F1}' => format!(
-            // ⋱ — diagonal ellipsis
-            "M{x1},{y1} V{y1} M{mid_x},{mid_y} V{mid_y} M{x2},{y2} V{y2}"
-        ), // ⋱
-
-        // ── Fallback for all other characters: a labelled bounding rectangle ─
-        _ => {
-            // A simple rectangle so every character has a deterministic,
-            // non-empty path even for uncommon glyphs.
-            format!("M{x1},{y1} H{x2} V{y2} H{x1} Z")
-        },
-    };
-
-    paths.push(format!(
-        r#"<path d="{d}" stroke="black" stroke-width="0.5" fill="none"/>"#
-    ));
+/// The cell origin `(x, y)` is the top-left corner in SVG pixel coordinates.
+/// The baseline is placed at `y + h`.
+fn emit_glyph_sized(
+    engine: &GlyphEngine,
+    ch: char,
+    paths: &mut Vec<String>,
+    x: i64,
+    y: i64,
+    w: i64,
+    h: i64,
+) -> Result<(), MathError> {
+    // Delegate to the font engine for real glyph outlines (F-S030-P9-H2).
+    engine.emit_glyph(ch, paths, x, y, w, h)
 }
+
+// (Static glyph table removed — replaced by GlyphEngine + Latin Modern Math font)
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
@@ -1895,36 +1379,44 @@ mod tests {
     ///
     /// Without the F-S030-P7-M1 fix each row starts where the previous row ended,
     /// producing a diagonal cascade instead of left-aligned columns.
+    ///
+    /// With real font outlines (F-S030-P9-H2), the first M coordinate in each path's
+    /// d= string reflects the font's first contour point — NOT the cell x origin.
+    /// The correct verification strategy is to use the **same character** as the
+    /// first glyph in both rows and check that their first M coordinates are equal
+    /// (proving both rows were rendered with the same `start_x = 0`).
     #[test]
     fn test_bc_1_10_003_pdf_cases_rows_aligned_at_same_x() {
-        // \begin{cases} x & y \\ -x & y \end{cases}
-        // Row 0: result=[x], condition=[y]
-        // Row 1: result=[-x], condition=[y]  (longer result — without fix, row 1 starts further right)
+        // \begin{cases} x & xy \\ x & y \end{cases}
+        // Row 0: result=[x], condition=[x, y]  (3 paths: x, x, y)
+        // Row 1: result=[x], condition=[y]       (2 paths: x, y)
+        // Both rows start with the same character 'x', so their first-M coordinates
+        // must be identical if the row-reset fix is active.
         let ast = inline_ast(vec![MathNode::Cases(vec![
             (
                 vec![MathNode::Text(Arc::from("x"))],
-                vec![MathNode::Text(Arc::from("y"))],
+                vec![MathNode::Text(Arc::from("xy"))],
             ),
             (
-                vec![MathNode::Text(Arc::from("-x"))],
+                vec![MathNode::Text(Arc::from("x"))],
                 vec![MathNode::Text(Arc::from("y"))],
             ),
         ])]);
         let result = render_pdf_paths(&ast).expect("render_pdf_paths must succeed for cases");
         let svg = &result.0;
 
-        // Row 0 first path x
+        // Row 0 first path x — path index 0
         let x_row0 = nth_path_x(svg, 0)
             .unwrap_or_else(|| panic!("could not extract x from path 0 in:\n{svg}"));
-        // Row 1 first path x — 'x' row has 1 path, 'y' has 1 path; row 1 starts at path index 2
-        // (path 0 = 'x' result row0, path 1 = 'y' condition row0, path 2 = '-' result row1)
-        let x_row1 = nth_path_x(svg, 2)
-            .unwrap_or_else(|| panic!("could not extract x from path 2 in:\n{svg}"));
+        // Row 1 first path x — row 0 has 3 paths (x, x, y); row 1's 'x' is path index 3
+        let x_row1 = nth_path_x(svg, 3)
+            .unwrap_or_else(|| panic!("could not extract x from path 3 in:\n{svg}"));
 
         assert_eq!(
             x_row0, x_row1,
-            "Cases: row 0 first glyph x ({x_row0}) must equal row 1 first glyph x ({x_row1})\n\
-             Bug F-S030-P7-M1: without fix, row N starts at end-x of row N-1.\nSVG: {svg}"
+            "Cases: row 0 first-glyph x ({x_row0}) must equal row 1 first-glyph x ({x_row1})\n\
+             Both rows start with 'x' at start_x=0; if the row-reset fix (F-S030-P7-M1) is \
+             active their first-M coordinates must be identical.\nSVG: {svg}"
         );
     }
 
