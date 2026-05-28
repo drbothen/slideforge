@@ -302,10 +302,15 @@ pub fn collect_sections(deck: &Deck) -> Result<Vec<GeneratedSection>, LayoutErro
     // of the same kind is present (AC-006).
     if manual_section_names.contains("risk_register") {
         // AC-006 / BC-3.02.001 EC-002: manual risk_register supersedes auto.
-        let has_severity_cards = deck
-            .slides
-            .iter()
-            .any(|s| s.slide_type.as_ref() == "severity_cards");
+        // OBS-A (Pass 5): exclude Notes-register slides from this check.
+        // A deck whose only severity_cards slides are Notes-register would not
+        // have produced an auto-generated risk_register (collect_risk_register
+        // already skips Notes slides). Firing the supersession warning for
+        // Notes-only severity_cards would be misleading — there was nothing to
+        // supersede. Mirror the same Notes filter used in the takeaway check above.
+        let has_severity_cards = deck.slides.iter().any(|s| {
+            s.register != Some(Register::Notes) && s.slide_type.as_ref() == "severity_cards"
+        });
         if has_severity_cards {
             warn!(
                 "BC-3.02.001 EC-002: Auto-generated risk_register overridden by explicit section \
@@ -360,6 +365,12 @@ pub fn collect_sections(deck: &Deck) -> Result<Vec<GeneratedSection>, LayoutErro
 /// name is not in [`SUPPORTED_MANUAL_SECTION_TYPES`].
 fn collect_manual_sections(deck: &Deck) -> Result<Vec<GeneratedSection>, LayoutError> {
     let mut sections = Vec::new();
+    // OBS-D (Pass 5): track section names seen so far to warn on duplicates.
+    // The spec (BC-3.02.002) does not treat duplicate manual section names as an
+    // error — both blocks are collected and included in the result. However, a
+    // duplicate is almost certainly a DSL authoring mistake (the author likely
+    // intended a single section), so a warning is emitted for each repeated name.
+    let mut seen_names: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     for block in &deck.section_blocks {
         let name: &str = block.name.as_ref();
@@ -372,6 +383,18 @@ fn collect_manual_sections(deck: &Deck) -> Result<Vec<GeneratedSection>, LayoutE
                 name: name.to_owned(),
                 span: block.span.clone(),
             });
+        }
+
+        // OBS-D (Pass 5): warn on duplicate manual section names.
+        // Both blocks are still collected — the spec does not prohibit duplicates.
+        if !seen_names.insert(name.to_owned()) {
+            warn!(
+                section_name = %name,
+                "section '{}' is declared more than once — \
+                 both blocks will be included in the output; \
+                 this is usually a DSL authoring mistake",
+                name
+            );
         }
 
         // OBS-003 / BC-3.02.002 EC-003: warn if the section body is empty.
@@ -397,6 +420,16 @@ fn collect_manual_sections(deck: &Deck) -> Result<Vec<GeneratedSection>, LayoutE
         // heading, so it must NOT also appear in the Custom map — it is a layout
         // directive, not a content field.  Consumers of `SectionItem::Custom`
         // (DOCX/PDF exporters) must not receive the same "heading" key twice.
+        //
+        // OBS-C (Pass 5 — DEFERRED): the spec is silent on whether unrecognised
+        // field keys in a manual section body should emit a warning. The BC
+        // (BC-3.02.002) specifies that the section body is an open-ended
+        // key-value map with no prescribed fields (section type plugins define
+        // their own schema). Adding a key-allowlist or an "unknown field" warning
+        // here would therefore be premature and could break author-defined content
+        // whose keys are not yet known at layout time. Deferred until the
+        // SectionType plugin surface (STORY-041/042) defines per-section schemas;
+        // at that point each plugin can validate its own field set.
         let custom_map: OrderedMap<Arc<str>, Value> = block
             .body
             .iter()
@@ -408,9 +441,23 @@ fn collect_manual_sections(deck: &Deck) -> Result<Vec<GeneratedSection>, LayoutE
         // OBS-002: if the section body has a "heading" key with a plain string
         // value, use it as the section heading; otherwise fall back to the
         // humanized section type name.
+        // OBS-B (Pass 5): when a "heading" key is present but holds a non-Str
+        // value (e.g., a number, list, or map), the fallback is applied silently.
+        // Emit a warning so DSL authors learn that their heading declaration was
+        // ignored. This is NOT an error — the build continues with the fallback.
         let heading: Arc<str> = match block.body.get("heading") {
             Some(Value::Str(s)) => Arc::clone(s),
-            _ => humanize_section_name(name),
+            Some(_non_str) => {
+                warn!(
+                    section_name = %name,
+                    "section '{}' has a 'heading' key with a non-string value — \
+                     falling back to humanized section name; \
+                     use heading: \"...\" with a plain string value",
+                    name
+                );
+                humanize_section_name(name)
+            },
+            None => humanize_section_name(name),
         };
 
         sections.push(GeneratedSection {
@@ -2586,6 +2633,212 @@ mod tests {
         assert!(
             msg.contains("unresolved") || msg.contains("FieldValue"),
             "UnresolvedSeverityCards message must mention unresolved; got: {msg}"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // OBS-A (Pass 5) — Notes-only severity_cards must NOT trigger the
+    // risk_register supersession warning
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Helper: severity_cards slide with an explicit register.
+    fn make_severity_cards_slide_with_register(register: Register) -> Slide {
+        let card_values = vec![{
+            let mut m = OrderedMap::new();
+            m.insert(Arc::from("title"), Value::Str(Arc::from("Risk A")));
+            m.insert(Arc::from("severity"), Value::Str(Arc::from("High")));
+            m.insert(Arc::from("description"), Value::Str(Arc::from("Desc")));
+            m.insert(Arc::from("owner"), Value::Str(Arc::from("Owner")));
+            Value::Map(m)
+        }];
+        let mut fields = OrderedMap::new();
+        fields.insert(
+            Arc::from("cards"),
+            FieldValue::Literal(Value::List(card_values)),
+        );
+        Slide {
+            slide_type: Arc::from("severity_cards"),
+            fields,
+            blocks: vec![],
+            register: Some(register),
+            tags: vec![],
+            source_span: SourceSpan::default(),
+        }
+    }
+
+    /// OBS-A (Pass 5) — when a manual risk_register block supersedes, the
+    /// supersession warning must NOT fire if all severity_cards slides are
+    /// Notes-register (they would not have contributed to the auto-generated
+    /// risk_register anyway).
+    #[tracing_test::traced_test]
+    #[test]
+    fn test_obs_a_risk_register_supersession_no_warn_for_notes_only_severity_cards() {
+        let manual_block = SectionBlock {
+            name: Arc::from("risk_register"),
+            body: OrderedMap::new(),
+            span: SourceSpan::default(),
+        };
+        // Only severity_cards slide is Notes-register — it would not have
+        // contributed to the auto-generated risk_register.
+        let deck = make_deck_with_section_blocks(
+            vec![make_severity_cards_slide_with_register(Register::Notes)],
+            vec![manual_block],
+        );
+        let _ = collect_sections(&deck).expect("collect_sections must succeed");
+        assert!(
+            !logs_contain("risk_register overridden"),
+            "supersession warning must NOT fire when all severity_cards slides are Notes-register"
+        );
+    }
+
+    /// OBS-A (Pass 5) — supersession warning DOES fire when at least one
+    /// non-Notes severity_cards slide exists alongside a manual risk_register.
+    #[tracing_test::traced_test]
+    #[test]
+    fn test_obs_a_risk_register_supersession_warns_for_non_notes_severity_cards() {
+        let manual_block = SectionBlock {
+            name: Arc::from("risk_register"),
+            body: OrderedMap::new(),
+            span: SourceSpan::default(),
+        };
+        // Non-Notes severity_cards slide — the auto-generated risk_register
+        // would have been produced, so the supersession warning must fire.
+        let deck = make_deck_with_section_blocks(
+            vec![make_severity_card_slide(
+                "Budget Risk",
+                "High",
+                "Desc",
+                "CFO",
+            )],
+            vec![manual_block],
+        );
+        let _ = collect_sections(&deck).expect("collect_sections must succeed");
+        assert!(
+            logs_contain("risk_register overridden"),
+            "supersession warning must fire when non-Notes severity_cards slides exist"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // OBS-B (Pass 5) — non-Str heading value emits tracing::warn!
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// OBS-B (Pass 5) — when a section block has a "heading" key with a
+    /// non-string value, a `tracing::warn!` is emitted and the humanized
+    /// fallback is used as the heading.
+    #[tracing_test::traced_test]
+    #[test]
+    fn test_obs_b_non_str_heading_emits_warn_and_uses_fallback() {
+        let block = SectionBlock {
+            name: Arc::from("methodology"),
+            body: {
+                let mut m = OrderedMap::new();
+                // heading key is a number, not a string
+                m.insert(Arc::from("heading"), Value::Int(42));
+                m
+            },
+            span: SourceSpan::default(),
+        };
+        let deck = make_deck_with_section_blocks(vec![make_slide("title")], vec![block]);
+        let sections = collect_sections(&deck).expect("collect_sections must succeed");
+        assert!(
+            logs_contain("non-string value"),
+            "warn must mention 'non-string value' for non-Str heading"
+        );
+        // The fallback heading must be the humanized section name.
+        assert_eq!(
+            sections[0].heading.as_ref(),
+            "Methodology",
+            "heading must fall back to humanized section name when heading value is non-Str"
+        );
+    }
+
+    /// OBS-B (Pass 5) — a plain-string heading does NOT emit the non-Str warning.
+    #[tracing_test::traced_test]
+    #[test]
+    fn test_obs_b_str_heading_no_warn() {
+        let block = SectionBlock {
+            name: Arc::from("methodology"),
+            body: {
+                let mut m = OrderedMap::new();
+                m.insert(Arc::from("heading"), Value::Str(Arc::from("Our Approach")));
+                m
+            },
+            span: SourceSpan::default(),
+        };
+        let deck = make_deck_with_section_blocks(vec![make_slide("title")], vec![block]);
+        let _ = collect_sections(&deck).expect("collect_sections must succeed");
+        assert!(
+            !logs_contain("non-string value"),
+            "non-Str heading warn must NOT fire for a valid string heading"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // OBS-D (Pass 5) — duplicate manual section names emit tracing::warn!
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// OBS-D (Pass 5) — when two manual section blocks share the same type name,
+    /// a `tracing::warn!` is emitted and both blocks are still collected.
+    #[tracing_test::traced_test]
+    #[test]
+    fn test_obs_d_duplicate_section_name_emits_warn_and_both_collected() {
+        let block_a = SectionBlock {
+            name: Arc::from("methodology"),
+            body: {
+                let mut m = OrderedMap::new();
+                m.insert(Arc::from("approach"), Value::Str(Arc::from("Agile")));
+                m
+            },
+            span: SourceSpan::default(),
+        };
+        let block_b = SectionBlock {
+            name: Arc::from("methodology"),
+            body: {
+                let mut m = OrderedMap::new();
+                m.insert(Arc::from("approach"), Value::Str(Arc::from("Waterfall")));
+                m
+            },
+            span: SourceSpan::default(),
+        };
+        let deck = make_deck_with_section_blocks(vec![make_slide("title")], vec![block_a, block_b]);
+        let sections =
+            collect_sections(&deck).expect("collect_sections must succeed with duplicates");
+        assert!(
+            logs_contain("declared more than once"),
+            "duplicate section warning must mention 'declared more than once'"
+        );
+        // Both methodology blocks must be present in the result.
+        let methodology_count = sections
+            .iter()
+            .filter(|s| s.kind == SectionKind::ManualSection(Arc::from("methodology")))
+            .count();
+        assert_eq!(
+            methodology_count, 2,
+            "both duplicate methodology blocks must be collected (2 expected, got {methodology_count})"
+        );
+    }
+
+    /// OBS-D (Pass 5) — a section with a unique name does NOT emit the
+    /// duplicate warning.
+    #[tracing_test::traced_test]
+    #[test]
+    fn test_obs_d_unique_section_names_no_warn() {
+        let block_a = SectionBlock {
+            name: Arc::from("methodology"),
+            body: OrderedMap::new(),
+            span: SourceSpan::default(),
+        };
+        let block_b = SectionBlock {
+            name: Arc::from("scope"),
+            body: OrderedMap::new(),
+            span: SourceSpan::default(),
+        };
+        let deck = make_deck_with_section_blocks(vec![make_slide("title")], vec![block_a, block_b]);
+        let _ = collect_sections(&deck).expect("collect_sections must succeed");
+        assert!(
+            !logs_contain("declared more than once"),
+            "duplicate warning must NOT fire when all section names are unique"
         );
     }
 }
