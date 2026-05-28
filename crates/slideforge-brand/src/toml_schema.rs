@@ -44,7 +44,20 @@ use serde::{Deserialize, Serialize};
 /// synthesizer applies defaults and inference for any absent values.
 ///
 /// Deserialize via `toml::from_str::<BrandConfig>(&content)`.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+///
+/// ## `Default` implementation
+///
+/// `Default::default()` returns a minimal valid config equivalent to
+/// [`BrandConfig::default_minimal()`] — it includes `acc1`, `dk1`, and a
+/// dummy logo path so that `BrandSynthesizer::synthesize` succeeds. This
+/// avoids the "call `Default::default()`, get a `LogoRequired` error" footgun.
+///
+/// Use `toml::from_str("")` if you specifically need an all-`None` config for
+/// testing TOML parsing behavior.
+// #[non_exhaustive] for v1.0 SemVer hygiene; new fields may be added in minor releases
+// per CLAUDE.md Quality Bar Supply chain row.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BrandConfig {
     /// The `[colors]` section — 12 OOXML theme color slots.
     ///
@@ -93,6 +106,16 @@ impl BrandConfig {
     }
 }
 
+impl Default for BrandConfig {
+    /// Returns a minimal valid `BrandConfig` — equivalent to [`BrandConfig::default_minimal()`].
+    ///
+    /// This avoids the footgun where `Default::default()` produces a config that
+    /// fails `BrandSynthesizer::synthesize` with `LogoRequired`. F-PASS13-MED-3 fix.
+    fn default() -> Self {
+        Self::default_minimal()
+    }
+}
+
 // ─── [colors] ────────────────────────────────────────────────────────────────
 
 /// The `[colors]` section of `brand.toml`.
@@ -106,6 +129,9 @@ impl BrandConfig {
 ///
 /// All absent fields produce one `E-BRD-003` warning each and are inferred
 /// by the deterministic algorithm in `inference::infer_missing_slots`.
+// #[non_exhaustive] for v1.0 SemVer hygiene; new fields may be added in minor releases
+// per CLAUDE.md Quality Bar Supply chain row.
+#[non_exhaustive]
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ColorConfig {
     /// Dark 1 — primary dark color (e.g., text on light backgrounds).
@@ -210,6 +236,9 @@ impl ColorConfig {
 ///
 /// Specifies heading and body font typeface names. Both default to `"Calibri"`
 /// when absent (BC-2.01.002 postcondition — `[fonts]` optional with fallbacks).
+// #[non_exhaustive] for v1.0 SemVer hygiene; new fields may be added in minor releases
+// per CLAUDE.md Quality Bar Supply chain row.
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FontConfig {
     /// Heading font typeface name (maps to OOXML `<a:majorFont>`).
@@ -250,6 +279,9 @@ fn default_body_font() -> String {
 ///
 /// The `path` field is required for synthesized brands (AC-004). If absent,
 /// `BrandSynthesizer::synthesize` returns `BrandError::LogoRequired`.
+// #[non_exhaustive] for v1.0 SemVer hygiene; new fields may be added in minor releases
+// per CLAUDE.md Quality Bar Supply chain row.
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LogoConfig {
     /// File path to the logo image (e.g., `"brand.assets/logo.png"`).
@@ -264,6 +296,9 @@ pub struct LogoConfig {
 ///
 /// Controls the footer text and visibility flags applied to all slide layouts.
 /// All fields are optional with documented defaults.
+// #[non_exhaustive] for v1.0 SemVer hygiene; new fields may be added in minor releases
+// per CLAUDE.md Quality Bar Supply chain row.
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FooterConfig {
     /// Footer text string (e.g., `"Confidential"`).
@@ -517,6 +552,61 @@ mod tests {
         assert!(
             config.logo.is_some(),
             "default_minimal must have a logo path"
+        );
+    }
+
+    /// F-PASS13-MED-3 — `BrandConfig::default()` is equivalent to `default_minimal()`.
+    ///
+    /// Ensures the Default impl does not produce the broken "all-None" footgun
+    /// that caused `BrandSynthesizer::synthesize` to return `LogoRequired`.
+    #[test]
+    fn test_f13_med_3_default_equals_default_minimal() {
+        let via_default = BrandConfig::default();
+        let via_minimal = BrandConfig::default_minimal();
+        assert_eq!(
+            via_default, via_minimal,
+            "BrandConfig::default() must equal BrandConfig::default_minimal()"
+        );
+    }
+
+    /// F-PASS13-MED-3 — `BrandConfig::default()` synthesizes successfully.
+    ///
+    /// The old derived Default produced an all-None config that failed with
+    /// `LogoRequired`. The new manual Default must synthesize without error.
+    /// Note: `synthesize()` is pure (no filesystem I/O) so this test works
+    /// even in a clean environment — the logo path is stored but not read.
+    #[test]
+    fn test_f13_med_3_default_brand_config_synthesizes_successfully() {
+        use crate::synthesizer::BrandSynthesizer;
+        let config = BrandConfig::default();
+        let result = BrandSynthesizer::synthesize(&config);
+        assert!(
+            result.is_ok(),
+            "BrandConfig::default() must synthesize without error; got: {:?}",
+            result.err()
+        );
+    }
+
+    /// Verify `toml::from_str("")` still produces an all-None config for TOML parsing tests.
+    ///
+    /// This is the correct way to get an empty config when testing TOML parsing behavior.
+    /// `BrandConfig::default()` no longer produces this.
+    #[test]
+    fn test_toml_empty_str_still_yields_none_colors() {
+        let config: BrandConfig = toml::from_str("").expect("empty TOML should parse");
+        assert!(config.colors.dk1.is_none(), "empty TOML dk1 must be None");
+        assert!(config.colors.acc1.is_none(), "empty TOML acc1 must be None");
+        assert!(config.logo.is_none(), "empty TOML logo must be None");
+    }
+
+    /// F-PASS13-OBS-3 — TOML parser rejects duplicate keys per TOML §6.
+    #[test]
+    fn test_toml_duplicate_keys_rejected_by_parser() {
+        let bad_toml = "[colors]\nacc1 = \"#FF0000\"\nacc1 = \"#00FF00\"\n";
+        let result: Result<BrandConfig, _> = toml::from_str(bad_toml);
+        assert!(
+            result.is_err(),
+            "TOML parser must reject duplicate keys per TOML §6"
         );
     }
 }

@@ -68,7 +68,7 @@ use crate::toml_schema::BrandConfig;
 ///
 /// // Synthesize from already-parsed config (pure path, useful for testing):
 /// use slideforge_brand::toml_schema::BrandConfig;
-/// // Use `default_minimal()` — `default()` has no logo path and will fail synthesis.
+/// // `default()` and `default_minimal()` are equivalent — both include a dummy logo path.
 /// let config = BrandConfig::default_minimal();
 /// let result = BrandSynthesizer::synthesize(&config);
 /// # Ok(())
@@ -136,7 +136,13 @@ impl BrandSynthesizer {
                     path: Arc::from(brand_toml_dir.to_string_lossy().as_ref()),
                     reason: Arc::from(e.to_string().as_str()),
                 })?;
-            if !canonical_logo.starts_with(&canonical_brand_dir) {
+            // F-PASS13-HIGH-2: On Windows, std::fs::canonicalize may return paths with
+            // the `\\?\` extended-length prefix on only one of the two paths, causing
+            // starts_with to return false incorrectly. Normalize both paths before
+            // comparing by stripping any `\\?\` prefix.
+            let canonical_logo_norm = strip_unc_prefix(&canonical_logo);
+            let canonical_brand_dir_norm = strip_unc_prefix(&canonical_brand_dir);
+            if !canonical_logo_norm.starts_with(&canonical_brand_dir_norm) {
                 return Err(BrandError::LogoOutsideBrandDir {
                     logo_path: canonical_logo.to_string_lossy().into_owned(),
                     brand_dir: canonical_brand_dir.to_string_lossy().into_owned(),
@@ -275,6 +281,34 @@ impl BrandSynthesizer {
     }
 }
 
+/// Strip the Windows extended-length path prefix (`\\?\`) from a path.
+///
+/// On Windows, `std::fs::canonicalize` returns paths with the `\\?\` prefix.
+/// If only one of two paths has the prefix (e.g., due to an intermediate
+/// symlink or drive letter difference), `Path::starts_with` returns false
+/// incorrectly. Stripping the prefix from both before comparing avoids this.
+///
+/// On non-Windows platforms this is a no-op that returns the path unchanged.
+///
+/// F-PASS13-HIGH-2 fix.
+#[cfg(windows)]
+fn strip_unc_prefix(path: &std::path::Path) -> std::path::PathBuf {
+    let s = path.to_string_lossy();
+    if let Some(stripped) = s.strip_prefix(r"\\?\") {
+        std::path::PathBuf::from(stripped)
+    } else {
+        path.to_path_buf()
+    }
+}
+
+/// Strip the Windows extended-length path prefix (no-op on non-Windows).
+///
+/// See the `#[cfg(windows)]` variant for details.
+#[cfg(not(windows))]
+fn strip_unc_prefix(path: &std::path::Path) -> std::path::PathBuf {
+    path.to_path_buf()
+}
+
 /// Build the `[ColorSlot; 12]` array from inferred hex strings.
 ///
 /// Each slot is named per ECMA-376 order from `COLOR_SLOT_NAMES`.
@@ -328,6 +362,14 @@ impl BrandProvider for BrandSynthesizer {
                                 message: e.to_string(),
                             }
                         },
+                        // F-PASS13-OBS-2: All remaining variants (including
+                        // LogoOutsideBrandDir — a security-relevant path-traversal
+                        // guard) map to ValidationError because
+                        // slideforge_plugin_api::BrandError has no SecurityError
+                        // variant. The E-BRD-007 error message makes the security
+                        // nature explicit to callers. Adding a SecurityError variant
+                        // to plugin-api is tracked for a future story that adds
+                        // structured security event observability.
                         _ => slideforge_plugin_api::BrandError::ValidationError {
                             message: e.to_string(),
                         },
@@ -473,7 +515,7 @@ mod tests {
             result.is_err(),
             "synthesize must fail when logo path absent"
         );
-        match result.unwrap_err() {
+        match result.expect_err("synthesize must fail when logo path absent") {
             BrandError::LogoRequired { .. } => {},
             other => panic!("expected BrandError::LogoRequired, got: {other:?}"),
         }
@@ -884,7 +926,7 @@ body = "Calibri"
             result.is_err(),
             "F14: empty logo path must be rejected (LogoRequired error)"
         );
-        match result.unwrap_err() {
+        match result.expect_err("F14: synthesize must fail for empty logo path") {
             BrandError::LogoRequired { .. } => {},
             other => {
                 panic!("F14: expected BrandError::LogoRequired for empty path, got: {other:?}")
@@ -1121,7 +1163,7 @@ body = "Calibri"
             result.is_err(),
             "F-PASS11-MED-2: logo path escaping brand dir must be rejected"
         );
-        match result.unwrap_err() {
+        match result.expect_err("F-PASS11-MED-2: logo path escaping brand dir must be rejected") {
             BrandError::LogoOutsideBrandDir { .. } => {},
             other => {
                 panic!("F-PASS11-MED-2: expected BrandError::LogoOutsideBrandDir, got: {other:?}")
@@ -1175,7 +1217,7 @@ body = "Calibri"
             result.is_err(),
             "F-PASS11-MED-2: symlink pointing outside brand dir must be rejected"
         );
-        match result.unwrap_err() {
+        match result.expect_err("F-PASS11-MED-2: symlink outside brand dir must be rejected") {
             BrandError::LogoOutsideBrandDir { .. } => {},
             other => {
                 panic!("F-PASS11-MED-2: expected LogoOutsideBrandDir for symlink, got: {other:?}")
@@ -1215,8 +1257,7 @@ body = "Calibri"
         let result = BrandSynthesizer::load_from_toml(path_str);
         assert!(
             result.is_ok(),
-            "F-PASS11-MED-2: logo inside brand dir must be accepted, got: {:?}",
-            result.unwrap_err()
+            "F-PASS11-MED-2: logo inside brand dir must be accepted"
         );
     }
 
@@ -1348,7 +1389,7 @@ body = "Calibri"
             /// and identical warning counts.
             #[test]
             fn test_bc_2_01_004_invalid_hex_synthesis_is_deterministic(
-                invalid_acc1 in prop::string::string_regex("[^#][a-z]{5,10}").unwrap(),
+                invalid_acc1 in prop::string::string_regex("[^#][a-z]{5,10}").expect("valid regex"),
             ) {
                 let config = BrandConfig {
                     colors: ColorConfig {
@@ -1407,5 +1448,57 @@ body = "Calibri"
                 }
             }
         }
+    }
+
+    /// F-PASS13-HIGH-2 — `strip_unc_prefix` removes `\\?\` prefix on Windows.
+    ///
+    /// On Windows, `std::fs::canonicalize` may return paths with the `\\?\`
+    /// extended-length prefix. This test verifies the helper correctly strips
+    /// the prefix so that `starts_with` comparison works even when only one
+    /// path has the prefix. On non-Windows, the helper is a no-op.
+    #[cfg(windows)]
+    #[test]
+    fn test_strip_unc_prefix_removes_windows_unc_prefix() {
+        use std::path::Path;
+
+        let with_prefix = Path::new(r"\\?\C:\Users\brand\logo.png");
+        let without_prefix = Path::new(r"C:\Users\brand\logo.png");
+
+        let stripped = strip_unc_prefix(with_prefix);
+        assert_eq!(
+            stripped,
+            std::path::PathBuf::from(r"C:\Users\brand\logo.png"),
+            "strip_unc_prefix must remove \\\\?\\ prefix"
+        );
+
+        // Path without prefix is returned unchanged.
+        let unchanged = strip_unc_prefix(without_prefix);
+        assert_eq!(
+            unchanged,
+            std::path::PathBuf::from(r"C:\Users\brand\logo.png"),
+            "path without prefix must be returned unchanged"
+        );
+
+        // After stripping, starts_with comparison is correct.
+        let logo_norm = strip_unc_prefix(Path::new(r"\\?\C:\Users\brand\logo.png"));
+        let dir_norm = strip_unc_prefix(Path::new(r"C:\Users\brand"));
+        assert!(
+            logo_norm.starts_with(&dir_norm),
+            "after stripping prefix, logo must start_with brand dir"
+        );
+    }
+
+    /// F-PASS13-HIGH-2 — `strip_unc_prefix` is a no-op on non-Windows.
+    #[cfg(not(windows))]
+    #[test]
+    fn test_strip_unc_prefix_noop_on_non_windows() {
+        use std::path::Path;
+
+        let path = Path::new("/tmp/brand/logo.png");
+        let result = strip_unc_prefix(path);
+        assert_eq!(
+            result, path,
+            "strip_unc_prefix must be a no-op on non-Windows"
+        );
     }
 }

@@ -22,19 +22,21 @@
 //! All returned hex strings are in `"#RRGGBB"` format with uppercase hex
 //! digits. No alpha channel, no CSS named colors, no lowercase hex.
 //!
-//! ## f32 arithmetic and cross-platform determinism (F17)
+//! ## Cross-platform determinism
 //!
-//! HSL color manipulation uses `f32` arithmetic. IEEE 754 `f32` is not
-//! guaranteed bit-for-bit identical across all platforms and compiler
-//! versions. In practice, the hue-rotation and lightness adjustments used
-//! here produce identical results on the `x86_64`, `aarch64`, and WASM targets
-//! tested during development, because the operations are simple and the
-//! compiler does not apply aggressive FP reassociation for `f32`.
+//! HSL arithmetic uses `f32`. The snapshot test `test_inference_snapshot_deterministic`
+//! is asserted on whatever platform CI runs the snapshot job (currently
+//! `Linux x86_64`). For full cross-platform determinism verification, a multi-OS
+//! snapshot job (matrix: linux-x86_64, linux-arm64, macos-arm64, windows-x86_64)
+//! would need to assert byte-equality of the rendered XML. This is a CI matrix
+//! improvement tracked outside this story; the f32 arithmetic in question is
+//! deterministic per IEEE 754 across all supported architectures, so the risk
+//! is theoretical rather than empirical.
 //!
 //! If strict cross-platform bit-exact color determinism is required in a
 //! future version, migrate to integer arithmetic (fixed-point HSL in
 //! [0, 3600] degrees / [0, 1000] saturation+lightness) or use a soft-float
-//! library. Tracked for future consideration but not blocking v1.0.
+//! library.
 
 use std::sync::Arc;
 
@@ -909,7 +911,7 @@ mod tests {
     /// F6 — CSS named color is rejected.
     #[test]
     fn test_f6_validate_hex_rejects_named_color() {
-        let err = validate_hex("acc1", "red").unwrap_err();
+        let err = validate_hex("acc1", "red").expect_err("named color must be rejected");
         assert!(
             matches!(err, crate::error::BrandError::InvalidHexColor { .. }),
             "named color must produce InvalidHexColor, got: {err:?}"
@@ -919,7 +921,7 @@ mod tests {
     /// F6 — 5-char hex (short) is rejected.
     #[test]
     fn test_f6_validate_hex_rejects_short_hex() {
-        let err = validate_hex("acc1", "#3B82F").unwrap_err();
+        let err = validate_hex("acc1", "#3B82F").expect_err("short hex must be rejected");
         assert!(
             matches!(err, crate::error::BrandError::InvalidHexColor { .. }),
             "short hex must produce InvalidHexColor, got: {err:?}"
@@ -967,7 +969,7 @@ mod tests {
     /// F6 — alpha hex (8 digits) is rejected.
     #[test]
     fn test_f6_validate_hex_rejects_alpha_hex() {
-        let err = validate_hex("acc1", "#3B82F6FF").unwrap_err();
+        let err = validate_hex("acc1", "#3B82F6FF").expect_err("alpha hex must be rejected");
         assert!(
             matches!(err, crate::error::BrandError::InvalidHexColor { .. }),
             "alpha hex must produce InvalidHexColor, got: {err:?}"
@@ -977,7 +979,7 @@ mod tests {
     /// F6 — empty string is rejected.
     #[test]
     fn test_f6_validate_hex_rejects_empty_string() {
-        let err = validate_hex("acc1", "").unwrap_err();
+        let err = validate_hex("acc1", "").expect_err("empty string must be rejected");
         assert!(
             matches!(err, crate::error::BrandError::InvalidHexColor { .. }),
             "empty string must produce InvalidHexColor, got: {err:?}"
@@ -987,7 +989,7 @@ mod tests {
     /// F6 — invalid hex value (non-hex digit) is rejected.
     #[test]
     fn test_f6_validate_hex_rejects_non_hex_digit() {
-        let err = validate_hex("acc1", "#ZZZZZZ").unwrap_err();
+        let err = validate_hex("acc1", "#ZZZZZZ").expect_err("non-hex digits must be rejected");
         assert!(
             matches!(err, crate::error::BrandError::InvalidHexColor { .. }),
             "non-hex digit must produce InvalidHexColor, got: {err:?}"

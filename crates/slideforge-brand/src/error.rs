@@ -50,6 +50,9 @@ pub const E_BRD_007: &str = "E-BRD-007";
 /// **Fatal variants** (broken, exit 4): [`BrandError::FileNotFound`], [`BrandError::ParseError`].
 ///
 /// **Cosmetic variants** (exit 0, warning only): [`BrandError::MissingColorSlot`], [`BrandError::FontUnavailable`].
+// #[non_exhaustive] for v1.0 SemVer hygiene; new variants may be added in minor releases
+// per CLAUDE.md Quality Bar Supply chain row.
+#[non_exhaustive]
 #[derive(Debug, Error)]
 pub enum BrandError {
     /// `E-BRD-001` — the brand template file was not found at the resolved path.
@@ -178,6 +181,14 @@ pub enum BrandError {
     /// the warnings `Vec` returned alongside the synthesized `BrandTemplate`.
     ///
     /// Traces to AC-006 (BC-2.01.004 invariant 3).
+    ///
+    /// ## Spec note (E-BRD-005 revised semantic)
+    ///
+    /// The original E-BRD-005 semantic ("missing required color slot — fatal") was
+    /// retired when the brand synthesis algorithm was designed to always infer missing
+    /// slots (BC-2.01.004). The error code was subsequently reused for invalid hex
+    /// color validation (introduced in Pass-11 fix burst). The error-taxonomy.md spec
+    /// has been updated to reflect this revised semantic.
     #[error(
         "E-BRD-005: Invalid hex color '{value}' in brand.toml slot '{slot_name}'. \
          Use 6-digit uppercase hex RGB (e.g. '#3B82F6')."

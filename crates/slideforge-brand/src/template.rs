@@ -28,6 +28,9 @@ pub const COLOR_SLOT_NAMES: [&str; 12] = [
 /// The `Hex` variant is the common case for well-formed brand templates.
 /// The `SchemeRef` variant indicates a self-referential or relative color that was
 /// extracted with a `tracing::warn!` and should be reviewed in brand.toml.
+// #[non_exhaustive] for v1.0 SemVer hygiene; new variants may be added in minor releases
+// per CLAUDE.md Quality Bar Supply chain row.
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ColorValue {
     /// An absolute hex color value, e.g., `"#003087"`.
@@ -80,6 +83,9 @@ impl ColorValue {
 ///
 /// Use [`ColorSlot::hex`] for the common case of an absolute color.
 /// Use [`ColorSlot::is_resolved`] to detect whether the slot can be used directly.
+// #[non_exhaustive] for v1.0 SemVer hygiene; new fields may be added in minor releases
+// per CLAUDE.md Quality Bar Supply chain row.
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ColorSlot {
     /// The OOXML slot name (e.g., `"dk1"`, `"acc1"`, `"hlink"`).
@@ -118,6 +124,9 @@ impl ColorSlot {
 ///
 /// Heading font maps to `<a:majorFont>` and body font maps to `<a:minorFont>`
 /// in the OOXML `theme1.xml`.
+// #[non_exhaustive] for v1.0 SemVer hygiene; new fields may be added in minor releases
+// per CLAUDE.md Quality Bar Supply chain row.
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BrandFonts {
     /// The heading (major) font typeface name (e.g., `"Calibri Light"`).
@@ -138,6 +147,9 @@ pub struct BrandFonts {
 ///
 /// The logo is optional — if no `[logo]` section in `brand.toml` and no image
 /// relationship in the source template, [`BrandTemplate::logo`] is `None`.
+// #[non_exhaustive] for v1.0 SemVer hygiene; new variants may be added in minor releases
+// per CLAUDE.md Quality Bar Supply chain row.
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum LogoAsset {
     /// Logo bytes already loaded into memory.
@@ -228,6 +240,9 @@ impl LogoAsset {
 ///
 /// Slide master IDs start at `2^31`. Layout IDs start at `2^31 + 1` and
 /// increment by 1 per layout. Slide IDs in generated decks start at 256.
+// #[non_exhaustive] for v1.0 SemVer hygiene; new fields may be added in minor releases
+// per CLAUDE.md Quality Bar Supply chain row.
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct MasterIds {
     /// The slide master ID: always `2^31 = 2_147_483_648`.
@@ -270,6 +285,9 @@ impl Default for MasterIds {
 /// For synthesized brands, `layouts` always contains exactly 31 entries
 /// (BC-2.01.005 postcondition 1). For loaded brands (from .pptx/.docx), the
 /// count reflects the source template.
+// #[non_exhaustive] for v1.0 SemVer hygiene; new fields may be added in minor releases
+// per CLAUDE.md Quality Bar Supply chain row.
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BrandTemplate {
     /// All 12 OOXML scheme color slots in ECMA-376 sequential order.

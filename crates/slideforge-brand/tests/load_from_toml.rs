@@ -99,7 +99,7 @@ fn test_load_brand_toml_missing_file_returns_error() {
         result.is_err(),
         "load_from_toml must fail for a missing file"
     );
-    let err = result.unwrap_err();
+    let err = result.expect_err("load_from_toml must fail for a missing file");
     let msg = err.to_string();
     assert!(
         msg.contains("E-BRD-001"),
@@ -164,7 +164,7 @@ fn test_load_brand_toml_invalid_toml_returns_parse_error() {
         .expect("tempfile path must be valid UTF-8");
     let result = BrandSynthesizer::load_from_toml(path);
     assert!(result.is_err(), "load_from_toml must fail for invalid TOML");
-    let msg = result.unwrap_err().to_string();
+    let msg = result.expect_err("load_from_toml must fail for invalid TOML").to_string();
     assert!(
         msg.contains("E-BRD-002"),
         "error must be TomlParseError (E-BRD-002), got: {msg}"
@@ -208,7 +208,7 @@ body = "Calibri"
         result.is_err(),
         "EC-005: load_from_toml must fail when the logo file does not exist"
     );
-    let err = result.unwrap_err();
+    let err = result.expect_err("EC-005: load_from_toml must fail when logo file does not exist");
     let msg = err.to_string();
     assert!(
         msg.contains("E-BRD-001"),

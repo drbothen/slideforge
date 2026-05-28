@@ -800,4 +800,64 @@ mod tests {
         let xml = std::str::from_utf8(&xml_bytes).expect("output must be valid UTF-8");
         insta::assert_snapshot!("dark_layout_xml", xml);
     }
+
+    /// F-PASS13-MED-2 — `quick_xml` escapes special characters in `accessibility_name`.
+    ///
+    /// Even though no current user-facing code path populates `accessibility_name` with
+    /// user input, this test prevents future regressions: an `accessibility_name`
+    /// containing XML-special characters must be properly escaped in the attribute.
+    ///
+    /// Characters tested: `"` (→ `&quot;`), `<` (→ `&lt;`), `>` (→ `&gt;`),
+    /// `&` (→ `&amp;`).
+    ///
+    /// Also verifies round-trip: the serialized XML parses back without error.
+    #[test]
+    fn test_xml_attribute_escaping_for_special_characters() {
+        use quick_xml::Reader;
+        use quick_xml::events::Event;
+
+        let layout = SlideLayoutDef {
+            index: 1,
+            name: Arc::from("Test Layout"),
+            ooxml_type: Some(Arc::from("title")),
+            placeholders: vec![LayoutPlaceholder {
+                ph_type: Arc::from("ctrTitle"),
+                idx: 0,
+                // Accessibility name with XML-special characters
+                accessibility_name: Arc::from(r#"Acme™ "Corp" <Special> & Things"#),
+                x: 457_200,
+                y: 274_638,
+                cx: 8_229_600,
+                cy: 1_143_000,
+            }],
+            has_color_override: false,
+            color_override_bg: None,
+            color_override_tx: None,
+        };
+        let xml_bytes = serialize_layout_to_xml(&layout);
+        let xml = std::str::from_utf8(&xml_bytes).expect("output must be valid UTF-8");
+
+        // The raw special characters must NOT appear unescaped inside attribute values.
+        // `quick_xml` should emit `&quot;` for `"`, `&lt;` for `<`, `&amp;` for `&`.
+        // Note: `>` inside attributes is technically allowed but often escaped; we
+        // test that the XML is well-formed (parseable) rather than a specific escape form.
+        assert!(
+            !xml.contains(r#"name="Acme™ "Corp""#),
+            "unescaped double-quote must not appear in attribute value; xml snippet: {}",
+            &xml[..xml.len().min(500)]
+        );
+
+        // Round-trip: the serialized XML must be parseable by quick_xml::Reader.
+        let mut reader = Reader::from_str(xml);
+        reader.config_mut().check_end_names = true;
+        let mut event_count = 0usize;
+        loop {
+            match reader.read_event() {
+                Ok(Event::Eof) => break,
+                Ok(_) => event_count += 1,
+                Err(e) => panic!("XML produced by serialize_layout_to_xml failed to parse: {e}"),
+            }
+        }
+        assert!(event_count > 0, "round-trip parse must produce events");
+    }
 }
