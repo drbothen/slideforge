@@ -1,9 +1,11 @@
 //! Core types for `slideforge-diagrams`.
 //!
-//! Defines [`DiagramLang`], [`RawDiagramSvg`], and [`DiagramError`].
+//! Defines [`DiagramLang`], [`RawDiagramSvg`], [`NormalizedDiagramSvg`], and
+//! [`DiagramError`].
 
 use std::sync::Arc;
 
+use miette::SourceSpan;
 use thiserror::Error;
 
 /// The diagram source language.
@@ -53,6 +55,44 @@ impl RawDiagramSvg {
         self.0
     }
 
+    /// Return a reference to the inner SVG string.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// Return `true` if the SVG string is non-empty.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+/// A newtype wrapping the usvg-normalized SVG string produced by
+/// [`crate::normalize::usvg_normalize`].
+///
+/// This is the output of the mandatory normalization pass (STORY-034, BC-1.12.003)
+/// that runs after every successful [`RawDiagramSvg`] is produced. The normalized
+/// form is guaranteed to be PPTX-safe:
+///
+/// - No `<foreignObject>` elements (removed by usvg).
+/// - No `<script>` elements (removed by usvg).
+/// - No CSS `@keyframes` or class-based `<style>` blocks (inlined by usvg).
+/// - Absolute pixel `width` and `height` on the root element (computed from
+///   `viewBox` by usvg when the source SVG uses percentage dimensions).
+/// - No `<use>` elements (all `href="#symbol"` references inlined by usvg).
+///
+/// The type system enforces that exporters receive only [`NormalizedDiagramSvg`],
+/// never [`RawDiagramSvg`]. Passing raw SVG to an exporter is a compile error.
+///
+/// ## IR compatibility
+///
+/// `NormalizedDiagramSvg` uses `Arc<str>` (not `String`) so that cloning is
+/// cheap and the type satisfies `Hash + Eq + Clone` for comemo compatibility.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct NormalizedDiagramSvg(pub Arc<str>);
+
+impl NormalizedDiagramSvg {
     /// Return a reference to the inner SVG string.
     #[must_use]
     pub fn as_str(&self) -> &str {
@@ -127,6 +167,35 @@ pub enum DiagramError {
     SvgPostProcessingError {
         /// Description of the post-processing failure.
         message: Arc<str>,
+    },
+
+    /// usvg normalization failed on the raw SVG produced by the renderer.
+    ///
+    /// Maps to **E-EXP-004**: the diagram SVG could not be normalized into
+    /// PPTX-safe form because usvg rejected the input as malformed SVG. This
+    /// is not a user-authored syntax error (the user writes Mermaid source) —
+    /// it is a rendering pipeline failure where the underlying renderer produced
+    /// SVG that usvg cannot parse.
+    ///
+    /// In strict mode: exit code 3.
+    /// In warn-only mode: error-slide placeholder substituted.
+    ///
+    /// The `source_id` field carries the diagram identifier (e.g., slide title
+    /// or diagram label) to aid debugging. The `span` field carries the byte
+    /// offset within the raw SVG where the parse failure occurred (if available
+    /// from usvg; otherwise a zero-length span at offset 0 is used).
+    #[error("[E-EXP-004] SVG normalization failed for diagram '{source_id}': {cause}")]
+    SvgNormalizationFailed {
+        /// Identifier of the diagram whose SVG could not be normalized
+        /// (e.g., the slide title or diagram alt-text label).
+        source_id: Arc<str>,
+        /// Human-readable description of the usvg parse/normalization failure.
+        cause: Arc<str>,
+        /// Byte offset span within the raw SVG where the failure was detected.
+        ///
+        /// Set to a zero-length span at offset 0 when usvg does not provide
+        /// positional information about the failure.
+        span: SourceSpan,
     },
 }
 

@@ -64,6 +64,7 @@ strsim = "=0.11.1"
 plotters = { version = "=0.3.7", default-features = false, features = ["svg_backend", "all_series", "all_elements", "full_palette"] }
 quick-xml = "=0.36.0"
 mermaid-rs-renderer = { version = "=0.2.2", default-features = false }
+usvg = "=0.47.0"
 
 # Testing (dev-only — exempt from pinning-audit per DEV_ONLY allowlist)
 insta = "1"

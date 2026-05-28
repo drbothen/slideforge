@@ -21,6 +21,16 @@
 //! STORY-033 produces the raw Mermaid → SVG output. STORY-034 adds the
 //! usvg normalization step. Together they form the complete diagram pipeline
 //! (BC-1.12.001 postcondition 6 / BC-1.12.003).
+//!
+//! ```text
+//! render_mermaid() → RawDiagramSvg
+//!                               ↓
+//!                     usvg_normalize()       (STORY-034)
+//!                               ↓
+//!                    NormalizedDiagramSvg
+//!                               ↓
+//!                   LaidOutDeck / Exporters
+//! ```
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
@@ -29,17 +39,20 @@
 
 pub mod accessibility;
 pub mod error;
+pub mod normalize;
 pub mod renderer;
 pub mod types;
 
 use slideforge_plugin_api::{DiagramOptions, DiagramRenderer};
 use tracing::instrument;
 
-use crate::types::{DiagramError, DiagramLang, RawDiagramSvg};
+use crate::types::{DiagramError, DiagramLang, NormalizedDiagramSvg, RawDiagramSvg};
 
 // Re-export primary types for crate consumers.
+pub use crate::normalize::usvg_normalize;
 pub use crate::types::{
-    DiagramError as SfDiagramError, DiagramLang as SfDiagramLang, RawDiagramSvg as SfRawDiagramSvg,
+    DiagramError as SfDiagramError, DiagramLang as SfDiagramLang,
+    NormalizedDiagramSvg as SfNormalizedDiagramSvg, RawDiagramSvg as SfRawDiagramSvg,
 };
 
 /// The default `DiagramRenderer` plugin implementation for slideforge.
@@ -62,30 +75,33 @@ impl DiagramRendererImpl {
         Self
     }
 
-    /// Render a Mermaid diagram source string to PPTX-safe SVG with
-    /// accessibility attributes injected.
+    /// Render a Mermaid diagram source string to a PPTX-safe, usvg-normalized
+    /// SVG with accessibility attributes injected.
     ///
     /// This is the **primary internal entry point** for diagram rendering in
     /// the slideforge eval pipeline. The eval layer calls this method directly
     /// with a fully-resolved `source` string and `alt_text`.
     ///
-    /// ## Pipeline
+    /// ## Pipeline (STORY-033 + STORY-034)
     ///
     /// 1. Validate `source` is non-empty → [`DiagramError::EmptySource`]
     /// 2. Validate `lang` is `Mermaid` → [`DiagramError::UnsupportedLanguage`]
-    /// 3. Call `mermaid_rs_renderer::render(source)` → raw SVG
+    /// 3. Call `mermaid_rs_renderer::render(source)` → raw SVG string
     /// 4. Assert no forbidden elements (foreignObject, script, @keyframes)
     /// 5. Inject `aria-label`, `role="img"`, `<title>` → [`RawDiagramSvg`]
+    /// 6. Call [`crate::normalize::usvg_normalize`] → [`NormalizedDiagramSvg`]
+    ///    (BC-1.12.003 invariant 1: normalization is mandatory, no bypass path)
     ///
     /// # Errors
     ///
-    /// Returns [`DiagramError`] on any step failure.
+    /// Returns [`DiagramError`] on any step failure. Step 6 failures produce
+    /// [`DiagramError::SvgNormalizationFailed`] with error code `E-EXP-004`.
     #[instrument(skip(source, alt_text), fields(lang = ?lang))]
     pub fn render_diagram(
         source: &str,
         lang: DiagramLang,
         alt_text: &str,
-    ) -> Result<RawDiagramSvg, DiagramError> {
+    ) -> Result<NormalizedDiagramSvg, DiagramError> {
         // Step 0: Validate language.
         if lang != DiagramLang::Mermaid {
             return Err(DiagramError::UnsupportedLanguage {
@@ -93,8 +109,12 @@ impl DiagramRendererImpl {
             });
         }
 
-        // Delegate to the renderer module.
-        crate::renderer::render_mermaid(source, alt_text)
+        // Steps 1–5: render Mermaid source to accessibility-annotated raw SVG.
+        let raw_svg: RawDiagramSvg = crate::renderer::render_mermaid(source, alt_text)?;
+
+        // Step 6: mandatory usvg normalization pass (BC-1.12.003 invariant 1).
+        // There is no bypass path — exporters receive NormalizedDiagramSvg only.
+        crate::normalize::usvg_normalize(&raw_svg, alt_text)
     }
 }
 
@@ -135,7 +155,7 @@ impl DiagramRenderer for DiagramRendererImpl {
     ///
     /// - [`slideforge_plugin_api::DiagramError::SyntaxError`] — invalid Mermaid syntax or empty source
     /// - [`slideforge_plugin_api::DiagramError::UnsupportedFeature`] — unsupported diagram language
-    /// - [`slideforge_plugin_api::DiagramError::RenderError`] — forbidden SVG element or post-processing failure
+    /// - [`slideforge_plugin_api::DiagramError::RenderError`] — forbidden SVG element, post-processing failure, or normalization failure
     #[instrument(skip(self, source, _opts))]
     fn render(
         &self,
@@ -146,7 +166,7 @@ impl DiagramRenderer for DiagramRendererImpl {
         // semantics). Callers that need alt text must use render_diagram() directly
         // or post-process the SVG. In the eval pipeline, render_diagram() is called
         // directly with the user-supplied AltText from DSL source.
-        let raw_svg =
+        let normalized =
             Self::render_diagram(source, DiagramLang::Mermaid, "").map_err(|e| match e {
                 DiagramError::MermaidSyntaxError {
                     message,
@@ -175,8 +195,15 @@ impl DiagramRenderer for DiagramRendererImpl {
                         message: format!("SVG post-processing failed: {message}"),
                     }
                 },
+                DiagramError::SvgNormalizationFailed {
+                    source_id, cause, ..
+                } => slideforge_plugin_api::DiagramError::RenderError {
+                    message: format!(
+                        "[E-EXP-004] SVG normalization failed for diagram '{source_id}': {cause}"
+                    ),
+                },
             })?;
-        Ok(raw_svg.into_string().into_bytes())
+        Ok(normalized.as_str().as_bytes().to_vec())
     }
 }
 
