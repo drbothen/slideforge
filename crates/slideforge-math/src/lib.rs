@@ -226,28 +226,50 @@ mod tests {
         );
     }
 
-    /// `render(node, MathMl)` panics with the STORY-030 todo! message (stub phase).
+    /// `render(node, MathMl)` dispatches through the trait to `render_mathml` and
+    /// returns a UTF-8 string containing the `MathML` namespace and `display="inline"`.
     ///
-    /// RED GATE: must fail with `todo!()` until STORY-030 implements `render_mathml`.
+    /// RED GATE: fails until STORY-030 implements `render_mathml` (todo!() panics).
     #[test]
-    #[should_panic(expected = "STORY-030")]
-    fn test_bc_1_10_003_mathml_stub_panics_until_implemented() {
+    fn test_bc_1_10_003_renderer_dispatches_to_mathml_for_html() {
         let renderer = MathRendererImpl::new();
         let node = inline_node("x");
-        // The trait impl now routes MathMl to mathml::render_mathml which is todo!().
-        let _ = renderer.render(&node, MathOutputFormat::MathMl);
+        let bytes = renderer
+            .render(&node, MathOutputFormat::MathMl)
+            .expect("render(MathMl) must succeed for 'x'");
+        let output = String::from_utf8(bytes).expect("MathML output must be valid UTF-8");
+        assert!(
+            output.contains("http://www.w3.org/1998/Math/MathML"),
+            "MathML output must contain namespace URI; got: {output}"
+        );
+        assert!(
+            output.contains(r#"display="inline""#),
+            "inline MathML must have display=\"inline\"; got: {output}"
+        );
     }
 
-    /// `render(node, Pdf)` panics with the STORY-030 todo! message (stub phase).
+    /// `render(node, Pdf)` dispatches through the trait to `render_pdf_paths` and
+    /// returns bytes that, as a string, contain an SVG root element and no `<text>`.
     ///
-    /// RED GATE: must fail with `todo!()` until STORY-030 implements `render_pdf_paths`.
+    /// RED GATE: fails until STORY-030 implements `render_pdf_paths` (todo!() panics).
     #[test]
-    #[should_panic(expected = "STORY-030")]
-    fn test_bc_1_10_003_pdf_paths_stub_panics_until_implemented() {
+    fn test_bc_1_10_003_renderer_dispatches_to_pdf_paths_for_pdf() {
         let renderer = MathRendererImpl::new();
         let node = inline_node("x");
-        // The trait impl now routes Pdf to pdf_paths::render_pdf_paths which is todo!().
-        let _ = renderer.render(&node, MathOutputFormat::Pdf);
+        let bytes = renderer
+            .render(&node, MathOutputFormat::Pdf)
+            .expect("render(Pdf) must succeed for 'x'");
+        let output = String::from_utf8(bytes).expect("PDF paths output must be valid UTF-8");
+        assert!(
+            output.contains("<svg") || output.contains("<?xml"),
+            "PDF path output must be an SVG document; got: {}",
+            &output[..output.len().min(120)]
+        );
+        assert!(
+            !output.contains("<text"),
+            "PDF path SVG must contain no <text> elements; got: {}",
+            &output[..output.len().min(400)]
+        );
     }
 
     /// `display_node` renders with `<m:oMathPara>` wrapper.

@@ -63,94 +63,395 @@ mod tests {
     use super::*;
     use crate::ast::{MathMode, MathNode};
 
-    // Helper: build a minimal MathAst inline expression.
+    // ─────────────────────────────────────────────────────────────────────────
+    // Helpers
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Build a minimal [`MathAst`] inline expression.
     fn inline_ast(nodes: Vec<MathNode>) -> MathAst {
         MathAst::new(MathMode::Inline, nodes)
     }
 
-    // Helper: build a minimal MathAst display expression.
+    /// Build a minimal [`MathAst`] display (block) expression.
     fn display_ast(nodes: Vec<MathNode>) -> MathAst {
         MathAst::new(MathMode::Display, nodes)
+    }
+
+    /// Walk a string with `quick_xml` and confirm all tags balance.
+    ///
+    /// Returns `Ok(())` if the XML is well-formed, `Err(msg)` otherwise.
+    fn assert_wellformed_xml(xml: &str) -> Result<(), String> {
+        use quick_xml::events::Event;
+        use quick_xml::Reader;
+
+        let mut reader = Reader::from_str(xml);
+        let mut depth: i64 = 0;
+        let mut buf = Vec::new();
+
+        loop {
+            match reader.read_event_into(&mut buf) {
+                Ok(Event::Start(_)) => depth += 1,
+                Ok(Event::End(_)) => {
+                    depth -= 1;
+                    if depth < 0 {
+                        return Err(format!("unmatched closing tag in: {xml}"));
+                    }
+                },
+                Ok(Event::Eof) => break,
+                Err(e) => return Err(format!("XML parse error: {e}")),
+                _ => {},
+            }
+            buf.clear();
+        }
+
+        if depth != 0 {
+            return Err(format!("unclosed tags (depth={depth}) in: {xml}"));
+        }
+        Ok(())
     }
 
     // ─────────────────────────────────────────────────────────────────────────
     // BC-1.10.003 — AC-001: MathML output for HTML export
     // ─────────────────────────────────────────────────────────────────────────
 
-    /// `render_mathml` for inline mode produces `display="inline"` on root.
+    /// `render_mathml` for `$x + y$` returns a string containing the `MathML`
+    /// root `<math xmlns="http://www.w3.org/1998/Math/MathML"` element, and
+    /// contains rendered identifiers `<mi>x</mi>`, `<mi>y</mi>` and the
+    /// operator `<mo>+</mo>`.
     ///
-    /// RED GATE: must fail with `todo!()` until implemented.
+    /// RED GATE: fails until `render_mathml` is implemented (`todo!()` panics).
     #[test]
-    #[should_panic(expected = "STORY-030")]
-    fn test_bc_1_10_003_mathml_inline_display_attribute() {
-        let ast = inline_ast(vec![MathNode::Text(Arc::from("x"))]);
-        let _ = render_mathml(&ast).unwrap();
+    fn test_bc_1_10_003_mathml_simple_expression() {
+        let ast = inline_ast(vec![
+            MathNode::Text(Arc::from("x")),
+            MathNode::Text(Arc::from("+")),
+            MathNode::Text(Arc::from("y")),
+        ]);
+        let output = render_mathml(&ast).expect("render_mathml must succeed for x + y");
+        assert!(
+            output.contains(r#"<math xmlns="http://www.w3.org/1998/Math/MathML""#),
+            "MathML must include xmlns declaration; got: {output}"
+        );
+        assert!(
+            output.contains("<mi>x</mi>"),
+            "MathML must contain <mi>x</mi>; got: {output}"
+        );
+        assert!(
+            output.contains("<mi>y</mi>"),
+            "MathML must contain <mi>y</mi>; got: {output}"
+        );
+        assert!(
+            output.contains("<mo>+</mo>"),
+            "MathML must contain <mo>+</mo>; got: {output}"
+        );
     }
 
-    /// `render_mathml` for display mode produces `display="block"` on root.
+    /// `render_mathml` for `$x^2$` produces `<msup><mi>x</mi><mn>2</mn></msup>`.
     ///
-    /// RED GATE: must fail with `todo!()` until implemented.
+    /// RED GATE: fails until `render_mathml` is implemented.
     #[test]
-    #[should_panic(expected = "STORY-030")]
-    fn test_bc_1_10_003_mathml_display_block_attribute() {
-        let ast = display_ast(vec![MathNode::Text(Arc::from("x"))]);
-        let _ = render_mathml(&ast).unwrap();
-    }
-
-    /// `render_mathml` output contains the `MathML` namespace declaration.
-    ///
-    /// RED GATE: must fail with `todo!()` until implemented.
-    #[test]
-    #[should_panic(expected = "STORY-030")]
-    fn test_bc_1_10_003_mathml_namespace_present() {
-        let ast = inline_ast(vec![MathNode::Text(Arc::from("x"))]);
-        let _ = render_mathml(&ast).unwrap();
-    }
-
-    /// `render_mathml` of `x^2` produces `<msup>` element.
-    ///
-    /// RED GATE: must fail with `todo!()` until implemented.
-    #[test]
-    #[should_panic(expected = "STORY-030")]
-    fn test_bc_1_10_003_mathml_superscript_produces_msup() {
+    fn test_bc_1_10_003_mathml_superscript() {
         let ast = inline_ast(vec![MathNode::Superscript {
             base: Box::new(MathNode::Text(Arc::from("x"))),
             sup: Box::new(MathNode::Text(Arc::from("2"))),
         }]);
-        let _ = render_mathml(&ast).unwrap();
+        let output = render_mathml(&ast).expect("render_mathml must succeed for x^2");
+        assert!(
+            output.contains("<msup>"),
+            "MathML for x^2 must contain <msup>; got: {output}"
+        );
+        assert!(
+            output.contains("<mi>x</mi>"),
+            "MathML for x^2 must contain <mi>x</mi>; got: {output}"
+        );
+        assert!(
+            output.contains("<mn>2</mn>"),
+            "MathML for x^2 must contain <mn>2</mn>; got: {output}"
+        );
+    }
+
+    /// `render_mathml` for `$x_2$` (subscript) produces `<msub>` element.
+    ///
+    /// RED GATE: fails until `render_mathml` is implemented.
+    #[test]
+    fn test_bc_1_10_003_mathml_subscript() {
+        let ast = inline_ast(vec![MathNode::Subscript {
+            base: Box::new(MathNode::Text(Arc::from("x"))),
+            sub: Box::new(MathNode::Text(Arc::from("2"))),
+        }]);
+        let output = render_mathml(&ast).expect("render_mathml must succeed for x_2");
+        assert!(
+            output.contains("<msub>"),
+            "MathML for x_2 must contain <msub>; got: {output}"
+        );
+    }
+
+    /// `render_mathml` for `$\frac{1}{2}$` produces `<mfrac>` element.
+    ///
+    /// RED GATE: fails until `render_mathml` is implemented.
+    #[test]
+    fn test_bc_1_10_003_mathml_fraction() {
+        let ast = inline_ast(vec![MathNode::Fraction {
+            num: Box::new(MathNode::Text(Arc::from("1"))),
+            denom: Box::new(MathNode::Text(Arc::from("2"))),
+        }]);
+        let output = render_mathml(&ast).expect("render_mathml must succeed for \\frac{1}{2}");
+        assert!(
+            output.contains("<mfrac>"),
+            "MathML for \\frac must contain <mfrac>; got: {output}"
+        );
+    }
+
+    /// Inline math produces root `<math display="inline"` attribute.
+    ///
+    /// RED GATE: fails until `render_mathml` is implemented.
+    #[test]
+    fn test_bc_1_10_003_mathml_inline_uses_display_inline() {
+        let ast = inline_ast(vec![MathNode::Text(Arc::from("x"))]);
+        let output = render_mathml(&ast).expect("render_mathml must succeed");
+        assert!(
+            output.contains(r#"display="inline""#),
+            "inline MathML must have display=\"inline\"; got: {output}"
+        );
+        assert!(
+            !output.contains(r#"display="block""#),
+            "inline MathML must NOT have display=\"block\"; got: {output}"
+        );
+    }
+
+    /// Display math (`$$...$$`) produces root `<math display="block"` attribute.
+    ///
+    /// RED GATE: fails until `render_mathml` is implemented.
+    #[test]
+    fn test_bc_1_10_003_mathml_display_uses_display_block() {
+        let ast = display_ast(vec![MathNode::Text(Arc::from("x"))]);
+        let output = render_mathml(&ast).expect("render_mathml must succeed");
+        assert!(
+            output.contains(r#"display="block""#),
+            "display MathML must have display=\"block\"; got: {output}"
+        );
+        assert!(
+            !output.contains(r#"display="inline""#),
+            "display MathML must NOT have display=\"inline\"; got: {output}"
+        );
+    }
+
+    /// `render_mathml` output for any expression contains a non-empty `aria-label`.
+    ///
+    /// RED GATE: fails until `render_mathml` is implemented.
+    #[test]
+    fn test_bc_1_10_003_mathml_has_aria_label() {
+        let ast = inline_ast(vec![MathNode::Text(Arc::from("x"))]);
+        let output = render_mathml(&ast).expect("render_mathml must succeed");
+        assert!(
+            output.contains("aria-label="),
+            "MathML must include aria-label attribute; got: {output}"
+        );
+        // The aria-label value must be non-empty — not aria-label=""
+        assert!(
+            !output.contains(r#"aria-label="""#),
+            "aria-label must not be empty; got: {output}"
+        );
     }
 
     // ─────────────────────────────────────────────────────────────────────────
     // BC-1.10.003 — AC-002: MathML is accessible to screen readers
     // ─────────────────────────────────────────────────────────────────────────
 
-    /// `render_mathml` output contains `aria-label` attribute.
+    /// `ast_to_aria_label` for `$E = mc^2$` returns a label containing
+    /// "equals" and "squared" (semantic plain-text description).
     ///
-    /// RED GATE: must fail with `todo!()` until implemented.
+    /// RED GATE: fails until `ast_to_aria_label` is implemented.
     #[test]
-    #[should_panic(expected = "STORY-030")]
-    fn test_bc_1_10_003_mathml_has_aria_label() {
-        let ast = inline_ast(vec![MathNode::Text(Arc::from("E"))]);
-        let _ = render_mathml(&ast).unwrap();
+    fn test_bc_1_10_003_aria_label_for_pythagorean() {
+        // AST for E = mc^2: nodes E, =, m, c^2
+        let ast = inline_ast(vec![
+            MathNode::Text(Arc::from("E")),
+            MathNode::Text(Arc::from("=")),
+            MathNode::Text(Arc::from("m")),
+            MathNode::Superscript {
+                base: Box::new(MathNode::Text(Arc::from("c"))),
+                sup: Box::new(MathNode::Text(Arc::from("2"))),
+            },
+        ]);
+        let label = ast_to_aria_label(&ast);
+        let lower = label.to_lowercase();
+        assert!(
+            lower.contains("equals"),
+            "aria-label for E=mc^2 must contain 'equals'; got: {label}"
+        );
+        assert!(
+            lower.contains("squared"),
+            "aria-label for E=mc^2 must contain 'squared'; got: {label}"
+        );
+    }
+
+    /// `ast_to_aria_label` for `$x + y$` returns a label containing "plus".
+    ///
+    /// RED GATE: fails until `ast_to_aria_label` is implemented.
+    #[test]
+    fn test_bc_1_10_003_aria_label_for_simple_sum() {
+        let ast = inline_ast(vec![
+            MathNode::Text(Arc::from("x")),
+            MathNode::Text(Arc::from("+")),
+            MathNode::Text(Arc::from("y")),
+        ]);
+        let label = ast_to_aria_label(&ast);
+        let lower = label.to_lowercase();
+        assert!(
+            lower.contains("plus"),
+            "aria-label for x+y must contain 'plus'; got: {label}"
+        );
     }
 
     /// `ast_to_aria_label` returns a non-empty string for any non-empty AST.
     ///
-    /// RED GATE: must fail with `todo!()` until implemented.
+    /// RED GATE: fails until `ast_to_aria_label` is implemented.
     #[test]
-    #[should_panic(expected = "STORY-030")]
     fn test_bc_1_10_003_aria_label_non_empty_for_non_empty_ast() {
         let ast = inline_ast(vec![MathNode::Text(Arc::from("x"))]);
-        let _ = ast_to_aria_label(&ast);
+        let label = ast_to_aria_label(&ast);
+        assert!(
+            !label.is_empty(),
+            "aria-label must not be empty for a non-empty AST"
+        );
     }
 
-    /// `ast_to_aria_label` for an empty AST returns an empty string (not a panic).
+    /// `ast_to_aria_label` for an empty AST returns an empty string (no panic).
     ///
-    /// RED GATE: must fail with `todo!()` until implemented.
+    /// RED GATE: fails until `ast_to_aria_label` is implemented.
     #[test]
-    #[should_panic(expected = "STORY-030")]
     fn test_bc_1_10_003_aria_label_empty_ast_returns_empty_string() {
         let ast = inline_ast(vec![]);
-        let _ = ast_to_aria_label(&ast);
+        let label = ast_to_aria_label(&ast);
+        assert!(
+            label.is_empty(),
+            "aria-label for empty AST must be empty string; got: {label}"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // BC-1.10.003 — Well-formedness and element constraints
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// `render_mathml` output is well-formed XML (all tags balance).
+    ///
+    /// Uses `quick-xml` event walk to confirm no unclosed tags.
+    ///
+    /// RED GATE: fails until `render_mathml` is implemented.
+    #[test]
+    fn test_bc_1_10_003_mathml_xml_is_wellformed() {
+        let ast = inline_ast(vec![
+            MathNode::Text(Arc::from("x")),
+            MathNode::Superscript {
+                base: Box::new(MathNode::Text(Arc::from("y"))),
+                sup: Box::new(MathNode::Text(Arc::from("2"))),
+            },
+        ]);
+        let output = render_mathml(&ast).expect("render_mathml must succeed");
+        assert_wellformed_xml(&output)
+            .unwrap_or_else(|e| panic!("MathML output is not well-formed XML: {e}"));
+    }
+
+    /// `render_mathml` output uses only `MathML` elements — no HTML tags.
+    ///
+    /// Checks that forbidden HTML elements (div, span, p, h1-h6) are absent.
+    ///
+    /// RED GATE: fails until `render_mathml` is implemented.
+    #[test]
+    fn test_bc_1_10_003_mathml_no_html_elements() {
+        let ast = inline_ast(vec![MathNode::Text(Arc::from("x"))]);
+        let output = render_mathml(&ast).expect("render_mathml must succeed");
+        for tag in &["<div", "<span", "<p>", "<p ", "<h1", "<h2", "<table"] {
+            assert!(
+                !output.contains(tag),
+                "MathML must not contain HTML element {tag}; got: {output}"
+            );
+        }
+    }
+
+    /// `render_mathml` namespace declaration is exactly the W3C `MathML` URI.
+    ///
+    /// RED GATE: fails until `render_mathml` is implemented.
+    #[test]
+    fn test_bc_1_10_003_mathml_namespace_is_w3c_uri() {
+        let ast = inline_ast(vec![MathNode::Text(Arc::from("x"))]);
+        let output = render_mathml(&ast).expect("render_mathml must succeed");
+        assert!(
+            output.contains("http://www.w3.org/1998/Math/MathML"),
+            "MathML namespace must be 'http://www.w3.org/1998/Math/MathML'; got: {output}"
+        );
+    }
+
+    /// `render_mathml` for `$\frac{1}{2}$` produces well-formed XML with `<mfrac>`.
+    ///
+    /// RED GATE: fails until `render_mathml` is implemented.
+    #[test]
+    fn test_bc_1_10_003_mathml_fraction_wellformed() {
+        let ast = inline_ast(vec![MathNode::Fraction {
+            num: Box::new(MathNode::Text(Arc::from("1"))),
+            denom: Box::new(MathNode::Text(Arc::from("2"))),
+        }]);
+        let output = render_mathml(&ast).expect("render_mathml must succeed for fraction");
+        assert!(output.contains("<mfrac>"), "must contain <mfrac>");
+        assert_wellformed_xml(&output)
+            .unwrap_or_else(|e| panic!("fraction MathML is not well-formed: {e}"));
+    }
+
+    /// `render_mathml` for a `Sqrt` node produces `<msqrt>` or `<mroot>` element.
+    ///
+    /// RED GATE: fails until `render_mathml` is implemented.
+    #[test]
+    fn test_bc_1_10_003_mathml_sqrt_element() {
+        let ast = inline_ast(vec![MathNode::Sqrt {
+            index: None,
+            radicand: Box::new(MathNode::Text(Arc::from("x"))),
+        }]);
+        let output = render_mathml(&ast).expect("render_mathml must succeed for sqrt");
+        assert!(
+            output.contains("<msqrt>") || output.contains("<mroot>"),
+            "MathML for \\sqrt must contain <msqrt> or <mroot>; got: {output}"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // BC-1.10.003 — EC-001: Display math in MathML → display="block"
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// EC-001: Display math in `MathML` gets `display="block"` on root `<math>`.
+    ///
+    /// RED GATE: fails until `render_mathml` is implemented.
+    #[test]
+    fn test_bc_1_10_003_ec001_display_math_gets_block_attribute() {
+        let ast = display_ast(vec![MathNode::Operator(Arc::from("sum"))]);
+        let output = render_mathml(&ast).expect("render_mathml must succeed for display math");
+        // Root <math> element must carry display="block"
+        let root_end = output.find('>').expect("output must contain a '>'");
+        let root_open = &output[..=root_end];
+        assert!(
+            root_open.contains(r#"display="block""#),
+            "root <math> of display mode must have display=\"block\" before first '>'; got root: {root_open}"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // BC-1.10.003 — AC-004: Single MathAst source (no re-parsing)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// The same [`MathAst`] can be passed to `render_mathml` twice without error.
+    ///
+    /// This exercises AC-004: `render_mathml` takes `&MathAst` (shared reference).
+    ///
+    /// RED GATE: fails until `render_mathml` is implemented.
+    #[test]
+    fn test_bc_1_10_003_mathml_ast_reusable_across_calls() {
+        let ast = inline_ast(vec![MathNode::Text(Arc::from("x"))]);
+        // Both calls take &ast — same AST, no re-parsing
+        let first = render_mathml(&ast).expect("first call must succeed");
+        let second = render_mathml(&ast).expect("second call must succeed");
+        assert_eq!(
+            first, second,
+            "render_mathml must be deterministic for the same AST"
+        );
     }
 }
