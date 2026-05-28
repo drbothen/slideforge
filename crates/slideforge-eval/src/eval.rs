@@ -293,6 +293,7 @@ pub fn eval_deck_with_variant(
         slideforge_version: version_str,
         lang,
         author: None,
+        section_order: None,
     };
 
     // ── Step 7: Build the Deck vars map (OrderedMap) ──
@@ -306,6 +307,7 @@ pub fn eval_deck_with_variant(
         vars: deck_vars_ordered,
         metadata,
         registers: OrderedMap::new(),
+        section_blocks: vec![],
     })
 }
 

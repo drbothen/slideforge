@@ -92,6 +92,40 @@ pub enum LayoutError {
         /// The offending bounding box.
         bbox: BoundingBox,
     },
+
+    /// A `takeaway:` field value on a slide is not a resolved plain string.
+    ///
+    /// The layout stage expects the evaluator to have resolved all
+    /// `FieldValue::Expr` and `FieldValue::Interpolated` values before layout
+    /// runs. If an unresolved variant is encountered on a `takeaway:` field,
+    /// this error is returned (HIGH-002 / BC-3.02.001).
+    #[error(
+        "layout error: slide {source_slide_index}: takeaway field is unresolved \
+         (expected Literal(Str), found a non-literal FieldValue variant)"
+    )]
+    UnresolvedTakeaway {
+        /// Zero-based index of the slide with the unresolved takeaway.
+        source_slide_index: usize,
+    },
+
+    /// A required field is missing from a risk card entry.
+    ///
+    /// Each entry in the `cards:` list of a `severity_cards` slide must be a
+    /// `Value::Map` containing `title`, `severity`, `description`, and `owner`
+    /// keys. When a key is absent or not a plain string, this error is returned
+    /// (HIGH-001 / BC-3.02.001).
+    #[error(
+        "layout error: slide {slide_index}: risk card at index {card_index} is missing \
+         required field '{field}' (or it is not a plain string)"
+    )]
+    MissingRiskCardField {
+        /// Zero-based index of the `severity_cards` slide.
+        slide_index: usize,
+        /// Zero-based index of the card within the slide's `cards:` list.
+        card_index: usize,
+        /// The name of the missing or non-string field.
+        field: String,
+    },
 }
 
 #[cfg(test)]

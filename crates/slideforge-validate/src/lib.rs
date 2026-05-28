@@ -114,8 +114,10 @@ mod integration_tests {
                 slideforge_version: Arc::from("0.1.0"),
                 lang: None, // triggers E-A11-003
                 author: None,
+                section_order: None,
             },
             registers: OrderedMap::new(),
+            section_blocks: vec![],
         };
 
         let opts = ValidatorOptions::default();
@@ -204,8 +206,10 @@ mod integration_tests {
                 slideforge_version: Arc::from("0.1.0"),
                 lang: Some(Arc::from("en-US")), // valid
                 author: None,
+                section_order: None,
             },
             registers: OrderedMap::new(),
+            section_blocks: vec![],
         };
 
         let opts = ValidatorOptions::default();

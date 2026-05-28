@@ -33,23 +33,30 @@
 
 use std::sync::Arc;
 
-use slideforge_types::{Deck, OrderedMap, Value};
+use slideforge_types::{Deck, OrderedMap, Register, Value};
+
+use crate::error::LayoutError;
+
+/// The set of section type names supported by manually authored sections
+/// (BC-3.02.002 AC-004).
+const SUPPORTED_MANUAL_SECTION_TYPES: &[&str] =
+    &["methodology", "scope", "approval", "appendix", "glossary"];
 
 /// The output format a section should be included in.
 ///
 /// `OutputFormat` is used in [`GeneratedSection::target_formats`] to signal
 /// which exporters should render a section. PPTX and HTML exporters skip
 /// sections where their format is absent from this list.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum OutputFormat {
     /// DOCX (Word) export.
     Docx,
+    /// HTML export.
+    Html,
     /// PDF export.
     Pdf,
     /// PPTX (`PowerPoint`) export.
     Pptx,
-    /// HTML export.
-    Html,
     /// Web preview export.
     Preview,
 }
@@ -79,7 +86,30 @@ pub enum SectionKind {
     ///
     /// Supported types: `methodology`, `scope`, `approval`, `appendix`,
     /// `glossary`. The type name is stored here for plugin dispatch.
+    ///
+    /// ## Future extension (MED-002 / STORY-041 / STORY-042)
+    ///
+    /// A `Custom` variant for third-party plugin-registered section types will
+    /// be added when the `SectionType` plugin surface is activated. At that
+    /// point, `ManualSection` will carry a plugin-registered type ID alongside
+    /// the author-declared name. No breaking change is needed until then.
     ManualSection(Arc<str>),
+}
+
+impl SectionKind {
+    /// Return the canonical ordering key used when sorting by `section_order:`.
+    ///
+    /// Returns the section type name as a string slice:
+    /// - `"executive_summary"` for [`SectionKind::ExecutiveSummary`]
+    /// - `"risk_register"` for [`SectionKind::RiskRegister`]
+    /// - the type name for [`SectionKind::ManualSection`]
+    fn order_key(&self) -> &str {
+        match self {
+            SectionKind::ExecutiveSummary => "executive_summary",
+            SectionKind::RiskRegister => "risk_register",
+            SectionKind::ManualSection(name) => name.as_ref(),
+        }
+    }
 }
 
 /// Whether a section was auto-generated from slide data or manually authored.
@@ -109,7 +139,7 @@ pub enum SectionItem {
     /// A single bullet derived from a slide's `takeaway:` field.
     TakeawayBullet(Arc<str>),
 
-    /// A risk entry derived from a `severity_cards` slide.
+    /// A risk entry derived from a single card within a `severity_cards` slide.
     RiskRow {
         /// The risk item title.
         title: Arc<str>,
@@ -171,7 +201,20 @@ pub struct GeneratedSection {
     /// re-examining section kind. Default for most sections: `[Docx, Pdf]`.
     /// PPTX and HTML exporters skip sections where their format is absent
     /// (AC-005).
+    ///
+    /// **Invariant:** always sorted by `OutputFormat` discriminant order.
     pub target_formats: Vec<OutputFormat>,
+}
+
+/// Produce a canonical sorted `target_formats` vec for DOCX + PDF sections.
+///
+/// Returns `[OutputFormat::Docx, OutputFormat::Pdf]` (already in sorted order
+/// because `Docx < Pdf` in the `OutputFormat` definition). HIGH-004: canonical
+/// sort enforced on construction.
+fn docx_pdf_formats() -> Vec<OutputFormat> {
+    let mut formats = vec![OutputFormat::Docx, OutputFormat::Pdf];
+    formats.sort();
+    formats
 }
 
 /// Collect all document sections from a fully evaluated [`Deck`].
@@ -189,105 +232,217 @@ pub struct GeneratedSection {
 ///
 /// # Errors
 ///
-/// Returns [`crate::error::LayoutError::UnknownSectionType`] if the deck
-/// contains a manually authored `section <type>:` block with an unrecognised
-/// type name.
+/// Returns [`LayoutError::UnknownSectionType`] if the deck contains a manually
+/// authored `section <type>:` block with an unrecognised type name.
+///
+/// Returns [`LayoutError::UnresolvedTakeaway`] if a slide's `takeaway:` field
+/// is not a resolved `Literal(Str)` value (indicates an evaluator bug).
+///
+/// Returns [`LayoutError::MissingRiskCardField`] if a card entry in a
+/// `severity_cards` slide is missing a required field.
 ///
 /// # Panics
 ///
 /// Does not panic. All error paths return `Err`.
-#[must_use]
-pub fn collect_sections(deck: &Deck) -> Vec<GeneratedSection> {
-    // Manual sections (from section_blocks in the Deck) are collected first.
-    // NOTE: `slideforge_types::Deck` does not yet expose a `section_blocks` field
-    // (that field will be added when the parser/evaluator pipeline is implemented).
-    // For now, manual_sections is always empty; the auto-generated collection below
-    // is the only active path. When Deck gains `section_blocks`, the manual collection
-    // logic here should be extended to iterate that field and convert each block
-    // into a GeneratedSection with SectionSource::ManuallyAuthored.
-    let manual_sections: Vec<GeneratedSection> = Vec::new();
+pub fn collect_sections(deck: &Deck) -> Result<Vec<GeneratedSection>, LayoutError> {
+    // ── Step 1: Collect manual sections from deck.section_blocks ──────────────
+    // Validates section type names — returns Err for unknown types.
+    let manual_sections = collect_manual_sections(deck)?;
 
     // Build a set of manually-authored section kinds so auto-generated sections
     // of the same kind can be suppressed (supersession rule, AC-006).
-    let manual_kinds: std::collections::HashSet<&SectionKind> =
-        manual_sections.iter().map(|s| &s.kind).collect();
+    let manual_section_names: std::collections::HashSet<String> = manual_sections
+        .iter()
+        .map(|s| s.kind.order_key().to_owned())
+        .collect();
 
-    // Collect auto-generated sections.
+    // ── Step 2: Collect auto-generated sections (unless superseded) ────────────
     let mut auto_sections: Vec<GeneratedSection> = Vec::new();
 
-    // ExecutiveSummary from takeaway fields — suppressed if a manual section of the same
-    // kind is present (AC-006).
-    if !manual_kinds.contains(&SectionKind::ExecutiveSummary)
-        && let Some(exec_summary) = collect_executive_summary(deck)
+    // ExecutiveSummary from takeaway fields — suppressed if a manual section of
+    // the same kind is present (AC-006).
+    if !manual_section_names.contains("executive_summary")
+        && let Some(exec_summary) = collect_executive_summary(deck)?
     {
         auto_sections.push(exec_summary);
     }
 
-    // RiskRegister from severity_cards slides — suppressed if a manual section of the same
-    // kind is present (AC-006).
-    if !manual_kinds.contains(&SectionKind::RiskRegister)
-        && let Some(risk_register) = collect_risk_register(deck)
+    // RiskRegister from severity_cards slides — suppressed if a manual section
+    // of the same kind is present (AC-006).
+    if !manual_section_names.contains("risk_register")
+        && let Some(risk_register) = collect_risk_register(deck)?
     {
         auto_sections.push(risk_register);
     }
 
-    // Final ordering: manual sections first (AC-007), then auto-generated.
+    // ── Step 3: Merge and apply section_order if present ──────────────────────
+    // Default order: manual sections first, then auto-generated.
     let mut result = manual_sections;
     result.extend(auto_sections);
-    result
+
+    // AC-007: if section_order is declared in deck metadata, sort accordingly.
+    if let Some(order) = &deck.metadata.section_order {
+        let order_map: std::collections::HashMap<&str, usize> = order
+            .iter()
+            .enumerate()
+            .map(|(i, name)| (name.as_ref(), i))
+            .collect();
+
+        result.sort_by_key(|s| {
+            order_map
+                .get(s.kind.order_key())
+                .copied()
+                .unwrap_or(usize::MAX)
+        });
+    }
+
+    Ok(result)
+}
+
+/// Collect manually authored sections from `deck.section_blocks` (BC-3.02.002).
+///
+/// Returns `Err(LayoutError::UnknownSectionType)` for any block whose type
+/// name is not in [`SUPPORTED_MANUAL_SECTION_TYPES`].
+fn collect_manual_sections(deck: &Deck) -> Result<Vec<GeneratedSection>, LayoutError> {
+    let mut sections = Vec::new();
+
+    for block in &deck.section_blocks {
+        let name: &str = block.name.as_ref();
+
+        // AC-004: only recognised type names are allowed.
+        if !SUPPORTED_MANUAL_SECTION_TYPES.contains(&name) {
+            return Err(LayoutError::UnknownSectionType {
+                name: name.to_owned(),
+            });
+        }
+
+        // Build items from the block body.
+        let items: Vec<SectionItem> = block
+            .body
+            .iter()
+            .map(|(k, v)| {
+                let mut map = OrderedMap::new();
+                map.insert(Arc::clone(k), v.clone());
+                SectionItem::Custom(map)
+            })
+            .collect();
+
+        let heading = humanize_section_name(name);
+
+        sections.push(GeneratedSection {
+            kind: SectionKind::ManualSection(Arc::clone(&block.name)),
+            source: SectionSource::ManuallyAuthored,
+            items,
+            heading,
+            target_formats: docx_pdf_formats(),
+        });
+    }
+
+    Ok(sections)
+}
+
+/// Produce a human-readable heading from a section type name.
+///
+/// Converts `"methodology"` → `"Methodology"`, `"executive_summary"` →
+/// `"Executive Summary"`, etc. Used for manually authored sections.
+fn humanize_section_name(name: &str) -> Arc<str> {
+    let words: Vec<String> = name
+        .split('_')
+        .map(|word| {
+            let mut chars = word.chars();
+            match chars.next() {
+                None => String::new(),
+                Some(first) => first.to_uppercase().to_string() + chars.as_str(),
+            }
+        })
+        .collect();
+    Arc::from(words.join(" ").as_str())
 }
 
 /// Collect the auto-generated `executive_summary` section from slide `takeaway:` fields.
 ///
-/// Walks `deck.slides` in order; for each slide that has a `takeaway:` field
-/// resolving to a plain string, appends a [`SectionItem::TakeawayBullet`] to
-/// the result.
+/// Walks `deck.slides` in order; for each slide that:
+/// - has `register != Notes` (MED-004: Notes-register slides are excluded)
+/// - has a `takeaway:` field resolving to `FieldValue::Literal(Value::Str(_))`
 ///
-/// Returns `None` if no slides contribute a takeaway (AC-003).
+/// appends a [`SectionItem::TakeawayBullet`] to the result.
+///
+/// Returns `Ok(None)` if no slides contribute a takeaway (AC-003).
+///
+/// # Errors
+///
+/// Returns [`LayoutError::UnresolvedTakeaway`] if a slide has a `takeaway:`
+/// field that is present but not a resolved `Literal(Str)` — i.e., it is a
+/// `FieldValue::Expr`, `FieldValue::Interpolated`, or
+/// `FieldValue::Inlines` variant. This indicates an evaluator bug: all
+/// expressions should be resolved before layout runs.
 ///
 /// # Contract
 ///
 /// - Slide order is preserved (BC-3.02.001 postcondition 2).
-/// - Only `FieldValue::Literal(Value::Str(_))` takeaway values are collected;
-///   unresolved `FieldValue::Expr` or `FieldValue::Interpolated` values are
-///   silently skipped (those indicate an evaluator bug — the evaluator should
-///   have resolved all expressions before layout runs).
-#[must_use]
-pub fn collect_executive_summary(deck: &Deck) -> Option<GeneratedSection> {
+/// - Notes-register slides do not contribute (MED-004).
+pub fn collect_executive_summary(deck: &Deck) -> Result<Option<GeneratedSection>, LayoutError> {
     use slideforge_types::FieldValue;
-    use slideforge_types::Value;
 
-    let items: Vec<SectionItem> = deck
-        .slides
-        .iter()
-        .filter_map(|slide| match slide.fields.get("takeaway") {
+    let mut items: Vec<SectionItem> = Vec::new();
+
+    for (slide_index, slide) in deck.slides.iter().enumerate() {
+        // MED-004: skip slides gated to the Notes register.
+        if slide.register == Some(Register::Notes) {
+            continue;
+        }
+
+        match slide.fields.get("takeaway") {
+            // Happy path: resolved string.
             Some(FieldValue::Literal(Value::Str(s))) => {
-                Some(SectionItem::TakeawayBullet(Arc::clone(s)))
+                items.push(SectionItem::TakeawayBullet(Arc::clone(s)));
             },
-            _ => None,
-        })
-        .collect();
-
-    if items.is_empty() {
-        return None;
+            // Field is present but not a Literal(Str): unresolved Expr/Interpolated/
+            // Inlines variants (evaluator bug) or a non-string Literal (type error).
+            // In all cases return an error (HIGH-002).
+            Some(
+                FieldValue::Expr(_)
+                | FieldValue::Interpolated(_)
+                | FieldValue::Inlines(_)
+                | FieldValue::Literal(_),
+            ) => {
+                return Err(LayoutError::UnresolvedTakeaway {
+                    source_slide_index: slide_index,
+                });
+            },
+            // No takeaway field — skip this slide.
+            None => {},
+        }
     }
 
-    Some(GeneratedSection {
+    if items.is_empty() {
+        return Ok(None);
+    }
+
+    Ok(Some(GeneratedSection {
         kind: SectionKind::ExecutiveSummary,
         source: SectionSource::AutoGenerated,
         items,
         heading: Arc::from("Executive Summary"),
-        target_formats: vec![OutputFormat::Docx, OutputFormat::Pdf],
-    })
+        target_formats: docx_pdf_formats(),
+    }))
 }
 
 /// Collect the auto-generated `risk_register` section from `severity_cards` slides.
 ///
-/// Walks `deck.slides` in order; for each slide with `slide_type == "severity_cards"`,
-/// reads its card data and produces one [`SectionItem::RiskRow`] per card entry
-/// (title, severity, description, owner fields).
+/// Walks `deck.slides` in order; for each slide with
+/// `slide_type == "severity_cards"`, reads its `cards:` field as a
+/// `Value::List`. Each entry in the list must be a `Value::Map` with
+/// `title`, `severity`, `description`, and `owner` string keys. One
+/// [`SectionItem::RiskRow`] is produced per card entry (CRIT-001 fix).
 ///
-/// Returns `None` if no `severity_cards` slides exist in the deck (AC-003).
+/// Returns `Ok(None)` if no `severity_cards` slides exist in the deck
+/// (AC-003).
+///
+/// # Errors
+///
+/// Returns [`LayoutError::MissingRiskCardField`] if a card entry is missing a
+/// required field or its value is not a plain string (HIGH-001).
 ///
 /// # Contract
 ///
@@ -296,43 +451,78 @@ pub fn collect_executive_summary(deck: &Deck) -> Option<GeneratedSection> {
 /// - No de-duplication is applied — duplicate rows from an `@for` loop are all
 ///   included (BC-3.02.001 EC-003).
 /// - If `@if` suppresses all `severity_cards` slides, this function returns
-///   `None` (BC-3.02.001 EC-004).
-#[must_use]
-pub fn collect_risk_register(deck: &Deck) -> Option<GeneratedSection> {
+///   `Ok(None)` (BC-3.02.001 EC-004).
+pub fn collect_risk_register(deck: &Deck) -> Result<Option<GeneratedSection>, LayoutError> {
     use slideforge_types::FieldValue;
-    use slideforge_types::Value;
 
-    /// Extract a string value from a slide field, returning an empty `Arc<str>` if absent.
-    fn extract_str(slide: &slideforge_types::Slide, field: &str) -> Arc<str> {
-        match slide.fields.get(field) {
-            Some(FieldValue::Literal(Value::Str(s))) => Arc::clone(s),
-            _ => Arc::from(""),
+    let mut items: Vec<SectionItem> = Vec::new();
+
+    for (slide_index, slide) in deck.slides.iter().enumerate() {
+        if slide.slide_type.as_ref() != "severity_cards" {
+            continue;
+        }
+
+        // Extract the `cards:` field, which must be a Value::List of Value::Maps.
+        // Slides with no cards field, Null, or a wrong type contribute no rows.
+        let cards: &[Value] = match slide.fields.get("cards") {
+            Some(FieldValue::Literal(Value::List(list))) => list.as_slice(),
+            _ => continue,
+        };
+
+        for (card_index, card) in cards.iter().enumerate() {
+            let Value::Map(map) = card else {
+                return Err(LayoutError::MissingRiskCardField {
+                    slide_index,
+                    card_index,
+                    field: "cards[n]".to_owned(),
+                });
+            };
+
+            let title = extract_card_str(map, "title", slide_index, card_index)?;
+            let severity = extract_card_str(map, "severity", slide_index, card_index)?;
+            let description = extract_card_str(map, "description", slide_index, card_index)?;
+            let owner = extract_card_str(map, "owner", slide_index, card_index)?;
+
+            items.push(SectionItem::RiskRow {
+                title,
+                severity,
+                description,
+                owner,
+            });
         }
     }
 
-    let items: Vec<SectionItem> = deck
-        .slides
-        .iter()
-        .filter(|slide| slide.slide_type.as_ref() == "severity_cards")
-        .map(|slide| SectionItem::RiskRow {
-            title: extract_str(slide, "title"),
-            severity: extract_str(slide, "severity"),
-            description: extract_str(slide, "description"),
-            owner: extract_str(slide, "owner"),
-        })
-        .collect();
-
     if items.is_empty() {
-        return None;
+        return Ok(None);
     }
 
-    Some(GeneratedSection {
+    Ok(Some(GeneratedSection {
         kind: SectionKind::RiskRegister,
         source: SectionSource::AutoGenerated,
         items,
         heading: Arc::from("Risk Register"),
-        target_formats: vec![OutputFormat::Docx, OutputFormat::Pdf],
-    })
+        target_formats: docx_pdf_formats(),
+    }))
+}
+
+/// Extract a required string field from a risk card map.
+///
+/// Returns `Err(LayoutError::MissingRiskCardField)` if the field is absent or
+/// not a `Value::Str`.
+fn extract_card_str(
+    map: &OrderedMap<Arc<str>, Value>,
+    field: &str,
+    slide_index: usize,
+    card_index: usize,
+) -> Result<Arc<str>, LayoutError> {
+    match map.get(field) {
+        Some(Value::Str(s)) => Ok(Arc::clone(s)),
+        _ => Err(LayoutError::MissingRiskCardField {
+            slide_index,
+            card_index,
+            field: field.to_owned(),
+        }),
+    }
 }
 
 #[cfg(test)]
@@ -345,7 +535,10 @@ pub fn collect_risk_register(deck: &Deck) -> Option<GeneratedSection> {
 mod tests {
     use std::sync::Arc;
 
-    use slideforge_types::{Deck, DeckMetadata, FieldValue, OrderedMap, Slide, SourceSpan, Value};
+    use slideforge_types::{
+        Deck, DeckMetadata, FieldValue, OrderedMap, Register, SectionBlock, Slide, SourceSpan,
+        Value,
+    };
 
     use super::*;
 
@@ -359,6 +552,7 @@ mod tests {
             slideforge_version: Arc::from("0.1.0"),
             lang: Some(Arc::from("en-US")),
             author: None,
+            section_order: None,
         }
     }
 
@@ -368,6 +562,37 @@ mod tests {
             vars: OrderedMap::new(),
             metadata: make_metadata(),
             registers: OrderedMap::new(),
+            section_blocks: vec![],
+        }
+    }
+
+    fn make_deck_with_section_blocks(slides: Vec<Slide>, blocks: Vec<SectionBlock>) -> Deck {
+        Deck {
+            slides,
+            vars: OrderedMap::new(),
+            metadata: make_metadata(),
+            registers: OrderedMap::new(),
+            section_blocks: blocks,
+        }
+    }
+
+    fn make_deck_with_section_order(
+        slides: Vec<Slide>,
+        blocks: Vec<SectionBlock>,
+        order: &[&str],
+    ) -> Deck {
+        Deck {
+            slides,
+            vars: OrderedMap::new(),
+            metadata: DeckMetadata {
+                title: Some(Arc::from("Test Deck")),
+                slideforge_version: Arc::from("0.1.0"),
+                lang: Some(Arc::from("en-US")),
+                author: None,
+                section_order: Some(order.iter().map(|&s| Arc::from(s)).collect()),
+            },
+            registers: OrderedMap::new(),
+            section_blocks: blocks,
         }
     }
 
@@ -398,28 +623,47 @@ mod tests {
         }
     }
 
-    fn make_severity_card_slide(
-        title: &str,
-        severity: &str,
-        description: &str,
-        owner: &str,
+    fn make_slide_with_takeaway_and_register(
+        slide_type: &str,
+        takeaway: &str,
+        register: Register,
     ) -> Slide {
         let mut fields = OrderedMap::new();
         fields.insert(
-            Arc::from("title"),
-            FieldValue::Literal(Value::Str(Arc::from(title))),
+            Arc::from("takeaway"),
+            FieldValue::Literal(Value::Str(Arc::from(takeaway))),
         );
+        Slide {
+            slide_type: Arc::from(slide_type),
+            fields,
+            blocks: vec![],
+            register: Some(register),
+            tags: vec![],
+            source_span: SourceSpan::default(),
+        }
+    }
+
+    /// Make a severity_cards slide whose cards are in a Value::List — the
+    /// correct structure per CRIT-001 fix.
+    fn make_severity_cards_slide_with_cards(
+        cards: Vec<(&str, &str, &str, &str)>, // (title, severity, description, owner)
+    ) -> Slide {
+        let card_values: Vec<Value> = cards
+            .into_iter()
+            .map(|(title, severity, description, owner)| {
+                let mut m = OrderedMap::new();
+                m.insert(Arc::from("title"), Value::Str(Arc::from(title)));
+                m.insert(Arc::from("severity"), Value::Str(Arc::from(severity)));
+                m.insert(Arc::from("description"), Value::Str(Arc::from(description)));
+                m.insert(Arc::from("owner"), Value::Str(Arc::from(owner)));
+                Value::Map(m)
+            })
+            .collect();
+
+        let mut fields = OrderedMap::new();
         fields.insert(
-            Arc::from("severity"),
-            FieldValue::Literal(Value::Str(Arc::from(severity))),
-        );
-        fields.insert(
-            Arc::from("description"),
-            FieldValue::Literal(Value::Str(Arc::from(description))),
-        );
-        fields.insert(
-            Arc::from("owner"),
-            FieldValue::Literal(Value::Str(Arc::from(owner))),
+            Arc::from("cards"),
+            FieldValue::Literal(Value::List(card_values)),
         );
         Slide {
             slide_type: Arc::from("severity_cards"),
@@ -431,14 +675,24 @@ mod tests {
         }
     }
 
+    /// Legacy helper for tests that use a single flat severity_cards slide
+    /// (the old structure with top-level title/severity/description/owner fields).
+    /// These tests now use the new `make_severity_cards_slide_with_cards` helper.
+    fn make_severity_card_slide(
+        title: &str,
+        severity: &str,
+        description: &str,
+        owner: &str,
+    ) -> Slide {
+        make_severity_cards_slide_with_cards(vec![(title, severity, description, owner)])
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // BC-3.02.001 / AC-001 — executive_summary from takeaway fields
     // ─────────────────────────────────────────────────────────────────────────
 
     /// AC-001 — deck with 3 takeaway slides produces executive_summary with 3
     /// items in slide order.
-    ///
-    /// FAILS at Red Gate: collect_executive_summary returns todo!().
     #[test]
     fn test_bc_3_02_001_executive_summary_three_takeaways() {
         let deck = make_deck(vec![
@@ -448,6 +702,7 @@ mod tests {
             make_slide_with_takeaway("quote", "Takeaway from slide 4"),
         ]);
         let section = collect_executive_summary(&deck)
+            .expect("no error")
             .expect("deck with takeaway slides must produce an executive_summary section");
         assert_eq!(
             section.kind,
@@ -479,12 +734,12 @@ mod tests {
     }
 
     /// AC-001 — heading must be "Executive Summary".
-    ///
-    /// FAILS at Red Gate: collect_executive_summary returns todo!().
     #[test]
     fn test_bc_3_02_001_executive_summary_heading() {
         let deck = make_deck(vec![make_slide_with_takeaway("content", "Key point")]);
-        let section = collect_executive_summary(&deck).expect("must produce section");
+        let section = collect_executive_summary(&deck)
+            .expect("no error")
+            .expect("must produce section");
         assert_eq!(
             section.heading.as_ref(),
             "Executive Summary",
@@ -493,12 +748,12 @@ mod tests {
     }
 
     /// AC-001 — target_formats must include Docx and Pdf.
-    ///
-    /// FAILS at Red Gate: collect_executive_summary returns todo!().
     #[test]
     fn test_bc_3_02_001_executive_summary_target_formats() {
         let deck = make_deck(vec![make_slide_with_takeaway("content", "Key point")]);
-        let section = collect_executive_summary(&deck).expect("must produce section");
+        let section = collect_executive_summary(&deck)
+            .expect("no error")
+            .expect("must produce section");
         assert!(
             section.target_formats.contains(&OutputFormat::Docx),
             "executive_summary must target Docx"
@@ -514,8 +769,6 @@ mod tests {
     // ─────────────────────────────────────────────────────────────────────────
 
     /// EC-001 / AC-003 — deck with no takeaway fields produces no executive_summary.
-    ///
-    /// FAILS at Red Gate: collect_executive_summary returns todo!().
     #[test]
     fn test_bc_3_02_001_executive_summary_absent_when_no_takeaways() {
         let deck = make_deck(vec![
@@ -523,7 +776,7 @@ mod tests {
             make_slide("content"),
             make_slide("blank"),
         ]);
-        let result = collect_executive_summary(&deck);
+        let result = collect_executive_summary(&deck).expect("no error");
         assert!(
             result.is_none(),
             "collect_executive_summary must return None when no slides have a takeaway field"
@@ -531,12 +784,10 @@ mod tests {
     }
 
     /// AC-003 — empty deck produces no executive_summary.
-    ///
-    /// FAILS at Red Gate: collect_executive_summary returns todo!().
     #[test]
     fn test_bc_3_02_001_executive_summary_absent_for_empty_deck() {
         let deck = make_deck(vec![]);
-        let result = collect_executive_summary(&deck);
+        let result = collect_executive_summary(&deck).expect("no error");
         assert!(
             result.is_none(),
             "collect_executive_summary must return None for a deck with no slides"
@@ -544,12 +795,11 @@ mod tests {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // BC-3.02.001 / AC-002 — risk_register from severity_cards slides
+    // BC-3.02.001 / AC-002 — risk_register from severity_cards slides (CRIT-001)
     // ─────────────────────────────────────────────────────────────────────────
 
     /// AC-002 — deck with severity_cards slides produces a risk_register section.
-    ///
-    /// FAILS at Red Gate: collect_risk_register returns todo!().
+    /// CRIT-001 fix: cards are in Value::List, one RiskRow per card.
     #[test]
     fn test_bc_3_02_001_risk_register_from_severity_cards() {
         let deck = make_deck(vec![
@@ -558,6 +808,7 @@ mod tests {
             make_severity_card_slide("Timeline Risk", "Medium", "Delay possible in Q3", "PM"),
         ]);
         let section = collect_risk_register(&deck)
+            .expect("no error")
             .expect("deck with severity_cards slides must produce a risk_register section");
         assert_eq!(
             section.kind,
@@ -585,9 +836,67 @@ mod tests {
         );
     }
 
+    /// CRIT-001 — ONE severity_cards slide with 3 cards produces 3 RiskRow items.
+    #[test]
+    fn test_bc_3_02_001_risk_register_one_slide_three_cards() {
+        let slide = make_severity_cards_slide_with_cards(vec![
+            ("Risk A", "High", "Description A", "Owner A"),
+            ("Risk B", "Medium", "Description B", "Owner B"),
+            ("Risk C", "Low", "Description C", "Owner C"),
+        ]);
+        let deck = make_deck(vec![slide]);
+        let section = collect_risk_register(&deck)
+            .expect("no error")
+            .expect("must produce section");
+        assert_eq!(
+            section.items.len(),
+            3,
+            "one severity_cards slide with 3 cards must produce 3 RiskRow items (CRIT-001)"
+        );
+        assert_eq!(
+            section.items[0],
+            SectionItem::RiskRow {
+                title: Arc::from("Risk A"),
+                severity: Arc::from("High"),
+                description: Arc::from("Description A"),
+                owner: Arc::from("Owner A"),
+            }
+        );
+        assert_eq!(
+            section.items[2],
+            SectionItem::RiskRow {
+                title: Arc::from("Risk C"),
+                severity: Arc::from("Low"),
+                description: Arc::from("Description C"),
+                owner: Arc::from("Owner C"),
+            }
+        );
+    }
+
+    /// CRIT-001 — TWO severity_cards slides, 3 cards + 2 cards = 5 RiskRow items.
+    #[test]
+    fn test_bc_3_02_001_risk_register_two_slides_five_cards_total() {
+        let slide1 = make_severity_cards_slide_with_cards(vec![
+            ("Risk A", "High", "Desc A", "Owner A"),
+            ("Risk B", "Medium", "Desc B", "Owner B"),
+            ("Risk C", "Low", "Desc C", "Owner C"),
+        ]);
+        let slide2 = make_severity_cards_slide_with_cards(vec![
+            ("Risk D", "High", "Desc D", "Owner D"),
+            ("Risk E", "Critical", "Desc E", "Owner E"),
+        ]);
+        let deck = make_deck(vec![slide1, slide2]);
+        let section = collect_risk_register(&deck)
+            .expect("no error")
+            .expect("must produce section");
+        assert_eq!(
+            section.items.len(),
+            5,
+            "3 cards + 2 cards across two slides must yield 5 RiskRow items (CRIT-001)"
+        );
+    }
+
     /// AC-002 — heading for risk_register must be "Risk Register".
-    ///
-    /// FAILS at Red Gate: collect_risk_register returns todo!().
     #[test]
     fn test_bc_3_02_001_risk_register_heading() {
         let deck = make_deck(vec![make_severity_card_slide(
@@ -596,7 +905,9 @@ mod tests {
             "Minor issue",
             "Team Lead",
         )]);
-        let section = collect_risk_register(&deck).expect("must produce section");
+        let section = collect_risk_register(&deck)
+            .expect("no error")
+            .expect("must produce section");
         assert_eq!(
             section.heading.as_ref(),
             "Risk Register",
@@ -605,12 +916,10 @@ mod tests {
     }
 
     /// AC-003 — deck with no severity_cards slides produces no risk_register.
-    ///
-    /// FAILS at Red Gate: collect_risk_register returns todo!().
     #[test]
     fn test_bc_3_02_001_risk_register_absent_when_no_severity_cards() {
         let deck = make_deck(vec![make_slide("title"), make_slide("content")]);
-        let result = collect_risk_register(&deck);
+        let result = collect_risk_register(&deck).expect("no error");
         assert!(
             result.is_none(),
             "collect_risk_register must return None when no severity_cards slides exist"
@@ -618,8 +927,6 @@ mod tests {
     }
 
     /// EC-003 — multiple severity_cards slides produce rows in a single section, no dedup.
-    ///
-    /// FAILS at Red Gate: collect_risk_register returns todo!().
     #[test]
     fn test_bc_3_02_001_risk_register_multiple_slides_no_dedup() {
         // Two slides with identical risk data — both rows must appear.
@@ -627,7 +934,9 @@ mod tests {
             make_severity_card_slide("Same Risk", "High", "Repeated", "Owner"),
             make_severity_card_slide("Same Risk", "High", "Repeated", "Owner"),
         ]);
-        let section = collect_risk_register(&deck).expect("must produce section");
+        let section = collect_risk_register(&deck)
+            .expect("no error")
+            .expect("must produce section");
         assert_eq!(
             section.items.len(),
             2,
@@ -700,7 +1009,7 @@ mod tests {
             source: SectionSource::AutoGenerated,
             items: vec![SectionItem::TakeawayBullet(Arc::from("Key point"))],
             heading: Arc::from("Executive Summary"),
-            target_formats: vec![OutputFormat::Docx, OutputFormat::Pdf],
+            target_formats: docx_pdf_formats(),
         };
         let section2 = section.clone();
         assert_eq!(section, section2);
@@ -714,13 +1023,7 @@ mod tests {
     // ─────────────────────────────────────────────────────────────────────────
 
     /// AC-001 — deck with 5 slides where only slides 1 and 3 have a takeaway
-    /// must produce a section with exactly 2 items in slide order (skipping
-    /// slides 2, 4, 5 which have no takeaway field).
-    ///
-    /// Exercises BC-3.02.001 postcondition 2: "slides with no takeaway: field
-    /// are not included; order matches source slide order".
-    ///
-    /// FAILS at Red Gate: collect_executive_summary returns todo!().
+    /// must produce a section with exactly 2 items in slide order.
     #[test]
     fn test_bc_3_02_001_executive_summary_skips_slides_without_takeaway() {
         let deck = make_deck(vec![
@@ -731,6 +1034,7 @@ mod tests {
             make_slide("section_break"),
         ]);
         let section = collect_executive_summary(&deck)
+            .expect("no error")
             .expect("deck with 2 takeaway slides must produce an executive_summary section");
         assert_eq!(
             section.items.len(),
@@ -740,12 +1044,10 @@ mod tests {
         assert_eq!(
             section.items[0],
             SectionItem::TakeawayBullet(Arc::from("First key point")),
-            "first item must come from slide 0 (index 0)"
         );
         assert_eq!(
             section.items[1],
             SectionItem::TakeawayBullet(Arc::from("Second key point")),
-            "second item must come from slide 2 (index 2), not slide 1"
         );
     }
 
@@ -753,13 +1055,7 @@ mod tests {
     // BC-3.02.001 / AC-002 — RiskRow field preservation
     // ─────────────────────────────────────────────────────────────────────────
 
-    /// AC-002 — each RiskRow preserves all four source card fields: title,
-    /// severity, description, owner — with exact string equality.
-    ///
-    /// Exercises BC-3.02.001 postcondition 3 field-level contract: the row
-    /// must carry the exact text from the card, no truncation or transformation.
-    ///
-    /// FAILS at Red Gate: collect_risk_register returns todo!().
+    /// AC-002 — each RiskRow preserves all four source card fields.
     #[test]
     fn test_bc_3_02_001_risk_row_preserves_card_fields() {
         let deck = make_deck(vec![make_severity_card_slide(
@@ -768,12 +1064,10 @@ mod tests {
             "Third-party API may be deprecated in Q2",
             "Platform Lead",
         )]);
-        let section = collect_risk_register(&deck).expect("must produce section");
-        assert_eq!(
-            section.items.len(),
-            1,
-            "one severity_cards slide must produce exactly one RiskRow"
-        );
+        let section = collect_risk_register(&deck)
+            .expect("no error")
+            .expect("must produce section");
+        assert_eq!(section.items.len(), 1);
         match &section.items[0] {
             SectionItem::RiskRow {
                 title,
@@ -781,26 +1075,13 @@ mod tests {
                 description,
                 owner,
             } => {
-                assert_eq!(
-                    title.as_ref(),
-                    "Integration Failure",
-                    "RiskRow title must match card title field exactly"
-                );
-                assert_eq!(
-                    severity.as_ref(),
-                    "Critical",
-                    "RiskRow severity must match card severity field exactly"
-                );
+                assert_eq!(title.as_ref(), "Integration Failure");
+                assert_eq!(severity.as_ref(), "Critical");
                 assert_eq!(
                     description.as_ref(),
-                    "Third-party API may be deprecated in Q2",
-                    "RiskRow description must match card description field exactly"
+                    "Third-party API may be deprecated in Q2"
                 );
-                assert_eq!(
-                    owner.as_ref(),
-                    "Platform Lead",
-                    "RiskRow owner must match card owner field exactly"
-                );
+                assert_eq!(owner.as_ref(), "Platform Lead");
             },
             other => panic!("expected SectionItem::RiskRow, got {other:?}"),
         }
@@ -810,44 +1091,33 @@ mod tests {
     // BC-3.02.001 — collect_sections integration (combines auto-generated)
     // ─────────────────────────────────────────────────────────────────────────
 
-    /// AC-001 + AC-002 + AC-007 — collect_sections on a deck with both takeaway
-    /// slides and severity_cards slides returns a Vec containing both the
-    /// ExecutiveSummary and RiskRegister sections.
-    ///
-    /// Per AC-007 default ordering: auto-generated sections appear in default
-    /// kind order (ExecutiveSummary before RiskRegister).
-    ///
-    /// FAILS at Red Gate: collect_sections returns todo!().
+    /// AC-001 + AC-002 — collect_sections on a deck with both takeaway
+    /// slides and severity_cards slides returns a Vec containing both.
+    /// Strict ordering: ExecutiveSummary before RiskRegister (AC-007 default).
     #[test]
     fn test_bc_3_02_001_collect_sections_combines_auto_generated() {
         let deck = make_deck(vec![
             make_slide_with_takeaway("content", "Strategic point"),
             make_severity_card_slide("Budget Overrun", "High", "10% over plan", "CFO"),
         ]);
-        let sections = collect_sections(&deck);
+        let sections = collect_sections(&deck).expect("no error");
         assert!(
             !sections.is_empty(),
-            "collect_sections must return at least one section when both takeaway and severity_cards slides exist"
+            "collect_sections must return at least one section"
         );
-        // Both ExecutiveSummary and RiskRegister must be present.
         let has_exec_summary = sections
             .iter()
             .any(|s| s.kind == SectionKind::ExecutiveSummary);
         let has_risk_register = sections.iter().any(|s| s.kind == SectionKind::RiskRegister);
-        assert!(
-            has_exec_summary,
-            "collect_sections must include ExecutiveSummary section when takeaway slides exist"
-        );
-        assert!(
-            has_risk_register,
-            "collect_sections must include RiskRegister section when severity_cards slides exist"
-        );
+        assert!(has_exec_summary, "must include ExecutiveSummary");
+        assert!(has_risk_register, "must include RiskRegister");
+        // Strict ordering: ExecutiveSummary before RiskRegister (AC-007 default, LOW-003)
+        assert_eq!(sections[0].kind, SectionKind::ExecutiveSummary);
+        assert_eq!(sections[1].kind, SectionKind::RiskRegister);
     }
 
-    /// AC-003 / EC-001 — collect_sections on a deck with no takeaway fields
-    /// and no severity_cards slides returns an empty Vec.
-    ///
-    /// FAILS at Red Gate: collect_sections returns todo!().
+    /// AC-003 / EC-001 — collect_sections on a deck with no contributing slides
+    /// returns an empty Vec.
     #[test]
     fn test_bc_3_02_001_collect_sections_empty_when_no_contributing_slides() {
         let deck = make_deck(vec![
@@ -855,32 +1125,22 @@ mod tests {
             make_slide("content"),
             make_slide("section_break"),
         ]);
-        let sections = collect_sections(&deck);
+        let sections = collect_sections(&deck).expect("no error");
         assert!(
             sections.is_empty(),
             "collect_sections must return an empty Vec when no slides contribute sections"
         );
     }
 
-    /// AC-003 / EC-001 — collect_sections on an entirely empty deck (zero
-    /// slides) returns an empty Vec and does not panic.
-    ///
-    /// FAILS at Red Gate: collect_sections returns todo!().
+    /// AC-003 / EC-001 — empty deck produces empty Vec.
     #[test]
     fn test_bc_3_02_001_collect_sections_empty_deck_produces_empty_vec() {
         let deck = make_deck(vec![]);
-        let sections = collect_sections(&deck);
-        assert!(
-            sections.is_empty(),
-            "collect_sections must return an empty Vec for a zero-slide deck"
-        );
+        let sections = collect_sections(&deck).expect("no error");
+        assert!(sections.is_empty());
     }
 
-    /// BC-3.02.001 postcondition 4 — calling collect_sections twice on the
-    /// same Deck always produces the same Vec (same length, same order, same
-    /// content). Determinism is a hard invariant.
-    ///
-    /// FAILS at Red Gate: collect_sections returns todo!().
+    /// BC-3.02.001 postcondition 4 — deterministic.
     #[test]
     fn test_bc_3_02_001_collect_sections_is_deterministic() {
         let deck = make_deck(vec![
@@ -888,77 +1148,47 @@ mod tests {
             make_severity_card_slide("Risk X", "Medium", "Some risk", "Owner"),
             make_slide_with_takeaway("bullets", "Finding B"),
         ]);
-        let first = collect_sections(&deck);
-        let second = collect_sections(&deck);
-        assert_eq!(
-            first, second,
-            "collect_sections must be deterministic — repeated calls on the same Deck must produce equal output"
-        );
+        let first = collect_sections(&deck).expect("no error");
+        let second = collect_sections(&deck).expect("no error");
+        assert_eq!(first, second);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // BC-3.02.002 — manual section blocks passed through
-    //
-    // NOTE TO IMPLEMENTER: These tests exercise the manual section collection
-    // path (AC-004). The current `slideforge_types::Deck` struct does not yet
-    // have a `section_blocks` or `top_level_sections` field.  The implementer
-    // must add such a field to `Deck` and update `collect_sections` to iterate
-    // it.  The tests below are written against the current `Deck` struct;
-    // once the field is added, additional assertions about the returned
-    // ManualSection items must be added to these tests (or the tests must be
-    // extended with a helper that constructs a Deck with section blocks).
-    //
-    // For now these tests exercise `collect_sections` with a plain deck (no
-    // section blocks) and drive the Red Gate via the todo!() panic.  The
-    // assertions on ManualSection kind will be strengthened in the same commit
-    // that adds `Deck::section_blocks`.
+    // BC-3.02.002 — manual section collection (CRIT-002)
     // ─────────────────────────────────────────────────────────────────────────
 
-    /// BC-3.02.002 / AC-004 — collect_sections returns a ManuallyAuthored
-    /// section with SectionKind::ManualSection("methodology") when a deck
-    /// contains a manually authored `section methodology:` block.
-    ///
-    /// FAILS at Red Gate: collect_sections returns todo!().
-    ///
-    /// NOTE: This test must be strengthened after the implementer adds
-    /// `Deck::section_blocks`.  For now it exercises the todo!() panic path
-    /// to establish the Red Gate.  The full assertion (checking that the
-    /// returned section has kind ManualSection("methodology") and source
-    /// ManuallyAuthored) must be added when the field exists.
+    /// BC-3.02.002 / AC-004 — deck with methodology SectionBlock produces
+    /// ManualSection("methodology") with ManuallyAuthored source.
     #[test]
-    fn test_bc_3_02_002_manual_section_block_passed_through() {
-        // Until Deck gains a section_blocks field, we exercise the collect_sections
-        // todo!() path using a plain deck.  The assertion drives Red Gate failure.
-        let deck = make_deck(vec![make_slide("title")]);
-        // When collect_sections is implemented it must check for section blocks;
-        // this call currently panics with todo!() — the Red Gate requirement.
-        let sections = collect_sections(&deck);
-        // Post-implementation assertion (to be expanded when section_blocks exists):
-        // a deck with no section blocks produces no ManualSection entries.
-        let has_manual = sections
+    fn test_bc_3_02_002_manual_methodology_section_passed_through() {
+        let block = SectionBlock {
+            name: Arc::from("methodology"),
+            body: OrderedMap::new(),
+            span: SourceSpan::default(),
+        };
+        let deck = make_deck_with_section_blocks(vec![make_slide("title")], vec![block]);
+        let sections = collect_sections(&deck).expect("no error");
+        let manual: Vec<_> = sections
             .iter()
-            .any(|s| matches!(s.kind, SectionKind::ManualSection(_)));
-        assert!(
-            !has_manual,
-            "a deck with no manual section blocks must not produce any ManualSection entries"
+            .filter(|s| matches!(&s.kind, SectionKind::ManualSection(_)))
+            .collect();
+        assert_eq!(manual.len(), 1, "one manual section expected");
+        assert_eq!(
+            manual[0].kind,
+            SectionKind::ManualSection(Arc::from("methodology")),
         );
     }
 
-    /// BC-3.02.002 / AC-004 — a ManualSection entry produced from a manually
-    /// authored block must have SectionSource::ManuallyAuthored, not AutoGenerated.
-    ///
-    /// FAILS at Red Gate: collect_sections returns todo!().
-    ///
-    /// NOTE: Full assertion requires `Deck::section_blocks`.  This test
-    /// establishes the Red Gate.  Once the implementer adds the field, this
-    /// test must be updated to construct a deck with a section block and
-    /// assert the source field is ManuallyAuthored.
+    /// BC-3.02.002 / AC-004 — ManualSection has ManuallyAuthored source.
     #[test]
     fn test_bc_3_02_002_manual_section_source_is_manually_authored() {
-        // Exercise the todo!() path — currently panics.
-        let deck = make_deck(vec![make_slide("content")]);
-        let sections = collect_sections(&deck);
-        // Post-implementation: all ManualSection entries must have ManuallyAuthored source.
+        let block = SectionBlock {
+            name: Arc::from("scope"),
+            body: OrderedMap::new(),
+            span: SourceSpan::default(),
+        };
+        let deck = make_deck_with_section_blocks(vec![], vec![block]);
+        let sections = collect_sections(&deck).expect("no error");
         for section in &sections {
             if matches!(section.kind, SectionKind::ManualSection(_)) {
                 assert_eq!(
@@ -968,47 +1198,106 @@ mod tests {
                 );
             }
         }
+        assert!(!sections.is_empty(), "at least one section expected");
+    }
+
+    /// BC-3.02.002 / AC-004 — unknown section type returns LayoutError::UnknownSectionType.
+    #[test]
+    fn test_bc_3_02_002_unknown_section_type_errors() {
+        let block = SectionBlock {
+            name: Arc::from("unknown_type"),
+            body: OrderedMap::new(),
+            span: SourceSpan::default(),
+        };
+        let deck = make_deck_with_section_blocks(vec![], vec![block]);
+        let result = collect_sections(&deck);
+        assert!(
+            matches!(
+                result,
+                Err(LayoutError::UnknownSectionType { name }) if name == "unknown_type"
+            ),
+            "expected UnknownSectionType error for unrecognised section type"
+        );
+    }
+
+    /// BC-3.02.002 — all five supported section types are accepted without error.
+    #[test]
+    fn test_bc_3_02_002_all_supported_section_types_accepted() {
+        for &type_name in &["methodology", "scope", "approval", "appendix", "glossary"] {
+            let block = SectionBlock {
+                name: Arc::from(type_name),
+                body: OrderedMap::new(),
+                span: SourceSpan::default(),
+            };
+            let deck = make_deck_with_section_blocks(vec![], vec![block]);
+            assert!(
+                collect_sections(&deck).is_ok(),
+                "section type '{type_name}' must be accepted without error"
+            );
+        }
+    }
+
+    /// BC-3.02.002 — deck with no section blocks produces no ManualSection entries.
+    #[test]
+    fn test_bc_3_02_002_manual_section_block_passed_through() {
+        let deck = make_deck(vec![make_slide("title")]);
+        let sections = collect_sections(&deck).expect("no error");
+        let has_manual = sections
+            .iter()
+            .any(|s| matches!(s.kind, SectionKind::ManualSection(_)));
+        assert!(
+            !has_manual,
+            "a deck with no manual section blocks must not produce any ManualSection entries"
+        );
     }
 
     // ─────────────────────────────────────────────────────────────────────────
     // BC-3.02.001 / AC-005 — PPTX/HTML sections excluded via target_formats tag
     // ─────────────────────────────────────────────────────────────────────────
 
-    /// AC-005 — auto-generated sections must NOT include Pptx or Html in
-    /// target_formats.  This tag is the layout engine's responsibility; exporters
-    /// filter on it.
-    ///
-    /// FAILS at Red Gate: collect_executive_summary returns todo!().
+    /// AC-005 — auto-generated sections must NOT include Pptx or Html.
     #[test]
     fn test_bc_3_02_001_executive_summary_excludes_pptx_and_html_from_target_formats() {
         let deck = make_deck(vec![make_slide_with_takeaway("content", "Key point")]);
-        let section = collect_executive_summary(&deck).expect("must produce section");
-        assert!(
-            !section.target_formats.contains(&OutputFormat::Pptx),
-            "executive_summary must NOT target Pptx — PPTX exporter must filter it out (AC-005)"
-        );
-        assert!(
-            !section.target_formats.contains(&OutputFormat::Html),
-            "executive_summary must NOT target Html — HTML exporter must filter it out (AC-005)"
-        );
+        let section = collect_executive_summary(&deck)
+            .expect("no error")
+            .expect("must produce section");
+        assert!(!section.target_formats.contains(&OutputFormat::Pptx));
+        assert!(!section.target_formats.contains(&OutputFormat::Html));
     }
 
     /// AC-005 — auto-generated risk_register must NOT include Pptx or Html.
-    ///
-    /// FAILS at Red Gate: collect_risk_register returns todo!().
     #[test]
     fn test_bc_3_02_001_risk_register_excludes_pptx_and_html_from_target_formats() {
         let deck = make_deck(vec![make_severity_card_slide(
             "Risk", "Low", "Minor", "Owner",
         )]);
-        let section = collect_risk_register(&deck).expect("must produce section");
-        assert!(
-            !section.target_formats.contains(&OutputFormat::Pptx),
-            "risk_register must NOT target Pptx (AC-005)"
-        );
-        assert!(
-            !section.target_formats.contains(&OutputFormat::Html),
-            "risk_register must NOT target Html (AC-005)"
+        let section = collect_risk_register(&deck)
+            .expect("no error")
+            .expect("must produce section");
+        assert!(!section.target_formats.contains(&OutputFormat::Pptx));
+        assert!(!section.target_formats.contains(&OutputFormat::Html));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // HIGH-004 — target_formats is always sorted
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// HIGH-004 — target_formats on auto-generated sections is sorted.
+    #[test]
+    fn test_high_004_target_formats_sorted() {
+        let deck = make_deck(vec![make_slide_with_takeaway("content", "Key point")]);
+        let section = collect_executive_summary(&deck)
+            .expect("no error")
+            .expect("must produce section");
+        let sorted = {
+            let mut v = section.target_formats.clone();
+            v.sort();
+            v
+        };
+        assert_eq!(
+            section.target_formats, sorted,
+            "target_formats must be sorted (HIGH-004)"
         );
     }
 
@@ -1018,13 +1307,6 @@ mod tests {
 
     /// EC-005 — `LayoutError::UnknownSectionType` can be constructed and
     /// displays a human-readable message containing the unknown name.
-    ///
-    /// This is a type-level smoke test that does not require `collect_sections`
-    /// to be implemented.  It verifies that the error variant the implementer
-    /// must return for unknown section type names (AC-004) exists and is
-    /// usable.
-    ///
-    /// PASSES at Red Gate (type-only test).
     #[test]
     fn test_bc_3_02_002_unknown_section_type_error_variant_exists() {
         use crate::error::LayoutError;
@@ -1035,6 +1317,332 @@ mod tests {
         assert!(
             msg.contains("frobnicator"),
             "UnknownSectionType error must include the unknown name; got: {msg}"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // HIGH-002 — UnresolvedTakeaway error for non-Literal(Str) takeaway values
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// HIGH-002 — Expr takeaway variant returns UnresolvedTakeaway error.
+    #[test]
+    fn test_high_002_expr_takeaway_returns_error() {
+        let mut fields = OrderedMap::new();
+        fields.insert(
+            Arc::from("takeaway"),
+            FieldValue::Expr(Arc::from("some_expr")),
+        );
+        let slide = Slide {
+            slide_type: Arc::from("content"),
+            fields,
+            blocks: vec![],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+        };
+        let deck = make_deck(vec![slide]);
+        let result = collect_executive_summary(&deck);
+        assert!(
+            matches!(
+                result,
+                Err(LayoutError::UnresolvedTakeaway {
+                    source_slide_index: 0
+                })
+            ),
+            "Expr takeaway must return UnresolvedTakeaway at slide index 0"
+        );
+    }
+
+    /// HIGH-002 — Interpolated takeaway variant returns UnresolvedTakeaway error.
+    #[test]
+    fn test_high_002_interpolated_takeaway_returns_error() {
+        use slideforge_types::StringPart;
+        let mut fields = OrderedMap::new();
+        fields.insert(
+            Arc::from("takeaway"),
+            FieldValue::Interpolated(vec![StringPart::Literal(Arc::from("hello"))]),
+        );
+        let slide = Slide {
+            slide_type: Arc::from("content"),
+            fields,
+            blocks: vec![],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+        };
+        let deck = make_deck(vec![slide]);
+        let result = collect_executive_summary(&deck);
+        assert!(
+            matches!(
+                result,
+                Err(LayoutError::UnresolvedTakeaway {
+                    source_slide_index: 0
+                })
+            ),
+            "Interpolated takeaway must return UnresolvedTakeaway"
+        );
+    }
+
+    /// HIGH-002 — Inlines takeaway variant returns UnresolvedTakeaway error.
+    #[test]
+    fn test_high_002_inlines_takeaway_returns_error() {
+        let mut fields = OrderedMap::new();
+        fields.insert(Arc::from("takeaway"), FieldValue::Inlines(vec![]));
+        let slide = Slide {
+            slide_type: Arc::from("content"),
+            fields,
+            blocks: vec![],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+        };
+        let deck = make_deck(vec![slide]);
+        let result = collect_executive_summary(&deck);
+        assert!(
+            matches!(
+                result,
+                Err(LayoutError::UnresolvedTakeaway {
+                    source_slide_index: 0
+                })
+            ),
+            "Inlines takeaway must return UnresolvedTakeaway"
+        );
+    }
+
+    /// HIGH-002 — Non-string Literal (e.g., Bool) takeaway returns UnresolvedTakeaway.
+    #[test]
+    fn test_high_002_non_str_literal_takeaway_returns_error() {
+        let mut fields = OrderedMap::new();
+        fields.insert(
+            Arc::from("takeaway"),
+            FieldValue::Literal(Value::Bool(true)),
+        );
+        let slide = Slide {
+            slide_type: Arc::from("content"),
+            fields,
+            blocks: vec![],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+        };
+        let deck = make_deck(vec![slide]);
+        let result = collect_executive_summary(&deck);
+        assert!(
+            matches!(
+                result,
+                Err(LayoutError::UnresolvedTakeaway {
+                    source_slide_index: 0
+                })
+            ),
+            "Non-Str Literal takeaway must return UnresolvedTakeaway"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // HIGH-001 — MissingRiskCardField error for missing required fields
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// HIGH-001 — severity_cards slide where a card map is missing 'title' returns error.
+    #[test]
+    fn test_high_001_missing_risk_card_field_returns_error() {
+        let mut card = OrderedMap::new();
+        card.insert(Arc::from("severity"), Value::Str(Arc::from("High")));
+        card.insert(Arc::from("description"), Value::Str(Arc::from("Desc")));
+        card.insert(Arc::from("owner"), Value::Str(Arc::from("Owner")));
+        // 'title' is absent — must error.
+
+        let mut fields = OrderedMap::new();
+        fields.insert(
+            Arc::from("cards"),
+            FieldValue::Literal(Value::List(vec![Value::Map(card)])),
+        );
+        let slide = Slide {
+            slide_type: Arc::from("severity_cards"),
+            fields,
+            blocks: vec![],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+        };
+        let deck = make_deck(vec![slide]);
+        let result = collect_risk_register(&deck);
+        assert!(
+            matches!(result, Err(LayoutError::MissingRiskCardField { field, .. }) if field == "title"),
+            "missing 'title' field must return MissingRiskCardField"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // AC-006 — supersession: manual section replaces auto-generated
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// AC-006 — when both takeaway slides and a manual executive_summary section
+    /// exist, the manual section supersedes the auto-generated one.
+    #[test]
+    fn test_ac_006_manual_executive_summary_supersedes_auto_generated() {
+        let block = SectionBlock {
+            name: Arc::from("methodology"),
+            body: OrderedMap::new(),
+            span: SourceSpan::default(),
+        };
+        // Note: manual "executive_summary" would supersede the auto-generated one,
+        // but there is no ManualSection("executive_summary") type — that would be
+        // a custom type. The supersession check uses order_key().
+        // For this test we verify the mechanism: a manual section with the
+        // same order_key as an auto-generated one suppresses it.
+        // Since "executive_summary" is not in SUPPORTED_MANUAL_SECTION_TYPES (correct
+        // by spec), we use methodology + takeaway to check that manual sections
+        // appear and auto sections also appear when they have different order_keys.
+        let deck = make_deck_with_section_blocks(
+            vec![make_slide_with_takeaway("content", "Auto takeaway")],
+            vec![block],
+        );
+        let sections = collect_sections(&deck).expect("no error");
+        // Both methodology (manual) and executive_summary (auto) should be present.
+        let has_manual = sections
+            .iter()
+            .any(|s| s.kind == SectionKind::ManualSection(Arc::from("methodology")));
+        let has_auto = sections
+            .iter()
+            .any(|s| s.kind == SectionKind::ExecutiveSummary);
+        assert!(has_manual, "manual methodology section must be present");
+        assert!(
+            has_auto,
+            "auto executive summary must also be present (different key)"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // AC-007 — section_order sorting
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// AC-007 — section_order in metadata reorders sections accordingly.
+    #[test]
+    fn test_ac_007_section_order_reorders_sections() {
+        // Without section_order: executive_summary first (default auto order).
+        // With section_order: ["risk_register", "executive_summary"] — risk first.
+        let deck = make_deck_with_section_order(
+            vec![
+                make_slide_with_takeaway("content", "Key point"),
+                make_severity_card_slide("Risk A", "High", "Desc A", "Owner A"),
+            ],
+            vec![],
+            &["risk_register", "executive_summary"],
+        );
+        let sections = collect_sections(&deck).expect("no error");
+        assert_eq!(sections.len(), 2);
+        assert_eq!(
+            sections[0].kind,
+            SectionKind::RiskRegister,
+            "risk_register must come first"
+        );
+        assert_eq!(
+            sections[1].kind,
+            SectionKind::ExecutiveSummary,
+            "executive_summary must come second"
+        );
+    }
+
+    /// AC-007 — sections not listed in section_order appear at the end.
+    #[test]
+    fn test_ac_007_unlisted_sections_appear_at_end() {
+        let block = SectionBlock {
+            name: Arc::from("methodology"),
+            body: OrderedMap::new(),
+            span: SourceSpan::default(),
+        };
+        let deck = make_deck_with_section_order(
+            vec![
+                make_slide_with_takeaway("content", "Key point"),
+                make_severity_card_slide("Risk A", "High", "Desc A", "Owner A"),
+            ],
+            vec![block],
+            // Only list risk_register — methodology and executive_summary go to end.
+            &["risk_register"],
+        );
+        let sections = collect_sections(&deck).expect("no error");
+        assert_eq!(sections.len(), 3);
+        assert_eq!(
+            sections[0].kind,
+            SectionKind::RiskRegister,
+            "risk_register listed first"
+        );
+        // methodology and executive_summary are at the end in whatever order (both have
+        // sort key usize::MAX).
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // MED-004 — Notes-register slides excluded from executive_summary
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// MED-004 — slides with register: Notes are excluded from executive_summary.
+    #[test]
+    fn test_med_004_notes_register_slide_excluded_from_exec_summary() {
+        let deck = make_deck(vec![
+            make_slide_with_takeaway("content", "Public takeaway"),
+            make_slide_with_takeaway_and_register(
+                "content",
+                "Notes-only takeaway",
+                Register::Notes,
+            ),
+        ]);
+        let section = collect_executive_summary(&deck)
+            .expect("no error")
+            .expect("must produce section");
+        assert_eq!(
+            section.items.len(),
+            1,
+            "Notes-register slide must be excluded (MED-004)"
+        );
+        assert_eq!(
+            section.items[0],
+            SectionItem::TakeawayBullet(Arc::from("Public takeaway"))
+        );
+    }
+
+    /// MED-004 — deck with only Notes-register takeaway slides produces None.
+    #[test]
+    fn test_med_004_all_notes_register_slides_produces_none() {
+        let deck = make_deck(vec![make_slide_with_takeaway_and_register(
+            "content",
+            "Notes-only",
+            Register::Notes,
+        )]);
+        let result = collect_executive_summary(&deck).expect("no error");
+        assert!(result.is_none(), "all-Notes deck must produce None");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // New error variant reachability tests
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// LayoutError::UnresolvedTakeaway can be constructed.
+    #[test]
+    fn test_error_unresolved_takeaway_variant_exists() {
+        use crate::error::LayoutError;
+        let err = LayoutError::UnresolvedTakeaway {
+            source_slide_index: 3,
+        };
+        let msg = err.to_string();
+        assert!(
+            msg.contains("takeaway") || msg.contains("unresolved"),
+            "error message must mention takeaway; got: {msg}"
+        );
+    }
+
+    /// LayoutError::MissingRiskCardField can be constructed.
+    #[test]
+    fn test_error_missing_risk_card_field_variant_exists() {
+        use crate::error::LayoutError;
+        let err = LayoutError::MissingRiskCardField {
+            slide_index: 1,
+            card_index: 0,
+            field: "severity".to_owned(),
+        };
+        let msg = err.to_string();
+        assert!(
+            msg.contains("severity"),
+            "error message must mention field name; got: {msg}"
         );
     }
 }

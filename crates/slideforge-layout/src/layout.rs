@@ -196,9 +196,15 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
     // STORY-027: Section collection pass.
     // Collect all document sections (auto-generated + manual) from the deck.
     // Auto-generated sections: ExecutiveSummary from takeaway fields, RiskRegister
-    // from severity_cards slides. Manual sections from section_blocks (when Deck gains
-    // that field). Supersession and ordering rules are applied inside collect_sections.
-    let sections = collect_sections(deck);
+    // from severity_cards slides. Manual sections from section_blocks.
+    // Supersession and ordering rules are applied inside collect_sections.
+    //
+    // Architectural note (HIGH-005): sections are collected unconditionally for
+    // ALL export targets and stored on LaidOutDeck. PPTX and HTML exporters
+    // filter by consulting GeneratedSection::target_formats; they skip sections
+    // where their format is not listed. This single-pass design means the layout
+    // IR is self-contained: exporters do not need to re-examine the Deck.
+    let sections = collect_sections(deck)?;
 
     Ok(LaidOutDeck {
         page_size,
