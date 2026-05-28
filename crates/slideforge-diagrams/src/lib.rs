@@ -131,9 +131,9 @@ impl DiagramRenderer for DiagramRendererImpl {
     ///
     /// ## Errors
     ///
-    /// - [`slideforge_plugin_api::DiagramError::SyntaxError`] — invalid Mermaid
-    /// - [`slideforge_plugin_api::DiagramError::RenderError`] — renderer failure
-    /// - [`slideforge_plugin_api::DiagramError::UnsupportedFeature`] — forbidden SVG element
+    /// - [`slideforge_plugin_api::DiagramError::SyntaxError`] — invalid Mermaid syntax or empty source
+    /// - [`slideforge_plugin_api::DiagramError::UnsupportedFeature`] — unsupported diagram language
+    /// - [`slideforge_plugin_api::DiagramError::RenderError`] — forbidden SVG element or post-processing failure
     #[instrument(skip(self, source, _opts))]
     fn render(
         &self,
