@@ -200,7 +200,7 @@ is a compile-time guarantee that normalization ran.
 | `slideforge-diagrams` (self, from STORY-033) | workspace | Extends rendering pipeline |
 | `usvg` | `=0.47.0` | SVG normalization (foreignObject removal, absolute dims, use resolution) |
 | `criterion` | `=0.5.1` | Updated benchmarks |
-| `insta` | `=1.39.0` | Before/after normalization snapshot |
+| `insta` | `=1.47.2` | Before/after normalization snapshot |
 
 Note: `usvg` 0.47.0 is pinned. Do NOT use `resvg` for normalization — `resvg` is
 a rasterizer. `usvg` is the normalization library (it parses and re-serializes SVG
