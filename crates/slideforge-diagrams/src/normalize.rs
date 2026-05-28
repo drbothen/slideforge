@@ -12,11 +12,13 @@
 //!
 //! ## I/O note
 //!
-//! The **first call** to `usvg_normalize` for an SVG containing `<text` elements
-//! performs disk I/O via `fontdb::Database::load_system_fonts()` (one-time cost
-//! ~50–300ms depending on platform). Subsequent calls are I/O-free — the font
-//! database is cached in a `OnceLock` and returned in O(1) as an `Arc::clone`.
-//! For SVGs without `<text` elements, no I/O is performed on any call.
+//! The **first call** to `usvg_normalize` performs disk I/O via
+//! `fontdb::Database::load_system_fonts()` (one-time cost ~50–300ms depending
+//! on platform). Subsequent calls are I/O-free — the font database is cached
+//! in a `OnceLock` and returned in O(1) as an `Arc::clone`.  The font database
+//! is unconditionally supplied to usvg (rather than gated on `<text` presence)
+//! to avoid false-negatives when `<text` elements appear with namespace prefixes
+//! or are introduced by `<use>` expansion.
 //!
 //! ## Pipeline position
 //!
@@ -35,8 +37,8 @@
 //!
 //! ## Implementation
 //!
-//! 1. Gate system font loading on presence of `<text` elements in the raw SVG
-//!    (keeps geometry-only paths fast; mermaid SVGs always have text).
+//! 1. Supply the system font database unconditionally via `OnceLock` (first call
+//!    loads fonts; subsequent calls are O(1) `Arc::clone` — no repeated I/O).
 //! 2. Call `usvg::Tree::from_str(raw_svg, &opt)` to parse.
 //! 3. Call `tree.to_string(&WriteOptions { preserve_text: true, .. })` to re-serialize.
 //! 4. Re-inject `aria-label`, `role="img"`, `<title>`, and `viewBox` that usvg strips.
@@ -92,9 +94,8 @@ fn font_db() -> Arc<usvg::fontdb::Database> {
 /// Normalize a [`RawDiagramSvg`] into a PPTX-safe [`NormalizedDiagramSvg`]
 /// using `usvg` 0.47.0.
 ///
-/// This is a **synchronous** operation. The first call for SVGs with `<text`
-/// elements performs disk I/O to load system fonts (one-time cost; subsequent
-/// calls hit the `OnceLock` cache). For SVGs without `<text`, no I/O occurs.
+/// This is a **synchronous** operation. The first call performs disk I/O to
+/// load system fonts (one-time cost; subsequent calls hit the `OnceLock` cache).
 ///
 /// It parses the raw SVG through `usvg::Tree::from_str` and re-serializes
 /// via `tree.to_string`. usvg guarantees the following
@@ -133,7 +134,7 @@ pub fn usvg_normalize(
     raw: &RawDiagramSvg,
     slide_title: &str,
 ) -> Result<NormalizedDiagramSvg, DiagramError> {
-    // Build usvg options, conditionally loading the system font database.
+    // Build usvg options, always loading the system font database.
     //
     // System fonts are required so that usvg preserves <text> elements as text
     // (rather than converting them to outlined paths). Without fonts:
@@ -141,23 +142,22 @@ pub fn usvg_normalize(
     // - Participant names ("Alice", "Bob") are lost from sequence diagrams.
     // - PPTX accessibility and screen-reader compatibility are broken.
     //
-    // Font loading is gated on whether the raw SVG contains `<text` elements.
-    // For geometry-only SVGs (no text), we skip font loading entirely — this
-    // keeps the warm + no-text path under 1ms (NFR-003/004). SVGs produced by
-    // mermaid-rs-renderer always contain `<text`, so the gate is rarely false
-    // in production; the exception is test fixtures and degenerate inputs.
-    //
-    // The font_db() call is O(1) after the first call (the database is loaded
+    // We always supply the font database regardless of whether the raw SVG
+    // contains `<text` elements. This eliminates a potential false-negative
+    // when `<text` appears with a namespace prefix (e.g., `<svg:text`) or
+    // when an SVG has text elements introduced by `<use>` expansion. The
+    // font_db() call is O(1) after the first call (the database is loaded
     // once and cached in `FONT_DB` via OnceLock). The first call may take
     // 50–300ms on systems with large font collections; subsequent calls are
     // nanoseconds (Arc::clone of the cached Arc<Database>).
-    let opt = if raw.as_str().contains("<text") {
-        usvg::Options {
-            fontdb: font_db(),
-            ..usvg::Options::default()
-        }
-    } else {
-        usvg::Options::default()
+    //
+    // NOTE: FONT_DB is process-global and initialized exactly once. Integration
+    // tests in tests/cold_budget.rs run in a fresh process (each `tests/*.rs`
+    // file compiles to a separate binary) and therefore see an uninitialized
+    // FONT_DB — this is the correct way to measure cold-path latency.
+    let opt = usvg::Options {
+        fontdb: font_db(),
+        ..usvg::Options::default()
     };
 
     // Parse the raw SVG through usvg. On failure, map to E-EXP-004.
@@ -401,7 +401,13 @@ fn reinject_accessibility_and_viewbox(
 
     // Inject viewBox only if not already present.
     if !opening_tag.contains("viewBox") {
-        let _ = write!(extra_attrs, r#" viewBox="0 0 {width_str} {height_str}""#);
+        // Strip CSS unit suffixes (e.g., "px") from width/height before
+        // interpolating into viewBox.  usvg 0.47.0 emits bare integers for
+        // absolute dimensions, but defensive stripping handles edge cases
+        // where upstream emits "800px" instead of "800".
+        let w = strip_unit_suffix(width_str);
+        let h = strip_unit_suffix(height_str);
+        let _ = write!(extra_attrs, r#" viewBox="0 0 {w} {h}""#);
     }
 
     // Inject accessibility attributes only if not already present.
@@ -415,7 +421,11 @@ fn reinject_accessibility_and_viewbox(
     let from_close = &normalized_svg[tag_close + 1..]; // skip the '>'
 
     // Idempotency guard for <title>: only inject if not already present.
-    let title_fragment = if normalized_svg.contains("<title>") {
+    // Check for both the bare `<title>` form AND the attributed `<title ` form
+    // (e.g., `<title id="t1">`) so that re-injection is skipped whenever any
+    // `<title` element exists, regardless of whether it carries attributes.
+    let has_title = normalized_svg.contains("<title>") || normalized_svg.contains("<title ");
+    let title_fragment = if has_title {
         String::new()
     } else {
         format!("<title>{escaped_text}</title>")
@@ -426,21 +436,38 @@ fn reinject_accessibility_and_viewbox(
     ))
 }
 
+/// Strip a CSS unit suffix from a dimension string and return a trimmed numeric slice.
+///
+/// usvg 0.47.0 emits bare integers (e.g., `"800"`) for absolute `width`/`height`
+/// attributes on the root `<svg>` element. However, upstream SVG sources may carry
+/// `"px"` suffixes (e.g., `"800px"`). Stripping the suffix before constructing a
+/// `viewBox` value ensures we produce valid SVG (`viewBox="0 0 800 600"`, not
+/// `viewBox="0 0 800px 600px"` which is malformed XML attribute content).
+///
+/// Only `"px"` is stripped; other unit suffixes (e.g., `"em"`, `"pt"`) are
+/// intentionally left in place so that an unexpected unit becomes visible rather
+/// than silently producing a wrong value.
+fn strip_unit_suffix(s: &str) -> &str {
+    s.trim_end_matches("px").trim_end()
+}
+
 /// Extract the value of a **named attribute** from an SVG opening tag string.
 ///
 /// Uses a word-boundary check to avoid substring matches: `extract_attr_value(tag, "width")`
-/// will not match `stroke-width=` because the required leading space prevents it.
+/// will not match `stroke-width=` because the check requires that the character
+/// immediately before the attribute name be XML whitespace (space, tab, CR, LF)
+/// or that the attribute name starts at position 0.
 ///
 /// The function handles both double-quoted and single-quoted attribute values.
 /// Returns `None` if the attribute is not found.
 ///
 /// ## Word-boundary rule
 ///
-/// We require that the attribute name be preceded by whitespace (space or newline)
-/// or be at the very start of the tag (e.g. `<svg width="100"` — the `w` in `width`
-/// immediately follows the space after `<svg`). This means `stroke-width=` is never
-/// matched when searching for `width` because `stroke-width=` is preceded by `-`,
-/// not by whitespace.
+/// XML 1.0 section 2.3 defines attribute-value whitespace as: space (`0x20`), tab (`0x09`),
+/// carriage-return (`0x0D`), and line-feed (`0x0A`).  All four are accepted as
+/// valid separators between attributes.  This means `stroke-width=` is never
+/// matched when searching for `width` because the preceding character is `-`,
+/// not an XML whitespace character.
 ///
 /// ## Examples
 ///
@@ -448,21 +475,55 @@ fn reinject_accessibility_and_viewbox(
 /// // Opening tag: `<svg stroke-width="2" width="100">`
 /// // extract_attr_value(tag, "width") returns Some("100")  — correct
 /// // extract_attr_value(tag, "stroke-width") returns Some("2")  — correct
+/// // Opening tag: `<svg\twidth="800">`
+/// // extract_attr_value(tag, "width") returns Some("800")  — correct (tab separator)
 /// ```
 fn extract_attr_value<'a>(tag: &'a str, attr_name: &str) -> Option<&'a str> {
-    // Require leading space to enforce word boundary:
-    //   ` width="..."` matches,  `stroke-width="..."` does not.
-    let needle = format!(" {attr_name}=");
-    let pos = tag.find(needle.as_str())?;
-    let after = &tag[pos + needle.len()..];
-    // Determine quote character
-    let quote = after.chars().next()?;
-    if quote != '"' && quote != '\'' {
+    // Scan the tag byte-by-byte looking for `attr_name=`.
+    // A match is valid only if the byte immediately before `attr_name` is an
+    // XML whitespace character (space, tab, CR, LF) or the attribute name
+    // begins at index 0.
+    let bytes = tag.as_bytes();
+    let needle = attr_name.as_bytes();
+    let needle_len = needle.len();
+
+    // We need at least `needle_len + 1` bytes (for the `=` sign) to match.
+    if bytes.len() < needle_len + 1 {
         return None;
     }
-    let value_start = &after[1..]; // skip opening quote
-    let end = value_start.find(quote)?;
-    Some(&value_start[..end])
+
+    let search_limit = bytes.len() - needle_len; // inclusive upper bound
+    let mut i = 0usize;
+    while i <= search_limit {
+        // Check if attr_name starts at position i.
+        if bytes[i..i + needle_len] == *needle {
+            // Check that the character after attr_name is `=`.
+            if bytes.get(i + needle_len) != Some(&b'=') {
+                i += 1;
+                continue;
+            }
+            // Check word boundary: preceding character must be XML whitespace
+            // or the attribute name starts at position 0.
+            let valid_boundary = i == 0 || matches!(bytes[i - 1], b' ' | b'\t' | b'\n' | b'\r');
+            if !valid_boundary {
+                i += 1;
+                continue;
+            }
+
+            // We have a valid attribute name match at position i.
+            // Now extract the quoted value.
+            let after = &tag[i + needle_len + 1..]; // skip attr_name + '='
+            let quote = after.chars().next()?;
+            if quote != '"' && quote != '\'' {
+                return None;
+            }
+            let value_start = &after[1..]; // skip opening quote
+            let end = value_start.find(quote)?;
+            return Some(&value_start[..end]);
+        }
+        i += 1;
+    }
+    None
 }
 
 #[cfg(test)]
@@ -1080,6 +1141,88 @@ mod tests {
             title_count, 1,
             "reinject must not add a second <title> when one already exists; \
              got {title_count} occurrences"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // F-MED-001: extract_attr_value handles all XML whitespace separators
+    // -----------------------------------------------------------------------
+
+    /// F-MED-001: `extract_attr_value` must match an attribute that is
+    /// separated from the previous attribute by a tab character, not just
+    /// a space.  XML 1.0 §2.3 allows space, tab, CR, and LF as whitespace
+    /// between attributes.
+    #[test]
+    fn test_extract_attr_value_handles_tab_whitespace() {
+        // Tab-separated attributes: `<svg\twidth="800">`
+        let tag = "<svg\twidth=\"800\">";
+        let val = extract_attr_value(tag, "width");
+        assert_eq!(
+            val,
+            Some("800"),
+            "extract_attr_value must find width='800' in tab-separated tag; got {val:?}"
+        );
+    }
+
+    /// F-MED-001: `extract_attr_value` must handle CR (\\r) as whitespace.
+    #[test]
+    fn test_extract_attr_value_handles_cr_whitespace() {
+        let tag = "<svg\rwidth=\"400\">";
+        let val = extract_attr_value(tag, "width");
+        assert_eq!(
+            val,
+            Some("400"),
+            "extract_attr_value must find width='400' in CR-separated tag; got {val:?}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // F-MED-002: viewBox synthesis strips px unit suffixes
+    // -----------------------------------------------------------------------
+
+    /// F-MED-002: `reinject_accessibility_and_viewbox` must strip `px` unit
+    /// suffixes from width and height values before constructing the viewBox.
+    /// For example, `width="800px"` must produce `viewBox="0 0 800 600"`,
+    /// not `viewBox="0 0 800px 600px"`.
+    #[test]
+    fn test_viewbox_synthesis_strips_px_suffix() {
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="800px" height="600px"><rect x="0" y="0" width="800" height="600" fill="white"/></svg>"#;
+        let result = reinject_accessibility_and_viewbox(svg, "px-test").expect("must succeed");
+        // The injected viewBox must not contain "px".
+        assert!(
+            !result.contains("viewBox=\"0 0 800px 600px\""),
+            "viewBox must not contain px suffixes; got result snippet: {}",
+            &result[..result.len().min(300)]
+        );
+        assert!(
+            result.contains("viewBox=\"0 0 800 600\""),
+            "viewBox must be '0 0 800 600' with px stripped; got result snippet: {}",
+            &result[..result.len().min(300)]
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // F-LOW-002: title idempotency handles attributed <title> tags
+    // -----------------------------------------------------------------------
+
+    /// F-LOW-002: `reinject_accessibility_and_viewbox` must not inject a
+    /// second `<title>` when the existing title element has XML attributes
+    /// (e.g., `<title id="t1">existing</title>`).  A naive `contains("<title>")`
+    /// check would miss `<title id="t1">` because it does not start with
+    /// the verbatim substring `<title>`.
+    #[test]
+    fn test_reinject_does_not_duplicate_title_when_attributed_title_present() {
+        let svg_with_attributed_title = r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><title id="t1">existing title</title><rect x="0" y="0" width="100" height="100" fill="blue"/></svg>"#;
+        let result = reinject_accessibility_and_viewbox(svg_with_attributed_title, "new text")
+            .expect("must succeed");
+        // Count both plain <title> and attributed <title ...> occurrences.
+        let plain_count = result.matches("<title>").count();
+        let attr_count = result.matches("<title ").count();
+        let total = plain_count + attr_count;
+        assert_eq!(
+            total, 1,
+            "reinject must not add a second <title> when an attributed <title ...> already exists; \
+             plain={plain_count}, attributed={attr_count}"
         );
     }
 }
