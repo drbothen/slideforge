@@ -283,12 +283,21 @@ pub fn collect_sections(deck: &Deck) -> Result<Vec<GeneratedSection>, LayoutErro
     // the same kind is present (AC-006).
     if manual_section_names.contains("executive_summary") {
         // AC-006 / BC-3.02.001 EC-002: manual executive_summary supersedes auto.
-        // Check if there would have been an auto-generated one to warn about.
-        let has_takeaways = deck
-            .slides
-            .iter()
-            .any(|s| s.register != Some(Register::Notes) && s.fields.contains_key("takeaway"));
-        if has_takeaways {
+        // Only warn if there are slides with resolved Literal(Str) takeaway values
+        // that would have produced a real auto-generated section. Checking only
+        // `contains_key("takeaway")` was a false-positive: an unresolved
+        // `FieldValue::Expr` takeaway would have caused collect_executive_summary to
+        // return Err(UnresolvedTakeaway), not a section — so there would be nothing
+        // to supersede and the warning would be misleading.
+        let has_resolved_takeaways = deck.slides.iter().any(|s| {
+            use slideforge_types::FieldValue;
+            s.register != Some(Register::Notes)
+                && matches!(
+                    s.fields.get("takeaway"),
+                    Some(FieldValue::Literal(slideforge_types::Value::Str(_)))
+                )
+        });
+        if has_resolved_takeaways {
             warn!(
                 "BC-3.02.001 EC-002: Auto-generated executive_summary overridden by explicit \
                  section block"
@@ -512,7 +521,9 @@ fn humanize_section_name(name: &str) -> Arc<str> {
 ///
 /// - Slide order is preserved (BC-3.02.001 postcondition 2).
 /// - Notes-register slides do not contribute (MED-004).
-pub fn collect_executive_summary(deck: &Deck) -> Result<Option<GeneratedSection>, LayoutError> {
+pub(crate) fn collect_executive_summary(
+    deck: &Deck,
+) -> Result<Option<GeneratedSection>, LayoutError> {
     use slideforge_types::FieldValue;
 
     let mut items: Vec<SectionItem> = Vec::new();
@@ -591,7 +602,9 @@ pub fn collect_executive_summary(deck: &Deck) -> Result<Option<GeneratedSection>
 ///   included (BC-3.02.001 EC-003).
 /// - If `@if` suppresses all `severity_cards` slides, this function returns
 ///   `Ok(None)` (BC-3.02.001 EC-004).
-pub fn collect_risk_register(deck: &Deck) -> Result<Option<GeneratedSection>, LayoutError> {
+pub(crate) fn collect_risk_register(
+    deck: &Deck,
+) -> Result<Option<GeneratedSection>, LayoutError> {
     use slideforge_types::FieldValue;
 
     let mut items: Vec<SectionItem> = Vec::new();
@@ -1472,6 +1485,12 @@ mod tests {
     /// EC-005 — `LayoutError::UnknownSectionType` can be constructed and
     /// displays a human-readable message containing the unknown name and known
     /// types list (BC-3.02.002 EC-001).
+    ///
+    /// Also verifies that the span is rendered via `Display` (compact
+    /// `file:line:col` / `<unknown>` form), NOT via `Debug` (verbose struct
+    /// dump). The `Display` impl on `SourceSpan` was added specifically for
+    /// clean error rendering; the error format string must use `{span}` not
+    /// `{span:?}`.
     #[test]
     fn test_bc_3_02_002_unknown_section_type_error_variant_exists() {
         use crate::error::LayoutError;
@@ -1487,6 +1506,17 @@ mod tests {
         assert!(
             msg.contains("Known types"),
             "UnknownSectionType error must include 'Known types' list (BC-3.02.002 EC-001); got: {msg}"
+        );
+        // Verify span uses Display (compact form), NOT Debug (struct dump).
+        // SourceSpan::default() has an empty file so Display renders as "<unknown>".
+        // Debug would render as "SourceSpan { file: \"\", line: 0, col: 0, byte_offset: 0 }".
+        assert!(
+            msg.contains("<unknown>"),
+            "span must render via Display ('<unknown>' for default span), not Debug struct dump; got: {msg}"
+        );
+        assert!(
+            !msg.contains("SourceSpan {"),
+            "span must NOT render as a Debug struct dump; got: {msg}"
         );
     }
 
@@ -2148,6 +2178,45 @@ mod tests {
         assert!(
             !logs_contain("executive_summary overridden"),
             "supersession warning must NOT fire when no takeaway slides exist"
+        );
+    }
+
+    /// CRIT-002 / PR-review finding 2 — supersession warning must NOT fire
+    /// when the only `takeaway` fields are unresolved `FieldValue::Expr`
+    /// values. An unresolved takeaway would have caused `collect_executive_summary`
+    /// to return `Err(UnresolvedTakeaway)`, NOT a section — so there is nothing
+    /// to supersede, and the warning would be a false positive.
+    #[tracing_test::traced_test]
+    #[test]
+    fn test_crit_002_no_supersession_warning_for_unresolved_expr_takeaway() {
+        let block = SectionBlock {
+            name: Arc::from("executive_summary"),
+            body: OrderedMap::new(),
+            span: SourceSpan::default(),
+        };
+        // A slide whose `takeaway:` is an unresolved Expr — NOT a Literal(Str).
+        // collect_executive_summary would have returned Err for this slide, not a section.
+        let mut fields = OrderedMap::new();
+        fields.insert(
+            Arc::from("takeaway"),
+            FieldValue::Expr(Arc::from("{{ some_unresolved_expr }}")),
+        );
+        let expr_takeaway_slide = Slide {
+            slide_type: Arc::from("content"),
+            fields,
+            blocks: vec![],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+        };
+        let deck = make_deck_with_section_blocks(vec![expr_takeaway_slide], vec![block]);
+        // collect_sections must succeed (the manual section is collected; the
+        // unresolved takeaway is in a superseded branch, not evaluated).
+        let _ = collect_sections(&deck).expect("collect_sections must succeed");
+        assert!(
+            !logs_contain("executive_summary overridden"),
+            "supersession warning must NOT fire when the only takeaway fields are unresolved \
+             Expr values — there would be no auto-generated section to supersede"
         );
     }
 

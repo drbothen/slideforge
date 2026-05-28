@@ -74,7 +74,7 @@ pub enum LayoutError {
     /// (AC-006 / BC-3.02.001 EC-002).  Any other name produces this error
     /// (AC-004 / BC-3.02.002 EC-001).
     #[error(
-        "layout error: unknown section type '{name}' at {span:?}. \
+        "layout error: unknown section type '{name}' at {span}. \
          Known types: [executive_summary, risk_register, methodology, scope, \
          approval, appendix, glossary]"
     )]
