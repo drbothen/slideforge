@@ -602,9 +602,7 @@ pub(crate) fn collect_executive_summary(
 ///   included (BC-3.02.001 EC-003).
 /// - If `@if` suppresses all `severity_cards` slides, this function returns
 ///   `Ok(None)` (BC-3.02.001 EC-004).
-pub(crate) fn collect_risk_register(
-    deck: &Deck,
-) -> Result<Option<GeneratedSection>, LayoutError> {
+pub(crate) fn collect_risk_register(deck: &Deck) -> Result<Option<GeneratedSection>, LayoutError> {
     use slideforge_types::FieldValue;
 
     let mut items: Vec<SectionItem> = Vec::new();
