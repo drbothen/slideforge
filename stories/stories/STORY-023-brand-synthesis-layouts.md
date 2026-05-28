@@ -108,8 +108,8 @@ Agent context budget: 200k tokens. This story is ~14.25% of budget — within li
 - [ ] **AC-005:** A `brand.toml` that omits the `[colors]` section entirely — including a literally-empty file (zero bytes) and a file with non-color sections only — produces exactly 12 E-BRD-003 warnings (one per slot) and synthesizes the entire palette from the default baseline. Build continues.
   (traces to BC-2.01.004 edge case EC-002 — empty brand.toml)
 
-- [ ] **AC-006:** All inferred colors are valid 6-digit uppercase hex RGB strings (e.g., `"#3B82F6"`). No alpha channel. No CSS named colors. No lowercase hex.
-  (traces to BC-2.01.004 invariant 3 — all inferred colors are valid 6-digit uppercase hex RGB)
+- [ ] **AC-006:** All inferred colors are valid 6-digit uppercase hex RGB strings (e.g., `"#3B82F6"`). No alpha channel. No CSS named colors. User-typed lowercase hex (e.g., `"#3b82f6"`) is accepted and normalised to uppercase during validation; inferred colors are always produced in uppercase.
+  (traces to BC-2.01.004 invariant 3 — all inferred colors are valid 6-digit uppercase hex RGB; F-PASS11-LOW-4 adjudication)
 
 - [ ] **AC-007:** Synthesis is deterministic: given the same `brand.toml` file content (same bytes), the returned `BrandTemplate` is always structurally identical. Two calls with identical inputs produce `BrandTemplate` values that compare equal (`==`).
   (traces to BC-2.01.002 invariant 4 — synthesis is deterministic)
