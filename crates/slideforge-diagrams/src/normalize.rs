@@ -83,10 +83,50 @@ static FONT_DB: OnceLock<Arc<usvg::fontdb::Database>> = OnceLock::new();
 ///
 /// On the first call this loads all system fonts (one-time cost ~50–300ms).
 /// Subsequent calls return the cached database in O(1).
+///
+/// ## Fallback font path loading (Linux headless environments)
+///
+/// `fontdb::Database::load_system_fonts()` relies on fontconfig on Linux, which
+/// can return an empty database on minimal CI images that have fonts installed
+/// but no fontconfig cache (e.g., GitHub Actions `ubuntu-latest` before
+/// `fc-cache -f` is run). When the database is empty after `load_system_fonts`,
+/// we fall back to scanning well-known Linux font directories directly via
+/// `load_fonts_dir`. This ensures that `<text>` elements in Mermaid SVGs
+/// (node labels like "Client", participant names like "Alice") survive usvg
+/// normalization even on CI runners that have fonts but no fontconfig cache.
+///
+/// Without at least one matching font, usvg silently drops `<text>` nodes
+/// entirely (it cannot compute bounding boxes without font metrics), causing
+/// BC-1.12.001 violations: "labels and participants must be visible in SVG output."
 fn font_db() -> Arc<usvg::fontdb::Database> {
     Arc::clone(FONT_DB.get_or_init(|| {
         let mut db = usvg::fontdb::Database::new();
         db.load_system_fonts();
+
+        // On Linux headless environments (e.g., CI runners), fontconfig may
+        // return an empty database even when fonts are present on disk. Fall
+        // back to scanning well-known font directories directly so that
+        // <text> elements always survive usvg normalization.
+        #[cfg(target_os = "linux")]
+        if db.len() == 0 {
+            // Common Linux font directories. The most important are:
+            // - /usr/share/fonts  (system-wide, present on Debian/Ubuntu/RHEL)
+            // - /usr/local/share/fonts  (locally installed fonts)
+            // - ~/.local/share/fonts  (user fonts; not relevant for CI)
+            //
+            // Each call is idempotent — fontdb deduplicates by inode.
+            for dir in &["/usr/share/fonts", "/usr/local/share/fonts"] {
+                if std::path::Path::new(dir).exists() {
+                    db.load_fonts_dir(dir);
+                }
+            }
+            tracing::debug!(
+                font_count = db.len(),
+                "fontdb: fallback dir scan loaded {} font face(s) for Linux headless env",
+                db.len()
+            );
+        }
+
         Arc::new(db)
     }))
 }

@@ -19,15 +19,15 @@
 //! iterations.  A dedicated integration test in its own binary is the correct
 //! mechanism for a cold-path gate.
 //!
-//! ## Obs-3 note (FONT_DB process-global, no test isolation)
+//! ## Obs-3 note (`FONT_DB` process-global, no test isolation)
 //!
 //! Within any single test binary (i.e., within `cargo nextest run -p
-//! slideforge-diagrams`), the `FONT_DB` OnceLock is initialized once and
+//! slideforge-diagrams`), the `FONT_DB` `OnceLock` is initialized once and
 //! reused for all tests.  The unit tests in `src/normalize.rs` that measure
 //! warm-path latency intentionally warm up the DB before timing (three-step
 //! methodology: warmup → font-init → timed).  Only THIS file, which lives
 //! in `tests/cold_budget.rs` and therefore gets its own binary, observes
-//! a genuinely cold FONT_DB.
+//! a genuinely cold `FONT_DB`.
 
 #![allow(clippy::unwrap_used)] // integration tests may use unwrap
 
@@ -72,11 +72,9 @@ fn test_cold_budget_under_200ms() {
     };
     assert!(
         elapsed < budget,
-        "cold render+normalize budget exceeded: {:?} >= {:?}. \
+        "cold render+normalize budget exceeded: {elapsed:?} >= {budget:?}. \
          This gate ensures the first call (FONT_DB init + mermaid render + usvg normalize) \
          stays within the NFR-003 cold budget on CI. \
-         If this fails only on CI: check system font count or CI runner speed.",
-        elapsed,
-        budget
+         If this fails only on CI: check system font count or CI runner speed."
     );
 }
