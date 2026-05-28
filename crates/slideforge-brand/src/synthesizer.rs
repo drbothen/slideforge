@@ -35,6 +35,8 @@ use slideforge_plugin_api::BrandProvider;
 use slideforge_plugin_api::BrandSource;
 use slideforge_types::Brand;
 
+use tracing::instrument;
+
 use crate::error::BrandError;
 use crate::inference;
 use crate::layout_xml::{
@@ -94,6 +96,7 @@ impl BrandSynthesizer {
     /// - Propagates all errors from [`BrandSynthesizer::synthesize`].
     ///
     /// On success, returns `(template, warnings)` — see [`BrandSynthesizer::synthesize`].
+    #[instrument(skip_all, fields(toml_path = %path))]
     pub fn load_from_toml(path: &str) -> Result<(BrandTemplate, Vec<BrandError>), BrandError> {
         let content = std::fs::read_to_string(path).map_err(|e| BrandError::TomlReadError {
             path: Arc::from(path),
@@ -168,6 +171,7 @@ impl BrandSynthesizer {
             *logo_path = brand_toml_dir.join(as_written);
         }
 
+        tracing::debug!(warnings_count = warnings.len(), "load_from_toml succeeded");
         Ok((template, warnings))
     }
 
@@ -194,6 +198,7 @@ impl BrandSynthesizer {
     /// zero or more [`BrandError::MissingColorSlot`] entries for each color slot
     /// that was absent in the config and was inferred (AC-002, AC-005, AC-007).
     /// These are cosmetic warnings — the build continues with inferred values.
+    #[instrument(skip(config), fields(heading_font = %config.fonts.heading))]
     pub fn synthesize(
         config: &BrandConfig,
     ) -> Result<(BrandTemplate, Vec<BrandError>), BrandError> {
@@ -277,6 +282,10 @@ impl BrandSynthesizer {
             master_ids,
             content_types_layout_entries,
         };
+        tracing::debug!(
+            layouts_count = template.layouts.len(),
+            "synthesize succeeded"
+        );
         Ok((template, warnings))
     }
 }
@@ -339,6 +348,7 @@ impl BrandProvider for BrandSynthesizer {
     /// Returns `slideforge_plugin_api::BrandError` on failure. All
     /// `slideforge_brand::BrandError` variants are mapped to the appropriate
     /// plugin-API error variant.
+    #[instrument(skip(self, source), fields(brand_source = ?source))]
     fn load(&self, source: &BrandSource) -> Result<Brand, slideforge_plugin_api::BrandError> {
         match source {
             BrandSource::TomlFile(path) => {
@@ -1499,6 +1509,53 @@ body = "Calibri"
         assert_eq!(
             result, path,
             "strip_unc_prefix must be a no-op on non-Windows"
+        );
+    }
+
+    // ─── F-PASS17-OBS-1: traced_test — instrument spans fire ──────────────────
+
+    /// F-PASS17-OBS-1 — `synthesize` emits a `tracing::debug!` event on success.
+    ///
+    /// Asserts that `tracing::debug!("synthesize succeeded")` fires when
+    /// `BrandSynthesizer::synthesize` completes without error, providing
+    /// load-bearing evidence for the `#[instrument]` annotation.
+    #[tracing_test::traced_test]
+    #[test]
+    fn test_f_pass17_obs_1_synthesize_span_emits_debug_event() {
+        let config = minimal_config();
+        let result = BrandSynthesizer::synthesize(&config);
+        assert!(
+            result.is_ok(),
+            "synthesize must succeed with minimal config"
+        );
+        assert!(
+            logs_contain("synthesize succeeded"),
+            "synthesize must emit a 'synthesize succeeded' debug event"
+        );
+    }
+
+    /// F-PASS17-OBS-1 — `load_from_toml` emits a `tracing::debug!` event on success.
+    ///
+    /// Writes a minimal brand.toml to a tempdir (with a real logo file) and
+    /// asserts that `tracing::debug!("load_from_toml succeeded")` fires.
+    #[tracing_test::traced_test]
+    #[test]
+    fn test_f_pass17_obs_1_load_from_toml_span_emits_debug_event() {
+        let tmp_dir = tempfile::tempdir().expect("tempdir must be created");
+        let logo_path = tmp_dir.path().join("logo.png");
+        std::fs::write(&logo_path, b"PNG").expect("write logo");
+        let toml_content = "[logo]\npath = \"logo.png\"\n[colors]\nacc1 = \"#3B82F6\"\n";
+        let toml_file = tmp_dir.path().join("brand.toml");
+        std::fs::write(&toml_file, toml_content).expect("write brand.toml");
+        let result =
+            BrandSynthesizer::load_from_toml(toml_file.to_str().expect("valid utf-8 path"));
+        assert!(
+            result.is_ok(),
+            "load_from_toml must succeed with minimal brand.toml"
+        );
+        assert!(
+            logs_contain("load_from_toml succeeded"),
+            "load_from_toml must emit a 'load_from_toml succeeded' debug event"
         );
     }
 }

@@ -191,7 +191,7 @@ pub enum BrandError {
     /// has been updated to reflect this revised semantic.
     #[error(
         "E-BRD-005: Invalid hex color value '{value}' in brand.toml slot '{slot_name}'. \
-         Use 6-digit uppercase hex RGB (e.g. '#3B82F6'; case insensitive — uppercase or lowercase accepted)."
+         Use 6-digit uppercase hex RGB (e.g. #3B82F6; case insensitive — uppercase or lowercase accepted)."
     )]
     InvalidHexColor {
         /// The OOXML color slot name (e.g., `"acc1"`).

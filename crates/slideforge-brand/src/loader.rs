@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use slideforge_plugin_api::{BrandError as TraitBrandError, BrandProvider, BrandSource};
 use slideforge_types::{Brand, BrandFonts as TypesBrandFonts, BrandPalette, SourceSpan};
+use tracing::instrument;
 use zip::ZipArchive;
 
 use crate::color::parse_theme_colors;
@@ -296,6 +297,7 @@ impl BrandProvider for BrandLoader {
         "slideforge-brand/default"
     }
 
+    #[instrument(skip(self, source), fields(brand_source = ?source))]
     fn load(&self, source: &BrandSource) -> Result<Brand, TraitBrandError> {
         match source {
             BrandSource::PptxFile(path) | BrandSource::DocxFile(path) => {

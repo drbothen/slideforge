@@ -27,3 +27,4 @@ proptest = "=1.5.0"
 tempfile = "=3.10.0"
 zip = "=2.3.0"
 tracing-subscriber = { workspace = true }
+tracing-test = "=0.2.5"
