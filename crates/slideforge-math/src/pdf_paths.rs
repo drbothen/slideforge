@@ -115,7 +115,7 @@ pub fn render_pdf_paths(ast: &MathAst) -> Result<SvgPaths, MathError> {
     let mut x: i64 = 0;
     let baseline_y: i64 = GLYPH_H;
 
-    collect_paths(&engine, ast, &ast.nodes, &mut paths, &mut x, baseline_y)?;
+    collect_paths(engine, ast, &ast.nodes, &mut paths, &mut x, baseline_y)?;
 
     // Secondary guard: a non-empty node list may still produce zero paths when
     // it consists solely of empty Group nodes (F-S030-P5-L1). In that case
