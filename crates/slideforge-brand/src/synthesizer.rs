@@ -7,8 +7,9 @@
 //! 1. **Effectful I/O** — [`BrandSynthesizer::load_from_toml`]: reads the
 //!    `brand.toml` file from the filesystem.
 //! 2. **Pure synthesis** — [`BrandSynthesizer::synthesize`]: pure function;
-//!    takes a [`BrandConfig`] reference, performs color inference, layout
-//!    generation, and XML serialization, and returns a [`BrandTemplate`].
+//!    takes a [`BrandConfig`] reference, performs color inference and layout
+//!    generation, and returns a [`BrandTemplate`]. XML serialization is
+//!    deferred to the PPTX exporter (STORY-037).
 //!
 //! The separation means `synthesize` is directly unit-testable without any
 //! filesystem dependency (AC-007 determinism test, VP-012 proptest).
@@ -64,7 +65,8 @@ use crate::toml_schema::BrandConfig;
 ///
 /// // Synthesize from already-parsed config (pure path, useful for testing):
 /// use slideforge_brand::toml_schema::BrandConfig;
-/// let config = BrandConfig::default();
+/// // Use `default_minimal()` — `default()` has no logo path and will fail synthesis.
+/// let config = BrandConfig::default_minimal();
 /// let result = BrandSynthesizer::synthesize(&config);
 /// ```
 #[derive(Debug, Default)]
@@ -74,12 +76,16 @@ impl BrandSynthesizer {
     /// Load a [`BrandTemplate`] from a `brand.toml` file at `path`.
     ///
     /// This is the effectful entry point. It reads the file, parses TOML,
+    /// checks that the declared logo path exists on the filesystem (EC-005),
     /// and calls [`BrandSynthesizer::synthesize`].
     ///
     /// # Errors
     ///
     /// - [`BrandError::TomlReadError`] if `path` does not exist or cannot be read.
     /// - [`BrandError::TomlParseError`] if the file content is not valid TOML.
+    /// - [`BrandError::FileNotFound`] (E-BRD-001) if the declared `[logo].path` does
+    ///   not exist on the filesystem. The logo path is resolved relative to the
+    ///   directory containing `brand.toml`.
     /// - Propagates all errors from [`BrandSynthesizer::synthesize`].
     ///
     /// On success, returns `(template, warnings)` — see [`BrandSynthesizer::synthesize`].
@@ -93,6 +99,25 @@ impl BrandSynthesizer {
                 path: Arc::from(path),
                 reason: Arc::from(e.to_string().as_str()),
             })?;
+
+        // EC-005: check logo path existence here (effectful — I/O allowed in loader).
+        // `synthesize` is pure and cannot perform this check.
+        // The logo path is relative to the directory containing brand.toml.
+        if let Some(logo) = config.logo.as_ref()
+            && !logo.path.is_empty()
+        {
+            let brand_toml_dir = std::path::Path::new(path)
+                .parent()
+                .unwrap_or(std::path::Path::new("."));
+            let logo_path = brand_toml_dir.join(&logo.path);
+            if !logo_path.exists() {
+                return Err(BrandError::FileNotFound {
+                    path: Arc::from(logo_path.to_string_lossy().as_ref()),
+                    span: slideforge_types::SourceSpan::default(),
+                });
+            }
+        }
+
         Self::synthesize(&config)
     }
 
@@ -632,12 +657,23 @@ mod tests {
     ///
     /// Writes a minimal brand.toml to a tempfile and calls `BrandSynthesizer::load`.
     /// Verifies the returned `Brand` has the expected color palette slots populated.
+    ///
+    /// The test also creates a dummy logo file alongside the brand.toml so that the
+    /// EC-005 logo-path existence check in `load_from_toml` passes.
     #[test]
     fn test_brand_provider_load_toml_file_returns_ok() {
         use slideforge_plugin_api::BrandProvider as _;
         use std::io::Write as _;
-        // Write a minimal brand.toml to a temp file.
-        let mut tmp = tempfile::NamedTempFile::new().expect("tempfile must be created");
+        // Use a temp directory so brand.toml and logo.png can coexist.
+        let tmp_dir = tempfile::tempdir().expect("tempdir must be created");
+        let brand_toml_path = tmp_dir.path().join("brand.toml");
+        let logo_path = tmp_dir.path().join("logo.png");
+
+        // Write a minimal PNG header as the logo fixture (EC-005 requires the file exists).
+        std::fs::write(&logo_path, b"\x89PNG\r\n\x1a\n").expect("logo fixture write must succeed");
+
+        let mut tmp =
+            std::fs::File::create(&brand_toml_path).expect("brand.toml create must succeed");
         writeln!(
             tmp,
             r##"
@@ -654,11 +690,10 @@ heading = "Calibri"
 body = "Calibri"
 "##
         )
-        .expect("write to tempfile must succeed");
-        let path = tmp
-            .path()
+        .expect("write to brand.toml must succeed");
+        let path = brand_toml_path
             .to_str()
-            .expect("tempfile path must be valid UTF-8");
+            .expect("brand.toml path must be valid UTF-8");
 
         let synth = BrandSynthesizer;
         let source = slideforge_plugin_api::BrandSource::TomlFile(Arc::from(path));

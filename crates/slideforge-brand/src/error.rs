@@ -191,6 +191,18 @@ pub enum BrandError {
     /// font name. The build continues.
     ///
     /// Traces to BC-2.01.002 edge case EC-004 (AC-015, NFR-021).
+    ///
+    /// ## EC-004 font-availability check — deferral note
+    ///
+    /// The font availability check for synthesized brands (EC-004) is deferred
+    /// to STORY-024 (Brand Extraction CLI). The reason: `BrandSynthesizer::synthesize`
+    /// is a **pure function** (Architecture Compliance Rule 2 — no side effects, no I/O).
+    /// Querying the OS font registry requires I/O and therefore belongs in the
+    /// effectful extraction/validation stage, not in the pure synthesizer.
+    ///
+    /// This variant is kept in the enum so that STORY-024 can emit it without a
+    /// breaking API change. It is not currently constructed by any production code
+    /// path; STORY-024 will wire up the construction.
     #[error(
         "E-BRD-004: Font '{font_name}' declared in brand.toml is not available \
          on this build host. Build continues; output will use '{font_name}'."

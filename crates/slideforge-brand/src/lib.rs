@@ -28,9 +28,13 @@
 //! 2. Applies deterministic color inference for any absent of the 12 OOXML
 //!    color slots (ac-003: hue rotation, lightness adjustment).
 //! 3. Generates 31 slide layout definitions.
-//! 4. Serializes each layout to OOXML XML via [`layout_xml::serialize_layout_to_xml`].
-//! 5. Returns `(BrandTemplate, Vec<BrandError>)` — the template plus any
+//! 4. Returns `(BrandTemplate, Vec<BrandError>)` — the template plus any
 //!    cosmetic warnings for inferred color slots.
+//!
+//! Layout XML serialization is performed **lazily** by the PPTX exporter
+//! (STORY-037), which calls [`layout_xml::serialize_layout_to_xml`] per
+//! layout when building each ZIP entry. The synthesizer itself is pure
+//! (no I/O) and does not produce XML bytes.
 //!
 //! ## Error Codes
 //!

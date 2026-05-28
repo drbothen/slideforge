@@ -13,9 +13,19 @@ use slideforge_brand::synthesizer::BrandSynthesizer;
 /// [`BrandTemplate`] with 31 layouts and populated color slots.
 #[test]
 fn test_load_brand_toml_end_to_end() {
-    let mut tmp = tempfile::NamedTempFile::new().expect("tempfile must be created");
+    // Use a temp directory so both the brand.toml and the logo file can coexist.
+    let tmp_dir = tempfile::tempdir().expect("tempdir must be created");
+    let brand_toml_path = tmp_dir.path().join("brand.toml");
+    let logo_path = tmp_dir.path().join("logo.png");
+
+    // Write a minimal 1×1 PNG (smallest valid PNG header) as the logo fixture.
+    // EC-005: load_from_toml must not fail when the logo file exists.
+    std::fs::write(&logo_path, b"\x89PNG\r\n\x1a\n").expect("logo fixture write must succeed");
+
+    let mut brand_toml =
+        std::fs::File::create(&brand_toml_path).expect("brand.toml create must succeed");
     writeln!(
-        tmp,
+        brand_toml,
         r##"
 [colors]
 dk1 = "#1F2937"
@@ -44,12 +54,11 @@ show_slide_number = true
 show_date = false
 "##
     )
-    .expect("write to tempfile must succeed");
+    .expect("write to brand.toml must succeed");
 
-    let path = tmp
-        .path()
+    let path = brand_toml_path
         .to_str()
-        .expect("tempfile path must be valid UTF-8");
+        .expect("brand.toml path must be valid UTF-8");
     let (template, warnings) =
         BrandSynthesizer::load_from_toml(path).expect("load_from_toml must succeed for valid TOML");
 
@@ -105,7 +114,14 @@ fn test_load_brand_toml_missing_file_returns_error() {
 /// its return tuple, satisfying AC-005 for the TOML loading path.
 #[test]
 fn test_load_brand_toml_empty_colors_section_yields_12_warnings() {
-    let mut tmp = tempfile::NamedTempFile::new().expect("tempfile must be created");
+    let tmp_dir = tempfile::tempdir().expect("tempdir must be created");
+    let brand_toml_path = tmp_dir.path().join("brand.toml");
+    let logo_path = tmp_dir.path().join("logo.png");
+
+    // Write a dummy logo file so EC-005 check passes.
+    std::fs::write(&logo_path, b"\x89PNG\r\n\x1a\n").expect("logo fixture write must succeed");
+
+    let mut tmp = std::fs::File::create(&brand_toml_path).expect("brand.toml create must succeed");
     std::io::Write::write_all(
         &mut tmp,
         br#"
@@ -115,10 +131,9 @@ path = "logo.png"
     )
     .expect("write to tempfile must succeed");
 
-    let path = tmp
-        .path()
+    let path = brand_toml_path
         .to_str()
-        .expect("tempfile path must be valid UTF-8");
+        .expect("brand.toml path must be valid UTF-8");
     let (template, warnings) = BrandSynthesizer::load_from_toml(path)
         .expect("load_from_toml must succeed even with missing colors");
 
@@ -153,5 +168,54 @@ fn test_load_brand_toml_invalid_toml_returns_parse_error() {
     assert!(
         msg.contains("E-BRD-002"),
         "error must be TomlParseError (E-BRD-002), got: {msg}"
+    );
+}
+
+/// EC-005 — `load_from_toml` returns `FileNotFound` when the declared logo path
+/// does not exist on the filesystem.
+///
+/// This test validates BC-2.01.002 EC-005 (logo file not found). The logo path
+/// is resolved relative to the directory containing `brand.toml`.
+#[test]
+fn test_load_brand_toml_missing_logo_returns_file_not_found() {
+    let tmp_dir = tempfile::tempdir().expect("tempdir must be created");
+    let brand_toml_path = tmp_dir.path().join("brand.toml");
+
+    // Write a brand.toml that references a logo file that does NOT exist.
+    std::fs::write(
+        &brand_toml_path,
+        r##"
+[colors]
+dk1 = "#1F2937"
+acc1 = "#3B82F6"
+
+[logo]
+path = "nonexistent_logo.png"
+
+[fonts]
+heading = "Calibri"
+body = "Calibri"
+"##,
+    )
+    .expect("brand.toml write must succeed");
+
+    let path = brand_toml_path
+        .to_str()
+        .expect("brand.toml path must be valid UTF-8");
+    let result = BrandSynthesizer::load_from_toml(path);
+
+    assert!(
+        result.is_err(),
+        "EC-005: load_from_toml must fail when the logo file does not exist"
+    );
+    let err = result.unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("E-BRD-001"),
+        "EC-005: error must be FileNotFound (E-BRD-001), got: {msg}"
+    );
+    assert!(
+        msg.contains("nonexistent_logo.png"),
+        "EC-005: error message must contain the missing logo path, got: {msg}"
     );
 }
