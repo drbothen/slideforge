@@ -83,9 +83,13 @@ fn validate_mermaid_syntax(source: &str) -> Result<(), DiagramError> {
     let mut in_frontmatter = false;
     let mut keyword_found = false;
     let mut is_flowchart = false;
-    let mut flowchart_lines: Vec<&str> = Vec::new();
+    // Each entry stores the 1-based original source line number alongside the line
+    // content, so that validate_flowchart_brackets can report accurate line numbers
+    // even when blank lines or comment lines precede the offending body line.
+    let mut flowchart_lines: Vec<(usize, &str)> = Vec::new();
 
-    for raw_line in source.lines() {
+    for (line_idx, raw_line) in source.lines().enumerate() {
+        let line_num = line_idx + 1; // 1-based
         let trimmed = raw_line.trim();
         if trimmed.is_empty() {
             continue;
@@ -121,8 +125,8 @@ fn validate_mermaid_syntax(source: &str) -> Result<(), DiagramError> {
                 )));
             }
         } else if is_flowchart {
-            // Collect body lines for bracket validation
-            flowchart_lines.push(raw_line);
+            // Collect body lines for bracket validation, preserving original line number.
+            flowchart_lines.push((line_num, raw_line));
         }
     }
 
@@ -159,10 +163,15 @@ fn strip_trailing_comment(line: &str) -> &str {
 /// a syntax error that `mermaid-rs-renderer` silently accepts (it treats the
 /// rest of the token as node text). This function detects that case.
 ///
+/// `lines` is a slice of `(original_1based_line_number, line_content)` tuples.
+/// The line numbers are tracked from the raw source so that errors report the
+/// correct position even when blank lines or comment lines appear before the
+/// offending body line.
+///
 /// Only checks non-comment lines. String literals (quoted labels) are handled
 /// by skipping content between `"..."` and `'...'` delimiters.
-fn validate_flowchart_brackets(lines: &[&str]) -> Result<(), DiagramError> {
-    for (line_idx, &line) in lines.iter().enumerate() {
+fn validate_flowchart_brackets(lines: &[(usize, &str)]) -> Result<(), DiagramError> {
+    for &(line_num, line) in lines {
         let stripped = strip_trailing_comment(line.trim());
         if stripped.starts_with("%%") || stripped.is_empty() {
             continue;
@@ -193,7 +202,7 @@ fn validate_flowchart_brackets(lines: &[&str]) -> Result<(), DiagramError> {
                         // Extra ']' without matching '[' — treat as syntax error
                         return Err(build_syntax_error(&format!(
                             "unmatched ']' in flowchart at line {} column {}",
-                            line_idx + 2, // +2: 1-based, +1 for keyword line
+                            line_num,
                             col + 1,
                         )));
                     }
@@ -205,9 +214,8 @@ fn validate_flowchart_brackets(lines: &[&str]) -> Result<(), DiagramError> {
         if depth > 0 {
             // Unclosed '[' found — this is a syntax error
             return Err(build_syntax_error(&format!(
-                "unclosed '[' in flowchart node label at line {}; \
+                "unclosed '[' in flowchart node label at line {line_num}; \
                  every '[' must have a matching ']'",
-                line_idx + 2, // +2: 1-based, +1 for keyword line
             )));
         }
     }
@@ -499,6 +507,51 @@ mod tests {
         assert!(
             svg.as_str().contains("height"),
             "rendered SVG must contain height attribute"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // -----------------------------------------------------------------------
+    // FINDING-001: validate_flowchart_brackets reports correct line numbers
+    // when blank lines and comments appear between the keyword line and the
+    // offending body line.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_finding_001_bracket_error_reports_correct_line_with_blank_and_comment_lines() {
+        // Line 1:  flowchart LR        (keyword)
+        // Line 2:  (blank)
+        // Line 3:  %% a comment
+        // Line 4:  (blank)
+        // Line 5:  A --> B             (valid)
+        // Line 6:  C --> [broken       (unclosed '[' — original source line 6)
+        let source = "flowchart LR\n\n%% a comment\n\nA --> B\nC --> [broken";
+        let result = render_mermaid(source, "test");
+        assert!(result.is_err(), "unclosed bracket must return an error");
+        let err = result.unwrap_err();
+        let msg = err.to_string();
+        // The error must report line 6, not a wrong offset like 3 or 4.
+        assert!(
+            msg.contains("line 6"),
+            "error must report original source line 6; got: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_finding_001_unmatched_close_bracket_reports_correct_line() {
+        // Line 1: graph TD
+        // Line 2: (blank)
+        // Line 3: %% comment
+        // Line 4: A --> B
+        // Line 5: ] extra close     (unmatched ']' — original source line 5)
+        let source = "graph TD\n\n%% comment\nA --> B\n] extra close";
+        let result = render_mermaid(source, "test");
+        assert!(result.is_err(), "unmatched ] must return an error");
+        let err = result.unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("line 5"),
+            "error must report original source line 5; got: {msg}"
         );
     }
 
