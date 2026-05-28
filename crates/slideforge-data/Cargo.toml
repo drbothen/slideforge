@@ -27,6 +27,8 @@ toml = { version = "=0.8.23", features = ["preserve_order"] }
 thiserror = "=2.0.12"
 indexmap = { version = "=2.9.0", features = ["std"] }
 ordered-float = "=4.6.0"
+ureq = "=2.12.1"
+url = "=2.5.4"
 
 [dev-dependencies]
 tempfile = "=3.10.0"
