@@ -1,6 +1,6 @@
 [package]
 name = "slideforge-data"
-description = "DataSource plugin implementations for slideforge — JSON, CSV, YAML, TOML file loading"
+description = "DataSource plugin implementations for slideforge — JSON, CSV, YAML, TOML file loading and HTTP/HTTPS sources with SSRF allowlist"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

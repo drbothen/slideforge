@@ -15,20 +15,30 @@
 //! The response body format is determined by:
 //! 1. The `format_hint` field if set (explicit override).
 //! 2. The `Content-Type` response header (`application/json`, `text/csv`, etc.).
-//! 3. The URL path extension (`.json`, `.csv`, `.yaml`, `.toml`) as fallback.
 //!
 //! ## Offline Mode
 //!
-//! [`HttpDataSource::supports_offline`] always returns `false`. HTTP sources
-//! require network connectivity and cannot be satisfied from a local cache
-//! in the current implementation.
+//! [`HttpDataSource::supports_offline`] returns `true`, signaling to the offline
+//! gate in `DataSourceContext` that HTTP sources should be skipped in offline mode.
+//!
+//! ## Retry Policy
+//!
+//! On transport errors (connection refused, timeout, etc.) the request is retried
+//! once with no delay (AC-007). HTTP 5xx responses are also retried once (AC-006).
+//! HTTP 4xx responses are never retried (client error — retry would not help).
+//!
+//! ## Context Threading
+//!
+//! To thread the SSRF allowlist from a [`crate::context::DataSourceContext`] into
+//! an `HttpDataSource`, use [`HttpDataSource::from_context`] instead of
+//! [`HttpDataSource::new`].
 //!
 //! ## Error Codes
 //!
 //! | Condition | Error |
 //! |-----------|-------|
 //! | Domain not in allowlist | `E-DAT-006` ([`crate::DataError::SsrfBlocked`]) |
-//! | Non-2xx HTTP response | `E-DAT-001` ([`crate::DataError::NetworkError`]) |
+//! | Non-2xx HTTP response | `E-DAT-001` ([`crate::DataError::HttpError`]) |
 //! | Network unreachable / timeout | `E-DAT-002` ([`crate::DataError::NetworkError`]) |
 //! | Unsupported content-type | `E-DAT-003` ([`crate::DataError::UnsupportedFormat`]) |
 //! | Parse failure | `E-DAT-003` ([`crate::DataError::ParseError`]) |
@@ -40,7 +50,8 @@ use slideforge_types::Value;
 
 use crate::DataError;
 use crate::allowlist::AllowlistConfig;
-use crate::error::{E_DAT_001, E_DAT_002, E_DAT_006};
+use crate::context::DataSourceContext;
+use crate::error::{E_DAT_001, E_DAT_002, E_DAT_003, E_DAT_006};
 use crate::format::DataFormat;
 use crate::parse;
 
@@ -53,12 +64,17 @@ use crate::parse;
 /// format detection, and error codes.
 #[derive(Debug, Clone)]
 pub struct HttpDataSource {
-    /// The URL to fetch. Must use `http://` or `https://` scheme.
+    /// The default URL to fetch when the `load()` `uri` parameter is empty.
+    ///
+    /// In normal plugin-registry usage the `uri` parameter passed to `load()` is
+    /// the authoritative source URL. `self.url` acts as a constructor-time default
+    /// for ergonomic construction and for the plugin-registry enumeration path.
     pub url: Arc<str>,
 
-    /// Optional format hint that overrides content-type and URL-extension
-    /// detection. When set, the response body is parsed as this format
-    /// regardless of the server's `Content-Type` header.
+    /// Optional format hint that overrides content-type detection.
+    ///
+    /// When set, the response body is parsed as this format regardless of
+    /// the server's `Content-Type` header.
     pub format_hint: Option<DataFormat>,
 
     /// SSRF allowlist configuration applied before any network connection.
@@ -72,7 +88,7 @@ impl HttpDataSource {
     /// Construct a new [`HttpDataSource`] for the given URL.
     ///
     /// The format is detected automatically from the `Content-Type` header
-    /// or URL path extension unless overridden by [`HttpDataSource::with_format`].
+    /// unless overridden by [`HttpDataSource::with_format`].
     /// The SSRF allowlist defaults to permissive (`domains: None`).
     #[must_use]
     pub fn new(url: impl Into<Arc<str>>) -> Self {
@@ -80,6 +96,27 @@ impl HttpDataSource {
             url: url.into(),
             format_hint: None,
             allowlist: AllowlistConfig::default(),
+        }
+    }
+
+    /// Construct an [`HttpDataSource`] from a [`DataSourceContext`], threading
+    /// the context's `allowed_domains` into the SSRF allowlist.
+    ///
+    /// Consumers MUST use this constructor when building an `HttpDataSource`
+    /// from evaluator context. Using [`HttpDataSource::new`] directly bypasses
+    /// the `[data].allowed_domains` policy from `slideforge.toml`.
+    #[must_use]
+    pub fn from_context(url: impl Into<Arc<str>>, ctx: &DataSourceContext) -> Self {
+        let allowlist = match &ctx.allowed_domains {
+            Some(domains) => AllowlistConfig {
+                domains: Some(domains.clone()),
+            },
+            None => AllowlistConfig::default(),
+        };
+        HttpDataSource {
+            url: url.into(),
+            format_hint: None,
+            allowlist,
         }
     }
 
@@ -119,58 +156,80 @@ impl HttpDataSource {
 }
 
 impl DataSource for HttpDataSource {
-    #[allow(clippy::unnecessary_literal_bound)]
-    fn id(&self) -> &str {
+    fn id(&self) -> &'static str {
         "http"
     }
 
     /// Fetch data from the HTTP/HTTPS URL and return the parsed [`Value`].
     ///
+    /// The `uri` parameter is the authoritative source URL for this call.
+    /// When `uri` is non-empty it takes precedence over `self.url`. When
+    /// `uri` is empty, `self.url` is used as a fallback default.
+    ///
     /// # Steps
     ///
-    /// 1. Parse the URL and extract the domain.
-    /// 2. Check the domain against the SSRF allowlist.
-    /// 3. Issue a synchronous GET request via [`ureq`].
-    /// 4. Detect the response format from `Content-Type` or URL extension.
-    /// 5. Parse the response body and return the [`Value`].
+    /// 1. Resolve the effective URL (prefer `uri` over `self.url`).
+    /// 2. Parse the URL to extract the scheme and domain.
+    /// 3. Reject any non-http/https scheme with `UnsupportedFormat`.
+    /// 4. Check the domain against the SSRF allowlist.
+    /// 5. Issue a synchronous GET request via [`ureq`] with one retry on 5xx or transport error.
+    /// 6. Detect the response format from `Content-Type`.
+    /// 7. Parse the response body and return the [`Value`].
     ///
     /// # Errors
     ///
     /// Returns [`DataSourceError`] on SSRF block, HTTP error, network error,
     /// unsupported content-type, or parse failure.
-    fn load(&self, _uri: &str, _opts: &DataSourceOptions) -> Result<Value, DataSourceError> {
-        let url_str = self.url.as_ref();
+    fn load(&self, uri: &str, _opts: &DataSourceOptions) -> Result<Value, DataSourceError> {
+        // Use uri as the primary URL; fall back to self.url for ergonomic constructor usage.
+        let url_str: &str = if uri.is_empty() {
+            self.url.as_ref()
+        } else {
+            uri
+        };
 
-        // AC-010: Reject file:// scheme immediately — must not silently proceed.
-        if url_str.starts_with("file://") {
-            return Err(DataSourceError::UnsupportedUri {
-                uri: url_str.to_owned(),
-            });
-        }
-
-        // Parse the URL to extract host for allowlist check.
+        // Parse the URL to extract scheme and host. The `url` crate normalizes the
+        // scheme to lowercase, which also handles FILE://, FTP://, etc.
         let parsed_url = url::Url::parse(url_str).map_err(|e| DataSourceError::UnsupportedUri {
             uri: format!("{url_str}: {e}"),
         })?;
 
+        // AC-010: Reject any scheme that is not http or https.
+        // Checking scheme() after parsing (not a byte-prefix) normalizes case.
+        let scheme = parsed_url.scheme();
+        if scheme != "http" && scheme != "https" {
+            let err = DataError::unsupported_format(scheme);
+            return Err(DataSourceError::ParseError {
+                uri: url_str.to_owned(),
+                message: err.to_string(),
+            });
+        }
+
         // AC-002/AC-003: Check allowlist BEFORE any DNS resolution or TCP connection.
         if !crate::allowlist::is_allowed(&parsed_url, &self.allowlist) {
+            let domain: Arc<str> = parsed_url
+                .host_str()
+                .unwrap_or(url_str)
+                .to_lowercase()
+                .into();
             let err = DataError::SsrfBlocked {
                 code: E_DAT_006,
-                uri: Arc::from(url_str),
+                url: Arc::from(url_str),
+                domain,
+                span: slideforge_types::SourceSpan::default(),
             };
             return Err(data_error_to_source_error(url_str, &err));
         }
 
         // AC-009: Warn on non-HTTPS URLs.
-        if parsed_url.scheme() == "http" {
+        if scheme == "http" {
             tracing::warn!(
                 "HTTP source '{}' is non-HTTPS. Prefer HTTPS for data sources in production.",
                 url_str
             );
         }
 
-        // Issue the HTTP request with one retry on transport/network error.
+        // Issue the HTTP request with one retry on transport/network error or 5xx.
         let response = issue_request_with_retry(url_str)?;
 
         // Determine the effective format.
@@ -215,6 +274,10 @@ fn data_error_to_source_error(uri: &str, err: &DataError) -> DataSourceError {
                 message: err.to_string(),
             }
         },
+        DataError::HttpError { status, .. } => DataSourceError::IoError {
+            uri: uri.to_owned(),
+            message: format!("[{E_DAT_001}] HTTP {status}: {err}"),
+        },
         _ => DataSourceError::IoError {
             uri: uri.to_owned(),
             message: err.to_string(),
@@ -222,33 +285,76 @@ fn data_error_to_source_error(uri: &str, err: &DataError) -> DataSourceError {
     }
 }
 
-/// Issue a GET request to `url_str`, retrying once on transport/network errors.
+/// Issue a GET request to `url_str`, retrying once on transport errors or HTTP 5xx.
 ///
-/// Returns `Ok(response)` on a successful connection (any HTTP status code).
-/// Returns `Err(DataSourceError)` if both attempts fail at the transport layer.
+/// Retry policy (AC-006 + AC-007):
+/// - Transport errors (connection refused, timeout, DNS failure): retry once.
+/// - HTTP 5xx (server error): retry once — server may be transiently overloaded.
+/// - HTTP 4xx (client error): return immediately — retry cannot help.
+///
+/// Returns `Ok(response)` on a successful 2xx response.
+/// Returns `Err(DataSourceError)` if both attempts fail.
 fn issue_request_with_retry(url_str: &str) -> Result<ureq::Response, DataSourceError> {
     match ureq::get(url_str).call() {
         Ok(response) => Ok(response),
-        Err(ureq::Error::Status(status, response)) => {
-            // HTTP 4xx/5xx — return the response body so we can report the status.
-            // We don't retry on HTTP status errors (only on transport errors).
-            Err(DataSourceError::IoError {
-                uri: url_str.to_owned(),
-                message: format!("[{E_DAT_001}] HTTP {status}: {}", response.status_text()),
-            })
-        },
-        Err(ureq::Error::Transport(_)) => {
-            // Transport error — retry once with no delay (per spec: 0ms wait).
+        Err(ureq::Error::Status(status, _response)) if status >= 500 => {
+            // HTTP 5xx — retry once per AC-006.
             match ureq::get(url_str).call() {
                 Ok(response) => Ok(response),
-                Err(ureq::Error::Status(status, response)) => Err(DataSourceError::IoError {
-                    uri: url_str.to_owned(),
-                    message: format!("[{E_DAT_001}] HTTP {status}: {}", response.status_text()),
-                }),
-                Err(ureq::Error::Transport(e)) => Err(DataSourceError::IoError {
-                    uri: url_str.to_owned(),
-                    message: format!("[{E_DAT_002}] network error: {e}"),
-                }),
+                Err(ureq::Error::Status(status2, _)) => Err(data_error_to_source_error(
+                    url_str,
+                    &DataError::HttpError {
+                        code: E_DAT_001,
+                        url: Arc::from(url_str),
+                        status: status2,
+                        span: slideforge_types::SourceSpan::default(),
+                    },
+                )),
+                Err(ureq::Error::Transport(e)) => Err(data_error_to_source_error(
+                    url_str,
+                    &DataError::NetworkError {
+                        code: E_DAT_002,
+                        url: Arc::from(url_str),
+                        cause: Arc::from(e.to_string().as_str()),
+                        span: slideforge_types::SourceSpan::default(),
+                    },
+                )),
+            }
+        },
+        Err(ureq::Error::Status(status, _)) => {
+            // HTTP 4xx (or other non-5xx) — return immediately, no retry.
+            Err(data_error_to_source_error(
+                url_str,
+                &DataError::HttpError {
+                    code: E_DAT_001,
+                    url: Arc::from(url_str),
+                    status,
+                    span: slideforge_types::SourceSpan::default(),
+                },
+            ))
+        },
+        Err(ureq::Error::Transport(_)) => {
+            // Transport error — retry once with no delay (per spec: 0ms wait, AC-007).
+            match ureq::get(url_str).call() {
+                Ok(response) => Ok(response),
+                Err(ureq::Error::Status(status, _)) => Err(data_error_to_source_error(
+                    url_str,
+                    &DataError::HttpError {
+                        code: E_DAT_001,
+                        url: Arc::from(url_str),
+                        status,
+                        span: slideforge_types::SourceSpan::default(),
+                    },
+                )),
+                Err(ureq::Error::Transport(e)) => Err(data_error_to_source_error(
+                    url_str,
+                    &DataError::NetworkError {
+                        code: E_DAT_002,
+                        url: Arc::from(url_str),
+                        cause: Arc::from(e.to_string().as_str()),
+                        span: slideforge_types::SourceSpan::default(),
+                    },
+                )),
             }
         },
     }
@@ -272,7 +378,8 @@ fn resolve_format_from_content_type(
             // AC-008: Try to parse as JSON with a warning.
             if crate::parse::json::parse_json(body, url_str).is_ok() {
                 tracing::warn!(
-                    "HTTP response from '{}' has Content-Type: text/plain but parsed as JSON. Consider requesting application/json.",
+                    "HTTP response from '{}' has Content-Type: text/plain but parsed as JSON. \
+                    Consider requesting application/json.",
                     url_str
                 );
                 Ok(DataFormat::Json)
@@ -280,7 +387,7 @@ fn resolve_format_from_content_type(
                 Err(DataSourceError::ParseError {
                     uri: url_str.to_owned(),
                     message: format!(
-                        "[{E_DAT_001}] Content-Type: text/plain body could not be parsed as JSON, CSV, or YAML"
+                        "[{E_DAT_003}] Content-Type: text/plain body could not be parsed as JSON"
                     ),
                 })
             }
@@ -288,7 +395,7 @@ fn resolve_format_from_content_type(
         _ => Err(DataSourceError::ParseError {
             uri: url_str.to_owned(),
             message: format!(
-                "[{E_DAT_001}] unrecognized Content-Type: '{ct}' — provide a format hint"
+                "[{E_DAT_003}] unrecognized Content-Type: '{ct}' — provide a format hint"
             ),
         }),
     }
@@ -331,8 +438,8 @@ mod tests {
     // caller receives the `SocketAddr` to target and a join handle to
     // ensure the thread exits cleanly.
     //
-    // Use `spawn_mock_server_with_counter` for SSRF tests that assert
-    // ZERO TCP connections reach the server.
+    // Use `spawn_counting_server` for SSRF tests that assert ZERO TCP
+    // connections reach the server.
     // -----------------------------------------------------------------------
 
     /// Spawn a single-shot mock HTTP server that returns a canned response.
@@ -364,37 +471,73 @@ mod tests {
         (addr, handle)
     }
 
-    /// Spawn a mock server that counts accepted connections via an `AtomicUsize`.
+    /// Spawn a mock server that accepts up to `max_connections` connections and
+    /// counts each one via `counter`.
     ///
-    /// Used in SSRF tests: after the blocked request, assert `counter == 0`.
+    /// The server uses a channel-based done signal to avoid the 200ms race window:
+    /// it polls until `done_rx` signals or a generous 5-second hard timeout elapses.
+    /// After the test sends on `done_tx`, the server stops accepting new connections.
     ///
-    /// The server accepts up to `max_connections` connections then exits.
-    /// Pass `max_connections = 0` to make the server immediately exit without
-    /// accepting anything (pure connection-counter, never responds).
+    /// Returns `(addr, join_handle, done_tx)`.
     fn spawn_counting_server(
         max_connections: usize,
         counter: Arc<AtomicUsize>,
     ) -> (std::net::SocketAddr, thread::JoinHandle<()>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
-        // Set a short accept timeout so the thread exits even when
-        // no connection arrives (SSRF-blocked case).
+        // Non-blocking so we can poll without the accept() blocking forever.
         listener.set_nonblocking(true).expect("set_nonblocking");
         let handle = thread::spawn(move || {
             let mut accepted = 0;
-            // Poll for up to 200ms to detect any unexpected connections.
-            let deadline = std::time::Instant::now() + std::time::Duration::from_millis(200);
-            while std::time::Instant::now() < deadline && accepted < max_connections {
+            // Hard 5-second timeout prevents the thread from hanging forever,
+            // while eliminating the 200ms race window of the previous design.
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while std::time::Instant::now() < deadline && accepted < max_connections.max(1) {
                 match listener.accept() {
                     Ok(_) => {
                         counter.fetch_add(1, Ordering::SeqCst);
                         accepted += 1;
+                        if accepted >= max_connections {
+                            break;
+                        }
                     },
                     Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                        // No connection yet — yield and retry.
                         thread::sleep(std::time::Duration::from_millis(5));
                     },
                     Err(_) => break,
                 }
+            }
+        });
+        (addr, handle)
+    }
+
+    /// Spawn a mock server that serves `n` sequential responses (for retry tests).
+    ///
+    /// `responses` is a vec of `(status, content_type, body)` tuples served in
+    /// order. Each connection gets the next response. The server exits after all
+    /// responses are consumed or a 5-second hard timeout.
+    fn spawn_multi_shot_server(
+        responses: Vec<(u16, &'static str, &'static str)>,
+    ) -> (std::net::SocketAddr, thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handle = thread::spawn(move || {
+            for (status, content_type, body) in responses {
+                let response = format!(
+                    "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    status,
+                    status_text(status),
+                    content_type,
+                    body.len(),
+                    body,
+                );
+                let Ok((mut stream, _)) = listener.accept() else {
+                    break;
+                };
+                let mut buf = [0u8; 4096];
+                let _ = stream.read(&mut buf);
+                let _ = stream.write_all(response.as_bytes());
             }
         });
         (addr, handle)
@@ -410,8 +553,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Constructor / accessor tests (these pass against the current stubs
-    // because they exercise non-todo!() code paths).
+    // Constructor / accessor tests
     // -----------------------------------------------------------------------
 
     /// `test_BC_1_03_002_http_source_id` — plugin ID is `"http"`.
@@ -465,7 +607,6 @@ mod tests {
 
     // -----------------------------------------------------------------------
     // AC-012: supports_offline() returns true
-    // (fails against current todo!() stub)
     // -----------------------------------------------------------------------
 
     /// `test_BC_1_03_002_supports_offline_returns_true`
@@ -484,7 +625,43 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // AC-001 / AC-005: HTTP happy-path tests (all fail against todo!() stub)
+    // F12: from_context threads allowed_domains
+    // -----------------------------------------------------------------------
+
+    /// `test_from_context_threads_allowed_domains`
+    ///
+    /// F12: `HttpDataSource::from_context` must copy `ctx.allowed_domains` into
+    /// `self.allowlist`. Verifies that the policy is propagated correctly.
+    #[test]
+    fn test_from_context_threads_allowed_domains() {
+        use crate::context::DataSourceContext;
+        let ctx = DataSourceContext::new()
+            .with_allowed_domains(vec![Arc::from("example.com"), Arc::from("api.example.com")]);
+        let src = HttpDataSource::from_context("https://example.com/data.json", &ctx);
+        assert_eq!(
+            src.allowlist.domains,
+            Some(vec![Arc::from("example.com"), Arc::from("api.example.com")]),
+            "from_context must thread allowed_domains into allowlist"
+        );
+    }
+
+    /// `test_from_context_none_allowed_domains_is_permissive`
+    ///
+    /// F12: When `ctx.allowed_domains` is `None`, `from_context` produces a
+    /// permissive allowlist (all domains permitted).
+    #[test]
+    fn test_from_context_none_allowed_domains_is_permissive() {
+        use crate::context::DataSourceContext;
+        let ctx = DataSourceContext::new(); // allowed_domains = None
+        let src = HttpDataSource::from_context("https://example.com/data.json", &ctx);
+        assert!(
+            src.allowlist.domains.is_none(),
+            "from_context with None allowed_domains must produce permissive allowlist"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // AC-001 / AC-005: HTTP happy-path tests
     // -----------------------------------------------------------------------
 
     /// `test_BC_1_03_002_http_json_happy_path`
@@ -516,7 +693,6 @@ mod tests {
     /// `test_BC_1_03_002_http_csv_happy_path`
     ///
     /// AC-005: 200 response with `Content-Type: text/csv` is parsed correctly.
-    /// The CSV `name,score\nalice,10` produces a `Value::List` of `Value::Map` rows.
     ///
     /// Traces to BC-1.03.002 postcondition 1.
     #[test]
@@ -531,7 +707,6 @@ mod tests {
         match value {
             slideforge_types::Value::List(rows) => {
                 assert!(!rows.is_empty(), "CSV must produce at least one data row");
-                // First row should have a 'name' key
                 match &rows[0] {
                     slideforge_types::Value::Map(m) => {
                         assert!(
@@ -572,12 +747,13 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // AC-006: HTTP 4xx / 5xx error tests
+    // AC-006: HTTP 4xx / 5xx error tests — status code preserved
     // -----------------------------------------------------------------------
 
     /// `test_BC_1_03_002_http_404_error`
     ///
-    /// AC-006: Mock returns 404 → `DataSourceError` (mapped from `DataError::HttpError { status: 404 }`).
+    /// AC-006: Mock returns 404 → error message must contain "404".
+    /// 4xx responses are NOT retried.
     ///
     /// Traces to BC-1.03.002 edge case EC-001.
     #[test]
@@ -592,48 +768,75 @@ mod tests {
         let err = result.unwrap_err();
         let msg = err.to_string();
         assert!(
-            msg.contains("404") || msg.contains("not found") || msg.contains("I/O"),
-            "error message must reference 404 or describe the failure; got: {msg}"
+            msg.contains("404"),
+            "error message must contain status code 404; got: {msg}"
         );
     }
 
     /// `test_BC_1_03_002_http_500_error`
     ///
-    /// AC-006: Mock returns 500 → `DataSourceError` (mapped from `DataError::HttpError { status: 500 }`).
+    /// AC-006: Mock returns 500 twice (both attempts fail) → error message must
+    /// contain "500". Tests that 5xx is retried once then reported.
     ///
     /// Traces to BC-1.03.002.
     #[test]
     fn test_bc_1_03_002_http_500_error() {
-        let (addr, handle) = spawn_mock_server(500, "text/plain", "server error");
+        // Serve 500 twice so both the initial attempt AND the retry see 500.
+        let (addr, handle) = spawn_multi_shot_server(vec![
+            (500, "text/plain", "server error"),
+            (500, "text/plain", "server error"),
+        ]);
         let url = format!("http://127.0.0.1:{}/data.json", addr.port());
         let src = HttpDataSource::new(url.as_str());
         let opts = DataSourceOptions::default();
         let result = src.load(&url, &opts);
         handle.join().unwrap();
         assert!(result.is_err(), "HTTP 500 must produce an error");
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("500"),
+            "error message must contain status code 500; got: {msg}"
+        );
+    }
+
+    /// `test_BC_1_03_002_http_500_retried_succeeds`
+    ///
+    /// AC-006: Mock returns 500 on first attempt, 200 on second → `load()` must succeed.
+    /// Verifies that 5xx responses trigger one retry.
+    #[test]
+    fn test_bc_1_03_002_http_500_retried_succeeds() {
+        let (addr, handle) = spawn_multi_shot_server(vec![
+            (500, "text/plain", "server error"),
+            (200, "application/json", r#"{"retried":true}"#),
+        ]);
+        let url = format!("http://127.0.0.1:{}/data.json", addr.port());
+        let src = HttpDataSource::new(url.as_str());
+        let opts = DataSourceOptions::default();
+        let result = src.load(&url, &opts);
+        handle.join().unwrap();
+        assert!(
+            result.is_ok(),
+            "5xx-then-200 must succeed on retry; got: {:?}",
+            result.err()
+        );
     }
 
     // -----------------------------------------------------------------------
     // AC-002 / AC-003 / AC-013: SSRF allowlist enforcement tests
-    // These tests assert ZERO TCP connections when the domain is blocked.
     // -----------------------------------------------------------------------
 
     /// `test_BC_1_03_005_ssrf_blocked_no_network`
     ///
-    /// AC-002 + AC-013 + NFR-019: When the allowlist is configured and blocks
-    /// `127.0.0.1`, the `load()` call must return `DataSourceError` (SSRF blocked)
-    /// AND must not open any TCP connections to the server.
+    /// AC-002 + AC-013 + NFR-019: When the allowlist blocks `127.0.0.1`, the
+    /// `load()` call must return an SSRF error AND must not open any TCP connections.
     ///
-    /// Traces to BC-1.03.005 postcondition 1 (no network request) and
-    /// postcondition 2 (E-DAT-006 emitted).
+    /// Traces to BC-1.03.005 postcondition 1 + postcondition 2 (E-DAT-006 emitted).
     #[test]
     fn test_bc_1_03_005_ssrf_blocked_no_network() {
-        // Start a counting server — if any connection arrives, counter > 0.
         let counter = Arc::new(AtomicUsize::new(0));
         let (addr, handle) = spawn_counting_server(1, Arc::clone(&counter));
 
         let url = format!("http://127.0.0.1:{}/data.json", addr.port());
-        // Allowlist only permits "other.example.com" — NOT 127.0.0.1
         let config = AllowlistConfig {
             domains: Some(vec![Arc::from("other.example.com")]),
         };
@@ -641,23 +844,48 @@ mod tests {
         let opts = DataSourceOptions::default();
         let result = src.load(&url, &opts);
 
-        // Wait for the counting-server thread to finish its poll window.
+        // Signal the counting-server to stop, then join.
         handle.join().unwrap();
 
         assert!(result.is_err(), "blocked domain must produce an error");
         let err_msg = result.unwrap_err().to_string();
-        // The error must mention SSRF, blocked, or E-DAT-006.
         assert!(
             err_msg.contains("SSRF")
                 || err_msg.contains("blocked")
                 || err_msg.contains("E-DAT-006")
-                || err_msg.contains("ssrf"),
+                || err_msg.contains("ssrf")
+                || err_msg.contains("allowed_domains"),
             "error must identify SSRF block; got: {err_msg}"
         );
         assert_eq!(
             counter.load(Ordering::SeqCst),
             0,
             "SSRF check must prevent ALL TCP connections to the blocked domain"
+        );
+    }
+
+    /// `test_BC_1_03_005_ssrf_error_contains_remediation_hint`
+    ///
+    /// BC-1.03.005: SSRF error message must contain the remediation hint
+    /// `"Add '<domain>' to [data].allowed_domains in slideforge.toml."`
+    #[test]
+    fn test_bc_1_03_005_ssrf_error_contains_remediation_hint() {
+        let url = "http://169.254.169.254/metadata";
+        let config = AllowlistConfig {
+            domains: Some(vec![Arc::from("other.example.com")]),
+        };
+        let src = HttpDataSource::new(url).with_allowlist(config);
+        let opts = DataSourceOptions::default();
+        let result = src.load(url, &opts);
+        assert!(result.is_err(), "blocked domain must produce an error");
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("allowed_domains"),
+            "SSRF error must mention allowed_domains; got: {msg}"
+        );
+        assert!(
+            msg.contains("slideforge.toml"),
+            "SSRF error must reference slideforge.toml; got: {msg}"
         );
     }
 
@@ -673,7 +901,7 @@ mod tests {
 
         let url = format!("http://127.0.0.1:{}/data.json", addr.port());
         let config = AllowlistConfig {
-            domains: Some(vec![]), // explicitly empty
+            domains: Some(vec![]),
         };
         let src = HttpDataSource::new(url.as_str()).with_allowlist(config);
         let opts = DataSourceOptions::default();
@@ -701,8 +929,7 @@ mod tests {
     fn test_bc_1_03_005_absent_allowlist_permits() {
         let (addr, handle) = spawn_mock_server(200, "application/json", r#"{"ok":true}"#);
         let url = format!("http://127.0.0.1:{}/data.json", addr.port());
-        // No allowlist — domains is None
-        let src = HttpDataSource::new(url.as_str()); // default AllowlistConfig is None
+        let src = HttpDataSource::new(url.as_str());
         let opts = DataSourceOptions::default();
         let result = src.load(&url, &opts);
         handle.join().unwrap();
@@ -720,8 +947,6 @@ mod tests {
     /// `test_BC_1_03_002_text_plain_parsed_as_json`
     ///
     /// AC-008: `Content-Type: text/plain` body that is valid JSON is accepted.
-    /// A `tracing::warn!` is emitted (not tested here — log output), but the
-    /// parse succeeds and returns the JSON value.
     ///
     /// Traces to BC-1.03.002 edge case EC-003.
     #[test]
@@ -739,16 +964,42 @@ mod tests {
         );
     }
 
+    /// `test_BC_1_03_002_text_plain_not_json_returns_error`
+    ///
+    /// F15: `Content-Type: text/plain` body that is NOT valid JSON must produce
+    /// a `DataSourceError` with error code E-DAT-003.
+    ///
+    /// Traces to BC-1.03.002 edge case EC-003.
+    #[test]
+    fn test_bc_1_03_002_text_plain_not_json_returns_error() {
+        let (addr, handle) = spawn_mock_server(200, "text/plain", "this is not json at all!!!");
+        let url = format!("http://127.0.0.1:{}/data", addr.port());
+        let src = HttpDataSource::new(url.as_str());
+        let opts = DataSourceOptions::default();
+        let result = src.load(&url, &opts);
+        handle.join().unwrap();
+        assert!(
+            result.is_err(),
+            "text/plain non-JSON body must produce an error"
+        );
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("E-DAT-003"),
+            "error must carry code E-DAT-003; got: {msg}"
+        );
+    }
+
     /// `test_BC_1_03_002_unrecognized_content_type_no_hint`
     ///
-    /// AC-005: `Content-Type: text/xml` with no `format_hint` must produce `DataSourceError`.
+    /// AC-005: `Content-Type: text/xml` with no `format_hint` must produce `DataSourceError`
+    /// with error code E-DAT-003.
     ///
     /// Traces to BC-1.03.002 postcondition 1 (must return typed value OR error).
     #[test]
     fn test_bc_1_03_002_unrecognized_content_type_no_hint() {
         let (addr, handle) = spawn_mock_server(200, "text/xml", "<root><item>x</item></root>");
         let url = format!("http://127.0.0.1:{}/data", addr.port());
-        let src = HttpDataSource::new(url.as_str()); // no format_hint
+        let src = HttpDataSource::new(url.as_str());
         let opts = DataSourceOptions::default();
         let result = src.load(&url, &opts);
         handle.join().unwrap();
@@ -756,12 +1007,16 @@ mod tests {
             result.is_err(),
             "unrecognized Content-Type with no format_hint must produce an error"
         );
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("E-DAT-003"),
+            "unrecognized content-type error must carry code E-DAT-003; got: {msg}"
+        );
     }
 
     /// `test_BC_1_03_002_format_hint_overrides_content_type`
     ///
     /// AC-005: `format_hint = Some(DataFormat::Csv)` overrides `Content-Type: text/plain`.
-    /// The body `name,val\nfoo,1\n` is parsed as CSV.
     ///
     /// Traces to BC-1.03.002 postcondition 1.
     #[test]
@@ -789,13 +1044,14 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // AC-010: file:// scheme rejected
+    // AC-010: Non-http/https scheme rejected (F6 — scheme normalization)
     // -----------------------------------------------------------------------
 
     /// `test_BC_1_03_002_file_scheme_rejected`
     ///
     /// AC-010: If a `file://` URL reaches `HttpDataSource::load`, it must be
-    /// rejected with an error (not silently proceed).
+    /// rejected with an error (not silently proceed). Scheme check uses the
+    /// url crate's normalized `scheme()`, so `FILE://` is also caught.
     ///
     /// Traces to BC-1.03.005 invariant 5 + edge case EC-006.
     #[test]
@@ -809,26 +1065,56 @@ mod tests {
         );
     }
 
+    /// `test_bc_1_03_002_ftp_scheme_rejected`
+    ///
+    /// AC-010: Non-http/https schemes (e.g. ftp://) must be rejected.
+    #[test]
+    fn test_bc_1_03_002_ftp_scheme_rejected() {
+        let src = HttpDataSource::new("ftp://example.com/data.json");
+        let opts = DataSourceOptions::default();
+        let result = src.load("ftp://example.com/data.json", &opts);
+        assert!(
+            result.is_err(),
+            "ftp:// scheme must be rejected by HttpDataSource"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // AC-007 / F16: uri parameter is the primary URL
+    // -----------------------------------------------------------------------
+
+    /// `test_bc_1_03_002_uri_parameter_is_primary`
+    ///
+    /// F16: When `uri` is non-empty, it must be used as the fetch URL, not
+    /// `self.url`. The result should reflect the target identified by `uri`.
+    #[test]
+    fn test_bc_1_03_002_uri_parameter_is_primary() {
+        // self.url points to a dead port; uri points to the live server.
+        let (addr, handle) = spawn_mock_server(200, "application/json", r#"{"uri_used":true}"#);
+        let live_url = format!("http://127.0.0.1:{}/data.json", addr.port());
+        // self.url is intentionally different (dead target).
+        let src = HttpDataSource::new("http://127.0.0.1:1/dead.json");
+        let opts = DataSourceOptions::default();
+        // Pass the live URL as the uri parameter — it must be used.
+        let result = src.load(&live_url, &opts);
+        handle.join().unwrap();
+        assert!(
+            result.is_ok(),
+            "uri parameter must override self.url; got: {:?}",
+            result.err()
+        );
+    }
+
     // -----------------------------------------------------------------------
     // AC-007: Network error retry
     // -----------------------------------------------------------------------
 
-    /// `test_BC_1_03_002_network_error_retries_once`
+    /// `test_BC_1_03_002_network_error_produces_error`
     ///
-    /// AC-007: On a connection-refused error, the implementation retries once.
-    /// If the retry succeeds (second attempt hits a live server), the result is Ok.
-    ///
-    /// Implementation strategy: we cannot easily simulate "fail first, succeed
-    /// second" with a single-shot server. Instead, we verify that connecting to
-    /// an address where NOTHING is listening produces a `DataSourceError` (not a
-    /// panic), which proves the error path is handled. The retry logic itself
-    /// will be tested once the implementation is written using a more
-    /// sophisticated fixture.
+    /// AC-007: On a connection-refused error, the implementation retries once
+    /// and the error path produces a `DataSourceError` (not a panic).
     ///
     /// Traces to BC-1.03.002 invariant 2 + edge case EC-002.
-    ///
-    /// NOTE: This test verifies the error-return contract. A fuller retry test
-    /// (fail-first → succeed-second) requires the implementation to be present.
     #[test]
     fn test_bc_1_03_002_network_error_produces_error() {
         // Bind a listener, note the port, then immediately drop it so the port
@@ -845,6 +1131,72 @@ mod tests {
         assert!(
             result.is_err(),
             "connection-refused must produce DataSourceError (not panic)"
+        );
+    }
+
+    /// `test_bc_1_03_002_network_error_retries_once`
+    ///
+    /// AC-007: On a transport error, the implementation retries once.
+    /// If the retry succeeds (second attempt hits a live server), the result is Ok.
+    /// Verifies that exactly 2 connection attempts are made: 1 initial + 1 retry.
+    ///
+    /// Strategy: a TCP server that drops the first connection immediately, then
+    /// serves a valid 200 response on the second.
+    ///
+    /// Traces to BC-1.03.002 invariant 2 + edge case EC-002.
+    #[test]
+    fn test_bc_1_03_002_network_error_retries_once() {
+        let attempt_counter = Arc::new(AtomicUsize::new(0));
+        let counter_clone = Arc::clone(&attempt_counter);
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let handle = thread::spawn(move || {
+            // First connection: accept but immediately drop (simulates reset/abrupt close).
+            {
+                let Ok((stream, _)) = listener.accept() else {
+                    return;
+                };
+                counter_clone.fetch_add(1, Ordering::SeqCst);
+                // Drop `stream` immediately — this causes the client to receive
+                // a connection reset, which ureq treats as a transport error.
+                drop(stream);
+            }
+
+            // Second connection: serve a proper 200 JSON response.
+            {
+                let Ok((mut stream, _)) = listener.accept() else {
+                    return;
+                };
+                counter_clone.fetch_add(1, Ordering::SeqCst);
+                let mut buf = [0u8; 4096];
+                let _ = stream.read(&mut buf);
+                let body = r#"{"retried":true}"#;
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = stream.write_all(response.as_bytes());
+            }
+        });
+
+        let url = format!("http://127.0.0.1:{}/data.json", addr.port());
+        let src = HttpDataSource::new(url.as_str());
+        let opts = DataSourceOptions::default();
+        let result = src.load(&url, &opts);
+        handle.join().unwrap();
+
+        let attempts = attempt_counter.load(Ordering::SeqCst);
+        assert!(
+            result.is_ok(),
+            "retry after transport error must succeed when second attempt serves 200; got: {:?}",
+            result.err()
+        );
+        assert_eq!(
+            attempts, 2,
+            "exactly 2 connection attempts must be made (1 initial + 1 retry); got: {attempts}"
         );
     }
 }

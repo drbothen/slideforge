@@ -10,12 +10,12 @@ use thiserror::Error;
 
 use crate::format::DataFormat;
 
-/// Error code for HTTP non-2xx response (reserved for STORY-019 HTTP source).
+/// Error code for HTTP non-2xx response.
 ///
 /// Maps to `E-DAT-001` in the error taxonomy.
 pub const E_DAT_001: &str = "E-DAT-001";
 
-/// Error code for network unreachable (reserved for STORY-019 HTTP source).
+/// Error code for network unreachable / transport error.
 ///
 /// Maps to `E-DAT-002` in the error taxonomy.
 pub const E_DAT_002: &str = "E-DAT-002";
@@ -35,7 +35,7 @@ pub const E_DAT_004: &str = "E-DAT-004";
 /// Maps to `E-DAT-005` in the error taxonomy.
 pub const E_DAT_005: &str = "E-DAT-005";
 
-/// Error code for SSRF domain blocked.
+/// Error code for SSRF domain blocked or path traversal.
 ///
 /// Maps to `E-DAT-006` in the error taxonomy.
 pub const E_DAT_006: &str = "E-DAT-006";
@@ -134,26 +134,52 @@ pub enum DataError {
         span: SourceSpan,
     },
 
-    /// An SSRF attempt was blocked by the security policy.
+    /// An SSRF attempt was blocked by the `allowed_domains` policy.
     ///
     /// Error code: `E-DAT-006`.
-    #[error("[{code}] SSRF blocked: {uri}")]
+    #[error(
+        "[{code}] HTTP source '{url}' blocked by allowed_domains policy. \
+        Add '{domain}' to [data].allowed_domains in slideforge.toml."
+    )]
     SsrfBlocked {
         /// The error code constant (`E-DAT-006`).
         code: &'static str,
-        /// The URI that was blocked.
-        uri: Arc<str>,
+        /// The full URL that was blocked.
+        url: Arc<str>,
+        /// The domain that was not found in the allowlist.
+        domain: Arc<str>,
+        /// The source location associated with this SSRF block.
+        span: SourceSpan,
     },
 
-    /// An HTTP or network-level error (reserved for STORY-019 HTTP source).
+    /// An HTTP non-2xx response was received from the server.
     ///
-    /// Error code: `E-DAT-001` for non-2xx, `E-DAT-002` for unreachable.
-    #[error("[{code}] network error or SSRF blocked: {message}")]
-    NetworkError {
-        /// The error code constant (`E-DAT-001` or `E-DAT-002`).
+    /// Error code: `E-DAT-001`.
+    #[error("[{code}] HTTP {status} from '{url}' (at {span})")]
+    HttpError {
+        /// The error code constant (`E-DAT-001`).
         code: &'static str,
-        /// Description of the network failure.
-        message: Arc<str>,
+        /// The URL that returned the non-2xx status.
+        url: Arc<str>,
+        /// The HTTP status code (4xx or 5xx).
+        status: u16,
+        /// The source location associated with this HTTP request.
+        span: SourceSpan,
+    },
+
+    /// A network transport error (connection refused, timeout, DNS failure, etc.).
+    ///
+    /// Error code: `E-DAT-002`.
+    #[error("[{code}] network error: {cause} (at {span})")]
+    NetworkError {
+        /// The error code constant (`E-DAT-002`).
+        code: &'static str,
+        /// The URL that could not be reached.
+        url: Arc<str>,
+        /// Human-readable description of the transport failure.
+        cause: Arc<str>,
+        /// The source location associated with this network error.
+        span: SourceSpan,
     },
 }
 
@@ -336,8 +362,30 @@ impl DataError {
                 path,
                 span: new_span,
             },
-            // Variants without a span field are returned unchanged.
-            other => other,
+            DataError::SsrfBlocked {
+                code, url, domain, ..
+            } => DataError::SsrfBlocked {
+                code,
+                url,
+                domain,
+                span: new_span,
+            },
+            DataError::HttpError {
+                code, url, status, ..
+            } => DataError::HttpError {
+                code,
+                url,
+                status,
+                span: new_span,
+            },
+            DataError::NetworkError {
+                code, url, cause, ..
+            } => DataError::NetworkError {
+                code,
+                url,
+                cause,
+                span: new_span,
+            },
         }
     }
 
@@ -401,7 +449,8 @@ impl DataError {
             DataError::ParseError { .. } | DataError::UnsupportedFormat { .. } => E_DAT_003,
             DataError::FieldNotFound { .. } => E_DAT_005,
             DataError::PathTraversalBlocked { .. } | DataError::SsrfBlocked { .. } => E_DAT_006,
-            DataError::NetworkError { code, .. } => code,
+            DataError::HttpError { .. } => E_DAT_001,
+            DataError::NetworkError { .. } => E_DAT_002,
         }
     }
 }
@@ -461,29 +510,56 @@ mod tests {
         assert!(err.to_string().contains(".txt"));
     }
 
-    /// `test_BC_5_03_001_error_code_network_error` — E-DAT-001/002 constants are correct.
+    /// `test_BC_5_03_001_error_code_network_error` — E-DAT-002 constant is correct.
     #[test]
     fn test_bc_5_03_001_error_code_network_error() {
         assert_eq!(E_DAT_001, "E-DAT-001");
         assert_eq!(E_DAT_002, "E-DAT-002");
         let err = DataError::NetworkError {
+            code: E_DAT_002,
+            url: Arc::from("http://example.com/data.json"),
+            cause: Arc::from("connection refused"),
+            span: SourceSpan::default(),
+        };
+        assert_eq!(err.code(), "E-DAT-002");
+        assert!(err.to_string().contains("E-DAT-002"));
+    }
+
+    /// `test_BC_5_03_001_error_code_http_error` — `HttpError` uses E-DAT-001 and carries status.
+    #[test]
+    fn test_bc_5_03_001_error_code_http_error() {
+        let err = DataError::HttpError {
             code: E_DAT_001,
-            message: Arc::from("connection refused"),
+            url: Arc::from("http://example.com/data.json"),
+            status: 404,
+            span: SourceSpan::default(),
         };
         assert_eq!(err.code(), "E-DAT-001");
         assert!(err.to_string().contains("E-DAT-001"));
+        assert!(err.to_string().contains("404"));
     }
 
-    /// `test_BC_5_03_001_error_code_ssrf_blocked` — `SsrfBlocked` uses E-DAT-006.
+    /// `test_BC_5_03_001_error_code_ssrf_blocked` — `SsrfBlocked` uses E-DAT-006 with remediation hint.
     #[test]
     fn test_bc_5_03_001_error_code_ssrf_blocked() {
         let err = DataError::SsrfBlocked {
             code: E_DAT_006,
-            uri: Arc::from("http://169.254.169.254"),
+            url: Arc::from("http://169.254.169.254"),
+            domain: Arc::from("169.254.169.254"),
+            span: SourceSpan::default(),
         };
         assert_eq!(err.code(), "E-DAT-006");
-        assert!(err.to_string().contains("E-DAT-006"));
-        assert!(err.to_string().contains("169.254.169.254"));
+        let msg = err.to_string();
+        assert!(msg.contains("E-DAT-006"));
+        assert!(msg.contains("169.254.169.254"));
+        assert!(
+            msg.contains("allowed_domains"),
+            "SSRF error must include remediation hint mentioning allowed_domains; got: {msg}"
+        );
+        assert!(
+            msg.contains("slideforge.toml"),
+            "SSRF error must reference slideforge.toml; got: {msg}"
+        );
     }
 
     /// `test_BC_5_03_001_error_code_io_error` — `IoError` uses E-DAT-004.
@@ -575,5 +651,53 @@ mod tests {
             "path_traversal_blocked_at span must appear in message"
         );
         assert!(msg.contains("secret"));
+    }
+
+    /// `test_with_span_ssrf_blocked` — `with_span()` attaches span to `SsrfBlocked`.
+    #[test]
+    fn test_with_span_ssrf_blocked() {
+        let err = DataError::SsrfBlocked {
+            code: E_DAT_006,
+            url: Arc::from("http://169.254.169.254"),
+            domain: Arc::from("169.254.169.254"),
+            span: SourceSpan::default(),
+        };
+        let span = SourceSpan::new(Arc::from("deck.sf"), 3, 1, 40);
+        let err_with_span = err.with_span(span);
+        let msg = err_with_span.to_string();
+        assert!(msg.contains("deck.sf") || msg.contains("E-DAT-006"));
+        assert_eq!(err_with_span.code(), "E-DAT-006");
+    }
+
+    /// `test_with_span_http_error` — `with_span()` attaches span to `HttpError`.
+    #[test]
+    fn test_with_span_http_error() {
+        let err = DataError::HttpError {
+            code: E_DAT_001,
+            url: Arc::from("http://example.com/data.json"),
+            status: 500,
+            span: SourceSpan::default(),
+        };
+        let span = SourceSpan::new(Arc::from("deck.sf"), 8, 2, 90);
+        let err_with_span = err.with_span(span);
+        assert_eq!(err_with_span.code(), "E-DAT-001");
+        let msg = err_with_span.to_string();
+        assert!(msg.contains("500"));
+    }
+
+    /// `test_with_span_network_error` — `with_span()` attaches span to `NetworkError`.
+    #[test]
+    fn test_with_span_network_error() {
+        let err = DataError::NetworkError {
+            code: E_DAT_002,
+            url: Arc::from("http://example.com/data.json"),
+            cause: Arc::from("connection refused"),
+            span: SourceSpan::default(),
+        };
+        let span = SourceSpan::new(Arc::from("deck.sf"), 5, 1, 60);
+        let err_with_span = err.with_span(span);
+        assert_eq!(err_with_span.code(), "E-DAT-002");
+        let msg = err_with_span.to_string();
+        assert!(msg.contains("connection refused"));
     }
 }
