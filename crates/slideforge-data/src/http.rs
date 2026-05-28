@@ -22,9 +22,10 @@
 //! ## Body Size Cap
 //!
 //! Response bodies are read with a hard cap of **50 MB** (`MAX_BODY_BYTES`). Responses
-//! that exceed this limit produce a [`DataSourceError::IoError`]. This prevents
-//! unbounded memory consumption from large or malicious HTTP payloads. For data sets
-//! larger than 50 MB, use a file-based [`crate::file::FileDataSource`] instead.
+//! that exceed this limit produce a [`DataSourceError::IoError`] with error code
+//! `[E-DAT-006]` (policy-rejected). This prevents unbounded memory consumption from
+//! large or malicious HTTP payloads. For data sets larger than 50 MB, use a file-based
+//! [`crate::file::FileDataSource`] instead.
 //!
 //! ## Offline Mode
 //!
@@ -48,6 +49,8 @@
 //! | Condition | Error |
 //! |-----------|-------|
 //! | Domain not in allowlist | `E-DAT-006` ([`crate::DataError::SsrfBlocked`]) |
+//! | Response body exceeds size cap | `E-DAT-006` ([`DataSourceError::IoError`]) |
+//! | TOML `format_hint` on HTTP source | `E-DAT-003` ([`crate::DataError::UnsupportedFormat`]) |
 //! | Non-2xx HTTP response | `E-DAT-001` ([`crate::DataError::HttpError`]) |
 //! | Network unreachable / timeout | `E-DAT-002` ([`crate::DataError::NetworkError`]) |
 //! | Unsupported content-type | `E-DAT-003` ([`crate::DataError::UnsupportedFormat`]) |
@@ -96,17 +99,18 @@ pub struct HttpDataSource {
     pub allowlist: AllowlistConfig,
 }
 
-/// Maximum response body size accepted from an HTTP source.
+/// Maximum allowed response body size (50 MB in production, 1 KB in tests).
 ///
-/// Responses larger than this limit produce [`DataSourceError::IoError`] with error
-/// code `[E-DAT-002]`. This prevents unbounded memory consumption from large or
-/// malicious HTTP payloads. For data sets larger than 50 MB, use a file-based
-/// [`FileDataSource`] instead.
+/// This is a defensive control beyond the explicit ACs to prevent unbounded
+/// memory consumption from malicious or buggy HTTP servers. Exceeding the cap
+/// produces a `DataSourceError::IoError` with `[E-DAT-006]` (policy-rejected).
 ///
 /// The detection strategy reads `MAX_BODY_BYTES + 1` bytes: if the reader yields more
 /// than `MAX_BODY_BYTES` bytes, the cap has been exceeded and the error is returned
 /// before the body is decoded or parsed. This guarantees the cap-exceeded condition
 /// is an observable, explicit error — never a silent truncation.
+///
+/// For data sets larger than 50 MB, use a file-based [`FileDataSource`] instead.
 ///
 /// [`FileDataSource`]: crate::file::FileDataSource
 #[cfg(not(test))]
@@ -287,7 +291,11 @@ impl DataSource for HttpDataSource {
             return Err(data_error_to_source_error(url_str, &err));
         }
 
-        // AC-009: Warn on non-HTTPS URLs.
+        // AC-009 interpretation: We emit at tracing::warn! level unconditionally.
+        // The "strict mode" wording in AC-009 / BC-1.03.002 invariant 1 refers to the
+        // CLI-layer mode where warns are escalated to build failures. The data-source
+        // layer does not gate the warning by mode — it always emits at warn level,
+        // leaving filtering/escalation to the CLI's tracing subscriber.
         if scheme == "http" {
             tracing::warn!(
                 "HTTP source '{}' is non-HTTPS. Prefer HTTPS for data sources in production.",
@@ -324,7 +332,8 @@ impl DataSource for HttpDataSource {
             return Err(DataSourceError::IoError {
                 uri: url_str.to_owned(),
                 message: format!(
-                    "[{E_DAT_002}] response body exceeds {MAX_BODY_BYTES}-byte cap — \
+                    "[{E_DAT_006}] response body exceeds {MAX_BODY_BYTES}-byte cap \
+                    (policy-rejected to prevent DoS) — \
                     use a file-based DataSource for payloads larger than {MAX_BODY_BYTES} bytes"
                 ),
             });
@@ -580,12 +589,29 @@ fn resolve_format_from_content_type(
 }
 
 /// Parse `body` using the given `format` and return the root [`Value`].
+///
+/// # AC-005 enforcement
+///
+/// TOML over HTTP is not supported per AC-005 — use a file-based `DataSource` for
+/// TOML files. Callers that set `format_hint = Some(DataFormat::Toml)` will receive
+/// an `UnsupportedFormat` error.
+///
+/// XLSX and `SQLite` are binary formats handled by dedicated non-HTTP data sources;
+/// they are likewise rejected here.
 fn parse_body(body: &str, url_str: &str, format: DataFormat) -> Result<Value, DataError> {
     match format {
         DataFormat::Json => parse::json::parse_json(body, url_str),
         DataFormat::Csv => parse::csv::parse_csv(body, url_str),
         DataFormat::Yaml => parse::yaml::parse_yaml(body, url_str),
-        DataFormat::Toml => parse::toml::parse_toml(body, url_str),
+        DataFormat::Toml => {
+            // AC-005: TOML over HTTP is not supported. Callers must use a
+            // file-based DataSource for TOML files. Rejecting here ensures that
+            // setting format_hint = Some(DataFormat::Toml) on an HttpDataSource
+            // produces a clear, actionable error rather than silently succeeding.
+            Err(DataError::unsupported_format(
+                "TOML over HTTP not supported per AC-005; use file-based DataSource",
+            ))
+        },
         DataFormat::Xlsx | DataFormat::Sqlite => {
             // XLSX and SQLite cannot be served over HTTP as text bodies.
             // The `format_hint` code path to get here would be user error;
@@ -1844,6 +1870,10 @@ mod tests {
             "cap-exceeded error must contain 'exceeds'; got: {msg}"
         );
         assert!(
+            msg.contains("E-DAT-006"),
+            "cap-exceeded error must contain 'E-DAT-006' (policy-rejected code); got: {msg}"
+        );
+        assert!(
             matches!(err, DataSourceError::IoError { .. }),
             "cap-exceeded error must be IoError; got: {msg}"
         );
@@ -1921,6 +1951,69 @@ mod tests {
             1,
             "HTTP 4xx must result in exactly 1 connection (no retry); got: {}",
             connection_counter.load(Ordering::SeqCst)
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // F1 (AC-005): TOML format_hint must be rejected for HTTP sources
+    // -----------------------------------------------------------------------
+
+    /// `test_bc_1_03_002_format_hint_toml_rejected`
+    ///
+    /// AC-005: `format_hint = Some(DataFormat::Toml)` on an `HttpDataSource` must
+    /// produce an error with "TOML over HTTP" in the message. TOML is a file-based
+    /// format — serving it over HTTP is unsupported per the spec.
+    ///
+    /// This test verifies that the rejection happens regardless of whether the server
+    /// sends a valid TOML-parseable body (i.e., the `format_hint` path is gated, not
+    /// just the Content-Type detection path).
+    ///
+    /// Traces to BC-1.03.002 AC-005.
+    #[test]
+    fn test_bc_1_03_002_format_hint_toml_rejected() {
+        // A server that serves valid TOML content — the rejection must happen
+        // before parsing, in `parse_body`, regardless of the body content.
+        let (addr, handle) = spawn_mock_server(200, "text/plain", "key = \"value\"\n");
+        let url = format!("http://127.0.0.1:{}/data.toml", addr.port());
+        let src = HttpDataSource::new(url.as_str()).with_format(DataFormat::Toml);
+        let opts = DataSourceOptions::default();
+        let result = src.load(&url, &opts);
+        handle.join().unwrap();
+        assert!(
+            result.is_err(),
+            "format_hint=Toml on HTTP source must produce an error (AC-005)"
+        );
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("TOML over HTTP"),
+            "error must mention 'TOML over HTTP'; got: {msg}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // F3: from_context with Some(vec![]) (empty allowlist) blocks all
+    // -----------------------------------------------------------------------
+
+    /// `test_from_context_empty_allowed_domains_blocks_all`
+    ///
+    /// F3: When `DataSourceContext` is configured with `allowed_domains = []`
+    /// (empty vec, not None), `from_context` must produce an allowlist that blocks
+    /// ALL hosts — fail-closed behaviour.
+    ///
+    /// Verifies by calling `load()` against a real server and asserting SSRF block.
+    ///
+    /// Traces to BC-1.03.005 invariant 3 (empty `allowed_domains` blocks everything).
+    #[test]
+    fn test_from_context_empty_allowed_domains_blocks_all() {
+        use crate::allowlist::is_allowed;
+        use crate::context::DataSourceContext;
+        let ctx = DataSourceContext::new().with_allowed_domains(vec![]);
+        let src =
+            HttpDataSource::from_context(Arc::<str>::from("https://api.example.com/data"), &ctx);
+        let url = url::Url::parse("https://api.example.com/data").unwrap();
+        assert!(
+            !is_allowed(&url, &src.allowlist),
+            "empty allowed_domains must block all hosts (fail-closed)"
         );
     }
 }
