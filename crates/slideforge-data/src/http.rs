@@ -274,10 +274,6 @@ fn data_error_to_source_error(uri: &str, err: &DataError) -> DataSourceError {
                 message: err.to_string(),
             }
         },
-        DataError::HttpError { status, .. } => DataSourceError::IoError {
-            uri: uri.to_owned(),
-            message: format!("[{E_DAT_001}] HTTP {status}: {err}"),
-        },
         _ => DataSourceError::IoError {
             uri: uri.to_owned(),
             message: err.to_string(),
@@ -315,7 +311,7 @@ fn issue_request_with_retry(url_str: &str) -> Result<ureq::Response, DataSourceE
                     &DataError::NetworkError {
                         code: E_DAT_002,
                         url: Arc::from(url_str),
-                        cause: Arc::from(e.to_string().as_str()),
+                        cause: Arc::<str>::from(e.to_string()),
                         span: slideforge_types::SourceSpan::default(),
                     },
                 )),
@@ -351,7 +347,7 @@ fn issue_request_with_retry(url_str: &str) -> Result<ureq::Response, DataSourceE
                     &DataError::NetworkError {
                         code: E_DAT_002,
                         url: Arc::from(url_str),
-                        cause: Arc::from(e.to_string().as_str()),
+                        cause: Arc::<str>::from(e.to_string()),
                         span: slideforge_types::SourceSpan::default(),
                     },
                 )),
@@ -427,6 +423,8 @@ mod tests {
         atomic::{AtomicUsize, Ordering},
     };
     use std::thread;
+
+    use tracing_test::traced_test;
 
     use super::*;
 
@@ -1198,5 +1196,202 @@ mod tests {
             attempts, 2,
             "exactly 2 connection attempts must be made (1 initial + 1 retry); got: {attempts}"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // F1 (AC-008): text/plain warning emission asserted via tracing-test
+    // -----------------------------------------------------------------------
+
+    /// `test_bc_1_03_002_text_plain_warning_emitted`
+    ///
+    /// F1: When a `text/plain` response body parses as JSON, a `tracing::warn!`
+    /// containing "text/plain but parsed as JSON" and "Consider requesting
+    /// application/json" must be emitted.
+    ///
+    /// Traces to BC-1.03.002 edge case EC-003 + AC-008.
+    #[traced_test]
+    #[test]
+    fn test_bc_1_03_002_text_plain_warning_emitted() {
+        let (addr, handle) = spawn_mock_server(200, "text/plain", r#"{"status":"ok"}"#);
+        let url = format!("http://127.0.0.1:{}/data.json", addr.port());
+        let src = HttpDataSource::new(url.as_str());
+        let opts = DataSourceOptions::default();
+        let result = src.load(&url, &opts);
+        handle.join().unwrap();
+        assert!(
+            result.is_ok(),
+            "text/plain JSON must succeed (with warning); got: {:?}",
+            result.err()
+        );
+        assert!(
+            logs_contain("text/plain but parsed as JSON"),
+            "warning must mention 'text/plain but parsed as JSON'"
+        );
+        assert!(
+            logs_contain("Consider requesting application/json"),
+            "warning must contain 'Consider requesting application/json'"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // F2 (AC-009): non-HTTPS warning emission asserted via tracing-test
+    // -----------------------------------------------------------------------
+
+    /// `test_bc_1_03_002_http_warning_emitted`
+    ///
+    /// F2 (AC-009): When a request uses `http://` (non-HTTPS), a `tracing::warn!`
+    /// containing "HTTP source" and "Prefer HTTPS" must be emitted.
+    ///
+    /// Traces to BC-1.03.002 AC-009.
+    #[traced_test]
+    #[test]
+    fn test_bc_1_03_002_http_warning_emitted() {
+        let (addr, handle) = spawn_mock_server(200, "application/json", r#"{"ok":true}"#);
+        let url = format!("http://127.0.0.1:{}/data.json", addr.port());
+        let src = HttpDataSource::new(url.as_str());
+        let opts = DataSourceOptions::default();
+        let result = src.load(&url, &opts);
+        handle.join().unwrap();
+        assert!(
+            result.is_ok(),
+            "http:// request must succeed (with warning); got: {:?}",
+            result.err()
+        );
+        assert!(
+            logs_contain("HTTP source"),
+            "warning must contain 'HTTP source'"
+        );
+        assert!(
+            logs_contain("Prefer HTTPS"),
+            "warning must contain 'Prefer HTTPS'"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // F4 (AC-010): scheme rejection tests with error code assertion
+    // -----------------------------------------------------------------------
+
+    /// `test_bc_1_03_002_file_scheme_rejected_with_code`
+    ///
+    /// F4 (AC-010): `file://` URLs must be rejected with an error message
+    /// containing "E-DAT-003" and "file".
+    ///
+    /// Traces to BC-1.03.005 invariant 5 + edge case EC-006.
+    #[test]
+    fn test_bc_1_03_002_file_scheme_rejected_with_code() {
+        let src = HttpDataSource::new("file:///tmp/data.json");
+        let opts = DataSourceOptions::default();
+        let result = src.load("file:///tmp/data.json", &opts);
+        assert!(
+            result.is_err(),
+            "file:// scheme must be rejected by HttpDataSource"
+        );
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("E-DAT-003"),
+            "file:// rejection must carry error code E-DAT-003; got: {msg}"
+        );
+        assert!(
+            msg.contains("file"),
+            "error message must mention 'file' scheme; got: {msg}"
+        );
+    }
+
+    /// `test_bc_1_03_002_ftp_scheme_rejected_with_code`
+    ///
+    /// F4 (AC-010): `ftp://` URLs must be rejected with an error message
+    /// containing "E-DAT-003" and "ftp".
+    ///
+    /// Traces to BC-1.03.005 invariant 5.
+    #[test]
+    fn test_bc_1_03_002_ftp_scheme_rejected_with_code() {
+        let src = HttpDataSource::new("ftp://example.com/data.json");
+        let opts = DataSourceOptions::default();
+        let result = src.load("ftp://example.com/data.json", &opts);
+        assert!(
+            result.is_err(),
+            "ftp:// scheme must be rejected by HttpDataSource"
+        );
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("E-DAT-003"),
+            "ftp:// rejection must carry error code E-DAT-003; got: {msg}"
+        );
+        assert!(
+            msg.contains("ftp"),
+            "error message must mention 'ftp' scheme; got: {msg}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // F5: HttpError message single-prefix assertion
+    // -----------------------------------------------------------------------
+
+    /// `test_bc_1_03_002_http_error_message_single_prefix`
+    ///
+    /// F5: A 404 response must produce an error message containing "[E-DAT-001]"
+    /// exactly once — not double-prefixed.
+    ///
+    /// Traces to BC-1.03.002 edge case EC-001.
+    #[test]
+    fn test_bc_1_03_002_http_error_message_single_prefix() {
+        let (addr, handle) = spawn_mock_server(404, "text/plain", "not found");
+        let url = format!("http://127.0.0.1:{}/data.json", addr.port());
+        let src = HttpDataSource::new(url.as_str());
+        let opts = DataSourceOptions::default();
+        let result = src.load(&url, &opts);
+        handle.join().unwrap();
+        assert!(result.is_err(), "404 must produce an error");
+        let msg = result.unwrap_err().to_string();
+        let count = msg.matches("[E-DAT-001]").count();
+        assert_eq!(
+            count, 1,
+            "error message must contain '[E-DAT-001]' exactly once; got {count} times in: {msg}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // F6: Content-Type alias coverage
+    // -----------------------------------------------------------------------
+
+    /// `test_bc_1_03_002_content_type_aliases`
+    ///
+    /// F6: All Content-Type aliases must be recognized correctly:
+    /// text/json, application/csv, text/yaml, application/yaml.
+    ///
+    /// Uses a for loop over alias table — one failing entry fails the whole test.
+    ///
+    /// Traces to BC-1.03.002 AC-005.
+    #[test]
+    fn test_bc_1_03_002_content_type_aliases() {
+        // (content_type, body, description)
+        let cases: &[(&str, &str, &str)] = &[
+            (
+                "text/json",
+                r#"{"alias":"text_json"}"#,
+                "text/json must parse as JSON",
+            ),
+            (
+                "application/csv",
+                "col\nval\n",
+                "application/csv must parse as CSV",
+            ),
+            ("text/yaml", "key: value\n", "text/yaml must parse as YAML"),
+            (
+                "application/yaml",
+                "key: value\n",
+                "application/yaml must parse as YAML",
+            ),
+        ];
+
+        for (ct, body, desc) in cases {
+            let (addr, handle) = spawn_mock_server(200, ct, body);
+            let url = format!("http://127.0.0.1:{}/data", addr.port());
+            let src = HttpDataSource::new(url.as_str());
+            let opts = DataSourceOptions::default();
+            let result = src.load(&url, &opts);
+            handle.join().unwrap();
+            assert!(result.is_ok(), "{desc}: got error: {:?}", result.err());
+        }
     }
 }
