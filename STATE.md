@@ -28,9 +28,9 @@ wave_1_completed: 2026-05-27
 wave_2_gate: "PASS 2026-05-27 — 11 gate passes, 19 findings fixed, 3/3 clean (passes 9-10-11)"
 wave_2_completed: 2026-05-27
 wave_3_batch_1_completed: 2026-05-28
-develop_sha: "7bc71f9c"
-develop_pr_count: 27
-workspace_tests: 1550
+develop_sha: "5ad267be"
+develop_pr_count: 28
+workspace_tests: 1551
 workspace_test_failures: 0
 ---
 
@@ -48,9 +48,9 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. It generates branded .p
 
 ## Current Status
 
-Phase 3 IN PROGRESS. Wave 1 COMPLETE (14/14 stories, gate PASSED). Wave 2 COMPLETE (7/7 stories, gate PASSED). Wave 3 Batch 1 COMPLETE (6 stories merged, PRs #21-#26). **Wave 3 Batch 2 IN PROGRESS (1/8 merged: STORY-019 PR #27). 7 stories remaining.**
+Phase 3 IN PROGRESS. Wave 1 COMPLETE (14/14 stories, gate PASSED). Wave 2 COMPLETE (7/7 stories, gate PASSED). Wave 3 Batch 1 COMPLETE (6 stories merged, PRs #21-#26). **Wave 3 Batch 2 IN PROGRESS (2/8 merged: STORY-019 PR #27, STORY-032 PR #28). 6 stories remaining.**
 
-develop branch: `7bc71f9c` (27 merged PRs, 1550 tests, 0 failures). No active worktrees. No open PRs.
+develop branch: `5ad267be` (28 merged PRs, 1551 tests, 0 failures). No active worktrees. No open PRs.
 
 ## What to Do Next: Wave 3 Batch 2
 
@@ -109,7 +109,7 @@ git fetch origin develop && git pull origin develop
 | Planning (25 DSL decisions) | DONE 2026-05-24 | q1–q25 decision docs + 14 research threads + 7/7 spikes resolved |
 | Phase 1: Spec Crystallization | DONE — APPROVED 2026-05-25 | PRD (109 BCs, 15 HS, 4 supplements) + architecture (14 ADRs, 15 VPs, 20 crates) + UX spec (10 screens, 5 flows) + L2 domain spec (12 files). 17 passes, 69 findings, 3/3 clean. |
 | Phase 2: Story Decomposition | DONE — APPROVED 2026-05-25 | 71 stories, 21 epics, 6 waves, 437 pts. 22 passes, 96+ findings, 3/3 clean. |
-| Phase 3: TDD Implementation | IN PROGRESS — Wave 1: COMPLETE + GATE PASSED. Wave 2: COMPLETE + GATE PASSED. Wave 3: Batch 1 COMPLETE (6/17 stories, PRs #21-#26, 494 new tests). Batch 2: STORY-019 MERGED (PR #27, 7bc71f9c), 7 remaining. | Per-story delivery |
+| Phase 3: TDD Implementation | IN PROGRESS — Wave 1: COMPLETE + GATE PASSED. Wave 2: COMPLETE + GATE PASSED. Wave 3: Batch 1 COMPLETE (6/17 stories, PRs #21-#26, 494 new tests). Batch 2: STORY-019 MERGED (PR #27, 7bc71f9c), STORY-032 MERGED (PR #28, 5ad267be), 6 remaining. | Per-story delivery |
 | Phase 4: Holdout Evaluation | NOT STARTED | Per-wave holdout gates |
 | Phase 5: Adversarial Refinement | NOT STARTED | Post-implementation cascade |
 | Phase 6: Formal Hardening | NOT STARTED | Kani + fuzz + mutants + semgrep |
@@ -148,11 +148,12 @@ Wave 2 gate: 11 passes, 19 findings fixed, 3/3 clean (passes 9-10-11). Gate fix 
 
 New crates added by Batch 1 (total workspace now 13 crates): slideforge-data, slideforge-brand, slideforge-layout, slideforge-math, slideforge-charts, slideforge-diagrams.
 
-## Wave 3 Batch 2 Story Status (IN PROGRESS — STORY-019 MERGED, 7 remaining)
+## Wave 3 Batch 2 Story Status (IN PROGRESS — STORY-019 + STORY-032 MERGED, 6 remaining)
 
 | Story | Title | Crate | Tests | Adversary | PR | Commit |
 |-------|-------|-------|-------|-----------|-----|--------|
 | STORY-019 | DataSource: HTTP/HTTPS + SSRF Allowlist | slideforge-data | 143 | 9 passes (20→8→5→6→3→6→0→0→0), 3/3 clean | #27 | 7bc71f9c |
+| STORY-032 | Chart Empty Data Placeholder | slideforge-charts | 146 | 7 passes (passes 5,6,7 CLEAN), 3/3 | #28 | 5ad267be |
 
 ## Decisions Log (milestones)
 
@@ -178,20 +179,21 @@ New crates added by Batch 1 (total workspace now 13 crates): slideforge-data, sl
 - 2026-05-27 — WAVE 2 GATE PASSED — 11 gate passes, 19 findings fixed, 3/3 clean (passes 9-10-11)
 - 2026-05-27/28 — WAVE 3 BATCH 1 COMPLETE — 6 new crates (data, brand, layout, math, charts, diagrams), 494 new tests, 6 PRs merged (#21-#26, commits 6d4d7c02 → 218334f1)
 - 2026-05-28 — STORY-019 MERGED (PR #27, 7bc71f9c) — HTTP/HTTPS DataSource + SSRF allowlist (9-pass adversary, 49 findings fixed, defense-in-depth: allowlist before DNS + redirects(0) + body cap + scheme normalization)
+- 2026-05-28 — STORY-032 MERGED (PR #28, 5ad267be) — Chart empty-data placeholder, 7-pass adversary convergence
 
 ## Session Resume Checkpoint
 
 | Field | Value |
 |-------|-------|
 | **Date** | 2026-05-28 |
-| **Position** | Phase 3, Wave 3 — Batch 2 IN PROGRESS (1/8 merged: STORY-019). Next: STORY-020, 023, 027, 028, 030, 032, 034. |
-| **develop SHA** | 7bc71f9c |
-| **Workspace tests** | 1550 passing, 0 failures |
+| **Position** | Phase 3, Wave 3 — Batch 2 IN PROGRESS (2/8 merged: STORY-019, STORY-032). Next: STORY-020, 023, 027, 028, 030, 034. |
+| **develop SHA** | 5ad267be |
+| **Workspace tests** | 1551 passing, 0 failures |
 | **Workspace crates** | 13 (7 from Wave 1 + 6 new from Batch 1: data, brand, layout, math, charts, diagrams) |
 | **Active worktrees** | None |
 | **Open PRs** | None |
-| **Batch 2 stories** | STORY-019 MERGED. Remaining: STORY-020, 023, 027, 028, 030, 032, 034 |
-| **Next action** | Continue Wave 3 Batch 2 — deliver next story (STORY-023 / 027 / 030 / 032 / 034 are independent and can start; STORY-020 + 028 depend on same-crate sibling stories already in progress or merged). |
+| **Batch 2 stories** | STORY-019 MERGED, STORY-032 MERGED. Remaining: STORY-020, 023, 027, 028, 030, 034 |
+| **Next action** | Continue Wave 3 Batch 2 — deliver next story (STORY-023 / 027 / 030 / 034 are independent and can start; STORY-020 + 028 depend on same-crate sibling stories). |
 
 ## Quality Bar (Non-Negotiable)
 

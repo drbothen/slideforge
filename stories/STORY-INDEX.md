@@ -97,7 +97,7 @@ stories_merged: 0
 | [STORY-029](stories/STORY-029-math-parser-omml.md) | EPIC-10 | Math Parser: $...$ / $$...$$ + @{var} + OMML Output | BC-1.10.001-003 | P1 | 8 | strict | draft |
 | [STORY-030](stories/STORY-030-math-mathml-pdf.md) | EPIC-10 | Math: MathML (HTML) + Path-Based (PDF) Output | BC-1.10.003 | P1 | 5 | strict | draft |
 | [STORY-031](stories/STORY-031-chart-renderer-core.md) | EPIC-11 | Chart Renderer: bar/line/pie/scatter/area/histogram/stacked-bar | BC-1.11.001 | P1 | 8 | strict | draft |
-| [STORY-032](stories/STORY-032-chart-empty-data.md) | EPIC-11 | Chart: Empty Data Error-Slide Placeholder | BC-1.11.002 | P1 | 3 | strict | draft |
+| [STORY-032](stories/STORY-032-chart-empty-data.md) | EPIC-11 | Chart: Empty Data Error-Slide Placeholder | BC-1.11.002 | P1 | 3 | strict | merged |
 | [STORY-033](stories/STORY-033-diagram-mermaid-render.md) | EPIC-12 | Diagram Renderer: Mermaid → PPTX-Safe SVG | BC-1.12.001-002 | P1 | 8 | strict | draft |
 | [STORY-034](stories/STORY-034-diagram-svg-normalize-perf.md) | EPIC-12 | SVG Normalization via usvg + Performance Gate | BC-1.12.003 | P1 | 5 | strict | draft |
 
