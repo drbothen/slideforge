@@ -38,6 +38,11 @@ pub const E_BRD_004: &str = "E-BRD-004";
 /// absent and inference continues with the remaining slots.
 pub const E_BRD_005: &str = "E-BRD-005";
 
+/// `E-BRD-007`: the logo path in `brand.toml` escapes the directory containing
+/// `brand.toml`. This is a path-traversal security violation — the logo must
+/// reside inside (or underneath) the `brand.toml` directory.
+pub const E_BRD_007: &str = "E-BRD-007";
+
 // ─── Error enum ──────────────────────────────────────────────────────────────
 
 /// Errors produced by the `slideforge-brand` crate.
@@ -184,6 +189,24 @@ pub enum BrandError {
         value: Arc<str>,
     },
 
+    /// `E-BRD-007` — the logo path in `brand.toml` escapes the directory containing
+    /// `brand.toml`.
+    ///
+    /// Fatal error (exit 4). A logo path must resolve to a file inside (or
+    /// beneath) the directory that contains `brand.toml`. Paths that escape
+    /// via `../` sequences or symlinks pointing outside that directory are
+    /// rejected to prevent path-traversal attacks.
+    #[error(
+        "E-BRD-007: Logo path '{logo_path}' escapes the brand.toml directory '{brand_dir}'. \
+         The logo file must be inside (or beneath) the brand.toml directory."
+    )]
+    LogoOutsideBrandDir {
+        /// The resolved canonical path of the logo file that escaped the brand dir.
+        logo_path: String,
+        /// The canonical path of the `brand.toml` parent directory.
+        brand_dir: String,
+    },
+
     /// `E-BRD-004` (synthesis) — a font name declared in `brand.toml`
     /// is not installed on the build host.
     ///
@@ -225,6 +248,7 @@ mod tests {
         assert_eq!(E_BRD_003, "E-BRD-003");
         assert_eq!(E_BRD_004, "E-BRD-004");
         assert_eq!(E_BRD_005, "E-BRD-005");
+        assert_eq!(E_BRD_007, "E-BRD-007");
     }
 
     /// BC-2.01.001 EC-001 — `FileNotFound` error message contains the path.
@@ -333,6 +357,28 @@ mod tests {
         assert!(
             msg.contains("E-BRD-004"),
             "error message must contain error code, got: {msg}"
+        );
+    }
+
+    /// E-BRD-007 — `LogoOutsideBrandDir` message contains logo path, brand dir, and error code.
+    #[test]
+    fn test_e_brd_007_logo_outside_brand_dir_message() {
+        let err = BrandError::LogoOutsideBrandDir {
+            logo_path: "/tmp/etc/passwd".to_owned(),
+            brand_dir: "/tmp/brand".to_owned(),
+        };
+        let msg = err.to_string();
+        assert!(
+            msg.contains("E-BRD-007"),
+            "error message must contain E-BRD-007, got: {msg}"
+        );
+        assert!(
+            msg.contains("/tmp/etc/passwd"),
+            "error message must contain logo path, got: {msg}"
+        );
+        assert!(
+            msg.contains("/tmp/brand"),
+            "error message must contain brand dir, got: {msg}"
         );
     }
 

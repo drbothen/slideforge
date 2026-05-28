@@ -57,17 +57,22 @@ use crate::toml_schema::BrandConfig;
 /// ## Usage
 ///
 /// ```no_run
+/// # fn run() -> Result<(), Box<dyn std::error::Error>> {
 /// use slideforge_brand::synthesizer::BrandSynthesizer;
 ///
 /// // Load from file (effectful path):
-/// let template = BrandSynthesizer::load_from_toml("path/to/brand.toml")
-///     .expect("brand load failed");
+/// let (template, warnings) = BrandSynthesizer::load_from_toml("path/to/brand.toml")?;
+/// for warning in &warnings {
+///     eprintln!("warning: {warning}");
+/// }
 ///
 /// // Synthesize from already-parsed config (pure path, useful for testing):
 /// use slideforge_brand::toml_schema::BrandConfig;
 /// // Use `default_minimal()` — `default()` has no logo path and will fail synthesis.
 /// let config = BrandConfig::default_minimal();
 /// let result = BrandSynthesizer::synthesize(&config);
+/// # Ok(())
+/// # }
 /// ```
 #[derive(Debug, Default)]
 pub struct BrandSynthesizer;
@@ -114,6 +119,29 @@ impl BrandSynthesizer {
                 return Err(BrandError::FileNotFound {
                     path: Arc::from(logo_path.to_string_lossy().as_ref()),
                     span: slideforge_types::SourceSpan::default(),
+                });
+            }
+
+            // Security: path-traversal guard (F-PASS11-MED-2).
+            // Canonicalize both paths and verify the logo resides inside the brand dir.
+            // We only canonicalize after confirming existence (above) so that
+            // canonicalize does not fail on a non-existent file.
+            let canonical_logo = std::fs::canonicalize(&logo_path).map_err(|e| {
+                BrandError::TomlReadError {
+                    path: Arc::from(logo_path.to_string_lossy().as_ref()),
+                    reason: Arc::from(e.to_string().as_str()),
+                }
+            })?;
+            let canonical_brand_dir = std::fs::canonicalize(brand_toml_dir).map_err(|e| {
+                BrandError::TomlReadError {
+                    path: Arc::from(brand_toml_dir.to_string_lossy().as_ref()),
+                    reason: Arc::from(e.to_string().as_str()),
+                }
+            })?;
+            if !canonical_logo.starts_with(&canonical_brand_dir) {
+                return Err(BrandError::LogoOutsideBrandDir {
+                    logo_path: canonical_logo.to_string_lossy().into_owned(),
+                    brand_dir: canonical_brand_dir.to_string_lossy().into_owned(),
                 });
             }
         }
@@ -226,12 +254,19 @@ impl BrandSynthesizer {
             original: Arc::from(l.path.as_str()),
         });
 
+        // Populate layout_names from the layout definitions (F-PASS11-LOW-1).
+        // For synthesized brands, layout_names mirrors the human-readable names
+        // from the generated layouts (31 entries, matching `layouts.len()`).
+        // For loaded brands (from .pptx/.docx), layout_names holds ZIP-internal
+        // paths populated by BrandLoader — see loader.rs.
+        let layout_names: Vec<Arc<str>> = layouts.iter().map(|l| Arc::clone(&l.name)).collect();
+
         let template = BrandTemplate {
             colors,
             fonts,
             logo,
             footer_text,
-            layout_names: vec![],
+            layout_names,
             layouts,
             notes_master_stub,
             handout_master_stub,
@@ -976,6 +1011,217 @@ body = "Calibri"
         );
     }
 
+    // ─── F-PASS11-LOW-3: snapshot all 31 layouts ─────────────────────────────
+
+    /// F-PASS11-LOW-3 — snapshot all 31 layouts as a determinism guard.
+    ///
+    /// The three existing snapshots covered only dark/standard layout_xml variants.
+    /// This test snapshots the complete layout taxonomy: all 31 names, indices,
+    /// OOXML types, and color-override flags. The insta snapshot serves as a
+    /// regression guard — any change to `generate_all_layouts` that alters the
+    /// taxonomy will be caught here.
+    #[test]
+    fn test_snapshot_all_31_layouts() {
+        let config = full_12_color_config();
+        let (template, _) =
+            BrandSynthesizer::synthesize(&config).expect("synthesize must succeed");
+        assert_eq!(template.layouts.len(), 31, "Expected 31 layouts");
+
+        let combined = template
+            .layouts
+            .iter()
+            .map(|l| {
+                format!(
+                    "=== {} (idx={}) type={:?} dark={} ===\n",
+                    l.name,
+                    l.index,
+                    l.ooxml_type.as_deref().unwrap_or("custom"),
+                    l.has_color_override,
+                )
+            })
+            .collect::<String>();
+
+        insta::assert_snapshot!("all_31_layouts", combined);
+    }
+
+    // ─── F-PASS11-LOW-1: layout_names populated from layouts ─────────────────
+
+    /// F-PASS11-LOW-1 — synthesized BrandTemplate has layout_names populated from layouts.
+    ///
+    /// The dead-state finding required eliminating `layout_names: vec![]` when
+    /// `layouts` has 31 entries. After the fix, `layout_names.len() == layouts.len()`
+    /// and each name matches `layouts[i].name`.
+    #[test]
+    fn test_layout_names_populated_from_layouts() {
+        let config = full_12_color_config();
+        let (template, _) =
+            BrandSynthesizer::synthesize(&config).expect("synthesize must succeed");
+        assert_eq!(
+            template.layout_names.len(),
+            template.layouts.len(),
+            "layout_names must have same length as layouts"
+        );
+        assert_eq!(
+            template.layout_names.len(),
+            31,
+            "both layout_names and layouts must have 31 entries"
+        );
+        for (i, (name, layout)) in template
+            .layout_names
+            .iter()
+            .zip(template.layouts.iter())
+            .enumerate()
+        {
+            assert_eq!(
+                name.as_ref(),
+                layout.name.as_ref(),
+                "layout_names[{i}] must match layouts[{i}].name"
+            );
+        }
+    }
+
+    // ─── F-PASS11-MED-2: path traversal tests ────────────────────────────────
+
+    /// F-PASS11-MED-2 — logo path with `../..` escaping brand dir is rejected.
+    #[test]
+    fn test_logo_path_traversal_rejected_with_dotdot() {
+        use std::io::Write as _;
+        let tmp_dir = tempfile::tempdir().expect("tempdir must be created");
+        // Create a file outside the brand dir that the traversal would reach
+        let outside_file = tmp_dir.path().join("outside.txt");
+        std::fs::write(&outside_file, b"secret").expect("outside file write must succeed");
+
+        // brand.toml lives in a subdirectory
+        let brand_dir = tmp_dir.path().join("brand");
+        std::fs::create_dir_all(&brand_dir).expect("brand dir create must succeed");
+        let brand_toml_path = brand_dir.join("brand.toml");
+
+        let mut f = std::fs::File::create(&brand_toml_path).expect("brand.toml create must succeed");
+        writeln!(
+            f,
+            r##"
+[colors]
+dk1 = "#1F2937"
+lt1 = "#FFFFFF"
+acc1 = "#3B82F6"
+
+[logo]
+path = "../outside.txt"
+
+[fonts]
+heading = "Calibri"
+body = "Calibri"
+"##
+        )
+        .expect("write to brand.toml must succeed");
+
+        let path_str = brand_toml_path
+            .to_str()
+            .expect("brand.toml path must be valid UTF-8");
+        let result = BrandSynthesizer::load_from_toml(path_str);
+        assert!(
+            result.is_err(),
+            "F-PASS11-MED-2: logo path escaping brand dir must be rejected"
+        );
+        match result.unwrap_err() {
+            BrandError::LogoOutsideBrandDir { .. } => {},
+            other => panic!(
+                "F-PASS11-MED-2: expected BrandError::LogoOutsideBrandDir, got: {other:?}"
+            ),
+        }
+    }
+
+    /// F-PASS11-MED-2 — symlink inside brand dir pointing to outside file is rejected.
+    #[test]
+    #[cfg(unix)] // symlinks on Unix only
+    fn test_logo_symlink_to_outside_dir_rejected() {
+        use std::io::Write as _;
+        let tmp_dir = tempfile::tempdir().expect("tempdir must be created");
+
+        // Create the target file outside the brand dir
+        let outside_file = tmp_dir.path().join("secret.png");
+        std::fs::write(&outside_file, b"\x89PNG\r\n\x1a\n").expect("secret file write");
+
+        // Brand dir
+        let brand_dir = tmp_dir.path().join("brand");
+        std::fs::create_dir_all(&brand_dir).expect("brand dir create");
+
+        // Create a symlink inside brand_dir pointing to the outside file
+        let symlink_path = brand_dir.join("logo.png");
+        std::os::unix::fs::symlink(&outside_file, &symlink_path)
+            .expect("symlink create must succeed");
+
+        let brand_toml_path = brand_dir.join("brand.toml");
+        let mut f = std::fs::File::create(&brand_toml_path).expect("brand.toml create");
+        writeln!(
+            f,
+            r##"
+[colors]
+dk1 = "#1F2937"
+lt1 = "#FFFFFF"
+acc1 = "#3B82F6"
+
+[logo]
+path = "logo.png"
+
+[fonts]
+heading = "Calibri"
+body = "Calibri"
+"##
+        )
+        .expect("write brand.toml");
+
+        let path_str = brand_toml_path.to_str().expect("path must be UTF-8");
+        let result = BrandSynthesizer::load_from_toml(path_str);
+        assert!(
+            result.is_err(),
+            "F-PASS11-MED-2: symlink pointing outside brand dir must be rejected"
+        );
+        match result.unwrap_err() {
+            BrandError::LogoOutsideBrandDir { .. } => {},
+            other => panic!(
+                "F-PASS11-MED-2: expected LogoOutsideBrandDir for symlink, got: {other:?}"
+            ),
+        }
+    }
+
+    /// F-PASS11-MED-2 — logo inside brand dir is accepted (positive case).
+    #[test]
+    fn test_logo_inside_brand_dir_accepted() {
+        use std::io::Write as _;
+        let tmp_dir = tempfile::tempdir().expect("tempdir must be created");
+        let logo_path = tmp_dir.path().join("logo.png");
+        std::fs::write(&logo_path, b"\x89PNG\r\n\x1a\n").expect("logo write");
+
+        let brand_toml_path = tmp_dir.path().join("brand.toml");
+        let mut f = std::fs::File::create(&brand_toml_path).expect("brand.toml create");
+        writeln!(
+            f,
+            r##"
+[colors]
+dk1 = "#1F2937"
+lt1 = "#FFFFFF"
+acc1 = "#3B82F6"
+
+[logo]
+path = "logo.png"
+
+[fonts]
+heading = "Calibri"
+body = "Calibri"
+"##
+        )
+        .expect("write brand.toml");
+
+        let path_str = brand_toml_path.to_str().expect("path must be UTF-8");
+        let result = BrandSynthesizer::load_from_toml(path_str);
+        assert!(
+            result.is_ok(),
+            "F-PASS11-MED-2: logo inside brand dir must be accepted, got: {:?}",
+            result.unwrap_err()
+        );
+    }
+
     // ─── VP-012: proptest — determinism round-trip ─────────────────────────────
 
     /// Exercises VP-012: palette determinism under randomised `BrandConfig` input.
@@ -983,8 +1229,10 @@ body = "Calibri"
     /// Strategy: arbitrary optional hex color strings → `BrandConfig` → synthesize
     /// twice with the same config → assert equal color hex values in both results.
     ///
-    /// Generator produces valid `"#RRGGBB"` strings with uppercase hex digits to
-    /// match the `InvalidHexColor` validation contract.
+    /// Generator produces valid `"#RRGGBB"` strings with uppercase hex digits.
+    /// Both uppercase and lowercase are accepted by `validate_hex` (F-PASS11-LOW-4:
+    /// lowercase is normalised to uppercase); this generator uses uppercase for
+    /// consistency with the BC-2.01.004 invariant 3 postcondition.
     #[cfg(test)]
     mod proptest_vp012 {
         use super::*;
