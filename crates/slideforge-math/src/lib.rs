@@ -183,7 +183,7 @@ impl MathRenderer for MathRendererImpl {
                 };
                 let ast = self.parse(&node.latex, mode, node.span.clone())?;
                 let paths = pdf_paths::render_pdf_paths(&ast)?;
-                Ok(paths.svg.into_bytes())
+                Ok(paths.0.into_bytes())
             },
         }
     }

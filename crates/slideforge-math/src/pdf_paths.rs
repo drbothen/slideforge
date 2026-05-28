@@ -69,26 +69,19 @@ const PDF_VERTICAL_PADDING_PX: i64 = 2;
 /// Produced by [`render_pdf_paths`]. The contained SVG has no `<text>` or
 /// `<image>` elements — only `<path>` elements with absolute coordinates.
 ///
-/// The struct also carries estimated bounding-box dimensions in EMUs. These
-/// are derived from the static glyph-layout pass and are a best-effort
-/// approximation — they reflect the bounding box computed by the renderer,
-/// not a parsed measurement of the final SVG viewBox. Exporters that need
-/// precise dimensions should parse the SVG `viewBox` attribute directly.
-///
 /// ## Invariant
 ///
-/// `svg` must not contain any `<text>` elements. Call sites may assert this
-/// in debug builds; the renderer itself guarantees it at construction time via
-/// `usvg` normalisation.
+/// The inner SVG string must not contain any `<text>` elements. Call sites may
+/// assert this in debug builds; the renderer itself guarantees it at
+/// construction time via `usvg` normalisation.
+///
+/// ## Bounding box
+///
+/// The SVG `viewBox` attribute encodes the rendered width and height in pixels.
+/// Exporters that need EMU dimensions should parse the `viewBox` attribute
+/// directly (914 400 EMU per inch at 96 dpi = 9 525 EMU per pixel).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct SvgPaths {
-    /// The complete SVG string with all glyphs rendered as `<path>` data.
-    pub svg: String,
-    /// Bounding-box width in EMUs (914 400 per inch).
-    pub width_emu: i64,
-    /// Bounding-box height in EMUs (914 400 per inch).
-    pub height_emu: i64,
-}
+pub struct SvgPaths(pub String);
 
 /// Render a [`MathAst`] to a vector-path SVG string for PDF embedding.
 ///
@@ -184,11 +177,10 @@ pub fn render_pdf_paths(ast: &MathAst) -> Result<SvgPaths, MathError> {
         "BUG: render_pdf_paths produced <text> element — static glyph engine invariant violated"
     );
 
-    Ok(SvgPaths {
-        svg,
-        width_emu,
-        height_emu,
-    })
+    // width_emu and height_emu are encoded in the viewBox — callers that need EMU
+    // dimensions parse the viewBox directly (see module-level doc).
+    let _ = (width_emu, height_emu);
+    Ok(SvgPaths(svg))
 }
 
 /// Collect `<path>` elements for an expression, advancing `x` as glyphs are
@@ -1147,6 +1139,27 @@ mod tests {
         MathAst::new(MathMode::Display, nodes)
     }
 
+    /// Extract `(width_px, height_px)` from an SVG `viewBox="0 0 W H"` attribute.
+    ///
+    /// Returns `None` if the attribute is absent or cannot be parsed.
+    /// The returned dimensions are in pixels; multiply by 9 525 (= 914 400 / 96)
+    /// to convert to EMUs.
+    fn parse_viewbox_dims(svg: &str) -> Option<(i64, i64)> {
+        // Find 'viewBox="...'
+        let vb_start = svg.find("viewBox=\"")?;
+        let after_vb = &svg[vb_start + 9..];
+        let vb_end = after_vb.find('"')?;
+        let vb_content = &after_vb[..vb_end];
+        // Format is "min-x min-y width height" — e.g. "0 0 42 22"
+        let parts: Vec<&str> = vb_content.split_whitespace().collect();
+        if parts.len() < 4 {
+            return None;
+        }
+        let w = parts[2].parse::<i64>().ok()?;
+        let h = parts[3].parse::<i64>().ok()?;
+        Some((w, h))
+    }
+
     /// Walk a string with `quick-xml` and confirm all tags balance.
     fn assert_wellformed_xml(xml: &str) -> Result<(), String> {
         use quick_xml::Reader;
@@ -1189,12 +1202,12 @@ mod tests {
     fn test_bc_1_10_003_pdf_paths_returns_svg_string() {
         let ast = inline_ast(vec![MathNode::Text(Arc::from("x"))]);
         let paths = render_pdf_paths(&ast).expect("render_pdf_paths must succeed for 'x'");
-        assert!(!paths.svg.is_empty(), "SvgPaths.svg must not be empty");
+        assert!(!paths.0.is_empty(), "SvgPaths.svg must not be empty");
         // The svg field must look like an SVG document
         assert!(
-            paths.svg.contains("<svg") || paths.svg.contains("<?xml"),
+            paths.0.contains("<svg") || paths.0.contains("<?xml"),
             "SvgPaths.svg must start with an SVG root element; got: {}",
-            &paths.svg[..paths.svg.len().min(120)]
+            &paths.0[..paths.0.len().min(120)]
         );
     }
 
@@ -1208,9 +1221,9 @@ mod tests {
         let ast = inline_ast(vec![MathNode::Text(Arc::from("E"))]);
         let paths = render_pdf_paths(&ast).expect("render_pdf_paths must succeed");
         assert!(
-            !paths.svg.contains("<text"),
+            !paths.0.contains("<text"),
             "SVG must not contain <text> elements (PDF/UA-1); got: {}",
-            &paths.svg[..paths.svg.len().min(400)]
+            &paths.0[..paths.0.len().min(400)]
         );
     }
 
@@ -1224,9 +1237,9 @@ mod tests {
         let ast = inline_ast(vec![MathNode::Text(Arc::from("E"))]);
         let paths = render_pdf_paths(&ast).expect("render_pdf_paths must succeed");
         assert!(
-            !paths.svg.contains("<image"),
+            !paths.0.contains("<image"),
             "SVG must not contain <image> elements (AC-003); got: {}",
-            &paths.svg[..paths.svg.len().min(400)]
+            &paths.0[..paths.0.len().min(400)]
         );
     }
 
@@ -1240,30 +1253,31 @@ mod tests {
         let ast = inline_ast(vec![MathNode::Text(Arc::from("x"))]);
         let paths = render_pdf_paths(&ast).expect("render_pdf_paths must succeed");
         assert!(
-            paths.svg.contains(r#"<path d=""#) || paths.svg.contains("<path "),
+            paths.0.contains(r#"<path d=""#) || paths.0.contains("<path "),
             "SVG must contain <path> elements with glyph outlines; got: {}",
-            &paths.svg[..paths.svg.len().min(400)]
+            &paths.0[..paths.0.len().min(400)]
         );
     }
 
-    /// `render_pdf_paths` returns positive EMU dimensions.
+    /// `render_pdf_paths` SVG has a positive viewBox (positive width and height).
     ///
     /// BC-1.10.003 invariant: bounding box must have positive width and height.
+    /// Since `SvgPaths` is a newtype, dimensions are read from the SVG viewBox.
     ///
     /// RED GATE: fails until `render_pdf_paths` is implemented.
     #[test]
     fn test_bc_1_10_003_pdf_paths_dimensions_positive() {
         let ast = inline_ast(vec![MathNode::Text(Arc::from("x"))]);
         let paths = render_pdf_paths(&ast).expect("render_pdf_paths must succeed");
+        let (w, h) = parse_viewbox_dims(&paths.0)
+            .unwrap_or_else(|| panic!("SVG must have a parseable viewBox; got: {}", paths.0));
         assert!(
-            paths.width_emu > 0,
-            "width_emu must be positive; got: {}",
-            paths.width_emu
+            w > 0,
+            "viewBox width must be positive; got: {w}"
         );
         assert!(
-            paths.height_emu > 0,
-            "height_emu must be positive; got: {}",
-            paths.height_emu
+            h > 0,
+            "viewBox height must be positive; got: {h}"
         );
     }
 
@@ -1277,7 +1291,7 @@ mod tests {
             sup: Box::new(MathNode::Text(Arc::from("2"))),
         }]);
         let paths = render_pdf_paths(&ast).expect("render_pdf_paths must succeed for x^2");
-        assert_wellformed_xml(&paths.svg)
+        assert_wellformed_xml(&paths.0)
             .unwrap_or_else(|e| panic!("PDF path SVG is not well-formed XML: {e}"));
     }
 
@@ -1285,21 +1299,21 @@ mod tests {
     // BC-1.10.003 — EC-005: usvg fails → TextRemainsInPathOutput
     // ─────────────────────────────────────────────────────────────────────────
 
-    /// [`SvgPaths`] struct fields are accessible, and the type is `Clone + PartialEq + Hash`.
+    /// [`SvgPaths`] is a newtype `SvgPaths(String)` — the inner SVG string is
+    /// accessible via `.0`, and the type is `Clone + PartialEq + Hash`.
     ///
-    /// This is a compile-time property test — the struct definition already exists
-    /// in the stub, so this test PASSES even before `render_pdf_paths` is implemented.
+    /// This tests the newtype API alignment with AC-003 (spec: `SvgPaths(String)`).
     #[test]
     fn test_bc_1_10_003_svg_paths_struct_fields_accessible() {
-        let paths = SvgPaths {
-            svg: "<svg/>".to_owned(),
-            width_emu: 914_400,
-            height_emu: 457_200,
-        };
+        let paths = SvgPaths("<svg/>".to_owned());
         let cloned = paths.clone();
         assert_eq!(paths, cloned);
-        assert_eq!(cloned.width_emu, 914_400);
-        assert_eq!(cloned.height_emu, 457_200);
+        // Inner SVG string is accessible via .0
+        assert_eq!(cloned.0, "<svg/>");
+        // The type satisfies Hash (compile-time check — use it as a HashMap key)
+        let mut map = std::collections::HashMap::new();
+        map.insert(paths.clone(), 42u32);
+        assert_eq!(map[&paths], 42);
     }
 
     /// `render_pdf_paths` for a complex multi-node expression returns `Ok`,
@@ -1321,9 +1335,11 @@ mod tests {
             },
         ]);
         let paths = render_pdf_paths(&ast).expect("render_pdf_paths must succeed for x^2+y^2");
-        assert!(!paths.svg.is_empty(), "SVG must not be empty");
-        assert!(paths.width_emu > 0, "width_emu must be positive");
-        assert!(paths.height_emu > 0, "height_emu must be positive");
+        assert!(!paths.0.is_empty(), "SVG must not be empty");
+        let (w, h) = parse_viewbox_dims(&paths.0)
+            .unwrap_or_else(|| panic!("complex expression SVG must have viewBox; got: {}", paths.0));
+        assert!(w > 0, "viewBox width must be positive");
+        assert!(h > 0, "viewBox height must be positive");
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -1361,10 +1377,10 @@ mod tests {
 
         let gamma_svg = render_pdf_paths(&gamma_ast)
             .expect("render_pdf_paths must succeed for \\gamma")
-            .svg;
+            .0;
         let g_svg = render_pdf_paths(&g_ast)
             .expect("render_pdf_paths must succeed for 'g'")
-            .svg;
+            .0;
 
         assert_ne!(
             gamma_svg, g_svg,
@@ -1388,7 +1404,7 @@ mod tests {
         let sum_ast = inline_ast(vec![MathNode::Operator(Arc::from("sum"))]);
         let sum_svg = render_pdf_paths(&sum_ast)
             .expect("render_pdf_paths must succeed for \\sum")
-            .svg;
+            .0;
 
         // Count <path> elements in the output — for a single glyph ∑ there
         // should be exactly one <path> element, not three (s, u, m).
@@ -1488,17 +1504,18 @@ mod tests {
             render_pdf_paths(&inline_ast(nodes.clone())).expect("inline render must succeed");
         let display = render_pdf_paths(&display_ast(nodes)).expect("display render must succeed");
 
+        let (inline_w, inline_h) = parse_viewbox_dims(&inline.0)
+            .unwrap_or_else(|| panic!("inline SVG must have viewBox; got: {}", inline.0));
+        let (display_w, display_h) = parse_viewbox_dims(&display.0)
+            .unwrap_or_else(|| panic!("display SVG must have viewBox; got: {}", display.0));
+
         assert!(
-            display.width_emu >= inline.width_emu,
-            "display-mode width_emu ({}) must be >= inline width_emu ({})",
-            display.width_emu,
-            inline.width_emu
+            display_w >= inline_w,
+            "display-mode viewBox width ({display_w}) must be >= inline width ({inline_w})"
         );
         assert!(
-            display.height_emu > inline.height_emu,
-            "display-mode height_emu ({}) must be > inline height_emu ({})",
-            display.height_emu,
-            inline.height_emu
+            display_h > inline_h,
+            "display-mode viewBox height ({display_h}) must be > inline height ({inline_h})"
         );
     }
 
@@ -1512,10 +1529,10 @@ mod tests {
 
         let union_svg = render_pdf_paths(&union_ast)
             .expect("render for \\cup must succeed")
-            .svg;
+            .0;
         let u_svg = render_pdf_paths(&u_ast)
             .expect("render for Latin U must succeed")
-            .svg;
+            .0;
 
         assert_ne!(
             union_svg, u_svg,
@@ -1533,10 +1550,10 @@ mod tests {
 
         let times_svg = render_pdf_paths(&times_ast)
             .expect("render for \\times must succeed")
-            .svg;
+            .0;
         let x_svg = render_pdf_paths(&x_ast)
             .expect("render for Latin X must succeed")
-            .svg;
+            .0;
 
         assert_ne!(
             times_svg, x_svg,
@@ -1554,10 +1571,10 @@ mod tests {
 
         let int_svg = render_pdf_paths(&int_ast)
             .expect("render for \\int must succeed")
-            .svg;
+            .0;
         let subset_svg = render_pdf_paths(&subset_ast)
             .expect("render for \\subset must succeed")
-            .svg;
+            .0;
 
         assert_ne!(
             int_svg, subset_svg,
@@ -1575,10 +1592,10 @@ mod tests {
 
         let plus_svg = render_pdf_paths(&plus_ast)
             .expect("render for '+' must succeed")
-            .svg;
+            .0;
         let t_svg = render_pdf_paths(&t_ast)
             .expect("render for 't' must succeed")
-            .svg;
+            .0;
 
         assert_ne!(
             plus_svg, t_svg,
@@ -1596,10 +1613,10 @@ mod tests {
 
         let pipe_svg = render_pdf_paths(&pipe_ast)
             .expect("render for '|' must succeed")
-            .svg;
+            .0;
         let l_svg = render_pdf_paths(&l_ast)
             .expect("render for 'l' must succeed")
-            .svg;
+            .0;
 
         assert_ne!(
             pipe_svg, l_svg,
@@ -1631,10 +1648,10 @@ mod tests {
 
         let sup_svg = render_pdf_paths(&ast_sup)
             .expect("superscript of Greek letter must render successfully")
-            .svg;
+            .0;
         let plain_svg = render_pdf_paths(&ast_plain)
             .expect("plain Greek letter must render successfully")
-            .svg;
+            .0;
 
         // The SVGs should differ: the superscript version has TWO path elements
         // (base α + scaled γ), the plain version has ONE.  More importantly, the
@@ -1665,7 +1682,7 @@ mod tests {
             result.is_ok(),
             "x^{{\\times}} must render successfully; got: {result:?}"
         );
-        let path_count = result.unwrap().svg.matches("<path ").count();
+        let path_count = result.unwrap().0.matches("<path ").count();
         assert_eq!(
             path_count, 2,
             "x^{{\\times}} must produce exactly 2 <path> elements; got {path_count}"
@@ -1696,7 +1713,7 @@ mod tests {
             ],
         )])]);
         let result = render_pdf_paths(&ast).expect("render_pdf_paths must succeed for cases");
-        let svg = &result.svg;
+        let svg = &result.0;
         // There must be at least 4 paths: 1 for 'x', 3 for 'y', '>', '0'
         let path_count = svg.matches("<path ").count();
         assert!(
@@ -1725,14 +1742,14 @@ mod tests {
             render_pdf_paths(&display_ast(nodes)).expect("display render must succeed");
 
         assert!(
-            display_result.svg.contains(r#"transform="scale(1.2)""#),
+            display_result.0.contains(r#"transform="scale(1.2)""#),
             "display-mode SVG must contain transform=\"scale(1.2)\" wrapper; got: {}",
-            display_result.svg
+            display_result.0
         );
         assert!(
-            !inline_result.svg.contains(r#"transform="scale(1.2)""#),
+            !inline_result.0.contains(r#"transform="scale(1.2)""#),
             "inline-mode SVG must NOT contain scale transform; got: {}",
-            inline_result.svg
+            inline_result.0
         );
     }
 
@@ -1754,11 +1771,11 @@ mod tests {
         let result = render_pdf_paths(&ast).expect("render_pdf_paths must succeed for \\{x\\}");
         // With unescaping: left='{', right='}', inner='x' → 3 paths total.
         // Without unescaping: left='\{' (2 chars), right='\}' (2 chars), inner='x' → 5 paths.
-        let path_count = result.svg.matches("<path ").count();
+        let path_count = result.0.matches("<path ").count();
         assert_eq!(
             path_count, 3,
             "\\{{x\\}} with unescaping must produce 3 paths ({{, x, }}); got: {path_count}\nSVG: {}",
-            result.svg
+            result.0
         );
     }
 
@@ -1780,10 +1797,10 @@ mod tests {
         }]);
         let hat_svg = render_pdf_paths(&hat_ast)
             .expect("render_pdf_paths must succeed for \\hat{x}")
-            .svg;
+            .0;
         let bar_svg = render_pdf_paths(&bar_ast)
             .expect("render_pdf_paths must succeed for \\bar{x}")
-            .svg;
+            .0;
         assert_ne!(
             hat_svg, bar_svg,
             "\\hat{{x}} and \\bar{{x}} must produce distinct SVG paths"
@@ -1802,10 +1819,10 @@ mod tests {
         let big_phi_ast = inline_ast(vec![MathNode::Greek(Arc::from("Phi"))]);
         let phi_svg = render_pdf_paths(&phi_ast)
             .expect("render_pdf_paths must succeed for \\phi")
-            .svg;
+            .0;
         let big_phi_svg = render_pdf_paths(&big_phi_ast)
             .expect("render_pdf_paths must succeed for \\Phi")
-            .svg;
+            .0;
         assert_ne!(
             phi_svg, big_phi_svg,
             "\\phi (φ, U+03C6) must produce DIFFERENT SVG than \\Phi (Φ, U+03A6)"
@@ -1894,7 +1911,7 @@ mod tests {
             ),
         ])]);
         let result = render_pdf_paths(&ast).expect("render_pdf_paths must succeed for cases");
-        let svg = &result.svg;
+        let svg = &result.0;
 
         // Row 0 first path x
         let x_row0 = nth_path_x(svg, 0)
@@ -1933,7 +1950,7 @@ mod tests {
             ],
         ])]);
         let result = render_pdf_paths(&ast).expect("render_pdf_paths must succeed for align");
-        let svg = &result.svg;
+        let svg = &result.0;
 
         // Row 0 first path x (path 0 = 'x')
         let x_row0 = nth_path_x(svg, 0)

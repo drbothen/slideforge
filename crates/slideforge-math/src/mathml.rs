@@ -53,11 +53,17 @@ const MATHML_NS: &str = "http://www.w3.org/1998/Math/MathML";
 ///
 /// # Errors
 ///
-/// Returns [`MathError::RenderError`] if the AST cannot be serialised to
-/// `MathML`, [`MathError::EmptyCommandName`] if a Greek/Operator/Symbol node
-/// carries an empty command name, or [`MathError::UnsupportedSymbol`] if a
-/// command name has no Unicode mapping.
+/// Returns [`MathError::EmptyAst`] if the AST has no nodes (parity with
+/// `render_pdf_paths`), [`MathError::RenderError`] if the AST cannot be
+/// serialised to `MathML`, [`MathError::EmptyCommandName`] if a
+/// Greek/Operator/Symbol node carries an empty command name, or
+/// [`MathError::UnsupportedSymbol`] if a command name has no Unicode mapping.
 pub fn render_mathml(ast: &MathAst) -> Result<String, MathError> {
+    // Guard: an empty AST produces an empty <mrow>, which is not meaningful
+    // output. Return EmptyAst for parity with render_pdf_paths (F-S030-P9-L1).
+    if ast.nodes.is_empty() {
+        return Err(MathError::EmptyAst);
+    }
     let mut buf: Vec<u8> = Vec::with_capacity(512);
     let mut writer = Writer::new(&mut buf);
 
