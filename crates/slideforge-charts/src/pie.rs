@@ -177,6 +177,9 @@ mod tests {
                 Arc::from("#009E60"),
             ],
             font_family: Arc::from("sans-serif"),
+            slide_title: Arc::from(""),
+            expression: Arc::from(""),
+            span: slideforge_types::SourceSpan::default(),
         }
     }
 
@@ -241,6 +244,9 @@ mod tests {
             height: InternalChartSpec::DEFAULT_HEIGHT,
             accent_colors: vec![Arc::from("#003766")],
             font_family: Arc::from("sans-serif"),
+            slide_title: Arc::from(""),
+            expression: Arc::from(""),
+            span: slideforge_types::SourceSpan::default(),
         };
         let result = super::render_pie(&spec);
         assert!(
@@ -274,6 +280,9 @@ mod tests {
             height: InternalChartSpec::DEFAULT_HEIGHT,
             accent_colors: vec![Arc::from("#003766")],
             font_family: Arc::from("sans-serif"),
+            slide_title: Arc::from(""),
+            expression: Arc::from(""),
+            span: slideforge_types::SourceSpan::default(),
         };
         let result = super::render_pie(&spec);
         assert!(result.is_err(), "all-negative pie must return an error");

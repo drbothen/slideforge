@@ -56,8 +56,14 @@ fn xml_escape(s: &str) -> String {
 /// # Returns
 ///
 /// A complete SVG string (`<svg ...>...</svg>`) with no external references.
+/// The SVG dimensions match the chart renderer default (800 × 450 px) so that
+/// the placeholder fits the same slot as a rendered chart.
+///
 /// The SVG includes:
-/// - `aria-label` attribute containing `slide_title` for accessibility
+/// - Explicit `width="800"` and `height="450"` attributes (HIGH-001 / MED-006)
+/// - `viewBox="0 0 800 450"` matching the chart default (HIGH-001)
+/// - A top-level `<title>` child element with `slide_title` (HIGH-002)
+/// - `aria-label` attribute on the root for screen-reader accessibility
 /// - `role="img"` for ARIA semantics
 /// - A light gray background `<rect>`
 /// - `<text>` elements for `error_code` and `message`
@@ -76,17 +82,26 @@ pub fn build_error_slide_placeholder_svg(
     let escaped_code = xml_escape(error_code);
     let escaped_msg = xml_escape(message);
     let mut svg = String::new();
-    svg.push_str(r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" role="img" aria-label="Error placeholder for slide: "#);
+    // HIGH-001/MED-006: dimensions match chart default (800×450). Explicit width+height
+    // added alongside viewBox for SVG consumers that do not process viewBox alone.
+    svg.push_str(r#"<svg xmlns="http://www.w3.org/2000/svg" width="800" height="450" viewBox="0 0 800 450" role="img" aria-label="Error placeholder for slide: "#);
     svg.push_str(&escaped_title);
     svg.push_str("\">\n");
+    // HIGH-002: <title> child element for accessibility parity with chart SVGs.
+    svg.push_str("  <title>");
+    svg.push_str(&escaped_title);
+    svg.push_str("</title>\n");
     svg.push_str("  <rect width=\"100%\" height=\"100%\" fill=\"#F3F4F6\" stroke=\"#9CA3AF\" stroke-width=\"2\"/>\n");
-    svg.push_str("  <text x=\"640\" y=\"300\" text-anchor=\"middle\" font-family=\"sans-serif\" font-size=\"24\" font-weight=\"bold\" fill=\"#374151\">");
+    // Text positions scaled proportionally from 1280×720 → 800×450:
+    //   x: 640 → 400  (center of 800 px width)
+    //   y: 300 → 188, 350 → 225, 400 → 263
+    svg.push_str("  <text x=\"400\" y=\"188\" text-anchor=\"middle\" font-family=\"sans-serif\" font-size=\"24\" font-weight=\"bold\" fill=\"#374151\">");
     svg.push_str(&escaped_code);
     svg.push_str("</text>\n");
-    svg.push_str("  <text x=\"640\" y=\"350\" text-anchor=\"middle\" font-family=\"sans-serif\" font-size=\"20\" fill=\"#374151\">");
+    svg.push_str("  <text x=\"400\" y=\"225\" text-anchor=\"middle\" font-family=\"sans-serif\" font-size=\"20\" fill=\"#374151\">");
     svg.push_str(&escaped_title);
     svg.push_str("</text>\n");
-    svg.push_str("  <text x=\"640\" y=\"400\" text-anchor=\"middle\" font-family=\"sans-serif\" font-size=\"16\" fill=\"#6B7280\">");
+    svg.push_str("  <text x=\"400\" y=\"263\" text-anchor=\"middle\" font-family=\"sans-serif\" font-size=\"16\" fill=\"#6B7280\">");
     svg.push_str(&escaped_msg);
     svg.push_str("</text>\n");
     svg.push_str("</svg>");
@@ -235,5 +250,160 @@ mod tests {
              SVG first 600 chars: {}",
             &svg[..svg.len().min(600)]
         );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // HIGH-001 / MED-006 — Placeholder SVG dimensions: 800×450 with explicit attrs
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// HIGH-001 — Placeholder SVG uses 800×450 viewBox (matches chart default, not 1280×720).
+    #[test]
+    fn test_bc_1_11_002_placeholder_svg_has_800x450_viewbox() {
+        let svg = build_error_slide_placeholder_svg("Test", "E-LAY-003", "empty");
+        assert!(
+            svg.contains("viewBox=\"0 0 800 450\""),
+            "placeholder SVG must have viewBox=\"0 0 800 450\" (chart default size); \
+             got: {}",
+            &svg[..svg.len().min(300)]
+        );
+    }
+
+    /// MED-006 — Placeholder SVG has explicit width and height attributes.
+    #[test]
+    fn test_bc_1_11_002_placeholder_svg_has_explicit_width_height() {
+        let svg = build_error_slide_placeholder_svg("Test", "E-LAY-003", "empty");
+        assert!(
+            svg.contains("width=\"800\""),
+            "placeholder SVG must have explicit width=\"800\" attribute; got: {}",
+            &svg[..svg.len().min(300)]
+        );
+        assert!(
+            svg.contains("height=\"450\""),
+            "placeholder SVG must have explicit height=\"450\" attribute; got: {}",
+            &svg[..svg.len().min(300)]
+        );
+    }
+
+    /// HIGH-002 — Placeholder SVG has a top-level `<title>` child element.
+    ///
+    /// Provides accessibility parity with rendered chart SVGs which also have
+    /// a `<title>` element.
+    #[test]
+    fn test_bc_1_11_002_placeholder_svg_has_title_element() {
+        let svg =
+            build_error_slide_placeholder_svg("Revenue Chart", "E-LAY-003", "Chart data is empty");
+        assert!(
+            svg.contains("<title>"),
+            "placeholder SVG must contain a <title> element for accessibility; \
+             got first 400 chars: {}",
+            &svg[..svg.len().min(400)]
+        );
+        // Title element must contain the (escaped) slide title text.
+        // "Revenue Chart" has no special chars so will appear verbatim.
+        assert!(
+            svg.contains("<title>Revenue Chart</title>"),
+            "placeholder <title> must contain the slide title text; got: {}",
+            &svg[..svg.len().min(600)]
+        );
+    }
+
+    /// HIGH-002 — `<title>` element content is XML-escaped when slide title has special chars.
+    #[test]
+    fn test_bc_1_11_002_placeholder_title_element_escapes_slide_title() {
+        let svg = build_error_slide_placeholder_svg("Revenue & Profit <Q3>", "E-LAY-003", "empty");
+        assert!(
+            svg.contains("<title>Revenue &amp; Profit &lt;Q3&gt;</title>"),
+            "placeholder <title> must XML-escape the slide title; got: {}",
+            &svg[..svg.len().min(600)]
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // MED-003 — xml_escape per-entity and double-escape prevention
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// MED-003 — `xml_escape` escapes `&` → `&amp;`.
+    #[test]
+    fn test_placeholder_xml_escape_ampersand() {
+        // Access xml_escape indirectly via build_error_slide_placeholder_svg.
+        // The title "A & B" should appear as "A &amp; B" in the SVG.
+        let svg = build_error_slide_placeholder_svg("A & B", "E-LAY-003", "empty");
+        assert!(
+            svg.contains("A &amp; B"),
+            "& must be escaped to &amp; in SVG output; got: {}",
+            &svg[..svg.len().min(400)]
+        );
+    }
+
+    /// MED-003 — `xml_escape` escapes `<` → `&lt;`.
+    #[test]
+    fn test_placeholder_xml_escape_less_than() {
+        let svg = build_error_slide_placeholder_svg("A < B", "E-LAY-003", "empty");
+        assert!(
+            svg.contains("A &lt; B"),
+            "< must be escaped to &lt;; got: {}",
+            &svg[..svg.len().min(400)]
+        );
+    }
+
+    /// MED-003 — `xml_escape` escapes `>` → `&gt;`.
+    #[test]
+    fn test_placeholder_xml_escape_greater_than() {
+        let svg = build_error_slide_placeholder_svg("A > B", "E-LAY-003", "empty");
+        assert!(
+            svg.contains("A &gt; B"),
+            "> must be escaped to &gt;; got: {}",
+            &svg[..svg.len().min(400)]
+        );
+    }
+
+    /// MED-003 — `xml_escape` escapes `"` → `&quot;`.
+    #[test]
+    fn test_placeholder_xml_escape_double_quote() {
+        let svg = build_error_slide_placeholder_svg("Say \"hi\"", "E-LAY-003", "empty");
+        assert!(
+            svg.contains("Say &quot;hi&quot;"),
+            "\" must be escaped to &quot;; got: {}",
+            &svg[..svg.len().min(400)]
+        );
+    }
+
+    /// MED-003 — `xml_escape` escapes `'` → `&apos;`.
+    #[test]
+    fn test_placeholder_xml_escape_single_quote() {
+        let svg = build_error_slide_placeholder_svg("It's here", "E-LAY-003", "empty");
+        assert!(
+            svg.contains("It&apos;s here"),
+            "' must be escaped to &apos;; got: {}",
+            &svg[..svg.len().min(400)]
+        );
+    }
+
+    /// MED-003 — Double-escape trap: `&amp;` input must not become `&amp;amp;`.
+    ///
+    /// If the input already contains `&amp;` (e.g., a string that was pre-escaped),
+    /// `xml_escape` must only escape the `&` in `&amp;` — not the already-escaped
+    /// entity sequence. The `&` in `&amp;` is a real `&` character and must be
+    /// escaped to `&amp;`. Result: `&amp;amp;`.
+    ///
+    /// Wait — `&amp;` as input is a 5-character string: `&`, `a`, `m`, `p`, `;`.
+    /// `xml_escape` sees the `&` and escapes it to `&amp;`, so the output is
+    /// `&amp;amp;` (the correct behavior for a raw string `"&amp;"` passed in).
+    /// This test verifies that the escaped `&` is not double-skipped.
+    #[test]
+    fn test_placeholder_xml_escape_ampersand_in_already_escaped_input() {
+        // Input: literal "&amp;" (the 5-char sequence & a m p ;)
+        // Expected output: "&amp;amp;" (the & at start gets escaped to &amp;,
+        // yielding &amp;amp;)
+        let svg = build_error_slide_placeholder_svg("&amp;", "E-LAY-003", "empty");
+        // The & at the start of "&amp;" must be escaped.
+        assert!(
+            svg.contains("&amp;amp;"),
+            "& in input '&amp;' must be escaped to &amp;amp; (not left as &amp;); \
+             got: {}",
+            &svg[..svg.len().min(400)]
+        );
+        // The output must NOT contain a raw unescaped & in the text content positions.
+        // (It's OK in attribute values like xmlns= etc.)
     }
 }

@@ -73,14 +73,17 @@ impl ChartRendererImpl {
     /// Dispatch to the appropriate type-specific renderer and apply post-processing.
     ///
     /// Post-processing steps (in order):
-    /// 1. Type-specific renderer → raw SVG string
-    /// 2. [`safety::assert_no_forbidden_elements`]
-    /// 3. [`accessibility::inject_aria_attributes`]
+    /// 1. **BC-1.11.002 invariant 2**: empty-data guard — returns
+    ///    [`ChartError::EmptyData`] immediately if `spec.data` is empty,
+    ///    before any renderer is called.
+    /// 2. Type-specific renderer → raw SVG string
+    /// 3. [`safety::assert_no_forbidden_elements`]
+    /// 4. [`accessibility::inject_aria_attributes`]
     ///
     /// # Errors
     ///
+    /// Returns [`ChartError::EmptyData`] when `spec.data` is empty (no series).
     /// Returns [`ChartError`] on render or post-processing failure.
-    /// Dispatch to the appropriate type-specific renderer and apply post-processing.
     ///
     /// This is the **primary internal entry point** for chart rendering in the
     /// slideforge eval pipeline. The eval layer calls this method directly with
@@ -91,6 +94,18 @@ impl ChartRendererImpl {
     /// this method from the eval pipeline via [`InternalChartSpec`].
     ///
     pub fn dispatch_and_process(spec: &InternalChartSpec) -> Result<ChartSvg, ChartError> {
+        // BC-1.11.002 invariant 2: empty-data guard must run BEFORE renderer dispatch.
+        // `spec.data.is_empty()` means no DataSeries were bound — equivalent to
+        // `Value::List([])` at the eval-layer. Return EmptyData immediately so the
+        // renderer is never called with an empty series list.
+        if spec.data.is_empty() {
+            return Err(ChartError::EmptyData {
+                slide_title: Arc::clone(&spec.slide_title),
+                expression: Arc::clone(&spec.expression),
+                span: spec.span.clone(),
+            });
+        }
+
         let raw_svg = match spec.chart_type {
             ChartType::Bar => bar::render_bar(spec)?,
             ChartType::Line => line::render_line(spec)?,
@@ -260,6 +275,9 @@ mod tests {
             height: InternalChartSpec::DEFAULT_HEIGHT,
             accent_colors: vec![Arc::from("#003766")],
             font_family: Arc::from("sans-serif"),
+            slide_title: Arc::from(""),
+            expression: Arc::from(""),
+            span: SourceSpan::default(),
         }
     }
 
@@ -513,6 +531,9 @@ mod tests {
             height: InternalChartSpec::DEFAULT_HEIGHT,
             accent_colors: vec![Arc::from("#003766")],
             font_family: Arc::from("sans-serif"),
+            slide_title: Arc::from(""),
+            expression: Arc::from(""),
+            span: SourceSpan::default(),
         };
         let result = crate::bar::render_bar(&spec);
         assert!(result.is_err(), "NaN data must return an error");
@@ -542,6 +563,9 @@ mod tests {
             height: InternalChartSpec::DEFAULT_HEIGHT,
             accent_colors: vec![Arc::from("#003766")],
             font_family: Arc::from("sans-serif"),
+            slide_title: Arc::from(""),
+            expression: Arc::from(""),
+            span: SourceSpan::default(),
         };
         let result = crate::line::render_line(&spec);
         assert!(result.is_err(), "Infinite data must return an error");
@@ -954,6 +978,9 @@ mod tests {
             height: InternalChartSpec::DEFAULT_HEIGHT,
             accent_colors: vec![Arc::from("#003766")],
             font_family: Arc::from("sans-serif"),
+            slide_title: Arc::from(""),
+            expression: Arc::from(""),
+            span: SourceSpan::default(),
         };
         let result = crate::pie::render_pie(&spec);
         let svg = result.unwrap();
@@ -980,6 +1007,9 @@ mod tests {
             height: InternalChartSpec::DEFAULT_HEIGHT,
             accent_colors: vec![Arc::from("#003766")],
             font_family: Arc::from("Calibri"),
+            slide_title: Arc::from(""),
+            expression: Arc::from(""),
+            span: SourceSpan::default(),
         };
         let svg = crate::bar::render_bar(&spec).unwrap();
         assert!(
@@ -1022,6 +1052,9 @@ mod tests {
             height: InternalChartSpec::DEFAULT_HEIGHT,
             accent_colors: vec![Arc::from("#003766")],
             font_family: Arc::from("sans-serif"),
+            slide_title: Arc::from(""),
+            expression: Arc::from(""),
+            span: SourceSpan::default(),
         }
     }
 
@@ -1243,6 +1276,9 @@ mod tests {
             height: InternalChartSpec::DEFAULT_HEIGHT,
             accent_colors: vec![Arc::from("#003766")],
             font_family: Arc::from("sans-serif"),
+            slide_title: Arc::from(""),
+            expression: Arc::from(""),
+            span: SourceSpan::default(),
         };
 
         let result = ChartRendererImpl::dispatch_and_process(&spec);
@@ -1298,6 +1334,9 @@ mod tests {
             height: InternalChartSpec::DEFAULT_HEIGHT,
             accent_colors: vec![Arc::from("#003766")],
             font_family: Arc::from("sans-serif"),
+            slide_title: Arc::from(""),
+            expression: Arc::from(""),
+            span: SourceSpan::default(),
         }
     }
 
@@ -1399,6 +1438,9 @@ mod tests {
             height: InternalChartSpec::DEFAULT_HEIGHT,
             accent_colors: vec![Arc::from("#003766")],
             font_family: Arc::from("sans-serif"),
+            slide_title: Arc::from(""),
+            expression: Arc::from(""),
+            span: SourceSpan::default(),
         }
     }
 
@@ -1423,6 +1465,197 @@ mod tests {
         assert!(
             svg.contains("<svg"),
             "single-point area output must contain <svg root element"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // BC-1.11.002 CRIT-001/002/003 — Empty-data guard wired into dispatch_and_process
+    // -----------------------------------------------------------------------
+
+    /// BC-1.11.002 invariant 2 — empty-data guard blocks renderer dispatch (strict mode).
+    ///
+    /// When `spec.data` is empty, `dispatch_and_process` must return
+    /// `ChartError::EmptyData` BEFORE calling any renderer. The test verifies
+    /// that the error is returned without panicking and that the error code
+    /// `E-LAY-003` appears in the Display string.
+    #[test]
+    fn test_bc_1_11_002_guard_blocks_renderer_dispatch_strict() {
+        let spec = InternalChartSpec {
+            chart_type: crate::types::ChartType::Bar,
+            data: vec![], // empty — guard must fire
+            title: None,
+            x_label: None,
+            y_label: None,
+            alt: Arc::from("empty data test"),
+            width: InternalChartSpec::DEFAULT_WIDTH,
+            height: InternalChartSpec::DEFAULT_HEIGHT,
+            accent_colors: vec![Arc::from("#003766")],
+            font_family: Arc::from("sans-serif"),
+            slide_title: Arc::from("Revenue Chart"),
+            expression: Arc::from("{{ kpis.monthly }}"),
+            span: SourceSpan::default(),
+        };
+
+        let result = ChartRendererImpl::dispatch_and_process(&spec);
+
+        // Must fail with EmptyData, not a renderer error.
+        assert!(
+            result.is_err(),
+            "dispatch_and_process with empty data must return Err"
+        );
+        let err = result.unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("E-LAY-003"),
+            "EmptyData error must include 'E-LAY-003'; got: {msg}"
+        );
+        assert!(
+            msg.contains("Revenue Chart"),
+            "EmptyData error must include the slide title; got: {msg}"
+        );
+        // Verify it is specifically ChartError::EmptyData (not a render error).
+        assert!(
+            matches!(err, crate::types::ChartError::EmptyData { .. }),
+            "error variant must be ChartError::EmptyData; got: {err:?}"
+        );
+    }
+
+    /// BC-1.11.002 postcondition 3 — warn-only caller builds `ErrorSlidePlaceholder` SVG.
+    ///
+    /// When `dispatch_and_process` returns `ChartError::EmptyData`, the pipeline
+    /// caller (in the eval or layout layer) can substitute an
+    /// `ErrorSlidePlaceholder` by:
+    /// 1. Extracting `slide_title` from the error
+    /// 2. Calling `placeholder::build_error_slide_placeholder_svg`
+    ///
+    /// This test verifies the end-to-end placeholder SVG production path that
+    /// the caller would use. It does NOT import `slideforge-layout` types
+    /// (no layout crate dependency from charts crate — architecture boundary).
+    #[test]
+    fn test_bc_1_11_002_warn_only_substitutes_placeholder() {
+        let spec = InternalChartSpec {
+            chart_type: crate::types::ChartType::Line,
+            data: vec![], // empty
+            title: None,
+            x_label: None,
+            y_label: None,
+            alt: Arc::from("kpi chart"),
+            width: InternalChartSpec::DEFAULT_WIDTH,
+            height: InternalChartSpec::DEFAULT_HEIGHT,
+            accent_colors: vec![Arc::from("#003766")],
+            font_family: Arc::from("sans-serif"),
+            slide_title: Arc::from("KPI Dashboard"),
+            expression: Arc::from("{{ kpis.monthly }}"),
+            span: SourceSpan::default(),
+        };
+
+        // Step 1: guard fires → EmptyData error.
+        let result = ChartRendererImpl::dispatch_and_process(&spec);
+        assert!(result.is_err(), "empty-data must produce an error");
+
+        // Step 2: caller in warn-only mode extracts slide_title and builds placeholder SVG.
+        let (placeholder_svg, placeholder_title, placeholder_code) = match result.unwrap_err() {
+            crate::types::ChartError::EmptyData {
+                slide_title,
+                expression: _,
+                span: _,
+            } => {
+                let message = format!(
+                    "Chart data is empty for slide '{slide_title}'. Rendering error-slide placeholder."
+                );
+                let svg = crate::placeholder::build_error_slide_placeholder_svg(
+                    &slide_title,
+                    crate::validation::E_LAY_003,
+                    &message,
+                );
+                (
+                    svg,
+                    slide_title,
+                    Arc::<str>::from(crate::validation::E_LAY_003),
+                )
+            },
+            other => panic!("expected ChartError::EmptyData, got: {other:?}"),
+        };
+
+        // Verify placeholder SVG is valid and contains expected content.
+        assert!(
+            placeholder_svg.contains("<svg"),
+            "placeholder svg must contain <svg root element"
+        );
+        assert!(
+            placeholder_svg.contains("E-LAY-003"),
+            "placeholder svg must render error code E-LAY-003"
+        );
+        assert_eq!(placeholder_title.as_ref(), "KPI Dashboard");
+        assert_eq!(placeholder_code.as_ref(), "E-LAY-003");
+        // Placeholder SVG must be PPTX-safe.
+        assert!(
+            !placeholder_svg.contains("<script"),
+            "placeholder svg must not contain <script"
+        );
+        assert!(
+            !placeholder_svg.contains("<foreignObject"),
+            "placeholder svg must not contain <foreignObject"
+        );
+    }
+
+    /// BC-1.11.002 — multi-slide scenario: one empty, two valid charts.
+    ///
+    /// Simulates a deck with three chart specs: the first is empty (guard fires),
+    /// the second and third have data (render succeeds). Verifies that:
+    /// 1. Empty spec → `ChartError::EmptyData`
+    /// 2. Non-empty specs → `Ok(ChartSvg)` with valid SVG
+    /// 3. Each renders independently (no cross-contamination)
+    #[test]
+    fn test_bc_1_11_002_multi_slide_one_empty_two_valid() {
+        let empty_spec = InternalChartSpec {
+            chart_type: crate::types::ChartType::Bar,
+            data: vec![],
+            title: None,
+            x_label: None,
+            y_label: None,
+            alt: Arc::from("empty"),
+            width: InternalChartSpec::DEFAULT_WIDTH,
+            height: InternalChartSpec::DEFAULT_HEIGHT,
+            accent_colors: vec![Arc::from("#003766")],
+            font_family: Arc::from("sans-serif"),
+            slide_title: Arc::from("Empty Chart"),
+            expression: Arc::from("{{ missing }}"),
+            span: SourceSpan::default(),
+        };
+
+        let valid_spec_1 = make_spec(crate::types::ChartType::Bar);
+        let valid_spec_2 = make_spec(crate::types::ChartType::Line);
+
+        let specs = [&empty_spec, &valid_spec_1, &valid_spec_2];
+        let results: Vec<_> = specs
+            .iter()
+            .map(|s| ChartRendererImpl::dispatch_and_process(s))
+            .collect();
+
+        // Index 0: empty → EmptyData error
+        assert!(
+            matches!(results[0], Err(crate::types::ChartError::EmptyData { .. })),
+            "empty spec must return ChartError::EmptyData"
+        );
+
+        // Index 1: valid bar → Ok with SVG
+        let svg1 = results[1].as_ref().expect("valid bar spec must succeed");
+        assert!(!svg1.as_str().is_empty(), "valid bar SVG must be non-empty");
+        assert!(
+            svg1.as_str().contains("<svg"),
+            "valid bar SVG must have <svg"
+        );
+
+        // Index 2: valid line → Ok with SVG
+        let svg2 = results[2].as_ref().expect("valid line spec must succeed");
+        assert!(
+            !svg2.as_str().is_empty(),
+            "valid line SVG must be non-empty"
+        );
+        assert!(
+            svg2.as_str().contains("<svg"),
+            "valid line SVG must have <svg"
         );
     }
 

@@ -125,6 +125,21 @@ pub struct InternalChartSpec {
     /// not available in the rendering context, plotters falls back to its
     /// built-in font.
     pub font_family: Arc<str>,
+    /// The human-readable title of the chart slide, used in `ChartError::EmptyData`
+    /// and error-slide placeholder messages (BC-1.11.002 invariant 2).
+    ///
+    /// Defaults to `""` if not supplied by the eval pipeline.
+    pub slide_title: Arc<str>,
+    /// The data binding expression from the DSL (e.g., `"{{ kpis.monthly }}"`),
+    /// used in `ChartError::EmptyData` diagnostics (BC-1.11.002 AC-001).
+    ///
+    /// Defaults to `""` if not supplied by the eval pipeline.
+    pub expression: Arc<str>,
+    /// Source location of the data binding in the `.sf` file.
+    ///
+    /// Carried into `ChartError::EmptyData` for miette span rendering.
+    /// Defaults to [`slideforge_types::SourceSpan::default`] if not supplied.
+    pub span: slideforge_types::SourceSpan,
 }
 
 impl InternalChartSpec {
@@ -204,7 +219,17 @@ pub enum ChartError {
     ///
     /// In strict mode: this error causes the build to fail (exit code 2, no output).
     /// In warn-only mode: the caller produces a [`slideforge_layout::FrameContent::ErrorSlidePlaceholder`].
-    #[error("E-LAY-003: chart data is empty for slide '{slide_title}' (expression: {expression})")]
+    ///
+    /// ## Canonical Display format (HIGH-004)
+    ///
+    /// `"E-LAY-003: Chart data is empty for slide '<title>'. Rendering error-slide placeholder."`
+    ///
+    /// The `expression` field is available to callers that need it (e.g., for building
+    /// diagnostics), but is NOT inlined in the Display string — miette renders the
+    /// `span` source pointer separately.
+    #[error(
+        "E-LAY-003: Chart data is empty for slide '{slide_title}'. Rendering error-slide placeholder."
+    )]
     EmptyData {
         /// The title of the chart slide where empty data was detected.
         slide_title: Arc<str>,
@@ -329,13 +354,16 @@ mod tests {
         );
     }
 
-    /// BC-1.11.002 AC-001 — `ChartError::EmptyData` Display impl includes `E-LAY-003`.
+    /// BC-1.11.002 AC-001 — `ChartError::EmptyData` Display impl uses canonical message.
     ///
     /// Traceability anchor: the named test for test vector 19 in STORY-032.
     ///
-    /// This test is structural (verifies the thiserror `#[error(...)]` template)
-    /// and passes at stub time. Its purpose is naming — providing a canonical
-    /// `test_BC_S_SS_NNN_xxx()` identifier for the `EmptyData` display assertion.
+    /// HIGH-004 (adversarial pass): the canonical Display format is:
+    /// `"E-LAY-003: Chart data is empty for slide '<title>'. Rendering error-slide placeholder."`
+    ///
+    /// The `expression` field is NOT inlined in the message body; it is available on
+    /// the variant for callers that need it. Miette renders the `span` source pointer
+    /// as a separate code-snippet annotation.
     #[test]
     fn test_bc_1_11_002_chart_error_empty_data_displays_e_lay_003() {
         use slideforge_types::SourceSpan;
@@ -350,11 +378,16 @@ mod tests {
             display.contains("E-LAY-003"),
             "ChartError::EmptyData Display must include 'E-LAY-003'; got: {display}"
         );
-        // Also verify that the expression appears in the Display output, per the
-        // thiserror template: "... (expression: {expression})"
         assert!(
-            display.contains("kpis"),
-            "ChartError::EmptyData Display must include the expression; got: {display}"
+            display.contains("Q3 Dashboard"),
+            "ChartError::EmptyData Display must include the slide title; got: {display}"
+        );
+        // HIGH-004: expression is NOT in the Display string (it is in the span/field).
+        // The canonical message is: "E-LAY-003: Chart data is empty for slide '<title>'.
+        // Rendering error-slide placeholder."
+        assert!(
+            display.contains("Rendering error-slide placeholder"),
+            "ChartError::EmptyData Display must include the canonical suffix; got: {display}"
         );
     }
 

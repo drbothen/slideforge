@@ -30,14 +30,13 @@ pub const E_LAY_003: &str = "E-LAY-003";
 
 /// Return `true` if `data` represents an empty collection.
 ///
-/// A `Value` is considered empty when it is:
-/// - [`Value::List`] with zero elements, or
-/// - [`Value::List`] whose elements are all empty (not checked here — only
-///   top-level emptiness is detected at this stage).
+/// A `Value` is considered empty (triggering E-LAY-003) when it is:
+/// - [`Value::List`] with zero elements (top-level only — not checked recursively)
+/// - [`Value::Map`] with zero entries (empty mapping has no chart rows)
 ///
-/// Any non-`List` value (e.g., `Value::Null`, `Value::Str`, `Value::Map`) is
-/// considered non-empty from the chart guard's perspective; those cases are
-/// caught earlier by the eval-stage type checker (E-EVL-006).
+/// `Value::Null`, `Value::Str`, `Value::Int`, `Value::Bool` are NOT flagged
+/// as empty by this guard; those type mismatches are caught by the eval-stage
+/// type checker (E-EVL-006) before the chart renderer is reached.
 ///
 /// # Examples
 ///
@@ -50,7 +49,11 @@ pub const E_LAY_003: &str = "E-LAY-003";
 /// ```
 #[must_use]
 pub fn data_is_empty(data: &Value) -> bool {
-    matches!(data, Value::List(items) if items.is_empty())
+    match data {
+        Value::List(items) => items.is_empty(),
+        Value::Map(m) => m.is_empty(),
+        _ => false,
+    }
 }
 
 /// Build an `E-LAY-003` [`Diagnostic`] for an empty-data chart slide.
@@ -62,6 +65,8 @@ pub fn data_is_empty(data: &Value) -> bool {
 ///
 /// * `slide_title` — The title of the chart slide (for the human-readable message).
 /// * `expression` — The data binding expression from the DSL (e.g., `{{ kpis.monthly }}`).
+///   The expression is passed through as a function argument for callers that need it,
+///   but is NOT inlined into the message body (miette renders the span pointer separately).
 /// * `span` — Source location of the `data` binding line in the `.sf` file.
 ///
 /// # Returns
@@ -71,19 +76,20 @@ pub fn data_is_empty(data: &Value) -> bool {
 /// - `severity`: [`DiagnosticSeverity::Error`]
 /// - `message`: `"Chart data is empty for slide '<slide_title>'. Rendering error-slide placeholder."`
 /// - `hint`: `"Ensure the data source contains at least one row."`
-/// - `span`: the provided `span`
+/// - `span`: the provided `span` (miette renders the expression location as a source pointer)
 #[must_use]
 pub fn build_empty_data_diagnostic(
     slide_title: &str,
-    expression: &str,
+    _expression: &str,
     span: SourceSpan,
 ) -> Diagnostic {
     Diagnostic {
         severity: slideforge_plugin_api::DiagnosticSeverity::Error,
         code: std::sync::Arc::from(E_LAY_003),
+        // HIGH-004: canonical message format — expression NOT inlined; miette renders the
+        // span source pointer which points at the data binding expression directly.
         message: std::sync::Arc::from(format!(
-            "Chart data is empty for slide '{slide_title}' (expression: {expression}). \
-             Rendering error-slide placeholder."
+            "Chart data is empty for slide '{slide_title}'. Rendering error-slide placeholder."
         )),
         span,
         hint: Some(std::sync::Arc::from(
@@ -103,12 +109,15 @@ mod tests {
     use super::*;
 
     // ─────────────────────────────────────────────────────────────────────────
-    // data_is_empty — BC-1.11.002 AC-002 / postcondition 1 / invariant 2
+    // data_is_empty — BC-1.11.002 precondition helper (MED-004: narrower anchor)
+    //
+    // MED-004: section anchor updated from "AC-002 / postcondition 1 / invariant 2"
+    // to "precondition helper". `data_is_empty` is a PRECONDITION guard — it does
+    // not verify postconditions; it enables them by preventing the renderer call
+    // when data is absent. Postcondition-level assertions are in the lib.rs tests.
     // ─────────────────────────────────────────────────────────────────────────
 
-    /// BC-1.11.002 — `Value::List([])` is recognized as empty.
-    ///
-    /// Red Gate: fails until `data_is_empty` is implemented.
+    /// BC-1.11.002 precondition helper — `Value::List([])` is recognized as empty.
     #[test]
     fn test_bc_1_11_002_data_is_empty_for_empty_list() {
         assert!(
@@ -175,17 +184,50 @@ mod tests {
     ///
     /// Only top-level `Value::List([])` triggers the empty-data check. A list
     /// with one element (even if that element is itself an empty list) is
-    /// considered non-empty at this stage.
+    /// considered non-empty at this stage — the outer list has 1 element.
     ///
-    /// Red Gate: fails until `data_is_empty` is implemented.
+    /// MED-001: renamed from `test_bc_1_11_002_data_is_empty_for_nested_empty_list`
+    /// (the old name was misleading — it tests the not-empty case for an outer list).
     #[test]
-    fn test_bc_1_11_002_data_is_empty_for_nested_empty_list() {
+    fn test_bc_1_11_002_data_is_not_empty_for_outer_list_with_inner_empty_list() {
         // Outer list has one element (inner empty list) → outer is NOT empty.
         let nested = Value::List(vec![Value::List(vec![])]);
         assert!(
             !data_is_empty(&nested),
             "Value::List([Value::List([])]) — outer list has 1 element so must NOT be empty; \
              only a top-level empty List triggers E-LAY-003"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // HIGH-003 — data_is_empty extended cases: Value::Map
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// HIGH-003 — `Value::Map({})` (empty map) is recognized as empty.
+    ///
+    /// An empty map binding has no chart rows. The guard must catch this at
+    /// the same stage as an empty list.
+    #[test]
+    fn test_bc_1_11_002_data_is_empty_for_empty_map() {
+        use slideforge_types::OrderedMap;
+        let empty_map: OrderedMap<Arc<str>, Value> = OrderedMap::new();
+        assert!(
+            data_is_empty(&Value::Map(empty_map)),
+            "Value::Map({{}}) must be recognized as empty data by the chart guard"
+        );
+    }
+
+    /// HIGH-003 — Non-empty `Value::Map` is NOT empty.
+    ///
+    /// A map with at least one entry has chart rows; guard must pass it through.
+    #[test]
+    fn test_bc_1_11_002_data_is_not_empty_for_nonempty_map() {
+        use slideforge_types::OrderedMap;
+        let mut map: OrderedMap<Arc<str>, Value> = OrderedMap::new();
+        map.insert(Arc::from("revenue"), Value::Int(100));
+        assert!(
+            !data_is_empty(&Value::Map(map)),
+            "Value::Map with 1 entry must NOT be recognized as empty"
         );
     }
 
@@ -207,16 +249,18 @@ mod tests {
         );
     }
 
-    /// BC-1.11.002 AC-001 / AC-003 — Diagnostic is `Error` severity (strict-mode
-    /// default). The AC-003 spec says strict mode causes exit code 2; this is
-    /// driven by the `DiagnosticSink` seeing an `Error`-severity diagnostic.
+    /// BC-1.11.002 AC-001 / AC-003 — Diagnostic is `Error` severity by default.
+    ///
     /// `build_empty_data_diagnostic` always returns `Error` severity because the
     /// pipeline dispatcher (not this function) downgrades to `Warning` for
-    /// warn-only mode.
+    /// warn-only mode. AC-003 strict mode causes exit code 2 by the `DiagnosticSink`
+    /// seeing an `Error`-severity diagnostic.
     ///
-    /// Red Gate: fails until `build_empty_data_diagnostic` is implemented.
+    /// MED-002: renamed from `test_bc_1_11_002_diagnostic_severity_depends_on_mode`
+    /// (old name implied mode-awareness in the function, but the function is stateless —
+    /// it always returns Error and the dispatcher handles downgrade).
     #[test]
-    fn test_bc_1_11_002_diagnostic_severity_depends_on_mode() {
+    fn test_bc_1_11_002_diagnostic_is_error_severity_by_default() {
         // Strict mode (default): the diagnostic returned must be Error severity.
         // The caller (pipeline dispatcher) is responsible for warn-only downgrade.
         let span = SourceSpan::default();
@@ -245,21 +289,35 @@ mod tests {
         );
     }
 
-    /// BC-1.11.002 AC-001 — Message references the data binding expression.
+    /// BC-1.11.002 AC-001 / HIGH-004 — Diagnostic uses canonical message format.
     ///
-    /// The diagnostic must quote or reference the data expression so the user
-    /// knows which binding triggered E-LAY-003.
+    /// The canonical message is:
+    /// `"Chart data is empty for slide '<title>'. Rendering error-slide placeholder."`
     ///
-    /// Red Gate: fails until `build_empty_data_diagnostic` is implemented.
+    /// The expression is NOT inlined in the message body (miette renders the span
+    /// source pointer separately). This test verifies the canonical format.
+    ///
+    /// Updated by HIGH-004 adversarial finding (three sources of truth reconciled).
     #[test]
     fn test_bc_1_11_002_diagnostic_message_contains_data_expression() {
         let span = SourceSpan::default();
         let expr = "{{ kpis.monthly }}";
         let diag = build_empty_data_diagnostic("Revenue Overview", expr, span);
+        // HIGH-004: canonical message does NOT inline the expression — verify canonical form.
         assert!(
-            diag.message.contains("kpis.monthly") || diag.message.contains(expr),
-            "diagnostic message must reference the data expression '{}'; got: {}",
-            expr,
+            diag.message.contains("Revenue Overview"),
+            "diagnostic message must contain the slide title; got: {}",
+            diag.message
+        );
+        assert!(
+            diag.message.contains("Rendering error-slide placeholder"),
+            "diagnostic message must contain canonical suffix; got: {}",
+            diag.message
+        );
+        // Verify expression is NOT in message body (it belongs in the span/field).
+        assert!(
+            !diag.message.contains("expression:"),
+            "canonical message must NOT inline expression: prefix; got: {}",
             diag.message
         );
     }
