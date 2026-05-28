@@ -14,7 +14,10 @@
 //!
 //! The response body format is determined by:
 //! 1. The `format_hint` field if set (explicit override).
-//! 2. The `Content-Type` response header (`application/json`, `text/csv`, etc.).
+//! 2. The `Content-Type` response header (`application/json`, `text/csv`,
+//!    `application/x-yaml`, etc.). JSON, CSV, and YAML are supported.
+//!    TOML over HTTP is not supported (AC-005). Use a file-based `DataSource`
+//!    for TOML files.
 //!
 //! ## Offline Mode
 //!
@@ -44,6 +47,7 @@
 //! | Parse failure | `E-DAT-003` ([`crate::DataError::ParseError`]) |
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use slideforge_plugin_api::{DataSource, DataSourceError, DataSourceOptions};
 use slideforge_types::Value;
@@ -58,7 +62,7 @@ use crate::parse;
 /// The built-in HTTP/HTTPS data source plugin.
 ///
 /// Fetches data over HTTP or HTTPS and parses the response body as JSON,
-/// CSV, YAML, or TOML. The plugin identifier is `"http"`.
+/// CSV, or YAML. The plugin identifier is `"http"`.
 ///
 /// See the [module documentation](self) for details on SSRF protection,
 /// format detection, and error codes.
@@ -281,22 +285,94 @@ fn data_error_to_source_error(uri: &str, err: &DataError) -> DataSourceError {
     }
 }
 
+/// Build the shared [`ureq::Agent`] used for all HTTP requests.
+///
+/// Security properties baked in:
+/// - `redirects(0)` — redirects are NEVER followed. A 3xx response is treated
+///   as an [`DataError::HttpError`] (E-DAT-001) with the redirect status code.
+///   This prevents SSRF bypass via redirect: an allowlisted server cannot
+///   transparently bounce the request to a blocked domain.
+/// - `timeout_connect(10s)` — prevents indefinite hang on slow-loris / slow
+///   connect attacks (BC-1.03.002 NFR requirement).
+/// - `timeout_read(30s)` — prevents indefinite hang during body transfer.
+fn build_agent() -> ureq::Agent {
+    ureq::AgentBuilder::new()
+        .redirects(0)
+        .timeout_connect(Duration::from_secs(10))
+        .timeout_read(Duration::from_secs(30))
+        .build()
+}
+
 /// Issue a GET request to `url_str`, retrying once on transport errors or HTTP 5xx.
 ///
 /// Retry policy (AC-006 + AC-007):
 /// - Transport errors (connection refused, timeout, DNS failure): retry once.
 /// - HTTP 5xx (server error): retry once — server may be transiently overloaded.
+/// - HTTP 3xx (redirect): return immediately as E-DAT-001 — redirects are
+///   never followed to prevent SSRF bypass via allowlisted server redirect.
 /// - HTTP 4xx (client error): return immediately — retry cannot help.
+///
+/// The request is issued via [`build_agent`] which enforces `redirects(0)` and
+/// connect/read timeouts.
+///
+/// Returns `Ok(response)` on a successful 2xx response.
+/// Returns `Err(DataSourceError)` if both attempts fail.
+/// Map an `Ok(ureq::Response)` to an error if the status is not 2xx.
+///
+/// With `redirects(0)`, ureq returns 3xx responses as `Ok(response)` rather
+/// than following the redirect. We must detect them here and convert them to
+/// `Err(HttpError)` so the SSRF invariant holds: the redirect target is never
+/// fetched regardless of allowlist membership.
+fn check_response_status(
+    url_str: &str,
+    response: ureq::Response,
+) -> Result<ureq::Response, DataSourceError> {
+    let status = response.status();
+    if (200..300).contains(&(status as usize)) {
+        Ok(response)
+    } else {
+        // 3xx, 4xx, 5xx — treat as HttpError.
+        // 3xx in particular: redirect not followed for SSRF safety.
+        Err(data_error_to_source_error(
+            url_str,
+            &DataError::HttpError {
+                code: E_DAT_001,
+                url: Arc::from(url_str),
+                status,
+                span: slideforge_types::SourceSpan::default(),
+            },
+        ))
+    }
+}
+
+/// Issue a GET request to `url_str`, retrying once on transport errors or HTTP 5xx.
+///
+/// Retry policy (AC-006 + AC-007):
+/// - Transport errors (connection refused, timeout, DNS failure): retry once.
+/// - HTTP 5xx (server error): retry once — server may be transiently overloaded.
+/// - HTTP 3xx (redirect): return immediately as E-DAT-001 — redirects are
+///   never followed to prevent SSRF bypass via allowlisted server redirect.
+///   Note: with `redirects(0)`, ureq returns 3xx as `Ok(response)`, so we
+///   detect them in [`check_response_status`] and convert to an error.
+/// - HTTP 4xx (client error): return immediately — retry cannot help.
+///
+/// The request is issued via [`build_agent`] which enforces `redirects(0)` and
+/// connect/read timeouts.
 ///
 /// Returns `Ok(response)` on a successful 2xx response.
 /// Returns `Err(DataSourceError)` if both attempts fail.
 fn issue_request_with_retry(url_str: &str) -> Result<ureq::Response, DataSourceError> {
-    match ureq::get(url_str).call() {
-        Ok(response) => Ok(response),
+    let agent = build_agent();
+    match agent.get(url_str).call() {
+        Ok(response) => {
+            // With redirects(0), 3xx comes back as Ok — check and reject.
+            check_response_status(url_str, response)
+        },
         Err(ureq::Error::Status(status, _response)) if status >= 500 => {
             // HTTP 5xx — retry once per AC-006.
-            match ureq::get(url_str).call() {
-                Ok(response) => Ok(response),
+            let agent2 = build_agent();
+            match agent2.get(url_str).call() {
+                Ok(response) => check_response_status(url_str, response),
                 Err(ureq::Error::Status(status2, _)) => Err(data_error_to_source_error(
                     url_str,
                     &DataError::HttpError {
@@ -318,7 +394,7 @@ fn issue_request_with_retry(url_str: &str) -> Result<ureq::Response, DataSourceE
             }
         },
         Err(ureq::Error::Status(status, _)) => {
-            // HTTP 4xx (or other non-5xx) — return immediately, no retry.
+            // HTTP 4xx (or other non-5xx errors) — return immediately, no retry.
             Err(data_error_to_source_error(
                 url_str,
                 &DataError::HttpError {
@@ -331,8 +407,9 @@ fn issue_request_with_retry(url_str: &str) -> Result<ureq::Response, DataSourceE
         },
         Err(ureq::Error::Transport(_)) => {
             // Transport error — retry once with no delay (per spec: 0ms wait, AC-007).
-            match ureq::get(url_str).call() {
-                Ok(response) => Ok(response),
+            let agent2 = build_agent();
+            match agent2.get(url_str).call() {
+                Ok(response) => check_response_status(url_str, response),
                 Err(ureq::Error::Status(status, _)) => Err(data_error_to_source_error(
                     url_str,
                     &DataError::HttpError {
@@ -358,6 +435,9 @@ fn issue_request_with_retry(url_str: &str) -> Result<ureq::Response, DataSourceE
 
 /// Resolve the data format from the `Content-Type` header value.
 ///
+/// Supported content-types: JSON, CSV, YAML (AC-005).
+/// TOML over HTTP is not supported — use a file-based `DataSource` for TOML.
+///
 /// Returns `Err` when the content-type is unrecognized and no `format_hint`
 /// was provided.
 fn resolve_format_from_content_type(
@@ -369,7 +449,6 @@ fn resolve_format_from_content_type(
         "application/json" | "text/json" => Ok(DataFormat::Json),
         "text/csv" | "application/csv" => Ok(DataFormat::Csv),
         "application/x-yaml" | "text/yaml" | "application/yaml" => Ok(DataFormat::Yaml),
-        "application/toml" | "text/toml" => Ok(DataFormat::Toml),
         "text/plain" => {
             // AC-008: Try to parse as JSON with a warning.
             if crate::parse::json::parse_json(body, url_str).is_ok() {
@@ -1393,5 +1472,155 @@ mod tests {
             handle.join().unwrap();
             assert!(result.is_ok(), "{desc}: got error: {:?}", result.err());
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // BC-1.03.005 invariant 1: No traffic reaches a blocked domain via redirect
+    // -----------------------------------------------------------------------
+
+    /// `test_bc_1_03_005_redirect_to_blocked_domain_not_followed`
+    ///
+    /// BC-1.03.005 invariant 1: "No network traffic reaches a blocked domain."
+    ///
+    /// An allowlisted server at port A returns `302 Location: http://127.0.0.1:B/`.
+    /// Port B is NOT in the allowlist. After `load()` returns `Err`, the connection
+    /// counter on B must be 0 — the redirect was never followed.
+    ///
+    /// This test validates that the SSRF protection cannot be bypassed by a
+    /// compromised or malicious allowlisted server issuing an open redirect.
+    ///
+    /// Without the `redirects(0)` fix, ureq follows up to 5 redirects silently,
+    /// causing the redirect target to be fetched regardless of the allowlist.
+    #[test]
+    fn test_bc_1_03_005_redirect_to_blocked_domain_not_followed() {
+        use std::io::Write;
+
+        // Server A: allowlisted. Returns 302 Location pointing to server B.
+        let listener_a = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr_a = listener_a.local_addr().unwrap();
+
+        // Server B: NOT allowlisted. Counts how many TCP connections it receives.
+        let counter_b = Arc::new(AtomicUsize::new(0));
+        let (addr_b, handle_b) = spawn_counting_server(1, Arc::clone(&counter_b));
+
+        // Spin up server A in a thread: serve one 302 redirect to server B.
+        let redirect_response = format!(
+            "HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:{}/\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            addr_b.port()
+        );
+        let handle_a = thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener_a.accept() {
+                let mut buf = [0u8; 4096];
+                let _ = stream.read(&mut buf);
+                let _ = stream.write_all(redirect_response.as_bytes());
+            }
+        });
+
+        // Configure allowlist: only allow server A's address, NOT server B.
+        let allowed_host: Arc<str> = format!("127.0.0.1:{}", addr_a.port()).into();
+        let config = AllowlistConfig {
+            domains: Some(vec![allowed_host]),
+        };
+        let url_a = format!("http://127.0.0.1:{}/", addr_a.port());
+        let src = HttpDataSource::new(url_a.as_str()).with_allowlist(config);
+        let opts = DataSourceOptions::default();
+
+        let result = src.load(&url_a, &opts);
+
+        handle_a.join().unwrap();
+        handle_b.join().unwrap();
+
+        // The request must fail — 302 with redirects(0) produces E-DAT-001.
+        assert!(
+            result.is_err(),
+            "302 redirect must produce an error when redirects are blocked"
+        );
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("302") || msg.contains("E-DAT-001"),
+            "error must reference the 302 status or E-DAT-001; got: {msg}"
+        );
+
+        // Critical: zero connections must have reached server B.
+        assert_eq!(
+            counter_b.load(Ordering::SeqCst),
+            0,
+            "redirect target (server B, not in allowlist) must receive ZERO TCP connections"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // BC-1.03.002: 4xx responses are not retried (load-bearing counter test)
+    // -----------------------------------------------------------------------
+
+    /// `test_bc_1_03_002_http_4xx_not_retried`
+    ///
+    /// AC-006: HTTP 4xx responses must be returned immediately — no retry.
+    ///
+    /// A counting server serves a 404 on the first connection. The test asserts
+    /// that exactly one connection was made (initial request only, no retry).
+    ///
+    /// This is the load-bearing test for the "4xx not retried" contract: a
+    /// simpler test that only asserts `is_err()` cannot prove the retry count.
+    ///
+    /// Traces to BC-1.03.002 retry policy.
+    #[test]
+    fn test_bc_1_03_002_http_4xx_not_retried() {
+        use std::io::Write;
+
+        // A server that counts connections and serves 404 on each.
+        let connection_counter = Arc::new(AtomicUsize::new(0));
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let counter_clone = Arc::clone(&connection_counter);
+
+        // The server accepts up to 3 connections (more than enough to detect a retry)
+        // and serves 404 for each. If only 1 connection is made, no retry happened.
+        let handle = thread::spawn(move || {
+            // Accept up to 3 connections with a 2-second hard timeout per accept.
+            listener
+                .set_nonblocking(true)
+                .expect("set_nonblocking failed");
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+            let mut accepted = 0usize;
+            while std::time::Instant::now() < deadline && accepted < 3 {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        counter_clone.fetch_add(1, Ordering::SeqCst);
+                        accepted += 1;
+                        let mut buf = [0u8; 4096];
+                        let _ = stream.read(&mut buf);
+                        let response = b"HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\nContent-Length: 9\r\nConnection: close\r\n\r\nnot found";
+                        let _ = stream.write_all(response);
+                    },
+                    Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(std::time::Duration::from_millis(5));
+                    },
+                    Err(_) => break,
+                }
+            }
+        });
+
+        let url = format!("http://127.0.0.1:{}/data.json", addr.port());
+        let src = HttpDataSource::new(url.as_str());
+        let opts = DataSourceOptions::default();
+        let result = src.load(&url, &opts);
+        handle.join().unwrap();
+
+        // Must be an error.
+        assert!(result.is_err(), "HTTP 404 must produce an error");
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("404"),
+            "error must reference status 404; got: {msg}"
+        );
+
+        // Critical: exactly 1 connection — no retry on 4xx.
+        assert_eq!(
+            connection_counter.load(Ordering::SeqCst),
+            1,
+            "HTTP 4xx must result in exactly 1 connection (no retry); got: {}",
+            connection_counter.load(Ordering::SeqCst)
+        );
     }
 }
