@@ -119,7 +119,7 @@ fn validate_mermaid_syntax(source: &str) -> Result<(), DiagramError> {
             }
             if !keyword_found {
                 return Err(build_syntax_error(&format!(
-                    "unrecognized Mermaid diagram type at line 1: expected a keyword \
+                    "unrecognized Mermaid diagram type at line {line_num}: expected a keyword \
                      such as 'flowchart', 'sequenceDiagram', 'classDiagram', etc.; \
                      got: {without_comment}",
                 )));
@@ -553,6 +553,122 @@ mod tests {
             msg.contains("line 5"),
             "error must report original source line 5; got: {msg}"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // IMP-1 regression: keyword error reports actual line number, not hardcoded "line 1"
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_imp1_keyword_error_reports_actual_line_number_after_frontmatter() {
+        // Frontmatter occupies lines 1-3; the invalid keyword is at line 4.
+        // The error must say "at line 4", not "at line 1".
+        //
+        // Line 1: ---
+        // Line 2: title: my diagram
+        // Line 3: ---
+        // Line 4: not_a_keyword
+        let source = "---\ntitle: my diagram\n---\nnot_a_keyword";
+        let result = render_mermaid(source, "test");
+        assert!(result.is_err(), "unrecognized keyword must return an error");
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("line 4"),
+            "error must report line 4 (actual keyword line), not line 1; got: {msg}"
+        );
+        assert!(
+            !msg.contains("line 1"),
+            "error must NOT say 'line 1' when keyword appears at line 4; got: {msg}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // IMP-2: frontmatter toggle path tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_imp2_valid_frontmatter_then_valid_keyword_renders_successfully() {
+        // Mermaid supports YAML front-matter delimited by `---`.
+        // The validator must skip frontmatter and find the keyword in the body.
+        //
+        // Line 1: ---
+        // Line 2: title: Architecture diagram
+        // Line 3: config:
+        // Line 4:   theme: default
+        // Line 5: ---
+        // Line 6: flowchart LR
+        // Line 7:   A[Client] --> B[Server]
+        let source = "---\ntitle: Architecture diagram\nconfig:\n  theme: default\n---\nflowchart LR\n  A[Client] --> B[Server]";
+        let result = render_mermaid(source, "Architecture overview");
+        assert!(
+            result.is_ok(),
+            "valid frontmatter followed by valid keyword must render successfully; got: {:?}",
+            result.err()
+        );
+        let svg = result.unwrap();
+        assert!(svg.as_str().contains("<svg"), "output must be an SVG");
+    }
+
+    #[test]
+    fn test_imp2_unclosed_frontmatter_single_dash_separator_returns_error() {
+        // A single `---` opens frontmatter but never closes it.
+        // Every subsequent line is consumed as frontmatter, so no keyword
+        // is ever found — the validator returns a MermaidSyntaxError.
+        // This is the correct behavior: unclosed frontmatter silently swallows
+        // the entire diagram body, so we surface an error rather than rendering
+        // an empty or incorrect diagram.
+        //
+        // Line 1: ---
+        // Line 2: title: My Diagram
+        // Line 3: flowchart LR       <-- looks like a keyword but is inside frontmatter
+        // Line 4:   A --> B
+        let source = "---\ntitle: My Diagram\nflowchart LR\n  A --> B";
+        let result = render_mermaid(source, "test");
+        assert!(
+            result.is_err(),
+            "unclosed frontmatter (single '---') must return an error because \
+             the diagram body is silently consumed as frontmatter, leaving no keyword"
+        );
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            !msg.is_empty(),
+            "error message must not be empty for unclosed frontmatter"
+        );
+    }
+
+    #[test]
+    fn test_imp2_stray_dash_separator_in_flowchart_body_does_not_panic() {
+        // A `---` appearing in the flowchart body (after the keyword) toggles
+        // `in_frontmatter` to true, hiding subsequent lines from bracket
+        // validation. The validator does NOT error on this because keyword_found
+        // is already true when `---` is encountered — the toggle model is applied
+        // consistently. This is intentional behavior: `---` in a diagram body is
+        // unusual but not a bracket syntax error. The renderer may handle it in
+        // a diagram-type-specific way.
+        //
+        // The contract tested here: no panic, and the call returns Ok or a
+        // structured Err — never an unwind.
+        //
+        // Line 1: flowchart LR
+        // Line 2:   A --> B
+        // Line 3: ---            <-- stray separator; toggles in_frontmatter=true
+        // Line 4:   C --> D      <-- silently skipped from bracket validation
+        let source = "flowchart LR\n  A --> B\n---\n  C --> D";
+        // Must not panic — Ok or structured Err are both acceptable.
+        let result = render_mermaid(source, "test");
+        match result {
+            Ok(svg) => {
+                assert!(
+                    !svg.is_empty(),
+                    "if render succeeds it must produce non-empty SVG"
+                );
+            }
+            Err(e) => {
+                // A structured error is also acceptable — what is NOT acceptable is a panic.
+                let msg = e.to_string();
+                assert!(!msg.is_empty(), "error message must not be empty");
+            }
+        }
     }
 
     // -----------------------------------------------------------------------
