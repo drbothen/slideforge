@@ -56,7 +56,7 @@ impl DataFormat {
             "yaml" | "yml" => Some(Self::Yaml),
             "toml" => Some(Self::Toml),
             "xlsx" => Some(Self::Xlsx),
-            "sqlite" | "db" => Some(Self::Sqlite),
+            "sqlite" | "sqlite3" | "db" => Some(Self::Sqlite),
             _ => None,
         }
     }
@@ -123,5 +123,47 @@ mod tests {
         assert_eq!(DataFormat::from_extension("CSV"), Some(DataFormat::Csv));
         assert_eq!(DataFormat::from_extension("YAML"), Some(DataFormat::Yaml));
         assert_eq!(DataFormat::from_extension("TOML"), Some(DataFormat::Toml));
+    }
+
+    /// `test_BC_1_03_006_xlsx_extension` — `.xlsx` maps to `DataFormat::Xlsx` (STORY-020 AC-001).
+    #[test]
+    fn test_bc_1_03_006_xlsx_extension() {
+        assert_eq!(DataFormat::from_extension("xlsx"), Some(DataFormat::Xlsx));
+        assert_eq!(DataFormat::from_extension("XLSX"), Some(DataFormat::Xlsx));
+        assert_eq!(
+            DataFormat::from_path(Path::new("data.xlsx")),
+            Some(DataFormat::Xlsx)
+        );
+    }
+
+    /// `test_BC_1_03_006_xls_unrecognized` — `.xls` (legacy) is NOT recognized (STORY-020 AC-005).
+    ///
+    /// `.xls` must not map to `DataFormat::Xlsx`. The `XlsxDataSource` produces
+    /// `DataError::UnsupportedFormat` if the file has an `.xls` extension.
+    #[test]
+    fn test_bc_1_03_006_xls_unrecognized() {
+        assert_eq!(
+            DataFormat::from_extension("xls"),
+            None,
+            ".xls must not map to any DataFormat — only .xlsx is supported"
+        );
+    }
+
+    /// `test_BC_1_03_007_sqlite_extensions` — `.sqlite`, `.sqlite3`, `.db` map to `DataFormat::Sqlite`.
+    #[test]
+    fn test_bc_1_03_007_sqlite_extensions() {
+        assert_eq!(
+            DataFormat::from_extension("sqlite"),
+            Some(DataFormat::Sqlite)
+        );
+        assert_eq!(
+            DataFormat::from_extension("sqlite3"),
+            Some(DataFormat::Sqlite)
+        );
+        assert_eq!(DataFormat::from_extension("db"), Some(DataFormat::Sqlite));
+        assert_eq!(
+            DataFormat::from_path(Path::new("app.sqlite3")),
+            Some(DataFormat::Sqlite)
+        );
     }
 }

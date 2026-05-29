@@ -30,8 +30,16 @@ ordered-float = "=4.6.0"
 ureq = "=2.12.1"
 url = "=2.5.4"
 tracing.workspace = true
+# STORY-020: Excel .xlsx reading (pure Rust, no C dependencies).
+calamine = "=0.26.1"
+# STORY-020: SQLite read-only query execution (bundled libsqlite3 for reproducible builds).
+rusqlite = { version = "=0.32.0", features = ["bundled"] }
+# STORY-020: BLOB column encoding to base64 Value::Str.
+base64 = "=0.22.1"
 
 [dev-dependencies]
 tempfile = "=3.10.0"
 insta = { workspace = true }
 tracing-test = "=0.2.5"
+# STORY-020: Generate test .xlsx files in memory for unit tests.
+rust_xlsxwriter = "=0.64.0"
