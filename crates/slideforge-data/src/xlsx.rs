@@ -205,7 +205,8 @@ impl DataSource for XlsxDataSource {
                 let header = headers
                     .get(col_idx)
                     .cloned()
-                    .unwrap_or_else(|| Arc::from(format!("col_{col_idx}").as_str()));
+                    .expect("extract_headers must produce headers.len() == col_count; \
+                             col_idx is bounded by col_count from range.width()");
                 // Excel limits: max 1,048,576 rows × 16,384 cols — both fit u32.
                 // cast_possible_truncation: usize→u32 is safe within Excel row/col limits.
                 #[allow(clippy::cast_possible_truncation)]
@@ -264,7 +265,7 @@ fn convert_calamine_cell(cell: &Data, col: u32, row: u32, path: &str) -> Result<
                     path: Arc::from(path),
                     format: DataFormat::Xlsx,
                     reason: Arc::from(format!(
-                        "XLSX numeric cell at col {col} row {row} in '{path}' has non-finite value \
+                        "XLSX numeric cell at col {col} row {row} (0-indexed) in '{path}' has non-finite value \
                         ({}). Non-finite floats are not representable in slideforge values.",
                         if f.is_nan() { "NaN" } else { "Infinity" }
                     )),
@@ -325,7 +326,7 @@ fn convert_calamine_cell(cell: &Data, col: u32, row: u32, path: &str) -> Result<
                     path: Arc::from(path),
                     format: DataFormat::Xlsx,
                     reason: Arc::from(format!(
-                        "XLSX datetime cell at col {col} row {row} in '{path}' has invalid \
+                        "XLSX datetime cell at col {col} row {row} (0-indexed) in '{path}' has invalid \
                         ISO 8601 value '{s}'. Expected format: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS\u{00b1}HH:MM"
                     )),
                     span: slideforge_types::SourceSpan::default(),
@@ -363,7 +364,7 @@ fn convert_calamine_cell(cell: &Data, col: u32, row: u32, path: &str) -> Result<
                     path: Arc::from(path),
                     format: DataFormat::Xlsx,
                     reason: Arc::from(format!(
-                        "XLSX DateTime cell at col {col} row {row} in '{path}' cannot be \
+                        "XLSX DateTime cell at col {col} row {row} (0-indexed) in '{path}' cannot be \
                         converted to ISO 8601: calamine as_datetime() returned None. \
                         The serial value may represent an out-of-range date."
                     )),
@@ -382,6 +383,14 @@ fn convert_calamine_cell(cell: &Data, col: u32, row: u32, path: &str) -> Result<
 fn data_error_to_source_error(path: &str, err: &DataError) -> DataSourceError {
     match err {
         DataError::FileNotFound { .. } => DataSourceError::IoError {
+            uri: path.to_owned(),
+            message: err.to_string(),
+        },
+        // F-PASS12-OBS-1: DataError::IoError (E-DAT-004) must map to
+        // DataSourceError::IoError, not DataSourceError::ParseError.
+        // The previous wildcard arm silently mis-classified I/O errors as
+        // parse errors, hiding the true failure category from callers.
+        DataError::IoError { .. } => DataSourceError::IoError {
             uri: path.to_owned(),
             message: err.to_string(),
         },
@@ -673,7 +682,8 @@ mod tests {
     use slideforge_plugin_api::{DataSource, DataSourceOptions};
     use slideforge_types::Value;
 
-    use super::{XlsxDataSource, convert_calamine_cell, extract_headers};
+    use super::{XlsxDataSource, convert_calamine_cell, data_error_to_source_error, extract_headers};
+    use crate::DataError;
 
     // ---------------------------------------------------------------------------
     // Helper: write an xlsx bytes buffer to a tempfile and return the path.
@@ -2310,6 +2320,39 @@ mod tests {
         assert!(
             msg.contains("[E-DAT-011]"),
             "wrong magic bytes error must embed '[E-DAT-011]' bracket code in message; got: {msg}"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // OBS-1: data_error_to_source_error IoError classification.
+    // DataError::IoError must map to DataSourceError::IoError, not ParseError.
+    // F-PASS12-OBS-1.
+    // ---------------------------------------------------------------------------
+
+    /// `test_obs1_data_error_io_error_maps_to_source_io_error` — IoError mis-classification fix.
+    ///
+    /// `data_error_to_source_error` previously had a wildcard `_` arm that mapped
+    /// `DataError::IoError` (E-DAT-004) to `DataSourceError::ParseError` — incorrect.
+    ///
+    /// This test exercises the mapping directly by calling `data_error_to_source_error`
+    /// with a `DataError::IoError` and asserting the result is `DataSourceError::IoError`.
+    ///
+    /// Load-bearing per TD-VSDD-059: re-adding the wildcard arm (or removing the explicit
+    /// `DataError::IoError` arm) will cause this test to fail.
+    ///
+    /// Traces to F-PASS12-OBS-1.
+    #[test]
+    fn test_obs1_data_error_io_error_maps_to_source_io_error() {
+        let io_err = DataError::io_error("/tmp/test.xlsx", "permission denied");
+        let source_err = data_error_to_source_error("/tmp/test.xlsx", &io_err);
+        assert!(
+            matches!(source_err, slideforge_plugin_api::DataSourceError::IoError { .. }),
+            "DataError::IoError must map to DataSourceError::IoError; got: {source_err:?}"
+        );
+        let msg = source_err.to_string();
+        assert!(
+            msg.contains("permission denied"),
+            "IoError message must be preserved; got: {msg}"
         );
     }
 
