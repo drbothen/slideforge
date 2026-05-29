@@ -11,6 +11,7 @@ kani_amenable: false
 bc_trace: [BC-3.04.001, DI-001]
 anchored_to_bc: BC-3.04.001
 traces_to: .factory/specs/verification-properties/VP-INDEX.md
+spec_version: "1.0.1"
 ---
 
 # VP-038: Shape Without Alt or Decorative Always Produces LayoutError::MissingAlt
@@ -96,4 +97,11 @@ fn test_missing_alt_carries_span() {
 |-------|----------------|----------|
 | `ShapeSpec { alt: None, decorative: false }` | `LayoutError::MissingAlt` with slide index and span | error |
 | `ShapeSpec { alt: None, decorative: true }` | No `MissingAlt` error | edge-case |
-| `ShapeSpec { alt: Some(AltText::Text("desc")), decorative: false }` | No `MissingAlt` error | happy-path |
+| `ShapeSpec { alt: Some(AltText::Provided(Arc::from("desc"))), decorative: false }` | No `MissingAlt` error | happy-path |
+
+## Changelog
+
+| Version | Date | Change |
+|---------|------|--------|
+| v1.0.1 | 2026-05-29 | pass-6 drift fix (F-P6-MED-001): AltText::Text → AltText::Provided to match canonical specs.rs variants |
+| v1.0.0 | — | Initial version |

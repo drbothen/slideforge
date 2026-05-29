@@ -11,6 +11,7 @@ kani_amenable: false
 bc_trace: [BC-3.04.001, DI-018]
 anchored_to_bc: BC-3.04.001
 traces_to: .factory/specs/verification-properties/VP-INDEX.md
+spec_version: "1.0.1"
 ---
 
 # VP-042: Shape Multi-Error Accumulation — N Missing Alts Produce N Errors
@@ -63,7 +64,7 @@ fn test_two_shapes_missing_alt_produces_two_errors() {
 fn test_three_shapes_one_with_alt_produces_two_errors() {
     let shapes = vec![
         ShapeSpec { alt: None, decorative: false, ..default_shape() },
-        ShapeSpec { alt: Some(AltText::Text(Arc::from("desc"))), ..default_shape() },
+        ShapeSpec { alt: Some(AltText::Provided(Arc::from("desc"))), ..default_shape() },
         ShapeSpec { alt: None, decorative: false, ..default_shape() },
     ];
     let slide = SlideIr { shapes, ..default_slide() };
@@ -82,3 +83,10 @@ fn test_three_shapes_one_with_alt_produces_two_errors() {
 | Slide with 2 shapes, both `alt: None` | `Vec` with 2 `MissingAlt` entries | multi-error (EC-010) |
 | Slide with 1 shape `alt: None` | `Vec` with 1 `MissingAlt` entry | single-error |
 | Slide with 2 shapes, 1 has alt | `Vec` with 1 `MissingAlt` entry | mixed |
+
+## Changelog
+
+| Version | Date | Change |
+|---------|------|--------|
+| v1.0.1 | 2026-05-29 | pass-6 drift fix (F-P6-MED-001): AltText::Text → AltText::Provided to match canonical specs.rs variants |
+| v1.0.0 | — | Initial version |
