@@ -501,6 +501,24 @@ mod tests {
 
     use super::{SqliteDataSource, find_duplicate_column};
 
+    // F-MED-P5-1: bring serial macro into scope for load_call_count group.
+    use serial_test::serial;
+
+    // ---------------------------------------------------------------------------
+    // VP-027 race-condition guard (F-MED-P5-1).
+    //
+    // `OPEN_READONLY_CALL_COUNT` is a shared process-global atomic.  Under
+    // `cargo test` / `cargo nextest`, tests run in parallel within a process,
+    // so a concurrent `.load()` call from another test can increment the counter
+    // between the `before` and `after` snapshots in
+    // `test_vp_027_load_uses_readonly`, causing a false-fail (delta > 1).
+    //
+    // Fix: `serial_test` crate groups `test_vp_027_load_uses_readonly` and
+    // every other test that calls `.load()` under the serial token
+    // `"load_call_count"`.  Within that group tests run one-at-a-time, so the
+    // VP-027 snapshot window cannot be interrupted by a sibling increment.
+    // ---------------------------------------------------------------------------
+
     // ---------------------------------------------------------------------------
     // Helpers
     // ---------------------------------------------------------------------------
@@ -590,6 +608,7 @@ mod tests {
     ///
     /// Traces to BC-1.03.007 AC-008, AC-009, postconditions 1-4.
     #[test]
+    #[serial(load_call_count)]
     fn test_bc_1_03_007_sqlite_happy_path() {
         let conn = make_memory_db(|c| {
             c.execute_batch(
@@ -654,6 +673,7 @@ mod tests {
     ///
     /// Traces to BC-1.03.007 AC-009, postcondition 3.
     #[test]
+    #[serial(load_call_count)]
     fn test_bc_1_03_007_sqlite_null_column() {
         let conn = make_memory_db(|c| {
             c.execute_batch(
@@ -699,6 +719,7 @@ mod tests {
     ///
     /// Traces to BC-1.03.007 postcondition 3.
     #[test]
+    #[serial(load_call_count)]
     fn test_bc_1_03_007_sqlite_integer_value() {
         let conn = make_memory_db(|c| {
             c.execute_batch(
@@ -736,6 +757,7 @@ mod tests {
     ///
     /// Traces to BC-1.03.007 postcondition 3.
     #[test]
+    #[serial(load_call_count)]
     fn test_bc_1_03_007_sqlite_real_value() {
         let conn = make_memory_db(|c| {
             c.execute_batch(
@@ -776,6 +798,7 @@ mod tests {
     ///
     /// Traces to BC-1.03.007 postcondition 3.
     #[test]
+    #[serial(load_call_count)]
     fn test_bc_1_03_007_sqlite_text_value() {
         let conn = make_memory_db(|c| {
             c.execute_batch(
@@ -815,6 +838,7 @@ mod tests {
     ///
     /// Traces to BC-1.03.007 AC-012, edge case EC-011.
     #[test]
+    #[serial(load_call_count)]
     fn test_bc_1_03_007_sqlite_zero_rows() {
         let conn = make_memory_db(|c| {
             c.execute_batch(
@@ -855,6 +879,7 @@ mod tests {
     ///
     /// Traces to BC-1.03.007 AC-011, invariant 5, edge case EC-009.
     #[test]
+    #[serial(load_call_count)]
     fn test_bc_1_03_007_sqlite_readonly_rejects_dml() {
         let conn = make_memory_db(|c| {
             c.execute_batch(
@@ -891,6 +916,7 @@ mod tests {
     ///
     /// Traces to BC-1.03.007 AC-011, invariant 5.
     #[test]
+    #[serial(load_call_count)]
     fn test_bc_1_03_007_sqlite_readonly_rejects_insert() {
         let conn = make_memory_db(|c| {
             c.execute_batch("CREATE TABLE t (x INTEGER);").unwrap();
@@ -912,6 +938,7 @@ mod tests {
     ///
     /// Traces to BC-1.03.007 AC-011, invariant 5.
     #[test]
+    #[serial(load_call_count)]
     fn test_bc_1_03_007_sqlite_readonly_rejects_update() {
         let conn = make_memory_db(|c| {
             c.execute_batch(
@@ -946,6 +973,7 @@ mod tests {
     ///
     /// Traces to BC-1.03.007 invariant 5, F-HIGH-3.
     #[test]
+    #[serial(load_call_count)]
     fn test_dml_message_handles_multibyte_unicode_query() {
         // "Ä" is U+00C4, encoded as 2 bytes (0xC3 0x84) in UTF-8.
         // 15 × "Ä" = 30 bytes but only 15 Unicode chars. The old byte-indexed
@@ -991,6 +1019,7 @@ mod tests {
     ///
     /// Traces to BC-1.03.007 edge case EC-007.
     #[test]
+    #[serial(load_call_count)]
     fn test_bc_1_03_007_sqlite_missing_file() {
         let src = SqliteDataSource::new(
             "/tmp/no_such_file_slideforge_sqlite_test_99999.db",
@@ -1020,6 +1049,7 @@ mod tests {
     ///
     /// Traces to BC-1.03.007 AC-013, edge case EC-012.
     #[test]
+    #[serial(load_call_count)]
     fn test_bc_1_03_007_sqlite_duplicate_column_names() {
         let conn = make_memory_db(|c| {
             c.execute_batch(
@@ -1065,6 +1095,7 @@ mod tests {
     ///
     /// Traces to BC-1.03.007 AC-009, postcondition 4.
     #[test]
+    #[serial(load_call_count)]
     fn test_bc_1_03_007_sqlite_blob_base64() {
         use base64::{Engine as _, engine::general_purpose::STANDARD};
 
@@ -1114,6 +1145,7 @@ mod tests {
     ///
     /// Traces to BC-1.03.007 edge case EC-008.
     #[test]
+    #[serial(load_call_count)]
     fn test_bc_1_03_007_sqlite_corrupt_db() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("not_a_db.db");
@@ -1144,6 +1176,7 @@ mod tests {
     ///
     /// Traces to BC-1.03.007 edge case EC-010.
     #[test]
+    #[serial(load_call_count)]
     fn test_bc_1_03_007_sqlite_missing_table() {
         let conn = make_memory_db(|c| {
             c.execute_batch("CREATE TABLE real_table (x INTEGER);")
@@ -1179,6 +1212,7 @@ mod tests {
     ///
     /// Traces to BC-1.03.007 postcondition 2 ("column name or alias").
     #[test]
+    #[serial(load_call_count)]
     fn test_bc_1_03_007_sqlite_column_alias() {
         let conn = make_memory_db(|c| {
             c.execute_batch(
@@ -1243,6 +1277,7 @@ mod tests {
     ///
     /// Traces to BC-1.03.007 canonical test vector (happy-path).
     #[test]
+    #[serial(load_call_count)]
     fn test_bc_1_03_007_sqlite_mixed_null_rows() {
         let conn = make_memory_db(|c| {
             c.execute_batch(
@@ -1400,6 +1435,7 @@ mod tests {
     ///
     /// Traces to BC-1.03.007 postcondition 2.
     #[test]
+    #[serial(load_call_count)]
     fn test_bc_1_03_007_convert_rusqlite_value_null() {
         // Use in-memory path to exercise the load() → convert_rusqlite_value() path.
         let conn = make_memory_db(|c| {
@@ -1425,6 +1461,7 @@ mod tests {
     ///
     /// Traces to BC-1.03.007 postcondition 3.
     #[test]
+    #[serial(load_call_count)]
     fn test_bc_1_03_007_convert_rusqlite_value_integer() {
         let conn = make_memory_db(|c| {
             c.execute_batch(
@@ -1453,6 +1490,7 @@ mod tests {
     ///
     /// Traces to BC-1.03.007 postcondition 3.
     #[test]
+    #[serial(load_call_count)]
     fn test_bc_1_03_007_convert_rusqlite_value_real() {
         let conn = make_memory_db(|c| {
             c.execute_batch(
@@ -1492,6 +1530,7 @@ mod tests {
     ///
     /// Traces to BC-1.03.007 AC-010, invariant 4.
     #[test]
+    #[serial(load_call_count)]
     fn test_bc_1_03_007_sqlite_empty_query_defensive() {
         let conn = make_memory_db(|c| {
             c.execute_batch("CREATE TABLE t (x INTEGER);").unwrap();
@@ -1582,6 +1621,7 @@ mod tests {
     ///
     /// Traces to BC-1.03.007 invariant 2, postcondition 1, VP-027, TD-VSDD-059.
     #[test]
+    #[serial(load_call_count)]
     fn test_vp_027_load_uses_readonly() {
         use std::sync::atomic::Ordering;
 
@@ -1639,6 +1679,7 @@ mod tests {
     ///
     /// Traces to BC-1.03.007 invariant 5, VP-029.
     #[test]
+    #[serial(load_call_count)]
     fn test_vp_029_dml_prefix_check_delete() {
         let conn = make_memory_db(|c| {
             c.execute_batch(
@@ -1672,6 +1713,7 @@ mod tests {
     ///
     /// Traces to BC-1.03.007 invariant 5.
     #[test]
+    #[serial(load_call_count)]
     fn test_vp_029_with_clause_is_allowed() {
         let conn = make_memory_db(|c| {
             c.execute_batch(
@@ -1715,6 +1757,7 @@ mod tests {
     ///
     /// Traces to BC-1.03.007 invariant 6, postcondition 4, VP-032.
     #[test]
+    #[serial(load_call_count)]
     fn test_vp_032_invalid_utf8_text_produces_e_dat_012() {
         // Insert known-invalid UTF-8 bytes as a BLOB.
         // [0xFF, 0xFE, 0x80] is not valid UTF-8 in any context:
@@ -1779,6 +1822,7 @@ mod tests {
     ///
     /// Traces to BC-1.03.007 postcondition 4, invariant 7, VP-033.
     #[test]
+    #[serial(load_call_count)]
     fn test_vp_033_blob_canonical_base64_vector() {
         use base64::{Engine as _, engine::general_purpose::STANDARD};
 
@@ -1827,6 +1871,7 @@ mod tests {
     ///
     /// Traces to BC-1.03.007 postcondition 7, VP-034, E-DAT-013.
     #[test]
+    #[serial(load_call_count)]
     fn test_vp_034_wrong_sqlite_magic_produces_parse_error() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("fake.db");
@@ -1870,6 +1915,7 @@ mod tests {
     ///
     /// Traces to BC-1.03.007 invariant 8, VP-035, E-DAT-014.
     #[test]
+    #[serial(load_call_count)]
     fn test_vp_035_unsupported_extension_produces_e_dat_014() {
         // The file doesn't need to exist — extension check fires first.
         let src = SqliteDataSource::new("/tmp/database.db3", "SELECT 1");
@@ -1906,6 +1952,7 @@ mod tests {
     ///
     /// Traces to BC-1.03.007 invariant 5, VP-036.
     #[test]
+    #[serial(load_call_count)]
     fn test_vp_036_missing_table_uses_actual_error_message() {
         let conn = make_memory_db(|c| {
             c.execute_batch("CREATE TABLE real_table (x INTEGER);")

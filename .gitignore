@@ -1,6 +1,8 @@
 # Rust build artifacts
 /target/
 **/*.rs.bk
+**/*.rs.bak
+**/*.rs.bak[0-9]*
 **/target/
 
 # Cargo.lock policy: COMMIT it (slideforge produces binaries via slideforge-cli).
