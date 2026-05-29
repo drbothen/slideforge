@@ -798,7 +798,7 @@ mod tests {
                 LayoutWarning::XrefTargetNotFound { target, source_slide_index: 2 }
                 if target.as_ref() == "nonexistent-slide"
             ),
-            "warning must be XrefTargetNotFound with correct target and slide_index"
+            "warning must be XrefTargetNotFound with correct target and source_slide_index"
         );
     }
 
