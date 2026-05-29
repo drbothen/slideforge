@@ -82,11 +82,14 @@ fn bench_xlsx_10k_rows(c: &mut Criterion) {
     c.bench_function("xlsx_10k_rows", |b| {
         b.iter(|| {
             let result = src.load("", &opts).expect("xlsx 10k bench must not fail");
-            // Prevent dead-code elimination: verify row count is non-zero.
+            // Positive-coverage row count assertion: guards against silent partial-load
+            // regressions (off-by-one, early-break, missing column conversion).
+            // F-MED-1: bench must assert full 10k load, not just non-zero.
             let n = match &result {
                 slideforge_types::Value::List(rows) => rows.len(),
                 _ => panic!("xlsx bench must return Value::List"),
             };
+            assert_eq!(n, 10_000, "bench must load all 10_000 rows (got {n})");
             std::hint::black_box(n)
         })
     });
@@ -166,10 +169,14 @@ fn bench_sqlite_10k_rows(c: &mut Criterion) {
     c.bench_function("sqlite_10k_rows", |b| {
         b.iter(|| {
             let result = src.load("", &opts).expect("sqlite 10k bench must not fail");
+            // Positive-coverage row count assertion: guards against silent partial-load
+            // regressions (off-by-one, early-break, missing column conversion).
+            // F-MED-1: bench must assert full 10k load, not just non-zero.
             let n = match &result {
                 slideforge_types::Value::List(rows) => rows.len(),
                 _ => panic!("sqlite bench must return Value::List"),
             };
+            assert_eq!(n, 10_000, "bench must load all 10_000 rows (got {n})");
             std::hint::black_box(n)
         })
     });
