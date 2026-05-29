@@ -401,16 +401,12 @@ fn convert_calamine_cell(cell: &Data, col: u32, row: u32, path: &str) -> Result<
                 })
             }
         },
-        // OBS-2: The caller's match at the load boundary already handles
-        // `None | Some(Data::Empty)` → `Value::Null` before ever calling this
-        // function. Data::Empty is dead in production paths; formula errors
-        // (Data::Error) are null-coalesced as specified by BC-1.03.006 PC-4.
-        Data::Error(_) => Ok(Value::Null),
-        // Exhaustive arm required by the compiler (Data::Empty exists in the enum).
-        // This arm is unreachable in production: the caller short-circuits Empty
-        // cells before calling this function. If somehow reached, null-coalesce
-        // defensively (consistent with formula-error handling above).
-        Data::Empty => Ok(Value::Null),
+        // OBS-2: Data::Empty is dead in production paths — the load-boundary caller
+        // short-circuits `None | Some(Data::Empty)` to `Value::Null` before ever
+        // calling this function. The arm is kept for compiler exhaustiveness; if
+        // somehow reached, null-coalesce defensively (consistent with formula errors).
+        // Formula errors (Data::Error) are null-coalesced per BC-1.03.006 PC-4.
+        Data::Error(_) | Data::Empty => Ok(Value::Null),
     }
 }
 
@@ -428,13 +424,13 @@ fn data_error_to_source_error(path: &str, err: &DataError) -> DataSourceError {
             uri: path.to_owned(),
             message: err.to_string(),
         },
-        DataError::UnsupportedFormat { extension, code, .. } => DataSourceError::UnsupportedUri {
+        DataError::UnsupportedFormat {
+            extension, code, ..
+        } => DataSourceError::UnsupportedUri {
             // F-MED-2: include the offending extension and the supported format.
             // TD-VSDD-060: generic message covers all non-xlsx extensions, not just .xls.
             // OBS-1: embed [E-DAT-003] bracket code so user-visible message matches SQLite pattern.
-            uri: format!(
-                "[{code}] {path} (only .xlsx extension supported; got '.{extension}')"
-            ),
+            uri: format!("[{code}] {path} (only .xlsx extension supported; got '.{extension}')"),
         },
         _ => DataSourceError::ParseError {
             uri: path.to_owned(),
@@ -1094,7 +1090,7 @@ mod tests {
     /// `test_bc_1_03_006_xls_rejected` -- `.xls` extension returns `DataSourceError::UnsupportedUri`.
     ///
     /// The error must mention `.xlsx` as the supported format AND embed `[E-DAT-003]`
-    /// in bracket form (OBS-1: load-bearing assertion matches SQLite E-DAT-014 pattern).
+    /// in bracket form (OBS-1: load-bearing assertion matches `SQLite` E-DAT-014 pattern).
     ///
     /// Load-bearing: if `data_error_to_source_error` omits `[E-DAT-003]` from the
     /// `UnsupportedUri` message, the `msg.contains("[E-DAT-003]")` assertion fails.
@@ -2283,7 +2279,7 @@ mod tests {
                     is_valid_iso,
                     "DateTime output must be valid ISO 8601; got: '{s}'"
                 );
-            }
+            },
             other => panic!("Data::DateTime must produce Value::Str, got: {other:?}"),
         }
     }
@@ -2304,11 +2300,15 @@ mod tests {
         let cell = Data::DateTime(dt);
         let result = convert_calamine_cell(&cell, 0, 1, "data.xlsx");
 
-        assert!(result.is_ok(), "date-only datetime must pass roundtrip guard; got: {result:?}");
+        assert!(
+            result.is_ok(),
+            "date-only datetime must pass roundtrip guard; got: {result:?}"
+        );
         if let Ok(Value::Str(s)) = result {
             // Either date-only or datetime form is acceptable.
             let is_date = chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d").is_ok();
-            let is_datetime = chrono::NaiveDateTime::parse_from_str(&s, "%Y-%m-%dT%H:%M:%S").is_ok();
+            let is_datetime =
+                chrono::NaiveDateTime::parse_from_str(&s, "%Y-%m-%dT%H:%M:%S").is_ok();
             assert!(
                 is_date || is_datetime,
                 "date-only output '{s}' must parse as NaiveDate or NaiveDateTime"
