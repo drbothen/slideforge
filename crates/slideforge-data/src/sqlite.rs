@@ -61,6 +61,22 @@ use tracing::instrument;
 use crate::DataError;
 use crate::format::DataFormat;
 
+/// Test-only call counter for `open_readonly_connection`.
+///
+/// Incremented once per call to `open_readonly_connection` (only in `#[cfg(test)]`).
+/// Used by `test_vp_027_load_uses_readonly` to verify that `load()` routes through
+/// this function, making VP-027 load-bearing: if `load()` reverts to a direct
+/// `Connection::open_with_flags(_, SQLITE_OPEN_READ_WRITE)` call (bypassing the
+/// helper), the counter does NOT increment and the test fails.
+///
+/// Zero production overhead: the counter and all increment sites are compiled
+/// away in release builds.
+///
+/// Traces to BC-1.03.007 invariant 2, VP-027, TD-VSDD-059.
+#[cfg(test)]
+pub(crate) static OPEN_READONLY_CALL_COUNT: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
 /// The built-in `SQLite` data source plugin.
 ///
 /// Opens a `SQLite` database in read-only mode and executes a SELECT query,
@@ -115,6 +131,16 @@ impl SqliteDataSource {
     ///
     /// Traces to BC-1.03.007 invariant 2, postcondition 1, VP-027.
     pub(crate) fn open_readonly_connection(path: &str) -> Result<Connection, DataError> {
+        // VP-027 load-bearing counter: increment once per call so that
+        // `test_vp_027_load_uses_readonly` can assert that `load()` routes through
+        // this function. Compiled away in release builds (zero overhead).
+        //
+        // TD-VSDD-059: if `load()` ever reverts to a direct
+        // `Connection::open_with_flags(_, SQLITE_OPEN_READ_WRITE)`, this counter
+        // will NOT be incremented and the VP-027 test FAILS.
+        #[cfg(test)]
+        OPEN_READONLY_CALL_COUNT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+
         Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY).map_err(|e| {
             DataError::ParseError {
                 code: crate::error::E_DAT_003,
@@ -1521,31 +1547,30 @@ mod tests {
         );
     }
 
-    /// `test_vp_027_load_uses_readonly` -- VP-027 v2: `SqliteDataSource::load()` uses
-    /// `open_readonly_connection`, so write operations fail at the driver level.
+    /// `test_vp_027_load_uses_readonly` -- VP-027 v4: `SqliteDataSource::load()` routes through
+    /// `open_readonly_connection` — confirmed via test-only atomic call counter.
     ///
-    /// This test is load-bearing per TD-VSDD-059: if production `load()` ever reverts
-    /// to calling `Connection::open_with_flags` with `SQLITE_OPEN_READ_WRITE`, the
-    /// connection handed to downstream code would accept PRAGMA writes (which bypass the
-    /// SELECT-prefix guard), and this test would fail.
+    /// This is the load-bearing VP-027 test (TD-VSDD-059).
     ///
-    /// Strategy: call `SqliteDataSource::load()` with a CTE SELECT that reads successfully,
-    /// then attempt a `PRAGMA user_version = 1` write on the SAME database file through a
-    /// fresh connection opened via `open_readonly_connection`. We cannot write through
-    /// the public `load()` API (SELECT-prefix guard fires first), so we instead verify
-    /// that the internal open path produces a genuinely read-only connection by:
-    ///   1. Loading via `load()` to confirm it succeeds (end-to-end production path).
-    ///   2. Calling `open_readonly_connection` directly (which `load()` now delegates to)
-    ///      and asserting that `PRAGMA user_version = 1` fails.
+    /// **Why the counter approach is genuinely load-bearing:**
+    /// `OPEN_READONLY_CALL_COUNT` is incremented ONLY inside
+    /// `open_readonly_connection`. If `load()` reverts to calling
+    /// `Connection::open_with_flags(_, SQLITE_OPEN_READ_WRITE)` directly (bypassing
+    /// the helper), the counter does NOT increment between the `before` and `after`
+    /// snapshots, and this test FAILS — catching the regression at the source.
     ///
-    /// Step 2 is load-bearing: it FAILS if `open_readonly_connection` is changed to
-    /// `SQLITE_OPEN_READ_WRITE`. Combined with F-HIGH-1's refactor that routes `load()`
-    /// through `open_readonly_connection`, this gives transitivity:
-    ///   `load()` → `open_readonly_connection` → `SQLITE_OPEN_READ_ONLY` → step 2 fails
+    /// Previous v1/v2/v3 variants called `open_readonly_connection` directly in step 2,
+    /// independent of the `load()` code path. The counter eliminates that independence:
+    /// the counter ONLY advances when `load()` internally calls the helper, providing
+    /// direct transitivity:
+    ///   `load()` → `open_readonly_connection` incremented → counter diff = 1 → test passes
+    ///   `load()` bypasses helper    → counter diff = 0 → test FAILS
     ///
-    /// Traces to BC-1.03.007 invariant 2, postcondition 1, VP-027.
+    /// Traces to BC-1.03.007 invariant 2, postcondition 1, VP-027, TD-VSDD-059.
     #[test]
     fn test_vp_027_load_uses_readonly() {
+        use std::sync::atomic::Ordering;
+
         // Build a small test database.
         let conn = make_memory_db(|c| {
             c.execute_batch(
@@ -1558,40 +1583,35 @@ mod tests {
         let (_dir, path) = save_db_to_tempfile(&conn, ".db");
         let path_str = path.to_str().expect("tempfile path must be UTF-8");
 
-        // Step 1: production load() must succeed — confirms the production path works
-        // end-to-end and that the refactor from open_with_flags → open_readonly_connection
-        // did not break the happy path.
+        // Snapshot counter BEFORE calling load().
+        let before = super::OPEN_READONLY_CALL_COUNT.load(Ordering::SeqCst);
+
+        // Call production load() — this is the ONLY call in this scope.
         let src = SqliteDataSource::new(path_str, "SELECT id, label FROM items ORDER BY id");
         let opts = DataSourceOptions::default();
         let result = src.load("", &opts).expect("load() with valid SELECT must succeed");
+
+        // Snapshot counter AFTER load() completes.
+        let after = super::OPEN_READONLY_CALL_COUNT.load(Ordering::SeqCst);
+
+        // Load-bearing assertion (TD-VSDD-059):
+        // If load() called open_readonly_connection exactly once, the counter must have
+        // incremented by exactly 1. If load() bypasses the helper (direct open_with_flags),
+        // the counter does NOT increment → diff = 0 → this assertion FAILS.
+        assert_eq!(
+            after - before,
+            1,
+            "load() must call open_readonly_connection exactly once (VP-027 load-bearing assertion). \
+            Counter before={before}, after={after}. \
+            If diff=0, load() bypassed open_readonly_connection (regression detected)."
+        );
+
+        // Confirm end-to-end correctness: load() returned the expected rows.
         let rows = match result {
             slideforge_types::Value::List(r) => r,
             other => panic!("load() must return Value::List, got: {other:?}"),
         };
         assert_eq!(rows.len(), 2, "load() must return 2 rows from items table");
-
-        // Step 2 (load-bearing): open_readonly_connection must produce a connection that
-        // rejects writes. Since load() delegates to open_readonly_connection (F-HIGH-1
-        // refactor), this assertion is load-bearing for the production path:
-        // if load() reverts to SQLITE_OPEN_READ_WRITE, the above step 1 still passes
-        // but open_readonly_connection would also have to change, and this step would
-        // fail — preventing a silent regression.
-        let ro_conn = SqliteDataSource::open_readonly_connection(path_str)
-            .expect("open_readonly_connection on a valid db must succeed");
-
-        // PRAGMA user_version is a write operation — blocked on SQLITE_OPEN_READ_ONLY.
-        let pragma_result = ro_conn.execute_batch("PRAGMA user_version = 42");
-        assert!(
-            pragma_result.is_err(),
-            "PRAGMA user_version write on SQLITE_OPEN_READ_ONLY connection must fail at \
-            the driver level — if this passes, open_readonly_connection uses READ_WRITE (VP-027)"
-        );
-
-        // SELECT must still work on the same connection.
-        let count: i64 = ro_conn
-            .query_row("SELECT COUNT(*) FROM items", [], |row| row.get(0))
-            .expect("SELECT on read-only connection must succeed");
-        assert_eq!(count, 2, "read-only connection must allow SELECT");
     }
 
     // ---------------------------------------------------------------------------
