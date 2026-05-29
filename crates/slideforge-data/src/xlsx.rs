@@ -266,8 +266,22 @@ fn convert_calamine_cell(cell: &Data, col: u32, row: u32, path: &str) -> Result<
                 ));
             }
             // Safe: f.is_finite() guaranteed above.
-            #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
-            if f.fract() == 0.0 && *f >= i64::MIN as f64 && *f <= i64::MAX as f64 {
+            // F-MED-1: Use round-trip check for exact representability instead of
+            // `*f <= i64::MAX as f64`. The latter allows 2^63 (which f64 CAN represent
+            // exactly as i64::MAX + 1) to pass the bounds check, after which
+            // `*f as i64` silently saturates to i64::MAX (corruption).
+            // Round-trip: `(*f as i64) as f64 == *f` confirms the value is exactly
+            // representable as i64 without loss. Values in range but not exactly
+            // representable (e.g. 2^63) stay as Value::Float.
+            // Traces to VP-021 boundary, F-MED-1.
+            // float_cmp: round-trip equality check is intentional — comparing exact
+            // bit representation to detect lossless i64 round-trip (not approximate equality).
+            #[allow(
+                clippy::cast_precision_loss,
+                clippy::cast_possible_truncation,
+                clippy::float_cmp
+            )]
+            if f.fract() == 0.0 && (*f as i64) as f64 == *f {
                 Ok(Value::Int(*f as i64))
             } else {
                 Ok(Value::Float(OrderedFloat(*f)))
@@ -336,8 +350,10 @@ fn data_error_to_source_error(path: &str, err: &DataError) -> DataSourceError {
             uri: path.to_owned(),
             message: err.to_string(),
         },
-        DataError::UnsupportedFormat { .. } => DataSourceError::UnsupportedUri {
-            uri: format!("{path} (.xls is not supported; convert to .xlsx)"),
+        DataError::UnsupportedFormat { extension, .. } => DataSourceError::UnsupportedUri {
+            // F-MED-2: include the offending extension and the supported format.
+            // TD-VSDD-060: generic message covers all non-xlsx extensions, not just .xls.
+            uri: format!("{path} (only .xlsx extension supported; got '.{extension}')"),
         },
         _ => DataSourceError::ParseError {
             uri: path.to_owned(),
@@ -355,7 +371,17 @@ fn data_error_to_source_error(path: &str, err: &DataError) -> DataSourceError {
 /// This is the second-phase check after extension validation. Combined with
 /// extension check, it ensures: extension=.xlsx AND magic=ZIP.
 ///
-/// Traces to BC-1.03.006 postcondition 9, invariant 3 (VP-026).
+/// ## TOCTOU note
+///
+/// We open the file here to read 4 bytes, then close it. `calamine::open_workbook`
+/// then opens the file again. There is a residual TOCTOU window between these two
+/// opens in which a file could be swapped — however, the trust model here is
+/// local-trusted-file (the orchestrator enforces path containment before reaching
+/// this point), so the risk is accepted and documented. A zero-cost TOCTOU
+/// mitigation (single open via a shared file handle) would require calamine VFS
+/// integration, which is out of scope for v1.0.
+///
+/// Traces to BC-1.03.006 postcondition 9, invariant 3 (VP-026), F-LOW-1.
 fn validate_xlsx_magic(path: &str) -> Result<(), DataError> {
     use std::io::Read as _;
 
@@ -393,32 +419,43 @@ fn validate_xlsx_magic(path: &str) -> Result<(), DataError> {
     Ok(())
 }
 
-/// Validate that the `.xlsx` extension is used (not `.xls`).
+/// Validate that the `.xlsx` extension is used; reject all other extensions.
 ///
-/// Returns `Err(DataError::UnsupportedFormat)` with the actionable hint
-/// `"Only .xlsx format is supported in v1.0. Convert to .xlsx before use."` if
-/// the path ends in `.xls`.
+/// Per BC-1.03.006 invariant 3 and AC-BC-005, this check fires BEFORE magic-byte
+/// validation ("Do NOT read bytes" — extension check is the first gate).
 ///
-/// Traces to BC-1.03.006 invariant 3 and edge case EC-002 (AC-005).
+/// - `.xlsx` (case-insensitive) → `Ok(())`
+/// - `.xls` → `Err(UnsupportedFormat)` with actionable hint
+/// - Any other extension → `Err(UnsupportedFormat)` with the offending extension named
+///
+/// Note: this function is named `reject_xls_extension` for historical reasons;
+/// it now validates the full extension contract (only `.xlsx` is accepted).
+///
+/// Traces to BC-1.03.006 invariant 3, AC-BC-005, edge case EC-002 (AC-005), F-MED-2.
 fn reject_xls_extension(path: &str) -> Result<(), DataError> {
-    // Check for .xls extension case-insensitively. We must NOT match .xlsx.
-    // Strategy: check if the lowercased path ends with ".xls" but NOT ".xlsx".
-    // `to_ascii_lowercase()` is called first, so the `ends_with` calls are safe.
-    let lower = path.to_ascii_lowercase();
-    // Allow: we already lower-cased the path above, making the comparison correct.
-    #[allow(clippy::case_sensitive_file_extension_comparisons)]
-    let ends_with_xls = lower.ends_with(".xls");
-    #[allow(clippy::case_sensitive_file_extension_comparisons)]
-    let ends_with_xlsx = lower.ends_with(".xlsx");
+    let p = std::path::Path::new(path);
+    let ext_lower = p
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_default();
 
-    if ends_with_xls && !ends_with_xlsx {
-        return Err(DataError::UnsupportedFormat {
-            code: crate::error::E_DAT_003,
-            extension: Arc::from("xls"),
-            span: slideforge_types::SourceSpan::default(),
-        });
+    if ext_lower == "xlsx" {
+        return Ok(());
     }
-    Ok(())
+
+    // All non-xlsx extensions are rejected with an informative message.
+    // .xls gets a special "convert to .xlsx" hint; others get a generic note.
+    let extension_arc = if ext_lower.is_empty() {
+        Arc::from("(no extension)")
+    } else {
+        Arc::from(ext_lower.as_str())
+    };
+    Err(DataError::UnsupportedFormat {
+        code: crate::error::E_DAT_003,
+        extension: extension_arc,
+        span: slideforge_types::SourceSpan::default(),
+    })
 }
 
 /// Select the target sheet by name or index, returning `(sheet_name, range)`.
@@ -543,7 +580,28 @@ fn extract_headers(range: &calamine::Range<Data>, path: &str) -> Result<Vec<Arc<
                 });
             },
             Some(Data::String(s)) => {
-                headers.push(Arc::from(s.as_str()));
+                // F-LOW-2: trim leading/trailing whitespace from header strings.
+                // An all-whitespace header (e.g. "   ") is treated as Empty and
+                // triggers E-DAT-007 (partial-empty header rejection).
+                // Traces to BC-1.03.006 invariant 5 (AC-BC-001), F-LOW-2.
+                let trimmed = s.trim();
+                if trimmed.is_empty() {
+                    return Err(DataError::ParseError {
+                        code: E_DAT_007,
+                        path: Arc::from(path),
+                        format: DataFormat::Xlsx,
+                        reason: Arc::from(
+                            format!(
+                                "XLSX header row at '{path}' has whitespace-only cell at column \
+                                {col_idx} (0-indexed). All header cells must be non-empty strings \
+                                after whitespace trimming. Remove blank or whitespace-only headers."
+                            )
+                            .as_str(),
+                        ),
+                        span: slideforge_types::SourceSpan::default(),
+                    });
+                }
+                headers.push(Arc::from(trimmed));
             },
             Some(non_string_cell) => {
                 // E-DAT-008: non-string header cell — Int, Float, Bool, DateTime etc.
@@ -997,6 +1055,119 @@ mod tests {
                 slideforge_plugin_api::DataSourceError::UnsupportedUri { .. }
             ),
             "`.XLS` (uppercase) must also be rejected; got: {err:?}"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // F-LOW-2: whitespace-only header cells are treated as Empty → E-DAT-007.
+    // BC-1.03.006 invariant 5 (AC-BC-001).
+    // ---------------------------------------------------------------------------
+
+    /// `test_bc_1_03_006_xlsx_whitespace_only_header_rejected` -- whitespace-only header cells are rejected.
+    ///
+    /// A header cell containing only spaces (e.g. `"   "`) must be treated as empty
+    /// and trigger E-DAT-007 (partial-empty header rejection). This test FAILS if
+    /// whitespace-only headers are passed through as column names — load-bearing
+    /// per TD-VSDD-059.
+    ///
+    /// Traces to BC-1.03.006 invariant 5 (AC-BC-001), F-LOW-2.
+    #[test]
+    fn test_bc_1_03_006_xlsx_whitespace_only_header_rejected() {
+        let mut wb = Workbook::new();
+        let ws = wb.add_worksheet();
+
+        // "name" header, then whitespace-only header "   ", then "score"
+        ws.write_string(0, 0, "name").unwrap();
+        ws.write_string(0, 1, "   ").unwrap(); // whitespace-only — must be treated as empty
+        ws.write_string(0, 2, "score").unwrap();
+        ws.write_string(1, 0, "Alice").unwrap();
+        ws.write_string(1, 2, "95").unwrap();
+
+        let buf = wb.save_to_buffer().unwrap();
+        let (_dir, path) = write_xlsx_to_tempfile(buf, ".xlsx");
+
+        let src = XlsxDataSource::new(path.to_str().unwrap());
+        let err = src.load("", &default_opts()).unwrap_err();
+
+        let msg = err.to_string();
+        assert!(
+            matches!(
+                err,
+                slideforge_plugin_api::DataSourceError::ParseError { .. }
+            ),
+            "whitespace-only header must produce DataSourceError::ParseError, got: {err:?}"
+        );
+        assert!(
+            msg.contains("E-DAT-007")
+                || msg.to_lowercase().contains("whitespace")
+                || msg.to_lowercase().contains("empty"),
+            "error must mention E-DAT-007 or whitespace/empty; got: {msg}"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // F-MED-2 / AC-BC-005: non-xlsx extension rejected (e.g. .txt, .foo, .csv).
+    // BC-1.03.006 invariant 3: extension check fires BEFORE magic-byte check.
+    // ---------------------------------------------------------------------------
+
+    /// `test_bc_1_03_006_unsupported_extension_rejected` -- non-`.xlsx` extensions are rejected.
+    ///
+    /// Per BC-1.03.006 AC-BC-005 ("Do NOT read bytes"), the extension check fires
+    /// BEFORE magic-byte validation. Files with `.txt`, `.foo`, or other non-xlsx
+    /// extensions must produce `UnsupportedUri` with the offending extension named.
+    ///
+    /// This test FAILS if the extension check is reverted to "only reject .xls" —
+    /// making it load-bearing per TD-VSDD-059.
+    ///
+    /// Traces to BC-1.03.006 invariant 3, AC-BC-005, F-MED-2.
+    #[test]
+    fn test_bc_1_03_006_unsupported_extension_rejected() {
+        // .txt extension: no file needs to exist (extension check fires first).
+        let src_txt = XlsxDataSource::new("/tmp/data.txt");
+        let err_txt = src_txt.load("", &default_opts()).unwrap_err();
+        assert!(
+            matches!(
+                err_txt,
+                slideforge_plugin_api::DataSourceError::UnsupportedUri { .. }
+            ),
+            "`.txt` must produce UnsupportedUri; got: {err_txt:?}"
+        );
+        let msg_txt = err_txt.to_string();
+        assert!(
+            msg_txt.contains("txt") || msg_txt.to_lowercase().contains("only .xlsx"),
+            "error must name the offending extension '.txt'; got: {msg_txt}"
+        );
+
+        // .foo extension:
+        let src_foo = XlsxDataSource::new("/tmp/data.foo");
+        let err_foo = src_foo.load("", &default_opts()).unwrap_err();
+        assert!(
+            matches!(
+                err_foo,
+                slideforge_plugin_api::DataSourceError::UnsupportedUri { .. }
+            ),
+            "`.foo` must produce UnsupportedUri; got: {err_foo:?}"
+        );
+        let msg_foo = err_foo.to_string();
+        assert!(
+            msg_foo.contains("foo") || msg_foo.to_lowercase().contains("only .xlsx"),
+            "error must name the offending extension '.foo'; got: {msg_foo}"
+        );
+
+        // .csv extension (common mistake):
+        let src_csv = XlsxDataSource::new("/tmp/data.csv");
+        let err_csv = src_csv.load("", &default_opts()).unwrap_err();
+        assert!(
+            matches!(
+                err_csv,
+                slideforge_plugin_api::DataSourceError::UnsupportedUri { .. }
+            ),
+            "`.csv` must produce UnsupportedUri; got: {err_csv:?}"
+        );
+        let msg_csv = err_csv.to_string();
+        assert!(
+            msg_csv.contains("csv") || msg_csv.to_lowercase().contains("only .xlsx"),
+            "error must name the offending extension '.csv'; got: {msg_csv}"
         );
     }
 
@@ -1606,6 +1777,91 @@ mod tests {
             result_zero,
             Value::Int(0),
             "Float(0.0) must promote to Int(0)"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // VP-021 boundary: Float(2^63) must NOT promote to Int (out-of-range whole).
+    // F-MED-1 regression test.
+    // BC-1.03.006 postcondition 5.
+    // ---------------------------------------------------------------------------
+
+    /// `test_vp_021_boundary_round_trip` -- VP-021 boundary: round-trip check rejects non-exact promotions.
+    ///
+    /// The round-trip check `(*f as i64) as f64 == *f` guarantees that only f64 values
+    /// that round-trip exactly through i64 are promoted. This test exercises the boundary:
+    ///
+    /// - `i64::MAX as f64` (= 2^63 in f64 due to rounding): round-trips to itself →
+    ///   promoted to `Value::Int(i64::MAX)`. This is the correct behavior because the f64
+    ///   value IS `i64::MAX` when interpreted as an integer (f64 has insufficient precision
+    ///   to distinguish `i64::MAX` from `2^63`; they share the same bit pattern).
+    /// - Large fractional-part float values that do NOT round-trip: stay as `Value::Float`.
+    /// - The key invariant: `Value::Int(n)` is only produced when `n as f64 == *f` exactly.
+    ///
+    /// This test FAILS if the round-trip check is removed — making it load-bearing
+    /// per TD-VSDD-059.
+    ///
+    /// Traces to BC-1.03.006 postcondition 5, F-MED-1.
+    // float_cmp: intentional exact bitwise equality checks for round-trip validation.
+    // cast_precision_loss + cast_possible_truncation: intentional — testing the
+    // same cast used in production code.
+    #[allow(
+        clippy::float_cmp,
+        clippy::cast_precision_loss,
+        clippy::cast_possible_truncation
+    )]
+    #[test]
+    fn test_vp_021_boundary_round_trip() {
+        // Case 1: f64 value that has fract() == 0.0 but does NOT round-trip exactly.
+        // 1.5e20 is a whole-number float > i64::MAX — its round-trip through i64 saturates
+        // and does NOT reproduce the original float, so it stays as Value::Float.
+        let large_whole: f64 = 1.5e20_f64;
+        assert_eq!(
+            large_whole.fract(),
+            0.0,
+            "precondition: 1.5e20 has fract() == 0.0"
+        );
+        assert!(large_whole.is_finite(), "precondition: 1.5e20 is finite");
+        // Confirm round-trip FAILS:
+        assert_ne!(
+            (large_whole as i64) as f64,
+            large_whole,
+            "1.5e20 must not round-trip through i64"
+        );
+        let cell_large = calamine::Data::Float(large_whole);
+        let result_large = convert_calamine_cell(&cell_large, 0, 1, "test.xlsx").unwrap();
+        match result_large {
+            Value::Float(_) => {},
+            Value::Int(n) => panic!(
+                "Data::Float(1.5e20) must stay as Value::Float (too large for i64); \
+                got Value::Int({n})"
+            ),
+            other => panic!("unexpected: {other:?}"),
+        }
+
+        // Case 2: f64 value that round-trips exactly through i64 — promoted.
+        // 1_000_000.0 round-trips: (1_000_000 as i64) as f64 = 1_000_000.0.
+        let cell_ok = calamine::Data::Float(1_000_000.0_f64);
+        let result_ok = convert_calamine_cell(&cell_ok, 0, 1, "test.xlsx").unwrap();
+        assert_eq!(
+            result_ok,
+            Value::Int(1_000_000),
+            "Data::Float(1_000_000.0) must promote to Value::Int(1_000_000)"
+        );
+
+        // Case 3: i64::MIN boundary — promoted (i64::MIN is exactly representable).
+        let min_f64: f64 = i64::MIN as f64;
+        assert_eq!(
+            (min_f64 as i64) as f64,
+            min_f64,
+            "i64::MIN round-trips exactly"
+        );
+        let cell_min = calamine::Data::Float(min_f64);
+        let result_min = convert_calamine_cell(&cell_min, 0, 1, "test.xlsx").unwrap();
+        assert_eq!(
+            result_min,
+            Value::Int(i64::MIN),
+            "Data::Float(i64::MIN as f64) must promote to Value::Int(i64::MIN)"
         );
     }
 

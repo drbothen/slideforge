@@ -103,6 +103,30 @@ impl SqliteDataSource {
     }
 }
 
+impl SqliteDataSource {
+    /// Open the `SQLite` database at `path` with `SQLITE_OPEN_READ_ONLY`.
+    ///
+    /// This is the production open function. Exposed as `pub(crate)` for targeted
+    /// VP-027 testing: verifies that the `SQLITE_OPEN_READ_ONLY` flag is always used,
+    /// independent of the SELECT-prefix DML guard (F-MED-3 / VP-027).
+    ///
+    /// Returns `Err` if the file cannot be opened.
+    ///
+    /// Traces to BC-1.03.007 invariant 2, postcondition 1, VP-027.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn open_readonly_connection(path: &str) -> Result<Connection, DataError> {
+        Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY).map_err(|e| {
+            DataError::ParseError {
+                code: crate::error::E_DAT_003,
+                path: Arc::from(path),
+                format: crate::format::DataFormat::Sqlite,
+                reason: Arc::from(format!("failed to open SQLite database '{path}': {e}").as_str()),
+                span: slideforge_types::SourceSpan::default(),
+            }
+        })
+    }
+}
+
 impl DataSource for SqliteDataSource {
     fn id(&self) -> &'static str {
         "sqlite"
@@ -161,12 +185,16 @@ impl DataSource for SqliteDataSource {
         let lower_prefix = trimmed_query.to_ascii_lowercase();
         let is_dml = !lower_prefix.starts_with("select") && !lower_prefix.starts_with("with");
         if is_dml {
+            // F-HIGH-3: char-boundary-safe truncation to 20 chars for error preview.
+            // Byte-indexing into a UTF-8 string can panic at multi-byte char boundaries;
+            // use chars().take(20).collect() instead.
+            // Regression test: test_dml_message_handles_multibyte_unicode_query.
+            let preview: String = trimmed_query.chars().take(20).collect();
             return Err(DataSourceError::ParseError {
                 uri: path_str.to_owned(),
                 message: format!(
                     "only SELECT queries are allowed in @data sqlite sources \
-                    (got: {}...)",
-                    &trimmed_query[..trimmed_query.len().min(20)]
+                    (got: {preview}...)"
                 ),
             });
         }
@@ -859,6 +887,55 @@ mod tests {
     }
 
     // ---------------------------------------------------------------------------
+    // F-HIGH-3: DML message with multi-byte Unicode query must NOT panic.
+    // Regression for byte-indexed slice panic at char boundaries.
+    // ---------------------------------------------------------------------------
+
+    /// `test_dml_message_handles_multibyte_unicode_query` -- DML message is safe with multi-byte chars.
+    ///
+    /// A DML query containing 15+ multi-byte characters (each 2+ bytes in UTF-8)
+    /// must produce a clean error message without panicking. Previously the code
+    /// used `&str[..n]` which can panic at a multi-byte char boundary.
+    ///
+    /// Traces to BC-1.03.007 invariant 5, F-HIGH-3.
+    #[test]
+    fn test_dml_message_handles_multibyte_unicode_query() {
+        // "Ä" is U+00C4, encoded as 2 bytes (0xC3 0x84) in UTF-8.
+        // 15 × "Ä" = 30 bytes but only 15 Unicode chars. The old byte-indexed
+        // `trimmed_query[..trimmed_query.len().min(20)]` would attempt to slice
+        // at byte offset 20, which lands in the middle of the 10th "Ä" (byte 18-19),
+        // causing a panic.
+        let multi_byte_dml = "DELETE ".to_owned() + &"Ä".repeat(15);
+        assert!(
+            multi_byte_dml.len() > 20,
+            "test precondition: query must be > 20 bytes: len={}",
+            multi_byte_dml.len()
+        );
+
+        // We need an actual db file for the path — extension check passes, file must exist.
+        let conn = make_memory_db(|c| {
+            c.execute_batch("CREATE TABLE t (x INTEGER);").unwrap();
+        });
+        let (_dir, path) = save_db_to_tempfile(&conn, ".db");
+
+        let src = SqliteDataSource::new(path.to_str().unwrap(), multi_byte_dml.as_str());
+        // Must NOT panic; must return a ParseError.
+        let err = src.load("", &default_opts()).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                slideforge_plugin_api::DataSourceError::ParseError { .. }
+            ),
+            "multi-byte DML query must produce ParseError, got: {err:?}"
+        );
+        let msg = err.to_string();
+        assert!(
+            msg.to_lowercase().contains("select"),
+            "DML rejection error must mention 'SELECT'; got: {msg}"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
     // EC-001/EC-007: Missing file → DataSourceError::IoError.
     // BC-1.03.007 edge case EC-001 (EC-007 in story).
     // ---------------------------------------------------------------------------
@@ -1390,9 +1467,20 @@ mod tests {
     // covers this; this VP label test confirms the production code path.)
     // ---------------------------------------------------------------------------
 
-    /// `test_vp_027_readonly_enforced` -- VP-027: DML via `load()` is rejected by read-only connection.
+    /// `test_vp_027_readonly_enforced` -- VP-027: `open_readonly_connection` opens with `SQLITE_OPEN_READ_ONLY`.
     ///
-    /// Traces to BC-1.03.007 invariant 2, VP-027.
+    /// Tests `SQLITE_OPEN_READ_ONLY` enforcement WITHOUT triggering the SELECT-prefix
+    /// DML check first (which would short-circuit before a connection is opened).
+    ///
+    /// Strategy: open the connection via `SqliteDataSource::open_readonly_connection` and
+    /// verify a direct INSERT attempt fails at the driver/OS level — confirming the
+    /// flag is passed to `SQLite`. This is the authoritative test for VP-027 because it
+    /// targets the `SQLITE_OPEN_READ_ONLY` invariant directly, not the DML prefix guard.
+    ///
+    /// This test FAILS if `open_readonly_connection` uses `SQLITE_OPEN_READ_WRITE`
+    /// instead of `SQLITE_OPEN_READ_ONLY` — making it load-bearing per TD-VSDD-059.
+    ///
+    /// Traces to BC-1.03.007 invariant 2, postcondition 1, VP-027.
     #[test]
     fn test_vp_027_readonly_enforced() {
         let conn = make_memory_db(|c| {
@@ -1404,15 +1492,25 @@ mod tests {
         });
         let (_dir, path) = save_db_to_tempfile(&conn, ".db");
 
-        // INSERT is a DML — now caught by the SELECT prefix check BEFORE opening.
-        let src = SqliteDataSource::new(path.to_str().unwrap(), "INSERT INTO t VALUES (2)");
-        let err = src.load("", &default_opts()).unwrap_err();
+        // Open using the production function — must use SQLITE_OPEN_READ_ONLY.
+        let ro_conn = SqliteDataSource::open_readonly_connection(path.to_str().unwrap())
+            .expect("opening a valid db with SQLITE_OPEN_READ_ONLY must succeed");
+
+        // A write attempt on a read-only connection must be rejected at the driver level,
+        // independent of any application-level DML guard.
+        let write_result = ro_conn.execute("INSERT INTO t VALUES (2)", []);
         assert!(
-            matches!(
-                err,
-                slideforge_plugin_api::DataSourceError::ParseError { .. }
-            ),
-            "DML must be rejected; got: {err:?}"
+            write_result.is_err(),
+            "INSERT on SQLITE_OPEN_READ_ONLY connection must fail at the driver level (VP-027)"
+        );
+
+        // SELECT must still work (read-only is read-only, not closed).
+        let count: i64 = ro_conn
+            .query_row("SELECT COUNT(*) FROM t", [], |row| row.get(0))
+            .expect("SELECT on read-only connection must succeed");
+        assert_eq!(
+            count, 1,
+            "read-only connection must allow SELECT (original 1 row must be present)"
         );
     }
 
@@ -1491,49 +1589,67 @@ mod tests {
 
     /// `test_vp_032_invalid_utf8_text_produces_e_dat_012` -- VP-032: invalid UTF-8 in TEXT column → E-DAT-012.
     ///
-    /// Using raw SQL to insert invalid UTF-8 bytes directly into `SQLite` via a BLOB cast.
-    /// The strict `std::str::from_utf8` must fail and produce E-DAT-012.
+    /// `SQLite`'s type system allows CAST(blob AS TEXT) to return arbitrary bytes as a
+    /// "TEXT" value, bypassing Rust-layer UTF-8 validation that rusqlite applies when
+    /// inserting `&str`. We exploit this to inject known-invalid UTF-8 bytes (0xFF, 0xFE,
+    /// 0x80) into a BLOB column, then SELECT with `CAST(data AS TEXT)`, which causes
+    /// rusqlite to surface a `ValueRef::Text` with the raw bytes.
+    ///
+    /// The production code's strict `std::str::from_utf8` MUST reject these bytes and
+    /// return E-DAT-012. This test FAILS if `from_utf8_lossy` (silent substitution) is
+    /// used instead — TD-VSDD-059 load-bearing contract.
     ///
     /// Traces to BC-1.03.007 invariant 6, postcondition 4, VP-032.
     #[test]
     fn test_vp_032_invalid_utf8_text_produces_e_dat_012() {
-        // SQLite stores TEXT as UTF-8, but we can bypass this by inserting BLOB data
-        // that will be reported as TEXT via the type affinity. However, since SQLite
-        // normally validates UTF-8, the easiest approach is to use the CAST mechanism
-        // or INSERT raw bytes. Actually rusqlite won't let us insert non-UTF-8 bytes
-        // as TEXT — it validates at the Rust layer.
-        //
-        // The pragmatic test: insert bytes that are valid UTF-8 (our strict converter
-        // accepts them), then verify that if rusqlite WERE to return invalid bytes,
-        // the converter would fail. We test this by calling the converter directly
-        // via the production load path with a known-good input to confirm VP-031
-        // (valid UTF-8 succeeds), since rusqlite itself prevents invalid UTF-8 from
-        // being stored as TEXT in a real database.
-        //
-        // Note: Testing invalid UTF-8 TEXT requires either a corrupted database file
-        // or using SQLite's experimental support. This is logged as a process gap:
-        // the production code path (std::str::from_utf8) is correct and the unit
-        // test for the converter is covered via the function signature contract.
-        // The E-DAT-012 error path is verified by code inspection of convert_rusqlite_value.
-        //
-        // Per SID-1 (Implementer Discipline): the load-bearing fix is in production code
-        // (std::str::from_utf8 vs from_utf8_lossy). The boundary test covers the API.
+        // Insert known-invalid UTF-8 bytes as a BLOB.
+        // [0xFF, 0xFE, 0x80] is not valid UTF-8 in any context:
+        //   0xFF is never a valid UTF-8 byte; 0xFE likewise; 0x80 is a continuation
+        //   byte without a valid lead byte.
+        let invalid_utf8_bytes: &[u8] = &[0xFF, 0xFE, 0x80];
+
         let conn = make_memory_db(|c| {
-            c.execute_batch(
-                "CREATE TABLE t (txt TEXT);
-                 INSERT INTO t VALUES ('valid UTF-8 text');",
+            c.execute_batch("CREATE TABLE t (data BLOB);").unwrap();
+            // Insert as BLOB — rusqlite accepts arbitrary bytes for BLOB columns.
+            c.execute(
+                "INSERT INTO t VALUES (?1)",
+                rusqlite::params![invalid_utf8_bytes],
             )
             .unwrap();
         });
         let (_dir, path) = save_db_to_tempfile(&conn, ".db");
 
-        let src = SqliteDataSource::new(path.to_str().unwrap(), "SELECT txt FROM t");
-        let result = src.load("", &default_opts()).unwrap();
-        let rows = result.as_list().unwrap();
-        assert_eq!(
-            rows[0].as_map().unwrap().get("txt").unwrap(),
-            &Value::Str(Arc::from("valid UTF-8 text")),
-            "Valid UTF-8 TEXT must produce Value::Str (VP-031 / VP-032 boundary)"
+        // SELECT CAST(data AS TEXT) forces SQLite to hand rusqlite the raw bytes as a
+        // TEXT affinity value, bypassing any Rust-layer UTF-8 guard on INSERT.
+        // rusqlite will surface these as ValueRef::Text(bytes) where bytes are the
+        // original invalid UTF-8 sequence. Our production convert_rusqlite_value must
+        // call std::str::from_utf8, detect the failure, and return E-DAT-012.
+        let src = SqliteDataSource::new(path.to_str().unwrap(), "SELECT CAST(data AS TEXT) FROM t");
+        let err = src
+            .load("", &default_opts())
+            .expect_err("invalid UTF-8 bytes via CAST must produce DataSourceError");
+
+        assert!(
+            matches!(
+                err,
+                slideforge_plugin_api::DataSourceError::ParseError { .. }
+            ),
+            "invalid UTF-8 TEXT must produce DataSourceError::ParseError (E-DAT-012); got: {err:?}"
+        );
+        let msg = err.to_string();
+        // Error must mention the column and/or row so users can locate the bad data.
+        assert!(
+            msg.contains("E-DAT-012")
+                || msg.to_lowercase().contains("utf-8")
+                || msg.to_lowercase().contains("utf8")
+                || msg.to_lowercase().contains("invalid"),
+            "E-DAT-012 error must mention UTF-8 or invalid; got: {msg}"
+        );
+        // The error message must name the column ('CAST(data AS TEXT)' or its alias)
+        // — production code formats "{col_name} at row {row_idx}".
+        assert!(
+            msg.contains("row 0") || msg.contains("row_idx: 0") || msg.contains("row"),
+            "E-DAT-012 error must reference the row index; got: {msg}"
         );
     }
 

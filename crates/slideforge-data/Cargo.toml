@@ -47,3 +47,10 @@ insta = { workspace = true }
 tracing-test = "=0.2.5"
 # STORY-020: Generate test .xlsx files in memory for unit tests.
 rust_xlsxwriter = "=0.64.0"
+# F-HIGH-1 (STORY-020 pass 2): performance benchmarks for NFR-036/037/038.
+# Pinned per supply-chain policy. criterion 0.5 requires stable Rust.
+criterion = { version = "=0.5.1", features = ["html_reports"] }
+
+[[bench]]
+name = "data_sources"
+harness = false
