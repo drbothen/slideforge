@@ -389,10 +389,13 @@ fn data_error_to_source_error(path: &str, err: &DataError) -> DataSourceError {
             uri: path.to_owned(),
             message: err.to_string(),
         },
-        DataError::UnsupportedFormat { extension, .. } => DataSourceError::UnsupportedUri {
+        DataError::UnsupportedFormat { extension, code, .. } => DataSourceError::UnsupportedUri {
             // F-MED-2: include the offending extension and the supported format.
             // TD-VSDD-060: generic message covers all non-xlsx extensions, not just .xls.
-            uri: format!("{path} (only .xlsx extension supported; got '.{extension}')"),
+            // OBS-1: embed [E-DAT-003] bracket code so user-visible message matches SQLite pattern.
+            uri: format!(
+                "[{code}] {path} (only .xlsx extension supported; got '.{extension}')"
+            ),
         },
         _ => DataSourceError::ParseError {
             uri: path.to_owned(),
@@ -1051,7 +1054,11 @@ mod tests {
 
     /// `test_bc_1_03_006_xls_rejected` -- `.xls` extension returns `DataSourceError::UnsupportedUri`.
     ///
-    /// The error must mention `.xlsx` as the supported format.
+    /// The error must mention `.xlsx` as the supported format AND embed `[E-DAT-003]`
+    /// in bracket form (OBS-1: load-bearing assertion matches SQLite E-DAT-014 pattern).
+    ///
+    /// Load-bearing: if `data_error_to_source_error` omits `[E-DAT-003]` from the
+    /// `UnsupportedUri` message, the `msg.contains("[E-DAT-003]")` assertion fails.
     ///
     /// Traces to BC-1.03.006 AC-005, invariant 3, edge case EC-002.
     #[test]
@@ -1071,6 +1078,12 @@ mod tests {
         assert!(
             msg.to_lowercase().contains("xlsx") || msg.to_lowercase().contains("not supported"),
             "error must mention .xlsx as the required format; got: {msg}"
+        );
+        // OBS-1 load-bearing: [E-DAT-003] must appear in bracket form.
+        // This assertion fails if data_error_to_source_error omits the error code.
+        assert!(
+            msg.contains("[E-DAT-003]"),
+            "UnsupportedUri message must embed '[E-DAT-003]' bracket code; got: {msg}"
         );
     }
 
