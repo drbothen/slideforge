@@ -351,6 +351,7 @@ jobs:
       - name: Performance smoke tests (NFR-036/037)
         run: >
           cargo test
+          --release
           -p slideforge-data
           --test perf_smoke
           --
