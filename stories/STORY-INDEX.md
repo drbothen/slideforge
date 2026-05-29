@@ -9,8 +9,8 @@ traces_to:
   - .factory/stories/epics.md
   - .factory/stories/dependency-graph.md
   - .factory/stories/wave-schedule.md
-total_stories: 72
-stories_written: 72
+total_stories: 73
+stories_written: 73
 stories_ready: 0
 stories_in_progress: 3
 stories_merged: 30
@@ -36,8 +36,8 @@ stories_merged: 30
 | Wave 4 | 13 | 13 | 0 | 0 | 0 | 0 |
 | Wave 5 | 14 | 14 | 0 | 0 | 0 | 0 |
 | Wave 6 | 6 | 6 | 0 | 0 | 0 | 0 |
-| Wave TBD | 1 | 1 | 0 | 0 | 0 | 0 |
-| **Total** | **72** | **39** | **0** | **3** | **30** | **0** |
+| Wave TBD | 2 | 2 | 0 | 0 | 0 | 0 |
+| **Total** | **73** | **40** | **0** | **3** | **30** | **0** |
 
 ---
 
@@ -173,8 +173,9 @@ These stories were created to resolve explicit "deferred surface" placeholders i
 | Story ID | Epic | Title | BCs | Priority | Points | tdd_mode | Status |
 |----------|------|-------|-----|---------|--------|---------|--------|
 | [STORY-072](stories/STORY-072-shape-gradient-fills.md) | EPIC-07 | shape: Gradient Fills (FillSpec::Gradient) | BC-3.04.001 | P2 | 3 | strict | draft |
+| [STORY-073](stories/STORY-073-bullets-layout.md) | EPIC-07 | Layout: ContentBlock::Bullets → FrameContent::TextRun frame generation | BC-3.05.001 | P1 | 5 | strict | draft |
 
-**Wave TBD total points: 3**
+**Wave TBD total points: 8**
 
 ---
 
@@ -188,8 +189,8 @@ These stories were created to resolve explicit "deferred surface" placeholders i
 | Wave 4 | 13 | 85 | 6.5 |
 | Wave 5 | 14 | 84 | 6.0 |
 | Wave 6 | 6 | 42 | 7.0 |
-| Wave TBD | 1 | 3 | 3.0 |
-| **Total** | **72** | **440** | **6.1** |
+| Wave TBD | 2 | 8 | 4.0 |
+| **Total** | **73** | **445** | **6.1** |
 
 > No story exceeds 13 points. STORY-023 (brand synthesis — 13 pts) and STORY-037
 > (PPTX core serialization — 13 pts) are the largest stories. Both have well-
@@ -197,6 +198,9 @@ These stories were created to resolve explicit "deferred surface" placeholders i
 > coherent implementation units. All other stories are 3-8 points.
 > STORY-072 (gradient fills — 3 pts) is a deferred surface from BC-3.04.001 v1.3;
 > wave assignment pending orchestrator dispatch.
+> STORY-073 (bullets-layout — 5 pts) anchors the ContentBlock::Bullets →
+> FrameContent::TextRun path and bullets xref validation; wave assignment pending
+> orchestrator dispatch after STORY-028 merges.
 
 ---
 

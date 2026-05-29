@@ -215,7 +215,7 @@ traces_to: domain-spec/L2-INDEX.md
 
 | BC ID | Title | Priority | Status | File |
 |-------|-------|----------|--------|------|
-| BC-3.05.001 | All 11 inline format types render to correct output per format (bold, italic, code, link, math, footnote, xref, super, sub, strike, highlight) | P1 | active | [BC-3.05.001.md](BC-3.05.001.md) |
+| BC-3.05.001 | All 12 inline format types render to correct output per format (plain, bold, italic, code, link, math, footnote, xref, super, sub, strike, highlight) | P1 | active | [BC-3.05.001.md](BC-3.05.001.md) |
 
 ### 3.06 — Core Layout Transformation: Deck → LaidOutDeck (CAP-010)
 
