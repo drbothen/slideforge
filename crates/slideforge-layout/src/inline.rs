@@ -3,7 +3,7 @@
 //! This module implements the two responsibilities of the layout stage with
 //! respect to inline content:
 //!
-//! 1. **All 11 (actually 12) [`slideforge_types::InlineNode`] variants are
+//! 1. **All 12 [`slideforge_types::InlineNode`] variants are
 //!    preserved verbatim** in [`crate::types::FrameContent::TextRun`] records
 //!    in [`crate::types::LaidOutSlide::frames`]. The layout stage does NOT
 //!    produce format-specific markup — it only carries the variant type and its
@@ -159,54 +159,441 @@ pub fn check_inline_node(
 #[cfg(test)]
 #[allow(clippy::missing_docs_in_private_items, clippy::unwrap_used)]
 mod tests {
-    #[allow(unused_imports)]
     use super::*;
-    #[allow(unused_imports)]
     use slideforge_types::{InlineNode, MathNode, SourceSpan};
-    #[allow(unused_imports)]
     use std::sync::Arc;
 
     // ─────────────────────────────────────────────────────────────────────────
-    // AC-005 — All 11/12 InlineNode variants represented (BC-3.05.001)
+    // Test helpers
     // ─────────────────────────────────────────────────────────────────────────
 
-    /// AC-005 — `validate_inline_nodes` handles all 12 InlineNode variants
-    /// without wildcard. An empty warning list is returned for valid nodes.
-    ///
-    /// Red Gate: `validate_inline_nodes` is `todo!()`.
-    #[test]
-    fn test_bc_3_05_001_ac005_all_12_inline_variants_survive_validation() {
-        panic!(
-            "not yet implemented (Red Gate): validate_inline_nodes must handle all 12 InlineNode \
-             variants (Plain, Bold, Italic, Code, Link, Math, Footnote, Xref, Superscript, \
-             Subscript, Strikethrough, Highlight) without a wildcard catch-all"
-        )
+    fn empty_titles() -> HashSet<Arc<str>> {
+        HashSet::new()
     }
 
-    /// AC-005 — `validate_inline_nodes` returns unchanged nodes (no mutation).
+    fn titles_with(names: &[&str]) -> HashSet<Arc<str>> {
+        names.iter().map(|s| Arc::from(*s)).collect()
+    }
+
+    /// Build one of every InlineNode variant (12 total).
+    /// Used to verify exhaustive handling without wildcard.
+    fn all_12_variants() -> Vec<InlineNode> {
+        vec![
+            InlineNode::Plain(Arc::from("plain text")),
+            InlineNode::Bold(vec![InlineNode::Plain(Arc::from("bold content"))]),
+            InlineNode::Italic(vec![InlineNode::Plain(Arc::from("italic content"))]),
+            InlineNode::Code(Arc::from("fn foo() {}")),
+            InlineNode::Link {
+                text: vec![InlineNode::Plain(Arc::from("link text"))],
+                url: Arc::from("https://example.com"),
+            },
+            InlineNode::Math(MathNode {
+                latex: Arc::from("x^2 + y^2"),
+                display: false,
+                span: SourceSpan::default(),
+            }),
+            InlineNode::Footnote(vec![InlineNode::Plain(Arc::from("footnote content"))]),
+            InlineNode::Xref(Arc::from("introduction")), // "introduction" is in known_titles
+            InlineNode::Superscript(vec![InlineNode::Plain(Arc::from("2"))]),
+            InlineNode::Subscript(vec![InlineNode::Plain(Arc::from("n"))]),
+            InlineNode::Strikethrough(vec![InlineNode::Plain(Arc::from("deleted text"))]),
+            InlineNode::Highlight(vec![InlineNode::Plain(Arc::from("highlighted"))]),
+        ]
+    }
+
+    fn make_deck_with_titles(titles: &[&str]) -> slideforge_types::Deck {
+        use slideforge_types::ordered_map::OrderedMap;
+        use slideforge_types::slide::FieldValue;
+        use slideforge_types::value::Value;
+        use slideforge_types::Slide;
+
+        let slides = titles
+            .iter()
+            .map(|t| Slide {
+                slide_type: Arc::from("bullets"),
+                fields: {
+                    let mut m = OrderedMap::new();
+                    m.insert(
+                        Arc::from("title"),
+                        FieldValue::Literal(Value::Str(Arc::from(*t))),
+                    );
+                    m
+                },
+                blocks: vec![],
+                register: None,
+                tags: vec![],
+                source_span: SourceSpan::default(),
+            })
+            .collect();
+
+        slideforge_types::Deck {
+            slides,
+            vars: OrderedMap::new(),
+            metadata: slideforge_types::DeckMetadata {
+                title: None,
+                slideforge_version: Arc::from("0.1.0"),
+                lang: Some(Arc::from("en-US")),
+                author: None,
+                section_order: None,
+            },
+            registers: OrderedMap::new(),
+            section_blocks: vec![],
+        }
+    }
+
+    fn make_laid_out_slide_with_text_run(
+        slide_index: usize,
+        nodes: Vec<InlineNode>,
+    ) -> crate::types::LaidOutSlide {
+        use crate::types::{BoundingBox, Emu, Frame, FrameContent, LaidOutSlide};
+
+        LaidOutSlide {
+            source_index: slide_index,
+            slide_type_keyword: Arc::from("bullets"),
+            frames: vec![Frame {
+                bbox: BoundingBox {
+                    x: Emu(0),
+                    y: Emu(0),
+                    width: Emu(9_144_000),
+                    height: Emu(5_143_500),
+                },
+                content: FrameContent::TextRun(nodes),
+                text_flow: None,
+            }],
+            speaker_notes: None,
+            register_tags: vec![],
+        }
+    }
+
+    fn make_laid_out_slide_empty(slide_index: usize) -> crate::types::LaidOutSlide {
+        use crate::types::{BoundingBox, Emu, Frame, FrameContent, LaidOutSlide};
+
+        LaidOutSlide {
+            source_index: slide_index,
+            slide_type_keyword: Arc::from("title"),
+            frames: vec![Frame {
+                bbox: BoundingBox {
+                    x: Emu(0),
+                    y: Emu(0),
+                    width: Emu(9_144_000),
+                    height: Emu(5_143_500),
+                },
+                content: FrameContent::Empty,
+                text_flow: None,
+            }],
+            speaker_notes: None,
+            register_tags: vec![],
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // AC-005 — All 12 InlineNode variants survive validation unchanged
+    // (BC-3.05.001 postcondition)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// AC-005 — `validate_inline_nodes` handles all 12 variants without wildcard.
+    /// With a known Xref target ("introduction"), produces zero warnings.
     ///
-    /// Red Gate: `validate_inline_nodes` is `todo!()`.
+    /// Red Gate: panics with `todo!()`.
+    #[test]
+    fn test_bc_3_05_001_ac005_all_12_inline_variants_no_warnings_with_known_xref() {
+        let nodes = all_12_variants();
+        let known = titles_with(&["introduction"]);
+        let mut warnings = vec![];
+        validate_inline_nodes(&nodes, &known, 0, &mut warnings);
+        assert!(
+            warnings.is_empty(),
+            "all 12 variants with known xref target must produce zero warnings; \
+             got: {warnings:?}"
+        );
+    }
+
+    /// AC-005 — `validate_inline_nodes` preserves nodes unchanged (no mutation).
+    ///
+    /// The layout stage is a read-only pass; it MUST NOT mutate the inline
+    /// content sequence.
+    ///
+    /// Red Gate: panics with `todo!()`.
     #[test]
     fn test_bc_3_05_001_ac005_nodes_unchanged_after_validation() {
-        panic!(
-            "not yet implemented (Red Gate): validate_inline_nodes must not mutate the node \
-             sequence — layout preserves inline content verbatim"
-        )
+        let original = vec![
+            InlineNode::Plain(Arc::from("hello")),
+            InlineNode::Bold(vec![InlineNode::Plain(Arc::from("world"))]),
+        ];
+        let nodes_copy = original.clone();
+        let known = empty_titles();
+        let mut warnings = vec![];
+        validate_inline_nodes(&nodes_copy, &known, 0, &mut warnings);
+        assert_eq!(
+            nodes_copy, original,
+            "validate_inline_nodes must not mutate the node sequence"
+        );
+    }
+
+    /// AC-005 — All 12 variant types are present in `all_12_variants()`.
+    ///
+    /// This is a compile-time/count check: if InlineNode ever gains a 13th variant
+    /// and the exhaustive match in `validate_inline_nodes` is missing it,
+    /// the compiler will emit an error. The count assertion here is secondary.
+    ///
+    /// This test does NOT exercise `validate_inline_nodes` directly — it verifies
+    /// the test helper construction covers the correct count.
+    #[test]
+    fn test_bc_3_05_001_ac005_helper_covers_all_12_variants() {
+        let variants = all_12_variants();
+        assert_eq!(
+            variants.len(),
+            12,
+            "all_12_variants() must yield exactly 12 InlineNode values"
+        );
+    }
+
+    /// AC-005 — Each of the 12 kind names is present in the test vector.
+    ///
+    /// Verifies the test helper names are correct so implementers can match
+    /// against them.
+    #[test]
+    fn test_bc_3_05_001_ac005_all_kind_names_present() {
+        let variants = all_12_variants();
+        let names: Vec<&str> = variants.iter().map(InlineNode::kind_name).collect();
+        for expected in &[
+            "Plain", "Bold", "Italic", "Code", "Link", "Math", "Footnote",
+            "Xref", "Superscript", "Subscript", "Strikethrough", "Highlight",
+        ] {
+            assert!(
+                names.contains(expected),
+                "kind name '{expected}' must be present in all_12_variants()"
+            );
+        }
+    }
+
+    /// AC-005 — `validate_inline_nodes` on an empty node slice produces zero warnings.
+    ///
+    /// Edge case: empty text run (e.g., blank body block).
+    ///
+    /// Red Gate: panics with `todo!()`.
+    #[test]
+    fn test_bc_3_05_001_ac005_empty_nodes_produces_no_warnings() {
+        let nodes: Vec<InlineNode> = vec![];
+        let mut warnings = vec![];
+        validate_inline_nodes(&nodes, &empty_titles(), 0, &mut warnings);
+        assert!(
+            warnings.is_empty(),
+            "empty node slice must produce zero warnings"
+        );
+    }
+
+    /// AC-005 — Plain text node produces no warnings.
+    ///
+    /// Red Gate: panics with `todo!()`.
+    #[test]
+    fn test_bc_3_05_001_ac005_plain_node_no_warning() {
+        let nodes = vec![InlineNode::Plain(Arc::from("Hello world"))];
+        let mut warnings = vec![];
+        validate_inline_nodes(&nodes, &empty_titles(), 0, &mut warnings);
+        assert!(warnings.is_empty(), "Plain node must produce no warnings");
+    }
+
+    /// AC-005 — Code node produces no warnings.
+    ///
+    /// Red Gate: panics with `todo!()`.
+    #[test]
+    fn test_bc_3_05_001_ac005_code_node_no_warning() {
+        let nodes = vec![InlineNode::Code(Arc::from("let x = 42;"))];
+        let mut warnings = vec![];
+        validate_inline_nodes(&nodes, &empty_titles(), 0, &mut warnings);
+        assert!(warnings.is_empty(), "Code node must produce no warnings");
+    }
+
+    /// AC-005 — Math node produces no warnings.
+    ///
+    /// Red Gate: panics with `todo!()`.
+    #[test]
+    fn test_bc_3_05_001_ac005_math_node_no_warning() {
+        let nodes = vec![InlineNode::Math(MathNode {
+            latex: Arc::from("E = mc^2"),
+            display: true,
+            span: SourceSpan::default(),
+        })];
+        let mut warnings = vec![];
+        validate_inline_nodes(&nodes, &empty_titles(), 0, &mut warnings);
+        assert!(warnings.is_empty(), "Math node must produce no warnings");
+    }
+
+    /// AC-005 — Link node produces no warnings.
+    ///
+    /// Red Gate: panics with `todo!()`.
+    #[test]
+    fn test_bc_3_05_001_ac005_link_node_no_warning() {
+        let nodes = vec![InlineNode::Link {
+            text: vec![InlineNode::Plain(Arc::from("See report"))],
+            url: Arc::from("https://example.com"),
+        }];
+        let mut warnings = vec![];
+        validate_inline_nodes(&nodes, &empty_titles(), 0, &mut warnings);
+        assert!(warnings.is_empty(), "Link node must produce no warnings");
+    }
+
+    /// AC-005 — Superscript node produces no warnings.
+    ///
+    /// Canonical test vector from BC-3.05.001:
+    ///   `superscript: "2"` → `<a:rPr baseline="30000">`; `<sup>2</sup>`.
+    ///
+    /// Red Gate: panics with `todo!()`.
+    #[test]
+    fn test_bc_3_05_001_ac005_superscript_node_no_warning() {
+        let nodes = vec![InlineNode::Superscript(vec![
+            InlineNode::Plain(Arc::from("2")),
+        ])];
+        let mut warnings = vec![];
+        validate_inline_nodes(&nodes, &empty_titles(), 0, &mut warnings);
+        assert!(warnings.is_empty(), "Superscript node must produce no warnings");
+    }
+
+    /// AC-005 — Subscript node produces no warnings.
+    ///
+    /// Red Gate: panics with `todo!()`.
+    #[test]
+    fn test_bc_3_05_001_ac005_subscript_node_no_warning() {
+        let nodes = vec![InlineNode::Subscript(vec![
+            InlineNode::Plain(Arc::from("n")),
+        ])];
+        let mut warnings = vec![];
+        validate_inline_nodes(&nodes, &empty_titles(), 0, &mut warnings);
+        assert!(warnings.is_empty(), "Subscript node must produce no warnings");
+    }
+
+    /// AC-005 — Strikethrough node produces no warnings.
+    ///
+    /// Red Gate: panics with `todo!()`.
+    #[test]
+    fn test_bc_3_05_001_ac005_strikethrough_node_no_warning() {
+        let nodes = vec![InlineNode::Strikethrough(vec![
+            InlineNode::Plain(Arc::from("deprecated text")),
+        ])];
+        let mut warnings = vec![];
+        validate_inline_nodes(&nodes, &empty_titles(), 0, &mut warnings);
+        assert!(warnings.is_empty(), "Strikethrough node must produce no warnings");
+    }
+
+    /// AC-005 — Highlight node produces no warnings.
+    ///
+    /// Red Gate: panics with `todo!()`.
+    #[test]
+    fn test_bc_3_05_001_ac005_highlight_node_no_warning() {
+        let nodes = vec![InlineNode::Highlight(vec![
+            InlineNode::Plain(Arc::from("important!")),
+        ])];
+        let mut warnings = vec![];
+        validate_inline_nodes(&nodes, &empty_titles(), 0, &mut warnings);
+        assert!(warnings.is_empty(), "Highlight node must produce no warnings");
+    }
+
+    /// AC-005 — Footnote node produces no warnings.
+    ///
+    /// Red Gate: panics with `todo!()`.
+    #[test]
+    fn test_bc_3_05_001_ac005_footnote_node_no_warning() {
+        let nodes = vec![InlineNode::Footnote(vec![
+            InlineNode::Plain(Arc::from("See appendix.")),
+        ])];
+        let mut warnings = vec![];
+        validate_inline_nodes(&nodes, &empty_titles(), 0, &mut warnings);
+        assert!(warnings.is_empty(), "Footnote node must produce no warnings");
     }
 
     // ─────────────────────────────────────────────────────────────────────────
     // AC-006 — Nested inline formatting preserved (BC-3.05.001 EC-001)
     // ─────────────────────────────────────────────────────────────────────────
 
-    /// AC-006 — Nested Bold(Italic(Plain)) tree survives validation unchanged.
+    /// AC-006 — Nested `Bold(vec![Italic(vec![Plain])])` survives validation
+    /// unchanged (no warnings, no mutation).
     ///
-    /// Red Gate: `validate_inline_nodes` is `todo!()`.
+    /// Canonical edge case from BC-3.05.001 EC-001:
+    ///   `italic: bold: "text"` → Both applied: PPTX `<a:rPr b="1" i="1">`.
+    ///
+    /// Red Gate: panics with `todo!()`.
     #[test]
     fn test_bc_3_05_001_ac006_nested_bold_italic_preserved() {
-        panic!(
-            "not yet implemented (Red Gate): validate_inline_nodes must traverse nested Bold(Italic) \
-             and preserve nesting depth"
-        )
+        let inner = InlineNode::Plain(Arc::from("doubly styled"));
+        let italic = InlineNode::Italic(vec![inner.clone()]);
+        let bold = InlineNode::Bold(vec![italic.clone()]);
+        let nodes = vec![bold.clone()];
+
+        let nodes_copy = nodes.clone();
+        let mut warnings = vec![];
+        validate_inline_nodes(&nodes_copy, &empty_titles(), 0, &mut warnings);
+
+        // 1. No warnings produced
+        assert!(
+            warnings.is_empty(),
+            "nested bold-italic must produce zero warnings"
+        );
+        // 2. Node structure preserved (no mutation)
+        assert_eq!(
+            nodes_copy, nodes,
+            "validate_inline_nodes must not mutate nested nodes"
+        );
+        // 3. Verify the nesting depth is intact
+        match &nodes_copy[0] {
+            InlineNode::Bold(bold_children) => {
+                assert_eq!(bold_children.len(), 1, "Bold must have one child");
+                match &bold_children[0] {
+                    InlineNode::Italic(italic_children) => {
+                        assert_eq!(italic_children.len(), 1, "Italic must have one child");
+                        assert!(
+                            matches!(&italic_children[0], InlineNode::Plain(s) if s.as_ref() == "doubly styled"),
+                            "innermost Plain node must be unchanged"
+                        );
+                    }
+                    other => panic!("expected Italic, got: {other:?}"),
+                }
+            }
+            other => panic!("expected Bold, got: {other:?}"),
+        }
+    }
+
+    /// AC-006 — Deeply nested `Highlight(Superscript(Plain))` is preserved.
+    ///
+    /// Red Gate: panics with `todo!()`.
+    #[test]
+    fn test_bc_3_05_001_ac006_nested_highlight_superscript_preserved() {
+        let nodes = vec![InlineNode::Highlight(vec![InlineNode::Superscript(vec![
+            InlineNode::Plain(Arc::from("42")),
+        ])])];
+        let nodes_copy = nodes.clone();
+        let mut warnings = vec![];
+        validate_inline_nodes(&nodes_copy, &empty_titles(), 0, &mut warnings);
+        assert!(warnings.is_empty());
+        assert_eq!(nodes_copy, nodes, "nested Highlight(Superscript(Plain)) must be unchanged");
+    }
+
+    /// AC-006 — `check_inline_node` on a nested `Bold` traverses the children.
+    ///
+    /// The recursive helper must descend into Bold's children, not only the
+    /// top-level node. Verify by nesting an unknown Xref inside Bold.
+    ///
+    /// Red Gate: panics with `todo!()`.
+    #[test]
+    fn test_bc_3_05_001_ac006_check_inline_node_recurses_into_bold_children() {
+        let unknown_xref = InlineNode::Xref(Arc::from("nonexistent-slide"));
+        let bold = InlineNode::Bold(vec![unknown_xref]);
+        let known = empty_titles();
+        let mut warnings = vec![];
+        check_inline_node(&bold, &known, 1, &mut warnings);
+        assert_eq!(
+            warnings.len(),
+            1,
+            "unknown Xref nested inside Bold must be found by recursive traversal"
+        );
+        assert!(
+            matches!(
+                &warnings[0],
+                LayoutWarning::XrefTargetNotFound { target, slide_index: 1 }
+                if target.as_ref() == "nonexistent-slide"
+            ),
+            "warning must reference the nested unknown xref target"
+        );
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -215,87 +602,273 @@ mod tests {
 
     /// AC-007 — `validate_inline_nodes` with a known xref target produces no warning.
     ///
-    /// Red Gate: `validate_inline_nodes` is `todo!()`.
+    /// Canonical test: xref to "introduction" where "introduction" is in known titles.
+    ///
+    /// Red Gate: panics with `todo!()`.
     #[test]
     fn test_bc_3_05_001_ac007_known_xref_target_produces_no_warning() {
-        panic!(
-            "not yet implemented (Red Gate): validate_inline_nodes with a known xref target must \
-             produce zero warnings"
-        )
+        let nodes = vec![InlineNode::Xref(Arc::from("introduction"))];
+        let known = titles_with(&["introduction", "conclusion"]);
+        let mut warnings = vec![];
+        validate_inline_nodes(&nodes, &known, 0, &mut warnings);
+        assert!(
+            warnings.is_empty(),
+            "Xref to known title must produce zero warnings; got: {warnings:?}"
+        );
     }
 
     /// AC-007 — `validate_inline_nodes` with unknown xref target pushes
     /// `LayoutWarning::XrefTargetNotFound`.
     ///
-    /// Red Gate: `validate_inline_nodes` is `todo!()`.
+    /// Canonical test vector from BC-3.05.001 EC-002:
+    ///   Xref to "slide-title-that-does-not-exist" → E-EVL-001-class warning.
+    ///
+    /// Red Gate: panics with `todo!()`.
     #[test]
     fn test_bc_3_05_001_ac007_unknown_xref_target_produces_warning() {
-        panic!(
-            "not yet implemented (Red Gate): validate_inline_nodes with an unknown xref target \
-             must push LayoutWarning::XrefTargetNotFound into the warnings sink"
-        )
+        let nodes = vec![InlineNode::Xref(Arc::from("nonexistent-slide"))];
+        let known = titles_with(&["introduction"]);
+        let mut warnings = vec![];
+        validate_inline_nodes(&nodes, &known, 2, &mut warnings);
+        assert_eq!(
+            warnings.len(),
+            1,
+            "one unknown Xref must produce exactly one warning"
+        );
+        assert!(
+            matches!(
+                &warnings[0],
+                LayoutWarning::XrefTargetNotFound { target, slide_index: 2 }
+                if target.as_ref() == "nonexistent-slide"
+            ),
+            "warning must be XrefTargetNotFound with correct target and slide_index"
+        );
     }
 
-    /// AC-007 — Multiple unknown xref targets accumulate multiple warnings.
+    /// AC-007 — Two unknown xref targets in the same node slice accumulate
+    /// two separate warnings (DI-018: accumulate ALL errors).
     ///
-    /// Red Gate: `validate_inline_nodes` is `todo!()`.
+    /// Red Gate: panics with `todo!()`.
     #[test]
-    fn test_bc_3_05_001_ac007_multiple_unknown_xrefs_accumulate_warnings() {
-        panic!(
-            "not yet implemented (Red Gate): validate_inline_nodes must accumulate ALL unknown \
-             xref warnings — not stop at the first one"
-        )
+    fn test_bc_3_05_001_ac007_multiple_unknown_xrefs_accumulate_all_warnings() {
+        let nodes = vec![
+            InlineNode::Xref(Arc::from("missing-slide-1")),
+            InlineNode::Xref(Arc::from("missing-slide-2")),
+        ];
+        let known = empty_titles();
+        let mut warnings = vec![];
+        validate_inline_nodes(&nodes, &known, 5, &mut warnings);
+        assert_eq!(
+            warnings.len(),
+            2,
+            "two unknown Xrefs must produce two warnings (accumulate ALL, not stop at first)"
+        );
+        let targets: Vec<&str> = warnings
+            .iter()
+            .filter_map(|w| {
+                if let LayoutWarning::XrefTargetNotFound { target, .. } = w {
+                    Some(target.as_ref())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert!(targets.contains(&"missing-slide-1"), "first unknown target must be warned");
+        assert!(targets.contains(&"missing-slide-2"), "second unknown target must be warned");
+    }
+
+    /// AC-007 — Mixed slice: one known xref and one unknown xref produces exactly
+    /// one warning (for the unknown one only).
+    ///
+    /// Red Gate: panics with `todo!()`.
+    #[test]
+    fn test_bc_3_05_001_ac007_known_and_unknown_xref_produces_one_warning() {
+        let nodes = vec![
+            InlineNode::Xref(Arc::from("introduction")),    // known
+            InlineNode::Xref(Arc::from("nonexistent")),     // unknown
+        ];
+        let known = titles_with(&["introduction"]);
+        let mut warnings = vec![];
+        validate_inline_nodes(&nodes, &known, 0, &mut warnings);
+        assert_eq!(
+            warnings.len(),
+            1,
+            "only the unknown xref must generate a warning"
+        );
+        assert!(
+            matches!(&warnings[0], LayoutWarning::XrefTargetNotFound { target, .. } if target.as_ref() == "nonexistent"),
+            "warning must reference 'nonexistent'"
+        );
+    }
+
+    /// AC-007 — `check_inline_node` on a known Xref target produces no warning.
+    ///
+    /// Red Gate: panics with `todo!()`.
+    #[test]
+    fn test_bc_3_05_001_ac007_check_inline_node_known_xref_no_warning() {
+        let node = InlineNode::Xref(Arc::from("executive-summary"));
+        let known = titles_with(&["executive-summary"]);
+        let mut warnings = vec![];
+        check_inline_node(&node, &known, 0, &mut warnings);
+        assert!(warnings.is_empty(), "known Xref must produce no warning from check_inline_node");
+    }
+
+    /// AC-007 — `check_inline_node` on an unknown Xref target pushes one warning.
+    ///
+    /// Red Gate: panics with `todo!()`.
+    #[test]
+    fn test_bc_3_05_001_ac007_check_inline_node_unknown_xref_pushes_warning() {
+        let node = InlineNode::Xref(Arc::from("slide-99"));
+        let known = empty_titles();
+        let mut warnings = vec![];
+        check_inline_node(&node, &known, 7, &mut warnings);
+        assert_eq!(warnings.len(), 1);
+        assert!(matches!(
+            &warnings[0],
+            LayoutWarning::XrefTargetNotFound { target, slide_index: 7 }
+            if target.as_ref() == "slide-99"
+        ));
     }
 
     // ─────────────────────────────────────────────────────────────────────────
     // collect_slide_titles
     // ─────────────────────────────────────────────────────────────────────────
 
-    /// `collect_slide_titles` returns a set containing the deck's slide titles.
+    /// `collect_slide_titles` returns a set containing the slide title strings.
     ///
-    /// Red Gate: `collect_slide_titles` is `todo!()`.
+    /// Red Gate: panics with `todo!()`.
     #[test]
-    fn test_collect_slide_titles_returns_title_set() {
-        panic!(
-            "not yet implemented (Red Gate): collect_slide_titles must return a HashSet containing \
-             all resolved slide title strings from the deck"
-        )
+    fn test_bc_3_05_001_collect_slide_titles_returns_title_set() {
+        let deck = make_deck_with_titles(&["Introduction", "Methodology", "Conclusion"]);
+        let titles = collect_slide_titles(&deck);
+        assert_eq!(titles.len(), 3, "must collect all three slide titles");
+        assert!(titles.contains::<str>("Introduction"));
+        assert!(titles.contains::<str>("Methodology"));
+        assert!(titles.contains::<str>("Conclusion"));
     }
 
     /// `collect_slide_titles` on an empty deck returns an empty set.
     ///
-    /// Red Gate: `collect_slide_titles` is `todo!()`.
+    /// Red Gate: panics with `todo!()`.
     #[test]
-    fn test_collect_slide_titles_empty_deck_returns_empty_set() {
-        panic!(
-            "not yet implemented (Red Gate): collect_slide_titles on a zero-slide deck must \
-             return an empty HashSet"
-        )
+    fn test_bc_3_05_001_collect_slide_titles_empty_deck_returns_empty_set() {
+        let deck = make_deck_with_titles(&[]);
+        let titles = collect_slide_titles(&deck);
+        assert!(
+            titles.is_empty(),
+            "empty deck must produce empty title set"
+        );
+    }
+
+    /// `collect_slide_titles` on a deck with one slide returns a set of size 1.
+    ///
+    /// Red Gate: panics with `todo!()`.
+    #[test]
+    fn test_bc_3_05_001_collect_slide_titles_single_slide() {
+        let deck = make_deck_with_titles(&["Executive Summary"]);
+        let titles = collect_slide_titles(&deck);
+        assert_eq!(titles.len(), 1);
+        assert!(titles.contains("Executive Summary"));
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // run_inline_validation integration
+    // run_inline_validation — integration tests
     // ─────────────────────────────────────────────────────────────────────────
 
-    /// `run_inline_validation` returns no warnings for a deck with no TextRun frames.
+    /// `run_inline_validation` on a deck with no `TextRun` frames returns no warnings.
     ///
-    /// Red Gate: `run_inline_validation` is `todo!()`.
+    /// Red Gate: panics with `todo!()`.
     #[test]
-    fn test_run_inline_validation_no_text_run_frames_no_warnings() {
-        panic!(
-            "not yet implemented (Red Gate): run_inline_validation on a LaidOutDeck with no \
-             TextRun frames must return an empty warnings Vec"
-        )
+    fn test_bc_3_05_001_run_inline_validation_no_text_run_frames_no_warnings() {
+        let deck = make_deck_with_titles(&["Introduction"]);
+        let slides = vec![make_laid_out_slide_empty(0)];
+        let warnings = run_inline_validation(&deck, &slides);
+        assert!(
+            warnings.is_empty(),
+            "no TextRun frames → zero warnings; got: {warnings:?}"
+        );
     }
 
-    /// `run_inline_validation` returns a warning for an unknown xref in a TextRun frame.
+    /// `run_inline_validation` on a deck with one `TextRun` frame containing no
+    /// xref nodes returns no warnings.
     ///
-    /// Red Gate: `run_inline_validation` is `todo!()`.
+    /// Red Gate: panics with `todo!()`.
     #[test]
-    fn test_run_inline_validation_unknown_xref_in_text_run_produces_warning() {
-        panic!(
-            "not yet implemented (Red Gate): run_inline_validation must detect unknown xref \
-             targets in FrameContent::TextRun frames and accumulate warnings"
-        )
+    fn test_bc_3_05_001_run_inline_validation_text_run_no_xref_no_warnings() {
+        let deck = make_deck_with_titles(&["Introduction"]);
+        let nodes = vec![
+            InlineNode::Plain(Arc::from("Hello")),
+            InlineNode::Bold(vec![InlineNode::Plain(Arc::from("world"))]),
+        ];
+        let slides = vec![make_laid_out_slide_with_text_run(0, nodes)];
+        let warnings = run_inline_validation(&deck, &slides);
+        assert!(
+            warnings.is_empty(),
+            "TextRun with no xref nodes must produce zero warnings"
+        );
+    }
+
+    /// `run_inline_validation` detects an unknown xref target in a `TextRun` frame.
+    ///
+    /// Red Gate: panics with `todo!()`.
+    #[test]
+    fn test_bc_3_05_001_run_inline_validation_unknown_xref_in_text_run_produces_warning() {
+        let deck = make_deck_with_titles(&["Introduction"]);
+        let nodes = vec![
+            InlineNode::Plain(Arc::from("See also: ")),
+            InlineNode::Xref(Arc::from("slide-that-does-not-exist")),
+        ];
+        let slides = vec![make_laid_out_slide_with_text_run(0, nodes)];
+        let warnings = run_inline_validation(&deck, &slides);
+        assert_eq!(
+            warnings.len(),
+            1,
+            "one unknown xref must produce one warning; got: {warnings:?}"
+        );
+        assert!(
+            matches!(
+                &warnings[0],
+                LayoutWarning::XrefTargetNotFound { target, .. }
+                if target.as_ref() == "slide-that-does-not-exist"
+            ),
+            "warning must reference the unknown xref target"
+        );
+    }
+
+    /// `run_inline_validation` with a known xref target produces no warnings.
+    ///
+    /// Red Gate: panics with `todo!()`.
+    #[test]
+    fn test_bc_3_05_001_run_inline_validation_known_xref_no_warning() {
+        let deck = make_deck_with_titles(&["Introduction", "Methodology"]);
+        let nodes = vec![InlineNode::Xref(Arc::from("Methodology"))];
+        let slides = vec![make_laid_out_slide_with_text_run(1, nodes)];
+        let warnings = run_inline_validation(&deck, &slides);
+        assert!(
+            warnings.is_empty(),
+            "Xref to known title must not generate a warning"
+        );
+    }
+
+    /// `run_inline_validation` accumulates warnings across multiple slides.
+    ///
+    /// Two slides each with one unknown xref → two warnings total.
+    ///
+    /// Red Gate: panics with `todo!()`.
+    #[test]
+    fn test_bc_3_05_001_run_inline_validation_accumulates_across_slides() {
+        let deck = make_deck_with_titles(&["Slide 0", "Slide 1"]);
+        let nodes0 = vec![InlineNode::Xref(Arc::from("missing-from-slide-0"))];
+        let nodes1 = vec![InlineNode::Xref(Arc::from("missing-from-slide-1"))];
+        let slides = vec![
+            make_laid_out_slide_with_text_run(0, nodes0),
+            make_laid_out_slide_with_text_run(1, nodes1),
+        ];
+        let warnings = run_inline_validation(&deck, &slides);
+        assert_eq!(
+            warnings.len(),
+            2,
+            "unknown xrefs on two slides must accumulate two warnings"
+        );
     }
 }
