@@ -257,7 +257,7 @@ impl DataSource for SqliteDataSource {
         if !std::path::Path::new(path_str).exists() {
             return Err(DataSourceError::IoError {
                 uri: path_str.to_owned(),
-                message: format!("file not found: {path_str}"),
+                message: format!("[{}] file not found: {path_str}", crate::error::E_DAT_004),
             });
         }
 
@@ -1084,6 +1084,12 @@ mod tests {
         assert!(
             msg.contains("no_such_file_slideforge_sqlite_test_99999"),
             "error must reference the missing path; got: {msg}"
+        );
+        // Load-bearing: E-DAT-004 bracket code must be embedded in the message.
+        // Traces to F-PASS17-LOW-1.
+        assert!(
+            msg.contains("[E-DAT-004]"),
+            "file-not-found error must embed [E-DAT-004] bracket code; got: {msg}"
         );
     }
 

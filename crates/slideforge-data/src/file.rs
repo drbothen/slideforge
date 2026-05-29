@@ -293,7 +293,7 @@ impl DataSource for FileDataSource {
         self.load_path(path, None).map_err(|e| match e {
             DataError::FileNotFound { path, .. } => DataSourceError::IoError {
                 uri: uri.to_owned(),
-                message: format!("file not found: {path}"),
+                message: format!("[{}] file not found: {path}", crate::error::E_DAT_004),
             },
             DataError::IoError { message, .. } => DataSourceError::IoError {
                 uri: uri.to_owned(),
@@ -447,6 +447,13 @@ mod tests {
         assert!(
             matches!(err, DataSourceError::IoError { .. }),
             "file-not-found must map to DataSourceError::IoError"
+        );
+        // Load-bearing: E-DAT-004 bracket code must be embedded in the IoError message.
+        // Traces to F-PASS17-LOW-1 workspace sweep.
+        let msg = err.to_string();
+        assert!(
+            msg.contains("[E-DAT-004]"),
+            "file-not-found IoError message must embed [E-DAT-004] bracket code; got: {msg}"
         );
     }
 
