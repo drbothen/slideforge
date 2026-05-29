@@ -2172,12 +2172,14 @@ mod tests {
             ),
             "wrong magic bytes must produce DataSourceError::ParseError, got: {err:?}"
         );
+        // F-MED-P5-3: strict bracket form "[E-DAT-011]" required (TD-VSDD-059 load-bearing).
+        // The DataError::ParseError Display format is "[{code}] parse error for ...".
+        // Passing via substring alone (e.g., "magic" or "ZIP") does NOT catch a regression
+        // where the code embedding is removed.  This assertion fails if `code: E_DAT_011` is
+        // stripped from the ParseError variant, catching the sibling-drift at source.
         assert!(
-            msg.contains("E-DAT-011")
-                || msg.contains("magic")
-                || msg.contains("ZIP")
-                || msg.contains("not a valid"),
-            "wrong magic error must mention E-DAT-011, magic, ZIP, or 'not a valid'; got: {msg}"
+            msg.contains("[E-DAT-011]"),
+            "wrong magic bytes error must embed '[E-DAT-011]' bracket code in message; got: {msg}"
         );
     }
 
