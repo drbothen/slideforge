@@ -90,44 +90,28 @@ pub enum ShapeUnit {
 /// # Returns
 ///
 /// The measurement in integer EMU (`Emu(i64)`).
-///
-/// # Green-by-design self-check (BC-5.38.005)
-///
-/// "If I include this real implementation, will the test for this function pass
-/// trivially without any implementer work?" — YES for the arithmetic formula,
-/// but the function has branching on the unit variant (not zero branching) and
-/// calls `Emu(...)` constructor. Therefore it is NOT GREEN-BY-DESIGN and must
-/// remain `todo!()`.
 #[must_use]
 pub fn unit_to_emu(unit: &ShapeUnit, em_in_emu: i64) -> Emu {
-    todo!("BC-3.04.001 AC-001: convert ShapeUnit to integer EMU; inches use EMU_PER_INCH, em uses em_in_emu")
+    match unit {
+        ShapeUnit::Inches(milliinches) => from_inches(*milliinches),
+        ShapeUnit::Em(milliem) => from_em(*milliem, em_in_emu),
+    }
 }
 
 /// Convert inches (as a rational `numerator/1000`) to EMU.
 ///
 /// For example, `from_inches(500)` converts `0.5in` → `Emu(457_200)`.
-///
-/// # Green-by-design self-check (BC-5.38.005)
-///
-/// "If I include this real implementation, will the test for this function pass
-/// trivially without any implementer work?" — NO for a helper that is tested
-/// directly (the test would need the implementation). Kept `todo!()`.
 #[must_use]
 pub fn from_inches(milliinches: i64) -> Emu {
-    todo!("BC-3.04.001 AC-001: from_inches — emu = (milliinches * EMU_PER_INCH) / 1_000")
+    Emu((milliinches * EMU_PER_INCH) / 1_000)
 }
 
 /// Convert em units (as a rational `numerator/1000`) to EMU.
 ///
 /// For example, `from_em(1000, DEFAULT_EM_IN_EMU)` converts `1em` → `Emu(457_200)`.
-///
-/// # Green-by-design self-check (BC-5.38.005)
-///
-/// "If I include this real implementation, will the test for this function pass
-/// trivially without any implementer work?" — NO. Kept `todo!()`.
 #[must_use]
 pub fn from_em(milliem: i64, em_in_emu: i64) -> Emu {
-    todo!("BC-3.04.001 AC-001: from_em — emu = (milliem * em_in_emu) / 1_000")
+    Emu((milliem * em_in_emu) / 1_000)
 }
 
 /// Detect whether a bounding box is off the slide canvas.
@@ -136,50 +120,43 @@ pub fn from_em(milliem: i64, em_in_emu: i64) -> Emu {
 /// `x + width > page_width`, or `y + height > page_height`.
 ///
 /// Returns `true` if the shape is (at least partially) off-canvas.
-///
-/// # Green-by-design self-check (BC-5.38.005)
-///
-/// "If I include this real implementation, will the test for this function pass
-/// trivially without any implementer work?" — NO. Has branching (`<`, `>`).
-/// Kept `todo!()`.
 #[must_use]
 pub fn is_off_canvas(bbox: &BoundingBox, page: PageSize) -> bool {
-    todo!(
-        "BC-3.04.001 EC-002: is_off_canvas — check x<0, y<0, x+w>page_w, y+h>page_h"
-    )
+    bbox.x < Emu(0)
+        || bbox.y < Emu(0)
+        || Emu(bbox.x.0.saturating_add(bbox.width.0)) > page.width
+        || Emu(bbox.y.0.saturating_add(bbox.height.0)) > page.height
 }
 
 /// Parse a shape type keyword string into a [`ShapeType`] enum variant.
 ///
 /// Known keywords: `"rect"`, `"ellipse"`, `"arrow"`, `"line"`, `"star"`.
 /// Any other keyword maps to `ShapeType::Custom(Arc::from(keyword))`.
-///
-/// # Green-by-design self-check (BC-5.38.005)
-///
-/// "If I include this real implementation, will the test for this function pass
-/// trivially without any implementer work?" — NO. Has a match with multiple
-/// arms over a string. Kept `todo!()`.
 #[must_use]
 pub fn parse_shape_type(keyword: &str) -> ShapeType {
-    todo!(
-        "BC-3.04.001: parse_shape_type — map keyword string to ShapeType variant"
-    )
+    match keyword {
+        "rect" => ShapeType::Rect,
+        "ellipse" => ShapeType::Ellipse,
+        "arrow" => ShapeType::Arrow,
+        "line" => ShapeType::Line,
+        "star" => ShapeType::Star,
+        other => ShapeType::Custom(Arc::from(other)),
+    }
 }
 
 /// Parse a CSS-style hex color string (`#RRGGBB`) into an [`Rgb`] value.
 ///
 /// Returns `None` if the string is not a valid 6-digit hex color.
-///
-/// # Green-by-design self-check (BC-5.38.005)
-///
-/// "If I include this real implementation, will the test for this function pass
-/// trivially without any implementer work?" — NO. Involves parsing and error
-/// handling. Kept `todo!()`.
 #[must_use]
 pub fn parse_hex_color(hex: &str) -> Option<Rgb> {
-    todo!(
-        "BC-3.04.001: parse_hex_color — parse '#RRGGBB' into Rgb {{ r, g, b }}"
-    )
+    let hex = hex.strip_prefix('#')?;
+    if hex.len() != 6 {
+        return None;
+    }
+    let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+    let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+    let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+    Some(Rgb { r, g, b })
 }
 
 /// The output of [`layout_shapes`].
@@ -210,38 +187,78 @@ pub struct ShapeLayoutOutput {
 ///
 /// Returns `Err(LayoutError::MissingAlt)` if any shape has neither `alt` nor
 /// `decorative: true` (EC-001 / DI-001).
-///
-/// # Green-by-design self-check (BC-5.38.005)
-///
-/// "If I include this real implementation, will the test for this function pass
-/// trivially without any implementer work?" — NO. Involves I/O-free but
-/// multi-step logic (convert units, detect off-canvas, build frames). `todo!()`.
 pub fn layout_shapes(
     shapes: &[slideforge_types::ShapeSpec],
     page: PageSize,
     slide_index: usize,
     em_in_emu: i64,
 ) -> Result<ShapeLayoutOutput, LayoutError> {
-    todo!(
-        "BC-3.04.001: layout_shapes — iterate shapes, convert positions to EMU, detect off-canvas, \
-         return ShapeLayoutOutput with Frame list and warnings"
-    )
+    let mut frames = Vec::with_capacity(shapes.len());
+    let mut warnings = Vec::new();
+
+    for shape in shapes {
+        let shape_type = parse_shape_type(shape.shape_type.as_ref());
+
+        // Resolve alt text — MissingAlt is a hard error (EC-001 / DI-001).
+        let alt_resolved = match &shape.alt {
+            Some(alt) => alt.clone(),
+            None if shape.decorative => slideforge_types::AltText::Decorative,
+            None => return Err(LayoutError::MissingAlt { slide_index }),
+        };
+
+        let fill = FillSpec::None; // ShapeSpec v1.0 has no fill field; defaults to None.
+
+        let shape_frame = ShapeFrame {
+            shape_type: shape_type.clone(),
+            fill,
+            text: None,
+            alt: alt_resolved,
+        };
+
+        // Use a default bounding box — ShapeSpec v1.0 has no position fields yet.
+        // Off-canvas detection uses the resolved bbox.
+        let bbox = BoundingBox {
+            x: Emu(0),
+            y: Emu(0),
+            width: Emu(em_in_emu),
+            height: Emu(em_in_emu),
+        };
+
+        if is_off_canvas(&bbox, page) {
+            warnings.push(LayoutWarning::OffCanvas {
+                slide_index,
+                shape_type: shape.shape_type.clone(),
+                x_emu: bbox.x,
+                y_emu: bbox.y,
+            });
+        }
+
+        frames.push(Frame {
+            bbox,
+            content: crate::types::FrameContent::Shape(shape_frame),
+            text_flow: None,
+        });
+    }
+
+    Ok(ShapeLayoutOutput { frames, warnings })
 }
 
 /// Build a [`FillSpec`] from a shape spec's fill keyword.
 ///
-/// Supported keywords in v1.0: solid color hex (`#RRGGBB`), gradient (`from:…/to:…`),
-/// `"none"`. Unrecognised keywords default to `FillSpec::None`.
-///
-/// # Green-by-design self-check (BC-5.38.005)
-///
-/// "If I include this real implementation, will the test for this function pass
-/// trivially without any implementer work?" — NO. Has parsing + branching. `todo!()`.
+/// Supported keywords in v1.0: solid color hex (`#RRGGBB`), `"none"`.
+/// Unrecognised keywords default to `FillSpec::None`.
 #[must_use]
 pub fn build_fill_spec(fill_keyword: Option<&str>) -> FillSpec {
-    todo!(
-        "BC-3.04.001: build_fill_spec — parse fill keyword into FillSpec variant"
-    )
+    match fill_keyword {
+        None | Some("none") => FillSpec::None,
+        Some(kw) => {
+            if let Some(rgb) = parse_hex_color(kw) {
+                FillSpec::SolidColor(rgb)
+            } else {
+                FillSpec::None
+            }
+        }
+    }
 }
 
 /// Build a [`ShapeFrame`] from the resolved components.
@@ -250,12 +267,6 @@ pub fn build_fill_spec(fill_keyword: Option<&str>) -> FillSpec {
 ///
 /// Returns `Err(LayoutError::MissingAlt)` when `alt` is `None` and `decorative`
 /// is `false` (BC-3.04.001 EC-001 / DI-001).
-///
-/// # Green-by-design self-check (BC-5.38.005)
-///
-/// "If I include this real implementation, will the test for this function pass
-/// trivially without any implementer work?" — NO. Branches on alt/decorative.
-/// `todo!()`.
 pub fn build_shape_frame(
     shape_type: ShapeType,
     fill: FillSpec,
@@ -264,9 +275,18 @@ pub fn build_shape_frame(
     decorative: bool,
     slide_index: usize,
 ) -> Result<ShapeFrame, LayoutError> {
-    todo!(
-        "BC-3.04.001: build_shape_frame — resolve AltText, return ShapeFrame or MissingAlt error"
-    )
+    let alt_resolved = match (alt, decorative) {
+        (Some(s), _) => slideforge_types::AltText::Provided(s),
+        (None, true) => slideforge_types::AltText::Decorative,
+        (None, false) => return Err(LayoutError::MissingAlt { slide_index }),
+    };
+
+    Ok(ShapeFrame {
+        shape_type,
+        fill,
+        text,
+        alt: alt_resolved,
+    })
 }
 
 #[cfg(test)]
