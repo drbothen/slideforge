@@ -51,22 +51,15 @@ use crate::types::LayoutWarning;
 /// * `known_slide_titles` — The set of slide title strings from the deck.
 /// * `slide_index` — Zero-based index of the slide being validated.
 /// * `warnings` — Mutable sink for accumulated warnings (DI-018).
-///
-/// # Green-by-design self-check (BC-5.38.005)
-///
-/// "If I include this real implementation, will the test for this function pass
-/// trivially without any implementer work?" — NO. Involves recursive tree
-/// traversal and match on all 12 variants. `todo!()`.
 pub fn validate_inline_nodes(
     nodes: &[InlineNode],
     known_slide_titles: &HashSet<Arc<str>>,
     slide_index: usize,
     warnings: &mut Vec<LayoutWarning>,
 ) {
-    todo!(
-        "BC-3.05.001: validate_inline_nodes — traverse all InlineNode variants (no wildcard), \
-         validate Xref targets, push XrefTargetNotFound warnings for unknown targets"
-    )
+    for node in nodes {
+        check_inline_node(node, known_slide_titles, slide_index, warnings);
+    }
 }
 
 /// Collect all slide title strings from the deck into a `HashSet`.
@@ -82,18 +75,12 @@ pub fn validate_inline_nodes(
 ///
 /// A `HashSet<Arc<str>>` containing every slide title string found in the deck.
 /// Slides without a title field are not represented (they cannot be xref targets).
-///
-/// # Green-by-design self-check (BC-5.38.005)
-///
-/// "If I include this real implementation, will the test for this function pass
-/// trivially without any implementer work?" — NO. Involves iteration + field
-/// lookup + string construction. `todo!()`.
 #[must_use]
 pub fn collect_slide_titles(deck: &slideforge_types::Deck) -> HashSet<Arc<str>> {
-    todo!(
-        "BC-3.05.001: collect_slide_titles — scan Deck.slides for title fields, \
-         return HashSet<Arc<str>> of all resolved title strings"
-    )
+    deck.slides
+        .iter()
+        .filter_map(|slide| slide.title_str().map(Arc::from))
+        .collect()
 }
 
 /// Run the inline validation pass for all slides in a `LaidOutDeck`.
@@ -115,21 +102,23 @@ pub fn collect_slide_titles(deck: &slideforge_types::Deck) -> HashSet<Arc<str>> 
 ///
 /// A `Vec<LayoutWarning>` containing all xref-not-found warnings accumulated
 /// across all slides.
-///
-/// # Green-by-design self-check (BC-5.38.005)
-///
-/// "If I include this real implementation, will the test for this function pass
-/// trivially without any implementer work?" — NO. Involves iteration over slides
-/// and frames, pattern matching on FrameContent variants. `todo!()`.
 #[must_use]
 pub fn run_inline_validation(
     deck: &slideforge_types::Deck,
     laid_out_slides: &[crate::types::LaidOutSlide],
 ) -> Vec<LayoutWarning> {
-    todo!(
-        "BC-3.05.001: run_inline_validation — collect slide titles, scan FrameContent::TextRun \
-         frames, validate Xref nodes, return warnings"
-    )
+    let known_titles = collect_slide_titles(deck);
+    let mut warnings = Vec::new();
+
+    for slide in laid_out_slides {
+        for frame in &slide.frames {
+            if let crate::types::FrameContent::TextRun(nodes) = &frame.content {
+                validate_inline_nodes(nodes, &known_titles, slide.source_index, &mut warnings);
+            }
+        }
+    }
+
+    warnings
 }
 
 /// Check whether a single [`InlineNode`] subtree contains any xref nodes that
@@ -138,22 +127,46 @@ pub fn run_inline_validation(
 /// This is the recursive helper for [`validate_inline_nodes`]. It MUST NOT use
 /// a wildcard `_ => {}` catch-all — every `InlineNode` variant must be
 /// explicitly handled (AC-005 / architecture rule 4).
-///
-/// # Green-by-design self-check (BC-5.38.005)
-///
-/// "If I include this real implementation, will the test for this function pass
-/// trivially without any implementer work?" — NO. Recursive, all 12 variants
-/// must be listed. `todo!()`.
 pub fn check_inline_node(
     node: &InlineNode,
     known_slide_titles: &HashSet<Arc<str>>,
     slide_index: usize,
     warnings: &mut Vec<LayoutWarning>,
 ) {
-    todo!(
-        "BC-3.05.001: check_inline_node — match on ALL InlineNode variants (no wildcard), \
-         recurse into nested children, push XrefTargetNotFound for unknown Xref targets"
-    )
+    match node {
+        // Leaf variants — no children, no xref.
+        InlineNode::Plain(_) | InlineNode::Code(_) | InlineNode::Math(_) => {}
+
+        // Xref — validate the target.
+        InlineNode::Xref(target) => {
+            if !known_slide_titles.contains(target.as_ref()) {
+                warnings.push(LayoutWarning::XrefTargetNotFound {
+                    target: target.clone(),
+                    slide_index,
+                });
+            }
+        }
+
+        // Container variants — recurse into children.
+        InlineNode::Bold(children)
+        | InlineNode::Italic(children)
+        | InlineNode::Footnote(children)
+        | InlineNode::Superscript(children)
+        | InlineNode::Subscript(children)
+        | InlineNode::Strikethrough(children)
+        | InlineNode::Highlight(children) => {
+            for child in children {
+                check_inline_node(child, known_slide_titles, slide_index, warnings);
+            }
+        }
+
+        // Link — recurse into display text children only; URL is not an xref target.
+        InlineNode::Link { text, url: _ } => {
+            for child in text {
+                check_inline_node(child, known_slide_titles, slide_index, warnings);
+            }
+        }
+    }
 }
 
 #[cfg(test)]
