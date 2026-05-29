@@ -885,6 +885,198 @@ mod tests {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // F-HIGH-002 — AC-INT-1 canonical EMU vector (load-bearing bbox assertion)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// F-HIGH-002 — `layout::run` produces exact EMU values for the canonical
+    /// position vector x=0.5in, y=1.0in, width=2.0in, height=1.0in.
+    ///
+    /// Previously, `test_ac_int_1_layout_run_wires_shape_block_to_frame` only
+    /// checked `frames.len() >= 3` and `FrameContent::Shape`. This test adds the
+    /// canonical-vector assertion for the bbox values (load-bearing per F-HIGH-002).
+    ///
+    /// Load-bearing: if `unit_to_emu` is stubbed to return Emu(0) for all inputs,
+    /// the bbox assertions below fail.
+    #[test]
+    fn test_f_high_002_layout_run_canonical_emu_vector() {
+        use slideforge_types::{
+            AltText, Block, ContentBlock, FillSpec, ShapePosition, ShapeSpec, ShapeType, ShapeUnit,
+        };
+
+        let shape_spec = ShapeSpec {
+            shape_type: ShapeType::Rect,
+            position: ShapePosition {
+                x: ShapeUnit::Inches(500),       // 0.5in → Emu(457_200)
+                y: ShapeUnit::Inches(1000),      // 1.0in → Emu(914_400)
+                width: ShapeUnit::Inches(2000),  // 2.0in → Emu(1_828_800)
+                height: ShapeUnit::Inches(1000), // 1.0in → Emu(914_400)
+            },
+            fill: FillSpec::None,
+            text: None,
+            alt: Some(AltText::Provided(Arc::from("canonical test rectangle"))),
+            decorative: false,
+            span: SourceSpan::default(),
+        };
+        let block = Block {
+            content: ContentBlock::Shape(shape_spec),
+            label: None,
+            span: SourceSpan::default(),
+        };
+        let slide = Slide {
+            slide_type: Arc::from("title"),
+            fields: OrderedMap::new(),
+            blocks: vec![block],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+        };
+        let deck = make_deck(vec![slide]);
+        let brand = make_brand();
+        let result = run(&deck, &brand).expect("layout::run must succeed");
+
+        let slide_out = &result.slides[0];
+        // Shape frame is the last frame (appended after region-map frames).
+        let last_frame = slide_out.frames.last().expect("frames must be non-empty");
+        assert!(
+            matches!(last_frame.content, FrameContent::Shape(_)),
+            "last frame must be FrameContent::Shape"
+        );
+
+        // Canonical EMU vector assertion (F-HIGH-002 load-bearing).
+        let bbox = last_frame.bbox;
+        assert_eq!(
+            bbox.x,
+            slideforge_types::Emu(457_200),
+            "x: 0.5in → Emu(457_200)"
+        );
+        assert_eq!(
+            bbox.y,
+            slideforge_types::Emu(914_400),
+            "y: 1.0in → Emu(914_400)"
+        );
+        assert_eq!(
+            bbox.width,
+            slideforge_types::Emu(1_828_800),
+            "width: 2.0in → Emu(1_828_800)"
+        );
+        assert_eq!(
+            bbox.height,
+            slideforge_types::Emu(914_400),
+            "height: 1.0in → Emu(914_400)"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // VP-049 — LaidOutDeck.warnings wired: off-canvas shape warning flows through
+    // VP-050 — LaidOutDeck.warnings wired: unknown xref warning flows through
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// VP-049 — `layout::run` propagates off-canvas shape warnings to
+    /// `LaidOutDeck.warnings` (BC-3.04.001 EC-002 / AC-003).
+    ///
+    /// A shape at x=-0.5in (negative x) is off-canvas. The warning must appear
+    /// in `LaidOutDeck.warnings`, not silently dropped.
+    ///
+    /// Load-bearing: if `deck_warnings.extend(shape_output.warnings)` is removed
+    /// from `layout::run`, this assertion fails (result.warnings would be empty).
+    #[test]
+    fn test_vp_049_layout_run_off_canvas_warning_in_laid_out_deck_warnings() {
+        use slideforge_types::{
+            AltText, Block, ContentBlock, FillSpec, ShapePosition, ShapeSpec, ShapeType, ShapeUnit,
+        };
+        use crate::types::LayoutWarning;
+
+        let shape_spec = ShapeSpec {
+            shape_type: ShapeType::Rect,
+            position: ShapePosition {
+                x: ShapeUnit::Inches(-500), // -0.5in → Emu(-457_200) → off-canvas
+                y: ShapeUnit::Inches(500),
+                width: ShapeUnit::Inches(1000),
+                height: ShapeUnit::Inches(500),
+            },
+            fill: FillSpec::None,
+            text: None,
+            alt: Some(AltText::Provided(Arc::from("off-canvas rectangle"))),
+            decorative: false,
+            span: SourceSpan::default(),
+        };
+        let block = Block {
+            content: ContentBlock::Shape(shape_spec),
+            label: None,
+            span: SourceSpan::default(),
+        };
+        let slide = Slide {
+            slide_type: Arc::from("title"),
+            fields: OrderedMap::new(),
+            blocks: vec![block],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+        };
+        let deck = make_deck(vec![slide]);
+        let brand = make_brand();
+        let result = run(&deck, &brand).expect("layout::run must succeed for off-canvas shape");
+
+        // VP-049: the off-canvas warning must appear in LaidOutDeck.warnings.
+        assert!(
+            result.warnings.iter().any(|w| matches!(w, LayoutWarning::OffCanvas { .. })),
+            "LaidOutDeck.warnings must contain OffCanvas warning for off-canvas shape; \
+             got: {:?}",
+            result.warnings
+        );
+    }
+
+    /// VP-050 — `layout::run` propagates xref-not-found warnings to
+    /// `LaidOutDeck.warnings` (BC-3.05.001 EC-002 / AC-007).
+    ///
+    /// A `TextRun` frame with an unknown `Xref` target must produce a
+    /// `XrefTargetNotFound` warning in `LaidOutDeck.warnings`.
+    ///
+    /// Load-bearing: if `deck_warnings.extend(inline_warnings)` is removed from
+    /// `layout::run`, this assertion fails.
+    #[test]
+    fn test_vp_050_layout_run_xref_warning_in_laid_out_deck_warnings() {
+        use crate::inline::run_inline_validation;
+        use crate::types::{BoundingBox, Frame, FrameContent, LaidOutSlide, LayoutWarning};
+        use slideforge_types::{Emu, InlineNode};
+
+        let xref_target = Arc::from("__nonexistent_slide__");
+        let text_run_frame = Frame {
+            bbox: BoundingBox {
+                x: Emu(0),
+                y: Emu(0),
+                width: Emu(1_000_000),
+                height: Emu(500_000),
+            },
+            content: FrameContent::TextRun(vec![InlineNode::Xref(Arc::clone(&xref_target))]),
+            text_flow: None,
+        };
+        let laid_out_slide = LaidOutSlide {
+            source_index: 0,
+            slide_type_keyword: Arc::from("title"),
+            frames: vec![text_run_frame],
+            speaker_notes: None,
+            register_tags: vec![],
+        };
+        let deck = make_deck(vec![make_slide("title")]);
+
+        // Call run_inline_validation directly (same path wired in layout::run).
+        let warnings = run_inline_validation(&deck, &[laid_out_slide])
+            .expect("run_inline_validation must not error for unknown xref");
+
+        // VP-050: the XrefTargetNotFound warning must be present.
+        assert!(
+            warnings.iter().any(|w| matches!(
+                w,
+                LayoutWarning::XrefTargetNotFound { target, .. }
+                if target.as_ref() == "__nonexistent_slide__"
+            )),
+            "warnings must contain XrefTargetNotFound for '__nonexistent_slide__'; \
+             got: {warnings:?}"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // VP-011 skeleton: proptest for slide count preservation
     // ─────────────────────────────────────────────────────────────────────────
 

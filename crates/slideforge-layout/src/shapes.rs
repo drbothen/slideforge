@@ -1736,4 +1736,273 @@ mod tests {
         set.insert(sf);
         assert_eq!(set.len(), 1);
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // VP-048 — ArithmeticOverflow wiring (Item M / BC-3.04.001 Invariant 8)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// VP-048 — `from_inches(i64::MAX)` returns `None` (overflow detected, not silent).
+    ///
+    /// BC-3.04.001 Invariant 8 / interface-definitions.md §9.4: `checked_mul` must
+    /// detect overflow and return `None`. This is the primary VP-048 test.
+    ///
+    /// Load-bearing: if production code uses `saturating_mul`, this returns
+    /// `Some(Emu(i64::MAX / 1_000))` and the assert fails.
+    #[test]
+    fn test_vp_048_from_inches_max_returns_arithmetic_overflow() {
+        let result = from_inches(i64::MAX);
+        assert!(
+            result.is_none(),
+            "from_inches(i64::MAX) must return None (VP-048 checked_mul); \
+             saturating_mul would return Some(Emu({})) — that is the wrong production behaviour",
+            i64::MAX / 1_000
+        );
+    }
+
+    /// VP-048 / F-MED-005 — `from_inches(i64::MIN)` returns `None` (underflow).
+    ///
+    /// Regression test for the negative-overflow boundary (F-MED-005).
+    ///
+    /// Load-bearing: saturating_mul would return `Some(Emu(i64::MIN / 1_000))`.
+    #[test]
+    fn test_vp_048_boundary_from_inches_min_returns_none() {
+        let result = from_inches(i64::MIN);
+        assert!(
+            result.is_none(),
+            "from_inches(i64::MIN) must return None (VP-048); \
+             saturating underflow would return Some — that is wrong"
+        );
+    }
+
+    /// VP-048 — `from_em(i64::MAX, DEFAULT_EM_IN_EMU)` returns `None`.
+    #[test]
+    fn test_vp_048_from_em_max_returns_none() {
+        let result = from_em(i64::MAX, DEFAULT_EM_IN_EMU);
+        assert!(
+            result.is_none(),
+            "from_em(i64::MAX, DEFAULT_EM_IN_EMU) must return None (VP-048 checked_mul)"
+        );
+    }
+
+    /// VP-048 — `layout_shapes` with an i64::MAX position field accumulates
+    /// `LayoutError::ArithmeticOverflow` in a `Multiple`.
+    ///
+    /// End-to-end overflow test: an artificially extreme `ShapeUnit::Inches(i64::MAX)`
+    /// must propagate through `layout_shapes` as `ArithmeticOverflow`, not silently clamp.
+    ///
+    /// Load-bearing: without the `checked_mul` path, layout would produce a shape frame
+    /// with a saturated (but accepted) EMU value — this test catches that regression.
+    #[test]
+    fn test_vp_048_layout_shapes_overflow_x_returns_arithmetic_overflow() {
+        let st =
+            slideforge_types::ShapeType::from_keyword("rect").expect("rect must be known");
+        let spec = ShapeSpec {
+            shape_type: st,
+            position: ShapePosition {
+                x: ShapeUnit::Inches(i64::MAX), // overflows checked_mul
+                y: ShapeUnit::Inches(1000),
+                width: ShapeUnit::Inches(1000),
+                height: ShapeUnit::Inches(500),
+            },
+            fill: FillSpec::None,
+            text: None,
+            alt: Some(AltText::Provided(Arc::from("test shape"))),
+            decorative: false,
+            span: SourceSpan::default(),
+        };
+        let shapes = vec![spec];
+        let result = layout_shapes(&shapes, default_page(), 0, DEFAULT_EM_IN_EMU);
+        assert!(result.is_err(), "overflow position must return Err");
+        match result.unwrap_err() {
+            LayoutError::Multiple { inner } => {
+                assert!(
+                    inner.iter().any(|e| matches!(e, LayoutError::ArithmeticOverflow { .. })),
+                    "Multiple must contain ArithmeticOverflow; got: {inner:?}"
+                );
+            },
+            other => panic!("expected LayoutError::Multiple containing ArithmeticOverflow, got: {other:?}"),
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Item N — LayoutError::multiple() smart constructor tests
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// BC-3.04.001 Item N — Single error → `Multiple { inner: vec![err] }` (uniform).
+    ///
+    /// `LayoutError::multiple()` MUST return `Multiple` even for a single error,
+    /// providing a uniform return type regardless of error count.
+    ///
+    /// Load-bearing: `layout_shapes` with 1 missing-alt shape previously returned
+    /// `MissingAlt` directly; this test enforces the new uniform Multiple contract.
+    #[test]
+    fn test_bc_3_04_001_multiple_single_error_uniformity() {
+        let single = LayoutError::MissingAlt {
+            source_slide_index: 0,
+            span: SourceSpan::default(),
+        };
+        let result = LayoutError::multiple(vec![single.clone()]);
+        match result {
+            LayoutError::Multiple { inner } => {
+                assert_eq!(inner.len(), 1, "single error must produce Multiple with len=1");
+                assert_eq!(inner[0], single, "inner error must equal the original");
+            },
+            other => panic!(
+                "LayoutError::multiple(vec![one_err]) must return Multiple, got: {other:?}"
+            ),
+        }
+    }
+
+    /// BC-3.04.001 Item N — Nested `Multiple` is flattened by smart constructor.
+    ///
+    /// `LayoutError::multiple(vec![Multiple { inner: [A, B] }, C])` → `Multiple { inner: [A, B, C] }`.
+    /// No nested Multiple variant must survive (BC-3.04.001 Multiple.Invariants).
+    ///
+    /// Load-bearing: without the flat_map path, nesting depth grows on each accumulation pass.
+    #[test]
+    fn test_bc_3_04_001_multiple_flattens_nested() {
+        let inner_a = LayoutError::EmptyDeck {
+            source_slide_index: 0,
+        };
+        let inner_b = LayoutError::EmptyDeck {
+            source_slide_index: 1,
+        };
+        let outer_c = LayoutError::EmptyDeck {
+            source_slide_index: 2,
+        };
+        let nested = LayoutError::Multiple {
+            inner: vec![inner_a.clone(), inner_b.clone()],
+        };
+        let result = LayoutError::multiple(vec![nested, outer_c.clone()]);
+        match result {
+            LayoutError::Multiple { inner } => {
+                assert_eq!(
+                    inner.len(),
+                    3,
+                    "nested Multiple must be flattened: expected 3 flat errors, got: {inner:?}"
+                );
+                assert_eq!(inner[0], inner_a);
+                assert_eq!(inner[1], inner_b);
+                assert_eq!(inner[2], outer_c);
+                // No nested Multiple in inner
+                for e in &inner {
+                    assert!(
+                        !matches!(e, LayoutError::Multiple { .. }),
+                        "flattened inner must not contain nested Multiple; found: {e:?}"
+                    );
+                }
+            },
+            other => panic!("expected Multiple after flattening, got: {other:?}"),
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // F-HIGH-002 — AC-INT-1 EMU canonical vector (load-bearing bbox assertion)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// F-HIGH-002 — `layout_shapes` with canonical position vector produces
+    /// exact EMU values: x=457_200, y=914_400, width=1_828_800, height=914_400.
+    ///
+    /// Canonical test vector from BC-3.04.001 AC-001.
+    /// Load-bearing: without the `unit_to_emu` wiring, the bbox values would be
+    /// zero or default — this assertion proves the full conversion path is active.
+    #[test]
+    fn test_f_high_002_layout_shapes_canonical_emu_vector() {
+        let shapes = vec![shape_spec_with_alt("rect", "Test rect")];
+        let output = layout_shapes(&shapes, default_page(), 0, DEFAULT_EM_IN_EMU)
+            .expect("canonical position must not overflow");
+        assert_eq!(output.frames.len(), 1);
+        let bbox = output.frames[0].bbox;
+        assert_eq!(bbox.x, Emu(457_200), "x: 0.5in → Emu(457_200)");
+        assert_eq!(bbox.y, Emu(914_400), "y: 1.0in → Emu(914_400)");
+        assert_eq!(bbox.width, Emu(1_828_800), "width: 2.0in → Emu(1_828_800)");
+        assert_eq!(bbox.height, Emu(914_400), "height: 1.0in → Emu(914_400)");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // F-HIGH-003 — is_valid over shape frames (zero-width/height guard)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// F-HIGH-003 — Shape with `width = 0` (i.e., 0 EMU) is rejected as
+    /// `LayoutError::InvalidBoundingBox` (BC-3.04.001 Invariant 9 / BC-3.06.003).
+    ///
+    /// Load-bearing: without the is_valid guard in layout_shapes, a zero-width shape
+    /// would produce a frame — this test catches that regression.
+    #[test]
+    fn test_f_high_003_zero_width_shape_rejected_as_invalid_bbox() {
+        let st =
+            slideforge_types::ShapeType::from_keyword("rect").expect("rect must be known");
+        let spec = ShapeSpec {
+            shape_type: st,
+            position: ShapePosition {
+                x: ShapeUnit::Inches(500),
+                y: ShapeUnit::Inches(1000),
+                width: ShapeUnit::Inches(0), // zero width → Emu(0) → invalid
+                height: ShapeUnit::Inches(1000),
+            },
+            fill: FillSpec::None,
+            text: None,
+            alt: Some(AltText::Provided(Arc::from("zero-width shape"))),
+            decorative: false,
+            span: SourceSpan::default(),
+        };
+        let shapes = vec![spec];
+        let result = layout_shapes(&shapes, default_page(), 1, DEFAULT_EM_IN_EMU);
+        assert!(result.is_err(), "zero-width shape must return Err");
+        assert!(
+            matches!(
+                result.unwrap_err(),
+                LayoutError::InvalidBoundingBox {
+                    source_slide_index: 1,
+                    ..
+                }
+            ),
+            "error must be InvalidBoundingBox"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // F-OBS-003 — Shape frame index >= region count (BC-3.04.001 PC-3)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// F-OBS-003 — `layout_shapes` appends shape frames AFTER region-map frames.
+    ///
+    /// BC-3.04.001 postcondition 3: `shape_frame_index >= region_count`.
+    /// With N region frames and 1 shape, the shape frame is at index N or later.
+    ///
+    /// This test uses `layout_shapes` directly (no regions) to verify source-order
+    /// preservation: 1 shape → 1 frame at index 0 in the shape output (appended
+    /// after any region frames by the caller).
+    #[test]
+    fn test_bc_3_04_001_shape_frame_after_regions() {
+        // layout_shapes produces shape frames that the caller (layout::run) appends
+        // after region frames. With 2 shapes, shape output has frames at indices 0 and 1
+        // (relative to the shape output vec), which become N and N+1 in the full slide.
+        let shapes = vec![
+            shape_spec_with_alt("rect", "First shape"),
+            shape_spec_with_alt("ellipse", "Second shape"),
+        ];
+        let output = layout_shapes(&shapes, default_page(), 0, DEFAULT_EM_IN_EMU)
+            .expect("layout_shapes must succeed");
+        assert_eq!(output.frames.len(), 2, "two shapes → two shape frames");
+        // Source order is preserved: first shape → frames[0], second → frames[1].
+        match &output.frames[0].content {
+            crate::types::FrameContent::Shape(sf) => {
+                assert!(
+                    matches!(sf.shape_type, ShapeType::Rect),
+                    "first shape frame must be Rect"
+                );
+            },
+            other => panic!("expected Shape frame at [0], got: {other:?}"),
+        }
+        match &output.frames[1].content {
+            crate::types::FrameContent::Shape(sf) => {
+                assert!(
+                    matches!(sf.shape_type, ShapeType::Ellipse),
+                    "second shape frame must be Ellipse"
+                );
+            },
+            other => panic!("expected Shape frame at [1], got: {other:?}"),
+        }
+    }
 }

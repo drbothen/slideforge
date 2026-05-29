@@ -512,4 +512,61 @@ mod tests {
         };
         // If this test compiles, the canonical field name is correctly applied.
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // LayoutError::multiple() smart constructor (Item N)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Item N — `LayoutError::multiple()` with one error returns `Multiple` uniformly.
+    ///
+    /// Even a single error must be returned as `Multiple { inner: vec![err] }`.
+    /// Load-bearing: verifies `matches!(result, LayoutError::Multiple { .. })`.
+    #[test]
+    fn test_bc_3_04_001_multiple_single_error_uniformity() {
+        let single = LayoutError::EmptyDeck {
+            source_slide_index: 0,
+        };
+        let result = LayoutError::multiple(vec![single]);
+        assert!(
+            matches!(&result, LayoutError::Multiple { inner } if inner.len() == 1),
+            "multiple(vec![one_err]) must return Multiple with len=1; got: {result:?}"
+        );
+    }
+
+    /// Item N — `LayoutError::multiple()` flattens nested `Multiple` variants.
+    ///
+    /// `multiple(vec![Multiple { inner: [A, B] }, C])` → `Multiple { inner: [A, B, C] }`.
+    /// Load-bearing: inner vec must have len=3, not 2.
+    #[test]
+    fn test_bc_3_04_001_multiple_flattens_nested() {
+        let a = LayoutError::EmptyDeck {
+            source_slide_index: 0,
+        };
+        let b = LayoutError::EmptyDeck {
+            source_slide_index: 1,
+        };
+        let c = LayoutError::EmptyDeck {
+            source_slide_index: 2,
+        };
+        let nested = LayoutError::Multiple {
+            inner: vec![a, b],
+        };
+        let result = LayoutError::multiple(vec![nested, c]);
+        match result {
+            LayoutError::Multiple { ref inner } => {
+                assert_eq!(
+                    inner.len(),
+                    3,
+                    "nested Multiple must flatten to 3 flat errors; got: {inner:?}"
+                );
+                for e in inner {
+                    assert!(
+                        !matches!(e, LayoutError::Multiple { .. }),
+                        "flattened inner must not contain nested Multiple; found: {e:?}"
+                    );
+                }
+            },
+            other => panic!("expected Multiple after flattening, got: {other:?}"),
+        }
+    }
 }
