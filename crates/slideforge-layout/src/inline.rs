@@ -206,12 +206,16 @@ pub fn run_inline_validation(
 ///
 /// ## Depth bound (F-MED-006 / BC-3.05.001 E-LAY-005)
 ///
-/// When `depth >= MAX_INLINE_DEPTH`, returns
+/// When `depth > MAX_INLINE_DEPTH`, returns
 /// `Err(LayoutError::InlineDepthExceeded)` rather than recursing further.
+/// Depths 0 through `MAX_INLINE_DEPTH` (64) are accepted; depth 65 and above
+/// are rejected (BC + VP-045 + AC-BC-A7).
 ///
 /// # Errors
 ///
-/// Returns `Err(LayoutError::InlineDepthExceeded)` when `depth >= MAX_INLINE_DEPTH`.
+/// Returns `Err(LayoutError::InlineDepthExceeded)` when `depth > MAX_INLINE_DEPTH`
+/// (i.e., the tree depth being processed is `MAX_INLINE_DEPTH + 1` = 65 or more).
+/// Depth 64 (== `MAX_INLINE_DEPTH`) is the last accepted level.
 pub fn check_inline_node<S: ::std::hash::BuildHasher>(
     node: &InlineNode,
     known_slide_titles: &HashSet<Arc<str>, S>,
@@ -219,7 +223,7 @@ pub fn check_inline_node<S: ::std::hash::BuildHasher>(
     warnings: &mut Vec<LayoutWarning>,
     depth: usize,
 ) -> Result<(), LayoutError> {
-    if depth >= MAX_INLINE_DEPTH {
+    if depth > MAX_INLINE_DEPTH {
         return Err(LayoutError::InlineDepthExceeded {
             source_slide_index,
             depth,
@@ -1124,9 +1128,10 @@ mod tests {
                 max,
             } => {
                 assert_eq!(source_slide_index, 3, "slide index must be 3");
-                assert!(
-                    depth >= MAX_INLINE_DEPTH,
-                    "depth must be >= MAX_INLINE_DEPTH"
+                assert_eq!(
+                    depth,
+                    65,
+                    "reported depth must be exactly 65 (BC literal: first rejected tree depth)"
                 );
                 assert_eq!(max, MAX_INLINE_DEPTH, "max must equal MAX_INLINE_DEPTH");
             },
@@ -1134,10 +1139,39 @@ mod tests {
         }
     }
 
-    /// VP-045 — Depth `MAX_INLINE_DEPTH - 1` (63) does NOT trigger depth error.
+    /// VP-045 / AC-BC-A7 / F-P11-MED-001 — Depth exactly `MAX_INLINE_DEPTH` (64)
+    /// MUST be accepted (BC-3.05.001 E-LAY-005).
     ///
-    /// The boundary is exclusive: depth 64 (== MAX_INLINE_DEPTH) IS an error,
-    /// depth 63 (== MAX_INLINE_DEPTH - 1) is NOT.
+    /// Builds exactly 64 nested `Bold` nodes wrapping a single `Plain` leaf.
+    /// The `Plain` leaf is reached at recursion depth 64 (== `MAX_INLINE_DEPTH`),
+    /// which is the last accepted level under the corrected `depth > MAX_INLINE_DEPTH`
+    /// guard. If the old `depth >= MAX_INLINE_DEPTH` guard were in place this test
+    /// would fail — it is the load-bearing regression guard for F-P11-MED-001.
+    #[test]
+    fn test_vp_045_depth_64_accepted() {
+        // Build exactly MAX_INLINE_DEPTH = 64 nested Bold nodes wrapping a Plain leaf.
+        // The Plain leaf is reached at depth 64 — the boundary that MUST be accepted.
+        let mut node = InlineNode::Plain(Arc::from("leaf"));
+        for _ in 0..MAX_INLINE_DEPTH {
+            node = InlineNode::Bold(vec![node]);
+        }
+        let nodes = vec![node];
+        let known = empty_titles();
+        let mut warnings = vec![];
+        let result = validate_inline_nodes(&nodes, &known, 0, &mut warnings);
+        assert!(
+            result.is_ok(),
+            "depth-64 (== MAX_INLINE_DEPTH) MUST be accepted per BC + VP-045 + AC-BC-A7; got: {result:?}"
+        );
+    }
+
+    /// VP-045 — Depth `MAX_INLINE_DEPTH` (64) does NOT trigger depth error.
+    ///
+    /// The boundary is inclusive: depth 64 (== MAX_INLINE_DEPTH) is accepted;
+    /// depth 65 (== MAX_INLINE_DEPTH + 1) is the first rejected level.
+    /// This test uses 63 nested Bolds (tree depth 63) to confirm the near-boundary
+    /// case also passes — depth-64 acceptance is covered by
+    /// `test_vp_045_depth_64_accepted`.
     #[test]
     fn test_vp_045_depth_63_does_not_exceed_limit() {
         // Build exactly MAX_INLINE_DEPTH - 1 = 63 nested Bold nodes.
