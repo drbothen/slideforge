@@ -202,11 +202,10 @@ impl DataSource for XlsxDataSource {
         for row_idx in 1..row_count {
             let mut map = OrderedMap::new();
             for col_idx in 0..col_count {
-                let header = headers
-                    .get(col_idx)
-                    .cloned()
-                    .expect("extract_headers must produce headers.len() == col_count; \
-                             col_idx is bounded by col_count from range.width()");
+                let header = headers.get(col_idx).cloned().expect(
+                    "extract_headers must produce headers.len() == col_count; \
+                             col_idx is bounded by col_count from range.width()",
+                );
                 // Excel limits: max 1,048,576 rows × 16,384 cols — both fit u32.
                 // cast_possible_truncation: usize→u32 is safe within Excel row/col limits.
                 #[allow(clippy::cast_possible_truncation)]
@@ -678,7 +677,9 @@ mod tests {
     use slideforge_plugin_api::{DataSource, DataSourceOptions};
     use slideforge_types::Value;
 
-    use super::{XlsxDataSource, convert_calamine_cell, data_error_to_source_error, extract_headers};
+    use super::{
+        XlsxDataSource, convert_calamine_cell, data_error_to_source_error, extract_headers,
+    };
     use crate::DataError;
 
     // ---------------------------------------------------------------------------
@@ -2342,7 +2343,10 @@ mod tests {
         let io_err = DataError::io_error("/tmp/test.xlsx", "permission denied");
         let source_err = data_error_to_source_error("/tmp/test.xlsx", &io_err);
         assert!(
-            matches!(source_err, slideforge_plugin_api::DataSourceError::IoError { .. }),
+            matches!(
+                source_err,
+                slideforge_plugin_api::DataSourceError::IoError { .. }
+            ),
             "DataError::IoError must map to DataSourceError::IoError; got: {source_err:?}"
         );
         let msg = source_err.to_string();

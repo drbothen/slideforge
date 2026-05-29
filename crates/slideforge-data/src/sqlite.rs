@@ -273,12 +273,11 @@ impl DataSource for SqliteDataSource {
         // exact same code path as production. And test_vp_027_load_uses_readonly
         // confirms the full load() path rejects writes.
         // Traces to BC-1.03.007 invariant 2, postcondition 1, VP-027.
-        let conn = Self::open_readonly_connection(path_str).map_err(|e| {
-            DataSourceError::ParseError {
+        let conn =
+            Self::open_readonly_connection(path_str).map_err(|e| DataSourceError::ParseError {
                 uri: path_str.to_owned(),
                 message: format!("failed to open SQLite database '{path_str}': {e}"),
-            }
-        })?;
+            })?;
 
         // Prepare the query statement.
         // If the query is invalid SQL (e.g., references a non-existent table),
@@ -1211,7 +1210,10 @@ mod tests {
 
         let err = validate_sqlite_magic(path.to_str().unwrap()).unwrap_err();
         assert!(
-            matches!(err, slideforge_plugin_api::DataSourceError::ParseError { .. }),
+            matches!(
+                err,
+                slideforge_plugin_api::DataSourceError::ParseError { .. }
+            ),
             "magic mismatch must produce DataSourceError::ParseError (E-DAT-013), got: {err:?}"
         );
         let msg = err.to_string();
@@ -1728,7 +1730,9 @@ mod tests {
         // Call production load() — this is the ONLY call in this scope.
         let src = SqliteDataSource::new(path_str, "SELECT id, label FROM items ORDER BY id");
         let opts = DataSourceOptions::default();
-        let result = src.load("", &opts).expect("load() with valid SELECT must succeed");
+        let result = src
+            .load("", &opts)
+            .expect("load() with valid SELECT must succeed");
 
         // Snapshot counter AFTER load() completes.
         let after = super::OPEN_READONLY_CALL_COUNT.load(Ordering::SeqCst);

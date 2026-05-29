@@ -95,9 +95,7 @@ fn make_sqlite_10k_rows() -> (TempDir, PathBuf) {
     let tx = conn.unchecked_transaction().unwrap();
     {
         let mut stmt = conn
-            .prepare(
-                "INSERT INTO metrics (id, name, value, flag, score) VALUES (?1,?2,?3,?4,?5)",
-            )
+            .prepare("INSERT INTO metrics (id, name, value, flag, score) VALUES (?1,?2,?3,?4,?5)")
             .unwrap();
         // Cast i64 → f64 for fixture data; minor precision loss is acceptable
         // for test scaffolding (value column is not checked for exact equality).
