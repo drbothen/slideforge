@@ -202,10 +202,12 @@ impl DataSource for SqliteDataSource {
         // F-MED-3: message references the parser, not "BC invariant 4".
         // Traces to BC-1.03.007 invariant 4.
         if self.query.is_empty() {
+            // F-PASS14-LOW-2: the previous message leaked "<span>" (a stale placeholder)
+            // into user-visible output. Span info is not available here; remove the trailer.
             return Err(DataSourceError::ParseError {
                 uri: path_str.to_owned(),
                 message: "internal: query field is empty; this should have been caught by the \
-                    @data parser at <span>"
+                    @data parser before reaching SqliteDataSource::load"
                     .to_owned(),
             });
         }
@@ -462,7 +464,7 @@ fn validate_sqlite_extension(path: &str) -> Result<(), String> {
                 Accepted extensions: .db, .sqlite, .sqlite3",
                 code = crate::error::E_DAT_014,
             ))
-        }
+        },
     }
 }
 
@@ -2124,6 +2126,57 @@ mod tests {
         assert!(
             !msg.contains("only SELECT queries are allowed"),
             "non-existent table error must NOT use generic DML rejection message; got: {msg}"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // F-PASS14-LOW-2: "<span>" placeholder leaked into user-visible error message
+    // for the empty-query defensive guard (BC-1.03.007 invariant 4, AC-010).
+    // ---------------------------------------------------------------------------
+
+    /// `test_f_pass14_low2_empty_query_no_span_placeholder` -- empty query error must NOT
+    /// contain the literal `<span>` placeholder string.
+    ///
+    /// The previous message ended with `"caught by the @data parser at <span>"` — a stale
+    /// development placeholder that leaked into user-visible output (F-PASS14-LOW-2).
+    ///
+    /// The fix removes the `at <span>` trailer and replaces it with the clarifying
+    /// `before reaching SqliteDataSource::load`.
+    ///
+    /// Load-bearing: without the fix, `msg.contains("<span>")` is `true` and the
+    /// `assert!(!msg.contains("<span>"))` assertion fails, exposing the regression.
+    ///
+    /// Traces to BC-1.03.007 AC-010, invariant 4, F-PASS14-LOW-2.
+    #[test]
+    #[serial(load_call_count)]
+    fn test_f_pass14_low2_empty_query_no_span_placeholder() {
+        // The path does not need to exist: the empty-query guard fires before file I/O.
+        let src = SqliteDataSource::new("/tmp/irrelevant.db", "");
+        let err = src.load("", &default_opts()).unwrap_err();
+
+        let msg = err.to_string();
+        // Must be a parse error (not UnsupportedUri — the path has a valid .db extension).
+        assert!(
+            matches!(
+                err,
+                slideforge_plugin_api::DataSourceError::ParseError { .. }
+            ),
+            "empty query must produce DataSourceError::ParseError, got: {err:?}"
+        );
+        // Load-bearing: must NOT contain the stale '<span>' placeholder.
+        assert!(
+            !msg.contains("<span>"),
+            "empty query error must NOT contain literal '<span>' placeholder; got: {msg}"
+        );
+        // Must contain the corrected message fragment so the fix is verified positively.
+        assert!(
+            msg.contains("SqliteDataSource::load"),
+            "empty query error must reference 'SqliteDataSource::load'; got: {msg}"
+        );
+        // Must still mention 'internal' to distinguish it from a user error.
+        assert!(
+            msg.contains("internal"),
+            "empty query error must carry 'internal' prefix; got: {msg}"
         );
     }
 }
