@@ -253,7 +253,7 @@ pub fn layout_shapes(
             height,
         };
 
-        // F-HIGH-003 / BC-3.04.001 Invariant 9: validate bbox from shape frames.
+        // F-HIGH-003 / BC-3.06.003: validate bbox from shape frames.
         // width > 0 and height > 0 must hold; x >= 0 and y >= 0 are off-canvas
         // (not hard errors), so we only check the strictly-invalid cases here.
         if bbox.width <= Emu(0) || bbox.height <= Emu(0) {
@@ -2052,7 +2052,7 @@ mod tests {
     // ─────────────────────────────────────────────────────────────────────────
 
     /// F-HIGH-003 — Shape with `width = 0` (i.e., 0 EMU) is rejected as
-    /// `LayoutError::InvalidBoundingBox` (BC-3.04.001 Invariant 9 / BC-3.06.003).
+    /// `LayoutError::InvalidBoundingBox` (BC-3.06.003).
     ///
     /// Load-bearing: without the is_valid guard in layout_shapes, a zero-width shape
     /// would produce a frame — this test catches that regression.
