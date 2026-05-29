@@ -28,6 +28,9 @@ pub const COLOR_SLOT_NAMES: [&str; 12] = [
 /// The `Hex` variant is the common case for well-formed brand templates.
 /// The `SchemeRef` variant indicates a self-referential or relative color that was
 /// extracted with a `tracing::warn!` and should be reviewed in brand.toml.
+// #[non_exhaustive] for v1.0 SemVer hygiene; new variants may be added in minor releases
+// per CLAUDE.md Quality Bar Supply chain row.
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ColorValue {
     /// An absolute hex color value, e.g., `"#003087"`.
@@ -126,25 +129,139 @@ pub struct BrandFonts {
     pub body: Arc<str>,
 }
 
-/// A logo image extracted from the slide master relationships.
+/// A logo image extracted from the slide master relationships, or a deferred
+/// path reference for synthesized brands.
 ///
-/// Extracted from `ppt/slideMasters/_rels/slideMaster1.xml.rels` (PPTX only).
-/// The logo is optional — if no image relationship is found, [`BrandTemplate::logo`]
-/// is `None`.
+/// ## Variants
+///
+/// - [`LogoAsset::Loaded`]: bytes already in memory (from `.pptx`/`.docx` extraction).
+/// - [`LogoAsset::Deferred`]: path recorded during synthesis; bytes loaded on demand
+///   by the PPTX exporter (STORY-037) when building the ZIP package. This keeps
+///   [`crate::synthesizer::BrandSynthesizer::synthesize`] pure (no filesystem I/O).
+///
+/// The logo is optional — if no `[logo]` section in `brand.toml` and no image
+/// relationship in the source template, [`BrandTemplate::logo`] is `None`.
+// #[non_exhaustive] for v1.0 SemVer hygiene; new variants may be added in minor releases
+// per CLAUDE.md Quality Bar Supply chain row.
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct LogoAsset {
-    /// Raw image bytes read from the ZIP archive.
-    pub bytes: Vec<u8>,
-    /// MIME type of the image (e.g., `"image/png"`, `"image/jpeg"`).
-    pub media_type: Arc<str>,
-    /// The ZIP-internal path of the image file (e.g., `"ppt/media/image1.png"`).
-    pub original_path: Arc<str>,
+pub enum LogoAsset {
+    /// Logo bytes already loaded into memory.
+    ///
+    /// Produced by [`crate::loader::BrandLoader`] when extracting from
+    /// a `.pptx` or `.docx` template (STORY-022).
+    Loaded {
+        /// Raw image bytes read from the ZIP archive.
+        bytes: Vec<u8>,
+        /// MIME type of the image (e.g., `"image/png"`, `"image/jpeg"`).
+        media_type: Arc<str>,
+        /// The ZIP-internal path of the image file (e.g., `"ppt/media/image1.png"`).
+        original_path: Arc<str>,
+    },
+    /// Logo path recorded for deferred loading by the PPTX exporter.
+    ///
+    /// Produced by [`crate::synthesizer::BrandSynthesizer::synthesize`] when
+    /// the `[logo]` section declares a path. The exporter reads the bytes from
+    /// the filesystem when building the output ZIP package (STORY-037).
+    ///
+    /// `path` is the resolved (absolute or relative-to-cwd) path — suitable for
+    /// direct filesystem access. It is populated as the as-written path by
+    /// `synthesize` (pure) and resolved relative to the `brand.toml` directory
+    /// by `load_from_toml` (effectful) after synthesis.
+    ///
+    /// `original` is the as-written string from `brand.toml` `[logo].path` — used
+    /// for display, diagnostics, and the [`LogoAsset::deferred_path`] API.
+    Deferred {
+        /// Resolved filesystem path to the logo image.
+        ///
+        /// Set to the as-written path by [`crate::synthesizer::BrandSynthesizer::synthesize`]; resolved
+        /// to a path relative to the `brand.toml` directory by
+        /// [`crate::synthesizer::BrandSynthesizer::load_from_toml`].
+        path: std::path::PathBuf,
+        /// The as-written path from `brand.toml` `[logo].path`, preserved for
+        /// display and diagnostics.
+        original: Arc<str>,
+    },
 }
 
-/// The complete brand template extracted from a `.pptx` or `.docx` file.
+impl LogoAsset {
+    /// Returns the raw bytes if this asset is [`LogoAsset::Loaded`], or `None`
+    /// if it is [`LogoAsset::Deferred`] (bytes not yet read from disk).
+    #[must_use]
+    pub fn loaded_bytes(&self) -> Option<&[u8]> {
+        match self {
+            Self::Loaded { bytes, .. } => Some(bytes),
+            Self::Deferred { .. } => None,
+        }
+    }
+
+    /// Returns the as-written path string for a [`LogoAsset::Deferred`] asset,
+    /// or `None` if this is a [`LogoAsset::Loaded`] asset.
+    ///
+    /// Returns the `original` field (as-written in `brand.toml`). For the resolved
+    /// filesystem path suitable for I/O, use [`LogoAsset::resolved_path`].
+    #[must_use]
+    pub fn deferred_path(&self) -> Option<&str> {
+        match self {
+            Self::Deferred { original, .. } => Some(original.as_ref()),
+            Self::Loaded { .. } => None,
+        }
+    }
+
+    /// Returns the resolved filesystem path for a [`LogoAsset::Deferred`] asset,
+    /// or `None` if this is a [`LogoAsset::Loaded`] asset.
+    ///
+    /// The path is resolved relative to the `brand.toml` directory by
+    /// [`crate::synthesizer::BrandSynthesizer::load_from_toml`]. When created via
+    /// [`crate::synthesizer::BrandSynthesizer::synthesize`] directly (pure path), this is the
+    /// as-written relative path.
+    #[must_use]
+    pub fn resolved_path(&self) -> Option<&std::path::Path> {
+        match self {
+            Self::Deferred { path, .. } => Some(path.as_path()),
+            Self::Loaded { .. } => None,
+        }
+    }
+
+    /// Returns `true` if this asset's bytes are already in memory.
+    #[must_use]
+    pub fn is_loaded(&self) -> bool {
+        matches!(self, Self::Loaded { .. })
+    }
+}
+
+/// OOXML master and layout ID constraints (BC-2.01.005 invariant 3 / AC-011).
 ///
-/// This struct is produced by [`crate::loader::BrandLoader`] and consumed by the
-/// PPTX exporter (STORY-037) and the brand synthesis pipeline (STORY-023).
+/// Slide master IDs start at `2^31`. Layout IDs start at `2^31 + 1` and
+/// increment by 1 per layout. Slide IDs in generated decks start at 256.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct MasterIds {
+    /// The slide master ID: always `2^31 = 2_147_483_648`.
+    pub master_id: u32,
+
+    /// The starting layout ID: always `2^31 + 1 = 2_147_483_649`.
+    pub layout_id_start: u32,
+
+    /// The starting slide ID for generated slides: always `256`.
+    pub slide_id_start: u32,
+}
+
+impl Default for MasterIds {
+    fn default() -> Self {
+        Self {
+            master_id: 2u32.pow(31),
+            layout_id_start: 2u32.pow(31) + 1,
+            slide_id_start: 256,
+        }
+    }
+}
+
+/// The complete brand template extracted from a `.pptx` or `.docx` file,
+/// or synthesized from a `brand.toml` (STORY-023).
+///
+/// This struct is produced by both [`crate::loader::BrandLoader`] (STORY-022)
+/// and [`crate::synthesizer::BrandSynthesizer`] (STORY-023), and consumed by
+/// the PPTX exporter (STORY-037).
 ///
 /// ## Color Slot Invariant
 ///
@@ -153,6 +270,12 @@ pub struct LogoAsset {
 /// fewer than 12 color slots, the missing slots are inferred and
 /// [`crate::error::BrandError::MissingColorSlot`] warnings are emitted. This is
 /// guaranteed by DI-015 (BC-2.01.001 invariant 1).
+///
+/// ## Layout Invariant (STORY-023)
+///
+/// For synthesized brands, `layouts` always contains exactly 31 entries
+/// (BC-2.01.005 postcondition 1). For loaded brands (from .pptx/.docx), the
+/// count reflects the source template.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BrandTemplate {
     /// All 12 OOXML scheme color slots in ECMA-376 sequential order.
@@ -165,7 +288,9 @@ pub struct BrandTemplate {
 
     /// Optional logo asset extracted from the slide master relationships.
     ///
-    /// `None` if no image relationship was found (EC-005 — not an error).
+    /// `None` if no image relationship was found (EC-005 — not an error for
+    /// loaded brands). For synthesized brands, a missing logo is a fatal error
+    /// (AC-004, BC-2.01.002 edge case EC-005).
     pub logo: Option<LogoAsset>,
 
     /// Optional footer text (from the deck-level footer field).
@@ -173,8 +298,39 @@ pub struct BrandTemplate {
 
     /// Slide layout XML names discovered in `ppt/slideLayouts/slideLayout*.xml`.
     ///
-    /// Used by STORY-023 to map layouts to the 31-type taxonomy.
+    /// For loaded brands (STORY-022): ZIP-internal paths.
+    /// For synthesized brands (STORY-023): not used — `layouts` field is populated instead.
     pub layout_names: Vec<Arc<str>>,
+
+    /// Structured layout definitions for all 31 slide layouts.
+    ///
+    /// Populated by [`crate::synthesizer::BrandSynthesizer`] (STORY-023).
+    /// Empty `Vec` for brands loaded from `.pptx`/`.docx` until STORY-037
+    /// adds layout extraction.
+    ///
+    /// Invariant for synthesized brands: `layouts.len() == 31` always.
+    pub layouts: Vec<crate::layouts::SlideLayoutDef>,
+
+    /// Serialized XML bytes for `notesMaster1.xml` (AC-012).
+    ///
+    /// Always populated for synthesized brands. Empty for loaded brands
+    /// until STORY-040 adds master extraction.
+    pub notes_master_stub: Vec<u8>,
+
+    /// Serialized XML bytes for `handoutMaster1.xml` (AC-012).
+    ///
+    /// Always populated for synthesized brands. Empty for loaded brands
+    /// until STORY-040 adds master extraction.
+    pub handout_master_stub: Vec<u8>,
+
+    /// OOXML master and layout ID constraints (AC-011, BC-2.01.005 invariant 3).
+    pub master_ids: MasterIds,
+
+    /// `[Content_Types].xml` registration fragment for all 31 layouts (AC-013).
+    ///
+    /// Contains one `<Override PartName="...">` entry per layout.
+    /// Populated by the synthesizer; empty for loaded brands.
+    pub content_types_layout_entries: Arc<str>,
 }
 
 impl BrandTemplate {
@@ -227,10 +383,9 @@ mod tests {
         ]
     }
 
-    /// BC-2.01.001 postcondition 1 — `BrandTemplate` can be constructed with all fields.
-    #[test]
-    fn test_bc_2_01_001_brand_template_default_construction() {
-        let template = BrandTemplate {
+    /// Helper: construct a minimal `BrandTemplate` for tests.
+    fn make_template() -> BrandTemplate {
+        BrandTemplate {
             colors: make_all_slots(),
             fonts: BrandFonts {
                 heading: Arc::from("Calibri Light"),
@@ -239,7 +394,18 @@ mod tests {
             logo: None,
             footer_text: None,
             layout_names: vec![],
-        };
+            layouts: vec![],
+            notes_master_stub: vec![],
+            handout_master_stub: vec![],
+            master_ids: MasterIds::default(),
+            content_types_layout_entries: Arc::from(""),
+        }
+    }
+
+    /// BC-2.01.001 postcondition 1 — `BrandTemplate` can be constructed with all fields.
+    #[test]
+    fn test_bc_2_01_001_brand_template_default_construction() {
+        let template = make_template();
         assert_eq!(template.colors.len(), 12);
         assert!(template.logo.is_none());
         assert!(template.footer_text.is_none());
@@ -248,16 +414,7 @@ mod tests {
     /// BC-2.01.001 invariant 1 — colors array always has exactly 12 entries.
     #[test]
     fn test_bc_2_01_001_invariant_always_12_color_slots() {
-        let template = BrandTemplate {
-            colors: make_all_slots(),
-            fonts: BrandFonts {
-                heading: Arc::from("Arial"),
-                body: Arc::from("Arial"),
-            },
-            logo: None,
-            footer_text: None,
-            layout_names: vec![],
-        };
+        let template = make_template();
         // The array type [ColorSlot; 12] enforces this at compile time, but we
         // also assert it at runtime to make it load-bearing per TD-VSDD-059.
         assert_eq!(
@@ -265,6 +422,19 @@ mod tests {
             12,
             "invariant DI-015: always 12 color slots"
         );
+    }
+
+    /// AC-011 — `MasterIds::default()` has correct OOXML-mandated values.
+    #[test]
+    fn test_bc_2_01_005_master_ids_default_values() {
+        let ids = MasterIds::default();
+        assert_eq!(ids.master_id, 2u32.pow(31), "master_id must be 2^31");
+        assert_eq!(
+            ids.layout_id_start,
+            2u32.pow(31) + 1,
+            "layout_id_start must be 2^31 + 1"
+        );
+        assert_eq!(ids.slide_id_start, 256, "slide_id_start must be 256");
     }
 
     /// BC-2.01.001 — color slot names match ECMA-376 sequential order.
@@ -285,16 +455,7 @@ mod tests {
     /// BC-2.01.001 — `color_by_name` returns correct slot.
     #[test]
     fn test_bc_2_01_001_color_by_name_lookup() {
-        let template = BrandTemplate {
-            colors: make_all_slots(),
-            fonts: BrandFonts {
-                heading: Arc::from("Arial"),
-                body: Arc::from("Arial"),
-            },
-            logo: None,
-            footer_text: None,
-            layout_names: vec![],
-        };
+        let template = make_template();
         let slot = template
             .color_by_name("acc1")
             .expect("acc1 must be present");
@@ -304,29 +465,37 @@ mod tests {
     /// BC-2.01.001 — `color_by_name` returns None for unknown slot.
     #[test]
     fn test_bc_2_01_001_color_by_name_unknown_returns_none() {
-        let template = BrandTemplate {
-            colors: make_all_slots(),
-            fonts: BrandFonts {
-                heading: Arc::from("Arial"),
-                body: Arc::from("Arial"),
-            },
-            logo: None,
-            footer_text: None,
-            layout_names: vec![],
-        };
+        let template = make_template();
         assert!(template.color_by_name("nonexistent").is_none());
     }
 
     /// BC-2.01.001 AC-005 — logo is Option<LogoAsset>.
     #[test]
     fn test_bc_2_01_001_logo_asset_construction() {
-        let logo = LogoAsset {
+        let logo = LogoAsset::Loaded {
             bytes: vec![0x89, 0x50, 0x4E, 0x47],
             media_type: Arc::from("image/png"),
             original_path: Arc::from("ppt/media/image1.png"),
         };
-        assert_eq!(logo.media_type.as_ref(), "image/png");
-        assert_eq!(logo.bytes.len(), 4);
+        assert_eq!(logo.loaded_bytes().map(<[u8]>::len), Some(4));
+        assert!(logo.is_loaded());
+        assert_eq!(logo.deferred_path(), None);
+    }
+
+    /// F5 — `LogoAsset::Deferred` carries the path and has no loaded bytes.
+    #[test]
+    fn test_logo_asset_deferred_variant() {
+        let logo = LogoAsset::Deferred {
+            path: std::path::PathBuf::from("brand.assets/logo.png"),
+            original: Arc::from("brand.assets/logo.png"),
+        };
+        assert!(!logo.is_loaded());
+        assert_eq!(logo.deferred_path(), Some("brand.assets/logo.png"));
+        assert_eq!(
+            logo.resolved_path(),
+            Some(std::path::Path::new("brand.assets/logo.png"))
+        );
+        assert_eq!(logo.loaded_bytes(), None);
     }
 
     /// BC-2.01.001 AC-006 — `layout_names` stored as Vec<Arc<str>> using ZIP-internal paths.
@@ -350,6 +519,11 @@ mod tests {
                 Arc::from("ppt/slideLayouts/slideLayout2.xml"),
                 Arc::from("ppt/slideLayouts/slideLayout3.xml"),
             ],
+            layouts: vec![],
+            notes_master_stub: vec![],
+            handout_master_stub: vec![],
+            master_ids: MasterIds::default(),
+            content_types_layout_entries: Arc::from(""),
         };
         assert_eq!(template.layout_names.len(), 3);
         // Values are ZIP-internal paths, not friendly semantic names.

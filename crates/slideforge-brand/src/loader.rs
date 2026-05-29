@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use slideforge_plugin_api::{BrandError as TraitBrandError, BrandProvider, BrandSource};
 use slideforge_types::{Brand, BrandFonts as TypesBrandFonts, BrandPalette, SourceSpan};
+use tracing::instrument;
 use zip::ZipArchive;
 
 use crate::color::parse_theme_colors;
@@ -212,6 +213,12 @@ impl BrandLoader {
             logo,
             footer_text: None,
             layout_names,
+            // STORY-023 fields — not populated by the loader; synthesizer fills these.
+            layouts: vec![],
+            notes_master_stub: vec![],
+            handout_master_stub: vec![],
+            master_ids: crate::template::MasterIds::default(),
+            content_types_layout_entries: std::sync::Arc::from(""),
         })
     }
 }
@@ -290,6 +297,7 @@ impl BrandProvider for BrandLoader {
         "slideforge-brand/default"
     }
 
+    #[instrument(skip(self, source), fields(brand_source = ?source))]
     fn load(&self, source: &BrandSource) -> Result<Brand, TraitBrandError> {
         match source {
             BrandSource::PptxFile(path) | BrandSource::DocxFile(path) => {
@@ -816,22 +824,33 @@ mod tests {
 
         let template = result.expect("PPTX with logo must load without error");
 
-        // Logo must be Some.
+        // Logo must be Some and Loaded (bytes in memory from ZIP extraction).
         let logo = template.logo.expect("logo must be present (FINDING-012)");
-        assert_eq!(
-            logo.bytes, png_bytes,
-            "logo bytes must match the image1.png content"
-        );
-        assert_eq!(
-            logo.media_type.as_ref(),
-            "image/png",
-            "logo media type must be image/png for .png extension"
-        );
-        assert_eq!(
-            logo.original_path.as_ref(),
-            "ppt/media/image1.png",
-            "logo original_path must be the resolved ZIP-internal path"
-        );
+        match logo {
+            crate::template::LogoAsset::Loaded {
+                bytes,
+                media_type,
+                original_path,
+            } => {
+                assert_eq!(
+                    bytes, png_bytes,
+                    "logo bytes must match the image1.png content"
+                );
+                assert_eq!(
+                    media_type.as_ref(),
+                    "image/png",
+                    "logo media type must be image/png for .png extension"
+                );
+                assert_eq!(
+                    original_path.as_ref(),
+                    "ppt/media/image1.png",
+                    "logo original_path must be the resolved ZIP-internal path"
+                );
+            },
+            other @ crate::template::LogoAsset::Deferred { .. } => {
+                panic!("expected LogoAsset::Loaded from PPTX extraction, got: {other:?}")
+            },
+        }
     }
 
     /// FINDING-001 — `BrandProvider::load()` returns Brand for a valid PPTX source.

@@ -1,0 +1,35 @@
+---
+source: crates/slideforge-brand/src/synthesizer.rs
+expression: combined
+---
+=== Title Slide (idx=1) type="title" dark=false ===
+=== Title and Content (idx=2) type="obj" dark=false ===
+=== Section Header (idx=3) type="secHead" dark=false ===
+=== Two Content (idx=4) type="twoObj" dark=false ===
+=== Comparison (idx=5) type="twoColTx" dark=false ===
+=== Title Only (idx=6) type="titleOnly" dark=false ===
+=== Blank (idx=7) type="blank" dark=false ===
+=== Content with Caption (idx=8) type="objTx" dark=false ===
+=== Picture with Caption (idx=9) type="picTx" dark=false ===
+=== Vertical Title and Text (idx=10) type="vertTitleAndTx" dark=false ===
+=== Vertical Text (idx=11) type="vertTx" dark=false ===
+=== SF Section Divider (idx=12) type="custom" dark=true ===
+=== SF Stat Grid (idx=13) type="custom" dark=false ===
+=== SF Quote (idx=14) type="custom" dark=false ===
+=== SF Timeline (idx=15) type="custom" dark=false ===
+=== SF Agenda (idx=16) type="custom" dark=false ===
+=== SF TOC (idx=17) type="custom" dark=false ===
+=== SF Bio (idx=18) type="custom" dark=false ===
+=== SF Team Grid (idx=19) type="custom" dark=false ===
+=== SF Comparison Table (idx=20) type="custom" dark=false ===
+=== SF Full-Bleed Image (idx=21) type="custom" dark=false ===
+=== SF End Slide (idx=22) type="custom" dark=true ===
+=== SF Data (idx=23) type="custom" dark=false ===
+=== SF Diagram (idx=24) type="custom" dark=false ===
+=== SF Chart (idx=25) type="custom" dark=false ===
+=== SF Map (idx=26) type="custom" dark=false ===
+=== SF Risk Register (idx=27) type="custom" dark=false ===
+=== SF Executive Summary (idx=28) type="custom" dark=false ===
+=== SF Two Column (idx=29) type="custom" dark=false ===
+=== SF Methodology (idx=30) type="custom" dark=false ===
+=== SF Appendix (idx=31) type="custom" dark=false ===

@@ -8,6 +8,7 @@
 //! | `E-BRD-002` | [`BrandError::ParseError`] | broken (exit 4) |
 //! | `E-BRD-003` | [`BrandError::MissingColorSlot`] | cosmetic (exit 0) |
 //! | `E-BRD-004` | [`BrandError::FontUnavailable`] | cosmetic (exit 0) |
+//! | `E-BRD-005` | [`BrandError::InvalidHexColor`] | cosmetic (exit 0) |
 
 use std::sync::Arc;
 
@@ -17,6 +18,8 @@ use thiserror::Error;
 // ─── Error code constants ────────────────────────────────────────────────────
 
 /// `E-BRD-001`: brand file not found at the resolved path.
+///
+/// Also emitted when a synthesized brand is missing the required `[logo]` path.
 pub const E_BRD_001: &str = "E-BRD-001";
 
 /// `E-BRD-002`: the brand template file cannot be parsed (corrupt or not OOXML).
@@ -30,6 +33,16 @@ pub const E_BRD_003: &str = "E-BRD-003";
 /// continues with a fallback font for metrics only.
 pub const E_BRD_004: &str = "E-BRD-004";
 
+/// `E-BRD-005`: a hex color value in `brand.toml` is not valid 6-digit uppercase
+/// RGB hex (e.g. `#3B82F6`). Cosmetic warning — the invalid slot is treated as
+/// absent and inference continues with the remaining slots.
+pub const E_BRD_005: &str = "E-BRD-005";
+
+/// `E-BRD-007`: the logo path in `brand.toml` escapes the directory containing
+/// `brand.toml`. This is a path-traversal security violation — the logo must
+/// reside inside (or underneath) the `brand.toml` directory.
+pub const E_BRD_007: &str = "E-BRD-007";
+
 // ─── Error enum ──────────────────────────────────────────────────────────────
 
 /// Errors produced by the `slideforge-brand` crate.
@@ -37,6 +50,9 @@ pub const E_BRD_004: &str = "E-BRD-004";
 /// **Fatal variants** (broken, exit 4): [`BrandError::FileNotFound`], [`BrandError::ParseError`].
 ///
 /// **Cosmetic variants** (exit 0, warning only): [`BrandError::MissingColorSlot`], [`BrandError::FontUnavailable`].
+// #[non_exhaustive] for v1.0 SemVer hygiene; new variants may be added in minor releases
+// per CLAUDE.md Quality Bar Supply chain row.
+#[non_exhaustive]
 #[derive(Debug, Error)]
 pub enum BrandError {
     /// `E-BRD-001` — the brand template file was not found at the resolved path.
@@ -111,6 +127,124 @@ pub enum BrandError {
         /// The fallback font name being used for metric calculations.
         fallback: Arc<str>,
     },
+
+    // ─── STORY-023 synthesis variants ─────────────────────────────────────────
+    /// `E-BRD-001` (synthesis) — the `[logo]` section is absent in a
+    /// synthesized brand's `brand.toml`.
+    ///
+    /// This is a fatal error (exit 4) for synthesized brands. A synthesized
+    /// brand cannot embed a logo if no path is declared.
+    ///
+    /// Traces to BC-2.01.002 edge case EC-005 (AC-004).
+    #[error(
+        "E-BRD-001: Synthesized brand requires a logo path. \
+         Add a [logo] section with 'path = \"...\"' to brand.toml."
+    )]
+    LogoRequired {
+        /// Source location of the `brand "..."` or `brand.toml` declaration.
+        ///
+        /// May be `SourceSpan::default()` when invoked from a non-DSL context
+        /// (e.g., direct API call without a source file).
+        span: SourceSpan,
+    },
+
+    /// `E-BRD-001` (synthesis) — the `brand.toml` file could not be read.
+    ///
+    /// Fatal error (exit 4). `reason` carries the underlying I/O error message.
+    #[error("E-BRD-001: Cannot read brand.toml at '{path}': {reason}.")]
+    TomlReadError {
+        /// Path of the file that could not be read.
+        path: Arc<str>,
+        /// Human-readable I/O error description.
+        reason: Arc<str>,
+    },
+
+    /// `E-BRD-002` (synthesis) — the `brand.toml` file is not valid TOML.
+    ///
+    /// Fatal error (exit 4). `reason` carries the TOML parser error message.
+    #[error(
+        "E-BRD-002: Cannot parse brand.toml at '{path}': {reason}. \
+         File may contain invalid TOML syntax."
+    )]
+    TomlParseError {
+        /// Path of the file that failed to parse.
+        path: Arc<str>,
+        /// Human-readable parse error description.
+        reason: Arc<str>,
+    },
+
+    /// `E-BRD-005` — a declared hex color value in `brand.toml` is not valid.
+    ///
+    /// Cosmetic warning (exit 0). The invalid slot is treated as absent and
+    /// inference continues with the remaining slots (see `inference.rs`). The
+    /// build does NOT abort on an invalid hex — callers receive the error via
+    /// the warnings `Vec` returned alongside the synthesized `BrandTemplate`.
+    ///
+    /// Traces to AC-006 (BC-2.01.004 invariant 3).
+    ///
+    /// ## Spec note (E-BRD-005 revised semantic)
+    ///
+    /// The original E-BRD-005 semantic ("missing required color slot — fatal") was
+    /// retired when the brand synthesis algorithm was designed to always infer missing
+    /// slots (BC-2.01.004). The error code was subsequently reused for invalid hex
+    /// color validation (introduced in Pass-11 fix burst). The error-taxonomy.md spec
+    /// has been updated to reflect this revised semantic.
+    #[error(
+        "E-BRD-005: Invalid hex color value '{value}' in brand.toml slot '{slot_name}'. \
+         Use 6-digit uppercase hex RGB (e.g. #3B82F6; case insensitive — uppercase or lowercase accepted)."
+    )]
+    InvalidHexColor {
+        /// The OOXML color slot name (e.g., `"acc1"`).
+        slot_name: Arc<str>,
+        /// The invalid value that was declared.
+        value: Arc<str>,
+    },
+
+    /// `E-BRD-007` — the logo path in `brand.toml` escapes the directory containing
+    /// `brand.toml`.
+    ///
+    /// Fatal error (exit 4). A logo path must resolve to a file inside (or
+    /// beneath) the directory that contains `brand.toml`. Paths that escape
+    /// via `../` sequences or symlinks pointing outside that directory are
+    /// rejected to prevent path-traversal attacks.
+    #[error(
+        "E-BRD-007: Logo path '{logo_path}' escapes the brand.toml directory '{brand_dir}'. \
+         The logo file must be inside (or beneath) the brand.toml directory."
+    )]
+    LogoOutsideBrandDir {
+        /// The resolved canonical path of the logo file that escaped the brand dir.
+        logo_path: String,
+        /// The canonical path of the `brand.toml` parent directory.
+        brand_dir: String,
+    },
+
+    /// `E-BRD-004` (synthesis) — a font name declared in `brand.toml`
+    /// is not installed on the build host.
+    ///
+    /// Cosmetic warning (exit 0). The OOXML output still writes the declared
+    /// font name. The build continues.
+    ///
+    /// Traces to BC-2.01.002 edge case EC-004 (AC-015, NFR-021).
+    ///
+    /// ## EC-004 font-availability check — deferral note
+    ///
+    /// The font availability check for synthesized brands (EC-004) is deferred
+    /// to STORY-024 (Brand Extraction CLI). The reason: `BrandSynthesizer::synthesize`
+    /// is a **pure function** (Architecture Compliance Rule 2 — no side effects, no I/O).
+    /// Querying the OS font registry requires I/O and therefore belongs in the
+    /// effectful extraction/validation stage, not in the pure synthesizer.
+    ///
+    /// This variant is kept in the enum so that STORY-024 can emit it without a
+    /// breaking API change. It is not currently constructed by any production code
+    /// path; STORY-024 will wire up the construction.
+    #[error(
+        "E-BRD-004: Font '{font_name}' declared in brand.toml is not available \
+         on this build host. Build continues; output will use '{font_name}'."
+    )]
+    DeclaredFontUnavailable {
+        /// The font name declared in `brand.toml` that is not installed.
+        font_name: Arc<str>,
+    },
 }
 
 #[cfg(test)]
@@ -124,6 +258,8 @@ mod tests {
         assert_eq!(E_BRD_002, "E-BRD-002");
         assert_eq!(E_BRD_003, "E-BRD-003");
         assert_eq!(E_BRD_004, "E-BRD-004");
+        assert_eq!(E_BRD_005, "E-BRD-005");
+        assert_eq!(E_BRD_007, "E-BRD-007");
     }
 
     /// BC-2.01.001 EC-001 — `FileNotFound` error message contains the path.
@@ -232,6 +368,58 @@ mod tests {
         assert!(
             msg.contains("E-BRD-004"),
             "error message must contain error code, got: {msg}"
+        );
+    }
+
+    /// E-BRD-007 — `LogoOutsideBrandDir` message contains logo path, brand dir, and error code.
+    #[test]
+    fn test_e_brd_007_logo_outside_brand_dir_message() {
+        let err = BrandError::LogoOutsideBrandDir {
+            logo_path: "/tmp/etc/passwd".to_owned(),
+            brand_dir: "/tmp/brand".to_owned(),
+        };
+        let msg = err.to_string();
+        assert!(
+            msg.contains("E-BRD-007"),
+            "error message must contain E-BRD-007, got: {msg}"
+        );
+        assert!(
+            msg.contains("/tmp/etc/passwd"),
+            "error message must contain logo path, got: {msg}"
+        );
+        assert!(
+            msg.contains("/tmp/brand"),
+            "error message must contain brand dir, got: {msg}"
+        );
+    }
+
+    /// F-PASS16-MED-1 — E-BRD-005 message matches error-taxonomy.md row 115.
+    ///
+    /// Verifies the word "value" is present and the case-insensitivity note is
+    /// included, mirroring the `validate_hex` behaviour introduced in Pass-11.
+    #[test]
+    fn test_f_pass16_med_1_e_brd_005_message_matches_taxonomy() {
+        let err = BrandError::InvalidHexColor {
+            slot_name: Arc::from("acc1"),
+            value: Arc::from("zzzzzz"),
+        };
+        let msg = err.to_string();
+        assert!(
+            msg.contains("E-BRD-005"),
+            "must contain error code, got: {msg}"
+        );
+        assert!(
+            msg.contains("value"),
+            "must contain the word 'value', got: {msg}"
+        );
+        assert!(
+            msg.contains("case insensitive"),
+            "must contain case-insensitivity note, got: {msg}"
+        );
+        assert!(msg.contains("acc1"), "must contain slot name, got: {msg}");
+        assert!(
+            msg.contains("zzzzzz"),
+            "must contain the invalid value, got: {msg}"
         );
     }
 

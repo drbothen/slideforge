@@ -1959,12 +1959,17 @@ version = "0.1.0"
 dependencies = [
  "dirs",
  "insta",
+ "proptest",
  "quick-xml",
+ "serde",
  "slideforge-plugin-api",
  "slideforge-types",
+ "tempfile",
  "thiserror 2.0.18",
+ "toml",
  "tracing",
  "tracing-subscriber",
+ "tracing-test",
  "zip",
 ]
 
