@@ -202,6 +202,12 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
         // unreachable here — ShapeSpec.shape_type is a resolved ShapeType enum,
         // so unknown keywords are rejected at the parse stage (E-PAR-012) before
         // a ShapeSpec is ever constructed.
+        // DEFERRED: brand-aware em conversion requires a `BrandFonts.font_size_emu`
+        // field that does not yet exist on the type. `DEFAULT_EM_IN_EMU` (457_200 EMU
+        // = 0.5 inch at 36pt) is used as a safe constant until that field is added.
+        // Tracked for v1.x: STORY-NNN-brand-em-sizing (to be created by orchestrator).
+        // BC-3.04.001 PC-2 mandates brand-aware em resolution; this deferral is
+        // structural (missing type field), not a design choice.
         let shape_output = layout_shapes(&shape_specs, page_size, source_index, DEFAULT_EM_IN_EMU)?;
 
         let mut all_frames = frames;
