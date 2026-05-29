@@ -2118,8 +2118,8 @@ mod tests {
             "partial-empty header must produce DataSourceError::ParseError, got: {err:?}"
         );
         assert!(
-            msg.contains("E-DAT-007") || msg.contains("empty cell") || msg.contains("empty"),
-            "partial-empty header error must mention E-DAT-007 or empty cell; got: {msg}"
+            msg.contains("[E-DAT-007]"),
+            "partial-empty header error must embed '[E-DAT-007]' bracket code; got: {msg}"
         );
         // Must NOT contain __empty phantom names (confirmed by absence of "phantom" or "__empty")
         assert!(
@@ -2166,8 +2166,8 @@ mod tests {
             "non-string header must produce DataSourceError::ParseError, got: {err:?}"
         );
         assert!(
-            msg.contains("E-DAT-008") || msg.contains("type") || msg.contains("header"),
-            "non-string header error must mention E-DAT-008 or type; got: {msg}"
+            msg.contains("[E-DAT-008]"),
+            "non-string header error must embed '[E-DAT-008]' bracket code; got: {msg}"
         );
     }
 

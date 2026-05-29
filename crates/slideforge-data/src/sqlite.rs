@@ -1808,11 +1808,8 @@ mod tests {
         let msg = err.to_string();
         // Error must mention the column and/or row so users can locate the bad data.
         assert!(
-            msg.contains("E-DAT-012")
-                || msg.to_lowercase().contains("utf-8")
-                || msg.to_lowercase().contains("utf8")
-                || msg.to_lowercase().contains("invalid"),
-            "E-DAT-012 error must mention UTF-8 or invalid; got: {msg}"
+            msg.contains("[E-DAT-012]"),
+            "invalid UTF-8 TEXT error must embed '[E-DAT-012]' bracket code; got: {msg}"
         );
         // The error message must name the column ('CAST(data AS TEXT)' or its alias)
         // — production code formats "{col_name} at row {row_idx}".
