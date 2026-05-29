@@ -246,7 +246,12 @@ pub fn layout_shapes(
             });
             continue;
         };
-        let bbox = BoundingBox { x, y, width, height };
+        let bbox = BoundingBox {
+            x,
+            y,
+            width,
+            height,
+        };
 
         // F-HIGH-003 / BC-3.04.001 Invariant 9: validate bbox from shape frames.
         // width > 0 and height > 0 must hold; x >= 0 and y >= 0 are off-canvas
@@ -964,7 +969,11 @@ mod tests {
         );
         match result.unwrap_err() {
             LayoutError::Multiple { inner } => {
-                assert_eq!(inner.len(), 1, "single missing-alt must produce Multiple with 1 inner");
+                assert_eq!(
+                    inner.len(),
+                    1,
+                    "single missing-alt must produce Multiple with 1 inner"
+                );
                 assert!(
                     matches!(
                         &inner[0],
@@ -1132,7 +1141,9 @@ mod tests {
     #[test]
     fn test_bc_3_04_001_parse_shape_type_unknown_returns_none() {
         assert!(
-            slideforge_types::ShapeType::from_keyword("frobnicator").ok().is_none(),
+            slideforge_types::ShapeType::from_keyword("frobnicator")
+                .ok()
+                .is_none(),
             r#"from_keyword("frobnicator").ok() must return None (no Custom fallback)"#
         );
     }
@@ -1390,9 +1401,13 @@ mod tests {
         let x = unit_to_emu(&pos.x, DEFAULT_EM_IN_EMU).expect("x must not overflow");
         let y = unit_to_emu(&pos.y, DEFAULT_EM_IN_EMU).expect("y must not overflow");
         let width = unit_to_emu(&pos.width, DEFAULT_EM_IN_EMU).expect("width must not overflow");
-        let height =
-            unit_to_emu(&pos.height, DEFAULT_EM_IN_EMU).expect("height must not overflow");
-        let bbox = BoundingBox { x, y, width, height };
+        let height = unit_to_emu(&pos.height, DEFAULT_EM_IN_EMU).expect("height must not overflow");
+        let bbox = BoundingBox {
+            x,
+            y,
+            width,
+            height,
+        };
         assert_eq!(bbox.x, Emu(457_200), "x: 0.5in → Emu(457_200)");
         assert_eq!(bbox.y, Emu(914_400), "y: 1.0in → Emu(914_400)");
         assert_eq!(bbox.width, Emu(1_828_800), "width: 2.0in → Emu(1_828_800)");
@@ -1412,8 +1427,8 @@ mod tests {
     /// with a default or overwrites it.
     #[test]
     fn test_vp_038_missing_alt_span_propagation() {
-        use std::sync::Arc;
         use slideforge_types::SourceSpan;
+        use std::sync::Arc;
         // Non-default span — load-bearing for F-MED-002.
         let non_default_span = SourceSpan {
             file: Arc::from("test.sf"),
@@ -1781,8 +1796,7 @@ mod tests {
     /// with a saturated (but accepted) EMU value — this test catches that regression.
     #[test]
     fn test_vp_048_layout_shapes_overflow_x_returns_arithmetic_overflow() {
-        let st =
-            slideforge_types::ShapeType::from_keyword("rect").expect("rect must be known");
+        let st = slideforge_types::ShapeType::from_keyword("rect").expect("rect must be known");
         let spec = ShapeSpec {
             shape_type: st,
             position: ShapePosition {
@@ -1803,11 +1817,15 @@ mod tests {
         match result.unwrap_err() {
             LayoutError::Multiple { inner } => {
                 assert!(
-                    inner.iter().any(|e| matches!(e, LayoutError::ArithmeticOverflow { .. })),
+                    inner
+                        .iter()
+                        .any(|e| matches!(e, LayoutError::ArithmeticOverflow { .. })),
                     "Multiple must contain ArithmeticOverflow; got: {inner:?}"
                 );
             },
-            other => panic!("expected LayoutError::Multiple containing ArithmeticOverflow, got: {other:?}"),
+            other => panic!(
+                "expected LayoutError::Multiple containing ArithmeticOverflow, got: {other:?}"
+            ),
         }
     }
 
@@ -1831,12 +1849,16 @@ mod tests {
         let result = LayoutError::multiple(vec![single.clone()]);
         match result {
             LayoutError::Multiple { inner } => {
-                assert_eq!(inner.len(), 1, "single error must produce Multiple with len=1");
+                assert_eq!(
+                    inner.len(),
+                    1,
+                    "single error must produce Multiple with len=1"
+                );
                 assert_eq!(inner[0], single, "inner error must equal the original");
             },
-            other => panic!(
-                "LayoutError::multiple(vec![one_err]) must return Multiple, got: {other:?}"
-            ),
+            other => {
+                panic!("LayoutError::multiple(vec![one_err]) must return Multiple, got: {other:?}")
+            },
         }
     }
 
@@ -1917,8 +1939,7 @@ mod tests {
     /// would produce a frame — this test catches that regression.
     #[test]
     fn test_f_high_003_zero_width_shape_rejected_as_invalid_bbox() {
-        let st =
-            slideforge_types::ShapeType::from_keyword("rect").expect("rect must be known");
+        let st = slideforge_types::ShapeType::from_keyword("rect").expect("rect must be known");
         let spec = ShapeSpec {
             shape_type: st,
             position: ShapePosition {

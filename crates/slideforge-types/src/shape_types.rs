@@ -281,10 +281,7 @@ mod tests {
     #[test]
     fn test_shape_type_from_keyword_all_valid() {
         assert_eq!(ShapeType::from_keyword("rect"), Ok(ShapeType::Rect));
-        assert_eq!(
-            ShapeType::from_keyword("ellipse"),
-            Ok(ShapeType::Ellipse)
-        );
+        assert_eq!(ShapeType::from_keyword("ellipse"), Ok(ShapeType::Ellipse));
         assert_eq!(ShapeType::from_keyword("arrow"), Ok(ShapeType::Arrow));
         assert_eq!(ShapeType::from_keyword("line"), Ok(ShapeType::Line));
         assert_eq!(ShapeType::from_keyword("star"), Ok(ShapeType::Star));
@@ -381,7 +378,11 @@ mod tests {
 
     #[test]
     fn test_fill_spec_variants_constructable() {
-        let solid = FillSpec::SolidColor(Rgb { r: 0, g: 55, b: 102 });
+        let solid = FillSpec::SolidColor(Rgb {
+            r: 0,
+            g: 55,
+            b: 102,
+        });
         let none = FillSpec::None;
         assert!(matches!(solid, FillSpec::SolidColor(_)));
         assert!(matches!(none, FillSpec::None));
@@ -390,8 +391,16 @@ mod tests {
     #[test]
     fn test_fill_spec_implements_hash_eq_clone() {
         let mut set = HashSet::new();
-        set.insert(FillSpec::SolidColor(Rgb { r: 0, g: 55, b: 102 }));
-        set.insert(FillSpec::SolidColor(Rgb { r: 0, g: 55, b: 102 }));
+        set.insert(FillSpec::SolidColor(Rgb {
+            r: 0,
+            g: 55,
+            b: 102,
+        }));
+        set.insert(FillSpec::SolidColor(Rgb {
+            r: 0,
+            g: 55,
+            b: 102,
+        }));
         assert_eq!(set.len(), 1);
         let v = FillSpec::None;
         let v2 = v.clone();
@@ -420,11 +429,7 @@ mod tests {
         set.insert(Rgb { r: 0, g: 0, b: 0 });
         set.insert(Rgb { r: 0, g: 0, b: 0 });
         assert_eq!(set.len(), 1);
-        let v = Rgb {
-            r: 1,
-            g: 2,
-            b: 3,
-        };
+        let v = Rgb { r: 1, g: 2, b: 3 };
         let v2 = v;
         assert_eq!(v, v2);
     }
@@ -463,7 +468,13 @@ mod tests {
             y_emu: Emu(0),
         };
         // Assert the field is accessible as ShapeType, not Arc<str>.
-        assert!(matches!(w, LayoutWarning::OffCanvas { shape_type: ShapeType::Ellipse, .. }));
+        assert!(matches!(
+            w,
+            LayoutWarning::OffCanvas {
+                shape_type: ShapeType::Ellipse,
+                ..
+            }
+        ));
     }
 
     #[test]

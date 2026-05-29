@@ -315,7 +315,10 @@ impl LayoutError {
     /// ```
     #[must_use]
     pub fn multiple(errors: Vec<Self>) -> Self {
-        debug_assert!(!errors.is_empty(), "LayoutError::multiple requires at least one error");
+        debug_assert!(
+            !errors.is_empty(),
+            "LayoutError::multiple requires at least one error"
+        );
         // Flatten nested Multiple variants into a single level (invariant: no nesting).
         let flattened: Vec<Self> = errors
             .into_iter()
@@ -548,9 +551,7 @@ mod tests {
         let c = LayoutError::EmptyDeck {
             source_slide_index: 2,
         };
-        let nested = LayoutError::Multiple {
-            inner: vec![a, b],
-        };
+        let nested = LayoutError::Multiple { inner: vec![a, b] };
         let result = LayoutError::multiple(vec![nested, c]);
         match result {
             LayoutError::Multiple { ref inner } => {

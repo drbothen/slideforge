@@ -980,13 +980,17 @@ mod tests {
     /// (e.g., in `build_shape_frame`), the equality assertions below fail.
     #[test]
     fn test_h_high_004_shape_fill_and_text_propagate_through_layout_run() {
+        use crate::types::FrameContent;
         use slideforge_types::{
             AltText, Block, ContentBlock, FillSpec, InlineNode, Rgb, ShapePosition, ShapeSpec,
             ShapeType, ShapeUnit,
         };
-        use crate::types::FrameContent;
 
-        let expected_fill = FillSpec::SolidColor(Rgb { r: 0, g: 55, b: 102 });
+        let expected_fill = FillSpec::SolidColor(Rgb {
+            r: 0,
+            g: 55,
+            b: 102,
+        });
         let expected_text = vec![InlineNode::Plain(Arc::from("Hello"))];
 
         let shape_spec = ShapeSpec {
@@ -1033,8 +1037,7 @@ mod tests {
 
         // F-HIGH-004 load-bearing: fill must be preserved verbatim.
         assert_eq!(
-            shape_frame.fill,
-            expected_fill,
+            shape_frame.fill, expected_fill,
             "fill must propagate through layout::run unchanged; \
              expected SolidColor(Rgb(0,55,102)), got: {:?}",
             shape_frame.fill
@@ -1065,10 +1068,10 @@ mod tests {
     /// from `layout::run`, this assertion fails (result.warnings would be empty).
     #[test]
     fn test_vp_049_layout_run_off_canvas_warning_in_laid_out_deck_warnings() {
+        use crate::types::LayoutWarning;
         use slideforge_types::{
             AltText, Block, ContentBlock, FillSpec, ShapePosition, ShapeSpec, ShapeType, ShapeUnit,
         };
-        use crate::types::LayoutWarning;
 
         let shape_spec = ShapeSpec {
             shape_type: ShapeType::Rect,
@@ -1103,7 +1106,10 @@ mod tests {
 
         // VP-049: the off-canvas warning must appear in LaidOutDeck.warnings.
         assert!(
-            result.warnings.iter().any(|w| matches!(w, LayoutWarning::OffCanvas { .. })),
+            result
+                .warnings
+                .iter()
+                .any(|w| matches!(w, LayoutWarning::OffCanvas { .. })),
             "LaidOutDeck.warnings must contain OffCanvas warning for off-canvas shape; \
              got: {:?}",
             result.warnings
@@ -1125,8 +1131,8 @@ mod tests {
     /// directly), making it load-bearing per the VP-049 contract.
     #[test]
     fn test_vp_049_layout_run_xref_warning_in_laid_out_deck_warnings() {
-        use slideforge_types::{Block, ContentBlock, InlineNode, TextBlock};
         use crate::types::LayoutWarning;
+        use slideforge_types::{Block, ContentBlock, InlineNode, TextBlock};
 
         let xref_target = Arc::from("__nonexistent_slide__");
         let text_block = TextBlock {
@@ -1152,7 +1158,8 @@ mod tests {
         // VP-049: call layout::run end-to-end. The TextRun frame produced from the
         // ContentBlock::Text block must trigger run_inline_validation, and the
         // XrefTargetNotFound warning must appear on LaidOutDeck.warnings.
-        let result = run(&deck, &brand).expect("layout::run must succeed for unknown xref (warning, not error)");
+        let result = run(&deck, &brand)
+            .expect("layout::run must succeed for unknown xref (warning, not error)");
 
         // VP-049 load-bearing assertion: warnings must contain XrefTargetNotFound.
         // If deck_warnings.extend(inline_warnings) is removed from layout::run,
@@ -1184,10 +1191,10 @@ mod tests {
     /// F-CRIT-001: this test uses `layout::run` end-to-end (not `layout_shapes` directly).
     #[test]
     fn test_vp_050_layout_run_shape_frame_after_regions() {
+        use crate::types::FrameContent;
         use slideforge_types::{
             AltText, Block, ContentBlock, FillSpec, ShapePosition, ShapeSpec, ShapeType, ShapeUnit,
         };
-        use crate::types::FrameContent;
 
         // Build a slide with a shape block — layout::run produces region frames first,
         // then appends shape frames (BC-3.04.001 postcondition 4 / PC-3).
@@ -1250,7 +1257,10 @@ mod tests {
 
         // Load-bearing: shape frame IS present.
         assert!(
-            matches!(slide_out.frames[first_shape_index].content, FrameContent::Shape(_)),
+            matches!(
+                slide_out.frames[first_shape_index].content,
+                FrameContent::Shape(_)
+            ),
             "frame at first_shape_index ({first_shape_index}) must be FrameContent::Shape"
         );
     }
