@@ -430,7 +430,16 @@ fn data_error_to_source_error(path: &str, err: &DataError) -> DataSourceError {
             // F-MED-2: include the offending extension and the supported format.
             // TD-VSDD-060: generic message covers all non-xlsx extensions, not just .xls.
             // OBS-1: embed [E-DAT-003] bracket code so user-visible message matches SQLite pattern.
-            uri: format!("[{code}] {path} (only .xlsx extension supported; got '.{extension}')"),
+            // F-PASS14-LOW-1: extensionless files use the cosmetic "(no extension)"; prefixing
+            // with '.' would render the awkward "'.(no extension)'" — omit the dot for that case.
+            uri: {
+                let ext_display = if extension.as_ref() == "(no extension)" {
+                    format!("got {extension}")
+                } else {
+                    format!("got '.{extension}'")
+                };
+                format!("[{code}] {path} (only .xlsx extension supported; {ext_display})")
+            },
         },
         _ => DataSourceError::ParseError {
             uri: path.to_owned(),
@@ -592,7 +601,7 @@ fn select_sheet(
 /// - Empty sheet (no rows or no non-empty cells in row 0) → `ParseError` "empty sheet" (EC-007)
 /// - Partial-empty header row (any cell `None`/`Empty` while others populated) → E-DAT-007 (AC-002)
 /// - Non-string header cell (Int, Float, Bool, `DateTime`) → E-DAT-008 (F-HIGH-1)
-/// - Duplicate header names → E-DAT-008 (F-PASS14-MED-1 / EC-006 parity with SQLite)
+/// - Duplicate header names → E-DAT-008 (F-PASS14-MED-1 / EC-006 parity with `SQLite`)
 ///
 /// Note: Merged cell detection in the header row is handled at the `load()` level
 /// via `workbook.worksheet_merge_cells()` before this function is called.
@@ -2575,6 +2584,53 @@ mod tests {
     // IndexMap.insert — must be rejected with [E-DAT-NNN] error.
     // Traces to BC-1.03.006 edge case EC-006 (sibling: SQLite find_duplicate_column).
     // ---------------------------------------------------------------------------
+
+    // ---------------------------------------------------------------------------
+    // F-PASS14-LOW-1: extensionless XLSX path rendered '.(no extension)' awkwardly.
+    // Mirrors OBS-3 pattern from SQLite (test_obs3_sqlite_no_extension_renders_cosmetic).
+    // ---------------------------------------------------------------------------
+
+    /// `test_obs3_xlsx_no_extension_renders_cosmetic` -- extensionless path renders
+    /// `(no extension)` without a leading dot in the error message.
+    ///
+    /// A path with no file extension (e.g. `/tmp/mydata`) previously rendered as
+    /// `'.(no extension)'` in the `UnsupportedUri` message (F-PASS14-LOW-1). The fix
+    /// omits the dot prefix when the extension cosmetic is `"(no extension)"`.
+    ///
+    /// Load-bearing: without the conditional formatting in `data_error_to_source_error`,
+    /// the `!msg.contains("'.(")` assertion fails and the test exposes the regression.
+    ///
+    /// Traces to BC-1.03.006 invariant 3 (extension validation), F-PASS14-LOW-1.
+    #[test]
+    fn test_obs3_xlsx_no_extension_renders_cosmetic() {
+        // No extension: extension check fires before any file I/O.
+        let src = XlsxDataSource::new("/tmp/mydata_no_ext");
+        let err = src.load("", &default_opts()).unwrap_err();
+
+        assert!(
+            matches!(
+                err,
+                slideforge_plugin_api::DataSourceError::UnsupportedUri { .. }
+            ),
+            "extensionless path must produce UnsupportedUri; got: {err:?}"
+        );
+        let msg = err.to_string();
+        // Must embed the error code.
+        assert!(
+            msg.contains("[E-DAT-003]"),
+            "extensionless XLSX error must embed '[E-DAT-003]'; got: {msg}"
+        );
+        // Must contain the cosmetic text without the leading dot.
+        assert!(
+            msg.contains("no extension"),
+            "extensionless XLSX error must render '(no extension)' cosmetic; got: {msg}"
+        );
+        // Must NOT render the awkward '.(no extension)' with the dot prefix.
+        assert!(
+            !msg.contains("'.("),
+            "extensionless XLSX error must NOT render \"'.(no extension)'\"; got: {msg}"
+        );
+    }
 
     /// `test_bc_1_03_006_xlsx_duplicate_header_rejected` -- header row with duplicate column
     /// names must return `DataSourceError::ParseError` with `[E-DAT-008]` bracket code.
