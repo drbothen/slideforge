@@ -371,7 +371,16 @@ fn convert_calamine_cell(cell: &Data, col: u32, row: u32, path: &str) -> Result<
                 })
             }
         },
-        Data::Error(_) | Data::Empty => Ok(Value::Null),
+        // OBS-2: The caller's match at the load boundary already handles
+        // `None | Some(Data::Empty)` → `Value::Null` before ever calling this
+        // function. Data::Empty is dead in production paths; formula errors
+        // (Data::Error) are null-coalesced as specified by BC-1.03.006 PC-4.
+        Data::Error(_) => Ok(Value::Null),
+        // Exhaustive arm required by the compiler (Data::Empty exists in the enum).
+        // This arm is unreachable in production: the caller short-circuits Empty
+        // cells before calling this function. If somehow reached, null-coalesce
+        // defensively (consistent with formula-error handling above).
+        Data::Empty => Ok(Value::Null),
     }
 }
 
