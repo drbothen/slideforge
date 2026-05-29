@@ -165,6 +165,25 @@ pub enum LayoutError {
         /// Zero-based index of the `severity_cards` slide.
         slide_index: usize,
     },
+
+    /// A `Shape` node reached the layout stage without `alt` text or
+    /// `decorative: true` (BC-3.04.001 EC-001 / DI-001).
+    ///
+    /// This is a defensive check — the primary alt-text enforcement is in
+    /// `slideforge-validate` (STORY-015). If this error fires, it indicates
+    /// the validation stage was bypassed or produced a false-pass.
+    ///
+    /// Layout returns this error rather than produce a shape without alt text,
+    /// because WCAG-AA compliance requires that every non-decorative visual
+    /// element have programmatically-determinable alternative text.
+    #[error(
+        "layout error: slide {slide_index}: shape node reached layout without alt text or \
+         `decorative: true` (internal invariant violation — validation should have caught this)"
+    )]
+    MissingAlt {
+        /// Zero-based index of the slide containing the shape without alt text.
+        slide_index: usize,
+    },
 }
 
 #[cfg(test)]

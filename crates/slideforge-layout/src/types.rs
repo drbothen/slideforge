@@ -1,5 +1,6 @@
 //! Layout IR types — `LaidOutDeck`, `LaidOutSlide`, `Frame`, `BoundingBox`,
-//! `TextFlow`, `PageSize`.
+//! `TextFlow`, `PageSize`, `ShapeFrame`, `ShapeType`, `FillSpec`, `Rgb`,
+//! `LayoutWarning`.
 //!
 //! These types carry the *geometric* representation of a presentation after
 //! the layout engine has computed EMU coordinates for every content frame.
@@ -17,6 +18,7 @@
 use std::sync::Arc;
 
 use slideforge_types::ContentBlock;
+use slideforge_types::InlineNode;
 pub use slideforge_types::Emu;
 pub use slideforge_types::NormalizedDiagramSvg;
 
@@ -244,6 +246,125 @@ impl BoundingBox {
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// BC-3.04.001 — Shape layout IR types (STORY-028)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// An sRGB color value.
+///
+/// Used in [`FillSpec::SolidColor`] and [`FillSpec::Gradient`] to carry
+/// per-channel color data. Integer channels (0–255); no floating-point.
+///
+/// Implements `Hash + Eq + Clone + Debug` for comemo compatibility (AC-010).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Rgb {
+    /// Red channel (0–255).
+    pub r: u8,
+    /// Green channel (0–255).
+    pub g: u8,
+    /// Blue channel (0–255).
+    pub b: u8,
+}
+
+/// The fill specification for a shape frame.
+///
+/// Exporters translate `FillSpec` into format-specific fill markup (PPTX `<a:solidFill>`,
+/// HTML `background-color`, PDF fill ops).
+///
+/// Implements `Hash + Eq + Clone + Debug` for comemo compatibility (AC-010).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum FillSpec {
+    /// A flat solid color fill.
+    SolidColor(Rgb),
+    /// A linear gradient from one color to another.
+    Gradient {
+        /// Gradient start color.
+        from: Rgb,
+        /// Gradient end color.
+        to: Rgb,
+    },
+    /// No fill (transparent background).
+    None,
+}
+
+/// The geometric shape type for a shape frame.
+///
+/// Corresponds to the `type` field in the DSL `shape:` block.
+///
+/// Implements `Hash + Eq + Clone + Debug` for comemo compatibility (AC-010).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum ShapeType {
+    /// Rectangular shape (default when type is omitted).
+    Rect,
+    /// Ellipse / circle shape.
+    Ellipse,
+    /// Single-headed arrow.
+    Arrow,
+    /// Line segment.
+    Line,
+    /// Star / burst shape.
+    Star,
+    /// A custom shape named by keyword.
+    Custom(Arc<str>),
+}
+
+/// A fully-positioned shape from the `shape:` DSL block.
+///
+/// Produced by [`crate::shapes::layout_shapes`] during the layout pass.
+/// Carries the shape's type, fill specification, optional text content,
+/// and resolved accessibility alt text.
+///
+/// Implements `Hash + Eq + Clone + Debug` for comemo compatibility (AC-010).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ShapeFrame {
+    /// The geometric shape kind.
+    pub shape_type: ShapeType,
+    /// The fill specification for this shape.
+    pub fill: FillSpec,
+    /// Optional inline text content rendered inside the shape.
+    ///
+    /// `None` means the shape has no text label.
+    pub text: Option<Vec<InlineNode>>,
+    /// Accessibility alt text for this shape (BC-3.04.001 precondition 3 /
+    /// AC-004: `decorative: true` → `AltText::Decorative`).
+    pub alt: slideforge_types::AltText,
+}
+
+/// A non-fatal diagnostic produced by the layout engine.
+///
+/// `LayoutWarning`s are accumulated in a `DiagnosticSink` during layout and
+/// do not halt processing. The shape / frame that triggered the warning is
+/// still produced at its declared position.
+///
+/// Implements `Hash + Eq + Clone + Debug` for comemo compatibility (AC-010).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum LayoutWarning {
+    /// A shape's declared position extends outside the slide canvas (AC-003 /
+    /// BC-3.04.001 EC-002). Negative x or y, or x+width > page_width, etc.
+    OffCanvas {
+        /// Zero-based index of the slide containing the off-canvas shape.
+        slide_index: usize,
+        /// The shape type keyword (e.g., `"rect"`).
+        shape_type: Arc<str>,
+        /// The declared x position in EMU (may be negative).
+        x_emu: Emu,
+        /// The declared y position in EMU (may be negative).
+        y_emu: Emu,
+    },
+    /// An `Xref` inline node references a slide title that does not exist in
+    /// the deck (AC-007 / BC-3.05.001 EC-002).
+    XrefTargetNotFound {
+        /// The target identifier that was not found.
+        target: Arc<str>,
+        /// Zero-based index of the slide containing the unresolved xref.
+        slide_index: usize,
+    },
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FrameContent
+// ─────────────────────────────────────────────────────────────────────────────
+
 /// The semantic content of a positioned layout frame.
 ///
 /// Each variant carries the data that the exporter will render into the frame's
@@ -272,8 +393,24 @@ pub enum FrameContent {
     /// raw SVG string — can be stored in this frame, preventing un-normalized
     /// SVG from reaching exporters.
     Diagram(NormalizedDiagramSvg),
-    /// A shape from the shape DSL.
-    Shape,
+    /// A shape from the shape DSL (BC-3.04.001, STORY-028).
+    ///
+    /// Carries the fully-resolved shape geometry, fill, text content, and
+    /// accessibility alt text. Produced by [`crate::shapes::layout_shapes`]
+    /// and appended after all placeholder frames in [`LaidOutSlide::frames`]
+    /// (AC-002 / BC-3.04.001 postcondition 4).
+    Shape(ShapeFrame),
+    /// A rich inline text run (BC-3.05.001, STORY-028).
+    ///
+    /// Carries a sequence of [`InlineNode`] values that have been validated by
+    /// the inline pass ([`crate::inline`]). The layout stage preserves the
+    /// `InlineNode` sequence verbatim; exporters translate each variant to
+    /// format-specific markup (OMML for PPTX, HTML tags for HTML, etc.).
+    ///
+    /// Produced for text blocks that carry inline formatting (bold, italic, code,
+    /// xref, etc.). Plain-text-only blocks continue to use
+    /// `FrameContent::Title` / `FrameContent::Subtitle` / `FrameContent::Body`.
+    TextRun(Vec<InlineNode>),
     /// An empty placeholder (present in the layout but no content assigned).
     Empty,
     /// An error-slide placeholder produced when a pipeline error occurs in
@@ -587,7 +724,15 @@ mod tests {
             r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><title>test</title></svg>"#,
         ));
         let diagram = FrameContent::Diagram(normalized_svg);
-        let shape = FrameContent::Shape;
+        // BC-3.04.001 / STORY-028: Shape now carries a ShapeFrame.
+        let shape = FrameContent::Shape(ShapeFrame {
+            shape_type: ShapeType::Rect,
+            fill: FillSpec::SolidColor(Rgb { r: 0, g: 55, b: 102 }),
+            text: None,
+            alt: slideforge_types::AltText::Provided(Arc::from("Blue rectangle")),
+        });
+        // BC-3.05.001 / STORY-028: TextRun carries a Vec<InlineNode>.
+        let text_run = FrameContent::TextRun(vec![]);
         let empty = FrameContent::Empty;
 
         assert!(matches!(title, FrameContent::Title(_)));
@@ -596,7 +741,8 @@ mod tests {
         assert!(matches!(image, FrameContent::Image { .. }));
         assert!(matches!(chart, FrameContent::Chart));
         assert!(matches!(diagram, FrameContent::Diagram(_)));
-        assert!(matches!(shape, FrameContent::Shape));
+        assert!(matches!(shape, FrameContent::Shape(_)));
+        assert!(matches!(text_run, FrameContent::TextRun(_)));
         assert!(matches!(empty, FrameContent::Empty));
     }
 

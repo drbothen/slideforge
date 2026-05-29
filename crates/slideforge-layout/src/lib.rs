@@ -44,9 +44,11 @@
 #![allow(clippy::module_name_repetitions)]
 
 pub mod error;
+pub mod inline;
 pub mod layout;
 pub mod regions;
 pub mod sections;
+pub mod shapes;
 pub mod text_flow;
 pub mod types;
 
@@ -55,8 +57,8 @@ pub use error::LayoutError;
 pub use layout::run;
 pub use sections::{GeneratedSection, OutputFormat, SectionItem, SectionKind, SectionSource};
 pub use types::{
-    BoundingBox, Frame, FrameContent, LaidOutDeck, LaidOutSlide, PageSize, RegisterSet,
-    RegisterTag, TextFlow, TextOverflow,
+    BoundingBox, FillSpec, Frame, FrameContent, LaidOutDeck, LaidOutSlide, LayoutWarning, PageSize,
+    RegisterSet, RegisterTag, Rgb, ShapeFrame, ShapeType, TextFlow, TextOverflow,
 };
 
 #[cfg(test)]
