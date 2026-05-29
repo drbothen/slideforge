@@ -421,8 +421,13 @@ fn find_duplicate_column<'a>(names: &[&'a str]) -> Option<&'a str> {
 /// Accepted (case-insensitive): `.db`, `.sqlite`, `.sqlite3`.
 /// All other extensions (including `.db3`, `.s3db`, `.sl3`) are rejected with E-DAT-014.
 ///
-/// Returns `Ok(())` on accepted extension, `Err(String)` containing the error message
-/// for rejection (caller wraps in `DataSourceError::UnsupportedUri`).
+/// Returns `Ok(())` on accepted extension, `Err(String)` containing the user-visible
+/// error message with `[E-DAT-014]` prefix embedded (caller wraps in
+/// `DataSourceError::UnsupportedUri`).
+///
+/// The `[E-DAT-014]` prefix is embedded in the returned string so that the final
+/// `DataSourceError` message always carries the granular error code — consistent
+/// with the XLSX pattern where error codes appear in `DataError` display strings.
 ///
 /// Traces to BC-1.03.007 invariant 8, VP-035, E-DAT-014.
 fn validate_sqlite_extension(path: &str) -> Result<(), String> {
@@ -436,8 +441,9 @@ fn validate_sqlite_extension(path: &str) -> Result<(), String> {
     match ext.as_str() {
         "db" | "sqlite" | "sqlite3" => Ok(()),
         other => Err(format!(
-            "Unsupported extension for SQLite data source: '.{other}'. \
-            Accepted extensions: .db, .sqlite, .sqlite3"
+            "[{code}] unsupported extension for SQLite data source: '.{other}'. \
+            Accepted extensions: .db, .sqlite, .sqlite3",
+            code = crate::error::E_DAT_014,
         )),
     }
 }
@@ -452,25 +458,33 @@ fn validate_sqlite_extension(path: &str) -> Result<(), String> {
 /// extension AND the right magic bytes.
 ///
 /// Returns `Ok(())` if the header matches, or `Err(String)` with a diagnostic
-/// message on mismatch or I/O failure.
+/// message (with `[E-DAT-013]` prefix embedded) on mismatch or I/O failure.
+///
+/// The `[E-DAT-013]` prefix is embedded in the returned string so that the final
+/// `DataSourceError` message always carries the granular error code — consistent
+/// with the XLSX pattern where error codes appear in `DataError` display strings.
 ///
 /// Traces to BC-1.03.007 postcondition 7, VP-034, E-DAT-013.
 fn validate_sqlite_magic(path: &str) -> Result<(), String> {
     const MAGIC: &[u8; 16] = b"SQLite format 3\x00";
     let mut buf = [0u8; 16];
-    let mut file =
-        std::fs::File::open(path).map_err(|e| format!("failed to read file '{path}': {e}"))?;
-    let n = file
-        .read(&mut buf)
-        .map_err(|e| format!("failed to read file header from '{path}': {e}"))?;
+    let mut file = std::fs::File::open(path)
+        .map_err(|e| format!("[{}] failed to read file '{path}': {e}", crate::error::E_DAT_013))?;
+    let n = file.read(&mut buf).map_err(|e| {
+        format!(
+            "[{}] failed to read file header from '{path}': {e}",
+            crate::error::E_DAT_013
+        )
+    })?;
     if n < 16 || &buf != MAGIC {
         let ext = std::path::Path::new(path)
             .extension()
             .and_then(|e| e.to_str())
             .unwrap_or("db");
         return Err(format!(
-            "'{path}' has .{ext} extension but is not a valid SQLite database \
-            (SQLite file header not found). File may be corrupted or misnamed."
+            "[{code}] '{path}' has .{ext} extension but is not a valid SQLite database \
+            (SQLite file header not found). File may be corrupted or misnamed.",
+            code = crate::error::E_DAT_013,
         ));
     }
     Ok(())
@@ -1805,9 +1819,13 @@ mod tests {
 
     /// `test_vp_034_wrong_sqlite_magic_produces_parse_error` -- VP-034: non-`SQLite` bytes → `ParseError`.
     ///
-    /// A file with `.db` extension but non-`SQLite` content must produce `ParseError` (E-DAT-013).
+    /// A file with `.db` extension but non-`SQLite` content must produce `ParseError` with
+    /// error code `[E-DAT-013]` embedded in the message (F-MED-1 load-bearing assertion).
     ///
-    /// Traces to BC-1.03.007 postcondition 7, VP-034.
+    /// Load-bearing: if `validate_sqlite_magic` omits `[E-DAT-013]` from the error message,
+    /// the `msg.contains("[E-DAT-013]")` assertion fails.
+    ///
+    /// Traces to BC-1.03.007 postcondition 7, VP-034, E-DAT-013.
     #[test]
     fn test_vp_034_wrong_sqlite_magic_produces_parse_error() {
         let dir = tempfile::tempdir().unwrap();
@@ -1830,6 +1848,11 @@ mod tests {
             msg.contains("not a valid SQLite") || msg.contains("header") || msg.contains("magic"),
             "E-DAT-013 error must explain invalid SQLite header; got: {msg}"
         );
+        // F-MED-1 load-bearing: error code must be embedded in the user-visible message.
+        assert!(
+            msg.contains("[E-DAT-013]"),
+            "E-DAT-013 error code must appear in the user-visible message; got: {msg}"
+        );
     }
 
     // ---------------------------------------------------------------------------
@@ -1839,9 +1862,13 @@ mod tests {
 
     /// `test_vp_035_unsupported_extension_produces_e_dat_014` -- VP-035: `.db3` extension → `UnsupportedUri`.
     ///
-    /// Extensions outside {.db, .sqlite, .sqlite3} must produce `UnsupportedUri` (E-DAT-014).
+    /// Extensions outside {.db, .sqlite, .sqlite3} must produce `UnsupportedUri` with
+    /// error code `[E-DAT-014]` embedded in the message (F-MED-1 load-bearing assertion).
     ///
-    /// Traces to BC-1.03.007 invariant 8, VP-035.
+    /// Load-bearing: if `validate_sqlite_extension` omits `[E-DAT-014]` from the error
+    /// message, the `msg.contains("[E-DAT-014]")` assertion fails.
+    ///
+    /// Traces to BC-1.03.007 invariant 8, VP-035, E-DAT-014.
     #[test]
     fn test_vp_035_unsupported_extension_produces_e_dat_014() {
         // The file doesn't need to exist — extension check fires first.
@@ -1859,6 +1886,11 @@ mod tests {
         assert!(
             msg.contains("db3") || msg.contains("Unsupported") || msg.contains("extension"),
             "E-DAT-014 error must name the extension; got: {msg}"
+        );
+        // F-MED-1 load-bearing: error code must be embedded in the user-visible message.
+        assert!(
+            msg.contains("[E-DAT-014]"),
+            "E-DAT-014 error code must appear in the user-visible message; got: {msg}"
         );
     }
 
