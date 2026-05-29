@@ -217,15 +217,28 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
         // STORY-072 scope; here we only need the TextRun frame to exist in the slide.
         for block in &slide.blocks {
             if let ContentBlock::Text(text_block) = &block.content {
-                // Use a minimal bounding box (positioned below the last existing frame, or
-                // at the top-left corner if no frames exist). The exact geometry does not
-                // matter for inline validation — only the frame content is needed.
+                // Clamp the placeholder height to page_height so the bbox always
+                // passes is_valid (F-P4-LOW-001 / BC-3.06.003). For brands with a
+                // canvas_height < 914_400 EMU the unclamped height would violate
+                // y + height <= page_height, triggering the InvalidBoundingBox
+                // defensive check below.
+                let placeholder_height = crate::types::Emu(914_400).min(page_size.height);
                 let bbox = crate::types::BoundingBox {
                     x: crate::types::Emu(0),
                     y: crate::types::Emu(0),
                     width: page_size.width,
-                    height: crate::types::Emu(914_400), // 1 inch height placeholder
+                    height: placeholder_height,
                 };
+                // BC-3.06.003 defensive check: the clamped bbox must still satisfy
+                // all invariants (non-zero dimensions, within page bounds).
+                let frame_index = all_frames.len();
+                if !bbox.is_valid(page_size.width, page_size.height) {
+                    return Err(LayoutError::InvalidBoundingBox {
+                        source_slide_index: source_index,
+                        frame_index,
+                        bbox,
+                    });
+                }
                 all_frames.push(crate::types::Frame {
                     bbox,
                     content: crate::types::FrameContent::TextRun(text_block.inlines.clone()),

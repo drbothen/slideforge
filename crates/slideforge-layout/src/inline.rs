@@ -110,10 +110,20 @@ pub fn collect_slide_titles(deck: &slideforge_types::Deck) -> HashSet<Arc<str>> 
 /// This is the entry point called by [`crate::layout::run`] after the per-slide
 /// frame pass. It:
 /// 1. Calls [`collect_slide_titles`] to build the known-titles set.
-/// 2. For each `LaidOutSlide`, scans all `FrameContent::TextRun` frames for
-///    `InlineNode` sequences.
+/// 2. For each `LaidOutSlide`, scans all `FrameContent::TextRun` frames AND
+///    all `FrameContent::Shape` frames whose `text` field is `Some` for
+///    `InlineNode` sequences (F-P4-MED-002: shape text bypass fix).
 /// 3. Calls [`validate_inline_nodes`] for each inline sequence.
 /// 4. Returns the accumulated `Vec<LayoutWarning>`.
+///
+/// ## Shape text scanning (F-P4-MED-002 / BC-3.05.001 EC-002)
+///
+/// `FrameContent::Shape(ShapeFrame { text: Some(nodes), .. })` frames are
+/// scanned with the same xref-target and depth-bound checks applied to
+/// `FrameContent::TextRun` frames. Without this, a user writing
+/// `shape: type rect ... text "see {{ xref(\"unknown\") }}"` would bypass
+/// the AC-007 xref-target validation gate (BC-3.05.001 EC-002) and the
+/// E-LAY-005 depth bound.
 ///
 /// # Arguments
 ///
@@ -128,7 +138,7 @@ pub fn collect_slide_titles(deck: &slideforge_types::Deck) -> HashSet<Arc<str>> 
 /// # Errors
 ///
 /// Returns `Err(LayoutError::InlineDepthExceeded)` if any inline node tree in
-/// any `TextRun` frame exceeds [`MAX_INLINE_DEPTH`] nesting levels
+/// any `TextRun` or `Shape` frame exceeds [`MAX_INLINE_DEPTH`] nesting levels
 /// (BC-3.05.001 E-LAY-005 / F-MED-006).
 pub fn run_inline_validation(
     deck: &slideforge_types::Deck,
@@ -139,8 +149,21 @@ pub fn run_inline_validation(
 
     for slide in laid_out_slides {
         for frame in &slide.frames {
-            if let crate::types::FrameContent::TextRun(nodes) = &frame.content {
-                validate_inline_nodes(nodes, &known_titles, slide.source_index, &mut warnings)?;
+            match &frame.content {
+                crate::types::FrameContent::TextRun(nodes) => {
+                    validate_inline_nodes(nodes, &known_titles, slide.source_index, &mut warnings)?;
+                }
+                crate::types::FrameContent::Shape(shape_frame) => {
+                    if let Some(nodes) = &shape_frame.text {
+                        validate_inline_nodes(
+                            nodes,
+                            &known_titles,
+                            slide.source_index,
+                            &mut warnings,
+                        )?;
+                    }
+                }
+                _ => {}
             }
         }
     }

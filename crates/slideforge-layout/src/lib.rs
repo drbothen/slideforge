@@ -1266,6 +1266,211 @@ mod tests {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // F-P4-MED-002 — shape text inline nodes scanned by run_inline_validation
+    // F-P4-LOW-001 — TextRun bbox validated against page size
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// F-P4-MED-002 — `run_inline_validation` scans xref nodes inside
+    /// `FrameContent::Shape` text, not only `FrameContent::TextRun` frames.
+    ///
+    /// A `shape:` block with `text: Some([Xref("nonexistent")])` must produce
+    /// `LaidOutDeck.warnings` containing `XrefTargetNotFound` for the unknown
+    /// target. Without the fix (only scanning `TextRun`), no warning is emitted
+    /// and this test fails.
+    ///
+    /// Load-bearing (TD-VSDD-059): removing the `FrameContent::Shape` arm from
+    /// `run_inline_validation` causes the assertion to fail.
+    #[test]
+    fn test_p4_med_002_shape_text_xref_validated() {
+        use crate::types::LayoutWarning;
+        use slideforge_types::{
+            AltText, Block, ContentBlock, FillSpec, InlineNode, ShapePosition, ShapeSpec, ShapeType,
+            ShapeUnit,
+        };
+
+        let unknown_target = Arc::from("__nonexistent_shape_xref__");
+        let shape_spec = ShapeSpec {
+            shape_type: ShapeType::Rect,
+            position: ShapePosition {
+                x: ShapeUnit::Inches(500),      // 0.5in
+                y: ShapeUnit::Inches(500),      // 0.5in
+                width: ShapeUnit::Inches(2000), // 2.0in
+                height: ShapeUnit::Inches(500), // 0.5in
+            },
+            fill: FillSpec::None,
+            // The text field carries an Xref to a slide that does not exist.
+            text: Some(vec![InlineNode::Xref(Arc::clone(&unknown_target))]),
+            alt: Some(AltText::Provided(Arc::from("shape with xref text"))),
+            decorative: false,
+            span: SourceSpan::default(),
+        };
+        let block = Block {
+            content: ContentBlock::Shape(shape_spec),
+            label: None,
+            span: SourceSpan::default(),
+        };
+        let slide = Slide {
+            slide_type: Arc::from("title"),
+            fields: OrderedMap::new(),
+            blocks: vec![block],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+        };
+        let deck = make_deck(vec![slide]);
+        let brand = make_brand();
+
+        let result = run(&deck, &brand)
+            .expect("layout::run must succeed — unknown xref is a warning, not an error");
+
+        // F-P4-MED-002 load-bearing assertion: shape text xref must be validated.
+        // Without the Shape arm in run_inline_validation, this fails (empty warnings).
+        assert!(
+            result.warnings.iter().any(|w| matches!(
+                w,
+                LayoutWarning::XrefTargetNotFound { target, .. }
+                if target.as_ref() == "__nonexistent_shape_xref__"
+            )),
+            "LaidOutDeck.warnings must contain XrefTargetNotFound for shape text xref \
+             '__nonexistent_shape_xref__'; got: {:?}",
+            result.warnings
+        );
+    }
+
+    /// F-P4-MED-002 — depth-bound check applies to shape text inline trees.
+    ///
+    /// A `shape:` block with text containing a 65-level-deep nested
+    /// `InlineNode::Bold` must return `Err(LayoutError::InlineDepthExceeded)`
+    /// from `layout::run` (BC-3.05.001 E-LAY-005 / F-MED-006).
+    ///
+    /// Load-bearing (TD-VSDD-059): without the Shape arm in
+    /// `run_inline_validation`, depth-exceeded errors from shape text are
+    /// silently swallowed and `layout::run` returns `Ok`, causing this test
+    /// to fail.
+    #[test]
+    fn test_p4_med_002_shape_text_depth_bound() {
+        use crate::inline::MAX_INLINE_DEPTH;
+        use slideforge_types::{
+            AltText, Block, ContentBlock, FillSpec, InlineNode, ShapePosition, ShapeSpec, ShapeType,
+            ShapeUnit,
+        };
+
+        // Build a 65-level-deep Bold tree (exceeds MAX_INLINE_DEPTH = 64).
+        // InlineNode::Bold(children: Vec<InlineNode>)
+        let leaf = InlineNode::Plain(Arc::from("deep text"));
+        let deeply_nested = (0..=MAX_INLINE_DEPTH).fold(leaf, |inner, _| {
+            InlineNode::Bold(vec![inner])
+        });
+
+        let shape_spec = ShapeSpec {
+            shape_type: ShapeType::Rect,
+            position: ShapePosition {
+                x: ShapeUnit::Inches(500),
+                y: ShapeUnit::Inches(500),
+                width: ShapeUnit::Inches(2000),
+                height: ShapeUnit::Inches(500),
+            },
+            fill: FillSpec::None,
+            text: Some(vec![deeply_nested]),
+            alt: Some(AltText::Provided(Arc::from("deep shape"))),
+            decorative: false,
+            span: SourceSpan::default(),
+        };
+        let block = Block {
+            content: ContentBlock::Shape(shape_spec),
+            label: None,
+            span: SourceSpan::default(),
+        };
+        let slide = Slide {
+            slide_type: Arc::from("title"),
+            fields: OrderedMap::new(),
+            blocks: vec![block],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+        };
+        let deck = make_deck(vec![slide]);
+        let brand = make_brand();
+
+        let result = run(&deck, &brand);
+
+        assert!(
+            matches!(result, Err(LayoutError::InlineDepthExceeded { .. })),
+            "layout::run must return Err(InlineDepthExceeded) for 65-deep shape text; \
+             got: {result:?}"
+        );
+    }
+
+    /// F-P4-LOW-001 — `TextRun` bbox is validated against page dimensions.
+    ///
+    /// A brand with a tiny canvas (height = `100_000` EMU, smaller than the
+    /// `914_400` EMU placeholder height) must NOT escape the `is_valid` check.
+    /// The layout engine clamps the placeholder height to `min(914_400, page_h)`
+    /// so the bbox always satisfies BC-3.06.003 invariants.
+    ///
+    /// This test verifies that a Text block on a tiny-canvas brand produces a
+    /// valid laid-out deck (no `InvalidBoundingBox` error) because the height is
+    /// clamped, AND that the `TextRun` frame bbox satisfies `is_valid`.
+    ///
+    /// Load-bearing (TD-VSDD-059): if the clamp is removed and the raw
+    /// `914_400` height is used, `is_valid` would return false for `height=100_000`
+    /// and `layout::run` would return `Err(InvalidBoundingBox)`, making this
+    /// assertion fail.
+    #[test]
+    fn test_p4_low_001_text_run_bbox_validated_against_page_size() {
+        use slideforge_types::{Block, ContentBlock, InlineNode, LayoutDefinition, TextBlock};
+
+        // Brand with tiny canvas: height = 100_000 EMU (< 914_400 placeholder).
+        let tiny_height = slideforge_types::Emu(100_000);
+        let page_width = slideforge_types::Emu(9_144_000); // 10 inches
+        let mut brand = make_brand();
+        brand.layouts.push(LayoutDefinition {
+            name: Arc::from("tiny"),
+            canvas_width: page_width,
+            canvas_height: tiny_height,
+            span: SourceSpan::default(),
+        });
+
+        let text_block = TextBlock {
+            inlines: vec![InlineNode::Plain(Arc::from("hello"))],
+            span: SourceSpan::default(),
+        };
+        let block = Block {
+            content: ContentBlock::Text(text_block),
+            label: None,
+            span: SourceSpan::default(),
+        };
+        let slide = Slide {
+            slide_type: Arc::from("title"),
+            fields: OrderedMap::new(),
+            blocks: vec![block],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+        };
+        let deck = make_deck(vec![slide]);
+
+        // Must succeed — the placeholder height is clamped to tiny_height.
+        let result = run(&deck, &brand).expect(
+            "layout::run must succeed for tiny-canvas brand with Text block; \
+             placeholder height must be clamped to page_height",
+        );
+
+        // Verify every frame in the result passes is_valid.
+        let page_w = result.page_size.width;
+        let page_h = result.page_size.height;
+        for (si, slide_out) in result.slides.iter().enumerate() {
+            for (fi, frame) in slide_out.frames.iter().enumerate() {
+                assert!(
+                    frame.bbox.is_valid(page_w, page_h),
+                    "F-P4-LOW-001: slide {si} frame {fi} has invalid bbox on tiny canvas: {:?}",
+                    frame.bbox
+                );
+            }
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // VP-011 skeleton: proptest for slide count preservation
     // ─────────────────────────────────────────────────────────────────────────
 
