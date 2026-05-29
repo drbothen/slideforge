@@ -1551,7 +1551,7 @@ mod tests {
 
     /// VP-040 — `parse_hex_color` rejects 3-digit short form.
     ///
-    /// BC-3.04.001 AC-BC-A2 / F-HIGH-005: `#RGB` short form → rejected (E-PAR-013).
+    /// BC-3.04.001 AC-BC-A2 / F-HIGH-005: `#RGB` short form → rejected (E-PAR-015).
     #[test]
     fn test_vp_040_parse_hex_color_short_form_rejected() {
         assert!(
@@ -1566,7 +1566,7 @@ mod tests {
 
     /// VP-040 — `parse_hex_color` rejects 8-digit RGBA form.
     ///
-    /// BC-3.04.001 AC-BC-A2 / F-HIGH-005: `#RRGGBBAA` → rejected (E-PAR-013).
+    /// BC-3.04.001 AC-BC-A2 / F-HIGH-005: `#RRGGBBAA` → rejected (E-PAR-015).
     #[test]
     fn test_vp_040_parse_hex_color_rgba_form_rejected() {
         assert!(
@@ -1973,16 +1973,17 @@ mod tests {
     // F-OBS-003 — Shape frame index >= region count (BC-3.04.001 PC-3)
     // ─────────────────────────────────────────────────────────────────────────
 
-    /// F-OBS-003 — `layout_shapes` appends shape frames AFTER region-map frames.
+    /// BC-3.04.001 — `layout_shapes` preserves shape source order.
     ///
-    /// BC-3.04.001 postcondition 3: `shape_frame_index >= region_count`.
-    /// With N region frames and 1 shape, the shape frame is at index N or later.
+    /// Two shapes submitted in order (Rect, Ellipse) must appear in the same
+    /// order in the output vec: frames[0] = Rect, frames[1] = Ellipse.
     ///
-    /// This test uses `layout_shapes` directly (no regions) to verify source-order
-    /// preservation: 1 shape → 1 frame at index 0 in the shape output (appended
-    /// after any region frames by the caller).
+    /// This test exercises `layout_shapes` in isolation (no regions).  The
+    /// resulting frames are those the caller (layout::run) appends after any
+    /// region frames; within the shape sub-vec the relative order must be
+    /// preserved.
     #[test]
-    fn test_bc_3_04_001_shape_frame_after_regions() {
+    fn test_bc_3_04_001_shape_source_order_preserved() {
         // layout_shapes produces shape frames that the caller (layout::run) appends
         // after region frames. With 2 shapes, shape output has frames at indices 0 and 1
         // (relative to the shape output vec), which become N and N+1 in the full slide.
