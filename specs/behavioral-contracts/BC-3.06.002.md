@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.1"
+version: "1.2"
 status: draft
 producer: product-owner
 timestamp: 2026-05-25T00:00:00
@@ -14,7 +14,7 @@ subsystem: SS-05
 capability: CAP-010
 lifecycle_status: active
 introduced: v1.0.0
-modified: []
+modified: ["v1.2 — pass-10 sweep (F-P10-HIGH-001): Frame.bounding_box → Frame.bbox in postcondition 2 to match production types.rs:214 (pub bbox: BoundingBox)"]
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -47,7 +47,7 @@ enables reproducible builds and is required for comemo incremental compilation.
 1. `layout::run(&deck_a, &brand_a) == layout::run(&deck_b, &brand_b)` when
    `deck_a == deck_b` and `brand_a == brand_b`.
 2. This equality holds for all nested fields: `LaidOutDeck.page_size`, every
-   `LaidOutSlide.frames`, every `Frame.bounding_box`, every `TextFlow` estimation.
+   `LaidOutSlide.frames`, every `Frame.bbox`, every `TextFlow` estimation.
 3. Two successive calls with the same inputs in the same process produce the same result
    (no internal mutation of global state between calls).
 

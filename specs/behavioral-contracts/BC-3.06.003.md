@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.2"
+version: "1.3"
 status: draft
 producer: product-owner
 timestamp: 2026-05-25T00:00:00
@@ -14,7 +14,7 @@ subsystem: SS-05
 capability: CAP-010
 lifecycle_status: active
 introduced: v1.0.0
-modified: ["v1.2 — pass-9 fix (F-P9-HIGH-003): InvalidFrameDimension → InvalidBoundingBox (canonical per error.rs:99-109); slide_index → source_slide_index; bounding_box → bbox; updated postcondition 2 and EC-004"]
+modified: ["v1.2 — pass-9 fix (F-P9-HIGH-003): InvalidFrameDimension → InvalidBoundingBox (canonical per error.rs:99-109); slide_index → source_slide_index; bounding_box → bbox; updated postcondition 2 and EC-004", "v1.3 — pass-10 completion of F-P9-HIGH-003 partial sweep: all remaining Frame.bounding_box occurrences in postconditions replaced with Frame.bbox; TextFlow.bounding_box left intact (correct production name)"]
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -46,12 +46,12 @@ corruption in OOXML consumers.
 
 1. For every `LaidOutSlide` in `laid_out_deck.slides`:
    - For every `Frame` in `slide.frames`:
-     - `frame.bounding_box.x >= Emu(0)`
-     - `frame.bounding_box.y >= Emu(0)`
-     - `frame.bounding_box.width > Emu(0)`
-     - `frame.bounding_box.height > Emu(0)`
-     - `frame.bounding_box.x + frame.bounding_box.width <= page_size.width`
-     - `frame.bounding_box.y + frame.bounding_box.height <= page_size.height`
+     - `frame.bbox.x >= Emu(0)`
+     - `frame.bbox.y >= Emu(0)`
+     - `frame.bbox.width > Emu(0)`
+     - `frame.bbox.height > Emu(0)`
+     - `frame.bbox.x + frame.bbox.width <= page_size.width`
+     - `frame.bbox.y + frame.bbox.height <= page_size.height`
 2. No `Frame` with a zero-dimension bounding box is emitted. Zero-dimension frames indicate
    a layout engine defect; the function returns `Err(LayoutError::InvalidBoundingBox { ... })`
    instead of producing invalid output.
@@ -66,7 +66,7 @@ corruption in OOXML consumers.
    canonical coordinates fit within the default 16:9 page size (static assertion or unit test).
 3. Custom `Brand` page sizes scale all region maps proportionally; no frame exceeds the custom
    bounds after scaling.
-4. `TextFlow.bounding_box` follows the same constraints as `Frame.bounding_box`. (DI-010)
+4. `TextFlow.bounding_box` follows the same constraints as `Frame.bbox`. (DI-010)
 
 ## Edge Cases
 

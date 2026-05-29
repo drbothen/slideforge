@@ -9,7 +9,7 @@ points: 5
 priority: P1
 tdd_mode: strict
 status: draft
-spec_version: "1.5"
+spec_version: "1.6"
 behavioral_contracts: [BC-3.04.001, BC-3.05.001]
 verification_properties: []
 nfr_refs: [NFR-021, NFR-022, NFR-023, NFR-024, NFR-025]
@@ -61,8 +61,8 @@ Extend the layout engine with two capabilities:
 
 | BC | Title | Version | Covered ACs |
 |----|-------|---------|-------------|
-| BC-3.04.001 | shape: block declares custom shape with type/position/fill/text/alt | v1.4 | AC-001, AC-002, AC-003, AC-004, AC-BC-A1, AC-BC-A2, AC-BC-A3, AC-BC-A4, AC-BC-A5, AC-BC-A6, AC-INT-1 |
-| BC-3.05.001 | All 12 inline format types render to correct output per format | v1.3.2 | AC-005, AC-006, AC-007, AC-BC-A7, AC-BC-A8 |
+| BC-3.04.001 | shape: block declares custom shape with type/position/fill/text/alt | v1.4.3 | AC-001, AC-002, AC-003, AC-004, AC-BC-A1, AC-BC-A2, AC-BC-A3, AC-BC-A4, AC-BC-A5, AC-BC-A6, AC-INT-1 |
+| BC-3.05.001 | All 12 inline format types render to correct output per format | v1.3.3 | AC-005, AC-006, AC-007, AC-BC-A7, AC-BC-A8 |
 | LayoutError | Canonical field name source_slide_index across all variants | v1.0 | AC-BC-A9 |
 
 ## Acceptance Criteria
@@ -92,7 +92,7 @@ preserved (first shape in source → first shape frame appended).
 
 ```rust
 Frame {
-    bounding_box: BoundingBox { ... },
+    bbox: BoundingBox { ... },
     content: FrameContent::Shape(ShapeFrame {
         shape_type: ShapeType::Rect,     // or Ellipse, Arrow, etc.
         fill: FillSpec::SolidColor(Rgb { r: 0, g: 55, b: 102 }),
@@ -154,7 +154,7 @@ pub enum InlineNode {
 Container variants (`Bold`, `Italic`, `Footnote`, `Superscript`, `Subscript`,
 `Strikethrough`, `Highlight`, `Link.text`) take `Vec<InlineNode>` to enable
 nesting. Leaf variants (`Plain`, `Code`, `Xref`) take `Arc<str>`. `Math` takes
-`MathNode`. The 12-variant count is authoritative per BC-3.05.001 v1.3.2.
+`MathNode`. The 12-variant count is authoritative per BC-3.05.001 v1.3.3.
 
 Each exporter translates its relevant variants to format output. The layout stage
 preserves the `InlineNode` sequence verbatim in the frame's text content.
@@ -188,7 +188,7 @@ BoundingBox { x: Emu(457_200), y: Emu(914_400), width: Emu(1_828_800), height: E
 Computation: `Inches(500) * 914_400 / 1_000 = 457_200`. All arithmetic is `i64`
 integer division; no `f64`. Verified via an integration test in
 `crates/slideforge-layout/tests/` that calls `layout::run()` and asserts
-`frames[0].bounding_box` equals the expected EMU values. (BC-3.04.001 v1.4,
+`frames[0].bbox` equals the expected EMU values. (BC-3.04.001 v1.4.3,
 postcondition 2 canonical test vector)
 
 ### AC-BC-A2: Hex color case-insensitive; short/alpha forms rejected
@@ -210,7 +210,7 @@ E-PAR-012 with a human-readable message listing the known types:
 Unknown shape type 'frobnicator' at <file>:<line>:<col>.
 Known types: [rect, ellipse, arrow, line, star, roundRect]
 ```
-There is NO silent `ShapeType::Custom(...)` fallback. (BC-3.04.001 v1.4, invariant 4
+There is NO silent `ShapeType::Custom(...)` fallback. (BC-3.04.001 v1.4.3, invariant 4
 and EC-005; canonical rule: no silent fallbacks per CLAUDE.md)
 
 ### AC-BC-A4: Off-canvas inclusive boundary semantics
@@ -220,7 +220,7 @@ A shape exactly touching the page edge is ON-canvas (not a warning). Specificall
 `x + width == page_width` is NOT off-canvas; `x + width > page_width` by even 1 EMU
 IS off-canvas. Canonical test vector: `x=8.0in, width=2.0in` on a 10-inch canvas
 (`page_width = Emu(9_144_000)`) produces NO `LayoutWarning::OffCanvas`. A shape with
-`x=8.0in, width=2.0in + 1 EMU` DOES produce the warning. (BC-3.04.001 v1.4,
+`x=8.0in, width=2.0in + 1 EMU` DOES produce the warning. (BC-3.04.001 v1.4.3,
 invariant 6 and EC-002/EC-003)
 
 ### AC-BC-A5: MissingAlt error carries SourceSpan
@@ -230,7 +230,7 @@ invariant 6 and EC-002/EC-003)
 offending `shape:` block in the source file. This satisfies the CLAUDE.md rule that
 all errors must carry source spans. The span must be non-default (file + line + col
 set) when a `shape:` block without `alt` or `decorative: true` reaches the layout
-stage. (BC-3.04.001 v1.4, invariant 7)
+stage. (BC-3.04.001 v1.4.3, invariant 7)
 
 ### AC-BC-A6: Multi-shape error accumulation in LayoutError::Multiple
 (traces to BC-3.04.001 postcondition 6 — multi-error accumulation)
@@ -240,7 +240,7 @@ When a slide contains two or more shapes that are both missing `alt` and
 returning. The layout function returns `Err(LayoutError::Multiple(vec![err1, err2,
 ...]))` (or equivalent accumulator variant). It does NOT bail on the first error.
 Canonical test vector: slide with 2 shapes both missing alt → `Vec<LayoutError>`
-with 2 `MissingAlt` entries. (BC-3.04.001 v1.4, postcondition 6 and EC-010)
+with 2 `MissingAlt` entries. (BC-3.04.001 v1.4.3, postcondition 6 and EC-010)
 
 ### AC-BC-A7: InlineDepthExceeded at depth 65
 (traces to BC-3.05.001 invariant 4 — nesting depth bound)
@@ -249,7 +249,7 @@ Inline trees nested deeper than 64 levels produce
 `LayoutError::InlineDepthExceeded { source_slide_index, depth: 65 }` (or the actual
 exceeded depth). This is a HARD error — output is NOT produced for the affected
 slide. Canonical test vector: a tree of 65 nested `Bold(vec![Bold(vec![...])])` nodes
-triggers the error. Depth 64 is the maximum permitted (no error). (BC-3.05.001 v1.3.2,
+triggers the error. Depth 64 is the maximum permitted (no error). (BC-3.05.001 v1.3.3,
 invariant 4 and EC-006, with canonical error code E-LAY-005)
 
 ### AC-BC-A8: Xref inside MathNode NOT validated
@@ -260,7 +260,7 @@ validated by the xref validation pass at layout time. The layout engine does not
 traverse into `MathNode` for xref resolution. This is an explicit v1.0 scope
 boundary (not an oversight). A unit test must confirm: a `Math(MathNode { latex:
 "\\xref{missing-slide}", ... })` variant does NOT produce
-`LayoutWarning::XrefTargetNotFound`. (BC-3.05.001 v1.3.2, invariant 5 and EC-007)
+`LayoutWarning::XrefTargetNotFound`. (BC-3.05.001 v1.3.3, invariant 5 and EC-007)
 
 ### AC-BC-A9: Canonical field name source_slide_index across all LayoutError variants
 (traces to BC-3.04.001 and BC-3.05.001 — structural consistency across error variants)
@@ -290,7 +290,7 @@ This closes F-CRIT-001 (the integration wire between parser output and layout ou
 
 ## ShapeSpec Position Schema
 
-Per BC-3.04.001 v1.4 postcondition 1 and the data-engineer schema commit (9ea373a8),
+Per BC-3.04.001 v1.4.3 postcondition 1 and the data-engineer schema commit (9ea373a8),
 the canonical `ShapeSpec` and supporting types in `slideforge-types/src/specs.rs` are:
 
 ```rust
@@ -335,7 +335,7 @@ listed — that was incorrect; unknown keywords are parse errors, not `Custom` f
 - [ ] Add `FrameContent::Shape(ShapeFrame)` and `FrameContent::TextRun(Vec<InlineNode>)` to `Frame` enum in `src/types.rs`
 - [ ] Implement `ShapeFrame` struct with `shape_type`, `fill`, `text`, `alt` fields
 - [ ] Implement `ShapeType` enum: `Rect`, `Ellipse`, `Arrow`, `Line`, `Star`, `RoundRect` (no `Custom` — unknown keyword is a parse error per BC-3.04.001 invariant 4)
-- [ ] Implement `FillSpec` enum: `SolidColor(Rgb)`, `None` (Gradient deferred to STORY-072 per BC-3.04.001 v1.4.2 Deferred Surfaces)
+- [ ] Implement `FillSpec` enum: `SolidColor(Rgb)`, `None` (Gradient deferred to STORY-072 per BC-3.04.001 v1.4.3 Deferred Surfaces)
 - [ ] Implement `AltText` enum: `Provided(Arc<str>)`, `Decorative`
 - [ ] Implement shape layout pass in `layout::run()`: iterate slide shapes → produce `Frame`s
 - [ ] Implement unit conversion: `from_inches`, `from_em` for shape positions
@@ -392,7 +392,7 @@ risks — but proptest and snapshot tests from STORY-026 must still pass.
 |-----------|-----------------|
 | This story spec (v1.2 — expanded ACs) | ~4,800 |
 | STORY-026 layout types | ~1,500 |
-| BC files (2 BCs: BC-3.04.001 v1.4 + BC-3.05.001 v1.3.2) | ~5,000 |
+| BC files (2 BCs: BC-3.04.001 v1.4.3 + BC-3.05.001 v1.3.3) | ~5,000 |
 | `slideforge-types` InlineNode definition | ~1,000 |
 | `slideforge-types/src/specs.rs` ShapeSpec schema | ~800 |
 | Test files to write | ~3,000 |
@@ -433,3 +433,4 @@ Build MUST fail if those crates appear in `slideforge-layout/Cargo.toml` depende
 | 1.3 | 2026-05-29 | architect | Pass-3 adjudication: BC version refs updated to BC-3.04.001 v1.4 and BC-3.05.001 v1.3.2 (F-MED-001); OffCanvas example updated to source_slide_index canonical name (F-MED-002) |
 | 1.4 | 2026-05-29 | story-writer | Pass-5 drift fix (F-P5-LOW-002): AltText::Explicit → AltText::Provided (lines 100, 339) to match canonical slideforge-types/src/specs.rs:143 |
 | 1.5 | 2026-05-29 | product-owner | Pass-8 sweep changes (commit 3e892d07): BC-3.04.001 version references updated to v1.4.2; task list FillSpec description corrected to reflect Gradient is deferred (not present); E-PAR-013/E-PAR-014 references updated to E-PAR-015/E-PAR-016 per pass-9 F-P9-HIGH-002 namespace collision resolution |
+| 1.6 | 2026-05-29 | product-owner | Pass-10 sweep (F-P10-HIGH-002 + F-P10-MED-001): Frame.bounding_box → Frame.bbox in AC-002 example (line 95) and AC-BC-A1 prose (frames[0].bbox); all BC-3.04.001 version refs updated v1.4/v1.4.2 → v1.4.3; all BC-3.05.001 version refs updated v1.3.2 → v1.3.3; token budget BC ref table updated to match |
