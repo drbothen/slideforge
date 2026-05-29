@@ -298,10 +298,9 @@ pub fn layout_shapes(
         if is_off_canvas(&bbox, page) {
             warnings.push(LayoutWarning::OffCanvas {
                 source_slide_index,
-                // LayoutWarning::OffCanvas.shape_type is Arc<str> (human-readable
-                // keyword for diagnostics). Use ShapeType::as_keyword() to produce
-                // the canonical string from the resolved enum variant.
-                shape_type: Arc::from(shape_type.as_keyword()),
+                // F-HIGH-003 / interface-definitions §9.3 (pass-3 binding):
+                // shape_type is the resolved ShapeType enum variant, not Arc<str>.
+                shape_type,
                 x_emu: bbox.x,
                 y_emu: bbox.y,
             });
@@ -413,7 +412,7 @@ mod tests {
     /// Panics in tests if the keyword is not in the closed vocabulary.
     fn shape_spec_with_alt(shape_type: &str, alt: &str) -> ShapeSpec {
         let st = slideforge_types::ShapeType::from_keyword(shape_type)
-            .unwrap_or_else(|| panic!("unknown shape type in test: {shape_type}"));
+            .unwrap_or_else(|_| panic!("unknown shape type in test: {shape_type}"));
         ShapeSpec {
             shape_type: st,
             position: default_position(),
@@ -430,7 +429,7 @@ mod tests {
     /// `shape_type` must be a valid v1.0 keyword. Panics in tests if unknown.
     fn shape_spec_decorative(shape_type: &str) -> ShapeSpec {
         let st = slideforge_types::ShapeType::from_keyword(shape_type)
-            .unwrap_or_else(|| panic!("unknown shape type in test: {shape_type}"));
+            .unwrap_or_else(|_| panic!("unknown shape type in test: {shape_type}"));
         ShapeSpec {
             shape_type: st,
             position: default_position(),
@@ -447,7 +446,7 @@ mod tests {
     /// `shape_type` must be a valid v1.0 keyword. Panics in tests if unknown.
     fn shape_spec_no_alt(shape_type: &str) -> ShapeSpec {
         let st = slideforge_types::ShapeType::from_keyword(shape_type)
-            .unwrap_or_else(|| panic!("unknown shape type in test: {shape_type}"));
+            .unwrap_or_else(|_| panic!("unknown shape type in test: {shape_type}"));
         ShapeSpec {
             shape_type: st,
             position: default_position(),
@@ -741,9 +740,10 @@ mod tests {
         assert!(is_off_canvas(&off_canvas_bbox, default_page()));
 
         // Verify warning can be constructed for this shape:
+        // F-HIGH-003: shape_type is ShapeType enum variant (not Arc<str>).
         let warning = LayoutWarning::OffCanvas {
             source_slide_index: 0,
-            shape_type: Arc::from("rect"),
+            shape_type: ShapeType::Rect,
             x_emu: Emu(-457_200),
             y_emu: Emu(914_400),
         };
@@ -1335,12 +1335,13 @@ mod tests {
     }
 
     /// `LayoutWarning::OffCanvas` can be constructed and is hashable.
+    /// F-HIGH-003: shape_type is ShapeType enum variant (not Arc<str>).
     #[test]
     fn test_layout_warning_offcanvas_constructable() {
         use std::collections::HashSet;
         let w = LayoutWarning::OffCanvas {
             source_slide_index: 0,
-            shape_type: Arc::from("rect"),
+            shape_type: ShapeType::Rect, // F-HIGH-003: enum variant
             x_emu: Emu(-457_200),
             y_emu: Emu(914_400),
         };
@@ -1478,8 +1479,8 @@ mod tests {
     /// VP-039 — `layout_shapes` with unknown shape type keyword returns
     /// BC-3.04.001 invariant 4: the closed shape-type vocabulary is enforced at
     /// the type level by `slideforge_types::ShapeType`. `ShapeType::from_keyword`
-    /// returns `None` for any keyword outside the six-member v1.0 vocabulary
-    /// (`rect`, `ellipse`, `arrow`, `line`, `star`, `roundRect`).
+    /// returns `Err(ShapeTypeError)` for any keyword outside the six-member v1.0
+    /// vocabulary (`rect`, `ellipse`, `arrow`, `line`, `star`, `roundRect`).
     ///
     /// With the STORY-028 pass-2 schema change (`ShapeSpec.shape_type: ShapeType`),
     /// it is no longer possible to construct a `ShapeSpec` with an unknown shape
@@ -1488,29 +1489,31 @@ mod tests {
     /// is preserved in the error enum for future parser-level surfacing but can no
     /// longer be triggered by `layout_shapes` itself.
     ///
-    /// This test verifies the parse-level gate: `from_keyword` returns `None`
-    /// for unrecognised keywords and returns `Some` for all six known keywords.
+    /// This test verifies the parse-level gate: `from_keyword` returns `Err`
+    /// for unrecognised keywords and returns `Ok` for all six known keywords.
+    /// Per interface-definitions §9.2 (pass-3 adjudication): from_keyword now
+    /// returns `Result<ShapeType, ShapeTypeError>` — not `Option<ShapeType>`.
     #[test]
     fn test_vp_039_unknown_shape_type_rejected_at_parse_level() {
-        // Unknown keywords produce None — caller must emit E-PAR-012.
+        // Unknown keywords produce Err(ShapeTypeError) — caller must emit E-PAR-012.
         assert!(
-            slideforge_types::ShapeType::from_keyword("frobnicator").is_none(),
-            "unknown keyword 'frobnicator' must return None from from_keyword"
+            slideforge_types::ShapeType::from_keyword("frobnicator").is_err(),
+            "unknown keyword 'frobnicator' must return Err from from_keyword"
         );
         assert!(
-            slideforge_types::ShapeType::from_keyword("").is_none(),
-            "empty string must return None from from_keyword"
+            slideforge_types::ShapeType::from_keyword("").is_err(),
+            "empty string must return Err from from_keyword"
         );
         assert!(
-            slideforge_types::ShapeType::from_keyword("Rect").is_none(),
-            "case-sensitive check: 'Rect' must return None (closed vocab uses 'rect')"
+            slideforge_types::ShapeType::from_keyword("Rect").is_err(),
+            "case-sensitive check: 'Rect' must return Err (closed vocab uses 'rect')"
         );
 
-        // All six v1.0 keywords must produce Some.
+        // All six v1.0 keywords must produce Ok.
         for kw in &["rect", "ellipse", "arrow", "line", "star", "roundRect"] {
             assert!(
-                slideforge_types::ShapeType::from_keyword(kw).is_some(),
-                "known keyword '{kw}' must return Some from from_keyword"
+                slideforge_types::ShapeType::from_keyword(kw).is_ok(),
+                "known keyword '{kw}' must return Ok from from_keyword"
             );
         }
     }

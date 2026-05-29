@@ -70,6 +70,43 @@ pub enum FillSpec {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// ShapeTypeError
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Error returned by [`ShapeType::from_keyword`] when an unknown keyword is
+/// supplied (interface-definitions.md §9.2 / BC-3.04.001 invariant 4).
+///
+/// ## Design rationale (§9.2)
+///
+/// `ShapeTypeError` is a minimal self-contained error type in `slideforge-types`
+/// (the leaf crate with no workspace crate deps). This avoids an upward
+/// dependency from `slideforge-types` into `slideforge-layout`. Callers in
+/// the layout crate map `ShapeTypeError` → `LayoutError::UnknownShapeType`.
+///
+/// The keyword is stored as `Arc<str>` to avoid unnecessary allocation on the
+/// caller side — callers that forward the keyword into a `LayoutError` can move
+/// it directly.
+///
+/// Implements `Debug + Clone + PartialEq + Eq + Hash` for comemo compatibility.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ShapeTypeError {
+    /// The unrecognised keyword that was supplied to `from_keyword`.
+    pub keyword: Arc<str>,
+}
+
+impl std::fmt::Display for ShapeTypeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "unknown shape type keyword '{}': expected one of [rect, ellipse, arrow, line, star, roundRect]",
+            self.keyword
+        )
+    }
+}
+
+impl std::error::Error for ShapeTypeError {}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // ShapeType
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -117,29 +154,35 @@ impl ShapeType {
     ///
     /// Keywords are **case-sensitive** per the DSL spec (BC-3.04.001 invariant 4).
     ///
-    /// Returns `None` for any other keyword; the caller MUST convert `None` to
-    /// `E-PAR-012` (unknown shape type). There is NO `Custom` fallback — the
-    /// type system enforces the closed vocabulary.
+    /// Returns `Err(ShapeTypeError { keyword })` for any unknown keyword.
+    /// There is NO `Custom` fallback — the type system enforces the closed
+    /// vocabulary. Callers in the layout crate map `ShapeTypeError` →
+    /// `LayoutError::UnknownShapeType` (interface-definitions.md §9.2).
     ///
     /// # Examples
     ///
     /// ```
     /// use slideforge_types::ShapeType;
     ///
-    /// assert_eq!(ShapeType::from_keyword("rect"), Some(ShapeType::Rect));
-    /// assert_eq!(ShapeType::from_keyword("roundRect"), Some(ShapeType::RoundRect));
-    /// assert_eq!(ShapeType::from_keyword("unknown"), None);
+    /// assert_eq!(ShapeType::from_keyword("rect"), Ok(ShapeType::Rect));
+    /// assert_eq!(ShapeType::from_keyword("roundRect"), Ok(ShapeType::RoundRect));
+    /// assert!(ShapeType::from_keyword("unknown").is_err());
     /// ```
-    #[must_use]
-    pub fn from_keyword(kw: &str) -> Option<Self> {
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ShapeTypeError`] when `kw` is not in the closed v1.0 vocabulary.
+    pub fn from_keyword(kw: &str) -> Result<Self, ShapeTypeError> {
         match kw {
-            "rect" => Some(Self::Rect),
-            "ellipse" => Some(Self::Ellipse),
-            "arrow" => Some(Self::Arrow),
-            "line" => Some(Self::Line),
-            "star" => Some(Self::Star),
-            "roundRect" => Some(Self::RoundRect),
-            _ => None,
+            "rect" => Ok(Self::Rect),
+            "ellipse" => Ok(Self::Ellipse),
+            "arrow" => Ok(Self::Arrow),
+            "line" => Ok(Self::Line),
+            "star" => Ok(Self::Star),
+            "roundRect" => Ok(Self::RoundRect),
+            _ => Err(ShapeTypeError {
+                keyword: Arc::from(kw),
+            }),
         }
     }
 
@@ -203,8 +246,9 @@ pub enum LayoutWarning {
         /// Zero-based index of the slide containing the off-canvas shape.
         /// Canonical field name per interface-definitions.md §8 (F-HIGH-001).
         source_slide_index: usize,
-        /// The shape type keyword (e.g., `"rect"`).
-        shape_type: Arc<str>,
+        /// The resolved shape type enum variant (interface-definitions.md §9.3 /
+        /// F-HIGH-003 binding). MUST be the enum variant, not `Arc<str>`.
+        shape_type: ShapeType,
         /// The declared x position in EMU (may be negative).
         x_emu: Emu,
         /// The declared y position in EMU (may be negative).
@@ -236,26 +280,30 @@ mod tests {
 
     #[test]
     fn test_shape_type_from_keyword_all_valid() {
-        assert_eq!(ShapeType::from_keyword("rect"), Some(ShapeType::Rect));
+        assert_eq!(ShapeType::from_keyword("rect"), Ok(ShapeType::Rect));
         assert_eq!(
             ShapeType::from_keyword("ellipse"),
-            Some(ShapeType::Ellipse)
+            Ok(ShapeType::Ellipse)
         );
-        assert_eq!(ShapeType::from_keyword("arrow"), Some(ShapeType::Arrow));
-        assert_eq!(ShapeType::from_keyword("line"), Some(ShapeType::Line));
-        assert_eq!(ShapeType::from_keyword("star"), Some(ShapeType::Star));
+        assert_eq!(ShapeType::from_keyword("arrow"), Ok(ShapeType::Arrow));
+        assert_eq!(ShapeType::from_keyword("line"), Ok(ShapeType::Line));
+        assert_eq!(ShapeType::from_keyword("star"), Ok(ShapeType::Star));
         assert_eq!(
             ShapeType::from_keyword("roundRect"),
-            Some(ShapeType::RoundRect)
+            Ok(ShapeType::RoundRect)
         );
     }
 
     #[test]
-    fn test_shape_type_from_keyword_unknown_returns_none() {
-        assert_eq!(ShapeType::from_keyword("frobnicator"), None);
-        assert_eq!(ShapeType::from_keyword(""), None);
-        assert_eq!(ShapeType::from_keyword("Rect"), None); // case-sensitive
-        assert_eq!(ShapeType::from_keyword("RECT"), None);
+    fn test_shape_type_from_keyword_unknown_returns_err() {
+        // Unknown keywords return Err(ShapeTypeError) — not Option::None.
+        assert!(ShapeType::from_keyword("frobnicator").is_err());
+        assert!(ShapeType::from_keyword("").is_err());
+        assert!(ShapeType::from_keyword("Rect").is_err()); // case-sensitive
+        assert!(ShapeType::from_keyword("RECT").is_err());
+        // The error carries the original keyword for diagnostics.
+        let err = ShapeType::from_keyword("frobnicator").unwrap_err();
+        assert_eq!(err.keyword.as_ref(), "frobnicator");
     }
 
     #[test]
@@ -272,10 +320,42 @@ mod tests {
             let kw = v.as_keyword();
             assert_eq!(
                 ShapeType::from_keyword(kw),
-                Some(v),
+                Ok(v),
                 "as_keyword + from_keyword must round-trip for {v:?}"
             );
         }
+    }
+
+    /// `ShapeTypeError` carries the failing keyword and displays a human-readable message.
+    #[test]
+    fn test_shape_type_error_carries_keyword_and_displays() {
+        let err = ShapeTypeError {
+            keyword: Arc::from("unknownType"),
+        };
+        assert_eq!(err.keyword.as_ref(), "unknownType");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("unknownType"),
+            "ShapeTypeError display must include the keyword; got: {msg}"
+        );
+        assert!(
+            msg.contains("rect"),
+            "ShapeTypeError display must list valid keywords; got: {msg}"
+        );
+    }
+
+    /// `ShapeTypeError` implements `Clone + PartialEq + Eq + Hash` (comemo AC-010).
+    #[test]
+    fn test_shape_type_error_implements_hash_eq_clone() {
+        use std::collections::HashSet;
+        let e1 = ShapeTypeError {
+            keyword: Arc::from("bad"),
+        };
+        let e2 = e1.clone();
+        assert_eq!(e1, e2);
+        let mut set = HashSet::new();
+        set.insert(e1);
+        assert_eq!(set.len(), 1);
     }
 
     #[test]
@@ -355,9 +435,10 @@ mod tests {
 
     #[test]
     fn test_layout_warning_offcanvas_constructable() {
+        // F-HIGH-003: shape_type is ShapeType (enum variant), not Arc<str>.
         let w = LayoutWarning::OffCanvas {
             source_slide_index: 0,
-            shape_type: Arc::from("rect"),
+            shape_type: ShapeType::Rect,
             x_emu: Emu(-457_200),
             y_emu: Emu(914_400),
         };
@@ -367,6 +448,20 @@ mod tests {
         let mut set = HashSet::new();
         set.insert(w);
         assert_eq!(set.len(), 1);
+    }
+
+    /// F-HIGH-003 compile test: OffCanvas.shape_type must be ShapeType enum, not Arc<str>.
+    ///
+    /// If this compiles with shape_type: ShapeType::Ellipse, the binding is correct.
+    #[test]
+    fn test_layout_warning_offcanvas_shape_type_is_enum_not_string() {
+        let _w = LayoutWarning::OffCanvas {
+            source_slide_index: 1,
+            shape_type: ShapeType::Ellipse,
+            x_emu: Emu(0),
+            y_emu: Emu(0),
+        };
+        // Compile-time proof: if shape_type: Arc<str> were used above, this would not compile.
     }
 
     #[test]
@@ -389,7 +484,7 @@ mod tests {
     fn test_layout_warning_canonical_field_name_source_slide_index() {
         let _off = LayoutWarning::OffCanvas {
             source_slide_index: 0,
-            shape_type: Arc::from("rect"),
+            shape_type: ShapeType::Rect, // F-HIGH-003: enum variant, not Arc<str>
             x_emu: Emu(0),
             y_emu: Emu(0),
         };
