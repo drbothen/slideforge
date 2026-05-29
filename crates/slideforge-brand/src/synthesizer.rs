@@ -387,19 +387,26 @@ impl BrandProvider for BrandSynthesizer {
                 })?;
 
                 // Convert BrandTemplate → slideforge_types::Brand.
-                // BrandPalette maps to the first 4 ECMA-376 color slots:
-                //   slot 0 (dk1)  → primary
-                //   slot 1 (lt1)  → secondary
-                //   slot 2 (dk2)  → accent
-                //   slot 3 (lt2)  → neutral
+                // BrandPalette uses ECMA-376 slot names, NOT positional indices,
+                // to match the mapping in `brand_from_template` (loader.rs):
+                //   dk2  → primary   (main brand color, not dk1 which is text black)
+                //   acc1 → secondary (primary accent; first visible brand color)
+                //   acc2 → accent    (secondary accent)
+                //   lt2  → neutral   (light background / muted tone)
                 //
-                // These are the canonical "theme-defining" colors per ECMA-376.
                 // Full 12-slot data is retained in BrandTemplate for the PPTX
                 // exporter (STORY-037); Brand carries the semantic palette only.
-                let primary = template.colors[0].hex().unwrap_or("#000000").to_owned();
-                let secondary = template.colors[1].hex().unwrap_or("#FFFFFF").to_owned();
-                let accent = template.colors[2].hex().unwrap_or("#808080").to_owned();
-                let neutral = template.colors[3].hex().unwrap_or("#F5F5F5").to_owned();
+                let slot_hex = |name: &str, fallback: &str| -> String {
+                    template
+                        .color_by_name(name)
+                        .and_then(|s| s.hex())
+                        .unwrap_or(fallback)
+                        .to_owned()
+                };
+                let primary = slot_hex("dk2", "#000000");
+                let secondary = slot_hex("acc1", "#808080");
+                let accent = slot_hex("acc2", "#808080");
+                let neutral = slot_hex("lt2", "#F5F5F5");
 
                 let brand = Brand {
                     name: Arc::from("synthesized"),
@@ -808,24 +815,102 @@ body = "Calibri"
         let brand = synth
             .load(&source)
             .expect("BrandProvider::load(TomlFile) must return Ok(Brand)");
-        // Verify the palette was populated from the color slots.
-        // slot 0 (dk1) → primary = "#1F2937"
+        // Verify the palette maps slot names consistent with `brand_from_template`
+        // in loader.rs (dk2→primary, acc1→secondary, acc2→accent, lt2→neutral).
+        // For this minimal config (dk1="#1F2937", lt1="#FFFFFF", acc1="#3B82F6"):
+        //   dk2 is inferred as acc1 = "#3B82F6" (inference rule: dk2 → acc1 if declared)
+        //   acc1 = "#3B82F6" (declared)
+        //   acc2 is inferred via hue-rotation of acc1
+        //   lt2 is inferred as "#F9FAFB"
         assert_eq!(
             brand.palette.primary.as_ref(),
-            "#1F2937",
-            "primary color must match dk1 from brand.toml"
+            "#3B82F6",
+            "primary must map to dk2 (inferred from acc1 when dk2 absent)"
         );
-        // slot 1 (lt1) → secondary = "#FFFFFF"
         assert_eq!(
             brand.palette.secondary.as_ref(),
-            "#FFFFFF",
-            "secondary color must match lt1 from brand.toml"
+            "#3B82F6",
+            "secondary must map to acc1 from brand.toml"
         );
         // Fonts must be preserved
         assert_eq!(
             brand.fonts.heading.as_ref(),
             "Calibri",
             "heading font must match [fonts].heading from brand.toml"
+        );
+    }
+
+    /// F1-REGRESSION — `BrandPalette` slot mapping is consistent between synthesizer and loader.
+    ///
+    /// When a brand.toml declares `dk2` explicitly, `Brand::palette.primary` MUST equal
+    /// the dk2 hex value — NOT dk1. This regression test guards against reintroduction
+    /// of the positional-index mapping bug where slot[0] (dk1) was used instead of dk2.
+    ///
+    /// This is a load-bearing assertion per TD-VSDD-059: it asserts on an actual palette
+    /// field value, exercising the full `BrandProvider::load` → inference → `BrandPalette`
+    /// construction path.
+    #[test]
+    fn test_f1_regression_brand_palette_primary_maps_to_dk2_not_dk1() {
+        use slideforge_plugin_api::BrandProvider as _;
+        use std::io::Write as _;
+        let tmp_dir = tempfile::tempdir().expect("tempdir must be created");
+        let brand_toml_path = tmp_dir.path().join("brand.toml");
+        let logo_path = tmp_dir.path().join("logo.png");
+        std::fs::write(&logo_path, b"\x89PNG\r\n\x1a\n").expect("logo fixture write");
+
+        let mut tmp =
+            std::fs::File::create(&brand_toml_path).expect("brand.toml create must succeed");
+        writeln!(
+            tmp,
+            r##"
+[colors]
+dk1 = "#000000"
+lt1 = "#FFFFFF"
+dk2 = "#003087"
+lt2 = "#F5F5F5"
+acc1 = "#0066CC"
+acc2 = "#FF6B35"
+
+[logo]
+path = "logo.png"
+
+[fonts]
+heading = "Calibri"
+body = "Calibri"
+"##
+        )
+        .expect("write to brand.toml must succeed");
+
+        let path = brand_toml_path
+            .to_str()
+            .expect("brand.toml path must be valid UTF-8");
+        let synth = BrandSynthesizer;
+        let source = slideforge_plugin_api::BrandSource::TomlFile(Arc::from(path));
+        let brand = synth
+            .load(&source)
+            .expect("BrandProvider::load(TomlFile) must return Ok(Brand)");
+
+        // PRIMARY MUST BE dk2 — this is the regression assertion for F1.
+        assert_eq!(
+            brand.palette.primary.as_ref(),
+            "#003087",
+            "palette.primary must equal dk2 ('#003087'), not dk1 ('#000000') — \
+             F1 regression: positional slot[0] mapping was a bug"
+        );
+        assert_eq!(
+            brand.palette.secondary.as_ref(),
+            "#0066CC",
+            "palette.secondary must equal acc1"
+        );
+        assert_eq!(
+            brand.palette.accent.as_ref(),
+            "#FF6B35",
+            "palette.accent must equal acc2"
+        );
+        assert_eq!(
+            brand.palette.neutral.as_ref(),
+            "#F5F5F5",
+            "palette.neutral must equal lt2"
         );
     }
 

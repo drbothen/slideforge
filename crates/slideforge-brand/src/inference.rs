@@ -259,6 +259,12 @@ pub fn infer_missing_slots(
 
     // Rule: fol_hlink — hlink darkened 10%
     if result[11].is_none() {
+        // slot[10] (hlink) must be populated by the preceding rule block; if it
+        // is somehow None here, darken_hex("") would silently produce black.
+        debug_assert!(
+            result[10].is_some(),
+            "inference slot[10] (hlink) must be populated before fol_hlink rule"
+        );
         let hlink_hex = result[10].as_ref().map_or("", |v| v.as_ref()).to_owned();
         let fol_hlink_val = darken_hex(&hlink_hex, 0.10);
         infer(
