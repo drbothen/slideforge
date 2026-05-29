@@ -196,12 +196,15 @@ impl DataSource for SqliteDataSource {
         };
         tracing::Span::current().record("path", path_str);
 
-        // AC-010 (defensive): reject empty query string.
+        // AC-010 (defensive): reject empty or whitespace-only query string.
         // The DSL parser enforces this before load() is called, but we guard
         // at the data layer as defense-in-depth.
         // F-MED-3: message references the parser, not "BC invariant 4".
+        // F-PASS15-LOW-1: trim() before is_empty() so whitespace-only queries
+        // (e.g. "   ") are rejected here rather than silently mis-classified as
+        // DML by the SELECT-prefix check that follows.
         // Traces to BC-1.03.007 invariant 4.
-        if self.query.is_empty() {
+        if self.query.trim().is_empty() {
             // F-PASS14-LOW-2: the previous message leaked "<span>" (a stale placeholder)
             // into user-visible output. Span info is not available here; remove the trailer.
             return Err(DataSourceError::ParseError {
@@ -230,8 +233,9 @@ impl DataSource for SqliteDataSource {
             return Err(DataSourceError::ParseError {
                 uri: path_str.to_owned(),
                 message: format!(
-                    "only SELECT queries are allowed in @data sqlite sources \
-                    (got: {preview}...)"
+                    "[{code}] only SELECT queries are allowed in @data sqlite sources \
+                    (got: {preview}...)",
+                    code = crate::error::E_DAT_003,
                 ),
             });
         }
@@ -305,8 +309,12 @@ impl DataSource for SqliteDataSource {
             if let Some(dup) = find_duplicate_column(&name_refs) {
                 return Err(DataSourceError::ParseError {
                     uri: path_str.to_owned(),
+                    // F-PASS15-MED-1: embed [E-DAT-003] bracket code so user-visible message
+                    // matches the XLSX / DML pattern. Load-bearing: test asserts
+                    // msg.contains("[E-DAT-003]").
                     message: format!(
-                        "SELECT result has duplicate column name '{dup}'; use aliases"
+                        "[{code}] SELECT result has duplicate column name '{dup}'; use aliases",
+                        code = crate::error::E_DAT_003,
                     ),
                 });
             }
@@ -459,8 +467,12 @@ fn validate_sqlite_extension(path: &str) -> Result<(), String> {
             } else {
                 format!(".{other}")
             };
+            // OBS-PASS15-1: remove single-quote wrappers from display_ext to match
+            // the XLSX extensionless cosmetic style ("got (no extension)" not
+            // "got '(no extension)'"). No quotes is cleaner and consistent across
+            // both data source types.
             Err(format!(
-                "[{code}] unsupported extension for SQLite data source: '{display_ext}'. \
+                "[{code}] unsupported extension for SQLite data source: {display_ext}. \
                 Accepted extensions: .db, .sqlite, .sqlite3",
                 code = crate::error::E_DAT_014,
             ))
@@ -1115,6 +1127,13 @@ mod tests {
             msg.contains("id"),
             "error message must name the duplicate column 'id'; got: {msg}"
         );
+        // F-PASS15-MED-1 load-bearing: [E-DAT-003] must appear in bracket form.
+        // This assertion FAILS if the format!() in the duplicate-column branch omits
+        // the bracket code, confirming the fix is not cosmetic.
+        assert!(
+            msg.contains("[E-DAT-003]"),
+            "duplicate column error must embed '[E-DAT-003]' bracket code; got: {msg}"
+        );
     }
 
     // ---------------------------------------------------------------------------
@@ -1637,6 +1656,58 @@ mod tests {
         assert!(
             result.is_err(),
             "empty query string must produce an error (defensive layer for BC-1.03.007 invariant 4)"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // F-PASS15-LOW-1: whitespace-only query must be rejected as empty.
+    // BC-1.03.007 invariant 4.
+    // ---------------------------------------------------------------------------
+
+    /// `test_f_pass15_low1_whitespace_only_query_rejected` -- whitespace-only query is rejected.
+    ///
+    /// A query consisting entirely of whitespace (e.g. `"   "`) previously passed the
+    /// `self.query.is_empty()` guard and reached the SELECT-prefix check, where it was
+    /// mis-classified as DML and produced a misleading "only SELECT queries are allowed"
+    /// message with an empty preview (`(got: ...)`). The fix uses `trim().is_empty()` to
+    /// catch this before the DML check.
+    ///
+    /// Load-bearing: if `is_empty()` is reverted to the pre-trim form, the whitespace
+    /// string passes the empty-query guard and reaches the DML check, producing a
+    /// different error variant/message than this test expects.
+    ///
+    /// Traces to BC-1.03.007 invariant 4, F-PASS15-LOW-1.
+    #[test]
+    #[serial(load_call_count)]
+    fn test_f_pass15_low1_whitespace_only_query_rejected() {
+        let conn = make_memory_db(|c| {
+            c.execute_batch("CREATE TABLE t (x INTEGER);").unwrap();
+        });
+        let (_dir, path) = save_db_to_tempfile(&conn, ".db");
+
+        // A whitespace-only query must be rejected the same way as an empty query.
+        let src = SqliteDataSource::new(path.to_str().unwrap(), "   ");
+        let result = src.load("", &default_opts());
+        assert!(
+            result.is_err(),
+            "whitespace-only query must produce an error (defense-in-depth for BC-1.03.007 invariant 4)"
+        );
+        let err = result.unwrap_err();
+        // Must produce ParseError (the empty-query defensive path), not some other variant.
+        assert!(
+            matches!(
+                err,
+                slideforge_plugin_api::DataSourceError::ParseError { .. }
+            ),
+            "whitespace-only query must produce DataSourceError::ParseError, got: {err:?}"
+        );
+        let msg = err.to_string();
+        // The error must reference the parser / empty-query defensive path, not the DML message.
+        assert!(
+            msg.to_lowercase().contains("empty")
+                || msg.to_lowercase().contains("query field")
+                || msg.to_lowercase().contains("parser"),
+            "whitespace-only query error must mention 'empty' / 'query field' / 'parser'; got: {msg}"
         );
     }
 
