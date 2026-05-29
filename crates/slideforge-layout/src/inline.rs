@@ -183,18 +183,19 @@ pub fn run_inline_validation(
                     }
                 }
                 // Variants below carry no InlineNode subtrees in v1.0 and require
-                // no inline validation. Each arm is explicit so the compiler will
-                // flag any future FrameContent variant addition (architecture rule
-                // cited in story spec line 370 — exhaustiveness over wildcards).
+                // no inline validation. Listed individually with `|` rather than as
+                // a wildcard `_` so the compiler will flag any future FrameContent
+                // variant addition that is missing from this arm — the exhaustiveness
+                // check is the contract (architecture rule cited in story spec line 370).
                 // Bullet-list inline scanning is owned by STORY-073.
-                crate::types::FrameContent::Title(_) => {}
-                crate::types::FrameContent::Subtitle(_) => {}
-                crate::types::FrameContent::Body(_) => {}
-                crate::types::FrameContent::Image { .. } => {}
-                crate::types::FrameContent::Chart => {}
-                crate::types::FrameContent::Diagram(_) => {}
-                crate::types::FrameContent::Empty => {}
-                crate::types::FrameContent::ErrorSlidePlaceholder { .. } => {}
+                crate::types::FrameContent::Title(_)
+                | crate::types::FrameContent::Subtitle(_)
+                | crate::types::FrameContent::Body(_)
+                | crate::types::FrameContent::Image { .. }
+                | crate::types::FrameContent::Chart
+                | crate::types::FrameContent::Diagram(_)
+                | crate::types::FrameContent::Empty
+                | crate::types::FrameContent::ErrorSlidePlaceholder { .. } => {}
             }
         }
     }

@@ -2133,4 +2133,138 @@ mod tests {
             other => panic!("expected Shape frame at [1], got: {other:?}"),
         }
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // F-P15-LOW-001 — Em overflow end-to-end coverage symmetry with Inches
+    //
+    // The existing VP-048 tests above exercise ShapeUnit::Inches(i64::MAX) for
+    // each of x/y/width/height. This block mirrors those tests using
+    // ShapeUnit::Em(i64::MAX) so that the Em arm of unit_to_emu (from_em) is
+    // covered by the same end-to-end overflow path. Without these tests a
+    // future refactor of from_em (e.g., changing checked_mul to saturating_mul)
+    // would break the VP-048 contract without any test failure.
+    //
+    // A shared helper eliminates 4×2 = 8x copy-paste.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Shared overflow assertion for `layout_shapes` with an Em-unit extreme value.
+    ///
+    /// Builds a `ShapeSpec` with `i64::MAX` in the given field (as `ShapeUnit::Em`)
+    /// and all other fields set to safe values. Asserts that `layout_shapes`
+    /// returns `LayoutError::Multiple` containing at least one `ArithmeticOverflow`.
+    ///
+    /// `field` is a human-readable label used in assertion messages ("x", "y",
+    /// "width", "height").
+    fn assert_em_overflow_field(
+        x: ShapeUnit,
+        y: ShapeUnit,
+        width: ShapeUnit,
+        height: ShapeUnit,
+        field: &str,
+    ) {
+        let st =
+            slideforge_types::ShapeType::from_keyword("rect").expect("rect must be known");
+        let spec = ShapeSpec {
+            shape_type: st,
+            position: ShapePosition { x, y, width, height },
+            fill: FillSpec::None,
+            text: None,
+            alt: Some(AltText::Provided(Arc::from("em overflow test shape"))),
+            decorative: false,
+            span: SourceSpan::default(),
+        };
+        let shapes = vec![spec];
+        let result = layout_shapes(&shapes, default_page(), 0, DEFAULT_EM_IN_EMU);
+        assert!(
+            result.is_err(),
+            "Em overflow in {field} must return Err (VP-048 checked_mul)"
+        );
+        match result.unwrap_err() {
+            LayoutError::Multiple { inner } => {
+                assert!(
+                    inner
+                        .iter()
+                        .any(|e| matches!(e, LayoutError::ArithmeticOverflow { .. })),
+                    "Multiple must contain ArithmeticOverflow for Em {field} overflow; \
+                     got: {inner:?}"
+                );
+            },
+            other => panic!(
+                "expected LayoutError::Multiple containing ArithmeticOverflow \
+                 for Em {field} overflow, got: {other:?}"
+            ),
+        }
+    }
+
+    /// VP-048 / F-P15-LOW-001 — `layout_shapes` with `ShapeUnit::Em(i64::MAX)` in
+    /// the `x` field propagates `LayoutError::ArithmeticOverflow` inside a `Multiple`.
+    ///
+    /// Mirrors `test_vp_048_layout_shapes_overflow_x_returns_arithmetic_overflow`
+    /// but exercises the Em arm of `unit_to_emu` (`from_em`).
+    ///
+    /// Load-bearing: change `from_em` to use `saturating_mul` — this test MUST fail.
+    #[test]
+    fn test_vp_048_layout_shapes_em_overflow_x_returns_arithmetic_overflow() {
+        assert_em_overflow_field(
+            ShapeUnit::Em(i64::MAX), // overflows checked_mul in from_em
+            ShapeUnit::Em(1000),
+            ShapeUnit::Em(1000),
+            ShapeUnit::Em(500),
+            "x",
+        );
+    }
+
+    /// VP-048 / F-P15-LOW-001 — `layout_shapes` with `ShapeUnit::Em(i64::MAX)` in
+    /// the `y` field propagates `LayoutError::ArithmeticOverflow` inside a `Multiple`.
+    ///
+    /// Mirrors `test_vp_048_layout_shapes_overflow_y_returns_arithmetic_overflow`
+    /// but exercises the Em arm of `unit_to_emu` (`from_em`).
+    ///
+    /// Load-bearing: change `from_em` to use `saturating_mul` — this test MUST fail.
+    #[test]
+    fn test_vp_048_layout_shapes_em_overflow_y_returns_arithmetic_overflow() {
+        assert_em_overflow_field(
+            ShapeUnit::Em(1000),
+            ShapeUnit::Em(i64::MAX), // overflows checked_mul in from_em
+            ShapeUnit::Em(1000),
+            ShapeUnit::Em(500),
+            "y",
+        );
+    }
+
+    /// VP-048 / F-P15-LOW-001 — `layout_shapes` with `ShapeUnit::Em(i64::MAX)` in
+    /// the `width` field propagates `LayoutError::ArithmeticOverflow` inside a `Multiple`.
+    ///
+    /// Mirrors `test_vp_048_layout_shapes_overflow_width_returns_arithmetic_overflow`
+    /// but exercises the Em arm of `unit_to_emu` (`from_em`).
+    ///
+    /// Load-bearing: change `from_em` to use `saturating_mul` — this test MUST fail.
+    #[test]
+    fn test_vp_048_layout_shapes_em_overflow_width_returns_arithmetic_overflow() {
+        assert_em_overflow_field(
+            ShapeUnit::Em(1000),
+            ShapeUnit::Em(1000),
+            ShapeUnit::Em(i64::MAX), // overflows checked_mul in from_em
+            ShapeUnit::Em(500),
+            "width",
+        );
+    }
+
+    /// VP-048 / F-P15-LOW-001 — `layout_shapes` with `ShapeUnit::Em(i64::MAX)` in
+    /// the `height` field propagates `LayoutError::ArithmeticOverflow` inside a `Multiple`.
+    ///
+    /// Mirrors `test_vp_048_layout_shapes_overflow_height_returns_arithmetic_overflow`
+    /// but exercises the Em arm of `unit_to_emu` (`from_em`).
+    ///
+    /// Load-bearing: change `from_em` to use `saturating_mul` — this test MUST fail.
+    #[test]
+    fn test_vp_048_layout_shapes_em_overflow_height_returns_arithmetic_overflow() {
+        assert_em_overflow_field(
+            ShapeUnit::Em(1000),
+            ShapeUnit::Em(1000),
+            ShapeUnit::Em(1000),
+            ShapeUnit::Em(i64::MAX), // overflows checked_mul in from_em
+            "height",
+        );
+    }
 }
