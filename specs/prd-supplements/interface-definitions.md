@@ -514,3 +514,52 @@ The `DataSourceContext` caller (in the evaluator) passes:
 
 This convention is enforced at the `DataSourceContext` level; individual plugins do not
 need to handle partial paths or path resolution — they receive a full path or empty string.
+
+---
+
+## 8. LayoutError Field-Naming Convention (Adjudicated 2026-05-28)
+
+> Codified in adversary pass 1 on STORY-028, item L.
+
+### 8.1 Canonical Field Name: `source_slide_index`
+
+The canonical field name for "which slide in the input Deck caused this error" in
+`LayoutError` variants is **`source_slide_index: usize`**.
+
+This is declared in the module doc-comment of `slideforge-layout/src/error.rs`:
+
+```
+All variants include a `source_slide_index: usize` where applicable so that
+error messages can point to the offending slide by position in the input Deck.
+```
+
+The module header is the source of truth. All `LayoutError` variants that identify
+a slide MUST use `source_slide_index` — not `slide_index`, `idx`, or other spellings.
+
+### 8.2 Current State and Fix Obligation
+
+As of STORY-028 implementation (HEAD cc037817), the following variants use the
+non-canonical `slide_index` name:
+
+- `LayoutError::MissingAlt { slide_index }`
+- `LayoutError::MissingRiskCardField { slide_index, card_index, field }`
+- `LayoutError::MalformedSeverityCards { slide_index, reason }`
+- `LayoutError::UnresolvedSeverityCards { slide_index }`
+
+These MUST be renamed to `source_slide_index` in a fix-burst dispatched by the
+orchestrator after STORY-028 closes. The fix burst is owned by the data-engineer
+(schema change) and requires a sibling-site sweep per TD-VSDD-060 (all callsites
+in `slideforge-layout` and adjacent crates that pattern-match these variants).
+
+### 8.3 Exception: `SlideCountMismatch`
+
+`LayoutError::SlideCountMismatch { expected, actual, source_slide_index }` correctly
+uses `source_slide_index` and requires no change.
+
+### 8.4 Future Variant Authoring Rule
+
+When adding a new `LayoutError` variant:
+- If the variant identifies a specific slide: use `source_slide_index: usize`
+- If the variant is slide-independent (e.g., empty deck): include `source_slide_index: usize`
+  set to `0` for structural consistency (as `EmptyDeck` does)
+- Never use `slide_index`, `idx`, `slide_idx`, or other spellings
