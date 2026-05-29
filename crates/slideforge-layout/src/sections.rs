@@ -627,17 +627,17 @@ pub(crate) fn collect_risk_register(deck: &Deck) -> Result<Option<GeneratedSecti
             Some(FieldValue::Literal(Value::List(list))) => list.as_slice(),
             Some(FieldValue::Literal(_)) => {
                 return Err(LayoutError::MalformedSeverityCards {
-                    slide_index,
+                    source_slide_index: slide_index,
                     reason: "expected List value for 'cards' field, found a non-List Literal"
                         .to_owned(),
                 });
             },
             Some(_) => {
-                return Err(LayoutError::UnresolvedSeverityCards { slide_index });
+                return Err(LayoutError::UnresolvedSeverityCards { source_slide_index: slide_index });
             },
             None => {
                 return Err(LayoutError::MissingRiskCardField {
-                    slide_index,
+                    source_slide_index: slide_index,
                     card_index: 0,
                     field: "cards".to_owned(),
                 });
@@ -647,7 +647,7 @@ pub(crate) fn collect_risk_register(deck: &Deck) -> Result<Option<GeneratedSecti
         for (card_index, card) in cards.iter().enumerate() {
             let Value::Map(map) = card else {
                 return Err(LayoutError::MissingRiskCardField {
-                    slide_index,
+                    source_slide_index: slide_index,
                     card_index,
                     field: "cards[n]".to_owned(),
                 });
@@ -693,7 +693,7 @@ fn extract_card_str(
     match map.get(field) {
         Some(Value::Str(s)) => Ok(Arc::clone(s)),
         _ => Err(LayoutError::MissingRiskCardField {
-            slide_index,
+            source_slide_index: slide_index,
             card_index,
             field: field.to_owned(),
         }),
@@ -1935,7 +1935,7 @@ mod tests {
     fn test_error_missing_risk_card_field_variant_exists() {
         use crate::error::LayoutError;
         let err = LayoutError::MissingRiskCardField {
-            slide_index: 1,
+            source_slide_index: 1,
             card_index: 0,
             field: "severity".to_owned(),
         };
@@ -2311,7 +2311,7 @@ mod tests {
         assert!(
             matches!(
                 result,
-                Err(LayoutError::MalformedSeverityCards { slide_index: 0, .. })
+                Err(LayoutError::MalformedSeverityCards { source_slide_index: 0, .. })
             ),
             "wrong-typed Literal 'cards' field must return MalformedSeverityCards; got: {result:?}"
         );
@@ -2336,7 +2336,7 @@ mod tests {
         assert!(
             matches!(
                 result,
-                Err(LayoutError::UnresolvedSeverityCards { slide_index: 0 })
+                Err(LayoutError::UnresolvedSeverityCards { source_slide_index: 0 })
             ),
             "Expr 'cards' field must return UnresolvedSeverityCards; got: {result:?}"
         );
@@ -2676,7 +2676,7 @@ mod tests {
     fn test_error_malformed_severity_cards_variant_exists() {
         use crate::error::LayoutError;
         let err = LayoutError::MalformedSeverityCards {
-            slide_index: 2,
+            source_slide_index: 2,
             reason: "expected List, found String".to_owned(),
         };
         let msg = err.to_string();
@@ -2695,7 +2695,7 @@ mod tests {
     #[test]
     fn test_error_unresolved_severity_cards_variant_exists() {
         use crate::error::LayoutError;
-        let err = LayoutError::UnresolvedSeverityCards { slide_index: 3 };
+        let err = LayoutError::UnresolvedSeverityCards { source_slide_index: 3 };
         let msg = err.to_string();
         assert!(
             msg.contains("unresolved") || msg.contains("FieldValue"),

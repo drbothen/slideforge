@@ -1,8 +1,14 @@
 //! `LayoutError` — errors returned by [`crate::layout::run`].
 //!
-//! All variants include a `source_slide_index: usize` where applicable so that
-//! error messages can point to the offending slide by position in the input
-//! [`slideforge_types::Deck`].
+//! ## Field-naming convention (interface-definitions.md §8 / BC-3.04.001 item L)
+//!
+//! All variants include a **`source_slide_index: usize`** where applicable so
+//! that error messages can point to the offending slide by position in the
+//! input [`slideforge_types::Deck`].
+//!
+//! The canonical field name is **`source_slide_index`** — not `slide_index`,
+//! `idx`, `slide_idx`, or any other spelling. This is the source of truth for
+//! all `LayoutError` variant authoring.
 
 use thiserror::Error;
 
@@ -124,12 +130,12 @@ pub enum LayoutError {
     /// keys. When a key is absent or not a plain string, this error is returned
     /// (HIGH-001 / BC-3.02.001).
     #[error(
-        "layout error: slide {slide_index}: risk card at index {card_index} is missing \
+        "layout error: slide {source_slide_index}: risk card at index {card_index} is missing \
          required field '{field}' (or it is not a plain string)"
     )]
     MissingRiskCardField {
         /// Zero-based index of the `severity_cards` slide.
-        slide_index: usize,
+        source_slide_index: usize,
         /// Zero-based index of the card within the slide's `cards:` list.
         card_index: usize,
         /// The name of the missing or non-string field.
@@ -142,12 +148,12 @@ pub enum LayoutError {
     /// This is a type-error in the .sf source — `cards:` must be a YAML-style
     /// list of maps, not a scalar or map at the top level (HIGH-003).
     #[error(
-        "layout error: slide {slide_index}: 'cards' field has wrong type — expected List, \
+        "layout error: slide {source_slide_index}: 'cards' field has wrong type — expected List, \
          found a non-List Literal value: {reason}"
     )]
     MalformedSeverityCards {
         /// Zero-based index of the `severity_cards` slide.
-        slide_index: usize,
+        source_slide_index: usize,
         /// Human-readable description of the actual type found.
         reason: String,
     },
@@ -158,12 +164,12 @@ pub enum LayoutError {
     /// The evaluator must resolve all field values before layout runs.
     /// An unresolved `cards:` field indicates an evaluator bug (HIGH-003).
     #[error(
-        "layout error: slide {slide_index}: 'cards' field is an unresolved FieldValue variant \
+        "layout error: slide {source_slide_index}: 'cards' field is an unresolved FieldValue variant \
          (expected Literal(List)); this indicates an evaluator bug"
     )]
     UnresolvedSeverityCards {
         /// Zero-based index of the `severity_cards` slide.
-        slide_index: usize,
+        source_slide_index: usize,
     },
 
     /// A `Shape` node reached the layout stage without `alt` text or
@@ -176,13 +182,47 @@ pub enum LayoutError {
     /// Layout returns this error rather than produce a shape without alt text,
     /// because WCAG-AA compliance requires that every non-decorative visual
     /// element have programmatically-determinable alternative text.
+    ///
+    /// `span` points to the offending `shape:` block in the source file
+    /// (BC-3.04.001 invariant 7 / CLAUDE.md error-handling rule: all errors
+    /// carry source spans).
     #[error(
-        "layout error: slide {slide_index}: shape node reached layout without alt text or \
-         `decorative: true` (internal invariant violation — validation should have caught this)"
+        "layout error: slide {source_slide_index}: shape node reached layout without alt text or \
+         `decorative: true` at {span} (internal invariant violation — validation should have caught this)"
     )]
     MissingAlt {
         /// Zero-based index of the slide containing the shape without alt text.
-        slide_index: usize,
+        source_slide_index: usize,
+        /// Source location of the offending `shape:` block.
+        span: SourceSpan,
+    },
+
+    /// Multiple `LayoutError`s accumulated from a single operation (BC-3.04.001 item G).
+    ///
+    /// Used by [`crate::shapes::layout_shapes`] to accumulate all `MissingAlt`
+    /// errors from a slide's shape set before returning. This variant allows
+    /// callers that accept `Result<_, LayoutError>` to receive all errors at once
+    /// rather than bailing on the first failure (DI-018 multi-error accumulation).
+    ///
+    /// ## Invariants
+    ///
+    /// - The inner `Vec` MUST be non-empty. An empty `Multiple([])` is a layout
+    ///   engine bug — use `Ok(...)` when there are no errors.
+    /// - `Multiple` MUST NOT be nested: inner errors are flat `LayoutError`
+    ///   variants, never another `Multiple`.
+    ///
+    /// ## Display
+    ///
+    /// Displays the count and the first error's message. Full inspection requires
+    /// matching the variant and iterating the inner `Vec`.
+    #[error(
+        "layout error: {count} accumulated errors; first: {first}",
+        count = inner.len(),
+        first = inner.first().map_or_else(|| "(none)".to_owned(), std::string::ToString::to_string)
+    )]
+    Multiple {
+        /// The accumulated errors, in source order.
+        inner: Vec<LayoutError>,
     },
 }
 
@@ -285,5 +325,89 @@ mod tests {
             source_slide_index: 0,
         }); // duplicate
         assert_eq!(set.len(), 1);
+    }
+
+    /// BC-3.04.001 item F — `LayoutError::MissingAlt` carries `source_slide_index`
+    /// and `span` fields (interface-definitions §8.1 canonical field name).
+    #[test]
+    fn test_bc_3_04_001_missing_alt_carries_source_slide_index_and_span() {
+        let err = LayoutError::MissingAlt {
+            source_slide_index: 4,
+            span: SourceSpan::default(),
+        };
+        let msg = err.to_string();
+        assert!(
+            msg.contains("alt text") || msg.contains("decorative"),
+            "MissingAlt message must mention alt text; got: {msg}"
+        );
+        assert!(
+            msg.contains('4'),
+            "MissingAlt message must include source_slide_index; got: {msg}"
+        );
+        // Verify Clone + PartialEq + Eq + Hash hold.
+        let err2 = err.clone();
+        assert_eq!(err, err2);
+    }
+
+    /// BC-3.04.001 item G — `LayoutError::Multiple` accumulates inner errors
+    /// and displays the count and first error message.
+    #[test]
+    fn test_bc_3_04_001_multiple_variant_carries_inner_errors() {
+        use std::collections::HashSet;
+
+        let inner = vec![
+            LayoutError::MissingAlt {
+                source_slide_index: 0,
+                span: SourceSpan::default(),
+            },
+            LayoutError::MissingAlt {
+                source_slide_index: 0,
+                span: SourceSpan::default(),
+            },
+        ];
+        let err = LayoutError::Multiple {
+            inner: inner.clone(),
+        };
+        let msg = err.to_string();
+        assert!(
+            msg.contains('2'),
+            "Multiple display must include the error count; got: {msg}"
+        );
+
+        // Clone + PartialEq + Eq + Hash
+        let err2 = err.clone();
+        assert_eq!(err, err2);
+
+        let mut set = HashSet::new();
+        set.insert(err);
+        assert_eq!(set.len(), 1);
+    }
+
+    /// interface-definitions §8.1 — renamed variants use `source_slide_index`,
+    /// NOT `slide_index`. This test constructs all four renamed variants to
+    /// ensure the canonical field name is enforced at compile time.
+    #[test]
+    fn test_interface_definitions_s8_canonical_field_name_source_slide_index() {
+        // MissingAlt
+        let _ = LayoutError::MissingAlt {
+            source_slide_index: 0,
+            span: SourceSpan::default(),
+        };
+        // MissingRiskCardField
+        let _ = LayoutError::MissingRiskCardField {
+            source_slide_index: 1,
+            card_index: 0,
+            field: "title".to_owned(),
+        };
+        // MalformedSeverityCards
+        let _ = LayoutError::MalformedSeverityCards {
+            source_slide_index: 2,
+            reason: "expected List".to_owned(),
+        };
+        // UnresolvedSeverityCards
+        let _ = LayoutError::UnresolvedSeverityCards {
+            source_slide_index: 3,
+        };
+        // If this test compiles, the canonical field name is correctly applied.
     }
 }

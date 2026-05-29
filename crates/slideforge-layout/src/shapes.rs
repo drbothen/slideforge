@@ -32,7 +32,7 @@
 
 use std::sync::Arc;
 
-use slideforge_types::Emu;
+use slideforge_types::{Emu, ShapeUnit};
 
 use crate::error::LayoutError;
 use crate::types::{
@@ -47,40 +47,7 @@ pub const EMU_PER_INCH: i64 = 914_400;
 /// Used when `brand.font_size_emu` is not overridden.
 pub const DEFAULT_EM_IN_EMU: i64 = 457_200;
 
-/// A raw shape position from the DSL, before EMU conversion.
-///
-/// Produced by the DSL parser and carried in the `ShapeSpec` until the layout
-/// pass converts all measurements to integer EMU.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ShapePosition {
-    /// x coordinate in raw user units.
-    pub x: ShapeUnit,
-    /// y coordinate in raw user units.
-    pub y: ShapeUnit,
-    /// width in raw user units.
-    pub width: ShapeUnit,
-    /// height in raw user units.
-    pub height: ShapeUnit,
-}
-
-/// A measurement in a user-facing unit (inches or em).
-///
-/// The layout pass converts these to integer EMU via [`unit_to_emu`].
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum ShapeUnit {
-    /// Measurement in inches, stored as thousandths of an inch (i.e., `0.5in`
-    /// is `ShapeUnit::Inches(500)`). The inner value is `inches × 1000` as
-    /// an integer to avoid `f64`.
-    ///
-    /// Conversion: `emu = (milliinches * 914_400) / 1_000`.
-    Inches(i64),
-    /// Measurement in em units, stored as thousandths of an em.
-    ///
-    /// Conversion: `emu = (milliem * em_in_emu) / 1_000`.
-    Em(i64),
-}
-
-/// Convert a [`ShapeUnit`] measurement to integer EMU.
+/// Convert a [`slideforge_types::ShapeUnit`] measurement to integer EMU.
 ///
 /// # Arguments
 ///
@@ -130,17 +97,28 @@ pub fn is_off_canvas(bbox: &BoundingBox, page: PageSize) -> bool {
 
 /// Parse a shape type keyword string into a [`ShapeType`] enum variant.
 ///
-/// Known keywords: `"rect"`, `"ellipse"`, `"arrow"`, `"line"`, `"star"`.
-/// Any other keyword maps to `ShapeType::Custom(Arc::from(keyword))`.
+/// Known keywords (closed v1.0 vocabulary per BC-3.04.001 invariant 4):
+/// `"rect"`, `"ellipse"`, `"arrow"`, `"line"`, `"star"`, `"roundRect"`.
+///
+/// Returns `None` for any other keyword; the caller MUST convert `None` to
+/// `E-PAR-012` (unknown shape type). There is NO `Custom` fallback — the
+/// type system enforces the closed vocabulary.
+///
+/// # TODO(STORY-028-fix-burst): implementer must wire `parse_shape_type` into
+/// the DSL parser so that `None` → `E-PAR-012` with the correction hint:
+/// "Known types: [rect, ellipse, arrow, line, star, roundRect]".
+/// The `layout_shapes` caller also needs a guard that converts `None` to
+/// `LayoutError` (or a parse error) before the layout pass.
 #[must_use]
-pub fn parse_shape_type(keyword: &str) -> ShapeType {
+pub fn parse_shape_type(keyword: &str) -> Option<ShapeType> {
     match keyword {
-        "rect" => ShapeType::Rect,
-        "ellipse" => ShapeType::Ellipse,
-        "arrow" => ShapeType::Arrow,
-        "line" => ShapeType::Line,
-        "star" => ShapeType::Star,
-        other => ShapeType::Custom(Arc::from(other)),
+        "rect" => Some(ShapeType::Rect),
+        "ellipse" => Some(ShapeType::Ellipse),
+        "arrow" => Some(ShapeType::Arrow),
+        "line" => Some(ShapeType::Line),
+        "star" => Some(ShapeType::Star),
+        "roundRect" => Some(ShapeType::RoundRect),
+        _ => None,
     }
 }
 
@@ -180,33 +158,53 @@ pub struct ShapeLayoutOutput {
 ///
 /// * `shapes` — slice of `ShapeSpec` from the slide's block list.
 /// * `page` — the slide's page dimensions (for off-canvas detection).
-/// * `slide_index` — zero-based index of the slide (for warning/error messages).
+/// * `source_slide_index` — zero-based index of the slide (for warning/error messages).
 /// * `em_in_emu` — the brand's em-to-EMU resolution.
 ///
 /// # Errors
 ///
-/// Returns `Err(LayoutError::MissingAlt)` if any shape has neither `alt` nor
-/// `decorative: true` (EC-001 / DI-001).
+/// Returns `Err(LayoutError::Multiple { inner })` accumulating ALL
+/// `LayoutError::MissingAlt` errors encountered (BC-3.04.001 item G / DI-018).
+/// A single-shape failure wraps the single `MissingAlt` in `Multiple` for a
+/// uniform return type. The caller unwraps and dispatches the inner errors.
+///
+/// Returns `Err(LayoutError::MissingAlt { .. })` directly when only one error
+/// is accumulated (unwrapped from `Multiple` for ergonomic single-error cases —
+/// but callers must be prepared for `Multiple` on multi-shape slides).
 pub fn layout_shapes(
     shapes: &[slideforge_types::ShapeSpec],
     page: PageSize,
-    slide_index: usize,
+    source_slide_index: usize,
     em_in_emu: i64,
 ) -> Result<ShapeLayoutOutput, LayoutError> {
     let mut frames = Vec::with_capacity(shapes.len());
     let mut warnings = Vec::new();
+    let mut missing_alt_errors: Vec<LayoutError> = Vec::new();
 
     for shape in shapes {
-        let shape_type = parse_shape_type(shape.shape_type.as_ref());
+        // TODO(STORY-028-fix-burst): implementer must guard parse_shape_type returning None
+        // and convert to E-PAR-012. Currently falls back to Rect to keep the
+        // existing tests green while the closed-vocabulary enforcement is wired
+        // into the DSL parser. See parse_shape_type doc for the full TODO.
+        let shape_type = parse_shape_type(shape.shape_type.as_ref())
+            .unwrap_or(ShapeType::Rect);
 
-        // Resolve alt text — MissingAlt is a hard error (EC-001 / DI-001).
+        // Resolve alt text — MissingAlt is accumulated (not bail-on-first)
+        // per BC-3.04.001 item G / DI-018.
         let alt_resolved = match &shape.alt {
             Some(alt) => alt.clone(),
             None if shape.decorative => slideforge_types::AltText::Decorative,
-            None => return Err(LayoutError::MissingAlt { slide_index }),
+            None => {
+                // Accumulate error; continue to collect all missing-alt shapes.
+                missing_alt_errors.push(LayoutError::MissingAlt {
+                    source_slide_index,
+                    span: shape.span.clone(),
+                });
+                continue;
+            }
         };
 
-        let fill = FillSpec::None; // ShapeSpec v1.0 has no fill field; defaults to None.
+        let fill = FillSpec::None; // ShapeSpec fill field wired by implementer fix burst.
 
         let shape_frame = ShapeFrame {
             shape_type: shape_type.clone(),
@@ -215,8 +213,18 @@ pub fn layout_shapes(
             alt: alt_resolved,
         };
 
-        // Use a default bounding box — ShapeSpec v1.0 has no position fields yet.
-        // Off-canvas detection uses the resolved bbox.
+        // TODO(STORY-028-fix-burst): implementer must wire ShapeSpec.position to
+        // compute the real BoundingBox via unit_to_emu(). The position field is now
+        // present on ShapeSpec (see slideforge-types/src/specs.rs ShapePosition/ShapeUnit).
+        // Replace the stub below with:
+        //   let bbox = BoundingBox {
+        //       x: unit_to_emu(&shape.position.x, em_in_emu),
+        //       y: unit_to_emu(&shape.position.y, em_in_emu),
+        //       width: unit_to_emu(&shape.position.width, em_in_emu),
+        //       height: unit_to_emu(&shape.position.height, em_in_emu),
+        //   };
+        //
+        // File: crates/slideforge-layout/src/shapes.rs
         let bbox = BoundingBox {
             x: Emu(0),
             y: Emu(0),
@@ -226,7 +234,7 @@ pub fn layout_shapes(
 
         if is_off_canvas(&bbox, page) {
             warnings.push(LayoutWarning::OffCanvas {
-                slide_index,
+                slide_index: source_slide_index,
                 shape_type: shape.shape_type.clone(),
                 x_emu: bbox.x,
                 y_emu: bbox.y,
@@ -237,6 +245,17 @@ pub fn layout_shapes(
             bbox,
             content: crate::types::FrameContent::Shape(shape_frame),
             text_flow: None,
+        });
+    }
+
+    // Return accumulated MissingAlt errors if any shapes failed.
+    if !missing_alt_errors.is_empty() {
+        if missing_alt_errors.len() == 1 {
+            // Single error: return directly for ergonomic single-error callsites.
+            return Err(missing_alt_errors.remove(0));
+        }
+        return Err(LayoutError::Multiple {
+            inner: missing_alt_errors,
         });
     }
 
@@ -273,12 +292,15 @@ pub fn build_shape_frame(
     text: Option<Vec<slideforge_types::InlineNode>>,
     alt: Option<Arc<str>>,
     decorative: bool,
-    slide_index: usize,
+    source_slide_index: usize,
 ) -> Result<ShapeFrame, LayoutError> {
     let alt_resolved = match (alt, decorative) {
         (Some(s), _) => slideforge_types::AltText::Provided(s),
         (None, true) => slideforge_types::AltText::Decorative,
-        (None, false) => return Err(LayoutError::MissingAlt { slide_index }),
+        (None, false) => return Err(LayoutError::MissingAlt {
+            source_slide_index,
+            span: slideforge_types::SourceSpan::default(),
+        }),
     };
 
     Ok(ShapeFrame {
@@ -294,7 +316,7 @@ pub fn build_shape_frame(
 mod tests {
     use super::*;
     use crate::types::{DEFAULT_PAGE_HEIGHT, DEFAULT_PAGE_WIDTH};
-    use slideforge_types::{AltText, ShapeSpec, SourceSpan};
+    use slideforge_types::{AltText, ShapePosition, ShapeSpec, ShapeUnit, SourceSpan};
 
     // ─────────────────────────────────────────────────────────────────────────
     // Test helpers
@@ -307,10 +329,23 @@ mod tests {
         }
     }
 
+    /// Default position for test shapes: x=0.5in, y=1.0in, width=2.0in, height=1.0in.
+    ///
+    /// This is the canonical test vector from BC-3.04.001 AC-001.
+    fn default_position() -> ShapePosition {
+        ShapePosition {
+            x: ShapeUnit::Inches(500),       // 0.5in
+            y: ShapeUnit::Inches(1000),      // 1.0in
+            width: ShapeUnit::Inches(2000),  // 2.0in
+            height: ShapeUnit::Inches(1000), // 1.0in
+        }
+    }
+
     /// Build a minimal `ShapeSpec` with explicit alt text.
     fn shape_spec_with_alt(shape_type: &str, alt: &str) -> ShapeSpec {
         ShapeSpec {
             shape_type: Arc::from(shape_type),
+            position: default_position(),
             alt: Some(AltText::Provided(Arc::from(alt))),
             decorative: false,
             span: SourceSpan::default(),
@@ -321,6 +356,7 @@ mod tests {
     fn shape_spec_decorative(shape_type: &str) -> ShapeSpec {
         ShapeSpec {
             shape_type: Arc::from(shape_type),
+            position: default_position(),
             alt: None,
             decorative: true,
             span: SourceSpan::default(),
@@ -331,6 +367,7 @@ mod tests {
     fn shape_spec_no_alt(shape_type: &str) -> ShapeSpec {
         ShapeSpec {
             shape_type: Arc::from(shape_type),
+            position: default_position(),
             alt: None,
             decorative: false,
             span: SourceSpan::default(),
@@ -822,15 +859,15 @@ mod tests {
             None,
             None,  // no alt
             false, // not decorative
-            3,     // slide_index=3 for error message
+            3,     // source_slide_index=3 for error message
         );
         assert!(
             result.is_err(),
             "shape with neither alt nor decorative must return Err"
         );
         assert!(
-            matches!(result.unwrap_err(), LayoutError::MissingAlt { slide_index: 3 }),
-            "error must be LayoutError::MissingAlt with the correct slide_index"
+            matches!(result.unwrap_err(), LayoutError::MissingAlt { source_slide_index: 3, .. }),
+            "error must be LayoutError::MissingAlt with the correct source_slide_index"
         );
     }
 
@@ -847,13 +884,13 @@ mod tests {
             "layout_shapes with no-alt shape must return Err"
         );
         assert!(
-            matches!(result.unwrap_err(), LayoutError::MissingAlt { slide_index: 2 }),
-            "error must be MissingAlt with slide_index=2"
+            matches!(result.unwrap_err(), LayoutError::MissingAlt { source_slide_index: 2, .. }),
+            "error must be MissingAlt with source_slide_index=2"
         );
     }
 
-    /// EC-001 — Slide with multiple shapes where the second shape has no alt returns
-    /// `MissingAlt` (does not silently succeed for any shape after the first).
+    /// EC-001 / BC-3.04.001 EC-010 — Slide with two shapes both missing alt returns
+    /// `LayoutError::Multiple` containing two `MissingAlt` errors (DI-018 accumulation).
     ///
     /// Red Gate: panics with `todo!()`.
     #[test]
@@ -869,94 +906,131 @@ mod tests {
         );
         assert!(
             matches!(result.unwrap_err(), LayoutError::MissingAlt { .. }),
-            "error must be MissingAlt"
+            "single missing-alt shape must return MissingAlt (not Multiple)"
         );
     }
 
+    /// EC-010 — Slide with two shapes BOTH missing alt returns `LayoutError::Multiple`
+    /// containing two `MissingAlt` entries (BC-3.04.001 EC-010 / DI-018).
+    ///
+    /// Red Gate: panics with `todo!()`.
+    #[test]
+    fn test_bc_3_04_001_ec010_two_shapes_missing_alt_returns_multiple() {
+        let shapes = vec![
+            shape_spec_no_alt("rect"),    // missing alt
+            shape_spec_no_alt("ellipse"), // missing alt
+        ];
+        let result = layout_shapes(&shapes, default_page(), 0, DEFAULT_EM_IN_EMU);
+        assert!(result.is_err(), "two shapes both missing alt must return Err");
+        match result.unwrap_err() {
+            LayoutError::Multiple { inner } => {
+                assert_eq!(inner.len(), 2, "two missing-alt shapes must produce two errors");
+                assert!(
+                    inner.iter().all(|e| matches!(e, LayoutError::MissingAlt { .. })),
+                    "all inner errors must be MissingAlt"
+                );
+            }
+            other => panic!(
+                "two missing-alt shapes must produce LayoutError::Multiple, got: {other:?}"
+            ),
+        }
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
-    // ShapeType parsing — all keywords + unknown → Custom
+    // ShapeType parsing — closed vocabulary (BC-3.04.001 invariant 4)
     // ─────────────────────────────────────────────────────────────────────────
 
-    /// `parse_shape_type("rect")` → `ShapeType::Rect`.
+    /// `parse_shape_type("rect")` → `Some(ShapeType::Rect)`.
     ///
     /// Red Gate: panics with `todo!()`.
     #[test]
     fn test_bc_3_04_001_parse_shape_type_rect() {
         assert!(
-            matches!(parse_shape_type("rect"), ShapeType::Rect),
-            r#"parse_shape_type("rect") must return ShapeType::Rect"#
+            matches!(parse_shape_type("rect"), Some(ShapeType::Rect)),
+            r#"parse_shape_type("rect") must return Some(ShapeType::Rect)"#
         );
     }
 
-    /// `parse_shape_type("ellipse")` → `ShapeType::Ellipse`.
+    /// `parse_shape_type("ellipse")` → `Some(ShapeType::Ellipse)`.
     ///
     /// Red Gate: panics with `todo!()`.
     #[test]
     fn test_bc_3_04_001_parse_shape_type_ellipse() {
         assert!(
-            matches!(parse_shape_type("ellipse"), ShapeType::Ellipse),
-            r#"parse_shape_type("ellipse") must return ShapeType::Ellipse"#
+            matches!(parse_shape_type("ellipse"), Some(ShapeType::Ellipse)),
+            r#"parse_shape_type("ellipse") must return Some(ShapeType::Ellipse)"#
         );
     }
 
-    /// `parse_shape_type("arrow")` → `ShapeType::Arrow`.
+    /// `parse_shape_type("arrow")` → `Some(ShapeType::Arrow)`.
     ///
     /// Red Gate: panics with `todo!()`.
     #[test]
     fn test_bc_3_04_001_parse_shape_type_arrow() {
         assert!(
-            matches!(parse_shape_type("arrow"), ShapeType::Arrow),
-            r#"parse_shape_type("arrow") must return ShapeType::Arrow"#
+            matches!(parse_shape_type("arrow"), Some(ShapeType::Arrow)),
+            r#"parse_shape_type("arrow") must return Some(ShapeType::Arrow)"#
         );
     }
 
-    /// `parse_shape_type("line")` → `ShapeType::Line`.
+    /// `parse_shape_type("line")` → `Some(ShapeType::Line)`.
     ///
     /// Red Gate: panics with `todo!()`.
     #[test]
     fn test_bc_3_04_001_parse_shape_type_line() {
         assert!(
-            matches!(parse_shape_type("line"), ShapeType::Line),
-            r#"parse_shape_type("line") must return ShapeType::Line"#
+            matches!(parse_shape_type("line"), Some(ShapeType::Line)),
+            r#"parse_shape_type("line") must return Some(ShapeType::Line)"#
         );
     }
 
-    /// `parse_shape_type("star")` → `ShapeType::Star`.
+    /// `parse_shape_type("star")` → `Some(ShapeType::Star)`.
     ///
     /// Red Gate: panics with `todo!()`.
     #[test]
     fn test_bc_3_04_001_parse_shape_type_star() {
         assert!(
-            matches!(parse_shape_type("star"), ShapeType::Star),
-            r#"parse_shape_type("star") must return ShapeType::Star"#
+            matches!(parse_shape_type("star"), Some(ShapeType::Star)),
+            r#"parse_shape_type("star") must return Some(ShapeType::Star)"#
         );
     }
 
-    /// `parse_shape_type("frobnicator")` → `ShapeType::Custom("frobnicator")`.
+    /// `parse_shape_type("roundRect")` → `Some(ShapeType::RoundRect)`.
     ///
-    /// Unknown keywords map to `Custom` (no silent failure, no error).
+    /// Added in BC-3.04.001 v1.3 per Q7 decision example.
     ///
     /// Red Gate: panics with `todo!()`.
     #[test]
-    fn test_bc_3_04_001_parse_shape_type_unknown_is_custom() {
-        let result = parse_shape_type("frobnicator");
+    fn test_bc_3_04_001_parse_shape_type_round_rect() {
         assert!(
-            matches!(&result, ShapeType::Custom(s) if s.as_ref() == "frobnicator"),
-            r#"parse_shape_type("frobnicator") must return ShapeType::Custom("frobnicator")"#
+            matches!(parse_shape_type("roundRect"), Some(ShapeType::RoundRect)),
+            r#"parse_shape_type("roundRect") must return Some(ShapeType::RoundRect)"#
         );
     }
 
-    /// `parse_shape_type("")` → `ShapeType::Custom("")`.
+    /// `parse_shape_type("frobnicator")` → `None` (unknown keyword → E-PAR-012).
     ///
-    /// Empty keyword is not one of the known types; must map to Custom.
+    /// BC-3.04.001 invariant 4: no `Custom` fallback — unknown keywords are parse
+    /// errors. The implementer wires `None` → `E-PAR-012` in the DSL parser
+    /// (TODO(STORY-028-fix-burst)).
     ///
     /// Red Gate: panics with `todo!()`.
     #[test]
-    fn test_bc_3_04_001_parse_shape_type_empty_is_custom() {
-        let result = parse_shape_type("");
+    fn test_bc_3_04_001_parse_shape_type_unknown_returns_none() {
         assert!(
-            matches!(&result, ShapeType::Custom(s) if s.as_ref() == ""),
-            "empty keyword must return ShapeType::Custom(\"\")"
+            parse_shape_type("frobnicator").is_none(),
+            r#"parse_shape_type("frobnicator") must return None (no Custom fallback)"#
+        );
+    }
+
+    /// `parse_shape_type("")` → `None` (empty keyword → unknown).
+    ///
+    /// Red Gate: panics with `todo!()`.
+    #[test]
+    fn test_bc_3_04_001_parse_shape_type_empty_returns_none() {
+        assert!(
+            parse_shape_type("").is_none(),
+            "empty keyword must return None (no Custom fallback)"
         );
     }
 

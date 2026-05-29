@@ -289,23 +289,30 @@ pub enum FillSpec {
 
 /// The geometric shape type for a shape frame.
 ///
-/// Corresponds to the `type` field in the DSL `shape:` block.
+/// Corresponds to the `type` field in the DSL `shape:` block. This is a
+/// **closed vocabulary** in v1.0 — exactly 6 keywords are accepted. Any
+/// unknown keyword produces `E-PAR-012` at parse time (BC-3.04.001 invariant 4).
+/// There is NO `Custom` variant; the type system enforces the closed vocabulary.
 ///
 /// Implements `Hash + Eq + Clone + Debug` for comemo compatibility (AC-010).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ShapeType {
-    /// Rectangular shape (default when type is omitted).
+    /// Rectangular shape (`type rect`).
     Rect,
-    /// Ellipse / circle shape.
+    /// Ellipse / circle shape (`type ellipse`).
     Ellipse,
-    /// Single-headed arrow.
+    /// Single-headed arrow (`type arrow`).
     Arrow,
-    /// Line segment.
+    /// Line segment (`type line`).
     Line,
-    /// Star / burst shape.
+    /// Star / burst shape (`type star`).
     Star,
-    /// A custom shape named by keyword.
-    Custom(Arc<str>),
+    /// Rounded-corner rectangle (`type roundRect`).
+    ///
+    /// Added in BC-3.04.001 v1.3 (per Q7 decision example).
+    RoundRect,
+    // NOTE: No Custom variant. Unknown keywords are parse errors (E-PAR-012).
+    // See BC-3.04.001 invariant 4 and CLAUDE.md "no silent fallback" rule.
 }
 
 /// A fully-positioned shape from the `shape:` DSL block.

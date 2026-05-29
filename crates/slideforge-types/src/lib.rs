@@ -61,7 +61,8 @@ pub use register::Register;
 pub use slide::{FieldValue, Slide, StringPart};
 pub use span::SourceSpan;
 pub use specs::{
-    AltText, ChartSpec, DiagramSpec, ImageSpec, NormalizedDiagramSvg, ShapeSpec, TableSpec,
+    AltText, ChartSpec, DiagramSpec, ImageSpec, NormalizedDiagramSvg, ShapePosition, ShapeSpec,
+    ShapeUnit, TableSpec,
 };
 pub use type_kind::TypeKind;
 pub use value::Value;
