@@ -2,7 +2,7 @@
 document_type: prd-supplement
 supplement_type: interface-definitions
 level: L3
-version: "1.3"
+version: "1.4"
 status: active
 producer: product-owner
 timestamp: 2026-05-29T00:00:00
@@ -610,24 +610,45 @@ variant" API is explicitly forbidden per BC-3.04.001 postcondition 6.
 
 ### 9.2 `ShapeType::from_keyword` — Parser Bridge (Item P)
 
+`ShapeType` lives in `slideforge-types`, which is a leaf crate. It MUST NOT depend on
+`slideforge-layout`'s `LayoutError` or on `slideforge-syntax`'s `ParseError`. To avoid
+creating an upward dependency, `from_keyword` uses its own small error type defined in
+`slideforge-types`:
+
 ```rust
+/// Returned by ShapeType::from_keyword on unknown input.
+/// Callers in higher crates map this to their own error type.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShapeTypeError {
+    /// The unrecognized keyword exactly as supplied.
+    pub keyword: Arc<str>,
+}
+
 impl ShapeType {
     /// Convert a DSL keyword string to the resolved ShapeType enum variant.
     ///
-    /// Called by: the DSL parser (future story) and ALL test construction sites.
-    /// The IR MUST NOT store Arc<str> in ShapeSpec.shape_type.
+    /// Called by: the DSL parser (future story), the layout layer, and ALL
+    /// test construction sites. The IR MUST NOT store Arc<str> in ShapeSpec.shape_type.
     ///
-    /// Returns Err(ParseError::UnknownShapeType { keyword, span }) on unknown input,
-    /// which the caller maps to E-PAR-012.
-    pub fn from_keyword(kw: &str) -> Result<ShapeType, ParseError>;
+    /// Returns Err(ShapeTypeError { keyword }) on unknown input. Callers map this
+    /// to their crate-appropriate error:
+    ///   - layout layer → LayoutError::UnknownShapeType
+    ///   - parser layer (future story) → ParseError::E-PAR-012
+    pub fn from_keyword(kw: &str) -> Result<ShapeType, ShapeTypeError>;
 }
 ```
 
 Accepted keywords (case-sensitive): `rect`, `ellipse`, `arrow`, `line`, `star`, `roundRect`.
 All other inputs return `Err`. Keyword matching is case-sensitive and exact — no fuzzy matching.
 
-This function lives in `slideforge-types` (alongside `ShapeType`) so that both the parser
-crate and test helpers can depend on it without introducing additional crate dependencies.
+**Rationale:** `slideforge-types` is the base leaf crate. Introducing a dependency on
+`LayoutError` (from `slideforge-layout`) or `ParseError` (from `slideforge-syntax`) would
+create a forbidden upward dependency cycle. `ShapeTypeError` is a minimal self-contained
+error that any higher crate can map upward without a downward dependency.
+
+**Implementer handoff:** The implementation currently returns `Option<Self>`. Change it to
+`Result<Self, ShapeTypeError>` as specified above. The layout caller (`layout_shapes`) maps
+`ShapeTypeError` → `LayoutError::UnknownShapeType`. See §9.3 for `LayoutError` definition.
 
 ### 9.3 `LaidOutDeck.warnings` — Warnings Field (Item O)
 
@@ -648,28 +669,102 @@ Exporters are consumers of `LaidOutDeck.warnings`; they MAY surface or suppress
 individual warning types but MUST NOT further lose warnings.
 
 The `LayoutWarning` enum variants relevant here:
-- `LayoutWarning::XrefTargetNotFound { target: Arc<str>, source_slide_index: usize }`
-- `LayoutWarning::OffCanvas { source_slide_index: usize, shape_type: ShapeType, x_emu: i64, y_emu: i64 }`
-
-Both variants use `source_slide_index` (consistent with the §8 field-naming convention).
-
-### 9.4 ArithmeticOverflow Error Return (Item M)
-
-`ShapeUnit::from_inches` and `ShapeUnit::from_em` MUST use `i64::checked_mul` for the
-milliunit-to-EMU multiplication. On overflow, they MUST return
-`Err(LayoutError::ArithmeticOverflow { source_slide_index, span })`.
 
 ```rust
-impl ShapeUnit {
-    /// Convert to EMU at layout time given the current brand font size.
-    ///
-    /// Returns Err on i64 overflow — the caller accumulates this into
-    /// LayoutError::multiple(accumulated_errors).
-    pub fn to_emu(&self, brand_font_size_emu: i64, source_slide_index: usize, span: SourceSpan)
-        -> Result<i64, LayoutError>;
+pub enum LayoutWarning {
+    XrefTargetNotFound {
+        target: Arc<str>,
+        source_slide_index: usize,
+    },
+    OffCanvas {
+        source_slide_index: usize,
+        /// MUST be ShapeType (the resolved enum variant), NOT Arc<str>.
+        /// Storing Arc<str> here reintroduces an unvalidated string into the
+        /// warning output and constitutes a regression per BC-3.04.001 invariant 4.
+        shape_type: ShapeType,
+        /// Emu is a newtype wrapper over i64 defined in slideforge-types/src/emu.rs.
+        /// Using Emu (not i64) is preferred; it carries semantic intent and prevents
+        /// accidental unit confusion. This supersedes the earlier i64 spec which
+        /// predated Emu's presence in slideforge-types.
+        x_emu: Emu,
+        y_emu: Emu,
+    },
 }
 ```
 
-`saturating_mul` without an error return is explicitly forbidden. The `ArithmeticOverflow`
-variant MUST be reachable from production code; it is NOT a "future strict-mode" concern.
-It maps to E-LAY-006 in the CLI diagnostic renderer.
+Both variants use `source_slide_index` (consistent with the §8 field-naming convention).
+
+**Binding constraints:**
+- `shape_type: ShapeType` — binding. Implementation MUST NOT use `Arc<str>` here.
+  The shape type must be the resolved enum variant from `ShapeType::from_keyword` (§9.2).
+- `source_slide_index: usize` — binding.
+- `x_emu: Emu, y_emu: Emu` — relaxed from earlier `i64` spec. `Emu` is semantically
+  equivalent (newtype over i64) and is now the preferred type since `Emu` lives in
+  `slideforge-types`.
+
+**Implementer handoff:** If current implementation has `shape_type: Arc<str>` in
+`LayoutWarning::OffCanvas`, change it to `shape_type: ShapeType`. This is a BINDING
+correction — the unvalidated `Arc<str>` form is a regression. `x_emu: Emu` and
+`y_emu: Emu` match the production implementation and are accepted as-is (spec relaxed).
+
+### 9.4 ArithmeticOverflow Error Return (Item M)
+
+The unit-conversion functions use `i64::checked_mul` internally and return `Option<Emu>`
+(not `Result`). The caller in `layout_shapes` is responsible for mapping `None` to the
+appropriate `LayoutError::ArithmeticOverflow` with slide context. This is the correct
+design: the conversion functions themselves do not have access to slide-level context
+(`source_slide_index`, `span`), so they return `None` on overflow and leave error
+construction to the context-aware caller.
+
+```rust
+impl Emu {
+    /// Convert milliinches (inch × 1000 as i64) to EMU using checked arithmetic.
+    /// Returns None on i64 overflow (input too large to represent in EMU).
+    /// 1 inch = 914,400 EMU; milliinch × 914_400 / 1_000.
+    pub fn from_inches(milliinches: i64) -> Option<Emu>;
+
+    /// Convert milliem (em × 1000 as i64) to EMU given the brand font size in EMU.
+    /// Returns None on i64 overflow.
+    pub fn from_em(milliem: i64, em_in_emu: i64) -> Option<Emu>;
+}
+
+impl ShapeUnit {
+    /// Convert a ShapeUnit to EMU given the brand font size in EMU.
+    /// Delegates to Emu::from_inches or Emu::from_em.
+    /// Returns None on overflow — caller constructs LayoutError::ArithmeticOverflow.
+    pub fn unit_to_emu(&self, em_in_emu: i64) -> Option<Emu>;
+}
+```
+
+The `layout_shapes` caller pattern:
+
+```rust
+let x_emu = shape.position.x.unit_to_emu(em_in_emu)
+    .ok_or_else(|| LayoutError::ArithmeticOverflow {
+        source_slide_index,
+        span: shape.span.clone(),
+    })?;
+```
+
+`saturating_mul` without an error path is explicitly forbidden. `ArithmeticOverflow` MUST
+be reachable from production code. It maps to E-LAY-006 in the CLI diagnostic renderer.
+
+**Kani note:** VP-048 targets `Emu::from_inches(i64::MAX) == None` and
+`Emu::from_em(i64::MAX, i64::MAX) == None` directly. The `Option<Emu>` return makes
+these proofs straightforward bounded-model-check targets without needing to pass slide
+context into the Kani harness.
+
+**Implementer handoff:** Current implementation returns `Option<Emu>` with caller adding
+span — this matches the spec as clarified. No signature change required for the conversion
+functions. Verify `unit_to_emu` is the public entry point (not separate `from_inches`
+called directly from outside the module).
+
+---
+
+## Changelog
+
+| Version | Date | Author | Summary |
+|---------|------|--------|---------|
+| 1.0–1.2 | 2026-05-25 | product-owner | Initial interface definitions through §8 |
+| 1.3 | 2026-05-28 | product-owner | §9 additions: LayoutError::multiple, ShapeType::from_keyword, LaidOutDeck.warnings, ArithmeticOverflow |
+| 1.4 | 2026-05-29 | architect | Pass-3 adjudications: §9.2 — from_keyword now returns Result<ShapeType, ShapeTypeError> (leaf-crate error, maps upward); §9.3 — OffCanvas.shape_type binding corrected to ShapeType (not Arc<str>), x_emu/y_emu relaxed to Emu; §9.4 — unit conversion clarified as Option<Emu> + caller-side error (cleaner API, Kani-amenable) |

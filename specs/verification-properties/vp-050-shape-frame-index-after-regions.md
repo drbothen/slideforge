@@ -11,6 +11,7 @@ kani_amenable: false
 bc_trace: [BC-3.04.001]
 anchored_to_bc: BC-3.04.001
 traces_to: .factory/specs/verification-properties/VP-INDEX.md
+spec_version: "1.0.1"
 ---
 
 # VP-050: Shape Frame Index >= region_count (Shape Frames Appended After Placeholders)
@@ -19,10 +20,11 @@ traces_to: .factory/specs/verification-properties/VP-INDEX.md
 
 In a `LaidOutDeck`, all `FrameContent::Shape` frames for a given slide MUST appear
 at indices >= `region_count` for that slide. No shape frame may interleave with or
-precede a placeholder frame.
+precede a non-shape (placeholder region) frame.
 
 Formally, for any slide `s` in `LaidOutDeck`:
-- `s.frames[0..s.region_count]` contains ONLY placeholder frames (`FrameContent::Placeholder`)
+- `s.frames[0..s.region_count]` contains ONLY non-shape frames (i.e., variants other
+  than `FrameContent::Shape` — such as `Title`, `Subtitle`, `Body`, `Image`, etc.)
 - `s.frames[s.region_count..]` contains ALL shape frames (`FrameContent::Shape`)
 - The first shape frame's 0-based index in `s.frames` MUST be >= `s.region_count`
 
@@ -82,10 +84,11 @@ fn test_title_content_slide_shape_frame_after_placeholder() {
     let laid_out = layout::run(&deck, &BrandConfig::default()).expect("layout should succeed");
 
     let laid_slide = &laid_out.slides[0];
-    // frames[0] must be a placeholder frame
+    // frames[0] must be a non-shape (placeholder region) frame —
+    // i.e., one of Title, Subtitle, Body, Image, etc., NOT FrameContent::Shape
     assert!(
-        matches!(laid_slide.frames[0].content, FrameContent::Placeholder { .. }),
-        "frames[0] must be a placeholder frame (region_count=1)"
+        !matches!(laid_slide.frames[0].content, FrameContent::Shape(_)),
+        "frames[0] must be a placeholder region frame, not a Shape (region_count=1)"
     );
     // frames[1] must be the shape frame
     assert!(
@@ -121,7 +124,11 @@ fn test_two_regions_two_shapes_ordering() {
     let laid_slide = &laid_out.slides[0];
 
     for i in 0..2 {
-        assert!(matches!(laid_slide.frames[i].content, FrameContent::Placeholder { .. }));
+        // frames[0..2] must be non-shape (placeholder region) frames
+        assert!(
+            !matches!(laid_slide.frames[i].content, FrameContent::Shape(_)),
+            "frames[{i}] must be a placeholder region frame, not a Shape (region_count=2)"
+        );
     }
     for i in 2..4 {
         assert!(matches!(laid_slide.frames[i].content, FrameContent::Shape(_)));
@@ -140,7 +147,11 @@ fn test_zero_shapes_only_placeholder_frames() {
     let laid_out = layout::run(&deck, &BrandConfig::default()).expect("layout should succeed");
     let laid_slide = &laid_out.slides[0];
     assert_eq!(laid_slide.frames.len(), 1);
-    assert!(matches!(laid_slide.frames[0].content, FrameContent::Placeholder { .. }));
+    // The single frame must be a non-shape placeholder region frame
+    assert!(
+        !matches!(laid_slide.frames[0].content, FrameContent::Shape(_)),
+        "frames[0] must be a placeholder region frame when there are no shape blocks"
+    );
 }
 ```
 
@@ -148,7 +159,7 @@ fn test_zero_shapes_only_placeholder_frames() {
 
 | Input | Expected Output | Category |
 |-------|----------------|----------|
-| `title_content` slide (`region_count=1`) + 1 shape block | `frames[0]`=placeholder, `frames[1]`=shape; first shape index (1) >= region_count (1) | canonical (EC-013) |
-| `title_body_content` slide (`region_count=2`) + 2 shape blocks | `frames[0..2]`=placeholders, `frames[2..4]`=shapes; first shape index (2) >= region_count (2) | ordering |
-| Slide with `region_count=1`, 0 shape blocks | `frames` has 1 entry, all placeholders; no shape frames | edge-case |
-| Slide with `region_count=0`, 1 shape block | `frames[0]`=shape; shape index (0) >= region_count (0) | zero-regions |
+| `title_content` slide (`region_count=1`) + 1 shape block | `frames[0]`=non-Shape (e.g. Title), `frames[1]`=Shape; first shape index (1) >= region_count (1) | canonical (EC-013) |
+| `title_body_content` slide (`region_count=2`) + 2 shape blocks | `frames[0..2]`=non-Shape (region frames), `frames[2..4]`=Shape; first shape index (2) >= region_count (2) | ordering |
+| Slide with `region_count=1`, 0 shape blocks | `frames` has 1 entry, all non-Shape (region frames); no shape frames | edge-case |
+| Slide with `region_count=0`, 1 shape block | `frames[0]`=Shape; shape index (0) >= region_count (0) | zero-regions |
