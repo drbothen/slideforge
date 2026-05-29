@@ -472,7 +472,7 @@ fn validate_sqlite_extension(path: &str) -> Result<(), String> {
 ///   These are infrastructure failures (permission denied, file disappeared) — not
 ///   format errors.
 /// - Magic-byte mismatch → `DataSourceError::ParseError` (E-DAT-013).
-///   The file is present and readable but is not a SQLite database.
+///   The file is present and readable but is not a `SQLite` database.
 ///
 /// Traces to BC-1.03.007 postcondition 7, VP-034, E-DAT-013, E-DAT-004.
 fn validate_sqlite_magic(path: &str) -> Result<(), DataSourceError> {
@@ -1194,12 +1194,12 @@ mod tests {
     // IoError for File::open failure, ParseError for magic mismatch.
     // ---------------------------------------------------------------------------
 
-    /// `test_obs2_sqlite_magic_mismatch_is_parse_error` — magic mismatch → ParseError (E-DAT-013).
+    /// `test_obs2_sqlite_magic_mismatch_is_parse_error` — magic mismatch → `ParseError` (E-DAT-013).
     ///
-    /// A file that is present and readable but lacks the SQLite magic header must
+    /// A file that is present and readable but lacks the `SQLite` magic header must
     /// produce `DataSourceError::ParseError` with `[E-DAT-013]` in the message.
     ///
-    /// Load-bearing per TD-VSDD-059: if the mismatch arm were changed to IoError,
+    /// Load-bearing per TD-VSDD-059: if the mismatch arm were changed to `IoError`,
     /// this test would fail.
     ///
     /// Traces to F-PASS12-OBS-2, BC-1.03.007 postcondition 7, E-DAT-013.
@@ -1221,13 +1221,13 @@ mod tests {
         );
     }
 
-    /// `test_obs2_sqlite_magic_io_error_is_io_error` — File::open failure → IoError (E-DAT-004).
+    /// `test_obs2_sqlite_magic_io_error_is_io_error` — `File::open` failure → `IoError` (E-DAT-004).
     ///
     /// When the file does not exist, `validate_sqlite_magic` must produce
-    /// `DataSourceError::IoError` (not ParseError) because the failure is an
+    /// `DataSourceError::IoError` (not `ParseError`) because the failure is an
     /// infrastructure error, not a format mismatch.
     ///
-    /// Load-bearing per TD-VSDD-059: if File::open errors were mapped to ParseError,
+    /// Load-bearing per TD-VSDD-059: if `File::open` errors were mapped to `ParseError`,
     /// this test would fail.
     ///
     /// Traces to F-PASS12-OBS-2, E-DAT-004.

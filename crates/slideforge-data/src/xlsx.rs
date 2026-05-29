@@ -382,15 +382,11 @@ fn convert_calamine_cell(cell: &Data, col: u32, row: u32, path: &str) -> Result<
 /// the plugin-api error type.
 fn data_error_to_source_error(path: &str, err: &DataError) -> DataSourceError {
     match err {
-        DataError::FileNotFound { .. } => DataSourceError::IoError {
-            uri: path.to_owned(),
-            message: err.to_string(),
-        },
         // F-PASS12-OBS-1: DataError::IoError (E-DAT-004) must map to
         // DataSourceError::IoError, not DataSourceError::ParseError.
-        // The previous wildcard arm silently mis-classified I/O errors as
-        // parse errors, hiding the true failure category from callers.
-        DataError::IoError { .. } => DataSourceError::IoError {
+        // Both FileNotFound and IoError are I/O failures — merged into one arm
+        // (clippy::match_same_arms).
+        DataError::FileNotFound { .. } | DataError::IoError { .. } => DataSourceError::IoError {
             uri: path.to_owned(),
             message: err.to_string(),
         },
@@ -1894,7 +1890,7 @@ mod tests {
     /// that only f64 values representable as i64 are promoted.  This test exercises the
     /// boundary with four cases:
     ///
-    /// - Case 1: `1.5e20` (whole, > i64::MAX) → stays `Value::Float` (out of range).
+    /// - Case 1: `1.5e20` (whole, > `i64::MAX`) → stays `Value::Float` (out of range).
     /// - Case 2: `1_000_000.0` (whole, in range) → promoted to `Value::Int`.
     /// - Case 3: `i64::MIN as f64` (lower bound, exactly representable) → promoted.
     /// - Case 4: `i64::MAX as f64` (= 2^63 in f64, because f64 cannot represent 2^63-1
@@ -2329,7 +2325,7 @@ mod tests {
     // F-PASS12-OBS-1.
     // ---------------------------------------------------------------------------
 
-    /// `test_obs1_data_error_io_error_maps_to_source_io_error` — IoError mis-classification fix.
+    /// `test_obs1_data_error_io_error_maps_to_source_io_error` — `IoError` mis-classification fix.
     ///
     /// `data_error_to_source_error` previously had a wildcard `_` arm that mapped
     /// `DataError::IoError` (E-DAT-004) to `DataSourceError::ParseError` — incorrect.
