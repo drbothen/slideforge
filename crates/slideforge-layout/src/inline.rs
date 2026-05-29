@@ -125,6 +125,26 @@ pub fn collect_slide_titles(deck: &slideforge_types::Deck) -> HashSet<Arc<str>> 
 /// the AC-007 xref-target validation gate (BC-3.05.001 EC-002) and the
 /// E-LAY-005 depth bound.
 ///
+/// ## Scope — what is scanned and what is not (F-P5-LOW-001)
+///
+/// **Currently scanned:**
+/// - `FrameContent::TextRun(nodes)` — body text frames produced by
+///   `ContentBlock::Text` during the synthetic-frame pass in `layout::run`
+/// - `FrameContent::Shape(ShapeFrame { text: Some(nodes), .. })` — shape-embedded
+///   text (added by F-P4-MED-002)
+///
+/// **Currently NOT scanned (deferred — no story ID yet):**
+/// - `ContentBlock::Bullets(Vec<BulletItem>)` — bullet items carry inline content
+///   via `BulletItem.inlines`. The layout pass does not yet produce
+///   `FrameContent::TextRun` frames for bullet content; until those frames exist,
+///   an `InlineNode::Xref` nested inside a bullet bypasses this validation.
+///   Extending coverage requires the body-layout pass that converts
+///   `ContentBlock::Bullets` into frames. This deferral was surfaced as finding
+///   F-P5-LOW-001 in STORY-028 pass 5 and is pending a new story assignment
+///   (orchestrator to create anchor story).
+/// - Other `ContentBlock` variants that carry inline content (e.g., `Table` cell
+///   text): same dependency — frame generation must precede validation.
+///
 /// # Arguments
 ///
 /// * `deck` — The semantic deck IR (used for title collection).

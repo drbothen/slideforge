@@ -214,7 +214,15 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
         // frames so the inline validation pass (run_inline_validation) can scan them for
         // xref targets. This is the minimum content path needed for VP-049 load-bearing
         // end-to-end test. Full body content layout (positioning, font metrics) is
-        // STORY-072 scope; here we only need the TextRun frame to exist in the slide.
+        // deferred to the body-layout story (no story ID yet — tracked as a gap surfaced
+        // during STORY-028 pass 5; orchestrator to create anchor story). STORY-072 is
+        // gradient fills only and is NOT the owner of this deferral.
+        //
+        // NOTE: ContentBlock::Bullets(Vec<BulletItem>) is also NOT converted here.
+        // Bullet items carry inline content (BulletItem.inlines) that bypasses
+        // run_inline_validation. Xref validation inside bullets requires the body-layout
+        // pass to produce frames for bullet content first. See run_inline_validation
+        // rustdoc in inline.rs for the full enumeration of what is and is not scanned.
         for block in &slide.blocks {
             if let ContentBlock::Text(text_block) = &block.content {
                 // Clamp the placeholder height to page_height so the bbox always
