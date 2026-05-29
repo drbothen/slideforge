@@ -148,11 +148,15 @@ impl SqliteDataSource {
         OPEN_READONLY_CALL_COUNT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 
         Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY).map_err(|e| {
+            // F-PASS16-LOW-1: reason carries only the raw rusqlite error.
+            // The outer DataError Display already adds "[E-DAT-003] parse error for '{path}'"
+            // structural prefix, so embedding "failed to open SQLite database '{path}'" here
+            // would duplicate both the phrase and the path in the user-visible message.
             DataError::ParseError {
                 code: crate::error::E_DAT_003,
                 path: Arc::from(path),
                 format: crate::format::DataFormat::Sqlite,
-                reason: Arc::from(format!("failed to open SQLite database '{path}': {e}").as_str()),
+                reason: Arc::from(format!("{e}").as_str()),
                 span: slideforge_types::SourceSpan::default(),
             }
         })
@@ -2197,6 +2201,47 @@ mod tests {
         assert!(
             !msg.contains("only SELECT queries are allowed"),
             "non-existent table error must NOT use generic DML rejection message; got: {msg}"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // F-PASS16-LOW-1: open_readonly_connection reason must NOT duplicate the
+    // "failed to open SQLite database" prefix — the DataError Display layer adds
+    // "[E-DAT-003] parse error for '{path}'" already.
+    // ---------------------------------------------------------------------------
+
+    /// `test_f_pass16_low1_open_error_no_duplicate_prefix` -- open failure message must not
+    /// contain "failed to open `SQLite` database" twice.
+    ///
+    /// Calls `open_readonly_connection` directly with a non-existent path so that
+    /// rusqlite returns an error. The resulting `DataError` Display must contain the
+    /// phrase "failed to open `SQLite` database" at most once (from the outer `load()`
+    /// wrapper). Before the fix, the `reason` field itself embedded the same phrase,
+    /// causing the substring to appear twice in the full formatted message.
+    ///
+    /// Load-bearing (TD-VSDD-059): if the reason field is reverted to the pre-fix
+    /// `format!("failed to open SQLite database '{path}': {e}")` form, the
+    /// `occurrences > 1` assertion fails, exposing the regression.
+    ///
+    /// Traces to F-PASS16-LOW-1, BC-1.03.007 invariant 2.
+    #[test]
+    fn test_f_pass16_low1_open_error_no_duplicate_prefix() {
+        // A non-existent path causes rusqlite::Connection::open_with_flags with
+        // SQLITE_OPEN_READ_ONLY to return an error (SQLite refuses to create a new
+        // file in read-only mode). open_readonly_connection does NOT check existence
+        // itself, so rusqlite surfaces the error directly.
+        let missing_path = "/tmp/no_such_file_slideforge_f_pass16_low1_test_99999.db";
+        let err = SqliteDataSource::open_readonly_connection(missing_path)
+            .expect_err("opening a non-existent path with SQLITE_OPEN_READ_ONLY must fail");
+
+        let msg = err.to_string();
+
+        // The phrase must appear at most once in the DataError Display output.
+        let occurrences = msg.matches("failed to open SQLite database").count();
+        assert!(
+            occurrences <= 1,
+            "DataError Display must not contain 'failed to open SQLite database' more than once \
+            (F-PASS16-LOW-1 duplicate prefix regression). Found {occurrences} occurrence(s) in: {msg}"
         );
     }
 
