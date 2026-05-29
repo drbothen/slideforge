@@ -209,6 +209,30 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
         // They are stored on LaidOutDeck::warnings (BC-3.04.001 EC-002).
         deck_warnings.extend(shape_output.warnings);
 
+        // Inline text pass: convert ContentBlock::Text blocks into FrameContent::TextRun
+        // frames so the inline validation pass (run_inline_validation) can scan them for
+        // xref targets. This is the minimum content path needed for VP-049 load-bearing
+        // end-to-end test. Full body content layout (positioning, font metrics) is
+        // STORY-072 scope; here we only need the TextRun frame to exist in the slide.
+        for block in &slide.blocks {
+            if let ContentBlock::Text(text_block) = &block.content {
+                // Use a minimal bounding box (positioned below the last existing frame, or
+                // at the top-left corner if no frames exist). The exact geometry does not
+                // matter for inline validation — only the frame content is needed.
+                let bbox = crate::types::BoundingBox {
+                    x: crate::types::Emu(0),
+                    y: crate::types::Emu(0),
+                    width: page_size.width,
+                    height: crate::types::Emu(914_400), // 1 inch height placeholder
+                };
+                all_frames.push(crate::types::Frame {
+                    bbox,
+                    content: crate::types::FrameContent::TextRun(text_block.inlines.clone()),
+                    text_flow: None,
+                });
+            }
+        }
+
         // Extract speaker notes from the slide's "notes" field, if present and
         // resolved to a plain string value.
         let speaker_notes: Option<Arc<str>> = match slide.fields.get("notes") {

@@ -327,13 +327,13 @@ mod tests {
     }
 
     fn make_laid_out_slide_with_text_run(
-        slide_index: usize,
+        source_slide_index: usize,
         nodes: Vec<InlineNode>,
     ) -> crate::types::LaidOutSlide {
         use crate::types::{BoundingBox, Emu, Frame, FrameContent, LaidOutSlide};
 
         LaidOutSlide {
-            source_index: slide_index,
+            source_index: source_slide_index,
             slide_type_keyword: Arc::from("bullets"),
             frames: vec![Frame {
                 bbox: BoundingBox {
@@ -350,11 +350,11 @@ mod tests {
         }
     }
 
-    fn make_laid_out_slide_empty(slide_index: usize) -> crate::types::LaidOutSlide {
+    fn make_laid_out_slide_empty(source_slide_index: usize) -> crate::types::LaidOutSlide {
         use crate::types::{BoundingBox, Emu, Frame, FrameContent, LaidOutSlide};
 
         LaidOutSlide {
-            source_index: slide_index,
+            source_index: source_slide_index,
             slide_type_keyword: Arc::from("title"),
             frames: vec![Frame {
                 bbox: BoundingBox {

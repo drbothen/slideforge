@@ -967,8 +967,92 @@ mod tests {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // F-HIGH-004 — End-to-end fill+text propagation through layout::run
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// F-HIGH-004 — `layout::run` preserves shape fill and text through the full pipeline.
+    ///
+    /// A `ShapeSpec` with `fill: FillSpec::SolidColor(Rgb { r: 0, g: 55, b: 102 })`
+    /// AND `text: Some(vec![InlineNode::Plain(Arc::from("Hello"))])` must produce
+    /// a `FrameContent::Shape` frame where both fields are preserved verbatim.
+    ///
+    /// Load-bearing: if the layout code drops fill or text during shape→frame conversion
+    /// (e.g., in `build_shape_frame`), the equality assertions below fail.
+    #[test]
+    fn test_h_high_004_shape_fill_and_text_propagate_through_layout_run() {
+        use slideforge_types::{
+            AltText, Block, ContentBlock, FillSpec, InlineNode, Rgb, ShapePosition, ShapeSpec,
+            ShapeType, ShapeUnit,
+        };
+        use crate::types::FrameContent;
+
+        let expected_fill = FillSpec::SolidColor(Rgb { r: 0, g: 55, b: 102 });
+        let expected_text = vec![InlineNode::Plain(Arc::from("Hello"))];
+
+        let shape_spec = ShapeSpec {
+            shape_type: ShapeType::Rect,
+            position: ShapePosition {
+                x: ShapeUnit::Inches(500),       // 0.5in
+                y: ShapeUnit::Inches(1000),      // 1.0in
+                width: ShapeUnit::Inches(2000),  // 2.0in
+                height: ShapeUnit::Inches(1000), // 1.0in
+            },
+            fill: expected_fill.clone(),
+            text: Some(expected_text.clone()),
+            alt: Some(AltText::Provided(Arc::from("fill-text test rect"))),
+            decorative: false,
+            span: SourceSpan::default(),
+        };
+        let block = Block {
+            content: ContentBlock::Shape(shape_spec),
+            label: None,
+            span: SourceSpan::default(),
+        };
+        let slide = Slide {
+            slide_type: Arc::from("title"),
+            fields: OrderedMap::new(),
+            blocks: vec![block],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+        };
+        let deck = make_deck(vec![slide]);
+        let brand = make_brand();
+        let result = run(&deck, &brand).expect("layout::run must succeed for F-HIGH-004 test");
+
+        // Find the shape frame in the output.
+        let slide_out = &result.slides[0];
+        let shape_frame = slide_out
+            .frames
+            .iter()
+            .find_map(|f| match &f.content {
+                FrameContent::Shape(sf) => Some(sf),
+                _ => None,
+            })
+            .expect("must have a FrameContent::Shape frame");
+
+        // F-HIGH-004 load-bearing: fill must be preserved verbatim.
+        assert_eq!(
+            shape_frame.fill,
+            expected_fill,
+            "fill must propagate through layout::run unchanged; \
+             expected SolidColor(Rgb(0,55,102)), got: {:?}",
+            shape_frame.fill
+        );
+
+        // F-HIGH-004 load-bearing: text must be preserved verbatim.
+        assert_eq!(
+            shape_frame.text.as_deref(),
+            Some(expected_text.as_slice()),
+            "text must propagate through layout::run unchanged; \
+             expected Some([Plain(\"Hello\")]), got: {:?}",
+            shape_frame.text
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // VP-049 — LaidOutDeck.warnings wired: off-canvas shape warning flows through
-    // VP-050 — LaidOutDeck.warnings wired: unknown xref warning flows through
+    // VP-050 — LaidOutDeck.warnings wired: shape frame after regions
     // ─────────────────────────────────────────────────────────────────────────
 
     /// VP-049 — `layout::run` propagates off-canvas shape warnings to
@@ -1026,53 +1110,148 @@ mod tests {
         );
     }
 
-    /// VP-050 — `layout::run` propagates xref-not-found warnings to
+    /// VP-049 — `layout::run` propagates xref-not-found warnings to
     /// `LaidOutDeck.warnings` (BC-3.05.001 EC-002 / AC-007).
     ///
-    /// A `TextRun` frame with an unknown `Xref` target must produce a
-    /// `XrefTargetNotFound` warning in `LaidOutDeck.warnings`.
+    /// A slide with a `ContentBlock::Text` block that contains an `Xref` to an
+    /// unknown target must produce a `XrefTargetNotFound` warning in
+    /// `LaidOutDeck.warnings` returned by `layout::run`.
     ///
     /// Load-bearing: if `deck_warnings.extend(inline_warnings)` is removed from
-    /// `layout::run`, this assertion fails.
+    /// `layout::run`, this assertion fails — the warning is produced by
+    /// `run_inline_validation` but never surfaced on the returned `LaidOutDeck`.
+    ///
+    /// F-CRIT-002: this test calls `layout::run` end-to-end (not `run_inline_validation`
+    /// directly), making it load-bearing per the VP-049 contract.
     #[test]
-    fn test_vp_050_layout_run_xref_warning_in_laid_out_deck_warnings() {
-        use crate::inline::run_inline_validation;
-        use crate::types::{BoundingBox, Frame, FrameContent, LaidOutSlide, LayoutWarning};
-        use slideforge_types::{Emu, InlineNode};
+    fn test_vp_049_layout_run_xref_warning_in_laid_out_deck_warnings() {
+        use slideforge_types::{Block, ContentBlock, InlineNode, TextBlock};
+        use crate::types::LayoutWarning;
 
         let xref_target = Arc::from("__nonexistent_slide__");
-        let text_run_frame = Frame {
-            bbox: BoundingBox {
-                x: Emu(0),
-                y: Emu(0),
-                width: Emu(1_000_000),
-                height: Emu(500_000),
-            },
-            content: FrameContent::TextRun(vec![InlineNode::Xref(Arc::clone(&xref_target))]),
-            text_flow: None,
+        let text_block = TextBlock {
+            inlines: vec![InlineNode::Xref(Arc::clone(&xref_target))],
+            span: SourceSpan::default(),
         };
-        let laid_out_slide = LaidOutSlide {
-            source_index: 0,
-            slide_type_keyword: Arc::from("title"),
-            frames: vec![text_run_frame],
-            speaker_notes: None,
-            register_tags: vec![],
+        let block = Block {
+            content: ContentBlock::Text(text_block),
+            label: None,
+            span: SourceSpan::default(),
         };
-        let deck = make_deck(vec![make_slide("title")]);
+        let slide = Slide {
+            slide_type: Arc::from("title"),
+            fields: OrderedMap::new(),
+            blocks: vec![block],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+        };
+        let deck = make_deck(vec![slide]);
+        let brand = make_brand();
 
-        // Call run_inline_validation directly (same path wired in layout::run).
-        let warnings = run_inline_validation(&deck, &[laid_out_slide])
-            .expect("run_inline_validation must not error for unknown xref");
+        // VP-049: call layout::run end-to-end. The TextRun frame produced from the
+        // ContentBlock::Text block must trigger run_inline_validation, and the
+        // XrefTargetNotFound warning must appear on LaidOutDeck.warnings.
+        let result = run(&deck, &brand).expect("layout::run must succeed for unknown xref (warning, not error)");
 
-        // VP-050: the XrefTargetNotFound warning must be present.
+        // VP-049 load-bearing assertion: warnings must contain XrefTargetNotFound.
+        // If deck_warnings.extend(inline_warnings) is removed from layout::run,
+        // this fails (result.warnings would be empty).
         assert!(
-            warnings.iter().any(|w| matches!(
+            result.warnings.iter().any(|w| matches!(
                 w,
                 LayoutWarning::XrefTargetNotFound { target, .. }
                 if target.as_ref() == "__nonexistent_slide__"
             )),
-            "warnings must contain XrefTargetNotFound for '__nonexistent_slide__'; \
-             got: {warnings:?}"
+            "LaidOutDeck.warnings must contain XrefTargetNotFound for '__nonexistent_slide__'; \
+             got: {:?}",
+            result.warnings
+        );
+    }
+
+    /// VP-050 — `layout::run` places shape frames AFTER all placeholder/region frames
+    /// in `LaidOutSlide.frames` (BC-3.04.001 v1.4 PC-3 / interface-definitions §9.3).
+    ///
+    /// A slide with region-map placeholders AND a `ContentBlock::Shape` block must
+    /// produce a `LaidOutSlide` where:
+    /// - The first N frames correspond to the region-map placeholders (not Shape)
+    /// - The shape frames appear after all placeholder frames
+    ///
+    /// Load-bearing:
+    /// - If shape frames are inserted BEFORE region frames, the index assertion fails.
+    /// - If placeholder frames are produced as Shape variants, the `!matches!` assertion fails.
+    ///
+    /// F-CRIT-001: this test uses `layout::run` end-to-end (not layout_shapes directly).
+    #[test]
+    fn test_vp_050_layout_run_shape_frame_after_regions() {
+        use slideforge_types::{
+            AltText, Block, ContentBlock, FillSpec, ShapePosition, ShapeSpec, ShapeType, ShapeUnit,
+        };
+        use crate::types::FrameContent;
+
+        // Build a slide with a shape block — layout::run produces region frames first,
+        // then appends shape frames (BC-3.04.001 postcondition 4 / PC-3).
+        let shape_spec = ShapeSpec {
+            shape_type: ShapeType::Rect,
+            position: ShapePosition {
+                x: ShapeUnit::Inches(500),       // 0.5in
+                y: ShapeUnit::Inches(1000),      // 1.0in
+                width: ShapeUnit::Inches(2000),  // 2.0in
+                height: ShapeUnit::Inches(1000), // 1.0in
+            },
+            fill: FillSpec::None,
+            text: None,
+            alt: Some(AltText::Provided(Arc::from("vp050 rect"))),
+            decorative: false,
+            span: SourceSpan::default(),
+        };
+        let block = Block {
+            content: ContentBlock::Shape(shape_spec),
+            label: None,
+            span: SourceSpan::default(),
+        };
+        let slide = Slide {
+            slide_type: Arc::from("title"),
+            fields: OrderedMap::new(),
+            blocks: vec![block],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+        };
+        let deck = make_deck(vec![slide]);
+        let brand = make_brand();
+
+        let result = run(&deck, &brand).expect("layout::run must succeed for VP-050 test");
+        let slide_out = &result.slides[0];
+
+        // Find the index of the first Shape frame.
+        let first_shape_index = slide_out
+            .frames
+            .iter()
+            .position(|f| matches!(f.content, FrameContent::Shape(_)))
+            .expect("must have at least one shape frame");
+
+        // VP-050 PC-3: shape frames appear AFTER all placeholder/region frames.
+        // All frames before the first shape must NOT be Shape variants.
+        let region_frame_count = first_shape_index;
+        assert!(
+            region_frame_count > 0,
+            "a 'title' slide must have at least one region-map frame before the shape frame; \
+             first_shape_index was 0, meaning no region frames precede it"
+        );
+        for (idx, frame) in slide_out.frames[..region_frame_count].iter().enumerate() {
+            assert!(
+                !matches!(frame.content, FrameContent::Shape(_)),
+                "VP-050: placeholder frame at index {idx} must not be a Shape variant; \
+                 got: {:?}",
+                frame.content
+            );
+        }
+
+        // Load-bearing: shape frame IS present.
+        assert!(
+            matches!(slide_out.frames[first_shape_index].content, FrameContent::Shape(_)),
+            "frame at first_shape_index ({first_shape_index}) must be FrameContent::Shape"
         );
     }
 
