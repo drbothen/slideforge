@@ -1,10 +1,10 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.3.1"
+version: "1.3.2"
 status: active
 producer: product-owner
-timestamp: 2026-05-28T00:00:00
+timestamp: 2026-05-29T00:00:00
 phase: 1a
 inputs: [domain-spec/L2-INDEX.md]
 input-hash: "[pending]"
@@ -14,7 +14,7 @@ subsystem: SS-TBD
 capability: CAP-024
 lifecycle_status: active
 introduced: v1.0.0
-modified: ["v1.2 — adversary pass 1 adjudication: variant count corrected to 12, payload shapes corrected to Vec<InlineNode> for structured variants, inline depth bound added (max 64), math xref validation boundary codified", "v1.3 — story spec AC-005 enum example corrected to match production types", "v1.3.1 — VP propagation burst: assigned VP-043 through VP-047 to all VP-TBD entries"]
+modified: ["v1.2 — adversary pass 1 adjudication: variant count corrected to 12, payload shapes corrected to Vec<InlineNode> for structured variants, inline depth bound added (max 64), math xref validation boundary codified", "v1.3 — story spec AC-005 enum example corrected to match production types", "v1.3.1 — VP propagation burst: assigned VP-043 through VP-047 to all VP-TBD entries", "v1.3.2 — adversary pass 2 adjudications S/O: LayoutError::Multiple smart constructor invariants codified; XrefTargetNotFound warnings must reach LaidOutDeck.warnings (not silently dropped)"]
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -133,6 +133,23 @@ Per output format:
 6. The layout stage preserves `InlineNode` sequences verbatim in `FrameContent::TextRun`.
    Exporters translate per-format; the layout stage does NOT produce format-specific
    markup.
+7. **XrefTargetNotFound warnings must reach LaidOutDeck.warnings (Item O).** The layout
+   runner (`layout::run`) MUST NOT silently drop `LayoutWarning::XrefTargetNotFound`
+   events produced by `run_inline_validation`. They MUST be accumulated in
+   `LaidOutDeck.warnings: Vec<LayoutWarning>` and returned to the caller. A layout
+   runner that drops warnings without propagating them violates this BC and BC-3.04.001
+   postcondition 7. (CLAUDE.md Rule 4: AI-built defects are the AI's responsibility to fix)
+8. **LayoutError::Multiple smart constructor invariants (Item S).** The constructor
+   `LayoutError::multiple(errors: Vec<Self>) -> Self` enforces these invariants at
+   all call sites:
+   - `errors` MUST be non-empty. An empty vec triggers `debug_assert!` (panics in
+     debug builds; undefined behavior in release would be worse — the assert makes
+     the bug visible). An empty `Multiple` is a logic error in the accumulation loop.
+   - Nested `Multiple` variants MUST be flattened. `multiple(vec![Multiple { inner }])`
+     MUST produce `Multiple { inner: flattened_vec }`, NOT
+     `Multiple { inner: vec![Multiple { inner }] }`. Nested `Multiple` values are
+     unreachable from correct callers but the constructor defends against misuse.
+   See interface-definitions.md §9 for the full constructor contract.
 
 ## Math Xref Validation Boundary
 

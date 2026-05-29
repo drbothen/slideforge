@@ -2,10 +2,10 @@
 document_type: prd-supplement
 supplement_type: interface-definitions
 level: L3
-version: "1.2"
+version: "1.3"
 status: active
 producer: product-owner
-timestamp: 2026-05-28T00:00:00
+timestamp: 2026-05-29T00:00:00
 phase: 1a
 traces_to: .factory/specs/prd.md
 primary_consumers: [implementer, test-writer]
@@ -563,3 +563,113 @@ When adding a new `LayoutError` variant:
 - If the variant is slide-independent (e.g., empty deck): include `source_slide_index: usize`
   set to `0` for structural consistency (as `EmptyDeck` does)
 - Never use `slide_index`, `idx`, `slide_idx`, or other spellings
+
+---
+
+## 9. Shape IR Conventions (Adjudicated 2026-05-29)
+
+> Codified in adversary pass 2 on STORY-028, items M, N, O, P, S.
+
+### 9.1 `LayoutError::multiple` — Smart Constructor (Item S / Item N)
+
+```rust
+impl LayoutError {
+    /// Construct a Multiple variant from an accumulated error list.
+    ///
+    /// # Panics (debug builds)
+    /// Panics via `debug_assert!` if `errors` is empty — an empty Multiple
+    /// is a logic error in the accumulation loop and must not silently pass.
+    ///
+    /// # Flattening
+    /// If any element of `errors` is itself `LayoutError::Multiple { inner }`,
+    /// that inner vec is flattened into the result. No nested Multiple values
+    /// are produced by this constructor.
+    pub fn multiple(errors: Vec<Self>) -> Self {
+        debug_assert!(!errors.is_empty(), "LayoutError::multiple called with empty vec");
+        let flattened: Vec<Self> = errors
+            .into_iter()
+            .flat_map(|e| match e {
+                LayoutError::Multiple { inner } => inner,
+                other => vec![other],
+            })
+            .collect();
+        LayoutError::Multiple { inner: flattened }
+    }
+}
+```
+
+**Usage rule:** ALL call sites that accumulate layout errors into a `Vec<LayoutError>` and
+then return an error MUST use `LayoutError::multiple(accumulated)` rather than constructing
+`LayoutError::Multiple { inner: accumulated }` directly. This ensures the flattening and
+empty-guard invariants are consistently applied.
+
+**Uniformity rule:** Even when only one error is accumulated, the return MUST be
+`LayoutError::multiple(vec![one_error])`, which produces `Multiple { inner: vec![one_error] }`.
+Callers pattern-match exclusively on `Multiple`. The asymmetric "single error = unwrapped
+variant" API is explicitly forbidden per BC-3.04.001 postcondition 6.
+
+### 9.2 `ShapeType::from_keyword` — Parser Bridge (Item P)
+
+```rust
+impl ShapeType {
+    /// Convert a DSL keyword string to the resolved ShapeType enum variant.
+    ///
+    /// Called by: the DSL parser (future story) and ALL test construction sites.
+    /// The IR MUST NOT store Arc<str> in ShapeSpec.shape_type.
+    ///
+    /// Returns Err(ParseError::UnknownShapeType { keyword, span }) on unknown input,
+    /// which the caller maps to E-PAR-012.
+    pub fn from_keyword(kw: &str) -> Result<ShapeType, ParseError>;
+}
+```
+
+Accepted keywords (case-sensitive): `rect`, `ellipse`, `arrow`, `line`, `star`, `roundRect`.
+All other inputs return `Err`. Keyword matching is case-sensitive and exact — no fuzzy matching.
+
+This function lives in `slideforge-types` (alongside `ShapeType`) so that both the parser
+crate and test helpers can depend on it without introducing additional crate dependencies.
+
+### 9.3 `LaidOutDeck.warnings` — Warnings Field (Item O)
+
+```rust
+pub struct LaidOutDeck {
+    // ... existing fields ...
+    /// Accumulated layout warnings from layout::run.
+    /// Populated by both run_inline_validation (XrefTargetNotFound) and
+    /// layout_shapes (OffCanvas). NEVER empty-initialized and then dropped;
+    /// the field is always present and callers may inspect it.
+    pub warnings: Vec<LayoutWarning>,
+}
+```
+
+`layout::run` is responsible for collecting ALL `LayoutWarning` values from both
+`run_inline_validation` and `layout_shapes` and placing them in this field.
+Exporters are consumers of `LaidOutDeck.warnings`; they MAY surface or suppress
+individual warning types but MUST NOT further lose warnings.
+
+The `LayoutWarning` enum variants relevant here:
+- `LayoutWarning::XrefTargetNotFound { target: Arc<str>, source_slide_index: usize }`
+- `LayoutWarning::OffCanvas { source_slide_index: usize, shape_type: ShapeType, x_emu: i64, y_emu: i64 }`
+
+Both variants use `source_slide_index` (consistent with the §8 field-naming convention).
+
+### 9.4 ArithmeticOverflow Error Return (Item M)
+
+`ShapeUnit::from_inches` and `ShapeUnit::from_em` MUST use `i64::checked_mul` for the
+milliunit-to-EMU multiplication. On overflow, they MUST return
+`Err(LayoutError::ArithmeticOverflow { source_slide_index, span })`.
+
+```rust
+impl ShapeUnit {
+    /// Convert to EMU at layout time given the current brand font size.
+    ///
+    /// Returns Err on i64 overflow — the caller accumulates this into
+    /// LayoutError::multiple(accumulated_errors).
+    pub fn to_emu(&self, brand_font_size_emu: i64, source_slide_index: usize, span: SourceSpan)
+        -> Result<i64, LayoutError>;
+}
+```
+
+`saturating_mul` without an error return is explicitly forbidden. The `ArithmeticOverflow`
+variant MUST be reachable from production code; it is NOT a "future strict-mode" concern.
+It maps to E-LAY-006 in the CLI diagnostic renderer.

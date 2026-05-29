@@ -2,10 +2,10 @@
 document_type: prd-supplement
 supplement_type: error-taxonomy
 level: L3
-version: "1.2"
+version: "1.3"
 status: active
 producer: product-owner
-timestamp: 2026-05-28T00:00:00
+timestamp: 2026-05-29T00:00:00
 phase: 1a
 traces_to: .factory/specs/prd.md
 primary_consumers: [implementer, test-writer]
@@ -95,6 +95,7 @@ slideforge.toml to promote to a blocking error.
 | E-LAY-003 | degraded | 2 (if strict-overflow) | `Chart data is empty for slide '<title>'. Rendering error-slide placeholder.` | CAP-013, DEC-014 |
 | E-LAY-004 | broken | 2 | `Shape at slide <slide_index> (<file>:<line>:<col>) has no alt text and is not marked decorative: true. Add alt "..." or decorative: true.` | BC-3.04.001 EC-001, DI-001, CAP-023 |
 | E-LAY-005 | broken | 2 | `Inline nesting depth exceeded at slide <slide_index>: depth <depth> exceeds maximum of 64. Flatten the inline tree.` | BC-3.05.001 EC-006, CAP-024 |
+| E-LAY-006 | broken | 2 | `Arithmetic overflow computing EMU for shape position at slide <source_slide_index> (<file>:<line>:<col>). Value <value> in <unit> exceeds i64 range after conversion. Use a value ≤ 9,007,199,254 inches (approximately 9.0 × 10⁹ in).` | BC-3.04.001 EC-014, EC-015, CAP-023 |
 
 Note (E-LAY-004): This is the layout-layer defensive check for missing alt text on
 shapes. `LayoutError::MissingAlt` maps to E-LAY-004 in the CLI diagnostic renderer.
@@ -113,6 +114,16 @@ truth per CLAUDE.md precedence rule — the header doc is earlier and more autho
 than individual variant choices). Data-engineer must rename `slide_index` → `source_slide_index`
 on `MissingAlt`, `MissingRiskCardField`, `MalformedSeverityCards`, and
 `UnresolvedSeverityCards` in a follow-up fix burst anchored to STORY-028.
+
+Note (E-LAY-006): `LayoutError::ArithmeticOverflow { source_slide_index: usize, span: SourceSpan }`
+maps to E-LAY-006. This error is produced when `ShapeUnit::from_inches` or `ShapeUnit::from_em`
+detects i64 overflow during the milliunit-to-EMU multiplication (the `checked_mul` path).
+Silent saturation via `saturating_mul` is FORBIDDEN — it would produce garbage coordinates
+in the IR. The `ArithmeticOverflow` variant MUST have a load-bearing constructor path (it
+is NOT dead code); any implementation that marks it `#[allow(dead_code)]` or documents it
+as "future strict-mode validator" is in direct violation of BC-3.04.001 invariant 8 and
+CLAUDE.md Rule 3 (no AI-added tech-debt register entries without explicit human direction).
+Adjudicated in adversary pass 2 on STORY-028, item M (2026-05-29).
 
 ---
 
