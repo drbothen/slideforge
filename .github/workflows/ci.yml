@@ -245,11 +245,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if find . -path '*/benches/build_bench.rs' | grep -q .; then
+          # F-PASS12-OBS-3: match ANY benches/*.rs file across the workspace, not
+          # just crates/slideforge-cli/benches/build_bench.rs. This ensures that
+          # benchmark files in other crates (e.g. slideforge-data/benches/data_sources.rs)
+          # also activate the perf-smoke gate.
+          if find . -path '*/benches/*.rs' | grep -q .; then
             echo "has_benches=true" >> "$GITHUB_OUTPUT"
           else
             echo "has_benches=false" >> "$GITHUB_OUTPUT"
-            echo "No benchmark fixtures found (expected at crates/slideforge-cli/benches/build_bench.rs). Skipping bench gate — will activate in Phase 3."
+            echo "No benchmark fixtures found (pattern: */benches/*.rs). Skipping bench gate — will activate in Phase 3."
           fi
       - name: cargo bench --no-run (compile check only when no fixtures)
         if: steps.bench-check.outputs.has_benches == 'false'
