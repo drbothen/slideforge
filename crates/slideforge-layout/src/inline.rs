@@ -51,9 +51,9 @@ use crate::types::LayoutWarning;
 /// * `known_slide_titles` — The set of slide title strings from the deck.
 /// * `slide_index` — Zero-based index of the slide being validated.
 /// * `warnings` — Mutable sink for accumulated warnings (DI-018).
-pub fn validate_inline_nodes(
+pub fn validate_inline_nodes<S: ::std::hash::BuildHasher>(
     nodes: &[InlineNode],
-    known_slide_titles: &HashSet<Arc<str>>,
+    known_slide_titles: &HashSet<Arc<str>, S>,
     slide_index: usize,
     warnings: &mut Vec<LayoutWarning>,
 ) {
@@ -127,9 +127,9 @@ pub fn run_inline_validation(
 /// This is the recursive helper for [`validate_inline_nodes`]. It MUST NOT use
 /// a wildcard `_ => {}` catch-all — every `InlineNode` variant must be
 /// explicitly handled (AC-005 / architecture rule 4).
-pub fn check_inline_node(
+pub fn check_inline_node<S: ::std::hash::BuildHasher>(
     node: &InlineNode,
-    known_slide_titles: &HashSet<Arc<str>>,
+    known_slide_titles: &HashSet<Arc<str>, S>,
     slide_index: usize,
     warnings: &mut Vec<LayoutWarning>,
 ) {
@@ -170,7 +170,7 @@ pub fn check_inline_node(
 }
 
 #[cfg(test)]
-#[allow(clippy::missing_docs_in_private_items, clippy::unwrap_used)]
+#[allow(clippy::missing_docs_in_private_items, clippy::unwrap_used, clippy::doc_markdown)]
 mod tests {
     use super::*;
     use slideforge_types::{InlineNode, MathNode, SourceSpan};

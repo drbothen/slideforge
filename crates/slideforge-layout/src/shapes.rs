@@ -290,7 +290,7 @@ pub fn build_shape_frame(
 }
 
 #[cfg(test)]
-#[allow(clippy::missing_docs_in_private_items, clippy::unwrap_used)]
+#[allow(clippy::missing_docs_in_private_items, clippy::unwrap_used, clippy::doc_markdown)]
 mod tests {
     use super::*;
     use crate::types::{DEFAULT_PAGE_HEIGHT, DEFAULT_PAGE_WIDTH};

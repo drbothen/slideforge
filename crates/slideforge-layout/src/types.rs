@@ -340,7 +340,7 @@ pub struct ShapeFrame {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum LayoutWarning {
     /// A shape's declared position extends outside the slide canvas (AC-003 /
-    /// BC-3.04.001 EC-002). Negative x or y, or x+width > page_width, etc.
+    /// BC-3.04.001 EC-002). Negative x or y, or x+width > `page_width`, etc.
     OffCanvas {
         /// Zero-based index of the slide containing the off-canvas shape.
         slide_index: usize,
