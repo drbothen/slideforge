@@ -53,7 +53,7 @@ pub fn parse_csv(source: &str, path: &str) -> Result<Value, DataError> {
         .map_err(|e| DataError::parse_error(path, DataFormat::Csv, e.to_string()))?
         .clone();
 
-    let headers: Vec<Arc<str>> = raw_headers.iter().map(|h| Arc::from(h)).collect();
+    let headers: Vec<Arc<str>> = raw_headers.iter().map(Arc::from).collect();
 
     // Detect duplicate headers
     let mut seen: HashSet<&str> = HashSet::new();
