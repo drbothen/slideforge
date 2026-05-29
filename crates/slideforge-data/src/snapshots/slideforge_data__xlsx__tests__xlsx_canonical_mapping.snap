@@ -1,0 +1,38 @@
+---
+source: crates/slideforge-data/src/xlsx.rs
+expression: result
+---
+List(
+    [
+        Map(
+            OrderedMap(
+                {
+                    "name": Str(
+                        "Alice",
+                    ),
+                    "score": Float(
+                        95.0,
+                    ),
+                    "active": Bool(
+                        true,
+                    ),
+                },
+            ),
+        ),
+        Map(
+            OrderedMap(
+                {
+                    "name": Str(
+                        "Bob",
+                    ),
+                    "score": Float(
+                        87.0,
+                    ),
+                    "active": Bool(
+                        false,
+                    ),
+                },
+            ),
+        ),
+    ],
+)

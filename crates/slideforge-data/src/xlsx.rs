@@ -36,11 +36,15 @@
 
 use std::sync::Arc;
 
-use calamine::{Data, Xlsx};
+use calamine::{Data, Dimensions, Reader, Xlsx, open_workbook};
+use ordered_float::OrderedFloat;
 use slideforge_plugin_api::{DataSource, DataSourceError, DataSourceOptions};
 use slideforge_types::Value;
+use slideforge_types::ordered_map::OrderedMap;
+use tracing::instrument;
 
 use crate::DataError;
+use crate::format::DataFormat;
 
 /// The built-in Excel XLSX data source plugin.
 ///
@@ -107,6 +111,7 @@ impl DataSource for XlsxDataSource {
     /// missing sheet, empty header, merged header cells, or parse failure.
     ///
     /// Traces to BC-1.03.006 postconditions 1-7.
+    #[instrument(skip(self, _opts), fields(path = %self.path))]
     fn load(&self, uri: &str, _opts: &DataSourceOptions) -> Result<Value, DataSourceError> {
         // Resolve the effective path: prefer uri if non-empty, fall back to self.path.
         let path_str: &str = if uri.is_empty() {
@@ -114,12 +119,79 @@ impl DataSource for XlsxDataSource {
         } else {
             uri
         };
-        todo!(
-            "BC-1.03.006: open workbook, validate header row, \
-            convert rows to Value::List(Vec<Value::Map>); \
-            path={path_str:?}, sheet={:?}",
-            self.sheet
-        )
+
+        // AC-005: Reject .xls (legacy format) before touching the file.
+        // Traces to BC-1.03.006 invariant 3, edge case EC-002.
+        reject_xls_extension(path_str)
+            .map_err(|e| data_error_to_source_error(path_str, &e))?;
+
+        // Check file existence before trying to open as workbook (better error).
+        if !std::path::Path::new(path_str).exists() {
+            return Err(DataSourceError::IoError {
+                uri: path_str.to_owned(),
+                message: format!("file not found: {path_str}"),
+            });
+        }
+
+        // Open workbook via calamine.
+        let mut workbook: Xlsx<_> = open_workbook(path_str).map_err(|e| {
+            DataSourceError::ParseError {
+                uri: path_str.to_owned(),
+                message: format!("failed to open xlsx workbook '{path_str}': {e}"),
+            }
+        })?;
+
+        // Select the target sheet (returns (sheet_name, range)).
+        let (sheet_name, range) = select_sheet(&mut workbook, self.sheet.as_deref(), path_str)
+            .map_err(|e| data_error_to_source_error(path_str, &e))?;
+
+        // AC-006: Check for merged cells in the header row (row 0) using the
+        // workbook-level merge metadata.
+        // Traces to BC-1.03.006 edge case EC-005.
+        if let Some(Ok(merge_dims)) = workbook.worksheet_merge_cells(&sheet_name) {
+            for dim in &merge_dims {
+                // A merge covering row 0 (header row) spanning >1 column is invalid.
+                let (start_row, start_col) = dim.start;
+                let (end_row, end_col) = dim.end;
+                if start_row == 0 && end_row == 0 && end_col > start_col {
+                    return Err(DataSourceError::ParseError {
+                        uri: path_str.to_owned(),
+                        message: format!(
+                            "merged cells in header row are not supported at {path_str}:1:{}",
+                            start_col + 1
+                        ),
+                    });
+                }
+            }
+        }
+
+        // Validate header row and extract column names.
+        // AC-002: empty header row → ParseError.
+        let headers = extract_headers(&range, path_str)
+            .map_err(|e| data_error_to_source_error(path_str, &e))?;
+
+        // Convert data rows (skip row 0, which is the header row).
+        let mut rows: Vec<Value> = Vec::new();
+        let row_count = range.height();
+        let col_count = range.width();
+
+        for row_idx in 1..row_count {
+            let mut map = OrderedMap::new();
+            for col_idx in 0..col_count {
+                let header = headers
+                    .get(col_idx)
+                    .cloned()
+                    .unwrap_or_else(|| Arc::from(format!("col_{col_idx}").as_str()));
+                // Excel limits: max 1,048,576 rows × 16,384 cols — both fit u32.
+                #[allow(clippy::cast_possible_truncation)]
+                let cell = range.get_value((row_idx as u32, col_idx as u32));
+                let value = cell.map_or(Value::Null, convert_calamine_cell);
+                map.insert(header, value);
+            }
+            rows.push(Value::Map(map));
+        }
+
+        Ok(Value::List(rows))
     }
 }
 
@@ -139,21 +211,45 @@ impl DataSource for XlsxDataSource {
 /// formula cached values are represented by one of the above variants directly.
 ///
 /// Traces to BC-1.03.006 postconditions 4-7 (cell type mapping).
-#[allow(dead_code)] // Implementer will call this from DataSource::load
 fn convert_calamine_cell(cell: &Data) -> Value {
-    todo!(
-        "BC-1.03.006: map calamine::Data variant {:?} to the correct Value variant \
-        (Int=>Int, Float=>Float, Bool=>Bool, String=>Str, Empty=>Null, DateTime=>Str ISO 8601, \
-        Error=>Null)",
-        cell
-    )
+    match cell {
+        Data::Int(n) => Value::Int(*n),
+        Data::Float(f) => Value::Float(OrderedFloat(*f)),
+        Data::String(s) | Data::DateTimeIso(s) | Data::DurationIso(s) => {
+            Value::Str(Arc::from(s.as_str()))
+        }
+        Data::Bool(b) => Value::Bool(*b),
+        Data::DateTime(dt) => {
+            // Convert calamine's ExcelDateTime to an ISO 8601 string.
+            // as_datetime() requires the calamine "dates" feature (chrono integration).
+            // NaiveDateTime Display formats as "YYYY-MM-DD HH:MM:SS".
+            // We convert the space to "T" and strip the time part if midnight.
+            if let Some(naive_dt) = dt.as_datetime() {
+                // NaiveDateTime::to_string() → "YYYY-MM-DD HH:MM:SS"
+                let raw = naive_dt.to_string();
+                // Convert to ISO 8601: replace space with "T"
+                let iso = raw.replace(' ', "T");
+                // If time is 00:00:00, emit date-only format.
+                let dt_str = if iso.ends_with("T00:00:00") {
+                    iso[..10].to_owned()
+                } else {
+                    iso
+                };
+                Value::Str(Arc::from(dt_str.as_str()))
+            } else {
+                // Fallback: raw float serial number as string (should not occur
+                // in practice with well-formed xlsx files).
+                Value::Str(Arc::from(format!("{dt}").as_str()))
+            }
+        }
+        Data::Error(_) | Data::Empty => Value::Null,
+    }
 }
 
 /// Convert a [`DataError`] from the XLSX layer to a [`DataSourceError`].
 ///
 /// Used at the `DataSource::load` boundary to convert rich internal errors to
 /// the plugin-api error type.
-#[allow(dead_code)] // Implementer will call this from DataSource::load
 fn data_error_to_source_error(path: &str, err: &DataError) -> DataSourceError {
     match err {
         DataError::FileNotFound { .. } => DataSourceError::IoError {
@@ -161,7 +257,7 @@ fn data_error_to_source_error(path: &str, err: &DataError) -> DataSourceError {
             message: err.to_string(),
         },
         DataError::UnsupportedFormat { .. } => DataSourceError::UnsupportedUri {
-            uri: path.to_owned(),
+            uri: format!("{path} (.xls is not supported; convert to .xlsx)"),
         },
         _ => DataSourceError::ParseError {
             uri: path.to_owned(),
@@ -177,33 +273,149 @@ fn data_error_to_source_error(path: &str, err: &DataError) -> DataSourceError {
 /// the path ends in `.xls`.
 ///
 /// Traces to BC-1.03.006 invariant 3 and edge case EC-002 (AC-005).
-#[allow(dead_code)] // Implementer will call this from DataSource::load
 fn reject_xls_extension(path: &str) -> Result<(), DataError> {
-    todo!(
-        "BC-1.03.006 AC-005: if path ends in '.xls' (case-insensitive), \
-        return DataError::UnsupportedFormat; path={path:?}"
-    )
+    // Check for .xls extension case-insensitively. We must NOT match .xlsx.
+    // Strategy: check if the lowercased path ends with ".xls" but NOT ".xlsx".
+    // `to_ascii_lowercase()` is called first, so the `ends_with` calls are safe.
+    let lower = path.to_ascii_lowercase();
+    // Allow: we already lower-cased the path above, making the comparison correct.
+    #[allow(clippy::case_sensitive_file_extension_comparisons)]
+    let ends_with_xls = lower.ends_with(".xls");
+    #[allow(clippy::case_sensitive_file_extension_comparisons)]
+    let ends_with_xlsx = lower.ends_with(".xlsx");
+
+    if ends_with_xls && !ends_with_xlsx {
+        return Err(DataError::UnsupportedFormat {
+            code: crate::error::E_DAT_003,
+            extension: Arc::from("xls"),
+            span: slideforge_types::SourceSpan::default(),
+        });
+    }
+    Ok(())
 }
 
-/// Select the target sheet by name or index, returning the sheet range data.
+/// Select the target sheet by name or index, returning `(sheet_name, range)`.
 ///
 /// If `sheet` is `None`, selects the first sheet. If `sheet` is `Some(name)`,
 /// searches by name. Returns `Err` with the list of available sheet names if
 /// the named sheet is not found.
 ///
 /// Traces to BC-1.03.006 edge case EC-003 (AC-004).
-#[allow(dead_code)] // Implementer will call this from DataSource::load
 fn select_sheet(
-    _workbook: &mut Xlsx<std::io::BufReader<std::fs::File>>,
+    workbook: &mut Xlsx<std::io::BufReader<std::fs::File>>,
     sheet: Option<&str>,
     path: &str,
-) -> Result<calamine::Range<Data>, DataError> {
-    todo!(
-        "BC-1.03.006 AC-004: select sheet by name or first; \
-        if named sheet missing, return DataError::ParseError with available sheets list; \
-        path={path:?}, sheet={sheet:?}"
-    )
+) -> Result<(String, calamine::Range<Data>), DataError> {
+    let sheet_names: Vec<String> = workbook.sheet_names().clone();
+
+    let target_name: String = match sheet {
+        None => {
+            // AC-001: use first sheet when no sheet specified.
+            sheet_names
+                .first()
+                .cloned()
+                .ok_or_else(|| DataError::parse_error(
+                    path,
+                    DataFormat::Xlsx,
+                    "workbook has no sheets",
+                ))?
+        }
+        Some(name) => {
+            // AC-004: named sheet must exist.
+            if sheet_names.iter().any(|s| s == name) {
+                name.to_owned()
+            } else {
+                let available = sheet_names.join(", ");
+                return Err(DataError::parse_error(
+                    path,
+                    DataFormat::Xlsx,
+                    format!("sheet '{name}' not found in '{path}'. Available sheets: [{available}]"),
+                ));
+            }
+        }
+    };
+
+    let range = workbook
+        .worksheet_range(&target_name)
+        .map_err(|e| DataError::parse_error(
+            path,
+            DataFormat::Xlsx,
+            format!("failed to read sheet '{target_name}': {e}"),
+        ))?;
+
+    Ok((target_name, range))
 }
+
+/// Extract and validate the header row from the range.
+///
+/// Returns a `Vec<Arc<str>>` of column names from row 0.
+///
+/// Errors:
+/// - Empty sheet (no rows or no non-empty cells in row 0) → `ParseError` "empty sheet"
+///
+/// Note: Merged cell detection in the header row is handled at the `load()` level
+/// via `workbook.worksheet_merge_cells()` before this function is called.
+///
+/// Traces to BC-1.03.006 postconditions 2-3, AC-002.
+fn extract_headers(
+    range: &calamine::Range<Data>,
+    path: &str,
+) -> Result<Vec<Arc<str>>, DataError> {
+    let row_count = range.height();
+    let col_count = range.width();
+
+    // Empty sheet: either no rows or no columns.
+    if row_count == 0 || col_count == 0 {
+        return Err(DataError::parse_error(
+            path,
+            DataFormat::Xlsx,
+            "cannot load data from empty sheet",
+        ));
+    }
+
+    // Collect header cells from row 0.
+    let mut headers: Vec<Arc<str>> = Vec::with_capacity(col_count);
+    let mut has_any_header = false;
+
+    for col_idx in 0..col_count {
+        // Excel max 16,384 columns — fits u32 safely.
+        #[allow(clippy::cast_possible_truncation)]
+        let cell = range.get_value((0, col_idx as u32));
+        match cell {
+            None | Some(Data::Empty) => {
+                // Empty header cell — placeholder column name.
+                headers.push(Arc::from(format!("__empty_{col_idx}").as_str()));
+            }
+            Some(cell_data) => {
+                has_any_header = true;
+                let header_str = match cell_data {
+                    Data::String(s) => Arc::from(s.as_str()),
+                    Data::Int(n) => Arc::from(n.to_string().as_str()),
+                    Data::Float(f) => Arc::from(f.to_string().as_str()),
+                    Data::Bool(b) => Arc::from(b.to_string().as_str()),
+                    _ => Arc::from(format!("col_{col_idx}").as_str()),
+                };
+                headers.push(header_str);
+            }
+        }
+    }
+
+    // AC-002: no non-empty header cells → empty sheet error.
+    if !has_any_header {
+        return Err(DataError::parse_error(
+            path,
+            DataFormat::Xlsx,
+            "cannot load data from empty sheet",
+        ));
+    }
+
+    Ok(headers)
+}
+
+/// Marker to suppress dead-code lint on `Dimensions` import used only in merge detection.
+const _: () = {
+    let _ = std::mem::size_of::<Dimensions>();
+};
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
@@ -385,7 +597,7 @@ mod tests {
 
     /// `test_bc_1_03_006_xlsx_date_cell_iso` -- date cell emits ISO 8601 string.
     ///
-    /// Writes a date via `write_datetime` so calamine reads it as a DateTime cell.
+    /// Writes a date via `write_datetime` so calamine reads it as a `DateTime` cell.
     /// The expected output is a `Value::Str` containing an ISO 8601 date string.
     ///
     /// Traces to BC-1.03.006 AC-003, postcondition 6.
@@ -465,22 +677,20 @@ mod tests {
         };
         assert_eq!(rows.len(), 2, "must have 2 data rows");
 
-        let row0 = match &rows[0] {
-            Value::Map(m) => m,
-            other => panic!("expected Value::Map, got {other:?}"),
+        let Value::Map(true_row) = &rows[0] else {
+            panic!("expected Value::Map for row 0")
         };
         assert_eq!(
-            row0.get("flag").unwrap(),
+            true_row.get("flag").unwrap(),
             &Value::Bool(true),
             "boolean true cell must be Value::Bool(true)"
         );
 
-        let row1 = match &rows[1] {
-            Value::Map(m) => m,
-            other => panic!("expected Value::Map, got {other:?}"),
+        let Value::Map(false_row) = &rows[1] else {
+            panic!("expected Value::Map for row 1")
         };
         assert_eq!(
-            row1.get("flag").unwrap(),
+            false_row.get("flag").unwrap(),
             &Value::Bool(false),
             "boolean false cell must be Value::Bool(false)"
         );
@@ -500,7 +710,7 @@ mod tests {
         let ws = wb.add_worksheet();
 
         ws.write_string(0, 0, "ratio").unwrap();
-        ws.write_number(1, 0, 3.14_f64).unwrap();
+        ws.write_number(1, 0, 1.5_f64).unwrap();
 
         let buf = wb.save_to_buffer().unwrap();
         let (_dir, path) = write_xlsx_to_tempfile(buf, ".xlsx");
@@ -523,12 +733,12 @@ mod tests {
         match ratio_val {
             Value::Float(f) => {
                 assert!(
-                    (f.0 - 3.14).abs() < 1e-9,
-                    "float cell must be approximately 3.14, got {}", f.0
+                    (f.0 - 1.5_f64).abs() < 1e-9,
+                    "float cell must be approximately 1.5, got {}", f.0
                 );
             }
             Value::Int(_) => {
-                panic!("3.14 must NOT become an Int; must be Value::Float")
+                panic!("1.5 must NOT become an Int; must be Value::Float")
             }
             other => panic!("fractional cell must be Value::Float, got {other:?}"),
         }
@@ -673,9 +883,11 @@ mod tests {
         let ws = wb.add_worksheet();
 
         ws.write_string(0, 0, "result").unwrap();
-        // write_formula writes the formula; Excel caches it as 5.
-        // rust_xlsxwriter stores the cached result so calamine can read it.
-        ws.write_formula(1, 0, Formula::new("=2+3")).unwrap();
+        // rust_xlsxwriter does NOT compute formula results; it stores "0" by default.
+        // We must explicitly set the cached result via set_result("5") so calamine
+        // can read the pre-computed value.  This matches how Excel .xlsx files work:
+        // the file stores both the formula text AND the last-computed result.
+        ws.write_formula(1, 0, Formula::new("=2+3").set_result("5")).unwrap();
 
         let buf = wb.save_to_buffer().unwrap();
         let (_dir, path) = write_xlsx_to_tempfile(buf, ".xlsx");
@@ -926,12 +1138,11 @@ mod tests {
         }
 
         // Spot-check row 0: metric = "revenue".
-        let row0 = match &rows[0] {
-            Value::Map(m) => m,
-            _ => unreachable!(),
+        let Value::Map(revenue_row) = &rows[0] else {
+            unreachable!()
         };
         assert_eq!(
-            row0.get("metric").unwrap(),
+            revenue_row.get("metric").unwrap(),
             &Value::Str(Arc::from("revenue"))
         );
     }
@@ -987,13 +1198,13 @@ mod tests {
     /// Traces to BC-1.03.006 postcondition 4.
     #[test]
     fn test_bc_1_03_006_convert_calamine_cell_float() {
-        let cell = Data::Float(3.14);
+        let cell = Data::Float(1.5);
         let result = convert_calamine_cell(&cell);
         match result {
             Value::Float(f) => {
                 assert!(
-                    (f.0 - 3.14).abs() < 1e-10,
-                    "Data::Float(3.14) must map to Value::Float(3.14)"
+                    (f.0 - 1.5_f64).abs() < 1e-10,
+                    "Data::Float(1.5) must map to Value::Float(1.5)"
                 );
             }
             other => panic!("Data::Float must produce Value::Float, got {other:?}"),
@@ -1064,7 +1275,7 @@ mod tests {
 
     /// `test_bc_1_03_006_convert_calamine_cell_datetime_iso_str` -- `Data::DateTimeIso` maps to `Value::Str`.
     ///
-    /// DateTimeIso strings are already ISO 8601; they pass through as-is.
+    /// `DateTimeIso` strings are already ISO 8601; they pass through as-is.
     ///
     /// Traces to BC-1.03.006 postcondition 6.
     #[test]

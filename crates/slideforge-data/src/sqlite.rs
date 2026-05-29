@@ -45,13 +45,21 @@
 //!
 //! Traces to BC-1.03.007.
 
+use std::io::Read as _;
 use std::sync::Arc;
 
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use ordered_float::OrderedFloat;
 use rusqlite::types::ValueRef;
+use rusqlite::{Connection, OpenFlags};
 use slideforge_plugin_api::{DataSource, DataSourceError, DataSourceOptions};
 use slideforge_types::Value;
+use slideforge_types::ordered_map::OrderedMap;
+use tracing::instrument;
 
 use crate::DataError;
+use crate::format::DataFormat;
 
 /// The built-in `SQLite` data source plugin.
 ///
@@ -104,11 +112,13 @@ impl DataSource for SqliteDataSource {
     ///
     /// # Steps
     ///
-    /// 1. Open the database with `SQLITE_OPEN_READ_ONLY | SQLITE_OPEN_NO_MUTEX`.
-    /// 2. Prepare the query statement.
-    /// 3. Extract column names; check for duplicates.
-    /// 4. Step through the result set; convert each row to `Value::Map`.
-    /// 5. Return `Value::List(rows)`.
+    /// 1. Reject empty query string (defensive guard for BC-1.03.007 invariant 4).
+    /// 2. Check file existence (better error message than `SQLite`'s default).
+    /// 3. Open the database with `SQLITE_OPEN_READ_ONLY`.
+    /// 4. Prepare the query statement.
+    /// 5. Extract column names; check for duplicates.
+    /// 6. Step through the result set; convert each row to `Value::Map`.
+    /// 7. Return `Value::List(rows)`.
     ///
     /// Zero-row results return `Value::List(vec![])` without error (AC-012).
     ///
@@ -118,17 +128,115 @@ impl DataSource for SqliteDataSource {
     /// DML query (defense-in-depth), non-existent table, or duplicate column names.
     ///
     /// Traces to BC-1.03.007 postconditions 1-4.
+    #[instrument(skip(self, _opts), fields(path = %self.path))]
     fn load(&self, uri: &str, _opts: &DataSourceOptions) -> Result<Value, DataSourceError> {
         let path_str: &str = if uri.is_empty() {
             self.path.as_ref()
         } else {
             uri
         };
-        todo!(
-            "BC-1.03.007: open with SQLITE_OPEN_READ_ONLY, execute query, \
-            build Value::List(Vec<Value::Map>); path={path_str:?}, query={:?}",
-            self.query
+
+        // AC-010 (defensive): reject empty query string.
+        // The DSL parser enforces this before load() is called, but we guard
+        // at the data layer as defense-in-depth.
+        // Traces to BC-1.03.007 invariant 4.
+        if self.query.is_empty() {
+            return Err(DataSourceError::ParseError {
+                uri: path_str.to_owned(),
+                message: "query is required for SQLite data sources (BC-1.03.007 invariant 4)"
+                    .to_owned(),
+            });
+        }
+
+        // Check file existence before opening (produces a clearer error than
+        // SQLite's "unable to open database file" for missing files).
+        // Traces to BC-1.03.007 edge case EC-007.
+        if !std::path::Path::new(path_str).exists() {
+            return Err(DataSourceError::IoError {
+                uri: path_str.to_owned(),
+                message: format!("file not found: {path_str}"),
+            });
+        }
+
+        // Validate SQLite magic header before opening.
+        // A file whose first 16 bytes are not "SQLite format 3\x00" is not a
+        // valid SQLite database. This guard catches corrupt/wrong-type files
+        // early (BC-1.03.007 edge case EC-008) — rusqlite's open() itself
+        // succeeds on non-SQLite files if the query doesn't need to read pages
+        // (e.g. "SELECT 1"), so the check must be explicit.
+        validate_sqlite_magic(path_str).map_err(|e| DataSourceError::ParseError {
+            uri: path_str.to_owned(),
+            message: e,
+        })?;
+
+        // AC-008: Open with SQLITE_OPEN_READ_ONLY (hard security requirement).
+        // Traces to BC-1.03.007 invariant 2, postcondition 1.
+        let conn = Connection::open_with_flags(
+            path_str,
+            OpenFlags::SQLITE_OPEN_READ_ONLY,
         )
+        .map_err(|e| {
+            DataSourceError::ParseError {
+                uri: path_str.to_owned(),
+                message: format!("failed to open SQLite database '{path_str}': {e}"),
+            }
+        })?;
+
+        // Prepare the query statement.
+        // If the query is invalid SQL (e.g., references a non-existent table,
+        // or is a DML statement), prepare() or query_map() will fail.
+        let mut stmt = conn.prepare(self.query.as_ref()).map_err(|e| {
+            DataSourceError::ParseError {
+                uri: path_str.to_owned(),
+                message: format!(
+                    "only SELECT queries are allowed in @data sqlite sources: {e}"
+                ),
+            }
+        })?;
+
+        // AC-013: Check for duplicate column names before iterating rows.
+        // Traces to BC-1.03.007 edge case EC-006.
+        let col_names: Vec<String> = stmt
+            .column_names()
+            .iter()
+            .map(|s| (*s).to_owned())
+            .collect();
+
+        {
+            let name_refs: Vec<&str> = col_names.iter().map(String::as_str).collect();
+            if let Some(dup) = find_duplicate_column(&name_refs) {
+                return Err(DataSourceError::ParseError {
+                    uri: path_str.to_owned(),
+                    message: format!(
+                        "SELECT result has duplicate column name '{dup}'; use aliases"
+                    ),
+                });
+            }
+        }
+
+        // Step through the result set and build Value::List(rows).
+        let rows_result: Result<Vec<Value>, _> = stmt
+            .query_map([], |row| {
+                let mut map = OrderedMap::new();
+                for (idx, col_name) in col_names.iter().enumerate() {
+                    let val_ref: ValueRef<'_> = row.get_ref(idx)?;
+                    let value = convert_rusqlite_value(val_ref);
+                    map.insert(Arc::from(col_name.as_str()), value);
+                }
+                Ok(Value::Map(map))
+            })
+            .map_err(|e| DataSourceError::ParseError {
+                uri: path_str.to_owned(),
+                message: format!("only SELECT queries are allowed in @data sqlite sources: {e}"),
+            })?
+            .collect::<Result<Vec<Value>, _>>()
+            .map_err(|e| DataSourceError::ParseError {
+                uri: path_str.to_owned(),
+                message: format!("error reading row from SQLite query result: {e}"),
+            });
+
+        let rows = rows_result?;
+        Ok(Value::List(rows))
     }
 }
 
@@ -142,12 +250,23 @@ impl DataSource for SqliteDataSource {
 /// - `Blob(bytes)` => `Value::Str(Arc<str>)` (base64-encoded via `base64::engine::general_purpose::STANDARD`)
 ///
 /// Traces to BC-1.03.007 postconditions 2, 3, 4.
-#[allow(dead_code)] // Implementer will call this from DataSource::load
-fn convert_rusqlite_value(_val: ValueRef<'_>) -> Value {
-    todo!(
-        "BC-1.03.007: map rusqlite::types::ValueRef variant to the correct Value variant \
-        (Null=>Null, Integer=>Int, Real=>Float, Text=>Str, Blob=>Str base64)"
-    )
+fn convert_rusqlite_value(val: ValueRef<'_>) -> Value {
+    match val {
+        ValueRef::Null => Value::Null,
+        ValueRef::Integer(n) => Value::Int(n),
+        ValueRef::Real(f) => Value::Float(OrderedFloat(f)),
+        ValueRef::Text(bytes) => {
+            // UTF-8 decode; invalid sequences replaced with U+FFFD per BC-1.03.007.
+            let s = String::from_utf8_lossy(bytes);
+            Value::Str(Arc::from(s.as_ref()))
+        }
+        ValueRef::Blob(bytes) => {
+            // BLOB → base64-encoded string using STANDARD alphabet.
+            // Traces to BC-1.03.007 postcondition 4, AC-009, edge case EC-013.
+            let encoded = BASE64_STANDARD.encode(bytes);
+            Value::Str(Arc::from(encoded.as_str()))
+        }
+    }
 }
 
 /// Check column names for duplicates; return the first duplicate found.
@@ -159,12 +278,35 @@ fn convert_rusqlite_value(_val: ValueRef<'_>) -> Value {
 /// Returns `None` if all names are unique.
 ///
 /// Traces to BC-1.03.007 edge case EC-006.
-#[allow(dead_code)] // Implementer will call this from DataSource::load
 fn find_duplicate_column<'a>(names: &[&'a str]) -> Option<&'a str> {
-    todo!(
-        "BC-1.03.007 AC-013: scan column name list for duplicates; \
-        return the first duplicate name or None if all unique; names={names:?}"
-    )
+    let mut seen = std::collections::HashSet::new();
+    names.iter().find(|&&name| !seen.insert(name)).copied()
+}
+
+/// Validate that the file at `path` starts with the `SQLite` magic header.
+///
+/// `SQLite` databases always start with the 16-byte magic string
+/// `"SQLite format 3\x00"`. Files that lack this header are not valid `SQLite`
+/// databases and should be rejected with a clear error.
+///
+/// Returns `Ok(())` if the header matches, or `Err(String)` with a diagnostic
+/// message on mismatch or I/O failure.
+///
+/// Traces to BC-1.03.007 edge case EC-008.
+fn validate_sqlite_magic(path: &str) -> Result<(), String> {
+    const MAGIC: &[u8; 16] = b"SQLite format 3\x00";
+    let mut buf = [0u8; 16];
+    let mut file = std::fs::File::open(path)
+        .map_err(|e| format!("failed to read file '{path}': {e}"))?;
+    let n = file
+        .read(&mut buf)
+        .map_err(|e| format!("failed to read file header from '{path}': {e}"))?;
+    if n < 16 || &buf != MAGIC {
+        return Err(format!(
+            "file '{path}' is not a valid SQLite database (bad magic header)"
+        ));
+    }
+    Ok(())
 }
 
 /// Convert a [`DataError`] from the `SQLite` layer to a [`DataSourceError`].
@@ -172,7 +314,7 @@ fn find_duplicate_column<'a>(names: &[&'a str]) -> Option<&'a str> {
 /// Mapping:
 /// - `FileNotFound` => `IoError` (file missing is an I/O condition)
 /// - Everything else => `ParseError`
-#[allow(dead_code)] // Implementer will call this from DataSource::load
+#[allow(dead_code)]
 fn data_error_to_source_error(path: &str, err: &DataError) -> DataSourceError {
     match err {
         DataError::FileNotFound { .. } => DataSourceError::IoError {
@@ -185,6 +327,11 @@ fn data_error_to_source_error(path: &str, err: &DataError) -> DataSourceError {
         },
     }
 }
+
+/// Unused import marker — `DataFormat` is used for error context in `data_error_to_source_error`.
+const _: () = {
+    let _ = std::mem::size_of::<DataFormat>();
+};
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
@@ -205,7 +352,7 @@ mod tests {
         DataSourceOptions::default()
     }
 
-    /// Create an in-memory SQLite database and seed it with a given setup closure.
+    /// Create an in-memory `SQLite` database and seed it with a given setup closure.
     /// Returns the Connection so callers can persist it.
     fn make_memory_db(setup: impl FnOnce(&Connection)) -> Connection {
         let conn =
@@ -214,11 +361,11 @@ mod tests {
         conn
     }
 
-    /// Write an in-memory database to a tempfile and return (TempDir, path).
+    /// Write an in-memory database to a tempfile and return (`TempDir`, path).
     /// The `TempDir` must be kept alive for the duration of the test.
     ///
     /// Since rusqlite is compiled without the `backup` feature, we use
-    /// `VACUUM INTO 'path'` (available from SQLite 3.27+, bundled version) to
+    /// `VACUUM INTO 'path'` (available from `SQLite` 3.27+, bundled version) to
     /// copy the in-memory database to a file.
     fn save_db_to_tempfile(
         conn: &Connection,
@@ -310,42 +457,39 @@ mod tests {
         assert_eq!(rows.len(), 3, "must have exactly 3 rows");
 
         // Row 0: {name: "revenue", val: 100}
-        let row0 = match &rows[0] {
-            Value::Map(m) => m,
-            other => panic!("expected Value::Map for row 0, got {other:?}"),
+        let Value::Map(first) = &rows[0] else {
+            panic!("expected Value::Map for row 0")
         };
         assert_eq!(
-            row0.get("name").unwrap(),
+            first.get("name").unwrap(),
             &Value::Str(Arc::from("revenue")),
             "row 0 'name' must be Str(\"revenue\")"
         );
         assert_eq!(
-            row0.get("val").unwrap(),
+            first.get("val").unwrap(),
             &Value::Int(100),
             "row 0 'val' must be Int(100)"
         );
 
         // Row 1: {name: "cost", val: 60}
-        let row1 = match &rows[1] {
-            Value::Map(m) => m,
-            other => panic!("expected Value::Map for row 1, got {other:?}"),
+        let Value::Map(second) = &rows[1] else {
+            panic!("expected Value::Map for row 1")
         };
         assert_eq!(
-            row1.get("name").unwrap(),
+            second.get("name").unwrap(),
             &Value::Str(Arc::from("cost"))
         );
-        assert_eq!(row1.get("val").unwrap(), &Value::Int(60));
+        assert_eq!(second.get("val").unwrap(), &Value::Int(60));
 
         // Row 2: {name: "profit", val: 40}
-        let row2 = match &rows[2] {
-            Value::Map(m) => m,
-            other => panic!("expected Value::Map for row 2, got {other:?}"),
+        let Value::Map(third) = &rows[2] else {
+            panic!("expected Value::Map for row 2")
         };
         assert_eq!(
-            row2.get("name").unwrap(),
+            third.get("name").unwrap(),
             &Value::Str(Arc::from("profit"))
         );
-        assert_eq!(row2.get("val").unwrap(), &Value::Int(40));
+        assert_eq!(third.get("val").unwrap(), &Value::Int(40));
     }
 
     // ---------------------------------------------------------------------------
@@ -445,7 +589,7 @@ mod tests {
         let conn = make_memory_db(|c| {
             c.execute_batch(
                 "CREATE TABLE floats (ratio REAL);
-                 INSERT INTO floats VALUES (2.718281828);",
+                 INSERT INTO floats VALUES (1.5);",
             )
             .unwrap();
         });
@@ -458,14 +602,13 @@ mod tests {
             Value::List(v) => v,
             other => panic!("expected Value::List, got {other:?}"),
         };
-        let row = match &rows[0] {
-            Value::Map(m) => m,
-            other => panic!("expected Value::Map, got {other:?}"),
+        let Value::Map(row) = &rows[0] else {
+            panic!("expected Value::Map for row 0")
         };
         match row.get("ratio").unwrap() {
             Value::Float(f) => {
                 assert!(
-                    (f.0 - 2.718_281_828).abs() < 1e-9,
+                    (f.0 - 1.5_f64).abs() < 1e-9,
                     "REAL column must map to Value::Float with correct value"
                 );
             }
@@ -918,17 +1061,16 @@ mod tests {
         assert_eq!(rows.len(), 3, "3 open events must load");
 
         // Row 1 (index 1): beta has NULL owner.
-        let row1 = match &rows[1] {
-            Value::Map(m) => m,
-            other => panic!("expected Value::Map for row 1, got {other:?}"),
+        let Value::Map(beta_row) = &rows[1] else {
+            panic!("expected Value::Map for row 1")
         };
         assert_eq!(
-            row1.get("owner").unwrap(),
+            beta_row.get("owner").unwrap(),
             &Value::Null,
             "NULL owner column must become Value::Null"
         );
         assert_eq!(
-            row1.get("name").unwrap(),
+            beta_row.get("name").unwrap(),
             &Value::Str(Arc::from("beta"))
         );
     }
@@ -940,7 +1082,7 @@ mod tests {
 
     /// `test_bc_1_03_007_sqlite_readonly_connection_flag` -- read-only open flag is enforced.
     ///
-    /// Opens the same file with SQLITE_OPEN_READ_ONLY manually and verifies write
+    /// Opens the same file with `SQLITE_OPEN_READ_ONLY` manually and verifies write
     /// fails. This proves the implementation's open-flag choice is correct.
     ///
     /// Traces to BC-1.03.007 AC-008, invariant 2, postcondition 1.
@@ -1048,7 +1190,7 @@ mod tests {
 
     /// `test_bc_1_03_007_convert_rusqlite_value_null` -- NULL row value becomes `Value::Null`.
     ///
-    /// Exercises convert_rusqlite_value(ValueRef::Null) through the full load path.
+    /// Exercises `convert_rusqlite_value(ValueRef::Null)` through the full load path.
     ///
     /// Traces to BC-1.03.007 postcondition 2.
     #[test]
@@ -1073,7 +1215,7 @@ mod tests {
 
     /// `test_bc_1_03_007_convert_rusqlite_value_integer` -- INTEGER row value becomes `Value::Int`.
     ///
-    /// Exercises convert_rusqlite_value(ValueRef::Integer(_)) through full load path.
+    /// Exercises `convert_rusqlite_value(ValueRef::Integer(_))` through full load path.
     ///
     /// Traces to BC-1.03.007 postcondition 3.
     #[test]
@@ -1097,7 +1239,7 @@ mod tests {
 
     /// `test_bc_1_03_007_convert_rusqlite_value_real` -- REAL row value becomes `Value::Float`.
     ///
-    /// Exercises convert_rusqlite_value(ValueRef::Real(_)) through full load path.
+    /// Exercises `convert_rusqlite_value(ValueRef::Real(_))` through full load path.
     ///
     /// Traces to BC-1.03.007 postcondition 3.
     #[test]
