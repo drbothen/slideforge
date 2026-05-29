@@ -205,30 +205,28 @@ impl FileDataSource {
                 // uri convention: pass the resolved path as the uri (non-empty → XlsxDataSource uses it).
                 let src = XlsxDataSource::new(Arc::clone(&path_str));
                 let opts = slideforge_plugin_api::DataSourceOptions::default();
-                return src
-                    .load(path_str.as_ref(), &opts)
-                    .map_err(|e| match e {
-                        slideforge_plugin_api::DataSourceError::IoError { message, .. } => {
-                            DataError::io_error(Arc::clone(&path_str), Arc::from(message.as_str()))
-                        }
-                        slideforge_plugin_api::DataSourceError::ParseError { message, .. } => {
-                            DataError::parse_error(&*path_str, format, message)
-                        }
-                        slideforge_plugin_api::DataSourceError::UnsupportedUri { uri } => {
-                            DataError::unsupported_format(Arc::from(uri.as_str()))
-                        }
-                        // AuthError is not expected from XlsxDataSource (no auth required),
-                        // but we handle it defensively to avoid wildcards on a growing enum.
-                        slideforge_plugin_api::DataSourceError::AuthError { uri } => {
-                            DataError::io_error(
-                                Arc::clone(&path_str),
-                                Arc::from(
-                                    format!("unexpected auth error for xlsx uri: {uri}").as_str(),
-                                ),
-                            )
-                        }
-                    });
-            }
+                return src.load(path_str.as_ref(), &opts).map_err(|e| match e {
+                    slideforge_plugin_api::DataSourceError::IoError { message, .. } => {
+                        DataError::io_error(Arc::clone(&path_str), Arc::from(message.as_str()))
+                    },
+                    slideforge_plugin_api::DataSourceError::ParseError { message, .. } => {
+                        DataError::parse_error(&*path_str, format, message)
+                    },
+                    slideforge_plugin_api::DataSourceError::UnsupportedUri { uri } => {
+                        DataError::unsupported_format(Arc::from(uri.as_str()))
+                    },
+                    // AuthError is not expected from XlsxDataSource (no auth required),
+                    // but we handle it defensively to avoid wildcards on a growing enum.
+                    slideforge_plugin_api::DataSourceError::AuthError { uri } => {
+                        DataError::io_error(
+                            Arc::clone(&path_str),
+                            Arc::from(
+                                format!("unexpected auth error for xlsx uri: {uri}").as_str(),
+                            ),
+                        )
+                    },
+                });
+            },
             DataFormat::Sqlite => {
                 // Delegate to SqliteDataSource. A query is required for SQLite;
                 // load_path cannot provide it (no opts parameter).
@@ -242,10 +240,10 @@ impl FileDataSource {
                     API with DataSourceOptions.query set to your SELECT statement, or use \
                     the DSL @data directive with query: \"SELECT ...\".",
                 ));
-            }
+            },
             _ => {
                 // Text-based formats: read the file content below.
-            }
+            },
         }
 
         // Read the file contents, distinguishing NotFound from other I/O errors.
@@ -273,7 +271,7 @@ impl FileDataSource {
             DataFormat::Xlsx | DataFormat::Sqlite => {
                 // Already handled above; this arm is unreachable.
                 unreachable!("xlsx/sqlite dispatched before text-read")
-            }
+            },
         }
     }
 }

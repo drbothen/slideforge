@@ -159,8 +159,7 @@ impl DataSource for SqliteDataSource {
         // actual rusqlite error message, NOT the generic DML message.
         let trimmed_query = self.query.trim();
         let lower_prefix = trimmed_query.to_ascii_lowercase();
-        let is_dml = !lower_prefix.starts_with("select")
-            && !lower_prefix.starts_with("with");
+        let is_dml = !lower_prefix.starts_with("select") && !lower_prefix.starts_with("with");
         if is_dml {
             return Err(DataSourceError::ParseError {
                 uri: path_str.to_owned(),
@@ -176,9 +175,8 @@ impl DataSource for SqliteDataSource {
         // Accepted: .db, .sqlite, .sqlite3 (case-insensitive). All other extensions →
         // UnsupportedFormat E-DAT-014. Applied before magic-byte check.
         // Traces to BC-1.03.007 invariant 8, VP-035, E-DAT-014.
-        validate_sqlite_extension(path_str).map_err(|e| DataSourceError::UnsupportedUri {
-            uri: e,
-        })?;
+        validate_sqlite_extension(path_str)
+            .map_err(|e| DataSourceError::UnsupportedUri { uri: e })?;
 
         // Check file existence before opening (produces a clearer error than
         // SQLite's "unable to open database file" for missing files).
@@ -206,27 +204,22 @@ impl DataSource for SqliteDataSource {
 
         // AC-008: Open with SQLITE_OPEN_READ_ONLY (hard security requirement).
         // Traces to BC-1.03.007 invariant 2, postcondition 1.
-        let conn = Connection::open_with_flags(
-            path_str,
-            OpenFlags::SQLITE_OPEN_READ_ONLY,
-        )
-        .map_err(|e| {
-            DataSourceError::ParseError {
+        let conn = Connection::open_with_flags(path_str, OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(|e| DataSourceError::ParseError {
                 uri: path_str.to_owned(),
                 message: format!("failed to open SQLite database '{path_str}': {e}"),
-            }
-        })?;
+            })?;
 
         // Prepare the query statement.
         // If the query is invalid SQL (e.g., references a non-existent table),
         // prepare() propagates the actual rusqlite error. Non-DML failures use the
         // real error message — NOT the generic DML message (F-MED-2 differentiation).
-        let mut stmt = conn.prepare(self.query.as_ref()).map_err(|e| {
-            DataSourceError::ParseError {
-                uri: path_str.to_owned(),
-                message: format!("failed to prepare query for '{path_str}': {e}"),
-            }
-        })?;
+        let mut stmt =
+            conn.prepare(self.query.as_ref())
+                .map_err(|e| DataSourceError::ParseError {
+                    uri: path_str.to_owned(),
+                    message: format!("failed to prepare query for '{path_str}': {e}"),
+                })?;
 
         // AC-013: Check for duplicate column names before iterating rows.
         // Traces to BC-1.03.007 edge case EC-006.
@@ -274,10 +267,12 @@ impl DataSource for SqliteDataSource {
                         ),
                     }
                 })?;
-                let value = convert_rusqlite_value(val_ref, col_name, row_idx, path_str)
-                    .map_err(|e| DataSourceError::ParseError {
-                        uri: path_str.to_owned(),
-                        message: e.to_string(),
+                let value =
+                    convert_rusqlite_value(val_ref, col_name, row_idx, path_str).map_err(|e| {
+                        DataSourceError::ParseError {
+                            uri: path_str.to_owned(),
+                            message: e.to_string(),
+                        }
                     })?;
                 map.insert(Arc::from(col_name.as_str()), value);
             }
@@ -336,13 +331,13 @@ fn convert_rusqlite_value(
                         span: slideforge_types::SourceSpan::default(),
                     }
                 })
-        }
+        },
         ValueRef::Blob(bytes) => {
             // BLOB → base64-encoded string using STANDARD alphabet (RFC 4648 §4).
             // Traces to BC-1.03.007 postcondition 4, AC-009, invariant 7, VP-033.
             let encoded = BASE64_STANDARD.encode(bytes);
             Ok(Value::Str(Arc::from(encoded.as_str())))
-        }
+        },
     }
 }
 
@@ -402,8 +397,8 @@ fn validate_sqlite_extension(path: &str) -> Result<(), String> {
 fn validate_sqlite_magic(path: &str) -> Result<(), String> {
     const MAGIC: &[u8; 16] = b"SQLite format 3\x00";
     let mut buf = [0u8; 16];
-    let mut file = std::fs::File::open(path)
-        .map_err(|e| format!("failed to read file '{path}': {e}"))?;
+    let mut file =
+        std::fs::File::open(path).map_err(|e| format!("failed to read file '{path}': {e}"))?;
     let n = file
         .read(&mut buf)
         .map_err(|e| format!("failed to read file header from '{path}': {e}"))?;
@@ -419,7 +414,6 @@ fn validate_sqlite_magic(path: &str) -> Result<(), String> {
     }
     Ok(())
 }
-
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
@@ -443,8 +437,7 @@ mod tests {
     /// Create an in-memory `SQLite` database and seed it with a given setup closure.
     /// Returns the Connection so callers can persist it.
     fn make_memory_db(setup: impl FnOnce(&Connection)) -> Connection {
-        let conn =
-            Connection::open_in_memory().expect("in-memory SQLite must open");
+        let conn = Connection::open_in_memory().expect("in-memory SQLite must open");
         setup(&conn);
         conn
     }
@@ -459,7 +452,6 @@ mod tests {
         conn: &Connection,
         suffix: &str,
     ) -> (tempfile::TempDir, std::path::PathBuf) {
-
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(format!("test{suffix}"));
 
@@ -499,7 +491,11 @@ mod tests {
     #[test]
     fn test_bc_1_03_007_sqlite_struct_fields() {
         let src = SqliteDataSource::new("metrics.db", "SELECT name, value FROM kpis");
-        assert_eq!(src.path.as_ref(), "metrics.db", "path field must match constructor arg");
+        assert_eq!(
+            src.path.as_ref(),
+            "metrics.db",
+            "path field must match constructor arg"
+        );
         assert_eq!(
             src.query.as_ref(),
             "SELECT name, value FROM kpis",
@@ -563,20 +559,14 @@ mod tests {
         let Value::Map(second) = &rows[1] else {
             panic!("expected Value::Map for row 1")
         };
-        assert_eq!(
-            second.get("name").unwrap(),
-            &Value::Str(Arc::from("cost"))
-        );
+        assert_eq!(second.get("name").unwrap(), &Value::Str(Arc::from("cost")));
         assert_eq!(second.get("val").unwrap(), &Value::Int(60));
 
         // Row 2: {name: "profit", val: 40}
         let Value::Map(third) = &rows[2] else {
             panic!("expected Value::Map for row 2")
         };
-        assert_eq!(
-            third.get("name").unwrap(),
-            &Value::Str(Arc::from("profit"))
-        );
+        assert_eq!(third.get("name").unwrap(), &Value::Str(Arc::from("profit")));
         assert_eq!(third.get("val").unwrap(), &Value::Int(40));
     }
 
@@ -599,10 +589,8 @@ mod tests {
         });
 
         let (_dir, path) = save_db_to_tempfile(&conn, ".db");
-        let src = SqliteDataSource::new(
-            path.to_str().unwrap(),
-            "SELECT id, description FROM items",
-        );
+        let src =
+            SqliteDataSource::new(path.to_str().unwrap(), "SELECT id, description FROM items");
         let result = src.load("", &default_opts()).unwrap();
 
         let rows = match &result {
@@ -640,7 +628,7 @@ mod tests {
         let conn = make_memory_db(|c| {
             c.execute_batch(
                 "CREATE TABLE nums (n INTEGER);
-                 INSERT INTO nums VALUES (9223372036854775807);",  // i64::MAX
+                 INSERT INTO nums VALUES (9223372036854775807);", // i64::MAX
             )
             .unwrap();
         });
@@ -699,7 +687,7 @@ mod tests {
                     (f.0 - 1.5_f64).abs() < 1e-9,
                     "REAL column must map to Value::Float with correct value"
                 );
-            }
+            },
             other => panic!("REAL column must map to Value::Float, got {other:?}"),
         }
     }
@@ -775,7 +763,7 @@ mod tests {
                     0,
                     "zero-row query must return Value::List(vec![]), not an error"
                 );
-            }
+            },
             other => panic!("zero-row query must return Value::List(vec![]), got {other:?}"),
         }
     }
@@ -802,14 +790,14 @@ mod tests {
         });
 
         let (_dir, path) = save_db_to_tempfile(&conn, ".db");
-        let src = SqliteDataSource::new(
-            path.to_str().unwrap(),
-            "DELETE FROM events",
-        );
+        let src = SqliteDataSource::new(path.to_str().unwrap(), "DELETE FROM events");
         let err = src.load("", &default_opts()).unwrap_err();
 
         assert!(
-            matches!(err, slideforge_plugin_api::DataSourceError::ParseError { .. }),
+            matches!(
+                err,
+                slideforge_plugin_api::DataSourceError::ParseError { .. }
+            ),
             "DML query must produce DataSourceError::ParseError, got: {err:?}"
         );
         let msg = err.to_string();
@@ -834,13 +822,13 @@ mod tests {
         });
 
         let (_dir, path) = save_db_to_tempfile(&conn, ".db");
-        let src = SqliteDataSource::new(
-            path.to_str().unwrap(),
-            "INSERT INTO t VALUES (1)",
-        );
+        let src = SqliteDataSource::new(path.to_str().unwrap(), "INSERT INTO t VALUES (1)");
         let err = src.load("", &default_opts()).unwrap_err();
         assert!(
-            matches!(err, slideforge_plugin_api::DataSourceError::ParseError { .. }),
+            matches!(
+                err,
+                slideforge_plugin_api::DataSourceError::ParseError { .. }
+            ),
             "INSERT query must produce DataSourceError::ParseError, got: {err:?}"
         );
     }
@@ -859,13 +847,13 @@ mod tests {
         });
 
         let (_dir, path) = save_db_to_tempfile(&conn, ".db");
-        let src = SqliteDataSource::new(
-            path.to_str().unwrap(),
-            "UPDATE t SET x = 2",
-        );
+        let src = SqliteDataSource::new(path.to_str().unwrap(), "UPDATE t SET x = 2");
         let err = src.load("", &default_opts()).unwrap_err();
         assert!(
-            matches!(err, slideforge_plugin_api::DataSourceError::ParseError { .. }),
+            matches!(
+                err,
+                slideforge_plugin_api::DataSourceError::ParseError { .. }
+            ),
             "UPDATE query must produce DataSourceError::ParseError, got: {err:?}"
         );
     }
@@ -920,13 +908,16 @@ mod tests {
         let (_dir, path) = save_db_to_tempfile(&conn, ".db");
         let src = SqliteDataSource::new(
             path.to_str().unwrap(),
-            "SELECT id, id FROM t",  // duplicate column name "id"
+            "SELECT id, id FROM t", // duplicate column name "id"
         );
         let err = src.load("", &default_opts()).unwrap_err();
 
         let msg = err.to_string();
         assert!(
-            matches!(err, slideforge_plugin_api::DataSourceError::ParseError { .. }),
+            matches!(
+                err,
+                slideforge_plugin_api::DataSourceError::ParseError { .. }
+            ),
             "duplicate column names must produce DataSourceError::ParseError, got: {err:?}"
         );
         assert!(
@@ -958,8 +949,11 @@ mod tests {
 
         let conn = make_memory_db(|c| {
             c.execute_batch("CREATE TABLE blobs (data BLOB);").unwrap();
-            c.execute("INSERT INTO blobs VALUES (?1)", rusqlite::params![blob_bytes])
-                .unwrap();
+            c.execute(
+                "INSERT INTO blobs VALUES (?1)",
+                rusqlite::params![blob_bytes],
+            )
+            .unwrap();
         });
 
         let (_dir, path) = save_db_to_tempfile(&conn, ".db");
@@ -982,7 +976,7 @@ mod tests {
                     expected_b64.as_str(),
                     "BLOB column must be base64-encoded using STANDARD alphabet"
                 );
-            }
+            },
             other => panic!("BLOB column must produce Value::Str (base64), got {other:?}"),
         }
     }
@@ -1028,18 +1022,19 @@ mod tests {
     #[test]
     fn test_bc_1_03_007_sqlite_missing_table() {
         let conn = make_memory_db(|c| {
-            c.execute_batch("CREATE TABLE real_table (x INTEGER);").unwrap();
+            c.execute_batch("CREATE TABLE real_table (x INTEGER);")
+                .unwrap();
         });
 
         let (_dir, path) = save_db_to_tempfile(&conn, ".db");
-        let src = SqliteDataSource::new(
-            path.to_str().unwrap(),
-            "SELECT x FROM no_such_table",
-        );
+        let src = SqliteDataSource::new(path.to_str().unwrap(), "SELECT x FROM no_such_table");
         let err = src.load("", &default_opts()).unwrap_err();
 
         assert!(
-            matches!(err, slideforge_plugin_api::DataSourceError::ParseError { .. }),
+            matches!(
+                err,
+                slideforge_plugin_api::DataSourceError::ParseError { .. }
+            ),
             "non-existent table must produce DataSourceError::ParseError, got: {err:?}"
         );
         let msg = err.to_string();
@@ -1177,16 +1172,15 @@ mod tests {
     #[test]
     fn test_bc_1_03_007_sqlite_readonly_connection_flag() {
         let conn = make_memory_db(|c| {
-            c.execute_batch("CREATE TABLE t (x INTEGER); INSERT INTO t VALUES (1);").unwrap();
+            c.execute_batch("CREATE TABLE t (x INTEGER); INSERT INTO t VALUES (1);")
+                .unwrap();
         });
 
         let (_dir, path) = save_db_to_tempfile(&conn, ".db");
 
         // Open with SQLITE_OPEN_READ_ONLY (same flag the implementation must use).
-        let ro_conn = Connection::open_with_flags(
-            &path,
-            OpenFlags::SQLITE_OPEN_READ_ONLY,
-        ).expect("read-only open must succeed for a valid db");
+        let ro_conn = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .expect("read-only open must succeed for a valid db");
 
         // A write attempt on a read-only connection must fail at the driver level.
         let write_result = ro_conn.execute("INSERT INTO t VALUES (2)", []);
@@ -1225,7 +1219,7 @@ mod tests {
     /// Traces to BC-1.03.007 AC-013, edge case EC-012.
     #[test]
     fn test_bc_1_03_007_find_duplicate_column_with_dupe() {
-        let names = ["id", "name", "id"];  // "id" appears twice
+        let names = ["id", "name", "id"]; // "id" appears twice
         let result = find_duplicate_column(&names);
         assert_eq!(
             result,
@@ -1239,7 +1233,7 @@ mod tests {
     /// Traces to BC-1.03.007 AC-013.
     #[test]
     fn test_bc_1_03_007_find_duplicate_column_multiple_dupes() {
-        let names = ["a", "b", "a", "b"];  // "a" duplicated first
+        let names = ["a", "b", "a", "b"]; // "a" duplicated first
         let result = find_duplicate_column(&names);
         assert_eq!(
             result,
@@ -1322,7 +1316,11 @@ mod tests {
 
         let rows = result.as_list().unwrap();
         let val = rows[0].as_map().unwrap().get("v").unwrap();
-        assert_eq!(val, &Value::Int(12345), "INTEGER row value must map to Value::Int(12345)");
+        assert_eq!(
+            val,
+            &Value::Int(12345),
+            "INTEGER row value must map to Value::Int(12345)"
+        );
     }
 
     /// `test_bc_1_03_007_convert_rusqlite_value_real` -- REAL row value becomes `Value::Float`.
@@ -1352,7 +1350,7 @@ mod tests {
                     (f.0 - 1.5).abs() < 1e-10,
                     "REAL value 1.5 must map to Value::Float(1.5)"
                 );
-            }
+            },
             other => panic!("REAL row value must map to Value::Float, got {other:?}"),
         }
     }
@@ -1410,7 +1408,10 @@ mod tests {
         let src = SqliteDataSource::new(path.to_str().unwrap(), "INSERT INTO t VALUES (2)");
         let err = src.load("", &default_opts()).unwrap_err();
         assert!(
-            matches!(err, slideforge_plugin_api::DataSourceError::ParseError { .. }),
+            matches!(
+                err,
+                slideforge_plugin_api::DataSourceError::ParseError { .. }
+            ),
             "DML must be rejected; got: {err:?}"
         );
     }
@@ -1441,7 +1442,10 @@ mod tests {
 
         let msg = err.to_string();
         assert!(
-            matches!(err, slideforge_plugin_api::DataSourceError::ParseError { .. }),
+            matches!(
+                err,
+                slideforge_plugin_api::DataSourceError::ParseError { .. }
+            ),
             "DELETE must be ParseError, got: {err:?}"
         );
         assert!(
@@ -1551,12 +1555,18 @@ mod tests {
         let blob_bytes: &[u8] = &[0x00, 0xFF, 0x42];
         let expected_b64 = STANDARD.encode(blob_bytes);
         // Canonical vector: STANDARD.encode([0x00, 0xFF, 0x42]) = "AP9C"
-        assert_eq!(expected_b64, "AP9C", "canonical base64 vector must be 'AP9C'");
+        assert_eq!(
+            expected_b64, "AP9C",
+            "canonical base64 vector must be 'AP9C'"
+        );
 
         let conn = make_memory_db(|c| {
             c.execute_batch("CREATE TABLE blobs (data BLOB);").unwrap();
-            c.execute("INSERT INTO blobs VALUES (?1)", rusqlite::params![blob_bytes])
-                .unwrap();
+            c.execute(
+                "INSERT INTO blobs VALUES (?1)",
+                rusqlite::params![blob_bytes],
+            )
+            .unwrap();
         });
         let (_dir, path) = save_db_to_tempfile(&conn, ".db");
 
@@ -1593,7 +1603,10 @@ mod tests {
         let err = src.load("", &default_opts()).unwrap_err();
 
         assert!(
-            matches!(err, slideforge_plugin_api::DataSourceError::ParseError { .. }),
+            matches!(
+                err,
+                slideforge_plugin_api::DataSourceError::ParseError { .. }
+            ),
             "wrong SQLite magic must produce ParseError, got: {err:?}"
         );
         let msg = err.to_string();
@@ -1620,7 +1633,10 @@ mod tests {
         let err = src.load("", &default_opts()).unwrap_err();
 
         assert!(
-            matches!(err, slideforge_plugin_api::DataSourceError::UnsupportedUri { .. }),
+            matches!(
+                err,
+                slideforge_plugin_api::DataSourceError::UnsupportedUri { .. }
+            ),
             ".db3 extension must produce UnsupportedUri (E-DAT-014), got: {err:?}"
         );
         let msg = err.to_string();
@@ -1644,7 +1660,8 @@ mod tests {
     #[test]
     fn test_vp_036_missing_table_uses_actual_error_message() {
         let conn = make_memory_db(|c| {
-            c.execute_batch("CREATE TABLE real_table (x INTEGER);").unwrap();
+            c.execute_batch("CREATE TABLE real_table (x INTEGER);")
+                .unwrap();
         });
         let (_dir, path) = save_db_to_tempfile(&conn, ".db");
 
@@ -1654,7 +1671,10 @@ mod tests {
         let msg = err.to_string();
         // Must be a parse error.
         assert!(
-            matches!(err, slideforge_plugin_api::DataSourceError::ParseError { .. }),
+            matches!(
+                err,
+                slideforge_plugin_api::DataSourceError::ParseError { .. }
+            ),
             "non-existent table must produce ParseError, got: {err:?}"
         );
         // Error must reference the actual table name, NOT just "only SELECT queries".

@@ -122,8 +122,7 @@ impl DataSource for XlsxDataSource {
 
         // AC-005: Reject .xls (legacy format) before touching the file.
         // Traces to BC-1.03.006 invariant 3, edge case EC-002.
-        reject_xls_extension(path_str)
-            .map_err(|e| data_error_to_source_error(path_str, &e))?;
+        reject_xls_extension(path_str).map_err(|e| data_error_to_source_error(path_str, &e))?;
 
         // Check file existence before trying to open as workbook (better error).
         if !std::path::Path::new(path_str).exists() {
@@ -138,16 +137,14 @@ impl DataSource for XlsxDataSource {
         // Extension check already passed; this catches files that have .xlsx extension
         // but are not actually XLSX/ZIP archives.
         // Traces to VP-026, E-DAT-011.
-        validate_xlsx_magic(path_str)
-            .map_err(|e| data_error_to_source_error(path_str, &e))?;
+        validate_xlsx_magic(path_str).map_err(|e| data_error_to_source_error(path_str, &e))?;
 
         // Open workbook via calamine.
-        let mut workbook: Xlsx<_> = open_workbook(path_str).map_err(|e| {
-            DataSourceError::ParseError {
+        let mut workbook: Xlsx<_> =
+            open_workbook(path_str).map_err(|e| DataSourceError::ParseError {
                 uri: path_str.to_owned(),
                 message: format!("failed to open xlsx workbook '{path_str}': {e}"),
-            }
-        })?;
+            })?;
 
         // Select the target sheet (returns (sheet_name, range)).
         let (sheet_name, range) = select_sheet(&mut workbook, self.sheet.as_deref(), path_str)
@@ -250,12 +247,7 @@ impl DataSource for XlsxDataSource {
 /// - `DateTimeIso` cells with invalid ISO 8601 values (E-DAT-009)
 ///
 /// Traces to BC-1.03.006 postconditions 4-7 (cell type mapping).
-fn convert_calamine_cell(
-    cell: &Data,
-    col: u32,
-    row: u32,
-    path: &str,
-) -> Result<Value, DataError> {
+fn convert_calamine_cell(cell: &Data, col: u32, row: u32, path: &str) -> Result<Value, DataError> {
     match cell {
         Data::Int(n) => Ok(Value::Int(*n)),
         Data::Float(f) => {
@@ -275,15 +267,12 @@ fn convert_calamine_cell(
             }
             // Safe: f.is_finite() guaranteed above.
             #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
-            if f.fract() == 0.0
-                && *f >= i64::MIN as f64
-                && *f <= i64::MAX as f64
-            {
+            if f.fract() == 0.0 && *f >= i64::MIN as f64 && *f <= i64::MAX as f64 {
                 Ok(Value::Int(*f as i64))
             } else {
                 Ok(Value::Float(OrderedFloat(*f)))
             }
-        }
+        },
         Data::String(s) | Data::DurationIso(s) => Ok(Value::Str(Arc::from(s.as_str()))),
         Data::DateTimeIso(s) => {
             // BC-1.03.006 postcondition 6 / invariant 9: validate ISO 8601.
@@ -305,7 +294,7 @@ fn convert_calamine_cell(
                     ),
                 ))
             }
-        }
+        },
         Data::Bool(b) => Ok(Value::Bool(*b)),
         Data::DateTime(dt) => {
             // Convert calamine's ExcelDateTime to an ISO 8601 string.
@@ -316,13 +305,9 @@ fn convert_calamine_cell(
                 // Use format string to preserve sub-second precision if present.
                 // F-LOW-3: include sub-second precision when non-zero.
                 let formatted = if naive_dt.nanosecond() > 0 {
-                    naive_dt
-                        .format("%Y-%m-%dT%H:%M:%S%.f")
-                        .to_string()
+                    naive_dt.format("%Y-%m-%dT%H:%M:%S%.f").to_string()
                 } else {
-                    naive_dt
-                        .format("%Y-%m-%dT%H:%M:%S")
-                        .to_string()
+                    naive_dt.format("%Y-%m-%dT%H:%M:%S").to_string()
                 };
                 // If time is 00:00:00, emit date-only format.
                 let dt_str = if formatted.ends_with("T00:00:00") {
@@ -336,7 +321,7 @@ fn convert_calamine_cell(
                 // in practice with well-formed xlsx files).
                 Ok(Value::Str(Arc::from(format!("{dt}").as_str())))
             }
-        }
+        },
         Data::Error(_) | Data::Empty => Ok(Value::Null),
     }
 }
@@ -380,12 +365,11 @@ fn validate_xlsx_magic(path: &str) -> Result<(), DataError> {
     const ZIP_MAGIC: [u8; 4] = [0x50, 0x4B, 0x03, 0x04];
 
     let mut buf = [0u8; 4];
-    let mut file = std::fs::File::open(path).map_err(|e| {
-        DataError::io_error(Arc::from(path), Arc::from(e.to_string().as_str()))
-    })?;
-    let n = file.read(&mut buf).map_err(|e| {
-        DataError::io_error(Arc::from(path), Arc::from(e.to_string().as_str()))
-    })?;
+    let mut file = std::fs::File::open(path)
+        .map_err(|e| DataError::io_error(Arc::from(path), Arc::from(e.to_string().as_str())))?;
+    let n = file
+        .read(&mut buf)
+        .map_err(|e| DataError::io_error(Arc::from(path), Arc::from(e.to_string().as_str())))?;
 
     if n < 4 || buf != ZIP_MAGIC {
         let ext = std::path::Path::new(path)
@@ -454,15 +438,10 @@ fn select_sheet(
     let target_name: String = match sheet {
         None => {
             // AC-001: use first sheet when no sheet specified.
-            sheet_names
-                .first()
-                .cloned()
-                .ok_or_else(|| DataError::parse_error(
-                    path,
-                    DataFormat::Xlsx,
-                    "workbook has no sheets",
-                ))?
-        }
+            sheet_names.first().cloned().ok_or_else(|| {
+                DataError::parse_error(path, DataFormat::Xlsx, "workbook has no sheets")
+            })?
+        },
         Some(name) => {
             // AC-004: named sheet must exist.
             if sheet_names.iter().any(|s| s == name) {
@@ -472,19 +451,21 @@ fn select_sheet(
                 return Err(DataError::parse_error(
                     path,
                     DataFormat::Xlsx,
-                    format!("sheet '{name}' not found in '{path}'. Available sheets: [{available}]"),
+                    format!(
+                        "sheet '{name}' not found in '{path}'. Available sheets: [{available}]"
+                    ),
                 ));
             }
-        }
+        },
     };
 
-    let range = workbook
-        .worksheet_range(&target_name)
-        .map_err(|e| DataError::parse_error(
+    let range = workbook.worksheet_range(&target_name).map_err(|e| {
+        DataError::parse_error(
             path,
             DataFormat::Xlsx,
             format!("failed to read sheet '{target_name}': {e}"),
-        ))?;
+        )
+    })?;
 
     Ok((target_name, range))
 }
@@ -502,10 +483,7 @@ fn select_sheet(
 /// via `workbook.worksheet_merge_cells()` before this function is called.
 ///
 /// Traces to BC-1.03.006 postconditions 2-3, invariants 5-6, AC-002.
-fn extract_headers(
-    range: &calamine::Range<Data>,
-    path: &str,
-) -> Result<Vec<Arc<str>>, DataError> {
+fn extract_headers(range: &calamine::Range<Data>, path: &str) -> Result<Vec<Arc<str>>, DataError> {
     use crate::error::{E_DAT_007, E_DAT_008};
 
     let row_count = range.height();
@@ -529,9 +507,7 @@ fn extract_headers(
         })
         .collect();
 
-    let all_empty = cells
-        .iter()
-        .all(|c| matches!(c, None | Some(Data::Empty)));
+    let all_empty = cells.iter().all(|c| matches!(c, None | Some(Data::Empty)));
 
     // EC-004: entirely empty header row — "empty sheet" error.
     if all_empty {
@@ -565,10 +541,10 @@ fn extract_headers(
                     ),
                     span: slideforge_types::SourceSpan::default(),
                 });
-            }
+            },
             Some(Data::String(s)) => {
                 headers.push(Arc::from(s.as_str()));
-            }
+            },
             Some(non_string_cell) => {
                 // E-DAT-008: non-string header cell — Int, Float, Bool, DateTime etc.
                 // Traces to BC-1.03.006 invariant 6, postcondition 2.
@@ -597,7 +573,7 @@ fn extract_headers(
                     ),
                     span: slideforge_types::SourceSpan::default(),
                 });
-            }
+            },
         }
     }
 
@@ -620,7 +596,10 @@ mod tests {
     // Helper: write an xlsx bytes buffer to a tempfile and return the path.
     // ---------------------------------------------------------------------------
 
-    fn write_xlsx_to_tempfile(buf: Vec<u8>, suffix: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+    fn write_xlsx_to_tempfile(
+        buf: Vec<u8>,
+        suffix: &str,
+    ) -> (tempfile::TempDir, std::path::PathBuf) {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(format!("test{suffix}"));
         std::fs::write(&path, buf).unwrap();
@@ -801,7 +780,8 @@ mod tests {
         // rust_xlsxwriter requires a date format for Excel to recognise it as a date.
         let date_fmt = Format::new().set_num_format("yyyy-mm-dd");
         let excel_date = ExcelDateTime::from_ymd(2024, 1, 15).unwrap();
-        ws.write_datetime_with_format(1, 1, &excel_date, &date_fmt).unwrap();
+        ws.write_datetime_with_format(1, 1, &excel_date, &date_fmt)
+            .unwrap();
 
         let buf = wb.save_to_buffer().unwrap();
         let (_dir, path) = write_xlsx_to_tempfile(buf, ".xlsx");
@@ -919,12 +899,13 @@ mod tests {
             Value::Float(f) => {
                 assert!(
                     (f.0 - 1.5_f64).abs() < 1e-9,
-                    "float cell must be approximately 1.5, got {}", f.0
+                    "float cell must be approximately 1.5, got {}",
+                    f.0
                 );
-            }
+            },
             Value::Int(_) => {
                 panic!("1.5 must NOT become an Int; must be Value::Float")
-            }
+            },
             other => panic!("fractional cell must be Value::Float, got {other:?}"),
         }
     }
@@ -955,7 +936,10 @@ mod tests {
 
         let msg = err.to_string();
         assert!(
-            matches!(err, slideforge_plugin_api::DataSourceError::ParseError { .. }),
+            matches!(
+                err,
+                slideforge_plugin_api::DataSourceError::ParseError { .. }
+            ),
             "missing sheet must produce DataSourceError::ParseError, got: {err:?}"
         );
         assert!(
@@ -987,7 +971,10 @@ mod tests {
         let err = src.load("", &default_opts()).unwrap_err();
 
         assert!(
-            matches!(err, slideforge_plugin_api::DataSourceError::UnsupportedUri { .. }),
+            matches!(
+                err,
+                slideforge_plugin_api::DataSourceError::UnsupportedUri { .. }
+            ),
             "`.xls` file must produce DataSourceError::UnsupportedUri, got: {err:?}"
         );
         let msg = err.to_string();
@@ -1005,7 +992,10 @@ mod tests {
         let src = XlsxDataSource::new("/tmp/UPPERCASE.XLS");
         let err = src.load("", &default_opts()).unwrap_err();
         assert!(
-            matches!(err, slideforge_plugin_api::DataSourceError::UnsupportedUri { .. }),
+            matches!(
+                err,
+                slideforge_plugin_api::DataSourceError::UnsupportedUri { .. }
+            ),
             "`.XLS` (uppercase) must also be rejected; got: {err:?}"
         );
     }
@@ -1029,7 +1019,8 @@ mod tests {
 
         // Merge cells A1:B1 (row 0, cols 0-1) for a merged header.
         let merge_fmt = Format::new();
-        ws.merge_range(0, 0, 0, 1, "MergedHeader", &merge_fmt).unwrap();
+        ws.merge_range(0, 0, 0, 1, "MergedHeader", &merge_fmt)
+            .unwrap();
         // Data row.
         ws.write_string(1, 0, "val1").unwrap();
         ws.write_string(1, 1, "val2").unwrap();
@@ -1042,7 +1033,10 @@ mod tests {
 
         let msg = err.to_string();
         assert!(
-            matches!(err, slideforge_plugin_api::DataSourceError::ParseError { .. }),
+            matches!(
+                err,
+                slideforge_plugin_api::DataSourceError::ParseError { .. }
+            ),
             "merged header cells must produce DataSourceError::ParseError, got: {err:?}"
         );
         assert!(
@@ -1067,7 +1061,8 @@ mod tests {
         // Vertical merge: A1:A2 spans header row (row 0) into first data row (row 1).
         // This creates a merged cell that spans from the header into a data row.
         let merge_fmt = Format::new();
-        ws.merge_range(0, 0, 1, 0, "VertMergedHeader", &merge_fmt).unwrap();
+        ws.merge_range(0, 0, 1, 0, "VertMergedHeader", &merge_fmt)
+            .unwrap();
         // Second column with normal header.
         ws.write_string(0, 1, "value").unwrap();
         // Second data row to ensure the sheet has some data.
@@ -1082,7 +1077,10 @@ mod tests {
 
         let msg = err.to_string();
         assert!(
-            matches!(err, slideforge_plugin_api::DataSourceError::ParseError { .. }),
+            matches!(
+                err,
+                slideforge_plugin_api::DataSourceError::ParseError { .. }
+            ),
             "vertical merge in header must produce DataSourceError::ParseError, got: {err:?}"
         );
         assert!(
@@ -1112,7 +1110,8 @@ mod tests {
         // We must explicitly set the cached result via set_result("5") so calamine
         // can read the pre-computed value.  This matches how Excel .xlsx files work:
         // the file stores both the formula text AND the last-computed result.
-        ws.write_formula(1, 0, Formula::new("=2+3").set_result("5")).unwrap();
+        ws.write_formula(1, 0, Formula::new("=2+3").set_result("5"))
+            .unwrap();
 
         let buf = wb.save_to_buffer().unwrap();
         let (_dir, path) = write_xlsx_to_tempfile(buf, ".xlsx");
@@ -1179,7 +1178,10 @@ mod tests {
 
         let msg = err.to_string();
         assert!(
-            matches!(err, slideforge_plugin_api::DataSourceError::ParseError { .. }),
+            matches!(
+                err,
+                slideforge_plugin_api::DataSourceError::ParseError { .. }
+            ),
             "zero-row sheet must produce DataSourceError::ParseError, got: {err:?}"
         );
         assert!(
@@ -1376,7 +1378,11 @@ mod tests {
             Value::List(v) => v,
             other => panic!("expected Value::List, got {other:?}"),
         };
-        assert_eq!(rows.len(), 3, "canonical test vector requires exactly 3 data rows");
+        assert_eq!(
+            rows.len(),
+            3,
+            "canonical test vector requires exactly 3 data rows"
+        );
 
         // Verify all 3 rows are maps with the 3 header keys.
         for (i, row_val) in rows.iter().enumerate() {
@@ -1442,7 +1448,11 @@ mod tests {
     fn test_bc_1_03_006_convert_calamine_cell_int_negative() {
         let cell = Data::Int(-99);
         let result = convert_calamine_cell(&cell, 0, 1, "test.xlsx").unwrap();
-        assert_eq!(result, Value::Int(-99), "Data::Int(-99) must map to Value::Int(-99)");
+        assert_eq!(
+            result,
+            Value::Int(-99),
+            "Data::Int(-99) must map to Value::Int(-99)"
+        );
     }
 
     /// `test_bc_1_03_006_convert_calamine_cell_float` -- `Data::Float(1.5)` maps to `Value::Float`.
@@ -1460,7 +1470,7 @@ mod tests {
                     (f.0 - 1.5_f64).abs() < 1e-10,
                     "Data::Float(1.5) must map to Value::Float(1.5)"
                 );
-            }
+            },
             other => panic!("Data::Float(1.5) must produce Value::Float, got {other:?}"),
         }
     }
@@ -1583,12 +1593,20 @@ mod tests {
         // Negative whole number
         let cell_neg = Data::Float(-42.0);
         let result_neg = convert_calamine_cell(&cell_neg, 0, 1, "test.xlsx").unwrap();
-        assert_eq!(result_neg, Value::Int(-42), "Float(-42.0) must promote to Int(-42)");
+        assert_eq!(
+            result_neg,
+            Value::Int(-42),
+            "Float(-42.0) must promote to Int(-42)"
+        );
 
         // Zero
         let cell_zero = Data::Float(0.0);
         let result_zero = convert_calamine_cell(&cell_zero, 0, 1, "test.xlsx").unwrap();
-        assert_eq!(result_zero, Value::Int(0), "Float(0.0) must promote to Int(0)");
+        assert_eq!(
+            result_zero,
+            Value::Int(0),
+            "Float(0.0) must promote to Int(0)"
+        );
     }
 
     // ---------------------------------------------------------------------------
@@ -1611,8 +1629,11 @@ mod tests {
         let result = convert_calamine_cell(&cell, 0, 1, "test.xlsx").unwrap();
         match result {
             Value::Float(f) => {
-                assert!((f.0 - 1.5).abs() < 1e-10, "Float(1.5) must be Value::Float(1.5)");
-            }
+                assert!(
+                    (f.0 - 1.5).abs() < 1e-10,
+                    "Float(1.5) must be Value::Float(1.5)"
+                );
+            },
             other => panic!("Float(1.5) must NOT be promoted to Int; got {other:?}"),
         }
     }
@@ -1632,7 +1653,10 @@ mod tests {
     fn test_vp_023_nan_produces_parse_error() {
         let cell = Data::Float(f64::NAN);
         let result = convert_calamine_cell(&cell, 2, 3, "test.xlsx");
-        assert!(result.is_err(), "Data::Float(NaN) must produce Err (VP-023)");
+        assert!(
+            result.is_err(),
+            "Data::Float(NaN) must produce Err (VP-023)"
+        );
         let err = result.unwrap_err();
         let msg = err.to_string();
         assert!(
@@ -1648,7 +1672,10 @@ mod tests {
     fn test_vp_023_infinity_produces_parse_error() {
         let cell = Data::Float(f64::INFINITY);
         let result = convert_calamine_cell(&cell, 0, 1, "test.xlsx");
-        assert!(result.is_err(), "Data::Float(Infinity) must produce Err (VP-023)");
+        assert!(
+            result.is_err(),
+            "Data::Float(Infinity) must produce Err (VP-023)"
+        );
         let err = result.unwrap_err();
         let msg = err.to_string();
         assert!(
@@ -1672,12 +1699,18 @@ mod tests {
         // RFC 3339 format
         let cell = Data::DateTimeIso("2024-01-15T09:00:00+00:00".to_owned());
         let result = convert_calamine_cell(&cell, 0, 1, "test.xlsx").unwrap();
-        assert!(matches!(result, Value::Str(_)), "RFC 3339 DateTimeIso must produce Str");
+        assert!(
+            matches!(result, Value::Str(_)),
+            "RFC 3339 DateTimeIso must produce Str"
+        );
 
         // Date-only format
         let cell2 = Data::DateTimeIso("2024-01-15".to_owned());
         let result2 = convert_calamine_cell(&cell2, 0, 1, "test.xlsx").unwrap();
-        assert!(matches!(result2, Value::Str(_)), "Date-only DateTimeIso must produce Str");
+        assert!(
+            matches!(result2, Value::Str(_)),
+            "Date-only DateTimeIso must produce Str"
+        );
     }
 
     // ---------------------------------------------------------------------------
@@ -1694,7 +1727,10 @@ mod tests {
     fn test_vp_025_invalid_datetime_iso_produces_error() {
         let cell = Data::DateTimeIso("not-iso-string".to_owned());
         let result = convert_calamine_cell(&cell, 3, 7, "data.xlsx");
-        assert!(result.is_err(), "Data::DateTimeIso(\"not-iso-string\") must produce Err (VP-025)");
+        assert!(
+            result.is_err(),
+            "Data::DateTimeIso(\"not-iso-string\") must produce Err (VP-025)"
+        );
         let err = result.unwrap_err();
         let msg = err.to_string();
         assert!(
@@ -1734,7 +1770,10 @@ mod tests {
 
         let msg = err.to_string();
         assert!(
-            matches!(err, slideforge_plugin_api::DataSourceError::ParseError { .. }),
+            matches!(
+                err,
+                slideforge_plugin_api::DataSourceError::ParseError { .. }
+            ),
             "partial-empty header must produce DataSourceError::ParseError, got: {err:?}"
         );
         assert!(
@@ -1779,7 +1818,10 @@ mod tests {
 
         let msg = err.to_string();
         assert!(
-            matches!(err, slideforge_plugin_api::DataSourceError::ParseError { .. }),
+            matches!(
+                err,
+                slideforge_plugin_api::DataSourceError::ParseError { .. }
+            ),
             "non-string header must produce DataSourceError::ParseError, got: {err:?}"
         );
         assert!(
@@ -1811,11 +1853,16 @@ mod tests {
 
         let msg = err.to_string();
         assert!(
-            matches!(err, slideforge_plugin_api::DataSourceError::ParseError { .. }),
+            matches!(
+                err,
+                slideforge_plugin_api::DataSourceError::ParseError { .. }
+            ),
             "wrong magic bytes must produce DataSourceError::ParseError, got: {err:?}"
         );
         assert!(
-            msg.contains("E-DAT-011") || msg.contains("magic") || msg.contains("ZIP")
+            msg.contains("E-DAT-011")
+                || msg.contains("magic")
+                || msg.contains("ZIP")
                 || msg.contains("not a valid"),
             "wrong magic error must mention E-DAT-011, magic, ZIP, or 'not a valid'; got: {msg}"
         );
@@ -1859,7 +1906,7 @@ mod tests {
             Ok(Value::List(rows)) => {
                 // If it succeeds, we must have all 1000 rows.
                 assert_eq!(rows.len(), 1000, "1000-row sheet must load 1000 data rows");
-            }
+            },
             Ok(other) => panic!("expected Value::List for 1000-row sheet, got {other:?}"),
             Err(e) => {
                 // A cap-exceeded error is also acceptable — but must not panic.
@@ -1871,7 +1918,7 @@ mod tests {
                         || msg.to_lowercase().contains("exceeded"),
                     "cap error must explain the row limit; got: {msg}"
                 );
-            }
+            },
         }
     }
 
