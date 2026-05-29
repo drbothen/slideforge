@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.4"
+version: "1.4.1"
 status: active
 producer: product-owner
 timestamp: 2026-05-29T00:00:00
@@ -14,7 +14,7 @@ subsystem: SS-TBD
 capability: CAP-023
 lifecycle_status: active
 introduced: v1.0.0
-modified: ["v1.2 — adversary pass 1 adjudication: codified ShapeSpec position schema, hex color contract, shape_type closed vocabulary, off-canvas boundary semantics, gradient deferral, MissingAlt span, multi-error accumulation", "v1.3 — roundRect added to closed vocabulary per Q7 decision example", "v1.3.1 — STORY-TBD-shape-gradient-fills placeholder resolved to STORY-072", "v1.3.2 — VP propagation burst: assigned VP-037 through VP-042 to all VP-TBD entries", "v1.4 — adversary pass 2 adjudications M/N/O/P/Q/R/T: ArithmeticOverflow Result return, LayoutError::Multiple uniformity, LaidOutDeck warnings field, fill+text fields on ShapeSpec, canonical test vectors, uppercase normalization phrasing, shape frame order enforcement"]
+modified: ["v1.2 — adversary pass 1 adjudication: codified ShapeSpec position schema, hex color contract, shape_type closed vocabulary, off-canvas boundary semantics, gradient deferral, MissingAlt span, multi-error accumulation", "v1.3 — roundRect added to closed vocabulary per Q7 decision example", "v1.3.1 — STORY-TBD-shape-gradient-fills placeholder resolved to STORY-072", "v1.3.2 — VP propagation burst: assigned VP-037 through VP-042 to all VP-TBD entries", "v1.4 — adversary pass 2 adjudications M/N/O/P/Q/R/T: ArithmeticOverflow Result return, LayoutError::Multiple uniformity, LaidOutDeck warnings field, fill+text fields on ShapeSpec, canonical test vectors, uppercase normalization phrasing, shape frame order enforcement", "v1.4.1 — pass-7 drift fix (F-P7-HIGH-004): slide_index → source_slide_index in EC-001 and EC-003 per AC-BC-A9 canonical field name"]
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -202,9 +202,9 @@ coordinates. ALL errors from a slide's shape set are accumulated before returnin
 
 | ID | Description | Expected Behavior |
 |----|-------------|-------------------|
-| EC-001 | shape: without alt and without decorative: true | `LayoutError::MissingAlt { slide_index, span }` (layout defensive check); E-A11-001 at validation |
+| EC-001 | shape: without alt and without decorative: true | `LayoutError::MissingAlt { source_slide_index, span }` (layout defensive check); E-A11-001 at validation |
 | EC-002 | shape: with position where x + width == page_width | ON-canvas (inclusive boundary). No off-canvas warning. Canonical test vector: x=8in, width=2in on 10in canvas → no warning. |
-| EC-003 | shape: with position where x + width > page_width by 1 EMU | `LayoutWarning::OffCanvas { slide_index, shape_type, x_emu, y_emu }`. Shape frame still produced at declared position. |
+| EC-003 | shape: with position where x + width > page_width by 1 EMU | `LayoutWarning::OffCanvas { source_slide_index, shape_type, x_emu, y_emu }`. Shape frame still produced at declared position. |
 | EC-004 | shape: with negative x or y | `LayoutWarning::OffCanvas`. Shape frame produced. |
 | EC-005 | shape: with unknown type keyword (e.g., `type frobnicator`) | E-PAR-012: "Unknown shape type 'frobnicator' at `<file>:<line>:<col>`. Known types: [rect, ellipse, arrow, line, star, roundRect]" |
 | EC-006 | shape: with fill "#FF6F00" (uppercase) | Accepted; normalized to `Rgb { r: 255, g: 111, b: 0 }` |

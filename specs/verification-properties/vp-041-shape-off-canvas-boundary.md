@@ -11,6 +11,7 @@ kani_amenable: true
 bc_trace: [BC-3.04.001]
 anchored_to_bc: BC-3.04.001
 traces_to: .factory/specs/verification-properties/VP-INDEX.md
+spec_version: "1.0.1"
 ---
 
 # VP-041: Shape Off-Canvas Boundary (Inclusive Boundary Semantics)
@@ -20,7 +21,7 @@ traces_to: .factory/specs/verification-properties/VP-INDEX.md
 For a shape with position `x_emu + width_emu == PAGE_WIDTH_EMU` (inclusive boundary),
 the layout stage MUST NOT produce `LayoutWarning::OffCanvas`. For a shape with
 `x_emu + width_emu == PAGE_WIDTH_EMU + 1` (one EMU beyond the page edge), the layout
-stage MUST produce `LayoutWarning::OffCanvas { slide_index, shape_type, x_emu, y_emu }`.
+stage MUST produce `LayoutWarning::OffCanvas { source_slide_index, shape_type, x_emu, y_emu }`.
 
 Formally:
 - `x + width <= PAGE_WIDTH_EMU → !off_canvas(x, width)`
@@ -115,3 +116,10 @@ fn test_one_emu_beyond_is_off_canvas() {
 | `x=8in, width=2in` on 10in page (`x+w == PAGE_W`) | No `OffCanvas` warning | boundary (EC-002) |
 | `x=8in, width=2in + 1EMU` on 10in page | `LayoutWarning::OffCanvas` | boundary (EC-003) |
 | `x=-1in, width=2in` (negative x) | `LayoutWarning::OffCanvas` | edge-case (EC-004) |
+
+## Changelog
+
+| Version | Date | Change |
+|---------|------|--------|
+| v1.0.1 | 2026-05-29 | pass-7 drift fix (F-P7-HIGH-002): slide_index → source_slide_index per AC-BC-A9 canonical field name |
+| v1.0.0 | — | Initial version |

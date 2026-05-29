@@ -11,7 +11,7 @@ kani_amenable: false
 bc_trace: [BC-3.04.001, DI-001]
 anchored_to_bc: BC-3.04.001
 traces_to: .factory/specs/verification-properties/VP-INDEX.md
-spec_version: "1.0.1"
+spec_version: "1.0.2"
 ---
 
 # VP-038: Shape Without Alt or Decorative Always Produces LayoutError::MissingAlt
@@ -19,7 +19,7 @@ spec_version: "1.0.1"
 ## Property Statement
 
 For any `ShapeSpec` where `alt == None` and `decorative == false`, the layout stage's
-shape processing function MUST produce `LayoutError::MissingAlt { slide_index, span }`.
+shape processing function MUST produce `LayoutError::MissingAlt { source_slide_index, span }`.
 This error MUST carry the `SourceSpan` of the offending `shape:` block.
 
 Formally: `shape.alt == None ∧ shape.decorative == false`
@@ -59,7 +59,7 @@ fn test_shape_without_alt_produces_missing_alt_error() {
     };
     let errors = layout_shape(0, &shape, &BrandConfig::default());
     assert!(
-        errors.iter().any(|e| matches!(e, LayoutError::MissingAlt { slide_index: 0, .. })),
+        errors.iter().any(|e| matches!(e, LayoutError::MissingAlt { source_slide_index: 0, .. })),
         "must produce MissingAlt error"
     );
 }
@@ -103,5 +103,6 @@ fn test_missing_alt_carries_span() {
 
 | Version | Date | Change |
 |---------|------|--------|
+| v1.0.2 | 2026-05-29 | pass-7 drift fix (F-P7-HIGH-001): slide_index → source_slide_index per AC-BC-A9 canonical field name |
 | v1.0.1 | 2026-05-29 | pass-6 drift fix (F-P6-MED-001): AltText::Text → AltText::Provided to match canonical specs.rs variants |
 | v1.0.0 | — | Initial version |

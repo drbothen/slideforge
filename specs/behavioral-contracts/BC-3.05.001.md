@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.3.2"
+version: "1.3.3"
 status: active
 producer: product-owner
 timestamp: 2026-05-29T00:00:00
@@ -14,7 +14,7 @@ subsystem: SS-TBD
 capability: CAP-024
 lifecycle_status: active
 introduced: v1.0.0
-modified: ["v1.2 — adversary pass 1 adjudication: variant count corrected to 12, payload shapes corrected to Vec<InlineNode> for structured variants, inline depth bound added (max 64), math xref validation boundary codified", "v1.3 — story spec AC-005 enum example corrected to match production types", "v1.3.1 — VP propagation burst: assigned VP-043 through VP-047 to all VP-TBD entries", "v1.3.2 — adversary pass 2 adjudications S/O: LayoutError::Multiple smart constructor invariants codified; XrefTargetNotFound warnings must reach LaidOutDeck.warnings (not silently dropped)"]
+modified: ["v1.2 — adversary pass 1 adjudication: variant count corrected to 12, payload shapes corrected to Vec<InlineNode> for structured variants, inline depth bound added (max 64), math xref validation boundary codified", "v1.3 — story spec AC-005 enum example corrected to match production types", "v1.3.1 — VP propagation burst: assigned VP-043 through VP-047 to all VP-TBD entries", "v1.3.2 — adversary pass 2 adjudications S/O: LayoutError::Multiple smart constructor invariants codified; XrefTargetNotFound warnings must reach LaidOutDeck.warnings (not silently dropped)", "v1.3.3 — pass-7 drift fix (F-P7-HIGH-005): slide_index → source_slide_index in Invariant 4, Inline Depth Bound section, EC-002, EC-006, and Canonical Test Vectors per AC-BC-A9 canonical field name"]
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -125,7 +125,7 @@ Per output format:
 3. Inline formatting within a math block (`$...$`) uses `@{var}` interpolation only;
    `{{ }}` text interpolation is disabled inside math mode. (BC-1.02.004)
 4. Nesting depth is bounded at 64 levels. Inline trees deeper than 64 produce
-   `LayoutError::InlineDepthExceeded { slide_index, depth: 65 }`. This is a
+   `LayoutError::InlineDepthExceeded { source_slide_index, depth: 65 }`. This is a
    hard error (not a warning) to prevent stack overflow on export.
 5. `InlineNode::Xref` validation traverses ONLY top-level inline sequences; it does
    NOT recursively validate xrefs inside `MathNode` content. Math is a separate
@@ -169,7 +169,7 @@ This boundary is explicit and intentional, not an oversight.
 Maximum nesting depth: **64 levels**.
 
 At depth 65+, `layout_shapes` (or the inline validation pass) returns
-`LayoutError::InlineDepthExceeded { slide_index, depth: 65 }` (or the actual
+`LayoutError::InlineDepthExceeded { source_slide_index, depth: 65 }` (or the actual
 exceeded depth). This is a hard error — output is NOT produced for the affected slide.
 
 Rationale: unbounded recursion in inline tree traversal during export (PPTX XML
@@ -184,11 +184,11 @@ must produce `LayoutError::InlineDepthExceeded`.
 | ID | Description | Expected Behavior |
 |----|-------------|-------------------|
 | EC-001 | Nested bold inside italic (`Italic(vec![Bold(vec![Plain("text")])])`) | Both applied: PPTX `<a:rPr b="1" i="1">`; HTML `<em><strong>text</strong></em>` |
-| EC-002 | Xref to a slide title that doesn't exist | `LayoutWarning::XrefTargetNotFound { target, slide_index }` accumulated; not fatal |
+| EC-002 | Xref to a slide title that doesn't exist | `LayoutWarning::XrefTargetNotFound { target, source_slide_index }` accumulated; not fatal |
 | EC-003 | Highlight in PPTX with no highlight color in brand | Default to yellow highlight (#FFFF00); lint warning: "highlight color not declared in brand; using yellow" |
 | EC-004 | Footnote in PPTX (no footnote feature in slides natively) | Footnote content moved to presenter notes with superscript reference number on slide |
 | EC-005 | Code inline in .pptx (no semantic code type in OOXML) | Monospace font run; no semantic tagging (PPTX limitation documented in DSL reference) |
-| EC-006 | Inline nesting at depth 65 | `LayoutError::InlineDepthExceeded { slide_index, depth: 65 }`; hard error |
+| EC-006 | Inline nesting at depth 65 | `LayoutError::InlineDepthExceeded { source_slide_index, depth: 65 }`; hard error |
 | EC-007 | `Xref("slide-title")` inside a `MathNode` | NOT validated by xref pass; math is a separate validation surface |
 | EC-008 | `"**bold using markdown"` (forbidden pattern) | No bold applied; literal `**bold using markdown` rendered as Plain text; lint warning |
 
@@ -200,8 +200,8 @@ must produce `LayoutError::InlineDepthExceeded`.
 | `Link { text: vec![Plain("See report")], url: "https://example.com" }` | PPTX: hlinkClick relationship; HTML: `<a href="https://example.com">See report</a>` | happy-path |
 | `"**bold using markdown"` (forbidden pattern) | No bold; literal text rendered; lint warning issued | edge-case |
 | `Superscript(vec![Plain("2")])` (inside "CO₂") | PPTX: `<a:rPr baseline="30000">`; HTML: `<sup>2</sup>` | happy-path |
-| 65-deep nested `Bold(vec![Bold(vec![...])])` | `LayoutError::InlineDepthExceeded { slide_index: 0, depth: 65 }` | depth-bound |
-| `Xref("nonexistent-slide")` in top-level text | `LayoutWarning::XrefTargetNotFound { target: "nonexistent-slide", slide_index: 0 }` | warning |
+| 65-deep nested `Bold(vec![Bold(vec![...])])` | `LayoutError::InlineDepthExceeded { source_slide_index: 0, depth: 65 }` | depth-bound |
+| `Xref("nonexistent-slide")` in top-level text | `LayoutWarning::XrefTargetNotFound { target: "nonexistent-slide", source_slide_index: 0 }` | warning |
 | All 12 variants present in one `Vec<InlineNode>` | All 12 variants survive layout pass unchanged; `FrameContent::TextRun` preserves all | exhaustive |
 
 ## Verification Properties

@@ -11,6 +11,7 @@ kani_amenable: true
 bc_trace: [BC-3.05.001, DI-018]
 anchored_to_bc: BC-3.05.001
 traces_to: .factory/specs/verification-properties/VP-INDEX.md
+spec_version: "1.0.1"
 ---
 
 # VP-045: Inline Tree at Depth 65 Produces InlineDepthExceeded Error
@@ -18,7 +19,7 @@ traces_to: .factory/specs/verification-properties/VP-INDEX.md
 ## Property Statement
 
 For any `InlineNode` tree with nesting depth >= 65, the layout-stage inline validator
-MUST return `Err(LayoutError::InlineDepthExceeded { slide_index, depth: 65 })` (or
+MUST return `Err(LayoutError::InlineDepthExceeded { source_slide_index, depth: 65 })` (or
 the actual exceeded depth). A tree at depth 64 MUST NOT trigger this error.
 
 Formally:
@@ -99,7 +100,7 @@ fn test_depth_65_rejected() {
     // BC-3.05.001 canonical test vector: 65-deep nested Bold nodes
     let tree = make_nested_bold(64); // 65 total levels
     let err = check_inline_depth(0, &tree).expect_err("depth 65 must be rejected");
-    assert!(matches!(err, LayoutError::InlineDepthExceeded { slide_index: 0, depth: 65, .. }));
+    assert!(matches!(err, LayoutError::InlineDepthExceeded { source_slide_index: 0, depth: 65, .. }));
 }
 ```
 
@@ -110,3 +111,10 @@ fn test_depth_65_rejected() {
 | `Bold(Bold(... 64 levels ...))` | `Ok(())` — depth 64 accepted | boundary |
 | `Bold(Bold(... 65 levels ...))` | `LayoutError::InlineDepthExceeded { depth: 65 }` | depth-bound (EC-006) |
 | `Plain("text")` (depth 1) | `Ok(())` | happy-path |
+
+## Changelog
+
+| Version | Date | Change |
+|---------|------|--------|
+| v1.0.1 | 2026-05-29 | pass-7 drift fix (F-P7-HIGH-003): slide_index → source_slide_index per AC-BC-A9 canonical field name |
+| v1.0.0 | — | Initial version |
