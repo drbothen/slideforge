@@ -17,9 +17,9 @@ pub enum DataFormat {
     Yaml,
     /// TOML (`.toml`)
     Toml,
-    /// Excel XLSX (`.xlsx`) — reserved for future implementation.
+    /// Excel XLSX (`.xlsx`) — implemented in STORY-020 (see [`crate::XlsxDataSource`]).
     Xlsx,
-    /// `SQLite` (`.sqlite`, `.db`) — reserved for future implementation.
+    /// `SQLite` (`.sqlite`, `.db`, `.sqlite3`) — implemented in STORY-020 (see [`crate::SqliteDataSource`]).
     Sqlite,
 }
 
