@@ -1054,8 +1054,8 @@ mod tests {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // VP-049 — LaidOutDeck.warnings wired: off-canvas shape warning flows through
-    // VP-050 — LaidOutDeck.warnings wired: shape frame after regions
+    // VP-049 — LaidOutDeck.warnings wired: off-canvas + xref warnings flow through
+    // VP-050 — Placeholder-before-shape frame ordering (BC-3.04.001 v1.4 PC-3)
     // ─────────────────────────────────────────────────────────────────────────
 
     /// VP-049 — `layout::run` propagates off-canvas shape warnings to

@@ -78,8 +78,6 @@ use crate::types::{
 ///   violates coordinate invariants (BC-3.06.003 defensive check).
 /// * `Err(LayoutError::MissingAlt)` / `Err(LayoutError::Multiple)` — A shape
 ///   node was missing `alt` text or `decorative: true` (BC-3.04.001 EC-001).
-/// * `Err(LayoutError::UnknownShapeType)` — A shape node has an unknown type
-///   keyword (BC-3.04.001 invariant 4 / E-PAR-012-SHP).
 /// * `Err(LayoutError::InlineDepthExceeded)` — An inline node tree exceeds the
 ///   maximum nesting depth (BC-3.05.001 E-LAY-005 / F-MED-006).
 ///
@@ -199,8 +197,11 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
             .collect();
 
         // layout_shapes returns either Ok(ShapeLayoutOutput) or Err(LayoutError).
-        // Warnings (off-canvas positions) are non-fatal; errors (MissingAlt,
-        // UnknownShapeType) are fatal and propagate out of layout::run.
+        // Warnings (off-canvas positions) are non-fatal; errors (MissingAlt)
+        // are fatal and propagate out of layout::run. UnknownShapeType is
+        // unreachable here — ShapeSpec.shape_type is a resolved ShapeType enum,
+        // so unknown keywords are rejected at the parse stage (E-PAR-012) before
+        // a ShapeSpec is ever constructed.
         let shape_output = layout_shapes(&shape_specs, page_size, source_index, DEFAULT_EM_IN_EMU)?;
 
         let mut all_frames = frames;

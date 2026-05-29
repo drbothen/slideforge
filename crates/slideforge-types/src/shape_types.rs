@@ -80,8 +80,10 @@ pub enum FillSpec {
 ///
 /// `ShapeTypeError` is a minimal self-contained error type in `slideforge-types`
 /// (the leaf crate with no workspace crate deps). This avoids an upward
-/// dependency from `slideforge-types` into `slideforge-layout`. Callers in
-/// the layout crate map `ShapeTypeError` → `LayoutError::UnknownShapeType`.
+/// dependency from `slideforge-types` into `slideforge-layout`. The parse
+/// stage surfaces this as `E-PAR-012`; the layout crate no longer exposes a
+/// separate `LayoutError::UnknownShapeType` (removed in STORY-028 pass-4,
+/// F-P4-MED-001 — unreachable after `ShapeSpec.shape_type` became `ShapeType`).
 ///
 /// The keyword is stored as `Arc<str>` to avoid unnecessary allocation on the
 /// caller side — callers that forward the keyword into a `LayoutError` can move
@@ -156,8 +158,8 @@ impl ShapeType {
     ///
     /// Returns `Err(ShapeTypeError { keyword })` for any unknown keyword.
     /// There is NO `Custom` fallback — the type system enforces the closed
-    /// vocabulary. Callers in the layout crate map `ShapeTypeError` →
-    /// `LayoutError::UnknownShapeType` (interface-definitions.md §9.2).
+    /// vocabulary. The parse stage surfaces this as `E-PAR-012`
+    /// (interface-definitions.md §9.2).
     ///
     /// # Examples
     ///

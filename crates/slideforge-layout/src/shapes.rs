@@ -1471,21 +1471,21 @@ mod tests {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // VP-039 — Unknown shape type → UnknownShapeType (no Custom fallback)
+    // VP-039 — Unknown shape type rejected at parse level (no Custom fallback)
     // ─────────────────────────────────────────────────────────────────────────
 
-    /// VP-039 — `layout_shapes` with unknown shape type keyword returns
-    /// BC-3.04.001 invariant 4: the closed shape-type vocabulary is enforced at
-    /// the type level by `slideforge_types::ShapeType`. `ShapeType::from_keyword`
-    /// returns `Err(ShapeTypeError)` for any keyword outside the six-member v1.0
+    /// VP-039 — The closed shape-type vocabulary is enforced at the type level
+    /// by `slideforge_types::ShapeType`. `ShapeType::from_keyword` returns
+    /// `Err(ShapeTypeError)` for any keyword outside the six-member v1.0
     /// vocabulary (`rect`, `ellipse`, `arrow`, `line`, `star`, `roundRect`).
     ///
     /// With the STORY-028 pass-2 schema change (`ShapeSpec.shape_type: ShapeType`),
-    /// it is no longer possible to construct a `ShapeSpec` with an unknown shape
-    /// type and pass it to `layout_shapes`. The parse stage rejects unknown keywords
+    /// it is not possible to construct a `ShapeSpec` with an unknown shape type
+    /// and pass it to `layout_shapes`. The parse stage rejects unknown keywords
     /// with `E-PAR-012` before a `ShapeSpec` is ever built. `LayoutError::UnknownShapeType`
-    /// is preserved in the error enum for future parser-level surfacing but can no
-    /// longer be triggered by `layout_shapes` itself.
+    /// was removed in STORY-028 pass-4 (F-P4-MED-001) because it is unreachable from
+    /// `layout_shapes` after the schema change. Future parser-level E-PAR-012 surfacing
+    /// will use `slideforge_types::ShapeTypeError` directly.
     ///
     /// This test verifies the parse-level gate: `from_keyword` returns `Err`
     /// for unrecognised keywords and returns `Ok` for all six known keywords.

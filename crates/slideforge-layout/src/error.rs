@@ -172,27 +172,6 @@ pub enum LayoutError {
         source_slide_index: usize,
     },
 
-    /// A `shape:` block specifies an unknown shape type keyword (BC-3.04.001
-    /// invariant 4 / E-PAR-012-SHP / F-MED-005).
-    ///
-    /// The closed v1.0 vocabulary is: `rect`, `ellipse`, `arrow`, `line`, `star`,
-    /// `roundRect`. Any other keyword produces this error. There is NO `Custom`
-    /// fallback — the type system enforces the closed vocabulary.
-    ///
-    /// `span` points to the offending `shape:` block in the source file.
-    #[error(
-        "layout error: slide {source_slide_index}: unknown shape type '{shape_type}' at {span}. \
-         Known types: [rect, ellipse, arrow, line, star, roundRect]"
-    )]
-    UnknownShapeType {
-        /// The unrecognised shape type keyword from the `.sf` source.
-        shape_type: String,
-        /// Zero-based index of the slide containing the offending `shape:` block.
-        source_slide_index: usize,
-        /// Source location of the offending `shape:` block.
-        span: SourceSpan,
-    },
-
     /// Arithmetic overflow in EMU conversion (BC-3.04.001 Invariant 8 / VP-048).
     ///
     /// `from_inches` and `from_em` use `checked_mul` (per BC-3.04.001 Invariant 8
