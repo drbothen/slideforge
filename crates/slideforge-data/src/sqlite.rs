@@ -260,10 +260,10 @@ impl DataSource for SqliteDataSource {
         // accepted and documented. A zero-cost TOCTOU mitigation (single open) would
         // require rusqlite VFS integration, which is out of scope for v1.0.
         // Traces to BC-1.03.007 postcondition 7, VP-034, E-DAT-013.
-        validate_sqlite_magic(path_str).map_err(|e| DataSourceError::ParseError {
-            uri: path_str.to_owned(),
-            message: e,
-        })?;
+        // F-PASS12-OBS-2: validate_sqlite_magic now returns DataSourceError directly,
+        // differentiating IoError (E-DAT-004) for I/O failures from ParseError
+        // (E-DAT-013) for magic-byte mismatches. Use `?` for direct propagation.
+        validate_sqlite_magic(path_str)?;
 
         // AC-008: Open with SQLITE_OPEN_READ_ONLY (hard security requirement).
         // Delegates to open_readonly_connection — the SINGLE source of truth for
@@ -466,35 +466,48 @@ fn validate_sqlite_extension(path: &str) -> Result<(), String> {
 /// Combined with the extension check, this ensures the file has both the right
 /// extension AND the right magic bytes.
 ///
-/// Returns `Ok(())` if the header matches, or `Err(String)` with a diagnostic
-/// message (with `[E-DAT-013]` prefix embedded) on mismatch or I/O failure.
+/// ## Error classification (F-PASS12-OBS-2)
 ///
-/// The `[E-DAT-013]` prefix is embedded in the returned string so that the final
-/// `DataSourceError` message always carries the granular error code — consistent
-/// with the XLSX pattern where error codes appear in `DataError` display strings.
+/// - `File::open` or `read` I/O failure → `DataSourceError::IoError` (E-DAT-004).
+///   These are infrastructure failures (permission denied, file disappeared) — not
+///   format errors.
+/// - Magic-byte mismatch → `DataSourceError::ParseError` (E-DAT-013).
+///   The file is present and readable but is not a SQLite database.
 ///
-/// Traces to BC-1.03.007 postcondition 7, VP-034, E-DAT-013.
-fn validate_sqlite_magic(path: &str) -> Result<(), String> {
+/// Traces to BC-1.03.007 postcondition 7, VP-034, E-DAT-013, E-DAT-004.
+fn validate_sqlite_magic(path: &str) -> Result<(), DataSourceError> {
     const MAGIC: &[u8; 16] = b"SQLite format 3\x00";
     let mut buf = [0u8; 16];
-    let mut file = std::fs::File::open(path)
-        .map_err(|e| format!("[{}] failed to read file '{path}': {e}", crate::error::E_DAT_013))?;
-    let n = file.read(&mut buf).map_err(|e| {
-        format!(
-            "[{}] failed to read file header from '{path}': {e}",
-            crate::error::E_DAT_013
-        )
+    // I/O failure opening the file → IoError (E-DAT-004), not ParseError.
+    let mut file = std::fs::File::open(path).map_err(|e| DataSourceError::IoError {
+        uri: path.to_owned(),
+        message: format!(
+            "[{}] failed to open file '{path}' to validate SQLite magic: {e}",
+            crate::error::E_DAT_004
+        ),
     })?;
+    // I/O failure reading the header → IoError (E-DAT-004).
+    let n = file.read(&mut buf).map_err(|e| DataSourceError::IoError {
+        uri: path.to_owned(),
+        message: format!(
+            "[{}] failed to read file header from '{path}': {e}",
+            crate::error::E_DAT_004
+        ),
+    })?;
+    // Magic-byte mismatch → ParseError (E-DAT-013): file is present but not SQLite.
     if n < 16 || &buf != MAGIC {
         let ext = std::path::Path::new(path)
             .extension()
             .and_then(|e| e.to_str())
             .unwrap_or("db");
-        return Err(format!(
-            "[{code}] '{path}' has .{ext} extension but is not a valid SQLite database \
-            (SQLite file header not found). File may be corrupted or misnamed.",
-            code = crate::error::E_DAT_013,
-        ));
+        return Err(DataSourceError::ParseError {
+            uri: path.to_owned(),
+            message: format!(
+                "[{code}] '{path}' has .{ext} extension but is not a valid SQLite database \
+                (SQLite file header not found). File may be corrupted or misnamed.",
+                code = crate::error::E_DAT_013,
+            ),
+        });
     }
     Ok(())
 }
@@ -508,7 +521,7 @@ mod tests {
     use slideforge_plugin_api::{DataSource, DataSourceOptions};
     use slideforge_types::Value;
 
-    use super::{SqliteDataSource, find_duplicate_column};
+    use super::{SqliteDataSource, find_duplicate_column, validate_sqlite_magic};
 
     // F-MED-P5-1: bring serial macro into scope for load_call_count group.
     use serial_test::serial;
@@ -1173,6 +1186,63 @@ mod tests {
                     | slideforge_plugin_api::DataSourceError::IoError { .. }
             ),
             "corrupt database must produce ParseError or IoError, got: {err:?}"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // OBS-2: validate_sqlite_magic error classification (F-PASS12-OBS-2).
+    // IoError for File::open failure, ParseError for magic mismatch.
+    // ---------------------------------------------------------------------------
+
+    /// `test_obs2_sqlite_magic_mismatch_is_parse_error` — magic mismatch → ParseError (E-DAT-013).
+    ///
+    /// A file that is present and readable but lacks the SQLite magic header must
+    /// produce `DataSourceError::ParseError` with `[E-DAT-013]` in the message.
+    ///
+    /// Load-bearing per TD-VSDD-059: if the mismatch arm were changed to IoError,
+    /// this test would fail.
+    ///
+    /// Traces to F-PASS12-OBS-2, BC-1.03.007 postcondition 7, E-DAT-013.
+    #[test]
+    fn test_obs2_sqlite_magic_mismatch_is_parse_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("fake.db");
+        std::fs::write(&path, b"this is not sqlite\x00\x01\x02\x03\x04\x05\x06\x07").unwrap();
+
+        let err = validate_sqlite_magic(path.to_str().unwrap()).unwrap_err();
+        assert!(
+            matches!(err, slideforge_plugin_api::DataSourceError::ParseError { .. }),
+            "magic mismatch must produce DataSourceError::ParseError (E-DAT-013), got: {err:?}"
+        );
+        let msg = err.to_string();
+        assert!(
+            msg.contains("E-DAT-013"),
+            "ParseError message must contain E-DAT-013; got: {msg}"
+        );
+    }
+
+    /// `test_obs2_sqlite_magic_io_error_is_io_error` — File::open failure → IoError (E-DAT-004).
+    ///
+    /// When the file does not exist, `validate_sqlite_magic` must produce
+    /// `DataSourceError::IoError` (not ParseError) because the failure is an
+    /// infrastructure error, not a format mismatch.
+    ///
+    /// Load-bearing per TD-VSDD-059: if File::open errors were mapped to ParseError,
+    /// this test would fail.
+    ///
+    /// Traces to F-PASS12-OBS-2, E-DAT-004.
+    #[test]
+    fn test_obs2_sqlite_magic_io_error_is_io_error() {
+        let err =
+            validate_sqlite_magic("/tmp/no_such_file_slideforge_obs2_test_99999.db").unwrap_err();
+        assert!(
+            matches!(err, slideforge_plugin_api::DataSourceError::IoError { .. }),
+            "File::open failure must produce DataSourceError::IoError (E-DAT-004), got: {err:?}"
+        );
+        let msg = err.to_string();
+        assert!(
+            msg.contains("E-DAT-004"),
+            "IoError message must contain E-DAT-004; got: {msg}"
         );
     }
 
