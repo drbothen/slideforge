@@ -73,6 +73,12 @@ use crate::format::DataFormat;
 /// away in release builds.
 ///
 /// Traces to BC-1.03.007 invariant 2, VP-027, TD-VSDD-059.
+///
+/// **Serial-group invariant (F-MED-P6-1):** All tests that cause this counter to
+/// increment — whether via `load()`, `open_readonly_connection()` directly, or any
+/// helper that opens a connection — MUST be annotated `#[serial(load_call_count)]`.
+/// Omitting the annotation races under cargo-test parallel-within-process execution,
+/// producing non-deterministic counter deltas.  See F-MED-P6-1 lesson.
 #[cfg(test)]
 pub(crate) static OPEN_READONLY_CALL_COUNT: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);
@@ -1567,6 +1573,12 @@ mod tests {
     /// instead of `SQLITE_OPEN_READ_ONLY` — making it load-bearing per TD-VSDD-059.
     ///
     /// Traces to BC-1.03.007 invariant 2, postcondition 1, VP-027.
+    ///
+    /// `#[serial(load_call_count)]` is required because this test calls
+    /// `open_readonly_connection` directly, incrementing `OPEN_READONLY_CALL_COUNT`.
+    /// Parallel execution with other tests in the same group would corrupt the counter
+    /// deltas used by `test_vp_027_load_uses_readonly`.  See F-MED-P6-1.
+    #[serial(load_call_count)]
     #[test]
     fn test_vp_027_readonly_enforced() {
         let conn = make_memory_db(|c| {
