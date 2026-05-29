@@ -33,6 +33,9 @@ tracing.workspace = true
 # STORY-020: Excel .xlsx reading (pure Rust, no C dependencies).
 # dates feature enables calamine::Data::DateTime → chrono::NaiveDateTime conversion for ISO 8601 output.
 calamine = { version = "=0.26.1", features = ["dates"] }
+# chrono is required directly for DateTimeIso validation in xlsx.rs (BC-1.03.006 postcondition 6).
+# Pinned to match calamine's transitive dependency version.
+chrono = { version = "=0.4.38", default-features = false, features = ["std"] }
 # STORY-020: SQLite read-only query execution (bundled libsqlite3 for reproducible builds).
 rusqlite = { version = "=0.32.0", features = ["bundled"] }
 # STORY-020: BLOB column encoding to base64 Value::Str.

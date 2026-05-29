@@ -36,7 +36,7 @@
 
 use std::sync::Arc;
 
-use calamine::{Data, Dimensions, Reader, Xlsx, open_workbook};
+use calamine::{Data, Reader, Xlsx, open_workbook};
 use ordered_float::OrderedFloat;
 use slideforge_plugin_api::{DataSource, DataSourceError, DataSourceOptions};
 use slideforge_types::Value;
@@ -110,7 +110,7 @@ impl DataSource for XlsxDataSource {
     /// Returns [`DataSourceError`] on file-not-found, unsupported format,
     /// missing sheet, empty header, merged header cells, or parse failure.
     ///
-    /// Traces to BC-1.03.006 postconditions 1-7.
+    /// Traces to BC-1.03.006 postconditions 1-9.
     #[instrument(skip(self, _opts), fields(path = %self.path))]
     fn load(&self, uri: &str, _opts: &DataSourceOptions) -> Result<Value, DataSourceError> {
         // Resolve the effective path: prefer uri if non-empty, fall back to self.path.
@@ -132,6 +132,14 @@ impl DataSource for XlsxDataSource {
                 message: format!("file not found: {path_str}"),
             });
         }
+
+        // BC-1.03.006 postcondition 9 / invariant 3 (second phase):
+        // Validate XLSX magic bytes (ZIP local file header PK\x03\x04).
+        // Extension check already passed; this catches files that have .xlsx extension
+        // but are not actually XLSX/ZIP archives.
+        // Traces to VP-026, E-DAT-011.
+        validate_xlsx_magic(path_str)
+            .map_err(|e| data_error_to_source_error(path_str, &e))?;
 
         // Open workbook via calamine.
         let mut workbook: Xlsx<_> = open_workbook(path_str).map_err(|e| {
@@ -185,7 +193,16 @@ impl DataSource for XlsxDataSource {
                 // Excel limits: max 1,048,576 rows × 16,384 cols — both fit u32.
                 #[allow(clippy::cast_possible_truncation)]
                 let cell = range.get_value((row_idx as u32, col_idx as u32));
-                let value = cell.map_or(Value::Null, convert_calamine_cell);
+                let value = match cell {
+                    None | Some(Data::Empty) => Value::Null,
+                    Some(c) => convert_calamine_cell(
+                        c,
+                        col_idx as u32,
+                        row_idx as u32,
+                        path_str,
+                    )
+                    .map_err(|e| data_error_to_source_error(path_str, &e))?,
+                };
                 map.insert(header, value);
             }
             rows.push(Value::Map(map));
@@ -200,49 +217,115 @@ impl DataSource for XlsxDataSource {
 /// Mapping (BC-1.03.006 postconditions 4, 5, 6):
 /// - `Empty` => `Value::Null`
 /// - `Int` => `Value::Int(i64)`
-/// - `Float` => `Value::Float(OrderedFloat(f64))`
+/// - `Float(f)` where `f.fract() == 0.0 && f.is_finite()` and in i64 range => `Value::Int(f as i64)`
+/// - `Float(f)` where `!f.is_finite()` => `Err(DataError::ParseError(E-DAT-010))`
+/// - `Float(f)` otherwise => `Value::Float(OrderedFloat(f64))`
 /// - `Bool` => `Value::Bool`
 /// - `String` => `Value::Str(Arc<str>)`
+/// - `DurationIso` => `Value::Str` as-is
+/// - `DateTimeIso(s)` => validated against chrono ISO 8601 parse; `Err` if invalid (E-DAT-009)
 /// - `DateTime` => `Value::Str` in ISO 8601 format
 /// - `Error(_)` => `Value::Null` (formula errors are nulled, not propagated)
-/// - `DateTimeIso` / `DurationIso` => `Value::Str` as-is
 ///
 /// Formula cells: `calamine::Data::Formula` is not present in calamine 0.26+;
 /// formula cached values are represented by one of the above variants directly.
 ///
+/// # Errors
+///
+/// Returns `Err(DataError)` for:
+/// - Non-finite float cells (E-DAT-010)
+/// - `DateTimeIso` cells with invalid ISO 8601 values (E-DAT-009)
+///
 /// Traces to BC-1.03.006 postconditions 4-7 (cell type mapping).
-fn convert_calamine_cell(cell: &Data) -> Value {
+fn convert_calamine_cell(
+    cell: &Data,
+    col: u32,
+    row: u32,
+    path: &str,
+) -> Result<Value, DataError> {
     match cell {
-        Data::Int(n) => Value::Int(*n),
-        Data::Float(f) => Value::Float(OrderedFloat(*f)),
-        Data::String(s) | Data::DateTimeIso(s) | Data::DurationIso(s) => {
-            Value::Str(Arc::from(s.as_str()))
+        Data::Int(n) => Ok(Value::Int(*n)),
+        Data::Float(f) => {
+            // BC-1.03.006 postcondition 5: whole-number Float promotion.
+            // Kani-amenable (VP-021, VP-022, VP-023).
+            if !f.is_finite() {
+                // E-DAT-010: NaN or Infinity is not representable.
+                return Err(DataError::parse_error(
+                    path,
+                    DataFormat::Xlsx,
+                    format!(
+                        "XLSX numeric cell at col {col} row {row} in '{path}' has non-finite value \
+                        ({}). Non-finite floats are not representable in slideforge values.",
+                        if f.is_nan() { "NaN" } else { "Infinity" }
+                    ),
+                ));
+            }
+            // Safe: f.is_finite() guaranteed above.
+            #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
+            if f.fract() == 0.0
+                && *f >= i64::MIN as f64
+                && *f <= i64::MAX as f64
+            {
+                Ok(Value::Int(*f as i64))
+            } else {
+                Ok(Value::Float(OrderedFloat(*f)))
+            }
         }
-        Data::Bool(b) => Value::Bool(*b),
+        Data::String(s) => Ok(Value::Str(Arc::from(s.as_str()))),
+        Data::DurationIso(s) => Ok(Value::Str(Arc::from(s.as_str()))),
+        Data::DateTimeIso(s) => {
+            // BC-1.03.006 postcondition 6 / invariant 9: validate ISO 8601.
+            // Traces to VP-024 (valid) and VP-025 (invalid).
+            // Try RFC 3339 first (e.g. "2024-01-15T09:00:00+00:00"), then
+            // NaiveDateTime ("%Y-%m-%dT%H:%M:%S"), then NaiveDate ("%Y-%m-%d").
+            let is_valid = chrono::DateTime::parse_from_rfc3339(s).is_ok()
+                || chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S").is_ok()
+                || chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").is_ok();
+            if is_valid {
+                Ok(Value::Str(Arc::from(s.as_str())))
+            } else {
+                Err(DataError::parse_error(
+                    path,
+                    DataFormat::Xlsx,
+                    format!(
+                        "XLSX datetime cell at col {col} row {row} in '{path}' has invalid \
+                        ISO 8601 value '{s}'. Expected format: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS\u{00b1}HH:MM"
+                    ),
+                ))
+            }
+        }
+        Data::Bool(b) => Ok(Value::Bool(*b)),
         Data::DateTime(dt) => {
             // Convert calamine's ExcelDateTime to an ISO 8601 string.
             // as_datetime() requires the calamine "dates" feature (chrono integration).
-            // NaiveDateTime Display formats as "YYYY-MM-DD HH:MM:SS".
-            // We convert the space to "T" and strip the time part if midnight.
+            // We use chrono::Timelike to access nanoseconds for sub-second precision.
             if let Some(naive_dt) = dt.as_datetime() {
-                // NaiveDateTime::to_string() → "YYYY-MM-DD HH:MM:SS"
-                let raw = naive_dt.to_string();
-                // Convert to ISO 8601: replace space with "T"
-                let iso = raw.replace(' ', "T");
-                // If time is 00:00:00, emit date-only format.
-                let dt_str = if iso.ends_with("T00:00:00") {
-                    iso[..10].to_owned()
+                use chrono::Timelike as _;
+                // Use format string to preserve sub-second precision if present.
+                // F-LOW-3: include sub-second precision when non-zero.
+                let formatted = if naive_dt.nanosecond() > 0 {
+                    naive_dt
+                        .format("%Y-%m-%dT%H:%M:%S%.f")
+                        .to_string()
                 } else {
-                    iso
+                    naive_dt
+                        .format("%Y-%m-%dT%H:%M:%S")
+                        .to_string()
                 };
-                Value::Str(Arc::from(dt_str.as_str()))
+                // If time is 00:00:00, emit date-only format.
+                let dt_str = if formatted.ends_with("T00:00:00") {
+                    formatted[..10].to_owned()
+                } else {
+                    formatted
+                };
+                Ok(Value::Str(Arc::from(dt_str.as_str())))
             } else {
                 // Fallback: raw float serial number as string (should not occur
                 // in practice with well-formed xlsx files).
-                Value::Str(Arc::from(format!("{dt}").as_str()))
+                Ok(Value::Str(Arc::from(format!("{dt}").as_str())))
             }
         }
-        Data::Error(_) | Data::Empty => Value::Null,
+        Data::Error(_) | Data::Empty => Ok(Value::Null),
     }
 }
 
@@ -264,6 +347,54 @@ fn data_error_to_source_error(path: &str, err: &DataError) -> DataSourceError {
             message: err.to_string(),
         },
     }
+}
+
+/// Validate that a file with `.xlsx` extension is actually a ZIP/XLSX archive.
+///
+/// XLSX files are ZIP archives — the local file header is `PK\x03\x04` (4 bytes).
+/// A file with the correct extension but wrong magic bytes is rejected with
+/// `DataError::ParseError` (E-DAT-011).
+///
+/// This is the second-phase check after extension validation. Combined with
+/// extension check, it ensures: extension=.xlsx AND magic=ZIP.
+///
+/// Traces to BC-1.03.006 postcondition 9, invariant 3 (VP-026).
+fn validate_xlsx_magic(path: &str) -> Result<(), DataError> {
+    use std::io::Read as _;
+
+    use crate::error::E_DAT_011;
+
+    // ZIP local file header magic: PK\x03\x04
+    const ZIP_MAGIC: [u8; 4] = [0x50, 0x4B, 0x03, 0x04];
+
+    let mut buf = [0u8; 4];
+    let mut file = std::fs::File::open(path).map_err(|e| {
+        DataError::io_error(Arc::from(path), Arc::from(e.to_string().as_str()))
+    })?;
+    let n = file.read(&mut buf).map_err(|e| {
+        DataError::io_error(Arc::from(path), Arc::from(e.to_string().as_str()))
+    })?;
+
+    if n < 4 || buf != ZIP_MAGIC {
+        let ext = std::path::Path::new(path)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("xlsx");
+        return Err(DataError::ParseError {
+            code: E_DAT_011,
+            path: Arc::from(path),
+            format: DataFormat::Xlsx,
+            reason: Arc::from(
+                format!(
+                    "'{path}' has .{ext} extension but is not a valid XLSX archive \
+                    (ZIP magic bytes not found). File may be corrupted or misnamed."
+                )
+                .as_str(),
+            ),
+            span: slideforge_types::SourceSpan::default(),
+        });
+    }
+    Ok(())
 }
 
 /// Validate that the `.xlsx` extension is used (not `.xls`).
@@ -351,16 +482,20 @@ fn select_sheet(
 /// Returns a `Vec<Arc<str>>` of column names from row 0.
 ///
 /// Errors:
-/// - Empty sheet (no rows or no non-empty cells in row 0) → `ParseError` "empty sheet"
+/// - Empty sheet (no rows or no non-empty cells in row 0) → `ParseError` "empty sheet" (EC-007)
+/// - Partial-empty header row (any cell `None`/`Empty` while others populated) → E-DAT-007 (AC-002)
+/// - Non-string header cell (Int, Float, Bool, DateTime) → E-DAT-008 (F-HIGH-1)
 ///
 /// Note: Merged cell detection in the header row is handled at the `load()` level
 /// via `workbook.worksheet_merge_cells()` before this function is called.
 ///
-/// Traces to BC-1.03.006 postconditions 2-3, AC-002.
+/// Traces to BC-1.03.006 postconditions 2-3, invariants 5-6, AC-002.
 fn extract_headers(
     range: &calamine::Range<Data>,
     path: &str,
 ) -> Result<Vec<Arc<str>>, DataError> {
+    use crate::error::{E_DAT_007, E_DAT_008};
+
     let row_count = range.height();
     let col_count = range.width();
 
@@ -373,35 +508,21 @@ fn extract_headers(
         ));
     }
 
-    // Collect header cells from row 0.
-    let mut headers: Vec<Arc<str>> = Vec::with_capacity(col_count);
-    let mut has_any_header = false;
+    // First pass: collect all cells and classify them to distinguish
+    // "entirely empty" (EC-004) from "partially empty" (E-DAT-007).
+    let cells: Vec<Option<&Data>> = (0..col_count)
+        .map(|col_idx| {
+            #[allow(clippy::cast_possible_truncation)]
+            range.get_value((0, col_idx as u32))
+        })
+        .collect();
 
-    for col_idx in 0..col_count {
-        // Excel max 16,384 columns — fits u32 safely.
-        #[allow(clippy::cast_possible_truncation)]
-        let cell = range.get_value((0, col_idx as u32));
-        match cell {
-            None | Some(Data::Empty) => {
-                // Empty header cell — placeholder column name.
-                headers.push(Arc::from(format!("__empty_{col_idx}").as_str()));
-            }
-            Some(cell_data) => {
-                has_any_header = true;
-                let header_str = match cell_data {
-                    Data::String(s) => Arc::from(s.as_str()),
-                    Data::Int(n) => Arc::from(n.to_string().as_str()),
-                    Data::Float(f) => Arc::from(f.to_string().as_str()),
-                    Data::Bool(b) => Arc::from(b.to_string().as_str()),
-                    _ => Arc::from(format!("col_{col_idx}").as_str()),
-                };
-                headers.push(header_str);
-            }
-        }
-    }
+    let all_empty = cells
+        .iter()
+        .all(|c| matches!(c, None | Some(Data::Empty)));
 
-    // AC-002: no non-empty header cells → empty sheet error.
-    if !has_any_header {
+    // EC-004: entirely empty header row — "empty sheet" error.
+    if all_empty {
         return Err(DataError::parse_error(
             path,
             DataFormat::Xlsx,
@@ -409,13 +530,67 @@ fn extract_headers(
         ));
     }
 
+    // Second pass: validate each cell. Non-empty sheet with any empty header
+    // cell is E-DAT-007 (partial-empty header). Non-string header is E-DAT-008.
+    let mut headers: Vec<Arc<str>> = Vec::with_capacity(col_count);
+
+    for (col_idx, cell) in cells.iter().enumerate() {
+        match cell {
+            None | Some(Data::Empty) => {
+                // E-DAT-007: partial-empty header — reject with actionable message.
+                // Traces to BC-1.03.006 invariant 5, postcondition 2.
+                return Err(DataError::ParseError {
+                    code: E_DAT_007,
+                    path: Arc::from(path),
+                    format: DataFormat::Xlsx,
+                    reason: Arc::from(
+                        format!(
+                            "XLSX header row at '{path}' has empty cell at column {col_idx} (0-indexed). \
+                            All header cells must be non-empty strings. Do not use blank column headers; \
+                            remove unused columns or name all headers."
+                        )
+                        .as_str(),
+                    ),
+                    span: slideforge_types::SourceSpan::default(),
+                });
+            }
+            Some(Data::String(s)) => {
+                headers.push(Arc::from(s.as_str()));
+            }
+            Some(non_string_cell) => {
+                // E-DAT-008: non-string header cell — Int, Float, Bool, DateTime etc.
+                // Traces to BC-1.03.006 invariant 6, postcondition 2.
+                let type_name = match non_string_cell {
+                    Data::Int(_) => "Integer",
+                    Data::Float(_) => "Float",
+                    Data::Bool(_) => "Boolean",
+                    Data::DateTime(_) => "DateTime",
+                    Data::DateTimeIso(_) => "DateTimeIso",
+                    Data::DurationIso(_) => "DurationIso",
+                    Data::Error(_) => "Error",
+                    Data::Empty | Data::String(_) => unreachable!(),
+                };
+                let repr = format!("{non_string_cell}");
+                return Err(DataError::ParseError {
+                    code: E_DAT_008,
+                    path: Arc::from(path),
+                    format: DataFormat::Xlsx,
+                    reason: Arc::from(
+                        format!(
+                            "XLSX header cell at column {col_idx} in '{path}' has type {type_name} \
+                            (value: {repr}). Header cells must be String-typed. Use a string label \
+                            as the column header."
+                        )
+                        .as_str(),
+                    ),
+                    span: slideforge_types::SourceSpan::default(),
+                });
+            }
+        }
+    }
+
     Ok(headers)
 }
-
-/// Marker to suppress dead-code lint on `Dimensions` import used only in merge detection.
-const _: () = {
-    let _ = std::mem::size_of::<Dimensions>();
-};
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
@@ -427,7 +602,8 @@ mod tests {
     use slideforge_plugin_api::{DataSource, DataSourceOptions};
     use slideforge_types::Value;
 
-    use super::{XlsxDataSource, convert_calamine_cell};
+    use super::{XlsxDataSource, convert_calamine_cell, extract_headers};
+    use crate::DataError;
 
     // ---------------------------------------------------------------------------
     // Helper: write an xlsx bytes buffer to a tempfile and return the path.
@@ -511,15 +687,14 @@ mod tests {
             &Value::Str(Arc::from("Alice")),
             "row 0 'name' must be Value::Str(\"Alice\")"
         );
-        // calamine reads integer-valued cells as Data::Float or Data::Int depending on xlsx content.
-        // The implementation must produce Value::Int(95) or Value::Float(95.0) for a whole-number cell.
+        // After F-HIGH-4 (VP-021): whole-number floats are promoted to Int.
+        // calamine reads 95_f64 as Data::Float(95.0) which must become Value::Int(95).
         let score0 = row0_map.get("score").unwrap();
-        let score0_ok = match score0 {
-            Value::Int(95) => true,
-            Value::Float(f) => (f.0 - 95.0).abs() < 1e-9,
-            _ => false,
-        };
-        assert!(score0_ok, "row 0 'score' must be Int(95) or Float(95.0), got {score0:?}");
+        assert_eq!(
+            score0,
+            &Value::Int(95),
+            "row 0 'score' must be Int(95) after whole-number Float promotion (VP-021); got {score0:?}"
+        );
 
         // Row 1: {"name": "Bob", "score": 87}
         let row1_map = match &rows[1] {
@@ -532,12 +707,11 @@ mod tests {
             "row 1 'name' must be Value::Str(\"Bob\")"
         );
         let score1 = row1_map.get("score").unwrap();
-        let score1_ok = match score1 {
-            Value::Int(87) => true,
-            Value::Float(f) => (f.0 - 87.0).abs() < 1e-9,
-            _ => false,
-        };
-        assert!(score1_ok, "row 1 'score' must be Int(87) or Float(87.0), got {score1:?}");
+        assert_eq!(
+            score1,
+            &Value::Int(87),
+            "row 1 'score' must be Int(87) after whole-number Float promotion (VP-021); got {score1:?}"
+        );
     }
 
     // ---------------------------------------------------------------------------
@@ -1175,7 +1349,7 @@ mod tests {
     #[test]
     fn test_bc_1_03_006_convert_calamine_cell_int() {
         let cell = Data::Int(42);
-        let result = convert_calamine_cell(&cell);
+        let result = convert_calamine_cell(&cell, 0, 1, "test.xlsx").unwrap();
         assert_eq!(
             result,
             Value::Int(42),
@@ -1189,17 +1363,19 @@ mod tests {
     #[test]
     fn test_bc_1_03_006_convert_calamine_cell_int_negative() {
         let cell = Data::Int(-99);
-        let result = convert_calamine_cell(&cell);
+        let result = convert_calamine_cell(&cell, 0, 1, "test.xlsx").unwrap();
         assert_eq!(result, Value::Int(-99), "Data::Int(-99) must map to Value::Int(-99)");
     }
 
-    /// `test_bc_1_03_006_convert_calamine_cell_float` -- `Data::Float` maps to `Value::Float`.
+    /// `test_bc_1_03_006_convert_calamine_cell_float` -- `Data::Float(1.5)` maps to `Value::Float`.
     ///
-    /// Traces to BC-1.03.006 postcondition 4.
+    /// VP-022: fractional floats stay as Float.
+    ///
+    /// Traces to BC-1.03.006 postcondition 5.
     #[test]
     fn test_bc_1_03_006_convert_calamine_cell_float() {
         let cell = Data::Float(1.5);
-        let result = convert_calamine_cell(&cell);
+        let result = convert_calamine_cell(&cell, 0, 1, "test.xlsx").unwrap();
         match result {
             Value::Float(f) => {
                 assert!(
@@ -1207,7 +1383,7 @@ mod tests {
                     "Data::Float(1.5) must map to Value::Float(1.5)"
                 );
             }
-            other => panic!("Data::Float must produce Value::Float, got {other:?}"),
+            other => panic!("Data::Float(1.5) must produce Value::Float, got {other:?}"),
         }
     }
 
@@ -1217,12 +1393,12 @@ mod tests {
     #[test]
     fn test_bc_1_03_006_convert_calamine_cell_bool() {
         assert_eq!(
-            convert_calamine_cell(&Data::Bool(true)),
+            convert_calamine_cell(&Data::Bool(true), 0, 1, "test.xlsx").unwrap(),
             Value::Bool(true),
             "Data::Bool(true) must map to Value::Bool(true)"
         );
         assert_eq!(
-            convert_calamine_cell(&Data::Bool(false)),
+            convert_calamine_cell(&Data::Bool(false), 0, 1, "test.xlsx").unwrap(),
             Value::Bool(false),
             "Data::Bool(false) must map to Value::Bool(false)"
         );
@@ -1234,7 +1410,7 @@ mod tests {
     #[test]
     fn test_bc_1_03_006_convert_calamine_cell_string() {
         let cell = Data::String("hello world".to_owned());
-        let result = convert_calamine_cell(&cell);
+        let result = convert_calamine_cell(&cell, 0, 1, "test.xlsx").unwrap();
         assert_eq!(
             result,
             Value::Str(Arc::from("hello world")),
@@ -1248,7 +1424,7 @@ mod tests {
     #[test]
     fn test_bc_1_03_006_convert_calamine_cell_empty() {
         let cell = Data::Empty;
-        let result = convert_calamine_cell(&cell);
+        let result = convert_calamine_cell(&cell, 0, 1, "test.xlsx").unwrap();
         assert_eq!(
             result,
             Value::Null,
@@ -1265,7 +1441,7 @@ mod tests {
     fn test_bc_1_03_006_convert_calamine_cell_error_is_null() {
         use calamine::CellErrorType;
         let cell = Data::Error(CellErrorType::Div0);
-        let result = convert_calamine_cell(&cell);
+        let result = convert_calamine_cell(&cell, 0, 1, "test.xlsx").unwrap();
         assert_eq!(
             result,
             Value::Null,
@@ -1273,15 +1449,15 @@ mod tests {
         );
     }
 
-    /// `test_bc_1_03_006_convert_calamine_cell_datetime_iso_str` -- `Data::DateTimeIso` maps to `Value::Str`.
+    /// `test_bc_1_03_006_convert_calamine_cell_datetime_iso_str` -- valid `Data::DateTimeIso` maps to `Value::Str`.
     ///
-    /// `DateTimeIso` strings are already ISO 8601; they pass through as-is.
+    /// VP-024: valid DateTimeIso strings pass through as Value::Str.
     ///
     /// Traces to BC-1.03.006 postcondition 6.
     #[test]
     fn test_bc_1_03_006_convert_calamine_cell_datetime_iso_str() {
         let cell = Data::DateTimeIso("2024-01-15T09:00:00".to_owned());
-        let result = convert_calamine_cell(&cell);
+        let result = convert_calamine_cell(&cell, 0, 1, "test.xlsx").unwrap();
         assert_eq!(
             result,
             Value::Str(Arc::from("2024-01-15T09:00:00")),
@@ -1297,11 +1473,269 @@ mod tests {
     #[test]
     fn test_bc_1_03_006_convert_calamine_cell_duration_iso_str() {
         let cell = Data::DurationIso("PT2H30M".to_owned());
-        let result = convert_calamine_cell(&cell);
+        let result = convert_calamine_cell(&cell, 0, 1, "test.xlsx").unwrap();
         assert_eq!(
             result,
             Value::Str(Arc::from("PT2H30M")),
             "Data::DurationIso must produce Value::Str"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // VP-021: Float(95.0) → Int(95) — whole-number Float promotion.
+    // BC-1.03.006 postcondition 5, invariant 7 (Kani-amenable).
+    // ---------------------------------------------------------------------------
+
+    /// `test_vp_021_float_whole_number_promotes_to_int` -- VP-021: `Data::Float(95.0)` → `Value::Int(95)`.
+    ///
+    /// Whole-number floats that fit in i64 are promoted to Int (not Float).
+    /// This is the canonical VP-021 test vector (Kani-amenable).
+    ///
+    /// Traces to BC-1.03.006 postcondition 5, invariant 7.
+    #[test]
+    fn test_vp_021_float_whole_number_promotes_to_int() {
+        let cell = Data::Float(95.0);
+        let result = convert_calamine_cell(&cell, 1, 1, "test.xlsx").unwrap();
+        assert_eq!(
+            result,
+            Value::Int(95),
+            "Data::Float(95.0) must promote to Value::Int(95) (VP-021)"
+        );
+
+        // Negative whole number
+        let cell_neg = Data::Float(-42.0);
+        let result_neg = convert_calamine_cell(&cell_neg, 0, 1, "test.xlsx").unwrap();
+        assert_eq!(result_neg, Value::Int(-42), "Float(-42.0) must promote to Int(-42)");
+
+        // Zero
+        let cell_zero = Data::Float(0.0);
+        let result_zero = convert_calamine_cell(&cell_zero, 0, 1, "test.xlsx").unwrap();
+        assert_eq!(result_zero, Value::Int(0), "Float(0.0) must promote to Int(0)");
+    }
+
+    // ---------------------------------------------------------------------------
+    // VP-022: Float(3.14) → Float (fractional, stays Float).
+    // BC-1.03.006 postcondition 5.
+    // ---------------------------------------------------------------------------
+
+    /// `test_vp_022_float_fractional_stays_float` -- VP-022: `Data::Float(3.14)` stays `Value::Float`.
+    ///
+    /// Fractional floats must NOT be promoted to Int.
+    ///
+    /// Traces to BC-1.03.006 postcondition 5.
+    #[test]
+    fn test_vp_022_float_fractional_stays_float() {
+        let cell = Data::Float(3.14);
+        let result = convert_calamine_cell(&cell, 0, 1, "test.xlsx").unwrap();
+        match result {
+            Value::Float(f) => {
+                assert!((f.0 - 3.14).abs() < 1e-10, "Float(3.14) must be Value::Float(3.14)");
+            }
+            other => panic!("Float(3.14) must NOT be promoted to Int; got {other:?}"),
+        }
+    }
+
+    // ---------------------------------------------------------------------------
+    // VP-023: NaN/Infinity → E-DAT-010 (Kani-amenable).
+    // BC-1.03.006 postcondition 5.
+    // ---------------------------------------------------------------------------
+
+    /// `test_vp_023_nan_produces_parse_error` -- VP-023: `Data::Float(NaN)` produces E-DAT-010.
+    ///
+    /// NaN and Infinity are not representable in slideforge Values and must error.
+    /// Kani-amenable (pure function, finite/infinite distinction).
+    ///
+    /// Traces to BC-1.03.006 postcondition 5, E-DAT-010.
+    #[test]
+    fn test_vp_023_nan_produces_parse_error() {
+        let cell = Data::Float(f64::NAN);
+        let result = convert_calamine_cell(&cell, 2, 3, "test.xlsx");
+        assert!(result.is_err(), "Data::Float(NaN) must produce Err (VP-023)");
+        let err = result.unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("NaN") || msg.contains("non-finite"),
+            "NaN error must mention NaN or non-finite; got: {msg}"
+        );
+    }
+
+    /// `test_vp_023_infinity_produces_parse_error` -- VP-023: `Data::Float(INFINITY)` produces E-DAT-010.
+    ///
+    /// Traces to BC-1.03.006 postcondition 5, E-DAT-010.
+    #[test]
+    fn test_vp_023_infinity_produces_parse_error() {
+        let cell = Data::Float(f64::INFINITY);
+        let result = convert_calamine_cell(&cell, 0, 1, "test.xlsx");
+        assert!(result.is_err(), "Data::Float(Infinity) must produce Err (VP-023)");
+        let err = result.unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Infinity") || msg.contains("non-finite"),
+            "Infinity error must mention Infinity or non-finite; got: {msg}"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // VP-024: valid DateTimeIso → Value::Str.
+    // BC-1.03.006 postcondition 6.
+    // ---------------------------------------------------------------------------
+
+    /// `test_vp_024_valid_datetime_iso_passes_through` -- VP-024: valid DateTimeIso → `Value::Str`.
+    ///
+    /// Tests multiple valid ISO 8601 formats.
+    ///
+    /// Traces to BC-1.03.006 postcondition 6.
+    #[test]
+    fn test_vp_024_valid_datetime_iso_passes_through() {
+        // RFC 3339 format
+        let cell = Data::DateTimeIso("2024-01-15T09:00:00+00:00".to_owned());
+        let result = convert_calamine_cell(&cell, 0, 1, "test.xlsx").unwrap();
+        assert!(matches!(result, Value::Str(_)), "RFC 3339 DateTimeIso must produce Str");
+
+        // Date-only format
+        let cell2 = Data::DateTimeIso("2024-01-15".to_owned());
+        let result2 = convert_calamine_cell(&cell2, 0, 1, "test.xlsx").unwrap();
+        assert!(matches!(result2, Value::Str(_)), "Date-only DateTimeIso must produce Str");
+    }
+
+    // ---------------------------------------------------------------------------
+    // VP-025: invalid DateTimeIso → E-DAT-009.
+    // BC-1.03.006 postcondition 6, F-HIGH-5.
+    // ---------------------------------------------------------------------------
+
+    /// `test_vp_025_invalid_datetime_iso_produces_error` -- VP-025: invalid DateTimeIso → E-DAT-009.
+    ///
+    /// Calamine emits Data::DateTimeIso("not-iso-string") — must produce ParseError.
+    ///
+    /// Traces to BC-1.03.006 postcondition 6, F-HIGH-5.
+    #[test]
+    fn test_vp_025_invalid_datetime_iso_produces_error() {
+        let cell = Data::DateTimeIso("not-iso-string".to_owned());
+        let result = convert_calamine_cell(&cell, 3, 7, "data.xlsx");
+        assert!(result.is_err(), "Data::DateTimeIso(\"not-iso-string\") must produce Err (VP-025)");
+        let err = result.unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("not-iso-string") || msg.contains("invalid") || msg.contains("ISO 8601"),
+            "invalid DateTimeIso error must describe the bad value; got: {msg}"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // VP-019: partial-empty header → E-DAT-007.
+    // BC-1.03.006 invariant 5, F-HIGH-2.
+    // ---------------------------------------------------------------------------
+
+    /// `test_vp_019_partial_empty_header_produces_e_dat_007` -- VP-019: partial-empty header row is rejected.
+    ///
+    /// A header row where some cells are String and at least one is empty must return E-DAT-007.
+    /// NO phantom "__empty_<idx>" names may be invented.
+    ///
+    /// Traces to BC-1.03.006 invariant 5, postcondition 2.
+    #[test]
+    fn test_vp_019_partial_empty_header_produces_e_dat_007() {
+        let mut wb = Workbook::new();
+        let ws = wb.add_worksheet();
+
+        // "name", <empty>, "score" — partial-empty header
+        ws.write_string(0, 0, "name").unwrap();
+        // col 1: intentionally left blank (empty header)
+        ws.write_string(0, 2, "score").unwrap();
+        ws.write_string(1, 0, "Alice").unwrap();
+        ws.write_string(1, 2, "95").unwrap();
+
+        let buf = wb.save_to_buffer().unwrap();
+        let (_dir, path) = write_xlsx_to_tempfile(buf, ".xlsx");
+
+        let src = XlsxDataSource::new(path.to_str().unwrap());
+        let err = src.load("", &default_opts()).unwrap_err();
+
+        let msg = err.to_string();
+        assert!(
+            matches!(err, slideforge_plugin_api::DataSourceError::ParseError { .. }),
+            "partial-empty header must produce DataSourceError::ParseError, got: {err:?}"
+        );
+        assert!(
+            msg.contains("E-DAT-007") || msg.contains("empty cell") || msg.contains("empty"),
+            "partial-empty header error must mention E-DAT-007 or empty cell; got: {msg}"
+        );
+        // Must NOT contain __empty phantom names (confirmed by absence of "phantom" or "__empty")
+        assert!(
+            !msg.contains("__empty"),
+            "error must NOT mention __empty phantom column names; got: {msg}"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // VP-020: non-string header cell → E-DAT-008.
+    // BC-1.03.006 invariant 6, F-HIGH-1.
+    // ---------------------------------------------------------------------------
+
+    /// `test_vp_020_non_string_header_produces_e_dat_008` -- VP-020: non-string header cell is rejected.
+    ///
+    /// An integer header cell must produce E-DAT-008 naming the column index and type.
+    ///
+    /// Traces to BC-1.03.006 invariant 6, postcondition 2.
+    #[test]
+    fn test_vp_020_non_string_header_produces_e_dat_008() {
+        // We test this via the extract_headers function directly with a calamine Range
+        // that has a non-string header cell. We build an XLSX with a numeric header.
+        let mut wb = Workbook::new();
+        let ws = wb.add_worksheet();
+
+        // Write an integer as the header of col 0 (non-string header)
+        ws.write_number(0, 0, 42.0).unwrap();
+        ws.write_string(0, 1, "score").unwrap();
+        ws.write_string(1, 0, "Alice").unwrap();
+        ws.write_number(1, 1, 95.0).unwrap();
+
+        let buf = wb.save_to_buffer().unwrap();
+        let (_dir, path) = write_xlsx_to_tempfile(buf, ".xlsx");
+
+        let src = XlsxDataSource::new(path.to_str().unwrap());
+        let err = src.load("", &default_opts()).unwrap_err();
+
+        let msg = err.to_string();
+        assert!(
+            matches!(err, slideforge_plugin_api::DataSourceError::ParseError { .. }),
+            "non-string header must produce DataSourceError::ParseError, got: {err:?}"
+        );
+        assert!(
+            msg.contains("E-DAT-008") || msg.contains("type") || msg.contains("header"),
+            "non-string header error must mention E-DAT-008 or type; got: {msg}"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // VP-026: wrong magic bytes → ParseError E-DAT-011.
+    // BC-1.03.006 postcondition 9, invariant 3.
+    // ---------------------------------------------------------------------------
+
+    /// `test_vp_026_wrong_magic_bytes_produces_e_dat_011` -- VP-026: `.xlsx` file with non-ZIP magic is rejected.
+    ///
+    /// A file with `.xlsx` extension but non-ZIP content must produce ParseError (E-DAT-011).
+    ///
+    /// Traces to BC-1.03.006 postcondition 9, invariant 3.
+    #[test]
+    fn test_vp_026_wrong_magic_bytes_produces_e_dat_011() {
+        // Write a file with .xlsx extension but non-ZIP content.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("fake.xlsx");
+        // Not a ZIP: first 4 bytes are not PK\x03\x04.
+        std::fs::write(&path, b"not a zip file at all").unwrap();
+
+        let src = XlsxDataSource::new(path.to_str().unwrap());
+        let err = src.load("", &default_opts()).unwrap_err();
+
+        let msg = err.to_string();
+        assert!(
+            matches!(err, slideforge_plugin_api::DataSourceError::ParseError { .. }),
+            "wrong magic bytes must produce DataSourceError::ParseError, got: {err:?}"
+        );
+        assert!(
+            msg.contains("E-DAT-011") || msg.contains("magic") || msg.contains("ZIP")
+                || msg.contains("not a valid"),
+            "wrong magic error must mention E-DAT-011, magic, ZIP, or 'not a valid'; got: {msg}"
         );
     }
 

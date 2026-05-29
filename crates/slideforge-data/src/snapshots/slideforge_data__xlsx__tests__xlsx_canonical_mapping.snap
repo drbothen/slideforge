@@ -10,8 +10,8 @@ List(
                     "name": Str(
                         "Alice",
                     ),
-                    "score": Float(
-                        95.0,
+                    "score": Int(
+                        95,
                     ),
                     "active": Bool(
                         true,
@@ -25,8 +25,8 @@ List(
                     "name": Str(
                         "Bob",
                     ),
-                    "score": Float(
-                        87.0,
+                    "score": Int(
+                        87,
                     ),
                     "active": Bool(
                         false,

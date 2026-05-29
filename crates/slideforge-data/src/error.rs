@@ -40,6 +40,46 @@ pub const E_DAT_005: &str = "E-DAT-005";
 /// Maps to `E-DAT-006` in the error taxonomy.
 pub const E_DAT_006: &str = "E-DAT-006";
 
+/// Error code for XLSX header row empty cell.
+///
+/// Maps to `E-DAT-007` in the error taxonomy.
+pub const E_DAT_007: &str = "E-DAT-007";
+
+/// Error code for XLSX header cell with non-string type.
+///
+/// Maps to `E-DAT-008` in the error taxonomy.
+pub const E_DAT_008: &str = "E-DAT-008";
+
+/// Error code for XLSX `DateTimeIso` cell with invalid ISO 8601 value.
+///
+/// Maps to `E-DAT-009` in the error taxonomy.
+pub const E_DAT_009: &str = "E-DAT-009";
+
+/// Error code for XLSX non-finite float cell (NaN or Infinity).
+///
+/// Maps to `E-DAT-010` in the error taxonomy.
+pub const E_DAT_010: &str = "E-DAT-010";
+
+/// Error code for file with `.xlsx` extension that is not a valid XLSX archive.
+///
+/// Maps to `E-DAT-011` in the error taxonomy.
+pub const E_DAT_011: &str = "E-DAT-011";
+
+/// Error code for SQLite TEXT column containing invalid UTF-8 bytes.
+///
+/// Maps to `E-DAT-012` in the error taxonomy.
+pub const E_DAT_012: &str = "E-DAT-012";
+
+/// Error code for file with SQLite extension that lacks the SQLite magic header.
+///
+/// Maps to `E-DAT-013` in the error taxonomy.
+pub const E_DAT_013: &str = "E-DAT-013";
+
+/// Error code for unsupported extension for SQLite data source.
+///
+/// Maps to `E-DAT-014` in the error taxonomy.
+pub const E_DAT_014: &str = "E-DAT-014";
+
 /// The top-level error type for all `slideforge-data` operations.
 ///
 /// Each variant corresponds to a documented error code in the error taxonomy.
@@ -95,7 +135,7 @@ pub enum DataError {
     ///
     /// Error code: `E-DAT-003` (sub-case of parse/format error).
     #[error(
-        "[{code}] unsupported format: '{extension}' — supported: json, csv, yaml, yml, toml (at {span})"
+        "[{code}] unsupported format: '{extension}' — supported: json, csv, yaml, yml, toml, xlsx, sqlite, sqlite3, db (at {span})"
     )]
     UnsupportedFormat {
         /// The error code constant (`E-DAT-003`).
