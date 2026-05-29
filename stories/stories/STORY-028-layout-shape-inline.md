@@ -196,8 +196,8 @@ postcondition 2 canonical test vector)
 
 Hex fill colors are case-insensitive. Both `#FF6F00` (uppercase) and `#ff6f00`
 (lowercase) parse to the same `Rgb { r: 255, g: 111, b: 0 }`. Short-form `#RGB`
-(3 digits) is rejected with E-PAR-013. Alpha form `#RRGGBBAA` (8 digits) is
-rejected with E-PAR-013. Error message includes the file:line:col span. (BC-3.04.001
+(3 digits) is rejected with E-PAR-015. Alpha form `#RRGGBBAA` (8 digits) is
+rejected with E-PAR-015. Error message includes the file:line:col span. (BC-3.04.001
 v1.4, invariant 5 and EC-006/EC-007/EC-008/EC-009)
 
 ### AC-BC-A3: shape_type closed vocabulary; unknown keyword produces E-PAR-012
@@ -432,3 +432,4 @@ Build MUST fail if those crates appear in `slideforge-layout/Cargo.toml` depende
 | 1.2 | 2026-05-28 | story-writer | Minor: spec_version field added to frontmatter; Forbidden Dependencies made explicit |
 | 1.3 | 2026-05-29 | architect | Pass-3 adjudication: BC version refs updated to BC-3.04.001 v1.4 and BC-3.05.001 v1.3.2 (F-MED-001); OffCanvas example updated to source_slide_index canonical name (F-MED-002) |
 | 1.4 | 2026-05-29 | story-writer | Pass-5 drift fix (F-P5-LOW-002): AltText::Explicit → AltText::Provided (lines 100, 339) to match canonical slideforge-types/src/specs.rs:143 |
+| 1.5 | 2026-05-29 | product-owner | Pass-8 sweep changes (commit 3e892d07): BC-3.04.001 version references updated to v1.4.2; task list FillSpec description corrected to reflect Gradient is deferred (not present); E-PAR-013/E-PAR-014 references updated to E-PAR-015/E-PAR-016 per pass-9 F-P9-HIGH-002 namespace collision resolution |

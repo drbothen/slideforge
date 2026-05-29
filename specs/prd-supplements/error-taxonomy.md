@@ -2,7 +2,7 @@
 document_type: prd-supplement
 supplement_type: error-taxonomy
 level: L3
-version: "1.4"
+version: "1.5"
 status: active
 producer: product-owner
 timestamp: 2026-05-29T00:00:00
@@ -38,8 +38,10 @@ Always fatal. Build halts with accumulated errors. No output produced.
 | E-PAR-011 | broken | 1 | `Variant cycle detected: <var1> → <var2> → ... → <var1>` | DI-022, CAP-007 |
 | ~~E-PAR-012~~ | ~~retired~~ | — | ~~Invalid indentation level at `<file>:<line>:<col>`. Expected multiple of `<N>` spaces.~~ RETIRED: indentation-level errors are subsumed by E-PAR-001 (which carries span and column info sufficient to diagnose this case). E-PAR-012 was reassigned in the STORY-028 Pass-1 adjudication (2026-05-28). | CAP-001 |
 | E-PAR-012-SHP | broken | 1 | `Unknown shape type '<keyword>' at <file>:<line>:<col>. Known types: [rect, ellipse, arrow, line, star, roundRect].` | CAP-023 |
-| E-PAR-013 | broken | 1 | `Invalid hex color '<value>' at <file>:<line>:<col>. Expected 6-digit hex (#RRGGBB). Short-form #RGB and alpha #RRGGBBAA are not supported.` | CAP-023 |
-| E-PAR-014 | broken | 1 | `Shape gradient fill is not supported in v1.0 at <file>:<line>:<col>. Use a solid hex color or 'none'. Gradient fill is planned for a future release.` | CAP-023 |
+| E-PAR-013 | broken | 1 | `Empty expression in {{ }} at <file>:<line>:<col>. An expression is required between {{ and }}.` | CAP-001 |
+| E-PAR-014 | broken | 1 | `Unterminated math block at <file>:<line>:<col>. Missing closing $ (or $$).` | CAP-012 |
+| E-PAR-015 | broken | 1 | `Invalid hex color '<value>' at <file>:<line>:<col>. Expected 6-digit hex (#RRGGBB). Short-form #RGB and alpha #RRGGBBAA are not supported.` | CAP-023 |
+| E-PAR-016 | broken | 1 | `Shape gradient fill is not supported in v1.0 at <file>:<line>:<col>. Use a solid hex color or 'none'. Gradient fill is planned for a future release (STORY-072).` | CAP-023 |
 
 ---
 
@@ -219,3 +221,16 @@ Per DI-018 and BC-1.15.002:
 - Exception: if a parse error prevents further parsing (unclosed block, complete
   indentation failure), accumulation stops at that point and reports all errors found so far.
 - Exit code is the HIGHEST severity code encountered across all errors.
+
+---
+
+## Changelog
+
+| Version | Date | Author | Summary |
+|---------|------|--------|---------|
+| 1.0 | 2026-05-24 | product-owner | Initial creation — parse errors (E-PAR-001 through E-PAR-011), evaluation errors (E-EVL-001 through E-EVL-006), layout errors (E-LAY-001 through E-LAY-003), export errors (E-EXP-001 through E-EXP-007), brand errors (E-BRD-001 through E-BRD-005), package errors (E-PKG-001 through E-PKG-004), configuration errors (E-CFG-001 through E-CFG-008), accessibility errors (E-A11-001 through E-A11-004) |
+| 1.1 | 2026-05-25 | product-owner | STORY-028 Pass-1 adjudication: E-PAR-012 retired (indentation-level subsumed by E-PAR-001); E-PAR-012-SHP added for unknown shape type; E-PAR-013 added for invalid hex color; E-PAR-014 added for gradient not supported in v1.0; E-LAY-004 added for MissingAlt; E-LAY-005 added for inline nesting depth exceeded |
+| 1.2 | 2026-05-28 | product-owner | STORY-028 pass-5 sweep: E-LAY-006 added for ArithmeticOverflow; E-EXP-008 added for diagram render failure; E-DAT-006 through E-DAT-014 added for HTTP SSRF, XLSX header, SQLite data source errors; E-CFG-005 through E-CFG-008 added |
+| 1.3 | 2026-05-29 | product-owner | Pass-7 sweep: E-LAY-004 and E-LAY-006 notes updated — source_slide_index canonical field name documented; E-BRD-007 added for logo path escaping brand directory; E-BRD-005 semantics note updated (original missing-slot fatal retired; reused for invalid hex in brand.toml) |
+| 1.4 | 2026-05-29 | product-owner | Pass-8 sweep: E-LAY-006 note updated with ArithmeticOverflow dead-code prohibition rule per adversary pass 2 item M adjudication |
+| 1.5 | 2026-05-29 | product-owner | Pass-9 sweep (F-P9-HIGH-002): E-PAR-013 (hex color invalid) and E-PAR-014 (gradient unsupported) renamed to E-PAR-015 and E-PAR-016 respectively to resolve namespace collision with parser template codes (E-PAR-013 = empty {{ }}, E-PAR-014 = unterminated math block, both pre-existing in slideforge-syntax/src/parser/template.rs). E-PAR-013 and E-PAR-014 now document their actual parser meaning. Implementer handoff: shape parsing code in STORY-028 worktree currently references E-PAR-013 only in doc comments (not in emitted string messages) — implementer must use E-PAR-015/E-PAR-016 codes in all emitted error messages for shape parsing. |

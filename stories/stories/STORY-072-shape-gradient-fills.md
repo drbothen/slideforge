@@ -9,7 +9,7 @@ points: 3
 priority: P2
 tdd_mode: strict
 status: draft
-spec_version: "1.0"
+spec_version: "1.1"
 behavioral_contracts: [BC-3.04.001]
 verification_properties: []
 nfr_refs: [NFR-021, NFR-022, NFR-023, NFR-024, NFR-025]
@@ -35,21 +35,24 @@ format-specific gradient encoding from the common `ShapeFrame` data.
 ## Dependency Anchor Justifications
 
 - Depends on STORY-028: `ShapeSpec`, `FillSpec`, `ShapeFrame`, `BoundingBox`, and
-  the `layout::run()` shape pass are all established by STORY-028. This story
-  extends the existing `FillSpec` enum with the `Gradient` variant and wires
-  parser → IR → layout → exporter. The `FillSpec::Gradient` variant ALREADY exists
-  in the IR type (defined in STORY-028 as a placeholder) — this story makes it
-  reachable from the DSL parser and removes E-PAR-014.
+  the `layout::run()` shape pass are all established by STORY-028. This story adds
+  the `FillSpec::Gradient { from: Rgb, to: Rgb }` variant to the `FillSpec` enum in
+  `slideforge-types` (currently only `SolidColor(Rgb)` and `None` per BC-3.04.001
+  v1.4.2 — the Gradient variant does NOT exist in the v1.0 codebase) and wires
+  parser → IR → layout → exporter. It also removes E-PAR-016 (the "gradient
+  unsupported" guard).
 
 ## Summary
 
-Extend the `FillSpec::Gradient` path end-to-end: DSL parser → `ShapeSpec` IR →
+Add `FillSpec::Gradient { from: Rgb, to: Rgb }` to the `FillSpec` enum in
+`slideforge-types` and wire it end-to-end: DSL parser → `ShapeSpec` IR →
 layout passthrough → PPTX/DOCX/PDF/HTML exporters.
 
-Currently the `FillSpec::Gradient { from: Rgb, to: Rgb }` variant is defined in
-`slideforge-types` but is NOT reachable from the DSL parser. Any attempt to use
-gradient syntax at the DSL level produces E-PAR-014 ("Shape gradient fill is not
-supported in v1.0"). This story ships the gradient surface, removes E-PAR-014, and
+The `FillSpec::Gradient` variant does NOT exist in the v1.0 codebase (confirmed per
+BC-3.04.001 v1.4.2 and code audit of `slideforge-types/src/shape_types.rs`). The
+`FillSpec` enum currently contains only `SolidColor(Rgb)` and `None`. Any attempt to
+use gradient syntax at the DSL level produces E-PAR-016 ("Shape gradient fill is not
+supported in v1.0"). This story ships the gradient surface, removes E-PAR-016, and
 implements native gradient emission in all four output formats (with a documented
 fallback where the format does not natively support gradients).
 
@@ -79,9 +82,9 @@ shape:
 ```
 
 The parser produces `FillSpec::Gradient { from: Rgb { r: 255, g: 0, b: 0 }, to:
-Rgb { r: 0, g: 0, b: 255 } }` in the `ShapeSpec` IR. The E-PAR-014 error is
+Rgb { r: 0, g: 0, b: 255 } }` in the `ShapeSpec` IR. The E-PAR-016 error is
 removed. Color syntax follows the same hex rules as solid fills: 6-digit only,
-case-insensitive, short/alpha forms rejected with E-PAR-013.
+case-insensitive, short/alpha forms rejected with E-PAR-015.
 
 ### AC-002: FillSpec::Gradient in ShapeSpec IR
 (traces to BC-3.04.001 postcondition 1 — ShapeSpec.fill populated)
@@ -124,9 +127,9 @@ does not change the alt-text contract.
 
 ## Tasks
 
-- [ ] Add `Gradient { from: Rgb, to: Rgb }` variant to `FillSpec` in `slideforge-types/src/specs.rs` (or verify it already exists as a placeholder — if so, confirm it derives `Debug + Clone + PartialEq + Eq + Hash`)
+- [ ] Add `Gradient { from: Rgb, to: Rgb }` variant to `FillSpec` in `slideforge-types/src/shape_types.rs` (variant does NOT exist yet — must be added as the FIRST task; confirm it derives `Debug + Clone + PartialEq + Eq + Hash` for comemo compatibility)
 - [ ] Extend DSL parser (in `slideforge-syntax` or `slideforge-eval` — whichever owns `shape:` parsing) to accept `fill gradient #RRGGBB to #RRGGBB` and produce `FillSpec::Gradient`
-- [ ] Remove E-PAR-014 error code from the parser (the "gradient not supported" guard)
+- [ ] Remove E-PAR-016 error code from the parser (the "gradient not supported" guard)
 - [ ] Update `layout::run()` shape pass to pass `FillSpec::Gradient` through to `ShapeFrame` (likely already correct — passthrough logic in STORY-028 should be variant-agnostic)
 - [ ] Implement PPTX gradient: emit `<a:gradFill>` with two `<a:gs>` stops
 - [ ] Implement PDF gradient: emit `ShadingPattern` linear gradient
@@ -142,10 +145,11 @@ does not change the alt-text contract.
 ## Previous Story Intelligence
 
 STORY-028 established the `FillSpec` enum with `SolidColor(Rgb)` and `None` variants
-and a comment placeholder for `Gradient`. This story activates that placeholder. The
-implementer must confirm whether `FillSpec::Gradient` was actually defined in the
-STORY-028 implementation or only in the BC spec. If it was omitted, add it to
-`slideforge-types/src/specs.rs` as the first task.
+and a comment-placeholder noting `Gradient` as deferred (per BC-3.04.001 v1.4.2 and
+confirmed by code audit of `slideforge-types/src/shape_types.rs`). The
+`FillSpec::Gradient` variant was NOT added during STORY-028 — it is deferred to this
+story. The implementer's FIRST task is adding `Gradient { from: Rgb, to: Rgb }` to
+`slideforge-types/src/shape_types.rs`.
 
 The STORY-028 `layout::run()` shape pass should already be variant-agnostic for
 `FillSpec` — the passthrough stores `ShapeSpec.fill` verbatim into `ShapeFrame.fill`.
@@ -182,8 +186,8 @@ errors in exporter code — fix those exhaustive matches in the same story.
 
 | File | Action | Purpose |
 |------|--------|---------|
-| `crates/slideforge-types/src/specs.rs` | Modify | Add/confirm `FillSpec::Gradient { from: Rgb, to: Rgb }` |
-| `crates/slideforge-syntax/src/shape.rs` (or equivalent) | Modify | Add `fill gradient` parser branch; remove E-PAR-014 guard |
+| `crates/slideforge-types/src/shape_types.rs` | Modify | Add `FillSpec::Gradient { from: Rgb, to: Rgb }` variant (does not yet exist) |
+| `crates/slideforge-syntax/src/shape.rs` (or equivalent) | Modify | Add `fill gradient` parser branch; remove E-PAR-016 guard |
 | `crates/slideforge-layout/src/shapes.rs` | Modify | Verify gradient passthrough (should be no-op if match is exhaustive-safe) |
 | `crates/slideforge-pptx/src/shape.rs` (or equivalent) | Modify | Emit `<a:gradFill>` for `FillSpec::Gradient` |
 | `crates/slideforge-pdf/src/shape.rs` (or equivalent) | Modify | Emit `ShadingPattern` for `FillSpec::Gradient` |
@@ -206,7 +210,7 @@ errors in exporter code — fix those exhaustive matches in the same story.
 ## Test Strategy
 
 - **Unit tests**: Parser: `fill gradient #FF0000 to #0000FF` → correct `FillSpec::Gradient`;
-  hex case-insensitivity preserved for gradient colors; E-PAR-013 still fires on
+  hex case-insensitivity preserved for gradient colors; E-PAR-015 still fires on
   short/alpha hex in gradient stops; alt-text enforcement applies.
 - **Snapshot tests**: PPTX XML for a gradient shape — assert `<a:gradFill>` structure
   with two `<a:gs>` stops at pos=0 and pos=100000.
@@ -220,7 +224,7 @@ errors in exporter code — fix those exhaustive matches in the same story.
 | ID | Description | Expected Behavior |
 |----|-------------|-------------------|
 | EC-001 | Gradient shape without alt or decorative | `LayoutError::MissingAlt` — same as solid shape |
-| EC-002 | Gradient with short-form hex (e.g., `#F00 to #00F`) | E-PAR-013 on the short-form stop |
+| EC-002 | Gradient with short-form hex (e.g., `#F00 to #00F`) | E-PAR-015 on the short-form stop |
 | EC-003 | Gradient in DOCX output | Solid fallback (`from` color) + lint warning |
 | EC-004 | Gradient shape in multi-shape slide where another shape has missing alt | Both errors accumulated per DI-018 |
 | EC-005 | Same `from` and `to` color (e.g., `#FF0000 to #FF0000`) | Valid — equivalent to solid fill; no error; output is a flat gradient (visually solid) |
@@ -238,3 +242,4 @@ Build MUST fail if those crates appear in `slideforge-layout/Cargo.toml`.
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0 | 2026-05-28 | story-writer | Initial creation — deferred surface from BC-3.04.001 v1.3 "Deferred Surfaces" section; resolves STORY-TBD-shape-gradient-fills placeholder |
+| 1.1 | 2026-05-29 | product-owner | Pass-9 sweep (F-P9-HIGH-001): removed false "ALREADY exists / placeholder" claims — FillSpec::Gradient is NOT in v1.0 codebase per BC-3.04.001 v1.4.2 and code audit; rewrote Dependency Anchor, Summary, Previous Story Intelligence to describe ADDING the variant as the first task; updated E-PAR-014 references to E-PAR-016 and E-PAR-013 references to E-PAR-015 per F-P9-HIGH-002 namespace collision resolution; corrected file path from specs.rs → shape_types.rs |

@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.4.2"
+version: "1.4.3"
 status: active
 producer: product-owner
 timestamp: 2026-05-29T00:00:00
@@ -14,7 +14,7 @@ subsystem: SS-TBD
 capability: CAP-023
 lifecycle_status: active
 introduced: v1.0.0
-modified: ["v1.2 — adversary pass 1 adjudication: codified ShapeSpec position schema, hex color contract, shape_type closed vocabulary, off-canvas boundary semantics, gradient deferral, MissingAlt span, multi-error accumulation", "v1.3 — roundRect added to closed vocabulary per Q7 decision example", "v1.3.1 — STORY-TBD-shape-gradient-fills placeholder resolved to STORY-072", "v1.3.2 — VP propagation burst: assigned VP-037 through VP-042 to all VP-TBD entries", "v1.4 — adversary pass 2 adjudications M/N/O/P/Q/R/T: ArithmeticOverflow Result return, LayoutError::Multiple uniformity, LaidOutDeck warnings field, fill+text fields on ShapeSpec, canonical test vectors, uppercase normalization phrasing, shape frame order enforcement", "v1.4.1 — pass-7 drift fix (F-P7-HIGH-004): slide_index → source_slide_index in EC-001 and EC-003 per AC-BC-A9 canonical field name", "v1.4.2 — pass-8 fix (F-P8-MED-001): Deferred Surfaces section rewritten to be consistent with Postcondition 1 — FillSpec::Gradient is NOT in the v1.0 enum (code confirmed absent); removed contradictory claim that variant is defined in IR"]
+modified: ["v1.2 — adversary pass 1 adjudication: codified ShapeSpec position schema, hex color contract, shape_type closed vocabulary, off-canvas boundary semantics, gradient deferral, MissingAlt span, multi-error accumulation", "v1.3 — roundRect added to closed vocabulary per Q7 decision example", "v1.3.1 — STORY-TBD-shape-gradient-fills placeholder resolved to STORY-072", "v1.3.2 — VP propagation burst: assigned VP-037 through VP-042 to all VP-TBD entries", "v1.4 — adversary pass 2 adjudications M/N/O/P/Q/R/T: ArithmeticOverflow Result return, LayoutError::Multiple uniformity, LaidOutDeck warnings field, fill+text fields on ShapeSpec, canonical test vectors, uppercase normalization phrasing, shape frame order enforcement", "v1.4.1 — pass-7 drift fix (F-P7-HIGH-004): slide_index → source_slide_index in EC-001 and EC-003 per AC-BC-A9 canonical field name", "v1.4.2 — pass-8 fix (F-P8-MED-001): Deferred Surfaces section rewritten to be consistent with Postcondition 1 — FillSpec::Gradient is NOT in the v1.0 enum (code confirmed absent); removed contradictory claim that variant is defined in IR", "v1.4.3 — pass-9 fix (F-P9-HIGH-002): E-PAR-013 → E-PAR-015 (hex color invalid) and E-PAR-014 → E-PAR-016 (gradient unsupported) to resolve namespace collision with parser template codes; updated precondition 5, EC-008, EC-009, EC-011, canonical test vectors, and Deferred Surfaces section"]
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -173,7 +173,7 @@ coordinates. ALL errors from a slide's shape set are accumulated before returnin
    numeric `Rgb { r: u8, g: u8, b: u8 }` struct where each byte is the decoded
    channel value. "Uppercase" or "lowercase" is meaningless at the IR level because
    `Rgb` stores integers, not strings — there is NO string round-trip.
-   Short-form `#RGB` and alpha form `#RRGGBBAA` are rejected with E-PAR-013.
+   Short-form `#RGB` and alpha form `#RRGGBBAA` are rejected with E-PAR-015.
 6. `x + width == page_width` (or `y + height == page_height`) is ON-canvas (inclusive
    boundary). Only strict `> page_width` / `> page_height` triggers off-canvas.
 7. `LayoutError::MissingAlt` carries a `span: SourceSpan` field pointing to the
@@ -209,10 +209,10 @@ coordinates. ALL errors from a slide's shape set are accumulated before returnin
 | EC-005 | shape: with unknown type keyword (e.g., `type frobnicator`) | E-PAR-012: "Unknown shape type 'frobnicator' at `<file>:<line>:<col>`. Known types: [rect, ellipse, arrow, line, star, roundRect]" |
 | EC-006 | shape: with fill "#FF6F00" (uppercase) | Accepted; normalized to `Rgb { r: 255, g: 111, b: 0 }` |
 | EC-007 | shape: with fill "#ff6f00" (lowercase) | Accepted; normalized to same `Rgb { r: 255, g: 111, b: 0 }` |
-| EC-008 | shape: with fill "#F60" (short-form #RGB) | E-PAR-013: "Invalid hex color '#F60' at `<file>:<line>:<col>`. Expected 6-digit hex (#RRGGBB). Short-form #RGB is not supported." |
-| EC-009 | shape: with fill "#FF6F00FF" (alpha #RRGGBBAA) | E-PAR-013: "Invalid hex color '#FF6F00FF' at `<file>:<line>:<col>`. 8-digit alpha hex not supported. Use fill-opacity: attribute for transparency." |
+| EC-008 | shape: with fill "#F60" (short-form #RGB) | E-PAR-015: "Invalid hex color '#F60' at `<file>:<line>:<col>`. Expected 6-digit hex (#RRGGBB). Short-form #RGB is not supported." |
+| EC-009 | shape: with fill "#FF6F00FF" (alpha #RRGGBBAA) | E-PAR-015: "Invalid hex color '#FF6F00FF' at `<file>:<line>:<col>`. 8-digit alpha hex not supported. Use fill-opacity: attribute for transparency." |
 | EC-010 | Slide with two shapes where both lack alt | Both `MissingAlt` errors accumulated; function returns `Err(LayoutError::Multiple { inner: vec![MissingAlt{...}, MissingAlt{...}] })`. ALSO: a slide with ONE shape lacking alt returns `Err(LayoutError::Multiple { inner: vec![MissingAlt{...}] })` — uniform wrapper even for single errors (Item N). |
-| EC-011 | shape: with gradient fill (e.g., `fill gradient(brand.primary, brand.accent1)`) | E-PAR-014: "Shape gradient fill is not supported in v1.0. Use a solid hex color or 'none'. Gradient fill is planned for a future release." |
+| EC-011 | shape: with gradient fill (e.g., `fill gradient(brand.primary, brand.accent1)`) | E-PAR-016: "Shape gradient fill is not supported in v1.0. Use a solid hex color or 'none'. Gradient fill is planned for a future release (STORY-072)." |
 | EC-012 | shape: in DOCX export | Shape rendered as floating `<w:drawing>` inline image (SVG rasterized at 150 DPI) |
 | EC-013 | `title_content` slide with 1 placeholder region and 1 `shape:` block | `frames[0]` = placeholder frame, `frames[1]` = shape frame; `shape_frame_index (1) >= region_count (1)` — shape is appended AFTER all placeholder frames. |
 | EC-014 | `ShapeUnit::Inches(i64::MAX)` passed to EMU conversion | `layout_shapes` returns `Err(LayoutError::Multiple { inner: [LayoutError::ArithmeticOverflow { source_slide_index, span }] })`. E-LAY-006 is reported with source span. Saturating-silent behavior is FORBIDDEN. |
@@ -230,7 +230,7 @@ coordinates. ALL errors from a slide's shape set are accumulated before returnin
 | `shape: type frobnicator alt "x"` | E-PAR-012 with known-types list; exit 1 | error |
 | `shape: type rect position x 8.0in y 0in width 2.0in height 1.0in alt "edge"` (x+w == page_width == 10in) | ON-canvas; no `OffCanvas` warning | boundary |
 | `shape: type rect fill "#ff6f00" alt "orange"` (lowercase hex) | Accepted; `ShapeSpec { fill: FillSpec::SolidColor(Rgb { r: 255, g: 111, b: 0 }), ... }` — numeric Rgb, no string preserved | case-insensitive |
-| `shape: type rect fill "#F60" alt "x"` (short-form) | E-PAR-013; exit 1 | error |
+| `shape: type rect fill "#F60" alt "x"` (short-form) | E-PAR-015; exit 1 | error |
 | Slide with 2 shapes both missing alt | `Err(LayoutError::Multiple { inner: vec![MissingAlt{source_slide_index:0,...}, MissingAlt{source_slide_index:0,...}] })` — 2 entries | multi-error |
 | `shape: type rect position x 1in y 1in width 2in height 1in fill "#003766" alt "Blue rect"` | `ShapeSpec { shape_type: ShapeType::Rect, position: ShapePosition { x: Inches(1000), y: Inches(1000), width: Inches(2000), height: Inches(1000) }, fill: FillSpec::SolidColor(Rgb { r: 0, g: 55, b: 102 }), text: None, alt: Some(AltText::Provided("Blue rect")), decorative: false, span: <span> }` | fill/text contract (Item Q) |
 | `shape: type rect position x 1in y 1in width 2in height 1in alt "box" text "Hello world"` | `ShapeSpec { ..., text: Some(vec![InlineNode::Plain(Arc::from("Hello world"))]), ... }` | text field contract (Item Q) |
@@ -245,10 +245,10 @@ missing — it is a planned feature with a spec boundary:
 **Gradient fills** (`fill gradient(from, to)`): The `FillSpec::Gradient { from: Rgb, to: Rgb }`
 variant is NOT in the v1.0 `FillSpec` enum (see Postcondition 1). The enum contains only
 `SolidColor(Rgb)` and `None` in v1.0. Any attempt to use gradient syntax at the DSL level
-produces E-PAR-014 ("Shape gradient fill is not supported in v1.0.").
+produces E-PAR-016 ("Shape gradient fill is not supported in v1.0.").
 Target story: **STORY-072** (`STORY-072-shape-gradient-fills.md`).
 When that story ships, it will: (1) add `FillSpec::Gradient { from: Rgb, to: Rgb }` to the
-enum in `slideforge-types`, (2) add gradient parsing to the DSL parser, (3) remove E-PAR-014,
+enum in `slideforge-types`, (2) add gradient parsing to the DSL parser, (3) remove E-PAR-016,
 (4) implement `FillSpec::Gradient` handling in PPTX/PDF/HTML exporters.
 
 ## Verification Properties

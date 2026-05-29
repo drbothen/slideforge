@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.1"
+version: "1.2"
 status: draft
 producer: product-owner
 timestamp: 2026-05-25T00:00:00
@@ -14,7 +14,7 @@ subsystem: SS-05
 capability: CAP-010
 lifecycle_status: active
 introduced: v1.0.0
-modified: []
+modified: ["v1.2 — pass-9 fix (F-P9-HIGH-003): InvalidFrameDimension → InvalidBoundingBox (canonical per error.rs:99-109); slide_index → source_slide_index; bounding_box → bbox; updated postcondition 2 and EC-004"]
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -53,7 +53,7 @@ corruption in OOXML consumers.
      - `frame.bounding_box.x + frame.bounding_box.width <= page_size.width`
      - `frame.bounding_box.y + frame.bounding_box.height <= page_size.height`
 2. No `Frame` with a zero-dimension bounding box is emitted. Zero-dimension frames indicate
-   a layout engine defect; the function returns `Err(LayoutError::InvalidFrameDimension { ... })`
+   a layout engine defect; the function returns `Err(LayoutError::InvalidBoundingBox { ... })`
    instead of producing invalid output.
 3. EMU values in all `BoundingBox` fields are represented as `Emu(i64)`, not raw `i64`, `f32`,
    or `f64`.
@@ -75,7 +75,7 @@ corruption in OOXML consumers.
 | EC-001 | Default 16:9 page size (`9_144_000 × 5_143_500` EMU) — title slide | All frames within `(0,0)–(9_144_000, 5_143_500)`; title at `(457200, 1600200)` |
 | EC-002 | Custom brand page size (`6_858_000 × 6_858_000` EMU, square slide) | Region maps scale proportionally; all frames remain within custom bounds |
 | EC-003 | Slide type with a frame touching the right/bottom edge exactly | `x + width == page_size.width` or `y + height == page_size.height` is valid (inclusive bound) |
-| EC-004 | Region map bug produces `x = -1` (hypothetical internal defect) | `Err(LayoutError::InvalidFrameDimension { slide_index, frame_index, bounding_box })` returned; no output produced |
+| EC-004 | Region map bug produces `x = -1` (hypothetical internal defect) | `Err(LayoutError::InvalidBoundingBox { source_slide_index, frame_index, bbox })` returned; no output produced |
 | EC-005 | `TextFlow.bounding_box` for empty-content frame | `width > 0` and `height > 0` (frame is allocated even for empty content); `TextFlow.overflow = Fit`, `line_count = 0` |
 
 ## Canonical Test Vectors

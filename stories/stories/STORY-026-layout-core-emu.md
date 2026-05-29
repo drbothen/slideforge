@@ -194,7 +194,7 @@ Every `BoundingBox` in every `Frame` across all `LaidOutSlide`s satisfies:
 `x >= 0`, `y >= 0`, `width > 0`, `height > 0`,
 `x + width <= page_size.width.0`, `y + height <= page_size.height.0`.
 Violations are caught by a post-layout integrity check inside `layout::run` and
-returned as `Err(LayoutError::InvalidBoundingBox { slide_index, frame_index, bbox })`.
+returned as `Err(LayoutError::InvalidBoundingBox { source_slide_index, frame_index, bbox })`.
 
 ## Behavioral Contracts
 
@@ -333,3 +333,10 @@ The `TextFlow` overflow detection is a heuristic for the canvas overflow warning
 width: `Emu(914400 / 12)` per character at 12pt font size (72 points/inch * 12
 points = 1 inch / 12 chars ~ 76200 EMU/char). This heuristic is acceptable per
 BC-3.03.001 which requires an "EMU estimate" not an exact value.
+
+## Changelog
+
+| Version | Date | Author | Summary |
+|---------|------|--------|---------|
+| 1.0 | 2026-05-24 | story-writer | Initial decomposition — Deck → LaidOutDeck, EMU system, layout::run stub, region maps for 31 slide types |
+| 1.1 | 2026-05-29 | product-owner | Pass-9 fix (F-P9-HIGH-003 sibling-sweep): AC-014 field name corrected — `slide_index` → `source_slide_index` in `InvalidBoundingBox` variant pattern to match canonical `error.rs:99-109` |
