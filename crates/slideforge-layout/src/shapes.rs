@@ -341,6 +341,19 @@ pub fn build_fill_spec(fill_keyword: Option<&str>) -> FillSpec {
 /// * `span` — source span of the shape block; used directly in `MissingAlt`
 ///   errors so callers do not need to re-emit with a corrected span (F-MED-004).
 ///
+/// # Alt / decorative precedence
+///
+/// When both `alt` (`Some(s)`) and `decorative = true` are supplied simultaneously,
+/// **`alt` takes precedence** and the result is `AltText::Provided(s)`. The
+/// `decorative` flag is ignored in this case.
+///
+/// Rationale: an explicit alt text string is always the more informative
+/// accessibility annotation. Silently preferring `AltText::Decorative` (which
+/// suppresses all screen-reader output) when the author also supplied meaningful
+/// text would be an accessibility regression. This "alt wins" rule is the correct
+/// default per WCAG AA. No warning is emitted because the outcome — an accessible
+/// shape with explicit alt — is unambiguously correct.
+///
 /// # Errors
 ///
 /// Returns `Err(LayoutError::MissingAlt)` with the provided `span` when `alt`
