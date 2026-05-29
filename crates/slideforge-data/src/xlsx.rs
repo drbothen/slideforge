@@ -580,28 +580,18 @@ fn extract_headers(range: &calamine::Range<Data>, path: &str) -> Result<Vec<Arc<
                 });
             },
             Some(Data::String(s)) => {
-                // F-LOW-2: trim leading/trailing whitespace from header strings.
-                // An all-whitespace header (e.g. "   ") is treated as Empty and
-                // triggers E-DAT-007 (partial-empty header rejection).
-                // Traces to BC-1.03.006 invariant 5 (AC-BC-001), F-LOW-2.
-                let trimmed = s.trim();
-                if trimmed.is_empty() {
-                    return Err(DataError::ParseError {
-                        code: E_DAT_007,
-                        path: Arc::from(path),
-                        format: DataFormat::Xlsx,
-                        reason: Arc::from(
-                            format!(
-                                "XLSX header row at '{path}' has whitespace-only cell at column \
-                                {col_idx} (0-indexed). All header cells must be non-empty strings \
-                                after whitespace trimming. Remove blank or whitespace-only headers."
-                            )
-                            .as_str(),
-                        ),
-                        span: slideforge_types::SourceSpan::default(),
-                    });
-                }
-                headers.push(Arc::from(trimmed));
+                // F-LOW-1 adjudication (pass 3): headers are stored EXACTLY as authored.
+                // Per CLAUDE.md "Forbidden Patterns" (DI-004, "strings are strings") and
+                // the canonical "no implicit type coercion" rule, silently mutating header
+                // column names with trim() is implicit transformation.
+                //
+                // A whitespace-only cell (e.g. "   ") is a non-empty string — it passes
+                // the empty-cell check (None/Data::Empty above) and is stored as-is.
+                // Users who want stripped headers must clean the XLSX before loading.
+                //
+                // This removes the previous trim() + whitespace-only error branch (F-LOW-2).
+                // Traces to BC-1.03.006 invariant 5 (AC-BC-001).
+                headers.push(Arc::from(s.as_str()));
             },
             Some(non_string_cell) => {
                 // E-DAT-008: non-string header cell — Int, Float, Bool, DateTime etc.
@@ -1059,49 +1049,116 @@ mod tests {
     }
 
     // ---------------------------------------------------------------------------
-    // F-LOW-2: whitespace-only header cells are treated as Empty → E-DAT-007.
-    // BC-1.03.006 invariant 5 (AC-BC-001).
+    // F-LOW-1 adjudication: headers stored EXACTLY as authored (no trim).
+    // BC-1.03.006 invariant 5 (AC-BC-001). Per DI-004 / "strings are strings".
     // ---------------------------------------------------------------------------
 
-    /// `test_bc_1_03_006_xlsx_whitespace_only_header_rejected` -- whitespace-only header cells are rejected.
+    /// `test_bc_1_03_006_xlsx_whitespace_only_header_stored_as_is` -- whitespace-only
+    /// headers are stored exactly as authored (not rejected, not trimmed).
     ///
-    /// A header cell containing only spaces (e.g. `"   "`) must be treated as empty
-    /// and trigger E-DAT-007 (partial-empty header rejection). This test FAILS if
-    /// whitespace-only headers are passed through as column names — load-bearing
-    /// per TD-VSDD-059.
+    /// F-LOW-1 adjudication (pass 3): the previous trim()-based implementation was
+    /// classified as implicit type coercion, forbidden by CLAUDE.md DI-004 and the
+    /// canonical "strings are strings" rule. Headers must be stored byte-for-byte.
     ///
-    /// Traces to BC-1.03.006 invariant 5 (AC-BC-001), F-LOW-2.
+    /// A whitespace-only cell `"   "` is a non-empty string. It passes the empty-cell
+    /// check (None/Data::Empty) and is stored as `"   "` (three spaces). Users who
+    /// want stripped headers must clean the XLSX before loading.
+    ///
+    /// This test FAILS if trim() is reintroduced (the column key would be `""` after
+    /// trimming, causing key mismatch) — load-bearing per TD-VSDD-059.
+    ///
+    /// Traces to BC-1.03.006 invariant 5 (AC-BC-001), F-LOW-1.
     #[test]
-    fn test_bc_1_03_006_xlsx_whitespace_only_header_rejected() {
+    fn test_bc_1_03_006_xlsx_whitespace_only_header_stored_as_is() {
         let mut wb = Workbook::new();
         let ws = wb.add_worksheet();
 
-        // "name" header, then whitespace-only header "   ", then "score"
+        // Header row: "name", "   " (whitespace-only), "score".
         ws.write_string(0, 0, "name").unwrap();
-        ws.write_string(0, 1, "   ").unwrap(); // whitespace-only — must be treated as empty
+        ws.write_string(0, 1, "   ").unwrap(); // whitespace-only — must be stored as "   "
         ws.write_string(0, 2, "score").unwrap();
         ws.write_string(1, 0, "Alice").unwrap();
+        ws.write_string(1, 1, "placeholder").unwrap(); // value for the whitespace-key column
         ws.write_string(1, 2, "95").unwrap();
 
         let buf = wb.save_to_buffer().unwrap();
         let (_dir, path) = write_xlsx_to_tempfile(buf, ".xlsx");
 
         let src = XlsxDataSource::new(path.to_str().unwrap());
-        let err = src.load("", &default_opts()).unwrap_err();
+        let result = src
+            .load("", &default_opts())
+            .expect("whitespace-only header must be accepted and stored as-is (F-LOW-1)");
 
-        let msg = err.to_string();
+        let rows = match result {
+            slideforge_types::Value::List(r) => r,
+            other => panic!("load must return Value::List, got: {other:?}"),
+        };
+        assert_eq!(rows.len(), 1, "must load 1 data row");
+
+        // The key must be the raw string "   " (three spaces), NOT "" or "score".
+        let row = match &rows[0] {
+            slideforge_types::Value::Map(m) => m,
+            other => panic!("row must be Value::Map, got: {other:?}"),
+        };
         assert!(
-            matches!(
-                err,
-                slideforge_plugin_api::DataSourceError::ParseError { .. }
-            ),
-            "whitespace-only header must produce DataSourceError::ParseError, got: {err:?}"
+            row.contains_key("   "),
+            "row must contain key '   ' (whitespace-only, exactly as authored); \
+            keys present: {:?}",
+            row.keys().collect::<Vec<_>>()
+        );
+        // Bonus: confirm "name" and "score" keys are also stored exactly.
+        assert!(row.contains_key("name"), "row must contain key 'name'");
+        assert!(row.contains_key("score"), "row must contain key 'score'");
+    }
+
+    /// `test_bc_1_03_006_xlsx_header_with_surrounding_spaces_stored_as_is` -- a header
+    /// like `" Score "` (spaces around content) is stored byte-for-byte, not stripped.
+    ///
+    /// Complements `test_bc_1_03_006_xlsx_whitespace_only_header_stored_as_is`.
+    /// Confirms that F-LOW-1 removal of trim() applies to mixed-whitespace headers
+    /// as well as whitespace-only cells.
+    ///
+    /// This test FAILS if trim() is reintroduced — the column key would be `"Score"`
+    /// instead of `" Score "`, causing the `row.contains_key(" Score ")` assertion to fail.
+    ///
+    /// Traces to BC-1.03.006 invariant 5 (AC-BC-001), F-LOW-1.
+    #[test]
+    fn test_bc_1_03_006_xlsx_header_with_surrounding_spaces_stored_as_is() {
+        let mut wb = Workbook::new();
+        let ws = wb.add_worksheet();
+
+        ws.write_string(0, 0, "id").unwrap();
+        ws.write_string(0, 1, " Score ").unwrap(); // leading + trailing spaces
+        ws.write_string(1, 0, "1").unwrap();
+        ws.write_string(1, 1, "42").unwrap();
+
+        let buf = wb.save_to_buffer().unwrap();
+        let (_dir, path) = write_xlsx_to_tempfile(buf, ".xlsx");
+
+        let src = XlsxDataSource::new(path.to_str().unwrap());
+        let result = src
+            .load("", &default_opts())
+            .expect("header with surrounding spaces must be accepted and stored as-is");
+
+        let rows = match result {
+            slideforge_types::Value::List(r) => r,
+            other => panic!("load must return Value::List, got: {other:?}"),
+        };
+        assert_eq!(rows.len(), 1, "must load 1 data row");
+
+        let row = match &rows[0] {
+            slideforge_types::Value::Map(m) => m,
+            other => panic!("row must be Value::Map, got: {other:?}"),
+        };
+        // Key must be " Score " (with spaces), not "Score".
+        assert!(
+            row.contains_key(" Score "),
+            "row must contain key ' Score ' (spaces preserved); keys: {:?}",
+            row.keys().collect::<Vec<_>>()
         );
         assert!(
-            msg.contains("E-DAT-007")
-                || msg.to_lowercase().contains("whitespace")
-                || msg.to_lowercase().contains("empty"),
-            "error must mention E-DAT-007 or whitespace/empty; got: {msg}"
+            !row.contains_key("Score"),
+            "trimmed key 'Score' must NOT appear — trim() was removed (F-LOW-1)"
         );
     }
 
