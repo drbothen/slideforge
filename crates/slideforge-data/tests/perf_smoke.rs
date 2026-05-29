@@ -1,5 +1,5 @@
 //! Performance smoke tests for NFR-036 (XLSX 10k rows < 2000ms) and
-//! NFR-037 (SQLite 10k rows < 500ms).
+//! NFR-037 (`SQLite` 10k rows < 500ms).
 //!
 //! These tests are `#[ignore]` by default so that `cargo nextest run` / `cargo test`
 //! in CI does not run them in the normal test suite (they take 0.5–2s each and
@@ -17,18 +17,25 @@
 //! they run the same 10k-row workload once, measure wall-clock time, and
 //! `assert!(elapsed < threshold)`.
 //!
-//! CI integration (perf-gate step): `cargo test --test perf_smoke -- --ignored`
-//! is wired into `.github/workflows/ci.yml` in STORY-NNN-data-perf-ci-gate
-//! (requested as a follow-up story; see AC-014 in the story spec).
+//! CI integration: `cargo test --test perf_smoke -- --ignored --test-threads 1`
+//! is wired into `.github/workflows/ci.yml` under the `perf-smoke` job
+//! (F-LOW-P5-1 fix, STORY-020 pass-5). The job runs on `ubuntu-latest`
+//! (linux-x86_64) sequentially (`--test-threads 1`) to reduce timer noise
+//! from shared CI runners.
 //!
 //! ## NFR-038 (memory profiling)
 //!
 //! Memory peak measurement requires a dedicated profiler (heaptrack / dhat /
-//! cargo-flamegraph). Enforcement is out of scope for this story — see
-//! STORY-NNN-data-perf-ci-gate for the CI gate + memory profiling story.
+//! cargo-flamegraph). Enforcement is deferred — see NFR-038 in the NFR catalog
+//! for the tracking item. CI gate for peak memory will be added when a
+//! platform-portable measurement approach is validated.
 //!
-//! Traces to BC-1.03.006 AC-014 (XLSX), BC-1.03.007 AC-014 (SQLite),
+//! Traces to BC-1.03.006 AC-014 (XLSX), BC-1.03.007 AC-014 (`SQLite`),
 //! NFR-036, NFR-037.
+
+// Integration test file: unwrap() in fixture helpers is acceptable.
+// This suppression mirrors the pattern in sqlite::tests and xlsx::tests.
+#![allow(clippy::unwrap_used)]
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -92,6 +99,9 @@ fn make_sqlite_10k_rows() -> (TempDir, PathBuf) {
                 "INSERT INTO metrics (id, name, value, flag, score) VALUES (?1,?2,?3,?4,?5)",
             )
             .unwrap();
+        // Cast i64 → f64 for fixture data; minor precision loss is acceptable
+        // for test scaffolding (value column is not checked for exact equality).
+        #[allow(clippy::cast_precision_loss)]
         for i in 1i64..=10_000 {
             stmt.execute(rusqlite::params![
                 i,
@@ -130,8 +140,8 @@ fn make_sqlite_10k_rows() -> (TempDir, PathBuf) {
 /// cargo test --test perf_smoke -- --ignored
 /// ```
 ///
-/// CI wiring: invoked in the `perf-gate` step of `.github/workflows/ci.yml`
-/// (wired in STORY-NNN-data-perf-ci-gate).
+/// CI wiring: invoked in the `perf-smoke` job of `.github/workflows/ci.yml`
+/// (wired by F-LOW-P5-1, STORY-020 pass-5).
 ///
 /// Traces to BC-1.03.006 AC-014, NFR-036.
 #[test]
@@ -167,7 +177,7 @@ fn nfr_036_xlsx_10k_rows_under_2000ms() {
 
 /// `nfr_037_sqlite_10k_rows_under_500ms` — AC-014 / NFR-037 CI gate.
 ///
-/// Loads a 10k-row SQLite table via `SqliteDataSource` and asserts the
+/// Loads a 10k-row `SQLite` table via `SqliteDataSource` and asserts the
 /// wall-clock elapsed time is under 500ms.
 ///
 /// This test is `#[ignore]` by default. Run explicitly via:
@@ -175,8 +185,8 @@ fn nfr_036_xlsx_10k_rows_under_2000ms() {
 /// cargo test --test perf_smoke -- --ignored
 /// ```
 ///
-/// CI wiring: invoked in the `perf-gate` step of `.github/workflows/ci.yml`
-/// (wired in STORY-NNN-data-perf-ci-gate).
+/// CI wiring: invoked in the `perf-smoke` job of `.github/workflows/ci.yml`
+/// (wired by F-LOW-P5-1, STORY-020 pass-5).
 ///
 /// Traces to BC-1.03.007 AC-014, NFR-037.
 #[test]

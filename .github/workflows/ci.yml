@@ -321,6 +321,42 @@ jobs:
             --psnr-threshold 35.0 \
             --fail-on-violation
 
+  # ─── Performance smoke gate (NFR-036 / NFR-037) ───────────────────────────
+  # Runs the #[ignore = "perf-gate"] integration tests from
+  # crates/slideforge-data/tests/perf_smoke.rs.
+  #
+  # NFR-036: XlsxDataSource 10k rows × 5 cols must load in < 2000ms.
+  # NFR-037: SqliteDataSource 10k rows × 5 cols must load in < 500ms.
+  #
+  # Linux-only: macOS and Windows have higher / more variable runner overhead
+  # that would make the fixed thresholds unreliable.  The spec thresholds are
+  # calibrated for Linux x86_64.
+  #
+  # --test-threads 1 runs tests sequentially to reduce timer noise from
+  # concurrent I/O on shared CI runners.
+  #
+  # F-LOW-P5-1 fix (STORY-020 pass-5): wired from stranded STORY-NNN handoff.
+  perf-smoke:
+    name: perf-smoke (NFR-036/037)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
+        with:
+          shared-key: perf-smoke
+      - name: Performance smoke tests (NFR-036/037)
+        run: >
+          cargo test
+          -p slideforge-data
+          --test perf_smoke
+          --
+          --ignored
+          --test-threads 1
+
   # ─── Summary: all required checks passed ───────────────────────────────────
   # This synthetic job depends on every required check. Branch protection
   # can gate on "CI / all-checks-pass" as a single required status check.
@@ -336,6 +372,7 @@ jobs:
       - supply-chain
       - bench
       - visual-regression
+      - perf-smoke
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()

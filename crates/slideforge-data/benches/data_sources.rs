@@ -1,4 +1,4 @@
-//! Performance benchmarks for `slideforge-data` DataSource implementations.
+//! Performance benchmarks for `slideforge-data` `DataSource` implementations.
 //!
 //! These benchmarks enforce the NFR performance gates from BC-1.03.006 and
 //! BC-1.03.007. Run with:
@@ -9,19 +9,23 @@
 //!
 //! ## NFR targets
 //!
-//! | Benchmark        | Target    | NFR       |
-//! |------------------|-----------|-----------|
-//! | `xlsx_10k_rows`  | < 2_000ms | NFR-036   |
-//! | `sqlite_10k_rows`| < 500ms   | NFR-037   |
+//! | Benchmark          | Target    | NFR     |
+//! |--------------------|-----------|---------|
+//! | `xlsx_10k_rows`    | `< 2_000ms` | NFR-036 |
+//! | `sqlite_10k_rows`  | `< 500ms`   | NFR-037 |
 //!
 //! ## NFR-038 note (memory profiling)
 //!
 //! NFR-038 requires peak memory measurement during large-dataset load.
 //! Memory profiling is NOT measurable via criterion alone — it requires a
 //! memory profiler (e.g., `heaptrack`, `dhat`, or `cargo-flamegraph`).
-//! See: `/Users/jmagady/Dev/slideforge/.factory/stories/stories/STORY-020-datasource-excel-sqlite.md`
-//! AC-014 for the NFR-038 requirement. When a memory profiler is wired into
-//! CI, add a bench here using the 10k-row fixture already defined below.
+//! See STORY-020 AC-014 for the NFR-038 requirement. When a memory profiler
+//! is wired into CI, add a bench here using the 10k-row fixture below.
+
+// Benchmark fixture helpers use unwrap() for brevity.  This is acceptable in
+// bench harness code where a panic terminates the benchmark run with a clear
+// message (not silent data corruption).
+#![allow(clippy::unwrap_used)]
 
 use std::path::PathBuf;
 
@@ -38,7 +42,7 @@ use tempfile::TempDir;
 
 /// Generate a 10k-row XLSX workbook into a tempfile and return the dir + path.
 ///
-/// Shape: headers `["id", "name", "value", "flag", "score"]`, 10_000 data rows.
+/// Shape: headers `["id", "name", "value", "flag", "score"]`, `10_000` data rows.
 ///
 /// Traces to BC-1.03.006 AC-014, NFR-036.
 fn make_xlsx_10k_rows() -> (TempDir, PathBuf) {
@@ -69,7 +73,7 @@ fn make_xlsx_10k_rows() -> (TempDir, PathBuf) {
 
 /// Benchmark: load a 10k-row XLSX workbook via `XlsxDataSource`.
 ///
-/// NFR-036: must complete in < 2_000ms on the CI baseline hardware.
+/// NFR-036: must complete in `< 2_000ms` on the CI baseline hardware.
 /// Run this bench in CI and assert `p50 < 2_000ms` in the bench regression step.
 ///
 /// Traces to BC-1.03.006 AC-014, NFR-036.
@@ -90,8 +94,8 @@ fn bench_xlsx_10k_rows(c: &mut Criterion) {
                 _ => panic!("xlsx bench must return Value::List"),
             };
             assert_eq!(n, 10_000, "bench must load all 10_000 rows (got {n})");
-            std::hint::black_box(n)
-        })
+            std::hint::black_box(n);
+        });
     });
 }
 
@@ -99,11 +103,11 @@ fn bench_xlsx_10k_rows(c: &mut Criterion) {
 // SQLite fixture: 10k rows (NFR-037 canonical bench shape).
 // ---------------------------------------------------------------------------
 
-/// Populate an in-memory SQLite database with 10k rows and write to tempfile.
+/// Populate an in-memory `SQLite` database with 10k rows and write to tempfile.
 ///
 /// Table: `metrics(id INTEGER, name TEXT, value REAL, flag INTEGER, score INTEGER)`.
 ///
-/// Uses `VACUUM INTO` (SQLite 3.27+) to copy in-memory DB to file, same pattern
+/// Uses `VACUUM INTO` (`SQLite` 3.27+) to copy in-memory DB to file, same pattern
 /// as production tests.
 ///
 /// Traces to BC-1.03.007 AC-014, NFR-037.
@@ -127,6 +131,9 @@ fn make_sqlite_10k_rows() -> (TempDir, PathBuf) {
         let mut stmt = conn
             .prepare("INSERT INTO metrics (id, name, value, flag, score) VALUES (?1,?2,?3,?4,?5)")
             .unwrap();
+        // Cast i64 → f64 for fixture data; minor precision loss is acceptable
+        // for bench scaffolding (value column is not checked for exact equality).
+        #[allow(clippy::cast_precision_loss)]
         for i in 1i64..=10_000 {
             stmt.execute(rusqlite::params![
                 i,
@@ -151,7 +158,7 @@ fn make_sqlite_10k_rows() -> (TempDir, PathBuf) {
     (dir, path)
 }
 
-/// Benchmark: load a 10k-row SQLite table via `SqliteDataSource`.
+/// Benchmark: load a 10k-row `SQLite` table via `SqliteDataSource`.
 ///
 /// NFR-037: must complete in < 500ms on CI baseline hardware.
 /// Run this bench in CI and assert `p50 < 500ms` in the bench regression step.
@@ -177,8 +184,8 @@ fn bench_sqlite_10k_rows(c: &mut Criterion) {
                 _ => panic!("sqlite bench must return Value::List"),
             };
             assert_eq!(n, 10_000, "bench must load all 10_000 rows (got {n})");
-            std::hint::black_box(n)
-        })
+            std::hint::black_box(n);
+        });
     });
 }
 
