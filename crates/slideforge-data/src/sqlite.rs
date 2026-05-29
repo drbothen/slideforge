@@ -448,11 +448,21 @@ fn validate_sqlite_extension(path: &str) -> Result<(), String> {
 
     match ext.as_str() {
         "db" | "sqlite" | "sqlite3" => Ok(()),
-        other => Err(format!(
-            "[{code}] unsupported extension for SQLite data source: '.{other}'. \
-            Accepted extensions: .db, .sqlite, .sqlite3",
-            code = crate::error::E_DAT_014,
-        )),
+        // OBS-3: use "(no extension)" cosmetic for extensionless paths, matching
+        // the XLSX reject_xls_extension pattern. Without this, a path such as
+        // "/tmp/mydb" would render the confusing "'.'" in the error message.
+        other => {
+            let display_ext = if other.is_empty() {
+                "(no extension)".to_owned()
+            } else {
+                format!(".{other}")
+            };
+            Err(format!(
+                "[{code}] unsupported extension for SQLite data source: '{display_ext}'. \
+                Accepted extensions: .db, .sqlite, .sqlite3",
+                code = crate::error::E_DAT_014,
+            ))
+        }
     }
 }
 
@@ -2023,6 +2033,53 @@ mod tests {
         assert!(
             msg.contains("[E-DAT-014]"),
             "E-DAT-014 error code must appear in the user-visible message; got: {msg}"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // OBS-3: extensionless path → "(no extension)" cosmetic in error message.
+    // validate_sqlite_extension, E-DAT-014.
+    // ---------------------------------------------------------------------------
+
+    /// `test_obs3_sqlite_no_extension_renders_cosmetic` -- extensionless path renders "(no extension)".
+    ///
+    /// A path with no file extension (e.g. `/tmp/mydb`) previously rendered as `'.'`
+    /// in the error message (OBS-3). The fix uses `(no extension)` to match the XLSX
+    /// pattern in `reject_xls_extension`.
+    ///
+    /// Load-bearing: if `validate_sqlite_extension` reverts to `unwrap_or("")` + `'.{other}'`
+    /// without the cosmetic branch, the `msg.contains("no extension")` assertion fails.
+    ///
+    /// Traces to BC-1.03.007 invariant 8, VP-035, E-DAT-014.
+    #[test]
+    #[serial(load_call_count)]
+    fn test_obs3_sqlite_no_extension_renders_cosmetic() {
+        // A path with no extension: the extension check fires first, no file needed.
+        let src = SqliteDataSource::new("/tmp/mydb_no_ext", "SELECT 1");
+        let err = src.load("", &default_opts()).unwrap_err();
+
+        assert!(
+            matches!(
+                err,
+                slideforge_plugin_api::DataSourceError::UnsupportedUri { .. }
+            ),
+            "extensionless path must produce UnsupportedUri (E-DAT-014), got: {err:?}"
+        );
+        let msg = err.to_string();
+        // Must embed the error code.
+        assert!(
+            msg.contains("[E-DAT-014]"),
+            "extensionless path error must embed '[E-DAT-014]'; got: {msg}"
+        );
+        // OBS-3 load-bearing: must say "(no extension)", not the awkward "'.'"
+        assert!(
+            msg.contains("no extension"),
+            "extensionless path error must render '(no extension)' cosmetic; got: {msg}"
+        );
+        // Must NOT contain the old '.' rendering.
+        assert!(
+            !msg.contains("'.'."),
+            "extensionless path must not render the confusing \"'.'\" pattern; got: {msg}"
         );
     }
 
