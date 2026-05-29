@@ -9,12 +9,13 @@ points: 5
 priority: P0
 tdd_mode: strict
 status: draft
+spec_version: "1.1.0"
 crate: slideforge-data
 subsystems: [SS-10]
 target_module: slideforge-data
 behavioral_contracts: [BC-1.03.006, BC-1.03.007]
 verification_properties: []
-nfr_refs: [NFR-021, NFR-022, NFR-023, NFR-024, NFR-025]
+nfr_refs: [NFR-021, NFR-022, NFR-023, NFR-024, NFR-025, NFR-036, NFR-037, NFR-038]
 depends_on:
   - STORY-018
 blocks:
@@ -39,14 +40,15 @@ column names; `NULL` columns become `Value::Null`.
 
 | Item | Estimated Tokens |
 |------|-----------------|
-| Story spec (this file) | ~4,000 |
+| Story spec (this file, v1.1.0 with BC v1.3 ACs) | ~6,000 |
 | `crates/slideforge-data/src/xlsx.rs` | ~2,500 |
 | `crates/slideforge-data/src/sqlite.rs` | ~2,500 |
-| Test fixtures (xlsx + db files generated in-memory) | ~3,000 |
-| BC files consulted (BC-1.03.006, BC-1.03.007) | ~2,000 |
-| **Total** | **~14,000** |
+| Test fixtures (xlsx + db files generated in-memory) | ~3,500 |
+| BC files consulted (BC-1.03.006 v1.3, BC-1.03.007 v1.3) | ~4,000 |
+| NFR catalog entries (NFR-036/037/038) | ~500 |
+| **Total** | **~19,000** |
 
-Agent context budget: 200k tokens. This story is ~7.0% of budget — within limit.
+Agent context budget: 200k tokens. This story is ~9.5% of budget — within limit.
 
 ## Acceptance Criteria
 
@@ -93,7 +95,115 @@ Agent context budget: 200k tokens. This story is ~7.0% of budget — within limi
 - [ ] **AC-013:** Duplicate column names in SELECT result (no alias) produce `DataError::ParseError` with `E-DAT-003: SELECT result has duplicate column name '<name>'; use aliases`.
   (traces to BC-1.03.007 edge case EC-006)
 
-- [ ] **AC-014:** `#![forbid(unsafe_code)]` (NFR-024), `#![warn(missing_docs)]` (NFR-023), clippy clean (NFR-022), `=` version pinning (NFR-025) applied to all new code.
+- [ ] **AC-014:** `#![forbid(unsafe_code)]` (NFR-024), `#![warn(missing_docs)]` (NFR-023), clippy clean (NFR-022), `=` version pinning (NFR-025) applied to all new code. A `cargo bench` target `xlsx_10k_rows` validates the large-sheet load time < 2,000ms wall-clock (NFR-036); a `sqlite_10k_rows` target validates SQLite 10k-row query time < 500ms (NFR-037); peak Value-tree memory for a 10,000-row XLSX sheet stays < 64MB (NFR-038). These benchmarks serve as CI gates.
+
+## BC-Traced Acceptance Criteria (BC-1.03.006 v1.3 + BC-1.03.007 v1.3 Adjudications)
+
+The following ACs were added per product-owner adjudication (factory-artifacts commit c8788a21)
+to align the story with BC v1.3 postconditions, invariants, and edge cases.
+They APPEND to AC-001–AC-014 without renumbering existing ACs.
+
+### Excel (.xlsx) — BC-1.03.006 v1.3 adjudications
+
+- [ ] **AC-015 (BC-1.03.006 AC-BC-001 — Partial-empty header rejection):**
+  A header row where at least one cell is `calamine::Data::Empty` while at least one
+  other cell is non-empty MUST produce `DataError::ParseError` with message conforming
+  to EC-007: `"header row at '<path>' has empty cell at column <idx> (0-indexed). All
+  header cells must be non-empty strings. Do not use blank column headers; remove unused
+  columns or name all headers."` The implementer MUST NOT substitute phantom column
+  names such as `"__empty_<idx>"`.
+  (traces to BC-1.03.006 invariant 5 — partial-empty header rows rejected)
+
+- [ ] **AC-016 (BC-1.03.006 AC-BC-002 — Non-string header cell rejection):**
+  A header cell that calamine parses as `Data::Int`, `Data::Float`, `Data::Bool`,
+  `Data::DateTime`, or `Data::DateTimeIso` MUST produce `DataError::ParseError` with
+  message conforming to EC-008: `"header cell at column <idx> in '<path>' has type
+  <calamine-type> (value: <repr>). Header cells must be String-typed. Use a string
+  label as the column header."` The implementer MUST NOT call `.to_string()` on
+  non-string header cells and silently accept the result.
+  (traces to BC-1.03.006 invariant 6 — non-string header cells rejected)
+
+- [ ] **AC-017 (BC-1.03.006 AC-BC-003 — Whole-number Float promotion in data cells):**
+  For every `calamine::Data::Float(f)` in a data cell (row index > 0):
+  - `f.fract() == 0.0 && f.is_finite() && f >= i64::MIN as f64 && f <= i64::MAX as f64`
+    → `Value::Int(f as i64)`
+  - `f.is_nan() || f.is_infinite()` → `DataError::ParseError` per EC-012
+    (`"numeric cell at <col>:<row> in '<path>' has non-finite value (<NaN|Infinity>)..."`)
+  - Otherwise → `Value::Float(OrderedFloat(f))`
+  `Data::Float` MUST NOT unconditionally produce `Value::Float`.
+  (traces to BC-1.03.006 invariant 7 — whole-number Float promotion mandatory)
+
+- [ ] **AC-018 (BC-1.03.006 AC-BC-004 — DateTimeIso strict ISO 8601 validation):**
+  For every `calamine::Data::DateTimeIso(s)` cell, validate `s` by trying in order:
+  1. `chrono::DateTime::parse_from_rfc3339(s)` (full datetime with timezone)
+  2. `chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d")` (date-only)
+  3. `chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S")` (local datetime)
+  If none succeeds → `DataError::ParseError` per EC-009
+  (`"datetime cell at <col>:<row> in '<path>' has invalid ISO 8601 value '<value>'..."`).
+  If any succeeds → `Value::Str(Arc::from(s))`. Passing `s` through without validation
+  is forbidden.
+  (traces to BC-1.03.006 invariant 8 — DateTimeIso validation mandatory)
+
+- [ ] **AC-019 (BC-1.03.006 AC-BC-005 — Extension + magic-byte two-phase validation):**
+  Extension check is performed first (before opening the file):
+  1. If path extension is not `.xlsx` (case-insensitive): `.xls` → `DataError::UnsupportedFormat`
+     per EC-002; any other extension → `DataError::UnsupportedFormat` "only .xlsx extension
+     supported". Do NOT read bytes.
+  2. If extension is `.xlsx`, open file and check first 4 bytes against
+     `[0x50, 0x4B, 0x03, 0x04]` (ZIP local file header magic).
+     - Bytes present → continue loading.
+     - Bytes absent → `DataError::ParseError` per EC-013
+       (`"'<path>' has .xlsx extension but is not a valid XLSX archive (ZIP magic bytes not
+       found). File may be corrupted or misnamed."`).
+  Extension check alone is insufficient; magic-byte check always follows for `.xlsx` files.
+  (traces to BC-1.03.006 postcondition 9 — extension + magic-byte both required)
+
+### SQLite — BC-1.03.007 v1.3 adjudications
+
+- [ ] **AC-020 (BC-1.03.007 AC-BC-006 — Strict UTF-8 decode for TEXT columns):**
+  `rusqlite::types::ValueRef::Text(bytes)` MUST be decoded via `std::str::from_utf8(bytes)`.
+  The lossy variant (`std::str::from_utf8_lossy` / `String::from_utf8_lossy`) is
+  FORBIDDEN. On `Err` → `DataError::ParseError` per EC-008:
+  `"TEXT column '<column_name>' at row <row_idx> in '<path>' contains invalid UTF-8 bytes.
+  SQLite TEXT values must be valid UTF-8."` On `Ok(s)` → `Value::Str(Arc::from(s))`.
+  (traces to BC-1.03.007 invariant 6 — strict UTF-8; no silent U+FFFD substitution)
+
+- [ ] **AC-021 (BC-1.03.007 AC-BC-007 — Base64 STANDARD encoding for BLOB columns):**
+  `rusqlite::types::ValueRef::Blob(bytes)` MUST be encoded using exactly
+  `base64::engine::general_purpose::STANDARD.encode(bytes)` (RFC 4648 §4, alphabet
+  A-Za-z0-9+/, with `=` padding to 4-character boundary). Alternative engines
+  (`URL_SAFE`, `STANDARD_NO_PAD`, `URL_SAFE_NO_PAD`) MUST NOT be used. The encoded
+  string becomes a `Value::Str`. Example: `[0x00, 0xFF, 0x42]` → `Value::Str("AP9C")`.
+  (traces to BC-1.03.007 invariant 7 — STANDARD base64 canonical and stable)
+
+- [ ] **AC-022 (BC-1.03.007 AC-BC-008 — Closed extension list + magic-byte check):**
+  Extension check is performed first (before opening the file):
+  1. If path extension is not one of `.db`, `.sqlite`, `.sqlite3` (case-insensitive) →
+     `DataError::UnsupportedFormat` per EC-010:
+     `"unsupported extension for SQLite data source: '<ext>'. Accepted extensions: .db,
+     .sqlite, .sqlite3"`. Do NOT attempt to open the file.
+  2. If extension is in the accepted set, open the file and read the first 16 bytes.
+     Check against `b"SQLite format 3\0"` (canonical SQLite file header magic).
+     - Match fails → `DataError::ParseError` per EC-009:
+       `"'<path>' has .<ext> extension but is not a valid SQLite database (SQLite file
+       header not found). File may be corrupted or misnamed."`
+     - Match succeeds → proceed with `rusqlite::Connection::open_with_flags(...)`.
+  Extensions `.db3`, `.s3db`, `.sl3` are explicitly outside the accepted set.
+  (traces to BC-1.03.007 invariant 8 — closed extension list + magic-byte both required)
+
+- [ ] **AC-023 (BC-1.03.007 AC-BC-009 — SELECT/WITH prefix DML rejection + honest pass-through):**
+  DML rejection is implemented as an explicit SELECT-prefix check before `prepare()`:
+  1. Trim leading whitespace from the query string.
+  2. If the trimmed query does NOT start with `SELECT` or `WITH` (case-insensitive) →
+     `DataError::ParseError` per EC-003:
+     `"only SELECT queries are allowed in @data sqlite sources (at <file>:<line>)"`.
+  3. If the trimmed query starts with `SELECT` or `WITH`, call `connection.prepare(query)`.
+     Any error from `prepare()` or subsequent `query_map()` → `DataError::ParseError`
+     with the ACTUAL rusqlite error message (not the generic DML string). Example:
+     `"SQLite error: no such table: 'events'"`.
+  The implementer MUST NOT use the "only SELECT queries are allowed" string for
+  `prepare()`/`query_map()` failures unrelated to DML keywords.
+  (traces to BC-1.03.007 invariant 5 — DML vs other-error message differentiation)
 
 ## Previous Story Intelligence
 
@@ -155,8 +265,11 @@ crates/slideforge-data/src/
    - Handle: missing file → `FileNotFound`; corrupt database → `ParseError`; DML query (defense-in-depth) → `ParseError`; zero rows → `Value::List(vec![])`; duplicate column names → `ParseError`. (45 min)
 5. **Write unit tests for `xlsx.rs`** — use `calamine`'s in-memory test support or generate a small XLSX file using `rust_xlsxwriter = "=0.64"` as a test-only dep. (30 min)
 6. **Write unit tests for `sqlite.rs`** — use `rusqlite` in-memory database (`:memory:` path) for all tests. (30 min)
-7. **Run `cargo clippy -p slideforge-data -- -D warnings`** and fix. (15 min)
-8. **Run `cargo test -p slideforge-data`** — all tests pass. (10 min)
+7. **Extend unit tests for `xlsx.rs`** for BC v1.3 adjudications (AC-015–AC-019): partial-empty header, non-string header, Float→Int promotion, DateTimeIso validation, extension+magic-byte check. (30 min)
+8. **Extend unit tests for `sqlite.rs`** for BC v1.3 adjudications (AC-020–AC-023): strict UTF-8 decode, STANDARD base64 for BLOB, closed extension list + magic-byte check, DML vs non-DML error message differentiation. (30 min)
+9. **Write `benches/data_sources.rs`** — Criterion benchmarks `xlsx_10k_rows` and `sqlite_10k_rows` for NFR-036/037 gates. Add `heaptrack` measurement notes in comments for NFR-038 CI gate (heaptrack is a CI-only gate, not run in unit benchmark). (20 min)
+10. **Run `cargo clippy -p slideforge-data -- -D warnings`** and fix. (15 min)
+11. **Run `cargo test -p slideforge-data`** — all tests pass. (10 min)
 
 ## Test Strategy
 
@@ -187,6 +300,36 @@ All tests use `rusqlite` in-memory databases (no temp files needed):
 | `test_sqlite_duplicate_column_names` | `SELECT id, id FROM t` (no alias) | `DataError::ParseError` with "duplicate column name" |
 | `test_sqlite_blob_base64` | BLOB column with bytes | `Value::Str` with base64-encoded content |
 
+### Additional unit tests for BC v1.3 adjudications (AC-015–AC-023)
+
+#### xlsx.rs — BC-1.03.006 v1.3
+
+| Test Name | Setup | Expected |
+|-----------|-------|----------|
+| `test_xlsx_partial_empty_header_rejected` | Header row `["name", "", "score"]` | `DataError::ParseError` with EC-007 message; no `__empty_` key in result |
+| `test_xlsx_non_string_header_int_rejected` | Header row where column 0 cell is `Data::Int(2024)` | `DataError::ParseError` with EC-008 message citing "type Int" |
+| `test_xlsx_float_whole_number_promoted_to_int` | Data cell written as `95i32` (calamine surfaces as `Data::Float(95.0)`) | `Value::Int(95)` in result map |
+| `test_xlsx_float_non_whole_stays_float` | Data cell with value `3.14` | `Value::Float(OrderedFloat(3.14))` |
+| `test_xlsx_float_nan_produces_error` | Data cell returning `Data::Float(f64::NAN)` | `DataError::ParseError` with EC-012 message containing "NaN" |
+| `test_xlsx_datetimeiso_valid_rfc3339` | `Data::DateTimeIso("2024-01-15T09:00:00+00:00")` | `Value::Str("2024-01-15T09:00:00+00:00")` |
+| `test_xlsx_datetimeiso_valid_date_only` | `Data::DateTimeIso("2024-01-15")` | `Value::Str("2024-01-15")` |
+| `test_xlsx_datetimeiso_invalid_string` | `Data::DateTimeIso("not-a-date")` | `DataError::ParseError` with EC-009 message |
+| `test_xlsx_wrong_magic_bytes` | File has `.xlsx` extension but first 4 bytes are `[0x00, 0x01, 0x02, 0x03]` | `DataError::ParseError` with EC-013 message |
+
+#### sqlite.rs — BC-1.03.007 v1.3
+
+| Test Name | Setup | Expected |
+|-----------|-------|----------|
+| `test_sqlite_text_strict_utf8_valid` | TEXT column with valid UTF-8 string | `Value::Str` with decoded string |
+| `test_sqlite_text_strict_utf8_invalid` | TEXT column with invalid UTF-8 bytes (via raw rusqlite injection) | `DataError::ParseError` with EC-008 message |
+| `test_sqlite_blob_standard_base64` | BLOB column with bytes `[0x00, 0xFF, 0x42]` | `Value::Str("AP9C")` — RFC 4648 §4 STANDARD encoding |
+| `test_sqlite_extension_db3_rejected` | Path with `.db3` extension | `DataError::UnsupportedFormat` with EC-010 message listing accepted extensions |
+| `test_sqlite_extension_sl3_rejected` | Path with `.sl3` extension | `DataError::UnsupportedFormat` with EC-010 message |
+| `test_sqlite_wrong_magic_bytes` | File with `.db` extension but first 16 bytes are not SQLite header | `DataError::ParseError` with EC-009 message |
+| `test_sqlite_dml_delete_produces_dml_error` | Query `"DELETE FROM t"` | `DataError::ParseError` with EC-003 message "only SELECT queries are allowed" |
+| `test_sqlite_nonexistent_table_produces_sqlite_error` | Query `"SELECT * FROM nonexistent_table"` | `DataError::ParseError` with message containing "no such table: 'nonexistent_table'" — NOT the DML string |
+| `test_sqlite_with_cte_allowed` | Query `"WITH cte AS (SELECT 1) SELECT * FROM cte"` | Succeeds; returns `Value::List` with one row |
+
 ## Dependencies
 
 **Depends on:**
@@ -207,35 +350,74 @@ complete data source set.
 ### calamine DataType Conversion
 
 ```rust
-fn convert_calamine_cell(cell: &calamine::DataType) -> Value {
+// NOTE: calamine 0.26+ uses `calamine::Data` (not `DataType`). Verify exact enum name.
+// This function is called only for DATA cells (row_idx > 0). Header cells have separate
+// validation logic that rejects non-String variants (AC-016, BC-1.03.006 invariant 6).
+fn convert_calamine_data_cell(cell: &calamine::Data, col: usize, row: usize, path: &str)
+    -> Result<Value, DataError>
+{
     match cell {
-        calamine::DataType::Int(n)       => Value::Int(*n),
-        calamine::DataType::Float(f)     => Value::Float(OrderedFloat(*f)),
-        calamine::DataType::String(s)    => Value::Str(Arc::from(s.as_str())),
-        calamine::DataType::Bool(b)      => Value::Bool(*b),
-        calamine::DataType::DateTime(dt) => Value::Str(Arc::from(dt.to_string().as_str())), // ISO 8601
-        calamine::DataType::Empty        => Value::Null,
-        calamine::DataType::Error(_)     => Value::Null, // formula errors → null
-        calamine::DataType::Formula(s)   => Value::Str(Arc::from(s.as_str())), // cached string value
-        // Note: calamine::DataType::Formula actually contains the cached result; check calamine 0.26 API
+        calamine::Data::Int(n)          => Ok(Value::Int(*n)),
+        calamine::Data::Float(f) => {
+            // AC-017 / BC-1.03.006 invariant 7: whole-number Float promotion is mandatory.
+            if f.is_nan() || f.is_infinite() {
+                // AC-017 / EC-012: non-finite values produce ParseError
+                Err(DataError::ParseError { /* ... EC-012 message ... */ })
+            } else if f.fract() == 0.0 && *f >= i64::MIN as f64 && *f <= i64::MAX as f64 {
+                Ok(Value::Int(*f as i64))
+            } else {
+                Ok(Value::Float(OrderedFloat(*f)))
+            }
+        },
+        calamine::Data::String(s)       => Ok(Value::Str(Arc::from(s.as_str()))),
+        calamine::Data::Bool(b)         => Ok(Value::Bool(*b)),
+        calamine::Data::DateTimeIso(s)  => {
+            // AC-018 / BC-1.03.006 invariant 8: validate ISO 8601 strictly
+            validate_datetimeiso(s, col, row, path)?;
+            Ok(Value::Str(Arc::from(s.as_str())))
+        },
+        calamine::Data::Empty           => Ok(Value::Null),
+        calamine::Data::Error(_)        => Ok(Value::Null), // formula errors → null
+        // Formula variant: check calamine 0.26.1 API — may carry cached result as inner Data
+        _ => Ok(Value::Null),
     }
 }
 ```
 
-Verify the exact `calamine 0.26.1` API — the `Formula` variant may carry the computed value differently.
-
-NOTE: In calamine 0.26+, the cell data enum may be `Data` instead of `DataType`. Verify exact enum name at implementation time.
+NOTE: In calamine 0.26+, the cell data enum is `Data` (not `DataType`). The `Float` variant
+MUST NOT unconditionally produce `Value::Float` — BC-1.03.006 invariant 7 (AC-017) requires
+whole-number promotion. Header cell validation (AC-016) is a separate code path that checks
+variant type and rejects non-`Data::String` cells with `DataError::ParseError`.
 
 ### rusqlite ValueRef Conversion
 
 ```rust
-fn convert_rusqlite_value(val: rusqlite::types::ValueRef<'_>) -> Value {
+use base64::Engine as _;
+
+// AC-020 / BC-1.03.007 invariant 6: strict UTF-8; no lossy fallback.
+// AC-021 / BC-1.03.007 invariant 7: STANDARD base64 with padding (RFC 4648 §4).
+fn convert_rusqlite_value(
+    val: rusqlite::types::ValueRef<'_>,
+    col_name: &str,
+    row_idx: usize,
+    path: &str,
+) -> Result<Value, DataError> {
     match val {
-        ValueRef::Null         => Value::Null,
-        ValueRef::Integer(n)   => Value::Int(n),
-        ValueRef::Real(f)      => Value::Float(OrderedFloat(f)),
-        ValueRef::Text(bytes)  => Value::Str(Arc::from(std::str::from_utf8(bytes).unwrap_or(""))),
-        ValueRef::Blob(bytes)  => Value::Str(Arc::from(base64::encode(bytes).as_str())),
+        ValueRef::Null         => Ok(Value::Null),
+        ValueRef::Integer(n)   => Ok(Value::Int(n)),
+        ValueRef::Real(f)      => Ok(Value::Float(OrderedFloat(f))),
+        ValueRef::Text(bytes)  => {
+            // MUST use strict from_utf8, NOT from_utf8_lossy (AC-020 / invariant 6)
+            match std::str::from_utf8(bytes) {
+                Ok(s)  => Ok(Value::Str(Arc::from(s))),
+                Err(_) => Err(DataError::ParseError { /* EC-008 message */ }),
+            }
+        },
+        ValueRef::Blob(bytes)  => {
+            // MUST use general_purpose::STANDARD, NOT URL_SAFE or NO_PAD variants (AC-021 / invariant 7)
+            let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+            Ok(Value::Str(Arc::from(encoded.as_str())))
+        },
     }
 }
 ```
@@ -278,4 +460,15 @@ for name in &names {
 | EC-010 | SQLite query references non-existent table | `DataError::ParseError` → E-DAT-003 "no such table: '<name>'" |
 | EC-011 | SQLite zero-row result | `Value::List(vec![])` — no error |
 | EC-012 | SQLite duplicate column names | `DataError::ParseError` → E-DAT-003 "duplicate column name" |
-| EC-013 | SQLite BLOB column | `Value::Str` (base64-encoded) |
+| EC-013 | SQLite BLOB column | `Value::Str` (base64 STANDARD RFC 4648 §4 encoding with padding) |
+| EC-014 | XLSX partial-empty header row (some cells blank, some non-empty) | `DataError::ParseError` → E-DAT-003 per EC-007; no phantom column names |
+| EC-015 | XLSX non-string header cell (Int, Float, Bool, or DateTime calamine type) | `DataError::ParseError` → E-DAT-003 per EC-008 naming cell type |
+| EC-016 | XLSX data Float cell with whole-number value (e.g., `95.0`) | `Value::Int(95)` — Float→Int promotion applied |
+| EC-017 | XLSX data Float cell with NaN or Infinity | `DataError::ParseError` → E-DAT-003 per EC-012 |
+| EC-018 | XLSX DateTimeIso cell with non-ISO string | `DataError::ParseError` → E-DAT-003 per EC-009 |
+| EC-019 | XLSX file with correct `.xlsx` extension but wrong ZIP magic bytes | `DataError::ParseError` → E-DAT-003 per EC-013 |
+| EC-020 | SQLite TEXT column with invalid UTF-8 bytes | `DataError::ParseError` → E-DAT-003 per EC-008 (strict decode, not lossy) |
+| EC-021 | SQLite file with `.db3`, `.s3db`, or `.sl3` extension | `DataError::UnsupportedFormat` → E-DAT-003 per EC-010 |
+| EC-022 | SQLite file with accepted extension but wrong magic bytes (not SQLite header) | `DataError::ParseError` → E-DAT-003 per EC-009 |
+| EC-023 | SQLite non-SELECT query (INSERT/UPDATE/DELETE) reaching `load()` | `DataError::ParseError` per EC-003 "only SELECT queries allowed" (DML keyword check fires first) |
+| EC-024 | SQLite SELECT/WITH query against non-existent table | `DataError::ParseError` with actual rusqlite error ("no such table: '...'") — NOT the DML string |
