@@ -272,22 +272,34 @@ fn convert_calamine_cell(cell: &Data, col: u32, row: u32, path: &str) -> Result<
                 });
             }
             // Safe: f.is_finite() guaranteed above.
-            // F-MED-1: Use round-trip check for exact representability instead of
-            // `*f <= i64::MAX as f64`. The latter allows 2^63 (which f64 CAN represent
-            // exactly as i64::MAX + 1) to pass the bounds check, after which
-            // `*f as i64` silently saturates to i64::MAX (corruption).
-            // Round-trip: `(*f as i64) as f64 == *f` confirms the value is exactly
-            // representable as i64 without loss. Values in range but not exactly
-            // representable (e.g. 2^63) stay as Value::Float.
-            // Traces to VP-021 boundary, F-MED-1.
-            // float_cmp: round-trip equality check is intentional — comparing exact
-            // bit representation to detect lossless i64 round-trip (not approximate equality).
+            // F-MED-1 (F-PASS12-MED-1): Use explicit range bounds instead of the
+            // round-trip check `(*f as i64) as f64 == *f`.
+            //
+            // The round-trip check has a silent-corruption flaw at the 2^63 boundary:
+            //   2^63 as f64  = 9.223372036854776e18  (exactly representable)
+            //   2^63 as i64  = i64::MAX (saturates, because 2^63 > i64::MAX = 2^63 - 1)
+            //   i64::MAX as f64 = 9.223372036854776e18 = 2^63 (f64 cannot represent 2^63-1)
+            //   → round-trip comparison: 2^63 == 2^63 → TRUE  (false pass)
+            //   → Value::Int(i64::MAX) produced from Float(2^63) — silent corruption.
+            //
+            // Fix: strict explicit range check:
+            //   lower: *f >= i64::MIN as f64  (i64::MIN = -2^63, exactly representable)
+            //   upper: *f < (i64::MAX as f64)  STRICT '<'
+            //     i64::MAX = 2^63 - 1 — NOT exactly representable in f64.
+            //     i64::MAX as f64 = 2^63 (nearest f64, rounds up).
+            //     Any f64 equal to 2^63 must NOT be promoted (it is out-of-range).
+            //     Strict '<' excludes exactly 2^63, which is the i64::MAX as f64 value.
+            //
+            // Traces to VP-021 boundary, F-PASS12-MED-1.
+            // float_cmp: intentional exact bound comparisons.
+            // cast_precision_loss: i64::MAX as f64 = 2^63 is the exact sentinel used.
+            // cast_possible_truncation: safe — f is in [i64::MIN, 2^63) after bounds check.
             #[allow(
                 clippy::cast_precision_loss,
                 clippy::cast_possible_truncation,
                 clippy::float_cmp
             )]
-            if f.fract() == 0.0 && (*f as i64) as f64 == *f {
+            if f.fract() == 0.0 && *f >= i64::MIN as f64 && *f < (i64::MAX as f64) {
                 Ok(Value::Int(*f as i64))
             } else {
                 Ok(Value::Float(OrderedFloat(*f)))
@@ -1866,23 +1878,26 @@ mod tests {
     // BC-1.03.006 postcondition 5.
     // ---------------------------------------------------------------------------
 
-    /// `test_vp_021_boundary_round_trip` -- VP-021 boundary: round-trip check rejects non-exact promotions.
+    /// `test_vp_021_boundary_round_trip` -- VP-021 boundary: strict range check rejects out-of-range floats.
     ///
-    /// The round-trip check `(*f as i64) as f64 == *f` guarantees that only f64 values
-    /// that round-trip exactly through i64 are promoted. This test exercises the boundary:
+    /// The strict bound check `*f >= i64::MIN as f64 && *f < (i64::MAX as f64)` guarantees
+    /// that only f64 values representable as i64 are promoted.  This test exercises the
+    /// boundary with four cases:
     ///
-    /// - `i64::MAX as f64` (= 2^63 in f64 due to rounding): round-trips to itself →
-    ///   promoted to `Value::Int(i64::MAX)`. This is the correct behavior because the f64
-    ///   value IS `i64::MAX` when interpreted as an integer (f64 has insufficient precision
-    ///   to distinguish `i64::MAX` from `2^63`; they share the same bit pattern).
-    /// - Large fractional-part float values that do NOT round-trip: stay as `Value::Float`.
-    /// - The key invariant: `Value::Int(n)` is only produced when `n as f64 == *f` exactly.
+    /// - Case 1: `1.5e20` (whole, > i64::MAX) → stays `Value::Float` (out of range).
+    /// - Case 2: `1_000_000.0` (whole, in range) → promoted to `Value::Int`.
+    /// - Case 3: `i64::MIN as f64` (lower bound, exactly representable) → promoted.
+    /// - Case 4: `i64::MAX as f64` (= 2^63 in f64, because f64 cannot represent 2^63-1
+    ///   exactly) → stays `Value::Float`. This is the critical regression case for
+    ///   F-PASS12-MED-1: the old round-trip check INCORRECTLY promoted 2^63 to
+    ///   `Value::Int(i64::MAX)` (silent corruption via saturation); the strict `<`
+    ///   upper bound correctly rejects it.
     ///
-    /// This test FAILS if the round-trip check is removed — making it load-bearing
-    /// per TD-VSDD-059.
+    /// This test FAILS when stubbed back to the buggy round-trip check — making it
+    /// load-bearing per TD-VSDD-059.
     ///
-    /// Traces to BC-1.03.006 postcondition 5, F-MED-1.
-    // float_cmp: intentional exact bitwise equality checks for round-trip validation.
+    /// Traces to BC-1.03.006 postcondition 5, F-PASS12-MED-1.
+    // float_cmp: intentional exact bound comparisons.
     // cast_precision_loss + cast_possible_truncation: intentional — testing the
     // same cast used in production code.
     #[allow(
@@ -1892,9 +1907,8 @@ mod tests {
     )]
     #[test]
     fn test_vp_021_boundary_round_trip() {
-        // Case 1: f64 value that has fract() == 0.0 but does NOT round-trip exactly.
-        // 1.5e20 is a whole-number float > i64::MAX — its round-trip through i64 saturates
-        // and does NOT reproduce the original float, so it stays as Value::Float.
+        // Case 1: f64 value that has fract() == 0.0 but is out-of-range (> i64::MAX).
+        // 1.5e20 is a whole-number float far above i64::MAX — must stay as Value::Float.
         let large_whole: f64 = 1.5e20_f64;
         assert_eq!(
             large_whole.fract(),
@@ -1902,12 +1916,6 @@ mod tests {
             "precondition: 1.5e20 has fract() == 0.0"
         );
         assert!(large_whole.is_finite(), "precondition: 1.5e20 is finite");
-        // Confirm round-trip FAILS:
-        assert_ne!(
-            (large_whole as i64) as f64,
-            large_whole,
-            "1.5e20 must not round-trip through i64"
-        );
         let cell_large = calamine::Data::Float(large_whole);
         let result_large = convert_calamine_cell(&cell_large, 0, 1, "test.xlsx").unwrap();
         match result_large {
@@ -1919,8 +1927,8 @@ mod tests {
             other => panic!("unexpected: {other:?}"),
         }
 
-        // Case 2: f64 value that round-trips exactly through i64 — promoted.
-        // 1_000_000.0 round-trips: (1_000_000 as i64) as f64 = 1_000_000.0.
+        // Case 2: f64 value in range — promoted.
+        // 1_000_000.0 is a normal whole-number float well within i64 range.
         let cell_ok = calamine::Data::Float(1_000_000.0_f64);
         let result_ok = convert_calamine_cell(&cell_ok, 0, 1, "test.xlsx").unwrap();
         assert_eq!(
@@ -1929,13 +1937,10 @@ mod tests {
             "Data::Float(1_000_000.0) must promote to Value::Int(1_000_000)"
         );
 
-        // Case 3: i64::MIN boundary — promoted (i64::MIN is exactly representable).
+        // Case 3: i64::MIN lower boundary — promoted (i64::MIN = -2^63, exactly representable).
+        // The strict lower bound is `*f >= i64::MIN as f64`; i64::MIN as f64 = -2^63 exactly,
+        // so this value passes and promotes correctly.
         let min_f64: f64 = i64::MIN as f64;
-        assert_eq!(
-            (min_f64 as i64) as f64,
-            min_f64,
-            "i64::MIN round-trips exactly"
-        );
         let cell_min = calamine::Data::Float(min_f64);
         let result_min = convert_calamine_cell(&cell_min, 0, 1, "test.xlsx").unwrap();
         assert_eq!(
@@ -1943,6 +1948,43 @@ mod tests {
             Value::Int(i64::MIN),
             "Data::Float(i64::MIN as f64) must promote to Value::Int(i64::MIN)"
         );
+
+        // Case 4: i64::MAX as f64 = 2^63 (upper-bound regression, F-PASS12-MED-1).
+        //
+        // i64::MAX = 2^63 - 1, which is NOT exactly representable in f64.
+        // i64::MAX as f64 rounds UP to the nearest f64 = 2^63 = 9.223372036854776e18.
+        //
+        // Buggy round-trip check:
+        //   (2^63 as f64) as i64  = i64::MAX  (saturates — 2^63 > i64::MAX)
+        //   i64::MAX as f64        = 2^63      (rounds up)
+        //   2^63 == 2^63           → TRUE      (false pass → Value::Int(i64::MAX) — CORRUPTION)
+        //
+        // Correct strict-bound check:
+        //   *f < (i64::MAX as f64) = *f < 2^63
+        //   2^63 < 2^63            → FALSE     (correctly rejected → Value::Float)
+        //
+        // This case MUST return Value::Float, NOT Value::Int.
+        // i64::MAX = 2^63 - 1, which is NOT exactly representable in f64.
+        // The nearest f64 is 2^63 (rounds up). Verify by checking the cast saturates:
+        let two_pow_63: f64 = i64::MAX as f64; // = 2^63 (rounds up from 2^63-1)
+        // Sanity: 2^63 as i64 saturates to i64::MAX (not exactly 2^63).
+        assert_eq!(
+            two_pow_63 as i64,
+            i64::MAX,
+            "precondition: casting 2^63 (f64) to i64 saturates to i64::MAX"
+        );
+        let cell_boundary = calamine::Data::Float(two_pow_63);
+        let result_boundary = convert_calamine_cell(&cell_boundary, 0, 1, "test.xlsx").unwrap();
+        match result_boundary {
+            Value::Float(_) => {}, // Correct: 2^63 is out-of-range for i64
+            Value::Int(n) => panic!(
+                "Data::Float(2^63) must stay as Value::Float — i64::MAX as f64 = 2^63 \
+                (not 2^63-1), so any f64 equal to 2^63 is out of i64 range. \
+                Old round-trip check would incorrectly produce Value::Int({n}) via \
+                saturation. This is the F-PASS12-MED-1 regression case."
+            ),
+            other => panic!("unexpected: {other:?}"),
+        }
     }
 
     // ---------------------------------------------------------------------------
