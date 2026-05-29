@@ -1181,7 +1181,7 @@ mod tests {
     /// - If shape frames are inserted BEFORE region frames, the index assertion fails.
     /// - If placeholder frames are produced as Shape variants, the `!matches!` assertion fails.
     ///
-    /// F-CRIT-001: this test uses `layout::run` end-to-end (not layout_shapes directly).
+    /// F-CRIT-001: this test uses `layout::run` end-to-end (not `layout_shapes` directly).
     #[test]
     fn test_vp_050_layout_run_shape_frame_after_regions() {
         use slideforge_types::{

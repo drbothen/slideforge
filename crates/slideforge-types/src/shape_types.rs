@@ -450,18 +450,20 @@ mod tests {
         assert_eq!(set.len(), 1);
     }
 
-    /// F-HIGH-003 compile test: OffCanvas.shape_type must be ShapeType enum, not Arc<str>.
+    /// F-HIGH-003 compile test: `OffCanvas.shape_type` must be `ShapeType` enum, not `Arc<str>`.
     ///
-    /// If this compiles with shape_type: ShapeType::Ellipse, the binding is correct.
+    /// If this compiles with `shape_type: ShapeType::Ellipse`, the binding is correct.
     #[test]
     fn test_layout_warning_offcanvas_shape_type_is_enum_not_string() {
-        let _w = LayoutWarning::OffCanvas {
+        // Construct the warning — if shape_type were Arc<str>, this would not compile.
+        let w = LayoutWarning::OffCanvas {
             source_slide_index: 1,
             shape_type: ShapeType::Ellipse,
             x_emu: Emu(0),
             y_emu: Emu(0),
         };
-        // Compile-time proof: if shape_type: Arc<str> were used above, this would not compile.
+        // Assert the field is accessible as ShapeType, not Arc<str>.
+        assert!(matches!(w, LayoutWarning::OffCanvas { shape_type: ShapeType::Ellipse, .. }));
     }
 
     #[test]
@@ -482,16 +484,28 @@ mod tests {
     /// present on both variants (interface-definitions.md §8 / BC-3.04.001).
     #[test]
     fn test_layout_warning_canonical_field_name_source_slide_index() {
-        let _off = LayoutWarning::OffCanvas {
-            source_slide_index: 0,
-            shape_type: ShapeType::Rect, // F-HIGH-003: enum variant, not Arc<str>
-            x_emu: Emu(0),
-            y_emu: Emu(0),
-        };
-        let _xref = LayoutWarning::XrefTargetNotFound {
-            target: Arc::from("t"),
-            source_slide_index: 1,
-        };
-        // If this compiles, the canonical field name is correctly applied.
+        // Compile-time proof: if the field were named differently, these would not compile.
+        assert!(matches!(
+            LayoutWarning::OffCanvas {
+                source_slide_index: 0,
+                shape_type: ShapeType::Rect,
+                x_emu: Emu(0),
+                y_emu: Emu(0),
+            },
+            LayoutWarning::OffCanvas {
+                source_slide_index: 0,
+                ..
+            }
+        ));
+        assert!(matches!(
+            LayoutWarning::XrefTargetNotFound {
+                target: Arc::from("t"),
+                source_slide_index: 1,
+            },
+            LayoutWarning::XrefTargetNotFound {
+                source_slide_index: 1,
+                ..
+            }
+        ));
     }
 }
