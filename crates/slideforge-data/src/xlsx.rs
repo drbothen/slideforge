@@ -592,11 +592,12 @@ fn select_sheet(
 /// - Empty sheet (no rows or no non-empty cells in row 0) → `ParseError` "empty sheet" (EC-007)
 /// - Partial-empty header row (any cell `None`/`Empty` while others populated) → E-DAT-007 (AC-002)
 /// - Non-string header cell (Int, Float, Bool, `DateTime`) → E-DAT-008 (F-HIGH-1)
+/// - Duplicate header names → E-DAT-008 (F-PASS14-MED-1 / EC-006 parity with SQLite)
 ///
 /// Note: Merged cell detection in the header row is handled at the `load()` level
 /// via `workbook.worksheet_merge_cells()` before this function is called.
 ///
-/// Traces to BC-1.03.006 postconditions 2-3, invariants 5-6, AC-002.
+/// Traces to BC-1.03.006 postconditions 2-3, invariants 5-6, AC-002, EC-006.
 fn extract_headers(range: &calamine::Range<Data>, path: &str) -> Result<Vec<Arc<str>>, DataError> {
     use crate::error::{E_DAT_007, E_DAT_008};
 
@@ -699,6 +700,33 @@ fn extract_headers(range: &calamine::Range<Data>, path: &str) -> Result<Vec<Arc<
                     span: slideforge_types::SourceSpan::default(),
                 });
             },
+        }
+    }
+
+    // EC-006 / F-PASS14-MED-1: duplicate header names must be rejected.
+    // SQLite has find_duplicate_column at BC-1.03.007:303-310; XLSX must have parity.
+    // Reuse the same HashSet scan pattern rather than a shared function (they differ in
+    // error type: DataError vs DataSourceError).
+    {
+        let header_refs: Vec<&str> = headers.iter().map(Arc::as_ref).collect();
+        let mut seen = std::collections::HashSet::new();
+        for name in &header_refs {
+            if !seen.insert(*name) {
+                return Err(DataError::ParseError {
+                    code: E_DAT_008,
+                    path: Arc::from(path),
+                    format: DataFormat::Xlsx,
+                    reason: Arc::from(
+                        format!(
+                            "XLSX header row at '{path}' has duplicate column name '{name}'. \
+                            All header names must be unique. Use distinct names or remove \
+                            duplicate columns."
+                        )
+                        .as_str(),
+                    ),
+                    span: slideforge_types::SourceSpan::default(),
+                });
+            }
         }
     }
 
@@ -2541,6 +2569,68 @@ mod tests {
     // Snapshot test: canonical XLSX → DataValue mapping.
     // BC-1.03.006 test vector (happy-path).
     // ---------------------------------------------------------------------------
+
+    // ---------------------------------------------------------------------------
+    // F-PASS14-MED-1: duplicate header names in XLSX silently overwrite via
+    // IndexMap.insert — must be rejected with [E-DAT-NNN] error.
+    // Traces to BC-1.03.006 edge case EC-006 (sibling: SQLite find_duplicate_column).
+    // ---------------------------------------------------------------------------
+
+    /// `test_bc_1_03_006_xlsx_duplicate_header_rejected` -- header row with duplicate column
+    /// names must return `DataSourceError::ParseError` with `[E-DAT-008]` bracket code.
+    ///
+    /// Input: header row `["name", "score", "name"]` (column 0 and 2 share "name").
+    /// Expected: `Err(DataSourceError::ParseError)` whose message contains `[E-DAT-008]`
+    /// and the duplicate column name `"name"`.
+    ///
+    /// Load-bearing: without the `find_duplicate_column` gate in `extract_headers`,
+    /// the check is absent and the test panics at `unwrap_err()` (the call succeeds
+    /// instead of erroring, or the error code is wrong).
+    ///
+    /// Traces to BC-1.03.006 edge case EC-006, F-PASS14-MED-1.
+    #[test]
+    fn test_bc_1_03_006_xlsx_duplicate_header_rejected() {
+        let mut wb = Workbook::new();
+        let ws = wb.add_worksheet();
+        // Header row: "name", "score", "name" — duplicate at column 2.
+        ws.write_string(0, 0, "name").unwrap();
+        ws.write_string(0, 1, "score").unwrap();
+        ws.write_string(0, 2, "name").unwrap();
+        // Data row.
+        ws.write_string(1, 0, "Alice").unwrap();
+        ws.write_number(1, 1, 95.0).unwrap();
+        ws.write_string(1, 2, "Duplicate").unwrap();
+
+        let buf = wb.save_to_buffer().unwrap();
+        let (_dir, path) = write_xlsx_to_tempfile(buf, ".xlsx");
+
+        let src = XlsxDataSource::new(path.to_str().unwrap());
+        let err = src.load("", &default_opts()).unwrap_err();
+
+        assert!(
+            matches!(
+                err,
+                slideforge_plugin_api::DataSourceError::ParseError { .. }
+            ),
+            "duplicate XLSX header must produce DataSourceError::ParseError, got: {err:?}"
+        );
+        let msg = err.to_string();
+        // Must embed the error code in bracket form.
+        assert!(
+            msg.contains("[E-DAT-008]"),
+            "duplicate header error must embed '[E-DAT-008]'; got: {msg}"
+        );
+        // Must name the offending column.
+        assert!(
+            msg.contains("name"),
+            "duplicate header error must name the duplicate column 'name'; got: {msg}"
+        );
+        // Must mention 'duplicate' so the user understands the problem.
+        assert!(
+            msg.to_lowercase().contains("duplicate"),
+            "duplicate header error must mention 'duplicate'; got: {msg}"
+        );
+    }
 
     /// `test_bc_1_03_006_xlsx_snapshot_value_mapping` -- insta snapshot of header+rows → Value.
     ///
