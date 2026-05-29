@@ -207,17 +207,14 @@ impl DataSource for XlsxDataSource {
                     .cloned()
                     .unwrap_or_else(|| Arc::from(format!("col_{col_idx}").as_str()));
                 // Excel limits: max 1,048,576 rows × 16,384 cols — both fit u32.
+                // cast_possible_truncation: usize→u32 is safe within Excel row/col limits.
                 #[allow(clippy::cast_possible_truncation)]
-                let cell = range.get_value((row_idx as u32, col_idx as u32));
+                let (row_u32, col_u32) = (row_idx as u32, col_idx as u32);
+                let cell = range.get_value((row_u32, col_u32));
                 let value = match cell {
                     None | Some(Data::Empty) => Value::Null,
-                    Some(c) => convert_calamine_cell(
-                        c,
-                        col_idx as u32,
-                        row_idx as u32,
-                        path_str,
-                    )
-                    .map_err(|e| data_error_to_source_error(path_str, &e))?,
+                    Some(c) => convert_calamine_cell(c, col_u32, row_u32, path_str)
+                        .map_err(|e| data_error_to_source_error(path_str, &e))?,
                 };
                 map.insert(header, value);
             }
@@ -287,8 +284,7 @@ fn convert_calamine_cell(
                 Ok(Value::Float(OrderedFloat(*f)))
             }
         }
-        Data::String(s) => Ok(Value::Str(Arc::from(s.as_str()))),
-        Data::DurationIso(s) => Ok(Value::Str(Arc::from(s.as_str()))),
+        Data::String(s) | Data::DurationIso(s) => Ok(Value::Str(Arc::from(s.as_str()))),
         Data::DateTimeIso(s) => {
             // BC-1.03.006 postcondition 6 / invariant 9: validate ISO 8601.
             // Traces to VP-024 (valid) and VP-025 (invalid).
@@ -500,7 +496,7 @@ fn select_sheet(
 /// Errors:
 /// - Empty sheet (no rows or no non-empty cells in row 0) → `ParseError` "empty sheet" (EC-007)
 /// - Partial-empty header row (any cell `None`/`Empty` while others populated) → E-DAT-007 (AC-002)
-/// - Non-string header cell (Int, Float, Bool, DateTime) → E-DAT-008 (F-HIGH-1)
+/// - Non-string header cell (Int, Float, Bool, `DateTime`) → E-DAT-008 (F-HIGH-1)
 ///
 /// Note: Merged cell detection in the header row is handled at the `load()` level
 /// via `workbook.worksheet_merge_cells()` before this function is called.
@@ -1058,7 +1054,7 @@ mod tests {
     /// `test_bc_1_03_006_xlsx_vertical_merge_in_header` -- vertical merge spanning header into data rows returns error.
     ///
     /// A cell that spans from row 0 (header) into row 1+ creates an ambiguous
-    /// column mapping. Must produce DataSourceError::ParseError (F-LOW-9, EC-005).
+    /// column mapping. Must produce `DataSourceError::ParseError` (F-LOW-9, EC-005).
     ///
     /// Traces to BC-1.03.006 AC-006, edge case EC-005, F-LOW-9.
     #[test]
@@ -1163,7 +1159,7 @@ mod tests {
     //   Path B — all_empty: worksheet has rows but every header cell is Data::Empty.
     // ---------------------------------------------------------------------------
 
-    /// `test_bc_1_03_006_xlsx_empty_header_row` -- zero-row sheet (path A) returns ParseError.
+    /// `test_bc_1_03_006_xlsx_empty_header_row` -- zero-row sheet (path A) returns `ParseError`.
     ///
     /// Exercises the `row_count == 0` branch in `extract_headers`. Writing nothing
     /// to a worksheet causes calamine to return a range with zero rows.
@@ -1192,7 +1188,7 @@ mod tests {
         );
     }
 
-    /// `test_bc_1_03_006_xlsx_all_empty_header_cells` -- all-empty header cells (path B) returns ParseError.
+    /// `test_bc_1_03_006_xlsx_all_empty_header_cells` -- all-empty header cells (path B) returns `ParseError`.
     ///
     /// Exercises the `all_empty` branch in `extract_headers`: a range with non-zero
     /// dimensions where every header cell is `Data::Empty`. This is distinct from the
@@ -1533,7 +1529,7 @@ mod tests {
 
     /// `test_bc_1_03_006_convert_calamine_cell_datetime_iso_str` -- valid `Data::DateTimeIso` maps to `Value::Str`.
     ///
-    /// VP-024: valid DateTimeIso strings pass through as Value::Str.
+    /// VP-024: valid `DateTimeIso` strings pass through as `Value::Str`.
     ///
     /// Traces to BC-1.03.006 postcondition 6.
     #[test]
@@ -1596,24 +1592,28 @@ mod tests {
     }
 
     // ---------------------------------------------------------------------------
-    // VP-022: Float(3.14) → Float (fractional, stays Float).
+    // VP-022: Float(1.5) → Float (fractional, stays Float).
+    // Uses 1.5 (exact in IEEE 754) rather than 3.14 (approx of π) to avoid
+    // clippy::approx_constant false positive.
     // BC-1.03.006 postcondition 5.
     // ---------------------------------------------------------------------------
 
-    /// `test_vp_022_float_fractional_stays_float` -- VP-022: `Data::Float(3.14)` stays `Value::Float`.
+    /// `test_vp_022_float_fractional_stays_float` -- VP-022: `Data::Float(1.5)` stays `Value::Float`.
     ///
     /// Fractional floats must NOT be promoted to Int.
+    /// 1.5 is used because it is exactly representable in IEEE 754 and is not
+    /// an approximation of any mathematical constant (avoiding `clippy::approx_constant`).
     ///
     /// Traces to BC-1.03.006 postcondition 5.
     #[test]
     fn test_vp_022_float_fractional_stays_float() {
-        let cell = Data::Float(3.14);
+        let cell = Data::Float(1.5);
         let result = convert_calamine_cell(&cell, 0, 1, "test.xlsx").unwrap();
         match result {
             Value::Float(f) => {
-                assert!((f.0 - 3.14).abs() < 1e-10, "Float(3.14) must be Value::Float(3.14)");
+                assert!((f.0 - 1.5).abs() < 1e-10, "Float(1.5) must be Value::Float(1.5)");
             }
-            other => panic!("Float(3.14) must NOT be promoted to Int; got {other:?}"),
+            other => panic!("Float(1.5) must NOT be promoted to Int; got {other:?}"),
         }
     }
 
@@ -1658,11 +1658,11 @@ mod tests {
     }
 
     // ---------------------------------------------------------------------------
-    // VP-024: valid DateTimeIso → Value::Str.
+    // VP-024: valid `DateTimeIso` → `Value::Str`.
     // BC-1.03.006 postcondition 6.
     // ---------------------------------------------------------------------------
 
-    /// `test_vp_024_valid_datetime_iso_passes_through` -- VP-024: valid DateTimeIso → `Value::Str`.
+    /// `test_vp_024_valid_datetime_iso_passes_through` -- VP-024: valid `DateTimeIso` → `Value::Str`.
     ///
     /// Tests multiple valid ISO 8601 formats.
     ///
@@ -1681,13 +1681,13 @@ mod tests {
     }
 
     // ---------------------------------------------------------------------------
-    // VP-025: invalid DateTimeIso → E-DAT-009.
+    // VP-025: invalid `DateTimeIso` → E-DAT-009.
     // BC-1.03.006 postcondition 6, F-HIGH-5.
     // ---------------------------------------------------------------------------
 
-    /// `test_vp_025_invalid_datetime_iso_produces_error` -- VP-025: invalid DateTimeIso → E-DAT-009.
+    /// `test_vp_025_invalid_datetime_iso_produces_error` -- VP-025: invalid `DateTimeIso` → E-DAT-009.
     ///
-    /// Calamine emits Data::DateTimeIso("not-iso-string") — must produce ParseError.
+    /// Calamine emits `Data::DateTimeIso("not-iso-string")` — must produce `ParseError`.
     ///
     /// Traces to BC-1.03.006 postcondition 6, F-HIGH-5.
     #[test]
@@ -1795,7 +1795,7 @@ mod tests {
 
     /// `test_vp_026_wrong_magic_bytes_produces_e_dat_011` -- VP-026: `.xlsx` file with non-ZIP magic is rejected.
     ///
-    /// A file with `.xlsx` extension but non-ZIP content must produce ParseError (E-DAT-011).
+    /// A file with `.xlsx` extension but non-ZIP content must produce `ParseError` (E-DAT-011).
     ///
     /// Traces to BC-1.03.006 postcondition 9, invariant 3.
     #[test]

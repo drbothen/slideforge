@@ -65,17 +65,17 @@ pub const E_DAT_010: &str = "E-DAT-010";
 /// Maps to `E-DAT-011` in the error taxonomy.
 pub const E_DAT_011: &str = "E-DAT-011";
 
-/// Error code for SQLite TEXT column containing invalid UTF-8 bytes.
+/// Error code for `SQLite` TEXT column containing invalid UTF-8 bytes.
 ///
 /// Maps to `E-DAT-012` in the error taxonomy.
 pub const E_DAT_012: &str = "E-DAT-012";
 
-/// Error code for file with SQLite extension that lacks the SQLite magic header.
+/// Error code for file with `SQLite` extension that lacks the `SQLite` magic header.
 ///
 /// Maps to `E-DAT-013` in the error taxonomy.
 pub const E_DAT_013: &str = "E-DAT-013";
 
-/// Error code for unsupported extension for SQLite data source.
+/// Error code for unsupported extension for `SQLite` data source.
 ///
 /// Maps to `E-DAT-014` in the error taxonomy.
 pub const E_DAT_014: &str = "E-DAT-014";

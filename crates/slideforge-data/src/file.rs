@@ -48,8 +48,8 @@ use crate::xlsx::XlsxDataSource;
 /// - `.yaml` / `.yml` → YAML parser
 /// - `.toml` → TOML parser
 /// - `.xlsx` → [`XlsxDataSource`] (pure Rust calamine, no C deps)
-/// - `.sqlite` / `.sqlite3` / `.db` → [`SqliteDataSource`] (bundled SQLite)
-///   For SQLite, the `uri` field is used as the path per the plugin interface convention.
+/// - `.sqlite` / `.sqlite3` / `.db` → [`crate::sqlite::SqliteDataSource`] (bundled `SQLite`)
+///   For `SQLite`, the `uri` field is used as the path per the plugin interface convention.
 ///   A query string must be provided via `DataSourceOptions` or the DSL `query:` directive.
 #[derive(Debug, Default)]
 pub struct FileDataSource;
@@ -217,10 +217,16 @@ impl FileDataSource {
                         slideforge_plugin_api::DataSourceError::UnsupportedUri { uri } => {
                             DataError::unsupported_format(Arc::from(uri.as_str()))
                         }
-                        other => DataError::io_error(
-                            Arc::clone(&path_str),
-                            Arc::from(other.to_string().as_str()),
-                        ),
+                        // AuthError is not expected from XlsxDataSource (no auth required),
+                        // but we handle it defensively to avoid wildcards on a growing enum.
+                        slideforge_plugin_api::DataSourceError::AuthError { uri } => {
+                            DataError::io_error(
+                                Arc::clone(&path_str),
+                                Arc::from(
+                                    format!("unexpected auth error for xlsx uri: {uri}").as_str(),
+                                ),
+                            )
+                        }
                     });
             }
             DataFormat::Sqlite => {
@@ -693,7 +699,7 @@ mod tests {
     // rather than attempting to read them as text.
     // ---------------------------------------------------------------------------
 
-    /// `test_file_datasource_dispatches_xlsx` — `.xlsx` file loads via FileDataSource (F-LOW-6).
+    /// `test_file_datasource_dispatches_xlsx` — `.xlsx` file loads via `FileDataSource` (F-LOW-6).
     ///
     /// Verifies that `FileDataSource::load_path()` correctly delegates `.xlsx` files
     /// to `XlsxDataSource` instead of trying to read them as UTF-8 text (which would

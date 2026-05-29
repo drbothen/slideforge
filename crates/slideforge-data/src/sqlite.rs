@@ -360,7 +360,7 @@ fn find_duplicate_column<'a>(names: &[&'a str]) -> Option<&'a str> {
     names.iter().find(|&&name| !seen.insert(name)).copied()
 }
 
-/// Validate that the SQLite file extension is one of the accepted variants.
+/// Validate that the `SQLite` file extension is one of the accepted variants.
 ///
 /// Accepted (case-insensitive): `.db`, `.sqlite`, `.sqlite3`.
 /// All other extensions (including `.db3`, `.s3db`, `.sl3`) are rejected with E-DAT-014.
@@ -1392,7 +1392,7 @@ mod tests {
     // covers this; this VP label test confirms the production code path.)
     // ---------------------------------------------------------------------------
 
-    /// `test_vp_027_readonly_enforced` -- VP-027: DML via load() is rejected by read-only connection.
+    /// `test_vp_027_readonly_enforced` -- VP-027: DML via `load()` is rejected by read-only connection.
     ///
     /// Traces to BC-1.03.007 invariant 2, VP-027.
     #[test]
@@ -1420,7 +1420,7 @@ mod tests {
     // VP-029: DML → ParseError E-DAT-003 with SELECT-prefix check (F-MED-2).
     // ---------------------------------------------------------------------------
 
-    /// `test_vp_029_dml_prefix_check_delete` -- VP-029: DELETE prefix → ParseError with "SELECT" message.
+    /// `test_vp_029_dml_prefix_check_delete` -- VP-029: DELETE prefix → `ParseError` with "SELECT" message.
     ///
     /// F-MED-2: The DML rejection is now an explicit SELECT-prefix check, not just read-only.
     ///
@@ -1487,7 +1487,7 @@ mod tests {
 
     /// `test_vp_032_invalid_utf8_text_produces_e_dat_012` -- VP-032: invalid UTF-8 in TEXT column → E-DAT-012.
     ///
-    /// Using raw SQL to insert invalid UTF-8 bytes directly into SQLite via a BLOB cast.
+    /// Using raw SQL to insert invalid UTF-8 bytes directly into `SQLite` via a BLOB cast.
     /// The strict `std::str::from_utf8` must fail and produce E-DAT-012.
     ///
     /// Traces to BC-1.03.007 invariant 6, postcondition 4, VP-032.
@@ -1577,9 +1577,9 @@ mod tests {
     // BC-1.03.007 postcondition 7, VP-034.
     // ---------------------------------------------------------------------------
 
-    /// `test_vp_034_wrong_sqlite_magic_produces_parse_error` -- VP-034: non-SQLite bytes → ParseError.
+    /// `test_vp_034_wrong_sqlite_magic_produces_parse_error` -- VP-034: non-`SQLite` bytes → `ParseError`.
     ///
-    /// A file with `.db` extension but non-SQLite content must produce ParseError (E-DAT-013).
+    /// A file with `.db` extension but non-`SQLite` content must produce `ParseError` (E-DAT-013).
     ///
     /// Traces to BC-1.03.007 postcondition 7, VP-034.
     #[test]
@@ -1608,9 +1608,9 @@ mod tests {
     // BC-1.03.007 invariant 8, F-MED-4.
     // ---------------------------------------------------------------------------
 
-    /// `test_vp_035_unsupported_extension_produces_e_dat_014` -- VP-035: `.db3` extension → UnsupportedUri.
+    /// `test_vp_035_unsupported_extension_produces_e_dat_014` -- VP-035: `.db3` extension → `UnsupportedUri`.
     ///
-    /// Extensions outside {.db, .sqlite, .sqlite3} must produce UnsupportedUri (E-DAT-014).
+    /// Extensions outside {.db, .sqlite, .sqlite3} must produce `UnsupportedUri` (E-DAT-014).
     ///
     /// Traces to BC-1.03.007 invariant 8, VP-035.
     #[test]
