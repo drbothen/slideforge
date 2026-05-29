@@ -133,12 +133,12 @@ pub fn collect_slide_titles(deck: &slideforge_types::Deck) -> HashSet<Arc<str>> 
 /// - `FrameContent::Shape(ShapeFrame { text: Some(nodes), .. })` — shape-embedded
 ///   text (added by F-P4-MED-002)
 ///
-/// **Currently NOT scanned (deferred — no story anchor yet):**
+/// **Currently NOT scanned (deferred — STORY-073):**
 /// - `ContentBlock::Bullets(Vec<BulletItem>)` — bullets carry `BulletItem.inlines: Vec<InlineNode>`.
 ///   Bullet-list layout passes are not yet built; once bullets produce frames, this validation must
 ///   extend to cover them.
-///   No story anchor exists for this work — orchestrator to create an anchor story owning
-///   `ContentBlock::Bullets → FrameContent::TextRun frame generation` (body-layout pass).
+///   STORY-073 owns `ContentBlock::Bullets → FrameContent::TextRun frame generation`
+///   (body-layout pass). Xref validation inside bullets will be wired in that story.
 ///
 /// Other `ContentBlock` variants (`Text`, `Shape`, `Math`, `Chart`, `Diagram`, `Image`, `Table`)
 /// either flow through this validation already (`Text` → `TextRun`; `Shape` → `Shape.text`) or do
@@ -182,7 +182,19 @@ pub fn run_inline_validation(
                         )?;
                     }
                 }
-                _ => {}
+                // Variants below carry no InlineNode subtrees in v1.0 and require
+                // no inline validation. Each arm is explicit so the compiler will
+                // flag any future FrameContent variant addition (architecture rule
+                // cited in story spec line 370 — exhaustiveness over wildcards).
+                // Bullet-list inline scanning is owned by STORY-073.
+                crate::types::FrameContent::Title(_) => {}
+                crate::types::FrameContent::Subtitle(_) => {}
+                crate::types::FrameContent::Body(_) => {}
+                crate::types::FrameContent::Image { .. } => {}
+                crate::types::FrameContent::Chart => {}
+                crate::types::FrameContent::Diagram(_) => {}
+                crate::types::FrameContent::Empty => {}
+                crate::types::FrameContent::ErrorSlidePlaceholder { .. } => {}
             }
         }
     }

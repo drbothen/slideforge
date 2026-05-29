@@ -214,9 +214,9 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
         // frames so the inline validation pass (run_inline_validation) can scan them for
         // xref targets. This is the minimum content path needed for VP-049 load-bearing
         // end-to-end test. Full body content layout (positioning, font metrics) is
-        // deferred to the body-layout story (no story ID yet — tracked as a gap surfaced
-        // during STORY-028 pass 5; orchestrator to create anchor story). STORY-072 is
-        // gradient fills only and is NOT the owner of this deferral.
+        // deferred to STORY-073 (body-layout pass — bullet-list frames, font metrics,
+        // and text reflow). STORY-072 is gradient fills only and is NOT the owner of
+        // this deferral.
         //
         // NOTE: ContentBlock::Bullets(Vec<BulletItem>) is also NOT converted here.
         // Bullet items carry inline content (BulletItem.inlines) that bypasses
