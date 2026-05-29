@@ -20,13 +20,13 @@ traces_to: .factory/specs/architecture/ARCH-INDEX.md
 
 | Metric | Count |
 |--------|-------|
-| Total VPs | 47 |
-| Kani proofs | 14 |
+| Total VPs | 50 |
+| Kani proofs | 16 |
 | Proptest suites | 5 |
 | Fuzz targets | 2 |
-| Unit test VPs | 26 |
+| Unit test VPs | 27 |
 | P0 (Phase 6 blocking) | 7 |
-| P1 (stretch goals) | 40 |
+| P1 (stretch goals) | 43 |
 
 ---
 
@@ -73,14 +73,17 @@ traces_to: .factory/specs/architecture/ARCH-INDEX.md
 | VP-037 | Shape: position EMU conversion matches declared user-unit values | slideforge-layout | Kani | P6 | P1 | draft |
 | VP-038 | Shape: without alt or decorative always produces LayoutError::MissingAlt | slideforge-layout | unit | P3 | P1 | draft |
 | VP-039 | Shape: unknown shape type keyword produces E-PAR-012 (no Custom fallback) | slideforge-layout | unit | P3 | P1 | draft |
-| VP-040 | Shape: hex color case-insensitive — lowercase = uppercase for 6-digit forms | slideforge-layout | Kani | P6 | P1 | draft |
+| VP-040 | Shape: hex color case-insensitive — lowercase = uppercase for 6-digit forms; Rgb stores integer bytes not strings | slideforge-layout | Kani | P6 | P1 | draft |
 | VP-041 | Shape: x + width == page_width is NOT off-canvas; + 1 EMU IS off-canvas | slideforge-layout | Kani | P6 | P1 | draft |
-| VP-042 | Shape: slide with N shapes missing alt returns Vec with N MissingAlt errors | slideforge-layout | unit | P3 | P1 | draft |
+| VP-042 | Shape: slide with N shapes missing alt returns Multiple with N MissingAlt entries (N=1 also returns Multiple, not unwrapped) | slideforge-layout | unit | P3 | P1 | draft |
 | VP-043 | Inline: all 12 variant types produce distinct non-empty XML in PPTX output | slideforge-pptx | unit | P3 | P1 | draft |
 | VP-044 | Inline: Bold via markdown pattern does not trigger b=1 in output | slideforge-pptx | unit | P3 | P1 | draft |
 | VP-045 | Inline: tree at depth 65 produces InlineDepthExceeded error | slideforge-layout | Kani | P6 | P1 | draft |
 | VP-046 | Inline: Xref inside MathNode is NOT flagged by xref validation pass | slideforge-layout | unit | P3 | P1 | draft |
 | VP-047 | Inline: all 12 variants survive layout pass in FrameContent::TextRun | slideforge-layout | unit | P3 | P1 | draft |
+| VP-048 | Shape: from_inches / from_em with i64::MAX returns Err(ArithmeticOverflow) — not silent saturation | slideforge-layout | Kani | P6 | P1 | draft |
+| VP-049 | LaidOutDeck.warnings populated with XrefTargetNotFound and OffCanvas from layout::run (not dropped) | slideforge-layout | unit | P3 | P1 | draft |
+| VP-050 | Shape frames in LaidOutDeck.frames appear at index >= region_count (after all placeholder frames) | slideforge-layout | unit | P3 | P1 | draft |
 
 ---
 
@@ -135,3 +138,6 @@ traces_to: .factory/specs/architecture/ARCH-INDEX.md
 | VP-045 | BC-3.05.001, DI-018 |
 | VP-046 | BC-3.05.001 |
 | VP-047 | BC-3.05.001 |
+| VP-048 | BC-3.04.001 |
+| VP-049 | BC-3.04.001, BC-3.05.001 |
+| VP-050 | BC-3.04.001 |

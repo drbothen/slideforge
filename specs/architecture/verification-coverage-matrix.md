@@ -64,6 +64,9 @@ traces_to: ARCH-INDEX.md
 | VP-045 | Inline: tree at depth 65 produces InlineDepthExceeded error | slideforge-layout | Kani | P6 | P1 |
 | VP-046 | Inline: Xref inside MathNode is NOT flagged by xref validation pass | slideforge-layout | unit | P3 | P1 |
 | VP-047 | Inline: all 12 variants survive layout pass in FrameContent::TextRun | slideforge-layout | unit | P3 | P1 |
+| VP-048 | Shape: from_inches / from_em with i64::MAX returns Err(ArithmeticOverflow) — not silent saturation | slideforge-layout | Kani | P6 | P1 |
+| VP-049 | LaidOutDeck.warnings populated with XrefTargetNotFound and OffCanvas from layout::run (not dropped) | slideforge-layout | unit | P3 | P1 |
+| VP-050 | Shape frames in LaidOutDeck.frames appear at index >= region_count (after all placeholder frames) | slideforge-layout | unit | P3 | P1 |
 
 ## Per-Module Counts
 
@@ -72,30 +75,30 @@ traces_to: ARCH-INDEX.md
 | slideforge-syntax | 2 | 0 | 1 | 1 | 0 | 4 |
 | slideforge-eval | 2 | 0 | 1 | 1 | 0 | 4 |
 | slideforge-validate | 3 | 0 | 0 | 0 | 0 | 3 |
-| slideforge-layout | 4 | 7 | 1 | 0 | 0 | 12 |
+| slideforge-layout | 5 | 7 | 1 | 0 | 0 | 13 |
 | slideforge-brand | 0 | 0 | 1 | 0 | 0 | 1 |
-| slideforge-pptx | 0 | 3 | 1 | 0 | 0 | 4 |
+| slideforge-pptx | 0 | 2 | 1 | 0 | 0 | 3 |
 | slideforge-pdf | 1 | 0 | 0 | 0 | 0 | 1 |
 | slideforge-data | 3 | 18 | 0 | 0 | 0 | 21 |
 
 Notes:
 - slideforge-data: VP-021/VP-022/VP-023 use Kani (pure `promote_float` function); VP-016 through VP-020 and VP-024 through VP-036 (minus VP-021/022/023) use unit tests = 18 unit VPs.
-- slideforge-layout: VP-037/VP-040/VP-041/VP-045 use Kani (pure arithmetic/comparison); VP-038/VP-039/VP-042/VP-046/VP-047 use unit tests (5 unit) + VP-011 proptest = 4 Kani + 5 unit + 1 proptest. VP-046 and VP-047 added = 7 unit total.
-- slideforge-pptx: VP-013 proptest + VP-043/VP-044 unit = 1 proptest + 2 unit.
+- slideforge-layout: VP-037/VP-040/VP-041/VP-045/VP-048 use Kani (pure arithmetic/comparison); VP-038/VP-039/VP-042/VP-046/VP-047/VP-049/VP-050 use unit tests; VP-011 proptest = 5 Kani + 7 unit + 1 proptest. VP-048 (Kani, ArithmeticOverflow checked_mul); VP-049 (unit, warnings not dropped); VP-050 (unit, frame ordering).
+- slideforge-pptx: VP-013 proptest + VP-043/VP-044 unit = 1 proptest + 2 unit = 3 total.
 
 ## Totals
 
 | Metric | Count |
 |--------|-------|
-| Total VPs | 47 |
-| Kani proofs | 14 |
+| Total VPs | 50 |
+| Kani proofs | 16 |
 | Proptest suites | 5 |
 | Fuzz targets | 2 |
-| Unit test VPs | 26 |
+| Unit test VPs | 27 |
 | Integration VPs | 0 |
 | P0 (Phase 6 blocking) | 7 |
-| P1 (stretch / Phase 3+) | 40 |
+| P1 (stretch / Phase 3+) | 43 |
 
-**Arithmetic check:** 14 (Kani) + 5 (proptest) + 2 (fuzz) + 26 (unit) + 0 (integration) = 47 total. Consistent.
+**Arithmetic check:** 16 (Kani) + 5 (proptest) + 2 (fuzz) + 27 (unit) + 0 (integration) = 50 total. Consistent.
 
-**VP-INDEX cross-check:** VP-INDEX total = 47. Coverage matrix VP row count = 47. Per-tool column totals: 14 + 5 + 2 + 26 = 47. Consistent.
+**VP-INDEX cross-check:** VP-INDEX total = 50. Coverage matrix VP row count = 50. Per-tool column totals: 16 + 5 + 2 + 27 = 50. Consistent.
