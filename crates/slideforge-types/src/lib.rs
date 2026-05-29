@@ -41,6 +41,7 @@ pub mod math;
 pub mod ordered_map;
 pub mod precedence;
 pub mod register;
+pub mod shape_types;
 pub mod slide;
 pub mod span;
 pub mod specs;
@@ -60,6 +61,7 @@ pub use precedence::MergePrecedence;
 pub use register::Register;
 pub use slide::{FieldValue, Slide, StringPart};
 pub use span::SourceSpan;
+pub use shape_types::{FillSpec, LayoutWarning, Rgb, ShapeType};
 pub use specs::{
     AltText, ChartSpec, DiagramSpec, ImageSpec, NormalizedDiagramSvg, ShapePosition, ShapeSpec,
     ShapeUnit, TableSpec,

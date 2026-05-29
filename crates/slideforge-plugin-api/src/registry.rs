@@ -468,6 +468,7 @@ mod tests {
             page_size: PageSize::default(),
             slides: vec![],
             sections: vec![],
+            warnings: vec![],
         }
     }
 

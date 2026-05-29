@@ -107,7 +107,7 @@ impl Validator for AltTextValidator {
                             spec.alt.as_ref(),
                             spec.decorative,
                             "shape",
-                            spec.shape_type.as_ref(),
+                            spec.shape_type.as_keyword(),
                             &spec.span,
                             &mut diagnostics,
                         );
@@ -231,7 +231,10 @@ mod tests {
     use slideforge_plugin_api::{DiagnosticSeverity, Validator, ValidatorOptions};
     use slideforge_types::{
         Block, ContentBlock, Deck, DeckMetadata, OrderedMap, Slide, SourceSpan,
-        specs::{AltText, ChartSpec, DiagramSpec, ImageSpec, ShapePosition, ShapeSpec, ShapeUnit, TableSpec},
+        specs::{
+            AltText, ChartSpec, DiagramSpec, ImageSpec, ShapePosition, ShapeSpec, ShapeUnit,
+            TableSpec,
+        },
     };
 
     use super::{AltTextValidator, E_A11_001, W_A11_001};
@@ -319,13 +322,15 @@ mod tests {
 
     fn make_shape_block(alt: Option<AltText>, decorative: bool) -> Block {
         make_block(ContentBlock::Shape(ShapeSpec {
-            shape_type: Arc::from("rect"),
+            shape_type: slideforge_types::ShapeType::Rect,
             position: ShapePosition {
                 x: ShapeUnit::Inches(500),
                 y: ShapeUnit::Inches(1000),
                 width: ShapeUnit::Inches(2000),
                 height: ShapeUnit::Inches(1000),
             },
+            fill: slideforge_types::FillSpec::None,
+            text: None,
             alt,
             decorative,
             span: SourceSpan::default(),

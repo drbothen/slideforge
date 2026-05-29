@@ -13,8 +13,8 @@ use crate::math::MathNode;
 
 /// An inline content node within a paragraph or bullet item.
 ///
-/// Exactly 11 variants are defined. This count is enforced by the acceptance
-/// criteria (AC-008) and must not change without a story.
+/// Exactly 12 variants are defined (BC-3.05.001 v1.3.1, AC-005). This count
+/// is enforced by the acceptance criteria and must not change without a story.
 ///
 /// The variants cover the inline formatting and semantic-annotation needs of
 /// PPTX, DOCX, HTML, and PDF output in v1.0. Additional inline types (e.g.,
@@ -104,7 +104,8 @@ mod tests {
     use super::*;
 
     // ──────────────────────────────────────────────────────────────────────────
-    // AC-008 — InlineNode has exactly 11 variants, implements Hash+Eq+Clone+Debug
+    // AC-005 — InlineNode has exactly 12 variants per BC-3.05.001 v1.3.1,
+    //          implements Hash+Eq+Clone+Debug
     // ──────────────────────────────────────────────────────────────────────────
 
     fn all_variants() -> Vec<InlineNode> {
@@ -132,22 +133,16 @@ mod tests {
     }
 
     #[test]
-    fn test_bc_1_01_008_inline_node_exactly_11_variants() {
-        // Every variant is constructed above; any missing variant would be a
-        // compiler warning or explicit count mismatch.
+    fn test_bc_1_01_008_inline_node_exactly_12_variants() {
+        // Every variant is constructed in all_variants(); any missing variant
+        // would be a compiler warning or explicit count mismatch.
+        // BC-3.05.001 v1.3.1 (PO adjudication) confirms the canonical count is 12.
         let variants = all_variants();
         assert_eq!(
             variants.len(),
             12,
-            "InlineNode has 12 variants, not 11 — check the spec"
+            "InlineNode must have exactly 12 variants per BC-3.05.001 v1.3.1"
         );
-        // NOTE: The story spec says 11 variants, but the enum has 12 entries
-        // because the original list in the prompt says:
-        //   Plain, Bold, Italic, Code, Link, Math, Footnote, Xref,
-        //   Superscript, Subscript, Strikethrough, Highlight
-        // That is 12 items. The AC says "exactly 11" but lists 12.
-        // The code uses 12 to match the actual listed variants; the AC count
-        // appears to be an off-by-one in the spec (this is a DONE_WITH_CONCERN).
     }
 
     #[test]

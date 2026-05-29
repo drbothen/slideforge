@@ -172,6 +172,64 @@ pub enum LayoutError {
         source_slide_index: usize,
     },
 
+    /// A `shape:` block specifies an unknown shape type keyword (BC-3.04.001
+    /// invariant 4 / E-PAR-012-SHP / F-MED-005).
+    ///
+    /// The closed v1.0 vocabulary is: `rect`, `ellipse`, `arrow`, `line`, `star`,
+    /// `roundRect`. Any other keyword produces this error. There is NO `Custom`
+    /// fallback — the type system enforces the closed vocabulary.
+    ///
+    /// `span` points to the offending `shape:` block in the source file.
+    #[error(
+        "layout error: slide {source_slide_index}: unknown shape type '{shape_type}' at {span}. \
+         Known types: [rect, ellipse, arrow, line, star, roundRect]"
+    )]
+    UnknownShapeType {
+        /// The unrecognised shape type keyword from the `.sf` source.
+        shape_type: String,
+        /// Zero-based index of the slide containing the offending `shape:` block.
+        source_slide_index: usize,
+        /// Source location of the offending `shape:` block.
+        span: SourceSpan,
+    },
+
+    /// Arithmetic overflow in EMU conversion (BC-3.04.001 AC-001 / F-CRIT-003).
+    ///
+    /// The EMU conversion functions use saturating arithmetic to avoid overflow;
+    /// this error variant is reserved for cases where overflow is detected at a
+    /// higher level and must be reported with a span.
+    ///
+    /// In practice, `from_inches` and `from_em` saturate silently per VP-037
+    /// semantics — this variant is the typed error form for any caller that needs
+    /// to surface the overflow explicitly (e.g., a future strict-mode validator).
+    #[error(
+        "layout error: slide {source_slide_index}: arithmetic overflow in EMU conversion at {span}"
+    )]
+    ArithmeticOverflow {
+        /// Zero-based index of the slide containing the overflowing shape.
+        source_slide_index: usize,
+        /// Source location of the value that overflowed.
+        span: SourceSpan,
+    },
+
+    /// Inline node nesting exceeded the maximum safe depth (BC-3.05.001 E-LAY-005 / F-MED-006).
+    ///
+    /// The maximum allowed inline nesting depth is
+    /// [`crate::inline::MAX_INLINE_DEPTH`] (64). Deeper nesting is rejected at
+    /// layout time to prevent stack overflow in recursive traversal.
+    #[error(
+        "layout error: slide {source_slide_index}: inline nesting depth {depth} exceeds maximum \
+         ({max}) — simplify the formatting nesting"
+    )]
+    InlineDepthExceeded {
+        /// Zero-based index of the slide containing the over-nested inline content.
+        source_slide_index: usize,
+        /// The actual depth that was detected (>= `max`).
+        depth: usize,
+        /// The maximum allowed depth ([`crate::inline::MAX_INLINE_DEPTH`]).
+        max: usize,
+    },
+
     /// A `Shape` node reached the layout stage without `alt` text or
     /// `decorative: true` (BC-3.04.001 EC-001 / DI-001).
     ///

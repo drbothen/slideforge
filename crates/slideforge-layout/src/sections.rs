@@ -633,7 +633,9 @@ pub(crate) fn collect_risk_register(deck: &Deck) -> Result<Option<GeneratedSecti
                 });
             },
             Some(_) => {
-                return Err(LayoutError::UnresolvedSeverityCards { source_slide_index: slide_index });
+                return Err(LayoutError::UnresolvedSeverityCards {
+                    source_slide_index: slide_index,
+                });
             },
             None => {
                 return Err(LayoutError::MissingRiskCardField {
@@ -2311,7 +2313,10 @@ mod tests {
         assert!(
             matches!(
                 result,
-                Err(LayoutError::MalformedSeverityCards { source_slide_index: 0, .. })
+                Err(LayoutError::MalformedSeverityCards {
+                    source_slide_index: 0,
+                    ..
+                })
             ),
             "wrong-typed Literal 'cards' field must return MalformedSeverityCards; got: {result:?}"
         );
@@ -2336,7 +2341,9 @@ mod tests {
         assert!(
             matches!(
                 result,
-                Err(LayoutError::UnresolvedSeverityCards { source_slide_index: 0 })
+                Err(LayoutError::UnresolvedSeverityCards {
+                    source_slide_index: 0
+                })
             ),
             "Expr 'cards' field must return UnresolvedSeverityCards; got: {result:?}"
         );
@@ -2695,7 +2702,9 @@ mod tests {
     #[test]
     fn test_error_unresolved_severity_cards_variant_exists() {
         use crate::error::LayoutError;
-        let err = LayoutError::UnresolvedSeverityCards { source_slide_index: 3 };
+        let err = LayoutError::UnresolvedSeverityCards {
+            source_slide_index: 3,
+        };
         let msg = err.to_string();
         assert!(
             msg.contains("unresolved") || msg.contains("FieldValue"),

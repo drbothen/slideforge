@@ -18,9 +18,12 @@
 use std::sync::Arc;
 
 use slideforge_types::ContentBlock;
-use slideforge_types::InlineNode;
 pub use slideforge_types::Emu;
+use slideforge_types::InlineNode;
 pub use slideforge_types::NormalizedDiagramSvg;
+// Re-export shape/warning types relocated to slideforge-types (STORY-028 pass-2).
+// Downstream code that imports these through slideforge-layout sees no change.
+pub use slideforge_types::{FillSpec, LayoutWarning, Rgb, ShapeType};
 
 use crate::sections::GeneratedSection;
 
@@ -106,6 +109,14 @@ pub enum RegisterTag {
 /// The list is populated by [`crate::sections::collect_sections`] during
 /// `layout::run`. PPTX and HTML exporters filter out sections where their
 /// format is absent from [`crate::sections::GeneratedSection::target_formats`].
+///
+/// ## Non-fatal warnings (STORY-028 / BC-3.04.001 EC-002 / BC-3.05.001 EC-002)
+///
+/// `warnings` accumulates all non-fatal diagnostics produced during layout:
+/// off-canvas shape positions ([`LayoutWarning::OffCanvas`]) and unresolved
+/// xref targets ([`LayoutWarning::XrefTargetNotFound`]). Exporters and
+/// validators may inspect this field to surface warnings to the user without
+/// halting the pipeline.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LaidOutDeck {
     /// The page dimensions for all slides in this deck.
@@ -118,6 +129,16 @@ pub struct LaidOutDeck {
     /// An empty `Vec` means the deck has no sections (no `takeaway:` fields,
     /// no `severity_cards` slides, and no manual `section:` blocks).
     pub sections: Vec<GeneratedSection>,
+    /// Non-fatal diagnostics accumulated during layout.
+    ///
+    /// Includes off-canvas shape warnings ([`LayoutWarning::OffCanvas`]) and
+    /// unresolved xref warnings ([`LayoutWarning::XrefTargetNotFound`]).
+    /// An empty `Vec` means the layout was clean.
+    ///
+    /// Populated by [`crate::layout::run`] from the shape layout pass
+    /// (BC-3.04.001 EC-002) and the inline validation pass
+    /// (BC-3.05.001 EC-002 / AC-007).
+    pub warnings: Vec<LayoutWarning>,
 }
 
 /// Slide page dimensions in EMU.
@@ -249,71 +270,14 @@ impl BoundingBox {
 // ─────────────────────────────────────────────────────────────────────────────
 // BC-3.04.001 — Shape layout IR types (STORY-028)
 // ─────────────────────────────────────────────────────────────────────────────
-
-/// An sRGB color value.
-///
-/// Used in [`FillSpec::SolidColor`] and [`FillSpec::Gradient`] to carry
-/// per-channel color data. Integer channels (0–255); no floating-point.
-///
-/// Implements `Hash + Eq + Clone + Debug` for comemo compatibility (AC-010).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Rgb {
-    /// Red channel (0–255).
-    pub r: u8,
-    /// Green channel (0–255).
-    pub g: u8,
-    /// Blue channel (0–255).
-    pub b: u8,
-}
-
-/// The fill specification for a shape frame.
-///
-/// Exporters translate `FillSpec` into format-specific fill markup (PPTX `<a:solidFill>`,
-/// HTML `background-color`, PDF fill ops).
-///
-/// Implements `Hash + Eq + Clone + Debug` for comemo compatibility (AC-010).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum FillSpec {
-    /// A flat solid color fill.
-    SolidColor(Rgb),
-    /// A linear gradient from one color to another.
-    Gradient {
-        /// Gradient start color.
-        from: Rgb,
-        /// Gradient end color.
-        to: Rgb,
-    },
-    /// No fill (transparent background).
-    None,
-}
-
-/// The geometric shape type for a shape frame.
-///
-/// Corresponds to the `type` field in the DSL `shape:` block. This is a
-/// **closed vocabulary** in v1.0 — exactly 6 keywords are accepted. Any
-/// unknown keyword produces `E-PAR-012` at parse time (BC-3.04.001 invariant 4).
-/// There is NO `Custom` variant; the type system enforces the closed vocabulary.
-///
-/// Implements `Hash + Eq + Clone + Debug` for comemo compatibility (AC-010).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum ShapeType {
-    /// Rectangular shape (`type rect`).
-    Rect,
-    /// Ellipse / circle shape (`type ellipse`).
-    Ellipse,
-    /// Single-headed arrow (`type arrow`).
-    Arrow,
-    /// Line segment (`type line`).
-    Line,
-    /// Star / burst shape (`type star`).
-    Star,
-    /// Rounded-corner rectangle (`type roundRect`).
-    ///
-    /// Added in BC-3.04.001 v1.3 (per Q7 decision example).
-    RoundRect,
-    // NOTE: No Custom variant. Unknown keywords are parse errors (E-PAR-012).
-    // See BC-3.04.001 invariant 4 and CLAUDE.md "no silent fallback" rule.
-}
+//
+// `Rgb`, `FillSpec`, `ShapeType`, and `LayoutWarning` are defined in
+// `slideforge_types::shape_types` and re-exported above via
+// `pub use slideforge_types::{FillSpec, LayoutWarning, Rgb, ShapeType}`.
+//
+// They live in slideforge-types (the leaf IR crate) so that `ShapeSpec` (the
+// pre-layout semantic type) can carry a resolved `ShapeType` directly without a
+// circular dependency. slideforge-layout re-exports them for backward compat.
 
 /// A fully-positioned shape from the `shape:` DSL block.
 ///
@@ -337,36 +301,8 @@ pub struct ShapeFrame {
     pub alt: slideforge_types::AltText,
 }
 
-/// A non-fatal diagnostic produced by the layout engine.
-///
-/// `LayoutWarning`s are accumulated in a `DiagnosticSink` during layout and
-/// do not halt processing. The shape / frame that triggered the warning is
-/// still produced at its declared position.
-///
-/// Implements `Hash + Eq + Clone + Debug` for comemo compatibility (AC-010).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum LayoutWarning {
-    /// A shape's declared position extends outside the slide canvas (AC-003 /
-    /// BC-3.04.001 EC-002). Negative x or y, or x+width > `page_width`, etc.
-    OffCanvas {
-        /// Zero-based index of the slide containing the off-canvas shape.
-        slide_index: usize,
-        /// The shape type keyword (e.g., `"rect"`).
-        shape_type: Arc<str>,
-        /// The declared x position in EMU (may be negative).
-        x_emu: Emu,
-        /// The declared y position in EMU (may be negative).
-        y_emu: Emu,
-    },
-    /// An `Xref` inline node references a slide title that does not exist in
-    /// the deck (AC-007 / BC-3.05.001 EC-002).
-    XrefTargetNotFound {
-        /// The target identifier that was not found.
-        target: Arc<str>,
-        /// Zero-based index of the slide containing the unresolved xref.
-        slide_index: usize,
-    },
-}
+// `LayoutWarning` is defined in `slideforge_types::shape_types` and re-exported
+// above. See the comment block preceding `ShapeFrame` for context.
 
 // ─────────────────────────────────────────────────────────────────────────────
 // FrameContent
@@ -623,6 +559,7 @@ mod tests {
             page_size: PageSize::default(),
             slides: vec![],
             sections: vec![],
+            warnings: vec![],
         };
         let deck2 = deck.clone();
         assert_eq!(deck, deck2);
@@ -734,7 +671,11 @@ mod tests {
         // BC-3.04.001 / STORY-028: Shape now carries a ShapeFrame.
         let shape = FrameContent::Shape(ShapeFrame {
             shape_type: ShapeType::Rect,
-            fill: FillSpec::SolidColor(Rgb { r: 0, g: 55, b: 102 }),
+            fill: FillSpec::SolidColor(Rgb {
+                r: 0,
+                g: 55,
+                b: 102,
+            }),
             text: None,
             alt: slideforge_types::AltText::Provided(Arc::from("Blue rectangle")),
         });

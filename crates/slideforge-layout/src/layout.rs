@@ -39,11 +39,13 @@
 
 use std::sync::Arc;
 
-use slideforge_types::{Brand, Deck, FieldValue, Register, Value};
+use slideforge_types::{Brand, ContentBlock, Deck, FieldValue, Register, Value};
 
 use crate::error::LayoutError;
+use crate::inline::run_inline_validation;
 use crate::regions::region_frames_for;
 use crate::sections::collect_sections;
+use crate::shapes::{DEFAULT_EM_IN_EMU, layout_shapes};
 use crate::text_flow::compute_text_flow;
 use crate::types::{
     DEFAULT_PAGE_HEIGHT, DEFAULT_PAGE_WIDTH, FrameContent, LaidOutDeck, LaidOutSlide, PageSize,
@@ -74,6 +76,12 @@ use crate::types::{
 ///   count does not equal input count (BC-3.06.001 defensive check).
 /// * `Err(LayoutError::InvalidBoundingBox)` — A produced bounding box
 ///   violates coordinate invariants (BC-3.06.003 defensive check).
+/// * `Err(LayoutError::MissingAlt)` / `Err(LayoutError::Multiple)` — A shape
+///   node was missing `alt` text or `decorative: true` (BC-3.04.001 EC-001).
+/// * `Err(LayoutError::UnknownShapeType)` — A shape node has an unknown type
+///   keyword (BC-3.04.001 invariant 4 / E-PAR-012-SHP).
+/// * `Err(LayoutError::InlineDepthExceeded)` — An inline node tree exceeds the
+///   maximum nesting depth (BC-3.05.001 E-LAY-005 / F-MED-006).
 ///
 /// # Purity (AC-008)
 ///
@@ -109,6 +117,9 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
 
     // Layout each slide.
     let mut laid_out_slides: Vec<LaidOutSlide> = Vec::with_capacity(deck.slides.len());
+    // Deck-level warning sink — shape off-canvas + inline xref-not-found warnings
+    // are accumulated here and stored on LaidOutDeck::warnings (STORY-028 / AC-003 / AC-007).
+    let mut deck_warnings: Vec<crate::types::LayoutWarning> = Vec::new();
 
     for (source_index, slide) in deck.slides.iter().enumerate() {
         let slide_type_keyword: Arc<str> = Arc::clone(&slide.slide_type);
@@ -171,6 +182,33 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
             })
             .collect();
 
+        // AC-INT-1 (F-CRIT-001): Shape layout pass.
+        // Filter ContentBlock::Shape blocks from the slide, convert their
+        // positions to EMU frames, and append them after the region-map frames
+        // in source order (BC-3.04.001 postcondition 4).
+        let shape_specs: Vec<slideforge_types::ShapeSpec> = slide
+            .blocks
+            .iter()
+            .filter_map(|b| {
+                if let ContentBlock::Shape(s) = &b.content {
+                    Some(s.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // layout_shapes returns either Ok(ShapeLayoutOutput) or Err(LayoutError).
+        // Warnings (off-canvas positions) are non-fatal; errors (MissingAlt,
+        // UnknownShapeType) are fatal and propagate out of layout::run.
+        let shape_output = layout_shapes(&shape_specs, page_size, source_index, DEFAULT_EM_IN_EMU)?;
+
+        let mut all_frames = frames;
+        all_frames.extend(shape_output.frames);
+        // Merge shape-level warnings (off-canvas) into the deck-level sink.
+        // They are stored on LaidOutDeck::warnings (BC-3.04.001 EC-002).
+        deck_warnings.extend(shape_output.warnings);
+
         // Extract speaker notes from the slide's "notes" field, if present and
         // resolved to a plain string value.
         let speaker_notes: Option<Arc<str>> = match slide.fields.get("notes") {
@@ -190,7 +228,7 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
         laid_out_slides.push(LaidOutSlide {
             source_index,
             slide_type_keyword,
-            frames,
+            frames: all_frames,
             speaker_notes,
             register_tags,
         });
@@ -204,6 +242,15 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
             source_slide_index: 0,
         });
     }
+
+    // AC-INT-1 (F-CRIT-001): Inline validation pass.
+    // Scan all TextRun frames in the laid-out slides for unknown Xref targets.
+    // Accumulates LayoutWarning::XrefTargetNotFound into a warning Vec.
+    // Fatal errors (InlineDepthExceeded) propagate out of layout::run.
+    // Warnings are merged into deck_warnings and stored on LaidOutDeck::warnings
+    // (BC-3.05.001 EC-002 / AC-007).
+    let inline_warnings = run_inline_validation(deck, &laid_out_slides)?;
+    deck_warnings.extend(inline_warnings);
 
     // STORY-027: Section collection pass.
     // Collect all document sections (auto-generated + manual) from the deck.
@@ -222,5 +269,6 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
         page_size,
         slides: laid_out_slides,
         sections,
+        warnings: deck_warnings,
     })
 }

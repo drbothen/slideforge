@@ -767,6 +767,124 @@ mod tests {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // F-CRIT-001 / AC-INT-1 — layout::run wires shape layout + inline validation
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// AC-INT-1 / F-CRIT-001 — `layout::run` integrates the shape layout pass:
+    /// a slide with a `ContentBlock::Shape` block must produce a `FrameContent::Shape`
+    /// frame appended after the region-map frames in the output `LaidOutSlide`.
+    ///
+    /// This is the end-to-end integration gate confirming that `layout_shapes` is
+    /// wired into `layout::run` (BC-3.04.001 postcondition 4 / AC-INT-1).
+    #[test]
+    fn test_ac_int_1_layout_run_wires_shape_block_to_frame() {
+        use slideforge_types::{
+            AltText, Block, ContentBlock, FillSpec, ShapePosition, ShapeSpec, ShapeType, ShapeUnit,
+        };
+
+        let shape_spec = ShapeSpec {
+            shape_type: ShapeType::Rect,
+            position: ShapePosition {
+                x: ShapeUnit::Inches(500),
+                y: ShapeUnit::Inches(500),
+                width: ShapeUnit::Inches(1000),
+                height: ShapeUnit::Inches(500),
+            },
+            fill: FillSpec::None,
+            text: None,
+            alt: Some(AltText::Provided(Arc::from("a test rectangle"))),
+            decorative: false,
+            span: SourceSpan::default(),
+        };
+        let block = Block {
+            content: ContentBlock::Shape(shape_spec),
+            label: None,
+            span: SourceSpan::default(),
+        };
+        let slide = Slide {
+            slide_type: Arc::from("title"),
+            fields: OrderedMap::new(),
+            blocks: vec![block],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+        };
+        let deck = make_deck(vec![slide]);
+        let brand = make_brand();
+        let result = run(&deck, &brand).expect("layout::run must succeed with a shape block");
+
+        // The title slide has 2 region-map frames (title + subtitle).
+        // The shape block adds a third frame.
+        let slide_out = &result.slides[0];
+        assert!(
+            slide_out.frames.len() >= 3,
+            "slide with a shape block must produce at least 3 frames (2 region + 1 shape), got {}",
+            slide_out.frames.len()
+        );
+
+        // The last frame must be FrameContent::Shape.
+        let last_frame = slide_out.frames.last().expect("frames must be non-empty");
+        assert!(
+            matches!(last_frame.content, FrameContent::Shape(_)),
+            "last frame must be FrameContent::Shape, got {:?}",
+            last_frame.content
+        );
+    }
+
+    /// AC-INT-1 / F-CRIT-001 step 4 — `run_inline_validation` (called by `layout::run`)
+    /// detects an unknown xref target in a `TextRun` frame and produces
+    /// `LayoutWarning::XrefTargetNotFound`.
+    ///
+    /// This test calls `run_inline_validation` directly (the same function wired into
+    /// `layout::run`) with a manually-constructed laid-out slide containing a `TextRun`
+    /// frame with an unknown `Xref` target. This proves the inline validation wire is
+    /// live (BC-3.05.001 EC-002 / AC-007 / F-CRIT-001).
+    #[test]
+    fn test_ac_int_1_inline_validation_unknown_xref_produces_warning() {
+        use crate::inline::run_inline_validation;
+        use crate::types::{BoundingBox, Frame, FrameContent, LaidOutSlide};
+        use slideforge_types::{Emu, InlineNode};
+
+        let xref_target = Arc::from("__unknown_slide_target__");
+        let text_run_frame = Frame {
+            bbox: BoundingBox {
+                x: Emu(0),
+                y: Emu(0),
+                width: Emu(1_000_000),
+                height: Emu(500_000),
+            },
+            content: FrameContent::TextRun(vec![InlineNode::Xref(Arc::clone(&xref_target))]),
+            text_flow: None,
+        };
+        let laid_out_slide = LaidOutSlide {
+            source_index: 0,
+            slide_type_keyword: Arc::from("title"),
+            frames: vec![text_run_frame],
+            speaker_notes: None,
+            register_tags: vec![],
+        };
+        let deck = make_deck(vec![make_slide("title")]);
+
+        let warnings = run_inline_validation(&deck, &[laid_out_slide])
+            .expect("run_inline_validation must not error for unknown xref (only a warning)");
+
+        assert_eq!(
+            warnings.len(),
+            1,
+            "must produce exactly one XrefTargetNotFound warning, got: {warnings:?}"
+        );
+        assert!(
+            matches!(
+                &warnings[0],
+                LayoutWarning::XrefTargetNotFound { target, .. }
+                if target.as_ref() == "__unknown_slide_target__"
+            ),
+            "warning must be XrefTargetNotFound for the unknown xref target, got: {:?}",
+            warnings[0]
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // VP-011 skeleton: proptest for slide count preservation
     // ─────────────────────────────────────────────────────────────────────────
 
