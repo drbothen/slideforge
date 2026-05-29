@@ -689,13 +689,13 @@ pub(crate) fn collect_risk_register(deck: &Deck) -> Result<Option<GeneratedSecti
 fn extract_card_str(
     map: &OrderedMap<Arc<str>, Value>,
     field: &str,
-    slide_index: usize,
+    source_slide_index: usize,
     card_index: usize,
 ) -> Result<Arc<str>, LayoutError> {
     match map.get(field) {
         Some(Value::Str(s)) => Ok(Arc::clone(s)),
         _ => Err(LayoutError::MissingRiskCardField {
-            source_slide_index: slide_index,
+            source_slide_index,
             card_index,
             field: field.to_owned(),
         }),

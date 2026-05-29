@@ -49,6 +49,9 @@ pub const DEFAULT_EM_IN_EMU: i64 = 457_200;
 
 /// Convert a [`slideforge_types::ShapeUnit`] measurement to integer EMU.
 ///
+/// Returns `None` when the multiplication would overflow `i64`
+/// (VP-048 / BC-3.04.001 Invariant 8 / interface-definitions.md §9.4).
+///
 /// # Arguments
 ///
 /// * `unit` — the measurement in user units.
@@ -56,9 +59,9 @@ pub const DEFAULT_EM_IN_EMU: i64 = 457_200;
 ///
 /// # Returns
 ///
-/// The measurement in integer EMU (`Emu(i64)`).
+/// `Some(Emu)` on success, `None` on arithmetic overflow.
 #[must_use]
-pub fn unit_to_emu(unit: &ShapeUnit, em_in_emu: i64) -> Emu {
+pub fn unit_to_emu(unit: &ShapeUnit, em_in_emu: i64) -> Option<Emu> {
     match unit {
         ShapeUnit::Inches(milliinches) => from_inches(*milliinches),
         ShapeUnit::Em(milliem) => from_em(*milliem, em_in_emu),
@@ -67,35 +70,40 @@ pub fn unit_to_emu(unit: &ShapeUnit, em_in_emu: i64) -> Emu {
 
 /// Convert inches (as a rational `numerator/1000`) to EMU.
 ///
-/// For example, `from_inches(500)` converts `0.5in` → `Emu(457_200)`.
+/// For example, `from_inches(500)` converts `0.5in` → `Some(Emu(457_200))`.
 ///
-/// Uses `checked_mul` to detect overflow. On overflow the value is clamped to
-/// `i64::MAX` or `i64::MIN` (saturating). An `i64::MAX`-class input value
-/// exceeds any physically meaningful slide dimension by many orders of magnitude,
-/// so clamping is the correct production behaviour (AC-001 / BC-3.04.001
-/// precondition: all inputs are validated at parse time before reaching layout).
+/// Uses `checked_mul` to detect overflow. Returns `None` when `milliinches *
+/// EMU_PER_INCH` overflows `i64`. An `i64::MAX`-class input exceeds any
+/// physically meaningful slide dimension by many orders of magnitude; the caller
+/// converts `None` to `LayoutError::ArithmeticOverflow { source_slide_index, span }`
+/// (BC-3.04.001 Invariant 8 / interface-definitions.md §9.4 / VP-048).
 ///
-/// # Kani candidate (VP-037)
+/// # Kani candidate (VP-048)
 ///
-/// The overflow behaviour is a verification property candidate for Phase 6 Kani
-/// proofs. The clamping semantics here are the concrete reference for that proof.
+/// The overflow behaviour is a verification property for Phase 6 Kani proofs.
+/// The checked semantics here are the concrete reference for that proof.
 #[must_use]
-pub fn from_inches(milliinches: i64) -> Emu {
-    // Saturate on overflow rather than wrapping or panicking.
-    let product = milliinches.saturating_mul(EMU_PER_INCH);
-    Emu(product / 1_000)
+pub fn from_inches(milliinches: i64) -> Option<Emu> {
+    // checked_mul returns None on overflow instead of saturating silently.
+    milliinches
+        .checked_mul(EMU_PER_INCH)
+        .map(|product| Emu(product / 1_000))
 }
 
 /// Convert em units (as a rational `numerator/1000`) to EMU.
 ///
-/// For example, `from_em(1000, DEFAULT_EM_IN_EMU)` converts `1em` → `Emu(457_200)`.
+/// For example, `from_em(1000, DEFAULT_EM_IN_EMU)` converts `1em` →
+/// `Some(Emu(457_200))`.
 ///
-/// Uses saturating multiplication to avoid arithmetic overflow on extreme inputs
-/// (F-CRIT-003 / AC-001 / VP-037). See [`from_inches`] for the overflow contract.
+/// Returns `None` when `milliem * em_in_emu` overflows `i64`
+/// (VP-048 / BC-3.04.001 Invariant 8 / interface-definitions.md §9.4).
+/// See [`from_inches`] for the full overflow contract.
 #[must_use]
-pub fn from_em(milliem: i64, em_in_emu: i64) -> Emu {
-    let product = milliem.saturating_mul(em_in_emu);
-    Emu(product / 1_000)
+pub fn from_em(milliem: i64, em_in_emu: i64) -> Option<Emu> {
+    // checked_mul returns None on overflow.
+    milliem
+        .checked_mul(em_in_emu)
+        .map(|product| Emu(product / 1_000))
 }
 
 /// Detect whether a bounding box is off the slide canvas.
@@ -121,11 +129,17 @@ pub fn is_off_canvas(bbox: &BoundingBox, page: PageSize) -> bool {
 /// `E-PAR-012` (unknown shape type). There is NO `Custom` fallback — the
 /// type system enforces the closed vocabulary.
 ///
-/// # TODO(STORY-028-fix-burst): implementer must wire `parse_shape_type` into
-/// the DSL parser so that `None` → `E-PAR-012` with the correction hint:
-/// "Known types: [rect, ellipse, arrow, line, star, roundRect]".
-/// The `layout_shapes` caller also needs a guard that converts `None` to
-/// `LayoutError` (or a parse error) before the layout pass.
+/// # Detection stage
+///
+/// In the current layout-stage pipeline, unknown shape type keywords are
+/// rejected at parse time via [`slideforge_types::ShapeType::from_keyword`]
+/// before a `ShapeSpec` is constructed. A `ShapeSpec` reaching layout always
+/// carries a resolved `ShapeType` enum variant; `parse_shape_type` is exposed
+/// here for utility (e.g., testing, future DSL tooling).
+///
+/// When the DSL parser (STORY-072 or equivalent) is implemented, it will call
+/// `from_keyword` directly and surface `E-PAR-012` with a source span at parse
+/// time rather than at the layout stage.
 #[must_use]
 pub fn parse_shape_type(keyword: &str) -> Option<ShapeType> {
     match keyword {
@@ -181,13 +195,9 @@ pub struct ShapeLayoutOutput {
 /// # Errors
 ///
 /// Returns `Err(LayoutError::Multiple { inner })` accumulating ALL
-/// `LayoutError::MissingAlt` errors encountered (BC-3.04.001 item G / DI-018).
-/// A single-shape failure wraps the single `MissingAlt` in `Multiple` for a
-/// uniform return type. The caller unwraps and dispatches the inner errors.
-///
-/// Returns `Err(LayoutError::MissingAlt { .. })` directly when only one error
-/// is accumulated (unwrapped from `Multiple` for ergonomic single-error cases —
-/// but callers must be prepared for `Multiple` on multi-shape slides).
+/// `LayoutError::MissingAlt` and `LayoutError::ArithmeticOverflow` errors
+/// encountered (BC-3.04.001 item G / DI-018 / VP-048).
+/// Even a single-shape failure returns `Multiple` for a uniform return type.
 pub fn layout_shapes(
     shapes: &[slideforge_types::ShapeSpec],
     page: PageSize,
@@ -196,7 +206,7 @@ pub fn layout_shapes(
 ) -> Result<ShapeLayoutOutput, LayoutError> {
     let mut frames = Vec::with_capacity(shapes.len());
     let mut warnings = Vec::new();
-    let mut missing_alt_errors: Vec<LayoutError> = Vec::new();
+    let mut accumulated_errors: Vec<LayoutError> = Vec::new();
 
     for shape in shapes {
         // BC-3.04.001 invariant 4: ShapeSpec.shape_type is already a resolved
@@ -232,7 +242,7 @@ pub fn layout_shapes(
             Ok(sf) => sf,
             Err(err @ LayoutError::MissingAlt { .. }) => {
                 // Re-emit with the correct span from the ShapeSpec.
-                missing_alt_errors.push(LayoutError::MissingAlt {
+                accumulated_errors.push(LayoutError::MissingAlt {
                     source_slide_index,
                     span: shape.span.clone(),
                 });
@@ -242,14 +252,48 @@ pub fn layout_shapes(
             Err(other) => return Err(other),
         };
 
-        // F-CRIT-002: wire ShapeSpec.position through unit_to_emu.
-        // Replaces the TODO stub with the real EMU conversion (BC-3.04.001 AC-001).
-        let bbox = BoundingBox {
-            x: unit_to_emu(&shape.position.x, em_in_emu),
-            y: unit_to_emu(&shape.position.y, em_in_emu),
-            width: unit_to_emu(&shape.position.width, em_in_emu),
-            height: unit_to_emu(&shape.position.height, em_in_emu),
+        // VP-048 / BC-3.04.001 Invariant 8: use checked_mul via unit_to_emu.
+        // On overflow, accumulate ArithmeticOverflow error (not silent saturation).
+        let Some(x) = unit_to_emu(&shape.position.x, em_in_emu) else {
+            accumulated_errors.push(LayoutError::ArithmeticOverflow {
+                source_slide_index,
+                span: shape.span.clone(),
+            });
+            continue;
         };
+        let Some(y) = unit_to_emu(&shape.position.y, em_in_emu) else {
+            accumulated_errors.push(LayoutError::ArithmeticOverflow {
+                source_slide_index,
+                span: shape.span.clone(),
+            });
+            continue;
+        };
+        let Some(width) = unit_to_emu(&shape.position.width, em_in_emu) else {
+            accumulated_errors.push(LayoutError::ArithmeticOverflow {
+                source_slide_index,
+                span: shape.span.clone(),
+            });
+            continue;
+        };
+        let Some(height) = unit_to_emu(&shape.position.height, em_in_emu) else {
+            accumulated_errors.push(LayoutError::ArithmeticOverflow {
+                source_slide_index,
+                span: shape.span.clone(),
+            });
+            continue;
+        };
+        let bbox = BoundingBox { x, y, width, height };
+
+        // F-HIGH-003 / BC-3.04.001 Invariant 9: validate bbox from shape frames.
+        // width > 0 and height > 0 must hold; x >= 0 and y >= 0 are off-canvas
+        // (not hard errors), so we only check the strictly-invalid cases here.
+        if bbox.width <= Emu(0) || bbox.height <= Emu(0) {
+            return Err(LayoutError::InvalidBoundingBox {
+                source_slide_index,
+                frame_index: frames.len(),
+                bbox,
+            });
+        }
 
         if is_off_canvas(&bbox, page) {
             warnings.push(LayoutWarning::OffCanvas {
@@ -270,15 +314,9 @@ pub fn layout_shapes(
         });
     }
 
-    // Return accumulated MissingAlt errors if any shapes failed.
-    if !missing_alt_errors.is_empty() {
-        if missing_alt_errors.len() == 1 {
-            // Single error: return directly for ergonomic single-error callsites.
-            return Err(missing_alt_errors.remove(0));
-        }
-        return Err(LayoutError::Multiple {
-            inner: missing_alt_errors,
-        });
+    // Return accumulated errors if any shapes failed (Item N: uniform Multiple).
+    if !accumulated_errors.is_empty() {
+        return Err(LayoutError::multiple(accumulated_errors));
     }
 
     Ok(ShapeLayoutOutput { frames, warnings })
@@ -427,127 +465,113 @@ mod tests {
     //                         2.0in → Emu(1_828_800)   (from BC-3.04.001 story spec)
     // ─────────────────────────────────────────────────────────────────────────
 
-    /// AC-001 — `from_inches(500)` converts 0.5 inch → `Emu(457_200)`.
+    /// AC-001 — `from_inches(500)` converts 0.5 inch → `Some(Emu(457_200))`.
     ///
     /// Canonical test vector from STORY-028 AC-001:
     ///   `position x 0.5in` → `BoundingBox.x = Emu(457_200)`.
     /// `500` is milliinches for `0.5in` (stored as `inches × 1000`).
-    ///
-    /// Red Gate: `from_inches` is `todo!()` — panics with unimplemented message.
+    /// Returns `Some(Emu)` for all in-range inputs (VP-048 / BC-3.04.001 Invariant 8).
     #[test]
     fn test_bc_3_04_001_ac001_half_inch_to_emu() {
         assert_eq!(
             from_inches(500),
-            Emu(457_200),
-            "0.5in (500 milliinches) must convert to Emu(457_200)"
+            Some(Emu(457_200)),
+            "0.5in (500 milliinches) must convert to Some(Emu(457_200))"
         );
     }
 
-    /// AC-001 — `from_inches(1000)` converts 1.0 inch → `Emu(914_400)`.
+    /// AC-001 — `from_inches(1000)` converts 1.0 inch → `Some(Emu(914_400))`.
     ///
     /// Canonical test vector: `position y 1.0in` → `BoundingBox.y = Emu(914_400)`.
-    ///
-    /// Red Gate: panics with `todo!()`.
     #[test]
     fn test_bc_3_04_001_ac001_one_inch_to_emu() {
         assert_eq!(
             from_inches(1000),
-            Emu(914_400),
-            "1.0in (1000 milliinches) must convert to Emu(914_400)"
+            Some(Emu(914_400)),
+            "1.0in (1000 milliinches) must convert to Some(Emu(914_400))"
         );
     }
 
-    /// AC-001 — `from_inches(2000)` converts 2.0 inches → `Emu(1_828_800)`.
+    /// AC-001 — `from_inches(2000)` converts 2.0 inches → `Some(Emu(1_828_800))`.
     ///
     /// Canonical test vector: `width 2.0in` → `BoundingBox.width = Emu(1_828_800)`.
-    ///
-    /// Red Gate: panics with `todo!()`.
     #[test]
     fn test_bc_3_04_001_ac001_two_inches_to_emu() {
         assert_eq!(
             from_inches(2000),
-            Emu(1_828_800),
-            "2.0in (2000 milliinches) must convert to Emu(1_828_800)"
+            Some(Emu(1_828_800)),
+            "2.0in (2000 milliinches) must convert to Some(Emu(1_828_800))"
         );
     }
 
-    /// AC-001 — `from_inches(0)` converts 0 inches → `Emu(0)`.
+    /// AC-001 — `from_inches(0)` converts 0 inches → `Some(Emu(0))`.
     ///
-    /// Boundary: zero-width/height is invalid per BoundingBox invariants, but the
-    /// conversion function itself must handle zero without overflow.
-    ///
-    /// Red Gate: panics with `todo!()`.
+    /// Boundary: zero input is in-range and must succeed.
     #[test]
     fn test_bc_3_04_001_ac001_zero_inches_to_emu() {
-        assert_eq!(from_inches(0), Emu(0), "0in must convert to Emu(0)");
+        assert_eq!(
+            from_inches(0),
+            Some(Emu(0)),
+            "0in must convert to Some(Emu(0))"
+        );
     }
 
-    /// AC-001 — `from_inches(-500)` converts −0.5 inch → `Emu(-457_200)`.
+    /// AC-001 — `from_inches(-500)` converts −0.5 inch → `Some(Emu(-457_200))`.
     ///
     /// Off-canvas shapes use negative coordinates; the conversion must preserve sign.
     /// (The off-canvas check happens at the `layout_shapes` level, not in conversion.)
-    ///
-    /// Red Gate: panics with `todo!()`.
     #[test]
     fn test_bc_3_04_001_ac001_negative_half_inch_to_emu() {
         assert_eq!(
             from_inches(-500),
-            Emu(-457_200),
-            "-0.5in must convert to Emu(-457_200)"
+            Some(Emu(-457_200)),
+            "-0.5in must convert to Some(Emu(-457_200))"
         );
     }
 
-    /// AC-001 — `from_em(1000, DEFAULT_EM_IN_EMU)` converts 1em → `Emu(457_200)`.
+    /// AC-001 — `from_em(1000, DEFAULT_EM_IN_EMU)` converts 1em → `Some(Emu(457_200))`.
     ///
     /// Default brand em: 457_200 EMU = 0.5 inch at 36pt.
-    ///
-    /// Red Gate: panics with `todo!()`.
     #[test]
     fn test_bc_3_04_001_ac001_one_em_to_emu() {
         assert_eq!(
             from_em(1000, DEFAULT_EM_IN_EMU),
-            Emu(457_200),
-            "1em at default brand size must convert to Emu(457_200)"
+            Some(Emu(457_200)),
+            "1em at default brand size must convert to Some(Emu(457_200))"
         );
     }
 
-    /// AC-001 — `from_em(2000, DEFAULT_EM_IN_EMU)` converts 2em → `Emu(914_400)`.
-    ///
-    /// Red Gate: panics with `todo!()`.
+    /// AC-001 — `from_em(2000, DEFAULT_EM_IN_EMU)` converts 2em → `Some(Emu(914_400))`.
     #[test]
     fn test_bc_3_04_001_ac001_two_em_to_emu() {
         assert_eq!(
             from_em(2000, DEFAULT_EM_IN_EMU),
-            Emu(914_400),
-            "2em at default brand size must convert to Emu(914_400)"
+            Some(Emu(914_400)),
+            "2em at default brand size must convert to Some(Emu(914_400))"
         );
     }
 
-    /// AC-001 — `unit_to_emu(ShapeUnit::Inches(500), DEFAULT_EM_IN_EMU)` → `Emu(457_200)`.
+    /// AC-001 — `unit_to_emu(ShapeUnit::Inches(500), DEFAULT_EM_IN_EMU)` → `Some(Emu(457_200))`.
     ///
     /// Tests the dispatch function that delegates to `from_inches`.
-    ///
-    /// Red Gate: panics with `todo!()`.
     #[test]
     fn test_bc_3_04_001_ac001_unit_to_emu_inches() {
         assert_eq!(
             unit_to_emu(&ShapeUnit::Inches(500), DEFAULT_EM_IN_EMU),
-            Emu(457_200),
-            "unit_to_emu with Inches(500) must return Emu(457_200)"
+            Some(Emu(457_200)),
+            "unit_to_emu with Inches(500) must return Some(Emu(457_200))"
         );
     }
 
-    /// AC-001 — `unit_to_emu(ShapeUnit::Em(1000), DEFAULT_EM_IN_EMU)` → `Emu(457_200)`.
+    /// AC-001 — `unit_to_emu(ShapeUnit::Em(1000), DEFAULT_EM_IN_EMU)` → `Some(Emu(457_200))`.
     ///
     /// Tests the dispatch function that delegates to `from_em`.
-    ///
-    /// Red Gate: panics with `todo!()`.
     #[test]
     fn test_bc_3_04_001_ac001_unit_to_emu_em() {
         assert_eq!(
             unit_to_emu(&ShapeUnit::Em(1000), DEFAULT_EM_IN_EMU),
-            Emu(457_200),
-            "unit_to_emu with Em(1000) must return Emu(457_200)"
+            Some(Emu(457_200)),
+            "unit_to_emu with Em(1000) must return Some(Emu(457_200))"
         );
     }
 
@@ -555,22 +579,28 @@ mod tests {
     ///
     /// This is the canonical test vector from STORY-028 AC-001. Verifies that all
     /// four position fields convert correctly in the same call.
-    ///
-    /// Red Gate: panics with `todo!()` inside `from_inches`.
     #[test]
     fn test_bc_3_04_001_ac001_full_position_vector_inches() {
         // x=0.5in, y=1.0in, width=2.0in, height=1.0in
-        assert_eq!(from_inches(500), Emu(457_200), "x: 0.5in → Emu(457_200)");
-        assert_eq!(from_inches(1000), Emu(914_400), "y: 1.0in → Emu(914_400)");
         assert_eq!(
-            from_inches(2000),
-            Emu(1_828_800),
-            "width: 2.0in → Emu(1_828_800)"
+            from_inches(500),
+            Some(Emu(457_200)),
+            "x: 0.5in → Some(Emu(457_200))"
         );
         assert_eq!(
             from_inches(1000),
-            Emu(914_400),
-            "height: 1.0in → Emu(914_400)"
+            Some(Emu(914_400)),
+            "y: 1.0in → Some(Emu(914_400))"
+        );
+        assert_eq!(
+            from_inches(2000),
+            Some(Emu(1_828_800)),
+            "width: 2.0in → Some(Emu(1_828_800))"
+        );
+        assert_eq!(
+            from_inches(1000),
+            Some(Emu(914_400)),
+            "height: 1.0in → Some(Emu(914_400))"
         );
     }
 
@@ -942,9 +972,9 @@ mod tests {
     }
 
     /// EC-001 — `layout_shapes` with a shape that has no alt and `decorative=false`
-    /// returns `Err(LayoutError::MissingAlt)`.
+    /// returns `Err(LayoutError::Multiple { inner: [MissingAlt] })`.
     ///
-    /// Red Gate: panics with `todo!()`.
+    /// Per Item N (uniform Multiple): even a single error is returned as Multiple.
     #[test]
     fn test_bc_3_04_001_ec001_layout_shapes_missing_alt_returns_error() {
         let shapes = vec![shape_spec_no_alt("rect")];
@@ -953,22 +983,26 @@ mod tests {
             result.is_err(),
             "layout_shapes with no-alt shape must return Err"
         );
-        assert!(
-            matches!(
-                result.unwrap_err(),
-                LayoutError::MissingAlt {
-                    source_slide_index: 2,
-                    ..
-                }
-            ),
-            "error must be MissingAlt with source_slide_index=2"
-        );
+        match result.unwrap_err() {
+            LayoutError::Multiple { inner } => {
+                assert_eq!(inner.len(), 1, "single missing-alt must produce Multiple with 1 inner");
+                assert!(
+                    matches!(
+                        &inner[0],
+                        LayoutError::MissingAlt {
+                            source_slide_index: 2,
+                            ..
+                        }
+                    ),
+                    "inner error must be MissingAlt with source_slide_index=2"
+                );
+            },
+            other => panic!("expected LayoutError::Multiple, got: {other:?}"),
+        }
     }
 
-    /// EC-001 / BC-3.04.001 EC-010 — Slide with two shapes both missing alt returns
-    /// `LayoutError::Multiple` containing two `MissingAlt` errors (DI-018 accumulation).
-    ///
-    /// Red Gate: panics with `todo!()`.
+    /// EC-001 / BC-3.04.001 EC-010 — Slide with one valid + one missing-alt shape
+    /// returns `LayoutError::Multiple { inner: [MissingAlt] }` (uniform Multiple).
     #[test]
     fn test_bc_3_04_001_ec001_second_shape_missing_alt_returns_error() {
         let shapes = vec![
@@ -980,10 +1014,20 @@ mod tests {
             result.is_err(),
             "second shape missing alt must cause layout_shapes to return Err"
         );
-        assert!(
-            matches!(result.unwrap_err(), LayoutError::MissingAlt { .. }),
-            "single missing-alt shape must return MissingAlt (not Multiple)"
-        );
+        match result.unwrap_err() {
+            LayoutError::Multiple { inner } => {
+                assert_eq!(
+                    inner.len(),
+                    1,
+                    "single missing-alt shape must produce Multiple with 1 entry"
+                );
+                assert!(
+                    matches!(inner[0], LayoutError::MissingAlt { .. }),
+                    "inner error must be MissingAlt"
+                );
+            },
+            other => panic!("expected LayoutError::Multiple (uniform), got: {other:?}"),
+        }
     }
 
     /// EC-010 — Slide with two shapes BOTH missing alt returns `LayoutError::Multiple`
@@ -1311,63 +1355,60 @@ mod tests {
     // VP-037 — EMU conversion (Kani candidate)
     // ─────────────────────────────────────────────────────────────────────────
 
-    /// VP-037 — `from_inches` with `i64::MAX` does NOT panic (saturating overflow).
+    /// VP-037 / VP-048 — `from_inches` with `i64::MAX` returns `None` (checked overflow).
     ///
-    /// `from_inches` must handle extreme inputs without panicking or wrapping.
-    /// BC-3.04.001 AC-001 / F-CRIT-003 / VP-037.
+    /// BC-3.04.001 Invariant 8 / VP-048: `from_inches` uses `checked_mul`; overflow
+    /// returns `None` rather than saturating silently. `i64::MAX * 914_400` overflows
+    /// `i64`, so the result is `None`.
     #[test]
     fn test_vp_037_from_inches_max_input_does_not_panic() {
-        // Saturation: MAX * 914_400 overflows → saturated to i64::MAX, then / 1000.
-        // The saturated value is i64::MAX / 1_000 (integer division truncates toward zero).
+        // checked_mul: MAX * 914_400 overflows → None (not saturated to i64::MAX).
         let result = from_inches(i64::MAX);
-        assert_eq!(
-            result.0,
-            i64::MAX / 1_000,
-            "from_inches(i64::MAX) must saturate to i64::MAX / 1000"
+        assert!(
+            result.is_none(),
+            "from_inches(i64::MAX) must return None (overflow, not saturation); got: {result:?}"
         );
     }
 
-    /// VP-037 — `from_inches` with `i64::MIN` does NOT panic (saturating underflow).
+    /// VP-037 / VP-048 — `from_inches` with `i64::MIN` returns `None` (checked underflow).
+    ///
+    /// `i64::MIN * 914_400` underflows `i64` → `None`.
     #[test]
     fn test_vp_037_from_inches_min_input_does_not_panic() {
-        // Saturation: MIN * 914_400 underflows → saturated to i64::MIN, then / 1000.
-        // The saturated value is i64::MIN / 1_000 (integer division rounds toward zero).
         let result = from_inches(i64::MIN);
-        assert_eq!(
-            result.0,
-            i64::MIN / 1_000,
-            "from_inches(i64::MIN) must saturate to i64::MIN / 1000"
+        assert!(
+            result.is_none(),
+            "from_inches(i64::MIN) must return None (underflow, not saturation); got: {result:?}"
         );
     }
 
-    /// VP-037 — `from_em` with `i64::MAX` does NOT panic.
+    /// VP-037 / VP-048 — `from_em` with `i64::MAX` returns `None` (checked overflow).
     #[test]
     fn test_vp_037_from_em_max_input_does_not_panic() {
-        // Saturation: MAX * em_in_emu overflows → saturated to i64::MAX, then / 1000.
+        // checked_mul: MAX * DEFAULT_EM_IN_EMU overflows → None.
         let result = from_em(i64::MAX, DEFAULT_EM_IN_EMU);
-        assert_eq!(
-            result.0,
-            i64::MAX / 1_000,
-            "from_em(i64::MAX, DEFAULT_EM_IN_EMU) must saturate to i64::MAX / 1000"
+        assert!(
+            result.is_none(),
+            "from_em(i64::MAX, DEFAULT_EM_IN_EMU) must return None (overflow); got: {result:?}"
         );
     }
 
-    /// VP-037 — Canonical AC-001 test vector: x=0.5in y=1.0in width=2.0in height=1.0in.
+    /// VP-037 / VP-048 — Canonical AC-001 test vector: x=0.5in y=1.0in width=2.0in height=1.0in.
     ///
-    /// This is the named canonical vector from the story spec (test_ac_001_canonical_position_vector_to_bbox).
+    /// In-range inputs return `Some(Emu(...))`.
     #[test]
     fn test_ac_001_canonical_position_vector_to_bbox() {
-        // x = 0.5in = 500 milliinches → Emu(457_200)
-        // y = 1.0in = 1000 milliinches → Emu(914_400)
-        // width = 2.0in = 2000 milliinches → Emu(1_828_800)
-        // height = 1.0in = 1000 milliinches → Emu(914_400)
+        // x = 0.5in = 500 milliinches → Some(Emu(457_200))
+        // y = 1.0in = 1000 milliinches → Some(Emu(914_400))
+        // width = 2.0in = 2000 milliinches → Some(Emu(1_828_800))
+        // height = 1.0in = 1000 milliinches → Some(Emu(914_400))
         let pos = default_position();
-        let bbox = BoundingBox {
-            x: unit_to_emu(&pos.x, DEFAULT_EM_IN_EMU),
-            y: unit_to_emu(&pos.y, DEFAULT_EM_IN_EMU),
-            width: unit_to_emu(&pos.width, DEFAULT_EM_IN_EMU),
-            height: unit_to_emu(&pos.height, DEFAULT_EM_IN_EMU),
-        };
+        let x = unit_to_emu(&pos.x, DEFAULT_EM_IN_EMU).expect("x must not overflow");
+        let y = unit_to_emu(&pos.y, DEFAULT_EM_IN_EMU).expect("y must not overflow");
+        let width = unit_to_emu(&pos.width, DEFAULT_EM_IN_EMU).expect("width must not overflow");
+        let height =
+            unit_to_emu(&pos.height, DEFAULT_EM_IN_EMU).expect("height must not overflow");
+        let bbox = BoundingBox { x, y, width, height };
         assert_eq!(bbox.x, Emu(457_200), "x: 0.5in → Emu(457_200)");
         assert_eq!(bbox.y, Emu(914_400), "y: 1.0in → Emu(914_400)");
         assert_eq!(bbox.width, Emu(1_828_800), "width: 2.0in → Emu(1_828_800)");
@@ -1378,25 +1419,55 @@ mod tests {
     // VP-038 — MissingAlt test (span propagation — F-MED-002)
     // ─────────────────────────────────────────────────────────────────────────
 
-    /// VP-038 — `layout_shapes` with a shape missing alt returns `MissingAlt`
-    /// whose `span` is the shape's `SourceSpan` (F-MED-002 / BC-3.04.001 AC-BC-A5).
+    /// VP-038 / F-MED-002 — `layout_shapes` with a shape missing alt returns
+    /// `Multiple { inner: [MissingAlt { source_slide_index, span }] }` where
+    /// `span` equals the shape's `SourceSpan` (BC-3.04.001 AC-BC-A5).
+    ///
+    /// Load-bearing span check: the test uses a NON-DEFAULT span (file/line/col
+    /// explicitly set) so the assertion fails if `layout_shapes` swaps the span
+    /// with a default or overwrites it.
     #[test]
     fn test_vp_038_missing_alt_span_propagation() {
+        use std::sync::Arc;
         use slideforge_types::SourceSpan;
-        // Give the shape a non-default span so we can verify propagation.
+        // Non-default span — load-bearing for F-MED-002.
+        let non_default_span = SourceSpan {
+            file: Arc::from("test.sf"),
+            line: 42,
+            col: 3,
+            byte_offset: 1024,
+        };
         let mut spec = shape_spec_no_alt("rect");
-        spec.span = SourceSpan::default(); // default for now — span infra available
+        spec.span = non_default_span.clone();
 
         let shapes = vec![spec];
         let result = layout_shapes(&shapes, default_page(), 5, DEFAULT_EM_IN_EMU);
         assert!(result.is_err(), "shape with no alt must return Err");
         match result.unwrap_err() {
-            LayoutError::MissingAlt {
-                source_slide_index, ..
-            } => {
-                assert_eq!(source_slide_index, 5, "source_slide_index must be 5");
+            LayoutError::Multiple { inner } => {
+                assert_eq!(
+                    inner.len(),
+                    1,
+                    "single missing-alt shape must produce Multiple with 1 entry"
+                );
+                match &inner[0] {
+                    LayoutError::MissingAlt {
+                        source_slide_index,
+                        span,
+                    } => {
+                        assert_eq!(*source_slide_index, 5, "source_slide_index must be 5");
+                        assert_eq!(
+                            span.file.as_ref(),
+                            "test.sf",
+                            "span.file must propagate from ShapeSpec"
+                        );
+                        assert_eq!(span.line, 42, "span.line must propagate from ShapeSpec");
+                        assert_eq!(span.col, 3, "span.col must propagate from ShapeSpec");
+                    },
+                    other => panic!("inner error must be MissingAlt, got: {other:?}"),
+                }
             },
-            other => panic!("expected MissingAlt, got: {other:?}"),
+            other => panic!("expected LayoutError::Multiple, got: {other:?}"),
         }
     }
 

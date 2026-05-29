@@ -193,15 +193,16 @@ pub enum LayoutError {
         span: SourceSpan,
     },
 
-    /// Arithmetic overflow in EMU conversion (BC-3.04.001 AC-001 / F-CRIT-003).
+    /// Arithmetic overflow in EMU conversion (BC-3.04.001 Invariant 8 / VP-048).
     ///
-    /// The EMU conversion functions use saturating arithmetic to avoid overflow;
-    /// this error variant is reserved for cases where overflow is detected at a
-    /// higher level and must be reported with a span.
+    /// `from_inches` and `from_em` use `checked_mul` (per BC-3.04.001 Invariant 8
+    /// / interface-definitions.md §9.4) and return `None` on overflow. When any of
+    /// the four position fields (x, y, width, height) overflows, `layout_shapes`
+    /// accumulates this error via the multi-error accumulation pattern (DI-018).
     ///
-    /// In practice, `from_inches` and `from_em` saturate silently per VP-037
-    /// semantics — this variant is the typed error form for any caller that needs
-    /// to surface the overflow explicitly (e.g., a future strict-mode validator).
+    /// An `i64::MAX`-class input exceeds any physically meaningful slide dimension
+    /// by many orders of magnitude; the correct production behaviour is to reject
+    /// it explicitly rather than silently clamp (VP-048).
     #[error(
         "layout error: slide {source_slide_index}: arithmetic overflow in EMU conversion at {span}"
     )]
@@ -258,9 +259,9 @@ pub enum LayoutError {
     /// Multiple `LayoutError`s accumulated from a single operation (BC-3.04.001 item G).
     ///
     /// Used by [`crate::shapes::layout_shapes`] to accumulate all `MissingAlt`
-    /// errors from a slide's shape set before returning. This variant allows
-    /// callers that accept `Result<_, LayoutError>` to receive all errors at once
-    /// rather than bailing on the first failure (DI-018 multi-error accumulation).
+    /// and `ArithmeticOverflow` errors from a slide's shape set before returning.
+    /// This variant allows callers that accept `Result<_, LayoutError>` to receive
+    /// all errors at once rather than bailing on the first failure (DI-018).
     ///
     /// ## Invariants
     ///
@@ -268,6 +269,8 @@ pub enum LayoutError {
     ///   engine bug — use `Ok(...)` when there are no errors.
     /// - `Multiple` MUST NOT be nested: inner errors are flat `LayoutError`
     ///   variants, never another `Multiple`.
+    /// - Even a single error is returned as `Multiple { inner: vec![err] }` for
+    ///   uniform return type. Use [`LayoutError::multiple`] to construct.
     ///
     /// ## Display
     ///
@@ -282,6 +285,47 @@ pub enum LayoutError {
         /// The accumulated errors, in source order.
         inner: Vec<LayoutError>,
     },
+}
+
+impl LayoutError {
+    /// Construct a `Multiple` error with flattening and non-empty invariant.
+    ///
+    /// This is the canonical constructor for `Multiple` — callers MUST use it
+    /// instead of constructing `LayoutError::Multiple { inner: ... }` directly.
+    ///
+    /// # Invariants enforced
+    ///
+    /// - `errors` MUST be non-empty (`debug_assert!` guards this in debug builds).
+    /// - Nested `Multiple` variants are flattened into a single level.
+    ///
+    /// # Panics (debug builds only)
+    ///
+    /// Asserts that `errors` is non-empty. An empty `Multiple` is a layout-engine
+    /// bug — use `Ok(...)` when there are no errors.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use slideforge_layout::error::LayoutError;
+    /// let err = LayoutError::multiple(vec![
+    ///     LayoutError::EmptyDeck { source_slide_index: 0 },
+    /// ]);
+    /// // Single error → Multiple { inner: [EmptyDeck] } (uniform).
+    /// assert!(matches!(err, LayoutError::Multiple { .. }));
+    /// ```
+    #[must_use]
+    pub fn multiple(errors: Vec<Self>) -> Self {
+        debug_assert!(!errors.is_empty(), "LayoutError::multiple requires at least one error");
+        // Flatten nested Multiple variants into a single level (invariant: no nesting).
+        let flattened: Vec<Self> = errors
+            .into_iter()
+            .flat_map(|e| match e {
+                LayoutError::Multiple { inner } => inner,
+                other => vec![other],
+            })
+            .collect();
+        LayoutError::Multiple { inner: flattened }
+    }
 }
 
 #[cfg(test)]

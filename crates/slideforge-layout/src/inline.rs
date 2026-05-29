@@ -64,7 +64,8 @@ pub const MAX_INLINE_DEPTH: usize = 64;
 ///
 /// * `nodes` — The inline node sequence to validate.
 /// * `known_slide_titles` — The set of slide title strings from the deck.
-/// * `slide_index` — Zero-based index of the slide being validated.
+/// * `source_slide_index` — Zero-based index of the slide being validated
+///   (interface-definitions.md §8: canonical field name `source_slide_index`).
 /// * `warnings` — Mutable sink for accumulated warnings (DI-018).
 ///
 /// # Errors
@@ -74,11 +75,11 @@ pub const MAX_INLINE_DEPTH: usize = 64;
 pub fn validate_inline_nodes<S: ::std::hash::BuildHasher>(
     nodes: &[InlineNode],
     known_slide_titles: &HashSet<Arc<str>, S>,
-    slide_index: usize,
+    source_slide_index: usize,
     warnings: &mut Vec<LayoutWarning>,
 ) -> Result<(), LayoutError> {
     for node in nodes {
-        check_inline_node(node, known_slide_titles, slide_index, warnings, 0)?;
+        check_inline_node(node, known_slide_titles, source_slide_index, warnings, 0)?;
     }
     Ok(())
 }
@@ -172,13 +173,13 @@ pub fn run_inline_validation(
 pub fn check_inline_node<S: ::std::hash::BuildHasher>(
     node: &InlineNode,
     known_slide_titles: &HashSet<Arc<str>, S>,
-    slide_index: usize,
+    source_slide_index: usize,
     warnings: &mut Vec<LayoutWarning>,
     depth: usize,
 ) -> Result<(), LayoutError> {
     if depth >= MAX_INLINE_DEPTH {
         return Err(LayoutError::InlineDepthExceeded {
-            source_slide_index: slide_index,
+            source_slide_index,
             depth,
             max: MAX_INLINE_DEPTH,
         });
@@ -195,7 +196,7 @@ pub fn check_inline_node<S: ::std::hash::BuildHasher>(
             if !known_slide_titles.contains(target.as_ref()) {
                 warnings.push(LayoutWarning::XrefTargetNotFound {
                     target: target.clone(),
-                    source_slide_index: slide_index,
+                    source_slide_index,
                 });
             }
         },
@@ -209,14 +210,26 @@ pub fn check_inline_node<S: ::std::hash::BuildHasher>(
         | InlineNode::Strikethrough(children)
         | InlineNode::Highlight(children) => {
             for child in children {
-                check_inline_node(child, known_slide_titles, slide_index, warnings, depth + 1)?;
+                check_inline_node(
+                    child,
+                    known_slide_titles,
+                    source_slide_index,
+                    warnings,
+                    depth + 1,
+                )?;
             }
         },
 
         // Link — recurse into display text children only; URL is not an xref target.
         InlineNode::Link { text, url: _ } => {
             for child in text {
-                check_inline_node(child, known_slide_titles, slide_index, warnings, depth + 1)?;
+                check_inline_node(
+                    child,
+                    known_slide_titles,
+                    source_slide_index,
+                    warnings,
+                    depth + 1,
+                )?;
             }
         },
     }
