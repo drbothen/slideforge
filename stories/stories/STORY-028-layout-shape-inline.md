@@ -9,7 +9,7 @@ points: 5
 priority: P1
 tdd_mode: strict
 status: draft
-spec_version: "1.4"
+spec_version: "1.5"
 behavioral_contracts: [BC-3.04.001, BC-3.05.001]
 verification_properties: []
 nfr_refs: [NFR-021, NFR-022, NFR-023, NFR-024, NFR-025]
@@ -335,7 +335,7 @@ listed — that was incorrect; unknown keywords are parse errors, not `Custom` f
 - [ ] Add `FrameContent::Shape(ShapeFrame)` and `FrameContent::TextRun(Vec<InlineNode>)` to `Frame` enum in `src/types.rs`
 - [ ] Implement `ShapeFrame` struct with `shape_type`, `fill`, `text`, `alt` fields
 - [ ] Implement `ShapeType` enum: `Rect`, `Ellipse`, `Arrow`, `Line`, `Star`, `RoundRect` (no `Custom` — unknown keyword is a parse error per BC-3.04.001 invariant 4)
-- [ ] Implement `FillSpec` enum: `SolidColor(Rgb)`, `Gradient { from: Rgb, to: Rgb }`, `None`
+- [ ] Implement `FillSpec` enum: `SolidColor(Rgb)`, `None` (Gradient deferred to STORY-072 per BC-3.04.001 v1.4.2 Deferred Surfaces)
 - [ ] Implement `AltText` enum: `Provided(Arc<str>)`, `Decorative`
 - [ ] Implement shape layout pass in `layout::run()`: iterate slide shapes → produce `Frame`s
 - [ ] Implement unit conversion: `from_inches`, `from_em` for shape positions

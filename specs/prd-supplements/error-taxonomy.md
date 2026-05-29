@@ -2,7 +2,7 @@
 document_type: prd-supplement
 supplement_type: error-taxonomy
 level: L3
-version: "1.3"
+version: "1.4"
 status: active
 producer: product-owner
 timestamp: 2026-05-29T00:00:00
@@ -93,8 +93,8 @@ slideforge.toml to promote to a blocking error.
 | E-LAY-001 | degraded | 2 (if strict-overflow) | `CanvasOverflow: slide '<title>' field '<field>' overflows by ~<N> EMU (~<M>pt). Consider reducing content or font size.` | CAP-022, DEC-013 |
 | E-LAY-002 | broken | 2 | `Zero-slide deck: no slide blocks found in '<file>'. A deck must contain at least one slide.` | CAP-022, DEC-011 |
 | E-LAY-003 | degraded | 2 (if strict-overflow) | `Chart data is empty for slide '<title>'. Rendering error-slide placeholder.` | CAP-013, DEC-014 |
-| E-LAY-004 | broken | 2 | `Shape at slide <slide_index> (<file>:<line>:<col>) has no alt text and is not marked decorative: true. Add alt "..." or decorative: true.` | BC-3.04.001 EC-001, DI-001, CAP-023 |
-| E-LAY-005 | broken | 2 | `Inline nesting depth exceeded at slide <slide_index>: depth <depth> exceeds maximum of 64. Flatten the inline tree.` | BC-3.05.001 EC-006, CAP-024 |
+| E-LAY-004 | broken | 2 | `Shape at slide <source_slide_index> (<file>:<line>:<col>) has no alt text and is not marked decorative: true. Add alt "..." or decorative: true.` | BC-3.04.001 EC-001, DI-001, CAP-023 |
+| E-LAY-005 | broken | 2 | `Inline nesting depth exceeded at slide <source_slide_index>: depth <depth> exceeds maximum of 64. Flatten the inline tree.` | BC-3.05.001 EC-006, CAP-024 |
 | E-LAY-006 | broken | 2 | `Arithmetic overflow computing EMU for shape position at slide <source_slide_index> (<file>:<line>:<col>). Value <value> in <unit> exceeds i64 range after conversion. Use a value ≤ 9,007,199,254 inches (approximately 9.0 × 10⁹ in).` | BC-3.04.001 EC-014, EC-015, CAP-023 |
 
 Note (E-LAY-004): This is the layout-layer defensive check for missing alt text on
@@ -103,17 +103,13 @@ The variant carries a `span: SourceSpan` field (file/line/col). The primary enfo
 is E-A11-001 in the validation stage; E-LAY-004 fires only if the validation stage was
 bypassed (internal invariant violation).
 
-Note (E-LAY-004 field naming): The canonical field name for slide index in
-`LayoutError::MissingAlt` is `slide_index` (not `source_slide_index`). The module
-doc-comment in `slideforge-layout/src/error.rs` describes the intent to use
-`source_slide_index` consistently across variants, but the STORY-028 variants
-(`MissingAlt`, `MissingRiskCardField`, `MalformedSeverityCards`,
-`UnresolvedSeverityCards`) use `slide_index`. **The canonical field name going forward
-is `source_slide_index`** per the module header declaration (which is the source of
-truth per CLAUDE.md precedence rule — the header doc is earlier and more authoritative
-than individual variant choices). Data-engineer must rename `slide_index` → `source_slide_index`
-on `MissingAlt`, `MissingRiskCardField`, `MalformedSeverityCards`, and
-`UnresolvedSeverityCards` in a follow-up fix burst anchored to STORY-028.
+Note (E-LAY-004 field naming): The variant fields on `LayoutError::MissingAlt`,
+`MissingRiskCardField`, `MalformedSeverityCards`, and `UnresolvedSeverityCards` were
+renamed from `slide_index` to `source_slide_index` in STORY-028 pass-1 (data-engineer
+schema burst, commit 9ea373a8) and the spec supplements were aligned in STORY-028
+pass-7 sweep (commit e52eb3d8). The canonical field name is `source_slide_index`
+throughout all `LayoutError` variants that identify a specific slide. See
+`interface-definitions.md §8` for the full module naming contract.
 
 Note (E-LAY-006): `LayoutError::ArithmeticOverflow { source_slide_index: usize, span: SourceSpan }`
 maps to E-LAY-006. This error is produced when `ShapeUnit::from_inches` or `ShapeUnit::from_em`

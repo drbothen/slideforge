@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.4.1"
+version: "1.4.2"
 status: active
 producer: product-owner
 timestamp: 2026-05-29T00:00:00
@@ -14,7 +14,7 @@ subsystem: SS-TBD
 capability: CAP-023
 lifecycle_status: active
 introduced: v1.0.0
-modified: ["v1.2 — adversary pass 1 adjudication: codified ShapeSpec position schema, hex color contract, shape_type closed vocabulary, off-canvas boundary semantics, gradient deferral, MissingAlt span, multi-error accumulation", "v1.3 — roundRect added to closed vocabulary per Q7 decision example", "v1.3.1 — STORY-TBD-shape-gradient-fills placeholder resolved to STORY-072", "v1.3.2 — VP propagation burst: assigned VP-037 through VP-042 to all VP-TBD entries", "v1.4 — adversary pass 2 adjudications M/N/O/P/Q/R/T: ArithmeticOverflow Result return, LayoutError::Multiple uniformity, LaidOutDeck warnings field, fill+text fields on ShapeSpec, canonical test vectors, uppercase normalization phrasing, shape frame order enforcement", "v1.4.1 — pass-7 drift fix (F-P7-HIGH-004): slide_index → source_slide_index in EC-001 and EC-003 per AC-BC-A9 canonical field name"]
+modified: ["v1.2 — adversary pass 1 adjudication: codified ShapeSpec position schema, hex color contract, shape_type closed vocabulary, off-canvas boundary semantics, gradient deferral, MissingAlt span, multi-error accumulation", "v1.3 — roundRect added to closed vocabulary per Q7 decision example", "v1.3.1 — STORY-TBD-shape-gradient-fills placeholder resolved to STORY-072", "v1.3.2 — VP propagation burst: assigned VP-037 through VP-042 to all VP-TBD entries", "v1.4 — adversary pass 2 adjudications M/N/O/P/Q/R/T: ArithmeticOverflow Result return, LayoutError::Multiple uniformity, LaidOutDeck warnings field, fill+text fields on ShapeSpec, canonical test vectors, uppercase normalization phrasing, shape frame order enforcement", "v1.4.1 — pass-7 drift fix (F-P7-HIGH-004): slide_index → source_slide_index in EC-001 and EC-003 per AC-BC-A9 canonical field name", "v1.4.2 — pass-8 fix (F-P8-MED-001): Deferred Surfaces section rewritten to be consistent with Postcondition 1 — FillSpec::Gradient is NOT in the v1.0 enum (code confirmed absent); removed contradictory claim that variant is defined in IR"]
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -243,11 +243,13 @@ The following surface is explicitly deferred to a future story. It is NOT silent
 missing — it is a planned feature with a spec boundary:
 
 **Gradient fills** (`fill gradient(from, to)`): The `FillSpec::Gradient { from: Rgb, to: Rgb }`
-variant is defined in the layout IR type but is NOT reachable from the DSL parser in v1.0.
-Any attempt to use gradient syntax at the DSL level produces E-PAR-014.
+variant is NOT in the v1.0 `FillSpec` enum (see Postcondition 1). The enum contains only
+`SolidColor(Rgb)` and `None` in v1.0. Any attempt to use gradient syntax at the DSL level
+produces E-PAR-014 ("Shape gradient fill is not supported in v1.0.").
 Target story: **STORY-072** (`STORY-072-shape-gradient-fills.md`).
-When that story ships, it will: (1) add gradient parsing to the DSL parser,
-(2) remove E-PAR-014, (3) implement `FillSpec::Gradient` handling in PPTX/PDF/HTML exporters.
+When that story ships, it will: (1) add `FillSpec::Gradient { from: Rgb, to: Rgb }` to the
+enum in `slideforge-types`, (2) add gradient parsing to the DSL parser, (3) remove E-PAR-014,
+(4) implement `FillSpec::Gradient` handling in PPTX/PDF/HTML exporters.
 
 ## Verification Properties
 

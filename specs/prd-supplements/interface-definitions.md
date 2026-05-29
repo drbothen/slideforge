@@ -2,7 +2,7 @@
 document_type: prd-supplement
 supplement_type: interface-definitions
 level: L3
-version: "1.4"
+version: "1.5"
 status: active
 producer: product-owner
 timestamp: 2026-05-29T00:00:00
@@ -536,20 +536,20 @@ error messages can point to the offending slide by position in the input Deck.
 The module header is the source of truth. All `LayoutError` variants that identify
 a slide MUST use `source_slide_index` — not `slide_index`, `idx`, or other spellings.
 
-### 8.2 Current State and Fix Obligation
+### 8.2 Completed Rename — STORY-028 pass-1 + pass-7
 
-As of STORY-028 implementation (HEAD cc037817), the following variants use the
-non-canonical `slide_index` name:
+The rename from `slide_index` to `source_slide_index` on the following variants was
+completed in STORY-028 pass-1 (data-engineer schema burst, commit 9ea373a8) with
+a sibling-site sweep per TD-VSDD-060, and spec supplements were aligned in STORY-028
+pass-7 (commit e52eb3d8) and pass-8 (this document):
 
-- `LayoutError::MissingAlt { slide_index }`
-- `LayoutError::MissingRiskCardField { slide_index, card_index, field }`
-- `LayoutError::MalformedSeverityCards { slide_index, reason }`
-- `LayoutError::UnresolvedSeverityCards { slide_index }`
+- `LayoutError::MissingAlt { source_slide_index }` ✓
+- `LayoutError::MissingRiskCardField { source_slide_index, card_index, field }` ✓
+- `LayoutError::MalformedSeverityCards { source_slide_index, reason }` ✓
+- `LayoutError::UnresolvedSeverityCards { source_slide_index }` ✓
 
-These MUST be renamed to `source_slide_index` in a fix-burst dispatched by the
-orchestrator after STORY-028 closes. The fix burst is owned by the data-engineer
-(schema change) and requires a sibling-site sweep per TD-VSDD-060 (all callsites
-in `slideforge-layout` and adjacent crates that pattern-match these variants).
+All four variants now use the canonical `source_slide_index` name. No further
+action required. See `error.rs:9-11` and `error.rs:231-236` for the live field names.
 
 ### 8.3 Exception: `SlideCountMismatch`
 
