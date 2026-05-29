@@ -59,7 +59,9 @@ pub const HANDOUT_MASTER_STUB: &[u8] = b"\
 
 // ─── Namespace constants ─────────────────────────────────────────────────────
 
+/// `PresentationML` namespace URI (`p:` prefix in layout XML).
 const NS_P: &str = "http://schemas.openxmlformats.org/presentationml/2006/main";
+/// `DrawingML` namespace URI (`a:` prefix in layout XML).
 const NS_A: &str = "http://schemas.openxmlformats.org/drawingml/2006/main";
 /// Relationship namespace — used by the PPTX exporter (STORY-037) when building
 /// `.rels` files. Not emitted in layout XML body (no r:-prefixed attributes used).

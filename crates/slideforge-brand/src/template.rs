@@ -137,7 +137,7 @@ pub struct BrandFonts {
 /// - [`LogoAsset::Loaded`]: bytes already in memory (from `.pptx`/`.docx` extraction).
 /// - [`LogoAsset::Deferred`]: path recorded during synthesis; bytes loaded on demand
 ///   by the PPTX exporter (STORY-037) when building the ZIP package. This keeps
-///   [`BrandSynthesizer::synthesize`] pure (no filesystem I/O).
+///   [`crate::synthesizer::BrandSynthesizer::synthesize`] pure (no filesystem I/O).
 ///
 /// The logo is optional — if no `[logo]` section in `brand.toml` and no image
 /// relationship in the source template, [`BrandTemplate::logo`] is `None`.
@@ -174,9 +174,9 @@ pub enum LogoAsset {
     Deferred {
         /// Resolved filesystem path to the logo image.
         ///
-        /// Set to the as-written path by [`BrandSynthesizer::synthesize`]; resolved
+        /// Set to the as-written path by [`crate::synthesizer::BrandSynthesizer::synthesize`]; resolved
         /// to a path relative to the `brand.toml` directory by
-        /// [`BrandSynthesizer::load_from_toml`].
+        /// [`crate::synthesizer::BrandSynthesizer::load_from_toml`].
         path: std::path::PathBuf,
         /// The as-written path from `brand.toml` `[logo].path`, preserved for
         /// display and diagnostics.
@@ -212,8 +212,8 @@ impl LogoAsset {
     /// or `None` if this is a [`LogoAsset::Loaded`] asset.
     ///
     /// The path is resolved relative to the `brand.toml` directory by
-    /// [`BrandSynthesizer::load_from_toml`]. When created via
-    /// [`BrandSynthesizer::synthesize`] directly (pure path), this is the
+    /// [`crate::synthesizer::BrandSynthesizer::load_from_toml`]. When created via
+    /// [`crate::synthesizer::BrandSynthesizer::synthesize`] directly (pure path), this is the
     /// as-written relative path.
     #[must_use]
     pub fn resolved_path(&self) -> Option<&std::path::Path> {

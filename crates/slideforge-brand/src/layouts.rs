@@ -118,28 +118,37 @@ pub struct LayoutPlaceholder {
 
 // ─── EMU constants ────────────────────────────────────────────────────────────
 
-/// Standard title placeholder position and size (`PowerPoint` defaults, 16:9).
+/// Standard title placeholder X origin in EMUs (`PowerPoint` defaults, 16:9).
 const TITLE_X: i64 = 457_200;
+/// Standard title placeholder Y origin in EMUs.
 const TITLE_Y: i64 = 274_638;
+/// Standard title placeholder width in EMUs.
 const TITLE_CX: i64 = 8_229_600;
+/// Standard title placeholder height in EMUs.
 const TITLE_CY: i64 = 1_143_000;
 
-/// Standard body/content placeholder position and size.
+/// Standard body/content placeholder X origin in EMUs.
 const BODY_X: i64 = 457_200;
+/// Standard body/content placeholder Y origin in EMUs.
 const BODY_Y: i64 = 1_600_200;
+/// Standard body/content placeholder width in EMUs.
 const BODY_CX: i64 = 8_229_600;
+/// Standard body/content placeholder height in EMUs.
 const BODY_CY: i64 = 3_543_300;
 
-/// Left half content (for two-column layouts): x=457200, cx=3962400
+/// Left half content X origin in EMUs (two-column layouts).
 const LEFT_X: i64 = 457_200;
+/// Left half content width in EMUs.
 const LEFT_CX: i64 = 3_962_400;
 
-/// Right half content: x=4724400, cx=3962400
+/// Right half content X origin in EMUs (two-column layouts).
 const RIGHT_X: i64 = 4_724_400;
+/// Right half content width in EMUs.
 const RIGHT_CX: i64 = 3_962_400;
 
-/// Two-column body Y and height.
+/// Two-column body Y origin in EMUs.
 const TWO_COL_Y: i64 = 1_600_200;
+/// Two-column body height in EMUs.
 const TWO_COL_CY: i64 = 3_543_300;
 
 // ─── Builder helpers ──────────────────────────────────────────────────────────
