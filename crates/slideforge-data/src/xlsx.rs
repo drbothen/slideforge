@@ -352,6 +352,36 @@ fn convert_calamine_cell(cell: &Data, col: u32, row: u32, path: &str) -> Result<
                 } else {
                     formatted
                 };
+
+                // OBS-4: Defense-in-depth roundtrip validation (BC-1.03.006 PC-6).
+                // Re-parse the formatted string to confirm it is valid ISO 8601.
+                // In practice calamine's serial→NaiveDateTime always yields a 4-digit
+                // year, so this should never fail — but if a future calamine version
+                // introduces a regression, we catch it here and return E-DAT-009
+                // instead of silently propagating a malformed timestamp.
+                let is_date_only = dt_str.len() == 10;
+                let roundtrip_ok = if is_date_only {
+                    chrono::NaiveDate::parse_from_str(&dt_str, "%Y-%m-%d").is_ok()
+                } else if dt_str.contains('.') {
+                    chrono::NaiveDateTime::parse_from_str(&dt_str, "%Y-%m-%dT%H:%M:%S%.f").is_ok()
+                } else {
+                    chrono::NaiveDateTime::parse_from_str(&dt_str, "%Y-%m-%dT%H:%M:%S").is_ok()
+                };
+
+                if !roundtrip_ok {
+                    return Err(DataError::ParseError {
+                        code: crate::error::E_DAT_009,
+                        path: Arc::from(path),
+                        format: DataFormat::Xlsx,
+                        reason: Arc::from(format!(
+                            "XLSX DateTime cell at col {col} row {row} (0-indexed) in '{path}' \
+                            produced a non-conformant ISO 8601 string '{dt_str}' (roundtrip \
+                            validation failed). This is a calamine conversion bug."
+                        )),
+                        span: slideforge_types::SourceSpan::default(),
+                    });
+                }
+
                 Ok(Value::Str(Arc::from(dt_str.as_str())))
             } else {
                 // as_datetime() returned None: calamine cannot convert this serial
@@ -2209,6 +2239,81 @@ mod tests {
             msg.contains("ISO 8601") || msg.contains("as_datetime()"),
             "error message must mention ISO 8601 or as_datetime(); got: {msg}"
         );
+    }
+
+    // ---------------------------------------------------------------------------
+    // OBS-4: Data::DateTime roundtrip validation (defense-in-depth, BC PC-6).
+    // ---------------------------------------------------------------------------
+
+    /// `test_obs4_datetime_roundtrip_validation_succeeds_for_valid_dt` --
+    /// OBS-4: `Data::DateTime` with a valid serial → ISO 8601 roundtrip succeeds.
+    ///
+    /// Defense-in-depth: after formatting to ISO 8601, the code re-parses the
+    /// result with chrono. This test confirms the happy path continues to work —
+    /// the roundtrip guard does NOT block a valid calamine-produced datetime.
+    ///
+    /// Load-bearing: if `roundtrip_ok` is falsely hard-coded to `false` (causing
+    /// every datetime to error), this test catches the regression.
+    ///
+    /// Traces to BC-1.03.006 PC-6 (ISO 8601 mandate), OBS-4.
+    #[test]
+    fn test_obs4_datetime_roundtrip_validation_succeeds_for_valid_dt() {
+        use calamine::{ExcelDateTime, ExcelDateTimeType};
+
+        // Serial 44927.0 = 2023-01-01T00:00:00 in Excel date encoding.
+        // as_datetime() will succeed for this well-known value.
+        let dt = ExcelDateTime::new(44_927.0, ExcelDateTimeType::DateTime, false);
+        let cell = Data::DateTime(dt);
+        let result = convert_calamine_cell(&cell, 0, 1, "data.xlsx");
+
+        // The roundtrip guard must NOT block a valid datetime.
+        assert!(
+            result.is_ok(),
+            "valid ExcelDateTime serial must produce Ok after roundtrip guard; got: {result:?}"
+        );
+        let v = result.unwrap();
+        // Value must be a string.
+        match &v {
+            Value::Str(s) => {
+                // Must be parseable as ISO 8601 (date-only or datetime).
+                let is_valid_iso = chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").is_ok()
+                    || chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S").is_ok()
+                    || chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S%.f").is_ok();
+                assert!(
+                    is_valid_iso,
+                    "DateTime output must be valid ISO 8601; got: '{s}'"
+                );
+            }
+            other => panic!("Data::DateTime must produce Value::Str, got: {other:?}"),
+        }
+    }
+
+    /// `test_obs4_datetime_roundtrip_validation_date_only_succeeds` --
+    /// OBS-4: `Data::DateTime` that strips to date-only roundtrips correctly.
+    ///
+    /// When the datetime serial represents midnight (00:00:00), the code emits
+    /// only the date part (YYYY-MM-DD). The roundtrip guard must accept this form.
+    ///
+    /// Traces to BC-1.03.006 PC-6, OBS-4.
+    #[test]
+    fn test_obs4_datetime_roundtrip_validation_date_only_succeeds() {
+        use calamine::{ExcelDateTime, ExcelDateTimeType};
+
+        // Serial 44927.0 = 2023-01-01T00:00:00 → should emit "2023-01-01" (date-only).
+        let dt = ExcelDateTime::new(44_927.0, ExcelDateTimeType::DateTime, false);
+        let cell = Data::DateTime(dt);
+        let result = convert_calamine_cell(&cell, 0, 1, "data.xlsx");
+
+        assert!(result.is_ok(), "date-only datetime must pass roundtrip guard; got: {result:?}");
+        if let Ok(Value::Str(s)) = result {
+            // Either date-only or datetime form is acceptable.
+            let is_date = chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d").is_ok();
+            let is_datetime = chrono::NaiveDateTime::parse_from_str(&s, "%Y-%m-%dT%H:%M:%S").is_ok();
+            assert!(
+                is_date || is_datetime,
+                "date-only output '{s}' must parse as NaiveDate or NaiveDateTime"
+            );
+        }
     }
 
     // ---------------------------------------------------------------------------
