@@ -175,7 +175,7 @@ impl std::fmt::Display for ShapeType {
 /// A non-fatal diagnostic produced by the layout engine.
 ///
 /// `LayoutWarning`s are accumulated during layout and do not halt processing.
-/// They are stored on [`crate::LaidOutDeck::warnings`] (via `slideforge-layout`).
+/// They are stored on `LaidOutDeck::warnings` in `slideforge-layout`.
 ///
 /// ## Placement in slideforge-types
 ///
