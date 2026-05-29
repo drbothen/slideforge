@@ -2,10 +2,10 @@
 document_type: prd-supplement
 supplement_type: nfr-catalog
 level: L3
-version: "1.0"
-status: draft
+version: "1.2"
+status: active
 producer: product-owner
-timestamp: 2026-05-24T00:00:00
+timestamp: 2026-05-28T00:00:00
 phase: 1a
 traces_to: .factory/specs/prd.md
 primary_consumers: [architect, performance-engineer]
@@ -120,6 +120,30 @@ primary_consumers: [architect, performance-engineer]
 |--------|---------|-------------|-----------------|------------------|------------|
 | NFR-034 | Holdout Eval | Phase 4 holdout mean satisfaction score | ≥ 0.85 | holdout-evaluator agent Phase 4 | ASM-001, R-009 |
 | NFR-035 | Holdout Eval | Phase 4 holdout must-pass scenario pass rate | ≥ 0.60 | holdout-evaluator agent Phase 4 | ASM-001, R-009 |
+
+---
+
+## Data Source Scale NFRs
+
+> Adjudicated 2026-05-28 (adversary pass 1, item J). BC-1.03.006 and BC-1.03.007 do not
+> specify a row cap — ALL rows are loaded. NFR-036 and NFR-037 anchor the large-sheet
+> performance and memory guarantees that the test `test_bc_1_03_006_xlsx_large_sheet_loads`
+> was implicitly testing. These NFRs give that test legitimate spec backing.
+> STORY-020 frontmatter nfr_refs should be updated by story-writer to include NFR-036
+> and NFR-037 in addition to NFR-021 through NFR-025.
+
+| NFR-ID | Category | Requirement | Numerical Target | Validation Method | Risk Source |
+|--------|---------|-------------|-----------------|------------------|------------|
+| NFR-036 | Performance | XLSX load time for a sheet with 10,000 data rows (50 columns, string + numeric mix) | < 2,000ms wall-clock | Unit benchmark: `cargo bench -p slideforge-data -- xlsx_10k_rows`; CI gate | BC-1.03.006, R-005 |
+| NFR-037 | Performance | SQLite load time for a query returning 10,000 rows (20 columns, text + integer mix) | < 500ms wall-clock | Unit benchmark: `cargo bench -p slideforge-data -- sqlite_10k_rows`; CI gate | BC-1.03.007, R-005 |
+| NFR-038 | Memory | Peak memory for loading 10,000-row XLSX sheet into Value::List | < 64MB resident for the loaded Value tree (exclusive of calamine scratch) | heaptrack measurement in CI | BC-1.03.006, NFR-006 |
+
+**Note on row cap:** There is NO hard row cap in BC-1.03.006 or BC-1.03.007. The `@data`
+directive loads all rows from the sheet or query result. NFR-036/037/038 express the
+performance contract for large sheets — they are scale guarantees, not caps. A sheet with
+50,000 rows is valid input; the build may exceed the NFR threshold and require optimization,
+but it will not produce an error. If a future decision adds a row cap for ergonomic or
+safety reasons, a new BC AC must be added with explicit `DataError::ParseError` behavior.
 
 ---
 

@@ -2,10 +2,10 @@
 document_type: prd-supplement
 supplement_type: interface-definitions
 level: L3
-version: "1.0"
-status: draft
+version: "1.2"
+status: active
 producer: product-owner
-timestamp: 2026-05-24T00:00:00
+timestamp: 2026-05-28T00:00:00
 phase: 1a
 traces_to: .factory/specs/prd.md
 primary_consumers: [implementer, test-writer]
@@ -452,3 +452,65 @@ pub trait InlineFormat: Send + Sync {
 ```
 
 All trait objects are `Send + Sync` to support concurrent export of multiple formats.
+
+---
+
+## 7. DataSource Plugin Calling Convention (Adjudicated 2026-05-28)
+
+> This section codifies the canonical `uri` parameter convention for all `DataSource`
+> implementations. Adjudicated in adversary pass 1 on STORY-020, item G.
+
+### 7.1 `DataSource::fetch` — `uri` Parameter Semantics
+
+The `DataSource` trait's `fetch` method signature is:
+
+```rust
+fn fetch(&self, uri: &str, opts: &FetchOptions) -> Result<DataValue, DataError>;
+```
+
+The `uri` parameter follows this protocol, which is **canonical for ALL DataSource
+implementations** (not STORY-020-only):
+
+| `uri` value | Behavior |
+|-------------|----------|
+| Non-empty string | `uri` overrides the plugin's internal path/state. The plugin MUST use `uri` as the data source location, ignoring `self.path` or equivalent internal field. |
+| Empty string (`""`) | Plugin-internal state is authoritative. The plugin uses `self.path` (or equivalent) as configured at construction time. |
+
+**Rationale:** File-based DataSource implementations (`XlsxDataSource`, `SqliteDataSource`,
+`JsonDataSource`, etc.) are constructed with a `path` field from the `@data` directive at
+parse time. The `fetch` call passes `uri` as a potential runtime override. Passing an empty
+`uri` is the normal case for compile-time file sources; a non-empty `uri` supports
+future use-cases like `slideforge watch` refreshing with a remapped path.
+
+**Invariant:** A DataSource plugin MUST NOT silently ignore a non-empty `uri`. If the plugin
+cannot handle URI-based override (e.g., because the format is path-specific), it MUST
+return `DataError::UnsupportedFormat` with a message explaining the constraint.
+
+### 7.2 Implementing the Convention in File-Based Sources
+
+For file-based plugins, the pattern is:
+
+```rust
+fn fetch(&self, uri: &str, opts: &FetchOptions) -> Result<DataValue, DataError> {
+    let effective_path = if uri.is_empty() { &*self.path } else { uri };
+    // ... use effective_path for all file I/O
+}
+```
+
+This pattern is required for `XlsxDataSource`, `SqliteDataSource`, `JsonDataSource`,
+`CsvDataSource`, `YamlDataSource`, and `TomlDataSource`.
+
+### 7.3 URI Convention for HTTP-Based Sources
+
+For HTTP DataSource implementations, `uri` is always expected to be non-empty (it IS the
+URL). An empty `uri` for an HTTP source produces `DataError::ParseError` with message:
+`"HTTP data source requires a non-empty URI"`.
+
+### 7.4 Downstream Callers
+
+The `DataSourceContext` caller (in the evaluator) passes:
+- `""` (empty) for `@data` directives that specify a static file path at parse time
+- The resolved path string for dynamic or remapped sources
+
+This convention is enforced at the `DataSourceContext` level; individual plugins do not
+need to handle partial paths or path resolution — they receive a full path or empty string.

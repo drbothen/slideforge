@@ -2,10 +2,10 @@
 document_type: prd-supplement
 supplement_type: error-taxonomy
 level: L3
-version: "1.0"
-status: draft
+version: "1.2"
+status: active
 producer: product-owner
-timestamp: 2026-05-24T00:00:00
+timestamp: 2026-05-28T00:00:00
 phase: 1a
 traces_to: .factory/specs/prd.md
 primary_consumers: [implementer, test-writer]
@@ -36,7 +36,10 @@ Always fatal. Build halts with accumulated errors. No output produced.
 | E-PAR-009 | broken | 1 | `'raw' keyword is not available in user .sf files at <file>:<line>:<col>. Use the shape: DSL instead.` | CAP-023 |
 | E-PAR-010 | broken | 1 | `slideforge_version "<ver>" is not supported. This binary supports version "<supported>".` | CAP-028 |
 | E-PAR-011 | broken | 1 | `Variant cycle detected: <var1> → <var2> → ... → <var1>` | DI-022, CAP-007 |
-| E-PAR-012 | broken | 1 | `Invalid indentation level at <file>:<line>:<col>. Expected multiple of <N> spaces.` | CAP-001 |
+| ~~E-PAR-012~~ | ~~retired~~ | — | ~~Invalid indentation level at `<file>:<line>:<col>`. Expected multiple of `<N>` spaces.~~ RETIRED: indentation-level errors are subsumed by E-PAR-001 (which carries span and column info sufficient to diagnose this case). E-PAR-012 was reassigned in the STORY-028 Pass-1 adjudication (2026-05-28). | CAP-001 |
+| E-PAR-012-SHP | broken | 1 | `Unknown shape type '<keyword>' at <file>:<line>:<col>. Known types: [rect, ellipse, arrow, line, star, roundRect].` | CAP-023 |
+| E-PAR-013 | broken | 1 | `Invalid hex color '<value>' at <file>:<line>:<col>. Expected 6-digit hex (#RRGGBB). Short-form #RGB and alpha #RRGGBBAA are not supported.` | CAP-023 |
+| E-PAR-014 | broken | 1 | `Shape gradient fill is not supported in v1.0 at <file>:<line>:<col>. Use a solid hex color or 'none'. Gradient fill is planned for a future release.` | CAP-023 |
 
 ---
 
@@ -69,6 +72,14 @@ slides that reference the failed data source.
 | E-DAT-004 | broken | 2 | `File data source not found: '<path>' (referenced at <file>:<line>:<col>)` | CAP-003 |
 | E-DAT-005 | broken | 2 | `Missing field '<field-path>' in data source '<name>' at <file>:<line>:<col>. Field does not exist in source data.` | DI-006, CAP-003 |
 | E-DAT-006 | broken | 2 | `HTTP source '<url>' blocked by allowed_domains policy. Add domain to [data].allowed_domains in slideforge.toml.` | CAP-003, R-011 |
+| E-DAT-007 | broken | 2 | `XLSX header row at '<path>' has empty cell at column <idx> (0-indexed). All header cells must be non-empty strings. Do not use blank column headers; remove unused columns or name all headers.` | BC-1.03.006 EC-007, DI-004 |
+| E-DAT-008 | broken | 2 | `XLSX header cell at column <idx> in '<path>' has type <calamine-type> (value: <repr>). Header cells must be String-typed. Use a string label as the column header.` | BC-1.03.006 EC-008, DI-004 |
+| E-DAT-009 | broken | 2 | `XLSX datetime cell at <col>:<row> in '<path>' has invalid ISO 8601 value '<value>'. Expected format: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS±HH:MM` | BC-1.03.006 EC-009, DI-004 |
+| E-DAT-010 | broken | 2 | `XLSX numeric cell at <col>:<row> in '<path>' has non-finite value (<NaN\|Infinity>). Non-finite floats are not representable in slideforge values.` | BC-1.03.006 EC-012 |
+| E-DAT-011 | broken | 2 | `'<path>' has .<ext> extension but is not a valid XLSX archive (ZIP magic bytes not found). File may be corrupted or misnamed.` | BC-1.03.006 EC-013 |
+| E-DAT-012 | broken | 2 | `TEXT column '<column_name>' at row <row_idx> in '<path>' contains invalid UTF-8 bytes. SQLite TEXT values must be valid UTF-8.` | BC-1.03.007 EC-008, DI-004 |
+| E-DAT-013 | broken | 2 | `'<path>' has .<ext> extension but is not a valid SQLite database (SQLite file header not found). File may be corrupted or misnamed.` | BC-1.03.007 EC-009 |
+| E-DAT-014 | broken | 2 | `Unsupported extension for SQLite data source: '<ext>'. Accepted extensions: .db, .sqlite, .sqlite3` | BC-1.03.007 EC-010 |
 
 ---
 
@@ -82,6 +93,26 @@ slideforge.toml to promote to a blocking error.
 | E-LAY-001 | degraded | 2 (if strict-overflow) | `CanvasOverflow: slide '<title>' field '<field>' overflows by ~<N> EMU (~<M>pt). Consider reducing content or font size.` | CAP-022, DEC-013 |
 | E-LAY-002 | broken | 2 | `Zero-slide deck: no slide blocks found in '<file>'. A deck must contain at least one slide.` | CAP-022, DEC-011 |
 | E-LAY-003 | degraded | 2 (if strict-overflow) | `Chart data is empty for slide '<title>'. Rendering error-slide placeholder.` | CAP-013, DEC-014 |
+| E-LAY-004 | broken | 2 | `Shape at slide <slide_index> (<file>:<line>:<col>) has no alt text and is not marked decorative: true. Add alt "..." or decorative: true.` | BC-3.04.001 EC-001, DI-001, CAP-023 |
+| E-LAY-005 | broken | 2 | `Inline nesting depth exceeded at slide <slide_index>: depth <depth> exceeds maximum of 64. Flatten the inline tree.` | BC-3.05.001 EC-006, CAP-024 |
+
+Note (E-LAY-004): This is the layout-layer defensive check for missing alt text on
+shapes. `LayoutError::MissingAlt` maps to E-LAY-004 in the CLI diagnostic renderer.
+The variant carries a `span: SourceSpan` field (file/line/col). The primary enforcement
+is E-A11-001 in the validation stage; E-LAY-004 fires only if the validation stage was
+bypassed (internal invariant violation).
+
+Note (E-LAY-004 field naming): The canonical field name for slide index in
+`LayoutError::MissingAlt` is `slide_index` (not `source_slide_index`). The module
+doc-comment in `slideforge-layout/src/error.rs` describes the intent to use
+`source_slide_index` consistently across variants, but the STORY-028 variants
+(`MissingAlt`, `MissingRiskCardField`, `MalformedSeverityCards`,
+`UnresolvedSeverityCards`) use `slide_index`. **The canonical field name going forward
+is `source_slide_index`** per the module header declaration (which is the source of
+truth per CLAUDE.md precedence rule — the header doc is earlier and more authoritative
+than individual variant choices). Data-engineer must rename `slide_index` → `source_slide_index`
+on `MissingAlt`, `MissingRiskCardField`, `MalformedSeverityCards`, and
+`UnresolvedSeverityCards` in a follow-up fix burst anchored to STORY-028.
 
 ---
 
