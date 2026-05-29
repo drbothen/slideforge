@@ -120,39 +120,6 @@ pub fn is_off_canvas(bbox: &BoundingBox, page: PageSize) -> bool {
         || Emu(bbox.y.0.saturating_add(bbox.height.0)) > page.height
 }
 
-/// Parse a shape type keyword string into a [`ShapeType`] enum variant.
-///
-/// Known keywords (closed v1.0 vocabulary per BC-3.04.001 invariant 4):
-/// `"rect"`, `"ellipse"`, `"arrow"`, `"line"`, `"star"`, `"roundRect"`.
-///
-/// Returns `None` for any other keyword; the caller MUST convert `None` to
-/// `E-PAR-012` (unknown shape type). There is NO `Custom` fallback — the
-/// type system enforces the closed vocabulary.
-///
-/// # Detection stage
-///
-/// In the current layout-stage pipeline, unknown shape type keywords are
-/// rejected at parse time via [`slideforge_types::ShapeType::from_keyword`]
-/// before a `ShapeSpec` is constructed. A `ShapeSpec` reaching layout always
-/// carries a resolved `ShapeType` enum variant; `parse_shape_type` is exposed
-/// here for utility (e.g., testing, future DSL tooling).
-///
-/// When the DSL parser (STORY-072 or equivalent) is implemented, it will call
-/// `from_keyword` directly and surface `E-PAR-012` with a source span at parse
-/// time rather than at the layout stage.
-#[must_use]
-pub fn parse_shape_type(keyword: &str) -> Option<ShapeType> {
-    match keyword {
-        "rect" => Some(ShapeType::Rect),
-        "ellipse" => Some(ShapeType::Ellipse),
-        "arrow" => Some(ShapeType::Arrow),
-        "line" => Some(ShapeType::Line),
-        "star" => Some(ShapeType::Star),
-        "roundRect" => Some(ShapeType::RoundRect),
-        _ => None,
-    }
-}
-
 /// Parse a CSS-style hex color string (`#RRGGBB`) into an [`Rgb`] value.
 ///
 /// Returns `None` if the string is not a valid 6-digit hex color.
@@ -230,7 +197,8 @@ pub fn layout_shapes(
         let text = shape.text.clone();
 
         // build_shape_frame enforces MissingAlt (EC-001 / BC-3.04.001).
-        // On error, accumulate and continue collecting all missing-alt shapes.
+        // F-MED-004: span is passed in directly — no re-emit needed.
+        // On MissingAlt error, accumulate and continue collecting all missing-alt shapes.
         let shape_frame = match build_shape_frame(
             shape_type,
             fill,
@@ -238,15 +206,11 @@ pub fn layout_shapes(
             alt,
             decorative,
             source_slide_index,
+            &shape.span,
         ) {
             Ok(sf) => sf,
             Err(err @ LayoutError::MissingAlt { .. }) => {
-                // Re-emit with the correct span from the ShapeSpec.
-                accumulated_errors.push(LayoutError::MissingAlt {
-                    source_slide_index,
-                    span: shape.span.clone(),
-                });
-                let _ = err; // discard the default-span version from build_shape_frame
+                accumulated_errors.push(err);
                 continue;
             },
             Err(other) => return Err(other),
@@ -341,10 +305,21 @@ pub fn build_fill_spec(fill_keyword: Option<&str>) -> FillSpec {
 
 /// Build a [`ShapeFrame`] from the resolved components.
 ///
+/// # Arguments
+///
+/// * `shape_type` — the resolved shape type enum variant.
+/// * `fill` — the fill specification (solid color or none).
+/// * `text` — optional inline node sequence for text content on the shape.
+/// * `alt` — optional alt text string (from `AltText::Provided`).
+/// * `decorative` — whether the shape is decorative (`alt` will be omitted).
+/// * `source_slide_index` — zero-based slide index for error messages.
+/// * `span` — source span of the shape block; used directly in `MissingAlt`
+///   errors so callers do not need to re-emit with a corrected span (F-MED-004).
+///
 /// # Errors
 ///
-/// Returns `Err(LayoutError::MissingAlt)` when `alt` is `None` and `decorative`
-/// is `false` (BC-3.04.001 EC-001 / DI-001).
+/// Returns `Err(LayoutError::MissingAlt)` with the provided `span` when `alt`
+/// is `None` and `decorative` is `false` (BC-3.04.001 EC-001 / DI-001).
 pub fn build_shape_frame(
     shape_type: ShapeType,
     fill: FillSpec,
@@ -352,6 +327,7 @@ pub fn build_shape_frame(
     alt: Option<Arc<str>>,
     decorative: bool,
     source_slide_index: usize,
+    span: &slideforge_types::SourceSpan,
 ) -> Result<ShapeFrame, LayoutError> {
     let alt_resolved = match (alt, decorative) {
         (Some(s), _) => slideforge_types::AltText::Provided(s),
@@ -359,7 +335,7 @@ pub fn build_shape_frame(
         (None, false) => {
             return Err(LayoutError::MissingAlt {
                 source_slide_index,
-                span: slideforge_types::SourceSpan::default(),
+                span: span.clone(),
             });
         },
     };
@@ -882,6 +858,7 @@ mod tests {
             None, // no explicit alt text
             true, // decorative: true
             0,
+            &SourceSpan::default(),
         )
         .expect("decorative shape must succeed");
         assert!(
@@ -908,6 +885,7 @@ mod tests {
             Some(Arc::from(alt_text)),
             false,
             0,
+            &SourceSpan::default(),
         )
         .expect("shape with explicit alt must succeed");
         assert!(
@@ -954,6 +932,7 @@ mod tests {
             None,  // no alt
             false, // not decorative
             3,     // source_slide_index=3 for error message
+            &SourceSpan::default(),
         );
         assert!(
             result.is_err(),
@@ -1067,99 +1046,103 @@ mod tests {
 
     // ─────────────────────────────────────────────────────────────────────────
     // ShapeType parsing — closed vocabulary (BC-3.04.001 invariant 4)
+    // F-MED-003: parse_shape_type deleted — tests use ShapeType::from_keyword.ok()
     // ─────────────────────────────────────────────────────────────────────────
 
-    /// `parse_shape_type("rect")` → `Some(ShapeType::Rect)`.
+    /// `ShapeType::from_keyword("rect").ok()` → `Some(ShapeType::Rect)`.
     ///
-    /// Red Gate: panics with `todo!()`.
+    /// F-MED-003: parse_shape_type was deleted (duplicate of ShapeType::from_keyword).
+    /// Tests now use `ShapeType::from_keyword(kw).ok()` for Option-style assertions.
     #[test]
     fn test_bc_3_04_001_parse_shape_type_rect() {
         assert!(
-            matches!(parse_shape_type("rect"), Some(ShapeType::Rect)),
-            r#"parse_shape_type("rect") must return Some(ShapeType::Rect)"#
+            matches!(
+                slideforge_types::ShapeType::from_keyword("rect").ok(),
+                Some(ShapeType::Rect)
+            ),
+            r#"from_keyword("rect").ok() must return Some(ShapeType::Rect)"#
         );
     }
 
-    /// `parse_shape_type("ellipse")` → `Some(ShapeType::Ellipse)`.
-    ///
-    /// Red Gate: panics with `todo!()`.
+    /// `ShapeType::from_keyword("ellipse").ok()` → `Some(ShapeType::Ellipse)`.
     #[test]
     fn test_bc_3_04_001_parse_shape_type_ellipse() {
         assert!(
-            matches!(parse_shape_type("ellipse"), Some(ShapeType::Ellipse)),
-            r#"parse_shape_type("ellipse") must return Some(ShapeType::Ellipse)"#
+            matches!(
+                slideforge_types::ShapeType::from_keyword("ellipse").ok(),
+                Some(ShapeType::Ellipse)
+            ),
+            r#"from_keyword("ellipse").ok() must return Some(ShapeType::Ellipse)"#
         );
     }
 
-    /// `parse_shape_type("arrow")` → `Some(ShapeType::Arrow)`.
-    ///
-    /// Red Gate: panics with `todo!()`.
+    /// `ShapeType::from_keyword("arrow").ok()` → `Some(ShapeType::Arrow)`.
     #[test]
     fn test_bc_3_04_001_parse_shape_type_arrow() {
         assert!(
-            matches!(parse_shape_type("arrow"), Some(ShapeType::Arrow)),
-            r#"parse_shape_type("arrow") must return Some(ShapeType::Arrow)"#
+            matches!(
+                slideforge_types::ShapeType::from_keyword("arrow").ok(),
+                Some(ShapeType::Arrow)
+            ),
+            r#"from_keyword("arrow").ok() must return Some(ShapeType::Arrow)"#
         );
     }
 
-    /// `parse_shape_type("line")` → `Some(ShapeType::Line)`.
-    ///
-    /// Red Gate: panics with `todo!()`.
+    /// `ShapeType::from_keyword("line").ok()` → `Some(ShapeType::Line)`.
     #[test]
     fn test_bc_3_04_001_parse_shape_type_line() {
         assert!(
-            matches!(parse_shape_type("line"), Some(ShapeType::Line)),
-            r#"parse_shape_type("line") must return Some(ShapeType::Line)"#
+            matches!(
+                slideforge_types::ShapeType::from_keyword("line").ok(),
+                Some(ShapeType::Line)
+            ),
+            r#"from_keyword("line").ok() must return Some(ShapeType::Line)"#
         );
     }
 
-    /// `parse_shape_type("star")` → `Some(ShapeType::Star)`.
-    ///
-    /// Red Gate: panics with `todo!()`.
+    /// `ShapeType::from_keyword("star").ok()` → `Some(ShapeType::Star)`.
     #[test]
     fn test_bc_3_04_001_parse_shape_type_star() {
         assert!(
-            matches!(parse_shape_type("star"), Some(ShapeType::Star)),
-            r#"parse_shape_type("star") must return Some(ShapeType::Star)"#
+            matches!(
+                slideforge_types::ShapeType::from_keyword("star").ok(),
+                Some(ShapeType::Star)
+            ),
+            r#"from_keyword("star").ok() must return Some(ShapeType::Star)"#
         );
     }
 
-    /// `parse_shape_type("roundRect")` → `Some(ShapeType::RoundRect)`.
+    /// `ShapeType::from_keyword("roundRect").ok()` → `Some(ShapeType::RoundRect)`.
     ///
     /// Added in BC-3.04.001 v1.3 per Q7 decision example.
-    ///
-    /// Red Gate: panics with `todo!()`.
     #[test]
     fn test_bc_3_04_001_parse_shape_type_round_rect() {
         assert!(
-            matches!(parse_shape_type("roundRect"), Some(ShapeType::RoundRect)),
-            r#"parse_shape_type("roundRect") must return Some(ShapeType::RoundRect)"#
+            matches!(
+                slideforge_types::ShapeType::from_keyword("roundRect").ok(),
+                Some(ShapeType::RoundRect)
+            ),
+            r#"from_keyword("roundRect").ok() must return Some(ShapeType::RoundRect)"#
         );
     }
 
-    /// `parse_shape_type("frobnicator")` → `None` (unknown keyword → E-PAR-012).
+    /// `ShapeType::from_keyword("frobnicator").ok()` → `None` (unknown keyword → E-PAR-012).
     ///
-    /// BC-3.04.001 invariant 4: no `Custom` fallback — unknown keywords are parse
-    /// errors. The implementer wires `None` → `E-PAR-012` in the DSL parser
-    /// (TODO(STORY-028-fix-burst)).
-    ///
-    /// Red Gate: panics with `todo!()`.
+    /// BC-3.04.001 invariant 4: no `Custom` fallback — unknown keywords are parse errors.
     #[test]
     fn test_bc_3_04_001_parse_shape_type_unknown_returns_none() {
         assert!(
-            parse_shape_type("frobnicator").is_none(),
-            r#"parse_shape_type("frobnicator") must return None (no Custom fallback)"#
+            slideforge_types::ShapeType::from_keyword("frobnicator").ok().is_none(),
+            r#"from_keyword("frobnicator").ok() must return None (no Custom fallback)"#
         );
     }
 
-    /// `parse_shape_type("")` → `None` (empty keyword → unknown).
-    ///
-    /// Red Gate: panics with `todo!()`.
+    /// `ShapeType::from_keyword("").ok()` → `None` (empty keyword → unknown).
     #[test]
     fn test_bc_3_04_001_parse_shape_type_empty_returns_none() {
         assert!(
-            parse_shape_type("").is_none(),
-            "empty keyword must return None (no Custom fallback)"
+            slideforge_types::ShapeType::from_keyword("").ok().is_none(),
+            "from_keyword(\"\").ok() must return None (no Custom fallback)"
         );
     }
 
@@ -1691,6 +1674,7 @@ mod tests {
             Some(Arc::from("Blue rectangle")),
             false,
             0,
+            &SourceSpan::default(),
         )
         .expect("build_shape_frame must succeed");
 
