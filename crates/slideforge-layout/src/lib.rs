@@ -27,9 +27,13 @@
 //!   returns `Err(LayoutError::SlideCountMismatch)`.
 //! - **Determinism (BC-3.06.002):** Identical inputs always produce identical
 //!   output (no random seeds, no non-deterministic data structures).
-//! - **Valid EMU coordinates (BC-3.06.003):** Every `BoundingBox` satisfies
-//!   `x >= 0`, `y >= 0`, `width > 0`, `height > 0`, `x + width <= page_width`,
-//!   `y + height <= page_height`.
+//! - **Valid EMU coordinates (BC-3.06.003):** Every `BoundingBox` for
+//!   non-shape frames (region/placeholder/text-run) satisfies `x >= 0`,
+//!   `y >= 0`, `width > 0`, `height > 0`, `x + width <= page_width`,
+//!   `y + height <= page_height`. Shape frames may legitimately fall outside
+//!   the page per BC-3.04.001 EC-002 and produce a
+//!   [`LayoutWarning::OffCanvas`]; they are still included in the output at
+//!   their declared position.
 //! - **Pure function (AC-008):** No I/O, no side effects, no panics.
 //!
 //! ## Forbidden dependencies
