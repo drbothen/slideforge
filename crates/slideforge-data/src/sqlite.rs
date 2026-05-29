@@ -184,14 +184,17 @@ impl DataSource for SqliteDataSource {
     /// DML query (defense-in-depth), non-existent table, or duplicate column names.
     ///
     /// Traces to BC-1.03.007 postconditions 1-4.
-    #[instrument(skip(self, _opts), fields(path = %self.path))]
+    #[instrument(skip(self, _opts, uri), fields(path = tracing::field::Empty))]
     fn load(&self, uri: &str, _opts: &DataSourceOptions) -> Result<Value, DataSourceError> {
         // F-MED-5 / interface-definitions §7: uri overrides self.path when non-empty.
+        // Record the effective path AFTER resolving the override so the span reflects
+        // the actual file being loaded (F-PASS11-OBS-1).
         let path_str: &str = if uri.is_empty() {
             self.path.as_ref()
         } else {
             uri
         };
+        tracing::Span::current().record("path", path_str);
 
         // AC-010 (defensive): reject empty query string.
         // The DSL parser enforces this before load() is called, but we guard

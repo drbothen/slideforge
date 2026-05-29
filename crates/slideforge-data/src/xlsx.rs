@@ -111,14 +111,17 @@ impl DataSource for XlsxDataSource {
     /// missing sheet, empty header, merged header cells, or parse failure.
     ///
     /// Traces to BC-1.03.006 postconditions 1-9.
-    #[instrument(skip(self, _opts), fields(path = %self.path))]
+    #[instrument(skip(self, _opts, uri), fields(path = tracing::field::Empty))]
     fn load(&self, uri: &str, _opts: &DataSourceOptions) -> Result<Value, DataSourceError> {
         // Resolve the effective path: prefer uri if non-empty, fall back to self.path.
+        // Record the effective path AFTER resolving the override so the span reflects
+        // the actual file being loaded (F-PASS11-OBS-1).
         let path_str: &str = if uri.is_empty() {
             self.path.as_ref()
         } else {
             uri
         };
+        tracing::Span::current().record("path", path_str);
 
         // AC-005: Reject .xls (legacy format) before touching the file.
         // Traces to BC-1.03.006 invariant 3, edge case EC-002.
@@ -295,10 +298,11 @@ fn convert_calamine_cell(cell: &Data, col: u32, row: u32, path: &str) -> Result<
             // BC-1.03.006 postcondition 6 / invariant 9: validate ISO 8601.
             // Traces to VP-024 (valid) and VP-025 (invalid).
             // Try RFC 3339 first (e.g. "2024-01-15T09:00:00+00:00"), then
-            // NaiveDateTime ("%Y-%m-%dT%H:%M:%S"), then NaiveDate ("%Y-%m-%d").
+            // NaiveDate ("%Y-%m-%d"), then NaiveDateTime ("%Y-%m-%dT%H:%M:%S").
+            // Order matches AC-018 and BC-1.03.006 AC-BC-004 (F-PASS11-OBS-3).
             let is_valid = chrono::DateTime::parse_from_rfc3339(s).is_ok()
-                || chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S").is_ok()
-                || chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").is_ok();
+                || chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").is_ok()
+                || chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S").is_ok();
             if is_valid {
                 Ok(Value::Str(Arc::from(s.as_str())))
             } else {
@@ -338,9 +342,21 @@ fn convert_calamine_cell(cell: &Data, col: u32, row: u32, path: &str) -> Result<
                 };
                 Ok(Value::Str(Arc::from(dt_str.as_str())))
             } else {
-                // Fallback: raw float serial number as string (should not occur
-                // in practice with well-formed xlsx files).
-                Ok(Value::Str(Arc::from(format!("{dt}").as_str())))
+                // as_datetime() returned None: calamine cannot convert this serial
+                // datetime to a chrono NaiveDateTime.  We cannot produce an ISO 8601
+                // string, so we must error.  Emitting the raw serial float would
+                // violate BC-1.03.006 PC-6 (F-PASS11-OBS-4).
+                Err(DataError::ParseError {
+                    code: crate::error::E_DAT_009,
+                    path: Arc::from(path),
+                    format: DataFormat::Xlsx,
+                    reason: Arc::from(format!(
+                        "XLSX DateTime cell at col {col} row {row} in '{path}' cannot be \
+                        converted to ISO 8601: calamine as_datetime() returned None. \
+                        The serial value may represent an out-of-range date."
+                    )),
+                    span: slideforge_types::SourceSpan::default(),
+                })
             }
         },
         Data::Error(_) | Data::Empty => Ok(Value::Null),
@@ -2077,6 +2093,50 @@ mod tests {
         assert!(
             msg.contains("[E-DAT-009]"),
             "invalid DateTimeIso error must embed '[E-DAT-009]' strict bracket code; got: {msg}"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // F-PASS11-OBS-4: Data::DateTime where as_datetime() returns None must
+    // produce E-DAT-009 ParseError, not a non-ISO serial string.
+    // BC-1.03.006 PC-6: all DateTime output must be ISO 8601.
+    // ---------------------------------------------------------------------------
+
+    /// `test_bc_1_03_006_convert_datetime_as_datetime_none_produces_parse_error` --
+    /// `Data::DateTime` where `as_datetime()` returns `None` → E-DAT-009.
+    ///
+    /// When calamine's `ExcelDateTime::as_datetime()` fails (e.g., out-of-range
+    /// serial value), `convert_calamine_cell` must return `DataError::ParseError`
+    /// with code E-DAT-009 instead of silently emitting the raw serial float as a
+    /// string (which would violate BC-1.03.006 PC-6 / ISO 8601 mandate).
+    ///
+    /// Load-bearing: this test fails if the `else` branch in `Data::DateTime`
+    /// handling reverts to `Ok(Value::Str(format!("{dt}")))`.
+    ///
+    /// Traces to BC-1.03.006 postcondition 6, F-PASS11-OBS-4.
+    #[test]
+    fn test_bc_1_03_006_convert_datetime_as_datetime_none_produces_parse_error() {
+        use calamine::{ExcelDateTime, ExcelDateTimeType};
+
+        // A serial value of f64::MAX causes checked_add_signed to overflow,
+        // so ExcelDateTime::as_datetime() returns None.
+        let dt = ExcelDateTime::new(f64::MAX, ExcelDateTimeType::DateTime, false);
+        let cell = Data::DateTime(dt);
+        let result = convert_calamine_cell(&cell, 2, 5, "data.xlsx");
+
+        assert!(
+            result.is_err(),
+            "Data::DateTime where as_datetime() returns None must produce Err (F-PASS11-OBS-4)"
+        );
+        let err = result.unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("[E-DAT-009]"),
+            "DateTime as_datetime() None error must embed '[E-DAT-009]'; got: {msg}"
+        );
+        assert!(
+            msg.contains("ISO 8601") || msg.contains("as_datetime()"),
+            "error message must mention ISO 8601 or as_datetime(); got: {msg}"
         );
     }
 

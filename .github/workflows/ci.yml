@@ -349,6 +349,10 @@ jobs:
         with:
           shared-key: perf-smoke
       - name: Performance smoke tests (NFR-036/037)
+        env:
+          # F-PASS11-OBS-2: suppress color codes so the grep regex remains stable
+          # across cargo upgrades that may change ANSI escape sequences.
+          CARGO_TERM_COLOR: never
         run: |
           set -euo pipefail
           cargo test --release -p slideforge-data --test perf_smoke -- --ignored --test-threads 1 2>&1 | tee /tmp/perf.log
