@@ -1061,10 +1061,10 @@ mod tests {
     /// canonical "strings are strings" rule. Headers must be stored byte-for-byte.
     ///
     /// A whitespace-only cell `"   "` is a non-empty string. It passes the empty-cell
-    /// check (None/Data::Empty) and is stored as `"   "` (three spaces). Users who
+    /// check (`None`/`Data::Empty`) and is stored as `"   "` (three spaces). Users who
     /// want stripped headers must clean the XLSX before loading.
     ///
-    /// This test FAILS if trim() is reintroduced (the column key would be `""` after
+    /// This test FAILS if `trim()` is reintroduced (the column key would be `""` after
     /// trimming, causing key mismatch) — load-bearing per TD-VSDD-059.
     ///
     /// Traces to BC-1.03.006 invariant 5 (AC-BC-001), F-LOW-1.
@@ -1115,10 +1115,10 @@ mod tests {
     /// like `" Score "` (spaces around content) is stored byte-for-byte, not stripped.
     ///
     /// Complements `test_bc_1_03_006_xlsx_whitespace_only_header_stored_as_is`.
-    /// Confirms that F-LOW-1 removal of trim() applies to mixed-whitespace headers
+    /// Confirms that F-LOW-1 removal of `trim()` applies to mixed-whitespace headers
     /// as well as whitespace-only cells.
     ///
-    /// This test FAILS if trim() is reintroduced — the column key would be `"Score"`
+    /// This test FAILS if `trim()` is reintroduced — the column key would be `"Score"`
     /// instead of `" Score "`, causing the `row.contains_key(" Score ")` assertion to fail.
     ///
     /// Traces to BC-1.03.006 invariant 5 (AC-BC-001), F-LOW-1.

@@ -106,7 +106,7 @@ impl SqliteDataSource {
 impl SqliteDataSource {
     /// Open the `SQLite` database at `path` with `SQLITE_OPEN_READ_ONLY`.
     ///
-    /// This is the SINGLE authoritative point for opening a SQLite connection in
+    /// This is the SINGLE authoritative point for opening a `SQLite` connection in
     /// read-only mode. Both production `load()` and VP-027 test coverage go through
     /// this function, ensuring the `SQLITE_OPEN_READ_ONLY` flag cannot be silently
     /// removed from the production path without breaking `test_vp_027_readonly_enforced`.
@@ -1541,7 +1541,7 @@ mod tests {
     /// Step 2 is load-bearing: it FAILS if `open_readonly_connection` is changed to
     /// `SQLITE_OPEN_READ_WRITE`. Combined with F-HIGH-1's refactor that routes `load()`
     /// through `open_readonly_connection`, this gives transitivity:
-    ///   `load()` → `open_readonly_connection` → SQLITE_OPEN_READ_ONLY → step 2 fails
+    ///   `load()` → `open_readonly_connection` → `SQLITE_OPEN_READ_ONLY` → step 2 fails
     ///
     /// Traces to BC-1.03.007 invariant 2, postcondition 1, VP-027.
     #[test]
