@@ -1829,6 +1829,125 @@ mod tests {
         }
     }
 
+    /// VP-048 — y-overflow propagates as `LayoutError::Multiple` containing `ArithmeticOverflow`.
+    ///
+    /// Mirrors `test_vp_048_layout_shapes_overflow_x_returns_arithmetic_overflow` but
+    /// exercises the `y` field overflow path. The x, y, width, and height paths share
+    /// identical `checked_mul` logic; each has a dedicated test so a future refactor
+    /// cannot accidentally skip one field without breaking coverage.
+    #[test]
+    fn test_vp_048_layout_shapes_overflow_y_returns_arithmetic_overflow() {
+        let st = slideforge_types::ShapeType::from_keyword("rect").expect("rect must be known");
+        let spec = ShapeSpec {
+            shape_type: st,
+            position: ShapePosition {
+                x: ShapeUnit::Inches(1000),
+                y: ShapeUnit::Inches(i64::MAX), // overflows checked_mul
+                width: ShapeUnit::Inches(1000),
+                height: ShapeUnit::Inches(500),
+            },
+            fill: FillSpec::None,
+            text: None,
+            alt: Some(AltText::Provided(Arc::from("test shape"))),
+            decorative: false,
+            span: SourceSpan::default(),
+        };
+        let shapes = vec![spec];
+        let result = layout_shapes(&shapes, default_page(), 0, DEFAULT_EM_IN_EMU);
+        assert!(result.is_err(), "y overflow must return Err");
+        match result.unwrap_err() {
+            LayoutError::Multiple { inner } => {
+                assert!(
+                    inner
+                        .iter()
+                        .any(|e| matches!(e, LayoutError::ArithmeticOverflow { .. })),
+                    "Multiple must contain ArithmeticOverflow for y overflow; got: {inner:?}"
+                );
+            },
+            other => panic!(
+                "expected LayoutError::Multiple containing ArithmeticOverflow, got: {other:?}"
+            ),
+        }
+    }
+
+    /// VP-048 — width-overflow propagates as `LayoutError::Multiple` containing `ArithmeticOverflow`.
+    ///
+    /// Mirrors `test_vp_048_layout_shapes_overflow_x_returns_arithmetic_overflow` but
+    /// exercises the `width` field overflow path.
+    #[test]
+    fn test_vp_048_layout_shapes_overflow_width_returns_arithmetic_overflow() {
+        let st = slideforge_types::ShapeType::from_keyword("rect").expect("rect must be known");
+        let spec = ShapeSpec {
+            shape_type: st,
+            position: ShapePosition {
+                x: ShapeUnit::Inches(1000),
+                y: ShapeUnit::Inches(1000),
+                width: ShapeUnit::Inches(i64::MAX), // overflows checked_mul
+                height: ShapeUnit::Inches(500),
+            },
+            fill: FillSpec::None,
+            text: None,
+            alt: Some(AltText::Provided(Arc::from("test shape"))),
+            decorative: false,
+            span: SourceSpan::default(),
+        };
+        let shapes = vec![spec];
+        let result = layout_shapes(&shapes, default_page(), 0, DEFAULT_EM_IN_EMU);
+        assert!(result.is_err(), "width overflow must return Err");
+        match result.unwrap_err() {
+            LayoutError::Multiple { inner } => {
+                assert!(
+                    inner
+                        .iter()
+                        .any(|e| matches!(e, LayoutError::ArithmeticOverflow { .. })),
+                    "Multiple must contain ArithmeticOverflow for width overflow; got: {inner:?}"
+                );
+            },
+            other => panic!(
+                "expected LayoutError::Multiple containing ArithmeticOverflow, got: {other:?}"
+            ),
+        }
+    }
+
+    /// VP-048 — height-overflow propagates as `LayoutError::Multiple` containing `ArithmeticOverflow`.
+    ///
+    /// Mirrors `test_vp_048_layout_shapes_overflow_x_returns_arithmetic_overflow` but
+    /// exercises the `height` field overflow path.
+    #[test]
+    fn test_vp_048_layout_shapes_overflow_height_returns_arithmetic_overflow() {
+        let st = slideforge_types::ShapeType::from_keyword("rect").expect("rect must be known");
+        let spec = ShapeSpec {
+            shape_type: st,
+            position: ShapePosition {
+                x: ShapeUnit::Inches(1000),
+                y: ShapeUnit::Inches(1000),
+                width: ShapeUnit::Inches(1000),
+                height: ShapeUnit::Inches(i64::MAX), // overflows checked_mul
+            },
+            fill: FillSpec::None,
+            text: None,
+            alt: Some(AltText::Provided(Arc::from("test shape"))),
+            decorative: false,
+            span: SourceSpan::default(),
+        };
+        let shapes = vec![spec];
+        let result = layout_shapes(&shapes, default_page(), 0, DEFAULT_EM_IN_EMU);
+        assert!(result.is_err(), "height overflow must return Err");
+        match result.unwrap_err() {
+            LayoutError::Multiple { inner } => {
+                assert!(
+                    inner
+                        .iter()
+                        .any(|e| matches!(e, LayoutError::ArithmeticOverflow { .. })),
+                    "Multiple must contain ArithmeticOverflow for height overflow; got: {inner:?}"
+                );
+            },
+            other => panic!(
+                "expected LayoutError::Multiple containing ArithmeticOverflow, got: {other:?}"
+            ),
+        }
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // Item N — LayoutError::multiple() smart constructor tests
     // ─────────────────────────────────────────────────────────────────────────
