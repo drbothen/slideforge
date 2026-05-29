@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.3"
+version: "1.3.1"
 status: active
 producer: product-owner
 timestamp: 2026-05-28T00:00:00
@@ -14,7 +14,7 @@ subsystem: SS-TBD
 capability: CAP-023
 lifecycle_status: active
 introduced: v1.0.0
-modified: ["v1.2 — adversary pass 1 adjudication: codified ShapeSpec position schema, hex color contract, shape_type closed vocabulary, off-canvas boundary semantics, gradient deferral, MissingAlt span, multi-error accumulation", "v1.3 — roundRect added to closed vocabulary per Q7 decision example"]
+modified: ["v1.2 — adversary pass 1 adjudication: codified ShapeSpec position schema, hex color contract, shape_type closed vocabulary, off-canvas boundary semantics, gradient deferral, MissingAlt span, multi-error accumulation", "v1.3 — roundRect added to closed vocabulary per Q7 decision example", "v1.3.1 — STORY-TBD-shape-gradient-fills placeholder resolved to STORY-072"]
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -92,7 +92,7 @@ coordinates. ALL errors from a slide's shape set are accumulated before returnin
    pub enum FillSpec {
        SolidColor(Rgb),
        None,
-       // Gradient variant: DEFERRED to STORY-NNN (see Deferred Surfaces section)
+       // Gradient variant: DEFERRED to STORY-072 (see Deferred Surfaces section)
    }
    ```
    All types derive `Debug + Clone + PartialEq + Eq + Hash` for comemo compatibility
@@ -183,7 +183,7 @@ missing — it is a planned feature with a spec boundary:
 **Gradient fills** (`fill gradient(from, to)`): The `FillSpec::Gradient { from: Rgb, to: Rgb }`
 variant is defined in the layout IR type but is NOT reachable from the DSL parser in v1.0.
 Any attempt to use gradient syntax at the DSL level produces E-PAR-014.
-Target story: **STORY-TBD-shape-gradient-fills** (to be created by orchestrator).
+Target story: **STORY-072** (`STORY-072-shape-gradient-fills.md`).
 When that story ships, it will: (1) add gradient parsing to the DSL parser,
 (2) remove E-PAR-014, (3) implement `FillSpec::Gradient` handling in PPTX/PDF/HTML exporters.
 
@@ -206,7 +206,7 @@ When that story ships, it will: (1) add gradient parsing to the DSL parser,
 | Capability Anchor Justification | CAP-023 ("Structured Shape DSL") per capabilities.md §CAP-023 — "shape: blocks with type, position, size, fill, text, and required alt text" is the verbatim description of CAP-023 |
 | L2 Domain Invariants | DI-001 (alt text required on visual elements), DI-010 (integer EMU for all coordinates), DI-018 (error accumulation), DI-021 (raw keyword rejected) |
 | Architecture Module | slideforge-layout crate — shape block parsing and EMU conversion; slideforge-pptx crate — shape to sp element |
-| Stories | STORY-028 |
+| Stories | STORY-028, STORY-072 |
 | Schema Delegation | `ShapeSpec` position fields (`ShapePosition`, `ShapeUnit`) are added to `slideforge-types/src/specs.rs` by data-engineer per orchestrator dispatch. BC defines the contract; implementation is in data-engineer scope. |
 
 ## Related BCs

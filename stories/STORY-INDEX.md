@@ -9,8 +9,8 @@ traces_to:
   - .factory/stories/epics.md
   - .factory/stories/dependency-graph.md
   - .factory/stories/wave-schedule.md
-total_stories: 71
-stories_written: 71
+total_stories: 72
+stories_written: 72
 stories_ready: 0
 stories_in_progress: 3
 stories_merged: 30
@@ -18,7 +18,7 @@ stories_merged: 30
 
 # STORY-INDEX — slideforge v1.0
 
-> Authoritative index of all 71 stories across 6 waves and 21 epics.
+> Authoritative index of all 72 stories across 6 waves and 21 epics.
 > Update `status` and `merged_sha` fields as stories progress.
 > Story files live in `.factory/stories/stories/STORY-NNN-[short].md`.
 >
@@ -36,7 +36,8 @@ stories_merged: 30
 | Wave 4 | 13 | 13 | 0 | 0 | 0 | 0 |
 | Wave 5 | 14 | 14 | 0 | 0 | 0 | 0 |
 | Wave 6 | 6 | 6 | 0 | 0 | 0 | 0 |
-| **Total** | **71** | **38** | **0** | **3** | **30** | **0** |
+| Wave TBD | 1 | 1 | 0 | 0 | 0 | 0 |
+| **Total** | **72** | **39** | **0** | **3** | **30** | **0** |
 
 ---
 
@@ -165,6 +166,18 @@ stories_merged: 30
 
 ---
 
+## Wave TBD: Deferred Surfaces (1 story)
+
+These stories were created to resolve explicit "deferred surface" placeholders in BCs but have not yet been wave-scheduled. Wave assignment pending orchestrator dispatch (likely Wave 4 or later, after exporters are available).
+
+| Story ID | Epic | Title | BCs | Priority | Points | tdd_mode | Status |
+|----------|------|-------|-----|---------|--------|---------|--------|
+| [STORY-072](stories/STORY-072-shape-gradient-fills.md) | EPIC-07 | shape: Gradient Fills (FillSpec::Gradient) | BC-3.04.001 | P2 | 3 | strict | draft |
+
+**Wave TBD total points: 3**
+
+---
+
 ## Story Points Summary
 
 | Wave | Stories | Total Points | Avg Points/Story |
@@ -175,12 +188,15 @@ stories_merged: 30
 | Wave 4 | 13 | 85 | 6.5 |
 | Wave 5 | 14 | 84 | 6.0 |
 | Wave 6 | 6 | 42 | 7.0 |
-| **Total** | **71** | **437** | **6.2** |
+| Wave TBD | 1 | 3 | 3.0 |
+| **Total** | **72** | **440** | **6.1** |
 
 > No story exceeds 13 points. STORY-023 (brand synthesis — 13 pts) and STORY-037
 > (PPTX core serialization — 13 pts) are the largest stories. Both have well-
 > defined scope that warrants their size and were not split further to preserve
 > coherent implementation units. All other stories are 3-8 points.
+> STORY-072 (gradient fills — 3 pts) is a deferred surface from BC-3.04.001 v1.3;
+> wave assignment pending orchestrator dispatch.
 
 ---
 
