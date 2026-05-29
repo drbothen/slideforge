@@ -27,6 +27,13 @@ in pure-core crates.
 | slideforge-pdf | EMU-to-PDF coordinate mapping: correct Y-axis flip, no overflow | VP-006 |
 | slideforge-validate | WCAG contrast formula: correct luminance linearization (0.04045 threshold) | VP-007 |
 | slideforge-validate | Alt enforcement: image with AltText::Text("") always produces diagnostic | VP-008 |
+| slideforge-data | XLSX whole-number Float promotion: f.fract()==0 → Value::Int | VP-021 |
+| slideforge-data | XLSX non-whole Float stays Float (complement of VP-021) | VP-022 |
+| slideforge-data | XLSX non-finite Float (NaN/Infinity) → ParseError | VP-023 |
+| slideforge-layout | Shape position EMU conversion: pure integer arithmetic, correct constants | VP-037 |
+| slideforge-layout | Shape hex color case-insensitive: #FF6F00 == #ff6f00 | VP-040 |
+| slideforge-layout | Shape off-canvas: x+w==page_w NOT off-canvas; x+w==page_w+1 IS | VP-041 |
+| slideforge-layout | Inline depth bound: depth 64 accepted, depth 65 rejected | VP-045 |
 
 ### Should Prove (proptest, Phase 6)
 
@@ -73,7 +80,7 @@ Must pass before v1.0 release (formal-verifier gate):
 - VP-007: WCAG contrast formula
 - VP-008: Alt diagnostic invariant
 
-## P1 Verification Properties (Phase 6 stretch goals)
+## P1 Verification Properties (Phase 6 stretch goals and Phase 3 unit)
 
 - VP-005: Integer arithmetic bounds in eval
 - VP-009: Parse of valid .sf source produces non-empty AST (proptest)
@@ -83,6 +90,7 @@ Must pass before v1.0 release (formal-verifier gate):
 - VP-013: Every synthesized PPTX is valid ZIP with [Content_Types].xml (proptest)
 - VP-014: Parser fuzz: any input terminates and produces errors or AST (fuzz)
 - VP-015: Eval fuzz: any valid AST terminates eval within time bound (fuzz)
+- VP-016 through VP-047: XLSX data source (VP-016–VP-026), SQLite data source (VP-027–VP-036), shape DSL (VP-037–VP-042), rich inline formatting (VP-043–VP-047) — all unit or Kani (see VP-INDEX for per-VP tool assignment)
 
 ## Tooling (ADR-011, Feasibility Notes)
 

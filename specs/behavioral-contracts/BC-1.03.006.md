@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.3"
+version: "1.3.1"
 status: active
 producer: product-owner
 timestamp: 2026-05-28T00:00:00
@@ -192,17 +192,17 @@ attempting to parse corrupt or misnamed files and producing misleading errors.
 
 | VP-NNN | Property | Proof Method |
 |--------|----------|-------------|
-| VP-TBD | First row of .xlsx becomes map keys | unit test: fixture xlsx, assert header row = map keys |
-| VP-TBD | Empty cells produce null (not empty string) | unit test: xlsx with empty cell, assert null in loaded data |
-| VP-TBD | Missing file always produces E-DAT-004 | unit test: assert error code on missing file |
-| VP-TBD | Partial-empty header row produces ParseError (no phantom column) | unit test: xlsx with blank middle header; assert E-DAT-003, no `__empty_` key in result |
-| VP-TBD | Non-string header cell (Int) produces ParseError | unit test: xlsx where header cell is integer; assert E-DAT-003 with type name in message |
-| VP-TBD | Whole-number Float 95.0 loads as Value::Int(95) | unit test: xlsx written with rust_xlsxwriter using integer value; assert Int(95) not Float |
-| VP-TBD | Non-whole Float 3.14 loads as Value::Float | unit test: xlsx with float 3.14; assert Float(3.14) |
-| VP-TBD | Non-finite Float (NaN) produces ParseError | unit test: assert E-DAT-003 for NaN cell |
-| VP-TBD | Valid DateTimeIso passes through as Value::Str | unit test: calamine DateTimeIso cell with valid RFC 3339; assert Value::Str |
-| VP-TBD | Invalid DateTimeIso string produces ParseError | unit test: stub calamine to return DateTimeIso("garbage"); assert E-DAT-003 |
-| VP-TBD | Correct extension + wrong magic bytes produces ParseError | unit test: write non-ZIP bytes to .xlsx file; assert E-DAT-003 |
+| VP-016 | First row of .xlsx becomes map keys | unit test: fixture xlsx, assert header row = map keys |
+| VP-017 | Empty cells produce null (not empty string) | unit test: xlsx with empty cell, assert null in loaded data |
+| VP-018 | Missing file always produces E-DAT-004 | unit test: assert error code on missing file |
+| VP-019 | Partial-empty header row produces ParseError (no phantom column) | unit test: xlsx with blank middle header; assert E-DAT-003, no `__empty_` key in result |
+| VP-020 | Non-string header cell (Int) produces ParseError | unit test: xlsx where header cell is integer; assert E-DAT-003 with type name in message |
+| VP-021 | Whole-number Float 95.0 loads as Value::Int(95) | unit test + Kani: xlsx written with rust_xlsxwriter using integer value; assert Int(95) not Float |
+| VP-022 | Non-whole Float 3.14 loads as Value::Float | unit test + Kani: xlsx with float 3.14; assert Float(3.14) |
+| VP-023 | Non-finite Float (NaN) produces ParseError | unit test + Kani: assert E-DAT-003 for NaN cell |
+| VP-024 | Valid DateTimeIso passes through as Value::Str | unit test: calamine DateTimeIso cell with valid RFC 3339; assert Value::Str |
+| VP-025 | Invalid DateTimeIso string produces ParseError | unit test: stub calamine to return DateTimeIso("garbage"); assert E-DAT-003 |
+| VP-026 | Correct extension + wrong magic bytes produces ParseError | unit test: write non-ZIP bytes to .xlsx file; assert E-DAT-003 |
 
 ## Traceability
 
@@ -221,6 +221,7 @@ attempting to parse corrupt or misnamed files and producing misleading errors.
 | 1.1 | 2026-05-24 | Initial draft |
 | 1.2 | 2026-05-24 | Minor clarifications (pre-adversary) |
 | 1.3 | 2026-05-28 | Adversary Pass 1 adjudications (items A, B, C, D, H): reject partial-empty headers; reject non-string headers; Float-to-Int promotion rule; DateTimeIso ISO 8601 validation; extension + magic-byte two-phase check. Added EC-007 through EC-013, AC-BC-001 through AC-BC-005, VP expansions. |
+| 1.3.1 | 2026-05-28 | VP propagation burst: assigned VP-016 through VP-026 to all VP-TBD entries. |
 
 ## Related BCs
 
@@ -239,4 +240,4 @@ STORY-020
 
 ## VP Anchors
 
-(filled after VP creation)
+VP-016, VP-017, VP-018, VP-019, VP-020, VP-021, VP-022, VP-023, VP-024, VP-025, VP-026

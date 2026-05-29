@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.3.1"
+version: "1.3.2"
 status: active
 producer: product-owner
 timestamp: 2026-05-28T00:00:00
@@ -14,7 +14,7 @@ subsystem: SS-TBD
 capability: CAP-023
 lifecycle_status: active
 introduced: v1.0.0
-modified: ["v1.2 — adversary pass 1 adjudication: codified ShapeSpec position schema, hex color contract, shape_type closed vocabulary, off-canvas boundary semantics, gradient deferral, MissingAlt span, multi-error accumulation", "v1.3 — roundRect added to closed vocabulary per Q7 decision example", "v1.3.1 — STORY-TBD-shape-gradient-fills placeholder resolved to STORY-072"]
+modified: ["v1.2 — adversary pass 1 adjudication: codified ShapeSpec position schema, hex color contract, shape_type closed vocabulary, off-canvas boundary semantics, gradient deferral, MissingAlt span, multi-error accumulation", "v1.3 — roundRect added to closed vocabulary per Q7 decision example", "v1.3.1 — STORY-TBD-shape-gradient-fills placeholder resolved to STORY-072", "v1.3.2 — VP propagation burst: assigned VP-037 through VP-042 to all VP-TBD entries"]
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -191,12 +191,12 @@ When that story ships, it will: (1) add gradient parsing to the DSL parser,
 
 | VP-NNN | Property | Proof Method |
 |--------|----------|-------------|
-| VP-TBD | Shape position in PPTX XML matches EMU conversion of declared user-unit values | unit test (known input → known EMU assertion) |
-| VP-TBD | Shape without alt or decorative always produces LayoutError::MissingAlt | unit test |
-| VP-TBD | Unknown shape type keyword produces E-PAR-012 (no silent Custom fallback) | unit test |
-| VP-TBD | Hex color case-insensitive: lowercase = uppercase for all 6-digit forms | unit test |
-| VP-TBD | x + width == page_width is NOT off-canvas; x + width == page_width + 1 EMU IS off-canvas | unit test (boundary) |
-| VP-TBD | Slide with N shapes all missing alt returns Vec with N MissingAlt errors | unit test (multi-error accumulation) |
+| VP-037 | Shape position in PPTX XML matches EMU conversion of declared user-unit values | unit test + Kani (known input → known EMU assertion; pure integer arithmetic) |
+| VP-038 | Shape without alt or decorative always produces LayoutError::MissingAlt | unit test |
+| VP-039 | Unknown shape type keyword produces E-PAR-012 (no silent Custom fallback) | unit test |
+| VP-040 | Hex color case-insensitive: lowercase = uppercase for all 6-digit forms | unit test + Kani |
+| VP-041 | x + width == page_width is NOT off-canvas; x + width == page_width + 1 EMU IS off-canvas | unit test + Kani (boundary; pure integer comparison) |
+| VP-042 | Slide with N shapes all missing alt returns Vec with N MissingAlt errors | unit test (multi-error accumulation) |
 
 ## Traceability
 
@@ -224,4 +224,4 @@ STORY-028
 
 ## VP Anchors
 
-(filled after VP creation)
+VP-037, VP-038, VP-039, VP-040, VP-041, VP-042

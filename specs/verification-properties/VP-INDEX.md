@@ -20,12 +20,13 @@ traces_to: .factory/specs/architecture/ARCH-INDEX.md
 
 | Metric | Count |
 |--------|-------|
-| Total VPs | 15 |
-| Kani proofs | 8 |
+| Total VPs | 47 |
+| Kani proofs | 14 |
 | Proptest suites | 5 |
 | Fuzz targets | 2 |
+| Unit test VPs | 26 |
 | P0 (Phase 6 blocking) | 7 |
-| P1 (stretch goals) | 8 |
+| P1 (stretch goals) | 40 |
 
 ---
 
@@ -48,6 +49,38 @@ traces_to: .factory/specs/architecture/ARCH-INDEX.md
 | VP-013 | Every synthesized PPTX is valid ZIP with [Content_Types].xml | slideforge-pptx | proptest | P3 | P1 | draft |
 | VP-014 | Parser fuzz: any input terminates and produces errors or AST | slideforge-syntax | fuzz | P6 | P1 | draft |
 | VP-015 | Eval fuzz: any valid AST terminates eval within time bound | slideforge-eval | fuzz | P6 | P1 | draft |
+| VP-016 | XLSX: first row becomes map keys | slideforge-data | unit | P3 | P1 | draft |
+| VP-017 | XLSX: empty cells produce null not empty string | slideforge-data | unit | P3 | P1 | draft |
+| VP-018 | XLSX: missing file always produces E-DAT-004 | slideforge-data | unit | P3 | P1 | draft |
+| VP-019 | XLSX: partial-empty header row produces ParseError (no phantom column) | slideforge-data | unit | P3 | P1 | draft |
+| VP-020 | XLSX: non-string header cell (Int) produces ParseError | slideforge-data | unit | P3 | P1 | draft |
+| VP-021 | XLSX: whole-number Float 95.0 loads as Value::Int(95) | slideforge-data | Kani | P6 | P1 | draft |
+| VP-022 | XLSX: non-whole Float 3.14 loads as Value::Float | slideforge-data | Kani | P6 | P1 | draft |
+| VP-023 | XLSX: non-finite Float (NaN/Infinity) produces ParseError | slideforge-data | Kani | P6 | P1 | draft |
+| VP-024 | XLSX: valid DateTimeIso passes through as Value::Str | slideforge-data | unit | P3 | P1 | draft |
+| VP-025 | XLSX: invalid DateTimeIso string produces ParseError | slideforge-data | unit | P3 | P1 | draft |
+| VP-026 | XLSX: correct extension + wrong magic bytes produces ParseError | slideforge-data | unit | P3 | P1 | draft |
+| VP-027 | SQLite: connection opened with SQLITE_OPEN_READONLY | slideforge-data | unit | P3 | P1 | draft |
+| VP-028 | SQLite: result row column names become map keys | slideforge-data | unit | P3 | P1 | draft |
+| VP-029 | SQLite: DML in query: field produces E-DAT-003 | slideforge-data | unit | P3 | P1 | draft |
+| VP-030 | SQLite: NULL db values produce null in data value tree | slideforge-data | unit | P3 | P1 | draft |
+| VP-031 | SQLite: TEXT column with valid UTF-8 produces Value::Str | slideforge-data | unit | P3 | P1 | draft |
+| VP-032 | SQLite: TEXT column with invalid UTF-8 produces ParseError | slideforge-data | unit | P3 | P1 | draft |
+| VP-033 | SQLite: BLOB column produces base64 STANDARD with padding | slideforge-data | unit | P3 | P1 | draft |
+| VP-034 | SQLite: .db file with non-SQLite magic bytes produces ParseError | slideforge-data | unit | P3 | P1 | draft |
+| VP-035 | SQLite: extension .db3 produces UnsupportedFormat | slideforge-data | unit | P3 | P1 | draft |
+| VP-036 | SQLite: non-existent table produces actual SQLite error not DML message | slideforge-data | unit | P3 | P1 | draft |
+| VP-037 | Shape: position EMU conversion matches declared user-unit values | slideforge-layout | Kani | P6 | P1 | draft |
+| VP-038 | Shape: without alt or decorative always produces LayoutError::MissingAlt | slideforge-layout | unit | P3 | P1 | draft |
+| VP-039 | Shape: unknown shape type keyword produces E-PAR-012 (no Custom fallback) | slideforge-layout | unit | P3 | P1 | draft |
+| VP-040 | Shape: hex color case-insensitive — lowercase = uppercase for 6-digit forms | slideforge-layout | Kani | P6 | P1 | draft |
+| VP-041 | Shape: x + width == page_width is NOT off-canvas; + 1 EMU IS off-canvas | slideforge-layout | Kani | P6 | P1 | draft |
+| VP-042 | Shape: slide with N shapes missing alt returns Vec with N MissingAlt errors | slideforge-layout | unit | P3 | P1 | draft |
+| VP-043 | Inline: all 12 variant types produce distinct non-empty XML in PPTX output | slideforge-pptx | unit | P3 | P1 | draft |
+| VP-044 | Inline: Bold via markdown pattern does not trigger b=1 in output | slideforge-pptx | unit | P3 | P1 | draft |
+| VP-045 | Inline: tree at depth 65 produces InlineDepthExceeded error | slideforge-layout | Kani | P6 | P1 | draft |
+| VP-046 | Inline: Xref inside MathNode is NOT flagged by xref validation pass | slideforge-layout | unit | P3 | P1 | draft |
+| VP-047 | Inline: all 12 variants survive layout pass in FrameContent::TextRun | slideforge-layout | unit | P3 | P1 | draft |
 
 ---
 
@@ -70,3 +103,35 @@ traces_to: .factory/specs/architecture/ARCH-INDEX.md
 | VP-013 | BC-4.01.001 |
 | VP-014 | BC-1.01.001, DI-018 |
 | VP-015 | BC-1.02.001, DI-005 |
+| VP-016 | BC-1.03.006, DI-004 |
+| VP-017 | BC-1.03.006, DI-004 |
+| VP-018 | BC-1.03.006 |
+| VP-019 | BC-1.03.006, DI-004 |
+| VP-020 | BC-1.03.006, DI-004 |
+| VP-021 | BC-1.03.006, DI-004 |
+| VP-022 | BC-1.03.006, DI-004 |
+| VP-023 | BC-1.03.006, DI-004 |
+| VP-024 | BC-1.03.006 |
+| VP-025 | BC-1.03.006 |
+| VP-026 | BC-1.03.006 |
+| VP-027 | BC-1.03.007, DI-004 |
+| VP-028 | BC-1.03.007 |
+| VP-029 | BC-1.03.007, DI-004 |
+| VP-030 | BC-1.03.007, DI-004 |
+| VP-031 | BC-1.03.007, DI-004 |
+| VP-032 | BC-1.03.007, DI-004 |
+| VP-033 | BC-1.03.007 |
+| VP-034 | BC-1.03.007 |
+| VP-035 | BC-1.03.007 |
+| VP-036 | BC-1.03.007 |
+| VP-037 | BC-3.04.001, DI-010 |
+| VP-038 | BC-3.04.001, DI-001 |
+| VP-039 | BC-3.04.001, DI-021 |
+| VP-040 | BC-3.04.001 |
+| VP-041 | BC-3.04.001 |
+| VP-042 | BC-3.04.001, DI-018 |
+| VP-043 | BC-3.05.001, DI-004 |
+| VP-044 | BC-3.05.001, DI-004 |
+| VP-045 | BC-3.05.001, DI-018 |
+| VP-046 | BC-3.05.001 |
+| VP-047 | BC-3.05.001 |

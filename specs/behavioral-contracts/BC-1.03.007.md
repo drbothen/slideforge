@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.3"
+version: "1.3.1"
 status: active
 producer: product-owner
 timestamp: 2026-05-28T00:00:00
@@ -188,16 +188,16 @@ the actual cause. This was a confusion identified in adversary pass 1 (F-MED-2).
 
 | VP-NNN | Property | Proof Method |
 |--------|----------|-------------|
-| VP-TBD | SQLite connection opened with SQLITE_OPEN_READONLY | unit test: mock db; attempt write inside query; assert connection error not silent success |
-| VP-TBD | Result row column names become map keys | unit test: fixture db; run SELECT; assert map keys match column names |
-| VP-TBD | DML in query: field produces E-DAT-003 | unit test: assert error code on DELETE/INSERT/UPDATE |
-| VP-TBD | NULL db values produce null in data value tree | unit test: fixture row with NULL column; assert null in loaded map |
-| VP-TBD | TEXT column with valid UTF-8 produces Value::Str | unit test: in-memory db; insert UTF-8 text; assert Value::Str |
-| VP-TBD | TEXT column with invalid UTF-8 produces ParseError | unit test: insert raw bytes via BLOB-then-reinterpret or rusqlite raw value injection; assert E-DAT-003 |
-| VP-TBD | BLOB column produces base64 STANDARD with padding | unit test: insert BLOB [0x00, 0xFF, 0x42]; assert Value::Str("AP9C") — the base64 STANDARD encoding |
-| VP-TBD | File with .db extension but non-SQLite magic bytes produces ParseError | unit test: write [0x00,0x01,0x02,...] to .db file; assert E-DAT-003 EC-009 message |
-| VP-TBD | Extension .db3 produces UnsupportedFormat | unit test: pass .db3 path; assert E-DAT-003 EC-010 message |
-| VP-TBD | Non-existent table produces actual SQLite error, not DML message | unit test: query against missing table; assert message contains "no such table" not "only SELECT queries" |
+| VP-027 | SQLite connection opened with SQLITE_OPEN_READONLY | unit test: mock db; attempt write inside query; assert connection error not silent success |
+| VP-028 | Result row column names become map keys | unit test: fixture db; run SELECT; assert map keys match column names |
+| VP-029 | DML in query: field produces E-DAT-003 | unit test: assert error code on DELETE/INSERT/UPDATE |
+| VP-030 | NULL db values produce null in data value tree | unit test: fixture row with NULL column; assert null in loaded map |
+| VP-031 | TEXT column with valid UTF-8 produces Value::Str | unit test: in-memory db; insert UTF-8 text; assert Value::Str |
+| VP-032 | TEXT column with invalid UTF-8 produces ParseError | unit test: insert raw bytes via BLOB-then-reinterpret or rusqlite raw value injection; assert E-DAT-003 |
+| VP-033 | BLOB column produces base64 STANDARD with padding | unit test: insert BLOB [0x00, 0xFF, 0x42]; assert Value::Str("AP9C") — the base64 STANDARD encoding |
+| VP-034 | File with .db extension but non-SQLite magic bytes produces ParseError | unit test: write [0x00,0x01,0x02,...] to .db file; assert E-DAT-003 EC-009 message |
+| VP-035 | Extension .db3 produces UnsupportedFormat | unit test: pass .db3 path; assert E-DAT-003 EC-010 message |
+| VP-036 | Non-existent table produces actual SQLite error, not DML message | unit test: query against missing table; assert message contains "no such table" not "only SELECT queries" |
 
 ## Traceability
 
@@ -216,6 +216,7 @@ the actual cause. This was a confusion identified in adversary pass 1 (F-MED-2).
 | 1.1 | 2026-05-24 | Initial draft |
 | 1.2 | 2026-05-24 | Minor clarifications (pre-adversary) |
 | 1.3 | 2026-05-28 | Adversary Pass 1 adjudications (items E, F, H, I): strict UTF-8 decode; base64 STANDARD RFC 4648 §4 canonical; extension closed list (.db/.sqlite/.sqlite3) + magic-byte check; DML vs other-error message differentiation. Added EC-008 through EC-012, AC-BC-006 through AC-BC-009, VP expansions. |
+| 1.3.1 | 2026-05-28 | VP propagation burst: assigned VP-027 through VP-036 to all VP-TBD entries. |
 
 ## Related BCs
 
@@ -234,4 +235,4 @@ STORY-020
 
 ## VP Anchors
 
-(filled after VP creation)
+VP-027, VP-028, VP-029, VP-030, VP-031, VP-032, VP-033, VP-034, VP-035, VP-036

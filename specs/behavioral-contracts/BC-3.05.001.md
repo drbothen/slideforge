@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.3"
+version: "1.3.1"
 status: active
 producer: product-owner
 timestamp: 2026-05-28T00:00:00
@@ -14,7 +14,7 @@ subsystem: SS-TBD
 capability: CAP-024
 lifecycle_status: active
 introduced: v1.0.0
-modified: ["v1.2 — adversary pass 1 adjudication: variant count corrected to 12, payload shapes corrected to Vec<InlineNode> for structured variants, inline depth bound added (max 64), math xref validation boundary codified", "v1.3 — story spec AC-005 enum example corrected to match production types"]
+modified: ["v1.2 — adversary pass 1 adjudication: variant count corrected to 12, payload shapes corrected to Vec<InlineNode> for structured variants, inline depth bound added (max 64), math xref validation boundary codified", "v1.3 — story spec AC-005 enum example corrected to match production types", "v1.3.1 — VP propagation burst: assigned VP-043 through VP-047 to all VP-TBD entries"]
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -191,11 +191,11 @@ must produce `LayoutError::InlineDepthExceeded`.
 
 | VP-NNN | Property | Proof Method |
 |--------|----------|-------------|
-| VP-TBD | All 12 inline variant types produce distinct non-empty XML in PPTX output | snapshot tests (one per inline type) |
-| VP-TBD | Bold via markdown pattern does not trigger `b="1"` in output | unit test |
-| VP-TBD | Inline tree at depth 65 produces InlineDepthExceeded error | unit test |
-| VP-TBD | Xref inside MathNode is NOT flagged by xref validation pass | unit test |
-| VP-TBD | All 12 variants survive layout pass in FrameContent::TextRun | unit test (exhaustive variant coverage) |
+| VP-043 | All 12 inline variant types produce distinct non-empty XML in PPTX output | snapshot tests (one per inline type) |
+| VP-044 | Bold via markdown pattern does not trigger `b="1"` in output | unit test |
+| VP-045 | Inline tree at depth 65 produces InlineDepthExceeded error | unit test + Kani (pure depth-count function) |
+| VP-046 | Xref inside MathNode is NOT flagged by xref validation pass | unit test |
+| VP-047 | All 12 variants survive layout pass in FrameContent::TextRun | unit test (exhaustive variant coverage) |
 
 ## Traceability
 
@@ -223,4 +223,4 @@ STORY-028
 
 ## VP Anchors
 
-(filled after VP creation)
+VP-043, VP-044, VP-045, VP-046, VP-047
