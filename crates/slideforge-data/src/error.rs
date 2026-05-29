@@ -482,11 +482,19 @@ impl DataError {
     }
 
     /// Return the error code string for this error variant.
+    ///
+    /// For [`DataError::ParseError`], returns the specific code stored in the
+    /// variant (e.g. `E-DAT-009` for invalid `DateTimeIso`, `E-DAT-010` for
+    /// non-finite floats) rather than always returning the generic `E-DAT-003`.
+    /// This ensures `err.code()` is consistent with the `Display` representation.
     #[must_use]
     pub fn code(&self) -> &'static str {
         match self {
             DataError::FileNotFound { .. } | DataError::IoError { .. } => E_DAT_004,
-            DataError::ParseError { .. } | DataError::UnsupportedFormat { .. } => E_DAT_003,
+            // ParseError stores the specific code in the variant — return it directly
+            // so that granular codes (E_DAT_009, E_DAT_010, etc.) are accessible.
+            DataError::ParseError { code, .. } => code,
+            DataError::UnsupportedFormat { .. } => E_DAT_003,
             DataError::FieldNotFound { .. } => E_DAT_005,
             DataError::PathTraversalBlocked { .. } | DataError::SsrfBlocked { .. } => E_DAT_006,
             DataError::HttpError { .. } => E_DAT_001,

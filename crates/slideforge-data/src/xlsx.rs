@@ -255,15 +255,18 @@ fn convert_calamine_cell(cell: &Data, col: u32, row: u32, path: &str) -> Result<
             // Kani-amenable (VP-021, VP-022, VP-023).
             if !f.is_finite() {
                 // E-DAT-010: NaN or Infinity is not representable.
-                return Err(DataError::parse_error(
-                    path,
-                    DataFormat::Xlsx,
-                    format!(
+                // TD-VSDD-059: use specific code E_DAT_010, not the generic parse_error() helper.
+                return Err(DataError::ParseError {
+                    code: crate::error::E_DAT_010,
+                    path: Arc::from(path),
+                    format: DataFormat::Xlsx,
+                    reason: Arc::from(format!(
                         "XLSX numeric cell at col {col} row {row} in '{path}' has non-finite value \
                         ({}). Non-finite floats are not representable in slideforge values.",
                         if f.is_nan() { "NaN" } else { "Infinity" }
-                    ),
-                ));
+                    )),
+                    span: slideforge_types::SourceSpan::default(),
+                });
             }
             // Safe: f.is_finite() guaranteed above.
             // F-MED-1: Use round-trip check for exact representability instead of
@@ -299,14 +302,18 @@ fn convert_calamine_cell(cell: &Data, col: u32, row: u32, path: &str) -> Result<
             if is_valid {
                 Ok(Value::Str(Arc::from(s.as_str())))
             } else {
-                Err(DataError::parse_error(
-                    path,
-                    DataFormat::Xlsx,
-                    format!(
+                // E-DAT-009: DateTimeIso cell contains invalid ISO 8601 value.
+                // TD-VSDD-059: use specific code E_DAT_009, not the generic parse_error() helper.
+                Err(DataError::ParseError {
+                    code: crate::error::E_DAT_009,
+                    path: Arc::from(path),
+                    format: DataFormat::Xlsx,
+                    reason: Arc::from(format!(
                         "XLSX datetime cell at col {col} row {row} in '{path}' has invalid \
                         ISO 8601 value '{s}'. Expected format: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS\u{00b1}HH:MM"
-                    ),
-                ))
+                    )),
+                    span: slideforge_types::SourceSpan::default(),
+                })
             }
         },
         Data::Bool(b) => Ok(Value::Bool(*b)),
@@ -1976,6 +1983,13 @@ mod tests {
             msg.contains("NaN") || msg.contains("non-finite"),
             "NaN error must mention NaN or non-finite; got: {msg}"
         );
+        // TD-VSDD-059 load-bearing: strict bracket form confirms E_DAT_010 is embedded in
+        // the error variant, not the generic E_DAT_003 from parse_error() helper.
+        // This assertion FAILS if `code: E_DAT_010` is replaced with `code: E_DAT_003`.
+        assert!(
+            msg.contains("[E-DAT-010]"),
+            "NaN parse error must embed '[E-DAT-010]' strict bracket code; got: {msg}"
+        );
     }
 
     /// `test_vp_023_infinity_produces_parse_error` -- VP-023: `Data::Float(INFINITY)` produces E-DAT-010.
@@ -1994,6 +2008,13 @@ mod tests {
         assert!(
             msg.contains("Infinity") || msg.contains("non-finite"),
             "Infinity error must mention Infinity or non-finite; got: {msg}"
+        );
+        // TD-VSDD-059 load-bearing: strict bracket form confirms E_DAT_010 is embedded in
+        // the error variant, not the generic E_DAT_003 from parse_error() helper.
+        // This assertion FAILS if `code: E_DAT_010` is replaced with `code: E_DAT_003`.
+        assert!(
+            msg.contains("[E-DAT-010]"),
+            "Infinity parse error must embed '[E-DAT-010]' strict bracket code; got: {msg}"
         );
     }
 
@@ -2049,6 +2070,13 @@ mod tests {
         assert!(
             msg.contains("not-iso-string") || msg.contains("invalid") || msg.contains("ISO 8601"),
             "invalid DateTimeIso error must describe the bad value; got: {msg}"
+        );
+        // TD-VSDD-059 load-bearing: strict bracket form confirms E_DAT_009 is embedded in
+        // the error variant, not the generic E_DAT_003 from parse_error() helper.
+        // This assertion FAILS if `code: E_DAT_009` is replaced with `code: E_DAT_003`.
+        assert!(
+            msg.contains("[E-DAT-009]"),
+            "invalid DateTimeIso error must embed '[E-DAT-009]' strict bracket code; got: {msg}"
         );
     }
 
