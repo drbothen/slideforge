@@ -9,7 +9,7 @@ points: 5
 priority: P1
 tdd_mode: strict
 status: draft
-spec_version: "1.3"
+spec_version: "1.4"
 behavioral_contracts: [BC-3.04.001, BC-3.05.001]
 verification_properties: []
 nfr_refs: [NFR-021, NFR-022, NFR-023, NFR-024, NFR-025]
@@ -97,7 +97,7 @@ Frame {
         shape_type: ShapeType::Rect,     // or Ellipse, Arrow, etc.
         fill: FillSpec::SolidColor(Rgb { r: 0, g: 55, b: 102 }),
         text: Option<Vec<InlineNode>>,
-        alt: AltText::Explicit("Blue rectangle".into()),
+        alt: AltText::Provided("Blue rectangle".into()),
     }),
 }
 ```
@@ -336,7 +336,7 @@ listed — that was incorrect; unknown keywords are parse errors, not `Custom` f
 - [ ] Implement `ShapeFrame` struct with `shape_type`, `fill`, `text`, `alt` fields
 - [ ] Implement `ShapeType` enum: `Rect`, `Ellipse`, `Arrow`, `Line`, `Star`, `RoundRect` (no `Custom` — unknown keyword is a parse error per BC-3.04.001 invariant 4)
 - [ ] Implement `FillSpec` enum: `SolidColor(Rgb)`, `Gradient { from: Rgb, to: Rgb }`, `None`
-- [ ] Implement `AltText` enum: `Explicit(Arc<str>)`, `Decorative`
+- [ ] Implement `AltText` enum: `Provided(Arc<str>)`, `Decorative`
 - [ ] Implement shape layout pass in `layout::run()`: iterate slide shapes → produce `Frame`s
 - [ ] Implement unit conversion: `from_inches`, `from_em` for shape positions
 - [ ] Implement off-canvas detection (negative or > page dimensions) → `LayoutWarning`
@@ -431,3 +431,4 @@ Build MUST fail if those crates appear in `slideforge-layout/Cargo.toml` depende
 | 1.1 | 2026-05-28 | story-writer | BC-3.04.001/BC-3.05.001 v1.3 adjudication — DONE_WITH_CONCERN resolved; 11→12 variant count; AC-005 enum corrected (Arc<str>→Vec<InlineNode> for container variants); AC-BC-A1 through AC-BC-A9 + AC-INT-1 added; ShapeSpec position schema section added; roundRect added to ShapeType; NFR-025 added |
 | 1.2 | 2026-05-28 | story-writer | Minor: spec_version field added to frontmatter; Forbidden Dependencies made explicit |
 | 1.3 | 2026-05-29 | architect | Pass-3 adjudication: BC version refs updated to BC-3.04.001 v1.4 and BC-3.05.001 v1.3.2 (F-MED-001); OffCanvas example updated to source_slide_index canonical name (F-MED-002) |
+| 1.4 | 2026-05-29 | story-writer | Pass-5 drift fix (F-P5-LOW-002): AltText::Explicit → AltText::Provided (lines 100, 339) to match canonical slideforge-types/src/specs.rs:143 |

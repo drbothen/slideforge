@@ -73,7 +73,7 @@ fn test_title_content_slide_shape_frame_after_placeholder() {
                     width: ShapeUnit::Inches(2_000),
                     height: ShapeUnit::Inches(1_000),
                 },
-                alt: Some(AltText::Described(Arc::from("blue rect"))),
+                alt: Some(AltText::Provided(Arc::from("blue rect"))),
                 fill: FillSpec::SolidColor(Rgb { r: 0, g: 55, b: 102 }),
                 ..default_shape()
             },
@@ -114,8 +114,8 @@ fn test_two_regions_two_shapes_ordering() {
         slide_type: SlideType::TitleBodyContent,
         region_count: 2,
         shapes: vec![
-            ShapeSpec { alt: Some(AltText::Described(Arc::from("s1"))), ..default_shape() },
-            ShapeSpec { alt: Some(AltText::Described(Arc::from("s2"))), ..default_shape() },
+            ShapeSpec { alt: Some(AltText::Provided(Arc::from("s1"))), ..default_shape() },
+            ShapeSpec { alt: Some(AltText::Provided(Arc::from("s2"))), ..default_shape() },
         ],
         ..default_slide()
     };

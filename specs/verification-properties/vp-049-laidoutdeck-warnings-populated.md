@@ -68,7 +68,7 @@ fn test_xref_target_not_found_reaches_laidoutdeck() {
     let slide = SlideIr {
         shapes: vec![ShapeSpec {
             text: Some(vec![InlineNode::Xref(Arc::from("missing-slide"))]),
-            alt: Some(AltText::Described(Arc::from("box"))),
+            alt: Some(AltText::Provided(Arc::from("box"))),
             ..default_shape()
         }],
         ..default_slide()
@@ -96,7 +96,7 @@ fn test_off_canvas_warning_reaches_laidoutdeck() {
                 width: ShapeUnit::Inches(1_000),
                 height: ShapeUnit::Inches(1_000),
             },
-            alt: Some(AltText::Described(Arc::from("off-canvas rect"))),
+            alt: Some(AltText::Provided(Arc::from("off-canvas rect"))),
             ..default_shape()
         }],
         ..default_slide()
