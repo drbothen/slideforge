@@ -158,14 +158,30 @@ impl DataSource for XlsxDataSource {
         // Traces to BC-1.03.006 edge case EC-005.
         if let Some(Ok(merge_dims)) = workbook.worksheet_merge_cells(&sheet_name) {
             for dim in &merge_dims {
-                // A merge covering row 0 (header row) spanning >1 column is invalid.
                 let (start_row, start_col) = dim.start;
                 let (end_row, end_col) = dim.end;
+                // Horizontal merge: a merge spanning >1 column within the header row.
+                // Traces to BC-1.03.006 edge case EC-005.
                 if start_row == 0 && end_row == 0 && end_col > start_col {
                     return Err(DataSourceError::ParseError {
                         uri: path_str.to_owned(),
                         message: format!(
                             "merged cells in header row are not supported at {path_str}:1:{}",
+                            start_col + 1
+                        ),
+                    });
+                }
+                // Vertical merge: a merge starting in the header row and spanning
+                // into one or more data rows. This creates a phantom header cell
+                // across multiple rows, making row-to-header mapping ambiguous.
+                // Traces to BC-1.03.006 edge case EC-005, F-LOW-9.
+                if start_row == 0 && end_row > 0 {
+                    return Err(DataSourceError::ParseError {
+                        uri: path_str.to_owned(),
+                        message: format!(
+                            "vertically merged cell in header row at {path_str}:1:{} spans \
+                            into data rows — this makes column mapping ambiguous. \
+                            Split the merge before loading.",
                             start_col + 1
                         ),
                     });
@@ -603,7 +619,6 @@ mod tests {
     use slideforge_types::Value;
 
     use super::{XlsxDataSource, convert_calamine_cell, extract_headers};
-    use crate::DataError;
 
     // ---------------------------------------------------------------------------
     // Helper: write an xlsx bytes buffer to a tempfile and return the path.
@@ -1040,6 +1055,46 @@ mod tests {
         );
     }
 
+    /// `test_bc_1_03_006_xlsx_vertical_merge_in_header` -- vertical merge spanning header into data rows returns error.
+    ///
+    /// A cell that spans from row 0 (header) into row 1+ creates an ambiguous
+    /// column mapping. Must produce DataSourceError::ParseError (F-LOW-9, EC-005).
+    ///
+    /// Traces to BC-1.03.006 AC-006, edge case EC-005, F-LOW-9.
+    #[test]
+    fn test_bc_1_03_006_xlsx_vertical_merge_in_header() {
+        use rust_xlsxwriter::Format;
+
+        let mut wb = Workbook::new();
+        let ws = wb.add_worksheet();
+
+        // Vertical merge: A1:A2 spans header row (row 0) into first data row (row 1).
+        // This creates a merged cell that spans from the header into a data row.
+        let merge_fmt = Format::new();
+        ws.merge_range(0, 0, 1, 0, "VertMergedHeader", &merge_fmt).unwrap();
+        // Second column with normal header.
+        ws.write_string(0, 1, "value").unwrap();
+        // Second data row to ensure the sheet has some data.
+        ws.write_string(2, 0, "data_a").unwrap();
+        ws.write_string(2, 1, "data_b").unwrap();
+
+        let buf = wb.save_to_buffer().unwrap();
+        let (_dir, path) = write_xlsx_to_tempfile(buf, ".xlsx");
+
+        let src = XlsxDataSource::new(path.to_str().unwrap());
+        let err = src.load("", &default_opts()).unwrap_err();
+
+        let msg = err.to_string();
+        assert!(
+            matches!(err, slideforge_plugin_api::DataSourceError::ParseError { .. }),
+            "vertical merge in header must produce DataSourceError::ParseError, got: {err:?}"
+        );
+        assert!(
+            msg.to_lowercase().contains("vertical") || msg.to_lowercase().contains("merged"),
+            "error message must mention 'vertical' or 'merged'; got: {msg}"
+        );
+    }
+
     // ---------------------------------------------------------------------------
     // AC-007: Formula cell uses cached value, not formula text.
     // BC-1.03.006 edge case EC-006.
@@ -1103,17 +1158,21 @@ mod tests {
     // ---------------------------------------------------------------------------
     // AC-002: Empty header row → DataError::ParseError "empty sheet".
     // BC-1.03.006 edge case EC-004.
+    // Two distinct "empty" sub-paths in extract_headers (F-LOW-4):
+    //   Path A — row_count == 0: worksheet has zero rows (struct is empty).
+    //   Path B — all_empty: worksheet has rows but every header cell is Data::Empty.
     // ---------------------------------------------------------------------------
 
-    /// `test_bc_1_03_006_xlsx_empty_header_row` -- completely empty sheet returns `DataSourceError::ParseError`.
+    /// `test_bc_1_03_006_xlsx_empty_header_row` -- zero-row sheet (path A) returns ParseError.
     ///
-    /// Error message must contain "empty" (BC-1.03.006 AC-002, EC-004).
+    /// Exercises the `row_count == 0` branch in `extract_headers`. Writing nothing
+    /// to a worksheet causes calamine to return a range with zero rows.
     ///
-    /// Traces to BC-1.03.006 AC-002, edge case EC-004.
+    /// Error message must contain "empty" (BC-1.03.006 AC-002, EC-004, F-LOW-4 path A).
     #[test]
     fn test_bc_1_03_006_xlsx_empty_header_row() {
         let mut wb = Workbook::new();
-        // Add a worksheet but write nothing — completely empty.
+        // Add a worksheet but write nothing — completely empty (row_count == 0).
         let _ws = wb.add_worksheet();
 
         let buf = wb.save_to_buffer().unwrap();
@@ -1125,8 +1184,31 @@ mod tests {
         let msg = err.to_string();
         assert!(
             matches!(err, slideforge_plugin_api::DataSourceError::ParseError { .. }),
-            "empty sheet must produce DataSourceError::ParseError, got: {err:?}"
+            "zero-row sheet must produce DataSourceError::ParseError, got: {err:?}"
         );
+        assert!(
+            msg.to_lowercase().contains("empty"),
+            "error message must mention 'empty'; got: {msg}"
+        );
+    }
+
+    /// `test_bc_1_03_006_xlsx_all_empty_header_cells` -- all-empty header cells (path B) returns ParseError.
+    ///
+    /// Exercises the `all_empty` branch in `extract_headers`: a range with non-zero
+    /// dimensions where every header cell is `Data::Empty`. This is distinct from the
+    /// zero-row path above — the sheet has structure but every header cell is empty.
+    ///
+    /// Error message must contain "empty" (BC-1.03.006 AC-002, EC-004, F-LOW-4 path B).
+    #[test]
+    fn test_bc_1_03_006_xlsx_all_empty_header_cells() {
+        use calamine::Range;
+        // Construct a Range with 2 rows × 2 cols, all cells defaulting to Data::Empty.
+        // Range::new creates a range with the given dimensions but no data — every
+        // call to get_value returns None (calamine's representation of an empty cell).
+        let empty_range: Range<Data> = Range::new((0, 0), (1, 1));
+        let err = extract_headers(&empty_range, "test_all_empty.xlsx")
+            .expect_err("all-empty header cells must produce DataError");
+        let msg = err.to_string();
         assert!(
             msg.to_lowercase().contains("empty"),
             "error message must mention 'empty'; got: {msg}"
@@ -1740,18 +1822,19 @@ mod tests {
     }
 
     // ---------------------------------------------------------------------------
-    // NFR-021: row cap — loading a sheet with many rows is bounded.
-    // This test exercises the bulk-loading path without requiring an exact cap number.
-    // (NFR-021 specifies the cap; the test verifies the path is exercised.)
+    // NFR-036: large-sheet load performance — loading a sheet with many rows
+    // must complete within the time gate specified by NFR-036 (< 2,000ms for
+    // 10,000 rows × 50 cols). This smoke test exercises the bulk-loading path
+    // with 1,000 rows to verify correctness; the full perf gate runs via
+    // `cargo bench -p slideforge-data -- xlsx_10k_rows` in CI.
     // ---------------------------------------------------------------------------
 
     /// `test_bc_1_03_006_xlsx_large_sheet_loads` -- a sheet with many rows loads without panic.
     ///
     /// Writes 1000 data rows to verify the load path handles volume correctly.
-    /// This is a smoke test for NFR-021 (row cap path); the exact cap number is
-    /// enforced by the implementer's cap check.
+    /// This is a correctness smoke test for the bulk-loading path (NFR-036).
     ///
-    /// Traces to BC-1.03.006, NFR-021.
+    /// Traces to BC-1.03.006, NFR-036.
     #[test]
     fn test_bc_1_03_006_xlsx_large_sheet_loads() {
         let mut wb = Workbook::new();

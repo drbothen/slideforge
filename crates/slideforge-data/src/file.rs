@@ -14,11 +14,13 @@ use slideforge_types::Value;
 use crate::DataError;
 use crate::format::DataFormat;
 use crate::parse::{csv, json, toml, yaml};
+use crate::xlsx::XlsxDataSource;
 
 /// The built-in file-based data source plugin.
 ///
-/// Handles local file paths with extensions `.json`, `.csv`, `.yaml`,
-/// `.yml`, and `.toml`. The plugin identifier is `"file"`.
+/// Handles local file paths with extensions `.json`, `.csv`, `.yaml`, `.yml`,
+/// `.toml`, `.xlsx`, `.sqlite`, `.sqlite3`, and `.db`. The plugin identifier
+/// is `"file"`.
 ///
 /// ## URI format
 ///
@@ -38,6 +40,17 @@ use crate::parse::{csv, json, toml, yaml};
 /// - Unsupported extension → [`DataSourceError::UnsupportedUri`]
 /// - Parse failure → [`DataSourceError::ParseError`]
 /// - Path traversal → [`DataSourceError::IoError`] wrapping [`DataError::PathTraversalBlocked`]
+///
+/// ## Format dispatch
+///
+/// - `.json` → JSON parser
+/// - `.csv` → CSV parser
+/// - `.yaml` / `.yml` → YAML parser
+/// - `.toml` → TOML parser
+/// - `.xlsx` → [`XlsxDataSource`] (pure Rust calamine, no C deps)
+/// - `.sqlite` / `.sqlite3` / `.db` → [`SqliteDataSource`] (bundled SQLite)
+///   For SQLite, the `uri` field is used as the path per the plugin interface convention.
+///   A query string must be provided via `DataSourceOptions` or the DSL `query:` directive.
 #[derive(Debug, Default)]
 pub struct FileDataSource;
 
@@ -181,8 +194,55 @@ impl FileDataSource {
             DataError::unsupported_format(ext)
         })?;
 
-        // Read the file contents, distinguishing NotFound from other I/O errors.
         let path_str: Arc<str> = Arc::from(resolved.to_string_lossy().as_ref());
+
+        // F-CRIT-1: Dispatch to binary format parsers before reading file as text.
+        // XLSX and SQLite are binary formats; read_to_string would fail or corrupt them.
+        // Traces to BC-1.03.006 and BC-1.03.007 end-to-end load path.
+        match format {
+            DataFormat::Xlsx => {
+                // Delegate to XlsxDataSource. No query needed for XLSX.
+                // uri convention: pass the resolved path as the uri (non-empty → XlsxDataSource uses it).
+                let src = XlsxDataSource::new(Arc::clone(&path_str));
+                let opts = slideforge_plugin_api::DataSourceOptions::default();
+                return src
+                    .load(path_str.as_ref(), &opts)
+                    .map_err(|e| match e {
+                        slideforge_plugin_api::DataSourceError::IoError { message, .. } => {
+                            DataError::io_error(Arc::clone(&path_str), Arc::from(message.as_str()))
+                        }
+                        slideforge_plugin_api::DataSourceError::ParseError { message, .. } => {
+                            DataError::parse_error(&*path_str, format, message)
+                        }
+                        slideforge_plugin_api::DataSourceError::UnsupportedUri { uri } => {
+                            DataError::unsupported_format(Arc::from(uri.as_str()))
+                        }
+                        other => DataError::io_error(
+                            Arc::clone(&path_str),
+                            Arc::from(other.to_string().as_str()),
+                        ),
+                    });
+            }
+            DataFormat::Sqlite => {
+                // Delegate to SqliteDataSource. A query is required for SQLite;
+                // load_path cannot provide it (no opts parameter).
+                // Callers that need SQLite support should use DataSource::load()
+                // which receives DataSourceOptions with query.
+                // This path is a fallback error to guide users to the correct API.
+                return Err(DataError::parse_error(
+                    &*path_str,
+                    format,
+                    "SQLite data sources require a query string. Use the DataSource::load() \
+                    API with DataSourceOptions.query set to your SELECT statement, or use \
+                    the DSL @data directive with query: \"SELECT ...\".",
+                ));
+            }
+            _ => {
+                // Text-based formats: read the file content below.
+            }
+        }
+
+        // Read the file contents, distinguishing NotFound from other I/O errors.
         let raw_contents = std::fs::read_to_string(&resolved).map_err(|e| {
             if e.kind() == io::ErrorKind::NotFound {
                 DataError::file_not_found(Arc::clone(&path_str))
@@ -198,24 +258,22 @@ impl FileDataSource {
             .strip_prefix('\u{FEFF}')
             .unwrap_or(&raw_contents);
 
-        // Dispatch to the appropriate parser.
+        // Dispatch to the text-based parsers.
         match format {
             DataFormat::Json => json::parse_json(contents, &path_str),
             DataFormat::Csv => csv::parse_csv(contents, &path_str),
             DataFormat::Yaml => yaml::parse_yaml(contents, &path_str),
             DataFormat::Toml => toml::parse_toml(contents, &path_str),
             DataFormat::Xlsx | DataFormat::Sqlite => {
-                let ext: Arc<str> =
-                    Arc::from(resolved.extension().and_then(|e| e.to_str()).unwrap_or(""));
-                Err(DataError::unsupported_format(ext))
-            },
+                // Already handled above; this arm is unreachable.
+                unreachable!("xlsx/sqlite dispatched before text-read")
+            }
         }
     }
 }
 
 impl DataSource for FileDataSource {
-    #[allow(clippy::unnecessary_literal_bound)]
-    fn id(&self) -> &str {
+    fn id(&self) -> &'static str {
         "file"
     }
 
@@ -260,6 +318,7 @@ impl DataSource for FileDataSource {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use std::io::Write as _;
+    use std::sync::Arc;
 
     use tempfile::NamedTempFile;
 
@@ -625,6 +684,85 @@ mod tests {
             row_map.contains_key("name"),
             "column header must be 'name' (no invisible BOM prefix); got keys: {:?}",
             row_map.keys().collect::<Vec<_>>()
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // F-LOW-6: XLSX dispatch through FileDataSource end-to-end (BC-1.03.006).
+    // FileDataSource::load_path() must delegate .xlsx files to XlsxDataSource
+    // rather than attempting to read them as text.
+    // ---------------------------------------------------------------------------
+
+    /// `test_file_datasource_dispatches_xlsx` — `.xlsx` file loads via FileDataSource (F-LOW-6).
+    ///
+    /// Verifies that `FileDataSource::load_path()` correctly delegates `.xlsx` files
+    /// to `XlsxDataSource` instead of trying to read them as UTF-8 text (which would
+    /// corrupt or fail on binary data).
+    ///
+    /// Traces to BC-1.03.006, F-LOW-6 (F-CRIT-1 binary-format dispatch).
+    #[test]
+    fn test_file_datasource_dispatches_xlsx() {
+        use rust_xlsxwriter::Workbook;
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let xlsx_path = dir.path().join("data.xlsx");
+
+        // Write a minimal valid .xlsx file.
+        let mut wb = Workbook::new();
+        let ws = wb.add_worksheet();
+        ws.write_string(0, 0, "city").unwrap();
+        ws.write_string(0, 1, "pop").unwrap();
+        ws.write_string(1, 0, "London").unwrap();
+        ws.write_number(1, 1, 9_500_000.0).unwrap();
+        wb.save(&xlsx_path).expect("save test xlsx");
+
+        let src = loader();
+        let value = src
+            .load_path(&xlsx_path, None)
+            .expect("FileDataSource must load .xlsx without error");
+
+        let list = value.as_list().expect("xlsx result must be a list");
+        assert_eq!(list.len(), 1, "must have exactly one data row");
+
+        let row = &list[0];
+        let row_map = row.as_map().expect("row must be a map");
+        assert_eq!(
+            row_map.get("city"),
+            Some(&Value::Str(Arc::from("London"))),
+            "city column must contain 'London'"
+        );
+        assert_eq!(
+            row_map.get("pop"),
+            Some(&Value::Int(9_500_000)),
+            "pop column must contain Int(9_500_000) (Float→Int promotion)"
+        );
+    }
+
+    /// `test_file_datasource_sqlite_no_query_returns_error` — `.sqlite` via `load_path()` returns
+    /// a clear error directing users to `DataSource::load()` with a query string.
+    ///
+    /// `load_path()` cannot provide a query (no `DataSourceOptions` parameter).
+    /// This test verifies the error message is actionable rather than a confusing
+    /// binary-parse failure.
+    ///
+    /// Traces to BC-1.03.007, F-CRIT-1 (binary-format dispatch).
+    #[test]
+    fn test_file_datasource_sqlite_no_query_returns_error() {
+        // Use a temp file with .sqlite extension (content doesn't matter — the error
+        // fires before the file is opened).
+        let f = temp_file_with_suffix(".sqlite", b"");
+        let src = loader();
+        let result = src.load_path(f.path(), None);
+        let err = result.expect_err(".sqlite via load_path must return Err (no query available)");
+        // Must be a ParseError (E-DAT-003), not an IoError (E-DAT-004).
+        assert_eq!(
+            err.code(),
+            "E-DAT-003",
+            "sqlite no-query error must be E-DAT-003 (ParseError)"
+        );
+        let msg = err.to_string();
+        assert!(
+            msg.contains("query") || msg.contains("SELECT"),
+            "error message must mention 'query' or 'SELECT'; got: {msg}"
         );
     }
 }
