@@ -36,8 +36,10 @@ use slideforge_types::{Emu, ShapeUnit};
 
 use crate::error::LayoutError;
 use crate::types::{
-    BoundingBox, FillSpec, Frame, LayoutWarning, PageSize, Rgb, ShapeFrame, ShapeType,
+    BoundingBox, FillSpec, Frame, LayoutWarning, PageSize, ShapeFrame, ShapeType,
 };
+#[cfg(test)]
+use crate::types::Rgb;
 
 /// EMU per inch: 914,400 (canonical DSL unit definition, DI-010).
 pub const EMU_PER_INCH: i64 = 914_400;
@@ -123,6 +125,14 @@ pub fn is_off_canvas(bbox: &BoundingBox, page: PageSize) -> bool {
 /// Parse a CSS-style hex color string (`#RRGGBB`) into an [`Rgb`] value.
 ///
 /// Returns `None` if the string is not a valid 6-digit hex color.
+///
+/// # Note
+///
+/// This function exists only for unit test helpers in this module.
+/// Production shape layout consumes [`slideforge_types::FillSpec`] directly
+/// from the already-parsed `ShapeSpec.fill` field — no keyword parsing is
+/// needed at layout time.
+#[cfg(test)]
 #[must_use]
 pub fn parse_hex_color(hex: &str) -> Option<Rgb> {
     let hex = hex.strip_prefix('#')?;
@@ -294,6 +304,16 @@ pub fn layout_shapes(
 ///
 /// Supported keywords in v1.0: solid color hex (`#RRGGBB`), `"none"`.
 /// Unrecognised keywords default to `FillSpec::None`.
+///
+/// # Note
+///
+/// This function exists only for unit test helpers in this module.
+/// Production shape layout consumes [`slideforge_types::FillSpec`] directly
+/// from the already-parsed `ShapeSpec.fill` field — no keyword parsing is
+/// needed at layout time. The silent `FillSpec::None` fallback on unrecognised
+/// input is intentional for the test-helper role; it would be an error anti-pattern
+/// in any future production path (see CLAUDE.md "silent fallback" forbidden patterns).
+#[cfg(test)]
 #[must_use]
 pub fn build_fill_spec(fill_keyword: Option<&str>) -> FillSpec {
     match fill_keyword {
