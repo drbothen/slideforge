@@ -133,17 +133,16 @@ pub fn collect_slide_titles(deck: &slideforge_types::Deck) -> HashSet<Arc<str>> 
 /// - `FrameContent::Shape(ShapeFrame { text: Some(nodes), .. })` — shape-embedded
 ///   text (added by F-P4-MED-002)
 ///
-/// **Currently NOT scanned (deferred — no story ID yet):**
-/// - `ContentBlock::Bullets(Vec<BulletItem>)` — bullet items carry inline content
-///   via `BulletItem.inlines`. The layout pass does not yet produce
-///   `FrameContent::TextRun` frames for bullet content; until those frames exist,
-///   an `InlineNode::Xref` nested inside a bullet bypasses this validation.
-///   Extending coverage requires the body-layout pass that converts
-///   `ContentBlock::Bullets` into frames. This deferral was surfaced as finding
-///   F-P5-LOW-001 in STORY-028 pass 5 and is pending a new story assignment
-///   (orchestrator to create anchor story).
-/// - Other `ContentBlock` variants that carry inline content (e.g., `Table` cell
-///   text): same dependency — frame generation must precede validation.
+/// **Currently NOT scanned (deferred — no story anchor yet):**
+/// - `ContentBlock::Bullets(Vec<BulletItem>)` — bullets carry `BulletItem.inlines: Vec<InlineNode>`.
+///   Bullet-list layout passes are not yet built; once bullets produce frames, this validation must
+///   extend to cover them.
+///   No story anchor exists for this work — orchestrator to create an anchor story owning
+///   `ContentBlock::Bullets → FrameContent::TextRun frame generation` (body-layout pass).
+///
+/// Other `ContentBlock` variants (`Text`, `Shape`, `Math`, `Chart`, `Diagram`, `Image`, `Table`)
+/// either flow through this validation already (`Text` → `TextRun`; `Shape` → `Shape.text`) or do
+/// NOT carry `InlineNode` subtrees and so don't require scanning.
 ///
 /// # Arguments
 ///
