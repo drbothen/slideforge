@@ -125,8 +125,11 @@ They APPEND to AC-001–AC-014 without renumbering existing ACs.
 
 - [ ] **AC-017 (BC-1.03.006 AC-BC-003 — Whole-number Float promotion in data cells):**
   For every `calamine::Data::Float(f)` in a data cell (row index > 0):
-  - `f.fract() == 0.0 && f.is_finite() && f >= i64::MIN as f64 && f <= i64::MAX as f64`
+  - `f.fract() == 0.0 && f.is_finite() && f >= i64::MIN as f64 && f < (i64::MAX as f64)`
     → `Value::Int(f as i64)`
+    (Strict `<`: f64 cannot represent i64::MAX exactly — it rounds to 2^63, causing
+    silent off-by-one corruption if `<=` were used. Matches production code per
+    F-PASS12-MED-1 fix; amended per F-PASS13-LOW-1 spec/code alignment.)
   - `f.is_nan() || f.is_infinite()` → `DataError::ParseError` per EC-012
     (`"numeric cell at <col>:<row> in '<path>' has non-finite value (<NaN|Infinity>)..."`)
   - Otherwise → `Value::Float(OrderedFloat(f))`

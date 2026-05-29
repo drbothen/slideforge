@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.3.1"
+version: "1.3.2"
 status: active
 producer: product-owner
 timestamp: 2026-05-28T00:00:00
@@ -61,7 +61,10 @@ whole-numbered and representable as i64; otherwise `Value::Float`.
 4. Empty cells are loaded as null (not empty string, not omitted).
 5. Numeric cells are loaded as follows:
    - `calamine::Data::Float(f)` where `f.fract() == 0.0 && f.is_finite()` and
-     `f` is within `i64::MIN as f64..=i64::MAX as f64` → `Value::Int(f as i64)`
+     `f >= i64::MIN as f64 && f < (i64::MAX as f64)` → `Value::Int(f as i64)`
+     (Strict `<` because f64 cannot represent i64::MAX (2^63-1) exactly — it rounds
+     to 2^63. Permitting `<=` would allow Float(2^63) → Int saturate to i64::MAX,
+     a silent off-by-one corruption.)
    - `calamine::Data::Float(f)` otherwise → `Value::Float(OrderedFloat(f))`
    - `calamine::Data::Int(n)` → `Value::Int(n)` (pass-through; calamine may surface
      integers directly from integer-typed cells)
@@ -142,8 +145,11 @@ when string is the required type.
 
 **AC-BC-003 (Item C — Whole-number Float promotion):**
 For every calamine `Data::Float(f)` in a data cell (row index > 0):
-- If `f.fract() == 0.0 && f.is_finite() && f >= i64::MIN as f64 && f <= i64::MAX as f64`
+- If `f.fract() == 0.0 && f.is_finite() && f >= i64::MIN as f64 && f < (i64::MAX as f64)`
   → produce `Value::Int(f as i64)`
+  (Strict `<` because f64 cannot represent i64::MAX (2^63-1) exactly — it rounds to 2^63.
+  Permitting `<=` would allow Float(2^63) → Int saturate to i64::MAX, a silent off-by-one
+  corruption. Fixed per F-PASS12-MED-1; confirmed in code review pass 13 as F-PASS13-LOW-1.)
 - If `f.is_nan() || f.is_infinite()` → produce `DataError::ParseError` per EC-012
 - Otherwise → produce `Value::Float(OrderedFloat(f))`
 No other code paths are acceptable. In particular, `Data::Float` MUST NOT unconditionally
@@ -222,6 +228,7 @@ attempting to parse corrupt or misnamed files and producing misleading errors.
 | 1.2 | 2026-05-24 | Minor clarifications (pre-adversary) |
 | 1.3 | 2026-05-28 | Adversary Pass 1 adjudications (items A, B, C, D, H): reject partial-empty headers; reject non-string headers; Float-to-Int promotion rule; DateTimeIso ISO 8601 validation; extension + magic-byte two-phase check. Added EC-007 through EC-013, AC-BC-001 through AC-BC-005, VP expansions. |
 | 1.3.1 | 2026-05-28 | VP propagation burst: assigned VP-016 through VP-026 to all VP-TBD entries. |
+| 1.3.2 | 2026-05-29 | PC-5 and AC-BC-003 upper bound corrected: `f <= i64::MAX as f64` → `f < (i64::MAX as f64)`. Strict `<` required because f64 cannot represent i64::MAX (2^63-1) exactly — it rounds to 2^63, causing silent off-by-one corruption. Spec amended to match production code per CLAUDE.md Rule 7. Closes F-PASS12-MED-1 spec-side; resolves F-PASS13-LOW-1 (spec/code mismatch finding). |
 
 ## Related BCs
 
