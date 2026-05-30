@@ -67,7 +67,7 @@ use slideforge_types::Value;
 
 use crate::DataError;
 use crate::context::DataSourceContext;
-use crate::error::{E_DAT_001, E_DAT_002, E_DAT_003, E_DAT_004, E_DAT_006};
+use crate::error::{E_DAT_001, E_DAT_002, E_DAT_003, E_DAT_004, E_DAT_006, E_DAT_015};
 
 /// Load all configured data sources, applying the offline gate.
 ///
@@ -187,12 +187,23 @@ fn map_source_error(name: &Arc<str>, err: &DataSourceError) -> DataError {
                 // HTTP 4xx/5xx response (non-2xx). Extract the status code from the
                 // bracket-coded message. Message format from HttpDataSource:
                 // "[E-DAT-001] HTTP <status> from '<url>'"
-                let status = extract_http_status(inner_msg).unwrap_or(0);
-                DataError::HttpError {
-                    code: E_DAT_001,
-                    url: Arc::from(uri.as_str()),
-                    status,
-                    span: slideforge_types::SourceSpan::default(),
+                //
+                // FINDING-2 fix: When status extraction fails (message format not
+                // recognized), fall back to DataError::IoError preserving the original
+                // message rather than fabricating a fake status of 0.
+                match extract_http_status(inner_msg) {
+                    Ok(status) => DataError::HttpError {
+                        code: E_DAT_001,
+                        url: Arc::from(uri.as_str()),
+                        status,
+                        span: slideforge_types::SourceSpan::default(),
+                    },
+                    Err(_unparseable) => DataError::IoError {
+                        code: E_DAT_001,
+                        path: Arc::from(uri.as_str()),
+                        message: Arc::from(inner_msg.as_str()),
+                        span: slideforge_types::SourceSpan::default(),
+                    },
                 }
             } else if inner_msg.contains(E_DAT_002) || message.contains(E_DAT_002) {
                 // Network/transport error (connection refused, timeout, DNS failure,
@@ -227,12 +238,26 @@ fn map_source_error(name: &Arc<str>, err: &DataSourceError) -> DataError {
                     span: slideforge_types::SourceSpan::default(),
                 }
             } else {
-                // Generic I/O error: preserve full message. Include the binding name
-                // so error messages identify which `@data` binding failed (FINDING-6).
-                DataError::IoError {
-                    code: E_DAT_004,
-                    path: Arc::from(uri.as_str()),
-                    message: Arc::from(format!("data binding '{name}': {message}")),
+                // FINDING-3 fix: Generic I/O error with no recognized bracket code.
+                // Route to UnspecifiedSourceError (E-DAT-015) rather than IoError
+                // (E-DAT-004 = "file not found") to avoid mis-categorizing third-party
+                // plugin errors (e.g., disk-full, permission-denied) as file-not-found.
+                //
+                // FINDING-7 fix: Use `inner_msg` (the source's own message, not
+                // `err.to_string()` which wraps it in a second IoError layer) to avoid
+                // the "I/O error reading" prefix appearing twice in the Display output.
+                //
+                // Emit a tracing::warn! to instruct plugin authors to embed [E-DAT-NNN].
+                tracing::warn!(
+                    "dispatcher: data source error for binding '{}' has no [E-DAT-NNN] \
+                    bracket code in message. Routed to E-DAT-015 (unspecified). \
+                    Plugin authors: embed [E-DAT-NNN] in error messages for precise routing.",
+                    name
+                );
+                DataError::UnspecifiedSourceError {
+                    code: E_DAT_015,
+                    uri: Arc::from(uri.as_str()),
+                    message: Arc::from(inner_msg.as_str()),
                     span: slideforge_types::SourceSpan::default(),
                 }
             }
@@ -247,13 +272,28 @@ fn map_source_error(name: &Arc<str>, err: &DataSourceError) -> DataError {
             // transient network failures. Re-map them back to SsrfBlocked here so
             // the dispatcher's DataError carries the correct E-DAT-006 code.
             if inner_msg.contains(E_DAT_006) || message.contains(E_DAT_006) {
-                // Reconstruct SsrfBlocked: extract domain from the full message if possible;
-                // fall back to using the URI as the domain.
-                let domain: Arc<str> = Arc::from(uri.as_str());
+                // FINDING-1 fix: Extract the bare hostname from the URI using url::Url::parse
+                // so the remediation hint reads "Add '169.254.169.254' to [data].allowed_domains"
+                // (bare host) rather than "Add 'http://169.254.169.254/path' to ..." (full URL).
+                // The `allowed_domains` config key accepts bare hosts, not full URLs.
+                //
+                // If url::Url::parse fails (malformed URI), fall back to the raw URI for both
+                // fields — the SSRF was already blocked so we're just formatting the error.
+                let (url_str, domain_str) = if let Ok(parsed) = url::Url::parse(uri) {
+                    let host = parsed.host_str().unwrap_or(uri.as_str()).to_lowercase();
+                    (uri.as_str(), host)
+                } else {
+                    tracing::warn!(
+                        "dispatcher: could not parse SSRF-blocked URI '{}' as URL; \
+                        using raw URI as domain in remediation hint",
+                        uri
+                    );
+                    (uri.as_str(), uri.to_owned())
+                };
                 DataError::SsrfBlocked {
                     code: E_DAT_006,
-                    url: Arc::from(uri.as_str()),
-                    domain,
+                    url: Arc::from(url_str),
+                    domain: Arc::from(domain_str.as_str()),
                     span: slideforge_types::SourceSpan::default(),
                 }
             } else {
@@ -279,13 +319,16 @@ fn map_source_error(name: &Arc<str>, err: &DataSourceError) -> DataError {
         },
 
         DataSourceError::AuthError { uri } => {
-            // Authentication failures are mapped to NetworkError (E-DAT-002) since
-            // they represent an access-layer failure, not a parse failure.
-            // Thread the binding name for debuggability (FINDING-6).
-            DataError::NetworkError {
+            // FINDING-8 fix: Authentication failures are mapped to AuthFailed
+            // (not NetworkError) so the Display does NOT include "Use --offline
+            // to skip HTTP sources" — which is wrong remediation for an auth failure.
+            //
+            // Note: `HttpDataSource` v1 silently ignores `auth_token` and will not
+            // reach this path in practice. The mapping exists for correctness when
+            // third-party plugins emit `DataSourceError::AuthError`.
+            DataError::AuthFailed {
                 code: E_DAT_002,
-                url: Arc::from(uri.as_str()),
-                cause: Arc::from(format!("data binding '{name}': {err}")),
+                uri: Arc::from(uri.as_str()),
                 span: slideforge_types::SourceSpan::default(),
             }
         },
@@ -295,15 +338,36 @@ fn map_source_error(name: &Arc<str>, err: &DataSourceError) -> DataError {
 /// Extract the HTTP status code from a bracket-coded message of the form
 /// `"[E-DAT-001] HTTP <status> from '<url>'"`.
 ///
-/// Returns `None` if the message does not contain a parseable three-digit status.
-fn extract_http_status(message: &str) -> Option<u16> {
+/// Returns `Ok(status)` when a parseable three-digit status code is found.
+/// Returns `Err(&'static str)` with a description when the message does not
+/// match the expected format. Callers MUST NOT fabricate a fake status of 0
+/// on `Err` — instead, fall back to `DataError::IoError` preserving the
+/// original message verbatim.
+///
+/// # Format
+///
+/// The message must contain the literal substring `"HTTP "` followed
+/// immediately by ASCII decimal digits. Example:
+/// `"[E-DAT-001] HTTP 404 from 'http://example.com/data.json'"`.
+fn extract_http_status(message: &str) -> Result<u16, &'static str> {
     // Look for "HTTP " followed by a numeric token.
-    let after_http = message.find("HTTP ")?.checked_add(5)?;
-    let rest = message.get(after_http..)?;
+    let after_http = message
+        .find("HTTP ")
+        .and_then(|pos| pos.checked_add(5))
+        .ok_or("'HTTP ' not found in message")?;
+    let rest = message
+        .get(after_http..)
+        .ok_or("message ended after 'HTTP '")?;
     let end = rest
         .find(|c: char| !c.is_ascii_digit())
         .unwrap_or(rest.len());
-    rest.get(..end)?.parse().ok()
+    let digits = rest.get(..end).ok_or("no digits after 'HTTP '")?;
+    if digits.is_empty() {
+        return Err("no digits after 'HTTP '");
+    }
+    digits
+        .parse::<u16>()
+        .map_err(|_| "status digits overflow u16")
 }
 
 /// Extract the path component from a bracket-coded message of the form
@@ -314,7 +378,25 @@ fn extract_http_status(message: &str) -> Option<u16> {
 /// followed by the label+path. This function skips past the closing bracket
 /// and any label prefix to extract the bare path.
 ///
-/// Returns `None` if the expected pattern is not found.
+/// ## Known label prefixes
+///
+/// - `"file not found: "` — emitted by `FileDataSource`
+/// - `"I/O error: "` — emitted by `FileDataSource` on permission/OS errors
+///
+/// ## Return value
+///
+/// Returns `Some(path)` when the message contains one of the known label prefixes
+/// and the path is non-empty after stripping the prefix.
+///
+/// Returns `None` when:
+/// - No `']'` bracket terminator is found.
+/// - The content after the bracket does not start with a recognized label prefix.
+///   The caller must fall back to `uri.as_str()` explicitly in this case.
+/// - The path segment after the prefix is empty.
+///
+/// This design prevents leaking unrecognized label text into the `.path` field
+/// of `DataError::FileNotFound` (FINDING-6: "unknown prefixes silently leak label
+/// text into the path").
 fn extract_path_after_code(message: &str) -> Option<&str> {
     // Bracket codes end with ']'. Find the first ']' and skip past it and
     // any leading space so we're positioned at the label + path content.
@@ -326,11 +408,16 @@ fn extract_path_after_code(message: &str) -> Option<&str> {
     } else {
         after_bracket
     };
-    // Strip known label prefixes that precede the path.
-    let clean = with_label
-        .trim_start_matches("file not found: ")
-        .trim_start_matches("I/O error: ")
-        .trim();
+    // Strip ONLY recognized label prefixes. Return None for unrecognized prefixes
+    // so callers fall back to uri.as_str() rather than leaking the label text.
+    let clean = if let Some(rest) = with_label.strip_prefix("file not found: ") {
+        rest.trim()
+    } else if let Some(rest) = with_label.strip_prefix("I/O error: ") {
+        rest.trim()
+    } else {
+        // Unrecognized prefix — signal the caller to fall back to uri.as_str().
+        return None;
+    };
     if clean.is_empty() { None } else { Some(clean) }
 }
 
@@ -761,5 +848,325 @@ mod tests {
         // They must be static plugin type identifiers, not dynamic binding names.
         assert_eq!(file_src.id(), "stub-file");
         assert_eq!(http_src.id(), "stub-http");
+    }
+
+    // ---------------------------------------------------------------------------
+    // FINDING-1: SsrfBlocked domain field must be bare host, not full URL
+    // ---------------------------------------------------------------------------
+
+    /// `test_map_source_error_ssrf_preserves_bare_host_in_remediation_hint`
+    ///
+    /// FINDING-1: When `DataSourceError::ParseError` carries `[E-DAT-006]` (SSRF),
+    /// the resulting `SsrfBlocked.domain` field must contain only the bare hostname
+    /// (no scheme, no path, no port for standard ports) so the remediation hint reads
+    /// "Add 'hostname' to [data].allowed_domains" — consistent with what the config key
+    /// actually expects.
+    #[test]
+    fn test_map_source_error_ssrf_preserves_bare_host_in_remediation_hint() {
+        // Case 1: IMDS endpoint — domain must be "169.254.169.254" (no scheme, no path)
+        let sources = single_error_source(
+            "imds",
+            DataSourceError::ParseError {
+                uri: "http://169.254.169.254/metadata".to_owned(),
+                message: "[E-DAT-006] HTTP source 'http://169.254.169.254/metadata' blocked \
+                           by allowed_domains policy."
+                    .to_owned(),
+            },
+        );
+        let ctx = DataSourceContext::new();
+        let (_scope, errors) = load_all(&sources, &ctx);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].code(), "E-DAT-006");
+        let display = errors[0].to_string();
+        assert!(
+            display.contains("Add '169.254.169.254' to"),
+            "SSRF remediation hint must use bare host '169.254.169.254'; got: {display}"
+        );
+        assert!(
+            !display.contains("Add 'http://169.254.169.254/metadata' to"),
+            "SSRF remediation hint must NOT include scheme or path; got: {display}"
+        );
+
+        // Case 2: internal host with explicit port — domain must be "internal.corp"
+        // (port is excluded from host_str() per url crate behavior for non-standard ports).
+        let sources2 = single_error_source(
+            "internal",
+            DataSourceError::ParseError {
+                uri: "https://internal.corp:8080/path".to_owned(),
+                message: "[E-DAT-006] blocked".to_owned(),
+            },
+        );
+        let (_scope2, errors2) = load_all(&sources2, &ctx);
+        assert_eq!(errors2.len(), 1);
+        assert_eq!(errors2[0].code(), "E-DAT-006");
+        let display2 = errors2[0].to_string();
+        assert!(
+            display2.contains("Add 'internal.corp' to"),
+            "SSRF remediation hint for host-with-port must use bare host 'internal.corp'; \
+            got: {display2}"
+        );
+
+        // Case 3: IPv6 loopback — domain must be "[::1]" (bracketed form)
+        let sources3 = single_error_source(
+            "ipv6",
+            DataSourceError::ParseError {
+                uri: "https://[::1]/foo".to_owned(),
+                message: "[E-DAT-006] blocked".to_owned(),
+            },
+        );
+        let (_scope3, errors3) = load_all(&sources3, &ctx);
+        assert_eq!(errors3.len(), 1);
+        assert_eq!(errors3[0].code(), "E-DAT-006");
+        let display3 = errors3[0].to_string();
+        // url::Url::host_str() returns "::1" (no brackets) for IPv6; we accept either.
+        assert!(
+            display3.contains("Add '::1' to") || display3.contains("Add '[::1]' to"),
+            "SSRF remediation hint for IPv6 must use the IPv6 host form; got: {display3}"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // FINDING-2: extract_http_status must not produce fake HTTP 0 on failure
+    // ---------------------------------------------------------------------------
+
+    /// `test_map_source_error_e_dat_001_display_contains_status_code`
+    ///
+    /// FINDING-2: When IoError contains [E-DAT-001] and a parseable status,
+    /// the Display must contain the actual status (e.g., "HTTP 404"). Tests two
+    /// status codes to pin the format.
+    #[test]
+    fn test_map_source_error_e_dat_001_display_contains_status_code() {
+        // Case 1: 404 Not Found
+        let sources_404 = single_error_source(
+            "api_404",
+            DataSourceError::IoError {
+                uri: "http://example.com/missing.json".to_owned(),
+                message: "[E-DAT-001] HTTP 404 from 'http://example.com/missing.json'".to_owned(),
+            },
+        );
+        let ctx = DataSourceContext::new();
+        let (_scope, errors) = load_all(&sources_404, &ctx);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].code(), "E-DAT-001");
+        let display = errors[0].to_string();
+        assert!(
+            display.contains("404"),
+            "E-DAT-001 error for 404 must contain '404' in Display; got: {display}"
+        );
+        assert!(
+            !display.contains("HTTP 0"),
+            "E-DAT-001 error must not fabricate 'HTTP 0'; got: {display}"
+        );
+
+        // Case 2: 503 Service Unavailable
+        let sources_503 = single_error_source(
+            "api_503",
+            DataSourceError::IoError {
+                uri: "http://example.com/data.json".to_owned(),
+                message: "[E-DAT-001] HTTP 503 from 'http://example.com/data.json'".to_owned(),
+            },
+        );
+        let (_scope2, errors2) = load_all(&sources_503, &ctx);
+        assert_eq!(errors2.len(), 1);
+        assert_eq!(errors2[0].code(), "E-DAT-001");
+        let display2 = errors2[0].to_string();
+        assert!(
+            display2.contains("503"),
+            "E-DAT-001 error for 503 must contain '503' in Display; got: {display2}"
+        );
+    }
+
+    /// `test_extract_http_status_falls_back_on_unparseable_message`
+    ///
+    /// FINDING-2: When the message does not match the "HTTP NNN" format,
+    /// `extract_http_status` must return Err (not produce a fake 0).
+    /// The caller must then fall back to preserving the original message.
+    #[test]
+    fn test_extract_http_status_falls_back_on_unparseable_message() {
+        // Message that does NOT contain "HTTP " followed by digits.
+        let result = extract_http_status("some error without an HTTP status");
+        assert!(
+            result.is_err(),
+            "extract_http_status must return Err on unparseable message; got: {result:?}"
+        );
+
+        // The dispatcher must route to IoError with original message, not HttpError{status:0}.
+        let sources = single_error_source(
+            "weird",
+            DataSourceError::IoError {
+                uri: "http://example.com/".to_owned(),
+                message: "[E-DAT-001] custom plugin error without HTTP status".to_owned(),
+            },
+        );
+        let ctx = DataSourceContext::new();
+        let (_scope, errors) = load_all(&sources, &ctx);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].code(), "E-DAT-001");
+        let display = errors[0].to_string();
+        assert!(
+            !display.contains("HTTP 0"),
+            "fallback path must not produce 'HTTP 0'; got: {display}"
+        );
+        assert!(
+            display.contains("custom plugin error without HTTP status"),
+            "fallback path must preserve the original message; got: {display}"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // FINDING-3: Catch-all must not use E-DAT-004 for unknown-category errors
+    // ---------------------------------------------------------------------------
+
+    /// `test_map_source_error_no_bracket_code_routes_to_e_dat_015`
+    ///
+    /// FINDING-3: When an IoError message has no [E-DAT-NNN] bracket prefix,
+    /// the dispatcher must route to E-DAT-015 (UnspecifiedSourceError), NOT
+    /// E-DAT-004 (file not found). The Display must not say "file not found".
+    #[test]
+    fn test_map_source_error_no_bracket_code_routes_to_e_dat_015() {
+        let sources = single_error_source(
+            "plugin",
+            DataSourceError::IoError {
+                uri: "custom://some-resource".to_owned(),
+                message: "disk quota exceeded".to_owned(),
+            },
+        );
+        let ctx = DataSourceContext::new();
+        let (_scope, errors) = load_all(&sources, &ctx);
+        assert_eq!(errors.len(), 1);
+        let code = errors[0].code();
+        assert_ne!(
+            code, "E-DAT-004",
+            "catch-all must NOT route to E-DAT-004 (file not found) for unknown error; \
+            got code: {code}"
+        );
+        assert_eq!(
+            code, "E-DAT-015",
+            "catch-all must route to E-DAT-015 (unspecified); got: {code}"
+        );
+        let display = errors[0].to_string();
+        assert!(
+            !display.contains("file not found"),
+            "catch-all Display must NOT say 'file not found'; got: {display}"
+        );
+        assert!(
+            display.contains("disk quota exceeded"),
+            "catch-all Display must preserve the original message; got: {display}"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // FINDING-6: extract_path_after_code returns None on unrecognized prefix
+    // ---------------------------------------------------------------------------
+
+    /// `test_extract_path_after_code_returns_none_on_unknown_prefix`
+    ///
+    /// FINDING-6: `extract_path_after_code` must return `None` when the content
+    /// after the bracket code does not start with a recognized label prefix.
+    /// This prevents unrecognized label text from leaking into the `.path` field.
+    #[test]
+    fn test_extract_path_after_code_returns_none_on_unknown_prefix() {
+        // Unknown prefix "custom error: " — must return None.
+        let result = extract_path_after_code("[E-DAT-004] custom error: /some/path");
+        assert!(
+            result.is_none(),
+            "extract_path_after_code must return None for unknown prefix; got: {result:?}"
+        );
+
+        // Known prefix "file not found: " — must return Some.
+        let result = extract_path_after_code("[E-DAT-004] file not found: /real/path.json");
+        assert_eq!(
+            result,
+            Some("/real/path.json"),
+            "extract_path_after_code must return Some for known 'file not found' prefix"
+        );
+
+        // Known prefix "I/O error: " — must return Some.
+        let result = extract_path_after_code("[E-DAT-004] I/O error: /some/file.json");
+        assert_eq!(
+            result,
+            Some("/some/file.json"),
+            "extract_path_after_code must return Some for known 'I/O error' prefix"
+        );
+
+        // No bracket terminator — must return None.
+        let result = extract_path_after_code("no bracket here");
+        assert!(
+            result.is_none(),
+            "extract_path_after_code must return None with no bracket; got: {result:?}"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // FINDING-7: Catch-all must not produce double "I/O error" in Display
+    // ---------------------------------------------------------------------------
+
+    /// `test_catch_all_display_does_not_double_wrap_io_error`
+    ///
+    /// FINDING-7: The catch-all arm must use the inner source message (not
+    /// `err.to_string()` which prepends "I/O error for 'uri': ") to prevent
+    /// the string "I/O error reading" from appearing twice in the Display.
+    #[test]
+    fn test_catch_all_display_does_not_double_wrap_io_error() {
+        let sources = single_error_source(
+            "plugin_weird",
+            DataSourceError::IoError {
+                uri: "custom://resource".to_owned(),
+                message: "permission denied".to_owned(),
+            },
+        );
+        let ctx = DataSourceContext::new();
+        let (_scope, errors) = load_all(&sources, &ctx);
+        assert_eq!(errors.len(), 1);
+        let display = errors[0].to_string();
+        // Count occurrences of "I/O error" — must appear at most once.
+        let occurrences = display.matches("I/O error").count();
+        assert!(
+            occurrences <= 1,
+            "Display must not contain 'I/O error' more than once; got {occurrences} \
+            occurrences in: {display}"
+        );
+        assert!(
+            display.contains("permission denied"),
+            "Display must contain the original error message; got: {display}"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // FINDING-8: AuthError must not produce "Use --offline" in Display
+    // ---------------------------------------------------------------------------
+
+    /// `test_map_source_error_auth_error_does_not_suggest_offline`
+    ///
+    /// FINDING-8: `DataSourceError::AuthError` must not produce a Display containing
+    /// "Use --offline" — that hint is wrong for an auth failure. The Display must
+    /// contain "auth" to indicate the failure type.
+    #[test]
+    fn test_map_source_error_auth_error_does_not_suggest_offline() {
+        let sources = single_error_source(
+            "api",
+            DataSourceError::AuthError {
+                uri: "https://api.example.com/data.json".to_owned(),
+            },
+        );
+        let ctx = DataSourceContext::new();
+        let (_scope, errors) = load_all(&sources, &ctx);
+        assert_eq!(errors.len(), 1);
+        // Must still be an access-layer error (E-DAT-002 range).
+        // AuthFailed returns E-DAT-002.
+        let code = errors[0].code();
+        assert_eq!(
+            code, "E-DAT-002",
+            "AuthError must carry E-DAT-002; got: {code}"
+        );
+        let display = errors[0].to_string();
+        assert!(
+            !display.contains("Use --offline"),
+            "AuthError Display must NOT suggest '--offline'; got: {display}"
+        );
+        assert!(
+            display.to_lowercase().contains("auth"),
+            "AuthError Display must mention 'auth'; got: {display}"
+        );
     }
 }

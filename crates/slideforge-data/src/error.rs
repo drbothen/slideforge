@@ -80,6 +80,22 @@ pub const E_DAT_013: &str = "E-DAT-013";
 /// Maps to `E-DAT-014` in the error taxonomy.
 pub const E_DAT_014: &str = "E-DAT-014";
 
+/// Error code for unspecified data-source error (third-party plugin, unknown category).
+///
+/// Maps to `E-DAT-015` in the error taxonomy.
+///
+/// Used by the dispatcher's catch-all arm when a third-party `DataSource` plugin
+/// returns an [`slideforge_plugin_api::DataSourceError::IoError`] whose message does
+/// NOT embed a `[E-DAT-NNN]` bracket prefix. The catch-all cannot infer the
+/// specific failure category, so it routes to this code instead of mis-using
+/// `E-DAT-004` (file-not-found) or `E-DAT-002` (network) which carry specific
+/// semantic meanings that do not apply to an unknown source.
+///
+/// Plugin authors should embed `[E-DAT-NNN]` in their error messages to enable
+/// precise routing. A `tracing::warn!` is emitted at dispatch time when this
+/// fallback is triggered.
+pub const E_DAT_015: &str = "E-DAT-015";
+
 /// The top-level error type for all `slideforge-data` operations.
 ///
 /// Each variant corresponds to a documented error code in the error taxonomy.
@@ -219,6 +235,46 @@ pub enum DataError {
         /// Human-readable description of the transport failure.
         cause: Arc<str>,
         /// The source location associated with this network error.
+        span: SourceSpan,
+    },
+
+    /// An authentication failure from a data source plugin.
+    ///
+    /// Error code: `E-DAT-002` (access-layer failure, not a parse failure).
+    ///
+    /// Note: `HttpDataSource` silently ignores `auth_token` in v1 and will not
+    /// emit this error in practice. The variant exists for correctness when
+    /// third-party plugins emit `DataSourceError::AuthError`.
+    #[error("[{code}] authentication failed for source '{uri}' (at {span})")]
+    AuthFailed {
+        /// The error code constant (`E-DAT-002`).
+        code: &'static str,
+        /// The URI of the source that failed authentication.
+        uri: Arc<str>,
+        /// The source location associated with this auth failure.
+        span: SourceSpan,
+    },
+
+    /// An unspecified error from a third-party data source plugin.
+    ///
+    /// Error code: `E-DAT-015`.
+    ///
+    /// Used by the dispatcher's catch-all arm when the plugin's
+    /// [`slideforge_plugin_api::DataSourceError::IoError`] message does not embed
+    /// a `[E-DAT-NNN]` bracket prefix. Third-party plugins should embed the prefix
+    /// in their messages to enable precise routing to a more specific variant.
+    ///
+    /// A `tracing::warn!` is emitted when this fallback fires, instructing the
+    /// plugin author to embed a `[E-DAT-NNN]` bracket code.
+    #[error("[{code}] data source error for '{uri}': {message} (at {span})")]
+    UnspecifiedSourceError {
+        /// The error code constant (`E-DAT-015`).
+        code: &'static str,
+        /// The URI the plugin was asked to load.
+        uri: Arc<str>,
+        /// The raw message from the plugin.
+        message: Arc<str>,
+        /// The source location associated with this error.
         span: SourceSpan,
     },
 }
@@ -426,6 +482,19 @@ impl DataError {
                 cause,
                 span: new_span,
             },
+            DataError::AuthFailed { code, uri, .. } => DataError::AuthFailed {
+                code,
+                uri,
+                span: new_span,
+            },
+            DataError::UnspecifiedSourceError {
+                code, uri, message, ..
+            } => DataError::UnspecifiedSourceError {
+                code,
+                uri,
+                message,
+                span: new_span,
+            },
         }
     }
 
@@ -503,7 +572,8 @@ impl DataError {
             DataError::FieldNotFound { .. } => E_DAT_005,
             DataError::PathTraversalBlocked { .. } | DataError::SsrfBlocked { .. } => E_DAT_006,
             DataError::HttpError { .. } => E_DAT_001,
-            DataError::NetworkError { .. } => E_DAT_002,
+            DataError::NetworkError { .. } | DataError::AuthFailed { .. } => E_DAT_002,
+            DataError::UnspecifiedSourceError { .. } => E_DAT_015,
         }
     }
 }

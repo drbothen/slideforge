@@ -61,14 +61,11 @@ use slideforge_types::Value;
 /// real network requests. Each call to `load()` increments `call_count`.
 ///
 /// FINDING-7 fix: `id()` returns the static plugin-type identifier `"mock-http"`,
-/// NOT the binding name. The binding name is a separate `binding_name` field used
-/// only for test setup, not for `id()`.
+/// NOT the binding name.
+///
+/// FINDING-9 fix: `_binding_name` field removed — it was dead code. The binding
+/// name is supplied as the key in the sources slice, not stored in the source.
 struct MockHttpSource {
-    /// The data binding name (used only in test setup construction, NOT for `id()`).
-    /// Prefixed with `_` to suppress the unused-field lint — the field exists to
-    /// document which binding this source belongs to, but the dispatcher does not
-    /// pass the binding name through the `DataSource` trait.
-    _binding_name: Arc<str>,
     /// The value returned by `load()` on success.
     value: Value,
     /// Counter incremented on every `load()` call. Shared across clones.
@@ -76,10 +73,9 @@ struct MockHttpSource {
 }
 
 impl MockHttpSource {
-    /// Construct a new `MockHttpSource` returning `value` under `binding_name`.
-    fn new(binding_name: impl Into<Arc<str>>, value: Value) -> Self {
+    /// Construct a new `MockHttpSource` returning `value`.
+    fn new(value: Value) -> Self {
         MockHttpSource {
-            _binding_name: binding_name.into(),
             value,
             call_count: Arc::new(AtomicUsize::new(0)),
         }
@@ -89,16 +85,8 @@ impl MockHttpSource {
     ///
     /// Used in AC-007 watch-mode tests where the caller needs to assert
     /// exactly zero calls across multiple dispatcher invocations.
-    fn with_counter(
-        binding_name: impl Into<Arc<str>>,
-        value: Value,
-        call_count: Arc<AtomicUsize>,
-    ) -> Self {
-        MockHttpSource {
-            _binding_name: binding_name.into(),
-            value,
-            call_count,
-        }
+    fn with_counter(value: Value, call_count: Arc<AtomicUsize>) -> Self {
+        MockHttpSource { value, call_count }
     }
 }
 
@@ -131,18 +119,15 @@ impl DataSource for MockHttpSource {
 ///
 /// FINDING-7 fix: `id()` returns the static plugin-type identifier `"mock-file"`,
 /// NOT the binding name.
+///
+/// FINDING-9 fix: `_binding_name` field removed — it was dead code.
 struct MockFileSource {
-    /// The data binding name (used only in test setup construction, NOT for `id()`).
-    _binding_name: Arc<str>,
     value: Value,
 }
 
 impl MockFileSource {
-    fn new(binding_name: impl Into<Arc<str>>, value: Value) -> Self {
-        MockFileSource {
-            _binding_name: binding_name.into(),
-            value,
-        }
+    fn new(value: Value) -> Self {
+        MockFileSource { value }
     }
 }
 
@@ -161,16 +146,13 @@ impl DataSource for MockFileSource {
 ///
 /// FINDING-7 fix: `id()` returns the static plugin-type identifier `"mock-fail"`,
 /// NOT the binding name.
-struct MockFailSource {
-    /// The data binding name (used only in test setup construction, NOT for `id()`).
-    _binding_name: Arc<str>,
-}
+///
+/// FINDING-9 fix: `_binding_name` field removed — it was dead code.
+struct MockFailSource;
 
 impl MockFailSource {
-    fn new(binding_name: impl Into<Arc<str>>) -> Self {
-        MockFailSource {
-            _binding_name: binding_name.into(),
-        }
+    fn new() -> Self {
+        MockFailSource
     }
 }
 
@@ -203,8 +185,7 @@ impl DataSource for MockFailSource {
 #[test]
 fn test_bc_1_03_004_offline_skips_http_source() {
     let call_count = Arc::new(AtomicUsize::new(0));
-    let mock_http =
-        MockHttpSource::with_counter("metrics", Value::Int(42), Arc::clone(&call_count));
+    let mock_http = MockHttpSource::with_counter(Value::Int(42), Arc::clone(&call_count));
     let sources: Vec<(Arc<str>, Box<dyn DataSource>)> =
         vec![(Arc::from("metrics"), Box::new(mock_http))];
     let ctx = DataSourceContext::new().with_offline(true);
@@ -252,12 +233,11 @@ fn test_bc_1_03_004_offline_loads_file_sources() {
     let sources: Vec<(Arc<str>, Box<dyn DataSource>)> = vec![
         (
             Arc::from("report"),
-            Box::new(MockFileSource::new("report", file_value.clone())),
+            Box::new(MockFileSource::new(file_value.clone())),
         ),
         (
             Arc::from("live_data"),
             Box::new(MockHttpSource::with_counter(
-                "live_data",
                 Value::Int(999),
                 Arc::clone(&http_call_count),
             )),
@@ -313,11 +293,11 @@ fn test_bc_1_03_004_online_loads_all_sources() {
     let sources: Vec<(Arc<str>, Box<dyn DataSource>)> = vec![
         (
             Arc::from("static"),
-            Box::new(MockFileSource::new("static", file_value.clone())),
+            Box::new(MockFileSource::new(file_value.clone())),
         ),
         (
             Arc::from("live"),
-            Box::new(MockHttpSource::new("live", http_value.clone())),
+            Box::new(MockHttpSource::new(http_value.clone())),
         ),
     ];
     let ctx = DataSourceContext::new(); // offline = false (default)
@@ -359,11 +339,11 @@ fn test_bc_1_03_004_offline_zero_http_sources() {
     let sources: Vec<(Arc<str>, Box<dyn DataSource>)> = vec![
         (
             Arc::from("data_a"),
-            Box::new(MockFileSource::new("data_a", v1.clone())),
+            Box::new(MockFileSource::new(v1.clone())),
         ),
         (
             Arc::from("data_b"),
-            Box::new(MockFileSource::new("data_b", v2.clone())),
+            Box::new(MockFileSource::new(v2.clone())),
         ),
     ];
     let ctx = DataSourceContext::new().with_offline(true);
@@ -403,11 +383,11 @@ fn test_bc_1_03_004_offline_with_file_and_http() {
     let sources: Vec<(Arc<str>, Box<dyn DataSource>)> = vec![
         (
             Arc::from("local_config"),
-            Box::new(MockFileSource::new("local_config", file_value.clone())),
+            Box::new(MockFileSource::new(file_value.clone())),
         ),
         (
             Arc::from("remote_api"),
-            Box::new(MockHttpSource::new("remote_api", Value::Int(999))),
+            Box::new(MockHttpSource::new(Value::Int(999))),
         ),
     ];
     let ctx = DataSourceContext::new().with_offline(true);
@@ -455,7 +435,7 @@ fn test_bc_1_03_004_offline_with_file_and_http() {
 fn test_bc_1_03_004_offline_unreferenced_http_source() {
     let sources: Vec<(Arc<str>, Box<dyn DataSource>)> = vec![(
         Arc::from("unused_http"),
-        Box::new(MockHttpSource::new("unused_http", Value::Int(0))),
+        Box::new(MockHttpSource::new(Value::Int(0))),
     )];
     let ctx = DataSourceContext::new().with_offline(true);
 
@@ -514,7 +494,7 @@ fn test_bc_1_03_004_offline_does_not_silently_substitute_empty_value() {
     {
         let sources: Vec<(Arc<str>, Box<dyn DataSource>)> = vec![(
             Arc::clone(&source_name),
-            Box::new(MockHttpSource::new("http_source", non_empty_value.clone())),
+            Box::new(MockHttpSource::new(non_empty_value.clone())),
         )];
         let ctx = DataSourceContext::new(); // offline=false
 
@@ -542,7 +522,7 @@ fn test_bc_1_03_004_offline_does_not_silently_substitute_empty_value() {
     {
         let sources: Vec<(Arc<str>, Box<dyn DataSource>)> = vec![(
             Arc::clone(&source_name),
-            Box::new(MockHttpSource::new("http_source", non_empty_value.clone())),
+            Box::new(MockHttpSource::new(non_empty_value.clone())),
         )];
         let ctx = DataSourceContext::new().with_offline(true);
 
@@ -593,7 +573,6 @@ fn test_bc_1_03_004_offline_watch_mode_repeated_dispatch() {
         let sources: Vec<(Arc<str>, Box<dyn DataSource>)> = vec![(
             Arc::from("live_feed"),
             Box::new(MockHttpSource::with_counter(
-                "live_feed",
                 Value::Int(invocation as i64),
                 Arc::clone(&http_call_count),
             )),
@@ -746,12 +725,9 @@ fn test_bc_1_03_004_partial_load_continues_on_error() {
     let sources: Vec<(Arc<str>, Box<dyn DataSource>)> = vec![
         (
             Arc::from("good_source"),
-            Box::new(MockFileSource::new("good_source", ok_value.clone())),
+            Box::new(MockFileSource::new(ok_value.clone())),
         ),
-        (
-            Arc::from("bad_source"),
-            Box::new(MockFailSource::new("bad_source")),
-        ),
+        (Arc::from("bad_source"), Box::new(MockFailSource::new())),
     ];
     let ctx = DataSourceContext::new();
 
@@ -895,5 +871,290 @@ fn test_bc_1_03_004_dispatcher_loads_real_file_source() {
         Some(&slideforge_types::Value::Str(Arc::from("test-data"))),
         "'label' field must be Str('test-data'); got: {:?}",
         map.get("label")
+    );
+}
+
+// ---------------------------------------------------------------------------
+// FINDING-4: AC-009 integration coverage for E-DAT-001 / E-DAT-002 / E-DAT-003
+//
+// These tests use real HttpDataSource + TcpListener mock servers (same pattern
+// as http.rs unit tests) to exercise the full dispatcher → HttpDataSource →
+// parse production code path. Tests verify:
+//   (a) errors.len() == 1
+//   (b) errors[0].code() == "E-DAT-NNN"
+//   (c) errors[0].to_string() contains a specific substring proving the right
+//       path was taken.
+//
+// This replaces the tautological StubSource coverage for E-DAT-001/002/003 that
+// only exercised the dispatcher's bracket-code parsing, not the full source path.
+// ---------------------------------------------------------------------------
+
+/// Spawn a single-shot TcpListener mock HTTP server on a random port.
+///
+/// Returns `(addr, join_handle)`. The server accepts exactly one connection,
+/// sends the canned response, and exits. Call `handle.join().unwrap()` after
+/// the test to ensure the thread is cleaned up.
+fn spawn_mock_http_server_for_finding4(
+    status: u16,
+    content_type: &'static str,
+    body: &'static str,
+) -> (std::net::SocketAddr, std::thread::JoinHandle<()>) {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let status_text = match status {
+        200 => "OK",
+        400 => "Bad Request",
+        404 => "Not Found",
+        500 => "Internal Server Error",
+        503 => "Service Unavailable",
+        _ => "Unknown",
+    };
+    let response = format!(
+        "HTTP/1.1 {status} {status_text}\r\nContent-Type: {content_type}\r\n\
+         Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len(),
+    );
+    let handle = std::thread::spawn(move || {
+        if let Ok((mut stream, _)) = listener.accept() {
+            let mut buf = [0u8; 4096];
+            let _ = stream.read(&mut buf);
+            let _ = stream.write_all(response.as_bytes());
+        }
+    });
+    (addr, handle)
+}
+
+/// `test_bc_1_03_004_error_code_dat_001_http_404_through_dispatcher`
+///
+/// FINDING-4: Real `HttpDataSource` hitting a mock 404 endpoint via the full
+/// dispatcher → HttpDataSource → load_all path returns exactly one error with
+/// code E-DAT-001 and Display containing "404".
+///
+/// Traces to AC-009 / BC-1.03.004.
+#[test]
+fn test_bc_1_03_004_error_code_dat_001_http_404_through_dispatcher() {
+    use slideforge_data::HttpDataSource;
+
+    let (addr, handle) =
+        spawn_mock_http_server_for_finding4(404, "application/json", "{\"error\":\"not found\"}");
+    let url = format!("http://127.0.0.1:{}", addr.port());
+
+    let sources: Vec<(Arc<str>, Box<dyn DataSource>)> = vec![(
+        Arc::from("api"),
+        Box::new(HttpDataSource::new(url.as_str())),
+    )];
+    let ctx = DataSourceContext::new();
+
+    let (scope, errors) = load_all(&sources, &ctx);
+
+    handle.join().unwrap();
+
+    assert!(
+        !scope.contains_key(&Arc::from("api")),
+        "404 source must not appear in scope"
+    );
+    assert_eq!(
+        errors.len(),
+        1,
+        "exactly one error expected for HTTP 404; got: {:?}",
+        errors
+    );
+    assert_eq!(
+        errors[0].code(),
+        "E-DAT-001",
+        "HTTP 404 must produce E-DAT-001; got: {} (display: {})",
+        errors[0].code(),
+        errors[0]
+    );
+    let display = errors[0].to_string();
+    assert!(
+        display.contains("404"),
+        "E-DAT-001 Display for 404 must contain '404'; got: {display}"
+    );
+}
+
+/// `test_bc_1_03_004_error_code_dat_001_http_500_through_dispatcher`
+///
+/// FINDING-4: Real `HttpDataSource` hitting a mock 500 endpoint via the full
+/// dispatcher path returns exactly one error with code E-DAT-001 and Display
+/// containing "500".
+///
+/// HttpDataSource retries 5xx once; the mock server must serve two responses.
+/// Traces to AC-009 / BC-1.03.004.
+#[test]
+fn test_bc_1_03_004_error_code_dat_001_http_500_through_dispatcher() {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+
+    // Must serve TWO responses because HttpDataSource retries once on 5xx.
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let handle = std::thread::spawn(move || {
+        for _ in 0..2 {
+            let Ok((mut stream, _)) = listener.accept() else {
+                break;
+            };
+            let mut buf = [0u8; 4096];
+            let _ = stream.read(&mut buf);
+            let response = "HTTP/1.1 500 Internal Server Error\r\n\
+                            Content-Type: application/json\r\n\
+                            Content-Length: 2\r\n\
+                            Connection: close\r\n\r\n{}";
+            let _ = stream.write_all(response.as_bytes());
+        }
+    });
+
+    let url = format!("http://127.0.0.1:{}", addr.port());
+
+    use slideforge_data::HttpDataSource;
+    let sources: Vec<(Arc<str>, Box<dyn DataSource>)> = vec![(
+        Arc::from("api"),
+        Box::new(HttpDataSource::new(url.as_str())),
+    )];
+    let ctx = DataSourceContext::new();
+
+    let (scope, errors) = load_all(&sources, &ctx);
+
+    handle.join().unwrap();
+
+    assert!(
+        !scope.contains_key(&Arc::from("api")),
+        "500 source must not appear in scope"
+    );
+    assert_eq!(
+        errors.len(),
+        1,
+        "exactly one error expected for HTTP 500; got: {:?}",
+        errors
+    );
+    assert_eq!(
+        errors[0].code(),
+        "E-DAT-001",
+        "HTTP 500 must produce E-DAT-001; got: {} (display: {})",
+        errors[0].code(),
+        errors[0]
+    );
+    let display = errors[0].to_string();
+    assert!(
+        display.contains("500"),
+        "E-DAT-001 Display for 500 must contain '500'; got: {display}"
+    );
+}
+
+/// `test_bc_1_03_004_error_code_dat_002_network_error_through_dispatcher`
+///
+/// FINDING-4: Real `HttpDataSource` pointing at a dead port (guaranteed
+/// connection refused) → dispatcher returns exactly one error with code E-DAT-002.
+///
+/// Strategy: bind a TcpListener to get an OS-assigned port, then drop it before
+/// the HttpDataSource attempts to connect. The port is now closed → connection
+/// refused → E-DAT-002.
+///
+/// Traces to AC-009 / BC-1.03.004.
+#[test]
+fn test_bc_1_03_004_error_code_dat_002_network_error_through_dispatcher() {
+    use std::net::TcpListener;
+
+    // Bind to get an OS-assigned port, then immediately drop the listener
+    // so the port is closed by the time HttpDataSource tries to connect.
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener); // Port is now closed → connection refused
+
+    let url = format!("http://127.0.0.1:{port}");
+
+    use slideforge_data::HttpDataSource;
+    let sources: Vec<(Arc<str>, Box<dyn DataSource>)> = vec![(
+        Arc::from("api"),
+        Box::new(HttpDataSource::new(url.as_str())),
+    )];
+    let ctx = DataSourceContext::new();
+
+    let (scope, errors) = load_all(&sources, &ctx);
+
+    assert!(
+        !scope.contains_key(&Arc::from("api")),
+        "network-error source must not appear in scope"
+    );
+    assert_eq!(
+        errors.len(),
+        1,
+        "exactly one error expected for connection refused; got: {:?}",
+        errors
+    );
+    assert_eq!(
+        errors[0].code(),
+        "E-DAT-002",
+        "connection refused must produce E-DAT-002; got: {} (display: {})",
+        errors[0].code(),
+        errors[0]
+    );
+}
+
+/// `test_bc_1_03_004_error_code_dat_003_parse_error_through_dispatcher`
+///
+/// FINDING-4: Real `FileDataSource` pointing at a temp file with invalid JSON →
+/// dispatcher returns exactly one error with code E-DAT-003 and the correct
+/// format inferred from the `.json` extension.
+///
+/// Traces to AC-009 / BC-1.03.004.
+#[test]
+fn test_bc_1_03_004_error_code_dat_003_parse_error_through_dispatcher() {
+    use slideforge_data::FileDataSource;
+    use std::io::Write as _;
+
+    // Write a temp file with invalid JSON content.
+    let mut tmp = tempfile::Builder::new()
+        .suffix(".json")
+        .tempfile()
+        .expect("temp file creation must succeed");
+    tmp.write_all(b"{not valid json")
+        .expect("write must succeed");
+    let path = tmp
+        .path()
+        .to_str()
+        .expect("temp path must be valid UTF-8")
+        .to_owned();
+
+    let sources: Vec<(Arc<str>, Box<dyn DataSource>)> = vec![(
+        Arc::from("bad_json"),
+        Box::new(FileDataSource::new(path.as_str())),
+    )];
+    let ctx = DataSourceContext::new();
+
+    let (scope, errors) = load_all(&sources, &ctx);
+
+    // Drop tmp AFTER load_all (file must exist during the load).
+    drop(tmp);
+
+    assert!(
+        !scope.contains_key(&Arc::from("bad_json")),
+        "parse-failed source must not appear in scope"
+    );
+    assert_eq!(
+        errors.len(),
+        1,
+        "exactly one error expected for invalid JSON; got: {:?}",
+        errors
+    );
+    assert_eq!(
+        errors[0].code(),
+        "E-DAT-003",
+        "invalid JSON must produce E-DAT-003; got: {} (display: {})",
+        errors[0].code(),
+        errors[0]
+    );
+    let display = errors[0].to_string();
+    assert!(
+        display.contains("E-DAT-003"),
+        "E-DAT-003 Display must contain the code; got: {display}"
+    );
+    // Verify format is inferred as Json from the .json extension.
+    assert!(
+        display.contains("Json") || display.contains("json"),
+        "E-DAT-003 Display must mention Json format for .json file; got: {display}"
     );
 }
