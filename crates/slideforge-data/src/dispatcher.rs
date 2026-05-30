@@ -68,9 +68,10 @@ use slideforge_types::Value;
 use crate::DataError;
 use crate::context::DataSourceContext;
 use crate::error::{
-    E_DAT_001, E_DAT_002, E_DAT_003, E_DAT_004, E_DAT_005, E_DAT_006, E_DAT_007, E_DAT_008,
-    E_DAT_009, E_DAT_010, E_DAT_011, E_DAT_012, E_DAT_013, E_DAT_014, E_DAT_015,
+    E_DAT_001, E_DAT_002, E_DAT_003, E_DAT_004, E_DAT_006, E_DAT_007, E_DAT_008, E_DAT_009,
+    E_DAT_010, E_DAT_011, E_DAT_012, E_DAT_013, E_DAT_014, E_DAT_015,
 };
+// E_DAT_005 is used in tests only (F-P12-MED-002: excluded from parse_e_dat_code candidates).
 
 /// Load all configured data sources, applying the offline gate.
 ///
@@ -599,7 +600,7 @@ fn strip_bracket_prefix(msg: &str) -> &str {
 
 /// Inspect the leading `[E-DAT-NNN]` bracket prefix of a message and return the
 /// matching error code constant, or `None` when the bracket does not match any
-/// of the `E_DAT_001` through `E_DAT_015` constants defined in [`crate::error`].
+/// parse-error-relevant code defined in [`crate::error`].
 ///
 /// ## Purpose (F-P10-HIGH-001)
 ///
@@ -616,13 +617,20 @@ fn strip_bracket_prefix(msg: &str) -> &str {
 /// to preserve the granular code when it is recognized, and fall back to the
 /// generic parse-error code only for messages that lack a known bracket prefix.
 ///
-/// ## Recognized codes
+/// ## Recognized codes (parse-error-relevant only — F-P12-MED-002)
 ///
-/// All `E_DAT_001` through `E_DAT_015` constants from [`crate::error`] are recognized,
-/// including `E_DAT_005` (`FieldNotFound`). `E_DAT_005` is evaluator-emitted rather than
-/// parser-emitted, but including it here is forward-compatible: if a `FieldNotFound`
-/// error ever flows through a `ParseError` message, it will route correctly instead of
-/// falling back to the generic `E_DAT_003`.
+/// Only codes that have semantically meaningful `ParseError` mappings are recognized.
+/// The following codes are intentionally excluded because they belong to non-`ParseError`
+/// variants and must not produce `DataError::ParseError { code: <excluded> }`:
+///
+/// - `E_DAT_004` (file-not-found / I/O failure) — belongs to `DataSourceError::IoError`;
+///   routing a `[E-DAT-004]` message through `ParseError` is semantically wrong.
+/// - `E_DAT_005` (field-not-found) — evaluator-emitted; `ParseError` messages do not
+///   carry this code in production.
+/// - `E_DAT_015` (unspecified source error) — dispatcher catch-all; a `ParseError`
+///   message carrying `[E-DAT-015]` must not produce `DataError::ParseError { code: E_DAT_015 }`.
+///
+/// Recognized: `E_DAT_001`, `E_DAT_002`, `E_DAT_003`, `E_DAT_006` through `E_DAT_014`.
 /// Unknown bracket formats (e.g., `[E-DAT-099]` or plugin-specific codes) return `None`.
 ///
 /// ## Relationship to `strip_bracket_prefix`
@@ -635,17 +643,15 @@ fn parse_e_dat_code(msg: &str) -> Option<&'static str> {
     if !msg.starts_with('[') {
         return None;
     }
-    // Recognize all defined E_DAT_NNN constants via anchored starts_with checks.
-    // Order: most-specific codes first (E_DAT_007..E_DAT_015 before the generic ones)
-    // to avoid a shorter prefix matching where a longer one applies. In practice all
-    // codes have the same prefix length ("E-DAT-0NN") so order is unambiguous, but
-    // longest-first is a good defensive practice.
+    // Recognize only parse-error-relevant E_DAT_NNN constants. E_DAT_004, E_DAT_005,
+    // and E_DAT_015 are intentionally excluded — they belong to non-ParseError variants.
+    // See F-P12-MED-002 for rationale.
     //
     // Each check uses format!("[{code}]") to guarantee the bracket wraps the code,
     // matching the canonical `[E-DAT-NNN]` format emitted by all built-in sources.
     let candidates: &[&'static str] = &[
-        E_DAT_001, E_DAT_002, E_DAT_003, E_DAT_004, E_DAT_005, E_DAT_006, E_DAT_007, E_DAT_008,
-        E_DAT_009, E_DAT_010, E_DAT_011, E_DAT_012, E_DAT_013, E_DAT_014, E_DAT_015,
+        E_DAT_001, E_DAT_002, E_DAT_003, E_DAT_006, E_DAT_007, E_DAT_008, E_DAT_009, E_DAT_010,
+        E_DAT_011, E_DAT_012, E_DAT_013, E_DAT_014,
     ];
     for &code in candidates {
         if msg.starts_with(&format!("[{code}]")) {
@@ -658,7 +664,7 @@ fn parse_e_dat_code(msg: &str) -> Option<&'static str> {
 /// Extract the HTTP status code from a bracket-coded message of the form
 /// `"[E-DAT-001] HTTP <status> from '<url>'"`.
 ///
-/// Returns `Ok(status)` when a parseable three-digit status code is found.
+/// Returns `Ok(status)` when a parseable, in-range HTTP status code is found.
 /// Returns `Err(&'static str)` with a description when the message does not
 /// match the expected format. Callers MUST NOT fabricate a fake status of 0
 /// on `Err` — instead, fall back to `DataError::IoError` preserving the
@@ -666,16 +672,47 @@ fn parse_e_dat_code(msg: &str) -> Option<&'static str> {
 ///
 /// # Format
 ///
-/// The message must contain the literal substring `"HTTP "` followed
-/// immediately by ASCII decimal digits. Example:
-/// `"[E-DAT-001] HTTP 404 from 'http://example.com/data.json'"`.
+/// The message must contain a closing `]` bracket (from the `[E-DAT-NNN]` prefix)
+/// followed at some point by `"HTTP "` and then ASCII decimal digits. The search
+/// for `"HTTP "` is anchored AFTER the closing `]` so that occurrences of `"HTTP"`
+/// embedded in URL paths or error body text before the bracket are not accidentally
+/// matched.
+///
+/// Example: `"[E-DAT-001] HTTP 404 from 'http://example.com/data.json'"`.
+///
+/// # Range validation (F-P12-LOW-001)
+///
+/// After parsing the digit sequence to `u16`, the value must be in the valid HTTP
+/// status code range `100..=599`. Values outside this range (e.g., `4040`, `99`,
+/// `600`) are rejected with `Err`. The caller falls back to `DataError::IoError`
+/// preserving the original message verbatim.
+///
+/// # Anchor after bracket (F-P12-LOW-002)
+///
+/// The search for `"HTTP "` starts after the `]` of the bracket code rather than
+/// scanning from the beginning of the message. This prevents an `"HTTP "` substring
+/// embedded in the URL path or response body (before the bracket) from being matched
+/// instead of the status code (after the bracket).
+///
+/// If no `]` is present in the message, the search falls back to scanning from the
+/// beginning (graceful degradation for messages without a bracket code).
 fn extract_http_status(message: &str) -> Result<u16, &'static str> {
-    // Look for "HTTP " followed by a numeric token.
-    let after_http = message
+    // F-P12-LOW-002: anchor the "HTTP " search after the closing ']' of the bracket
+    // code. This prevents matching an "HTTP " embedded in the URL or payload before
+    // the bracket rather than the status code that appears after it.
+    // If no ']' is present (non-bracketed messages), fall back to the start of the
+    // message (graceful degradation).
+    let search_start = message
+        .find(']')
+        .and_then(|pos| pos.checked_add(1))
+        .unwrap_or(0);
+    let search_region = message.get(search_start..).unwrap_or("");
+    // Look for "HTTP " followed by a numeric token within the post-bracket region.
+    let after_http = search_region
         .find("HTTP ")
         .and_then(|pos| pos.checked_add(5))
-        .ok_or("'HTTP ' not found in message")?;
-    let rest = message
+        .ok_or("'HTTP ' not found after bracket code in message")?;
+    let rest = search_region
         .get(after_http..)
         .ok_or("message ended after 'HTTP '")?;
     let end = rest
@@ -685,9 +722,16 @@ fn extract_http_status(message: &str) -> Result<u16, &'static str> {
     if digits.is_empty() {
         return Err("no digits after 'HTTP '");
     }
-    digits
+    let status = digits
         .parse::<u16>()
-        .map_err(|_| "status digits overflow u16")
+        .map_err(|_| "status digits overflow u16")?;
+    // F-P12-LOW-001: validate that the status code is in the valid HTTP range.
+    // Values outside 100..=599 are not valid HTTP status codes and likely indicate
+    // a malformed message (e.g., a port number like 4040 or a line number like 99).
+    if !(100..=599).contains(&status) {
+        return Err("HTTP status out of valid range (must be 100-599)");
+    }
+    Ok(status)
 }
 
 /// Extract the bare OS reason string from a bracket-stripped I/O error message.
@@ -1545,6 +1589,96 @@ mod tests {
         assert!(
             display.contains("custom plugin error without HTTP status"),
             "fallback path must preserve the original message; got: {display}"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // F-P12-LOW-001: extract_http_status must reject out-of-range status codes
+    // F-P12-LOW-002: extract_http_status search must be anchored after ']'
+    // ---------------------------------------------------------------------------
+
+    /// `test_extract_http_status_range_validation`
+    ///
+    /// F-P12-LOW-001: After parsing the digit sequence, the status must be in the
+    /// valid HTTP range `100..=599`. Out-of-range values (e.g., `4040`, `99`, `600`)
+    /// must return `Err` so the caller falls back to `DataError::IoError` preserving
+    /// the original message verbatim.
+    #[test]
+    fn test_extract_http_status_range_validation() {
+        // Valid edge cases at the boundaries.
+        assert_eq!(
+            extract_http_status("[E-DAT-001] HTTP 100 from 'http://example.com'"),
+            Ok(100),
+            "HTTP 100 is the minimum valid status and must parse Ok"
+        );
+        assert_eq!(
+            extract_http_status("[E-DAT-001] HTTP 200 from 'http://example.com'"),
+            Ok(200),
+            "HTTP 200 must parse Ok"
+        );
+        assert_eq!(
+            extract_http_status("[E-DAT-001] HTTP 599 from 'http://example.com'"),
+            Ok(599),
+            "HTTP 599 is the maximum valid status and must parse Ok"
+        );
+        // Values below the minimum must return Err.
+        assert!(
+            extract_http_status("[E-DAT-001] HTTP 99 from 'http://example.com'").is_err(),
+            "HTTP 99 is below valid range (100-599) and must return Err"
+        );
+        assert!(
+            extract_http_status("[E-DAT-001] HTTP 0 from 'http://example.com'").is_err(),
+            "HTTP 0 must return Err (out of valid range)"
+        );
+        // Values above the maximum must return Err.
+        assert!(
+            extract_http_status("[E-DAT-001] HTTP 600 from 'http://example.com'").is_err(),
+            "HTTP 600 is above valid range (100-599) and must return Err"
+        );
+        assert!(
+            extract_http_status("[E-DAT-001] HTTP 4040 from 'http://example.com'").is_err(),
+            "HTTP 4040 (plausible port number) must return Err (out of valid range)"
+        );
+    }
+
+    /// `test_extract_http_status_anchored_after_bracket`
+    ///
+    /// F-P12-LOW-002: The `"HTTP "` search must be anchored after the closing `']'`
+    /// of the bracket code, not from the start of the message. This prevents an
+    /// `"HTTP "` substring embedded in the URL path or error body (before the bracket)
+    /// from being mistakenly matched instead of the actual status code after the bracket.
+    ///
+    /// The first HTTP occurrence after `]` is canonical. Multiple `"HTTP "` substrings
+    /// after `]` should yield the first one encountered.
+    #[test]
+    fn test_extract_http_status_anchored_after_bracket() {
+        // The URL contains "HTTP" before the bracket — must NOT match it.
+        // Only the status after ']' should be extracted.
+        assert_eq!(
+            extract_http_status(
+                "[E-DAT-001] HTTP 200 OK with embedded HTTP 404 in payload from 'http://example.com'"
+            ),
+            Ok(200),
+            "must extract the first HTTP status after ']', not any embedded later occurrence"
+        );
+        // "HTTP" before ']' in a hypothetical malformed message must not be matched.
+        // The bracket is missing in this case — fall back to scanning from start.
+        assert_eq!(
+            extract_http_status("HTTP 200 some message without bracket"),
+            Ok(200),
+            "graceful fallback: no ']' present means scan from start of message"
+        );
+        // "HTTP" appears before the bracket code — must be ignored; only post-bracket counts.
+        // Simulate a message where the pre-bracket part has "HTTP 999" (invalid, out of range)
+        // and the post-bracket part has "HTTP 404" (valid).
+        // This test confirms that anchoring prevents the invalid pre-bracket status from
+        // being extracted.
+        let msg = "HTTP 999 [E-DAT-001] HTTP 404 from 'http://example.com'";
+        // Since the search anchors after ']', it should find "HTTP 404" (valid).
+        assert_eq!(
+            extract_http_status(msg),
+            Ok(404),
+            "anchored search must skip the pre-bracket 'HTTP 999' and find post-bracket 'HTTP 404'"
         );
     }
 
@@ -2882,21 +3016,34 @@ mod tests {
     ///
     /// F-P10-HIGH-001: Unit test for `parse_e_dat_code` directly — validates that each
     /// known bracket prefix maps to the correct constant and unknown prefixes return None.
+    ///
+    /// F-P12-MED-002: Updated to reflect the restricted candidate set. E_DAT_004,
+    /// E_DAT_005, and E_DAT_015 are excluded from candidates; their bracket codes
+    /// must return None (not Some) so they cannot produce ParseError with wrong code.
     #[test]
     fn test_parse_e_dat_code_returns_correct_constants() {
         use crate::error::{
             E_DAT_008, E_DAT_009, E_DAT_010, E_DAT_011, E_DAT_012, E_DAT_013, E_DAT_014,
         };
-        // Known codes must match.
+        // Known parse-error-relevant codes must match.
         assert_eq!(
             parse_e_dat_code("[E-DAT-001] some http error"),
             Some(E_DAT_001)
         );
         assert_eq!(parse_e_dat_code("[E-DAT-003] parse error"), Some(E_DAT_003));
-        // E_DAT_005 (FieldNotFound) must be recognized — F-P11-LOW-001.
+        // E_DAT_004 (file-not-found/I/O) must NOT be recognized — F-P12-MED-002.
+        assert_eq!(
+            parse_e_dat_code("[E-DAT-004] file not found"),
+            None,
+            "E_DAT_004 must not be recognized by parse_e_dat_code (F-P12-MED-002)"
+        );
+        // E_DAT_005 (FieldNotFound) must NOT be recognized — F-P12-MED-002 supersedes
+        // F-P11-LOW-001. FieldNotFound is evaluator-emitted and must not produce
+        // DataError::ParseError { code: E_DAT_005 }.
         assert_eq!(
             parse_e_dat_code("[E-DAT-005] field lookup"),
-            Some(E_DAT_005)
+            None,
+            "E_DAT_005 must not be recognized by parse_e_dat_code (F-P12-MED-002)"
         );
         assert_eq!(
             parse_e_dat_code("[E-DAT-007] xlsx empty header"),
@@ -2927,7 +3074,12 @@ mod tests {
             parse_e_dat_code("[E-DAT-014] unsupported ext"),
             Some(E_DAT_014)
         );
-        assert_eq!(parse_e_dat_code("[E-DAT-015] unspecified"), Some(E_DAT_015));
+        // E_DAT_015 (unspecified source error) must NOT be recognized — F-P12-MED-002.
+        assert_eq!(
+            parse_e_dat_code("[E-DAT-015] unspecified"),
+            None,
+            "E_DAT_015 must not be recognized by parse_e_dat_code (F-P12-MED-002)"
+        );
         // Unknown prefix must return None.
         assert_eq!(parse_e_dat_code("[E-DAT-099] unknown code"), None);
         assert_eq!(parse_e_dat_code("no bracket at all"), None);
@@ -2937,44 +3089,68 @@ mod tests {
     }
 
     // ---------------------------------------------------------------------------
-    // F-P11-LOW-001: E_DAT_005 (FieldNotFound) must be recognized by parse_e_dat_code
+    // F-P12-MED-002: E_DAT_004, E_DAT_005, E_DAT_015 must NOT be recognized by
+    // parse_e_dat_code — they belong to non-ParseError variants.
+    //
+    // Note: F-P11-LOW-001 previously required E_DAT_005 to be recognized. F-P12-MED-002
+    // supersedes that decision: E_DAT_005 (FieldNotFound) is evaluator-emitted and must
+    // NOT produce DataError::ParseError { code: E_DAT_005 }. The test below is the
+    // load-bearing guard for the new restricted candidate set.
     // ---------------------------------------------------------------------------
 
-    /// `test_parse_e_dat_005_field_not_found_recognized`
+    /// `test_parse_e_dat_code_excludes_non_parse_codes`
     ///
-    /// F-P11-LOW-001: `parse_e_dat_code` previously omitted `E_DAT_005` from the
-    /// candidates array while the docstring claimed "All E_DAT_001 through E_DAT_015
-    /// recognized." This test is the load-bearing guard: if E_DAT_005 is removed
-    /// from the candidates array, this test fails.
+    /// F-P12-MED-002: Verifies that E_DAT_004, E_DAT_005, and E_DAT_015 return None
+    /// from `parse_e_dat_code`. These codes belong to non-ParseError variants and must
+    /// not route through ParseError, which would produce semantically incorrect errors.
     ///
-    /// `E_DAT_005` is evaluator-emitted (FieldNotFound) rather than parser-emitted,
-    /// but including it is forward-compatible: any message that embeds [E-DAT-005]
-    /// will route to the correct constant rather than falling back to the generic
-    /// E_DAT_003.
+    /// F-P11-LOW-001 previously required E_DAT_005 to be recognized; F-P12-MED-002
+    /// supersedes that finding by restricting candidates to parse-error-relevant codes only.
     #[test]
-    fn test_parse_e_dat_005_field_not_found_recognized() {
-        // Representative FieldNotFound message format.
+    fn test_parse_e_dat_code_excludes_non_parse_codes() {
+        // E_DAT_004 (file-not-found / I/O) — must NOT be recognized.
+        assert_eq!(
+            parse_e_dat_code("[E-DAT-004] file not found: '/data/source.json'"),
+            None,
+            "E_DAT_004 must not be recognized by parse_e_dat_code (F-P12-MED-002)"
+        );
+        assert_eq!(
+            parse_e_dat_code("[E-DAT-004] failed to open file '/data/x.db': permission denied"),
+            None,
+            "E_DAT_004 open-file form must not be recognized (F-P12-MED-002)"
+        );
+        // E_DAT_005 (FieldNotFound) — must NOT be recognized (supersedes F-P11-LOW-001).
         assert_eq!(
             parse_e_dat_code("[E-DAT-005] field not found: 'price' in source 'sales'"),
-            Some(E_DAT_005),
-            "E_DAT_005 must be recognized by parse_e_dat_code (F-P11-LOW-001)"
+            None,
+            "E_DAT_005 must not be recognized by parse_e_dat_code (F-P12-MED-002)"
         );
-        // Minimal bracket-only form.
         assert_eq!(
             parse_e_dat_code("[E-DAT-005] field lookup"),
-            Some(E_DAT_005),
-            "E_DAT_005 minimal form must be recognized"
+            None,
+            "E_DAT_005 minimal form must not be recognized (F-P12-MED-002)"
         );
-        // Verify it does NOT accidentally match a neighbouring code.
-        assert_ne!(
-            parse_e_dat_code("[E-DAT-005] field lookup"),
-            Some(E_DAT_004),
-            "E_DAT_005 must not match E_DAT_004"
+        // E_DAT_015 (unspecified source error) — must NOT be recognized.
+        assert_eq!(
+            parse_e_dat_code("[E-DAT-015] unspecified error from third-party plugin"),
+            None,
+            "E_DAT_015 must not be recognized by parse_e_dat_code (F-P12-MED-002)"
         );
-        assert_ne!(
-            parse_e_dat_code("[E-DAT-005] field lookup"),
+        // Verify adjacent codes ARE still recognized (guard against over-pruning).
+        assert_eq!(
+            parse_e_dat_code("[E-DAT-003] parse error"),
+            Some(E_DAT_003),
+            "E_DAT_003 must still be recognized after F-P12-MED-002 restriction"
+        );
+        assert_eq!(
+            parse_e_dat_code("[E-DAT-006] ssrf blocked"),
             Some(E_DAT_006),
-            "E_DAT_005 must not match E_DAT_006"
+            "E_DAT_006 must still be recognized after F-P12-MED-002 restriction"
+        );
+        assert_eq!(
+            parse_e_dat_code("[E-DAT-014] unsupported extension"),
+            Some(E_DAT_014),
+            "E_DAT_014 must still be recognized after F-P12-MED-002 restriction"
         );
     }
 

@@ -1324,3 +1324,182 @@ fn test_unsupported_extension_display_clean() {
     // Keep tmp alive until after load_all to ensure the file exists during dispatch.
     drop(tmp);
 }
+
+// ---------------------------------------------------------------------------
+// F-P12-HIGH-001: SQLite validate_sqlite_magic canonical separator
+// ---------------------------------------------------------------------------
+
+/// `test_bc_1_03_004_dispatcher_routes_sqlite_open_failure_correctly`
+///
+/// F-P12-HIGH-001: When `validate_sqlite_magic` cannot open a `.sqlite` file (e.g.,
+/// permission denied), the emitted `DataSourceError::IoError` message must use the
+/// canonical `"'<path>': <reason>"` separator — NOT the broken
+/// `"to validate SQLite magic: <reason>"` form that previously broke path/reason
+/// extractors in the dispatcher.
+///
+/// Specifically asserts:
+/// - `errors[0].code() == "E-DAT-004"` — I/O failure routes to IoError (not ParseError)
+/// - Display contains the file path EXACTLY ONCE (no duplication from extractors)
+/// - Display contains the OS reason (e.g., "permission denied") EXACTLY ONCE
+/// - Display does NOT contain `"to validate SQLite magic"` (the broken annotation)
+/// - Bracket `[E-DAT-004]` appears exactly ONCE in Display
+///
+/// This is a `#[cfg(unix)]` test because `chmod 0o000` is POSIX-specific. On Windows,
+/// file ACLs behave differently and this exact permission-denied path is not exercised.
+///
+/// Traces to F-P12-HIGH-001, BC-1.03.007 postcondition 6.
+#[test]
+#[cfg(unix)]
+fn test_bc_1_03_004_dispatcher_routes_sqlite_open_failure_correctly() {
+    use slideforge_data::SqliteDataSource;
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt as _;
+
+    // Create a tempfile with a .sqlite extension that contains valid SQLite magic
+    // bytes, then remove read permission so validate_sqlite_magic cannot open it.
+    let tmp_dir = tempfile::tempdir().expect("tempdir must be created");
+    let path = tmp_dir.path().join("test_perm_denied.sqlite");
+
+    // Write valid SQLite magic header + padding (16 bytes minimum).
+    let magic = b"SQLite format 3\x00some padding to make it look real";
+    fs::write(&path, magic).expect("write temp sqlite file must succeed");
+
+    // Remove all permissions so File::open fails with "permission denied".
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o000))
+        .expect("chmod 000 must succeed on unix");
+
+    let path_str = path.to_str().expect("path must be valid UTF-8");
+
+    let sources: Vec<(Arc<str>, Box<dyn slideforge_plugin_api::DataSource>)> = vec![(
+        Arc::from("sqlite_perm"),
+        Box::new(SqliteDataSource::new(path_str, "SELECT 1")),
+    )];
+    let ctx = DataSourceContext::new();
+    let (_scope, errors) = load_all(&sources, &ctx);
+
+    // Restore permissions so tempdir cleanup can delete the file.
+    let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o644));
+
+    assert_eq!(
+        errors.len(),
+        1,
+        "exactly one error expected for permission-denied sqlite file; got: {:?}",
+        errors
+    );
+
+    // Must produce E-DAT-004 (IoError / file-not-found category), not E-DAT-003.
+    let code = errors[0].code();
+    assert_eq!(
+        code, "E-DAT-004",
+        "permission-denied SQLite open failure must produce E-DAT-004; got: {code}"
+    );
+
+    let display = errors[0].to_string();
+
+    // Bracket [E-DAT-004] must appear exactly once — no double-bracket nesting.
+    assert_eq!(
+        display.matches("[E-DAT-004]").count(),
+        1,
+        "Display must contain exactly one [E-DAT-004]; got: {display}"
+    );
+
+    // File path must appear in the display.
+    assert!(
+        display.contains(path_str),
+        "Display must contain the file path; got: {display}"
+    );
+
+    // OS reason ("permission denied") must appear — do not hardcode the exact OS phrase,
+    // but at minimum "permission" or "denied" must be present.
+    let os_reason_present =
+        display.to_lowercase().contains("permission") || display.to_lowercase().contains("denied");
+    assert!(
+        os_reason_present,
+        "Display must contain the OS reason (permission denied); got: {display}"
+    );
+
+    // The broken annotation must NOT appear (F-P12-HIGH-001 fix guard).
+    assert!(
+        !display.contains("to validate SQLite magic"),
+        "Display must NOT contain 'to validate SQLite magic' annotation (F-P12-HIGH-001); got: {display}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// F-P12-MED-001: xlsx UnsupportedUri must emit bare extension — no nested bracket
+// ---------------------------------------------------------------------------
+
+/// `test_bc_1_03_006_xlsx_xls_extension_display_clean`
+///
+/// F-P12-MED-001: When an `XlsxDataSource` rejects a `.xls` file, the resulting
+/// `DataError` Display must be clean — no nested bracket code, no annotated string
+/// embedded in the extension slot.
+///
+/// Before the fix, `data_error_to_source_error` in xlsx.rs emitted:
+///   `UnsupportedUri { uri: "[E-DAT-003] '/path' is an .xls file. Only .xlsx ..." }`
+///
+/// The dispatcher mapped `UnsupportedUri.uri` → `DataError::UnsupportedFormat.extension`,
+/// producing the broken double-bracket display:
+///   `"[E-DAT-003] unsupported format: '[E-DAT-003] '/path' ...' — supported: ..."`
+///
+/// After the fix, `data_error_to_source_error` emits only the bare extension:
+///   `UnsupportedUri { uri: "xls" }`
+///
+/// Producing the clean display:
+///   `"[E-DAT-003] unsupported format: 'xls' — supported: ..."`
+///
+/// This integration test drives the FULL end-to-end path through the dispatcher.
+///
+/// Traces to F-P12-MED-001, BC-1.03.006 AC-005.
+#[test]
+fn test_bc_1_03_006_xlsx_xls_extension_display_clean() {
+    use slideforge_data::XlsxDataSource;
+
+    // .xls file — does not need to exist; extension check fires first.
+    let sources: Vec<(Arc<str>, Box<dyn slideforge_plugin_api::DataSource>)> = vec![(
+        Arc::from("xls_source"),
+        Box::new(XlsxDataSource::new("/tmp/legacy_data.xls")),
+    )];
+    let ctx = DataSourceContext::new();
+    let (_scope, errors) = load_all(&sources, &ctx);
+
+    assert_eq!(
+        errors.len(),
+        1,
+        "exactly one error expected for .xls file; got: {:?}",
+        errors
+    );
+
+    let code = errors[0].code();
+    assert_eq!(
+        code, "E-DAT-003",
+        ".xls extension must produce E-DAT-003; got: {code}"
+    );
+
+    let display = errors[0].to_string();
+
+    // [E-DAT-003] must appear EXACTLY ONCE — not double-nested.
+    assert_eq!(
+        display.matches("[E-DAT-003]").count(),
+        1,
+        "Display must contain exactly one [E-DAT-003] (no nested bracket); got: {display}"
+    );
+
+    // The bare extension 'xls' must appear in the extension slot.
+    assert!(
+        display.contains("'xls'"),
+        "Display must contain \"'xls'\" (bare extension in extension slot); got: {display}"
+    );
+
+    // The supported-formats hint must be present.
+    assert!(
+        display.contains("supported:"),
+        "Display must contain the supported-formats hint; got: {display}"
+    );
+
+    // The annotated message must NOT appear in the extension slot.
+    assert!(
+        !display.contains("is an .xls file"),
+        "Display must NOT contain annotated AC-005 wording in extension slot (F-P12-MED-001); got: {display}"
+    );
+}

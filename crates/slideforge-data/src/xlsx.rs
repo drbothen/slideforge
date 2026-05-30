@@ -468,29 +468,19 @@ fn data_error_to_source_error(path: &str, err: &DataError) -> DataSourceError {
             uri: path.to_owned(),
             message: err.to_string(),
         },
-        DataError::UnsupportedFormat {
-            extension, code, ..
-        } => DataSourceError::UnsupportedUri {
-            // F-PASS26-MED-2: .xls gets the exact AC-005 wording (actionable conversion hint).
-            // All other non-xlsx extensions get a generic message.
-            // OBS-1: embed [E-DAT-003] bracket code so user-visible message matches SQLite pattern.
-            // F-PASS14-LOW-1: extensionless files use the cosmetic "(no extension)"; prefixing
-            // with '.' would render the awkward "'.(no extension)'" — omit the dot for that case.
-            uri: if extension.as_ref() == "xls" {
-                // AC-005 exact wording (BC-1.03.006 edge case EC-002).
-                format!(
-                    "[{code}] '{path}' is an .xls file. \
-                    Only .xlsx format is supported in v1.0. \
-                    Convert to .xlsx before use."
-                )
-            } else {
-                let ext_display = if extension.as_ref() == "(no extension)" {
-                    format!("got {extension}")
-                } else {
-                    format!("got '.{extension}'")
-                };
-                format!("[{code}] {path} (only .xlsx extension supported; {ext_display})")
-            },
+        DataError::UnsupportedFormat { extension, .. } => DataSourceError::UnsupportedUri {
+            // F-P12-MED-001: emit the bare extension string (e.g., "xls") so the
+            // dispatcher's UnsupportedUri arm can route to DataError::UnsupportedFormat
+            // without producing a nested-bracket Display. The annotated AC-005 hint
+            // (".xlsx required, convert .xls to .xlsx") is documented in error-taxonomy.md
+            // for E-DAT-003 rather than embedded here, which avoids the double-bracket
+            // pattern that results when a full "[E-DAT-003] ..." string is stored in the
+            // `uri` slot and then re-wrapped by the dispatcher.
+            //
+            // The bare extension flows into DataError::UnsupportedFormat.extension at the
+            // dispatcher, producing a clean Display:
+            //   "[E-DAT-003] unsupported format: 'xls' — supported: ..."
+            uri: extension.to_string(),
         },
         _ => DataSourceError::ParseError {
             uri: path.to_owned(),
@@ -1178,16 +1168,23 @@ mod tests {
     // ---------------------------------------------------------------------------
 
     /// `test_bc_1_03_006_xls_rejected` -- `.xls` extension returns `DataSourceError::UnsupportedUri`
-    /// with the exact AC-005 wording.
+    /// with the bare extension in the `uri` slot.
     ///
-    /// AC-005 mandates: `'<path>' is an .xls file. Only .xlsx format is supported in v1.0.
-    /// Convert to .xlsx before use.`
+    /// F-P12-MED-001: `data_error_to_source_error` now emits the bare extension string
+    /// (e.g., `"xls"`) instead of an annotated `"[E-DAT-003] '...' is an .xls file ..."`
+    /// string. This prevents the nested-bracket Display that occurred when the dispatcher
+    /// routed `UnsupportedUri { uri: <annotated-string> }` → `DataError::UnsupportedFormat
+    /// { extension: <annotated-string> }` and then rendered the extension inside
+    /// `"[E-DAT-003] unsupported format: '<extension>'"`.
     ///
-    /// Load-bearing assertions (F-PASS26-MED-2, TD-VSDD-059):
-    /// - `msg.contains("is an .xls file")` — exact AC-005 phrase 1
-    /// - `msg.contains("Only .xlsx format is supported in v1.0")` — exact AC-005 phrase 2
-    /// - `msg.contains("Convert to .xlsx")` — exact AC-005 phrase 3
-    /// - `msg.contains("[E-DAT-003]")` — bracket code preserved (OBS-1)
+    /// The AC-005 conversion hint (".xlsx required, convert .xls to .xlsx") is preserved
+    /// in error-taxonomy.md for E-DAT-003 (F-P12-MED-001 option b). The user-visible
+    /// `[E-DAT-003]` bracket code and the `"supported: ..."` hint appear at the
+    /// `DataError::UnsupportedFormat` Display level (emitted by the dispatcher), not here.
+    ///
+    /// Load-bearing assertions (F-P12-MED-001, TD-VSDD-059):
+    /// - variant is `DataSourceError::UnsupportedUri`
+    /// - `uri` slot contains the bare extension `"xls"` (no bracket, no annotation)
     ///
     /// Traces to BC-1.03.006 AC-005, invariant 3, edge case EC-002.
     #[test]
@@ -1196,34 +1193,25 @@ mod tests {
         let src = XlsxDataSource::new("/tmp/legacy_data.xls");
         let err = src.load("", &default_opts()).unwrap_err();
 
-        assert!(
-            matches!(
-                err,
-                slideforge_plugin_api::DataSourceError::UnsupportedUri { .. }
-            ),
-            "`.xls` file must produce DataSourceError::UnsupportedUri, got: {err:?}"
-        );
-        let msg = err.to_string();
+        // Must produce UnsupportedUri variant.
+        let uri = match &err {
+            slideforge_plugin_api::DataSourceError::UnsupportedUri { uri } => uri.clone(),
+            other => {
+                panic!("`.xls` file must produce DataSourceError::UnsupportedUri, got: {other:?}")
+            },
+        };
 
-        // F-PASS26-MED-2 load-bearing: exact AC-005 phrase components.
-        assert!(
-            msg.contains("is an .xls file"),
-            "AC-005: error must contain \"is an .xls file\"; got: {msg}"
+        // F-P12-MED-001: uri slot must contain ONLY the bare extension — no bracket code,
+        // no annotated message. This is the load-bearing assertion that prevents nested-bracket
+        // Display when the dispatcher wraps this into DataError::UnsupportedFormat.
+        assert_eq!(
+            uri, "xls",
+            "UnsupportedUri uri must be the bare extension 'xls' (F-P12-MED-001); got: {uri:?}"
         );
+        // No bracket code must be present in the uri slot.
         assert!(
-            msg.contains("Only .xlsx format is supported in v1.0"),
-            "AC-005: error must contain \"Only .xlsx format is supported in v1.0\"; got: {msg}"
-        );
-        assert!(
-            msg.contains("Convert to .xlsx"),
-            "AC-005: error must contain \"Convert to .xlsx\"; got: {msg}"
-        );
-
-        // OBS-1 load-bearing: [E-DAT-003] must appear in bracket form.
-        // This assertion fails if data_error_to_source_error omits the error code.
-        assert!(
-            msg.contains("[E-DAT-003]"),
-            "UnsupportedUri message must embed '[E-DAT-003]' bracket code; got: {msg}"
+            !uri.contains('['),
+            "UnsupportedUri uri must not embed a bracket code (F-P12-MED-001); got: {uri:?}"
         );
     }
 
@@ -2665,44 +2653,56 @@ mod tests {
     // ---------------------------------------------------------------------------
 
     /// `test_obs3_xlsx_no_extension_renders_cosmetic` -- extensionless path renders
-    /// `(no extension)` without a leading dot in the error message.
+    /// `(no extension)` in the bare-extension `uri` slot.
     ///
-    /// A path with no file extension (e.g. `/tmp/mydata`) previously rendered as
-    /// `'.(no extension)'` in the `UnsupportedUri` message (F-PASS14-LOW-1). The fix
-    /// omits the dot prefix when the extension cosmetic is `"(no extension)"`.
+    /// F-P12-MED-001: `data_error_to_source_error` now emits the bare extension value
+    /// from `DataError::UnsupportedFormat.extension` into `UnsupportedUri.uri`. For
+    /// extensionless files, `reject_xls_extension` sets `extension = "(no extension)"`,
+    /// so the `uri` slot now contains exactly `"(no extension)"` — no bracket code, no
+    /// annotated message.
     ///
-    /// Load-bearing: without the conditional formatting in `data_error_to_source_error`,
-    /// the `!msg.contains("'.(")` assertion fails and the test exposes the regression.
+    /// F-PASS14-LOW-1: The old annotated-string approach (which embedded the cosmetic
+    /// in a message like `"[E-DAT-003] /path (only .xlsx; got (no extension))"`) is
+    /// superseded. The `"'.(no extension)'"` defect that F-PASS14-LOW-1 addressed was
+    /// a formatting artifact of the annotated-string approach; with bare extension routing
+    /// that path is structurally impossible.
     ///
-    /// Traces to BC-1.03.006 invariant 3 (extension validation), F-PASS14-LOW-1.
+    /// Load-bearing: without the `DataError::UnsupportedFormat.extension` pass-through
+    /// in `data_error_to_source_error`, the uri slot would contain something else and
+    /// the `assert_eq!(uri, "(no extension)")` assertion fails.
+    ///
+    /// Traces to BC-1.03.006 invariant 3 (extension validation), F-PASS14-LOW-1,
+    /// F-P12-MED-001.
     #[test]
     fn test_obs3_xlsx_no_extension_renders_cosmetic() {
         // No extension: extension check fires before any file I/O.
         let src = XlsxDataSource::new("/tmp/mydata_no_ext");
         let err = src.load("", &default_opts()).unwrap_err();
 
-        assert!(
-            matches!(
-                err,
-                slideforge_plugin_api::DataSourceError::UnsupportedUri { .. }
-            ),
-            "extensionless path must produce UnsupportedUri; got: {err:?}"
+        // Must produce UnsupportedUri variant.
+        let uri = match &err {
+            slideforge_plugin_api::DataSourceError::UnsupportedUri { uri } => uri.clone(),
+            other => {
+                panic!("extensionless path must produce UnsupportedUri; got: {other:?}")
+            },
+        };
+
+        // F-P12-MED-001 load-bearing: uri must be the bare extension cosmetic "(no extension)",
+        // not an annotated string or a format with a leading dot.
+        assert_eq!(
+            uri, "(no extension)",
+            "UnsupportedUri uri for extensionless path must be '(no extension)' \
+            (F-P12-MED-001); got: {uri:?}"
         );
-        let msg = err.to_string();
-        // Must embed the error code.
+        // No bracket code must be present in the uri slot.
         assert!(
-            msg.contains("[E-DAT-003]"),
-            "extensionless XLSX error must embed '[E-DAT-003]'; got: {msg}"
+            !uri.contains('['),
+            "UnsupportedUri uri must not embed a bracket code (F-P12-MED-001); got: {uri:?}"
         );
-        // Must contain the cosmetic text without the leading dot.
+        // The old '.(no extension)' rendering must not be possible with bare-extension routing.
         assert!(
-            msg.contains("no extension"),
-            "extensionless XLSX error must render '(no extension)' cosmetic; got: {msg}"
-        );
-        // Must NOT render the awkward '.(no extension)' with the dot prefix.
-        assert!(
-            !msg.contains("'.("),
-            "extensionless XLSX error must NOT render \"'.(no extension)'\"; got: {msg}"
+            !uri.starts_with("'."),
+            "UnsupportedUri uri must not start with \"'.\" (F-PASS14-LOW-1 + F-P12-MED-001); got: {uri:?}"
         );
     }
 

@@ -548,10 +548,13 @@ fn validate_sqlite_magic(path: &str) -> Result<(), DataSourceError> {
     const MAGIC: &[u8; 16] = b"SQLite format 3\x00";
     let mut buf = [0u8; 16];
     // I/O failure opening the file → IoError (E-DAT-004), not ParseError.
+    // F-P12-HIGH-001: use canonical "'<path>': <reason>" separator — no embedded
+    // annotation between the closing quote and the colon-space. The E-DAT-004 code
+    // and the `validate_sqlite_magic` stack frame already convey the operation context.
     let mut file = std::fs::File::open(path).map_err(|e| DataSourceError::IoError {
         uri: path.to_owned(),
         message: format!(
-            "[{}] failed to open file '{path}' to validate SQLite magic: {e}",
+            "[{}] failed to open file '{path}': {e}",
             crate::error::E_DAT_004
         ),
     })?;
