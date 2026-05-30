@@ -185,11 +185,16 @@ pub fn run_inline_validation(
                         )?;
                     }
                 }
-                // Variants below carry no InlineNode subtrees in v1.0 and require
-                // no inline validation. Listed individually with `|` rather than as
-                // a wildcard `_` so the compiler will flag any future FrameContent
-                // variant addition that is missing from this arm — the exhaustiveness
-                // check is the contract (architecture rule cited in story spec line 370).
+                // Variants below do not carry InlineNode subtrees IN ANY PRODUCTION
+                // CODE PATH THAT EXISTS TODAY and require no inline validation here.
+                // IMPORTANT: Body(Vec<ContentBlock>) CAN carry InlineNode-bearing blocks
+                // (Text, Bullets) — it is simply not wired to inline validation in this
+                // pass. Future stories MUST route InlineNode-bearing content through
+                // TextRun or extend this match arm to recurse into Body(Vec<ContentBlock>).
+                // Listed individually with `|` rather than as a wildcard `_` so the
+                // compiler will flag any future FrameContent variant addition that is
+                // missing from this arm — the exhaustiveness check is the contract
+                // (architecture rule cited in story spec line 370).
                 // Bullet-list inline scanning is owned by STORY-073.
                 crate::types::FrameContent::Title(_)
                 | crate::types::FrameContent::Subtitle(_)
