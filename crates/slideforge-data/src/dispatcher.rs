@@ -1016,8 +1016,8 @@ fn extract_path_from_traversal_msg(message: &str) -> Option<&str> {
 /// - The path segment after the prefix is empty.
 ///
 /// This design prevents leaking unrecognized label text into the `.path` field
-/// of `DataError::FileNotFound` (FINDING-6: "unknown prefixes silently leak label
-/// text into the path").
+/// of `DataError::FileNotFound` AND `DataError::IoError` — both routing paths in
+/// `map_source_error` call this helper. Traces to FINDING-6.
 fn extract_path_after_code(message: &str) -> Option<&str> {
     // Bracket codes end with ']'. Find the first ']' and skip past it and
     // any leading space so we're positioned at the label + path content.
