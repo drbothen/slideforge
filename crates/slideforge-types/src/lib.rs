@@ -41,6 +41,7 @@ pub mod math;
 pub mod ordered_map;
 pub mod precedence;
 pub mod register;
+pub mod shape_types;
 pub mod slide;
 pub mod span;
 pub mod specs;
@@ -58,10 +59,12 @@ pub use math::MathNode;
 pub use ordered_map::OrderedMap;
 pub use precedence::MergePrecedence;
 pub use register::Register;
+pub use shape_types::{FillSpec, LayoutWarning, Rgb, ShapeType, ShapeTypeError};
 pub use slide::{FieldValue, Slide, StringPart};
 pub use span::SourceSpan;
 pub use specs::{
-    AltText, ChartSpec, DiagramSpec, ImageSpec, NormalizedDiagramSvg, ShapeSpec, TableSpec,
+    AltText, ChartSpec, DiagramSpec, ImageSpec, NormalizedDiagramSvg, ShapePosition, ShapeSpec,
+    ShapeUnit, TableSpec,
 };
 pub use type_kind::TypeKind;
 pub use value::Value;

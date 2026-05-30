@@ -39,11 +39,13 @@
 
 use std::sync::Arc;
 
-use slideforge_types::{Brand, Deck, FieldValue, Register, Value};
+use slideforge_types::{Brand, ContentBlock, Deck, FieldValue, Register, Value};
 
 use crate::error::LayoutError;
+use crate::inline::run_inline_validation;
 use crate::regions::region_frames_for;
 use crate::sections::collect_sections;
+use crate::shapes::{DEFAULT_EM_IN_EMU, layout_shapes};
 use crate::text_flow::compute_text_flow;
 use crate::types::{
     DEFAULT_PAGE_HEIGHT, DEFAULT_PAGE_WIDTH, FrameContent, LaidOutDeck, LaidOutSlide, PageSize,
@@ -74,6 +76,10 @@ use crate::types::{
 ///   count does not equal input count (BC-3.06.001 defensive check).
 /// * `Err(LayoutError::InvalidBoundingBox)` — A produced bounding box
 ///   violates coordinate invariants (BC-3.06.003 defensive check).
+/// * `Err(LayoutError::MissingAlt)` / `Err(LayoutError::Multiple)` — A shape
+///   node was missing `alt` text or `decorative: true` (BC-3.04.001 EC-001).
+/// * `Err(LayoutError::InlineDepthExceeded)` — An inline node tree exceeds the
+///   maximum nesting depth (BC-3.05.001 E-LAY-005 / F-MED-006).
 ///
 /// # Purity (AC-008)
 ///
@@ -109,6 +115,9 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
 
     // Layout each slide.
     let mut laid_out_slides: Vec<LaidOutSlide> = Vec::with_capacity(deck.slides.len());
+    // Deck-level warning sink — shape off-canvas + inline xref-not-found warnings
+    // are accumulated here and stored on LaidOutDeck::warnings (STORY-028 / AC-003 / AC-007).
+    let mut deck_warnings: Vec<crate::types::LayoutWarning> = Vec::new();
 
     for (source_index, slide) in deck.slides.iter().enumerate() {
         let slide_type_keyword: Arc<str> = Arc::clone(&slide.slide_type);
@@ -171,6 +180,96 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
             })
             .collect();
 
+        // AC-INT-1 (F-CRIT-001): Shape layout pass.
+        // Filter ContentBlock::Shape blocks from the slide, convert their
+        // positions to EMU frames, and append them after the region-map frames
+        // in source order (BC-3.04.001 postcondition 4).
+        let shape_specs: Vec<slideforge_types::ShapeSpec> = slide
+            .blocks
+            .iter()
+            .filter_map(|b| {
+                if let ContentBlock::Shape(s) = &b.content {
+                    Some(s.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // layout_shapes returns either Ok(ShapeLayoutOutput) or Err(LayoutError).
+        // Warnings (off-canvas positions) are non-fatal; errors (MissingAlt)
+        // are fatal and propagate out of layout::run. UnknownShapeType is
+        // unreachable here — ShapeSpec.shape_type is a resolved ShapeType enum,
+        // so unknown keywords are rejected at the parse stage (E-PAR-012) before
+        // a ShapeSpec is ever constructed.
+        // DEFERRED: brand-aware em conversion requires a `BrandFonts.font_size_emu`
+        // field that does not yet exist on the type. `DEFAULT_EM_IN_EMU` (457_200 EMU
+        // = 0.5 inch at 36pt) is used as a safe constant until that field is added.
+        // Tracked: STORY-074 (brand-em-sizing) will add `BrandFonts.font_size_emu`
+        // and wire it here. BC-3.04.001 PC-2 mandates brand-aware em resolution;
+        // this deferral is structural (missing type field), not a design choice.
+        // Pass frames.len() as base_index so InvalidBoundingBox.frame_index is
+        // slide-wide (region frames + shape-list position) rather than a local
+        // sub-list index (F-P20-LOW-002 / BC-3.06.003).
+        let shape_output = layout_shapes(
+            &shape_specs,
+            page_size,
+            source_index,
+            DEFAULT_EM_IN_EMU,
+            frames.len(),
+        )?;
+
+        let mut all_frames = frames;
+        all_frames.extend(shape_output.frames);
+        // Merge shape-level warnings (off-canvas) into the deck-level sink.
+        // They are stored on LaidOutDeck::warnings (BC-3.04.001 EC-002).
+        deck_warnings.extend(shape_output.warnings);
+
+        // Inline text pass: convert ContentBlock::Text blocks into FrameContent::TextRun
+        // frames so the inline validation pass (run_inline_validation) can scan them for
+        // xref targets. This is the minimum content path needed for VP-049 load-bearing
+        // end-to-end test. Full body content layout (positioning, font metrics) is
+        // deferred to STORY-073 (body-layout pass — bullet-list frames, font metrics,
+        // and text reflow). STORY-072 is gradient fills only and is NOT the owner of
+        // this deferral.
+        //
+        // NOTE: ContentBlock::Bullets(Vec<BulletItem>) is also NOT converted here.
+        // Bullet items carry inline content (BulletItem.inlines) that bypasses
+        // run_inline_validation. Xref validation inside bullets requires the body-layout
+        // pass to produce frames for bullet content first. See run_inline_validation
+        // rustdoc in inline.rs for the full enumeration of what is and is not scanned.
+        for block in &slide.blocks {
+            if let ContentBlock::Text(text_block) = &block.content {
+                // Clamp the placeholder height to page_height so the bbox always
+                // passes is_valid (F-P4-LOW-001 / BC-3.06.003). For brands with a
+                // canvas_height < 914_400 EMU the unclamped height would violate
+                // y + height <= page_height, triggering the InvalidBoundingBox
+                // defensive check below.
+                let placeholder_height = crate::types::Emu(914_400).min(page_size.height);
+                let bbox = crate::types::BoundingBox {
+                    x: crate::types::Emu(0),
+                    y: crate::types::Emu(0),
+                    width: page_size.width,
+                    height: placeholder_height,
+                };
+                // BC-3.06.003 defensive check: the clamped bbox must still satisfy
+                // all invariants (non-zero dimensions, within page bounds).
+                let frame_index = all_frames.len();
+                if !bbox.is_valid(page_size.width, page_size.height) {
+                    return Err(LayoutError::InvalidBoundingBox {
+                        source_slide_index: source_index,
+                        frame_index,
+                        bbox,
+                    });
+                }
+                all_frames.push(crate::types::Frame {
+                    bbox,
+                    content: crate::types::FrameContent::TextRun(text_block.inlines.clone()),
+                    text_flow: None,
+                });
+            }
+        }
+
         // Extract speaker notes from the slide's "notes" field, if present and
         // resolved to a plain string value.
         let speaker_notes: Option<Arc<str>> = match slide.fields.get("notes") {
@@ -190,7 +289,7 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
         laid_out_slides.push(LaidOutSlide {
             source_index,
             slide_type_keyword,
-            frames,
+            frames: all_frames,
             speaker_notes,
             register_tags,
         });
@@ -204,6 +303,15 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
             source_slide_index: 0,
         });
     }
+
+    // AC-INT-1 (F-CRIT-001): Inline validation pass.
+    // Scan all TextRun frames in the laid-out slides for unknown Xref targets.
+    // Accumulates LayoutWarning::XrefTargetNotFound into a warning Vec.
+    // Fatal errors (InlineDepthExceeded) propagate out of layout::run.
+    // Warnings are merged into deck_warnings and stored on LaidOutDeck::warnings
+    // (BC-3.05.001 EC-002 / AC-007).
+    let inline_warnings = run_inline_validation(deck, &laid_out_slides)?;
+    deck_warnings.extend(inline_warnings);
 
     // STORY-027: Section collection pass.
     // Collect all document sections (auto-generated + manual) from the deck.
@@ -222,5 +330,6 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
         page_size,
         slides: laid_out_slides,
         sections,
+        warnings: deck_warnings,
     })
 }

@@ -1,8 +1,14 @@
 //! `LayoutError` — errors returned by [`crate::layout::run`].
 //!
-//! All variants include a `source_slide_index: usize` where applicable so that
-//! error messages can point to the offending slide by position in the input
-//! [`slideforge_types::Deck`].
+//! ## Field-naming convention (interface-definitions.md §8 / BC-3.04.001 item L)
+//!
+//! All variants include a **`source_slide_index: usize`** where applicable so
+//! that error messages can point to the offending slide by position in the
+//! input [`slideforge_types::Deck`].
+//!
+//! The canonical field name is **`source_slide_index`** — not `slide_index`,
+//! `idx`, `slide_idx`, or any other spelling. This is the source of truth for
+//! all `LayoutError` variant authoring.
 
 use thiserror::Error;
 
@@ -96,7 +102,12 @@ pub enum LayoutError {
     InvalidBoundingBox {
         /// Zero-based index of the slide containing the invalid frame.
         source_slide_index: usize,
-        /// Zero-based index of the frame within the slide.
+        /// Zero-based **slide-wide** index of the offending frame within the slide.
+        ///
+        /// This is the position in the full combined frame list (region frames +
+        /// shape frames), not a sub-list index within the shape group alone.
+        /// A slide with 2 region frames where the first shape frame is invalid
+        /// reports `frame_index = 2`, not 0 (F-P20-LOW-002).
         frame_index: usize,
         /// The offending bounding box.
         bbox: BoundingBox,
@@ -124,12 +135,12 @@ pub enum LayoutError {
     /// keys. When a key is absent or not a plain string, this error is returned
     /// (HIGH-001 / BC-3.02.001).
     #[error(
-        "layout error: slide {slide_index}: risk card at index {card_index} is missing \
+        "layout error: slide {source_slide_index}: risk card at index {card_index} is missing \
          required field '{field}' (or it is not a plain string)"
     )]
     MissingRiskCardField {
         /// Zero-based index of the `severity_cards` slide.
-        slide_index: usize,
+        source_slide_index: usize,
         /// Zero-based index of the card within the slide's `cards:` list.
         card_index: usize,
         /// The name of the missing or non-string field.
@@ -142,12 +153,12 @@ pub enum LayoutError {
     /// This is a type-error in the .sf source — `cards:` must be a YAML-style
     /// list of maps, not a scalar or map at the top level (HIGH-003).
     #[error(
-        "layout error: slide {slide_index}: 'cards' field has wrong type — expected List, \
+        "layout error: slide {source_slide_index}: 'cards' field has wrong type — expected List, \
          found a non-List Literal value: {reason}"
     )]
     MalformedSeverityCards {
         /// Zero-based index of the `severity_cards` slide.
-        slide_index: usize,
+        source_slide_index: usize,
         /// Human-readable description of the actual type found.
         reason: String,
     },
@@ -158,13 +169,157 @@ pub enum LayoutError {
     /// The evaluator must resolve all field values before layout runs.
     /// An unresolved `cards:` field indicates an evaluator bug (HIGH-003).
     #[error(
-        "layout error: slide {slide_index}: 'cards' field is an unresolved FieldValue variant \
+        "layout error: slide {source_slide_index}: 'cards' field is an unresolved FieldValue variant \
          (expected Literal(List)); this indicates an evaluator bug"
     )]
     UnresolvedSeverityCards {
         /// Zero-based index of the `severity_cards` slide.
-        slide_index: usize,
+        source_slide_index: usize,
     },
+
+    /// Arithmetic overflow in EMU conversion (BC-3.04.001 Invariant 8 / VP-048).
+    ///
+    /// `from_inches` and `from_em` use `checked_mul` (per BC-3.04.001 Invariant 8
+    /// / interface-definitions.md §9.4) and return `None` on overflow. When any of
+    /// the four position fields (x, y, width, height) overflows, `layout_shapes`
+    /// accumulates this error via the multi-error accumulation pattern (DI-018).
+    ///
+    /// An `i64::MAX`-class input exceeds any physically meaningful slide dimension
+    /// by many orders of magnitude; the correct production behaviour is to reject
+    /// it explicitly rather than silently clamp (VP-048).
+    ///
+    /// The `field` discriminant names the specific position field that overflowed
+    /// (`"x"`, `"y"`, `"width"`, or `"height"`), enabling precise diagnostic
+    /// messages and targeted test assertions (F-P18-LOW-003).
+    #[error(
+        "layout error: slide {source_slide_index}: arithmetic overflow in EMU conversion \
+         of field '{field}' at {span}"
+    )]
+    ArithmeticOverflow {
+        /// Zero-based index of the slide containing the overflowing shape.
+        source_slide_index: usize,
+        /// Source location of the value that overflowed.
+        span: SourceSpan,
+        /// Name of the position field that overflowed: `"x"`, `"y"`, `"width"`, or `"height"`.
+        field: &'static str,
+    },
+
+    /// Inline node nesting exceeded the maximum safe depth (BC-3.05.001 E-LAY-005 / F-MED-006).
+    ///
+    /// The maximum allowed inline nesting depth is
+    /// [`crate::inline::MAX_INLINE_DEPTH`] (64). Deeper nesting is rejected at
+    /// layout time to prevent stack overflow in recursive traversal.
+    #[error(
+        "layout error: slide {source_slide_index}: inline nesting depth {depth} exceeds maximum \
+         ({max}) — simplify the formatting nesting"
+    )]
+    InlineDepthExceeded {
+        /// Zero-based index of the slide containing the over-nested inline content.
+        source_slide_index: usize,
+        /// The actual depth that was detected (>= `max`).
+        depth: usize,
+        /// The maximum allowed depth ([`crate::inline::MAX_INLINE_DEPTH`]).
+        max: usize,
+    },
+
+    /// A `Shape` node reached the layout stage without `alt` text or
+    /// `decorative: true` (BC-3.04.001 EC-001 / DI-001).
+    ///
+    /// This is a defensive check — the primary alt-text enforcement is in
+    /// `slideforge-validate` (STORY-015). If this error fires, it indicates
+    /// the validation stage was bypassed or produced a false-pass.
+    ///
+    /// Layout returns this error rather than produce a shape without alt text,
+    /// because WCAG-AA compliance requires that every non-decorative visual
+    /// element have programmatically-determinable alternative text.
+    ///
+    /// `span` points to the offending `shape:` block in the source file
+    /// (BC-3.04.001 invariant 7 / CLAUDE.md error-handling rule: all errors
+    /// carry source spans).
+    #[error(
+        "layout error: slide {source_slide_index}: shape node reached layout without alt text or \
+         `decorative: true` at {span} (internal invariant violation — validation should have caught this)"
+    )]
+    MissingAlt {
+        /// Zero-based index of the slide containing the shape without alt text.
+        source_slide_index: usize,
+        /// Source location of the offending `shape:` block.
+        span: SourceSpan,
+    },
+
+    /// Multiple `LayoutError`s accumulated from a single operation (BC-3.04.001 item G).
+    ///
+    /// Used by [`crate::shapes::layout_shapes`] to accumulate all `MissingAlt`
+    /// and `ArithmeticOverflow` errors from a slide's shape set before returning.
+    /// This variant allows callers that accept `Result<_, LayoutError>` to receive
+    /// all errors at once rather than bailing on the first failure (DI-018).
+    ///
+    /// ## Invariants
+    ///
+    /// - The inner `Vec` MUST be non-empty. An empty `Multiple([])` is a layout
+    ///   engine bug — use `Ok(...)` when there are no errors.
+    /// - `Multiple` MUST NOT be nested: inner errors are flat `LayoutError`
+    ///   variants, never another `Multiple`.
+    /// - Even a single error is returned as `Multiple { inner: vec![err] }` for
+    ///   uniform return type. Use [`LayoutError::multiple`] to construct.
+    ///
+    /// ## Display
+    ///
+    /// Displays the count and the first error's message. Full inspection requires
+    /// matching the variant and iterating the inner `Vec`.
+    #[error(
+        "layout error: {count} accumulated errors; first: {first}",
+        count = inner.len(),
+        first = inner.first().map_or_else(|| "(none)".to_owned(), std::string::ToString::to_string)
+    )]
+    Multiple {
+        /// The accumulated errors, in source order.
+        inner: Vec<LayoutError>,
+    },
+}
+
+impl LayoutError {
+    /// Construct a `Multiple` error with flattening and non-empty invariant.
+    ///
+    /// This is the canonical constructor for `Multiple` — callers MUST use it
+    /// instead of constructing `LayoutError::Multiple { inner: ... }` directly.
+    ///
+    /// # Invariants enforced
+    ///
+    /// - `errors` MUST be non-empty (`debug_assert!` guards this in debug builds).
+    /// - Nested `Multiple` variants are flattened into a single level.
+    ///
+    /// # Panics (debug builds only)
+    ///
+    /// Asserts that `errors` is non-empty. An empty `Multiple` is a layout-engine
+    /// bug — use `Ok(...)` when there are no errors.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use slideforge_layout::error::LayoutError;
+    /// let err = LayoutError::multiple(vec![
+    ///     LayoutError::EmptyDeck { source_slide_index: 0 },
+    /// ]);
+    /// // Single error → Multiple { inner: [EmptyDeck] } (uniform).
+    /// assert!(matches!(err, LayoutError::Multiple { .. }));
+    /// ```
+    #[must_use]
+    pub fn multiple(errors: Vec<Self>) -> Self {
+        debug_assert!(
+            !errors.is_empty(),
+            "LayoutError::multiple requires at least one error"
+        );
+        // Flatten nested Multiple variants into a single level (invariant: no nesting).
+        let flattened: Vec<Self> = errors
+            .into_iter()
+            .flat_map(|e| match e {
+                LayoutError::Multiple { inner } => inner,
+                other => vec![other],
+            })
+            .collect();
+        LayoutError::Multiple { inner: flattened }
+    }
 }
 
 #[cfg(test)]
@@ -266,5 +421,172 @@ mod tests {
             source_slide_index: 0,
         }); // duplicate
         assert_eq!(set.len(), 1);
+    }
+
+    /// BC-3.04.001 item F — `LayoutError::MissingAlt` carries `source_slide_index`
+    /// and `span` fields (interface-definitions §8.1 canonical field name).
+    #[test]
+    fn test_bc_3_04_001_missing_alt_carries_source_slide_index_and_span() {
+        let err = LayoutError::MissingAlt {
+            source_slide_index: 4,
+            span: SourceSpan::default(),
+        };
+        let msg = err.to_string();
+        assert!(
+            msg.contains("alt text") || msg.contains("decorative"),
+            "MissingAlt message must mention alt text; got: {msg}"
+        );
+        assert!(
+            msg.contains('4'),
+            "MissingAlt message must include source_slide_index; got: {msg}"
+        );
+        // Verify Clone + PartialEq + Eq + Hash hold.
+        let err2 = err.clone();
+        assert_eq!(err, err2);
+    }
+
+    /// BC-3.04.001 Invariant 8 / F-P18-LOW-003 — `LayoutError::ArithmeticOverflow` carries
+    /// `source_slide_index`, `span`, and `field` discriminant; Display includes field name.
+    ///
+    /// Load-bearing: verifies that the `field` discriminant ("x", "y", "width", "height")
+    /// appears in the Display output, enabling precise diagnostics per handoff F-P18-LOW-003.
+    #[test]
+    fn test_bc_3_04_001_arithmetic_overflow_carries_field_discriminant() {
+        for field_name in &["x", "y", "width", "height"] {
+            let err = LayoutError::ArithmeticOverflow {
+                source_slide_index: 7,
+                span: SourceSpan::default(),
+                field: field_name,
+            };
+            let msg = err.to_string();
+            assert!(
+                msg.contains(field_name),
+                "ArithmeticOverflow Display must include field name '{field_name}'; got: {msg}"
+            );
+            assert!(
+                msg.contains('7'),
+                "ArithmeticOverflow Display must include source_slide_index; got: {msg}"
+            );
+            // Clone + PartialEq + Eq + Hash
+            let err2 = err.clone();
+            assert_eq!(err, err2);
+        }
+    }
+
+    /// BC-3.04.001 item G — `LayoutError::Multiple` accumulates inner errors
+    /// and displays the count and first error message.
+    #[test]
+    fn test_bc_3_04_001_multiple_variant_carries_inner_errors() {
+        use std::collections::HashSet;
+
+        let inner = vec![
+            LayoutError::MissingAlt {
+                source_slide_index: 0,
+                span: SourceSpan::default(),
+            },
+            LayoutError::MissingAlt {
+                source_slide_index: 0,
+                span: SourceSpan::default(),
+            },
+        ];
+        let err = LayoutError::Multiple {
+            inner: inner.clone(),
+        };
+        let msg = err.to_string();
+        assert!(
+            msg.contains('2'),
+            "Multiple display must include the error count; got: {msg}"
+        );
+
+        // Clone + PartialEq + Eq + Hash
+        let err2 = err.clone();
+        assert_eq!(err, err2);
+
+        let mut set = HashSet::new();
+        set.insert(err);
+        assert_eq!(set.len(), 1);
+    }
+
+    /// interface-definitions §8.1 — renamed variants use `source_slide_index`,
+    /// NOT `slide_index`. This test constructs all four renamed variants to
+    /// ensure the canonical field name is enforced at compile time.
+    #[test]
+    fn test_interface_definitions_s8_canonical_field_name_source_slide_index() {
+        // MissingAlt
+        let _ = LayoutError::MissingAlt {
+            source_slide_index: 0,
+            span: SourceSpan::default(),
+        };
+        // MissingRiskCardField
+        let _ = LayoutError::MissingRiskCardField {
+            source_slide_index: 1,
+            card_index: 0,
+            field: "title".to_owned(),
+        };
+        // MalformedSeverityCards
+        let _ = LayoutError::MalformedSeverityCards {
+            source_slide_index: 2,
+            reason: "expected List".to_owned(),
+        };
+        // UnresolvedSeverityCards
+        let _ = LayoutError::UnresolvedSeverityCards {
+            source_slide_index: 3,
+        };
+        // If this test compiles, the canonical field name is correctly applied.
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // LayoutError::multiple() smart constructor (Item N)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Item N — `LayoutError::multiple()` with one error returns `Multiple` uniformly.
+    ///
+    /// Even a single error must be returned as `Multiple { inner: vec![err] }`.
+    /// Load-bearing: verifies `matches!(result, LayoutError::Multiple { .. })`.
+    #[test]
+    fn test_bc_3_04_001_multiple_single_error_uniformity() {
+        let single = LayoutError::EmptyDeck {
+            source_slide_index: 0,
+        };
+        let result = LayoutError::multiple(vec![single]);
+        assert!(
+            matches!(&result, LayoutError::Multiple { inner } if inner.len() == 1),
+            "multiple(vec![one_err]) must return Multiple with len=1; got: {result:?}"
+        );
+    }
+
+    /// Item N — `LayoutError::multiple()` flattens nested `Multiple` variants.
+    ///
+    /// `multiple(vec![Multiple { inner: [A, B] }, C])` → `Multiple { inner: [A, B, C] }`.
+    /// Load-bearing: inner vec must have len=3, not 2.
+    #[test]
+    fn test_bc_3_04_001_multiple_flattens_nested() {
+        let a = LayoutError::EmptyDeck {
+            source_slide_index: 0,
+        };
+        let b = LayoutError::EmptyDeck {
+            source_slide_index: 1,
+        };
+        let c = LayoutError::EmptyDeck {
+            source_slide_index: 2,
+        };
+        let nested = LayoutError::Multiple { inner: vec![a, b] };
+        let result = LayoutError::multiple(vec![nested, c]);
+        match result {
+            LayoutError::Multiple { ref inner } => {
+                assert_eq!(
+                    inner.len(),
+                    3,
+                    "nested Multiple must flatten to 3 flat errors; got: {inner:?}"
+                );
+                for e in inner {
+                    assert!(
+                        !matches!(e, LayoutError::Multiple { .. }),
+                        "flattened inner must not contain nested Multiple; found: {e:?}"
+                    );
+                }
+            },
+            other => panic!("expected Multiple after flattening, got: {other:?}"),
+        }
     }
 }

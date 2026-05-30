@@ -6,6 +6,8 @@
 
 use std::sync::Arc;
 
+use crate::inline::InlineNode;
+use crate::shape_types::{FillSpec, ShapeType};
 use crate::span::SourceSpan;
 
 /// A usvg-normalized SVG string that is guaranteed PPTX-safe.
@@ -165,7 +167,8 @@ pub struct ChartSpec {
     /// When `true`, the author set `decorative: true` on this element.
     ///
     /// If both `alt` is `Some(AltText::Provided(_))` AND `decorative` is `true`,
-    /// the validator emits `W-A11-001` (alt text provided but decorative wins).
+    /// the validator emits `W-A11-002` (alt takes precedence over decorative, per
+    /// BC-3.04.001 v1.5.2 Invariant 11 / F-P18-HIGH-001).
     pub decorative: bool,
 
     /// Source location.
@@ -191,14 +194,103 @@ pub struct DiagramSpec {
     pub span: SourceSpan,
 }
 
+/// A position measurement in a user-facing unit (inches or em).
+///
+/// Stored as an integer multiple of `1/1000` of the named unit to avoid `f64`:
+///
+/// - `Inches(milliinches)` — e.g., `0.5in` is stored as `Inches(500)`.
+///   EMU conversion: `(milliinches * 914_400) / 1_000`.
+/// - `Em(milliem)` — e.g., `1em` is stored as `Em(1000)`.
+///   EMU conversion: `(milliem * brand_em_in_emu) / 1_000`.
+///
+/// Implements `Debug + Clone + PartialEq + Eq + Hash` for comemo compatibility
+/// (DI-010, CLAUDE.md hash+eq+clone rule).
+///
+/// See BC-3.04.001 postcondition 1 for the authoritative unit table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ShapeUnit {
+    /// Measurement in inches, stored as thousandths of an inch (`inches × 1000`).
+    ///
+    /// Example: `0.5in` → `Inches(500)`.
+    /// EMU conversion: `(milliinches * 914_400) / 1_000`.
+    Inches(i64),
+    /// Measurement in em units, stored as thousandths of an em (`em × 1000`).
+    ///
+    /// Example: `2em` → `Em(2000)`.
+    /// EMU conversion: `(milliem * brand_em_in_emu) / 1_000`.
+    Em(i64),
+}
+
+/// The position and size of a shape in user-declared units.
+///
+/// Carried by [`ShapeSpec`] through the semantic IR. The layout pass converts
+/// each field to integer EMU via `slideforge_layout::shapes::unit_to_emu`.
+///
+/// Implements `Debug + Clone + PartialEq + Eq + Hash` for comemo compatibility
+/// (DI-010, CLAUDE.md hash+eq+clone rule).
+///
+/// See BC-3.04.001 postcondition 1 for conversion constants.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ShapePosition {
+    /// Horizontal position from the slide's left edge.
+    pub x: ShapeUnit,
+    /// Vertical position from the slide's top edge.
+    pub y: ShapeUnit,
+    /// Width of the shape.
+    pub width: ShapeUnit,
+    /// Height of the shape.
+    pub height: ShapeUnit,
+}
+
 /// Specification for a shape content block.
 ///
-/// Shape types, positions, and fills are defined in the shape-spec story.
-/// This skeleton carries the minimum needed now.
+/// Carries the full shape declaration from the `shape:` DSL block, including
+/// type, position, fill, optional text content, and accessibility alt text.
+///
+/// ## Schema (BC-3.04.001 v1.5.2 / interface-definitions.md §9)
+///
+/// - `shape_type` is now a resolved [`ShapeType`] enum variant (not a raw
+///   `Arc<str>`). The parser validates the keyword and rejects unknown values
+///   with `E-PAR-012` before constructing a `ShapeSpec`. This eliminates the
+///   class of "unknown shape type" bugs that previously could only be caught at
+///   layout time.
+/// - `fill` carries the fill specification from the `fill:` DSL field. Defaults
+///   to [`crate::shape_types::FillSpec::None`] (transparent) when not declared.
+/// - `text` carries optional inline text content from the `text:` DSL field.
+///
+/// Implements `Debug + Clone + PartialEq + Eq + Hash` for comemo compatibility
+/// (DI-010, CLAUDE.md hash+eq+clone rule).
+///
+/// See BC-3.04.001 for the authoritative contract.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ShapeSpec {
-    /// The shape type keyword (e.g., `"rect"`, `"ellipse"`, `"arrow"`).
-    pub shape_type: Arc<str>,
+    /// The resolved geometric shape type.
+    ///
+    /// Corresponds to the closed v1.0 vocabulary: `rect`, `ellipse`, `arrow`,
+    /// `line`, `star`, `roundRect`. Unknown keywords are rejected by the parser
+    /// with `E-PAR-012` before a `ShapeSpec` is constructed — there is no
+    /// `Custom` fallback (BC-3.04.001 invariant 4 / CLAUDE.md "no silent
+    /// fallback" rule).
+    pub shape_type: ShapeType,
+
+    /// The shape's declared position and size in user units.
+    ///
+    /// The layout pass converts each [`ShapeUnit`] field to integer EMU using
+    /// `slideforge_layout::shapes::unit_to_emu` (BC-3.04.001 postcondition 2).
+    pub position: ShapePosition,
+
+    /// The fill specification for this shape.
+    ///
+    /// Derived from the `fill:` DSL field. Defaults to
+    /// [`crate::shape_types::FillSpec::None`] (transparent background) when
+    /// the author does not declare a fill.
+    pub fill: FillSpec,
+
+    /// Optional inline text content rendered inside the shape.
+    ///
+    /// `None` means the shape has no text label. Populated from the `text:`
+    /// DSL field when present.
+    pub text: Option<Vec<InlineNode>>,
 
     /// Accessibility alt text state. See [`ChartSpec::alt`] for semantics.
     pub alt: Option<AltText>,
@@ -278,13 +370,51 @@ mod tests {
 
     #[test]
     fn test_bc_1_01_specs_shape_spec_fields() {
+        use crate::shape_types::{FillSpec, ShapeType};
+
         let spec = ShapeSpec {
-            shape_type: Arc::from("rect"),
+            shape_type: ShapeType::Rect,
+            position: ShapePosition {
+                x: ShapeUnit::Inches(500),       // 0.5in
+                y: ShapeUnit::Inches(1000),      // 1.0in
+                width: ShapeUnit::Inches(2000),  // 2.0in
+                height: ShapeUnit::Inches(1000), // 1.0in
+            },
+            fill: FillSpec::None,
+            text: None,
             alt: Some(AltText::Provided(Arc::from("a rectangle"))),
             decorative: false,
             span: SourceSpan::default(),
         };
-        assert_eq!(spec.shape_type.as_ref(), "rect");
+        assert_eq!(spec.shape_type, ShapeType::Rect);
+        // Verify position fields carry the declared user units.
+        assert!(matches!(spec.position.x, ShapeUnit::Inches(500)));
+        assert!(matches!(spec.position.y, ShapeUnit::Inches(1000)));
+        assert!(matches!(spec.position.width, ShapeUnit::Inches(2000)));
+        assert!(matches!(spec.position.height, ShapeUnit::Inches(1000)));
+        assert!(matches!(spec.fill, FillSpec::None));
+        assert!(spec.text.is_none());
+    }
+
+    /// BC-3.04.001 — `ShapePosition` and `ShapeUnit` implement `Hash + Eq + Clone`
+    /// (comemo compatibility / DI-010).
+    #[test]
+    fn test_bc_3_04_001_shape_position_and_unit_implement_hash_eq_clone() {
+        use std::collections::HashSet;
+
+        let pos = ShapePosition {
+            x: ShapeUnit::Inches(500),
+            y: ShapeUnit::Em(1000),
+            width: ShapeUnit::Inches(2000),
+            height: ShapeUnit::Em(500),
+        };
+        let pos2 = pos.clone();
+        assert_eq!(pos, pos2);
+
+        let mut set = HashSet::new();
+        set.insert(ShapeUnit::Inches(500));
+        set.insert(ShapeUnit::Inches(500)); // duplicate
+        assert_eq!(set.len(), 1, "ShapeUnit must deduplicate in HashSet");
     }
 
     #[test]

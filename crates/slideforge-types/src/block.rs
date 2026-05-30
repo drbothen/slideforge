@@ -139,7 +139,15 @@ mod tests {
                 span: SourceSpan::default(),
             }),
             ContentBlock::Shape(ShapeSpec {
-                shape_type: Arc::from("rect"),
+                shape_type: crate::shape_types::ShapeType::Rect,
+                position: crate::specs::ShapePosition {
+                    x: crate::specs::ShapeUnit::Inches(500),
+                    y: crate::specs::ShapeUnit::Inches(1000),
+                    width: crate::specs::ShapeUnit::Inches(2000),
+                    height: crate::specs::ShapeUnit::Inches(1000),
+                },
+                fill: crate::shape_types::FillSpec::None,
+                text: None,
                 alt: Some(AltText::Provided(Arc::from("shape"))),
                 decorative: false,
                 span: SourceSpan::default(),

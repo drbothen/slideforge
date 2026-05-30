@@ -9,7 +9,7 @@
 //! | Code | Severity | Meaning |
 //! |------|----------|---------|
 //! | `E-A11-001` | Error | Visual element is missing alt text and is not marked decorative |
-//! | `W-A11-001` | Warning | Visual element has both alt text AND `decorative: true` (alt is ignored) |
+//! | `W-A11-002` | Warning | Visual element has both alt text AND `decorative: true`; alt takes precedence, decorative flag ignored (BC-3.04.001 v1.5.2 Invariant 11) |
 
 use slideforge_plugin_api::{Diagnostic, DiagnosticSeverity, Validator, ValidatorOptions};
 use slideforge_types::{Deck, SourceSpan, specs::AltText};
@@ -27,13 +27,14 @@ pub(crate) const E_A11_001: &str = "E-A11-001";
 
 /// Warning code emitted when a visual element has both alt text AND `decorative: true`.
 ///
-/// `decorative: true` takes precedence — the provided alt text is silently
-/// ignored. Authors should remove the `alt` field or remove `decorative: true`
-/// to resolve the ambiguity.
+/// Per BC-3.04.001 v1.5.2 Invariant 11 (F-P18-HIGH-001): **alt wins over decorative**.
+/// The element is treated as having valid alt text; `decorative: true` is ignored.
+/// Authors should remove `decorative: true` or remove the `alt` field to resolve
+/// the ambiguity.
 ///
 /// Used by the `validate()` implementation (STORY-015 implementer phase) and
 /// exercised directly by the test suite.
-pub(crate) const W_A11_001: &str = "W-A11-001";
+pub(crate) const W_A11_002: &str = "W-A11-002";
 
 /// Validates that all visual elements have alt text or are marked decorative.
 ///
@@ -107,7 +108,7 @@ impl Validator for AltTextValidator {
                             spec.alt.as_ref(),
                             spec.decorative,
                             "shape",
-                            spec.shape_type.as_ref(),
+                            spec.shape_type.as_keyword(),
                             &spec.span,
                             &mut diagnostics,
                         );
@@ -129,21 +130,30 @@ impl Validator for AltTextValidator {
 
 /// Check a visual element with `decorative` support (Image, Chart, Diagram, Shape).
 ///
-/// Logic (per AC-009, AC-006, AC-001 through AC-005):
+/// Logic (per AC-009, AC-006, AC-001 through AC-005, and BC-3.04.001 v1.5.2
+/// Invariant 11 / F-P18-HIGH-001):
 ///
 /// 1. If `decorative: true` AND `alt` is `Some(AltText::Provided(s))` where `s` is
-///    non-blank → emit W-A11-001 (non-empty alt is ignored).
-///    Empty/whitespace alt with `decorative: true` does NOT emit W-A11-001 because
+///    non-blank → emit W-A11-002 (alt wins, decorative flag ignored).
+///    The element is then treated as having valid alt text — no E-A11-001 is emitted.
+///    Empty/whitespace alt with `decorative: true` does NOT emit W-A11-002 because
 ///    blank alt is not meaningful content worth warning about.
-/// 2. If `decorative: true` (regardless) → skip error check (decorative exemption).
-/// 3. If `alt` is `None` or blank `Provided` → emit E-A11-001.
+/// 2. If `decorative: true` AND `alt` is `None` or blank → decorative exemption, no error.
+/// 3. If `alt` is `None` or blank `Provided` (and not decorative) → emit E-A11-001.
 /// 4. If `alt` is valid `Provided` or `Decorative` enum variant → valid, no diagnostic.
+///
+/// ## Alt-wins precedence (BC-3.04.001 v1.5.2 Invariant 11)
+///
+/// When both a non-blank `alt` text AND `decorative: true` are present, **alt takes
+/// precedence**. The layout engine (`slideforge-layout::build_shape_frame`) applies the
+/// same "alt wins" rule, ensuring cross-crate semantic consistency: both crates produce
+/// an element with valid alt text and `decorative = false` as the effective outcome.
 ///
 /// ## Design note: dual decorative representation
 ///
 /// The IR carries BOTH `decorative: bool` (from `decorative: true` keyword in DSL) AND
 /// `alt: Option<AltText>` (where `AltText::Decorative` can also express decorative intent).
-/// This dual representation is necessary to detect the AC-009 case: when the user writes
+/// This dual representation is necessary to detect the ambiguous case: when the user writes
 /// BOTH `alt "..."` AND `decorative: true`, both fields are set and we can warn.
 ///
 /// The contradictory state `alt: Some(AltText::Decorative)` with `decorative: false`
@@ -159,21 +169,29 @@ fn check_visual_element(
     span: &SourceSpan,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    // AC-009: both non-blank alt text AND decorative: true → warn that alt is ignored.
+    // BC-3.04.001 v1.5.2 Invariant 11 (F-P18-HIGH-001): when both non-blank alt AND
+    // decorative: true are present, alt wins. Emit W-A11-002 and treat the element as
+    // having valid alt text (fall through to the non-decorative path below).
     // Blank alt with decorative: true is silently accepted (blank alt is not meaningful).
-    if decorative {
+    let effective_decorative = if decorative {
         if let Some(AltText::Provided(s)) = alt
             && !is_blank(s)
         {
+            // Alt wins — warn and treat as non-decorative with valid alt.
             diagnostics.push(make_warning(element_type, identifier, span));
+            false
+        } else {
+            // Decorative exemption (no non-blank alt to promote): skip error check.
+            return;
         }
-        // Decorative exemption: no E-A11-001 needed.
-        return;
-    }
+    } else {
+        false
+    };
 
-    // Non-decorative: check that alt text is present and non-blank.
+    // Non-decorative path (effective_decorative is always false here; kept for clarity).
     // AltText::Decorative (enum variant) wins — element is treated as valid even if
     // `decorative: bool` is false. See design note on dual decorative representation above.
+    let _ = effective_decorative;
     let is_missing = match alt {
         None => true,
         Some(AltText::Provided(s)) => is_blank(s),
@@ -207,17 +225,23 @@ fn make_error(element_type: &str, identifier: &str, span: &SourceSpan) -> Diagno
     }
 }
 
-/// Construct a `W-A11-001` warning diagnostic for conflicting non-blank alt + decorative.
+/// Construct a `W-A11-002` warning diagnostic for conflicting non-blank alt + decorative.
+///
+/// Per BC-3.04.001 v1.5.2 Invariant 11 (F-P18-HIGH-001): alt takes precedence over
+/// `decorative: true`. The element is treated as having valid alt text; the decorative
+/// flag is ignored.
 fn make_warning(element_type: &str, identifier: &str, span: &SourceSpan) -> Diagnostic {
     Diagnostic {
         severity: DiagnosticSeverity::Warning,
-        code: std::sync::Arc::from(W_A11_001),
+        code: std::sync::Arc::from(W_A11_002),
         message: std::sync::Arc::from(format!(
-            "Alt text ignored for decorative {element_type} '{identifier}' at {span}"
+            "{element_type} '{identifier}' at {span} has both alt and decorative: true; \
+             alt takes precedence, decorative flag ignored. \
+             Consider removing one."
         )),
         span: span.clone(),
         hint: Some(std::sync::Arc::from(
-            "Remove alt text or remove decorative: true",
+            "Remove decorative: true to keep the alt text, or remove alt to keep decorative behaviour",
         )),
     }
 }
@@ -231,10 +255,13 @@ mod tests {
     use slideforge_plugin_api::{DiagnosticSeverity, Validator, ValidatorOptions};
     use slideforge_types::{
         Block, ContentBlock, Deck, DeckMetadata, OrderedMap, Slide, SourceSpan,
-        specs::{AltText, ChartSpec, DiagramSpec, ImageSpec, ShapeSpec, TableSpec},
+        specs::{
+            AltText, ChartSpec, DiagramSpec, ImageSpec, ShapePosition, ShapeSpec, ShapeUnit,
+            TableSpec,
+        },
     };
 
-    use super::{AltTextValidator, E_A11_001, W_A11_001};
+    use super::{AltTextValidator, E_A11_001, W_A11_002};
 
     // ── Deck/slide/block construction helpers ──────────────────────────────────
 
@@ -319,7 +346,15 @@ mod tests {
 
     fn make_shape_block(alt: Option<AltText>, decorative: bool) -> Block {
         make_block(ContentBlock::Shape(ShapeSpec {
-            shape_type: Arc::from("rect"),
+            shape_type: slideforge_types::ShapeType::Rect,
+            position: ShapePosition {
+                x: ShapeUnit::Inches(500),
+                y: ShapeUnit::Inches(1000),
+                width: ShapeUnit::Inches(2000),
+                height: ShapeUnit::Inches(1000),
+            },
+            fill: slideforge_types::FillSpec::None,
+            text: None,
             alt,
             decorative,
             span: SourceSpan::default(),
@@ -464,10 +499,10 @@ mod tests {
 
     #[test]
     fn test_bc_5_03_015_alt_and_decorative_together() {
-        // alt: Some(Provided("text")), decorative: true → 1 W-A11-001 warning
-        // Decorative wins, but the ignored non-blank alt text warrants a warning (AC-009).
+        // alt: Some(Provided("text")), decorative: true → 1 W-A11-002 warning
+        // Per BC-3.04.001 v1.5.2 Invariant 11: alt wins over decorative (AC-009 / F-P18-HIGH-001).
         let slide = make_slide(vec![make_image_block(
-            Some(AltText::Provided(Arc::from("this alt will be ignored"))),
+            Some(AltText::Provided(Arc::from("this alt takes precedence"))),
             true,
         )]);
         let deck = make_deck(vec![slide]);
@@ -475,10 +510,67 @@ mod tests {
         assert_eq!(
             diags.len(),
             1,
-            "alt+decorative together should produce 1 W-A11-001; got {diags:?}"
+            "alt+decorative together should produce 1 W-A11-002; got {diags:?}"
         );
-        assert_eq!(diags[0].code.as_ref(), W_A11_001);
+        assert_eq!(diags[0].code.as_ref(), W_A11_002);
         assert_eq!(diags[0].severity, DiagnosticSeverity::Warning);
+    }
+
+    // ── Alt wins over decorative (BC-3.04.001 v1.5.2 Invariant 11 / F-P18-HIGH-001) ───
+
+    #[test]
+    fn test_w_a11_002_alt_wins_over_decorative() {
+        // When both non-blank alt text AND decorative: true are present:
+        // - Output alt is preserved (element treated as having valid alt)
+        // - Output decorative is false (effective outcome: alt wins)
+        // - Exactly 1 W-A11-002 warning is emitted
+        // - No E-A11-001 error is emitted (alt is valid)
+        //
+        // Per BC-3.04.001 v1.5.2 Invariant 11 (F-P18-HIGH-001). Cross-crate
+        // semantic consistency: slideforge-layout::build_shape_frame applies the
+        // same "alt wins" rule, producing AltText::Provided(s) when both are set.
+        let alt_text = Arc::from("A meaningful description of the shape");
+        let deck = make_deck(vec![make_slide(vec![make_image_block(
+            Some(AltText::Provided(Arc::clone(&alt_text))),
+            true,
+        )])]);
+        let diags = AltTextValidator.validate(&deck, &default_opts());
+
+        // Exactly 1 diagnostic (the W-A11-002 warning)
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected exactly 1 W-A11-002 warning (no E-A11-001); got {diags:?}"
+        );
+
+        // Must be a warning, not an error
+        assert_eq!(
+            diags[0].severity,
+            DiagnosticSeverity::Warning,
+            "alt+decorative conflict must produce a Warning, not an Error; got {diags:?}"
+        );
+
+        // Must use W-A11-002 code
+        assert_eq!(
+            diags[0].code.as_ref(),
+            W_A11_002,
+            "warning code must be W-A11-002; got {}",
+            diags[0].code
+        );
+
+        // Message must reference alt taking precedence
+        assert!(
+            diags[0].message.contains("alt takes precedence"),
+            "W-A11-002 message must state alt takes precedence; got: {}",
+            diags[0].message
+        );
+
+        // Message must mention decorative flag is ignored
+        assert!(
+            diags[0].message.contains("decorative flag ignored"),
+            "W-A11-002 message must state decorative flag is ignored; got: {}",
+            diags[0].message
+        );
     }
 
     // ── Other visual element types ─────────────────────────────────────────────
@@ -718,17 +810,69 @@ mod tests {
 
     #[test]
     fn test_warning_message_contains_identifier() {
-        // W-A11-001 for an image must include the file path as identifier
+        // W-A11-002 for an image must include the file path as identifier
         let deck = make_deck(vec![make_slide(vec![make_image_block(
-            Some(AltText::Provided(Arc::from("ignored alt"))),
+            Some(AltText::Provided(Arc::from("alt that wins"))),
             true,
         )])]);
         let diags = AltTextValidator.validate(&deck, &default_opts());
         assert_eq!(diags.len(), 1);
-        assert_eq!(diags[0].code.as_ref(), W_A11_001);
+        assert_eq!(diags[0].code.as_ref(), W_A11_002);
         assert!(
             diags[0].message.contains("'photo.png'"),
             "warning message must contain the image path; got: {}",
+            diags[0].message
+        );
+    }
+
+    // ── W-A11-002 shape dispatch sibling test (F-P20-LOW-001) ─────────────────
+
+    /// W-A11-002 — shape with non-blank alt + decorative: true emits exactly
+    /// 1 W-A11-002 warning (no E-A11-001).
+    ///
+    /// Mirrors `test_w_a11_002_alt_wins_over_decorative` but uses a
+    /// `ContentBlock::Shape` instead of `ContentBlock::Image` to confirm the
+    /// W-A11-002 dispatch path is exercised for the Shape arm of the
+    /// `check_visual_element` call chain (F-P20-LOW-001 sibling-site gap).
+    ///
+    /// Load-bearing: swap `make_shape_block` for `make_image_block` or change
+    /// `AltText::Provided` to `None` — any of these changes must cause the
+    /// assertion to fail.
+    #[test]
+    fn test_w_a11_002_alt_wins_over_decorative_shape() {
+        let alt_text = Arc::from("A meaningful description of the shape");
+        let deck = make_deck(vec![make_slide(vec![make_shape_block(
+            Some(AltText::Provided(Arc::clone(&alt_text))),
+            true,
+        )])]);
+        let diags = AltTextValidator.validate(&deck, &default_opts());
+
+        // Exactly 1 diagnostic (the W-A11-002 warning) — no E-A11-001
+        assert_eq!(
+            diags.len(),
+            1,
+            "shape with alt+decorative should produce 1 W-A11-002; got {diags:?}"
+        );
+
+        // Must be a warning, not an error
+        assert_eq!(
+            diags[0].severity,
+            DiagnosticSeverity::Warning,
+            "shape alt+decorative conflict must produce Warning; got {diags:?}"
+        );
+
+        // Must use W-A11-002 code
+        assert_eq!(
+            diags[0].code.as_ref(),
+            W_A11_002,
+            "warning code must be W-A11-002; got {}",
+            diags[0].code
+        );
+
+        // Message must reference alt taking precedence
+        assert!(
+            diags[0].message.contains("alt takes precedence"),
+            "W-A11-002 message must state alt takes precedence; got: {}",
             diags[0].message
         );
     }
@@ -752,8 +896,9 @@ mod tests {
 
     #[test]
     fn test_blank_alt_with_decorative_no_warning() {
-        // decorative: true + alt: Some(Provided("")) → no warning
-        // Blank alt is not meaningful content, so no W-A11-001 is emitted.
+        // decorative: true + alt: Some(Provided("")) → no warning, no error
+        // Blank alt is not meaningful content, so no W-A11-002 is emitted and the
+        // element retains decorative exemption (not treated as "alt wins").
         let deck = make_deck(vec![make_slide(vec![make_image_block(
             Some(AltText::Provided(Arc::from(""))),
             true,
@@ -768,6 +913,7 @@ mod tests {
     #[test]
     fn test_whitespace_alt_with_decorative_no_warning() {
         // decorative: true + alt: Some(Provided("   ")) → no warning (whitespace is blank)
+        // Same as blank alt — not meaningful content, decorative exemption applies.
         let deck = make_deck(vec![make_slide(vec![make_image_block(
             Some(AltText::Provided(Arc::from("   "))),
             true,
