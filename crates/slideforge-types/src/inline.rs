@@ -14,7 +14,7 @@ use crate::math::MathNode;
 /// An inline content node within a paragraph or bullet item.
 ///
 /// Exactly 12 variants are defined. This count is enforced by the acceptance
-/// criteria (AC-008). Bullets-layout validation scope is STORY-073.
+/// criteria (BC-3.05.001 v1.3.4 AC-005). Bullets-layout validation scope is STORY-073.
 ///
 /// The variants cover the inline formatting and semantic-annotation needs of
 /// PPTX, DOCX, HTML, and PDF output in v1.0. Additional inline types (e.g.,
