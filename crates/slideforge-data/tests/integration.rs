@@ -1218,3 +1218,109 @@ fn test_bc_1_03_004_dispatcher_routes_xlsx_bad_magic_to_e_dat_011() {
         "E-DAT-011 Display must contain the code; got: {display}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// F-P11-LOW-002: Unsupported extension — clean Display (no stutter)
+// ---------------------------------------------------------------------------
+
+/// `test_unsupported_extension_display_clean`
+///
+/// F-P11-LOW-002: When a `FileDataSource` is loaded via the dispatcher with a
+/// path that has an unsupported extension (e.g., `.txt`), the resulting
+/// `DataError` Display must be clean — no stuttered `"(unsupported extension: ...)"`.
+///
+/// Before the fix, `file.rs` emitted:
+///   `UnsupportedUri { uri: "/tmp/data.txt (unsupported extension: txt)" }`
+///
+/// The dispatcher mapped `UnsupportedUri.uri` → `DataError::UnsupportedFormat.extension`,
+/// producing the broken display:
+///   `"[E-DAT-003] unsupported format: '/tmp/data.txt (unsupported extension: txt)' — ..."`
+///
+/// After the fix, `file.rs` emits only the bare extension as the uri:
+///   `UnsupportedUri { uri: "txt" }`
+///
+/// Resulting in the clean display:
+///   `"[E-DAT-003] unsupported format: 'txt' — supported: json, csv, yaml, ..."`
+///
+/// This integration test drives the FULL production path:
+///   `FileDataSource::load` → `DataSourceError::UnsupportedUri { uri: "txt" }`
+///   → dispatcher `map_source_error` → `DataError::UnsupportedFormat { extension: "txt" }`
+///   → Display: `"[E-DAT-003] unsupported format: 'txt' — supported: ..."`
+///
+/// Traces to F-P11-LOW-002 (Pass 11 adversarial finding).
+#[test]
+fn test_unsupported_extension_display_clean() {
+    use slideforge_data::FileDataSource;
+    use std::io::Write as _;
+
+    // Create a temp file with an unsupported extension.
+    let mut tmp = tempfile::Builder::new()
+        .suffix(".txt")
+        .tempfile()
+        .expect("temp file creation must succeed");
+    tmp.write_all(b"some data").expect("write must succeed");
+    let path = tmp
+        .path()
+        .to_str()
+        .expect("temp path must be valid UTF-8")
+        .to_owned();
+
+    let sources: Vec<(Arc<str>, Box<dyn DataSource>)> = vec![(
+        Arc::from("txt_source"),
+        Box::new(FileDataSource::new(path.as_str())),
+    )];
+    let ctx = DataSourceContext::new();
+
+    let (_scope, errors) = load_all(&sources, &ctx);
+
+    assert_eq!(
+        errors.len(),
+        1,
+        "exactly one error expected for unsupported extension; got: {:?}",
+        errors
+    );
+
+    let err_code = errors[0].code();
+    assert_eq!(
+        err_code, "E-DAT-003",
+        "unsupported extension must produce E-DAT-003; got: {err_code}"
+    );
+
+    let display = errors[0].to_string();
+
+    // Must contain just the bare extension in quotes — no full path, no annotation.
+    assert!(
+        display.contains("'txt'"),
+        "Display must contain \"'txt'\" (bare extension); got: {display}"
+    );
+
+    // Must contain the supported-formats list (helpful context preserved).
+    assert!(
+        display.contains("supported: json, csv"),
+        "Display must contain the supported-formats list; got: {display}"
+    );
+
+    // Must NOT contain the stuttered annotation "(unsupported extension:".
+    assert!(
+        !display.contains("(unsupported extension:"),
+        "Display must NOT contain '(unsupported extension:' annotation (F-P11-LOW-002 stutter guard); got: {display}"
+    );
+
+    // Must NOT contain the full file path in the extension slot.
+    // (The path MAY appear elsewhere in the display — e.g., in a span — but NOT as the extension value.)
+    // The extension slot is rendered as "'<value>' —" so we check that the extension value is bare.
+    // A path contains '/' so we verify the substring between the first "'" and " —" is just the extension.
+    if let Some(start) = display.find("unsupported format: '") {
+        let after = &display[start + "unsupported format: '".len()..];
+        if let Some(end) = after.find('\'') {
+            let ext_slot = &after[..end];
+            assert!(
+                !ext_slot.contains('/'),
+                "Extension slot must not contain a path separator ('/'): extension slot is '{ext_slot}'; full display: {display}"
+            );
+        }
+    }
+
+    // Keep tmp alive until after load_all to ensure the file exists during dispatch.
+    drop(tmp);
+}

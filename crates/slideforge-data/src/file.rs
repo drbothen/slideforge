@@ -342,7 +342,13 @@ impl DataSource for FileDataSource {
                 message: format!("[{}] file not found: {path}", crate::error::E_DAT_004),
             },
             DataError::UnsupportedFormat { extension, .. } => DataSourceError::UnsupportedUri {
-                uri: format!("{effective_path_str} (unsupported extension: {extension})"),
+                // Convention: emit only the bare extension (e.g., "txt") as the uri slot.
+                // The dispatcher maps UnsupportedUri.uri → DataError::UnsupportedFormat.extension,
+                // which is rendered by the Display as "[E-DAT-003] unsupported format: 'txt' — ...".
+                // Putting the full path + annotation here would produce stuttered output:
+                // "[E-DAT-003] unsupported format: '/tmp/data.txt (unsupported extension: txt)' — ..."
+                // F-P11-LOW-002 fix.
+                uri: extension.to_string(),
             },
             // F-PASS18-MED-2 / F-PASS26-MED-1: Translate DataError::ParseError into
             // DataSourceError::ParseError without re-wrapping the boilerplate prefix.
@@ -526,6 +532,50 @@ mod tests {
             matches!(err, DataSourceError::UnsupportedUri { .. }),
             "unsupported extension must map to DataSourceError::UnsupportedUri"
         );
+    }
+
+    /// `test_unsupported_extension_uri_is_bare_extension`
+    ///
+    /// F-P11-LOW-002: The `UnsupportedUri.uri` field must contain only the bare
+    /// extension (e.g., `"txt"`), NOT the full path + annotation string
+    /// `"/tmp/data.txt (unsupported extension: txt)"`.
+    ///
+    /// When the dispatcher maps `UnsupportedUri { uri }` →
+    /// `DataError::UnsupportedFormat { extension: Arc::from(uri.as_str()) }`,
+    /// the resulting Display must read:
+    ///   `"[E-DAT-003] unsupported format: 'txt' — supported: json, csv, ..."`
+    /// NOT the stuttered form:
+    ///   `"[E-DAT-003] unsupported format: '/tmp/data.txt (unsupported extension: txt)' — ..."`
+    ///
+    /// This test drives the `DataSource::load()` trait boundary (not `load_path`)
+    /// so it exercises exactly the code path that feeds the dispatcher.
+    ///
+    /// Traces to F-P11-LOW-002 (Pass 11 adversarial finding).
+    #[test]
+    fn test_unsupported_extension_uri_is_bare_extension() {
+        let f = temp_file_with_suffix(".txt", b"data");
+        let src = loader();
+        let opts = DataSourceOptions::default();
+        let uri = f.path().to_str().unwrap();
+        let result = src.load(uri, &opts);
+        let err = result.expect_err(".txt must return DataSourceError");
+
+        match &err {
+            DataSourceError::UnsupportedUri { uri: uri_field } => {
+                // The uri slot must hold only the bare extension — not a composite string.
+                assert_eq!(
+                    uri_field.as_str(),
+                    "txt",
+                    "UnsupportedUri.uri must be the bare extension 'txt'; \
+                    got: '{uri_field}' — stutter guard: must NOT contain path or '(unsupported extension:'"
+                );
+                assert!(
+                    !uri_field.contains('('),
+                    "UnsupportedUri.uri must not contain '(' (no annotation); got: '{uri_field}'"
+                );
+            },
+            other => panic!("expected DataSourceError::UnsupportedUri, got: {other:?}"),
+        }
     }
 
     /// `test_BC_5_03_007_datasource_trait_load_json` — `DataSource::load()` happy path for JSON.

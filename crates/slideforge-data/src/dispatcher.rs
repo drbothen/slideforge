@@ -68,8 +68,8 @@ use slideforge_types::Value;
 use crate::DataError;
 use crate::context::DataSourceContext;
 use crate::error::{
-    E_DAT_001, E_DAT_002, E_DAT_003, E_DAT_004, E_DAT_006, E_DAT_007, E_DAT_008, E_DAT_009,
-    E_DAT_010, E_DAT_011, E_DAT_012, E_DAT_013, E_DAT_014, E_DAT_015,
+    E_DAT_001, E_DAT_002, E_DAT_003, E_DAT_004, E_DAT_005, E_DAT_006, E_DAT_007, E_DAT_008,
+    E_DAT_009, E_DAT_010, E_DAT_011, E_DAT_012, E_DAT_013, E_DAT_014, E_DAT_015,
 };
 
 /// Load all configured data sources, applying the offline gate.
@@ -618,7 +618,11 @@ fn strip_bracket_prefix(msg: &str) -> &str {
 ///
 /// ## Recognized codes
 ///
-/// All `E_DAT_001` through `E_DAT_015` constants from [`crate::error`] are recognized.
+/// All `E_DAT_001` through `E_DAT_015` constants from [`crate::error`] are recognized,
+/// including `E_DAT_005` (`FieldNotFound`). `E_DAT_005` is evaluator-emitted rather than
+/// parser-emitted, but including it here is forward-compatible: if a `FieldNotFound`
+/// error ever flows through a `ParseError` message, it will route correctly instead of
+/// falling back to the generic `E_DAT_003`.
 /// Unknown bracket formats (e.g., `[E-DAT-099]` or plugin-specific codes) return `None`.
 ///
 /// ## Relationship to `strip_bracket_prefix`
@@ -640,8 +644,8 @@ fn parse_e_dat_code(msg: &str) -> Option<&'static str> {
     // Each check uses format!("[{code}]") to guarantee the bracket wraps the code,
     // matching the canonical `[E-DAT-NNN]` format emitted by all built-in sources.
     let candidates: &[&'static str] = &[
-        E_DAT_001, E_DAT_002, E_DAT_003, E_DAT_004, E_DAT_006, E_DAT_007, E_DAT_008, E_DAT_009,
-        E_DAT_010, E_DAT_011, E_DAT_012, E_DAT_013, E_DAT_014, E_DAT_015,
+        E_DAT_001, E_DAT_002, E_DAT_003, E_DAT_004, E_DAT_005, E_DAT_006, E_DAT_007, E_DAT_008,
+        E_DAT_009, E_DAT_010, E_DAT_011, E_DAT_012, E_DAT_013, E_DAT_014, E_DAT_015,
     ];
     for &code in candidates {
         if msg.starts_with(&format!("[{code}]")) {
@@ -2889,6 +2893,11 @@ mod tests {
             Some(E_DAT_001)
         );
         assert_eq!(parse_e_dat_code("[E-DAT-003] parse error"), Some(E_DAT_003));
+        // E_DAT_005 (FieldNotFound) must be recognized — F-P11-LOW-001.
+        assert_eq!(
+            parse_e_dat_code("[E-DAT-005] field lookup"),
+            Some(E_DAT_005)
+        );
         assert_eq!(
             parse_e_dat_code("[E-DAT-007] xlsx empty header"),
             Some(E_DAT_007)
@@ -2925,6 +2934,48 @@ mod tests {
         assert_eq!(parse_e_dat_code(""), None);
         // Bracket code in body but NOT at start: must return None.
         assert_eq!(parse_e_dat_code("prefix text [E-DAT-007] body"), None);
+    }
+
+    // ---------------------------------------------------------------------------
+    // F-P11-LOW-001: E_DAT_005 (FieldNotFound) must be recognized by parse_e_dat_code
+    // ---------------------------------------------------------------------------
+
+    /// `test_parse_e_dat_005_field_not_found_recognized`
+    ///
+    /// F-P11-LOW-001: `parse_e_dat_code` previously omitted `E_DAT_005` from the
+    /// candidates array while the docstring claimed "All E_DAT_001 through E_DAT_015
+    /// recognized." This test is the load-bearing guard: if E_DAT_005 is removed
+    /// from the candidates array, this test fails.
+    ///
+    /// `E_DAT_005` is evaluator-emitted (FieldNotFound) rather than parser-emitted,
+    /// but including it is forward-compatible: any message that embeds [E-DAT-005]
+    /// will route to the correct constant rather than falling back to the generic
+    /// E_DAT_003.
+    #[test]
+    fn test_parse_e_dat_005_field_not_found_recognized() {
+        // Representative FieldNotFound message format.
+        assert_eq!(
+            parse_e_dat_code("[E-DAT-005] field not found: 'price' in source 'sales'"),
+            Some(E_DAT_005),
+            "E_DAT_005 must be recognized by parse_e_dat_code (F-P11-LOW-001)"
+        );
+        // Minimal bracket-only form.
+        assert_eq!(
+            parse_e_dat_code("[E-DAT-005] field lookup"),
+            Some(E_DAT_005),
+            "E_DAT_005 minimal form must be recognized"
+        );
+        // Verify it does NOT accidentally match a neighbouring code.
+        assert_ne!(
+            parse_e_dat_code("[E-DAT-005] field lookup"),
+            Some(E_DAT_004),
+            "E_DAT_005 must not match E_DAT_004"
+        );
+        assert_ne!(
+            parse_e_dat_code("[E-DAT-005] field lookup"),
+            Some(E_DAT_006),
+            "E_DAT_005 must not match E_DAT_006"
+        );
     }
 
     // ---------------------------------------------------------------------------
