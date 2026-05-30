@@ -662,10 +662,16 @@ fn strip_bracket_prefix(msg: &str) -> &str {
 ///   messages do not carry this code in production.
 /// - `E_DAT_014` — retired by F-P13-HIGH-002; `SQLite` extension errors now route through
 ///   `DataSourceError::UnsupportedUri` (not `ParseError`). Falls back to `E_DAT_003`.
+/// - `E_DAT_006` (`SsrfBlocked`) — F-P17-LOW-001: SSRF parse errors are intercepted by the
+///   outer `if inner_msg.starts_with(&format!("[{E_DAT_006}]"))` branch in `map_source_error`
+///   (see line ~416). That branch routes them to `DataError::SsrfBlocked` BEFORE the else
+///   branch that calls `parse_e_dat_code`. Therefore, when `parse_e_dat_code` is called,
+///   `inner_msg` CANNOT start with `[E-DAT-006]`. Including it in candidates would be dead
+///   code in every production path.
 /// - `E_DAT_015` (`UnspecifiedSourceError`) — dispatcher catch-all; a `ParseError`
 ///   message carrying `[E-DAT-015]` must not produce `DataError::ParseError { code: E_DAT_015 }`.
 ///
-/// Recognized: `E_DAT_003`, `E_DAT_006` through `E_DAT_013`.
+/// Recognized: `E_DAT_003`, `E_DAT_007` through `E_DAT_013`.
 ///
 /// Unknown bracket formats (e.g., `[E-DAT-099]` or plugin-specific codes) return `None`.
 ///
@@ -682,13 +688,18 @@ fn parse_e_dat_code(msg: &str) -> Option<&'static str> {
     // Recognize only parse-error-relevant E_DAT_NNN constants.
     // Excluded: E_DAT_001, E_DAT_002 (HTTP/network — IoError arm handles them),
     //           E_DAT_004, E_DAT_005, E_DAT_015 (non-ParseError variants — F-P12-MED-002),
-    //           E_DAT_014 (retired — F-P13-HIGH-002).
+    //           E_DAT_014 (retired — F-P13-HIGH-002),
+    //           E_DAT_006 (SSRF — intercepted by outer branch in map_source_error before
+    //                      parse_e_dat_code is called; see line ~416 — F-P17-LOW-001).
     //
     // Each check uses format!("[{code}]") to guarantee the bracket wraps the code,
     // matching the canonical `[E-DAT-NNN]` format emitted by all built-in sources.
+    //
+    // E_DAT_006 intentionally excluded — SSRF parse errors are routed by the outer branch
+    // in map_source_error (see line ~416). When this function is called, inner_msg CANNOT
+    // start with [E-DAT-006]; including it here would be dead code in every production path.
     let candidates: &[&'static str] = &[
-        E_DAT_003, E_DAT_006, E_DAT_007, E_DAT_008, E_DAT_009, E_DAT_010, E_DAT_011, E_DAT_012,
-        E_DAT_013,
+        E_DAT_003, E_DAT_007, E_DAT_008, E_DAT_009, E_DAT_010, E_DAT_011, E_DAT_012, E_DAT_013,
     ];
     for &code in candidates {
         if msg.starts_with(&format!("[{code}]")) {
@@ -3349,6 +3360,15 @@ mod tests {
             None,
             "E_DAT_005 must not be recognized by parse_e_dat_code (F-P12-MED-002)"
         );
+        // E_DAT_006 (SsrfBlocked) must NOT be recognized — F-P17-LOW-001.
+        // SSRF parse errors are intercepted by the outer branch in map_source_error (line ~416)
+        // before parse_e_dat_code is ever called; it is dead code in every production path.
+        assert_eq!(
+            parse_e_dat_code("[E-DAT-006] ssrf blocked: 169.254.169.254"),
+            None,
+            "E_DAT_006 must not be recognized by parse_e_dat_code (F-P17-LOW-001: SSRF parse \
+             errors are intercepted upstream by the outer branch before this helper is called)"
+        );
         assert_eq!(
             parse_e_dat_code("[E-DAT-007] xlsx empty header"),
             Some(E_DAT_007)
@@ -3479,10 +3499,14 @@ mod tests {
             Some(E_DAT_003),
             "E_DAT_003 must still be recognized after F-P12-MED-002/F-P15-MED-002 restriction"
         );
+        // E_DAT_006 (SsrfBlocked) must NOT be recognized — F-P17-LOW-001.
+        // SSRF parse errors are intercepted by the outer branch in map_source_error (line ~416)
+        // before parse_e_dat_code is called; including it in candidates is dead code.
         assert_eq!(
             parse_e_dat_code("[E-DAT-006] ssrf blocked"),
-            Some(E_DAT_006),
-            "E_DAT_006 must still be recognized after F-P12-MED-002/F-P15-MED-002 restriction"
+            None,
+            "E_DAT_006 must not be recognized by parse_e_dat_code (F-P17-LOW-001: intercepted \
+             upstream by the SSRF branch before parse_e_dat_code is ever reached)"
         );
         // E_DAT_014 is now also retired (F-P13-HIGH-002) and must return None.
         assert_eq!(
