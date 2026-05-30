@@ -119,11 +119,42 @@ pub trait DataSource: Send + Sync {
     /// source file. Implementations should parse the URI, fetch the data,
     /// and return the resolved value.
     ///
+    /// When `uri` is empty, implementations should use their own internally
+    /// configured address (e.g., the URL or path baked in at construction time).
+    ///
     /// # Errors
     ///
     /// Returns [`DataSourceError`] when the URI cannot be resolved, the data
     /// cannot be parsed, or an I/O error occurs.
     fn load(&self, uri: &str, opts: &DataSourceOptions) -> Result<Value, DataSourceError>;
+
+    /// Returns `true` if this source would make a network request that the
+    /// `--offline` flag should suppress.
+    ///
+    /// The dispatcher calls this method to determine whether to skip a source
+    /// when `DataSourceContext::offline` is `true`. Sources that read from the
+    /// local filesystem (JSON, CSV, YAML, TOML, XLSX, `SQLite`) return `false`
+    /// (the default) and are always loaded. Sources that require network access
+    /// (HTTP/HTTPS) return `true` and are silently skipped in offline mode.
+    ///
+    /// Third-party plugin authors: override this method and return `true` for
+    /// any source that would open a TCP connection or otherwise depend on
+    /// network availability.
+    ///
+    /// ## Coordination protocol
+    ///
+    /// This method is the canonical offline-capability declaration for the
+    /// plugin-first architecture. The dispatcher uses `supports_offline()` as
+    /// its sole gate — no out-of-band boolean flags are accepted in the sources
+    /// slice. This ensures that a third-party `DataSource` implementation can
+    /// participate in offline-mode coordination without any changes to the
+    /// dispatcher or the calling code.
+    ///
+    /// Traces to BC-1.03.004 AC-012 + Architecture Compliance Rules.
+    #[must_use]
+    fn supports_offline(&self) -> bool {
+        false
+    }
 }
 
 #[cfg(test)]

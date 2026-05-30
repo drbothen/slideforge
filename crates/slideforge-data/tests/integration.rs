@@ -48,11 +48,11 @@ use slideforge_types::Value;
 //   - Increments an Arc<AtomicUsize> call counter on each `load()` call
 //     (used in AC-007 watch-mode tests to assert zero calls when offline)
 //
-// The `offline_capable` flag (passed separately in the source tuple) is what
-// the dispatcher uses to decide whether to skip this source. The MockHttpSource
-// itself always returns Ok if called — so if the dispatcher incorrectly calls
-// it when offline, the test will fail because the scope WILL contain the entry
-// (violating the "absent from scope" assertion).
+// MockHttpSource overrides `supports_offline()` to return `true`, which is what
+// the dispatcher calls to decide whether to skip this source in offline mode.
+// The MockHttpSource itself always returns Ok if called — so if the dispatcher
+// incorrectly calls it when offline, the test will fail because the scope WILL
+// contain the entry (violating the "absent from scope" assertion).
 // ---------------------------------------------------------------------------
 
 /// A mock DataSource that simulates an HTTP source.
@@ -99,6 +99,11 @@ impl DataSource for MockHttpSource {
     fn load(&self, _uri: &str, _opts: &DataSourceOptions) -> Result<Value, DataSourceError> {
         self.call_count.fetch_add(1, Ordering::SeqCst);
         Ok(self.value.clone())
+    }
+
+    /// HTTP mock sources declare themselves as network-dependent.
+    fn supports_offline(&self) -> bool {
+        true
     }
 }
 
@@ -165,7 +170,7 @@ impl DataSource for MockFailSource {
 
 /// `test_BC_1_03_004_offline_skips_http_source`
 ///
-/// AC-001: With one MockHttpSource (offline_capable=true) and ctx.offline=true,
+/// AC-001: With one MockHttpSource (supports_offline=true) and ctx.offline=true,
 /// the dispatcher must return an EMPTY scope map and the mock's load() must
 /// NOT be called (zero call_count).
 ///
@@ -176,11 +181,8 @@ fn test_bc_1_03_004_offline_skips_http_source() {
     let call_count = Arc::new(AtomicUsize::new(0));
     let mock_http =
         MockHttpSource::with_counter("metrics", Value::Int(42), Arc::clone(&call_count));
-    let sources: Vec<(Arc<str>, Box<dyn DataSource>, bool)> = vec![(
-        Arc::from("metrics"),
-        Box::new(mock_http),
-        true, // offline_capable = true (HTTP source)
-    )];
+    let sources: Vec<(Arc<str>, Box<dyn DataSource>)> =
+        vec![(Arc::from("metrics"), Box::new(mock_http))];
     let ctx = DataSourceContext::new().with_offline(true);
 
     let (scope, errors) = load_all(&sources, &ctx);
@@ -213,8 +215,8 @@ fn test_bc_1_03_004_offline_skips_http_source() {
 
 /// `test_BC_1_03_004_offline_loads_file_sources`
 ///
-/// AC-003: With a file source (offline_capable=false) and an HTTP source
-/// (offline_capable=true), ctx.offline=true must load the file source and
+/// AC-003: With a file source (supports_offline=false) and an HTTP source
+/// (supports_offline=true), ctx.offline=true must load the file source and
 /// skip the HTTP source.
 ///
 /// Traces to BC-1.03.004 invariant 2 + postcondition 4.
@@ -223,11 +225,10 @@ fn test_bc_1_03_004_offline_loads_file_sources() {
     let file_value = Value::Int(100);
     let http_call_count = Arc::new(AtomicUsize::new(0));
 
-    let sources: Vec<(Arc<str>, Box<dyn DataSource>, bool)> = vec![
+    let sources: Vec<(Arc<str>, Box<dyn DataSource>)> = vec![
         (
             Arc::from("report"),
             Box::new(MockFileSource::new("report", file_value.clone())),
-            false, // offline_capable = false (file source — always loaded)
         ),
         (
             Arc::from("live_data"),
@@ -236,7 +237,6 @@ fn test_bc_1_03_004_offline_loads_file_sources() {
                 Value::Int(999),
                 Arc::clone(&http_call_count),
             )),
-            true, // offline_capable = true (HTTP source — skipped)
         ),
     ];
     let ctx = DataSourceContext::new().with_offline(true);
@@ -286,16 +286,14 @@ fn test_bc_1_03_004_online_loads_all_sources() {
     let file_value = Value::Int(10);
     let http_value = Value::Int(20);
 
-    let sources: Vec<(Arc<str>, Box<dyn DataSource>, bool)> = vec![
+    let sources: Vec<(Arc<str>, Box<dyn DataSource>)> = vec![
         (
             Arc::from("static"),
             Box::new(MockFileSource::new("static", file_value.clone())),
-            false,
         ),
         (
             Arc::from("live"),
             Box::new(MockHttpSource::new("live", http_value.clone())),
-            true,
         ),
     ];
     let ctx = DataSourceContext::new(); // offline = false (default)
@@ -325,7 +323,7 @@ fn test_bc_1_03_004_online_loads_all_sources() {
 /// `test_BC_1_03_004_offline_zero_http_sources`
 ///
 /// AC-004 / EC-001: When ctx.offline=true and there are ONLY file sources
-/// (none are offline_capable), the behavior is identical to offline=false.
+/// (none return supports_offline=true), the behavior is identical to offline=false.
 /// All file sources are loaded normally.
 ///
 /// Traces to BC-1.03.004 edge case EC-001.
@@ -334,16 +332,14 @@ fn test_bc_1_03_004_offline_zero_http_sources() {
     let v1 = Value::Int(1);
     let v2 = Value::Int(2);
 
-    let sources: Vec<(Arc<str>, Box<dyn DataSource>, bool)> = vec![
+    let sources: Vec<(Arc<str>, Box<dyn DataSource>)> = vec![
         (
             Arc::from("data_a"),
             Box::new(MockFileSource::new("data_a", v1.clone())),
-            false,
         ),
         (
             Arc::from("data_b"),
             Box::new(MockFileSource::new("data_b", v2.clone())),
-            false,
         ),
     ];
     let ctx = DataSourceContext::new().with_offline(true);
@@ -380,16 +376,14 @@ fn test_bc_1_03_004_offline_zero_http_sources() {
 fn test_bc_1_03_004_offline_with_file_and_http() {
     let file_value = Value::Int(55);
 
-    let sources: Vec<(Arc<str>, Box<dyn DataSource>, bool)> = vec![
+    let sources: Vec<(Arc<str>, Box<dyn DataSource>)> = vec![
         (
             Arc::from("local_config"),
             Box::new(MockFileSource::new("local_config", file_value.clone())),
-            false,
         ),
         (
             Arc::from("remote_api"),
             Box::new(MockHttpSource::new("remote_api", Value::Int(999))),
-            true,
         ),
     ];
     let ctx = DataSourceContext::new().with_offline(true);
@@ -435,10 +429,9 @@ fn test_bc_1_03_004_offline_with_file_and_http() {
 /// Traces to BC-1.03.004 edge case EC-002.
 #[test]
 fn test_bc_1_03_004_offline_unreferenced_http_source() {
-    let sources: Vec<(Arc<str>, Box<dyn DataSource>, bool)> = vec![(
+    let sources: Vec<(Arc<str>, Box<dyn DataSource>)> = vec![(
         Arc::from("unused_http"),
         Box::new(MockHttpSource::new("unused_http", Value::Int(0))),
-        true, // offline_capable
     )];
     let ctx = DataSourceContext::new().with_offline(true);
 
@@ -470,13 +463,12 @@ fn test_bc_1_03_004_offline_unreferenced_http_source() {
 #[test]
 fn test_bc_1_03_004_offline_does_not_silently_substitute_empty_value() {
     let source_name: Arc<str> = Arc::from("http_source");
-    let sources: Vec<(Arc<str>, Box<dyn DataSource>, bool)> = vec![(
+    let sources: Vec<(Arc<str>, Box<dyn DataSource>)> = vec![(
         Arc::clone(&source_name),
         Box::new(MockHttpSource::new(
             "http_source",
             Value::Map(Default::default()),
         )),
-        true,
     )];
     let ctx = DataSourceContext::new().with_offline(true);
 
@@ -511,14 +503,13 @@ fn test_bc_1_03_004_offline_watch_mode_repeated_dispatch() {
 
     for invocation in 1..=3_usize {
         // Rebuild sources on each iteration (as watch mode would recreate them).
-        let sources: Vec<(Arc<str>, Box<dyn DataSource>, bool)> = vec![(
+        let sources: Vec<(Arc<str>, Box<dyn DataSource>)> = vec![(
             Arc::from("live_feed"),
             Box::new(MockHttpSource::with_counter(
                 "live_feed",
                 Value::Int(invocation as i64),
                 Arc::clone(&http_call_count),
             )),
-            true,
         )];
 
         let (scope, errors) = load_all(&sources, &ctx);
@@ -558,21 +549,18 @@ fn test_bc_1_03_004_offline_watch_mode_repeated_dispatch() {
 fn test_bc_1_03_004_error_code_dat_004_file_not_found() {
     use slideforge_data::FileDataSource;
 
-    // Use a path that cannot exist. The source is NOT offline_capable (file source).
+    // Use a path that cannot exist. FileDataSource::new() takes the path at
+    // construction time; the dispatcher calls load("", opts) and the source
+    // falls back to self.path, which resolves to the missing path → E-DAT-004.
     let missing_path = "/STORY-021-red-gate-guaranteed-missing-12345/data.json";
-    let sources: Vec<(Arc<str>, Box<dyn DataSource>, bool)> = vec![(
+    let sources: Vec<(Arc<str>, Box<dyn DataSource>)> = vec![(
         Arc::from("missing"),
-        Box::new(FileDataSource),
-        false, // file source — always attempted
+        Box::new(FileDataSource::new(missing_path)),
     )];
     let ctx = DataSourceContext::new();
 
-    // We call the real FileDataSource via the dispatcher, using the missing path
-    // as the URI. The dispatcher must call source.load(name.as_ref(), opts)
-    // and collect the resulting error.
-    //
-    // NOTE: The dispatcher stub currently panics with todo!(). This test will
-    // fail with the Red Gate panic until the implementer bodies load_all.
+    // The dispatcher calls load("", opts); FileDataSource falls back to self.path
+    // (the missing path baked in at construction), which triggers E-DAT-004.
     let (scope, errors) = load_all(&sources, &ctx);
 
     // The scope must not contain the missing source.
@@ -594,9 +582,6 @@ fn test_bc_1_03_004_error_code_dat_004_file_not_found() {
         err_display.contains("E-DAT-004"),
         "file-not-found error must contain 'E-DAT-004'; got: {err_display}"
     );
-
-    // Drop to silence the unused-variable warning from the dispatcher path.
-    let _ = missing_path;
 }
 
 // ---------------------------------------------------------------------------
@@ -623,10 +608,10 @@ fn test_bc_1_03_004_error_code_dat_006_ssrf_blocked() {
         domains: Some(vec![Arc::from("allowed-only.example.com")]),
     });
 
-    // NOT offline_capable for this test — we want the dispatcher to ATTEMPT the
-    // load so we get the SSRF error. (offline_capable=false bypasses the gate.)
-    let sources: Vec<(Arc<str>, Box<dyn DataSource>, bool)> =
-        vec![(Arc::from("imds"), Box::new(http_src), false)];
+    // HttpDataSource::supports_offline() returns true, but ctx.offline is false,
+    // so the dispatcher WILL attempt the load and collect the SSRF error.
+    let sources: Vec<(Arc<str>, Box<dyn DataSource>)> =
+        vec![(Arc::from("imds"), Box::new(http_src))];
     let ctx = DataSourceContext::new();
 
     // Red Gate: panics on todo!() until implemented.
@@ -671,16 +656,14 @@ fn test_bc_1_03_004_error_code_dat_006_ssrf_blocked() {
 #[test]
 fn test_bc_1_03_004_partial_load_continues_on_error() {
     let ok_value = Value::Int(77);
-    let sources: Vec<(Arc<str>, Box<dyn DataSource>, bool)> = vec![
+    let sources: Vec<(Arc<str>, Box<dyn DataSource>)> = vec![
         (
             Arc::from("good_source"),
             Box::new(MockFileSource::new("good_source", ok_value.clone())),
-            false,
         ),
         (
             Arc::from("bad_source"),
             Box::new(MockFailSource::new("bad_source")),
-            false,
         ),
     ];
     let ctx = DataSourceContext::new();
@@ -733,7 +716,7 @@ fn test_bc_1_03_004_partial_load_continues_on_error() {
 /// Traces to BC-1.03.004 / story-spec §Edge Cases EC-006.
 #[test]
 fn test_bc_1_03_004_zero_sources_returns_empty_scope_zero_errors() {
-    let sources: Vec<(Arc<str>, Box<dyn DataSource>, bool)> = vec![];
+    let sources: Vec<(Arc<str>, Box<dyn DataSource>)> = vec![];
     let ctx = DataSourceContext::new();
 
     // Red Gate: panics on todo!() until implemented.
@@ -748,5 +731,82 @@ fn test_bc_1_03_004_zero_sources_returns_empty_scope_zero_errors() {
         errors.is_empty(),
         "empty sources must produce zero errors; got: {:?}",
         errors
+    );
+}
+
+// ---------------------------------------------------------------------------
+// AC-003 / TD-VSDD-059: Real FileDataSource via dispatcher — production code path.
+//
+// This test verifies that the dispatcher can successfully load a real
+// FileDataSource with a real file. Without this test, the production code
+// path was untested — the only FileDataSource test was the missing-path test
+// which exercised only the error path.
+// ---------------------------------------------------------------------------
+
+/// `test_bc_1_03_004_dispatcher_loads_real_file_source`
+///
+/// AC-003 / TD-VSDD-059: With a real `FileDataSource` pointing to a temporary
+/// JSON file, the dispatcher must successfully load the file and return the
+/// parsed value in the scope map.
+///
+/// This test exercises the FULL dispatcher → FileDataSource → parser production
+/// code path and proves the code is not dead. The file is written to disk,
+/// dispatched, and the returned value is verified against the written content.
+///
+/// Without this test, the only FileDataSource integration test was the
+/// missing-path error test, leaving the success path untested — a violation of
+/// TD-VSDD-059 (paper-fix detection: new tests must exercise real production paths).
+///
+/// Traces to AC-003 (file sources always loaded).
+#[test]
+fn test_bc_1_03_004_dispatcher_loads_real_file_source() {
+    use slideforge_data::FileDataSource;
+    use std::io::Write as _;
+
+    // Write a real JSON file to a temp location.
+    let mut tmp = tempfile::Builder::new()
+        .suffix(".json")
+        .tempfile()
+        .expect("temp file creation must succeed");
+    tmp.write_all(br#"{"answer": 42, "label": "test-data"}"#)
+        .expect("write must succeed");
+    let path = tmp.path().to_str().expect("temp path must be valid UTF-8");
+
+    // Construct a real FileDataSource pointing to the temp file.
+    let sources: Vec<(Arc<str>, Box<dyn DataSource>)> =
+        vec![(Arc::from("real_file"), Box::new(FileDataSource::new(path)))];
+    let ctx = DataSourceContext::new();
+
+    let (scope, errors) = load_all(&sources, &ctx);
+
+    // No errors — the file exists and is valid JSON.
+    assert!(
+        errors.is_empty(),
+        "real file must load without errors; got: {:?}",
+        errors
+    );
+
+    // The scope must contain the data under the registered name.
+    assert!(
+        scope.contains_key(&Arc::from("real_file")),
+        "'real_file' must be present in scope after successful load"
+    );
+
+    // The parsed value must be a map with 'answer' = Int(42).
+    let value = scope
+        .get(&Arc::from("real_file"))
+        .expect("scope entry must exist");
+    let map = value.as_map().expect("JSON object must parse as map");
+    assert_eq!(
+        map.get("answer"),
+        Some(&slideforge_types::Value::Int(42)),
+        "'answer' field must be Int(42); got: {:?}",
+        map.get("answer")
+    );
+    assert_eq!(
+        map.get("label"),
+        Some(&slideforge_types::Value::Str(Arc::from("test-data"))),
+        "'label' field must be Str('test-data'); got: {:?}",
+        map.get("label")
     );
 }

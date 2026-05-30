@@ -180,24 +180,22 @@ impl HttpDataSource {
         self.allowlist = config;
         self
     }
-
-    /// Returns `true` — HTTP sources should be skipped in offline mode.
-    ///
-    /// This method is a capability query for build systems that want to skip
-    /// network-dependent data sources during offline builds (e.g., CI without
-    /// outbound internet access). When `true`, the offline gate in
-    /// `DataSourceContext` will skip this source rather than failing the build.
-    ///
-    /// Traces to BC-1.03.002 edge case EC-005 (AC-012).
-    #[must_use]
-    pub fn supports_offline(&self) -> bool {
-        true
-    }
 }
 
 impl DataSource for HttpDataSource {
     fn id(&self) -> &'static str {
         "http"
+    }
+
+    /// Returns `true` — HTTP sources should be skipped in offline mode.
+    ///
+    /// Overrides the `DataSource` trait default (`false`) to declare that this
+    /// source makes network requests. The dispatcher calls this method to decide
+    /// whether to skip the source when `DataSourceContext::offline` is `true`.
+    ///
+    /// Traces to BC-1.03.002 edge case EC-005 (AC-012).
+    fn supports_offline(&self) -> bool {
+        true
     }
 
     /// Fetch data from the HTTP/HTTPS URL and return the parsed [`Value`].

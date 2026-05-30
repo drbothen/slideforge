@@ -51,8 +51,16 @@ use crate::xlsx::XlsxDataSource;
 /// - `.sqlite` / `.sqlite3` / `.db` → [`crate::sqlite::SqliteDataSource`] (bundled `SQLite`)
 ///   For `SQLite`, the `uri` field is used as the path per the plugin interface convention.
 ///   A query string must be provided via `DataSourceOptions` or the DSL `query:` directive.
-#[derive(Debug, Default)]
-pub struct FileDataSource;
+#[derive(Debug)]
+pub struct FileDataSource {
+    /// The file path baked in at construction time.
+    ///
+    /// When `DataSource::load()` is called with an empty `uri`, this path is used
+    /// as the effective file path. When `load()` is called with a non-empty `uri`,
+    /// the `uri` overrides this field (allows the dispatcher to call `load("", opts)`
+    /// and have each source resolve its own pre-configured address).
+    path: Arc<str>,
+}
 
 /// Lexically normalize a path by resolving `..` and `.` components.
 ///
@@ -91,10 +99,22 @@ fn normalize_path(path: &Path) -> PathBuf {
 }
 
 impl FileDataSource {
-    /// Construct a new [`FileDataSource`] plugin instance.
+    /// Construct a new [`FileDataSource`] with the given file path.
+    ///
+    /// The `path` is baked in at construction time. When the dispatcher calls
+    /// `DataSource::load("", opts)` (empty URI), the source uses this path.
+    /// When `load(uri, opts)` is called with a non-empty URI, the URI overrides
+    /// the baked-in path (enabling the evaluator to override the path at call time).
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use slideforge_data::FileDataSource;
+    /// let src = FileDataSource::new("data/sales.json");
+    /// ```
     #[must_use]
-    pub fn new() -> Self {
-        FileDataSource
+    pub fn new(path: impl Into<Arc<str>>) -> Self {
+        FileDataSource { path: path.into() }
     }
 
     /// Load a file from a path, detecting format by extension, and return the parsed [`Value`].
@@ -272,42 +292,39 @@ impl DataSource for FileDataSource {
     /// directive) MUST use [`FileDataSource::load_path`] directly with the
     /// project root as `base_dir`.
     ///
-    /// ## Empty URI
+    /// ## URI resolution
     ///
-    /// When `uri` is empty (e.g., when the dispatcher calls this source with an
-    /// empty placeholder URI and the file path is configured at a higher layer),
-    /// this method returns `DataSourceError::IoError` with `[E-DAT-004]` in the
-    /// message. This signals "no file path was provided" and is the same error
-    /// code as file-not-found, allowing callers to surface a coherent diagnostic.
+    /// When `uri` is non-empty it is used as the file path directly (override).
+    /// When `uri` is empty the source falls back to `self.path`, which is the
+    /// path baked in at construction time via [`FileDataSource::new`]. This
+    /// matches the convention used by `HttpDataSource` (`self.url` fallback) and
+    /// `XlsxDataSource` / `SqliteDataSource` (`self.path` fallback), so the
+    /// dispatcher can uniformly call `load("", opts)` on all source types and
+    /// have each resolve its own pre-configured address.
     ///
     // `_opts` is intentionally ignored: local file formats (JSON, CSV, YAML, TOML) have no
     // concept of timeout, auth token, or query filter at the DataSource trait boundary.
     // File-based sources MAY silently ignore options that have no semantic meaning for their
     // format (see `DataSourceOptions` rustdoc convention, F-PASS21-LOW-1).
     fn load(&self, uri: &str, _opts: &DataSourceOptions) -> Result<Value, DataSourceError> {
-        // Guard: empty URI means no file path was provided. Return E-DAT-004
-        // (file-not-found) so the dispatcher can surface a coherent error code.
-        // This branch is taken when the dispatcher calls load("", opts) as a
-        // placeholder invocation — real evaluator code always provides the path.
-        if uri.is_empty() {
-            return Err(DataSourceError::IoError {
-                uri: String::new(),
-                message: format!(
-                    "[{}] file not found: (no file path provided — uri is empty)",
-                    crate::error::E_DAT_004
-                ),
-            });
-        }
-        let path = Path::new(uri);
+        // Use uri as the primary path; fall back to self.path when uri is empty.
+        // This mirrors HttpDataSource::load() which falls back to self.url when uri is empty,
+        // ensuring the dispatcher's uniform `load("", opts)` call works for all source types.
+        let effective_path_str: &str = if uri.is_empty() {
+            self.path.as_ref()
+        } else {
+            uri
+        };
+        let path = Path::new(effective_path_str);
         self.load_path(path, None).map_err(|e| match e {
             DataError::FileNotFound { path, .. } => DataSourceError::IoError {
-                uri: uri.to_owned(),
+                uri: effective_path_str.to_owned(),
                 // FileNotFound: construct message manually so the [E-DAT-004] bracket code
                 // is explicit without the Display's "I/O error reading" boilerplate.
                 message: format!("[{}] file not found: {path}", crate::error::E_DAT_004),
             },
             DataError::UnsupportedFormat { extension, .. } => DataSourceError::UnsupportedUri {
-                uri: format!("{uri} (unsupported extension: {extension})"),
+                uri: format!("{effective_path_str} (unsupported extension: {extension})"),
             },
             // F-PASS18-MED-2 / F-PASS26-MED-1: Translate DataError::ParseError into
             // DataSourceError::ParseError without re-wrapping the boilerplate prefix.
@@ -321,7 +338,7 @@ impl DataSource for FileDataSource {
             // "[{code}] {reason}" as the DataSourceError message. The bracket code is preserved
             // (satisfying F-PASS18-MED-2) and no boilerplate prefix is duplicated (F-PASS26-MED-1).
             DataError::ParseError { code, reason, .. } => DataSourceError::ParseError {
-                uri: uri.to_owned(),
+                uri: effective_path_str.to_owned(),
                 message: format!("[{code}] {reason}"),
             },
             // F-PASS18-MED-1: use err.to_string() for IoError ([E-DAT-004]) and
@@ -329,7 +346,7 @@ impl DataSource for FileDataSource {
             // The catch-all also uses err.to_string(), which always includes the bracket code
             // from the DataError Display format for any remaining variants.
             err => DataSourceError::IoError {
-                uri: uri.to_owned(),
+                uri: effective_path_str.to_owned(),
                 message: err.to_string(),
             },
         })
@@ -347,7 +364,10 @@ mod tests {
     use super::*;
 
     fn loader() -> FileDataSource {
-        FileDataSource::new()
+        // Unit tests that use `loader()` always call `load_path()` directly or
+        // call `load(uri, opts)` with an explicit URI — they never rely on
+        // self.path. An empty string is fine here.
+        FileDataSource::new("")
     }
 
     /// `test_BC_5_03_007_file_not_found` — non-existent path → `DataError::FileNotFound` with E-DAT-004.

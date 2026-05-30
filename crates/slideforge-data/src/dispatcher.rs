@@ -2,25 +2,22 @@
 //!
 //! STORY-021 / BC-1.03.004.
 //!
-//! # Design: offline-capability flag
+//! # Design: trait-method offline gate
 //!
-//! The [`load_all`] function receives a per-source `offline_capable` boolean alongside
-//! the source. This boolean signals that the source should be skipped when
-//! `ctx.offline == true`. File-based sources pass `false`; HTTP/HTTPS sources pass `true`.
+//! The [`load_all`] function calls `source.supports_offline()` on each source to
+//! determine whether to skip it when `ctx.offline == true`. This is the coordination
+//! protocol mandated by the story spec and the plugin-first architecture principle:
 //!
-//! This design was chosen over adding a `supports_offline()` method to the
-//! `DataSource` trait (Option A in the original stub) because:
-//! - No trait-signature change in `slideforge-plugin-api` — backward-compatible with all
-//!   existing implementors, third-party and built-in.
-//! - The offline decision is a dispatcher-level policy concern, not a plugin concern.
-//!   Plugins describe capabilities (via the boolean); the dispatcher enforces policy.
-//! - `HttpDataSource` already has a concrete `supports_offline()` method (added in
-//!   STORY-019). Callers that build the sources slice simply call `src.supports_offline()`
-//!   to populate the boolean, keeping the interface ergonomic without touching the trait.
+//! > "All functionality goes through plugin traits defined in `slideforge-plugin-api`.
+//! > If a bundled plugin needs to bypass the trait API, the API is wrong and must be fixed."
+//!
+//! `DataSource::supports_offline()` defaults to `false` (file-like), so all existing
+//! implementors are backward-compatible without any changes. `HttpDataSource` overrides
+//! to `true`. Third-party plugin authors override to `true` for any network-dependent source.
 //!
 //! # Offline gate semantics
 //!
-//! When `ctx.offline == true` and a source's `offline_capable == true`:
+//! When `ctx.offline == true` and `source.supports_offline() == true`:
 //! - The source is skipped silently.
 //! - The source's data name is NOT added to the scope map.
 //! - No error is emitted for the skip.
@@ -76,14 +73,14 @@ use crate::error::{E_DAT_002, E_DAT_003, E_DAT_004, E_DAT_006};
 ///
 /// # Parameters
 ///
-/// - `sources` — name-source-capability triples: `(data_name, source, offline_capable)`.
-///   `offline_capable` is `true` for HTTP/HTTPS sources (should be skipped when
-///   `ctx.offline == true`) and `false` for file-based sources (always loaded).
+/// - `sources` — name-source pairs: `(data_name, source)`. Each source declares
+///   its own offline capability via [`DataSource::supports_offline`]. This is the
+///   canonical coordination protocol — no out-of-band boolean flags are accepted.
 /// - `ctx` — the evaluation context carrying the offline flag and SSRF allowlist.
 ///
 /// # Offline gate
 ///
-/// For each source where `offline_capable == true` AND `ctx.offline == true`,
+/// For each source where `source.supports_offline() == true` AND `ctx.offline == true`,
 /// the source is skipped: no network request is made, and the source's data
 /// name is absent from the returned scope.
 ///
@@ -99,7 +96,7 @@ use crate::error::{E_DAT_002, E_DAT_003, E_DAT_004, E_DAT_006};
 /// decision (abort-in-strict-mode vs. continue-in-warn-mode).
 #[must_use]
 pub fn load_all(
-    sources: &[(Arc<str>, Box<dyn DataSource>, bool)],
+    sources: &[(Arc<str>, Box<dyn DataSource>)],
     ctx: &DataSourceContext,
 ) -> (IndexMap<Arc<str>, Value>, Vec<DataError>) {
     let mut scope: IndexMap<Arc<str>, Value> = IndexMap::new();
@@ -107,11 +104,12 @@ pub fn load_all(
 
     let opts = DataSourceOptions::default();
 
-    for (name, source, offline_capable) in sources {
+    for (name, source) in sources {
         // Offline gate (BC-1.03.004 postcondition 1 + 2 + invariant 1):
         // Skip network-capable sources silently when in offline mode.
+        // `supports_offline()` is the canonical trait-method coordination protocol.
         // The source's data name is NOT added to scope — no empty-value substitution.
-        if ctx.offline && *offline_capable {
+        if ctx.offline && source.supports_offline() {
             continue;
         }
 
@@ -119,10 +117,10 @@ pub fn load_all(
         // address:
         // - `HttpDataSource`: when `uri` is empty it falls back to `self.url`
         //   (the URL baked in at construction time from the `@data` directive).
-        // - `FileDataSource`: when `uri` is empty it returns a `FileNotFound` error
-        //   (E-DAT-004), signalling that no path was provided at call time. In real
-        //   evaluator usage the evaluator constructs the source with the path; the
-        //   dispatcher's job is only to trigger loading.
+        // - `FileDataSource`: when `uri` is empty it falls back to `self.path`
+        //   (the path baked in at construction time via `FileDataSource::new(path)`).
+        // - `XlsxDataSource` / `SqliteDataSource`: both have an internal path/query
+        //   baked in at construction; `load("", opts)` uses those fields.
         // - Mock sources in tests: all mocks ignore the `uri` parameter and return
         //   their pre-configured value regardless.
         //
@@ -302,10 +300,48 @@ mod tests {
         }
     }
 
+    /// A stub that overrides `supports_offline` to return true (simulates HTTP source).
+    struct OnlineStubSource {
+        id: &'static str,
+        result: Result<Value, DataSourceError>,
+    }
+
+    impl DataSource for OnlineStubSource {
+        fn id(&self) -> &str {
+            self.id
+        }
+
+        fn load(&self, _uri: &str, _opts: &DataSourceOptions) -> Result<Value, DataSourceError> {
+            match &self.result {
+                Ok(v) => Ok(v.clone()),
+                Err(e) => Err(match e {
+                    DataSourceError::IoError { uri, message } => DataSourceError::IoError {
+                        uri: uri.clone(),
+                        message: message.clone(),
+                    },
+                    DataSourceError::ParseError { uri, message } => DataSourceError::ParseError {
+                        uri: uri.clone(),
+                        message: message.clone(),
+                    },
+                    DataSourceError::UnsupportedUri { uri } => {
+                        DataSourceError::UnsupportedUri { uri: uri.clone() }
+                    },
+                    DataSourceError::AuthError { uri } => {
+                        DataSourceError::AuthError { uri: uri.clone() }
+                    },
+                }),
+            }
+        }
+
+        fn supports_offline(&self) -> bool {
+            true
+        }
+    }
+
     /// `test_load_all_empty_sources` — zero sources returns empty scope and zero errors.
     #[test]
     fn test_load_all_empty_sources() {
-        let sources: Vec<(Arc<str>, Box<dyn DataSource>, bool)> = vec![];
+        let sources: Vec<(Arc<str>, Box<dyn DataSource>)> = vec![];
         let ctx = DataSourceContext::new();
         let (scope, errors) = load_all(&sources, &ctx);
         assert!(scope.is_empty());
@@ -315,22 +351,20 @@ mod tests {
     /// `test_load_all_online_loads_all` — all sources loaded when offline=false.
     #[test]
     fn test_load_all_online_loads_all() {
-        let sources: Vec<(Arc<str>, Box<dyn DataSource>, bool)> = vec![
+        let sources: Vec<(Arc<str>, Box<dyn DataSource>)> = vec![
             (
                 Arc::from("a"),
                 Box::new(StubSource {
                     id: "a",
                     result: Ok(Value::Int(1)),
                 }),
-                false,
             ),
             (
                 Arc::from("b"),
-                Box::new(StubSource {
+                Box::new(OnlineStubSource {
                     id: "b",
                     result: Ok(Value::Int(2)),
                 }),
-                true,
             ),
         ];
         let ctx = DataSourceContext::new();
@@ -339,34 +373,32 @@ mod tests {
         assert!(errors.is_empty());
     }
 
-    /// `test_load_all_offline_skips_capable` — offline gate skips `offline_capable=true` sources.
+    /// `test_load_all_offline_skips_capable` — offline gate skips `supports_offline=true` sources.
     #[test]
     fn test_load_all_offline_skips_capable() {
-        let sources: Vec<(Arc<str>, Box<dyn DataSource>, bool)> = vec![(
+        let sources: Vec<(Arc<str>, Box<dyn DataSource>)> = vec![(
             Arc::from("net"),
-            Box::new(StubSource {
+            Box::new(OnlineStubSource {
                 id: "net",
                 result: Ok(Value::Int(99)),
             }),
-            true,
         )];
         let ctx = DataSourceContext::new().with_offline(true);
         let (scope, errors) = load_all(&sources, &ctx);
-        assert!(scope.is_empty(), "offline_capable source must be skipped");
+        assert!(scope.is_empty(), "supports_offline source must be skipped");
         assert!(errors.is_empty(), "skip must produce zero errors");
     }
 
     /// `test_load_all_partial_error` — failed source adds to error vec; successful source in scope.
     #[test]
     fn test_load_all_partial_error() {
-        let sources: Vec<(Arc<str>, Box<dyn DataSource>, bool)> = vec![
+        let sources: Vec<(Arc<str>, Box<dyn DataSource>)> = vec![
             (
                 Arc::from("ok"),
                 Box::new(StubSource {
                     id: "ok",
                     result: Ok(Value::Int(1)),
                 }),
-                false,
             ),
             (
                 Arc::from("bad"),
@@ -377,7 +409,6 @@ mod tests {
                         message: format!("[{E_DAT_004}] file not found"),
                     }),
                 }),
-                false,
             ),
         ];
         let ctx = DataSourceContext::new();
