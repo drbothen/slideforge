@@ -1803,12 +1803,10 @@ mod tests {
 
     /// BC-3.04.001 v1.5.2 Invariant 11 — when both `alt: Some(Provided(s))` and
     /// `decorative: true` are on a `ShapeSpec`, alt text WINS in the output frame
-    /// (`AltText::Provided(s)`), and `ShapeSpec.decorative` is NOT mutated by
-    /// `build_shape_frame` (it takes the flag by value — mutation is structurally
-    /// impossible, but this assertion makes the contract explicit and load-bearing).
+    /// (`AltText::Provided(s)`).
     ///
-    /// Load-bearing: swap the match arm order in `build_shape_frame` so that
-    /// `(_, true) => AltText::Decorative` is checked before `(Some(s), _)`,
+    /// Load-bearing (Contract B): swap the match arm order in `build_shape_frame`
+    /// so that `(_, true) => AltText::Decorative` is checked before `(Some(s), _)`,
     /// and this test MUST fail with `AltText::Decorative` instead of `AltText::Provided`.
     #[test]
     fn test_bc_3_04_001_invariant_11_alt_wins_over_decorative() {
@@ -1823,13 +1821,6 @@ mod tests {
             decorative: true, // will lose to alt text (Invariant 11)
             span: SourceSpan::default(),
         };
-
-        // Snapshot the input field BEFORE calling build_shape_frame.
-        // Invariant 11 "input preservation" contract: spec.decorative is NOT
-        // altered by the layout pass — build_shape_frame takes `decorative: bool`
-        // by value so mutation is structurally impossible, but we assert it
-        // explicitly to make the contract a load-bearing test assertion.
-        let spec_decorative_before = spec.decorative;
 
         // Extract values from spec (mirroring layout_shapes extraction at shapes.rs:215-220).
         let alt = match &spec.alt {
@@ -1850,14 +1841,7 @@ mod tests {
         )
         .expect("alt + decorative=true must succeed (Invariant 11: alt wins)");
 
-        // Contract A: ShapeSpec.decorative is unchanged after the layout pass.
-        assert_eq!(
-            spec.decorative,
-            spec_decorative_before,
-            "ShapeSpec.decorative must not be mutated by build_shape_frame (Invariant 11 input preservation)"
-        );
-
-        // Contract B: the output frame carries AltText::Provided, not Decorative.
+        // Contract B (load-bearing): the output frame carries AltText::Provided, not Decorative.
         match &frame.alt {
             slideforge_types::AltText::Provided(s) => {
                 assert_eq!(
