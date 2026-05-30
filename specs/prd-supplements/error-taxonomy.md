@@ -68,7 +68,7 @@ slides that reference the failed data source.
 
 | Code | Severity | Exit (strict) | Message Format | Traces To |
 |------|---------|--------------|---------------|-----------|
-| E-DAT-001 | broken | 2 | `HTTP fetch failed: '<url>' returned HTTP <code>. Hint: use --offline to skip HTTP sources.` | CAP-003, FM-005 |
+| E-DAT-001 | broken | 2 | `HTTP fetch failed: '<url>' returned HTTP <status>. Hint: use --offline to skip HTTP sources.` | CAP-003, FM-005 |
 | E-DAT-002 | broken | 2 | `Network error fetching '<url>': <os-error>. Use --offline to skip HTTP sources.` | CAP-003, FM-005 |
 | E-DAT-003 | broken | 2 | `Cannot parse response from '<url>' as <format>: <parse-error>` | CAP-003 |
 | E-DAT-004 | broken | 2 | `File data source not found: '<path>' (referenced at <file>:<line>:<col>)` | CAP-003 |
