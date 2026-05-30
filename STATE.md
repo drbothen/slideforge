@@ -29,9 +29,10 @@ wave_2_gate: "PASS 2026-05-27 — 11 gate passes, 19 findings fixed, 3/3 clean (
 wave_2_completed: 2026-05-27
 wave_3_batch_1_completed: 2026-05-28
 wave_3_batch_2_completed: 2026-05-30
-develop_sha: "066d625f"
-develop_pr_count: 34
-workspace_tests: 1764
+wave_3_batch_3_started: 2026-05-30
+develop_sha: "362c4a1f"
+develop_pr_count: 35
+workspace_tests: 2282
 workspace_test_failures: 0
 ---
 
@@ -53,27 +54,27 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. It generates branded .p
 
 Before doing ANY work, a new session should:
 
-1. **Sync local develop:** Run `git pull origin develop` in the main worktree (origin/develop is at `066d625f` after STORY-028 merge; local develop may be behind).
-2. **Verify worktree health:** `git worktree list` should show ONLY main + .factory (both STORY-020 and STORY-028 worktrees were cleaned post-merge). No active per-story worktrees.
+1. **Sync local develop:** Run `git pull origin develop` in the main worktree (origin/develop is at `362c4a1f` after STORY-021 merge; local develop may be behind).
+2. **Verify worktree health:** `git worktree list` should show ONLY main + .factory (STORY-021 worktree was cleaned post-merge). No active per-story worktrees.
 3. **Read this STATE.md** in full to understand context.
 4. **Check follow-up stories status:** STORY-072 (gradient fills, P2/3pts), STORY-073 (bullets layout, P1/5pts), STORY-074 (brand-em-sizing, P2/3pts) — all status=draft, all created during STORY-028 cascade. See STORY-INDEX.md.
-5. **Top action on resume:** Wave 3 Batch 3 dispatch (STORY-021 DataSource HTTP cache, STORY-024 DataSource XLSX large-file, STORY-025 DataSource SQLite pagination — verify exact titles from wave-schedule.md before dispatching). Confirm dependencies merged.
+5. **Top action on resume:** Wave 3 Batch 3 — STORY-021 MERGED. Dispatch STORY-024 + STORY-025 next (verify exact titles from wave-schedule.md before dispatching). Confirm dependencies merged.
 
 ### Where we are
 
-Phase 3, Wave 3 Batch 2 — **COMPLETE. STORY-028 MERGED (PR #34, 066d625f).** All 13 Batch 2 stories merged: STORY-019, 020, 022, 023, 026, 027, 028, 029, 030, 031, 032, 033, 034.
+Phase 3, Wave 3 Batch 3 — **IN PROGRESS. STORY-021 MERGED (PR #35, 362c4a1f).** Batch 3 has 1/3 stories merged; STORY-024 + STORY-025 remain.
 
-**STORY-028:** Layout shape: Block + Rich Inline. 32-pass LOCAL adversary cascade, 3-CLEAN at passes 30-31-32 per BC-5.39.001. 18 ACs demo'd. PR-level review: 1 cycle CLEAN (zero CRIT/HIGH/MED). Security: 0 CRIT/HIGH/MED + 3 LOW informational. CI fix burst: 1 cycle (fmt + clippy). Follow-up stories created during cascade: STORY-072 (gradient fills), STORY-073 (bullets layout), STORY-074 (brand-em-sizing).
+**STORY-021:** 23-pass LOCAL adversary cascade, 3-CLEAN at passes 21-22-23 per BC-5.39.001. ~80 total findings closed across 12 fix bursts. 10 ACs demo'd (30 evidence files). Key structural changes: PolicyRejected variant for E-DAT-006 body-cap; label-driven IoError vs FileNotFound routing; #[non_exhaustive] on DataError + DataSourceError; parse_e_dat_code for E-DAT-007..014 granularity; STRUCTURAL FIX in Pass 15 decoupling http.rs Display from inter-layer protocol. Lessons captured — see "Lessons captured this session."
 
 ### Top 3 next actions (in order)
 
-1. **Wave 3 Batch 3** (STORY-021, STORY-024, STORY-025) per wave-schedule.md — next stories to implement.
+1. **Wave 3 Batch 3 remaining** (STORY-024, STORY-025) per wave-schedule.md.
 2. **Wave 3 Gate** after Batch 3 complete (full test suite + adversarial gate + holdout).
-3. **Process improvements from AKM-style cascade** — codify lessons from 29 + 32 pass marathons into orchestrator playbook.
+3. **Process improvements from AKM-style cascade** — codify Display-vs-protocol coupling antipattern + CI clippy version drift into CLAUDE.md or orchestrator playbook.
 
 ### Orchestrator Playbook Improvements (codify before next cascade)
 
-From the STORY-020 (29 passes) + STORY-028 (32 passes) marathon cascades:
+From the STORY-020 (29 passes) + STORY-028 (32 passes) + STORY-021 (23 passes) marathon cascades:
 
 1. **BC version bump auto-sweep**: When PO bumps a BC version, the orchestrator should automatically dispatch:
    - implementer for code-comment sweep (grep crates/ for "BC-X.YY.NNN vX.Y.Z" stale refs)
@@ -89,6 +90,14 @@ From the STORY-020 (29 passes) + STORY-028 (32 passes) marathon cascades:
 
 5. **Documentation sweep on green-phase**: When implementer closes a Red Gate (todo!() → real implementation), the same commit should remove the "/// Red Gate: panics with todo!()" doc lines. 78 stale Red Gate doc lines were found in STORY-028 across 3 files.
 
+6. **Display-vs-protocol coupling (STORY-021 Pass 15 structural fix)**: Never embed user-facing Display strings in inter-layer error protocol formats. Source layer emits canonical machine-friendly format; dispatcher/consumer layer constructs rich Display. Any cross-layer message parsing that calls `.to_string()` on an error enum variant is a smell — flag for adversary inspection.
+
+7. **CI clippy version drift (STORY-021)**: Local clippy clean with `-D warnings` does NOT equal CI clean with `-D clippy::pedantic -D clippy::unwrap_used`. `just check` must mirror CI clippy flags exactly. Include the CI clippy invocation (with all pedantic flags) in the per-story-delivery pre-push checklist.
+
+8. **Spec-entity retirement parity (STORY-021 Pass 13→14)**: When code retires or deprecates a spec entity (e.g., E-DAT-014), the matching spec update (error-taxonomy.md, BC file) MUST be in the same fix burst. "Constant retained for SemVer compat" is not a valid justification for a missing spec update — surface the tension explicitly.
+
+9. **#[non_exhaustive] default for public enums**: All public enums in slideforge-* crates should default to #[non_exhaustive] to prevent SemVer breakage on variant additions. Adversary should flag any new public enum lacking this attribute.
+
 ### Task state (TaskList does not persist — captured here)
 
 Completed in 2026-05-28/30 session:
@@ -100,8 +109,10 @@ Completed in 2026-05-28/30 session:
 - STORY-020 29-pass LOCAL adversary cascade, 3-CLEAN at passes 27-28-29; 23 ACs demo'd; PR #33 MERGED (143f1b78); 251 tests + 2 perf_smoke
 - STORY-028 32-pass LOCAL adversary cascade, 3-CLEAN at passes 30-31-32; 18 ACs demo'd; PR #34 MERGED (066d625f); CI fix burst 1 cycle
 
+- STORY-021 23-pass LOCAL adversary cascade CONVERGED 3/3, ~80 findings closed across 12 fix bursts, 10 ACs demo'd (30 evidence files); MERGED in PR #35 (362c4a1f) — 2026-05-30.
+
 Pending:
-- Wave 3 Batch 3 (STORY-021, 024, 025) — ready to start
+- Wave 3 Batch 3 (STORY-024, STORY-025) — STORY-021 done, 2 remaining
 - Wave 3 Gate (after all Batch 3 done)
 
 ### Lessons captured this session
@@ -120,14 +131,20 @@ Pending:
 - **Convergence is asymptotic, not absolute.** STORY-020 took 29 passes; STORY-028 took 32. Each pass found 1-5 new findings in the late phase. After 26+ passes the LOW findings became progressively cosmetic. The PR-merge gate (zero CRIT/HIGH/MED) is the canonical merge criterion; strict 3-CLEAN is the convergence criterion for adversarial cascade closure.
 - **Sibling-sweep recurrence is systemic.** Every BC version bump during STORY-028 cascade generated new sweep work across spec body + code comments + tests. Pattern: orchestrator should automatically dispatch implementer for code-comment sweep AND story-writer for spec-body sweep AND grep-all-perimeter audit before declaring any BC bump complete.
 - **Implementer overclaim pattern (TD-VSDD-059 at agent-process level).** Pass-27 implementer for STORY-020 claimed 33 test renames in 4 files; adversary verified only 8 in 1 file. Cross-story scope creep when implementer extends scope without orchestrator authorization. Recovery: orchestrator MUST verify git log against implementer's claimed file count before declaring fix-burst closure.
+- **AKM compounding novelty confirmed AGAIN (STORY-021, 23 passes).** 23-pass cascade converged at passes 21-22-23 (vs STORY-020: 29, STORY-028: 32). Each pass surfaced 1-5 new defect classes from fresh-context eyes. Real defects continued through Pass 20+; only P21/22/23 were genuinely zero-finding. The pattern is consistent: compounding novelty persists well past pass 10.
+- **Display-vs-protocol coupling antipattern (STORY-021 Pass 14→15 structural fix).** Pass 14 added --offline hint to HttpError/NetworkError Display. Pass 15 discovered this broke the dispatcher's parsing of those Displays (extract_http_status + strip_prefix). Fix: decouple user-facing Display from inter-layer machine-friendly protocol. Source layer emits canonical machine format; dispatcher constructs rich Display variant. This pattern is REQUIRED for any cross-layer error emission in slideforge-* crates.
+- **CI clippy version drift (STORY-021).** Local clippy was clean with `-D warnings`. CI uses Rust 1.95 with `-D clippy::pedantic -D clippy::unwrap_used`, surfacing 55 new errors (doc_markdown, unnecessary_literal_bound, uninlined_format_args). Fix: `just check` must mirror CI clippy flags exactly. Include the CI pedantic invocation in the per-story-delivery pre-push checklist.
+- **#[non_exhaustive] default for public enums.** Adding #[non_exhaustive] to DataError + DataSourceError required wildcard arms in match statements; implementer handled propagation cleanly. Process: all new public enums in slideforge-* crates should default to #[non_exhaustive] to prevent SemVer breakage on future variant additions.
+- **Spec-entity retirement parity (STORY-021 Pass 13→14).** Pass 13 retired E-DAT-014 in code; Pass 14 found spec (error-taxonomy.md) not updated. "Constant retained for SemVer compat" does not excuse missing spec update. Rule: when code retires/deprecates a spec entity, the spec update MUST be in the same fix burst — or listed as an explicit known follow-up with a specific future story anchor before declaring closure.
+- **PolicyRejected / SsrfBlocked / PathTraversalBlocked discrimination (STORY-021 Pass 3).** All three share E-DAT-006 but represent distinct policy classes. Label-driven discrimination at the dispatcher boundary (message_is_path_traversal, message_is_file_not_found patterns) is the established pattern. Any new shared-code variant with multiple behavioral sub-classes should follow this discipline from the start.
 
 ---
 
 ## Current Status
 
-Phase 3 IN PROGRESS. Wave 1 COMPLETE (14/14 stories, gate PASSED). Wave 2 COMPLETE (7/7 stories, gate PASSED). Wave 3 Batch 1 COMPLETE (6 stories merged, PRs #21-#26). **Wave 3 Batch 2 COMPLETE — all 13 stories merged (STORY-019, 020, 022, 023, 026, 027, 028, 029, 030, 031, 032, 033, 034). Ready for Batch 3.**
+Phase 3 IN PROGRESS. Wave 1 COMPLETE (14/14 stories, gate PASSED). Wave 2 COMPLETE (7/7 stories, gate PASSED). Wave 3 Batch 1 COMPLETE (6 stories merged, PRs #21-#26). Wave 3 Batch 2 COMPLETE (13 stories merged, PRs #27–#34). **Wave 3 Batch 3 IN PROGRESS — STORY-021 MERGED (PR #35, 362c4a1f). STORY-024 + STORY-025 remain.**
 
-develop branch: `066d625f` (34 merged PRs, 1764 tests, 0 failures). 0 active worktrees. 0 open PRs.
+develop branch: `362c4a1f` (35 merged PRs, 2282 tests, 0 failures). 0 active worktrees. 0 open PRs.
 
 ## Wave 3 Batch 2 Story Status
 
@@ -142,11 +159,19 @@ develop branch: `066d625f` (34 merged PRs, 1764 tests, 0 failures). 0 active wor
 | STORY-020 | DataSource: Excel + SQLite | NOT STARTED | — | — | Depends on STORY-019 (merged) |
 | STORY-028 | Layout: shape: Block + Rich Inline | NOT STARTED | — | — | Depends on STORY-027 (merged) |
 
+## Wave 3 Batch 3 Story Status (IN PROGRESS — 1/3 merged)
+
+| Story | Title | Status | PR | Commit | Notes |
+|-------|-------|--------|----|--------|-------|
+| STORY-021 | DataSource: HTTP cache / E-DAT policy errors | MERGED | #35 | 362c4a1f | 23-pass adversary, 3/3 CLEAN (P21-22-23); ~80 findings, 12 fix bursts; PolicyRejected + label-driven routing; Display-vs-protocol structural fix (P15) |
+| STORY-024 | DataSource: XLSX large-file | NOT STARTED | — | — | Depends on STORY-021 (merged) |
+| STORY-025 | DataSource: SQLite pagination | NOT STARTED | — | — | Depends on STORY-021 (merged) |
+
 ## What to Do Next
 
-- **Wave 3 Batch 3**: STORY-021 (DSL Package System), STORY-024 (CLI: Core Commands), STORY-025 (CLI: Build Pipeline) per wave-schedule.md
+- **Wave 3 Batch 3 remaining**: STORY-024, STORY-025 per wave-schedule.md (STORY-021 done)
 - **Wave 3 Gate** after all Batch 3 stories merged (full test suite + adversarial gate + holdout evaluation)
-- **Codify AKM cascade lessons** into orchestrator playbook (sibling-sweep on BC bumps, implementer overclaim verification, implementer scope discipline)
+- **Codify AKM cascade lessons** into orchestrator playbook (sibling-sweep on BC bumps, implementer overclaim verification, Display-vs-protocol coupling pattern, CI clippy version drift)
 
 **Key file references:**
 - Wave schedule + batching: `.factory/stories/wave-schedule.md`
@@ -186,7 +211,7 @@ git fetch origin develop && git pull origin develop
 | Planning (25 DSL decisions) | DONE 2026-05-24 | q1–q25 decision docs + 14 research threads + 7/7 spikes resolved |
 | Phase 1: Spec Crystallization | DONE — APPROVED 2026-05-25 | PRD (109 BCs, 15 HS, 4 supplements) + architecture (14 ADRs, 15 VPs, 20 crates) + UX spec (10 screens, 5 flows) + L2 domain spec (12 files). 17 passes, 69 findings, 3/3 clean. |
 | Phase 2: Story Decomposition | DONE — APPROVED 2026-05-25 | 71 stories, 21 epics, 6 waves, 437 pts. 22 passes, 96+ findings, 3/3 clean. |
-| Phase 3: TDD Implementation | IN PROGRESS — Wave 1: COMPLETE + GATE PASSED. Wave 2: COMPLETE + GATE PASSED. Wave 3: Batch 1 COMPLETE (6 stories, PRs #21-#26, 494 new tests). Batch 2: COMPLETE (13 stories, PRs #27-#34, 066d625f). Batch 3 NEXT (STORY-021, 024, 025). | Per-story delivery |
+| Phase 3: TDD Implementation | IN PROGRESS — Wave 1: COMPLETE + GATE PASSED. Wave 2: COMPLETE + GATE PASSED. Wave 3: Batch 1 COMPLETE (6 stories, PRs #21-#26, 494 new tests). Batch 2: COMPLETE (13 stories, PRs #27-#34, 066d625f). Batch 3: IN PROGRESS — STORY-021 MERGED (PR #35, 362c4a1f); STORY-024 + STORY-025 NOT STARTED. | Per-story delivery |
 | Phase 4: Holdout Evaluation | NOT STARTED | Per-wave holdout gates |
 | Phase 5: Adversarial Refinement | NOT STARTED | Post-implementation cascade |
 | Phase 6: Formal Hardening | NOT STARTED | Kani + fuzz + mutants + semgrep |
@@ -278,21 +303,22 @@ New crates added by Batch 1 (total workspace now 13 crates): slideforge-data, sl
 - 2026-05-29 — STORY-023 MERGED (PR #32, dd6054c1) — Brand Synthesis: brand.toml → 31 Layouts. Convergence: 20 LOCAL adversary passes, 3/3 CLEAN (P18-20). PR-level review: 2 cycles, cycle 1 (2 findings: F1 HIGH BrandPalette slot mismatch, F2 SUGGEST debug_assert gap), cycle 2 CLEAN (PR-merge). F1/F2 fixed in 4f78aa1c: shared color_by_name slot-name mapping + load-bearing regression test (test_f1_regression_brand_palette_primary_maps_to_dk2_not_dk1) + debug_assert in inference.rs. Wave 3 Batch 2 now 6/8 merged; STORY-020 + STORY-028 remaining.
 - 2026-05-30 — STORY-020 MERGED (PR #33, 143f1b78) — DataSource: Excel + SQLite. Convergence: 29 LOCAL adversary passes, 3/3 CLEAN (P27-28-29). AKM compounding-novelty: paper-fixes, sibling-sweep gaps, semantic anchoring drift, BC version propagation, doc-vs-code precision all found across the run. Implementer-overclaim correction at P27 (claimed 33 renames in 4 files; adversary verified 8 in 1 file). 23 ACs demo'd, 251 unit tests + 2 perf_smoke. PR-level review: 1 cycle CLEAN; security: 0 findings. Wave 3 Batch 2 now 7/8 merged; STORY-028 remaining.
 - 2026-05-30 — STORY-028 MERGED (PR #34, 066d625f) — Layout: shape: Block + Rich Inline. Convergence: 32 LOCAL adversary passes, 3/3 CLEAN (P30-31-32) per BC-5.39.001. 18 ACs demo'd, 309 slideforge-layout tests + 1764 workspace tests. PR-level review: 1 cycle CLEAN (zero CRIT/HIGH/MED); security: 0 CRIT/HIGH/MED + 3 LOW informational. CI fix burst: 1 cycle (fmt + clippy). Follow-up stories created during cascade: STORY-072 (gradient fills), STORY-073 (bullets layout), STORY-074 (brand-em-sizing). Wave 3 Batch 2 COMPLETE — all 13 stories merged (PRs #27–#34). Ready for Batch 3 (STORY-021, 024, 025).
+- 2026-05-30 — STORY-021 MERGED (PR #35, 362c4a1f) — DataSource HTTP cache + E-DAT policy errors. Convergence: 23 LOCAL adversary passes, 3/3 CLEAN (P21-22-23) per BC-5.39.001. ~80 findings closed across 12 fix bursts. 10 ACs demo'd (30 evidence files: 10 ACs × 3 formats + evidence-report.md at docs/demo-evidence/STORY-021/). Key structural changes: PolicyRejected variant for E-DAT-006 body-cap (distinct from SsrfBlocked/PathTraversalBlocked); label-driven IoError vs FileNotFound routing (P4); #[non_exhaustive] on DataError + DataSourceError (P5); UTF-8 panic fix in strip_bracket_prefix via DoS vector (P9); parse_e_dat_code for E-DAT-007..014 granularity (P10); E-DAT-014 retired at dispatcher boundary (P13); --offline hint added per spec (P14); STRUCTURAL FIX — http.rs Display decoupled from inter-layer protocol via canonical machine-friendly format (P15). Workspace tests: 2282 (up from 1764). Wave 3 Batch 3: 1/3 merged. STORY-024 + STORY-025 next.
 
 ## Session Resume Checkpoint
 
 | Field | Value |
 |-------|-------|
 | **Date** | 2026-05-30 |
-| **Position** | Phase 3, Wave 3 — Batch 2: COMPLETE (13/13 merged). STORY-028 MERGED (PR #34, 066d625f). Ready for Batch 3. |
-| **develop SHA** | 066d625f |
-| **Workspace tests** | 1764 passing, 0 failures |
+| **Position** | Phase 3, Wave 3 — Batch 3: IN PROGRESS (1/3 merged). STORY-021 MERGED (PR #35, 362c4a1f). STORY-024 + STORY-025 not started. |
+| **develop SHA** | 362c4a1f |
+| **Workspace tests** | 2282 passing, 0 failures |
 | **Workspace crates** | 13 (7 from Wave 1 + 6 new from Batch 1: data, brand, layout, math, charts, diagrams) |
 | **Active worktrees** | none |
 | **Open PRs** | 0 |
 | **In-flight stories** | none |
-| **Not-started stories** | STORY-021, STORY-024, STORY-025 (Batch 3) |
-| **Highest priority next actions** | 1. Batch 3: STORY-021 (DSL Package System), STORY-024 (CLI: Core Commands), STORY-025 (CLI: Build Pipeline). 2. Wave 3 Gate after Batch 3 complete. 3. Codify AKM cascade lessons into orchestrator playbook. |
+| **Not-started stories** | STORY-024, STORY-025 (Batch 3 remaining) |
+| **Highest priority next actions** | 1. Batch 3: STORY-024 (DataSource XLSX large-file), STORY-025 (DataSource SQLite pagination). 2. Wave 3 Gate after Batch 3 complete. 3. Codify Display-vs-protocol + CI clippy lessons into CLAUDE.md or orchestrator playbook. |
 
 ## Quality Bar (Non-Negotiable)
 
