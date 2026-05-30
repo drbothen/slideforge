@@ -86,7 +86,7 @@ mod tests {
     // ──────────────────────────────────────────────────────────────────────────
 
     #[test]
-    fn test_bc_1_01_001_source_span_default() {
+    fn test_bc_1_01_009_source_span_default() {
         let span = SourceSpan::default();
         assert_eq!(span.line, 0);
         assert_eq!(span.col, 0);
@@ -94,12 +94,12 @@ mod tests {
     }
 
     #[test]
-    fn test_bc_1_01_001_source_span_default_is_unknown() {
+    fn test_bc_1_01_009_source_span_default_is_unknown() {
         assert!(SourceSpan::default().is_unknown());
     }
 
     #[test]
-    fn test_bc_1_01_001_source_span_new() {
+    fn test_bc_1_01_009_source_span_new() {
         let span = SourceSpan::new(Arc::from("deck.sf"), 10, 3, 150);
         assert_eq!(span.file.as_ref(), "deck.sf");
         assert_eq!(span.line, 10);
@@ -108,14 +108,14 @@ mod tests {
     }
 
     #[test]
-    fn test_bc_1_01_001_source_span_clone() {
+    fn test_bc_1_01_009_source_span_clone() {
         let span = SourceSpan::new(Arc::from("a.sf"), 1, 1, 0);
         let span2 = span.clone();
         assert_eq!(span, span2);
     }
 
     #[test]
-    fn test_bc_1_01_001_source_span_hash() {
+    fn test_bc_1_01_009_source_span_hash() {
         use std::collections::HashMap;
         let span = SourceSpan::new(Arc::from("x.sf"), 1, 1, 0);
         let mut map: HashMap<SourceSpan, &str> = HashMap::new();
@@ -124,34 +124,34 @@ mod tests {
     }
 
     #[test]
-    fn test_bc_1_01_001_source_span_eq() {
+    fn test_bc_1_01_009_source_span_eq() {
         let a = SourceSpan::new(Arc::from("a.sf"), 5, 2, 100);
         let b = SourceSpan::new(Arc::from("a.sf"), 5, 2, 100);
         assert_eq!(a, b);
     }
 
     #[test]
-    fn test_bc_1_01_001_source_span_ne() {
+    fn test_bc_1_01_009_source_span_ne() {
         let a = SourceSpan::new(Arc::from("a.sf"), 5, 2, 100);
         let b = SourceSpan::new(Arc::from("a.sf"), 5, 3, 101);
         assert_ne!(a, b);
     }
 
     #[test]
-    fn test_bc_1_01_001_source_span_debug() {
+    fn test_bc_1_01_009_source_span_debug() {
         let span = SourceSpan::new(Arc::from("deck.sf"), 1, 1, 0);
         let s = format!("{span:?}");
         assert!(s.contains("SourceSpan"));
     }
 
     #[test]
-    fn test_bc_1_01_001_source_span_display_unknown() {
+    fn test_bc_1_01_009_source_span_display_unknown() {
         let span = SourceSpan::default();
         assert_eq!(span.to_string(), "<unknown>");
     }
 
     #[test]
-    fn test_bc_1_01_001_source_span_display_known() {
+    fn test_bc_1_01_009_source_span_display_known() {
         let span = SourceSpan::new(Arc::from("deck.sf"), 10, 3, 150);
         assert_eq!(span.to_string(), "deck.sf:10:3");
     }
