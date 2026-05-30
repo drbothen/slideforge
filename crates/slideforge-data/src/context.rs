@@ -23,6 +23,11 @@ use std::sync::Arc;
 /// - `allowed_domains` — the SSRF allowlist for HTTP data sources. `None`
 ///   means all domains are permitted; `Some(list)` restricts to the listed
 ///   domains only.
+/// - `offline` — when `true`, any data source that declares itself as
+///   network-dependent (via the `supports_offline` flag in
+///   [`crate::dispatcher`]) is skipped without making a network request.
+///   File-based sources are always loaded regardless of this flag.
+///   Traces to BC-1.03.004.
 #[derive(Debug, Clone, Default)]
 pub struct DataSourceContext {
     /// The project root directory used for resolving relative file paths.
@@ -44,6 +49,16 @@ pub struct DataSourceContext {
     /// request URL. Subdomains are NOT implicitly included — each permitted
     /// subdomain must be listed explicitly.
     pub allowed_domains: Option<Vec<Arc<str>>>,
+
+    /// When `true`, data sources that flag themselves as network-dependent
+    /// (HTTP/HTTPS sources) are skipped without making any network request.
+    ///
+    /// File-based sources (`FileDataSource`, `XlsxDataSource`,
+    /// `SqliteDataSource`) are always loaded regardless of this flag.
+    ///
+    /// Set to `true` by the CLI when the `--offline` flag is passed.
+    /// Traces to BC-1.03.004.
+    pub offline: bool,
 }
 
 impl DataSourceContext {
@@ -59,6 +74,19 @@ impl DataSourceContext {
     #[must_use]
     pub fn with_base_dir(mut self, base_dir: PathBuf) -> Self {
         self.base_dir = Some(base_dir);
+        self
+    }
+
+    /// Enable offline mode, causing network-dependent data sources to be skipped.
+    ///
+    /// When offline mode is enabled, sources marked as network-dependent in the
+    /// [`crate::dispatcher`] are skipped without making any network request.
+    /// File-based sources are unaffected.
+    ///
+    /// Returns `self` for chaining.
+    #[must_use]
+    pub fn with_offline(mut self, offline: bool) -> Self {
+        self.offline = offline;
         self
     }
 
