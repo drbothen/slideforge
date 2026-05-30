@@ -304,7 +304,9 @@ mod tests {
         assert!(ShapeType::from_keyword("Rect").is_err()); // case-sensitive
         assert!(ShapeType::from_keyword("RECT").is_err());
         // The error carries the original keyword for diagnostics.
-        let err = ShapeType::from_keyword("frobnicator").unwrap_err();
+        // Use expect_err to satisfy clippy::unwrap_used in test code.
+        let err = ShapeType::from_keyword("frobnicator")
+            .expect_err("frobnicator is not a valid ShapeType keyword");
         assert_eq!(err.keyword.as_ref(), "frobnicator");
     }
 

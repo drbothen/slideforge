@@ -211,7 +211,13 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
         // Pass frames.len() as base_index so InvalidBoundingBox.frame_index is
         // slide-wide (region frames + shape-list position) rather than a local
         // sub-list index (F-P20-LOW-002 / BC-3.06.003).
-        let shape_output = layout_shapes(&shape_specs, page_size, source_index, DEFAULT_EM_IN_EMU, frames.len())?;
+        let shape_output = layout_shapes(
+            &shape_specs,
+            page_size,
+            source_index,
+            DEFAULT_EM_IN_EMU,
+            frames.len(),
+        )?;
 
         let mut all_frames = frames;
         all_frames.extend(shape_output.frames);

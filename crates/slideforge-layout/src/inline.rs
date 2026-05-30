@@ -174,7 +174,7 @@ pub fn run_inline_validation(
             match &frame.content {
                 crate::types::FrameContent::TextRun(nodes) => {
                     validate_inline_nodes(nodes, &known_titles, slide.source_index, &mut warnings)?;
-                }
+                },
                 crate::types::FrameContent::Shape(shape_frame) => {
                     if let Some(nodes) = &shape_frame.text {
                         validate_inline_nodes(
@@ -184,7 +184,7 @@ pub fn run_inline_validation(
                             &mut warnings,
                         )?;
                     }
-                }
+                },
                 // Variants below do not carry InlineNode subtrees IN ANY PRODUCTION
                 // CODE PATH THAT EXISTS TODAY and require no inline validation here.
                 // IMPORTANT: Body(Vec<ContentBlock>) CAN carry InlineNode-bearing blocks
@@ -203,7 +203,7 @@ pub fn run_inline_validation(
                 | crate::types::FrameContent::Chart
                 | crate::types::FrameContent::Diagram(_)
                 | crate::types::FrameContent::Empty
-                | crate::types::FrameContent::ErrorSlidePlaceholder { .. } => {}
+                | crate::types::FrameContent::ErrorSlidePlaceholder { .. } => {},
             }
         }
     }
@@ -1150,8 +1150,7 @@ mod tests {
             } => {
                 assert_eq!(source_slide_index, 3, "slide index must be 3");
                 assert_eq!(
-                    depth,
-                    65,
+                    depth, 65,
                     "reported depth must be exactly 65 (BC literal: first rejected tree depth)"
                 );
                 assert_eq!(max, MAX_INLINE_DEPTH, "max must equal MAX_INLINE_DEPTH");

@@ -1293,8 +1293,8 @@ mod tests {
     fn test_p4_med_002_shape_text_xref_validated() {
         use crate::types::LayoutWarning;
         use slideforge_types::{
-            AltText, Block, ContentBlock, FillSpec, InlineNode, ShapePosition, ShapeSpec, ShapeType,
-            ShapeUnit,
+            AltText, Block, ContentBlock, FillSpec, InlineNode, ShapePosition, ShapeSpec,
+            ShapeType, ShapeUnit,
         };
 
         let unknown_target = Arc::from("__nonexistent_shape_xref__");
@@ -1360,16 +1360,15 @@ mod tests {
     fn test_p4_med_002_shape_text_depth_bound() {
         use crate::inline::MAX_INLINE_DEPTH;
         use slideforge_types::{
-            AltText, Block, ContentBlock, FillSpec, InlineNode, ShapePosition, ShapeSpec, ShapeType,
-            ShapeUnit,
+            AltText, Block, ContentBlock, FillSpec, InlineNode, ShapePosition, ShapeSpec,
+            ShapeType, ShapeUnit,
         };
 
         // Build a 65-level-deep Bold tree (exceeds MAX_INLINE_DEPTH = 64).
         // InlineNode::Bold(children: Vec<InlineNode>)
         let leaf = InlineNode::Plain(Arc::from("deep text"));
-        let deeply_nested = (0..=MAX_INLINE_DEPTH).fold(leaf, |inner, _| {
-            InlineNode::Bold(vec![inner])
-        });
+        let deeply_nested =
+            (0..=MAX_INLINE_DEPTH).fold(leaf, |inner, _| InlineNode::Bold(vec![inner]));
 
         let shape_spec = ShapeSpec {
             shape_type: ShapeType::Rect,

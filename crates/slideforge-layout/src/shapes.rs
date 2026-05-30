@@ -35,11 +35,9 @@ use std::sync::Arc;
 use slideforge_types::{Emu, ShapeUnit};
 
 use crate::error::LayoutError;
-use crate::types::{
-    BoundingBox, FillSpec, Frame, LayoutWarning, PageSize, ShapeFrame, ShapeType,
-};
 #[cfg(test)]
 use crate::types::Rgb;
+use crate::types::{BoundingBox, FillSpec, Frame, LayoutWarning, PageSize, ShapeFrame, ShapeType};
 
 /// EMU per inch: 914,400 (canonical DSL unit definition, DI-010).
 pub const EMU_PER_INCH: i64 = 914_400;
@@ -1139,7 +1137,7 @@ mod tests {
             position: ShapePosition {
                 x: ShapeUnit::Inches(500),
                 y: ShapeUnit::Inches(1000),
-                width: ShapeUnit::Inches(0),  // zero width → InvalidBoundingBox
+                width: ShapeUnit::Inches(0), // zero width → InvalidBoundingBox
                 height: ShapeUnit::Inches(1000),
             },
             fill: FillSpec::None,
@@ -1160,8 +1158,12 @@ mod tests {
                     2,
                     "must accumulate exactly 2 errors (MissingAlt + InvalidBoundingBox); got: {inner:?}"
                 );
-                let has_missing_alt = inner.iter().any(|e| matches!(e, LayoutError::MissingAlt { .. }));
-                let has_invalid_bbox = inner.iter().any(|e| matches!(e, LayoutError::InvalidBoundingBox { .. }));
+                let has_missing_alt = inner
+                    .iter()
+                    .any(|e| matches!(e, LayoutError::MissingAlt { .. }));
+                let has_invalid_bbox = inner
+                    .iter()
+                    .any(|e| matches!(e, LayoutError::InvalidBoundingBox { .. }));
                 assert!(
                     has_missing_alt,
                     "Multiple must contain MissingAlt; inner: {inner:?}"
@@ -1827,8 +1829,7 @@ mod tests {
             Some(AltText::Provided(s)) => Some(Arc::clone(s)),
             Some(AltText::Decorative) | None => None,
         };
-        let decorative =
-            spec.decorative || matches!(&spec.alt, Some(AltText::Decorative));
+        let decorative = spec.decorative || matches!(&spec.alt, Some(AltText::Decorative));
 
         let frame = build_shape_frame(
             spec.shape_type,
@@ -2261,7 +2262,11 @@ mod tests {
         // in a Multiple for uniform error shape (Item N). Unwrap the Multiple to check.
         match result.unwrap_err() {
             LayoutError::Multiple { inner } => {
-                assert_eq!(inner.len(), 1, "single invalid-bbox must produce Multiple with 1 inner");
+                assert_eq!(
+                    inner.len(),
+                    1,
+                    "single invalid-bbox must produce Multiple with 1 inner"
+                );
                 assert!(
                     matches!(
                         &inner[0],
@@ -2270,10 +2275,13 @@ mod tests {
                             ..
                         }
                     ),
-                    "inner error must be InvalidBoundingBox with source_slide_index=1; got: {:?}", inner[0]
+                    "inner error must be InvalidBoundingBox with source_slide_index=1; got: {:?}",
+                    inner[0]
                 );
             },
-            other => panic!("expected LayoutError::Multiple wrapping InvalidBoundingBox, got: {other:?}"),
+            other => {
+                panic!("expected LayoutError::Multiple wrapping InvalidBoundingBox, got: {other:?}")
+            },
         }
     }
 
@@ -2312,7 +2320,11 @@ mod tests {
         // (uniform Item N shape). Unwrap the Multiple to verify the inner field values.
         match result.unwrap_err() {
             LayoutError::Multiple { inner } => {
-                assert_eq!(inner.len(), 1, "single invalid-bbox must produce Multiple with 1 inner");
+                assert_eq!(
+                    inner.len(),
+                    1,
+                    "single invalid-bbox must produce Multiple with 1 inner"
+                );
                 match &inner[0] {
                     LayoutError::InvalidBoundingBox {
                         source_slide_index,
@@ -2329,7 +2341,9 @@ mod tests {
                     other => panic!("inner error must be InvalidBoundingBox, got: {other:?}"),
                 }
             },
-            other => panic!("expected LayoutError::Multiple wrapping InvalidBoundingBox, got: {other:?}"),
+            other => {
+                panic!("expected LayoutError::Multiple wrapping InvalidBoundingBox, got: {other:?}")
+            },
         }
     }
 
@@ -2407,11 +2421,15 @@ mod tests {
         height: ShapeUnit,
         field: &str,
     ) {
-        let st =
-            slideforge_types::ShapeType::from_keyword("rect").expect("rect must be known");
+        let st = slideforge_types::ShapeType::from_keyword("rect").expect("rect must be known");
         let spec = ShapeSpec {
             shape_type: st,
-            position: ShapePosition { x, y, width, height },
+            position: ShapePosition {
+                x,
+                y,
+                width,
+                height,
+            },
             fill: FillSpec::None,
             text: None,
             alt: Some(AltText::Provided(Arc::from("em overflow test shape"))),
