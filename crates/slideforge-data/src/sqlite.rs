@@ -2520,4 +2520,61 @@ mod tests {
             "EC-010 extension error must contain \"'.db3'\" (single-quoted); got: {msg}"
         );
     }
+
+    // ---------------------------------------------------------------------------
+    // F-PASS20-LOW-2: SQL comment prefix mis-classified as DML — regression pin.
+    // A query "-- comment\nSELECT * FROM t" has a comment prefix and fails the
+    // SELECT/WITH check, producing a DML-rejection error. The DSL forbids comments
+    // at parse time so this path should never occur in production, but we pin the
+    // behavior as a regression test to document and lock in current semantics.
+    // ---------------------------------------------------------------------------
+
+    /// `test_sqlite_comment_prefix_query_rejected_as_dml` -- `-- comment\nSELECT` prefix
+    /// triggers DML-rejection error (current behavior, pinned as regression).
+    ///
+    /// The SELECT-prefix check operates on `self.query.trim()` and tests whether the
+    /// lowercased string STARTS WITH "select" or "with". A leading SQL comment
+    /// (`-- comment\n`) causes the `starts_with` check to fail, and the query is
+    /// classified as DML and rejected.
+    ///
+    /// The DSL parser rejects comments before they reach `SqliteDataSource::load()`, so
+    /// this path is defense-in-depth only. This test pins the current behavior:
+    /// comment-prefixed queries produce a DML-rejection `ParseError`. A future story
+    /// may relax this by stripping comments before the prefix check; this test must
+    /// be updated at that time.
+    ///
+    /// Load-bearing (TD-VSDD-059): if the SELECT-prefix check is changed to strip
+    /// comments first, this test will fail and remind the implementer to document
+    /// the intentional behavioral change.
+    ///
+    /// Traces to BC-1.03.007 invariant 5, F-PASS20-LOW-2.
+    #[test]
+    #[serial(load_call_count)]
+    fn test_sqlite_comment_prefix_query_rejected_as_dml() {
+        // File does not need to exist — DML check fires before file I/O.
+        // Extension check fires before DML check; use a valid .db extension.
+        let src =
+            SqliteDataSource::new("/tmp/irrelevant.db", "-- comment\nSELECT * FROM t");
+        let err = src.load("", &default_opts()).unwrap_err();
+
+        // Must be a ParseError (DML-rejection path).
+        assert!(
+            matches!(
+                err,
+                slideforge_plugin_api::DataSourceError::ParseError { .. }
+            ),
+            "comment-prefix query must produce DataSourceError::ParseError, got: {err:?}"
+        );
+        let msg = err.to_string();
+        // Must contain the DML-rejection message fragment.
+        assert!(
+            msg.contains("only SELECT queries are allowed"),
+            "comment-prefix query must produce DML-rejection message; got: {msg}"
+        );
+        // Must contain the error code.
+        assert!(
+            msg.contains("[E-DAT-003]"),
+            "DML-rejection message must embed '[E-DAT-003]'; got: {msg}"
+        );
+    }
 }
