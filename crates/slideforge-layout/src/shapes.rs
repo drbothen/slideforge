@@ -195,6 +195,13 @@ pub fn layout_shapes(
 
         // Resolve alt text — MissingAlt is accumulated (not bail-on-first)
         // per BC-3.04.001 item G / DI-018.
+        //
+        // Layout trusts validator's alt-text checks; blank alt strings should not
+        // reach this point under the default --validate pipeline.  The
+        // slideforge-validate alt-text validator (W-A11-002) gates blank / whitespace
+        // alt before layout runs.  See STORY-015 (alt-text enforcement) if a
+        // blank-alt-bypass guard at the layout boundary becomes a documented concern
+        // (e.g., when --no-validate mode is formally specified).
         let alt = match &shape.alt {
             Some(slideforge_types::AltText::Provided(s)) => Some(Arc::clone(s)),
             Some(slideforge_types::AltText::Decorative) | None => None,
@@ -355,8 +362,9 @@ pub fn build_fill_spec(fill_keyword: Option<&str>) -> FillSpec {
 /// accessibility annotation. Silently preferring `AltText::Decorative` (which
 /// suppresses all screen-reader output) when the author also supplied meaningful
 /// text would be an accessibility regression. This "alt wins" rule is the correct
-/// default per WCAG AA. No warning is emitted because the outcome — an accessible
-/// shape with explicit alt — is unambiguously correct.
+/// default per WCAG AA. No warning is emitted *by layout*; the `slideforge-validate`
+/// `alt-text` validator emits W-A11-002 to surface the ambiguity (see BC-3.04.001
+/// v1.5.0 Invariant 11 and BC-5.01.002 v1.2).
 ///
 /// # Errors
 ///
@@ -1712,6 +1720,41 @@ mod tests {
             ),
             "build_fill_spec with '#003766' must return FillSpec::SolidColor; got: {fill:?}"
         );
+    }
+
+    /// BC-3.04.001 v1.5.0 Invariant 11 — when both `alt: Some(s)` and `decorative: true`
+    /// are supplied to `build_shape_frame`, alt text WINS and the result is
+    /// `AltText::Provided(s)` with the decorative flag ignored.
+    ///
+    /// Load-bearing: swap the match arm order in `build_shape_frame` so that
+    /// `(_, true) => AltText::Decorative` is checked before `(Some(s), _)`,
+    /// and this test MUST fail with `AltText::Decorative` instead of `AltText::Provided`.
+    #[test]
+    fn test_bc_3_04_001_invariant_11_alt_wins_over_decorative() {
+        let result = build_shape_frame(
+            ShapeType::Rect,
+            FillSpec::None,
+            None,
+            Some(Arc::from("Blue rect")), // alt text present
+            true,                          // decorative: true — must lose to alt
+            0,
+            &SourceSpan::default(),
+        );
+        let frame = result.expect("alt + decorative=true must succeed (Invariant 11: alt wins)");
+        match &frame.alt {
+            slideforge_types::AltText::Provided(s) => {
+                assert_eq!(
+                    s.as_ref(),
+                    "Blue rect",
+                    "alt must be preserved (Invariant 11)"
+                );
+            },
+            slideforge_types::AltText::Decorative => {
+                panic!(
+                    "decorative MUST NOT win when alt is present (BC-3.04.001 v1.5.0 Invariant 11)"
+                );
+            },
+        }
     }
 
     /// F-HIGH-004 — `build_shape_frame` with fill and alt produces a ShapeFrame
