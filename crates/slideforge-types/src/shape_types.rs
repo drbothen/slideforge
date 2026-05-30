@@ -66,7 +66,10 @@ pub enum FillSpec {
     /// No fill (transparent background).
     None,
     // NOTE: Gradient variant deferred to STORY-072 — not in v1.0.
-    // When added, update slideforge-layout/src/shapes.rs `build_fill_spec`.
+    // When added, the DSL parser path that produces FillSpec (slideforge-syntax
+    // shape parser) must handle the new keyword; build_fill_spec is a test-only
+    // helper and not part of the production fill path. See STORY-072 for gradient
+    // implementation scope.
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
