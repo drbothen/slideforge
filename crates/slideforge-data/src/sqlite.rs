@@ -506,15 +506,17 @@ fn validate_sqlite_extension(path: &str) -> Result<(), String> {
         // the XLSX reject_xls_extension pattern. Without this, a path such as
         // "/tmp/mydb" would render the confusing "'.'" in the error message.
         other => {
+            // BC-1.03.007 EC-010 specifies the format: "unsupported extension for
+            // SQLite data source: '<ext>'." — non-empty extensions MUST be
+            // single-quoted. The no-extension cosmetic case uses a prose string
+            // without quotes (OBS-PASS15-1), which is explicitly excluded from the
+            // BC-quoted format by the `if other.is_empty()` branch.
+            // F-PASS20-LOW-1: restore single quotes for non-empty extensions.
             let display_ext = if other.is_empty() {
                 "(no extension)".to_owned()
             } else {
-                format!(".{other}")
+                format!("'.{other}'")
             };
-            // OBS-PASS15-1: remove single-quote wrappers from display_ext to match
-            // the XLSX extensionless cosmetic style ("got (no extension)" not
-            // "got '(no extension)'"). No quotes is cleaner and consistent across
-            // both data source types.
             Err(format!(
                 "[{code}] unsupported extension for SQLite data source: {display_ext}. \
                 Accepted extensions: .db, .sqlite, .sqlite3",
@@ -2484,6 +2486,38 @@ mod tests {
         assert!(
             logs_contain("opts.query"),
             "warn! must mention 'opts.query' when the option is set; no warning was captured"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // F-PASS20-LOW-1: EC-010 extension error must wrap extension in single quotes.
+    // BC-1.03.007 EC-010 spec: "unsupported extension for SQLite data source: '<ext>'."
+    // ---------------------------------------------------------------------------
+
+    /// `test_f_pass20_low1_ec010_extension_wrapped_in_single_quotes` -- `.db3` rejection
+    /// message must contain `'.db3'` with single quotes per BC-1.03.007 EC-010.
+    ///
+    /// BC-1.03.007 EC-010 specifies the error message format with `'<ext>'` (single-quoted
+    /// extension). A previous adversary pass (OBS-PASS15-1) removed quotes for the
+    /// no-extension cosmetic case; F-PASS20-LOW-1 confirms the non-empty extension path
+    /// uses quotes as the spec requires.
+    ///
+    /// Load-bearing (TD-VSDD-059): if `validate_sqlite_extension` drops the single-quote
+    /// wrappers around non-empty extensions, the `msg.contains("'.db3'")` assertion fails.
+    ///
+    /// Traces to BC-1.03.007 EC-010, F-PASS20-LOW-1.
+    #[test]
+    #[serial(load_call_count)]
+    fn test_f_pass20_low1_ec010_extension_wrapped_in_single_quotes() {
+        // File does not need to exist — extension check fires before file I/O.
+        let src = SqliteDataSource::new("/tmp/database.db3", "SELECT 1");
+        let err = src.load("", &default_opts()).unwrap_err();
+
+        let msg = err.to_string();
+        // BC-1.03.007 EC-010 strict: extension must appear in single quotes.
+        assert!(
+            msg.contains("'.db3'"),
+            "EC-010 extension error must contain \"'.db3'\" (single-quoted); got: {msg}"
         );
     }
 }
