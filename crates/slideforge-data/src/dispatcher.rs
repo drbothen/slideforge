@@ -67,9 +67,7 @@ use slideforge_types::Value;
 
 use crate::DataError;
 use crate::context::DataSourceContext;
-use crate::error::{
-    E_DAT_001, E_DAT_002, E_DAT_003, E_DAT_004, E_DAT_006, E_DAT_006_POLICY, E_DAT_015,
-};
+use crate::error::{E_DAT_001, E_DAT_002, E_DAT_003, E_DAT_004, E_DAT_006, E_DAT_015};
 
 /// Load all configured data sources, applying the offline gate.
 ///
@@ -165,15 +163,17 @@ pub fn load_all(
 ///
 /// ## Code-to-variant routing
 ///
-/// | Bracket code in message | Routed to variant |
-/// |-------------------------|-------------------|
-/// | `[E-DAT-001]`           | `DataError::HttpError` |
-/// | `[E-DAT-002]`           | `DataError::NetworkError` |
-/// | `[E-DAT-004]`           | `DataError::FileNotFound` |
-/// | `[E-DAT-006]` (in IoError)   | `DataError::PolicyRejected` (body-size cap) |
-/// | `[E-DAT-006]` (in ParseError)| `DataError::SsrfBlocked` |
-/// | `[E-DAT-003]`           | `DataError::ParseError` |
-/// | *(no bracket code)*     | Generic `DataError::UnspecifiedSourceError` with full message |
+/// | Bracket code + label in message                   | Routed to variant |
+/// |---------------------------------------------------|-------------------|
+/// | `[E-DAT-001]` + HTTP status                       | `DataError::HttpError` |
+/// | `[E-DAT-001]` + no parseable status               | `DataError::IoError` (code `E-DAT-001`) |
+/// | `[E-DAT-002]`                                     | `DataError::NetworkError` |
+/// | `[E-DAT-004]` + `"file not found: "` label        | `DataError::FileNotFound` |
+/// | `[E-DAT-004]` + any other label (I/O error, etc.) | `DataError::IoError` |
+/// | `[E-DAT-006]` (in IoError)                        | `DataError::PolicyRejected` (body-size cap) |
+/// | `[E-DAT-006]` (in ParseError)                     | `DataError::SsrfBlocked` |
+/// | `[E-DAT-003]`                                     | `DataError::ParseError` |
+/// | *(no bracket code)*                               | `DataError::UnspecifiedSourceError` |
 #[must_use]
 fn map_source_error(name: &Arc<str>, err: &DataSourceError) -> DataError {
     let message: Arc<str> = Arc::from(err.to_string());
@@ -246,15 +246,48 @@ fn map_source_error(name: &Arc<str>, err: &DataSourceError) -> DataError {
                     span: slideforge_types::SourceSpan::default(),
                 }
             } else if inner_msg.contains(E_DAT_004) || message.contains(E_DAT_004) {
-                // File-not-found: surface as FileNotFound.
-                // FINDING-4 fix: extract the actual missing path from the bracket-coded
-                // message tail (after "[E-DAT-004] file not found: <path>") so users
-                // see the real path, not just the URI.
-                let actual_path = extract_path_after_code(inner_msg).unwrap_or(uri.as_str());
-                DataError::FileNotFound {
-                    code: E_DAT_004,
-                    path: Arc::from(actual_path),
-                    span: slideforge_types::SourceSpan::default(),
+                // Route to FileNotFound OR IoError depending on the label in the message.
+                //
+                // F-P4-HIGH-001 fix: `[E-DAT-004]` is shared by two `DataError` variants:
+                //   - `FileNotFound` ("file not found: <path>") — file absent
+                //   - `IoError` ("I/O error reading '<path>': <msg>") — OS error (permission, etc.)
+                //
+                // The dispatcher must inspect the label AFTER the bracket code to choose
+                // the correct variant. `message_is_file_not_found` returns true only for
+                // the "file not found:" label; all other labels (I/O error reading, failed
+                // to open file, etc.) map to `DataError::IoError`.
+                let source_msg = if inner_msg.contains(E_DAT_004) {
+                    inner_msg.as_str()
+                } else {
+                    message.as_ref()
+                };
+                if message_is_file_not_found(source_msg) {
+                    // FINDING-4 fix: extract the actual missing path from the bracket-coded
+                    // message tail (after "[E-DAT-004] file not found: <path>") so users
+                    // see the real path, not just the URI.
+                    let actual_path = extract_path_after_code(source_msg).unwrap_or(uri.as_str());
+                    DataError::FileNotFound {
+                        code: E_DAT_004,
+                        path: Arc::from(actual_path),
+                        span: slideforge_types::SourceSpan::default(),
+                    }
+                } else {
+                    // I/O error (e.g., permission denied, header read failure).
+                    // Extract path from the message; fall back to the URI.
+                    let path = extract_path_after_code(source_msg).unwrap_or(uri.as_str());
+                    // Strip the bracket code + label from the message to avoid double-prefix
+                    // when stored into IoError (whose Display prepends "[E-DAT-004] I/O error
+                    // reading…").
+                    let clean_msg = strip_bracket_prefix(source_msg);
+                    // Also strip any canonical label prefixes so the stored message is the
+                    // bare OS reason string (e.g., "permission denied").
+                    let bare_msg = extract_bare_io_reason(clean_msg);
+                    DataError::IoError {
+                        code: E_DAT_004,
+                        path: Arc::from(path),
+                        message: Arc::from(bare_msg),
+                        span: slideforge_types::SourceSpan::default(),
+                    }
                 }
             } else if inner_msg.contains(E_DAT_006) || message.contains(E_DAT_006) {
                 // F-P3-MED-002 fix (structural): E-DAT-006 in an IoError arm means the HTTP
@@ -265,7 +298,11 @@ fn map_source_error(name: &Arc<str>, err: &DataSourceError) -> DataError {
                 // decision. Also strip the [E-DAT-006] bracket prefix from the message to
                 // prevent double-bracket in the Display.
                 DataError::PolicyRejected {
-                    code: E_DAT_006_POLICY,
+                    // E-DAT-006: body-cap policy rejection (vs. SSRF — both share the
+                    // code but route to different DataError variants: SsrfBlocked for
+                    // SSRF domain blocks, PolicyRejected for body-size cap and similar
+                    // policy rejections).
+                    code: E_DAT_006,
                     uri: Arc::from(uri.as_str()),
                     message: Arc::from(strip_bracket_prefix(inner_msg)),
                     span: slideforge_types::SourceSpan::default(),
@@ -280,8 +317,11 @@ fn map_source_error(name: &Arc<str>, err: &DataSourceError) -> DataError {
                 // `err.to_string()` which wraps it in a second IoError layer) to avoid
                 // the "I/O error reading" prefix appearing twice in the Display output.
                 //
-                // Emit a tracing::warn! to instruct plugin authors to embed [E-DAT-NNN].
-                tracing::warn!(
+                // F-P4-LOW-004 fix: emit at `debug!` (not `warn!`) so watch-mode doesn't
+                // flood logs when a third-party plugin doesn't embed [E-DAT-NNN].
+                // This is developer-guidance, not an operational alert. Plugin authors who
+                // consult the dispatcher docs or trace output will see it at debug level.
+                tracing::debug!(
                     "dispatcher: data source error for binding '{}' has no [E-DAT-NNN] \
                     bracket code in message. Routed to E-DAT-015 (unspecified). \
                     Plugin authors: embed [E-DAT-NNN] in error messages for precise routing.",
@@ -404,7 +444,11 @@ fn strip_bracket_prefix(msg: &str) -> &str {
     let window = if msg.len() < 16 { msg.len() } else { 16 };
     if let Some(close) = msg[..window].find(']') {
         // Skip past ']' and any immediately following space.
-        msg[close + 1..].trim_start()
+        let stripped = msg[close + 1..].trim_start();
+        // F-P4-LOW-002 fix: if stripping leaves an empty string (e.g., input "[E-DAT-006]"
+        // with no body), fall back to the original input to avoid emitting an empty message
+        // that would produce double-space in Display format.
+        if stripped.is_empty() { msg } else { stripped }
     } else {
         msg
     }
@@ -445,8 +489,74 @@ fn extract_http_status(message: &str) -> Result<u16, &'static str> {
         .map_err(|_| "status digits overflow u16")
 }
 
+/// Extract the bare OS reason string from a bracket-stripped I/O error message.
+///
+/// Built-in sources format I/O error messages as:
+/// - `"I/O error reading '<path>': <reason> (at ...)"`
+/// - `"failed to open file '<path>': <reason> (at ...)"`
+/// - `"failed to read file header '<path>': <reason> (at ...)"`
+///
+/// This function strips the label + path prefix and the trailing span annotation
+/// to return just the OS reason string (e.g., `"permission denied"`).
+///
+/// When no recognized prefix is found, returns the input trimmed.
+fn extract_bare_io_reason(clean_msg: &str) -> &str {
+    /// Strip a quoted-path prefix of the form `"<label>'<path>': "` from `s`
+    /// and return everything after the `": "` separator.
+    fn strip_quoted_label<'a>(s: &'a str, label: &str) -> Option<&'a str> {
+        s.strip_prefix(label)
+            .and_then(|rest| rest.split_once("': ").map(|(_, after)| after))
+    }
+    let after_label = strip_quoted_label(clean_msg, "I/O error reading '")
+        .or_else(|| strip_quoted_label(clean_msg, "failed to open file '"))
+        .or_else(|| strip_quoted_label(clean_msg, "failed to read file header '"))
+        .unwrap_or(clean_msg);
+    // Strip trailing " (at …)" span annotation.
+    if let Some((before, _)) = after_label.rsplit_once(" (at ") {
+        before.trim()
+    } else {
+        after_label.trim()
+    }
+}
+
+/// Classify whether a bracket-coded message indicates "file not found" or a
+/// generic I/O error.
+///
+/// Built-in sources embed `[E-DAT-004]` for both file-not-found (the `FileNotFound`
+/// variant) and general I/O errors (the `IoError` variant, e.g., permission denied).
+/// The dispatcher must inspect the label that follows the bracket code to choose the
+/// correct target variant.
+///
+/// ## Decision table
+///
+/// | Label prefix after `[E-DAT-004]` | Variant |
+/// |-----------------------------------|---------|
+/// | `"file not found: "`              | `DataError::FileNotFound` |
+/// | `"I/O error reading '"`           | `DataError::IoError` |
+/// | `"I/O error: "`                   | `DataError::IoError` (legacy label) |
+/// | `"failed to open file '"`         | `DataError::IoError` (`SQLite` magic-check) |
+/// | `"failed to read file header '"`  | `DataError::IoError` (`SQLite` magic-check) |
+/// | *(anything else)*                 | `DataError::IoError` (conservative default) |
+///
+/// Returns `true` when the message is a "file not found" message, `false` for any
+/// I/O error variant.
+fn message_is_file_not_found(message: &str) -> bool {
+    // Skip the bracket code to the label text.
+    let after_bracket = match message.find(']') {
+        Some(pos) => message
+            .get(pos.saturating_add(1)..)
+            .unwrap_or("")
+            .trim_start(),
+        None => return false,
+    };
+    // Only the "file not found:" label routes to FileNotFound.
+    // All other labels (I/O error reading, failed to open file, etc.) route to IoError.
+    after_bracket.starts_with("file not found: ")
+}
+
 /// Extract the path component from a bracket-coded message of the form
-/// `"[E-DAT-NNN] <label>: <path>"` or `"[E-DAT-NNN] <label>: <path> (at ...)"`.
+/// `"[E-DAT-NNN] <label>: <path>"`, `"[E-DAT-NNN] <label>: '<path>'"`,
+/// or `"[E-DAT-NNN] <label>: <path> (at ...)"`.
 ///
 /// The bracket code format used by built-in sources is `[E-DAT-NNN]` (no colon
 /// inside the bracket), so the content after the bracket starts with a space
@@ -456,7 +566,10 @@ fn extract_http_status(message: &str) -> Result<u16, &'static str> {
 /// ## Known label prefixes
 ///
 /// - `"file not found: "` — emitted by `FileDataSource`
-/// - `"I/O error: "` — emitted by `FileDataSource` on permission/OS errors
+/// - `"I/O error: "` — emitted by `FileDataSource` on permission/OS errors (legacy)
+/// - `"I/O error reading '"` — canonical `DataError::IoError` Display format
+/// - `"failed to open file '"` — emitted by `validate_sqlite_magic`
+/// - `"failed to read file header '"` — emitted by `validate_sqlite_magic`
 ///
 /// ## Return value
 ///
@@ -477,18 +590,30 @@ fn extract_path_after_code(message: &str) -> Option<&str> {
     // any leading space so we're positioned at the label + path content.
     let close_bracket = message.find(']')?;
     let after_bracket = message.get(close_bracket.checked_add(1)?..)?.trim_start();
-    // Strip everything after " (at " if present (span annotation).
-    let with_label = if let Some(at_pos) = after_bracket.find(" (at ") {
-        after_bracket.get(..at_pos)?
+    // Use rsplit_once so paths containing " (at " are handled correctly
+    // (F-P4-LOW-001 fix: first-match `find` would truncate such paths).
+    let with_label = if let Some((before_at, _)) = after_bracket.rsplit_once(" (at ") {
+        before_at
     } else {
         after_bracket
     };
     // Strip ONLY recognized label prefixes. Return None for unrecognized prefixes
     // so callers fall back to uri.as_str() rather than leaking the label text.
+    //
+    // Labels that end with a bare colon+space have a plain path following them.
+    // Labels that end with a single-quote have a quoted path: strip the opening
+    // quote and read up to (but not including) the next single-quote.
     let clean = if let Some(rest) = with_label.strip_prefix("file not found: ") {
         rest.trim()
     } else if let Some(rest) = with_label.strip_prefix("I/O error: ") {
         rest.trim()
+    } else if let Some(rest) = with_label.strip_prefix("I/O error reading '") {
+        // Quoted path: read up to the closing single-quote.
+        rest.split('\'').next().unwrap_or(rest).trim()
+    } else if let Some(rest) = with_label.strip_prefix("failed to open file '") {
+        rest.split('\'').next().unwrap_or(rest).trim()
+    } else if let Some(rest) = with_label.strip_prefix("failed to read file header '") {
+        rest.split('\'').next().unwrap_or(rest).trim()
     } else {
         // Unrecognized prefix — signal the caller to fall back to uri.as_str().
         return None;
@@ -1257,16 +1382,23 @@ mod tests {
     ///
     /// F-P3-MED-001: When the message starts with `[` but no closing `]` is found
     /// within 16 characters, return the input unchanged (conservative fallback).
+    ///
+    /// F-P4-LOW-003: Pin the exact return value for the long-bracket case (not just
+    /// non-empty). `strip_bracket_prefix` is documented to return the original string
+    /// unchanged when no `]` appears within the 16-character window.
     #[test]
     fn test_strip_bracket_prefix_leaves_malformed_bracket_unchanged() {
-        // No closing bracket at all.
+        // No closing bracket at all — returns input unchanged.
         assert_eq!(strip_bracket_prefix("[MALFORMED"), "[MALFORMED");
-        // Closing bracket beyond position 15 — treated as not our format.
+        // Closing bracket beyond position 15 — no `]` in the 16-char window, so the
+        // function returns the original string unchanged (documented contract).
         let long = "[THIS-IS-A-VERY-LONG-CODE] rest";
-        let result = strip_bracket_prefix(long);
-        // Either returns original (no ']' in window) or strips it — both are safe.
-        // The important thing: no panic.
-        assert!(!result.is_empty());
+        assert_eq!(
+            strip_bracket_prefix(long),
+            long,
+            "strip_bracket_prefix must return the original string unchanged when ']' \
+            is not within the first 16 characters (no-bracket-in-window contract)"
+        );
     }
 
     // ---------------------------------------------------------------------------
@@ -1430,6 +1562,172 @@ mod tests {
         assert!(
             display.to_lowercase().contains("auth"),
             "AuthError Display must mention 'auth'; got: {display}"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // F-P4-HIGH-001: permission-denied I/O error must route to DataError::IoError,
+    // not DataError::FileNotFound.
+    // ---------------------------------------------------------------------------
+
+    /// `test_bc_1_03_004_dispatcher_routes_permission_denied_to_ioerror_not_filenotfound`
+    ///
+    /// F-P4-HIGH-001: When an `IoError` message contains `[E-DAT-004]` but with the
+    /// "I/O error reading" label (not "file not found"), the dispatcher must route to
+    /// `DataError::IoError`, NOT `DataError::FileNotFound`.
+    ///
+    /// This test exercises the label-discrimination logic in the E-DAT-004 routing arm
+    /// via a synthetic message that matches the canonical `DataError::IoError` Display
+    /// format, avoiding a live `chmod 0o000` dependency (which is platform-specific).
+    ///
+    /// The live-file variant is covered by the `#[cfg(unix)]` test below.
+    #[test]
+    fn test_bc_1_03_004_dispatcher_routes_ioerror_label_to_ioerror_variant() {
+        // Simulate what file.rs produces when DataError::IoError is translated via
+        // err.to_string(): "[E-DAT-004] I/O error reading '/tmp/locked.csv': permission denied (at ...)"
+        let sources = single_error_source(
+            "locked",
+            DataSourceError::IoError {
+                uri: "/tmp/locked.csv".to_owned(),
+                message: "[E-DAT-004] I/O error reading '/tmp/locked.csv': \
+                    permission denied (at src:1:1)"
+                    .to_owned(),
+            },
+        );
+        let ctx = DataSourceContext::new();
+        let (_scope, errors) = load_all(&sources, &ctx);
+        assert_eq!(errors.len(), 1, "expected exactly one error");
+        // Must NOT be FileNotFound — permission denied is an I/O error, not absence.
+        assert!(
+            !matches!(errors[0], DataError::FileNotFound { .. }),
+            "permission-denied error must NOT route to FileNotFound; got: {:?}",
+            errors[0]
+        );
+        // Must be IoError.
+        assert!(
+            matches!(errors[0], DataError::IoError { .. }),
+            "permission-denied error must route to IoError; got: {:?}",
+            errors[0]
+        );
+        assert_eq!(
+            errors[0].code(),
+            "E-DAT-004",
+            "IoError code must be E-DAT-004; got: {}",
+            errors[0].code()
+        );
+        let display = errors[0].to_string();
+        assert!(
+            display.contains("permission denied"),
+            "IoError Display must include the OS reason 'permission denied'; got: {display}"
+        );
+        assert!(
+            display.contains("/tmp/locked.csv"),
+            "IoError Display must include the path; got: {display}"
+        );
+        // Must NOT say "file not found" — that implies the file is absent.
+        assert!(
+            !display.contains("file not found"),
+            "permission-denied error Display must NOT say 'file not found'; got: {display}"
+        );
+    }
+
+    /// `test_bc_1_03_004_dispatcher_routes_permission_denied_to_ioerror_not_filenotfound`
+    ///
+    /// F-P4-HIGH-001 (live-file variant): Use a real file with `chmod 0o000` on Unix
+    /// to confirm the full pipeline from `FileDataSource::load` through the dispatcher
+    /// routes to `DataError::IoError`, not `DataError::FileNotFound`.
+    ///
+    /// Skipped on non-Unix platforms (Windows does not honour `chmod 0o000` at the OS
+    /// level — the equivalent is a read-locked file which requires different setup).
+    #[test]
+    #[cfg(unix)]
+    fn test_bc_1_03_004_dispatcher_routes_permission_denied_to_ioerror_not_filenotfound() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        use crate::file::FileDataSource;
+
+        // Use a `.json` suffix so FileDataSource recognises the extension and
+        // proceeds to the open() call where EACCES is triggered. Without an
+        // extension the source returns UnsupportedFormat before any I/O attempt.
+        let tmp = tempfile::Builder::new()
+            .suffix(".json")
+            .tempfile()
+            .expect("tmpfile");
+        let path = tmp.path().to_str().expect("utf8 path").to_owned();
+
+        // Write something so the file exists (file-not-found wouldn't reproduce the bug).
+        std::fs::write(&path, b"{}").expect("write");
+
+        // Remove all permissions so any open attempt is EACCES.
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000))
+            .expect("chmod 0o000");
+
+        let source = FileDataSource::new(path.as_str());
+        let sources: Vec<(Arc<str>, Box<dyn slideforge_plugin_api::DataSource>)> =
+            vec![(Arc::from("locked"), Box::new(source))];
+        let ctx = DataSourceContext::new();
+        let (_scope, errors) = load_all(&sources, &ctx);
+
+        // Restore permissions so the temp file can be cleaned up.
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644));
+
+        assert_eq!(errors.len(), 1, "expected exactly one error");
+        assert!(
+            !matches!(errors[0], DataError::FileNotFound { .. }),
+            "permission-denied on existing file must NOT route to FileNotFound; got: {:?}",
+            errors[0]
+        );
+        assert!(
+            matches!(errors[0], DataError::IoError { .. }),
+            "permission-denied on existing file must route to IoError; got: {:?}",
+            errors[0]
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // F-P4-LOW-001: extract_path_after_code handles paths containing " (at "
+    // ---------------------------------------------------------------------------
+
+    /// `test_extract_path_after_code_handles_path_containing_at_in_label`
+    ///
+    /// F-P4-LOW-001: `extract_path_after_code` uses `rsplit_once(" (at ")` so the
+    /// trailing span annotation (always last) is identified correctly even when the
+    /// path itself contains the substring `" (at "`.
+    #[test]
+    fn test_extract_path_after_code_handles_path_containing_at_in_label() {
+        // Path contains " (at noon)" — first-match `find` would truncate here.
+        let msg = "[E-DAT-004] file not found: /tmp/oddly named (at noon)/file.json \
+                   (at SourceSpan { line: 1, col: 1 })";
+        let result = extract_path_after_code(msg);
+        assert_eq!(
+            result,
+            Some("/tmp/oddly named (at noon)/file.json"),
+            "extract_path_after_code must use rsplit_once so paths with ' (at ' are not \
+            truncated; got: {result:?}"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // F-P4-LOW-002: strip_bracket_prefix empty-body falls back to input
+    // ---------------------------------------------------------------------------
+
+    /// `test_strip_bracket_prefix_empty_body_falls_back_to_input`
+    ///
+    /// F-P4-LOW-002: When stripping leaves an empty string (e.g., input `"[E-DAT-006]"`
+    /// with no body), the function must return the original input rather than an empty
+    /// string. This prevents double-space in Display output like `"[E-DAT-006]  (at ...)"`.
+    #[test]
+    fn test_strip_bracket_prefix_empty_body_falls_back_to_input() {
+        // No body after the bracket — stripping would yield ""; fall back to input.
+        assert_eq!(
+            strip_bracket_prefix("[E-DAT-006]"),
+            "[E-DAT-006]",
+            "strip_bracket_prefix must return original input when stripping yields empty string"
+        );
+        // Normal case still strips correctly.
+        assert_eq!(
+            strip_bracket_prefix("[E-DAT-006] body exceeded"),
+            "body exceeded"
         );
     }
 }

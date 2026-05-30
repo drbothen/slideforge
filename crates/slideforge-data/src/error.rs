@@ -96,19 +96,10 @@ pub const E_DAT_014: &str = "E-DAT-014";
 /// fallback is triggered.
 pub const E_DAT_015: &str = "E-DAT-015";
 
-/// Error code for data-policy rejection (HTTP body-size cap exceeded, etc.).
-///
-/// Maps to `E-DAT-006` in the error taxonomy (policy sub-case, distinct from SSRF).
-///
-/// Used by the dispatcher when an HTTP source's response body exceeds the configured
-/// cap. This is a policy-level rejection (not an I/O failure, not an SSRF block),
-/// so it routes to [`DataError::PolicyRejected`] rather than [`DataError::IoError`]
-/// (which implies I/O failure) or [`DataError::SsrfBlocked`] (which implies an
-/// SSRF-domain block).
-///
-/// The constant reuses `E-DAT-006` because the taxonomy documents the body-cap as
-/// a sub-case of the same security-policy error category.
-pub const E_DAT_006_POLICY: &str = "E-DAT-006";
+// F-P4-OBS-001: E_DAT_006_POLICY alias removed. The dispatcher now uses E_DAT_006
+// directly at the single PolicyRejected construction site, with an inline comment
+// explaining the dual-sub-case semantics (SSRF vs body-cap). The alias was
+// documentary-only and carried no load-bearing semantic distinction.
 
 /// The top-level error type for all `slideforge-data` operations.
 ///
@@ -178,10 +169,12 @@ pub enum DataError {
 
     /// A generic I/O error that is not a simple file-not-found.
     ///
-    /// Error code: `E-DAT-004` (I/O error sub-case).
+    /// Error code: `E-DAT-004` by default; can carry `E-DAT-001` in the dispatcher's
+    /// HTTP-fallback path when an HTTP status code cannot be extracted from the message.
+    /// Body-cap policy rejections use [`DataError::PolicyRejected`] instead of `IoError`.
     #[error("[{code}] I/O error reading '{path}': {message} (at {span})")]
     IoError {
-        /// The error code constant (`E-DAT-004`).
+        /// The error code constant (`E-DAT-004` by default; `E-DAT-001` in HTTP fallback).
         code: &'static str,
         /// The path that triggered the I/O error.
         path: Arc<str>,
@@ -597,8 +590,10 @@ impl DataError {
     ///
     /// Returns the specific code stored in the variant for [`DataError::ParseError`],
     /// [`DataError::FileNotFound`], and [`DataError::IoError`] — the stored `code`
-    /// field is authoritative. This allows `IoError` to carry `E-DAT-006` for
-    /// HTTP body-cap rejections while still using the same variant.
+    /// field is authoritative. This allows `IoError` to carry `E-DAT-001` in the
+    /// dispatcher's HTTP-fallback path and `ParseError` to carry granular format codes
+    /// without requiring distinct variants. Body-cap policy rejections route to
+    /// [`DataError::PolicyRejected`] (not `IoError`).
     ///
     /// For all other variants the code is determined by the discriminant.
     #[must_use]
@@ -606,7 +601,7 @@ impl DataError {
         match self {
             // Variants that store the specific code directly — return it without
             // overriding. `FileNotFound` and `IoError` both use E_DAT_004 by default,
-            // but `IoError` may carry E_DAT_006 for HTTP body-size cap rejections.
+            // but `IoError` may carry E_DAT_001 in the dispatcher's HTTP-fallback path.
             // `ParseError` may carry granular sub-codes (E_DAT_009, E_DAT_010, etc.).
             DataError::FileNotFound { code, .. }
             | DataError::IoError { code, .. }
@@ -867,5 +862,97 @@ mod tests {
         assert_eq!(err_with_span.code(), "E-DAT-002");
         let msg = err_with_span.to_string();
         assert!(msg.contains("connection refused"));
+    }
+
+    // ---------------------------------------------------------------------------
+    // F-P4-MED-002: PolicyRejected unit tests
+    // ---------------------------------------------------------------------------
+
+    /// `test_policy_rejected_code_is_e_dat_006`
+    ///
+    /// F-P4-MED-002: `DataError::PolicyRejected` must carry code `E-DAT-006`.
+    #[test]
+    fn test_policy_rejected_code_is_e_dat_006() {
+        let err = DataError::PolicyRejected {
+            code: E_DAT_006,
+            uri: Arc::from("http://example.com"),
+            message: Arc::from("body too big"),
+            span: SourceSpan::default(),
+        };
+        assert_eq!(
+            err.code(),
+            "E-DAT-006",
+            "PolicyRejected must carry E-DAT-006; got: {}",
+            err.code()
+        );
+    }
+
+    /// `test_policy_rejected_display_format`
+    ///
+    /// F-P4-MED-002: `DataError::PolicyRejected` Display must match the canonical
+    /// format `"[E-DAT-006] data policy rejected '<uri>': <message> (at <span>)"`.
+    #[test]
+    fn test_policy_rejected_display_format() {
+        let span = SourceSpan::new(Arc::from("deck.sf"), 1, 1, 0);
+        let err = DataError::PolicyRejected {
+            code: E_DAT_006,
+            uri: Arc::from("http://example.com"),
+            message: Arc::from("body too big"),
+            span,
+        };
+        let display = err.to_string();
+        assert!(
+            display.contains("[E-DAT-006]"),
+            "PolicyRejected Display must contain [E-DAT-006]; got: {display}"
+        );
+        assert!(
+            display.contains("data policy rejected"),
+            "PolicyRejected Display must contain 'data policy rejected'; got: {display}"
+        );
+        assert!(
+            display.contains("http://example.com"),
+            "PolicyRejected Display must contain the URI; got: {display}"
+        );
+        assert!(
+            display.contains("body too big"),
+            "PolicyRejected Display must contain the message; got: {display}"
+        );
+        assert!(
+            display.contains("deck.sf"),
+            "PolicyRejected Display must contain the span file; got: {display}"
+        );
+    }
+
+    /// `test_policy_rejected_with_span_replaces_span`
+    ///
+    /// F-P4-MED-002: `with_span()` on `PolicyRejected` must replace the span while
+    /// preserving `code`, `uri`, and `message`.
+    #[test]
+    fn test_policy_rejected_with_span_replaces_span() {
+        let original_span = SourceSpan::default();
+        let err = DataError::PolicyRejected {
+            code: E_DAT_006,
+            uri: Arc::from("http://example.com"),
+            message: Arc::from("body too big"),
+            span: original_span,
+        };
+        let new_span = SourceSpan::new(Arc::from("slide.sf"), 5, 3, 80);
+        let updated = err.with_span(new_span);
+        // Code and URI and message must be preserved.
+        assert_eq!(updated.code(), "E-DAT-006");
+        let display = updated.to_string();
+        assert!(
+            display.contains("http://example.com"),
+            "with_span must preserve URI; got: {display}"
+        );
+        assert!(
+            display.contains("body too big"),
+            "with_span must preserve message; got: {display}"
+        );
+        // New span must appear.
+        assert!(
+            display.contains("slide.sf"),
+            "with_span must replace span (new file 'slide.sf' must appear); got: {display}"
+        );
     }
 }
