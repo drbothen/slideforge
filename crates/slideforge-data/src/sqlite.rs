@@ -101,7 +101,14 @@ pub(crate) static OPEN_READONLY_CALL_COUNT: std::sync::atomic::AtomicUsize =
 pub struct SqliteDataSource {
     /// The path to the `SQLite` database file.
     ///
-    /// Use `":memory:"` for in-memory databases (useful in tests).
+    /// Must be one of the supported extensions: `.db`, `.sqlite`, or `.sqlite3`.
+    /// The path is validated by [`SqliteDataSource::load`] before opening.
+    ///
+    /// Note: `":memory:"` is NOT supported via this field — `:memory:` is a
+    /// `rusqlite` connection string, not a file path, and will be rejected by
+    /// the extension validator. In-memory databases are created directly with
+    /// `rusqlite::Connection::open_in_memory()` in test helpers; they are not
+    /// accessible through the `DataSource` trait.
     pub path: Arc<str>,
 
     /// The SELECT query to execute against the database.
