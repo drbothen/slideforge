@@ -201,31 +201,13 @@ impl FileDataSource {
         // Traces to BC-1.03.006 and BC-1.03.007 end-to-end load path.
         match format {
             DataFormat::Xlsx => {
-                // Delegate to XlsxDataSource. No query needed for XLSX.
-                // uri convention: pass the resolved path as the uri (non-empty → XlsxDataSource uses it).
+                // Delegate to XlsxDataSource via load_internal, which returns DataError directly.
+                // This avoids the DataError → DataSourceError → DataError double-wrap that
+                // occurred when calling load() + re-wrapping (F-PASS26-MED-1): the inner error
+                // code (e.g. E-DAT-011 for wrong magic bytes) was lost and replaced by E-DAT-003,
+                // and the bracket notation appeared twice in the user-visible message.
                 let src = XlsxDataSource::new(Arc::clone(&path_str));
-                let opts = slideforge_plugin_api::DataSourceOptions::default();
-                return src.load(path_str.as_ref(), &opts).map_err(|e| match e {
-                    slideforge_plugin_api::DataSourceError::IoError { message, .. } => {
-                        DataError::io_error(Arc::clone(&path_str), Arc::from(message.as_str()))
-                    },
-                    slideforge_plugin_api::DataSourceError::ParseError { message, .. } => {
-                        DataError::parse_error(&*path_str, format, message)
-                    },
-                    slideforge_plugin_api::DataSourceError::UnsupportedUri { uri } => {
-                        DataError::unsupported_format(Arc::from(uri.as_str()))
-                    },
-                    // AuthError is not expected from XlsxDataSource (no auth required),
-                    // but we handle it defensively to avoid wildcards on a growing enum.
-                    slideforge_plugin_api::DataSourceError::AuthError { uri } => {
-                        DataError::io_error(
-                            Arc::clone(&path_str),
-                            Arc::from(
-                                format!("unexpected auth error for xlsx uri: {uri}").as_str(),
-                            ),
-                        )
-                    },
-                });
+                return src.load_internal(path_str.as_ref());
             },
             DataFormat::Sqlite => {
                 // Delegate to SqliteDataSource. A query is required for SQLite;
@@ -305,11 +287,20 @@ impl DataSource for FileDataSource {
             DataError::UnsupportedFormat { extension, .. } => DataSourceError::UnsupportedUri {
                 uri: format!("{uri} (unsupported extension: {extension})"),
             },
-            // F-PASS18-MED-2: use err.to_string() so the [E-DAT-003] bracket code present in
-            // DataError::ParseError's Display format is preserved in the DataSourceError message.
-            err @ DataError::ParseError { .. } => DataSourceError::ParseError {
+            // F-PASS18-MED-2 / F-PASS26-MED-1: Translate DataError::ParseError into
+            // DataSourceError::ParseError without re-wrapping the boilerplate prefix.
+            //
+            // Using err.to_string() would produce "[E-DAT-NNN] parse error for 'path' (Fmt): reason"
+            // and then DataSourceError::ParseError Display adds "data parse error for 'uri': " —
+            // resulting in two "parse error for" phrases and (if the reason itself contains
+            // [E-DAT-NNN]) potentially two bracket codes.
+            //
+            // Instead: extract the granular code and reason directly, composing
+            // "[{code}] {reason}" as the DataSourceError message. The bracket code is preserved
+            // (satisfying F-PASS18-MED-2) and no boilerplate prefix is duplicated (F-PASS26-MED-1).
+            DataError::ParseError { code, reason, .. } => DataSourceError::ParseError {
                 uri: uri.to_owned(),
-                message: err.to_string(),
+                message: format!("[{code}] {reason}"),
             },
             // F-PASS18-MED-1: use err.to_string() for IoError ([E-DAT-004]) and
             // PathTraversalBlocked ([E-DAT-006]) so bracket codes are preserved.
@@ -904,6 +895,64 @@ mod tests {
         assert!(
             translated_message.contains("[E-DAT-006]"),
             "err.to_string() (used by translator after fix) must contain [E-DAT-006]; got: {translated_message}"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // F-PASS26-MED-1: XLSX dispatch through FileDataSource must not double-wrap errors.
+    // Before the fix, file.rs called XlsxDataSource::load() and re-wrapped
+    // DataSourceError::ParseError into DataError::parse_error(), which prepended
+    // "[E-DAT-003] parse error for..." around a message that already contained
+    // "[E-DAT-011] ...". The fix uses load_internal() which returns DataError directly.
+    // ---------------------------------------------------------------------------
+
+    /// `test_pass26_med1_xlsx_magic_byte_failure_no_double_bracket` — magic-byte failure
+    /// through `FileDataSource::load` must not produce duplicate `[E-DAT-` brackets.
+    ///
+    /// Regression test for F-PASS26-MED-1. Before the fix, the error message contained
+    /// `[E-DAT-003]` (outer wrapper) and `[E-DAT-011]` (inner granular code) — both
+    /// from the double-wrap. After the fix, only `[E-DAT-011]` appears.
+    ///
+    /// Load-bearing assertions (TD-VSDD-059):
+    /// - `msg.matches("[E-DAT-").count() == 1` — no duplicate bracket codes
+    /// - `msg.matches("parse error for").count() == 1` — no duplicate boilerplate prefix
+    /// - `msg.contains("[E-DAT-011]")` — granular code is preserved, NOT replaced by E-DAT-003
+    ///
+    /// Traces to F-PASS26-MED-1, BC-1.03.006 postcondition 9, VP-026.
+    #[test]
+    fn test_pass26_med1_xlsx_magic_byte_failure_no_double_bracket() {
+        // Create a file with .xlsx extension but wrong magic bytes (not a ZIP archive).
+        let f = temp_file_with_suffix(".xlsx", b"This is not a real xlsx file");
+        let src = loader();
+        let opts = DataSourceOptions::default();
+        let uri = f.path().to_str().unwrap();
+
+        let err = src
+            .load(uri, &opts)
+            .expect_err("magic-byte failure must return Err");
+
+        let msg = err.to_string();
+
+        // Load-bearing: no duplicate [E-DAT-... bracket codes.
+        let bracket_count = msg.matches("[E-DAT-").count();
+        assert_eq!(
+            bracket_count,
+            1,
+            "exactly one [E-DAT-... bracket code must appear (no double-wrap); got {bracket_count} in: {msg}"
+        );
+
+        // Load-bearing: no duplicate "parse error for" prefix.
+        let prefix_count = msg.matches("parse error for").count();
+        assert_eq!(
+            prefix_count,
+            1,
+            "exactly one 'parse error for' phrase must appear (no double-wrap); got {prefix_count} in: {msg}"
+        );
+
+        // Load-bearing: granular code E-DAT-011 is preserved (not replaced by E-DAT-003).
+        assert!(
+            msg.contains("[E-DAT-011]"),
+            "granular code [E-DAT-011] must be present in the error message; got: {msg}"
         );
     }
 

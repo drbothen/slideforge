@@ -89,6 +89,138 @@ impl XlsxDataSource {
     }
 }
 
+impl XlsxDataSource {
+    /// Load the XLSX workbook and return `Value::List(rows)`, using rich `DataError` types.
+    ///
+    /// This is the canonical internal implementation. It returns [`crate::DataError`]
+    /// directly, avoiding the `DataError → DataSourceError → DataError` round-trip that
+    /// occurs when callers re-wrap the result of [`DataSource::load`].
+    ///
+    /// [`FileDataSource`] calls this method directly so that granular error codes
+    /// (e.g., `E-DAT-011` for wrong magic bytes) are preserved without double-wrapping.
+    ///
+    /// The public [`DataSource::load`] trait method delegates here and converts errors
+    /// via [`data_error_to_source_error`] for callers that use the plugin-api boundary.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::DataError`] on file-not-found, unsupported format, missing sheet,
+    /// empty header, merged header cells, or parse failure.
+    ///
+    /// Traces to BC-1.03.006 postconditions 1-9, F-PASS26-MED-1 (no double-wrap).
+    pub(crate) fn load_internal(&self, path_str: &str) -> Result<Value, crate::DataError> {
+        // AC-005: Reject .xls (legacy format) before touching the file.
+        // Traces to BC-1.03.006 invariant 3, edge case EC-002.
+        reject_xls_extension(path_str)?;
+
+        // Check file existence before trying to open as workbook (better error).
+        if !std::path::Path::new(path_str).exists() {
+            return Err(crate::DataError::file_not_found(Arc::from(path_str)));
+        }
+
+        // BC-1.03.006 postcondition 9 / invariant 3 (second phase):
+        // Validate XLSX magic bytes (ZIP local file header PK\x03\x04).
+        // Extension check already passed; this catches files that have .xlsx extension
+        // but are not actually XLSX/ZIP archives.
+        // Traces to VP-026, E-DAT-011.
+        validate_xlsx_magic(path_str)?;
+
+        // Open workbook via calamine.
+        let mut workbook: Xlsx<_> = open_workbook(path_str).map_err(|e| crate::DataError::ParseError {
+            code: crate::error::E_DAT_003,
+            path: Arc::from(path_str),
+            format: DataFormat::Xlsx,
+            reason: Arc::from(
+                format!("failed to open xlsx workbook '{path_str}': {e}").as_str(),
+            ),
+            span: slideforge_types::SourceSpan::default(),
+        })?;
+
+        // Select the target sheet (returns (sheet_name, range)).
+        let (sheet_name, range) = select_sheet(&mut workbook, self.sheet.as_deref(), path_str)?;
+
+        // AC-006: Check for merged cells in the header row (row 0) using the
+        // workbook-level merge metadata.
+        // Traces to BC-1.03.006 edge case EC-005.
+        if let Some(Ok(merge_dims)) = workbook.worksheet_merge_cells(&sheet_name) {
+            for dim in &merge_dims {
+                let (start_row, start_col) = dim.start;
+                let (end_row, end_col) = dim.end;
+                // Horizontal merge: a merge spanning >1 column within the header row.
+                // Traces to BC-1.03.006 edge case EC-005.
+                if start_row == 0 && end_row == 0 && end_col > start_col {
+                    return Err(crate::DataError::ParseError {
+                        code: crate::error::E_DAT_003,
+                        path: Arc::from(path_str),
+                        format: DataFormat::Xlsx,
+                        reason: Arc::from(
+                            format!(
+                                "merged cells in header row are not supported at {path_str}:1:{}",
+                                start_col + 1,
+                            )
+                            .as_str(),
+                        ),
+                        span: slideforge_types::SourceSpan::default(),
+                    });
+                }
+                // Vertical merge: a merge starting in the header row and spanning
+                // into one or more data rows. This creates a phantom header cell
+                // across multiple rows, making row-to-header mapping ambiguous.
+                // Traces to BC-1.03.006 edge case EC-005, F-LOW-9.
+                if start_row == 0 && end_row > 0 {
+                    return Err(crate::DataError::ParseError {
+                        code: crate::error::E_DAT_003,
+                        path: Arc::from(path_str),
+                        format: DataFormat::Xlsx,
+                        reason: Arc::from(
+                            format!(
+                                "vertically merged cell in header row at {path_str}:1:{} spans \
+                                into data rows — this makes column mapping ambiguous. \
+                                Split the merge before loading.",
+                                start_col + 1,
+                            )
+                            .as_str(),
+                        ),
+                        span: slideforge_types::SourceSpan::default(),
+                    });
+                }
+            }
+        }
+
+        // Validate header row and extract column names.
+        // AC-002: empty header row → ParseError.
+        let headers = extract_headers(&range, path_str)?;
+
+        // Convert data rows (skip row 0, which is the header row).
+        let mut rows: Vec<Value> = Vec::new();
+        let row_count = range.height();
+        let col_count = range.width();
+
+        for row_idx in 1..row_count {
+            let mut map = OrderedMap::new();
+            for col_idx in 0..col_count {
+                let header = headers.get(col_idx).cloned().expect(
+                    "extract_headers must produce headers.len() == col_count; \
+                             col_idx is bounded by col_count from range.width()",
+                );
+                // Excel limits: max 1,048,576 rows × 16,384 cols — both fit u32.
+                // cast_possible_truncation: usize→u32 is safe within Excel row/col limits.
+                #[allow(clippy::cast_possible_truncation)]
+                let (row_u32, col_u32) = (row_idx as u32, col_idx as u32);
+                let cell = range.get_value((row_u32, col_u32));
+                let value = match cell {
+                    None | Some(Data::Empty) => Value::Null,
+                    Some(c) => convert_calamine_cell(c, col_u32, row_u32, path_str)?,
+                };
+                map.insert(header, value);
+            }
+            rows.push(Value::Map(map));
+        }
+
+        Ok(Value::List(rows))
+    }
+}
+
 impl DataSource for XlsxDataSource {
     fn id(&self) -> &'static str {
         "xlsx"
@@ -96,14 +228,11 @@ impl DataSource for XlsxDataSource {
 
     /// Load the XLSX workbook and return `Value::List(rows)`.
     ///
-    /// # Steps
+    /// Delegates to [`XlsxDataSource::load_internal`] for the core logic and
+    /// converts [`crate::DataError`] to [`DataSourceError`] at the plugin-api boundary.
     ///
-    /// 1. Reject `.xls` extension with `UnsupportedFormat`.
-    /// 2. Open the workbook via `calamine::open_workbook`.
-    /// 3. Select the target sheet (first or named).
-    /// 4. Validate the header row (non-empty, no merged cells).
-    /// 5. Convert each data row to `Value::Map` keyed by header values.
-    /// 6. Return `Value::List(rows)`.
+    /// [`FileDataSource`] calls `load_internal` directly to avoid the
+    /// `DataError → DataSourceError → DataError` double-wrap (F-PASS26-MED-1).
     ///
     /// # Errors
     ///
@@ -127,113 +256,8 @@ impl DataSource for XlsxDataSource {
         };
         tracing::Span::current().record("path", path_str);
 
-        // AC-005: Reject .xls (legacy format) before touching the file.
-        // Traces to BC-1.03.006 invariant 3, edge case EC-002.
-        reject_xls_extension(path_str).map_err(|e| data_error_to_source_error(path_str, &e))?;
-
-        // Check file existence before trying to open as workbook (better error).
-        if !std::path::Path::new(path_str).exists() {
-            return Err(DataSourceError::IoError {
-                uri: path_str.to_owned(),
-                message: format!("[{}] file not found: {path_str}", crate::error::E_DAT_004),
-            });
-        }
-
-        // BC-1.03.006 postcondition 9 / invariant 3 (second phase):
-        // Validate XLSX magic bytes (ZIP local file header PK\x03\x04).
-        // Extension check already passed; this catches files that have .xlsx extension
-        // but are not actually XLSX/ZIP archives.
-        // Traces to VP-026, E-DAT-011.
-        validate_xlsx_magic(path_str).map_err(|e| data_error_to_source_error(path_str, &e))?;
-
-        // Open workbook via calamine.
-        let mut workbook: Xlsx<_> =
-            open_workbook(path_str).map_err(|e| DataSourceError::ParseError {
-                uri: path_str.to_owned(),
-                // Workspace sweep (F-PASS18-LOW-3): embed [E-DAT-003] bracket code.
-                message: format!(
-                    "[{code}] failed to open xlsx workbook '{path_str}': {e}",
-                    code = crate::error::E_DAT_003,
-                ),
-            })?;
-
-        // Select the target sheet (returns (sheet_name, range)).
-        let (sheet_name, range) = select_sheet(&mut workbook, self.sheet.as_deref(), path_str)
-            .map_err(|e| data_error_to_source_error(path_str, &e))?;
-
-        // AC-006: Check for merged cells in the header row (row 0) using the
-        // workbook-level merge metadata.
-        // Traces to BC-1.03.006 edge case EC-005.
-        if let Some(Ok(merge_dims)) = workbook.worksheet_merge_cells(&sheet_name) {
-            for dim in &merge_dims {
-                let (start_row, start_col) = dim.start;
-                let (end_row, end_col) = dim.end;
-                // Horizontal merge: a merge spanning >1 column within the header row.
-                // Traces to BC-1.03.006 edge case EC-005.
-                if start_row == 0 && end_row == 0 && end_col > start_col {
-                    // Workspace sweep (F-PASS18-LOW-3): embed [E-DAT-003] bracket code.
-                    return Err(DataSourceError::ParseError {
-                        uri: path_str.to_owned(),
-                        message: format!(
-                            "[{code}] merged cells in header row are not supported at {path_str}:1:{}",
-                            start_col + 1,
-                            code = crate::error::E_DAT_003,
-                        ),
-                    });
-                }
-                // Vertical merge: a merge starting in the header row and spanning
-                // into one or more data rows. This creates a phantom header cell
-                // across multiple rows, making row-to-header mapping ambiguous.
-                // Traces to BC-1.03.006 edge case EC-005, F-LOW-9.
-                if start_row == 0 && end_row > 0 {
-                    // Workspace sweep (F-PASS18-LOW-3): embed [E-DAT-003] bracket code.
-                    return Err(DataSourceError::ParseError {
-                        uri: path_str.to_owned(),
-                        message: format!(
-                            "[{code}] vertically merged cell in header row at {path_str}:1:{} spans \
-                            into data rows — this makes column mapping ambiguous. \
-                            Split the merge before loading.",
-                            start_col + 1,
-                            code = crate::error::E_DAT_003,
-                        ),
-                    });
-                }
-            }
-        }
-
-        // Validate header row and extract column names.
-        // AC-002: empty header row → ParseError.
-        let headers = extract_headers(&range, path_str)
-            .map_err(|e| data_error_to_source_error(path_str, &e))?;
-
-        // Convert data rows (skip row 0, which is the header row).
-        let mut rows: Vec<Value> = Vec::new();
-        let row_count = range.height();
-        let col_count = range.width();
-
-        for row_idx in 1..row_count {
-            let mut map = OrderedMap::new();
-            for col_idx in 0..col_count {
-                let header = headers.get(col_idx).cloned().expect(
-                    "extract_headers must produce headers.len() == col_count; \
-                             col_idx is bounded by col_count from range.width()",
-                );
-                // Excel limits: max 1,048,576 rows × 16,384 cols — both fit u32.
-                // cast_possible_truncation: usize→u32 is safe within Excel row/col limits.
-                #[allow(clippy::cast_possible_truncation)]
-                let (row_u32, col_u32) = (row_idx as u32, col_idx as u32);
-                let cell = range.get_value((row_u32, col_u32));
-                let value = match cell {
-                    None | Some(Data::Empty) => Value::Null,
-                    Some(c) => convert_calamine_cell(c, col_u32, row_u32, path_str)
-                        .map_err(|e| data_error_to_source_error(path_str, &e))?,
-                };
-                map.insert(header, value);
-            }
-            rows.push(Value::Map(map));
-        }
-
-        Ok(Value::List(rows))
+        self.load_internal(path_str)
+            .map_err(|e| data_error_to_source_error(path_str, &e))
     }
 }
 
