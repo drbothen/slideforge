@@ -126,15 +126,16 @@ impl XlsxDataSource {
         validate_xlsx_magic(path_str)?;
 
         // Open workbook via calamine.
-        let mut workbook: Xlsx<_> = open_workbook(path_str).map_err(|e| crate::DataError::ParseError {
-            code: crate::error::E_DAT_003,
-            path: Arc::from(path_str),
-            format: DataFormat::Xlsx,
-            reason: Arc::from(
-                format!("failed to open xlsx workbook '{path_str}': {e}").as_str(),
-            ),
-            span: slideforge_types::SourceSpan::default(),
-        })?;
+        let mut workbook: Xlsx<_> =
+            open_workbook(path_str).map_err(|e| crate::DataError::ParseError {
+                code: crate::error::E_DAT_003,
+                path: Arc::from(path_str),
+                format: DataFormat::Xlsx,
+                reason: Arc::from(
+                    format!("failed to open xlsx workbook '{path_str}': {e}").as_str(),
+                ),
+                span: slideforge_types::SourceSpan::default(),
+            })?;
 
         // Select the target sheet (returns (sheet_name, range)).
         let (sheet_name, range) = select_sheet(&mut workbook, self.sheet.as_deref(), path_str)?;
@@ -228,10 +229,10 @@ impl DataSource for XlsxDataSource {
 
     /// Load the XLSX workbook and return `Value::List(rows)`.
     ///
-    /// Delegates to [`XlsxDataSource::load_internal`] for the core logic and
-    /// converts [`crate::DataError`] to [`DataSourceError`] at the plugin-api boundary.
+    /// Delegates to `load_internal` for the core logic and converts
+    /// [`crate::DataError`] to [`DataSourceError`] at the plugin-api boundary.
     ///
-    /// [`FileDataSource`] calls `load_internal` directly to avoid the
+    /// The file-based dispatch path calls `load_internal` directly to avoid the
     /// `DataError → DataSourceError → DataError` double-wrap (F-PASS26-MED-1).
     ///
     /// # Errors

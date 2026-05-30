@@ -936,16 +936,14 @@ mod tests {
         // Load-bearing: no duplicate [E-DAT-... bracket codes.
         let bracket_count = msg.matches("[E-DAT-").count();
         assert_eq!(
-            bracket_count,
-            1,
+            bracket_count, 1,
             "exactly one [E-DAT-... bracket code must appear (no double-wrap); got {bracket_count} in: {msg}"
         );
 
         // Load-bearing: no duplicate "parse error for" prefix.
         let prefix_count = msg.matches("parse error for").count();
         assert_eq!(
-            prefix_count,
-            1,
+            prefix_count, 1,
             "exactly one 'parse error for' phrase must appear (no double-wrap); got {prefix_count} in: {msg}"
         );
 

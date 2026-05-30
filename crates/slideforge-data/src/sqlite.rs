@@ -2554,8 +2554,7 @@ mod tests {
     fn test_sqlite_comment_prefix_query_rejected_as_dml() {
         // File does not need to exist — DML check fires before file I/O.
         // Extension check fires before DML check; use a valid .db extension.
-        let src =
-            SqliteDataSource::new("/tmp/irrelevant.db", "-- comment\nSELECT * FROM t");
+        let src = SqliteDataSource::new("/tmp/irrelevant.db", "-- comment\nSELECT * FROM t");
         let err = src.load("", &default_opts()).unwrap_err();
 
         // Must be a ParseError (DML-rejection path).
