@@ -825,6 +825,58 @@ mod tests {
         );
     }
 
+    // ── W-A11-002 shape dispatch sibling test (F-P20-LOW-001) ─────────────────
+
+    /// W-A11-002 — shape with non-blank alt + decorative: true emits exactly
+    /// 1 W-A11-002 warning (no E-A11-001).
+    ///
+    /// Mirrors `test_w_a11_002_alt_wins_over_decorative` but uses a
+    /// `ContentBlock::Shape` instead of `ContentBlock::Image` to confirm the
+    /// W-A11-002 dispatch path is exercised for the Shape arm of the
+    /// `check_visual_element` call chain (F-P20-LOW-001 sibling-site gap).
+    ///
+    /// Load-bearing: swap `make_shape_block` for `make_image_block` or change
+    /// `AltText::Provided` to `None` — any of these changes must cause the
+    /// assertion to fail.
+    #[test]
+    fn test_w_a11_002_alt_wins_over_decorative_shape() {
+        let alt_text = Arc::from("A meaningful description of the shape");
+        let deck = make_deck(vec![make_slide(vec![make_shape_block(
+            Some(AltText::Provided(Arc::clone(&alt_text))),
+            true,
+        )])]);
+        let diags = AltTextValidator.validate(&deck, &default_opts());
+
+        // Exactly 1 diagnostic (the W-A11-002 warning) — no E-A11-001
+        assert_eq!(
+            diags.len(),
+            1,
+            "shape with alt+decorative should produce 1 W-A11-002; got {diags:?}"
+        );
+
+        // Must be a warning, not an error
+        assert_eq!(
+            diags[0].severity,
+            DiagnosticSeverity::Warning,
+            "shape alt+decorative conflict must produce Warning; got {diags:?}"
+        );
+
+        // Must use W-A11-002 code
+        assert_eq!(
+            diags[0].code.as_ref(),
+            W_A11_002,
+            "warning code must be W-A11-002; got {}",
+            diags[0].code
+        );
+
+        // Message must reference alt taking precedence
+        assert!(
+            diags[0].message.contains("alt takes precedence"),
+            "W-A11-002 message must state alt takes precedence; got: {}",
+            diags[0].message
+        );
+    }
+
     // ── Shape missing alt (ADV-P01-MED-003) ───────────────────────────────────
 
     #[test]
