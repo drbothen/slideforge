@@ -533,9 +533,14 @@ fn validate_xlsx_magic(path: &str) -> Result<(), DataError> {
             code: E_DAT_011,
             path: Arc::from(path),
             format: DataFormat::Xlsx,
+            // F-P13-MED-001: Drop the leading '{path}' from the reason string.
+            // DataError::ParseError Display already includes "parse error for '{path}'"
+            // — embedding the path again in reason produces path stutter:
+            //   "[E-DAT-011] parse error for '/tmp/x.xlsx' (Xlsx): '/tmp/x.xlsx' has ..."
+            // After fix: "[E-DAT-011] parse error for '/tmp/x.xlsx' (Xlsx): file has ..."
             reason: Arc::from(
                 format!(
-                    "'{path}' has .{ext} extension but is not a valid XLSX archive \
+                    "file has .{ext} extension but is not a valid XLSX archive \
                     (ZIP magic bytes not found). File may be corrupted or misnamed."
                 )
                 .as_str(),

@@ -69,9 +69,12 @@ use crate::DataError;
 use crate::context::DataSourceContext;
 use crate::error::{
     E_DAT_001, E_DAT_002, E_DAT_003, E_DAT_004, E_DAT_006, E_DAT_007, E_DAT_008, E_DAT_009,
-    E_DAT_010, E_DAT_011, E_DAT_012, E_DAT_013, E_DAT_014, E_DAT_015,
+    E_DAT_010, E_DAT_011, E_DAT_012, E_DAT_013, E_DAT_015,
 };
-// E_DAT_005 is used in tests only (F-P12-MED-002: excluded from parse_e_dat_code candidates).
+// E_DAT_005 (FieldNotFound) is evaluator-emitted, not dispatcher-emitted; tests-only in this module per F-P12-MED-002.
+// E_DAT_014 retired (F-P13-HIGH-002): subsumed by E_DAT_003 at the dispatcher boundary.
+// SQLite extension errors now route through DataError::UnsupportedFormat (E-DAT-003) via
+// DataSourceError::UnsupportedUri with a bare extension, matching the XLSX pattern.
 
 /// Load all configured data sources, applying the offline gate.
 ///
@@ -438,7 +441,7 @@ fn map_source_error(name: &Arc<str>, err: &DataSourceError) -> DataError {
                 // prepends "[E-DAT-003] parse error for 'sales.csv' (Csv): " — producing
                 // double brackets and double "parse error for". Fix: use `inner_msg` directly
                 // and strip the bracket prefix, matching the pattern applied in the IoError arm.
-                // F-P10-HIGH-001 fix: Preserve granular bracket codes (E-DAT-007..E-DAT-014)
+                // F-P10-HIGH-001 fix: Preserve granular bracket codes (E-DAT-007..E-DAT-013)
                 // embedded in the source message instead of hardcoding E_DAT_003. The built-in
                 // XLSX source emits "[E-DAT-007] xlsx empty header" and the SQLite source emits
                 // "[E-DAT-013] sqlite bad header magic" — these were previously downgraded to
@@ -516,6 +519,11 @@ fn map_source_error(name: &Arc<str>, err: &DataSourceError) -> DataError {
         // (E-DAT-015) — the same conservative fallback used for third-party IoError
         // messages that lack a bracket code. The full `err.to_string()` is preserved
         // so no information is lost.
+        //
+        // F-P13-MED-002: Use `Arc::clone(name)` instead of `Arc::from("")` so the
+        // source-binding identity is preserved in user-facing error even for unrecognized
+        // future variants. An empty URI in the Display ("[E-DAT-015] data source error for '': ...")
+        // is confusing when the binding name is available.
         _ => {
             tracing::warn!(
                 "dispatcher: unrecognized DataSourceError variant for binding '{}'. \
@@ -525,7 +533,7 @@ fn map_source_error(name: &Arc<str>, err: &DataSourceError) -> DataError {
             );
             DataError::UnspecifiedSourceError {
                 code: E_DAT_015,
-                uri: Arc::from(""),
+                uri: Arc::clone(name),
                 message: Arc::from(err.to_string().as_str()),
                 span: slideforge_types::SourceSpan::default(),
             }
@@ -630,7 +638,10 @@ fn strip_bracket_prefix(msg: &str) -> &str {
 /// - `E_DAT_015` (unspecified source error) — dispatcher catch-all; a `ParseError`
 ///   message carrying `[E-DAT-015]` must not produce `DataError::ParseError { code: E_DAT_015 }`.
 ///
-/// Recognized: `E_DAT_001`, `E_DAT_002`, `E_DAT_003`, `E_DAT_006` through `E_DAT_014`.
+/// Recognized: `E_DAT_001`, `E_DAT_002`, `E_DAT_003`, `E_DAT_006` through `E_DAT_013`.
+/// `E_DAT_014` is retired (F-P13-HIGH-002) and no longer recognized — its `ParseError`
+/// messages now route to `E_DAT_003` (the dispatcher's `UnsupportedUri` arm already uses
+/// `E_DAT_003` for all unsupported-format errors).
 /// Unknown bracket formats (e.g., `[E-DAT-099]` or plugin-specific codes) return `None`.
 ///
 /// ## Relationship to `strip_bracket_prefix`
@@ -649,9 +660,14 @@ fn parse_e_dat_code(msg: &str) -> Option<&'static str> {
     //
     // Each check uses format!("[{code}]") to guarantee the bracket wraps the code,
     // matching the canonical `[E-DAT-NNN]` format emitted by all built-in sources.
+    // E_DAT_014 is intentionally excluded — retired by F-P13-HIGH-002. SQLite extension
+    // errors now route through DataSourceError::UnsupportedUri (not ParseError) so
+    // [E-DAT-014] will not appear in production ParseError messages. If a third-party
+    // plugin emits [E-DAT-014] in a ParseError message, it falls back to E_DAT_003,
+    // which is the correct subsuming code.
     let candidates: &[&'static str] = &[
         E_DAT_001, E_DAT_002, E_DAT_003, E_DAT_006, E_DAT_007, E_DAT_008, E_DAT_009, E_DAT_010,
-        E_DAT_011, E_DAT_012, E_DAT_013, E_DAT_014,
+        E_DAT_011, E_DAT_012, E_DAT_013,
     ];
     for &code in candidates {
         if msg.starts_with(&format!("[{code}]")) {
@@ -1668,17 +1684,54 @@ mod tests {
             Ok(200),
             "graceful fallback: no ']' present means scan from start of message"
         );
-        // "HTTP" appears before the bracket code — must be ignored; only post-bracket counts.
-        // Simulate a message where the pre-bracket part has "HTTP 999" (invalid, out of range)
-        // and the post-bracket part has "HTTP 404" (valid).
-        // This test confirms that anchoring prevents the invalid pre-bracket status from
-        // being extracted.
+        // Case 3: F-P13-LOW-004 — pins behavior for malformed third-party plugin messages
+        // that prepend text before the bracket code; built-in sources always emit the bracket
+        // as the message prefix. A third-party plugin might emit something like
+        // "HTTP 999 [E-DAT-001] HTTP 404 from 'http://example.com'" where the pre-bracket
+        // "HTTP 999" is out of the valid range. The anchored search must skip the pre-bracket
+        // "HTTP 999" (which would be invalid anyway) and find the post-bracket "HTTP 404".
         let msg = "HTTP 999 [E-DAT-001] HTTP 404 from 'http://example.com'";
         // Since the search anchors after ']', it should find "HTTP 404" (valid).
         assert_eq!(
             extract_http_status(msg),
             Ok(404),
             "anchored search must skip the pre-bracket 'HTTP 999' and find post-bracket 'HTTP 404'"
+        );
+    }
+
+    /// `test_extract_http_status_stops_at_first_non_digit`
+    ///
+    /// F-P13-LOW-002: `extract_http_status` must stop parsing the digit run at the
+    /// first non-digit character. A status like `"200x"` must extract `200`, not fail.
+    ///
+    /// Load-bearing: if `extract_http_status` used `str::parse::<u16>()` on the full
+    /// run including non-digit characters, `"200x"` would return `Err` (parse failure)
+    /// instead of `Ok(200)`. The current implementation uses `find(|c| !c.is_ascii_digit())`
+    /// to bound the digit slice, which correctly stops at the first non-digit.
+    ///
+    /// This test pins the first-non-digit-terminates behavior so a future refactor
+    /// cannot accidentally break it.
+    ///
+    /// Traces to F-P13-LOW-002.
+    #[test]
+    fn test_extract_http_status_stops_at_first_non_digit() {
+        // "200x" — must extract 200 (stops at 'x').
+        assert_eq!(
+            extract_http_status("[E-DAT-001] HTTP 200x from 'http://example.com'"),
+            Ok(200),
+            "extract_http_status must stop at first non-digit and return 200 from '200x'"
+        );
+        // "404ab" — must extract 404 (stops at 'a').
+        assert_eq!(
+            extract_http_status("[E-DAT-001] HTTP 404ab from 'http://example.com'"),
+            Ok(404),
+            "extract_http_status must stop at first non-digit and return 404 from '404ab'"
+        );
+        // "500-Internal" — must extract 500 (stops at '-').
+        assert_eq!(
+            extract_http_status("[E-DAT-001] HTTP 500-Internal Server Error from 'http://x.com'"),
+            Ok(500),
+            "extract_http_status must stop at '-' and return 500"
         );
     }
 
@@ -2253,6 +2306,21 @@ mod tests {
         assert_eq!(
             result3, "\u{00F1}-prefix message",
             "bracket strip must return ñ-prefix body correctly; got: {result3:?}"
+        );
+
+        // Case 4: F-P13-LOW-001 — closing ']' at a byte offset that crosses a
+        // multi-byte UTF-8 boundary.
+        // "[abcΩ]rest" — '[' at 0, 'Ω' (U+03A9, 2 bytes: 0xCE 0xA9) at bytes 4-5,
+        // ']' at byte 6, then 'r','e','s','t'.
+        // Byte layout: [ a b c Ω(CE A9) ] r e s t
+        //              0 1 2 3 4     5   6 7 8 9
+        // A naive `msg[..16]` scan would slice mid-Ω if the bracket were at byte ≤16.
+        // The implementation uses char_indices so it always yields valid boundaries.
+        let msg_boundary = "[abc\u{03A9}]rest";
+        let result4 = strip_bracket_prefix(msg_boundary);
+        assert_eq!(
+            result4, "rest",
+            "bracket at byte offset crossing Ω boundary must strip correctly without panicking; got: {result4:?}"
         );
     }
 
@@ -2945,14 +3013,18 @@ mod tests {
 
     /// `test_map_source_error_parse_error_preserves_granular_codes`
     ///
-    /// F-P10-HIGH-001: Table-driven test that E-DAT-008 through E-DAT-014 are all
+    /// F-P10-HIGH-001: Table-driven test that E-DAT-008 through E-DAT-013 are all
     /// preserved by the dispatcher's `ParseError` branch. Each code corresponds to a
     /// distinct XLSX or SQLite parse failure from the error taxonomy.
+    ///
+    /// E-DAT-014 is excluded from this table: it is retired by F-P13-HIGH-002. SQLite
+    /// extension errors now route through DataSourceError::UnsupportedUri (not ParseError),
+    /// so [E-DAT-014] will not appear in production ParseError messages. A ParseError
+    /// with [E-DAT-014] would fall back to E-DAT-003 (correct, since UnsupportedFormat
+    /// is a sub-case of parse/format errors).
     #[test]
     fn test_map_source_error_parse_error_preserves_granular_codes() {
-        use crate::error::{
-            E_DAT_008, E_DAT_009, E_DAT_010, E_DAT_011, E_DAT_012, E_DAT_013, E_DAT_014,
-        };
+        use crate::error::{E_DAT_008, E_DAT_009, E_DAT_010, E_DAT_011, E_DAT_012, E_DAT_013};
         // Table: (code_constant, human_readable_message)
         let cases: &[(&str, &str)] = &[
             (
@@ -2978,10 +3050,6 @@ mod tests {
             (
                 E_DAT_013,
                 "[E-DAT-013] sqlite bad header magic: not a sqlite3 database",
-            ),
-            (
-                E_DAT_014,
-                "[E-DAT-014] sqlite unsupported extension '.xls' (expected .sqlite, .db)",
             ),
         ];
 
@@ -3020,11 +3088,13 @@ mod tests {
     /// F-P12-MED-002: Updated to reflect the restricted candidate set. E_DAT_004,
     /// E_DAT_005, and E_DAT_015 are excluded from candidates; their bracket codes
     /// must return None (not Some) so they cannot produce ParseError with wrong code.
+    ///
+    /// F-P13-HIGH-002: E_DAT_014 is retired and removed from candidates. A ParseError
+    /// with [E-DAT-014] now falls back to E-DAT-003 (correct — UnsupportedFormat is a
+    /// parse/format sub-case). The [E-DAT-014] check returns None.
     #[test]
     fn test_parse_e_dat_code_returns_correct_constants() {
-        use crate::error::{
-            E_DAT_008, E_DAT_009, E_DAT_010, E_DAT_011, E_DAT_012, E_DAT_013, E_DAT_014,
-        };
+        use crate::error::{E_DAT_008, E_DAT_009, E_DAT_010, E_DAT_011, E_DAT_012, E_DAT_013};
         // Known parse-error-relevant codes must match.
         assert_eq!(
             parse_e_dat_code("[E-DAT-001] some http error"),
@@ -3070,9 +3140,12 @@ mod tests {
             parse_e_dat_code("[E-DAT-013] bad sqlite magic"),
             Some(E_DAT_013)
         );
+        // E_DAT_014 is retired (F-P13-HIGH-002) and must NOT be recognized — it is no
+        // longer in the candidates list. A ParseError with [E-DAT-014] falls back to E-DAT-003.
         assert_eq!(
             parse_e_dat_code("[E-DAT-014] unsupported ext"),
-            Some(E_DAT_014)
+            None,
+            "E_DAT_014 is retired (F-P13-HIGH-002) and must not be recognized by parse_e_dat_code"
         );
         // E_DAT_015 (unspecified source error) must NOT be recognized — F-P12-MED-002.
         assert_eq!(
@@ -3147,10 +3220,11 @@ mod tests {
             Some(E_DAT_006),
             "E_DAT_006 must still be recognized after F-P12-MED-002 restriction"
         );
+        // E_DAT_014 is now also retired (F-P13-HIGH-002) and must return None.
         assert_eq!(
             parse_e_dat_code("[E-DAT-014] unsupported extension"),
-            Some(E_DAT_014),
-            "E_DAT_014 must still be recognized after F-P12-MED-002 restriction"
+            None,
+            "E_DAT_014 is retired (F-P13-HIGH-002) and must not be recognized by parse_e_dat_code"
         );
     }
 

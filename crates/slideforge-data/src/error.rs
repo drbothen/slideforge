@@ -78,6 +78,17 @@ pub const E_DAT_013: &str = "E-DAT-013";
 /// Error code for unsupported extension for `SQLite` data source.
 ///
 /// Maps to `E-DAT-014` in the error taxonomy.
+///
+/// # Deprecation
+///
+/// **Retired by F-P13-HIGH-002.** `E-DAT-014` is subsumed by `E-DAT-003` at the
+/// dispatcher boundary. `SQLite` extension errors now route through
+/// [`DataError::UnsupportedFormat`] (E-DAT-003) via `DataSourceError::UnsupportedUri`
+/// with a bare extension string, matching the XLSX pattern.
+///
+/// The constant is retained for `SemVer` compatibility (external crates may reference
+/// it). No production code path produces a [`DataError`] whose `.code()` returns
+/// `"E-DAT-014"`. See error-taxonomy.md changelog (v1.8).
 pub const E_DAT_014: &str = "E-DAT-014";
 
 /// Error code for unspecified data-source error (third-party plugin, unknown category).
