@@ -266,7 +266,15 @@ pub enum DataError {
     /// An HTTP non-2xx response was received from the server.
     ///
     /// Error code: `E-DAT-001`.
-    #[error("[{code}] HTTP {status} from '{url}' (at {span})")]
+    ///
+    /// Display format: `"[E-DAT-001] HTTP fetch failed: '<url>' returned HTTP <status>. Hint: use --offline to skip HTTP sources. (at <span>)"`
+    ///
+    /// Matches the spec format in error-taxonomy.md (E-DAT-001). The `--offline` hint is
+    /// the canonical discovery surface for users who did not know the flag existed.
+    #[error(
+        "[{code}] HTTP fetch failed: '{url}' returned HTTP {status}. \
+        Hint: use --offline to skip HTTP sources. (at {span})"
+    )]
     HttpError {
         /// The error code constant (`E-DAT-001`).
         code: &'static str,
@@ -281,7 +289,16 @@ pub enum DataError {
     /// A network transport error (connection refused, timeout, DNS failure, etc.).
     ///
     /// Error code: `E-DAT-002`.
-    #[error("[{code}] network error: {cause} (at {span})")]
+    ///
+    /// Display format: `"[E-DAT-002] network error fetching '<url>': <cause>. Use --offline to skip HTTP sources. (at <span>)"`
+    ///
+    /// Matches the spec format in error-taxonomy.md (E-DAT-002). The `--offline` hint and
+    /// the URL field are both required by the spec; the URL is the canonical discovery surface
+    /// for which source triggered the network failure.
+    #[error(
+        "[{code}] network error fetching '{url}': {cause}. \
+        Use --offline to skip HTTP sources. (at {span})"
+    )]
     NetworkError {
         /// The error code constant (`E-DAT-002`).
         code: &'static str,
@@ -894,6 +911,98 @@ mod tests {
         assert_eq!(err_with_span.code(), "E-DAT-002");
         let msg = err_with_span.to_string();
         assert!(msg.contains("connection refused"));
+    }
+
+    // ---------------------------------------------------------------------------
+    // F-P14-MED-001 / F-P14-MED-002: Display --offline hint tests
+    // ---------------------------------------------------------------------------
+
+    /// `test_http_error_display_includes_offline_hint`
+    ///
+    /// F-P14-MED-001: `DataError::HttpError` Display must include the `--offline` hint
+    /// per error-taxonomy.md E-DAT-001. This is the canonical user-facing discovery
+    /// surface for the `--offline` flag.
+    #[test]
+    fn test_http_error_display_includes_offline_hint() {
+        let err = DataError::HttpError {
+            code: E_DAT_001,
+            url: Arc::from("http://example.com/data.json"),
+            status: 503,
+            span: SourceSpan::default(),
+        };
+        let display = err.to_string();
+        assert!(
+            display.contains("--offline"),
+            "HttpError Display must contain '--offline' hint; got: {display}"
+        );
+        assert!(
+            display.contains("Hint:"),
+            "HttpError Display must contain 'Hint:' prefix; got: {display}"
+        );
+        assert!(
+            display.contains("503"),
+            "HttpError Display must contain the status code; got: {display}"
+        );
+        assert!(
+            display.contains("http://example.com/data.json"),
+            "HttpError Display must contain the URL; got: {display}"
+        );
+    }
+
+    /// `test_network_error_display_includes_url_and_offline_hint`
+    ///
+    /// F-P14-MED-001 / F-P14-MED-002: `DataError::NetworkError` Display must include
+    /// both the URL (F-P14-MED-002) and the `--offline` hint (F-P14-MED-001) per
+    /// error-taxonomy.md E-DAT-002.
+    #[test]
+    fn test_network_error_display_includes_url_and_offline_hint() {
+        let err = DataError::NetworkError {
+            code: E_DAT_002,
+            url: Arc::from("http://api.example.com/feed.json"),
+            cause: Arc::from("connection timed out"),
+            span: SourceSpan::default(),
+        };
+        let display = err.to_string();
+        assert!(
+            display.contains("--offline"),
+            "NetworkError Display must contain '--offline' hint; got: {display}"
+        );
+        assert!(
+            display.contains("http://api.example.com/feed.json"),
+            "NetworkError Display must contain the URL; got: {display}"
+        );
+        assert!(
+            display.contains("connection timed out"),
+            "NetworkError Display must contain the cause; got: {display}"
+        );
+    }
+
+    /// `test_auth_failed_display_does_not_include_offline_hint`
+    ///
+    /// F-P14-MED-001 (negative): `DataError::AuthFailed` Display must NOT include
+    /// "Use --offline" — per Pass-5 F-P5-LOW-008, `--offline` is wrong remediation
+    /// for an authentication failure. Preserved from existing test in dispatcher.rs.
+    #[test]
+    fn test_auth_failed_display_does_not_include_offline_hint() {
+        let err = DataError::AuthFailed {
+            code: E_DAT_002,
+            uri: Arc::from("https://api.example.com/data.json"),
+            span: SourceSpan::default(),
+        };
+        let display = err.to_string();
+        assert!(
+            !display.contains("--offline"),
+            "AuthFailed Display must NOT contain '--offline' hint; got: {display}"
+        );
+        assert!(
+            !display.contains("Use --offline"),
+            "AuthFailed Display must NOT contain 'Use --offline'; got: {display}"
+        );
+        // Must still mention the URI and auth context.
+        assert!(
+            display.to_lowercase().contains("auth"),
+            "AuthFailed Display must mention 'auth'; got: {display}"
+        );
     }
 
     // ---------------------------------------------------------------------------

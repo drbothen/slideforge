@@ -713,15 +713,37 @@ fn parse_e_dat_code(msg: &str) -> Option<&'static str> {
 /// If no `]` is present in the message, the search falls back to scanning from the
 /// beginning (graceful degradation for messages without a bracket code).
 fn extract_http_status(message: &str) -> Result<u16, &'static str> {
-    // F-P12-LOW-002: anchor the "HTTP " search after the closing ']' of the bracket
-    // code. This prevents matching an "HTTP " embedded in the URL or payload before
-    // the bracket rather than the status code that appears after it.
-    // If no ']' is present (non-bracketed messages), fall back to the start of the
-    // message (graceful degradation).
-    let search_start = message
-        .find(']')
-        .and_then(|pos| pos.checked_add(1))
-        .unwrap_or(0);
+    // F-P14-LOW-001: anchor the "HTTP " search after the LAST `[E-DAT-` bracket code
+    // start position so that a stray `]` appearing BEFORE the actual bracket code
+    // (e.g., in data like `"data: [1,2,3] [E-DAT-001] HTTP 200 from 'url'"`) does
+    // not cause the search to start at the wrong position.
+    //
+    // Strategy: use `rfind("[E-DAT-")` to locate the LAST canonical bracket code
+    // start, then find the closing `]` from that position. This is strictly more
+    // correct than F-P12-LOW-002's `find(']')` (first `]`) because a third-party
+    // plugin may emit arbitrary data before the bracket code — including JSON arrays
+    // or other bracketed content that contain `]` before the real code.
+    //
+    // Graceful degradation: if no `[E-DAT-` is found (non-bracketed messages, e.g.,
+    // the existing test "HTTP 200 some message without bracket"), fall back to
+    // `find(']')` (the F-P12-LOW-002 approach), and then to 0 if no `]` either.
+    let search_start = if let Some(bracket_start) = message.rfind("[E-DAT-") {
+        // Find the first `]` after the `[E-DAT-` start.
+        message[bracket_start..]
+            .find(']')
+            .and_then(|offset| {
+                bracket_start
+                    .checked_add(offset)
+                    .and_then(|pos| pos.checked_add(1))
+            })
+            .unwrap_or(0)
+    } else {
+        // No canonical bracket code — fall back to first `]` (F-P12-LOW-002 legacy path).
+        message
+            .find(']')
+            .and_then(|pos| pos.checked_add(1))
+            .unwrap_or(0)
+    };
     let search_region = message.get(search_start..).unwrap_or("");
     // Look for "HTTP " followed by a numeric token within the post-bracket region.
     let after_http = search_region
@@ -1699,6 +1721,43 @@ mod tests {
         );
     }
 
+    /// `test_extract_http_status_anchored_after_e_dat_bracket`
+    ///
+    /// F-P14-LOW-001: `extract_http_status` must anchor the `"HTTP "` search after
+    /// the LAST `[E-DAT-` bracket code (using `rfind`), NOT after the first `]`.
+    ///
+    /// A third-party plugin may emit a message that contains a stray `]` before the
+    /// canonical `[E-DAT-NNN]` bracket (e.g., JSON data `"data: [1,2,3] [E-DAT-001]
+    /// HTTP 200 from 'url'"`). The old `find(']')` would anchor at the `]` after `3]`,
+    /// causing the search region to start mid-message rather than after the bracket code.
+    ///
+    /// `rfind("[E-DAT-")` locates the LAST occurrence of the canonical bracket prefix,
+    /// ensuring the anchor is always on the real bracket code regardless of what appears
+    /// before it in the message.
+    ///
+    /// Traces to F-P14-LOW-001.
+    #[test]
+    fn test_extract_http_status_anchored_after_e_dat_bracket() {
+        // Input: stray `]` from JSON data before the real bracket code.
+        // The anchor must land on `[E-DAT-001]`, not on `3]`.
+        let msg = "data: [1,2,3] [E-DAT-001] HTTP 200 from 'http://example.com/data.json'";
+        assert_eq!(
+            extract_http_status(msg),
+            Ok(200),
+            "stray ']' before bracket code must not mislead the anchor; \
+            must extract HTTP 200 from the post-[E-DAT-001] region; msg: {msg}"
+        );
+
+        // Verify: a stray ']' whose post-region contains no "HTTP " must not false-positive.
+        let msg_no_status = "data: [1,2,3] [E-DAT-001] something else (no status)";
+        assert!(
+            extract_http_status(msg_no_status).is_err(),
+            "anchored search after [E-DAT-001] must not find 'HTTP ' in post-bracket region; \
+            got: {:?}",
+            extract_http_status(msg_no_status)
+        );
+    }
+
     /// `test_extract_http_status_stops_at_first_non_digit`
     ///
     /// F-P13-LOW-002: `extract_http_status` must stop parsing the digit run at the
@@ -1934,7 +1993,12 @@ mod tests {
     ///
     /// F-P3-MED-001: When an `IoError` carrying `[E-DAT-002]` is routed to
     /// `DataError::NetworkError`, the Display must contain exactly one `[E-DAT-002]`
-    /// and exactly one `"network error:"` — not double-wrapped.
+    /// and exactly one `"network error fetching"` — not double-wrapped.
+    ///
+    /// Updated in Pass-14 (F-P14-MED-001): The Display format now includes the URL
+    /// and the `--offline` hint per the spec (error-taxonomy.md E-DAT-002).
+    /// The label changed from `"network error:"` to `"network error fetching '<url>':"`
+    /// so the assertion is updated to match the canonical format.
     #[test]
     fn test_map_source_error_e_dat_002_display_single_bracket_only() {
         let sources = single_error_source(
@@ -1954,10 +2018,21 @@ mod tests {
             1,
             "Display must contain exactly one [E-DAT-002]; got: {display}"
         );
+        // New spec format: "network error fetching '<url>':" (not "network error:").
         assert_eq!(
-            display.matches("network error:").count(),
+            display.matches("network error fetching").count(),
             1,
-            "Display must contain exactly one 'network error:'; got: {display}"
+            "Display must contain exactly one 'network error fetching'; got: {display}"
+        );
+        // Must NOT contain the old "network error:" label (stripped during cleaning).
+        assert!(
+            !display.contains("network error: "),
+            "Display must not contain old 'network error: ' label; got: {display}"
+        );
+        // Must include the URL.
+        assert!(
+            display.contains("http://example.com/"),
+            "Display must include the URL; got: {display}"
         );
         // Span annotation must not be doubled.
         assert!(
