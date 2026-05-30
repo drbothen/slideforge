@@ -170,7 +170,8 @@ pub fn load_all(
 /// | `[E-DAT-002]`                                     | `DataError::NetworkError` |
 /// | `[E-DAT-004]` + `"file not found: "` label        | `DataError::FileNotFound` |
 /// | `[E-DAT-004]` + any other label (I/O error, etc.) | `DataError::IoError` |
-/// | `[E-DAT-006]` (in IoError)                        | `DataError::PolicyRejected` (body-size cap) |
+/// | `[E-DAT-006]` (in IoError) + `"path traversal blocked: '"` | `DataError::PathTraversalBlocked` |
+/// | `[E-DAT-006]` (in IoError) + any other label      | `DataError::PolicyRejected` (body-size cap) |
 /// | `[E-DAT-006]` (in ParseError)                     | `DataError::SsrfBlocked` |
 /// | `[E-DAT-003]`                                     | `DataError::ParseError` |
 /// | *(no bracket code)*                               | `DataError::UnspecifiedSourceError` |
@@ -181,8 +182,6 @@ pub fn load_all(
 #[allow(clippy::too_many_lines)]
 #[must_use]
 fn map_source_error(name: &Arc<str>, err: &DataSourceError) -> DataError {
-    let message: Arc<str> = Arc::from(err.to_string());
-
     match err {
         DataSourceError::IoError {
             uri,
@@ -275,11 +274,11 @@ fn map_source_error(name: &Arc<str>, err: &DataSourceError) -> DataError {
                 // the correct variant. `message_is_file_not_found` returns true only for
                 // the "file not found:" label; all other labels (I/O error reading, failed
                 // to open file, etc.) map to `DataError::IoError`.
-                let source_msg = if has_bracket(inner_msg, E_DAT_004) {
-                    inner_msg.as_str()
-                } else {
-                    message.as_ref()
-                };
+                //
+                // F-P7-MED-001 fix: the enclosing `else if has_bracket(inner_msg, E_DAT_004)`
+                // already guarantees the bracket is present — the inner re-test was dead code.
+                // Replaced with a direct reference to `inner_msg.as_str()`.
+                let source_msg: &str = inner_msg.as_str();
                 if message_is_file_not_found(source_msg) {
                     // FINDING-4 fix: extract the actual missing path from the bracket-coded
                     // message tail (after "[E-DAT-004] file not found: <path>") so users
@@ -309,22 +308,45 @@ fn map_source_error(name: &Arc<str>, err: &DataSourceError) -> DataError {
                     }
                 }
             } else if has_bracket(inner_msg, E_DAT_006) {
-                // F-P3-MED-002 fix (structural): E-DAT-006 in an IoError arm means the HTTP
-                // source's response-body-size cap was exceeded (a policy rejection, not I/O
-                // failure and not an SSRF block). Route to PolicyRejected which has a
-                // semantically correct Display ("data policy rejected") rather than IoError
-                // ("I/O error reading") which is factually wrong for a policy-enforcement
-                // decision. Also strip the [E-DAT-006] bracket prefix from the message to
-                // prevent double-bracket in the Display.
-                DataError::PolicyRejected {
-                    // E-DAT-006: body-cap policy rejection (vs. SSRF — both share the
-                    // code but route to different DataError variants: SsrfBlocked for
-                    // SSRF domain blocks, PolicyRejected for body-size cap and similar
-                    // policy rejections).
-                    code: E_DAT_006,
-                    uri: Arc::from(uri.as_str()),
-                    message: Arc::from(strip_bracket_prefix(inner_msg)),
-                    span: slideforge_types::SourceSpan::default(),
+                // F-P3-MED-002 fix (structural): E-DAT-006 in an IoError arm covers two
+                // distinct security sub-cases that share the same bracket code:
+                //
+                //   1. Path traversal blocked — `FileDataSource::load_path` returns
+                //      `DataError::PathTraversalBlocked` which is translated via
+                //      `err.to_string()` into a message containing the literal substring
+                //      "path traversal blocked: '". Must route to PathTraversalBlocked.
+                //
+                //   2. Body-size cap (or other HTTP policy rejection) — the HTTP source
+                //      emits "[E-DAT-006] response body exceeds … cap". Must route to
+                //      PolicyRejected, which has a semantically correct Display
+                //      ("data policy rejected") rather than IoError ("I/O error reading").
+                //
+                // F-P7-HIGH-001 fix: inspect the message BEFORE routing to PolicyRejected.
+                // Without this check, path-traversal events were silently recharacterized
+                // as policy rejections — misleading the user and losing the PathTraversalBlocked
+                // variant identity (so callers matching on PathTraversalBlocked never saw it).
+                if message_is_path_traversal(inner_msg) {
+                    // Extract the traversal-attempt path from the message.
+                    // Format emitted by DataError::PathTraversalBlocked Display:
+                    // "[E-DAT-006] path traversal blocked: '<path>' is outside base dir (at ...)"
+                    let path = extract_path_from_traversal_msg(inner_msg).unwrap_or(uri.as_str());
+                    DataError::PathTraversalBlocked {
+                        code: E_DAT_006,
+                        path: Arc::from(path),
+                        span: slideforge_types::SourceSpan::default(),
+                    }
+                } else {
+                    // Body-cap policy rejection (vs. SSRF — both share the code but route
+                    // to different DataError variants: SsrfBlocked for SSRF domain blocks,
+                    // PolicyRejected for body-size cap and similar policy rejections).
+                    // Strip the [E-DAT-006] bracket prefix from the message to prevent
+                    // double-bracket in the Display.
+                    DataError::PolicyRejected {
+                        code: E_DAT_006,
+                        uri: Arc::from(uri.as_str()),
+                        message: Arc::from(strip_bracket_prefix(inner_msg)),
+                        span: slideforge_types::SourceSpan::default(),
+                    }
                 }
             } else {
                 // FINDING-3 fix: Generic I/O error with no recognized bracket code.
@@ -627,6 +649,56 @@ fn message_is_file_not_found(message: &str) -> bool {
     // Only the "file not found:" label routes to FileNotFound.
     // All other labels (I/O error reading, failed to open file, etc.) route to IoError.
     after_bracket.starts_with("file not found: ")
+}
+
+/// Classify whether a bracket-coded `[E-DAT-006]` message is a path-traversal event.
+///
+/// `FileDataSource::load_path` returns [`DataError::PathTraversalBlocked`] when a path
+/// escapes the sandbox. That variant's Display is:
+/// `"[E-DAT-006] path traversal blocked: '<path>' is outside base dir (at <span>)"`.
+///
+/// When this string is translated through `file.rs`'s catch-all arm (`err.to_string()`)
+/// into a `DataSourceError::IoError` message, it preserves the `"path traversal blocked: '"`
+/// literal substring. The dispatcher inspects that literal to distinguish path-traversal
+/// blocks from body-cap policy rejections, which share the same `[E-DAT-006]` bracket code.
+///
+/// Returns `true` only for path-traversal messages, `false` for body-cap or any other
+/// `[E-DAT-006]` sub-case.
+///
+/// ## Decision table
+///
+/// | Label in message after `[E-DAT-006]`  | Variant |
+/// |---------------------------------------|---------|
+/// | `"path traversal blocked: '"`         | `DataError::PathTraversalBlocked` |
+/// | *(anything else, e.g., body-cap)*     | `DataError::PolicyRejected` |
+///
+/// Traces to F-P7-HIGH-001 (path traversal silently re-routed to `PolicyRejected`).
+fn message_is_path_traversal(message: &str) -> bool {
+    // The distinguishing substring is the literal from DataError::PathTraversalBlocked Display.
+    // We check for it after the bracket code prefix has established E-DAT-006 context.
+    // Using `contains` (not `starts_with`) because `message` still includes the bracket prefix.
+    message.contains("path traversal blocked: '")
+}
+
+/// Extract the traversal-attempt path from a `PathTraversalBlocked` Display message.
+///
+/// The format emitted by [`DataError::PathTraversalBlocked`] is:
+/// `"[E-DAT-006] path traversal blocked: '<path>' is outside base dir (at <span>)"`.
+///
+/// This function extracts the `<path>` substring between the first single-quote after
+/// `"path traversal blocked: '"` and the next single-quote. If extraction fails for any
+/// reason (unexpected format), returns `None` and the caller falls back to the URI.
+///
+/// Traces to F-P7-HIGH-001.
+fn extract_path_from_traversal_msg(message: &str) -> Option<&str> {
+    // Find the opening quote after "path traversal blocked: '"
+    let marker = "path traversal blocked: '";
+    let start = message.find(marker)?.checked_add(marker.len())?;
+    let rest = message.get(start..)?;
+    // The path ends at the next single-quote.
+    let end = rest.find('\'')?;
+    let path = rest.get(..end)?.trim();
+    if path.is_empty() { None } else { Some(path) }
 }
 
 /// Extract the path component from a bracket-coded message of the form
@@ -2050,6 +2122,124 @@ mod tests {
         assert!(
             display.contains("unexpected token at line 2"),
             "Display must preserve the original reason text; got: {display:?}"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // F-P7-HIGH-001: PathTraversalBlocked must not be re-routed to PolicyRejected
+    // ---------------------------------------------------------------------------
+
+    /// `test_bc_1_03_004_dispatcher_routes_path_traversal_correctly`
+    ///
+    /// F-P7-HIGH-001: When `FileDataSource` emits a `DataSourceError::IoError` whose
+    /// message is the `DataError::PathTraversalBlocked` Display string (e.g., generated
+    /// by `file.rs`'s catch-all arm via `err.to_string()`), the dispatcher must:
+    ///   1. Route to `DataError::PathTraversalBlocked` — NOT `DataError::PolicyRejected`.
+    ///   2. Preserve the variant identity so callers matching `PathTraversalBlocked` see it.
+    ///   3. Display "path traversal blocked" — NOT "data policy rejected".
+    ///   4. Carry code `E-DAT-006` (single bracket, not doubled).
+    ///   5. The path in the error must be the traversal-attempt path, not the URI.
+    ///
+    /// This is an integration test that drives a real `FileDataSource` with `base_dir`
+    /// set to a `TempDir` and an absolute path pointing outside it, exercises the full
+    /// dispatcher pipeline, and asserts on the mapped `DataError` variant.
+    ///
+    /// Traces to BC-1.03.004, F-P7-HIGH-001.
+    #[test]
+    fn test_bc_1_03_004_dispatcher_routes_path_traversal_correctly() {
+        use crate::file::FileDataSource;
+
+        // Use two separate TempDirs: one as the "sandbox" base_dir, one as the "outside"
+        // directory containing a real JSON file. The file must exist so the containment
+        // check fires before file-not-found (preventing confounding with FileNotFound).
+        let sandbox = tempfile::TempDir::new().expect("sandbox temp dir");
+        let outside = tempfile::TempDir::new().expect("outside temp dir");
+        let outside_json = outside.path().join("secret.json");
+        std::fs::write(&outside_json, br#"{"secret": 42}"#).expect("write outside json");
+
+        // Build a FileDataSource pointing at the outside file, then use load_path to
+        // trigger PathTraversalBlocked. We then simulate what file.rs's load() does:
+        // translate the DataError into a DataSourceError::IoError via err.to_string().
+        let src = FileDataSource::new("");
+        let traversal_err = src
+            .load_path(&outside_json, Some(sandbox.path()))
+            .expect_err("path outside sandbox must return Err");
+
+        // Confirm it is a PathTraversalBlocked at the DataError level.
+        assert_eq!(
+            traversal_err.code(),
+            "E-DAT-006",
+            "FileDataSource::load_path must return E-DAT-006 for traversal; got: {traversal_err:?}"
+        );
+        assert!(
+            matches!(traversal_err, crate::DataError::PathTraversalBlocked { .. }),
+            "FileDataSource::load_path must return PathTraversalBlocked; got: {traversal_err:?}"
+        );
+
+        // Simulate file.rs catch-all: err.to_string() → DataSourceError::IoError.
+        // This is what the dispatcher receives when FileDataSource::load() is called.
+        let outside_path_str = outside_json.to_string_lossy().to_string();
+        let simulated_io_error = slideforge_plugin_api::DataSourceError::IoError {
+            uri: outside_path_str.clone(),
+            message: traversal_err.to_string(),
+        };
+
+        // Now run the full dispatcher with a stub that returns this DataSourceError.
+        let sources: Vec<(Arc<str>, Box<dyn slideforge_plugin_api::DataSource>)> = vec![(
+            Arc::from("secret"),
+            Box::new(StubSource {
+                result: Err(simulated_io_error),
+            }),
+        )];
+        let ctx = DataSourceContext::new();
+        let (_scope, errors) = load_all(&sources, &ctx);
+
+        assert_eq!(
+            errors.len(),
+            1,
+            "expected exactly one error from dispatcher"
+        );
+
+        // Assertion 1: variant identity is PathTraversalBlocked (not PolicyRejected).
+        assert!(
+            matches!(errors[0], DataError::PathTraversalBlocked { .. }),
+            "dispatcher must route path-traversal IoError to PathTraversalBlocked, \
+            not PolicyRejected; got: {:?}",
+            errors[0]
+        );
+
+        // Assertion 2: code is E-DAT-006 (no double bracket).
+        assert_eq!(
+            errors[0].code(),
+            "E-DAT-006",
+            "PathTraversalBlocked must carry E-DAT-006; got: {}",
+            errors[0].code()
+        );
+
+        let display = errors[0].to_string();
+
+        // Assertion 3: Display says "path traversal blocked", not "data policy rejected".
+        assert!(
+            display.contains("path traversal blocked"),
+            "Display must say 'path traversal blocked'; got: {display}"
+        );
+        assert!(
+            !display.contains("data policy rejected"),
+            "Display must NOT say 'data policy rejected' for path traversal; got: {display}"
+        );
+
+        // Assertion 4: exactly one [E-DAT-006] bracket (no double bracket).
+        assert_eq!(
+            display.matches("[E-DAT-006]").count(),
+            1,
+            "Display must contain exactly one [E-DAT-006]; got: {display}"
+        );
+
+        // Assertion 5: the path in the error is the traversal-attempt path, not the URI.
+        // The traversal path is the absolute path to outside_json.
+        assert!(
+            display.contains(outside_path_str.as_str()),
+            "Display must contain the traversal-attempt path '{outside_path_str}'; got: {display}"
         );
     }
 
