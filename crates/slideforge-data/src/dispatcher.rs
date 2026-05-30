@@ -67,7 +67,10 @@ use slideforge_types::Value;
 
 use crate::DataError;
 use crate::context::DataSourceContext;
-use crate::error::{E_DAT_001, E_DAT_002, E_DAT_003, E_DAT_004, E_DAT_006, E_DAT_015};
+use crate::error::{
+    E_DAT_001, E_DAT_002, E_DAT_003, E_DAT_004, E_DAT_006, E_DAT_007, E_DAT_008, E_DAT_009,
+    E_DAT_010, E_DAT_011, E_DAT_012, E_DAT_013, E_DAT_014, E_DAT_015,
+};
 
 /// Load all configured data sources, applying the offline gate.
 ///
@@ -434,6 +437,18 @@ fn map_source_error(name: &Arc<str>, err: &DataSourceError) -> DataError {
                 // prepends "[E-DAT-003] parse error for 'sales.csv' (Csv): " — producing
                 // double brackets and double "parse error for". Fix: use `inner_msg` directly
                 // and strip the bracket prefix, matching the pattern applied in the IoError arm.
+                // F-P10-HIGH-001 fix: Preserve granular bracket codes (E-DAT-007..E-DAT-014)
+                // embedded in the source message instead of hardcoding E_DAT_003. The built-in
+                // XLSX source emits "[E-DAT-007] xlsx empty header" and the SQLite source emits
+                // "[E-DAT-013] sqlite bad header magic" — these were previously downgraded to
+                // E-DAT-003 by the hardcoded fallback, preventing callers from distinguishing
+                // specific parse failures from generic parse errors.
+                //
+                // Rationale: `parse_e_dat_code` inspects the leading bracket of `inner_msg`
+                // and returns the matching constant when recognized; falls back to E_DAT_003
+                // for messages without a known bracket prefix (third-party plugins, generic
+                // parse errors).
+                let preserved_code = parse_e_dat_code(inner_msg).unwrap_or(E_DAT_003);
                 let clean_reason = strip_bracket_prefix(inner_msg).trim();
                 // Also strip any leading "data parse error for '<uri>': " label in case a
                 // source has already wrapped its message through DataSourceError::ParseError.
@@ -456,10 +471,15 @@ fn map_source_error(name: &Arc<str>, err: &DataSourceError) -> DataError {
                 } else {
                     clean_reason
                 };
+                // F-P10-LOW-001 fix: Use DataFormat::Unknown for URIs without a recognizable
+                // extension (e.g., HTTP URIs without a file extension) so the format annotation
+                // in the Display reads "(Unknown)" rather than falsely reporting "(Json)".
+                // DataFormat::Unknown was added to explicitly represent the "no extension /
+                // unrecognized extension" case in error messages.
                 let format = crate::format::DataFormat::from_path(std::path::Path::new(uri))
-                    .unwrap_or(crate::format::DataFormat::Json);
+                    .unwrap_or(crate::format::DataFormat::Unknown);
                 DataError::ParseError {
-                    code: E_DAT_003,
+                    code: preserved_code,
                     path: Arc::from(uri.as_str()),
                     format,
                     reason: Arc::from(clean_reason),
@@ -577,6 +597,60 @@ fn strip_bracket_prefix(msg: &str) -> &str {
     }
 }
 
+/// Inspect the leading `[E-DAT-NNN]` bracket prefix of a message and return the
+/// matching error code constant, or `None` when the bracket does not match any
+/// of the `E_DAT_001` through `E_DAT_015` constants defined in [`crate::error`].
+///
+/// ## Purpose (F-P10-HIGH-001)
+///
+/// The `ParseError` generic-fallback branch in `map_source_error` previously
+/// hardcoded `E_DAT_003` regardless of the bracket code embedded in the
+/// source message. This caused granular codes such as `E-DAT-007` (XLSX empty
+/// header) and `E-DAT-013` (`SQLite` bad magic) to be silently downgraded to the
+/// generic `E-DAT-003`.
+///
+/// Callers use this helper as:
+/// ```text
+/// parse_e_dat_code(inner_msg).unwrap_or(E_DAT_003)
+/// ```
+/// to preserve the granular code when it is recognized, and fall back to the
+/// generic parse-error code only for messages that lack a known bracket prefix.
+///
+/// ## Recognized codes
+///
+/// All `E_DAT_001` through `E_DAT_015` constants from [`crate::error`] are recognized.
+/// Unknown bracket formats (e.g., `[E-DAT-099]` or plugin-specific codes) return `None`.
+///
+/// ## Relationship to `strip_bracket_prefix`
+///
+/// This function inspects the bracket but does NOT strip it — it only returns the
+/// matching constant. The caller strips the bracket separately using
+/// [`strip_bracket_prefix`] when constructing the stored `reason` field.
+fn parse_e_dat_code(msg: &str) -> Option<&'static str> {
+    // Fast path: if the message does not start with '[', there is no bracket code.
+    if !msg.starts_with('[') {
+        return None;
+    }
+    // Recognize all defined E_DAT_NNN constants via anchored starts_with checks.
+    // Order: most-specific codes first (E_DAT_007..E_DAT_015 before the generic ones)
+    // to avoid a shorter prefix matching where a longer one applies. In practice all
+    // codes have the same prefix length ("E-DAT-0NN") so order is unambiguous, but
+    // longest-first is a good defensive practice.
+    //
+    // Each check uses format!("[{code}]") to guarantee the bracket wraps the code,
+    // matching the canonical `[E-DAT-NNN]` format emitted by all built-in sources.
+    let candidates: &[&'static str] = &[
+        E_DAT_001, E_DAT_002, E_DAT_003, E_DAT_004, E_DAT_006, E_DAT_007, E_DAT_008, E_DAT_009,
+        E_DAT_010, E_DAT_011, E_DAT_012, E_DAT_013, E_DAT_014, E_DAT_015,
+    ];
+    for &code in candidates {
+        if msg.starts_with(&format!("[{code}]")) {
+            return Some(code);
+        }
+    }
+    None
+}
+
 /// Extract the HTTP status code from a bracket-coded message of the form
 /// `"[E-DAT-001] HTTP <status> from '<url>'"`.
 ///
@@ -629,9 +703,17 @@ fn extract_http_status(message: &str) -> Result<u16, &'static str> {
 fn extract_bare_io_reason(clean_msg: &str) -> &str {
     /// Strip a quoted-path prefix of the form `"<label>'<path>': "` from `s`
     /// and return everything after the `": "` separator.
+    ///
+    /// Uses `rsplit_once("': ")` (last match) rather than `split_once` (first match)
+    /// so that paths containing an apostrophe (e.g., `/tmp/Bob's_data.csv`) are handled
+    /// correctly. The canonical `"': "` separator always appears AFTER the path, so
+    /// anchoring on the last occurrence is structurally correct.
+    ///
+    /// F-P10-MED-002 fix: sibling of `extract_path_after_code` which received an
+    /// identical `rsplit_once` fix in F-P9-MED-001. The two helpers must agree.
     fn strip_quoted_label<'a>(s: &'a str, label: &str) -> Option<&'a str> {
         s.strip_prefix(label)
-            .and_then(|rest| rest.split_once("': ").map(|(_, after)| after))
+            .and_then(|rest| rest.rsplit_once("': ").map(|(_, after)| after))
     }
     // Legacy label: "I/O error: <reason>" — no path component; the entire segment
     // after the prefix is treated as the reason string.
@@ -2691,5 +2773,264 @@ mod tests {
                 ...)` clauses live again; display: {display:?}",
             );
         }
+    }
+
+    // ---------------------------------------------------------------------------
+    // F-P10-HIGH-001: ParseError arm must preserve granular E-DAT-007..014 codes
+    // ---------------------------------------------------------------------------
+
+    /// `test_map_source_error_parse_error_preserves_e_dat_007`
+    ///
+    /// F-P10-HIGH-001: `ParseError` with `[E-DAT-007]` (XLSX empty header) must
+    /// produce `DataError::ParseError.code() == "E-DAT-007"`, NOT "E-DAT-003".
+    /// This test drives `parse_e_dat_code` through the dispatcher's full routing path.
+    #[test]
+    fn test_map_source_error_parse_error_preserves_e_dat_007() {
+        let sources = single_error_source(
+            "sheet",
+            DataSourceError::ParseError {
+                uri: "/data/report.xlsx".to_owned(),
+                message: "[E-DAT-007] xlsx empty header: column 2 header cell is empty".to_owned(),
+            },
+        );
+        let ctx = DataSourceContext::new();
+        let (_scope, errors) = load_all(&sources, &ctx);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(
+            errors[0].code(),
+            "E-DAT-007",
+            "ParseError with [E-DAT-007] must carry E-DAT-007, not E-DAT-003; got: {}, display: {}",
+            errors[0].code(),
+            errors[0]
+        );
+    }
+
+    /// `test_map_source_error_parse_error_preserves_granular_codes`
+    ///
+    /// F-P10-HIGH-001: Table-driven test that E-DAT-008 through E-DAT-014 are all
+    /// preserved by the dispatcher's `ParseError` branch. Each code corresponds to a
+    /// distinct XLSX or SQLite parse failure from the error taxonomy.
+    #[test]
+    fn test_map_source_error_parse_error_preserves_granular_codes() {
+        use crate::error::{
+            E_DAT_008, E_DAT_009, E_DAT_010, E_DAT_011, E_DAT_012, E_DAT_013, E_DAT_014,
+        };
+        // Table: (code_constant, human_readable_message)
+        let cases: &[(&str, &str)] = &[
+            (
+                E_DAT_008,
+                "[E-DAT-008] xlsx header cell non-string type: Int at column 1",
+            ),
+            (
+                E_DAT_009,
+                "[E-DAT-009] xlsx DateTimeIso cell invalid ISO 8601: 'not-a-date'",
+            ),
+            (
+                E_DAT_010,
+                "[E-DAT-010] xlsx non-finite float cell: NaN in column 3 row 2",
+            ),
+            (
+                E_DAT_011,
+                "[E-DAT-011] xlsx bad ZIP magic: file is not a valid xlsx archive",
+            ),
+            (
+                E_DAT_012,
+                "[E-DAT-012] sqlite TEXT column invalid UTF-8 bytes at row 5",
+            ),
+            (
+                E_DAT_013,
+                "[E-DAT-013] sqlite bad header magic: not a sqlite3 database",
+            ),
+            (
+                E_DAT_014,
+                "[E-DAT-014] sqlite unsupported extension '.xls' (expected .sqlite, .db)",
+            ),
+        ];
+
+        let ctx = DataSourceContext::new();
+        for (expected_code, msg) in cases {
+            let sources = single_error_source(
+                "granular",
+                DataSourceError::ParseError {
+                    uri: "/data/source.xlsx".to_owned(),
+                    message: msg.to_string(),
+                },
+            );
+            let (_scope, errors) = load_all(&sources, &ctx);
+            assert_eq!(
+                errors.len(),
+                1,
+                "expected exactly one error for code {expected_code}"
+            );
+            assert_eq!(
+                errors[0].code(),
+                *expected_code,
+                "ParseError with {expected_code} must carry that code, not E-DAT-003; \
+                got: {}, message: {}, display: {}",
+                errors[0].code(),
+                msg,
+                errors[0]
+            );
+        }
+    }
+
+    /// `test_parse_e_dat_code_returns_correct_constants`
+    ///
+    /// F-P10-HIGH-001: Unit test for `parse_e_dat_code` directly — validates that each
+    /// known bracket prefix maps to the correct constant and unknown prefixes return None.
+    #[test]
+    fn test_parse_e_dat_code_returns_correct_constants() {
+        use crate::error::{
+            E_DAT_008, E_DAT_009, E_DAT_010, E_DAT_011, E_DAT_012, E_DAT_013, E_DAT_014,
+        };
+        // Known codes must match.
+        assert_eq!(
+            parse_e_dat_code("[E-DAT-001] some http error"),
+            Some(E_DAT_001)
+        );
+        assert_eq!(parse_e_dat_code("[E-DAT-003] parse error"), Some(E_DAT_003));
+        assert_eq!(
+            parse_e_dat_code("[E-DAT-007] xlsx empty header"),
+            Some(E_DAT_007)
+        );
+        assert_eq!(
+            parse_e_dat_code("[E-DAT-008] non-string header"),
+            Some(E_DAT_008)
+        );
+        assert_eq!(
+            parse_e_dat_code("[E-DAT-009] invalid ISO date"),
+            Some(E_DAT_009)
+        );
+        assert_eq!(parse_e_dat_code("[E-DAT-010] NaN float"), Some(E_DAT_010));
+        assert_eq!(
+            parse_e_dat_code("[E-DAT-011] bad zip magic"),
+            Some(E_DAT_011)
+        );
+        assert_eq!(
+            parse_e_dat_code("[E-DAT-012] invalid utf8"),
+            Some(E_DAT_012)
+        );
+        assert_eq!(
+            parse_e_dat_code("[E-DAT-013] bad sqlite magic"),
+            Some(E_DAT_013)
+        );
+        assert_eq!(
+            parse_e_dat_code("[E-DAT-014] unsupported ext"),
+            Some(E_DAT_014)
+        );
+        assert_eq!(parse_e_dat_code("[E-DAT-015] unspecified"), Some(E_DAT_015));
+        // Unknown prefix must return None.
+        assert_eq!(parse_e_dat_code("[E-DAT-099] unknown code"), None);
+        assert_eq!(parse_e_dat_code("no bracket at all"), None);
+        assert_eq!(parse_e_dat_code(""), None);
+        // Bracket code in body but NOT at start: must return None.
+        assert_eq!(parse_e_dat_code("prefix text [E-DAT-007] body"), None);
+    }
+
+    // ---------------------------------------------------------------------------
+    // F-P10-MED-002: extract_bare_io_reason must use rsplit_once (apostrophe safety)
+    // ---------------------------------------------------------------------------
+
+    /// `test_extract_bare_io_reason_handles_apostrophe_in_quoted_path`
+    ///
+    /// F-P10-MED-002: `extract_bare_io_reason` inner helper `strip_quoted_label` used
+    /// `split_once("': ")` (first match) instead of `rsplit_once("': ")` (last match).
+    /// For a path like `/tmp/Bob's_data.csv`, the first `"': "` separator would split
+    /// at the apostrophe, yielding only the OS reason AFTER the apostrophe — not the
+    /// correct reason text after the path.
+    ///
+    /// Expected: `"permission denied"` (the OS reason after the canonical `"': "` separator).
+    #[test]
+    fn test_extract_bare_io_reason_handles_apostrophe_in_quoted_path() {
+        // Input: bracket already stripped. Path contains apostrophe.
+        // Format: "I/O error reading '<path-with-apostrophe>': <reason>"
+        let input = "I/O error reading '/tmp/Bob's_data.csv': permission denied";
+        let result = extract_bare_io_reason(input);
+        assert_eq!(
+            result, "permission denied",
+            "extract_bare_io_reason must strip 'I/O error reading' label and return only the \
+            OS reason even when the path contains an apostrophe; got: {result:?}"
+        );
+
+        // Variant: "failed to open file" label with apostrophe in path.
+        let input2 = "failed to open file '/data/O'Brien_db.sqlite': no such file or directory";
+        let result2 = extract_bare_io_reason(input2);
+        assert_eq!(
+            result2, "no such file or directory",
+            "extract_bare_io_reason must handle apostrophe in path under 'failed to open file' \
+            label; got: {result2:?}"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // F-P10-LOW-001: ParseError for no-extension URI uses DataFormat::Unknown
+    // ---------------------------------------------------------------------------
+
+    /// `test_map_source_error_parse_error_no_extension_uses_unknown_format`
+    ///
+    /// F-P10-LOW-001: When a `ParseError` has an HTTP URI with no file extension
+    /// (e.g., `"http://api.example.com/data"`), the format fallback must be
+    /// `DataFormat::Unknown`, NOT `DataFormat::Json`. The Display must NOT contain
+    /// `"(Json)"` as that would be misleading for actual CSV/YAML from HTTP.
+    #[test]
+    fn test_map_source_error_parse_error_no_extension_uses_unknown_format() {
+        let sources = single_error_source(
+            "api_no_ext",
+            DataSourceError::ParseError {
+                uri: "http://api.example.com/data".to_owned(),
+                message: "[E-DAT-003] unexpected token at offset 42".to_owned(),
+            },
+        );
+        let ctx = DataSourceContext::new();
+        let (_scope, errors) = load_all(&sources, &ctx);
+        assert_eq!(errors.len(), 1);
+        let display = errors[0].to_string();
+        assert!(
+            !display.contains("(Json)"),
+            "ParseError for no-extension HTTP URI must NOT report '(Json)'; got: {display}"
+        );
+        assert!(
+            display.contains("(Unknown)"),
+            "ParseError for no-extension HTTP URI must report '(Unknown)'; got: {display}"
+        );
+        assert_eq!(
+            errors[0].code(),
+            "E-DAT-003",
+            "code must still be E-DAT-003; got: {}",
+            errors[0].code()
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // F-P10-LOW-003: extract_path_after_code handles apostrophe + " (at " combined
+    // ---------------------------------------------------------------------------
+
+    /// `test_extract_path_after_code_handles_apostrophe_and_at_combined`
+    ///
+    /// F-P10-LOW-003: Confirms that `rsplit_once(" (at ")` (span strip) and
+    /// `rsplit_once("': ")` (path/reason strip) compose correctly when a path contains
+    /// BOTH an apostrophe and the substring `" (at "`.
+    ///
+    /// Input format:
+    ///   `"[E-DAT-004] I/O error reading '/tmp/Bob's (at) folder/data.csv': \
+    ///    permission denied (at SourceSpan { line: 1, col: 1 })"`
+    ///
+    /// Expected: `Some("/tmp/Bob's (at) folder/data.csv")`
+    ///
+    /// The `rsplit_once(" (at ")` strips the LAST `" (at "` (the trailing span annotation),
+    /// leaving `"[E-DAT-004] I/O error reading '/tmp/Bob's (at) folder/data.csv': \
+    /// permission denied"`. Then `rsplit_once("': ")` anchors on the LAST `"': "` to
+    /// extract the path correctly.
+    #[test]
+    fn test_extract_path_after_code_handles_apostrophe_and_at_combined() {
+        let msg = "[E-DAT-004] I/O error reading '/tmp/Bob's (at) folder/data.csv': \
+                   permission denied (at SourceSpan { line: 1, col: 1 })";
+        let result = extract_path_after_code(msg);
+        assert_eq!(
+            result,
+            Some("/tmp/Bob's (at) folder/data.csv"),
+            "path with apostrophe and ' (at ' substring must be extracted correctly \
+            via rsplit_once composition; got: {result:?}"
+        );
     }
 }

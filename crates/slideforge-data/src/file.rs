@@ -272,9 +272,27 @@ impl FileDataSource {
             DataFormat::Yaml => yaml::parse_yaml(contents, &path_str),
             DataFormat::Toml => toml::parse_toml(contents, &path_str),
             DataFormat::Xlsx | DataFormat::Sqlite => {
-                // Already handled above; this arm is unreachable.
-                unreachable!("xlsx/sqlite dispatched before text-read")
+                // SAFETY INVARIANT: binary formats (Xlsx, Sqlite) must be dispatched at the
+                // pre-dispatch block above (lines ~222-249). If this arm is reached in
+                // correct code, the pre-dispatch block is missing a new binary format. Rather
+                // than panicking, surface a structured error so an invariant violation is
+                // visible to callers and to the error taxonomy, rather than crashing the process.
+                //
+                // F-P10-LOW-002 fix: replaced `unreachable!()` (which panics in production)
+                // with a graceful `DataError::unsupported_format` so future maintainers
+                // adding binary format variants without wiring the pre-dispatch route receive
+                // a structured error rather than a process abort.
+                Err(DataError::unsupported_format(Arc::from(format!(
+                    "{format:?}"
+                ))))
             },
+            // DataFormat is #[non_exhaustive]; wildcard arm required to remain
+            // forward-compatible when new variants are added in future releases.
+            // This arm catches unknown variants such as DataFormat::Unknown that
+            // are not valid file-load targets (they exist for error-message annotation only).
+            _ => Err(DataError::unsupported_format(Arc::from(format!(
+                "{format:?}"
+            )))),
         }
     }
 }

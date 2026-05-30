@@ -71,12 +71,16 @@ impl DataSourceContext {
     /// Set the base directory for relative path resolution.
     ///
     /// This field is consulted by [`crate::file::FileDataSource`] for path-containment
-    /// enforcement (STORY-018). The dispatcher ([`crate::dispatcher::load_all`]) does
-    /// **NOT** propagate this field into source construction — callers must pass the
-    /// base directory directly to `FileDataSource::new_with_base_dir` or equivalent
-    /// at source-construction time. This builder exists for callers that share a
+    /// enforcement (STORY-018).
+    ///
+    /// **Dispatcher propagation gap:** The dispatcher ([`crate::dispatcher::load_all`]) does
+    /// **NOT** propagate `base_dir` into source construction — its `load("", opts)` calls
+    /// pass `None`. Callers requiring path containment must use
+    /// `FileDataSource::load_path(path, Some(base_dir))` directly at source-construction
+    /// time (or at load time via `load_path`). This builder exists for callers that share a
     /// `DataSourceContext` between source construction and dispatch, or for future
-    /// dispatcher versions that construct sources internally.
+    /// dispatcher versions that construct sources internally and thread `ctx.base_dir`
+    /// through `DataSourceOptions` or a similar mechanism (STORY-055 / future enhancement).
     ///
     /// Returns `self` for chaining.
     #[must_use]
@@ -104,16 +108,17 @@ impl DataSourceContext {
     /// user-supplied values like `"API.EXAMPLE.COM"` from `slideforge.toml` match
     /// the lowercase host components returned by the `url` crate.
     ///
-    /// **Important — dispatcher propagation:** This field is consulted by
+    /// **Dispatcher propagation gap:** This field is consulted by
     /// [`crate::http::HttpDataSource`] SSRF guarding during source construction
     /// (STORY-019). The dispatcher ([`crate::dispatcher::load_all`]) does **NOT**
-    /// propagate this field into source construction — callers must pass the
-    /// allowlist directly to `HttpDataSource::new_with_allowlist` or equivalent
-    /// at source-construction time. This builder exists for callers that share a
-    /// `DataSourceContext` between source construction and dispatch, or for future
-    /// dispatcher versions that construct sources internally. A caller using only
-    /// this builder without also configuring the source directly will silently get
-    /// no SSRF filtering effect. Traces to F-P9-LOW-001.
+    /// propagate this field into source construction — callers must configure each
+    /// `HttpDataSource` with the allowlist at construction time via
+    /// `HttpDataSource::new(url).with_allowlist(AllowlistConfig { domains: ... })`.
+    /// A caller that sets only `DataSourceContext::with_allowed_domains` without also
+    /// configuring the source at construction time will silently get no SSRF filtering
+    /// effect. This builder exists for callers that share a `DataSourceContext` between
+    /// source construction and dispatch, or for future dispatcher versions that construct
+    /// sources internally. Traces to F-P9-LOW-001.
     ///
     /// Returns `self` for chaining.
     #[must_use]

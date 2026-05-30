@@ -616,6 +616,10 @@ fn parse_body(body: &str, url_str: &str, format: DataFormat) -> Result<Value, Da
             // return an unsupported-format error.
             Err(DataError::unsupported_format(format!("{format:?}")))
         },
+        // DataFormat is #[non_exhaustive]; wildcard arm required for forward compatibility
+        // when new variants are added. DataFormat::Unknown (added by F-P10-LOW-001) is not
+        // a valid parse target — treat it the same as an unrecognized format.
+        _ => Err(DataError::unsupported_format(format!("{format:?}"))),
     }
 }
 

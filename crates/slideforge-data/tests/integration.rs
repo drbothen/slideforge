@@ -148,7 +148,18 @@ impl DataSource for MockFileSource {
 /// NOT the binding name.
 ///
 /// FINDING-9 fix: `_binding_name` field removed — it was dead code.
+///
+/// F-P10-OBS-002: `MockFailSource` is a unit struct. Adding `Default` allows callers
+/// to use `MockFailSource::default()` instead of `MockFailSource::new()`, eliminating
+/// the clippy::new_without_default lint. Both `new()` and `Default::default()` are
+/// kept for call-site compatibility.
 struct MockFailSource;
+
+impl Default for MockFailSource {
+    fn default() -> Self {
+        MockFailSource
+    }
+}
 
 impl MockFailSource {
     fn new() -> Self {
@@ -1151,5 +1162,59 @@ fn test_bc_1_03_004_error_code_dat_003_parse_error_through_dispatcher() {
     assert!(
         display.contains("Json") || display.contains("json"),
         "E-DAT-003 Display must mention Json format for .json file; got: {display}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// F-P10-HIGH-001: End-to-end XLSX bad-magic → E-DAT-011 (integration)
+// ---------------------------------------------------------------------------
+
+/// `test_bc_1_03_004_dispatcher_routes_xlsx_bad_magic_to_e_dat_011`
+///
+/// F-P10-HIGH-001 integration test: Drive a real `XlsxDataSource` (via
+/// `FileDataSource`) with a file that has an `.xlsx` extension but contains
+/// invalid magic bytes (not a ZIP archive). The dispatcher must route this
+/// to `DataError::ParseError` with `code() == "E-DAT-011"`, NOT "E-DAT-003".
+///
+/// This test confirms the FULL end-to-end production path:
+///   1. `FileDataSource::load` dispatches to `XlsxDataSource::load_internal`
+///   2. `load_internal` returns `DataError::ParseError { code: E_DAT_011, ... }`
+///   3. `FileDataSource::load` translates to `DataSourceError::ParseError`
+///      with message `"[E-DAT-011] ..."` (granular code preserved)
+///   4. Dispatcher `map_source_error` uses `parse_e_dat_code` to preserve E-DAT-011
+///
+/// Traces to F-P10-HIGH-001, BC-1.03.006 postcondition 9.
+#[test]
+fn test_bc_1_03_004_dispatcher_routes_xlsx_bad_magic_to_e_dat_011() {
+    use slideforge_data::FileDataSource;
+    use std::io::Write as _;
+
+    // Create a file with .xlsx extension but wrong magic bytes.
+    let mut tmp = tempfile::Builder::new()
+        .suffix(".xlsx")
+        .tempfile()
+        .expect("temp file creation must succeed");
+    tmp.write_all(b"This is not a real xlsx ZIP archive")
+        .expect("write must succeed");
+    let path = tmp.path().to_str().expect("temp path must be valid UTF-8");
+
+    let sources: Vec<(Arc<str>, Box<dyn DataSource>)> =
+        vec![(Arc::from("bad_xlsx"), Box::new(FileDataSource::new(path)))];
+    let ctx = DataSourceContext::new();
+
+    let (_scope, errors) = load_all(&sources, &ctx);
+
+    assert_eq!(errors.len(), 1, "expected exactly one error");
+    assert_eq!(
+        errors[0].code(),
+        "E-DAT-011",
+        "XLSX bad-magic must produce E-DAT-011, NOT E-DAT-003; got: {} (display: {})",
+        errors[0].code(),
+        errors[0]
+    );
+    let display = errors[0].to_string();
+    assert!(
+        display.contains("E-DAT-011"),
+        "E-DAT-011 Display must contain the code; got: {display}"
     );
 }
