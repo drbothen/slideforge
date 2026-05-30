@@ -2365,6 +2365,7 @@ mod tests {
     ///
     /// Traces to F-PASS16-LOW-1, BC-1.03.007 invariant 2.
     #[test]
+    #[serial(load_call_count)]
     fn test_f_pass16_low1_open_error_no_duplicate_prefix() {
         // A non-existent path causes rusqlite::Connection::open_with_flags with
         // SQLITE_OPEN_READ_ONLY to return an error (SQLite refuses to create a new
