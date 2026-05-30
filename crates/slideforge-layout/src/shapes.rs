@@ -288,12 +288,19 @@ pub fn layout_shapes(
         // the caller) + frames.len() (valid shapes placed so far in this call).
         // This matches the semantics of LayoutError::InvalidBoundingBox.frame_index
         // as documented in error.rs §BC-3.06.003 (F-P20-LOW-002).
+        //
+        // DI-018 / BC-3.04.001 item G: InvalidBoundingBox is ACCUMULATED (not a
+        // bail-on-first return) so that ALL shapes in a slide are validated in a
+        // single pass. A direct `return Err(...)` here would discard any
+        // MissingAlt or ArithmeticOverflow errors already accumulated for earlier
+        // shapes. Accumulate and continue — the Multiple is returned at loop end.
         if bbox.width <= Emu(0) || bbox.height <= Emu(0) {
-            return Err(LayoutError::InvalidBoundingBox {
+            accumulated_errors.push(LayoutError::InvalidBoundingBox {
                 source_slide_index,
                 frame_index: base_index + frames.len(),
                 bbox,
             });
+            continue;
         }
 
         if is_off_canvas(&bbox, page) {
@@ -1106,6 +1113,67 @@ mod tests {
             other => {
                 panic!("two missing-alt shapes must produce LayoutError::Multiple, got: {other:?}")
             },
+        }
+    }
+
+    /// DI-018 / BC-3.04.001 item G — `layout_shapes` accumulates ALL errors in one pass.
+    ///
+    /// A slide containing a shape with missing alt AND a shape with an invalid bounding
+    /// box (zero width) must produce `LayoutError::Multiple { inner }` with BOTH
+    /// `MissingAlt` and `InvalidBoundingBox` present, regardless of shape order.
+    ///
+    /// Load-bearing for L1 (F-P21-LOW-001): before this fix, `InvalidBoundingBox`
+    /// used `return Err(...)` and discarded prior accumulated `MissingAlt` errors.
+    /// After the fix it uses `accumulated_errors.push(...)` + `continue`, so both
+    /// errors survive to the end-of-loop `Multiple` return.
+    #[test]
+    fn test_l1_invalid_bbox_accumulated_alongside_missing_alt() {
+        // Shape 1: missing alt (no alt text, decorative: false) — produces MissingAlt.
+        let missing_alt_shape = shape_spec_no_alt("rect");
+
+        // Shape 2: has valid alt but zero-width bounding box — produces InvalidBoundingBox.
+        let st = slideforge_types::ShapeType::from_keyword("ellipse")
+            .expect("ellipse must be a valid shape type keyword");
+        let zero_width_shape = ShapeSpec {
+            shape_type: st,
+            position: ShapePosition {
+                x: ShapeUnit::Inches(500),
+                y: ShapeUnit::Inches(1000),
+                width: ShapeUnit::Inches(0),  // zero width → InvalidBoundingBox
+                height: ShapeUnit::Inches(1000),
+            },
+            fill: FillSpec::None,
+            text: None,
+            alt: Some(AltText::Provided(Arc::from("zero-width ellipse"))),
+            decorative: false,
+            span: SourceSpan::default(),
+        };
+
+        let shapes = vec![missing_alt_shape, zero_width_shape];
+        let result = layout_shapes(&shapes, default_page(), 0, DEFAULT_EM_IN_EMU, 0);
+
+        // Must fail with Multiple containing BOTH MissingAlt and InvalidBoundingBox.
+        match result.unwrap_err() {
+            LayoutError::Multiple { inner } => {
+                assert_eq!(
+                    inner.len(),
+                    2,
+                    "must accumulate exactly 2 errors (MissingAlt + InvalidBoundingBox); got: {inner:?}"
+                );
+                let has_missing_alt = inner.iter().any(|e| matches!(e, LayoutError::MissingAlt { .. }));
+                let has_invalid_bbox = inner.iter().any(|e| matches!(e, LayoutError::InvalidBoundingBox { .. }));
+                assert!(
+                    has_missing_alt,
+                    "Multiple must contain MissingAlt; inner: {inner:?}"
+                );
+                assert!(
+                    has_invalid_bbox,
+                    "Multiple must contain InvalidBoundingBox; inner: {inner:?}"
+                );
+            },
+            other => panic!(
+                "expected LayoutError::Multiple with MissingAlt + InvalidBoundingBox, got: {other:?}"
+            ),
         }
     }
 
@@ -2205,16 +2273,24 @@ mod tests {
         let shapes = vec![spec];
         let result = layout_shapes(&shapes, default_page(), 1, DEFAULT_EM_IN_EMU, 0);
         assert!(result.is_err(), "zero-width shape must return Err");
-        assert!(
-            matches!(
-                result.unwrap_err(),
-                LayoutError::InvalidBoundingBox {
-                    source_slide_index: 1,
-                    ..
-                }
-            ),
-            "error must be InvalidBoundingBox"
-        );
+        // InvalidBoundingBox is accumulated per DI-018 (not bail-on-first) and returned
+        // in a Multiple for uniform error shape (Item N). Unwrap the Multiple to check.
+        match result.unwrap_err() {
+            LayoutError::Multiple { inner } => {
+                assert_eq!(inner.len(), 1, "single invalid-bbox must produce Multiple with 1 inner");
+                assert!(
+                    matches!(
+                        &inner[0],
+                        LayoutError::InvalidBoundingBox {
+                            source_slide_index: 1,
+                            ..
+                        }
+                    ),
+                    "inner error must be InvalidBoundingBox with source_slide_index=1; got: {:?}", inner[0]
+                );
+            },
+            other => panic!("expected LayoutError::Multiple wrapping InvalidBoundingBox, got: {other:?}"),
+        }
     }
 
     /// F-P20-LOW-002 — `InvalidBoundingBox.frame_index` is slide-wide, not sub-list.
@@ -2248,20 +2324,28 @@ mod tests {
         // Slide-wide frame_index = base_index(2) + sub-list(0) = 2.
         let result = layout_shapes(&[spec], default_page(), 0, DEFAULT_EM_IN_EMU, 2);
         assert!(result.is_err(), "zero-width shape must return Err");
+        // InvalidBoundingBox is accumulated per DI-018 and returned in a Multiple
+        // (uniform Item N shape). Unwrap the Multiple to verify the inner field values.
         match result.unwrap_err() {
-            LayoutError::InvalidBoundingBox {
-                source_slide_index,
-                frame_index,
-                ..
-            } => {
-                assert_eq!(source_slide_index, 0, "source_slide_index must be 0");
-                assert_eq!(
-                    frame_index, 2,
-                    "frame_index must be 2 (slide-wide: base_index=2 + sub-list=0); \
-                     got {frame_index} — did base_index get wired through?"
-                );
+            LayoutError::Multiple { inner } => {
+                assert_eq!(inner.len(), 1, "single invalid-bbox must produce Multiple with 1 inner");
+                match &inner[0] {
+                    LayoutError::InvalidBoundingBox {
+                        source_slide_index,
+                        frame_index,
+                        ..
+                    } => {
+                        assert_eq!(*source_slide_index, 0, "source_slide_index must be 0");
+                        assert_eq!(
+                            *frame_index, 2,
+                            "frame_index must be 2 (slide-wide: base_index=2 + sub-list=0); \
+                             got {frame_index} — did base_index get wired through?"
+                        );
+                    },
+                    other => panic!("inner error must be InvalidBoundingBox, got: {other:?}"),
+                }
             },
-            other => panic!("expected LayoutError::InvalidBoundingBox, got: {other:?}"),
+            other => panic!("expected LayoutError::Multiple wrapping InvalidBoundingBox, got: {other:?}"),
         }
     }
 
