@@ -168,6 +168,11 @@ pub struct ShapeLayoutOutput {
 /// * `page` — the slide's page dimensions (for off-canvas detection).
 /// * `source_slide_index` — zero-based index of the slide (for warning/error messages).
 /// * `em_in_emu` — the brand's em-to-EMU resolution.
+/// * `base_index` — the number of frames already placed by the caller for this
+///   slide (i.e. the region-map frame count). Shape frames are appended after
+///   those frames, so `frame_index` in any [`crate::error::LayoutError::InvalidBoundingBox`]
+///   produced here equals `base_index + <local-position-in-shapes>`, giving a
+///   slide-wide frame index rather than a sub-list index (F-P20-LOW-002).
 ///
 /// # Errors
 ///
@@ -180,6 +185,7 @@ pub fn layout_shapes(
     page: PageSize,
     source_slide_index: usize,
     em_in_emu: i64,
+    base_index: usize,
 ) -> Result<ShapeLayoutOutput, LayoutError> {
     let mut frames = Vec::with_capacity(shapes.len());
     let mut warnings = Vec::new();
@@ -277,10 +283,15 @@ pub fn layout_shapes(
         // F-HIGH-003 / BC-3.06.003: validate bbox from shape frames.
         // width > 0 and height > 0 must hold; x >= 0 and y >= 0 are off-canvas
         // (not hard errors), so we only check the strictly-invalid cases here.
+        //
+        // frame_index is slide-wide: base_index (region frames already placed by
+        // the caller) + frames.len() (valid shapes placed so far in this call).
+        // This matches the semantics of LayoutError::InvalidBoundingBox.frame_index
+        // as documented in error.rs §BC-3.06.003 (F-P20-LOW-002).
         if bbox.width <= Emu(0) || bbox.height <= Emu(0) {
             return Err(LayoutError::InvalidBoundingBox {
                 source_slide_index,
-                frame_index: frames.len(),
+                frame_index: base_index + frames.len(),
                 bbox,
             });
         }
@@ -791,7 +802,7 @@ mod tests {
     #[test]
     fn test_bc_3_04_001_ac003_layout_shapes_valid_shape_no_warnings() {
         let shapes = vec![shape_spec_with_alt("rect", "Blue rectangle highlight")];
-        let result = layout_shapes(&shapes, default_page(), 0, DEFAULT_EM_IN_EMU);
+        let result = layout_shapes(&shapes, default_page(), 0, DEFAULT_EM_IN_EMU, 0);
         let output = result.expect("layout_shapes must succeed for a valid shape");
         assert_eq!(output.frames.len(), 1, "one shape → one frame");
         assert!(
@@ -810,7 +821,7 @@ mod tests {
     #[test]
     fn test_bc_3_04_001_ac002_layout_shapes_returns_one_frame_per_shape() {
         let shapes = vec![shape_spec_with_alt("rect", "Blue rectangle")];
-        let output = layout_shapes(&shapes, default_page(), 0, DEFAULT_EM_IN_EMU)
+        let output = layout_shapes(&shapes, default_page(), 0, DEFAULT_EM_IN_EMU, 0)
             .expect("layout_shapes must succeed");
         assert_eq!(output.frames.len(), 1, "one shape in → one frame out");
     }
@@ -827,7 +838,7 @@ mod tests {
             shape_spec_with_alt("rect", "First shape"),
             shape_spec_with_alt("ellipse", "Second shape"),
         ];
-        let output = layout_shapes(&shapes, default_page(), 0, DEFAULT_EM_IN_EMU)
+        let output = layout_shapes(&shapes, default_page(), 0, DEFAULT_EM_IN_EMU, 0)
             .expect("layout_shapes must succeed");
         assert_eq!(output.frames.len(), 2, "two shapes → two frames");
         // First frame must carry the first shape (Rect), second must carry Ellipse.
@@ -859,7 +870,7 @@ mod tests {
     #[test]
     fn test_bc_3_04_001_ac002_layout_shapes_empty_slice_produces_empty_output() {
         let shapes: Vec<slideforge_types::ShapeSpec> = vec![];
-        let output = layout_shapes(&shapes, default_page(), 0, DEFAULT_EM_IN_EMU)
+        let output = layout_shapes(&shapes, default_page(), 0, DEFAULT_EM_IN_EMU, 0)
             .expect("layout_shapes with empty slice must succeed");
         assert!(output.frames.is_empty(), "zero shapes → zero frames");
         assert!(output.warnings.is_empty(), "zero shapes → zero warnings");
@@ -874,7 +885,7 @@ mod tests {
     #[test]
     fn test_bc_3_04_001_ac002_frame_content_is_shape_variant() {
         let shapes = vec![shape_spec_with_alt("rect", "Test rectangle")];
-        let output = layout_shapes(&shapes, default_page(), 0, DEFAULT_EM_IN_EMU)
+        let output = layout_shapes(&shapes, default_page(), 0, DEFAULT_EM_IN_EMU, 0)
             .expect("layout_shapes must succeed");
         assert!(
             matches!(
@@ -951,7 +962,7 @@ mod tests {
     #[test]
     fn test_bc_3_04_001_ac004_layout_shapes_decorative_shape_frame() {
         let shapes = vec![shape_spec_decorative("ellipse")];
-        let output = layout_shapes(&shapes, default_page(), 0, DEFAULT_EM_IN_EMU)
+        let output = layout_shapes(&shapes, default_page(), 0, DEFAULT_EM_IN_EMU, 0)
             .expect("decorative shape must succeed in layout_shapes");
         match &output.frames[0].content {
             crate::types::FrameContent::Shape(sf) => {
@@ -1007,7 +1018,7 @@ mod tests {
     #[test]
     fn test_bc_3_04_001_ec001_layout_shapes_missing_alt_returns_error() {
         let shapes = vec![shape_spec_no_alt("rect")];
-        let result = layout_shapes(&shapes, default_page(), 2, DEFAULT_EM_IN_EMU);
+        let result = layout_shapes(&shapes, default_page(), 2, DEFAULT_EM_IN_EMU, 0);
         assert!(
             result.is_err(),
             "layout_shapes with no-alt shape must return Err"
@@ -1042,7 +1053,7 @@ mod tests {
             shape_spec_with_alt("rect", "Valid shape"),
             shape_spec_no_alt("ellipse"), // missing alt
         ];
-        let result = layout_shapes(&shapes, default_page(), 0, DEFAULT_EM_IN_EMU);
+        let result = layout_shapes(&shapes, default_page(), 0, DEFAULT_EM_IN_EMU, 0);
         assert!(
             result.is_err(),
             "second shape missing alt must cause layout_shapes to return Err"
@@ -1073,7 +1084,7 @@ mod tests {
             shape_spec_no_alt("rect"),    // missing alt
             shape_spec_no_alt("ellipse"), // missing alt
         ];
-        let result = layout_shapes(&shapes, default_page(), 0, DEFAULT_EM_IN_EMU);
+        let result = layout_shapes(&shapes, default_page(), 0, DEFAULT_EM_IN_EMU, 0);
         assert!(
             result.is_err(),
             "two shapes both missing alt must return Err"
@@ -1485,7 +1496,7 @@ mod tests {
         spec.span = non_default_span.clone();
 
         let shapes = vec![spec];
-        let result = layout_shapes(&shapes, default_page(), 5, DEFAULT_EM_IN_EMU);
+        let result = layout_shapes(&shapes, default_page(), 5, DEFAULT_EM_IN_EMU, 0);
         assert!(result.is_err(), "shape with no alt must return Err");
         match result.unwrap_err() {
             LayoutError::Multiple { inner } => {
@@ -1680,7 +1691,7 @@ mod tests {
             shape_spec_no_alt("ellipse"),
             shape_spec_no_alt("arrow"),
         ];
-        let result = layout_shapes(&shapes, default_page(), 0, DEFAULT_EM_IN_EMU);
+        let result = layout_shapes(&shapes, default_page(), 0, DEFAULT_EM_IN_EMU, 0);
         assert!(result.is_err(), "three missing-alt shapes must return Err");
         match result.unwrap_err() {
             LayoutError::Multiple { inner } => {
@@ -1892,7 +1903,7 @@ mod tests {
             span: SourceSpan::default(),
         };
         let shapes = vec![spec];
-        let result = layout_shapes(&shapes, default_page(), 0, DEFAULT_EM_IN_EMU);
+        let result = layout_shapes(&shapes, default_page(), 0, DEFAULT_EM_IN_EMU, 0);
         assert!(result.is_err(), "overflow position must return Err");
         match result.unwrap_err() {
             LayoutError::Multiple { inner } => {
@@ -1933,7 +1944,7 @@ mod tests {
             span: SourceSpan::default(),
         };
         let shapes = vec![spec];
-        let result = layout_shapes(&shapes, default_page(), 0, DEFAULT_EM_IN_EMU);
+        let result = layout_shapes(&shapes, default_page(), 0, DEFAULT_EM_IN_EMU, 0);
         assert!(result.is_err(), "y overflow must return Err");
         match result.unwrap_err() {
             LayoutError::Multiple { inner } => {
@@ -1972,7 +1983,7 @@ mod tests {
             span: SourceSpan::default(),
         };
         let shapes = vec![spec];
-        let result = layout_shapes(&shapes, default_page(), 0, DEFAULT_EM_IN_EMU);
+        let result = layout_shapes(&shapes, default_page(), 0, DEFAULT_EM_IN_EMU, 0);
         assert!(result.is_err(), "width overflow must return Err");
         match result.unwrap_err() {
             LayoutError::Multiple { inner } => {
@@ -2011,7 +2022,7 @@ mod tests {
             span: SourceSpan::default(),
         };
         let shapes = vec![spec];
-        let result = layout_shapes(&shapes, default_page(), 0, DEFAULT_EM_IN_EMU);
+        let result = layout_shapes(&shapes, default_page(), 0, DEFAULT_EM_IN_EMU, 0);
         assert!(result.is_err(), "height overflow must return Err");
         match result.unwrap_err() {
             LayoutError::Multiple { inner } => {
@@ -2117,7 +2128,7 @@ mod tests {
     #[test]
     fn test_f_high_002_layout_shapes_canonical_emu_vector() {
         let shapes = vec![shape_spec_with_alt("rect", "Test rect")];
-        let output = layout_shapes(&shapes, default_page(), 0, DEFAULT_EM_IN_EMU)
+        let output = layout_shapes(&shapes, default_page(), 0, DEFAULT_EM_IN_EMU, 0)
             .expect("canonical position must not overflow");
         assert_eq!(output.frames.len(), 1);
         let bbox = output.frames[0].bbox;
@@ -2154,7 +2165,7 @@ mod tests {
             span: SourceSpan::default(),
         };
         let shapes = vec![spec];
-        let result = layout_shapes(&shapes, default_page(), 1, DEFAULT_EM_IN_EMU);
+        let result = layout_shapes(&shapes, default_page(), 1, DEFAULT_EM_IN_EMU, 0);
         assert!(result.is_err(), "zero-width shape must return Err");
         assert!(
             matches!(
@@ -2166,6 +2177,54 @@ mod tests {
             ),
             "error must be InvalidBoundingBox"
         );
+    }
+
+    /// F-P20-LOW-002 — `InvalidBoundingBox.frame_index` is slide-wide, not sub-list.
+    ///
+    /// Scenario: 2 region frames already placed by the caller (base_index=2),
+    /// then 1 zero-width shape. Expected `frame_index = 2 + 0 = 2` (not 0).
+    ///
+    /// Load-bearing: change `base_index` from 2 to 0 in the call below and the
+    /// assertion for `frame_index: 2` must fail (it would report 0 instead),
+    /// proving that the `base_index` parameter is wired through to the error.
+    #[test]
+    fn test_f_p20_low_002_invalid_bbox_frame_index_is_slide_wide() {
+        let st = slideforge_types::ShapeType::from_keyword("rect").expect("rect must be known");
+        // Zero-width shape — will trigger InvalidBoundingBox.
+        let spec = ShapeSpec {
+            shape_type: st,
+            position: ShapePosition {
+                x: ShapeUnit::Inches(500),
+                y: ShapeUnit::Inches(1000),
+                width: ShapeUnit::Inches(0), // zero width → Emu(0) → invalid
+                height: ShapeUnit::Inches(1000),
+            },
+            fill: FillSpec::None,
+            text: None,
+            alt: Some(AltText::Provided(Arc::from("zero-width shape"))),
+            decorative: false,
+            span: SourceSpan::default(),
+        };
+        // Simulates a slide that already has 2 region frames (base_index=2).
+        // The zero-width shape is the first (and only) shape, at sub-list index 0.
+        // Slide-wide frame_index = base_index(2) + sub-list(0) = 2.
+        let result = layout_shapes(&[spec], default_page(), 0, DEFAULT_EM_IN_EMU, 2);
+        assert!(result.is_err(), "zero-width shape must return Err");
+        match result.unwrap_err() {
+            LayoutError::InvalidBoundingBox {
+                source_slide_index,
+                frame_index,
+                ..
+            } => {
+                assert_eq!(source_slide_index, 0, "source_slide_index must be 0");
+                assert_eq!(
+                    frame_index, 2,
+                    "frame_index must be 2 (slide-wide: base_index=2 + sub-list=0); \
+                     got {frame_index} — did base_index get wired through?"
+                );
+            },
+            other => panic!("expected LayoutError::InvalidBoundingBox, got: {other:?}"),
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -2190,7 +2249,7 @@ mod tests {
             shape_spec_with_alt("rect", "First shape"),
             shape_spec_with_alt("ellipse", "Second shape"),
         ];
-        let output = layout_shapes(&shapes, default_page(), 0, DEFAULT_EM_IN_EMU)
+        let output = layout_shapes(&shapes, default_page(), 0, DEFAULT_EM_IN_EMU, 0)
             .expect("layout_shapes must succeed");
         assert_eq!(output.frames.len(), 2, "two shapes → two shape frames");
         // Source order is preserved: first shape → frames[0], second → frames[1].
@@ -2254,7 +2313,7 @@ mod tests {
             span: SourceSpan::default(),
         };
         let shapes = vec![spec];
-        let result = layout_shapes(&shapes, default_page(), 0, DEFAULT_EM_IN_EMU);
+        let result = layout_shapes(&shapes, default_page(), 0, DEFAULT_EM_IN_EMU, 0);
         assert!(
             result.is_err(),
             "Em overflow in {field} must return Err (VP-048 checked_mul)"

@@ -102,7 +102,12 @@ pub enum LayoutError {
     InvalidBoundingBox {
         /// Zero-based index of the slide containing the invalid frame.
         source_slide_index: usize,
-        /// Zero-based index of the frame within the slide.
+        /// Zero-based **slide-wide** index of the offending frame within the slide.
+        ///
+        /// This is the position in the full combined frame list (region frames +
+        /// shape frames), not a sub-list index within the shape group alone.
+        /// A slide with 2 region frames where the first shape frame is invalid
+        /// reports `frame_index = 2`, not 0 (F-P20-LOW-002).
         frame_index: usize,
         /// The offending bounding box.
         bbox: BoundingBox,

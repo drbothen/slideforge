@@ -208,7 +208,10 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
         // Tracked: STORY-074 (brand-em-sizing) will add `BrandFonts.font_size_emu`
         // and wire it here. BC-3.04.001 PC-2 mandates brand-aware em resolution;
         // this deferral is structural (missing type field), not a design choice.
-        let shape_output = layout_shapes(&shape_specs, page_size, source_index, DEFAULT_EM_IN_EMU)?;
+        // Pass frames.len() as base_index so InvalidBoundingBox.frame_index is
+        // slide-wide (region frames + shape-list position) rather than a local
+        // sub-list index (F-P20-LOW-002 / BC-3.06.003).
+        let shape_output = layout_shapes(&shape_specs, page_size, source_index, DEFAULT_EM_IN_EMU, frames.len())?;
 
         let mut all_frames = frames;
         all_frames.extend(shape_output.frames);
