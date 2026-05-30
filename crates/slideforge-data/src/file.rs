@@ -271,11 +271,33 @@ impl DataSource for FileDataSource {
     /// need containment enforcement (e.g., the evaluator processing an `@data`
     /// directive) MUST use [`FileDataSource::load_path`] directly with the
     /// project root as `base_dir`.
+    ///
+    /// ## Empty URI
+    ///
+    /// When `uri` is empty (e.g., when the dispatcher calls this source with an
+    /// empty placeholder URI and the file path is configured at a higher layer),
+    /// this method returns `DataSourceError::IoError` with `[E-DAT-004]` in the
+    /// message. This signals "no file path was provided" and is the same error
+    /// code as file-not-found, allowing callers to surface a coherent diagnostic.
+    ///
     // `_opts` is intentionally ignored: local file formats (JSON, CSV, YAML, TOML) have no
     // concept of timeout, auth token, or query filter at the DataSource trait boundary.
     // File-based sources MAY silently ignore options that have no semantic meaning for their
     // format (see `DataSourceOptions` rustdoc convention, F-PASS21-LOW-1).
     fn load(&self, uri: &str, _opts: &DataSourceOptions) -> Result<Value, DataSourceError> {
+        // Guard: empty URI means no file path was provided. Return E-DAT-004
+        // (file-not-found) so the dispatcher can surface a coherent error code.
+        // This branch is taken when the dispatcher calls load("", opts) as a
+        // placeholder invocation — real evaluator code always provides the path.
+        if uri.is_empty() {
+            return Err(DataSourceError::IoError {
+                uri: String::new(),
+                message: format!(
+                    "[{}] file not found: (no file path provided — uri is empty)",
+                    crate::error::E_DAT_004
+                ),
+            });
+        }
         let path = Path::new(uri);
         self.load_path(path, None).map_err(|e| match e {
             DataError::FileNotFound { path, .. } => DataSourceError::IoError {

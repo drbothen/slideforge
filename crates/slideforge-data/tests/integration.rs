@@ -35,10 +35,7 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
 };
 
-use slideforge_data::{
-    DataSourceContext,
-    dispatcher::load_all,
-};
+use slideforge_data::{DataSourceContext, dispatcher::load_all};
 use slideforge_plugin_api::{DataSource, DataSourceError, DataSourceOptions};
 use slideforge_types::Value;
 
@@ -85,11 +82,7 @@ impl MockHttpSource {
     ///
     /// Used in AC-007 watch-mode tests where the caller needs to assert
     /// exactly zero calls across multiple dispatcher invocations.
-    fn with_counter(
-        name: impl Into<Arc<str>>,
-        value: Value,
-        call_count: Arc<AtomicUsize>,
-    ) -> Self {
+    fn with_counter(name: impl Into<Arc<str>>, value: Value, call_count: Arc<AtomicUsize>) -> Self {
         MockHttpSource {
             name: name.into(),
             value,
@@ -181,11 +174,8 @@ impl DataSource for MockFailSource {
 #[test]
 fn test_bc_1_03_004_offline_skips_http_source() {
     let call_count = Arc::new(AtomicUsize::new(0));
-    let mock_http = MockHttpSource::with_counter(
-        "metrics",
-        Value::Int(42),
-        Arc::clone(&call_count),
-    );
+    let mock_http =
+        MockHttpSource::with_counter("metrics", Value::Int(42), Arc::clone(&call_count));
     let sources: Vec<(Arc<str>, Box<dyn DataSource>, bool)> = vec![(
         Arc::from("metrics"),
         Box::new(mock_http),
@@ -320,7 +310,11 @@ fn test_bc_1_03_004_online_loads_all_sources() {
         scope.contains_key(&Arc::from("live")),
         "HTTP source 'live' must be loaded when online (offline=false)"
     );
-    assert_eq!(scope.len(), 2, "scope must have exactly 2 entries when online");
+    assert_eq!(
+        scope.len(),
+        2,
+        "scope must have exactly 2 entries when online"
+    );
     assert!(errors.is_empty(), "no errors expected; got: {:?}", errors);
 }
 
@@ -361,8 +355,14 @@ fn test_bc_1_03_004_offline_zero_http_sources() {
         2,
         "all file sources must be loaded when offline=true and no HTTP sources exist"
     );
-    assert!(scope.contains_key(&Arc::from("data_a")), "'data_a' must be present");
-    assert!(scope.contains_key(&Arc::from("data_b")), "'data_b' must be present");
+    assert!(
+        scope.contains_key(&Arc::from("data_a")),
+        "'data_a' must be present"
+    );
+    assert!(
+        scope.contains_key(&Arc::from("data_b")),
+        "'data_b' must be present"
+    );
     assert!(errors.is_empty(), "no errors expected; got: {:?}", errors);
 }
 
@@ -413,7 +413,11 @@ fn test_bc_1_03_004_offline_with_file_and_http() {
     );
 
     assert!(errors.is_empty(), "no errors expected; got: {:?}", errors);
-    assert_eq!(scope.len(), 1, "scope must contain exactly 1 entry (the file source)");
+    assert_eq!(
+        scope.len(),
+        1,
+        "scope must contain exactly 1 entry (the file source)"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -468,7 +472,10 @@ fn test_bc_1_03_004_offline_does_not_silently_substitute_empty_value() {
     let source_name: Arc<str> = Arc::from("http_source");
     let sources: Vec<(Arc<str>, Box<dyn DataSource>, bool)> = vec![(
         Arc::clone(&source_name),
-        Box::new(MockHttpSource::new("http_source", Value::Map(Default::default()))),
+        Box::new(MockHttpSource::new(
+            "http_source",
+            Value::Map(Default::default()),
+        )),
         true,
     )];
     let ctx = DataSourceContext::new().with_offline(true);
@@ -575,7 +582,12 @@ fn test_bc_1_03_004_error_code_dat_004_file_not_found() {
     );
 
     // There must be exactly one error.
-    assert_eq!(errors.len(), 1, "exactly one error expected; got: {:?}", errors);
+    assert_eq!(
+        errors.len(),
+        1,
+        "exactly one error expected; got: {:?}",
+        errors
+    );
 
     let err_display = errors[0].to_string();
     assert!(
@@ -613,11 +625,8 @@ fn test_bc_1_03_004_error_code_dat_006_ssrf_blocked() {
 
     // NOT offline_capable for this test — we want the dispatcher to ATTEMPT the
     // load so we get the SSRF error. (offline_capable=false bypasses the gate.)
-    let sources: Vec<(Arc<str>, Box<dyn DataSource>, bool)> = vec![(
-        Arc::from("imds"),
-        Box::new(http_src),
-        false,
-    )];
+    let sources: Vec<(Arc<str>, Box<dyn DataSource>, bool)> =
+        vec![(Arc::from("imds"), Box::new(http_src), false)];
     let ctx = DataSourceContext::new();
 
     // Red Gate: panics on todo!() until implemented.
@@ -627,7 +636,12 @@ fn test_bc_1_03_004_error_code_dat_006_ssrf_blocked() {
         !scope.contains_key(&Arc::from("imds")),
         "SSRF-blocked source must not appear in scope"
     );
-    assert_eq!(errors.len(), 1, "exactly one SSRF error expected; got: {:?}", errors);
+    assert_eq!(
+        errors.len(),
+        1,
+        "exactly one SSRF error expected; got: {:?}",
+        errors
+    );
 
     let err_display = errors[0].to_string();
     assert!(
