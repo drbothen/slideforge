@@ -245,11 +245,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if find . -path '*/benches/build_bench.rs' | grep -q .; then
+          # F-PASS12-OBS-3: match ANY benches/*.rs file across the workspace, not
+          # just crates/slideforge-cli/benches/build_bench.rs. This ensures that
+          # benchmark files in other crates (e.g. slideforge-data/benches/data_sources.rs)
+          # also activate the perf-smoke gate.
+          if find . -path '*/benches/*.rs' | grep -q .; then
             echo "has_benches=true" >> "$GITHUB_OUTPUT"
           else
             echo "has_benches=false" >> "$GITHUB_OUTPUT"
-            echo "No benchmark fixtures found (expected at crates/slideforge-cli/benches/build_bench.rs). Skipping bench gate — will activate in Phase 3."
+            echo "No benchmark fixtures found (pattern: */benches/*.rs). Skipping bench gate — will activate in Phase 3."
           fi
       - name: cargo bench --no-run (compile check only when no fixtures)
         if: steps.bench-check.outputs.has_benches == 'false'
@@ -321,6 +325,45 @@ jobs:
             --psnr-threshold 35.0 \
             --fail-on-violation
 
+  # ─── Performance smoke gate (NFR-036 / NFR-037) ───────────────────────────
+  # Runs the #[ignore = "perf-gate"] integration tests from
+  # crates/slideforge-data/tests/perf_smoke.rs.
+  #
+  # NFR-036: XlsxDataSource 10k rows × 5 cols must load in < 2000ms.
+  # NFR-037: SqliteDataSource 10k rows × 5 cols must load in < 500ms.
+  #
+  # Linux-only: macOS and Windows have higher / more variable runner overhead
+  # that would make the fixed thresholds unreliable.  The spec thresholds are
+  # calibrated for Linux x86_64.
+  #
+  # --test-threads 1 runs tests sequentially to reduce timer noise from
+  # concurrent I/O on shared CI runners.
+  #
+  # F-LOW-P5-1 fix (STORY-020 pass-5): wired from stranded STORY-NNN handoff.
+  perf-smoke:
+    name: perf-smoke (NFR-036/037)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
+        with:
+          shared-key: perf-smoke
+      - name: Performance smoke tests (NFR-036/037)
+        env:
+          # F-PASS11-OBS-2: suppress color codes so the grep regex remains stable
+          # across cargo upgrades that may change ANSI escape sequences.
+          CARGO_TERM_COLOR: never
+        run: |
+          set -euo pipefail
+          cargo test --release -p slideforge-data --test perf_smoke -- --ignored --test-threads 1 2>&1 | tee /tmp/perf.log
+          PASSED=$(grep -oE "test result: ok\. [0-9]+ passed" /tmp/perf.log | grep -oE "[0-9]+" | head -1)
+          test "${PASSED:-0}" -ge 2 || { echo "::error::perf-smoke false-green: expected >=2 tests passed, got ${PASSED:-0}"; exit 1; }
+          echo "Check passed: ${PASSED} perf-gate tests validated (NFR-036/037)"
+
   # ─── Summary: all required checks passed ───────────────────────────────────
   # This synthetic job depends on every required check. Branch protection
   # can gate on "CI / all-checks-pass" as a single required status check.
@@ -336,6 +379,7 @@ jobs:
       - supply-chain
       - bench
       - visual-regression
+      - perf-smoke
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()

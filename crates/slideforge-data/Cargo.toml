@@ -30,8 +30,30 @@ ordered-float = "=4.6.0"
 ureq = "=2.12.1"
 url = "=2.5.4"
 tracing.workspace = true
+# STORY-020: Excel .xlsx reading (pure Rust, no C dependencies).
+# dates feature enables calamine::Data::DateTime → chrono::NaiveDateTime conversion for ISO 8601 output.
+calamine = { version = "=0.26.1", features = ["dates"] }
+# chrono is required directly for DateTimeIso validation in xlsx.rs (BC-1.03.006 postcondition 6).
+# Pinned to match calamine's transitive dependency version.
+chrono = { version = "=0.4.38", default-features = false, features = ["std"] }
+# STORY-020: SQLite read-only query execution (bundled libsqlite3 for reproducible builds).
+rusqlite = { version = "=0.32.0", features = ["bundled"] }
+# STORY-020: BLOB column encoding to base64 Value::Str.
+base64 = "=0.22.1"
 
 [dev-dependencies]
 tempfile = "=3.10.0"
 insta = { workspace = true }
 tracing-test = "=0.2.5"
+# STORY-020: Generate test .xlsx files in memory for unit tests.
+rust_xlsxwriter = "=0.64.0"
+# F-HIGH-1 (STORY-020 pass 2): performance benchmarks for NFR-036/037/038.
+# Pinned per supply-chain policy. criterion 0.5 requires stable Rust.
+criterion = { version = "=0.5.1", features = ["html_reports"] }
+# F-MED-P5-1: serialise VP-027 counter test against concurrent .load() calls.
+# serial_test 3.1.1 is the latest stable at STORY-020 pass-5 (2026-05-29).
+serial_test = "=3.1.1"
+
+[[bench]]
+name = "data_sources"
+harness = false

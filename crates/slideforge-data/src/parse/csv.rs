@@ -16,8 +16,17 @@ use crate::format::DataFormat;
 /// Parse a CSV string and return a [`Value::List`] of row maps.
 ///
 /// Each row in the CSV (after the header row) becomes a [`Value::Map`]
-/// where keys are trimmed column header names and values are
-/// [`Value::Str`] cell contents. Empty cells become [`Value::Null`].
+/// where keys are the verbatim column header names (no trimming applied)
+/// and values are [`Value::Str`] cell contents. Empty cells become
+/// [`Value::Null`].
+///
+/// ## Header whitespace policy
+///
+/// Headers are stored verbatim — `" name "` produces key `" name "`, not
+/// `"name"`. This matches the canonical "strings are strings" rule (DSL
+/// design decision R3 / sibling-DataSource consistency with XLSX, which
+/// also stores headers verbatim per pass-3 fix). Callers that need
+/// trimmed keys must apply their own normalization.
 ///
 /// # Errors
 ///
@@ -36,13 +45,15 @@ pub fn parse_csv(source: &str, path: &str) -> Result<Value, DataError> {
         .flexible(true)
         .from_reader(source.as_bytes());
 
-    // Read and trim headers
+    // Read headers verbatim (no trimming — canonical "strings are strings" rule,
+    // F-LOW-1 / sibling-DataSource consistency: XLSX also stores headers verbatim.
+    // Traces to S-7.01 sibling-DataSource consistency requirement).
     let raw_headers = reader
         .headers()
         .map_err(|e| DataError::parse_error(path, DataFormat::Csv, e.to_string()))?
         .clone();
 
-    let headers: Vec<Arc<str>> = raw_headers.iter().map(|h| Arc::from(h.trim())).collect();
+    let headers: Vec<Arc<str>> = raw_headers.iter().map(Arc::from).collect();
 
     // Detect duplicate headers
     let mut seen: HashSet<&str> = HashSet::new();
@@ -165,22 +176,31 @@ mod tests {
         );
     }
 
-    /// `test_BC_5_03_004_parse_csv_header_whitespace_trimming` — headers with surrounding spaces are trimmed.
+    /// `test_BC_5_03_004_parse_csv_header_whitespace_preserved` — headers with surrounding spaces
+    /// are stored verbatim (no trimming).
+    ///
+    /// Inverted from the previous "trimming" assertion: the canonical "strings are strings"
+    /// rule (F-LOW-1 / S-7.01 sibling-DataSource consistency) requires that CSV headers be
+    /// stored as-is, matching XLSX behavior (pass-3 fix). Trimming was removed from the
+    /// production code path; this test confirms the preserved (verbatim) behavior.
     #[test]
-    fn test_bc_5_03_004_parse_csv_header_whitespace_trimming() {
+    fn test_bc_5_03_004_parse_csv_header_whitespace_preserved() {
         let src = " name , val \nAlice,42";
         let value = parse_csv(src, "test.csv").expect("whitespace-header CSV must parse");
         let list = value.as_list().expect("must be Value::List");
         assert_eq!(list.len(), 1);
         let row = list[0].as_map().expect("row must be map");
-        // Keys must be trimmed: "name" not " name "
+        // Keys must be verbatim: " name " not "name".
+        // F-LOW-1: trimming was removed; the canonical "strings are strings" rule applies.
         assert!(
-            row.get("name").is_some(),
-            "header whitespace must be trimmed — key 'name' must be accessible"
+            row.get(" name ").is_some(),
+            "header whitespace must be preserved — key ' name ' (with spaces) must be accessible; \
+            got keys: {:?}",
+            row.keys().collect::<Vec<_>>()
         );
         assert!(
-            row.get(" name ").is_none(),
-            "untrimmed key ' name ' must NOT be present"
+            row.get("name").is_none(),
+            "trimmed key 'name' must NOT be present — headers are stored verbatim"
         );
     }
 

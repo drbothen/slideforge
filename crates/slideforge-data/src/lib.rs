@@ -1,8 +1,8 @@
 //! `DataSource` plugin implementations for slideforge.
 //!
 //! This crate provides the built-in `DataSource` plugin implementations
-//! that load data from local files in JSON, CSV, YAML, and TOML formats,
-//! as well as HTTP/HTTPS sources with SSRF protection.
+//! that load data from local files in JSON, CSV, YAML, TOML, Excel XLSX,
+//! and `SQLite` formats, as well as HTTP/HTTPS sources with SSRF protection.
 //!
 //! ## Supported formats
 //!
@@ -12,6 +12,8 @@
 //! | CSV    | `.csv`    | [`csv`] crate |
 //! | YAML   | `.yaml`, `.yml` | [`serde_yaml_ng`] |
 //! | TOML   | `.toml`   | [`toml`] crate |
+//! | XLSX   | `.xlsx`   | [`calamine`] crate |
+//! | `SQLite` | `.sqlite`, `.db`, `.sqlite3` | [`rusqlite`] crate |
 //!
 //! ## Architecture
 //!
@@ -22,8 +24,9 @@
 //!
 //! ## Dog-fooding Guarantee (BC-5.02.002)
 //!
-//! `FileDataSource` and `HttpDataSource` implement `DataSource` using only
-//! the public plugin-api traits. No internal bypass of the plugin system.
+//! `FileDataSource`, `HttpDataSource`, `XlsxDataSource`, and `SqliteDataSource`
+//! implement `DataSource` using only the public plugin-api traits. No internal
+//! bypass of the plugin system.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
@@ -37,9 +40,13 @@ pub mod file;
 pub mod format;
 pub mod http;
 pub mod parse;
+pub mod sqlite;
+pub mod xlsx;
 
 pub use context::DataSourceContext;
 pub use error::DataError;
 pub use file::FileDataSource;
 pub use format::DataFormat;
 pub use http::HttpDataSource;
+pub use sqlite::SqliteDataSource;
+pub use xlsx::XlsxDataSource;
