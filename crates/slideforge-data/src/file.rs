@@ -293,14 +293,9 @@ impl DataSource for FileDataSource {
         self.load_path(path, None).map_err(|e| match e {
             DataError::FileNotFound { path, .. } => DataSourceError::IoError {
                 uri: uri.to_owned(),
+                // FileNotFound: construct message manually so the [E-DAT-004] bracket code
+                // is explicit without the Display's "I/O error reading" boilerplate.
                 message: format!("[{}] file not found: {path}", crate::error::E_DAT_004),
-            },
-            // F-PASS18-MED-1: use err.to_string() (full Display, includes [E-DAT-004] prefix)
-            // rather than extracting the inner `message` field, which is the raw I/O description
-            // without the bracket code.
-            err @ DataError::IoError { .. } => DataSourceError::IoError {
-                uri: uri.to_owned(),
-                message: err.to_string(),
             },
             DataError::UnsupportedFormat { extension, .. } => DataSourceError::UnsupportedUri {
                 uri: format!("{uri} (unsupported extension: {extension})"),
@@ -311,14 +306,13 @@ impl DataSource for FileDataSource {
                 uri: uri.to_owned(),
                 message: err.to_string(),
             },
-            // F-PASS18-MED-1 (path traversal): use err.to_string() to preserve [E-DAT-006].
-            err @ DataError::PathTraversalBlocked { .. } => DataSourceError::IoError {
+            // F-PASS18-MED-1: use err.to_string() for IoError ([E-DAT-004]) and
+            // PathTraversalBlocked ([E-DAT-006]) so bracket codes are preserved.
+            // The catch-all also uses err.to_string(), which always includes the bracket code
+            // from the DataError Display format for any remaining variants.
+            err => DataSourceError::IoError {
                 uri: uri.to_owned(),
                 message: err.to_string(),
-            },
-            other => DataSourceError::IoError {
-                uri: uri.to_owned(),
-                message: other.to_string(),
             },
         })
     }
@@ -794,14 +788,14 @@ mod tests {
     // underlying DataError::Display must survive translation into DataSourceError.
     // ---------------------------------------------------------------------------
 
-    /// `test_pass18_med1_io_error_preserves_bracket_code` — `DataSource::load()` IoError arm
+    /// `test_pass18_med1_io_error_preserves_bracket_code` — `DataSource::load()` `IoError` arm
     /// preserves `[E-DAT-004]` bracket code from the underlying `DataError::IoError`.
     ///
     /// Before F-PASS18-MED-1 fix: `DataError::IoError { message, .. }` extracted the raw
     /// `message` field (which is just the I/O description text, no bracket code).
     /// After fix: `err.to_string()` is used, which includes `[E-DAT-004]` from Display.
     ///
-    /// Traces to F-PASS18-MED-1 (sibling-sweep gap: IoError → DataSourceError::IoError strips [E-DAT-004]).
+    /// Traces to F-PASS18-MED-1 (sibling-sweep gap: `IoError` → `DataSourceError::IoError` strips `[E-DAT-004]`).
     #[test]
     fn test_pass18_med1_io_error_preserves_bracket_code() {
         use std::path::PathBuf;
@@ -828,10 +822,7 @@ mod tests {
         //
         // Simpler: the DataError::IoError arm fires from base_dir canonicalization failure.
         // We exercise it through load_path() and verify the code on the returned DataError.
-        let result = src.load_path(
-            std::path::Path::new("some.json"),
-            Some(&nonexistent_base),
-        );
+        let result = src.load_path(std::path::Path::new("some.json"), Some(&nonexistent_base));
         let err = result.expect_err("non-canonicalizable base_dir must return Err");
         // The DataError itself (from load_path) must carry E-DAT-004.
         assert_eq!(
@@ -848,13 +839,13 @@ mod tests {
         );
     }
 
-    /// `test_pass18_med2_parse_error_preserves_bracket_code` — `DataSource::load()` ParseError arm
+    /// `test_pass18_med2_parse_error_preserves_bracket_code` — `DataSource::load()` `ParseError` arm
     /// preserves `[E-DAT-003]` bracket code from the underlying `DataError::ParseError`.
     ///
     /// Before F-PASS18-MED-2 fix: `DataError::ParseError { reason, .. }` extracted the raw
     /// `reason` field (no bracket code). After fix: `err.to_string()` used, including `[E-DAT-003]`.
     ///
-    /// Traces to F-PASS18-MED-2 (sibling-sweep gap: ParseError → DataSourceError::ParseError strips [E-DAT-003]).
+    /// Traces to F-PASS18-MED-2 (sibling-sweep gap: `ParseError` → `DataSourceError::ParseError` strips `[E-DAT-003]`).
     #[test]
     fn test_pass18_med2_parse_error_preserves_bracket_code() {
         // Trigger a DataError::ParseError by loading a file with invalid JSON.
@@ -864,7 +855,9 @@ mod tests {
         let uri = f.path().to_str().unwrap();
         // DataSource::load() maps DataError::ParseError → DataSourceError::ParseError.
         // The resulting DataSourceError::ParseError::message must contain [E-DAT-003].
-        let err = src.load(uri, &opts).expect_err("invalid JSON must return Err");
+        let err = src
+            .load(uri, &opts)
+            .expect_err("invalid JSON must return Err");
         assert!(
             matches!(err, DataSourceError::ParseError { .. }),
             "invalid JSON must produce DataSourceError::ParseError; got: {err:?}"
@@ -876,16 +869,16 @@ mod tests {
         );
     }
 
-    /// `test_pass18_med1_path_traversal_preserves_bracket_code` — `DataSource::load()` PathTraversalBlocked
-    /// arm preserves `[E-DAT-006]` bracket code.
+    /// `test_pass18_med1_path_traversal_preserves_bracket_code` — `DataSource::load()`
+    /// `PathTraversalBlocked` arm preserves `[E-DAT-006]` bracket code.
     ///
     /// Before F-PASS18-MED-1 fix: `DataError::PathTraversalBlocked { path, .. }` was used to
     /// format a message without the bracket code. After fix: `err.to_string()` used.
     ///
-    /// This path is exercised through load_path() (the DataError is returned from there), but the
-    /// translator in load() is what is being tested for bracket preservation.
+    /// This path is exercised through `load_path()` (the `DataError` is returned from there),
+    /// but the translator in `load()` is what is being tested for bracket preservation.
     ///
-    /// Traces to F-PASS18-MED-1 (path traversal arm strips [E-DAT-006]).
+    /// Traces to F-PASS18-MED-1 (path traversal arm strips `[E-DAT-006]`).
     #[test]
     fn test_pass18_med1_path_traversal_preserves_bracket_code() {
         // We test via DataError::PathTraversalBlocked Display directly (load() doesn't go

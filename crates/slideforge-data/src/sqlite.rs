@@ -1371,15 +1371,14 @@ mod tests {
     /// that requires corrupted page-level data beyond the 16-byte magic header. Since
     /// rusqlite is permissive about opening minimal files (it treats them as empty DBs),
     /// we cover the bracket code correctness for lines 298-301 (prepare) and 314 (duplicate
-    /// column) through this test and test_pass18_low3_duplicate_column_bracket_code.
+    /// column) through this test and `test_pass18_low3_duplicate_column_bracket_code`.
     ///
     /// Traces to F-PASS18-LOW-3, lines 298-301.
     #[test]
     #[serial(load_call_count)]
     fn test_pass18_low3_prepare_failure_has_bracket() {
         let conn = make_memory_db(|c| {
-            c.execute_batch("CREATE TABLE data (val INTEGER);")
-                .unwrap();
+            c.execute_batch("CREATE TABLE data (val INTEGER);").unwrap();
         });
         let (_dir, path) = save_db_to_tempfile(&conn, ".db");
         // A query with a syntax error causes prepare() to fail.
@@ -1400,16 +1399,16 @@ mod tests {
         );
     }
 
-    /// `test_pass18_low3_query_execution_failure_has_bracket` — stmt.query() failure embeds
+    /// `test_pass18_low3_query_execution_failure_has_bracket` — `stmt.query()` failure embeds
     /// `[E-DAT-003]` bracket code.
     ///
-    /// This path fires when prepare() succeeds but query execution itself fails.
-    /// In practice, query([]) on a prepared statement rarely fails in rusqlite without
-    /// an external trigger; prepare() failure is more common. The test verifies the
-    /// bracket is present on the prepare path (covered by test_bc_1_03_007_sqlite_missing_table
+    /// This path fires when `prepare()` succeeds but query execution itself fails.
+    /// In practice, `query([])` on a prepared statement rarely fails in rusqlite without
+    /// an external trigger; `prepare()` failure is more common. The test verifies the
+    /// bracket is present on the prepare path (covered by `test_bc_1_03_007_sqlite_missing_table`
     /// above) and on the execute path via a query that succeeds to prepare but the
     /// column-read error path is exercised via the invalid-UTF8 test. We add a direct
-    /// assertion on the duplicate-column path which is also a ParseError site.
+    /// assertion on the duplicate-column path which is also a `ParseError` site.
     ///
     /// Traces to F-PASS18-LOW-3, lines 333-336.
     #[test]
