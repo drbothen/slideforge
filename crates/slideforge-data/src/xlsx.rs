@@ -146,7 +146,11 @@ impl DataSource for XlsxDataSource {
         let mut workbook: Xlsx<_> =
             open_workbook(path_str).map_err(|e| DataSourceError::ParseError {
                 uri: path_str.to_owned(),
-                message: format!("failed to open xlsx workbook '{path_str}': {e}"),
+                // Workspace sweep (F-PASS18-LOW-3): embed [E-DAT-003] bracket code.
+                message: format!(
+                    "[{code}] failed to open xlsx workbook '{path_str}': {e}",
+                    code = crate::error::E_DAT_003,
+                ),
             })?;
 
         // Select the target sheet (returns (sheet_name, range)).
@@ -163,11 +167,13 @@ impl DataSource for XlsxDataSource {
                 // Horizontal merge: a merge spanning >1 column within the header row.
                 // Traces to BC-1.03.006 edge case EC-005.
                 if start_row == 0 && end_row == 0 && end_col > start_col {
+                    // Workspace sweep (F-PASS18-LOW-3): embed [E-DAT-003] bracket code.
                     return Err(DataSourceError::ParseError {
                         uri: path_str.to_owned(),
                         message: format!(
-                            "merged cells in header row are not supported at {path_str}:1:{}",
-                            start_col + 1
+                            "[{code}] merged cells in header row are not supported at {path_str}:1:{}",
+                            start_col + 1,
+                            code = crate::error::E_DAT_003,
                         ),
                     });
                 }
@@ -176,13 +182,15 @@ impl DataSource for XlsxDataSource {
                 // across multiple rows, making row-to-header mapping ambiguous.
                 // Traces to BC-1.03.006 edge case EC-005, F-LOW-9.
                 if start_row == 0 && end_row > 0 {
+                    // Workspace sweep (F-PASS18-LOW-3): embed [E-DAT-003] bracket code.
                     return Err(DataSourceError::ParseError {
                         uri: path_str.to_owned(),
                         message: format!(
-                            "vertically merged cell in header row at {path_str}:1:{} spans \
+                            "[{code}] vertically merged cell in header row at {path_str}:1:{} spans \
                             into data rows — this makes column mapping ambiguous. \
                             Split the merge before loading.",
-                            start_col + 1
+                            start_col + 1,
+                            code = crate::error::E_DAT_003,
                         ),
                     });
                 }
