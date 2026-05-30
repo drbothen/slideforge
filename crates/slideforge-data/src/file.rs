@@ -288,6 +288,10 @@ impl DataSource for FileDataSource {
     /// need containment enforcement (e.g., the evaluator processing an `@data`
     /// directive) MUST use [`FileDataSource::load_path`] directly with the
     /// project root as `base_dir`.
+    // `_opts` is intentionally ignored: local file formats (JSON, CSV, YAML, TOML) have no
+    // concept of timeout, auth token, or query filter at the DataSource trait boundary.
+    // File-based sources MAY silently ignore options that have no semantic meaning for their
+    // format (see `DataSourceOptions` rustdoc convention, F-PASS21-LOW-1).
     fn load(&self, uri: &str, _opts: &DataSourceOptions) -> Result<Value, DataSourceError> {
         let path = Path::new(uri);
         self.load_path(path, None).map_err(|e| match e {

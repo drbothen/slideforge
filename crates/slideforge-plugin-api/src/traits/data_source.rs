@@ -13,6 +13,21 @@ use thiserror::Error;
 /// This struct carries per-call configuration that may differ between
 /// evaluations of the same data source plugin (e.g., query parameters,
 /// timeout overrides, or authentication headers for HTTP sources).
+///
+/// ## Plugin convention for ignored options
+///
+/// Plugins SHOULD emit `tracing::warn!` for options they silently ignore
+/// **if and only if** the option is conceptually applicable to the plugin.
+/// For example:
+/// - An SQLite plugin that receives a non-empty `query` but only supports
+///   `SELECT *` should warn.
+/// - An HTTP plugin that receives `auth_token` but cannot authenticate with
+///   it should warn.
+///
+/// File-based sources (XLSX, file-format CSV/JSON/YAML/TOML, etc.) MAY
+/// silently ignore options that have no semantic meaning for their format
+/// (e.g., `timeout_ms` on a local-file read, `auth_token` on a plain
+/// XLSX or JSON file). No warning is required in these cases.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct DataSourceOptions {
     /// Optional timeout in milliseconds. `None` means use the plugin default.

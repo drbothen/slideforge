@@ -111,6 +111,10 @@ impl DataSource for XlsxDataSource {
     /// missing sheet, empty header, merged header cells, or parse failure.
     ///
     /// Traces to BC-1.03.006 postconditions 1-9.
+    // `_opts` is intentionally ignored: XLSX is a local file format with no concept of
+    // timeout, auth token, or query filter at the DataSource trait boundary. File-based
+    // sources MAY silently ignore options that have no semantic meaning for their format
+    // (see `DataSourceOptions` rustdoc convention, F-PASS21-LOW-1).
     #[instrument(skip(self, _opts, uri), fields(path = tracing::field::Empty))]
     fn load(&self, uri: &str, _opts: &DataSourceOptions) -> Result<Value, DataSourceError> {
         // Resolve the effective path: prefer uri if non-empty, fall back to self.path.
