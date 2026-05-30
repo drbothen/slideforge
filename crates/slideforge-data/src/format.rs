@@ -10,8 +10,10 @@ use std::path::Path;
 ///
 /// The [`DataFormat::Unknown`] variant is used in error messages when the URI has
 /// no recognizable file extension (e.g., HTTP URIs without a path extension). It
-/// signals "format could not be determined" and causes the error Display to omit
-/// the `"(Unknown)"` format annotation rather than misleadingly reporting `"(Json)"`.
+/// signals "format could not be determined." When this variant is interpolated into a
+/// [`crate::DataError::ParseError`], its `Debug` representation `Unknown` appears in
+/// the Display in place of the misleading `(Json)` annotation that previously occurred
+/// when format inference failed.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DataFormat {

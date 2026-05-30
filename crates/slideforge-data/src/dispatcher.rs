@@ -534,6 +534,15 @@ fn map_source_error(name: &Arc<str>, err: &DataSourceError) -> DataError {
         // source-binding identity is preserved in user-facing error even for unrecognized
         // future variants. An empty URI in the Display ("[E-DAT-015] data source error for '': ...")
         // is confusing when the binding name is available.
+        //
+        // CONTRACT (untestable by integration test — F-P16-LOW-001):
+        // The URI field is set to `Arc::clone(name)` (the *binding name*), not the source's
+        // own URI. This differs from the no-bracket IoError path above, which uses the source's
+        // URI (`Arc::from(uri.as_str())`). For the wildcard arm, the source's URI is not
+        // available (only `err.to_string()` is), so the binding name is the best available
+        // identifier. `DataSourceError` variants added by future plugin-api releases cannot
+        // be constructed from outside the crate, so this arm cannot be driven by integration
+        // tests until slideforge-plugin-api ships such a variant.
         _ => {
             tracing::warn!(
                 "dispatcher: unrecognized DataSourceError variant for binding '{}'. \
@@ -715,31 +724,37 @@ fn parse_e_dat_code(msg: &str) -> Option<&'static str> {
 /// `600`) are rejected with `Err`. The caller falls back to `DataError::IoError`
 /// preserving the original message verbatim.
 ///
-/// # Anchor after bracket (F-P12-LOW-002)
+/// # Anchor after bracket (F-P12-LOW-002, F-P14-LOW-001, F-P16-LOW-003)
 ///
-/// The search for `"HTTP "` starts after the `]` of the bracket code rather than
-/// scanning from the beginning of the message. This prevents an `"HTTP "` substring
-/// embedded in the URL path or response body (before the bracket) from being matched
-/// instead of the status code (after the bracket).
+/// The search for `"HTTP "` starts after the `]` of the FIRST `[E-DAT-` bracket code
+/// occurrence rather than scanning from the beginning of the message. Using the first
+/// occurrence (via `find`) is correct because:
 ///
-/// If no `]` is present in the message, the search falls back to scanning from the
-/// beginning (graceful degradation for messages without a bracket code).
+/// - Built-in sources always emit `[E-DAT-NNN]` as the **leading prefix** of the
+///   message (asserted by `test_data_source_error_display_never_starts_with_bracket`).
+///   The first occurrence IS the canonical bracket code.
+/// - Using `rfind` (last occurrence) would be fragile against URL-embedded bracket
+///   strings such as `"[E-DAT-001] HTTP 404 from 'http://example.com/?ref=[E-DAT-001]'"`,
+///   where `rfind` would land on the URL copy and miss the leading bracket code
+///   (F-P16-LOW-003).
+///
+/// If no `[E-DAT-` is present in the message, the search falls back to the first `]`
+/// (graceful degradation for non-bracket messages).
 fn extract_http_status(message: &str) -> Result<u16, &'static str> {
-    // F-P14-LOW-001: anchor the "HTTP " search after the LAST `[E-DAT-` bracket code
-    // start position so that a stray `]` appearing BEFORE the actual bracket code
-    // (e.g., in data like `"data: [1,2,3] [E-DAT-001] HTTP 200 from 'url'"`) does
-    // not cause the search to start at the wrong position.
+    // F-P14-LOW-001 + F-P16-LOW-003: anchor the "HTTP " search after the FIRST
+    // `[E-DAT-` bracket code occurrence. Built-in sources always emit the bracket as
+    // the leading prefix, so `find` (first match) is both correct and safe against
+    // URL-embedded copies of the bracket code that would mislead `rfind` (last match).
     //
-    // Strategy: use `rfind("[E-DAT-")` to locate the LAST canonical bracket code
-    // start, then find the closing `]` from that position. This is strictly more
-    // correct than F-P12-LOW-002's `find(']')` (first `]`) because a third-party
-    // plugin may emit arbitrary data before the bracket code — including JSON arrays
-    // or other bracketed content that contain `]` before the real code.
+    // Example of the F-P16-LOW-003 fragility:
+    //   "[E-DAT-001] HTTP 404 from 'http://example.com/path?ref=[E-DAT-001]'"
+    // rfind would land on the trailing "[E-DAT-001]" in the URL, placing search_start
+    // after the last `]`, beyond "HTTP 404". find lands on the leading bracket correctly.
     //
     // Graceful degradation: if no `[E-DAT-` is found (non-bracketed messages, e.g.,
     // the existing test "HTTP 200 some message without bracket"), fall back to
     // `find(']')` (the F-P12-LOW-002 approach), and then to 0 if no `]` either.
-    let search_start = if let Some(bracket_start) = message.rfind("[E-DAT-") {
+    let search_start = if let Some(bracket_start) = message.find("[E-DAT-") {
         // Find the first `]` after the `[E-DAT-` start.
         message[bracket_start..]
             .find(']')
@@ -1795,23 +1810,24 @@ mod tests {
 
     /// `test_extract_http_status_anchored_after_e_dat_bracket`
     ///
-    /// F-P14-LOW-001: `extract_http_status` must anchor the `"HTTP "` search after
-    /// the LAST `[E-DAT-` bracket code (using `rfind`), NOT after the first `]`.
+    /// F-P14-LOW-001: `extract_http_status` must anchor the `"HTTP "` search after the
+    /// FIRST `[E-DAT-` bracket code occurrence, NOT after the first bare `]`.
     ///
     /// A third-party plugin may emit a message that contains a stray `]` before the
     /// canonical `[E-DAT-NNN]` bracket (e.g., JSON data `"data: [1,2,3] [E-DAT-001]
     /// HTTP 200 from 'url'"`). The old `find(']')` would anchor at the `]` after `3]`,
     /// causing the search region to start mid-message rather than after the bracket code.
     ///
-    /// `rfind("[E-DAT-")` locates the LAST occurrence of the canonical bracket prefix,
-    /// ensuring the anchor is always on the real bracket code regardless of what appears
-    /// before it in the message.
+    /// `find("[E-DAT-")` locates the FIRST canonical `[E-DAT-` occurrence, then finds the
+    /// closing `]` from that position. This correctly skips stray `]` characters that appear
+    /// before the bracket code and is safe against URL-embedded copies of the bracket code
+    /// (see `test_extract_http_status_url_with_embedded_bracket` for the URL case).
     ///
-    /// Traces to F-P14-LOW-001.
+    /// Traces to F-P14-LOW-001, F-P16-LOW-003.
     #[test]
     fn test_extract_http_status_anchored_after_e_dat_bracket() {
         // Input: stray `]` from JSON data before the real bracket code.
-        // The anchor must land on `[E-DAT-001]`, not on `3]`.
+        // `find("[E-DAT-")` must land on `[E-DAT-001]`, not on the `]` after `3`.
         let msg = "data: [1,2,3] [E-DAT-001] HTTP 200 from 'http://example.com/data.json'";
         assert_eq!(
             extract_http_status(msg),
@@ -1827,6 +1843,45 @@ mod tests {
             "anchored search after [E-DAT-001] must not find 'HTTP ' in post-bracket region; \
             got: {:?}",
             extract_http_status(msg_no_status)
+        );
+    }
+
+    /// `test_extract_http_status_url_with_embedded_bracket`
+    ///
+    /// F-P16-LOW-003: `extract_http_status` must correctly extract the HTTP status from a
+    /// message where the URL contains an embedded `[E-DAT-NNN]` substring (e.g., as a query
+    /// parameter). The function anchors after the FIRST `[E-DAT-` occurrence (using `find`),
+    /// which is the leading bracket code prefix — not the embedded copy in the URL.
+    ///
+    /// If `rfind` were used instead of `find`, it would land on the URL-embedded copy at the
+    /// end of the message, placing `search_start` after that trailing `]`, beyond `"HTTP 404"`,
+    /// and causing `Err` instead of `Ok(404)`.
+    ///
+    /// Load-bearing: this test will regress immediately if the implementation reverts to
+    /// `rfind("[E-DAT-")`.
+    ///
+    /// Traces to F-P16-LOW-003.
+    #[test]
+    fn test_extract_http_status_url_with_embedded_bracket() {
+        // The URL contains a query parameter that repeats the bracket code.
+        // `find("[E-DAT-")` must land on the LEADING bracket, giving search_start
+        // just past the first `]`, where "HTTP 404" appears.
+        let msg = "[E-DAT-001] HTTP 404 from 'http://example.com/path?ref=[E-DAT-001]'";
+        assert_eq!(
+            extract_http_status(msg),
+            Ok(404),
+            "URL-embedded bracket must not mislead the anchor; \
+            must extract HTTP 404 from the post-leading-[E-DAT-001] region; msg: {msg}"
+        );
+
+        // A variant where both the leading bracket code and the URL copy are identical —
+        // the status must still be extracted from the region after the FIRST (leading) bracket.
+        let msg2 = "[E-DAT-001] HTTP 200 from 'http://example.com/api?error=[E-DAT-001]&page=1'";
+        assert_eq!(
+            extract_http_status(msg2),
+            Ok(200),
+            "URL query param with embedded bracket must not mislead anchor; \
+            must extract HTTP 200; msg: {msg2}"
         );
     }
 

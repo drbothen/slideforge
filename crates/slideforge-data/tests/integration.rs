@@ -1781,32 +1781,30 @@ fn test_bc_1_03_006_xlsx_bad_magic_path_appears_once() {
 // F-P13-MED-002: wildcard arm must use binding name (not empty string) for URI.
 // ---------------------------------------------------------------------------
 
-/// `test_map_source_error_wildcard_uses_binding_name`
+/// `test_io_error_no_bracket_uri_uses_source_uri`
 ///
-/// F-P13-MED-002: The dispatcher's wildcard `#[non_exhaustive]` arm must set
-/// `uri = Arc::clone(name)` — the binding name — NOT `Arc::from("")`.
+/// F-P13-MED-002 (IoError no-bracket path): The dispatcher's `DataSourceError::IoError`
+/// arm, when the inner message has no `[E-DAT-NNN]` bracket code, routes to
+/// `DataError::UnspecifiedSourceError` (E-DAT-015) with `uri = Arc::from(uri.as_str())`
+/// — the **source's own URI** — not an empty string.
 ///
-/// Before the fix: `DataError::UnspecifiedSourceError { uri: "", ... }`, producing:
-///   `"[E-DAT-015] data source error for '': ..."`
+/// This test pins that the IoError no-bracket path produces a non-empty URI in the
+/// `UnspecifiedSourceError` display. The pinned source URI is `"custom://some-resource"`.
 ///
-/// After the fix: `DataError::UnspecifiedSourceError { uri: "binding_name", ... }`,
-/// producing: `"[E-DAT-015] data source error for 'binding_name': ..."`
+/// NOTE: This test does NOT exercise the wildcard `_` arm of `map_source_error`. The
+/// wildcard arm handles truly unrecognized future `DataSourceError` variants (new variants
+/// added after `DataSourceError` is `#[non_exhaustive]`). Those variants cannot be
+/// constructed from outside the crate, so the wildcard arm cannot be driven by an
+/// integration test. The wildcard arm's contract — `uri = Arc::clone(name)` (binding
+/// name, not source URI) — is documented in a code comment at the wildcard arm site in
+/// `dispatcher.rs`. See F-P16-LOW-001 for the distinction.
 ///
-/// The wildcard arm fires for truly unrecognized `DataSourceError` variants (new variants
-/// added in future plugin-api releases). Since we cannot construct a future variant in a
-/// test, this test drives the E-DAT-015 path via a no-bracket IoError (same code path as
-/// what the wildcard arm will use). The key invariant verified: the URI field in
-/// `UnspecifiedSourceError` must never be empty when a binding name is known.
-///
-/// Load-bearing: if the wildcard arm reverts to `Arc::from("")`, the empty-URI assertion
-/// would expose that regression. The IoError fallback (no-bracket path) uses
-/// `Arc::from(uri.as_str())` — the wildcard fix ensures it uses `Arc::clone(name)`.
-///
-/// Traces to F-P13-MED-002, F-P5-MED-004.
+/// Traces to F-P13-MED-002, F-P5-MED-004, F-P16-LOW-001.
 #[test]
-fn test_map_source_error_wildcard_uses_binding_name() {
+fn test_io_error_no_bracket_uri_uses_source_uri() {
     // A minimal DataSource that always returns an IoError with no [E-DAT-NNN] bracket code.
-    // The no-bracket IoError path routes to UnspecifiedSourceError (E-DAT-015).
+    // The no-bracket IoError path routes to UnspecifiedSourceError (E-DAT-015) using the
+    // source's own URI field (not the binding name).
     struct NoBracketSource;
     impl DataSource for NoBracketSource {
         fn id(&self) -> &str {
@@ -1840,10 +1838,14 @@ fn test_map_source_error_wildcard_uses_binding_name() {
         errors[0].code()
     );
 
-    // The Display must NOT show an empty URI — the binding name must appear.
+    // The Display must show the source URI — NOT an empty string.
     let display = errors[0].to_string();
     assert!(
+        display.contains("custom://some-resource"),
+        "Display must show the source URI 'custom://some-resource' in E-DAT-015; got: {display}"
+    );
+    assert!(
         !display.contains("data source error for '':"),
-        "Display must NOT show empty URI in E-DAT-015 (F-P13-MED-002 wildcard fix); got: {display}"
+        "Display must NOT show empty URI in E-DAT-015; got: {display}"
     );
 }
