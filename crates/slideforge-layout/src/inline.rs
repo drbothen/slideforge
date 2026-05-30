@@ -133,12 +133,15 @@ pub fn collect_slide_titles(deck: &slideforge_types::Deck) -> HashSet<Arc<str>> 
 /// - `FrameContent::Shape(ShapeFrame { text: Some(nodes), .. })` — shape-embedded
 ///   text (added by F-P4-MED-002)
 ///
-/// **Currently NOT scanned (deferred — STORY-073):**
+/// **Currently NOT scanned — structural dependency on STORY-073:**
 /// - `ContentBlock::Bullets(Vec<BulletItem>)` — bullets carry `BulletItem.inlines: Vec<InlineNode>`.
-///   Bullet-list layout passes are not yet built; once bullets produce frames, this validation must
-///   extend to cover them.
-///   STORY-073 owns `ContentBlock::Bullets → FrameContent::TextRun frame generation`
-///   (body-layout pass). Xref validation inside bullets will be wired in that story.
+///   This is a STRUCTURAL deferral, not an arbitrary one: bullet-list layout has no frame-production
+///   pass yet. `run_inline_validation` scans `LaidOutSlide.frames`, but bullets do not produce any
+///   frames until STORY-073 implements `ContentBlock::Bullets → FrameContent::TextRun` in the
+///   body-layout pass. Scanning `BulletItem.inlines` here would require a second scan path that
+///   bypasses the frame IR — introducing a parallel code path that STORY-073 would then need to
+///   remove. The correct fix is to wire bullet xref validation inside STORY-073's frame-production
+///   pass, at which point bullet inline nodes will appear in `frames` naturally.
 ///
 /// Other `ContentBlock` variants (`Text`, `Shape`, `Math`, `Chart`, `Diagram`, `Image`, `Table`)
 /// either flow through this validation already (`Text` → `TextRun`; `Shape` → `Shape.text`) or do
