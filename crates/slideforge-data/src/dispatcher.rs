@@ -200,7 +200,11 @@ fn map_source_error(name: &Arc<str>, err: &DataSourceError) -> DataError {
             fn has_bracket(msg: &str, code: &str) -> bool {
                 msg.starts_with(&format!("[{code}]"))
             }
-            if has_bracket(inner_msg, E_DAT_001) || has_bracket(message.as_ref(), E_DAT_001) {
+            // F-P6-MED-001 fix: removed `|| has_bracket(message.as_ref(), E_DAT_NNN)` dead code
+            // from all IoError sub-arms. DataSourceError::IoError Display always starts with
+            // "I/O error for '…'" — never with "[E-DAT-NNN]" — so the second clause could
+            // never be true. Only `inner_msg` carries the bracket code from built-in sources.
+            if has_bracket(inner_msg, E_DAT_001) {
                 // HTTP 4xx/5xx response (non-2xx). Extract the status code from the
                 // bracket-coded message. Message format from HttpDataSource:
                 // "[E-DAT-001] HTTP <status> from '<url>'"
@@ -229,8 +233,7 @@ fn map_source_error(name: &Arc<str>, err: &DataSourceError) -> DataError {
                         }
                     },
                 }
-            } else if has_bracket(inner_msg, E_DAT_002) || has_bracket(message.as_ref(), E_DAT_002)
-            {
+            } else if has_bracket(inner_msg, E_DAT_002) {
                 // Network/transport error (connection refused, timeout, DNS failure,
                 // body-read I/O error, non-UTF-8 body). The inner message is the
                 // human-readable cause.
@@ -261,8 +264,7 @@ fn map_source_error(name: &Arc<str>, err: &DataSourceError) -> DataError {
                     cause: Arc::from(clean_cause),
                     span: slideforge_types::SourceSpan::default(),
                 }
-            } else if has_bracket(inner_msg, E_DAT_004) || has_bracket(message.as_ref(), E_DAT_004)
-            {
+            } else if has_bracket(inner_msg, E_DAT_004) {
                 // Route to FileNotFound OR IoError depending on the label in the message.
                 //
                 // F-P4-HIGH-001 fix: `[E-DAT-004]` is shared by two `DataError` variants:
@@ -306,8 +308,7 @@ fn map_source_error(name: &Arc<str>, err: &DataSourceError) -> DataError {
                         span: slideforge_types::SourceSpan::default(),
                     }
                 }
-            } else if has_bracket(inner_msg, E_DAT_006) || has_bracket(message.as_ref(), E_DAT_006)
-            {
+            } else if has_bracket(inner_msg, E_DAT_006) {
                 // F-P3-MED-002 fix (structural): E-DAT-006 in an IoError arm means the HTTP
                 // source's response-body-size cap was exceeded (a policy rejection, not I/O
                 // failure and not an SSRF block). Route to PolicyRejected which has a
@@ -363,9 +364,10 @@ fn map_source_error(name: &Arc<str>, err: &DataSourceError) -> DataError {
             // transient network failures. Re-map them back to SsrfBlocked here so
             // the dispatcher's DataError carries the correct E-DAT-006 code.
             // F-P5-LOW-004: anchored bracket check — same discipline as IoError arm.
-            if inner_msg.starts_with(&format!("[{E_DAT_006}]"))
-                || message.starts_with(&format!("[{E_DAT_006}]"))
-            {
+            // F-P6-MED-001: removed dead-code `|| message.starts_with(...)` clause;
+            // DataSourceError::ParseError Display starts with "data parse error for '...'"
+            // (never with "[E-DAT-006]"), so only `inner_msg` carries the bracket code.
+            if inner_msg.starts_with(&format!("[{E_DAT_006}]")) {
                 // FINDING-1 fix: Extract the bare hostname from the URI using url::Url::parse
                 // so the remediation hint reads "Add '169.254.169.254' to [data].allowed_domains"
                 // (bare host) rather than "Add 'http://169.254.169.254/path' to ..." (full URL).
@@ -394,13 +396,33 @@ fn map_source_error(name: &Arc<str>, err: &DataSourceError) -> DataError {
                 // Generic parse or unsupported-format error.
                 // FINDING-3 fix: infer format from URI extension instead of
                 // hardcoding DataFormat::Json as a placeholder.
+                //
+                // F-P6-HIGH-002 fix: `inner_msg` is the source's raw message (e.g.,
+                // "[E-DAT-003] unexpected token at line 2"). `message` = err.to_string()
+                // wraps it in DataSourceError::ParseError's Display:
+                // "data parse error for 'sales.csv': [E-DAT-003] unexpected token at line 2".
+                // If we store `message` directly into `reason`, DataError::ParseError's Display
+                // prepends "[E-DAT-003] parse error for 'sales.csv' (Csv): " — producing
+                // double brackets and double "parse error for". Fix: use `inner_msg` directly
+                // and strip the bracket prefix, matching the pattern applied in the IoError arm.
+                let clean_reason = strip_bracket_prefix(inner_msg).trim();
+                // Also strip any leading "data parse error for '<uri>': " label in case a
+                // source has already wrapped its message through DataSourceError::ParseError.
+                let clean_reason = if let Some(after_label) = clean_reason
+                    .strip_prefix("data parse error for '")
+                    .and_then(|s| s.split_once("': ").map(|(_, after)| after))
+                {
+                    after_label
+                } else {
+                    clean_reason
+                };
                 let format = crate::format::DataFormat::from_path(std::path::Path::new(uri))
                     .unwrap_or(crate::format::DataFormat::Json);
                 DataError::ParseError {
                     code: E_DAT_003,
                     path: Arc::from(uri.as_str()),
                     format,
-                    reason: Arc::clone(&message),
+                    reason: Arc::from(clean_reason),
                     span: slideforge_types::SourceSpan::default(),
                 }
             }
@@ -535,7 +557,8 @@ fn extract_http_status(message: &str) -> Result<u16, &'static str> {
 ///
 /// Built-in sources format I/O error messages as:
 /// - `"I/O error reading '<path>': <reason> (at ...)"`
-/// - `"I/O error: <path> <reason>"` — legacy label (path NOT quoted)
+/// - `"I/O error: <reason>"` — legacy label (no path component; full segment after
+///   the prefix is treated as the reason string)
 /// - `"failed to open file '<path>': <reason> (at ...)"`
 /// - `"failed to read file header '<path>': <reason> (at ...)"`
 /// - `"failed to read file header from '<path>': <reason> (at ...)"`
@@ -551,8 +574,8 @@ fn extract_bare_io_reason(clean_msg: &str) -> &str {
         s.strip_prefix(label)
             .and_then(|rest| rest.split_once("': ").map(|(_, after)| after))
     }
-    // Legacy label: "I/O error: <rest>" — path is NOT in quotes.
-    // Strip the label and return everything up to a trailing span annotation.
+    // Legacy label: "I/O error: <reason>" — no path component; the entire segment
+    // after the prefix is treated as the reason string.
     fn strip_unquoted_label<'a>(s: &'a str, label: &str) -> Option<&'a str> {
         s.strip_prefix(label)
     }
@@ -1982,5 +2005,92 @@ mod tests {
             "must be DataError::PolicyRejected, not DataError::HttpError; got: {:?}",
             errors[0]
         );
+    }
+
+    // ---------------------------------------------------------------------------
+    // F-P6-HIGH-002: ParseError arm must not produce double-bracket or double label
+    // ---------------------------------------------------------------------------
+
+    /// `test_map_source_error_parse_error_display_single_bracket_and_prefix`
+    ///
+    /// F-P6-HIGH-002: When a source emits `DataSourceError::ParseError` whose
+    /// message already contains "[E-DAT-003] …", the mapped `DataError::ParseError`
+    /// Display must have exactly one "[E-DAT-003]", one "parse error for", and the
+    /// path mentioned exactly once.
+    #[test]
+    fn test_map_source_error_parse_error_display_single_bracket_and_prefix() {
+        let sources = single_error_source(
+            "csv_binding",
+            DataSourceError::ParseError {
+                uri: "sales.csv".to_owned(),
+                message: "[E-DAT-003] unexpected token at line 2".to_owned(),
+            },
+        );
+        let ctx = DataSourceContext::new();
+        let (_scope, errors) = load_all(&sources, &ctx);
+
+        assert_eq!(errors.len(), 1, "expected exactly one error");
+        let display = errors[0].to_string();
+
+        assert_eq!(
+            display.matches("[E-DAT-003]").count(),
+            1,
+            "Display must contain exactly one '[E-DAT-003]' bracket; got: {display:?}"
+        );
+        assert_eq!(
+            display.matches("parse error for").count(),
+            1,
+            "Display must contain exactly one 'parse error for' phrase; got: {display:?}"
+        );
+        assert_eq!(
+            display.matches("sales.csv").count(),
+            1,
+            "Display must mention the path exactly once (not duplicated); got: {display:?}"
+        );
+        assert!(
+            display.contains("unexpected token at line 2"),
+            "Display must preserve the original reason text; got: {display:?}"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // F-P6-MED-001: DataSourceError Display contract — never starts with '['
+    // ---------------------------------------------------------------------------
+
+    /// `test_data_source_error_display_never_starts_with_bracket`
+    ///
+    /// F-P6-MED-001: The dead-code removal of `|| has_bracket(message.as_ref(), …)` is
+    /// safe only because DataSourceError's Display prefixes always start with a literal
+    /// word (e.g., "data parse error for '…'", "I/O error for '…'"), never with "[".
+    /// This test pins that upstream contract so a future Display change doesn't silently
+    /// reactivate the dead-code assumption.
+    #[test]
+    fn test_data_source_error_display_never_starts_with_bracket() {
+        let variants: Vec<DataSourceError> = vec![
+            DataSourceError::ParseError {
+                uri: "test.csv".to_owned(),
+                message: "[E-DAT-003] some parse failure".to_owned(),
+            },
+            DataSourceError::IoError {
+                uri: "test.csv".to_owned(),
+                message: "[E-DAT-004] some io failure".to_owned(),
+            },
+            DataSourceError::UnsupportedUri {
+                uri: "ftp://test.csv".to_owned(),
+            },
+            DataSourceError::AuthError {
+                uri: "https://api.example.com/".to_owned(),
+            },
+        ];
+
+        for variant in &variants {
+            let display = variant.to_string();
+            assert!(
+                !display.starts_with('['),
+                "DataSourceError::Display must never start with '['; display started with \
+                '[', which would incorrectly make the dead-code `has_bracket(message.as_ref(), \
+                ...)` clauses live again; display: {display:?}",
+            );
+        }
     }
 }

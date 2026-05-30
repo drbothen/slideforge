@@ -157,7 +157,8 @@ pub trait DataSource: Send + Sync {
     /// participate in offline-mode coordination without any changes to the
     /// dispatcher or the calling code.
     ///
-    /// Traces to BC-1.03.004 AC-012 + Architecture Compliance Rules.
+    /// Traces to BC-1.03.002 AC-012 (HTTP source declares offline-capability via STORY-019)
+    /// and BC-1.03.004 (dispatcher --offline gate semantics via STORY-021).
     #[must_use]
     fn supports_offline(&self) -> bool {
         false

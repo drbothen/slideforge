@@ -536,17 +536,11 @@ fn test_bc_1_03_004_offline_does_not_silently_substitute_empty_value() {
         );
     }
 
-    // ---- Static assertion: dispatcher source must not contain empty-value substitution ----
-    // Verifies that the dispatcher's offline-skip branch does not add any default value.
-    let dispatcher_src = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/dispatcher.rs"));
-    assert!(
-        !dispatcher_src.contains("Value::Map(Default::default())"),
-        "dispatcher must not substitute Value::Map(Default::default()) at the offline-skip site"
-    );
-    assert!(
-        !dispatcher_src.contains("Value::Null"),
-        "dispatcher must not substitute Value::Null at the offline-skip site"
-    );
+    // Static-source greps are too brittle — any future unit test or unrelated code in
+    // dispatcher.rs that legitimately uses `Value::Null` would fail this integration test.
+    // The two-cycle behavioral test above is load-bearing for AC-008: it directly verifies
+    // that the offline-skip branch does NOT insert an empty value into scope. That runtime
+    // assertion is the authoritative gate; the static-grep block is removed per F-P6-MED-002.
 }
 
 // ---------------------------------------------------------------------------
