@@ -182,14 +182,21 @@ pub enum LayoutError {
     /// An `i64::MAX`-class input exceeds any physically meaningful slide dimension
     /// by many orders of magnitude; the correct production behaviour is to reject
     /// it explicitly rather than silently clamp (VP-048).
+    ///
+    /// The `field` discriminant names the specific position field that overflowed
+    /// (`"x"`, `"y"`, `"width"`, or `"height"`), enabling precise diagnostic
+    /// messages and targeted test assertions (F-P18-LOW-003).
     #[error(
-        "layout error: slide {source_slide_index}: arithmetic overflow in EMU conversion at {span}"
+        "layout error: slide {source_slide_index}: arithmetic overflow in EMU conversion \
+         of field '{field}' at {span}"
     )]
     ArithmeticOverflow {
         /// Zero-based index of the slide containing the overflowing shape.
         source_slide_index: usize,
         /// Source location of the value that overflowed.
         span: SourceSpan,
+        /// Name of the position field that overflowed: `"x"`, `"y"`, `"width"`, or `"height"`.
+        field: &'static str,
     },
 
     /// Inline node nesting exceeded the maximum safe depth (BC-3.05.001 E-LAY-005 / F-MED-006).
@@ -431,6 +438,34 @@ mod tests {
         // Verify Clone + PartialEq + Eq + Hash hold.
         let err2 = err.clone();
         assert_eq!(err, err2);
+    }
+
+    /// BC-3.04.001 Invariant 8 / F-P18-LOW-003 — `LayoutError::ArithmeticOverflow` carries
+    /// `source_slide_index`, `span`, and `field` discriminant; Display includes field name.
+    ///
+    /// Load-bearing: verifies that the `field` discriminant ("x", "y", "width", "height")
+    /// appears in the Display output, enabling precise diagnostics per handoff F-P18-LOW-003.
+    #[test]
+    fn test_bc_3_04_001_arithmetic_overflow_carries_field_discriminant() {
+        for field_name in &["x", "y", "width", "height"] {
+            let err = LayoutError::ArithmeticOverflow {
+                source_slide_index: 7,
+                span: SourceSpan::default(),
+                field: field_name,
+            };
+            let msg = err.to_string();
+            assert!(
+                msg.contains(field_name),
+                "ArithmeticOverflow Display must include field name '{field_name}'; got: {msg}"
+            );
+            assert!(
+                msg.contains('7'),
+                "ArithmeticOverflow Display must include source_slide_index; got: {msg}"
+            );
+            // Clone + PartialEq + Eq + Hash
+            let err2 = err.clone();
+            assert_eq!(err, err2);
+        }
     }
 
     /// BC-3.04.001 item G — `LayoutError::Multiple` accumulates inner errors

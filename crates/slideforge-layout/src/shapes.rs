@@ -77,7 +77,7 @@ pub fn unit_to_emu(unit: &ShapeUnit, em_in_emu: i64) -> Option<Emu> {
 /// Uses `checked_mul` to detect overflow. Returns `None` when `milliinches *
 /// EMU_PER_INCH` overflows `i64`. An `i64::MAX`-class input exceeds any
 /// physically meaningful slide dimension by many orders of magnitude; the caller
-/// converts `None` to `LayoutError::ArithmeticOverflow { source_slide_index, span }`
+/// converts `None` to `LayoutError::ArithmeticOverflow { source_slide_index, span, field }`
 /// (BC-3.04.001 Invariant 8 / interface-definitions.md §9.4 / VP-048).
 ///
 /// # Kani candidate (VP-048)
@@ -232,6 +232,7 @@ pub fn layout_shapes(
             accumulated_errors.push(LayoutError::ArithmeticOverflow {
                 source_slide_index,
                 span: shape.span.clone(),
+                field: "x",
             });
             continue;
         };
@@ -239,6 +240,7 @@ pub fn layout_shapes(
             accumulated_errors.push(LayoutError::ArithmeticOverflow {
                 source_slide_index,
                 span: shape.span.clone(),
+                field: "y",
             });
             continue;
         };
@@ -246,6 +248,7 @@ pub fn layout_shapes(
             accumulated_errors.push(LayoutError::ArithmeticOverflow {
                 source_slide_index,
                 span: shape.span.clone(),
+                field: "width",
             });
             continue;
         };
@@ -253,6 +256,7 @@ pub fn layout_shapes(
             accumulated_errors.push(LayoutError::ArithmeticOverflow {
                 source_slide_index,
                 span: shape.span.clone(),
+                field: "height",
             });
             continue;
         };
