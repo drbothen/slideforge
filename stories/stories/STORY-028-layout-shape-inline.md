@@ -9,7 +9,7 @@ points: 5
 priority: P1
 tdd_mode: strict
 status: draft
-spec_version: "1.9"
+spec_version: "2.0"
 behavioral_contracts: [BC-3.04.001, BC-3.05.001]
 verification_properties: []
 nfr_refs: [NFR-021, NFR-022, NFR-023, NFR-024, NFR-025]
@@ -62,7 +62,7 @@ Extend the layout engine with two capabilities:
 | BC | Title | Version | Covered ACs |
 |----|-------|---------|-------------|
 | BC-3.04.001 | shape: block declares custom shape with type/position/fill/text/alt | v1.5.2 | AC-001, AC-002, AC-003, AC-004, AC-BC-A1, AC-BC-A2, AC-BC-A3, AC-BC-A4, AC-BC-A5, AC-BC-A6, AC-BC-A10, AC-INT-1 |
-| BC-3.05.001 | All 12 inline format types render to correct output per format | v1.3.3 | AC-005, AC-006, AC-007, AC-BC-A7, AC-BC-A8 |
+| BC-3.05.001 | All 12 inline format types render to correct output per format | v1.3.4 | AC-005, AC-006, AC-007, AC-BC-A7, AC-BC-A8 |
 | LayoutError | Canonical field name source_slide_index across all variants | v1.0 | AC-BC-A9 |
 
 ## Acceptance Criteria
@@ -154,7 +154,7 @@ pub enum InlineNode {
 Container variants (`Bold`, `Italic`, `Footnote`, `Superscript`, `Subscript`,
 `Strikethrough`, `Highlight`, `Link.text`) take `Vec<InlineNode>` to enable
 nesting. Leaf variants (`Plain`, `Code`, `Xref`) take `Arc<str>`. `Math` takes
-`MathNode`. The 12-variant count is authoritative per BC-3.05.001 v1.3.3.
+`MathNode`. The 12-variant count is authoritative per BC-3.05.001 v1.3.4.
 
 Each exporter translates its relevant variants to format output. The layout stage
 preserves the `InlineNode` sequence verbatim in the frame's text content.
@@ -275,7 +275,7 @@ Inline trees nested deeper than 64 levels produce
 `LayoutError::InlineDepthExceeded { source_slide_index, depth: 65 }` (or the actual
 exceeded depth). This is a HARD error — output is NOT produced for the affected
 slide. Canonical test vector: a tree of 65 nested `Bold(vec![Bold(vec![...])])` nodes
-triggers the error. Depth 64 is the maximum permitted (no error). (BC-3.05.001 v1.3.3,
+triggers the error. Depth 64 is the maximum permitted (no error). (BC-3.05.001 v1.3.4,
 invariant 4 and EC-006, with canonical error code E-LAY-005)
 
 ### AC-BC-A8: Xref inside MathNode NOT validated
@@ -286,7 +286,7 @@ validated by the xref validation pass at layout time. The layout engine does not
 traverse into `MathNode` for xref resolution. This is an explicit v1.0 scope
 boundary (not an oversight). A unit test must confirm: a `Math(MathNode { latex:
 "\\xref{missing-slide}", ... })` variant does NOT produce
-`LayoutWarning::XrefTargetNotFound`. (BC-3.05.001 v1.3.3, invariant 5 and EC-007)
+`LayoutWarning::XrefTargetNotFound`. (BC-3.05.001 v1.3.4, invariant 5 and EC-007)
 
 ### AC-BC-A9: Canonical field name source_slide_index across all LayoutError variants
 (traces to BC-3.04.001 and BC-3.05.001 — structural consistency across error variants)
@@ -418,7 +418,7 @@ risks — but proptest and snapshot tests from STORY-026 must still pass.
 |-----------|-----------------|
 | This story spec (v1.2 — expanded ACs) | ~4,800 |
 | STORY-026 layout types | ~1,500 |
-| BC files (2 BCs: BC-3.04.001 v1.5.2 + BC-3.05.001 v1.3.3) | ~5,000 |
+| BC files (2 BCs: BC-3.04.001 v1.5.2 + BC-3.05.001 v1.3.4) | ~5,000 |
 | `slideforge-types` InlineNode definition | ~1,000 |
 | `slideforge-types/src/specs.rs` ShapeSpec schema | ~800 |
 | Test files to write | ~3,000 |
@@ -463,3 +463,4 @@ Build MUST fail if those crates appear in `slideforge-layout/Cargo.toml` depende
 | 1.7 | 2026-05-29 | product-owner | Pass-19 sibling sweep (F-P19-HIGH-001 + F-P19-MED-001): all BC-3.04.001 version refs updated v1.4.3 → v1.5.0 (8 locations); BC table covered-ACs updated to include AC-BC-A10; added AC-BC-A10 covering EC-018 alt-wins behavior (Invariant 11) with load-bearing test name test_bc_3_04_001_invariant_11_alt_wins_over_decorative; token budget BC ref table updated to v1.5.0 |
 | 1.8 | 2026-05-29 | product-owner | F-P20-LOW-003 precision fix: AC-BC-A10 traces-to ref updated v1.5.0 → v1.5.2; prose updated to state ShapeSpec.decorative is NOT mutated — alt-wins effect via typed ShapeFrame.alt enum; load-bearing test example updated from assert_eq!(spec_resolved.decorative, false) → assert_eq!(frame.alt, AltText::Provided(...)); BC table version ref updated v1.5.0 → v1.5.2 |
 | 1.9 | 2026-05-29 | product-owner | Pass-22 sweep (F-P22-MED-001): remaining BC-3.04.001 v1.5.0 refs updated to v1.5.2 at 9 sites (AC-BC-A1 through AC-BC-A6, ShapeSpec schema section, task list, token budget table) |
+| 2.0 | 2026-05-29 | product-owner | F-P26-MED-001: BC-3.05.001 version refs updated v1.3.3 → v1.3.4 at 5 sites (BC table row line 65, AC-005 prose line 157, AC-BC-A7 line 278, AC-BC-A8 line 289, token budget table line 421); spec_version bumped to 2.0 |

@@ -70,7 +70,7 @@ story extends the layout engine to:
 
 | BC | Title | Version | Covered ACs |
 |----|-------|---------|-------------|
-| BC-3.05.001 | All 12 inline format types render to correct output per format | v1.3.3 | AC-001, AC-002, AC-003, AC-INT-1 |
+| BC-3.05.001 | All 12 inline format types render to correct output per format | v1.3.4 | AC-001, AC-002, AC-003, AC-INT-1 |
 
 ## Acceptance Criteria
 
@@ -179,7 +179,7 @@ rather than separate per-source passes.
    `slideforge-html`. Bullet frame generation is IR-level only.
 2. **Integer EMU for bounding boxes (DI-010, ADR-013)**: Any bounding box
    associated with bullet frames uses `Emu(i64)`, not `f64`.
-3. **12 InlineNode variants are exhaustive (BC-3.05.001 v1.3.3)**: The layout
+3. **12 InlineNode variants are exhaustive (BC-3.05.001 v1.3.4)**: The layout
    pass handling `BulletItem.content` must handle ALL 12 variants without a
    wildcard catch-all. Missing variants are compile errors.
 4. **Xref validation scope includes bullets**: The validation pass must not
