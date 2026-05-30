@@ -1066,19 +1066,19 @@ mod tests {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // VP-043 — All 12 inline variants → distinct, non-empty (BC-3.05.001 v1.3.3)
+    // VP-043 — All 12 inline variants → distinct, non-empty (BC-3.05.001 v1.3.4)
     // ─────────────────────────────────────────────────────────────────────────
 
     /// VP-043 — All 12 inline variants produce distinct kind names (AC-005 /
-    /// BC-3.05.001 v1.3.3). F-HIGH-003: comment now cites 12 variants per spec.
+    /// BC-3.05.001 v1.3.4). F-HIGH-003: comment now cites 12 variants per spec.
     #[test]
     fn test_vp_043_all_12_inline_variant_kind_names_distinct() {
         let variants = all_12_variants();
-        // Must be exactly 12 variants per BC-3.05.001 v1.3.3
+        // Must be exactly 12 variants per BC-3.05.001 v1.3.4
         assert_eq!(
             variants.len(),
             12,
-            "all_12_variants() must yield exactly 12 InlineNode values (BC-3.05.001 v1.3.3)"
+            "all_12_variants() must yield exactly 12 InlineNode values (BC-3.05.001 v1.3.4)"
         );
         // All kind names must be distinct
         let mut names: std::collections::HashSet<&str> = std::collections::HashSet::new();

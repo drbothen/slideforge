@@ -104,7 +104,7 @@ mod tests {
     use super::*;
 
     // ──────────────────────────────────────────────────────────────────────────
-    // AC-005 — InlineNode has exactly 12 variants per BC-3.05.001 v1.3.3,
+    // AC-005 — InlineNode has exactly 12 variants per BC-3.05.001 v1.3.4,
     //          implements Hash+Eq+Clone+Debug
     // ──────────────────────────────────────────────────────────────────────────
 
@@ -136,12 +136,12 @@ mod tests {
     fn test_bc_1_01_008_inline_node_exactly_12_variants() {
         // Every variant is constructed in all_variants(); any missing variant
         // would be a compiler warning or explicit count mismatch.
-        // BC-3.05.001 v1.3.3 (PO adjudication) confirms the canonical count is 12.
+        // BC-3.05.001 v1.3.4 (PO adjudication) confirms the canonical count is 12.
         let variants = all_variants();
         assert_eq!(
             variants.len(),
             12,
-            "InlineNode must have exactly 12 variants per BC-3.05.001 v1.3.3"
+            "InlineNode must have exactly 12 variants per BC-3.05.001 v1.3.4"
         );
     }
 
