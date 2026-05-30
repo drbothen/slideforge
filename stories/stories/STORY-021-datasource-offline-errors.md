@@ -134,16 +134,36 @@ crates/slideforge-data/src/
 
 ### Integration tests in `tests/integration.rs`
 
+Updated to reflect actual implementation (Pass-4, 2026-05-30).
+
 | Test Name | Setup | Expected |
 |-----------|-------|----------|
-| `test_offline_skips_http_source` | Dispatcher with one `MockHttpSource` (supports_offline=true), `ctx.offline=true` | Scope map is empty; zero network calls |
-| `test_offline_loads_file_sources` | Dispatcher with `FileDataSource` (JSON) + `MockHttpSource`, `ctx.offline=true` | File source loaded normally; HTTP skipped |
-| `test_online_loads_all_sources` | Dispatcher with file source + `MockHttpSource` returning JSON, `ctx.offline=false` | Both loaded; scope map has 2 entries |
-| `test_offline_zero_http_sources` | Dispatcher with only file sources, `ctx.offline=true` | All file sources loaded; no change in behavior |
-| `test_offline_unreferenced_http_source` | Skipped HTTP source; evaluator not involved | No error from dispatcher (error only comes from evaluator on `{{ name.field }}` access) |
-| `test_error_code_dat_004` | `FileDataSource` with missing file | `DataError::FileNotFound`; `Display` output starts with "E-DAT-004:" |
-| `test_error_code_dat_006` | `HttpDataSource` with blocked domain | `DataError::SsrfBlocked`; `Display` output starts with "E-DAT-006:" |
-| `test_partial_load_continues` | Two file sources; one missing, one valid | Error vec contains `FileNotFound`; scope map contains the valid one |
+| `test_bc_1_03_004_offline_skips_http_source` | Dispatcher with one `MockHttpSource` (supports_offline=true), `ctx.offline=true` | Scope map is empty; zero network calls |
+| `test_bc_1_03_004_offline_loads_file_sources` | Dispatcher with `FileDataSource` (JSON) + `MockHttpSource`, `ctx.offline=true` | File source loaded normally; HTTP skipped |
+| `test_bc_1_03_004_online_loads_all_sources` | Dispatcher with file source + `MockHttpSource` returning JSON, `ctx.offline=false` | Both loaded; scope map has 2 entries |
+| `test_bc_1_03_004_offline_zero_http_sources` | Dispatcher with only file sources, `ctx.offline=true` | All file sources loaded; no change in behavior |
+| `test_bc_1_03_004_offline_unreferenced_http_source` | Skipped HTTP source; evaluator not involved | No error from dispatcher |
+| `test_bc_1_03_004_offline_watch_mode_repeated_dispatch` | Repeated load_all with offline=true | Consistent results across calls |
+| `test_bc_1_03_004_zero_sources_returns_empty_scope_zero_errors` | Empty source list | Empty scope, zero errors |
+| `test_bc_1_03_004_error_code_dat_004_file_not_found` | `FileDataSource` with missing file | `DataError::FileNotFound`; Display contains "E-DAT-004" |
+| `test_bc_1_03_004_error_code_dat_006_ssrf_blocked` | `HttpDataSource` with blocked domain | `DataError::SsrfBlocked`; Display contains "E-DAT-006" |
+| `test_bc_1_03_004_partial_load_continues_on_error` | Two file sources; one missing, one valid | Error vec contains `FileNotFound`; scope map contains the valid one |
+| `test_bc_1_03_004_error_code_dat_003_parse_error_through_dispatcher` | Source emits ParseError with E-DAT-003 | `DataError::ParseError`; Display contains "E-DAT-003" |
+| `test_bc_1_03_004_error_code_dat_002_network_error_through_dispatcher` | Source emits IoError with E-DAT-002 | `DataError::NetworkError`; Display contains "E-DAT-002" |
+| `test_bc_1_03_004_error_code_dat_001_http_404_through_dispatcher` | Source emits IoError with E-DAT-001 + HTTP 404 | `DataError::HttpError { status: 404 }`; Display contains "E-DAT-001" |
+| `test_bc_1_03_004_error_code_dat_001_http_500_through_dispatcher` | Source emits IoError with E-DAT-001 + HTTP 500 | `DataError::HttpError { status: 500 }`; Display contains "E-DAT-001" |
+| `test_bc_1_03_004_offline_does_not_silently_substitute_empty_value` | Offline skips HTTP; evaluator not involved | Skipped source has no entry in scope |
+| `test_bc_1_03_004_dispatcher_loads_real_file_source` | Real `FileDataSource` via load_all with tmp file | Scope contains the file's data; zero errors |
+
+### Unit tests in dispatcher.rs (selected)
+
+| Test Name | What it pins |
+|-----------|-------------|
+| `test_bc_1_03_004_dispatcher_routes_ioerror_label_to_ioerror_variant` | Synthetic E-DAT-004 + "I/O error reading" → `DataError::IoError`, NOT `FileNotFound` (F-P4-HIGH-001) |
+| `test_bc_1_03_004_dispatcher_routes_permission_denied_to_ioerror_not_filenotfound` | Live chmod 0o000 file → `DataError::IoError` (Unix only; F-P4-HIGH-001) |
+| `test_extract_path_after_code_handles_path_containing_at_in_label` | Path with " (at " inside it → rsplit_once finds the trailing span (F-P4-LOW-001) |
+| `test_strip_bracket_prefix_empty_body_falls_back_to_input` | "[E-DAT-006]" with no body → returns original input, not empty string (F-P4-LOW-002) |
+| `test_strip_bracket_prefix_leaves_malformed_bracket_unchanged` | Long bracket code beyond 16-char window → original input unchanged (F-P4-LOW-003 pinned) |
 
 ### Mock DataSource for testing
 

@@ -2,7 +2,7 @@
 document_type: prd-supplement
 supplement_type: error-taxonomy
 level: L3
-version: "1.6"
+version: "1.7"
 status: active
 producer: product-owner
 timestamp: 2026-05-30T00:00:00
@@ -73,7 +73,7 @@ slides that reference the failed data source.
 | E-DAT-003 | broken | 2 | `Cannot parse response from '<url>' as <format>: <parse-error>` | CAP-003 |
 | E-DAT-004 | broken | 2 | `File data source not found: '<path>' (referenced at <file>:<line>:<col>)` | CAP-003 |
 | E-DAT-005 | broken | 2 | `Missing field '<field-path>' in data source '<name>' at <file>:<line>:<col>. Field does not exist in source data.` | DI-006, CAP-003 |
-| E-DAT-006 | broken | 2 | `HTTP source '<url>' blocked by allowed_domains policy. Add domain to [data].allowed_domains in slideforge.toml.` | CAP-003, R-011 |
+| E-DAT-006 | broken | 2 | `HTTP source '<url>' blocked by allowed_domains policy. Add domain to [data].allowed_domains in slideforge.toml.` — SSRF sub-case via `DataError::SsrfBlocked`. Also used for body-size cap and similar policy rejections via `DataError::PolicyRejected` (display: `"[E-DAT-006] data policy rejected '<uri>': <message> (at <span>)"`). E-DAT-006 covers all DataSource-policy rejections; route to `SsrfBlocked` for domain blocks, `PolicyRejected` for body-cap and other policy rejections. | CAP-003, R-011 |
 | E-DAT-007 | broken | 2 | `XLSX header row at '<path>' has empty cell at column <idx> (0-indexed). All header cells must be non-empty strings. Do not use blank column headers; remove unused columns or name all headers.` | BC-1.03.006 EC-007, DI-004 |
 | E-DAT-008 | broken | 2 | `XLSX header cell at column <idx> in '<path>' has type <calamine-type> (value: <repr>). Header cells must be String-typed. Use a string label as the column header.` | BC-1.03.006 EC-008, DI-004 |
 | E-DAT-009 | broken | 2 | `XLSX datetime cell at <col>:<row> in '<path>' has invalid ISO 8601 value '<value>'. Expected format: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS±HH:MM` | BC-1.03.006 EC-009, DI-004 |
@@ -236,3 +236,4 @@ Per DI-018 and BC-1.15.002:
 | 1.4 | 2026-05-29 | product-owner | Pass-8 sweep: E-LAY-006 note updated with ArithmeticOverflow dead-code prohibition rule per adversary pass 2 item M adjudication |
 | 1.5 | 2026-05-29 | product-owner | Pass-9 sweep (F-P9-HIGH-002): E-PAR-013 (hex color invalid) and E-PAR-014 (gradient unsupported) renamed to E-PAR-015 and E-PAR-016 respectively to resolve namespace collision with parser template codes (E-PAR-013 = empty {{ }}, E-PAR-014 = unterminated math block, both pre-existing in slideforge-syntax/src/parser/template.rs). E-PAR-013 and E-PAR-014 now document their actual parser meaning. Implementer handoff: shape parsing code in STORY-028 worktree currently references E-PAR-013 only in doc comments (not in emitted string messages) — implementer must use E-PAR-015/E-PAR-016 codes in all emitted error messages for shape parsing. |
 | 1.6 | 2026-05-30 | implementer | STORY-021 Pass-2 adversarial fix burst: E-DAT-015 added for unspecified data-source error (catch-all from third-party plugins without [E-DAT-NNN] bracket codes). E-DAT-015 replaces the incorrect E-DAT-004 routing that mis-categorized arbitrary plugin errors as file-not-found. DataError::AuthFailed variant added for correct AuthError mapping (no "Use --offline" hint). |
+| 1.7 | 2026-05-30 | implementer | STORY-021 Pass-3 adversarial fix burst: `DataError::PolicyRejected` variant added (carries E-DAT-006 for body-cap and similar policy rejections, distinct from SSRF-domain blocks which use `SsrfBlocked`). Display format: `"[E-DAT-006] data policy rejected '<uri>': <message> (at <span>)"`. E-DAT-006 row expanded to document both semantic sub-cases (SSRF via `SsrfBlocked`; body-cap and policy via `PolicyRejected`). Pass-4 burst: `E_DAT_006_POLICY` alias removed (was documentary only); dispatcher E-DAT-004 routing arm now distinguishes `FileNotFound` from `IoError` by inspecting the label prefix (F-P4-HIGH-001 fix). |
