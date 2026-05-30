@@ -49,6 +49,16 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. It generates branded .p
 
 ## Session Resume Brief (2026-05-30 handoff)
 
+### Fresh Session Resume Checklist
+
+Before doing ANY work, a new session should:
+
+1. **Sync local develop:** Run `git pull origin develop` in the main worktree (origin/develop is at `066d625f` after STORY-028 merge; local develop may be behind).
+2. **Verify worktree health:** `git worktree list` should show ONLY main + .factory (both STORY-020 and STORY-028 worktrees were cleaned post-merge). No active per-story worktrees.
+3. **Read this STATE.md** in full to understand context.
+4. **Check follow-up stories status:** STORY-072 (gradient fills, P2/3pts), STORY-073 (bullets layout, P1/5pts), STORY-074 (brand-em-sizing, P2/3pts) — all status=draft, all created during STORY-028 cascade. See STORY-INDEX.md.
+5. **Top action on resume:** Wave 3 Batch 3 dispatch (STORY-021 DataSource HTTP cache, STORY-024 DataSource XLSX large-file, STORY-025 DataSource SQLite pagination — verify exact titles from wave-schedule.md before dispatching). Confirm dependencies merged.
+
 ### Where we are
 
 Phase 3, Wave 3 Batch 2 — **COMPLETE. STORY-028 MERGED (PR #34, 066d625f).** All 13 Batch 2 stories merged: STORY-019, 020, 022, 023, 026, 027, 028, 029, 030, 031, 032, 033, 034.
@@ -60,6 +70,24 @@ Phase 3, Wave 3 Batch 2 — **COMPLETE. STORY-028 MERGED (PR #34, 066d625f).** A
 1. **Wave 3 Batch 3** (STORY-021, STORY-024, STORY-025) per wave-schedule.md — next stories to implement.
 2. **Wave 3 Gate** after Batch 3 complete (full test suite + adversarial gate + holdout).
 3. **Process improvements from AKM-style cascade** — codify lessons from 29 + 32 pass marathons into orchestrator playbook.
+
+### Orchestrator Playbook Improvements (codify before next cascade)
+
+From the STORY-020 (29 passes) + STORY-028 (32 passes) marathon cascades:
+
+1. **BC version bump auto-sweep**: When PO bumps a BC version, the orchestrator should automatically dispatch:
+   - implementer for code-comment sweep (grep crates/ for "BC-X.YY.NNN vX.Y.Z" stale refs)
+   - story-writer for story-spec body sweep (grep .factory/stories/ for stale refs)
+   - architect for VP-INDEX propagation if VPs changed
+   Before declaring the BC bump fix-burst complete.
+
+2. **Implementer commit-SHA verification**: When implementer reports N file changes, orchestrator should verify against `git log --stat HEAD` before accepting closure. Pass-27 had implementer claim 33 renames in 4 files; only 8 in 1 file actually shipped. TD-VSDD-059 paper-fix at agent-process level.
+
+3. **Scope creep detection**: When implementer touches files OUTSIDE the story's perimeter (frontmatter behavioral_contracts), surface for orchestrator authorization BEFORE the fix-burst. Pass-27 partial-fix of cross-story phantom-BC pattern is the example.
+
+4. **Convergence asymptote awareness**: After ~10 passes with only LOW findings, the orchestrator should explicitly check in with the human about strict-CLEAN vs PR-merge-CLEAN gate selection. Per BC-5.39.001, PR-merge is the canonical merge gate; strict 3-CLEAN is the cascade-closure criterion. Each pass 1-3 new LOW findings via fresh-context.
+
+5. **Documentation sweep on green-phase**: When implementer closes a Red Gate (todo!() → real implementation), the same commit should remove the "/// Red Gate: panics with todo!()" doc lines. 78 stale Red Gate doc lines were found in STORY-028 across 3 files.
 
 ### Task state (TaskList does not persist — captured here)
 
@@ -84,7 +112,7 @@ Pending:
 - **Spec-code drift accumulates.** STORY-023 Pass 13 found 3 CRIT spec-vs-code drift items (E-BRD-007 undocumented, E-BRD-005 retire/un-retire, E-BRD-002 PPTX/TOML→PPTX/DOCX). All required factory commits to error-taxonomy.md to fix.
 - **Sibling-site sweep (TD-VSDD-060) is high-yield.** Pass 14 STORY-030 + Pass 17 STORY-023 both found missing `#[instrument]` on entrypoints by comparing against sibling crates. Should be a standard adversary axis.
 - **STORY-023 PR-level F1 (synthesizer vs loader BrandPalette slot semantics mismatch) caught a code-vs-code drift the local adversary missed.** Two production code paths constructing the same domain type from the same template diverged on slot mapping — visual parity violation. Pattern: when two code paths produce the same domain object, the type itself should encode invariants or a shared constructor should be the only path. Future adversary axis: dual-path domain-object construction symmetry.
-- **AKM compounding-novelty confirmed over 29-pass cascades (STORY-020 + STORY-028).** Each fresh-context pass surfaced new defect classes — paper-fixes, sibling-sweep gaps, semantic anchoring drift, BC version propagation, doc-vs-code precision. STORY-020 converged at passes 27-28-29; STORY-028 still in cascade at pass 30. Real defects found across the full run. Process-grade canonical principle 'fix everything in scope' was honored throughout — no MVP deferrals; all findings closed or surfaced as follow-up stories (STORY-073, STORY-074).
+- **AKM compounding-novelty confirmed over 29+32-pass cascades (STORY-020 + STORY-028).** Each fresh-context pass surfaced new defect classes — paper-fixes, sibling-sweep gaps, semantic anchoring drift, BC version propagation, doc-vs-code precision. STORY-020 converged at passes 27-28-29; STORY-028 converged at passes 30-31-32 (MERGED PR #34, 066d625f). Real defects found across the full run. Process-grade canonical principle 'fix everything in scope' was honored throughout — no MVP deferrals; all findings closed or surfaced as follow-up stories (STORY-072, STORY-073, STORY-074).
 - **Sibling-sweep recurrence pattern (BC version bumps).** Every BC version bump triggered propagation work to story-spec body + code comments — three rounds of v1.x.x bumps required three sweeps. Going forward: when bumping a BC version, automatically dispatch implementer for code-comment sweep + story-writer for spec-body sweep + grep-all-.factory/-and-crates audit before declaring fix-burst complete.
 - **Implementer overclaim pattern (TD-VSDD-059 at agent-process level).** Pass-27 implementer for STORY-020 claimed 33 test renames in 4 files; adversary verified only 8 in 1 file. Cross-story scope creep when implementer extends scope without orchestrator authorization. Recovery: orchestrator MUST verify git log against implementer's claimed file count before declaring a fix-burst closure.
 - **Compounding-novelty value persists past pass 28.** Even after 28 clean passes, pass 29 on STORY-020 found a real internal contradiction (AC-008 citation contradicting 12-variant claim in the same docstring). Fresh-context audits never reach 'done' but each pass narrows the defect space.
