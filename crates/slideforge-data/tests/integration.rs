@@ -55,7 +55,7 @@ use slideforge_types::Value;
 // contain the entry (violating the "absent from scope" assertion).
 // ---------------------------------------------------------------------------
 
-/// A mock DataSource that simulates an HTTP source.
+/// A mock `DataSource` that simulates an HTTP source.
 ///
 /// Used in integration tests to verify offline-gate behavior without making
 /// real network requests. Each call to `load()` increments `call_count`.
@@ -92,7 +92,7 @@ impl MockHttpSource {
 
 impl DataSource for MockHttpSource {
     /// FINDING-7: Static plugin-type id, NOT the binding name.
-    fn id(&self) -> &str {
+    fn id(&self) -> &'static str {
         "mock-http"
     }
 
@@ -115,7 +115,7 @@ impl DataSource for MockHttpSource {
 // dispatcher logic from filesystem I/O.
 // ---------------------------------------------------------------------------
 
-/// A mock DataSource that simulates a file-based source (not network-dependent).
+/// A mock `DataSource` that simulates a file-based source (not network-dependent).
 ///
 /// FINDING-7 fix: `id()` returns the static plugin-type identifier `"mock-file"`,
 /// NOT the binding name.
@@ -133,7 +133,7 @@ impl MockFileSource {
 
 impl DataSource for MockFileSource {
     /// FINDING-7: Static plugin-type id, NOT the binding name.
-    fn id(&self) -> &str {
+    fn id(&self) -> &'static str {
         "mock-file"
     }
 
@@ -142,7 +142,7 @@ impl DataSource for MockFileSource {
     }
 }
 
-/// A mock DataSource that always fails with an IoError (simulates a missing file).
+/// A mock `DataSource` that always fails with an `IoError` (simulates a missing file).
 ///
 /// FINDING-7 fix: `id()` returns the static plugin-type identifier `"mock-fail"`,
 /// NOT the binding name.
@@ -160,7 +160,7 @@ impl MockFailSource {
 
 impl DataSource for MockFailSource {
     /// FINDING-7: Static plugin-type id, NOT the binding name.
-    fn id(&self) -> &str {
+    fn id(&self) -> &'static str {
         "mock-fail"
     }
 
@@ -178,9 +178,9 @@ impl DataSource for MockFailSource {
 
 /// `test_BC_1_03_004_offline_skips_http_source`
 ///
-/// AC-001: With one MockHttpSource (supports_offline=true) and ctx.offline=true,
-/// the dispatcher must return an EMPTY scope map and the mock's load() must
-/// NOT be called (zero call_count).
+/// AC-001: With one `MockHttpSource` (`supports_offline=true`) and ctx.offline=true,
+/// the dispatcher must return an EMPTY scope map and the mock's `load()` must
+/// NOT be called (zero `call_count`).
 ///
 /// Traces to BC-1.03.004 postcondition 1 (no HTTP requests when offline) and
 /// postcondition 2 (HTTP-bound names absent from scope).
@@ -205,8 +205,7 @@ fn test_bc_1_03_004_offline_skips_http_source() {
     // No errors produced for a skipped source.
     assert!(
         errors.is_empty(),
-        "skipping an HTTP source must not produce errors; got: {:?}",
-        errors
+        "skipping an HTTP source must not produce errors; got: {errors:?}"
     );
     // The mock's load() must not have been called.
     assert_eq!(
@@ -222,8 +221,8 @@ fn test_bc_1_03_004_offline_skips_http_source() {
 
 /// `test_BC_1_03_004_offline_loads_file_sources`
 ///
-/// AC-003: With a file source (supports_offline=false) and an HTTP source
-/// (supports_offline=true), ctx.offline=true must load the file source and
+/// AC-003: With a file source (`supports_offline=false`) and an HTTP source
+/// (`supports_offline=true`), ctx.offline=true must load the file source and
 /// skip the HTTP source.
 ///
 /// Traces to BC-1.03.004 invariant 2 + postcondition 4.
@@ -267,7 +266,7 @@ fn test_bc_1_03_004_offline_loads_file_sources() {
     );
 
     // No errors expected.
-    assert!(errors.is_empty(), "no errors expected; got: {:?}", errors);
+    assert!(errors.is_empty(), "no errors expected; got: {errors:?}");
 
     // HTTP load() must not have been called.
     assert_eq!(
@@ -319,7 +318,7 @@ fn test_bc_1_03_004_online_loads_all_sources() {
         2,
         "scope must have exactly 2 entries when online"
     );
-    assert!(errors.is_empty(), "no errors expected; got: {:?}", errors);
+    assert!(errors.is_empty(), "no errors expected; got: {errors:?}");
 }
 
 // ---------------------------------------------------------------------------
@@ -329,7 +328,7 @@ fn test_bc_1_03_004_online_loads_all_sources() {
 /// `test_BC_1_03_004_offline_zero_http_sources`
 ///
 /// AC-004 / EC-001: When ctx.offline=true and there are ONLY file sources
-/// (none return supports_offline=true), the behavior is identical to offline=false.
+/// (none return `supports_offline=true`), the behavior is identical to offline=false.
 /// All file sources are loaded normally.
 ///
 /// Traces to BC-1.03.004 edge case EC-001.
@@ -365,7 +364,7 @@ fn test_bc_1_03_004_offline_zero_http_sources() {
         scope.contains_key(&Arc::from("data_b")),
         "'data_b' must be present"
     );
-    assert!(errors.is_empty(), "no errors expected; got: {:?}", errors);
+    assert!(errors.is_empty(), "no errors expected; got: {errors:?}");
 }
 
 // ---------------------------------------------------------------------------
@@ -412,7 +411,7 @@ fn test_bc_1_03_004_offline_with_file_and_http() {
         "'remote_api' (HTTP source) must be absent from scope when offline=true"
     );
 
-    assert!(errors.is_empty(), "no errors expected; got: {:?}", errors);
+    assert!(errors.is_empty(), "no errors expected; got: {errors:?}");
     assert_eq!(
         scope.len(),
         1,
@@ -447,8 +446,7 @@ fn test_bc_1_03_004_offline_unreferenced_http_source() {
     assert!(
         errors.is_empty(),
         "a skipped HTTP source must produce ZERO errors from the dispatcher; \
-        errors come from the evaluator on access; got: {:?}",
-        errors
+        errors come from the evaluator on access; got: {errors:?}"
     );
 
     // Scope is empty (source was skipped).
@@ -504,8 +502,7 @@ fn test_bc_1_03_004_offline_does_not_silently_substitute_empty_value() {
 
         assert!(
             errors.is_empty(),
-            "online cycle must have no errors; got: {:?}",
-            errors
+            "online cycle must have no errors; got: {errors:?}"
         );
         assert!(
             scope.get(&source_name).is_some(),
@@ -555,7 +552,7 @@ fn test_bc_1_03_004_offline_does_not_silently_substitute_empty_value() {
 /// file-change event. With ctx.offline=true, HTTP sources must not be polled
 /// even across multiple dispatcher invocations.
 ///
-/// This test calls `load_all` three times and asserts the HTTP call_count
+/// This test calls `load_all` three times and asserts the HTTP `call_count`
 /// remains at zero throughout.
 ///
 /// Traces to BC-1.03.004 edge case EC-004.
@@ -569,7 +566,7 @@ fn test_bc_1_03_004_offline_watch_mode_repeated_dispatch() {
         let sources: Vec<(Arc<str>, Box<dyn DataSource>)> = vec![(
             Arc::from("live_feed"),
             Box::new(MockHttpSource::with_counter(
-                Value::Int(invocation as i64),
+                Value::Int(i64::try_from(invocation).expect("invocation counter fits in i64")),
                 Arc::clone(&http_call_count),
             )),
         )];
@@ -582,8 +579,7 @@ fn test_bc_1_03_004_offline_watch_mode_repeated_dispatch() {
         );
         assert!(
             errors.is_empty(),
-            "no errors on invocation {invocation}; got: {:?}",
-            errors
+            "no errors on invocation {invocation}; got: {errors:?}"
         );
         assert_eq!(
             http_call_count.load(Ordering::SeqCst),
@@ -635,8 +631,7 @@ fn test_bc_1_03_004_error_code_dat_004_file_not_found() {
     assert_eq!(
         errors.len(),
         1,
-        "exactly one error expected; got: {:?}",
-        errors
+        "exactly one error expected; got: {errors:?}"
     );
 
     let err_display = errors[0].to_string();
@@ -686,8 +681,7 @@ fn test_bc_1_03_004_error_code_dat_006_ssrf_blocked() {
     assert_eq!(
         errors.len(),
         1,
-        "exactly one SSRF error expected; got: {:?}",
-        errors
+        "exactly one SSRF error expected; got: {errors:?}"
     );
 
     let err_display = errors[0].to_string();
@@ -705,7 +699,7 @@ fn test_bc_1_03_004_error_code_dat_006_ssrf_blocked() {
 /// `test_BC_1_03_004_partial_load_continues_on_error`
 ///
 /// Partial-load semantics (story spec §Partial Load Semantics): With two file
-/// sources where one succeeds and one fails (simulated by MockFailSource),
+/// sources where one succeeds and one fails (simulated by `MockFailSource`),
 /// the dispatcher must:
 /// - Continue iterating after the failure (not abort on first error)
 /// - Add the successful source to scope
@@ -750,8 +744,7 @@ fn test_bc_1_03_004_partial_load_continues_on_error() {
     assert_eq!(
         errors.len(),
         1,
-        "exactly one error expected (for 'bad_source'); got: {:?}",
-        errors
+        "exactly one error expected (for 'bad_source'); got: {errors:?}"
     );
 
     // Error message must reference E-DAT-004.
@@ -788,8 +781,7 @@ fn test_bc_1_03_004_zero_sources_returns_empty_scope_zero_errors() {
     );
     assert!(
         errors.is_empty(),
-        "empty sources must produce zero errors; got: {:?}",
-        errors
+        "empty sources must produce zero errors; got: {errors:?}"
     );
 }
 
@@ -808,11 +800,11 @@ fn test_bc_1_03_004_zero_sources_returns_empty_scope_zero_errors() {
 /// JSON file, the dispatcher must successfully load the file and return the
 /// parsed value in the scope map.
 ///
-/// This test exercises the FULL dispatcher → FileDataSource → parser production
+/// This test exercises the FULL dispatcher → `FileDataSource` → parser production
 /// code path and proves the code is not dead. The file is written to disk,
 /// dispatched, and the returned value is verified against the written content.
 ///
-/// Without this test, the only FileDataSource integration test was the
+/// Without this test, the only `FileDataSource` integration test was the
 /// missing-path error test, leaving the success path untested — a violation of
 /// TD-VSDD-059 (paper-fix detection: new tests must exercise real production paths).
 ///
@@ -841,8 +833,7 @@ fn test_bc_1_03_004_dispatcher_loads_real_file_source() {
     // No errors — the file exists and is valid JSON.
     assert!(
         errors.is_empty(),
-        "real file must load without errors; got: {:?}",
-        errors
+        "real file must load without errors; got: {errors:?}"
     );
 
     // The scope must contain the data under the registered name.
@@ -885,7 +876,7 @@ fn test_bc_1_03_004_dispatcher_loads_real_file_source() {
 // only exercised the dispatcher's bracket-code parsing, not the full source path.
 // ---------------------------------------------------------------------------
 
-/// Spawn a single-shot TcpListener mock HTTP server on a random port.
+/// Spawn a single-shot `TcpListener` mock HTTP server on a random port.
 ///
 /// Returns `(addr, join_handle)`. The server accepts exactly one connection,
 /// sends the canned response, and exits. Call `handle.join().unwrap()` after
@@ -926,7 +917,7 @@ fn spawn_mock_http_server_for_finding4(
 /// `test_bc_1_03_004_error_code_dat_001_http_404_through_dispatcher`
 ///
 /// FINDING-4: Real `HttpDataSource` hitting a mock 404 endpoint via the full
-/// dispatcher → HttpDataSource → load_all path returns exactly one error with
+/// dispatcher → `HttpDataSource` → `load_all` path returns exactly one error with
 /// code E-DAT-001 and Display containing "404".
 ///
 /// Traces to AC-009 / BC-1.03.004.
@@ -955,8 +946,7 @@ fn test_bc_1_03_004_error_code_dat_001_http_404_through_dispatcher() {
     assert_eq!(
         errors.len(),
         1,
-        "exactly one error expected for HTTP 404; got: {:?}",
-        errors
+        "exactly one error expected for HTTP 404; got: {errors:?}"
     );
     assert_eq!(
         errors[0].code(),
@@ -1000,10 +990,11 @@ fn test_bc_1_03_004_error_code_dat_001_http_404_through_dispatcher() {
 /// dispatcher path returns exactly one error with code E-DAT-001 and Display
 /// containing "500".
 ///
-/// HttpDataSource retries 5xx once; the mock server must serve two responses.
+/// `HttpDataSource` retries 5xx once; the mock server must serve two responses.
 /// Traces to AC-009 / BC-1.03.004.
 #[test]
 fn test_bc_1_03_004_error_code_dat_001_http_500_through_dispatcher() {
+    use slideforge_data::HttpDataSource;
     use std::io::{Read, Write};
     use std::net::TcpListener;
 
@@ -1027,7 +1018,6 @@ fn test_bc_1_03_004_error_code_dat_001_http_500_through_dispatcher() {
 
     let url = format!("http://127.0.0.1:{}", addr.port());
 
-    use slideforge_data::HttpDataSource;
     let sources: Vec<(Arc<str>, Box<dyn DataSource>)> = vec![(
         Arc::from("api"),
         Box::new(HttpDataSource::new(url.as_str())),
@@ -1045,8 +1035,7 @@ fn test_bc_1_03_004_error_code_dat_001_http_500_through_dispatcher() {
     assert_eq!(
         errors.len(),
         1,
-        "exactly one error expected for HTTP 500; got: {:?}",
-        errors
+        "exactly one error expected for HTTP 500; got: {errors:?}"
     );
     assert_eq!(
         errors[0].code(),
@@ -1094,20 +1083,19 @@ fn test_bc_1_03_004_error_code_dat_001_http_500_through_dispatcher() {
 ///   - On Windows, port 1 may behave differently; this test is expected to pass
 ///     on the Linux/macOS CI matrix defined in `.github/workflows/ci.yml`.
 ///
-/// This replaces the previous TcpListener bind-then-drop TOCTOU pattern: that
+/// This replaces the previous `TcpListener` bind-then-drop TOCTOU pattern: that
 /// pattern was racy because another process could claim the freed ephemeral port
 /// between `drop(listener)` and `HttpDataSource::load`. Port 1 is deterministic.
 ///
 /// Traces to AC-009 / BC-1.03.004.
 #[test]
 fn test_bc_1_03_004_error_code_dat_002_network_error_through_dispatcher() {
+    use slideforge_data::HttpDataSource;
     // Port 1 is privileged and always refuses connections from user-space processes.
     // This is a deterministic alternative to the TOCTOU bind-then-drop pattern.
     // On Linux/macOS: ECONNREFUSED. On Windows: may return a different OS error
     // (still not 2xx, still mapped to E-DAT-002 via the network error path).
     let url = "http://127.0.0.1:1/";
-
-    use slideforge_data::HttpDataSource;
     let sources: Vec<(Arc<str>, Box<dyn DataSource>)> =
         vec![(Arc::from("api"), Box::new(HttpDataSource::new(url)))];
     let ctx = DataSourceContext::new();
@@ -1121,8 +1109,7 @@ fn test_bc_1_03_004_error_code_dat_002_network_error_through_dispatcher() {
     assert_eq!(
         errors.len(),
         1,
-        "exactly one error expected for connection refused; got: {:?}",
-        errors
+        "exactly one error expected for connection refused; got: {errors:?}"
     );
     assert_eq!(
         errors[0].code(),
@@ -1207,8 +1194,7 @@ fn test_bc_1_03_004_error_code_dat_003_parse_error_through_dispatcher() {
     assert_eq!(
         errors.len(),
         1,
-        "exactly one error expected for invalid JSON; got: {:?}",
-        errors
+        "exactly one error expected for invalid JSON; got: {errors:?}"
     );
     assert_eq!(
         errors[0].code(),
@@ -1340,8 +1326,7 @@ fn test_unsupported_extension_display_clean() {
     assert_eq!(
         errors.len(),
         1,
-        "exactly one error expected for unsupported extension; got: {:?}",
-        errors
+        "exactly one error expected for unsupported extension; got: {errors:?}"
     );
 
     let err_code = errors[0].code();
@@ -1402,7 +1387,7 @@ fn test_unsupported_extension_display_clean() {
 /// extractors in the dispatcher.
 ///
 /// Specifically asserts:
-/// - `errors[0].code() == "E-DAT-004"` — I/O failure routes to IoError (not ParseError)
+/// - `errors[0].code() == "E-DAT-004"` — I/O failure routes to `IoError` (not `ParseError`)
 /// - Display contains the file path EXACTLY ONCE (no duplication from extractors)
 /// - Display contains the OS reason (e.g., "permission denied") EXACTLY ONCE
 /// - Display does NOT contain `"to validate SQLite magic"` (the broken annotation)
@@ -1447,8 +1432,7 @@ fn test_bc_1_03_004_dispatcher_routes_sqlite_open_failure_correctly() {
     assert_eq!(
         errors.len(),
         1,
-        "exactly one error expected for permission-denied sqlite file; got: {:?}",
-        errors
+        "exactly one error expected for permission-denied sqlite file; got: {errors:?}"
     );
 
     // Must produce E-DAT-004 (IoError / file-not-found category), not E-DAT-003.
@@ -1530,8 +1514,7 @@ fn test_bc_1_03_006_xlsx_xls_extension_display_clean() {
     assert_eq!(
         errors.len(),
         1,
-        "exactly one error expected for .xls file; got: {:?}",
-        errors
+        "exactly one error expected for .xls file; got: {errors:?}"
     );
 
     let code = errors[0].code();
@@ -1611,8 +1594,7 @@ fn test_bc_1_03_007_sqlite_extension_display_clean() {
     assert_eq!(
         errors.len(),
         1,
-        "exactly one error expected for .db3 file; got: {:?}",
-        errors
+        "exactly one error expected for .db3 file; got: {errors:?}"
     );
 
     let code = errors[0].code();
@@ -1691,8 +1673,7 @@ fn test_bc_1_03_007_sqlite_magic_mismatch_path_appears_once() {
     assert_eq!(
         errors.len(),
         1,
-        "exactly one error expected for bad-magic sqlite file; got: {:?}",
-        errors
+        "exactly one error expected for bad-magic sqlite file; got: {errors:?}"
     );
 
     assert_eq!(
@@ -1746,8 +1727,7 @@ fn test_bc_1_03_006_xlsx_bad_magic_path_appears_once() {
     assert_eq!(
         errors.len(),
         1,
-        "exactly one error expected for bad-magic xlsx file; got: {:?}",
-        errors
+        "exactly one error expected for bad-magic xlsx file; got: {errors:?}"
     );
 
     assert_eq!(
@@ -1774,12 +1754,12 @@ fn test_bc_1_03_006_xlsx_bad_magic_path_appears_once() {
 
 /// `test_io_error_no_bracket_uri_uses_source_uri`
 ///
-/// F-P13-MED-002 (IoError no-bracket path): The dispatcher's `DataSourceError::IoError`
+/// F-P13-MED-002 (`IoError` no-bracket path): The dispatcher's `DataSourceError::IoError`
 /// arm, when the inner message has no `[E-DAT-NNN]` bracket code, routes to
 /// `DataError::UnspecifiedSourceError` (E-DAT-015) with `uri = Arc::from(uri.as_str())`
 /// — the **source's own URI** — not an empty string.
 ///
-/// This test pins that the IoError no-bracket path produces a non-empty URI in the
+/// This test pins that the `IoError` no-bracket path produces a non-empty URI in the
 /// `UnspecifiedSourceError` display. The pinned source URI is `"custom://some-resource"`.
 ///
 /// NOTE: This test does NOT exercise the wildcard `_` arm of `map_source_error`. The
@@ -1798,7 +1778,7 @@ fn test_io_error_no_bracket_uri_uses_source_uri() {
     // source's own URI field (not the binding name).
     struct NoBracketSource;
     impl DataSource for NoBracketSource {
-        fn id(&self) -> &str {
+        fn id(&self) -> &'static str {
             "no-bracket-source"
         }
 
@@ -1819,8 +1799,7 @@ fn test_io_error_no_bracket_uri_uses_source_uri() {
     assert_eq!(
         errors.len(),
         1,
-        "exactly one error expected; got: {:?}",
-        errors
+        "exactly one error expected; got: {errors:?}"
     );
     assert_eq!(
         errors[0].code(),
