@@ -70,6 +70,14 @@ impl DataSourceContext {
 
     /// Set the base directory for relative path resolution.
     ///
+    /// This field is consulted by [`crate::file::FileDataSource`] for path-containment
+    /// enforcement (STORY-018). The dispatcher ([`crate::dispatcher::load_all`]) does
+    /// **NOT** propagate this field into source construction — callers must pass the
+    /// base directory directly to `FileDataSource::new_with_base_dir` or equivalent
+    /// at source-construction time. This builder exists for callers that share a
+    /// `DataSourceContext` between source construction and dispatch, or for future
+    /// dispatcher versions that construct sources internally.
+    ///
     /// Returns `self` for chaining.
     #[must_use]
     pub fn with_base_dir(mut self, base_dir: PathBuf) -> Self {
@@ -95,6 +103,17 @@ impl DataSourceContext {
     /// Each entry is **normalized to lowercase** before storing, ensuring that
     /// user-supplied values like `"API.EXAMPLE.COM"` from `slideforge.toml` match
     /// the lowercase host components returned by the `url` crate.
+    ///
+    /// **Important — dispatcher propagation:** This field is consulted by
+    /// [`crate::http::HttpDataSource`] SSRF guarding during source construction
+    /// (STORY-019). The dispatcher ([`crate::dispatcher::load_all`]) does **NOT**
+    /// propagate this field into source construction — callers must pass the
+    /// allowlist directly to `HttpDataSource::new_with_allowlist` or equivalent
+    /// at source-construction time. This builder exists for callers that share a
+    /// `DataSourceContext` between source construction and dispatch, or for future
+    /// dispatcher versions that construct sources internally. A caller using only
+    /// this builder without also configuring the source directly will silently get
+    /// no SSRF filtering effect. Traces to F-P9-LOW-001.
     ///
     /// Returns `self` for chaining.
     #[must_use]

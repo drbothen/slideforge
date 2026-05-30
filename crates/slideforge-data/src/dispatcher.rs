@@ -218,7 +218,14 @@ fn map_source_error(name: &Arc<str>, err: &DataSourceError) -> DataError {
                         status,
                         span: slideforge_types::SourceSpan::default(),
                     },
-                    Err(_unparseable) => {
+                    Err(reason) => {
+                        // F-P9-LOW-002 fix: log the unparseable reason for debuggability
+                        // instead of silently discarding it. The previous `Err(_unparseable)`
+                        // binding dropped the description string, making future diagnosis harder.
+                        tracing::debug!(
+                            "dispatcher: extract_http_status fell back to IoError: \
+                            {reason}; message: {inner_msg}"
+                        );
                         // F-P3-MED-003 fix: Strip the [E-DAT-001] bracket prefix from
                         // inner_msg before storing into `message`. IoError's Display
                         // prepends "[{code}] I/O error reading …", so storing the raw
@@ -438,6 +445,17 @@ fn map_source_error(name: &Arc<str>, err: &DataSourceError) -> DataError {
                 } else {
                     clean_reason
                 };
+                // F-P9-MED-002 fix: Strip any trailing " (at ...)" span annotation from
+                // the reason string. Without this step, a plugin emitting
+                // "[E-DAT-003] unexpected token (at line 2:5)" would store "unexpected token
+                // (at line 2:5)" as the reason, and DataError::ParseError's Display would
+                // prepend its own "(at <span>)" producing a double-annotation.
+                // Mirrors the identical strip applied in the NetworkError arm.
+                let clean_reason = if let Some((before_at, _)) = clean_reason.rsplit_once(" (at ") {
+                    before_at.trim()
+                } else {
+                    clean_reason
+                };
                 let format = crate::format::DataFormat::from_path(std::path::Path::new(uri))
                     .unwrap_or(crate::format::DataFormat::Json);
                 DataError::ParseError {
@@ -502,13 +520,24 @@ fn map_source_error(name: &Arc<str>, err: &DataSourceError) -> DataError {
 ///
 /// # Behaviour
 ///
-/// - If the message starts with `'['` and a matching `']'` is found within the
-///   first 16 characters, the content after the bracket (leading spaces stripped)
+/// - If the message starts with `'['` and a matching `']'` is found at a
+///   character position within the first 32 bytes (UTF-8 safe via
+///   `char_indices`), the content after the bracket (leading spaces stripped)
 ///   is returned.
 /// - If the message does not start with `'['`, or the `']'` cannot be found
-///   within 16 characters, the input is returned **unchanged**. This conservative
-///   fallback prevents incorrectly stripping messages from third-party plugins
-///   that happen to contain bracket characters for other reasons.
+///   within the first 32 bytes, the input is returned **unchanged**. This
+///   conservative fallback prevents incorrectly stripping messages from
+///   third-party plugins that happen to contain bracket characters for other
+///   reasons.
+///
+/// # UTF-8 safety
+///
+/// The position limit is enforced via `char_indices()` iteration, which always
+/// lands on valid UTF-8 character boundaries. Direct byte-slice indexing
+/// (`msg[..N]`) is intentionally avoided here because a plugin may emit a
+/// message whose Nth byte falls inside a multi-byte character (e.g., UTF-8
+/// sequences for non-ASCII characters) — byte-slicing at such a position would
+/// panic with "byte index N is not a char boundary". Traces to F-P9-HIGH-001.
 ///
 /// # Examples
 ///
@@ -521,16 +550,24 @@ fn map_source_error(name: &Arc<str>, err: &DataSourceError) -> DataError {
 ///     → "[MALFORMED"
 /// ```
 fn strip_bracket_prefix(msg: &str) -> &str {
+    // The standard bracket format is "[E-DAT-NNN]" — at most 12 characters.
+    // Use char_indices() to find ']' within the first 32 bytes so we never
+    // slice at a non-character boundary (UTF-8 safety, F-P9-HIGH-001 fix).
+    // A bracket code like "[E-DAT-015]" is 12 chars; 32 bytes is a generous
+    // upper bound that rejects long non-code bracket sequences without risk
+    // of splitting a multi-byte character.
+    const BRACKET_BYTE_LIMIT: usize = 32;
     if !msg.starts_with('[') {
         return msg;
     }
-    // The standard bracket format is "[E-DAT-NNN]" — at most 12 characters.
-    // Search within 16 characters to give a safe margin while rejecting long
-    // bracket-like sequences that are not our format.
-    let window = if msg.len() < 16 { msg.len() } else { 16 };
-    if let Some(close) = msg[..window].find(']') {
-        // Skip past ']' and any immediately following space.
-        let stripped = msg[close + 1..].trim_start();
+    let close = msg
+        .char_indices()
+        .take_while(|(byte_pos, _)| *byte_pos < BRACKET_BYTE_LIMIT)
+        .find(|(_, ch)| *ch == ']')
+        .map(|(byte_pos, _)| byte_pos);
+    if let Some(close_pos) = close {
+        // Skip past ']' (1 byte — ']' is ASCII) and any immediately following space.
+        let stripped = msg[close_pos + 1..].trim_start();
         // F-P4-LOW-002 fix: if stripping leaves an empty string (e.g., input "[E-DAT-006]"
         // with no body), fall back to the original input to avoid emitting an empty message
         // that would produce double-space in Display format.
@@ -750,6 +787,17 @@ fn extract_path_from_traversal_msg(message: &str) -> Option<&str> {
 /// - `"failed to read file header from '"` — emitted by `validate_sqlite_magic` (read failure)
 /// - `"failed to read file header '"` — retained for backward compatibility
 ///
+/// ## Quoted-path extraction (apostrophe safety)
+///
+/// For label prefixes that use single-quote delimiters (e.g., `"I/O error reading '"`),
+/// the closing boundary is the canonical `"': "` suffix (quote, colon, space) rather
+/// than the first apostrophe character. This prevents truncation when the path itself
+/// contains an apostrophe (e.g., `/tmp/Bob's_data.json`). The canonical message format
+/// emitted by all built-in sources places exactly one `"': "` between the path and the
+/// OS reason string. `rsplit_once("': ")` is used so even a path containing `"': "`
+/// is handled correctly by anchoring on the LAST occurrence of the separator.
+/// Traces to F-P9-MED-001.
+///
 /// ## Return value
 ///
 /// Returns `Some(path)` when the message contains one of the known label prefixes
@@ -780,21 +828,31 @@ fn extract_path_after_code(message: &str) -> Option<&str> {
     // so callers fall back to uri.as_str() rather than leaking the label text.
     //
     // Labels that end with a bare colon+space have a plain path following them.
-    // Labels that end with a single-quote have a quoted path: strip the opening
-    // quote and read up to (but not including) the next single-quote.
+    // Labels that end with a single-quote have a quoted path delimited by the
+    // canonical "': " separator. We use rsplit_once("': ") to anchor on the
+    // LAST such separator so paths containing apostrophes or "': " are not
+    // truncated. Traces to F-P9-MED-001 (apostrophe truncation fix).
     let clean = if let Some(rest) = with_label.strip_prefix("file not found: ") {
         rest.trim()
     } else if let Some(rest) = with_label.strip_prefix("I/O error: ") {
         rest.trim()
     } else if let Some(rest) = with_label.strip_prefix("I/O error reading '") {
-        // Quoted path: read up to the closing single-quote.
-        rest.split('\'').next().unwrap_or(rest).trim()
+        // Quoted path: anchor on the canonical "': " closing separator.
+        rest.rsplit_once("': ")
+            .map_or(rest, |(path_raw, _)| path_raw)
+            .trim()
     } else if let Some(rest) = with_label.strip_prefix("failed to open file '") {
-        rest.split('\'').next().unwrap_or(rest).trim()
+        rest.rsplit_once("': ")
+            .map_or(rest, |(path_raw, _)| path_raw)
+            .trim()
     } else if let Some(rest) = with_label.strip_prefix("failed to read file header from '") {
-        rest.split('\'').next().unwrap_or(rest).trim()
+        rest.rsplit_once("': ")
+            .map_or(rest, |(path_raw, _)| path_raw)
+            .trim()
     } else if let Some(rest) = with_label.strip_prefix("failed to read file header '") {
-        rest.split('\'').next().unwrap_or(rest).trim()
+        rest.rsplit_once("': ")
+            .map_or(rest, |(path_raw, _)| path_raw)
+            .trim()
     } else {
         // Unrecognized prefix — signal the caller to fall back to uri.as_str().
         return None;
@@ -1572,23 +1630,26 @@ mod tests {
     /// `test_strip_bracket_prefix_leaves_malformed_bracket_unchanged`
     ///
     /// F-P3-MED-001: When the message starts with `[` but no closing `]` is found
-    /// within 16 characters, return the input unchanged (conservative fallback).
+    /// within the first 32 bytes, return the input unchanged (conservative fallback).
     ///
     /// F-P4-LOW-003: Pin the exact return value for the long-bracket case (not just
     /// non-empty). `strip_bracket_prefix` is documented to return the original string
-    /// unchanged when no `]` appears within the 16-character window.
+    /// unchanged when no `]` appears within the byte-limit window.
+    ///
+    /// F-P9-HIGH-001: The window is now 32 bytes (char_indices-based, UTF-8 safe).
     #[test]
     fn test_strip_bracket_prefix_leaves_malformed_bracket_unchanged() {
         // No closing bracket at all — returns input unchanged.
         assert_eq!(strip_bracket_prefix("[MALFORMED"), "[MALFORMED");
-        // Closing bracket beyond position 15 — no `]` in the 16-char window, so the
-        // function returns the original string unchanged (documented contract).
-        let long = "[THIS-IS-A-VERY-LONG-CODE] rest";
+        // Closing bracket beyond position 31 (byte index) — no `]` in the 32-byte window,
+        // so the function returns the original string unchanged (documented contract).
+        // "[THIS-IS-A-VERY-LONG-BRACKET-CODE]" is 35 bytes, so ']' is at byte 34.
+        let long = "[THIS-IS-A-VERY-LONG-BRACKET-CODE] rest";
         assert_eq!(
             strip_bracket_prefix(long),
             long,
             "strip_bracket_prefix must return the original string unchanged when ']' \
-            is not within the first 16 characters (no-bracket-in-window contract)"
+            is not within the first 32 bytes (no-bracket-in-window contract)"
         );
     }
 
@@ -1925,6 +1986,56 @@ mod tests {
     // F-P4-LOW-002: strip_bracket_prefix empty-body falls back to input
     // ---------------------------------------------------------------------------
 
+    // ---------------------------------------------------------------------------
+    // F-P9-HIGH-001: strip_bracket_prefix must not panic on non-ASCII UTF-8
+    // ---------------------------------------------------------------------------
+
+    /// `test_strip_bracket_prefix_handles_non_ascii_message_safely`
+    ///
+    /// F-P9-HIGH-001: `strip_bracket_prefix` must NOT panic when the message
+    /// contains multi-byte UTF-8 characters that straddle the byte-limit boundary.
+    ///
+    /// The old implementation used `msg[..16]` byte-slice indexing, which panics
+    /// with "byte index N is not a char boundary" when a multi-byte character
+    /// (e.g., `Ω` = 2 bytes UTF-8, `🚨` = 4 bytes UTF-8) starts before byte 16
+    /// and ends after it. The fix uses `char_indices().take_while(|(i, _)| *i < 32)`,
+    /// which always yields valid char boundaries.
+    ///
+    /// Traces to F-P9-HIGH-001 (DoS via third-party plugin emitting non-ASCII message).
+    #[test]
+    fn test_strip_bracket_prefix_handles_non_ascii_message_safely() {
+        // Case 1: 15 ASCII chars then a 2-byte UTF-8 char (Ω = U+03A9 = 0xCE 0xA9)
+        // at byte offset 15.  The old msg[..16] would slice mid-character (byte 16
+        // is inside Ω's 2-byte sequence), causing a panic.
+        // "[abcdefghijklmnΩ pad after" — '[' at 0, Ω starts at byte 15, ']' absent.
+        let msg_omega = "[abcdefghijklmnΩ pad after";
+        // Must NOT panic — returns unchanged (no ']' within first 32 bytes at a char boundary).
+        let result = strip_bracket_prefix(msg_omega);
+        assert_eq!(
+            result, msg_omega,
+            "non-ASCII message without ']' must be returned unchanged; got: {result:?}"
+        );
+
+        // Case 2: Well-formed bracket followed by emoji in the body — must strip bracket.
+        // "[E-DAT-001] error with emoji 🚨 in the middle"
+        let msg_emoji = "[E-DAT-001] error with emoji \u{1F6A8} in the middle";
+        let result2 = strip_bracket_prefix(msg_emoji);
+        assert_eq!(
+            result2, "error with emoji \u{1F6A8} in the middle",
+            "bracket strip must succeed when body contains multi-byte emoji; got: {result2:?}"
+        );
+        // Most importantly: must not panic.
+
+        // Case 3: Well-formed bracket followed by an accented character — must strip bracket.
+        // "[E-DAT-001] ñ-prefix message"
+        let msg_tilde = "[E-DAT-001] \u{00F1}-prefix message";
+        let result3 = strip_bracket_prefix(msg_tilde);
+        assert_eq!(
+            result3, "\u{00F1}-prefix message",
+            "bracket strip must return ñ-prefix body correctly; got: {result3:?}"
+        );
+    }
+
     /// `test_strip_bracket_prefix_empty_body_falls_back_to_input`
     ///
     /// F-P4-LOW-002: When stripping leaves an empty string (e.g., input `"[E-DAT-006]"`
@@ -1942,6 +2053,57 @@ mod tests {
         assert_eq!(
             strip_bracket_prefix("[E-DAT-006] body exceeded"),
             "body exceeded"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // F-P9-MED-001: extract_path_after_code must handle apostrophe in quoted path
+    // ---------------------------------------------------------------------------
+
+    /// `test_extract_path_after_code_handles_apostrophe_in_quoted_path`
+    ///
+    /// F-P9-MED-001: `extract_path_after_code` must return the FULL path when
+    /// the path itself contains an apostrophe character. The old implementation
+    /// used `rest.split('\'').next()` which truncated at the first apostrophe.
+    /// The fix uses `rsplit_once("': ")` anchored on the canonical `"': "` separator.
+    ///
+    /// Canonical message format emitted by built-in sources:
+    ///   `"[E-DAT-004] I/O error reading '/tmp/Bob's_data.json': permission denied (at ...)"`
+    ///
+    /// Expected: `Some("/tmp/Bob's_data.json")` — full path preserved.
+    #[test]
+    fn test_extract_path_after_code_handles_apostrophe_in_quoted_path() {
+        // Core case: apostrophe inside quoted path, canonical "': " separator present.
+        let msg = "[E-DAT-004] I/O error reading '/tmp/Bob's_data.json': \
+                   permission denied (at SourceSpan { line: 1, col: 1 })";
+        let result = extract_path_after_code(msg);
+        assert_eq!(
+            result,
+            Some("/tmp/Bob's_data.json"),
+            "path with apostrophe must be returned in full via rsplit_once(\"': \"); \
+            got: {result:?}"
+        );
+
+        // Variant: "failed to open file" label with apostrophe in path.
+        let msg2 = "[E-DAT-004] failed to open file '/data/O'Brien_db.sqlite': \
+                    no such file or directory (at SourceSpan { line: 3, col: 1 })";
+        let result2 = extract_path_after_code(msg2);
+        assert_eq!(
+            result2,
+            Some("/data/O'Brien_db.sqlite"),
+            "apostrophe in path under 'failed to open file' label must be handled; \
+            got: {result2:?}"
+        );
+
+        // Variant: "failed to read file header from" label with apostrophe in path.
+        let msg3 = "[E-DAT-004] failed to read file header from '/tmp/O'Brien.sqlite': \
+                    unexpected end of file (at SourceSpan { line: 1, col: 1 })";
+        let result3 = extract_path_after_code(msg3);
+        assert_eq!(
+            result3,
+            Some("/tmp/O'Brien.sqlite"),
+            "apostrophe in path under 'failed to read file header from' label must be handled; \
+            got: {result3:?}"
         );
     }
 
@@ -2153,6 +2315,61 @@ mod tests {
         assert!(
             display.contains("unexpected token at line 2"),
             "Display must preserve the original reason text; got: {display:?}"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // F-P9-MED-002: ParseError arm must strip trailing "(at ...)" span annotation
+    // ---------------------------------------------------------------------------
+
+    /// `test_map_source_error_parse_error_strips_trailing_at_annotation`
+    ///
+    /// F-P9-MED-002: When a `DataSourceError::ParseError` message already contains
+    /// a trailing `"(at line 2:5)"` span annotation, the mapped `DataError::ParseError`
+    /// Display must contain the `"(at "` substring at most once — from the outer
+    /// `DataError::ParseError` Display, not duplicated from the source message.
+    ///
+    /// This test uses a message with an embedded span annotation:
+    ///   `"[E-DAT-003] unexpected token (at line 2:5)"`
+    /// and asserts:
+    ///   - `display.matches("(at ").count() <= 1`
+    ///   - The original reason text `"unexpected token"` is preserved.
+    #[test]
+    fn test_map_source_error_parse_error_strips_trailing_at_annotation() {
+        let sources = single_error_source(
+            "csv_span",
+            DataSourceError::ParseError {
+                uri: "sales.csv".to_owned(),
+                // Message already contains a "(at ...)" span annotation.
+                message: "[E-DAT-003] unexpected token (at line 2:5)".to_owned(),
+            },
+        );
+        let ctx = DataSourceContext::new();
+        let (_scope, errors) = load_all(&sources, &ctx);
+        assert_eq!(errors.len(), 1, "expected exactly one error");
+
+        let display = errors[0].to_string();
+
+        // The "(at " substring must appear at most once in the final Display.
+        let at_count = display.matches("(at ").count();
+        assert!(
+            at_count <= 1,
+            "Display must contain '(at ' at most once (no double span annotation); \
+            found {at_count} occurrences in: {display:?}"
+        );
+
+        // The original reason text must be preserved.
+        assert!(
+            display.contains("unexpected token"),
+            "Display must preserve the original reason text 'unexpected token'; got: {display:?}"
+        );
+
+        // Code must be E-DAT-003.
+        assert_eq!(
+            errors[0].code(),
+            "E-DAT-003",
+            "ParseError must carry code E-DAT-003; got: {}",
+            errors[0].code()
         );
     }
 
