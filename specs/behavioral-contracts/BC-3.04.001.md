@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.4.3"
+version: "1.5.0"
 status: active
 producer: product-owner
 timestamp: 2026-05-29T00:00:00
@@ -14,7 +14,7 @@ subsystem: SS-TBD
 capability: CAP-023
 lifecycle_status: active
 introduced: v1.0.0
-modified: ["v1.2 — adversary pass 1 adjudication: codified ShapeSpec position schema, hex color contract, shape_type closed vocabulary, off-canvas boundary semantics, gradient deferral, MissingAlt span, multi-error accumulation", "v1.3 — roundRect added to closed vocabulary per Q7 decision example", "v1.3.1 — STORY-TBD-shape-gradient-fills placeholder resolved to STORY-072", "v1.3.2 — VP propagation burst: assigned VP-037 through VP-042 to all VP-TBD entries", "v1.4 — adversary pass 2 adjudications M/N/O/P/Q/R/T: ArithmeticOverflow Result return, LayoutError::Multiple uniformity, LaidOutDeck warnings field, fill+text fields on ShapeSpec, canonical test vectors, uppercase normalization phrasing, shape frame order enforcement", "v1.4.1 — pass-7 drift fix (F-P7-HIGH-004): slide_index → source_slide_index in EC-001 and EC-003 per AC-BC-A9 canonical field name", "v1.4.2 — pass-8 fix (F-P8-MED-001): Deferred Surfaces section rewritten to be consistent with Postcondition 1 — FillSpec::Gradient is NOT in the v1.0 enum (code confirmed absent); removed contradictory claim that variant is defined in IR", "v1.4.3 — pass-9 fix (F-P9-HIGH-002): E-PAR-013 → E-PAR-015 (hex color invalid) and E-PAR-014 → E-PAR-016 (gradient unsupported) to resolve namespace collision with parser template codes; updated precondition 5, EC-008, EC-009, EC-011, canonical test vectors, and Deferred Surfaces section"]
+modified: ["v1.2 — adversary pass 1 adjudication: codified ShapeSpec position schema, hex color contract, shape_type closed vocabulary, off-canvas boundary semantics, gradient deferral, MissingAlt span, multi-error accumulation", "v1.3 — roundRect added to closed vocabulary per Q7 decision example", "v1.3.1 — STORY-TBD-shape-gradient-fills placeholder resolved to STORY-072", "v1.3.2 — VP propagation burst: assigned VP-037 through VP-042 to all VP-TBD entries", "v1.4 — adversary pass 2 adjudications M/N/O/P/Q/R/T: ArithmeticOverflow Result return, LayoutError::Multiple uniformity, LaidOutDeck warnings field, fill+text fields on ShapeSpec, canonical test vectors, uppercase normalization phrasing, shape frame order enforcement", "v1.4.1 — pass-7 drift fix (F-P7-HIGH-004): slide_index → source_slide_index in EC-001 and EC-003 per AC-BC-A9 canonical field name", "v1.4.2 — pass-8 fix (F-P8-MED-001): Deferred Surfaces section rewritten to be consistent with Postcondition 1 — FillSpec::Gradient is NOT in the v1.0 enum (code confirmed absent); removed contradictory claim that variant is defined in IR", "v1.4.3 — pass-9 fix (F-P9-HIGH-002): E-PAR-013 → E-PAR-015 (hex color invalid) and E-PAR-014 → E-PAR-016 (gradient unsupported) to resolve namespace collision with parser template codes; updated precondition 5, EC-008, EC-009, EC-011, canonical test vectors, and Deferred Surfaces section", "v1.5.0 — pass-18 spec adjudication (F-P18-HIGH-001): added Invariant 11 (alt-wins over decorative when both supplied); updated Precondition 3 wording from exclusive-OR to explicit precedence; added EC-018 and canonical test vector for alt+decorative conflict; updated slideforge-validate handoff note. WCAG canonical: explicit alt text supersedes implicit-decorative inference."]
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -41,7 +41,8 @@ coordinates. ALL errors from a slide's shape set are accumulated before returnin
 2. The `shape:` block declares `type:` with a keyword from the closed v1.0 vocabulary:
    `rect`, `ellipse`, `arrow`, `line`, `star`, `roundRect`. Any other keyword
    produces E-PAR-012 (unknown shape type; hard error).
-3. The `shape:` block declares `alt "..."` OR `decorative: true`.
+3. The `shape:` block declares `alt "..."` OR `decorative: true` (or both — see Invariant 11 for
+   conflict resolution). A shape with neither is a hard error (E-A11-001 / `LayoutError::MissingAlt`).
 4. `position:` specifies x, y, width, height as numbers with units (in or em).
 5. Hex fill color, if supplied, is exactly 6 uppercase or lowercase hexadecimal
    digits preceded by `#` (i.e., `#RRGGBB` or `#rrggbb`). Case-insensitive;
@@ -197,6 +198,16 @@ coordinates. ALL errors from a slide's shape set are accumulated before returnin
     a `text:` directive means `None`. Both fields MUST be present in the struct
     definition. (CLAUDE.md Rule 1: "shape: type/position/fill/text/alt" is the v1.0
     shape contract; Item Q adjudication)
+11. **When both `alt "..."` and `decorative: true` are supplied on the same shape,
+    `alt` takes precedence. The resulting `ShapeSpec` carries `alt: Some(AltText::Provided(s))`
+    and `decorative: false`.** Rationale: explicit accessibility annotations always
+    supersede implicit-decorative inference per WCAG AA. An author supplying both has
+    provided a textual description that MUST be preserved — silently discarding it
+    would be an accessibility regression. The validator (slideforge-validate W-A11-001)
+    MUST emit a lint warning (W-A11-002 — "shape has both alt and decorative: true;
+    alt takes precedence, decorative flag ignored. Consider removing one.") to
+    prompt the author to clean up the ambiguity, but MUST NOT suppress the alt text.
+    (F-P18-HIGH-001 adjudication, 2026-05-29; WCAG 2.1 §1.1.1)
 
 ## Edge Cases
 
@@ -219,6 +230,7 @@ coordinates. ALL errors from a slide's shape set are accumulated before returnin
 | EC-015 | `ShapeUnit::Em(i64::MAX)` passed to EMU conversion | Same as EC-014: `LayoutError::ArithmeticOverflow`; E-LAY-006. |
 | EC-016 | Slide with one `Xref("missing")` shape text field | `LaidOutDeck.warnings` contains `LayoutWarning::XrefTargetNotFound { target: "missing", source_slide_index: 0 }`; shape frame IS produced; exit 0 (warning, not error). |
 | EC-017 | Shape positioned at x=11in on a 10in canvas | `LaidOutDeck.warnings` contains `LayoutWarning::OffCanvas { source_slide_index, shape_type, x_emu, y_emu }`; shape frame IS produced at declared position. |
+| EC-018 | `shape: type rect alt "Blue rect" decorative: true fill "#003766"` (both alt AND decorative supplied) | `ShapeSpec { alt: Some(AltText::Provided("Blue rect")), decorative: false, ... }` — alt wins. slideforge-validate emits W-A11-002 lint warning. PPTX `<p:sp>` carries `descr="Blue rect"`, NOT empty descr. Exit 0. (Invariant 11; F-P18-HIGH-001) |
 
 ## Canonical Test Vectors
 
@@ -236,6 +248,7 @@ coordinates. ALL errors from a slide's shape set are accumulated before returnin
 | `shape: type rect position x 1in y 1in width 2in height 1in alt "box" text "Hello world"` | `ShapeSpec { ..., text: Some(vec![InlineNode::Plain(Arc::from("Hello world"))]), ... }` | text field contract (Item Q) |
 | `title_content` slide with 1 placeholder + 1 shape block | `frames[0]` = placeholder frame (`region_count = 1`), `frames[1]` = shape frame; `frames[1].index (1) >= region_count (1)` — shape appended after placeholders | frame-order (Item T) |
 | `ShapeUnit::Inches(i64::MAX)` in position | `Err(LayoutError::Multiple { inner: [LayoutError::ArithmeticOverflow { source_slide_index: 0, span: <span> }] })` | arithmetic overflow (Item M) |
+| `shape: type rect alt "Blue rect" decorative: true fill "#003766"` | `ShapeSpec { alt: Some(AltText::Provided("Blue rect")), decorative: false, fill: FillSpec::SolidColor(Rgb { r: 0, g: 55, b: 102 }), ... }` — alt wins; W-A11-002 lint emitted; exit 0 | alt+decorative conflict (Invariant 11, EC-018) |
 
 ## Deferred Surfaces
 
@@ -273,7 +286,7 @@ enum in `slideforge-types`, (2) add gradient parsing to the DSL parser, (3) remo
 | Capability Anchor Justification | CAP-023 ("Structured Shape DSL") per capabilities.md §CAP-023 — "shape: blocks with type, position, size, fill, text, and required alt text" is the verbatim description of CAP-023 |
 | L2 Domain Invariants | DI-001 (alt text required on visual elements), DI-010 (integer EMU for all coordinates), DI-018 (error accumulation), DI-021 (raw keyword rejected) |
 | Architecture Module | slideforge-layout crate — shape block parsing and EMU conversion; slideforge-pptx crate — shape to sp element |
-| Stories | STORY-028, STORY-072 |
+| Stories | STORY-028, STORY-072, STORY-074 |
 | Schema Delegation | `ShapeSpec` position fields (`ShapePosition`, `ShapeUnit`) are added to `slideforge-types/src/specs.rs` by data-engineer per orchestrator dispatch. BC defines the contract; implementation is in data-engineer scope. |
 
 ## Related BCs
