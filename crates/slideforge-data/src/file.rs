@@ -229,16 +229,17 @@ impl FileDataSource {
             },
             DataFormat::Sqlite => {
                 // Delegate to SqliteDataSource. A query is required for SQLite;
-                // load_path cannot provide it (no opts parameter).
-                // Callers that need SQLite support should use DataSource::load()
-                // which receives DataSourceOptions with query.
-                // This path is a fallback error to guide users to the correct API.
+                // load_path cannot provide it (no opts parameter). Note that
+                // SqliteDataSource ignores opts.query at runtime — the query is
+                // fixed at construction time via SqliteDataSource::new(path, query).
+                // This path is a fallback error to guide callers to the correct API.
                 return Err(DataError::parse_error(
                     &*path_str,
                     format,
-                    "SQLite data sources require a query string. Use the DataSource::load() \
-                    API with DataSourceOptions.query set to your SELECT statement, or use \
-                    the DSL @data directive with query: \"SELECT ...\".",
+                    "SQLite data sources require a query string. Construct \
+                    SqliteDataSource::new(path, query) directly, or use the DSL @data \
+                    directive with query: \"SELECT ...\". DataSource::load() opts.query \
+                    is not honored by SqliteDataSource.",
                 ));
             },
             _ => {
