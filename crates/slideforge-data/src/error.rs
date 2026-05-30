@@ -92,8 +92,15 @@ pub const E_DAT_014: &str = "E-DAT-014";
 /// semantic meanings that do not apply to an unknown source.
 ///
 /// Plugin authors should embed `[E-DAT-NNN]` in their error messages to enable
-/// precise routing. A `tracing::warn!` is emitted at dispatch time when this
+/// precise routing. A `tracing::debug!` is emitted at dispatch time when this
 /// fallback is triggered.
+///
+/// # Observability
+///
+/// The developer-guidance log message is emitted at `tracing::debug!` level (not
+/// `warn!`). To surface it, set `RUST_LOG=slideforge_data=debug` (or configure
+/// an equivalent subscriber filter). Keeping it at `debug` prevents flooding
+/// watch-mode output for third-party plugins that do not yet embed bracket codes.
 pub const E_DAT_015: &str = "E-DAT-015";
 
 // F-P4-OBS-001: E_DAT_006_POLICY alias removed. The dispatcher now uses E_DAT_006
@@ -104,6 +111,15 @@ pub const E_DAT_015: &str = "E-DAT-015";
 /// The top-level error type for all `slideforge-data` operations.
 ///
 /// Each variant corresponds to a documented error code in the error taxonomy.
+///
+/// # `SemVer` policy
+///
+/// This enum is `#[non_exhaustive]`. Match arms in external crates (and internal
+/// code using exhaustive patterns) must include a wildcard arm (`_ => ...`) to
+/// remain forward-compatible as new error codes are added in future releases.
+/// Internal code that matches exhaustively within this crate is exempt (the
+/// compiler enforces completeness at the call site automatically).
+#[non_exhaustive]
 #[derive(Debug, Error)]
 pub enum DataError {
     /// The specified file path does not exist or is not accessible.
@@ -292,8 +308,13 @@ pub enum DataError {
     /// a `[E-DAT-NNN]` bracket prefix. Third-party plugins should embed the prefix
     /// in their messages to enable precise routing to a more specific variant.
     ///
-    /// A `tracing::warn!` is emitted when this fallback fires, instructing the
-    /// plugin author to embed a `[E-DAT-NNN]` bracket code.
+    /// # Observability
+    ///
+    /// A `tracing::debug!` is emitted when this fallback fires, instructing the
+    /// plugin author to embed a `[E-DAT-NNN]` bracket code. To surface this message,
+    /// set `RUST_LOG=slideforge_data=debug` (or configure an equivalent subscriber
+    /// filter). The message is at `debug` level — not `warn!` — to avoid flooding
+    /// watch-mode logs for third-party plugins that are under active development.
     #[error("[{code}] data source error for '{uri}': {message} (at {span})")]
     UnspecifiedSourceError {
         /// The error code constant (`E-DAT-015`).

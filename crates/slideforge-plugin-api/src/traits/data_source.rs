@@ -43,6 +43,13 @@ pub struct DataSourceOptions {
 }
 
 /// Error returned by [`DataSource::load`] when data cannot be fetched or parsed.
+///
+/// # `SemVer` policy
+///
+/// This enum is `#[non_exhaustive]`. External plugin authors and internal callers
+/// that pattern-match on this enum must include a wildcard arm (`_ => ...`) to
+/// remain forward-compatible as new variants are added in future releases.
+#[non_exhaustive]
 #[derive(Debug, Error)]
 pub enum DataSourceError {
     /// The URI scheme or format is not supported by this plugin.

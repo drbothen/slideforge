@@ -174,6 +174,11 @@ pub fn load_all(
 /// | `[E-DAT-006]` (in ParseError)                     | `DataError::SsrfBlocked` |
 /// | `[E-DAT-003]`                                     | `DataError::ParseError` |
 /// | *(no bracket code)*                               | `DataError::UnspecifiedSourceError` |
+// This function is a routing table with one arm per DataSourceError variant and one
+// sub-arm per bracket code. Splitting it into smaller functions would require passing
+// the same arguments through multiple layers of helper calls without improving
+// readability. The line count is marginally over the lint threshold; suppress here.
+#[allow(clippy::too_many_lines)]
 #[must_use]
 fn map_source_error(name: &Arc<str>, err: &DataSourceError) -> DataError {
     let message: Arc<str> = Arc::from(err.to_string());
@@ -185,7 +190,17 @@ fn map_source_error(name: &Arc<str>, err: &DataSourceError) -> DataError {
         } => {
             // Route by bracket code embedded in the message.
             // Priority order: most-specific codes first.
-            if inner_msg.contains(E_DAT_001) || message.contains(E_DAT_001) {
+            //
+            // F-P5-LOW-004: Use anchored bracket-prefix checks (`starts_with("[E-DAT-NNN]")`)
+            // rather than unanchored `contains("E-DAT-NNN")` substring matches. The unanchored
+            // form would misroute a message like `"[E-DAT-006] policy rejected; see also E-DAT-001
+            // in docs"` to the E-DAT-001 arm instead of the E-DAT-006 arm.
+            //
+            // Helper: returns true when `msg` starts with the `[E-DAT-NNN]` bracket for `code`.
+            fn has_bracket(msg: &str, code: &str) -> bool {
+                msg.starts_with(&format!("[{code}]"))
+            }
+            if has_bracket(inner_msg, E_DAT_001) || has_bracket(message.as_ref(), E_DAT_001) {
                 // HTTP 4xx/5xx response (non-2xx). Extract the status code from the
                 // bracket-coded message. Message format from HttpDataSource:
                 // "[E-DAT-001] HTTP <status> from '<url>'"
@@ -214,7 +229,8 @@ fn map_source_error(name: &Arc<str>, err: &DataSourceError) -> DataError {
                         }
                     },
                 }
-            } else if inner_msg.contains(E_DAT_002) || message.contains(E_DAT_002) {
+            } else if has_bracket(inner_msg, E_DAT_002) || has_bracket(message.as_ref(), E_DAT_002)
+            {
                 // Network/transport error (connection refused, timeout, DNS failure,
                 // body-read I/O error, non-UTF-8 body). The inner message is the
                 // human-readable cause.
@@ -245,7 +261,8 @@ fn map_source_error(name: &Arc<str>, err: &DataSourceError) -> DataError {
                     cause: Arc::from(clean_cause),
                     span: slideforge_types::SourceSpan::default(),
                 }
-            } else if inner_msg.contains(E_DAT_004) || message.contains(E_DAT_004) {
+            } else if has_bracket(inner_msg, E_DAT_004) || has_bracket(message.as_ref(), E_DAT_004)
+            {
                 // Route to FileNotFound OR IoError depending on the label in the message.
                 //
                 // F-P4-HIGH-001 fix: `[E-DAT-004]` is shared by two `DataError` variants:
@@ -256,7 +273,7 @@ fn map_source_error(name: &Arc<str>, err: &DataSourceError) -> DataError {
                 // the correct variant. `message_is_file_not_found` returns true only for
                 // the "file not found:" label; all other labels (I/O error reading, failed
                 // to open file, etc.) map to `DataError::IoError`.
-                let source_msg = if inner_msg.contains(E_DAT_004) {
+                let source_msg = if has_bracket(inner_msg, E_DAT_004) {
                     inner_msg.as_str()
                 } else {
                     message.as_ref()
@@ -289,7 +306,8 @@ fn map_source_error(name: &Arc<str>, err: &DataSourceError) -> DataError {
                         span: slideforge_types::SourceSpan::default(),
                     }
                 }
-            } else if inner_msg.contains(E_DAT_006) || message.contains(E_DAT_006) {
+            } else if has_bracket(inner_msg, E_DAT_006) || has_bracket(message.as_ref(), E_DAT_006)
+            {
                 // F-P3-MED-002 fix (structural): E-DAT-006 in an IoError arm means the HTTP
                 // source's response-body-size cap was exceeded (a policy rejection, not I/O
                 // failure and not an SSRF block). Route to PolicyRejected which has a
@@ -344,7 +362,10 @@ fn map_source_error(name: &Arc<str>, err: &DataSourceError) -> DataError {
             // (F2 fix in STORY-019) so callers can distinguish policy blocks from
             // transient network failures. Re-map them back to SsrfBlocked here so
             // the dispatcher's DataError carries the correct E-DAT-006 code.
-            if inner_msg.contains(E_DAT_006) || message.contains(E_DAT_006) {
+            // F-P5-LOW-004: anchored bracket check — same discipline as IoError arm.
+            if inner_msg.starts_with(&format!("[{E_DAT_006}]"))
+                || message.starts_with(&format!("[{E_DAT_006}]"))
+            {
                 // FINDING-1 fix: Extract the bare hostname from the URI using url::Url::parse
                 // so the remediation hint reads "Add '169.254.169.254' to [data].allowed_domains"
                 // (bare host) rather than "Add 'http://169.254.169.254/path' to ..." (full URL).
@@ -402,6 +423,27 @@ fn map_source_error(name: &Arc<str>, err: &DataSourceError) -> DataError {
             DataError::AuthFailed {
                 code: E_DAT_002,
                 uri: Arc::from(uri.as_str()),
+                span: slideforge_types::SourceSpan::default(),
+            }
+        },
+
+        // F-P5-MED-004: `DataSourceError` is `#[non_exhaustive]`. This wildcard arm
+        // is required to remain forward-compatible when new variants are added in
+        // future releases. Unknown variants are mapped to `DataError::UnspecifiedSourceError`
+        // (E-DAT-015) — the same conservative fallback used for third-party IoError
+        // messages that lack a bracket code. The full `err.to_string()` is preserved
+        // so no information is lost.
+        _ => {
+            tracing::warn!(
+                "dispatcher: unrecognized DataSourceError variant for binding '{}'. \
+                DataSourceError is #[non_exhaustive]; update map_source_error when a \
+                new variant is added. Falling back to E-DAT-015.",
+                name
+            );
+            DataError::UnspecifiedSourceError {
+                code: E_DAT_015,
+                uri: Arc::from(""),
+                message: Arc::from(err.to_string().as_str()),
                 span: slideforge_types::SourceSpan::default(),
             }
         },
@@ -493,8 +535,10 @@ fn extract_http_status(message: &str) -> Result<u16, &'static str> {
 ///
 /// Built-in sources format I/O error messages as:
 /// - `"I/O error reading '<path>': <reason> (at ...)"`
+/// - `"I/O error: <path> <reason>"` — legacy label (path NOT quoted)
 /// - `"failed to open file '<path>': <reason> (at ...)"`
 /// - `"failed to read file header '<path>': <reason> (at ...)"`
+/// - `"failed to read file header from '<path>': <reason> (at ...)"`
 ///
 /// This function strips the label + path prefix and the trailing span annotation
 /// to return just the OS reason string (e.g., `"permission denied"`).
@@ -507,9 +551,16 @@ fn extract_bare_io_reason(clean_msg: &str) -> &str {
         s.strip_prefix(label)
             .and_then(|rest| rest.split_once("': ").map(|(_, after)| after))
     }
+    // Legacy label: "I/O error: <rest>" — path is NOT in quotes.
+    // Strip the label and return everything up to a trailing span annotation.
+    fn strip_unquoted_label<'a>(s: &'a str, label: &str) -> Option<&'a str> {
+        s.strip_prefix(label)
+    }
     let after_label = strip_quoted_label(clean_msg, "I/O error reading '")
         .or_else(|| strip_quoted_label(clean_msg, "failed to open file '"))
+        .or_else(|| strip_quoted_label(clean_msg, "failed to read file header from '"))
         .or_else(|| strip_quoted_label(clean_msg, "failed to read file header '"))
+        .or_else(|| strip_unquoted_label(clean_msg, "I/O error: "))
         .unwrap_or(clean_msg);
     // Strip trailing " (at …)" span annotation.
     if let Some((before, _)) = after_label.rsplit_once(" (at ") {
@@ -535,7 +586,8 @@ fn extract_bare_io_reason(clean_msg: &str) -> &str {
 /// | `"I/O error reading '"`           | `DataError::IoError` |
 /// | `"I/O error: "`                   | `DataError::IoError` (legacy label) |
 /// | `"failed to open file '"`         | `DataError::IoError` (`SQLite` magic-check) |
-/// | `"failed to read file header '"`  | `DataError::IoError` (`SQLite` magic-check) |
+/// | `"failed to read file header '"`  | `DataError::IoError` (`SQLite` magic-check, open) |
+/// | `"failed to read file header from '"` | `DataError::IoError` (`SQLite` magic-check, read) |
 /// | *(anything else)*                 | `DataError::IoError` (conservative default) |
 ///
 /// Returns `true` when the message is a "file not found" message, `false` for any
@@ -568,8 +620,9 @@ fn message_is_file_not_found(message: &str) -> bool {
 /// - `"file not found: "` — emitted by `FileDataSource`
 /// - `"I/O error: "` — emitted by `FileDataSource` on permission/OS errors (legacy)
 /// - `"I/O error reading '"` — canonical `DataError::IoError` Display format
-/// - `"failed to open file '"` — emitted by `validate_sqlite_magic`
-/// - `"failed to read file header '"` — emitted by `validate_sqlite_magic`
+/// - `"failed to open file '"` — emitted by `validate_sqlite_magic` (open failure)
+/// - `"failed to read file header from '"` — emitted by `validate_sqlite_magic` (read failure)
+/// - `"failed to read file header '"` — retained for backward compatibility
 ///
 /// ## Return value
 ///
@@ -611,6 +664,8 @@ fn extract_path_after_code(message: &str) -> Option<&str> {
         // Quoted path: read up to the closing single-quote.
         rest.split('\'').next().unwrap_or(rest).trim()
     } else if let Some(rest) = with_label.strip_prefix("failed to open file '") {
+        rest.split('\'').next().unwrap_or(rest).trim()
+    } else if let Some(rest) = with_label.strip_prefix("failed to read file header from '") {
         rest.split('\'').next().unwrap_or(rest).trim()
     } else if let Some(rest) = with_label.strip_prefix("failed to read file header '") {
         rest.split('\'').next().unwrap_or(rest).trim()
@@ -673,6 +728,11 @@ mod tests {
                     DataSourceError::AuthError { uri } => {
                         DataSourceError::AuthError { uri: uri.clone() }
                     },
+                    // F-P5-MED-004: DataSourceError is #[non_exhaustive]; wildcard required.
+                    _ => DataSourceError::IoError {
+                        uri: "stub-unreachable".to_owned(),
+                        message: format!("stub: unhandled DataSourceError variant: {e}"),
+                    },
                 }),
             }
         }
@@ -706,6 +766,11 @@ mod tests {
                     },
                     DataSourceError::AuthError { uri } => {
                         DataSourceError::AuthError { uri: uri.clone() }
+                    },
+                    // F-P5-MED-004: DataSourceError is #[non_exhaustive]; wildcard required.
+                    _ => DataSourceError::IoError {
+                        uri: "stub-unreachable".to_owned(),
+                        message: format!("stub: unhandled DataSourceError variant: {e}"),
                     },
                 }),
             }
@@ -1646,6 +1711,23 @@ mod tests {
 
         use crate::file::FileDataSource;
 
+        // F-P5-OBS-002: RAII guard restores permissions even if the test panics.
+        // Without this guard, a mid-test panic would leave the file mode 0o000,
+        // causing NamedTempFile's destructor to fail to remove the file.
+        struct PermissionGuard<'a> {
+            path: &'a str,
+            restore_mode: u32,
+        }
+        impl Drop for PermissionGuard<'_> {
+            fn drop(&mut self) {
+                use std::os::unix::fs::PermissionsExt as _;
+                let _ = std::fs::set_permissions(
+                    self.path,
+                    std::fs::Permissions::from_mode(self.restore_mode),
+                );
+            }
+        }
+
         // Use a `.json` suffix so FileDataSource recognises the extension and
         // proceeds to the open() call where EACCES is triggered. Without an
         // extension the source returns UnsupportedFormat before any I/O attempt.
@@ -1662,14 +1744,20 @@ mod tests {
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000))
             .expect("chmod 0o000");
 
+        // RAII guard: restore mode 0o644 on drop (covers both normal exit and panic).
+        let guard = PermissionGuard {
+            path: &path,
+            restore_mode: 0o644,
+        };
+
         let source = FileDataSource::new(path.as_str());
         let sources: Vec<(Arc<str>, Box<dyn slideforge_plugin_api::DataSource>)> =
             vec![(Arc::from("locked"), Box::new(source))];
         let ctx = DataSourceContext::new();
         let (_scope, errors) = load_all(&sources, &ctx);
 
-        // Restore permissions so the temp file can be cleaned up.
-        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644));
+        // Guard's Drop will restore permissions at end of scope.
+        drop(guard);
 
         assert_eq!(errors.len(), 1, "expected exactly one error");
         assert!(
@@ -1728,6 +1816,171 @@ mod tests {
         assert_eq!(
             strip_bracket_prefix("[E-DAT-006] body exceeded"),
             "body exceeded"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // F-P5-MED-001: dispatcher recognizes "failed to read file header from '"
+    // ---------------------------------------------------------------------------
+
+    /// `test_bc_1_03_004_dispatcher_routes_sqlite_header_failure_correctly`
+    ///
+    /// F-P5-MED-001: When a SQLite magic-check failure emits
+    /// `"[E-DAT-004] failed to read file header from '<path>': <reason>"`,
+    /// the dispatcher must:
+    ///   1. Route to `DataError::IoError` (not `FileNotFound`).
+    ///   2. Carry code `"E-DAT-004"`.
+    ///   3. Include the file path EXACTLY ONCE in the Display.
+    ///   4. NOT contain `"I/O error reading"` followed by `"failed to read file header"`
+    ///      (no double-label wrapping).
+    #[test]
+    fn test_bc_1_03_004_dispatcher_routes_sqlite_header_failure_correctly() {
+        let path = "/data/mydb.sqlite";
+        let inner = format!(
+            "[{E_DAT_004}] failed to read file header from '{path}': \
+            unexpected end of file (at SourceSpan {{ line: 1, col: 1 }})"
+        );
+        let sources = single_error_source(
+            "mydb",
+            DataSourceError::IoError {
+                uri: path.to_owned(),
+                message: inner,
+            },
+        );
+        let ctx = DataSourceContext::new();
+        let (_scope, errors) = load_all(&sources, &ctx);
+
+        assert_eq!(errors.len(), 1, "expected exactly one error");
+
+        // Must carry E-DAT-004 (IoError code, not FileNotFound).
+        assert_eq!(
+            errors[0].code(),
+            "E-DAT-004",
+            "SQLite header-read failure must carry E-DAT-004; got: {}",
+            errors[0].code()
+        );
+
+        // Must be IoError, NOT FileNotFound.
+        assert!(
+            matches!(errors[0], DataError::IoError { .. }),
+            "SQLite header-read failure must route to DataError::IoError; got: {:?}",
+            errors[0]
+        );
+
+        let display = errors[0].to_string();
+
+        // Path must appear exactly once.
+        assert_eq!(
+            display.matches(path).count(),
+            1,
+            "path must appear exactly once in Display (no duplicate); got: {display}"
+        );
+
+        // Must NOT contain double-label "I/O error reading … failed to read file header".
+        assert!(
+            !(display.contains("I/O error reading")
+                && display.contains("failed to read file header")),
+            "Display must not double-wrap the label; got: {display}"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // F-P5-MED-003: extract_bare_io_reason handles "I/O error: " legacy label
+    // ---------------------------------------------------------------------------
+
+    /// `test_extract_bare_io_reason_handles_legacy_io_error_label`
+    ///
+    /// F-P5-MED-003: `extract_bare_io_reason` must handle the legacy
+    /// `"I/O error: <reason>"` label (path NOT quoted) and return the bare
+    /// reason string, stripping any trailing span annotation.
+    #[test]
+    fn test_extract_bare_io_reason_handles_legacy_io_error_label() {
+        // Legacy label: "I/O error: <path> <reason>" — path is unquoted.
+        assert_eq!(
+            extract_bare_io_reason("I/O error: permission denied"),
+            "permission denied",
+            "legacy 'I/O error: ' label must be stripped; reason must be returned"
+        );
+
+        // With trailing span annotation.
+        assert_eq!(
+            extract_bare_io_reason("I/O error: access denied (at src:3:1)"),
+            "access denied",
+            "trailing span annotation must be stripped from legacy label result"
+        );
+
+        // Regular "I/O error reading" label still works.
+        assert_eq!(
+            extract_bare_io_reason("I/O error reading '/tmp/data.csv': disk full (at src:1:1)"),
+            "disk full",
+            "quoted 'I/O error reading' label must still be handled"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // F-P5-LOW-002: extract_bare_io_reason unknown-label fallthrough
+    // ---------------------------------------------------------------------------
+
+    /// `test_extract_bare_io_reason_unknown_label_falls_through`
+    ///
+    /// F-P5-LOW-002: When the message does not start with any recognized label,
+    /// `extract_bare_io_reason` must return the input trimmed (with the trailing
+    /// span annotation stripped), preserving the label text intact.
+    #[test]
+    fn test_extract_bare_io_reason_unknown_label_falls_through() {
+        let input = "some custom error: details (at SourceSpan { line: 5, col: 2 })";
+        let result = extract_bare_io_reason(input);
+        assert_eq!(
+            result, "some custom error: details",
+            "unknown label must fall through with span stripped and label preserved; \
+            got: {result:?}"
+        );
+
+        // No trailing span — returns trimmed input unchanged.
+        let no_span = "some custom error: details";
+        let result2 = extract_bare_io_reason(no_span);
+        assert_eq!(
+            result2, "some custom error: details",
+            "input without trailing span must be returned trimmed; got: {result2:?}"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // F-P5-LOW-004: routing uses anchored bracket check not substring
+    // ---------------------------------------------------------------------------
+
+    /// `test_map_source_error_routes_by_anchored_bracket_not_substring`
+    ///
+    /// F-P5-LOW-004: A message that starts with `[E-DAT-006]` but mentions
+    /// `"E-DAT-001"` in the body (e.g., in a docs reference) must route to
+    /// `PolicyRejected` (E-DAT-006), NOT to `HttpError` (E-DAT-001).
+    /// This test pins the anchored-bracket routing discipline.
+    #[test]
+    fn test_map_source_error_routes_by_anchored_bracket_not_substring() {
+        let sources = single_error_source(
+            "policy_with_ref",
+            DataSourceError::IoError {
+                uri: "http://example.com/large.json".to_owned(),
+                message: "[E-DAT-006] policy rejected; see also E-DAT-001 in docs".to_owned(),
+            },
+        );
+        let ctx = DataSourceContext::new();
+        let (_scope, errors) = load_all(&sources, &ctx);
+
+        assert_eq!(errors.len(), 1, "expected exactly one error");
+
+        // Must route to PolicyRejected (E-DAT-006), NOT HttpError (E-DAT-001).
+        assert_eq!(
+            errors[0].code(),
+            "E-DAT-006",
+            "message starting with [E-DAT-006] must route to PolicyRejected (E-DAT-006), \
+            not to HttpError (E-DAT-001); got code: {}",
+            errors[0].code()
+        );
+        assert!(
+            matches!(errors[0], DataError::PolicyRejected { .. }),
+            "must be DataError::PolicyRejected, not DataError::HttpError; got: {:?}",
+            errors[0]
         );
     }
 }
