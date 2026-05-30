@@ -218,11 +218,15 @@ impl DataSource for SqliteDataSource {
         if self.query.trim().is_empty() {
             // F-PASS14-LOW-2: the previous message leaked "<span>" (a stale placeholder)
             // into user-visible output. Span info is not available here; remove the trailer.
+            // F-PASS19-MED-1: embed [E-DAT-003] bracket prefix so this site matches the
+            // established bracket-code convention across all ParseError sites in this module.
             return Err(DataSourceError::ParseError {
                 uri: path_str.to_owned(),
-                message: "internal: query field is empty; this should have been caught by the \
-                    @data parser before reaching SqliteDataSource::load"
-                    .to_owned(),
+                message: format!(
+                    "[{code}] internal: query field is empty; this should have been caught by \
+                    the @data parser before reaching SqliteDataSource::load",
+                    code = crate::error::E_DAT_003,
+                ),
             });
         }
 
@@ -2404,6 +2408,12 @@ mod tests {
         assert!(
             !msg.contains("<span>"),
             "empty query error must NOT contain literal '<span>' placeholder; got: {msg}"
+        );
+        // F-PASS19-MED-1 load-bearing: [E-DAT-003] bracket must appear in the message.
+        // Without this assertion, the bracket-code convention would be silently violated.
+        assert!(
+            msg.contains("[E-DAT-003]"),
+            "empty query error must embed '[E-DAT-003]' bracket code; got: {msg}"
         );
         // Must contain the corrected message fragment so the fix is verified positively.
         assert!(
