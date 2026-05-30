@@ -483,17 +483,22 @@ impl DataError {
 
     /// Return the error code string for this error variant.
     ///
-    /// For [`DataError::ParseError`], returns the specific code stored in the
-    /// variant (e.g. `E-DAT-009` for invalid `DateTimeIso`, `E-DAT-010` for
-    /// non-finite floats) rather than always returning the generic `E-DAT-003`.
-    /// This ensures `err.code()` is consistent with the `Display` representation.
+    /// Returns the specific code stored in the variant for [`DataError::ParseError`],
+    /// [`DataError::FileNotFound`], and [`DataError::IoError`] — the stored `code`
+    /// field is authoritative. This allows `IoError` to carry `E-DAT-006` for
+    /// HTTP body-cap rejections while still using the same variant.
+    ///
+    /// For all other variants the code is determined by the discriminant.
     #[must_use]
     pub fn code(&self) -> &'static str {
         match self {
-            DataError::FileNotFound { .. } | DataError::IoError { .. } => E_DAT_004,
-            // ParseError stores the specific code in the variant — return it directly
-            // so that granular codes (E_DAT_009, E_DAT_010, etc.) are accessible.
-            DataError::ParseError { code, .. } => code,
+            // Variants that store the specific code directly — return it without
+            // overriding. `FileNotFound` and `IoError` both use E_DAT_004 by default,
+            // but `IoError` may carry E_DAT_006 for HTTP body-size cap rejections.
+            // `ParseError` may carry granular sub-codes (E_DAT_009, E_DAT_010, etc.).
+            DataError::FileNotFound { code, .. }
+            | DataError::IoError { code, .. }
+            | DataError::ParseError { code, .. } => code,
             DataError::UnsupportedFormat { .. } => E_DAT_003,
             DataError::FieldNotFound { .. } => E_DAT_005,
             DataError::PathTraversalBlocked { .. } | DataError::SsrfBlocked { .. } => E_DAT_006,

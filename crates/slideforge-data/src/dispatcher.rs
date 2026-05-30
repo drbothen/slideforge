@@ -67,7 +67,7 @@ use slideforge_types::Value;
 
 use crate::DataError;
 use crate::context::DataSourceContext;
-use crate::error::{E_DAT_002, E_DAT_003, E_DAT_004, E_DAT_006};
+use crate::error::{E_DAT_001, E_DAT_002, E_DAT_003, E_DAT_004, E_DAT_006};
 
 /// Load all configured data sources, applying the offline gate.
 ///
@@ -155,6 +155,7 @@ pub fn load_all(
 /// 2. Inspect the message for the specific bracket code to route to the most
 ///    precise `DataError` variant.
 /// 3. Wrap the full error message in the target variant so no information is lost.
+/// 4. Thread `name` (the `@data` binding name) into each error for debuggability.
 ///
 /// This approach avoids adding a new structural field to `DataSourceError` in
 /// `slideforge-plugin-api` while still preserving the error codes surfaced in
@@ -164,14 +165,15 @@ pub fn load_all(
 ///
 /// | Bracket code in message | Routed to variant |
 /// |-------------------------|-------------------|
-/// | `[E-DAT-004]`           | `DataError::FileNotFound` or `DataError::IoError` |
-/// | `[E-DAT-006]`           | `DataError::SsrfBlocked` or `DataError::PathTraversalBlocked` |
-/// | `[E-DAT-003]`           | `DataError::ParseError` |
 /// | `[E-DAT-001]`           | `DataError::HttpError` |
 /// | `[E-DAT-002]`           | `DataError::NetworkError` |
+/// | `[E-DAT-004]`           | `DataError::FileNotFound` |
+/// | `[E-DAT-006]` (in IoError)   | `DataError::IoError` (body-size cap, policy-rejected) |
+/// | `[E-DAT-006]` (in ParseError)| `DataError::SsrfBlocked` |
+/// | `[E-DAT-003]`           | `DataError::ParseError` |
 /// | *(no bracket code)*     | Generic `DataError::IoError` with full message |
 #[must_use]
-fn map_source_error(_name: &Arc<str>, err: &DataSourceError) -> DataError {
+fn map_source_error(name: &Arc<str>, err: &DataSourceError) -> DataError {
     let message: Arc<str> = Arc::from(err.to_string());
 
     match err {
@@ -180,27 +182,57 @@ fn map_source_error(_name: &Arc<str>, err: &DataSourceError) -> DataError {
             message: inner_msg,
         } => {
             // Route by bracket code embedded in the message.
-            if inner_msg.contains(E_DAT_004) || message.contains(E_DAT_004) {
-                // File-not-found: surface as FileNotFound with the code prefix in Display.
+            // Priority order: most-specific codes first.
+            if inner_msg.contains(E_DAT_001) || message.contains(E_DAT_001) {
+                // HTTP 4xx/5xx response (non-2xx). Extract the status code from the
+                // bracket-coded message. Message format from HttpDataSource:
+                // "[E-DAT-001] HTTP <status> from '<url>'"
+                let status = extract_http_status(inner_msg).unwrap_or(0);
+                DataError::HttpError {
+                    code: E_DAT_001,
+                    url: Arc::from(uri.as_str()),
+                    status,
+                    span: slideforge_types::SourceSpan::default(),
+                }
+            } else if inner_msg.contains(E_DAT_002) || message.contains(E_DAT_002) {
+                // Network/transport error (connection refused, timeout, DNS failure,
+                // body-read I/O error, non-UTF-8 body). The inner message is the
+                // human-readable cause.
+                DataError::NetworkError {
+                    code: E_DAT_002,
+                    url: Arc::from(uri.as_str()),
+                    cause: Arc::from(inner_msg.as_str()),
+                    span: slideforge_types::SourceSpan::default(),
+                }
+            } else if inner_msg.contains(E_DAT_004) || message.contains(E_DAT_004) {
+                // File-not-found: surface as FileNotFound.
+                // FINDING-4 fix: extract the actual missing path from the bracket-coded
+                // message tail (after "[E-DAT-004] file not found: <path>") so users
+                // see the real path, not just the URI.
+                let actual_path = extract_path_after_code(inner_msg).unwrap_or(uri.as_str());
                 DataError::FileNotFound {
                     code: E_DAT_004,
-                    path: Arc::from(uri.as_str()),
+                    path: Arc::from(actual_path),
                     span: slideforge_types::SourceSpan::default(),
                 }
             } else if inner_msg.contains(E_DAT_006) || message.contains(E_DAT_006) {
-                // SSRF-level I/O rejection (body-size cap, etc.): PathTraversalBlocked
-                // as a structural proxy since it shares the E-DAT-006 code.
-                DataError::PathTraversalBlocked {
+                // FINDING-2 fix: E-DAT-006 in an IoError arm means the HTTP source's
+                // response-body-size cap was exceeded (policy-rejected). This is NOT a
+                // path traversal — route to a generic IoError that preserves the
+                // bracket code verbatim and does NOT claim "path traversal blocked".
+                DataError::IoError {
                     code: E_DAT_006,
                     path: Arc::from(uri.as_str()),
+                    message: Arc::from(inner_msg.as_str()),
                     span: slideforge_types::SourceSpan::default(),
                 }
             } else {
-                // Generic I/O error: preserve full message, use E-DAT-004 as the code.
+                // Generic I/O error: preserve full message. Include the binding name
+                // so error messages identify which `@data` binding failed (FINDING-6).
                 DataError::IoError {
                     code: E_DAT_004,
                     path: Arc::from(uri.as_str()),
-                    message: Arc::clone(&message),
+                    message: Arc::from(format!("data binding '{name}': {message}")),
                     span: slideforge_types::SourceSpan::default(),
                 }
             }
@@ -226,10 +258,14 @@ fn map_source_error(_name: &Arc<str>, err: &DataSourceError) -> DataError {
                 }
             } else {
                 // Generic parse or unsupported-format error.
+                // FINDING-3 fix: infer format from URI extension instead of
+                // hardcoding DataFormat::Json as a placeholder.
+                let format = crate::format::DataFormat::from_path(std::path::Path::new(uri))
+                    .unwrap_or(crate::format::DataFormat::Json);
                 DataError::ParseError {
                     code: E_DAT_003,
                     path: Arc::from(uri.as_str()),
-                    format: crate::format::DataFormat::Json, // placeholder — format is not recoverable here
+                    format,
                     reason: Arc::clone(&message),
                     span: slideforge_types::SourceSpan::default(),
                 }
@@ -245,18 +281,65 @@ fn map_source_error(_name: &Arc<str>, err: &DataSourceError) -> DataError {
         DataSourceError::AuthError { uri } => {
             // Authentication failures are mapped to NetworkError (E-DAT-002) since
             // they represent an access-layer failure, not a parse failure.
+            // Thread the binding name for debuggability (FINDING-6).
             DataError::NetworkError {
                 code: E_DAT_002,
                 url: Arc::from(uri.as_str()),
-                cause: Arc::from(err.to_string()),
+                cause: Arc::from(format!("data binding '{name}': {err}")),
                 span: slideforge_types::SourceSpan::default(),
             }
         },
     }
 }
 
+/// Extract the HTTP status code from a bracket-coded message of the form
+/// `"[E-DAT-001] HTTP <status> from '<url>'"`.
+///
+/// Returns `None` if the message does not contain a parseable three-digit status.
+fn extract_http_status(message: &str) -> Option<u16> {
+    // Look for "HTTP " followed by a numeric token.
+    let after_http = message.find("HTTP ")?.checked_add(5)?;
+    let rest = message.get(after_http..)?;
+    let end = rest
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(rest.len());
+    rest.get(..end)?.parse().ok()
+}
+
+/// Extract the path component from a bracket-coded message of the form
+/// `"[E-DAT-NNN] <label>: <path>"` or `"[E-DAT-NNN] <label>: <path> (at ...)"`.
+///
+/// The bracket code format used by built-in sources is `[E-DAT-NNN]` (no colon
+/// inside the bracket), so the content after the bracket starts with a space
+/// followed by the label+path. This function skips past the closing bracket
+/// and any label prefix to extract the bare path.
+///
+/// Returns `None` if the expected pattern is not found.
+fn extract_path_after_code(message: &str) -> Option<&str> {
+    // Bracket codes end with ']'. Find the first ']' and skip past it and
+    // any leading space so we're positioned at the label + path content.
+    let close_bracket = message.find(']')?;
+    let after_bracket = message.get(close_bracket.checked_add(1)?..)?.trim_start();
+    // Strip everything after " (at " if present (span annotation).
+    let with_label = if let Some(at_pos) = after_bracket.find(" (at ") {
+        after_bracket.get(..at_pos)?
+    } else {
+        after_bracket
+    };
+    // Strip known label prefixes that precede the path.
+    let clean = with_label
+        .trim_start_matches("file not found: ")
+        .trim_start_matches("I/O error: ")
+        .trim();
+    if clean.is_empty() { None } else { Some(clean) }
+}
+
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::doc_markdown,
+    clippy::unnecessary_literal_bound
+)]
 mod tests {
     use std::sync::Arc;
 
@@ -266,15 +349,23 @@ mod tests {
     use super::*;
     use crate::context::DataSourceContext;
 
-    // Minimal stub DataSource used in unit tests.
+    // ---------------------------------------------------------------------------
+    // Stub DataSources for dispatcher unit tests.
+    //
+    // FINDING-7 fix: `id()` returns a static plugin-type identifier per the
+    // `DataSource` trait contract ("lowercase ASCII with hyphens, e.g. 'json',
+    // 'csv', 'http'"). The binding name is NOT the plugin id.
+    // ---------------------------------------------------------------------------
+
+    /// Minimal file-like stub (supports_offline = false, the default).
     struct StubSource {
-        id: &'static str,
         result: Result<Value, DataSourceError>,
     }
 
     impl DataSource for StubSource {
+        /// Plugin type identifier — static string, NOT the binding name.
         fn id(&self) -> &str {
-            self.id
+            "stub-file"
         }
 
         fn load(&self, _uri: &str, _opts: &DataSourceOptions) -> Result<Value, DataSourceError> {
@@ -300,15 +391,15 @@ mod tests {
         }
     }
 
-    /// A stub that overrides `supports_offline` to return true (simulates HTTP source).
+    /// Network-capable stub (supports_offline = true, simulates HTTP source).
     struct OnlineStubSource {
-        id: &'static str,
         result: Result<Value, DataSourceError>,
     }
 
     impl DataSource for OnlineStubSource {
+        /// Plugin type identifier — static string, NOT the binding name.
         fn id(&self) -> &str {
-            self.id
+            "stub-http"
         }
 
         fn load(&self, _uri: &str, _opts: &DataSourceOptions) -> Result<Value, DataSourceError> {
@@ -355,14 +446,12 @@ mod tests {
             (
                 Arc::from("a"),
                 Box::new(StubSource {
-                    id: "a",
                     result: Ok(Value::Int(1)),
                 }),
             ),
             (
                 Arc::from("b"),
                 Box::new(OnlineStubSource {
-                    id: "b",
                     result: Ok(Value::Int(2)),
                 }),
             ),
@@ -374,47 +463,303 @@ mod tests {
     }
 
     /// `test_load_all_offline_skips_capable` — offline gate skips `supports_offline=true` sources.
+    ///
+    /// FINDING-8 fix: also assert the skipped binding is absent from scope AND
+    /// the loaded binding IS in scope when mixing offline-capable and file sources.
     #[test]
     fn test_load_all_offline_skips_capable() {
-        let sources: Vec<(Arc<str>, Box<dyn DataSource>)> = vec![(
-            Arc::from("net"),
-            Box::new(OnlineStubSource {
-                id: "net",
-                result: Ok(Value::Int(99)),
-            }),
-        )];
+        let sources: Vec<(Arc<str>, Box<dyn DataSource>)> = vec![
+            (
+                Arc::from("file_src"),
+                Box::new(StubSource {
+                    result: Ok(Value::Int(7)),
+                }),
+            ),
+            (
+                Arc::from("net"),
+                Box::new(OnlineStubSource {
+                    result: Ok(Value::Int(99)),
+                }),
+            ),
+        ];
         let ctx = DataSourceContext::new().with_offline(true);
         let (scope, errors) = load_all(&sources, &ctx);
-        assert!(scope.is_empty(), "supports_offline source must be skipped");
+        // The online (supports_offline=true) source must be absent.
+        assert!(
+            scope.get(&Arc::from("net")).is_none(),
+            "supports_offline source 'net' must be skipped — not in scope"
+        );
+        // The file source must be present.
+        assert!(
+            scope.contains_key(&Arc::from("file_src")),
+            "file source 'file_src' must still be loaded when offline=true"
+        );
         assert!(errors.is_empty(), "skip must produce zero errors");
     }
 
     /// `test_load_all_partial_error` — failed source adds to error vec; successful source in scope.
+    ///
+    /// FINDING-8 fix: assert error code and message content, not just error count.
     #[test]
     fn test_load_all_partial_error() {
         let sources: Vec<(Arc<str>, Box<dyn DataSource>)> = vec![
             (
                 Arc::from("ok"),
                 Box::new(StubSource {
-                    id: "ok",
                     result: Ok(Value::Int(1)),
                 }),
             ),
             (
                 Arc::from("bad"),
                 Box::new(StubSource {
-                    id: "bad",
                     result: Err(DataSourceError::IoError {
                         uri: "bad".to_owned(),
-                        message: format!("[{E_DAT_004}] file not found"),
+                        message: format!("[{E_DAT_004}] file not found: /real/path.json"),
                     }),
                 }),
             ),
         ];
         let ctx = DataSourceContext::new();
         let (scope, errors) = load_all(&sources, &ctx);
-        assert!(scope.contains_key(&Arc::from("ok")));
-        assert!(!scope.contains_key(&Arc::from("bad")));
+        assert!(
+            scope.contains_key(&Arc::from("ok")),
+            "successful source must be in scope"
+        );
+        assert!(
+            !scope.contains_key(&Arc::from("bad")),
+            "failed source must not be in scope"
+        );
+        assert_eq!(errors.len(), 1, "exactly one error expected");
+        // FINDING-8: assert the code and message content, not just the count.
+        assert_eq!(
+            errors[0].code(),
+            "E-DAT-004",
+            "partial-load error must carry code E-DAT-004; got: {}",
+            errors[0].code()
+        );
+        assert!(
+            errors[0].to_string().contains("file not found")
+                || errors[0].to_string().contains("E-DAT-004"),
+            "error message must reference file-not-found condition; got: {}",
+            errors[0]
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // Unit tests for map_source_error routing (FINDING-1, 2, 3, 4)
+    // ---------------------------------------------------------------------------
+
+    /// Helper: build a named source slice with one StubSource returning the given error.
+    fn single_error_source(
+        name: &str,
+        err: DataSourceError,
+    ) -> Vec<(Arc<str>, Box<dyn DataSource>)> {
+        vec![(Arc::from(name), Box::new(StubSource { result: Err(err) }))]
+    }
+
+    /// `test_map_source_error_e_dat_001_routed_correctly`
+    ///
+    /// FINDING-1: IoError with [E-DAT-001] in message must produce code "E-DAT-001",
+    /// NOT "E-DAT-004". Verifies HttpError routing in `map_source_error`.
+    #[test]
+    fn test_map_source_error_e_dat_001_routed_correctly() {
+        let sources = single_error_source(
+            "api",
+            DataSourceError::IoError {
+                uri: "http://example.com/data.json".to_owned(),
+                message: "[E-DAT-001] HTTP 404 from 'http://example.com/data.json'".to_owned(),
+            },
+        );
+        let ctx = DataSourceContext::new();
+        let (_scope, errors) = load_all(&sources, &ctx);
         assert_eq!(errors.len(), 1);
+        assert_eq!(
+            errors[0].code(),
+            "E-DAT-001",
+            "E-DAT-001 in IoError message must route to HttpError; got code: {}, display: {}",
+            errors[0].code(),
+            errors[0]
+        );
+    }
+
+    /// `test_map_source_error_e_dat_002_routed_correctly`
+    ///
+    /// FINDING-1: IoError with [E-DAT-002] in message must produce code "E-DAT-002",
+    /// NOT "E-DAT-004". Verifies NetworkError routing in `map_source_error`.
+    #[test]
+    fn test_map_source_error_e_dat_002_routed_correctly() {
+        let sources = single_error_source(
+            "live",
+            DataSourceError::IoError {
+                uri: "http://example.com/".to_owned(),
+                message: "[E-DAT-002] connection refused: tcp connect error".to_owned(),
+            },
+        );
+        let ctx = DataSourceContext::new();
+        let (_scope, errors) = load_all(&sources, &ctx);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(
+            errors[0].code(),
+            "E-DAT-002",
+            "E-DAT-002 in IoError message must route to NetworkError; got code: {}, display: {}",
+            errors[0].code(),
+            errors[0]
+        );
+    }
+
+    /// `test_map_source_error_e_dat_006_io_error_not_path_traversal`
+    ///
+    /// FINDING-2: IoError with [E-DAT-006] in message (HTTP body-size cap) must NOT
+    /// produce a Display containing "path traversal blocked" or "outside base dir".
+    /// It must route to IoError variant (code E-DAT-006), not PathTraversalBlocked.
+    #[test]
+    fn test_map_source_error_e_dat_006_io_error_not_path_traversal() {
+        let sources = single_error_source(
+            "bigdata",
+            DataSourceError::IoError {
+                uri: "http://example.com/large.json".to_owned(),
+                message: "[E-DAT-006] response body exceeds 52428800-byte cap (policy-rejected) — \
+                    use a file-based DataSource for payloads larger than 52428800 bytes"
+                    .to_owned(),
+            },
+        );
+        let ctx = DataSourceContext::new();
+        let (_scope, errors) = load_all(&sources, &ctx);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(
+            errors[0].code(),
+            "E-DAT-006",
+            "body-cap IoError must carry E-DAT-006; got: {}",
+            errors[0].code()
+        );
+        let display = errors[0].to_string();
+        assert!(
+            !display.contains("path traversal"),
+            "body-cap error must NOT say 'path traversal'; got: {display}"
+        );
+        assert!(
+            !display.contains("outside base dir"),
+            "body-cap error must NOT say 'outside base dir'; got: {display}"
+        );
+    }
+
+    /// `test_map_source_error_parse_error_format_inferred_from_extension`
+    ///
+    /// FINDING-3: ParseError for a CSV URI must surface DataFormat::Csv, not Json.
+    /// Verifies the format-inference fix in `map_source_error`.
+    #[test]
+    fn test_map_source_error_parse_error_format_inferred_from_extension() {
+        let sources = single_error_source(
+            "sales",
+            DataSourceError::ParseError {
+                uri: "/data/sales.csv".to_owned(),
+                message: "[E-DAT-003] parse error: unexpected token at line 2".to_owned(),
+            },
+        );
+        let ctx = DataSourceContext::new();
+        let (_scope, errors) = load_all(&sources, &ctx);
+        assert_eq!(errors.len(), 1);
+        // The Display must contain "Csv" not "Json" for a .csv URI.
+        let display = errors[0].to_string();
+        assert!(
+            display.contains("Csv"),
+            "ParseError for .csv URI must show Csv format; got: {display}"
+        );
+        assert!(
+            !display.contains("(Json)"),
+            "ParseError for .csv URI must NOT show Json format; got: {display}"
+        );
+    }
+
+    /// `test_map_source_error_parse_error_format_inferred_yaml`
+    ///
+    /// FINDING-3: ParseError for a YAML URI must surface DataFormat::Yaml.
+    #[test]
+    fn test_map_source_error_parse_error_format_inferred_yaml() {
+        let sources = single_error_source(
+            "config",
+            DataSourceError::ParseError {
+                uri: "/etc/config.yaml".to_owned(),
+                message: "[E-DAT-003] parse error: unexpected indent".to_owned(),
+            },
+        );
+        let ctx = DataSourceContext::new();
+        let (_scope, errors) = load_all(&sources, &ctx);
+        assert_eq!(errors.len(), 1);
+        let display = errors[0].to_string();
+        assert!(
+            display.contains("Yaml"),
+            "ParseError for .yaml URI must show Yaml format; got: {display}"
+        );
+    }
+
+    /// `test_map_source_error_parse_error_format_inferred_toml`
+    ///
+    /// FINDING-3: ParseError for a TOML URI must surface DataFormat::Toml.
+    #[test]
+    fn test_map_source_error_parse_error_format_inferred_toml() {
+        let sources = single_error_source(
+            "brand",
+            DataSourceError::ParseError {
+                uri: "/project/brand.toml".to_owned(),
+                message: "[E-DAT-003] invalid TOML: expected key".to_owned(),
+            },
+        );
+        let ctx = DataSourceContext::new();
+        let (_scope, errors) = load_all(&sources, &ctx);
+        assert_eq!(errors.len(), 1);
+        let display = errors[0].to_string();
+        assert!(
+            display.contains("Toml"),
+            "ParseError for .toml URI must show Toml format; got: {display}"
+        );
+    }
+
+    /// `test_map_source_error_file_not_found_extracts_real_path`
+    ///
+    /// FINDING-4: IoError with [E-DAT-004] must extract the actual missing path from
+    /// the message instead of using the URI as the path. Both the URI and the real path
+    /// must be visible to the caller via the error display.
+    #[test]
+    fn test_map_source_error_file_not_found_extracts_real_path() {
+        let sources = single_error_source(
+            "data",
+            DataSourceError::IoError {
+                uri: "mock://missing".to_owned(),
+                message: "[E-DAT-004] file not found: /real/path.json (at mock)".to_owned(),
+            },
+        );
+        let ctx = DataSourceContext::new();
+        let (_scope, errors) = load_all(&sources, &ctx);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].code(), "E-DAT-004");
+        let display = errors[0].to_string();
+        assert!(
+            display.contains("/real/path.json"),
+            "file-not-found error must contain the actual path '/real/path.json'; got: {display}"
+        );
+    }
+
+    /// `test_stub_source_id_returns_static_plugin_id`
+    ///
+    /// FINDING-7: Mock plugin `id()` must return a static plugin-type id,
+    /// NOT the binding name. Verify the stubs in this test module comply.
+    #[test]
+    fn test_stub_source_id_returns_static_plugin_id() {
+        let file_src = StubSource {
+            result: Ok(Value::Int(0)),
+        };
+        let http_src = OnlineStubSource {
+            result: Ok(Value::Int(0)),
+        };
+        // ids must be static plugin-type strings, not binding names.
+        assert!(!file_src.id().is_empty(), "StubSource id must not be empty");
+        assert!(
+            !http_src.id().is_empty(),
+            "OnlineStubSource id must not be empty"
+        );
+        // They must be static plugin type identifiers, not dynamic binding names.
+        assert_eq!(file_src.id(), "stub-file");
+        assert_eq!(http_src.id(), "stub-http");
     }
 }

@@ -59,9 +59,16 @@ use slideforge_types::Value;
 ///
 /// Used in integration tests to verify offline-gate behavior without making
 /// real network requests. Each call to `load()` increments `call_count`.
+///
+/// FINDING-7 fix: `id()` returns the static plugin-type identifier `"mock-http"`,
+/// NOT the binding name. The binding name is a separate `binding_name` field used
+/// only for test setup, not for `id()`.
 struct MockHttpSource {
-    /// The data name this source is registered under (used for `id()`).
-    name: Arc<str>,
+    /// The data binding name (used only in test setup construction, NOT for `id()`).
+    /// Prefixed with `_` to suppress the unused-field lint — the field exists to
+    /// document which binding this source belongs to, but the dispatcher does not
+    /// pass the binding name through the `DataSource` trait.
+    _binding_name: Arc<str>,
     /// The value returned by `load()` on success.
     value: Value,
     /// Counter incremented on every `load()` call. Shared across clones.
@@ -69,10 +76,10 @@ struct MockHttpSource {
 }
 
 impl MockHttpSource {
-    /// Construct a new `MockHttpSource` returning `value` under `name`.
-    fn new(name: impl Into<Arc<str>>, value: Value) -> Self {
+    /// Construct a new `MockHttpSource` returning `value` under `binding_name`.
+    fn new(binding_name: impl Into<Arc<str>>, value: Value) -> Self {
         MockHttpSource {
-            name: name.into(),
+            _binding_name: binding_name.into(),
             value,
             call_count: Arc::new(AtomicUsize::new(0)),
         }
@@ -82,9 +89,13 @@ impl MockHttpSource {
     ///
     /// Used in AC-007 watch-mode tests where the caller needs to assert
     /// exactly zero calls across multiple dispatcher invocations.
-    fn with_counter(name: impl Into<Arc<str>>, value: Value, call_count: Arc<AtomicUsize>) -> Self {
+    fn with_counter(
+        binding_name: impl Into<Arc<str>>,
+        value: Value,
+        call_count: Arc<AtomicUsize>,
+    ) -> Self {
         MockHttpSource {
-            name: name.into(),
+            _binding_name: binding_name.into(),
             value,
             call_count,
         }
@@ -92,8 +103,9 @@ impl MockHttpSource {
 }
 
 impl DataSource for MockHttpSource {
+    /// FINDING-7: Static plugin-type id, NOT the binding name.
     fn id(&self) -> &str {
-        self.name.as_ref()
+        "mock-http"
     }
 
     fn load(&self, _uri: &str, _opts: &DataSourceOptions) -> Result<Value, DataSourceError> {
@@ -116,23 +128,28 @@ impl DataSource for MockHttpSource {
 // ---------------------------------------------------------------------------
 
 /// A mock DataSource that simulates a file-based source (not network-dependent).
+///
+/// FINDING-7 fix: `id()` returns the static plugin-type identifier `"mock-file"`,
+/// NOT the binding name.
 struct MockFileSource {
-    name: Arc<str>,
+    /// The data binding name (used only in test setup construction, NOT for `id()`).
+    _binding_name: Arc<str>,
     value: Value,
 }
 
 impl MockFileSource {
-    fn new(name: impl Into<Arc<str>>, value: Value) -> Self {
+    fn new(binding_name: impl Into<Arc<str>>, value: Value) -> Self {
         MockFileSource {
-            name: name.into(),
+            _binding_name: binding_name.into(),
             value,
         }
     }
 }
 
 impl DataSource for MockFileSource {
+    /// FINDING-7: Static plugin-type id, NOT the binding name.
     fn id(&self) -> &str {
-        self.name.as_ref()
+        "mock-file"
     }
 
     fn load(&self, _uri: &str, _opts: &DataSourceOptions) -> Result<Value, DataSourceError> {
@@ -141,19 +158,26 @@ impl DataSource for MockFileSource {
 }
 
 /// A mock DataSource that always fails with an IoError (simulates a missing file).
+///
+/// FINDING-7 fix: `id()` returns the static plugin-type identifier `"mock-fail"`,
+/// NOT the binding name.
 struct MockFailSource {
-    name: Arc<str>,
+    /// The data binding name (used only in test setup construction, NOT for `id()`).
+    _binding_name: Arc<str>,
 }
 
 impl MockFailSource {
-    fn new(name: impl Into<Arc<str>>) -> Self {
-        MockFailSource { name: name.into() }
+    fn new(binding_name: impl Into<Arc<str>>) -> Self {
+        MockFailSource {
+            _binding_name: binding_name.into(),
+        }
     }
 }
 
 impl DataSource for MockFailSource {
+    /// FINDING-7: Static plugin-type id, NOT the binding name.
     fn id(&self) -> &str {
-        self.name.as_ref()
+        "mock-fail"
     }
 
     fn load(&self, _uri: &str, _opts: &DataSourceOptions) -> Result<Value, DataSourceError> {
@@ -459,26 +483,89 @@ fn test_bc_1_03_004_offline_unreferenced_http_source() {
 /// an empty value. The skipped data name must be completely ABSENT from scope
 /// (not mapped to `Value::Null`, `Value::Map({})`, or `Value::List([])`).
 ///
+/// FINDING-5 fix: Restructured as a two-cycle test that differentiates
+/// "source was loaded as non-empty" (online) from "source is absent" (offline).
+/// The previous implementation only checked the offline case with an empty-map
+/// source — it did not differentiate "skipped" from "loaded-empty".
+///
+/// Cycle 1 (online, ctx.offline=false): source returns a non-empty map. Scope
+/// must contain the binding with the expected map content.
+///
+/// Cycle 2 (offline, ctx.offline=true): same source is skipped. Scope must NOT
+/// contain the binding at all (not even as null/empty-map).
+///
+/// Additionally, a static-assertion verifies that the dispatcher source code does
+/// NOT contain an empty-value substitution at the offline-skip call site.
+///
 /// Traces to BC-1.03.004 invariant 1.
 #[test]
 fn test_bc_1_03_004_offline_does_not_silently_substitute_empty_value() {
+    use slideforge_types::OrderedMap;
+
     let source_name: Arc<str> = Arc::from("http_source");
-    let sources: Vec<(Arc<str>, Box<dyn DataSource>)> = vec![(
-        Arc::clone(&source_name),
-        Box::new(MockHttpSource::new(
-            "http_source",
-            Value::Map(Default::default()),
-        )),
-    )];
-    let ctx = DataSourceContext::new().with_offline(true);
 
-    let (scope, _errors) = load_all(&sources, &ctx);
+    // Build a non-empty map value the source will return when online.
+    let mut expected_map: OrderedMap<Arc<str>, Value> = OrderedMap::new();
+    expected_map.insert(Arc::from("revenue"), Value::Int(1_000_000));
+    let non_empty_value = Value::Map(expected_map);
 
-    // The key must be COMPLETELY absent — not mapped to Null, empty Map, or empty List.
+    // ---- Cycle 1: online ----
+    // Source must load successfully and the binding must be present with data.
+    {
+        let sources: Vec<(Arc<str>, Box<dyn DataSource>)> = vec![(
+            Arc::clone(&source_name),
+            Box::new(MockHttpSource::new("http_source", non_empty_value.clone())),
+        )];
+        let ctx = DataSourceContext::new(); // offline=false
+
+        let (scope, errors) = load_all(&sources, &ctx);
+
+        assert!(
+            errors.is_empty(),
+            "online cycle must have no errors; got: {:?}",
+            errors
+        );
+        assert!(
+            scope.get(&source_name).is_some(),
+            "online cycle: binding 'http_source' must be present in scope"
+        );
+        let loaded = scope.get(&source_name).unwrap();
+        assert_eq!(
+            *loaded, non_empty_value,
+            "online cycle: loaded value must match the expected non-empty map"
+        );
+    }
+
+    // ---- Cycle 2: offline ----
+    // Same source is skipped. Binding must be COMPLETELY absent — not mapped to
+    // Null, empty Map, or empty List. `scope.get()` must return None.
+    {
+        let sources: Vec<(Arc<str>, Box<dyn DataSource>)> = vec![(
+            Arc::clone(&source_name),
+            Box::new(MockHttpSource::new("http_source", non_empty_value.clone())),
+        )];
+        let ctx = DataSourceContext::new().with_offline(true);
+
+        let (scope, _errors) = load_all(&sources, &ctx);
+
+        assert!(
+            scope.get(&source_name).is_none(),
+            "offline cycle: skipped source must be ABSENT from scope (get() must return None), \
+            not mapped to any empty value; --offline never silently substitutes empty data \
+            (BC-1.03.004 invariant 1)"
+        );
+    }
+
+    // ---- Static assertion: dispatcher source must not contain empty-value substitution ----
+    // Verifies that the dispatcher's offline-skip branch does not add any default value.
+    let dispatcher_src = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/dispatcher.rs"));
     assert!(
-        !scope.contains_key(&source_name),
-        "skipped source must be ABSENT from scope, not present with an empty value; \
-        --offline never silently substitutes empty data (BC-1.03.004 invariant 1)"
+        !dispatcher_src.contains("Value::Map(Default::default())"),
+        "dispatcher must not substitute Value::Map(Default::default()) at the offline-skip site"
+    );
+    assert!(
+        !dispatcher_src.contains("Value::Null"),
+        "dispatcher must not substitute Value::Null at the offline-skip site"
     );
 }
 
