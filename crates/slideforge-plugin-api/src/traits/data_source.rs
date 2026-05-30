@@ -19,7 +19,7 @@ use thiserror::Error;
 /// Plugins SHOULD emit `tracing::warn!` for options they silently ignore
 /// **if and only if** the option is conceptually applicable to the plugin.
 /// For example:
-/// - An SQLite plugin that receives a non-empty `query` but only supports
+/// - An `SQLite` plugin that receives a non-empty `query` but only supports
 ///   `SELECT *` should warn.
 /// - An HTTP plugin that receives `auth_token` but cannot authenticate with
 ///   it should warn.

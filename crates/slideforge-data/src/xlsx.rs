@@ -470,12 +470,19 @@ fn data_error_to_source_error(path: &str, err: &DataError) -> DataSourceError {
         DataError::UnsupportedFormat {
             extension, code, ..
         } => DataSourceError::UnsupportedUri {
-            // F-MED-2: include the offending extension and the supported format.
-            // TD-VSDD-060: generic message covers all non-xlsx extensions, not just .xls.
+            // F-PASS26-MED-2: .xls gets the exact AC-005 wording (actionable conversion hint).
+            // All other non-xlsx extensions get a generic message.
             // OBS-1: embed [E-DAT-003] bracket code so user-visible message matches SQLite pattern.
             // F-PASS14-LOW-1: extensionless files use the cosmetic "(no extension)"; prefixing
             // with '.' would render the awkward "'.(no extension)'" — omit the dot for that case.
-            uri: {
+            uri: if extension.as_ref() == "xls" {
+                // AC-005 exact wording (BC-1.03.006 edge case EC-002).
+                format!(
+                    "[{code}] '{path}' is an .xls file. \
+                    Only .xlsx format is supported in v1.0. \
+                    Convert to .xlsx before use."
+                )
+            } else {
                 let ext_display = if extension.as_ref() == "(no extension)" {
                     format!("got {extension}")
                 } else {
@@ -573,8 +580,10 @@ fn reject_xls_extension(path: &str) -> Result<(), DataError> {
         return Ok(());
     }
 
-    // All non-xlsx extensions are rejected with an informative message.
-    // .xls gets a special "convert to .xlsx" hint; others get a generic note.
+    // All non-xlsx extensions are rejected via DataError::UnsupportedFormat.
+    // The human-visible message is composed in data_error_to_source_error:
+    // .xls → AC-005 exact wording ("is an .xls file … Convert to .xlsx before use.")
+    // other extensions → generic "(only .xlsx extension supported; got '.<ext>')"
     let extension_arc = if ext_lower.is_empty() {
         Arc::from("(no extension)")
     } else {
@@ -1167,13 +1176,17 @@ mod tests {
     // BC-1.03.006 invariant 3, edge case EC-002.
     // ---------------------------------------------------------------------------
 
-    /// `test_bc_1_03_006_xls_rejected` -- `.xls` extension returns `DataSourceError::UnsupportedUri`.
+    /// `test_bc_1_03_006_xls_rejected` -- `.xls` extension returns `DataSourceError::UnsupportedUri`
+    /// with the exact AC-005 wording.
     ///
-    /// The error must mention `.xlsx` as the supported format AND embed `[E-DAT-003]`
-    /// in bracket form (OBS-1: load-bearing assertion matches `SQLite` E-DAT-014 pattern).
+    /// AC-005 mandates: `'<path>' is an .xls file. Only .xlsx format is supported in v1.0.
+    /// Convert to .xlsx before use.`
     ///
-    /// Load-bearing: if `data_error_to_source_error` omits `[E-DAT-003]` from the
-    /// `UnsupportedUri` message, the `msg.contains("[E-DAT-003]")` assertion fails.
+    /// Load-bearing assertions (F-PASS26-MED-2, TD-VSDD-059):
+    /// - `msg.contains("is an .xls file")` — exact AC-005 phrase 1
+    /// - `msg.contains("Only .xlsx format is supported in v1.0")` — exact AC-005 phrase 2
+    /// - `msg.contains("Convert to .xlsx")` — exact AC-005 phrase 3
+    /// - `msg.contains("[E-DAT-003]")` — bracket code preserved (OBS-1)
     ///
     /// Traces to BC-1.03.006 AC-005, invariant 3, edge case EC-002.
     #[test]
@@ -1190,10 +1203,21 @@ mod tests {
             "`.xls` file must produce DataSourceError::UnsupportedUri, got: {err:?}"
         );
         let msg = err.to_string();
+
+        // F-PASS26-MED-2 load-bearing: exact AC-005 phrase components.
         assert!(
-            msg.to_lowercase().contains("xlsx") || msg.to_lowercase().contains("not supported"),
-            "error must mention .xlsx as the required format; got: {msg}"
+            msg.contains("is an .xls file"),
+            "AC-005: error must contain \"is an .xls file\"; got: {msg}"
         );
+        assert!(
+            msg.contains("Only .xlsx format is supported in v1.0"),
+            "AC-005: error must contain \"Only .xlsx format is supported in v1.0\"; got: {msg}"
+        );
+        assert!(
+            msg.contains("Convert to .xlsx"),
+            "AC-005: error must contain \"Convert to .xlsx\"; got: {msg}"
+        );
+
         // OBS-1 load-bearing: [E-DAT-003] must appear in bracket form.
         // This assertion fails if data_error_to_source_error omits the error code.
         assert!(
