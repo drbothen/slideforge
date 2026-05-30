@@ -31,9 +31,14 @@
 //!   non-shape frames (region/placeholder/text-run) satisfies `x >= 0`,
 //!   `y >= 0`, `width > 0`, `height > 0`, `x + width <= page_width`,
 //!   `y + height <= page_height`. Shape frames may legitimately fall outside
-//!   the page per BC-3.04.001 EC-002 and produce a
-//!   [`LayoutWarning::OffCanvas`]; they are still included in the output at
-//!   their declared position.
+//!   the page edges (`x < 0`, `y < 0`, or extending beyond `page_width`/
+//!   `page_height`) per BC-3.04.001 EC-002 and produce
+//!   [`LayoutWarning::OffCanvas`]. Shape frames are still required to satisfy
+//!   `width > 0` and `height > 0`; violations return
+//!   [`crate::error::LayoutError::InvalidBoundingBox`].
+//!   Per BC-3.04.001 v1.5.0 Invariant 11: when both `alt` text and
+//!   `decorative: true` are set on a shape, `alt` takes precedence and the
+//!   layout result carries `AltText::Provided`.
 //! - **Pure function (AC-008):** No I/O, no side effects, no panics.
 //!
 //! ## Forbidden dependencies
