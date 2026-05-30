@@ -35,7 +35,7 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
 };
 
-use slideforge_data::{DataSourceContext, dispatcher::load_all};
+use slideforge_data::{DataError, DataSourceContext, dispatcher::load_all};
 use slideforge_plugin_api::{DataSource, DataSourceError, DataSourceOptions};
 use slideforge_types::Value;
 
@@ -974,10 +974,32 @@ fn test_bc_1_03_004_error_code_dat_001_http_404_through_dispatcher() {
         errors[0].code(),
         errors[0]
     );
+    // F-P15-HIGH-001 variant-identity guard: must reconstruct DataError::HttpError
+    // (not fall back to IoError) even after structural inter-layer protocol fix.
+    assert!(
+        matches!(&errors[0], DataError::HttpError { status: 404, .. }),
+        "HTTP 404 must produce DataError::HttpError {{ status: 404, .. }}; \
+        got variant with code: {}, display: {}",
+        errors[0].code(),
+        errors[0]
+    );
     let display = errors[0].to_string();
     assert!(
         display.contains("404"),
         "E-DAT-001 Display for 404 must contain '404'; got: {display}"
+    );
+    // F-P15-HIGH-001 guard: the rich Display (--offline hint) must come from
+    // DataError::HttpError, not from the inter-layer canonical format.
+    assert!(
+        display.contains("--offline"),
+        "E-DAT-001 Display must contain '--offline' hint (from DataError::HttpError Display); \
+        got: {display}"
+    );
+    // The --offline hint must appear exactly once (no doubling from inter-layer leakage).
+    assert_eq!(
+        display.matches("--offline").count(),
+        1,
+        "Display must contain '--offline' exactly once (no doubling); got: {display}"
     );
 }
 
@@ -1042,10 +1064,30 @@ fn test_bc_1_03_004_error_code_dat_001_http_500_through_dispatcher() {
         errors[0].code(),
         errors[0]
     );
+    // F-P15-HIGH-001 variant-identity guard: must reconstruct DataError::HttpError
+    // (not fall back to IoError) even after structural inter-layer protocol fix.
+    assert!(
+        matches!(&errors[0], DataError::HttpError { status: 500, .. }),
+        "HTTP 500 must produce DataError::HttpError {{ status: 500, .. }}; \
+        got variant with code: {}, display: {}",
+        errors[0].code(),
+        errors[0]
+    );
     let display = errors[0].to_string();
     assert!(
         display.contains("500"),
         "E-DAT-001 Display for 500 must contain '500'; got: {display}"
+    );
+    // F-P15-HIGH-001 guard: the rich Display (--offline hint) must come from
+    // DataError::HttpError, not from the inter-layer canonical format.
+    assert!(
+        display.contains("--offline"),
+        "E-DAT-001 Display for 500 must contain '--offline' hint; got: {display}"
+    );
+    assert_eq!(
+        display.matches("--offline").count(),
+        1,
+        "Display must contain '--offline' exactly once for 500 error; got: {display}"
     );
 }
 
@@ -1098,6 +1140,37 @@ fn test_bc_1_03_004_error_code_dat_002_network_error_through_dispatcher() {
         errors[0].code(),
         errors[0]
     );
+    // F-P15-HIGH-002 variant-identity guard: must reconstruct DataError::NetworkError
+    // (not fall back to IoError) even after structural inter-layer protocol fix.
+    assert!(
+        matches!(&errors[0], DataError::NetworkError { .. }),
+        "connection refused must produce DataError::NetworkError {{ .. }}; \
+        got variant with code: {}, display: {}",
+        errors[0].code(),
+        errors[0]
+    );
+    let display = errors[0].to_string();
+    // F-P15-HIGH-002 guard: the rich Display (--offline hint + URL) must come from
+    // DataError::NetworkError, not from the inter-layer canonical format.
+    assert!(
+        display.contains("--offline"),
+        "E-DAT-002 Display must contain '--offline' hint (from DataError::NetworkError Display); \
+        got: {display}"
+    );
+    assert_eq!(
+        display.matches("--offline").count(),
+        1,
+        "E-DAT-002 Display must contain '--offline' exactly once (no doubling); got: {display}"
+    );
+    assert!(
+        display.contains("127.0.0.1"),
+        "E-DAT-002 Display must include the URL; got: {display}"
+    );
+    // Note: ureq transport error messages embed the URL in the cause string,
+    // so the URL may appear more than once in the Display (once from the `url`
+    // field in the format string, and once in `cause` from ureq). That is
+    // acceptable — the key invariant is that the --offline hint appears exactly
+    // once (no doubling from inter-layer leakage).
 }
 
 /// `test_bc_1_03_004_error_code_dat_003_parse_error_through_dispatcher`

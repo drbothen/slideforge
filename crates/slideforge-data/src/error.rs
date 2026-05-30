@@ -638,11 +638,16 @@ impl DataError {
     /// Return the error code string for this error variant.
     ///
     /// Returns the specific code stored in the variant for [`DataError::ParseError`],
-    /// [`DataError::FileNotFound`], and [`DataError::IoError`] — the stored `code`
-    /// field is authoritative. This allows `IoError` to carry `E-DAT-001` in the
-    /// dispatcher's HTTP-fallback path and `ParseError` to carry granular format codes
-    /// without requiring distinct variants. Body-cap policy rejections route to
-    /// [`DataError::PolicyRejected`] (not `IoError`).
+    /// [`DataError::FileNotFound`], [`DataError::IoError`], and [`DataError::AuthFailed`]
+    /// — the stored `code` field is authoritative. This allows `IoError` to carry
+    /// `E-DAT-001` in the dispatcher's HTTP-fallback path and `ParseError` to carry
+    /// granular format codes without requiring distinct variants. Body-cap policy
+    /// rejections route to [`DataError::PolicyRejected`] (not `IoError`).
+    ///
+    /// `AuthFailed` also uses the stored `code` field (F-P15-LOW-001), consistent with
+    /// the sibling pattern in `FileNotFound`, `IoError`, and `ParseError`. The stored
+    /// field is invariantly `E-DAT-002` in current production paths, but returning
+    /// the stored field is the structurally correct approach.
     ///
     /// For all other variants the code is determined by the discriminant.
     #[must_use]
@@ -652,16 +657,19 @@ impl DataError {
             // overriding. `FileNotFound` and `IoError` both use E_DAT_004 by default,
             // but `IoError` may carry E_DAT_001 in the dispatcher's HTTP-fallback path.
             // `ParseError` may carry granular sub-codes (E_DAT_009, E_DAT_010, etc.).
+            // `AuthFailed` invariantly stores E_DAT_002, but returning the stored field
+            // is consistent with the sibling pattern (F-P15-LOW-001).
             DataError::FileNotFound { code, .. }
             | DataError::IoError { code, .. }
-            | DataError::ParseError { code, .. } => code,
+            | DataError::ParseError { code, .. }
+            | DataError::AuthFailed { code, .. } => code,
             DataError::UnsupportedFormat { .. } => E_DAT_003,
             DataError::FieldNotFound { .. } => E_DAT_005,
             DataError::PathTraversalBlocked { .. }
             | DataError::SsrfBlocked { .. }
             | DataError::PolicyRejected { .. } => E_DAT_006,
             DataError::HttpError { .. } => E_DAT_001,
-            DataError::NetworkError { .. } | DataError::AuthFailed { .. } => E_DAT_002,
+            DataError::NetworkError { .. } => E_DAT_002,
             DataError::UnspecifiedSourceError { .. } => E_DAT_015,
         }
     }
@@ -749,6 +757,43 @@ mod tests {
         assert_eq!(err.code(), "E-DAT-001");
         assert!(err.to_string().contains("E-DAT-001"));
         assert!(err.to_string().contains("404"));
+    }
+
+    /// `test_f_p15_low_001_auth_failed_code_uses_stored_field` — `AuthFailed.code()` returns
+    /// the stored `code` field, not a hardcoded constant. This is Option A of F-P15-LOW-001:
+    /// consistent with the sibling pattern in `FileNotFound`, `IoError`, and `ParseError`.
+    ///
+    /// Traces to F-P15-LOW-001.
+    #[test]
+    fn test_f_p15_low_001_auth_failed_code_uses_stored_field() {
+        // Construct AuthFailed with the standard E_DAT_002 code.
+        let err = DataError::AuthFailed {
+            code: E_DAT_002,
+            uri: Arc::from("http://example.com/secure"),
+            span: SourceSpan::default(),
+        };
+        assert_eq!(
+            err.code(),
+            "E-DAT-002",
+            "AuthFailed.code() must return the stored code field; got: {}",
+            err.code()
+        );
+
+        // Verify the stored field is authoritative: constructing with E_DAT_005
+        // must return E-DAT-005, not E-DAT-002 (this tests that the match arm
+        // reads the stored field, not a hardcoded constant).
+        let err_with_non_default_code = DataError::AuthFailed {
+            code: E_DAT_005,
+            uri: Arc::from("http://example.com/secure"),
+            span: SourceSpan::default(),
+        };
+        assert_eq!(
+            err_with_non_default_code.code(),
+            "E-DAT-005",
+            "AuthFailed.code() must return the stored field (E-DAT-005), not a hardcoded constant; \
+            got: {}",
+            err_with_non_default_code.code()
+        );
     }
 
     /// `test_BC_5_03_001_error_code_ssrf_blocked` — `SsrfBlocked` uses E-DAT-006 with remediation hint.

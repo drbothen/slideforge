@@ -368,6 +368,16 @@ fn map_source_error(name: &Arc<str>, err: &DataSourceError) -> DataError {
                 // (E-DAT-004 = "file not found") to avoid mis-categorizing third-party
                 // plugin errors (e.g., disk-full, permission-denied) as file-not-found.
                 //
+                // F-P15-OBS-001: Codes E-DAT-007 through E-DAT-013 (XLSX and SQLite
+                // sub-codes) in an IoError message fall through here and route to E-DAT-015
+                // rather than being recognized. This is intentional: those codes are
+                // parse-domain semantics — they belong in DataSourceError::ParseError, not
+                // DataSourceError::IoError. A third-party plugin incorrectly emitting
+                // [E-DAT-007]..[E-DAT-013] in an IoError message is a plugin bug; falling
+                // through to E-DAT-015 is the safe default. Only DataSourceError::ParseError
+                // messages with those codes are recognized (via parse_e_dat_code in the
+                // ParseError arm below).
+                //
                 // FINDING-7 fix: Use `inner_msg` (the source's own message, not
                 // `err.to_string()` which wraps it in a second IoError layer) to avoid
                 // the "I/O error reading" prefix appearing twice in the Display output.
@@ -625,23 +635,29 @@ fn strip_bracket_prefix(msg: &str) -> &str {
 /// to preserve the granular code when it is recognized, and fall back to the
 /// generic parse-error code only for messages that lack a known bracket prefix.
 ///
-/// ## Recognized codes (parse-error-relevant only — F-P12-MED-002)
+/// ## Recognized codes (parse-error-relevant only — F-P12-MED-002, F-P15-MED-002)
 ///
 /// Only codes that have semantically meaningful `ParseError` mappings are recognized.
 /// The following codes are intentionally excluded because they belong to non-`ParseError`
 /// variants and must not produce `DataError::ParseError { code: <excluded> }`:
 ///
-/// - `E_DAT_004` (file-not-found / I/O failure) — belongs to `DataSourceError::IoError`;
-///   routing a `[E-DAT-004]` message through `ParseError` is semantically wrong.
-/// - `E_DAT_005` (field-not-found) — evaluator-emitted; `ParseError` messages do not
-///   carry this code in production.
-/// - `E_DAT_015` (unspecified source error) — dispatcher catch-all; a `ParseError`
+/// - `E_DAT_001` (`HttpError`) — F-P15-MED-002: HTTP status errors are handled by the
+///   `IoError` arm's `has_bracket(inner_msg, E_DAT_001)` routing path. A `ParseError`
+///   message embedding `[E-DAT-001]` is invalid and falls back to `E_DAT_003`.
+/// - `E_DAT_002` (`NetworkError`) — F-P15-MED-002: Network transport errors are handled
+///   by the `IoError` arm's `has_bracket(inner_msg, E_DAT_002)` routing path. A
+///   `ParseError` message embedding `[E-DAT-002]` is invalid and falls back to `E_DAT_003`.
+/// - `E_DAT_004` (`FileNotFound` / `IoError`) — F-P12-MED-002: belongs to non-`ParseError`
+///   variants; routing a `[E-DAT-004]` message through `ParseError` is semantically wrong.
+/// - `E_DAT_005` (`FieldNotFound`) — F-P12-MED-002: evaluator-emitted; `ParseError`
+///   messages do not carry this code in production.
+/// - `E_DAT_014` — retired by F-P13-HIGH-002; `SQLite` extension errors now route through
+///   `DataSourceError::UnsupportedUri` (not `ParseError`). Falls back to `E_DAT_003`.
+/// - `E_DAT_015` (`UnspecifiedSourceError`) — dispatcher catch-all; a `ParseError`
 ///   message carrying `[E-DAT-015]` must not produce `DataError::ParseError { code: E_DAT_015 }`.
 ///
-/// Recognized: `E_DAT_001`, `E_DAT_002`, `E_DAT_003`, `E_DAT_006` through `E_DAT_013`.
-/// `E_DAT_014` is retired (F-P13-HIGH-002) and no longer recognized — its `ParseError`
-/// messages now route to `E_DAT_003` (the dispatcher's `UnsupportedUri` arm already uses
-/// `E_DAT_003` for all unsupported-format errors).
+/// Recognized: `E_DAT_003`, `E_DAT_006` through `E_DAT_013`.
+///
 /// Unknown bracket formats (e.g., `[E-DAT-099]` or plugin-specific codes) return `None`.
 ///
 /// ## Relationship to `strip_bracket_prefix`
@@ -654,20 +670,16 @@ fn parse_e_dat_code(msg: &str) -> Option<&'static str> {
     if !msg.starts_with('[') {
         return None;
     }
-    // Recognize only parse-error-relevant E_DAT_NNN constants. E_DAT_004, E_DAT_005,
-    // and E_DAT_015 are intentionally excluded — they belong to non-ParseError variants.
-    // See F-P12-MED-002 for rationale.
+    // Recognize only parse-error-relevant E_DAT_NNN constants.
+    // Excluded: E_DAT_001, E_DAT_002 (HTTP/network — IoError arm handles them),
+    //           E_DAT_004, E_DAT_005, E_DAT_015 (non-ParseError variants — F-P12-MED-002),
+    //           E_DAT_014 (retired — F-P13-HIGH-002).
     //
     // Each check uses format!("[{code}]") to guarantee the bracket wraps the code,
     // matching the canonical `[E-DAT-NNN]` format emitted by all built-in sources.
-    // E_DAT_014 is intentionally excluded — retired by F-P13-HIGH-002. SQLite extension
-    // errors now route through DataSourceError::UnsupportedUri (not ParseError) so
-    // [E-DAT-014] will not appear in production ParseError messages. If a third-party
-    // plugin emits [E-DAT-014] in a ParseError message, it falls back to E_DAT_003,
-    // which is the correct subsuming code.
     let candidates: &[&'static str] = &[
-        E_DAT_001, E_DAT_002, E_DAT_003, E_DAT_006, E_DAT_007, E_DAT_008, E_DAT_009, E_DAT_010,
-        E_DAT_011, E_DAT_012, E_DAT_013,
+        E_DAT_003, E_DAT_006, E_DAT_007, E_DAT_008, E_DAT_009, E_DAT_010, E_DAT_011, E_DAT_012,
+        E_DAT_013,
     ];
     for &code in candidates {
         if msg.starts_with(&format!("[{code}]")) {
@@ -1265,13 +1277,28 @@ mod tests {
     ///
     /// FINDING-1: IoError with [E-DAT-001] in message must produce code "E-DAT-001",
     /// NOT "E-DAT-004". Verifies HttpError routing in `map_source_error`.
+    ///
+    /// ## Inter-layer protocol contract
+    ///
+    /// The `inner_msg` below is constructed using the CANONICAL MACHINE-FRIENDLY format
+    /// that `http.rs::data_error_to_source_error` emits for `DataError::HttpError`:
+    ///   `"[E-DAT-001] HTTP {status} from '{url}'"`
+    ///
+    /// This is the format that `extract_http_status` was designed to parse. The dispatcher
+    /// reads the status code from this message and reconstructs the rich `DataError::HttpError`
+    /// variant (with `--offline` hint, URL, span) before presenting it to the user.
+    ///
+    /// Changing the canonical format in `http.rs` would break this test — that is
+    /// INTENTIONAL. A single-point-of-failure ensures format drift is caught immediately.
     #[test]
     fn test_map_source_error_e_dat_001_routed_correctly() {
+        // Canonical inter-layer format emitted by http.rs::data_error_to_source_error.
+        let canonical_msg = format!("[{E_DAT_001}] HTTP 404 from 'http://example.com/data.json'");
         let sources = single_error_source(
             "api",
             DataSourceError::IoError {
                 uri: "http://example.com/data.json".to_owned(),
-                message: "[E-DAT-001] HTTP 404 from 'http://example.com/data.json'".to_owned(),
+                message: canonical_msg,
             },
         );
         let ctx = DataSourceContext::new();
@@ -1284,19 +1311,42 @@ mod tests {
             errors[0].code(),
             errors[0]
         );
+        // Variant-identity: must produce DataError::HttpError, not DataError::IoError.
+        assert!(
+            matches!(&errors[0], DataError::HttpError { status: 404, .. }),
+            "E-DAT-001 canonical message must reconstruct DataError::HttpError {{ status: 404 }}; \
+            got: {}",
+            errors[0]
+        );
     }
 
     /// `test_map_source_error_e_dat_002_routed_correctly`
     ///
     /// FINDING-1: IoError with [E-DAT-002] in message must produce code "E-DAT-002",
     /// NOT "E-DAT-004". Verifies NetworkError routing in `map_source_error`.
+    ///
+    /// ## Inter-layer protocol contract
+    ///
+    /// The `inner_msg` below is constructed using the CANONICAL MACHINE-FRIENDLY format
+    /// that `http.rs::data_error_to_source_error` emits for `DataError::NetworkError`:
+    ///   `"[E-DAT-002] network error: {cause}"`
+    ///
+    /// This is the format that the dispatcher's `strip_prefix("network error: ")` was
+    /// designed to consume. The dispatcher strips the label and bracket code, then
+    /// reconstructs the rich `DataError::NetworkError` variant (with `--offline` hint,
+    /// URL, span) before presenting it to the user.
+    ///
+    /// Changing the canonical format in `http.rs` would break this test — that is
+    /// INTENTIONAL. A single-point-of-failure ensures format drift is caught immediately.
     #[test]
     fn test_map_source_error_e_dat_002_routed_correctly() {
+        // Canonical inter-layer format emitted by http.rs::data_error_to_source_error.
+        let canonical_msg = format!("[{E_DAT_002}] network error: tcp connect error");
         let sources = single_error_source(
             "live",
             DataSourceError::IoError {
                 uri: "http://example.com/".to_owned(),
-                message: "[E-DAT-002] connection refused: tcp connect error".to_owned(),
+                message: canonical_msg,
             },
         );
         let ctx = DataSourceContext::new();
@@ -1307,6 +1357,13 @@ mod tests {
             "E-DAT-002",
             "E-DAT-002 in IoError message must route to NetworkError; got code: {}, display: {}",
             errors[0].code(),
+            errors[0]
+        );
+        // Variant-identity: must produce DataError::NetworkError, not DataError::IoError.
+        assert!(
+            matches!(&errors[0], DataError::NetworkError { .. }),
+            "E-DAT-002 canonical message must reconstruct DataError::NetworkError {{ .. }}; \
+            got: {}",
             errors[0]
         );
     }
@@ -1551,14 +1608,28 @@ mod tests {
     /// FINDING-2: When IoError contains [E-DAT-001] and a parseable status,
     /// the Display must contain the actual status (e.g., "HTTP 404"). Tests two
     /// status codes to pin the format.
+    ///
+    /// ## Inter-layer protocol contract (F-P15-MED-001)
+    ///
+    /// `inner_msg` is constructed using the CANONICAL MACHINE-FRIENDLY format that
+    /// `http.rs::data_error_to_source_error` emits for `DataError::HttpError`:
+    ///   `"[E-DAT-001] HTTP {status} from '{url}'"`
+    ///
+    /// The dispatcher parses this format in `extract_http_status` to recover the
+    /// status code, then constructs the rich `DataError::HttpError` variant (with
+    /// `--offline` hint) for user-facing Display. This test pins the dispatcher's
+    /// contract with http.rs: source emits canonical machine-friendly format;
+    /// dispatcher constructs rich DataError variant.
     #[test]
     fn test_map_source_error_e_dat_001_display_contains_status_code() {
-        // Case 1: 404 Not Found
+        // Case 1: 404 Not Found — using canonical inter-layer format from http.rs.
+        let canonical_404 =
+            format!("[{E_DAT_001}] HTTP 404 from 'http://example.com/missing.json'");
         let sources_404 = single_error_source(
             "api_404",
             DataSourceError::IoError {
                 uri: "http://example.com/missing.json".to_owned(),
-                message: "[E-DAT-001] HTTP 404 from 'http://example.com/missing.json'".to_owned(),
+                message: canonical_404,
             },
         );
         let ctx = DataSourceContext::new();
@@ -1575,12 +1646,13 @@ mod tests {
             "E-DAT-001 error must not fabricate 'HTTP 0'; got: {display}"
         );
 
-        // Case 2: 503 Service Unavailable
+        // Case 2: 503 Service Unavailable — using canonical inter-layer format.
+        let canonical_503 = format!("[{E_DAT_001}] HTTP 503 from 'http://example.com/data.json'");
         let sources_503 = single_error_source(
             "api_503",
             DataSourceError::IoError {
                 uri: "http://example.com/data.json".to_owned(),
-                message: "[E-DAT-001] HTTP 503 from 'http://example.com/data.json'".to_owned(),
+                message: canonical_503,
             },
         );
         let (_scope2, errors2) = load_all(&sources_503, &ctx);
@@ -1995,17 +2067,33 @@ mod tests {
     /// `DataError::NetworkError`, the Display must contain exactly one `[E-DAT-002]`
     /// and exactly one `"network error fetching"` — not double-wrapped.
     ///
+    /// ## Inter-layer protocol contract (F-P15-MED-001)
+    ///
+    /// `inner_msg` is constructed using the CANONICAL MACHINE-FRIENDLY format that
+    /// `http.rs::data_error_to_source_error` emits for `DataError::NetworkError`:
+    ///   `"[E-DAT-002] network error: {cause}"`
+    ///
+    /// The dispatcher's `strip_prefix("network error: ")` consumes this format to
+    /// extract the bare `cause`, then constructs `DataError::NetworkError` whose
+    /// rich Display includes `--offline` hint and URL. This test pins the dispatcher's
+    /// contract with http.rs: source emits canonical machine-friendly format;
+    /// dispatcher constructs rich DataError variant.
+    ///
     /// Updated in Pass-14 (F-P14-MED-001): The Display format now includes the URL
     /// and the `--offline` hint per the spec (error-taxonomy.md E-DAT-002).
     /// The label changed from `"network error:"` to `"network error fetching '<url>':"`
     /// so the assertion is updated to match the canonical format.
     #[test]
     fn test_map_source_error_e_dat_002_display_single_bracket_only() {
+        // Canonical inter-layer format emitted by http.rs::data_error_to_source_error.
+        // Note: the cause does NOT include a "(at ...)" span annotation — span is added
+        // by the dispatcher when constructing DataError::NetworkError.
+        let canonical_msg = format!("[{E_DAT_002}] network error: connection refused");
         let sources = single_error_source(
             "net_src",
             DataSourceError::IoError {
                 uri: "http://example.com/".to_owned(),
-                message: "[E-DAT-002] network error: connection refused (at src:1:1)".to_owned(),
+                message: canonical_msg,
             },
         );
         let ctx = DataSourceContext::new();
@@ -2024,10 +2112,12 @@ mod tests {
             1,
             "Display must contain exactly one 'network error fetching'; got: {display}"
         );
-        // Must NOT contain the old "network error:" label (stripped during cleaning).
+        // Must NOT contain the old "network error: " label in the Display
+        // (it was the inter-layer label, stripped by the dispatcher before
+        // constructing NetworkError.cause).
         assert!(
             !display.contains("network error: "),
-            "Display must not contain old 'network error: ' label; got: {display}"
+            "Display must not leak inter-layer 'network error: ' label; got: {display}"
         );
         // Must include the URL.
         assert!(
@@ -3167,14 +3257,28 @@ mod tests {
     /// F-P13-HIGH-002: E_DAT_014 is retired and removed from candidates. A ParseError
     /// with [E-DAT-014] now falls back to E-DAT-003 (correct — UnsupportedFormat is a
     /// parse/format sub-case). The [E-DAT-014] check returns None.
+    ///
+    /// F-P15-MED-002: E_DAT_001 and E_DAT_002 are also excluded. HTTP status errors
+    /// and network errors route through the IoError arm's has_bracket checks, NOT
+    /// through the ParseError arm. A ParseError embedding [E-DAT-001] or [E-DAT-002]
+    /// is semantically invalid and must fall back to E_DAT_003.
     #[test]
     fn test_parse_e_dat_code_returns_correct_constants() {
         use crate::error::{E_DAT_008, E_DAT_009, E_DAT_010, E_DAT_011, E_DAT_012, E_DAT_013};
-        // Known parse-error-relevant codes must match.
+        // E_DAT_001 (HttpError) must NOT be recognized — F-P15-MED-002.
+        // HTTP errors route through IoError arm, not ParseError arm.
         assert_eq!(
             parse_e_dat_code("[E-DAT-001] some http error"),
-            Some(E_DAT_001)
+            None,
+            "E_DAT_001 must not be recognized by parse_e_dat_code (F-P15-MED-002)"
         );
+        // E_DAT_002 (NetworkError) must NOT be recognized — F-P15-MED-002.
+        assert_eq!(
+            parse_e_dat_code("[E-DAT-002] network error: connection refused"),
+            None,
+            "E_DAT_002 must not be recognized by parse_e_dat_code (F-P15-MED-002)"
+        );
+        // Known parse-error-relevant codes must match.
         assert_eq!(parse_e_dat_code("[E-DAT-003] parse error"), Some(E_DAT_003));
         // E_DAT_004 (file-not-found/I/O) must NOT be recognized — F-P12-MED-002.
         assert_eq!(
@@ -3254,8 +3358,38 @@ mod tests {
     ///
     /// F-P11-LOW-001 previously required E_DAT_005 to be recognized; F-P12-MED-002
     /// supersedes that finding by restricting candidates to parse-error-relevant codes only.
+    ///
+    /// F-P15-MED-002: Also excludes E_DAT_001 (HttpError) and E_DAT_002 (NetworkError).
+    /// HTTP status errors and network transport errors route through the IoError arm's
+    /// has_bracket() routing, not through the ParseError arm. Including them in the
+    /// ParseError arm's candidate list would cause semantic misrouting for any (malformed)
+    /// ParseError message embedding an HTTP or network bracket code.
     #[test]
     fn test_parse_e_dat_code_excludes_non_parse_codes() {
+        // E_DAT_001 (HttpError) — must NOT be recognized (F-P15-MED-002).
+        // HTTP status errors route through IoError arm's has_bracket(E_DAT_001) path.
+        assert_eq!(
+            parse_e_dat_code("[E-DAT-001] HTTP 404 from 'http://example.com/data.json'"),
+            None,
+            "E_DAT_001 must not be recognized by parse_e_dat_code (F-P15-MED-002)"
+        );
+        assert_eq!(
+            parse_e_dat_code("[E-DAT-001] HTTP 500 from 'http://api.example.com/'"),
+            None,
+            "E_DAT_001 HTTP 5xx form must not be recognized (F-P15-MED-002)"
+        );
+        // E_DAT_002 (NetworkError) — must NOT be recognized (F-P15-MED-002).
+        // Network transport errors route through IoError arm's has_bracket(E_DAT_002) path.
+        assert_eq!(
+            parse_e_dat_code("[E-DAT-002] network error: connection refused"),
+            None,
+            "E_DAT_002 must not be recognized by parse_e_dat_code (F-P15-MED-002)"
+        );
+        assert_eq!(
+            parse_e_dat_code("[E-DAT-002] network error: dns lookup failed"),
+            None,
+            "E_DAT_002 DNS-error form must not be recognized (F-P15-MED-002)"
+        );
         // E_DAT_004 (file-not-found / I/O) — must NOT be recognized.
         assert_eq!(
             parse_e_dat_code("[E-DAT-004] file not found: '/data/source.json'"),
@@ -3288,12 +3422,12 @@ mod tests {
         assert_eq!(
             parse_e_dat_code("[E-DAT-003] parse error"),
             Some(E_DAT_003),
-            "E_DAT_003 must still be recognized after F-P12-MED-002 restriction"
+            "E_DAT_003 must still be recognized after F-P12-MED-002/F-P15-MED-002 restriction"
         );
         assert_eq!(
             parse_e_dat_code("[E-DAT-006] ssrf blocked"),
             Some(E_DAT_006),
-            "E_DAT_006 must still be recognized after F-P12-MED-002 restriction"
+            "E_DAT_006 must still be recognized after F-P12-MED-002/F-P15-MED-002 restriction"
         );
         // E_DAT_014 is now also retired (F-P13-HIGH-002) and must return None.
         assert_eq!(

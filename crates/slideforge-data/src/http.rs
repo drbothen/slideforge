@@ -358,8 +358,36 @@ impl DataSource for HttpDataSource {
 /// Used internally by [`HttpDataSource::load`] to map the rich internal error
 /// type to the plugin API's error type at the boundary.
 ///
+/// ## Separation of concerns: inter-layer protocol vs. user-facing Display
+///
+/// This function emits a **canonical machine-friendly format** in the `message`
+/// field of `DataSourceError::IoError`. That format is the inter-layer protocol
+/// consumed by the dispatcher's `map_source_error` function, which parses the
+/// bracket code and routing fields to reconstruct the rich `DataError` variant
+/// (including URL, `--offline` hint, source span, etc.) before presenting it to
+/// the user.
+///
+/// The canonical formats are:
+/// - `HttpError`    → `"[E-DAT-001] HTTP {status} from '{url}'"` — the format
+///   that `extract_http_status` was designed to parse. The dispatcher reads the
+///   status code from this message and reconstructs `DataError::HttpError { status, url, .. }`,
+///   whose rich Display includes the `--offline` hint.
+/// - `NetworkError` → `"[E-DAT-002] network error: {cause}"` — the format that
+///   the dispatcher's `strip_prefix("network error: ")` was designed to consume.
+///   The dispatcher strips the label and bracket code, then reconstructs
+///   `DataError::NetworkError { cause, url, .. }`, whose rich Display includes
+///   the `--offline` hint and URL.
+///
+/// **Do NOT change these formats without updating the dispatcher** — they are a
+/// single-point-of-failure contract. The corresponding dispatcher tests
+/// (`test_map_source_error_e_dat_001_routed_correctly`, `test_map_source_error_e_dat_002_routed_correctly`,
+/// `test_map_source_error_e_dat_001_display_contains_status_code`, etc.)
+/// construct their `inner_msg` in this canonical format for exactly that reason.
+///
 /// ## Mapping rationale
 ///
+/// - `HttpError` → `IoError` with canonical `"[E-DAT-001] HTTP {status} from '{url}'"`.
+/// - `NetworkError` → `IoError` with canonical `"[E-DAT-002] network error: {cause}"`.
 /// - `SsrfBlocked` → `ParseError`: A security policy rejection is NOT a transient
 ///   network condition. Mapping to `IoError` (the former default) conflated "blocked by
 ///   policy — do not retry" with "network blip — maybe retry". `ParseError` is not
@@ -369,10 +397,26 @@ impl DataSource for HttpDataSource {
 ///   and `HttpError` by matching on `ParseError` discriminant + inspecting the message
 ///   for "E-DAT-006".
 /// - `ParseError` / `UnsupportedFormat` → `ParseError`: direct semantic match.
-/// - Everything else → `IoError`: network transport and HTTP status errors.
+/// - Everything else → `IoError` with the variant's Display as the message.
 #[must_use]
 fn data_error_to_source_error(uri: &str, err: &DataError) -> DataSourceError {
     match err {
+        // Emit canonical inter-layer format so the dispatcher's extract_http_status
+        // can parse the status code from "[E-DAT-001] HTTP {status} from '{url}'".
+        // The dispatcher reconstructs the rich DataError::HttpError variant (with
+        // --offline hint, URL, span) before presenting it to the user.
+        DataError::HttpError { status, url, .. } => DataSourceError::IoError {
+            uri: uri.to_owned(),
+            message: format!("[{E_DAT_001}] HTTP {status} from '{url}'"),
+        },
+        // Emit canonical inter-layer format so the dispatcher's strip_prefix("network error: ")
+        // can extract the bare cause from "[E-DAT-002] network error: {cause}".
+        // The dispatcher reconstructs the rich DataError::NetworkError variant (with
+        // --offline hint, URL, span) before presenting it to the user.
+        DataError::NetworkError { cause, .. } => DataSourceError::IoError {
+            uri: uri.to_owned(),
+            message: format!("[{E_DAT_002}] network error: {cause}"),
+        },
         DataError::SsrfBlocked { .. } => {
             // Security policy rejection: map to ParseError (not IoError) so callers
             // can distinguish "blocked — do not retry" from transient network failures.
