@@ -1,8 +1,8 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.1"
-status: draft
+version: "1.2"
+status: active
 producer: product-owner
 timestamp: 2026-05-24T00:00:00
 phase: 1a
@@ -14,7 +14,7 @@ subsystem: SS-TBD
 capability: CAP-020
 lifecycle_status: active
 introduced: v1.0.0
-modified: []
+modified: ["v1.2 — pass-19 sibling sweep (F-P19-HIGH-001): inverted alt+decorative conflict semantics — alt wins (not decorative wins), W-A11-002 emitted (not W-A11-001). Precondition 2, Invariant 3, EC-002, test vector at line 76, and VP entry updated to match BC-3.04.001 v1.5.0 Invariant 11 (WCAG canonical: explicit alt supersedes implicit-decorative inference)."]
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -36,7 +36,7 @@ DEC-008 (all elements on a slide may be legitimately decorative).
 ## Preconditions
 
 1. A visual element is declared with `decorative: true` in the .sf source.
-2. The element does NOT have an `alt "..."` field (if both are present, decorative wins).
+2. The element does NOT have an `alt "..."` field (if both are present, alt wins — see Invariant 3).
 3. The build is in any mode (strict or warn-only).
 
 ## Postconditions
@@ -53,16 +53,19 @@ DEC-008 (all elements on a slide may be legitimately decorative).
 1. `decorative: true` is the ONLY mechanism to opt out of alt text. Silence (omitting
    the alt field) is NOT treated as decorative — it produces E-A11-001. (DI-001)
 2. The decorative marker propagates to ALL output formats from the same IR record.
-3. If both `alt "..."` and `decorative: true` are specified, the element is treated as
-   decorative and a lint warning W-A11-001 is emitted ("alt text ignored for decorative
-   element").
+3. If both `alt "..."` and `decorative: true` are specified, `alt` takes precedence —
+   the element is treated as having explicit alt text, alt is preserved in all output,
+   and `slideforge-validate` emits W-A11-002 ("element has both alt and decorative: true;
+   alt takes precedence, decorative flag ignored. Consider removing one."). This matches
+   BC-3.04.001 v1.5.0 Invariant 11 and WCAG AA: explicit accessibility annotations
+   supersede implicit-decorative inference.
 
 ## Edge Cases
 
 | ID | Description | Expected Behavior |
 |----|-------------|-------------------|
 | EC-001 | All visual elements on a slide are `decorative: true` (DEC-008) | No E-A11-001; all elements produce empty alt in all formats; slide is valid |
-| EC-002 | `decorative: true` with `alt "Some text"` also set | Decorative wins; W-A11-001 lint warning; alt text NOT embedded; element treated as artifact |
+| EC-002 | `decorative: true` with `alt "Some text"` also set | Alt wins; W-A11-002 lint warning; alt "Some text" IS embedded in output; element treated as having explicit alt (NOT as artifact) |
 | EC-003 | Decorative shape in a chart slide | Chart group shape treated as Artifact in PDF; `descr=""` in PPTX |
 | EC-004 | decorative: true in --warn-only mode | Behaves identically to strict mode — decorative is valid in both modes |
 | EC-005 | decorative: false (explicit false) | Treated as missing decorative marker; alt is still required |
@@ -73,7 +76,7 @@ DEC-008 (all elements on a slide may be legitimately decorative).
 |-------|----------------|----------|
 | `image: "bg.png"` with `decorative: true` | No E-A11-001; PPTX `descr=""`; HTML `alt="" role="presentation"` | happy-path (TV-7.3) |
 | Slide with 5 images all `decorative: true` | No errors; all 5 have empty alt in all formats | edge-case (DEC-008) |
-| `image: "photo.png"` with `alt "Team"` and `decorative: true` | W-A11-001 lint warning; element treated as decorative; alt "Team" not in output | edge-case |
+| `image: "photo.png"` with `alt "Team"` and `decorative: true` | W-A11-002 lint warning; element treated as having explicit alt; alt "Team" IS in output; NOT treated as artifact | edge-case |
 | `image: "bg.png"` with no alt and no decorative | E-A11-001 (covered by BC-5.01.001) | error |
 
 ## Verification Properties
@@ -82,7 +85,7 @@ DEC-008 (all elements on a slide may be legitimately decorative).
 |--------|----------|-------------|
 | VP-TBD | decorative elements have empty alt in PPTX, Artifact in PDF, alt="" in HTML | integration test: build fixture; parse all three output formats |
 | VP-TBD | No E-A11-001 for decorative elements | unit test: parse .sf with all-decorative slide; assert zero A11 errors |
-| VP-TBD | W-A11-001 emitted when both alt and decorative: true are set | unit test |
+| VP-TBD | W-A11-002 emitted when both alt and decorative: true are set; alt IS preserved in output | unit test |
 
 ## Traceability
 
