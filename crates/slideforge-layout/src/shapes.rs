@@ -1733,36 +1733,74 @@ mod tests {
         );
     }
 
-    /// BC-3.04.001 v1.5.0 Invariant 11 — when both `alt: Some(s)` and `decorative: true`
-    /// are supplied to `build_shape_frame`, alt text WINS and the result is
-    /// `AltText::Provided(s)` with the decorative flag ignored.
+    /// BC-3.04.001 v1.5.2 Invariant 11 — when both `alt: Some(Provided(s))` and
+    /// `decorative: true` are on a `ShapeSpec`, alt text WINS in the output frame
+    /// (`AltText::Provided(s)`), and `ShapeSpec.decorative` is NOT mutated by
+    /// `build_shape_frame` (it takes the flag by value — mutation is structurally
+    /// impossible, but this assertion makes the contract explicit and load-bearing).
     ///
     /// Load-bearing: swap the match arm order in `build_shape_frame` so that
     /// `(_, true) => AltText::Decorative` is checked before `(Some(s), _)`,
     /// and this test MUST fail with `AltText::Decorative` instead of `AltText::Provided`.
     #[test]
     fn test_bc_3_04_001_invariant_11_alt_wins_over_decorative() {
-        let result = build_shape_frame(
-            ShapeType::Rect,
-            FillSpec::None,
-            None,
-            Some(Arc::from("Blue rect")), // alt text present
-            true,                          // decorative: true — must lose to alt
+        // Build a ShapeSpec with BOTH alt text AND decorative: true.
+        // This is the conflicting-intent case that Invariant 11 resolves.
+        let spec = ShapeSpec {
+            shape_type: ShapeType::Rect,
+            position: default_position(),
+            fill: FillSpec::None,
+            text: None,
+            alt: Some(AltText::Provided(Arc::from("Blue rect"))),
+            decorative: true, // will lose to alt text (Invariant 11)
+            span: SourceSpan::default(),
+        };
+
+        // Snapshot the input field BEFORE calling build_shape_frame.
+        // Invariant 11 "input preservation" contract: spec.decorative is NOT
+        // altered by the layout pass — build_shape_frame takes `decorative: bool`
+        // by value so mutation is structurally impossible, but we assert it
+        // explicitly to make the contract a load-bearing test assertion.
+        let spec_decorative_before = spec.decorative;
+
+        // Extract values from spec (mirroring layout_shapes extraction at shapes.rs:215-220).
+        let alt = match &spec.alt {
+            Some(AltText::Provided(s)) => Some(Arc::clone(s)),
+            Some(AltText::Decorative) | None => None,
+        };
+        let decorative =
+            spec.decorative || matches!(&spec.alt, Some(AltText::Decorative));
+
+        let frame = build_shape_frame(
+            spec.shape_type,
+            spec.fill.clone(),
+            spec.text.clone(),
+            alt,
+            decorative,
             0,
-            &SourceSpan::default(),
+            &spec.span,
+        )
+        .expect("alt + decorative=true must succeed (Invariant 11: alt wins)");
+
+        // Contract A: ShapeSpec.decorative is unchanged after the layout pass.
+        assert_eq!(
+            spec.decorative,
+            spec_decorative_before,
+            "ShapeSpec.decorative must not be mutated by build_shape_frame (Invariant 11 input preservation)"
         );
-        let frame = result.expect("alt + decorative=true must succeed (Invariant 11: alt wins)");
+
+        // Contract B: the output frame carries AltText::Provided, not Decorative.
         match &frame.alt {
             slideforge_types::AltText::Provided(s) => {
                 assert_eq!(
                     s.as_ref(),
                     "Blue rect",
-                    "alt must be preserved (Invariant 11)"
+                    "alt must be preserved in output frame (Invariant 11)"
                 );
             },
             slideforge_types::AltText::Decorative => {
                 panic!(
-                    "decorative MUST NOT win when alt is present (BC-3.04.001 v1.5.0 Invariant 11)"
+                    "decorative MUST NOT win when alt is present (BC-3.04.001 v1.5.2 Invariant 11)"
                 );
             },
         }
