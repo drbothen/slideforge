@@ -4,7 +4,7 @@ mode: greenfield
 created: 2026-05-23
 current_phase: phase-3-tdd-implementation
 status: IN_PROGRESS
-last_updated: 2026-05-28
+last_updated: 2026-05-30
 phase_1_approved: 2026-05-25
 phase_2_approved: 2026-05-25
 phase_1_convergence: "17 passes, 69 findings, 3/3 clean (passes 15-16-17)"
@@ -28,9 +28,9 @@ wave_1_completed: 2026-05-27
 wave_2_gate: "PASS 2026-05-27 — 11 gate passes, 19 findings fixed, 3/3 clean (passes 9-10-11)"
 wave_2_completed: 2026-05-27
 wave_3_batch_1_completed: 2026-05-28
-develop_sha: "dd6054c1"
-develop_pr_count: 32
-workspace_tests: 1785
+develop_sha: "143f1b78"
+develop_pr_count: 33
+workspace_tests: 2038
 workspace_test_failures: 0
 ---
 
@@ -50,29 +50,29 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. It generates branded .p
 
 ### Where we are
 
-Phase 3, Wave 3 Batch 2 — **8 of 8 stories merged** (STORY-019, 027, 030, 032, 034, and now STORY-023). 2 not-started (STORY-020, STORY-028).
+Phase 3, Wave 3 Batch 2 — **STORY-020 MERGED (PR #33, 143f1b78).** 7/8 Batch 2 stories merged (STORY-019, 020, 023, 027, 030, 032, 034). **STORY-028 in active 3-CLEAN cascade (LOCAL adversary pass 30, potential 1/3 streak after pass 29 closed 1 finding at 498a4dbc).**
 
-**STORY-023 MERGED in PR #32 (dd6054c1).** Batch 2 still has 2 remaining stories (STORY-020 + STORY-028) not started.
+**STORY-020:** DataSource Excel + SQLite. 29-pass LOCAL adversary cascade, 3-CLEAN at passes 27-28-29 per BC-5.39.001. 23 ACs demo'd, 251 unit tests + 2 perf_smoke. PR-level review: 1 cycle CLEAN (zero CRIT/HIGH/MED). Security: clean, 0 findings.
 
 ### Top 3 next actions (in order)
 
-1. **Start STORY-020 + STORY-028 in parallel** — STORY-020: DataSource Excel + SQLite (dep STORY-019 merged); STORY-028: Layout shape: Block + Rich Inline (dep STORY-027 merged). Different crates (slideforge-data vs slideforge-layout) — parallel-safe.
-2. **Wave 3 Batch 3** (after Batch 2 fully merged) — STORY-021, STORY-024, STORY-025 per `.factory/stories/wave-schedule.md`.
-3. **Wave 3 Gate** after all Batch 2 + Batch 3 stories merged — full test suite on develop, adversarial wave-gate review, holdout evaluation.
+1. **Complete STORY-028 LOCAL 3-CLEAN cascade** — currently at pass 30 (potential 1/3 streak). After 3-CLEAN: per-AC demos + push + PR targeting develop.
+2. **STORY-028 demos + PR** after 3-CLEAN convergence — then Batch 2 is fully merged.
+3. **Wave 3 Batch 3** (STORY-021, STORY-024, STORY-025) + **Wave 3 Gate** after all Batch 2 + Batch 3 done.
 
 ### Task state (TaskList does not persist — captured here)
 
-Completed in 2026-05-28 session:
+Completed in 2026-05-28/30 session:
 - Fix PR #30 STORY-034 conflict + merge (4 CI iterations: rebase + Linux font_resolver + Trebuchet MS via freefont/usvg fallback)
 - STORY-030 Pass 10-17 adversary cycles + 4 fix bursts (2 paper-fix corrections via TD-VSDD-059) + PR #31 merge (1 CI iteration)
 - STORY-023 Pass 11-20 adversary cycles + 5 fix bursts (3 CRIT spec drift corrections + 1 non_exhaustive scope correction)
-- STORY-023 3/3 CONVERGED at Pass 18, 19, 20
-- STORY-023 per-AC demos for 15 ACs at d771099e
+- STORY-023 3/3 CONVERGED at Pass 18, 19, 20; per-AC demos for 15 ACs at d771099e
 - STORY-023 MERGED in PR #32 (dd6054c1) — F1 BrandPalette slot-mapping + F2 debug_assert fixed in 4f78aa1c; PR-level 2 cycles, cycle 2 CLEAN
+- STORY-020 29-pass LOCAL adversary cascade, 3-CLEAN at passes 27-28-29; 23 ACs demo'd; PR #33 MERGED (143f1b78); 251 tests + 2 perf_smoke
+- STORY-028 LOCAL adversary cascade in progress (pass 30, 1 finding closed at 498a4dbc in pass 29)
 
 Pending:
-- STORY-020 ship
-- STORY-028 ship
+- STORY-028 complete 3-CLEAN cascade + demos + PR
 - Wave 3 Gate (after all Wave 3 Batch 2 + Batch 3 done)
 
 ### Lessons captured this session
@@ -83,14 +83,18 @@ Pending:
 - **Spec-code drift accumulates.** STORY-023 Pass 13 found 3 CRIT spec-vs-code drift items (E-BRD-007 undocumented, E-BRD-005 retire/un-retire, E-BRD-002 PPTX/TOML→PPTX/DOCX). All required factory commits to error-taxonomy.md to fix.
 - **Sibling-site sweep (TD-VSDD-060) is high-yield.** Pass 14 STORY-030 + Pass 17 STORY-023 both found missing `#[instrument]` on entrypoints by comparing against sibling crates. Should be a standard adversary axis.
 - **STORY-023 PR-level F1 (synthesizer vs loader BrandPalette slot semantics mismatch) caught a code-vs-code drift the local adversary missed.** Two production code paths constructing the same domain type from the same template diverged on slot mapping — visual parity violation. Pattern: when two code paths produce the same domain object, the type itself should encode invariants or a shared constructor should be the only path. Future adversary axis: dual-path domain-object construction symmetry.
+- **AKM compounding-novelty confirmed over 29-pass cascades (STORY-020 + STORY-028).** Each fresh-context pass surfaced new defect classes — paper-fixes, sibling-sweep gaps, semantic anchoring drift, BC version propagation, doc-vs-code precision. STORY-020 converged at passes 27-28-29; STORY-028 still in cascade at pass 30. Real defects found across the full run. Process-grade canonical principle 'fix everything in scope' was honored throughout — no MVP deferrals; all findings closed or surfaced as follow-up stories (STORY-073, STORY-074).
+- **Sibling-sweep recurrence pattern (BC version bumps).** Every BC version bump triggered propagation work to story-spec body + code comments — three rounds of v1.x.x bumps required three sweeps. Going forward: when bumping a BC version, automatically dispatch implementer for code-comment sweep + story-writer for spec-body sweep + grep-all-.factory/-and-crates audit before declaring fix-burst complete.
+- **Implementer overclaim pattern (TD-VSDD-059 at agent-process level).** Pass-27 implementer for STORY-020 claimed 33 test renames in 4 files; adversary verified only 8 in 1 file. Cross-story scope creep when implementer extends scope without orchestrator authorization. Recovery: orchestrator MUST verify git log against implementer's claimed file count before declaring a fix-burst closure.
+- **Compounding-novelty value persists past pass 28.** Even after 28 clean passes, pass 29 on STORY-020 found a real internal contradiction (AC-008 citation contradicting 12-variant claim in the same docstring). Fresh-context audits never reach 'done' but each pass narrows the defect space.
 
 ---
 
 ## Current Status
 
-Phase 3 IN PROGRESS. Wave 1 COMPLETE (14/14 stories, gate PASSED). Wave 2 COMPLETE (7/7 stories, gate PASSED). Wave 3 Batch 1 COMPLETE (6 stories merged, PRs #21-#26). **Wave 3 Batch 2: 6/8 merged (STORY-019, 023, 027, 030, 032, 034). STORY-020 + STORY-028 not started.**
+Phase 3 IN PROGRESS. Wave 1 COMPLETE (14/14 stories, gate PASSED). Wave 2 COMPLETE (7/7 stories, gate PASSED). Wave 3 Batch 1 COMPLETE (6 stories merged, PRs #21-#26). **Wave 3 Batch 2: 7/8 merged (STORY-019, 020, 023, 027, 030, 032, 034). STORY-028 LOCAL adversary cascade in progress (pass 30).**
 
-develop branch: `dd6054c1` (32 merged PRs, 1785 tests, 0 failures). 0 active worktrees. 0 open PRs.
+develop branch: `143f1b78` (33 merged PRs, 2038 tests, 0 failures). 0 active worktrees. 0 open PRs.
 
 ## Wave 3 Batch 2 Story Status
 
@@ -107,13 +111,13 @@ develop branch: `dd6054c1` (32 merged PRs, 1785 tests, 0 failures). 0 active wor
 
 ## Resume Instructions for Each In-Flight Story
 
-No in-flight stories. All Batch 2 started stories have merged.
+**STORY-028** (Layout: shape: Block + Rich Inline) — LOCAL adversary cascade pass 30 in progress. 1 finding closed at 498a4dbc in pass 29; potential 1/3 streak. Worktree: `.worktrees/STORY-028`. Continue adversary cascade to 3-CLEAN (BC-5.39.001), then demos + PR.
 
 ## What to Do Next
 
-- **Start STORY-020** (DataSource: Excel + SQLite, depends on STORY-019 — merged) — crate: slideforge-data
-- **Start STORY-028** (Layout: shape: Block + Rich Inline, depends on STORY-027 — merged) — crate: slideforge-layout
-- After Batch 2 fully merged: Batch 3 (STORY-021, 024, 025)
+- **Complete STORY-028 3-CLEAN cascade** — pass 30 in progress; need 3 consecutive zero-finding passes
+- After Batch 2 fully merged: **Batch 3** (STORY-021, 024, 025)
+- **Wave 3 Gate** after all Batch 2 + Batch 3 done
 
 **Key file references:**
 - Wave schedule + batching: `.factory/stories/wave-schedule.md`
@@ -153,7 +157,7 @@ git fetch origin develop && git pull origin develop
 | Planning (25 DSL decisions) | DONE 2026-05-24 | q1–q25 decision docs + 14 research threads + 7/7 spikes resolved |
 | Phase 1: Spec Crystallization | DONE — APPROVED 2026-05-25 | PRD (109 BCs, 15 HS, 4 supplements) + architecture (14 ADRs, 15 VPs, 20 crates) + UX spec (10 screens, 5 flows) + L2 domain spec (12 files). 17 passes, 69 findings, 3/3 clean. |
 | Phase 2: Story Decomposition | DONE — APPROVED 2026-05-25 | 71 stories, 21 epics, 6 waves, 437 pts. 22 passes, 96+ findings, 3/3 clean. |
-| Phase 3: TDD Implementation | IN PROGRESS — Wave 1: COMPLETE + GATE PASSED. Wave 2: COMPLETE + GATE PASSED. Wave 3: Batch 1 COMPLETE (6 stories, PRs #21-#26, 494 new tests). Batch 2: 6/8 merged (STORY-019 #27, STORY-023 #32, STORY-027 #29, STORY-030 #31, STORY-032 #28, STORY-034 #30). 2 not started (STORY-020, STORY-028). | Per-story delivery |
+| Phase 3: TDD Implementation | IN PROGRESS — Wave 1: COMPLETE + GATE PASSED. Wave 2: COMPLETE + GATE PASSED. Wave 3: Batch 1 COMPLETE (6 stories, PRs #21-#26, 494 new tests). Batch 2: 7/8 merged (STORY-019 #27, STORY-020 #33, STORY-023 #32, STORY-027 #29, STORY-030 #31, STORY-032 #28, STORY-034 #30). STORY-028 LOCAL cascade in progress (pass 30). | Per-story delivery |
 | Phase 4: Holdout Evaluation | NOT STARTED | Per-wave holdout gates |
 | Phase 5: Adversarial Refinement | NOT STARTED | Post-implementation cascade |
 | Phase 6: Formal Hardening | NOT STARTED | Kani + fuzz + mutants + semgrep |
@@ -192,7 +196,7 @@ Wave 2 gate: 11 passes, 19 findings fixed, 3/3 clean (passes 9-10-11). Gate fix 
 
 New crates added by Batch 1 (total workspace now 13 crates): slideforge-data, slideforge-brand, slideforge-layout, slideforge-math, slideforge-charts, slideforge-diagrams.
 
-## Wave 3 Batch 2 Story Status (IN PROGRESS — STORY-019, 023, 027, 030, 032, 034 MERGED; 2 not started)
+## Wave 3 Batch 2 Story Status (IN PROGRESS — STORY-019, 020, 023, 027, 030, 032, 034 MERGED; STORY-028 cascade in progress)
 
 | Story | Title | Crate | Tests | Adversary | PR | Commit |
 |-------|-------|-------|-------|-----------|-----|--------|
@@ -202,6 +206,8 @@ New crates added by Batch 1 (total workspace now 13 crates): slideforge-data, sl
 | STORY-034 | SVG Normalization via usvg | slideforge-diagrams | +71 | 9 passes, 3/3 clean (pre-merge adversary); 4 CI iterations post-3/3: rebase + clippy + cold_budget budget + Linux font fallback | #30 | 0cb4b982 |
 | STORY-030 | Math: MathML + PDF Paths | slideforge-math | +170 +2 traced_test (~172 net) | 9 iterations (Pass 9-17): font-engine refactor + Linux font_resolver insights from STORY-034 + 2 paper-fix corrections (TD-VSDD-059); 3/3 CLEAN Pass 15/16/17 | #31 | 19e79696 |
 | STORY-023 | Brand Synthesis: brand.toml → 31 Layouts | slideforge-brand | +113 net | 20 passes, 3/3 CLEAN (P18-20); 5 fix bursts; 3 CRIT spec drifts (E-BRD-002/005/007); PR-level 2 cycles, cycle 2 CLEAN; F1 BrandPalette slot mismatch + F2 debug_assert fixed in 4f78aa1c | #32 | dd6054c1 |
+| STORY-020 | DataSource: Excel + SQLite | slideforge-data | 251 + 2 perf_smoke | 29 passes, 3/3 CLEAN (P27-28-29); AKM compounding-novelty; implementer-overclaim correction (P27); sibling-sweep recurrence (BC version bumps); 23 ACs demo'd. PR-level 1 cycle CLEAN; security clean. | #33 | 143f1b78 |
+| STORY-028 | Layout: shape: Block + Rich Inline | slideforge-layout | — | 29+ passes; pass 30 in progress (1 finding closed at 498a4dbc in pass 29; potential 1/3 streak) | — | — |
 
 ## Decisions Log (milestones)
 
@@ -241,21 +247,22 @@ New crates added by Batch 1 (total workspace now 13 crates): slideforge-data, sl
 - 2026-05-28 — STORY-023 CONVERGED 3/3 CLEAN (Pass 18, 19, 20) + demos done (15 ACs at d771099e). 20-pass adversary trail, 5 fix bursts, 1 scope-discipline correction (non_exhaustive over-application caught Pass 14), 3 spec-code drift corrections (E-BRD-002 PPTX/TOML→PPTX/DOCX, E-BRD-005 un-retired with new semantic, E-BRD-007 documented in error-taxonomy.md).
 - 2026-05-28 — Session handoff: STATE.md is the resume document. Top 3 next actions captured in Session Resume Brief. STORY-023 demo evidence pushed at d771099e (15 ACs covered in docs/demo-evidence/STORY-023/).
 - 2026-05-29 — STORY-023 MERGED (PR #32, dd6054c1) — Brand Synthesis: brand.toml → 31 Layouts. Convergence: 20 LOCAL adversary passes, 3/3 CLEAN (P18-20). PR-level review: 2 cycles, cycle 1 (2 findings: F1 HIGH BrandPalette slot mismatch, F2 SUGGEST debug_assert gap), cycle 2 CLEAN (PR-merge). F1/F2 fixed in 4f78aa1c: shared color_by_name slot-name mapping + load-bearing regression test (test_f1_regression_brand_palette_primary_maps_to_dk2_not_dk1) + debug_assert in inference.rs. Wave 3 Batch 2 now 6/8 merged; STORY-020 + STORY-028 remaining.
+- 2026-05-30 — STORY-020 MERGED (PR #33, 143f1b78) — DataSource: Excel + SQLite. Convergence: 29 LOCAL adversary passes, 3/3 CLEAN (P27-28-29). AKM compounding-novelty: paper-fixes, sibling-sweep gaps, semantic anchoring drift, BC version propagation, doc-vs-code precision all found across the run. Implementer-overclaim correction at P27 (claimed 33 renames in 4 files; adversary verified 8 in 1 file). 23 ACs demo'd, 251 unit tests + 2 perf_smoke. PR-level review: 1 cycle CLEAN; security: 0 findings. Wave 3 Batch 2 now 7/8 merged; STORY-028 remaining.
 
 ## Session Resume Checkpoint
 
 | Field | Value |
 |-------|-------|
-| **Date** | 2026-05-28 |
-| **Position** | Phase 3, Wave 3 — Batch 2: 6/8 merged. STORY-023 MERGED (PR #32, dd6054c1). STORY-020 + STORY-028 not started. |
-| **develop SHA** | dd6054c1 |
-| **Workspace tests** | 1785 passing, 0 failures |
+| **Date** | 2026-05-30 |
+| **Position** | Phase 3, Wave 3 — Batch 2: 7/8 merged. STORY-020 MERGED (PR #33, 143f1b78). STORY-028 LOCAL cascade pass 30 in progress (1/3 streak potential). |
+| **develop SHA** | 143f1b78 |
+| **Workspace tests** | 2038 passing, 0 failures |
 | **Workspace crates** | 13 (7 from Wave 1 + 6 new from Batch 1: data, brand, layout, math, charts, diagrams) |
-| **Active worktrees** | none |
+| **Active worktrees** | STORY-028 (.worktrees/STORY-028, cascade pass 30) |
 | **Open PRs** | 0 |
-| **In-flight stories** | none |
-| **Not-started stories** | STORY-020 (Excel+SQLite, dep STORY-019 merged), STORY-028 (shape:, dep STORY-027 merged) |
-| **Highest priority next actions** | 1. Start STORY-020 + STORY-028 in parallel (different crates: slideforge-data vs slideforge-layout, parallel-safe). 2. After Batch 2 done: Batch 3 (STORY-021, 024, 025). 3. Wave 3 Gate after all Batch 2 + Batch 3 merged. |
+| **In-flight stories** | STORY-028 (LOCAL adversary pass 30 — 1 finding closed at 498a4dbc in pass 29; potential 1/3 streak) |
+| **Not-started stories** | none in Batch 2 |
+| **Highest priority next actions** | 1. Complete STORY-028 3-CLEAN cascade (pass 30 in progress). 2. STORY-028 demos + PR after convergence. 3. Batch 3 (STORY-021, 024, 025) + Wave 3 Gate. |
 
 ## Quality Bar (Non-Negotiable)
 
