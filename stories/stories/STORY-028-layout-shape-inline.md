@@ -9,7 +9,7 @@ points: 5
 priority: P1
 tdd_mode: strict
 status: draft
-spec_version: "1.7"
+spec_version: "1.8"
 behavioral_contracts: [BC-3.04.001, BC-3.05.001]
 verification_properties: []
 nfr_refs: [NFR-021, NFR-022, NFR-023, NFR-024, NFR-025]
@@ -61,7 +61,7 @@ Extend the layout engine with two capabilities:
 
 | BC | Title | Version | Covered ACs |
 |----|-------|---------|-------------|
-| BC-3.04.001 | shape: block declares custom shape with type/position/fill/text/alt | v1.5.0 | AC-001, AC-002, AC-003, AC-004, AC-BC-A1, AC-BC-A2, AC-BC-A3, AC-BC-A4, AC-BC-A5, AC-BC-A6, AC-BC-A10, AC-INT-1 |
+| BC-3.04.001 | shape: block declares custom shape with type/position/fill/text/alt | v1.5.2 | AC-001, AC-002, AC-003, AC-004, AC-BC-A1, AC-BC-A2, AC-BC-A3, AC-BC-A4, AC-BC-A5, AC-BC-A6, AC-BC-A10, AC-INT-1 |
 | BC-3.05.001 | All 12 inline format types render to correct output per format | v1.3.3 | AC-005, AC-006, AC-007, AC-BC-A7, AC-BC-A8 |
 | LayoutError | Canonical field name source_slide_index across all variants | v1.0 | AC-BC-A9 |
 
@@ -243,10 +243,12 @@ Canonical test vector: slide with 2 shapes both missing alt → `Vec<LayoutError
 with 2 `MissingAlt` entries. (BC-3.04.001 v1.5.0, postcondition 6 and EC-010)
 
 ### AC-BC-A10: alt wins over decorative: true when both supplied (Invariant 11)
-(traces to BC-3.04.001 v1.5.0 Invariant 11 and EC-018)
+(traces to BC-3.04.001 v1.5.2 Invariant 11 and EC-018)
 
 When a `shape:` block declares both `alt "..."` and `decorative: true`, the layout
-stage MUST produce `ShapeSpec { alt: Some(AltText::Provided(s)), decorative: false, ... }`.
+stage MUST produce a `ShapeFrame` with `alt: AltText::Provided(s)`. The `ShapeSpec.decorative`
+input field is preserved (not mutated); the alt-wins effect is achieved via the typed
+`ShapeFrame.alt` enum at layout resolution time.
 The alt text IS preserved in all output formats (PPTX `<p:cNvPr descr="Blue rect">`).
 `slideforge-validate` emits W-A11-002 lint warning. This is NOT treated as a decorative
 artifact (decorative loses, alt wins). Exit 0.
@@ -257,15 +259,14 @@ Load-bearing test: `test_bc_3_04_001_invariant_11_alt_wins_over_decorative` in
 // Canonical input: shape with both alt and decorative: true
 let spec = ShapeSpec {
     alt: Some(AltText::Provided(Arc::from("Blue rect"))),
-    decorative: true,   // both supplied
+    decorative: true,   // both supplied — preserved in IR, not mutated
     fill: FillSpec::SolidColor(Rgb { r: 0, g: 55, b: 102 }),
     // ... other fields
 };
-// After layout resolution: alt wins
-assert_eq!(spec_resolved.decorative, false);
-assert_eq!(spec_resolved.alt, Some(AltText::Provided(Arc::from("Blue rect"))));
+// After layout resolution: alt wins via typed enum
+assert_eq!(frame.alt, AltText::Provided(Arc::from("Blue rect")));
 ```
-(BC-3.04.001 v1.5.0, Invariant 11, EC-018; F-P19-HIGH-001 sibling sweep)
+(BC-3.04.001 v1.5.2, Invariant 11, EC-018; F-P19-HIGH-001 sibling sweep; F-P20-LOW-003)
 
 ### AC-BC-A7: InlineDepthExceeded at depth 65
 (traces to BC-3.05.001 invariant 4 — nesting depth bound)
@@ -460,3 +461,4 @@ Build MUST fail if those crates appear in `slideforge-layout/Cargo.toml` depende
 | 1.5 | 2026-05-29 | product-owner | Pass-8 sweep changes (commit 3e892d07): BC-3.04.001 version references updated to v1.4.2; task list FillSpec description corrected to reflect Gradient is deferred (not present); E-PAR-013/E-PAR-014 references updated to E-PAR-015/E-PAR-016 per pass-9 F-P9-HIGH-002 namespace collision resolution |
 | 1.6 | 2026-05-29 | product-owner | Pass-10 sweep (F-P10-HIGH-002 + F-P10-MED-001): Frame.bounding_box → Frame.bbox in AC-002 example (line 95) and AC-BC-A1 prose (frames[0].bbox); all BC-3.04.001 version refs updated v1.4/v1.4.2 → v1.4.3; all BC-3.05.001 version refs updated v1.3.2 → v1.3.3; token budget BC ref table updated to match |
 | 1.7 | 2026-05-29 | product-owner | Pass-19 sibling sweep (F-P19-HIGH-001 + F-P19-MED-001): all BC-3.04.001 version refs updated v1.4.3 → v1.5.0 (8 locations); BC table covered-ACs updated to include AC-BC-A10; added AC-BC-A10 covering EC-018 alt-wins behavior (Invariant 11) with load-bearing test name test_bc_3_04_001_invariant_11_alt_wins_over_decorative; token budget BC ref table updated to v1.5.0 |
+| 1.8 | 2026-05-29 | product-owner | F-P20-LOW-003 precision fix: AC-BC-A10 traces-to ref updated v1.5.0 → v1.5.2; prose updated to state ShapeSpec.decorative is NOT mutated — alt-wins effect via typed ShapeFrame.alt enum; load-bearing test example updated from assert_eq!(spec_resolved.decorative, false) → assert_eq!(frame.alt, AltText::Provided(...)); BC table version ref updated v1.5.0 → v1.5.2 |
