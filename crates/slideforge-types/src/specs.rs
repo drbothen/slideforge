@@ -168,7 +168,7 @@ pub struct ChartSpec {
     ///
     /// If both `alt` is `Some(AltText::Provided(_))` AND `decorative` is `true`,
     /// the validator emits `W-A11-002` (alt takes precedence over decorative, per
-    /// BC-3.04.001 v1.5.0 Invariant 11 / F-P18-HIGH-001).
+    /// BC-3.04.001 v1.5.2 Invariant 11 / F-P18-HIGH-001).
     pub decorative: bool,
 
     /// Source location.

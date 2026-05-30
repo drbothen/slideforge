@@ -9,7 +9,7 @@
 //! | Code | Severity | Meaning |
 //! |------|----------|---------|
 //! | `E-A11-001` | Error | Visual element is missing alt text and is not marked decorative |
-//! | `W-A11-002` | Warning | Visual element has both alt text AND `decorative: true`; alt takes precedence, decorative flag ignored (BC-3.04.001 v1.5.0 Invariant 11) |
+//! | `W-A11-002` | Warning | Visual element has both alt text AND `decorative: true`; alt takes precedence, decorative flag ignored (BC-3.04.001 v1.5.2 Invariant 11) |
 
 use slideforge_plugin_api::{Diagnostic, DiagnosticSeverity, Validator, ValidatorOptions};
 use slideforge_types::{Deck, SourceSpan, specs::AltText};
@@ -27,7 +27,7 @@ pub(crate) const E_A11_001: &str = "E-A11-001";
 
 /// Warning code emitted when a visual element has both alt text AND `decorative: true`.
 ///
-/// Per BC-3.04.001 v1.5.0 Invariant 11 (F-P18-HIGH-001): **alt wins over decorative**.
+/// Per BC-3.04.001 v1.5.2 Invariant 11 (F-P18-HIGH-001): **alt wins over decorative**.
 /// The element is treated as having valid alt text; `decorative: true` is ignored.
 /// Authors should remove `decorative: true` or remove the `alt` field to resolve
 /// the ambiguity.
@@ -130,7 +130,7 @@ impl Validator for AltTextValidator {
 
 /// Check a visual element with `decorative` support (Image, Chart, Diagram, Shape).
 ///
-/// Logic (per AC-009, AC-006, AC-001 through AC-005, and BC-3.04.001 v1.5.0
+/// Logic (per AC-009, AC-006, AC-001 through AC-005, and BC-3.04.001 v1.5.2
 /// Invariant 11 / F-P18-HIGH-001):
 ///
 /// 1. If `decorative: true` AND `alt` is `Some(AltText::Provided(s))` where `s` is
@@ -142,7 +142,7 @@ impl Validator for AltTextValidator {
 /// 3. If `alt` is `None` or blank `Provided` (and not decorative) → emit E-A11-001.
 /// 4. If `alt` is valid `Provided` or `Decorative` enum variant → valid, no diagnostic.
 ///
-/// ## Alt-wins precedence (BC-3.04.001 v1.5.0 Invariant 11)
+/// ## Alt-wins precedence (BC-3.04.001 v1.5.2 Invariant 11)
 ///
 /// When both a non-blank `alt` text AND `decorative: true` are present, **alt takes
 /// precedence**. The layout engine (`slideforge-layout::build_shape_frame`) applies the
@@ -169,7 +169,7 @@ fn check_visual_element(
     span: &SourceSpan,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    // BC-3.04.001 v1.5.0 Invariant 11 (F-P18-HIGH-001): when both non-blank alt AND
+    // BC-3.04.001 v1.5.2 Invariant 11 (F-P18-HIGH-001): when both non-blank alt AND
     // decorative: true are present, alt wins. Emit W-A11-002 and treat the element as
     // having valid alt text (fall through to the non-decorative path below).
     // Blank alt with decorative: true is silently accepted (blank alt is not meaningful).
@@ -227,7 +227,7 @@ fn make_error(element_type: &str, identifier: &str, span: &SourceSpan) -> Diagno
 
 /// Construct a `W-A11-002` warning diagnostic for conflicting non-blank alt + decorative.
 ///
-/// Per BC-3.04.001 v1.5.0 Invariant 11 (F-P18-HIGH-001): alt takes precedence over
+/// Per BC-3.04.001 v1.5.2 Invariant 11 (F-P18-HIGH-001): alt takes precedence over
 /// `decorative: true`. The element is treated as having valid alt text; the decorative
 /// flag is ignored.
 fn make_warning(element_type: &str, identifier: &str, span: &SourceSpan) -> Diagnostic {
@@ -500,7 +500,7 @@ mod tests {
     #[test]
     fn test_bc_5_03_015_alt_and_decorative_together() {
         // alt: Some(Provided("text")), decorative: true → 1 W-A11-002 warning
-        // Per BC-3.04.001 v1.5.0 Invariant 11: alt wins over decorative (AC-009 / F-P18-HIGH-001).
+        // Per BC-3.04.001 v1.5.2 Invariant 11: alt wins over decorative (AC-009 / F-P18-HIGH-001).
         let slide = make_slide(vec![make_image_block(
             Some(AltText::Provided(Arc::from("this alt takes precedence"))),
             true,
@@ -516,7 +516,7 @@ mod tests {
         assert_eq!(diags[0].severity, DiagnosticSeverity::Warning);
     }
 
-    // ── Alt wins over decorative (BC-3.04.001 v1.5.0 Invariant 11 / F-P18-HIGH-001) ───
+    // ── Alt wins over decorative (BC-3.04.001 v1.5.2 Invariant 11 / F-P18-HIGH-001) ───
 
     #[test]
     fn test_w_a11_002_alt_wins_over_decorative() {
@@ -526,7 +526,7 @@ mod tests {
         // - Exactly 1 W-A11-002 warning is emitted
         // - No E-A11-001 error is emitted (alt is valid)
         //
-        // Per BC-3.04.001 v1.5.0 Invariant 11 (F-P18-HIGH-001). Cross-crate
+        // Per BC-3.04.001 v1.5.2 Invariant 11 (F-P18-HIGH-001). Cross-crate
         // semantic consistency: slideforge-layout::build_shape_frame applies the
         // same "alt wins" rule, producing AltText::Provided(s) when both are set.
         let alt_text = Arc::from("A meaningful description of the shape");

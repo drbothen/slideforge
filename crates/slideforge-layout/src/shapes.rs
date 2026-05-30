@@ -382,7 +382,7 @@ pub fn build_fill_spec(fill_keyword: Option<&str>) -> FillSpec {
 /// text would be an accessibility regression. This "alt wins" rule is the correct
 /// default per WCAG AA. No warning is emitted *by layout*; the `slideforge-validate`
 /// `alt-text` validator emits W-A11-002 to surface the ambiguity (see BC-3.04.001
-/// v1.5.0 Invariant 11 and BC-5.01.002 v1.2).
+/// v1.5.2 Invariant 11 and BC-5.01.002 v1.5.2).
 ///
 /// # Errors
 ///

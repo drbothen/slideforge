@@ -36,9 +36,9 @@
 //!   [`LayoutWarning::OffCanvas`]. Shape frames are still required to satisfy
 //!   `width > 0` and `height > 0`; violations return
 //!   [`crate::error::LayoutError::InvalidBoundingBox`].
-//!   Per BC-3.04.001 v1.5.0 Invariant 11: when both `alt` text and
-//!   `decorative: true` are set on a shape, `alt` takes precedence and the
-//!   layout result carries `AltText::Provided`.
+//!   Per BC-3.04.001 v1.5.2 Invariant 11 (current version per BC v1.5.2, latest):
+//!   when both `alt` text and `decorative: true` are set on a shape, `alt` takes
+//!   precedence and the layout result carries `AltText::Provided`.
 //! - **Pure function (AC-008):** No I/O, no side effects, no panics.
 //!
 //! ## Forbidden dependencies
