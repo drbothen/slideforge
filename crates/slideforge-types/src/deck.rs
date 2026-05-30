@@ -194,7 +194,7 @@ mod tests {
     // ──────────────────────────────────────────────────────────────────────────
 
     #[test]
-    fn test_bc_1_01_010_deck_metadata_fields() {
+    fn test_bc_1_01_001_deck_metadata_fields() {
         let meta = make_metadata();
         assert_eq!(meta.title.as_deref(), Some("Test Deck"));
         assert_eq!(meta.slideforge_version.as_ref(), "0.1.0");
@@ -203,7 +203,7 @@ mod tests {
     }
 
     #[test]
-    fn test_bc_1_01_010_deck_metadata_with_author() {
+    fn test_bc_1_01_001_deck_metadata_with_author() {
         let meta = DeckMetadata {
             title: Some(Arc::from("My Deck")),
             slideforge_version: Arc::from("0.1.0"),
@@ -215,7 +215,7 @@ mod tests {
     }
 
     #[test]
-    fn test_bc_1_01_010_deck_metadata_none_title_lang() {
+    fn test_bc_1_01_001_deck_metadata_none_title_lang() {
         // AC-010: title and lang are Option — None is valid
         let meta = DeckMetadata {
             title: None,
@@ -229,7 +229,7 @@ mod tests {
     }
 
     #[test]
-    fn test_bc_1_01_010_deck_metadata_hash() {
+    fn test_bc_1_01_001_deck_metadata_hash() {
         use std::collections::HashSet;
         let meta = make_metadata();
         let mut set: HashSet<DeckMetadata> = HashSet::new();
@@ -238,14 +238,14 @@ mod tests {
     }
 
     #[test]
-    fn test_bc_1_01_010_deck_metadata_clone() {
+    fn test_bc_1_01_001_deck_metadata_clone() {
         let meta = make_metadata();
         let meta2 = meta.clone();
         assert_eq!(meta, meta2);
     }
 
     #[test]
-    fn test_bc_1_01_010_deck_metadata_debug() {
+    fn test_bc_1_01_001_deck_metadata_debug() {
         let meta = make_metadata();
         let s = format!("{meta:?}");
         assert!(s.contains("DeckMetadata"));

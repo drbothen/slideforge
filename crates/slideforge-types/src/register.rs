@@ -103,20 +103,20 @@ mod tests {
     // ──────────────────────────────────────────────────────────────────────────
 
     #[test]
-    fn test_bc_1_01_007_register_ordering() {
+    fn test_bc_1_01_001_register_ordering() {
         assert!(Register::Notes < Register::Report);
         assert!(Register::Report < Register::Detail);
         assert!(Register::Notes < Register::Detail);
     }
 
     #[test]
-    fn test_bc_1_01_007_register_equality() {
+    fn test_bc_1_01_001_register_equality() {
         assert_eq!(Register::Notes, Register::Notes);
         assert_ne!(Register::Notes, Register::Report);
     }
 
     #[test]
-    fn test_bc_1_01_007_register_copy() {
+    fn test_bc_1_01_001_register_copy() {
         let r = Register::Report;
         let r2 = r; // Copy — no move
         let r3 = r; // Still usable (Copy)
@@ -125,19 +125,19 @@ mod tests {
     }
 
     #[test]
-    fn test_bc_1_01_007_register_clone() {
+    fn test_bc_1_01_001_register_clone() {
         let r = Register::Detail;
         assert_eq!(r.clone(), Register::Detail);
     }
 
     #[test]
-    fn test_bc_1_01_007_register_debug() {
+    fn test_bc_1_01_001_register_debug() {
         let s = format!("{:?}", Register::Notes);
         assert!(s.contains("Notes"));
     }
 
     #[test]
-    fn test_bc_1_01_007_register_hash() {
+    fn test_bc_1_01_001_register_hash() {
         use std::collections::HashMap;
         let mut map: HashMap<Register, &str> = HashMap::new();
         map.insert(Register::Notes, "notes");
@@ -148,14 +148,14 @@ mod tests {
     }
 
     #[test]
-    fn test_bc_1_01_007_register_keywords() {
+    fn test_bc_1_01_001_register_keywords() {
         assert_eq!(Register::Notes.as_keyword(), "notes");
         assert_eq!(Register::Report.as_keyword(), "report");
         assert_eq!(Register::Detail.as_keyword(), "detail");
     }
 
     #[test]
-    fn test_bc_1_01_007_register_predicates() {
+    fn test_bc_1_01_001_register_predicates() {
         assert!(Register::Notes.is_notes());
         assert!(!Register::Notes.is_report());
         assert!(Register::Report.is_report());
@@ -163,19 +163,19 @@ mod tests {
     }
 
     #[test]
-    fn test_bc_1_01_007_register_default() {
+    fn test_bc_1_01_001_register_default() {
         assert_eq!(Register::default(), Register::Notes);
     }
 
     #[test]
-    fn test_bc_1_01_007_register_display() {
+    fn test_bc_1_01_001_register_display() {
         assert_eq!(Register::Notes.to_string(), "notes");
         assert_eq!(Register::Report.to_string(), "report");
         assert_eq!(Register::Detail.to_string(), "detail");
     }
 
     #[test]
-    fn test_bc_1_01_007_register_sorted() {
+    fn test_bc_1_01_001_register_sorted() {
         let mut registers = vec![Register::Detail, Register::Notes, Register::Report];
         registers.sort();
         assert_eq!(
