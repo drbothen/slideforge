@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.2"
+version: "1.3"
 status: active
 producer: product-owner
 timestamp: 2026-05-24T00:00:00
@@ -14,7 +14,7 @@ subsystem: SS-TBD
 capability: CAP-020
 lifecycle_status: active
 introduced: v1.0.0
-modified: ["v1.2 — pass-19 sibling sweep (F-P19-HIGH-001): inverted alt+decorative conflict semantics — alt wins (not decorative wins), W-A11-002 emitted (not W-A11-001). Precondition 2, Invariant 3, EC-002, test vector at line 76, and VP entry updated to match BC-3.04.001 v1.5.0 Invariant 11 (WCAG canonical: explicit alt supersedes implicit-decorative inference)."]
+modified: ["v1.2 — pass-19 sibling sweep (F-P19-HIGH-001): inverted alt+decorative conflict semantics — alt wins (not decorative wins), W-A11-002 emitted (not W-A11-001). Precondition 2, Invariant 3, EC-002, test vector at line 76, and VP entry updated to match BC-3.04.001 v1.5.0 Invariant 11 (WCAG canonical: explicit alt supersedes implicit-decorative inference).", "v1.3 — pass-22 sweep (F-P22-MED-001): BC-3.04.001 version ref in modified[] and Invariant 3 updated v1.5.0 → v1.5.2 to align with BC-3.04.001 current version."]
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -57,7 +57,7 @@ DEC-008 (all elements on a slide may be legitimately decorative).
    the element is treated as having explicit alt text, alt is preserved in all output,
    and `slideforge-validate` emits W-A11-002 ("element has both alt and decorative: true;
    alt takes precedence, decorative flag ignored. Consider removing one."). This matches
-   BC-3.04.001 v1.5.0 Invariant 11 and WCAG AA: explicit accessibility annotations
+   BC-3.04.001 v1.5.2 Invariant 11 and WCAG AA: explicit accessibility annotations
    supersede implicit-decorative inference.
 
 ## Edge Cases

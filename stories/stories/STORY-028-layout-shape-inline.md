@@ -9,7 +9,7 @@ points: 5
 priority: P1
 tdd_mode: strict
 status: draft
-spec_version: "1.8"
+spec_version: "1.9"
 behavioral_contracts: [BC-3.04.001, BC-3.05.001]
 verification_properties: []
 nfr_refs: [NFR-021, NFR-022, NFR-023, NFR-024, NFR-025]
@@ -188,7 +188,7 @@ BoundingBox { x: Emu(457_200), y: Emu(914_400), width: Emu(1_828_800), height: E
 Computation: `Inches(500) * 914_400 / 1_000 = 457_200`. All arithmetic is `i64`
 integer division; no `f64`. Verified via an integration test in
 `crates/slideforge-layout/tests/` that calls `layout::run()` and asserts
-`frames[0].bbox` equals the expected EMU values. (BC-3.04.001 v1.5.0,
+`frames[0].bbox` equals the expected EMU values. (BC-3.04.001 v1.5.2,
 postcondition 2 canonical test vector)
 
 ### AC-BC-A2: Hex color case-insensitive; short/alpha forms rejected
@@ -198,7 +198,7 @@ Hex fill colors are case-insensitive. Both `#FF6F00` (uppercase) and `#ff6f00`
 (lowercase) parse to the same `Rgb { r: 255, g: 111, b: 0 }`. Short-form `#RGB`
 (3 digits) is rejected with E-PAR-015. Alpha form `#RRGGBBAA` (8 digits) is
 rejected with E-PAR-015. Error message includes the file:line:col span. (BC-3.04.001
-v1.5.0, invariant 5 and EC-006/EC-007/EC-008/EC-009)
+v1.5.2, invariant 5 and EC-006/EC-007/EC-008/EC-009)
 
 ### AC-BC-A3: shape_type closed vocabulary; unknown keyword produces E-PAR-012
 (traces to BC-3.04.001 invariant 4 — closed type vocabulary)
@@ -210,7 +210,7 @@ E-PAR-012 with a human-readable message listing the known types:
 Unknown shape type 'frobnicator' at <file>:<line>:<col>.
 Known types: [rect, ellipse, arrow, line, star, roundRect]
 ```
-There is NO silent `ShapeType::Custom(...)` fallback. (BC-3.04.001 v1.5.0, invariant 4
+There is NO silent `ShapeType::Custom(...)` fallback. (BC-3.04.001 v1.5.2, invariant 4
 and EC-005; canonical rule: no silent fallbacks per CLAUDE.md)
 
 ### AC-BC-A4: Off-canvas inclusive boundary semantics
@@ -220,7 +220,7 @@ A shape exactly touching the page edge is ON-canvas (not a warning). Specificall
 `x + width == page_width` is NOT off-canvas; `x + width > page_width` by even 1 EMU
 IS off-canvas. Canonical test vector: `x=8.0in, width=2.0in` on a 10-inch canvas
 (`page_width = Emu(9_144_000)`) produces NO `LayoutWarning::OffCanvas`. A shape with
-`x=8.0in, width=2.0in + 1 EMU` DOES produce the warning. (BC-3.04.001 v1.5.0,
+`x=8.0in, width=2.0in + 1 EMU` DOES produce the warning. (BC-3.04.001 v1.5.2,
 invariant 6 and EC-002/EC-003)
 
 ### AC-BC-A5: MissingAlt error carries SourceSpan
@@ -230,7 +230,7 @@ invariant 6 and EC-002/EC-003)
 offending `shape:` block in the source file. This satisfies the CLAUDE.md rule that
 all errors must carry source spans. The span must be non-default (file + line + col
 set) when a `shape:` block without `alt` or `decorative: true` reaches the layout
-stage. (BC-3.04.001 v1.5.0, invariant 7)
+stage. (BC-3.04.001 v1.5.2, invariant 7)
 
 ### AC-BC-A6: Multi-shape error accumulation in LayoutError::Multiple
 (traces to BC-3.04.001 postcondition 6 — multi-error accumulation)
@@ -240,7 +240,7 @@ When a slide contains two or more shapes that are both missing `alt` and
 returning. The layout function returns `Err(LayoutError::Multiple(vec![err1, err2,
 ...]))` (or equivalent accumulator variant). It does NOT bail on the first error.
 Canonical test vector: slide with 2 shapes both missing alt → `Vec<LayoutError>`
-with 2 `MissingAlt` entries. (BC-3.04.001 v1.5.0, postcondition 6 and EC-010)
+with 2 `MissingAlt` entries. (BC-3.04.001 v1.5.2, postcondition 6 and EC-010)
 
 ### AC-BC-A10: alt wins over decorative: true when both supplied (Invariant 11)
 (traces to BC-3.04.001 v1.5.2 Invariant 11 and EC-018)
@@ -316,7 +316,7 @@ This closes F-CRIT-001 (the integration wire between parser output and layout ou
 
 ## ShapeSpec Position Schema
 
-Per BC-3.04.001 v1.5.0 postcondition 1 and the data-engineer schema commit (9ea373a8),
+Per BC-3.04.001 v1.5.2 postcondition 1 and the data-engineer schema commit (9ea373a8),
 the canonical `ShapeSpec` and supporting types in `slideforge-types/src/specs.rs` are:
 
 ```rust
@@ -361,7 +361,7 @@ listed — that was incorrect; unknown keywords are parse errors, not `Custom` f
 - [ ] Add `FrameContent::Shape(ShapeFrame)` and `FrameContent::TextRun(Vec<InlineNode>)` to `Frame` enum in `src/types.rs`
 - [ ] Implement `ShapeFrame` struct with `shape_type`, `fill`, `text`, `alt` fields
 - [ ] Implement `ShapeType` enum: `Rect`, `Ellipse`, `Arrow`, `Line`, `Star`, `RoundRect` (no `Custom` — unknown keyword is a parse error per BC-3.04.001 invariant 4)
-- [ ] Implement `FillSpec` enum: `SolidColor(Rgb)`, `None` (Gradient deferred to STORY-072 per BC-3.04.001 v1.5.0 Deferred Surfaces)
+- [ ] Implement `FillSpec` enum: `SolidColor(Rgb)`, `None` (Gradient deferred to STORY-072 per BC-3.04.001 v1.5.2 Deferred Surfaces)
 - [ ] Implement `AltText` enum: `Provided(Arc<str>)`, `Decorative`
 - [ ] Implement shape layout pass in `layout::run()`: iterate slide shapes → produce `Frame`s
 - [ ] Implement unit conversion: `from_inches`, `from_em` for shape positions
@@ -418,7 +418,7 @@ risks — but proptest and snapshot tests from STORY-026 must still pass.
 |-----------|-----------------|
 | This story spec (v1.2 — expanded ACs) | ~4,800 |
 | STORY-026 layout types | ~1,500 |
-| BC files (2 BCs: BC-3.04.001 v1.5.0 + BC-3.05.001 v1.3.3) | ~5,000 |
+| BC files (2 BCs: BC-3.04.001 v1.5.2 + BC-3.05.001 v1.3.3) | ~5,000 |
 | `slideforge-types` InlineNode definition | ~1,000 |
 | `slideforge-types/src/specs.rs` ShapeSpec schema | ~800 |
 | Test files to write | ~3,000 |
@@ -462,3 +462,4 @@ Build MUST fail if those crates appear in `slideforge-layout/Cargo.toml` depende
 | 1.6 | 2026-05-29 | product-owner | Pass-10 sweep (F-P10-HIGH-002 + F-P10-MED-001): Frame.bounding_box → Frame.bbox in AC-002 example (line 95) and AC-BC-A1 prose (frames[0].bbox); all BC-3.04.001 version refs updated v1.4/v1.4.2 → v1.4.3; all BC-3.05.001 version refs updated v1.3.2 → v1.3.3; token budget BC ref table updated to match |
 | 1.7 | 2026-05-29 | product-owner | Pass-19 sibling sweep (F-P19-HIGH-001 + F-P19-MED-001): all BC-3.04.001 version refs updated v1.4.3 → v1.5.0 (8 locations); BC table covered-ACs updated to include AC-BC-A10; added AC-BC-A10 covering EC-018 alt-wins behavior (Invariant 11) with load-bearing test name test_bc_3_04_001_invariant_11_alt_wins_over_decorative; token budget BC ref table updated to v1.5.0 |
 | 1.8 | 2026-05-29 | product-owner | F-P20-LOW-003 precision fix: AC-BC-A10 traces-to ref updated v1.5.0 → v1.5.2; prose updated to state ShapeSpec.decorative is NOT mutated — alt-wins effect via typed ShapeFrame.alt enum; load-bearing test example updated from assert_eq!(spec_resolved.decorative, false) → assert_eq!(frame.alt, AltText::Provided(...)); BC table version ref updated v1.5.0 → v1.5.2 |
+| 1.9 | 2026-05-29 | product-owner | Pass-22 sweep (F-P22-MED-001): remaining BC-3.04.001 v1.5.0 refs updated to v1.5.2 at 9 sites (AC-BC-A1 through AC-BC-A6, ShapeSpec schema section, task list, token budget table) |
