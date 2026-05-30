@@ -168,7 +168,7 @@ pub enum DataError {
     ///
     /// Error code: `E-DAT-005`.
     ///
-    /// **Hardcoded-discriminant group** — see [module-level code field semantics](DataError#code-field-semantics).
+    /// **Hardcoded-discriminant group** — see [code field semantics](DataError#code-field-semantics).
     #[error("[{code}] field not found: '{field}' in source '{source_name}' (at {span})")]
     FieldNotFound {
         /// The error code constant (`E-DAT-005`).
@@ -185,7 +185,7 @@ pub enum DataError {
     ///
     /// Error code: `E-DAT-003` (sub-case of parse/format error).
     ///
-    /// **Hardcoded-discriminant group** — see [module-level code field semantics](DataError#code-field-semantics).
+    /// **Hardcoded-discriminant group** — see [code field semantics](DataError#code-field-semantics).
     #[error(
         "[{code}] unsupported format: '{extension}' — supported: json, csv, yaml, yml, toml, xlsx, sqlite, sqlite3, db (at {span})"
     )]
@@ -219,7 +219,7 @@ pub enum DataError {
     ///
     /// Error code: `E-DAT-006` (security policy sub-case).
     ///
-    /// **Hardcoded-discriminant group** — see [module-level code field semantics](DataError#code-field-semantics).
+    /// **Hardcoded-discriminant group** — see [code field semantics](DataError#code-field-semantics).
     #[error("[{code}] path traversal blocked: '{path}' is outside base dir (at {span})")]
     PathTraversalBlocked {
         /// The error code constant (`E-DAT-006`).
@@ -234,7 +234,7 @@ pub enum DataError {
     ///
     /// Error code: `E-DAT-006`.
     ///
-    /// **Hardcoded-discriminant group** — see [module-level code field semantics](DataError#code-field-semantics).
+    /// **Hardcoded-discriminant group** — see [code field semantics](DataError#code-field-semantics).
     #[error(
         "[{code}] HTTP source '{url}' blocked by allowed_domains policy. \
         Add '{domain}' to [data].allowed_domains in slideforge.toml."
@@ -260,7 +260,7 @@ pub enum DataError {
     ///
     /// Display: `"[E-DAT-006] data policy rejected '<uri>': <message> (at <span>)"`
     ///
-    /// **Hardcoded-discriminant group** — see [module-level code field semantics](DataError#code-field-semantics).
+    /// **Hardcoded-discriminant group** — see [code field semantics](DataError#code-field-semantics).
     #[error("[{code}] data policy rejected '{uri}': {message} (at {span})")]
     PolicyRejected {
         /// The error code constant (`E-DAT-006`).
@@ -282,7 +282,7 @@ pub enum DataError {
     /// Matches the spec format in error-taxonomy.md (E-DAT-001). The `--offline` hint is
     /// the canonical discovery surface for users who did not know the flag existed.
     ///
-    /// **Hardcoded-discriminant group** — see [module-level code field semantics](DataError#code-field-semantics).
+    /// **Hardcoded-discriminant group** — see [code field semantics](DataError#code-field-semantics).
     #[error(
         "[{code}] HTTP fetch failed: '{url}' returned HTTP {status}. \
         Hint: use --offline to skip HTTP sources. (at {span})"
@@ -308,7 +308,7 @@ pub enum DataError {
     /// the URL field are both required by the spec; the URL is the canonical discovery surface
     /// for which source triggered the network failure.
     ///
-    /// **Hardcoded-discriminant group** — see [module-level code field semantics](DataError#code-field-semantics).
+    /// **Hardcoded-discriminant group** — see [code field semantics](DataError#code-field-semantics).
     #[error(
         "[{code}] network error fetching '{url}': {cause}. \
         Use --offline to skip HTTP sources. (at {span})"
@@ -358,7 +358,7 @@ pub enum DataError {
     /// filter). The message is at `debug` level — not `warn!` — to avoid flooding
     /// watch-mode logs for third-party plugins that are under active development.
     ///
-    /// **Hardcoded-discriminant group** — see [module-level code field semantics](DataError#code-field-semantics).
+    /// **Hardcoded-discriminant group** — see [code field semantics](DataError#code-field-semantics).
     #[error("[{code}] data source error for '{uri}': {message} (at {span})")]
     UnspecifiedSourceError {
         /// The error code constant (`E-DAT-015`).

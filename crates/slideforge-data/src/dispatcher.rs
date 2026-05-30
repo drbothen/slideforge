@@ -814,8 +814,6 @@ fn extract_http_status(message: &str) -> Result<u16, &'static str> {
 ///
 /// Built-in sources format I/O error messages as:
 /// - `"I/O error reading '<path>': <reason> (at ...)"`
-/// - `"I/O error: <reason>"` — legacy label (no path component; full segment after
-///   the prefix is treated as the reason string)
 /// - `"failed to open file '<path>': <reason> (at ...)"`
 /// - `"failed to read file header '<path>': <reason> (at ...)"`
 /// - `"failed to read file header from '<path>': <reason> (at ...)"`
@@ -839,16 +837,10 @@ fn extract_bare_io_reason(clean_msg: &str) -> &str {
         s.strip_prefix(label)
             .and_then(|rest| rest.rsplit_once("': ").map(|(_, after)| after))
     }
-    // Legacy label: "I/O error: <reason>" — no path component; the entire segment
-    // after the prefix is treated as the reason string.
-    fn strip_unquoted_label<'a>(s: &'a str, label: &str) -> Option<&'a str> {
-        s.strip_prefix(label)
-    }
     let after_label = strip_quoted_label(clean_msg, "I/O error reading '")
         .or_else(|| strip_quoted_label(clean_msg, "failed to open file '"))
         .or_else(|| strip_quoted_label(clean_msg, "failed to read file header from '"))
         .or_else(|| strip_quoted_label(clean_msg, "failed to read file header '"))
-        .or_else(|| strip_unquoted_label(clean_msg, "I/O error: "))
         .unwrap_or(clean_msg);
     // Strip trailing " (at …)" span annotation.
     if let Some((before, _)) = after_label.rsplit_once(" (at ") {
@@ -872,7 +864,6 @@ fn extract_bare_io_reason(clean_msg: &str) -> &str {
 /// |-----------------------------------|---------|
 /// | `"file not found: "`              | `DataError::FileNotFound` |
 /// | `"I/O error reading '"`           | `DataError::IoError` |
-/// | `"I/O error: "`                   | `DataError::IoError` (legacy label) |
 /// | `"failed to open file '"`         | `DataError::IoError` (`SQLite` magic-check) |
 /// | `"failed to read file header '"`  | `DataError::IoError` (`SQLite` magic-check, open) |
 /// | `"failed to read file header from '"` | `DataError::IoError` (`SQLite` magic-check, read) |
@@ -987,7 +978,6 @@ fn extract_path_from_traversal_msg(message: &str) -> Option<&str> {
 /// ## Known label prefixes
 ///
 /// - `"file not found: "` — emitted by `FileDataSource`
-/// - `"I/O error: "` — emitted by `FileDataSource` on permission/OS errors (legacy)
 /// - `"I/O error reading '"` — canonical `DataError::IoError` Display format
 /// - `"failed to open file '"` — emitted by `validate_sqlite_magic` (open failure)
 /// - `"failed to read file header from '"` — emitted by `validate_sqlite_magic` (read failure)
@@ -1039,8 +1029,6 @@ fn extract_path_after_code(message: &str) -> Option<&str> {
     // LAST such separator so paths containing apostrophes or "': " are not
     // truncated. Traces to F-P9-MED-001 (apostrophe truncation fix).
     let clean = if let Some(rest) = with_label.strip_prefix("file not found: ") {
-        rest.trim()
-    } else if let Some(rest) = with_label.strip_prefix("I/O error: ") {
         rest.trim()
     } else if let Some(rest) = with_label.strip_prefix("I/O error reading '") {
         // Quoted path: anchor on the canonical "': " closing separator.
@@ -2000,14 +1988,6 @@ mod tests {
             "extract_path_after_code must return Some for known 'file not found' prefix"
         );
 
-        // Known prefix "I/O error: " — must return Some.
-        let result = extract_path_after_code("[E-DAT-004] I/O error: /some/file.json");
-        assert_eq!(
-            result,
-            Some("/some/file.json"),
-            "extract_path_after_code must return Some for known 'I/O error' prefix"
-        );
-
         // No bracket terminator — must return None.
         let result = extract_path_after_code("no bracket here");
         assert!(
@@ -2688,39 +2668,6 @@ mod tests {
             !(display.contains("I/O error reading")
                 && display.contains("failed to read file header")),
             "Display must not double-wrap the label; got: {display}"
-        );
-    }
-
-    // ---------------------------------------------------------------------------
-    // F-P5-MED-003: extract_bare_io_reason handles "I/O error: " legacy label
-    // ---------------------------------------------------------------------------
-
-    /// `test_extract_bare_io_reason_handles_legacy_io_error_label`
-    ///
-    /// F-P5-MED-003: `extract_bare_io_reason` must handle the legacy
-    /// `"I/O error: <reason>"` label (path NOT quoted) and return the bare
-    /// reason string, stripping any trailing span annotation.
-    #[test]
-    fn test_extract_bare_io_reason_handles_legacy_io_error_label() {
-        // Legacy label: "I/O error: <path> <reason>" — path is unquoted.
-        assert_eq!(
-            extract_bare_io_reason("I/O error: permission denied"),
-            "permission denied",
-            "legacy 'I/O error: ' label must be stripped; reason must be returned"
-        );
-
-        // With trailing span annotation.
-        assert_eq!(
-            extract_bare_io_reason("I/O error: access denied (at src:3:1)"),
-            "access denied",
-            "trailing span annotation must be stripped from legacy label result"
-        );
-
-        // Regular "I/O error reading" label still works.
-        assert_eq!(
-            extract_bare_io_reason("I/O error reading '/tmp/data.csv': disk full (at src:1:1)"),
-            "disk full",
-            "quoted 'I/O error reading' label must still be handled"
         );
     }
 

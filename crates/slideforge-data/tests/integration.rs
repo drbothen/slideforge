@@ -148,19 +148,10 @@ impl DataSource for MockFileSource {
 /// NOT the binding name.
 ///
 /// FINDING-9 fix: `_binding_name` field removed — it was dead code.
-///
-/// F-P10-OBS-002: `MockFailSource` is a unit struct. Adding `Default` allows callers
-/// to use `MockFailSource::default()` instead of `MockFailSource::new()`, eliminating
-/// the clippy::new_without_default lint. Both `new()` and `Default::default()` are
-/// kept for call-site compatibility.
 struct MockFailSource;
 
-impl Default for MockFailSource {
-    fn default() -> Self {
-        MockFailSource
-    }
-}
-
+// Test stub — `Default::default()` would be syntactically identical for a unit struct.
+#[allow(clippy::new_without_default)]
 impl MockFailSource {
     fn new() -> Self {
         MockFailSource
