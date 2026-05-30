@@ -305,7 +305,15 @@ fn convert_calamine_cell(cell: &Data, col: u32, row: u32, path: &str) -> Result<
                 Ok(Value::Float(OrderedFloat(*f)))
             }
         },
-        Data::String(s) | Data::DurationIso(s) => Ok(Value::Str(Arc::from(s.as_str()))),
+        Data::String(s) => Ok(Value::Str(Arc::from(s.as_str()))),
+        // F-PASS18-LOW-2: DurationIso passes through as a string without ISO 8601 validation.
+        // calamine emits DurationIso for Excel cells that store durations (e.g., "PT1H30M").
+        // No AC in BC-1.03.006 currently covers DurationIso validation; DateTimeIso does have
+        // an explicit validation requirement (postcondition 6 / VP-024 / VP-025). If calamine
+        // emits a malformed DurationIso string it passes through here as Value::Str.
+        // Future hardening (if AC is added for DurationIso): add ISO 8601 duration validation
+        // via chrono::Duration or a dedicated parser. No story currently covers this path.
+        Data::DurationIso(s) => Ok(Value::Str(Arc::from(s.as_str()))),
         Data::DateTimeIso(s) => {
             // BC-1.03.006 postcondition 6 / invariant 9: validate ISO 8601.
             // Traces to VP-024 (valid) and VP-025 (invalid).
