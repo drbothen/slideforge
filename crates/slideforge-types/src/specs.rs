@@ -247,7 +247,7 @@ pub struct ShapePosition {
 /// Carries the full shape declaration from the `shape:` DSL block, including
 /// type, position, fill, optional text content, and accessibility alt text.
 ///
-/// ## Schema (BC-3.04.001 v1.4.3 / interface-definitions.md §9)
+/// ## Schema (BC-3.04.001 v1.5.2 / interface-definitions.md §9)
 ///
 /// - `shape_type` is now a resolved [`ShapeType`] enum variant (not a raw
 ///   `Arc<str>`). The parser validates the keyword and rejects unknown values

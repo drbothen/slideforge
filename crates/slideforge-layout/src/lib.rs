@@ -1064,7 +1064,7 @@ mod tests {
 
     // ─────────────────────────────────────────────────────────────────────────
     // VP-049 — LaidOutDeck.warnings wired: off-canvas + xref warnings flow through
-    // VP-050 — Placeholder-before-shape frame ordering (BC-3.04.001 v1.4.3 PC-3)
+    // VP-050 — Placeholder-before-shape frame ordering (BC-3.04.001 v1.5.2 PC-3)
     // ─────────────────────────────────────────────────────────────────────────
 
     /// VP-049 — `layout::run` propagates off-canvas shape warnings to
@@ -1186,7 +1186,7 @@ mod tests {
     }
 
     /// VP-050 — `layout::run` places shape frames AFTER all placeholder/region frames
-    /// in `LaidOutSlide.frames` (BC-3.04.001 v1.4.3 PC-3 / interface-definitions §9.3).
+    /// in `LaidOutSlide.frames` (BC-3.04.001 v1.5.2 PC-3 / interface-definitions §9.3).
     ///
     /// A slide with region-map placeholders AND a `ContentBlock::Shape` block must
     /// produce a `LaidOutSlide` where:

@@ -215,7 +215,7 @@ pub fn layout_shapes(
         let decorative =
             shape.decorative || matches!(&shape.alt, Some(slideforge_types::AltText::Decorative));
 
-        // Pass fill and text from ShapeSpec directly (BC-3.04.001 v1.4.3 schema).
+        // Pass fill and text from ShapeSpec directly (BC-3.04.001 v1.5.2 schema).
         let fill = shape.fill.clone();
         let text = shape.text.clone();
 
