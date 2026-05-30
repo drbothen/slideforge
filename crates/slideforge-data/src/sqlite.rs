@@ -195,8 +195,18 @@ impl DataSource for SqliteDataSource {
     /// DML query (defense-in-depth), non-existent table, or duplicate column names.
     ///
     /// Traces to BC-1.03.007 postconditions 1-4.
-    #[instrument(skip(self, _opts, uri), fields(path = tracing::field::Empty))]
-    fn load(&self, uri: &str, _opts: &DataSourceOptions) -> Result<Value, DataSourceError> {
+    #[instrument(skip(self, opts, uri), fields(path = tracing::field::Empty))]
+    fn load(&self, uri: &str, opts: &DataSourceOptions) -> Result<Value, DataSourceError> {
+        // F-PASS20-OBS-1: match HttpDataSource pattern — warn when caller passes
+        // opts.query because SqliteDataSource ignores it (it always uses self.query
+        // set at construction time). Silent discard would hide misconfiguration.
+        if opts.query.is_some() {
+            tracing::warn!(
+                "SQLite source does not honor opts.query; the runtime option is ignored. \
+                The query is fixed at construction time via SqliteDataSource::new(path, query)."
+            );
+        }
+
         // F-MED-5 / interface-definitions §7: uri overrides self.path when non-empty.
         // Record the effective path AFTER resolving the override so the span reflects
         // the actual file being loaded (F-PASS11-OBS-1).
@@ -582,6 +592,9 @@ mod tests {
 
     // F-MED-P5-1: bring serial macro into scope for load_call_count group.
     use serial_test::serial;
+
+    // F-PASS20-OBS-1: tracing-test for warn! emission assertions.
+    use tracing_test::traced_test;
 
     // ---------------------------------------------------------------------------
     // VP-027 race-condition guard (F-MED-P5-1).
@@ -2424,6 +2437,53 @@ mod tests {
         assert!(
             msg.contains("internal"),
             "empty query error must carry 'internal' prefix; got: {msg}"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // F-PASS20-OBS-1: opts.query silently ignored — must emit tracing::warn!
+    // Matches HttpDataSource pattern (http.rs line ~247).
+    // ---------------------------------------------------------------------------
+
+    /// `test_f_pass20_obs1_opts_query_emits_warn` -- opts.query passed at runtime emits warn.
+    ///
+    /// `SqliteDataSource` ignores `opts.query` at load time (the query is fixed at
+    /// construction via `new(path, query)`). Before this fix the option was silently
+    /// discarded under `_opts`. Now a `tracing::warn!` is emitted matching the
+    /// `HttpDataSource` convention.
+    ///
+    /// Load-bearing (TD-VSDD-059): if the `tracing::warn!` branch is removed, the
+    /// `logs_contain("opts.query")` assertion fails, exposing the regression.
+    ///
+    /// Traces to F-PASS20-OBS-1.
+    #[traced_test]
+    #[test]
+    #[serial(load_call_count)]
+    fn test_f_pass20_obs1_opts_query_emits_warn() {
+        let conn = make_memory_db(|c| {
+            c.execute_batch("CREATE TABLE t (x INTEGER); INSERT INTO t VALUES (1);")
+                .unwrap();
+        });
+        let (_dir, path) = save_db_to_tempfile(&conn, ".db");
+
+        let src = SqliteDataSource::new(path.to_str().unwrap(), "SELECT x FROM t");
+        let opts = DataSourceOptions {
+            query: Some(Arc::from("SELECT x FROM t")),
+            ..DataSourceOptions::default()
+        };
+
+        // load() succeeds but must have emitted a warn!.
+        let result = src.load("", &opts);
+        assert!(
+            result.is_ok(),
+            "load must still succeed when opts.query is set; got: {:?}",
+            result.err()
+        );
+
+        // Load-bearing: warn! must contain the key phrase.
+        assert!(
+            logs_contain("opts.query"),
+            "warn! must mention 'opts.query' when the option is set; no warning was captured"
         );
     }
 }
