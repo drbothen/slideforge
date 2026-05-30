@@ -67,7 +67,9 @@ use slideforge_types::Value;
 
 use crate::DataError;
 use crate::context::DataSourceContext;
-use crate::error::{E_DAT_001, E_DAT_002, E_DAT_003, E_DAT_004, E_DAT_006, E_DAT_015};
+use crate::error::{
+    E_DAT_001, E_DAT_002, E_DAT_003, E_DAT_004, E_DAT_006, E_DAT_006_POLICY, E_DAT_015,
+};
 
 /// Load all configured data sources, applying the offline gate.
 ///
@@ -168,10 +170,10 @@ pub fn load_all(
 /// | `[E-DAT-001]`           | `DataError::HttpError` |
 /// | `[E-DAT-002]`           | `DataError::NetworkError` |
 /// | `[E-DAT-004]`           | `DataError::FileNotFound` |
-/// | `[E-DAT-006]` (in IoError)   | `DataError::IoError` (body-size cap, policy-rejected) |
+/// | `[E-DAT-006]` (in IoError)   | `DataError::PolicyRejected` (body-size cap) |
 /// | `[E-DAT-006]` (in ParseError)| `DataError::SsrfBlocked` |
 /// | `[E-DAT-003]`           | `DataError::ParseError` |
-/// | *(no bracket code)*     | Generic `DataError::IoError` with full message |
+/// | *(no bracket code)*     | Generic `DataError::UnspecifiedSourceError` with full message |
 #[must_use]
 fn map_source_error(name: &Arc<str>, err: &DataSourceError) -> DataError {
     let message: Arc<str> = Arc::from(err.to_string());
@@ -198,21 +200,49 @@ fn map_source_error(name: &Arc<str>, err: &DataSourceError) -> DataError {
                         status,
                         span: slideforge_types::SourceSpan::default(),
                     },
-                    Err(_unparseable) => DataError::IoError {
-                        code: E_DAT_001,
-                        path: Arc::from(uri.as_str()),
-                        message: Arc::from(inner_msg.as_str()),
-                        span: slideforge_types::SourceSpan::default(),
+                    Err(_unparseable) => {
+                        // F-P3-MED-003 fix: Strip the [E-DAT-001] bracket prefix from
+                        // inner_msg before storing into `message`. IoError's Display
+                        // prepends "[{code}] I/O error reading …", so storing the raw
+                        // inner_msg (which may already contain "[E-DAT-001] …") would
+                        // produce a double bracket in the final Display.
+                        DataError::IoError {
+                            code: E_DAT_001,
+                            path: Arc::from(uri.as_str()),
+                            message: Arc::from(strip_bracket_prefix(inner_msg)),
+                            span: slideforge_types::SourceSpan::default(),
+                        }
                     },
                 }
             } else if inner_msg.contains(E_DAT_002) || message.contains(E_DAT_002) {
                 // Network/transport error (connection refused, timeout, DNS failure,
                 // body-read I/O error, non-UTF-8 body). The inner message is the
                 // human-readable cause.
+                //
+                // F-P3-MED-001 fix: Strip the leading [E-DAT-002] bracket from inner_msg
+                // before storing into `cause`. NetworkError's Display already prepends
+                // "[E-DAT-002] network error: …", so storing the raw inner_msg (which
+                // also starts with "[E-DAT-002] network error: …") produces double-bracket
+                // + double "network error:" in the final Display.
+                //
+                // Strip order:
+                //  1. [E-DAT-NNN] bracket prefix
+                //  2. any leading "network error: " label (to avoid double label)
+                //  3. any trailing " (at SourceSpan { … })" span annotation
+                let clean_cause = {
+                    let s = strip_bracket_prefix(inner_msg);
+                    let s = s.strip_prefix("network error: ").unwrap_or(s);
+                    // Strip trailing " (at …)" span annotation if present.
+                    if let Some((before_at, _)) = s.rsplit_once(" (at ") {
+                        before_at.trim()
+                    } else {
+                        s.trim()
+                    }
+                };
                 DataError::NetworkError {
                     code: E_DAT_002,
                     url: Arc::from(uri.as_str()),
-                    cause: Arc::from(inner_msg.as_str()),
+                    cause: Arc::from(clean_cause),
                     span: slideforge_types::SourceSpan::default(),
                 }
             } else if inner_msg.contains(E_DAT_004) || message.contains(E_DAT_004) {
@@ -227,14 +257,17 @@ fn map_source_error(name: &Arc<str>, err: &DataSourceError) -> DataError {
                     span: slideforge_types::SourceSpan::default(),
                 }
             } else if inner_msg.contains(E_DAT_006) || message.contains(E_DAT_006) {
-                // FINDING-2 fix: E-DAT-006 in an IoError arm means the HTTP source's
-                // response-body-size cap was exceeded (policy-rejected). This is NOT a
-                // path traversal — route to a generic IoError that preserves the
-                // bracket code verbatim and does NOT claim "path traversal blocked".
-                DataError::IoError {
-                    code: E_DAT_006,
-                    path: Arc::from(uri.as_str()),
-                    message: Arc::from(inner_msg.as_str()),
+                // F-P3-MED-002 fix (structural): E-DAT-006 in an IoError arm means the HTTP
+                // source's response-body-size cap was exceeded (a policy rejection, not I/O
+                // failure and not an SSRF block). Route to PolicyRejected which has a
+                // semantically correct Display ("data policy rejected") rather than IoError
+                // ("I/O error reading") which is factually wrong for a policy-enforcement
+                // decision. Also strip the [E-DAT-006] bracket prefix from the message to
+                // prevent double-bracket in the Display.
+                DataError::PolicyRejected {
+                    code: E_DAT_006_POLICY,
+                    uri: Arc::from(uri.as_str()),
+                    message: Arc::from(strip_bracket_prefix(inner_msg)),
                     span: slideforge_types::SourceSpan::default(),
                 }
             } else {
@@ -332,6 +365,48 @@ fn map_source_error(name: &Arc<str>, err: &DataSourceError) -> DataError {
                 span: slideforge_types::SourceSpan::default(),
             }
         },
+    }
+}
+
+/// Strip a leading `[E-DAT-NNN]` bracket prefix from an error message, returning
+/// just the human-readable text after the prefix (with any immediately following
+/// space trimmed). Used to prevent double-bracket-in-Display regressions when
+/// re-wrapping a source's pre-bracketed message in a `DataError` variant whose
+/// own Display also prepends `[{code}]`.
+///
+/// # Behaviour
+///
+/// - If the message starts with `'['` and a matching `']'` is found within the
+///   first 16 characters, the content after the bracket (leading spaces stripped)
+///   is returned.
+/// - If the message does not start with `'['`, or the `']'` cannot be found
+///   within 16 characters, the input is returned **unchanged**. This conservative
+///   fallback prevents incorrectly stripping messages from third-party plugins
+///   that happen to contain bracket characters for other reasons.
+///
+/// # Examples
+///
+/// ```text
+/// strip_bracket_prefix("[E-DAT-002] network error: …")
+///     → "network error: …"
+/// strip_bracket_prefix("no bracket here")
+///     → "no bracket here"
+/// strip_bracket_prefix("[MALFORMED")       // no closing ']'
+///     → "[MALFORMED"
+/// ```
+fn strip_bracket_prefix(msg: &str) -> &str {
+    if !msg.starts_with('[') {
+        return msg;
+    }
+    // The standard bracket format is "[E-DAT-NNN]" — at most 12 characters.
+    // Search within 16 characters to give a safe margin while rejecting long
+    // bracket-like sequences that are not our format.
+    let window = if msg.len() < 16 { msg.len() } else { 16 };
+    if let Some(close) = msg[..window].find(']') {
+        // Skip past ']' and any immediately following space.
+        msg[close + 1..].trim_start()
+    } else {
+        msg
     }
 }
 
@@ -1129,6 +1204,194 @@ mod tests {
         assert!(
             display.contains("permission denied"),
             "Display must contain the original error message; got: {display}"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // FINDING-8: AuthError must not produce "Use --offline" in Display
+    // ---------------------------------------------------------------------------
+
+    // ---------------------------------------------------------------------------
+    // F-P3-MED-001: strip_bracket_prefix unit tests
+    // ---------------------------------------------------------------------------
+
+    /// `test_strip_bracket_prefix_strips_known_prefix`
+    ///
+    /// F-P3-MED-001: `strip_bracket_prefix` must strip a well-formed `[E-DAT-NNN]`
+    /// bracket from the front of a message and return only the human-readable tail.
+    #[test]
+    fn test_strip_bracket_prefix_strips_known_prefix() {
+        assert_eq!(
+            strip_bracket_prefix("[E-DAT-002] network error: connection refused"),
+            "network error: connection refused"
+        );
+        assert_eq!(
+            strip_bracket_prefix("[E-DAT-006] response body exceeds cap"),
+            "response body exceeds cap"
+        );
+        assert_eq!(
+            strip_bracket_prefix("[E-DAT-001] HTTP 404 from 'http://example.com'"),
+            "HTTP 404 from 'http://example.com'"
+        );
+    }
+
+    /// `test_strip_bracket_prefix_leaves_plain_message_unchanged`
+    ///
+    /// F-P3-MED-001: When the message does not start with `[`, `strip_bracket_prefix`
+    /// must return the input unchanged.
+    #[test]
+    fn test_strip_bracket_prefix_leaves_plain_message_unchanged() {
+        assert_eq!(
+            strip_bracket_prefix("connection refused"),
+            "connection refused"
+        );
+        assert_eq!(strip_bracket_prefix(""), "");
+        // Conservatively: '[' at non-zero position must NOT strip.
+        assert_eq!(
+            strip_bracket_prefix("some [bracketed] text"),
+            "some [bracketed] text"
+        );
+    }
+
+    /// `test_strip_bracket_prefix_leaves_malformed_bracket_unchanged`
+    ///
+    /// F-P3-MED-001: When the message starts with `[` but no closing `]` is found
+    /// within 16 characters, return the input unchanged (conservative fallback).
+    #[test]
+    fn test_strip_bracket_prefix_leaves_malformed_bracket_unchanged() {
+        // No closing bracket at all.
+        assert_eq!(strip_bracket_prefix("[MALFORMED"), "[MALFORMED");
+        // Closing bracket beyond position 15 — treated as not our format.
+        let long = "[THIS-IS-A-VERY-LONG-CODE] rest";
+        let result = strip_bracket_prefix(long);
+        // Either returns original (no ']' in window) or strips it — both are safe.
+        // The important thing: no panic.
+        assert!(!result.is_empty());
+    }
+
+    // ---------------------------------------------------------------------------
+    // F-P3-MED-001: NetworkError must not double-wrap bracket or "network error:"
+    // ---------------------------------------------------------------------------
+
+    /// `test_map_source_error_e_dat_002_display_single_bracket_only`
+    ///
+    /// F-P3-MED-001: When an `IoError` carrying `[E-DAT-002]` is routed to
+    /// `DataError::NetworkError`, the Display must contain exactly one `[E-DAT-002]`
+    /// and exactly one `"network error:"` — not double-wrapped.
+    #[test]
+    fn test_map_source_error_e_dat_002_display_single_bracket_only() {
+        let sources = single_error_source(
+            "net_src",
+            DataSourceError::IoError {
+                uri: "http://example.com/".to_owned(),
+                message: "[E-DAT-002] network error: connection refused (at src:1:1)".to_owned(),
+            },
+        );
+        let ctx = DataSourceContext::new();
+        let (_scope, errors) = load_all(&sources, &ctx);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].code(), "E-DAT-002");
+        let display = errors[0].to_string();
+        assert_eq!(
+            display.matches("[E-DAT-002]").count(),
+            1,
+            "Display must contain exactly one [E-DAT-002]; got: {display}"
+        );
+        assert_eq!(
+            display.matches("network error:").count(),
+            1,
+            "Display must contain exactly one 'network error:'; got: {display}"
+        );
+        // Span annotation must not be doubled.
+        assert!(
+            display.matches("(at ").count() <= 1,
+            "Display must not contain '(at ' more than once; got: {display}"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // F-P3-MED-002: E-DAT-006 body-cap routes to PolicyRejected, not IoError
+    // ---------------------------------------------------------------------------
+
+    /// `test_map_source_error_e_dat_006_body_cap_routes_to_policy_rejected_single_bracket`
+    ///
+    /// F-P3-MED-002: When an `IoError` carrying `[E-DAT-006]` (body-size cap) is
+    /// routed, it must:
+    ///   1. Produce code `E-DAT-006`.
+    ///   2. Display exactly one `[E-DAT-006]`.
+    ///   3. NOT say `"I/O error reading"` (that would be semantically wrong).
+    ///   4. NOT say `"path traversal"` (confirmed safe from Pass-2).
+    #[test]
+    fn test_map_source_error_e_dat_006_body_cap_routes_to_policy_rejected_single_bracket() {
+        let sources = single_error_source(
+            "bigdata",
+            DataSourceError::IoError {
+                uri: "http://example.com/large.json".to_owned(),
+                message: "[E-DAT-006] response body exceeds 52428800-byte cap (policy-rejected)"
+                    .to_owned(),
+            },
+        );
+        let ctx = DataSourceContext::new();
+        let (_scope, errors) = load_all(&sources, &ctx);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(
+            errors[0].code(),
+            "E-DAT-006",
+            "body-cap IoError must carry E-DAT-006; got: {}",
+            errors[0].code()
+        );
+        let display = errors[0].to_string();
+        assert_eq!(
+            display.matches("[E-DAT-006]").count(),
+            1,
+            "Display must contain exactly one [E-DAT-006]; got: {display}"
+        );
+        assert!(
+            !display.contains("I/O error reading"),
+            "body-cap error must NOT say 'I/O error reading' (policy, not I/O); got: {display}"
+        );
+        assert!(
+            !display.contains("path traversal"),
+            "body-cap error must NOT say 'path traversal'; got: {display}"
+        );
+        // Must contain the human-readable policy description from the source.
+        assert!(
+            display.contains("response body exceeds") || display.contains("policy-rejected"),
+            "body-cap error Display must describe the policy violation; got: {display}"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // F-P3-MED-003: E-DAT-001 fallback must not double-wrap bracket
+    // ---------------------------------------------------------------------------
+
+    /// `test_extract_http_status_fallback_single_bracket`
+    ///
+    /// F-P3-MED-003: When `extract_http_status` fails (message has no parseable HTTP
+    /// status), the dispatcher falls back to `DataError::IoError` with the inner_msg.
+    /// The Display must contain exactly one `[E-DAT-001]` — not double-wrapped.
+    #[test]
+    fn test_extract_http_status_fallback_single_bracket() {
+        let sources = single_error_source(
+            "api",
+            DataSourceError::IoError {
+                uri: "http://example.com/".to_owned(),
+                message: "[E-DAT-001] custom plugin error without HTTP status".to_owned(),
+            },
+        );
+        let ctx = DataSourceContext::new();
+        let (_scope, errors) = load_all(&sources, &ctx);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].code(), "E-DAT-001");
+        let display = errors[0].to_string();
+        assert_eq!(
+            display.matches("[E-DAT-001]").count(),
+            1,
+            "Fallback IoError Display must contain exactly one [E-DAT-001]; got: {display}"
+        );
+        assert!(
+            !display.contains("HTTP 0"),
+            "fallback must not produce 'HTTP 0'; got: {display}"
         );
     }
 

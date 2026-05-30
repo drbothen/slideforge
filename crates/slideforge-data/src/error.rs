@@ -96,6 +96,20 @@ pub const E_DAT_014: &str = "E-DAT-014";
 /// fallback is triggered.
 pub const E_DAT_015: &str = "E-DAT-015";
 
+/// Error code for data-policy rejection (HTTP body-size cap exceeded, etc.).
+///
+/// Maps to `E-DAT-006` in the error taxonomy (policy sub-case, distinct from SSRF).
+///
+/// Used by the dispatcher when an HTTP source's response body exceeds the configured
+/// cap. This is a policy-level rejection (not an I/O failure, not an SSRF block),
+/// so it routes to [`DataError::PolicyRejected`] rather than [`DataError::IoError`]
+/// (which implies I/O failure) or [`DataError::SsrfBlocked`] (which implies an
+/// SSRF-domain block).
+///
+/// The constant reuses `E-DAT-006` because the taxonomy documents the body-cap as
+/// a sub-case of the same security-policy error category.
+pub const E_DAT_006_POLICY: &str = "E-DAT-006";
+
 /// The top-level error type for all `slideforge-data` operations.
 ///
 /// Each variant corresponds to a documented error code in the error taxonomy.
@@ -205,6 +219,27 @@ pub enum DataError {
         /// The domain that was not found in the allowlist.
         domain: Arc<str>,
         /// The source location associated with this SSRF block.
+        span: SourceSpan,
+    },
+
+    /// An HTTP data-policy rejection (body-size cap exceeded, or similar policy block).
+    ///
+    /// Error code: `E-DAT-006` (policy sub-case, distinct from SSRF block).
+    ///
+    /// Used when an HTTP source returns data that violates a configured policy
+    /// (e.g., the response body exceeds the 50 MiB cap). This is semantically a
+    /// policy rejection, NOT an I/O failure and NOT an SSRF domain block.
+    ///
+    /// Display: `"[E-DAT-006] data policy rejected '<uri>': <message> (at <span>)"`
+    #[error("[{code}] data policy rejected '{uri}': {message} (at {span})")]
+    PolicyRejected {
+        /// The error code constant (`E-DAT-006`).
+        code: &'static str,
+        /// The URI of the source whose response violated the policy.
+        uri: Arc<str>,
+        /// Human-readable description of the policy violation.
+        message: Arc<str>,
+        /// The source location associated with this error.
         span: SourceSpan,
     },
 
@@ -466,6 +501,14 @@ impl DataError {
                 domain,
                 span: new_span,
             },
+            DataError::PolicyRejected {
+                code, uri, message, ..
+            } => DataError::PolicyRejected {
+                code,
+                uri,
+                message,
+                span: new_span,
+            },
             DataError::HttpError {
                 code, url, status, ..
             } => DataError::HttpError {
@@ -570,7 +613,9 @@ impl DataError {
             | DataError::ParseError { code, .. } => code,
             DataError::UnsupportedFormat { .. } => E_DAT_003,
             DataError::FieldNotFound { .. } => E_DAT_005,
-            DataError::PathTraversalBlocked { .. } | DataError::SsrfBlocked { .. } => E_DAT_006,
+            DataError::PathTraversalBlocked { .. }
+            | DataError::SsrfBlocked { .. }
+            | DataError::PolicyRejected { .. } => E_DAT_006,
             DataError::HttpError { .. } => E_DAT_001,
             DataError::NetworkError { .. } | DataError::AuthFailed { .. } => E_DAT_002,
             DataError::UnspecifiedSourceError { .. } => E_DAT_015,

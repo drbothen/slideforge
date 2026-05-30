@@ -1049,28 +1049,29 @@ fn test_bc_1_03_004_error_code_dat_001_http_500_through_dispatcher() {
 /// FINDING-4: Real `HttpDataSource` pointing at a dead port (guaranteed
 /// connection refused) → dispatcher returns exactly one error with code E-DAT-002.
 ///
-/// Strategy: bind a TcpListener to get an OS-assigned port, then drop it before
-/// the HttpDataSource attempts to connect. The port is now closed → connection
-/// refused → E-DAT-002.
+/// Strategy (F-P3-LOW-006 fix): Use `http://127.0.0.1:1/` — port 1 is a
+/// privileged port that reliably refuses connections on Linux and macOS because:
+///   - Unprivileged processes cannot bind to ports < 1024.
+///   - The OS immediately returns ECONNREFUSED (Linux) or ECONNREFUSED (macOS).
+///   - On Windows, port 1 may behave differently; this test is expected to pass
+///     on the Linux/macOS CI matrix defined in `.github/workflows/ci.yml`.
+///
+/// This replaces the previous TcpListener bind-then-drop TOCTOU pattern: that
+/// pattern was racy because another process could claim the freed ephemeral port
+/// between `drop(listener)` and `HttpDataSource::load`. Port 1 is deterministic.
 ///
 /// Traces to AC-009 / BC-1.03.004.
 #[test]
 fn test_bc_1_03_004_error_code_dat_002_network_error_through_dispatcher() {
-    use std::net::TcpListener;
-
-    // Bind to get an OS-assigned port, then immediately drop the listener
-    // so the port is closed by the time HttpDataSource tries to connect.
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = listener.local_addr().unwrap().port();
-    drop(listener); // Port is now closed → connection refused
-
-    let url = format!("http://127.0.0.1:{port}");
+    // Port 1 is privileged and always refuses connections from user-space processes.
+    // This is a deterministic alternative to the TOCTOU bind-then-drop pattern.
+    // On Linux/macOS: ECONNREFUSED. On Windows: may return a different OS error
+    // (still not 2xx, still mapped to E-DAT-002 via the network error path).
+    let url = "http://127.0.0.1:1/";
 
     use slideforge_data::HttpDataSource;
-    let sources: Vec<(Arc<str>, Box<dyn DataSource>)> = vec![(
-        Arc::from("api"),
-        Box::new(HttpDataSource::new(url.as_str())),
-    )];
+    let sources: Vec<(Arc<str>, Box<dyn DataSource>)> =
+        vec![(Arc::from("api"), Box::new(HttpDataSource::new(url)))];
     let ctx = DataSourceContext::new();
 
     let (scope, errors) = load_all(&sources, &ctx);
