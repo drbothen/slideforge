@@ -265,12 +265,27 @@ impl DataSource for SqliteDataSource {
             });
         }
 
-        // F-MED-4 / AC-BC-008 / VP-035: Extension validation.
+        // F-MED-4 / AC-BC-008 / VP-035 / F-P13-HIGH-001: Extension validation.
         // Accepted: .db, .sqlite, .sqlite3 (case-insensitive). All other extensions →
-        // UnsupportedFormat E-DAT-014. Applied before magic-byte check.
-        // Traces to BC-1.03.007 invariant 8, VP-035, E-DAT-014.
-        validate_sqlite_extension(path_str)
-            .map_err(|e| DataSourceError::UnsupportedUri { uri: e })?;
+        // UnsupportedFormat (E-DAT-003). Applied before magic-byte check.
+        //
+        // validate_sqlite_extension returns Err(DataError::UnsupportedFormat) carrying
+        // the bare extension string. We map it to DataSourceError::UnsupportedUri with
+        // uri = bare extension, matching the xlsx.rs pattern (data_error_to_source_error).
+        // The dispatcher routes UnsupportedUri.uri → DataError::UnsupportedFormat.extension,
+        // producing a clean single-bracket Display without nested annotations.
+        //
+        // Traces to BC-1.03.007 invariant 8, VP-035, F-P13-HIGH-001.
+        validate_sqlite_extension(path_str).map_err(|e| {
+            if let DataError::UnsupportedFormat { extension, .. } = e {
+                DataSourceError::UnsupportedUri {
+                    uri: extension.to_string(),
+                }
+            } else {
+                // Defensive: validate_sqlite_extension only emits UnsupportedFormat.
+                DataSourceError::UnsupportedUri { uri: String::new() }
+            }
+        })?;
 
         // Check file existence before opening (produces a clearer error than
         // SQLite's "unable to open database file" for missing files).
@@ -481,18 +496,24 @@ fn find_duplicate_column<'a>(names: &[&'a str]) -> Option<&'a str> {
 /// Validate that the `SQLite` file extension is one of the accepted variants.
 ///
 /// Accepted (case-insensitive): `.db`, `.sqlite`, `.sqlite3`.
-/// All other extensions (including `.db3`, `.s3db`, `.sl3`) are rejected with E-DAT-014.
+/// All other extensions (including `.db3`, `.s3db`, `.sl3`) are rejected with
+/// `DataError::UnsupportedFormat` (E-DAT-003).
 ///
-/// Returns `Ok(())` on accepted extension, `Err(String)` containing the user-visible
-/// error message with `[E-DAT-014]` prefix embedded (caller wraps in
-/// `DataSourceError::UnsupportedUri`).
+/// Returns `Ok(())` on accepted extension, `Err(DataError::UnsupportedFormat)`
+/// carrying the bare extension string (e.g., `"db3"`). The caller maps this to
+/// `DataSourceError::UnsupportedUri { uri: bare_ext }`, matching the XLSX pattern
+/// in `reject_xls_extension` and `data_error_to_source_error`. The dispatcher then
+/// routes `UnsupportedUri` → `DataError::UnsupportedFormat`, producing a clean
+/// single-bracket Display:
+///   `"[E-DAT-003] unsupported format: 'db3' — supported: ..."`
 ///
-/// The `[E-DAT-014]` prefix is embedded in the returned string so that the final
-/// `DataSourceError` message always carries the granular error code — consistent
-/// with the XLSX pattern where error codes appear in `DataError` display strings.
+/// Previously this function returned `Err(String)` with an embedded `[E-DAT-014]`
+/// prefix. That caused nested brackets when the dispatcher re-wrapped the annotated
+/// string in `DataError::UnsupportedFormat.extension`. Fixed by F-P13-HIGH-001:
+/// retire the annotated-string pattern and emit bare extension only.
 ///
-/// Traces to BC-1.03.007 invariant 8, VP-035, E-DAT-014.
-fn validate_sqlite_extension(path: &str) -> Result<(), String> {
+/// Traces to BC-1.03.007 invariant 8, VP-035, F-P13-HIGH-001.
+fn validate_sqlite_extension(path: &str) -> Result<(), DataError> {
     let p = std::path::Path::new(path);
     let ext = p
         .extension()
@@ -506,22 +527,21 @@ fn validate_sqlite_extension(path: &str) -> Result<(), String> {
         // the XLSX reject_xls_extension pattern. Without this, a path such as
         // "/tmp/mydb" would render the confusing "'.'" in the error message.
         other => {
-            // BC-1.03.007 EC-010 specifies the format: "unsupported extension for
-            // SQLite data source: '<ext>'." — non-empty extensions MUST be
-            // single-quoted. The no-extension cosmetic case uses a prose string
-            // without quotes (OBS-PASS15-1), which is explicitly excluded from the
-            // BC-quoted format by the `if other.is_empty()` branch.
-            // F-PASS20-LOW-1: restore single quotes for non-empty extensions.
-            let display_ext = if other.is_empty() {
-                "(no extension)".to_owned()
+            // Emit the bare extension (e.g., "db3") so the dispatcher routes
+            // UnsupportedUri.uri → DataError::UnsupportedFormat.extension cleanly,
+            // producing "[E-DAT-003] unsupported format: 'db3' — supported: ..."
+            // without nested brackets. The "(no extension)" cosmetic is preserved
+            // for extensionless paths (OBS-PASS15-1).
+            let bare_ext = if other.is_empty() {
+                Arc::from("(no extension)")
             } else {
-                format!("'.{other}'")
+                Arc::from(other)
             };
-            Err(format!(
-                "[{code}] unsupported extension for SQLite data source: {display_ext}. \
-                Accepted extensions: .db, .sqlite, .sqlite3",
-                code = crate::error::E_DAT_014,
-            ))
+            Err(DataError::UnsupportedFormat {
+                code: crate::error::E_DAT_003,
+                extension: bare_ext,
+                span: slideforge_types::SourceSpan::default(),
+            })
         },
     }
 }
@@ -548,10 +568,13 @@ fn validate_sqlite_magic(path: &str) -> Result<(), DataSourceError> {
     const MAGIC: &[u8; 16] = b"SQLite format 3\x00";
     let mut buf = [0u8; 16];
     // I/O failure opening the file → IoError (E-DAT-004), not ParseError.
+    // F-P12-HIGH-001: use canonical "'<path>': <reason>" separator — no embedded
+    // annotation between the closing quote and the colon-space. The E-DAT-004 code
+    // and the `validate_sqlite_magic` stack frame already convey the operation context.
     let mut file = std::fs::File::open(path).map_err(|e| DataSourceError::IoError {
         uri: path.to_owned(),
         message: format!(
-            "[{}] failed to open file '{path}' to validate SQLite magic: {e}",
+            "[{}] failed to open file '{path}': {e}",
             crate::error::E_DAT_004
         ),
     })?;
@@ -564,6 +587,10 @@ fn validate_sqlite_magic(path: &str) -> Result<(), DataSourceError> {
         ),
     })?;
     // Magic-byte mismatch → ParseError (E-DAT-013): file is present but not SQLite.
+    // F-P13-MED-001: Drop the leading '{path}' from the reason string. The dispatcher
+    // routes DataSourceError::ParseError → DataError::ParseError, whose Display already
+    // includes "parse error for '{path}'" — embedding the path again in the reason
+    // produces path stutter. The reason must describe the failure, not repeat the path.
     if n < 16 || &buf != MAGIC {
         let ext = std::path::Path::new(path)
             .extension()
@@ -572,7 +599,7 @@ fn validate_sqlite_magic(path: &str) -> Result<(), DataSourceError> {
         return Err(DataSourceError::ParseError {
             uri: path.to_owned(),
             message: format!(
-                "[{code}] '{path}' has .{ext} extension but is not a valid SQLite database \
+                "[{code}] file has .{ext} extension but is not a valid SQLite database \
                 (SQLite file header not found). File may be corrupted or misnamed.",
                 code = crate::error::E_DAT_013,
             ),
@@ -2214,22 +2241,32 @@ mod tests {
     }
 
     // ---------------------------------------------------------------------------
-    // VP-035: extension .db3 → UnsupportedFormat E-DAT-014.
-    // BC-1.03.007 invariant 8, F-MED-4.
+    // VP-035: extension .db3 → UnsupportedFormat E-DAT-003.
+    // BC-1.03.007 invariant 8, F-MED-4, F-P13-HIGH-001.
+    //
+    // After F-P13-HIGH-001: validate_sqlite_extension returns DataError::UnsupportedFormat
+    // with the bare extension (e.g., "db3") instead of an annotated String embedding
+    // [E-DAT-014]. The caller maps this to DataSourceError::UnsupportedUri { uri: "db3" }.
+    // The dispatcher then routes UnsupportedUri → DataError::UnsupportedFormat (E-DAT-003).
+    // E-DAT-014 is retired (subsumed by E-DAT-003 at the dispatcher boundary) per F-P13-HIGH-002.
     // ---------------------------------------------------------------------------
 
-    /// `test_vp_035_unsupported_extension_produces_e_dat_014` -- VP-035: `.db3` extension → `UnsupportedUri`.
+    /// `test_vp_035_unsupported_extension_produces_unsupported_uri` -- VP-035: `.db3` → `UnsupportedUri` with bare extension.
     ///
-    /// Extensions outside {.db, .sqlite, .sqlite3} must produce `UnsupportedUri` with
-    /// error code `[E-DAT-014]` embedded in the message (F-MED-1 load-bearing assertion).
+    /// Extensions outside {.db, .sqlite, .sqlite3} must produce `DataSourceError::UnsupportedUri`
+    /// where `uri` is the bare extension (e.g., `"db3"`) — no embedded bracket annotation.
     ///
-    /// Load-bearing: if `validate_sqlite_extension` omits `[E-DAT-014]` from the error
-    /// message, the `msg.contains("[E-DAT-014]")` assertion fails.
+    /// F-P13-HIGH-001 fix: `validate_sqlite_extension` now returns `DataError::UnsupportedFormat`
+    /// (not `Err(String)` with `[E-DAT-014]` prefix). The caller extracts the bare extension
+    /// from the `DataError` and wraps it in `DataSourceError::UnsupportedUri { uri: "db3" }`.
     ///
-    /// Traces to BC-1.03.007 invariant 8, VP-035, E-DAT-014.
+    /// Load-bearing: if `validate_sqlite_extension` reverts to the annotated-string approach,
+    /// the `uri == "db3"` assertion fails (the uri would contain `[E-DAT-014] ...`).
+    ///
+    /// Traces to BC-1.03.007 invariant 8, VP-035, F-P13-HIGH-001, F-P13-HIGH-002.
     #[test]
     #[serial(load_call_count)]
-    fn test_vp_035_unsupported_extension_produces_e_dat_014() {
+    fn test_vp_035_unsupported_extension_produces_unsupported_uri() {
         // The file doesn't need to exist — extension check fires first.
         let src = SqliteDataSource::new("/tmp/database.db3", "SELECT 1");
         let err = src.load("", &default_opts()).unwrap_err();
@@ -2239,23 +2276,34 @@ mod tests {
                 err,
                 slideforge_plugin_api::DataSourceError::UnsupportedUri { .. }
             ),
-            ".db3 extension must produce UnsupportedUri (E-DAT-014), got: {err:?}"
+            ".db3 extension must produce UnsupportedUri, got: {err:?}"
         );
+
+        // After the fix: uri must be the bare extension "db3" — not an annotated string.
+        if let slideforge_plugin_api::DataSourceError::UnsupportedUri { ref uri } = err {
+            assert_eq!(
+                uri.as_str(),
+                "db3",
+                "UnsupportedUri.uri must be bare extension 'db3' (no bracket annotation); got: {uri:?}"
+            );
+        }
+        // DataSourceError::UnsupportedUri Display = "unsupported URI scheme or format: db3".
+        // The bracket code ([E-DAT-003]) only appears after the dispatcher maps to DataError.
         let msg = err.to_string();
         assert!(
-            msg.contains("db3") || msg.contains("Unsupported") || msg.contains("extension"),
-            "E-DAT-014 error must name the extension; got: {msg}"
+            msg.contains("db3"),
+            "UnsupportedUri message must name the extension 'db3'; got: {msg}"
         );
-        // F-MED-1 load-bearing: error code must be embedded in the user-visible message.
+        // E-DAT-014 must NOT appear — it is retired.
         assert!(
-            msg.contains("[E-DAT-014]"),
-            "E-DAT-014 error code must appear in the user-visible message; got: {msg}"
+            !msg.contains("[E-DAT-014]"),
+            "Retired E-DAT-014 must not appear in DataSourceError message; got: {msg}"
         );
     }
 
     // ---------------------------------------------------------------------------
     // OBS-3: extensionless path → "(no extension)" cosmetic in error message.
-    // validate_sqlite_extension, E-DAT-014.
+    // validate_sqlite_extension, F-P13-HIGH-001, F-P13-HIGH-002.
     // ---------------------------------------------------------------------------
 
     /// `test_obs3_sqlite_no_extension_renders_cosmetic` -- extensionless path renders "(no extension)".
@@ -2264,10 +2312,13 @@ mod tests {
     /// in the error message (OBS-3). The fix uses `(no extension)` to match the XLSX
     /// pattern in `reject_xls_extension`.
     ///
-    /// Load-bearing: if `validate_sqlite_extension` reverts to `unwrap_or("")` + `'.{other}'`
-    /// without the cosmetic branch, the `msg.contains("no extension")` assertion fails.
+    /// After F-P13-HIGH-001: `DataSourceError::UnsupportedUri { uri: "(no extension)" }`.
+    /// After F-P13-HIGH-002: E-DAT-014 is retired; the extension slot carries the cosmetic.
     ///
-    /// Traces to BC-1.03.007 invariant 8, VP-035, E-DAT-014.
+    /// Load-bearing: if `validate_sqlite_extension` reverts to the no-cosmetic branch,
+    /// the `uri.contains("no extension")` assertion fails.
+    ///
+    /// Traces to BC-1.03.007 invariant 8, VP-035, F-P13-HIGH-001, F-P13-HIGH-002.
     #[test]
     #[serial(load_call_count)]
     fn test_obs3_sqlite_no_extension_renders_cosmetic() {
@@ -2280,14 +2331,16 @@ mod tests {
                 err,
                 slideforge_plugin_api::DataSourceError::UnsupportedUri { .. }
             ),
-            "extensionless path must produce UnsupportedUri (E-DAT-014), got: {err:?}"
+            "extensionless path must produce UnsupportedUri, got: {err:?}"
         );
+        // After F-P13-HIGH-001: uri = "(no extension)" (bare cosmetic, no bracket).
+        if let slideforge_plugin_api::DataSourceError::UnsupportedUri { ref uri } = err {
+            assert!(
+                uri.contains("no extension"),
+                "extensionless path must set uri to '(no extension)' cosmetic; got: {uri:?}"
+            );
+        }
         let msg = err.to_string();
-        // Must embed the error code.
-        assert!(
-            msg.contains("[E-DAT-014]"),
-            "extensionless path error must embed '[E-DAT-014]'; got: {msg}"
-        );
         // OBS-3 load-bearing: must say "(no extension)", not the awkward "'.'"
         assert!(
             msg.contains("no extension"),
@@ -2297,6 +2350,11 @@ mod tests {
         assert!(
             !msg.contains("'.'."),
             "extensionless path must not render the confusing \"'.'\" pattern; got: {msg}"
+        );
+        // E-DAT-014 must NOT appear — it is retired.
+        assert!(
+            !msg.contains("[E-DAT-014]"),
+            "Retired E-DAT-014 must not appear in DataSourceError message; got: {msg}"
         );
     }
 
@@ -2491,34 +2549,67 @@ mod tests {
     }
 
     // ---------------------------------------------------------------------------
-    // F-PASS20-LOW-1: EC-010 extension error must wrap extension in single quotes.
-    // BC-1.03.007 EC-010 spec: "unsupported extension for SQLite data source: '<ext>'."
+    // F-PASS20-LOW-1 / F-P13-HIGH-001: EC-010 extension naming in UnsupportedUri.
+    //
+    // BC-1.03.007 EC-010 specifies the error message format with `'<ext>'` (single-quoted
+    // extension). F-P13-HIGH-001 changed validate_sqlite_extension to return a bare extension
+    // string (not an annotated string with embedded quotes) so the dispatcher can route cleanly
+    // without nested brackets.
+    //
+    // After F-P13-HIGH-001: DataSourceError::UnsupportedUri { uri: "db3" } (bare, no quotes).
+    // The single-quoted form 'db3' appears AFTER dispatcher routing in DataError::UnsupportedFormat.
+    // See integration test test_bc_1_03_007_sqlite_extension_display_clean for the full Display check.
     // ---------------------------------------------------------------------------
 
-    /// `test_f_pass20_low1_ec010_extension_wrapped_in_single_quotes` -- `.db3` rejection
-    /// message must contain `'.db3'` with single quotes per BC-1.03.007 EC-010.
+    /// `test_f_pass20_low1_ec010_extension_bare_in_unsupported_uri` -- `.db3` rejection produces
+    /// `DataSourceError::UnsupportedUri` with bare extension `"db3"` (F-P13-HIGH-001).
     ///
-    /// BC-1.03.007 EC-010 specifies the error message format with `'<ext>'` (single-quoted
-    /// extension). A previous adversary pass (OBS-PASS15-1) removed quotes for the
-    /// no-extension cosmetic case; F-PASS20-LOW-1 confirms the non-empty extension path
-    /// uses quotes as the spec requires.
+    /// F-P13-HIGH-001 changed `validate_sqlite_extension` to return `DataError::UnsupportedFormat`
+    /// (bare extension) instead of `Err(String)` with embedded `[E-DAT-014]` and single-quoted
+    /// extension. The caller now maps to `DataSourceError::UnsupportedUri { uri: "db3" }`.
     ///
-    /// Load-bearing (TD-VSDD-059): if `validate_sqlite_extension` drops the single-quote
-    /// wrappers around non-empty extensions, the `msg.contains("'.db3'")` assertion fails.
+    /// BC-1.03.007 EC-010's single-quote requirement is still met at the `DataError` level
+    /// (after dispatcher routing) — verified by `test_bc_1_03_007_sqlite_extension_display_clean`.
     ///
-    /// Traces to BC-1.03.007 EC-010, F-PASS20-LOW-1.
+    /// Load-bearing (TD-VSDD-059): if `validate_sqlite_extension` reverts to the annotated-string
+    /// approach, the `uri == "db3"` assertion fails (uri would contain the annotated prefix).
+    ///
+    /// Traces to BC-1.03.007 EC-010, F-PASS20-LOW-1, F-P13-HIGH-001.
     #[test]
     #[serial(load_call_count)]
-    fn test_f_pass20_low1_ec010_extension_wrapped_in_single_quotes() {
+    fn test_f_pass20_low1_ec010_extension_bare_in_unsupported_uri() {
         // File does not need to exist — extension check fires before file I/O.
         let src = SqliteDataSource::new("/tmp/database.db3", "SELECT 1");
         let err = src.load("", &default_opts()).unwrap_err();
 
-        let msg = err.to_string();
-        // BC-1.03.007 EC-010 strict: extension must appear in single quotes.
+        // Must be UnsupportedUri.
         assert!(
-            msg.contains("'.db3'"),
-            "EC-010 extension error must contain \"'.db3'\" (single-quoted); got: {msg}"
+            matches!(
+                err,
+                slideforge_plugin_api::DataSourceError::UnsupportedUri { .. }
+            ),
+            ".db3 must produce UnsupportedUri; got: {err:?}"
+        );
+
+        // After F-P13-HIGH-001: uri = bare extension "db3" (no bracket annotation, no quotes).
+        if let slideforge_plugin_api::DataSourceError::UnsupportedUri { ref uri } = err {
+            assert_eq!(
+                uri.as_str(),
+                "db3",
+                "F-P13-HIGH-001: UnsupportedUri.uri must be bare extension 'db3'; got: {uri:?}"
+            );
+        }
+
+        // The message contains the bare extension (no annotation).
+        let msg = err.to_string();
+        assert!(
+            msg.contains("db3"),
+            "DataSourceError message must name the extension 'db3'; got: {msg}"
+        );
+        // E-DAT-014 annotation must NOT appear at the DataSourceError level.
+        assert!(
+            !msg.contains("[E-DAT-014]"),
+            "Retired E-DAT-014 must not appear at DataSourceError level; got: {msg}"
         );
     }
 

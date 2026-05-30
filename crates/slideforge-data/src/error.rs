@@ -78,11 +78,59 @@ pub const E_DAT_013: &str = "E-DAT-013";
 /// Error code for unsupported extension for `SQLite` data source.
 ///
 /// Maps to `E-DAT-014` in the error taxonomy.
+///
+/// # Deprecation
+///
+/// **Retired by F-P13-HIGH-002.** `E-DAT-014` is subsumed by `E-DAT-003` at the
+/// dispatcher boundary. `SQLite` extension errors now route through
+/// [`DataError::UnsupportedFormat`] (E-DAT-003) via `DataSourceError::UnsupportedUri`
+/// with a bare extension string, matching the XLSX pattern.
+///
+/// The constant is retained for `SemVer` compatibility (external crates may reference
+/// it). No production code path produces a [`DataError`] whose `.code()` returns
+/// `"E-DAT-014"`. See error-taxonomy.md changelog (v1.8).
 pub const E_DAT_014: &str = "E-DAT-014";
+
+/// Error code for unspecified data-source error (third-party plugin, unknown category).
+///
+/// Maps to `E-DAT-015` in the error taxonomy.
+///
+/// Used by the dispatcher's catch-all arm when a third-party `DataSource` plugin
+/// returns an [`slideforge_plugin_api::DataSourceError::IoError`] whose message does
+/// NOT embed a `[E-DAT-NNN]` bracket prefix. The catch-all cannot infer the
+/// specific failure category, so it routes to this code instead of mis-using
+/// `E-DAT-004` (file-not-found) or `E-DAT-002` (network) which carry specific
+/// semantic meanings that do not apply to an unknown source.
+///
+/// Plugin authors should embed `[E-DAT-NNN]` in their error messages to enable
+/// precise routing. A `tracing::debug!` is emitted at dispatch time when this
+/// fallback is triggered.
+///
+/// # Observability
+///
+/// The developer-guidance log message is emitted at `tracing::debug!` level (not
+/// `warn!`). To surface it, set `RUST_LOG=slideforge_data=debug` (or configure
+/// an equivalent subscriber filter). Keeping it at `debug` prevents flooding
+/// watch-mode output for third-party plugins that do not yet embed bracket codes.
+pub const E_DAT_015: &str = "E-DAT-015";
+
+// F-P4-OBS-001: E_DAT_006_POLICY alias removed. The dispatcher now uses E_DAT_006
+// directly at the single PolicyRejected construction site, with an inline comment
+// explaining the dual-sub-case semantics (SSRF vs body-cap). The alias was
+// documentary-only and carried no load-bearing semantic distinction.
 
 /// The top-level error type for all `slideforge-data` operations.
 ///
 /// Each variant corresponds to a documented error code in the error taxonomy.
+///
+/// # `SemVer` policy
+///
+/// This enum is `#[non_exhaustive]`. Match arms in external crates (and internal
+/// code using exhaustive patterns) must include a wildcard arm (`_ => ...`) to
+/// remain forward-compatible as new error codes are added in future releases.
+/// Internal code that matches exhaustively within this crate is exempt (the
+/// compiler enforces completeness at the call site automatically).
+#[non_exhaustive]
 #[derive(Debug, Error)]
 pub enum DataError {
     /// The specified file path does not exist or is not accessible.
@@ -119,6 +167,8 @@ pub enum DataError {
     /// A field lookup returned no result.
     ///
     /// Error code: `E-DAT-005`.
+    ///
+    /// **Hardcoded-discriminant group** — see [code field semantics](DataError#code-field-semantics).
     #[error("[{code}] field not found: '{field}' in source '{source_name}' (at {span})")]
     FieldNotFound {
         /// The error code constant (`E-DAT-005`).
@@ -134,6 +184,8 @@ pub enum DataError {
     /// The file extension is not supported by any registered parser.
     ///
     /// Error code: `E-DAT-003` (sub-case of parse/format error).
+    ///
+    /// **Hardcoded-discriminant group** — see [code field semantics](DataError#code-field-semantics).
     #[error(
         "[{code}] unsupported format: '{extension}' — supported: json, csv, yaml, yml, toml, xlsx, sqlite, sqlite3, db (at {span})"
     )]
@@ -148,10 +200,12 @@ pub enum DataError {
 
     /// A generic I/O error that is not a simple file-not-found.
     ///
-    /// Error code: `E-DAT-004` (I/O error sub-case).
+    /// Error code: `E-DAT-004` by default; can carry `E-DAT-001` in the dispatcher's
+    /// HTTP-fallback path when an HTTP status code cannot be extracted from the message.
+    /// Body-cap policy rejections use [`DataError::PolicyRejected`] instead of `IoError`.
     #[error("[{code}] I/O error reading '{path}': {message} (at {span})")]
     IoError {
-        /// The error code constant (`E-DAT-004`).
+        /// The error code constant (`E-DAT-004` by default; `E-DAT-001` in HTTP fallback).
         code: &'static str,
         /// The path that triggered the I/O error.
         path: Arc<str>,
@@ -164,6 +218,8 @@ pub enum DataError {
     /// A file path escaped the project root (path traversal attempt blocked).
     ///
     /// Error code: `E-DAT-006` (security policy sub-case).
+    ///
+    /// **Hardcoded-discriminant group** — see [code field semantics](DataError#code-field-semantics).
     #[error("[{code}] path traversal blocked: '{path}' is outside base dir (at {span})")]
     PathTraversalBlocked {
         /// The error code constant (`E-DAT-006`).
@@ -177,6 +233,8 @@ pub enum DataError {
     /// An SSRF attempt was blocked by the `allowed_domains` policy.
     ///
     /// Error code: `E-DAT-006`.
+    ///
+    /// **Hardcoded-discriminant group** — see [code field semantics](DataError#code-field-semantics).
     #[error(
         "[{code}] HTTP source '{url}' blocked by allowed_domains policy. \
         Add '{domain}' to [data].allowed_domains in slideforge.toml."
@@ -192,10 +250,43 @@ pub enum DataError {
         span: SourceSpan,
     },
 
+    /// An HTTP data-policy rejection (body-size cap exceeded, or similar policy block).
+    ///
+    /// Error code: `E-DAT-006` (policy sub-case, distinct from SSRF block).
+    ///
+    /// Used when an HTTP source returns data that violates a configured policy
+    /// (e.g., the response body exceeds the 50 MiB cap). This is semantically a
+    /// policy rejection, NOT an I/O failure and NOT an SSRF domain block.
+    ///
+    /// Display: `"[E-DAT-006] data policy rejected '<uri>': <message> (at <span>)"`
+    ///
+    /// **Hardcoded-discriminant group** — see [code field semantics](DataError#code-field-semantics).
+    #[error("[{code}] data policy rejected '{uri}': {message} (at {span})")]
+    PolicyRejected {
+        /// The error code constant (`E-DAT-006`).
+        code: &'static str,
+        /// The URI of the source whose response violated the policy.
+        uri: Arc<str>,
+        /// Human-readable description of the policy violation.
+        message: Arc<str>,
+        /// The source location associated with this error.
+        span: SourceSpan,
+    },
+
     /// An HTTP non-2xx response was received from the server.
     ///
     /// Error code: `E-DAT-001`.
-    #[error("[{code}] HTTP {status} from '{url}' (at {span})")]
+    ///
+    /// Display format: `"[E-DAT-001] HTTP fetch failed: '<url>' returned HTTP <status>. Hint: use --offline to skip HTTP sources. (at <span>)"`
+    ///
+    /// Matches the spec format in error-taxonomy.md (E-DAT-001). The `--offline` hint is
+    /// the canonical discovery surface for users who did not know the flag existed.
+    ///
+    /// **Hardcoded-discriminant group** — see [code field semantics](DataError#code-field-semantics).
+    #[error(
+        "[{code}] HTTP fetch failed: '{url}' returned HTTP {status}. \
+        Hint: use --offline to skip HTTP sources. (at {span})"
+    )]
     HttpError {
         /// The error code constant (`E-DAT-001`).
         code: &'static str,
@@ -210,7 +301,18 @@ pub enum DataError {
     /// A network transport error (connection refused, timeout, DNS failure, etc.).
     ///
     /// Error code: `E-DAT-002`.
-    #[error("[{code}] network error: {cause} (at {span})")]
+    ///
+    /// Display format: `"[E-DAT-002] network error fetching '<url>': <cause>. Use --offline to skip HTTP sources. (at <span>)"`
+    ///
+    /// Matches the spec format in error-taxonomy.md (E-DAT-002). The `--offline` hint and
+    /// the URL field are both required by the spec; the URL is the canonical discovery surface
+    /// for which source triggered the network failure.
+    ///
+    /// **Hardcoded-discriminant group** — see [code field semantics](DataError#code-field-semantics).
+    #[error(
+        "[{code}] network error fetching '{url}': {cause}. \
+        Use --offline to skip HTTP sources. (at {span})"
+    )]
     NetworkError {
         /// The error code constant (`E-DAT-002`).
         code: &'static str,
@@ -221,8 +323,76 @@ pub enum DataError {
         /// The source location associated with this network error.
         span: SourceSpan,
     },
+
+    /// An authentication failure from a data source plugin.
+    ///
+    /// Error code: `E-DAT-002` (access-layer failure, not a parse failure).
+    ///
+    /// Note: `HttpDataSource` silently ignores `auth_token` in v1 and will not
+    /// emit this error in practice. The variant exists for correctness when
+    /// third-party plugins emit `DataSourceError::AuthError`.
+    #[error("[{code}] authentication failed for source '{uri}' (at {span})")]
+    AuthFailed {
+        /// The error code constant (`E-DAT-002`).
+        code: &'static str,
+        /// The URI of the source that failed authentication.
+        uri: Arc<str>,
+        /// The source location associated with this auth failure.
+        span: SourceSpan,
+    },
+
+    /// An unspecified error from a third-party data source plugin.
+    ///
+    /// Error code: `E-DAT-015`.
+    ///
+    /// Used by the dispatcher's catch-all arm when the plugin's
+    /// [`slideforge_plugin_api::DataSourceError::IoError`] message does not embed
+    /// a `[E-DAT-NNN]` bracket prefix. Third-party plugins should embed the prefix
+    /// in their messages to enable precise routing to a more specific variant.
+    ///
+    /// # Observability
+    ///
+    /// A `tracing::debug!` is emitted when this fallback fires, instructing the
+    /// plugin author to embed a `[E-DAT-NNN]` bracket code. To surface this message,
+    /// set `RUST_LOG=slideforge_data=debug` (or configure an equivalent subscriber
+    /// filter). The message is at `debug` level — not `warn!` — to avoid flooding
+    /// watch-mode logs for third-party plugins that are under active development.
+    ///
+    /// **Hardcoded-discriminant group** — see [code field semantics](DataError#code-field-semantics).
+    #[error("[{code}] data source error for '{uri}': {message} (at {span})")]
+    UnspecifiedSourceError {
+        /// The error code constant (`E-DAT-015`).
+        code: &'static str,
+        /// The URI the plugin was asked to load.
+        uri: Arc<str>,
+        /// The raw message from the plugin.
+        message: Arc<str>,
+        /// The source location associated with this error.
+        span: SourceSpan,
+    },
 }
 
+/// # Code field semantics
+///
+/// `DataError` variants split into two groups based on how `code()` treats the
+/// stored `code: &'static str` field:
+///
+/// **Stored-field group** (4 variants): `FileNotFound`, `IoError`, `ParseError`,
+/// `AuthFailed`. The `code()` method returns the variant's stored `code` field —
+/// the stored value is authoritative. Construction with a non-canonical value
+/// will produce that value in both Display and `.code()`.
+///
+/// **Hardcoded-discriminant group** (8 variants): `UnsupportedFormat`,
+/// `FieldNotFound`, `PathTraversalBlocked`, `SsrfBlocked`, `PolicyRejected`,
+/// `HttpError`, `NetworkError`, `UnspecifiedSourceError`. The `code()` method
+/// returns a hardcoded constant matching the variant's canonical code. The
+/// stored `code` field is consumed only by the `Display` formatter (via
+/// `#[error("[{code}] ...")]`). Constructing a variant in this group with a
+/// non-canonical `code` field will produce a Display/`.code()` mismatch.
+///
+/// In production, all construction sites use canonical codes — the asymmetry
+/// is documented for completeness and to warn third-party crates against
+/// constructing variants with non-canonical codes.
 impl DataError {
     /// Construct a [`DataError::FileNotFound`] with the canonical error code.
     ///
@@ -410,6 +580,14 @@ impl DataError {
                 domain,
                 span: new_span,
             },
+            DataError::PolicyRejected {
+                code, uri, message, ..
+            } => DataError::PolicyRejected {
+                code,
+                uri,
+                message,
+                span: new_span,
+            },
             DataError::HttpError {
                 code, url, status, ..
             } => DataError::HttpError {
@@ -424,6 +602,19 @@ impl DataError {
                 code,
                 url,
                 cause,
+                span: new_span,
+            },
+            DataError::AuthFailed { code, uri, .. } => DataError::AuthFailed {
+                code,
+                uri,
+                span: new_span,
+            },
+            DataError::UnspecifiedSourceError {
+                code, uri, message, ..
+            } => DataError::UnspecifiedSourceError {
+                code,
+                uri,
+                message,
                 span: new_span,
             },
         }
@@ -483,22 +674,40 @@ impl DataError {
 
     /// Return the error code string for this error variant.
     ///
-    /// For [`DataError::ParseError`], returns the specific code stored in the
-    /// variant (e.g. `E-DAT-009` for invalid `DateTimeIso`, `E-DAT-010` for
-    /// non-finite floats) rather than always returning the generic `E-DAT-003`.
-    /// This ensures `err.code()` is consistent with the `Display` representation.
+    /// Returns the specific code stored in the variant for [`DataError::ParseError`],
+    /// [`DataError::FileNotFound`], [`DataError::IoError`], and [`DataError::AuthFailed`]
+    /// — the stored `code` field is authoritative. This allows `IoError` to carry
+    /// `E-DAT-001` in the dispatcher's HTTP-fallback path and `ParseError` to carry
+    /// granular format codes without requiring distinct variants. Body-cap policy
+    /// rejections route to [`DataError::PolicyRejected`] (not `IoError`).
+    ///
+    /// `AuthFailed` also uses the stored `code` field (F-P15-LOW-001), consistent with
+    /// the sibling pattern in `FileNotFound`, `IoError`, and `ParseError`. The stored
+    /// field is invariantly `E-DAT-002` in current production paths, but returning
+    /// the stored field is the structurally correct approach.
+    ///
+    /// For all other variants the code is determined by the discriminant.
     #[must_use]
     pub fn code(&self) -> &'static str {
         match self {
-            DataError::FileNotFound { .. } | DataError::IoError { .. } => E_DAT_004,
-            // ParseError stores the specific code in the variant — return it directly
-            // so that granular codes (E_DAT_009, E_DAT_010, etc.) are accessible.
-            DataError::ParseError { code, .. } => code,
+            // Variants that store the specific code directly — return it without
+            // overriding. `FileNotFound` and `IoError` both use E_DAT_004 by default,
+            // but `IoError` may carry E_DAT_001 in the dispatcher's HTTP-fallback path.
+            // `ParseError` may carry granular sub-codes (E_DAT_009, E_DAT_010, etc.).
+            // `AuthFailed` invariantly stores E_DAT_002, but returning the stored field
+            // is consistent with the sibling pattern (F-P15-LOW-001).
+            DataError::FileNotFound { code, .. }
+            | DataError::IoError { code, .. }
+            | DataError::ParseError { code, .. }
+            | DataError::AuthFailed { code, .. } => code,
             DataError::UnsupportedFormat { .. } => E_DAT_003,
             DataError::FieldNotFound { .. } => E_DAT_005,
-            DataError::PathTraversalBlocked { .. } | DataError::SsrfBlocked { .. } => E_DAT_006,
+            DataError::PathTraversalBlocked { .. }
+            | DataError::SsrfBlocked { .. }
+            | DataError::PolicyRejected { .. } => E_DAT_006,
             DataError::HttpError { .. } => E_DAT_001,
             DataError::NetworkError { .. } => E_DAT_002,
+            DataError::UnspecifiedSourceError { .. } => E_DAT_015,
         }
     }
 }
@@ -585,6 +794,43 @@ mod tests {
         assert_eq!(err.code(), "E-DAT-001");
         assert!(err.to_string().contains("E-DAT-001"));
         assert!(err.to_string().contains("404"));
+    }
+
+    /// `test_f_p15_low_001_auth_failed_code_uses_stored_field` — `AuthFailed.code()` returns
+    /// the stored `code` field, not a hardcoded constant. This is Option A of F-P15-LOW-001:
+    /// consistent with the sibling pattern in `FileNotFound`, `IoError`, and `ParseError`.
+    ///
+    /// Traces to F-P15-LOW-001.
+    #[test]
+    fn test_f_p15_low_001_auth_failed_code_uses_stored_field() {
+        // Construct AuthFailed with the standard E_DAT_002 code.
+        let err = DataError::AuthFailed {
+            code: E_DAT_002,
+            uri: Arc::from("http://example.com/secure"),
+            span: SourceSpan::default(),
+        };
+        assert_eq!(
+            err.code(),
+            "E-DAT-002",
+            "AuthFailed.code() must return the stored code field; got: {}",
+            err.code()
+        );
+
+        // Verify the stored field is authoritative: constructing with E_DAT_005
+        // must return E-DAT-005, not E-DAT-002 (this tests that the match arm
+        // reads the stored field, not a hardcoded constant).
+        let err_with_non_default_code = DataError::AuthFailed {
+            code: E_DAT_005,
+            uri: Arc::from("http://example.com/secure"),
+            span: SourceSpan::default(),
+        };
+        assert_eq!(
+            err_with_non_default_code.code(),
+            "E-DAT-005",
+            "AuthFailed.code() must return the stored field (E-DAT-005), not a hardcoded constant; \
+            got: {}",
+            err_with_non_default_code.code()
+        );
     }
 
     /// `test_BC_5_03_001_error_code_ssrf_blocked` — `SsrfBlocked` uses E-DAT-006 with remediation hint.
@@ -747,5 +993,189 @@ mod tests {
         assert_eq!(err_with_span.code(), "E-DAT-002");
         let msg = err_with_span.to_string();
         assert!(msg.contains("connection refused"));
+    }
+
+    // ---------------------------------------------------------------------------
+    // F-P14-MED-001 / F-P14-MED-002: Display --offline hint tests
+    // ---------------------------------------------------------------------------
+
+    /// `test_http_error_display_includes_offline_hint`
+    ///
+    /// F-P14-MED-001: `DataError::HttpError` Display must include the `--offline` hint
+    /// per error-taxonomy.md E-DAT-001. This is the canonical user-facing discovery
+    /// surface for the `--offline` flag.
+    #[test]
+    fn test_http_error_display_includes_offline_hint() {
+        let err = DataError::HttpError {
+            code: E_DAT_001,
+            url: Arc::from("http://example.com/data.json"),
+            status: 503,
+            span: SourceSpan::default(),
+        };
+        let display = err.to_string();
+        assert!(
+            display.contains("--offline"),
+            "HttpError Display must contain '--offline' hint; got: {display}"
+        );
+        assert!(
+            display.contains("Hint:"),
+            "HttpError Display must contain 'Hint:' prefix; got: {display}"
+        );
+        assert!(
+            display.contains("503"),
+            "HttpError Display must contain the status code; got: {display}"
+        );
+        assert!(
+            display.contains("http://example.com/data.json"),
+            "HttpError Display must contain the URL; got: {display}"
+        );
+    }
+
+    /// `test_network_error_display_includes_url_and_offline_hint`
+    ///
+    /// F-P14-MED-001 / F-P14-MED-002: `DataError::NetworkError` Display must include
+    /// both the URL (F-P14-MED-002) and the `--offline` hint (F-P14-MED-001) per
+    /// error-taxonomy.md E-DAT-002.
+    #[test]
+    fn test_network_error_display_includes_url_and_offline_hint() {
+        let err = DataError::NetworkError {
+            code: E_DAT_002,
+            url: Arc::from("http://api.example.com/feed.json"),
+            cause: Arc::from("connection timed out"),
+            span: SourceSpan::default(),
+        };
+        let display = err.to_string();
+        assert!(
+            display.contains("--offline"),
+            "NetworkError Display must contain '--offline' hint; got: {display}"
+        );
+        assert!(
+            display.contains("http://api.example.com/feed.json"),
+            "NetworkError Display must contain the URL; got: {display}"
+        );
+        assert!(
+            display.contains("connection timed out"),
+            "NetworkError Display must contain the cause; got: {display}"
+        );
+    }
+
+    /// `test_auth_failed_display_does_not_include_offline_hint`
+    ///
+    /// F-P14-MED-001 (negative): `DataError::AuthFailed` Display must NOT include
+    /// "Use --offline" — per Pass-5 F-P5-LOW-008, `--offline` is wrong remediation
+    /// for an authentication failure. Preserved from existing test in dispatcher.rs.
+    #[test]
+    fn test_auth_failed_display_does_not_include_offline_hint() {
+        let err = DataError::AuthFailed {
+            code: E_DAT_002,
+            uri: Arc::from("https://api.example.com/data.json"),
+            span: SourceSpan::default(),
+        };
+        let display = err.to_string();
+        assert!(
+            !display.contains("--offline"),
+            "AuthFailed Display must NOT contain '--offline' hint; got: {display}"
+        );
+        assert!(
+            !display.contains("Use --offline"),
+            "AuthFailed Display must NOT contain 'Use --offline'; got: {display}"
+        );
+        // Must still mention the URI and auth context.
+        assert!(
+            display.to_lowercase().contains("auth"),
+            "AuthFailed Display must mention 'auth'; got: {display}"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // F-P4-MED-002: PolicyRejected unit tests
+    // ---------------------------------------------------------------------------
+
+    /// `test_policy_rejected_code_is_e_dat_006`
+    ///
+    /// F-P4-MED-002: `DataError::PolicyRejected` must carry code `E-DAT-006`.
+    #[test]
+    fn test_policy_rejected_code_is_e_dat_006() {
+        let err = DataError::PolicyRejected {
+            code: E_DAT_006,
+            uri: Arc::from("http://example.com"),
+            message: Arc::from("body too big"),
+            span: SourceSpan::default(),
+        };
+        assert_eq!(
+            err.code(),
+            "E-DAT-006",
+            "PolicyRejected must carry E-DAT-006; got: {}",
+            err.code()
+        );
+    }
+
+    /// `test_policy_rejected_display_format`
+    ///
+    /// F-P4-MED-002: `DataError::PolicyRejected` Display must match the canonical
+    /// format `"[E-DAT-006] data policy rejected '<uri>': <message> (at <span>)"`.
+    #[test]
+    fn test_policy_rejected_display_format() {
+        let span = SourceSpan::new(Arc::from("deck.sf"), 1, 1, 0);
+        let err = DataError::PolicyRejected {
+            code: E_DAT_006,
+            uri: Arc::from("http://example.com"),
+            message: Arc::from("body too big"),
+            span,
+        };
+        let display = err.to_string();
+        assert!(
+            display.contains("[E-DAT-006]"),
+            "PolicyRejected Display must contain [E-DAT-006]; got: {display}"
+        );
+        assert!(
+            display.contains("data policy rejected"),
+            "PolicyRejected Display must contain 'data policy rejected'; got: {display}"
+        );
+        assert!(
+            display.contains("http://example.com"),
+            "PolicyRejected Display must contain the URI; got: {display}"
+        );
+        assert!(
+            display.contains("body too big"),
+            "PolicyRejected Display must contain the message; got: {display}"
+        );
+        assert!(
+            display.contains("deck.sf"),
+            "PolicyRejected Display must contain the span file; got: {display}"
+        );
+    }
+
+    /// `test_policy_rejected_with_span_replaces_span`
+    ///
+    /// F-P4-MED-002: `with_span()` on `PolicyRejected` must replace the span while
+    /// preserving `code`, `uri`, and `message`.
+    #[test]
+    fn test_policy_rejected_with_span_replaces_span() {
+        let original_span = SourceSpan::default();
+        let err = DataError::PolicyRejected {
+            code: E_DAT_006,
+            uri: Arc::from("http://example.com"),
+            message: Arc::from("body too big"),
+            span: original_span,
+        };
+        let new_span = SourceSpan::new(Arc::from("slide.sf"), 5, 3, 80);
+        let updated = err.with_span(new_span);
+        // Code and URI and message must be preserved.
+        assert_eq!(updated.code(), "E-DAT-006");
+        let display = updated.to_string();
+        assert!(
+            display.contains("http://example.com"),
+            "with_span must preserve URI; got: {display}"
+        );
+        assert!(
+            display.contains("body too big"),
+            "with_span must preserve message; got: {display}"
+        );
+        // New span must appear.
+        assert!(
+            display.contains("slide.sf"),
+            "with_span must replace span (new file 'slide.sf' must appear); got: {display}"
+        );
     }
 }

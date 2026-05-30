@@ -7,6 +7,14 @@
 use std::path::Path;
 
 /// The set of data formats that the built-in file loader can handle.
+///
+/// The [`DataFormat::Unknown`] variant is used in error messages when the URI has
+/// no recognizable file extension (e.g., HTTP URIs without a path extension). It
+/// signals "format could not be determined." When this variant is interpolated into a
+/// [`crate::DataError::ParseError`], its `Debug` representation `Unknown` appears in
+/// the Display in place of the misleading `(Json)` annotation that previously occurred
+/// when format inference failed.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DataFormat {
     /// JSON (`.json`)
@@ -21,6 +29,16 @@ pub enum DataFormat {
     Xlsx,
     /// `SQLite` (`.sqlite`, `.db`, `.sqlite3`) — implemented in STORY-020 (see [`crate::SqliteDataSource`]).
     Sqlite,
+    /// Format could not be determined from the URI (no extension, or unrecognized extension).
+    ///
+    /// Used by the dispatcher's `ParseError` fallback when
+    /// [`DataFormat::from_path`] returns `None` for an HTTP URI without an extension.
+    /// Avoids falsely annotating the error as `(Json)` when the actual format is unknown.
+    ///
+    /// `DataFormat::Unknown` is intentionally NOT produced by [`DataFormat::from_path`] —
+    /// callers that need the unknown-format sentinel use it as the `.unwrap_or` fallback:
+    /// `DataFormat::from_path(path).unwrap_or(DataFormat::Unknown)`.
+    Unknown,
 }
 
 impl DataFormat {

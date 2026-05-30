@@ -35,6 +35,7 @@
 
 pub mod allowlist;
 pub mod context;
+pub mod dispatcher;
 pub mod error;
 pub mod file;
 pub mod format;

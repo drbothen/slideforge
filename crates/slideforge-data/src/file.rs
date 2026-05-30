@@ -51,8 +51,16 @@ use crate::xlsx::XlsxDataSource;
 /// - `.sqlite` / `.sqlite3` / `.db` → [`crate::sqlite::SqliteDataSource`] (bundled `SQLite`)
 ///   For `SQLite`, the `uri` field is used as the path per the plugin interface convention.
 ///   A query string must be provided via `DataSourceOptions` or the DSL `query:` directive.
-#[derive(Debug, Default)]
-pub struct FileDataSource;
+#[derive(Debug)]
+pub struct FileDataSource {
+    /// The file path baked in at construction time.
+    ///
+    /// When `DataSource::load()` is called with an empty `uri`, this path is used
+    /// as the effective file path. When `load()` is called with a non-empty `uri`,
+    /// the `uri` overrides this field (allows the dispatcher to call `load("", opts)`
+    /// and have each source resolve its own pre-configured address).
+    path: Arc<str>,
+}
 
 /// Lexically normalize a path by resolving `..` and `.` components.
 ///
@@ -91,10 +99,22 @@ fn normalize_path(path: &Path) -> PathBuf {
 }
 
 impl FileDataSource {
-    /// Construct a new [`FileDataSource`] plugin instance.
+    /// Construct a new [`FileDataSource`] with the given file path.
+    ///
+    /// The `path` is baked in at construction time. When the dispatcher calls
+    /// `DataSource::load("", opts)` (empty URI), the source uses this path.
+    /// When `load(uri, opts)` is called with a non-empty URI, the URI overrides
+    /// the baked-in path (enabling the evaluator to override the path at call time).
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use slideforge_data::FileDataSource;
+    /// let src = FileDataSource::new("data/sales.json");
+    /// ```
     #[must_use]
-    pub fn new() -> Self {
-        FileDataSource
+    pub fn new(path: impl Into<Arc<str>>) -> Self {
+        FileDataSource { path: path.into() }
     }
 
     /// Load a file from a path, detecting format by extension, and return the parsed [`Value`].
@@ -252,9 +272,27 @@ impl FileDataSource {
             DataFormat::Yaml => yaml::parse_yaml(contents, &path_str),
             DataFormat::Toml => toml::parse_toml(contents, &path_str),
             DataFormat::Xlsx | DataFormat::Sqlite => {
-                // Already handled above; this arm is unreachable.
-                unreachable!("xlsx/sqlite dispatched before text-read")
+                // SAFETY INVARIANT: binary formats (Xlsx, Sqlite) must be dispatched at the
+                // pre-dispatch block above (lines ~222-249). If this arm is reached in
+                // correct code, the pre-dispatch block is missing a new binary format. Rather
+                // than panicking, surface a structured error so an invariant violation is
+                // visible to callers and to the error taxonomy, rather than crashing the process.
+                //
+                // F-P10-LOW-002 fix: replaced `unreachable!()` (which panics in production)
+                // with a graceful `DataError::unsupported_format` so future maintainers
+                // adding binary format variants without wiring the pre-dispatch route receive
+                // a structured error rather than a process abort.
+                Err(DataError::unsupported_format(Arc::from(format!(
+                    "{format:?}"
+                ))))
             },
+            // DataFormat is #[non_exhaustive]; wildcard arm required to remain
+            // forward-compatible when new variants are added in future releases.
+            // This arm catches unknown variants such as DataFormat::Unknown that
+            // are not valid file-load targets (they exist for error-message annotation only).
+            _ => Err(DataError::unsupported_format(Arc::from(format!(
+                "{format:?}"
+            )))),
         }
     }
 }
@@ -271,21 +309,46 @@ impl DataSource for FileDataSource {
     /// need containment enforcement (e.g., the evaluator processing an `@data`
     /// directive) MUST use [`FileDataSource::load_path`] directly with the
     /// project root as `base_dir`.
+    ///
+    /// ## URI resolution
+    ///
+    /// When `uri` is non-empty it is used as the file path directly (override).
+    /// When `uri` is empty the source falls back to `self.path`, which is the
+    /// path baked in at construction time via [`FileDataSource::new`]. This
+    /// matches the convention used by `HttpDataSource` (`self.url` fallback) and
+    /// `XlsxDataSource` / `SqliteDataSource` (`self.path` fallback), so the
+    /// dispatcher can uniformly call `load("", opts)` on all source types and
+    /// have each resolve its own pre-configured address.
+    ///
     // `_opts` is intentionally ignored: local file formats (JSON, CSV, YAML, TOML) have no
     // concept of timeout, auth token, or query filter at the DataSource trait boundary.
     // File-based sources MAY silently ignore options that have no semantic meaning for their
     // format (see `DataSourceOptions` rustdoc convention, F-PASS21-LOW-1).
     fn load(&self, uri: &str, _opts: &DataSourceOptions) -> Result<Value, DataSourceError> {
-        let path = Path::new(uri);
+        // Use uri as the primary path; fall back to self.path when uri is empty.
+        // This mirrors HttpDataSource::load() which falls back to self.url when uri is empty,
+        // ensuring the dispatcher's uniform `load("", opts)` call works for all source types.
+        let effective_path_str: &str = if uri.is_empty() {
+            self.path.as_ref()
+        } else {
+            uri
+        };
+        let path = Path::new(effective_path_str);
         self.load_path(path, None).map_err(|e| match e {
             DataError::FileNotFound { path, .. } => DataSourceError::IoError {
-                uri: uri.to_owned(),
+                uri: effective_path_str.to_owned(),
                 // FileNotFound: construct message manually so the [E-DAT-004] bracket code
                 // is explicit without the Display's "I/O error reading" boilerplate.
                 message: format!("[{}] file not found: {path}", crate::error::E_DAT_004),
             },
             DataError::UnsupportedFormat { extension, .. } => DataSourceError::UnsupportedUri {
-                uri: format!("{uri} (unsupported extension: {extension})"),
+                // Convention: emit only the bare extension (e.g., "txt") as the uri slot.
+                // The dispatcher maps UnsupportedUri.uri → DataError::UnsupportedFormat.extension,
+                // which is rendered by the Display as "[E-DAT-003] unsupported format: 'txt' — ...".
+                // Putting the full path + annotation here would produce stuttered output:
+                // "[E-DAT-003] unsupported format: '/tmp/data.txt (unsupported extension: txt)' — ..."
+                // F-P11-LOW-002 fix.
+                uri: extension.to_string(),
             },
             // F-PASS18-MED-2 / F-PASS26-MED-1: Translate DataError::ParseError into
             // DataSourceError::ParseError without re-wrapping the boilerplate prefix.
@@ -299,7 +362,7 @@ impl DataSource for FileDataSource {
             // "[{code}] {reason}" as the DataSourceError message. The bracket code is preserved
             // (satisfying F-PASS18-MED-2) and no boilerplate prefix is duplicated (F-PASS26-MED-1).
             DataError::ParseError { code, reason, .. } => DataSourceError::ParseError {
-                uri: uri.to_owned(),
+                uri: effective_path_str.to_owned(),
                 message: format!("[{code}] {reason}"),
             },
             // F-PASS18-MED-1: use err.to_string() for IoError ([E-DAT-004]) and
@@ -307,7 +370,7 @@ impl DataSource for FileDataSource {
             // The catch-all also uses err.to_string(), which always includes the bracket code
             // from the DataError Display format for any remaining variants.
             err => DataSourceError::IoError {
-                uri: uri.to_owned(),
+                uri: effective_path_str.to_owned(),
                 message: err.to_string(),
             },
         })
@@ -325,7 +388,10 @@ mod tests {
     use super::*;
 
     fn loader() -> FileDataSource {
-        FileDataSource::new()
+        // Unit tests that use `loader()` always call `load_path()` directly or
+        // call `load(uri, opts)` with an explicit URI — they never rely on
+        // self.path. An empty string is fine here.
+        FileDataSource::new("")
     }
 
     /// `test_BC_5_03_007_file_not_found` — non-existent path → `DataError::FileNotFound` with E-DAT-004.
@@ -466,6 +532,50 @@ mod tests {
             matches!(err, DataSourceError::UnsupportedUri { .. }),
             "unsupported extension must map to DataSourceError::UnsupportedUri"
         );
+    }
+
+    /// `test_unsupported_extension_uri_is_bare_extension`
+    ///
+    /// F-P11-LOW-002: The `UnsupportedUri.uri` field must contain only the bare
+    /// extension (e.g., `"txt"`), NOT the full path + annotation string
+    /// `"/tmp/data.txt (unsupported extension: txt)"`.
+    ///
+    /// When the dispatcher maps `UnsupportedUri { uri }` →
+    /// `DataError::UnsupportedFormat { extension: Arc::from(uri.as_str()) }`,
+    /// the resulting Display must read:
+    ///   `"[E-DAT-003] unsupported format: 'txt' — supported: json, csv, ..."`
+    /// NOT the stuttered form:
+    ///   `"[E-DAT-003] unsupported format: '/tmp/data.txt (unsupported extension: txt)' — ..."`
+    ///
+    /// This test drives the `DataSource::load()` trait boundary (not `load_path`)
+    /// so it exercises exactly the code path that feeds the dispatcher.
+    ///
+    /// Traces to F-P11-LOW-002 (Pass 11 adversarial finding).
+    #[test]
+    fn test_unsupported_extension_uri_is_bare_extension() {
+        let f = temp_file_with_suffix(".txt", b"data");
+        let src = loader();
+        let opts = DataSourceOptions::default();
+        let uri = f.path().to_str().unwrap();
+        let result = src.load(uri, &opts);
+        let err = result.expect_err(".txt must return DataSourceError");
+
+        match &err {
+            DataSourceError::UnsupportedUri { uri: uri_field } => {
+                // The uri slot must hold only the bare extension — not a composite string.
+                assert_eq!(
+                    uri_field.as_str(),
+                    "txt",
+                    "UnsupportedUri.uri must be the bare extension 'txt'; \
+                    got: '{uri_field}' — stutter guard: must NOT contain path or '(unsupported extension:'"
+                );
+                assert!(
+                    !uri_field.contains('('),
+                    "UnsupportedUri.uri must not contain '(' (no annotation); got: '{uri_field}'"
+                );
+            },
+            other => panic!("expected DataSourceError::UnsupportedUri, got: {other:?}"),
+        }
     }
 
     /// `test_BC_5_03_007_datasource_trait_load_json` — `DataSource::load()` happy path for JSON.

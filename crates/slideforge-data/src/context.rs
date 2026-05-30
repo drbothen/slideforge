@@ -23,6 +23,11 @@ use std::sync::Arc;
 /// - `allowed_domains` — the SSRF allowlist for HTTP data sources. `None`
 ///   means all domains are permitted; `Some(list)` restricts to the listed
 ///   domains only.
+/// - `offline` — when `true`, any data source that declares itself as
+///   network-dependent (via the `supports_offline` flag in
+///   [`crate::dispatcher`]) is skipped without making a network request.
+///   File-based sources are always loaded regardless of this flag.
+///   Traces to BC-1.03.004.
 #[derive(Debug, Clone, Default)]
 pub struct DataSourceContext {
     /// The project root directory used for resolving relative file paths.
@@ -44,6 +49,16 @@ pub struct DataSourceContext {
     /// request URL. Subdomains are NOT implicitly included — each permitted
     /// subdomain must be listed explicitly.
     pub allowed_domains: Option<Vec<Arc<str>>>,
+
+    /// When `true`, data sources that flag themselves as network-dependent
+    /// (HTTP/HTTPS sources) are skipped without making any network request.
+    ///
+    /// File-based sources (`FileDataSource`, `XlsxDataSource`,
+    /// `SqliteDataSource`) are always loaded regardless of this flag.
+    ///
+    /// Set to `true` by the CLI when the `--offline` flag is passed.
+    /// Traces to BC-1.03.004.
+    pub offline: bool,
 }
 
 impl DataSourceContext {
@@ -55,10 +70,35 @@ impl DataSourceContext {
 
     /// Set the base directory for relative path resolution.
     ///
+    /// This field is consulted by [`crate::file::FileDataSource`] for path-containment
+    /// enforcement (STORY-018).
+    ///
+    /// **Dispatcher propagation gap:** The dispatcher ([`crate::dispatcher::load_all`]) does
+    /// **NOT** propagate `base_dir` into source construction — its `load("", opts)` calls
+    /// pass `None`. Callers requiring path containment must use
+    /// `FileDataSource::load_path(path, Some(base_dir))` directly at source-construction
+    /// time (or at load time via `load_path`). This builder exists for callers that share a
+    /// `DataSourceContext` between source construction and dispatch, or for future
+    /// dispatcher versions that construct sources internally and thread `ctx.base_dir`
+    /// through `DataSourceOptions` or a similar mechanism (STORY-055 / future enhancement).
+    ///
     /// Returns `self` for chaining.
     #[must_use]
     pub fn with_base_dir(mut self, base_dir: PathBuf) -> Self {
         self.base_dir = Some(base_dir);
+        self
+    }
+
+    /// Enable offline mode, causing network-dependent data sources to be skipped.
+    ///
+    /// When offline mode is enabled, sources marked as network-dependent in the
+    /// [`crate::dispatcher`] are skipped without making any network request.
+    /// File-based sources are unaffected.
+    ///
+    /// Returns `self` for chaining.
+    #[must_use]
+    pub fn with_offline(mut self, offline: bool) -> Self {
+        self.offline = offline;
         self
     }
 
@@ -67,6 +107,18 @@ impl DataSourceContext {
     /// Each entry is **normalized to lowercase** before storing, ensuring that
     /// user-supplied values like `"API.EXAMPLE.COM"` from `slideforge.toml` match
     /// the lowercase host components returned by the `url` crate.
+    ///
+    /// **Dispatcher propagation gap:** This field is consulted by
+    /// [`crate::http::HttpDataSource`] SSRF guarding during source construction
+    /// (STORY-019). The dispatcher ([`crate::dispatcher::load_all`]) does **NOT**
+    /// propagate this field into source construction — callers must configure each
+    /// `HttpDataSource` with the allowlist at construction time via
+    /// `HttpDataSource::new(url).with_allowlist(AllowlistConfig { domains: ... })`.
+    /// A caller that sets only `DataSourceContext::with_allowed_domains` without also
+    /// configuring the source at construction time will silently get no SSRF filtering
+    /// effect. This builder exists for callers that share a `DataSourceContext` between
+    /// source construction and dispatch, or for future dispatcher versions that construct
+    /// sources internally. Traces to F-P9-LOW-001.
     ///
     /// Returns `self` for chaining.
     #[must_use]
