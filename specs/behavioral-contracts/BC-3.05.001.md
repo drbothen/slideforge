@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.3.3"
+version: "1.3.4"
 status: active
 producer: product-owner
 timestamp: 2026-05-29T00:00:00
@@ -14,7 +14,7 @@ subsystem: SS-TBD
 capability: CAP-024
 lifecycle_status: active
 introduced: v1.0.0
-modified: ["v1.2 — adversary pass 1 adjudication: variant count corrected to 12, payload shapes corrected to Vec<InlineNode> for structured variants, inline depth bound added (max 64), math xref validation boundary codified", "v1.3 — story spec AC-005 enum example corrected to match production types", "v1.3.1 — VP propagation burst: assigned VP-043 through VP-047 to all VP-TBD entries", "v1.3.2 — adversary pass 2 adjudications S/O: LayoutError::Multiple smart constructor invariants codified; XrefTargetNotFound warnings must reach LaidOutDeck.warnings (not silently dropped)", "v1.3.3 — pass-7 drift fix (F-P7-HIGH-005): slide_index → source_slide_index in Invariant 4, Inline Depth Bound section, EC-002, EC-006, and Canonical Test Vectors per AC-BC-A9 canonical field name"]
+modified: ["v1.2 — adversary pass 1 adjudication: variant count corrected to 12, payload shapes corrected to Vec<InlineNode> for structured variants, inline depth bound added (max 64), math xref validation boundary codified", "v1.3 — story spec AC-005 enum example corrected to match production types", "v1.3.1 — VP propagation burst: assigned VP-043 through VP-047 to all VP-TBD entries", "v1.3.2 — adversary pass 2 adjudications S/O: LayoutError::Multiple smart constructor invariants codified; XrefTargetNotFound warnings must reach LaidOutDeck.warnings (not silently dropped)", "v1.3.3 — pass-7 drift fix (F-P7-HIGH-005): slide_index → source_slide_index in Invariant 4, Inline Depth Bound section, EC-002, EC-006, and Canonical Test Vectors per AC-BC-A9 canonical field name", "v1.3.4 — F-P25-MED-001: Architecture Module corrected — InlineNode enum lives in slideforge-types (not slideforge-eval); inline validation pass (run_inline_validation) lives in slideforge-layout"]
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -221,7 +221,7 @@ must produce `LayoutError::InlineDepthExceeded`.
 | L2 Capability | CAP-024 ("Rich Inline Formatting") per capabilities.md §CAP-024 |
 | Capability Anchor Justification | CAP-024 ("Rich Inline Formatting") per capabilities.md §CAP-024 — "All 12 inline types ship v1.0" is stated in this BC; this BC is the single contract covering all 12 types and their per-format rendering behavior |
 | L2 Domain Invariants | DI-004 (no implicit type coercion — markdown-style bold is not applied), DI-018 (error accumulation — depth exceeded is a hard error not a silent truncation) |
-| Architecture Module | slideforge-eval crate — InlineNode enum; slideforge-pptx / slideforge-html / slideforge-pdf — inline renderers |
+| Architecture Module | slideforge-types crate — InlineNode enum; slideforge-layout crate — inline validation pass (`run_inline_validation`); slideforge-pptx / slideforge-html / slideforge-pdf — inline renderers |
 | Stories | STORY-028 |
 
 ## Related BCs
