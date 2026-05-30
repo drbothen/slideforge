@@ -665,19 +665,39 @@ fn message_is_file_not_found(message: &str) -> bool {
 /// Returns `true` only for path-traversal messages, `false` for body-cap or any other
 /// `[E-DAT-006]` sub-case.
 ///
+/// ## Anchored semantics
+///
+/// This function uses an **anchored** check: it locates the closing `]` of the bracket
+/// code, strips leading whitespace from the remainder, and then applies `starts_with`.
+/// This mirrors the pattern used by [`message_is_file_not_found`] and prevents a
+/// substring that appears only in the *body* of a different error message (e.g., a
+/// "see also: path traversal blocked" docs reference in a body-cap message) from
+/// yielding a false positive.  Messages without a `]` bracket are rejected (returns
+/// `false`), because the caller guarantees that `[E-DAT-006]` context has already been
+/// established by the bracket-routing step.
+///
 /// ## Decision table
 ///
-/// | Label in message after `[E-DAT-006]`  | Variant |
-/// |---------------------------------------|---------|
-/// | `"path traversal blocked: '"`         | `DataError::PathTraversalBlocked` |
-/// | *(anything else, e.g., body-cap)*     | `DataError::PolicyRejected` |
+/// | Label after `]` + `trim_start`          | Returns |
+/// |-----------------------------------------|---------|
+/// | `"path traversal blocked: '"`           | `true`  |
+/// | *(anything else, e.g., body-cap)*        | `false` |
+/// | *(no `]` in message)*                   | `false` |
 ///
 /// Traces to F-P7-HIGH-001 (path traversal silently re-routed to `PolicyRejected`).
+/// Anchoring fix traces to F-P8-LOW-001.
 fn message_is_path_traversal(message: &str) -> bool {
-    // The distinguishing substring is the literal from DataError::PathTraversalBlocked Display.
-    // We check for it after the bracket code prefix has established E-DAT-006 context.
-    // Using `contains` (not `starts_with`) because `message` still includes the bracket prefix.
-    message.contains("path traversal blocked: '")
+    // Skip past the closing bracket of the bracket code (e.g., "[E-DAT-006]"),
+    // then trim leading whitespace to land on the label text.  Apply starts_with
+    // so only the label position is tested, not arbitrary substrings in the body.
+    let after_bracket = match message.find(']') {
+        Some(pos) => message
+            .get(pos.saturating_add(1)..)
+            .unwrap_or("")
+            .trim_start(),
+        None => return false,
+    };
+    after_bracket.starts_with("path traversal blocked: '")
 }
 
 /// Extract the traversal-attempt path from a `PathTraversalBlocked` Display message.
@@ -685,19 +705,30 @@ fn message_is_path_traversal(message: &str) -> bool {
 /// The format emitted by [`DataError::PathTraversalBlocked`] is:
 /// `"[E-DAT-006] path traversal blocked: '<path>' is outside base dir (at <span>)"`.
 ///
-/// This function extracts the `<path>` substring between the first single-quote after
-/// `"path traversal blocked: '"` and the next single-quote. If extraction fails for any
-/// reason (unexpected format), returns `None` and the caller falls back to the URI.
+/// This function extracts the `<path>` substring that appears between
+/// `"path traversal blocked: '"` and the canonical suffix `"' is outside base dir"`.
+/// Using `rsplit_once("' is outside base dir")` to locate the closing boundary is
+/// structurally anchored: it matches on the canonical suffix regardless of whether
+/// the path itself contains single-quote characters (e.g., `/tmp/foo's_dir/file.json`).
+/// An earlier implementation used `find('\'')` which would truncate on the first
+/// apostrophe in the path.  Traces to F-P8-OBS (apostrophe truncation) and
+/// F-P8-LOW-002 (missing direct unit tests).
+///
+/// If extraction fails for any reason (unexpected format, missing marker, missing
+/// suffix, or empty path after extraction), returns `None` and the caller falls back
+/// to the URI.
 ///
 /// Traces to F-P7-HIGH-001.
 fn extract_path_from_traversal_msg(message: &str) -> Option<&str> {
-    // Find the opening quote after "path traversal blocked: '"
+    // Locate the opening marker: everything after it is the quoted path followed by
+    // "' is outside base dir (at <span>)".
     let marker = "path traversal blocked: '";
     let start = message.find(marker)?.checked_add(marker.len())?;
     let rest = message.get(start..)?;
-    // The path ends at the next single-quote.
-    let end = rest.find('\'')?;
-    let path = rest.get(..end)?.trim();
+    // Use rsplit_once on the canonical closing suffix so paths containing apostrophes
+    // are handled correctly (F-P8-OBS fix: find('\'') would truncate at first apostrophe).
+    let (path_raw, _) = rest.rsplit_once("' is outside base dir")?;
+    let path = path_raw.trim();
     if path.is_empty() { None } else { Some(path) }
 }
 
@@ -2179,8 +2210,14 @@ mod tests {
         // Simulate file.rs catch-all: err.to_string() → DataSourceError::IoError.
         // This is what the dispatcher receives when FileDataSource::load() is called.
         let outside_path_str = outside_json.to_string_lossy().to_string();
+        // Use a sentinel URI that is DISTINCT from the traversal path. This is load-bearing
+        // for Assertion 5 below: the test must prove that the extracted path came from the
+        // message (via extract_path_from_traversal_msg), NOT from the URI fallback.
+        // If the assertion passes with a sentinel URI, the extractor is doing real work.
+        // Traces to F-P8-LOW-003 (URI-vs-extractor ambiguity fix).
+        let sentinel_uri = "stub://unrelated-uri-not-the-traversal-path".to_owned();
         let simulated_io_error = slideforge_plugin_api::DataSourceError::IoError {
-            uri: outside_path_str.clone(),
+            uri: sentinel_uri.clone(),
             message: traversal_err.to_string(),
         };
 
@@ -2235,11 +2272,166 @@ mod tests {
             "Display must contain exactly one [E-DAT-006]; got: {display}"
         );
 
-        // Assertion 5: the path in the error is the traversal-attempt path, not the URI.
-        // The traversal path is the absolute path to outside_json.
+        // Assertion 5: the path in the error is the traversal-attempt path extracted from
+        // the message by extract_path_from_traversal_msg, NOT the sentinel URI fallback.
+        // Because the sentinel URI differs from the traversal path, the only way
+        // Display can contain outside_path_str is if the extractor was load-bearing.
         assert!(
             display.contains(outside_path_str.as_str()),
-            "Display must contain the traversal-attempt path '{outside_path_str}'; got: {display}"
+            "Display must contain the traversal-attempt path '{outside_path_str}' \
+            (extracted from message, not from URI); got: {display}"
+        );
+        assert!(
+            !display.contains(sentinel_uri.as_str()),
+            "Display must NOT contain the sentinel URI '{sentinel_uri}' — \
+            the traversal path must come from the message extractor, not the URI fallback; \
+            got: {display}"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // F-P8-LOW-001 + F-P8-LOW-002: message_is_path_traversal anchored semantics
+    //                               and extract_path_from_traversal_msg direct tests
+    // ---------------------------------------------------------------------------
+
+    /// `test_message_is_path_traversal_recognizes_canonical_message`
+    ///
+    /// F-P8-LOW-001: The canonical `PathTraversalBlocked` Display message must be
+    /// recognized as a path-traversal event.  The check is label-position anchored:
+    /// the label text must appear immediately after the `]` bracket (post trim_start),
+    /// not anywhere in the body.
+    #[test]
+    fn test_message_is_path_traversal_recognizes_canonical_message() {
+        let msg = "[E-DAT-006] path traversal blocked: '/etc/passwd' is outside base dir \
+                   (at SourceSpan { line: 1, col: 1 })";
+        assert!(
+            message_is_path_traversal(msg),
+            "canonical PathTraversalBlocked display must be recognized; got false for: {msg:?}"
+        );
+    }
+
+    /// `test_message_is_path_traversal_rejects_body_cap_message`
+    ///
+    /// F-P8-LOW-001: A body-cap policy message that mentions "path traversal blocked"
+    /// only in its *body* (not as the label immediately after `]`) must NOT be
+    /// recognized as a path-traversal event.  This is the false-positive the anchored
+    /// check prevents.
+    #[test]
+    fn test_message_is_path_traversal_rejects_body_cap_message() {
+        let msg = "[E-DAT-006] response body exceeds 52428800-byte cap \
+                   (policy-rejected — see also: path traversal blocked: '<x>' in unrelated docs)";
+        assert!(
+            !message_is_path_traversal(msg),
+            "body-cap message with 'path traversal blocked' in body must return false; \
+            got true for: {msg:?}"
+        );
+    }
+
+    /// `test_message_is_path_traversal_rejects_ssrf_message`
+    ///
+    /// F-P8-LOW-001: An SSRF-blocked policy message must not be recognized as
+    /// path-traversal even though it carries the same `[E-DAT-006]` bracket code.
+    #[test]
+    fn test_message_is_path_traversal_rejects_ssrf_message() {
+        let msg = "[E-DAT-006] HTTP source 'http://example.com' blocked by allowed_domains \
+                   policy. Add 'example.com' to the allowed list to permit this source.";
+        assert!(
+            !message_is_path_traversal(msg),
+            "SSRF policy message must return false; got true for: {msg:?}"
+        );
+    }
+
+    /// `test_message_is_path_traversal_rejects_no_bracket`
+    ///
+    /// F-P8-LOW-001: A message with no `]` bracket (i.e., not prefixed with a bracket
+    /// code) must return `false`.  The helper assumes the caller has already established
+    /// `[E-DAT-006]` context via the bracket-routing step; a bare string without a
+    /// bracket guard is rejected defensively.
+    #[test]
+    fn test_message_is_path_traversal_rejects_no_bracket() {
+        let msg = "path traversal blocked: '/x'";
+        assert!(
+            !message_is_path_traversal(msg),
+            "message without bracket prefix must return false; got true for: {msg:?}"
+        );
+    }
+
+    /// `test_extract_path_from_traversal_msg_extracts_well_formed`
+    ///
+    /// F-P8-LOW-002: The canonical well-formed `PathTraversalBlocked` Display message
+    /// must yield `Some("/etc/passwd")`.
+    #[test]
+    fn test_extract_path_from_traversal_msg_extracts_well_formed() {
+        let msg = "[E-DAT-006] path traversal blocked: '/etc/passwd' is outside base dir \
+                   (at SourceSpan { line: 1, col: 1 })";
+        let result = extract_path_from_traversal_msg(msg);
+        assert_eq!(
+            result,
+            Some("/etc/passwd"),
+            "well-formed message must extract path '/etc/passwd'; got: {result:?}"
+        );
+    }
+
+    /// `test_extract_path_from_traversal_msg_returns_none_missing_closing_suffix`
+    ///
+    /// F-P8-LOW-002: When the canonical closing suffix `"' is outside base dir"` is absent
+    /// (e.g., the path's closing quote is missing), the function must return `None`.
+    #[test]
+    fn test_extract_path_from_traversal_msg_returns_none_missing_closing_suffix() {
+        // No closing "' is outside base dir" — rsplit_once will return None.
+        let msg = "[E-DAT-006] path traversal blocked: '/etc/passwd is outside base dir \
+                   (at SourceSpan { line: 1, col: 1 })";
+        let result = extract_path_from_traversal_msg(msg);
+        assert_eq!(
+            result, None,
+            "message missing closing suffix must return None; got: {result:?}"
+        );
+    }
+
+    /// `test_extract_path_from_traversal_msg_returns_none_empty_path`
+    ///
+    /// F-P8-LOW-002: A message with an empty quoted path (`''`) must return `None`
+    /// because an empty path is not actionable.
+    #[test]
+    fn test_extract_path_from_traversal_msg_returns_none_empty_path() {
+        let msg = "[E-DAT-006] path traversal blocked: '' is outside base dir \
+                   (at SourceSpan { line: 1, col: 1 })";
+        let result = extract_path_from_traversal_msg(msg);
+        assert_eq!(
+            result, None,
+            "message with empty path must return None; got: {result:?}"
+        );
+    }
+
+    /// `test_extract_path_from_traversal_msg_returns_none_missing_marker`
+    ///
+    /// F-P8-LOW-002: A message that does not contain the `"path traversal blocked: '"`
+    /// marker must return `None`.
+    #[test]
+    fn test_extract_path_from_traversal_msg_returns_none_missing_marker() {
+        let msg = "some other error message without the path traversal marker";
+        let result = extract_path_from_traversal_msg(msg);
+        assert_eq!(
+            result, None,
+            "message without traversal marker must return None; got: {result:?}"
+        );
+    }
+
+    /// `test_extract_path_from_traversal_msg_handles_apostrophe_in_path`
+    ///
+    /// F-P8-OBS: A path containing an apostrophe (e.g., `/tmp/foo's_dir/file.json`)
+    /// must be extracted correctly.  The earlier `find('\'')` implementation would
+    /// have truncated at the first apostrophe and returned `Some("/tmp/foo")`.
+    /// The `rsplit_once("' is outside base dir")` fix extracts the full path.
+    #[test]
+    fn test_extract_path_from_traversal_msg_handles_apostrophe_in_path() {
+        let msg = "[E-DAT-006] path traversal blocked: '/tmp/foo's_dir/file.json' \
+                   is outside base dir (at SourceSpan { line: 1, col: 1 })";
+        let result = extract_path_from_traversal_msg(msg);
+        assert_eq!(
+            result,
+            Some("/tmp/foo's_dir/file.json"),
+            "path with apostrophe must be extracted in full; got: {result:?}"
         );
     }
 
