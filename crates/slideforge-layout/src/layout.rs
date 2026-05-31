@@ -286,18 +286,21 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
             None => vec![],
         };
 
+        // BC-1.14.001/002/003 (STORY-035): Extract register-gated content from
+        // the evaluated slide. `Slide::extract_register_content` traverses
+        // the slide's fields for "notes", "report", and "detail" keys, converts
+        // each present, non-null value to inline nodes, and tags with the correct
+        // Register variant. The result is ordered Notes < Report < Detail
+        // (BC-1.14.004 invariant 3 — deterministic ordering).
+        let register_content = slide.extract_register_content();
+
         laid_out_slides.push(LaidOutSlide {
             source_index,
             slide_type_keyword,
             frames: all_frames,
             speaker_notes,
             register_tags,
-            // STORY-035: populated by extract_register_content pass in slideforge-eval.
-            // The layout engine does not yet call that pass; register_content is
-            // seeded empty here. When STORY-035 implementation is complete,
-            // eval_deck will call extract_register_content and thread the result
-            // through to LaidOutSlide before layout runs.
-            register_content: vec![],
+            register_content,
         });
     }
 

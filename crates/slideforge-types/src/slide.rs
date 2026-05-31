@@ -14,6 +14,37 @@ use crate::slide_overlay::SlideOverlay;
 use crate::span::SourceSpan;
 use crate::value::Value;
 
+// ─── Private helper ───────────────────────────────────────────────────────────
+
+/// Convert a resolved [`FieldValue`] into a sequence of [`InlineNode`]s for
+/// register content extraction.
+///
+/// Returns `None` for `Value::Null`, `Value::List`, and `Value::Map` —
+/// these variants are semantically absent or non-text. All other variants
+/// produce a non-empty or empty inline sequence.
+fn field_value_to_register_inlines(fv: &FieldValue) -> Option<Vec<InlineNode>> {
+    match fv {
+        // Null, List, Map — semantically absent or non-text; produce no entry.
+        FieldValue::Literal(Value::Null | Value::List(_) | Value::Map(_)) => None,
+        // Plain string — the common case for register fields after evaluation.
+        FieldValue::Literal(Value::Str(s)) => Some(vec![InlineNode::Plain(Arc::clone(s))]),
+        // Scalar variants — convert to text.
+        FieldValue::Literal(Value::Int(n)) => {
+            Some(vec![InlineNode::Plain(Arc::from(n.to_string().as_str()))])
+        },
+        FieldValue::Literal(Value::Bool(b)) => {
+            Some(vec![InlineNode::Plain(Arc::from(b.to_string().as_str()))])
+        },
+        FieldValue::Literal(Value::Float(f)) => {
+            Some(vec![InlineNode::Plain(Arc::from(f.to_string().as_str()))])
+        },
+        // Rich inline content (already-evaluated).
+        FieldValue::Inlines(nodes) => Some(nodes.clone()),
+        // Expr/Interpolated should have been resolved; emit empty on error-fallback.
+        FieldValue::Expr(_) | FieldValue::Interpolated(_) => Some(vec![]),
+    }
+}
+
 /// An interpolated string part — either a literal or an expression.
 ///
 /// Field values like titles may contain `{{ expr }}` interpolations. Before
@@ -90,6 +121,69 @@ pub struct Slide {
 }
 
 impl Slide {
+    /// Extract all register-gated content from this slide.
+    ///
+    /// Traverses `self.fields` for the three canonical register field names
+    /// (`"notes"`, `"report"`, `"detail"`) and converts each present, non-null
+    /// field value into a [`RegisteredContent`] entry tagged with the correct
+    /// [`Register`] variant.
+    ///
+    /// The result is ordered `Notes < Report < Detail` regardless of field
+    /// insertion order, satisfying BC-1.14.004 invariant 3 (deterministic ordering).
+    ///
+    /// A `FieldValue::Literal(Value::Null)` is treated as absent (returns no entry).
+    /// All other non-null field values are converted to inline text content.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use slideforge_types::{Slide, FieldValue, Value, Register, SourceSpan, OrderedMap};
+    /// use slideforge_types::slide_overlay::SlideOverlay;
+    /// use std::sync::Arc;
+    ///
+    /// let mut fields = OrderedMap::new();
+    /// fields.insert(Arc::from("notes"), FieldValue::Literal(Value::Str(Arc::from("Hello"))));
+    /// let slide = Slide {
+    ///     slide_type: Arc::from("title"),
+    ///     fields,
+    ///     blocks: vec![],
+    ///     register: None,
+    ///     tags: vec![],
+    ///     source_span: SourceSpan::default(),
+    ///     overlay: None,
+    /// };
+    /// let content = slide.extract_register_content();
+    /// assert_eq!(content.len(), 1);
+    /// assert_eq!(content[0].register, Register::Notes);
+    /// ```
+    #[must_use]
+    pub fn extract_register_content(&self) -> Vec<crate::register::RegisteredContent> {
+        use crate::register::RegisteredContent;
+
+        let register_pairs: [(Register, &str); 3] = [
+            (Register::Notes, "notes"),
+            (Register::Report, "report"),
+            (Register::Detail, "detail"),
+        ];
+
+        let mut result = Vec::with_capacity(3);
+
+        for (register, field_name) in register_pairs {
+            if let Some(inlines) = self
+                .fields
+                .get(field_name)
+                .and_then(field_value_to_register_inlines)
+            {
+                result.push(RegisteredContent {
+                    register,
+                    content: inlines,
+                });
+            }
+        }
+
+        result
+    }
+
     /// Return the slide's title field as a string slice, if it is a plain
     /// `Value::Str` field value. Returns `None` if absent or not yet resolved.
     ///

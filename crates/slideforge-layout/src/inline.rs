@@ -415,7 +415,7 @@ mod tests {
             }],
             speaker_notes: None,
             register_tags: vec![],
-        register_content: vec![],
+            register_content: vec![],
         }
     }
 
@@ -437,7 +437,7 @@ mod tests {
             }],
             speaker_notes: None,
             register_tags: vec![],
-        register_content: vec![],
+            register_content: vec![],
         }
     }
 

@@ -880,7 +880,7 @@ mod tests {
             frames: vec![text_run_frame],
             speaker_notes: None,
             register_tags: vec![],
-        register_content: vec![],
+            register_content: vec![],
         };
         let deck = make_deck(vec![make_slide("title")]);
 

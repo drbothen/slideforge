@@ -36,7 +36,7 @@
 //! This module is pure-core: no I/O, no filesystem access, no network calls.
 //! The function is a pure transformation from `&Slide` to `Vec<RegisteredContent>`.
 
-use slideforge_types::{FieldValue, InlineNode, RegisteredContent, Slide};
+use slideforge_types::{FieldValue, InlineNode, Register, RegisteredContent, Slide, Value};
 
 // ─── Public API ──────────────────────────────────────────────────────────────
 
@@ -44,7 +44,7 @@ use slideforge_types::{FieldValue, InlineNode, RegisteredContent, Slide};
 ///
 /// For each of the three register field names (`"notes"`, `"report"`,
 /// `"detail"`), if the field is present in `slide.fields` and its value
-/// contains non-empty text, a [`RegisteredContent`] entry is produced and
+/// is not `Value::Null`, a [`RegisteredContent`] entry is produced and
 /// appended to the result.
 ///
 /// # Preconditions (BC-1.14.001/002/003 invariant 1)
@@ -58,7 +58,7 @@ use slideforge_types::{FieldValue, InlineNode, RegisteredContent, Slide};
 ///
 /// # Postconditions
 ///
-/// - The returned `Vec` contains one entry per non-empty register field.
+/// - The returned `Vec` contains one entry per present, non-null register field.
 /// - Each entry's `content` is fully evaluated inline content.
 /// - The `Vec` is ordered: Notes < Report < Detail (matching
 ///   [`Register`]'s ordering), so iteration is deterministic.
@@ -67,12 +67,33 @@ use slideforge_types::{FieldValue, InlineNode, RegisteredContent, Slide};
 ///
 /// A `Vec<RegisteredContent>` with 0 to 3 entries. Empty if the slide has
 /// no register fields.
-pub fn extract_register_content(_slide: &Slide) -> Vec<RegisteredContent> {
-    todo!(
-        "STORY-035: implement register routing pass — extract notes/report/detail \
-         fields from slide.fields, convert to InlineNode sequences, and tag with \
-         the correct Register variant. See BC-1.14.001, BC-1.14.002, BC-1.14.003."
-    )
+#[must_use]
+pub fn extract_register_content(slide: &Slide) -> Vec<RegisteredContent> {
+    // Process registers in canonical order: Notes, Report, Detail.
+    // This guarantees a deterministic output ordering regardless of the insertion
+    // order in slide.fields (ordering invariant, BC-1.14.004).
+    let register_pairs: [(Register, &str); 3] = [
+        (Register::Notes, "notes"),
+        (Register::Report, "report"),
+        (Register::Detail, "detail"),
+    ];
+
+    let mut result = Vec::with_capacity(3);
+
+    for (register, field_name) in register_pairs {
+        if let Some(inlines) = slide
+            .fields
+            .get(field_name)
+            .and_then(field_value_to_inlines)
+        {
+            result.push(RegisteredContent {
+                register,
+                content: inlines,
+            });
+        }
+    }
+
+    result
 }
 
 // ─── Private helpers ──────────────────────────────────────────────────────────
@@ -83,15 +104,43 @@ pub fn extract_register_content(_slide: &Slide) -> Vec<RegisteredContent> {
 /// plain-text field value produces a single [`InlineNode::Plain`]; a
 /// rich-inline field value preserves the inline node sequence as-is.
 ///
-/// Returns `None` if the field value is empty or cannot be rendered as
-/// inline content (e.g., `FieldValue::Literal(Value::Null)`).
-#[allow(dead_code)]
-fn field_value_to_inlines(_fv: &FieldValue) -> Option<Vec<InlineNode>> {
-    todo!(
-        "STORY-035: implement field_value_to_inlines — convert FieldValue::Literal(Str), \
-         FieldValue::Inlines, and FieldValue::Interpolated(already-resolved) into \
-         Vec<InlineNode>. Return None for empty/null/non-text values."
-    )
+/// Returns `None` only if the field value is `FieldValue::Literal(Value::Null)`,
+/// which represents a semantically absent field. An empty string (`""`) is a
+/// valid (if vacuous) author intent and returns `Some(vec![InlineNode::Plain("")])`
+/// so that exporters can observe the explicit empty declaration.
+///
+/// Any `Expr` or `Interpolated` variant arriving here is a sign of an evaluation
+/// error already reported upstream; only the literal parts are preserved.
+fn field_value_to_inlines(fv: &FieldValue) -> Option<Vec<InlineNode>> {
+    match fv {
+        // Null, List, Map — semantically absent or non-text; produce no entry.
+        FieldValue::Literal(Value::Null | Value::List(_) | Value::Map(_)) => None,
+
+        // Plain string (the common case after evaluation).
+        FieldValue::Literal(Value::Str(s)) => {
+            Some(vec![InlineNode::Plain(std::sync::Arc::clone(s))])
+        },
+
+        // Scalar Literal variants formatted as strings for register content.
+        FieldValue::Literal(Value::Int(n)) => Some(vec![InlineNode::Plain(std::sync::Arc::from(
+            n.to_string().as_str(),
+        ))]),
+        FieldValue::Literal(Value::Bool(b)) => Some(vec![InlineNode::Plain(std::sync::Arc::from(
+            b.to_string().as_str(),
+        ))]),
+        FieldValue::Literal(Value::Float(f)) => Some(vec![InlineNode::Plain(
+            std::sync::Arc::from(f.to_string().as_str()),
+        )]),
+
+        // Rich inline content (already-evaluated). Empty Inlines preserves author intent.
+        FieldValue::Inlines(nodes) => Some(nodes.clone()),
+
+        // Expr and Interpolated variants should have been resolved by eval_deck before
+        // this function is called. If they arrive here, it means the evaluator encountered
+        // an error and could not resolve them. Produce an empty inline sequence so the
+        // register entry is still emitted (preserving author intent) without crashing.
+        FieldValue::Expr(_) | FieldValue::Interpolated(_) => Some(vec![]),
+    }
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -99,23 +148,24 @@ fn field_value_to_inlines(_fv: &FieldValue) -> Option<Vec<InlineNode>> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 #[allow(clippy::expect_used)]
+// Register field names (e.g. `register_content`) are used as prose in test
+// doc comments; suppressing the doc_markdown lint for the test module avoids
+// requiring backticks around every occurrence.
+#[allow(clippy::doc_markdown)]
 mod tests {
     use std::sync::Arc;
 
     use insta::assert_debug_snapshot;
-    use slideforge_types::{FieldValue, InlineNode, OrderedMap, Register, RegisteredContent, Slide,
-        SourceSpan, Value};
-    use slideforge_types::slide_overlay::SlideOverlay;
+    use slideforge_types::{
+        FieldValue, InlineNode, OrderedMap, Register, RegisteredContent, Slide, SourceSpan, Value,
+    };
 
     use super::*;
 
     // ─── Test helpers ─────────────────────────────────────────────────────────
 
     /// Build a minimal `Slide` with the given field map and slide type.
-    fn make_slide_with_fields(
-        slide_type: &str,
-        fields: OrderedMap<Arc<str>, FieldValue>,
-    ) -> Slide {
+    fn make_slide_with_fields(slide_type: &str, fields: OrderedMap<Arc<str>, FieldValue>) -> Slide {
         Slide {
             slide_type: Arc::from(slide_type),
             fields,
@@ -238,7 +288,11 @@ mod tests {
 
         let result = extract_register_content(&slide);
 
-        assert_eq!(result.len(), 1, "slide with report field must produce 1 entry");
+        assert_eq!(
+            result.len(),
+            1,
+            "slide with report field must produce 1 entry"
+        );
         assert_eq!(
             result[0].register,
             Register::Report,
@@ -278,7 +332,11 @@ mod tests {
 
         let result = extract_register_content(&slide);
 
-        assert_eq!(result.len(), 1, "slide with detail field must produce 1 entry");
+        assert_eq!(
+            result.len(),
+            1,
+            "slide with detail field must produce 1 entry"
+        );
         assert_eq!(
             result[0].register,
             Register::Detail,
@@ -476,7 +534,11 @@ mod tests {
 
         let result = extract_register_content(&slide);
 
-        assert_eq!(result.len(), 1, "notes-only slide must produce exactly 1 entry");
+        assert_eq!(
+            result.len(),
+            1,
+            "notes-only slide must produce exactly 1 entry"
+        );
         assert!(result[0].register.is_notes());
     }
 
@@ -527,8 +589,14 @@ mod tests {
             "report + detail slide must produce exactly 2 entries; got: {result:?}"
         );
         let registers: Vec<Register> = result.iter().map(|rc| rc.register).collect();
-        assert!(registers.contains(&Register::Report), "Report must be present");
-        assert!(registers.contains(&Register::Detail), "Detail must be present");
+        assert!(
+            registers.contains(&Register::Report),
+            "Report must be present"
+        );
+        assert!(
+            registers.contains(&Register::Detail),
+            "Detail must be present"
+        );
         assert!(
             !registers.contains(&Register::Notes),
             "Notes must NOT be present when notes field absent"
@@ -624,10 +692,7 @@ mod tests {
     #[test]
     fn test_bc_1_14_001_null_register_field_produces_no_entry() {
         let mut fields = OrderedMap::new();
-        fields.insert(
-            Arc::from("notes"),
-            FieldValue::Literal(Value::Null),
-        );
+        fields.insert(Arc::from("notes"), FieldValue::Literal(Value::Null));
         let slide = make_slide_with_fields("content", fields);
 
         let result = extract_register_content(&slide);
@@ -671,7 +736,10 @@ mod tests {
         assert_eq!(rc, rc2, "RegisteredContent must implement PartialEq");
 
         let debug_str = format!("{rc:?}");
-        assert!(debug_str.contains("RegisteredContent"), "must implement Debug");
+        assert!(
+            debug_str.contains("RegisteredContent"),
+            "must implement Debug"
+        );
 
         let mut set = HashSet::new();
         set.insert(rc.clone());
@@ -680,7 +748,11 @@ mod tests {
         // Different content produces different hash entries.
         let rc3 = RegisteredContent::plain(Register::Report, Arc::from("hello"));
         set.insert(rc3);
-        assert_eq!(set.len(), 2, "Different registers must produce different entries");
+        assert_eq!(
+            set.len(),
+            2,
+            "Different registers must produce different entries"
+        );
     }
 
     /// RegisteredContent::plain() is_empty() returns false for non-empty content.
@@ -711,17 +783,19 @@ mod tests {
         nodes
             .iter()
             .map(|node| match node {
-                InlineNode::Plain(s) => s.as_ref().to_owned(),
-                InlineNode::Bold(children) => extract_plain_text(children),
-                InlineNode::Italic(children) => extract_plain_text(children),
-                InlineNode::Code(s) => s.as_ref().to_owned(),
+                // Leaf text nodes — return the text directly.
+                InlineNode::Plain(s) | InlineNode::Code(s) | InlineNode::Xref(s) => {
+                    s.as_ref().to_owned()
+                },
+                // Container nodes — recurse into children.
+                InlineNode::Bold(children)
+                | InlineNode::Italic(children)
+                | InlineNode::Footnote(children)
+                | InlineNode::Superscript(children)
+                | InlineNode::Subscript(children)
+                | InlineNode::Strikethrough(children)
+                | InlineNode::Highlight(children) => extract_plain_text(children),
                 InlineNode::Link { text, .. } => extract_plain_text(text),
-                InlineNode::Footnote(children) => extract_plain_text(children),
-                InlineNode::Superscript(children) => extract_plain_text(children),
-                InlineNode::Subscript(children) => extract_plain_text(children),
-                InlineNode::Strikethrough(children) => extract_plain_text(children),
-                InlineNode::Highlight(children) => extract_plain_text(children),
-                InlineNode::Xref(s) => s.as_ref().to_owned(),
                 InlineNode::Math(m) => m.latex.as_ref().to_owned(),
             })
             .collect()

@@ -111,7 +111,7 @@ impl SlideType for ImageSlideType {
             frames: vec![],
             speaker_notes: None,
             register_tags: vec![],
-        register_content: vec![],
+            register_content: vec![],
         })
     }
 }
