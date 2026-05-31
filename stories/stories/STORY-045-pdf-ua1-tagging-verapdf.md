@@ -184,6 +184,20 @@ The CI workflow (`pdf-ua1.yml`) in this story depends on the CI infrastructure
 established by STORY-051 (CI matrix job), which is in Wave 1. The pdf-ua1 job is
 a separate workflow file, not an addition to the matrix job.
 
+**CRITICAL forward obligation from STORY-043 — frame-level Diagram/Chart placeholder alt:**
+STORY-043's `SlideTagEngine` uses hardcoded placeholder alt strings (`"diagram"` /
+`"chart"`) for frame-level `FrameContent::Diagram` and `FrameContent::Chart` because
+`NormalizedDiagramSvg` carries no `alt` field in the IR. The non-UA-1 validator mode
+used in STORY-043 does not reject these placeholders. STORY-045 MUST replace these
+placeholder strings with real alt text sourced from `DiagramSpec.alt` /
+`ChartSpec.alt` (or the corresponding IR field carrying the DSL `alt "..."` value)
+before enabling `Validator::UA1`. If this is not done, `verapdf --flavour ua1` will
+see a generic `"diagram"` or `"chart"` string as the `/Alt` value for every frame-level
+diagram/chart and pass on an "alt lie" — a structural accessibility defect that
+satisfies the syntax check but violates the semantic requirement that `/Alt` describes
+the actual content. AC-004 in this story (figures tagged with /Alt text) MUST include
+frame-level Diagram/Chart frames as part of its test fixture, not only inline images.
+
 ## Architecture Compliance Rules
 
 1. **Chrome is forbidden (BC-4.03.001 invariant 1 and BC-4.03.002)**: The CI job

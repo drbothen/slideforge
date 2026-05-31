@@ -26,7 +26,7 @@ dtu_services: []
 wave_1_gate: "PASS 2026-05-27 — 3 gate passes, 11 findings fixed"
 wave_2_gate: "PASS 2026-05-27 — 11 gate passes, 19 findings fixed, 3/3 clean (passes 9-10-11)"
 wave_3_gate: "PASSED 2026-05-31 — PR #38 (7d266ad7); #[non_exhaustive] hardening + slideforge-brand [workspace.dependencies] + conventions.md v1.3; adversary pass 8 strict-CLEAN; holdout must-pass 5/5"
-wave_4_batch_a_complete: 2
+wave_4_batch_a_complete: 3
 wave_4_batch_a_total: 9
 wave_4_started: 2026-05-31
 wave_4_total_stories: 17
@@ -37,8 +37,9 @@ wave_4_batch_c: "STORY-049→050 (after Batch B)"
 wave_4_new_p0: "STORY-077 (8pts SectionBlock IR extension) — architect-directed spin-out from STORY-035 F-002 descope; blocks STORY-041/042"
 story035_status: "MERGED — PR #39, squash commit 0e7d9fde (2026-05-31). 10-pass LOCAL adversary cascade, 3/3 strict-CLEAN at passes 8/9/10. Option D single-source eval-stage routing. AC-005 descoped → STORY-077."
 story036_status: "MERGED — PR #40, squash commit 094f8dca (2026-05-31). 9-pass LOCAL adversary cascade, 3/3 strict-CLEAN at passes 7/8/9. BleedChecker test utility (test-utils-gated). Exporter ACs deferred to STORY-037/041/046. 6 fix-bursts (XML entity decoder hardening)."
-develop_sha: "094f8dca"
-develop_pr_count: 40
+story043_status: "MERGED — PR #41, squash commit 331d456c (2026-05-31). 14-pass LOCAL adversary cascade, 3/3 strict-CLEAN at passes 12/13/14. New slideforge-pdf crate (krilla 0.6.0 pure-Rust PDF; moved from [workspace] exclude → members). PdfExporter + SlideTagEngine + svg_embed + font + check-pdf-deps CI job. indexmap 2.9→2.10. 2 MED + 3 LOW security findings fixed. Workspace now 16 crates."
+develop_sha: "331d456c"
+develop_pr_count: 41
 workspace_tests: "~2584 (full-suite run 2026-05-31 @ 584cbc6f; fix-PR #38 additive config+attrs only)"
 workspace_test_failures: 0
 ---
@@ -57,24 +58,25 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. Generates branded .pptx
 
 ### Where we are
 
-Phase 3, Wave 4. Wave 3 COMPLETE + Gate PASSED (2026-05-31, 22 stories, 2584 tests GREEN, adversary 3-CLEAN passes 6/7/8, fix-PR #38 @ `7d266ad7`). **Wave 4 STARTED, Batch A 2/9 complete.**
+Phase 3, Wave 4. Wave 3 COMPLETE + Gate PASSED (2026-05-31, 22 stories, 2584 tests GREEN, adversary 3-CLEAN passes 6/7/8, fix-PR #38 @ `7d266ad7`). **Wave 4 STARTED, Batch A 3/9 complete.**
 
-**STORY-035 (Writing Register Routing) MERGED** — PR #39, squash `0e7d9fde`, 2026-05-31. 10-pass LOCAL adversary cascade, 3/3 strict-CLEAN at passes 8/9/10. Option D single-source eval-stage routing. AC-005 descoped → STORY-077 (EC-003). BC-1.14.004 added.
+**STORY-035 (Writing Register Routing) MERGED** — PR #39, squash `0e7d9fde`, 2026-05-31. 10-pass LOCAL adversary, 3/3 strict-CLEAN at P8/9/10. Option D routing. AC-005 → STORY-077.
 
-**STORY-036 (No-Bleed Invariant) MERGED** — PR #40, squash `094f8dca`, 2026-05-31. 9-pass LOCAL adversary cascade, 3/3 strict-CLEAN at passes 7/8/9. BleedChecker test utility shipped (test-utils feature-gated). 6 fix-bursts hardening the hand-rolled XML entity decoder (false-negative → false-positive/green entity-joins → greedy-boundary sentinel erasure → multibyte panic). Exporter ACs (AC-001..AC-007 un-ignore) deferred to STORY-037/041/046. pr-reviewer APPROVE; security CLEAN; CI 18/18.
+**STORY-036 (No-Bleed Invariant) MERGED** — PR #40, squash `094f8dca`, 2026-05-31. 9-pass LOCAL adversary, 3/3 strict-CLEAN at P7/8/9. BleedChecker test-utils feature-gated. 6 fix-bursts (XML entity decoder). Exporter ACs → STORY-037/041/046.
 
-develop: `094f8dca` (40 merged PRs). 0 active feature worktrees. 0 open PRs.
+**STORY-043 (PDF Core) MERGED** — PR #41, squash `331d456c`, 2026-05-31. 14-pass LOCAL adversary cascade, 3/3 strict-CLEAN at passes 12/13/14. New `slideforge-pdf` crate (krilla 0.6.0, pure-Rust, no FFI/subprocess; moved from `[workspace] exclude` → `members`). PdfExporter + SlideTagEngine + svg_embed + font subsetting + `check-pdf-deps` CI job. indexmap bumped 2.9→2.10. Security: 2 MED + 3 LOW found and fixed (SVG recursion/size caps, symlink-safe font scan, error hygiene). CI 19/19. Workspace now 16 crates. Pre-flight pattern (tech-validation + architect scope-directive) validated — reuse for STORY-044/045.
+
+develop: `331d456c` (41 merged PRs). 0 active feature worktrees. 0 open PRs.
 
 **STORY-077 CREATED:** SectionBlock IR Extension (EPIC-18, P0, 8pts, Wave 4 Batch A). Architect-directed spin-out from STORY-035 F-002 descope. Anchors BC-3.02.002 + BC-1.14.003. Blocks STORY-041/042.
 
 ### Top next action
 
-**Dispatch next Wave 4 Batch A story: STORY-043 (PDF Core).** STORY-036 done. STORY-043 scaffolds the slideforge-pdf crate + moves it from `[workspace] exclude` → `members` as its first task. Remaining Batch A (7 stories):
+**Dispatch next Wave 4 Batch A story: STORY-044 (PDF coordinate mapping + Y-flip; draws text, exercises font subsetting; owns AC-009). Unblocked by STORY-043 MERGED.** Remaining Batch A (6 stories):
 
 | Story | Title | Unblocked? |
 |-------|-------|-----------|
-| STORY-043 | PDF Core (scaffold slideforge-pdf crate; move from `[workspace] exclude` → `members` first) | YES |
-| STORY-044 | PDF Layout Integration | After STORY-043 |
+| STORY-044 | PDF Layout Integration (coord map + Y-flip, font subsetting, AC-009) | YES — unblocked by STORY-043 |
 | STORY-045 | PDF Export Pipeline | After STORY-044 |
 | STORY-073 | Bullets Layout (P1 pull-in) | YES |
 | STORY-075 | Footer Detection (P1 pull-in) | YES |
@@ -93,9 +95,9 @@ Before accepting any "clippy clean": run `rustup update stable && cargo clippy -
 
 ## Current Status
 
-Phase 3 IN PROGRESS. Wave 1 COMPLETE (gate PASSED). Wave 2 COMPLETE (gate PASSED). Wave 3 COMPLETE (22/22 stories, gate PASSED 2026-05-31). **Wave 4 STARTED — 17 stories / 104 pts, Batch A 2/9 complete (STORY-035 + STORY-036 MERGED).**
+Phase 3 IN PROGRESS. Wave 1 COMPLETE (gate PASSED). Wave 2 COMPLETE (gate PASSED). Wave 3 COMPLETE (22/22 stories, gate PASSED 2026-05-31). **Wave 4 STARTED — 17 stories / 104 pts, Batch A 3/9 complete (STORY-035 + STORY-036 + STORY-043 MERGED).**
 
-develop: `094f8dca` (40 merged PRs, ~2584 tests, 0 failures). 0 active feature worktrees. 77 stories / 462 pts total.
+develop: `331d456c` (41 merged PRs, ~2584 tests, 0 failures). 0 active feature worktrees. 77 stories / 462 pts total. Workspace: 16 crates.
 
 ## Phase Progress
 
@@ -106,7 +108,7 @@ develop: `094f8dca` (40 merged PRs, ~2584 tests, 0 failures). 0 active feature w
 | Planning (25 DSL decisions) | DONE 2026-05-24 | q1–q25 decision docs + 14 research threads + 7/7 spikes resolved |
 | Phase 1: Spec Crystallization | DONE — APPROVED 2026-05-25 | PRD (109 BCs, 15 HS, 4 supplements) + architecture (14 ADRs, 15 VPs, 20 crates) + UX spec. 17 passes, 69 findings, 3/3 clean. |
 | Phase 2: Story Decomposition | DONE — APPROVED 2026-05-25 | 77 stories, 21 epics, 6 waves, 462 pts. 22 passes, 96+ findings, 3/3 clean. |
-| Phase 3: TDD Implementation | IN PROGRESS — Wave 1: GATE PASSED. Wave 2: GATE PASSED. Wave 3: GATE PASSED 2026-05-31. **Wave 4 STARTED — Batch A 2/9 (STORY-035 + STORY-036 MERGED).** | Per-story delivery |
+| Phase 3: TDD Implementation | IN PROGRESS — Wave 1: GATE PASSED. Wave 2: GATE PASSED. Wave 3: GATE PASSED 2026-05-31. **Wave 4 STARTED — Batch A 3/9 (STORY-035 + STORY-036 + STORY-043 MERGED).** | Per-story delivery |
 | Phase 4: Holdout Evaluation | NOT STARTED | Per-wave holdout gates |
 | Phase 5: Adversarial Refinement | NOT STARTED | Post-implementation cascade |
 | Phase 6: Formal Hardening | NOT STARTED | Kani + fuzz + mutants + semgrep |
@@ -118,8 +120,8 @@ develop: `094f8dca` (40 merged PRs, ~2584 tests, 0 failures). 0 active feature w
 |-------|-------|--------|----|--------|
 | STORY-035 | Writing Register Routing | MERGED | #39 | 0e7d9fde |
 | STORY-036 | No-Bleed Invariant | MERGED | #40 | 094f8dca |
-| STORY-043 | PDF Core (new crate) | NOT STARTED | — | — |
-| STORY-044 | PDF Layout Integration | NOT STARTED (after 043) | — | — |
+| STORY-043 | PDF Core (new crate) | MERGED | #41 | 331d456c |
+| STORY-044 | PDF Layout Integration | NOT STARTED (after 043 ✓) | — | — |
 | STORY-045 | PDF Export Pipeline | NOT STARTED (after 044) | — | — |
 | STORY-073 | Bullets Layout | NOT STARTED | — | — |
 | STORY-075 | Footer Detection | NOT STARTED | — | — |
@@ -141,28 +143,29 @@ develop: `094f8dca` (40 merged PRs, ~2584 tests, 0 failures). 0 active feature w
 - 2026-05-31 — STORY-035 MERGED (PR #39, 0e7d9fde) — Writing Register Routing. 10-pass adversary cascade, 3/3 strict-CLEAN (passes 8/9/10). Option D single-source eval-stage routing. AC-005 descoped → STORY-077. Wave 4 Batch A: 1/8 complete.
 - 2026-05-31 — STORY-077 CREATED — SectionBlock IR Extension (architect-directed spin-out, EPIC-18, P0, 8pts). Blocks STORY-041/042. Project total: 77 stories / 462 pts.
 - 2026-05-31 — STORY-036 MERGED (PR #40, 094f8dca) — No-Bleed Invariant / BleedChecker. 9-pass adversary cascade, 3/3 strict-CLEAN (passes 7/8/9). 6 fix-bursts (XML entity decoder). Exporter ACs deferred to STORY-037/041/046. Wave 4 Batch A: 2/9 complete.
+- 2026-05-31 — STORY-043 MERGED (PR #41, 331d456c) — PDF Core (slideforge-pdf crate). 14-pass adversary cascade, 3/3 strict-CLEAN (passes 12/13/14). krilla 0.6.0 pure-Rust PDF (no FFI). PdfExporter + SlideTagEngine + svg_embed + font + check-pdf-deps CI. indexmap 2.9→2.10. 2 MED + 3 LOW security fixed. Workspace 16 crates. STORY-044 unblocked. Wave 4 Batch A: 3/9 complete.
 
 ## Session Resume Checkpoint
 
 | Field | Value |
 |-------|-------|
 | **Date** | 2026-05-31 |
-| **Position** | Phase 3, Wave 4 Batch A — 2/9 complete. STORY-035 + STORY-036 MERGED. Top action: dispatch STORY-043 (PDF Core — scaffolds slideforge-pdf crate). |
-| **develop SHA** | 094f8dca (40 merged PRs) |
-| **Workspace tests** | ~2584 (full-suite 2026-05-31 @ 584cbc6f; fix-PR #38 additive only) |
-| **Workspace crates** | 13 (7 Wave 1 + 6 Batch 1: data, brand, layout, math, charts, diagrams) |
+| **Position** | Phase 3, Wave 4 Batch A — 3/9 complete. STORY-035 + STORY-036 + STORY-043 MERGED. Top action: dispatch STORY-044 (PDF coord map + Y-flip; draws text, font subsetting, AC-009). |
+| **develop SHA** | 331d456c (41 merged PRs) |
+| **Workspace tests** | ~2584 (full-suite 2026-05-31 @ 584cbc6f; fix-PR #38 additive only; STORY-043 CI 19/19) |
+| **Workspace crates** | 16 (13 prior + slideforge-pdf added in STORY-043) |
 | **Active worktrees** | 0 |
 | **Open PRs** | 0 |
 | **STORY-035** | MERGED — PR #39, 0e7d9fde. 10-pass adversary, 3/3 strict-CLEAN (P8/9/10). Option D routing. AC-005 → STORY-077. |
 | **STORY-036** | MERGED — PR #40, 094f8dca. 9-pass adversary, 3/3 strict-CLEAN (P7/8/9). BleedChecker test-utils feature-gated. 6 fix-bursts (XML entity decoder). Exporter ACs → STORY-037/041/046. |
+| **STORY-043** | MERGED — PR #41, 331d456c. 14-pass adversary, 3/3 strict-CLEAN (P12/13/14). slideforge-pdf crate (krilla 0.6.0, pure-Rust). 2 MED + 3 LOW security fixed. check-pdf-deps CI job. indexmap 2.9→2.10. |
 | **STORY-077** | Created 2026-05-31. SectionBlock IR Extension, EPIC-18, P0, 8pts, Batch A. Blocks STORY-041/042. |
-| **Wave 4 Batch A remaining** | STORY-043→044→045 (pdf crate), STORY-073, STORY-075, STORY-076, STORY-077 |
-| **STORY-043 prerequisite** | Scaffold slideforge-pdf crate + move from `[workspace] exclude` → `members` as first task. |
+| **Wave 4 Batch A remaining** | STORY-044→045 (pdf chain), STORY-073, STORY-075, STORY-076, STORY-077 |
 | **BC deltas in effect** | BC-2.01.001 v1.2 (EC-006 srgbClr, Option B); BC-2.01.003 v1.9 (EC-003 widened); error-taxonomy v2.3. |
-| **Cross-story caveat (S36→S37/S41)** | BleedChecker AC-001..AC-007 tests are `#[ignore]`'d pending PPTX/DOCX exporters. When STORY-037 (PPTX) and STORY-041 (DOCX) un-ignore them, register sentinels MUST be emitted as contiguous XML runs (or tags stripped before search). Content split across runs (`<w:t>R&amp;D</w:t><w:t> roadmap</w:t>`) will NOT match the decoded sentinel. Add this constraint to STORY-037 and STORY-041 implementation notes. |
+| **Cross-story caveat (S36→S37/S41)** | BleedChecker AC-001..AC-007 tests are `#[ignore]`'d pending PPTX/DOCX exporters. Register sentinels MUST be contiguous XML runs. Add to STORY-037 + STORY-041 implementation notes. |
 | **factory-artifacts** | Local only. Push requires explicit human authorization per CLAUDE.md. |
 | **Holdout caveat** | Full mean-satisfaction holdout (≥0.85) deferred to post-exporter waves; 9/15 scenarios blocked by missing CLI + exporters. |
-| **Archived history** | Verbose per-merge decisions log + prior checkpoints → .factory/cycles/STORY-035/burst-log.md + session-checkpoints.md |
+| **Archived history** | Prior checkpoints → .factory/cycles/STORY-043/session-checkpoints.md |
 
 ## Per-Story Delivery Flow (reference)
 
@@ -203,3 +206,4 @@ Production-grade from day 1. Key enforced gates:
 |------|------|----------|-------|
 | 2026-05-28 | LOCAL adversary 3-CLEAN on STORY-034 ran macOS-only, missed Linux Trebuchet MS substitution failure (BC-1.12.001 violation) | LOW | Required 4 CI iterations. Process-gap candidate: should LOCAL adversary spawn a Linux-container test pass for font/text/SVG/rendering stories? Surface to user for codification decision. |
 | 2026-05-31 | BC-1.14.004 frontmatter has `subsystem: SS-TBD` + unfilled template placeholders (Architecture Module, Stories, Story Anchor, VP Anchors). May affect other BCs. | LOW | Deferred to a future spec-hygiene pass. Owner: architect / spec-steward. No story blocker — do not block Wave 4 delivery on this. |
+| 2026-05-31 | slideforge-diagrams `src/normalize.rs` usvg_normalize parses externally-sourced mermaid SVG via `usvg::Tree::from_str` WITHOUT a size/depth guard — DoS hardening gap (CWE-400), analogous to STORY-043 SEC-002 (SVG recursion cap). | LOW | Target: future slideforge-diagrams hardening story. Surface during Wave 4+ triage alongside STORY-072–077 follow-ups. Security-reviewer to verify when diagrams crate is next touched. |

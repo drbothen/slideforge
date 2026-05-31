@@ -33,7 +33,7 @@ wave_4_batch_a:
   stories: [STORY-035, STORY-036, STORY-043, STORY-044, STORY-045, STORY-073, STORY-075, STORY-076, STORY-077]
   execution: parallel
   chains: ["STORY-035→036", "STORY-043→044→045", "STORY-073 independent", "STORY-075 independent", "STORY-076 independent", "STORY-077 independent (blocks STORY-041/042 in Batch B)"]
-  completed: 2
+  completed: 3
   total: 9
 wave_4_batch_b:
   stories: [STORY-037, STORY-038, STORY-039, STORY-040, STORY-041, STORY-042]
@@ -48,8 +48,9 @@ wave_4_batch_c:
 wave_4_pulled_in_p1: [STORY-073, STORY-075, STORY-076]
 wave_4_deferred_p2_to_wave5: [STORY-072, STORY-074]
 wave_4_bc_deltas: "BC-2.01.001 v1.1→v1.2; BC-2.01.003 v1.8→v1.9; error-taxonomy v2.2→v2.3"
-develop_sha: "094f8dca"
-develop_pr_count: 40
+develop_sha: "331d456c"
+develop_pr_count: 41
+last_updated: 2026-05-31
 ---
 
 stories:
@@ -392,12 +393,16 @@ stories:
     points: 5
     notes: "DOCX Auto-Generated Document Sections; depends on STORY-041"
   STORY-043:
-    status: not-started
+    status: merged
     wave: 4
     batch: A
     priority: P0
     points: 8
-    notes: "PDF Core: pdf-writer + krilla + SlideTagEngine; NEW CRATE slideforge-pdf (scaffold + move from exclude→members first); chain: STORY-043→044→045"
+    pr: 41
+    merge_commit: "331d456c"
+    merged: 2026-05-31
+    adversary_convergence: "3/3 strict-CLEAN at passes 12/13/14 (14-pass total cascade)"
+    notes: "PDF Core: krilla 0.6.0 pure-Rust (no FFI). PdfExporter + SlideTagEngine + svg_embed + font subsetting + check-pdf-deps CI. indexmap 2.9→2.10. 2 MED + 3 LOW security fixed (SVG recursion/size caps, symlink-safe font scan, error hygiene). Workspace now 16 crates. Pre-flight: tech-validation.md + scope-directive.md in cycles/STORY-043/. STORY-044 unblocked."
   STORY-044:
     status: not-started
     wave: 4

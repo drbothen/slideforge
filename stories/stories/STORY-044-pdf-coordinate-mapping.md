@@ -9,7 +9,7 @@ points: 5
 priority: P0
 tdd_mode: strict
 status: draft
-behavioral_contracts: [BC-4.03.005]
+behavioral_contracts: [BC-4.03.005, BC-4.03.002]
 verification_properties: [VP-006]
 nfr_refs: [NFR-021, NFR-022, NFR-023, NFR-024]
 crate: slideforge-pdf
@@ -68,6 +68,7 @@ Standard slide dimensions (from BC-4.03.005):
 | BC | Title | Covered ACs |
 |----|-------|-------------|
 | BC-4.03.005 | PDF Coordinate Mapping: EMU to PDF User Units with Y-Axis Flip | AC-001 through AC-008 |
+| BC-4.03.002 | PDF Produced via pdf-writer + krilla + SlideTagEngine (No Chrome/Headless) | AC-009 (font subsetting, re-scoped from STORY-043 per scope-directive Decision 2) |
 
 ## Acceptance Criteria
 
@@ -140,6 +141,27 @@ mapping with the expected output values.
 `ir_y_to_pdf_y(ir_y, Emu(0), SLIDE_H_EMU)` ==
 `SLIDE_HEIGHT_PT - emu_to_pt(ir_y)`. Verified as a unit test.
 
+### AC-009: Font subsetting verified — krilla internal, no system tooling
+(traces to BC-4.03.002 invariant 3)
+
+When `PdfExporter::export()` draws text elements via krilla's Surface/text API in
+STORY-044, krilla internally subsets fonts via its `subsetter` transitive dependency
+(krilla 0.6.0 declares `^0.2.3`; Cargo.lock resolves to 0.2.4).
+
+A unit test verifies: for a deck using only ASCII glyphs from a large Unicode font
+(e.g., a font with full CJK coverage), the embedded font program in the output PDF
+is smaller than the unsubsetted font file. Assertion: `embedded_font_bytes.len() <
+full_font_file_bytes.len()`.
+
+No `subsetter::subset(...)` call appears in `slideforge-pdf` source code — subsetting
+is entirely internal to krilla. No system font tooling (`fonttools`, `pyftsubset`,
+`hb-subset`) is invoked.
+
+This AC was re-scoped from STORY-043 AC-004 (which could not be verified without text
+drawing). Scope rationale: `.factory/cycles/STORY-043/scope-directive.md` Decision 2.
+BC-4.03.002 invariant 3 is unchanged — only the test vehicle moved to STORY-044
+where glyphs are actually drawn onto the Surface.
+
 ## Tasks
 
 - [ ] Create `crates/slideforge-pdf/src/coords.rs`:
@@ -204,12 +226,13 @@ Note: No additional crate dependencies required. This story is pure math.
 
 | Component | Estimated Tokens |
 |-----------|-----------------|
-| This story spec | ~2,200 |
+| This story spec | ~2,500 |
 | BC-4.03.005 | ~1,200 |
+| BC-4.03.002 (invariant 3 — font subsetting, AC-009) | ~400 |
 | STORY-043 exporter.rs (context for wiring) | ~1,500 |
 | Emu type from slideforge-types | ~400 |
-| Test files to write | ~1,500 |
-| **Total** | **~6,800** |
+| Test files to write | ~1,800 |
+| **Total** | **~7,800** |
 
 Context budget: ~7% of a 100k-token context window. Well within limit.
 
