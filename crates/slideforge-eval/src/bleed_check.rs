@@ -591,7 +591,21 @@ fn decode_xml_entities(input: &str) -> String {
         // Search for `;` within a bounded window to avoid consuming unrelated
         // semicolons far from the `&` (F-P5-001). The window is MAX_ENTITY_WINDOW
         // bytes from the start of `remaining` (which begins with `&`).
-        let window = &remaining[..remaining.len().min(MAX_ENTITY_WINDOW)];
+        //
+        // SAFETY NOTE (F-P6-001): `remaining.len().min(MAX_ENTITY_WINDOW)` is a
+        // byte index, not a char index.  When a multi-byte UTF-8 character straddles
+        // that byte boundary the plain slice `[..end]` would panic with "byte index
+        // N is not a char boundary".  We clamp `end` DOWN to the nearest valid char
+        // boundary before slicing.  `end` stays ≥ 1 because `remaining` begins with
+        // the ASCII `&` (byte 0x26, always a single-byte boundary), so the
+        // while-loop terminates in at most 3 additional iterations (max UTF-8 trail
+        // bytes per codepoint is 3).  Using `is_char_boundary` is stable;
+        // `floor_char_boundary` is nightly-only and is intentionally NOT used.
+        let mut end = remaining.len().min(MAX_ENTITY_WINDOW);
+        while end > 0 && !remaining.is_char_boundary(end) {
+            end -= 1;
+        }
+        let window = &remaining[..end];
         let semi_pos_opt = window.find(';');
 
         if let Some(semi_pos) = semi_pos_opt {
@@ -863,5 +877,86 @@ mod unit_tests {
         // Multi-byte char after the entity must also be intact.
         let result2 = decode_xml_entities("&amp;é");
         assert_eq!(result2, "&é");
+    }
+
+    // ─── F-P6-001: char-boundary clamp — multibyte chars straddling the window ───
+
+    /// Reproducer from F-P6-001: `&` + 16 ASCII `x` chars + `é` (2 bytes).
+    ///
+    /// Total bytes = 1 + 16 + 2 = 19.  `MAX_ENTITY_WINDOW` = 18, so before the fix
+    /// `remaining[..18]` split `é` (U+00E9, bytes at indices 17-18) and panicked
+    /// with "byte index 18 is not a char boundary".
+    ///
+    /// After the fix: `end` is clamped down to 17 (the char boundary before `é`);
+    /// no `;` is found in the window; `&` is emitted literally; the rest of the
+    /// input (`xxxxxxxxxxxxxxxxé`) passes through unchanged.
+    #[test]
+    fn test_f_p6_001_two_byte_char_at_window_boundary_no_panic() {
+        // Build: `&` + 16 × `x` + `é`
+        let input = format!("&{}é", "x".repeat(16));
+        // Must not panic.  The body is invalid (all x's, no semicolon) so the
+        // `&` is emitted literally and the full string is reproduced.
+        let result = decode_xml_entities(&input);
+        assert!(
+            result.contains('&'),
+            "literal & must be present; got: {result:?}"
+        );
+        assert!(
+            result.contains('é'),
+            "multi-byte char é must be preserved; got: {result:?}"
+        );
+        // The whole string round-trips (invalid body → literal &, rest unchanged).
+        assert_eq!(
+            result, input,
+            "invalid entity body must reproduce the input unchanged; got: {result:?}"
+        );
+    }
+
+    /// Mixed ASCII entities + CJK characters: no panic, entities decoded correctly.
+    ///
+    /// `&amp;` → `&`, `&lt;` → `<`; CJK characters (3-byte UTF-8 each) are
+    /// preserved verbatim.
+    #[test]
+    fn test_f_p6_001_cjk_chars_with_entities_no_panic() {
+        let input = "text &amp; 日本語 &lt; more";
+        let result = decode_xml_entities(input);
+        // Entities must decode.
+        assert!(result.contains('&'), "&amp; must become &; got: {result:?}");
+        assert!(result.contains('<'), "&lt; must become <; got: {result:?}");
+        // CJK chars must be preserved.
+        assert!(
+            result.contains("日本語"),
+            "CJK chars must be preserved; got: {result:?}"
+        );
+        assert_eq!(result, "text & 日本語 < more");
+    }
+
+    /// Emoji (4-byte UTF-8) right after the window boundary: no panic.
+    ///
+    /// `&` + 15 × `y` + `😀` + `;`
+    /// `😀` is 4 bytes (U+1F600), so bytes 16-19.  `MAX_ENTITY_WINDOW` = 18 falls
+    /// in the middle of the emoji.  The clamp must walk back to byte 16 before
+    /// slicing.  No `;` is found in the clamped window → `&` emitted literally.
+    #[test]
+    fn test_f_p6_001_four_byte_emoji_at_window_boundary_no_panic() {
+        // `&` (1 byte) + 15 × `y` (15 bytes) + `😀` (4 bytes) + `;` (1 byte)
+        // Bytes: index 0=`&`, 1-15=`y`, 16-19=`😀`, 20=`;`
+        // MAX_ENTITY_WINDOW=18 falls at byte 18, inside the emoji (boundary at 16).
+        let input = format!("&{}😀;", "y".repeat(15));
+        let result = decode_xml_entities(&input);
+        // Must not panic.  Body `yyyyyyyyyyyyyyy😀` is > 16 chars and contains
+        // non-ASCII → invalid → literal `&` emitted, rest unchanged.
+        assert!(
+            result.contains('&'),
+            "literal & must be present; got: {result:?}"
+        );
+        assert!(
+            result.contains('😀'),
+            "emoji must be preserved; got: {result:?}"
+        );
+        assert_eq!(
+            result, input,
+            "invalid entity body must reproduce input unchanged; got: {result:?}"
+        );
     }
 }
