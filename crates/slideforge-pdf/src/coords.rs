@@ -9,14 +9,27 @@
 //! OOXML specifies 1 inch = 914,400 EMU and 1 inch = 72 PDF points, therefore
 //! 1 point = 914,400 / 72 = 12,700 EMU exactly.
 //!
-//! ## Y-axis flip
+//! ## Coordinate model for krilla (DIR-044-001)
 //!
-//! The PPTX IR has origin at top-left with Y increasing downward. PDF has origin
-//! at bottom-left with Y increasing upward. `ir_y_to_pdf_y` performs the flip:
+//! `krilla`'s `Surface` API is **top-left, Y-down** (`surface.rs:44`,
+//! `geom.rs:145`). krilla applies the PDF bottom-left Y-up flip internally via
+//! `page_root_transform` (`Transform::from_row(1,0,0,-1,0,h)`, `page.rs:262-263`)
+//! before serializing. Callers of `Surface` must pass top-left, Y-down
+//! coordinates — NOT raw PDF bottom-left coordinates.
+//!
+//! The draw path in `exporter.rs` therefore passes `emu_to_pt(ir_y)` directly
+//! to krilla — no `ir_y_to_pdf_y` call at draw time:
 //!
 //! ```text
-//! pdf_y = slide_height_pt − ir_y_pt − element_height_pt
+//! surface_x  = emu_to_pt(bbox.x)            // left edge
+//! surface_y  = emu_to_pt(bbox.y)            // top edge (Y-down from slide top)
+//! baseline_y = surface_y + height_pt * 0.8  // baseline down from box top
 //! ```
+//!
+//! `ir_y_to_pdf_y` is retained as a documented pure function and VP-006 Kani
+//! proof target. Its output is a raw PDF bottom-left Y coordinate (useful for
+//! any future exporter targeting a raw PDF writer rather than krilla's Surface).
+//! It is NOT called on the krilla draw path.
 //!
 //! ## Architecture invariant (BC-4.03.005)
 //!
@@ -77,14 +90,33 @@ pub fn emu_to_pt(emu: Emu) -> f32 {
     result
 }
 
-/// Convert an IR Y-coordinate to a PDF Y-coordinate with Y-axis flip.
+/// Compute the raw PDF bottom-left Y coordinate for an IR element via Y-axis flip.
 ///
-/// PDF origin is at the **bottom-left**; PPTX IR origin is at the
-/// **top-left**. This function applies the inversion:
+/// ## Purpose and scope
+///
+/// This function computes the PDF Y coordinate under the **raw PDF coordinate
+/// system** (origin at bottom-left, Y increasing upward). It applies the
+/// standard IR-to-PDF inversion:
 ///
 /// ```text
 /// pdf_y = emu_to_pt(slide_h) − emu_to_pt(ir_y) − emu_to_pt(element_h)
 /// ```
+///
+/// ## IMPORTANT: Not called on the krilla draw path (DIR-044-001)
+///
+/// `krilla`'s `Surface` uses a **top-left, Y-down** coordinate system and
+/// applies the PDF Y-flip internally (`page_root_transform`, `page.rs:262-263`).
+/// Callers of `Surface` must pass top-left, Y-down coordinates via `emu_to_pt`
+/// directly — NOT the output of this function. Calling `ir_y_to_pdf_y` at krilla
+/// draw time applies a double Y-flip, vertically mirroring all content.
+///
+/// `ir_y_to_pdf_y` is retained as:
+/// 1. A pure-function / VP-006 Kani proof target (range invariant:
+///    for valid `(ir_y, element_h, slide_h)` the output is in `[0, slide_h_pt]`).
+/// 2. A reference for future exporters that target a raw PDF writer
+///    (e.g., `pdf-writer` directly) rather than krilla's `Surface`.
+///
+/// ## Pure function guarantee
 ///
 /// This is a **pure function** with no side effects — it is a candidate for
 /// a Kani proof in Phase 6 (VP-006). No logging, no mutation, no I/O.
@@ -103,6 +135,7 @@ pub fn emu_to_pt(emu: Emu) -> f32 {
 /// use slideforge_types::Emu;
 ///
 /// // Top-left element of height 100pt: pdf_y = 405 − 0 − 100 = 305
+/// // (raw PDF bottom-left coords — NOT used on the krilla draw path)
 /// assert_eq!(
 ///     ir_y_to_pdf_y(Emu(0), Emu(100 * 12_700), SLIDE_HEIGHT_EMU),
 ///     305.0_f32,

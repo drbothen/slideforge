@@ -31,7 +31,9 @@
 //!    for each slide to build its structural tag sub-tree.
 //! 3. Draws slide content via krilla's Surface API:
 //!    - Text frames (Title/Subtitle/Body/TextRun): `surface.draw_text()` at
-//!      coordinates from `coords::emu_to_pt()` / `coords::ir_y_to_pdf_y()`.
+//!      coordinates from `coords::emu_to_pt()` (top-left, Y-down — krilla
+//!      Surface origin). `ir_y_to_pdf_y` is NOT called at draw time; krilla
+//!      applies the PDF Y-flip internally (DIR-044-001).
 //!    - Diagram frames: `svg_embed::embed_normalized_svg()`.
 //! 4. Calls `document.set_tag_tree(tag_tree)` with the assembled structural tree.
 //! 5. Calls `document.finish()` → `KrillaResult<Vec<u8>>`.
@@ -46,6 +48,12 @@
 //! `emu / 12700` arithmetic is permitted anywhere in this file. This invariant
 //! enables the Kani proof for `emu_to_pt` (VP-006, Phase 6) to cover all
 //! conversion sites.
+//!
+//! `ir_y_to_pdf_y` is NOT imported or called anywhere in this file. It is a
+//! documented pure function in `coords.rs` (VP-006 Kani target) that computes
+//! PDF bottom-left Y coordinates — inapplicable here because krilla's Surface
+//! uses a top-left Y-down coordinate system and bakes the PDF Y-flip internally
+//! via `page_root_transform` (DIR-044-001).
 
 use krilla::Document;
 use krilla::geom::Point;
@@ -54,9 +62,9 @@ use krilla::text::TextDirection;
 use slideforge_layout::LaidOutDeck;
 use slideforge_layout::types::{BoundingBox, FrameContent};
 use slideforge_plugin_api::{ExportError, ExportOptions, Exporter};
-use slideforge_types::{Brand, Deck, Emu};
+use slideforge_types::{Brand, Deck};
 
-use crate::coords::{emu_to_pt, ir_y_to_pdf_y};
+use crate::coords::emu_to_pt;
 use crate::error::PdfExportError;
 use crate::font::load_font_data;
 use crate::svg_embed::embed_normalized_svg;
@@ -135,7 +143,8 @@ impl PdfExporter {
     ///
     /// For each slide, this function draws:
     /// - Text frames (Title/Subtitle/Body/TextRun): `surface.draw_text()` at
-    ///   coordinates computed via `coords::emu_to_pt()` and `coords::ir_y_to_pdf_y()`.
+    ///   coordinates computed via `coords::emu_to_pt()` (top-left Surface coords;
+    ///   krilla handles the PDF Y-flip internally — DIR-044-001).
     ///   Font is resolved from brand family name via `font::system_font_fallback()`
     ///   then `krilla::text::Font::new()`. If no font can be resolved, text drawing
     ///   is skipped with a `tracing::warn!` — the page still renders.
@@ -143,8 +152,9 @@ impl PdfExporter {
     ///
     /// ## Coordinate invariant (BC-4.03.005 / Architecture Compliance Rule 2)
     ///
-    /// ALL EMU-to-point conversions go through `coords::emu_to_pt()` and
-    /// `coords::ir_y_to_pdf_y()`. No inline `emu / 12700` arithmetic is used.
+    /// ALL EMU-to-point conversions go through `coords::emu_to_pt()`. No inline
+    /// `emu / 12700` arithmetic is used. `ir_y_to_pdf_y` is NOT called on the draw
+    /// path (krilla Surface is top-left Y-down; krilla applies the PDF flip internally).
     ///
     /// # Errors
     ///
@@ -212,9 +222,6 @@ impl PdfExporter {
         // Collect per-slide Part groups for later assembly into the deck tag tree.
         let mut slide_parts = Vec::with_capacity(laid_out.slides.len());
 
-        // Slide height in EMU for ir_y_to_pdf_y — taken from the deck's page size.
-        let slide_h_emu = laid_out.page_size.height;
-
         for slide in &laid_out.slides {
             // Convert page dimensions via coords:: — Architecture Compliance Rule 2.
             let width_pts = emu_to_pt(laid_out.page_size.width);
@@ -242,7 +249,6 @@ impl PdfExporter {
                     &mut surface,
                     &frame.bbox,
                     &frame.content,
-                    slide_h_emu,
                     resolved_font.as_ref(),
                 )?;
             }
@@ -364,28 +370,30 @@ fn try_resolve_font(family: &str) -> Option<krilla::text::Font> {
 
 /// Draw the content of a single layout frame onto a krilla `Surface`.
 ///
-/// All coordinate conversions go through `coords::emu_to_pt()` and
-/// `coords::ir_y_to_pdf_y()` (BC-4.03.005 Architecture Compliance Rule 2).
+/// All coordinate conversions go through `coords::emu_to_pt()`
+/// (BC-4.03.005 Architecture Compliance Rule 2). `ir_y_to_pdf_y` is NOT called
+/// here — krilla's `Surface` is top-left, Y-down, and applies the PDF Y-flip
+/// internally (DIR-044-001).
 ///
 /// ## Text baseline approximation
 ///
-/// PDF text coordinates are specified at the **baseline** of the first line of
-/// text. The IR gives the top-left corner of the bounding box. A reasonable
-/// baseline approximation for a single-line draw is:
+/// The IR gives the top-left corner of the bounding box in Surface coordinates
+/// (Y-down, top-left origin). A reasonable baseline approximation is:
 ///
 /// ```text
-/// baseline_y ≈ ir_y_to_pdf_y(ir_y, element_h, slide_h) + element_h_pt * 0.8
+/// surface_y  = emu_to_pt(bbox.y)                          // top edge, Y-down
+/// baseline_y = surface_y + emu_to_pt(bbox.height) * 0.8   // 80% down from top
 /// ```
 ///
-/// This places the baseline at approximately 80% of the box height from the
-/// PDF bottom of the box (i.e., 20% descender allowance below the text). Text
-/// is guaranteed to land within `[0, SLIDE_HEIGHT_PT]` for any valid IR layout.
+/// This places the baseline at 80% of the box height measured downward from
+/// the box top (20% descender allowance below the baseline). Text is guaranteed
+/// to land within `[0, SLIDE_HEIGHT_PT]` for any valid IR layout.
 ///
 /// Precise multi-line typography is deferred to STORY-045 (text flow engine).
 ///
 /// ## Font sizes
 ///
-/// Default font sizes: Title 36pt, Subtitle 28pt, Body/other 18pt.
+/// Default font sizes: Title 36pt, Subtitle 28pt, Body text 18pt, Bullets 16pt.
 /// These defaults are overridden when brand template font sizes are available
 /// (STORY-045 scope).
 ///
@@ -406,41 +414,40 @@ fn draw_frame(
     surface: &mut krilla::surface::Surface<'_>,
     bbox: &BoundingBox,
     content: &FrameContent,
-    slide_h_emu: Emu,
     font: Option<&krilla::text::Font>,
 ) -> Result<(), PdfExportError> {
     match content {
         FrameContent::Title(text) => {
-            draw_text_at_bbox(surface, text, bbox, slide_h_emu, 36.0, font);
+            draw_text_at_bbox(surface, text, bbox, 36.0, font);
         },
         FrameContent::Subtitle(text) => {
-            draw_text_at_bbox(surface, text, bbox, slide_h_emu, 28.0, font);
+            draw_text_at_bbox(surface, text, bbox, 28.0, font);
         },
         FrameContent::Body(blocks) => {
-            draw_body_blocks(surface, blocks, bbox, slide_h_emu, font);
+            draw_body_blocks(surface, blocks, bbox, font);
         },
         FrameContent::TextRun(inlines) => {
             let text = extract_inline_text(inlines);
             if !text.is_empty() {
-                draw_text_at_bbox(surface, &text, bbox, slide_h_emu, 18.0, font);
+                draw_text_at_bbox(surface, &text, bbox, 18.0, font);
             }
         },
         FrameContent::Diagram(svg) => {
-            // Place the SVG at the frame's PDF coordinates.
-            // SVG content is drawn at the PDF-mapped position using a translate
-            // transform so paths land within the frame's bounding box.
-            let pdf_x = emu_to_pt(bbox.x);
-            let pdf_y = ir_y_to_pdf_y(bbox.y, bbox.height, slide_h_emu);
-            place_svg_at(surface, svg, pdf_x, pdf_y)?;
+            // Place the SVG at the frame's Surface coordinates (top-left, Y-down).
+            // krilla's Surface origin is top-left; bbox.y is the top edge (Y-down).
+            // No ir_y_to_pdf_y flip — krilla applies the PDF Y-flip internally.
+            let surface_x = emu_to_pt(bbox.x);
+            let surface_y = emu_to_pt(bbox.y);
+            place_svg_at(surface, svg, surface_x, surface_y)?;
         },
         // ErrorSlidePlaceholder carries an SVG — render it like a diagram.
         FrameContent::ErrorSlidePlaceholder { svg, .. } => {
             use slideforge_types::NormalizedDiagramSvg;
             use std::sync::Arc;
             let normalized = NormalizedDiagramSvg::from_normalized_string(Arc::from(svg.as_ref()));
-            let pdf_x = emu_to_pt(bbox.x);
-            let pdf_y = ir_y_to_pdf_y(bbox.y, bbox.height, slide_h_emu);
-            place_svg_at(surface, &normalized, pdf_x, pdf_y)?;
+            let surface_x = emu_to_pt(bbox.x);
+            let surface_y = emu_to_pt(bbox.y);
+            place_svg_at(surface, &normalized, surface_x, surface_y)?;
         },
         // Chart: no SVG payload at frame level — drawn via ChartRenderer pass.
         // Image, Shape, Empty: no drawing in this story.
@@ -452,15 +459,39 @@ fn draw_frame(
     Ok(())
 }
 
-/// Draw text at a bounding box position using PDF coordinate mapping.
+/// Compute the Surface Y coordinate of the text baseline for a bounding box.
 ///
-/// If `font` is `None`, logs a debug warning and skips drawing. This is the
-/// correct non-fatal behavior when a brand font is unavailable.
+/// krilla's `Surface` is top-left, Y-down (DIR-044-001). The text baseline is
+/// approximated at 80% of the box height measured downward from the box top edge,
+/// giving 20% descender allowance below the baseline.
+///
+/// ```text
+/// surface_y  = emu_to_pt(bbox.y)                          // top edge, Y-down
+/// baseline_y = surface_y + emu_to_pt(bbox.height) * 0.8
+/// ```
+///
+/// This is a **pure function** used by both production (`draw_text_at_bbox`) and
+/// the vertical-placement regression tests to ensure they exercise the same
+/// formula as the real draw path (non-vacuous load-bearing test contract).
+///
+/// For a title frame at `ir_y=0` (slide top): baseline = 0 + height*0.8
+/// (in the top half of the page). Under the old (buggy) `ir_y_to_pdf_y`
+/// formula the baseline was ~390 (near the bottom) — the mirror bug.
+#[inline]
+pub(crate) fn text_baseline_surface_y(bbox: &BoundingBox) -> f32 {
+    let surface_top_y = emu_to_pt(bbox.y);
+    surface_top_y + emu_to_pt(bbox.height) * 0.8
+}
+
+/// Draw text at a bounding box position using krilla Surface (top-left, Y-down) coordinates.
+///
+/// Uses [`text_baseline_surface_y`] to compute the baseline position. If `font`
+/// is `None`, logs a debug warning and skips drawing. This is the correct
+/// non-fatal behavior when a brand font is unavailable.
 fn draw_text_at_bbox(
     surface: &mut krilla::surface::Surface<'_>,
     text: &str,
     bbox: &BoundingBox,
-    slide_h_emu: Emu,
     font_size: f32,
     font: Option<&krilla::text::Font>,
 ) {
@@ -479,16 +510,14 @@ fn draw_text_at_bbox(
         return;
     }
 
-    // PDF X: left edge of the bounding box.
-    let pdf_x = emu_to_pt(bbox.x);
+    // Surface X: left edge of the bounding box (top-left origin, Y-down).
+    let surface_x = emu_to_pt(bbox.x);
 
-    // PDF Y baseline: bottom of the bounding box in PDF coords + 80% of height
-    // as the baseline approximation (20% descender allowance).
-    let box_bottom_pdf_y = ir_y_to_pdf_y(bbox.y, bbox.height, slide_h_emu);
-    let element_h_pt = emu_to_pt(bbox.height);
-    let baseline_y = box_bottom_pdf_y + element_h_pt * 0.8;
+    // Surface Y baseline: 80% of box height down from the box top edge.
+    // No ir_y_to_pdf_y — krilla handles the PDF Y-flip internally (DIR-044-001).
+    let baseline_y = text_baseline_surface_y(bbox);
 
-    let start = Point::from_xy(pdf_x, baseline_y);
+    let start = Point::from_xy(surface_x, baseline_y);
     surface.draw_text(
         start,
         font.clone(),
@@ -508,7 +537,6 @@ fn draw_body_blocks(
     surface: &mut krilla::surface::Surface<'_>,
     blocks: &[slideforge_types::ContentBlock],
     bbox: &BoundingBox,
-    slide_h_emu: Emu,
     font: Option<&krilla::text::Font>,
 ) {
     use slideforge_types::ContentBlock;
@@ -518,14 +546,14 @@ fn draw_body_blocks(
             ContentBlock::Text(text_block) => {
                 let text = extract_inline_text(&text_block.inlines);
                 if !text.is_empty() {
-                    draw_text_at_bbox(surface, &text, bbox, slide_h_emu, 18.0, font);
+                    draw_text_at_bbox(surface, &text, bbox, 18.0, font);
                 }
             },
             ContentBlock::Bullets(items) => {
                 for item in items {
                     let text = extract_inline_text(&item.inlines);
                     if !text.is_empty() {
-                        draw_text_at_bbox(surface, &text, bbox, slide_h_emu, 16.0, font);
+                        draw_text_at_bbox(surface, &text, bbox, 16.0, font);
                     }
                 }
             },
@@ -1016,42 +1044,46 @@ mod tests {
 
     // ─── F-044-003: AC-006 integration test — render a fixture deck ──────────
 
-    /// BC-4.03.005 AC-006 (integration): `PdfExporter::export()` on a fixture
-    /// `LaidOutDeck` (elements at various positions including top/bottom edges)
-    /// must draw all elements within the slide canvas `[0.0, 0.0, 720.0, 405.0]` —
-    /// BOTH axes: `0 <= pdf_x` AND `pdf_x + width_pt <= SLIDE_WIDTH_PT (720.0)`
-    /// AND `0 <= pdf_y <= SLIDE_HEIGHT_PT (405.0)`.
+    /// BC-4.03.005 AC-006 (integration, updated for DIR-044-001 top-left mapping):
+    /// `PdfExporter::export()` on a fixture `LaidOutDeck` must draw all elements
+    /// within the slide canvas `[0.0, 0.0, 720.0, 405.0]` — BOTH axes:
+    /// `0 <= surface_x` AND `surface_x + width_pt <= SLIDE_WIDTH_PT (720.0)`
+    /// AND `0 <= baseline_y <= SLIDE_HEIGHT_PT (405.0)`.
     ///
-    /// ## What this tests (F-044-003 fix + F-P5-001 X-axis extension)
-    ///
-    /// The spec says AC-006 must be "verified by an INTEGRATION TEST that RENDERS
-    /// A FIXTURE DECK and asserts all element bounding boxes are within
-    /// [0,0,720,405]." This test:
+    /// ## What this tests (F-044-003 fix + F-P5-001 X-axis extension + DIR-044-001)
     ///
     /// 1. Builds a fixture `LaidOutDeck` with Title/Subtitle/Body frames at
     ///    positions spanning the full slide width and height (top, middle, bottom).
     /// 2. Runs `PdfExporter::export()` to confirm the pipeline completes without
     ///    coordinate errors.
-    /// 3. Asserts the X-axis bounding box (`pdf_x` and `pdf_x + width_pt`)
+    /// 3. Asserts the X-axis bounding box (`surface_x` and `surface_x + width_pt`)
     ///    stays within `[0.0, SLIDE_WIDTH_PT]`.
-    /// 4. Asserts the PDF Y-coordinate arithmetic (`ir_y_to_pdf_y + 0.8 * height`)
-    ///    for all test frames stays within `[-epsilon, SLIDE_HEIGHT_PT + epsilon]`.
+    /// 4. Asserts the draw-time baseline Y (top-left mapping: `emu_to_pt(ir_y) +
+    ///    0.8 * height`) stays within `[0.0, SLIDE_HEIGHT_PT]` — using
+    ///    `text_baseline_surface_y` (the same function as the production draw path).
     ///
-    /// The X assertions are non-vacuous: they would fail if an element were placed
-    /// at `pdf_x > 720.0` or `pdf_x < 0.0`. This test confirms the exporter maps X
-    /// via `coords::emu_to_pt` (Architecture Compliance Rule 2), not ad-hoc arithmetic.
+    /// ## Why the Y formula changed (DIR-044-001)
+    ///
+    /// The OLD formula was `ir_y_to_pdf_y(ir_y, elem_h, slide_h) + 0.8 * height`.
+    /// That was vacuously safe (always in range) but computed the wrong position
+    /// (mirror bug: top-of-slide elements rendered at the bottom).
+    ///
+    /// The NEW formula uses `text_baseline_surface_y(bbox)` which calls
+    /// `emu_to_pt(bbox.y) + emu_to_pt(bbox.height) * 0.8`. This correctly places
+    /// elements in Surface space (top-left, Y-down). The Y-axis range assertion
+    /// here remains valid: for in-bounds IR boxes, `emu_to_pt(ir_y) + 0.8*h` ≤ 405.
     ///
     /// ## Distinction from the existing coords unit tests
     ///
     /// The existing `test_bc_4_03_005_no_element_outside_canvas_after_conversion`
-    /// tests `ir_y_to_pdf_y()` pairs in isolation. THIS test exercises the
-    /// BASELINE COMPUTATION `box_bottom_pdf_y + element_h_pt * 0.8` as used in
-    /// the DRAW PATH, confirming element placement via the export route.
+    /// tests `ir_y_to_pdf_y()` arithmetic in isolation (retained as VP-006 target).
+    /// THIS test exercises `text_baseline_surface_y` via the ACTUAL DRAW PATH
+    /// function, confirming element placement via the export route.
     #[allow(clippy::unwrap_used, clippy::float_cmp)]
     #[test]
     fn test_bc_4_03_005_ac006_export_all_elements_within_canvas() {
         use crate::SLIDE_HEIGHT_EMU;
-        use crate::coords::{SLIDE_HEIGHT_PT, SLIDE_WIDTH_PT, emu_to_pt, ir_y_to_pdf_y};
+        use crate::coords::{SLIDE_HEIGHT_PT, SLIDE_WIDTH_PT, emu_to_pt};
 
         // Fixture deck: Title at top, Subtitle at 1-inch offset, Body at 2-inch offset.
         // All stay within the 5.625-inch (405pt) slide height and 10-inch (720pt) width.
@@ -1127,11 +1159,9 @@ mod tests {
         // Verify bounding box computations for all frames stay within
         // [0.0, 0.0, SLIDE_WIDTH_PT, SLIDE_HEIGHT_PT] — BOTH axes.
         //
-        // X-axis: pdf_x = emu_to_pt(bbox.x); right edge = pdf_x + emu_to_pt(bbox.width).
-        // Y-axis baseline: box_bottom_pdf_y = ir_y_to_pdf_y(ir_y, elem_h, slide_h)
-        //                  baseline_y = box_bottom_pdf_y + elem_h_pt * 0.8
-        //
-        // This mirrors the exact formulas used in `draw_text_at_bbox`.
+        // X-axis: surface_x = emu_to_pt(bbox.x); right edge = surface_x + width_pt.
+        // Y-axis baseline: text_baseline_surface_y(bbox) = emu_to_pt(ir_y) + 0.8 * height
+        //   (top-left Surface coords, DIR-044-001 — matches production draw_text_at_bbox).
         let frames_under_test = [
             (Emu(0), slide_w_emu, Emu(0), title_h_emu, "title-top"),
             (
@@ -1146,50 +1176,150 @@ mod tests {
 
         for (ir_x, elem_w, ir_y, elem_h, label) in frames_under_test {
             // ── X-axis bounds (F-P5-001) ──────────────────────────────────────
-            // pdf_x = emu_to_pt(bbox.x) — left edge, via coords::emu_to_pt.
-            let pdf_x = emu_to_pt(ir_x);
+            // surface_x = emu_to_pt(bbox.x) — left edge, via coords::emu_to_pt.
+            let surface_x = emu_to_pt(ir_x);
             let width_pt = emu_to_pt(elem_w);
 
             assert!(
-                pdf_x >= -0.001,
-                "AC-006: pdf_x for frame '{label}' must be >= 0.0; got {pdf_x:.3}"
+                surface_x >= -0.001,
+                "AC-006: surface_x for frame '{label}' must be >= 0.0; got {surface_x:.3}"
             );
             assert!(
-                pdf_x + width_pt <= SLIDE_WIDTH_PT + 0.001,
-                "AC-006: pdf_x + width_pt for frame '{label}' must be <= {SLIDE_WIDTH_PT}; \
-                 got pdf_x={pdf_x:.3}, width_pt={width_pt:.3}, sum={:.3}",
-                pdf_x + width_pt
+                surface_x + width_pt <= SLIDE_WIDTH_PT + 0.001,
+                "AC-006: surface_x + width_pt for frame '{label}' must be <= {SLIDE_WIDTH_PT}; \
+                 got surface_x={surface_x:.3}, width_pt={width_pt:.3}, sum={:.3}",
+                surface_x + width_pt
             );
 
-            // ── Y-axis bounds ─────────────────────────────────────────────────
-            let box_bottom = ir_y_to_pdf_y(ir_y, elem_h, SLIDE_HEIGHT_EMU);
-            let elem_h_pt = emu_to_pt(elem_h);
-            let baseline_y = box_bottom + elem_h_pt * 0.8;
+            // ── Y-axis bounds (top-left Surface mapping, DIR-044-001) ─────────
+            // Use text_baseline_surface_y — the SAME function as production draw_text_at_bbox.
+            // This makes the test non-vacuous and load-bearing: if the formula changes
+            // in production, this test reflects the change automatically.
+            let bbox = BoundingBox {
+                x: ir_x,
+                y: ir_y,
+                width: elem_w,
+                height: elem_h,
+            };
+            let baseline_y = text_baseline_surface_y(&bbox);
 
-            // box_bottom must be >= 0 (element fits within the page).
             assert!(
-                box_bottom >= -0.001,
-                "AC-006: box_bottom_pdf_y for frame '{label}' must be >= 0; got {box_bottom:.3}"
+                baseline_y >= -0.001,
+                "AC-006: baseline_y for frame '{label}' must be >= 0.0 (on the page); \
+                 got {baseline_y:.3}"
             );
-            // box_bottom must be <= SLIDE_HEIGHT_PT.
-            assert!(
-                box_bottom <= SLIDE_HEIGHT_PT + 0.001,
-                "AC-006: box_bottom_pdf_y for frame '{label}' must be <= {SLIDE_HEIGHT_PT}; \
-                 got {box_bottom:.3}"
-            );
-            // baseline_y = box_bottom + 0.8 * height must be <= SLIDE_HEIGHT_PT
-            // (since box_bottom = slide_h - ir_y - elem_h and baseline_y adds back
-            // 0.8 * elem_h, baseline_y = slide_h - ir_y - 0.2 * elem_h ≤ slide_h).
             assert!(
                 baseline_y <= SLIDE_HEIGHT_PT + 0.001,
                 "AC-006: baseline_y for frame '{label}' must be <= {SLIDE_HEIGHT_PT}; \
                  got {baseline_y:.3}"
             );
-            assert!(
-                baseline_y >= -0.001,
-                "AC-006: baseline_y for frame '{label}' must be >= 0; got {baseline_y:.3}"
-            );
         }
+    }
+
+    // ─── Vertical-placement regression tests (DIR-044-001 mirror bug) ─────────
+
+    /// Regression test for the vertical-mirror coordinate bug (DIR-044-001).
+    ///
+    /// A title frame at `ir_y=0` (slide top) must draw its baseline in the TOP HALF
+    /// of the Surface (`baseline_y < SLIDE_HEIGHT_PT / 2 = 202.5`).
+    ///
+    /// Under the OLD (buggy) `ir_y_to_pdf_y` formula:
+    ///   `box_bottom = 405 − 0 − 72 = 333`; `baseline = 333 + 72*0.8 = 390.6`
+    ///   → `390.6 < 202.5` is FALSE → test FAILS (catches the mirror bug).
+    ///
+    /// Under the CORRECT `text_baseline_surface_y` formula:
+    ///   `surface_top = emu_to_pt(Emu(0)) = 0.0`; `baseline = 0 + 72*0.8 = 57.6`
+    ///   → `57.6 < 202.5` is TRUE → test PASSES.
+    ///
+    /// Uses `text_baseline_surface_y` — the same pure function as `draw_text_at_bbox` —
+    /// so the test is non-vacuous and load-bearing: any regression in the draw path
+    /// is caught here.
+    #[test]
+    fn test_vertical_placement_title_at_top() {
+        use crate::coords::{SLIDE_HEIGHT_PT, emu_to_pt};
+
+        // Title frame at ir_y=0 (slide top), height=72pt (1 inch).
+        let ir_y = Emu(0);
+        let element_h = Emu(72 * 12_700); // 72pt
+        let bbox = BoundingBox {
+            x: Emu(0),
+            y: ir_y,
+            width: Emu(9_144_000),
+            height: element_h,
+        };
+
+        let baseline_y = text_baseline_surface_y(&bbox);
+
+        // Numeric verification:
+        // surface_top_y = emu_to_pt(Emu(0)) = 0.0
+        // baseline_y    = 0.0 + emu_to_pt(72 * 12_700) * 0.8 = 72.0 * 0.8 = 57.6
+        let expected = emu_to_pt(Emu(0)) + emu_to_pt(element_h) * 0.8;
+        assert!(
+            (baseline_y - expected).abs() < 0.001,
+            "title baseline must equal {expected:.3}; got {baseline_y:.3}"
+        );
+
+        // Directional assertion: the baseline must be in the TOP HALF of the Surface.
+        // A value > 202.5 (= SLIDE_HEIGHT_PT / 2) indicates the mirror bug.
+        assert!(
+            baseline_y < SLIDE_HEIGHT_PT / 2.0,
+            "title baseline at ir_y=0 must be in the top half of the Surface \
+             (Surface-Y < {:.1}); got {baseline_y:.3}. A value >= {:.1} indicates \
+             the mirror bug: ir_y_to_pdf_y is being applied at draw time.",
+            SLIDE_HEIGHT_PT / 2.0,
+            SLIDE_HEIGHT_PT / 2.0
+        );
+        assert!(
+            baseline_y >= 0.0,
+            "title baseline must be >= 0.0 (on the page); got {baseline_y:.3}"
+        );
+    }
+
+    /// Complementary regression test for the vertical-mirror coordinate bug.
+    ///
+    /// A footer frame near the BOTTOM of the slide (`ir_y ≈ slide_h − frame_h`)
+    /// must draw its baseline in the BOTTOM HALF of the Surface
+    /// (`baseline_y > SLIDE_HEIGHT_PT / 2 = 202.5`).
+    ///
+    /// Uses `text_baseline_surface_y` — the same pure function as `draw_text_at_bbox` —
+    /// ensuring this test is non-vacuous and load-bearing.
+    #[test]
+    fn test_vertical_placement_footer_at_bottom() {
+        use crate::SLIDE_HEIGHT_EMU;
+        use crate::coords::{SLIDE_HEIGHT_PT, emu_to_pt};
+
+        // Footer frame: height 36pt (0.5 inch), placed at the bottom of the slide.
+        let element_h = Emu(36 * 12_700); // 36pt
+        let ir_y = Emu(SLIDE_HEIGHT_EMU.0 - element_h.0); // top of footer = slide_h - 36pt
+        let bbox = BoundingBox {
+            x: Emu(0),
+            y: ir_y,
+            width: Emu(9_144_000),
+            height: element_h,
+        };
+
+        let baseline_y = text_baseline_surface_y(&bbox);
+
+        // Numeric verification:
+        // surface_top_y = emu_to_pt(ir_y) = 405 - 36 = 369.0
+        // baseline_y    = 369.0 + 36.0 * 0.8 = 369.0 + 28.8 = 397.8
+        let expected = emu_to_pt(ir_y) + emu_to_pt(element_h) * 0.8;
+        assert!(
+            (baseline_y - expected).abs() < 0.001,
+            "footer baseline must equal {expected:.3}; got {baseline_y:.3}"
+        );
+
+        // Directional assertion: the baseline must be in the BOTTOM HALF of the Surface.
+        assert!(
+            baseline_y > SLIDE_HEIGHT_PT / 2.0,
+            "footer baseline at bottom of slide must be in the bottom half of the Surface \
+             (Surface-Y > {:.1}); got {baseline_y:.3}.",
+            SLIDE_HEIGHT_PT / 2.0
+        );
+        assert!(
+            baseline_y <= SLIDE_HEIGHT_PT + 0.001,
+            "footer baseline must be <= SLIDE_HEIGHT_PT ({SLIDE_HEIGHT_PT}); got {baseline_y:.3}"
+        );
     }
 
     // ─── F-044-004: Drawing-path behavioral coverage ───────────────────────────
