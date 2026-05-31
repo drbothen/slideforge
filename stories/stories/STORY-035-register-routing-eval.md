@@ -9,7 +9,7 @@ points: 5
 priority: P0
 tdd_mode: strict
 status: draft
-behavioral_contracts: [BC-1.14.001, BC-1.14.002, BC-1.14.003]
+behavioral_contracts: [BC-1.14.001, BC-1.14.002, BC-1.14.003, BC-1.14.004]
 verification_properties: []
 nfr_refs: [NFR-021, NFR-022, NFR-023, NFR-024]
 crate: slideforge-eval
@@ -105,6 +105,7 @@ never tagged with a register.
 | BC-1.14.001 | notes register routes to presenter notes in PPTX/DOCX/HTML only | AC-001, AC-002 |
 | BC-1.14.002 | report register routes to DOCX body; excluded from PPTX slide content | AC-003, AC-004 |
 | BC-1.14.003 | detail register routes to DOCX/PDF only; excluded from PPTX and web preview | AC-005, AC-006 |
+| BC-1.14.004 | No Register Content Bleeds to Wrong Format | AC-008 |
 
 ## Acceptance Criteria
 
@@ -143,10 +144,14 @@ does not contain "Analysis text"; (2) `register_content` contains one entry with
 ### AC-005: detail fields extracted and tagged at evaluate stage
 (traces to BC-1.14.003 invariant 1 — detail routing determined at Evaluate stage)
 
-After evaluation, every slide or section with a non-empty `detail` field or `detail:`
+After evaluation, every `LaidOutSlide` with a non-empty `detail` field or `detail:`
 block has at least one `RegisteredContent { register: Register::Detail, content: ... }`
-in `register_content`. Standalone `section detail:` blocks (with no parent slide) also
-produce `RegisteredContent` entries attached to a synthetic section node.
+in `register_content`. The `detail` content is evaluated before tagging. The `detail`
+content does NOT appear in `LaidOutSlide.frames`.
+
+Note: section-level `detail` routing (standalone `section detail:` blocks attaching
+`RegisteredContent` to a section node) is out of scope for this story — see Scope
+Boundary section below for the descope record.
 
 ### AC-006: detail content excluded from visual frames
 (traces to BC-1.14.003 postcondition 3 — detail NOT in PPTX or web preview)
@@ -181,14 +186,12 @@ contains only the visual content (title, bullets, etc.) — none of the register
   - Return `Vec<RegisteredContent>`
 - [ ] Call `extract_register_content` in the evaluation pipeline before layout pass
 - [ ] Remove `notes`/`report`/`detail` fields from the visual field set so they do not reach `frames`
-- [ ] Handle `section detail:` standalone blocks → attach `RegisteredContent` to section node
 - [ ] Write unit tests:
   - `notes "..."` → `register_content` has `Notes`, `frames` does not contain text
   - `report "..."` → `register_content` has `Report`, `frames` does not contain text
   - `detail "..."` → `register_content` has `Detail`, `frames` does not contain text
   - `notes "Quarter: {{ quarter }}"` with scoped var → interpolated before tagging
   - Slide with all three registers → three entries, correct types, visual frames unaffected
-  - Standalone `section detail:` block → `Detail` entry on section node
 
 ## Previous Story Intelligence
 
@@ -197,6 +200,28 @@ N/A — first story in EPIC-18. Writing registers are a new concern. STORY-011, 
 pipeline that this story extends. The `LaidOutSlide` type is extended from STORY-026
 (layout core) with the `register_content` field — coordinate with STORY-026's type
 definitions to add the field there.
+
+## Scope Boundary — Section-Level Register Routing Descoped
+
+**Architect directive dated 2026-05-31 (F-002 [HIGH]):**
+
+Section-level register routing — specifically the attachment of `RegisteredContent`
+to a section node from a standalone `section detail:` or `section report:` block — is
+**OUT OF SCOPE** for this story. It has been descoped because `SectionBlock.body` is
+currently typed `OrderedMap<Arc<str>, Value>`, where `Value` is a fully resolved scalar.
+`Value` cannot carry `FieldValue::Inlines` (rich inline content for `RegisteredContent.content`)
+or `Vec<Block>` (nested block structure for a `detail:` sub-block). A plain-string
+workaround is not acceptable under the production-grade default.
+
+The concrete IR-extension work required (changing `SectionBlock.body` from `Value` to
+`FieldValue`, teaching the parser to emit `FieldValue::Inlines` for `detail:` within
+section blocks, adding eval-stage routing of section-level `detail`/`report` to
+`RegisteredContent`) is tracked in **STORY-077** (anchor: BC-3.02.002 postcondition 1 /
+EC-004 / descoped EC-003). STORY-077 blocks any DOCX story that renders section-level
+detail or report content (cross-ref STORY-041, STORY-042).
+
+Slide-level `detail` field extraction (AC-005) **remains in scope** — it is exercised
+by the existing `extract_register_content` function for the `Slide` type.
 
 ## Architecture Compliance Rules
 
@@ -237,13 +262,14 @@ evaluation pipeline.
 
 | Component | Estimated Tokens |
 |-----------|-----------------|
-| This story spec | ~2,500 |
+| This story spec | ~2,800 |
 | BC-1.14.001 | ~1,500 |
 | BC-1.14.002 | ~1,200 |
 | BC-1.14.003 | ~1,200 |
+| BC-1.14.004 | ~1,000 |
 | `slideforge-types` IR definitions (from STORY-001/026) | ~1,500 |
 | Test files to write | ~2,000 |
-| **Total** | **~9,900** |
+| **Total** | **~11,200** |
 
 Well within the 20-30% context budget.
 
@@ -263,7 +289,7 @@ Well within the 20-30% context budget.
 |----|-------------|-------------------|
 | EC-001 | Slide with only `notes` field (no visual content) | `frames` empty; `register_content` has one `Notes` entry |
 | EC-002 | `notes` field with `{{ expr }}` interpolation | Interpolation evaluated; resolved value stored in `Notes` entry |
-| EC-003 | Standalone `section detail:` with no parent slide | `Detail` entry on section node; not attached to any `LaidOutSlide` |
+| EC-003 | ~~Standalone `section detail:` with no parent slide~~ | **DESCOPED** — moved to STORY-077 (BC-3.02.002). Section-level register routing requires `SectionBlock.body: FieldValue` IR extension not yet available. |
 | EC-004 | `detail` and `report` both present on same slide | Both entries in `register_content`; both absent from `frames` |
 | EC-005 | `@for` loop with `notes` field | Each iteration produces its own `Notes` entry in its slide's `register_content` |
 

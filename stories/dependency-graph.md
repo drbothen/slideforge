@@ -11,7 +11,7 @@ traces_to:
   - .factory/specs/behavioral-contracts/BC-INDEX.md
 topological_sort: validated
 cycle_check: PASS
-total_stories: 71
+total_stories: 77
 ---
 
 # Story Dependency Graph — slideforge v1.0
@@ -176,8 +176,9 @@ canonical — individual story files use these exact IDs.
 | STORY-038 | EPIC-08 | PPTX Layout Compliance: Placeholder Inheritance + Slide IDs + Layouts | STORY-037, STORY-023 | STORY-039, STORY-040, STORY-049, STORY-050 |
 | STORY-039 | EPIC-08 | PPTX Accessibility Metadata: alt text, lang, WCAG contrast | STORY-038, STORY-015 | STORY-049, STORY-050 |
 | STORY-040 | EPIC-08 | PPTX: Speaker Notes + Slide Sections + notesMaster1.xml | STORY-038, STORY-035 | STORY-049, STORY-050 |
-| STORY-041 | EPIC-09 | DOCX Core Serialization: report register + ooxmlsdk | STORY-026, STORY-035, STORY-036 | STORY-042, STORY-049, STORY-050 |
-| STORY-042 | EPIC-09 | DOCX: Auto-Generated Document Sections | STORY-041, STORY-027 | STORY-049, STORY-050 |
+| STORY-041 | EPIC-09 | DOCX Core Serialization: report register + ooxmlsdk | STORY-026, STORY-035, STORY-036, STORY-077 | STORY-042, STORY-049, STORY-050 |
+| STORY-042 | EPIC-09 | DOCX: Auto-Generated Document Sections | STORY-041, STORY-027, STORY-077 | STORY-049, STORY-050 |
+| STORY-077 | EPIC-18 | SectionBlock IR Extension: FieldValue body + section-level register routing | STORY-006, STORY-007, STORY-008, STORY-011, STORY-012, STORY-013, STORY-027 | STORY-041, STORY-042 |
 | STORY-043 | EPIC-13 | PDF Core: pdf-writer + krilla + SlideTagEngine | STORY-026, STORY-034 | STORY-044, STORY-045, STORY-049, STORY-050 |
 | STORY-044 | EPIC-13 | PDF: EMU-to-PDF Coordinate Mapping + Y-Axis Flip | STORY-043 | STORY-045, STORY-049, STORY-050 |
 | STORY-045 | EPIC-13 | PDF: PDF/UA-1 Tagging + veraPDF CI Gate | STORY-043, STORY-044 | STORY-049, STORY-050 |
@@ -293,6 +294,12 @@ canonical — individual story files use these exact IDs.
 | STORY-069 | EPIC-20 | proptest-brand-pptx-layout | 6 | P0 | 5 |
 | STORY-070 | EPIC-20 | kani-pdf | 6 | P0 | 5 |
 | STORY-071 | EPIC-20 | fuzz-mutants | 6 | P0 | 8 |
+| STORY-072 | EPIC-07 | shape-gradient-fills | 5 | P2 | 3 |
+| STORY-073 | EPIC-07 | bullets-layout | 4 | P1 | 5 |
+| STORY-074 | EPIC-07 | brand-em-sizing | 5 | P2 | 3 |
+| STORY-075 | EPIC-06 | brand-loader-footer-detection | 4 | P1 | 3 |
+| STORY-076 | EPIC-06 | brand-srgbclr-transform-extraction | 4 | P1 | 3 |
+| STORY-077 | EPIC-18 | section-block-ir-extension | 4 | P0 | 8 |
 
 > Note: Stories STORY-051 through STORY-054 are the EPIC-19 CI stories (Wave 1).
 > Stories STORY-055 through STORY-059 are EPIC-15 CLI stories (Wave 5).
@@ -326,11 +333,12 @@ Wave 3 (prereqs all in Waves 1-2):
   STORY-033, STORY-034                          ← EPIC-12
 
 Wave 4 (prereqs all in Waves 1-3):
-  STORY-035, STORY-036,                         ← EPIC-18
+  STORY-035, STORY-036, STORY-077,              ← EPIC-18
   STORY-037, STORY-038, STORY-039, STORY-040,   ← EPIC-08
   STORY-041, STORY-042,                         ← EPIC-09
   STORY-043, STORY-044, STORY-045,              ← EPIC-13
-  STORY-049, STORY-050                          ← EPIC-21
+  STORY-049, STORY-050,                         ← EPIC-21
+  STORY-073, STORY-075, STORY-076               ← EPIC-06/07 (pulled-in P1)
 
 Wave 5 (prereqs all in Waves 1-4):
   STORY-046, STORY-047, STORY-048,              ← EPIC-14
@@ -399,8 +407,8 @@ its dependencies. The dependency graph is a DAG.
 | BC-1.13.001 | STORY-009 | Full |
 | BC-1.14.001 | STORY-035 | Full |
 | BC-1.14.002 | STORY-035 | Full |
-| BC-1.14.003 | STORY-035 | Full |
-| BC-1.14.004 | STORY-036 | Full |
+| BC-1.14.003 | STORY-035, STORY-077 | Full (slide-level: STORY-035; section-level: STORY-077) |
+| BC-1.14.004 | STORY-035, STORY-036 | Full (invariant 3 unit test: STORY-035 AC-008; integration: STORY-036) |
 | BC-1.15.001 | STORY-010, STORY-055, STORY-058 | Full |
 | BC-1.15.002 | STORY-010, STORY-055 | Full |
 | BC-1.15.003 | STORY-010, STORY-016, STORY-055 | Full |
@@ -415,8 +423,8 @@ its dependencies. The dependency graph is a DAG.
 | BC-3.01.001 | STORY-003 | Full |
 | BC-3.01.002 | STORY-003 | Full |
 | BC-3.01.003 | STORY-003 | Full |
+| BC-3.02.002 | STORY-027, STORY-077 | Full (auto-generated sections: STORY-027; manually authored section IR extension + register routing: STORY-077) |
 | BC-3.02.001 | STORY-027 | Full |
-| BC-3.02.002 | STORY-027 | Full |
 | BC-3.03.001 | STORY-016 | Full |
 | BC-3.03.002 | STORY-016 | Full |
 | BC-3.03.003 | STORY-016 | Full |
@@ -465,6 +473,7 @@ its dependencies. The dependency graph is a DAG.
 | BC-3.06.003 | STORY-026 | Full |
 
 **Coverage result: 112/112 BCs covered. Zero orphan BCs.**
+(BC-3.02.002 now covered by STORY-027 + STORY-077; BC-1.14.003 now covered by STORY-035 + STORY-077; BC-1.14.004 now covered by STORY-035 + STORY-036 — updated 2026-05-31 per architect directive F-002.)
 
 ---
 
@@ -567,14 +576,13 @@ its dependencies. The dependency graph is a DAG.
 
 ## Gap Register
 
-No gaps identified in this structural pass. All 112 BCs, 15 VPs, 35 NFRs, and 20
-edge cases are covered by at least one story. The gap register will be updated by
-the individual story-writing pass if specific BC clauses cannot be fully covered
-within scope.
+One gap was identified and resolved during the STORY-035 adversarial review pass
+(2026-05-31). It is recorded here with its resolution target.
 
 | Gap ID | Level | Source | Clause/Item | Justification | Resolution Target |
 |--------|-------|--------|-------------|---------------|-------------------|
-| — | — | — | — | — | — |
+| GAP-001 | L2 | BC-3.02.002 postcondition 1 / EC-004 | Section-level `detail:` / `report:` sub-block content routing to `RegisteredContent` — descoped from STORY-035 because `SectionBlock.body: OrderedMap<Arc<str>, Value>` cannot carry `FieldValue::Inlines`. A plain-string workaround violates evaluate-stage routing invariant (BC-1.14.003 invariant 1). | STORY-077 (Wave 4 Batch A) |
+| GAP-001 | L2 | STORY-035 EC-003 | Standalone `section detail:` with no parent slide → `Detail` entry on section node — descoped from STORY-035 for same IR-limitation reason. | STORY-077 (Wave 4 Batch A) — AC-006 delivers this behavior |
 
 ---
 

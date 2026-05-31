@@ -17,8 +17,8 @@ prd_vps: 15
 prd_supplements: 4
 spikes_resolved: 7
 spikes_total: 7
-total_stories: 76
-total_points: 454
+total_stories: 77
+total_points: 462
 total_waves: 6
 total_epics: 21
 dtu_required: false
@@ -41,14 +41,16 @@ wave_3_gate_status: "PASSED 2026-05-31 — test suite GREEN 2584 tests 0 failure
 wave_3_completed: 2026-05-31
 wave_3_gate: "PASSED 2026-05-31 — PR #38 (7d266ad7); #[non_exhaustive] hardening + slideforge-brand [workspace.dependencies] + conventions.md v1.3; adversary pass 8 strict-CLEAN; holdout must-pass 5/5 PASS"
 wave_4_started: 2026-05-31
-wave_4_total_stories: 16
-wave_4_total_points: 96
-wave_4_batch_a: "STORY-035→036, STORY-043→044→045, STORY-073, STORY-075, STORY-076 (parallel)"
+wave_4_total_stories: 17
+wave_4_total_points: 104
+wave_4_batch_a: "STORY-035→036, STORY-043→044→045, STORY-073, STORY-075, STORY-076, STORY-077 (parallel)"
 wave_4_batch_b: "STORY-037→038→039→040, STORY-041→042 (parallel, after Batch A)"
 wave_4_batch_c: "STORY-049→050 (after Batch B)"
 wave_4_pulled_in_p1: "STORY-073 (5pts bullets layout), STORY-075 (3pts footer detection), STORY-076 (3pts srgbClr transform)"
+wave_4_new_p0: "STORY-077 (8pts SectionBlock IR extension) — architect-directed spin-out from STORY-035 F-002 descope; blocks STORY-041/042"
 wave_4_deferred_p2: "STORY-072 → Wave 5 (gradient fills), STORY-074 → Wave 5 (brand-em-sizing)"
 wave_4_bc_deltas: "BC-2.01.001 v1.1→v1.2 (EC-006 srgbClr transform, Option B); BC-2.01.003 v1.8→v1.9 (EC-003 widened); error-taxonomy v2.2→v2.3 (no new variant)"
+story035_status: "IN_PROGRESS — Red Gate 3392b598 + Green 4f8a9487 + adversary LOCAL Pass 1 (2 HIGH/2 MED/1 LOW, streak 0/3) + fix-burst 1b4f654e. 743/743 GREEN, clippy/fmt clean. Adversary Pass 2 in flight. F-001 Option D directive issued; AC-005 section-node descoped to STORY-077; EC-003 DESCOPED; BC-1.14.004 added to spec."
 develop_sha: "7d266ad7"
 develop_pr_count: 38
 workspace_tests: "~2584 (full-suite run 2026-05-31 @ 584cbc6f pre-fix-PR; fix-PR #38 is additive #[non_exhaustive] + dep config only)"
@@ -67,28 +69,28 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. It generates branded .p
 **Workspace:** /Users/jmagady/Dev/slideforge
 **Factory worktree:** .factory/ on branch `factory-artifacts`
 
-## Session Resume Brief (2026-05-31 handoff — Wave 4 STARTED)
+## Session Resume Brief (2026-05-31 — Wave 4 Batch A IN PROGRESS)
 
 ### Fresh Session Resume Checklist
 
 Before doing ANY work, a new session should:
 
 1. **Sync local develop:** `git pull origin develop`. develop is at `7d266ad7` (38 merged PRs, ~2584 tests).
-2. **Verify worktree health:** `git worktree list` should show: main worktree + `.factory/` only. No active feature worktrees.
-3. **Top priority on resume:** **Wave 4 Batch A delivery.** Plan is human-approved. Dispatch Batch A stories in parallel: STORY-035→036, STORY-043→044→045, STORY-073, STORY-075, STORY-076. See wave-schedule.md for story specs.
+2. **Verify worktree health:** `git worktree list` should show: main worktree + `.factory/` + `.worktrees/STORY-035` (feature/S-035 in progress).
+3. **Top priority on resume:** **STORY-035 adversary Pass 2** — verdict pending (streak 0/3; Pass 2 in flight). Then continue Batch A: STORY-036, STORY-043→044→045, STORY-073, STORY-075, STORY-076, STORY-077. See wave-schedule.md for story specs.
 4. **STORY-043 prerequisite:** slideforge-pdf crate must be scaffolded and moved from `[workspace] exclude` → `members` as the FIRST task of STORY-043 delivery. slideforge-html stays excluded until Wave 5/STORY-046.
 5. **BC deltas in effect for Wave 4:** BC-2.01.001 v1.2 (EC-006 srgbClr transform handling, Option B); BC-2.01.003 v1.9 (EC-003 widened to srgbClr); error-taxonomy v2.3. Story specs for STORY-075/076 already reference these versions.
 
 ### Where we are
 
-Phase 3, Wave 3 — **COMPLETE.** Wave 4 — **STARTED (human-approved 2026-05-31).** All 22 Wave 3 stories merged; Wave 3 Gate PASSED (2584 tests GREEN; holdout must-pass 5/5; adversary 8 passes strict-CLEAN 6/7/8; fix-PR #38 @ `7d266ad7`). Wave 4: 16 stories / 96 pts, human-approved batch plan (Batch A/B/C). STORY-073/075/076 pulled in as P1; STORY-072/074 deferred to Wave 5 as P2. BC-2.01.001 v1.2 + BC-2.01.003 v1.9 + error-taxonomy v2.3 landed.
+Phase 3, Wave 3 — **COMPLETE.** Wave 4 — **STARTED, Batch A IN PROGRESS.** All 22 Wave 3 stories merged; Wave 3 Gate PASSED (2584 tests GREEN; holdout must-pass 5/5; adversary 8 passes strict-CLEAN 6/7/8; fix-PR #38 @ `7d266ad7`). Wave 4: 17 stories / 104 pts (expanded from 16/96: STORY-077 added per architect directive). STORY-073/075/076 pulled in as P1; STORY-072/074 deferred to Wave 5 as P2; STORY-077 added P0. BC-2.01.001 v1.2 + BC-2.01.003 v1.9 + error-taxonomy v2.3 landed. **STORY-035 adversary Pass 2 in flight (streak 0/3).**
 
 ### Wave 4 Batch Plan (human-approved 2026-05-31)
 
-Wave 4: 16 stories / 96 pts. STORY-073/075/076 pulled in as P1; STORY-072/074 deferred to Wave 5.
+Wave 4: 17 stories / 104 pts. STORY-073/075/076 pulled in as P1; STORY-072/074 deferred to Wave 5. STORY-077 added as architect-directed P0 spin-out.
 
-- **Batch A (parallel):** STORY-035→036, STORY-043→044→045 (slideforge-pdf NEW CRATE), STORY-073, STORY-075, STORY-076
-- **Batch B (parallel, after Batch A gate):** STORY-037→038→039→040 (PPTX), STORY-041→042 (DOCX)
+- **Batch A (parallel):** STORY-035→036, STORY-043→044→045 (slideforge-pdf NEW CRATE), STORY-073, STORY-075, STORY-076, STORY-077
+- **Batch B (parallel, after Batch A gate):** STORY-037→038→039→040 (PPTX), STORY-041→042 (DOCX; blocked on STORY-077)
 - **Batch C (after Batch B gate):** STORY-049→050 (plugin registry + E2E)
 
 **BC deltas in effect:** BC-2.01.001 v1.2 (EC-006 srgbClr, Option B); BC-2.01.003 v1.9 (EC-003 widened); error-taxonomy v2.3.
@@ -96,9 +98,9 @@ Wave 4: 16 stories / 96 pts. STORY-073/075/076 pulled in as P1; STORY-072/074 de
 
 ### Top 3 next actions (in order)
 
-1. **Dispatch Wave 4 Batch A:** Deliver all 8 Batch A stories in parallel. STORY-043 starts with workspace scaffolding (slideforge-pdf crate). Use per-story-delivery flow.
-2. **Process improvements (apply now):** Add `-D clippy::pedantic -D clippy::unwrap_used` to `just check` Justfile target. Add cross-crate compile check to per-story-delivery flow for stories touching slideforge-brand or slideforge-types.
-3. **Holdout caveat (standing):** Full mean-satisfaction holdout (≥0.85) deferred to post-exporter waves. 9/15 scenarios blocked by missing CLI + exporters. Re-run after PPTX/HTML exporters ship.
+1. **Complete STORY-035 adversary cascade:** Pass 2 in flight (streak 0/3). Need 3 consecutive clean passes. Fix-burst 1b4f654e closed Pass 1 findings (F-001 Option D implemented; F-002 AC-005/EC-003 descoped). Await Pass 2 verdict.
+2. **Continue Batch A in parallel:** Dispatch remaining stories (STORY-036, STORY-043→044→045, STORY-073, STORY-075, STORY-076, STORY-077). STORY-043 starts with slideforge-pdf workspace scaffolding. STORY-077 is prerequisite for STORY-041/042.
+3. **Process improvements (apply now):** Add `-D clippy::pedantic -D clippy::unwrap_used` to `just check` Justfile target. Add cross-crate compile check to per-story-delivery flow for stories touching slideforge-brand or slideforge-types.
 
 ### Orchestrator Playbook Improvements (codify before next cascade)
 
@@ -166,9 +168,13 @@ Pending:
 
 ## Current Status
 
-Phase 3 IN PROGRESS. Wave 1 COMPLETE (14/14, gate PASSED). Wave 2 COMPLETE (7/7, gate PASSED). Wave 3 COMPLETE (22/22 stories, gate PASSED 2026-05-31). **Wave 4 STARTED — 16 stories / 96 pts, human-approved Batch A/B/C plan.** Batch A dispatch is next.
+Phase 3 IN PROGRESS. Wave 1 COMPLETE (14/14, gate PASSED). Wave 2 COMPLETE (7/7, gate PASSED). Wave 3 COMPLETE (22/22 stories, gate PASSED 2026-05-31). **Wave 4 STARTED — 17 stories / 104 pts, human-approved Batch A/B/C plan.** Batch A in progress.
 
-develop branch: `7d266ad7` (38 merged PRs, ~2584 tests, 0 failures). 0 active feature worktrees. 0 open PRs. 76 stories / 454 pts total.
+develop branch: `7d266ad7` (38 merged PRs, ~2584 tests, 0 failures). 1 active feature worktree (STORY-035 in .worktrees/STORY-035, adversary Pass 2 in flight). 77 stories / 462 pts total.
+
+**STORY-035 IN PROGRESS:** Red Gate (3392b598) + Green (4f8a9487) + LOCAL adversary Pass 1 (2 HIGH/2 MED/1 LOW) + fix-burst (1b4f654e). 743/743 GREEN, clippy/fmt clean. Adversary Pass 2 running now (streak 0/3). Architect directive issued: F-001→Option D (eval populates Slide.register_content; layout clones; delete slideforge-types method); F-002→AC-005 section-node descoped + EC-003 DESCOPED → STORY-077. BC-1.14.004 added to spec.
+
+**STORY-077 CREATED:** SectionBlock IR Extension (EPIC-18, P0, 8pts, Wave 4 Batch A). Architect-directed spin-out from STORY-035 F-002 descope. Anchors BC-3.02.002 + BC-1.14.003. Blocks STORY-041/042.
 
 ## Wave 3 Batch 2 Story Status
 
@@ -193,8 +199,9 @@ develop branch: `7d266ad7` (38 merged PRs, ~2584 tests, 0 failures). 0 active fe
 
 ## What to Do Next
 
-- **Dispatch Wave 4 Batch A**: Deliver all 8 Batch A stories in parallel. STORY-043 starts with slideforge-pdf workspace scaffolding. Full batch plan in wave-schedule.md.
-- **Process configuration**: Add `-D clippy::pedantic -D clippy::unwrap_used` to `just check` target in Justfile. Add cross-crate compile check to per-story-delivery flow for stories touching slideforge-brand or slideforge-types.
+- **STORY-035**: Await adversary Pass 2 verdict (streak 0/3). If CLEAN: continue cascade. If findings: fix-burst + Pass 3. Need 3 consecutive strict-CLEAN for closure.
+- **Continue Wave 4 Batch A**: Deliver remaining parallel stories (STORY-036, STORY-043→044→045, STORY-073, STORY-075, STORY-076, STORY-077). STORY-043 starts with slideforge-pdf workspace scaffolding.
+- **Process configuration**: Add `-D clippy::pedantic -D clippy::unwrap_used` to `just check` target in Justfile. Add cross-crate compile check for stories touching slideforge-brand or slideforge-types.
 - **Holdout caveat (standing)**: Full mean-satisfaction holdout (≥ 0.85) deferred to post-exporter waves. Re-run after CLI + PPTX/HTML exporters ship.
 
 **Key file references:**
@@ -234,8 +241,8 @@ git fetch origin develop && git pull origin develop
 | Market intelligence | DONE 2026-05-23 | GO with medium confidence |
 | Planning (25 DSL decisions) | DONE 2026-05-24 | q1–q25 decision docs + 14 research threads + 7/7 spikes resolved |
 | Phase 1: Spec Crystallization | DONE — APPROVED 2026-05-25 | PRD (109 BCs, 15 HS, 4 supplements) + architecture (14 ADRs, 15 VPs, 20 crates) + UX spec (10 screens, 5 flows) + L2 domain spec (12 files). 17 passes, 69 findings, 3/3 clean. |
-| Phase 2: Story Decomposition | DONE — APPROVED 2026-05-25 | 76 stories, 21 epics, 6 waves, 454 pts (updated 2026-05-31 per wave-4 expansion). 22 passes, 96+ findings, 3/3 clean. |
-| Phase 3: TDD Implementation | IN PROGRESS — Wave 1: COMPLETE + GATE PASSED. Wave 2: COMPLETE + GATE PASSED. Wave 3: COMPLETE + GATE PASSED 2026-05-31 (22 stories; 2584 tests GREEN; adversary 3-CLEAN passes 6/7/8; fix-PR #38 @ 7d266ad7). **Wave 4 STARTED 2026-05-31 — 16 stories / 96 pts, Batch A dispatch next.** | Per-story delivery |
+| Phase 2: Story Decomposition | DONE — APPROVED 2026-05-25 | 77 stories, 21 epics, 6 waves, 462 pts (updated 2026-05-31: STORY-077 added per architect directive). 22 passes, 96+ findings, 3/3 clean. |
+| Phase 3: TDD Implementation | IN PROGRESS — Wave 1: COMPLETE + GATE PASSED. Wave 2: COMPLETE + GATE PASSED. Wave 3: COMPLETE + GATE PASSED 2026-05-31 (22 stories; 2584 tests GREEN; adversary 3-CLEAN passes 6/7/8; fix-PR #38 @ 7d266ad7). **Wave 4 STARTED 2026-05-31 — 17 stories / 104 pts, Batch A in progress.** STORY-035: 743/743 GREEN, adversary Pass 2 in flight (streak 0/3). | Per-story delivery |
 | Phase 4: Holdout Evaluation | NOT STARTED | Per-wave holdout gates |
 | Phase 5: Adversarial Refinement | NOT STARTED | Post-implementation cascade |
 | Phase 6: Formal Hardening | NOT STARTED | Kani + fuzz + mutants + semgrep |
@@ -339,21 +346,25 @@ New crates added by Batch 1 (total workspace now 13 crates): slideforge-data, sl
 - 2026-05-31 — WAVE 3 GATE FIX-PR #38 MERGED (squash commit 7d266ad7). Integration findings fixed: slideforge-brand → [workspace.dependencies]; #[non_exhaustive] hardening across all public error enums + PATH-A plugin-api data enums with OBS-1 wildcard-error arms; conventions.md v1.3. AI review strict-CLEAN; security CLEAN; 17/17 CI checks pass. Adversary pass 8 strict-CLEAN.
 - 2026-05-31 — WAVE 3 COMPLETE. All 22 stories merged (Batch 1: 6, Batch 2: 13, Batch 3: 3) + gate PASSED. develop @ 7d266ad7 (38 PRs, ~2584 tests, 0 failures). 0 active worktrees. NEXT: Wave 4.
 - 2026-05-31 — WAVE 4 STARTED. Human-approved: 16 stories / 96 pts (expanded from 13/85). STORY-073/075/076 pulled in as P1 follow-ups; STORY-072/074 deferred to Wave 5 as P2. BC-2.01.001 v1.2, BC-2.01.003 v1.9, error-taxonomy v2.3 landed. Batch A dispatch next.
+- 2026-05-31 — STORY-035 IN PROGRESS (feature/S-035 @ 1b4f654e): Red Gate + Green + adversary LOCAL Pass 1 (2 HIGH/2 MED/1 LOW) + fix-burst. 743/743 GREEN, clippy/fmt clean. Adversary Pass 2 in flight (streak 0/3). Architect directive issued: F-001 Option D (eval populates Slide.register_content; layout clones; delete slideforge-types duplicate); F-002 AC-005/EC-003 descoped to STORY-077. BC-1.14.004 added to STORY-035 spec.
+- 2026-05-31 — STORY-077 CREATED: SectionBlock IR Extension (architect-directed spin-out from STORY-035 F-002 descope). EPIC-18, P0, 8pts, Wave 4 Batch A. Anchors BC-3.02.002 + BC-1.14.003. Blocks STORY-041 + STORY-042. Wave 4 now 17 stories / 104 pts; project total 77 stories / 462 pts.
 
 ## Session Resume Checkpoint
 
 | Field | Value |
 |-------|-------|
 | **Date** | 2026-05-31 |
-| **Position** | Phase 3, Wave 4 STARTED. Wave 3 Gate PASSED (PR #38, 7d266ad7). Wave 4 Batch A dispatch is next action. |
+| **Position** | Phase 3, Wave 4 STARTED. Wave 3 Gate PASSED (PR #38, 7d266ad7). STORY-035 Batch A in progress — adversary Pass 2 running (streak 0/3). |
 | **develop SHA** | 7d266ad7 (38 merged PRs) |
 | **Workspace tests** | ~2584 (full-suite run 2026-05-31 @ 584cbc6f; fix-PR #38 is additive config+attrs only) |
 | **Workspace crates** | 13 (7 Wave 1 + 6 Batch 1: data, brand, layout, math, charts, diagrams) |
-| **Active worktrees** | 0 active feature worktrees. 0 open PRs. |
+| **Active worktrees** | 1: .worktrees/STORY-035 (feature/S-035, 743/743 GREEN) |
 | **Open PRs** | 0 |
-| **Wave 4 batch plan** | Batch A: STORY-035→036, STORY-043→044→045 (slideforge-pdf NEW), STORY-073, STORY-075, STORY-076. Batch B: STORY-037→040 (PPTX), STORY-041→042 (DOCX). Batch C: STORY-049→050. |
+| **Wave 4 batch plan** | Batch A: STORY-035→036, STORY-043→044→045 (slideforge-pdf NEW), STORY-073, STORY-075, STORY-076, STORY-077. Batch B: STORY-037→040 (PPTX), STORY-041→042 (DOCX; blocked on STORY-077). Batch C: STORY-049→050. |
+| **STORY-035 state** | Red Gate 3392b598 + Green 4f8a9487 + Pass 1 fix-burst 1b4f654e. Adversary Pass 2 in flight. Architect directive: F-001 Option D + F-002 descope to STORY-077. BC-1.14.004 added. |
+| **STORY-077** | Created 2026-05-31. SectionBlock IR Extension, EPIC-18, P0, 8pts, Wave 4 Batch A. Blocks STORY-041/042. |
 | **factory-artifacts** | Local only (not pushed to remote). Push requires explicit human authorization per CLAUDE.md. |
-| **Highest priority next** | 1. Wave 4 Batch A delivery (8 stories in parallel). 2. Justfile `just check` clippy flag update. 3. slideforge-pdf workspace scaffolding (STORY-043 first task). |
+| **Highest priority next** | 1. Complete STORY-035 adversary cascade (need 3-CLEAN; Pass 2 in flight). 2. Continue remaining Batch A stories in parallel (STORY-036, STORY-043→044→045, STORY-073, STORY-075, STORY-076, STORY-077). 3. slideforge-pdf workspace scaffolding (STORY-043 first task). |
 | **Holdout caveat** | Full mean-satisfaction holdout (≥0.85) deferred to post-exporter waves; 9/15 scenarios blocked by missing CLI + exporters. Re-run after PPTX/HTML exporters ship. |
 | **Process improvements to apply** | Before accepting any "clippy clean": run `rustup update stable && cargo clippy --workspace --all-targets --all-features -- -D clippy::pedantic -D clippy::unwrap_used`. Add cross-crate compile check for stories touching slideforge-brand or slideforge-types. |
 
@@ -378,7 +389,7 @@ Production-grade from day 1. Key enforced gates:
 | .factory/specs/prd.md | PRD + 109 BCs + 15 holdout scenarios |
 | .factory/stories/wave-schedule.md | 6 waves, batching, dependency order |
 | .factory/stories/dependency-graph.md | Full story dependency graph |
-| .factory/stories/STORY-INDEX.md | 71 stories with status |
+| .factory/stories/STORY-INDEX.md | 77 stories with status |
 | .factory/stories/sprint-state.yaml | Current sprint/wave state |
 | .factory/planning/q1-decision-final.md | Computation, formats, registers, charts, math, brand, roadmap |
 | .factory/planning/q2-decision-final.md | 31 types, aliases, components, DSL syntax per type |

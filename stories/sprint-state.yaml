@@ -27,12 +27,12 @@ wave_3_gate_adversary_clean_at: "6/7/8"
 wave_3_gate_holdout_must_pass: "5/5 PASS"
 wave_3_gate_tests: 2584
 wave_4_started: 2026-05-31
-wave_4_total_stories: 16
-wave_4_total_points: 96
+wave_4_total_stories: 17
+wave_4_total_points: 104
 wave_4_batch_a:
-  stories: [STORY-035, STORY-036, STORY-043, STORY-044, STORY-045, STORY-073, STORY-075, STORY-076]
+  stories: [STORY-035, STORY-036, STORY-043, STORY-044, STORY-045, STORY-073, STORY-075, STORY-076, STORY-077]
   execution: parallel
-  chains: ["STORY-035→036", "STORY-043→044→045", "STORY-073 independent", "STORY-075 independent", "STORY-076 independent"]
+  chains: ["STORY-035→036", "STORY-043→044→045", "STORY-073 independent", "STORY-075 independent", "STORY-076 independent", "STORY-077 independent (blocks STORY-041/042 in Batch B)"]
 wave_4_batch_b:
   stories: [STORY-037, STORY-038, STORY-039, STORY-040, STORY-041, STORY-042]
   execution: parallel
@@ -318,12 +318,21 @@ stories:
     pr: 37
     merge_commit: 584cbc6f
   STORY-035:
-    status: not-started
+    status: in-progress
     wave: 4
     batch: A
     priority: P0
     points: 5
-    notes: "Writing Register Routing in Evaluator; chain: STORY-035→036"
+    worktree: ".worktrees/STORY-035"
+    branch: "feature/S-035"
+    red_gate_commit: "3392b598"
+    green_commit: "4f8a9487"
+    fix_burst_commit: "1b4f654e"
+    adversary_streak: "0/3"
+    adversary_pass_1: "2 HIGH / 2 MED / 1 LOW — F-001 Option D directive issued; F-002 AC-005/EC-003 descoped to STORY-077"
+    adversary_pass_2: "IN FLIGHT"
+    tests: "743/743 GREEN"
+    notes: "BC-1.14.004 added to spec; architect directive in cycles/STORY-035/architecture-directive.md"
   STORY-036:
     status: not-started
     wave: 4
@@ -441,3 +450,10 @@ stories:
     priority: P1
     points: 3
     notes: "srgbClr transform extraction follow-up from STORY-024 cascade; pulled into Wave 4 as P1; BCs: BC-2.01.001 v1.2 + BC-2.01.003 v1.9"
+  STORY-077:
+    status: draft
+    wave: 4
+    batch: A
+    priority: P0
+    points: 8
+    notes: "SectionBlock IR extension: FieldValue body + section-level register routing; architect-directed spin-out from STORY-035 F-002 descope; blocks STORY-041/042; BCs: BC-3.02.002 + BC-1.14.003"

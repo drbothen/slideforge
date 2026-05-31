@@ -9,7 +9,7 @@ traces_to:
   - .factory/stories/dependency-graph.md
   - .factory/stories/epics.md
 total_waves: 6
-total_stories: 71
+total_stories: 77
 ---
 
 # Wave Schedule — slideforge v1.0
@@ -30,12 +30,12 @@ total_stories: 71
 | Wave 1 | EPIC-01, EPIC-02, EPIC-19 | 14 | Partial — see internal sequencing note below | All stubs compile; CI runs green on all platforms |
 | Wave 2 | EPIC-03, EPIC-04 | 7 | Partial — STORY-011→012→013 chain; STORY-011+012→014 (fork, not sequential after 013); STORY-015→016→017 chain | Wave 1 gate PASS |
 | Wave 3 | EPIC-05, EPIC-06, EPIC-07, EPIC-10, EPIC-11, EPIC-12 | 17 | Partial — multiple sub-chains within epics (EPIC-05: 018→019/020→021; EPIC-06: 022→023→024/025; EPIC-07: 026→027/028; EPIC-10: 029→030; EPIC-11: 031→032; EPIC-12: 033→034) | Wave 2 gate PASS |
-| Wave 4 | EPIC-06, EPIC-07, EPIC-08, EPIC-09, EPIC-13, EPIC-18, EPIC-21 | 16 | Partial — Batch A parallel: STORY-035→036, STORY-043→044→045, STORY-073, STORY-075, STORY-076; Batch B parallel: STORY-037→038→039→040, STORY-041→042; Batch C: STORY-049→050 | Wave 3 gate PASS; Phase 4 crates added to workspace |
+| Wave 4 | EPIC-06, EPIC-07, EPIC-08, EPIC-09, EPIC-13, EPIC-18, EPIC-21 | 17 | Partial — Batch A parallel: STORY-035→036, STORY-043→044→045, STORY-073, STORY-075, STORY-076, STORY-077; Batch B parallel: STORY-037→038→039→040, STORY-041→042; Batch C: STORY-049→050 | Wave 3 gate PASS; Phase 4 crates added to workspace |
 | Wave 5 | EPIC-07, EPIC-14, EPIC-15, EPIC-16, EPIC-17 | 16 | Partial — EPIC-16 and EPIC-17 independent of EPIC-14/15; EPIC-15 depends on EPIC-14 (STORY-056 requires STORY-047 for live reload). Chains: EPIC-14: 046→047→048; EPIC-15: 055→056→059 (056 also needs 047); EPIC-16: 060→061→062/063; EPIC-17: 064→065; STORY-072, STORY-074 independent (deferred P2 surfaces) | Wave 4 gate PASS |
 | Wave 6 | EPIC-20 (Phase 6) | 6 | Partial — STORY-066/067/068 independent; STORY-071 depends on 066+067; STORY-069/070 independent | Wave 5 gate PASS; Kani + cargo-fuzz available on CI |
 
-**Total: 76 stories, 454 points across 6 waves.**
-(Wave 4: 16 stories / 96 pts; Wave 5: 16 stories / 90 pts — updated 2026-05-31 per human approval)
+**Total: 77 stories, 462 points across 6 waves.**
+(Wave 4: 17 stories / 104 pts — updated 2026-05-31: STORY-077 added per architect directive F-002; Wave 5: 16 stories / 90 pts — updated 2026-05-31 per human approval)
 
 ---
 
@@ -534,7 +534,7 @@ added to `[workspace] members` at start of wave (previously in `exclude`).
 
 **Human-Approved Batch Plan (Wave 4):**
 - **Batch A (parallel):** STORY-035→036, STORY-043→044→045, STORY-073 (pulled-in P1),
-  STORY-075 (pulled-in P1), STORY-076 (pulled-in P1)
+  STORY-075 (pulled-in P1), STORY-076 (pulled-in P1), STORY-077 (architect-directed P0)
 - **Batch B (parallel, after Batch A):** STORY-037→038→039→040, STORY-041→042
 - **Batch C (after Batch B):** STORY-049→050
 
@@ -738,6 +738,24 @@ added to `[workspace] members` at start of wave (previously in `exclude`).
   emits `tracing::warn!`. Implements BC-2.01.001 EC-006 (loading) and BC-2.01.003
   EC-003 widened (extraction). Pulled into Wave 4 as P1 follow-up (PO BC delta landed
   2026-05-31; Option B chosen for v1.0; no new error code).
+
+### STORY-077 — SectionBlock IR Extension: FieldValue body + section-level register routing (Architect-Directed P0)
+- **Epic:** EPIC-18
+- **Crate:** slideforge-types (SS-15) + slideforge-syntax (SS-01) + slideforge-eval (SS-02)
+- **BCs:** BC-3.02.002, BC-1.14.003
+- **Points:** 8
+- **Priority:** P0
+- **tdd_mode:** strict
+- **Batch:** A (parallel with STORY-035→036, STORY-043→044→045, STORY-073, STORY-075, STORY-076)
+- Extends `SectionBlock.body` from `OrderedMap<Arc<str>, Value>` to
+  `OrderedMap<Arc<str>, FieldValue>`, enabling `detail:` and `report:` sub-blocks inside
+  `section <type>:` declarations to carry `FieldValue::Inlines`. Parser emits structured
+  inline nodes (not plain strings). Eval-stage `extract_section_register_content` routes
+  section-level `detail:` and `report:` to `RegisteredContent` entries on the section node.
+  Spun out from STORY-035 per architect directive F-002 (2026-05-31): `SectionBlock.body: Value`
+  cannot carry inline content; a plain-string workaround is not acceptable.
+  Blocks STORY-041 and STORY-042 — DOCX exporters require section-level `RegisteredContent`
+  before rendering section body content.
 
 ---
 
