@@ -311,14 +311,22 @@ impl BleedChecker {
     ///
     /// - The five predefined XML entities (`&amp;`, `&lt;`, `&gt;`, `&quot;`, `&apos;`)
     ///   and numeric character references (`&#NN;`, `&#xHH;`) are decoded exactly.
-    /// - Unknown named entities (e.g. `&copy;`, `&nbsp;`) silently expand to the
-    ///   empty string rather than causing the entire member to fall back to raw text.
-    ///   This is correct: an unknown entity is never equal to a sentinel character,
-    ///   so collapsing it to empty cannot cause a false negative.
+    /// - Unknown named entities (e.g. `&copy;`, `&nbsp;`) decode to the Unicode
+    ///   replacement character U+FFFD (`\u{FFFD}`) rather than the empty string.
+    ///   Using the empty string would cause two categories of silent bug:
+    ///   - **False positive:** `A&copy;B` → `AB` (empty joins neighbours) triggers
+    ///     an absence-check panic even when `AB` is not semantically present.
+    ///   - **False green:** `R&copy;D` → `RD` (empty joins neighbours) makes a
+    ///     presence check pass even when `RD` was never written, hiding a routing
+    ///     failure.
+    ///
+    ///   U+FFFD is a sentinel-neutral placeholder: it never forms a substring equal
+    ///   to a well-formed ASCII/UTF-8 sentinel, so it cannot cause either bug.
+    ///   Predefined entity decoding (`&amp;` → `&` etc.) is unaffected.
     /// - As belt-and-suspenders, the sentinel is checked against BOTH the
     ///   best-effort-decoded text AND the raw UTF-8 text. A hit in either counts as
     ///   bleed. This ensures that a sentinel is never missed because an unrelated
-    ///   unknown entity appears in the same member.
+    ///   unknown entity appears in the same member (no false negative).
     ///
     /// Non-UTF-8 bytes in the member are replaced with the Unicode replacement
     /// character (U+FFFD) before entity decoding.
@@ -343,15 +351,20 @@ impl BleedChecker {
         });
         let raw_utf8 = String::from_utf8_lossy(&raw_bytes).into_owned();
 
-        // Tolerant best-effort entity decoding (EC-004, F-036-002):
+        // Tolerant best-effort entity decoding (EC-004, F-036-002, F-PASS3-001):
         // - Known XML entities and numeric char refs are decoded correctly.
-        // - Unknown named entities (e.g. &copy;, &nbsp;) expand to "" instead
-        //   of causing the whole-member fallback.
+        // - Unknown named entities (e.g. &copy;, &nbsp;) decode to U+FFFD
+        //   (Unicode replacement character) rather than the empty string.
+        //   Using empty string would collapse neighbours — e.g. `A&copy;B` → `AB`
+        //   or `R&copy;D` → `RD` — causing false positives (spurious panic on
+        //   absence check) and false greens (silent pass on presence check).
+        //   U+FFFD is sentinel-neutral: it never matches any well-formed ASCII
+        //   sentinel, so it avoids BOTH false-positive and false-negative joins.
         let decoded = quick_xml::escape::unescape_with(&raw_utf8, |entity| {
             // Try the five predefined XML entities first.
-            // For any other named entity, return Some("") — the entity collapses
-            // to empty rather than causing an error that would abort decoding.
-            quick_xml::escape::resolve_predefined_entity(entity).or(Some(""))
+            // For any other named entity, return Some("\u{FFFD}") — the entity
+            // becomes a non-joining replacement char rather than empty string.
+            quick_xml::escape::resolve_predefined_entity(entity).or(Some("\u{FFFD}"))
         })
         .unwrap_or_else(|_| {
             // This branch is only reached for malformed numeric char refs (e.g.

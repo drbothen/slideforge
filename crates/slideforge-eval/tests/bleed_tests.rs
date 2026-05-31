@@ -516,6 +516,98 @@ fn test_BC_1_14_004_ec004_unknown_entity_does_not_mask_adjacent_sentinel() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// F-PASS3-001: Unknown-entity placeholder tests — U+FFFD, not empty string
+//
+// These three tests verify that unknown XML entities (e.g. `&copy;`) are
+// decoded to the Unicode replacement character U+FFFD rather than the empty
+// string. Using the empty string causes two categories of bug:
+//   (a) False positive: `A&copy;B` → `AB` triggers `assert_absent` panic
+//       even though `AB` is not semantically present.
+//   (b) False green: `R&copy;D` → `RD` passes `assert_present(.., "RD")`
+//       when `RD` was never actually written — hiding a routing failure.
+//
+// With U+FFFD: `A&copy;B` → `A\u{FFFD}B` (not `AB`); `R&copy;D` →
+// `R\u{FFFD}D` (not `RD`). These tests MUST FAIL against the `.or(Some(""))`
+// implementation and MUST PASS after the U+FFFD placeholder fix.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// F-PASS3-001 (a) — no false positive:
+/// `assert_absent_from_pptx_slides(.., "AB")` must NOT panic when the slide
+/// member contains `A&copy;B` (unknown entity between A and B).
+///
+/// With `.or(Some(""))`, `&copy;` decodes to `""` → `AB` is formed → panic
+/// (spurious RED). With U+FFFD, the decoded text is `A\u{FFFD}B` which does
+/// NOT contain `AB` → no panic (correct).
+///
+/// This test FAILS against the empty-string fallback and PASSES after the fix.
+#[test]
+fn test_BC_1_14_004_unknown_entity_placeholder_no_false_positive_absent_check() {
+    // Slide member contains A followed by &copy; followed by B.
+    // The human-readable sentinel to check absence of is "AB".
+    let pptx = make_pptx_zip(r"<a:t>A&copy;B</a:t>", "notes without sentinel");
+    // Must NOT panic — "AB" is not semantically present; the unknown entity
+    // separates A and B and must decode to a non-joining placeholder (U+FFFD),
+    // not the empty string.
+    BleedChecker::assert_absent_from_pptx_slides(&pptx, "AB");
+}
+
+/// F-PASS3-001 (b) — no false green:
+/// `assert_present_in_docx_body(.., "RD")` must PANIC when `word/document.xml`
+/// contains only `R&copy;D` (unknown entity between R and D, no literal `RD`).
+///
+/// With `.or(Some(""))`, `&copy;` decodes to `""` → decoded text is `RD` →
+/// the check PASSES (false green: routing failure is silently hidden). With
+/// U+FFFD, the decoded text is `R\u{FFFD}D` which does NOT contain `RD` → the
+/// check correctly PANICS (routing failure detected).
+///
+/// This test FAILS against the empty-string fallback (the check incorrectly
+/// passes) and PASSES after the fix (the check correctly panics).
+#[test]
+#[should_panic(expected = "BleedChecker: expected register content NOT found in DOCX body")]
+fn test_BC_1_14_004_unknown_entity_placeholder_no_false_green_present_check() {
+    // word/document.xml contains ONLY R followed by &copy; followed by D.
+    // There is no literal "RD" substring anywhere in the raw or decoded text
+    // (after the U+FFFD fix). We check that "RD" is present — it must NOT be
+    // found because R and D are separated by the unknown entity placeholder.
+    let docx = make_docx_zip(r"R&copy;D and nothing else matching");
+    BleedChecker::assert_present_in_docx_body(&docx, "RD");
+}
+
+/// F-PASS3-001 (c) — no false negative (regression guard):
+/// The existing `&copy; R&amp;D roadmap` → detect `R&D roadmap` test must
+/// still work after the U+FFFD fix. The placeholder must not break detection
+/// of legitimately escaped predefined entities.
+///
+/// `&copy;` → `\u{FFFD}`, `R&amp;D` → `R&D`. The decoded text contains
+/// `R&D roadmap` as a substring → sentinel IS found → assert_absent panics.
+#[test]
+fn test_BC_1_14_004_unknown_entity_placeholder_no_false_negative_regression() {
+    // Slide member: &copy; (unknown) followed by R&amp;D roadmap (escaped sentinel).
+    let pptx = make_pptx_zip(
+        r"<a:t>&copy; R&amp;D roadmap &amp; analysis</a:t>",
+        "notes without sentinel",
+    );
+    // assert_absent_from_pptx_all must PANIC: decoded text contains "R&D roadmap".
+    let result = std::panic::catch_unwind(|| {
+        BleedChecker::assert_absent_from_pptx_all(&pptx, "R&D roadmap");
+    });
+    assert!(
+        result.is_err(),
+        "Regression: BleedChecker must still detect 'R&D roadmap' after U+FFFD fix — \
+         the placeholder must not break detection of predefined entity decoding (F-PASS3-001 c)"
+    );
+    // Also verify the slide-scoped check detects it.
+    let result2 = std::panic::catch_unwind(|| {
+        BleedChecker::assert_absent_from_pptx_slides(&pptx, "R&D roadmap");
+    });
+    assert!(
+        result2.is_err(),
+        "Regression: assert_absent_from_pptx_slides must also detect 'R&D roadmap' \
+         via predefined entity decoding (U+FFFD fix must not break this — F-PASS3-001 c)"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // F-003: Zero-member guard tests — absence checks must fail-closed
 //
 // assert_absent_from_pptx_slides and assert_absent_from_pptx_all must NOT
@@ -602,14 +694,18 @@ fn test_BC_1_14_004_fixture_parses_without_errors() {
         sink.errors().len()
     );
 
-    // Fail if there were any unexpected non-fatal errors (warnings are OK
-    // for missing brand file etc, but the fixture must not have parse errors).
-    let errors = sink.errors();
+    // Fail if there were any FATAL-severity errors (warnings are acceptable
+    // for things like a missing brand file, but the fixture must not have
+    // fatal parse errors). We gate on has_fatal() rather than errors.is_empty()
+    // because DiagnosticSink::errors() returns ALL diagnostics regardless of
+    // severity — asserting it is empty would spuriously fail if the parser
+    // ever emits a benign WARNING for this fixture (F-PASS3-002).
     assert!(
-        errors.is_empty(),
-        "three-register-slide.sf must produce zero parse errors; \
-         got {} errors",
-        errors.len()
+        !sink.has_fatal(),
+        "three-register-slide.sf must produce zero fatal parse errors; \
+         {} diagnostic(s) in sink (use has_fatal() to gate on severity, \
+         not errors().is_empty() which rejects warnings)",
+        sink.errors().len()
     );
 
     // Verify the parsed deck has exactly one slide item.
