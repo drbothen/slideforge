@@ -25,6 +25,7 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use crate::color::default_color_for_slot;
 use crate::context::BrandLoadContext;
 use crate::error::BrandError;
 use crate::loader::BrandLoader;
@@ -313,21 +314,16 @@ fn brand_template_to_toml(
                 let resolved_hex: String = resolve_scheme_ref(scheme_name, i, &template.colors)
                     .map_or_else(
                         || {
-                            // Self-reference or unresolvable: use the crate's default fallback
-                            // for this slot. This is always a valid #RRGGBB string.
+                            // Self-reference or unresolvable: delegate to the single-source-of-truth
+                            // default table in color.rs (F-024A-MED-2 — eliminates sibling-drift).
+                            // color_slot.name is the OOXML slot name (e.g., "folHlink"),
+                            // which is the key accepted by default_color_for_slot.
                             tracing::warn!(
                                 slot = field,
                                 scheme_ref = scheme_name.as_ref(),
                                 "unresolvable SchemeRef; using fallback hex for brand.toml"
                             );
-                            // Mirror the default_color_for_slot logic from color.rs.
-                            match field {
-                                "dk1" | "dk2" => "#404040".to_owned(),
-                                "lt1" => "#F0F0F0".to_owned(),
-                                "lt2" => "#D0D0D0".to_owned(),
-                                "hlink" | "fol_hlink" => "#0000EE".to_owned(),
-                                _ => "#808080".to_owned(),
-                            }
+                            default_color_for_slot(color_slot.name.as_ref()).to_string()
                         },
                         std::string::ToString::to_string,
                     );
@@ -1429,6 +1425,102 @@ mod tests {
             acc2_line.contains("# derived via tint/shade"),
             "resolved SchemeRef must still carry inline comment (EC-003), got: {acc2_line}"
         );
+    }
+
+    // ─── F-024A-MED-2: single source for default color fallbacks ─────────────
+
+    /// F-024A-MED-2 — the fallback hex used in `brand_template_to_toml` for
+    /// unresolvable `SchemeRef` slots must equal `color::default_color_for_slot`
+    /// for all 12 OOXML slot names.
+    ///
+    /// This guards against the TD-VSDD-060 sibling-drift risk: two independent
+    /// tables for the same canonical values. After the fix, extractor delegates
+    /// to `color::default_color_for_slot` (the single source of truth).
+    #[test]
+    fn test_f024a_med2_extractor_fallback_matches_color_default_for_all_slots() {
+        use crate::color::default_color_for_slot;
+        use crate::template::{BrandFonts, BrandTemplate, ColorSlot, ColorValue, MasterIds};
+
+        // Build a template where every slot is a self-referential SchemeRef, so each
+        // one is unresolvable and falls back to the default color.
+        // We use slot names exactly as stored by color.rs (OOXML canonical names).
+        let ooxml_names = [
+            "dk1", "lt1", "dk2", "lt2", "acc1", "acc2", "acc3", "acc4", "acc5", "acc6",
+            "hlink", "folHlink",
+        ];
+        let toml_names = [
+            "dk1", "lt1", "dk2", "lt2", "acc1", "acc2", "acc3", "acc4", "acc5", "acc6",
+            "hlink", "fol_hlink",
+        ];
+        let colors: [ColorSlot; 12] = ooxml_names
+            .iter()
+            .map(|&name| ColorSlot {
+                name: Arc::from(name),
+                // Self-referential: the lowercase of the OOXML name (as stored by color.rs).
+                value: ColorValue::SchemeRef(Arc::from(name.to_lowercase().as_str())),
+            })
+            .collect::<Vec<_>>()
+            .try_into()
+            .expect("12 elements");
+
+        let template = BrandTemplate {
+            colors,
+            fonts: BrandFonts {
+                heading: Arc::from("Calibri Light"),
+                body: Arc::from("Calibri"),
+            },
+            logo: None,
+            footer_text: None,
+            layout_names: vec![],
+            layouts: vec![],
+            notes_master_stub: vec![],
+            handout_master_stub: vec![],
+            master_ids: MasterIds::default(),
+            content_types_layout_entries: Arc::from(""),
+        };
+
+        let (toml_str, _) = brand_template_to_toml(&template, None);
+
+        // Parse the output as BrandConfig.
+        let config: crate::toml_schema::BrandConfig =
+            toml::from_str(&toml_str).unwrap_or_else(|e| {
+                panic!(
+                    "F-024A-MED-2 TOML must parse as BrandConfig: {e}\nOutput:\n{toml_str}"
+                )
+            });
+
+        // For each slot, the written value must equal default_color_for_slot(ooxml_name).
+        let config_values = [
+            config.colors.dk1.as_deref(),
+            config.colors.lt1.as_deref(),
+            config.colors.dk2.as_deref(),
+            config.colors.lt2.as_deref(),
+            config.colors.acc1.as_deref(),
+            config.colors.acc2.as_deref(),
+            config.colors.acc3.as_deref(),
+            config.colors.acc4.as_deref(),
+            config.colors.acc5.as_deref(),
+            config.colors.acc6.as_deref(),
+            config.colors.hlink.as_deref(),
+            config.colors.fol_hlink.as_deref(),
+        ];
+
+        for (i, ooxml_name) in ooxml_names.iter().enumerate() {
+            let expected = default_color_for_slot(ooxml_name);
+            let actual = config_values[i].unwrap_or_else(|| {
+                panic!(
+                    "F-024A-MED-2: slot '{}' (TOML: '{}') must be present in config",
+                    ooxml_name, toml_names[i]
+                )
+            });
+            assert_eq!(
+                actual,
+                expected.as_ref(),
+                "F-024A-MED-2: fallback for '{}' (TOML: '{}') must equal \
+                 color::default_color_for_slot(\"{}\") = \"{}\", but got \"{}\"",
+                ooxml_name, toml_names[i], ooxml_name, expected, actual
+            );
+        }
     }
 
     // ─── F-024A-MED-1: camelCase SchemeRef resolution ────────────────────────
