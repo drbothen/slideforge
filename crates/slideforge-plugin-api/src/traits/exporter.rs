@@ -30,6 +30,10 @@ pub struct ExportOptions {
 }
 
 /// Error returned by [`Exporter::export`] when output cannot be produced.
+///
+/// `#[non_exhaustive]` allows adding variants in minor releases without
+/// breaking downstream plugin authors or consumer crates.
+#[non_exhaustive]
 #[derive(Debug, Error)]
 pub enum ExportError {
     /// The export operation failed due to an I/O error (e.g., cannot read a

@@ -63,6 +63,10 @@ impl Default for Canvas {
 }
 
 /// Error returned by [`SlideType::lay_out`].
+///
+/// `#[non_exhaustive]` allows adding variants in minor releases without
+/// breaking downstream plugin authors or consumer crates.
+#[non_exhaustive]
 #[derive(Debug, Error)]
 pub enum LayoutError {
     /// A required field is missing from the slide.

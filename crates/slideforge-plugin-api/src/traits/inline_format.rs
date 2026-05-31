@@ -41,6 +41,10 @@ impl std::fmt::Display for InlineOutputFormat {
 }
 
 /// Error returned by [`InlineFormat::render`].
+///
+/// `#[non_exhaustive]` allows adding variants in minor releases without
+/// breaking downstream plugin authors or consumer crates.
+#[non_exhaustive]
 #[derive(Debug, Error)]
 pub enum InlineError {
     /// The [`InlineNode`] variant is not supported by this formatter for the

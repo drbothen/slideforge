@@ -47,6 +47,10 @@ impl std::fmt::Display for BrandSource {
 }
 
 /// Error returned by [`BrandProvider::load`].
+///
+/// `#[non_exhaustive]` allows adding variants in minor releases without
+/// breaking downstream plugin authors or consumer crates.
+#[non_exhaustive]
 #[derive(Debug, Error)]
 pub enum BrandError {
     /// The source file does not exist or cannot be opened.
