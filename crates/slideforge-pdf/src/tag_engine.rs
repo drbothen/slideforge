@@ -46,16 +46,13 @@ use slideforge_layout::LaidOutSlide;
 use slideforge_layout::types::FrameContent;
 use slideforge_types::{AltText, ContentBlock};
 
-/// `NonZeroU16` value `2` for H2 headings. Evaluated at compile time;
-/// 2 is a valid non-zero u16 so this `const` block never panics.
-// SAFETY: 2 != 0, so unwrap() inside const context is infallible.
-const H2_LEVEL: std::num::NonZeroU16 =
-    // `unwrap()` in a const context panics at compile time on invalid input;
-    // since the literal is 2, this is provably infallible.
-    match std::num::NonZeroU16::new(2) {
-        Some(v) => v,
-        None => unreachable!(),
-    };
+/// `NonZeroU16` value `2` for H2 headings, resolved at compile time via
+/// `match`. The `None` arm is statically unreachable because the literal `2`
+/// is non-zero; the compiler proves this during const evaluation.
+const H2_LEVEL: std::num::NonZeroU16 = match std::num::NonZeroU16::new(2) {
+    Some(v) => v,
+    None => unreachable!(),
+};
 
 use crate::error::PdfExportError;
 
@@ -259,8 +256,13 @@ impl SlideTagEngine {
                 Ok(Some(TagGroup::new(Tag::<krilla::tagging::kind::P>::P)))
             },
 
-            // Bullet list → L (Disc) with LI+LBody for each item
+            // Bullet list → L (Disc) with LI+LBody for each item.
+            // An empty items list produces no tag group: a childless L element
+            // has no semantic value in a PDF structure tree and is structurally odd.
             ContentBlock::Bullets(items) => {
+                if items.is_empty() {
+                    return Ok(None);
+                }
                 let mut list_group =
                     TagGroup::new(Tag::<krilla::tagging::kind::L>::L(ListNumbering::Disc));
                 for _item in items {
@@ -269,10 +271,6 @@ impl SlideTagEngine {
                     li_group.push(lbody_group);
                     list_group.push(li_group);
                 }
-                // If there are no items, emit an empty-but-valid L group.
-                // (An L with zero LI is unusual but not invalid at this stage;
-                // STORY-044 draws the actual glyph runs.) F-008 fix: emit L+LI
-                // when items exist, not a bare empty L.
                 Ok(Some(list_group))
             },
 
@@ -713,5 +711,21 @@ mod tests {
                 "each deck-level tag tree child must be a Group node"
             );
         }
+    }
+
+    /// BC-4.03.002 AC-003 (guard): an empty `ContentBlock::Bullets` list must
+    /// NOT produce a childless `L` group — `tag_content_block` must return
+    /// `Ok(None)` for an empty bullet list.
+    #[allow(clippy::unwrap_used)]
+    #[test]
+    fn test_bc_4_03_002_empty_bullets_produces_no_tag_group() {
+        let engine = SlideTagEngine::new();
+        let result = engine
+            .tag_content_block(&slideforge_types::ContentBlock::Bullets(vec![]))
+            .unwrap();
+        assert!(
+            result.is_none(),
+            "empty Bullets([]) must return Ok(None), not a childless L group"
+        );
     }
 }
