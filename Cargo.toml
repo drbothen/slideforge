@@ -81,6 +81,7 @@ slideforge-layout = { path = "crates/slideforge-layout", version = "0.1.0" }
 slideforge-pptx = { path = "crates/slideforge-pptx", version = "0.1.0" }
 slideforge-validate = { path = "crates/slideforge-validate", version = "0.1.0" }
 slideforge-data = { path = "crates/slideforge-data", version = "0.1.0" }
+slideforge-brand = { path = "crates/slideforge-brand", version = "0.1.0" }
 slideforge-math = { path = "crates/slideforge-math", version = "0.1.0" }
 slideforge-charts = { path = "crates/slideforge-charts", version = "0.1.0" }
 slideforge-diagrams = { path = "crates/slideforge-diagrams", version = "0.1.0" }
