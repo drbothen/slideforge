@@ -96,7 +96,13 @@ pub fn parse_theme_colors(
                 if let Some(slot) = current_slot {
                     match name_str {
                         "srgbClr" => {
-                            // Extract the `val` attribute.
+                            // Extract the `val` attribute (the base hex color).
+                            //
+                            // Child transform elements (lumMod, lumOff, tint, shade) are
+                            // intentionally NOT applied here — the raw hex is preserved as-is.
+                            // BC-2.01.003 EC-003 scopes transforms to schemeClr only; srgbClr
+                            // transform-aware extraction (widening EC-003) is tracked as STORY-076
+                            // (Brand Loader: Transform-Aware Theme Color Extraction).
                             for attr in e.attributes().flatten() {
                                 if attr.key.local_name().as_ref() == b"val"
                                     && let Ok(val) = std::str::from_utf8(&attr.value)
