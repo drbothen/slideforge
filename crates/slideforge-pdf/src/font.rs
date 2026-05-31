@@ -181,11 +181,21 @@ fn home_dir() -> Option<std::path::PathBuf> {
 
 /// Search a single directory (recursively) for a font file matching `needle`.
 ///
-/// Returns the path of the first match found, or `None`.
+/// Returns the **lexicographically-first** match found (sorted by path), so
+/// results are deterministic regardless of the OS `read_dir` iteration order.
+/// Returns `None` if the directory cannot be read or no matching file exists.
 fn search_font_dir(dir: &std::path::Path, needle: &str) -> Option<std::path::PathBuf> {
-    let entries = std::fs::read_dir(dir).ok()?;
-    for entry in entries.flatten() {
-        let path = entry.path();
+    // Collect all readable entries and sort them so iteration is deterministic.
+    // Non-readable entries are silently skipped (graceful handling for
+    // permission-restricted system font directories).
+    let mut entries: Vec<std::path::PathBuf> = std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .collect();
+    entries.sort();
+
+    for path in entries {
         if path.is_dir() {
             // Recurse into subdirectories (common on Linux: /usr/share/fonts/truetype/…).
             if let Some(found) = search_font_dir(&path, needle) {
@@ -318,5 +328,74 @@ mod tests {
         assert_eq!(normalize_font_name("Open-Sans"), "opensans");
         assert_eq!(normalize_font_name("Arial"), "arial");
         assert_eq!(normalize_font_name(""), "");
+    }
+
+    /// `search_font_dir` returns the **lexicographically-first** match when
+    /// multiple files share the same normalized stem (determinism invariant).
+    ///
+    /// Two temp `.ttf` files whose stems both normalize to "arial" are placed in
+    /// a controlled temp directory. The function must always return the
+    /// lexicographically-first path, regardless of the OS-level `read_dir`
+    /// order. We verify this by running the search multiple times and confirming
+    /// the result is identical and equal to the expected first path.
+    #[allow(clippy::unwrap_used)]
+    #[test]
+    fn test_search_font_dir_is_deterministic_on_matching_stem() {
+        use std::fs;
+
+        let dir = tempfile::tempdir().expect("failed to create temp dir");
+        let dir_path = dir.path();
+
+        // Create two files with the same normalized stem ("arial"):
+        //   "Arial-Bold.ttf"  → normalize_font_name → "arialbold"   (no match)
+        //   "Arial.ttf"       → normalize_font_name → "arial"        (match)
+        //   "Arial_v2.ttf"    → normalize_font_name → "arial_v2"     (no match)
+        // We want two DISTINCT files that BOTH normalize to "arial" so we can
+        // test which one wins. Use a subdirectory trick: place "AArial.ttf" and
+        // "BArial.ttf" — both normalize to "aarial" / "barial" — they don't
+        // share a stem. Instead, use TWO files with identical stems but
+        // different filenames is not possible with the current normalizer since
+        // it strips only spaces and hyphens. So we test the simpler invariant:
+        // given one match and one non-match, the match is returned and repeated
+        // calls produce the identical path.
+        let font_a = dir_path.join("AArial.ttf"); // normalizes to "aarial"
+        let font_b = dir_path.join("BArial.ttf"); // normalizes to "barial"
+        fs::write(&font_a, b"FAKE").expect("write font_a");
+        fs::write(&font_b, b"FAKE").expect("write font_b");
+
+        // Search for "aarial" — only font_a matches.
+        let result1 = search_font_dir(dir_path, "aarial");
+        let result2 = search_font_dir(dir_path, "aarial");
+        assert_eq!(
+            result1,
+            Some(font_a.clone()),
+            "search_font_dir must return the matching file"
+        );
+        assert_eq!(
+            result1, result2,
+            "search_font_dir must return the same result on repeated calls (determinism)"
+        );
+
+        // Now test that when two files share the same normalized stem, the
+        // lexicographically-first path wins. We achieve identical stems by
+        // writing two files with the same name in two subdirectories.
+        let sub_a = dir_path.join("a_subdir");
+        let sub_b = dir_path.join("b_subdir");
+        fs::create_dir(&sub_a).expect("create sub_a");
+        fs::create_dir(&sub_b).expect("create sub_b");
+
+        let match_in_a = sub_a.join("CommonFont.ttf"); // normalizes to "commonfont"
+        let match_in_b = sub_b.join("CommonFont.ttf"); // normalizes to "commonfont"
+        fs::write(&match_in_a, b"FONT_A").expect("write match_in_a");
+        fs::write(&match_in_b, b"FONT_B").expect("write match_in_b");
+
+        // sub_a sorts before sub_b lexicographically, so match_in_a must win.
+        let result = search_font_dir(dir_path, "commonfont");
+        assert_eq!(
+            result,
+            Some(match_in_a),
+            "search_font_dir must return the lexicographically-first path \
+             when multiple files share the same normalized stem"
+        );
     }
 }
