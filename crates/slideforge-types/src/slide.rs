@@ -272,8 +272,8 @@ mod tests {
     /// clones correctly (comemo compatibility).
     #[test]
     fn test_bc_2_02_001_slide_has_overlay_field_hash_clone() {
-        use std::collections::HashMap;
         use crate::slide_overlay::SlideOverlay;
+        use std::collections::HashMap;
 
         let overlay = SlideOverlay {
             logo_path: Some(Arc::from("client-logo.png")),
@@ -328,6 +328,12 @@ mod tests {
         };
         // Structural invariant: overlay is metadata only, no master reference.
         assert!(slide.overlay.is_some());
-        assert!(slide.overlay.as_ref().unwrap().is_empty());
+        assert!(
+            slide
+                .overlay
+                .as_ref()
+                .expect("overlay was set Some above")
+                .is_empty()
+        );
     }
 }

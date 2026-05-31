@@ -119,7 +119,10 @@ mod tests {
         };
         assert_eq!(overlay.logo_path.as_deref(), Some("client-logo.png"));
         assert_eq!(overlay.footer_text.as_deref(), Some("CONFIDENTIAL"));
-        assert_eq!(overlay.confidentiality.as_deref(), Some("DO NOT DISTRIBUTE"));
+        assert_eq!(
+            overlay.confidentiality.as_deref(),
+            Some("DO NOT DISTRIBUTE")
+        );
     }
 
     /// AC-008 / BC-2.02.002 invariant: `SlideOverlay` has NO master-switching field.

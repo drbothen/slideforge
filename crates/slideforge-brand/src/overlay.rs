@@ -102,7 +102,31 @@ pub struct LogoOverride {
     pub media_type: Arc<str>,
 }
 
-// ─── resolve_overlay (STUB — Red Gate) ───────────────────────────────────────
+// ─── infer_media_type ────────────────────────────────────────────────────────
+
+/// Infer the MIME type of a logo image from its file extension.
+///
+/// Supports `.png` → `"image/png"`, `.jpg`/`.jpeg` → `"image/jpeg"`,
+/// `.gif` → `"image/gif"`, `.svg` → `"image/svg+xml"`. Unknown extensions
+/// return `"application/octet-stream"`.
+#[must_use]
+pub fn infer_media_type(path: &Path) -> Arc<str> {
+    let mime = match path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("png") => "image/png",
+        Some("jpg" | "jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("svg") => "image/svg+xml",
+        _ => "application/octet-stream",
+    };
+    Arc::from(mime)
+}
+
+// ─── resolve_overlay ─────────────────────────────────────────────────────────
 
 /// Resolve a parse-time [`SlideOverlay`] into a fully-loaded [`BrandOverlay`].
 ///
@@ -122,35 +146,44 @@ pub struct LogoOverride {
 ///
 /// - [`BrandError::FileNotFound`] — if `raw.logo_path` is set and the file does
 ///   not exist at the resolved path (BC-2.02.001 edge case EC-001, `E-BRD-001`).
-///
-/// # Red Gate (STORY-025)
-///
-/// This function body is `todo!()`. Every test that calls it will panic with
-/// `"BC-2.02.001/002 — STORY-025 — Red Gate: brand overlay not yet implemented"`.
-/// The implementer must replace this body with production logic.
 pub fn resolve_overlay(
     raw: &SlideOverlay,
     root_dir: &Path,
 ) -> Result<Option<BrandOverlay>, BrandError> {
-    let _ = (raw, root_dir);
-    todo!("BC-2.02.001/002 — STORY-025 — Red Gate: brand overlay not yet implemented")
-}
+    // Empty overlay (all fields None) → no-op per BC-2.02.001 EC-004.
+    if raw.is_empty() {
+        return Ok(None);
+    }
 
-// ─── infer_media_type (STUB — Red Gate) ──────────────────────────────────────
+    // Resolve logo if a path is declared.
+    let logo = match raw.logo_path.as_ref() {
+        None => None,
+        Some(logo_path_str) => {
+            let logo_path = root_dir.join(logo_path_str.as_ref());
+            if !logo_path.exists() {
+                return Err(BrandError::FileNotFound {
+                    path: Arc::clone(logo_path_str),
+                    span: raw.span.clone(),
+                });
+            }
+            let bytes = std::fs::read(&logo_path).map_err(|_| BrandError::FileNotFound {
+                path: Arc::clone(logo_path_str),
+                span: raw.span.clone(),
+            })?;
+            let media_type = infer_media_type(&logo_path);
+            Some(LogoOverride {
+                path: Arc::clone(logo_path_str),
+                bytes,
+                media_type,
+            })
+        },
+    };
 
-/// Infer the MIME type of a logo image from its file extension.
-///
-/// Supports `.png` → `"image/png"`, `.jpg`/`.jpeg` → `"image/jpeg"`,
-/// `.gif` → `"image/gif"`, `.svg` → `"image/svg+xml"`. Unknown extensions
-/// return `"application/octet-stream"`.
-///
-/// # Red Gate (STORY-025)
-///
-/// This function body is `todo!()`. The implementer must replace this body.
-#[must_use]
-pub fn infer_media_type(path: &Path) -> Arc<str> {
-    let _ = path;
-    todo!("BC-2.02.001/002 — STORY-025 — Red Gate: media type inference not yet implemented")
+    Ok(Some(BrandOverlay {
+        logo,
+        footer_text: raw.footer_text.clone(),
+        confidentiality: raw.confidentiality.clone(),
+    }))
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -178,7 +211,7 @@ mod tests {
 
     // ── AC-001 / BC-2.02.001 precondition 2: BrandOverlay struct fields ────────
 
-    /// AC-001: `BrandOverlay` has the correct fields (logo, footer_text, confidentiality).
+    /// AC-001: `BrandOverlay` has the correct fields (logo, `footer_text`, confidentiality).
     /// This is a compile-time structural test. If the fields were wrong, this would
     /// not compile.
     #[test]
@@ -190,10 +223,13 @@ mod tests {
         };
         assert!(overlay.logo.is_none());
         assert_eq!(overlay.footer_text.as_deref(), Some("CONFIDENTIAL"));
-        assert_eq!(overlay.confidentiality.as_deref(), Some("DO NOT DISTRIBUTE"));
+        assert_eq!(
+            overlay.confidentiality.as_deref(),
+            Some("DO NOT DISTRIBUTE")
+        );
     }
 
-    /// AC-001: `LogoOverride` has path, bytes, and media_type fields.
+    /// AC-001: `LogoOverride` has path, bytes, and `media_type` fields.
     #[test]
     fn test_bc_2_02_001_logo_override_fields_present() {
         let logo = LogoOverride {
@@ -213,11 +249,13 @@ mod tests {
     fn test_bc_2_02_002_invariant_brand_overlay_no_master_field() {
         // Exhaustive — if template_path, master_path, or layout_idx existed on
         // BrandOverlay, this would not compile (unknown field error).
-        let _overlay = BrandOverlay {
+        let overlay = BrandOverlay {
             logo: None,
             footer_text: None,
             confidentiality: None,
         };
+        // Verify the struct compiles with exactly the 3 expected fields.
+        assert!(overlay.logo.is_none());
     }
 
     /// AC-001: `BrandOverlay` implements `Hash + Clone + Eq + Debug`.
@@ -244,28 +282,23 @@ mod tests {
 
     /// AC-006 / BC-2.02.001 EC-004: `resolve_overlay` with all-None overlay
     /// returns `Ok(None)` (no overlay to apply).
-    ///
-    /// RED GATE: This test will panic with todo!() until the stub is implemented.
     #[test]
-    #[should_panic(expected = "Red Gate")]
     fn test_bc_2_02_001_resolve_overlay_empty_returns_none() {
         let overlay = empty_overlay();
         let dir = tempdir().expect("tempdir");
         let result = resolve_overlay(&overlay, dir.path());
-        // After implementation this assert replaces the panic check:
-        // assert!(result.is_ok());
-        // assert!(result.unwrap().is_none());
-        let _ = result;
+        assert!(result.is_ok(), "empty overlay must not error: {result:?}");
+        assert!(
+            result.expect("checked is_ok above").is_none(),
+            "empty overlay must return None"
+        );
     }
 
     // ── AC-005 / EC-001: missing logo → BrandError::FileNotFound ─────────────
 
     /// AC-005 / BC-2.02.001 EC-001: a `brand_overlay:` with a nonexistent logo
     /// path produces `BrandError::FileNotFound` (E-BRD-001, fatal, exit 4).
-    ///
-    /// RED GATE: This test will panic with todo!() until the stub is implemented.
     #[test]
-    #[should_panic(expected = "Red Gate")]
     fn test_bc_2_02_001_resolve_overlay_missing_logo_file_not_found() {
         let overlay = SlideOverlay {
             logo_path: Some(Arc::from("absolutely-does-not-exist-7f3a.png")),
@@ -275,45 +308,54 @@ mod tests {
         };
         let dir = tempdir().expect("tempdir");
         let result = resolve_overlay(&overlay, dir.path());
-        // After implementation this replaces the panic check:
-        // match result {
-        //     Err(BrandError::FileNotFound { path, .. }) => {
-        //         assert!(path.contains("absolutely-does-not-exist-7f3a.png"));
-        //     }
-        //     _ => panic!("expected FileNotFound"),
-        // }
-        let _ = result;
+        match result {
+            Err(BrandError::FileNotFound { path, .. }) => {
+                assert!(
+                    path.contains("absolutely-does-not-exist-7f3a.png"),
+                    "FileNotFound path must contain the logo path, got: {path}"
+                );
+            },
+            other => panic!("expected BrandError::FileNotFound, got: {other:?}"),
+        }
     }
 
     // ── AC-002 / BC-2.02.001 postcondition 1: logo bytes loaded from path ─────
 
     /// AC-002 / BC-2.02.001 postcondition 1: `resolve_overlay` with a valid logo
     /// path loads the bytes and returns `BrandOverlay.logo = Some(LogoOverride { bytes })`.
-    ///
-    /// RED GATE: This test will panic with todo!() until the stub is implemented.
     #[test]
-    #[should_panic(expected = "Red Gate")]
     fn test_bc_2_02_001_resolve_overlay_logo_path_loads_bytes() {
         let dir = tempdir().expect("tempdir");
         let logo_path = dir.path().join("test-logo.png");
         let png_bytes = b"\x89PNG\r\n\x1a\n"; // minimal PNG header
         std::fs::write(&logo_path, png_bytes).expect("write png");
 
+        let file_name = logo_path
+            .file_name()
+            .expect("path has a file name")
+            .to_str()
+            .expect("file name is valid UTF-8");
         let overlay = SlideOverlay {
-            logo_path: Some(Arc::from(
-                logo_path.file_name().unwrap().to_str().unwrap(),
-            )),
+            logo_path: Some(Arc::from(file_name)),
             footer_text: None,
             confidentiality: None,
             span: SourceSpan::default(),
         };
         let result = resolve_overlay(&overlay, dir.path());
-        // After implementation:
-        // let brand_overlay = result.expect("no error").expect("Some overlay");
-        // let logo = brand_overlay.logo.expect("logo present");
-        // assert_eq!(logo.bytes, png_bytes);
-        // assert_eq!(logo.media_type.as_ref(), "image/png");
-        let _ = result;
+        let brand_overlay = result
+            .expect("no error")
+            .expect("Some overlay — logo path was set");
+        let logo = brand_overlay.logo.expect("logo must be present");
+        assert_eq!(
+            logo.bytes.as_slice(),
+            png_bytes.as_slice(),
+            "logo bytes must match file content"
+        );
+        assert_eq!(
+            logo.media_type.as_ref(),
+            "image/png",
+            "media type must be image/png for .png extension"
+        );
     }
 
     // ── AC-003 / BC-2.02.001 postcondition 2: footer_text semantics ───────────
@@ -321,9 +363,9 @@ mod tests {
     /// AC-003 / BC-2.02.001 postcondition 2: `footer_text: Some("")` in
     /// `SlideOverlay` produces `BrandOverlay.footer_text = Some("")` — NOT `None`.
     ///
-    /// RED GATE: This test will panic with todo!() until the stub is implemented.
+    /// `Some("")` clears footer text content; `None` means no change. These must be
+    /// distinct values (BC-2.02.001 invariant 3).
     #[test]
-    #[should_panic(expected = "Red Gate")]
     fn test_bc_2_02_001_resolve_overlay_footer_text_some_empty_distinct_from_none() {
         let overlay = SlideOverlay {
             logo_path: None,
@@ -333,18 +375,19 @@ mod tests {
         };
         let dir = tempdir().expect("tempdir");
         let result = resolve_overlay(&overlay, dir.path());
-        // After implementation:
-        // let brand_overlay = result.expect("no error").expect("Some overlay — Some('') is not empty");
-        // assert_eq!(brand_overlay.footer_text, Some(Arc::from("")));
-        let _ = result;
+        let brand_overlay = result
+            .expect("no error")
+            .expect("Some overlay — Some('') is not empty; it has explicit intent");
+        assert_eq!(
+            brand_overlay.footer_text,
+            Some(Arc::from("")),
+            "footer_text Some('') must be preserved as Some(''), not converted to None"
+        );
     }
 
     /// AC-003 / BC-2.02.001 postcondition 2: `footer_text: None` in `SlideOverlay`
-    /// produces `BrandOverlay.footer_text = None` — no change to footer.
-    ///
-    /// RED GATE: This test will panic with todo!() until the stub is implemented.
+    /// produces an empty overlay (all-None → `Ok(None)`).
     #[test]
-    #[should_panic(expected = "Red Gate")]
     fn test_bc_2_02_001_resolve_overlay_footer_text_none() {
         let overlay = SlideOverlay {
             logo_path: None,
@@ -354,18 +397,22 @@ mod tests {
         };
         let dir = tempdir().expect("tempdir");
         let result = resolve_overlay(&overlay, dir.path());
-        // After implementation: result = Ok(None) since all fields are None.
-        let _ = result;
+        // All fields None → Ok(None) (no-op overlay).
+        assert!(
+            result.is_ok(),
+            "all-None overlay must not error: {result:?}"
+        );
+        assert!(
+            result.expect("checked is_ok above").is_none(),
+            "all-None overlay must return Ok(None)"
+        );
     }
 
     // ── AC-004 / BC-2.02.001 postcondition 3: confidentiality ────────────────
 
     /// AC-004 / BC-2.02.001 postcondition 3: confidentiality text is passed
     /// through to `BrandOverlay.confidentiality`.
-    ///
-    /// RED GATE: This test will panic with todo!() until the stub is implemented.
     #[test]
-    #[should_panic(expected = "Red Gate")]
     fn test_bc_2_02_001_resolve_overlay_confidentiality_passthrough() {
         let overlay = SlideOverlay {
             logo_path: None,
@@ -375,21 +422,23 @@ mod tests {
         };
         let dir = tempdir().expect("tempdir");
         let result = resolve_overlay(&overlay, dir.path());
-        // After implementation:
-        // let brand_overlay = result.expect("no error").expect("Some overlay");
-        // assert_eq!(brand_overlay.confidentiality.as_deref(), Some("CONFIDENTIAL — DO NOT DISTRIBUTE"));
-        let _ = result;
+        let brand_overlay = result
+            .expect("no error")
+            .expect("Some overlay — confidentiality was set");
+        assert_eq!(
+            brand_overlay.confidentiality.as_deref(),
+            Some("CONFIDENTIAL — DO NOT DISTRIBUTE"),
+            "confidentiality text must pass through unchanged"
+        );
     }
 
     // ── AC-010 / BC-2.02.002 EC-002: all slides have overlays ────────────────
 
     /// AC-010 / BC-2.02.002 EC-002: `resolve_overlay` is called N times for an
     /// N-slide deck (e.g., 10 slides all with overlays). The function is pure
-    /// per-slide — no shared state. Each call returns independently.
-    ///
-    /// RED GATE: This test will panic with todo!() until the stub is implemented.
+    /// per-slide — no shared state. Each call returns independently with the
+    /// correct per-slide footer text.
     #[test]
-    #[should_panic(expected = "Red Gate")]
     fn test_bc_2_02_002_all_slides_have_overlays_resolve_independently() {
         let dir = tempdir().expect("tempdir");
         let overlays: Vec<SlideOverlay> = (0..10)
@@ -402,10 +451,16 @@ mod tests {
             .collect();
 
         // Each call to resolve_overlay is independent — no shared mutable state.
-        // After implementation: all should return Ok(Some(...)) with per-slide footer.
-        for overlay in &overlays {
+        for (i, overlay) in overlays.iter().enumerate() {
             let result = resolve_overlay(overlay, dir.path());
-            let _ = result;
+            let brand_overlay = result
+                .unwrap_or_else(|e| panic!("slide {i} overlay must not error: {e}"))
+                .unwrap_or_else(|| panic!("slide {i} must return Some overlay"));
+            assert_eq!(
+                brand_overlay.footer_text.as_deref(),
+                Some(format!("Slide {i} Footer").as_str()),
+                "slide {i} footer text must match"
+            );
         }
     }
 
@@ -413,42 +468,35 @@ mod tests {
 
     /// BC-2.02.002 invariant 2: No API, flag, or field in `BrandOverlay` allows
     /// a second slide master. This test validates the struct is exhaustively
-    /// constructible with exactly 3 fields (logo, footer_text, confidentiality).
+    /// constructible with exactly 3 fields (logo, `footer_text`, confidentiality).
     #[test]
     fn test_bc_2_02_002_invariant_no_second_master_api() {
         // Exhaustive struct construction.
         // If template_path, master_path, or layout_idx were added, this would fail.
-        let _overlay = BrandOverlay {
+        let overlay = BrandOverlay {
             logo: None,
             footer_text: None,
             confidentiality: None,
         };
         // Success = proof of structural absence of master-switch API.
+        assert!(overlay.footer_text.is_none());
     }
 
-    // ── infer_media_type stub ─────────────────────────────────────────────────
+    // ── infer_media_type ─────────────────────────────────────────────────────
 
     /// `infer_media_type` returns `"image/png"` for `.png` extension.
-    ///
-    /// RED GATE: This test will panic with todo!() until the stub is implemented.
     #[test]
-    #[should_panic(expected = "Red Gate")]
     fn test_bc_2_02_001_infer_media_type_png() {
         let path = std::path::Path::new("logo.png");
         let result = infer_media_type(path);
-        // After implementation: assert_eq!(result.as_ref(), "image/png");
-        let _ = result;
+        assert_eq!(result.as_ref(), "image/png");
     }
 
     /// `infer_media_type` returns `"image/jpeg"` for `.jpg` extension.
-    ///
-    /// RED GATE: This test will panic with todo!() until the stub is implemented.
     #[test]
-    #[should_panic(expected = "Red Gate")]
     fn test_bc_2_02_001_infer_media_type_jpg() {
         let path = std::path::Path::new("logo.jpg");
         let result = infer_media_type(path);
-        // After implementation: assert_eq!(result.as_ref(), "image/jpeg");
-        let _ = result;
+        assert_eq!(result.as_ref(), "image/jpeg");
     }
 }
