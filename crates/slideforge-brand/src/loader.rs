@@ -210,6 +210,8 @@ impl BrandLoader {
             colors,
             fonts,
             logo,
+            // Footer detection deferred to STORY-075 (Brand Loader: Footer Detection).
+            // The extractor's [footer] writer is reachable once this is populated.
             footer_text: None,
             layout_names,
             // STORY-023 fields — not populated by the loader; synthesizer fills these.
