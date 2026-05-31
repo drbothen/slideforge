@@ -287,18 +287,21 @@ mod tests {
 
     // ── AC-007: 4:3 slide size coordinate mapping ─────────────────────────────
 
-    /// BC-4.03.005 AC-007 / EC-005: 4:3 slide (7,200,000 × 5,400,000 EMU).
+    /// BC-4.03.005 AC-007 / EC-005: 4:3 slide (7,315,200 × 5,486,400 EMU = 576 × 432 pt = 8" × 6").
     ///
     /// `ir_y_to_pdf_y` must use the supplied `slide_h`, not the hard-coded 16:9 constant.
     /// Verifies non-16:9 slide dimensions are mapped via the supplied parameter.
+    ///
+    /// EMU derivation: 576pt × 12700 EMU/pt = 7,315,200 EMU; 432pt × 12700 EMU/pt = 5,486,400 EMU.
+    /// These yield EXACT round-number pt values (no rounding error in f32 arithmetic).
     #[test]
     #[allow(clippy::similar_names, clippy::cast_precision_loss)]
     fn test_bc_4_03_005_ir_y_to_pdf_y_4x3_slide_mapping() {
-        // 4:3 slide dimensions: 7_200_000 × 5_400_000 EMU (common presentation 4:3)
-        // emu_to_pt(7_200_000) ≈ 566.929pt
-        // emu_to_pt(5_400_000) ≈ 425.197pt
-        let slide_w_4x3 = Emu(7_200_000);
-        let slide_h_4x3 = Emu(5_400_000);
+        // 4:3 slide dimensions: 7_315_200 × 5_486_400 EMU (8" × 6" = 576pt × 432pt exact)
+        // emu_to_pt(7_315_200) = 576.0pt (exact)
+        // emu_to_pt(5_486_400) = 432.0pt (exact)
+        let slide_w_4x3 = Emu(7_315_200);
+        let slide_h_4x3 = Emu(5_486_400);
 
         // Expected values: computed in the same way as emu_to_pt() for a direct comparison.
         // cast_precision_loss: i64→f32 acceptable; slide EMU values ≤ 9M are within f32 precision.
