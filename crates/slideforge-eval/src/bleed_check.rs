@@ -435,43 +435,145 @@ impl BleedChecker {
     }
 }
 
-/// Decode XML entity references in `input` using a per-token tolerant strategy.
+/// Maximum number of bytes to scan ahead from `&` when looking for the
+/// closing `;` of an entity reference.
+///
+/// A valid entity body is at most 16 characters (`&#x` + 13 hex digits
+/// would already exceed the Unicode scalar range, and well-known named
+/// entities are much shorter). We allow the `&` byte itself plus 16 body
+/// characters plus the `;`, giving a window of 18 bytes. Any `&` followed
+/// by a `;` further than this limit is not a valid entity reference — the
+/// `&` is emitted literally and we advance one byte.
+const MAX_ENTITY_WINDOW: usize = 18;
+
+/// Classify a potential entity body (the text between `&` and `;`) as either
+/// a valid entity form or invalid.
+///
+/// Valid forms (F-P5-001):
+/// - Named predefined: matched by `quick_xml::escape::resolve_predefined_entity`.
+/// - Named well-formed (unknown to us): `[A-Za-z][A-Za-z0-9]*`, max 16 chars.
+///   These decode to U+FFFD (non-joining placeholder).
+/// - Decimal numeric: `#[0-9]+` — decoded via `char::from_u32`.
+/// - Hex numeric (lowercase `x`): `#x[0-9A-Fa-f]+` — decoded via `char::from_u32`.
+///
+/// Everything else (contains spaces, punctuation, starts with digit, empty,
+/// uppercase `X`, too long) is INVALID — the caller emits a literal `&`.
+#[derive(Debug, PartialEq)]
+enum EntityBodyKind {
+    /// `&amp;`/`&lt;`/etc. — decode to the predefined character.
+    Predefined(&'static str),
+    /// Well-formed but unknown named entity — decode to U+FFFD.
+    UnknownNamed,
+    /// Decimal numeric reference `&#NNN;` with a parse-able code point.
+    Decimal(u32),
+    /// Hex numeric reference `&#xHHH;` with a parse-able code point.
+    Hex(u32),
+    /// Body does not match any valid entity form — emit literal `&`.
+    Invalid,
+}
+
+/// Classify `body` (the text between `&` and `;`, not including delimiters).
+fn classify_entity_body(body: &str) -> EntityBodyKind {
+    // Empty body → invalid.
+    if body.is_empty() {
+        return EntityBodyKind::Invalid;
+    }
+
+    // Enforce overall body length limit (defensive; window already bounds this).
+    if body.len() > 16 {
+        return EntityBodyKind::Invalid;
+    }
+
+    // Predefined entities take priority.
+    if let Some(ch) = quick_xml::escape::resolve_predefined_entity(body) {
+        return EntityBodyKind::Predefined(ch);
+    }
+
+    // Numeric character references.
+    if let Some(rest) = body.strip_prefix('#') {
+        if rest.is_empty() {
+            // `&#;` — invalid.
+            return EntityBodyKind::Invalid;
+        }
+        if let Some(hex_digits) = rest.strip_prefix('x') {
+            // Hex reference: `&#xHHH;` — `x` must be lowercase (XML spec).
+            // All characters after `x` must be hex digits; empty digits invalid.
+            if hex_digits.is_empty() || !hex_digits.chars().all(|c| c.is_ascii_hexdigit()) {
+                return EntityBodyKind::Invalid;
+            }
+            let value = u32::from_str_radix(hex_digits, 16).unwrap_or(u32::MAX);
+            return EntityBodyKind::Hex(value);
+        }
+        // Decimal reference: `&#NNN;` — all characters must be ASCII digits.
+        if !rest.chars().all(|c| c.is_ascii_digit()) {
+            return EntityBodyKind::Invalid;
+        }
+        let value: u32 = rest.parse().unwrap_or(u32::MAX);
+        return EntityBodyKind::Decimal(value);
+    }
+
+    // Named entity: must start with an ASCII letter, followed only by ASCII
+    // letters and digits (standard XML Name production, simplified).
+    // Entities containing spaces, punctuation, or starting with a digit are
+    // invalid (e.g. `&D summary;`, `&1foo;`, `& ;`).
+    let mut chars = body.chars();
+    let first = chars.next().expect("body non-empty checked above");
+    if !first.is_ascii_alphabetic() {
+        return EntityBodyKind::Invalid;
+    }
+    if !chars.all(|c| c.is_ascii_alphanumeric()) {
+        return EntityBodyKind::Invalid;
+    }
+
+    // Well-formed named entity but not one of the five predefined ones.
+    EntityBodyKind::UnknownNamed
+}
+
+/// Decode XML entity references in `input` using a per-token tolerant strategy
+/// with entity-body validation (F-P5-001).
 ///
 /// This is the core EC-004 decoder for `BleedChecker`. It processes each
 /// `&...;` token individually — a malformed or unknown entity never disables
-/// decoding for the tokens that follow it (F-P4-003).
+/// decoding for the tokens that follow it (F-P4-003). Each candidate entity
+/// reference is validated before decoding: if the body between `&` and `;`
+/// does not match a recognised entity form, the `&` is emitted literally and
+/// the scanner advances one byte, leaving the rest of the input intact.
 ///
-/// # Decoding rules
+/// # Decoding rules (F-P5-001)
 ///
-/// | Token form | Decoding |
-/// |---|---|
-/// | `&amp;` | `&` |
-/// | `&lt;` | `<` |
-/// | `&gt;` | `>` |
-/// | `&quot;` | `"` |
-/// | `&apos;` | `'` |
-/// | `&#NNN;` (valid decimal Unicode scalar) | that Unicode char |
-/// | `&#xHHH;` (valid hex Unicode scalar) | that Unicode char |
-/// | unknown named (`&copy;`, `&nbsp;`, …) | U+FFFD (replacement char) |
-/// | malformed numeric (`&#xZZ;`, `&#;`, …) | U+FFFD (replacement char) |
-/// | plain text (no `&`) | passed through unchanged |
+/// | Token form | Body valid? | Decoding |
+/// |---|---|---|
+/// | `&amp;` / `&lt;` / `&gt;` / `&quot;` / `&apos;` | yes (predefined) | that char |
+/// | `&#NNN;` (valid decimal Unicode scalar) | yes | that Unicode char |
+/// | `&#xHHH;` (valid hex Unicode scalar, lowercase `x`) | yes | that Unicode char |
+/// | `&#NNN;` / `&#xHHH;` valid form but non-scalar code point | yes (well-formed) | U+FFFD |
+/// | unknown named (`&copy;`, `&nbsp;`, …) | yes (well-formed name) | U+FFFD |
+/// | invalid body (space, punctuation, too long, empty, uppercase `X`, …) | no | literal `&` + advance 1 |
+/// | `&` with no `;` within the bounded window | — | literal `&` + advance 1 |
+/// | plain text (no `&`) | — | passed through unchanged |
 ///
-/// U+FFFD is the sentinel-neutral placeholder: it is never a substring of a
-/// well-formed ASCII/UTF-8 sentinel, so it prevents both false-positive joins
+/// Key invariant for bleed detection (F-P5-001): a member containing the raw
+/// string `R&D summary; q3` decodes to `R&D summary; q3` — the `&D summary`
+/// body is invalid (contains a space) so the `&` is emitted literally, and the
+/// sentinel `R&D` is preserved in the decoded text.
+///
+/// U+FFFD is used only for *well-formed* but unrecognised tokens (unknown named
+/// entities and numeric refs that map to non-scalar code points). It is a
+/// sentinel-neutral placeholder: it never forms a substring equal to a
+/// well-formed ASCII/UTF-8 sentinel, preventing both false-positive joins
 /// (`A&copy;B` → `A\u{FFFD}B`, not `AB`) and false-green joins
 /// (`R&copy;D` → `R\u{FFFD}D`, not `RD`).
 ///
 /// # Why not `quick_xml::escape::unescape_with`?
 ///
 /// `unescape_with` processes the whole string atomically: if any numeric
-/// character reference is malformed (e.g. `&#xZZ;`) the function returns `Err`
-/// for the ENTIRE input. The previous code fell back to raw text on `Err`,
-/// meaning a malformed entity anywhere in a ZIP member silently disabled
-/// predefined-entity decoding for the whole member — causing false negatives
-/// for correctly-escaped sentinels elsewhere in the same member (F-P4-003).
+/// character reference is malformed the function returns `Err` for the ENTIRE
+/// input. The previous code fell back to raw text on `Err`, meaning a malformed
+/// entity anywhere in a ZIP member silently disabled predefined-entity decoding
+/// for the whole member — causing false negatives for correctly-escaped
+/// sentinels elsewhere in the same member (F-P4-003).
 ///
-/// The per-token loop below avoids this: each token is processed independently,
-/// so one bad token emits U+FFFD and the loop continues.
+/// The per-token loop below avoids this: each token is processed independently.
 ///
 /// `quick_xml::escape::resolve_predefined_entity` IS still used internally to
 /// decode individual predefined entities within the loop (it operates on a
@@ -486,44 +588,50 @@ fn decode_xml_entities(input: &str) -> String {
         output.push_str(&remaining[..amp_pos]);
         remaining = &remaining[amp_pos..];
 
-        // Find the closing `;` for this entity reference.
-        if let Some(semi_pos) = remaining.find(';') {
-            let entity_with_delimiters = &remaining[..=semi_pos]; // "&...;"
-            let entity_name = &remaining[1..semi_pos]; // "..." (without & and ;)
-            remaining = &remaining[semi_pos + 1..];
+        // Search for `;` within a bounded window to avoid consuming unrelated
+        // semicolons far from the `&` (F-P5-001). The window is MAX_ENTITY_WINDOW
+        // bytes from the start of `remaining` (which begins with `&`).
+        let window = &remaining[..remaining.len().min(MAX_ENTITY_WINDOW)];
+        let semi_pos_opt = window.find(';');
 
-            // Try predefined entities first (amp, lt, gt, quot, apos).
-            if let Some(ch) = quick_xml::escape::resolve_predefined_entity(entity_name) {
-                output.push_str(ch);
-            } else if let Some(rest) = entity_name.strip_prefix('#') {
-                // Numeric character reference: &#NNN; or &#xHHH;
-                let code_point: Option<u32> = if let Some(hex) = rest.strip_prefix('x') {
-                    // Hexadecimal: &#xHHH;
-                    u32::from_str_radix(hex, 16).ok()
-                } else {
-                    // Decimal: &#NNN;
-                    rest.parse::<u32>().ok()
-                };
-                match code_point.and_then(char::from_u32) {
-                    Some(ch) => output.push(ch),
-                    None => {
-                        // Malformed or non-scalar code point → U+FFFD placeholder.
-                        // This covers &#xZZ; (invalid hex), &#3000000; (out of range),
-                        // &#xD800; (surrogate), etc.
-                        output.push('\u{FFFD}');
-                    },
-                }
-            } else {
-                // Unknown named entity (e.g. &copy;, &nbsp;, &trade;) → U+FFFD.
-                // Using U+FFFD rather than "" prevents false-positive joins
-                // (A&copy;B → A\u{FFFD}B, not AB) and false-green joins
-                // (R&copy;D → R\u{FFFD}D, not RD).
-                let _ = entity_with_delimiters; // consumed above; suppress unused warning
-                output.push('\u{FFFD}');
+        if let Some(semi_pos) = semi_pos_opt {
+            let entity_body = &remaining[1..semi_pos]; // between `&` and `;`
+
+            match classify_entity_body(entity_body) {
+                EntityBodyKind::Predefined(ch) => {
+                    output.push_str(ch);
+                    remaining = &remaining[semi_pos + 1..];
+                },
+                EntityBodyKind::UnknownNamed => {
+                    // Well-formed name but not predefined → U+FFFD (non-joining).
+                    output.push('\u{FFFD}');
+                    remaining = &remaining[semi_pos + 1..];
+                },
+                EntityBodyKind::Decimal(code_point) | EntityBodyKind::Hex(code_point) => {
+                    match char::from_u32(code_point) {
+                        Some(ch) => output.push(ch),
+                        None => {
+                            // Valid numeric form but non-scalar code point
+                            // (surrogate, out-of-range) → U+FFFD.
+                            output.push('\u{FFFD}');
+                        },
+                    }
+                    remaining = &remaining[semi_pos + 1..];
+                },
+                EntityBodyKind::Invalid => {
+                    // Body does not match any valid entity form (contains
+                    // spaces, punctuation, empty, too long, etc.).
+                    // Emit the `&` literally and advance exactly one byte so
+                    // the scanner resumes at the character after `&`. This
+                    // preserves the rest of the input — including the `;`
+                    // that would have been consumed by a greedy match.
+                    output.push('&');
+                    remaining = &remaining[1..];
+                },
             }
         } else {
-            // No closing `;` found — bare `&` with no matching entity end.
-            // Emit the `&` literally and advance past it.
+            // No `;` within the bounded window — bare `&` with no matching
+            // entity end. Emit the `&` literally and advance past it.
             output.push('&');
             remaining = &remaining[1..];
         }
@@ -580,18 +688,26 @@ mod unit_tests {
     }
 
     #[test]
-    fn test_malformed_hex_ref_becomes_fffd() {
-        // &#xZZ; is not valid hex — must produce U+FFFD, not abort.
+    fn test_malformed_hex_ref_invalid_body_emits_literal_ampersand() {
+        // &#xZZ; — body `#xZZ` fails hex validation (Z is not a hex digit).
+        // With F-P5-001 body validation: invalid body → literal `&` emitted,
+        // scanner advances one byte, remaining `#xZZ;` passes through as-is.
+        // Full decoded result is the original string unchanged.
         let result = decode_xml_entities("&#xZZ;");
-        assert_eq!(result, "\u{FFFD}");
+        assert_eq!(result, "&#xZZ;");
     }
 
     #[test]
     fn test_malformed_numeric_ref_does_not_disable_rest_of_member() {
-        // &#xZZ; (malformed) must not prevent R&amp;D from decoding correctly.
+        // &#xZZ; (invalid body) must not prevent R&amp;D from decoding correctly.
+        // With F-P5-001: &#xZZ; → literal `&` emitted + `#xZZ;` passes through.
+        // R&amp;D → R&D.  Full result: "&#xZZ; R&D roadmap".
+        // Sentinel detection invariant: the R&D sentinel IS present (must remain).
         let result = decode_xml_entities("&#xZZ; R&amp;D roadmap");
         assert!(result.contains("R&D roadmap"), "got: {result:?}");
-        assert!(result.starts_with('\u{FFFD}'), "got: {result:?}");
+        // The malformed token is rendered as a literal `&` + remainder of the
+        // original token text (no U+FFFD for invalid bodies — F-P5-001).
+        assert!(result.starts_with("&#xZZ;"), "got: {result:?}");
     }
 
     #[test]
@@ -619,15 +735,133 @@ mod unit_tests {
 
     #[test]
     fn test_surrogate_code_point_becomes_fffd() {
-        // &#xD800; is a surrogate — not a valid Unicode scalar value.
+        // &#xD800; — body `#xD800` is valid hex form, but D800 is a surrogate.
+        // char::from_u32(0xD800) returns None → U+FFFD.
         let result = decode_xml_entities("&#xD800;");
         assert_eq!(result, "\u{FFFD}");
     }
 
     #[test]
     fn test_out_of_range_code_point_becomes_fffd() {
-        // &#x200000; is beyond the Unicode range (max U+10FFFF).
+        // &#x200000; — body `#x200000` is valid hex form, but 0x200000 > 0x10FFFF.
+        // char::from_u32 returns None → U+FFFD.
         let result = decode_xml_entities("&#x200000;");
         assert_eq!(result, "\u{FFFD}");
+    }
+
+    // ─── F-P5-002: Direct unit tests for decode_xml_entities (body validation) ───
+
+    /// The critical bleed-detection correctness case (F-P5-001).
+    ///
+    /// `R&D summary; q3` contains a bare `&` whose "body" (`D summary`) fails
+    /// the entity-body validator because it contains a space. Under the OLD
+    /// greedy implementation this consumed everything up to the first `;`
+    /// (producing `R\u{FFFD} q3`), silently erasing the sentinel `R&D`.
+    ///
+    /// With F-P5-001 body validation the `&` is emitted literally and the
+    /// scanner advances one byte, leaving the full string intact.
+    #[test]
+    fn test_f_p5_001_invalid_body_with_space_preserves_sentinel() {
+        let result = decode_xml_entities("R&D summary; q3");
+        assert_eq!(
+            result, "R&D summary; q3",
+            "bare & followed by a body containing a space must emit literal & \
+             and preserve the rest of the string unchanged"
+        );
+        // The sentinel substring is intact — the bleed checker will find it.
+        assert!(
+            result.contains("R&D"),
+            "sentinel R&D must be present; got: {result:?}"
+        );
+    }
+
+    /// Predefined entity decoding must still work after F-P5-001.
+    #[test]
+    fn test_f_p5_002_predefined_entity_still_decoded() {
+        assert_eq!(decode_xml_entities("R&amp;D"), "R&D");
+    }
+
+    /// Unknown well-formed named entities still produce U+FFFD (non-joining).
+    #[test]
+    fn test_f_p5_002_unknown_named_entity_produces_fffd() {
+        assert_eq!(decode_xml_entities("A&copy;B"), "A\u{FFFD}B");
+    }
+
+    /// Decimal numeric references are decoded to the corresponding character.
+    #[test]
+    fn test_f_p5_002_decimal_numeric_ref_decoded() {
+        assert_eq!(decode_xml_entities("&#65;"), "A");
+        assert_eq!(decode_xml_entities("&#x41;"), "A");
+    }
+
+    /// Invalid hex body (non-hex digit in body) → literal `&`, not U+FFFD.
+    /// The rest of the string passes through unchanged.
+    #[test]
+    fn test_f_p5_002_invalid_hex_body_emits_literal_ampersand() {
+        // `Z` is not a hex digit → body `#xZZ` is invalid.
+        let result = decode_xml_entities("&#xZZ;");
+        // Literal & emitted, scanner advances 1, rest passthrough.
+        assert_eq!(result, "&#xZZ;");
+    }
+
+    /// Bare `&` with no `;` anywhere → literal `&`.
+    #[test]
+    fn test_f_p5_002_bare_ampersand_no_semicolon() {
+        assert_eq!(decode_xml_entities("AT&T"), "AT&T");
+    }
+
+    /// Empty entity body `&;` is invalid → literal `&`.
+    #[test]
+    fn test_f_p5_002_empty_entity_body() {
+        // `&;` → body is "" → invalid → literal & emitted, `;` passthrough.
+        let result = decode_xml_entities("&;");
+        assert_eq!(result, "&;");
+    }
+
+    /// `&amp` (no closing `;`) has no `;` within the window → literal `&`.
+    #[test]
+    fn test_f_p5_002_named_entity_no_semicolon() {
+        let result = decode_xml_entities("&amp");
+        // No `;` found → literal `&`, remaining `amp` passthrough.
+        assert_eq!(result, "&amp");
+    }
+
+    /// `a & b ;` — the `&` is followed by a space, making the body ` b ` which
+    /// is invalid (starts with space). Literal `&` emitted, rest unchanged.
+    #[test]
+    fn test_f_p5_002_spaced_ampersand_body() {
+        let result = decode_xml_entities("a & b ;");
+        // Body " b " has spaces → invalid → literal & emitted.
+        assert_eq!(result, "a & b ;");
+    }
+
+    /// Over-long body (> 16 chars) → invalid → literal `&`.
+    #[test]
+    fn test_f_p5_002_overlength_body_emits_literal_ampersand() {
+        // Body of 50 x's exceeds the 16-char limit → invalid.
+        let long_body = format!("&{};", "x".repeat(50));
+        let result = decode_xml_entities(&long_body);
+        // Literal & emitted, scanner advances 1, rest passthrough.
+        assert!(
+            result.starts_with('&'),
+            "over-long body must emit literal &; got: {result:?}"
+        );
+        assert!(
+            !result.contains('\u{FFFD}'),
+            "over-long body must not produce U+FFFD; got: {result:?}"
+        );
+    }
+
+    /// Multi-byte UTF-8 character adjacent to an entity must not panic.
+    /// (Byte vs char index safety — the `&` must be found at a char boundary.)
+    #[test]
+    fn test_f_p5_002_multibyte_char_adjacent_to_entity() {
+        // 'é' is 2 bytes (U+00E9). The sentinel `é&amp;` must decode to `é&`.
+        let result = decode_xml_entities("é&amp;");
+        assert_eq!(result, "é&");
+
+        // Multi-byte char after the entity must also be intact.
+        let result2 = decode_xml_entities("&amp;é");
+        assert_eq!(result2, "&é");
     }
 }
