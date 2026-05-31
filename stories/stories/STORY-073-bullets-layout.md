@@ -4,11 +4,11 @@ traces_to: .factory/stories/STORY-INDEX.md
 story_id: STORY-073
 title: "Layout: ContentBlock::Bullets → FrameContent::TextRun frame generation"
 epic: EPIC-07
-wave: TBD
+wave: 4
 points: 5
 priority: P1
 tdd_mode: strict
-status: draft
+status: ready
 crate: slideforge-layout
 target_module: slideforge-layout
 subsystems: [SS-05]

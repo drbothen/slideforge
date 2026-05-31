@@ -4,17 +4,15 @@ traces_to: .factory/stories/STORY-INDEX.md
 story_id: STORY-076
 title: "Brand Loader: Transform-Aware Theme Color Extraction (srgbClr lumMod/tint/shade)"
 epic: EPIC-06
-wave: TBD
+wave: 4
 points: 3
 priority: P1
 tdd_mode: strict
-status: draft
+status: ready
 crate: slideforge-brand
 subsystems: [SS-04]
 target_module: slideforge-brand
-behavioral_contracts: [BC-2.01.001]
-# BC status: pending PO authorship — BC-2.01.001 EC-003 widening and possible new EC-006
-# are required before this story can move to ready. See Scope section for details.
+behavioral_contracts: [BC-2.01.001, BC-2.01.003]
 verification_properties: []
 nfr_refs: [NFR-021, NFR-022, NFR-024, NFR-025]
 depends_on:
@@ -45,19 +43,33 @@ from the raw value (the effective luminance-modulated color would be approximate
 `#002465`). This silent drop means brand.toml represents a color that diverges from
 what a viewer actually sees in the .pptx.
 
-The existing BC-2.01.003 EC-003 covers this case for `schemeClr` elements only.
-`srgbClr` elements with transform children are outside that scope and are silently
-dropped today with no comment emitted. This story widens the transform-awareness to
-cover `srgbClr` as well.
+BC-2.01.001 now carries a new edge case EC-006 covering `srgbClr` elements with
+transform children (loading side): store the base `val` hex verbatim, set
+`ColorSlot.is_derived = true`, emit `tracing::warn!` naming the slot and transform
+type(s). No HSL resolution (deferred v2). No new error code is introduced.
 
-**Deferral justification:** This is a spec-gap follow-up, not a v1.0 blocker. The
-current behavior is consistent with the written spec (no BC clause covers srgbClr
-transforms). Deferral is legitimate under the canonical principle because: (1) it
-requires widening BC-2.01.001 (loader BC) and BC-2.01.003 EC-003 — a product-owner
-decision, not an AI-defaulted shortcut; (2) the workaround (inline comment on schemeClr
-transforms) is already in place for the analogous schemeClr case; (3) the divergence
-is observable only for corporate templates that use luminance-modulated srgbClr slots,
-which are uncommon in practice.
+BC-2.01.003 EC-003 is widened on the extraction side from "schemeClr with
+lumMod/lumOff/tint/shade" to "schemeClr OR srgbClr with lumMod/lumOff/tint/shade";
+the extractor conditions on `ColorSlot.is_derived` regardless of element origin.
+
+Note: these are TWO distinct BCs covering the same physical transform: BC-2.01.001
+EC-006 governs the loading behavior (what `parse_theme_colors` stores and warns);
+BC-2.01.003 EC-003 governs the extraction behavior (what `BrandExtractor` writes to
+brand.toml). Do not conflate them — AC-001 and AC-003 trace to BC-2.01.001 EC-006;
+AC-002 traces to BC-2.01.003 EC-003.
+
+**Resolution:** The PO has now landed BC-2.01.001 EC-006 (loading side) and widened
+BC-2.01.003 EC-003 (extraction side) in v1.9. Option B is the v1.0 choice: store
+base hex + set is_derived flag + emit tracing::warn!; defer HSL resolution to v2.
+No new error code is introduced (error-taxonomy v2.3 documents this decision).
+This story is now `ready` for Wave 4 dispatch.
+
+## Behavioral Contracts
+
+| BC | Title | Version | Covered ACs |
+|----|-------|---------|-------------|
+| BC-2.01.001 | Brand Loader: .pptx/.docx Template Extraction | v1.2 | AC-001 (EC-006 loading side), AC-003 (EC-006 warn!), AC-004 (EC-006 clean srgbClr regression) |
+| BC-2.01.003 | Brand Extraction CLI | v1.9 | AC-002 (EC-003 widened — extractor emits comment for is_derived regardless of origin) |
 
 ## Token Budget Estimate
 
@@ -66,8 +78,8 @@ which are uncommon in practice.
 | Story spec (this file) | ~2,000 |
 | `crates/slideforge-brand/src/color.rs` | ~1,500 |
 | `crates/slideforge-brand/src/extractor.rs` (for EC-003 comment behavior) | ~1,000 |
-| BC-2.01.001 (loader BC, widening target) | ~800 |
-| BC-2.01.003 EC-003 (widening reference) | ~300 |
+| BC-2.01.001 (loader BC, EC-006 — loading side) | ~800 |
+| BC-2.01.003 EC-003 widened (extraction side) | ~400 |
 | Test code | ~1,500 |
 | **Total** | **~7,100** |
 
@@ -77,27 +89,31 @@ Agent context budget: 200k tokens. This story is ~3.6% of budget — well within
 
 - [ ] **AC-001:** When `parse_theme_colors` encounters an `<a:srgbClr>` element with
   one or more child transform elements (`<a:lumMod>`, `<a:lumOff>`, `<a:tint>`,
-  `<a:shade>`), it detects the transform children and either: (a) resolves the
-  effective transformed color and stores the result, OR (b) stores the base `val`
-  hex value with an `is_derived` flag set on the `ColorSlot` (analogous to schemeClr
-  treatment). The choice between (a) and (b) is the product-owner decision that
-  must be documented in the BC widening before this story moves to `ready`.
-  (traces to BC-2.01.001 invariant 1 — all 12 slots represented with accurate values;
-  awaiting BC-2.01.001 EC widening for srgbClr transforms)
+  `<a:shade>`), it stores the base `val` hex verbatim as `ColorSlot.hex` and sets
+  `ColorSlot.is_derived = true`. No HSL resolution or effective color computation is
+  performed (deferred to v2). A `tracing::warn!` is emitted identifying the specific
+  slot name and each transform type found. Example:
+  `"slot dk2: srgbClr has lumMod child (val=75000); base color #003087 stored with is_derived=true"`.
+  `srgbClr` elements WITHOUT transform children set `is_derived = false` with no warning.
+  (traces to BC-2.01.001 EC-006 — srgbClr with transform children: store base hex,
+  set is_derived, emit tracing::warn!; Option B chosen as v1.0 decision; HSL resolution deferred v2)
 
 - [ ] **AC-002:** When `BrandExtractor` serializes a `ColorSlot` that has the
   `is_derived` flag set (from either schemeClr or srgbClr transform detection), it
   emits the same EC-003-style inline TOML comment:
   `# derived via tint/shade; may not match exact color`
-  This unifies the comment behavior for both color element types.
-  (traces to BC-2.01.003 EC-003 — widened to cover srgbClr transforms in addition
-  to schemeClr transforms)
+  This unifies the comment behavior for both color element types. BC-2.01.003 EC-003
+  is widened from "schemeClr with lumMod/lumOff/tint/shade" to "schemeClr OR srgbClr
+  with lumMod/lumOff/tint/shade"; the extractor conditions on `ColorSlot.is_derived`
+  regardless of the originating element type (schemeClr or srgbClr).
+  (traces to BC-2.01.003 EC-003 widened — extractor emits inline comment whenever
+  ColorSlot.is_derived is true, regardless of whether origin was schemeClr or srgbClr)
 
 - [ ] **AC-003:** When `parse_theme_colors` encounters a srgbClr with transforms and
   emits a lint warning via `tracing::warn!`, the warning message identifies the
-  specific slot name and the transform type found. Example:
-  `"slot dk2: srgbClr has lumMod child (val=75000); base color #003087 stored with derived flag"`
-  (traces to BC-2.01.001 — observability of lossy extraction)
+  specific slot name and each transform type found. Example:
+  `"slot dk2: srgbClr has lumMod child (val=75000); base color #003087 stored with is_derived=true"`
+  (traces to BC-2.01.001 EC-006 — observability requirement: warn! names slot + transform type(s))
 
 - [ ] **AC-004:** `srgbClr` elements WITHOUT transform children continue to be
   extracted exactly as before — `val` attribute as hex, no derived flag, no comment.
@@ -116,25 +132,11 @@ condition update using the existing `is_derived` flag.
 
 **Out of scope for this story:**
 - Computing the mathematically correct resolved color from lumMod/tint/shade formulas
-  (that would require a separate story with Kani proof obligations — defer to v2 if
-  exact resolution is desired).
-- Any changes to BC files (the product-owner must widen BC-2.01.001 and BC-2.01.003
-  EC-003 independently before this story reaches `ready`).
-
-## BC Widening Prerequisite
-
-Before this story moves from `draft` to `ready`, the product-owner must:
-
-1. Add a new edge case to BC-2.01.001 (Brand Loader BC) covering:
-   "srgbClr with lumMod/lumOff/tint/shade children → base val stored with derived
-   flag; EC-003-style warning emitted; tracing::warn identifies slot and transform."
-
-2. Widen BC-2.01.003 EC-003 from "schemeClr with modifiers" to
-   "schemeClr OR srgbClr with lumMod/tint/shade modifiers" — same behavior:
-   write as-is with inline TOML comment.
-
-These are product-owner decisions because they change the observable contract of the
-loader output. The story cannot be dispatched until the BCs are updated.
+  (requires a separate story with Kani proof obligations — deferred to v2 per
+  Option B decision; no new story ID assigned yet).
+- Any further BC changes — the PO has already landed BC-2.01.001 EC-006 (loading)
+  and the BC-2.01.003 EC-003 widening (extraction). This story implements against
+  those updated contracts.
 
 ## Previous Story Intelligence
 
@@ -229,16 +231,7 @@ emit the `tracing::warn!`. This requires iterating child elements with `quick-xm
 event reader before returning — an O(N) scan where N is the number of child elements
 (typically 0–2).
 
-If the product-owner decides that exact resolved color computation is required
-(Option A in AC-001), the implementation becomes:
-
-```
-effective = apply_lummod(base_hex, lummod_val)
-           // lummod: multiply luminance by val/100000
-           // e.g., val=75000 → 75% of base luminance in HSL space
-```
-
-This is non-trivial (requires HSL conversion) and should be scoped to a separate
-story if chosen, with a Kani proof obligation for the arithmetic. The `is_derived`
-flag + comment approach (Option B) is strongly preferred for v1.0 because it is
-simpler, provably correct (no new arithmetic), and transparent to the user.
+The v1.0 decision (Option B, confirmed by PO, BC-2.01.001 EC-006) is: store base
+hex verbatim + set `is_derived = true` + emit `tracing::warn!`. No HSL resolution.
+If exact color computation is required in a future version, it would need a separate
+story with a Kani proof obligation for the HSL arithmetic.

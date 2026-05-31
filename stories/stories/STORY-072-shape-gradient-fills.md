@@ -4,7 +4,7 @@ traces_to: .factory/stories/STORY-INDEX.md
 story_id: STORY-072
 title: "shape: Gradient Fills (FillSpec::Gradient)"
 epic: EPIC-07
-wave: TBD
+wave: 5
 points: 3
 priority: P2
 tdd_mode: strict

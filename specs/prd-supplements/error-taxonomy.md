@@ -2,10 +2,10 @@
 document_type: prd-supplement
 supplement_type: error-taxonomy
 level: L3
-version: "2.2"
+version: "2.3"
 status: active
 producer: product-owner
-timestamp: 2026-05-30T00:00:00
+timestamp: 2026-05-31T00:00:00
 phase: 1a
 traces_to: .factory/specs/prd.md
 primary_consumers: [implementer, test-writer]
@@ -243,3 +243,4 @@ Per DI-018 and BC-1.15.002:
 | 2.0 | 2026-05-30 | product-owner | STORY-025 adversary finding F-025-001: E-BRD-007 description widened from synthesis-only to all user-supplied logo paths (master brand logo AND per-slide `brand_overlay: logo` paths). Message template updated from "brand.toml directory" to "brand root directory" for generality. CAP-019 added to Traces To column. Behavior at canonical path check ordering (E-BRD-001 fires first for non-existent paths) and `BrandError::LogoOutsideBrandDir` mapping made explicit. Exit code 4 and severity unchanged. |
 | 2.1 | 2026-05-30 | product-owner | STORY-025 fix burst taxonomy-completeness gap: E-BRD-001 row expanded to document all three shared `BrandError` variants — `FileNotFound`, `LogoRequired`, and `TomlReadError`. The `LogoRequired` subcase was previously undocumented in the taxonomy; it is user-reachable via per-slide `brand_overlay: logo ""` (empty string) or absent logo key. The context-neutral `LogoRequired` message (`"E-BRD-001: A logo path is required but was empty or absent. Provide a non-empty logo path — either the brand.toml [logo] 'path' (brand synthesis) or the brand_overlay: logo value (per-slide overlay)."`) matches the message emitted by `crates/slideforge-brand/src/error.rs` after the STORY-025 context-neutral refactor. E-BRD-002 row similarly expanded to document its two shared variants (`ParseError` and `TomlParseError`). Code, severity (broken), and exit code (4) unchanged for both. |
 | 2.2 | 2026-05-30 | product-owner | Variant-name correction: E-BRD-001 third variant corrected from `BrandReadError` → `TomlReadError`; E-BRD-002 second variant corrected from `BrandTomlParseError` → `TomlParseError`. Names now match the actual `BrandError` enum variants in `crates/slideforge-brand/src/error.rs` exactly. No semantic change — severity, exit code, message format, and Traces To columns are unchanged. |
+| 2.3 | 2026-05-31 | product-owner | STORY-076 taxonomy decision note: srgbClr transform detection (BC-2.01.001 EC-006) does NOT introduce a new E-BRD-NNN error code. The `tracing::warn!` emitted when a srgbClr element has lumMod/lumOff/tint/shade children is an observability log event (structured field output to the tracing subscriber), not a user-facing diagnostic with an E-BRD code. The inline TOML comment written by BrandExtractor (`# derived via tint/shade; may not match exact color`) is the user-visible signal. This is consistent with the existing schemeClr transform treatment (also no error code — just a TOML comment). No new rows added to the Brand Errors table. |

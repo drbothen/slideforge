@@ -30,11 +30,12 @@ total_stories: 71
 | Wave 1 | EPIC-01, EPIC-02, EPIC-19 | 14 | Partial — see internal sequencing note below | All stubs compile; CI runs green on all platforms |
 | Wave 2 | EPIC-03, EPIC-04 | 7 | Partial — STORY-011→012→013 chain; STORY-011+012→014 (fork, not sequential after 013); STORY-015→016→017 chain | Wave 1 gate PASS |
 | Wave 3 | EPIC-05, EPIC-06, EPIC-07, EPIC-10, EPIC-11, EPIC-12 | 17 | Partial — multiple sub-chains within epics (EPIC-05: 018→019/020→021; EPIC-06: 022→023→024/025; EPIC-07: 026→027/028; EPIC-10: 029→030; EPIC-11: 031→032; EPIC-12: 033→034) | Wave 2 gate PASS |
-| Wave 4 | EPIC-08, EPIC-09, EPIC-13, EPIC-18, EPIC-21 | 13 | Partial — STORY-035→036→037→038 chain; STORY-043→044→045 chain; all merge into STORY-049→050 | Wave 3 gate PASS; Phase 4 crates added to workspace |
-| Wave 5 | EPIC-14, EPIC-15, EPIC-16, EPIC-17 | 14 | Partial — EPIC-16 and EPIC-17 independent of EPIC-14/15; EPIC-15 depends on EPIC-14 (STORY-056 requires STORY-047 for live reload). Chains: EPIC-14: 046→047→048; EPIC-15: 055→056→059 (056 also needs 047); EPIC-16: 060→061→062/063; EPIC-17: 064→065 | Wave 4 gate PASS |
+| Wave 4 | EPIC-06, EPIC-07, EPIC-08, EPIC-09, EPIC-13, EPIC-18, EPIC-21 | 16 | Partial — Batch A parallel: STORY-035→036, STORY-043→044→045, STORY-073, STORY-075, STORY-076; Batch B parallel: STORY-037→038→039→040, STORY-041→042; Batch C: STORY-049→050 | Wave 3 gate PASS; Phase 4 crates added to workspace |
+| Wave 5 | EPIC-07, EPIC-14, EPIC-15, EPIC-16, EPIC-17 | 16 | Partial — EPIC-16 and EPIC-17 independent of EPIC-14/15; EPIC-15 depends on EPIC-14 (STORY-056 requires STORY-047 for live reload). Chains: EPIC-14: 046→047→048; EPIC-15: 055→056→059 (056 also needs 047); EPIC-16: 060→061→062/063; EPIC-17: 064→065; STORY-072, STORY-074 independent (deferred P2 surfaces) | Wave 4 gate PASS |
 | Wave 6 | EPIC-20 (Phase 6) | 6 | Partial — STORY-066/067/068 independent; STORY-071 depends on 066+067; STORY-069/070 independent | Wave 5 gate PASS; Kani + cargo-fuzz available on CI |
 
-**Total: 71 stories, 437 points across 6 waves.**
+**Total: 76 stories, 454 points across 6 waves.**
+(Wave 4: 16 stories / 96 pts; Wave 5: 16 stories / 90 pts — updated 2026-05-31 per human approval)
 
 ---
 
@@ -520,15 +521,31 @@ synthesis produces 31 layouts; proptest VP-011, VP-012 pass.
 
 ---
 
-## Wave 4: Exporters + Registry (13 stories)
+## Wave 4: Exporters + Registry (16 stories)
 
-**Theme:** All output format exporters and plugin registry assembly. Depends on
-brand, layout, and all renderers being complete.
+**Theme:** All output format exporters and plugin registry assembly, plus three
+pulled-in P1 follow-ups (STORY-073, STORY-075, STORY-076). Depends on brand,
+layout, and all renderers being complete.
 
 **Prerequisite:** Wave 3 gate PASS. Phase 4 crates (`slideforge-pdf`, `slideforge-html`)
 added to `[workspace] members` at start of wave (previously in `exclude`).
-**Gate:** All 13 stories merged; `.pptx` output validated by LibreOffice headless;
+**Gate:** All 16 stories merged; `.pptx` output validated by LibreOffice headless;
 `veraPDF` passes; `cargo deny` green.
+
+**Human-Approved Batch Plan (Wave 4):**
+- **Batch A (parallel):** STORY-035→036, STORY-043→044→045, STORY-073 (pulled-in P1),
+  STORY-075 (pulled-in P1), STORY-076 (pulled-in P1)
+- **Batch B (parallel, after Batch A):** STORY-037→038→039→040, STORY-041→042
+- **Batch C (after Batch B):** STORY-049→050
+
+**Pulled-in P1 follow-up stories (human-approved, 2026-05-31):**
+- STORY-073 (5 pts) — ContentBlock::Bullets → FrameContent::TextRun frame generation
+- STORY-075 (3 pts) — Brand Loader: Footer Detection from .pptx Slide Master
+- STORY-076 (3 pts) — Brand Loader: Transform-Aware Theme Color Extraction (srgbClr)
+
+**Deferred to Wave 5 (P2, 2026-05-31):**
+- STORY-072 (3 pts) — shape: Gradient Fills (FillSpec::Gradient) — P2
+- STORY-074 (3 pts) — Brand-aware Em conversion (font_size_emu) — P2
 
 ### STORY-035 — Writing Register Routing in Evaluator
 - **Epic:** EPIC-18
@@ -682,16 +699,62 @@ added to `[workspace] members` at start of wave (previously in `exclude`).
   scenario stubs (NFR-034, NFR-035 targets defined here; evaluated in Phase 4).
   `insta` snapshot tests for IR structures.
 
+### STORY-073 — Layout: ContentBlock::Bullets → FrameContent::TextRun (Pulled-in P1)
+- **Epic:** EPIC-07
+- **Crate:** slideforge-layout (SS-05)
+- **BCs:** BC-3.05.001
+- **Points:** 5
+- **Priority:** P1
+- **tdd_mode:** strict
+- **Batch:** A (parallel with STORY-035→036, STORY-043→044→045, STORY-075, STORY-076)
+- Extends `layout::run()` to generate `FrameContent::TextRun` frames from
+  `ContentBlock::Bullets` items; extends `run_inline_validation` to traverse bullet
+  inline content (xref validation, depth bounds). Pulled into Wave 4 from Wave TBD
+  because STORY-037/041/046 exporter stories depend on bullets being in LaidOutDeck.
+
+### STORY-075 — Brand Loader: Footer Detection (Pulled-in P1)
+- **Epic:** EPIC-06
+- **Crate:** slideforge-brand (SS-04)
+- **BCs:** BC-2.01.001
+- **Points:** 3
+- **Priority:** P1
+- **tdd_mode:** strict
+- **Batch:** A (parallel with STORY-035→036, STORY-043→044→045, STORY-073, STORY-076)
+- Adds footer detection to `BrandLoader::load()`: reads `ppt/slideMasters/slideMaster1.xml`
+  and `presProps.xml` to populate `BrandTemplate.footer_text` and `footer_flags`.
+  Makes STORY-024's `[footer]` writer reachable. Pulled into Wave 4 as P1 follow-up
+  (closes adversary finding F-024A-OBS-1).
+
+### STORY-076 — Brand Loader: srgbClr Transform Detection (Pulled-in P1)
+- **Epic:** EPIC-06
+- **Crate:** slideforge-brand (SS-04)
+- **BCs:** BC-2.01.001, BC-2.01.003
+- **Points:** 3
+- **Priority:** P1
+- **tdd_mode:** strict
+- **Batch:** A (parallel with STORY-035→036, STORY-043→044→045, STORY-073, STORY-075)
+- Extends `parse_theme_colors` to detect `srgbClr` elements with transform children
+  (lumMod/lumOff/tint/shade): stores base hex verbatim, sets `is_derived = true`,
+  emits `tracing::warn!`. Implements BC-2.01.001 EC-006 (loading) and BC-2.01.003
+  EC-003 widened (extraction). Pulled into Wave 4 as P1 follow-up (PO BC delta landed
+  2026-05-31; Option B chosen for v1.0; no new error code).
+
 ---
 
-## Wave 5: CLI + User-Facing Features (14 stories)
+## Wave 5: CLI + User-Facing Features + Deferred Surfaces (16 stories)
 
 **Theme:** CLI binary, web preview, package management, workspace configuration.
 The complete user-facing product. Depends on all exporters being complete.
+Also includes two P2 deferred-surface stories (STORY-072, STORY-074) moved here
+from Wave TBD per human approval on 2026-05-31.
 
 **Prerequisite:** Wave 4 gate PASS.
 **Gate:** `slideforge build deck.sf` end-to-end works. `slideforge watch` live
 reloads. All CI gates pass including performance benchmarks (NFR-001 < 500ms).
+
+**Added to Wave 5 (deferred P2 stories from Wave TBD, 2026-05-31):**
+- STORY-072 (3 pts) — shape: Gradient Fills (FillSpec::Gradient) — P2
+- STORY-074 (3 pts) — Brand-aware Em conversion (font_size_emu) — P2
 
 ### STORY-055 — CLI: build command + miette error rendering
 - **Epic:** EPIC-15
@@ -851,6 +914,30 @@ reloads. All CI gates pass including performance benchmarks (NFR-001 < 500ms).
 - `.sfconfig` cascade: max 3 levels, family-specific overrides. `slideforge config
   explain <setting>` shows full provenance: which `.sfconfig` file at which level
   provided the value.
+
+### STORY-072 — shape: Gradient Fills (FillSpec::Gradient) (Deferred P2)
+- **Epic:** EPIC-07
+- **Crate:** slideforge-layout + exporters (SS-05, SS-06, SS-07, SS-08, SS-09)
+- **BCs:** BC-3.04.001
+- **Points:** 3
+- **Priority:** P2
+- **tdd_mode:** strict
+- Adds `FillSpec::Gradient { from: Rgb, to: Rgb }` to `slideforge-types` and wires
+  DSL parser → IR → layout passthrough → all four exporters (PPTX native `<a:gradFill>`;
+  PDF `ShadingPattern`; HTML CSS `linear-gradient`; DOCX solid fallback + lint warning).
+  Deferred from Wave TBD to Wave 5 per human approval 2026-05-31 (P2, after exporters exist).
+
+### STORY-074 — Brand-aware Em conversion (font_size_emu) (Deferred P2)
+- **Epic:** EPIC-07
+- **Crate:** slideforge-types + slideforge-layout (SS-01, SS-05)
+- **BCs:** BC-3.04.001
+- **Points:** 3
+- **Priority:** P2
+- **tdd_mode:** strict
+- Adds `font_size_emu: Emu` to `BrandFonts` (default 457_200 = 36pt). Threads real
+  brand body font size through `layout::run` → `layout_shapes()` replacing
+  `DEFAULT_EM_IN_EMU` constant. Closes structural deferral from STORY-028.
+  Deferred from Wave TBD to Wave 5 per human approval 2026-05-31 (P2).
 
 ---
 

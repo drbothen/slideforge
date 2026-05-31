@@ -1,10 +1,10 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.8"
+version: "1.9"
 status: draft
 producer: product-owner
-timestamp: 2026-05-24T00:00:00
+timestamp: 2026-05-31T00:00:00
 phase: 1a
 inputs: [domain-spec/L2-INDEX.md]
 input-hash: "[pending]"
@@ -15,6 +15,9 @@ capability: CAP-018
 lifecycle_status: active
 introduced: v1.0.0
 modified:
+  - version: "1.9"
+    date: 2026-05-31
+    reason: "STORY-076 BC widening: widen EC-003 from 'schemeClr with lumMod/tint/shade' to 'schemeClr OR srgbClr with lumMod/lumOff/tint/shade transforms' — same output behavior for both element types: write base value as-is with inline TOML comment '# derived via tint/shade; may not match exact color'. The unified behavior is driven by the is_derived flag on ColorSlot (set by BC-2.01.001 EC-006 for srgbClr, already set for schemeClr by STORY-022). Add Canonical Test Vector for srgbClr transform case."
   - version: "1.8"
     date: 2026-05-30
     reason: "F-024-pass8-OBS-1 spec-parity sync: add <path>: prefix to EC-001 error message example and matching Canonical Test Vectors row so both match the authoritative E-BRD-006 form in error-taxonomy.md and code error.rs:233."
@@ -102,7 +105,7 @@ is found in the slide master's media relationships.
 |----|-------------|-------------------|
 | EC-001 | brand.toml already exists and --force not passed | Error: "<path>: brand.toml already exists. Use --force to overwrite." Exit 4. |
 | EC-002 | Source .pptx has sysClr elements instead of srgbClr | Use lastClr attribute value; no error |
-| EC-003 | Source .pptx has lumMod/tint/shade transforms on schemeClr | Write value as-is with inline comment warning: "derived via tint/shade; may not match exact color" |
+| EC-003 | Source .pptx has `lumMod`, `lumOff`, `tint`, or `shade` transform child elements on either `schemeClr` OR `srgbClr` color elements | For both element types: write the base value as-is to `brand.toml` with inline TOML comment `# derived via tint/shade; may not match exact color`. The `is_derived` flag on `ColorSlot` (set to `true` by the loader — see BC-2.01.001 EC-006 for srgbClr, and the schemeClr path in STORY-022) drives this unified extractor behavior. The extractor branch conditions on `ColorSlot.is_derived` regardless of the originating element type. No E-BRD-NNN error is emitted for this case — it is an observability comment only. |
 | EC-004 | Source .pptx has multiple slide masters | Extract from slideMaster1.xml only; lint warning noting multi-master template |
 | EC-005 | Logo file extension in ppt/media/ is not one of the renderable set (png, jpg/jpeg, gif, svg) — detection is by file extension only, not by content/magic-byte sniffing | Copy the file anyway; log a warning about potential rendering differences |
 
@@ -114,6 +117,7 @@ is found in the slide master's media relationships.
 | .pptx with sysClr for dk1 (Windows system color) | brand.toml `[colors]` section contains `dk1 = "#<lastClr value>"`; exit 0 | edge-case |
 | brand.toml already exists, no --force | Error: "<path>: brand.toml already exists. Use --force to overwrite."; exit 4 | error |
 | .pptx with no logo in slide master | brand.toml written with `[colors]` and `[fonts]` but no `[logo]` section; exit 0 | edge-case |
+| .pptx with srgbClr slot (dk2 = `#003087`) having `<a:lumMod val="75000"/>` child | brand.toml `[colors]` section contains `dk2 = "#003087"` with trailing inline comment `# derived via tint/shade; may not match exact color`; exit 0 | edge-case (EC-003 widened) |
 
 ## Verification Properties
 

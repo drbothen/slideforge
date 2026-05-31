@@ -1,8 +1,8 @@
 ---
-current_wave: 3
+current_wave: 4
 current_phase: 3
 pipeline_status: IN_PROGRESS
-last_updated: 2026-05-30
+last_updated: 2026-05-31
 wave_1_gate: PASS
 wave_1_gate_date: 2026-05-27
 wave_1_gate_passes: 3
@@ -16,10 +16,38 @@ wave_3_batch_1_stories: 6
 wave_3_batch_1_tests_added: 494
 wave_3_batch_2_completed: 2026-05-30
 wave_3_batch_2_stories: 8
-wave_3_batch_3_completed: 2026-05-30
+wave_3_batch_3_completed: 2026-05-31
 wave_3_batch_3_stories: 3
-develop_sha: "584cbc6f"
-develop_pr_count: 37
+wave_3_gate: PASS
+wave_3_gate_date: 2026-05-31
+wave_3_gate_pr: 38
+wave_3_gate_commit: "7d266ad7"
+wave_3_gate_adversary_passes: 8
+wave_3_gate_adversary_clean_at: "6/7/8"
+wave_3_gate_holdout_must_pass: "5/5 PASS"
+wave_3_gate_tests: 2584
+wave_4_started: 2026-05-31
+wave_4_total_stories: 16
+wave_4_total_points: 96
+wave_4_batch_a:
+  stories: [STORY-035, STORY-036, STORY-043, STORY-044, STORY-045, STORY-073, STORY-075, STORY-076]
+  execution: parallel
+  chains: ["STORY-035→036", "STORY-043→044→045", "STORY-073 independent", "STORY-075 independent", "STORY-076 independent"]
+wave_4_batch_b:
+  stories: [STORY-037, STORY-038, STORY-039, STORY-040, STORY-041, STORY-042]
+  execution: parallel
+  chains: ["STORY-037→038→039→040", "STORY-041→042"]
+  prerequisite: Batch A gate check
+wave_4_batch_c:
+  stories: [STORY-049, STORY-050]
+  execution: sequential
+  chains: ["STORY-049→050"]
+  prerequisite: Batch B gate check
+wave_4_pulled_in_p1: [STORY-073, STORY-075, STORY-076]
+wave_4_deferred_p2_to_wave5: [STORY-072, STORY-074]
+wave_4_bc_deltas: "BC-2.01.001 v1.1→v1.2; BC-2.01.003 v1.8→v1.9; error-taxonomy v2.2→v2.3"
+develop_sha: "7d266ad7"
+develop_pr_count: 38
 ---
 
 stories:
@@ -289,23 +317,127 @@ stories:
     merged: 2026-05-30
     pr: 37
     merge_commit: 584cbc6f
+  STORY-035:
+    status: not-started
+    wave: 4
+    batch: A
+    priority: P0
+    points: 5
+    notes: "Writing Register Routing in Evaluator; chain: STORY-035→036"
+  STORY-036:
+    status: not-started
+    wave: 4
+    batch: A
+    priority: P0
+    points: 5
+    notes: "Register-Aware Rendering: No Content Bleed Invariant; depends on STORY-035"
+  STORY-037:
+    status: not-started
+    wave: 4
+    batch: B
+    priority: P0
+    points: 13
+    notes: "PPTX Core Serialization: ooxmlsdk + ZIP Assembly; chain: STORY-037→038→039→040"
+  STORY-038:
+    status: not-started
+    wave: 4
+    batch: B
+    priority: P0
+    points: 8
+    notes: "PPTX Layout Compliance: Placeholder Inheritance; depends on STORY-037"
+  STORY-039:
+    status: not-started
+    wave: 4
+    batch: B
+    priority: P0
+    points: 5
+    notes: "PPTX Accessibility Metadata; depends on STORY-038"
+  STORY-040:
+    status: not-started
+    wave: 4
+    batch: B
+    priority: P0
+    points: 5
+    notes: "PPTX Speaker Notes + notesMaster1.xml; depends on STORY-039"
+  STORY-041:
+    status: not-started
+    wave: 4
+    batch: B
+    priority: P0
+    points: 8
+    notes: "DOCX Core Serialization; chain: STORY-041→042"
+  STORY-042:
+    status: not-started
+    wave: 4
+    batch: B
+    priority: P0
+    points: 5
+    notes: "DOCX Auto-Generated Document Sections; depends on STORY-041"
+  STORY-043:
+    status: not-started
+    wave: 4
+    batch: A
+    priority: P0
+    points: 8
+    notes: "PDF Core: pdf-writer + krilla + SlideTagEngine; NEW CRATE slideforge-pdf (scaffold + move from exclude→members first); chain: STORY-043→044→045"
+  STORY-044:
+    status: not-started
+    wave: 4
+    batch: A
+    priority: P0
+    points: 5
+    notes: "PDF EMU-to-PDF Coordinate Mapping + Y-Axis Flip; depends on STORY-043"
+  STORY-045:
+    status: not-started
+    wave: 4
+    batch: A
+    priority: P0
+    points: 5
+    notes: "PDF/UA-1 Tagging + veraPDF CI Gate; depends on STORY-044"
+  STORY-049:
+    status: not-started
+    wave: 4
+    batch: C
+    priority: P0
+    points: 5
+    notes: "Plugin Registry Assembly; depends on Batch B; chain: STORY-049→050"
+  STORY-050:
+    status: not-started
+    wave: 4
+    batch: C
+    priority: P0
+    points: 8
+    notes: "End-to-End Integration Test Suite; depends on STORY-049"
   STORY-072:
     status: draft
-    wave: TBD
-    notes: "gradient fills follow-up from STORY-028 cascade"
+    wave: 5
+    priority: P2
+    points: 3
+    notes: "gradient fills follow-up from STORY-028 cascade; deferred P2 to Wave 5 (requires exporters)"
   STORY-073:
-    status: draft
-    wave: TBD
-    notes: "bullets layout follow-up from STORY-028 cascade"
+    status: ready
+    wave: 4
+    batch: A
+    priority: P1
+    points: 5
+    notes: "bullets layout follow-up from STORY-028 cascade; pulled into Wave 4 as P1 (exporters need bullets in LaidOutDeck)"
   STORY-074:
     status: draft
-    wave: TBD
-    notes: "brand-em-sizing follow-up from STORY-028 cascade"
+    wave: 5
+    priority: P2
+    points: 3
+    notes: "brand-em-sizing follow-up from STORY-028 cascade; deferred P2 to Wave 5"
   STORY-075:
-    status: draft
-    wave: TBD
-    notes: "footer detection follow-up from STORY-024 cascade"
+    status: ready
+    wave: 4
+    batch: A
+    priority: P1
+    points: 3
+    notes: "footer detection follow-up from STORY-024 cascade; pulled into Wave 4 as P1; BC: BC-2.01.001 v1.2"
   STORY-076:
-    status: draft
-    wave: TBD
-    notes: "srgbClr transform extraction follow-up from STORY-024 cascade"
+    status: ready
+    wave: 4
+    batch: A
+    priority: P1
+    points: 3
+    notes: "srgbClr transform extraction follow-up from STORY-024 cascade; pulled into Wave 4 as P1; BCs: BC-2.01.001 v1.2 + BC-2.01.003 v1.9"

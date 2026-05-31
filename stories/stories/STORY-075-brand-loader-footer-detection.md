@@ -4,18 +4,15 @@ traces_to: .factory/stories/STORY-INDEX.md
 story_id: STORY-075
 title: "Brand Loader: Footer Detection from .pptx Slide Master/Layout Placeholders"
 epic: EPIC-06
-wave: TBD
+wave: 4
 points: 3
 priority: P1
 tdd_mode: strict
-status: draft
+status: ready
 crate: slideforge-brand
 subsystems: [SS-04]
 target_module: slideforge-brand
 behavioral_contracts: [BC-2.01.001]
-# BC status: BC-2.01.001 postcondition 1 and invariant 1 already exist and promise
-# footer_text in BrandTemplate. This story activates the dormant detection path.
-# No new BC is needed — coverage maps to BC-2.01.001 postcondition 1.
 verification_properties: []
 nfr_refs: [NFR-021, NFR-022, NFR-023, NFR-024, NFR-025]
 depends_on:

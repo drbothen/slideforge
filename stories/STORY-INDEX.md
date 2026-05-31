@@ -32,12 +32,11 @@ stories_merged: 30
 |------|-------|-------|-------|-------------|--------|---------|
 | Wave 1 | 14 | 0 | 0 | 0 | 14 | 0 |
 | Wave 2 | 7 | 0 | 0 | 0 | 7 | 0 |
-| Wave 3 | 17 | 5 | 0 | 3 | 9 | 0 |
-| Wave 4 | 13 | 13 | 0 | 0 | 0 | 0 |
-| Wave 5 | 14 | 14 | 0 | 0 | 0 | 0 |
+| Wave 3 | 17 | 0 | 0 | 0 | 17 | 0 |
+| Wave 4 | 16 | 13 | 3 | 0 | 0 | 0 |
+| Wave 5 | 16 | 16 | 0 | 0 | 0 | 0 |
 | Wave 6 | 6 | 6 | 0 | 0 | 0 | 0 |
-| Wave TBD | 5 | 5 | 0 | 0 | 0 | 0 |
-| **Total** | **76** | **43** | **0** | **3** | **30** | **0** |
+| **Total** | **76** | **29** | **3** | **0** | **38** | **0** |
 
 ---
 
@@ -86,27 +85,27 @@ stories_merged: 30
 |----------|------|-------|-----|---------|--------|---------|--------|
 | [STORY-018](stories/STORY-018-datasource-file-formats.md) | EPIC-05 | DataSource: JSON/CSV/YAML/TOML File Loading | BC-1.03.001, BC-1.03.003 | P0 | 5 | strict | merged |
 | [STORY-019](stories/STORY-019-datasource-http-ssrf.md) | EPIC-05 | DataSource: HTTP/HTTPS + SSRF Allowlist | BC-1.03.002, BC-1.03.005 | P0 | 8 | strict | merged |
-| [STORY-020](stories/STORY-020-datasource-excel-sqlite.md) | EPIC-05 | DataSource: Excel (.xlsx) + SQLite | BC-1.03.006, BC-1.03.007 | P0 | 5 | strict | draft |
-| [STORY-021](stories/STORY-021-datasource-offline-errors.md) | EPIC-05 | DataSource: --offline Flag + Error Handling | BC-1.03.004 | P0 | 3 | strict | draft |
+| [STORY-020](stories/STORY-020-datasource-excel-sqlite.md) | EPIC-05 | DataSource: Excel (.xlsx) + SQLite | BC-1.03.006, BC-1.03.007 | P0 | 5 | strict | merged |
+| [STORY-021](stories/STORY-021-datasource-offline-errors.md) | EPIC-05 | DataSource: --offline Flag + Error Handling | BC-1.03.004 | P0 | 3 | strict | merged |
 | [STORY-022](stories/STORY-022-brand-load-extraction.md) | EPIC-06 | Brand Loading: .pptx/.docx Template Extraction | BC-2.01.001, BC-2.01.006 | P0 | 5 | strict | merged |
-| [STORY-023](stories/STORY-023-brand-synthesis-layouts.md) | EPIC-06 | Brand Synthesis: brand.toml → 31 Layouts + 12 OOXML Slots | BC-2.01.002, BC-2.01.004-005 | P0 | 13 | strict | in-progress |
-| [STORY-024](stories/STORY-024-brand-extract-cli.md) | EPIC-06 | Brand Extraction CLI (slideforge extract-brand) | BC-2.01.003 | P0 | 3 | strict | draft |
-| [STORY-025](stories/STORY-025-brand-overlay-per-slide.md) | EPIC-06 | Per-Slide brand_overlay: (No Master Switch Invariant) | BC-2.02.001-002 | P1 | 3 | strict | draft |
+| [STORY-023](stories/STORY-023-brand-synthesis-layouts.md) | EPIC-06 | Brand Synthesis: brand.toml → 31 Layouts + 12 OOXML Slots | BC-2.01.002, BC-2.01.004-005 | P0 | 13 | strict | merged |
+| [STORY-024](stories/STORY-024-brand-extract-cli.md) | EPIC-06 | Brand Extraction CLI (slideforge extract-brand) | BC-2.01.003 | P0 | 3 | strict | merged |
+| [STORY-025](stories/STORY-025-brand-overlay-per-slide.md) | EPIC-06 | Per-Slide brand_overlay: (No Master Switch Invariant) | BC-2.02.001-002 | P1 | 3 | strict | merged |
 | [STORY-026](stories/STORY-026-layout-core-emu.md) | EPIC-07 | Core Layout: Deck → LaidOutDeck, EMU System | BC-3.06.001, BC-3.06.002, BC-3.06.003 | P0 | 8 | strict | merged |
 | [STORY-027](stories/STORY-027-layout-docx-sections.md) | EPIC-07 | Layout: Document Section Generation (DOCX) | BC-3.02.001-002 | P0 | 5 | strict | merged |
-| [STORY-028](stories/STORY-028-layout-shape-inline.md) | EPIC-07 | Layout: shape: Block + Rich Inline Formatting | BC-3.04.001, BC-3.05.001 | P1 | 5 | strict | draft |
+| [STORY-028](stories/STORY-028-layout-shape-inline.md) | EPIC-07 | Layout: shape: Block + Rich Inline Formatting | BC-3.04.001, BC-3.05.001 | P1 | 5 | strict | merged |
 | [STORY-029](stories/STORY-029-math-parser-omml.md) | EPIC-10 | Math Parser: $...$ / $$...$$ + @{var} + OMML Output | BC-1.10.001-003 | P1 | 8 | strict | merged |
-| [STORY-030](stories/STORY-030-math-mathml-pdf.md) | EPIC-10 | Math: MathML (HTML) + Path-Based (PDF) Output | BC-1.10.003 | P1 | 5 | strict | in-progress |
+| [STORY-030](stories/STORY-030-math-mathml-pdf.md) | EPIC-10 | Math: MathML (HTML) + Path-Based (PDF) Output | BC-1.10.003 | P1 | 5 | strict | merged |
 | [STORY-031](stories/STORY-031-chart-renderer-core.md) | EPIC-11 | Chart Renderer: bar/line/pie/scatter/area/histogram/stacked-bar | BC-1.11.001 | P1 | 8 | strict | merged |
 | [STORY-032](stories/STORY-032-chart-empty-data.md) | EPIC-11 | Chart: Empty Data Error-Slide Placeholder | BC-1.11.002 | P1 | 3 | strict | merged |
 | [STORY-033](stories/STORY-033-diagram-mermaid-render.md) | EPIC-12 | Diagram Renderer: Mermaid → PPTX-Safe SVG | BC-1.12.001-002 | P1 | 8 | strict | merged |
-| [STORY-034](stories/STORY-034-diagram-svg-normalize-perf.md) | EPIC-12 | SVG Normalization via usvg + Performance Gate | BC-1.12.003 | P1 | 5 | strict | in-progress |
+| [STORY-034](stories/STORY-034-diagram-svg-normalize-perf.md) | EPIC-12 | SVG Normalization via usvg + Performance Gate | BC-1.12.003 | P1 | 5 | strict | merged |
 
 **Wave 3 total points: 100**
 
 ---
 
-## Wave 4: Exporters + Registry (13 stories)
+## Wave 4: Exporters + Registry (16 stories)
 
 | Story ID | Epic | Title | BCs | Priority | Points | tdd_mode | Status |
 |----------|------|-------|-----|---------|--------|---------|--------|
@@ -123,12 +122,15 @@ stories_merged: 30
 | [STORY-045](stories/STORY-045-pdf-ua1-tagging-verapdf.md) | EPIC-13 | PDF: PDF/UA-1 Tagging + veraPDF CI Gate | BC-4.03.001 | P0 | 5 | strict | draft |
 | [STORY-049](stories/STORY-049-plugin-registry-assembly.md) | EPIC-21 | Plugin Registry Assembly (root crate) | BC-5.02.001-002 | P0 | 5 | strict | draft |
 | [STORY-050](stories/STORY-050-e2e-integration-tests.md) | EPIC-21 | End-to-End Integration Test Suite | BC-5.02.001-002 | P0 | 8 | strict | draft |
+| [STORY-073](stories/STORY-073-bullets-layout.md) | EPIC-07 | Layout: ContentBlock::Bullets → FrameContent::TextRun frame generation | BC-3.05.001 | P1 | 5 | strict | ready |
+| [STORY-075](stories/STORY-075-brand-loader-footer-detection.md) | EPIC-06 | Brand Loader: Footer Detection from .pptx Slide Master/Layout Placeholders | BC-2.01.001 | P1 | 3 | strict | ready |
+| [STORY-076](stories/STORY-076-brand-srgbclr-transform-extraction.md) | EPIC-06 | Brand Loader: Transform-Aware Theme Color Extraction (srgbClr lumMod/tint/shade) | BC-2.01.001, BC-2.01.003 | P1 | 3 | strict | ready |
 
-**Wave 4 total points: 85**
+**Wave 4 total points: 96**
 
 ---
 
-## Wave 5: CLI + User-Facing Features (14 stories)
+## Wave 5: CLI + User-Facing Features + Deferred Surfaces (16 stories)
 
 | Story ID | Epic | Title | BCs | Priority | Points | tdd_mode | Status |
 |----------|------|-------|-----|---------|--------|---------|--------|
@@ -146,8 +148,10 @@ stories_merged: 30
 | [STORY-063](stories/STORY-063-pkg-verify-integrity.md) | EPIC-16 | Package: verify (SHA-256 checksum audit) | BC-5.03.006 | P1 | 3 | strict | draft |
 | [STORY-064](stories/STORY-064-workspace-build.md) | EPIC-17 | Workspace: slideforge.toml [workspace] + build --workspace | BC-5.04.001 | P1 | 5 | strict | draft |
 | [STORY-065](stories/STORY-065-workspace-sfconfig-explain.md) | EPIC-17 | Workspace: .sfconfig cascade + config explain provenance | BC-5.04.002-003 | P1 | 5 | strict | draft |
+| [STORY-072](stories/STORY-072-shape-gradient-fills.md) | EPIC-07 | shape: Gradient Fills (FillSpec::Gradient) | BC-3.04.001 | P2 | 3 | strict | draft |
+| [STORY-074](stories/STORY-074-brand-em-sizing.md) | EPIC-07 | Brand-aware Em conversion (font_size_emu) | BC-3.04.001 | P2 | 3 | strict | draft |
 
-**Wave 5 total points: 84**
+**Wave 5 total points: 90**
 
 ---
 
@@ -166,19 +170,13 @@ stories_merged: 30
 
 ---
 
-## Wave TBD: Deferred Surfaces (5 stories)
+## Wave TBD: Deferred Surfaces (0 stories)
 
-These stories were created to resolve explicit "deferred surface" placeholders in BCs but have not yet been wave-scheduled. Wave assignment pending orchestrator dispatch (likely Wave 3-4, after STORY-028 merges).
+All previously Wave TBD stories have been assigned waves per human approval 2026-05-31:
+- STORY-073, STORY-075, STORY-076 → Wave 4 (pulled in as P1 follow-ups)
+- STORY-072, STORY-074 → Wave 5 (deferred P2 surfaces)
 
-| Story ID | Epic | Title | BCs | Priority | Points | tdd_mode | Status |
-|----------|------|-------|-----|---------|--------|---------|--------|
-| [STORY-072](stories/STORY-072-shape-gradient-fills.md) | EPIC-07 | shape: Gradient Fills (FillSpec::Gradient) | BC-3.04.001 | P2 | 3 | strict | draft |
-| [STORY-073](stories/STORY-073-bullets-layout.md) | EPIC-07 | Layout: ContentBlock::Bullets → FrameContent::TextRun frame generation | BC-3.05.001 | P1 | 5 | strict | draft |
-| [STORY-074](stories/STORY-074-brand-em-sizing.md) | EPIC-07 | Brand-aware Em conversion (font_size_emu) | BC-3.04.001 | P2 | 3 | strict | draft |
-| [STORY-075](stories/STORY-075-brand-loader-footer-detection.md) | EPIC-06 | Brand Loader: Footer Detection from .pptx Slide Master/Layout Placeholders | BC-2.01.001 | P1 | 3 | strict | draft |
-| [STORY-076](stories/STORY-076-brand-srgbclr-transform-extraction.md) | EPIC-06 | Brand Loader: Transform-Aware Theme Color Extraction (srgbClr lumMod/tint/shade) | BC-2.01.001 | P1 | 3 | strict | draft |
-
-**Wave TBD total points: 17**
+**Wave TBD total points: 0**
 
 ---
 
@@ -189,33 +187,25 @@ These stories were created to resolve explicit "deferred surface" placeholders i
 | Wave 1 | 14 | 85 | 6.1 |
 | Wave 2 | 7 | 41 | 5.9 |
 | Wave 3 | 17 | 100 | 5.9 |
-| Wave 4 | 13 | 85 | 6.5 |
-| Wave 5 | 14 | 84 | 6.0 |
+| Wave 4 | 16 | 96 | 6.0 |
+| Wave 5 | 16 | 90 | 5.6 |
 | Wave 6 | 6 | 42 | 7.0 |
-| Wave TBD | 5 | 17 | 3.4 |
 | **Total** | **76** | **454** | **6.0** |
 
 > No story exceeds 13 points. STORY-023 (brand synthesis — 13 pts) and STORY-037
 > (PPTX core serialization — 13 pts) are the largest stories. Both have well-
 > defined scope that warrants their size and were not split further to preserve
 > coherent implementation units. All other stories are 3-8 points.
-> STORY-072 (gradient fills — 3 pts) is a deferred surface from BC-3.04.001 v1.3;
-> wave assignment pending orchestrator dispatch.
-> STORY-073 (bullets-layout — 5 pts) anchors the ContentBlock::Bullets →
-> FrameContent::TextRun path and bullets xref validation; wave assignment pending
-> orchestrator dispatch after STORY-028 merges.
-> STORY-074 (brand-em-sizing — 3 pts) closes the DEFAULT_EM_IN_EMU deferral from
-> STORY-028 by adding BrandFonts.font_size_emu and threading brand font size into
-> layout_shapes(); created by pass-18 spec adjudication (F-P18-MED-001).
-> STORY-075 (brand-loader-footer-detection — 3 pts) closes adversary finding F-024A-OBS-1:
-> loader.rs:214 hardcoded footer_text: None, making STORY-024's [footer] writer permanently
-> dead. This story adds footer placeholder detection from ppt/slideMasters/slideMaster1.xml
-> and presProps.xml visibility flags, anchored to BC-2.01.001 postcondition 1.
-> STORY-076 (brand-srgbclr-transform-extraction — 3 pts) closes adversary finding from
-> STORY-024 cascade (OBS): parse_theme_colors in color.rs silently drops lumMod/tint/shade
-> children on srgbClr elements with no EC-003-style comment emitted. This story widens
-> transform detection to srgbClr (matching existing schemeClr treatment); requires PO to
-> widen BC-2.01.001 and BC-2.01.003 EC-003 before the story reaches ready.
+>
+> Wave 4 expanded from 13 → 16 stories (85 → 96 pts) per human approval 2026-05-31:
+> STORY-073 (bullets-layout, 5 pts, P1), STORY-075 (footer detection, 3 pts, P1),
+> STORY-076 (srgbClr transform extraction, 3 pts, P1) pulled in from Wave TBD.
+> BC-2.01.001 EC-006 + BC-2.01.003 EC-003 widening landed by PO; STORY-076
+> implements Option B (store base hex + is_derived flag + tracing::warn!; HSL deferred v2).
+>
+> Wave 5 expanded from 14 → 16 stories (84 → 90 pts) per same approval:
+> STORY-072 (gradient fills, 3 pts, P2) and STORY-074 (brand-em-sizing, 3 pts, P2)
+> assigned to Wave 5 (require exporters from Wave 4 to be complete before dispatch).
 
 ---
 
