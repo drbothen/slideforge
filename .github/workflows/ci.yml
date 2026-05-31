@@ -32,6 +32,19 @@ env:
 # ─────────────────────────────────────────────────────────────────────────────
 
 jobs:
+  # ─── PDF dep perimeter (BC-4.03.002 AC-002/AC-008/AC-009) ─────────────────
+  # Verifies that Cargo.lock contains no browser-based or C-library PDF deps
+  # and that crates/slideforge-pdf/src/ has zero std::process usage.
+  # Runs scripts/check-pdf-deps.sh from the workspace root.
+  check-pdf-deps:
+    name: check-pdf-deps
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Check PDF dep perimeter (BC-4.03.002)
+        run: bash scripts/check-pdf-deps.sh
+
   # ─── Format check ──────────────────────────────────────────────────────────
   # Runs only on Linux; formatting is platform-independent.
   fmt:
@@ -370,6 +383,7 @@ jobs:
   all-checks-pass:
     name: all-checks-pass
     needs:
+      - check-pdf-deps
       - fmt
       - clippy
       - test

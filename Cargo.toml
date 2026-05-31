@@ -20,12 +20,12 @@ members = [
     "crates/slideforge-math",
     "crates/slideforge-charts",
     "crates/slideforge-diagrams",
+    "crates/slideforge-pdf",      # STORY-043: Phase 4 — PDF core backend
 ]
 
 # Crates that exist as scaffolding but are not built yet (Phase 4+).
 # Move into `members` as they are implemented.
 exclude = [
-    "crates/slideforge-pdf",      # Phase 4
     "crates/slideforge-html",     # Phase 4
     "crates/slideforge-ffi",      # Phase 5
 ]
@@ -57,7 +57,7 @@ tracing = "=0.1.44"
 tracing-subscriber = { version = "=0.3.23", features = ["env-filter"] }
 thiserror = "=2.0.18"
 ordered-float = "=4.6.0"
-indexmap = { version = "=2.9.0", features = ["std"] }
+indexmap = { version = "=2.10.0", features = ["std"] }
 anyhow = "=1.0.102"
 phf = { version = "=0.11.3", features = ["macros"] }
 strsim = "=0.11.1"
@@ -85,6 +85,7 @@ slideforge-brand = { path = "crates/slideforge-brand", version = "0.1.0" }
 slideforge-math = { path = "crates/slideforge-math", version = "0.1.0" }
 slideforge-charts = { path = "crates/slideforge-charts", version = "0.1.0" }
 slideforge-diagrams = { path = "crates/slideforge-diagrams", version = "0.1.0" }
+slideforge-pdf = { path = "crates/slideforge-pdf", version = "0.1.0" }
 
 # Release profile tuned for binary size and runtime perf.
 [profile.release]

@@ -29,7 +29,7 @@ slideforge-types = { workspace = true }
 slideforge-syntax = { workspace = true }
 thiserror = { workspace = true }
 miette = { workspace = true }
-indexmap = "=2.9.0"
+indexmap = "=2.10.0"
 ordered-float = { workspace = true }
 tracing = { workspace = true }
 # Optional: only compiled when the `test-utils` feature is enabled.
