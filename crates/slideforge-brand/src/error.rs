@@ -139,16 +139,25 @@ pub enum BrandError {
     },
 
     // ─── STORY-023 synthesis variants ─────────────────────────────────────────
-    /// `E-BRD-001` (synthesis) — the `[logo]` section is absent in a
-    /// synthesized brand's `brand.toml`.
+    /// `E-BRD-001` — a logo path is required but was absent or empty.
     ///
-    /// This is a fatal error (exit 4) for synthesized brands. A synthesized
-    /// brand cannot embed a logo if no path is declared.
+    /// This is a fatal error (exit 4). Fires in two contexts:
+    ///
+    /// - **Brand synthesis** (`brand.toml`): the `[logo]` section is absent
+    ///   or its `path` field is empty. Fix by adding `[logo]\npath = "..."` to
+    ///   `brand.toml`.
+    /// - **Per-slide overlay** (`.sf` file `brand_overlay:` block): the
+    ///   `logo` value is present but empty. Fix by providing a non-empty
+    ///   logo path in the `brand_overlay:` block.
+    ///
+    /// The message is intentionally context-neutral so it remains accurate
+    /// regardless of which entry point triggered it.
     ///
     /// Traces to BC-2.01.002 edge case EC-005 (AC-004).
     #[error(
-        "E-BRD-001: Synthesized brand requires a logo path. \
-         Add a [logo] section with 'path = \"...\"' to brand.toml."
+        "E-BRD-001: A logo path is required but was empty or absent. \
+         Provide a non-empty logo path — either the brand.toml [logo] 'path' \
+         (brand synthesis) or the brand_overlay: logo value (per-slide overlay)."
     )]
     LogoRequired {
         /// Source location of the `brand "..."` or `brand.toml` declaration.

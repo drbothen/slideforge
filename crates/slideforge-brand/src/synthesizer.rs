@@ -988,6 +988,11 @@ body = "Calibri"
     }
 
     /// F13 — `BrandError::LogoRequired` now carries a `span` field.
+    ///
+    /// Also verifies the message is context-neutral (F-RV3-001): must accurately
+    /// describe BOTH the brand synthesis context AND the per-slide overlay context,
+    /// and must NOT contain synthesis-specific-only phrasing that would mislead
+    /// overlay users.
     #[test]
     fn test_f13_logo_required_has_span_field() {
         let err = BrandError::LogoRequired {
@@ -996,11 +1001,27 @@ body = "Calibri"
         let msg = err.to_string();
         assert!(
             msg.contains("E-BRD-001"),
-            "LogoRequired must contain E-BRD-001"
+            "LogoRequired must contain E-BRD-001, got: {msg}"
         );
         assert!(
             msg.contains("logo path"),
-            "LogoRequired message must mention logo path"
+            "LogoRequired message must mention logo path, got: {msg}"
+        );
+        // F-RV3-001: message must cover the brand synthesis context.
+        assert!(
+            msg.contains("brand.toml"),
+            "LogoRequired message must mention brand.toml (synthesis context), got: {msg}"
+        );
+        // F-RV3-001: message must cover the per-slide overlay context.
+        assert!(
+            msg.contains("brand_overlay"),
+            "LogoRequired message must mention brand_overlay: (overlay context), got: {msg}"
+        );
+        // F-RV3-001: must NOT contain the old synthesis-only phrasing that misled overlay users.
+        assert!(
+            !msg.contains("Synthesized brand requires"),
+            "LogoRequired message must NOT contain 'Synthesized brand requires' \
+             (synthesis-only phrasing misleads overlay users), got: {msg}"
         );
     }
 

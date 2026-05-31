@@ -373,6 +373,11 @@ mod tests {
     /// rejected with `BrandError::LogoRequired` — the same error the synthesizer
     /// returns for empty logo paths (synthesizer.rs line 208, F14 comment).
     ///
+    /// Also verifies the context-neutral message wording (F-RV3-001): the emitted
+    /// message must cover both contexts (synthesis + overlay) and must NOT contain
+    /// the old synthesis-specific phrasing "Synthesized brand requires" that would
+    /// mislead an overlay user into editing brand.toml as the only remedy.
+    ///
     /// **Why not `FileNotFound`?** `root_dir.join("")` resolves to `root_dir` itself.
     /// On most platforms `root_dir.exists()` is `true` (it is a directory), so the
     /// existence check passes silently; `std::fs::read(root_dir)` then fails with
@@ -393,6 +398,25 @@ mod tests {
         match result {
             Err(BrandError::LogoRequired { .. }) => {
                 // Correct: mirrors synthesizer behaviour (synthesizer.rs line 208).
+                // F-RV3-001: also verify the message is context-neutral.
+                let err = BrandError::LogoRequired {
+                    span: SourceSpan::default(),
+                };
+                let msg = err.to_string();
+                // Must mention the overlay context so overlay users know where to fix.
+                assert!(
+                    msg.contains("brand_overlay"),
+                    "F-RV3-001: LogoRequired message must mention brand_overlay: \
+                     (overlay context), got: {msg}"
+                );
+                // Must NOT contain the old synthesis-specific phrasing that told overlay
+                // users to edit brand.toml as the ONLY remedy.
+                assert!(
+                    !msg.contains("Synthesized brand requires"),
+                    "F-RV3-001: LogoRequired message must NOT contain \
+                     'Synthesized brand requires' (synthesis-only phrasing misleads \
+                     overlay users), got: {msg}"
+                );
             },
             Err(BrandError::FileNotFound { path, .. }) => {
                 panic!(
