@@ -377,6 +377,9 @@ mod tests {
     /// 3. `/H1` `StructElem` is present (the title frame produced a heading).
     /// 4. `/Figure` `StructElem` is present (the image frame with alt text produced
     ///    a figure element).
+    /// 5. `/Document` root `StructElem` is present — krilla auto-emits this via
+    ///    `TagTree::serialize()` calling `struct_elem.kind(StructRole::Document)`.
+    ///    Closes adversary finding F-P4-004 non-vacuously.
     ///
     /// These are the exact bytes krilla 0.6.0 writes for the corresponding
     /// `TagKind` variants (verified against krilla source and live output).
@@ -430,6 +433,32 @@ mod tests {
             has_figure,
             "exported PDF must contain /Figure StructElem; \
              confirms the Image frame (with alt text) was tagged as Figure"
+        );
+
+        // 5. /Document root StructElem must be present — confirms krilla auto-emits
+        // the PDF/UA-1 Document root structure element (F-P4-004 non-vacuous closure).
+        //
+        // krilla 0.6.0 `TagTree::serialize()` always calls
+        // `struct_elem.kind(StructRole::Document)` on the root element before
+        // `document.finish()`, writing `/S /Document` into the PDF stream.
+        // `StructRole::Document` serializes to `Name(b"Document")` in pdf-writer,
+        // producing the literal bytes `/Document` in the output file.
+        //
+        // Sources:
+        //   - krilla 0.6.0 src/interchange/tagging/mod.rs:1050
+        //     `struct_elem.kind(StructRole::Document);`
+        //   - pdf-writer 0.14.0 src/structure.rs:877
+        //     `Self::Document => Name(b"Document")`
+        //
+        // This assertion closes adversary finding F-P4-004 non-vacuously:
+        // the spec-required /Document IS in the output, emitted automatically
+        // by krilla's TagTree, not by slideforge production code.
+        let has_document_root = bytes.windows(b"/Document".len()).any(|w| w == b"/Document");
+        assert!(
+            has_document_root,
+            "exported PDF must contain /Document root StructElem \
+             (krilla auto-emits StructRole::Document via TagTree::serialize); \
+             this confirms the PDF/UA-1 Document-root invariant (F-P4-004)"
         );
     }
 
