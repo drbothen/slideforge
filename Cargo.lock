@@ -2557,7 +2557,6 @@ dependencies = [
 name = "slideforge-pdf"
 version = "0.1.0"
 dependencies = [
- "indexmap",
  "krilla",
  "slideforge-layout",
  "slideforge-plugin-api",

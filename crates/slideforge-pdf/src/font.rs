@@ -129,6 +129,13 @@ fn normalize_font_name(name: &str) -> String {
 }
 
 /// Returns the platform-specific list of directories to search for font files.
+///
+/// ## Platform font directories searched
+///
+/// - **macOS:** system fonts + user `~/Library/Fonts`
+/// - **Windows:** system `%WINDIR%\Fonts` + per-user
+///   `%USERPROFILE%\AppData\Local\Microsoft\Windows\Fonts`
+/// - **Linux / other:** `/usr/share/fonts`, `/usr/local/share/fonts`, `~/.fonts`
 fn system_font_dirs() -> Vec<std::path::PathBuf> {
     #[cfg(target_os = "macos")]
     {
@@ -145,7 +152,18 @@ fn system_font_dirs() -> Vec<std::path::PathBuf> {
     #[cfg(target_os = "windows")]
     {
         let windir = std::env::var("WINDIR").unwrap_or_else(|_| String::from("C:\\Windows"));
-        vec![std::path::PathBuf::from(windir).join("Fonts")]
+        let mut dirs = vec![std::path::PathBuf::from(windir).join("Fonts")];
+        // Per-user font directory (Windows 10+): %USERPROFILE%\AppData\Local\Microsoft\Windows\Fonts
+        if let Some(home) = home_dir() {
+            dirs.push(
+                home.join("AppData")
+                    .join("Local")
+                    .join("Microsoft")
+                    .join("Windows")
+                    .join("Fonts"),
+            );
+        }
+        dirs
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]

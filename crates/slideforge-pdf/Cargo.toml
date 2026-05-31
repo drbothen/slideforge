@@ -15,7 +15,7 @@ name = "slideforge_pdf"
 
 [dependencies]
 # PRIMARY PDF engine — owns page content, text, fonts, tagging, PDF/UA-1.
-# pdf-writer =0.14.0 and subsetter =0.2.3 arrive as transitive deps of krilla;
+# pdf-writer =0.14.0 and subsetter =0.2.4 arrive as transitive deps of krilla;
 # do NOT add them as direct deps (RISK-1 / RISK-2 per tech-validation.md).
 krilla = "=0.6.0"
 

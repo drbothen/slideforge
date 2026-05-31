@@ -1,7 +1,7 @@
 //! `slideforge-pdf` — Pure-Rust PDF export backend for slideforge.
 //!
 //! Uses `krilla 0.6.0` as the primary PDF engine (which wraps `pdf-writer
-//! 0.14.0` and `subsetter 0.2.3` transitively) plus a custom
+//! 0.14.0` and `subsetter 0.2.4` transitively) plus a custom
 //! [`tag_engine::SlideTagEngine`] for PDF/UA-1 structure tree generation.
 //!
 //! ## Architecture (BC-4.03.002)

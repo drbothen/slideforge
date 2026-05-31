@@ -1,7 +1,7 @@
 //! SVG embedding via `usvg` parse → krilla `Surface` path-drawing operations.
 //!
 //! For each `FrameContent::Diagram(NormalizedDiagramSvg)` or
-//! `FrameContent::Chart` frame in a [`LaidOutSlide`], this module:
+//! `FrameContent::Chart` frame in a [`slideforge_layout::LaidOutSlide`], this module:
 //!
 //! 1. Parses the SVG via `usvg::Tree::from_str()`.
 //! 2. Walks the `usvg` node tree recursively.
