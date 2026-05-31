@@ -1378,6 +1378,172 @@ mod tests {
         let _ = std::fs::remove_dir_all(&out_dir);
     }
 
+    // ─── F-024-pass7-OBS-1: schemeClr end-to-end round-trip ─────────────────
+
+    /// BC-2.01.003 / EC-003 — end-to-end round-trip with a `<a:schemeClr>`-bearing
+    /// theme1.xml.
+    ///
+    /// The two existing round-trip tests (`test_bc_2_01_003_round_trip_pptx_to_brand_toml_and_back`
+    /// and `test_bc_2_01_003_effectful_extract_load_from_toml_round_trip`) both use the
+    /// all-`srgbClr` `MINIMAL_THEME_XML` fixture. This test closes the end-to-end gap
+    /// identified in F-024-pass7-OBS-1: no previous test confirmed that a real
+    /// `<a:schemeClr>`-bearing theme1.xml survives the full
+    /// `extract → brand.toml → BrandSynthesizer::load_from_toml` round-trip.
+    ///
+    /// Specifically this tests that the trailing `# derived via tint/shade; may not match
+    /// exact color` inline comment written by `brand_template_to_toml` (EC-003) does NOT
+    /// break TOML parsing inside `BrandSynthesizer::load_from_toml`.
+    ///
+    /// Fixture: `SCHEME_REF_THEME_XML` — acc2 uses `<a:schemeClr val="accent1"/>` (a
+    /// resolvable cross-reference to acc1 which is `<a:srgbClr val="0066CC"/>`).
+    ///
+    /// Assertions:
+    ///   (a) The extracted brand.toml for acc2 carries the EC-003 inline comment
+    ///       (`# derived via tint/shade`) AND a valid `#RRGGBB` resolved hex (`#0066CC`).
+    ///   (b) `BrandSynthesizer::load_from_toml` returns Ok on this brand.toml (proving
+    ///       the EC-003 inline comment is TOML-safe through the real synthesize path),
+    ///       and the resulting template's acc2 color slot parses as a resolved hex.
+    #[test]
+    fn test_bc_2_01_003_ec003_scheme_ref_end_to_end_round_trip() {
+        use crate::synthesizer::BrandSynthesizer;
+
+        // Theme XML where acc2 is a schemeClr referencing accent1 (= acc1 = #0066CC).
+        // All other slots use srgbClr so the extraction is otherwise clean.
+        // This is the load-bearing fixture: it exercises the schemeClr → SchemeRef →
+        // EC-003-comment → TOML-inline-comment → load_from_toml path end-to-end.
+        const SCHEME_REF_THEME_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="SchemeRefTheme">
+  <a:themeElements>
+    <a:clrScheme name="SchemeRefScheme">
+      <a:dk1><a:srgbClr val="000000"/></a:dk1>
+      <a:lt1><a:srgbClr val="FFFFFF"/></a:lt1>
+      <a:dk2><a:srgbClr val="003087"/></a:dk2>
+      <a:lt2><a:srgbClr val="F5F5F5"/></a:lt2>
+      <a:acc1><a:srgbClr val="0066CC"/></a:acc1>
+      <a:acc2><a:schemeClr val="accent1"/></a:acc2>
+      <a:acc3><a:srgbClr val="28A745"/></a:acc3>
+      <a:acc4><a:srgbClr val="FFC107"/></a:acc4>
+      <a:acc5><a:srgbClr val="6F42C1"/></a:acc5>
+      <a:acc6><a:srgbClr val="17A2B8"/></a:acc6>
+      <a:hlink><a:srgbClr val="0000EE"/></a:hlink>
+      <a:folHlink><a:srgbClr val="551A8B"/></a:folHlink>
+    </a:clrScheme>
+    <a:fontScheme name="SchemeRefFontScheme">
+      <a:majorFont><a:latin typeface="Calibri Light"/></a:majorFont>
+      <a:minorFont><a:latin typeface="Calibri"/></a:minorFont>
+    </a:fontScheme>
+  </a:themeElements>
+</a:theme>"#;
+
+        // Use the logo fixture so load_from_toml's EC-005 logo-existence check passes.
+        let zip_bytes = build_pptx_zip_with_logo(SCHEME_REF_THEME_XML);
+        let source_path = write_temp_pptx(&zip_bytes);
+        let out_dir = temp_output_dir();
+
+        let extraction = BrandExtractor::extract(source_path.to_str().unwrap(), &out_dir, false)
+            .expect("F-024-pass7-OBS-1: extraction of schemeClr-bearing theme must succeed");
+
+        let _ = std::fs::remove_file(&source_path);
+
+        // ── Assertion (a): the acc2 line in brand.toml carries both the EC-003 inline
+        //    comment and a valid #RRGGBB resolved hex. ────────────────────────────────
+
+        let toml_content = std::fs::read_to_string(&extraction.brand_toml_path)
+            .expect("F-024-pass7-OBS-1: brand.toml must be readable after extraction");
+
+        let acc2_line = toml_content
+            .lines()
+            .find(|l| l.trim_start().starts_with("acc2"))
+            .unwrap_or_else(|| {
+                panic!(
+                    "F-024-pass7-OBS-1: acc2 line must appear in brand.toml, got:\n{toml_content}"
+                )
+            });
+
+        // (a.i) EC-003 inline comment must be present on the acc2 line.
+        assert!(
+            acc2_line.contains("# derived via tint/shade"),
+            "F-024-pass7-OBS-1 (a.i): acc2 schemeClr slot must carry EC-003 inline comment \
+             '# derived via tint/shade; may not match exact color', got line: {acc2_line}"
+        );
+
+        // (a.ii) The TOML value must be a valid #RRGGBB hex, not a garbage placeholder.
+        //        Parse the whole brand.toml to get the acc2 color value safely.
+        let config: crate::toml_schema::BrandConfig =
+            toml::from_str(&toml_content).unwrap_or_else(|e| {
+                panic!(
+                    "F-024-pass7-OBS-1 (a.ii): brand.toml with EC-003 comment must parse as \
+                     valid BrandConfig (proves the inline comment is TOML-safe at the parse level); \
+                     error: {e}\nContent:\n{toml_content}"
+                )
+            });
+
+        let acc2_value =
+            config.colors.acc2.as_deref().unwrap_or_else(|| {
+                panic!("F-024-pass7-OBS-1: acc2 must be present in BrandConfig")
+            });
+
+        // The schemeClr val="accent1" refers to acc1 = #0066CC, which is resolvable.
+        // The extractor must write the resolved hex, not "#accent1".
+        let is_valid_hex = acc2_value.starts_with('#')
+            && acc2_value.len() == 7
+            && acc2_value[1..].chars().all(|c| c.is_ascii_hexdigit());
+        assert!(
+            is_valid_hex,
+            "F-024-pass7-OBS-1 (a.ii): acc2 schemeClr must produce a valid 6-hex-digit color \
+             value in brand.toml (not a garbage placeholder like '#accent1'), got: {acc2_value:?}"
+        );
+
+        // The resolved hex must match acc1's value (#0066CC) since accent1 → acc1.
+        assert!(
+            acc2_value.eq_ignore_ascii_case("#0066CC"),
+            "F-024-pass7-OBS-1 (a.ii): acc2 schemeClr(accent1) must resolve to acc1's hex \
+             #0066CC in brand.toml, got: {acc2_value:?}"
+        );
+
+        // ── Assertion (b): load_from_toml returns Ok and acc2 is a resolved hex. ────
+
+        let brand_toml_path_str = extraction
+            .brand_toml_path
+            .to_str()
+            .expect("F-024-pass7-OBS-1: brand.toml path must be valid UTF-8");
+
+        // This is the critical end-to-end assertion: load_from_toml must NOT fail on
+        // a brand.toml that contains EC-003 inline comments. If the inline comment
+        // breaks TOML parsing inside the synthesizer, this call returns Err.
+        let (template, _warnings) = BrandSynthesizer::load_from_toml(brand_toml_path_str).expect(
+            "F-024-pass7-OBS-1 (b): BrandSynthesizer::load_from_toml must return Ok on a \
+                 brand.toml that contains EC-003 '# derived via tint/shade' inline comments — \
+                 the comment must be TOML-safe through the real synthesize path",
+        );
+
+        // The loaded template's acc2 slot (index 5) must be a resolved hex color.
+        // If the EC-003 comment caused a parse failure or the SchemeRef survived into
+        // the loaded template as an unresolved value, this assertion catches it.
+        assert_eq!(
+            template.colors.len(),
+            12,
+            "F-024-pass7-OBS-1 (b): loaded BrandTemplate must have exactly 12 color slots"
+        );
+
+        let acc2_slot = &template.colors[5]; // acc2 is index 5 in ECMA-376 order
+        let acc2_loaded_hex = acc2_slot.hex().unwrap_or_else(|| {
+            panic!(
+                "F-024-pass7-OBS-1 (b): acc2 color slot after load_from_toml must be a resolved \
+                 hex (the EC-003 inline comment must not cause an unresolved SchemeRef to survive \
+                 into the loaded BrandTemplate)"
+            )
+        });
+
+        assert!(
+            acc2_loaded_hex.eq_ignore_ascii_case("#0066CC"),
+            "F-024-pass7-OBS-1 (b): acc2 loaded from brand.toml must equal the resolved hex \
+             #0066CC (schemeClr(accent1) → acc1 = #0066CC), got: {acc2_loaded_hex:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(&out_dir);
+    }
+
     // ─── AC-001 / EC-006: output directory created if absent ─────────────────
 
     /// BC-2.01.003 EC-006 — when `output_dir` does not exist, it is created
