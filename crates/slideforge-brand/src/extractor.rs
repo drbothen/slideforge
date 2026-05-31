@@ -196,7 +196,16 @@ impl BrandExtractor {
         let loader = BrandLoader::new();
         let ctx = BrandLoadContext {
             check_font_availability: false,
-            root_dir: output_dir.to_path_buf(),
+            // root_dir is the parent directory of the SOURCE .pptx, matching the
+            // convention used by BrandProvider::load (loader.rs). load_template does not
+            // currently read root_dir on this code path (it is reserved for future
+            // relative logo-path resolution), but it must be set to the source directory
+            // — not output_dir — so the context is semantically correct if the field is
+            // ever read by a future code path.
+            root_dir: Path::new(source).parent().map_or_else(
+                || std::path::PathBuf::from("."),
+                std::path::Path::to_path_buf,
+            ),
             span: slideforge_types::SourceSpan::default(),
         };
         let template = loader.load_template(Path::new(source), &ctx)?;
