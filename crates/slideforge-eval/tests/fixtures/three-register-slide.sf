@@ -1,0 +1,27 @@
+slideforge_version "1"
+lang "en-US"
+brand "default.pptx"
+
+# Canonical three-register test fixture for STORY-036 BleedChecker tests.
+#
+# This deck has a single slide with all three writing registers plus a title
+# field. Each register uses a distinct sentinel string to allow bleed detection
+# at the byte level: if a sentinel appears in the wrong output section, the
+# bleed test will catch it.
+#
+# Sentinel strings are chosen to be:
+# - XML-safe (no <, >, &, ", ' characters)
+# - Unique and unlikely to collide with generated XML structure
+# - Clearly register-typed for diagnostic clarity
+#
+# Bleed matrix for this fixture:
+#   SENTINEL_NOTES  -> PPTX: notes slide only; DOCX: absent from body
+#   SENTINEL_REPORT -> PPTX: absent entirely; DOCX: body only
+#   SENTINEL_DETAIL -> PPTX: absent entirely; DOCX: body only (extended)
+#   SENTINEL_TITLE  -> PPTX: slide body only (visual); this is NOT a register
+
+slide content:
+  title "SENTINEL_TITLE"
+  notes "SENTINEL_NOTES"
+  report "SENTINEL_REPORT"
+  detail "SENTINEL_DETAIL"

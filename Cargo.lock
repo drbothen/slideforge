@@ -2324,6 +2324,7 @@ dependencies = [
  "slideforge-types",
  "thiserror 2.0.18",
  "tracing",
+ "zip 2.3.0",
 ]
 
 [[package]]
