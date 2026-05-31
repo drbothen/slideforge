@@ -94,8 +94,21 @@ echo ""
 
 PDF_SRC_DIR="${WORKSPACE_ROOT}/crates/slideforge-pdf/src"
 if [[ ! -d "${PDF_SRC_DIR}" ]]; then
-    echo "  WARN: crates/slideforge-pdf/src not found — skipping source check"
+    echo "  FAIL: crates/slideforge-pdf/src not found — cannot run no-subprocess source check" >&2
+    echo "        Rename or relocation of the crate src/ directory must be reflected here." >&2
+    exit 1
 else
+    # Positive-coverage guard: count .rs files to be scanned.
+    # The crate has at least 6 source files; fewer than 5 means the directory
+    # is unexpectedly sparse and the check would be a no-op pass.
+    RS_FILE_COUNT=$(find "${PDF_SRC_DIR}" -name "*.rs" | wc -l | tr -d ' ')
+    if [[ "${RS_FILE_COUNT}" -lt 5 ]]; then
+        echo "  FAIL: only ${RS_FILE_COUNT} .rs file(s) found in crates/slideforge-pdf/src/" >&2
+        echo "        Expected at least 5. The source check would be a no-op — failing closed." >&2
+        exit 1
+    fi
+    echo "  INFO: scanning ${RS_FILE_COUNT} .rs file(s) in crates/slideforge-pdf/src/"
+
     # Grep for actual use-site patterns (non-comment lines only).
     # Use perl-regex look-ahead to skip lines whose trimmed content starts
     # with `//` (Rust comment lines, including doc comments `///`).
