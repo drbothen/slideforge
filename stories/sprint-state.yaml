@@ -2,7 +2,7 @@
 current_wave: 3
 current_phase: 3
 pipeline_status: IN_PROGRESS
-last_updated: 2026-05-28
+last_updated: 2026-05-30
 wave_1_gate: PASS
 wave_1_gate_date: 2026-05-27
 wave_1_gate_passes: 3
@@ -14,6 +14,12 @@ wave_2_gate_findings_fixed: 19
 wave_3_batch_1_completed: 2026-05-28
 wave_3_batch_1_stories: 6
 wave_3_batch_1_tests_added: 494
+wave_3_batch_2_completed: 2026-05-30
+wave_3_batch_2_stories: 8
+wave_3_batch_3_completed: 2026-05-30
+wave_3_batch_3_stories: 3
+develop_sha: "584cbc6f"
+develop_pr_count: 37
 ---
 
 stories:
@@ -228,23 +234,78 @@ stories:
     pr: 29
     merge_commit: 7641d4ea
   STORY-023:
-    status: in_progress
+    status: merged
     wave: 3
     started: 2026-05-28
-    branch: feature/S-023
-    sha: 800b11d8
-    convergence: "2/3 CLEAN (passes 9, 10)"
+    merged: 2026-05-29
+    pr: 32
+    merge_commit: dd6054c1
   STORY-030:
-    status: in_progress
+    status: merged
     wave: 3
     started: 2026-05-28
-    branch: feature/S-030
-    sha: fedf1ec3
-    convergence: "post-font-engine refactor; next pass 10"
+    merged: 2026-05-28
+    pr: 31
+    merge_commit: 19e79696
   STORY-034:
-    status: in_progress
+    status: merged
     wave: 3
     started: 2026-05-28
-    branch: feature/S-034
-    sha: 92221f3d
-    convergence: "3/3 CONVERGED; PR pending"
+    merged: 2026-05-28
+    pr: 30
+    merge_commit: 0cb4b982
+  STORY-020:
+    status: merged
+    wave: 3
+    started: 2026-05-29
+    merged: 2026-05-30
+    pr: 33
+    merge_commit: 143f1b78
+  STORY-028:
+    status: merged
+    wave: 3
+    started: 2026-05-29
+    merged: 2026-05-30
+    pr: 34
+    merge_commit: 066d625f
+  STORY-021:
+    status: merged
+    wave: 3
+    started: 2026-05-30
+    merged: 2026-05-30
+    pr: 35
+    merge_commit: 362c4a1f
+  STORY-024:
+    status: merged
+    wave: 3
+    started: 2026-05-30
+    merged: 2026-05-30
+    pr: 36
+    merge_commit: 924cdc04
+  STORY-025:
+    status: merged
+    wave: 3
+    started: 2026-05-30
+    merged: 2026-05-30
+    pr: 37
+    merge_commit: 584cbc6f
+  STORY-072:
+    status: draft
+    wave: TBD
+    notes: "gradient fills follow-up from STORY-028 cascade"
+  STORY-073:
+    status: draft
+    wave: TBD
+    notes: "bullets layout follow-up from STORY-028 cascade"
+  STORY-074:
+    status: draft
+    wave: TBD
+    notes: "brand-em-sizing follow-up from STORY-028 cascade"
+  STORY-075:
+    status: draft
+    wave: TBD
+    notes: "footer detection follow-up from STORY-024 cascade"
+  STORY-076:
+    status: draft
+    wave: TBD
+    notes: "srgbClr transform extraction follow-up from STORY-024 cascade"
