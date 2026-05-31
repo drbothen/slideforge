@@ -180,6 +180,10 @@ impl ChartSvg {
 }
 
 /// Error produced by the chart renderer.
+///
+/// `#[non_exhaustive]` ensures that adding variants in minor releases does not
+/// break downstream crates that match on this enum (SemVer hygiene, quality-bar).
+#[non_exhaustive]
 #[derive(Debug, Error)]
 pub enum ChartError {
     /// The requested chart type is not supported by this renderer.

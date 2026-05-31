@@ -93,6 +93,10 @@ impl RawDiagramSvg {
 /// responsibility of the diagram renderer (render or fail) and the eval layer
 /// (apply build policy). The eval layer does not exist in STORY-033 scope; it
 /// will be implemented in the wave that adds `slideforge-eval` functionality.
+///
+/// `#[non_exhaustive]` ensures that adding variants in minor releases does not
+/// break downstream crates that match on this enum (SemVer hygiene, quality-bar).
+#[non_exhaustive]
 #[derive(Debug, Error)]
 pub enum DiagramError {
     /// The Mermaid source contains a syntax error.
