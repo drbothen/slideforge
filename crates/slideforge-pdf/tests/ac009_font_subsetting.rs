@@ -175,14 +175,18 @@ fn test_bc_4_03_002_ac009_lm_math_fixture_exists_and_is_large() {
 /// that would fail in CI/headless environments.
 ///
 /// The export uses **uncompressed content streams** (`compress_content_streams:
-/// false`), so `measure_embedded_streams_size` measures the raw font program
-/// bytes without `FlateDecode` inflation. This closes the F1 false-green vector:
+/// false`). Note: this flag controls PDF *content-stream* compression (drawing
+/// operators), not font-program streams, which may remain Flate-compressed
+/// independently at the discretion of the PDF engine. The `< 100_000` bound is
+/// robust regardless: a full-font embed exceeds 100 KB whether the font program
+/// is compressed (~300–440 KB) or fully uncompressed (~733 KB). A 2-glyph subset
+/// comfortably passes in either case (~10–30 KiB). This closes the F1 false-green
+/// vector from the old `< 733_736` ceiling (36× too loose):
 ///
-/// - **With compressed export (old):** A full 733 KB font compressed to ~300–440 KB
-///   still passed `< 733_736` → false-green. The 36× margin was too loose.
-/// - **With uncompressed export (new):** The full uncompressed font would appear as
-///   ~733 KB in the stream total, making `< 100_000` a fail. A 2-glyph subset is
-///   ~10–30 KB, making `< 100_000` a pass. The bound is tight.
+/// - **With old bound:** A full 733 KB font compressed to ~300–440 KB still passed
+///   `< 733_736` → false-green.
+/// - **With new bound:** `< 100_000` correctly distinguishes subset-scale from
+///   full-font-scale, independent of content-stream compression.
 ///
 /// ## Assertions (belt-and-suspenders)
 ///
@@ -190,7 +194,7 @@ fn test_bc_4_03_002_ac009_lm_math_fixture_exists_and_is_large() {
 /// 2. `embedded_total < 100_000`: the embedded font is subset-scale, NOT full-font
 ///    scale. Rationale: 2–3 glyphs from a 4,802-glyph font subseted to ~10–30 KiB
 ///    (Latin Modern Math OTF, krilla internal subsetting). 100 KB is a safe ceiling
-///    that a full uncompressed (~733 KB) or compressed (~300–440 KB) embed would
+///    that a full embed (~300–440 KB compressed, ~733 KB uncompressed) would
 ///    exceed, while a 2-glyph subset comfortably passes.
 /// 3. `embedded_total < full_font_size`: belt-and-suspenders against the uncompressed
 ///    full font baseline.
@@ -203,7 +207,7 @@ fn test_bc_4_03_002_ac009_lm_math_fixture_exists_and_is_large() {
 ///
 /// ## Test seam
 ///
-/// `PdfExporter::export_uncompressed` (`#[cfg(test)]` only) calls
+/// `PdfExporter::export_uncompressed` (`#[doc(hidden)] pub`) calls
 /// `generate_pdf_inner` with `SerializeSettings { compress_content_streams:
 /// false, .. }`. This makes the embedded byte sizes directly observable.
 /// `PdfExporter::with_font_path` sets the explicit font path for deterministic

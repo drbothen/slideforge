@@ -137,7 +137,7 @@ impl PdfExporter {
     /// Export to uncompressed PDF bytes — test seam for AC-009 / F-044-004.
     ///
     /// Identical to [`Exporter::export`] except `compress_content_streams: false`
-    /// is passed to krilla's [`SerializeSettings`]. This makes embedded font
+    /// is passed to krilla's [`krilla::SerializeSettings`]. This makes embedded font
     /// program bytes directly measurable without FlateDecode inflation:
     ///
     /// - Uncompressed full LM Math (~733 KB) or compressed full (~300–440 KB)
@@ -152,7 +152,7 @@ impl PdfExporter {
     ///
     /// # Errors
     ///
-    /// Same error conditions as [`generate_pdf`].
+    /// Same error conditions as the [`Exporter::export`] path.
     #[doc(hidden)]
     pub fn export_uncompressed(
         &self,
