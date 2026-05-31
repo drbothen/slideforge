@@ -178,16 +178,34 @@ pub fn resolve_overlay(
             // Security: path-traversal containment guard (F-025-001).
             // Mirrors the guard in `synthesizer::load_from_toml` (F-PASS13-HIGH-2).
             // Reuses `synthesizer::strip_unc_prefix` — single source of truth (TD-VSDD-060).
-            let canonical_logo =
-                std::fs::canonicalize(&logo_path).map_err(|e| BrandError::FileNotFound {
-                    path: Arc::from(format!("{}: {e}", logo_path.display()).as_str()),
+            let canonical_logo = std::fs::canonicalize(&logo_path).map_err(|e| {
+                // TOCTOU: file existed at the exists() check but canonicalize failed.
+                // Log the OS error for diagnostics; path field stays clean (E-BRD-001
+                // format: '<resolved-path>'). Mirrors synthesizer::load_from_toml
+                // (lines 132-136) which uses a clean path + separate reason field.
+                tracing::warn!(
+                    logo_path = %logo_path.display(),
+                    os_error = %e,
+                    "brand_overlay canonicalize failed for logo (TOCTOU race); \
+                     returning FileNotFound with clean path",
+                );
+                BrandError::FileNotFound {
+                    path: Arc::clone(logo_path_str),
                     span: raw.span.clone(),
-                })?;
-            let canonical_root =
-                std::fs::canonicalize(root_dir).map_err(|e| BrandError::FileNotFound {
-                    path: Arc::from(format!("{}: {e}", root_dir.display()).as_str()),
+                }
+            })?;
+            let canonical_root = std::fs::canonicalize(root_dir).map_err(|e| {
+                tracing::warn!(
+                    root_dir = %root_dir.display(),
+                    os_error = %e,
+                    "brand_overlay canonicalize failed for root_dir; \
+                     returning FileNotFound with clean path",
+                );
+                BrandError::FileNotFound {
+                    path: Arc::from(root_dir.to_string_lossy().as_ref()),
                     span: raw.span.clone(),
-                })?;
+                }
+            })?;
             let canonical_logo_norm = strip_unc_prefix(&canonical_logo);
             let canonical_root_norm = strip_unc_prefix(&canonical_root);
             if !canonical_logo_norm.starts_with(&canonical_root_norm) {
