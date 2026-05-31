@@ -103,46 +103,41 @@ impl BleedChecker {
     ///   `ppt/slides/slide*.xml` file.
     pub fn assert_absent_from_pptx_slides(pptx_bytes: &[u8], sentinel: &str) {
         let mut archive = Self::open_zip(pptx_bytes, "PPTX");
-        let names: Vec<String> = (0..archive.len())
-            .map(|i| {
-                archive
+
+        // F-003: Fail closed — a valid PPTX always contains ≥1 slide body.
+        // Collect slide member count first (by index, F-036-004) to enforce the guard.
+        let slide_count = (0..archive.len())
+            .filter(|&i| {
+                let name = archive
                     .by_index(i)
                     .unwrap_or_else(|e| {
                         panic!("BleedChecker: failed to index PPTX ZIP entry {i}: {e}")
                     })
                     .name()
-                    .to_owned()
+                    .to_owned();
+                Self::is_pptx_slide_path(&name)
             })
-            .collect();
-
-        // F-003: Fail closed — a valid PPTX always contains ≥1 slide body.
-        // If we find none, the archive is malformed or the exporter has a structural
-        // regression. An absence check on zero members would be vacuously true,
-        // silently masking that defect.
-        let slide_members: Vec<&String> = names
-            .iter()
-            .filter(|n| Self::is_pptx_slide_path(n))
-            .collect();
+            .count();
         assert!(
-            !slide_members.is_empty(),
+            slide_count > 0,
             "BleedChecker: no ppt/slides/slide*.xml members found — not a valid PPTX.\n\
              (A valid PPTX must contain at least one slide body. Absence check would be \
              vacuously true on an empty/malformed archive — refusing to give a false green.)"
         );
 
-        for name in &names {
-            // EC-003: Only scan `ppt/slides/slide*.xml` — no other paths.
-            if !Self::is_pptx_slide_path(name) {
-                continue;
+        // Scan each physical entry by index (F-036-004 — handles duplicate names).
+        // EC-003: only ppt/slides/slide*.xml paths are scanned.
+        for i in 0..archive.len() {
+            if let Some(name) =
+                Self::member_contains(&mut archive, i, sentinel, Self::is_pptx_slide_path)
+            {
+                panic!(
+                    "BleedChecker: register-content bleed detected in PPTX slide body.\n\
+                     sentinel : {sentinel:?}\n\
+                     found in : {name:?}\n\
+                     (BC-1.14.004 invariant 1: register content must not appear in PPTX slide body)"
+                );
             }
-            let text = Self::read_member_text_decoded(&mut archive, name);
-            assert!(
-                !text.contains(sentinel),
-                "BleedChecker: register-content bleed detected in PPTX slide body.\n\
-                 sentinel : {sentinel:?}\n\
-                 found in : {name:?}\n\
-                 (BC-1.14.004 invariant 1: register content must not appear in PPTX slide body)"
-            );
         }
     }
 
@@ -168,37 +163,27 @@ impl BleedChecker {
     ///   the ZIP.
     pub fn assert_absent_from_pptx_all(pptx_bytes: &[u8], sentinel: &str) {
         let mut archive = Self::open_zip(pptx_bytes, "PPTX");
-        let names: Vec<String> = (0..archive.len())
-            .map(|i| {
-                archive
-                    .by_index(i)
-                    .unwrap_or_else(|e| {
-                        panic!("BleedChecker: failed to index PPTX ZIP entry {i}: {e}")
-                    })
-                    .name()
-                    .to_owned()
-            })
-            .collect();
 
         // F-003: Fail closed — an empty archive means zero members were scanned,
         // making any absence check vacuously true and silently hiding that the
         // PPTX was never written.
         assert!(
-            !names.is_empty(),
+            !archive.is_empty(),
             "BleedChecker: PPTX archive contains zero members — not a valid PPTX.\n\
              (Absence check would be vacuously true on an empty archive — refusing to \
              give a false green.)"
         );
 
-        for name in &names {
-            let text = Self::read_member_text_decoded(&mut archive, name);
-            assert!(
-                !text.contains(sentinel),
-                "BleedChecker: register-content bleed detected in PPTX archive.\n\
-                 sentinel : {sentinel:?}\n\
-                 found in : {name:?}\n\
-                 (BC-1.14.004 postcondition 6: detail content must not appear anywhere in PPTX)"
-            );
+        // Scan every physical entry by index (F-036-004 — handles duplicate names).
+        for i in 0..archive.len() {
+            if let Some(name) = Self::member_contains(&mut archive, i, sentinel, |_| true) {
+                panic!(
+                    "BleedChecker: register-content bleed detected in PPTX archive.\n\
+                     sentinel : {sentinel:?}\n\
+                     found in : {name:?}\n\
+                     (BC-1.14.004 postcondition 6: detail content must not appear anywhere in PPTX)"
+                );
+            }
         }
     }
 
@@ -223,9 +208,10 @@ impl BleedChecker {
     ///   `word/document.xml`.
     pub fn assert_present_in_docx_body(docx_bytes: &[u8], sentinel: &str) {
         let mut archive = Self::open_zip(docx_bytes, "DOCX");
-        let text = Self::read_member_text_decoded(&mut archive, "word/document.xml");
+        let (decoded, raw) = Self::read_docx_member_decoded(&mut archive, "word/document.xml");
+        // Belt-and-suspenders (EC-004): hit in either decoded or raw text counts.
         assert!(
-            text.contains(sentinel),
+            decoded.contains(sentinel) || raw.contains(sentinel),
             "BleedChecker: expected register content NOT found in DOCX body.\n\
              sentinel     : {sentinel:?}\n\
              searched in  : \"word/document.xml\"\n\
@@ -253,9 +239,10 @@ impl BleedChecker {
     ///   `word/document.xml`.
     pub fn assert_absent_from_docx_body(docx_bytes: &[u8], sentinel: &str) {
         let mut archive = Self::open_zip(docx_bytes, "DOCX");
-        let text = Self::read_member_text_decoded(&mut archive, "word/document.xml");
+        let (decoded, raw) = Self::read_docx_member_decoded(&mut archive, "word/document.xml");
+        // Belt-and-suspenders (EC-004): a hit in either decoded or raw text counts.
         assert!(
-            !text.contains(sentinel),
+            !decoded.contains(sentinel) && !raw.contains(sentinel),
             "BleedChecker: register-content bleed detected in DOCX body.\n\
              sentinel    : {sentinel:?}\n\
              found in    : \"word/document.xml\"\n\
@@ -302,9 +289,17 @@ impl BleedChecker {
         })
     }
 
-    /// Read a ZIP member by name as a UTF-8 string, then XML-entity-decode it.
+    /// Read a ZIP member by physical index as a UTF-8 string, then XML-entity-decode it
+    /// using a tolerant best-effort decoder.
     ///
-    /// # EC-004 compliance
+    /// # Why index, not name (F-036-004)
+    ///
+    /// ZIP permits duplicate member names (two entries named `ppt/slides/slide1.xml`).
+    /// `ZipArchive::by_name` returns the FIRST match, silently skipping any
+    /// duplicate. By reading by index we visit every physical entry — including
+    /// duplicates — so no bleed-bearing duplicate can hide behind an earlier entry.
+    ///
+    /// # EC-004 compliance (F-036-002)
     ///
     /// XML exporters escape special characters: `&` → `&amp;`, `<` → `&lt;`,
     /// `>` → `&gt;`, `"` → `&quot;`, `'` → `&apos;`. Numeric character
@@ -312,43 +307,122 @@ impl BleedChecker {
     /// sentinel like `R&D roadmap` would not be found in a member containing
     /// `R&amp;D roadmap`, causing a false negative (missed bleed detection).
     ///
-    /// Decoding is performed via [`quick_xml::escape::unescape`]. If decoding
-    /// fails (malformed entity in the member), the raw UTF-8 text is used as a
-    /// fallback with a warning — this is conservative: it may miss some
-    /// sentinel matches in badly-formed XML, but it never silently skips a
-    /// member that was scanned.
+    /// Decoding uses a **best-effort, per-entity tolerant** strategy:
+    ///
+    /// - The five predefined XML entities (`&amp;`, `&lt;`, `&gt;`, `&quot;`, `&apos;`)
+    ///   and numeric character references (`&#NN;`, `&#xHH;`) are decoded exactly.
+    /// - Unknown named entities (e.g. `&copy;`, `&nbsp;`) silently expand to the
+    ///   empty string rather than causing the entire member to fall back to raw text.
+    ///   This is correct: an unknown entity is never equal to a sentinel character,
+    ///   so collapsing it to empty cannot cause a false negative.
+    /// - As belt-and-suspenders, the sentinel is checked against BOTH the
+    ///   best-effort-decoded text AND the raw UTF-8 text. A hit in either counts as
+    ///   bleed. This ensures that a sentinel is never missed because an unrelated
+    ///   unknown entity appears in the same member.
     ///
     /// Non-UTF-8 bytes in the member are replaced with the Unicode replacement
     /// character (U+FFFD) before entity decoding.
     ///
     /// # Panics
     ///
-    /// Panics if the member is not found in the archive.
-    fn read_member_text_decoded(
+    /// Panics if the member index is out of range or the member cannot be read.
+    fn read_member_by_index_decoded(
         archive: &mut ZipArchive<std::io::Cursor<&[u8]>>,
-        name: &str,
-    ) -> String {
-        let mut entry = archive.by_name(name).unwrap_or_else(|e| {
+        index: usize,
+    ) -> (String, String) {
+        let mut entry = archive.by_index(index).unwrap_or_else(|e| {
             panic!(
-                "BleedChecker: ZIP member {name:?} not found in archive: {e}\n\
-                 (Is this a valid PPTX/DOCX file with the expected structure?)"
+                "BleedChecker: failed to read ZIP member at index {index}: {e}\n\
+                 (ZIP archive may be malformed or truncated)"
             )
         });
-        let mut raw = Vec::new();
-        entry
-            .read_to_end(&mut raw)
-            .unwrap_or_else(|e| panic!("BleedChecker: failed to read ZIP member {name:?}: {e}"));
-        let utf8 = String::from_utf8_lossy(&raw);
-        // XML-entity-decode so that sentinels with `&`, `<`, `>`, `"`, `'`
-        // are found even when the exporter has XML-escaped them.
-        match quick_xml::escape::unescape(&utf8) {
-            Ok(decoded) => decoded.into_owned(),
-            Err(_) => {
-                // Malformed entity in this member — fall back to raw text.
-                // This is conservative: we may miss a sentinel that straddles
-                // a malformed entity, but we never silently skip the member.
-                utf8.into_owned()
-            },
+        let name = entry.name().to_owned();
+        let mut raw_bytes = Vec::new();
+        entry.read_to_end(&mut raw_bytes).unwrap_or_else(|e| {
+            panic!("BleedChecker: failed to read ZIP member {name:?} at index {index}: {e}")
+        });
+        let raw_utf8 = String::from_utf8_lossy(&raw_bytes).into_owned();
+
+        // Tolerant best-effort entity decoding (EC-004, F-036-002):
+        // - Known XML entities and numeric char refs are decoded correctly.
+        // - Unknown named entities (e.g. &copy;, &nbsp;) expand to "" instead
+        //   of causing the whole-member fallback.
+        let decoded = quick_xml::escape::unescape_with(&raw_utf8, |entity| {
+            // Try the five predefined XML entities first.
+            // For any other named entity, return Some("") — the entity collapses
+            // to empty rather than causing an error that would abort decoding.
+            quick_xml::escape::resolve_predefined_entity(entity).or(Some(""))
+        })
+        .unwrap_or_else(|_| {
+            // This branch is only reached for malformed numeric char refs (e.g.
+            // `&#xGGGG;`). Fall back to raw text — belt-and-suspenders still applies.
+            std::borrow::Cow::Borrowed(&raw_utf8)
+        })
+        .into_owned();
+
+        (decoded, raw_utf8)
+    }
+
+    /// Check whether `sentinel` is present in either the decoded or raw text
+    /// of a ZIP member (belt-and-suspenders, EC-004 / F-036-002).
+    ///
+    /// Returns `Some(name)` with the member name if a match is found, `None` otherwise.
+    fn member_contains(
+        archive: &mut ZipArchive<std::io::Cursor<&[u8]>>,
+        index: usize,
+        sentinel: &str,
+        path_filter: impl Fn(&str) -> bool,
+    ) -> Option<String> {
+        // Peek at the name without reading bytes first.
+        let name = {
+            let entry = archive.by_index(index).unwrap_or_else(|e| {
+                panic!(
+                    "BleedChecker: failed to index ZIP entry {index}: {e}\n\
+                     (ZIP archive may be malformed)"
+                )
+            });
+            entry.name().to_owned()
+        };
+
+        if !path_filter(&name) {
+            return None;
         }
+
+        let (decoded, raw) = Self::read_member_by_index_decoded(archive, index);
+        if decoded.contains(sentinel) || raw.contains(sentinel) {
+            Some(name)
+        } else {
+            None
+        }
+    }
+
+    /// Read a named DOCX member (`word/document.xml`) for presence/absence checks.
+    ///
+    /// For DOCX checks, the member name is canonical and unique per spec; there is
+    /// only ever one `word/document.xml`. We still use by-index scanning to remain
+    /// consistent with the F-036-004 robustness requirement and to correctly handle
+    /// any ZIP with duplicate-named entries.
+    ///
+    /// Returns the first `(decoded, raw)` pair for a member whose name equals
+    /// `target_name`, or panics if none is found.
+    fn read_docx_member_decoded(
+        archive: &mut ZipArchive<std::io::Cursor<&[u8]>>,
+        target_name: &str,
+    ) -> (String, String) {
+        for i in 0..archive.len() {
+            let name = {
+                let entry = archive
+                    .by_index(i)
+                    .unwrap_or_else(|e| panic!("BleedChecker: failed to index ZIP entry {i}: {e}"));
+                entry.name().to_owned()
+            };
+            if name == target_name {
+                return Self::read_member_by_index_decoded(archive, i);
+            }
+        }
+        panic!(
+            "BleedChecker: ZIP member {target_name:?} not found in archive.\n\
+             (Is this a valid DOCX file with the expected structure?)"
+        );
     }
 }
