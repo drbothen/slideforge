@@ -121,8 +121,10 @@ interpolations resolved) before tagging. The `notes` content does NOT appear in
 ### AC-002: notes content excluded from visual frames
 (traces to BC-1.14.001 postcondition 1 — notes does NOT appear in slide body shapes)
 
-The `notes` field value is removed from the slide's visual field set before layout.
-No `FrameContent` variant in `LaidOutSlide.frames` contains notes register text.
+Frame construction is ALLOWLIST-based: the layout pass reads only `title`, `subtitle`,
+and `body` from `slide.fields`; register keys remain in `slide.fields` but are never
+consulted by the frame builder. No `FrameContent` variant in `LaidOutSlide.frames`
+contains notes register text (per architecture directive F-035-P2-002 / Option D).
 A unit test builds a slide with `notes "Test notes"` and confirms `frames` does not
 contain "Test notes" while `register_content` does (tagged as `Notes`).
 
@@ -185,7 +187,7 @@ contains only the visual content (title, bullets, etc.) — none of the register
   - Tag each block with the correct `Register` variant
   - Return `Vec<RegisteredContent>`
 - [ ] Call `extract_register_content` in the evaluation pipeline before layout pass
-- [ ] Remove `notes`/`report`/`detail` fields from the visual field set so they do not reach `frames`
+- [ ] Ensure register fields never reach `frames` — frame construction is ALLOWLIST-based (reads only `title`/`subtitle`/`body` from `slide.fields`); register keys intentionally remain in `slide.fields` and are surfaced only via `register_content` (per architecture directive F-035-P2-002 / Option D)
 - [ ] Write unit tests:
   - `notes "..."` → `register_content` has `Notes`, `frames` does not contain text
   - `report "..."` → `register_content` has `Report`, `frames` does not contain text
@@ -252,11 +254,14 @@ evaluation pipeline.
 
 | File | Action | Purpose |
 |------|--------|---------|
-| `crates/slideforge-types/src/register.rs` | Create | `Register` enum, `RegisteredContent` struct |
-| `crates/slideforge-types/src/ir.rs` | Modify | Add `register_content: Vec<RegisteredContent>` to `LaidOutSlide` |
+| `crates/slideforge-types/src/register.rs` | Modify | Add `RegisteredContent` struct (`Register` enum pre-exists) |
+| `crates/slideforge-types/src/slide.rs` | Modify | Add `register_content: Vec<RegisteredContent>` to semantic `Slide` |
+| `crates/slideforge-layout/src/types.rs` | Modify | Add `register_content: Vec<RegisteredContent>` to `LaidOutSlide` |
 | `crates/slideforge-eval/src/register_routing.rs` | Create | `extract_register_content()` pass |
-| `crates/slideforge-eval/src/lib.rs` | Modify | Call register routing pass in pipeline |
-| `crates/slideforge-eval/src/tests/register_routing_tests.rs` | Create | Unit tests for all AC cases |
+| `crates/slideforge-eval/src/for_eval.rs` | Modify | Call register routing pass inside `eval_slide_node` before layout |
+| `crates/slideforge-layout/src/layout.rs` | Modify | Copy `register_content` from evaluated `Slide` into `LaidOutSlide` |
+| `crates/slideforge-eval/src/register_routing.rs` | Modify | Co-located `#[cfg(test)] mod tests` for all AC/EC cases (inline per CLAUDE.md convention) |
+| `crates/slideforge-eval/src/eval.rs` | Modify | Co-located `#[cfg(test)] mod tests` for `eval_deck` integration cases |
 
 ## Token Budget Estimate
 

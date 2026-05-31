@@ -40,6 +40,9 @@ wave_3_gate_adversarial: "CONVERGED — 8 passes, strict-CLEAN at passes 6/7/8; 
 wave_3_gate_status: "PASSED 2026-05-31 — test suite GREEN 2584 tests 0 failures; holdout must-pass 5/5; adversary 8 passes 3-CLEAN (6/7/8); fix-PR #38 squash-merged 7d266ad7"
 wave_3_completed: 2026-05-31
 wave_3_gate: "PASSED 2026-05-31 — PR #38 (7d266ad7); #[non_exhaustive] hardening + slideforge-brand [workspace.dependencies] + conventions.md v1.3; adversary pass 8 strict-CLEAN; holdout must-pass 5/5 PASS"
+wave_4_batch_a_complete: 1
+wave_4_batch_a_total: 8
+wave_4_batch_a_story035_merged: "PR #39, 0e7d9fde, 2026-05-31"
 wave_4_started: 2026-05-31
 wave_4_total_stories: 17
 wave_4_total_points: 104
@@ -50,9 +53,9 @@ wave_4_pulled_in_p1: "STORY-073 (5pts bullets layout), STORY-075 (3pts footer de
 wave_4_new_p0: "STORY-077 (8pts SectionBlock IR extension) — architect-directed spin-out from STORY-035 F-002 descope; blocks STORY-041/042"
 wave_4_deferred_p2: "STORY-072 → Wave 5 (gradient fills), STORY-074 → Wave 5 (brand-em-sizing)"
 wave_4_bc_deltas: "BC-2.01.001 v1.1→v1.2 (EC-006 srgbClr transform, Option B); BC-2.01.003 v1.8→v1.9 (EC-003 widened); error-taxonomy v2.2→v2.3 (no new variant)"
-story035_status: "IN_PROGRESS — Red Gate 3392b598 + Green 4f8a9487 + adversary LOCAL Pass 1 (2 HIGH/2 MED/1 LOW, streak 0/3) + fix-burst 1b4f654e. 743/743 GREEN, clippy/fmt clean. Adversary Pass 2 in flight. F-001 Option D directive issued; AC-005 section-node descoped to STORY-077; EC-003 DESCOPED; BC-1.14.004 added to spec."
-develop_sha: "7d266ad7"
-develop_pr_count: 38
+story035_status: "MERGED — PR #39, squash commit 0e7d9fde (2026-05-31). 10-pass LOCAL adversary cascade, 3/3 strict-CLEAN at passes 8/9/10. Option D single-source eval-stage routing. pr-reviewer APPROVE 0 findings; security CLEAN; CI 17/17. AC-005 descoped → STORY-077 (EC-003)."
+develop_sha: "0e7d9fde"
+develop_pr_count: 39
 workspace_tests: "~2584 (full-suite run 2026-05-31 @ 584cbc6f pre-fix-PR; fix-PR #38 is additive #[non_exhaustive] + dep config only)"
 workspace_test_failures: 0
 ---

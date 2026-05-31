@@ -33,6 +33,8 @@ wave_4_batch_a:
   stories: [STORY-035, STORY-036, STORY-043, STORY-044, STORY-045, STORY-073, STORY-075, STORY-076, STORY-077]
   execution: parallel
   chains: ["STORY-035→036", "STORY-043→044→045", "STORY-073 independent", "STORY-075 independent", "STORY-076 independent", "STORY-077 independent (blocks STORY-041/042 in Batch B)"]
+  completed: 1
+  total: 9
 wave_4_batch_b:
   stories: [STORY-037, STORY-038, STORY-039, STORY-040, STORY-041, STORY-042]
   execution: parallel
@@ -46,8 +48,8 @@ wave_4_batch_c:
 wave_4_pulled_in_p1: [STORY-073, STORY-075, STORY-076]
 wave_4_deferred_p2_to_wave5: [STORY-072, STORY-074]
 wave_4_bc_deltas: "BC-2.01.001 v1.1→v1.2; BC-2.01.003 v1.8→v1.9; error-taxonomy v2.2→v2.3"
-develop_sha: "7d266ad7"
-develop_pr_count: 38
+develop_sha: "0e7d9fde"
+develop_pr_count: 39
 ---
 
 stories:
@@ -318,21 +320,24 @@ stories:
     pr: 37
     merge_commit: 584cbc6f
   STORY-035:
-    status: in-progress
+    status: merged
     wave: 4
     batch: A
     priority: P0
     points: 5
-    worktree: ".worktrees/STORY-035"
-    branch: "feature/S-035"
+    pr: 39
+    merge_commit: "0e7d9fde"
+    merged: 2026-05-31
     red_gate_commit: "3392b598"
     green_commit: "4f8a9487"
     fix_burst_commit: "1b4f654e"
-    adversary_streak: "0/3"
+    adversary_streak: "3/3"
     adversary_pass_1: "2 HIGH / 2 MED / 1 LOW — F-001 Option D directive issued; F-002 AC-005/EC-003 descoped to STORY-077"
-    adversary_pass_2: "IN FLIGHT"
+    adversary_pass_2: "CLEAN (strict)"
+    adversary_pass_3: "CLEAN (strict)"
+    adversary_convergence: "3/3 strict-CLEAN at passes 8/9/10 (10-pass total cascade)"
     tests: "743/743 GREEN"
-    notes: "BC-1.14.004 added to spec; architect directive in cycles/STORY-035/architecture-directive.md"
+    notes: "BC-1.14.004 added to spec; architect directive in cycles/STORY-035/architecture-directive.md; Option D single-source eval-stage routing; AC-005 descoped → STORY-077 (EC-003)"
   STORY-036:
     status: not-started
     wave: 4
