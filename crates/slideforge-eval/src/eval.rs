@@ -1665,4 +1665,214 @@ mod tests {
         let deck = deck.unwrap();
         assert_eq!(deck.slides.len(), 1, "evaluated deck must have 1 slide");
     }
+
+    // ─── F-003: integration test — eval_deck populates register_content ───────
+
+    /// F-003 / BC-1.14.004: `eval_deck` populates `slide.register_content` for all
+    /// three register fields on a slide with `notes`, `report`, and `detail`.
+    ///
+    /// This test exercises the PRODUCTION pipeline path — it calls `eval_deck` (the
+    /// top-level function) and asserts that `deck.slides[0].register_content` is
+    /// populated with the correct `RegisteredContent` entries. This is the integration
+    /// proof that `eval_deck` wires `extract_register_content` correctly — the
+    /// unit-level tests in `register_routing.rs` test the isolated function.
+    ///
+    /// Architecture directive (STORY-035 F-001): `extract_register_content` is called
+    /// ONCE inside `eval_slide_node` after field resolution. This test verifies that
+    /// the call happened and the results flow through `deck.slides[0].register_content`.
+    #[test]
+    fn test_f003_eval_deck_populates_register_content_from_all_three_fields() {
+        use slideforge_types::Register;
+
+        // Build a slide with notes, report, and detail fields.
+        let notes_field = FieldNode {
+            name: Spanned::new("notes".to_string(), dummy_span()),
+            value: Spanned::new(
+                FieldValue::Template(vec![TemplateChunk::Literal(
+                    "Presenter: emphasise the growth story".to_string(),
+                )]),
+                dummy_span(),
+            ),
+        };
+        let report_field = FieldNode {
+            name: Spanned::new("report".to_string(), dummy_span()),
+            value: Spanned::new(
+                FieldValue::Template(vec![TemplateChunk::Literal(
+                    "Detailed narrative for readers".to_string(),
+                )]),
+                dummy_span(),
+            ),
+        };
+        let detail_field = FieldNode {
+            name: Spanned::new("detail".to_string(), dummy_span()),
+            value: Spanned::new(
+                FieldValue::Template(vec![TemplateChunk::Literal(
+                    "Technical appendix".to_string(),
+                )]),
+                dummy_span(),
+            ),
+        };
+
+        let slide_item = BlockItem::Slide(Spanned::new(
+            SlideNode {
+                kind: Spanned::new("content".to_string(), dummy_span()),
+                tags: vec![],
+                fields: vec![notes_field, report_field, detail_field],
+                inline_items: vec![],
+            },
+            dummy_span(),
+        ));
+        let deck_node = DeckNode {
+            items: vec![slide_item],
+            ..DeckNode::default()
+        };
+
+        let config = default_config();
+        let mut sink = DiagnosticSink::new();
+
+        // Call the production eval_deck — NOT extract_register_content directly.
+        let deck = eval_deck(&deck_node, &config, &mut sink);
+        let deck = deck.expect("eval_deck must return Some for a valid slide with register fields");
+        assert!(
+            sink.is_empty(),
+            "no diagnostics expected for valid register fields; got: {:?}",
+            sink.errors()
+        );
+        assert_eq!(deck.slides.len(), 1, "must have exactly 1 slide");
+
+        // The critical assertion: register_content must be populated by eval_deck,
+        // not by the layout stage or any other post-eval pass.
+        let slide = &deck.slides[0];
+        assert_eq!(
+            slide.register_content.len(),
+            3,
+            "eval_deck must populate register_content with 3 entries (notes+report+detail); \
+             got: {:?}",
+            slide.register_content
+        );
+
+        // Verify each register variant is present with the correct content.
+        let notes_entry = slide
+            .register_content
+            .iter()
+            .find(|rc| rc.register == Register::Notes)
+            .expect("Notes entry must be present in register_content after eval_deck");
+        let notes_text: String = notes_entry
+            .content
+            .iter()
+            .map(|n| {
+                if let slideforge_types::InlineNode::Plain(s) = n {
+                    s.as_ref().to_owned()
+                } else {
+                    String::new()
+                }
+            })
+            .collect();
+        assert_eq!(
+            notes_text, "Presenter: emphasise the growth story",
+            "Notes content must match the notes field value"
+        );
+
+        let report_entry = slide
+            .register_content
+            .iter()
+            .find(|rc| rc.register == Register::Report)
+            .expect("Report entry must be present in register_content after eval_deck");
+        let report_text: String = report_entry
+            .content
+            .iter()
+            .map(|n| {
+                if let slideforge_types::InlineNode::Plain(s) = n {
+                    s.as_ref().to_owned()
+                } else {
+                    String::new()
+                }
+            })
+            .collect();
+        assert_eq!(
+            report_text, "Detailed narrative for readers",
+            "Report content must match the report field value"
+        );
+
+        let detail_entry = slide
+            .register_content
+            .iter()
+            .find(|rc| rc.register == Register::Detail)
+            .expect("Detail entry must be present in register_content after eval_deck");
+        let detail_text: String = detail_entry
+            .content
+            .iter()
+            .map(|n| {
+                if let slideforge_types::InlineNode::Plain(s) = n {
+                    s.as_ref().to_owned()
+                } else {
+                    String::new()
+                }
+            })
+            .collect();
+        assert_eq!(
+            detail_text, "Technical appendix",
+            "Detail content must match the detail field value"
+        );
+
+        // Ordering invariant (BC-1.14.004 invariant 3): Notes < Report < Detail.
+        assert_eq!(
+            slide.register_content[0].register,
+            Register::Notes,
+            "First register_content entry must be Notes (ordering invariant)"
+        );
+        assert_eq!(
+            slide.register_content[1].register,
+            Register::Report,
+            "Second register_content entry must be Report (ordering invariant)"
+        );
+        assert_eq!(
+            slide.register_content[2].register,
+            Register::Detail,
+            "Third register_content entry must be Detail (ordering invariant)"
+        );
+    }
+
+    /// F-003 (complement): `eval_deck` produces empty `register_content` for a slide
+    /// with no register fields.
+    ///
+    /// Verifies that `eval_deck` correctly initialises `register_content` to an empty
+    /// `Vec` when a slide has no `notes`, `report`, or `detail` fields.
+    #[test]
+    fn test_f003_eval_deck_produces_empty_register_content_for_visual_only_slide() {
+        let title_field = FieldNode {
+            name: Spanned::new("title".to_string(), dummy_span()),
+            value: Spanned::new(
+                FieldValue::Template(vec![TemplateChunk::Literal("Hello World".to_string())]),
+                dummy_span(),
+            ),
+        };
+        let slide_item = BlockItem::Slide(Spanned::new(
+            SlideNode {
+                kind: Spanned::new("title".to_string(), dummy_span()),
+                tags: vec![],
+                fields: vec![title_field],
+                inline_items: vec![],
+            },
+            dummy_span(),
+        ));
+        let deck_node = DeckNode {
+            items: vec![slide_item],
+            ..DeckNode::default()
+        };
+
+        let config = default_config();
+        let mut sink = DiagnosticSink::new();
+
+        let deck = eval_deck(&deck_node, &config, &mut sink);
+        let deck = deck.expect("eval_deck must return Some for a visual-only slide");
+        assert!(sink.is_empty(), "no diagnostics expected");
+
+        let slide = &deck.slides[0];
+        assert!(
+            slide.register_content.is_empty(),
+            "visual-only slide must have empty register_content; got: {:?}",
+            slide.register_content
+        );
+    }
 }

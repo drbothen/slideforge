@@ -80,6 +80,7 @@ pub fn error_slide_placeholder(code: &str, message: &str, position: usize) -> Sl
         tags: vec![],
         source_span: SourceSpan::default(),
         overlay: None,
+        register_content: vec![],
     }
 }
 

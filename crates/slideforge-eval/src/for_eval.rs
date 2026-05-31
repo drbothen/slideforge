@@ -339,7 +339,11 @@ pub fn eval_slide_node<S: std::hash::BuildHasher>(
         .map(|t| Arc::from(t.value().as_str()))
         .collect();
 
-    Some(Slide {
+    // ── Step 1: Construct the slide with all resolved fields ──────────────────
+    // `register_content` starts empty; it will be populated in Step 2 below
+    // after the slide struct is fully initialised (register_routing requires
+    // the complete `&Slide` reference).
+    let mut slide = Slide {
         slide_type,
         fields,
         // Block-level content (images, charts, diagrams, shapes) is populated
@@ -365,7 +369,18 @@ pub fn eval_slide_node<S: std::hash::BuildHasher>(
         // per-iteration overlay semantics; STORY-008/STORY-009 implement the
         // parser-side wiring.
         overlay: None,
-    })
+        // Initialised empty; populated immediately below.
+        register_content: vec![],
+    };
+
+    // ── Step 2: Populate register_content (F-001 / STORY-035) ────────────────
+    // Call the single canonical extraction function AFTER the slide is fully
+    // constructed so all field values are available. This is the ONLY call site
+    // for `extract_register_content` in production code — layout reads the
+    // pre-computed field and never re-derives routing.
+    slide.register_content = crate::register_routing::extract_register_content(&slide);
+
+    Some(slide)
 }
 
 // ─── eval_block_items ────────────────────────────────────────────────────────

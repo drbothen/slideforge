@@ -100,6 +100,7 @@ mod tests {
             tags: vec![],
             source_span: SourceSpan::default(),
             overlay: None,
+            register_content: vec![],
         }
     }
 

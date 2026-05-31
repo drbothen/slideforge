@@ -104,6 +104,7 @@ mod integration_tests {
             tags: vec![],
             source_span: SourceSpan::default(),
             overlay: None,
+            register_content: vec![],
         };
 
         // Deck with lang: None — triggers E-A11-003
@@ -198,6 +199,7 @@ mod integration_tests {
             tags: vec![],
             source_span: SourceSpan::default(),
             overlay: None,
+            register_content: vec![],
         };
 
         let deck = Deck {

@@ -120,6 +120,7 @@ mod tests {
             tags: vec![],
             source_span: SourceSpan::default(),
             overlay: None,
+            register_content: vec![],
         }
     }
 
@@ -137,6 +138,7 @@ mod tests {
             tags: vec![],
             source_span: SourceSpan::default(),
             overlay: None,
+            register_content: vec![],
         }
     }
 
@@ -440,6 +442,7 @@ mod tests {
             tags: vec![],
             source_span: SourceSpan::default(),
             overlay: None,
+            register_content: vec![],
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -462,6 +465,7 @@ mod tests {
             tags: vec![],
             source_span: SourceSpan::default(),
             overlay: None,
+            register_content: vec![],
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -477,14 +481,27 @@ mod tests {
     // FINDING-002 — speaker_notes extraction
     // ─────────────────────────────────────────────────────────────────────────
 
-    /// FINDING-002 — slide with `notes` field set to a plain string populates `speaker_notes`.
+    /// FINDING-002 / F-004 (STORY-035) — `speaker_notes` is derived from `register_content`.
+    ///
+    /// After STORY-035 F-004: `speaker_notes` is a derived convenience field computed
+    /// from the Notes entry in `LaidOutSlide.register_content`. Layout does NOT read
+    /// `slide.fields.get("notes")` — it reads `slide.register_content` (canonical source).
+    /// The test pre-populates `register_content` (simulating what `eval_deck` produces).
     #[test]
     fn test_bc_3_06_001_speaker_notes_extracted_from_notes_field() {
+        use slideforge_types::{InlineNode, Register, RegisteredContent};
+
         let mut fields = OrderedMap::new();
         fields.insert(
             Arc::from("notes"),
             FieldValue::Literal(Value::Str(Arc::from("My notes"))),
         );
+        // Pre-populate register_content — simulates what eval_deck would produce
+        // (eval_deck calls extract_register_content after field resolution).
+        let register_content = vec![RegisteredContent {
+            register: Register::Notes,
+            content: vec![InlineNode::Plain(Arc::from("My notes"))],
+        }];
         let slide = Slide {
             slide_type: Arc::from("title"),
             fields,
@@ -493,6 +510,7 @@ mod tests {
             tags: vec![],
             source_span: SourceSpan::default(),
             overlay: None,
+            register_content,
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -500,7 +518,8 @@ mod tests {
         assert_eq!(
             result.slides[0].speaker_notes,
             Some(Arc::from("My notes")),
-            "slide with notes field must have speaker_notes populated"
+            "slide with notes in register_content must have speaker_notes populated; \
+             speaker_notes is derived from register_content (F-004 / STORY-035)"
         );
     }
 
@@ -537,6 +556,7 @@ mod tests {
             tags: vec![],
             source_span: SourceSpan::default(),
             overlay: None,
+            register_content: vec![],
         };
         let deck = slideforge_types::Deck {
             slides: vec![slide_with_takeaway],
@@ -614,6 +634,7 @@ mod tests {
             tags: vec![],
             source_span: SourceSpan::default(),
             overlay: None,
+            register_content: vec![],
         }
     }
 
@@ -632,6 +653,7 @@ mod tests {
             tags: vec![],
             source_span: SourceSpan::default(),
             overlay: None,
+            register_content: vec![],
         }
     }
 
@@ -826,6 +848,7 @@ mod tests {
             tags: vec![],
             source_span: SourceSpan::default(),
             overlay: None,
+            register_content: vec![],
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -949,6 +972,7 @@ mod tests {
             tags: vec![],
             source_span: SourceSpan::default(),
             overlay: None,
+            register_content: vec![],
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -1040,6 +1064,7 @@ mod tests {
             tags: vec![],
             source_span: SourceSpan::default(),
             overlay: None,
+            register_content: vec![],
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -1121,6 +1146,7 @@ mod tests {
             tags: vec![],
             source_span: SourceSpan::default(),
             overlay: None,
+            register_content: vec![],
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -1174,6 +1200,7 @@ mod tests {
             tags: vec![],
             source_span: SourceSpan::default(),
             overlay: None,
+            register_content: vec![],
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -1248,6 +1275,7 @@ mod tests {
             tags: vec![],
             source_span: SourceSpan::default(),
             overlay: None,
+            register_content: vec![],
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -1341,6 +1369,7 @@ mod tests {
             tags: vec![],
             source_span: SourceSpan::default(),
             overlay: None,
+            register_content: vec![],
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -1413,6 +1442,7 @@ mod tests {
             tags: vec![],
             source_span: SourceSpan::default(),
             overlay: None,
+            register_content: vec![],
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -1473,6 +1503,7 @@ mod tests {
             tags: vec![],
             source_span: SourceSpan::default(),
             overlay: None,
+            register_content: vec![],
         };
         let deck = make_deck(vec![slide]);
 
@@ -1493,6 +1524,146 @@ mod tests {
                     frame.bbox
                 );
             }
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // F-003/F-004 (STORY-035): No-bleed invariant — register text must not appear
+    // in frames; register_content must be populated (BC-1.14.004 invariant 3)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// F-004 / BC-1.14.004 invariant 3: After layout, `LaidOutSlide.frames` must
+    /// contain NONE of the register text, while `register_content` must contain all
+    /// three register entries.
+    ///
+    /// This test builds a `Slide` with all three register fields pre-populated
+    /// (simulating the post-eval state), runs `layout::run`, and asserts:
+    /// 1. `LaidOutSlide.register_content` has 3 entries (Notes, Report, Detail).
+    /// 2. No frame in `LaidOutSlide.frames` contains register text.
+    ///
+    /// This is the executable no-bleed assertion for BC-1.14.004 invariant 3.
+    #[test]
+    fn test_f004_no_bleed_register_text_not_in_frames() {
+        use slideforge_types::{FieldValue, InlineNode, Register, RegisteredContent, Value};
+
+        // Build a slide with register fields AND a visual title.
+        // The slide's register_content is pre-populated (simulating post-eval state)
+        // since the layout stage does NOT call extract_register_content — it reads
+        // slide.register_content verbatim (Option D, architecture-directive STORY-035).
+        let mut fields = OrderedMap::new();
+        fields.insert(
+            Arc::from("title"),
+            FieldValue::Literal(Value::Str(Arc::from("Q1 Results"))),
+        );
+        fields.insert(
+            Arc::from("notes"),
+            FieldValue::Literal(Value::Str(Arc::from("Presenter: emphasise growth"))),
+        );
+        fields.insert(
+            Arc::from("report"),
+            FieldValue::Literal(Value::Str(Arc::from("Detailed narrative for readers"))),
+        );
+        fields.insert(
+            Arc::from("detail"),
+            FieldValue::Literal(Value::Str(Arc::from("Technical appendix text"))),
+        );
+
+        // Pre-populate register_content (as eval_deck would).
+        let register_content = vec![
+            RegisteredContent {
+                register: Register::Notes,
+                content: vec![InlineNode::Plain(Arc::from("Presenter: emphasise growth"))],
+            },
+            RegisteredContent {
+                register: Register::Report,
+                content: vec![InlineNode::Plain(Arc::from(
+                    "Detailed narrative for readers",
+                ))],
+            },
+            RegisteredContent {
+                register: Register::Detail,
+                content: vec![InlineNode::Plain(Arc::from("Technical appendix text"))],
+            },
+        ];
+
+        let slide = Slide {
+            slide_type: Arc::from("content"),
+            fields,
+            blocks: vec![],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+            overlay: None,
+            register_content,
+        };
+        let deck = make_deck(vec![slide]);
+        let brand = make_brand();
+
+        let result = run(&deck, &brand).expect("layout::run must succeed for content slide");
+        assert_eq!(result.slides.len(), 1, "must produce 1 laid-out slide");
+
+        let laid_out = &result.slides[0];
+
+        // Assertion 1: register_content is populated with 3 entries (copied verbatim).
+        assert_eq!(
+            laid_out.register_content.len(),
+            3,
+            "LaidOutSlide.register_content must have 3 entries; \
+             got: {:?}",
+            laid_out.register_content
+        );
+        assert_eq!(laid_out.register_content[0].register, Register::Notes);
+        assert_eq!(laid_out.register_content[1].register, Register::Report);
+        assert_eq!(laid_out.register_content[2].register, Register::Detail);
+
+        // Assertion 2 (no-bleed): none of the register texts must appear in any frame.
+        // Collect all plain text from all frames.
+        let register_texts = [
+            "Presenter: emphasise growth",
+            "Detailed narrative for readers",
+            "Technical appendix text",
+        ];
+        for frame in &laid_out.frames {
+            let frame_text = collect_frame_text(frame);
+            for register_text in register_texts {
+                assert!(
+                    !frame_text.contains(register_text),
+                    "BC-1.14.004 NO-BLEED violation: register text '{register_text}' found \
+                     in frame (frame content: '{frame_text}'). Register text must NOT \
+                     appear in frames — it belongs only in register_content."
+                );
+            }
+        }
+    }
+
+    /// Collect all plain text from a frame (for no-bleed assertions).
+    fn collect_frame_text(frame: &crate::types::Frame) -> String {
+        use crate::types::FrameContent;
+        use slideforge_types::InlineNode;
+
+        fn inline_text(nodes: &[InlineNode]) -> String {
+            nodes
+                .iter()
+                .map(|node| match node {
+                    InlineNode::Plain(s) | InlineNode::Code(s) | InlineNode::Xref(s) => {
+                        s.as_ref().to_owned()
+                    },
+                    InlineNode::Bold(c)
+                    | InlineNode::Italic(c)
+                    | InlineNode::Footnote(c)
+                    | InlineNode::Superscript(c)
+                    | InlineNode::Subscript(c)
+                    | InlineNode::Strikethrough(c)
+                    | InlineNode::Highlight(c) => inline_text(c),
+                    InlineNode::Link { text, .. } => inline_text(text),
+                    InlineNode::Math(m) => m.latex.as_ref().to_owned(),
+                })
+                .collect()
+        }
+
+        match &frame.content {
+            FrameContent::TextRun(nodes) => inline_text(nodes),
+            _ => String::new(),
         }
     }
 

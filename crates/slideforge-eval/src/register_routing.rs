@@ -135,11 +135,53 @@ fn field_value_to_inlines(fv: &FieldValue) -> Option<Vec<InlineNode>> {
         // Rich inline content (already-evaluated). Empty Inlines preserves author intent.
         FieldValue::Inlines(nodes) => Some(nodes.clone()),
 
-        // Expr and Interpolated variants should have been resolved by eval_deck before
-        // this function is called. If they arrive here, it means the evaluator encountered
-        // an error and could not resolve them. Produce an empty inline sequence so the
-        // register entry is still emitted (preserving author intent) without crashing.
-        FieldValue::Expr(_) | FieldValue::Interpolated(_) => Some(vec![]),
+        // F-005 / STORY-035: Expr and Interpolated variants are an INVARIANT VIOLATION.
+        //
+        // `extract_register_content` is called ONLY from `eval_slide_node` AFTER all
+        // field values have been resolved by the evaluator. At that point:
+        //   - Template fields become FieldValue::Literal(Value::Str(...))
+        //   - Ident fields become FieldValue::Literal(value)
+        //   - Error fields are SKIPPED (not inserted into slide.fields)
+        //
+        // An Expr or Interpolated variant reaching this function means either:
+        //   (a) A caller outside eval_slide_node called extract_register_content on a
+        //       pre-evaluation slide (a programming error), or
+        //   (b) The evaluator's error fallback path inserted an unresolved Expr/Interpolated
+        //       into slide.fields instead of Literal(Null) (a different programming error).
+        //
+        // FORBIDDEN (F-005): Silent empty-content fallback would swallow the data loss.
+        // Instead, emit a tracing::error! diagnostic and assert in debug mode.
+        // We return None (treat as absent) so no vacuous register entry is produced —
+        // returning Some(vec![]) would create a register entry with empty content, which
+        // is indistinguishable from an intentional empty register field.
+        FieldValue::Expr(raw) => {
+            debug_assert!(
+                false,
+                "invariant violation: Expr({raw:?}) reached extract_register_content \
+                 after eval_deck — evaluator did not resolve this field value"
+            );
+            tracing::error!(
+                raw_expr = %raw,
+                "extract_register_content: unresolved Expr variant reached after eval_deck; \
+                 this is an internal invariant violation — register content will be absent \
+                 for this field (F-005 / STORY-035)"
+            );
+            None
+        },
+        FieldValue::Interpolated(parts) => {
+            debug_assert!(
+                false,
+                "invariant violation: Interpolated({parts:?}) reached extract_register_content \
+                 after eval_deck — evaluator did not resolve this field value"
+            );
+            tracing::error!(
+                part_count = parts.len(),
+                "extract_register_content: unresolved Interpolated variant reached after eval_deck; \
+                 this is an internal invariant violation — register content will be absent \
+                 for this field (F-005 / STORY-035)"
+            );
+            None
+        },
     }
 }
 
@@ -174,6 +216,7 @@ mod tests {
             tags: vec![],
             source_span: SourceSpan::default(),
             overlay: None,
+            register_content: vec![],
         }
     }
 
@@ -799,5 +842,70 @@ mod tests {
                 InlineNode::Math(m) => m.latex.as_ref().to_owned(),
             })
             .collect()
+    }
+
+    // ─── F-005: Expr/Interpolated variants are invariant violations ───────────
+
+    /// F-005 (debug mode): An `Expr` variant reaching `extract_register_content`
+    /// is an invariant violation and panics in debug mode (via `debug_assert!`).
+    ///
+    /// This test is gated on `#[cfg(debug_assertions)]`. In release mode, the
+    /// behaviour is `None` return + `tracing::error!` (tested separately below).
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "invariant violation")]
+    fn test_f005_expr_in_register_field_panics_in_debug_mode() {
+        // Construct a slide with an unresolved Expr in the notes field.
+        // This simulates a caller that bypassed eval_deck (a programming error).
+        use slideforge_types::StringPart;
+
+        let mut fields = OrderedMap::new();
+        // Insert an Interpolated variant (simulating pre-evaluation state).
+        fields.insert(
+            Arc::from("notes"),
+            FieldValue::Interpolated(vec![
+                StringPart::Literal(Arc::from("Quarter: ")),
+                StringPart::Expr(Arc::from("quarter")),
+            ]),
+        );
+        let slide = make_slide_with_fields("content", fields);
+
+        // This call must panic in debug mode via debug_assert!(false).
+        let _ = extract_register_content(&slide);
+    }
+
+    /// F-005 (release mode / #[cfg(not(debug_assertions))]): An unresolved
+    /// `Expr` variant produces no register entry (return `None`) and does NOT
+    /// silently create a vacuous entry with empty content.
+    ///
+    /// This test verifies the non-panic path: the result is absent (not
+    /// `Some(vec![])` — the old silent-loss fallback).
+    ///
+    /// Notes: This test runs in both debug and release mode. In debug mode the
+    /// `debug_assert!` fires first (see the `#[should_panic]` test above);
+    /// this test is a complementary check gated on `#[cfg(not(debug_assertions))]`
+    /// for pure release-mode builds.
+    #[test]
+    #[cfg(not(debug_assertions))]
+    fn test_f005_expr_in_register_field_produces_no_entry_in_release_mode() {
+        use slideforge_types::StringPart;
+
+        let mut fields = OrderedMap::new();
+        fields.insert(
+            Arc::from("notes"),
+            FieldValue::Interpolated(vec![StringPart::Expr(Arc::from("quarter"))]),
+        );
+        let slide = make_slide_with_fields("content", fields);
+
+        let result = extract_register_content(&slide);
+
+        // The result must be empty: no vacuous register entry should be produced.
+        // Returning Some(vec![]) would create an indistinguishable-from-intentional
+        // empty entry — the old silent-loss pattern (F-005).
+        assert!(
+            result.is_empty(),
+            "Interpolated variant must produce NO register entry (not Some(vec![])); \
+             got: {result:?}"
+        );
     }
 }
