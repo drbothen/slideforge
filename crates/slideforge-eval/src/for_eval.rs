@@ -349,9 +349,21 @@ pub fn eval_slide_node<S: std::hash::BuildHasher>(
         // operate on `Deck` values produced by the layout stage, not directly
         // from `eval_deck` output.
         blocks: vec![],
+        // `register` (presenter-notes register) is wired in by the parser /
+        // later pipeline stages that read the `notes:` / `report:` / `detail:`
+        // DSL keywords. The evaluator produces `None` here; the parser populates
+        // it before handing the slide node to `eval_for_block`.
         register: None,
         tags,
         source_span: SourceSpan::default(),
+        // `overlay` (per-slide brand_overlay) is attached from the parsed AST
+        // during the DSL parser / wiring stage (STORY-008/STORY-009). The
+        // evaluator produces `None` here intentionally — per-iteration overlay
+        // attachment is deferred to the parser wiring pass, which populates
+        // `SlideNode::overlay` before `eval_for_block` is called. This is the
+        // same deferral pattern as `register` above. BC-2.02.001 EC-003 governs
+        // per-iteration overlay semantics; STORY-008/STORY-009 implement the
+        // parser-side wiring.
         overlay: None,
     })
 }
