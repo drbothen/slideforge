@@ -152,6 +152,19 @@ pub fn resolve_overlay(
     let logo = match raw.logo_path.as_ref() {
         None => None,
         Some(logo_path_str) => {
+            // F-025-A (TD-VSDD-060): mirror synthesizer::synthesize behaviour (line 208).
+            // An empty logo path string is equally unusable as no logo at all —
+            // `root_dir.join("")` resolves to `root_dir` itself, which exists but is
+            // a directory; `std::fs::read(root_dir)` would fail with EISDIR and produce
+            // the misleading `BrandError::FileNotFound { path: "" }`.
+            // Guard here exactly as the synthesizer does: reject immediately with
+            // `LogoRequired` so both user-supplied logo entry points behave identically.
+            if logo_path_str.is_empty() {
+                return Err(BrandError::LogoRequired {
+                    span: raw.span.clone(),
+                });
+            }
+
             let logo_path = root_dir.join(logo_path_str.as_ref());
 
             // Check existence before canonicalize (canonicalize fails on missing file).
@@ -351,6 +364,45 @@ mod tests {
                 );
             },
             other => panic!("expected BrandError::FileNotFound, got: {other:?}"),
+        }
+    }
+
+    // ── F-025-A: empty logo_path string guard ────────────────────────────────
+
+    /// F-025-A (TD-VSDD-060 sibling-site parity): `logo_path: Some("")` must be
+    /// rejected with `BrandError::LogoRequired` — the same error the synthesizer
+    /// returns for empty logo paths (synthesizer.rs line 208, F14 comment).
+    ///
+    /// **Why not `FileNotFound`?** `root_dir.join("")` resolves to `root_dir` itself.
+    /// On most platforms `root_dir.exists()` is `true` (it is a directory), so the
+    /// existence check passes silently; `std::fs::read(root_dir)` then fails with
+    /// EISDIR, which was previously mapped to the misleading
+    /// `FileNotFound { path: "" }`. The guard added by this fix short-circuits
+    /// before any path operations and returns the same `LogoRequired` variant that
+    /// the synthesizer uses, making both entry points behave identically.
+    #[test]
+    fn test_f025_a_empty_logo_path_rejected_with_logo_required() {
+        let dir = tempdir().expect("tempdir");
+        let overlay = SlideOverlay {
+            logo_path: Some(Arc::from("")), // empty string — equally unusable as None
+            footer_text: None,
+            confidentiality: None,
+            span: SourceSpan::default(),
+        };
+        let result = resolve_overlay(&overlay, dir.path());
+        match result {
+            Err(BrandError::LogoRequired { .. }) => {
+                // Correct: mirrors synthesizer behaviour (synthesizer.rs line 208).
+            },
+            Err(BrandError::FileNotFound { path, .. }) => {
+                panic!(
+                    "empty logo_path must NOT produce misleading FileNotFound \
+                     (path={path:?}); expected LogoRequired"
+                );
+            },
+            other => {
+                panic!("expected BrandError::LogoRequired for empty logo_path, got: {other:?}")
+            },
         }
     }
 
