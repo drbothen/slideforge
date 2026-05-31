@@ -152,6 +152,17 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
         // MED-002: Compute text_flow for text-bearing frames.
         // For title/subtitle frames, extract text from the slide's resolved fields
         // to enable the canvas overflow validator (BC-3.03.001).
+        //
+        // ALLOWLIST GUARANTEE — BC-1.14.004 no-bleed (STORY-035 F-035-P2-002):
+        // Register keys (`notes`, `report`, `detail`) intentionally REMAIN in
+        // `slide.fields` after eval; they are NOT removed by the evaluator.
+        // Frame construction here is ALLOWLIST-based: it reads ONLY the keys
+        // `"title"`, `"subtitle"`, and `"body"` from `slide.fields`. Register
+        // keys are never read at this site. Future slide-type authors and body-
+        // layout pass implementers MUST follow the same allowlist discipline —
+        // do NOT enumerate all `slide.fields` keys or pattern-match on arbitrary
+        // fields, or register content will silently bleed into frames.
+        // The `test_f004_no_bleed_register_text_not_in_frames` test enforces this.
         let frames: Vec<_> = frames
             .into_iter()
             .enumerate()

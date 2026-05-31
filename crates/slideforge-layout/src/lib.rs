@@ -1532,64 +1532,145 @@ mod tests {
     // in frames; register_content must be populated (BC-1.14.004 invariant 3)
     // ─────────────────────────────────────────────────────────────────────────
 
+    /// F-004a / BC-1.14.004 POSITIVE CONTROL: `collect_frame_text` is non-empty for all
+    /// text-bearing `FrameContent` variants — `Title`, `Subtitle`, `Body`, `TextRun`.
+    ///
+    /// This test proves the extractor actually reads frame text so the no-bleed assertion
+    /// in `test_f004_no_bleed_register_text_not_in_frames` is demonstrably load-bearing.
+    /// If `collect_frame_text` silently returned empty for `Title` frames, the no-bleed
+    /// guard would be vacuously true and could never catch a real violation.
+    #[test]
+    fn test_f004a_collect_frame_text_positive_control() {
+        use slideforge_types::{ContentBlock, InlineNode, SourceSpan, TextBlock};
+
+        let make_bbox = |h: i64| crate::types::BoundingBox {
+            x: crate::types::Emu(0),
+            y: crate::types::Emu(0),
+            width: crate::types::Emu(9_144_000),
+            height: crate::types::Emu(h),
+        };
+
+        // Title variant
+        let title_frame = crate::types::Frame {
+            bbox: make_bbox(685_800),
+            content: crate::types::FrameContent::Title(Arc::from("Quarterly Revenue")),
+            text_flow: None,
+        };
+        let title_text = collect_frame_text(&title_frame);
+        assert!(
+            title_text.contains("Quarterly Revenue"),
+            "collect_frame_text must extract text from FrameContent::Title; got: '{title_text}'"
+        );
+
+        // Subtitle variant
+        let subtitle_frame = crate::types::Frame {
+            bbox: make_bbox(914_400),
+            content: crate::types::FrameContent::Subtitle(Arc::from("FY-2026 Highlights")),
+            text_flow: None,
+        };
+        assert!(
+            collect_frame_text(&subtitle_frame).contains("FY-2026 Highlights"),
+            "collect_frame_text must extract text from FrameContent::Subtitle"
+        );
+
+        // Body variant with ContentBlock::Text
+        let body_frame = crate::types::Frame {
+            bbox: make_bbox(3_657_600),
+            content: crate::types::FrameContent::Body(vec![ContentBlock::Text(TextBlock {
+                inlines: vec![InlineNode::Plain(Arc::from("Body visual content"))],
+                span: SourceSpan::default(),
+            })]),
+            text_flow: None,
+        };
+        assert!(
+            collect_frame_text(&body_frame).contains("Body visual content"),
+            "collect_frame_text must extract text from FrameContent::Body ContentBlock::Text"
+        );
+
+        // TextRun variant
+        let text_run_frame = crate::types::Frame {
+            bbox: make_bbox(914_400),
+            content: crate::types::FrameContent::TextRun(vec![InlineNode::Plain(Arc::from(
+                "TextRun inline text",
+            ))]),
+            text_flow: None,
+        };
+        assert!(
+            collect_frame_text(&text_run_frame).contains("TextRun inline text"),
+            "collect_frame_text must extract text from FrameContent::TextRun"
+        );
+    }
+
     /// F-004 / BC-1.14.004 invariant 3: After layout, `LaidOutSlide.frames` must
     /// contain NONE of the register text, while `register_content` must contain all
-    /// three register entries.
-    ///
-    /// This test builds a `Slide` with all three register fields pre-populated
-    /// (simulating the post-eval state), runs `layout::run`, and asserts:
-    /// 1. `LaidOutSlide.register_content` has 3 entries (Notes, Report, Detail).
-    /// 2. No frame in `LaidOutSlide.frames` contains register text.
-    ///
-    /// This is the executable no-bleed assertion for BC-1.14.004 invariant 3.
+    /// three register entries. The no-bleed guard is non-vacuous: at least one frame
+    /// carries visual text (verified by `collect_frame_text`), so the check can catch
+    /// a real violation.
     #[test]
     fn test_f004_no_bleed_register_text_not_in_frames() {
-        use slideforge_types::{FieldValue, InlineNode, Register, RegisteredContent, Value};
+        use slideforge_types::{
+            Block, ContentBlock, FieldValue, InlineNode, Register, RegisteredContent, SourceSpan,
+            TextBlock, Value,
+        };
 
-        // Build a slide with register fields AND a visual title.
-        // The slide's register_content is pre-populated (simulating post-eval state)
-        // since the layout stage does NOT call extract_register_content — it reads
-        // slide.register_content verbatim (Option D, architecture-directive STORY-035).
+        // Use distinctive register strings that cannot accidentally substring-match
+        // visual content (sentinel-style prefixes).
+        let notes_text = "REGISTER::NOTES::emphasise-growth-Q1";
+        let report_text = "REGISTER::REPORT::narrative-for-readers";
+        let detail_text = "REGISTER::DETAIL::technical-appendix";
+
+        // Build a slide with all three register fields AND a visual ContentBlock::Text
+        // block that produces a real TextRun frame — so collect_frame_text sees
+        // non-empty visual content and the no-bleed check is demonstrably load-bearing.
         let mut fields = OrderedMap::new();
         fields.insert(
             Arc::from("title"),
-            FieldValue::Literal(Value::Str(Arc::from("Q1 Results"))),
+            FieldValue::Literal(Value::Str(Arc::from("VISUAL SLIDE TITLE"))),
         );
         fields.insert(
             Arc::from("notes"),
-            FieldValue::Literal(Value::Str(Arc::from("Presenter: emphasise growth"))),
+            FieldValue::Literal(Value::Str(Arc::from(notes_text))),
         );
         fields.insert(
             Arc::from("report"),
-            FieldValue::Literal(Value::Str(Arc::from("Detailed narrative for readers"))),
+            FieldValue::Literal(Value::Str(Arc::from(report_text))),
         );
         fields.insert(
             Arc::from("detail"),
-            FieldValue::Literal(Value::Str(Arc::from("Technical appendix text"))),
+            FieldValue::Literal(Value::Str(Arc::from(detail_text))),
         );
 
         // Pre-populate register_content (as eval_deck would).
         let register_content = vec![
             RegisteredContent {
                 register: Register::Notes,
-                content: vec![InlineNode::Plain(Arc::from("Presenter: emphasise growth"))],
+                content: vec![InlineNode::Plain(Arc::from(notes_text))],
             },
             RegisteredContent {
                 register: Register::Report,
-                content: vec![InlineNode::Plain(Arc::from(
-                    "Detailed narrative for readers",
-                ))],
+                content: vec![InlineNode::Plain(Arc::from(report_text))],
             },
             RegisteredContent {
                 register: Register::Detail,
-                content: vec![InlineNode::Plain(Arc::from("Technical appendix text"))],
+                content: vec![InlineNode::Plain(Arc::from(detail_text))],
             },
         ];
 
+        // Add a ContentBlock::Text block — layout::run converts this to a
+        // FrameContent::TextRun frame, so collect_frame_text returns non-empty
+        // visual content and the no-bleed check is load-bearing.
+        let visual_body_text = "VISUAL SLIDE TITLE body paragraph";
         let slide = Slide {
             slide_type: Arc::from("content"),
             fields,
-            blocks: vec![],
+            blocks: vec![Block {
+                content: ContentBlock::Text(TextBlock {
+                    inlines: vec![InlineNode::Plain(Arc::from(visual_body_text))],
+                    span: SourceSpan::default(),
+                }),
+                label: None,
+                span: SourceSpan::default(),
+            }],
             register: None,
             tags: vec![],
             source_span: SourceSpan::default(),
@@ -1608,21 +1689,25 @@ mod tests {
         assert_eq!(
             laid_out.register_content.len(),
             3,
-            "LaidOutSlide.register_content must have 3 entries; \
-             got: {:?}",
+            "LaidOutSlide.register_content must have 3 entries; got: {:?}",
             laid_out.register_content
         );
         assert_eq!(laid_out.register_content[0].register, Register::Notes);
         assert_eq!(laid_out.register_content[1].register, Register::Report);
         assert_eq!(laid_out.register_content[2].register, Register::Detail);
 
-        // Assertion 2 (no-bleed): none of the register texts must appear in any frame.
-        // Collect all plain text from all frames.
-        let register_texts = [
-            "Presenter: emphasise growth",
-            "Detailed narrative for readers",
-            "Technical appendix text",
-        ];
+        // Assertion 2 (positive control): at least one frame must carry visual text —
+        // proving the extractor is active and the no-bleed check below is not vacuous.
+        let all_frame_text: String = laid_out.frames.iter().map(collect_frame_text).collect();
+        assert!(
+            all_frame_text.contains(visual_body_text),
+            "POSITIVE CONTROL FAIL: visual body text not found in frames; \
+             no-bleed guard is not load-bearing. frames: {:?}",
+            laid_out.frames
+        );
+
+        // Assertion 3 (no-bleed): none of the register texts must appear in any frame.
+        let register_texts = [notes_text, report_text, detail_text];
         for frame in &laid_out.frames {
             let frame_text = collect_frame_text(frame);
             for register_text in register_texts {
@@ -1636,10 +1721,29 @@ mod tests {
         }
     }
 
-    /// Collect all plain text from a frame (for no-bleed assertions).
+    /// Collect all visible plain text from a frame for no-bleed assertions.
+    ///
+    /// Covers ALL `FrameContent` variants that can carry text visible to exporters:
+    /// - `Title(Arc<str>)` — primary slide title string
+    /// - `Subtitle(Arc<str>)` — subtitle / secondary heading string
+    /// - `Body(Vec<ContentBlock>)` — text paragraphs and bullet inline nodes
+    /// - `TextRun(Vec<InlineNode>)` — rich inline text from `ContentBlock::Text` blocks
+    /// - `Shape(ShapeFrame)` — optional inline text label on a shape
+    ///
+    /// All other variants (`Image`, `Chart`, `Diagram`, `Empty`,
+    /// `ErrorSlidePlaceholder`) carry no user-authored text and return empty.
+    ///
+    /// ## Allowlist guarantee (BC-1.14.004 no-bleed)
+    ///
+    /// This function is the companion to the `layout::run` allowlist contract: frame
+    /// construction in the region-map pass reads ONLY title/subtitle/body fields from
+    /// `slide.fields` — register keys (`notes`/`report`/`detail`) are intentionally
+    /// excluded. If a future slide type or body-layout pass incorrectly routes register
+    /// content into a `Title`, `Subtitle`, `Body`, or `TextRun` frame, this function
+    /// will expose it via the no-bleed test.
     fn collect_frame_text(frame: &crate::types::Frame) -> String {
         use crate::types::FrameContent;
-        use slideforge_types::InlineNode;
+        use slideforge_types::{ContentBlock, InlineNode};
 
         fn inline_text(nodes: &[InlineNode]) -> String {
             nodes
@@ -1661,9 +1765,47 @@ mod tests {
                 .collect()
         }
 
+        fn bullet_text(items: &[slideforge_types::BulletItem]) -> String {
+            items
+                .iter()
+                .map(|item| {
+                    let mut t = inline_text(&item.inlines);
+                    t.push_str(&bullet_text(&item.children));
+                    t
+                })
+                .collect()
+        }
+
+        fn body_text(blocks: &[ContentBlock]) -> String {
+            blocks
+                .iter()
+                .map(|block| match block {
+                    ContentBlock::Text(tb) => inline_text(&tb.inlines),
+                    ContentBlock::Bullets(items) => bullet_text(items),
+                    // Non-text content blocks (charts, diagrams, shapes, math,
+                    // images, tables) carry no user-authored plain text reachable
+                    // via FrameContent::Body in the current pipeline.
+                    _ => String::new(),
+                })
+                .collect()
+        }
+
         match &frame.content {
+            // String-payload variants — plain text is the entire field value.
+            FrameContent::Title(s) | FrameContent::Subtitle(s) => s.as_ref().to_owned(),
+            // Structured body content — extract inline text from Text/Bullets blocks.
+            FrameContent::Body(blocks) => body_text(blocks),
+            // Rich inline text run — produced by ContentBlock::Text layout pass.
             FrameContent::TextRun(nodes) => inline_text(nodes),
-            _ => String::new(),
+            // Shape text label (optional inline text rendered inside a shape).
+            FrameContent::Shape(sf) => sf.text.as_deref().map_or_else(String::new, inline_text),
+            // Non-text-bearing variants: Image, Chart, Diagram, Empty,
+            // ErrorSlidePlaceholder. Return empty — no user text in frames.
+            FrameContent::Image { .. }
+            | FrameContent::Chart
+            | FrameContent::Diagram(_)
+            | FrameContent::Empty
+            | FrameContent::ErrorSlidePlaceholder { .. } => String::new(),
         }
     }
 
