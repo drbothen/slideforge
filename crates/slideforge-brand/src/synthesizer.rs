@@ -299,9 +299,11 @@ impl BrandSynthesizer {
 ///
 /// On non-Windows platforms this is a no-op that returns the path unchanged.
 ///
+/// Shared with `overlay.rs` (F-025-001, TD-VSDD-060 — single source of truth).
+///
 /// F-PASS13-HIGH-2 fix.
 #[cfg(windows)]
-fn strip_unc_prefix(path: &std::path::Path) -> std::path::PathBuf {
+pub(crate) fn strip_unc_prefix(path: &std::path::Path) -> std::path::PathBuf {
     let s = path.to_string_lossy();
     if let Some(stripped) = s.strip_prefix(r"\\?\") {
         std::path::PathBuf::from(stripped)
@@ -314,7 +316,7 @@ fn strip_unc_prefix(path: &std::path::Path) -> std::path::PathBuf {
 ///
 /// See the `#[cfg(windows)]` variant for details.
 #[cfg(not(windows))]
-fn strip_unc_prefix(path: &std::path::Path) -> std::path::PathBuf {
+pub(crate) fn strip_unc_prefix(path: &std::path::Path) -> std::path::PathBuf {
     path.to_path_buf()
 }
 
