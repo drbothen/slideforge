@@ -43,6 +43,7 @@ pub mod precedence;
 pub mod register;
 pub mod shape_types;
 pub mod slide;
+pub mod slide_overlay;
 pub mod span;
 pub mod specs;
 pub mod type_kind;
@@ -61,6 +62,7 @@ pub use precedence::MergePrecedence;
 pub use register::Register;
 pub use shape_types::{FillSpec, LayoutWarning, Rgb, ShapeType, ShapeTypeError};
 pub use slide::{FieldValue, Slide, StringPart};
+pub use slide_overlay::SlideOverlay;
 pub use span::SourceSpan;
 pub use specs::{
     AltText, ChartSpec, DiagramSpec, ImageSpec, NormalizedDiagramSvg, ShapePosition, ShapeSpec,

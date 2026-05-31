@@ -70,6 +70,7 @@ pub mod layout_xml;
 pub mod layouts;
 pub mod loader;
 pub mod logo;
+pub mod overlay;
 pub mod synthesizer;
 pub mod template;
 pub mod toml_schema;
@@ -82,6 +83,7 @@ pub use error::{
 pub use extractor::{BrandExtractionResult, BrandExtractor};
 pub use layouts::{LayoutPlaceholder, SlideLayoutDef};
 pub use loader::BrandLoader;
+pub use overlay::{BrandOverlay, LogoOverride, resolve_overlay};
 pub use synthesizer::BrandSynthesizer;
 pub use template::{BrandFonts, BrandTemplate, COLOR_SLOT_NAMES, ColorSlot, LogoAsset, MasterIds};
 pub use toml_schema::{BrandConfig, ColorConfig, FontConfig, FooterConfig, LogoConfig};

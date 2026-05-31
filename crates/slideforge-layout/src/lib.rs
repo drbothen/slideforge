@@ -119,6 +119,7 @@ mod tests {
             register: None,
             tags: vec![],
             source_span: SourceSpan::default(),
+            overlay: None,
         }
     }
 
@@ -135,6 +136,7 @@ mod tests {
             register: None,
             tags: vec![],
             source_span: SourceSpan::default(),
+            overlay: None,
         }
     }
 
@@ -437,6 +439,7 @@ mod tests {
             register: Some(Register::Notes),
             tags: vec![],
             source_span: SourceSpan::default(),
+            overlay: None,
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -458,6 +461,7 @@ mod tests {
             register: Some(Register::Detail),
             tags: vec![],
             source_span: SourceSpan::default(),
+            overlay: None,
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -488,6 +492,7 @@ mod tests {
             register: None,
             tags: vec![],
             source_span: SourceSpan::default(),
+            overlay: None,
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -531,6 +536,7 @@ mod tests {
             register: None,
             tags: vec![],
             source_span: SourceSpan::default(),
+            overlay: None,
         };
         let deck = slideforge_types::Deck {
             slides: vec![slide_with_takeaway],
@@ -607,6 +613,7 @@ mod tests {
             register: None,
             tags: vec![],
             source_span: SourceSpan::default(),
+            overlay: None,
         }
     }
 
@@ -624,6 +631,7 @@ mod tests {
             register: None,
             tags: vec![],
             source_span: SourceSpan::default(),
+            overlay: None,
         }
     }
 
@@ -817,6 +825,7 @@ mod tests {
             register: None,
             tags: vec![],
             source_span: SourceSpan::default(),
+            overlay: None,
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -938,6 +947,7 @@ mod tests {
             register: None,
             tags: vec![],
             source_span: SourceSpan::default(),
+            overlay: None,
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -1028,6 +1038,7 @@ mod tests {
             register: None,
             tags: vec![],
             source_span: SourceSpan::default(),
+            overlay: None,
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -1108,6 +1119,7 @@ mod tests {
             register: None,
             tags: vec![],
             source_span: SourceSpan::default(),
+            overlay: None,
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -1160,6 +1172,7 @@ mod tests {
             register: None,
             tags: vec![],
             source_span: SourceSpan::default(),
+            overlay: None,
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -1233,6 +1246,7 @@ mod tests {
             register: None,
             tags: vec![],
             source_span: SourceSpan::default(),
+            overlay: None,
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -1325,6 +1339,7 @@ mod tests {
             register: None,
             tags: vec![],
             source_span: SourceSpan::default(),
+            overlay: None,
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -1396,6 +1411,7 @@ mod tests {
             register: None,
             tags: vec![],
             source_span: SourceSpan::default(),
+            overlay: None,
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -1455,6 +1471,7 @@ mod tests {
             register: None,
             tags: vec![],
             source_span: SourceSpan::default(),
+            overlay: None,
         };
         let deck = make_deck(vec![slide]);
 

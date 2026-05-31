@@ -352,6 +352,7 @@ pub fn eval_slide_node<S: std::hash::BuildHasher>(
         register: None,
         tags,
         source_span: SourceSpan::default(),
+        overlay: None,
     })
 }
 
