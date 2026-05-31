@@ -216,9 +216,13 @@ pub struct LaidOutSlide {
     /// # Invariant (BC-1.14.004 invariant 3)
     ///
     /// No text present in any `RegisteredContent` entry may also appear in
-    /// `frames`. The evaluate pass removes register fields from the visual field
-    /// set before layout — this field is the single authoritative source for all
-    /// register-gated content.
+    /// `frames`. Register fields (`notes`, `report`, `detail`) intentionally
+    /// REMAIN in `slide.fields` after eval — they are NOT removed by the
+    /// evaluator. The no-bleed guarantee is enforced by ALLOWLIST-based frame
+    /// construction in the layout engine: frames read only `title`, `subtitle`,
+    /// and `body` from `slide.fields` and never enumerate arbitrary keys (see
+    /// `layout.rs` ALLOWLIST GUARANTEE comment). This field is the single
+    /// authoritative source for all register-gated content for exporters.
     pub register_content: Vec<RegisteredContent>,
 }
 
