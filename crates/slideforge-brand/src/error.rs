@@ -10,6 +10,7 @@
 //! | `E-BRD-004` | [`BrandError::FontUnavailable`] | cosmetic (exit 0) |
 //! | `E-BRD-005` | [`BrandError::InvalidHexColor`] | cosmetic (exit 0) |
 //! | `E-BRD-006` | [`BrandError::OutputExists`] | broken (exit 4) |
+//! | `E-BRD-007` | [`BrandError::LogoOutsideBrandDir`] | broken (exit 4) |
 
 use std::sync::Arc;
 
