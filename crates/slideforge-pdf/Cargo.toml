@@ -1,0 +1,42 @@
+[package]
+name = "slideforge-pdf"
+description = "PDF export backend for slideforge — pure-Rust via krilla + SlideTagEngine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "../../README.md"
+
+[lib]
+name = "slideforge_pdf"
+
+[dependencies]
+# PRIMARY PDF engine — owns page content, text, fonts, tagging, PDF/UA-1.
+# pdf-writer =0.14.0 and subsetter =0.2.3 arrive as transitive deps of krilla;
+# do NOT add them as direct deps (RISK-1 / RISK-2 per tech-validation.md).
+krilla = "=0.6.0"
+
+# SVG parsing: usvg parse → krilla Surface path conversion.
+# krilla 0.6.0 has NO usvg dependency — zero version conflict.
+usvg = { workspace = true }
+
+# Error types
+thiserror = { workspace = true }
+
+# Plugin trait — Exporter, ExportError, ExportOptions
+slideforge-plugin-api = { workspace = true }
+
+# Semantic IR types — Brand, Deck, NormalizedDiagramSvg, Emu
+slideforge-types = { workspace = true }
+
+# Geometric IR types — LaidOutDeck, LaidOutSlide, Frame, FrameContent
+slideforge-layout = { workspace = true }
+
+[dev-dependencies]
+# For font.rs tests: create temp font files without filesystem coupling.
+tempfile = "=3.10.0"
+# For exporter.rs tests: indexmap to construct an empty OrderedMap.
+indexmap = { version = "=2.10.0", features = ["std"] }
