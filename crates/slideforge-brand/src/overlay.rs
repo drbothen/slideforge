@@ -135,8 +135,13 @@ pub struct LogoOverride {
 ///
 /// # Errors
 ///
+/// - [`BrandError::LogoRequired`] — if `raw.logo_path` is `Some("")` (empty-string
+///   logo path); mirrors the synthesizer's empty-path guard (BC-2.02.001 EC-008,
+///   E-BRD-001).
 /// - [`BrandError::FileNotFound`] — if `raw.logo_path` is set and the file does
-///   not exist at the resolved path (BC-2.02.001 edge case EC-001, `E-BRD-001`).
+///   not exist at the resolved path (BC-2.02.001 edge case EC-001, `E-BRD-001`);
+///   also returned on TOCTOU race where the file disappears between the existence
+///   check and `canonicalize`/`read`.
 /// - [`BrandError::LogoOutsideBrandDir`] — if the resolved logo path escapes
 ///   `root_dir` via `../` traversal or a symlink pointing outside (E-BRD-007).
 pub fn resolve_overlay(
