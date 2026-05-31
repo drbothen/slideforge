@@ -164,53 +164,73 @@ fn test_bc_4_03_002_ac009_lm_math_fixture_exists_and_is_large() {
 // ─── AC-009 behavioral test — drives PdfExporter::export() ───────────────────
 
 /// BC-4.03.002 AC-009: Embedded font in PDF exported by `PdfExporter::export()`
-/// is smaller than the unsubsetted font file.
+/// is a true subset — far smaller than the unsubsetted font file.
 ///
-/// ## What this tests (F-044-002 fix)
+/// ## What this tests (F-044-002 fix; F1 robustness hardening)
 ///
-/// Drives `PdfExporter::export()` on a fixture `LaidOutDeck` containing a
-/// Title frame with text "Hi". The exporter is constructed with
+/// Drives `PdfExporter::export_uncompressed()` on a fixture `LaidOutDeck`
+/// containing a Title frame with text "Hi". The exporter is constructed with
 /// `PdfExporter::with_font_path(lm_math_font_path())` so font resolution loads
 /// the Latin Modern Math OTF directly — bypassing the brand family-name lookup
 /// that would fail in CI/headless environments.
 ///
-/// After export, the test scans the PDF bytes for embedded stream data and
-/// asserts:
+/// The export uses **uncompressed content streams** (`compress_content_streams:
+/// false`), so `measure_embedded_streams_size` measures the raw font program
+/// bytes without `FlateDecode` inflation. This closes the F1 false-green vector:
 ///
-///   `embedded_stream_total_bytes < full_font_file_size`
+/// - **With compressed export (old):** A full 733 KB font compressed to ~300–440 KB
+///   still passed `< 733_736` → false-green. The 36× margin was too loose.
+/// - **With uncompressed export (new):** The full uncompressed font would appear as
+///   ~733 KB in the stream total, making `< 100_000` a fail. A 2-glyph subset is
+///   ~10–30 KB, making `< 100_000` a pass. The bound is tight.
 ///
-/// This proves:
-/// 1. `PdfExporter::export()` actually drew text (a font stream is present).
-/// 2. krilla's internal subsetting was invoked — the embedded font program is
-///    smaller than the full 717 KiB font.
-/// 3. No system font tooling was involved (confirmed structurally by
-///    `test_bc_4_03_002_no_direct_subsetter_call` + `check-pdf-deps.sh`).
+/// ## Assertions (belt-and-suspenders)
+///
+/// 1. `embedded_total > 0`: a font stream was embedded (non-vacuous guard).
+/// 2. `embedded_total < 100_000`: the embedded font is subset-scale, NOT full-font
+///    scale. Rationale: 2–3 glyphs from a 4,802-glyph font subseted to ~10–30 KiB
+///    (Latin Modern Math OTF, krilla internal subsetting). 100 KB is a safe ceiling
+///    that a full uncompressed (~733 KB) or compressed (~300–440 KB) embed would
+///    exceed, while a 2-glyph subset comfortably passes.
+/// 3. `embedded_total < full_font_size`: belt-and-suspenders against the uncompressed
+///    full font baseline.
 ///
 /// ## Font fixture
 ///
 /// `crates/slideforge-math/fonts/latinmodern-math.otf` — 717 KiB, 4,802 glyphs.
 /// Drawing only "Hi" (ASCII H=72, i=105 → 2 used glyphs + .notdef) produces a
-/// font subset of order 10–20 KiB. The total embedded streams in the PDF must
-/// be far smaller than 717 KiB.
+/// font subset of order 10–30 KiB uncompressed.
 ///
 /// ## Test seam
 ///
-/// `PdfExporter::with_font_path` is a `pub(crate)` constructor that sets an
-/// explicit font file path on the exporter. This bypasses brand family-name
-/// lookup (which requires a matching system font) so the test is deterministic
-/// in CI and headless environments. It is a real production capability — it does
-/// NOT change the drawing path; it only changes which font file is loaded.
+/// `PdfExporter::export_uncompressed` (`#[cfg(test)]` only) calls
+/// `generate_pdf_inner` with `SerializeSettings { compress_content_streams:
+/// false, .. }`. This makes the embedded byte sizes directly observable.
+/// `PdfExporter::with_font_path` sets the explicit font path for deterministic
+/// font resolution in CI/headless environments.
 #[test]
 #[allow(clippy::unwrap_used)]
+#[allow(clippy::cast_precision_loss)] // usize→f64 only used for diagnostic eprintln! KiB display; not load-bearing
 fn test_bc_4_03_002_ac009_font_subset_smaller_than_full_font() {
     use slideforge_layout::types::{
         BoundingBox, Frame, FrameContent, LaidOutDeck, LaidOutSlide, PageSize, RegisterSet,
     };
     use slideforge_pdf::PdfExporter;
-    use slideforge_plugin_api::{ExportOptions, Exporter};
+    use slideforge_plugin_api::ExportOptions;
     use slideforge_types::{
         Brand, BrandFonts, BrandPalette, Deck, DeckMetadata, Emu, OrderedMap, SourceSpan,
     };
+
+    // Subset-scale ceiling for assertion 2 (declared here to satisfy
+    // clippy::items_after_statements — consts must precede let-bindings).
+    //
+    // A 2-glyph subset of a 4,802-glyph font is ~10–30 KiB uncompressed.
+    // 100,000 bytes (≈97.7 KiB) is chosen as the ceiling because:
+    //   - A full uncompressed LM Math font is 733,736 bytes — fails this bound.
+    //   - A `FlateDecode`-compressed full LM Math is ~300–440 KB — also fails.
+    //   - A 2–3 glyph uncompressed subset is typically 10–30 KB — passes easily.
+    // If subsetting regresses (full font embedded), assertion 2 fails.
+    const SUBSET_SCALE_CEILING: usize = 100_000;
 
     // ── 1. Load the fixture font and measure its full size ─────────────────
     let font_path = lm_math_font_path();
@@ -285,7 +305,11 @@ fn test_bc_4_03_002_ac009_font_subset_smaller_than_full_font() {
         span: SourceSpan::default(),
     };
 
-    // ── 3. Export via PdfExporter::export() using the font override seam ──
+    // ── 3. Export via export_uncompressed() using the font override seam ──
+    //
+    // export_uncompressed() calls generate_pdf_inner with
+    // compress_content_streams: false so stream byte counts directly reflect
+    // the raw font program size — no FlateDecode inflation.
     //
     // PdfExporter::with_font_path loads the LM Math font directly without
     // calling system_font_fallback(). This makes the test deterministic in
@@ -294,51 +318,67 @@ fn test_bc_4_03_002_ac009_font_subset_smaller_than_full_font() {
     let opts = ExportOptions::default();
 
     let pdf_bytes = exporter
-        .export(&deck, &laid_out, &brand, &opts)
-        .unwrap_or_else(|e| panic!("PdfExporter::export must succeed for AC-009 test: {e:?}"));
+        .export_uncompressed(&deck, &laid_out, &brand, &opts)
+        .unwrap_or_else(|e| {
+            panic!("PdfExporter::export_uncompressed must succeed for AC-009 test: {e:?}")
+        });
 
     assert!(
         pdf_bytes.starts_with(b"%PDF-"),
         "PDF output must start with %PDF- header"
     );
 
-    // ── 4. Measure embedded stream total size ─────────────────────────────
+    // ── 4. Measure embedded stream total size (uncompressed) ──────────────
     //
-    // krilla embeds font subsets as compressed stream objects. We sum the raw
-    // byte count between every `stream\n` and `endstream` marker — this gives
-    // the total data embedded in the PDF (content streams + font streams).
+    // Because compress_content_streams: false was used, stream bytes are raw
+    // (not FlateDecode-encoded). The sum of all stream sizes gives an upper
+    // bound on the font program bytes actually embedded.
     //
-    // For a 2-glyph Latin Modern Math subset, the embedded font stream should
-    // be well under 50 KiB, vs. the full 717 KiB font. Even accounting for
-    // content streams (slide background, page structure), the total embedded
-    // stream size must be far smaller than the full font.
+    // For a 2-glyph Latin Modern Math subset (uncompressed), the embedded
+    // font stream should be ~10–30 KiB. Even counting all content streams
+    // (page structure, background) the total should be well under 100 KiB.
     let embedded_total = measure_embedded_streams_size(&pdf_bytes);
 
-    // AC-009 core assertion:
-    // Total embedded streams < full font file size.
-    // This proves subsetting occurred — the exporter did NOT embed the full font.
-    // Non-vacuous: if drawing were a no-op (no text drawn), embedded_total would
-    // be 0, which is also < full_font_size, but the non-zero embedded total
-    // confirms a font stream was actually embedded. Additional non-vacuity:
-    // assert the embedded total is > 0 (a font was embedded).
+    eprintln!(
+        "[AC-009] uncompressed embedded_total = {embedded_total} bytes ({:.1} KiB)",
+        embedded_total as f64 / 1024.0
+    );
+
+    // ── AC-009 assertion 1: non-vacuous guard ────────────────────────────
+    // A zero total means no font was embedded — the text drawing path is a no-op.
     assert!(
         embedded_total > 0,
         "AC-009 FAILED (non-vacuous guard): embedded stream total is 0 — \
-         PdfExporter::export() did NOT embed any font data. \
+         PdfExporter::export_uncompressed() did NOT embed any font data. \
          Text drawing may not be reaching krilla's surface.draw_text()."
     );
 
+    // ── AC-009 assertion 2: subset-scale bound (the critical one) ────────
+    // See SUBSET_SCALE_CEILING constant declared above for full rationale.
+    assert!(
+        embedded_total < SUBSET_SCALE_CEILING,
+        "AC-009 FAILED (subset-scale bound): uncompressed embedded stream total \
+         ({embedded_total} bytes, {:.1} KiB) is NOT subset-scale (must be < \
+         {SUBSET_SCALE_CEILING} bytes / {:.1} KiB). \
+         Expected krilla to subset the font to the 2 glyphs used in 'Hi' (~10–30 KiB). \
+         If embedded_total ≈ 733_736, the full font was embedded without subsetting.",
+        embedded_total as f64 / 1024.0,
+        SUBSET_SCALE_CEILING as f64 / 1024.0,
+    );
+
+    // ── AC-009 assertion 3: belt-and-suspenders vs full-font baseline ────
     assert!(
         embedded_total < full_font_size,
-        "AC-009 FAILED: embedded streams ({embedded_total} bytes) is NOT smaller \
-         than the full font ({full_font_size} bytes). \
-         Expected krilla to subset the font to the 2 glyphs used in 'Hi'. \
-         If embedded == full_font_size, subsetting did not occur."
+        "AC-009 FAILED: uncompressed embedded streams ({embedded_total} bytes) is NOT \
+         smaller than the full uncompressed font ({full_font_size} bytes). \
+         Subsetting did not occur."
     );
 
     eprintln!(
-        "[AC-009] PASS: PdfExporter::export() embedded {embedded_total} bytes \
-         < full LM Math font {full_font_size} bytes (krilla subsetting confirmed)"
+        "[AC-009] PASS: PdfExporter::export_uncompressed() embedded {embedded_total} bytes \
+         ({:.1} KiB) — subset-scale ({SUBSET_SCALE_CEILING} bytes ceiling) and \
+         < full LM Math font {full_font_size} bytes (krilla subsetting confirmed)",
+        embedded_total as f64 / 1024.0
     );
 }
 

@@ -134,6 +134,45 @@ impl PdfExporter {
         }
     }
 
+    /// Export to uncompressed PDF bytes — test seam for AC-009 / F-044-004.
+    ///
+    /// Identical to [`Exporter::export`] except `compress_content_streams: false`
+    /// is passed to krilla's [`SerializeSettings`]. This makes embedded font
+    /// program bytes directly measurable without FlateDecode inflation:
+    ///
+    /// - Uncompressed full LM Math (~733 KB) or compressed full (~300–440 KB)
+    ///   would both appear at their true byte counts and exceed the 100 KB
+    ///   subset-scale ceiling in AC-009.
+    /// - Uncompressed 2-glyph subset is typically 10–30 KB — well under 100 KB.
+    ///
+    /// `#[doc(hidden)]` — not part of the public API contract. Exposed `pub`
+    /// so integration tests in `tests/` can call it (integration tests compile
+    /// as a separate crate and cannot access `pub(crate)` items). Production
+    /// callers should use [`Exporter::export`] instead.
+    ///
+    /// # Errors
+    ///
+    /// Same error conditions as [`generate_pdf`].
+    #[doc(hidden)]
+    pub fn export_uncompressed(
+        &self,
+        deck: &Deck,
+        laid_out: &LaidOutDeck,
+        brand: &Brand,
+        opts: &ExportOptions,
+    ) -> Result<Vec<u8>, PdfExportError> {
+        self.generate_pdf_inner(
+            deck,
+            laid_out,
+            brand,
+            opts,
+            krilla::SerializeSettings {
+                compress_content_streams: false,
+                ..krilla::SerializeSettings::default()
+            },
+        )
+    }
+
     /// Core PDF generation logic — called from [`Exporter::export`].
     ///
     /// Returns raw PDF bytes on success. `&self` is included for future use
