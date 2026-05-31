@@ -65,6 +65,13 @@ pub enum ParseSeverity {
 /// | `VarNameCollision` | `E-PAR-008` |
 /// | `RawKeyword` | `E-PAR-009` |
 /// | `VersionError` | `E-PAR-010` |
+///
+/// # Extensibility
+///
+/// `#[non_exhaustive]` ensures that adding new diagnostic variants in minor releases
+/// does not force downstream callers to update exhaustive match arms (OBS-1 rule,
+/// conventions.md §non_exhaustive-policy).
+#[non_exhaustive]
 #[derive(Debug, Clone, thiserror::Error, Diagnostic)]
 pub enum SyntaxError {
     /// Indentation is inconsistent — neither a valid push nor a valid pop.

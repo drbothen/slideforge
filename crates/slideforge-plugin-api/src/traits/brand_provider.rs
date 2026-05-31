@@ -15,6 +15,15 @@ use thiserror::Error;
 /// Brand can be synthesized from a TOML file, extracted from an existing PPTX
 /// template, or extracted from a DOCX template. The bidirectional bridge is
 /// described in the planning decisions (Q4 Brand decision).
+///
+/// `#[non_exhaustive]` — external [`BrandProvider`] plugins pattern-match
+/// this enum in their `load` implementations. Future minor releases may add
+/// new source types (e.g., `ApiEndpoint` for corporate brand registries,
+/// `GitRepo` for git-hosted brand configs). The attribute prevents those
+/// plugins from silently ignoring new source types. Plugin authors must add
+/// a wildcard arm that returns [`BrandError::SourceNotFound`] or a
+/// descriptive error rather than silently falling back.
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum BrandSource {
     /// Load brand from an existing `.pptx` template file.
@@ -38,6 +47,10 @@ pub enum BrandSource {
 
 impl std::fmt::Display for BrandSource {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // This match is exhaustive within the defining crate. The `#[non_exhaustive]`
+        // attribute only forces wildcard arms in EXTERNAL crates that match this enum.
+        // External BrandProvider plugins must include a wildcard arm that returns
+        // BrandError::SourceNotFound for unrecognised source types.
         match self {
             BrandSource::PptxFile(path) => write!(f, "pptx:{path}"),
             BrandSource::DocxFile(path) => write!(f, "docx:{path}"),
@@ -47,6 +60,10 @@ impl std::fmt::Display for BrandSource {
 }
 
 /// Error returned by [`BrandProvider::load`].
+///
+/// `#[non_exhaustive]` allows adding variants in minor releases without
+/// breaking downstream plugin authors or consumer crates.
+#[non_exhaustive]
 #[derive(Debug, Error)]
 pub enum BrandError {
     /// The source file does not exist or cannot be opened.

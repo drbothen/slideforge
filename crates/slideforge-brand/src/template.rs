@@ -28,8 +28,19 @@ pub const COLOR_SLOT_NAMES: [&str; 12] = [
 /// The `Hex` variant is the common case for well-formed brand templates.
 /// The `SchemeRef` variant indicates a self-referential or relative color that was
 /// extracted with a `tracing::warn!` and should be reviewed in brand.toml.
-// #[non_exhaustive] for v1.0 SemVer hygiene; new variants may be added in minor releases
-// per CLAUDE.md Quality Bar Supply chain row.
+///
+/// # Extensibility
+///
+/// This enum is `#[non_exhaustive]` because STORY-072 (Gradient Fills) will add a
+/// `Gradient` variant mapping OOXML `<a:gradFill>` gradient stops. Adding that
+/// variant without `#[non_exhaustive]` would be a semver-major breaking change for
+/// all downstream exporter `match` arms.
+///
+/// # Wildcard arm rule (OBS-1)
+///
+/// When this enum is matched exhaustively, the required wildcard arm MUST propagate
+/// an explicit error — never supply a silent fallback color. Silent color fallback is
+/// a forbidden pattern (CLAUDE.md Forbidden Patterns, R1 finding).
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ColorValue {
@@ -141,9 +152,14 @@ pub struct BrandFonts {
 ///
 /// The logo is optional — if no `[logo]` section in `brand.toml` and no image
 /// relationship in the source template, [`BrandTemplate::logo`] is `None`.
-// #[non_exhaustive] for v1.0 SemVer hygiene; new variants may be added in minor releases
-// per CLAUDE.md Quality Bar Supply chain row.
-#[non_exhaustive]
+///
+/// # Closed domain
+///
+/// This enum is **not** `#[non_exhaustive]`. The two variants represent a binary
+/// operational state — bytes in memory vs. path on disk — determined entirely by
+/// which pipeline stage created the value. There is no credible future variant;
+/// adding one would require new pipeline stages and is a deliberate semver-major
+/// breaking change. Downstream match arms are exhaustive by design.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum LogoAsset {
     /// Logo bytes already loaded into memory.

@@ -23,6 +23,13 @@ use std::sync::Arc;
 /// the token stream may still be partially populated — the lexer continues
 /// scanning after every error to collect as many diagnostics as possible in
 /// a single pass.
+///
+/// # Extensibility
+///
+/// `#[non_exhaustive]` ensures that adding new lexer diagnostic variants in minor
+/// releases does not force downstream callers to update exhaustive match arms
+/// (OBS-1 rule, conventions.md §non_exhaustive-policy).
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum LexError {
     /// A tab character (`\t`) was found in the leading whitespace of a line.

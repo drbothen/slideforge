@@ -36,6 +36,10 @@ impl MathDiagnostic {
 /// and carries the extra context needed for user-facing diagnostics (spans,
 /// hints, variable names). It is converted to the public type at the
 /// plugin-trait boundary in `lib.rs`.
+///
+/// `#[non_exhaustive]` ensures that adding variants in minor releases does not
+/// break downstream crates that match on this enum (`SemVer` hygiene, quality-bar rule).
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum MathRendererError {
     /// A LaTeX command is not in the supported command set for slideforge.

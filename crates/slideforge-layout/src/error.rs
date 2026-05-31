@@ -24,6 +24,10 @@ use slideforge_types::SourceSpan;
 ///
 /// All variants implement `Debug + Clone + PartialEq + Eq + Hash` for
 /// comemo compatibility and proptest `Arbitrary` derivability (AC-010).
+///
+/// `#[non_exhaustive]` ensures that adding variants in minor releases does not
+/// break downstream crates that match on this enum (`SemVer` hygiene, quality-bar rule).
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Error)]
 pub enum LayoutError {
     /// The input `Deck` contains zero slides.

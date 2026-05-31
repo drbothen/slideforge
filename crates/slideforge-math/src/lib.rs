@@ -199,6 +199,10 @@ impl MathRenderer for MathRendererImpl {
                 let paths = pdf_paths::render_pdf_paths(&ast)?;
                 Ok(paths.0.into_bytes())
             },
+            // `#[non_exhaustive]` wildcard: MathOutputFormat may gain new variants in
+            // minor releases. OBS-1 rule: NEVER silently fall back — return an explicit
+            // error so callers know the format is unsupported, not ignored.
+            _ => Err(MathError::UnsupportedFormat { format }),
         }
     }
 }
