@@ -52,6 +52,32 @@ pub mod register_routing;
 #[cfg(kani)]
 pub mod proofs;
 
+// ─── test-utils feature: BleedChecker ────────────────────────────────────────
+//
+// The `test-utils` feature gates the `bleed_check` module so that `BleedChecker`
+// is available to exporter crate test suites (slideforge-pptx, slideforge-docx,
+// etc.) without making `zip` a hard production dependency.
+//
+// Why `#[cfg(feature = "test-utils")]` here rather than `#[cfg(test)]`:
+// - `#[cfg(test)]` items are ONLY compiled in the crate's own test build.
+//   They are NOT visible to external crates, even via dev-dependencies.
+// - `#[cfg(feature = "test-utils")]` is compiled whenever the feature is active,
+//   including when another crate enables it in [dev-dependencies]. This is the
+//   only way to share test-only utilities across crate boundaries.
+//
+// Usage in exporter crates:
+//
+//   [dev-dependencies]
+//   slideforge-eval = { ..., features = ["test-utils"] }
+//
+//   In test code:
+//   use slideforge_eval::BleedChecker;
+#[cfg(feature = "test-utils")]
+pub mod bleed_check;
+
+#[cfg(feature = "test-utils")]
+pub use bleed_check::BleedChecker;
+
 // ─── Public API re-exports ───────────────────────────────────────────────────
 
 pub use config::EvalConfig;

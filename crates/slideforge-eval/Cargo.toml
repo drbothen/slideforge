@@ -10,6 +10,20 @@ repository.workspace = true
 homepage.workspace = true
 readme = "../../README.md"
 
+[features]
+# test-utils: exposes BleedChecker and related ZIP-scanning utilities for use
+# by exporter crate test suites (slideforge-pptx, slideforge-docx, etc.).
+# Exporter crates list:
+#   slideforge-eval = { ..., features = ["test-utils"] }
+# in their [dev-dependencies] to gain access to BleedChecker.
+#
+# IMPORTANT: `zip` MUST be a regular optional dependency (not a dev-dependency)
+# because when another crate enables the "test-utils" feature on slideforge-eval,
+# Cargo must be able to compile the feature-gated code even outside a dev build.
+# Dev-dependencies are not transitive, so `zip` in [dev-dependencies] would cause
+# "can't find crate `zip`" errors in the exporter crates' test builds.
+test-utils = ["dep:zip", "dep:quick-xml"]
+
 [dependencies]
 slideforge-types = { workspace = true }
 slideforge-syntax = { workspace = true }
@@ -18,10 +32,38 @@ miette = { workspace = true }
 indexmap = "=2.9.0"
 ordered-float = { workspace = true }
 tracing = { workspace = true }
+# Optional: only compiled when the `test-utils` feature is enabled.
+# Pinned to =2.3.0 (same version already in Cargo.lock via slideforge-brand
+# and calamine). The spec originally cited =4.2.0 which does not exist on
+# crates.io; =2.3.0 is the correct version available in this workspace.
+zip = { version = "=2.3.0", optional = true }
+# Optional: only compiled when the `test-utils` feature is enabled.
+# Used by BleedChecker to decode XML entities in scanned member text so that
+# sentinels containing `&`, `<`, `>`, `"`, `'` are found even when the exporter
+# XML-escapes them (EC-004 compliance). The workspace already pins this at
+# =0.36.0 via slideforge-brand and slideforge-math.
+quick-xml = { workspace = true, optional = true }
 
 [dev-dependencies]
 insta = { workspace = true }
 ordered-float = { workspace = true }
+# `zip` is also needed in [dev-dependencies] so that integration tests in
+# `tests/bleed_tests.rs` can use `zip::ZipWriter` directly to construct
+# synthetic PPTX/DOCX ZIP fixtures. The optional dep under [dependencies]
+# makes `zip` available to the compiled library (for BleedChecker), while
+# this dev-dep makes it available to the integration test binaries.
+zip = "=2.3.0"
+
+[[test]]
+# bleed_tests.rs uses `slideforge_eval::BleedChecker`, which is gated behind the
+# `test-utils` feature.  Without `required-features`, `cargo nextest run -p
+# slideforge-eval` (no --features flag) would fail to compile this test binary
+# with E0432 — breaking the canonical inner-loop TDD command.  With
+# `required-features`, Cargo AUTO-SKIPS the test target when the feature is off
+# instead of emitting a compile error.  Run with `--features test-utils` to
+# include the test.  (F-036-001 fix.)
+name = "bleed_tests"
+required-features = ["test-utils"]
 
 [lints.rust]
 # `kani` is the cfg flag set by the Kani proof runner (Phase 6, STORY-067).

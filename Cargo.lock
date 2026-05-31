@@ -2320,10 +2320,12 @@ dependencies = [
  "insta",
  "miette",
  "ordered-float",
+ "quick-xml 0.36.0",
  "slideforge-syntax",
  "slideforge-types",
  "thiserror 2.0.18",
  "tracing",
+ "zip 2.3.0",
 ]
 
 [[package]]
