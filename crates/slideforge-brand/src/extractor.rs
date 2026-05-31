@@ -43,10 +43,31 @@ use crate::template::{BrandTemplate, ColorValue, LogoAsset};
 /// This function therefore normalizes `scheme_name` to ASCII-lowercase before
 /// matching, so all OOXML camelCase aliases resolve correctly regardless of
 /// the case used in the original XML.
+///
+/// ## Intentionally Unresolved: Color-Map Mnemonics and `phClr`
+///
+/// The following `schemeClr val` tokens are intentionally NOT handled here and will
+/// return `None`, triggering the `default_color_for_slot` fallback:
+///
+/// - `tx1`, `tx2`, `bg1`, `bg2` — color-map mnemonics that remap scheme slots at the
+///   slide master / slide layout level (via `<p:clrMap>`). Resolving them requires the
+///   per-master color map, which is context-dependent and not available in this
+///   slot-level lookup function.
+/// - `phClr` — the "placeholder color" sentinel indicating that the color is inherited
+///   from the layout or shape's placeholder hierarchy. No absolute hex can be determined
+///   without fully walking the placeholder chain.
+///
+/// Both cases are spec-compliant under BC-2.01.003 EC-003: the extractor is permitted
+/// to fall back to `default_color_for_slot` with the inline TOML comment
+/// `"# derived via tint/shade; may not match exact color"` when an absolute hex
+/// cannot be determined. This behavior is correct and intentional, not an oversight.
 fn scheme_name_to_slot_index(scheme_name: &str) -> Option<usize> {
     // OOXML `<a:schemeClr val="...">` uses "accent1"…"accent6" spellings; some templates
     // also use the short "acc1"…"acc6" aliases used in brand.toml. Both forms are accepted.
     // All arms are lowercase to match the stored SchemeRef values from color.rs:155.
+    //
+    // Color-map mnemonics (tx1, tx2, bg1, bg2) and phClr are intentionally absent —
+    // see the function-level doc comment above for the rationale.
     match scheme_name.to_ascii_lowercase().as_str() {
         "dk1" => Some(0),
         "lt1" => Some(1),
@@ -1023,10 +1044,18 @@ mod tests {
     // ─── AC-008: source file unchanged after extraction ───────────────────────
 
     /// BC-2.01.003 invariant 2 / AC-008 — the source `.pptx` file is NEVER
-    /// modified. SHA-256 hash before and after extraction must be identical.
+    /// modified. Byte-for-byte comparison before and after a SUCCESSFUL extraction
+    /// must be identical.
     ///
     /// Verification property (BC-2.01.003): "Source .pptx file is unmodified
     /// after extraction (file hash before/after)."
+    ///
+    /// F-024R-MED-2 strengthening:
+    /// (a) Extraction is asserted `Ok()` BEFORE comparing source state, so the invariant
+    ///     is proven on a successful extraction — not on a vacuously-unchanged source
+    ///     after a failed extraction.
+    /// (b) Comparison uses direct byte-for-byte `Vec<u8>` equality (stronger than any
+    ///     hash proxy; requires no additional dependency).
     #[test]
     fn test_bc_2_01_003_invariant_source_file_unmodified() {
         let zip_bytes = build_pptx_zip(MINIMAL_THEME_XML);
@@ -1035,20 +1064,28 @@ mod tests {
 
         // Read source bytes before extraction.
         let bytes_before = std::fs::read(&source_path).unwrap();
-        let sha_before = simple_sha256(&bytes_before);
 
-        let _ = BrandExtractor::extract(source_path.to_str().unwrap(), &out_dir, false);
+        // F-024R-MED-2(a): assert extraction succeeded BEFORE comparing source state.
+        // If extract returns Err, the source trivially appears unchanged — that proves
+        // nothing about read-only behaviour during a SUCCESSFUL extraction.
+        let result = BrandExtractor::extract(source_path.to_str().unwrap(), &out_dir, false);
+        assert!(
+            result.is_ok(),
+            "AC-008: extraction must succeed so the read-only invariant is proven on a \
+             successful run, not vacuously on a failed one. Error: {:?}",
+            result.err()
+        );
 
-        // Read source bytes after extraction.
+        // F-024R-MED-2(b): byte-for-byte equality is stronger than any hash proxy
+        // and needs no additional dependency.
         let bytes_after = std::fs::read(&source_path).unwrap();
-        let sha_after = simple_sha256(&bytes_after);
 
         let _ = std::fs::remove_file(&source_path);
         let _ = std::fs::remove_dir_all(&out_dir);
 
         assert_eq!(
-            sha_before, sha_after,
-            "source .pptx must be byte-identical before and after extraction (invariant 2)"
+            bytes_before, bytes_after,
+            "source .pptx must be byte-identical before and after extraction (AC-008 invariant 2)"
         );
     }
 
@@ -1100,12 +1137,42 @@ mod tests {
 
     // ─── AC-010: round-trip integration test ─────────────────────────────────
 
-    /// BC-2.01.003 verification property / AC-010 — round-trip test:
-    /// load `.pptx` → extract `brand.toml` → parse the TOML back →
-    /// `BrandConfig.colors` hex values must match original `.pptx` color slots.
+    /// BC-2.01.003 verification property / AC-010 — full round-trip test:
+    /// load `.pptx` → extract `brand.toml` → parse the TOML back into
+    /// `BrandConfig` → **synthesize a `BrandTemplate` from the `BrandConfig`**
+    /// → assert all 12 synthesized color hex values equal the original source hex values.
+    ///
+    /// F-024R-MED-1 strengthening: the synthesize step is the load-bearing part of
+    /// the round-trip. Inference / normalization inside `BrandSynthesizer::synthesize`
+    /// could mutate a loaded hex (e.g., case normalisation or slot-inference overwriting
+    /// a declared value). This assertion catches any such mutation.
+    ///
+    /// The source PPTX includes a logo so the extracted brand.toml contains a `[logo]`
+    /// section — `BrandSynthesizer::synthesize` requires a non-empty logo path.
     #[test]
     fn test_bc_2_01_003_round_trip_pptx_to_brand_toml_and_back() {
-        let zip_bytes = build_pptx_zip(MINIMAL_THEME_XML);
+        use crate::synthesizer::BrandSynthesizer;
+
+        // F-024R-MED-1: MINIMAL_THEME_XML canonical hex values (all 12 slots, ECMA-376 order).
+        // Defined before any let-bindings (items_after_statements lint).
+        const EXPECTED_HEX: [&str; 12] = [
+            "#000000", // dk1
+            "#FFFFFF", // lt1
+            "#003087", // dk2
+            "#F5F5F5", // lt2
+            "#0066CC", // acc1
+            "#FF6B35", // acc2
+            "#28A745", // acc3
+            "#FFC107", // acc4
+            "#6F42C1", // acc5
+            "#17A2B8", // acc6
+            "#0000EE", // hlink
+            "#551A8B", // fol_hlink
+        ];
+
+        // Use the logo PPTX fixture so the extracted brand.toml contains [logo],
+        // which `BrandSynthesizer::synthesize` requires (logo path must be non-empty).
+        let zip_bytes = build_pptx_zip_with_logo(MINIMAL_THEME_XML);
         let source_path = write_temp_pptx(&zip_bytes);
         let out_dir = temp_output_dir();
 
@@ -1119,11 +1186,13 @@ mod tests {
         let config: crate::toml_schema::BrandConfig =
             toml::from_str(&content).expect("extracted brand.toml must parse as valid BrandConfig");
 
-        // Verify canonical values from MINIMAL_THEME_XML are round-tripped.
+        // Verify canonical values from MINIMAL_THEME_XML are round-tripped at the
+        // BrandConfig level (existing assertions, preserved).
         // dk1 = #000000, lt1 = #FFFFFF, dk2 = #003087 (values normalised to uppercase).
         let dk1 = config
             .colors
             .dk1
+            .clone()
             .expect("dk1 must be present after round-trip");
         assert!(
             dk1.eq_ignore_ascii_case("#000000"),
@@ -1132,6 +1201,7 @@ mod tests {
         let dk2 = config
             .colors
             .dk2
+            .clone()
             .expect("dk2 must be present after round-trip");
         assert!(
             dk2.eq_ignore_ascii_case("#003087"),
@@ -1140,6 +1210,7 @@ mod tests {
         let acc1 = config
             .colors
             .acc1
+            .clone()
             .expect("acc1 must be present after round-trip");
         assert!(
             acc1.eq_ignore_ascii_case("#0066CC"),
@@ -1148,11 +1219,51 @@ mod tests {
         let fol_hlink = config
             .colors
             .fol_hlink
+            .clone()
             .expect("fol_hlink must be present after round-trip");
         assert!(
             fol_hlink.eq_ignore_ascii_case("#551A8B"),
             "fol_hlink must round-trip as #551A8B, got: {fol_hlink}"
         );
+
+        // F-024R-MED-1: FULL round-trip — synthesize a BrandTemplate from the extracted
+        // BrandConfig and assert ALL 12 synthesized color hex values match the original
+        // source hex values from MINIMAL_THEME_XML.
+        //
+        // This is the load-bearing step: BrandSynthesizer::synthesize performs color
+        // inference and normalization. Any mutation of declared hex values during
+        // synthesis (e.g., a slot that was declared in brand.toml being overwritten by
+        // an inference rule) would be caught here.
+        let (synth_template, _warnings) = BrandSynthesizer::synthesize(&config).expect(
+            "AC-010 (F-024R-MED-1): BrandSynthesizer::synthesize must succeed \
+                     on the extracted BrandConfig — all 12 slots declared in brand.toml \
+                     must be recognised by the synthesizer",
+        );
+
+        assert_eq!(
+            synth_template.colors.len(),
+            12,
+            "AC-010 (F-024R-MED-1): synthesized BrandTemplate must have 12 color slots"
+        );
+
+        for (i, expected) in EXPECTED_HEX.iter().enumerate() {
+            let slot = &synth_template.colors[i];
+            let actual_hex = slot.hex().unwrap_or_else(|| {
+                panic!(
+                    "AC-010 (F-024R-MED-1): synthesized color slot {i} ('{}') must be a \
+                     resolved hex — round-trip must not produce an unresolved SchemeRef",
+                    slot.name
+                )
+            });
+            assert!(
+                actual_hex.eq_ignore_ascii_case(expected),
+                "AC-010 (F-024R-MED-1): synthesized slot {i} ('{}') must equal source hex \
+                 '{}' after full round-trip (pptx → brand.toml → BrandConfig → \
+                 BrandSynthesizer::synthesize), got: '{actual_hex}'",
+                slot.name,
+                expected
+            );
+        }
 
         let _ = std::fs::remove_dir_all(&out_dir);
     }
@@ -2024,20 +2135,5 @@ mod tests {
         assert_eq!(body, "Calibri", "body font must round-trip (F-024-H4)");
 
         let _ = std::fs::remove_dir_all(&out_dir);
-    }
-
-    // ─── Helper: simple SHA-256 without external deps ────────────────────────
-
-    /// Compute a simple FNV-1a hash (64-bit) as a proxy for content identity.
-    ///
-    /// We avoid pulling in `sha2` just for tests. FNV-1a is sufficient for
-    /// the invariant: if the bytes are unchanged, the hash is unchanged.
-    fn simple_sha256(data: &[u8]) -> u64 {
-        let mut hash: u64 = 14_695_981_039_346_656_037;
-        for &byte in data {
-            hash ^= u64::from(byte);
-            hash = hash.wrapping_mul(1_099_511_628_211);
-        }
-        hash
     }
 }
