@@ -91,6 +91,11 @@ echo "[No-subprocess source check] — AC-008 / scope-directive Decision 3:"
 echo "  Assert zero std::process / Command::new / process::Command usage in"
 echo "  crates/slideforge-pdf/src/ (source-level enforcement of AC-008)."
 echo ""
+echo "  NOTE (SEC-003): The authoritative load-bearing check for this invariant"
+echo "  is the Rust integration test 'no_forbidden_deps' (tests/no_forbidden_deps.rs)."
+echo "  This shell script is a coarse defense-in-depth layer that catches obvious"
+echo "  violations early in CI. The Rust test is the source of truth."
+echo ""
 
 PDF_SRC_DIR="${WORKSPACE_ROOT}/crates/slideforge-pdf/src"
 if [[ ! -d "${PDF_SRC_DIR}" ]]; then
@@ -110,13 +115,25 @@ else
     echo "  INFO: scanning ${RS_FILE_COUNT} .rs file(s) in crates/slideforge-pdf/src/"
 
     # Grep for actual use-site patterns (non-comment lines only).
-    # Use perl-regex look-ahead to skip lines whose trimmed content starts
-    # with `//` (Rust comment lines, including doc comments `///`).
-    # The output of grep has format "file:lineno:content"; we filter on the
-    # content portion (after the second colon).
+    # SEC-003: Strip BOTH line comments (`//`) and block comment lines (`/*`).
+    # The authoritative check is the Rust integration test; this is defense-in-depth.
+    #
+    # Filter logic (awk):
+    #   - Split on ':' to separate file, line number, and content.
+    #   - Reconstruct the content portion (fields 3..NF joined with ':').
+    #   - Strip leading whitespace from content.
+    #   - Skip lines whose trimmed content starts with '//' (line comments,
+    #     including '///' doc comments).
+    #   - Skip lines whose trimmed content starts with '/*' (block comment lines).
+    #   - Only print lines that survive both filters — these are real use sites.
     SUBPROCESS_HITS=$(grep -rn "std::process\|Command::new\|process::Command" \
         "${PDF_SRC_DIR}/" 2>/dev/null \
-        | awk -F: '{ rest=$3; for(i=4;i<=NF;i++) rest=rest":"$i; gsub(/^[ \t]*/,"",rest); if (substr(rest,1,2) != "//") print }' \
+        | awk -F: '{
+              rest=$3;
+              for(i=4;i<=NF;i++) rest=rest":"$i;
+              gsub(/^[ \t]*/,"",rest);
+              if (substr(rest,1,2) != "//" && substr(rest,1,2) != "/*") print
+          }' \
         || true)
     if [[ -n "${SUBPROCESS_HITS}" ]]; then
         echo "${SUBPROCESS_HITS}"

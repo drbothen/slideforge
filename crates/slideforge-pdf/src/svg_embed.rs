@@ -43,6 +43,32 @@ use usvg::{Node, Options, Tree};
 
 use crate::error::PdfExportError;
 
+/// Maximum nesting depth for SVG `<g>` group recursion.
+///
+/// Crafted SVGs with deeply nested groups (e.g. 10k levels) can exhaust the
+/// call stack. 64 levels is far beyond any legitimate diagram or chart
+/// (real-world SVGs from plotters or mermaid rarely exceed 5–10 levels) and
+/// provides a safe hard ceiling well within default thread stack limits.
+///
+/// The value 64 was chosen so that 64 recursive `render_group` frames (plus
+/// the usvg node tree overhead) never risk stack exhaustion even on a 2 MiB
+/// test thread stack. 256 was rejected because on debug builds the per-frame
+/// cost may exhaust a 2 MiB thread stack before the guard fires.
+///
+/// **SEC-001 (CWE-674):** Depth exceeded → `PdfExportError::SvgEmbed` (not a
+/// stack overflow).
+const MAX_SVG_NESTING_DEPTH: usize = 64;
+
+/// Maximum byte length accepted by [`embed_svg_str`] and
+/// [`embed_normalized_svg`].
+///
+/// 50 MiB is a generous ceiling for any real SVG produced by plotters or
+/// a mermaid renderer. Inputs larger than this are rejected before parsing to
+/// prevent memory-DoS.
+///
+/// **SEC-002 (CWE-400):** Size exceeded → `PdfExportError::SvgEmbed`.
+const MAX_SVG_BYTES: usize = 50 * 1024 * 1024;
+
 /// Embed a [`NormalizedDiagramSvg`] as vector paths on a krilla `Surface`.
 ///
 /// The function parses the SVG via `usvg::Tree::from_str`, walks the node
@@ -58,8 +84,10 @@ use crate::error::PdfExportError;
 /// # Errors
 ///
 /// Returns [`PdfExportError::SvgEmbed`] if:
+/// - The SVG exceeds the 50 MiB size limit (`MAX_SVG_BYTES`).
 /// - The SVG cannot be parsed by `usvg`.
 /// - A path operation fails on the krilla `Surface`.
+/// - SVG `<g>` nesting exceeds the 64-level cap (`MAX_SVG_NESTING_DEPTH`, `DoS` guard).
 ///
 /// # Contract
 ///
@@ -81,26 +109,62 @@ pub fn embed_normalized_svg(
 /// (chart SVGs are produced directly by `plotters` and are guaranteed safe
 /// by construction).
 ///
+/// This function is crate-internal. External callers use [`embed_normalized_svg`]
+/// which accepts the type-safe [`NormalizedDiagramSvg`] wrapper.
+///
+/// **SEC-002:** Rejects inputs larger than [`MAX_SVG_BYTES`] before parsing to
+/// prevent memory-DoS.
+///
 /// # Errors
 ///
-/// Returns [`PdfExportError::SvgEmbed`] if the SVG cannot be parsed or
-/// drawn.
-pub fn embed_svg_str(svg_str: &str, surface: &mut Surface<'_>) -> Result<(), PdfExportError> {
+/// Returns [`PdfExportError::SvgEmbed`] if the SVG exceeds the size limit,
+/// cannot be parsed, or cannot be drawn.
+pub(crate) fn embed_svg_str(
+    svg_str: &str,
+    surface: &mut Surface<'_>,
+) -> Result<(), PdfExportError> {
+    // SEC-002: size guard — reject before any allocation-heavy parse.
+    if svg_str.len() > MAX_SVG_BYTES {
+        return Err(PdfExportError::SvgEmbed {
+            message: format!(
+                "SVG input too large: {} bytes exceeds the {MAX_SVG_BYTES}-byte limit",
+                svg_str.len()
+            ),
+        });
+    }
+
     let tree =
         Tree::from_str(svg_str, &Options::default()).map_err(|e| PdfExportError::SvgEmbed {
             message: format!("usvg parse error: {e}"),
         })?;
 
-    render_group(tree.root(), surface)
+    render_group(tree.root(), surface, 0)
 }
 
 /// Recursively render a usvg `Group` node and all its children onto `surface`.
-fn render_group(group: &usvg::Group, surface: &mut Surface<'_>) -> Result<(), PdfExportError> {
+///
+/// `depth` is the current recursion level, starting at `0` for the SVG root.
+/// Returns [`PdfExportError::SvgEmbed`] if `depth` exceeds
+/// [`MAX_SVG_NESTING_DEPTH`] (SEC-001, CWE-674).
+fn render_group(
+    group: &usvg::Group,
+    surface: &mut Surface<'_>,
+    depth: usize,
+) -> Result<(), PdfExportError> {
+    if depth > MAX_SVG_NESTING_DEPTH {
+        return Err(PdfExportError::SvgEmbed {
+            message: format!(
+                "SVG group nesting depth {depth} exceeds the {MAX_SVG_NESTING_DEPTH}-level limit; \
+                 possible DoS input — aborting SVG embed"
+            ),
+        });
+    }
+
     for child in group.children() {
         match child {
             Node::Group(g) => {
-                // Recurse into nested groups.
-                render_group(g, surface)?;
+                // Recurse into nested groups, incrementing the depth counter.
+                render_group(g, surface, depth + 1)?;
             },
             Node::Path(path) => {
                 if !path.is_visible() {
@@ -364,6 +428,212 @@ mod tests {
             parse_result.is_ok(),
             "usvg must parse the simple SVG rect without error: {:?}",
             parse_result.err()
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // SEC-001 tests: SVG group nesting depth cap (CWE-674)
+    // -------------------------------------------------------------------------
+
+    /// SEC-001: `embed_normalized_svg` returns `PdfExportError::SvgEmbed` for
+    /// an SVG whose `<g>` nesting exceeds `MAX_SVG_NESTING_DEPTH` (256).
+    ///
+    /// A crafted SVG with 257 nested `<g>` elements would previously cause
+    /// unbounded recursion; now it must return an error — NOT a panic/overflow.
+    #[allow(clippy::unwrap_used)]
+    #[test]
+    fn test_sec_001_svg_depth_cap_exceeds_limit_returns_error() {
+        use krilla::Document;
+        use krilla::SerializeSettings;
+        use krilla::page::PageSettings;
+
+        // Build an SVG with MAX_SVG_NESTING_DEPTH + 1 nested <g> elements.
+        // The opening tags push us one level past the cap on the innermost group.
+        let depth = MAX_SVG_NESTING_DEPTH + 1;
+        let mut svg =
+            String::from("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"100\" height=\"100\">");
+        for _ in 0..depth {
+            svg.push_str("<g>");
+        }
+        svg.push_str("<rect x=\"0\" y=\"0\" width=\"10\" height=\"10\" fill=\"red\"/>");
+        for _ in 0..depth {
+            svg.push_str("</g>");
+        }
+        svg.push_str("</svg>");
+
+        let normalized = NormalizedDiagramSvg::from_normalized_string(Arc::from(svg.as_str()));
+
+        let settings = SerializeSettings {
+            compress_content_streams: false,
+            ..SerializeSettings::default()
+        };
+        let mut document = Document::new_with(settings);
+        let mut page =
+            document.start_page_with(PageSettings::from_wh(595.0, 842.0).expect("valid page size"));
+        let mut surface = page.surface();
+
+        let result = embed_normalized_svg(&normalized, &mut surface);
+
+        surface.finish();
+        page.finish();
+        let _ = document.finish();
+
+        assert!(
+            result.is_err(),
+            "embed_normalized_svg must return Err for SVG with nesting depth > MAX_SVG_NESTING_DEPTH"
+        );
+        match result {
+            Err(PdfExportError::SvgEmbed { message }) => {
+                assert!(
+                    message.contains("nesting depth") || message.contains("limit"),
+                    "SvgEmbed error must mention nesting depth or limit: {message}"
+                );
+            },
+            other => panic!("expected PdfExportError::SvgEmbed, got: {other:?}"),
+        }
+    }
+
+    /// SEC-001: A normally-nested SVG (well within the 256-level cap) still
+    /// renders successfully — the depth guard must not reject legitimate SVGs.
+    #[allow(clippy::unwrap_used)]
+    #[test]
+    fn test_sec_001_svg_depth_cap_normal_nesting_succeeds() {
+        use krilla::Document;
+        use krilla::SerializeSettings;
+        use krilla::page::PageSettings;
+
+        // Build an SVG with 5 nested <g> elements — well within the 256 limit.
+        let mut svg =
+            String::from("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"100\" height=\"100\">");
+        for _ in 0..5_usize {
+            svg.push_str("<g>");
+        }
+        svg.push_str("<rect x=\"0\" y=\"0\" width=\"10\" height=\"10\" fill=\"#003087\"/>");
+        for _ in 0..5_usize {
+            svg.push_str("</g>");
+        }
+        svg.push_str("</svg>");
+
+        let normalized = NormalizedDiagramSvg::from_normalized_string(Arc::from(svg.as_str()));
+
+        let settings = SerializeSettings {
+            compress_content_streams: false,
+            ..SerializeSettings::default()
+        };
+        let mut document = Document::new_with(settings);
+        let mut page =
+            document.start_page_with(PageSettings::from_wh(595.0, 842.0).expect("valid page size"));
+        let mut surface = page.surface();
+
+        let result = embed_normalized_svg(&normalized, &mut surface);
+
+        surface.finish();
+        page.finish();
+        let _ = document.finish();
+
+        assert!(
+            result.is_ok(),
+            "embed_normalized_svg must succeed for an SVG with normal nesting depth (5 levels): {result:?}"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // SEC-002 tests: SVG input size cap (CWE-400)
+    // -------------------------------------------------------------------------
+
+    /// SEC-002: `embed_normalized_svg` returns `PdfExportError::SvgEmbed` when
+    /// the SVG string exceeds `MAX_SVG_BYTES` (50 MiB).
+    ///
+    /// This test constructs a string just over the limit without actually
+    /// allocating 50 MiB of valid SVG content — it pads with spaces inside a
+    /// comment, which keeps the string syntactically irrelevant (the size check
+    /// fires before parsing).
+    #[allow(clippy::unwrap_used)]
+    #[test]
+    fn test_sec_002_svg_size_cap_over_limit_returns_error() {
+        use krilla::Document;
+        use krilla::SerializeSettings;
+        use krilla::page::PageSettings;
+
+        // Build a string that is MAX_SVG_BYTES + 1 bytes long.
+        // The content doesn't need to be valid SVG because the size guard fires
+        // before usvg parsing.
+        let over_limit = MAX_SVG_BYTES + 1;
+        // Use a valid SVG prefix followed by padding to reach the limit.
+        let prefix = "<svg xmlns=\"http://www.w3.org/2000/svg\"><!-- ";
+        let suffix = " --></svg>";
+        let padding_len = over_limit.saturating_sub(prefix.len() + suffix.len());
+        let mut svg = String::with_capacity(over_limit + 10);
+        svg.push_str(prefix);
+        svg.extend(std::iter::repeat_n('x', padding_len));
+        svg.push_str(suffix);
+
+        assert!(
+            svg.len() > MAX_SVG_BYTES,
+            "test setup: svg must exceed MAX_SVG_BYTES"
+        );
+
+        let normalized = NormalizedDiagramSvg::from_normalized_string(Arc::from(svg.as_str()));
+
+        let settings = SerializeSettings {
+            compress_content_streams: false,
+            ..SerializeSettings::default()
+        };
+        let mut document = Document::new_with(settings);
+        let mut page =
+            document.start_page_with(PageSettings::from_wh(595.0, 842.0).expect("valid page size"));
+        let mut surface = page.surface();
+
+        let result = embed_normalized_svg(&normalized, &mut surface);
+
+        surface.finish();
+        page.finish();
+        let _ = document.finish();
+
+        assert!(
+            result.is_err(),
+            "embed_normalized_svg must return Err when SVG exceeds MAX_SVG_BYTES"
+        );
+        match result {
+            Err(PdfExportError::SvgEmbed { message }) => {
+                assert!(
+                    message.contains("too large") || message.contains("limit"),
+                    "SvgEmbed error must mention size/limit: {message}"
+                );
+            },
+            other => panic!("expected PdfExportError::SvgEmbed, got: {other:?}"),
+        }
+    }
+
+    /// SEC-002: A normally-sized SVG (well under 50 MiB) passes the size guard
+    /// and renders correctly.
+    #[allow(clippy::unwrap_used)]
+    #[test]
+    fn test_sec_002_svg_size_cap_normal_size_succeeds() {
+        use krilla::Document;
+        use krilla::SerializeSettings;
+        use krilla::page::PageSettings;
+
+        let normalized = NormalizedDiagramSvg::from_normalized_string(Arc::from(SIMPLE_SVG_RECT));
+
+        let settings = SerializeSettings {
+            compress_content_streams: false,
+            ..SerializeSettings::default()
+        };
+        let mut document = Document::new_with(settings);
+        let mut page =
+            document.start_page_with(PageSettings::from_wh(595.0, 842.0).expect("valid page size"));
+        let mut surface = page.surface();
+
+        let result = embed_normalized_svg(&normalized, &mut surface);
+
+        surface.finish();
+        page.finish();
+        let _ = document.finish();
+
+        assert!(
+            result.is_ok(),
+            "embed_normalized_svg must succeed for a normally-sized SVG: {result:?}"
         );
     }
 }

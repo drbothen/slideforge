@@ -34,10 +34,14 @@ impl FontBytes {
     ///
     /// Returns [`PdfExportError::Io`] if the file cannot be read.
     pub fn load(path: &std::path::Path) -> Result<Self, PdfExportError> {
-        let bytes = std::fs::read(path).map_err(|e| PdfExportError::Io {
-            message: format!("failed to read font file '{}': {e}", path.display()),
-        })?;
-        Ok(Self(bytes))
+        std::fs::read(path).map(Self).map_err(|e| {
+            // SEC-005: log the full path at debug level for diagnostics,
+            // but keep the user-facing error generic (no internal path disclosure).
+            tracing::debug!(path = %path.display(), error = %e, "failed to read font file");
+            PdfExportError::Io {
+                message: format!("failed to read font file: {e}"),
+            }
+        })
     }
 
     /// Construct `FontBytes` from a raw byte buffer.
@@ -66,11 +70,17 @@ impl FontBytes {
 /// # Errors
 ///
 /// Returns [`PdfExportError::Io`] if the file cannot be read (e.g., it does
-/// not exist, or the process lacks read permission). The error message includes
-/// the path for diagnostic context.
+/// not exist, or the process lacks read permission). The full path is emitted
+/// via `tracing::debug!` for diagnostics; the user-facing error message is
+/// generic and does not expose internal paths (SEC-005).
 pub fn load_font_data(path: &std::path::Path) -> Result<Vec<u8>, PdfExportError> {
-    std::fs::read(path).map_err(|e| PdfExportError::Io {
-        message: format!("failed to read font file '{}': {e}", path.display()),
+    std::fs::read(path).map_err(|e| {
+        // SEC-005: log the full path at debug level for diagnostics,
+        // but keep the user-facing error generic (no internal path disclosure).
+        tracing::debug!(path = %path.display(), error = %e, "failed to read font file");
+        PdfExportError::Io {
+            message: format!("failed to read font file: {e}"),
+        }
     })
 }
 
@@ -197,12 +207,48 @@ fn home_dir() -> Option<std::path::PathBuf> {
     }
 }
 
+/// Maximum recursion depth for [`search_font_dir`].
+///
+/// System font directories rarely exceed 3-4 levels deep. 32 is a generous
+/// ceiling that prevents stack exhaustion from a symlink loop while allowing
+/// any legitimate font tree layout.
+///
+/// **SEC-004 (CWE-61):** Symlinks to directories are skipped outright (not
+/// followed); this depth cap is belt-and-suspenders for any case the symlink
+/// check misses.
+const MAX_FONT_DIR_DEPTH: usize = 32;
+
 /// Search a single directory (recursively) for a font file matching `needle`.
 ///
 /// Returns the **lexicographically-first** match found (sorted by path), so
 /// results are deterministic regardless of the OS `read_dir` iteration order.
 /// Returns `None` if the directory cannot be read or no matching file exists.
+///
+/// **SEC-004 (CWE-61) — symlink-loop safety:**
+/// - Directory entries that are symlinks are **skipped** (not followed into).
+///   `path.symlink_metadata().file_type().is_dir()` is used rather than
+///   `path.is_dir()` (which follows symlinks) to detect real directories.
+/// - A [`MAX_FONT_DIR_DEPTH`] cap prevents stack exhaustion in edge cases.
 fn search_font_dir(dir: &std::path::Path, needle: &str) -> Option<std::path::PathBuf> {
+    search_font_dir_inner(dir, needle, 0)
+}
+
+/// Inner recursive implementation with explicit `depth` counter.
+fn search_font_dir_inner(
+    dir: &std::path::Path,
+    needle: &str,
+    depth: usize,
+) -> Option<std::path::PathBuf> {
+    if depth > MAX_FONT_DIR_DEPTH {
+        tracing::warn!(
+            depth,
+            max = MAX_FONT_DIR_DEPTH,
+            dir = %dir.display(),
+            "font dir recursion depth cap exceeded — stopping traversal"
+        );
+        return None;
+    }
+
     // Collect all readable entries and sort them so iteration is deterministic.
     // Non-readable entries are silently skipped (graceful handling for
     // permission-restricted system font directories).
@@ -214,12 +260,26 @@ fn search_font_dir(dir: &std::path::Path, needle: &str) -> Option<std::path::Pat
     entries.sort();
 
     for path in entries {
-        if path.is_dir() {
-            // Recurse into subdirectories (common on Linux: /usr/share/fonts/truetype/…).
-            if let Some(found) = search_font_dir(&path, needle) {
+        // SEC-004: use symlink_metadata() so we inspect the symlink itself,
+        // not its target. If the entry IS a symlink, skip it (do not follow
+        // into symlinked directories — prevents infinite loops).
+        let Ok(meta) = path.symlink_metadata() else {
+            continue;
+        };
+        let file_type = meta.file_type();
+
+        if file_type.is_symlink() {
+            // Skip symlinks entirely — do not follow into symlinked directories.
+            tracing::debug!(path = %path.display(), "skipping symlink during font dir scan (SEC-004)");
+            continue;
+        }
+
+        if file_type.is_dir() {
+            // Real directory (not a symlink) — recurse with incremented depth.
+            if let Some(found) = search_font_dir_inner(&path, needle, depth + 1) {
                 return Some(found);
             }
-        } else {
+        } else if file_type.is_file() {
             let ext = path
                 .extension()
                 .and_then(|e| e.to_str())
@@ -304,6 +364,11 @@ mod tests {
 
     /// BC-4.03.002 AC-004: `load_font_data` returns `Err(PdfExportError::Io)`
     /// for a path that does not exist.
+    ///
+    /// SEC-005: The user-facing error message must NOT contain the internal
+    /// file path (no path disclosure). The path is emitted at `tracing::debug!`
+    /// level for diagnostics but is not exposed in the `PdfExportError::Io`
+    /// message field.
     #[test]
     fn test_bc_4_03_002_load_font_data_errors_on_missing_path() {
         let missing = std::path::Path::new("/tmp/__nonexistent_font_for_slideforge_test__.ttf");
@@ -315,9 +380,15 @@ mod tests {
         // Verify the error is an Io variant (not a panic).
         match result {
             Err(PdfExportError::Io { message }) => {
+                // SEC-005: message must NOT contain the internal path.
                 assert!(
-                    message.contains("__nonexistent_font_for_slideforge_test__"),
-                    "Io error message must include the path: {message}"
+                    !message.contains("__nonexistent_font_for_slideforge_test__"),
+                    "Io error message must NOT expose the internal file path (SEC-005): {message}"
+                );
+                // The message must still describe the failure generically.
+                assert!(
+                    message.contains("failed to read font file"),
+                    "Io error message must describe the failure: {message}"
                 );
             },
             Err(other) => panic!("expected PdfExportError::Io, got {other:?}"),
@@ -346,6 +417,42 @@ mod tests {
         assert_eq!(normalize_font_name("Open-Sans"), "opensans");
         assert_eq!(normalize_font_name("Arial"), "arial");
         assert_eq!(normalize_font_name(""), "");
+    }
+
+    /// SEC-004: `search_font_dir` skips symlinks and applies a depth cap so
+    /// a self-referential symlink loop in a font directory does not cause
+    /// infinite recursion or a stack overflow.
+    ///
+    /// This test creates a temp directory with a self-referential symlink
+    /// (`link -> .`) and verifies that `search_font_dir` returns without
+    /// hanging. It is `#[cfg(unix)]` because symlink creation requires Unix
+    /// semantics.
+    #[cfg(unix)]
+    #[allow(clippy::unwrap_used)]
+    #[test]
+    fn test_sec_004_symlink_loop_does_not_recurse_infinitely() {
+        use std::fs;
+        use std::os::unix::fs as unix_fs;
+
+        let dir = tempfile::tempdir().expect("failed to create temp dir");
+        let dir_path = dir.path();
+
+        // Create a self-referential symlink: link -> . (points back to parent).
+        let link_path = dir_path.join("loop_link");
+        unix_fs::symlink(dir_path, &link_path).expect("failed to create symlink");
+
+        // Place a real font file so there's something to find.
+        let font_path = dir_path.join("TestFont.ttf");
+        fs::write(&font_path, b"FAKE_FONT").expect("write font file");
+
+        // The symlink loop must NOT cause infinite recursion or panic.
+        // The real font file must still be found (symlink is skipped, not the real dir).
+        let result = search_font_dir(dir_path, "testfont");
+        assert_eq!(
+            result,
+            Some(font_path),
+            "search_font_dir must find the real font file even when a symlink loop exists"
+        );
     }
 
     /// `search_font_dir` returns the **lexicographically-first** match when
