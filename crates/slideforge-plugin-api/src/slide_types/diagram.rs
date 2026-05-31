@@ -94,6 +94,7 @@ impl SlideType for DiagramSlideType {
             frames: vec![],
             speaker_notes: None,
             register_tags: vec![],
+        register_content: vec![],
         })
     }
 }

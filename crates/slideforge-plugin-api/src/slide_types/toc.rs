@@ -81,6 +81,7 @@ impl SlideType for TocSlideType {
             frames: vec![],
             speaker_notes: None,
             register_tags: vec![],
+        register_content: vec![],
         })
     }
 }

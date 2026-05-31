@@ -292,6 +292,12 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
             frames: all_frames,
             speaker_notes,
             register_tags,
+            // STORY-035: populated by extract_register_content pass in slideforge-eval.
+            // The layout engine does not yet call that pass; register_content is
+            // seeded empty here. When STORY-035 implementation is complete,
+            // eval_deck will call extract_register_content and thread the result
+            // through to LaidOutSlide before layout runs.
+            register_content: vec![],
         });
     }
 

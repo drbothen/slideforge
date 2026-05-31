@@ -21,6 +21,7 @@ use slideforge_types::ContentBlock;
 pub use slideforge_types::Emu;
 use slideforge_types::InlineNode;
 pub use slideforge_types::NormalizedDiagramSvg;
+pub use slideforge_types::RegisteredContent;
 // Re-export shape/warning types relocated to slideforge-types (STORY-028 pass-2).
 // Downstream code that imports these through slideforge-layout sees no change.
 pub use slideforge_types::{FillSpec, LayoutWarning, Rgb, ShapeType};
@@ -195,6 +196,30 @@ pub struct LaidOutSlide {
     ///
     /// An empty [`RegisterSet`] means the slide is unregistered (appears in all outputs).
     pub register_tags: RegisterSet,
+
+    /// Register-tagged content blocks for this slide.
+    ///
+    /// Populated by the `extract_register_content` pass in `slideforge-eval`
+    /// (STORY-035 / BC-1.14.001/002/003). Each entry carries a [`RegisteredContent`]
+    /// value that pairs a [`slideforge_types::Register`] tag with its evaluated
+    /// inline content.
+    ///
+    /// Exporters read only the entries for their allowed registers:
+    /// - PPTX: reads `Notes` entries only (speaker notes)
+    /// - DOCX: reads `Notes`, `Report`, and `Detail` entries
+    /// - PDF: reads `Report` and `Detail` entries
+    /// - HTML/preview: reads `Notes` only (presenter panel)
+    ///
+    /// An empty `Vec` means the slide has no register-gated content — all content
+    /// is visual and stored in `frames`.
+    ///
+    /// # Invariant (BC-1.14.004 invariant 3)
+    ///
+    /// No text present in any `RegisteredContent` entry may also appear in
+    /// `frames`. The evaluate pass removes register fields from the visual field
+    /// set before layout — this field is the single authoritative source for all
+    /// register-gated content.
+    pub register_content: Vec<RegisteredContent>,
 }
 
 /// A positioned content region within a laid-out slide.
@@ -581,6 +606,7 @@ mod tests {
             frames: vec![],
             speaker_notes: None,
             register_tags: vec![],
+            register_content: vec![],
         };
         let slide2 = slide.clone();
         assert_eq!(slide, slide2);
