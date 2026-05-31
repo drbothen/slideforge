@@ -88,11 +88,16 @@ impl BrandSynthesizer {
     ///
     /// # Errors
     ///
-    /// - [`BrandError::TomlReadError`] if `path` does not exist or cannot be read.
+    /// - [`BrandError::TomlReadError`] if `path` does not exist or cannot be read,
+    ///   or if `canonicalize` fails on the logo path or brand directory after the
+    ///   existence check passes.
     /// - [`BrandError::TomlParseError`] if the file content is not valid TOML.
     /// - [`BrandError::FileNotFound`] (E-BRD-001) if the declared `[logo].path` does
     ///   not exist on the filesystem. The logo path is resolved relative to the
     ///   directory containing `brand.toml`.
+    /// - [`BrandError::LogoOutsideBrandDir`] (E-BRD-007) if the resolved canonical
+    ///   logo path escapes the `brand.toml` parent directory via `../` traversal or
+    ///   a symlink pointing outside it.
     /// - Propagates all errors from [`BrandSynthesizer::synthesize`].
     ///
     /// On success, returns `(template, warnings)` — see [`BrandSynthesizer::synthesize`].
