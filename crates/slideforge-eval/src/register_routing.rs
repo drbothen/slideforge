@@ -38,6 +38,8 @@
 
 use slideforge_types::{FieldValue, InlineNode, Register, RegisteredContent, Slide, Value};
 
+use crate::filters::format_float_display;
+
 // ─── Public API ──────────────────────────────────────────────────────────────
 
 /// Extract register-gated content from a fully-evaluated slide.
@@ -113,8 +115,47 @@ pub fn extract_register_content(slide: &Slide) -> Vec<RegisteredContent> {
 /// error already reported upstream; only the literal parts are preserved.
 fn field_value_to_inlines(fv: &FieldValue) -> Option<Vec<InlineNode>> {
     match fv {
-        // Null, List, Map — semantically absent or non-text; produce no entry.
-        FieldValue::Literal(Value::Null | Value::List(_) | Value::Map(_)) => None,
+        // Null — semantically absent; produce no entry.
+        FieldValue::Literal(Value::Null) => None,
+
+        // List / Map — register fields are text-only by design (BC-1.14.001/002/003):
+        //
+        // Register fields (`notes`, `report`, `detail`) carry prose destined for
+        // a single writing register (presenter notes, reader narrative, document
+        // appendix). Those registers are always rendered as a block of text by
+        // exporters; there is no mechanism to render a list or map value as prose.
+        //
+        // Inconsistency note (F-035-P5-003): eval_expr_to_string (eval.rs:~78)
+        // emits EvalError::TypeMismatch (E-EVL-003) when a List/Map reaches a
+        // text interpolation. Here we cannot emit into a DiagnosticSink because
+        // extract_register_content is called from a public API that intentionally
+        // carries no sink (the function is pure-core; threading a sink would change
+        // its signature and every test call site). Instead we:
+        //   1. Emit a tracing::warn! so the drop is OBSERVABLE in structured logs.
+        //   2. Return None (no register entry produced), which is the same
+        //      observable effect as TypeMismatch in eval_expr_to_string (no output).
+        //
+        // This behavior is SPECIFIED and TESTED (see test_list_register_field_produces_no_entry
+        // and test_map_register_field_produces_no_entry). It is NOT a silent drop.
+        //
+        // If a future story threads a DiagnosticSink through extract_register_content,
+        // replace these tracing::warn! calls with sink.push_with_severity(TypeMismatch...).
+        FieldValue::Literal(Value::List(_)) => {
+            tracing::warn!(
+                "extract_register_content: register field resolved to List — \
+                 register fields are text-only (BC-1.14.001/002/003); \
+                 no register entry produced (F-035-P5-003)"
+            );
+            None
+        },
+        FieldValue::Literal(Value::Map(_)) => {
+            tracing::warn!(
+                "extract_register_content: register field resolved to Map — \
+                 register fields are text-only (BC-1.14.001/002/003); \
+                 no register entry produced (F-035-P5-003)"
+            );
+            None
+        },
 
         // Plain string (the common case after evaluation).
         FieldValue::Literal(Value::Str(s)) => {
@@ -129,7 +170,10 @@ fn field_value_to_inlines(fv: &FieldValue) -> Option<Vec<InlineNode>> {
             b.to_string().as_str(),
         ))]),
         FieldValue::Literal(Value::Float(f)) => Some(vec![InlineNode::Plain(
-            std::sync::Arc::from(f.to_string().as_str()),
+            // Route through the shared formatter (DI-012 / single-source consistency):
+            // avoids scientific notation for normal values and matches the output of
+            // every other evaluator text surface (eval_expr_to_string, filters::coerce_to_string).
+            std::sync::Arc::from(format_float_display(f.0).as_str()),
         )]),
 
         // Rich inline content (already-evaluated). Empty Inlines preserves author intent.
@@ -813,6 +857,310 @@ mod tests {
             content: vec![],
         };
         assert!(rc.is_empty(), "empty content must report is_empty == true");
+    }
+
+    // ─── F-035-P5-001: Inlines branch — rich inline formatting survives ──────
+
+    /// F-035-P5-001 (EC-003): A register field whose value is `FieldValue::Inlines`
+    /// must preserve the exact InlineNode variants in `RegisteredContent.content`.
+    ///
+    /// This covers BC-1.14.001 EC-003 ("notes field contains inline formatting"):
+    /// bold/italic/link/plain inline nodes that the DSL parser constructs for
+    /// rich-formatted register fields must pass through `extract_register_content`
+    /// without being flattened to plain text.
+    ///
+    /// Asserts structural equality, not just flattened text, so that a regression
+    /// that collapses formatting (e.g., Bold → Plain) is detected.
+    #[test]
+    fn test_f035_p5_001_rich_inlines_preserved_structurally() {
+        use slideforge_types::MathNode;
+
+        // Construct a notes field with FieldValue::Inlines containing
+        // Bold, Italic, Link, and Plain nodes — the canonical rich-inline set.
+        let bold_node = InlineNode::Bold(vec![InlineNode::Plain(Arc::from("important"))]);
+        let italic_node = InlineNode::Italic(vec![InlineNode::Plain(Arc::from("emphasis"))]);
+        let link_node = InlineNode::Link {
+            text: vec![InlineNode::Plain(Arc::from("click here"))],
+            url: Arc::from("https://example.com"),
+        };
+        let plain_node = InlineNode::Plain(Arc::from("trailing text"));
+        // Math node — exercises the Math variant of the Inlines path.
+        let math_node = InlineNode::Math(MathNode {
+            latex: Arc::from("E = mc^2"),
+            display: false,
+            span: slideforge_types::SourceSpan::default(),
+        });
+
+        let inlines = vec![
+            bold_node.clone(),
+            italic_node.clone(),
+            link_node.clone(),
+            plain_node.clone(),
+            math_node.clone(),
+        ];
+
+        let mut fields = OrderedMap::new();
+        fields.insert(Arc::from("notes"), FieldValue::Inlines(inlines.clone()));
+        let slide = make_slide_with_fields("content", fields);
+
+        let result = extract_register_content(&slide);
+
+        assert_eq!(
+            result.len(),
+            1,
+            "notes field with FieldValue::Inlines must produce exactly 1 entry"
+        );
+        assert_eq!(result[0].register, Register::Notes);
+        assert_eq!(
+            result[0].content, inlines,
+            "FieldValue::Inlines must be preserved structurally — \
+             rich inline formatting (Bold, Italic, Link, Math) must not be flattened"
+        );
+        // Structural checks: verify individual node variants are present.
+        assert!(
+            matches!(result[0].content[0], InlineNode::Bold(_)),
+            "first node must be Bold"
+        );
+        assert!(
+            matches!(result[0].content[1], InlineNode::Italic(_)),
+            "second node must be Italic"
+        );
+        assert!(
+            matches!(result[0].content[2], InlineNode::Link { .. }),
+            "third node must be Link"
+        );
+        assert!(
+            matches!(result[0].content[3], InlineNode::Plain(_)),
+            "fourth node must be Plain"
+        );
+        assert!(
+            matches!(result[0].content[4], InlineNode::Math(_)),
+            "fifth node must be Math"
+        );
+    }
+
+    /// F-035-P5-001: Empty `FieldValue::Inlines` produces a register entry with
+    /// empty content (author explicitly declared an empty rich-inline register field).
+    ///
+    /// Distinct from `Value::Null` (which produces no entry at all).
+    #[test]
+    fn test_f035_p5_001_empty_inlines_produces_one_entry() {
+        let mut fields = OrderedMap::new();
+        fields.insert(Arc::from("notes"), FieldValue::Inlines(vec![]));
+        let slide = make_slide_with_fields("content", fields);
+
+        let result = extract_register_content(&slide);
+
+        assert_eq!(
+            result.len(),
+            1,
+            "empty FieldValue::Inlines must produce 1 entry (author intent preserved)"
+        );
+        assert!(
+            result[0].content.is_empty(),
+            "content must be empty for empty Inlines"
+        );
+    }
+
+    // ─── F-035-P5-001: Scalar coercion arms — Int / Bool / Float ─────────────
+
+    /// F-035-P5-001: `FieldValue::Literal(Value::Int(n))` must produce a
+    /// `RegisteredContent` with a single `InlineNode::Plain` containing the
+    /// decimal string representation.
+    #[test]
+    fn test_f035_p5_001_int_register_field_formatted_as_decimal_string() {
+        let mut fields = OrderedMap::new();
+        fields.insert(Arc::from("notes"), FieldValue::Literal(Value::Int(42)));
+        let slide = make_slide_with_fields("content", fields);
+
+        let result = extract_register_content(&slide);
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].register, Register::Notes);
+        let text = extract_plain_text(&result[0].content);
+        assert_eq!(text, "42", "Int(42) must render as \"42\"");
+    }
+
+    /// Negative Int register field.
+    #[test]
+    fn test_f035_p5_001_negative_int_register_field_formatted_correctly() {
+        let mut fields = OrderedMap::new();
+        fields.insert(Arc::from("report"), FieldValue::Literal(Value::Int(-7)));
+        let slide = make_slide_with_fields("content", fields);
+
+        let result = extract_register_content(&slide);
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].register, Register::Report);
+        assert_eq!(extract_plain_text(&result[0].content), "-7");
+    }
+
+    /// F-035-P5-001: `FieldValue::Literal(Value::Bool(true))` must produce "true".
+    #[test]
+    fn test_f035_p5_001_bool_true_register_field_formatted_as_true() {
+        let mut fields = OrderedMap::new();
+        fields.insert(Arc::from("notes"), FieldValue::Literal(Value::Bool(true)));
+        let slide = make_slide_with_fields("content", fields);
+
+        let result = extract_register_content(&slide);
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(extract_plain_text(&result[0].content), "true");
+    }
+
+    /// F-035-P5-001: `FieldValue::Literal(Value::Bool(false))` must produce "false".
+    #[test]
+    fn test_f035_p5_001_bool_false_register_field_formatted_as_false() {
+        let mut fields = OrderedMap::new();
+        fields.insert(Arc::from("notes"), FieldValue::Literal(Value::Bool(false)));
+        let slide = make_slide_with_fields("content", fields);
+
+        let result = extract_register_content(&slide);
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(extract_plain_text(&result[0].content), "false");
+    }
+
+    // ─── F-035-P5-002: Float formatting via shared formatter ─────────────────
+
+    /// F-035-P5-002: Float register fields must use `format_float_display`
+    /// (the shared evaluator formatter), NOT raw `f64::Display`.
+    ///
+    /// Normal-range Float values must render without scientific notation.
+    #[test]
+    fn test_f035_p5_002_float_register_field_formatted_without_scientific_notation() {
+        use ordered_float::OrderedFloat;
+
+        // Use 1.5 — not an approximation of any known constant.
+        let mut fields = OrderedMap::new();
+        fields.insert(
+            Arc::from("notes"),
+            FieldValue::Literal(Value::Float(OrderedFloat(1.5))),
+        );
+        let slide = make_slide_with_fields("content", fields);
+
+        let result = extract_register_content(&slide);
+
+        assert_eq!(result.len(), 1);
+        let text = extract_plain_text(&result[0].content);
+        assert_eq!(text, "1.5", "Float(1.5) must render as \"1.5\"");
+        assert!(
+            !text.contains('e') && !text.contains('E'),
+            "normal-range Float must not use scientific notation; got: {text}"
+        );
+    }
+
+    /// F-035-P5-002 (DI-012 consistency): The Float register field must produce
+    /// IDENTICAL text to `format_float_display` for all values, not a divergent
+    /// rendering via raw `f64::Display`.
+    ///
+    /// This test exercises the consistency invariant directly: whatever value
+    /// `format_float_display` returns for a given f64, the register field
+    /// output for the same f64 must be byte-identical.
+    ///
+    /// Note: Rust's `f64::Display` does NOT use scientific notation — it always
+    /// emits full decimal strings. Therefore the `format_float_display` fallback
+    /// path (for 'e'/'E' in Display output) is never reached in practice.
+    /// The fix still matters for forward-compatibility if `format_float_display`
+    /// is ever updated to apply rounding/truncation, or if the float formatting
+    /// behavior changes between Rust editions. Routing through the shared function
+    /// ensures the register surface stays consistent with interpolation surfaces.
+    #[test]
+    fn test_f035_p5_002_float_formatting_consistent_with_shared_formatter() {
+        use ordered_float::OrderedFloat;
+
+        // Probe several representative float values: integer-valued, fractional,
+        // very large, very small. All must match format_float_display exactly.
+        // Values chosen to avoid clippy::approx_constant (no ~PI, ~E, etc.).
+        // Use simple decimal values and one small float to exercise the formatter.
+        let cases: &[(f64, &str)] = &[
+            (0.0, "0"),
+            (1.0, "1"),
+            (1.5, "1.5"),
+            (-1.25, "-1.25"),
+            (1_000_000.0, "1000000"),
+            (0.001, "0.001"),
+            (1.234_567_89e-10, "0.000000000123456789"),
+        ];
+
+        for (val, expected_display) in cases {
+            let from_formatter = crate::filters::format_float_display(*val);
+            // Verify test fixture first: our expected_display matches format_float_display.
+            assert_eq!(
+                from_formatter, *expected_display,
+                "fixture: format_float_display({val}) must equal {expected_display:?}"
+            );
+
+            let mut fields = OrderedMap::new();
+            fields.insert(
+                Arc::from("notes"),
+                FieldValue::Literal(Value::Float(OrderedFloat(*val))),
+            );
+            let slide = make_slide_with_fields("content", fields);
+            let result = extract_register_content(&slide);
+
+            assert_eq!(result.len(), 1, "Float({val}) must produce 1 entry");
+            let text = extract_plain_text(&result[0].content);
+            assert_eq!(
+                text, from_formatter,
+                "Float({val}) register formatting must be IDENTICAL to \
+                 format_float_display output (DI-012 single-source consistency); \
+                 got {text:?}, expected {from_formatter:?}"
+            );
+        }
+    }
+
+    // ─── F-035-P5-003: List/Map — documented, tested, observable drop ─────────
+
+    /// F-035-P5-003: A register field resolving to `Value::List` must produce
+    /// no `RegisteredContent` entry.
+    ///
+    /// Register fields are text-only by design (BC-1.14.001/002/003). List values
+    /// cannot be rendered as prose. The drop is observable via `tracing::warn!`
+    /// (see the code comment in `field_value_to_inlines`). This test specifies
+    /// and locks in the documented behavior so it is NOT a silent, untested drop.
+    #[test]
+    fn test_f035_p5_003_list_register_field_produces_no_entry() {
+        let mut fields = OrderedMap::new();
+        fields.insert(
+            Arc::from("notes"),
+            FieldValue::Literal(Value::List(vec![
+                Value::Str(Arc::from("item1")),
+                Value::Str(Arc::from("item2")),
+            ])),
+        );
+        let slide = make_slide_with_fields("content", fields);
+
+        let result = extract_register_content(&slide);
+
+        assert!(
+            result.is_empty(),
+            "notes field with List value must produce NO register entry \
+             (register fields are text-only, BC-1.14.001/002/003; \
+             drop is logged via tracing::warn! — F-035-P5-003); got: {result:?}"
+        );
+    }
+
+    /// F-035-P5-003: A register field resolving to `Value::Map` must produce
+    /// no `RegisteredContent` entry.
+    ///
+    /// Same reasoning as the List case — maps have no prose rendering.
+    #[test]
+    fn test_f035_p5_003_map_register_field_produces_no_entry() {
+        let mut map = OrderedMap::new();
+        map.insert(Arc::from("key"), Value::Str(Arc::from("val")));
+        let mut fields = OrderedMap::new();
+        fields.insert(Arc::from("notes"), FieldValue::Literal(Value::Map(map)));
+        let slide = make_slide_with_fields("content", fields);
+
+        let result = extract_register_content(&slide);
+
+        assert!(
+            result.is_empty(),
+            "notes field with Map value must produce NO register entry \
+             (register fields are text-only, BC-1.14.001/002/003; \
+             drop is logged via tracing::warn! — F-035-P5-003); got: {result:?}"
+        );
     }
 
     // ─── Helper: extract plain text from InlineNode sequence ──────────────────
