@@ -159,8 +159,8 @@ These methods are used by all exporter test suites from STORY-037 onward.
   - Implement `assert_absent_from_pptx_all(bytes, sentinel)`: unzip, scan all files
   - Implement `assert_present_in_docx_body(bytes, sentinel)`: unzip, scan document.xml
   - Implement `assert_absent_from_docx_body(bytes, sentinel)`: unzip, scan document.xml
-- [ ] Create canonical test fixture file `tests/fixtures/three-register-slide.sf` with all three registers plus visual content
-- [ ] Write bleed invariant tests in `crates/slideforge-eval/src/tests/bleed_tests.rs`:
+- [ ] Create canonical test fixture file `crates/slideforge-eval/tests/fixtures/three-register-slide.sf` with all three registers plus visual content
+- [ ] Write bleed invariant tests in `crates/slideforge-eval/tests/bleed_tests.rs` (integration test target, `required-features = ["test-utils"]`):
   - AC-001: notes sentinel absent from PPTX slides (stubbed — depends on STORY-037)
   - AC-002: report sentinel absent from PPTX slides (stubbed)
   - AC-003: detail sentinel absent from PPTX all parts
@@ -188,8 +188,11 @@ with the sentinel string visible in the assertion error.
 1. **BC-1.14.004 invariant 2**: Routing rules are determined at the Evaluate stage,
    not the Export stage. This story implements the TEST that verifies exporters honor
    those rules — the tests run against post-serialization bytes.
-2. **`BleedChecker` is test-only**: `#[cfg(test)]`. No production code path calls it.
-   It is a test utility, not a runtime guard.
+2. **`BleedChecker` is a test utility gated behind the `test-utils` Cargo feature**:
+   `#[cfg(feature = "test-utils")]`. No production code path calls it — it is a test
+   utility, not a runtime guard. Exporter crates access it via `[dev-dependencies]`
+   with `features = ["test-utils"]`. The `#[cfg(test)]` annotation alone is NOT used
+   because `#[cfg(test)]` items are invisible across crate boundaries.
 3. **SS-02 pure-core boundary**: The `BleedChecker` utility is pure computation
    (ZIP parsing + string search). No I/O in production code.
 4. **Stub tests unlock exporter stories**: The stubbed tests (marked `#[ignore]`) are
@@ -202,16 +205,18 @@ with the sentinel string visible in the assertion error.
 |---------|---------|---------|
 | `slideforge-eval` (self) | workspace | `BleedChecker` implementation |
 | `slideforge-types` (workspace) | workspace | `Register`, `RegisteredContent` |
-| `zip` | `=4.2.0` | ZIP unpacking in `BleedChecker` (test-only dev-dep; compatible with ooxmlsdk 0.6.1) |
+| `zip` | `=2.3.0` | ZIP unpacking in `BleedChecker` (optional dep under `test-utils` feature; lockfile-resolved version — `=4.2.0` does not exist on crates.io) |
+| `quick-xml` | `=0.36.0` | XML-entity decoding in `BleedChecker` (EC-004 — checks decoded text, not raw bytes); optional dep under `test-utils` feature |
 
 ## File Structure Requirements
 
 | File | Action | Purpose |
 |------|--------|---------|
-| `crates/slideforge-eval/src/bleed_check.rs` | Create | `BleedChecker` test utility (`#[cfg(test)]`) |
-| `crates/slideforge-eval/src/tests/bleed_tests.rs` | Create | Bleed invariant tests (some stubbed) |
-| `tests/fixtures/three-register-slide.sf` | Create | Canonical three-register test deck |
-| `crates/slideforge-eval/src/lib.rs` | Modify | Re-export `BleedChecker` for exporter test use |
+| `crates/slideforge-eval/src/bleed_check.rs` | Create | `BleedChecker` test utility, gated `#[cfg(feature = "test-utils")]` |
+| `crates/slideforge-eval/tests/bleed_tests.rs` | Create | Integration test target (cross-crate harness); `required-features = ["test-utils"]` in `Cargo.toml` `[[test]]` table |
+| `crates/slideforge-eval/tests/fixtures/three-register-slide.sf` | Create | Canonical three-register test fixture deck |
+| `crates/slideforge-eval/Cargo.toml` | Modify | Add `test-utils` feature; declare `zip` and `quick-xml` as optional deps under the feature; add `[[test]]` table entry with `required-features = ["test-utils"]` |
+| `crates/slideforge-eval/src/lib.rs` | Modify | Re-export `BleedChecker` under `#[cfg(feature = "test-utils")]` so exporter crates can access it via `[dev-dependencies]` |
 
 ## Token Budget Estimate
 
@@ -248,4 +253,6 @@ with the sentinel string visible in the assertion error.
 Same as STORY-035:
 - `slideforge-pptx`, `slideforge-docx`, `slideforge-pdf`, `slideforge-html`, `slideforge-preview`
   must NOT appear in `slideforge-eval/Cargo.toml` as production deps.
-- The `zip` crate is acceptable as a `[dev-dependencies]` dep only (used only in `#[cfg(test)]`).
+- The `zip` and `quick-xml` crates are acceptable only as optional dependencies under the
+  `test-utils` Cargo feature (`[dev-dependencies]` of exporter crates). They must NOT
+  appear as unconditional production dependencies of `slideforge-eval`.

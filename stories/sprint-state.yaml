@@ -33,7 +33,7 @@ wave_4_batch_a:
   stories: [STORY-035, STORY-036, STORY-043, STORY-044, STORY-045, STORY-073, STORY-075, STORY-076, STORY-077]
   execution: parallel
   chains: ["STORY-035→036", "STORY-043→044→045", "STORY-073 independent", "STORY-075 independent", "STORY-076 independent", "STORY-077 independent (blocks STORY-041/042 in Batch B)"]
-  completed: 1
+  completed: 2
   total: 9
 wave_4_batch_b:
   stories: [STORY-037, STORY-038, STORY-039, STORY-040, STORY-041, STORY-042]
@@ -48,8 +48,8 @@ wave_4_batch_c:
 wave_4_pulled_in_p1: [STORY-073, STORY-075, STORY-076]
 wave_4_deferred_p2_to_wave5: [STORY-072, STORY-074]
 wave_4_bc_deltas: "BC-2.01.001 v1.1→v1.2; BC-2.01.003 v1.8→v1.9; error-taxonomy v2.2→v2.3"
-develop_sha: "0e7d9fde"
-develop_pr_count: 39
+develop_sha: "094f8dca"
+develop_pr_count: 40
 ---
 
 stories:
@@ -339,12 +339,16 @@ stories:
     tests: "743/743 GREEN"
     notes: "BC-1.14.004 added to spec; architect directive in cycles/STORY-035/architecture-directive.md; Option D single-source eval-stage routing; AC-005 descoped → STORY-077 (EC-003)"
   STORY-036:
-    status: not-started
+    status: merged
     wave: 4
     batch: A
     priority: P0
     points: 5
-    notes: "Register-Aware Rendering: No Content Bleed Invariant; depends on STORY-035"
+    pr: 40
+    merge_commit: "094f8dca"
+    merged: 2026-05-31
+    adversary_convergence: "3/3 strict-CLEAN at passes 7/8/9 (9-pass total cascade)"
+    notes: "Register-Aware Rendering: No Content Bleed Invariant. BleedChecker test utility (test-utils feature-gated). Exporter ACs (AC-001..AC-007) deferred to STORY-037/041/046. 6 fix-bursts hardening XML entity decoder. Cross-story: STORY-037/041 must emit register sentinels as contiguous XML runs."
   STORY-037:
     status: not-started
     wave: 4
