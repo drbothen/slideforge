@@ -27,6 +27,10 @@ pub struct DiagramOptions {
 }
 
 /// Error returned by [`DiagramRenderer::render`].
+///
+/// `#[non_exhaustive]` allows adding variants in minor releases without
+/// breaking external plugin authors who pattern-match this enum (SemVer hygiene).
+#[non_exhaustive]
 #[derive(Debug, Error)]
 pub enum DiagramError {
     /// The diagram source contains a syntax error.

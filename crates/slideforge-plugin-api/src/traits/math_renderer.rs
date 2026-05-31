@@ -44,6 +44,10 @@ impl std::fmt::Display for MathOutputFormat {
 }
 
 /// Error returned by [`MathRenderer::render`].
+///
+/// `#[non_exhaustive]` allows adding variants in minor releases without
+/// breaking external plugin authors who pattern-match this enum (SemVer hygiene).
+#[non_exhaustive]
 #[derive(Debug, Error)]
 pub enum MathError {
     /// The LaTeX source in the [`MathNode`] contains a syntax error.
