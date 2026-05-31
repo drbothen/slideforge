@@ -60,8 +60,12 @@ proptest! {
         elem_h_fraction in 0.0_f64..=1.0_f64,
     ) {
         // Derive ir_y and element_h so that ir_y + element_h <= slide_h.
+        // cast_precision_loss: i64→f64 for EMU fraction math (values ≤ 91_440_000 — acceptable)
+        // cast_possible_truncation: f64→i64 for deriving integer EMU from fraction — intentional
+        #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
         let ir_y_emu = (ir_y_fraction * slide_h_emu as f64) as i64;
         let remaining = slide_h_emu - ir_y_emu;
+        #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
         let elem_h_emu = (elem_h_fraction * remaining as f64) as i64;
 
         // Precondition: ir_y + elem_h <= slide_h (guaranteed by construction).

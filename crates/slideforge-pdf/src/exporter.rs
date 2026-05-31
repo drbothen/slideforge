@@ -23,34 +23,43 @@
 //!   The exporter maps `PdfExportError` → `ExportError::RenderError` at the
 //!   trait boundary.
 //!
-//! ## Architecture (BC-4.03.002)
+//! ## Architecture (BC-4.03.002 + STORY-044)
 //!
 //! `PdfExporter` is an effectful shell (ARCH-INDEX SS-07). It:
 //! 1. Creates a `krilla::Document::new()`.
 //! 2. Iterates over `laid_out.slides`, calling `SlideTagEngine::tag_slide`
-//!    for each slide to build its structural tag sub-tree. Content drawing
-//!    (text, SVG paths via `svg_embed`) is added in STORY-044.
-//! 3. Calls `document.set_tag_tree(tag_tree)` with the assembled structural tree.
-//! 4. Calls `document.finish()` → `KrillaResult<Vec<u8>>`.
-//! 5. Maps `KrillaError` → `PdfExportError::Serialize` → `ExportError::RenderError`.
-//! 6. Returns the PDF bytes.
+//!    for each slide to build its structural tag sub-tree.
+//! 3. Draws slide content via krilla's Surface API:
+//!    - Text frames (Title/Subtitle/Body/TextRun): `surface.draw_text()` at
+//!      coordinates from `coords::emu_to_pt()` / `coords::ir_y_to_pdf_y()`.
+//!    - Diagram frames: `svg_embed::embed_normalized_svg()`.
+//! 4. Calls `document.set_tag_tree(tag_tree)` with the assembled structural tree.
+//! 5. Calls `document.finish()` → `KrillaResult<Vec<u8>>`.
+//! 6. Maps `KrillaError` → `PdfExportError::Serialize` → `ExportError::RenderError`.
+//! 7. Returns the PDF bytes.
 //!
 //! No subprocess is spawned. No FFI to C libraries. Pure Rust.
 //!
-//! ## EMU canonicalization (F-005)
+//! ## EMU coordinate policy (BC-4.03.005 / Architecture Compliance Rule 2)
 //!
-//! All EMU-to-points conversions use [`slideforge_types::Emu::to_points`] which
-//! calls the canonical `EMU_PER_POINT = 12_700` constant defined in
-//! `slideforge-types`. The private `EMU_PER_POINT` constant previously
-//! duplicated here has been removed.
+//! ALL EMU-to-point conversions go through `coords::emu_to_pt()`. No inline
+//! `emu / 12700` arithmetic is permitted anywhere in this file. This invariant
+//! enables the Kani proof for `emu_to_pt` (VP-006, Phase 6) to cover all
+//! conversion sites.
 
 use krilla::Document;
+use krilla::geom::Point;
 use krilla::page::PageSettings;
+use krilla::text::TextDirection;
 use slideforge_layout::LaidOutDeck;
+use slideforge_layout::types::{BoundingBox, FrameContent};
 use slideforge_plugin_api::{ExportError, ExportOptions, Exporter};
-use slideforge_types::{Brand, Deck};
+use slideforge_types::{Brand, Deck, Emu};
 
+use crate::coords::{emu_to_pt, ir_y_to_pdf_y};
 use crate::error::PdfExportError;
+use crate::font::load_font_data;
+use crate::svg_embed::embed_normalized_svg;
 use crate::tag_engine::SlideTagEngine;
 
 /// PDF exporter implementing the [`Exporter`] plugin trait.
@@ -74,29 +83,41 @@ impl PdfExporter {
     /// Core PDF generation logic — called from [`Exporter::export`].
     ///
     /// Returns raw PDF bytes on success. `&self` is included for future use
-    /// when `PdfExporter` carries font caches or configuration (STORY-044+).
+    /// when `PdfExporter` carries font caches or configuration.
     ///
-    /// Current behavior (STORY-043 scope):
-    /// - Creates a `krilla::Document`.
-    /// - Iterates over `laid_out.slides`, calling `SlideTagEngine::tag_slide`
-    ///   for each slide to build its PDF/UA-1 structural tag sub-tree.
-    /// - Produces structurally tagged but otherwise blank pages — content
-    ///   drawing (text, SVG paths via `svg_embed`) is wired in STORY-044.
-    /// - Assembles per-slide `Part` groups into the deck-level `TagTree` via
-    ///   `SlideTagEngine::assemble_deck_tag_tree` and attaches it with
-    ///   `document.set_tag_tree(tag_tree)` before `document.finish()`.
-    /// - Returns the serialized PDF bytes.
+    /// ## Drawing pass (STORY-044)
+    ///
+    /// For each slide, this function draws:
+    /// - Text frames (Title/Subtitle/Body/TextRun): `surface.draw_text()` at
+    ///   coordinates computed via `coords::emu_to_pt()` and `coords::ir_y_to_pdf_y()`.
+    ///   Font is resolved from brand family name via `font::system_font_fallback()`
+    ///   then `krilla::text::Font::new()`. If no font can be resolved, text drawing
+    ///   is skipped with a `tracing::warn!` — the page still renders.
+    /// - Diagram frames: `svg_embed::embed_normalized_svg()` at the mapped position.
+    ///
+    /// ## Coordinate invariant (BC-4.03.005 / Architecture Compliance Rule 2)
+    ///
+    /// ALL EMU-to-point conversions go through `coords::emu_to_pt()` and
+    /// `coords::ir_y_to_pdf_y()`. No inline `emu / 12700` arithmetic is used.
     ///
     /// # Errors
     ///
-    /// Returns [`PdfExportError`] on failure. The [`Exporter::export`]
-    /// implementation maps this to [`ExportError::RenderError`].
+    /// Returns [`PdfExportError`] on:
+    /// - Invalid page dimensions.
+    /// - Tag tree assembly failure.
+    /// - SVG embed failure.
+    /// - Document serialization failure.
+    ///
+    /// Note: Font resolution failures are non-fatal — text is skipped with a
+    /// structured warning, and the export continues. This ensures a partial PDF
+    /// (without text) is returned rather than an export failure when a brand font
+    /// is unavailable in the current environment.
     #[allow(clippy::unused_self)]
     fn generate_pdf(
         &self,
         _deck: &Deck,
         laid_out: &LaidOutDeck,
-        _brand: &Brand,
+        brand: &Brand,
         _opts: &ExportOptions,
     ) -> Result<Vec<u8>, PdfExportError> {
         // Create a krilla Document with default settings.
@@ -106,19 +127,25 @@ impl PdfExporter {
         // Instantiate the tag engine — one per export pass, stateless per slide.
         let tag_engine = SlideTagEngine::new();
 
+        // Resolve a font for text drawing. Source order:
+        //   1. brand.fonts.heading — resolved via system_font_fallback()
+        //   2. brand.fonts.body   — fallback if heading not found
+        //
+        // If neither resolves, `resolved_font` is None and text frames are
+        // skipped with a tracing::warn! (graceful degradation — export still
+        // produces a PDF without text rather than failing).
+        let resolved_font = resolve_brand_font(brand);
+
         // Collect per-slide Part groups for later assembly into the deck tag tree.
         let mut slide_parts = Vec::with_capacity(laid_out.slides.len());
 
+        // Slide height in EMU for ir_y_to_pdf_y — taken from the deck's page size.
+        let slide_h_emu = laid_out.page_size.height;
+
         for slide in &laid_out.slides {
-            // Convert page dimensions from EMU to PDF points using the canonical
-            // Emu::to_points() from slideforge-types (EMU_PER_POINT = 12_700).
-            // TD-VSDD-060: no duplicate EMU_PER_POINT constant in this crate.
-            // f64→f32 truncation is intentional: PDF point precision at typical
-            // slide sizes (720×540 pt) loses < 0.01 pt — below rendering tolerance.
-            #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
-            let width_pts = laid_out.page_size.width.to_points() as f32;
-            #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
-            let height_pts = laid_out.page_size.height.to_points() as f32;
+            // Convert page dimensions via coords:: — Architecture Compliance Rule 2.
+            let width_pts = emu_to_pt(laid_out.page_size.width);
+            let height_pts = emu_to_pt(laid_out.page_size.height);
 
             let page_settings = PageSettings::from_wh(width_pts, height_pts).ok_or_else(|| {
                 PdfExportError::Serialize {
@@ -132,18 +159,21 @@ impl PdfExporter {
             let mut page = document.start_page_with(page_settings);
 
             // Build the structural tag sub-tree for this slide.
-            // tag_slide returns a PartResult containing the Part TagGroup and
-            // the list of decorative frame indices.
             let part_result = tag_engine.tag_slide(slide)?;
 
-            // `surface` is obtained for drawing operations.
-            // Content drawing (text, SVG paths) is added in STORY-044/STORY-045.
-            // The page is currently blank except for the tag structure tree.
-            //
-            // Decorative frames (part_result.decorative_frame_indices) will be
-            // marked with ContentTag::Artifact(ArtifactType::Other) during the
-            // drawing pass in STORY-044.
-            let surface = page.surface();
+            // Obtain the krilla Surface and draw slide content.
+            let mut surface = page.surface();
+
+            for frame in &slide.frames {
+                draw_frame(
+                    &mut surface,
+                    &frame.bbox,
+                    &frame.content,
+                    slide_h_emu,
+                    resolved_font.as_ref(),
+                )?;
+            }
+
             surface.finish();
             page.finish();
 
@@ -171,6 +201,266 @@ impl Default for PdfExporter {
     fn default() -> Self {
         Self::new()
     }
+}
+
+// ─── Font resolution ──────────────────────────────────────────────────────────
+
+/// Resolve a krilla font for text drawing from the brand font configuration.
+///
+/// Tries `brand.fonts.heading` first, then `brand.fonts.body`. For each, calls
+/// [`crate::font::system_font_fallback`] to find a font file by family name,
+/// then `load_font_data` to read the bytes, then `krilla::text::Font::new`.
+///
+/// Returns `None` if no font can be resolved (missing system font or unreadable
+/// file). Callers MUST skip text drawing when `None` is returned rather than
+/// failing the export — font unavailability is non-fatal.
+fn resolve_brand_font(brand: &Brand) -> Option<krilla::text::Font> {
+    let candidates = [brand.fonts.heading.as_ref(), brand.fonts.body.as_ref()];
+    for family in &candidates {
+        if let Some(font) = try_resolve_font(family) {
+            return Some(font);
+        }
+    }
+    tracing::warn!(
+        heading = %brand.fonts.heading,
+        body = %brand.fonts.body,
+        "brand font families not found on this system — text drawing will be skipped; \
+         PDF will contain structural content but no visible text"
+    );
+    None
+}
+
+/// Attempt to resolve a single font family name to a `krilla::text::Font`.
+///
+/// Returns `None` on any failure (family not found, file unreadable, invalid
+/// font data). All failures are logged at `tracing::debug!` level for
+/// diagnostics without exposing internal paths to callers (SEC-005).
+fn try_resolve_font(family: &str) -> Option<krilla::text::Font> {
+    use crate::font::system_font_fallback;
+
+    let path = system_font_fallback(family)?;
+    let bytes = load_font_data(&path)
+        .map_err(|e| {
+            tracing::debug!(family, path = %path.display(), error = %e, "font file load failed");
+        })
+        .ok()?;
+    let data: krilla::Data = bytes.into();
+    let font = krilla::text::Font::new(data, 0);
+    if font.is_none() {
+        tracing::debug!(
+            family,
+            "krilla::text::Font::new returned None for font file"
+        );
+    }
+    font
+}
+
+// ─── Frame content drawing ────────────────────────────────────────────────────
+
+/// Draw the content of a single layout frame onto a krilla `Surface`.
+///
+/// All coordinate conversions go through `coords::emu_to_pt()` and
+/// `coords::ir_y_to_pdf_y()` (BC-4.03.005 Architecture Compliance Rule 2).
+///
+/// ## Text baseline approximation
+///
+/// PDF text coordinates are specified at the **baseline** of the first line of
+/// text. The IR gives the top-left corner of the bounding box. A reasonable
+/// baseline approximation for a single-line draw is:
+///
+/// ```text
+/// baseline_y ≈ ir_y_to_pdf_y(ir_y, element_h, slide_h) + element_h_pt * 0.8
+/// ```
+///
+/// This places the baseline at approximately 80% of the box height from the
+/// PDF bottom of the box (i.e., 20% descender allowance below the text). Text
+/// is guaranteed to land within `[0, SLIDE_HEIGHT_PT]` for any valid IR layout.
+///
+/// Precise multi-line typography is deferred to STORY-045 (text flow engine).
+///
+/// ## Font sizes
+///
+/// Default font sizes: Title 36pt, Subtitle 28pt, Body/other 18pt.
+/// These defaults are overridden when brand template font sizes are available
+/// (STORY-045 scope).
+///
+/// # Errors
+///
+/// Returns [`PdfExportError::SvgEmbed`] for diagram frame failures. All other
+/// frame types silently skip on failure (font unavailable, empty content, etc.).
+fn draw_frame(
+    surface: &mut krilla::surface::Surface<'_>,
+    bbox: &BoundingBox,
+    content: &FrameContent,
+    slide_h_emu: Emu,
+    font: Option<&krilla::text::Font>,
+) -> Result<(), PdfExportError> {
+    match content {
+        FrameContent::Title(text) => {
+            draw_text_at_bbox(surface, text, bbox, slide_h_emu, 36.0, font);
+        },
+        FrameContent::Subtitle(text) => {
+            draw_text_at_bbox(surface, text, bbox, slide_h_emu, 28.0, font);
+        },
+        FrameContent::Body(blocks) => {
+            draw_body_blocks(surface, blocks, bbox, slide_h_emu, font);
+        },
+        FrameContent::TextRun(inlines) => {
+            let text = extract_inline_text(inlines);
+            if !text.is_empty() {
+                draw_text_at_bbox(surface, &text, bbox, slide_h_emu, 18.0, font);
+            }
+        },
+        FrameContent::Diagram(svg) => {
+            // Place the SVG at the frame's PDF coordinates.
+            // SVG content is drawn at the PDF-mapped position using a translate
+            // transform so paths land within the frame's bounding box.
+            let pdf_x = emu_to_pt(bbox.x);
+            let pdf_y = ir_y_to_pdf_y(bbox.y, bbox.height, slide_h_emu);
+            place_svg_at(surface, svg, pdf_x, pdf_y)?;
+        },
+        // ErrorSlidePlaceholder carries an SVG — render it like a diagram.
+        FrameContent::ErrorSlidePlaceholder { svg, .. } => {
+            use slideforge_types::NormalizedDiagramSvg;
+            use std::sync::Arc;
+            let normalized = NormalizedDiagramSvg::from_normalized_string(Arc::from(svg.as_ref()));
+            let pdf_x = emu_to_pt(bbox.x);
+            let pdf_y = ir_y_to_pdf_y(bbox.y, bbox.height, slide_h_emu);
+            place_svg_at(surface, &normalized, pdf_x, pdf_y)?;
+        },
+        // Chart: no SVG payload at frame level — drawn via ChartRenderer pass.
+        // Image, Shape, Empty: no drawing in this story.
+        FrameContent::Chart
+        | FrameContent::Image { .. }
+        | FrameContent::Shape(_)
+        | FrameContent::Empty => {},
+    }
+    Ok(())
+}
+
+/// Draw text at a bounding box position using PDF coordinate mapping.
+///
+/// If `font` is `None`, logs a debug warning and skips drawing. This is the
+/// correct non-fatal behavior when a brand font is unavailable.
+fn draw_text_at_bbox(
+    surface: &mut krilla::surface::Surface<'_>,
+    text: &str,
+    bbox: &BoundingBox,
+    slide_h_emu: Emu,
+    font_size: f32,
+    font: Option<&krilla::text::Font>,
+) {
+    let Some(font) = font else {
+        tracing::debug!(
+            text_preview = &text[..text.len().min(20)],
+            "skipping text draw: no resolved font"
+        );
+        return;
+    };
+    if text.is_empty() {
+        return;
+    }
+
+    // PDF X: left edge of the bounding box.
+    let pdf_x = emu_to_pt(bbox.x);
+
+    // PDF Y baseline: bottom of the bounding box in PDF coords + 80% of height
+    // as the baseline approximation (20% descender allowance).
+    let box_bottom_pdf_y = ir_y_to_pdf_y(bbox.y, bbox.height, slide_h_emu);
+    let element_h_pt = emu_to_pt(bbox.height);
+    let baseline_y = box_bottom_pdf_y + element_h_pt * 0.8;
+
+    let start = Point::from_xy(pdf_x, baseline_y);
+    surface.draw_text(
+        start,
+        font.clone(),
+        font_size,
+        text,
+        false,
+        TextDirection::Auto,
+    );
+}
+
+/// Draw body content blocks at the given bounding box.
+///
+/// Iterates text-bearing blocks (Text, Bullets) and draws their inline text.
+/// Non-text blocks (Chart, Diagram, Math, Image, Table, Shape) are skipped in
+/// this pass — they are handled separately in their own frame draw logic.
+fn draw_body_blocks(
+    surface: &mut krilla::surface::Surface<'_>,
+    blocks: &[slideforge_types::ContentBlock],
+    bbox: &BoundingBox,
+    slide_h_emu: Emu,
+    font: Option<&krilla::text::Font>,
+) {
+    use slideforge_types::ContentBlock;
+
+    for block in blocks {
+        match block {
+            ContentBlock::Text(text_block) => {
+                let text = extract_inline_text(&text_block.inlines);
+                if !text.is_empty() {
+                    draw_text_at_bbox(surface, &text, bbox, slide_h_emu, 18.0, font);
+                }
+            },
+            ContentBlock::Bullets(items) => {
+                for item in items {
+                    let text = extract_inline_text(&item.inlines);
+                    if !text.is_empty() {
+                        draw_text_at_bbox(surface, &text, bbox, slide_h_emu, 16.0, font);
+                    }
+                }
+            },
+            // Other block types are not drawn in this pass.
+            ContentBlock::Chart(_)
+            | ContentBlock::Diagram(_)
+            | ContentBlock::Math(_)
+            | ContentBlock::Image(_)
+            | ContentBlock::Table(_)
+            | ContentBlock::Shape(_) => {},
+        }
+    }
+}
+
+/// Extract a flat plain-text string from a sequence of [`InlineNode`]s.
+///
+/// Traverses `Bold` and `Italic` nodes recursively to collect all
+/// [`InlineNode::Plain`] leaf text. Other inline variants (Code, Xref, etc.)
+/// are skipped in this story — they contribute to the text stream in STORY-045.
+fn extract_inline_text(inlines: &[slideforge_types::InlineNode]) -> String {
+    use slideforge_types::InlineNode;
+
+    let mut out = String::new();
+    for node in inlines {
+        match node {
+            InlineNode::Plain(s) => out.push_str(s),
+            InlineNode::Bold(children) | InlineNode::Italic(children) => {
+                out.push_str(&extract_inline_text(children));
+            },
+            // Other variants (Code, Xref, Math, etc.) deferred to STORY-045.
+            _ => {},
+        }
+    }
+    out
+}
+
+/// Place a normalized SVG diagram on the surface at the specified PDF position.
+///
+/// Applies a translation transform so the SVG paths land at `(pdf_x, pdf_y)`.
+/// The transform is pushed before embedding and popped after, leaving the
+/// surface state unchanged for subsequent draw calls.
+fn place_svg_at(
+    surface: &mut krilla::surface::Surface<'_>,
+    svg: &slideforge_types::NormalizedDiagramSvg,
+    pdf_x: f32,
+    pdf_y: f32,
+) -> Result<(), PdfExportError> {
+    // Apply a translation so the SVG is positioned at the frame's PDF coords.
+    let transform = krilla::geom::Transform::from_translate(pdf_x, pdf_y);
+    surface.push_transform(&transform);
+    let result = embed_normalized_svg(svg, surface);
+    surface.pop();
+    result
 }
 
 impl Exporter for PdfExporter {

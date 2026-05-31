@@ -220,9 +220,6 @@ fn test_bc_4_03_002_ac009_lm_math_fixture_exists_and_is_large() {
 /// bytes between the FIRST `/FontFile`-adjacent stream marker and `endstream`.
 /// This is sufficient to prove the assertion — if ANY font is embedded and is
 /// smaller than the full font, subsetting occurred.
-#[ignore = "STORY-044: requires text drawing wired in PdfExporter::export(). \
-            Un-ignore after implementing generate_pdf() draw loop. \
-            Fixture: crates/slideforge-math/fonts/latinmodern-math.otf (717 KiB, 4802 glyphs)."]
 #[test]
 #[allow(clippy::unwrap_used)]
 fn test_bc_4_03_002_ac009_font_subset_smaller_than_full_font() {
@@ -237,7 +234,10 @@ fn test_bc_4_03_002_ac009_font_subset_smaller_than_full_font() {
     // ── 1. Load the Latin Modern Math OTF fixture ──────────────────────────
     let font_path = lm_math_font_path();
     let full_font_bytes: Vec<u8> = std::fs::read(&font_path).unwrap_or_else(|e| {
-        panic!("Failed to read Latin Modern Math OTF from {}: {e}", font_path.display())
+        panic!(
+            "Failed to read Latin Modern Math OTF from {}: {e}",
+            font_path.display()
+        )
     });
     let full_font_size = full_font_bytes.len();
 
@@ -252,9 +252,8 @@ fn test_bc_4_03_002_ac009_font_subset_smaller_than_full_font() {
     // krilla::Data: pub use data::*; Data implements From<Vec<u8>>.
     // Use .into() coercion: Vec<u8> -> krilla::Data.
     let font_data: krilla::Data = full_font_bytes.clone().into();
-    let font = Font::new(font_data, 0).expect(
-        "krilla::text::Font::new must succeed for a valid OTF file (Latin Modern Math)"
-    );
+    let font = Font::new(font_data, 0)
+        .expect("krilla::text::Font::new must succeed for a valid OTF file (Latin Modern Math)");
 
     // ── 3. Render a minimal document using only ASCII glyphs ───────────────
     let mut document = Document::new();
