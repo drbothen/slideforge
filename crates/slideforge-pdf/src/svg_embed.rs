@@ -255,17 +255,42 @@ mod tests {
     /// This test verifies:
     /// - usvg parses the SVG correctly.
     /// - The resulting PDF bytes start with `%PDF-` (valid PDF structure).
-    /// - The PDF bytes contain NO `/Image` `XObject` (vector-only assertion)
-    ///   (verified by checking for the absence of `Subtype /Image`).
+    /// - The PDF bytes contain NO `/Image` `XObject` (vector-only assertion,
+    ///   verified by checking for the absence of `Subtype /Image`).
+    /// - The PDF content stream contains actual PDF path-drawing operators —
+    ///   specifically the `f` fill operator that `render_path` emits via
+    ///   `surface.draw_path()`. This is a POSITIVE assertion that vector paths
+    ///   reached the page content stream; a no-op embed that drew nothing would
+    ///   fail it.
+    ///
+    /// ## Compression handling
+    ///
+    /// We use `SerializeSettings { compress_content_streams: false, .. }` so
+    /// the page content stream is written as plain bytes (no `FlateDecode` filter).
+    /// This lets us scan the raw PDF bytes for the PDF fill operator `f` (ASCII
+    /// 0x66) surrounded by space/newline delimiters — the exact bytes krilla
+    /// emits via `pdf_writer::Content::fill_nonzero()`.
+    ///
+    /// A blank page has an empty or near-empty content stream with no path
+    /// operators; a page with a filled rect path will contain `m`, `l`, `h`,
+    /// and `f` operators. The presence of `\nf\n` or ` f\n` (the isolated `f`
+    /// fill token) is a reliable non-vacuous signal.
+    #[allow(clippy::unwrap_used)]
     #[test]
     fn test_bc_4_03_002_svg_embed_converts_rect_to_vector_paths() {
         use krilla::Document;
+        use krilla::SerializeSettings;
         use krilla::page::PageSettings;
 
         let normalized = NormalizedDiagramSvg::from_normalized_string(Arc::from(SIMPLE_SVG_RECT));
 
-        // Build a real Document + Page to get a live Surface.
-        let mut document = Document::new();
+        // Disable stream compression so that PDF path operators are readable
+        // as plain ASCII bytes in the output — no FlateDecode decompression needed.
+        let settings = SerializeSettings {
+            compress_content_streams: false,
+            ..SerializeSettings::default()
+        };
+        let mut document = Document::new_with(settings);
         let mut page =
             document.start_page_with(PageSettings::from_wh(595.0, 842.0).expect("valid page size"));
         let mut surface = page.surface();
@@ -302,6 +327,30 @@ mod tests {
             !has_raster_image,
             "PDF output must NOT contain raster /Image `XObject` (Subtype /Image) \
              for SVG vector content"
+        );
+
+        // Positive vector-path assertion: the page content stream must contain
+        // the PDF fill operator `f` (NonZero winding fill, ASCII b"f").
+        //
+        // krilla emits `fill_nonzero()` (pdf-writer's `Content::fill_nonzero`)
+        // which writes the literal bytes b" f\n" into the uncompressed content
+        // stream. This proves that `render_path` issued a `surface.draw_path()`
+        // call that produced real path-drawing content — not a blank page.
+        //
+        // Why ` f\n` is the right token to search: pdf-writer separates operators
+        // with spaces/newlines and writes `f` as an isolated keyword token.
+        // A blank page has no path operators at all; this assertion fails if
+        // `render_path` drew nothing (e.g., was never called or returned early).
+        let has_fill_op = pdf_bytes.windows(3).any(|w| w == b" f\n")
+            || pdf_bytes.windows(3).any(|w| w == b"\nf\n")
+            || pdf_bytes.windows(3).any(|w| w == b" f\r");
+        assert!(
+            has_fill_op,
+            "PDF content stream must contain the `f` fill operator (pdf-writer NonZero fill); \
+             this proves render_path issued a draw_path call that reached the page stream. \
+             A no-op embed or blank page would fail this assertion. \
+             PDF bytes (first 512): {:?}",
+            std::str::from_utf8(&pdf_bytes[..pdf_bytes.len().min(512)]).unwrap_or("<non-utf8>")
         );
     }
 

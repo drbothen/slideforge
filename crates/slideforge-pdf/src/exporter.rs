@@ -27,8 +27,9 @@
 //!
 //! `PdfExporter` is an effectful shell (ARCH-INDEX SS-07). It:
 //! 1. Creates a `krilla::Document::new()`.
-//! 2. Iterates over `laid_out.slides`, calling into `SlideTagEngine` and
-//!    `svg_embed` for each slide.
+//! 2. Iterates over `laid_out.slides`, calling `SlideTagEngine::tag_slide`
+//!    for each slide to build its structural tag sub-tree. Content drawing
+//!    (text, SVG paths via `svg_embed`) is added in STORY-044.
 //! 3. Calls `document.set_tag_tree(tag_tree)` with the assembled structural tree.
 //! 4. Calls `document.finish()` → `KrillaResult<Vec<u8>>`.
 //! 5. Maps `KrillaError` → `PdfExportError::Serialize` → `ExportError::RenderError`.
@@ -74,6 +75,17 @@ impl PdfExporter {
     ///
     /// Returns raw PDF bytes on success. `&self` is included for future use
     /// when `PdfExporter` carries font caches or configuration (STORY-044+).
+    ///
+    /// Current behavior (STORY-043 scope):
+    /// - Creates a `krilla::Document`.
+    /// - Iterates over `laid_out.slides`, calling `SlideTagEngine::tag_slide`
+    ///   for each slide to build its PDF/UA-1 structural tag sub-tree.
+    /// - Produces structurally tagged but otherwise blank pages — content
+    ///   drawing (text, SVG paths via `svg_embed`) is wired in STORY-044.
+    /// - Assembles per-slide `Part` groups into the deck-level `TagTree` via
+    ///   `SlideTagEngine::assemble_deck_tag_tree` and attaches it with
+    ///   `document.set_tag_tree(tag_tree)` before `document.finish()`.
+    /// - Returns the serialized PDF bytes.
     ///
     /// # Errors
     ///
