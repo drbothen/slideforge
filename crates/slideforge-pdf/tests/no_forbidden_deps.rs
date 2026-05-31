@@ -175,14 +175,20 @@ fn test_bc_4_03_002_no_direct_subsetter_dep() {
 
 /// Recursively scan `.rs` files under `dir`, collecting lines that contain any
 /// `forbidden` pattern and are not pure comment lines (trimmed start != `//`).
-fn scan_dir_for_patterns(dir: &Path, forbidden: &[&str], violations: &mut Vec<String>) {
+///
+/// Returns the number of `.rs` files actually scanned. The caller must assert
+/// that this count is `>= N` to guard against a silent no-op when the source
+/// tree is relocated or renamed (positive-coverage guard, F-P6-002).
+fn scan_dir_for_patterns(dir: &Path, forbidden: &[&str], violations: &mut Vec<String>) -> usize {
     let entries =
         std::fs::read_dir(dir).unwrap_or_else(|e| panic!("cannot read dir {}: {e}", dir.display()));
+    let mut files_scanned: usize = 0;
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
-            scan_dir_for_patterns(&path, forbidden, violations);
+            files_scanned += scan_dir_for_patterns(&path, forbidden, violations);
         } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
+            files_scanned += 1;
             let content = std::fs::read_to_string(&path)
                 .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
             for (lineno, line) in content.lines().enumerate() {
@@ -204,6 +210,7 @@ fn scan_dir_for_patterns(dir: &Path, forbidden: &[&str], violations: &mut Vec<St
             }
         }
     }
+    files_scanned
 }
 
 /// BC-4.03.002 AC-008 (source-level no-subprocess check): No usage of
@@ -228,7 +235,18 @@ fn test_bc_4_03_002_no_subprocess_in_pdf_source() {
 
     // Recursively scan all .rs files in src/.
     let mut violations: Vec<String> = Vec::new();
-    scan_dir_for_patterns(&src_dir, &forbidden_patterns, &mut violations);
+    let files_scanned = scan_dir_for_patterns(&src_dir, &forbidden_patterns, &mut violations);
+
+    // Positive-coverage guard (F-P6-002): the scan must actually visit files.
+    // The crate has at least lib.rs / exporter.rs / tag_engine.rs / font.rs /
+    // svg_embed.rs / error.rs. If this assertion fires, the src/ tree was
+    // relocated or the scan logic regressed into a silent no-op.
+    assert!(
+        files_scanned >= 5,
+        "positive-coverage guard: expected to scan >=5 .rs files in slideforge-pdf/src/, \
+         but only scanned {files_scanned}. The scan may have silently no-op'd due to a \
+         src/ relocation or rename (F-P6-002)."
+    );
 
     assert!(
         violations.is_empty(),

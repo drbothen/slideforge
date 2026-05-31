@@ -67,10 +67,6 @@ use crate::error::PdfExportError;
 /// (where `/Image` is the PDF keyword for embedded raster images).
 /// Verified in tests by asserting no `Subtype /Image` entry appears in the
 /// output bytes.
-///
-/// # Errors
-///
-/// See module-level documentation.
 pub fn embed_normalized_svg(
     svg: &NormalizedDiagramSvg,
     surface: &mut Surface<'_>,
