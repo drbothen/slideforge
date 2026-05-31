@@ -295,6 +295,7 @@ mod tests {
         assert_eq!(E_BRD_003, "E-BRD-003");
         assert_eq!(E_BRD_004, "E-BRD-004");
         assert_eq!(E_BRD_005, "E-BRD-005");
+        assert_eq!(E_BRD_006, "E-BRD-006");
         assert_eq!(E_BRD_007, "E-BRD-007");
     }
 
