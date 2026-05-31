@@ -76,7 +76,9 @@ pub mod toml_schema;
 
 // Re-export the most commonly used types at the crate root.
 pub use context::BrandLoadContext;
-pub use error::{BrandError, E_BRD_001, E_BRD_002, E_BRD_003, E_BRD_004, E_BRD_005, E_BRD_006, E_BRD_007};
+pub use error::{
+    BrandError, E_BRD_001, E_BRD_002, E_BRD_003, E_BRD_004, E_BRD_005, E_BRD_006, E_BRD_007,
+};
 pub use extractor::{BrandExtractionResult, BrandExtractor};
 pub use layouts::{LayoutPlaceholder, SlideLayoutDef};
 pub use loader::BrandLoader;

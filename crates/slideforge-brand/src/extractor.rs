@@ -21,9 +21,14 @@
 //! The source `.pptx` file is NEVER modified (BC-2.01.003 invariant 2).
 //! All I/O writes are to `output_dir`, never to the source path.
 
-use std::path::PathBuf;
+use std::fmt::Write as _;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
+use crate::context::BrandLoadContext;
 use crate::error::BrandError;
+use crate::loader::BrandLoader;
+use crate::template::{BrandTemplate, ColorValue, LogoAsset};
 
 // ─── Result type ─────────────────────────────────────────────────────────────
 
@@ -75,16 +80,183 @@ impl BrandExtractor {
     /// - [`BrandError::ParseError`] — `source` is not a valid OOXML ZIP (E-BRD-002).
     /// - [`BrandError::OutputExists`] — `brand.toml` already exists and `force = false` (E-BRD-006).
     pub fn extract(
-        _source: &str,
-        _output_dir: &std::path::Path,
-        _force: bool,
+        source: &str,
+        output_dir: &Path,
+        force: bool,
     ) -> Result<BrandExtractionResult, BrandError> {
-        todo!(
-            "BC-2.01.003 — STORY-024 — Red Gate: BrandExtractor::extract not yet implemented. \
-             Implementer: load .pptx via BrandLoader, convert BrandTemplate → BrandConfig, \
-             serialize to TOML, write brand.toml, copy logo bytes."
-        )
+        // --- Step 1: Create output directory if it does not exist (EC-006) ---
+        std::fs::create_dir_all(output_dir).map_err(|e| BrandError::ParseError {
+            path: Arc::from(output_dir.to_string_lossy().as_ref()),
+            reason: Arc::from(format!("cannot create output directory: {e}").as_str()),
+            span: slideforge_types::SourceSpan::default(),
+        })?;
+
+        // --- Step 2: Check for existing brand.toml (EC-001) ---
+        let brand_toml_path = output_dir.join("brand.toml");
+        if brand_toml_path.exists() && !force {
+            return Err(BrandError::OutputExists {
+                path: Arc::from(brand_toml_path.to_string_lossy().as_ref()),
+            });
+        }
+
+        // --- Step 3: Load the .pptx via BrandLoader (read-only) ---
+        let loader = BrandLoader::new();
+        let ctx = BrandLoadContext {
+            check_font_availability: false,
+            root_dir: output_dir.to_path_buf(),
+            span: slideforge_types::SourceSpan::default(),
+        };
+        let template = loader.load_template(Path::new(source), &ctx)?;
+
+        // --- Step 4: Convert BrandTemplate → TOML string ---
+        let (toml_content, logo_relative_path) =
+            brand_template_to_toml(&template, template.logo.as_ref());
+
+        // --- Step 5: Write brand.toml ---
+        std::fs::write(&brand_toml_path, toml_content.as_bytes()).map_err(|e| {
+            BrandError::ParseError {
+                path: Arc::from(brand_toml_path.to_string_lossy().as_ref()),
+                reason: Arc::from(format!("cannot write brand.toml: {e}").as_str()),
+                span: slideforge_types::SourceSpan::default(),
+            }
+        })?;
+
+        // --- Step 6: Copy logo asset if present (AC-004) ---
+        let logo_asset_path = if let Some(logo) = &template.logo {
+            if let Some(relative_path) = &logo_relative_path {
+                let logo_dest = output_dir.join(relative_path);
+
+                // Create brand.assets/ directory.
+                if let Some(parent) = logo_dest.parent() {
+                    std::fs::create_dir_all(parent).map_err(|e| BrandError::ParseError {
+                        path: Arc::from(parent.to_string_lossy().as_ref()),
+                        reason: Arc::from(
+                            format!("cannot create brand.assets directory: {e}").as_str(),
+                        ),
+                        span: slideforge_types::SourceSpan::default(),
+                    })?;
+                }
+
+                // Write logo bytes.
+                if let LogoAsset::Loaded { bytes, .. } = logo {
+                    std::fs::write(&logo_dest, bytes).map_err(|e| BrandError::ParseError {
+                        path: Arc::from(logo_dest.to_string_lossy().as_ref()),
+                        reason: Arc::from(format!("cannot write logo asset: {e}").as_str()),
+                        span: slideforge_types::SourceSpan::default(),
+                    })?;
+                    Some(logo_dest)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        tracing::info!(
+            source = source,
+            output = %brand_toml_path.display(),
+            has_logo = logo_asset_path.is_some(),
+            "brand extraction complete"
+        );
+
+        Ok(BrandExtractionResult {
+            brand_toml_path,
+            logo_asset_path,
+        })
     }
+}
+
+// ─── TOML serialization ───────────────────────────────────────────────────────
+
+/// Convert a [`BrandTemplate`] to a `brand.toml` string with stable ECMA-376 field order.
+///
+/// Returns `(toml_string, Option<logo_relative_path>)`.
+///
+/// The TOML string is built manually (not via `toml::to_string`) to guarantee:
+/// - All 12 color slots appear in ECMA-376 sequential order (BC-2.01.003 invariant 1).
+/// - Sections appear in stable order: `[colors]` → `[fonts]` → `[logo]` → `[footer]`.
+/// - `folHlink` is serialized as `fol_hlink` (TOML-safe name, AC-003).
+/// - Scheme-color slots (unresolved) carry an inline TOML comment per EC-003.
+fn brand_template_to_toml(
+    template: &BrandTemplate,
+    logo: Option<&LogoAsset>,
+) -> (String, Option<String>) {
+    // Slot names in ECMA-376 order; index 11 (folHlink) is serialized as fol_hlink.
+    const TOML_FIELD_NAMES: [&str; 12] = [
+        "dk1",
+        "lt1",
+        "dk2",
+        "lt2",
+        "acc1",
+        "acc2",
+        "acc3",
+        "acc4",
+        "acc5",
+        "acc6",
+        "hlink",
+        "fol_hlink",
+    ];
+
+    let mut out = String::with_capacity(512);
+
+    // [colors]
+    out.push_str("[colors]\n");
+    for (i, color_slot) in template.colors.iter().enumerate() {
+        let field = TOML_FIELD_NAMES[i];
+        match &color_slot.value {
+            ColorValue::Hex(hex) => {
+                let _ = writeln!(out, "{field} = \"{hex}\"");
+            },
+            ColorValue::SchemeRef(scheme_ref) => {
+                // EC-003: tint/shade or scheme-ref — write a placeholder with a TOML inline comment.
+                // BC-2.01.003 AC-006: "written with inline TOML comment: # derived via tint/shade".
+                let _ = writeln!(
+                    out,
+                    "{field} = \"#{scheme_ref}\" # derived via tint/shade; may not match exact color"
+                );
+            },
+        }
+    }
+    out.push('\n');
+
+    // [fonts]
+    out.push_str("[fonts]\n");
+    let _ = writeln!(out, "heading = \"{}\"", template.fonts.heading);
+    let _ = writeln!(out, "body = \"{}\"", template.fonts.body);
+
+    // [logo] — only if a logo was found (AC-004)
+    let logo_relative_path = logo.and_then(|l| {
+        if let LogoAsset::Loaded { original_path, .. } = l {
+            // Determine file extension from ZIP-internal path (e.g., "ppt/media/image1.png" → "png").
+            let ext = Path::new(original_path.as_ref())
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("bin");
+            Some(format!("brand.assets/logo.{ext}"))
+        } else {
+            None
+        }
+    });
+
+    if let Some(ref rel_path) = logo_relative_path {
+        out.push('\n');
+        out.push_str("[logo]\n");
+        let _ = writeln!(out, "path = \"{rel_path}\"");
+    }
+
+    // [footer] — only if footer text is present and non-empty
+    if let Some(footer_text) = &template.footer_text
+        && !footer_text.is_empty()
+    {
+        out.push('\n');
+        out.push_str("[footer]\n");
+        let _ = writeln!(out, "text = \"{footer_text}\"");
+    }
+
+    (out, logo_relative_path)
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -228,7 +400,7 @@ mod tests {
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
         let name = format!(
-            "slideforge_extractor_out_{}_{}_{}" ,
+            "slideforge_extractor_out_{}_{}_{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -254,11 +426,7 @@ mod tests {
         let source_path = write_temp_pptx(&zip_bytes);
         let out_dir = temp_output_dir();
 
-        let result = BrandExtractor::extract(
-            source_path.to_str().unwrap(),
-            &out_dir,
-            false,
-        );
+        let result = BrandExtractor::extract(source_path.to_str().unwrap(), &out_dir, false);
 
         let _ = std::fs::remove_file(&source_path);
 
@@ -324,7 +492,8 @@ mod tests {
         );
 
         // Existing file must be untouched (sentinel content preserved).
-        let content = std::fs::read_to_string(&existing_path).expect("existing file must still exist");
+        let content =
+            std::fs::read_to_string(&existing_path).expect("existing file must still exist");
         assert_eq!(
             content, "# existing brand.toml sentinel\n",
             "existing brand.toml must not be modified when force=false (AC-002)"
@@ -355,7 +524,8 @@ mod tests {
 
         let _ = std::fs::remove_file(&source_path);
 
-        let extraction = result.expect("extract with force=true must succeed even when brand.toml exists");
+        let extraction =
+            result.expect("extract with force=true must succeed even when brand.toml exists");
 
         // The file must have been overwritten (no longer the sentinel).
         let content = std::fs::read_to_string(&extraction.brand_toml_path).unwrap();
@@ -384,12 +554,8 @@ mod tests {
         let source_path = write_temp_pptx(&zip_bytes);
         let out_dir = temp_output_dir();
 
-        let extraction = BrandExtractor::extract(
-            source_path.to_str().unwrap(),
-            &out_dir,
-            false,
-        )
-        .expect("valid PPTX must extract without error");
+        let extraction = BrandExtractor::extract(source_path.to_str().unwrap(), &out_dir, false)
+            .expect("valid PPTX must extract without error");
 
         let _ = std::fs::remove_file(&source_path);
 
@@ -397,9 +563,18 @@ mod tests {
 
         // All 12 field names must appear in the output TOML.
         let expected_fields = [
-            "dk1", "lt1", "dk2", "lt2",
-            "acc1", "acc2", "acc3", "acc4", "acc5", "acc6",
-            "hlink", "fol_hlink",
+            "dk1",
+            "lt1",
+            "dk2",
+            "lt2",
+            "acc1",
+            "acc2",
+            "acc3",
+            "acc4",
+            "acc5",
+            "acc6",
+            "hlink",
+            "fol_hlink",
         ];
         for field in &expected_fields {
             assert!(
@@ -432,12 +607,8 @@ mod tests {
         let source_path = write_temp_pptx(&zip_bytes);
         let out_dir = temp_output_dir();
 
-        let extraction = BrandExtractor::extract(
-            source_path.to_str().unwrap(),
-            &out_dir,
-            false,
-        )
-        .expect("valid PPTX must extract");
+        let extraction = BrandExtractor::extract(source_path.to_str().unwrap(), &out_dir, false)
+            .expect("valid PPTX must extract");
 
         let _ = std::fs::remove_file(&source_path);
 
@@ -445,9 +616,18 @@ mod tests {
 
         // Find the byte positions of each field key in the file to check ordering.
         let order = [
-            "dk1", "lt1", "dk2", "lt2",
-            "acc1", "acc2", "acc3", "acc4", "acc5", "acc6",
-            "hlink", "fol_hlink",
+            "dk1",
+            "lt1",
+            "dk2",
+            "lt2",
+            "acc1",
+            "acc2",
+            "acc3",
+            "acc4",
+            "acc5",
+            "acc6",
+            "hlink",
+            "fol_hlink",
         ];
         let mut prev_pos = 0usize;
         for field in &order {
@@ -476,18 +656,14 @@ mod tests {
         let source_path = write_temp_pptx(&zip_bytes);
         let out_dir = temp_output_dir();
 
-        let extraction = BrandExtractor::extract(
-            source_path.to_str().unwrap(),
-            &out_dir,
-            false,
-        )
-        .expect("PPTX with logo must extract without error");
+        let extraction = BrandExtractor::extract(source_path.to_str().unwrap(), &out_dir, false)
+            .expect("PPTX with logo must extract without error");
 
         let _ = std::fs::remove_file(&source_path);
 
         // logo_asset_path must be Some.
         let logo_path = extraction.logo_asset_path.expect(
-            "BrandExtractionResult.logo_asset_path must be Some when logo is found (AC-004)"
+            "BrandExtractionResult.logo_asset_path must be Some when logo is found (AC-004)",
         );
         assert!(
             logo_path.exists(),
@@ -532,12 +708,8 @@ mod tests {
         let source_path = write_temp_pptx(&zip_bytes);
         let out_dir = temp_output_dir();
 
-        let extraction = BrandExtractor::extract(
-            source_path.to_str().unwrap(),
-            &out_dir,
-            false,
-        )
-        .expect("PPTX without logo must extract without error");
+        let extraction = BrandExtractor::extract(source_path.to_str().unwrap(), &out_dir, false)
+            .expect("PPTX without logo must extract without error");
 
         let _ = std::fs::remove_file(&source_path);
 
@@ -568,12 +740,8 @@ mod tests {
         let source_path = write_temp_pptx(&zip_bytes);
         let out_dir = temp_output_dir();
 
-        let extraction = BrandExtractor::extract(
-            source_path.to_str().unwrap(),
-            &out_dir,
-            false,
-        )
-        .expect("PPTX with sysClr must extract without error (EC-002)");
+        let extraction = BrandExtractor::extract(source_path.to_str().unwrap(), &out_dir, false)
+            .expect("PPTX with sysClr must extract without error (EC-002)");
 
         let _ = std::fs::remove_file(&source_path);
 
@@ -603,9 +771,11 @@ mod tests {
             let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
             zw.start_file(PPTX_THEME_PATH, opts).unwrap();
             zw.write_all(MINIMAL_THEME_XML.as_bytes()).unwrap();
-            zw.start_file("ppt/slideMasters/slideMaster1.xml", opts).unwrap();
+            zw.start_file("ppt/slideMasters/slideMaster1.xml", opts)
+                .unwrap();
             zw.write_all(b"<p:sldMaster/>").unwrap();
-            zw.start_file("ppt/slideMasters/slideMaster2.xml", opts).unwrap();
+            zw.start_file("ppt/slideMasters/slideMaster2.xml", opts)
+                .unwrap();
             zw.write_all(b"<p:sldMaster/>").unwrap();
             zw.start_file("[Content_Types].xml", opts).unwrap();
             zw.write_all(b"<?xml version=\"1.0\" encoding=\"UTF-8\"?><Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"/>").unwrap();
@@ -617,11 +787,7 @@ mod tests {
         let out_dir = temp_output_dir();
 
         // Extraction must succeed (multiple masters is warning, not fatal).
-        let result = BrandExtractor::extract(
-            source_path.to_str().unwrap(),
-            &out_dir,
-            false,
-        );
+        let result = BrandExtractor::extract(source_path.to_str().unwrap(), &out_dir, false);
 
         let _ = std::fs::remove_file(&source_path);
 
@@ -651,11 +817,7 @@ mod tests {
         let bytes_before = std::fs::read(&source_path).unwrap();
         let sha_before = simple_sha256(&bytes_before);
 
-        let _ = BrandExtractor::extract(
-            source_path.to_str().unwrap(),
-            &out_dir,
-            false,
-        );
+        let _ = BrandExtractor::extract(source_path.to_str().unwrap(), &out_dir, false);
 
         // Read source bytes after extraction.
         let bytes_after = std::fs::read(&source_path).unwrap();
@@ -681,21 +843,19 @@ mod tests {
         let source_path = write_temp_pptx(&zip_bytes);
         let out_dir = temp_output_dir();
 
-        let extraction = BrandExtractor::extract(
-            source_path.to_str().unwrap(),
-            &out_dir,
-            false,
-        )
-        .expect("valid PPTX must extract");
+        let extraction = BrandExtractor::extract(source_path.to_str().unwrap(), &out_dir, false)
+            .expect("valid PPTX must extract");
 
         let _ = std::fs::remove_file(&source_path);
 
         let content = std::fs::read_to_string(&extraction.brand_toml_path).unwrap();
 
         // [colors] must appear before [fonts].
-        let colors_pos = content.find("[colors]")
+        let colors_pos = content
+            .find("[colors]")
             .expect("brand.toml must have [colors] section");
-        let fonts_pos = content.find("[fonts]")
+        let fonts_pos = content
+            .find("[fonts]")
             .expect("brand.toml must have [fonts] section");
         assert!(
             colors_pos < fonts_pos,
@@ -729,12 +889,8 @@ mod tests {
         let source_path = write_temp_pptx(&zip_bytes);
         let out_dir = temp_output_dir();
 
-        let extraction = BrandExtractor::extract(
-            source_path.to_str().unwrap(),
-            &out_dir,
-            false,
-        )
-        .expect("round-trip extraction must succeed");
+        let extraction = BrandExtractor::extract(source_path.to_str().unwrap(), &out_dir, false)
+            .expect("round-trip extraction must succeed");
 
         let _ = std::fs::remove_file(&source_path);
 
@@ -745,22 +901,34 @@ mod tests {
 
         // Verify canonical values from MINIMAL_THEME_XML are round-tripped.
         // dk1 = #000000, lt1 = #FFFFFF, dk2 = #003087 (values normalised to uppercase).
-        let dk1 = config.colors.dk1.expect("dk1 must be present after round-trip");
+        let dk1 = config
+            .colors
+            .dk1
+            .expect("dk1 must be present after round-trip");
         assert!(
             dk1.eq_ignore_ascii_case("#000000"),
             "dk1 must round-trip as #000000, got: {dk1}"
         );
-        let dk2 = config.colors.dk2.expect("dk2 must be present after round-trip");
+        let dk2 = config
+            .colors
+            .dk2
+            .expect("dk2 must be present after round-trip");
         assert!(
             dk2.eq_ignore_ascii_case("#003087"),
             "dk2 must round-trip as #003087, got: {dk2}"
         );
-        let acc1 = config.colors.acc1.expect("acc1 must be present after round-trip");
+        let acc1 = config
+            .colors
+            .acc1
+            .expect("acc1 must be present after round-trip");
         assert!(
             acc1.eq_ignore_ascii_case("#0066CC"),
             "acc1 must round-trip as #0066CC, got: {acc1}"
         );
-        let fol_hlink = config.colors.fol_hlink.expect("fol_hlink must be present after round-trip");
+        let fol_hlink = config
+            .colors
+            .fol_hlink
+            .expect("fol_hlink must be present after round-trip");
         assert!(
             fol_hlink.eq_ignore_ascii_case("#551A8B"),
             "fol_hlink must round-trip as #551A8B, got: {fol_hlink}"
@@ -786,17 +954,12 @@ mod tests {
             "output_dir must not exist before extraction for this test"
         );
 
-        let result = BrandExtractor::extract(
-            source_path.to_str().unwrap(),
-            &out_dir,
-            false,
-        );
+        let result = BrandExtractor::extract(source_path.to_str().unwrap(), &out_dir, false);
 
         let _ = std::fs::remove_file(&source_path);
 
-        let extraction = result.expect(
-            "extraction must succeed even when output_dir does not exist (EC-006)"
-        );
+        let extraction =
+            result.expect("extraction must succeed even when output_dir does not exist (EC-006)");
         assert!(
             extraction.brand_toml_path.exists(),
             "brand.toml must be written after creating nested output_dir"
@@ -882,12 +1045,8 @@ mod tests {
         let source_path = write_temp_pptx(&zip_bytes);
         let out_dir = temp_output_dir();
 
-        let extraction = BrandExtractor::extract(
-            source_path.to_str().unwrap(),
-            &out_dir,
-            false,
-        )
-        .expect("valid PPTX must extract");
+        let extraction = BrandExtractor::extract(source_path.to_str().unwrap(), &out_dir, false)
+            .expect("valid PPTX must extract");
 
         let _ = std::fs::remove_file(&source_path);
 
@@ -907,6 +1066,90 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&out_dir);
+    }
+
+    // ─── AC-006 / EC-003: scheme-color slots get inline TOML comment ────────
+
+    /// BC-2.01.003 AC-006 / EC-003 — when a color slot in the source `.pptx`
+    /// contains a `<a:schemeClr>` element (tint/shade transform or relative
+    /// scheme reference), the extracted `brand.toml` entry includes an inline
+    /// TOML comment: `# derived via tint/shade; may not match exact color`.
+    ///
+    /// This test exercises the `brand_template_to_toml` helper directly with a
+    /// `ColorValue::SchemeRef` slot (no real PPTX needed — we control the
+    /// `BrandTemplate` directly to inject the unresolved slot).
+    ///
+    /// Traces to BC-2.01.003 edge case EC-003.
+    #[test]
+    fn test_bc_2_01_003_ec003_scheme_ref_slot_gets_inline_toml_comment() {
+        use crate::template::{BrandFonts, BrandTemplate, ColorSlot, ColorValue, MasterIds};
+
+        // Build a BrandTemplate where acc1 (index 4) is a SchemeRef (tint/shade).
+        let make_hex_slot = |name: &str, hex: &str| ColorSlot {
+            name: Arc::from(name),
+            value: ColorValue::Hex(Arc::from(hex)),
+        };
+        let make_scheme_slot = |name: &str, scheme: &str| ColorSlot {
+            name: Arc::from(name),
+            value: ColorValue::SchemeRef(Arc::from(scheme)),
+        };
+
+        let colors: [ColorSlot; 12] = [
+            make_hex_slot("dk1", "#000000"),
+            make_hex_slot("lt1", "#FFFFFF"),
+            make_hex_slot("dk2", "#003087"),
+            make_hex_slot("lt2", "#F5F5F5"),
+            // acc1 is a scheme-ref (tint/shade, EC-003 vector)
+            make_scheme_slot("acc1", "accent1"),
+            make_hex_slot("acc2", "#FF6B35"),
+            make_hex_slot("acc3", "#28A745"),
+            make_hex_slot("acc4", "#FFC107"),
+            make_hex_slot("acc5", "#6F42C1"),
+            make_hex_slot("acc6", "#17A2B8"),
+            make_hex_slot("hlink", "#0000EE"),
+            make_hex_slot("folHlink", "#551A8B"),
+        ];
+
+        let template = BrandTemplate {
+            colors,
+            fonts: BrandFonts {
+                heading: Arc::from("Calibri Light"),
+                body: Arc::from("Calibri"),
+            },
+            logo: None,
+            footer_text: None,
+            layout_names: vec![],
+            layouts: vec![],
+            notes_master_stub: vec![],
+            handout_master_stub: vec![],
+            master_ids: MasterIds::default(),
+            content_types_layout_entries: Arc::from(""),
+        };
+
+        let (toml_str, _logo_path) = brand_template_to_toml(&template, None);
+
+        // The acc1 line must contain the tint/shade inline comment (AC-006 / EC-003).
+        let acc1_line = toml_str
+            .lines()
+            .find(|l| l.trim_start().starts_with("acc1"))
+            .unwrap_or_else(|| panic!("acc1 line must appear in TOML output, got:\n{toml_str}"));
+
+        assert!(
+            acc1_line.contains("# derived via tint/shade"),
+            "acc1 SchemeRef slot must contain inline TOML comment \
+             '# derived via tint/shade; may not match exact color' (EC-003), \
+             got line: {acc1_line}"
+        );
+
+        // Other hex slots must NOT contain the comment.
+        let dk1_line = toml_str
+            .lines()
+            .find(|l| l.trim_start().starts_with("dk1"))
+            .unwrap_or_else(|| panic!("dk1 line must appear in TOML output, got:\n{toml_str}"));
+        assert!(
+            !dk1_line.contains("# derived"),
+            "dk1 Hex slot must NOT contain the scheme-ref comment, got: {dk1_line}"
+        );
     }
 
     // ─── Helper: simple SHA-256 without external deps ────────────────────────

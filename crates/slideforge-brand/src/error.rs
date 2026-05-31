@@ -229,9 +229,7 @@ pub enum BrandError {
     /// This is a fatal error. The command exits with code 4.
     ///
     /// Traces to BC-2.01.003 edge case EC-001.
-    #[error(
-        "E-BRD-006: {path}: brand.toml already exists. Use --force to overwrite."
-    )]
+    #[error("E-BRD-006: {path}: brand.toml already exists. Use --force to overwrite.")]
     OutputExists {
         /// The path of the existing `brand.toml` file.
         path: Arc<str>,
