@@ -25,11 +25,15 @@ use quick_xml::events::Event;
 use crate::error::BrandError;
 use crate::template::{COLOR_SLOT_NAMES, ColorSlot, ColorValue};
 
-/// Default fallback hex colors for missing slots, keyed by slot name.
+/// Default fallback hex colors for missing slots, keyed by OOXML slot name.
 ///
 /// `dk1` / `dk2` → dark gray, `lt1` / `lt2` → light gray,
 /// accent slots → placeholder gray, link slots → placeholder blue.
-fn default_color_for_slot(slot_name: &str) -> Arc<str> {
+///
+/// This is the **single source of truth** for per-slot default colors.
+/// `extractor.rs` delegates to this function for unresolvable `SchemeRef`
+/// fallbacks (F-024A-MED-2 — eliminates sibling-drift risk per TD-VSDD-060).
+pub(crate) fn default_color_for_slot(slot_name: &str) -> Arc<str> {
     match slot_name {
         "dk1" | "dk2" => Arc::from("#404040"),
         "lt1" => Arc::from("#F0F0F0"),
@@ -92,7 +96,13 @@ pub fn parse_theme_colors(
                 if let Some(slot) = current_slot {
                     match name_str {
                         "srgbClr" => {
-                            // Extract the `val` attribute.
+                            // Extract the `val` attribute (the base hex color).
+                            //
+                            // Child transform elements (lumMod, lumOff, tint, shade) are
+                            // intentionally NOT applied here — the raw hex is preserved as-is.
+                            // BC-2.01.003 EC-003 scopes transforms to schemeClr only; srgbClr
+                            // transform-aware extraction (widening EC-003) is tracked as STORY-076
+                            // (Brand Loader: Transform-Aware Theme Color Extraction).
                             for attr in e.attributes().flatten() {
                                 if attr.key.local_name().as_ref() == b"val"
                                     && let Ok(val) = std::str::from_utf8(&attr.value)

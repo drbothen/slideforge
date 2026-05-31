@@ -115,10 +115,9 @@ impl BrandLoader {
                 })
                 .count();
             if master_count > 1 {
+                // AC-007 mandates this exact warning string (BC-2.01.003 EC-004, F-024-H3).
                 tracing::warn!(
-                    path = %path.display(),
-                    master_count,
-                    "Template has multiple slide masters; only slideMaster1.xml is used."
+                    "Source .pptx has multiple slide masters; extracting from slideMaster1.xml only."
                 );
             }
         }
@@ -211,6 +210,8 @@ impl BrandLoader {
             colors,
             fonts,
             logo,
+            // Footer detection deferred to STORY-075 (Brand Loader: Footer Detection).
+            // The extractor's [footer] writer is reachable once this is populated.
             footer_text: None,
             layout_names,
             // STORY-023 fields — not populated by the loader; synthesizer fills these.
