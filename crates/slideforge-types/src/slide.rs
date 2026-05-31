@@ -2,14 +2,14 @@
 //!
 //! A [`Slide`] is the semantic, pre-layout representation of one slide. It
 //! carries the slide type keyword, field values, content blocks, register,
-//! tags, and source location.
+//! tags, source location, and post-evaluation register content.
 
 use std::sync::Arc;
 
 use crate::block::Block;
 use crate::inline::InlineNode;
 use crate::ordered_map::OrderedMap;
-use crate::register::Register;
+use crate::register::{Register, RegisteredContent};
 use crate::slide_overlay::SlideOverlay;
 use crate::span::SourceSpan;
 use crate::value::Value;
@@ -87,6 +87,23 @@ pub struct Slide {
     ///
     /// See [`SlideOverlay`] for the single-master invariant enforcement (BC-2.02.002).
     pub overlay: Option<SlideOverlay>,
+
+    /// Post-evaluation register-gated content for this slide.
+    ///
+    /// Populated by `slideforge-eval::register_routing::extract_register_content`
+    /// after all field expressions are resolved. Initialized to `vec![]` by the
+    /// parser; `eval_deck` populates it as a post-evaluation annotation.
+    ///
+    /// The layout engine copies this field verbatim into
+    /// `LaidOutSlide::register_content` without re-deriving routing logic.
+    /// Layout MUST NOT call any extraction function — it reads this field only.
+    ///
+    /// # Ordering invariant (BC-1.14.004 invariant 3)
+    ///
+    /// Entries are ordered `Notes < Report < Detail` regardless of field
+    /// insertion order in `slide.fields`. This ordering is enforced by
+    /// `slideforge-eval::register_routing::extract_register_content`.
+    pub register_content: Vec<RegisteredContent>,
 }
 
 impl Slide {
@@ -110,6 +127,7 @@ impl Slide {
     ///     tags: vec![],
     ///     source_span: SourceSpan::default(),
     ///     overlay: None,
+    ///     register_content: vec![],
     /// };
     /// assert_eq!(slide.title_str(), Some("My Slide"));
     /// ```
@@ -136,6 +154,7 @@ mod tests {
             tags: vec![],
             source_span: SourceSpan::default(),
             overlay: None,
+            register_content: vec![],
         }
     }
 
@@ -237,6 +256,7 @@ mod tests {
             tags: vec![],
             source_span: SourceSpan::default(),
             overlay: None,
+            register_content: vec![],
         };
         assert_eq!(slide_with_register.register, Some(Register::Notes));
     }
@@ -289,6 +309,7 @@ mod tests {
             tags: vec![],
             source_span: SourceSpan::default(),
             overlay: Some(overlay.clone()),
+            register_content: vec![],
         };
         let slide2 = slide.clone();
         assert_eq!(slide, slide2, "Slide with overlay must equal its clone");
@@ -325,6 +346,7 @@ mod tests {
             tags: vec![],
             source_span: SourceSpan::default(),
             overlay: Some(overlay),
+            register_content: vec![],
         };
         // Structural invariant: overlay is metadata only, no master reference.
         assert!(slide.overlay.is_some());

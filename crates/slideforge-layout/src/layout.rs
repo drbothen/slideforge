@@ -152,6 +152,17 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
         // MED-002: Compute text_flow for text-bearing frames.
         // For title/subtitle frames, extract text from the slide's resolved fields
         // to enable the canvas overflow validator (BC-3.03.001).
+        //
+        // ALLOWLIST GUARANTEE — BC-1.14.004 no-bleed (STORY-035 F-035-P2-002):
+        // Register keys (`notes`, `report`, `detail`) intentionally REMAIN in
+        // `slide.fields` after eval; they are NOT removed by the evaluator.
+        // Frame construction here is ALLOWLIST-based: it reads ONLY the keys
+        // `"title"`, `"subtitle"`, and `"body"` from `slide.fields`. Register
+        // keys are never read at this site. Future slide-type authors and body-
+        // layout pass implementers MUST follow the same allowlist discipline —
+        // do NOT enumerate all `slide.fields` keys or pattern-match on arbitrary
+        // fields, or register content will silently bleed into frames.
+        // The `test_f004_no_bleed_register_text_not_in_frames` test enforces this.
         let frames: Vec<_> = frames
             .into_iter()
             .enumerate()
@@ -270,12 +281,19 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
             }
         }
 
-        // Extract speaker notes from the slide's "notes" field, if present and
-        // resolved to a plain string value.
-        let speaker_notes: Option<Arc<str>> = match slide.fields.get("notes") {
-            Some(FieldValue::Literal(Value::Str(s))) => Some(Arc::clone(s)),
-            _ => None,
-        };
+        // BC-1.14.001/002/003 (STORY-035): Copy register-gated content from the
+        // semantic slide IR. `slide.register_content` was populated by
+        // `slideforge-eval::register_routing::extract_register_content` during
+        // `eval_deck` (after all field expressions were resolved). Layout copies
+        // it verbatim — zero routing logic is performed here (Option D,
+        // architecture-directive STORY-035). The result is ordered
+        // Notes < Report < Detail (BC-1.14.004 invariant 3).
+        let register_content = slide.register_content.clone();
+
+        // BC-1.14.004 (STORY-035 F-004): derive `speaker_notes` from `register_content`.
+        // See `speaker_notes_from_register_content` for the derivation rationale.
+        // Must come AFTER register_content is bound above.
+        let speaker_notes = speaker_notes_from_register_content(&register_content);
 
         // Derive register_tags from the semantic slide's register field.
         // An unregistered slide (register: None) produces an empty Vec.
@@ -292,6 +310,7 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
             frames: all_frames,
             speaker_notes,
             register_tags,
+            register_content,
         });
     }
 
@@ -332,4 +351,48 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
         sections,
         warnings: deck_warnings,
     })
+}
+
+/// Derive `speaker_notes` from the canonical `register_content` vector.
+///
+/// # Derivation rationale (BC-1.14.004 / STORY-035 F-004)
+///
+/// `register_content` (populated by `eval_deck` via
+/// `slideforge-eval::register_routing::extract_register_content`) is the CANONICAL
+/// source for all register-gated content. `speaker_notes` is a PPTX/HTML convenience
+/// field that must be derived from the Notes entry in `register_content` — NOT read
+/// independently from `slide.fields`. This ensures there is ONE source of truth for
+/// register text (BC-1.14.004 invariant 3 — no bleed between `register_content` and
+/// any other field).
+///
+/// # Returns
+///
+/// - `None` if `register_content` has no Notes entry.
+/// - `None` if the Notes entry has no plain-text inline nodes and no content.
+/// - `Some(text)` where `text` is all [`slideforge_types::InlineNode::Plain`] nodes
+///   from the Notes entry concatenated in order.
+fn speaker_notes_from_register_content(
+    register_content: &[slideforge_types::RegisteredContent],
+) -> Option<Arc<str>> {
+    register_content
+        .iter()
+        .find(|rc| rc.register == Register::Notes)
+        .and_then(|rc| {
+            let text: String = rc
+                .content
+                .iter()
+                .filter_map(|node| {
+                    if let slideforge_types::InlineNode::Plain(s) = node {
+                        Some(s.as_ref())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            if text.is_empty() && rc.content.is_empty() {
+                None
+            } else {
+                Some(Arc::from(text.as_str()))
+            }
+        })
 }

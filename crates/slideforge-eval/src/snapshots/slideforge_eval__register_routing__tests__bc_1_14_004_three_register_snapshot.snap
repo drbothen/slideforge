@@ -1,0 +1,30 @@
+---
+source: crates/slideforge-eval/src/register_routing.rs
+expression: result
+---
+[
+    RegisteredContent {
+        register: Notes,
+        content: [
+            Plain(
+                "Presenter notes here",
+            ),
+        ],
+    },
+    RegisteredContent {
+        register: Report,
+        content: [
+            Plain(
+                "Report prose here",
+            ),
+        ],
+    },
+    RegisteredContent {
+        register: Detail,
+        content: [
+            Plain(
+                "Technical detail here",
+            ),
+        ],
+    },
+]

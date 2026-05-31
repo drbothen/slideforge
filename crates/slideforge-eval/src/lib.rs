@@ -47,6 +47,7 @@ pub mod filters;
 pub mod for_eval;
 pub mod if_eval;
 pub mod include_cycle;
+pub mod register_routing;
 
 #[cfg(kani)]
 pub mod proofs;
@@ -64,3 +65,4 @@ pub use filters::{AVAILABLE_FILTERS, apply_filter};
 pub use for_eval::{eval_block_items, eval_for_block, eval_slide_node};
 pub use if_eval::eval_if_chain;
 pub use include_cycle::{IncludeGraph, check_include_cycles};
+pub use register_routing::extract_register_content;

@@ -94,6 +94,63 @@ impl std::fmt::Display for Register {
     }
 }
 
+/// A content block tagged with a writing register.
+///
+/// `RegisteredContent` pairs a [`Register`] tag with the evaluated inline
+/// content of that register's field. The evaluator produces one
+/// `RegisteredContent` entry per register field present on a slide. Exporters
+/// filter `LaidOutSlide::register_content` to select only the entries for their
+/// allowed registers.
+///
+/// # Invariants
+///
+/// - `content` is always fully evaluated: all `{{ expr }}` interpolations have
+///   been resolved before this struct is constructed.
+/// - `content` is stored as a sequence of [`crate::inline::InlineNode`] values.
+///   Plain-text-only registers use a single `InlineNode::Plain` entry.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct RegisteredContent {
+    /// The writing register this content belongs to.
+    pub register: Register,
+
+    /// The fully-evaluated inline content for this register.
+    ///
+    /// All `{{ expr }}` interpolations in the source field value have been
+    /// resolved by the evaluator before this field is populated.
+    pub content: Vec<crate::inline::InlineNode>,
+}
+
+impl RegisteredContent {
+    /// Construct a `RegisteredContent` with a single plain-text inline node.
+    ///
+    /// This is the common case for register fields that contain simple string
+    /// values (e.g., `notes "Hello"` or `report "Detailed analysis"`).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use slideforge_types::{Register, register::RegisteredContent};
+    /// use std::sync::Arc;
+    ///
+    /// let rc = RegisteredContent::plain(Register::Notes, Arc::from("Hello"));
+    /// assert_eq!(rc.register, Register::Notes);
+    /// assert_eq!(rc.content.len(), 1);
+    /// ```
+    #[must_use]
+    pub fn plain(register: Register, text: std::sync::Arc<str>) -> Self {
+        Self {
+            register,
+            content: vec![crate::inline::InlineNode::Plain(text)],
+        }
+    }
+
+    /// Return `true` if the content is empty (no inline nodes).
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.content.is_empty()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

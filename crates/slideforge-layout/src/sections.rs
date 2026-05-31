@@ -782,6 +782,7 @@ mod tests {
             tags: vec![],
             source_span: SourceSpan::default(),
             overlay: None,
+            register_content: vec![],
         }
     }
 
@@ -799,6 +800,7 @@ mod tests {
             tags: vec![],
             source_span: SourceSpan::default(),
             overlay: None,
+            register_content: vec![],
         }
     }
 
@@ -820,6 +822,7 @@ mod tests {
             tags: vec![],
             source_span: SourceSpan::default(),
             overlay: None,
+            register_content: vec![],
         }
     }
 
@@ -853,6 +856,7 @@ mod tests {
             tags: vec![],
             source_span: SourceSpan::default(),
             overlay: None,
+            register_content: vec![],
         }
     }
 
@@ -1544,6 +1548,7 @@ mod tests {
             tags: vec![],
             source_span: SourceSpan::default(),
             overlay: None,
+            register_content: vec![],
         };
         let deck = make_deck(vec![slide]);
         let result = collect_executive_summary(&deck);
@@ -1575,6 +1580,7 @@ mod tests {
             tags: vec![],
             source_span: SourceSpan::default(),
             overlay: None,
+            register_content: vec![],
         };
         let deck = make_deck(vec![slide]);
         let result = collect_executive_summary(&deck);
@@ -1602,6 +1608,7 @@ mod tests {
             tags: vec![],
             source_span: SourceSpan::default(),
             overlay: None,
+            register_content: vec![],
         };
         let deck = make_deck(vec![slide]);
         let result = collect_executive_summary(&deck);
@@ -1632,6 +1639,7 @@ mod tests {
             tags: vec![],
             source_span: SourceSpan::default(),
             overlay: None,
+            register_content: vec![],
         };
         let deck = make_deck(vec![slide]);
         let result = collect_executive_summary(&deck);
@@ -1672,6 +1680,7 @@ mod tests {
             tags: vec![],
             source_span: SourceSpan::default(),
             overlay: None,
+            register_content: vec![],
         };
         let deck = make_deck(vec![slide]);
         let result = collect_risk_register(&deck);
@@ -1716,6 +1725,7 @@ mod tests {
                 tags: vec![],
                 source_span: SourceSpan::default(),
                 overlay: None,
+                register_content: vec![],
             }
         };
         let normal_slide =
@@ -1773,6 +1783,7 @@ mod tests {
                 tags: vec![],
                 source_span: SourceSpan::default(),
                 overlay: None,
+                register_content: vec![],
             }
         };
 
@@ -2220,6 +2231,7 @@ mod tests {
             tags: vec![],
             source_span: SourceSpan::default(),
             overlay: None,
+            register_content: vec![],
         };
         let deck = make_deck_with_section_blocks(vec![expr_takeaway_slide], vec![block]);
         // collect_sections must succeed (the manual section is collected; the
@@ -2320,6 +2332,7 @@ mod tests {
             tags: vec![],
             source_span: SourceSpan::default(),
             overlay: None,
+            register_content: vec![],
         };
         let deck = make_deck(vec![slide]);
         let result = collect_risk_register(&deck);
@@ -2349,6 +2362,7 @@ mod tests {
             tags: vec![],
             source_span: SourceSpan::default(),
             overlay: None,
+            register_content: vec![],
         };
         let deck = make_deck(vec![slide]);
         let result = collect_risk_register(&deck);
@@ -2376,6 +2390,7 @@ mod tests {
             tags: vec![],
             source_span: SourceSpan::default(),
             overlay: None,
+            register_content: vec![],
         };
         let deck = make_deck(vec![slide]);
         let result = collect_risk_register(&deck);
@@ -2755,6 +2770,7 @@ mod tests {
             tags: vec![],
             source_span: SourceSpan::default(),
             overlay: None,
+            register_content: vec![],
         }
     }
 

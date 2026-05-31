@@ -254,6 +254,7 @@ mod tests {
             tags: vec![],
             source_span: SourceSpan::default(),
             overlay: None,
+            register_content: vec![],
         }
     }
 
@@ -503,6 +504,7 @@ mod tests {
             tags: vec![],
             source_span: SourceSpan::default(),
             overlay: None,
+            register_content: vec![],
         };
         let deck = make_deck(vec![slide]);
         let diags = LabelCheckValidator.validate(&deck, &default_opts());

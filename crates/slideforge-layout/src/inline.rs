@@ -376,6 +376,7 @@ mod tests {
                 tags: vec![],
                 source_span: SourceSpan::default(),
                 overlay: None,
+                register_content: vec![],
             })
             .collect();
 
@@ -415,6 +416,7 @@ mod tests {
             }],
             speaker_notes: None,
             register_tags: vec![],
+            register_content: vec![],
         }
     }
 
@@ -436,6 +438,7 @@ mod tests {
             }],
             speaker_notes: None,
             register_tags: vec![],
+            register_content: vec![],
         }
     }
 

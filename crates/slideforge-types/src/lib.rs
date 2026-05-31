@@ -59,7 +59,7 @@ pub use inline::InlineNode;
 pub use math::MathNode;
 pub use ordered_map::OrderedMap;
 pub use precedence::MergePrecedence;
-pub use register::Register;
+pub use register::{Register, RegisteredContent};
 pub use shape_types::{FillSpec, LayoutWarning, Rgb, ShapeType, ShapeTypeError};
 pub use slide::{FieldValue, Slide, StringPart};
 pub use slide_overlay::SlideOverlay;
