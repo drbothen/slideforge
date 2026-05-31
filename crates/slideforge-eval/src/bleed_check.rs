@@ -27,11 +27,11 @@
 //!   sentinel in a path not scanned does not trigger a panic.
 //! - EC-004: `BleedChecker` works on **decoded XML text**. Before searching for
 //!   the sentinel, each ZIP member's raw UTF-8 bytes are XML-entity-decoded via
-//!   [`quick_xml::escape::unescape`]. This means callers pass the
-//!   **human-readable** (unescaped) register string as the sentinel — the
-//!   checker finds it regardless of how the exporter XML-escapes it in the
-//!   output. For example, a register string `R&D roadmap` will be detected even
-//!   when the exporter writes `R&amp;D roadmap` in the XML.
+//!   a **per-token tolerant decoder** (see [`decode_xml_entities`]). This means
+//!   callers pass the **human-readable** (unescaped) register string as the
+//!   sentinel — the checker finds it regardless of how the exporter XML-escapes
+//!   it in the output. For example, a register string `R&D roadmap` will be
+//!   detected even when the exporter writes `R&amp;D roadmap` in the XML.
 //!
 //! # Cross-crate availability
 //!
@@ -84,8 +84,12 @@ impl BleedChecker {
     /// # Sentinel contract (EC-004)
     ///
     /// Pass the **human-readable** register string as `sentinel`. `BleedChecker`
-    /// XML-entity-decodes each member before searching, so `R&D roadmap` is
-    /// detected even when the exporter writes `R&amp;D roadmap` in the XML.
+    /// XML-entity-decodes each member before searching using a per-token tolerant
+    /// decoder, so `R&D roadmap` is detected even when the exporter writes
+    /// `R&amp;D roadmap` in the XML. Only the decoded text is searched; the raw
+    /// XML bytes are never searched (see F-P4-001 for why the raw-search branch
+    /// was removed — it caused false positives for sentinels that are substrings
+    /// of XML escape machinery, e.g., sentinel `"amp"` matching inside `&amp;`).
     ///
     /// # EC-003 compliance
     ///
@@ -150,8 +154,10 @@ impl BleedChecker {
     /// # Sentinel contract (EC-004)
     ///
     /// Pass the **human-readable** register string as `sentinel`. `BleedChecker`
-    /// XML-entity-decodes each member before searching, so `R&D roadmap` is
-    /// detected even when the exporter writes `R&amp;D roadmap` in the XML.
+    /// XML-entity-decodes each member before searching using a per-token tolerant
+    /// decoder, so `R&D roadmap` is detected even when the exporter writes
+    /// `R&amp;D roadmap` in the XML. Only the decoded text is searched; the raw
+    /// XML bytes are never searched (see F-P4-001).
     ///
     /// # Panics
     ///
@@ -197,7 +203,8 @@ impl BleedChecker {
     /// # Sentinel contract (EC-004)
     ///
     /// Pass the **human-readable** register string as `sentinel`. `BleedChecker`
-    /// XML-entity-decodes the member before searching.
+    /// XML-entity-decodes the member before searching using a per-token tolerant
+    /// decoder. Only the decoded text is searched (see F-P4-001).
     ///
     /// # Panics
     ///
@@ -208,10 +215,9 @@ impl BleedChecker {
     ///   `word/document.xml`.
     pub fn assert_present_in_docx_body(docx_bytes: &[u8], sentinel: &str) {
         let mut archive = Self::open_zip(docx_bytes, "DOCX");
-        let (decoded, raw) = Self::read_docx_member_decoded(&mut archive, "word/document.xml");
-        // Belt-and-suspenders (EC-004): hit in either decoded or raw text counts.
+        let decoded = Self::read_docx_member_decoded(&mut archive, "word/document.xml");
         assert!(
-            decoded.contains(sentinel) || raw.contains(sentinel),
+            decoded.contains(sentinel),
             "BleedChecker: expected register content NOT found in DOCX body.\n\
              sentinel     : {sentinel:?}\n\
              searched in  : \"word/document.xml\"\n\
@@ -228,7 +234,8 @@ impl BleedChecker {
     /// # Sentinel contract (EC-004)
     ///
     /// Pass the **human-readable** register string as `sentinel`. `BleedChecker`
-    /// XML-entity-decodes the member before searching.
+    /// XML-entity-decodes the member before searching using a per-token tolerant
+    /// decoder. Only the decoded text is searched (see F-P4-001).
     ///
     /// # Panics
     ///
@@ -239,10 +246,9 @@ impl BleedChecker {
     ///   `word/document.xml`.
     pub fn assert_absent_from_docx_body(docx_bytes: &[u8], sentinel: &str) {
         let mut archive = Self::open_zip(docx_bytes, "DOCX");
-        let (decoded, raw) = Self::read_docx_member_decoded(&mut archive, "word/document.xml");
-        // Belt-and-suspenders (EC-004): a hit in either decoded or raw text counts.
+        let decoded = Self::read_docx_member_decoded(&mut archive, "word/document.xml");
         assert!(
-            !decoded.contains(sentinel) && !raw.contains(sentinel),
+            !decoded.contains(sentinel),
             "BleedChecker: register-content bleed detected in DOCX body.\n\
              sentinel    : {sentinel:?}\n\
              found in    : \"word/document.xml\"\n\
@@ -290,7 +296,11 @@ impl BleedChecker {
     }
 
     /// Read a ZIP member by physical index as a UTF-8 string, then XML-entity-decode it
-    /// using a tolerant best-effort decoder.
+    /// using the per-token tolerant decoder ([`decode_xml_entities`]).
+    ///
+    /// Returns the **decoded** text only. The raw text is NOT returned and is NOT
+    /// searched (see F-P4-001: the raw-search branch was removed because it caused
+    /// false positives for sentinels that are substrings of XML escape machinery).
     ///
     /// # Why index, not name (F-036-004)
     ///
@@ -299,7 +309,7 @@ impl BleedChecker {
     /// duplicate. By reading by index we visit every physical entry — including
     /// duplicates — so no bleed-bearing duplicate can hide behind an earlier entry.
     ///
-    /// # EC-004 compliance (F-036-002)
+    /// # EC-004 compliance (F-036-002, F-P4-001, F-P4-003)
     ///
     /// XML exporters escape special characters: `&` → `&amp;`, `<` → `&lt;`,
     /// `>` → `&gt;`, `"` → `&quot;`, `'` → `&apos;`. Numeric character
@@ -307,29 +317,29 @@ impl BleedChecker {
     /// sentinel like `R&D roadmap` would not be found in a member containing
     /// `R&amp;D roadmap`, causing a false negative (missed bleed detection).
     ///
-    /// Decoding uses a **best-effort, per-entity tolerant** strategy:
+    /// Decoding uses a **per-token tolerant** strategy via [`decode_xml_entities`]:
     ///
     /// - The five predefined XML entities (`&amp;`, `&lt;`, `&gt;`, `&quot;`, `&apos;`)
-    ///   and numeric character references (`&#NN;`, `&#xHH;`) are decoded exactly.
+    ///   are decoded to their corresponding characters.
+    /// - Numeric character references (`&#NN;`, `&#xHH;`) that map to valid Unicode
+    ///   scalar values are decoded to those characters.
     /// - Unknown named entities (e.g. `&copy;`, `&nbsp;`) decode to the Unicode
-    ///   replacement character U+FFFD (`\u{FFFD}`) rather than the empty string.
-    ///   Using the empty string would cause two categories of silent bug:
-    ///   - **False positive:** `A&copy;B` → `AB` (empty joins neighbours) triggers
-    ///     an absence-check panic even when `AB` is not semantically present.
-    ///   - **False green:** `R&copy;D` → `RD` (empty joins neighbours) makes a
-    ///     presence check pass even when `RD` was never written, hiding a routing
-    ///     failure.
+    ///   replacement character U+FFFD (`\u{FFFD}`).
+    /// - Malformed numeric references (e.g. `&#xZZ;`) decode to U+FFFD rather than
+    ///   aborting — one bad token never disables decoding for the rest of the member.
     ///
     ///   U+FFFD is a sentinel-neutral placeholder: it never forms a substring equal
-    ///   to a well-formed ASCII/UTF-8 sentinel, so it cannot cause either bug.
-    ///   Predefined entity decoding (`&amp;` → `&` etc.) is unaffected.
-    /// - As belt-and-suspenders, the sentinel is checked against BOTH the
-    ///   best-effort-decoded text AND the raw UTF-8 text. A hit in either counts as
-    ///   bleed. This ensures that a sentinel is never missed because an unrelated
-    ///   unknown entity appears in the same member (no false negative).
+    ///   to a well-formed ASCII/UTF-8 sentinel, so it cannot cause false-positive
+    ///   joins (e.g. `A&copy;B` → `A\u{FFFD}B`, not `AB`) or false-green joins
+    ///   (e.g. `R&copy;D` → `R\u{FFFD}D`, not `RD`).
     ///
-    /// Non-UTF-8 bytes in the member are replaced with the Unicode replacement
-    /// character (U+FFFD) before entity decoding.
+    /// The sentinel is checked against the **decoded text only** (F-P4-001).
+    /// The raw-search branch was removed because it matched escape-machinery
+    /// substrings: a sentinel like `"amp"` would match inside `&amp;D` raw bytes,
+    /// producing a spurious panic (false positive) or a spurious pass (false green)
+    /// depending on whether the check is an absence or presence assertion.
+    ///
+    /// Non-UTF-8 bytes in the member are replaced with U+FFFD before entity decoding.
     ///
     /// # Panics
     ///
@@ -337,7 +347,7 @@ impl BleedChecker {
     fn read_member_by_index_decoded(
         archive: &mut ZipArchive<std::io::Cursor<&[u8]>>,
         index: usize,
-    ) -> (String, String) {
+    ) -> String {
         let mut entry = archive.by_index(index).unwrap_or_else(|e| {
             panic!(
                 "BleedChecker: failed to read ZIP member at index {index}: {e}\n\
@@ -349,37 +359,22 @@ impl BleedChecker {
         entry.read_to_end(&mut raw_bytes).unwrap_or_else(|e| {
             panic!("BleedChecker: failed to read ZIP member {name:?} at index {index}: {e}")
         });
-        let raw_utf8 = String::from_utf8_lossy(&raw_bytes).into_owned();
+        let raw_utf8 = String::from_utf8_lossy(&raw_bytes);
 
-        // Tolerant best-effort entity decoding (EC-004, F-036-002, F-PASS3-001):
-        // - Known XML entities and numeric char refs are decoded correctly.
-        // - Unknown named entities (e.g. &copy;, &nbsp;) decode to U+FFFD
-        //   (Unicode replacement character) rather than the empty string.
-        //   Using empty string would collapse neighbours — e.g. `A&copy;B` → `AB`
-        //   or `R&copy;D` → `RD` — causing false positives (spurious panic on
-        //   absence check) and false greens (silent pass on presence check).
-        //   U+FFFD is sentinel-neutral: it never matches any well-formed ASCII
-        //   sentinel, so it avoids BOTH false-positive and false-negative joins.
-        let decoded = quick_xml::escape::unescape_with(&raw_utf8, |entity| {
-            // Try the five predefined XML entities first.
-            // For any other named entity, return Some("\u{FFFD}") — the entity
-            // becomes a non-joining replacement char rather than empty string.
-            quick_xml::escape::resolve_predefined_entity(entity).or(Some("\u{FFFD}"))
-        })
-        .unwrap_or_else(|_| {
-            // This branch is only reached for malformed numeric char refs (e.g.
-            // `&#xGGGG;`). Fall back to raw text — belt-and-suspenders still applies.
-            std::borrow::Cow::Borrowed(&raw_utf8)
-        })
-        .into_owned();
-
-        (decoded, raw_utf8)
+        // Per-token tolerant entity decoding (EC-004, F-036-002, F-P4-001, F-P4-003):
+        // decode_xml_entities processes each &...;  token individually and never
+        // returns Err — one malformed token decodes to U+FFFD and processing
+        // continues for the rest of the member. This eliminates the whole-member
+        // Err→raw fallback that was the root cause of false negatives (F-P4-003).
+        decode_xml_entities(&raw_utf8)
     }
 
-    /// Check whether `sentinel` is present in either the decoded or raw text
-    /// of a ZIP member (belt-and-suspenders, EC-004 / F-036-002).
+    /// Check whether `sentinel` is present in the **decoded** text of a ZIP member.
     ///
     /// Returns `Some(name)` with the member name if a match is found, `None` otherwise.
+    ///
+    /// Only the decoded text is searched (F-P4-001: the raw-search branch was
+    /// removed — see [`read_member_by_index_decoded`] for the full rationale).
     fn member_contains(
         archive: &mut ZipArchive<std::io::Cursor<&[u8]>>,
         index: usize,
@@ -401,8 +396,8 @@ impl BleedChecker {
             return None;
         }
 
-        let (decoded, raw) = Self::read_member_by_index_decoded(archive, index);
-        if decoded.contains(sentinel) || raw.contains(sentinel) {
+        let decoded = Self::read_member_by_index_decoded(archive, index);
+        if decoded.contains(sentinel) {
             Some(name)
         } else {
             None
@@ -416,12 +411,12 @@ impl BleedChecker {
     /// consistent with the F-036-004 robustness requirement and to correctly handle
     /// any ZIP with duplicate-named entries.
     ///
-    /// Returns the first `(decoded, raw)` pair for a member whose name equals
-    /// `target_name`, or panics if none is found.
+    /// Returns the decoded text for the first member whose name equals `target_name`,
+    /// or panics if none is found.
     fn read_docx_member_decoded(
         archive: &mut ZipArchive<std::io::Cursor<&[u8]>>,
         target_name: &str,
-    ) -> (String, String) {
+    ) -> String {
         for i in 0..archive.len() {
             let name = {
                 let entry = archive
@@ -437,5 +432,202 @@ impl BleedChecker {
             "BleedChecker: ZIP member {target_name:?} not found in archive.\n\
              (Is this a valid DOCX file with the expected structure?)"
         );
+    }
+}
+
+/// Decode XML entity references in `input` using a per-token tolerant strategy.
+///
+/// This is the core EC-004 decoder for `BleedChecker`. It processes each
+/// `&...;` token individually — a malformed or unknown entity never disables
+/// decoding for the tokens that follow it (F-P4-003).
+///
+/// # Decoding rules
+///
+/// | Token form | Decoding |
+/// |---|---|
+/// | `&amp;` | `&` |
+/// | `&lt;` | `<` |
+/// | `&gt;` | `>` |
+/// | `&quot;` | `"` |
+/// | `&apos;` | `'` |
+/// | `&#NNN;` (valid decimal Unicode scalar) | that Unicode char |
+/// | `&#xHHH;` (valid hex Unicode scalar) | that Unicode char |
+/// | unknown named (`&copy;`, `&nbsp;`, …) | U+FFFD (replacement char) |
+/// | malformed numeric (`&#xZZ;`, `&#;`, …) | U+FFFD (replacement char) |
+/// | plain text (no `&`) | passed through unchanged |
+///
+/// U+FFFD is the sentinel-neutral placeholder: it is never a substring of a
+/// well-formed ASCII/UTF-8 sentinel, so it prevents both false-positive joins
+/// (`A&copy;B` → `A\u{FFFD}B`, not `AB`) and false-green joins
+/// (`R&copy;D` → `R\u{FFFD}D`, not `RD`).
+///
+/// # Why not `quick_xml::escape::unescape_with`?
+///
+/// `unescape_with` processes the whole string atomically: if any numeric
+/// character reference is malformed (e.g. `&#xZZ;`) the function returns `Err`
+/// for the ENTIRE input. The previous code fell back to raw text on `Err`,
+/// meaning a malformed entity anywhere in a ZIP member silently disabled
+/// predefined-entity decoding for the whole member — causing false negatives
+/// for correctly-escaped sentinels elsewhere in the same member (F-P4-003).
+///
+/// The per-token loop below avoids this: each token is processed independently,
+/// so one bad token emits U+FFFD and the loop continues.
+///
+/// `quick_xml::escape::resolve_predefined_entity` IS still used internally to
+/// decode individual predefined entities within the loop (it operates on a
+/// single entity name, not the whole string, so it never triggers the
+/// whole-input Err problem).
+fn decode_xml_entities(input: &str) -> String {
+    let mut output = String::with_capacity(input.len());
+    let mut remaining = input;
+
+    while let Some(amp_pos) = remaining.find('&') {
+        // Append everything before the `&`.
+        output.push_str(&remaining[..amp_pos]);
+        remaining = &remaining[amp_pos..];
+
+        // Find the closing `;` for this entity reference.
+        if let Some(semi_pos) = remaining.find(';') {
+            let entity_with_delimiters = &remaining[..=semi_pos]; // "&...;"
+            let entity_name = &remaining[1..semi_pos]; // "..." (without & and ;)
+            remaining = &remaining[semi_pos + 1..];
+
+            // Try predefined entities first (amp, lt, gt, quot, apos).
+            if let Some(ch) = quick_xml::escape::resolve_predefined_entity(entity_name) {
+                output.push_str(ch);
+            } else if let Some(rest) = entity_name.strip_prefix('#') {
+                // Numeric character reference: &#NNN; or &#xHHH;
+                let code_point: Option<u32> = if let Some(hex) = rest.strip_prefix('x') {
+                    // Hexadecimal: &#xHHH;
+                    u32::from_str_radix(hex, 16).ok()
+                } else {
+                    // Decimal: &#NNN;
+                    rest.parse::<u32>().ok()
+                };
+                match code_point.and_then(char::from_u32) {
+                    Some(ch) => output.push(ch),
+                    None => {
+                        // Malformed or non-scalar code point → U+FFFD placeholder.
+                        // This covers &#xZZ; (invalid hex), &#3000000; (out of range),
+                        // &#xD800; (surrogate), etc.
+                        output.push('\u{FFFD}');
+                    },
+                }
+            } else {
+                // Unknown named entity (e.g. &copy;, &nbsp;, &trade;) → U+FFFD.
+                // Using U+FFFD rather than "" prevents false-positive joins
+                // (A&copy;B → A\u{FFFD}B, not AB) and false-green joins
+                // (R&copy;D → R\u{FFFD}D, not RD).
+                let _ = entity_with_delimiters; // consumed above; suppress unused warning
+                output.push('\u{FFFD}');
+            }
+        } else {
+            // No closing `;` found — bare `&` with no matching entity end.
+            // Emit the `&` literally and advance past it.
+            output.push('&');
+            remaining = &remaining[1..];
+        }
+    }
+
+    // Append any trailing text after the last entity reference.
+    output.push_str(remaining);
+    output
+}
+
+#[cfg(test)]
+mod unit_tests {
+    use super::decode_xml_entities;
+
+    #[test]
+    fn test_predefined_entities_decoded() {
+        assert_eq!(decode_xml_entities("R&amp;D"), "R&D");
+        assert_eq!(decode_xml_entities("&lt;item&gt;"), "<item>");
+        assert_eq!(
+            decode_xml_entities("say &quot;hello&quot;"),
+            "say \"hello\""
+        );
+        assert_eq!(decode_xml_entities("it&apos;s"), "it's");
+    }
+
+    #[test]
+    fn test_decimal_numeric_ref_decoded() {
+        // &#65; = 'A'
+        assert_eq!(decode_xml_entities("&#65;"), "A");
+        // &#38; = '&'
+        assert_eq!(decode_xml_entities("&#38;"), "&");
+    }
+
+    #[test]
+    fn test_hex_numeric_ref_decoded() {
+        // &#x41; = 'A'
+        assert_eq!(decode_xml_entities("&#x41;"), "A");
+        // &#x26; = '&'
+        assert_eq!(decode_xml_entities("&#x26;"), "&");
+    }
+
+    #[test]
+    fn test_unknown_named_entity_becomes_fffd() {
+        let result = decode_xml_entities("&copy;");
+        assert_eq!(result, "\u{FFFD}");
+    }
+
+    #[test]
+    fn test_unknown_entity_does_not_join_neighbours() {
+        // A&copy;B must NOT produce "AB" (which would be a false positive for sentinel "AB").
+        let result = decode_xml_entities("A&copy;B");
+        assert_eq!(result, "A\u{FFFD}B");
+        assert!(!result.contains("AB"));
+    }
+
+    #[test]
+    fn test_malformed_hex_ref_becomes_fffd() {
+        // &#xZZ; is not valid hex — must produce U+FFFD, not abort.
+        let result = decode_xml_entities("&#xZZ;");
+        assert_eq!(result, "\u{FFFD}");
+    }
+
+    #[test]
+    fn test_malformed_numeric_ref_does_not_disable_rest_of_member() {
+        // &#xZZ; (malformed) must not prevent R&amp;D from decoding correctly.
+        let result = decode_xml_entities("&#xZZ; R&amp;D roadmap");
+        assert!(result.contains("R&D roadmap"), "got: {result:?}");
+        assert!(result.starts_with('\u{FFFD}'), "got: {result:?}");
+    }
+
+    #[test]
+    fn test_no_entity_passthrough() {
+        let s = "plain text with no entities";
+        assert_eq!(decode_xml_entities(s), s);
+    }
+
+    #[test]
+    fn test_bare_ampersand_no_semicolon() {
+        // A bare & with no closing ; must not panic — emit it literally.
+        let result = decode_xml_entities("AT&T");
+        assert_eq!(result, "AT&T");
+    }
+
+    #[test]
+    fn test_escape_machinery_sentinel_amp_not_found_in_decoded() {
+        // R&amp;D decoded is "R&D". Sentinel "amp" must NOT be in the decoded text.
+        // (This is the F-P4-001 collision: raw bytes contain "amp" inside "&amp;"
+        //  but decoded text does not.)
+        let decoded = decode_xml_entities("R&amp;D project");
+        assert_eq!(decoded, "R&D project");
+        assert!(!decoded.contains("amp"));
+    }
+
+    #[test]
+    fn test_surrogate_code_point_becomes_fffd() {
+        // &#xD800; is a surrogate — not a valid Unicode scalar value.
+        let result = decode_xml_entities("&#xD800;");
+        assert_eq!(result, "\u{FFFD}");
+    }
+
+    #[test]
+    fn test_out_of_range_code_point_becomes_fffd() {
+        // &#x200000; is beyond the Unicode range (max U+10FFFF).
+        let result = decode_xml_entities("&#x200000;");
+        assert_eq!(result, "\u{FFFD}");
     }
 }

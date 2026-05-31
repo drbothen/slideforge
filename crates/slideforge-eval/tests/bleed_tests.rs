@@ -5,12 +5,15 @@
 //!
 //! Tests are split into two groups:
 //!
-//! ## Group 1: AC-008 BleedChecker utility unit tests (RUNS NOW)
+//! ## Group 1: AC-008 BleedChecker utility unit tests (RUNS NOW — PASSING)
 //!
 //! These tests construct minimal synthetic PPTX-like / DOCX-like ZIP bytes
 //! in-memory using the `zip` crate and exercise `BleedChecker`'s four methods.
-//! They do not require any exporter crate. They MUST FAIL until
-//! `BleedChecker`'s `todo!()` stubs are implemented (Red Gate phase).
+//! They do not require any exporter crate. `BleedChecker` is fully implemented
+//! (the `todo!()` stubs from the Red Gate phase are gone); all tests in this
+//! group pass. The decoder uses a per-token tolerant strategy (`decode_xml_entities`)
+//! that decodes predefined entities and numeric refs correctly while mapping unknown
+//! or malformed entities to U+FFFD — never returning Err for the whole member.
 //!
 //! - `test_BC_1_14_004_bleedchecker_absent_from_slides_passes_when_not_present`
 //! - `test_BC_1_14_004_bleedchecker_absent_from_slides_panics_when_present`
@@ -475,14 +478,15 @@ fn test_BC_1_14_004_ec004_unescaped_sentinel_absent_passes() {
 /// `Err` for the WHOLE member, which caused the code to fall back to raw text.
 /// Raw text for `R&amp;D` does NOT contain `R&D`, so the bleed was silently missed.
 ///
-/// The fix uses `unescape_with` with a resolver that returns `Some("")` for
-/// unknown named entities (they collapse to empty rather than aborting),
-/// combined with belt-and-suspenders raw-text searching. After the fix:
-/// - Decoded text: `&copy;` → `` (empty), `R&amp;D` → `R&D` → sentinel found.
-/// - Belt-and-suspenders raw search would also not suppress the decoded hit.
+/// The fix uses a per-token tolerant decoder (`decode_xml_entities`) where unknown
+/// named entities decode to U+FFFD (the Unicode replacement character) rather than
+/// the empty string (not `Some("")` — using the empty string would cause false-positive
+/// joins like `A&copy;B` → `AB`). After the fix:
+/// - Decoded text: `&copy;` → `\u{FFFD}`, `R&amp;D` → `R&D` → sentinel found.
+/// - Only the decoded text is searched (the raw-search branch was removed, F-P4-001).
 ///
 /// This test MUST FAIL against the old all-or-nothing fallback implementation
-/// and MUST PASS after the tolerant-decode fix.
+/// and MUST PASS after the per-token tolerant-decode fix.
 #[test]
 fn test_BC_1_14_004_ec004_unknown_entity_does_not_mask_adjacent_sentinel() {
     // Build a PPTX slide member containing BOTH an unknown entity (`&copy;`) and
@@ -882,4 +886,124 @@ fn test_BC_1_14_004_ac007_all_three_registers_no_bleed_cross_format() {
         "un-ignore and implement once STORY-037 PPTX exporter and STORY-041 DOCX exporter \
          are available"
     )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// F-P4-005: Regression pin tests — fail against old dual-search / whole-member
+// fallback, pass after per-token tolerant decoder + decoded-only search.
+//
+// These three tests pin the exact bugs identified in the Phase 4 adversarial
+// pass (F-P4-001 and F-P4-003). They are written as first-class tests
+// (not #[ignore]'d) so any future regression immediately breaks CI.
+//
+// Test 1 — Escape-machinery collision (F-P4-001):
+//   With the OLD dual-search: member `R&amp;D` (no literal "amp" text), sentinel
+//   "amp". The raw bytes contain the literal substring "amp" (inside "&amp;D").
+//   `|| raw.contains("amp")` → true → absence check spuriously panics (false
+//   positive). With decoded-only search: decoded text is `R&D`, which does NOT
+//   contain "amp" → absence check correctly passes. Also verify presence check
+//   for "amp" correctly reports absent (no panic on assert_absent_from_pptx_all).
+//
+// Test 2 — Escape-machinery collision for assert_absent_from_pptx_all
+//   (same scenario, covering the all-members scan path).
+//
+// Test 3 — Malformed-numeric resilience (F-P4-003):
+//   Member contains BOTH a malformed numeric ref `&#xZZ;` AND an escaped
+//   sentinel `R&amp;D`. With the OLD whole-member fallback: unescape_with returns
+//   Err on the malformed ref → decoded = raw_utf8 → decoded text still contains
+//   "&amp;" → sentinel "R&D" NOT found in decoded → false GREEN (the real
+//   escaped bleed is silently missed). With per-token decoder: `&#xZZ;` →
+//   U+FFFD (one bad token, rest decoded normally) → `R&amp;D` → `R&D` → sentinel
+//   IS found → absence check correctly panics.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// F-P4-005 / F-P4-001 — Escape-machinery collision, slides scan:
+/// `assert_absent_from_pptx_slides("amp")` must NOT panic when the slide member
+/// contains `R&amp;D` but no literal text "amp".
+///
+/// With the OLD dual-search (`|| raw.contains(sentinel)`): the raw bytes contain
+/// the substring "amp" embedded in "&amp;D" → spurious panic (false positive).
+/// With decoded-only search: decoded text is `R&D`, which does not contain "amp"
+/// → absence check correctly passes (no panic).
+///
+/// This test FAILS against the old dual-search implementation (because the raw
+/// bytes of "&amp;D" do contain "amp") and PASSES after the fix.
+#[test]
+fn test_BC_1_14_004_f_p4_005_escape_machinery_collision_slides_no_false_positive() {
+    // Slide body contains ONLY R&amp;D — no literal text "amp" anywhere.
+    let pptx = make_pptx_zip(r"<a:t>R&amp;D project</a:t>", "notes without any amp");
+    // Sentinel "amp" must NOT be detected — it only exists in XML machinery
+    // (&amp;), not in the decoded human-readable text.
+    // Decoded: "R&D project" — does not contain "amp".
+    // OLD dual-search raw bytes DO contain "amp" inside "&amp;" → false panic.
+    BleedChecker::assert_absent_from_pptx_slides(&pptx, "amp");
+}
+
+/// F-P4-005 / F-P4-001 — Escape-machinery collision, all-members scan:
+/// `assert_absent_from_pptx_all("amp")` must NOT panic when the only occurrence
+/// of "amp" in the archive is inside XML escape machinery (`&amp;`).
+///
+/// Same bug as above but covering the `assert_absent_from_pptx_all` code path.
+/// OLD dual-search: raw bytes of `&amp;D` contain "amp" → spurious panic.
+/// Fixed decoded-only: decoded `R&D` does not contain "amp" → passes.
+#[test]
+fn test_BC_1_14_004_f_p4_005_escape_machinery_collision_all_no_false_positive() {
+    // Both slide body and notes contain &amp; but no literal "amp" text.
+    let pptx = make_pptx_zip(
+        r"<a:t>R&amp;D project</a:t>",
+        r"notes with R&amp;D reference",
+    );
+    // "amp" is only in XML machinery, not in decoded text.
+    BleedChecker::assert_absent_from_pptx_all(&pptx, "amp");
+}
+
+/// F-P4-005 / F-P4-003 — Malformed numeric ref + escaped sentinel:
+/// When a ZIP member contains BOTH a malformed numeric char ref (`&#xZZ;`) AND
+/// an XML-escaped sentinel (`R&amp;D`), `assert_absent_from_pptx_all` MUST
+/// PANIC — the real escaped bleed must be detected despite the malformed token.
+///
+/// With the OLD whole-member fallback: `unescape_with` returns `Err` because
+/// `&#xZZ;` is malformed → `decoded` is set to `raw_utf8` (still escaped) →
+/// decoded text contains `&amp;D` not `&D` → sentinel `R&D` not found → FALSE
+/// GREEN (bleed silently missed).
+///
+/// With the per-token tolerant decoder: `&#xZZ;` → U+FFFD (one bad token,
+/// processing continues) → `R&amp;D` → `R&D` → sentinel IS found → absence
+/// check correctly panics (bleed detected).
+///
+/// This test FAILS against the old whole-member-fallback impl (the absence
+/// check incorrectly passes — false green) and PASSES after the per-token fix
+/// (the absence check correctly panics — real bleed detected).
+#[test]
+fn test_BC_1_14_004_f_p4_005_malformed_numeric_ref_does_not_mask_escaped_sentinel() {
+    // Build a PPTX slide member containing:
+    //   - &#xZZ; (malformed numeric char ref — not valid hex)
+    //   - R&amp;D roadmap (correctly escaped sentinel)
+    let pptx = make_pptx_zip(
+        r"<a:t>&#xZZ; R&amp;D roadmap</a:t>",
+        "notes without sentinel",
+    );
+
+    // assert_absent_from_pptx_all must PANIC: the decoded text must contain
+    // "R&D roadmap" even though an unrelated malformed ref appears nearby.
+    // OLD whole-member fallback: entire member falls back to raw bytes → false green.
+    // Per-token decoder: &#xZZ; → U+FFFD, R&amp;D → R&D → bleed detected → panic.
+    let result = std::panic::catch_unwind(|| {
+        BleedChecker::assert_absent_from_pptx_all(&pptx, "R&D roadmap");
+    });
+    assert!(
+        result.is_err(),
+        "BleedChecker must detect 'R&D roadmap' even when a malformed numeric char ref \
+         (&#xZZ;) appears in the same member — per-token tolerant decoding required (F-P4-003)"
+    );
+
+    // Also verify the slide-scoped check detects it.
+    let result2 = std::panic::catch_unwind(|| {
+        BleedChecker::assert_absent_from_pptx_slides(&pptx, "R&D roadmap");
+    });
+    assert!(
+        result2.is_err(),
+        "assert_absent_from_pptx_slides must also detect 'R&D roadmap' via per-token \
+         decoding when a malformed numeric ref appears in the same member (F-P4-003)"
+    );
 }
