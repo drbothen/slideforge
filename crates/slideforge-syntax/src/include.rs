@@ -65,6 +65,13 @@ pub type VarsScope = HashMap<String, String>;
 // ─── IncludeError ─────────────────────────────────────────────────────────────
 
 /// Error type returned by [`resolve_includes`].
+///
+/// # Extensibility
+///
+/// `#[non_exhaustive]` ensures that adding new include-resolution error variants in
+/// minor releases does not force downstream callers to update exhaustive match arms
+/// (OBS-1 rule, conventions.md §non_exhaustive-policy).
+#[non_exhaustive]
 #[derive(Debug, Clone)]
 pub enum IncludeError {
     /// The included file was not found (`E-PAR-005`).

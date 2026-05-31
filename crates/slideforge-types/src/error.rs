@@ -12,6 +12,13 @@ use crate::span::SourceSpan;
 ///
 /// Every variant carries a [`SourceSpan`] so that `miette` can render a
 /// colored source pointer to the exact location in the `.sf` file.
+///
+/// # Extensibility
+///
+/// `#[non_exhaustive]` ensures that adding new type-error variants in minor releases
+/// does not force downstream callers to update exhaustive match arms (OBS-1 rule,
+/// conventions.md §non_exhaustive-policy).
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum TypeError {
     /// A value was of the wrong type for the operation.
