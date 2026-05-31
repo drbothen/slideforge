@@ -2,12 +2,12 @@
 //!
 //! Each variant maps to an error code from the slideforge error taxonomy:
 //!
-//! | Code | Variant | Severity |
-//! |------|---------|---------|
-//! | `E-BRD-001` | [`BrandError::FileNotFound`] | broken (exit 4) |
-//! | `E-BRD-002` | [`BrandError::ParseError`] | broken (exit 4) |
+//! | Code | Variants | Severity |
+//! |------|----------|---------|
+//! | `E-BRD-001` | [`BrandError::FileNotFound`], [`BrandError::LogoRequired`], [`BrandError::TomlReadError`] | broken (exit 4) |
+//! | `E-BRD-002` | [`BrandError::ParseError`], [`BrandError::TomlParseError`] | broken (exit 4) |
 //! | `E-BRD-003` | [`BrandError::MissingColorSlot`] | cosmetic (exit 0) |
-//! | `E-BRD-004` | [`BrandError::FontUnavailable`] | cosmetic (exit 0) |
+//! | `E-BRD-004` | [`BrandError::FontUnavailable`], [`BrandError::DeclaredFontUnavailable`] | cosmetic (exit 0) |
 //! | `E-BRD-005` | [`BrandError::InvalidHexColor`] | cosmetic (exit 0) |
 //! | `E-BRD-006` | [`BrandError::OutputExists`] | broken (exit 4) |
 //! | `E-BRD-007` | [`BrandError::LogoOutsideBrandDir`] | broken (exit 4) |
@@ -236,7 +236,9 @@ pub enum BrandError {
     LogoOutsideBrandDir {
         /// The resolved canonical path of the logo file that escaped the brand dir.
         logo_path: String,
-        /// The canonical path of the `brand.toml` parent directory.
+        /// The canonical path of the brand root directory (the `.sf` source directory
+        /// for per-slide overlays; the `brand.toml` parent directory for the master
+        /// brand logo).
         brand_dir: String,
     },
 

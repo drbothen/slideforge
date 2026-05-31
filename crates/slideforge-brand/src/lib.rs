@@ -38,12 +38,12 @@
 //!
 //! ## Error Codes
 //!
-//! | Code | Variant | Severity |
-//! |------|---------|---------|
-//! | `E-BRD-001` | [`BrandError::FileNotFound`] | broken (exit 4) |
-//! | `E-BRD-002` | [`BrandError::ParseError`] | broken (exit 4) |
+//! | Code | Variants | Severity |
+//! |------|----------|---------|
+//! | `E-BRD-001` | [`BrandError::FileNotFound`], [`BrandError::LogoRequired`], [`BrandError::TomlReadError`] | broken (exit 4) |
+//! | `E-BRD-002` | [`BrandError::ParseError`], [`BrandError::TomlParseError`] | broken (exit 4) |
 //! | `E-BRD-003` | [`BrandError::MissingColorSlot`] | cosmetic (exit 0) |
-//! | `E-BRD-004` | [`BrandError::FontUnavailable`] | cosmetic (exit 0) |
+//! | `E-BRD-004` | [`BrandError::FontUnavailable`], [`BrandError::DeclaredFontUnavailable`] | cosmetic (exit 0) |
 //! | `E-BRD-005` | [`BrandError::InvalidHexColor`] | cosmetic (exit 0) |
 //! | `E-BRD-006` | [`BrandError::OutputExists`] | broken (exit 4) |
 //! | `E-BRD-007` | [`BrandError::LogoOutsideBrandDir`] | broken (exit 4) |
