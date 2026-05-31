@@ -34,10 +34,19 @@ use crate::template::{BrandTemplate, ColorValue, LogoAsset};
 /// their canonical slot index (0-based, ECMA-376 order).
 ///
 /// Used by [`resolve_scheme_ref`] to look up the base hex for a `SchemeRef`.
+///
+/// ## Normalization
+///
+/// `color.rs` stores every `schemeClr val` lowercased (e.g., `"folHlink"` becomes
+/// `"folhlink"`, `"followedHyperlink"` becomes `"followedhyperlink"`).
+/// This function therefore normalizes `scheme_name` to ASCII-lowercase before
+/// matching, so all OOXML camelCase aliases resolve correctly regardless of
+/// the case used in the original XML.
 fn scheme_name_to_slot_index(scheme_name: &str) -> Option<usize> {
     // OOXML `<a:schemeClr val="...">` uses "accent1"…"accent6" spellings; some templates
     // also use the short "acc1"…"acc6" aliases used in brand.toml. Both forms are accepted.
-    match scheme_name {
+    // All arms are lowercase to match the stored SchemeRef values from color.rs:155.
+    match scheme_name.to_ascii_lowercase().as_str() {
         "dk1" => Some(0),
         "lt1" => Some(1),
         "dk2" => Some(2),
@@ -49,7 +58,7 @@ fn scheme_name_to_slot_index(scheme_name: &str) -> Option<usize> {
         "accent5" | "acc5" => Some(8),
         "accent6" | "acc6" => Some(9),
         "hlink" | "hyperlink" => Some(10),
-        "folHlink" | "followedHyperlink" => Some(11),
+        "folhlink" | "followedhyperlink" => Some(11),
         _ => None,
     }
 }
@@ -1419,6 +1428,125 @@ mod tests {
         assert!(
             acc2_line.contains("# derived via tint/shade"),
             "resolved SchemeRef must still carry inline comment (EC-003), got: {acc2_line}"
+        );
+    }
+
+    // ─── F-024A-MED-1: camelCase SchemeRef resolution ────────────────────────
+
+    /// F-024A-MED-1 — `SchemeRef` stored as lowercase (from `color.rs` line 155)
+    /// must resolve correctly via `scheme_name_to_slot_index` when the target name
+    /// is a mixed-case OOXML alias such as `"folHlink"` or `"hyperlink"`.
+    ///
+    /// After `color.rs` lowercases `val` to `"folhlink"`, `scheme_name_to_slot_index`
+    /// must accept `"folhlink"` (not only the original mixed-case `"folHlink"`).
+    ///
+    /// EC-003 load-bearing guard: a `SchemeRef` whose target is `"folhlink"` (the
+    /// stored lowercase form of OOXML `"folHlink"`) must resolve to the hlink slot's
+    /// hex, not fall back to the default.
+    #[test]
+    fn test_f024a_med1_schemeclr_folhlink_lowercase_resolves_to_sibling_hex() {
+        use crate::template::{BrandFonts, BrandTemplate, ColorSlot, ColorValue, MasterIds};
+
+        let make_hex_slot = |name: &str, hex: &str| ColorSlot {
+            name: Arc::from(name),
+            value: ColorValue::Hex(Arc::from(hex)),
+        };
+
+        // hlink (index 10) holds Hex "#AABBCC".
+        // folHlink (index 11) holds SchemeRef("folhlink") — the LOWERCASED form that
+        // color.rs:155 would store for <a:schemeClr val="folHlink"/>. This must NOT
+        // be treated as a self-reference (folHlink slot name is "folHlink", not "folhlink").
+        //
+        // Wait — the SchemeRef here is "folhlink" targeting the folHlink SLOT (index 11).
+        // That IS a self-reference (same slot), so it should fall back to default.
+        // The real test: hlink slot (index 10) is SchemeRef("hyperlink") — stored lowercase.
+        // "hyperlink" must map to index 10 (hlink) — but that IS the same slot, so fallback.
+        //
+        // Better: acc1 (index 4) has SchemeRef("accent1") stored as lowercase "accent1".
+        // acc1 maps to index 4 — self-reference → fallback. Not useful.
+        //
+        // The real failure scenario: folHlink (index 11) contains SchemeRef("hlink") —
+        // i.e., val="hlink" in OOXML, stored as lowercase "hlink". This is NOT a
+        // self-reference; it targets index 10 (hlink slot, hex "#AABBCC").
+        // Before the fix: scheme_name_to_slot_index("hlink") returns Some(10) — OK.
+        //
+        // The actual broken case: folHlink slot contains SchemeRef("folhlink") which is
+        // the lowercase of "folHlink". The old match has arm "folHlink" (mixed-case),
+        // which NEVER matches the stored lowercase "folhlink". With the fix (match on
+        // lowercase), "folhlink" correctly maps to index 11 — but that's a self-reference
+        // and returns None (fallback).
+        //
+        // The truly broken case: hlink slot (10) contains SchemeRef("followedhyperlink")
+        // (lowercase of "followedHyperlink"). Before fix: no arm matches → None → fallback.
+        // After fix: "followedhyperlink" → Some(11) (folHlink), different slot → resolved hex.
+        let colors: [ColorSlot; 12] = [
+            make_hex_slot("dk1", "#000000"),
+            make_hex_slot("lt1", "#FFFFFF"),
+            make_hex_slot("dk2", "#003087"),
+            make_hex_slot("lt2", "#F5F5F5"),
+            make_hex_slot("acc1", "#0066CC"),
+            make_hex_slot("acc2", "#FF6B35"),
+            make_hex_slot("acc3", "#28A745"),
+            make_hex_slot("acc4", "#FFC107"),
+            make_hex_slot("acc5", "#6F42C1"),
+            make_hex_slot("acc6", "#17A2B8"),
+            // hlink (index 10): SchemeRef("followedhyperlink") — lowercase of "followedHyperlink".
+            // This refers to folHlink (index 11) = "#551A8B". Before fix: no match → fallback.
+            ColorSlot {
+                name: Arc::from("hlink"),
+                value: ColorValue::SchemeRef(Arc::from("followedhyperlink")),
+            },
+            make_hex_slot("folHlink", "#551A8B"), // index 11
+        ];
+
+        let template = BrandTemplate {
+            colors,
+            fonts: BrandFonts {
+                heading: Arc::from("Calibri Light"),
+                body: Arc::from("Calibri"),
+            },
+            logo: None,
+            footer_text: None,
+            layout_names: vec![],
+            layouts: vec![],
+            notes_master_stub: vec![],
+            handout_master_stub: vec![],
+            master_ids: MasterIds::default(),
+            content_types_layout_entries: Arc::from(""),
+        };
+
+        let (toml_str, _) = brand_template_to_toml(&template, None);
+
+        // Parse the output.
+        let config: crate::toml_schema::BrandConfig =
+            toml::from_str(&toml_str).unwrap_or_else(|e| {
+                panic!(
+                    "F-024A-MED-1 TOML must parse as BrandConfig: {e}\nOutput:\n{toml_str}"
+                )
+            });
+        let hlink_value = config
+            .colors
+            .hlink
+            .as_deref()
+            .unwrap_or_else(|| panic!("hlink must be present in parsed config"));
+
+        // After fix: "followedhyperlink" maps to index 11 (folHlink = "#551A8B").
+        // Before fix: no match → fallback "#0000EE".
+        assert_eq!(
+            hlink_value, "#551A8B",
+            "F-024A-MED-1: SchemeRef(\"followedhyperlink\") must resolve to folHlink hex \
+             \"#551A8B\" (not the default \"#0000EE\"). \
+             This fails if scheme_name_to_slot_index does not normalize to lowercase."
+        );
+
+        // Also verify it carries the inline comment.
+        let hlink_line = toml_str
+            .lines()
+            .find(|l| l.trim_start().starts_with("hlink"))
+            .unwrap_or_else(|| panic!("hlink line must appear in TOML output"));
+        assert!(
+            hlink_line.contains("# derived via tint/shade"),
+            "resolved SchemeRef must carry inline TOML comment (EC-003)"
         );
     }
 
