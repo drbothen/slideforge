@@ -115,10 +115,9 @@ impl BrandLoader {
                 })
                 .count();
             if master_count > 1 {
+                // AC-007 mandates this exact warning string (BC-2.01.003 EC-004, F-024-H3).
                 tracing::warn!(
-                    path = %path.display(),
-                    master_count,
-                    "Template has multiple slide masters; only slideMaster1.xml is used."
+                    "Source .pptx has multiple slide masters; extracting from slideMaster1.xml only."
                 );
             }
         }
