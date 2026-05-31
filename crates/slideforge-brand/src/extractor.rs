@@ -1268,6 +1268,107 @@ mod tests {
         let _ = std::fs::remove_dir_all(&out_dir);
     }
 
+    // ─── F-024-pass4-OBS-2: extract → load_from_toml effectful round-trip ────
+
+    /// BC-2.01.003 / AC-010 — full effectful round-trip:
+    /// extract from PPTX with logo → `brand.toml` + `brand.assets/logo.png`
+    /// → `BrandSynthesizer::load_from_toml` → assert 12 color hex values match source.
+    ///
+    /// This test exercises the path NOT covered by the existing AC-010 test, which uses
+    /// `BrandSynthesizer::synthesize` (pure, no I/O). The REAL production consumer is
+    /// `load_from_toml`, which adds:
+    ///   1. Logo file-existence check (EC-005).
+    ///   2. Path-traversal guard against the written `brand.assets/logo.png`.
+    ///
+    /// The extracted logo is written to `output_dir/brand.assets/logo.png` by
+    /// `BrandExtractor::extract`. `load_from_toml` must resolve the logo path
+    /// relative to the `brand.toml` directory and confirm the logo is inside it.
+    #[test]
+    fn test_bc_2_01_003_effectful_extract_load_from_toml_round_trip() {
+        use crate::synthesizer::BrandSynthesizer;
+
+        // Expected hex values from MINIMAL_THEME_XML (ECMA-376 slot order).
+        const EXPECTED_HEX: [&str; 12] = [
+            "#000000", // dk1
+            "#FFFFFF", // lt1
+            "#003087", // dk2
+            "#F5F5F5", // lt2
+            "#0066CC", // acc1
+            "#FF6B35", // acc2
+            "#28A745", // acc3
+            "#FFC107", // acc4
+            "#6F42C1", // acc5
+            "#17A2B8", // acc6
+            "#0000EE", // hlink
+            "#551A8B", // fol_hlink
+        ];
+
+        // Use the logo PPTX fixture: extraction will write brand.assets/logo.png.
+        let zip_bytes = build_pptx_zip_with_logo(MINIMAL_THEME_XML);
+        let source_path = write_temp_pptx(&zip_bytes);
+        let out_dir = temp_output_dir();
+
+        let extraction = BrandExtractor::extract(source_path.to_str().unwrap(), &out_dir, false)
+            .expect("extraction from PPTX-with-logo must succeed");
+
+        let _ = std::fs::remove_file(&source_path);
+
+        // Confirm the logo asset was written to brand.assets/ (pre-condition for the
+        // load_from_toml test: the logo file must exist for the EC-005 check to pass).
+        assert!(
+            extraction.logo_asset_path.is_some(),
+            "F-024-pass4-OBS-2: extraction must have produced a logo asset path"
+        );
+        let logo_asset_path = extraction
+            .logo_asset_path
+            .as_ref()
+            .expect("logo_asset_path must be Some (asserted above)");
+        assert!(
+            logo_asset_path.exists(),
+            "F-024-pass4-OBS-2: brand.assets/logo.png must exist on disk after extraction, \
+             path: {logo_asset_path:?}"
+        );
+
+        // Call the EFFECTFUL load_from_toml — exercises EC-005 logo-existence check
+        // and path-traversal guard against the written brand.assets/logo.png.
+        let brand_toml_path_str = extraction
+            .brand_toml_path
+            .to_str()
+            .expect("brand.toml path must be valid UTF-8");
+
+        let (template, _warnings) = BrandSynthesizer::load_from_toml(brand_toml_path_str).expect(
+            "F-024-pass4-OBS-2: BrandSynthesizer::load_from_toml must return Ok on extracted \
+             brand.toml with a logo file written to brand.assets/",
+        );
+
+        // Assert all 12 color hex values match the original MINIMAL_THEME_XML source values.
+        assert_eq!(
+            template.colors.len(),
+            12,
+            "F-024-pass4-OBS-2: loaded BrandTemplate must have exactly 12 color slots"
+        );
+
+        for (i, expected) in EXPECTED_HEX.iter().enumerate() {
+            let slot = &template.colors[i];
+            let actual_hex = slot.hex().unwrap_or_else(|| {
+                panic!(
+                    "F-024-pass4-OBS-2: loaded color slot {i} ('{}') must be a resolved hex \
+                     (not an unresolved SchemeRef)",
+                    slot.name
+                )
+            });
+            assert!(
+                actual_hex.eq_ignore_ascii_case(expected),
+                "F-024-pass4-OBS-2: loaded slot {i} ('{}') must equal source hex '{}' \
+                 after effectful round-trip (pptx → brand.toml → load_from_toml), got: '{actual_hex}'",
+                slot.name,
+                expected
+            );
+        }
+
+        let _ = std::fs::remove_dir_all(&out_dir);
+    }
+
     // ─── AC-001 / EC-006: output directory created if absent ─────────────────
 
     /// BC-2.01.003 EC-006 — when `output_dir` does not exist, it is created
