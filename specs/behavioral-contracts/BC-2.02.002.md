@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.1"
+version: "1.2"
 status: draft
 producer: product-owner
 timestamp: 2026-05-24T00:00:00
@@ -10,11 +10,11 @@ inputs: [domain-spec/L2-INDEX.md]
 input-hash: "[pending]"
 traces_to: domain-spec/L2-INDEX.md
 origin: greenfield
-subsystem: SS-TBD
+subsystem: SS-06
 capability: CAP-019
 lifecycle_status: active
 introduced: v1.0.0
-modified: []
+modified: [v1.2]
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -103,3 +103,10 @@ use `brand_overlay:` to switch themes or masters is a compile error.
 ## VP Anchors
 
 (filled after VP creation)
+
+## Changelog
+
+| Version | Date | Author | Summary |
+|---------|------|--------|---------|
+| 1.1 | 2026-05-24 | product-owner | Initial creation — single-master invariant, EC-001 through EC-004, canonical test vectors |
+| 1.2 | 2026-05-30 | product-owner | Resolved SS-TBD placeholder: `subsystem` set to SS-06 (PPTX Export / slideforge-pptx) per ARCH-INDEX.md Subsystem Registry. The no-master-switch invariant is enforced by the PPTX relationship serializer; postconditions are stated in terms of sldMaster element count and _rels graph structure. Consistent with STORY-025 subsystems anchor [SS-04, SS-06]. |

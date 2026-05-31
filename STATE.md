@@ -31,10 +31,10 @@ wave_2_completed: 2026-05-27
 wave_3_batch_1_completed: 2026-05-28
 wave_3_batch_2_completed: 2026-05-30
 wave_3_batch_3_started: 2026-05-30
-wave_3_batch_3_in_progress: "STORY-021 MERGED (PR #35, 362c4a1f); STORY-024 MERGED (PR #36, 924cdc04); STORY-025 Red Gate done (rebase onto 924cdc04 needed — slideforge-brand/lib.rs union conflict expected)"
+wave_3_batch_3_in_progress: "STORY-021 MERGED (PR #35, 362c4a1f); STORY-024 MERGED (PR #36, 924cdc04); STORY-025 LOCAL ADVERSARY CONVERGED (11 passes, 3/3 strict-CLEAN P9-10-11) — demos done (10 ACs), PR next"
 develop_sha: "924cdc04"
 develop_pr_count: 36
-workspace_tests: "~2300+ (pending Wave 3 gate full-suite count; STORY-024 added ~25 net new tests over Red Gate baseline)"
+workspace_tests: "~2300+ (pending Wave 3 gate full-suite count; STORY-025 slideforge-brand+types: 455 tests passing)"
 workspace_test_failures: 0
 ---
 
@@ -57,20 +57,20 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. It generates branded .p
 Before doing ANY work, a new session should:
 
 1. **Sync local develop:** `git pull origin develop` in main worktree. develop is at `924cdc04` (36 merged PRs, ~2300+ tests). No pending merges.
-2. **Verify worktree health:** `git worktree list` should show: main worktree + `.factory/` + `.worktrees/STORY-025`. STORY-024 worktree cleanup is in progress (devops-engineer); STORY-025 worktree is ACTIVE and should NOT be removed.
-   - `.worktrees/STORY-025` on branch `feature/S-025` at commit `27d67613`
-3. **Top priority on resume:** Rebase STORY-025 onto develop 924cdc04 (expect slideforge-brand/lib.rs conflict — resolve by extension: each adds new modules, no shared modifications). Then dispatch IMPLEMENTER for STORY-025. See implementer notes below — critical (should_panic conversion, resolve_overlay, infer_media_type).
-4. **Check follow-up stories:** STORY-072 (gradient fills, P2/3pts), STORY-073 (bullets layout, P1/5pts), STORY-074 (brand-em-sizing, P2/3pts) — status=draft, created during STORY-028 cascade. See STORY-INDEX.md.
+2. **Verify worktree health:** `git worktree list` should show: main worktree + `.factory/` + `.worktrees/STORY-025`. STORY-024 worktree cleanup is in progress (devops-engineer); STORY-025 worktree is ACTIVE (LOCAL adversary converged — PR in flight).
+   - `.worktrees/STORY-025` on branch `feature/S-025`; 455 slideforge-brand+types tests passing; 10 ACs demo'd
+3. **Top priority on resume:** Push `feature/S-025` and run 9-step PR cycle (pr-manager). LOCAL adversary 3/3 strict-CLEAN (P9-10-11) is COMPLETE. Demos done (10 ACs). STORY-024 already MERGED (924cdc04). After STORY-025 merges: Wave 3 Gate.
+4. **Check follow-up stories:** STORY-072 (gradient fills, P2/3pts), STORY-073 (bullets layout, P1/5pts), STORY-074 (brand-em-sizing, P2/3pts) — status=draft, created during STORY-028 cascade. STORY-075 (footer detection), STORY-076 (srgbClr transform extraction) — status=draft, created during STORY-024 cascade. See STORY-INDEX.md.
 
 ### Where we are
 
-Phase 3, Wave 3 Batch 3 — **IN PROGRESS.** 2/3 merged. STORY-021 MERGED (PR #35, 362c4a1f). STORY-024 MERGED (PR #36, 924cdc04). STORY-025 Red Gate done — rebase onto 924cdc04 needed (slideforge-brand/lib.rs union conflict expected; resolve by extension).
+Phase 3, Wave 3 Batch 3 — **IN PROGRESS.** 2/3 merged. STORY-021 MERGED (PR #35, 362c4a1f). STORY-024 MERGED (PR #36, 924cdc04). STORY-025 LOCAL adversary CONVERGED (11 passes, 3/3 strict-CLEAN P9-10-11), 10 ACs demo'd — PR next.
 
 | Story | Status | Worktree | Branch | Notes |
 |-------|--------|----------|--------|-------|
 | STORY-021 | MERGED — PR #35, 362c4a1f | (cleaned up) | — | — |
 | STORY-024 | MERGED — PR #36, 924cdc04 | (cleanup in progress) | — | 11-pass adversary 3/3 strict-CLEAN; library-only; 11 ACs demo'd; STORY-075+076 follow-ups |
-| STORY-025 | RED GATE DONE — awaiting rebase onto 924cdc04 + implementer | `.worktrees/STORY-025` | `feature/S-025` | 9 should_panic + 12 structural; lib.rs conflict with STORY-024 expected (resolve by extension) |
+| STORY-025 | LOCAL ADVERSARY CONVERGED (11 passes, 3/3 strict-CLEAN P9-10-11) — demos done (10 ACs), PR next | `.worktrees/STORY-025` | `feature/S-025` | 455 slideforge-brand+types tests. BC-2.02.001 v1.4 / BC-2.02.002 v1.2 / error-taxonomy v2.2. Push feature/S-025 → 9-step PR cycle → merge. |
 
 ### STORY-024 — MERGED (PR #36, 924cdc04)
 
@@ -82,25 +82,22 @@ Phase 3, Wave 3 Batch 3 — **IN PROGRESS.** 2/3 merged. STORY-021 MERGED (PR #3
 **Follow-up stories:** STORY-075 (footer detection — loader.rs:214 hardcodes footer_text: None), STORY-076 (srgbClr transform-aware extraction — silent drop in color.rs). Status: draft, Wave TBD.
 **Worktree:** cleanup in progress (devops-engineer).
 
-### STORY-025 — Implementer Handoff
+### STORY-025 — Converged, Demos Done, PR Next
 
 **Title:** Per-Slide brand_overlay: No Master Switch Invariant (BC-2.02.001+002, 3pts, P1)
 **Worktree:** `/Users/jmagady/Dev/slideforge/.worktrees/STORY-025`
-**Key file to implement:** `crates/slideforge-brand/src/overlay.rs` — body `resolve_overlay()` and `infer_media_type()`
-**Files created at Red Gate:** `crates/slideforge-types/src/slide_overlay.rs` (SlideOverlay fully implemented + 7 tests), `crates/slideforge-brand/src/overlay.rs` (stub + 14 tests)
-**Files modified at Red Gate:** `crates/slideforge-types/src/slide.rs` (+`overlay: Option<SlideOverlay>` field), 11 other files in slideforge-layout/validate/plugin-api/eval (TD-VSDD-060 sibling sweep: 42 Slide constructions updated with `overlay: None`)
-
-**CRITICAL note:** The 9 `#[should_panic]` tests WILL START FAILING once `resolve_overlay()` and `infer_media_type()` are bodied (panics removed). Implementer MUST convert them from `#[should_panic]` to direct `assert!` checks during the green phase. This is intentional TDD pattern — do not skip.
-
-**AC-007/AC-009/AC-012 (parser rejection tests) are NOT in this story.** Deferred to STORY-008/STORY-009 (parser scope) per Architecture Compliance Rule 4 (slideforge-brand cannot depend on slideforge-syntax).
+**Status:** LOCAL adversary CONVERGED (11 passes, 3/3 strict-CLEAN P9-10-11). 10 ACs demo'd. 455 slideforge-brand+types tests passing.
+**Spec parity achieved:** BC-2.02.001 v1.4 (EC-006 path-containment, EC-007 unknown-extension warn, EC-008 empty-path→LogoRequired, "brand root directory" wording, subsystem SS-04). BC-2.02.002 v1.2 (subsystem SS-06). error-taxonomy v2.2 (E-BRD-007 widened to overlay coverage, shared-variant rows for E-BRD-001/002, LogoRequired context-neutral message, TomlReadError/TomlParseError variant-name corrections).
+**Key implementation hardening:** HIGH path-traversal containment guard in resolve_overlay (reuses strip_unc_prefix pattern); media_type unified to logo::media_type_from_extension; EC-007 unknown-extension emits warn not error; EC-008 empty-path returns LogoRequired; LogoRequired message is context-neutral (cross-context reuse).
+**Next action:** Push `feature/S-025` → 9-step PR cycle (pr-manager) → squash-merge → state-manager post-merge burst.
 
 **Merge conflict note:** STORY-024 and STORY-025 both touch `slideforge-brand`. When the second one lands, expect a merge conflict on `crates/slideforge-brand/src/lib.rs`. Resolve by extension — each adds new modules and new public types, not modifying existing ones.
 
 ### Top 3 next actions (in order)
 
-1. **STORY-025 rebase + implementer:** Rebase `feature/S-025` onto develop 924cdc04 (expect slideforge-brand/lib.rs conflict — resolve by extension). Then body `resolve_overlay` + `infer_media_type`, convert 9 `#[should_panic]` to `assert!`.
-2. **STORY-025 LOCAL adversary 3-CLEAN + demos + PR:** After implementer green, run LOCAL adversary cascade (3 consecutive strict-CLEAN passes per BC-5.39.001). Record demos per AC. Push + 9-step PR cycle (pr-manager).
-3. **After STORY-025 merges:** Wave 3 Gate (full workspace test + adversarial gate + holdout evaluation).
+1. **STORY-025 PR:** Push `feature/S-025` → 9-step PR cycle (pr-manager) → squash-merge develop. LOCAL adversary 3/3 strict-CLEAN (P9-10-11) complete. Demos done (10 ACs). Note STORY-024 already MERGED (924cdc04).
+2. **After STORY-025 merges:** Wave 3 Gate (full workspace test + adversarial wave-gate + holdout evaluation). Wave 3 Batch 3: 3/3 stories complete once STORY-025 merged.
+3. **Wave 3 Gate:** vsdd-factory:wave-gate skill — full `cargo test --workspace --no-fail-fast` on develop, adversarial gate (3-CLEAN), holdout evaluation.
 
 ### Orchestrator Playbook Improvements (codify before next cascade)
 
@@ -144,9 +141,8 @@ Completed in 2026-05-28/30 session:
 - STORY-024 demos (11 ACs) + push + PR #36 + merge (924cdc04). Wave 3 Batch 3: 2/3 merged.
 
 Pending:
-- STORY-025 rebase onto develop 924cdc04 (expect slideforge-brand/lib.rs conflict — resolve by extension) + implementer (body resolve_overlay + infer_media_type — convert 9 should_panic to assert!)
-- LOCAL adversary 3-CLEAN + demos + push + PR for STORY-025
-- Wave 3 Gate (after all Batch 3 stories merged)
+- STORY-025 push feature/S-025 + 9-step PR cycle (pr-manager) → squash-merge → state-manager post-merge burst
+- Wave 3 Gate (after all Batch 3 stories merged — STORY-021 + STORY-024 + STORY-025)
 - STORY-075 + STORY-076 (Wave TBD, status draft — not yet scheduled)
 
 ### Lessons captured (archived to cycle files — see below)
@@ -168,7 +164,7 @@ Pending:
 
 ## Current Status
 
-Phase 3 IN PROGRESS. Wave 1 COMPLETE (14/14, gate PASSED). Wave 2 COMPLETE (7/7, gate PASSED). Wave 3 Batch 1 COMPLETE (6 stories, PRs #21-#26). Wave 3 Batch 2 COMPLETE (13 stories, PRs #27–#34). **Wave 3 Batch 3 IN PROGRESS — 2/3 merged. STORY-021 MERGED (PR #35, 362c4a1f). STORY-024 MERGED (PR #36, 924cdc04). STORY-025 Red Gate done — rebase + implementer next.**
+Phase 3 IN PROGRESS. Wave 1 COMPLETE (14/14, gate PASSED). Wave 2 COMPLETE (7/7, gate PASSED). Wave 3 Batch 1 COMPLETE (6 stories, PRs #21-#26). Wave 3 Batch 2 COMPLETE (13 stories, PRs #27–#34). **Wave 3 Batch 3 IN PROGRESS — 2/3 merged. STORY-021 MERGED (PR #35, 362c4a1f). STORY-024 MERGED (PR #36, 924cdc04). STORY-025 LOCAL adversary CONVERGED (11 passes, 3/3 strict-CLEAN P9-10-11), demos done — PR next.**
 
 develop branch: `924cdc04` (36 merged PRs, ~2300+ tests, 0 failures). 1 active feature worktree (STORY-025). 0 open PRs.
 
@@ -185,17 +181,17 @@ develop branch: `924cdc04` (36 merged PRs, ~2300+ tests, 0 failures). 1 active f
 | STORY-020 | DataSource: Excel + SQLite | MERGED | #33 | 143f1b78 | 29-pass adversary, 3/3 CLEAN (P27-28-29); 251 tests + 2 perf_smoke; 23 ACs demo'd |
 | STORY-028 | Layout: shape: Block + Rich Inline | MERGED | #34 | 066d625f | 32-pass adversary, 3/3 CLEAN (P30-31-32); 309 layout tests; follow-ups STORY-072/073/074 |
 
-## Wave 3 Batch 3 Story Status (IN PROGRESS — 1/3 merged)
+## Wave 3 Batch 3 Story Status (IN PROGRESS — 2/3 merged)
 
 | Story | Title | Status | PR | Commit | Notes |
 |-------|-------|--------|----|--------|-------|
 | STORY-021 | DataSource: HTTP cache / E-DAT policy errors | MERGED | #35 | 362c4a1f | 23-pass adversary, 3/3 CLEAN (P21-22-23); ~80 findings, 20 fix-burst commits; PolicyRejected + label-driven routing; Display-vs-protocol structural fix (P15); 2282 workspace tests post-merge |
 | STORY-024 | Brand Extraction CLI (library-only, BC-2.01.003) | MERGED | #36 | 924cdc04 | 11-pass adversary 3/3 strict-CLEAN (P9-10-11); library-only; 211 slideforge-brand tests; 11 ACs demo'd; E-BRD-006, VP-051/052, BC v1.8; follow-ups STORY-075 (footer detection) + STORY-076 (transform-aware extraction). AI PR-diff review PR-merge-CLEAN (2 LOW/OBS non-blocking). Security CLEAN. |
-| STORY-025 | Per-Slide brand_overlay invariant (BC-2.02.001+002) | RED GATE DONE | — | 27d67613 | Worktree: `.worktrees/STORY-025`, branch feature/S-025; 9 should_panic + 12 structural failing; `overlay.rs` stub; 42 Slide constructions swept (sibling sweep). See implementer notes in Session Resume Brief. |
+| STORY-025 | Per-Slide brand_overlay invariant (BC-2.02.001+002) | LOCAL ADVERSARY CONVERGED (11 passes, 3/3 strict-CLEAN P9-10-11) — demos done (10 ACs), PR next | — | — | Worktree: `.worktrees/STORY-025`, branch feature/S-025. 455 slideforge-brand+types tests passing. Key hardening: HIGH path-traversal guard (E-BRD-007), media_type unified to logo::media_type_from_extension, EC-007 unknown-ext warn, EC-008 empty-path→LogoRequired, LogoRequired context-neutral. BC-2.02.001 v1.4 / BC-2.02.002 v1.2 / error-taxonomy v2.2. |
 
 ## What to Do Next
 
-- **Wave 3 Batch 3**: STORY-024 DONE (PR #36, 924cdc04). STORY-025 rebase onto 924cdc04 + implementer next. Worktree `.worktrees/STORY-025` already exists at 27d67613.
+- **Wave 3 Batch 3**: STORY-021 + STORY-024 MERGED. STORY-025 LOCAL adversary CONVERGED (11 passes, 3/3 strict-CLEAN P9-10-11), demos done (10 ACs). Push feature/S-025 → 9-step PR cycle (pr-manager) → squash-merge. Then Wave 3 Gate.
 - **After both merge**: Wave 3 Gate (full test suite + adversarial gate + holdout evaluation)
 - **Process configuration**: Add `-D clippy::pedantic -D clippy::unwrap_used` to `just check` target in Justfile. Add cross-crate compile check to per-story-delivery flow for stories touching slideforge-brand or slideforge-types.
 
@@ -237,7 +233,7 @@ git fetch origin develop && git pull origin develop
 | Planning (25 DSL decisions) | DONE 2026-05-24 | q1–q25 decision docs + 14 research threads + 7/7 spikes resolved |
 | Phase 1: Spec Crystallization | DONE — APPROVED 2026-05-25 | PRD (109 BCs, 15 HS, 4 supplements) + architecture (14 ADRs, 15 VPs, 20 crates) + UX spec (10 screens, 5 flows) + L2 domain spec (12 files). 17 passes, 69 findings, 3/3 clean. |
 | Phase 2: Story Decomposition | DONE — APPROVED 2026-05-25 | 71 stories, 21 epics, 6 waves, 437 pts. 22 passes, 96+ findings, 3/3 clean. |
-| Phase 3: TDD Implementation | IN PROGRESS — Wave 1: COMPLETE + GATE PASSED. Wave 2: COMPLETE + GATE PASSED. Wave 3: Batch 1 COMPLETE (6 stories, PRs #21-#26, 494 new tests). Batch 2: COMPLETE (13 stories, PRs #27-#34, 066d625f). Batch 3: IN PROGRESS — 2/3 merged: STORY-021 (PR #35, 362c4a1f) + STORY-024 (PR #36, 924cdc04); STORY-025 Red Gate done, rebase + implementer next. | Per-story delivery |
+| Phase 3: TDD Implementation | IN PROGRESS — Wave 1: COMPLETE + GATE PASSED. Wave 2: COMPLETE + GATE PASSED. Wave 3: Batch 1 COMPLETE (6 stories, PRs #21-#26, 494 new tests). Batch 2: COMPLETE (13 stories, PRs #27-#34, 066d625f). Batch 3: IN PROGRESS — 2/3 merged: STORY-021 (PR #35, 362c4a1f) + STORY-024 (PR #36, 924cdc04); STORY-025 LOCAL adversary CONVERGED (11 passes, 3/3 strict-CLEAN P9-10-11), demos done — PR next. | Per-story delivery |
 | Phase 4: Holdout Evaluation | NOT STARTED | Per-wave holdout gates |
 | Phase 5: Adversarial Refinement | NOT STARTED | Post-implementation cascade |
 | Phase 6: Formal Hardening | NOT STARTED | Kani + fuzz + mutants + semgrep |
@@ -334,22 +330,23 @@ New crates added by Batch 1 (total workspace now 13 crates): slideforge-data, sl
 - 2026-05-30 — STORY-025 RED GATE COMPLETE (feature/S-025 @ 27d67613) — Per-Slide brand_overlay invariant (BC-2.02.001+002). 9 should_panic + 12 structural failing tests. SlideOverlay fully implemented; resolve_overlay + infer_media_type stubbed. TD-VSDD-060 sibling sweep: 42 Slide constructions updated with overlay: None across 11 files. Implementer must convert should_panic to direct assert! on green phase. AC-007/009/012 (parser rejection) deferred to STORY-008/009 per Architecture Compliance Rule 4.
 - 2026-05-30 — STORY-024 LOCAL ADVERSARY 3/3 STRICT-CLEAN CONVERGED (11 passes). Key hardening during cascade: scheme-ref hex resolution (schemeClr must resolve against theme table, not passthrough symbolic name), TOML string escaping for special chars in brand names/fonts, EC-005 logo format detection emits warn not error (E-BRD-006), AC-007 color slot values quoted as strings in TOML, end-to-end round-trip test added. Spec parity achieved: E-BRD-006 row added to error-taxonomy.md, CAP-018 registered, VP-051 (brand round-trip extraction integration test) + VP-052 (source file read-only invariant) added to VP-INDEX (50→52), verification-architecture.md + verification-coverage-matrix.md updated. BC-2.01.003 v1.1→v1.8 (8 incremental versions during cascade). Follow-up stories created: STORY-075 (footer detection — loader.rs:214 hardcodes footer_text: None, dormant [footer] writer in extractor) + STORY-076 (srgbClr lumMod/tint/shade transform-aware extraction — silent drop in color.rs). STORY-INDEX 74→76. 211 slideforge-brand tests passing.
 - 2026-05-30 — STORY-024 MERGED (PR #36, 924cdc04) — Brand Extraction library (BC-2.01.003). 11-pass adversary 3/3 strict-CLEAN (P9-10-11); library-only (CLI wiring deferred to STORY-057); 11 ACs demo'd. AI PR-diff review PR-merge-CLEAN (2 LOW/OBS non-blocking: BrandError::ParseError reuse for I/O — naming nit; .unwrap_or("bin") logo-ext fallback — documented). Security review CLEAN. All 17 CI checks passed. Wave 3 Batch 3: 2/3 merged.
+- 2026-05-30 — STORY-025 LOCAL ADVERSARY 3/3 STRICT-CLEAN CONVERGED (11 passes). Key hardening during cascade: HIGH path-traversal containment guard in resolve_overlay (E-BRD-007, reuses strip_unc_prefix); media_type unified to shared logo::media_type_from_extension (eliminates divergence risk); EC-007 unknown-ext emits warn not error; EC-008 empty-path returns LogoRequired; LogoRequired message context-neutral (cross-context reuse). Spec parity: E-BRD-007 widened to overlay coverage (error-taxonomy v2.2); shared-variant rows for E-BRD-001/002; TomlReadError/TomlParseError variant-name corrections; BC-2.02.001 v1.1→v1.4 (EC-006 path-containment, EC-007, EC-008, "brand root directory" wording, subsystem SS-04); BC-2.02.002 v1.1→v1.2 (subsystem SS-06). 455 slideforge-brand+types tests passing. 10 ACs demo'd. Two [process-gap] lessons captured in .factory/cycles/STORY-025/lessons.md: (a) taxonomy/BC widen requires same-burst sweep of #[error] string + variant docs + field docs + sibling doc-tables (recurred 3x); (b) new error return arm requires `# Errors` rustdoc completeness check against all reachable arms (recurred 2x).
 
 ## Session Resume Checkpoint
 
 | Field | Value |
 |-------|-------|
 | **Date** | 2026-05-30 |
-| **Position** | Phase 3, Wave 3, Batch 3 IN PROGRESS — 2/3 merged. STORY-021 MERGED (PR #35). STORY-024 MERGED (PR #36, 924cdc04). STORY-025 Red Gate done — rebase onto 924cdc04 + implementer next. |
+| **Position** | Phase 3, Wave 3, Batch 3 IN PROGRESS — 2/3 merged. STORY-021 MERGED (PR #35). STORY-024 MERGED (PR #36, 924cdc04). STORY-025 LOCAL adversary CONVERGED (11 passes, 3/3 strict-CLEAN P9-10-11), demos done (10 ACs) — PR next. |
 | **develop SHA** | 924cdc04 |
-| **Workspace tests** | ~2300+ (STORY-024 added ~25 net new tests; exact count pending Wave 3 gate full-suite run) |
+| **Workspace tests** | ~2300+ (STORY-025 slideforge-brand+types: 455 passing; exact workspace count pending Wave 3 gate full-suite run) |
 | **Workspace crates** | 13 (7 Wave 1 + 6 Batch 1: data, brand, layout, math, charts, diagrams) |
-| **Active worktrees** | 1: `.worktrees/STORY-025` (feature/S-025 @ 27d67613). STORY-024 worktree cleanup in progress (devops-engineer). |
-| **Open PRs** | 0 |
-| **Follow-up stories** | STORY-075 (footer detection, draft, P1/3pts), STORY-076 (srgbClr transform extraction, draft, P1/3pts) — both in Wave TBD |
+| **Active worktrees** | 1: `.worktrees/STORY-025` (feature/S-025, 455 brand+types tests, 10 ACs demo'd). STORY-024 worktree cleanup in progress (devops-engineer). |
+| **Open PRs** | 0 (STORY-025 PR in flight — push + 9-step PR cycle next) |
+| **Follow-up stories** | STORY-072/073/074 (STORY-028 cascade, draft, Wave TBD); STORY-075/076 (STORY-024 cascade, draft, Wave TBD) |
 | **factory-artifacts** | Local only (not pushed to remote). Push requires explicit human authorization per CLAUDE.md. |
-| **Highest priority next** | 1. Rebase STORY-025 onto 924cdc04 (expect lib.rs conflict — resolve by extension). 2. Dispatch implementer: body resolve_overlay + infer_media_type, convert 9 should_panic to assert!. 3. LOCAL adversary 3-CLEAN + demos + PR for STORY-025. 4. Wave 3 Gate. |
-| **Process improvements to apply** | Before accepting any "clippy clean": run `rustup update stable && cargo clippy --workspace --all-targets --all-features -- -D clippy::pedantic -D clippy::unwrap_used`. After slideforge-brand/types structural change: `cargo build --workspace 2>&1` cross-crate compile check. Default cross-layer error emission pattern: canonical machine format from source, rich Display at consumer (STORY-021 P15 lesson). |
+| **Highest priority next** | 1. Push feature/S-025 → 9-step PR cycle (pr-manager) → squash-merge. 2. State-manager post-merge burst. 3. Wave 3 Gate (vsdd-factory:wave-gate). |
+| **Process improvements to apply** | Before accepting any "clippy clean": run `rustup update stable && cargo clippy --workspace --all-targets --all-features -- -D clippy::pedantic -D clippy::unwrap_used`. After slideforge-brand/types structural change: `cargo build --workspace 2>&1` cross-crate compile check. Default cross-layer error emission pattern: canonical machine format from source, rich Display at consumer (STORY-021 P15 lesson). Pre-fix-burst: grep crates/ for literal old error message string when widening taxonomy/BC (STORY-025 process-gap). |
 
 ## Quality Bar (Non-Negotiable)
 

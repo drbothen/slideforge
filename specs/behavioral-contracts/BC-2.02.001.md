@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.1"
+version: "1.4"
 status: draft
 producer: product-owner
 timestamp: 2026-05-24T00:00:00
@@ -10,11 +10,11 @@ inputs: [domain-spec/L2-INDEX.md]
 input-hash: "[pending]"
 traces_to: domain-spec/L2-INDEX.md
 origin: greenfield
-subsystem: SS-TBD
+subsystem: SS-04
 capability: CAP-019
 lifecycle_status: active
 introduced: v1.0.0
-modified: []
+modified: [v1.2, v1.3, v1.4]
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -70,6 +70,9 @@ customization mechanism for multi-client or multi-audience decks.
 | EC-003 | brand_overlay: in a @for loop — different logo per iteration | Overlay per slide is applied individually; each loop iteration gets its own overlay values |
 | EC-004 | brand_overlay: declared with no fields (empty block) | Parse warning: empty brand_overlay block has no effect; build continues |
 | EC-005 | Multiple brand_overlay: blocks on same slide | E-PAR-002 (syntax error): duplicate brand_overlay block on same slide |
+| EC-006 | brand_overlay: logo path resolves outside the brand root (path traversal or symlink escape — e.g., `logo "../../../etc/passwd"`) | `BrandError::LogoOutsideBrandDir` → E-BRD-007 (broken, exit 4): `Logo path '<logo_path>' escapes the brand root directory '<brand_dir>'. The logo file must be inside (or beneath) the brand root directory.` Canonical path check fires AFTER the file-existence check (EC-001); a path that does not exist AND escapes the brand root reports E-BRD-001 (file-not-found is reached first). This is a security containment invariant that mirrors the master-logo guard enforced during brand synthesis. |
+| EC-007 | brand_overlay: logo file has an unknown or unsupported extension (e.g., `.bmp`, `.tiff`, `.exe`) | `media_type` falls back to `application/octet-stream` AND a `tracing::warn!` diagnostic is emitted: `"brand_overlay logo '<path>' has unrecognized extension '<ext>'; media_type set to application/octet-stream — logo may not render in all viewers"`. The overlay is otherwise resolved normally (logo bytes are loaded, path containment is validated). Parser/validator-level rejection of unsupported media types is deferred to STORY-008/STORY-009. |
+| EC-008 | `brand_overlay: logo ""` (empty string path) | `BrandError::LogoRequired` → E-BRD-001 (broken, exit 4). An explicit empty-string logo value is treated as an absent mandatory logo, mirroring the master-logo empty-path guard enforced during brand synthesis. Distinct from omitting `logo:` entirely, which is the no-override (None) case and is not an error. |
 
 ## Canonical Test Vectors
 
@@ -113,3 +116,12 @@ customization mechanism for multi-client or multi-audience decks.
 ## VP Anchors
 
 (filled after VP creation)
+
+## Changelog
+
+| Version | Date | Author | Summary |
+|---------|------|--------|---------|
+| 1.1 | 2026-05-24 | product-owner | Initial creation — overlay logo/footer/confidentiality fields, EC-001 through EC-005, canonical test vectors |
+| 1.2 | 2026-05-30 | product-owner | STORY-025 adversary finding F-025-001/F-025-002: EC-006 added (overlay logo path traversal/symlink escape → BrandError::LogoOutsideBrandDir / E-BRD-007; security containment invariant mirroring master-logo guard); EC-007 added (overlay logo with unknown extension → application/octet-stream media-type fallback + tracing::warn; no silent drop; parser/validator rejection deferred to STORY-008/STORY-009) |
+| 1.3 | 2026-05-30 | product-owner | STORY-025 adversary findings F-RV-001 + F-RV-002: EC-006 message wording corrected — "brand.toml directory" → "brand root directory" in both occurrences, matching error-taxonomy.md v2.0 and the load-bearing assertion in error.rs (F-RV-002); EC-008 added — empty-string logo path (`logo ""`) → BrandError::LogoRequired / E-BRD-001 (fatal, exit 4), documented as distinct from the absent-logo no-override (None) case (F-RV-001) |
+| 1.4 | 2026-05-30 | product-owner | Resolved SS-TBD placeholder: `subsystem` set to SS-04 (Brand / slideforge-brand) per ARCH-INDEX.md Subsystem Registry. `resolve_overlay` executes in the brand layer; PPTX export (SS-06) consumes the already-resolved overlay. Consistent with STORY-025 subsystems anchor [SS-04, SS-06]. |
