@@ -339,6 +339,13 @@ impl BrandProvider for BrandLoader {
                     ),
                 })
             },
+            // `#[non_exhaustive]` wildcard: BrandSource may gain new source types in
+            // minor releases (e.g., ApiEndpoint, GitRepo). OBS-1 rule: NEVER silently
+            // fall back — return an explicit SourceNotFound error so callers know the
+            // source type is unsupported by this provider, not silently ignored.
+            _ => Err(TraitBrandError::SourceNotFound {
+                uri: source.to_string(),
+            }),
         }
     }
 }

@@ -15,6 +15,14 @@ use slideforge_types::InlineNode;
 use thiserror::Error;
 
 /// The output format for an inline formatting operation.
+///
+/// `#[non_exhaustive]` — external [`InlineFormat`] plugins pattern-match
+/// this enum in their `render` implementations. Adding a new output format
+/// (e.g., `LaTeX`, `PlainText`) is a minor-release addition; the attribute
+/// prevents those plugins from silently ignoring the new variant. Plugin
+/// authors must add a wildcard arm that returns [`InlineError::UnsupportedNode`]
+/// or a format-specific error rather than silently falling back.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum InlineOutputFormat {
     /// OOXML run markup (for PPTX and DOCX exporters). The output is a valid
@@ -32,6 +40,10 @@ pub enum InlineOutputFormat {
 
 impl std::fmt::Display for InlineOutputFormat {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // This match is exhaustive within the defining crate. The `#[non_exhaustive]`
+        // attribute only forces wildcard arms in EXTERNAL crates that match this enum.
+        // External InlineFormat plugins must include a wildcard arm that returns an
+        // appropriate InlineError for unrecognised variants.
         match self {
             InlineOutputFormat::Ooxml => write!(f, "OOXML"),
             InlineOutputFormat::Html => write!(f, "HTML"),

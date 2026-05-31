@@ -18,6 +18,14 @@ use thiserror::Error;
 /// Each exporter requests the format appropriate for its output target:
 /// PPTX/DOCX exporters request `Omml`; HTML exporters request `MathMl`;
 /// PDF exporters request `Pdf`.
+///
+/// `#[non_exhaustive]` — external [`MathRenderer`] plugins pattern-match
+/// this enum in their `render` implementations. Adding a new output format
+/// (e.g., `Epub`) is a minor-release addition; the attribute prevents those
+/// plugins from silently ignoring the new variant. Plugin authors must add
+/// a wildcard arm that returns [`MathError::UnsupportedFormat`] for
+/// unrecognised variants rather than silently falling back.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MathOutputFormat {
     /// Office Open Math Markup Language, the native math format for OOXML
@@ -35,6 +43,10 @@ pub enum MathOutputFormat {
 
 impl std::fmt::Display for MathOutputFormat {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // This match is exhaustive within the defining crate. The `#[non_exhaustive]`
+        // attribute only forces wildcard arms in EXTERNAL crates that match this enum.
+        // External MathRenderer plugins must include a wildcard arm that returns
+        // MathError::UnsupportedFormat for unrecognised variants.
         match self {
             MathOutputFormat::Omml => write!(f, "OMML"),
             MathOutputFormat::MathMl => write!(f, "MathML"),
