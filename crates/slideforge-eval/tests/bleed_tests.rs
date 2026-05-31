@@ -86,9 +86,6 @@
 #![allow(clippy::panic)]
 // BC-ID traceability convention requires uppercase in test names (e.g. BC_1_14_004).
 #![allow(non_snake_case)]
-// `#[should_panic]` tests here intentionally omit the expected message — the
-// relevant invariant is that the method panics at all, not the message text.
-#![allow(clippy::should_panic_without_expect)]
 // doc_markdown: sentinel names like SENTINEL_NOTES in comments are identifiers
 // by convention, not code references; backtick-quoting all of them in prose
 // comments would reduce readability.
@@ -255,7 +252,7 @@ fn test_BC_1_14_004_bleedchecker_absent_from_slides_passes_when_not_present() {
 ///
 /// Red Gate: this test FAILS because `assert_absent_from_pptx_slides` is `todo!()`.
 #[test]
-#[should_panic]
+#[should_panic(expected = "BleedChecker: register-content bleed detected in PPTX slide body")]
 fn test_BC_1_14_004_bleedchecker_absent_from_slides_panics_when_present() {
     // Sentinel in slide body — this is the bleed defect scenario.
     let pptx = make_pptx_zip("NOTES_SENTINEL_VALUE leaked into body", "");
@@ -279,7 +276,7 @@ fn test_BC_1_14_004_bleedchecker_absent_from_all_passes_when_not_present() {
 ///
 /// Red Gate: FAILS due to todo!() stub.
 #[test]
-#[should_panic]
+#[should_panic(expected = "BleedChecker: register-content bleed detected in PPTX archive")]
 fn test_BC_1_14_004_bleedchecker_absent_from_all_panics_when_present() {
     // Sentinel in the notes slide — but for `assert_absent_from_pptx_all`,
     // even the notes slide is disallowed (detail must not appear anywhere in PPTX).
@@ -304,7 +301,7 @@ fn test_BC_1_14_004_bleedchecker_present_in_docx_body_passes_when_present() {
 ///
 /// Red Gate: FAILS due to todo!() stub.
 #[test]
-#[should_panic]
+#[should_panic(expected = "BleedChecker: expected register content NOT found in DOCX body")]
 fn test_BC_1_14_004_bleedchecker_present_in_docx_body_panics_when_absent() {
     let docx = make_docx_zip("body has no report sentinel here");
     BleedChecker::assert_present_in_docx_body(&docx, "REPORT_DOCX_SENTINEL");
@@ -327,7 +324,7 @@ fn test_BC_1_14_004_bleedchecker_absent_from_docx_body_passes_when_not_present()
 ///
 /// Red Gate: FAILS due to todo!() stub.
 #[test]
-#[should_panic]
+#[should_panic(expected = "BleedChecker: register-content bleed detected in DOCX body")]
 fn test_BC_1_14_004_bleedchecker_absent_from_docx_body_panics_when_present() {
     let docx = make_docx_zip("NOTES_DOCX_SENTINEL leaked into document body");
     BleedChecker::assert_absent_from_docx_body(&docx, "NOTES_DOCX_SENTINEL");
@@ -468,6 +465,56 @@ fn test_BC_1_14_004_ec004_unescaped_sentinel_absent_passes() {
     BleedChecker::assert_absent_from_pptx_slides(&pptx, "DETAIL_SENTINEL");
 }
 
+/// BC-1.14.004 EC-004 / AC-008 — tolerant per-entity decoding (F-036-002):
+/// An unknown named entity (`&copy;`) adjacent to a correctly-escaped sentinel
+/// (`R&amp;D`) in the same `<a:t>` element must NOT prevent the sentinel from
+/// being detected.
+///
+/// This is the root bug in the previous all-or-nothing implementation: if any
+/// entity in the member was unrecognised, `quick_xml::escape::unescape` returned
+/// `Err` for the WHOLE member, which caused the code to fall back to raw text.
+/// Raw text for `R&amp;D` does NOT contain `R&D`, so the bleed was silently missed.
+///
+/// The fix uses `unescape_with` with a resolver that returns `Some("")` for
+/// unknown named entities (they collapse to empty rather than aborting),
+/// combined with belt-and-suspenders raw-text searching. After the fix:
+/// - Decoded text: `&copy;` → `` (empty), `R&amp;D` → `R&D` → sentinel found.
+/// - Belt-and-suspenders raw search would also not suppress the decoded hit.
+///
+/// This test MUST FAIL against the old all-or-nothing fallback implementation
+/// and MUST PASS after the tolerant-decode fix.
+#[test]
+fn test_BC_1_14_004_ec004_unknown_entity_does_not_mask_adjacent_sentinel() {
+    // Build a PPTX slide member containing BOTH an unknown entity (`&copy;`) and
+    // the XML-escaped form of the sentinel (`R&amp;D`) in the same text run.
+    let pptx = make_pptx_zip(
+        r"<a:t>&copy; R&amp;D roadmap &amp; analysis</a:t>",
+        "notes without sentinel",
+    );
+
+    // The sentinel is the human-readable unescaped string.
+    // assert_absent_from_pptx_all must PANIC: decoded slide body contains "R&D roadmap".
+    // An all-or-nothing decoder would fall back to raw text (no `R&D` there) → false green.
+    let result = std::panic::catch_unwind(|| {
+        BleedChecker::assert_absent_from_pptx_all(&pptx, "R&D roadmap");
+    });
+    assert!(
+        result.is_err(),
+        "BleedChecker must detect 'R&D roadmap' even when an unknown entity (&copy;) \
+         appears in the same member — tolerant per-entity decoding required (F-036-002)"
+    );
+
+    // Also verify the slide-scoped check detects it.
+    let result2 = std::panic::catch_unwind(|| {
+        BleedChecker::assert_absent_from_pptx_slides(&pptx, "R&D roadmap");
+    });
+    assert!(
+        result2.is_err(),
+        "assert_absent_from_pptx_slides must also detect 'R&D roadmap' via tolerant \
+         per-entity decoding when an unrelated unknown entity is present (F-036-002)"
+    );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // F-003: Zero-member guard tests — absence checks must fail-closed
 //
@@ -484,7 +531,7 @@ fn test_BC_1_14_004_ec004_unescaped_sentinel_absent_passes() {
 /// structural regression. An absence check on zero members would be vacuously
 /// true — silently hiding the defect. The checker must fail-closed.
 #[test]
-#[should_panic]
+#[should_panic(expected = "BleedChecker: no ppt/slides/slide*.xml members found")]
 fn test_BC_1_14_004_absent_from_slides_panics_on_slideless_pptx() {
     let pptx = make_pptx_zip_no_slides();
     // Must panic: no slide bodies found, fail-closed.
@@ -498,7 +545,7 @@ fn test_BC_1_14_004_absent_from_slides_panics_on_slideless_pptx() {
 /// An empty archive means nothing was scanned, so the absence check would be
 /// vacuously true. The checker must fail-closed to expose this condition.
 #[test]
-#[should_panic]
+#[should_panic(expected = "BleedChecker: PPTX archive contains zero members")]
 fn test_BC_1_14_004_absent_from_all_panics_on_empty_archive() {
     let empty = make_empty_zip();
     // Must panic: empty archive, fail-closed.
