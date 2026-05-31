@@ -45,6 +45,7 @@
 //! | `E-BRD-003` | [`BrandError::MissingColorSlot`] | cosmetic (exit 0) |
 //! | `E-BRD-004` | [`BrandError::FontUnavailable`] | cosmetic (exit 0) |
 //! | `E-BRD-005` | [`BrandError::InvalidHexColor`] | cosmetic (exit 0) |
+//! | `E-BRD-006` | [`BrandError::OutputExists`] | broken (exit 4) |
 //! | `E-BRD-007` | [`BrandError::LogoOutsideBrandDir`] | broken (exit 4) |
 //!
 //! ## Design Constraints
@@ -62,6 +63,7 @@
 pub mod color;
 pub mod context;
 pub mod error;
+pub mod extractor;
 pub mod font;
 pub mod inference;
 pub mod layout_xml;
@@ -74,7 +76,8 @@ pub mod toml_schema;
 
 // Re-export the most commonly used types at the crate root.
 pub use context::BrandLoadContext;
-pub use error::{BrandError, E_BRD_001, E_BRD_002, E_BRD_003, E_BRD_004, E_BRD_005, E_BRD_007};
+pub use error::{BrandError, E_BRD_001, E_BRD_002, E_BRD_003, E_BRD_004, E_BRD_005, E_BRD_006, E_BRD_007};
+pub use extractor::{BrandExtractionResult, BrandExtractor};
 pub use layouts::{LayoutPlaceholder, SlideLayoutDef};
 pub use loader::BrandLoader;
 pub use synthesizer::BrandSynthesizer;

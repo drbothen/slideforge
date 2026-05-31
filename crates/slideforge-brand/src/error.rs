@@ -9,6 +9,7 @@
 //! | `E-BRD-003` | [`BrandError::MissingColorSlot`] | cosmetic (exit 0) |
 //! | `E-BRD-004` | [`BrandError::FontUnavailable`] | cosmetic (exit 0) |
 //! | `E-BRD-005` | [`BrandError::InvalidHexColor`] | cosmetic (exit 0) |
+//! | `E-BRD-006` | [`BrandError::OutputExists`] | broken (exit 4) |
 
 use std::sync::Arc;
 
@@ -37,6 +38,10 @@ pub const E_BRD_004: &str = "E-BRD-004";
 /// RGB hex (e.g. `#3B82F6`). Cosmetic warning — the invalid slot is treated as
 /// absent and inference continues with the remaining slots.
 pub const E_BRD_005: &str = "E-BRD-005";
+
+/// `E-BRD-006`: the output `brand.toml` already exists and `--force` was not
+/// passed to the extraction command.
+pub const E_BRD_006: &str = "E-BRD-006";
 
 /// `E-BRD-007`: the logo path in `brand.toml` escapes the directory containing
 /// `brand.toml`. This is a path-traversal security violation — the logo must
@@ -216,6 +221,20 @@ pub enum BrandError {
         logo_path: String,
         /// The canonical path of the `brand.toml` parent directory.
         brand_dir: String,
+    },
+
+    /// `E-BRD-006` — the output `brand.toml` already exists and `--force` was
+    /// not passed to the extraction command.
+    ///
+    /// This is a fatal error. The command exits with code 4.
+    ///
+    /// Traces to BC-2.01.003 edge case EC-001.
+    #[error(
+        "E-BRD-006: {path}: brand.toml already exists. Use --force to overwrite."
+    )]
+    OutputExists {
+        /// The path of the existing `brand.toml` file.
+        path: Arc<str>,
     },
 
     /// `E-BRD-004` (synthesis) — a font name declared in `brand.toml`
