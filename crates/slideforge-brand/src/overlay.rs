@@ -23,10 +23,11 @@
 //! and no template path. The type-level absence of these fields is the
 //! compile-time enforcement of DI-016.
 //!
-//! ## `resolve_overlay` stub (STORY-025 Red Gate)
+//! ## `resolve_overlay` (STORY-025)
 //!
-//! The `resolve_overlay` function is bodied as `todo!()`. Tests that call it MUST
-//! panic. The implementer (STORY-025 implementation phase) will replace the body.
+//! Reads logo bytes from disk, infers MIME type, and passes through footer text
+//! and confidentiality strings. Returns `Ok(None)` for empty overlays (no-op)
+//! and `Err(BrandError::FileNotFound)` for missing logo paths.
 
 use std::path::Path;
 use std::sync::Arc;
