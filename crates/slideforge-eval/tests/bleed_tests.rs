@@ -67,6 +67,18 @@
 #![allow(clippy::unwrap_used)]
 #![allow(clippy::expect_used)]
 #![allow(clippy::panic)]
+// BC-ID traceability convention requires uppercase in test names (e.g. BC_1_14_004).
+#![allow(non_snake_case)]
+// `#[should_panic]` tests here intentionally omit the expected message — the
+// relevant invariant is that the method panics at all, not the message text.
+#![allow(clippy::should_panic_without_expect)]
+// doc_markdown: sentinel names like SENTINEL_NOTES in comments are identifiers
+// by convention, not code references; backtick-quoting all of them in prose
+// comments would reduce readability.
+#![allow(clippy::doc_markdown)]
+// items_after_statements: test helpers declared after `let` bindings are
+// idiomatic in test code; restructuring them would reduce locality.
+#![allow(clippy::items_after_statements)]
 
 use std::io::Write;
 

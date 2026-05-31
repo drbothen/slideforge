@@ -1,4 +1,4 @@
-//! BleedChecker — post-serialization no-bleed invariant test utility.
+//! `BleedChecker` — post-serialization no-bleed invariant test utility.
 //!
 //! # Purpose
 //!
@@ -26,10 +26,11 @@
 //!   methods are scoped to specific ZIP paths; a sentinel in a path not scanned
 //!   does not trigger a panic.
 //! - EC-004: `BleedChecker` works on decoded XML text (via [`zip`] member
-//!   extraction to `String`), not raw bytes. This means XML-escaped content
-//!   like `&amp;` in the raw bytes will be present as `&amp;` in the string —
-//!   if the sentinel contains `&`, the search correctly finds the escaped form.
-//!   Callers should use sentinels that are XML-safe (no `<`, `>`, `&`, `"`, `'`).
+//!   extraction to `String`). For sentinels that are XML-safe (no `<`, `>`,
+//!   `&`, `"`, `'`), the substring search on the raw UTF-8 text is correct.
+//!   Callers MUST use sentinels that are XML-safe. All canonical STORY-036
+//!   sentinels (`SENTINEL_NOTES`, `SENTINEL_REPORT`, `SENTINEL_DETAIL`, etc.) are
+//!   XML-safe identifiers, so no additional entity decoding is required.
 //!
 //! # Cross-crate availability
 //!
@@ -55,6 +56,8 @@
 #![cfg(feature = "test-utils")]
 
 // zip is an optional dep gated on `test-utils`; it is always available here.
+use std::io::Read;
+
 use zip::ZipArchive;
 
 /// Test utility for verifying that register content does not bleed across
@@ -76,19 +79,45 @@ impl BleedChecker {
     /// layouts. A finding here means notes/report/detail content has bled into
     /// the visual slide body (a P0 bleed defect per BC-1.14.004).
     ///
+    /// # EC-003 compliance
+    ///
+    /// Only members whose names start with `ppt/slides/slide` and end with
+    /// `.xml` are scanned. A sentinel in any other path (theme, notes, masters,
+    /// layouts, content types, etc.) does NOT trigger a panic.
+    ///
     /// # Panics
     ///
     /// Panics if:
     /// - `pptx_bytes` is not a valid ZIP archive.
     /// - `sentinel` is found in any `ppt/slides/slide*.xml` file.
     pub fn assert_absent_from_pptx_slides(pptx_bytes: &[u8], sentinel: &str) {
-        todo!(
-            "BleedChecker::assert_absent_from_pptx_slides — to be implemented by STORY-036 implementer. \
-             Must: (1) open pptx_bytes as a ZIP archive, (2) iterate all members matching \
-             `ppt/slides/slide*.xml`, (3) read each member as UTF-8 text, (4) assert sentinel \
-             is absent from the text. Sentinel: {:?}",
-            sentinel
-        )
+        let mut archive = Self::open_zip(pptx_bytes, "PPTX");
+        let names: Vec<String> = (0..archive.len())
+            .map(|i| {
+                archive
+                    .by_index(i)
+                    .unwrap_or_else(|e| {
+                        panic!("BleedChecker: failed to index PPTX ZIP entry {i}: {e}")
+                    })
+                    .name()
+                    .to_owned()
+            })
+            .collect();
+
+        for name in &names {
+            // EC-003: Only scan `ppt/slides/slide*.xml` — no other paths.
+            if !Self::is_pptx_slide_path(name) {
+                continue;
+            }
+            let text = Self::read_member_text(&mut archive, name);
+            assert!(
+                !text.contains(sentinel),
+                "BleedChecker: register-content bleed detected in PPTX slide body.\n\
+                 sentinel : {sentinel:?}\n\
+                 found in : {name:?}\n\
+                 (BC-1.14.004 invariant 1: register content must not appear in PPTX slide body)"
+            );
+        }
     }
 
     /// Assert that `sentinel` does NOT appear in ANY file within the PPTX ZIP.
@@ -103,13 +132,29 @@ impl BleedChecker {
     /// - `pptx_bytes` is not a valid ZIP archive.
     /// - `sentinel` is found in any file within the ZIP.
     pub fn assert_absent_from_pptx_all(pptx_bytes: &[u8], sentinel: &str) {
-        todo!(
-            "BleedChecker::assert_absent_from_pptx_all — to be implemented by STORY-036 implementer. \
-             Must: (1) open pptx_bytes as a ZIP archive, (2) iterate ALL members, (3) read each \
-             as UTF-8 text (skip binary members gracefully), (4) assert sentinel is absent from \
-             every member. Sentinel: {:?}",
-            sentinel
-        )
+        let mut archive = Self::open_zip(pptx_bytes, "PPTX");
+        let names: Vec<String> = (0..archive.len())
+            .map(|i| {
+                archive
+                    .by_index(i)
+                    .unwrap_or_else(|e| {
+                        panic!("BleedChecker: failed to index PPTX ZIP entry {i}: {e}")
+                    })
+                    .name()
+                    .to_owned()
+            })
+            .collect();
+
+        for name in &names {
+            let text = Self::read_member_text(&mut archive, name);
+            assert!(
+                !text.contains(sentinel),
+                "BleedChecker: register-content bleed detected in PPTX archive.\n\
+                 sentinel : {sentinel:?}\n\
+                 found in : {name:?}\n\
+                 (BC-1.14.004 postcondition 6: detail content must not appear anywhere in PPTX)"
+            );
+        }
     }
 
     /// Assert that `sentinel` IS present in `word/document.xml` within the
@@ -126,12 +171,15 @@ impl BleedChecker {
     /// - `word/document.xml` is not present in the ZIP.
     /// - `sentinel` is NOT found in `word/document.xml`.
     pub fn assert_present_in_docx_body(docx_bytes: &[u8], sentinel: &str) {
-        todo!(
-            "BleedChecker::assert_present_in_docx_body — to be implemented by STORY-036 implementer. \
-             Must: (1) open docx_bytes as a ZIP archive, (2) find `word/document.xml`, (3) read it \
-             as UTF-8 text, (4) assert sentinel IS present. Panics if absent. Sentinel: {:?}",
-            sentinel
-        )
+        let mut archive = Self::open_zip(docx_bytes, "DOCX");
+        let text = Self::read_member_text(&mut archive, "word/document.xml");
+        assert!(
+            text.contains(sentinel),
+            "BleedChecker: expected register content NOT found in DOCX body.\n\
+             sentinel     : {sentinel:?}\n\
+             searched in  : \"word/document.xml\"\n\
+             (BC-1.14.004 postcondition 3: report content must be present in DOCX body)"
+        );
     }
 
     /// Assert that `sentinel` does NOT appear in `word/document.xml` within
@@ -147,37 +195,77 @@ impl BleedChecker {
     /// - `word/document.xml` is not present in the ZIP.
     /// - `sentinel` IS found in `word/document.xml`.
     pub fn assert_absent_from_docx_body(docx_bytes: &[u8], sentinel: &str) {
-        todo!(
-            "BleedChecker::assert_absent_from_docx_body — to be implemented by STORY-036 implementer. \
-             Must: (1) open docx_bytes as a ZIP archive, (2) find `word/document.xml`, (3) read it \
-             as UTF-8 text, (4) assert sentinel is absent. Sentinel: {:?}",
-            sentinel
-        )
+        let mut archive = Self::open_zip(docx_bytes, "DOCX");
+        let text = Self::read_member_text(&mut archive, "word/document.xml");
+        assert!(
+            !text.contains(sentinel),
+            "BleedChecker: register-content bleed detected in DOCX body.\n\
+             sentinel    : {sentinel:?}\n\
+             found in    : \"word/document.xml\"\n\
+             (BC-1.14.004 postcondition 2: notes content must not appear in DOCX body)"
+        );
     }
 
-    // ─── Internal helpers (to be implemented alongside the stubs above) ───────
+    // ─── Internal helpers ─────────────────────────────────────────────────────
 
-    /// Open `bytes` as a ZIP archive.
+    /// Returns `true` if `name` matches the PPTX slide body path pattern:
+    /// `ppt/slides/slide<N>.xml` (where N is one or more digits).
+    ///
+    /// This implements EC-003 path scoping: only slide body files are scanned
+    /// by `assert_absent_from_pptx_slides`. Notes slides, masters, layouts,
+    /// and any other paths are excluded.
+    fn is_pptx_slide_path(name: &str) -> bool {
+        // Must start with the slides directory prefix and end with .xml.
+        // The filename portion must be "slide" followed by at least one digit.
+        let Some(filename) = name.strip_prefix("ppt/slides/") else {
+            return false;
+        };
+        let Some(stem) = filename.strip_suffix(".xml") else {
+            return false;
+        };
+        let Some(digits) = stem.strip_prefix("slide") else {
+            return false;
+        };
+        !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit())
+    }
+
+    /// Open `bytes` as a ZIP archive, panicking with a context message on failure.
     ///
     /// # Panics
     ///
-    /// Panics with a descriptive message if `bytes` is not a valid ZIP.
-    #[allow(dead_code)]
-    fn open_zip(bytes: &[u8]) -> ZipArchive<std::io::Cursor<&[u8]>> {
-        todo!("open_zip: wrap bytes in Cursor, call ZipArchive::new, panic with context on error")
+    /// Panics with a descriptive message (including the format name) if `bytes`
+    /// is not a valid ZIP archive.
+    fn open_zip<'a>(bytes: &'a [u8], format: &str) -> ZipArchive<std::io::Cursor<&'a [u8]>> {
+        let cursor = std::io::Cursor::new(bytes);
+        ZipArchive::new(cursor).unwrap_or_else(|e| {
+            panic!(
+                "BleedChecker: failed to open {format} bytes as a ZIP archive: {e}\n\
+                 (Are you passing valid {format} bytes?)"
+            )
+        })
     }
 
     /// Read a ZIP member by name as a UTF-8 string.
     ///
+    /// Non-UTF-8 bytes in the member are replaced with the Unicode replacement
+    /// character (U+FFFD) to avoid panicking on binary members that happen to
+    /// share a name pattern. For sentinel matching this is safe because all
+    /// canonical sentinels are ASCII.
+    ///
     /// # Panics
     ///
-    /// Panics if the member is not found or cannot be decoded as UTF-8.
-    #[allow(dead_code)]
+    /// Panics if the member is not found in the archive.
     fn read_member_text(archive: &mut ZipArchive<std::io::Cursor<&[u8]>>, name: &str) -> String {
-        todo!(
-            "read_member_text: call archive.by_name(name), read to bytes, \
-             decode as UTF-8, panic with context on error. Member: {:?}",
-            name
-        )
+        let mut entry = archive.by_name(name).unwrap_or_else(|e| {
+            panic!(
+                "BleedChecker: ZIP member {name:?} not found in archive: {e}\n\
+                 (Is this a valid PPTX/DOCX file with the expected structure?)"
+            )
+        });
+        let mut raw = Vec::new();
+        entry
+            .read_to_end(&mut raw)
+            .unwrap_or_else(|e| panic!("BleedChecker: failed to read ZIP member {name:?}: {e}"));
+        String::from_utf8_lossy(&raw).into_owned()
     }
 }

@@ -37,4 +37,9 @@ Thumbs.db
 *.profraw
 *.profdata
 
-.mcp.json   
+.mcp.json
+
+# Factory artifacts belong on the factory-artifacts orphan branch, not on
+# feature/develop branches. Gitignore here prevents accidental leaks from
+# per-story worktrees (seen in STORY-027, STORY-029, STORY-034, STORY-036).
+/.factory/
