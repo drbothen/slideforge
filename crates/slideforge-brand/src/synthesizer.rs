@@ -24,8 +24,8 @@
 //!
 //! | Condition | Error | Severity |
 //! |-----------|-------|---------|
-//! | `brand.toml` not found | [`BrandError::FileNotFound`] | fatal (exit 4) |
-//! | Invalid TOML syntax | [`BrandError::ParseError`] | fatal (exit 4) |
+//! | `brand.toml` not found or unreadable | [`BrandError::TomlReadError`] | fatal (exit 4) |
+//! | Invalid TOML syntax | [`BrandError::TomlParseError`] | fatal (exit 4) |
 //! | Missing `[logo]` section | `E-BRD-001` via `BrandError::LogoRequired` | fatal (exit 4) |
 //! | Absent color slot | [`BrandError::MissingColorSlot`] | warning (exit 0) |
 
