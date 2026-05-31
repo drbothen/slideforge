@@ -20,7 +20,7 @@
 //! tooling. They pass immediately after crate scaffolding and serve as the
 //! CI-equivalent guard for dep hygiene.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Path to the workspace root Cargo.lock.
 ///
@@ -170,6 +170,71 @@ fn test_bc_4_03_002_no_direct_subsetter_dep() {
          subsetter arrives transitively via krilla =0.6.0 (tech-validation RISK-2).\n\
          Cargo.toml path: {path}",
         path = toml_path.display(),
+    );
+}
+
+/// Recursively scan `.rs` files under `dir`, collecting lines that contain any
+/// `forbidden` pattern and are not pure comment lines (trimmed start != `//`).
+fn scan_dir_for_patterns(dir: &Path, forbidden: &[&str], violations: &mut Vec<String>) {
+    let entries =
+        std::fs::read_dir(dir).unwrap_or_else(|e| panic!("cannot read dir {}: {e}", dir.display()));
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            scan_dir_for_patterns(&path, forbidden, violations);
+        } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
+            let content = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+            for (lineno, line) in content.lines().enumerate() {
+                // Skip lines whose trimmed content starts with `//` (comments).
+                let trimmed = line.trim_start();
+                if trimmed.starts_with("//") {
+                    continue;
+                }
+                for pat in forbidden {
+                    if line.contains(pat) {
+                        violations.push(format!(
+                            "{}:{}: {}",
+                            path.display(),
+                            lineno + 1,
+                            line.trim()
+                        ));
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// BC-4.03.002 AC-008 (source-level no-subprocess check): No usage of
+/// `std::process`, `Command::new`, or `process::Command` in any non-comment
+/// line of `crates/slideforge-pdf/src/`.
+///
+/// This is the load-bearing Rust-level assertion for AC-008 (scope-directive
+/// Decision 3, F-006 fix). The companion shell assertion is in
+/// `scripts/check-pdf-deps.sh`.
+///
+/// Full strace/dtrace integration test deferred to STORY-049:
+///   test name: `test_e2e_pdf_export_no_execve_syscall`
+///   Reason: requires full CLI binary + syscall tracer.
+#[test]
+fn test_bc_4_03_002_no_subprocess_in_pdf_source() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let src_dir = manifest_dir.join("src");
+    assert!(src_dir.is_dir(), "src/ directory must exist");
+
+    // Subprocess API patterns forbidden in production code.
+    let forbidden_patterns = ["std::process", "Command::new", "process::Command"];
+
+    // Recursively scan all .rs files in src/.
+    let mut violations: Vec<String> = Vec::new();
+    scan_dir_for_patterns(&src_dir, &forbidden_patterns, &mut violations);
+
+    assert!(
+        violations.is_empty(),
+        "BC-4.03.002 AC-008: found subprocess usage in slideforge-pdf/src/:\n{}\n\
+         \nAll PDF generation must be pure Rust — no std::process spawning.",
+        violations.join("\n")
     );
 }
 

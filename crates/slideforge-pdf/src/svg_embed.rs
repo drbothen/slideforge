@@ -174,18 +174,49 @@ fn render_path(path: &usvg::Path, surface: &mut Surface<'_>) -> Result<(), PdfEx
 
 /// Convert a `usvg::Fill` to a `krilla::Fill`.
 ///
-/// Gradients and patterns are approximated with a black fill in this story
-/// (STORY-045 extends color server support). Only `Paint::Color` is fully
-/// translated here.
+/// Only `Paint::Color` is fully translated here. Gradients and patterns fall
+/// back to opaque black (STORY-045 extends color server support). A
+/// `tracing::warn!` is emitted for any unsupported paint server so that the
+/// fallback is visible in logs and not silently swapped (F-010 fix).
+///
+/// Logging uses `tracing::warn!` with structured fields naming the paint server
+/// kind, in accordance with the project convention (no `println!` in library
+/// crates).
 fn usvg_fill_to_krilla(fill: &usvg::Fill) -> Fill {
     let opacity = usvg_opacity_to_krilla(fill.opacity().get());
     let rule = usvg_fill_rule_to_krilla(fill.rule());
 
     let paint: Paint = match fill.paint() {
         usvg::Paint::Color(color) => rgb::Color::new(color.red, color.green, color.blue).into(),
-        // Gradients and patterns: fall back to black for now.
-        // Full gradient support is STORY-045 scope.
-        _ => rgb::Color::new(0, 0, 0).into(),
+        usvg::Paint::LinearGradient(_) => {
+            // F-010: warn instead of silently substituting.
+            // Full linear-gradient support is deferred to STORY-045.
+            tracing::warn!(
+                paint_server = "LinearGradient",
+                fallback = "opaque black",
+                "unsupported SVG paint server — falling back to opaque black; \
+                 full gradient support deferred to STORY-045"
+            );
+            rgb::Color::new(0, 0, 0).into()
+        },
+        usvg::Paint::RadialGradient(_) => {
+            tracing::warn!(
+                paint_server = "RadialGradient",
+                fallback = "opaque black",
+                "unsupported SVG paint server — falling back to opaque black; \
+                 full gradient support deferred to STORY-045"
+            );
+            rgb::Color::new(0, 0, 0).into()
+        },
+        usvg::Paint::Pattern(_) => {
+            tracing::warn!(
+                paint_server = "Pattern",
+                fallback = "opaque black",
+                "unsupported SVG paint server — falling back to opaque black; \
+                 full pattern support deferred to STORY-045"
+            );
+            rgb::Color::new(0, 0, 0).into()
+        },
     };
 
     Fill {

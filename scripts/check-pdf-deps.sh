@@ -87,12 +87,41 @@ else
 fi
 
 echo ""
+echo "[No-subprocess source check] — AC-008 / scope-directive Decision 3:"
+echo "  Assert zero std::process / Command::new / process::Command usage in"
+echo "  crates/slideforge-pdf/src/ (source-level enforcement of AC-008)."
+echo ""
+
+PDF_SRC_DIR="${WORKSPACE_ROOT}/crates/slideforge-pdf/src"
+if [[ ! -d "${PDF_SRC_DIR}" ]]; then
+    echo "  WARN: crates/slideforge-pdf/src not found — skipping source check"
+else
+    # Grep for actual use-site patterns (non-comment lines only).
+    # Use perl-regex look-ahead to skip lines whose trimmed content starts
+    # with `//` (Rust comment lines, including doc comments `///`).
+    # The output of grep has format "file:lineno:content"; we filter on the
+    # content portion (after the second colon).
+    SUBPROCESS_HITS=$(grep -rn "std::process\|Command::new\|process::Command" \
+        "${PDF_SRC_DIR}/" 2>/dev/null \
+        | awk -F: '{ rest=$3; for(i=4;i<=NF;i++) rest=rest":"$i; gsub(/^[ \t]*/,"",rest); if (substr(rest,1,2) != "//") print }' \
+        || true)
+    if [[ -n "${SUBPROCESS_HITS}" ]]; then
+        echo "${SUBPROCESS_HITS}"
+        echo "  FAIL: subprocess usage found in crates/slideforge-pdf/src/"
+        echo "        BC-4.03.002 AC-008 requires zero std::process in slideforge-pdf."
+        FOUND_FORBIDDEN=1
+    else
+        echo "  OK:   no std::process / Command::new / process::Command in slideforge-pdf/src/"
+    fi
+fi
+
+echo ""
 if [[ "${FOUND_FORBIDDEN}" -eq 1 ]]; then
-    echo "FAIL: Forbidden PDF dependencies found in Cargo.lock."
+    echo "FAIL: Forbidden PDF dependencies or subprocess usage found."
     echo "      BC-4.03.002 requires a pure-Rust PDF stack (krilla + pdf-writer)."
     echo "      Remove the forbidden dependencies from slideforge-pdf/Cargo.toml."
     exit 1
 else
-    echo "PASS: No forbidden PDF dependencies found."
+    echo "PASS: No forbidden PDF dependencies or subprocess usage found."
     exit 0
 fi

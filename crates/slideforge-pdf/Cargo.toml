@@ -19,6 +19,9 @@ name = "slideforge_pdf"
 # do NOT add them as direct deps (RISK-1 / RISK-2 per tech-validation.md).
 krilla = "=0.6.0"
 
+# Structured logging — no println! in library crates (code conventions).
+tracing = { workspace = true }
+
 # SVG parsing: usvg parse → krilla Surface path conversion.
 # krilla 0.6.0 has NO usvg dependency — zero version conflict.
 usvg = { workspace = true }

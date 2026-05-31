@@ -29,11 +29,19 @@
 //! 1. Creates a `krilla::Document::new()`.
 //! 2. Iterates over `laid_out.slides`, calling into `SlideTagEngine` and
 //!    `svg_embed` for each slide.
-//! 3. Calls `document.finish()` → `KrillaResult<Vec<u8>>`.
-//! 4. Maps `KrillaError` → `PdfExportError::Serialize` → `ExportError::RenderError`.
-//! 5. Returns the PDF bytes.
+//! 3. Calls `document.set_tag_tree(tag_tree)` with the assembled structural tree.
+//! 4. Calls `document.finish()` → `KrillaResult<Vec<u8>>`.
+//! 5. Maps `KrillaError` → `PdfExportError::Serialize` → `ExportError::RenderError`.
+//! 6. Returns the PDF bytes.
 //!
 //! No subprocess is spawned. No FFI to C libraries. Pure Rust.
+//!
+//! ## EMU canonicalization (F-005)
+//!
+//! All EMU-to-points conversions use [`slideforge_types::Emu::to_points`] which
+//! calls the canonical `EMU_PER_POINT = 12_700` constant defined in
+//! `slideforge-types`. The private `EMU_PER_POINT` constant previously
+//! duplicated here has been removed.
 
 use krilla::Document;
 use krilla::page::PageSettings;
@@ -42,12 +50,12 @@ use slideforge_plugin_api::{ExportError, ExportOptions, Exporter};
 use slideforge_types::{Brand, Deck};
 
 use crate::error::PdfExportError;
+use crate::tag_engine::SlideTagEngine;
 
 /// PDF exporter implementing the [`Exporter`] plugin trait.
 ///
-/// Produces PDF/UA-1-compliant PDF bytes from a [`LaidOutDeck`] using
-/// `krilla 0.6.0` as the primary PDF engine and [`crate::tag_engine::SlideTagEngine`]
-/// for the structure tree.
+/// Produces a tagged PDF from a [`LaidOutDeck`] using `krilla 0.6.0` as the
+/// primary PDF engine and [`SlideTagEngine`] for the PDF/UA-1 structure tree.
 ///
 /// ## Thread safety
 ///
@@ -80,16 +88,25 @@ impl PdfExporter {
         _opts: &ExportOptions,
     ) -> Result<Vec<u8>, PdfExportError> {
         // Create a krilla Document with default settings.
-        // Default SerializeSettings has enable_tagging: true; we do NOT call
-        // set_tag_tree here — the tag tree is attached only when tagging is
-        // fully wired (STORY-045). Without set_tag_tree, krilla produces a
-        // syntactically valid PDF without a structure tree.
+        // Default SerializeSettings has enable_tagging: true.
         let mut document = Document::new();
 
+        // Instantiate the tag engine — one per export pass, stateless per slide.
+        let tag_engine = SlideTagEngine::new();
+
+        // Collect per-slide Part groups for later assembly into the deck tag tree.
+        let mut slide_parts = Vec::with_capacity(laid_out.slides.len());
+
         for slide in &laid_out.slides {
-            // Convert page dimensions from EMU to PDF points (1 pt = 12,700 EMU).
-            let width_pts = slide_dim_to_pts(laid_out.page_size.width.0);
-            let height_pts = slide_dim_to_pts(laid_out.page_size.height.0);
+            // Convert page dimensions from EMU to PDF points using the canonical
+            // Emu::to_points() from slideforge-types (EMU_PER_POINT = 12_700).
+            // TD-VSDD-060: no duplicate EMU_PER_POINT constant in this crate.
+            // f64→f32 truncation is intentional: PDF point precision at typical
+            // slide sizes (720×540 pt) loses < 0.01 pt — below rendering tolerance.
+            #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
+            let width_pts = laid_out.page_size.width.to_points() as f32;
+            #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
+            let height_pts = laid_out.page_size.height.to_points() as f32;
 
             let page_settings = PageSettings::from_wh(width_pts, height_pts).ok_or_else(|| {
                 PdfExportError::Serialize {
@@ -101,14 +118,34 @@ impl PdfExporter {
             })?;
 
             let mut page = document.start_page_with(page_settings);
-            // `Surface` is obtained from `page.surface()` for drawing operations.
-            // Content drawing (text, SVG paths) is added here in STORY-044 / STORY-045.
-            // For now the page is intentionally blank — the `%PDF-` header and valid
-            // document structure are what AC-001 requires at this stage.
+
+            // Build the structural tag sub-tree for this slide.
+            // tag_slide returns a PartResult containing the Part TagGroup and
+            // the list of decorative frame indices.
+            let part_result = tag_engine.tag_slide(slide)?;
+
+            // `surface` is obtained for drawing operations.
+            // Content drawing (text, SVG paths) is added in STORY-044/STORY-045.
+            // The page is currently blank except for the tag structure tree.
+            //
+            // Decorative frames (part_result.decorative_frame_indices) will be
+            // marked with ContentTag::Artifact(ArtifactType::Other) during the
+            // drawing pass in STORY-044.
             let surface = page.surface();
             surface.finish();
             page.finish();
+
+            // Collect the Part group for deck-level tree assembly.
+            slide_parts.push(part_result.part);
         }
+
+        // Assemble the per-slide Part groups into a single deck-level TagTree
+        // and attach it to the document before finish().
+        //
+        // BC-4.03.002 AC-003: set_tag_tree called before document.finish().
+        // STORY-043 scope-directive Decision 1: this wiring must happen NOW.
+        let tag_tree = tag_engine.assemble_deck_tag_tree(slide_parts)?;
+        document.set_tag_tree(tag_tree);
 
         // Serialize to PDF bytes. `Document::finish()` returns
         // `KrillaResult<Vec<u8>>` (i.e. `Result<Vec<u8>, KrillaError>`).
@@ -116,22 +153,6 @@ impl PdfExporter {
             message: format!("krilla serialization error: {e:?}"),
         })
     }
-}
-
-/// Convert an EMU value (i64) to PDF points (f32).
-///
-/// PDF points = EMU / 12,700.
-/// krilla's `PageSettings::from_wh` and coordinate system use `f32` points.
-///
-/// # Precision note
-///
-/// EMU values are large integers; converting directly to `f32` can lose
-/// sub-point precision, but for page dimensions this is acceptable (precision
-/// loss < 0.01 pt at typical slide sizes).
-#[allow(clippy::cast_precision_loss)]
-fn slide_dim_to_pts(emu: i64) -> f32 {
-    const EMU_PER_POINT: i64 = 12_700;
-    (emu as f32) / (EMU_PER_POINT as f32)
 }
 
 impl Default for PdfExporter {
@@ -266,12 +287,6 @@ mod tests {
 
     /// BC-4.03.002 AC-001 (behavioral): `PdfExporter::export()` on a minimal
     /// 1-slide `LaidOutDeck` produces non-empty bytes starting with `%PDF-`.
-    ///
-    /// RED GATE: This test MUST FAIL because `generate_pdf` is a `todo!()`.
-    /// After implementation, the bytes returned must:
-    /// - Be non-empty.
-    /// - Start with the PDF magic bytes `b"%PDF-"`.
-    /// - Contain no forbidden browser-PDF dep markers.
     #[allow(clippy::unwrap_used)]
     #[test]
     fn test_bc_4_03_002_export_produces_pdf_bytes() {
@@ -283,7 +298,6 @@ mod tests {
 
         let result = exporter.export(&deck, &laid_out, &brand, &opts);
 
-        // After implementation: assert the PDF bytes are valid.
         assert!(
             result.is_ok(),
             "PdfExporter::export must succeed for a minimal 1-slide deck: {:?}",
@@ -300,8 +314,6 @@ mod tests {
 
     /// BC-4.03.002 AC-001 (id/extension): `PdfExporter::id()` == `"pdf"` and
     /// `PdfExporter::extension()` == `"pdf"`.
-    ///
-    /// PASSES NOW — these are real values, not stubs.
     #[test]
     fn test_bc_4_03_002_exporter_id_and_extension() {
         let exporter = PdfExporter::new();
@@ -309,17 +321,65 @@ mod tests {
         assert_eq!(exporter.extension(), "pdf");
     }
 
+    /// BC-4.03.002 AC-003 (integration): `PdfExporter::export()` produces a
+    /// tagged PDF — the output bytes contain the structure tree marker that
+    /// krilla emits when `set_tag_tree` is called.
+    ///
+    /// The `StructTreeRoot` marker (`/MarkInfo` or `StructTreeRoot` keyword in the
+    /// PDF bytes) confirms the tag tree is actually attached.
+    #[allow(clippy::unwrap_used)]
+    #[test]
+    fn test_bc_4_03_002_export_produces_tagged_pdf() {
+        let exporter = PdfExporter::new();
+        let deck = minimal_deck();
+        let laid_out = minimal_laid_out_deck();
+        let brand = minimal_brand();
+        let opts = ExportOptions::default();
+
+        let bytes = exporter.export(&deck, &laid_out, &brand, &opts).unwrap();
+
+        // krilla emits `/MarkInfo` when `set_tag_tree` is called.
+        // This confirms the structural tag tree is present in the PDF.
+        let has_mark_info = bytes
+            .windows(b"StructTreeRoot".len())
+            .any(|w| w == b"StructTreeRoot");
+        assert!(
+            has_mark_info,
+            "exported PDF must contain StructTreeRoot (tagged PDF marker); \
+             this confirms set_tag_tree was called before document.finish()"
+        );
+    }
+
     /// BC-4.03.002 AC-008 (structural no-subprocess check): `PdfExporter::export`
     /// is a pure Rust call graph — it must not spawn subprocesses.
     ///
-    /// This verifies the `PdfExporter` type does NOT implement any subprocess-
-    /// spawning interface. We assert it is `Send + Sync` (pure-Rust guarantee)
-    /// and that `generate_pdf` is a normal instance method (not an async fn or
-    /// thread spawner).
+    /// ## Load-bearing assertion (F-006 fix)
     ///
-    /// A full strace/dtrace integration test is deferred to STORY-049 (E2E tests)
-    /// per AC-008's original spec intent. Per SID-1, this compile-time Send+Sync
-    /// check provides structural coverage without an external syscall tracer.
+    /// The REAL enforcement is a source-level grep in `scripts/check-pdf-deps.sh`:
+    ///
+    /// ```bash
+    /// # Assert no std::process usage in the export path
+    /// if grep -r "std::process\|Command::new\|process::Command" \
+    ///     crates/slideforge-pdf/src/; then
+    ///     echo "FAIL: subprocess usage found" >&2
+    ///     exit 1
+    /// fi
+    /// ```
+    ///
+    /// Run `bash scripts/check-pdf-deps.sh` to execute this check in CI.
+    /// That is the load-bearing assertion for AC-008 (F-006 fix, scope-directive
+    /// Decision 3).
+    ///
+    /// ## Deferred strace/dtrace integration test
+    ///
+    /// Full strace/dtrace integration test is deferred to STORY-049:
+    ///   test name: `test_e2e_pdf_export_no_execve_syscall`
+    ///   Reason: requires full CLI binary + syscall tracer (strace/dtrace/procmon).
+    ///   Per SID-1: STORY-049 explicitly named, deferred by concrete dependency
+    ///   (CLI binary + platform tracing tool not available in unit test context).
+    ///
+    /// The `Send + Sync` assertions below are supplementary structural coverage
+    /// and do NOT prove absence of subprocess spawning on their own.
     #[test]
     fn test_bc_4_03_002_no_subprocess_structural_check() {
         // Structural: PdfExporter is Send + Sync, which rules out holding OS
