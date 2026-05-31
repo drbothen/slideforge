@@ -4,7 +4,7 @@ mode: greenfield
 created: 2026-05-23
 current_phase: phase-3-tdd-implementation
 status: IN_PROGRESS
-last_updated: 2026-05-30
+last_updated: 2026-05-31
 wave_3_batch_3_story024_merged: "PR #36, 924cdc04, 2026-05-30"
 phase_1_approved: 2026-05-25
 phase_2_approved: 2026-05-25
@@ -33,9 +33,14 @@ wave_3_batch_2_completed: 2026-05-30
 wave_3_batch_3_started: 2026-05-30
 wave_3_batch_3_completed: 2026-05-30
 wave_3_batch_3_stories: "STORY-021 (PR #35, 362c4a1f) + STORY-024 (PR #36, 924cdc04) + STORY-025 (PR #37, 584cbc6f) — ALL MERGED"
+wave_3_gate_test_suite: "GREEN @ 584cbc6f — 0 failures (full cargo test --workspace --no-fail-fast 2026-05-31)"
+wave_3_gate_holdout: "must-pass PASS (5/5 ≥0.60; SSRF/HS-013 0.90); mean 0.767 over 6 evaluable scenarios (9 blocked — no CLI/exporters yet)"
+wave_3_gate_adversarial: "CONVERGED — 8 passes, strict-CLEAN at passes 6/7/8; fix branch fix/wave3-gate; fix-PR in flight"
+wave_3_gate_status: "PASSED (pending fix-PR merge; conventions.md v1.3 #[non_exhaustive] policy codified)"
+wave_3_completed: "2026-05-31 (pending fix-PR merge)"
 develop_sha: "584cbc6f"
 develop_pr_count: 37
-workspace_tests: "~2300+ (exact count pending Wave 3 Gate full-suite run; STORY-025 added net-new brand+types tests)"
+workspace_tests: "2584 (full-suite run 2026-05-31 @ 584cbc6f, 0 failures)"
 workspace_test_failures: 0
 ---
 
@@ -51,20 +56,20 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. It generates branded .p
 **Workspace:** /Users/jmagady/Dev/slideforge
 **Factory worktree:** .factory/ on branch `factory-artifacts`
 
-## Session Resume Brief (2026-05-30 handoff — COMPREHENSIVE CHECKPOINT)
+## Session Resume Brief (2026-05-31 handoff — Wave 3 Gate COMPLETE)
 
 ### Fresh Session Resume Checklist
 
 Before doing ANY work, a new session should:
 
-1. **Sync local develop:** `git pull origin develop` in main worktree. develop is at `584cbc6f` (37 merged PRs, ~2300+ tests). No pending merges.
-2. **Verify worktree health:** `git worktree list` should show: main worktree + `.factory/` only. STORY-025 worktree cleanup in progress (devops-engineer). No active feature worktrees.
-3. **Top priority on resume:** **Wave 3 Gate.** All 3 Batch 3 stories are merged. Run `vsdd-factory:wave-gate` — full `cargo test --workspace --no-fail-fast` on develop @ 584cbc6f; adversarial wave-diff review 3-CLEAN; holdout evaluation; demo-evidence validation. DTU n/a (dtu_required=false).
+1. **Sync local develop:** `git pull origin develop`. After fix-PR merges, develop will be at the fix-PR squash commit. Until then, develop is at `584cbc6f` (37 merged PRs, 2584 tests).
+2. **Verify worktree health:** `git worktree list` should show: main worktree + `.factory/` only. No active feature worktrees.
+3. **Top priority on resume:** **Merge the Wave 3 Gate fix-PR** (branch `fix/wave3-gate` — #[non_exhaustive] hardening + slideforge-brand workspace-dep fix). After merge, Wave 3 is COMPLETE. Proceed to Wave 4 planning or Phase 4 Holdout Evaluation.
 4. **Check follow-up stories:** STORY-072 (gradient fills, P2/3pts), STORY-073 (bullets layout, P1/5pts), STORY-074 (brand-em-sizing, P2/3pts) — status=draft, created during STORY-028 cascade. STORY-075 (footer detection), STORY-076 (srgbClr transform extraction) — status=draft, created during STORY-024 cascade. See STORY-INDEX.md.
 
 ### Where we are
 
-Phase 3, Wave 3 Batch 3 — **COMPLETE.** All 3 stories merged. STORY-021 MERGED (PR #35, 362c4a1f). STORY-024 MERGED (PR #36, 924cdc04). STORY-025 MERGED (PR #37, 584cbc6f). **NEXT: Wave 3 Gate.**
+Phase 3, Wave 3 Gate — **PASSED** (pending fix-PR merge). Full test suite GREEN (2584 tests, 0 failures) @ 584cbc6f. Holdout: must-pass PASS (5/5). Adversarial: 8 passes, strict-CLEAN at passes 6/7/8. Gate fixes on `fix/wave3-gate`: slideforge-brand workspace-dep + #[non_exhaustive] hardening + conventions.md v1.3 policy. Fix-PR in flight.
 
 | Story | Status | Worktree | Branch | Notes |
 |-------|--------|----------|--------|-------|
@@ -92,8 +97,8 @@ Phase 3, Wave 3 Batch 3 — **COMPLETE.** All 3 stories merged. STORY-021 MERGED
 
 ### Top 3 next actions (in order)
 
-1. **Wave 3 Gate:** `vsdd-factory:wave-gate` — full `cargo test --workspace --no-fail-fast` on develop @ 584cbc6f; adversarial wave-diff review 3-CLEAN; holdout evaluation; demo-evidence validation. DTU n/a.
-2. **After Wave 3 Gate passes:** Wave 3 is complete. Proceed to Wave 4 story planning or Phase 4 Holdout Evaluation per wave schedule.
+1. **Merge Wave 3 Gate fix-PR** (`fix/wave3-gate` → develop): #[non_exhaustive] hardening across all public error enums + PATH-A plugin-api data enums + OBS-1 wildcard-error arms; slideforge-brand → [workspace.dependencies]; conventions.md v1.3. After merge, Wave 3 is COMPLETE.
+2. **Wave 4 planning or Phase 4 Holdout Evaluation:** Per wave schedule. Consult `.factory/stories/wave-schedule.md` for Wave 4 story list and prerequisites.
 3. **Follow-up story triage:** STORY-072/073/074 (STORY-028 cascade), STORY-075/076 (STORY-024 cascade) — all draft, Wave TBD. Schedule in next wave planning.
 
 ### Orchestrator Playbook Improvements (codify before next cascade)
@@ -189,8 +194,8 @@ develop branch: `584cbc6f` (37 merged PRs, ~2300+ tests, 0 failures). 0 active f
 
 ## What to Do Next
 
-- **Wave 3 Gate**: All 3 Batch 3 stories merged (STORY-021 PR #35, STORY-024 PR #36, STORY-025 PR #37). Run `vsdd-factory:wave-gate` on develop @ 584cbc6f — full `cargo test --workspace --no-fail-fast`, adversarial wave-diff review 3-CLEAN, holdout evaluation, demo-evidence validation. DTU n/a.
-- **After Wave 3 Gate passes**: Wave 3 complete. Proceed to Wave 4 or Phase 4 Holdout Evaluation per wave schedule.
+- **Merge Wave 3 Gate fix-PR**: Branch `fix/wave3-gate` — all gate integration findings fixed: slideforge-brand [workspace.dependencies], #[non_exhaustive] hardening (public error enums + PATH-A plugin-api data enums + OBS-1 wildcard-error arms), conventions.md v1.3 policy. After merge, Wave 3 is COMPLETE.
+- **Wave 4 planning**: Post-merge, consult `.factory/stories/wave-schedule.md` for Wave 4 story list and prerequisites. Alternatively, proceed to Phase 4 Holdout Evaluation (per-wave holdout gates).
 - **Process configuration**: Add `-D clippy::pedantic -D clippy::unwrap_used` to `just check` target in Justfile. Add cross-crate compile check to per-story-delivery flow for stories touching slideforge-brand or slideforge-types.
 
 **Key file references:**
@@ -231,7 +236,7 @@ git fetch origin develop && git pull origin develop
 | Planning (25 DSL decisions) | DONE 2026-05-24 | q1–q25 decision docs + 14 research threads + 7/7 spikes resolved |
 | Phase 1: Spec Crystallization | DONE — APPROVED 2026-05-25 | PRD (109 BCs, 15 HS, 4 supplements) + architecture (14 ADRs, 15 VPs, 20 crates) + UX spec (10 screens, 5 flows) + L2 domain spec (12 files). 17 passes, 69 findings, 3/3 clean. |
 | Phase 2: Story Decomposition | DONE — APPROVED 2026-05-25 | 71 stories, 21 epics, 6 waves, 437 pts. 22 passes, 96+ findings, 3/3 clean. |
-| Phase 3: TDD Implementation | IN PROGRESS — Wave 1: COMPLETE + GATE PASSED. Wave 2: COMPLETE + GATE PASSED. Wave 3: Batch 1 COMPLETE (6 stories, PRs #21-#26, 494 new tests). Batch 2: COMPLETE (13 stories, PRs #27-#34, 066d625f). Batch 3: COMPLETE — all 3 merged: STORY-021 (PR #35, 362c4a1f) + STORY-024 (PR #36, 924cdc04) + STORY-025 (PR #37, 584cbc6f). NEXT: Wave 3 Gate. | Per-story delivery |
+| Phase 3: TDD Implementation | IN PROGRESS — Wave 1: COMPLETE + GATE PASSED. Wave 2: COMPLETE + GATE PASSED. Wave 3: Batch 1 COMPLETE (6 stories, PRs #21-#26, 494 new tests). Batch 2: COMPLETE (13 stories, PRs #27-#34, 066d625f). Batch 3: COMPLETE (3 stories, PRs #35-#37, 584cbc6f). Wave 3 Gate: PASSED (2584 tests GREEN; holdout must-pass 5/5; adversary 3-CLEAN passes 6/7/8; fix-PR in flight). Wave 4 NEXT after fix-PR merge. | Per-story delivery |
 | Phase 4: Holdout Evaluation | NOT STARTED | Per-wave holdout gates |
 | Phase 5: Adversarial Refinement | NOT STARTED | Post-implementation cascade |
 | Phase 6: Formal Hardening | NOT STARTED | Kani + fuzz + mutants + semgrep |
@@ -330,22 +335,24 @@ New crates added by Batch 1 (total workspace now 13 crates): slideforge-data, sl
 - 2026-05-30 — STORY-024 MERGED (PR #36, 924cdc04) — Brand Extraction library (BC-2.01.003). 11-pass adversary 3/3 strict-CLEAN (P9-10-11); library-only (CLI wiring deferred to STORY-057); 11 ACs demo'd. AI PR-diff review PR-merge-CLEAN (2 LOW/OBS non-blocking: BrandError::ParseError reuse for I/O — naming nit; .unwrap_or("bin") logo-ext fallback — documented). Security review CLEAN. All 17 CI checks passed. Wave 3 Batch 3: 2/3 merged.
 - 2026-05-30 — STORY-025 LOCAL ADVERSARY 3/3 STRICT-CLEAN CONVERGED (11 passes). Key hardening during cascade: HIGH path-traversal containment guard in resolve_overlay (E-BRD-007, reuses strip_unc_prefix); media_type unified to shared logo::media_type_from_extension (eliminates divergence risk); EC-007 unknown-ext emits warn not error; EC-008 empty-path returns LogoRequired; LogoRequired message context-neutral (cross-context reuse). Spec parity: E-BRD-007 widened to overlay coverage (error-taxonomy v2.2); shared-variant rows for E-BRD-001/002; TomlReadError/TomlParseError variant-name corrections; BC-2.02.001 v1.1→v1.4 (EC-006 path-containment, EC-007, EC-008, "brand root directory" wording, subsystem SS-04); BC-2.02.002 v1.1→v1.2 (subsystem SS-06). 455 slideforge-brand+types tests passing. 10 ACs demo'd. Two [process-gap] lessons captured in .factory/cycles/STORY-025/lessons.md: (a) taxonomy/BC widen requires same-burst sweep of #[error] string + variant docs + field docs + sibling doc-tables (recurred 3x); (b) new error return arm requires `# Errors` rustdoc completeness check against all reachable arms (recurred 2x).
 - 2026-05-30 — STORY-025 MERGED (PR #37, 584cbc6f) — Per-Slide brand_overlay invariant (BC-2.02.001+002). 11-pass adversary 3/3 strict-CLEAN (P9-10-11); 10 ACs demo'd; HIGH path-traversal guard confirmed. AI PR-diff review PR-merge-CLEAN (1 LOW + 4 OBS non-blocking). Security CLEAN. All 17 CI checks passed. Wave 3 Batch 3 COMPLETE — all 3 stories merged (STORY-021 PR #35, STORY-024 PR #36, STORY-025 PR #37). NEXT: Wave 3 Gate.
+- 2026-05-31 — WAVE 3 GATE: Full test suite GREEN (2584 tests, 0 failures) on develop @ 584cbc6f. Holdout evaluation: must-pass PASS (5/5 must-pass ≥0.60; SSRF/HS-013 0.90; mean 0.767 over 6 evaluable scenarios — 9 blocked scenarios are structural mid-build artifact, not a quality defect; full mean-satisfaction holdout deferred to post-exporter waves). Adversarial wave-diff review CONVERGED: 8 passes, strict-CLEAN at passes 6/7/8. Integration findings fixed on branch fix/wave3-gate: slideforge-brand → [workspace.dependencies]; #[non_exhaustive] hardening across all public error enums + PATH-A plugin-api data enums with OBS-1 wildcard-error arms; conventions.md v1.3 policy codified. Fix-PR in flight.
+- 2026-05-31 — CONVENTIONS.md v1.3: #[non_exhaustive] Policy codified (PATH A variant-growth / PATH B closed-domain framework; exhaustive plugin-api classification table; scope statement; wildcard-arm rule; checklist). Policy artifact is POLICY-only — conformance verified by adversary + clippy, not recorded in spec. Stale-checkout code-state column removed (OBS-2 correction; was written from develop checkout lacking fix commits).
 
 ## Session Resume Checkpoint
 
 | Field | Value |
 |-------|-------|
-| **Date** | 2026-05-30 |
-| **Position** | Phase 3, Wave 3, Batch 3 COMPLETE. STORY-021 MERGED (PR #35, 362c4a1f). STORY-024 MERGED (PR #36, 924cdc04). STORY-025 MERGED (PR #37, 584cbc6f). NEXT: Wave 3 Gate. |
-| **develop SHA** | 584cbc6f |
-| **Workspace tests** | ~2300+ (exact count pending Wave 3 Gate full-suite run; STORY-025 added net-new brand+types tests) |
+| **Date** | 2026-05-31 |
+| **Position** | Phase 3, Wave 3 Gate PASSED. Fix-PR (`fix/wave3-gate`) in flight. After merge, Wave 3 COMPLETE. NEXT: Wave 4 planning or Phase 4 Holdout. |
+| **develop SHA** | 584cbc6f (will advance to fix-PR squash commit after merge) |
+| **Workspace tests** | 2584 (full-suite run 2026-05-31, 0 failures) |
 | **Workspace crates** | 13 (7 Wave 1 + 6 Batch 1: data, brand, layout, math, charts, diagrams) |
-| **Active worktrees** | 0 active feature worktrees. STORY-025 worktree cleanup in progress (devops-engineer). |
-| **Open PRs** | 0 |
+| **Active worktrees** | 0 active feature worktrees. fix/wave3-gate worktree at `.worktrees/wave3-gate-fix`. |
+| **Open PRs** | 1 — fix/wave3-gate gate-fix PR (in flight, pending merge) |
 | **Follow-up stories** | STORY-072/073/074 (STORY-028 cascade, draft, Wave TBD); STORY-075/076 (STORY-024 cascade, draft, Wave TBD) |
 | **factory-artifacts** | Local only (not pushed to remote). Push requires explicit human authorization per CLAUDE.md. |
-| **Highest priority next** | 1. Wave 3 Gate (vsdd-factory:wave-gate on develop @ 584cbc6f — full cargo test + adversarial 3-CLEAN + holdout eval + demo evidence). 2. STORY-025 worktree cleanup (devops-engineer). 3. Wave 4 planning or Phase 4 holdout after gate passes. |
-| **Process improvements to apply** | Before accepting any "clippy clean": run `rustup update stable && cargo clippy --workspace --all-targets --all-features -- -D clippy::pedantic -D clippy::unwrap_used`. After slideforge-brand/types structural change: `cargo build --workspace 2>&1` cross-crate compile check. Default cross-layer error emission pattern: canonical machine format from source, rich Display at consumer (STORY-021 P15 lesson). Pre-fix-burst: grep crates/ for literal old error message string when widening taxonomy/BC (STORY-025 process-gap). |
+| **Highest priority next** | 1. Merge Wave 3 Gate fix-PR (fix/wave3-gate). 2. Wave 4 planning (wave-schedule.md). 3. Follow-up story scheduling (STORY-072–076, Wave TBD). |
+| **Process improvements to apply** | Before accepting any "clippy clean": run `rustup update stable && cargo clippy --workspace --all-targets --all-features -- -D clippy::pedantic -D clippy::unwrap_used`. Gate fix reviews: always give worktree-prefixed absolute paths + mandate HEAD/pwd verification to prevent stale-checkout reads. Policy artifacts must state POLICY only — never embed point-in-time code-state columns. |
 
 ## Quality Bar (Non-Negotiable)
 
