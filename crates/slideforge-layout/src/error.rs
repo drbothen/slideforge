@@ -26,7 +26,7 @@ use slideforge_types::SourceSpan;
 /// comemo compatibility and proptest `Arbitrary` derivability (AC-010).
 ///
 /// `#[non_exhaustive]` ensures that adding variants in minor releases does not
-/// break downstream crates that match on this enum (SemVer hygiene, quality-bar).
+/// break downstream crates that match on this enum (`SemVer` hygiene, quality-bar rule).
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Error)]
 pub enum LayoutError {

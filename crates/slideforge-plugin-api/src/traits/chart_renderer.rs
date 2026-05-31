@@ -11,7 +11,7 @@ use thiserror::Error;
 /// Error returned by [`ChartRenderer::render`].
 ///
 /// `#[non_exhaustive]` allows adding variants in minor releases without
-/// breaking external plugin authors who pattern-match this enum (SemVer hygiene).
+/// breaking external plugin authors who pattern-match this enum (`SemVer` hygiene).
 #[non_exhaustive]
 #[derive(Debug, Error)]
 pub enum ChartError {

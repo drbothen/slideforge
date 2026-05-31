@@ -95,7 +95,7 @@ impl RawDiagramSvg {
 /// will be implemented in the wave that adds `slideforge-eval` functionality.
 ///
 /// `#[non_exhaustive]` ensures that adding variants in minor releases does not
-/// break downstream crates that match on this enum (SemVer hygiene, quality-bar).
+/// break downstream crates that match on this enum (`SemVer` hygiene, quality-bar rule).
 #[non_exhaustive]
 #[derive(Debug, Error)]
 pub enum DiagramError {
