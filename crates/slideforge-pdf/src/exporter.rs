@@ -391,8 +391,17 @@ fn try_resolve_font(family: &str) -> Option<krilla::text::Font> {
 ///
 /// # Errors
 ///
-/// Returns [`PdfExportError::SvgEmbed`] for diagram frame failures. All other
-/// frame types silently skip on failure (font unavailable, empty content, etc.).
+/// Error propagation depends on frame type:
+///
+/// - **`Diagram` and `ErrorSlidePlaceholder`** — SVG embed failures propagate
+///   via `?` as [`PdfExportError::SvgEmbed`], aborting the export. A malformed
+///   or unsupported SVG payload is treated as a hard failure.
+/// - **Text frames (`Title`, `Subtitle`, `Body`, `TextRun`)** — degrade
+///   gracefully: if `font` is `None`, drawing is skipped with a
+///   `tracing::debug!` warning and the function returns `Ok(())`. Empty
+///   `TextRun` content is silently skipped.
+/// - **`Chart`, `Image`, `Shape`, `Empty`** — no drawing in STORY-044;
+///   always return `Ok(())` immediately.
 fn draw_frame(
     surface: &mut krilla::surface::Surface<'_>,
     bbox: &BoundingBox,
@@ -590,7 +599,10 @@ impl Exporter for PdfExporter {
     ///
     /// # Parameters
     ///
-    /// - `deck` — the semantic, pre-layout IR (used for metadata: title, lang)
+    /// - `deck` — the semantic, pre-layout IR. Currently unused by the PDF
+    ///   renderer; it is accepted so the [`Exporter`] trait signature is
+    ///   satisfied. PDF document metadata (title, language) will be populated
+    ///   from this parameter in STORY-045 (PDF/UA-1 metadata wiring).
     /// - `laid_out` — the geometric, post-layout IR (slide frames, coordinates)
     /// - `brand` — resolved brand configuration (fonts, palette, page size)
     /// - `opts` — per-export options
