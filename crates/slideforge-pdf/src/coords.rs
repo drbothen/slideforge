@@ -121,18 +121,10 @@ mod tests {
     use super::*;
 
     // ── AC-001: emu_to_pt canonical test vectors ──────────────────────────────
-    //
-    // All tests in this section call `emu_to_pt()` or `ir_y_to_pdf_y()` which
-    // have `todo!()` bodies. A `todo!()` panics at runtime. nextest/libtest
-    // catches the panic and reports the test as FAILED. This is the correct
-    // Red Gate behavior: tests FAIL before implementation, PASS after.
-    //
-    // Do NOT use `#[should_panic]` here — that would make the test PASS on the
-    // `todo!()` panic, defeating the Red Gate.
 
     /// BC-4.03.005 AC-001 / postcondition 1: slide width (10 inches) converts to 720.0pt.
     ///
-    /// Exercises VP-006. FAILS at Red Gate (`todo!()` panic). PASSES after implementation.
+    /// Exercises VP-006. Verifies the exact 9,144,000 EMU → 720.0pt conversion.
     #[test]
     #[allow(clippy::float_cmp)]
     fn test_bc_4_03_005_emu_to_pt_slide_width_720() {
@@ -145,7 +137,7 @@ mod tests {
 
     /// BC-4.03.005 AC-001 / postcondition 2: slide height (5.625 inches) converts to 405.0pt.
     ///
-    /// FAILS at Red Gate (`todo!()` panic). PASSES after implementation.
+    /// Verifies the exact 5,143,500 EMU → 405.0pt conversion.
     #[test]
     #[allow(clippy::float_cmp)]
     fn test_bc_4_03_005_emu_to_pt_slide_height_405() {
@@ -158,7 +150,7 @@ mod tests {
 
     /// BC-4.03.005 AC-001: 1 PDF point = 12,700 EMU (canonical unit).
     ///
-    /// FAILS at Red Gate (`todo!()` panic). PASSES after implementation.
+    /// Verifies the unit-step conversion: 12,700 EMU → 1.0pt.
     #[test]
     #[allow(clippy::float_cmp)]
     fn test_bc_4_03_005_emu_to_pt_one_point() {
@@ -171,7 +163,7 @@ mod tests {
 
     /// BC-4.03.005 AC-001 / EC-001: origin maps to 0.0pt.
     ///
-    /// FAILS at Red Gate (`todo!()` panic). PASSES after implementation.
+    /// Verifies the zero-EMU edge case: 0 EMU → 0.0pt.
     #[test]
     #[allow(clippy::float_cmp)]
     fn test_bc_4_03_005_emu_to_pt_zero_is_zero() {
@@ -183,7 +175,7 @@ mod tests {
     /// BC-4.03.005 AC-002 / postcondition 3 / EC-002: top-left element of 100pt height
     /// maps to `pdf_y = 405 − 0 − 100 = 305.0pt`.
     ///
-    /// FAILS at Red Gate (`todo!()` panic). PASSES after implementation.
+    /// Verifies Y-axis flip formula for element at slide top edge.
     #[test]
     fn test_bc_4_03_005_ir_y_to_pdf_y_top_left_element_305() {
         let result = ir_y_to_pdf_y(Emu(0), Emu(100 * 12_700), SLIDE_HEIGHT_EMU);
@@ -196,7 +188,7 @@ mod tests {
     /// BC-4.03.005 AC-002 / postcondition 4 / EC-003: bottom-edge element maps to `pdf_y = 0.0`.
     ///
     /// Element at `ir_y = slide_height − element_height` fills the bottom of the slide.
-    /// FAILS at Red Gate (`todo!()` panic). PASSES after implementation.
+    /// Verifies the flip puts the bottom-most valid element at `pdf_y` ≈ 0.
     #[test]
     fn test_bc_4_03_005_ir_y_to_pdf_y_bottom_edge_zero() {
         let element_h = Emu(100 * 12_700);
@@ -211,7 +203,7 @@ mod tests {
     /// BC-4.03.005 AC-002 / AC-008 / EC-004: zero-height element at `ir_y=0` gives 405.0pt.
     ///
     /// `ir_y_to_pdf_y(Emu(0), Emu(0), SLIDE_H) == SLIDE_HEIGHT_PT - 0 - 0 == 405.0`
-    /// FAILS at Red Gate (`todo!()` panic). PASSES after implementation.
+    /// Verifies the degenerate zero-height case returns the full slide height.
     #[test]
     fn test_bc_4_03_005_ir_y_to_pdf_y_zero_height_at_origin_is_slide_height() {
         let result = ir_y_to_pdf_y(Emu(0), Emu(0), SLIDE_HEIGHT_EMU);
@@ -229,7 +221,7 @@ mod tests {
     /// Samples the range `0..=9_144_000` at 1,000-EMU intervals (~9,145 samples)
     /// and compares `f32` output against `f64` reference for each.
     ///
-    /// FAILS at Red Gate (todo!() panic on first call). PASSES after implementation.
+    /// Verifies the precision postcondition across the full slide-scale EMU range.
     #[test]
     fn test_bc_4_03_005_emu_to_pt_rounding_error_below_0_001() {
         let mut max_err = 0.0_f64;
@@ -242,7 +234,6 @@ mod tests {
             if emu_val > 9_144_000 {
                 break;
             }
-            // This call panics with todo!() before implementation — test FAILS.
             let f32_result = f64::from(emu_to_pt(Emu(emu_val)));
             #[allow(clippy::cast_precision_loss)]
             // i64→f64: acceptable for slide-scale EMU values (≤9M)
@@ -266,7 +257,7 @@ mod tests {
     /// BC-4.03.005 AC-007 / EC-005: 4:3 slide (7,200,000 × 5,400,000 EMU).
     ///
     /// `ir_y_to_pdf_y` must use the supplied `slide_h`, not the hard-coded 16:9 constant.
-    /// FAILS at Red Gate (todo!() panic). PASSES after implementation.
+    /// Verifies non-16:9 slide dimensions are mapped via the supplied parameter.
     #[test]
     #[allow(clippy::similar_names, clippy::cast_precision_loss)]
     fn test_bc_4_03_005_ir_y_to_pdf_y_4x3_slide_mapping() {
@@ -309,27 +300,57 @@ mod tests {
 
     // ── AC-006: Integration — no element outside canvas after conversion ───────
 
-    /// BC-4.03.005 AC-006 / invariant 3: For a fixture deck, all element bounding
-    /// boxes converted via `ir_y_to_pdf_y` lie within `[0, SLIDE_HEIGHT_PT]`.
+    /// BC-4.03.005 AC-006 / invariant 3: For a fixture set of bounding boxes,
+    /// all elements converted via `ir_y_to_pdf_y` lie within the 4-tuple
+    /// `[0.0, 0.0, SLIDE_WIDTH_PT, SLIDE_HEIGHT_PT]` — BOTH axes.
     ///
-    /// Uses a hand-crafted set of representative `(ir_y, element_h)` pairs.
-    /// FAILS at Red Gate (todo!() panic). PASSES after implementation.
+    /// Uses a hand-crafted set of representative `(ir_x, elem_w, ir_y, element_h)`
+    /// tuples. All satisfy:
+    /// - `ir_x + elem_w <= SLIDE_WIDTH_EMU` (9,144,000)
+    /// - `ir_y + elem_h <= SLIDE_HEIGHT_EMU` (5,143,500)
+    ///
+    /// Verifies `0 <= pdf_x` AND `pdf_x + width_pt <= SLIDE_WIDTH_PT (720.0)` AND
+    /// `0 <= pdf_y` AND `pdf_y <= SLIDE_HEIGHT_PT (405.0)` for every case.
+    /// This test is non-vacuous: it would fail if an element were placed at
+    /// `pdf_x` > 720 or `pdf_x` < 0.
     #[test]
     fn test_bc_4_03_005_no_element_outside_canvas_after_conversion() {
-        // Representative (ir_y_emu, element_h_emu) pairs.
-        // All satisfy: ir_y + element_h <= SLIDE_HEIGHT_EMU (5_143_500).
-        let test_cases: &[(i64, i64)] = &[
-            (0, 72 * 12_700),
-            (72 * 12_700, 333 * 12_700),
-            (SLIDE_HEIGHT_EMU.0 - 12_700, 12_700),
-            (0, SLIDE_HEIGHT_EMU.0),
-            (0, 0),
-            (SLIDE_HEIGHT_EMU.0 / 2, 0),
-            (SLIDE_HEIGHT_EMU.0, 0),
+        // Representative (ir_x_emu, elem_w_emu, ir_y_emu, elem_h_emu) tuples.
+        // All satisfy: ir_x + elem_w <= SLIDE_WIDTH_EMU and ir_y + elem_h <= SLIDE_HEIGHT_EMU.
+        let test_cases: &[(i64, i64, i64, i64)] = &[
+            // (ir_x, elem_w, ir_y, elem_h)
+            (0, 72 * 12_700, 0, 72 * 12_700),
+            (0, SLIDE_WIDTH_EMU.0, 72 * 12_700, 333 * 12_700),
+            (
+                72 * 12_700,
+                SLIDE_WIDTH_EMU.0 - 72 * 12_700,
+                SLIDE_HEIGHT_EMU.0 - 12_700,
+                12_700,
+            ),
+            (0, SLIDE_WIDTH_EMU.0, 0, SLIDE_HEIGHT_EMU.0),
+            (0, 0, 0, 0),
+            (SLIDE_WIDTH_EMU.0 / 2, 0, SLIDE_HEIGHT_EMU.0 / 2, 0),
+            (SLIDE_WIDTH_EMU.0, 0, SLIDE_HEIGHT_EMU.0, 0),
         ];
 
-        for &(ir_y_val, elem_h_val) in test_cases {
-            // Panics with todo!() before implementation.
+        for &(ir_x_val, elem_w_val, ir_y_val, elem_h_val) in test_cases {
+            // X-axis: pdf_x = emu_to_pt(ir_x) — the left edge.
+            let pdf_x = emu_to_pt(Emu(ir_x_val));
+            let width_pt = emu_to_pt(Emu(elem_w_val));
+
+            assert!(
+                pdf_x >= -0.001,
+                "pdf_x must be >= 0.0 for ir_x={ir_x_val}: got {pdf_x}"
+            );
+            assert!(
+                pdf_x + width_pt <= SLIDE_WIDTH_PT + 0.001,
+                "pdf_x + width_pt must be <= {SLIDE_WIDTH_PT} for \
+                 ir_x={ir_x_val}, elem_w={elem_w_val}: got pdf_x={pdf_x:.3}, \
+                 width_pt={width_pt:.3}, sum={:.3}",
+                pdf_x + width_pt
+            );
+
+            // Y-axis: pdf_y = ir_y_to_pdf_y(ir_y, elem_h, slide_h).
             let pdf_y = ir_y_to_pdf_y(Emu(ir_y_val), Emu(elem_h_val), SLIDE_HEIGHT_EMU);
             assert!(
                 pdf_y >= -0.001,
@@ -348,11 +369,10 @@ mod tests {
     /// BC-4.03.005 AC-004 / AC-005: `emu_to_pt` must be a pure function.
     ///
     /// Repeated calls with identical inputs must return identical results.
-    /// FAILS at Red Gate (`todo!()` panic). PASSES after implementation.
+    /// Verifies determinism (pure function invariant) and that 1-inch EMU → 72.0pt.
     #[test]
     #[allow(clippy::float_cmp)] // bitwise equality intended: same inputs → same f32 bits
     fn test_bc_4_03_005_emu_to_pt_is_deterministic() {
-        // Both calls panic with todo!() before implementation.
         let a = emu_to_pt(Emu(914_400));
         let b = emu_to_pt(Emu(914_400));
         assert_eq!(a, b, "emu_to_pt must be deterministic (pure function)");
@@ -364,7 +384,7 @@ mod tests {
 
     /// BC-4.03.005 AC-004 / AC-005: `ir_y_to_pdf_y` must be a pure function.
     ///
-    /// FAILS at Red Gate (`todo!()` panic). PASSES after implementation.
+    /// Verifies determinism: repeated calls with identical inputs return identical results.
     #[test]
     #[allow(clippy::float_cmp)] // bitwise equality intended: same inputs → same f32 bits
     fn test_bc_4_03_005_ir_y_to_pdf_y_is_deterministic() {

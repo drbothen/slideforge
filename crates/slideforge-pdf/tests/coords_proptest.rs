@@ -6,11 +6,11 @@
 //!   satisfying `ir_y + element_h <= slide_h`, `ir_y_to_pdf_y()` returns a
 //!   non-negative value.
 //!
-//! ## Red Gate status
+//! ## Case count
 //!
-//! All tests in this file MUST FAIL before implementation because
-//! `emu_to_pt` and `ir_y_to_pdf_y` have `todo!()` bodies.
-//! After implementation (TDD green), these tests MUST PASS.
+//! Each proptest! block runs ≥1000 random cases (via `ProptestConfig`), matching
+//! the AC-003 specification requirement. Default proptest case count (256) is
+//! explicitly overridden.
 //!
 //! ## proptest version
 //!
@@ -31,6 +31,8 @@ const MAX_TEST_EMU: i64 = 91_440_000;
 // ─── Property: ir_y_to_pdf_y >= 0 for valid inputs ───────────────────────────
 
 proptest! {
+    #![proptest_config(ProptestConfig { cases: 1000, ..ProptestConfig::default() })]
+
     /// BC-4.03.005 AC-003 / invariant 3 / VP-006: For all valid `(ir_y, element_h,
     /// slide_h)` satisfying `ir_y + element_h <= slide_h`, `ir_y_to_pdf_y` returns
     /// a value >= 0.0.
@@ -46,10 +48,7 @@ proptest! {
     ///   Since ir_y + elem_h <= slide_h (precondition), slide_h - ir_y - elem_h >= 0,
     ///   therefore pdf_y >= 0.0.
     ///
-    /// ## Red Gate
-    ///
-    /// MUST FAIL at Red Gate because `ir_y_to_pdf_y` panics with `todo!()`.
-    /// After implementation this property must pass across ≥1000 random cases.
+    /// Runs ≥1000 random cases (ProptestConfig override — spec AC-003 requirement).
     #[test]
     fn test_bc_4_03_005_proptest_ir_y_to_pdf_y_nonneg_for_valid_inputs(
         // slide_h: the full slide height in EMU — at least 1pt (12_700 EMU), at most 100 inches.
@@ -90,15 +89,15 @@ proptest! {
 }
 
 proptest! {
+    #![proptest_config(ProptestConfig { cases: 1000, ..ProptestConfig::default() })]
+
     /// BC-4.03.005 AC-001 / AC-003: `emu_to_pt` is monotonically non-decreasing.
     ///
     /// For all a, b ≥ 0 with a ≤ b: `emu_to_pt(a) ≤ emu_to_pt(b)`.
     ///
     /// This is a weaker but useful property: the conversion must not invert order.
     ///
-    /// ## Red Gate
-    ///
-    /// MUST FAIL because `emu_to_pt` panics with `todo!()`.
+    /// Runs ≥1000 random cases (ProptestConfig override — spec AC-003 requirement).
     #[test]
     fn test_bc_4_03_005_proptest_emu_to_pt_monotone(
         a_emu in 0_i64..=MAX_TEST_EMU,

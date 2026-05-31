@@ -1018,22 +1018,28 @@ mod tests {
 
     /// BC-4.03.005 AC-006 (integration): `PdfExporter::export()` on a fixture
     /// `LaidOutDeck` (elements at various positions including top/bottom edges)
-    /// must draw all elements within the slide canvas `[0, SLIDE_WIDTH_PT] ×
-    /// [0, SLIDE_HEIGHT_PT]`.
+    /// must draw all elements within the slide canvas `[0.0, 0.0, 720.0, 405.0]` —
+    /// BOTH axes: `0 <= pdf_x` AND `pdf_x + width_pt <= SLIDE_WIDTH_PT (720.0)`
+    /// AND `0 <= pdf_y <= SLIDE_HEIGHT_PT (405.0)`.
     ///
-    /// ## What this tests (F-044-003 fix)
+    /// ## What this tests (F-044-003 fix + F-P5-001 X-axis extension)
     ///
     /// The spec says AC-006 must be "verified by an INTEGRATION TEST that RENDERS
     /// A FIXTURE DECK and asserts all element bounding boxes are within
     /// [0,0,720,405]." This test:
     ///
     /// 1. Builds a fixture `LaidOutDeck` with Title/Subtitle/Body frames at
-    ///    positions spanning the full slide height (top, middle, bottom).
+    ///    positions spanning the full slide width and height (top, middle, bottom).
     /// 2. Runs `PdfExporter::export()` to confirm the pipeline completes without
     ///    coordinate errors.
-    /// 3. Asserts the PDF coordinate arithmetic (`ir_y_to_pdf_y + 0.8 * height`)
+    /// 3. Asserts the X-axis bounding box (`pdf_x` and `pdf_x + width_pt`)
+    ///    stays within `[0.0, SLIDE_WIDTH_PT]`.
+    /// 4. Asserts the PDF Y-coordinate arithmetic (`ir_y_to_pdf_y + 0.8 * height`)
     ///    for all test frames stays within `[-epsilon, SLIDE_HEIGHT_PT + epsilon]`.
-    ///    This validates the ACTUAL baseline computation used in `draw_text_at_bbox`.
+    ///
+    /// The X assertions are non-vacuous: they would fail if an element were placed
+    /// at `pdf_x > 720.0` or `pdf_x < 0.0`. This test confirms the exporter maps X
+    /// via `coords::emu_to_pt` (Architecture Compliance Rule 2), not ad-hoc arithmetic.
     ///
     /// ## Distinction from the existing coords unit tests
     ///
@@ -1045,20 +1051,19 @@ mod tests {
     #[test]
     fn test_bc_4_03_005_ac006_export_all_elements_within_canvas() {
         use crate::SLIDE_HEIGHT_EMU;
-        use crate::coords::{SLIDE_HEIGHT_PT, emu_to_pt, ir_y_to_pdf_y};
+        use crate::coords::{SLIDE_HEIGHT_PT, SLIDE_WIDTH_PT, emu_to_pt, ir_y_to_pdf_y};
 
         // Fixture deck: Title at top, Subtitle at 1-inch offset, Body at 2-inch offset.
-        // All stay within the 5.625-inch (405pt) slide height.
+        // All stay within the 5.625-inch (405pt) slide height and 10-inch (720pt) width.
         let one_inch_emu = Emu(914_400);
         let two_inch_emu = Emu(1_828_800);
         let title_h_emu = Emu(914_400); // 72pt
         let body_h_emu = Emu(1_270_000); // ~100pt
-
-        let slide_h_emu = SLIDE_HEIGHT_EMU;
+        let slide_w_emu = Emu(9_144_000); // 720pt (full width)
 
         // Verify our test fixture is within bounds.
         assert!(
-            two_inch_emu.0 + body_h_emu.0 <= slide_h_emu.0,
+            two_inch_emu.0 + body_h_emu.0 <= SLIDE_HEIGHT_EMU.0,
             "test fixture: body frame must fit within slide height"
         );
 
@@ -1072,7 +1077,7 @@ mod tests {
                         bbox: BoundingBox {
                             x: Emu(0),
                             y: Emu(0),
-                            width: Emu(9_144_000),
+                            width: slide_w_emu,
                             height: title_h_emu,
                         },
                         content: FrameContent::Title(Arc::from("Title at top")),
@@ -1082,7 +1087,7 @@ mod tests {
                         bbox: BoundingBox {
                             x: Emu(0),
                             y: one_inch_emu,
-                            width: Emu(9_144_000),
+                            width: slide_w_emu,
                             height: title_h_emu,
                         },
                         content: FrameContent::Subtitle(Arc::from("Subtitle at 1-inch")),
@@ -1092,7 +1097,7 @@ mod tests {
                         bbox: BoundingBox {
                             x: Emu(0),
                             y: two_inch_emu,
-                            width: Emu(9_144_000),
+                            width: slide_w_emu,
                             height: body_h_emu,
                         },
                         content: FrameContent::Body(vec![]),
@@ -1119,18 +1124,45 @@ mod tests {
             "export must succeed for the AC-006 fixture deck: {result:?}"
         );
 
-        // Verify baseline computations for all frames stay within [0, SLIDE_HEIGHT_PT].
-        // This mirrors the exact formula used in `draw_text_at_bbox`:
-        //   box_bottom_pdf_y = ir_y_to_pdf_y(ir_y, element_h, slide_h)
-        //   baseline_y = box_bottom_pdf_y + element_h_pt * 0.8
+        // Verify bounding box computations for all frames stay within
+        // [0.0, 0.0, SLIDE_WIDTH_PT, SLIDE_HEIGHT_PT] — BOTH axes.
+        //
+        // X-axis: pdf_x = emu_to_pt(bbox.x); right edge = pdf_x + emu_to_pt(bbox.width).
+        // Y-axis baseline: box_bottom_pdf_y = ir_y_to_pdf_y(ir_y, elem_h, slide_h)
+        //                  baseline_y = box_bottom_pdf_y + elem_h_pt * 0.8
+        //
+        // This mirrors the exact formulas used in `draw_text_at_bbox`.
         let frames_under_test = [
-            (Emu(0), title_h_emu, "title-top"),
-            (one_inch_emu, title_h_emu, "subtitle-1in"),
-            (two_inch_emu, body_h_emu, "body-2in"),
+            (Emu(0), slide_w_emu, Emu(0), title_h_emu, "title-top"),
+            (
+                Emu(0),
+                slide_w_emu,
+                one_inch_emu,
+                title_h_emu,
+                "subtitle-1in",
+            ),
+            (Emu(0), slide_w_emu, two_inch_emu, body_h_emu, "body-2in"),
         ];
 
-        for (ir_y, elem_h, label) in frames_under_test {
-            let box_bottom = ir_y_to_pdf_y(ir_y, elem_h, slide_h_emu);
+        for (ir_x, elem_w, ir_y, elem_h, label) in frames_under_test {
+            // ── X-axis bounds (F-P5-001) ──────────────────────────────────────
+            // pdf_x = emu_to_pt(bbox.x) — left edge, via coords::emu_to_pt.
+            let pdf_x = emu_to_pt(ir_x);
+            let width_pt = emu_to_pt(elem_w);
+
+            assert!(
+                pdf_x >= -0.001,
+                "AC-006: pdf_x for frame '{label}' must be >= 0.0; got {pdf_x:.3}"
+            );
+            assert!(
+                pdf_x + width_pt <= SLIDE_WIDTH_PT + 0.001,
+                "AC-006: pdf_x + width_pt for frame '{label}' must be <= {SLIDE_WIDTH_PT}; \
+                 got pdf_x={pdf_x:.3}, width_pt={width_pt:.3}, sum={:.3}",
+                pdf_x + width_pt
+            );
+
+            // ── Y-axis bounds ─────────────────────────────────────────────────
+            let box_bottom = ir_y_to_pdf_y(ir_y, elem_h, SLIDE_HEIGHT_EMU);
             let elem_h_pt = emu_to_pt(elem_h);
             let baseline_y = box_bottom + elem_h_pt * 0.8;
 
