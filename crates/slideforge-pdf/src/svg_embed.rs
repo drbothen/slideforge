@@ -436,9 +436,9 @@ mod tests {
     // -------------------------------------------------------------------------
 
     /// SEC-001: `embed_normalized_svg` returns `PdfExportError::SvgEmbed` for
-    /// an SVG whose `<g>` nesting exceeds `MAX_SVG_NESTING_DEPTH` (256).
+    /// an SVG whose `<g>` nesting exceeds `MAX_SVG_NESTING_DEPTH` (64).
     ///
-    /// A crafted SVG with 257 nested `<g>` elements would previously cause
+    /// A crafted SVG with 65 nested `<g>` elements would previously cause
     /// unbounded recursion; now it must return an error — NOT a panic/overflow.
     #[allow(clippy::unwrap_used)]
     #[test]
@@ -493,7 +493,7 @@ mod tests {
         }
     }
 
-    /// SEC-001: A normally-nested SVG (well within the 256-level cap) still
+    /// SEC-001: A normally-nested SVG (well within the 64-level cap) still
     /// renders successfully — the depth guard must not reject legitimate SVGs.
     #[allow(clippy::unwrap_used)]
     #[test]
@@ -502,7 +502,7 @@ mod tests {
         use krilla::SerializeSettings;
         use krilla::page::PageSettings;
 
-        // Build an SVG with 5 nested <g> elements — well within the 256 limit.
+        // Build an SVG with 5 nested <g> elements — well within the 64-level cap.
         let mut svg =
             String::from("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"100\" height=\"100\">");
         for _ in 0..5_usize {
