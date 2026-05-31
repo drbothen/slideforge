@@ -60,8 +60,12 @@ pub const E_BRD_007: &str = "E-BRD-007";
 /// **Fatal variants** (broken, exit 4): [`BrandError::FileNotFound`], [`BrandError::ParseError`].
 ///
 /// **Cosmetic variants** (exit 0, warning only): [`BrandError::MissingColorSlot`], [`BrandError::FontUnavailable`].
-// #[non_exhaustive] for v1.0 SemVer hygiene; new variants may be added in minor releases
-// per CLAUDE.md Quality Bar Supply chain row.
+///
+/// # Extensibility
+///
+/// `#[non_exhaustive]` ensures that adding new brand-error variants in minor releases
+/// does not force downstream callers to update exhaustive match arms (OBS-1 rule,
+/// conventions.md §non_exhaustive-policy).
 #[non_exhaustive]
 #[derive(Debug, Error)]
 pub enum BrandError {
