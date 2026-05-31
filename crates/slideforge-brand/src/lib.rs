@@ -38,12 +38,12 @@
 //!
 //! ## Error Codes
 //!
-//! | Code | Variant | Severity |
-//! |------|---------|---------|
-//! | `E-BRD-001` | [`BrandError::FileNotFound`] | broken (exit 4) |
-//! | `E-BRD-002` | [`BrandError::ParseError`] | broken (exit 4) |
+//! | Code | Variants | Severity |
+//! |------|----------|---------|
+//! | `E-BRD-001` | [`BrandError::FileNotFound`], [`BrandError::LogoRequired`], [`BrandError::TomlReadError`] | broken (exit 4) |
+//! | `E-BRD-002` | [`BrandError::ParseError`], [`BrandError::TomlParseError`] | broken (exit 4) |
 //! | `E-BRD-003` | [`BrandError::MissingColorSlot`] | cosmetic (exit 0) |
-//! | `E-BRD-004` | [`BrandError::FontUnavailable`] | cosmetic (exit 0) |
+//! | `E-BRD-004` | [`BrandError::FontUnavailable`], [`BrandError::DeclaredFontUnavailable`] | cosmetic (exit 0) |
 //! | `E-BRD-005` | [`BrandError::InvalidHexColor`] | cosmetic (exit 0) |
 //! | `E-BRD-006` | [`BrandError::OutputExists`] | broken (exit 4) |
 //! | `E-BRD-007` | [`BrandError::LogoOutsideBrandDir`] | broken (exit 4) |
@@ -70,6 +70,7 @@ pub mod layout_xml;
 pub mod layouts;
 pub mod loader;
 pub mod logo;
+pub mod overlay;
 pub mod synthesizer;
 pub mod template;
 pub mod toml_schema;
@@ -82,6 +83,7 @@ pub use error::{
 pub use extractor::{BrandExtractionResult, BrandExtractor};
 pub use layouts::{LayoutPlaceholder, SlideLayoutDef};
 pub use loader::BrandLoader;
+pub use overlay::{BrandOverlay, LogoOverride, resolve_overlay};
 pub use synthesizer::BrandSynthesizer;
 pub use template::{BrandFonts, BrandTemplate, COLOR_SLOT_NAMES, ColorSlot, LogoAsset, MasterIds};
 pub use toml_schema::{BrandConfig, ColorConfig, FontConfig, FooterConfig, LogoConfig};

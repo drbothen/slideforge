@@ -255,6 +255,7 @@ mod tests {
             register: None,
             tags: vec![],
             source_span: SourceSpan::default(),
+            overlay: None,
         }
     }
 
@@ -275,6 +276,7 @@ mod tests {
             register: None,
             tags: vec![],
             source_span: SourceSpan::default(),
+            overlay: None,
         }
     }
 

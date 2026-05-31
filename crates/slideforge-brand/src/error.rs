@@ -2,12 +2,12 @@
 //!
 //! Each variant maps to an error code from the slideforge error taxonomy:
 //!
-//! | Code | Variant | Severity |
-//! |------|---------|---------|
-//! | `E-BRD-001` | [`BrandError::FileNotFound`] | broken (exit 4) |
-//! | `E-BRD-002` | [`BrandError::ParseError`] | broken (exit 4) |
+//! | Code | Variants | Severity |
+//! |------|----------|---------|
+//! | `E-BRD-001` | [`BrandError::FileNotFound`], [`BrandError::LogoRequired`], [`BrandError::TomlReadError`] | broken (exit 4) |
+//! | `E-BRD-002` | [`BrandError::ParseError`], [`BrandError::TomlParseError`] | broken (exit 4) |
 //! | `E-BRD-003` | [`BrandError::MissingColorSlot`] | cosmetic (exit 0) |
-//! | `E-BRD-004` | [`BrandError::FontUnavailable`] | cosmetic (exit 0) |
+//! | `E-BRD-004` | [`BrandError::FontUnavailable`], [`BrandError::DeclaredFontUnavailable`] | cosmetic (exit 0) |
 //! | `E-BRD-005` | [`BrandError::InvalidHexColor`] | cosmetic (exit 0) |
 //! | `E-BRD-006` | [`BrandError::OutputExists`] | broken (exit 4) |
 //! | `E-BRD-007` | [`BrandError::LogoOutsideBrandDir`] | broken (exit 4) |
@@ -44,9 +44,13 @@ pub const E_BRD_005: &str = "E-BRD-005";
 /// passed to the extraction command.
 pub const E_BRD_006: &str = "E-BRD-006";
 
-/// `E-BRD-007`: the logo path in `brand.toml` escapes the directory containing
-/// `brand.toml`. This is a path-traversal security violation — the logo must
-/// reside inside (or underneath) the `brand.toml` directory.
+/// `E-BRD-007`: a user-supplied logo path escapes the brand root directory.
+///
+/// Fires for master brand logos (path declared in `brand.toml`) AND for
+/// per-slide logos declared via `brand_overlay:` (where the containment root
+/// is the `.sf` source directory, not the `brand.toml` parent). This is a
+/// path-traversal security violation — the logo must reside inside (or
+/// underneath) the brand root directory.
 pub const E_BRD_007: &str = "E-BRD-007";
 
 // ─── Error enum ──────────────────────────────────────────────────────────────
@@ -135,16 +139,25 @@ pub enum BrandError {
     },
 
     // ─── STORY-023 synthesis variants ─────────────────────────────────────────
-    /// `E-BRD-001` (synthesis) — the `[logo]` section is absent in a
-    /// synthesized brand's `brand.toml`.
+    /// `E-BRD-001` — a logo path is required but was absent or empty.
     ///
-    /// This is a fatal error (exit 4) for synthesized brands. A synthesized
-    /// brand cannot embed a logo if no path is declared.
+    /// This is a fatal error (exit 4). Fires in two contexts:
+    ///
+    /// - **Brand synthesis** (`brand.toml`): the `[logo]` section is absent
+    ///   or its `path` field is empty. Fix by adding `[logo]\npath = "..."` to
+    ///   `brand.toml`.
+    /// - **Per-slide overlay** (`.sf` file `brand_overlay:` block): the
+    ///   `logo` value is present but empty. Fix by providing a non-empty
+    ///   logo path in the `brand_overlay:` block.
+    ///
+    /// The message is intentionally context-neutral so it remains accurate
+    /// regardless of which entry point triggered it.
     ///
     /// Traces to BC-2.01.002 edge case EC-005 (AC-004).
     #[error(
-        "E-BRD-001: Synthesized brand requires a logo path. \
-         Add a [logo] section with 'path = \"...\"' to brand.toml."
+        "E-BRD-001: A logo path is required but was empty or absent. \
+         Provide a non-empty logo path — either the brand.toml [logo] 'path' \
+         (brand synthesis) or the brand_overlay: logo value (per-slide overlay)."
     )]
     LogoRequired {
         /// Source location of the `brand "..."` or `brand.toml` declaration.
@@ -206,21 +219,26 @@ pub enum BrandError {
         value: Arc<str>,
     },
 
-    /// `E-BRD-007` — the logo path in `brand.toml` escapes the directory containing
-    /// `brand.toml`.
+    /// `E-BRD-007` — a user-supplied logo path escapes the brand root directory.
     ///
-    /// Fatal error (exit 4). A logo path must resolve to a file inside (or
-    /// beneath) the directory that contains `brand.toml`. Paths that escape
-    /// via `../` sequences or symlinks pointing outside that directory are
-    /// rejected to prevent path-traversal attacks.
+    /// Fatal error (exit 4). This variant fires for ANY user-supplied logo path —
+    /// whether it is the master brand logo declared in `brand.toml` OR a per-slide
+    /// logo declared via `brand_overlay:` in a `.sf` source file. In both cases
+    /// the logo must reside inside (or beneath) the brand root directory (the `.sf`
+    /// source directory for per-slide overlays; the `brand.toml` parent directory
+    /// for the master brand logo). Paths that escape via `../` sequences or
+    /// symlinks pointing outside the root are rejected to prevent path-traversal
+    /// attacks.
     #[error(
-        "E-BRD-007: Logo path '{logo_path}' escapes the brand.toml directory '{brand_dir}'. \
-         The logo file must be inside (or beneath) the brand.toml directory."
+        "E-BRD-007: Logo path '{logo_path}' escapes the brand root directory '{brand_dir}'. \
+         The logo file must be inside (or beneath) the brand root directory."
     )]
     LogoOutsideBrandDir {
         /// The resolved canonical path of the logo file that escaped the brand dir.
         logo_path: String,
-        /// The canonical path of the `brand.toml` parent directory.
+        /// The canonical path of the brand root directory (the `.sf` source directory
+        /// for per-slide overlays; the `brand.toml` parent directory for the master
+        /// brand logo).
         brand_dir: String,
     },
 
@@ -277,6 +295,7 @@ mod tests {
         assert_eq!(E_BRD_003, "E-BRD-003");
         assert_eq!(E_BRD_004, "E-BRD-004");
         assert_eq!(E_BRD_005, "E-BRD-005");
+        assert_eq!(E_BRD_006, "E-BRD-006");
         assert_eq!(E_BRD_007, "E-BRD-007");
     }
 
@@ -389,7 +408,11 @@ mod tests {
         );
     }
 
-    /// E-BRD-007 — `LogoOutsideBrandDir` message contains logo path, brand dir, and error code.
+    /// E-BRD-007 — `LogoOutsideBrandDir` message matches error-taxonomy.md v2.0.
+    ///
+    /// Verifies that the message uses "brand root directory" (not "brand.toml
+    /// directory") so the wording covers both master-brand logos and per-slide
+    /// `brand_overlay` logos — per error-taxonomy.md v2.0 widening in STORY-025.
     #[test]
     fn test_e_brd_007_logo_outside_brand_dir_message() {
         let err = BrandError::LogoOutsideBrandDir {
@@ -408,6 +431,17 @@ mod tests {
         assert!(
             msg.contains("/tmp/brand"),
             "error message must contain brand dir, got: {msg}"
+        );
+        // Load-bearing taxonomy v2.0 parity: must say "brand root directory", NOT
+        // "brand.toml directory" (the old wording was too narrow — it excluded the
+        // per-slide brand_overlay case where there is no brand.toml).
+        assert!(
+            msg.contains("brand root directory"),
+            "error message must contain 'brand root directory' (taxonomy v2.0), got: {msg}"
+        );
+        assert!(
+            !msg.contains("brand.toml directory"),
+            "error message must NOT contain 'brand.toml directory' (stale wording), got: {msg}"
         );
     }
 

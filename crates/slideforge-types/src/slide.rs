@@ -10,6 +10,7 @@ use crate::block::Block;
 use crate::inline::InlineNode;
 use crate::ordered_map::OrderedMap;
 use crate::register::Register;
+use crate::slide_overlay::SlideOverlay;
 use crate::span::SourceSpan;
 use crate::value::Value;
 
@@ -76,6 +77,16 @@ pub struct Slide {
 
     /// Source location of the slide declaration.
     pub source_span: SourceSpan,
+
+    /// Per-slide brand overlay metadata (from `brand_overlay:` DSL block).
+    ///
+    /// - `None` — no `brand_overlay:` block on this slide; deck-level brand applies.
+    /// - `Some(overlay)` — this slide has a `brand_overlay:` block. The overlay
+    ///   is stored as parse-time metadata; `slideforge-brand` interprets it at
+    ///   export time via `resolve_overlay()`.
+    ///
+    /// See [`SlideOverlay`] for the single-master invariant enforcement (BC-2.02.002).
+    pub overlay: Option<SlideOverlay>,
 }
 
 impl Slide {
@@ -86,6 +97,7 @@ impl Slide {
     ///
     /// ```
     /// use slideforge_types::{Slide, FieldValue, Value, Register, SourceSpan, OrderedMap};
+    /// use slideforge_types::slide_overlay::SlideOverlay;
     /// use std::sync::Arc;
     ///
     /// let mut fields = OrderedMap::new();
@@ -97,6 +109,7 @@ impl Slide {
     ///     register: None,
     ///     tags: vec![],
     ///     source_span: SourceSpan::default(),
+    ///     overlay: None,
     /// };
     /// assert_eq!(slide.title_str(), Some("My Slide"));
     /// ```
@@ -122,6 +135,7 @@ mod tests {
             register: None,
             tags: vec![],
             source_span: SourceSpan::default(),
+            overlay: None,
         }
     }
 
@@ -222,6 +236,7 @@ mod tests {
             register: Some(Register::Notes),
             tags: vec![],
             source_span: SourceSpan::default(),
+            overlay: None,
         };
         assert_eq!(slide_with_register.register, Some(Register::Notes));
     }
@@ -232,5 +247,93 @@ mod tests {
         slide.tags.push(Arc::from("intro"));
         slide.tags.push(Arc::from("keynote"));
         assert_eq!(slide.tags.len(), 2);
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // STORY-025 / AC-011: Slide.overlay field — Red Gate tests
+    // These tests MUST FAIL until the overlay field is wired to resolve_overlay.
+    // They exercise the type presence and semantic properties of Slide.overlay.
+    // ──────────────────────────────────────────────────────────────────────────
+
+    /// AC-011 / BC-2.02.001 invariant 2: `Slide` has `overlay: Option<SlideOverlay>` field.
+    ///
+    /// Verifies the field compiles, can be set to `None`, and round-trips through
+    /// `Hash + Clone` correctly.
+    #[test]
+    fn test_bc_2_02_001_slide_overlay_none_is_default() {
+        let slide = make_minimal_slide();
+        assert!(
+            slide.overlay.is_none(),
+            "Slide with no brand_overlay block must have overlay = None"
+        );
+    }
+
+    /// AC-011 / BC-2.02.001 invariant 2: a `Slide` with `Some(SlideOverlay)` hashes and
+    /// clones correctly (comemo compatibility).
+    #[test]
+    fn test_bc_2_02_001_slide_has_overlay_field_hash_clone() {
+        use crate::slide_overlay::SlideOverlay;
+        use std::collections::HashMap;
+
+        let overlay = SlideOverlay {
+            logo_path: Some(Arc::from("client-logo.png")),
+            footer_text: Some(Arc::from("CONFIDENTIAL")),
+            confidentiality: None,
+            span: SourceSpan::default(),
+        };
+        let slide = Slide {
+            slide_type: Arc::from("bullets"),
+            fields: OrderedMap::new(),
+            blocks: vec![],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+            overlay: Some(overlay.clone()),
+        };
+        let slide2 = slide.clone();
+        assert_eq!(slide, slide2, "Slide with overlay must equal its clone");
+
+        // Must be hashable for comemo.
+        let mut map: HashMap<Slide, u32> = HashMap::new();
+        map.insert(slide.clone(), 42);
+        assert_eq!(map[&slide2], 42);
+    }
+
+    /// BC-2.02.002: `Slide.overlay` uses `SlideOverlay` — a type with NO master-path field.
+    ///
+    /// This is a structural compile-time test: if `SlideOverlay` had a `master_path`
+    /// field, constructing it exhaustively here would fail to compile. The fact that
+    /// the 4-field construction compiles proves the structural absence of master-switch
+    /// capability (DI-016).
+    #[test]
+    fn test_bc_2_02_002_slide_overlay_type_has_no_master_path() {
+        use crate::slide_overlay::SlideOverlay;
+
+        // Exhaustive SlideOverlay construction — if any extra field (master_path,
+        // template_path, layout_idx) were present, this would fail to compile.
+        let overlay = SlideOverlay {
+            logo_path: None,
+            footer_text: None,
+            confidentiality: None,
+            span: SourceSpan::default(),
+        };
+        let slide = Slide {
+            slide_type: Arc::from("title"),
+            fields: OrderedMap::new(),
+            blocks: vec![],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+            overlay: Some(overlay),
+        };
+        // Structural invariant: overlay is metadata only, no master reference.
+        assert!(slide.overlay.is_some());
+        assert!(
+            slide
+                .overlay
+                .as_ref()
+                .expect("overlay was set Some above")
+                .is_empty()
+        );
     }
 }

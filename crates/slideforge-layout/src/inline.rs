@@ -375,6 +375,7 @@ mod tests {
                 register: None,
                 tags: vec![],
                 source_span: SourceSpan::default(),
+                overlay: None,
             })
             .collect();
 

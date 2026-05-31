@@ -24,8 +24,8 @@
 //!
 //! | Condition | Error | Severity |
 //! |-----------|-------|---------|
-//! | `brand.toml` not found | [`BrandError::FileNotFound`] | fatal (exit 4) |
-//! | Invalid TOML syntax | [`BrandError::ParseError`] | fatal (exit 4) |
+//! | `brand.toml` not found or unreadable | [`BrandError::TomlReadError`] | fatal (exit 4) |
+//! | Invalid TOML syntax | [`BrandError::TomlParseError`] | fatal (exit 4) |
 //! | Missing `[logo]` section | `E-BRD-001` via `BrandError::LogoRequired` | fatal (exit 4) |
 //! | Absent color slot | [`BrandError::MissingColorSlot`] | warning (exit 0) |
 
@@ -88,11 +88,16 @@ impl BrandSynthesizer {
     ///
     /// # Errors
     ///
-    /// - [`BrandError::TomlReadError`] if `path` does not exist or cannot be read.
+    /// - [`BrandError::TomlReadError`] if `path` does not exist or cannot be read,
+    ///   or if `canonicalize` fails on the logo path or brand directory after the
+    ///   existence check passes.
     /// - [`BrandError::TomlParseError`] if the file content is not valid TOML.
     /// - [`BrandError::FileNotFound`] (E-BRD-001) if the declared `[logo].path` does
     ///   not exist on the filesystem. The logo path is resolved relative to the
     ///   directory containing `brand.toml`.
+    /// - [`BrandError::LogoOutsideBrandDir`] (E-BRD-007) if the resolved canonical
+    ///   logo path escapes the `brand.toml` parent directory via `../` traversal or
+    ///   a symlink pointing outside it.
     /// - Propagates all errors from [`BrandSynthesizer::synthesize`].
     ///
     /// On success, returns `(template, warnings)` — see [`BrandSynthesizer::synthesize`].
@@ -299,9 +304,11 @@ impl BrandSynthesizer {
 ///
 /// On non-Windows platforms this is a no-op that returns the path unchanged.
 ///
+/// Shared with `overlay.rs` (F-025-001, TD-VSDD-060 — single source of truth).
+///
 /// F-PASS13-HIGH-2 fix.
 #[cfg(windows)]
-fn strip_unc_prefix(path: &std::path::Path) -> std::path::PathBuf {
+pub(crate) fn strip_unc_prefix(path: &std::path::Path) -> std::path::PathBuf {
     let s = path.to_string_lossy();
     if let Some(stripped) = s.strip_prefix(r"\\?\") {
         std::path::PathBuf::from(stripped)
@@ -314,7 +321,7 @@ fn strip_unc_prefix(path: &std::path::Path) -> std::path::PathBuf {
 ///
 /// See the `#[cfg(windows)]` variant for details.
 #[cfg(not(windows))]
-fn strip_unc_prefix(path: &std::path::Path) -> std::path::PathBuf {
+pub(crate) fn strip_unc_prefix(path: &std::path::Path) -> std::path::PathBuf {
     path.to_path_buf()
 }
 
@@ -986,6 +993,11 @@ body = "Calibri"
     }
 
     /// F13 — `BrandError::LogoRequired` now carries a `span` field.
+    ///
+    /// Also verifies the message is context-neutral (F-RV3-001): must accurately
+    /// describe BOTH the brand synthesis context AND the per-slide overlay context,
+    /// and must NOT contain synthesis-specific-only phrasing that would mislead
+    /// overlay users.
     #[test]
     fn test_f13_logo_required_has_span_field() {
         let err = BrandError::LogoRequired {
@@ -994,11 +1006,27 @@ body = "Calibri"
         let msg = err.to_string();
         assert!(
             msg.contains("E-BRD-001"),
-            "LogoRequired must contain E-BRD-001"
+            "LogoRequired must contain E-BRD-001, got: {msg}"
         );
         assert!(
             msg.contains("logo path"),
-            "LogoRequired message must mention logo path"
+            "LogoRequired message must mention logo path, got: {msg}"
+        );
+        // F-RV3-001: message must cover the brand synthesis context.
+        assert!(
+            msg.contains("brand.toml"),
+            "LogoRequired message must mention brand.toml (synthesis context), got: {msg}"
+        );
+        // F-RV3-001: message must cover the per-slide overlay context.
+        assert!(
+            msg.contains("brand_overlay"),
+            "LogoRequired message must mention brand_overlay: (overlay context), got: {msg}"
+        );
+        // F-RV3-001: must NOT contain the old synthesis-only phrasing that misled overlay users.
+        assert!(
+            !msg.contains("Synthesized brand requires"),
+            "LogoRequired message must NOT contain 'Synthesized brand requires' \
+             (synthesis-only phrasing misleads overlay users), got: {msg}"
         );
     }
 
