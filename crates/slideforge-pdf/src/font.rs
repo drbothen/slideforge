@@ -33,8 +33,11 @@ impl FontBytes {
     /// # Errors
     ///
     /// Returns [`PdfExportError::FontLoad`] if the file cannot be read.
-    pub fn load(_path: &std::path::Path) -> Result<Self, PdfExportError> {
-        todo!("STORY-043 Red Gate stub: FontBytes::load not yet implemented")
+    pub fn load(path: &std::path::Path) -> Result<Self, PdfExportError> {
+        let bytes = std::fs::read(path).map_err(|e| PdfExportError::Io {
+            message: format!("failed to read font file '{}': {e}", path.display()),
+        })?;
+        Ok(Self(bytes))
     }
 
     /// Construct `FontBytes` from a raw byte buffer.
@@ -60,8 +63,7 @@ mod tests {
     use tempfile::NamedTempFile;
 
     /// BC-4.03.002 AC-004: `FontBytes::load` reads a font file from disk.
-    ///
-    /// RED GATE: This test MUST FAIL because `FontBytes::load` is a `todo!()`.
+    #[allow(clippy::unwrap_used)]
     #[test]
     fn test_bc_4_03_002_font_bytes_load_reads_file() {
         // Create a temp file with fake font bytes to avoid filesystem dependency.
@@ -72,7 +74,10 @@ mod tests {
 
         // This panics at todo!() — confirms Red Gate is active.
         let result = FontBytes::load(path);
-        assert!(result.is_ok(), "FontBytes::load must succeed for a valid file");
+        assert!(
+            result.is_ok(),
+            "FontBytes::load must succeed for a valid file"
+        );
         let bytes = result.unwrap();
         assert_eq!(
             bytes.as_bytes(),

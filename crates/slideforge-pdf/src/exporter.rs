@@ -35,6 +35,8 @@
 //!
 //! No subprocess is spawned. No FFI to C libraries. Pure Rust.
 
+use krilla::Document;
+use krilla::page::PageSettings;
 use slideforge_layout::LaidOutDeck;
 use slideforge_plugin_api::{ExportError, ExportOptions, Exporter};
 use slideforge_types::{Brand, Deck};
@@ -62,21 +64,74 @@ impl PdfExporter {
 
     /// Core PDF generation logic — called from [`Exporter::export`].
     ///
-    /// Returns raw PDF bytes on success.
+    /// Returns raw PDF bytes on success. `&self` is included for future use
+    /// when `PdfExporter` carries font caches or configuration (STORY-044+).
     ///
     /// # Errors
     ///
     /// Returns [`PdfExportError`] on failure. The [`Exporter::export`]
     /// implementation maps this to [`ExportError::RenderError`].
+    #[allow(clippy::unused_self)]
     fn generate_pdf(
         &self,
         _deck: &Deck,
-        _laid_out: &LaidOutDeck,
+        laid_out: &LaidOutDeck,
         _brand: &Brand,
         _opts: &ExportOptions,
     ) -> Result<Vec<u8>, PdfExportError> {
-        todo!("STORY-043 Red Gate stub: PdfExporter::generate_pdf not yet implemented — implement in TDD green phase")
+        // Create a krilla Document with default settings.
+        // Default SerializeSettings has enable_tagging: true; we do NOT call
+        // set_tag_tree here — the tag tree is attached only when tagging is
+        // fully wired (STORY-045). Without set_tag_tree, krilla produces a
+        // syntactically valid PDF without a structure tree.
+        let mut document = Document::new();
+
+        for slide in &laid_out.slides {
+            // Convert page dimensions from EMU to PDF points (1 pt = 12,700 EMU).
+            let width_pts = slide_dim_to_pts(laid_out.page_size.width.0);
+            let height_pts = slide_dim_to_pts(laid_out.page_size.height.0);
+
+            let page_settings = PageSettings::from_wh(width_pts, height_pts).ok_or_else(|| {
+                PdfExportError::Serialize {
+                    message: format!(
+                        "invalid page size: {}pt x {}pt (slide {})",
+                        width_pts, height_pts, slide.source_index
+                    ),
+                }
+            })?;
+
+            let mut page = document.start_page_with(page_settings);
+            // `Surface` is obtained from `page.surface()` for drawing operations.
+            // Content drawing (text, SVG paths) is added here in STORY-044 / STORY-045.
+            // For now the page is intentionally blank — the `%PDF-` header and valid
+            // document structure are what AC-001 requires at this stage.
+            let surface = page.surface();
+            surface.finish();
+            page.finish();
+        }
+
+        // Serialize to PDF bytes. `Document::finish()` returns
+        // `KrillaResult<Vec<u8>>` (i.e. `Result<Vec<u8>, KrillaError>`).
+        document.finish().map_err(|e| PdfExportError::Serialize {
+            message: format!("krilla serialization error: {e:?}"),
+        })
     }
+}
+
+/// Convert an EMU value (i64) to PDF points (f32).
+///
+/// PDF points = EMU / 12,700.
+/// krilla's `PageSettings::from_wh` and coordinate system use `f32` points.
+///
+/// # Precision note
+///
+/// EMU values are large integers; converting directly to `f32` can lose
+/// sub-point precision, but for page dimensions this is acceptable (precision
+/// loss < 0.01 pt at typical slide sizes).
+#[allow(clippy::cast_precision_loss)]
+fn slide_dim_to_pts(emu: i64) -> f32 {
+    const EMU_PER_POINT: i64 = 12_700;
+    (emu as f32) / (EMU_PER_POINT as f32)
 }
 
 impl Default for PdfExporter {
@@ -86,10 +141,15 @@ impl Default for PdfExporter {
 }
 
 impl Exporter for PdfExporter {
+    // Trait requires `&str`; return type is tied to `&self` per trait contract
+    // even though we return `'static` literals. Suppressing the unnecessary_literal_bound
+    // lint because the trait signature (not ours to change) imposes the `&self` lifetime.
+    #[allow(clippy::unnecessary_literal_bound)]
     fn id(&self) -> &str {
         "pdf"
     }
 
+    #[allow(clippy::unnecessary_literal_bound)]
     fn extension(&self) -> &str {
         "pdf"
     }
@@ -124,9 +184,11 @@ impl Exporter for PdfExporter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
-    use slideforge_layout::types::{LaidOutDeck, LaidOutSlide, Frame, BoundingBox, FrameContent, PageSize, RegisterSet};
+    use slideforge_layout::types::{
+        BoundingBox, Frame, FrameContent, LaidOutDeck, LaidOutSlide, PageSize, RegisterSet,
+    };
     use slideforge_types::{Brand, BrandFonts, BrandPalette, Deck, Emu, SourceSpan};
+    use std::sync::Arc;
 
     /// Build a minimal 1-slide `LaidOutDeck` for export tests.
     fn minimal_laid_out_deck() -> LaidOutDeck {
@@ -210,6 +272,7 @@ mod tests {
     /// - Be non-empty.
     /// - Start with the PDF magic bytes `b"%PDF-"`.
     /// - Contain no forbidden browser-PDF dep markers.
+    #[allow(clippy::unwrap_used)]
     #[test]
     fn test_bc_4_03_002_export_produces_pdf_bytes() {
         let exporter = PdfExporter::new();
@@ -218,7 +281,6 @@ mod tests {
         let brand = minimal_brand();
         let opts = ExportOptions::default();
 
-        // This panics at todo!() — confirms Red Gate is active.
         let result = exporter.export(&deck, &laid_out, &brand, &opts);
 
         // After implementation: assert the PDF bytes are valid.

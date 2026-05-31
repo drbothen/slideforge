@@ -25,7 +25,7 @@ use std::path::PathBuf;
 /// Path to the workspace root Cargo.lock.
 ///
 /// The test file lives at `crates/slideforge-pdf/tests/no_forbidden_deps.rs`.
-/// CARGO_MANIFEST_DIR = `.../crates/slideforge-pdf`.
+/// `CARGO_MANIFEST_DIR` = `.../crates/slideforge-pdf`.
 /// The workspace root is 2 levels up: `../..`.
 fn cargo_lock_path() -> PathBuf {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -119,7 +119,7 @@ fn test_bc_4_03_002_no_ffi_pdf_deps_in_cargo_lock() {
 /// as a direct dependency. It arrives transitively via krilla 0.6.0.
 ///
 /// Adding a direct `pdf-writer` dep risks version splits and conflicts with
-/// krilla's internal StructTreeRoot generation (tech-validation RISK-1).
+/// krilla's internal `StructTreeRoot` generation (tech-validation RISK-1).
 ///
 /// PASSES NOW — Cargo.toml has no `pdf-writer` entry in `[dependencies]`.
 #[test]

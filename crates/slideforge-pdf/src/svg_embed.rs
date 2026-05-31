@@ -4,10 +4,10 @@
 //! `FrameContent::Chart` frame in a [`LaidOutSlide`], this module:
 //!
 //! 1. Parses the SVG via `usvg::Tree::from_str()`.
-//! 2. Walks the `usvg` node tree.
+//! 2. Walks the `usvg` node tree recursively.
 //! 3. Issues path-drawing operations on the krilla `Surface`
-//!    (`surface.draw_path(...)`, `surface.set_fill(...)`,
-//!    `surface.set_stroke(...)`).
+//!    (`surface.set_fill(...)`, `surface.set_stroke(...)`,
+//!    `surface.draw_path(...)`).
 //!
 //! **Vector-only contract (BC-4.03.002 AC-005):**
 //! SVG content is embedded as PDF vector paths — never rasterized. The `image`
@@ -25,8 +25,21 @@
 //! Do NOT route SVG paths through `pdf-writer` path operators directly. All
 //! drawing goes through krilla's `Surface` to preserve krilla's coordinate
 //! space and layer management (RISK-1 per tech-validation.md).
+//!
+//! **tiny-skia-path version difference:**
+//! usvg 0.47.0 uses `tiny_skia_path` 0.12.0; krilla 0.6.0 uses 0.11.4.
+//! These are different crate versions and their `Path` types cannot be
+//! directly shared. Path segment conversion is performed by iterating
+//! `usvg::Path::data().segments()` (0.12.0 API) and rebuilding via
+//! `krilla::PathBuilder` (0.11.4 API).
 
+use krilla::color::rgb;
+use krilla::geom::PathBuilder;
+use krilla::num::NormalizedF32;
+use krilla::paint::{Fill, FillRule, Paint};
+use krilla::surface::Surface;
 use slideforge_types::NormalizedDiagramSvg;
+use usvg::{Node, Options, Tree};
 
 use crate::error::PdfExportError;
 
@@ -50,13 +63,19 @@ use crate::error::PdfExportError;
 ///
 /// # Contract
 ///
-/// The output PDF must not contain any raster `/Image` XObject for SVG input.
-/// Verified in tests by asserting no `/Image` entry appears in the output bytes.
+/// The output PDF must not contain any raster image `XObject` for SVG input
+/// (where `/Image` is the PDF keyword for embedded raster images).
+/// Verified in tests by asserting no `Subtype /Image` entry appears in the
+/// output bytes.
+///
+/// # Errors
+///
+/// See module-level documentation.
 pub fn embed_normalized_svg(
-    _svg: &NormalizedDiagramSvg,
-    _surface: &mut krilla::surface::Surface<'_>,
+    svg: &NormalizedDiagramSvg,
+    surface: &mut Surface<'_>,
 ) -> Result<(), PdfExportError> {
-    todo!("STORY-043 Red Gate stub: embed_normalized_svg not yet implemented — implement in TDD green phase")
+    embed_svg_str(svg.as_str(), surface)
 }
 
 /// Embed a raw SVG string (e.g., from `FrameContent::Chart`) as vector paths.
@@ -70,86 +89,201 @@ pub fn embed_normalized_svg(
 ///
 /// Returns [`PdfExportError::SvgEmbed`] if the SVG cannot be parsed or
 /// drawn.
-pub fn embed_svg_str(
-    _svg_str: &str,
-    _surface: &mut krilla::surface::Surface<'_>,
-) -> Result<(), PdfExportError> {
-    todo!("STORY-043 Red Gate stub: embed_svg_str not yet implemented")
+pub fn embed_svg_str(svg_str: &str, surface: &mut Surface<'_>) -> Result<(), PdfExportError> {
+    let tree =
+        Tree::from_str(svg_str, &Options::default()).map_err(|e| PdfExportError::SvgEmbed {
+            message: format!("usvg parse error: {e}"),
+        })?;
+
+    render_group(tree.root(), surface)
+}
+
+/// Recursively render a usvg `Group` node and all its children onto `surface`.
+fn render_group(group: &usvg::Group, surface: &mut Surface<'_>) -> Result<(), PdfExportError> {
+    for child in group.children() {
+        match child {
+            Node::Group(g) => {
+                // Recurse into nested groups.
+                render_group(g, surface)?;
+            },
+            Node::Path(path) => {
+                if !path.is_visible() {
+                    continue;
+                }
+                render_path(path, surface)?;
+            },
+            // Image and Text nodes are not yet rendered in this story.
+            // STORY-045 will extend coverage for text rendering.
+            // Image nodes would require rasterization (forbidden by AC-005).
+            Node::Image(_) | Node::Text(_) => {
+                // Intentionally skipped: images violate vector-only contract;
+                // text rendering requires krilla font API (STORY-044 / STORY-045).
+            },
+        }
+    }
+    Ok(())
+}
+
+/// Render a single `usvg::Path` node as a krilla `draw_path` call.
+///
+/// Translates path segments from `tiny_skia_path` 0.12.0 (usvg's version)
+/// to `krilla::PathBuilder` (which wraps `tiny_skia_path` 0.11.4).
+///
+/// Returns `Ok(())` always in this story; the `Result` return type is kept
+/// for forward compatibility when future paths may produce errors via the
+/// krilla surface (e.g., clip-path operations in STORY-045).
+#[allow(clippy::unnecessary_wraps)]
+fn render_path(path: &usvg::Path, surface: &mut Surface<'_>) -> Result<(), PdfExportError> {
+    use usvg::tiny_skia_path::PathSegment;
+
+    // Build the krilla path from usvg segment data.
+    let mut builder = PathBuilder::new();
+    for segment in path.data().segments() {
+        match segment {
+            PathSegment::MoveTo(p) => builder.move_to(p.x, p.y),
+            PathSegment::LineTo(p) => builder.line_to(p.x, p.y),
+            PathSegment::QuadTo(p1, p2) => builder.quad_to(p1.x, p1.y, p2.x, p2.y),
+            PathSegment::CubicTo(p1, p2, p3) => {
+                builder.cubic_to(p1.x, p1.y, p2.x, p2.y, p3.x, p3.y);
+            },
+            PathSegment::Close => builder.close(),
+        }
+    }
+
+    let Some(krilla_path) = builder.finish() else {
+        // Degenerate path (zero points) — skip silently.
+        return Ok(());
+    };
+
+    // Apply fill.
+    if let Some(fill) = path.fill() {
+        let krilla_fill = usvg_fill_to_krilla(fill);
+        surface.set_fill(Some(krilla_fill));
+    } else {
+        surface.set_fill(None);
+    }
+
+    // Apply stroke (stub — full stroke translation is STORY-044 scope).
+    // For AC-005 we only need fill; clear any lingering stroke.
+    surface.set_stroke(None);
+
+    surface.draw_path(&krilla_path);
+
+    Ok(())
+}
+
+/// Convert a `usvg::Fill` to a `krilla::Fill`.
+///
+/// Gradients and patterns are approximated with a black fill in this story
+/// (STORY-045 extends color server support). Only `Paint::Color` is fully
+/// translated here.
+fn usvg_fill_to_krilla(fill: &usvg::Fill) -> Fill {
+    let opacity = usvg_opacity_to_krilla(fill.opacity().get());
+    let rule = usvg_fill_rule_to_krilla(fill.rule());
+
+    let paint: Paint = match fill.paint() {
+        usvg::Paint::Color(color) => rgb::Color::new(color.red, color.green, color.blue).into(),
+        // Gradients and patterns: fall back to black for now.
+        // Full gradient support is STORY-045 scope.
+        _ => rgb::Color::new(0, 0, 0).into(),
+    };
+
+    Fill {
+        paint,
+        opacity,
+        rule,
+    }
+}
+
+/// Convert a usvg opacity value (f32 in 0..=1) to a krilla `NormalizedF32`.
+///
+/// Clamps out-of-range values defensively.
+fn usvg_opacity_to_krilla(opacity: f32) -> NormalizedF32 {
+    NormalizedF32::new(opacity.clamp(0.0, 1.0)).unwrap_or(NormalizedF32::ONE)
+}
+
+/// Convert a usvg `FillRule` to the equivalent krilla `FillRule`.
+fn usvg_fill_rule_to_krilla(rule: usvg::FillRule) -> FillRule {
+    match rule {
+        usvg::FillRule::NonZero => FillRule::NonZero,
+        usvg::FillRule::EvenOdd => FillRule::EvenOdd,
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::sync::Arc;
 
+    use super::*;
+    use slideforge_types::NormalizedDiagramSvg;
+
     /// A minimal SVG rect used as test input.
-    const SIMPLE_SVG_RECT: &str =
-        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"100\" height=\"100\">\
+    const SIMPLE_SVG_RECT: &str = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"100\" height=\"100\">\
          <rect x=\"10\" y=\"10\" width=\"80\" height=\"80\" fill=\"#003087\"/>\
          </svg>";
 
     /// BC-4.03.002 AC-005: `embed_normalized_svg` converts a simple SVG rect
     /// to krilla Surface draw calls without rasterization.
     ///
-    /// RED GATE: This test MUST FAIL because `embed_normalized_svg` is a
-    /// `todo!()` stub. After implementation, the test verifies:
-    /// - The function returns `Ok(())`.
-    /// - The resulting PDF byte stream contains `%PDF-` header.
-    /// - The PDF contains NO `/Image` XObject (vector-only assertion).
-    ///
-    /// The krilla `Surface` requires a live `Document`/`Page` context and
-    /// cannot be constructed in pure unit tests without a page. The implementer
-    /// must wire this test into a document/page harness (similar to the
-    /// exporter test). For the Red Gate, the `todo!()` panic is sufficient.
+    /// This test verifies:
+    /// - usvg parses the SVG correctly.
+    /// - The resulting PDF bytes start with `%PDF-` (valid PDF structure).
+    /// - The PDF bytes contain NO `/Image` `XObject` (vector-only assertion)
+    ///   (verified by checking for the absence of `Subtype /Image`).
     #[test]
     fn test_bc_4_03_002_svg_embed_converts_rect_to_vector_paths() {
-        // Build a NormalizedDiagramSvg from the test SVG string.
+        use krilla::Document;
+        use krilla::page::PageSettings;
+
         let normalized = NormalizedDiagramSvg::from_normalized_string(Arc::from(SIMPLE_SVG_RECT));
 
-        // We cannot construct a real krilla Surface without a Document+Page.
-        // The test intentionally exercises the type signature and the todo!()
-        // panic confirms the Red Gate. The implementer wires a document harness.
-        //
-        // Red Gate assertion: the function must panic at todo!() here.
-        // After implementation: the surface draw calls succeed and the PDF
-        // output contains no /Image entry.
-        //
-        // To avoid requiring a live Surface in the Red Gate test, we verify the
-        // SVG string is accepted by usvg parse (which is NOT stubbed):
-        let parse_result = usvg::Tree::from_str(
-            normalized.as_str(),
-            &usvg::Options::default(),
-        );
+        // Build a real Document + Page to get a live Surface.
+        let mut document = Document::new();
+        let mut page =
+            document.start_page_with(PageSettings::from_wh(595.0, 842.0).expect("valid page size"));
+        let mut surface = page.surface();
+
+        let result = embed_normalized_svg(&normalized, &mut surface);
+
+        surface.finish();
+        page.finish();
+
+        // The embed must succeed.
         assert!(
-            parse_result.is_ok(),
-            "usvg must be able to parse the test SVG rect: {:?}",
-            parse_result.err()
+            result.is_ok(),
+            "embed_normalized_svg must succeed for a simple SVG rect: {result:?}"
         );
 
-        // The embed call itself is stubbed — calling it here would require a
-        // live Surface. The Red Gate for embed_normalized_svg is verified via
-        // test_bc_4_03_002_svg_embed_stub_panics below.
+        let pdf_bytes = document
+            .finish()
+            .expect("krilla document serialization must succeed");
+
+        // The output must be a valid PDF (starts with %PDF-).
+        assert!(
+            pdf_bytes.starts_with(b"%PDF-"),
+            "PDF output must start with %PDF- header"
+        );
+
+        // Vector-only assertion: no raster Image `XObject` (Subtype /Image) in the PDF.
+        // We check for `/Subtype /Image` which is the PDF signature of an embedded
+        // raster image `XObject`. Note: `/ImageC`, `/ImageB` appear in the standard
+        // ProcSet declaration even for non-image PDFs and are NOT image `XObject`s.
+        let has_raster_image = pdf_bytes
+            .windows(b"/Subtype /Image".len())
+            .any(|w| w == b"/Subtype /Image");
+        assert!(
+            !has_raster_image,
+            "PDF output must NOT contain raster /Image `XObject` (Subtype /Image) \
+             for SVG vector content"
+        );
     }
 
-    /// RED GATE: Directly invoke the stub to confirm it panics with the
-    /// expected message. This test documents the stub boundary for the
-    /// implementer (SID-1 rule: stub must have a specific panic message).
-    ///
-    /// This test is intentionally NOT run in CI because constructing a
-    /// `krilla::surface::Surface<'_>` requires a live Document/Page context.
-    /// The implementer converts this to a real integration test in the green
-    /// phase.
-    ///
-    /// The usvg parse subtest above provides the non-live-surface Red Gate
-    /// verification.
+    /// BC-4.03.002 AC-005: `embed_svg_str` also parses correctly.
     #[test]
     fn test_bc_4_03_002_svg_str_is_parseable_by_usvg() {
         // Verify that embed_svg_str would receive a parseable SVG.
         // The embed call itself requires a live Surface (deferred to green phase).
-        let parse_result = usvg::Tree::from_str(
-            SIMPLE_SVG_RECT,
-            &usvg::Options::default(),
-        );
+        let parse_result = usvg::Tree::from_str(SIMPLE_SVG_RECT, &usvg::Options::default());
         assert!(
             parse_result.is_ok(),
             "usvg must parse the simple SVG rect without error: {:?}",
