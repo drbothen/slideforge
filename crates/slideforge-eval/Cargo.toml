@@ -54,6 +54,17 @@ ordered-float = { workspace = true }
 # this dev-dep makes it available to the integration test binaries.
 zip = "=2.3.0"
 
+[[test]]
+# bleed_tests.rs uses `slideforge_eval::BleedChecker`, which is gated behind the
+# `test-utils` feature.  Without `required-features`, `cargo nextest run -p
+# slideforge-eval` (no --features flag) would fail to compile this test binary
+# with E0432 — breaking the canonical inner-loop TDD command.  With
+# `required-features`, Cargo AUTO-SKIPS the test target when the feature is off
+# instead of emitting a compile error.  Run with `--features test-utils` to
+# include the test.  (F-036-001 fix.)
+name = "bleed_tests"
+required-features = ["test-utils"]
+
 [lints.rust]
 # `kani` is the cfg flag set by the Kani proof runner (Phase 6, STORY-067).
 # It is not a Cargo feature, so we explicitly declare it to silence the
