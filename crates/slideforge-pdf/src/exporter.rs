@@ -111,8 +111,8 @@ impl PdfExporter {
             let page_settings = PageSettings::from_wh(width_pts, height_pts).ok_or_else(|| {
                 PdfExportError::Serialize {
                     message: format!(
-                        "invalid page size: {}pt x {}pt (slide {})",
-                        width_pts, height_pts, slide.source_index
+                        "invalid page size: {width_pts}pt x {height_pts}pt (slide {})",
+                        slide.source_index
                     ),
                 }
             })?;
@@ -237,6 +237,51 @@ mod tests {
         }
     }
 
+    /// Build a 1-slide `LaidOutDeck` with a Title frame + an Image figure frame.
+    ///
+    /// Used by `test_bc_4_03_002_export_produces_tagged_pdf` to exercise the
+    /// tag tree in a non-vacuous way: the resulting PDF must contain structural
+    /// element markers for both `/Part` (the slide) and `/H1` (the title heading)
+    /// and `/Figure` (the image frame with alt text).
+    fn title_and_figure_laid_out_deck() -> LaidOutDeck {
+        LaidOutDeck {
+            page_size: PageSize::default(),
+            slides: vec![LaidOutSlide {
+                source_index: 0,
+                slide_type_keyword: Arc::from("photo"),
+                frames: vec![
+                    Frame {
+                        bbox: BoundingBox {
+                            x: Emu(0),
+                            y: Emu(0),
+                            width: Emu(9_144_000),
+                            height: Emu(914_400),
+                        },
+                        content: FrameContent::Title(Arc::from("Sunrise Over Mountains")),
+                        text_flow: None,
+                    },
+                    Frame {
+                        bbox: BoundingBox {
+                            x: Emu(0),
+                            y: Emu(914_400),
+                            width: Emu(9_144_000),
+                            height: Emu(5_143_500),
+                        },
+                        content: FrameContent::Image {
+                            alt: Arc::from("A mountain landscape at sunrise"),
+                        },
+                        text_flow: None,
+                    },
+                ],
+                speaker_notes: None,
+                register_tags: RegisterSet::new(),
+                register_content: vec![],
+            }],
+            sections: vec![],
+            warnings: vec![],
+        }
+    }
+
     /// Build a minimal `Brand` for export tests.
     fn minimal_brand() -> Brand {
         Brand {
@@ -322,31 +367,69 @@ mod tests {
     }
 
     /// BC-4.03.002 AC-003 (integration): `PdfExporter::export()` produces a
-    /// tagged PDF — the output bytes contain the structure tree marker that
-    /// krilla emits when `set_tag_tree` is called.
+    /// tagged PDF with a non-vacuous structure tree.
     ///
-    /// The `StructTreeRoot` marker (`/MarkInfo` or `StructTreeRoot` keyword in the
-    /// PDF bytes) confirms the tag tree is actually attached.
+    /// Uses a deck with a Title frame (→ `/H1` `StructElem`) and an Image frame
+    /// with alt text (→ `/Figure` `StructElem`) to verify that:
+    ///
+    /// 1. `StructTreeRoot` is present (`set_tag_tree` was called).
+    /// 2. `/Part` `StructElem` is present (the slide Part group was emitted).
+    /// 3. `/H1` `StructElem` is present (the title frame produced a heading).
+    /// 4. `/Figure` `StructElem` is present (the image frame with alt text produced
+    ///    a figure element).
+    ///
+    /// These are the exact bytes krilla 0.6.0 writes for the corresponding
+    /// `TagKind` variants (verified against krilla source and live output).
+    /// An empty-but-present tree would fail assertions 2–4 — this test is
+    /// non-vacuous.
     #[allow(clippy::unwrap_used)]
     #[test]
     fn test_bc_4_03_002_export_produces_tagged_pdf() {
         let exporter = PdfExporter::new();
         let deck = minimal_deck();
-        let laid_out = minimal_laid_out_deck();
+        // Use a title+figure deck so the tag tree assertions are non-vacuous:
+        // an empty (but present) StructTreeRoot would pass assertion 1 but fail 2–4.
+        let laid_out = title_and_figure_laid_out_deck();
         let brand = minimal_brand();
         let opts = ExportOptions::default();
 
         let bytes = exporter.export(&deck, &laid_out, &brand, &opts).unwrap();
 
-        // krilla emits `/MarkInfo` when `set_tag_tree` is called.
-        // This confirms the structural tag tree is present in the PDF.
-        let has_mark_info = bytes
+        // 1. StructTreeRoot must be present — confirms set_tag_tree was called.
+        let has_struct_tree_root = bytes
             .windows(b"StructTreeRoot".len())
             .any(|w| w == b"StructTreeRoot");
         assert!(
-            has_mark_info,
+            has_struct_tree_root,
             "exported PDF must contain StructTreeRoot (tagged PDF marker); \
              this confirms set_tag_tree was called before document.finish()"
+        );
+
+        // 2. /Part StructElem must be present — confirms the slide Part group was emitted.
+        // krilla 0.6.0 writes `/S /Part` for TagKind::Part.
+        let has_part = bytes.windows(b"/Part".len()).any(|w| w == b"/Part");
+        assert!(
+            has_part,
+            "exported PDF must contain /Part StructElem; \
+             confirms the slide Part TagGroup was attached to the tag tree"
+        );
+
+        // 3. /H1 StructElem must be present — confirms the Title frame → Hn(1) mapping.
+        // krilla 0.6.0 writes `/S /H1` for TagKind::Hn with level 1.
+        let has_h1 = bytes.windows(b"/H1".len()).any(|w| w == b"/H1");
+        assert!(
+            has_h1,
+            "exported PDF must contain /H1 StructElem; \
+             confirms the Title frame was tagged as Hn(level=1)"
+        );
+
+        // 4. /Figure StructElem must be present — confirms the Image frame → Figure mapping.
+        // krilla 0.6.0 writes `/S /Figure` for TagKind::Figure.
+        let has_figure = bytes.windows(b"/Figure".len()).any(|w| w == b"/Figure");
+        assert!(
+            has_figure,
+            "exported PDF must contain /Figure StructElem; \
+             confirms the Image frame (with alt text) was tagged as Figure"
         );
     }
 

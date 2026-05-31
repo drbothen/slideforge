@@ -42,4 +42,5 @@ slideforge-layout = { workspace = true }
 # For font.rs tests: create temp font files without filesystem coupling.
 tempfile = "=3.10.0"
 # For exporter.rs tests: indexmap to construct an empty OrderedMap.
-indexmap = { version = "=2.10.0", features = ["std"] }
+# Uses workspace dep to track future bumps (TD-VSDD-060).
+indexmap = { workspace = true, features = ["std"] }
