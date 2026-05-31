@@ -22,7 +22,7 @@ readme = "../../README.md"
 # Cargo must be able to compile the feature-gated code even outside a dev build.
 # Dev-dependencies are not transitive, so `zip` in [dev-dependencies] would cause
 # "can't find crate `zip`" errors in the exporter crates' test builds.
-test-utils = ["dep:zip"]
+test-utils = ["dep:zip", "dep:quick-xml"]
 
 [dependencies]
 slideforge-types = { workspace = true }
@@ -37,6 +37,12 @@ tracing = { workspace = true }
 # and calamine). The spec originally cited =4.2.0 which does not exist on
 # crates.io; =2.3.0 is the correct version available in this workspace.
 zip = { version = "=2.3.0", optional = true }
+# Optional: only compiled when the `test-utils` feature is enabled.
+# Used by BleedChecker to decode XML entities in scanned member text so that
+# sentinels containing `&`, `<`, `>`, `"`, `'` are found even when the exporter
+# XML-escapes them (EC-004 compliance). The workspace already pins this at
+# =0.36.0 via slideforge-brand and slideforge-math.
+quick-xml = { workspace = true, optional = true }
 
 [dev-dependencies]
 insta = { workspace = true }

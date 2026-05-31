@@ -23,12 +23,27 @@
 //!
 //! ## EC-003 and EC-004 (RUNS NOW)
 //!
-//! - `test_BC_1_14_004_ec003_sentinel_in_title_not_flagged_as_bleed` — a
-//!   sentinel in a non-scanned path (`content.xml`) must not trigger the slide
-//!   check.
-//! - `test_BC_1_14_004_ec004_xml_escaped_sentinel_detected` — BleedChecker
-//!   scans decoded text, so the sentinel is found even if the underlying bytes
-//!   differ from the sentinel string in trivially different ways.
+//! - `test_BC_1_14_004_ec003_sentinel_in_nonscanned_path_not_flagged_as_bleed` —
+//!   a sentinel in a non-scanned path (`ppt/theme/theme1.xml`) must not trigger
+//!   the slide check.
+//! - `test_BC_1_14_004_ec003_sentinel_in_notes_slide_not_flagged_as_bleed` —
+//!   a sentinel in `ppt/notesSlides/notesSlide1.xml` must not trigger the slide
+//!   check (the spec's canonical EC-003 scenario).
+//! - `test_BC_1_14_004_ec004_xml_escaped_content_detected` — BleedChecker
+//!   entity-decodes scanned text, so `R&D roadmap` is detected even when the
+//!   member contains `R&amp;D roadmap` (genuine XML-escaping coverage).
+//! - `test_BC_1_14_004_ec004_lt_gt_escaped_content_detected` — same for
+//!   `<item>` serialised as `&lt;item&gt;`.
+//! - `test_BC_1_14_004_ec004_unescaped_sentinel_absent_passes` — an absence
+//!   check for an unescaped sentinel that genuinely does not appear in the
+//!   decoded text must pass without panicking.
+//!
+//! ## F-003 zero-member guard tests (RUNS NOW)
+//!
+//! - `test_BC_1_14_004_absent_from_slides_panics_on_slideless_pptx` — a PPTX
+//!   with no slide bodies makes the slide absence check panic (fail-closed).
+//! - `test_BC_1_14_004_absent_from_all_panics_on_empty_archive` — an empty
+//!   ZIP makes the all-members absence check panic (fail-closed).
 //!
 //! ## Group 2: Fixture parse test (RUNS NOW)
 //!
@@ -54,6 +69,8 @@
 //! | `test_BC_1_14_004_bleedchecker_*` | BC-1.14.004 invariant 1 | AC-008 |
 //! | `test_BC_1_14_004_ec003_*` | BC-1.14.004 EC-003 | AC-008 |
 //! | `test_BC_1_14_004_ec004_*` | BC-1.14.004 EC-004 | AC-008 |
+//! | `test_BC_1_14_004_absent_from_slides_panics_on_slideless_pptx` | BC-1.14.004 EC-004 | AC-008 |
+//! | `test_BC_1_14_004_absent_from_all_panics_on_empty_archive` | BC-1.14.004 EC-004 | AC-008 |
 //! | `test_BC_1_14_004_fixture_parses_*` | BC-1.14.004 postcondition 1-6 | AC-007 |
 //! | `test_BC_1_14_004_ac001_*` | BC-1.14.004 postcondition 2 | AC-001 |
 //! | `test_BC_1_14_004_ac002_*` | BC-1.14.004 postcondition 4 | AC-002 |
@@ -180,6 +197,37 @@ fn make_docx_zip(document_content: &str) -> Vec<u8> {
     cursor.into_inner()
 }
 
+/// Build a ZIP with only non-slide members (no `ppt/slides/slideN.xml`).
+///
+/// Used for F-003 testing: `assert_absent_from_pptx_slides` must fail-closed
+/// when given a PPTX with no slide bodies.
+fn make_pptx_zip_no_slides() -> Vec<u8> {
+    let buf = Vec::new();
+    let cursor = std::io::Cursor::new(buf);
+    let mut zip = zip::ZipWriter::new(cursor);
+    let opts =
+        zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+
+    // Only a theme file — no slide bodies.
+    zip.start_file("ppt/theme/theme1.xml", opts).unwrap();
+    zip.write_all(b"<a:theme/>").unwrap();
+
+    let cursor = zip.finish().unwrap();
+    cursor.into_inner()
+}
+
+/// Build a ZIP with zero members.
+///
+/// Used for F-003 testing: `assert_absent_from_pptx_all` must fail-closed
+/// when given an empty archive.
+fn make_empty_zip() -> Vec<u8> {
+    let buf = Vec::new();
+    let cursor = std::io::Cursor::new(buf);
+    let zip = zip::ZipWriter::new(cursor);
+    let cursor = zip.finish().unwrap();
+    cursor.into_inner()
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // AC-008: BleedChecker utility unit tests (RUNS NOW — Red Gate)
 //
@@ -290,12 +338,12 @@ fn test_BC_1_14_004_bleedchecker_absent_from_docx_body_panics_when_present() {
 //
 // BC-1.14.004 EC-003: `BleedChecker` checks specifically scoped ZIP paths.
 // A sentinel in a path that `assert_absent_from_pptx_slides` does NOT scan
-// (e.g., `ppt/theme/theme1.xml` or `content.xml`) must not trigger a panic.
+// must not trigger a panic.
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// BC-1.14.004 EC-003 / AC-008:
-/// A sentinel in a non-slides path (e.g., theme XML) does NOT cause
-/// `assert_absent_from_pptx_slides` to panic.
+/// A sentinel in a non-slides path (e.g., `ppt/theme/theme1.xml`) does NOT
+/// cause `assert_absent_from_pptx_slides` to panic.
 ///
 /// This verifies that BleedChecker scans only `ppt/slides/slide*.xml` and does
 /// not false-positive on other ZIP members.
@@ -314,42 +362,147 @@ fn test_BC_1_14_004_ec003_sentinel_in_nonscanned_path_not_flagged_as_bleed() {
     BleedChecker::assert_absent_from_pptx_slides(&pptx, "EC003_SENTINEL_IN_THEME");
 }
 
+/// BC-1.14.004 EC-003 / AC-008 — notesSlides scenario:
+/// A sentinel in `ppt/notesSlides/notesSlide1.xml` does NOT cause
+/// `assert_absent_from_pptx_slides` to panic.
+///
+/// This is the spec's canonical EC-003 scenario: a sentinel legitimately
+/// present in notesSlides must not be detected as a slide-body bleed.
+/// The slide body itself is clean; only the notes slide carries the sentinel.
+///
+/// `assert_absent_from_pptx_slides` only scans `ppt/slides/slide*.xml`,
+/// so the notes slide is not in scope.
+#[test]
+fn test_BC_1_14_004_ec003_sentinel_in_notes_slide_not_flagged_as_bleed() {
+    // Build a PPTX where the notes slide holds the sentinel but the slide body
+    // is clean. make_pptx_zip places the second argument in notesSlide1.xml.
+    let pptx = make_pptx_zip("clean slide body", "EC003_SENTINEL_IN_NOTES");
+    // assert_absent_from_pptx_slides must NOT panic because it only scans
+    // ppt/slides/slide*.xml; notesSlides is out of scope.
+    BleedChecker::assert_absent_from_pptx_slides(&pptx, "EC003_SENTINEL_IN_NOTES");
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
-// EC-004: BleedChecker works on decoded text (XML-safe sentinels)
+// EC-004: BleedChecker entity-decodes XML text before searching
 //
-// BC-1.14.004 EC-004: BleedChecker reads ZIP member bytes as UTF-8 text.
-// For sentinels containing XML-special characters, callers must use the
-// XML-escaped form as the sentinel (e.g., "&amp;" instead of "&"). The
-// canonical sentinels used by STORY-036 are XML-safe (no special chars),
-// so this test verifies the basic text-decoding path.
+// BC-1.14.004 EC-004: BleedChecker must find sentinels even when the exporter
+// has XML-escaped them. These tests are GENUINE (non-tautological): they embed
+// only the ESCAPED form in the ZIP member and assert that the UNESCAPED sentinel
+// is detected. With the old implementation (no entity decoding) these tests
+// would fail (false negative). After the F-001 fix they must pass.
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// BC-1.14.004 EC-004 / AC-008:
-/// BleedChecker correctly detects a sentinel that appears verbatim in the
-/// decoded UTF-8 text of the ZIP member. This confirms BleedChecker is doing
-/// string search on decoded text, not raw bytes.
+/// BC-1.14.004 EC-004 / AC-008 — ampersand escaping:
+/// BleedChecker detects `R&D roadmap` even when the slide member contains
+/// `R&amp;D roadmap` (the XML-escaped form a conforming exporter would produce).
 ///
-/// The canonical STORY-036 sentinels (SENTINEL_NOTES, SENTINEL_REPORT, etc.)
-/// are XML-safe identifiers; this test uses a realistic sentinel to verify the
-/// text-decoding path end-to-end.
+/// With the OLD implementation (no entity decoding) this test demonstrates a
+/// FALSE NEGATIVE: `assert_absent_from_pptx_all` would NOT panic even though
+/// the content `R&D roadmap` is present (escaped as `R&amp;D roadmap`), silently
+/// missing a real P0 bleed.
 ///
-/// Red Gate: FAILS due to todo!() stub in assert_absent_from_pptx_slides.
+/// After the F-001 fix (entity decoding via quick_xml::escape::unescape),
+/// the decoded text is `R&D roadmap` and the sentinel IS found → panic.
 #[test]
-fn test_BC_1_14_004_ec004_sentinel_detected_in_decoded_text() {
-    // Build a slide body with the sentinel present as UTF-8 text.
-    let sentinel = "BLEED_DETECTED_IN_UTF8_TEXT";
-    let pptx = make_pptx_zip(&format!("<a:t>{sentinel}</a:t>"), "notes content");
-    // Since the sentinel IS in the slide body, assert_absent must panic.
-    // We use should_panic to verify detection works on decoded text.
-    // (The inverse — absent sentinel passes — is covered by other tests.)
+fn test_BC_1_14_004_ec004_xml_escaped_content_detected() {
+    // Embed ONLY the XML-escaped form in the slide body.
+    // A conforming PPTX exporter writing "R&D roadmap" would produce this.
+    let pptx = make_pptx_zip(
+        r"<a:t>R&amp;D roadmap</a:t>",
+        "notes content without sentinel",
+    );
+
+    // The sentinel is the HUMAN-READABLE unescaped string.
+    // assert_absent_from_pptx_all must PANIC because the decoded slide body
+    // contains "R&D roadmap". If entity decoding is absent, this wrongly passes.
     let result = std::panic::catch_unwind(|| {
-        BleedChecker::assert_absent_from_pptx_slides(&pptx, sentinel);
+        BleedChecker::assert_absent_from_pptx_all(&pptx, "R&D roadmap");
     });
-    // The implementation must have panicked (sentinel found in slide body).
     assert!(
         result.is_err(),
-        "BleedChecker must panic when sentinel is present in slide body (EC-004: text decoding)"
+        "BleedChecker must detect 'R&D roadmap' even when escaped as 'R&amp;D roadmap' \
+         (EC-004: entity decoding prevents false negatives)"
     );
+
+    // Also verify the slide-scoped check detects it.
+    let result2 = std::panic::catch_unwind(|| {
+        BleedChecker::assert_absent_from_pptx_slides(&pptx, "R&D roadmap");
+    });
+    assert!(
+        result2.is_err(),
+        "assert_absent_from_pptx_slides must also detect 'R&D roadmap' via entity decoding"
+    );
+}
+
+/// BC-1.14.004 EC-004 / AC-008 — less-than / greater-than escaping:
+/// BleedChecker detects `<item>` even when the member contains `&lt;item&gt;`
+/// (the XML-escaped form). Covers `&lt;` and `&gt;` entity references.
+#[test]
+fn test_BC_1_14_004_ec004_lt_gt_escaped_content_detected() {
+    // Embed only the escaped form.
+    let pptx = make_pptx_zip(r"<a:t>&lt;item&gt;</a:t>", "notes content");
+
+    // The sentinel is the unescaped form; must be detected after decoding.
+    let result = std::panic::catch_unwind(|| {
+        BleedChecker::assert_absent_from_pptx_slides(&pptx, "<item>");
+    });
+    assert!(
+        result.is_err(),
+        "BleedChecker must detect '<item>' even when escaped as '&lt;item&gt;' \
+         (EC-004: &lt;/&gt; entity decoding)"
+    );
+}
+
+/// BC-1.14.004 EC-004 / AC-008 — positive direction (no false positives):
+/// An absence check for a sentinel that genuinely does NOT appear in the
+/// decoded text must pass without panicking.
+///
+/// This guards against the entity-decoding implementation accidentally
+/// matching the wrong sentinel.
+#[test]
+fn test_BC_1_14_004_ec004_unescaped_sentinel_absent_passes() {
+    // Slide body contains `R&amp;D roadmap` (= decoded `R&D roadmap`).
+    // We check for a DIFFERENT sentinel — must not panic.
+    let pptx = make_pptx_zip(r"<a:t>R&amp;D roadmap</a:t>", "notes content");
+    // "DETAIL_SENTINEL" is not in the decoded text — absence check must pass.
+    BleedChecker::assert_absent_from_pptx_slides(&pptx, "DETAIL_SENTINEL");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// F-003: Zero-member guard tests — absence checks must fail-closed
+//
+// assert_absent_from_pptx_slides and assert_absent_from_pptx_all must NOT
+// silently return "absent" when they scan zero members. A valid PPTX has ≥1
+// slide body; an empty archive is not a valid PPTX.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// BC-1.14.004 / AC-008 — F-003 guard:
+/// `assert_absent_from_pptx_slides` must PANIC when given a PPTX-shaped ZIP
+/// that contains no `ppt/slides/slide*.xml` members.
+///
+/// A PPTX with zero slide bodies is either malformed or indicates an exporter
+/// structural regression. An absence check on zero members would be vacuously
+/// true — silently hiding the defect. The checker must fail-closed.
+#[test]
+#[should_panic]
+fn test_BC_1_14_004_absent_from_slides_panics_on_slideless_pptx() {
+    let pptx = make_pptx_zip_no_slides();
+    // Must panic: no slide bodies found, fail-closed.
+    BleedChecker::assert_absent_from_pptx_slides(&pptx, "ANY_SENTINEL");
+}
+
+/// BC-1.14.004 / AC-008 — F-003 guard:
+/// `assert_absent_from_pptx_all` must PANIC when given an empty ZIP archive
+/// (zero members).
+///
+/// An empty archive means nothing was scanned, so the absence check would be
+/// vacuously true. The checker must fail-closed to expose this condition.
+#[test]
+#[should_panic]
+fn test_BC_1_14_004_absent_from_all_panics_on_empty_archive() {
+    let empty = make_empty_zip();
+    // Must panic: empty archive, fail-closed.
+    BleedChecker::assert_absent_from_pptx_all(&empty, "ANY_SENTINEL");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
