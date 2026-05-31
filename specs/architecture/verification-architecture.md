@@ -1,10 +1,10 @@
 ---
 document_type: architecture-section
 section: verification-architecture
-version: "1.0"
+version: "1.1"
 status: approved
 producer: architect
-timestamp: 2026-05-24T00:00:00
+timestamp: 2026-05-30T00:00:00
 traces_to: ARCH-INDEX.md
 ---
 
@@ -58,6 +58,16 @@ inform robustness of the pure-core pipeline entry points.
 | slideforge-syntax | Parser fuzz: any input terminates and produces errors or AST (VP-014) | cargo-fuzz | P6 |
 | slideforge-eval | Eval fuzz: any valid AST terminates eval within time bound (VP-015) | cargo-fuzz | P6 |
 
+### Integration Test Properties (effectful I/O, non-Kani)
+
+Properties that exercise effectful boundaries (file I/O, ZIP parsing) and cannot
+be formally proven with Kani. Anchored by named integration tests.
+
+| Module | Property | VP | Anchoring Tests |
+|--------|----------|----|----------------|
+| slideforge-brand | Brand round-trip extraction: extract brand.toml from .pptx → synthesize → color values match | VP-051 | `test_bc_2_01_003_round_trip_pptx_to_brand_toml_and_back`, `test_bc_2_01_003_effectful_extract_load_from_toml_round_trip` |
+| slideforge-brand | Brand extraction is read-only: source .pptx byte-identical before and after extract | VP-052 | `test_bc_2_01_003_invariant_source_file_unmodified` |
+
 ### Test Sufficient (integration + snapshot)
 
 UI logic, CLI behavior, non-critical rendering paths.
@@ -91,6 +101,9 @@ Must pass before v1.0 release (formal-verifier gate):
 - VP-014: Parser fuzz: any input terminates and produces errors or AST (fuzz)
 - VP-015: Eval fuzz: any valid AST terminates eval within time bound (fuzz)
 - VP-016 through VP-047: XLSX data source (VP-016–VP-026), SQLite data source (VP-027–VP-036), shape DSL (VP-037–VP-042), rich inline formatting (VP-043–VP-047) — all unit or Kani (see VP-INDEX for per-VP tool assignment)
+- VP-048: Shape ArithmeticOverflow (Kani); VP-049: layout warnings not dropped (unit); VP-050: shape frame ordering (unit)
+- VP-051: Brand round-trip extraction (integration — effectful I/O, anchored by named tests in slideforge-brand)
+- VP-052: Brand extraction read-only invariant (integration — file-hash check before/after, anchored by named test in slideforge-brand)
 
 ## Tooling (ADR-011, Feasibility Notes)
 

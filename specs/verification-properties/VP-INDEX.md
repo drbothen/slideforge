@@ -1,9 +1,9 @@
 ---
 document_type: verification-property-index
-version: "1.0"
+version: "1.1"
 status: approved
 producer: architect
-timestamp: 2026-05-24T00:00:00
+timestamp: 2026-05-30T00:00:00
 phase: 1b
 traces_to: .factory/specs/architecture/ARCH-INDEX.md
 ---
@@ -20,13 +20,14 @@ traces_to: .factory/specs/architecture/ARCH-INDEX.md
 
 | Metric | Count |
 |--------|-------|
-| Total VPs | 50 |
+| Total VPs | 52 |
 | Kani proofs | 16 |
 | Proptest suites | 5 |
 | Fuzz targets | 2 |
 | Unit test VPs | 27 |
+| Integration test VPs | 2 |
 | P0 (Phase 6 blocking) | 7 |
-| P1 (stretch goals) | 43 |
+| P1 (stretch goals) | 45 |
 
 ---
 
@@ -84,6 +85,8 @@ traces_to: .factory/specs/architecture/ARCH-INDEX.md
 | VP-048 | Shape: from_inches / from_em with i64::MAX returns Err(ArithmeticOverflow) — not silent saturation | slideforge-layout | Kani | P6 | P1 | draft |
 | VP-049 | LaidOutDeck.warnings populated with XrefTargetNotFound and OffCanvas from layout::run (not dropped) | slideforge-layout | unit | P3 | P1 | draft |
 | VP-050 | Shape frames in LaidOutDeck.frames appear at index >= region_count (after all placeholder frames) | slideforge-layout | unit | P3 | P1 | draft |
+| VP-051 | Brand round-trip extraction: extract brand.toml from .pptx → synthesize → color values match | slideforge-brand | integration | P3 | P1 | draft |
+| VP-052 | Brand extraction is read-only: source .pptx byte-identical before and after extract | slideforge-brand | integration | P3 | P1 | draft |
 
 ---
 
@@ -141,3 +144,5 @@ traces_to: .factory/specs/architecture/ARCH-INDEX.md
 | VP-048 | BC-3.04.001 |
 | VP-049 | BC-3.04.001, BC-3.05.001 |
 | VP-050 | BC-3.04.001 |
+| VP-051 | BC-2.01.003, DI-015 |
+| VP-052 | BC-2.01.003 |

@@ -9,8 +9,8 @@ traces_to:
   - .factory/stories/epics.md
   - .factory/stories/dependency-graph.md
   - .factory/stories/wave-schedule.md
-total_stories: 74
-stories_written: 74
+total_stories: 76
+stories_written: 76
 stories_ready: 0
 stories_in_progress: 3
 stories_merged: 30
@@ -18,7 +18,7 @@ stories_merged: 30
 
 # STORY-INDEX — slideforge v1.0
 
-> Authoritative index of all 72 stories across 6 waves and 21 epics.
+> Authoritative index of all 76 stories across 6 waves and 21 epics.
 > Update `status` and `merged_sha` fields as stories progress.
 > Story files live in `.factory/stories/stories/STORY-NNN-[short].md`.
 >
@@ -36,8 +36,8 @@ stories_merged: 30
 | Wave 4 | 13 | 13 | 0 | 0 | 0 | 0 |
 | Wave 5 | 14 | 14 | 0 | 0 | 0 | 0 |
 | Wave 6 | 6 | 6 | 0 | 0 | 0 | 0 |
-| Wave TBD | 3 | 3 | 0 | 0 | 0 | 0 |
-| **Total** | **74** | **41** | **0** | **3** | **30** | **0** |
+| Wave TBD | 5 | 5 | 0 | 0 | 0 | 0 |
+| **Total** | **76** | **43** | **0** | **3** | **30** | **0** |
 
 ---
 
@@ -166,7 +166,7 @@ stories_merged: 30
 
 ---
 
-## Wave TBD: Deferred Surfaces (3 stories)
+## Wave TBD: Deferred Surfaces (5 stories)
 
 These stories were created to resolve explicit "deferred surface" placeholders in BCs but have not yet been wave-scheduled. Wave assignment pending orchestrator dispatch (likely Wave 3-4, after STORY-028 merges).
 
@@ -175,8 +175,10 @@ These stories were created to resolve explicit "deferred surface" placeholders i
 | [STORY-072](stories/STORY-072-shape-gradient-fills.md) | EPIC-07 | shape: Gradient Fills (FillSpec::Gradient) | BC-3.04.001 | P2 | 3 | strict | draft |
 | [STORY-073](stories/STORY-073-bullets-layout.md) | EPIC-07 | Layout: ContentBlock::Bullets → FrameContent::TextRun frame generation | BC-3.05.001 | P1 | 5 | strict | draft |
 | [STORY-074](stories/STORY-074-brand-em-sizing.md) | EPIC-07 | Brand-aware Em conversion (font_size_emu) | BC-3.04.001 | P2 | 3 | strict | draft |
+| [STORY-075](stories/STORY-075-brand-loader-footer-detection.md) | EPIC-06 | Brand Loader: Footer Detection from .pptx Slide Master/Layout Placeholders | BC-2.01.001 | P1 | 3 | strict | draft |
+| [STORY-076](stories/STORY-076-brand-srgbclr-transform-extraction.md) | EPIC-06 | Brand Loader: Transform-Aware Theme Color Extraction (srgbClr lumMod/tint/shade) | BC-2.01.001 | P1 | 3 | strict | draft |
 
-**Wave TBD total points: 11**
+**Wave TBD total points: 17**
 
 ---
 
@@ -190,8 +192,8 @@ These stories were created to resolve explicit "deferred surface" placeholders i
 | Wave 4 | 13 | 85 | 6.5 |
 | Wave 5 | 14 | 84 | 6.0 |
 | Wave 6 | 6 | 42 | 7.0 |
-| Wave TBD | 3 | 11 | 3.7 |
-| **Total** | **74** | **448** | **6.1** |
+| Wave TBD | 5 | 17 | 3.4 |
+| **Total** | **76** | **454** | **6.0** |
 
 > No story exceeds 13 points. STORY-023 (brand synthesis — 13 pts) and STORY-037
 > (PPTX core serialization — 13 pts) are the largest stories. Both have well-
@@ -205,6 +207,15 @@ These stories were created to resolve explicit "deferred surface" placeholders i
 > STORY-074 (brand-em-sizing — 3 pts) closes the DEFAULT_EM_IN_EMU deferral from
 > STORY-028 by adding BrandFonts.font_size_emu and threading brand font size into
 > layout_shapes(); created by pass-18 spec adjudication (F-P18-MED-001).
+> STORY-075 (brand-loader-footer-detection — 3 pts) closes adversary finding F-024A-OBS-1:
+> loader.rs:214 hardcoded footer_text: None, making STORY-024's [footer] writer permanently
+> dead. This story adds footer placeholder detection from ppt/slideMasters/slideMaster1.xml
+> and presProps.xml visibility flags, anchored to BC-2.01.001 postcondition 1.
+> STORY-076 (brand-srgbclr-transform-extraction — 3 pts) closes adversary finding from
+> STORY-024 cascade (OBS): parse_theme_colors in color.rs silently drops lumMod/tint/shade
+> children on srgbClr elements with no EC-003-style comment emitted. This story widens
+> transform detection to srgbClr (matching existing schemeClr treatment); requires PO to
+> widen BC-2.01.001 and BC-2.01.003 EC-003 before the story reaches ready.
 
 ---
 

@@ -1,10 +1,10 @@
 ---
 document_type: architecture-section
 section: verification-coverage-matrix
-version: "1.0"
+version: "1.1"
 status: approved
 producer: architect
-timestamp: 2026-05-24T00:00:00
+timestamp: 2026-05-30T00:00:00
 traces_to: ARCH-INDEX.md
 ---
 
@@ -67,6 +67,8 @@ traces_to: ARCH-INDEX.md
 | VP-048 | Shape: from_inches / from_em with i64::MAX returns Err(ArithmeticOverflow) — not silent saturation | slideforge-layout | Kani | P6 | P1 |
 | VP-049 | LaidOutDeck.warnings populated with XrefTargetNotFound and OffCanvas from layout::run (not dropped) | slideforge-layout | unit | P3 | P1 |
 | VP-050 | Shape frames in LaidOutDeck.frames appear at index >= region_count (after all placeholder frames) | slideforge-layout | unit | P3 | P1 |
+| VP-051 | Brand round-trip extraction: extract brand.toml from .pptx → synthesize → color values match | slideforge-brand | integration | P3 | P1 |
+| VP-052 | Brand extraction is read-only: source .pptx byte-identical before and after extract | slideforge-brand | integration | P3 | P1 |
 
 ## Per-Module Counts
 
@@ -76,7 +78,7 @@ traces_to: ARCH-INDEX.md
 | slideforge-eval | 2 | 0 | 1 | 1 | 0 | 4 |
 | slideforge-validate | 3 | 0 | 0 | 0 | 0 | 3 |
 | slideforge-layout | 5 | 7 | 1 | 0 | 0 | 13 |
-| slideforge-brand | 0 | 0 | 1 | 0 | 0 | 1 |
+| slideforge-brand | 0 | 0 | 1 | 0 | 2 | 3 |
 | slideforge-pptx | 0 | 2 | 1 | 0 | 0 | 3 |
 | slideforge-pdf | 1 | 0 | 0 | 0 | 0 | 1 |
 | slideforge-data | 3 | 18 | 0 | 0 | 0 | 21 |
@@ -85,20 +87,21 @@ Notes:
 - slideforge-data: VP-021/VP-022/VP-023 use Kani (pure `promote_float` function); VP-016 through VP-020 and VP-024 through VP-036 (minus VP-021/022/023) use unit tests = 18 unit VPs.
 - slideforge-layout: VP-037/VP-040/VP-041/VP-045/VP-048 use Kani (pure arithmetic/comparison); VP-038/VP-039/VP-042/VP-046/VP-047/VP-049/VP-050 use unit tests; VP-011 proptest = 5 Kani + 7 unit + 1 proptest. VP-048 (Kani, ArithmeticOverflow checked_mul); VP-049 (unit, warnings not dropped); VP-050 (unit, frame ordering).
 - slideforge-pptx: VP-013 proptest + VP-043/VP-044 unit = 1 proptest + 2 unit = 3 total.
+- slideforge-brand: VP-012 proptest (round-trip: synthesize → extract) + VP-051 integration (extraction direction: .pptx → brand.toml → synthesize) + VP-052 integration (read-only: source file byte-identical after extract) = 1 proptest + 2 integration = 3 total.
 
 ## Totals
 
 | Metric | Count |
 |--------|-------|
-| Total VPs | 50 |
+| Total VPs | 52 |
 | Kani proofs | 16 |
 | Proptest suites | 5 |
 | Fuzz targets | 2 |
 | Unit test VPs | 27 |
-| Integration VPs | 0 |
+| Integration VPs | 2 |
 | P0 (Phase 6 blocking) | 7 |
-| P1 (stretch / Phase 3+) | 43 |
+| P1 (stretch / Phase 3+) | 45 |
 
-**Arithmetic check:** 16 (Kani) + 5 (proptest) + 2 (fuzz) + 27 (unit) + 0 (integration) = 50 total. Consistent.
+**Arithmetic check:** 16 (Kani) + 5 (proptest) + 2 (fuzz) + 27 (unit) + 2 (integration) = 52 total. Consistent.
 
-**VP-INDEX cross-check:** VP-INDEX total = 50. Coverage matrix VP row count = 50. Per-tool column totals: 16 + 5 + 2 + 27 = 50. Consistent.
+**VP-INDEX cross-check:** VP-INDEX total = 52. Coverage matrix VP row count = 52. Per-tool column totals: 16 + 5 + 2 + 27 + 2 = 52. Consistent.

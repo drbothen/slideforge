@@ -13,7 +13,7 @@ crate: slideforge-brand
 subsystems: [SS-04, SS-18]
 target_module: slideforge-brand
 behavioral_contracts: [BC-2.01.003]
-verification_properties: []
+verification_properties: [VP-051, VP-052]
 nfr_refs: [NFR-021, NFR-022, NFR-023, NFR-024, NFR-025]
 depends_on:
   - STORY-022
@@ -52,7 +52,7 @@ Agent context budget: 200k tokens. This story is ~4% of budget — well within l
 - [ ] **AC-001:** `BrandExtractor::extract(source_pptx: &str, output_dir: &Path, force: bool) -> Result<BrandExtractionResult, BrandError>` loads the `.pptx` via `BrandLoader::load()` (STORY-022), serializes the `BrandTemplate` fields to `brand.toml` format, and writes the file to `output_dir/brand.toml`. On success, returns `BrandExtractionResult { brand_toml_path, logo_asset_path: Option<PathBuf> }`.
   (traces to BC-2.01.003 postcondition 1 — `brand.toml` written with `[colors]`, `[fonts]`, `[logo]`, `[footer]`)
 
-- [ ] **AC-002:** If `output_dir/brand.toml` already exists and `force = false`, returns `BrandError::OutputExists { path: Arc<str> }` with message: `"brand.toml already exists. Use --force to overwrite."` (exit code 4). If `force = true`, the existing file is overwritten.
+- [ ] **AC-002:** If `output_dir/brand.toml` already exists and `force = false`, returns `BrandError::OutputExists { path: Arc<str> }` with message: `"<path>: brand.toml already exists. Use --force to overwrite."` (exit code 4). If `force = true`, the existing file is overwritten.
   (traces to BC-2.01.003 edge case EC-001 — existing brand.toml without --force)
 
 - [ ] **AC-003:** All 12 OOXML color slots are written in the `[colors]` section of `brand.toml` using their semantic field names. The slot-to-field mapping is:
@@ -72,20 +72,20 @@ Agent context budget: 200k tokens. This story is ~4% of budget — well within l
 - [ ] **AC-005:** `sysClr` elements (Windows system color references) in `theme1.xml` use their `lastClr` attribute value as the hex color in `brand.toml`. This is the same logic as `BrandLoader` (from STORY-022).
   (traces to BC-2.01.003 edge case EC-002 — `sysClr` → `lastClr`)
 
-- [ ] **AC-006:** Color slots with `lumMod`/`tint`/`shade` transforms (`schemeClr` with modifiers) are written to `brand.toml` as their base hex value with an inline TOML comment: `# derived via tint/shade; may not match exact color`. This is the best-effort extraction per BC-2.01.003 edge case EC-003.
+- [ ] **AC-006:** Color slots with `lumMod`/`tint`/`shade` transforms (`schemeClr` with modifiers) are written to `brand.toml` as their base hex value — specifically, the referenced slot's resolved hex for the resolvable case; for references that cannot be resolved (self-reference or color-map mnemonics like `tx1`/`bg1`/`phClr`), a best-effort default hex is written instead — with an inline TOML comment in both cases: `# derived via tint/shade; may not match exact color`. This is the best-effort extraction per BC-2.01.003 edge case EC-003.
   (traces to BC-2.01.003 edge case EC-003 — tint/shade transforms noted in comment)
 
 - [ ] **AC-007:** If the source `.pptx` has multiple slide masters, only `slideMaster1.xml` is processed. A lint warning is emitted: `tracing::warn!("Source .pptx has multiple slide masters; extracting from slideMaster1.xml only.")`.
   (traces to BC-2.01.003 edge case EC-004)
 
 - [ ] **AC-008:** The source `.pptx` file is NEVER modified. Read-only file access only. An integration test verifies the SHA-256 hash of the source file before and after extraction is identical.
-  (traces to BC-2.01.003 invariant 2 — extraction is read-only)
+  (traces to BC-2.01.003 invariant 2 — extraction is read-only; exercises VP-052)
 
 - [ ] **AC-009:** The `brand.toml` TOML output is human-readable with section headers (`[colors]`, `[fonts]`, `[logo]`, `[footer]`), one field per line, and fields in a stable order (not `HashMap` iteration order — use `IndexMap` or explicit ordering).
   (traces to BC-2.01.003 invariant 3 — semantic field names are fixed; implies stable ordering)
 
 - [ ] **AC-010:** The extraction enables round-trip: load `.pptx` → extract `brand.toml` → synthesize from `brand.toml` → produced `BrandTemplate` has same color hex values as original `.pptx` template. Integration test verifies this round-trip.
-  (traces to BC-2.01.003 verification property — round-trip integration test)
+  (traces to BC-2.01.003 verification property — round-trip integration test; exercises VP-051)
 
 - [ ] **AC-011:** `#![forbid(unsafe_code)]` (NFR-024), clippy clean (NFR-022), `=` version pinning (NFR-025) maintained.
 
