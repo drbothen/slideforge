@@ -198,9 +198,11 @@ pub fn resolve_overlay(
                 tracing::warn!(
                     logo_path = %logo_path_str,
                     extension = %ext,
-                    "brand_overlay logo has unknown extension; \
-                     media_type defaults to application/octet-stream — \
-                     logo may not render correctly in PPTX output"
+                    "brand_overlay logo '{}' has unrecognized extension '{}'; \
+                     media_type set to application/octet-stream — \
+                     logo may not render in all viewers",
+                    logo_path_str,
+                    ext,
                 );
             }
 
@@ -587,10 +589,15 @@ mod tests {
     }
 
     /// F-025-002: unknown-extension logo resolves Ok (not a hard error) but
-    /// the media type is `application/octet-stream`.
+    /// the media type is `application/octet-stream` and a `tracing::warn!` is
+    /// emitted whose message text matches BC-2.02.001 EC-007 exactly.
     ///
     /// The overlay-resolution layer does NOT hard-error on unknown extension —
     /// parser/validator rejection is deferred to STORY-008/009.
+    ///
+    /// Log capture via `tracing_test::traced_test` makes the BC EC-007 message
+    /// parity load-bearing (TD-VSDD-059).
+    #[tracing_test::traced_test]
     #[test]
     fn test_f025_002_unknown_ext_overlay_resolves_with_warn() {
         let dir = tempdir().expect("tempdir");
@@ -612,6 +619,27 @@ mod tests {
             logo.media_type.as_ref(),
             "application/octet-stream",
             "unknown extension must yield application/octet-stream"
+        );
+        // BC-2.02.001 EC-007 message parity (load-bearing — must match the BC string).
+        // The warn message must say "unrecognized extension" (not "unknown extension").
+        assert!(
+            logs_contain("unrecognized extension"),
+            "warn must contain 'unrecognized extension' per BC-2.02.001 EC-007"
+        );
+        // Must reference the logo path inline in the message.
+        assert!(
+            logs_contain("weird.xyz"),
+            "warn must contain the logo path 'weird.xyz' inline in the message"
+        );
+        // Must say "media_type set to" (not "defaults to").
+        assert!(
+            logs_contain("media_type set to"),
+            "warn must contain 'media_type set to' per BC-2.02.001 EC-007"
+        );
+        // Must say "may not render in all viewers" (not "PPTX output" — covers PDF/HTML too).
+        assert!(
+            logs_contain("may not render in all viewers"),
+            "warn must contain 'may not render in all viewers' per BC-2.02.001 EC-007"
         );
     }
 
