@@ -1,4 +1,7 @@
 #![allow(clippy::missing_docs_in_private_items, clippy::unwrap_used)]
+#![allow(non_snake_case)] // test_BC_S_SS_NNN_xxx naming convention per TDD traceability
+#![allow(clippy::doc_markdown)] // test function names in doc comments do not need backticks
+#![allow(clippy::no_effect_underscore_binding)] // _warning type-check bindings in tests
 //! Failing test suite (Red Gate) for STORY-078: Parser section block syntax.
 //!
 //! # TDD Red Gate
@@ -164,7 +167,10 @@ fn test_section_recognized_type_with_sub_blocks() {
         "methodology",
         "AC-002: section kind must be \"methodology\""
     );
-    assert!(!section.kind.span().is_empty(), "AC-002: kind span must be non-empty");
+    assert!(
+        !section.kind.span().is_empty(),
+        "AC-002: kind span must be non-empty"
+    );
     assert_eq!(
         section.fields.len(),
         2,
@@ -207,10 +213,7 @@ fn test_section_recognized_type_with_sub_blocks() {
 #[test]
 fn test_section_unknown_type_parsed_verbatim() {
     // AC-003 canonical fixture (DIR-077-001-A Ruling 3 / story spec AC-003)
-    let src = concat!(
-        "section foobar:\n",
-        "  detail: \"Some content.\"\n",
-    );
+    let src = concat!("section foobar:\n", "  detail: \"Some content.\"\n",);
     let result = parse_src_ok(src);
 
     // Zero errors — the parse must SUCCEED for any type name
@@ -370,9 +373,9 @@ fn test_section_nested_in_slide_error() {
     // of being nested — the exact wording is implementation-determined, but must
     // communicate the constraint.
     let error_messages: Vec<String> = errors.iter().map(|e| format!("{e:?}")).collect();
-    let has_top_level_error = error_messages
-        .iter()
-        .any(|msg| msg.contains("top-level") || msg.contains("top_level") || msg.contains("section"));
+    let has_top_level_error = error_messages.iter().any(|msg| {
+        msg.contains("top-level") || msg.contains("top_level") || msg.contains("section")
+    });
     assert!(
         has_top_level_error,
         "AC-005: at least one error must reference the top-level constraint for nested section blocks, errors: {error_messages:?}"
@@ -422,10 +425,22 @@ fn test_BC_3_02_002_register_key_unknown_returns_false() {
     // pub-export `is_register_sub_block_key` from it.
     use crate::section::is_register_sub_block_key;
 
-    assert!(!is_register_sub_block_key("foo"), "'foo' is not a register key");
-    assert!(!is_register_sub_block_key("body"), "'body' is not a register key");
-    assert!(!is_register_sub_block_key("title"), "'title' is not a register key");
-    assert!(!is_register_sub_block_key(""), "empty string is not a register key");
+    assert!(
+        !is_register_sub_block_key("foo"),
+        "'foo' is not a register key"
+    );
+    assert!(
+        !is_register_sub_block_key("body"),
+        "'body' is not a register key"
+    );
+    assert!(
+        !is_register_sub_block_key("title"),
+        "'title' is not a register key"
+    );
+    assert!(
+        !is_register_sub_block_key(""),
+        "empty string is not a register key"
+    );
 }
 
 // ── EC-005 / EC-006 ───────────────────────────────────────────────────────────
@@ -463,9 +478,9 @@ fn test_reserved_name_collision() {
 
     // The error message must contain a corrective hint about register syntax
     let error_messages: Vec<String> = errors.iter().map(|e| format!("{e:?}")).collect();
-    let has_corrective_hint = error_messages.iter().any(|msg| {
-        msg.contains("report") || msg.contains("reserved") || msg.contains("register")
-    });
+    let has_corrective_hint = error_messages
+        .iter()
+        .any(|msg| msg.contains("report") || msg.contains("reserved") || msg.contains("register"));
     assert!(
         has_corrective_hint,
         "EC-006: error must reference the reserved register name 'report' or provide a corrective hint, errors: {error_messages:?}"
@@ -553,8 +568,8 @@ fn test_section_error_accumulation() {
     // enforce is errors.len() >= 2.
     let src = concat!(
         "section methodology:\n",
-        "  : \"orphan-value-1\"\n",   // malformed: no IDENT key, just a colon
-        "  : \"orphan-value-2\"\n",   // malformed: no IDENT key, just a colon
+        "  : \"orphan-value-1\"\n", // malformed: no IDENT key, just a colon
+        "  : \"orphan-value-2\"\n", // malformed: no IDENT key, just a colon
     );
     let errors = parse_src_errors(src);
 

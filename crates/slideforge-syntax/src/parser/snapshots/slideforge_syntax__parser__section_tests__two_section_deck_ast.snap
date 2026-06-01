@@ -1,0 +1,129 @@
+---
+source: crates/slideforge-syntax/src/parser/section_tests.rs
+expression: result.deck
+---
+DeckNode {
+    version: None,
+    lang: None,
+    brand: None,
+    vars: [],
+    set_rules: [],
+    variants: None,
+    variant_names: [],
+    items: [
+        Section(
+            Spanned(
+                SectionNode {
+                    kind: Spanned(
+                        "methodology",
+                        Span {
+                            file_id: 0,
+                            start: 8,
+                            end: 19,
+                        },
+                    ),
+                    fields: [
+                        FieldNode {
+                            name: Spanned(
+                                "report",
+                                Span {
+                                    file_id: 0,
+                                    start: 23,
+                                    end: 29,
+                                },
+                            ),
+                            value: Spanned(
+                                Template(
+                                    [
+                                        Literal(
+                                            "Methodology content.",
+                                        ),
+                                    ],
+                                ),
+                                Span {
+                                    file_id: 0,
+                                    start: 31,
+                                    end: 53,
+                                },
+                            ),
+                        },
+                    ],
+                },
+                Span {
+                    file_id: 0,
+                    start: 0,
+                    end: 55,
+                },
+            ),
+        ),
+        Section(
+            Spanned(
+                SectionNode {
+                    kind: Spanned(
+                        "scope",
+                        Span {
+                            file_id: 0,
+                            start: 63,
+                            end: 68,
+                        },
+                    ),
+                    fields: [
+                        FieldNode {
+                            name: Spanned(
+                                "detail",
+                                Span {
+                                    file_id: 0,
+                                    start: 72,
+                                    end: 78,
+                                },
+                            ),
+                            value: Spanned(
+                                Template(
+                                    [
+                                        Literal(
+                                            "Scope detail.",
+                                        ),
+                                    ],
+                                ),
+                                Span {
+                                    file_id: 0,
+                                    start: 80,
+                                    end: 95,
+                                },
+                            ),
+                        },
+                        FieldNode {
+                            name: Spanned(
+                                "report",
+                                Span {
+                                    file_id: 0,
+                                    start: 98,
+                                    end: 104,
+                                },
+                            ),
+                            value: Spanned(
+                                Template(
+                                    [
+                                        Literal(
+                                            "Scope report.",
+                                        ),
+                                    ],
+                                ),
+                                Span {
+                                    file_id: 0,
+                                    start: 106,
+                                    end: 121,
+                                },
+                            ),
+                        },
+                    ],
+                },
+                Span {
+                    file_id: 0,
+                    start: 55,
+                    end: 122,
+                },
+            ),
+        ),
+    ],
+}

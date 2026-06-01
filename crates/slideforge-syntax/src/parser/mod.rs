@@ -29,6 +29,7 @@ pub mod alias;
 pub mod control_flow;
 pub mod deck;
 pub mod expr;
+pub mod section;
 pub mod shape;
 pub mod slide;
 pub mod template;
@@ -193,33 +194,45 @@ pub fn parse(
     let (deck_opt, parse_errors) = deck_parser(file_id).parse(input).into_output_errors();
 
     // Phase 5: convert chumsky Rich errors to SyntaxError.
+    //
+    // Two categories are distinguished:
+    //
+    // A) `W-PAR-*` prefixed messages — non-fatal parse-time warnings emitted by
+    //    `section_block_parser` (and future warning-emitting parsers). These are
+    //    accumulated in `parse_time_warnings` and later merged into
+    //    `ParseResult::warnings`, allowing the parse to succeed.
+    //
+    // B) All other messages (E-PAR-*, unexpected tokens, indent errors) — fatal;
+    //    accumulated in `errors` and cause an `Err` return.
+    //
     // When the found token is `Indent(n)`, classify as IndentError (E-PAR-001)
     // since it means the parser encountered an unexpected indentation level.
+    //
+    // Real tab errors are caught by the lexer (LexError::TabIndentation).
+    // Misaligned dedents are caught by the lexer (LexError::IndentationInconsistency).
+    //
+    // The parser sees an unexpected Indent(n) token when the grammar does not
+    // expect any further nesting at the current position — for example, a
+    // second Indent inside a slide field list. The "found" level is the value
+    // carried by the Indent token. The "expected" level is derived as
+    // `found_n - 1` (one space less than found), which correctly identifies
+    // the last valid indentation level for the common case:
+    //
+    // - Indent(3) inside a 2-space block → expected=2, found=3  ✓
+    // - Indent(4) inside a 2-space block → expected=3, found=4  ✓
+    //
+    // The definitively correct solution would thread the open-block indent
+    // level through the chumsky State context, which is STORY-007+ scope.
+    // The `found_n - 1` formula removes the prior hardcoding of `expected=2`
+    // and is correct for all cases where exactly one extra space is added.
+    let mut parse_time_warnings: Vec<SyntaxError> = Vec::new();
+
     for rich_err in parse_errors {
         let span = rich_err.span();
         let byte_start = span.start;
         let (line, col) = byte_offset_to_line_col(src, byte_start);
         let span_len = span.end.saturating_sub(span.start).max(1);
 
-        // Classify parser-level Indent token errors as IndentError (E-PAR-001).
-        //
-        // Real tab errors are caught by the lexer (LexError::TabIndentation).
-        // Misaligned dedents are caught by the lexer (LexError::IndentationInconsistency).
-        //
-        // The parser sees an unexpected Indent(n) token when the grammar does not
-        // expect any further nesting at the current position — for example, a
-        // second Indent inside a slide field list. The "found" level is the value
-        // carried by the Indent token. The "expected" level is derived as
-        // `found_n - 1` (one space less than found), which correctly identifies
-        // the last valid indentation level for the common case:
-        //
-        // - Indent(3) inside a 2-space block → expected=2, found=3  ✓
-        // - Indent(4) inside a 2-space block → expected=3, found=4  ✓
-        //
-        // The definitively correct solution would thread the open-block indent
-        // level through the chumsky State context, which is STORY-007+ scope.
-        // The `found_n - 1` formula removes the prior hardcoding of `expected=2`
-        // and is correct for all cases where exactly one extra space is added.
         let syntax_err = if let Some(Token::Indent(found_n)) = rich_err.found() {
             let expected = found_n.saturating_sub(1);
             SyntaxError::indent_error(
@@ -233,6 +246,23 @@ pub fn parse(
             )
         } else {
             let message = format!("{:?}", rich_err.reason());
+
+            // Route W-PAR-* diagnostics as non-fatal warnings (DIR-077-001-A Ruling 2).
+            // These are emitted by `section_block_parser` for unrecognised sub-block
+            // keys (EC-005 / BC-3.02.002 invariant 4) and must not fail the parse.
+            if message.contains("W-PAR-") {
+                let warning = SyntaxError::unexpected_token(
+                    file_path.to_string(),
+                    line,
+                    col,
+                    message,
+                    src.to_string(),
+                    byte_start,
+                    span_len,
+                );
+                parse_time_warnings.push(warning);
+                continue;
+            }
 
             // Classify structured error messages by their E-PAR-NNN prefix.
             // Parsers emit these as `Rich::custom(span, "E-PAR-NNN: ...")` so
@@ -297,9 +327,22 @@ pub fn parse(
     //
     // Missing `slideforge_version` is a non-fatal warning per BC-1.09.010 /
     // BC-1.13.001 postcondition 2.  Emit it when the source contains slides.
-    let mut warnings: Vec<SyntaxError> = Vec::new();
+    //
+    // Parse-time warnings (W-PAR-*) accumulated during Phase 5 are merged here.
+    let mut warnings: Vec<SyntaxError> = parse_time_warnings;
     let deck = deck_opt.unwrap_or_default();
-    if version_gate_result == VersionGateResult::MissingVersion && !deck.items.is_empty() {
+    // Missing-version warning fires when the deck contains slides (or control-flow
+    // items that produce slides). Section-only decks (DOCX/PDF document output)
+    // do not require a version declaration — they have no PPTX render path.
+    let has_slide_items = deck.items.iter().any(|i| {
+        matches!(
+            i,
+            crate::ast::BlockItem::Slide(_)
+                | crate::ast::BlockItem::For(_)
+                | crate::ast::BlockItem::If(_)
+        )
+    });
+    if version_gate_result == VersionGateResult::MissingVersion && has_slide_items {
         warnings.push(SyntaxError::version_error(
             file_path.to_string(),
             "E-PAR-010: missing slideforge_version declaration — \

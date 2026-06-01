@@ -4,7 +4,9 @@
 //! reserved names:
 //!
 //! 1. **Reserved structural keywords** — names used as DSL keywords at the
-//!    deck / slide level (`vars`, `set`, `alias`, `variants`, `section`).
+//!    deck / slide level (`vars`, `set`, `alias`, `variants`).
+//!    Note: `section` was un-reserved in STORY-078 and is now an active
+//!    block-level introducer handled by `parser/section.rs`.
 //! 2. **Reserved directive keywords** — `@`-prefixed names (`@for`, `@if`,
 //!    `@elif`, `@else`, `@include`, `@data`, `@fn`, `@mixin`, `@while`).
 //! 3. **Slide-type keywords** — the 31 built-in slide types that must not be
@@ -71,7 +73,9 @@ static RESERVED_KEYWORDS: phf::Map<&'static str, (&'static str, &'static str)> =
     "alias"     => ("E-PAR-006", "type alias declaration keyword"),
     "variants"  => ("E-PAR-006", "audience variants block keyword"),
     "slide"     => ("E-PAR-006", "slide block keyword"),
-    "section"   => ("E-PAR-006", "section block keyword"),
+    // NOTE: "section" was removed from this table in STORY-078.
+    // "section" is now an active block-level introducer (same tier as "slide"),
+    // not a reserved-to-error keyword. classify_keyword("section") returns None.
     "shape"     => ("E-PAR-006", "shape block keyword"),
     // ── Reserved bare identifiers (E-PAR-006 — reserved for future use) ──
     "component" => ("E-PAR-006", "reusable components (planned for slideforge v2)"),
