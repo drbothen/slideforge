@@ -2353,27 +2353,137 @@ mod tests {
         );
     }
 
-    /// STORY-073 / EC-003 — Nested bullet (children > 0) produces frames for both the
-    /// parent item and the nested children, with depth preserved (not flattened).
+    /// STORY-073 / EC-002 — A single `BulletItem` with empty inlines (`inlines: vec![]`)
+    /// produces EXACTLY ONE `FrameContent::TextRun` frame whose inline sequence is empty.
     ///
-    /// The layout stage does NOT flatten nested bullet lists. Each `BulletItem` at any
-    /// nesting level (parent or child) produces its own `FrameContent::TextRun` frame.
+    /// This is distinct from EC-001 (empty bullet LIST → 0 frames): here the LIST has
+    /// one item but that item has no inline content. The layout engine must still emit a
+    /// frame for the item — it must NOT skip items with empty `inlines`.
     ///
-    /// At Red Gate: no frames for any bullet items → count is 0, assertions fail.
+    /// Load-bearing (F-P1-LOW-001): if the implementation skips `BulletItem` entries
+    /// whose `inlines` is empty (e.g., with an `if inlines.is_empty() { continue }` guard),
+    /// the count assertion below fails (0 frames instead of 1).
+    ///
+    /// At Red Gate: `layout::run` does not process `ContentBlock::Bullets` at all, so
+    /// 0 TextRun frames are produced — the count assertion fails immediately.
     #[test]
-    fn test_bc_3_05_001_story073_ec003_nested_bullet_produces_frame_per_item() {
+    fn test_bc_3_05_001_story073_ec002_empty_inlines_bullet_produces_one_frame() {
         use slideforge_types::{Block, BulletItem, ContentBlock, InlineNode, SourceSpan};
 
-        let child_item = BulletItem {
-            inlines: vec![InlineNode::Plain(Arc::from("nested child"))],
+        // One bullet item with empty inlines — the bullet exists but has no text content.
+        let bullet_items = vec![BulletItem {
+            inlines: vec![],
+            children: vec![],
+            span: SourceSpan::default(),
+        }];
+        let block = Block {
+            content: ContentBlock::Bullets(bullet_items),
+            label: None,
+            span: SourceSpan::default(),
+        };
+        let slide = Slide {
+            slide_type: Arc::from("title"),
+            fields: OrderedMap::new(),
+            blocks: vec![block],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+            overlay: None,
+            register_content: vec![],
+        };
+        let deck = make_deck(vec![slide]);
+        let brand = make_brand();
+
+        let result = run(&deck, &brand).expect(
+            "layout::run must succeed for a bullet item with empty inlines (EC-002)",
+        );
+
+        let slide_out = &result.slides[0];
+
+        // Collect all TextRun frames (regardless of origin — region-map frames produce
+        // Title/Subtitle variants, not TextRun, so all TextRun frames here come from bullets).
+        let text_run_frames: Vec<&Vec<InlineNode>> = slide_out
+            .frames
+            .iter()
+            .filter_map(|f| match &f.content {
+                FrameContent::TextRun(nodes) => Some(nodes),
+                _ => None,
+            })
+            .collect();
+
+        // EC-002 load-bearing: exactly ONE TextRun frame — one per bullet item, even when
+        // the item's inline sequence is empty. NOT zero (item must not be skipped).
+        assert_eq!(
+            text_run_frames.len(),
+            1,
+            "EC-002: one BulletItem with empty inlines must produce exactly 1 TextRun frame, \
+             not 0 (skipped) and not >1; got {} TextRun frames (total frames: {})",
+            text_run_frames.len(),
+            slide_out.frames.len()
+        );
+
+        // The single TextRun frame must carry an EMPTY inline sequence (verbatim pass-through).
+        assert!(
+            text_run_frames[0].is_empty(),
+            "EC-002: the TextRun frame for a bullet with empty inlines must carry an \
+             empty Vec<InlineNode>; got: {:?}",
+            text_run_frames[0]
+        );
+
+        // No errors or warnings from an otherwise well-formed empty-inlines bullet.
+        assert!(
+            result.warnings.is_empty(),
+            "EC-002: empty-inlines bullet must produce zero warnings; got: {:?}",
+            result.warnings
+        );
+    }
+
+    /// STORY-073 / EC-003 — Nested bullets at THREE levels (parent → child → grandchild)
+    /// produce one `FrameContent::TextRun` frame per item in DEPTH-FIRST source order:
+    /// parent first, child second, grandchild third.
+    ///
+    /// This test uses POSITIONAL assertions on the frame vector, not order-independent
+    /// `.any()` matching. The expected invariant:
+    ///   frames[parent_idx]       carries the parent inlines
+    ///   frames[parent_idx + 1]   carries the child inlines
+    ///   frames[parent_idx + 2]   carries the grandchild inlines
+    ///
+    /// Load-bearing (F-P1-LOW-002): a future change that emits children before parents,
+    /// reverses depth-first traversal, or flattens nesting in a different order will cause
+    /// these positional assertions to fail. The order-independent `.any()` approach used in
+    /// the original EC-003 test would NOT catch such a regression.
+    ///
+    /// At Red Gate: `layout::run` does not process `ContentBlock::Bullets` → 0 TextRun
+    /// frames → the exact-count assertion and all positional assertions fail immediately.
+    #[test]
+    fn test_bc_3_05_001_story073_ec003_nested_bullets_exact_frame_order_three_levels() {
+        use slideforge_types::{Block, BulletItem, ContentBlock, InlineNode, SourceSpan};
+
+        // Canonical sentinel strings — chosen to be unambiguously distinct.
+        let parent_marker = Arc::from("EC003_PARENT_BULLET");
+        let child_marker = Arc::from("EC003_CHILD_BULLET");
+        let grandchild_marker = Arc::from("EC003_GRANDCHILD_BULLET");
+
+        // Build the three-level tree:
+        //   parent
+        //     child
+        //       grandchild
+        let grandchild_item = BulletItem {
+            inlines: vec![InlineNode::Plain(Arc::clone(&grandchild_marker))],
             children: vec![],
             span: SourceSpan::default(),
         };
+        let child_item = BulletItem {
+            inlines: vec![InlineNode::Plain(Arc::clone(&child_marker))],
+            children: vec![grandchild_item],
+            span: SourceSpan::default(),
+        };
         let parent_item = BulletItem {
-            inlines: vec![InlineNode::Plain(Arc::from("parent item"))],
+            inlines: vec![InlineNode::Plain(Arc::clone(&parent_marker))],
             children: vec![child_item],
             span: SourceSpan::default(),
         };
+
         let block = Block {
             content: ContentBlock::Bullets(vec![parent_item]),
             label: None,
@@ -2392,44 +2502,76 @@ mod tests {
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
 
-        let result = run(&deck, &brand).expect("layout::run must succeed for nested bullet items");
+        let result = run(&deck, &brand)
+            .expect("layout::run must succeed for three-level nested bullet (EC-003)");
 
         let slide_out = &result.slides[0];
-        let text_run_inlines: Vec<Vec<_>> = slide_out
+
+        // Collect all TextRun frames with their position in the overall frame vector.
+        // Region-map frames (Title, Subtitle) are non-TextRun variants so they are excluded.
+        let text_run_positions: Vec<(usize, &Vec<InlineNode>)> = slide_out
             .frames
             .iter()
-            .filter_map(|f| match &f.content {
-                FrameContent::TextRun(nodes) => Some(nodes.clone()),
+            .enumerate()
+            .filter_map(|(idx, f)| match &f.content {
+                FrameContent::TextRun(nodes) => Some((idx, nodes)),
                 _ => None,
             })
             .collect();
 
-        // Parent + child = 2 TextRun frames total.
+        // EC-003 load-bearing count: exactly 3 TextRun frames (one per bullet item at
+        // each nesting level). NOT 2 (grandchild dropped), NOT 1 (only parent kept).
         assert_eq!(
-            text_run_inlines.len(),
-            2,
-            "nested bullet (parent + 1 child) must produce 2 TextRun frames; \
-             got {} (total frames: {})",
-            text_run_inlines.len(),
-            slide_out.frames.len()
+            text_run_positions.len(),
+            3,
+            "EC-003: three-level nested bullet (parent + child + grandchild) must produce \
+             exactly 3 TextRun frames; got {} (total frames: {}). \
+             Positions: {:?}",
+            text_run_positions.len(),
+            slide_out.frames.len(),
+            text_run_positions.iter().map(|(i, _)| i).collect::<Vec<_>>()
         );
 
-        // Parent item inlines must appear in a frame.
-        let parent_inlines = vec![InlineNode::Plain(Arc::from("parent item"))];
+        // Extract the three frame-vector indices for readable positional assertions.
+        let parent_frame_idx = text_run_positions[0].0;
+        let child_frame_idx = text_run_positions[1].0;
+        let grandchild_frame_idx = text_run_positions[2].0;
+        let parent_nodes = text_run_positions[0].1;
+        let child_nodes = text_run_positions[1].1;
+        let grandchild_nodes = text_run_positions[2].1;
+
+        // EC-003 load-bearing ORDER: parent frame index < child frame index < grandchild frame index.
+        // This assertion CANNOT be satisfied by order-independent `.any()` matching.
         assert!(
-            text_run_inlines
-                .iter()
-                .any(|nodes| nodes == &parent_inlines),
-            "parent bullet inlines must appear verbatim in a TextRun frame; \
-             got frames: {text_run_inlines:?}"
+            parent_frame_idx < child_frame_idx,
+            "EC-003: parent frame (index {parent_frame_idx}) must appear BEFORE child frame \
+             (index {child_frame_idx}) in LaidOutSlide.frames"
+        );
+        assert!(
+            child_frame_idx < grandchild_frame_idx,
+            "EC-003: child frame (index {child_frame_idx}) must appear BEFORE grandchild frame \
+             (index {grandchild_frame_idx}) in LaidOutSlide.frames"
         );
 
-        // Child item inlines must appear in a frame (not flattened/dropped).
-        let child_inlines = vec![InlineNode::Plain(Arc::from("nested child"))];
-        assert!(
-            text_run_inlines.iter().any(|nodes| nodes == &child_inlines),
-            "nested child bullet inlines must appear verbatim in a TextRun frame; \
-             got frames: {text_run_inlines:?}"
+        // EC-003 content correctness: each frame carries its item's inlines verbatim.
+        let expected_parent = vec![InlineNode::Plain(Arc::clone(&parent_marker))];
+        let expected_child = vec![InlineNode::Plain(Arc::clone(&child_marker))];
+        let expected_grandchild = vec![InlineNode::Plain(Arc::clone(&grandchild_marker))];
+
+        assert_eq!(
+            parent_nodes, &expected_parent,
+            "EC-003: frame at index {parent_frame_idx} must carry parent inlines \
+             ({parent_marker:?}); got: {parent_nodes:?}"
+        );
+        assert_eq!(
+            child_nodes, &expected_child,
+            "EC-003: frame at index {child_frame_idx} must carry child inlines \
+             ({child_marker:?}); got: {child_nodes:?}"
+        );
+        assert_eq!(
+            grandchild_nodes, &expected_grandchild,
+            "EC-003: frame at index {grandchild_frame_idx} must carry grandchild inlines \
+             ({grandchild_marker:?}); got: {grandchild_nodes:?}"
         );
     }
 
