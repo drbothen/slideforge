@@ -326,23 +326,13 @@ pub fn parse(
     // Phase 7: accumulate warnings.
     //
     // Missing `slideforge_version` is a non-fatal warning per BC-1.09.010 /
-    // BC-1.13.001 postcondition 2.  Emit it when the source contains slides.
+    // BC-1.13.001 postcondition 2.  Emit it whenever the deck has any items
+    // (BC-1.13.001 EC-001: no exemption for section-only decks).
     //
     // Parse-time warnings (W-PAR-*) accumulated during Phase 5 are merged here.
     let mut warnings: Vec<SyntaxError> = parse_time_warnings;
     let deck = deck_opt.unwrap_or_default();
-    // Missing-version warning fires when the deck contains slides (or control-flow
-    // items that produce slides). Section-only decks (DOCX/PDF document output)
-    // do not require a version declaration — they have no PPTX render path.
-    let has_slide_items = deck.items.iter().any(|i| {
-        matches!(
-            i,
-            crate::ast::BlockItem::Slide(_)
-                | crate::ast::BlockItem::For(_)
-                | crate::ast::BlockItem::If(_)
-        )
-    });
-    if version_gate_result == VersionGateResult::MissingVersion && has_slide_items {
+    if version_gate_result == VersionGateResult::MissingVersion && !deck.items.is_empty() {
         warnings.push(SyntaxError::version_error(
             file_path.to_string(),
             "E-PAR-010: missing slideforge_version declaration — \
