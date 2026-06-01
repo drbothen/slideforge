@@ -137,48 +137,81 @@ pub fn section_block_parser<'src, I>(
 where
     I: ValueInput<'src, Token = Token, Span = TSpan>,
 {
-    // A single sub-block field: `IDENT ":" value NEWLINE`.
+    // A single sub-block field in a section body.
     //
-    // The colon after the key is required syntax — sub-block assignments always
-    // use `key: value` form (consistent with the vars-block grammar).
+    // Two syntactic forms are possible:
     //
-    // The `.validate()` closure checks the IDENT against the fixed compile-time
-    // set `SECTION_REGISTER_KEYS = ["report", "detail"]`:
-    //   - Recognised key        → stored as FieldNode, no diagnostic.
-    //   - Unrecognised key that IS a reserved register name (EC-006) →
-    //     FATAL E-PAR-015 with corrective hint.
-    //   - Other unrecognised key (EC-005) →
-    //     NON-FATAL W-PAR-001 warning; key retained in AST.
+    //   (a) `IDENT ":" value NEWLINE`   — the normal register-key form.
+    //   (b) `IDENT value NEWLINE`       — bare scalar: IDENT without Colon.
+    //
+    // To dispatch without backtracking (chumsky 0.10 does not backtrack past
+    // consumed tokens), we parse `IDENT` once and then branch on whether the
+    // NEXT token is `Colon` using `.then(just(Token::Colon).or_not())`:
+    //
+    //   Some(_) → with-colon path (EC-005 rules apply)
+    //   None    → no-colon path  (EC-006 if reserved; structural error otherwise)
+    //
+    // # Per DIR-077-001-A §5 Ruling 4:
+    //
+    // With-colon path (form a):
+    //   - Recognised key (`report`, `detail`) → no diagnostic; stored as FieldNode.
+    //   - Unrecognised key (ANY other IDENT, including `notes`) → EC-005 non-fatal
+    //     W-PAR-001 warning; key still retained in AST.
+    //
+    // No-colon path (form b):
+    //   - If IDENT is a reserved register name (`report`, `detail`, `notes`) →
+    //     EC-006 FATAL E-PAR-015 with dedicated corrective hint.
+    //   - Other IDENT without Colon → FATAL structural error ("expected `:`").
+    //     The sub-block grammar requires a Colon; its absence is an error for
+    //     all non-reserved keys. This preserves the error-accumulation invariant
+    //     (Q23, LOCKED): `key1 badtoken` still produces a fatal error and triggers
+    //     recovery, just as it did when the grammar hard-required a Colon.
     let sub_block = any_ident()
-        .then_ignore(just(Token::Colon))
+        .then(just(Token::Colon).or_not())
         .then(section_value_parser())
         .then_ignore(just(Token::Newline).or_not())
-        .validate(move |((key, key_span), (val, val_span)), info, emitter| {
-            if !is_register_sub_block_key(&key) {
-                if is_reserved_register_name(&key) {
-                    // EC-006: reserved register name used without colon — FATAL.
-                    emitter.emit(Rich::custom(
-                        info.span(),
-                        format!(
-                            "E-PAR-015: Key '{key}' is a reserved register name — \
-                             use '{key}:' register syntax or choose a different key."
-                        ),
-                    ));
+        .validate(
+            move |(((key, key_span), colon_opt), (val, val_span)), info, emitter| {
+                if colon_opt.is_some() {
+                    // With-colon path: EC-005 for unrecognised keys (DIR-077-001-A Ruling 4).
+                    if !is_register_sub_block_key(&key) {
+                        // The "W-PAR-" prefix causes parser/mod.rs to route this
+                        // diagnostic into ParseResult::warnings (non-fatal).
+                        emitter.emit(Rich::custom(
+                            key_span,
+                            format!(
+                                "W-PAR-001: Unrecognized section sub-block key '{key}' — ignored"
+                            ),
+                        ));
+                    }
                 } else {
-                    // EC-005: unrecognised key — non-fatal W-PAR-001 warning.
-                    // The "W-PAR-" prefix causes the conversion boundary in
-                    // parser/mod.rs to route this into ParseResult::warnings.
-                    emitter.emit(Rich::custom(
-                        key_span,
-                        format!("W-PAR-001: Unrecognized section sub-block key '{key}' — ignored"),
-                    ));
+                    // No-colon path: the sub-block grammar requires `IDENT ":" value`.
+                    // An IDENT without a Colon is always a structural error.
+                    if is_reserved_register_name(&key) {
+                        // EC-006: dedicated fatal error with corrective hint.
+                        emitter.emit(Rich::custom(
+                            info.span(),
+                            format!(
+                                "E-PAR-015: Key '{key}' is a reserved register name — \
+                                 use `{key}:` register syntax or choose a different key."
+                            ),
+                        ));
+                    } else {
+                        // Structural error: non-reserved key missing its `:` separator.
+                        // This makes `key1 badtoken` fatal — preserving Q23 error
+                        // accumulation semantics (skip_then_retry_until path fires).
+                        emitter.emit(Rich::custom(
+                            info.span(),
+                            format!("expected `:` after section sub-block key '{key}'"),
+                        ));
+                    }
                 }
-            }
-            FieldNode {
-                name: Spanned::new(key, to_span(key_span, file_id)),
-                value: Spanned::new(val, to_span(val_span, file_id)),
-            }
-        });
+                FieldNode {
+                    name: Spanned::new(key, to_span(key_span, file_id)),
+                    value: Spanned::new(val, to_span(val_span, file_id)),
+                }
+            },
+        );
 
     // Accumulate all sub-block errors via recovery — never bail-on-first (Q23).
     let sub_block_with_recovery = sub_block.recover_with(skip_then_retry_until(
