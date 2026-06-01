@@ -2783,7 +2783,7 @@ mod tests {
     /// the leaf outward, which is two fewer iterations than the depth-65-rejected
     /// test's `(0..=MAX_BULLET_DEPTH)` (65 iterations):
     ///
-    /// | fold count | leaf at current_depth | empty-children call | outcome |
+    /// | fold count | leaf at `current_depth` | empty-children call | outcome |
     /// |---|---|---|---|
     /// | 63 (this test) | 63 | 64 → `64 > 64` = false | **Ok** |
     /// | 64 | 64 | 65 → `65 > 64` = true | Err |
@@ -3038,8 +3038,7 @@ mod tests {
                 // OBS-2 load-bearing: source_slide_index must be 1, not 0.
                 // A hardcoded-0 regression would fail this assertion.
                 assert_eq!(
-                    source_slide_index,
-                    1,
+                    source_slide_index, 1,
                     "source_slide_index must be 1 (the second slide, index 1); \
                      got {source_slide_index} — this means the loop index is not threaded \
                      correctly through push_bullet_frames"
@@ -3051,9 +3050,7 @@ mod tests {
                     MAX_BULLET_DEPTH + 1
                 );
             },
-            other => panic!(
-                "expected LayoutError::BulletDepthExceeded, got: {other:?}"
-            ),
+            other => panic!("expected LayoutError::BulletDepthExceeded, got: {other:?}"),
         }
     }
 }
