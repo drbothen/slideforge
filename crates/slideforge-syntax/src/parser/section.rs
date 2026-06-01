@@ -8,7 +8,8 @@
 //! ```text
 //! section_block     ::= "section" IDENT ":" NEWLINE INDENT section_body DEDENT
 //! section_body      ::= section_sub_block*
-//! section_sub_block ::= IDENT value NEWLINE
+//! section_sub_block ::= IDENT ":" value NEWLINE   -- recognised key (register/known)
+//!                     | IDENT value NEWLINE        -- bare key triggers EC-006 E-PAR-017
 //! value             ::= STRING | INT | FLOAT | BOOL | IDENT
 //! ```
 //!
@@ -114,7 +115,8 @@ where
 /// Produces a [`BlockItem::Section`] from the grammar:
 /// ```text
 /// section_block ::= "section" IDENT ":" NEWLINE INDENT sub_block* DEDENT
-/// sub_block     ::= IDENT value NEWLINE
+/// sub_block     ::= IDENT ":" value NEWLINE   -- recognised key (register/known)
+///                 | IDENT value NEWLINE        -- bare key triggers EC-006 E-PAR-017
 /// ```
 ///
 /// # Warning routing (DIR-077-001-A Ruling 2)

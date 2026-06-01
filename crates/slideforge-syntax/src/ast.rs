@@ -308,7 +308,7 @@ pub struct SlideNode {
 /// Each [`FieldNode`] carries a sub-block key and its associated value.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SectionNode {
-    /// The section type keyword (e.g., `"appendix"`, `"bibliography"`).
+    /// The section type keyword (e.g., `"appendix"`, `"glossary"`).
     pub kind: Spanned<String>,
     /// Field assignments inside this section block, in source order.
     ///
