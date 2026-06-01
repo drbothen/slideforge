@@ -4,7 +4,7 @@ mode: greenfield
 created: 2026-05-23
 current_phase: phase-3-tdd-implementation
 status: IN_PROGRESS
-last_updated: 2026-05-31
+last_updated: 2026-06-01
 phase_1_approved: 2026-05-25
 phase_2_approved: 2026-05-25
 phase_1_convergence: "17 passes, 69 findings, 3/3 clean (passes 15-16-17)"
@@ -127,6 +127,7 @@ develop: `94f74402` (42 merged PRs, 2443 tests, 0 failures). 77 stories / 462 pt
 - 2026-05-31 — STORY-036 MERGED (PR #40, 094f8dca) — No-Bleed Invariant / BleedChecker. 9-pass adversary cascade, 3/3 strict-CLEAN (passes 7/8/9). 6 fix-bursts (XML entity decoder). Exporter ACs deferred to STORY-037/041/046. Wave 4 Batch A: 2/9 complete.
 - 2026-05-31 — STORY-043 MERGED (PR #41, 331d456c) — PDF Core (slideforge-pdf crate). 14-pass adversary cascade, 3/3 strict-CLEAN (passes 12/13/14). krilla 0.6.0 pure-Rust PDF (no FFI). PdfExporter + SlideTagEngine + svg_embed + font subsetting + check-pdf-deps CI. indexmap 2.9→2.10. 2 MED + 3 LOW security fixed. Workspace 16 crates. STORY-044 unblocked. Wave 4 Batch A: 3/9 complete.
 - 2026-05-31 — STORY-044 MERGED (PR #42, 94f74402) — PDF coordinate mapping + Y-axis + SVG/diagram fidelity. 27-pass adversary cascade, 3/3 strict-CLEAN (P25/26/27). Real SVG stroke rendering (usvg→krilla full translation) + paint-state-leak fix (explicit fill/clear stroke before draw_text). 3 STORY-045 forward-obligations recorded; 1 Windows flaky-test drift item recorded. Wave 4 Batch A: 4/9 complete.
+- 2026-06-01 — STORY-077 spec-readiness closed — BC-3.02.002 v1.2 + BC-1.14.003 v1.2 (section-level detail/report register routing + inline-structure preservation + unrecognized-sub-block-key warning clauses); STORY-077 status→ready; entering per-story delivery.
 
 ## STORY-045 Forward-Obligations
 

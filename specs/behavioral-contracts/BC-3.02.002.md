@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.1"
+version: "1.2"
 status: draft
 producer: product-owner
 timestamp: 2026-05-24T00:00:00
@@ -14,7 +14,8 @@ subsystem: SS-TBD
 capability: CAP-011
 lifecycle_status: active
 introduced: v1.0.0
-modified: []
+modified:
+  - "2026-06-01: v1.2 — Added postcondition 7 (detail: sub-blocks), postcondition 8 (inline-structure preservation via FieldValue::Inlines), EC-005 (unrecognized sub-block key → non-fatal warning), EC-006 (reserved-name collision); clarified EC-004; added BC-1.14.003 cross-reference. Closes STORY-077 BC-status flag."
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -30,8 +31,11 @@ removal_reason: null
 A `section <type>:` block in a .sf file (e.g., `section methodology:`, `section scope:`,
 `section approval:`) declares manually authored narrative content that appears as a
 structured section in DOCX and PDF output. Section blocks are not rendered in PPTX or
-web preview. They can contain rich inline formatting, `report` register sub-blocks, and
-`{{ }}` interpolation.
+web preview. They can contain rich inline formatting, `report` and `detail` register
+sub-blocks, and `{{ }}` interpolation. The detail routing semantics (exclusion from PPTX
+and web preview) are owned by BC-1.14.003; this contract governs the section block's
+structural role, its appearance in DOCX/PDF, and the evaluation-stage tagging of
+sub-block content as `RegisteredContent`.
 
 ## Preconditions
 
@@ -51,22 +55,44 @@ web preview. They can contain rich inline formatting, `report` register sub-bloc
 5. Inline `{{ }}` interpolations within section content are resolved before rendering.
 6. The section preserves its source order relative to other sections and slides'
    `report` register content.
+7. A `section <type>:` block may contain a `detail:` sub-block. At the Evaluate stage,
+   that sub-block's content is extracted and attached to the section's output node as
+   `RegisteredContent { register: Register::Detail, content: Vec<InlineNode> }`. DOCX
+   and PDF exporters read this entry from the section node and render it in the appropriate
+   extended section. PPTX and web preview exporters do NOT read section node
+   `register_content`. (Detail routing exclusion rules are governed by BC-1.14.003; this
+   postcondition covers the tagging obligation.)
+8. The body sub-block content of a `section <type>:` block (whether `report:`, `detail:`,
+   or plain narrative body) is stored in `SectionBlock.body` as `FieldValue::Inlines`
+   (not as a flat `Value::Str`). This preserves rich inline structure — bold, xref/links,
+   `{{ }}` interpolation nodes — from parse time through to the Evaluate stage without
+   any loss of structural information. Observable consequence: bold text within a section
+   sub-block renders as bold in DOCX/PDF output (not as literal asterisks).
 
 ## Invariants
 
 1. Section blocks are output-format conditional: DOCX/PDF only. (DI-012)
 2. The SectionType trait handles all section rendering — no per-type hard-coding. (DI-008)
-3. An unrecognized `section <type>:` produces a compile error naming the unknown type
-   and listing registered types.
+3. An unrecognized `section <type>:` (unrecognized section TYPE at the block level) is a
+   FATAL compile error naming the unknown type and listing registered types. This is
+   distinct from invariant 4 below, which governs sub-block keys inside a recognized section.
+4. An unrecognized sub-block key inside a RECOGNIZED `section <type>:` block (e.g., `foo:`
+   inside `section methodology:`) is a NON-FATAL lint warning naming the key. The warning
+   is emitted at parse time. Build continues; the unrecognized key is silently ignored.
+   Exception: if the unknown key coincidentally matches a reserved register name
+   (`notes`, `report`, `detail`) but is not being used as a register declaration, the
+   reserved-name collision policy applies (surfaced as a parse error with a corrective hint).
 
 ## Edge Cases
 
 | ID | Description | Expected Behavior |
 |----|-------------|-------------------|
-| EC-001 | Unrecognized section type `section foobar:` | E-PAR-007-class error: "Unknown section type 'foobar'. Known types: [methodology, scope, approval, appendix, glossary, ...]" |
+| EC-001 | Unrecognized section type `section foobar:` | E-PAR-007-class error: "Unknown section type 'foobar'. Known types: [methodology, scope, approval, appendix, glossary, ...]"; build exits 1 |
 | EC-002 | section block inside a slide block | Parse error: section blocks must be top-level, not nested inside slide blocks |
 | EC-003 | section block with only @if content that evaluates to false | Section produces no body content; section heading is still emitted in DOCX (empty section); lint warning |
-| EC-004 | section block with report: sub-block | Report sub-block content is included in the section's DOCX output |
+| EC-004 | section block with `report:` sub-block | At Evaluate stage: `RegisteredContent { register: Register::Report, content: Vec<InlineNode> }` is attached to the section's output node. DOCX exporter reads this entry and renders it as section body content. PPTX/web preview do not render it. (BC-1.14.002 governs report routing exclusion rules.) |
+| EC-005 | Unrecognized sub-block key inside recognized section (e.g., `foo:` inside `section methodology:`) | Non-fatal lint warning at parse time: "Unrecognized section sub-block key 'foo' — ignored". Build continues. This is governed by invariant 4, not invariant 3. |
+| EC-006 | Unrecognized sub-block key that collides with a reserved register name | Parse error with corrective hint: "Key '<name>' is a reserved register name — use `<name>:` register syntax or choose a different key." Build exits 1. |
 
 ## Canonical Test Vectors
 
@@ -92,12 +118,13 @@ web preview. They can contain rich inline formatting, `report` register sub-bloc
 | Capability Anchor Justification | CAP-011 ("Document Section Generation") per capabilities.md §CAP-011 — "manually authored (section methodology:, section scope:, section approval:)" is explicitly enumerated in CAP-011 |
 | L2 Domain Invariants | DI-008 (SectionType trait API), DI-012 (single source produces all formats) |
 | Architecture Module | slideforge-eval crate — section block parsing; slideforge-docx crate — SectionType rendering (filled by architect) |
-| Stories | (filled by story-writer) |
+| Stories | STORY-077 |
 
 ## Related BCs
 
 - BC-3.02.001 — related to (auto-generated sections use the same SectionType trait rendering path)
-- BC-1.14.002 — related to (report register and section blocks are two distinct DOCX content sources)
+- BC-1.14.002 — related to (report register routing exclusion rules; applies when section `report:` sub-block is present)
+- BC-1.14.003 — authority for (detail register routing exclusion rules; postcondition 7 of this BC defers to BC-1.14.003 for PPTX/web exclusion semantics; BC-1.14.003 EC-001 explicitly covers the `section detail:` standalone case)
 
 ## Architecture Anchors
 
@@ -105,7 +132,7 @@ web preview. They can contain rich inline formatting, `report` register sub-bloc
 
 ## Story Anchor
 
-(filled by story-writer)
+STORY-077 — SectionBlock IR Extension: FieldValue body + section-level register routing
 
 ## VP Anchors
 

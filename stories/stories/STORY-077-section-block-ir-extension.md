@@ -8,8 +8,7 @@ wave: 4
 points: 8
 priority: P0
 tdd_mode: strict
-status: draft
-# BC status: pending PO authorship for BC-3.02.002 clause coverage review
+status: ready
 crate: slideforge-types
 target_module: slideforge-types, slideforge-syntax, slideforge-eval
 subsystems: [SS-01, SS-02, SS-15]
@@ -101,7 +100,7 @@ naturally in Batch A. No circular dependency is introduced.
 ## Acceptance Criteria
 
 ### AC-001: SectionBlock.body carries FieldValue (not Value)
-(traces to BC-3.02.002 postcondition 1 — section content preserved with inline structure)
+(traces to BC-3.02.002 postcondition 8 — inline-structure preservation; FieldValue::Inlines not Value::Str)
 
 After this story, `SectionBlock.body` is typed `OrderedMap<Arc<str>, FieldValue>`. A
 `section methodology:` block with a `detail:` sub-block containing rich inline content
@@ -110,7 +109,7 @@ is `FieldValue::Inlines(vec![InlineNode::Bold(...), ...])`, not `Value::Str("...
 inline structure is preserved from parse time through to evaluation.
 
 ### AC-002: Parser emits FieldValue::Inlines for detail:/report: in section blocks
-(traces to BC-3.02.002 postcondition 1 — inline {{ }} resolved; detail/report sub-blocks structured)
+(traces to BC-3.02.002 postcondition 8 — inline-structure preservation; FieldValue::Inlines emitted not coerced to Value::Str)
 
 The parser produces `FieldValue::Inlines` (not `Value::Str`) for `detail:` and `report:`
 sub-block content appearing inside a `section <type>:` declaration. A round-trip test
@@ -126,7 +125,7 @@ and asserts the resulting `SectionBlock.body["detail"]` is `FieldValue::Inlines`
 `InlineNode::Bold` and `InlineNode::Xref` nodes — not a flat string.
 
 ### AC-003: Eval-stage produces RegisteredContent for section detail: blocks
-(traces to BC-1.14.003 invariant 1 — routing determined at Evaluate stage)
+(traces to BC-3.02.002 postcondition 7 — eval-stage RegisteredContent{Register::Detail} on section node; BC-1.14.003 invariant 1 — routing determined at Evaluate stage)
 
 After evaluation, a `section <type>:` block whose body contains a `detail:` sub-block
 produces at least one `RegisteredContent { register: Register::Detail, content: Vec<InlineNode> }`
@@ -142,7 +141,7 @@ with `client = "Acme"` in scope and asserts the section output carries
 `RegisteredContent { register: Register::Detail, content: [InlineNode::Plain("Methodology detail: Acme")] }`.
 
 ### AC-004: Eval-stage produces RegisteredContent for section report: blocks
-(traces to BC-3.02.002 postcondition 4 — report sub-block in section appears in DOCX)
+(traces to BC-3.02.002 EC-004 — eval-stage RegisteredContent{Register::Report} on section node)
 
 After evaluation, a `section <type>:` block whose body contains a `report:` sub-block
 produces `RegisteredContent { register: Register::Report, content: ... }` attached to
@@ -150,7 +149,7 @@ the section's output node. The `report:` content does NOT appear in PPTX or web 
 (enforced via BC-1.14.002 routing rules in the DOCX exporter, which reads from `register_content`).
 
 ### AC-005: section detail: content excluded from PPTX and web preview
-(traces to BC-1.14.003 postcondition 5 — detail NOT in PPTX or web preview)
+(traces to BC-1.14.003 postcondition 3 — detail NOT in PPTX; BC-1.14.003 postcondition 5 — detail NOT in web preview)
 
 Section-level `detail:` register content follows the same exclusion rules as slide-level
 `detail:`. It does NOT appear in PPTX slide XML or web preview canvas. A test builds a deck
@@ -158,7 +157,7 @@ containing only a `section detail:` block (no slides with detail fields) and ass
 ZIP contains no section detail content.
 
 ### AC-006: STORY-035 descoped EC-003 is now covered — standalone section detail:
-(traces to BC-3.02.002 invariant 1 — section blocks DOCX/PDF only; traces to BC-1.14.003 invariant 1)
+(traces to BC-3.02.002 postcondition 7 — eval-stage RegisteredContent{Register::Detail} not attached to any LaidOutSlide; BC-1.14.003 EC-001 — standalone section detail: and section <type>:/detail: sub-block both valid, not attached to any slide)
 
 A standalone `section <type>:` block with only a `detail:` sub-block (no visual slide body)
 produces `RegisteredContent { register: Register::Detail, ... }` on the section's output node.
@@ -167,7 +166,7 @@ find this entry on the section node and render it in the appropriate section. Th
 behavior descoped from STORY-035 EC-003.
 
 ### AC-EC-001: Unrecognized section-level register sub-block is a parse warning
-(traces to BC-3.02.002 invariant 3 — unrecognized section type → compile error)
+(traces to BC-3.02.002 invariant 4 — unrecognized sub-block key inside recognized section → non-fatal lint warning; BC-3.02.002 EC-005 — "Unrecognized section sub-block key 'foo' — ignored")
 
 A `section methodology:` block with an unrecognized sub-block key (e.g., `foo:`) produces
 a lint warning (not a fatal error) naming the unrecognized key, consistent with the general
@@ -319,3 +318,4 @@ definition work (not yet in the codebase), the implementer should request a stor
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0 | 2026-05-31 | story-writer | Initial story creation — spun out from STORY-035 per architect directive F-002 (section-level register routing requires SectionBlock IR extension not available in v1.0 Wave 4 without this story) |
+| 1.1 | 2026-06-01 | story-writer | BC clause coverage closed by PO (BC-3.02.002 v1.2, BC-1.14.003 v1.2); AC→BC traces corrected (AC-001/AC-002 → PC8; AC-003 → PC7+inv1; AC-004 → EC-004; AC-005 → PC3+PC5; AC-006 → PC7+EC-001; AC-EC-001 → inv4+EC-005); BC-status comment removed; story marked implementation-ready (status: ready). |

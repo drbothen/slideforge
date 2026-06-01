@@ -11,7 +11,7 @@ traces_to:
   - .factory/stories/wave-schedule.md
 total_stories: 77
 stories_written: 77
-stories_ready: 0
+stories_ready: 4
 stories_in_progress: 0
 stories_merged: 42
 ---
@@ -33,10 +33,10 @@ stories_merged: 42
 | Wave 1 | 14 | 0 | 0 | 0 | 14 | 0 |
 | Wave 2 | 7 | 0 | 0 | 0 | 7 | 0 |
 | Wave 3 | 17 | 0 | 0 | 0 | 17 | 0 |
-| Wave 4 | 17 | 10 | 3 | 0 | 4 | 0 |
+| Wave 4 | 17 | 9 | 4 | 0 | 4 | 0 |
 | Wave 5 | 16 | 16 | 0 | 0 | 0 | 0 |
 | Wave 6 | 6 | 6 | 0 | 0 | 0 | 0 |
-| **Total** | **77** | **26** | **3** | **0** | **42** | **0** |
+| **Total** | **77** | **25** | **4** | **0** | **42** | **0** |
 
 ---
 
@@ -125,7 +125,7 @@ stories_merged: 42
 | [STORY-073](stories/STORY-073-bullets-layout.md) | EPIC-07 | Layout: ContentBlock::Bullets → FrameContent::TextRun frame generation | BC-3.05.001 | P1 | 5 | strict | ready |
 | [STORY-075](stories/STORY-075-brand-loader-footer-detection.md) | EPIC-06 | Brand Loader: Footer Detection from .pptx Slide Master/Layout Placeholders | BC-2.01.001 | P1 | 3 | strict | ready |
 | [STORY-076](stories/STORY-076-brand-srgbclr-transform-extraction.md) | EPIC-06 | Brand Loader: Transform-Aware Theme Color Extraction (srgbClr lumMod/tint/shade) | BC-2.01.001, BC-2.01.003 | P1 | 3 | strict | ready |
-| [STORY-077](stories/STORY-077-section-block-ir-extension.md) | EPIC-18 | SectionBlock IR Extension: FieldValue body + section-level register routing | BC-3.02.002, BC-1.14.003 | P0 | 8 | strict | draft |
+| [STORY-077](stories/STORY-077-section-block-ir-extension.md) | EPIC-18 | SectionBlock IR Extension: FieldValue body + section-level register routing | BC-3.02.002, BC-1.14.003 | P0 | 8 | strict | ready |
 
 **Wave 4 total points: 104**
 

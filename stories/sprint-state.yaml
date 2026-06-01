@@ -50,7 +50,7 @@ wave_4_deferred_p2_to_wave5: [STORY-072, STORY-074]
 wave_4_bc_deltas: "BC-2.01.001 v1.1→v1.2; BC-2.01.003 v1.8→v1.9; error-taxonomy v2.2→v2.3"
 develop_sha: "94f74402"
 develop_pr_count: 42
-last_updated: 2026-05-31
+last_updated: 2026-06-01
 ---
 
 stories:
@@ -479,9 +479,9 @@ stories:
     points: 3
     notes: "srgbClr transform extraction follow-up from STORY-024 cascade; pulled into Wave 4 as P1; BCs: BC-2.01.001 v1.2 + BC-2.01.003 v1.9"
   STORY-077:
-    status: draft
+    status: ready
     wave: 4
     batch: A
     priority: P0
     points: 8
-    notes: "SectionBlock IR extension: FieldValue body + section-level register routing; architect-directed spin-out from STORY-035 F-002 descope; blocks STORY-041/042; BCs: BC-3.02.002 + BC-1.14.003"
+    notes: "SectionBlock IR extension: FieldValue body + section-level register routing; architect-directed spin-out from STORY-035 F-002 descope; blocks STORY-041/042; BCs: BC-3.02.002 v1.2 + BC-1.14.003 v1.2; spec-readiness closed 2026-06-01"

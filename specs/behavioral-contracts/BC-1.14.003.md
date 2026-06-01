@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.1"
+version: "1.2"
 status: draft
 producer: product-owner
 timestamp: 2026-05-24T00:00:00
@@ -14,7 +14,8 @@ subsystem: SS-TBD
 capability: CAP-029
 lifecycle_status: active
 introduced: v1.0.0
-modified: []
+modified:
+  - "2026-06-01: v1.2 — Clarified EC-001 to make explicit that `detail:` sub-blocks inside `section <type>:` blocks are included in scope (not only standalone `section detail:` syntax). Added BC-3.02.002 cross-reference in Related BCs."
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -58,7 +59,7 @@ context.
 
 | ID | Description | Expected Behavior |
 |----|-------------|-------------------|
-| EC-001 | `section detail:` standalone block with no parent slide | Valid — detail sections are independent of slide content; appear in DOCX/PDF as standalone sections |
+| EC-001 | `section detail:` standalone block with no parent slide, OR a `section <type>:` block (e.g., `section methodology:`) containing a `detail:` sub-block | Valid — detail content is independent of slide structure in both forms. In the sub-block form (`section methodology: / detail: ...`), the `detail:` content is tagged as `RegisteredContent { register: Register::Detail }` on the section's output node at Evaluate stage (per BC-3.02.002 postcondition 7) and then excluded from PPTX/web preview by this contract's postconditions 3 and 5. |
 | EC-002 | `detail` field on every slide + built to PPTX only | No detail content in PPTX; exit 0 (no error — it is expected that detail is excluded from PPTX) |
 | EC-003 | `detail` block with markdown-style headings | Headings rendered as DOCX styled headings (Heading 2/3) in the extended section |
 | EC-004 | `detail` and `report` content both present on same slide | Both render in DOCX (report as body, detail as extended section); both absent from PPTX |
@@ -86,13 +87,14 @@ context.
 | Capability Anchor Justification | CAP-029 ("Writing Register Support") per capabilities.md §CAP-029 — "detail (document-only extended analysis): routes to DOCX/PDF only; excluded from PPTX and web preview" is the definition in CAP-029 |
 | L2 Domain Invariants | DI-012 (single .sf source produces all formats consistently) |
 | Architecture Module | slideforge-eval + slideforge-docx + slideforge-pdf crates (filled by architect) |
-| Stories | (filled by story-writer) |
+| Stories | STORY-077 |
 
 ## Related BCs
 
 - BC-1.14.001 — related to (notes register routing)
 - BC-1.14.002 — related to (report register routing)
 - BC-1.14.004 — composes with (no register bleeds to wrong format)
+- BC-3.02.002 — depends on (section-block IR extension; BC-3.02.002 postcondition 7 creates `RegisteredContent { register: Register::Detail }` on section nodes, which this contract then routes to DOCX/PDF and excludes from PPTX/web preview)
 
 ## Architecture Anchors
 
@@ -100,7 +102,7 @@ context.
 
 ## Story Anchor
 
-(filled by story-writer)
+STORY-077 — SectionBlock IR Extension: FieldValue body + section-level register routing
 
 ## VP Anchors
 

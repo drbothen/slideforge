@@ -139,7 +139,7 @@ traces_to: domain-spec/L2-INDEX.md
 |-------|-------|----------|--------|------|
 | BC-1.14.001 | notes register routes to presenter notes in PPTX/DOCX/HTML only | P0 | active | [BC-1.14.001.md](BC-1.14.001.md) |
 | BC-1.14.002 | report register routes to DOCX body; excluded from PPTX slide content | P0 | active | [BC-1.14.002.md](BC-1.14.002.md) |
-| BC-1.14.003 | detail register routes to DOCX/PDF only; excluded from PPTX and web preview | P0 | active | [BC-1.14.003.md](BC-1.14.003.md) |
+| BC-1.14.003 | detail register routes to DOCX/PDF only; excluded from PPTX and web preview | P0 | active | [BC-1.14.003.md](BC-1.14.003.md) | v1.2 |
 | BC-1.14.004 | No register content bleeds to wrong format | P0 | active | [BC-1.14.004.md](BC-1.14.004.md) |
 
 ### 1.15 — Diagnostic Reporting with Source Spans (CAP-030)
@@ -193,7 +193,7 @@ traces_to: domain-spec/L2-INDEX.md
 | BC ID | Title | Priority | Status | File |
 |-------|-------|----------|--------|------|
 | BC-3.02.001 | Auto-generated DOCX sections derived from slide data (executive_summary, risk_register) | P0 | active | [BC-3.02.001.md](BC-3.02.001.md) |
-| BC-3.02.002 | Manually authored section blocks (section methodology:) appear in DOCX/PDF | P0 | active | [BC-3.02.002.md](BC-3.02.002.md) |
+| BC-3.02.002 | Manually authored section blocks (section methodology:) appear in DOCX/PDF | P0 | active | [BC-3.02.002.md](BC-3.02.002.md) | v1.2 |
 
 ### 3.03 — Compile-Time Content Validation (CAP-022)
 
