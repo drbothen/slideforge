@@ -34,6 +34,13 @@ pub mod slide;
 pub mod template;
 pub mod variants;
 
+// STORY-078 Red Gate: failing test suite for section block parser.
+// This module references `slideforge_syntax::section::is_register_sub_block_key`
+// and `slideforge_syntax::parser::section::section_block_parser`, both of which
+// do NOT yet exist — causing compile failures that constitute the Red Gate.
+#[cfg(test)]
+mod section_tests;
+
 use std::sync::Arc;
 
 use chumsky::{Parser, prelude::SimpleSpan};
