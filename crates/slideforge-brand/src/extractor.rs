@@ -299,7 +299,7 @@ impl BrandExtractor {
 /// - Sections appear in stable order: `[colors]` → `[fonts]` → `[logo]` → `[footer]`.
 /// - `folHlink` is serialized as `fol_hlink` (TOML-safe name, AC-003).
 /// - Scheme-color slots (unresolved) carry an inline TOML comment per EC-003.
-fn brand_template_to_toml(
+pub(crate) fn brand_template_to_toml(
     template: &BrandTemplate,
     logo: Option<&LogoAsset>,
 ) -> (String, Option<String>) {
