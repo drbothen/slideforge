@@ -237,6 +237,25 @@ jobs:
           bans
           sources
 
+  # ─── Doctests ──────────────────────────────────────────────────────────────
+  # cargo-nextest does not execute doctests (by design). This job closes DI-5
+  # by running `cargo test --doc` separately on a single Linux leg — doctests
+  # are platform-independent, so one runner is sufficient to keep CI cost bounded.
+  doctest:
+    name: doctest
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
+        with:
+          shared-key: doctest
+      - name: cargo test --doc (workspace)
+        run: cargo test --doc --workspace --all-features
+
   # ─── Performance benchmark gate ────────────────────────────────────────────
   # NFR-001: cold build < 500ms; NFR-002: incremental rebuild < 50ms.
   # Skipped until Phase 3 when benchmark fixtures land (criterion benches).
@@ -387,6 +406,7 @@ jobs:
       - fmt
       - clippy
       - test
+      - doctest
       - msrv
       - docs
       - snapshots
