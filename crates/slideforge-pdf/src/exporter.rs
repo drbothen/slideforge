@@ -1833,30 +1833,33 @@ mod tests {
             let needle = b"1 0 0 rg";
             pdf_bytes.windows(needle.len()).rposition(|w| w == needle)
         };
-        let first_black_after_red = {
+        // Search for the first black-fill occurrence STRICTLY AFTER `last_red_pos`.
+        // We slice `pdf_bytes[red_pos..]` so `.position()` returns a relative offset;
+        // we then add `red_pos` to recover the absolute byte position.  This makes the
+        // "after" relationship explicit and robust — it does not rely on the fixture
+        // ordering happening to place the SVG (red) frame before the Title (black text)
+        // frame, nor on the absence of a page-initial black-fill default.
+        let first_black_fill_after_red = last_red_pos.and_then(|red_pos| {
             let needle_rgb = b"0 0 0 rg";
             let needle_g = b" 0 g\n";
-            let black_rgb_pos = pdf_bytes
-                .windows(needle_rgb.len())
-                .position(|w| w == needle_rgb);
-            let black_g_pos = pdf_bytes
-                .windows(needle_g.len())
-                .position(|w| w == needle_g);
-            match (black_rgb_pos, black_g_pos) {
-                (Some(a), Some(b)) => Some(a.min(b)),
-                (Some(a), None) => Some(a),
-                (None, Some(b)) => Some(b),
+            let tail = &pdf_bytes[red_pos..];
+            let black_rgb_rel = tail.windows(needle_rgb.len()).position(|w| w == needle_rgb);
+            let black_g_rel = tail.windows(needle_g.len()).position(|w| w == needle_g);
+            match (black_rgb_rel, black_g_rel) {
+                (Some(a), Some(b)) => Some(red_pos + a.min(b)),
+                (Some(a), None) => Some(red_pos + a),
+                (None, Some(b)) => Some(red_pos + b),
                 (None, None) => None,
             }
-        };
+        });
 
-        if let (Some(red_pos), Some(black_pos)) = (last_red_pos, first_black_after_red) {
-            // If black fill comes AFTER the last red fill, text was explicitly reset to black.
-            // This is the expected state after the fix.
+        if let (Some(red_pos), Some(black_pos)) = (last_red_pos, first_black_fill_after_red) {
+            // `black_pos` is guaranteed > `red_pos` by construction (we searched only the
+            // tail starting at `red_pos`), but assert explicitly to catch regressions.
             assert!(
                 black_pos > red_pos,
                 "OBS-044-22-01: The last `1 0 0 rg` (red fill from SVG) appears at offset {red_pos}. \
-                 The first black fill operator appears at offset {black_pos}. \
+                 The first black fill operator AFTER that appears at offset {black_pos}. \
                  For text to be correctly black, black fill MUST appear AFTER the SVG red fill. \
                  This confirms draw_text_at_bbox explicitly resets the fill to black."
             );
@@ -1865,12 +1868,12 @@ mod tests {
             // have rendered. The /Font assertion above already guards this case.
             // Accept as pass (SVG embedding not exercised, paint state isn't leaked).
         } else {
-            // last_red_pos is Some but first_black_after_red is None.
-            // Red fill exists (from SVG) but no black fill reset was found — text
-            // is inheriting the leaked red fill. This is the FAILING case.
+            // last_red_pos is Some but first_black_fill_after_red is None.
+            // Red fill exists (from SVG) but no black fill reset was found strictly
+            // after it — text is inheriting the leaked red fill. This is the FAILING case.
             panic!(
                 "OBS-044-22-01 FAILED: `1 0 0 rg` (red SVG fill) found at offset {last_red_pos:?} in PDF, \
-                 but NO black fill reset (`0 0 0 rg` or `0 g`) found anywhere after it. \
+                 but NO black fill reset (`0 0 0 rg` or `0 g`) found AFTER that offset. \
                  `draw_text_at_bbox` is inheriting the SVG's red fill for text rendering. \
                  Fix: add `surface.set_fill(Some(black_fill))` before `surface.draw_text()` \
                  in `draw_text_at_bbox`. \
