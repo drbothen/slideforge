@@ -416,8 +416,7 @@ mod tests {
         // Collect only the warn messages that mention the "dk2" slot — isolating
         // the warn(s) emitted by this parse call from any ambient noise.
         let messages = captured_messages.lock().unwrap();
-        let dk2_warns: Vec<&String> =
-            messages.iter().filter(|msg| msg.contains("dk2")).collect();
+        let dk2_warns: Vec<&String> = messages.iter().filter(|msg| msg.contains("dk2")).collect();
 
         // Assertion 1: exactly ONE warn for this slot.
         // If the impl emits one warn per transform this count will be 2, not 1.

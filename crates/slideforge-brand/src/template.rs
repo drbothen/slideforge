@@ -97,14 +97,17 @@ impl ColorValue {
 ///
 /// ## Derived Flag (BC-2.01.001 EC-006 / STORY-076)
 ///
-/// `is_derived` is `true` when the color was extracted from an `<a:srgbClr>` or
-/// `<a:schemeClr>` element that carried transform children (`lumMod`, `lumOff`,
+/// `is_derived` is `true` when the color was extracted from an `<a:srgbClr>`
+/// element that carries one or more transform children (`lumMod`, `lumOff`,
 /// `tint`, `shade`). In this case the stored value is the BASE hex verbatim — no
 /// HSL resolution was applied (Option B, deferred to v2). Downstream consumers that
 /// require the visually-rendered color must apply the transform arithmetic themselves.
 ///
+/// `<a:schemeClr>` elements always produce `is_derived = false` regardless of
+/// any child elements they carry (scheme-color HSL resolution is out of scope for v1.0).
+///
 /// When `is_derived` is `false`, the stored value is the literal color from the
-/// OOXML theme with no transforms pending.
+/// OOXML element with no pending transforms.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ColorSlot {
     /// The OOXML slot name (e.g., `"dk1"`, `"acc1"`, `"hlink"`).
@@ -117,9 +120,12 @@ pub struct ColorSlot {
     pub value: ColorValue,
     /// Whether the stored color is a base value with unapplied transform children.
     ///
-    /// Set to `true` when the source OOXML element (`<a:srgbClr>` or `<a:schemeClr>`)
-    /// carried one or more transform child elements (`lumMod`, `lumOff`, `tint`, `shade`).
+    /// Set to `true` only when the source OOXML element is `<a:srgbClr>` and it
+    /// carries one or more transform child elements (`lumMod`, `lumOff`, `tint`, `shade`).
     /// The base hex is stored verbatim; HSL resolution is deferred to v2 (Option B).
+    /// See BC-2.01.001 postcondition 1 and EC-006.
+    ///
+    /// `<a:schemeClr>` elements always produce `is_derived = false`.
     ///
     /// When `false`, the stored value is the literal OOXML color with no pending transforms.
     pub is_derived: bool,
