@@ -2832,4 +2832,108 @@ mod tests {
             other => panic!("expected LayoutError::BulletDepthExceeded, got: {other:?}"),
         }
     }
+
+    /// OBS-2 load-bearing — `source_slide_index` in `BulletDepthExceeded` threads the
+    /// real loop index, not a hardcoded zero.
+    ///
+    /// A deck with two slides is constructed:
+    /// - Slide 0: a normal "title" slide with a shallow (depth-1) bullet list — must NOT error.
+    /// - Slide 1: a "content" slide with a structurally 65-deep bullet list — MUST error.
+    ///
+    /// `layout::run` must return `Err(LayoutError::BulletDepthExceeded)` with
+    /// `source_slide_index == 1` and `depth == MAX_BULLET_DEPTH + 1`.
+    ///
+    /// If the production code hardcodes `source_slide_index: 0` the `source_slide_index`
+    /// assertion below fails, making the threading load-bearing.
+    #[test]
+    fn test_bc_3_05_001_story073_bullet_depth_error_reports_correct_slide_index() {
+        use crate::layout::MAX_BULLET_DEPTH;
+        use slideforge_types::{Block, BulletItem, ContentBlock, InlineNode, SourceSpan};
+
+        // Slide 0: a well-formed shallow bullet (depth 1 — safely within limit).
+        let shallow_bullet = BulletItem {
+            inlines: vec![InlineNode::Plain(Arc::from("slide0_shallow"))],
+            children: vec![],
+            span: SourceSpan::default(),
+        };
+        let slide0_block = Block {
+            content: ContentBlock::Bullets(vec![shallow_bullet]),
+            label: None,
+            span: SourceSpan::default(),
+        };
+        let slide0 = Slide {
+            slide_type: Arc::from("title"),
+            fields: OrderedMap::new(),
+            blocks: vec![slide0_block],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+            overlay: None,
+            register_content: vec![],
+        };
+
+        // Slide 1: a structurally 65-deep bullet chain (MAX_BULLET_DEPTH + 1 = 65).
+        // Build leaf-outward so the chain is depth MAX_BULLET_DEPTH + 1.
+        let leaf = BulletItem {
+            inlines: vec![InlineNode::Plain(Arc::from("slide1_leaf"))],
+            children: vec![],
+            span: SourceSpan::default(),
+        };
+        let deep_root = (0..=MAX_BULLET_DEPTH).fold(leaf, |inner, i| BulletItem {
+            inlines: vec![InlineNode::Plain(Arc::from(format!("slide1_level_{i}")))],
+            children: vec![inner],
+            span: SourceSpan::default(),
+        });
+        let slide1_block = Block {
+            content: ContentBlock::Bullets(vec![deep_root]),
+            label: None,
+            span: SourceSpan::default(),
+        };
+        let slide1 = Slide {
+            slide_type: Arc::from("content"),
+            fields: OrderedMap::new(),
+            blocks: vec![slide1_block],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+            overlay: None,
+            register_content: vec![],
+        };
+
+        let deck = make_deck(vec![slide0, slide1]);
+        let brand = make_brand();
+
+        let result = run(&deck, &brand);
+
+        assert!(
+            result.is_err(),
+            "two-slide deck where slide 1 has a 65-deep bullet must return \
+             Err(BulletDepthExceeded); got Ok"
+        );
+        match result.unwrap_err() {
+            LayoutError::BulletDepthExceeded {
+                depth,
+                source_slide_index,
+            } => {
+                // OBS-2 load-bearing: source_slide_index must be 1, not 0.
+                // A hardcoded-0 regression would fail this assertion.
+                assert_eq!(
+                    source_slide_index,
+                    1,
+                    "source_slide_index must be 1 (the second slide, index 1); \
+                     got {source_slide_index} — this means the loop index is not threaded \
+                     correctly through push_bullet_frames"
+                );
+                assert_eq!(
+                    depth,
+                    MAX_BULLET_DEPTH + 1,
+                    "depth must be MAX_BULLET_DEPTH + 1 = {}; got {depth}",
+                    MAX_BULLET_DEPTH + 1
+                );
+            },
+            other => panic!(
+                "expected LayoutError::BulletDepthExceeded, got: {other:?}"
+            ),
+        }
+    }
 }

@@ -458,6 +458,115 @@ fn test_bc_3_05_001_story073_ec003_nested_bullet_produces_frame_per_item() {
     );
 }
 
+/// OBS-3 load-bearing — EC-003 positional frame order pinned at integration level.
+///
+/// The existing `test_..._ec003_nested_bullet_produces_frame_per_item` verifies
+/// membership via `.any()` and a count check, but does NOT assert that the parent
+/// frame precedes the child frame by absolute position.  This companion test
+/// closes that gap at the integration level (the unit-level counterpart is
+/// `test_..._exact_frame_order_three_levels` in lib.rs).
+///
+/// Deck: single slide, one parent bullet with one child bullet and one grandchild
+/// bullet.  After `layout::run`, the three TextRun frames in `LaidOutSlide.frames`
+/// must appear in source order:
+///
+///   parent_frame_idx < child_frame_idx < grandchild_frame_idx
+///
+/// Regression property: a bug that emits children-before-parents, or flattens/
+/// reorders the tree, will produce frames in the wrong relative position and fail
+/// at least one of the two `<` assertions below.
+///
+/// Uses `positional indexing` — no `.any()`.
+#[test]
+fn test_bc_3_05_001_story073_ec003_integration_frame_order_parent_before_child() {
+    let grandchild = BulletItem {
+        inlines: vec![InlineNode::Plain(Arc::from("INT_EC003_GRANDCHILD"))],
+        children: vec![],
+        span: SourceSpan::default(),
+    };
+    let child = BulletItem {
+        inlines: vec![InlineNode::Plain(Arc::from("INT_EC003_CHILD"))],
+        children: vec![grandchild],
+        span: SourceSpan::default(),
+    };
+    let parent = BulletItem {
+        inlines: vec![InlineNode::Plain(Arc::from("INT_EC003_PARENT"))],
+        children: vec![child],
+        span: SourceSpan::default(),
+    };
+    let slide = bullets_slide("title", vec![parent]);
+    let deck = make_deck(vec![slide]);
+    let brand = make_brand();
+
+    let result = run(&deck, &brand)
+        .expect("three-level nested bullet must not error (all depths ≤ MAX_BULLET_DEPTH)");
+
+    let slide_out = &result.slides[0];
+
+    // Collect (frame_vector_index, inlines) for every TextRun frame, preserving order.
+    let text_run_positions: Vec<(usize, &Vec<InlineNode>)> = slide_out
+        .frames
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, f)| match &f.content {
+            FrameContent::TextRun(nodes) => Some((idx, nodes)),
+            _ => None,
+        })
+        .collect();
+
+    // Exactly 3 TextRun frames: parent, child, grandchild.
+    assert_eq!(
+        text_run_positions.len(),
+        3,
+        "EC-003 integration: three-level nested bullet must produce exactly 3 TextRun \
+         frames; got {} (total frames: {})",
+        text_run_positions.len(),
+        slide_out.frames.len()
+    );
+
+    let parent_frame_idx = text_run_positions[0].0;
+    let child_frame_idx = text_run_positions[1].0;
+    let grandchild_frame_idx = text_run_positions[2].0;
+
+    let parent_nodes = text_run_positions[0].1;
+    let child_nodes = text_run_positions[1].1;
+    let grandchild_nodes = text_run_positions[2].1;
+
+    // OBS-3 load-bearing ORDER assertions — cannot be satisfied by `.any()`.
+    assert!(
+        parent_frame_idx < child_frame_idx,
+        "EC-003 integration: parent frame (index {parent_frame_idx}) must appear BEFORE \
+         child frame (index {child_frame_idx}) in LaidOutSlide.frames — \
+         a regression that emits children-before-parents would fail here"
+    );
+    assert!(
+        child_frame_idx < grandchild_frame_idx,
+        "EC-003 integration: child frame (index {child_frame_idx}) must appear BEFORE \
+         grandchild frame (index {grandchild_frame_idx}) in LaidOutSlide.frames"
+    );
+
+    // Content correctness: each positional slot carries its item's inlines verbatim.
+    let expected_parent = vec![InlineNode::Plain(Arc::from("INT_EC003_PARENT"))];
+    let expected_child = vec![InlineNode::Plain(Arc::from("INT_EC003_CHILD"))];
+    let expected_grandchild = vec![InlineNode::Plain(Arc::from("INT_EC003_GRANDCHILD"))];
+
+    assert_eq!(
+        parent_nodes, &expected_parent,
+        "EC-003 integration: frame at index {parent_frame_idx} must carry parent inlines; \
+         got: {parent_nodes:?}"
+    );
+    assert_eq!(
+        child_nodes, &expected_child,
+        "EC-003 integration: frame at index {child_frame_idx} must carry child inlines; \
+         got: {child_nodes:?}"
+    );
+    assert_eq!(
+        grandchild_nodes, &expected_grandchild,
+        "EC-003 integration: frame at index {grandchild_frame_idx} must carry grandchild \
+         inlines; got: {grandchild_nodes:?}"
+    );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // EC-004 — Xref inside nested container inside bullet
 // ─────────────────────────────────────────────────────────────────────────────
