@@ -42,9 +42,9 @@ story035_status: "MERGED — PR #39, squash commit 0e7d9fde (2026-05-31). 10-pas
 story036_status: "MERGED — PR #40, squash commit 094f8dca (2026-05-31). 9-pass LOCAL adversary cascade, 3/3 strict-CLEAN at passes 7/8/9. BleedChecker test utility (test-utils-gated). Exporter ACs deferred to STORY-037/041/046. 6 fix-bursts (XML entity decoder hardening)."
 story043_status: "MERGED — PR #41, squash commit 331d456c (2026-05-31). 14-pass LOCAL adversary cascade, 3/3 strict-CLEAN at passes 12/13/14. New slideforge-pdf crate (krilla 0.6.0 pure-Rust PDF; moved from [workspace] exclude → members). PdfExporter + SlideTagEngine + svg_embed + font + check-pdf-deps CI job. indexmap 2.9→2.10. 2 MED + 3 LOW security findings fixed. Workspace now 16 crates."
 story044_status: "MERGED — PR #42, squash 94f74402 (2026-05-31). Post-SVG-fix re-verification: 27-pass LOCAL adversary cascade total, 3/3 strict-CLEAN at passes 25/26/27 (BC-5.39.001). CI 18/18 green (1 flaky Windows slideforge-data test, passed on re-run)."
-develop_sha: "94f74402"
-develop_pr_count: 42
-workspace_tests: "2443 (CI Windows; 62/62 slideforge-pdf green)"
+develop_sha: "a4ddae8d"
+develop_pr_count: 43
+workspace_tests: "2443 (CI Windows) + 66 doctests (ubuntu, PR #43); 62/62 slideforge-pdf green"
 workspace_test_failures: 0
 ---
 
@@ -64,11 +64,11 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. Generates branded .pptx
 |-------|-------|
 | **Date** | 2026-06-01 |
 | **Position** | Phase 3, Wave 4 Batch A — 4/10 complete. STORY-044 MERGED. STORY-077 BLOCKED on STORY-078. Next: deliver STORY-078 (parser, 5pts, P0, unblocks STORY-077), then continue Batch A (STORY-045, 073, 075, 076), then STORY-077 rework. STORY-079/080 in Wave 5. |
-| **develop SHA** | 94f74402 (42 merged PRs) — UNCHANGED |
+| **develop SHA** | a4ddae8d (43 merged PRs) — PR #43 DI-5 doctest CI job |
 | **Active worktrees** | 0 |
 | **Open PRs** | 0 |
 | **Workspace crates** | 16 |
-| **Workspace tests** | 2443 (CI Windows); 62/62 slideforge-pdf |
+| **Workspace tests** | 2443 (CI Windows) + 66 doctests (ubuntu, PR #43); 62/62 slideforge-pdf |
 | **STORY-035** | MERGED — PR #39, 0e7d9fde. 10-pass adversary, 3/3 strict-CLEAN (P8/9/10). Option D routing. AC-005 → STORY-077. |
 | **STORY-036** | MERGED — PR #40, 094f8dca. 9-pass adversary, 3/3 strict-CLEAN (P7/8/9). BleedChecker test-utils feature-gated. Exporter ACs → STORY-037/041/046. |
 | **STORY-043** | MERGED — PR #41, 331d456c. 14-pass adversary, 3/3 strict-CLEAN (P12/13/14). slideforge-pdf crate (krilla 0.6.0, pure-Rust). 2 MED + 3 LOW security fixed. check-pdf-deps CI job. |
@@ -84,7 +84,7 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. Generates branded .pptx
 
 Phase 3 IN PROGRESS. Wave 1 COMPLETE (gate PASSED). Wave 2 COMPLETE (gate PASSED). Wave 3 COMPLETE (22/22 stories, gate PASSED 2026-05-31). **Wave 4 STARTED — 18 stories / 109 pts. Batch A 4/10 complete (STORY-035, 036, 043, 044 MERGED). STORY-077 BLOCKED on STORY-078 (new, parser prerequisite). 0 active worktrees. 0 open PRs.**
 
-develop: `94f74402` (42 merged PRs, 2443 tests, 0 failures). 80 stories / 473 pts total. Workspace: 16 crates.
+develop: `a4ddae8d` (43 merged PRs, 2443 tests + 66 doctests, 0 failures). 80 stories / 473 pts total. Workspace: 16 crates.
 
 ## Phase Progress
 
@@ -136,7 +136,8 @@ develop: `94f74402` (42 merged PRs, 2443 tests, 0 failures). 80 stories / 473 pt
 - 2026-06-01 — STORY-077 spec-readiness closed — BC-3.02.002 v1.2 + BC-1.14.003 v1.2 (section-level detail/report register routing + inline-structure preservation + unrecognized-sub-block-key warning clauses); STORY-077 status→ready; entering per-story delivery.
 - 2026-06-01 — STORY-077 BLOCKED: prerequisite parser gap discovered — STORY-027 decomposition gap (parser cannot parse `section <type>:` blocks; STORY-008 reserved keyword not lifted). DIR-077-001 issued (architect directive: parse-stage parsing belongs in STORY-078 new story). DIR-077-001-A addendum: chumsky 0.10.1 research confirmed parse-time sub-block-KEY warning is correct via `validate()`/`emitter.emit()` + `ParseSeverity::Warning`; no BC-3.02.002 amendment needed. TYPE validation → eval stage (STORY-077). KEY warning + reserved-collision check → parse stage (STORY-078). STORY-077 status→blocked-on-078; branch feature/S-077 retained, worktree parked.
 - 2026-06-01 — STORY-078 CREATED — Parser: section block syntax (5pts, P0, EPIC-02, Wave 4 Batch A). Blocks STORY-077. Added to Wave 4 Batch A. Project total: 80 stories / 473 pts.
-- 2026-06-01 — Deferred-tasks sweep: DI-2 RESOLVED (BC-1.14.004 → v1.2: subsystem SS-02 filled; story/arch/VP anchors resolved); DI-3 RESOLVED (BC-4.03.001 + BC-4.03.002 → v1.2: subsystem SS-07 filled; story/arch/VP anchors resolved). DI-4 → STORY-079 created (slideforge-diagrams SVG DoS hardening, 3pts, P2, Wave 5). DI-6 → STORY-080 created (test de-flake, 3pts, P2, Wave 5). DI-5 (CI doctest gap) remains open — code-repo fix-PR dispatched separately. DI-1 remains justified deferral (no action). New low-severity drift row added: BC-1.14.001/002/003 carry subsystem SS-TBD (correct value SS-02 per STORY-035) — fold into next spec-hygiene pass.
+- 2026-06-01 — DI-5 RESOLVED: PR #43 (a4ddae8d) added doctest CI job (66 doctests executed on ubuntu, `cargo test --doc --workspace --all-features`, wired into all-checks-pass aggregator; closes CI doctest-execution gap). Deferred-tasks sweep complete: DI-2/3/5 fixed, DI-4→STORY-079, DI-6→STORY-080, DI-1 deferred.
+- 2026-06-01 — Deferred-tasks sweep: DI-2 RESOLVED (BC-1.14.004 → v1.2: subsystem SS-02 filled; story/arch/VP anchors resolved); DI-3 RESOLVED (BC-4.03.001 + BC-4.03.002 → v1.2: subsystem SS-07 filled; story/arch/VP anchors resolved). DI-4 → STORY-079 created (slideforge-diagrams SVG DoS hardening, 3pts, P2, Wave 5). DI-6 → STORY-080 created (test de-flake, 3pts, P2, Wave 5). DI-5 RESOLVED (see PR #43 row). DI-1 remains justified deferral (no action). New low-severity drift row added: BC-1.14.001/002/003 carry subsystem SS-TBD (correct value SS-02 per STORY-035) — fold into next spec-hygiene pass.
 
 ## STORY-045 Forward-Obligations
 
@@ -184,7 +185,7 @@ Production-grade from day 1. Key enforced gates:
 | 2026-05-31 | BC-1.14.004 frontmatter had `subsystem: SS-TBD` + unfilled template placeholders (Architecture Module, Stories, Story Anchor, VP Anchors). | LOW | **RESOLVED 2026-06-01** — BC-1.14.004 → v1.2: subsystem SS-02 filled; arch/story/VP anchors resolved. DI-2 closed. |
 | 2026-05-31 | BC-4.03.001 + BC-4.03.002 had unfilled `subsystem: SS-TBD` + Stories/Story-Anchor/VP-Anchor placeholders (subsystem SS-07 is the correct answer for both PDF BCs). | LOW | **RESOLVED 2026-06-01** — BC-4.03.001 + BC-4.03.002 → v1.2: subsystem SS-07 filled; arch/story/VP anchors resolved. DI-3 closed. |
 | 2026-05-31 | slideforge-diagrams `src/normalize.rs` usvg_normalize parses externally-sourced mermaid SVG via `usvg::Tree::from_str` WITHOUT a size/depth guard — DoS hardening gap (CWE-400), analogous to STORY-043 SEC-002. | LOW | **→ STORY-079 created 2026-06-01** (3pts, P2, Wave 5, EPIC-12). DI-4 closed (converted to story). |
-| 2026-05-31 | CI has NO doctest job: `test` job uses `cargo nextest` (skips doctests); no `cargo test --doc` step. coords.rs runnable doctests checked by `cargo doc` but NOT executed in CI. | LOW | DI-5: in-progress — code-repo fix-PR dispatched (devops-engineer). Do not block Wave 4. |
+| 2026-05-31 | CI has NO doctest job: `test` job uses `cargo nextest` (skips doctests); no `cargo test --doc` step. coords.rs runnable doctests checked by `cargo doc` but NOT executed in CI. | LOW | **RESOLVED 2026-06-01 (PR #43, a4ddae8d — doctest CI job added; 66 doctests now executed in CI, ubuntu runner, wired into all-checks-pass aggregator).** DI-5 closed. |
 | 2026-05-31 | slideforge-data `http::tests::test_bc_1_03_002_http_4xx_not_retried` is FLAKY on windows-x86_64 — connection-count race in Windows test harness. Cold-budget timing test flaky under CI load. | LOW-MED | **→ STORY-080 created 2026-06-01** (3pts, P2, Wave 5, EPIC-19). DI-6 closed (converted to story). |
 | 2026-06-01 | BC-1.14.001, BC-1.14.002, BC-1.14.003 still carry `subsystem: SS-TBD` (correct value SS-02 per STORY-035 subsystems field). Architect-flagged during DI-2 fix. | LOW | Fold into next spec-hygiene pass alongside any future SS-TBD sweeps. Not a story blocker. |
 
