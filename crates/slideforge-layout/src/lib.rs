@@ -2709,7 +2709,7 @@ mod tests {
     /// This test documents the architectural constraint: slideforge-layout must NOT
     /// depend on slideforge-pptx, slideforge-docx, slideforge-pdf, or slideforge-html.
     /// The Cargo.toml constraint is the real enforcement; this test is a compile-time
-    /// documentation anchor confirming the architecture rule.
+    /// documentation anchor confirming the arcade rule.
     ///
     /// Because we can compile this test module at all, the constraint is satisfied:
     /// any accidental exporter dependency would cause a circular crate dependency
@@ -2732,5 +2732,97 @@ mod tests {
             "Bullets",
             "ContentBlock::Bullets must exist and kind_name() must return 'Bullets'"
         );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // F-P1-MED-001 — Bullet structural depth bound (anti-DoS)
+    //
+    // BC-3.05.001 invariant 4 guards inline depth; the same threat applies to
+    // bullet STRUCTURAL nesting (BulletItem.children chains). A deeply-nested
+    // bullet tree overflows the stack inside push_bullet_frames — unbounded
+    // recursion through BulletItem.children with no depth guard.
+    //
+    // Fix: introduce MAX_BULLET_DEPTH (= 64, mirroring MAX_INLINE_DEPTH) and
+    // LayoutError::BulletDepthExceeded { depth }. The guard fires at entry to
+    // push_bullet_frames before recursing further.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// F-P1-MED-001 — A `ContentBlock::Bullets` with a structural BulletItem chain
+    /// nested 65 levels deep (parent → child → ... → 65 levels) must return
+    /// `Err(LayoutError::BulletDepthExceeded { depth: 65 })` from `layout::run`,
+    /// NOT `Ok(...)` and NOT a stack overflow.
+    ///
+    /// The guard must trigger at depth 65 (one above `MAX_BULLET_DEPTH` = 64)
+    /// BEFORE deep recursion exhausts the stack.
+    ///
+    /// At Red Gate: `push_bullet_frames` has no structural depth guard, so a
+    /// 65-deep children chain would return `Ok(...)` (no error), causing this
+    /// `assert!(result.is_err())` to fail cleanly. Depth 65 was chosen so the
+    /// Red run does NOT overflow the stack — it returns Ok and fails the assertion.
+    ///
+    /// Anti-paper-fix (TD-VSDD-059): the variant check inside `match` ensures
+    /// a wrong error type (e.g., `InlineDepthExceeded`) also fails the test.
+    #[test]
+    fn test_bc_3_05_001_story073_bullet_structural_depth_65_is_error() {
+        use crate::layout::MAX_BULLET_DEPTH;
+        use slideforge_types::{Block, BulletItem, ContentBlock, InlineNode, SourceSpan};
+
+        // Build a BulletItem chain of structural depth 65 via children nesting:
+        //   level_0 { children: [ level_1 { children: [ ... level_64 { children: [] } ] } ] }
+        // This is structural depth, NOT inline depth — BulletItem.inlines is a
+        // flat Plain node at every level.
+        let leaf = BulletItem {
+            inlines: vec![InlineNode::Plain(Arc::from("leaf"))],
+            children: vec![],
+            span: SourceSpan::default(),
+        };
+        // Build from the leaf outward to depth MAX_BULLET_DEPTH + 1 = 65.
+        // Each step wraps the previous item as the sole child of a new item.
+        let root = (0..=MAX_BULLET_DEPTH).fold(leaf, |inner, i| BulletItem {
+            inlines: vec![InlineNode::Plain(Arc::from(format!("level {i}")))],
+            children: vec![inner],
+            span: SourceSpan::default(),
+        });
+
+        let block = Block {
+            content: ContentBlock::Bullets(vec![root]),
+            label: None,
+            span: SourceSpan::default(),
+        };
+        let slide = Slide {
+            slide_type: Arc::from("title"),
+            fields: OrderedMap::new(),
+            blocks: vec![block],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+            overlay: None,
+            register_content: vec![],
+        };
+        let deck = make_deck(vec![slide]);
+        let brand = make_brand();
+
+        let result = run(&deck, &brand);
+
+        // RED GATE: without the depth guard push_bullet_frames returns Ok.
+        // With the guard it must return Err(BulletDepthExceeded { depth: 65 }).
+        assert!(
+            result.is_err(),
+            "bullet structural depth 65 must return Err(BulletDepthExceeded), got Ok"
+        );
+        match result.unwrap_err() {
+            LayoutError::BulletDepthExceeded { depth } => {
+                assert_eq!(
+                    depth,
+                    MAX_BULLET_DEPTH + 1,
+                    "reported depth must be MAX_BULLET_DEPTH + 1 = {}; got {}",
+                    MAX_BULLET_DEPTH + 1,
+                    depth
+                );
+            },
+            other => panic!(
+                "expected LayoutError::BulletDepthExceeded, got: {other:?}"
+            ),
+        }
     }
 }

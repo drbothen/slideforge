@@ -42,6 +42,20 @@ use std::sync::Arc;
 use slideforge_types::{Brand, BulletItem, ContentBlock, Deck, FieldValue, Register, Value};
 
 use crate::error::LayoutError;
+
+/// Maximum allowed structural nesting depth for `BulletItem.children` chains
+/// (F-P1-MED-001 / BC-3.05.001 invariant 4 — bullet structural depth analogue).
+///
+/// Mirrors [`crate::inline::MAX_INLINE_DEPTH`] (64). Bullet *structural* depth
+/// is the length of the `BulletItem → children[0] → children[0] → ...` chain,
+/// counted as the number of recursive levels. A depth-65 chain (one beyond this
+/// limit) returns `LayoutError::BulletDepthExceeded` before recursing further,
+/// preventing stack overflow on adversarially-deep inputs.
+///
+/// This constant is a Kani candidate (VP-045 analogue for structural depth):
+/// the proof would bound the children chain length and verify that traversal
+/// always terminates within `MAX_BULLET_DEPTH` frames.
+pub const MAX_BULLET_DEPTH: usize = 64;
 use crate::inline::run_inline_validation;
 use crate::regions::region_frames_for;
 use crate::sections::collect_sections;
@@ -420,17 +434,48 @@ fn speaker_notes_from_register_content(
 /// The bounding box for each frame is a full-width placeholder clamped to the
 /// page height (same rule as `ContentBlock::Text` frames — BC-3.06.003 / F-P4-LOW-001).
 ///
+/// # Structural depth bound (F-P1-MED-001)
+///
+/// The `current_depth` parameter tracks how many `children` levels have been
+/// entered. When `current_depth` would exceed [`MAX_BULLET_DEPTH`], the function
+/// returns `Err(LayoutError::BulletDepthExceeded { depth })` BEFORE recursing
+/// further, preventing stack overflow on adversarially-deep inputs.
+/// Depth 0 through [`MAX_BULLET_DEPTH`] (64) are accepted; depth 65 and above
+/// are rejected.
+///
 /// # Errors
 ///
-/// Returns `Err(LayoutError::InvalidBoundingBox)` if the clamped placeholder bbox
-/// violates BC-3.06.003 invariants (should never trigger in practice — the clamp
-/// ensures the bbox is always valid).
+/// - `Err(LayoutError::BulletDepthExceeded { depth })` — the `BulletItem.children`
+///   chain exceeds [`MAX_BULLET_DEPTH`] structural levels (F-P1-MED-001).
+/// - `Err(LayoutError::InvalidBoundingBox)` — the clamped placeholder bbox
+///   violates BC-3.06.003 invariants (should never trigger in practice).
 fn push_bullet_frames(
     items: &[BulletItem],
     frames: &mut Vec<crate::types::Frame>,
     page_size: PageSize,
     source_slide_index: usize,
 ) -> Result<(), LayoutError> {
+    push_bullet_frames_inner(items, frames, page_size, source_slide_index, 0)
+}
+
+/// Inner recursive implementation for [`push_bullet_frames`] with an explicit
+/// `current_depth` parameter for the structural depth bound (F-P1-MED-001).
+fn push_bullet_frames_inner(
+    items: &[BulletItem],
+    frames: &mut Vec<crate::types::Frame>,
+    page_size: PageSize,
+    source_slide_index: usize,
+    current_depth: usize,
+) -> Result<(), LayoutError> {
+    // F-P1-MED-001: reject structural nesting deeper than MAX_BULLET_DEPTH BEFORE
+    // recursing. The check fires at entry so the first call at a too-deep level
+    // returns the error rather than pushing frames and then recursing further.
+    if current_depth > MAX_BULLET_DEPTH {
+        return Err(LayoutError::BulletDepthExceeded {
+            depth: current_depth,
+        });
+    }
+
     for item in items {
         // Clamp placeholder height to page height — same rule as ContentBlock::Text
         // (F-P4-LOW-001 / BC-3.06.003).
@@ -456,8 +501,14 @@ fn push_bullet_frames(
             content: crate::types::FrameContent::TextRun(item.inlines.clone()),
             text_flow: None,
         });
-        // Recurse into children (depth-first, source order).
-        push_bullet_frames(&item.children, frames, page_size, source_slide_index)?;
+        // Recurse into children (depth-first, source order), incrementing depth.
+        push_bullet_frames_inner(
+            &item.children,
+            frames,
+            page_size,
+            source_slide_index,
+            current_depth + 1,
+        )?;
     }
     Ok(())
 }

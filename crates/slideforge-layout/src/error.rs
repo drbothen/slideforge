@@ -226,6 +226,32 @@ pub enum LayoutError {
         max: usize,
     },
 
+    /// Bullet item structural nesting depth exceeded the maximum safe level
+    /// (F-P1-MED-001 / BC-3.05.001 invariant 4 — structural-depth analogue).
+    ///
+    /// This error is distinct from [`LayoutError::InlineDepthExceeded`]: it
+    /// bounds `BulletItem.children` chain depth (structural nesting), NOT the
+    /// depth of inline formatting nodes within a single bullet item's text.
+    ///
+    /// The maximum allowed structural depth is
+    /// [`crate::layout::MAX_BULLET_DEPTH`] (64). A chain exceeding this depth
+    /// is rejected at layout time to prevent stack overflow in
+    /// `push_bullet_frames` — the recursive helper that traverses
+    /// `BulletItem.children` chains.
+    ///
+    /// `depth` is the first rejected depth value (i.e., `MAX_BULLET_DEPTH + 1`
+    /// = 65 for the default limit).
+    #[error(
+        "layout error: bullet structural nesting depth {depth} exceeds maximum \
+         ({max}) — reduce bullet list nesting depth",
+        max = crate::layout::MAX_BULLET_DEPTH
+    )]
+    BulletDepthExceeded {
+        /// The structural nesting depth at which the limit was exceeded.
+        /// This equals `MAX_BULLET_DEPTH + 1` for the first rejected level.
+        depth: usize,
+    },
+
     /// A `Shape` node reached the layout stage without `alt` text or
     /// `decorative: true` (BC-3.04.001 EC-001 / DI-001).
     ///
