@@ -45,6 +45,7 @@ pub mod lexer;
 pub mod lexer_error;
 pub mod parser;
 pub mod render;
+pub mod section;
 pub mod sink;
 pub mod span;
 pub mod template;

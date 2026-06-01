@@ -173,6 +173,8 @@ where
         });
 
     // Priority: shape_block (starts with `shape:`) > raw_rejected > regular_field.
+    // Note: `section_rejected` is handled at the `block_item` level (not here)
+    // to ensure it produces a terminal error that is included in parse_errors.
     shape_field.or(raw_rejected).or(regular_field)
 }
 
@@ -295,6 +297,69 @@ where
                 ))
             });
 
+        // ── `section` block rejection (AC-005) ───────────────────────────────
+        // `section` blocks are top-level only (BC-3.02.002 precondition 3).
+        // When `section` appears inside a @for/@if body, emit E-PAR-018 with
+        // the correct context label and the taxonomy-mandated corrective sentence.
+        //
+        // This combinator fires at the `block_item` recursion level, which is
+        // shared by both @for and @if bodies. Since the same recursive parser
+        // is used for both, the enclosing control-flow type is not statically
+        // distinguishable here. The accurate context label is "@for/@if" —
+        // reflecting that the `block_item` combinator is only reached via
+        // @for or @if bodies (NOT slide bodies, which use `body_item_parser`
+        // in `slide_block_cf`).
+        //
+        // This combinator is placed at the block_item level (not field_line_cf)
+        // so that the E-PAR-018 Rich error is a terminal error captured by
+        // `into_output_errors()` — not a non-terminal validate error that can
+        // be missed by the error accumulator.
+        //
+        // The combinator also consumes the optional indented body block
+        // (Indent...content...Dedent) to prevent the dangling Indent token
+        // from triggering a secondary IndentError that would mask the E-PAR-018.
+        let section_rejected = select! {
+            Token::Ident(s) = e if s.as_ref() == "section" => e.span()
+        }
+        // Consume the rest of the section header line (type IDENT, colon, etc.).
+        .then_ignore(
+            any()
+                .filter(|t: &Token| !matches!(t, Token::Newline | Token::Dedent | Token::Eof))
+                .repeated(),
+        )
+        .then_ignore(just(Token::Newline).or_not())
+        // Consume the optional indented body block to prevent a secondary
+        // IndentError from masking the E-PAR-018 diagnostic.
+        .then_ignore(
+            select! { Token::Indent(_) => () }
+                .then_ignore(
+                    any()
+                        .filter(|t: &Token| !matches!(t, Token::Dedent | Token::Eof))
+                        .repeated(),
+                )
+                .then_ignore(just(Token::Dedent))
+                .or_not(),
+        )
+        .validate(|_span, info, emitter| {
+            emitter.emit(Rich::custom(
+                info.span(),
+                "E-PAR-018: section blocks must be top-level — found inside @for/@if block. \
+                 Move the section: declaration to the top level of the .sf file.",
+            ));
+        })
+        .map(move |()| {
+            // Produce a dummy BlockItem::If to allow accumulation and continuation.
+            BlockItem::If(Spanned::new(
+                IfNode {
+                    condition: Spanned::new(Expr::Error, zero_span(file_id)),
+                    then_body: vec![],
+                    elif_branches: vec![],
+                    else_body: None,
+                },
+                zero_span(file_id),
+            ))
+        });
+
         // ── @for block ────────────────────────────────────────────────────────
         let for_b = for_block(file_id, item.clone());
 
@@ -312,6 +377,7 @@ where
                 reserved_directive_rejected
                     .or(while_rejected)
                     .or(elif_rejected)
+                    .or(section_rejected)
                     .or(for_b)
                     .or(if_b)
                     .or(slide_b)
@@ -423,7 +489,63 @@ where
                 )))
             });
 
-        field
+        // `section` keyword rejection inside slide body (AC-005, BC-3.02.002 EC-002).
+        //
+        // `section` blocks are top-level only. When encountered inside a slide body
+        // (at element scope), emit E-PAR-018 with a message naming the constraint.
+        //
+        // The combinator consumes BOTH the section header line AND the optional
+        // indented body (Indent ... Dedent). Consuming the entire block prevents the
+        // Indent token from triggering a subsequent terminal error — which would
+        // otherwise replace the non-terminal validate error in chumsky's output.
+        //
+        // This combinator is placed BEFORE `field` so that `section` is not parsed
+        // as a bare-identifier field name (which would produce a generic "unexpected
+        // Colon" error rather than the specific top-level message).
+        let section_body_rejected = select! {
+            Token::Ident(s) = e if s.as_ref() == "section" => e.span()
+        }
+        // Consume the rest of the section header line (type IDENT, colon, etc.).
+        .then_ignore(
+            any()
+                .filter(|t: &Token| !matches!(t, Token::Newline | Token::Dedent | Token::Eof))
+                .repeated(),
+        )
+        .then_ignore(just(Token::Newline).or_not())
+        // Consume the optional indented body block (prevents terminal Indent errors).
+        .then_ignore(
+            select! { Token::Indent(_) => () }
+                .then_ignore(
+                    any()
+                        .filter(|t: &Token| !matches!(t, Token::Dedent | Token::Eof))
+                        .repeated(),
+                )
+                .then_ignore(just(Token::Dedent))
+                .or_not(),
+        )
+        .validate(|_span, info, emitter| {
+            emitter.emit(Rich::custom(
+                info.span(),
+                "E-PAR-018: section blocks must be top-level — found inside slide block. \
+                 Move the section: declaration to the top level of the .sf file.",
+            ));
+        })
+        .map(move |()| {
+            // Produce a dummy field to allow accumulation and continuation.
+            SlideBodyItem::Field(FieldNode {
+                name: Spanned::new(
+                    "section".to_string(),
+                    to_span(SimpleSpan::from(0..0), file_id),
+                ),
+                value: Spanned::new(
+                    FieldValue::Error,
+                    to_span(SimpleSpan::from(0..0), file_id),
+                ),
+            })
+        });
+
+        section_body_rejected
+            .or(field)
             .or(inline_if)
             .or(inline_for)
             .recover_with(skip_then_retry_until(

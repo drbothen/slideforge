@@ -36,6 +36,7 @@ use crate::{
 use super::{
     alias::{AliasRegistry, alias_decl},
     control_flow::block_item,
+    section::section_block_parser,
     template::template_value,
     variants::variants_block,
 };
@@ -445,6 +446,8 @@ enum DeckItem {
     AliasErr,
     /// An `@include "path"` directive (synthetic placeholder for resolution).
     Include(BlockItem),
+    /// A `section <type>: ...` block (STORY-078).
+    Section(BlockItem),
     /// A block item: `slide`, `@for`, or `@if` block.
     Block(BlockItem),
 }
@@ -490,6 +493,8 @@ where
     });
     // STORY-008: @include directive
     let include = include_directive_parser(file_id).map(DeckItem::Include);
+    // STORY-078: section block
+    let section = section_block_parser(file_id).map(DeckItem::Section);
     // Use block_item() to handle slide, @for, and @if at deck level.
     let block = block_item(file_id).map(DeckItem::Block);
 
@@ -511,6 +516,7 @@ where
                 .or(variants)
                 .or(alias)
                 .or(include)
+                .or(section)
                 .or(block)
                 .recover_with(skip_then_retry_until(
                     any()
@@ -565,6 +571,10 @@ where
                     },
                     DeckItem::Include(bi) => {
                         // @include placeholder — passed through for post-parse resolution.
+                        deck.items.push(bi);
+                    },
+                    DeckItem::Section(bi) => {
+                        // Section blocks are top-level items; no alias expansion needed.
                         deck.items.push(bi);
                     },
                     DeckItem::Block(bi) => {
