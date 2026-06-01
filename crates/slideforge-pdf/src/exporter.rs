@@ -449,6 +449,8 @@ fn try_resolve_font(family: &str) -> Option<krilla::text::Font> {
 ///   `TextRun` content is silently skipped.
 /// - **`Chart`, `Image`, `Shape`, `Empty`** — no drawing in STORY-044;
 ///   always return `Ok(())` immediately.
+// frame_w_pt / frame_h_pt are intrinsically paired width/height bindings in the body.
+#[allow(clippy::similar_names)]
 fn draw_frame(
     surface: &mut krilla::surface::Surface<'_>,
     bbox: &BoundingBox,
@@ -477,7 +479,9 @@ fn draw_frame(
             // No ir_y_to_pdf_y flip — krilla applies the PDF Y-flip internally.
             let surface_x = emu_to_pt(bbox.x);
             let surface_y = emu_to_pt(bbox.y);
-            place_svg_at(surface, svg, surface_x, surface_y)?;
+            let frame_w_pt = emu_to_pt(bbox.width);
+            let frame_h_pt = emu_to_pt(bbox.height);
+            place_svg_at(surface, svg, surface_x, surface_y, frame_w_pt, frame_h_pt)?;
         },
         // ErrorSlidePlaceholder carries an SVG — render it like a diagram.
         FrameContent::ErrorSlidePlaceholder { svg, .. } => {
@@ -486,7 +490,16 @@ fn draw_frame(
             let normalized = NormalizedDiagramSvg::from_normalized_string(Arc::from(svg.as_ref()));
             let surface_x = emu_to_pt(bbox.x);
             let surface_y = emu_to_pt(bbox.y);
-            place_svg_at(surface, &normalized, surface_x, surface_y)?;
+            let frame_w_pt = emu_to_pt(bbox.width);
+            let frame_h_pt = emu_to_pt(bbox.height);
+            place_svg_at(
+                surface,
+                &normalized,
+                surface_x,
+                surface_y,
+                frame_w_pt,
+                frame_h_pt,
+            )?;
         },
         // Chart: no SVG payload at frame level — drawn via ChartRenderer pass.
         // Image, Shape, Empty: no drawing in this story.
@@ -629,21 +642,44 @@ fn extract_inline_text(inlines: &[slideforge_types::InlineNode]) -> String {
     out
 }
 
-/// Place a normalized SVG diagram on the surface at the specified PDF position.
+/// Place a normalized SVG diagram on the surface at the specified top-left Surface position.
 ///
-/// Applies a translation transform so the SVG paths land at `(pdf_x, pdf_y)`.
-/// The transform is pushed before embedding and popped after, leaving the
+/// ## Transform composition (F-P18-001 / F-P18-002 fix)
+///
+/// Pushes a translation transform so the SVG is positioned at `(surface_x, surface_y)`
+/// on the krilla Surface (top-left, Y-down). The actual scale-to-frame transform is
+/// applied inside `embed_normalized_svg` via the frame dimensions.
+///
+/// The composed chain for each path is:
+/// ```text
+/// translate(surface_x, surface_y) ∘ scale(frame_w/svg_w, frame_h/svg_h)
+///     ∘ path.abs_transform() ∘ local_path_data
+/// ```
+///
+/// All transforms are pushed before embedding and popped after, leaving the
 /// surface state unchanged for subsequent draw calls.
+///
+/// ## Parameters
+///
+/// - `surface_x` / `surface_y` — top-left corner of the frame in Surface coords
+///   (Y-down; krilla applies the PDF Y-flip internally — DIR-044-001).
+/// - `frame_w_pt` / `frame_h_pt` — frame width and height in Surface points,
+///   used to scale the SVG viewport to fit the frame (F-P18-002).
+// frame_w_pt / frame_h_pt are intrinsically paired width/height parameters.
+#[allow(clippy::similar_names)]
 fn place_svg_at(
     surface: &mut krilla::surface::Surface<'_>,
     svg: &slideforge_types::NormalizedDiagramSvg,
-    pdf_x: f32,
-    pdf_y: f32,
+    surface_x: f32,
+    surface_y: f32,
+    frame_w_pt: f32,
+    frame_h_pt: f32,
 ) -> Result<(), PdfExportError> {
-    // Apply a translation so the SVG is positioned at the frame's PDF coords.
-    let transform = krilla::geom::Transform::from_translate(pdf_x, pdf_y);
-    surface.push_transform(&transform);
-    let result = embed_normalized_svg(svg, surface);
+    // Apply a translation so the SVG is positioned at the frame's top-left Surface coords.
+    // The scale is handled inside embed_normalized_svg (around the tree render).
+    let translate = krilla::geom::Transform::from_translate(surface_x, surface_y);
+    surface.push_transform(&translate);
+    let result = embed_normalized_svg(svg, surface, frame_w_pt, frame_h_pt);
     surface.pop();
     result
 }
