@@ -1890,10 +1890,10 @@ mod tests {
     /// per `BulletItem` in a `ContentBlock::Bullets` block, in source order.
     ///
     /// Canonical fixture from STORY-073 story spec:
-    ///   2-item bullet list → 2 TextRun frames (beyond region-map frames).
+    ///   2-item bullet list → 2 `TextRun` frames (beyond region-map frames).
     ///
     /// At Red Gate: `layout::run` does not process `ContentBlock::Bullets`, so the
-    /// TextRun frame count for bullet items is 0. The assertion fails.
+    /// `TextRun` frame count for bullet items is 0. The assertion fails.
     ///
     /// Anti-paper-fix (TD-VSDD-059): removing the `len()` assertion and replacing
     /// with `len() >= 0` would silence the test vacuously. The test asserts the
@@ -1909,7 +1909,9 @@ mod tests {
                 span: SourceSpan::default(),
             },
             BulletItem {
-                inlines: vec![InlineNode::Bold(vec![InlineNode::Plain(Arc::from("second bullet"))])],
+                inlines: vec![InlineNode::Bold(vec![InlineNode::Plain(Arc::from(
+                    "second bullet",
+                ))])],
                 children: vec![],
                 span: SourceSpan::default(),
             },
@@ -1955,13 +1957,13 @@ mod tests {
         );
     }
 
-    /// STORY-073 / AC-001 — Source order is preserved: item1 → first TextRun frame,
-    /// item2 → second TextRun frame.
+    /// STORY-073 / AC-001 — Source order is preserved: item1 → first `TextRun` frame,
+    /// item2 → second `TextRun` frame.
     ///
-    /// The inline content of each TextRun frame must match the corresponding
-    /// BulletItem.inlines sequence verbatim.
+    /// The inline content of each `TextRun` frame must match the corresponding
+    /// `BulletItem.inlines` sequence verbatim.
     ///
-    /// At Red Gate: no TextRun frames are produced for bullets, so both assertions fail.
+    /// At Red Gate: no `TextRun` frames are produced for bullets, so both assertions fail.
     #[test]
     fn test_bc_3_05_001_story073_ac001_bullets_source_order_preserved() {
         use slideforge_types::{Block, BulletItem, ContentBlock, InlineNode, SourceSpan};
@@ -1999,8 +2001,7 @@ mod tests {
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
 
-        let result = run(&deck, &brand)
-            .expect("layout::run must succeed for bullet items");
+        let result = run(&deck, &brand).expect("layout::run must succeed for bullet items");
 
         let slide_out = &result.slides[0];
         let text_run_frames: Vec<_> = slide_out
@@ -2028,21 +2029,21 @@ mod tests {
         assert!(
             has_item1,
             "first bullet item inlines must appear verbatim in a TextRun frame; \
-             expected {:?} in frames: {:?}", item1_inlines, text_run_frames
+             expected {item1_inlines:?} in frames: {text_run_frames:?}"
         );
         assert!(
             has_item2,
             "second bullet item inlines must appear verbatim in a TextRun frame; \
-             expected {:?} in frames: {:?}", item2_inlines, text_run_frames
+             expected {item2_inlines:?} in frames: {text_run_frames:?}"
         );
     }
 
-    /// STORY-073 / AC-001 — Three-item bullet list → 3 TextRun frames.
+    /// STORY-073 / AC-001 — Three-item bullet list → 3 `TextRun` frames.
     ///
     /// Canonical fixture with 3 items covering Plain, Bold, and Xref inline types.
     /// The layout stage preserves all 12 inline variants verbatim (BC-3.05.001 invariant 6).
     ///
-    /// At Red Gate: 0 TextRun frames for bullets → assertion fails.
+    /// At Red Gate: 0 `TextRun` frames for bullets → assertion fails.
     #[test]
     fn test_bc_3_05_001_story073_ac001_three_bullet_items_three_frames() {
         use slideforge_types::{Block, BulletItem, ContentBlock, InlineNode, SourceSpan};
@@ -2054,7 +2055,9 @@ mod tests {
                 span: SourceSpan::default(),
             },
             BulletItem {
-                inlines: vec![InlineNode::Bold(vec![InlineNode::Plain(Arc::from("bold item"))])],
+                inlines: vec![InlineNode::Bold(vec![InlineNode::Plain(Arc::from(
+                    "bold item",
+                ))])],
                 children: vec![],
                 span: SourceSpan::default(),
             },
@@ -2122,7 +2125,7 @@ mod tests {
     /// `LayoutWarning::XrefTargetNotFound` in `LaidOutDeck.warnings`.
     ///
     /// End-to-end test through `layout::run`. The xref validation pass must scan
-    /// the TextRun frames produced for bullet items (BC-3.05.001 EC-002).
+    /// the `TextRun` frames produced for bullet items (BC-3.05.001 EC-002).
     ///
     /// At Red Gate: bullet items produce no frames → xref not scanned → no warning
     /// → assertion fails.
@@ -2167,7 +2170,8 @@ mod tests {
                 if target.as_ref() == "missing-slide-from-bullet"
             )),
             "LaidOutDeck.warnings must contain XrefTargetNotFound for unknown bullet xref; \
-             got: {:?}", result.warnings
+             got: {:?}",
+            result.warnings
         );
     }
 
@@ -2202,8 +2206,8 @@ mod tests {
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
 
-        let result = run(&deck, &brand)
-            .expect("layout::run must succeed for bullet with unknown xref");
+        let result =
+            run(&deck, &brand).expect("layout::run must succeed for bullet with unknown xref");
 
         let xref_warnings: Vec<_> = result
             .warnings
@@ -2223,7 +2227,8 @@ mod tests {
                 if target.as_ref() == "missing-slide"
             ),
             "warning must carry target == 'missing-slide' and source_slide_index == 0; \
-             got: {:?}", xref_warnings[0]
+             got: {:?}",
+            xref_warnings[0]
         );
     }
 
@@ -2233,7 +2238,7 @@ mod tests {
     /// Canonical test vector from BC-3.05.001:
     ///   65-deep `Bold(Bold(Bold(...)))` → `LayoutError::InlineDepthExceeded { depth: 65 }`.
     ///
-    /// At Red Gate: bullets not validated → layout::run returns Ok instead of Err.
+    /// At Red Gate: bullets not validated → `layout::run` returns Ok instead of Err.
     #[test]
     fn test_bc_3_05_001_story073_ac003_depth_exceeded_in_bullet_is_hard_error() {
         use crate::inline::MAX_INLINE_DEPTH;
@@ -2280,14 +2285,20 @@ mod tests {
                 max,
             } => {
                 assert_eq!(source_slide_index, 0, "source_slide_index must be 0");
-                assert_eq!(depth, 65, "depth must be 65 (first rejected level, BC literal)");
-                assert_eq!(max, MAX_INLINE_DEPTH, "max must equal MAX_INLINE_DEPTH (64)");
+                assert_eq!(
+                    depth, 65,
+                    "depth must be 65 (first rejected level, BC literal)"
+                );
+                assert_eq!(
+                    max, MAX_INLINE_DEPTH,
+                    "max must equal MAX_INLINE_DEPTH (64)"
+                );
             },
             other => panic!("expected InlineDepthExceeded, got: {other:?}"),
         }
     }
 
-    /// STORY-073 / EC-001 — Empty bullet list produces zero TextRun frames from bullets,
+    /// STORY-073 / EC-001 — Empty bullet list produces zero `TextRun` frames from bullets,
     /// no error, no warning.
     ///
     /// `ContentBlock::Bullets(vec![])` must succeed and contribute 0 frames.
@@ -2318,7 +2329,7 @@ mod tests {
         let brand = make_brand();
 
         let result = run(&deck, &brand).expect(
-            "layout::run must succeed for ContentBlock::Bullets(vec![]) — no error on empty list"
+            "layout::run must succeed for ContentBlock::Bullets(vec![]) — no error on empty list",
         );
 
         // Zero TextRun frames produced from the empty bullet list.
@@ -2329,8 +2340,7 @@ mod tests {
             .count();
 
         assert_eq!(
-            text_run_count,
-            0,
+            text_run_count, 0,
             "empty ContentBlock::Bullets must produce 0 TextRun frames; \
              got {text_run_count}"
         );
@@ -2338,7 +2348,8 @@ mod tests {
         // No warnings.
         assert!(
             result.warnings.is_empty(),
-            "empty bullet list must produce zero warnings; got: {:?}", result.warnings
+            "empty bullet list must produce zero warnings; got: {:?}",
+            result.warnings
         );
     }
 
@@ -2381,8 +2392,7 @@ mod tests {
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
 
-        let result = run(&deck, &brand)
-            .expect("layout::run must succeed for nested bullet items");
+        let result = run(&deck, &brand).expect("layout::run must succeed for nested bullet items");
 
         let slide_out = &result.slides[0];
         let text_run_inlines: Vec<Vec<_>> = slide_out
@@ -2407,9 +2417,11 @@ mod tests {
         // Parent item inlines must appear in a frame.
         let parent_inlines = vec![InlineNode::Plain(Arc::from("parent item"))];
         assert!(
-            text_run_inlines.iter().any(|nodes| nodes == &parent_inlines),
+            text_run_inlines
+                .iter()
+                .any(|nodes| nodes == &parent_inlines),
             "parent bullet inlines must appear verbatim in a TextRun frame; \
-             got frames: {:?}", text_run_inlines
+             got frames: {text_run_inlines:?}"
         );
 
         // Child item inlines must appear in a frame (not flattened/dropped).
@@ -2417,14 +2429,14 @@ mod tests {
         assert!(
             text_run_inlines.iter().any(|nodes| nodes == &child_inlines),
             "nested child bullet inlines must appear verbatim in a TextRun frame; \
-             got frames: {:?}", text_run_inlines
+             got frames: {text_run_inlines:?}"
         );
     }
 
     /// STORY-073 / EC-004 — Xref inside nested Bold inside a bullet must still trigger
     /// `XrefTargetNotFound` warning (BC-3.05.001 EC-002 recursive traversal).
     ///
-    /// End-to-end: layout::run must validate xrefs inside container nodes inside bullets.
+    /// End-to-end: `layout::run` must validate xrefs inside container nodes inside bullets.
     ///
     /// At Red Gate: bullets produce no frames → xref not scanned → no warning → fails.
     #[test]
@@ -2467,7 +2479,8 @@ mod tests {
                 if target.as_ref() == "__nested_bold_xref_target__"
             )),
             "LaidOutDeck.warnings must contain XrefTargetNotFound for xref nested inside \
-             Bold(Italic(...)) inside bullet; got: {:?}", result.warnings
+             Bold(Italic(...)) inside bullet; got: {:?}",
+            result.warnings
         );
     }
 
@@ -2492,7 +2505,9 @@ mod tests {
                 span: SourceSpan::default(),
             },
             BulletItem {
-                inlines: vec![InlineNode::Bold(vec![InlineNode::Plain(Arc::from("bold bullet"))])],
+                inlines: vec![InlineNode::Bold(vec![InlineNode::Plain(Arc::from(
+                    "bold bullet",
+                ))])],
                 children: vec![],
                 span: SourceSpan::default(),
             },
@@ -2521,13 +2536,14 @@ mod tests {
         let deck = make_deck(vec![title_slide, bullets_slide]);
         let brand = make_brand();
 
-        let result = run(&deck, &brand)
-            .expect("layout::run must succeed for well-formed bullet list");
+        let result =
+            run(&deck, &brand).expect("layout::run must succeed for well-formed bullet list");
 
         // Zero warnings (no unknown xref, no depth violation).
         assert!(
             result.warnings.is_empty(),
-            "well-formed bullet list must produce zero warnings; got: {:?}", result.warnings
+            "well-formed bullet list must produce zero warnings; got: {:?}",
+            result.warnings
         );
 
         // Slide count preserved.
@@ -2541,8 +2557,7 @@ mod tests {
             .count();
 
         assert_eq!(
-            bullet_text_run_count,
-            3,
+            bullet_text_run_count, 3,
             "well-formed 3-item bullet list must produce 3 TextRun frames; got {bullet_text_run_count}"
         );
     }

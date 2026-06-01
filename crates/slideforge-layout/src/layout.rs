@@ -39,7 +39,7 @@
 
 use std::sync::Arc;
 
-use slideforge_types::{Brand, ContentBlock, Deck, FieldValue, Register, Value};
+use slideforge_types::{Brand, BulletItem, ContentBlock, Deck, FieldValue, Register, Value};
 
 use crate::error::LayoutError;
 use crate::inline::run_inline_validation;
@@ -236,48 +236,58 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
         // They are stored on LaidOutDeck::warnings (BC-3.04.001 EC-002).
         deck_warnings.extend(shape_output.warnings);
 
-        // Inline text pass: convert ContentBlock::Text blocks into FrameContent::TextRun
-        // frames so the inline validation pass (run_inline_validation) can scan them for
-        // xref targets. This is the minimum content path needed for VP-049 load-bearing
-        // end-to-end test. Full body content layout (positioning, font metrics) is
-        // deferred to STORY-073 (body-layout pass — bullet-list frames, font metrics,
-        // and text reflow). STORY-072 is gradient fills only and is NOT the owner of
-        // this deferral.
+        // Inline text pass: convert ContentBlock::Text and ContentBlock::Bullets blocks
+        // into FrameContent::TextRun frames so the inline validation pass
+        // (run_inline_validation) can scan them for xref targets and depth violations
+        // (BC-3.05.001 EC-002 / AC-003 / STORY-073).
         //
-        // NOTE: ContentBlock::Bullets(Vec<BulletItem>) is also NOT converted here.
-        // Bullet items carry inline content (BulletItem.inlines) that bypasses
-        // run_inline_validation. Xref validation inside bullets requires the body-layout
-        // pass to produce frames for bullet content first. See run_inline_validation
-        // rustdoc in inline.rs for the full enumeration of what is and is not scanned.
+        // For ContentBlock::Text: one TextRun frame per block.
+        // For ContentBlock::Bullets: one TextRun frame per BulletItem (parent before
+        // children, depth-first order). Nesting is structural via BulletItem.children;
+        // layout preserves the flat frame sequence for exporters.
         for block in &slide.blocks {
-            if let ContentBlock::Text(text_block) = &block.content {
-                // Clamp the placeholder height to page_height so the bbox always
-                // passes is_valid (F-P4-LOW-001 / BC-3.06.003). For brands with a
-                // canvas_height < 914_400 EMU the unclamped height would violate
-                // y + height <= page_height, triggering the InvalidBoundingBox
-                // defensive check below.
-                let placeholder_height = crate::types::Emu(914_400).min(page_size.height);
-                let bbox = crate::types::BoundingBox {
-                    x: crate::types::Emu(0),
-                    y: crate::types::Emu(0),
-                    width: page_size.width,
-                    height: placeholder_height,
-                };
-                // BC-3.06.003 defensive check: the clamped bbox must still satisfy
-                // all invariants (non-zero dimensions, within page bounds).
-                let frame_index = all_frames.len();
-                if !bbox.is_valid(page_size.width, page_size.height) {
-                    return Err(LayoutError::InvalidBoundingBox {
-                        source_slide_index: source_index,
-                        frame_index,
+            match &block.content {
+                ContentBlock::Text(text_block) => {
+                    // Clamp the placeholder height to page_height so the bbox always
+                    // passes is_valid (F-P4-LOW-001 / BC-3.06.003). For brands with a
+                    // canvas_height < 914_400 EMU the unclamped height would violate
+                    // y + height <= page_height, triggering the InvalidBoundingBox
+                    // defensive check below.
+                    let placeholder_height = crate::types::Emu(914_400).min(page_size.height);
+                    let bbox = crate::types::BoundingBox {
+                        x: crate::types::Emu(0),
+                        y: crate::types::Emu(0),
+                        width: page_size.width,
+                        height: placeholder_height,
+                    };
+                    // BC-3.06.003 defensive check: the clamped bbox must still satisfy
+                    // all invariants (non-zero dimensions, within page bounds).
+                    let frame_index = all_frames.len();
+                    if !bbox.is_valid(page_size.width, page_size.height) {
+                        return Err(LayoutError::InvalidBoundingBox {
+                            source_slide_index: source_index,
+                            frame_index,
+                            bbox,
+                        });
+                    }
+                    all_frames.push(crate::types::Frame {
                         bbox,
+                        content: crate::types::FrameContent::TextRun(text_block.inlines.clone()),
+                        text_flow: None,
                     });
-                }
-                all_frames.push(crate::types::Frame {
-                    bbox,
-                    content: crate::types::FrameContent::TextRun(text_block.inlines.clone()),
-                    text_flow: None,
-                });
+                },
+                ContentBlock::Bullets(items) => {
+                    // STORY-073 / AC-001 — produce one FrameContent::TextRun per
+                    // BulletItem, recursively visiting children depth-first.
+                    // Source order is preserved: parent frame before child frames.
+                    // The inline content (BulletItem.inlines) is carried verbatim —
+                    // no inline processing occurs at layout time (BC-3.05.001 invariant 6).
+                    push_bullet_frames(items, &mut all_frames, page_size, source_index)?;
+                },
+                // Other ContentBlock variants (Chart, Diagram, Shape, Math, Image, Table)
+                // are handled elsewhere (shape pass above) or do not carry InlineNode
+                // content that needs layout-time TextRun frames.
+                _ => {},
             }
         }
 
@@ -395,4 +405,59 @@ fn speaker_notes_from_register_content(
                 Some(Arc::from(text.as_str()))
             }
         })
+}
+
+/// Recursively emit one [`crate::types::FrameContent::TextRun`] frame per
+/// [`BulletItem`], depth-first.
+///
+/// Traversal order: parent item then children (in source order), recursively.
+/// This produces a flat `Vec<Frame>` sequence that preserves the source order of
+/// all bullet items including nested sub-bullets (STORY-073 / AC-001 / EC-003).
+///
+/// Each frame carries the bullet item's `inlines` sequence verbatim — no inline
+/// processing occurs at layout time (BC-3.05.001 invariant 6).
+///
+/// The bounding box for each frame is a full-width placeholder clamped to the
+/// page height (same rule as `ContentBlock::Text` frames — BC-3.06.003 / F-P4-LOW-001).
+///
+/// # Errors
+///
+/// Returns `Err(LayoutError::InvalidBoundingBox)` if the clamped placeholder bbox
+/// violates BC-3.06.003 invariants (should never trigger in practice — the clamp
+/// ensures the bbox is always valid).
+fn push_bullet_frames(
+    items: &[BulletItem],
+    frames: &mut Vec<crate::types::Frame>,
+    page_size: PageSize,
+    source_slide_index: usize,
+) -> Result<(), LayoutError> {
+    for item in items {
+        // Clamp placeholder height to page height — same rule as ContentBlock::Text
+        // (F-P4-LOW-001 / BC-3.06.003).
+        let placeholder_height = crate::types::Emu(914_400).min(page_size.height);
+        let bbox = crate::types::BoundingBox {
+            x: crate::types::Emu(0),
+            y: crate::types::Emu(0),
+            width: page_size.width,
+            height: placeholder_height,
+        };
+        // BC-3.06.003 defensive check.
+        let frame_index = frames.len();
+        if !bbox.is_valid(page_size.width, page_size.height) {
+            return Err(LayoutError::InvalidBoundingBox {
+                source_slide_index,
+                frame_index,
+                bbox,
+            });
+        }
+        // Produce one TextRun frame carrying BulletItem.inlines verbatim.
+        frames.push(crate::types::Frame {
+            bbox,
+            content: crate::types::FrameContent::TextRun(item.inlines.clone()),
+            text_flow: None,
+        });
+        // Recurse into children (depth-first, source order).
+        push_bullet_frames(&item.children, frames, page_size, source_slide_index)?;
+    }
+    Ok(())
 }

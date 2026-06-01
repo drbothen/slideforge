@@ -1335,7 +1335,8 @@ mod tests {
                 if target.as_ref() == "missing-bullet-xref-target"
             ),
             "warning must carry the unknown xref target from bullet inline content; \
-             got: {:?}", warnings[0]
+             got: {:?}",
+            warnings[0]
         );
     }
 
@@ -1405,8 +1406,14 @@ mod tests {
                     source_slide_index, 0,
                     "source_slide_index must be 0 for the first slide"
                 );
-                assert_eq!(depth, 65, "reported depth must be 65 (first rejected level)");
-                assert_eq!(max, MAX_INLINE_DEPTH, "max must equal MAX_INLINE_DEPTH (64)");
+                assert_eq!(
+                    depth, 65,
+                    "reported depth must be 65 (first rejected level)"
+                );
+                assert_eq!(
+                    max, MAX_INLINE_DEPTH,
+                    "max must equal MAX_INLINE_DEPTH (64)"
+                );
             },
             other => panic!("expected InlineDepthExceeded, got: {other:?}"),
         }
@@ -1421,8 +1428,8 @@ mod tests {
         let deck = make_deck_with_titles(&[]);
         let empty_bullet_inlines: Vec<InlineNode> = vec![];
         let slide = make_laid_out_slide_with_text_run(0, empty_bullet_inlines);
-        let warnings = run_inline_validation(&deck, &[slide])
-            .expect("empty bullet inlines must not error");
+        let warnings =
+            run_inline_validation(&deck, &[slide]).expect("empty bullet inlines must not error");
         assert!(
             warnings.is_empty(),
             "empty BulletItem.inlines must produce zero warnings; got: {warnings:?}"
@@ -1458,7 +1465,10 @@ mod tests {
         );
         // Verify it's specifically InlineDepthExceeded, not some other error variant.
         assert!(
-            matches!(result.unwrap_err(), crate::error::LayoutError::InlineDepthExceeded { .. }),
+            matches!(
+                result.unwrap_err(),
+                crate::error::LayoutError::InlineDepthExceeded { .. }
+            ),
             "error must be InlineDepthExceeded for depth-65 bullet content"
         );
     }

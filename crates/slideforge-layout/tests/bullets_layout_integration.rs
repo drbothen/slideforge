@@ -28,14 +28,16 @@
 //!
 //! BC-3.05.001 v1.3.4 — All 12 inline format types render to correct output per format.
 
-#![allow(clippy::missing_docs_in_private_items, clippy::unwrap_used, clippy::expect_used)]
+#![allow(
+    clippy::missing_docs_in_private_items,
+    clippy::unwrap_used,
+    clippy::expect_used
+)]
 
 use std::sync::Arc;
 
-use slideforge_layout::{
-    run, FrameContent, LaidOutDeck, LayoutError, LayoutWarning,
-};
 use slideforge_layout::inline::MAX_INLINE_DEPTH;
+use slideforge_layout::{FrameContent, LaidOutDeck, LayoutError, LayoutWarning, run};
 use slideforge_types::{
     Block, Brand, BrandFonts, BrandPalette, BulletItem, ContentBlock, Deck, DeckMetadata,
     FieldValue, InlineNode, OrderedMap, Slide, SourceSpan, Value,
@@ -65,6 +67,7 @@ fn make_deck(slides: Vec<Slide>) -> Deck {
     }
 }
 
+#[allow(dead_code)]
 fn make_slide(slide_type: &str) -> Slide {
     Slide {
         slide_type: Arc::from(slide_type),
@@ -172,15 +175,17 @@ fn test_bc_3_05_001_story073_ac_int1_bullets_end_to_end() {
     let title_slide = make_slide_with_title("title", "introduction");
     let bullet_items = vec![
         flat_bullet(vec![InlineNode::Plain(Arc::from("plain text item"))]),
-        flat_bullet(vec![InlineNode::Bold(vec![InlineNode::Plain(Arc::from("bold item"))])]),
+        flat_bullet(vec![InlineNode::Bold(vec![InlineNode::Plain(Arc::from(
+            "bold item",
+        ))])]),
         flat_bullet(vec![InlineNode::Xref(Arc::from("introduction"))]),
     ];
     let content_slide = bullets_slide("content", bullet_items);
     let deck = make_deck(vec![title_slide, content_slide]);
     let brand = make_brand();
 
-    let result = run(&deck, &brand)
-        .expect("layout::run must succeed for deck with ContentBlock::Bullets");
+    let result =
+        run(&deck, &brand).expect("layout::run must succeed for deck with ContentBlock::Bullets");
 
     // AC-INT-1 assertion 1: slide count preserved.
     assert_eq!(result.slides.len(), 2, "slide count must be preserved");
@@ -221,8 +226,8 @@ fn test_bc_3_05_001_story073_ac_int1_text_run_carries_inlines_verbatim() {
     let deck = make_deck(vec![slide]);
     let brand = make_brand();
 
-    let result = run(&deck, &brand)
-        .expect("layout::run must succeed for verbatim inline content test");
+    let result =
+        run(&deck, &brand).expect("layout::run must succeed for verbatim inline content test");
 
     let text_run_frames: Vec<Vec<InlineNode>> = result.slides[0]
         .frames
@@ -237,12 +242,14 @@ fn test_bc_3_05_001_story073_ac_int1_text_run_carries_inlines_verbatim() {
     assert!(
         text_run_frames.iter().any(|nodes| nodes == &item1.inlines),
         "item1 inlines must appear verbatim in a TextRun frame; \
-         got frames: {:?}", text_run_frames
+         got frames: {:?}",
+        text_run_frames
     );
     assert!(
         text_run_frames.iter().any(|nodes| nodes == &item2.inlines),
         "item2 inlines must appear verbatim in a TextRun frame; \
-         got frames: {:?}", text_run_frames
+         got frames: {:?}",
+        text_run_frames
     );
 }
 
@@ -258,13 +265,15 @@ fn test_bc_3_05_001_story073_ac_int1_text_run_carries_inlines_verbatim() {
 fn test_bc_3_05_001_story073_ac_int1_unknown_xref_in_bullet_warns() {
     let slide = bullets_slide(
         "title",
-        vec![flat_bullet(vec![InlineNode::Xref(Arc::from("missing-slide"))])],
+        vec![flat_bullet(vec![InlineNode::Xref(Arc::from(
+            "missing-slide",
+        ))])],
     );
     let deck = make_deck(vec![slide]);
     let brand = make_brand();
 
-    let result = run(&deck, &brand)
-        .expect("unknown xref in bullet must produce warning, not error");
+    let result =
+        run(&deck, &brand).expect("unknown xref in bullet must produce warning, not error");
 
     let xref_warnings: Vec<_> = result
         .warnings
@@ -285,7 +294,8 @@ fn test_bc_3_05_001_story073_ac_int1_unknown_xref_in_bullet_warns() {
             if target.as_ref() == "missing-slide"
         ),
         "warning must carry target='missing-slide' and source_slide_index=0; \
-         got: {:?}", xref_warnings[0]
+         got: {:?}",
+        xref_warnings[0]
     );
 }
 
@@ -320,8 +330,14 @@ fn test_bc_3_05_001_story073_ac_int1_depth_65_bullet_is_hard_error() {
             max,
         } => {
             assert_eq!(source_slide_index, 0, "source_slide_index must be 0");
-            assert_eq!(depth, 65, "depth must be 65 (BC literal — first rejected level)");
-            assert_eq!(max, MAX_INLINE_DEPTH, "max must equal MAX_INLINE_DEPTH (64)");
+            assert_eq!(
+                depth, 65,
+                "depth must be 65 (BC literal — first rejected level)"
+            );
+            assert_eq!(
+                max, MAX_INLINE_DEPTH,
+                "max must equal MAX_INLINE_DEPTH (64)"
+            );
         },
         other => panic!("expected LayoutError::InlineDepthExceeded, got: {other:?}"),
     }
@@ -343,8 +359,7 @@ fn test_bc_3_05_001_story073_ec001_empty_bullets_no_frames_no_error_no_warning()
     let deck = make_deck(vec![slide]);
     let brand = make_brand();
 
-    let result = run(&deck, &brand)
-        .expect("ContentBlock::Bullets(vec![]) must not error");
+    let result = run(&deck, &brand).expect("ContentBlock::Bullets(vec![]) must not error");
 
     assert_eq!(
         text_run_count(&result, 0),
@@ -353,7 +368,8 @@ fn test_bc_3_05_001_story073_ec001_empty_bullets_no_frames_no_error_no_warning()
     );
     assert!(
         result.warnings.is_empty(),
-        "empty bullet list must produce no warnings; got: {:?}", result.warnings
+        "empty bullet list must produce no warnings; got: {:?}",
+        result.warnings
     );
 }
 
@@ -372,8 +388,7 @@ fn test_bc_3_05_001_story073_ec002_empty_bullet_item_inlines_one_frame_no_error(
     let deck = make_deck(vec![slide]);
     let brand = make_brand();
 
-    let result = run(&deck, &brand)
-        .expect("BulletItem with empty inlines must not error");
+    let result = run(&deck, &brand).expect("BulletItem with empty inlines must not error");
 
     assert_eq!(
         text_run_count(&result, 0),
@@ -383,7 +398,8 @@ fn test_bc_3_05_001_story073_ec002_empty_bullet_item_inlines_one_frame_no_error(
     );
     assert!(
         result.warnings.is_empty(),
-        "empty-inlines bullet must produce no warnings; got: {:?}", result.warnings
+        "empty-inlines bullet must produce no warnings; got: {:?}",
+        result.warnings
     );
 }
 
@@ -407,8 +423,7 @@ fn test_bc_3_05_001_story073_ec003_nested_bullet_produces_frame_per_item() {
     let deck = make_deck(vec![slide]);
     let brand = make_brand();
 
-    let result = run(&deck, &brand)
-        .expect("nested bullet items must not error");
+    let result = run(&deck, &brand).expect("nested bullet items must not error");
 
     // Parent item + 1 child item = 2 TextRun frames.
     assert_eq!(
@@ -432,12 +447,14 @@ fn test_bc_3_05_001_story073_ec003_nested_bullet_produces_frame_per_item() {
 
     assert!(
         frame_inlines.iter().any(|nodes| nodes == &parent_inlines),
-        "parent bullet inlines must appear in a TextRun frame; frames: {:?}", frame_inlines
+        "parent bullet inlines must appear in a TextRun frame; frames: {:?}",
+        frame_inlines
     );
     assert!(
         frame_inlines.iter().any(|nodes| nodes == &child_inlines),
         "child bullet inlines must appear in a TextRun frame (not dropped/flattened); \
-         frames: {:?}", frame_inlines
+         frames: {:?}",
+        frame_inlines
     );
 }
 
@@ -456,15 +473,15 @@ fn test_bc_3_05_001_story073_ec004_deep_nested_xref_in_bullet_layout_run() {
     let unknown = Arc::from("__ec004_deep_xref__");
     let slide = bullets_slide(
         "title",
-        vec![flat_bullet(vec![InlineNode::Bold(vec![InlineNode::Italic(vec![
-            InlineNode::Xref(Arc::clone(&unknown)),
-        ])])])],
+        vec![flat_bullet(vec![InlineNode::Bold(vec![
+            InlineNode::Italic(vec![InlineNode::Xref(Arc::clone(&unknown))]),
+        ])])],
     );
     let deck = make_deck(vec![slide]);
     let brand = make_brand();
 
-    let result = run(&deck, &brand)
-        .expect("deep nested xref in bullet must produce warning, not error");
+    let result =
+        run(&deck, &brand).expect("deep nested xref in bullet must produce warning, not error");
 
     assert!(
         result.warnings.iter().any(|w| matches!(
@@ -473,7 +490,8 @@ fn test_bc_3_05_001_story073_ec004_deep_nested_xref_in_bullet_layout_run() {
             if target.as_ref() == "__ec004_deep_xref__"
         )),
         "XrefTargetNotFound must be produced for xref inside Bold(Italic(Xref)) in bullet; \
-         got: {:?}", result.warnings
+         got: {:?}",
+        result.warnings
     );
 }
 
@@ -561,7 +579,11 @@ fn test_bc_3_05_001_story073_vp047_all_12_inline_variants_in_bullet_survive_layo
         InlineNode::Strikethrough(vec![InlineNode::Plain(Arc::from("strike"))]),
         InlineNode::Highlight(vec![InlineNode::Plain(Arc::from("highlight"))]),
     ];
-    assert_eq!(all_12_inlines.len(), 12, "test setup: must have exactly 12 inline variants");
+    assert_eq!(
+        all_12_inlines.len(),
+        12,
+        "test setup: must have exactly 12 inline variants"
+    );
 
     let title_slide = make_slide_with_title("title", "introduction");
     let bullet_item = flat_bullet(all_12_inlines.clone());
@@ -590,13 +612,14 @@ fn test_bc_3_05_001_story073_vp047_all_12_inline_variants_in_bullet_survive_layo
 
     let bullet_frame = bullet_frame.expect(
         "must find a FrameContent::TextRun frame carrying exactly 12 InlineNode variants \
-         (one per BulletItem.inlines for the all-12-variants bullet)"
+         (one per BulletItem.inlines for the all-12-variants bullet)",
     );
 
     assert_eq!(
         bullet_frame, all_12_inlines,
         "VP-047: all 12 InlineNode variants must survive the layout pass unchanged in the \
-         FrameContent::TextRun frame; got: {:?}", bullet_frame
+         FrameContent::TextRun frame; got: {:?}",
+        bullet_frame
     );
 }
 
@@ -648,8 +671,8 @@ fn test_bc_3_05_001_story073_ac_int1_mixed_text_and_bullets_blocks() {
     let deck = make_deck(vec![slide]);
     let brand = make_brand();
 
-    let result = run(&deck, &brand)
-        .expect("layout::run must succeed for mixed Text + Bullets blocks");
+    let result =
+        run(&deck, &brand).expect("layout::run must succeed for mixed Text + Bullets blocks");
 
     // Expect 4 TextRun frames: 1 from Text block + 3 from Bullets block.
     assert_eq!(
@@ -664,7 +687,8 @@ fn test_bc_3_05_001_story073_ac_int1_mixed_text_and_bullets_blocks() {
     // No errors, no warnings (all content is well-formed).
     assert!(
         result.warnings.is_empty(),
-        "well-formed mixed deck must produce zero warnings; got: {:?}", result.warnings
+        "well-formed mixed deck must produce zero warnings; got: {:?}",
+        result.warnings
     );
 }
 
@@ -689,8 +713,7 @@ fn test_bc_3_05_001_story073_bullet_text_run_bboxes_are_valid() {
     let deck = make_deck(vec![slide]);
     let brand = make_brand();
 
-    let result = run(&deck, &brand)
-        .expect("layout::run must succeed for valid bullet items");
+    let result = run(&deck, &brand).expect("layout::run must succeed for valid bullet items");
 
     let page_w = result.page_size.width;
     let page_h = result.page_size.height;
@@ -708,11 +731,13 @@ fn test_bc_3_05_001_story073_bullet_text_run_bboxes_are_valid() {
                 // width and height must be positive (non-zero Emu values).
                 assert!(
                     frame.bbox.width.0 > 0,
-                    "bullet TextRun frame width must be > 0 EMU; got {:?}", frame.bbox.width
+                    "bullet TextRun frame width must be > 0 EMU; got {:?}",
+                    frame.bbox.width
                 );
                 assert!(
                     frame.bbox.height.0 > 0,
-                    "bullet TextRun frame height must be > 0 EMU; got {:?}", frame.bbox.height
+                    "bullet TextRun frame height must be > 0 EMU; got {:?}",
+                    frame.bbox.height
                 );
             }
         }
