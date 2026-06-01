@@ -2102,13 +2102,15 @@ fn test_bc_4_03_001_validator_ua1_compliant_deck_exports_successfully() {
     // To make this a Red Gate: we also assert /Outlines is present in the bytes
     // (which fails currently regardless of whether the export succeeds/fails).
     // If the export is Ok but /Outlines is missing, the assert below catches it.
-    let bytes = result.unwrap_or_else(|e| panic!(
-        "AC-012/positive FAILED: compliant deck must export successfully once \
+    let bytes = result.unwrap_or_else(|e| {
+        panic!(
+            "AC-012/positive FAILED: compliant deck must export successfully once \
          AC-010+011+012 are all implemented.\n\
          Current error: {e}\n\
          If Validator::UA1 is enabled but outline/Hn-titles are not yet added, \
          this error is expected as an intermediate Red Gate state."
-    ));
+        )
+    });
 
     // The export succeeded — verify the outline is present (load-bearing AC-010 proxy).
     // This catches the case where the export succeeds with Validator::None but no outline.
@@ -2245,8 +2247,8 @@ fn test_bc_4_03_001_ac013_verapdf_full_compliance() {
     let bytes = export_to_bytes(&deck, &laid_out);
 
     // Write PDF bytes to a temp file for verapdf to read.
-    let mut tmp = tempfile::NamedTempFile::new()
-        .expect("failed to create temp file for veraPDF fixture");
+    let mut tmp =
+        tempfile::NamedTempFile::new().expect("failed to create temp file for veraPDF fixture");
     tmp.write_all(&bytes)
         .expect("failed to write PDF bytes to temp file");
     let pdf_path = tmp.path().to_owned();

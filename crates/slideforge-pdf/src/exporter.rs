@@ -57,9 +57,12 @@
 
 use krilla::Document;
 use krilla::color::rgb;
+use krilla::configure::{Configuration, Validator};
+use krilla::destination::XyzDestination;
 use krilla::geom::Point;
 use krilla::metadata::Metadata;
 use krilla::num::NormalizedF32;
+use krilla::outline::{Outline, OutlineNode};
 use krilla::page::PageSettings;
 use krilla::paint::{Fill, FillRule};
 use krilla::tagging::{ArtifactType, ContentTag};
@@ -166,6 +169,10 @@ impl PdfExporter {
         brand: &Brand,
         opts: &ExportOptions,
     ) -> Result<Vec<u8>, PdfExportError> {
+        // AC-012: production path uses Validator::UA1 in BOTH export() and
+        // export_uncompressed().  The uncompressed path is used by integration
+        // tests that need to scan PDF content streams — it still must be UA-1
+        // compliant.
         self.generate_pdf_inner(
             deck,
             laid_out,
@@ -173,6 +180,7 @@ impl PdfExporter {
             opts,
             krilla::SerializeSettings {
                 compress_content_streams: false,
+                configuration: Configuration::new_with_validator(Validator::UA1),
                 ..krilla::SerializeSettings::default()
             },
         )
@@ -194,6 +202,12 @@ impl PdfExporter {
     ///   is skipped with a `tracing::warn!` — the page still renders.
     /// - Diagram frames: `svg_embed::embed_normalized_svg()` at the mapped position.
     ///
+    /// ## PDF/UA-1 validator (AC-012 / BC-4.03.001 invariant 5)
+    ///
+    /// The production export path uses `Validator::UA1` via
+    /// `Configuration::new_with_validator(Validator::UA1)`. Any `KrillaError::Validation`
+    /// is propagated as a fatal `PdfExportError::Serialize` — it is NOT silently swallowed.
+    ///
     /// ## Coordinate invariant (BC-4.03.005 / Architecture Compliance Rule 2)
     ///
     /// ALL EMU-to-point conversions go through `coords::emu_to_pt()`. No inline
@@ -206,7 +220,7 @@ impl PdfExporter {
     /// - Invalid page dimensions.
     /// - Tag tree assembly failure.
     /// - SVG embed failure.
-    /// - Document serialization failure.
+    /// - Document serialization failure (including `Validator::UA1` rejection).
     ///
     /// Note: Font resolution failures are non-fatal — text is skipped with a
     /// structured warning, and the export continues. This ensures a partial PDF
@@ -219,13 +233,14 @@ impl PdfExporter {
         brand: &Brand,
         opts: &ExportOptions,
     ) -> Result<Vec<u8>, PdfExportError> {
-        self.generate_pdf_inner(
-            deck,
-            laid_out,
-            brand,
-            opts,
-            krilla::SerializeSettings::default(),
-        )
+        // AC-012 / BC-4.03.001 invariant 5: production export MUST use Validator::UA1.
+        // `Configuration::new_with_validator` never returns None for UA1 (it selects a
+        // compatible PDF version automatically).
+        let settings = krilla::SerializeSettings {
+            configuration: Configuration::new_with_validator(Validator::UA1),
+            ..krilla::SerializeSettings::default()
+        };
+        self.generate_pdf_inner(deck, laid_out, brand, opts, settings)
     }
 
     /// Core PDF generation with explicit [`krilla::SerializeSettings`].
@@ -266,10 +281,56 @@ impl PdfExporter {
         // Collect per-slide Part groups for later assembly into the deck tag tree.
         let mut slide_parts = Vec::with_capacity(laid_out.slides.len());
 
-        for slide in &laid_out.slides {
-            // Convert page dimensions via coords:: — Architecture Compliance Rule 2.
-            let width_pts = emu_to_pt(laid_out.page_size.width);
-            let height_pts = emu_to_pt(laid_out.page_size.height);
+        // Pre-compute page width/height in points — identical for all slides.
+        let width_pts = emu_to_pt(laid_out.page_size.width);
+        let height_pts = emu_to_pt(laid_out.page_size.height);
+
+        // Build the PDF document outline (AC-010 / BC-4.03.001 postcondition 1).
+        //
+        // ISO 14289-1 §7.1: an outline is mandatory when the document contains headings,
+        // which every slideforge deck with title-type slides does.
+        //
+        // For each laid-out slide (in source order), we produce one top-level outline entry:
+        //   - Label = deck.slides[slide.source_index].title_str()
+        //     OR fallback "Slide N" (1-based) when title_str() returns None.
+        //   - Destination = XyzDestination pointing to the top-left of the slide's page.
+        //
+        // The outline is built BEFORE the page loop so we have the slide index → page
+        // index mapping available. Page indices are 0-based and match slide order.
+        let mut outline = Outline::new();
+        for (page_idx, slide) in laid_out.slides.iter().enumerate() {
+            let label: String = deck
+                .slides
+                .get(slide.source_index)
+                .and_then(|s| s.title_str())
+                .map_or_else(
+                    || format!("Slide {}", page_idx + 1),
+                    std::borrow::ToOwned::to_owned,
+                );
+
+            // XyzDestination pointing to the top-left corner of the slide page.
+            // `Point::from_xy(0.0, 0.0)` is the top-left in krilla's Surface coordinates
+            // (Y-down). krilla applies the PDF Y-flip internally when serialising the dest.
+            let dest = XyzDestination::new(page_idx, Point::from_xy(0.0, 0.0));
+            let node = OutlineNode::new(label, dest);
+            outline.push_child(node);
+        }
+
+        for (page_idx, slide) in laid_out.slides.iter().enumerate() {
+            // Resolve the slide title for AC-011 Hn /Title attribute.
+            //
+            // AC-011 (BC-4.03.001 postcondition 1): every /H1–/H6 structure element must
+            // carry a /Title attribute whose value is the heading text.  The title is
+            // sourced from deck.slides[source_index].title_str(); fallback "Slide N"
+            // (1-based) is used when title_str() returns None.
+            let slide_title: String = deck
+                .slides
+                .get(slide.source_index)
+                .and_then(|s| s.title_str())
+                .map_or_else(
+                    || format!("Slide {}", page_idx + 1),
+                    std::borrow::ToOwned::to_owned,
+                );
 
             let page_settings = PageSettings::from_wh(width_pts, height_pts).ok_or_else(|| {
                 PdfExportError::Serialize {
@@ -285,7 +346,10 @@ impl PdfExporter {
             // Build the structural tag sub-tree for this slide.
             // `mut` required: the draw loop inserts Identifier leaf nodes into
             // `part_result.part.children` for F-045-C2 MCID linkage.
-            let mut part_result = tag_engine.tag_slide(slide)?;
+            //
+            // Pass `Some(&slide_title)` so that Hn structure elements carry the
+            // /Title attribute required by PDF/UA-1 (AC-011).
+            let mut part_result = tag_engine.tag_slide_with_title(slide, Some(&slide_title))?;
 
             // Obtain the krilla Surface and draw slide content.
             let mut surface = page.surface();
@@ -414,6 +478,16 @@ impl PdfExporter {
         if has_meta {
             document.set_metadata(meta);
         }
+
+        // Wire the PDF document outline (AC-010 / BC-4.03.001 postcondition 1 / invariant 6).
+        //
+        // ISO 14289-1 §7.1 requires a document outline whenever headings (H1–H6) are
+        // present. Every slideforge deck with title-type slides has H1 headings.
+        //
+        // The `outline` was built above (one entry per slide, in source order).
+        // `document.set_outline` stores it in the SerializeContext; krilla writes
+        // `catalog.outlines(ref)` → `/Outlines` in the PDF catalog on `document.finish()`.
+        document.set_outline(outline);
 
         // Assemble the per-slide Part groups into a single deck-level TagTree
         // and attach it to the document before finish().

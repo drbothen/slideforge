@@ -143,6 +143,37 @@ impl SlideTagEngine {
     /// using a `match` expression that proves `NonZeroU16::new(2)` is `Some(_)`
     /// at compile time — no runtime panic path exists.
     pub fn tag_slide(&self, slide: &LaidOutSlide) -> Result<PartResult, PdfExportError> {
+        self.tag_slide_with_title(slide, None)
+    }
+
+    /// Build the PDF structure tag tree for a single slide, with an explicit
+    /// heading title string for PDF/UA-1 compliance.
+    ///
+    /// `slide_title` is the text to attach as the `/T` (Title) attribute on any
+    /// `Hn` structure element produced for this slide. It is sourced from
+    /// `deck.slides[slide.source_index].title_str()` in the exporter, with
+    /// `"Slide N"` as the fallback when `title_str()` returns `None`.
+    ///
+    /// Per ISO 14289-1 §7.1: every `H1`–`H6` structure element must carry a
+    /// `/Title` attribute (`/T` key in the `StructElem` dictionary). krilla's
+    /// `Validator::UA1` reports `MissingHeadingTitle` when this attribute is
+    /// absent or empty.
+    ///
+    /// When `slide_title` is `None` the behaviour is identical to
+    /// [`tag_slide`](Self::tag_slide) — the `Hn` tag is built without a `/T`
+    /// attribute. Callers that do not have access to the deck's semantic layer
+    /// (e.g., unit tests operating on `LaidOutSlide` directly) should use
+    /// [`tag_slide`](Self::tag_slide) or pass `None` explicitly.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PdfExportError::Serialize`] if the tag tree cannot be
+    /// constructed.
+    pub fn tag_slide_with_title(
+        &self,
+        slide: &LaidOutSlide,
+        slide_title: Option<&str>,
+    ) -> Result<PartResult, PdfExportError> {
         // One Part group per slide — wraps all structural children.
         let mut part_group = TagGroup::new(Tag::<krilla::tagging::kind::Part>::Part);
         let mut decorative_frame_indices: Vec<usize> = Vec::new();
@@ -162,22 +193,33 @@ impl SlideTagEngine {
                 },
 
                 // ── Title → H1 ───────────────────────────────────────────────
+                //
+                // AC-011 (BC-4.03.001): ISO 14289-1 §7.1 requires every Hn structure
+                // element to carry a /Title attribute (/T key in the StructElem dictionary).
+                // The title text is sourced from `deck.slides[source_index].title_str()` by
+                // the exporter and passed as `slide_title`. When `slide_title` is None
+                // (e.g., unit tests that do not have deck access), Hn is built without /T.
                 FrameContent::Title(_text) => {
                     let child_idx = part_group.children.len();
                     let heading_group = TagGroup::new(Tag::<krilla::tagging::kind::Hn>::Hn(
                         // NonZeroU16::MIN == 1 (H1); infallible construction.
                         std::num::NonZeroU16::MIN,
-                        None,
+                        slide_title.map(std::borrow::ToOwned::to_owned),
                     ));
                     part_group.push(heading_group);
                     frame_child_part_indices[frame_idx] = Some(child_idx);
                 },
 
                 // ── Subtitle → H2 ────────────────────────────────────────────
+                //
+                // Subtitle frames use H2. The same slide_title is used for consistency
+                // (subtitle is a sub-heading within the same slide context).
                 FrameContent::Subtitle(_text) => {
                     let child_idx = part_group.children.len();
-                    let heading_group =
-                        TagGroup::new(Tag::<krilla::tagging::kind::Hn>::Hn(H2_LEVEL, None));
+                    let heading_group = TagGroup::new(Tag::<krilla::tagging::kind::Hn>::Hn(
+                        H2_LEVEL,
+                        slide_title.map(std::borrow::ToOwned::to_owned),
+                    ));
                     part_group.push(heading_group);
                     frame_child_part_indices[frame_idx] = Some(child_idx);
                 },
