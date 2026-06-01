@@ -433,6 +433,153 @@ fn test_section_nested_in_slide_error() {
     );
 }
 
+// ── MED-1: E-PAR-018 context label in @for and @if bodies ───────────────────
+
+/// MED-1 (E-PAR-018, BC-3.02.002 EC-002):
+/// A `section` keyword nested inside a `@for` loop body must produce a fatal
+/// E-PAR-018 error whose message names the `@for` context — NOT "slide block".
+///
+/// Taxonomy (error-taxonomy.md v2.6, E-PAR-018):
+/// > `section blocks must be top-level — found inside <context> block at
+/// > <file>:<line>:<col>. Move the section: declaration to the top level
+/// > of the .sf file.`
+///
+/// Where `<context>` is substituted with `@for` for this case.
+///
+/// RED GATE: the current implementation hardcodes "slide block" for ALL block_item-
+/// level section rejections, including inside @for bodies. This test asserts that
+/// the message does NOT say "slide" and DOES say "@for" (or "@for/@if").
+/// Additionally, the corrective sentence "Move the section: declaration to the top
+/// level of the .sf file." must be present.
+#[test]
+fn test_section_nested_in_for_error() {
+    // section nested inside a @for body — must produce E-PAR-018 naming @for context
+    let src = concat!(
+        "slideforge_version \"1\"\n",
+        "@for x in items:\n",
+        "  section methodology:\n",
+        "    detail: \"nested inside for — must error\"\n",
+    );
+    let errors = parse_src_errors(src);
+
+    assert!(
+        !errors.is_empty(),
+        "MED-1 (@for): section nested inside @for body must produce a fatal parse error"
+    );
+
+    let error_messages: Vec<String> = errors.iter().map(|e| format!("{e:?}")).collect();
+
+    // The error must carry E-PAR-018 and must say "top-level".
+    let has_e_par_018 = error_messages
+        .iter()
+        .any(|msg| msg.contains("E-PAR-018") || msg.contains("top-level"));
+    assert!(
+        has_e_par_018,
+        "MED-1 (@for): error must contain E-PAR-018 or 'top-level'; errors: {error_messages:?}"
+    );
+
+    // The context label must NOT say "slide" — section is inside @for, not a slide.
+    // The taxonomy specifies context = "@for" for this case.
+    let wrongly_says_slide = error_messages.iter().any(|msg| {
+        // Match "slide block" or "slide body" — the incorrect hardcoded label.
+        // Do NOT false-positive on "slideforge_version" in the fixture.
+        msg.contains("slide block") || msg.contains("slide body")
+    });
+    assert!(
+        !wrongly_says_slide,
+        "MED-1 (@for): error must NOT say 'slide block' or 'slide body' \
+         when section is nested inside @for — taxonomy requires context '@for'; \
+         errors: {error_messages:?}"
+    );
+
+    // The context label must name the @for context.
+    let names_for_context = error_messages
+        .iter()
+        .any(|msg| msg.contains("@for") || msg.contains("for"));
+    assert!(
+        names_for_context,
+        "MED-1 (@for): error must name the @for context; errors: {error_messages:?}"
+    );
+
+    // The corrective sentence from the taxonomy must be present.
+    let has_corrective = error_messages
+        .iter()
+        .any(|msg| msg.contains("Move the section"));
+    assert!(
+        has_corrective,
+        "MED-1 (@for): error must include the taxonomy corrective sentence \
+         'Move the section: declaration to the top level of the .sf file.'; \
+         errors: {error_messages:?}"
+    );
+}
+
+/// MED-1 companion (@if case, E-PAR-018, BC-3.02.002 EC-002):
+/// A `section` keyword nested inside an `@if` body must produce a fatal
+/// E-PAR-018 error whose message names the `@if` context — NOT "slide block".
+///
+/// Same taxonomy requirements as the @for case above.
+///
+/// RED GATE: same as test_section_nested_in_for_error — both use the same
+/// `section_rejected` arm in block_item which currently hardcodes "slide block".
+#[test]
+fn test_section_nested_in_if_error() {
+    // section nested inside an @if body — must produce E-PAR-018 naming @if context
+    let src = concat!(
+        "slideforge_version \"1\"\n",
+        "@if show_section:\n",
+        "  section methodology:\n",
+        "    detail: \"nested inside if — must error\"\n",
+    );
+    let errors = parse_src_errors(src);
+
+    assert!(
+        !errors.is_empty(),
+        "MED-1 (@if): section nested inside @if body must produce a fatal parse error"
+    );
+
+    let error_messages: Vec<String> = errors.iter().map(|e| format!("{e:?}")).collect();
+
+    // The error must carry E-PAR-018 and must say "top-level".
+    let has_e_par_018 = error_messages
+        .iter()
+        .any(|msg| msg.contains("E-PAR-018") || msg.contains("top-level"));
+    assert!(
+        has_e_par_018,
+        "MED-1 (@if): error must contain E-PAR-018 or 'top-level'; errors: {error_messages:?}"
+    );
+
+    // The context label must NOT say "slide" — section is inside @if, not a slide.
+    let wrongly_says_slide = error_messages
+        .iter()
+        .any(|msg| msg.contains("slide block") || msg.contains("slide body"));
+    assert!(
+        !wrongly_says_slide,
+        "MED-1 (@if): error must NOT say 'slide block' or 'slide body' \
+         when section is nested inside @if — taxonomy requires context '@if'; \
+         errors: {error_messages:?}"
+    );
+
+    // The context label must name the @if context.
+    let names_if_context = error_messages
+        .iter()
+        .any(|msg| msg.contains("@if") || msg.contains("if"));
+    assert!(
+        names_if_context,
+        "MED-1 (@if): error must name the @if context; errors: {error_messages:?}"
+    );
+
+    // The corrective sentence from the taxonomy must be present.
+    let has_corrective = error_messages
+        .iter()
+        .any(|msg| msg.contains("Move the section"));
+    assert!(
+        has_corrective,
+        "MED-1 (@if): error must include the taxonomy corrective sentence \
+         'Move the section: declaration to the top level of the .sf file.'; \
+         errors: {error_messages:?}"
+    );
+}
+
 // ── AC-006 ────────────────────────────────────────────────────────────────────
 
 /// AC-006 (BC-3.02.002 EC-004, EC-006, DIR-077-001 §5):

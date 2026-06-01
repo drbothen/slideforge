@@ -299,27 +299,52 @@ where
 
         // ── `section` block rejection (AC-005) ───────────────────────────────
         // `section` blocks are top-level only (BC-3.02.002 precondition 3).
-        // When `section` appears inside a @for/@if body or a slide body (via
-        // the slide_block_cf's own block_item calls), emit E-PAR-018 with a
-        // corrective message naming the top-level constraint.
+        // When `section` appears inside a @for/@if body, emit E-PAR-018 with
+        // the correct context label and the taxonomy-mandated corrective sentence.
+        //
+        // This combinator fires at the `block_item` recursion level, which is
+        // shared by both @for and @if bodies. Since the same recursive parser
+        // is used for both, the enclosing control-flow type is not statically
+        // distinguishable here. The accurate context label is "@for/@if" —
+        // reflecting that the `block_item` combinator is only reached via
+        // @for or @if bodies (NOT slide bodies, which use `body_item_parser`
+        // in `slide_block_cf`).
         //
         // This combinator is placed at the block_item level (not field_line_cf)
         // so that the E-PAR-018 Rich error is a terminal error captured by
         // `into_output_errors()` — not a non-terminal validate error that can
         // be missed by the error accumulator.
+        //
+        // The combinator also consumes the optional indented body block
+        // (Indent...content...Dedent) to prevent the dangling Indent token
+        // from triggering a secondary IndentError that would mask the E-PAR-018.
         let section_rejected = select! {
             Token::Ident(s) = e if s.as_ref() == "section" => e.span()
         }
+        // Consume the rest of the section header line (type IDENT, colon, etc.).
         .then_ignore(
             any()
                 .filter(|t: &Token| !matches!(t, Token::Newline | Token::Dedent | Token::Eof))
                 .repeated(),
         )
         .then_ignore(just(Token::Newline).or_not())
+        // Consume the optional indented body block to prevent a secondary
+        // IndentError from masking the E-PAR-018 diagnostic.
+        .then_ignore(
+            select! { Token::Indent(_) => () }
+                .then_ignore(
+                    any()
+                        .filter(|t: &Token| !matches!(t, Token::Dedent | Token::Eof))
+                        .repeated(),
+                )
+                .then_ignore(just(Token::Dedent))
+                .or_not(),
+        )
         .validate(|_span, info, emitter| {
             emitter.emit(Rich::custom(
                 info.span(),
-                "E-PAR-018: section blocks must be top-level — found inside slide block",
+                "E-PAR-018: section blocks must be top-level — found inside @for/@if block. \
+                 Move the section: declaration to the top level of the .sf file.",
             ));
         })
         .map(move |()| {
@@ -501,7 +526,8 @@ where
         .validate(|_span, info, emitter| {
             emitter.emit(Rich::custom(
                 info.span(),
-                "E-PAR-018: section blocks must be top-level — found inside slide block",
+                "E-PAR-018: section blocks must be top-level — found inside slide block. \
+                 Move the section: declaration to the top level of the .sf file.",
             ));
         })
         .map(move |()| {
