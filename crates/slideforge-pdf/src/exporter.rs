@@ -58,6 +58,7 @@
 use krilla::Document;
 use krilla::color::rgb;
 use krilla::geom::Point;
+use krilla::metadata::Metadata;
 use krilla::num::NormalizedF32;
 use krilla::page::PageSettings;
 use krilla::paint::{Fill, FillRule};
@@ -236,7 +237,7 @@ impl PdfExporter {
     /// Same error conditions as [`generate_pdf`].
     fn generate_pdf_inner(
         &self,
-        _deck: &Deck,
+        deck: &Deck,
         laid_out: &LaidOutDeck,
         brand: &Brand,
         _opts: &ExportOptions,
@@ -300,6 +301,43 @@ impl PdfExporter {
 
             // Collect the Part group for deck-level tree assembly.
             slide_parts.push(part_result.part);
+        }
+
+        // Wire document-level metadata (BC-4.03.001 AC-007: /Lang from deck metadata).
+        //
+        // `krilla::Document::set_metadata` writes the document's metadata dictionary
+        // and causes krilla to emit `/Lang` in the PDF catalog (via
+        // `catalog.lang(TextStr(lang))` in `chunk_container.rs:189`).
+        //
+        // We wire `deck.metadata.lang` → `Metadata::language()`.  When `lang` is
+        // `None`, the precondition (BC-4.03.001 precondition 2) is not met but the
+        // accessibility validator (BC-5.01.001) should have rejected the deck before
+        // we reach the export stage.  For defence in depth, we simply skip the
+        // metadata call — no `/Lang` is emitted, which is safer than writing a
+        // garbage or empty language tag.
+        //
+        // The document title is wired from `deck.metadata.title` when present.
+        let mut meta = Metadata::new();
+        let mut has_meta = false;
+
+        if let Some(lang) = &deck.metadata.lang {
+            meta = meta.language(lang.as_ref().to_owned());
+            has_meta = true;
+            tracing::debug!(lang = lang.as_ref(), "wiring document /Lang from deck metadata");
+        } else {
+            tracing::warn!(
+                "deck.metadata.lang is None — PDF will not have /Lang; \
+                 PDF/UA-1 compliance requires a document language"
+            );
+        }
+
+        if let Some(title) = &deck.metadata.title {
+            meta = meta.title(title.as_ref().to_owned());
+            has_meta = true;
+        }
+
+        if has_meta {
+            document.set_metadata(meta);
         }
 
         // Assemble the per-slide Part groups into a single deck-level TagTree
