@@ -300,16 +300,20 @@ pub struct SlideNode {
 
 // ─── SectionNode ─────────────────────────────────────────────────────────────
 
-/// A `section <type>:` block (future; placeholder for STORY-008+).
+/// A `section <type>:` block parsed by `section_block_parser` (STORY-078).
 ///
-/// Included here so that [`BlockItem::Section`] can reference it, completing
-/// the block item discriminant set. The `fields` member is intentionally
-/// empty for the STORY-007 scope.
+/// Each `section <kind>:` block in a `.sf` file produces one `SectionNode`.
+/// The `fields` member is populated by the parser and contains every
+/// key/value assignment found inside the section body, in source order.
+/// Each [`FieldNode`] carries a sub-block key and its associated value.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SectionNode {
-    /// The section type keyword.
+    /// The section type keyword (e.g., `"appendix"`, `"bibliography"`).
     pub kind: Spanned<String>,
     /// Field assignments inside this section block, in source order.
+    ///
+    /// Populated by `section_block_parser` (STORY-078). Each entry is a
+    /// [`FieldNode`] carrying a sub-block key and its parsed value.
     pub fields: Vec<FieldNode>,
 }
 
