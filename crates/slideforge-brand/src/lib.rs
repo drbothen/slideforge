@@ -65,6 +65,7 @@ pub mod context;
 pub mod error;
 pub mod extractor;
 pub mod font;
+pub mod footer;
 pub mod inference;
 pub mod layout_xml;
 pub mod layouts;
