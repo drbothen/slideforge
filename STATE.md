@@ -80,6 +80,27 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. Generates branded .pptx
 | **factory-artifacts** | Local only. Push requires explicit human authorization per CLAUDE.md. |
 | **Archived history** | Prior checkpoints → .factory/cycles/STORY-044/session-checkpoints.md |
 
+## STORY-078 Kickoff Brief (cold-start)
+
+**Goal:** Deliver STORY-078 (Parser: section block syntax, 5pts, P0, Wave 4 Batch A, EPIC-02, crate slideforge-syntax/SS-01, traces BC-3.02.002). Unblocks STORY-077.
+
+**Authoritative artifacts (read these first):**
+- Spec: `.factory/stories/stories/STORY-078-parser-section-block-syntax.md`
+- Binding directive: `.factory/cycles/STORY-077/section-parse-directive.md` (DIR-077-001 + Addendum DIR-077-001-A — addendum is CURRENT ruling)
+- Research: `.factory/cycles/STORY-077/chumsky-parse-warning-research.md`
+- BC: `.factory/specs/behavioral-contracts/BC-3.02.002.md` (v1.2 — NO amendment; invariant 4 "parse time" is CORRECT)
+
+**Must-honor technical decisions (DIR-077-001-A):**
+1. Un-reserve `section` — `crates/slideforge-syntax/src/keywords.rs:74` maps `"section"` → E-PAR-006. Make it a recognized block introducer. `SectionNode` (ast.rs:303-314) is a placeholder — make it real (`kind: Spanned<String>`, `fields: Vec<FieldNode>`).
+2. Reuse existing `template_value()` inline combinator for `detail:`/`report:` sub-block values — SINGLE inline parser. Preserve Bold/Xref/`{{ }}`/math as structured inline nodes.
+3. Section TYPE stored VERBATIM in `SectionNode.kind`; parser does NOT validate against a type list and emits NO error for any type name. TYPE validation → eval stage (STORY-077, not STORY-078).
+4. Unrecognized sub-block KEY → parse-time WARNING via chumsky 0.10.1 `validate()` + `Emitter::emit(Rich::custom(span,msg))` routed through `push_with_severity(ParseSeverity::Warning)` → `ParseResult::warnings`. Parse SUCCEEDS. Reserved-name collision (EC-006) → parse-time FATAL with hint.
+5. `REGISTER_SUB_BLOCK_KEYS = ["report","detail"]` — `notes` is INVALID on sections (triggers unrecognized-key warning).
+
+**Delivery flow:** worktree from origin/develop (a4ddae8d): `git worktree add .worktrees/STORY-078 -b feature/S-078 origin/develop` → test-writer Red Gate → implementer TDD → LOCAL adversary BC-5.39.001 3 consecutive strict-CLEAN → demo-recorder per-AC → push → pr-manager 9-step PR → squash-merge → worktree cleanup → post-merge state burst.
+
+**STORY-077 disposition:** BLOCKED on 078. Old branch `feature/S-077` (2bf17d25) has defective eval work (flatten-to-Str, vacuous tests) — DISCARD and redo after 078 merges. IR type change (`SectionBlock.body: OrderedMap<Arc<str>, FieldValue>` + `register_content` field) and ~32 layout call-site adjustments are reusable references only.
+
 ## Current Status
 
 Phase 3 IN PROGRESS. Wave 1 COMPLETE (gate PASSED). Wave 2 COMPLETE (gate PASSED). Wave 3 COMPLETE (22/22 stories, gate PASSED 2026-05-31). **Wave 4 STARTED — 18 stories / 109 pts. Batch A 4/10 complete (STORY-035, 036, 043, 044 MERGED). STORY-077 BLOCKED on STORY-078 (new, parser prerequisite). 0 active worktrees. 0 open PRs.**
