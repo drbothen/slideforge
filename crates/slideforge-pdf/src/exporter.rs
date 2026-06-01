@@ -58,11 +58,9 @@
 use krilla::Document;
 use krilla::color::rgb;
 use krilla::configure::{Configuration, Validator};
-use krilla::destination::XyzDestination;
 use krilla::geom::Point;
 use krilla::metadata::Metadata;
 use krilla::num::NormalizedF32;
-use krilla::outline::{Outline, OutlineNode};
 use krilla::page::PageSettings;
 use krilla::paint::{Fill, FillRule};
 use krilla::tagging::{ArtifactType, ContentTag};
@@ -75,6 +73,7 @@ use slideforge_types::{Brand, Deck};
 use crate::coords::emu_to_pt;
 use crate::error::PdfExportError;
 use crate::font::load_font_data;
+use crate::outline::{build_krilla_outline, build_outline_entries};
 use crate::svg_embed::embed_normalized_svg;
 use crate::tag_engine::SlideTagEngine;
 
@@ -290,31 +289,15 @@ impl PdfExporter {
         // ISO 14289-1 §7.1: an outline is mandatory when the document contains headings,
         // which every slideforge deck with title-type slides does.
         //
-        // For each laid-out slide (in source order), we produce one top-level outline entry:
-        //   - Label = deck.slides[slide.source_index].title_str()
-        //     OR fallback "Slide N" (1-based) when title_str() returns None.
-        //   - Destination = XyzDestination pointing to the top-left of the slide's page.
+        // Delegated to `outline::build_outline_entries` + `outline::build_krilla_outline`
+        // (F-045-P1-004): the intermediate `Vec<OutlineEntry>` is unit-testable (count,
+        // labels, destination page indices) without serialising a full PDF.
         //
-        // The outline is built BEFORE the page loop so we have the slide index → page
-        // index mapping available. Page indices are 0-based and match slide order.
-        let mut outline = Outline::new();
-        for (page_idx, slide) in laid_out.slides.iter().enumerate() {
-            let label: String = deck
-                .slides
-                .get(slide.source_index)
-                .and_then(|s| s.title_str())
-                .map_or_else(
-                    || format!("Slide {}", page_idx + 1),
-                    std::borrow::ToOwned::to_owned,
-                );
-
-            // XyzDestination pointing to the top-left corner of the slide page.
-            // `Point::from_xy(0.0, 0.0)` is the top-left in krilla's Surface coordinates
-            // (Y-down). krilla applies the PDF Y-flip internally when serialising the dest.
-            let dest = XyzDestination::new(page_idx, Point::from_xy(0.0, 0.0));
-            let node = OutlineNode::new(label, dest);
-            outline.push_child(node);
-        }
+        // F-045-P1-005 invariant: label comes from deck.slides[source_index]; destination
+        // page index is the enumerate position. The debug_assert in build_outline_entries
+        // fires when source_index is out-of-bounds — see outline.rs for details.
+        let outline_entries = build_outline_entries(deck, laid_out);
+        let outline = build_krilla_outline(&outline_entries);
 
         for (page_idx, slide) in laid_out.slides.iter().enumerate() {
             // Resolve the slide title for AC-011 Hn /Title attribute.
@@ -445,39 +428,37 @@ impl PdfExporter {
         // and causes krilla to emit `/Lang` in the PDF catalog (via
         // `catalog.lang(TextStr(lang))` in `chunk_container.rs:189`).
         //
-        // We wire `deck.metadata.lang` → `Metadata::language()`.  When `lang` is
-        // `None`, the precondition (BC-4.03.001 precondition 2) is not met but the
-        // accessibility validator (BC-5.01.001) should have rejected the deck before
-        // we reach the export stage.  For defence in depth, we simply skip the
-        // metadata call — no `/Lang` is emitted, which is safer than writing a
-        // garbage or empty language tag.
+        // F-045-P1-007 / BC-4.03.001 defence-in-depth:
         //
-        // The document title is wired from `deck.metadata.title` when present.
-        let mut meta = Metadata::new();
-        let mut has_meta = false;
+        // When `Validator::UA1` is active, a missing `/Lang` is a fatal validation
+        // error (`ValidationError::NoDocumentLanguage`). Rather than silently continuing
+        // and letting krilla catch it at `document.finish()`, we fail fast here with a
+        // structured `ValidationFailed` error. This makes the failure cause explicit to
+        // the caller and prevents shipping a non-compliant PDF.
+        //
+        // The upstream accessibility validator (BC-5.01.001) should have rejected the
+        // deck before reaching the export stage. This check is defence-in-depth — we do
+        // not rely solely on the upstream check.
+        let Some(lang) = &deck.metadata.lang else {
+            return Err(PdfExportError::ValidationFailed {
+                message: "PDF/UA-1 compliance requires a document language (/Lang); \
+                          deck.metadata.lang is None — set lang in the deck metadata"
+                    .to_owned(),
+            });
+        };
 
-        if let Some(lang) = &deck.metadata.lang {
-            meta = meta.language(lang.as_ref().to_owned());
-            has_meta = true;
-            tracing::debug!(
-                lang = lang.as_ref(),
-                "wiring document /Lang from deck metadata"
-            );
-        } else {
-            tracing::warn!(
-                "deck.metadata.lang is None — PDF will not have /Lang; \
-                 PDF/UA-1 compliance requires a document language"
-            );
-        }
+        tracing::debug!(
+            lang = lang.as_ref(),
+            "wiring document /Lang from deck metadata"
+        );
 
+        // Build the metadata object: language is always present (guarded above);
+        // title is wired when present.
+        let mut meta = Metadata::new().language(lang.as_ref().to_owned());
         if let Some(title) = &deck.metadata.title {
             meta = meta.title(title.as_ref().to_owned());
-            has_meta = true;
         }
-
-        if has_meta {
-            document.set_metadata(meta);
-        }
+        document.set_metadata(meta);
 
         // Wire the PDF document outline (AC-010 / BC-4.03.001 postcondition 1 / invariant 6).
         //
@@ -499,8 +480,25 @@ impl PdfExporter {
 
         // Serialize to PDF bytes. `Document::finish()` returns
         // `KrillaResult<Vec<u8>>` (i.e. `Result<Vec<u8>, KrillaError>`).
-        document.finish().map_err(|e| PdfExportError::Serialize {
-            message: format!("krilla serialization error: {e:?}"),
+        //
+        // F-045-P1-003 / BC-4.03.001 invariant 5: `KrillaError::Validation` MUST map to
+        // `PdfExportError::ValidationFailed`, NOT `Serialize`. Any other `KrillaError`
+        // variant maps to `Serialize`. This distinction is observable in tests that
+        // assert the specific variant type (e.g., test_bc_4_03_001_validator_ua1_rejects_*).
+        document.finish().map_err(|e| match e {
+            krilla::error::KrillaError::Validation(ref violations) => {
+                let message = violations
+                    .iter()
+                    .map(|v| format!("{v:?}"))
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                PdfExportError::ValidationFailed {
+                    message: format!("PDF/UA-1 validation failed: {message}"),
+                }
+            },
+            other => PdfExportError::Serialize {
+                message: format!("krilla serialization error: {other:?}"),
+            },
         })
     }
 }

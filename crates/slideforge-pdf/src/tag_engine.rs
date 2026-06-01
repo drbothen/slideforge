@@ -212,13 +212,20 @@ impl SlideTagEngine {
 
                 // ── Subtitle → H2 ────────────────────────────────────────────
                 //
-                // Subtitle frames use H2. The same slide_title is used for consistency
-                // (subtitle is a sub-heading within the same slide context).
-                FrameContent::Subtitle(_text) => {
+                // OBS-012 / AC-011: body H2-H6 /Title attribute values must be the
+                // first inline run of that frame — NOT the slide title re-used.
+                //
+                // Using the slide_title here was incorrect: a subtitle frame such as
+                // "Q4 2025 Highlights" must carry its OWN text as the H2 /Title, not
+                // the parent slide's H1 title.
+                //
+                // The subtitle text is the first (and typically only) inline run of
+                // the frame; `subtitle_text` is the `Arc<str>` stored in the variant.
+                FrameContent::Subtitle(subtitle_text) => {
                     let child_idx = part_group.children.len();
                     let heading_group = TagGroup::new(Tag::<krilla::tagging::kind::Hn>::Hn(
                         H2_LEVEL,
-                        slide_title.map(std::borrow::ToOwned::to_owned),
+                        Some(subtitle_text.as_ref().to_owned()),
                     ));
                     part_group.push(heading_group);
                     frame_child_part_indices[frame_idx] = Some(child_idx);

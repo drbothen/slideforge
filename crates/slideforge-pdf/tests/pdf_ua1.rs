@@ -64,7 +64,7 @@ use std::sync::Arc;
 use slideforge_layout::types::{
     BoundingBox, Frame, FrameContent, LaidOutDeck, LaidOutSlide, PageSize, RegisterSet,
 };
-use slideforge_pdf::PdfExporter;
+use slideforge_pdf::{PdfExportError, PdfExporter};
 use slideforge_plugin_api::{ExportOptions, Exporter};
 use slideforge_types::{
     Brand, BrandFonts, BrandPalette, Deck, DeckMetadata, Emu, OrderedMap, SourceSpan,
@@ -1006,31 +1006,41 @@ fn test_bc_4_03_001_lang_none_does_not_panic_or_produce_garbage() {
     let deck = deck_without_lang();
     let laid_out = n_slide_deck(1);
 
+    // F-045-P1-007 (load-bearing): when lang is None and Validator::UA1 is active,
+    // the export MUST return Err(PdfExportError::ValidationFailed), not Ok or a panic.
+    //
+    // defence-in-depth: generate_pdf_inner returns ValidationFailed before document.finish()
+    // when lang is None, so the specific variant is observable via export_uncompressed.
     let exporter = PdfExporter::new();
     let brand = minimal_brand();
     let opts = ExportOptions::default();
 
-    // Either the export succeeds (no crash) or it returns an error.
-    // We do NOT assert success — a Result::Err is acceptable here.
-    // We DO assert it does not panic (no unwrap in production paths).
-    let result = exporter.export(&deck, &laid_out, &brand, &opts);
+    let result = exporter.export_uncompressed(&deck, &laid_out, &brand, &opts);
 
     match result {
-        Ok(bytes) => {
-            // If export succeeds, the PDF must still be a valid PDF header.
+        Err(PdfExportError::ValidationFailed { ref message }) => {
+            // Correct — the lang-None fast-fail path returned ValidationFailed.
             assert!(
-                bytes.starts_with(b"%PDF-"),
-                "AC-007/null-lang: export without lang must still produce a valid PDF header"
+                message.to_lowercase().contains("lang")
+                    || message.to_lowercase().contains("language"),
+                "AC-007/F-007: ValidationFailed message must mention 'lang' or 'language': '{message}'"
             );
-            // No garbage lang value must appear. What is NOT acceptable:
-            // a random pointer address or empty string disguised as a lang code.
-            // A missing /Lang is OK (precondition 2 not met).
-            // We do not assert absence of /Lang here — just the non-garbage invariant.
         },
-        Err(e) => {
-            // A structured error is acceptable when lang is missing.
-            // Record the error message for human review.
-            eprintln!("[AC-007/null-lang] export returned Err (acceptable): {e}");
+        Err(other) => {
+            // An Err of a different variant is also acceptable (e.g., krilla catches it at
+            // document.finish() as NoDocumentLanguage → ValidationFailed via the match arm).
+            // The important invariant is that it is NOT Ok(bytes).
+            eprintln!(
+                "[AC-007/null-lang] export returned Err (non-ValidationFailed variant, acceptable): {other:?}"
+            );
+        },
+        Ok(_bytes) => {
+            panic!(
+                "AC-007/F-007 FAILED: export with lang=None and Validator::UA1 must return Err.\n\
+                 PDF/UA-1 requires a document language — a deck without /Lang must be rejected.\n\
+                 F-045-P1-007: generate_pdf_inner must return Err(ValidationFailed) when \
+                 deck.metadata.lang is None."
+            );
         },
     }
 }
@@ -1228,7 +1238,7 @@ fn test_bc_4_03_001_ua1_export_proxy_validation() {
 ///
 /// ```bash
 /// cargo nextest run -p slideforge-pdf --test pdf_ua1 \
-///     test_bc_4_03_001_verapdf_integration -- --include-ignored
+///     -E 'test(verapdf_integration)' --run-ignored all
 /// ```
 ///
 /// Or set `VERAPDF_AVAILABLE=1` and run with `cargo test`.
@@ -1771,6 +1781,8 @@ fn test_bc_4_03_001_document_outline_present_in_pdf() {
 #[allow(clippy::unwrap_used)]
 #[test]
 fn test_bc_4_03_001_document_outline_entries_have_slide_title_labels() {
+    use slideforge_pdf::outline::build_outline_entries;
+
     let deck = deck_with_slides(vec![
         slide_with_title("Overview", "title"),
         slide_with_title("Data", "content"),
@@ -1781,36 +1793,51 @@ fn test_bc_4_03_001_document_outline_entries_have_slide_title_labels() {
         slide.source_index = i;
     }
 
+    // F-045-P1-008 (structural assertions via build_outline_entries):
+    // Test entry count, label order, and destination page indices at the
+    // intermediate OutlineEntry level — before krilla serialisation.
+    // This is non-tautological: it asserts STRUCTURE, not raw byte collisions.
+    let entries = build_outline_entries(&deck, &laid_out);
+
+    assert_eq!(
+        entries.len(),
+        3,
+        "AC-010/F-008: expected exactly 3 outline entries for 3-slide deck, got {}",
+        entries.len()
+    );
+
+    let expected_labels = ["Overview", "Data", "Summary"];
+    for (i, (entry, expected)) in entries.iter().zip(expected_labels.iter()).enumerate() {
+        assert_eq!(
+            entry.label, *expected,
+            "AC-010/F-008: entry[{i}] label mismatch: expected '{}', got '{}'",
+            expected, entry.label
+        );
+        assert_eq!(
+            entry.page_idx, i,
+            "AC-010/F-008: entry[{i}] page_idx mismatch: expected {i}, got {}",
+            entry.page_idx
+        );
+    }
+
+    // Integration check: the PDF bytes must also contain /Outlines and the labels.
+    // (Catches regressions where build_outline_entries is correct but
+    //  build_krilla_outline or document.set_outline is not called.)
     let bytes = export_to_bytes(&deck, &laid_out);
 
-    // Outline must be present.
     assert!(
         pdf_contains(&bytes, b"Outlines"),
-        "AC-010 prerequisite: /Outlines must be present before checking labels."
+        "AC-010 integration: /Outlines must be present in the serialised PDF."
     );
 
-    // Each slide title must appear in the PDF bytes (as the outline entry label).
-    // krilla's OutlineItem::title() writes the text string directly to the PDF stream.
-    assert!(
-        pdf_contains(&bytes, b"Overview"),
-        "AC-010 FAILED: outline label 'Overview' not found in PDF bytes.\n\
-         PdfExporter::build_outlines() must use deck.slides[0].title_str() \
-         as the label for the first outline entry."
-    );
-
-    assert!(
-        pdf_contains(&bytes, b"Data"),
-        "AC-010 FAILED: outline label 'Data' not found in PDF bytes.\n\
-         PdfExporter::build_outlines() must use deck.slides[1].title_str() \
-         as the label for the second outline entry."
-    );
-
-    assert!(
-        pdf_contains(&bytes, b"Summary"),
-        "AC-010 FAILED: outline label 'Summary' not found in PDF bytes.\n\
-         PdfExporter::build_outlines() must use deck.slides[2].title_str() \
-         as the label for the third outline entry."
-    );
+    // Byte-scan for each label as a load-bearing integration assertion.
+    // Labels appear in the PDF stream via krilla's OutlineItem::title().
+    for label in &expected_labels {
+        assert!(
+            pdf_contains(&bytes, label.as_bytes()),
+            "AC-010 integration: outline label '{label}' not found in PDF bytes."
+        );
+    }
 }
 
 /// BC-4.03.001 AC-010 (EC-006): Slide with NO title field → fallback label "Slide N".
@@ -1969,6 +1996,105 @@ fn test_bc_4_03_001_hn_tag_fallback_title_for_untitled_slide() {
     );
 }
 
+// ─── OBS-012: Subtitle H2 carries its own text as /T attribute ──────────────
+
+/// OBS-012 / AC-011: A Subtitle frame's H2 structure element MUST carry the
+/// subtitle's own text as the `/T` attribute — NOT the slide title reused.
+///
+/// ## Contract (AC-011 / BC-4.03.001 postcondition 1)
+///
+/// AC-011 states: body H2-H6 /Title = first inline run of that frame.
+/// A subtitle frame on a slide titled "Quarterly Review" with subtitle text
+/// "Q4 2025 Highlights" must produce an H2 with /T = "Q4 2025 Highlights",
+/// not /T = "Quarterly Review" (the slide title).
+///
+/// ## Load-bearing assertion
+///
+/// We export a slide with:
+///   - H1 title: "Quarterly Review"
+///   - H2 subtitle: "Q4 2025 Highlights"
+///
+/// Both strings are known-distinct. The byte scan for "Q4 2025 Highlights"
+/// in the presence of /H2 is the load-bearing assertion.
+/// If the old (wrong) code reused `slide_title` for the H2, only
+/// "Quarterly Review" would appear as a /T value — this test catches that.
+#[allow(clippy::unwrap_used)]
+#[test]
+fn test_bc_4_03_001_subtitle_h2_carries_own_text_as_title_attribute() {
+    let deck = deck_with_slides(vec![slide_with_title("Quarterly Review", "title")]);
+
+    // Build a LaidOutSlide with both Title (H1) and Subtitle (H2) frames.
+    let subtitle_slide = LaidOutSlide {
+        source_index: 0,
+        slide_type_keyword: Arc::from("title-subtitle"),
+        frames: vec![
+            Frame {
+                bbox: BoundingBox {
+                    x: Emu(0),
+                    y: Emu(0),
+                    width: Emu(9_144_000),
+                    height: Emu(914_400),
+                },
+                content: FrameContent::Title(Arc::from("Quarterly Review")),
+                text_flow: None,
+            },
+            Frame {
+                bbox: BoundingBox {
+                    x: Emu(0),
+                    y: Emu(914_400),
+                    width: Emu(9_144_000),
+                    height: Emu(914_400),
+                },
+                content: FrameContent::Subtitle(Arc::from("Q4 2025 Highlights")),
+                text_flow: None,
+            },
+        ],
+        speaker_notes: None,
+        register_tags: RegisterSet::new(),
+        register_content: vec![],
+    };
+    let laid_out = LaidOutDeck {
+        page_size: PageSize::default(),
+        slides: vec![subtitle_slide],
+        sections: vec![],
+        warnings: vec![],
+    };
+
+    // Use with_font_path for deterministic font resolution (same as F-006 fix).
+    let font_path = {
+        let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        manifest_dir.join("../slideforge-math/fonts/latinmodern-math.otf")
+    };
+    let exporter = PdfExporter::with_font_path(font_path);
+    let brand = minimal_brand();
+    let opts = ExportOptions::default();
+    let bytes = exporter
+        .export_uncompressed(&deck, &laid_out, &brand, &opts)
+        .unwrap_or_else(|e| panic!("export_uncompressed failed: {e}"));
+
+    // /H2 must be present.
+    assert!(
+        pdf_contains(&bytes, b"/H2"),
+        "OBS-012 prerequisite: /H2 StructElem must be present for a Subtitle frame."
+    );
+
+    // The SUBTITLE's own text must appear as the H2 /T value.
+    assert!(
+        pdf_contains(&bytes, b"Q4 2025 Highlights"),
+        "OBS-012 FAILED: subtitle text 'Q4 2025 Highlights' not found in PDF bytes.\n\
+         The H2 StructElem must carry the subtitle's OWN text as /T, not the slide title.\n\
+         If 'Quarterly Review' (the slide title) was used instead, the H2 /T is wrong.\n\
+         Implementer: in tag_engine.rs Subtitle arm, use subtitle_text.as_ref() as the\n\
+         H2 title, not slide_title."
+    );
+
+    // Sanity check: the H1 title is still the slide title (unchanged).
+    assert!(
+        pdf_contains(&bytes, b"Quarterly Review"),
+        "OBS-012 sanity: H1 title 'Quarterly Review' must still appear in PDF bytes."
+    );
+}
+
 // ─── AC-012: Validator::UA1 enabled in production export path ────────────────
 
 /// BC-4.03.001 AC-012: The production `PdfExporter::export()` path MUST be
@@ -2007,17 +2133,20 @@ fn test_bc_4_03_001_hn_tag_fallback_title_for_untitled_slide() {
 #[test]
 fn test_bc_4_03_001_validator_ua1_rejects_missing_document_title() {
     // Deck with NO metadata.title (= None) but with a Title frame on the slide.
-    // With Validator::UA1: ValidationError::NoDocumentTitle → fatal error.
-    // With Validator::None (current): no validation, export succeeds.
+    // With Validator::UA1: ValidationError::NoDocumentTitle → fatal ValidationFailed error.
+    // With Validator::None: no validation, export succeeds.
     let deck = deck_without_doc_title();
     let mut laid_out = n_slide_deck(1);
     laid_out.slides[0].source_index = 0;
 
+    // Use export_uncompressed (returns PdfExportError directly) so we can assert the
+    // specific variant — not a substring match against the stringified ExportError.
+    // F-045-P1-003: the error MUST be PdfExportError::ValidationFailed, NOT Serialize.
     let exporter = PdfExporter::new();
     let brand = minimal_brand();
     let opts = ExportOptions::default();
 
-    let result = exporter.export(&deck, &laid_out, &brand, &opts);
+    let result = exporter.export_uncompressed(&deck, &laid_out, &brand, &opts);
 
     assert!(
         result.is_err(),
@@ -2037,14 +2166,25 @@ fn test_bc_4_03_001_validator_ua1_rejects_missing_document_title() {
          }}"
     );
 
-    // When Err: the error message must reference validation (not a crash).
-    if let Err(ref e) = result {
-        let msg = e.to_string().to_lowercase();
-        assert!(
-            msg.contains("validation") || msg.contains("krilla") || msg.contains("serialize"),
-            "AC-012: error was Err but message does not mention validation: '{}'",
-            e
-        );
+    // F-045-P1-003 (load-bearing): the error MUST be the ValidationFailed variant —
+    // not Serialize and not a generic string match. A Serialize variant here would
+    // indicate the KrillaError::Validation branch is missing from generate_pdf_inner.
+    match result.unwrap_err() {
+        PdfExportError::ValidationFailed { message } => {
+            // message must mention the violation (NoDocumentTitle or similar).
+            assert!(
+                message.to_lowercase().contains("validation"),
+                "AC-012: ValidationFailed message does not contain 'validation': '{message}'"
+            );
+        },
+        other => {
+            panic!(
+                "AC-012 FAILED: expected PdfExportError::ValidationFailed but got: {other:?}\n\
+                 KrillaError::Validation from document.finish() must map to \
+                 PdfExportError::ValidationFailed, not Serialize or any other variant.\n\
+                 Implementer: add a match arm for KrillaError::Validation in generate_pdf_inner."
+            );
+        },
     }
 }
 
@@ -2086,7 +2226,18 @@ fn test_bc_4_03_001_validator_ua1_compliant_deck_exports_successfully() {
         slide.source_index = i;
     }
 
-    let exporter = PdfExporter::new();
+    // F-045-P1-006: use the bundled fixture font so font resolution is deterministic
+    // across CI runners regardless of which system fonts are installed. Without an
+    // explicit font, Helvetica may not resolve on headless Linux CI → text drawing
+    // is skipped → UA-1 outcome becomes environment-dependent.
+    //
+    // `crates/slideforge-math/fonts/latinmodern-math.otf` is committed to the repo
+    // and guaranteed to be present on all CI runners.
+    let font_path = {
+        let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        manifest_dir.join("../slideforge-math/fonts/latinmodern-math.otf")
+    };
+    let exporter = PdfExporter::with_font_path(font_path);
     let brand = minimal_brand();
     let opts = ExportOptions::default();
 
@@ -2221,13 +2372,16 @@ fn test_bc_4_03_001_ac013_structural_proxy_for_verapdf_ua1() {
 /// The CI job MUST invoke:
 /// ```bash
 /// cargo nextest run -p slideforge-pdf --test pdf_ua1 \
-///     test_bc_4_03_001_ac013_verapdf_full_compliance -- --include-ignored
+///     -E 'test(ac013_verapdf_full_compliance)' \
+///     --run-ignored all
 /// ```
-/// Per AC-013: `.github/workflows/pdf-ua1.yml` must contain `-- --include-ignored`.
+/// Per AC-013: `.github/workflows/pdf-ua1.yml` must contain `--run-ignored all`
+/// (cargo-nextest flag) and the -E filter must target this test name.
+/// Note: `--include-ignored` is a libtest flag — INVALID for cargo-nextest (F-045-P1-002).
 #[test]
 #[ignore = "requires verapdf CLI on PATH (Java tool — available in CI via Docker image \
              ghcr.io/verapdf/cli:latest; blocking dependency: \
-             .github/workflows/pdf-ua1.yml which runs this test via --include-ignored)"]
+             .github/workflows/pdf-ua1.yml which runs this test via --run-ignored all)"]
 #[allow(clippy::unwrap_used)]
 fn test_bc_4_03_001_ac013_verapdf_full_compliance() {
     use std::io::Write;
@@ -2302,13 +2456,25 @@ fn test_bc_4_03_001_ac013_verapdf_full_compliance() {
 // ─── AC-013 CI gate: workflow file checks ────────────────────────────────────
 
 /// BC-4.03.001 AC-013 (CI gate): `.github/workflows/pdf-ua1.yml` must invoke
-/// `cargo test ... -- --include-ignored` to un-ignore the veraPDF test.
+/// `cargo nextest run ... --run-ignored all` to un-ignore the veraPDF test.
+///
+/// ## F-045-P1-002 (load-bearing)
+///
+/// `--include-ignored` is a libtest flag and is NOT valid for cargo-nextest.
+/// The correct cargo-nextest flag is `--run-ignored all` (or `--run-ignored=all`).
+/// This test asserts the workflow contains the CORRECT nextest flag so CI does not
+/// silently fail with an invalid argument parse error.
+///
+/// ## F-045-P1-001 (load-bearing)
+///
+/// The CI job MUST run `test_bc_4_03_001_ac013_verapdf_full_compliance` (the AC-013
+/// full-compliance test using deck_with_slides), NOT `test_bc_4_03_001_verapdf_integration`
+/// (the old AC-008 degenerate fixture with empty slides). The -E filter must target
+/// `ac013_verapdf_full_compliance`.
 ///
 /// ## Red Gate trigger — FAILS UNTIL CI WORKFLOW IS WRITTEN (STORY-045)
 ///
 /// The CI workflow file does not yet exist. This test fails on file absence.
-/// When the file exists, the content assertion verifies `--include-ignored`
-/// is present (SID-1 requirement for `#[ignore]`'d external-tool tests).
 #[test]
 fn test_bc_4_03_001_ac013_ci_workflow_includes_ignored_flag() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -2318,22 +2484,38 @@ fn test_bc_4_03_001_ac013_ci_workflow_includes_ignored_flag() {
     assert!(
         workflow_path.exists(),
         "AC-013 FAILED: CI workflow file not found at {path}.\n\
-         STORY-045 must create .github/workflows/pdf-ua1.yml.\n\
-         The file must invoke cargo test with -- --include-ignored to un-ignore \
-         the veraPDF integration test.",
+         STORY-045 must create .github/workflows/pdf-ua1.yml.",
         path = workflow_path.display()
     );
 
-    // The file must contain '--include-ignored' so the veraPDF test runs in CI.
     let content = std::fs::read_to_string(&workflow_path)
         .unwrap_or_else(|e| panic!("failed to read pdf-ua1.yml: {e}"));
 
+    // F-045-P1-002: --run-ignored is the cargo-nextest flag (NOT --include-ignored).
     assert!(
-        content.contains("--include-ignored"),
-        "AC-013 FAILED: pdf-ua1.yml exists but does not contain '--include-ignored'.\n\
-         The CI job must un-ignore the veraPDF integration test by passing \
-         '-- --include-ignored' to cargo test/nextest.\n\
-         Without this flag, test_bc_4_03_001_ac013_verapdf_full_compliance is \
-         silently skipped and the veraPDF gate is not enforced."
+        content.contains("--run-ignored"),
+        "AC-013/F-002 FAILED: pdf-ua1.yml does not contain '--run-ignored'.\n\
+         cargo-nextest uses '--run-ignored all' to run ignored tests.\n\
+         '--include-ignored' is a libtest flag and is INVALID for nextest — \
+         it causes an argument parse error rather than running the test.\n\
+         Fix: replace '--include-ignored' with '--run-ignored all' in the verapdf job."
+    );
+
+    // F-045-P1-001: the -E filter must target the AC-013 full-compliance test.
+    assert!(
+        content.contains("ac013_verapdf_full_compliance"),
+        "AC-013/F-001 FAILED: pdf-ua1.yml does not filter for 'ac013_verapdf_full_compliance'.\n\
+         The -E filter must target test_bc_4_03_001_ac013_verapdf_full_compliance \
+         (the AC-013 full-compliance test with real titles via deck_with_slides).\n\
+         The old filter 'test(verapdf_integration)' matched the degenerate AC-008 test \
+         which uses an empty-slides fixture — insufficient for full compliance verification."
+    );
+
+    // OBS-009: the workflow must have a coverage-assertion step to catch zero-test runs.
+    assert!(
+        content.contains("zero tests ran") || content.contains("TESTS_RUN"),
+        "OBS-009 FAILED: pdf-ua1.yml does not contain a coverage-assertion step.\n\
+         A compliance gate that silently passes when zero tests run is a false gate.\n\
+         Add a step that parses nextest's 'N tests run' summary and fails if N < 1."
     );
 }

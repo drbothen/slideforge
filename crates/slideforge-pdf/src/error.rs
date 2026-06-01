@@ -22,6 +22,28 @@ pub enum PdfExportError {
         message: String,
     },
 
+    /// The PDF document failed PDF/UA-1 (or another validator) validation.
+    ///
+    /// This variant is produced when `krilla::Document::finish()` returns
+    /// `KrillaError::Validation(errors)` — meaning the document violates
+    /// one or more constraints of the active [`krilla::configure::Validator`].
+    ///
+    /// Under `Validator::UA1`, common causes include:
+    /// - Missing document title (`NoDocumentTitle`)
+    /// - Missing document language (`NoDocumentLanguage`)
+    /// - Missing heading title on Hn elements (`MissingHeadingTitle`)
+    /// - Missing document outline (`MissingDocumentOutline`)
+    ///
+    /// BC-4.03.001 invariant 5: a `KrillaError::Validation` MUST be propagated
+    /// as this variant (not silently swallowed or merged into `Serialize`).
+    #[error("PDF validation error: {message}")]
+    ValidationFailed {
+        /// Human-readable summary of the validation failure(s).
+        ///
+        /// For multi-error cases, violations are joined with `"; "`.
+        message: String,
+    },
+
     /// `Configuration::new_with(Validator, PdfVersion)` returned `None`.
     ///
     /// This means the supplied validator / PDF version combination is invalid.
