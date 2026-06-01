@@ -34,12 +34,16 @@
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 
+pub mod coords;
 pub mod error;
 pub mod exporter;
 pub mod font;
 pub mod svg_embed;
 pub mod tag_engine;
 
+pub use coords::{
+    SLIDE_HEIGHT_EMU, SLIDE_HEIGHT_PT, SLIDE_WIDTH_EMU, SLIDE_WIDTH_PT, emu_to_pt, ir_y_to_pdf_y,
+};
 pub use error::PdfExportError;
 pub use exporter::PdfExporter;
 pub use tag_engine::SlideTagEngine;

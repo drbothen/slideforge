@@ -1,0 +1,436 @@
+//! EMU-to-PDF coordinate mapping for `slideforge-pdf`.
+//!
+//! This module provides two **pure** coordinate conversion functions that are
+//! the exclusive mechanism for all EMU-to-point conversions in the PDF export
+//! path. Both functions are candidates for Kani proofs in Phase 6 (VP-006).
+//!
+//! ## Conversion rationale
+//!
+//! OOXML specifies 1 inch = 914,400 EMU and 1 inch = 72 PDF points, therefore
+//! 1 point = 914,400 / 72 = 12,700 EMU exactly.
+//!
+//! ## Coordinate model for krilla (DIR-044-001)
+//!
+//! `krilla`'s `Surface` API is **top-left, Y-down** (`surface.rs:44`,
+//! `geom.rs:145`). krilla applies the PDF bottom-left Y-up flip internally via
+//! `page_root_transform` (`Transform::from_row(1,0,0,-1,0,h)`, `page.rs:262-263`)
+//! before serializing. Callers of `Surface` must pass top-left, Y-down
+//! coordinates — NOT raw PDF bottom-left coordinates.
+//!
+//! The draw path in `exporter.rs` therefore passes `emu_to_pt(ir_y)` directly
+//! to krilla — no `ir_y_to_pdf_y` call at draw time:
+//!
+//! ```text
+//! surface_x  = emu_to_pt(bbox.x)            // left edge
+//! surface_y  = emu_to_pt(bbox.y)            // top edge (Y-down from slide top)
+//! baseline_y = surface_y + height_pt * 0.8  // baseline down from box top
+//! ```
+//!
+//! `ir_y_to_pdf_y` is retained as a documented pure function and VP-006 Kani
+//! proof target. Its output is a raw PDF bottom-left Y coordinate (useful for
+//! any future exporter targeting a raw PDF writer rather than krilla's Surface).
+//! It is NOT called on the krilla draw path.
+//!
+//! ## Architecture invariant (BC-4.03.005)
+//!
+//! Every EMU-to-point conversion in `slideforge-pdf` MUST go through
+//! [`emu_to_pt`]. Ad-hoc inline `emu / 12700.0` arithmetic is forbidden: it
+//! prevents the Kani proof from covering all conversion sites.
+
+use slideforge_types::Emu;
+
+// ─── Standard slide dimensions (16:9 canvas, BC-4.03.005) ────────────────────
+
+/// Standard 16:9 slide width: 10 inches = 720 PDF points = 9,144,000 EMU.
+///
+/// This matches [`slideforge_layout::types::DEFAULT_PAGE_WIDTH`].
+pub const SLIDE_WIDTH_EMU: Emu = Emu(9_144_000);
+
+/// Standard 16:9 slide height: 5.625 inches = 405 PDF points = 5,143,500 EMU.
+///
+/// This matches [`slideforge_layout::types::DEFAULT_PAGE_HEIGHT`].
+pub const SLIDE_HEIGHT_EMU: Emu = Emu(5_143_500);
+
+/// Standard 16:9 slide width in PDF points (720.0 pt).
+pub const SLIDE_WIDTH_PT: f32 = 720.0;
+
+/// Standard 16:9 slide height in PDF points (405.0 pt).
+pub const SLIDE_HEIGHT_PT: f32 = 405.0;
+
+// ─── Conversion functions ─────────────────────────────────────────────────────
+
+/// Convert an EMU value to PDF user units (points).
+///
+/// Formula: `emu.0 as f32 / 12_700.0`
+///
+/// This is a **pure function** with no side effects — it is a candidate for
+/// a Kani proof in Phase 6 (VP-006). No logging, no mutation, no I/O.
+///
+/// # Precision
+///
+/// The returned `f32` has a rounding error < 0.001 points for all standard
+/// slide dimension values (0 ≤ EMU ≤ 9,144,000), as required by
+/// BC-4.03.005 postcondition 5 (AC-003).
+///
+/// # Examples
+///
+/// ```
+/// use slideforge_pdf::coords::emu_to_pt;
+/// use slideforge_types::Emu;
+///
+/// assert_eq!(emu_to_pt(Emu(9_144_000)), 720.0_f32);
+/// assert_eq!(emu_to_pt(Emu(0)), 0.0_f32);
+/// assert_eq!(emu_to_pt(Emu(12_700)), 1.0_f32);
+/// ```
+#[inline]
+#[must_use]
+pub fn emu_to_pt(emu: Emu) -> f32 {
+    #[allow(clippy::cast_precision_loss)]
+    let result = emu.0 as f32 / 12_700.0;
+    result
+}
+
+/// Compute the raw PDF bottom-left Y coordinate for an IR element via Y-axis flip.
+///
+/// ## Purpose and scope
+///
+/// This function computes the PDF Y coordinate under the **raw PDF coordinate
+/// system** (origin at bottom-left, Y increasing upward). It applies the
+/// standard IR-to-PDF inversion:
+///
+/// ```text
+/// pdf_y = emu_to_pt(slide_h) − emu_to_pt(ir_y) − emu_to_pt(element_h)
+/// ```
+///
+/// ## IMPORTANT: Not called on the krilla draw path (DIR-044-001)
+///
+/// `krilla`'s `Surface` uses a **top-left, Y-down** coordinate system and
+/// applies the PDF Y-flip internally (`page_root_transform`, `page.rs:262-263`).
+/// Callers of `Surface` must pass top-left, Y-down coordinates via `emu_to_pt`
+/// directly — NOT the output of this function. Calling `ir_y_to_pdf_y` at krilla
+/// draw time applies a double Y-flip, vertically mirroring all content.
+///
+/// `ir_y_to_pdf_y` is retained as:
+/// 1. A pure-function / VP-006 Kani proof target (range invariant:
+///    for valid `(ir_y, element_h, slide_h)` the output is in `[0, slide_h_pt]`).
+/// 2. A reference for future exporters that target a raw PDF writer
+///    (e.g., `pdf-writer` directly) rather than krilla's `Surface`.
+///
+/// ## Pure function guarantee
+///
+/// This is a **pure function** with no side effects — it is a candidate for
+/// a Kani proof in Phase 6 (VP-006). No logging, no mutation, no I/O.
+///
+/// # Parameters
+///
+/// - `ir_y` — Y position of the element's top edge in IR coordinates.
+/// - `element_h` — height of the element.
+/// - `slide_h` — height of the slide (use `SLIDE_HEIGHT_EMU` for standard
+///   16:9; use the brand's slide height for non-standard sizes).
+///
+/// # Examples
+///
+/// ```
+/// use slideforge_pdf::coords::{ir_y_to_pdf_y, SLIDE_HEIGHT_EMU};
+/// use slideforge_types::Emu;
+///
+/// // Top-left element of height 100pt: pdf_y = 405 − 0 − 100 = 305
+/// // (raw PDF bottom-left coords — NOT used on the krilla draw path)
+/// assert_eq!(
+///     ir_y_to_pdf_y(Emu(0), Emu(100 * 12_700), SLIDE_HEIGHT_EMU),
+///     305.0_f32,
+/// );
+/// ```
+#[inline]
+#[must_use]
+pub fn ir_y_to_pdf_y(ir_y: Emu, element_h: Emu, slide_h: Emu) -> f32 {
+    emu_to_pt(slide_h) - emu_to_pt(ir_y) - emu_to_pt(element_h)
+}
+
+// ─── Unit tests ───────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── AC-001: emu_to_pt canonical test vectors ──────────────────────────────
+
+    /// BC-4.03.005 AC-001 / postcondition 1: slide width (10 inches) converts to 720.0pt.
+    ///
+    /// Exercises VP-006. Verifies the exact 9,144,000 EMU → 720.0pt conversion.
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn test_bc_4_03_005_emu_to_pt_slide_width_720() {
+        assert_eq!(
+            emu_to_pt(SLIDE_WIDTH_EMU),
+            720.0_f32,
+            "emu_to_pt(9_144_000 EMU) must equal 720.0 PDF points (10 inches)"
+        );
+    }
+
+    /// BC-4.03.005 AC-001 / postcondition 2: slide height (5.625 inches) converts to 405.0pt.
+    ///
+    /// Verifies the exact 5,143,500 EMU → 405.0pt conversion.
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn test_bc_4_03_005_emu_to_pt_slide_height_405() {
+        assert_eq!(
+            emu_to_pt(SLIDE_HEIGHT_EMU),
+            405.0_f32,
+            "emu_to_pt(5_143_500 EMU) must equal 405.0 PDF points (5.625 inches)"
+        );
+    }
+
+    /// BC-4.03.005 AC-001: 1 PDF point = 12,700 EMU (canonical unit).
+    ///
+    /// Verifies the unit-step conversion: 12,700 EMU → 1.0pt.
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn test_bc_4_03_005_emu_to_pt_one_point() {
+        assert_eq!(
+            emu_to_pt(Emu(12_700)),
+            1.0_f32,
+            "emu_to_pt(12_700 EMU) must equal 1.0 PDF point"
+        );
+    }
+
+    /// BC-4.03.005 AC-001 / EC-001: origin maps to 0.0pt.
+    ///
+    /// Verifies the zero-EMU edge case: 0 EMU → 0.0pt.
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn test_bc_4_03_005_emu_to_pt_zero_is_zero() {
+        assert_eq!(emu_to_pt(Emu(0)), 0.0_f32, "emu_to_pt(0) must equal 0.0");
+    }
+
+    // ── AC-002: ir_y_to_pdf_y canonical test vectors ──────────────────────────
+
+    /// BC-4.03.005 AC-002 / postcondition 3 / EC-002: top-left element of 100pt height
+    /// maps to `pdf_y = 405 − 0 − 100 = 305.0pt`.
+    ///
+    /// Verifies Y-axis flip formula for element at slide top edge.
+    #[test]
+    fn test_bc_4_03_005_ir_y_to_pdf_y_top_left_element_305() {
+        let result = ir_y_to_pdf_y(Emu(0), Emu(100 * 12_700), SLIDE_HEIGHT_EMU);
+        assert!(
+            (result - 305.0_f32).abs() < 0.001,
+            "ir_y_to_pdf_y(0, 100pt, slide_h) must equal 305.0; got {result}"
+        );
+    }
+
+    /// BC-4.03.005 AC-002 / postcondition 4 / EC-003: bottom-edge element maps to `pdf_y = 0.0`.
+    ///
+    /// Element at `ir_y = slide_height − element_height` fills the bottom of the slide.
+    /// Verifies the flip puts the bottom-most valid element at `pdf_y` ≈ 0.
+    #[test]
+    fn test_bc_4_03_005_ir_y_to_pdf_y_bottom_edge_zero() {
+        let element_h = Emu(100 * 12_700);
+        let ir_y = Emu(SLIDE_HEIGHT_EMU.0 - element_h.0);
+        let result = ir_y_to_pdf_y(ir_y, element_h, SLIDE_HEIGHT_EMU);
+        assert!(
+            result.abs() < 0.001,
+            "ir_y_to_pdf_y(slide_h - 100pt, 100pt, slide_h) must equal 0.0; got {result}"
+        );
+    }
+
+    /// BC-4.03.005 AC-002 / AC-008 / EC-004: zero-height element at `ir_y=0` gives 405.0pt.
+    ///
+    /// `ir_y_to_pdf_y(Emu(0), Emu(0), SLIDE_H) == SLIDE_HEIGHT_PT - 0 - 0 == 405.0`
+    /// Verifies the degenerate zero-height case returns the full slide height.
+    #[test]
+    fn test_bc_4_03_005_ir_y_to_pdf_y_zero_height_at_origin_is_slide_height() {
+        let result = ir_y_to_pdf_y(Emu(0), Emu(0), SLIDE_HEIGHT_EMU);
+        assert!(
+            (result - SLIDE_HEIGHT_PT).abs() < 0.001,
+            "ir_y_to_pdf_y(0, 0, slide_h) must equal SLIDE_HEIGHT_PT ({SLIDE_HEIGHT_PT}); got {result}"
+        );
+    }
+
+    // ── AC-003: Rounding error < 0.001 for 0..=9_144_000 EMU ─────────────────
+
+    /// BC-4.03.005 AC-003 / postcondition 5: `emu_to_pt` rounding error < 0.001pt
+    /// for all standard slide dimension values.
+    ///
+    /// Samples the range `0..=9_144_000` at 1,000-EMU intervals (~9,145 samples)
+    /// and compares `f32` output against `f64` reference for each.
+    ///
+    /// Verifies the precision postcondition across the full slide-scale EMU range.
+    #[test]
+    fn test_bc_4_03_005_emu_to_pt_rounding_error_below_0_001() {
+        let mut max_err = 0.0_f64;
+        let mut worst_emu = 0_i64;
+
+        // Step by 1000 EMU to keep runtime reasonable while covering the full
+        // standard slide width (9,144,000 EMU) with ~9,145 samples.
+        let mut emu_val = 0_i64;
+        loop {
+            if emu_val > 9_144_000 {
+                break;
+            }
+            let f32_result = f64::from(emu_to_pt(Emu(emu_val)));
+            #[allow(clippy::cast_precision_loss)]
+            // i64→f64: acceptable for slide-scale EMU values (≤9M)
+            let f64_reference = emu_val as f64 / 12_700.0_f64;
+            let err = (f32_result - f64_reference).abs();
+            if err > max_err {
+                max_err = err;
+                worst_emu = emu_val;
+            }
+            emu_val += 1000;
+        }
+
+        assert!(
+            max_err < 0.001,
+            "emu_to_pt rounding error exceeds 0.001pt: max_err={max_err:.6} at EMU={worst_emu}"
+        );
+    }
+
+    // ── AC-007: 4:3 slide size coordinate mapping ─────────────────────────────
+
+    /// BC-4.03.005 AC-007 / EC-005: 4:3 slide (7,315,200 × 5,486,400 EMU = 576 × 432 pt = 8" × 6").
+    ///
+    /// `ir_y_to_pdf_y` must use the supplied `slide_h`, not the hard-coded 16:9 constant.
+    /// Verifies non-16:9 slide dimensions are mapped via the supplied parameter.
+    ///
+    /// EMU derivation: 576pt × 12700 EMU/pt = 7,315,200 EMU; 432pt × 12700 EMU/pt = 5,486,400 EMU.
+    /// These yield EXACT round-number pt values (no rounding error in f32 arithmetic).
+    #[test]
+    #[allow(clippy::similar_names, clippy::cast_precision_loss)]
+    fn test_bc_4_03_005_ir_y_to_pdf_y_4x3_slide_mapping() {
+        // 4:3 slide dimensions: 7_315_200 × 5_486_400 EMU (8" × 6" = 576pt × 432pt exact)
+        // emu_to_pt(7_315_200) = 576.0pt (exact)
+        // emu_to_pt(5_486_400) = 432.0pt (exact)
+        let slide_w_4x3 = Emu(7_315_200);
+        let slide_h_4x3 = Emu(5_486_400);
+
+        // Expected values: computed in the same way as emu_to_pt() for a direct comparison.
+        // cast_precision_loss: i64→f32 acceptable; slide EMU values ≤ 9M are within f32 precision.
+        let expected_w_pt = slide_w_4x3.0 as f32 / 12_700.0_f32;
+        let expected_h_pt = slide_h_4x3.0 as f32 / 12_700.0_f32;
+
+        // Verify width conversion — panics before implementation.
+        let actual_w = emu_to_pt(slide_w_4x3);
+        assert!(
+            (actual_w - expected_w_pt).abs() < 0.001,
+            "4:3 slide width: expected {expected_w_pt:.3}pt, got {actual_w:.3}pt"
+        );
+
+        let actual_h = emu_to_pt(slide_h_4x3);
+        assert!(
+            (actual_h - expected_h_pt).abs() < 0.001,
+            "4:3 slide height: expected {expected_h_pt:.3}pt, got {actual_h:.3}pt"
+        );
+
+        // Element at top-left with height 100pt in 4:3 slide.
+        let element_h = Emu(100 * 12_700);
+        let expected_pdf_y = expected_h_pt - 100.0_f32;
+        let actual_pdf_y = ir_y_to_pdf_y(Emu(0), element_h, slide_h_4x3);
+
+        assert!(
+            (actual_pdf_y - expected_pdf_y).abs() < 0.001,
+            "4:3 slide: ir_y_to_pdf_y(0, 100pt, slide_h_4x3) must be {expected_pdf_y:.3}pt; \
+             got {actual_pdf_y:.3}pt. The function MUST use the supplied slide_h \
+             (not the hardcoded SLIDE_HEIGHT_EMU constant)."
+        );
+    }
+
+    // ── AC-006: Integration — no element outside canvas after conversion ───────
+
+    /// BC-4.03.005 AC-006 / invariant 3: For a fixture set of bounding boxes,
+    /// all elements converted via `ir_y_to_pdf_y` lie within the 4-tuple
+    /// `[0.0, 0.0, SLIDE_WIDTH_PT, SLIDE_HEIGHT_PT]` — BOTH axes.
+    ///
+    /// Uses a hand-crafted set of representative `(ir_x, elem_w, ir_y, element_h)`
+    /// tuples. All satisfy:
+    /// - `ir_x + elem_w <= SLIDE_WIDTH_EMU` (9,144,000)
+    /// - `ir_y + elem_h <= SLIDE_HEIGHT_EMU` (5,143,500)
+    ///
+    /// Verifies `0 <= pdf_x` AND `pdf_x + width_pt <= SLIDE_WIDTH_PT (720.0)` AND
+    /// `0 <= pdf_y` AND `pdf_y <= SLIDE_HEIGHT_PT (405.0)` for every case.
+    /// This test is non-vacuous: it would fail if an element were placed at
+    /// `pdf_x` > 720 or `pdf_x` < 0.
+    #[test]
+    fn test_bc_4_03_005_no_element_outside_canvas_after_conversion() {
+        // Representative (ir_x_emu, elem_w_emu, ir_y_emu, elem_h_emu) tuples.
+        // All satisfy: ir_x + elem_w <= SLIDE_WIDTH_EMU and ir_y + elem_h <= SLIDE_HEIGHT_EMU.
+        let test_cases: &[(i64, i64, i64, i64)] = &[
+            // (ir_x, elem_w, ir_y, elem_h)
+            (0, 72 * 12_700, 0, 72 * 12_700),
+            (0, SLIDE_WIDTH_EMU.0, 72 * 12_700, 333 * 12_700),
+            (
+                72 * 12_700,
+                SLIDE_WIDTH_EMU.0 - 72 * 12_700,
+                SLIDE_HEIGHT_EMU.0 - 12_700,
+                12_700,
+            ),
+            (0, SLIDE_WIDTH_EMU.0, 0, SLIDE_HEIGHT_EMU.0),
+            (0, 0, 0, 0),
+            (SLIDE_WIDTH_EMU.0 / 2, 0, SLIDE_HEIGHT_EMU.0 / 2, 0),
+            (SLIDE_WIDTH_EMU.0, 0, SLIDE_HEIGHT_EMU.0, 0),
+        ];
+
+        for &(ir_x_val, elem_w_val, ir_y_val, elem_h_val) in test_cases {
+            // X-axis: pdf_x = emu_to_pt(ir_x) — the left edge.
+            let pdf_x = emu_to_pt(Emu(ir_x_val));
+            let width_pt = emu_to_pt(Emu(elem_w_val));
+
+            assert!(
+                pdf_x >= -0.001,
+                "pdf_x must be >= 0.0 for ir_x={ir_x_val}: got {pdf_x}"
+            );
+            assert!(
+                pdf_x + width_pt <= SLIDE_WIDTH_PT + 0.001,
+                "pdf_x + width_pt must be <= {SLIDE_WIDTH_PT} for \
+                 ir_x={ir_x_val}, elem_w={elem_w_val}: got pdf_x={pdf_x:.3}, \
+                 width_pt={width_pt:.3}, sum={:.3}",
+                pdf_x + width_pt
+            );
+
+            // Y-axis: pdf_y = ir_y_to_pdf_y(ir_y, elem_h, slide_h).
+            let pdf_y = ir_y_to_pdf_y(Emu(ir_y_val), Emu(elem_h_val), SLIDE_HEIGHT_EMU);
+            assert!(
+                pdf_y >= -0.001,
+                "pdf_y must be >= 0.0 for ir_y={ir_y_val}, elem_h={elem_h_val}: got {pdf_y}"
+            );
+            assert!(
+                pdf_y <= SLIDE_HEIGHT_PT + 0.001,
+                "pdf_y must be <= {SLIDE_HEIGHT_PT} for ir_y={ir_y_val}, elem_h={elem_h_val}: \
+                 got {pdf_y}"
+            );
+        }
+    }
+
+    // ── AC-004 / AC-005: Pure-function structural check ───────────────────────
+
+    /// BC-4.03.005 AC-004 / AC-005: `emu_to_pt` must be a pure function.
+    ///
+    /// Repeated calls with identical inputs must return identical results.
+    /// Verifies determinism (pure function invariant) and that 1-inch EMU → 72.0pt.
+    #[test]
+    #[allow(clippy::float_cmp)] // bitwise equality intended: same inputs → same f32 bits
+    fn test_bc_4_03_005_emu_to_pt_is_deterministic() {
+        let a = emu_to_pt(Emu(914_400));
+        let b = emu_to_pt(Emu(914_400));
+        assert_eq!(a, b, "emu_to_pt must be deterministic (pure function)");
+        assert!(
+            (a - 72.0_f32).abs() < 0.001,
+            "emu_to_pt(914_400) must equal 72.0pt (1 inch); got {a}"
+        );
+    }
+
+    /// BC-4.03.005 AC-004 / AC-005: `ir_y_to_pdf_y` must be a pure function.
+    ///
+    /// Verifies determinism: repeated calls with identical inputs return identical results.
+    #[test]
+    #[allow(clippy::float_cmp)] // bitwise equality intended: same inputs → same f32 bits
+    fn test_bc_4_03_005_ir_y_to_pdf_y_is_deterministic() {
+        let a = ir_y_to_pdf_y(Emu(12_700), Emu(25_400), SLIDE_HEIGHT_EMU);
+        let b = ir_y_to_pdf_y(Emu(12_700), Emu(25_400), SLIDE_HEIGHT_EMU);
+        assert_eq!(a, b, "ir_y_to_pdf_y must be deterministic (pure function)");
+        // Expected: 405.0 - 1.0 - 2.0 = 402.0
+        assert!(
+            (a - 402.0_f32).abs() < 0.001,
+            "ir_y_to_pdf_y(1pt, 2pt, slide_h) must equal 402.0pt; got {a}"
+        );
+    }
+}

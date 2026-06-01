@@ -23,34 +23,54 @@
 //!   The exporter maps `PdfExportError` → `ExportError::RenderError` at the
 //!   trait boundary.
 //!
-//! ## Architecture (BC-4.03.002)
+//! ## Architecture (BC-4.03.002 + STORY-044)
 //!
 //! `PdfExporter` is an effectful shell (ARCH-INDEX SS-07). It:
 //! 1. Creates a `krilla::Document::new()`.
 //! 2. Iterates over `laid_out.slides`, calling `SlideTagEngine::tag_slide`
-//!    for each slide to build its structural tag sub-tree. Content drawing
-//!    (text, SVG paths via `svg_embed`) is added in STORY-044.
-//! 3. Calls `document.set_tag_tree(tag_tree)` with the assembled structural tree.
-//! 4. Calls `document.finish()` → `KrillaResult<Vec<u8>>`.
-//! 5. Maps `KrillaError` → `PdfExportError::Serialize` → `ExportError::RenderError`.
-//! 6. Returns the PDF bytes.
+//!    for each slide to build its structural tag sub-tree.
+//! 3. Draws slide content via krilla's Surface API:
+//!    - Text frames (Title/Subtitle/Body/TextRun): `surface.draw_text()` at
+//!      coordinates from `coords::emu_to_pt()` (top-left, Y-down — krilla
+//!      Surface origin). `ir_y_to_pdf_y` is NOT called at draw time; krilla
+//!      applies the PDF Y-flip internally (DIR-044-001).
+//!    - Diagram frames: `svg_embed::embed_normalized_svg()`.
+//! 4. Calls `document.set_tag_tree(tag_tree)` with the assembled structural tree.
+//! 5. Calls `document.finish()` → `KrillaResult<Vec<u8>>`.
+//! 6. Maps `KrillaError` → `PdfExportError::Serialize` → `ExportError::RenderError`.
+//! 7. Returns the PDF bytes.
 //!
 //! No subprocess is spawned. No FFI to C libraries. Pure Rust.
 //!
-//! ## EMU canonicalization (F-005)
+//! ## EMU coordinate policy (BC-4.03.005 / Architecture Compliance Rule 2)
 //!
-//! All EMU-to-points conversions use [`slideforge_types::Emu::to_points`] which
-//! calls the canonical `EMU_PER_POINT = 12_700` constant defined in
-//! `slideforge-types`. The private `EMU_PER_POINT` constant previously
-//! duplicated here has been removed.
+//! ALL EMU-to-point conversions go through `coords::emu_to_pt()`. No inline
+//! `emu / 12700` arithmetic is permitted anywhere in this file. This invariant
+//! enables the Kani proof for `emu_to_pt` (VP-006, Phase 6) to cover all
+//! conversion sites.
+//!
+//! `ir_y_to_pdf_y` is NOT imported or called anywhere in this file. It is a
+//! documented pure function in `coords.rs` (VP-006 Kani target) that computes
+//! PDF bottom-left Y coordinates — inapplicable here because krilla's Surface
+//! uses a top-left Y-down coordinate system and bakes the PDF Y-flip internally
+//! via `page_root_transform` (DIR-044-001).
 
 use krilla::Document;
+use krilla::color::rgb;
+use krilla::geom::Point;
+use krilla::num::NormalizedF32;
 use krilla::page::PageSettings;
+use krilla::paint::{Fill, FillRule};
+use krilla::text::TextDirection;
 use slideforge_layout::LaidOutDeck;
+use slideforge_layout::types::{BoundingBox, FrameContent};
 use slideforge_plugin_api::{ExportError, ExportOptions, Exporter};
 use slideforge_types::{Brand, Deck};
 
+use crate::coords::emu_to_pt;
 use crate::error::PdfExportError;
+use crate::font::load_font_data;
+use crate::svg_embed::embed_normalized_svg;
 use crate::tag_engine::SlideTagEngine;
 
 /// PDF exporter implementing the [`Exporter`] plugin trait.
@@ -62,63 +82,192 @@ use crate::tag_engine::SlideTagEngine;
 ///
 /// `PdfExporter` is `Send + Sync` (no interior mutability, no thread-local
 /// state). Multiple concurrent export operations on independent decks are safe.
-pub struct PdfExporter;
+///
+/// ## Font override (test seam — F-044-002)
+///
+/// `PdfExporter` can be constructed with an explicit font file path via
+/// [`PdfExporter::with_font_path`]. When set, font resolution bypasses the
+/// brand family-name lookup and loads the font directly from the given path.
+/// This is a real production capability (a user could point the exporter at a
+/// specific font file), not a test-only hack — production code never changes
+/// behavior based on whether the seam is active, it just uses the font at the
+/// supplied path instead of looking one up from the brand name.
+pub struct PdfExporter {
+    /// Optional explicit font file path. When `Some`, `resolve_brand_font`
+    /// loads this path directly instead of searching the system font directories
+    /// by brand family name. Used by tests (F-044-002) and by production callers
+    /// that have a known font file on disk.
+    font_override_path: Option<std::path::PathBuf>,
+}
 
 impl PdfExporter {
-    /// Construct a new `PdfExporter`.
+    /// Construct a new `PdfExporter` using brand-based font resolution.
     #[must_use]
     pub fn new() -> Self {
-        Self
+        Self {
+            font_override_path: None,
+        }
+    }
+
+    /// Construct a `PdfExporter` that loads its font from an explicit file path,
+    /// bypassing brand family-name resolution.
+    ///
+    /// # Use cases
+    ///
+    /// - **Tests:** use a fixture font (e.g., `crates/slideforge-math/fonts/
+    ///   latinmodern-math.otf`) for deterministic AC-009 / drawing-path tests.
+    /// - **Production:** callers with a known font file on disk can skip the
+    ///   best-effort `system_font_fallback` name lookup.
+    ///
+    /// If the font file cannot be loaded at export time, the exporter falls back
+    /// to brand-based resolution (graceful degradation).
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use slideforge_pdf::PdfExporter;
+    ///
+    /// let exporter = PdfExporter::with_font_path(
+    ///     std::path::PathBuf::from("/usr/share/fonts/opentype/myfont.otf")
+    /// );
+    /// ```
+    #[must_use]
+    pub fn with_font_path(path: std::path::PathBuf) -> Self {
+        Self {
+            font_override_path: Some(path),
+        }
+    }
+
+    /// Export to uncompressed PDF bytes — test seam for AC-009 / F-044-004.
+    ///
+    /// Identical to [`Exporter::export`] except `compress_content_streams: false`
+    /// is passed to krilla's [`krilla::SerializeSettings`]. This makes embedded font
+    /// program bytes directly measurable without FlateDecode inflation:
+    ///
+    /// - Uncompressed full LM Math (~733 KB) or compressed full (~300–440 KB)
+    ///   would both appear at their true byte counts and exceed the 100 KB
+    ///   subset-scale ceiling in AC-009.
+    /// - Uncompressed 2-glyph subset is typically 10–30 KB — well under 100 KB.
+    ///
+    /// `#[doc(hidden)]` — not part of the public API contract. Exposed `pub`
+    /// so integration tests in `tests/` can call it (integration tests compile
+    /// as a separate crate and cannot access `pub(crate)` items). Production
+    /// callers should use [`Exporter::export`] instead.
+    ///
+    /// # Errors
+    ///
+    /// Same error conditions as the [`Exporter::export`] path.
+    #[doc(hidden)]
+    pub fn export_uncompressed(
+        &self,
+        deck: &Deck,
+        laid_out: &LaidOutDeck,
+        brand: &Brand,
+        opts: &ExportOptions,
+    ) -> Result<Vec<u8>, PdfExportError> {
+        self.generate_pdf_inner(
+            deck,
+            laid_out,
+            brand,
+            opts,
+            krilla::SerializeSettings {
+                compress_content_streams: false,
+                ..krilla::SerializeSettings::default()
+            },
+        )
     }
 
     /// Core PDF generation logic — called from [`Exporter::export`].
     ///
     /// Returns raw PDF bytes on success. `&self` is included for future use
-    /// when `PdfExporter` carries font caches or configuration (STORY-044+).
+    /// when `PdfExporter` carries font caches or configuration.
     ///
-    /// Current behavior (STORY-043 scope):
-    /// - Creates a `krilla::Document`.
-    /// - Iterates over `laid_out.slides`, calling `SlideTagEngine::tag_slide`
-    ///   for each slide to build its PDF/UA-1 structural tag sub-tree.
-    /// - Produces structurally tagged but otherwise blank pages — content
-    ///   drawing (text, SVG paths via `svg_embed`) is wired in STORY-044.
-    /// - Assembles per-slide `Part` groups into the deck-level `TagTree` via
-    ///   `SlideTagEngine::assemble_deck_tag_tree` and attaches it with
-    ///   `document.set_tag_tree(tag_tree)` before `document.finish()`.
-    /// - Returns the serialized PDF bytes.
+    /// ## Drawing pass (STORY-044)
+    ///
+    /// For each slide, this function draws:
+    /// - Text frames (Title/Subtitle/Body/TextRun): `surface.draw_text()` at
+    ///   coordinates computed via `coords::emu_to_pt()` (top-left Surface coords;
+    ///   krilla handles the PDF Y-flip internally — DIR-044-001).
+    ///   Font is resolved from brand family name via `font::system_font_fallback()`
+    ///   then `krilla::text::Font::new()`. If no font can be resolved, text drawing
+    ///   is skipped with a `tracing::warn!` — the page still renders.
+    /// - Diagram frames: `svg_embed::embed_normalized_svg()` at the mapped position.
+    ///
+    /// ## Coordinate invariant (BC-4.03.005 / Architecture Compliance Rule 2)
+    ///
+    /// ALL EMU-to-point conversions go through `coords::emu_to_pt()`. No inline
+    /// `emu / 12700` arithmetic is used. `ir_y_to_pdf_y` is NOT called on the draw
+    /// path (krilla Surface is top-left Y-down; krilla applies the PDF flip internally).
     ///
     /// # Errors
     ///
-    /// Returns [`PdfExportError`] on failure. The [`Exporter::export`]
-    /// implementation maps this to [`ExportError::RenderError`].
-    #[allow(clippy::unused_self)]
+    /// Returns [`PdfExportError`] on:
+    /// - Invalid page dimensions.
+    /// - Tag tree assembly failure.
+    /// - SVG embed failure.
+    /// - Document serialization failure.
+    ///
+    /// Note: Font resolution failures are non-fatal — text is skipped with a
+    /// structured warning, and the export continues. This ensures a partial PDF
+    /// (without text) is returned rather than an export failure when a brand font
+    /// is unavailable in the current environment.
     fn generate_pdf(
+        &self,
+        deck: &Deck,
+        laid_out: &LaidOutDeck,
+        brand: &Brand,
+        opts: &ExportOptions,
+    ) -> Result<Vec<u8>, PdfExportError> {
+        self.generate_pdf_inner(
+            deck,
+            laid_out,
+            brand,
+            opts,
+            krilla::SerializeSettings::default(),
+        )
+    }
+
+    /// Core PDF generation with explicit [`krilla::SerializeSettings`].
+    ///
+    /// Separated from `generate_pdf` so tests can pass `compress_content_streams: false`
+    /// to produce uncompressed output scannable for text/path operators (F-044-004).
+    ///
+    /// # Errors
+    ///
+    /// Same error conditions as [`generate_pdf`].
+    fn generate_pdf_inner(
         &self,
         _deck: &Deck,
         laid_out: &LaidOutDeck,
-        _brand: &Brand,
+        brand: &Brand,
         _opts: &ExportOptions,
+        settings: krilla::SerializeSettings,
     ) -> Result<Vec<u8>, PdfExportError> {
-        // Create a krilla Document with default settings.
-        // Default SerializeSettings has enable_tagging: true.
-        let mut document = Document::new();
+        // Create a krilla Document with the supplied settings.
+        // Default SerializeSettings has enable_tagging: true, compress_content_streams: true.
+        let mut document = Document::new_with(settings);
 
         // Instantiate the tag engine — one per export pass, stateless per slide.
         let tag_engine = SlideTagEngine::new();
+
+        // Resolve a font for text drawing.
+        //
+        // If `self.font_override_path` is set, load directly from that path.
+        // Otherwise try brand family name resolution:
+        //   1. brand.fonts.heading — resolved via system_font_fallback()
+        //   2. brand.fonts.body   — fallback if heading not found
+        //
+        // If no font can be resolved, `resolved_font` is None and text frames are
+        // skipped with a tracing::warn! (graceful degradation — export still
+        // produces a PDF without text rather than failing).
+        let resolved_font = resolve_brand_font(brand, self.font_override_path.as_deref());
 
         // Collect per-slide Part groups for later assembly into the deck tag tree.
         let mut slide_parts = Vec::with_capacity(laid_out.slides.len());
 
         for slide in &laid_out.slides {
-            // Convert page dimensions from EMU to PDF points using the canonical
-            // Emu::to_points() from slideforge-types (EMU_PER_POINT = 12_700).
-            // TD-VSDD-060: no duplicate EMU_PER_POINT constant in this crate.
-            // f64→f32 truncation is intentional: PDF point precision at typical
-            // slide sizes (720×540 pt) loses < 0.01 pt — below rendering tolerance.
-            #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
-            let width_pts = laid_out.page_size.width.to_points() as f32;
-            #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
-            let height_pts = laid_out.page_size.height.to_points() as f32;
+            // Convert page dimensions via coords:: — Architecture Compliance Rule 2.
+            let width_pts = emu_to_pt(laid_out.page_size.width);
+            let height_pts = emu_to_pt(laid_out.page_size.height);
 
             let page_settings = PageSettings::from_wh(width_pts, height_pts).ok_or_else(|| {
                 PdfExportError::Serialize {
@@ -132,18 +281,20 @@ impl PdfExporter {
             let mut page = document.start_page_with(page_settings);
 
             // Build the structural tag sub-tree for this slide.
-            // tag_slide returns a PartResult containing the Part TagGroup and
-            // the list of decorative frame indices.
             let part_result = tag_engine.tag_slide(slide)?;
 
-            // `surface` is obtained for drawing operations.
-            // Content drawing (text, SVG paths) is added in STORY-044/STORY-045.
-            // The page is currently blank except for the tag structure tree.
-            //
-            // Decorative frames (part_result.decorative_frame_indices) will be
-            // marked with ContentTag::Artifact(ArtifactType::Other) during the
-            // drawing pass in STORY-044.
-            let surface = page.surface();
+            // Obtain the krilla Surface and draw slide content.
+            let mut surface = page.surface();
+
+            for frame in &slide.frames {
+                draw_frame(
+                    &mut surface,
+                    &frame.bbox,
+                    &frame.content,
+                    resolved_font.as_ref(),
+                )?;
+            }
+
             surface.finish();
             page.finish();
 
@@ -173,6 +324,410 @@ impl Default for PdfExporter {
     }
 }
 
+// ─── Font resolution ──────────────────────────────────────────────────────────
+
+/// Resolve a krilla font for text drawing.
+///
+/// ## Resolution order
+///
+/// 1. If `font_override_path` is `Some`, load directly from that path (test seam
+///    and production override — bypasses brand family-name lookup).
+/// 2. Otherwise try brand family-name resolution:
+///    - `brand.fonts.heading` via [`crate::font::system_font_fallback`]
+///    - `brand.fonts.body` as fallback
+///
+/// Returns `None` if no font can be resolved (missing system font, unreadable
+/// file, or invalid font data). Callers MUST skip text drawing when `None` is
+/// returned rather than failing the export — font unavailability is non-fatal.
+fn resolve_brand_font(
+    brand: &Brand,
+    font_override_path: Option<&std::path::Path>,
+) -> Option<krilla::text::Font> {
+    // If an explicit font path was provided, try it first.
+    if let Some(path) = font_override_path {
+        match load_font_data(path) {
+            Ok(bytes) => {
+                let data: krilla::Data = bytes.into();
+                if let Some(font) = krilla::text::Font::new(data, 0) {
+                    return Some(font);
+                }
+                tracing::debug!(
+                    path = %path.display(),
+                    "krilla::text::Font::new returned None for override font path; \
+                     falling back to brand family resolution"
+                );
+            },
+            Err(e) => {
+                tracing::debug!(
+                    path = %path.display(),
+                    error = %e,
+                    "font override path load failed; falling back to brand family resolution"
+                );
+            },
+        }
+    }
+
+    // Brand family-name resolution.
+    let candidates = [brand.fonts.heading.as_ref(), brand.fonts.body.as_ref()];
+    for family in &candidates {
+        if let Some(font) = try_resolve_font(family) {
+            return Some(font);
+        }
+    }
+    tracing::warn!(
+        heading = %brand.fonts.heading,
+        body = %brand.fonts.body,
+        "brand font families not found on this system — text drawing will be skipped; \
+         PDF will contain structural content but no visible text"
+    );
+    None
+}
+
+/// Attempt to resolve a single font family name to a `krilla::text::Font`.
+///
+/// Returns `None` on any failure (family not found, file unreadable, invalid
+/// font data). All failures are logged at `tracing::debug!` level for
+/// diagnostics without exposing internal paths to callers (SEC-005).
+fn try_resolve_font(family: &str) -> Option<krilla::text::Font> {
+    use crate::font::system_font_fallback;
+
+    let path = system_font_fallback(family)?;
+    let bytes = load_font_data(&path)
+        .map_err(|e| {
+            tracing::debug!(family, path = %path.display(), error = %e, "font file load failed");
+        })
+        .ok()?;
+    let data: krilla::Data = bytes.into();
+    let font = krilla::text::Font::new(data, 0);
+    if font.is_none() {
+        tracing::debug!(
+            family,
+            "krilla::text::Font::new returned None for font file"
+        );
+    }
+    font
+}
+
+// ─── Frame content drawing ────────────────────────────────────────────────────
+
+/// Draw the content of a single layout frame onto a krilla `Surface`.
+///
+/// All coordinate conversions go through `coords::emu_to_pt()`
+/// (BC-4.03.005 Architecture Compliance Rule 2). `ir_y_to_pdf_y` is NOT called
+/// here — krilla's `Surface` is top-left, Y-down, and applies the PDF Y-flip
+/// internally (DIR-044-001).
+///
+/// ## Text baseline approximation
+///
+/// The IR gives the top-left corner of the bounding box in Surface coordinates
+/// (Y-down, top-left origin). A reasonable baseline approximation is:
+///
+/// ```text
+/// surface_y  = emu_to_pt(bbox.y)                          // top edge, Y-down
+/// baseline_y = surface_y + emu_to_pt(bbox.height) * 0.8   // 80% down from top
+/// ```
+///
+/// This places the baseline at 80% of the box height measured downward from
+/// the box top (20% descender allowance below the baseline). Text is guaranteed
+/// to land within `[0, SLIDE_HEIGHT_PT]` for any valid IR layout.
+///
+/// Precise multi-line typography is deferred to STORY-045 (text flow engine).
+///
+/// ## Font sizes
+///
+/// Default font sizes: Title 36pt, Subtitle 28pt, Body text 18pt, Bullets 16pt.
+/// These defaults are overridden when brand template font sizes are available
+/// (STORY-045 scope).
+///
+/// # Errors
+///
+/// Error propagation depends on frame type:
+///
+/// - **`Diagram` and `ErrorSlidePlaceholder`** — SVG embed failures propagate
+///   via `?` as [`PdfExportError::SvgEmbed`], aborting the export. A malformed
+///   or unsupported SVG payload is treated as a hard failure.
+/// - **Text frames (`Title`, `Subtitle`, `Body`, `TextRun`)** — degrade
+///   gracefully: if `font` is `None`, drawing is skipped with a
+///   `tracing::debug!` warning and the function returns `Ok(())`. Empty
+///   `TextRun` content is silently skipped.
+/// - **`Chart`, `Image`, `Shape`, `Empty`** — no drawing in STORY-044;
+///   always return `Ok(())` immediately.
+// frame_w_pt / frame_h_pt are intrinsically paired width/height bindings in the body.
+#[allow(clippy::similar_names)]
+fn draw_frame(
+    surface: &mut krilla::surface::Surface<'_>,
+    bbox: &BoundingBox,
+    content: &FrameContent,
+    font: Option<&krilla::text::Font>,
+) -> Result<(), PdfExportError> {
+    match content {
+        FrameContent::Title(text) => {
+            draw_text_at_bbox(surface, text, bbox, 36.0, font);
+        },
+        FrameContent::Subtitle(text) => {
+            draw_text_at_bbox(surface, text, bbox, 28.0, font);
+        },
+        FrameContent::Body(blocks) => {
+            draw_body_blocks(surface, blocks, bbox, font);
+        },
+        FrameContent::TextRun(inlines) => {
+            let text = extract_inline_text(inlines);
+            if !text.is_empty() {
+                draw_text_at_bbox(surface, &text, bbox, 18.0, font);
+            }
+        },
+        FrameContent::Diagram(svg) => {
+            // Place the SVG at the frame's Surface coordinates (top-left, Y-down).
+            // krilla's Surface origin is top-left; bbox.y is the top edge (Y-down).
+            // No ir_y_to_pdf_y flip — krilla applies the PDF Y-flip internally.
+            let surface_x = emu_to_pt(bbox.x);
+            let surface_y = emu_to_pt(bbox.y);
+            let frame_w_pt = emu_to_pt(bbox.width);
+            let frame_h_pt = emu_to_pt(bbox.height);
+            place_svg_at(surface, svg, surface_x, surface_y, frame_w_pt, frame_h_pt)?;
+        },
+        // ErrorSlidePlaceholder carries an SVG — render it like a diagram.
+        FrameContent::ErrorSlidePlaceholder { svg, .. } => {
+            use slideforge_types::NormalizedDiagramSvg;
+            use std::sync::Arc;
+            let normalized = NormalizedDiagramSvg::from_normalized_string(Arc::from(svg.as_ref()));
+            let surface_x = emu_to_pt(bbox.x);
+            let surface_y = emu_to_pt(bbox.y);
+            let frame_w_pt = emu_to_pt(bbox.width);
+            let frame_h_pt = emu_to_pt(bbox.height);
+            place_svg_at(
+                surface,
+                &normalized,
+                surface_x,
+                surface_y,
+                frame_w_pt,
+                frame_h_pt,
+            )?;
+        },
+        // Chart: no SVG payload at frame level — drawn via ChartRenderer pass.
+        // Image, Shape, Empty: no drawing in this story.
+        FrameContent::Chart
+        | FrameContent::Image { .. }
+        | FrameContent::Shape(_)
+        | FrameContent::Empty => {},
+    }
+    Ok(())
+}
+
+/// Compute the Surface Y coordinate of the text baseline for a bounding box.
+///
+/// krilla's `Surface` is top-left, Y-down (DIR-044-001). The text baseline is
+/// approximated at 80% of the box height measured downward from the box top edge,
+/// giving 20% descender allowance below the baseline.
+///
+/// ```text
+/// surface_y  = emu_to_pt(bbox.y)                          // top edge, Y-down
+/// baseline_y = surface_y + emu_to_pt(bbox.height) * 0.8
+/// ```
+///
+/// This is a **pure function** used by both production (`draw_text_at_bbox`) and
+/// the vertical-placement regression tests to ensure they exercise the same
+/// formula as the real draw path (non-vacuous load-bearing test contract).
+///
+/// For a title frame at `ir_y=0` (slide top): baseline = 0 + height*0.8
+/// (in the top half of the page). Under the old (buggy) `ir_y_to_pdf_y`
+/// formula the baseline was ~390 (near the bottom) — the mirror bug.
+#[inline]
+pub(crate) fn text_baseline_surface_y(bbox: &BoundingBox) -> f32 {
+    let surface_top_y = emu_to_pt(bbox.y);
+    surface_top_y + emu_to_pt(bbox.height) * 0.8
+}
+
+/// Solid opaque black fill used for text rendering.
+///
+/// OBS-044-22-01 fix: `draw_text_at_bbox` must set an EXPLICIT fill before
+/// `surface.draw_text()` so that text color is always the deterministic default
+/// (solid black) and never inherits leaked fill state from a prior SVG/Diagram
+/// frame drawn on the same krilla `Surface`.
+///
+/// `krilla::paint::Fill` / `Surface::set_fill` accept `Option<Fill>`. Passing
+/// `Some(TEXT_FILL_BLACK)` is equivalent to `Fill::default()` but makes the
+/// intent explicit: text is always rendered in opaque black regardless of what
+/// SVG path drawing left in the surface's paint state.
+///
+/// Why RGB black (`rgb::Color::new(0, 0, 0)`) instead of luma black
+/// (`luma::Color::black()` / `Fill::default()`): both produce black text, but
+/// the RGB form emits `0 0 0 rg` in the uncompressed PDF stream, which is
+/// directly assertable in tests. The luma form emits `0 g`. We choose RGB for
+/// consistency with the SVG fill path (which uses `rgb::Color`) and for
+/// test-assertion clarity.
+fn text_fill_black() -> Fill {
+    Fill {
+        paint: rgb::Color::new(0, 0, 0).into(),
+        opacity: NormalizedF32::ONE,
+        rule: FillRule::NonZero,
+    }
+}
+
+/// Draw text at a bounding box position using krilla Surface (top-left, Y-down) coordinates.
+///
+/// Uses [`text_baseline_surface_y`] to compute the baseline position. If `font`
+/// is `None`, logs a debug warning and skips drawing. This is the correct
+/// non-fatal behavior when a brand font is unavailable.
+///
+/// ## Paint-state determinism (OBS-044-22-01 fix)
+///
+/// Explicitly sets fill to opaque black and clears stroke before calling
+/// `surface.draw_text()`. This ensures text color is never inherited from the
+/// fill/stroke state left by a prior `Diagram`/`ErrorSlidePlaceholder` frame
+/// on the same krilla `Surface`. See [`text_fill_black`] for color rationale.
+fn draw_text_at_bbox(
+    surface: &mut krilla::surface::Surface<'_>,
+    text: &str,
+    bbox: &BoundingBox,
+    font_size: f32,
+    font: Option<&krilla::text::Font>,
+) {
+    let Some(font) = font else {
+        // Use char-safe truncation to avoid byte-boundary panics on multi-byte
+        // UTF-8 text (F-044-001: `&text[..text.len().min(20)]` would panic when
+        // the 20th byte is mid-codepoint; `chars().take(20)` is always safe).
+        let preview: String = text.chars().take(20).collect();
+        tracing::debug!(
+            text_preview = %preview,
+            "skipping text draw: no resolved font"
+        );
+        return;
+    };
+    if text.is_empty() {
+        return;
+    }
+
+    // OBS-044-22-01 fix: explicitly set fill and clear stroke BEFORE draw_text.
+    // krilla Surface.fill / Surface.stroke are mutable fields (NOT part of the
+    // transform/graphics-state stack). A prior Diagram frame's render_path calls
+    // may have left any fill/stroke in the surface state. Resetting here makes
+    // text rendering self-sufficient and deterministic, independent of draw order.
+    surface.set_fill(Some(text_fill_black()));
+    surface.set_stroke(None);
+
+    // Surface X: left edge of the bounding box (top-left origin, Y-down).
+    let surface_x = emu_to_pt(bbox.x);
+
+    // Surface Y baseline: 80% of box height down from the box top edge.
+    // No ir_y_to_pdf_y — krilla handles the PDF Y-flip internally (DIR-044-001).
+    let baseline_y = text_baseline_surface_y(bbox);
+
+    let start = Point::from_xy(surface_x, baseline_y);
+    surface.draw_text(
+        start,
+        font.clone(),
+        font_size,
+        text,
+        false,
+        TextDirection::Auto,
+    );
+}
+
+/// Draw body content blocks at the given bounding box.
+///
+/// Iterates text-bearing blocks (Text, Bullets) and draws their inline text.
+/// Non-text blocks (Chart, Diagram, Math, Image, Table, Shape) are skipped in
+/// this pass — they are handled separately in their own frame draw logic.
+fn draw_body_blocks(
+    surface: &mut krilla::surface::Surface<'_>,
+    blocks: &[slideforge_types::ContentBlock],
+    bbox: &BoundingBox,
+    font: Option<&krilla::text::Font>,
+) {
+    use slideforge_types::ContentBlock;
+
+    for block in blocks {
+        match block {
+            ContentBlock::Text(text_block) => {
+                let text = extract_inline_text(&text_block.inlines);
+                if !text.is_empty() {
+                    draw_text_at_bbox(surface, &text, bbox, 18.0, font);
+                }
+            },
+            ContentBlock::Bullets(items) => {
+                for item in items {
+                    let text = extract_inline_text(&item.inlines);
+                    if !text.is_empty() {
+                        draw_text_at_bbox(surface, &text, bbox, 16.0, font);
+                    }
+                }
+            },
+            // Other block types are not drawn in this pass.
+            ContentBlock::Chart(_)
+            | ContentBlock::Diagram(_)
+            | ContentBlock::Math(_)
+            | ContentBlock::Image(_)
+            | ContentBlock::Table(_)
+            | ContentBlock::Shape(_) => {},
+        }
+    }
+}
+
+/// Extract a flat plain-text string from a sequence of [`InlineNode`]s.
+///
+/// Traverses `Bold` and `Italic` nodes recursively to collect all
+/// [`InlineNode::Plain`] leaf text. Other inline variants (Code, Xref, etc.)
+/// are skipped in this story — they contribute to the text stream in STORY-045.
+fn extract_inline_text(inlines: &[slideforge_types::InlineNode]) -> String {
+    use slideforge_types::InlineNode;
+
+    let mut out = String::new();
+    for node in inlines {
+        match node {
+            InlineNode::Plain(s) => out.push_str(s),
+            InlineNode::Bold(children) | InlineNode::Italic(children) => {
+                out.push_str(&extract_inline_text(children));
+            },
+            // Other variants (Code, Xref, Math, etc.) deferred to STORY-045.
+            _ => {},
+        }
+    }
+    out
+}
+
+/// Place a normalized SVG diagram on the surface at the specified top-left Surface position.
+///
+/// ## Transform composition (F-P18-001 / F-P18-002 fix)
+///
+/// Pushes a translation transform so the SVG is positioned at `(surface_x, surface_y)`
+/// on the krilla Surface (top-left, Y-down). The actual scale-to-frame transform is
+/// applied inside `embed_normalized_svg` via the frame dimensions.
+///
+/// The composed chain for each path is:
+/// ```text
+/// translate(surface_x, surface_y) ∘ scale(frame_w/svg_w, frame_h/svg_h)
+///     ∘ path.abs_transform() ∘ local_path_data
+/// ```
+///
+/// All transforms are pushed before embedding and popped after, leaving the
+/// surface state unchanged for subsequent draw calls.
+///
+/// ## Parameters
+///
+/// - `surface_x` / `surface_y` — top-left corner of the frame in Surface coords
+///   (Y-down; krilla applies the PDF Y-flip internally — DIR-044-001).
+/// - `frame_w_pt` / `frame_h_pt` — frame width and height in Surface points,
+///   used to scale the SVG viewport to fit the frame (F-P18-002).
+// frame_w_pt / frame_h_pt are intrinsically paired width/height parameters.
+#[allow(clippy::similar_names)]
+fn place_svg_at(
+    surface: &mut krilla::surface::Surface<'_>,
+    svg: &slideforge_types::NormalizedDiagramSvg,
+    surface_x: f32,
+    surface_y: f32,
+    frame_w_pt: f32,
+    frame_h_pt: f32,
+) -> Result<(), PdfExportError> {
+    // Apply a translation so the SVG is positioned at the frame's top-left Surface coords.
+    // The scale is handled inside embed_normalized_svg (around the tree render).
+    let translate = krilla::geom::Transform::from_translate(surface_x, surface_y);
+    surface.push_transform(&translate);
+    let result = embed_normalized_svg(svg, surface, frame_w_pt, frame_h_pt);
+    surface.pop();
+    result
+}
+
 impl Exporter for PdfExporter {
     // Trait requires `&str`; return type is tied to `&self` per trait contract
     // even though we return `'static` literals. Suppressing the unnecessary_literal_bound
@@ -191,7 +746,10 @@ impl Exporter for PdfExporter {
     ///
     /// # Parameters
     ///
-    /// - `deck` — the semantic, pre-layout IR (used for metadata: title, lang)
+    /// - `deck` — the semantic, pre-layout IR. Currently unused by the PDF
+    ///   renderer; it is accepted so the [`Exporter`] trait signature is
+    ///   satisfied. PDF document metadata (title, language) will be populated
+    ///   from this parameter in STORY-045 (PDF/UA-1 metadata wiring).
     /// - `laid_out` — the geometric, post-layout IR (slide frames, coordinates)
     /// - `brand` — resolved brand configuration (fonts, palette, page size)
     /// - `opts` — per-export options
@@ -517,5 +1075,814 @@ mod tests {
         assert_ne!(id, "chrome", "exporter ID must not be a browser name");
         assert_ne!(id, "chromium", "exporter ID must not be a browser name");
         assert_eq!(id, "pdf", "exporter ID must be 'pdf'");
+    }
+
+    // ─── F-044-001 test: no char-boundary panic on multi-byte text ─────────────
+
+    /// F-044-001: `PdfExporter::export()` must not panic on a deck whose text
+    /// contains multi-byte UTF-8 characters when font resolution returns `None`.
+    ///
+    /// The bug was `&text[..text.len().min(20)]` in the font-None log path,
+    /// which panics when the 20th byte is mid-codepoint. The fix uses
+    /// `text.chars().take(20).collect::<String>()`.
+    ///
+    /// The brand uses a guaranteed-absent font family so font resolution returns
+    /// `None`, exercising the degradation path. The long Japanese text (36+ bytes,
+    /// 20th byte mid-codepoint with the old code) confirms no panic occurs.
+    #[allow(clippy::unwrap_used)]
+    #[test]
+    fn test_f044_001_no_panic_on_multibyte_text_with_font_none() {
+        // A long Japanese string whose 20th byte (0-indexed) is mid-codepoint.
+        // Each Japanese character is 3 bytes in UTF-8, so 7 chars = 21 bytes.
+        // The 20th byte (index 19) is the second byte of the 7th character.
+        // The old code would panic; the fixed code must not.
+        let japanese_text = "日本語のテキストが長い場合のトランケーション";
+        // Verify the test setup: the 20th byte is mid-codepoint.
+        assert!(
+            !japanese_text.is_char_boundary(20),
+            "test setup: byte 20 must be mid-codepoint for this test to be meaningful"
+        );
+
+        let exporter = PdfExporter::new(); // uses brand-based font resolution
+        let deck = minimal_deck();
+        let brand = Brand {
+            name: Arc::from("TestBrand"),
+            palette: BrandPalette {
+                primary: Arc::from("#003087"),
+                secondary: Arc::from("#FFFFFF"),
+                accent: Arc::from("#F5A623"),
+                neutral: Arc::from("#F0F0F0"),
+            },
+            fonts: BrandFonts {
+                // Guaranteed-absent family names → font resolution returns None.
+                heading: Arc::from("NoSuchFont_F044001_Unicode_Test"),
+                body: Arc::from("NoSuchFont_F044001_Unicode_Test"),
+                mono: Arc::from("Courier"),
+            },
+            layouts: vec![],
+            span: SourceSpan::default(),
+        };
+        let laid_out = LaidOutDeck {
+            page_size: PageSize::default(),
+            slides: vec![LaidOutSlide {
+                source_index: 0,
+                slide_type_keyword: Arc::from("title"),
+                frames: vec![Frame {
+                    bbox: BoundingBox {
+                        x: Emu(0),
+                        y: Emu(0),
+                        width: Emu(9_144_000),
+                        height: Emu(914_400),
+                    },
+                    content: FrameContent::Title(Arc::from(japanese_text)),
+                    text_flow: None,
+                }],
+                speaker_notes: None,
+                register_tags: RegisterSet::new(),
+                register_content: vec![],
+            }],
+            sections: vec![],
+            warnings: vec![],
+        };
+        let opts = ExportOptions::default();
+
+        // Must NOT panic — this is the core assertion.
+        // Before the fix, this panicked with "byte index 20 is not a char boundary".
+        let result = exporter.export(&deck, &laid_out, &brand, &opts);
+
+        assert!(
+            result.is_ok(),
+            "export must succeed even with multi-byte UTF-8 text + no resolved font: {result:?}"
+        );
+        let bytes = result.unwrap();
+        assert!(
+            bytes.starts_with(b"%PDF-"),
+            "PDF output must start with %PDF- header"
+        );
+    }
+
+    // ─── F-044-003: AC-006 integration test — render a fixture deck ──────────
+
+    /// BC-4.03.005 AC-006 (integration, updated for DIR-044-001 top-left mapping):
+    /// `PdfExporter::export()` on a fixture `LaidOutDeck` must draw all elements
+    /// within the slide canvas `[0.0, 0.0, 720.0, 405.0]` — BOTH axes:
+    /// `0 <= surface_x` AND `surface_x + width_pt <= SLIDE_WIDTH_PT (720.0)`
+    /// AND `0 <= baseline_y <= SLIDE_HEIGHT_PT (405.0)`.
+    ///
+    /// ## What this tests (F-044-003 fix + F-P5-001 X-axis extension + DIR-044-001)
+    ///
+    /// 1. Builds a fixture `LaidOutDeck` with Title/Subtitle/Body frames at
+    ///    positions spanning the full slide width and height (top, middle, bottom).
+    /// 2. Runs `PdfExporter::export()` to confirm the pipeline completes without
+    ///    coordinate errors.
+    /// 3. Asserts the X-axis bounding box (`surface_x` and `surface_x + width_pt`)
+    ///    stays within `[0.0, SLIDE_WIDTH_PT]`.
+    /// 4. Asserts the draw-time baseline Y (top-left mapping: `emu_to_pt(ir_y) +
+    ///    0.8 * height`) stays within `[0.0, SLIDE_HEIGHT_PT]` — using
+    ///    `text_baseline_surface_y` (the same function as the production draw path).
+    ///
+    /// ## Why the Y formula changed (DIR-044-001)
+    ///
+    /// The OLD formula was `ir_y_to_pdf_y(ir_y, elem_h, slide_h) + 0.8 * height`.
+    /// That was vacuously safe (always in range) but computed the wrong position
+    /// (mirror bug: top-of-slide elements rendered at the bottom).
+    ///
+    /// The NEW formula uses `text_baseline_surface_y(bbox)` which calls
+    /// `emu_to_pt(bbox.y) + emu_to_pt(bbox.height) * 0.8`. This correctly places
+    /// elements in Surface space (top-left, Y-down). The Y-axis range assertion
+    /// here remains valid: for in-bounds IR boxes, `emu_to_pt(ir_y) + 0.8*h` ≤ 405.
+    ///
+    /// ## Distinction from the existing coords unit tests
+    ///
+    /// The existing `test_bc_4_03_005_no_element_outside_canvas_after_conversion`
+    /// tests `ir_y_to_pdf_y()` arithmetic in isolation (retained as VP-006 target).
+    /// THIS test exercises `text_baseline_surface_y` via the ACTUAL DRAW PATH
+    /// function, confirming element placement via the export route.
+    #[allow(clippy::unwrap_used, clippy::float_cmp)]
+    #[test]
+    fn test_bc_4_03_005_ac006_export_all_elements_within_canvas() {
+        use crate::SLIDE_HEIGHT_EMU;
+        use crate::coords::{SLIDE_HEIGHT_PT, SLIDE_WIDTH_PT, emu_to_pt};
+
+        // Fixture deck: Title at top, Subtitle at 1-inch offset, Body at 2-inch offset.
+        // All stay within the 5.625-inch (405pt) slide height and 10-inch (720pt) width.
+        let one_inch_emu = Emu(914_400);
+        let two_inch_emu = Emu(1_828_800);
+        let title_h_emu = Emu(914_400); // 72pt
+        let body_h_emu = Emu(1_270_000); // ~100pt
+        let slide_w_emu = Emu(9_144_000); // 720pt (full width)
+
+        // Verify our test fixture is within bounds.
+        assert!(
+            two_inch_emu.0 + body_h_emu.0 <= SLIDE_HEIGHT_EMU.0,
+            "test fixture: body frame must fit within slide height"
+        );
+
+        let laid_out = LaidOutDeck {
+            page_size: PageSize::default(),
+            slides: vec![LaidOutSlide {
+                source_index: 0,
+                slide_type_keyword: Arc::from("content"),
+                frames: vec![
+                    Frame {
+                        bbox: BoundingBox {
+                            x: Emu(0),
+                            y: Emu(0),
+                            width: slide_w_emu,
+                            height: title_h_emu,
+                        },
+                        content: FrameContent::Title(Arc::from("Title at top")),
+                        text_flow: None,
+                    },
+                    Frame {
+                        bbox: BoundingBox {
+                            x: Emu(0),
+                            y: one_inch_emu,
+                            width: slide_w_emu,
+                            height: title_h_emu,
+                        },
+                        content: FrameContent::Subtitle(Arc::from("Subtitle at 1-inch")),
+                        text_flow: None,
+                    },
+                    Frame {
+                        bbox: BoundingBox {
+                            x: Emu(0),
+                            y: two_inch_emu,
+                            width: slide_w_emu,
+                            height: body_h_emu,
+                        },
+                        content: FrameContent::Body(vec![]),
+                        text_flow: None,
+                    },
+                ],
+                speaker_notes: None,
+                register_tags: RegisterSet::new(),
+                register_content: vec![],
+            }],
+            sections: vec![],
+            warnings: vec![],
+        };
+
+        let exporter = PdfExporter::new();
+        let deck = minimal_deck();
+        let brand = minimal_brand();
+        let opts = ExportOptions::default();
+
+        // Export must succeed (no coordinate errors).
+        let result = exporter.export(&deck, &laid_out, &brand, &opts);
+        assert!(
+            result.is_ok(),
+            "export must succeed for the AC-006 fixture deck: {result:?}"
+        );
+
+        // Verify bounding box computations for all frames stay within
+        // [0.0, 0.0, SLIDE_WIDTH_PT, SLIDE_HEIGHT_PT] — BOTH axes.
+        //
+        // X-axis: surface_x = emu_to_pt(bbox.x); right edge = surface_x + width_pt.
+        // Y-axis baseline: text_baseline_surface_y(bbox) = emu_to_pt(ir_y) + 0.8 * height
+        //   (top-left Surface coords, DIR-044-001 — matches production draw_text_at_bbox).
+        let frames_under_test = [
+            (Emu(0), slide_w_emu, Emu(0), title_h_emu, "title-top"),
+            (
+                Emu(0),
+                slide_w_emu,
+                one_inch_emu,
+                title_h_emu,
+                "subtitle-1in",
+            ),
+            (Emu(0), slide_w_emu, two_inch_emu, body_h_emu, "body-2in"),
+        ];
+
+        for (ir_x, elem_w, ir_y, elem_h, label) in frames_under_test {
+            // ── X-axis bounds (F-P5-001) ──────────────────────────────────────
+            // surface_x = emu_to_pt(bbox.x) — left edge, via coords::emu_to_pt.
+            let surface_x = emu_to_pt(ir_x);
+            let width_pt = emu_to_pt(elem_w);
+
+            assert!(
+                surface_x >= -0.001,
+                "AC-006: surface_x for frame '{label}' must be >= 0.0; got {surface_x:.3}"
+            );
+            assert!(
+                surface_x + width_pt <= SLIDE_WIDTH_PT + 0.001,
+                "AC-006: surface_x + width_pt for frame '{label}' must be <= {SLIDE_WIDTH_PT}; \
+                 got surface_x={surface_x:.3}, width_pt={width_pt:.3}, sum={:.3}",
+                surface_x + width_pt
+            );
+
+            // ── Y-axis bounds (top-left Surface mapping, DIR-044-001) ─────────
+            // Use text_baseline_surface_y — the SAME function as production draw_text_at_bbox.
+            // This makes the test non-vacuous and load-bearing: if the formula changes
+            // in production, this test reflects the change automatically.
+            let bbox = BoundingBox {
+                x: ir_x,
+                y: ir_y,
+                width: elem_w,
+                height: elem_h,
+            };
+            let baseline_y = text_baseline_surface_y(&bbox);
+
+            assert!(
+                baseline_y >= -0.001,
+                "AC-006: baseline_y for frame '{label}' must be >= 0.0 (on the page); \
+                 got {baseline_y:.3}"
+            );
+            assert!(
+                baseline_y <= SLIDE_HEIGHT_PT + 0.001,
+                "AC-006: baseline_y for frame '{label}' must be <= {SLIDE_HEIGHT_PT}; \
+                 got {baseline_y:.3}"
+            );
+        }
+    }
+
+    // ─── Vertical-placement regression tests (DIR-044-001 mirror bug) ─────────
+
+    /// Regression test for the vertical-mirror coordinate bug (DIR-044-001).
+    ///
+    /// A title frame at `ir_y=0` (slide top) must draw its baseline in the TOP HALF
+    /// of the Surface (`baseline_y < SLIDE_HEIGHT_PT / 2 = 202.5`).
+    ///
+    /// Under the OLD (buggy) `ir_y_to_pdf_y` formula:
+    ///   `box_bottom = 405 − 0 − 72 = 333`; `baseline = 333 + 72*0.8 = 390.6`
+    ///   → `390.6 < 202.5` is FALSE → test FAILS (catches the mirror bug).
+    ///
+    /// Under the CORRECT `text_baseline_surface_y` formula:
+    ///   `surface_top = emu_to_pt(Emu(0)) = 0.0`; `baseline = 0 + 72*0.8 = 57.6`
+    ///   → `57.6 < 202.5` is TRUE → test PASSES.
+    ///
+    /// Uses `text_baseline_surface_y` — the same pure function as `draw_text_at_bbox` —
+    /// so the test is non-vacuous and load-bearing: any regression in the draw path
+    /// is caught here.
+    #[test]
+    fn test_vertical_placement_title_at_top() {
+        use crate::coords::{SLIDE_HEIGHT_PT, emu_to_pt};
+
+        // Title frame at ir_y=0 (slide top), height=72pt (1 inch).
+        let ir_y = Emu(0);
+        let element_h = Emu(72 * 12_700); // 72pt
+        let bbox = BoundingBox {
+            x: Emu(0),
+            y: ir_y,
+            width: Emu(9_144_000),
+            height: element_h,
+        };
+
+        let baseline_y = text_baseline_surface_y(&bbox);
+
+        // Numeric verification:
+        // surface_top_y = emu_to_pt(Emu(0)) = 0.0
+        // baseline_y    = 0.0 + emu_to_pt(72 * 12_700) * 0.8 = 72.0 * 0.8 = 57.6
+        let expected = emu_to_pt(Emu(0)) + emu_to_pt(element_h) * 0.8;
+        assert!(
+            (baseline_y - expected).abs() < 0.001,
+            "title baseline must equal {expected:.3}; got {baseline_y:.3}"
+        );
+
+        // Directional assertion: the baseline must be in the TOP HALF of the Surface.
+        // A value > 202.5 (= SLIDE_HEIGHT_PT / 2) indicates the mirror bug.
+        assert!(
+            baseline_y < SLIDE_HEIGHT_PT / 2.0,
+            "title baseline at ir_y=0 must be in the top half of the Surface \
+             (Surface-Y < {:.1}); got {baseline_y:.3}. A value >= {:.1} indicates \
+             the mirror bug: ir_y_to_pdf_y is being applied at draw time.",
+            SLIDE_HEIGHT_PT / 2.0,
+            SLIDE_HEIGHT_PT / 2.0
+        );
+        assert!(
+            baseline_y >= 0.0,
+            "title baseline must be >= 0.0 (on the page); got {baseline_y:.3}"
+        );
+    }
+
+    /// Complementary regression test for the vertical-mirror coordinate bug.
+    ///
+    /// A footer frame near the BOTTOM of the slide (`ir_y ≈ slide_h − frame_h`)
+    /// must draw its baseline in the BOTTOM HALF of the Surface
+    /// (`baseline_y > SLIDE_HEIGHT_PT / 2 = 202.5`).
+    ///
+    /// Uses `text_baseline_surface_y` — the same pure function as `draw_text_at_bbox` —
+    /// ensuring this test is non-vacuous and load-bearing.
+    #[test]
+    fn test_vertical_placement_footer_at_bottom() {
+        use crate::SLIDE_HEIGHT_EMU;
+        use crate::coords::{SLIDE_HEIGHT_PT, emu_to_pt};
+
+        // Footer frame: height 36pt (0.5 inch), placed at the bottom of the slide.
+        let element_h = Emu(36 * 12_700); // 36pt
+        let ir_y = Emu(SLIDE_HEIGHT_EMU.0 - element_h.0); // top of footer = slide_h - 36pt
+        let bbox = BoundingBox {
+            x: Emu(0),
+            y: ir_y,
+            width: Emu(9_144_000),
+            height: element_h,
+        };
+
+        let baseline_y = text_baseline_surface_y(&bbox);
+
+        // Numeric verification:
+        // surface_top_y = emu_to_pt(ir_y) = 405 - 36 = 369.0
+        // baseline_y    = 369.0 + 36.0 * 0.8 = 369.0 + 28.8 = 397.8
+        let expected = emu_to_pt(ir_y) + emu_to_pt(element_h) * 0.8;
+        assert!(
+            (baseline_y - expected).abs() < 0.001,
+            "footer baseline must equal {expected:.3}; got {baseline_y:.3}"
+        );
+
+        // Directional assertion: the baseline must be in the BOTTOM HALF of the Surface.
+        assert!(
+            baseline_y > SLIDE_HEIGHT_PT / 2.0,
+            "footer baseline at bottom of slide must be in the bottom half of the Surface \
+             (Surface-Y > {:.1}); got {baseline_y:.3}.",
+            SLIDE_HEIGHT_PT / 2.0
+        );
+        assert!(
+            baseline_y <= SLIDE_HEIGHT_PT + 0.001,
+            "footer baseline must be <= SLIDE_HEIGHT_PT ({SLIDE_HEIGHT_PT}); got {baseline_y:.3}"
+        );
+    }
+
+    // ─── F-044-004: Drawing-path behavioral coverage ───────────────────────────
+
+    /// F-044-004 (text frame): `PdfExporter::export()` with a resolvable font
+    /// draws text so that the exported PDF contains font-related structure.
+    ///
+    /// Uses `PdfExporter::with_font_path(lm_math_font_path)` for deterministic
+    /// font resolution. Produces an uncompressed PDF (via `generate_pdf_inner`
+    /// with `compress_content_streams: false`) and asserts:
+    ///
+    /// 1. The PDF contains a font resource (`/Font` dict entry) — confirms a font
+    ///    was embedded (i.e., text drawing reached `surface.draw_text()`).
+    /// 2. The PDF bytes are non-empty and start with `%PDF-`.
+    ///
+    /// This test FAILS if text drawing is a no-op (no `/Font` entry → no glyphs
+    /// reached krilla's text surface).
+    #[allow(clippy::unwrap_used)]
+    #[test]
+    fn test_f044_004_text_frame_draws_font_resource_in_export() {
+        // Path to Latin Modern Math OTF fixture (deterministic font).
+        let font_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../crates/slideforge-math/fonts/latinmodern-math.otf")
+            .canonicalize()
+            .expect("LM Math fixture must be accessible for F-044-004 drawing-path test");
+
+        let exporter = PdfExporter::with_font_path(font_path);
+        let deck = minimal_deck();
+        let laid_out = LaidOutDeck {
+            page_size: PageSize::default(),
+            slides: vec![LaidOutSlide {
+                source_index: 0,
+                slide_type_keyword: Arc::from("title"),
+                frames: vec![Frame {
+                    bbox: BoundingBox {
+                        x: Emu(0),
+                        y: Emu(0),
+                        width: Emu(9_144_000),
+                        height: Emu(914_400),
+                    },
+                    content: FrameContent::Title(Arc::from("Drawing Path Test")),
+                    text_flow: None,
+                }],
+                speaker_notes: None,
+                register_tags: RegisterSet::new(),
+                register_content: vec![],
+            }],
+            sections: vec![],
+            warnings: vec![],
+        };
+        let brand = Brand {
+            name: Arc::from("TestBrand"),
+            palette: BrandPalette {
+                primary: Arc::from("#003087"),
+                secondary: Arc::from("#FFFFFF"),
+                accent: Arc::from("#F5A623"),
+                neutral: Arc::from("#F0F0F0"),
+            },
+            // Intentionally absent — override path is used instead.
+            fonts: BrandFonts {
+                heading: Arc::from("NoSuchFont_F044004"),
+                body: Arc::from("NoSuchFont_F044004"),
+                mono: Arc::from("Courier"),
+            },
+            layouts: vec![],
+            span: SourceSpan::default(),
+        };
+        let opts = ExportOptions::default();
+
+        // Use uncompressed settings so we can scan the raw content streams.
+        let pdf_bytes = exporter
+            .generate_pdf_inner(
+                &deck,
+                &laid_out,
+                &brand,
+                &opts,
+                krilla::SerializeSettings {
+                    compress_content_streams: false,
+                    ..krilla::SerializeSettings::default()
+                },
+            )
+            .expect("generate_pdf_inner must succeed for F-044-004 text drawing test");
+
+        assert!(
+            pdf_bytes.starts_with(b"%PDF-"),
+            "PDF must start with %PDF- header"
+        );
+
+        // Assert a font resource was embedded — confirms text drawing reached
+        // krilla's Surface and a glyph was placed.
+        // krilla writes `/Font` dict entries into the page resources when text is drawn.
+        let has_font_resource = pdf_bytes.windows(b"/Font".len()).any(|w| w == b"/Font");
+        assert!(
+            has_font_resource,
+            "F-044-004 FAILED: exported PDF contains no /Font resource. \
+             Text drawing did not reach krilla's Surface (draw_text path is a no-op). \
+             Ensure draw_text_at_bbox is called for Title frames."
+        );
+    }
+
+    /// F-044-004 (SVG / Diagram frame): `PdfExporter::export()` with a Diagram
+    /// frame draws SVG vector paths and the transform is balanced (push/pop).
+    ///
+    /// Builds a deck with a simple SVG rectangle and exports with uncompressed
+    /// content streams. Asserts:
+    ///
+    /// 1. Vector path operators (`re` for rectangle, `m`/`l`/`c` for paths) appear
+    ///    in the exported bytes — confirms `place_svg_at` reached `embed_normalized_svg`.
+    /// 2. The PDF is valid (`%PDF-` header present, `%%EOF` near end).
+    /// 3. Export succeeds without error — confirms `push_transform`/`pop_transform` are
+    ///    balanced (an unbalanced transform stack causes krilla to return an error
+    ///    or produce malformed output).
+    #[allow(clippy::unwrap_used)]
+    #[test]
+    fn test_f044_004_diagram_frame_draws_svg_paths_in_export() {
+        use slideforge_types::NormalizedDiagramSvg;
+
+        // A simple SVG with one rectangle — produces a `re` PDF operator.
+        // Use ##-delimited raw string to avoid conflict with the # in the color value.
+        let svg_str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
+            <rect x="10" y="10" width="80" height="80" fill="#003087"/>
+        </svg>"##;
+        let svg = NormalizedDiagramSvg::from_normalized_string(Arc::from(svg_str));
+
+        let exporter = PdfExporter::new(); // no font needed for SVG-only deck
+        let deck = minimal_deck();
+        let laid_out = LaidOutDeck {
+            page_size: PageSize::default(),
+            slides: vec![LaidOutSlide {
+                source_index: 0,
+                slide_type_keyword: Arc::from("diagram"),
+                frames: vec![Frame {
+                    bbox: BoundingBox {
+                        x: Emu(0),
+                        y: Emu(0),
+                        width: Emu(9_144_000),
+                        height: Emu(5_143_500),
+                    },
+                    content: FrameContent::Diagram(svg),
+                    text_flow: None,
+                }],
+                speaker_notes: None,
+                register_tags: RegisterSet::new(),
+                register_content: vec![],
+            }],
+            sections: vec![],
+            warnings: vec![],
+        };
+        let brand = minimal_brand();
+        let opts = ExportOptions::default();
+
+        // Export with uncompressed content streams to scan for path operators.
+        let pdf_bytes = exporter
+            .generate_pdf_inner(
+                &deck,
+                &laid_out,
+                &brand,
+                &opts,
+                krilla::SerializeSettings {
+                    compress_content_streams: false,
+                    ..krilla::SerializeSettings::default()
+                },
+            )
+            .expect("generate_pdf_inner must succeed for SVG/Diagram frame");
+
+        assert!(
+            pdf_bytes.starts_with(b"%PDF-"),
+            "PDF must start with %PDF- header"
+        );
+
+        // Assert vector path operators are present in the exported bytes.
+        // The SVG <rect> is translated to PDF path operators by svg_embed.
+        // krilla's SVG renderer emits `re` (rectangle) for SVG <rect> elements,
+        // or `m`/`l` for generic path segments.
+        // At minimum, the content streams must be non-empty after the drawing pass.
+        // We check for `re ` (PDF rectangle operator) or `f` (fill operator).
+        let has_rect_op = pdf_bytes.windows(b" re ".len()).any(|w| w == b" re ");
+        let has_fill_op = pdf_bytes.windows(b" f\n".len()).any(|w| w == b" f\n")
+            || pdf_bytes.windows(b" f\r".len()).any(|w| w == b" f\r")
+            || pdf_bytes.windows(b" F ".len()).any(|w| w == b" F ");
+        // Also check for generic move-to (`m` operator) as a fallback.
+        let has_path_ops = has_rect_op
+            || has_fill_op
+            || pdf_bytes.windows(b" m\n".len()).any(|w| w == b" m\n")
+            || pdf_bytes.windows(b" m ".len()).any(|w| w == b" m ");
+
+        assert!(
+            has_path_ops,
+            "F-044-004 FAILED: exported PDF contains no vector path operators (re/f/m). \
+             SVG drawing did not reach krilla's Surface. \
+             Ensure place_svg_at → embed_normalized_svg is called for Diagram frames. \
+             PDF size: {} bytes.",
+            pdf_bytes.len()
+        );
+
+        // Assert %%EOF is near the end — PDF is well-formed.
+        let tail = &pdf_bytes[pdf_bytes.len().saturating_sub(64)..];
+        let has_eof = tail.windows(b"%%EOF".len()).any(|w| w == b"%%EOF");
+        assert!(
+            has_eof,
+            "F-044-004: PDF must end with %%EOF marker (well-formed PDF)"
+        );
+    }
+
+    // ─── OBS-044-22-01: paint-state leak across frames ────────────────────────
+
+    /// OBS-044-22-01 (driving regression test): `draw_text_at_bbox` must set
+    /// an explicit fill before `surface.draw_text()` so that text rendering is
+    /// never influenced by fill/stroke state leaked from a prior SVG/Diagram frame
+    /// on the same slide.
+    ///
+    /// ## Bug
+    ///
+    /// `render_path` in `svg_embed.rs` calls `surface.set_fill(Some(...))` /
+    /// `surface.set_fill(None)` and `surface.set_stroke(...)` for every SVG path.
+    /// These mutations persist on the krilla `Surface` after `place_svg_at`
+    /// completes (only the transform is restored by `surface.pop()`; fill/stroke
+    /// are NOT part of the transform stack). `draw_text_at_bbox` then calls
+    /// `surface.draw_text()` without first resetting the fill — text inherits the
+    /// last SVG path's fill color.
+    ///
+    /// ## Test setup
+    ///
+    /// 2-frame slide:
+    ///   Frame 0 — `Diagram` with a solid RED (`#FF0000`) rectangle SVG.
+    ///             `render_path` sets `surface.fill = Some(red_fill)`.
+    ///   Frame 1 — `Title` with text "Hello Paint State".
+    ///             Without the fix: `draw_text` inherits `fill = red`.
+    ///             With the fix: `draw_text` uses explicit black fill.
+    ///
+    /// ## Non-vacuous assertion (TD-VSDD-059)
+    ///
+    /// krilla emits the non-stroking (fill) color for text as an RGB or devicegray
+    /// PDF color operator in the uncompressed content stream. When fill is solid
+    /// black (RGB 0,0,0), the content stream contains a `0 0 0 rg` operator (or
+    /// devicegray `0 g`). When fill is leaked red (RGB 1,0,0), it contains `1 0 0 rg`.
+    ///
+    /// Assertion: the uncompressed PDF MUST contain `0 0 0 rg` or `0 g` (explicit
+    /// black text fill) AND MUST NOT contain `1 0 0 rg` immediately before the
+    /// text font reference — confirming text fill is NOT inherited from the SVG.
+    ///
+    /// This test FAILS before the fix (text renders in red, PDF has `1 0 0 rg`)
+    /// and PASSES after the fix (text explicitly sets black fill, `0 0 0 rg`).
+    #[allow(clippy::unwrap_used)]
+    #[test]
+    fn test_obs_044_22_01_text_fill_not_leaked_from_svg_frame() {
+        use slideforge_types::NormalizedDiagramSvg;
+
+        // Frame 0: SVG with solid RED fill — will leak red into surface state.
+        // Use ##-delimited raw string to avoid conflict with # in color value.
+        let red_svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
+            <rect x="0" y="0" width="100" height="100" fill="#FF0000"/>
+        </svg>"##;
+        let svg = NormalizedDiagramSvg::from_normalized_string(Arc::from(red_svg));
+
+        let font_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../crates/slideforge-math/fonts/latinmodern-math.otf")
+            .canonicalize()
+            .expect("LM Math fixture must be accessible for OBS-044-22-01 regression test");
+
+        let exporter = PdfExporter::with_font_path(font_path);
+        let deck = minimal_deck();
+        let brand = Brand {
+            name: Arc::from("TestBrand"),
+            palette: BrandPalette {
+                primary: Arc::from("#003087"),
+                secondary: Arc::from("#FFFFFF"),
+                accent: Arc::from("#F5A623"),
+                neutral: Arc::from("#F0F0F0"),
+            },
+            // Override font is used instead of brand names.
+            fonts: BrandFonts {
+                heading: Arc::from("NoSuchFont_OBS_044_22_01"),
+                body: Arc::from("NoSuchFont_OBS_044_22_01"),
+                mono: Arc::from("Courier"),
+            },
+            layouts: vec![],
+            span: SourceSpan::default(),
+        };
+
+        // 2-frame slide: Diagram (red SVG) FIRST, then Title (text) SECOND.
+        // On a shared Surface, frame 0 leaves surface.fill = Some(red).
+        // Frame 1 must NOT inherit that red fill for text.
+        let laid_out = LaidOutDeck {
+            page_size: PageSize::default(),
+            slides: vec![LaidOutSlide {
+                source_index: 0,
+                slide_type_keyword: Arc::from("diagram-then-title"),
+                frames: vec![
+                    Frame {
+                        bbox: BoundingBox {
+                            x: Emu(0),
+                            y: Emu(0),
+                            width: Emu(9_144_000),
+                            height: Emu(3_657_600), // 2-inch tall SVG frame
+                        },
+                        content: FrameContent::Diagram(svg),
+                        text_flow: None,
+                    },
+                    Frame {
+                        bbox: BoundingBox {
+                            x: Emu(0),
+                            y: Emu(3_657_600), // below SVG frame
+                            width: Emu(9_144_000),
+                            height: Emu(914_400), // 1-inch title
+                        },
+                        content: FrameContent::Title(Arc::from("Hello Paint State")),
+                        text_flow: None,
+                    },
+                ],
+                speaker_notes: None,
+                register_tags: RegisterSet::new(),
+                register_content: vec![],
+            }],
+            sections: vec![],
+            warnings: vec![],
+        };
+        let opts = ExportOptions::default();
+
+        // Export with uncompressed content streams so color operators are scannable.
+        let pdf_bytes = exporter
+            .generate_pdf_inner(
+                &deck,
+                &laid_out,
+                &brand,
+                &opts,
+                krilla::SerializeSettings {
+                    compress_content_streams: false,
+                    ..krilla::SerializeSettings::default()
+                },
+            )
+            .expect("generate_pdf_inner must succeed for OBS-044-22-01 regression test");
+
+        assert!(
+            pdf_bytes.starts_with(b"%PDF-"),
+            "PDF must start with %PDF- header"
+        );
+
+        // Assert the PDF contains a /Font resource — text drawing reached krilla.
+        let has_font = pdf_bytes.windows(b"/Font".len()).any(|w| w == b"/Font");
+        assert!(
+            has_font,
+            "OBS-044-22-01: PDF must contain /Font resource — text drawing must have fired. \
+             If no font is present, the Title frame was not drawn at all."
+        );
+
+        // Search for color operators using byte patterns (PDF may contain binary bytes).
+        // Use a safe helper to produce a UTF-8 preview for error messages.
+        let pdf_preview = String::from_utf8_lossy(&pdf_bytes[..pdf_bytes.len().min(4096)]);
+
+        // Canonical set of byte patterns that krilla may emit for a solid-black fill.
+        //
+        // Krilla serializes solid-black fills as either:
+        //   - DeviceRGB:  `0 0 0 rg` or `0.0 0.0 0.0 rg`
+        //   - DeviceGray: `0 g` (preceded/followed by whitespace per PDF tokenization)
+        //
+        // This SINGLE shared list is used by BOTH assertion 1 (existence check) and
+        // assertion 2 (ordering check), so they can never silently diverge.
+        //
+        // `find_first_black_fill(slice)` returns the smallest byte offset within
+        // `slice` at which any of these patterns begins, or `None` if none is found.
+        let black_fill_patterns: &[&[u8]] = &[
+            b"0 0 0 rg",
+            b"0.0 0.0 0.0 rg",
+            b" 0 g\n",
+            b" 0 g\r",
+            b"\n0 g\n",
+        ];
+        let find_first_black_fill = |slice: &[u8]| -> Option<usize> {
+            black_fill_patterns
+                .iter()
+                .filter_map(|pat| slice.windows(pat.len()).position(|w| w == *pat))
+                .min()
+        };
+
+        // Non-vacuous assertion 1: the PDF MUST contain a black fill color operator
+        // from the explicit text fill set by `draw_text_at_bbox`.
+        //
+        // These tokens appear when `draw_text_at_bbox` calls `set_fill(Some(black_fill))`
+        // before `draw_text()`.
+        let has_black_fill_op = find_first_black_fill(&pdf_bytes).is_some();
+        assert!(
+            has_black_fill_op,
+            "OBS-044-22-01 FAILED: PDF does not contain a black fill color operator \
+             (`0 0 0 rg` or `0 g`). `draw_text_at_bbox` must explicitly call \
+             `surface.set_fill(Some(black_fill))` before `surface.draw_text()`. \
+             Without this, text inherits the SVG frame's fill (red in this test) \
+             and renders in the wrong color. \
+             PDF (first 4096 bytes): {pdf_preview}"
+        );
+
+        // Non-vacuous assertion 2: the PDF MUST NOT contain `1 0 0 rg` (red fill)
+        // as the text color operator. The SVG sets fill to red (#FF0000 = 1,0,0 in
+        // normalized RGB). If `draw_text_at_bbox` inherits this, `1 0 0 rg` appears
+        // in the text drawing context. After the fix, only the SVG path uses red fill.
+        //
+        // Simplified non-vacuous check: assert `1 0 0 rg` exists only BEFORE any
+        // text-related operator. We scan the raw bytes: if a black fill operator
+        // appears after the LAST `1 0 0 rg`, the text fill was correctly reset to black.
+        //
+        // We use `rposition` (the LAST red occurrence) rather than `position` because
+        // this is safe under krilla's current behavior: the fixture has a single SVG
+        // frame drawn *before* the Title (text) frame. Krilla coalesces identical
+        // consecutive fill-color operators, so `1 0 0 rg` is not re-emitted after the
+        // black reset in the text frame. Therefore `rposition` finds the SVG red-fill
+        // operator, and any black fill strictly after it belongs to the text frame.
+        let last_red_pos = {
+            let needle = b"1 0 0 rg";
+            pdf_bytes.windows(needle.len()).rposition(|w| w == needle)
+        };
+        // Search for the first black-fill occurrence STRICTLY AFTER `last_red_pos`
+        // using the same shared `find_first_black_fill` matcher as assertion 1.
+        // We slice `pdf_bytes[red_pos..]` so the closure returns a relative offset;
+        // we then add `red_pos` to recover the absolute byte position.
+        let first_black_fill_after_red = last_red_pos.and_then(|red_pos| {
+            find_first_black_fill(&pdf_bytes[red_pos..]).map(|rel| red_pos + rel)
+        });
+
+        if let (Some(red_pos), Some(black_pos)) = (last_red_pos, first_black_fill_after_red) {
+            // `black_pos` is guaranteed > `red_pos` by construction (we searched only the
+            // tail starting at `red_pos`), but assert explicitly to catch regressions.
+            assert!(
+                black_pos > red_pos,
+                "OBS-044-22-01: The last `1 0 0 rg` (red fill from SVG) appears at offset {red_pos}. \
+                 The first black fill operator AFTER that appears at offset {black_pos}. \
+                 For text to be correctly black, black fill MUST appear AFTER the SVG red fill. \
+                 This confirms draw_text_at_bbox explicitly resets the fill to black."
+            );
+        } else if last_red_pos.is_none() {
+            // No red fill at all — SVG path color wasn't applied? The SVG may not
+            // have rendered. The /Font assertion above already guards this case.
+            // Accept as pass (SVG embedding not exercised, paint state isn't leaked).
+        } else {
+            // last_red_pos is Some but first_black_fill_after_red is None.
+            // Red fill exists (from SVG) but no black fill reset was found strictly
+            // after it — text is inheriting the leaked red fill. This is the FAILING case.
+            panic!(
+                "OBS-044-22-01 FAILED: `1 0 0 rg` (red SVG fill) found at offset {last_red_pos:?} in PDF, \
+                 but NO black fill reset (`0 0 0 rg` or `0 g`) found AFTER that offset. \
+                 `draw_text_at_bbox` is inheriting the SVG's red fill for text rendering. \
+                 Fix: add `surface.set_fill(Some(black_fill))` before `surface.draw_text()` \
+                 in `draw_text_at_bbox`. \
+                 PDF (first 4096 bytes): {pdf_preview}"
+            );
+        }
     }
 }

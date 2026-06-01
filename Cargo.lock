@@ -2558,6 +2558,7 @@ name = "slideforge-pdf"
 version = "0.1.0"
 dependencies = [
  "krilla",
+ "proptest",
  "slideforge-layout",
  "slideforge-plugin-api",
  "slideforge-types",
