@@ -1131,4 +1131,254 @@ mod tests {
         let _parsed: crate::toml_schema::BrandConfig = toml::from_str(&toml_str)
             .expect("TOML with EC-003 inline comment on Hex slot must be valid TOML");
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // SEC-002 (CWE-789/400) — unbounded Vec allocation guard
+    //
+    // A crafted theme1.xml with many transform children must not cause unbounded
+    // Vec growth. The accumulator must be capped at MAX_TRANSFORMS_PER_SLOT.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// SEC-002 / CWE-789 — srgbClr with 100 transform children is capped at
+    /// `MAX_TRANSFORMS_PER_SLOT` (8) entries; no excessive allocation occurs.
+    ///
+    /// The slot must still be parsed correctly: `is_derived = true`, base hex
+    /// stored verbatim, and no `MissingColorSlot` warning emitted.
+    ///
+    /// # RED Gate
+    ///
+    /// Before the fix, BOTH push sites in `parse_theme_colors` push unconditionally.
+    /// This test asserts the capped behavior that requires the guard to be present.
+    /// It will FAIL (or exhibit unbounded allocation) until `MAX_TRANSFORMS_PER_SLOT`
+    /// and both `transforms.len() < MAX_TRANSFORMS_PER_SLOT` guards are added.
+    #[test]
+    fn test_sec_002_srgbclr_many_transforms_capped_at_max() {
+        use std::sync::{Arc as StdArc, Mutex};
+        use tracing::field::{Field, Visit};
+        use tracing_subscriber::Layer;
+        use tracing_subscriber::layer::SubscriberExt as _;
+
+        // Capture warn messages to verify the warning is still emitted (capped, not silent).
+        struct MessageCapturingLayer {
+            messages: StdArc<Mutex<Vec<String>>>,
+        }
+        struct MessageVisitor {
+            message: Option<String>,
+        }
+        impl Visit for MessageVisitor {
+            fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+                if field.name() == "message" {
+                    self.message = Some(format!("{value:?}"));
+                }
+            }
+            fn record_str(&mut self, field: &Field, value: &str) {
+                if field.name() == "message" {
+                    self.message = Some(value.to_owned());
+                }
+            }
+        }
+        impl<S: tracing::Subscriber> Layer<S> for MessageCapturingLayer {
+            fn on_event(
+                &self,
+                event: &tracing::Event<'_>,
+                _ctx: tracing_subscriber::layer::Context<'_, S>,
+            ) {
+                if *event.metadata().level() == tracing::Level::WARN {
+                    let mut visitor = MessageVisitor { message: None };
+                    event.record(&mut visitor);
+                    if let Some(msg) = visitor.message {
+                        let _ = self.messages.lock().map(|mut guard| guard.push(msg));
+                    }
+                }
+            }
+        }
+        let captured: StdArc<Mutex<Vec<String>>> = StdArc::new(Mutex::new(Vec::new()));
+        let layer = MessageCapturingLayer {
+            messages: StdArc::clone(&captured),
+        };
+        let subscriber = tracing_subscriber::registry().with(layer);
+        let _guard = tracing::subscriber::set_default(subscriber);
+
+        // Build a dk2 srgbClr with 100 lumMod children (crafted adversarial input).
+        // OOXML defines only 4 transform types; 100 is far beyond any legitimate usage.
+        use std::fmt::Write as _;
+        let mut inner = String::from(r#"<a:srgbClr val="003087">"#);
+        for i in 0..100u32 {
+            let _ = write!(inner, r#"<a:lumMod val="{i}"/>"#);
+        }
+        inner.push_str("</a:srgbClr>");
+
+        let xml = theme_xml_with_dk2_srgbclr(&inner);
+        let (slots, warnings) = parse_theme_colors(xml.as_bytes())
+            .expect("adversarial many-transforms XML must parse without hard error");
+
+        // No MissingColorSlot warnings — the slot is still present.
+        assert_eq!(
+            warnings.len(),
+            0,
+            "many-transform srgbClr must not produce MissingColorSlot warnings"
+        );
+
+        let dk2 = &slots[2];
+        assert_eq!(dk2.name.as_ref(), "dk2");
+
+        // is_derived must be true — transforms were detected (even if capped).
+        assert!(
+            dk2.is_derived,
+            "SEC-002: srgbClr with many transforms must still set is_derived = true"
+        );
+
+        // Base hex stored verbatim (Option B).
+        assert_eq!(
+            dk2.hex(),
+            Some("#003087"),
+            "SEC-002: base hex must be stored verbatim despite many transforms"
+        );
+
+        // The warn message must exist (one warn for the slot) and must NOT contain
+        // 100 semicolon-delimited entries — the cap limits the list.
+        let messages = captured.lock().unwrap();
+        let dk2_warns: Vec<&String> = messages.iter().filter(|m| m.contains("dk2")).collect();
+        assert_eq!(
+            dk2_warns.len(),
+            1,
+            "SEC-002: exactly one warn must be emitted for dk2 with many transforms"
+        );
+
+        // The warn message must NOT contain more than MAX_TRANSFORMS_PER_SLOT (8)
+        // semicolon-separated entries. Count occurrences of " child" as a proxy for
+        // the number of transform descriptions joined in the warn.
+        let warn_msg = dk2_warns[0];
+        let child_count = warn_msg.matches(" child").count();
+        assert!(
+            child_count <= 8,
+            "SEC-002: warn message must list at most MAX_TRANSFORMS_PER_SLOT (8) \
+             transform entries, but found {child_count} 'child' occurrences.\n\
+             Full warn message: {warn_msg:?}"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // SEC-001 (CWE-117) — log injection sanitization guard
+    //
+    // A transform `val` attribute containing control characters / newlines must
+    // NOT flow verbatim into the tracing::warn! message. The sanitized description
+    // must omit control chars and be length-capped.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// SEC-001 / CWE-117 — a transform `val` containing control characters
+    /// (e.g. `"\n\u{1b}[31minjected"`) is sanitized before inclusion in the
+    /// `tracing::warn!` log message.
+    ///
+    /// The captured warning message must NOT contain a raw newline (`\n`) or the
+    /// ANSI escape sequence (`\x1b[31m`). The sanitized message may still name the
+    /// transform type (`lumMod`) so the legitimate diagnostic value is preserved.
+    ///
+    /// # RED Gate
+    ///
+    /// Before the fix, `transform_description` embeds `v` verbatim (line ~83 of
+    /// color.rs). This test will FAIL until the sanitization (`filter(is_control) +
+    /// take(32)`) is applied.
+    #[test]
+    fn test_sec_001_transform_val_control_chars_sanitized_in_warn() {
+        use std::sync::{Arc as StdArc, Mutex};
+        use tracing::field::{Field, Visit};
+        use tracing_subscriber::Layer;
+        use tracing_subscriber::layer::SubscriberExt as _;
+
+        struct MessageCapturingLayer {
+            messages: StdArc<Mutex<Vec<String>>>,
+        }
+        struct MessageVisitor {
+            message: Option<String>,
+        }
+        impl Visit for MessageVisitor {
+            fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+                if field.name() == "message" {
+                    self.message = Some(format!("{value:?}"));
+                }
+            }
+            fn record_str(&mut self, field: &Field, value: &str) {
+                if field.name() == "message" {
+                    self.message = Some(value.to_owned());
+                }
+            }
+        }
+        impl<S: tracing::Subscriber> Layer<S> for MessageCapturingLayer {
+            fn on_event(
+                &self,
+                event: &tracing::Event<'_>,
+                _ctx: tracing_subscriber::layer::Context<'_, S>,
+            ) {
+                if *event.metadata().level() == tracing::Level::WARN {
+                    let mut visitor = MessageVisitor { message: None };
+                    event.record(&mut visitor);
+                    if let Some(msg) = visitor.message {
+                        let _ = self.messages.lock().map(|mut guard| guard.push(msg));
+                    }
+                }
+            }
+        }
+
+        let captured: StdArc<Mutex<Vec<String>>> = StdArc::new(Mutex::new(Vec::new()));
+        let layer = MessageCapturingLayer {
+            messages: StdArc::clone(&captured),
+        };
+        let subscriber = tracing_subscriber::registry().with(layer);
+        let _guard = tracing::subscriber::set_default(subscriber);
+
+        // Adversarial val: newline + ANSI escape to simulate log injection.
+        // The XML attribute value contains raw control chars that quick_xml will
+        // pass through as-is. The val after attribute parsing will be
+        // "\n\x1b[31minjected" — a newline followed by a color-code escape.
+        let injected_val = "\n\x1b[31minjected";
+
+        // Build the XML with the injected val embedded in a lumMod child.
+        // We use the standard dk2 wrapper fixture.
+        let inner =
+            format!(r#"<a:srgbClr val="003087"><a:lumMod val="{injected_val}"/></a:srgbClr>"#);
+        let xml = theme_xml_with_dk2_srgbclr(&inner);
+
+        let (slots, _warnings) = parse_theme_colors(xml.as_bytes())
+            .expect("injection-attempt XML must parse without hard error");
+
+        // is_derived must still be set — the transform was detected.
+        assert!(
+            slots[2].is_derived,
+            "SEC-001: lumMod with injected val must still set is_derived = true"
+        );
+
+        // Inspect captured warn messages for the raw control characters.
+        let messages = captured.lock().unwrap();
+        let dk2_warns: Vec<&String> = messages.iter().filter(|m| m.contains("dk2")).collect();
+
+        // There must be at least one warn for dk2.
+        assert!(
+            !dk2_warns.is_empty(),
+            "SEC-001: a warn! must be emitted for dk2 even with injected val"
+        );
+
+        let warn_msg = dk2_warns[0];
+
+        // The raw newline must NOT appear in the logged message.
+        assert!(
+            !warn_msg.contains('\n'),
+            "SEC-001: warn! message must NOT contain raw newline (log injection guard).\n\
+             Actual message: {warn_msg:?}"
+        );
+
+        // The raw ANSI escape must NOT appear in the logged message.
+        assert!(
+            !warn_msg.contains('\x1b'),
+            "SEC-001: warn! message must NOT contain raw ESC character (log injection guard).\n\
+             Actual message: {warn_msg:?}"
+        );
+
+        // The injected payload string must NOT appear verbatim.
+        assert!(
+            !warn_msg.contains("[31minjected"),
+            "SEC-001: warn! message must NOT contain ANSI color code payload '[31minjected'.\n\
+             Actual message: {warn_msg:?}"
+        );
+    }
 }

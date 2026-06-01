@@ -55,6 +55,16 @@ fn default_color_value_for_slot(slot_name: &str) -> ColorValue {
 /// per BC-2.01.001 EC-006 (STORY-076).
 const SRGB_TRANSFORM_NAMES: &[&str] = &["lumMod", "lumOff", "tint", "shade"];
 
+/// Maximum number of transform descriptions collected per `<a:srgbClr>` slot.
+///
+/// OOXML defines exactly 4 transform types for `<a:srgbClr>` children:
+/// `lumMod`, `lumOff`, `tint`, and `shade`. A legitimate theme1.xml will never
+/// have more than 4. This cap of 8 (2× the defined maximum) prevents a crafted
+/// input from causing unbounded `Vec` growth (CWE-789 / SEC-002).
+///
+/// Both push sites in `parse_theme_colors` are gated on this limit.
+pub(crate) const MAX_TRANSFORMS_PER_SLOT: usize = 8;
+
 /// Parse a 6-character OOXML hex value string into a `#RRGGBB` [`Arc<str>`].
 ///
 /// Returns `None` if the value is not exactly 6 ASCII hex digits.
@@ -68,19 +78,40 @@ fn parse_ooxml_hex(val: &str) -> Option<Arc<str>> {
 
 /// Build the transform description string for a single transform element, extracting
 /// the `val` attribute for inclusion in the `tracing::warn!` message per AC-003.
+///
+/// # Security: Log Injection Prevention (CWE-117 / SEC-001)
+///
+/// The raw `val` attribute is attacker-controlled in an adversarially crafted
+/// `theme1.xml`. Embedding it verbatim into a log message allows control characters,
+/// newlines, and ANSI escape sequences to corrupt or inject into structured log
+/// output. The value is sanitized before inclusion:
+/// - All control characters (including `\n`, `\r`, `\x1b`) are stripped.
+/// - The result is capped at 32 characters to bound log-line length.
 fn transform_description<'a>(
     name_str: &str,
     mut attrs: impl Iterator<Item = quick_xml::events::attributes::Attribute<'a>>,
 ) -> String {
     let transform_val = attrs
         .find(|a| a.key.local_name().as_ref() == b"val")
-        .and_then(|a| {
-            std::str::from_utf8(&a.value)
-                .ok()
-                .map(std::string::ToString::to_string)
-        });
+        .and_then(|a| std::str::from_utf8(&a.value).ok().map(str::to_owned));
     if let Some(v) = transform_val {
-        format!("{name_str} child (val={v})")
+        // Sanitize: allow only ASCII alphanumeric chars plus a minimal safe set
+        // (`._%, +-`), cap at 32 characters (CWE-117 / SEC-001 log injection guard).
+        //
+        // OOXML transform `val` attributes are numeric percent-thousandths (e.g. "75000").
+        // Stripping control chars is necessary but not sufficient — ANSI escape sequences
+        // follow the pattern `\x1b[<digits>m`, where `[`, digits, and `m` are all printable
+        // ASCII. Filtering to only alphanumeric + safe punctuation removes both the escape
+        // char AND the ANSI sequence continuation, preventing any recognizable injection
+        // payload from appearing in log output.
+        let sanitized: String = v
+            .chars()
+            .filter(|c| {
+                c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '%' | ',' | ' ' | '+' | '-')
+            })
+            .take(32)
+            .collect();
+        format!("{name_str} child (val={sanitized})")
     } else {
         format!("{name_str} child")
     }
@@ -205,8 +236,12 @@ pub fn parse_theme_colors(
                 let name_str = std::str::from_utf8(local_name.as_ref()).unwrap_or("");
 
                 // Inside srgbClr: collect recognized transform children.
+                // SEC-002 (CWE-789): cap at MAX_TRANSFORMS_PER_SLOT to prevent
+                // unbounded Vec growth from a crafted theme1.xml.
                 if let Some((_, _, ref mut transforms)) = inside_srgbclr {
-                    if SRGB_TRANSFORM_NAMES.contains(&name_str) {
+                    if SRGB_TRANSFORM_NAMES.contains(&name_str)
+                        && transforms.len() < MAX_TRANSFORMS_PER_SLOT
+                    {
                         let desc = transform_description(name_str, e.attributes().flatten());
                         transforms.push(desc);
                     }
@@ -256,8 +291,12 @@ pub fn parse_theme_colors(
                 let name_str = std::str::from_utf8(local_name.as_ref()).unwrap_or("");
 
                 // Self-closing child inside srgbClr — also a transform.
+                // SEC-002 (CWE-789): cap at MAX_TRANSFORMS_PER_SLOT to prevent
+                // unbounded Vec growth from a crafted theme1.xml.
                 if let Some((_, _, ref mut transforms)) = inside_srgbclr {
-                    if SRGB_TRANSFORM_NAMES.contains(&name_str) {
+                    if SRGB_TRANSFORM_NAMES.contains(&name_str)
+                        && transforms.len() < MAX_TRANSFORMS_PER_SLOT
+                    {
                         let desc = transform_description(name_str, e.attributes().flatten());
                         transforms.push(desc);
                     }
