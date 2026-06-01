@@ -45,6 +45,15 @@
 //! 4. The CI workflow `.github/workflows/pdf-ua1.yml` does not yet exist.
 //!    `test_BC_4_03_001_ci_workflow_file_exists` will FAIL (file not present).
 
+// Test-file lint suppressions — these are pedantic style lints that do not
+// affect correctness.  Doc-comment formatting lints, format-arg inlining, and
+// the vec-macro lint are suppressed to keep test code readable.
+#![allow(clippy::doc_markdown)]
+#![allow(clippy::doc_lazy_continuation)]
+#![allow(clippy::uninlined_format_args)]
+#![allow(clippy::vec_init_then_push)]
+#![allow(unused_imports)]
+
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -795,9 +804,7 @@ fn test_bc_4_03_001_lang_none_does_not_panic_or_produce_garbage() {
         Err(e) => {
             // A structured error is acceptable when lang is missing.
             // Record the error message for human review.
-            eprintln!(
-                "[AC-007/null-lang] export returned Err (acceptable): {e}"
-            );
+            eprintln!("[AC-007/null-lang] export returned Err (acceptable): {e}");
         },
     }
 }
@@ -1191,12 +1198,10 @@ fn test_bc_4_03_001_invariant_structure_tree_reading_order() {
                     width: Emu(9_144_000),
                     height: Emu(3_657_600),
                 },
-                content: FrameContent::Body(vec![
-                    ContentBlock::Text(TextBlock {
-                        inlines: vec![InlineNode::Plain(Arc::from("Paragraph"))],
-                        span: SourceSpan::default(),
-                    }),
-                ]),
+                content: FrameContent::Body(vec![ContentBlock::Text(TextBlock {
+                    inlines: vec![InlineNode::Plain(Arc::from("Paragraph"))],
+                    span: SourceSpan::default(),
+                })]),
                 text_flow: None,
             },
         ],

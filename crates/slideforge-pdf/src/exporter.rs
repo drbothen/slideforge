@@ -323,7 +323,10 @@ impl PdfExporter {
         if let Some(lang) = &deck.metadata.lang {
             meta = meta.language(lang.as_ref().to_owned());
             has_meta = true;
-            tracing::debug!(lang = lang.as_ref(), "wiring document /Lang from deck metadata");
+            tracing::debug!(
+                lang = lang.as_ref(),
+                "wiring document /Lang from deck metadata"
+            );
         } else {
             tracing::warn!(
                 "deck.metadata.lang is None — PDF will not have /Lang; \

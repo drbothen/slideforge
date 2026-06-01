@@ -1,0 +1,179 @@
+name: PDF/UA-1 Validation Gate
+
+# Runs on every PR or push that touches PDF export code or this workflow.
+# Validates that the slideforge-pdf exporter produces PDF/UA-1 compliant output
+# by running veraPDF against an exported fixture PDF.
+#
+# BC-4.03.001 AC-008: veraPDF --flavour ua1 must exit with isCompliant: true.
+# BC-4.03.001 Architecture Compliance Rule 1: NO Chrome/Chromium — veraPDF only.
+on:
+  push:
+    branches: [develop, main]
+    paths:
+      - "crates/slideforge-pdf/**"
+      - ".github/workflows/pdf-ua1.yml"
+  pull_request:
+    branches: [develop, main]
+    paths:
+      - "crates/slideforge-pdf/**"
+      - ".github/workflows/pdf-ua1.yml"
+
+# Cancel in-progress runs when a new commit is pushed to the same ref.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/develop' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+  RUST_BACKTRACE: 1
+  CARGO_INCREMENTAL: 0
+
+# ─── Pinned action SHAs ──────────────────────────────────────────────────────
+# All actions are pinned to a full commit SHA (supply chain security).
+# To update: resolve the new tag to its commit SHA and replace below.
+#
+#   actions/checkout          v4  → 34e114876b0b11c390a56381ad16ebd13914f8d5
+#   Swatinem/rust-cache       v2  → 42dc69e1aa15d09112580998cf2ef0119e2e91ae
+#   dtolnay/rust-toolchain  HEAD  → 3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+#   taiki-e/install-action    v2  → d9be7d8cda89035c9c843f78bd44d4f72d8403d4
+# ─────────────────────────────────────────────────────────────────────────────
+
+jobs:
+  # ─── PDF/UA-1 structure validation (fast — runs on every PR) ─────────────
+  # Runs the unit-proxy tests that verify the PDF structure meets UA-1
+  # requirements without requiring the veraPDF CLI tool.  These tests are
+  # always available (no external dependency) and catch structural regressions
+  # immediately.
+  #
+  # Coverage:
+  #   - AC-001: /StructTreeRoot present
+  #   - AC-002: One /Part per slide
+  #   - AC-003: Text elements tagged correctly
+  #   - AC-004: /Figure elements with /Alt text
+  #   - AC-005: Decorative elements as Artifacts
+  #   - AC-006: /MarkInfo present
+  #   - AC-007: /Lang from deck metadata (PRIMARY RED GATE — STORY-045)
+  #   - AC-008: UA-1 proxy (composite of above, without external verapdf)
+  pdf-ua1-structure:
+    name: pdf-ua1-structure
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
+        with:
+          shared-key: pdf-ua1-structure
+      - name: Install core fonts (required for usvg text normalization on Linux)
+        run: |
+          sudo apt-get update -y -q
+          sudo apt-get install -y -q fonts-dejavu-core fonts-noto-core fonts-liberation fonts-freefont-ttf
+          fc-cache -f
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@d9be7d8cda89035c9c843f78bd44d4f72d8403d4
+        with:
+          tool: cargo-nextest
+      - name: Run PDF/UA-1 structure proxy tests (BC-4.03.001 AC-001 through AC-008)
+        run: >
+          cargo nextest run
+          -p slideforge-pdf
+          --test pdf_ua1
+          --no-fail-fast
+          --profile ci
+
+  # ─── PDF/UA-1 full validation via veraPDF (runs if veraPDF is available) ──
+  # Installs veraPDF via the official Docker container and runs
+  # `verapdf --flavour ua1` against an exported fixture PDF.
+  #
+  # This job produces the definitive BC-4.03.001 AC-008 gate:
+  # "verapdf --flavour ua1 exits with isCompliant: true".
+  #
+  # Architecture compliance:
+  #   - NO Chrome or Chromium installed (BC-4.03.001 invariant 1)
+  #   - veraPDF is the ONLY PDF validation tool (Java-based CLI)
+  #   - veraPDF is installed via Docker (no apt package available on ubuntu)
+  #
+  # The fixture PDF is exported by running the ignored integration test
+  # with `--include-ignored` once veraPDF is available on PATH via
+  # a Docker wrapper script.  The test writes the PDF to a temp file
+  # and runs `verapdf --flavour ua1` against it.
+  pdf-ua1-verapdf:
+    name: pdf-ua1-verapdf
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
+        with:
+          shared-key: pdf-ua1-verapdf
+      - name: Install core fonts (required for usvg text normalization on Linux)
+        run: |
+          sudo apt-get update -y -q
+          sudo apt-get install -y -q fonts-dejavu-core fonts-noto-core fonts-liberation fonts-freefont-ttf
+          fc-cache -f
+
+      # Install Java (required for veraPDF CLI)
+      - name: Install Java 21 (required for veraPDF)
+        run: |
+          sudo apt-get update -y -q
+          sudo apt-get install -y -q openjdk-21-jre-headless
+          java -version
+
+      # Install veraPDF via the official installer.
+      # Requires Java 8/11/17/21 pre-installed.
+      # Installer archive: https://github.com/veraPDF/veraPDF-library/releases
+      - name: Install veraPDF CLI
+        run: |
+          set -euo pipefail
+          VERAPDF_VERSION="1.26.2"
+          VERAPDF_ARCHIVE="verapdf-greenfield-${VERAPDF_VERSION}-installer.zip"
+          # Download the installer from the veraPDF release archives.
+          wget -q "https://github.com/veraPDF/veraPDF-library/releases/download/v${VERAPDF_VERSION}/${VERAPDF_ARCHIVE}"
+          unzip -q "${VERAPDF_ARCHIVE}"
+          # Run the auto-install (non-interactive mode via install4j auto-install XML).
+          # veraPDF installer supports silent install via response file.
+          INSTALL_DIR="/opt/verapdf"
+          mkdir -p "${INSTALL_DIR}"
+          # The installer JAR supports -console flag for non-interactive install.
+          java -jar "verapdf-greenfield-${VERAPDF_VERSION}/verapdf-greenfield-${VERAPDF_VERSION}-installer.jar" \
+            -console \
+            -dir "${INSTALL_DIR}" \
+            || true
+          # Create a verapdf shim on PATH.
+          if [ -f "${INSTALL_DIR}/verapdf" ]; then
+            sudo ln -sf "${INSTALL_DIR}/verapdf" /usr/local/bin/verapdf
+          else
+            # Fallback: run veraPDF via the installed jar directly.
+            echo '#!/bin/bash' | sudo tee /usr/local/bin/verapdf
+            echo "exec java -jar ${INSTALL_DIR}/verapdf-greenfield-${VERAPDF_VERSION}.jar \"\$@\"" \
+              | sudo tee -a /usr/local/bin/verapdf
+            sudo chmod +x /usr/local/bin/verapdf
+          fi
+          verapdf --version || echo "veraPDF version check failed — will still attempt validation"
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@d9be7d8cda89035c9c843f78bd44d4f72d8403d4
+        with:
+          tool: cargo-nextest
+
+      # Run the veraPDF integration test that was #[ignore]'d on dev machines.
+      # With veraPDF on PATH, the test can now execute the full verapdf --flavour
+      # ua1 check and assert isCompliant: true (BC-4.03.001 AC-008).
+      - name: Run veraPDF integration test (BC-4.03.001 AC-008)
+        env:
+          # Signal to tests that veraPDF is available.
+          VERAPDF_AVAILABLE: "1"
+        run: >
+          cargo nextest run
+          -p slideforge-pdf
+          --test pdf_ua1
+          -E 'test(verapdf_integration)'
+          --no-fail-fast
+          --profile ci
+          --include-ignored
