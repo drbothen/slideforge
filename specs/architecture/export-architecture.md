@@ -63,8 +63,13 @@ trigger: `veraPDF --flavour ua1` exits non-zero on a full test fixture deck.
 **Fallback-of-fallback:** Typst template approach (generate `.typ` source from
 LaidOutDeck via Typst's `place()` function). Escalates to human decision.
 
-Coordinate mapping: `pdf_y = page_height_pt - (ir_y_pt + element_height_pt)`.
-This is a pure function; VP-006 specifies a Kani proof for the EMU-to-PDF arithmetic.
+Coordinate mapping: krilla's `Surface` is top-left, Y-down (surface.rs:44, geom.rs:145).
+krilla applies the PDF Y-axis flip internally via `page_root_transform`
+(`Transform::from_row(1,0,0,-1,0,h)`, page.rs:262-263). The draw path passes IR Y
+coordinates directly as `emu_to_pt(ir_y)` — no exporter-applied Y-flip.
+The pure function `ir_y_to_pdf_y` (formula: `page_height_pt - (ir_y_pt + element_height_pt)`)
+is retained as a documented pure function and VP-006 Kani proof target, but it is NOT
+called on the krilla draw path. See BC-4.03.005 v1.2 and DIR-044-001.
 
 Accessibility gate: `veraPDF --flavour ua1` in CI via Docker sidecar (`verapdf/rest:1.26.0`).
 

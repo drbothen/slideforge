@@ -52,8 +52,13 @@ internal computation uses `i64` EMU values. This enables:
 
 ## Coordinate Mapping at Export Boundaries
 
-PDF (Y-axis flip): `pdf_y = page_height_pt - (ir_y_pt + element_height_pt)`
-where `ir_y_pt = emu / 12700`. See S2 code sample; this is a Kani proof candidate.
+PDF (krilla backend): krilla's `Surface` uses a top-left, Y-down coordinate system
+(surface.rs:44, geom.rs:145). krilla applies the PDF Y-axis flip internally via
+`page_root_transform` (page.rs:262-263). The exporter passes IR Y coordinates
+directly: `surface_y = emu_to_pt(ir_y)`. No exporter-applied Y-flip on the draw path.
+The pure function `ir_y_to_pdf_y` (formula: `page_height_pt - (ir_y_pt + element_height_pt)`)
+is a VP-006 Kani proof target for raw PDF coordinate arithmetic but is NOT called on
+the krilla draw path. See BC-4.03.005 v1.2 and DIR-044-001 (2026-05-31).
 
 PPTX: EMU values pass through directly to OOXML `cx`/`cy`/`x`/`y` attributes.
 

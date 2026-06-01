@@ -257,7 +257,7 @@ traces_to: domain-spec/L2-INDEX.md
 | BC-4.03.002 | PDF produced via pdf-writer + krilla + SlideTagEngine (no Chrome/headless) | P0 | active | [BC-4.03.002.md](BC-4.03.002.md) |
 | BC-4.03.003 | Static HTML output passes WCAG AA via axe-core on CI | P0 | active | [BC-4.03.003.md](BC-4.03.003.md) |
 | BC-4.03.004 | Web preview served via axum+websocket+SVG canvas; updates on save | P1 | active | [BC-4.03.004.md](BC-4.03.004.md) |
-| BC-4.03.005 | PDF coordinate mapping: EMU to PDF user units with Y-axis flip | P0 | active | [BC-4.03.005.md](BC-4.03.005.md) |
+| BC-4.03.005 | PDF coordinate mapping: EMU to PDF user units with Y-axis flip | P0 | active | [BC-4.03.005.md](BC-4.03.005.md) | v1.2 |
 
 ---
 

@@ -20,8 +20,19 @@ For any `ir_y_emu` and `element_height_emu` where both are non-negative and
 produces a `pdf_y` value in `[0.0, SLIDE_HEIGHT_PT]` without arithmetic overflow.
 
 The Y-axis flip invariant: `pdf_y = SLIDE_HEIGHT_PT - (ir_y_pt + element_height_pt)`.
-An element at IR `y=0` appears at `pdf_y = SLIDE_HEIGHT_PT - height`.
-An element at the bottom of the slide appears at `pdf_y ≈ 0`.
+An element at IR `y=0` produces `pdf_y = SLIDE_HEIGHT_PT - height` (correct raw PDF
+bottom-left coordinate for the top of the page in a PDF Y-up system).
+An element at the bottom of the slide produces `pdf_y ≈ 0`.
+
+**Scope clarification (DIR-044-001, 2026-05-31):** This Kani proof targets the
+arithmetic correctness of `ir_y_to_pdf_y` as a pure mathematical function —
+specifically its output range invariant (`pdf_y ∈ [0.0, SLIDE_HEIGHT_PT]`) and
+overflow safety. It does NOT verify draw-time placement behavior. The krilla
+backend (krilla 0.6.0) applies the PDF Y-axis flip internally via
+`page_root_transform` (page.rs:262-263) and exposes a top-left, Y-down Surface
+API. The draw path therefore uses `emu_to_pt(ir_y)` directly and does NOT call
+`ir_y_to_pdf_y`. The function is retained as a documented pure function for
+potential use by future exporters targeting a raw bottom-left PDF writer API.
 
 ## Motivation
 

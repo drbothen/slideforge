@@ -404,12 +404,27 @@ stories:
     adversary_convergence: "3/3 strict-CLEAN at passes 12/13/14 (14-pass total cascade)"
     notes: "PDF Core: krilla 0.6.0 pure-Rust (no FFI). PdfExporter + SlideTagEngine + svg_embed + font subsetting + check-pdf-deps CI. indexmap 2.9→2.10. 2 MED + 3 LOW security fixed (SVG recursion/size caps, symlink-safe font scan, error hygiene). Workspace now 16 crates. Pre-flight: tech-validation.md + scope-directive.md in cycles/STORY-043/. STORY-044 unblocked."
   STORY-044:
-    status: not-started
+    status: in-progress
     wave: 4
     batch: A
     priority: P0
     points: 5
-    notes: "PDF EMU-to-PDF Coordinate Mapping + Y-Axis Flip; depends on STORY-043"
+    branch: feature/S-044
+    head: "a39e068c"
+    worktree: .worktrees/STORY-044
+    worktree_active: true
+    tests_pdf: "57/57 GREEN"
+    tests_workspace: "2394 pass (1 timing-flaky cold_budget, passes in isolation)"
+    adversary_passes: 18
+    adversary_streak: "0/3 — SVG fix (a39e068c) resets streak; re-verify focus: svg_embed render_path/abs_transform + place_svg_at scaling"
+    coord_bug_fixed: true
+    bc_4_03_005_version: "1.2"
+    spec_artifacts_corrected: 5
+    svg_fix_commit: "a39e068c"
+    svg_fix_scope: "human-authorized expansion — usvg abs_transform per-path + fit-to-frame scaling; closes F-P18-001/002/003"
+    ac_009_status: COMPLETE
+    next_step: "adversary re-verify SVG path to 3-CLEAN, then demo-recorder, then pr-manager 9-step"
+    notes: "PDF EMU-to-PDF Coordinate Mapping + Y-Axis Flip + content drawing. SVG fix landed; needs adversary re-verification to 3-CLEAN before demos/PR. Spec artifacts committed in factory-artifacts. PR will be code-only."
   STORY-045:
     status: not-started
     wave: 4
