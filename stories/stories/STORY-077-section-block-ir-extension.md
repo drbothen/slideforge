@@ -23,6 +23,7 @@ depends_on:
   - STORY-012
   - STORY-013
   - STORY-027
+  - STORY-078
 blocks:
   - STORY-041
   - STORY-042
@@ -46,6 +47,7 @@ estimated_days: 3
 - Depends on STORY-012 (Variable Scoping + @for): section content may reference outer-scope variables set before the section block.
 - Depends on STORY-013 (@if/@elif/@else): section content may contain conditional blocks.
 - Depends on STORY-027 (Layout: Document Section Generation): STORY-027 defines the `SectionBlock` type and establishes how sections appear in the layout IR. STORY-077 extends that type; the extension must be compatible with the existing layout pass.
+- Depends on STORY-078 (Parser: section block syntax): STORY-077's AC-002 requires the parser to already produce `SectionNode` entries from source. STORY-078 delivers the `section_block_parser` combinator and un-reserves the `"section"` keyword. STORY-077 is BLOCKED until STORY-078 merges. Per DIR-077-001 §2, STORY-078 initially stores sub-block values as `FieldValue::Template`; STORY-077's parser extension work upgrades `detail:` and `report:` keys to `FieldValue::Inlines`.
 - Blocks STORY-041 (DOCX Core Serialization): the DOCX exporter must be able to access section-level `RegisteredContent`; this requires STORY-077's IR extension to be present.
 - Blocks STORY-042 (DOCX Auto-Generated Document Sections): section-level register routing from `section detail:` and `section report:` blocks must be present before STORY-042 renders section content in DOCX output.
 
@@ -56,6 +58,41 @@ per architect directive F-002 (2026-05-31). The descope reason: `SectionBlock.bo
 `OrderedMap<Arc<str>, Value>` where `Value` is a fully resolved scalar — it cannot carry
 `FieldValue::Inlines` (rich inline content for `RegisteredContent.content`) or `Vec<Block>`
 (nested block structure for a `detail:` sub-block).
+
+**DIR-077-001 parsing prerequisite:** Section-block parsing is delivered by STORY-078
+(a new STORY-027 decomposition gap story). STORY-077 is BLOCKED until STORY-078 merges.
+The task entry "Update the parser ... to emit `FieldValue::Inlines` for `detail:` and
+`report:` sub-blocks within `section <type>:` declarations" is now scoped as: extend the
+STORY-078 parser output — which initially stores sub-block values as `FieldValue::Template` —
+to emit `FieldValue::Inlines` for the recognized register keys (`detail:`, `report:`).
+
+**DIR-077-001-A corrections (2026-06-01):**
+
+1. **Unrecognized sub-block KEY warning is parse-time (Ruling 2, STORY-078's ownership):**
+   STORY-078's `section_block_parser` emits the non-fatal `ParseSeverity::Warning` for
+   unrecognized sub-block keys via the `validate()`/`emit` + `push_with_severity` pattern.
+   STORY-077's eval stage (`eval_section_nodes`) must NOT re-emit this warning. AC-EC-001
+   has been updated accordingly.
+
+2. **Section TYPE validation is eval-stage (Ruling 3, STORY-077's obligation):**
+   STORY-078 stores the section type IDENT verbatim with no parser-level rejection.
+   STORY-077's `eval_section_nodes` function is the authority for type validation: when
+   `SectionNode.kind` does not match any entry in the `SectionType` plugin registry
+   (built-ins: methodology, scope, approval, appendix, glossary, plus any plugin-registered
+   types), emit a fatal eval-stage error equivalent to `LayoutError::UnknownSectionType`
+   with message: `"Unknown section type '<name>'. Known types: [...]"`. This satisfies
+   BC-3.02.002 invariant 3 at the correct stage.
+
+3. **Eval still routes RegisteredContent from FieldValue::Inlines** for `detail:` and
+   `report:` sub-blocks as originally scoped.
+
+**`SECTION_REGISTER_KEYS` correction:** Per DIR-077-001 §5, `SECTION_REGISTER_KEYS` in
+`section.rs` must be `["report", "detail"]` — NOT `["notes", "report", "detail"]`. The
+`notes` register is the PRESENTER register (speaker view on a slide canvas). Document
+sections have no PPTX rendering path and no slide canvas; `notes:` on a section block is
+semantically meaningless. `extract_section_register_content` already excludes `notes`
+correctly; the `SECTION_REGISTER_KEYS` constant must be brought into alignment. This is a
+code correction, not a BC change.
 
 Three coordinated changes are required:
 
@@ -165,13 +202,18 @@ This entry is NOT attached to any `LaidOutSlide` (because no slide exists). DOCX
 find this entry on the section node and render it in the appropriate section. This is the exact
 behavior descoped from STORY-035 EC-003.
 
-### AC-EC-001: Unrecognized section-level register sub-block is a parse warning
-(traces to BC-3.02.002 invariant 4 — unrecognized sub-block key inside recognized section → non-fatal lint warning; BC-3.02.002 EC-005 — "Unrecognized section sub-block key 'foo' — ignored")
+### AC-EC-001: Eval-stage does NOT re-emit the unrecognized-sub-block-key warning
+(traces to BC-3.02.002 invariant 4 — unrecognized sub-block key warning is parse-time, owned by STORY-078; BC-3.02.002 EC-005)
 
-A `section methodology:` block with an unrecognized sub-block key (e.g., `foo:`) produces
-a lint warning (not a fatal error) naming the unrecognized key, consistent with the general
-policy that unknown keys in section bodies are non-fatal in strict mode unless the key
-collides with a reserved register name.
+Per DIR-077-001-A Ruling 2, the non-fatal lint warning for an unrecognized sub-block key
+(e.g., `foo:`) is emitted at parse time by STORY-078's `section_block_parser`. The eval
+stage (`eval_section_nodes`) must NOT emit a second copy of this warning. When eval
+encounters a `FieldNode` whose key is not in `REGISTER_SUB_BLOCK_KEYS`, it silently
+skips it (the user has already received the parse-time warning). A test verifies:
+
+Given a deck with `section methodology: / foo: "x"`, after full `eval_deck()`, assert
+that `eval_diagnostics` contains no `UnrecognizedSectionSubBlockKey` entry (the
+warning was already emitted during parsing, not duplicated at eval).
 
 ## Tasks
 
@@ -183,6 +225,14 @@ collides with a reserved register name.
   - Extract `detail:` and `report:` entries from `section.body` as `FieldValue::Inlines`
   - Convert inline nodes to `RegisteredContent` with correct `Register` variant
   - Return `Vec<RegisteredContent>`
+- [ ] In `eval_section_nodes`, validate `SectionNode.kind` against the `SectionType` plugin
+      registry (built-ins: methodology, scope, approval, appendix, glossary, plus any
+      plugin-registered types); emit a fatal eval-stage error for unrecognized types:
+      `"Unknown section type '<name>'. Known types: [...]"` (BC-3.02.002 invariant 3;
+      DIR-077-001-A Ruling 3 — this check is NOT in STORY-078's parser)
+- [ ] In `eval_section_nodes`, when a `FieldNode` key is NOT in `REGISTER_SUB_BLOCK_KEYS`,
+      silently skip it — do NOT emit a duplicate warning (the parse-time warning was already
+      emitted by STORY-078's parser; DIR-077-001-A Ruling 2)
 - [ ] Call `extract_section_register_content` in the eval pipeline for each `SectionBlock` in the `Deck`
 - [ ] Attach resulting `Vec<RegisteredContent>` to a section output node in the evaluated IR (coordinate with layout IR for how section-level `register_content` is represented)
 - [ ] Write unit tests:
@@ -293,6 +343,11 @@ definition work (not yet in the codebase), the implementer should request a stor
   - `section detail: "{{ client }}"` with scoped `client = "Acme"` → interpolated
   - Standalone `section detail:` (no slides in deck) → section node has `Detail` entry; no `LaidOutSlide`
   - `section` with both `detail:` and `report:` sub-blocks → two entries on section node
+  - `section foobar: / detail: "x"` → fatal eval error naming `foobar`, known types listed
+    (DIR-077-001-A Ruling 3: parser stored type verbatim; eval validates against registry)
+  - `section methodology: / foo: "x"` → eval diagnostics do NOT contain
+    `UnrecognizedSectionSubBlockKey` (warning was emitted at parse time by STORY-078;
+    eval skips silently per DIR-077-001-A Ruling 2)
 - **Integration test** (in `crates/slideforge-eval/tests/section_register_integration.rs`):
   - Full `eval_deck()` call on a deck with slides (each having `notes`/`report`/`detail` fields)
     AND a `section methodology:` block (with `detail:` sub-block)
@@ -319,3 +374,5 @@ definition work (not yet in the codebase), the implementer should request a stor
 |---------|------|--------|---------|
 | 1.0 | 2026-05-31 | story-writer | Initial story creation — spun out from STORY-035 per architect directive F-002 (section-level register routing requires SectionBlock IR extension not available in v1.0 Wave 4 without this story) |
 | 1.1 | 2026-06-01 | story-writer | BC clause coverage closed by PO (BC-3.02.002 v1.2, BC-1.14.003 v1.2); AC→BC traces corrected (AC-001/AC-002 → PC8; AC-003 → PC7+inv1; AC-004 → EC-004; AC-005 → PC3+PC5; AC-006 → PC7+EC-001; AC-EC-001 → inv4+EC-005); BC-status comment removed; story marked implementation-ready (status: ready). |
+| 1.2 | 2026-06-01 | story-writer | Per DIR-077-001 (architect directive): section-block PARSING is delivered by STORY-078 (STORY-027 decomposition gap). STORY-077 is BLOCKED until STORY-078 merges. Added STORY-078 to `depends_on`. STORY-077's parser extension task now reads: "Extend the STORY-078 parser to emit `FieldValue::Inlines` for `detail:` and `report:` sub-block content (instead of `FieldValue::Template`) inside `section <type>:` declarations." Additionally, `SECTION_REGISTER_KEYS` in `section.rs` must be `["report", "detail"]` — `"notes"` is dropped per DIR-077-001 §5 (notes register is presenter-only; sections have no slide canvas). This is a code correction resolving an inconsistency between `SECTION_REGISTER_KEYS` and `extract_section_register_content`; no BC amendment required. STORY-077's existing ACs and points (8) are unchanged. |
+| 1.3 | 2026-06-01 | story-writer | Per DIR-077-001-A: (a) Unrecognized sub-block KEY warning is parse-time (STORY-078 ownership, Ruling 2) — STORY-077's eval must NOT re-emit it; AC-EC-001 updated to assert no duplicate eval diagnostic; eval task added to silently skip unrecognized keys. (b) Section TYPE validation is STORY-077's explicit eval-stage obligation (Ruling 3) — `eval_section_nodes` validates `SectionNode.kind` against SectionType plugin registry and emits fatal error for unknown types; added as explicit task and test case. Points unchanged (8). |

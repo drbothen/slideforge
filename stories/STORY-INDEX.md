@@ -9,8 +9,8 @@ traces_to:
   - .factory/stories/epics.md
   - .factory/stories/dependency-graph.md
   - .factory/stories/wave-schedule.md
-total_stories: 77
-stories_written: 77
+total_stories: 80
+stories_written: 80
 stories_ready: 4
 stories_in_progress: 0
 stories_merged: 42
@@ -18,7 +18,7 @@ stories_merged: 42
 
 # STORY-INDEX — slideforge v1.0
 
-> Authoritative index of all 77 stories across 6 waves and 21 epics.
+> Authoritative index of all 80 stories across 6 waves and 21 epics.
 > Update `status` and `merged_sha` fields as stories progress.
 > Story files live in `.factory/stories/stories/STORY-NNN-[short].md`.
 >
@@ -33,10 +33,10 @@ stories_merged: 42
 | Wave 1 | 14 | 0 | 0 | 0 | 14 | 0 |
 | Wave 2 | 7 | 0 | 0 | 0 | 7 | 0 |
 | Wave 3 | 17 | 0 | 0 | 0 | 17 | 0 |
-| Wave 4 | 17 | 9 | 4 | 0 | 4 | 0 |
-| Wave 5 | 16 | 16 | 0 | 0 | 0 | 0 |
+| Wave 4 | 18 | 9 | 4 | 0 | 4 | 1 |
+| Wave 5 | 18 | 18 | 0 | 0 | 0 | 0 |
 | Wave 6 | 6 | 6 | 0 | 0 | 0 | 0 |
-| **Total** | **77** | **25** | **4** | **0** | **42** | **0** |
+| **Total** | **80** | **33** | **4** | **0** | **42** | **1** |
 
 ---
 
@@ -105,7 +105,7 @@ stories_merged: 42
 
 ---
 
-## Wave 4: Exporters + Registry (16 stories)
+## Wave 4: Exporters + Registry (18 stories)
 
 | Story ID | Epic | Title | BCs | Priority | Points | tdd_mode | Status |
 |----------|------|-------|-----|---------|--------|---------|--------|
@@ -125,13 +125,14 @@ stories_merged: 42
 | [STORY-073](stories/STORY-073-bullets-layout.md) | EPIC-07 | Layout: ContentBlock::Bullets → FrameContent::TextRun frame generation | BC-3.05.001 | P1 | 5 | strict | ready |
 | [STORY-075](stories/STORY-075-brand-loader-footer-detection.md) | EPIC-06 | Brand Loader: Footer Detection from .pptx Slide Master/Layout Placeholders | BC-2.01.001 | P1 | 3 | strict | ready |
 | [STORY-076](stories/STORY-076-brand-srgbclr-transform-extraction.md) | EPIC-06 | Brand Loader: Transform-Aware Theme Color Extraction (srgbClr lumMod/tint/shade) | BC-2.01.001, BC-2.01.003 | P1 | 3 | strict | ready |
-| [STORY-077](stories/STORY-077-section-block-ir-extension.md) | EPIC-18 | SectionBlock IR Extension: FieldValue body + section-level register routing | BC-3.02.002, BC-1.14.003 | P0 | 8 | strict | ready |
+| [STORY-077](stories/STORY-077-section-block-ir-extension.md) | EPIC-18 | SectionBlock IR Extension: FieldValue body + section-level register routing | BC-3.02.002, BC-1.14.003 | P0 | 8 | strict | blocked |
+| [STORY-078](stories/STORY-078-parser-section-block-syntax.md) | EPIC-02 | Parser: section block syntax (section &lt;type&gt;: ... with sub-blocks) | BC-3.02.002 | P0 | 5 | strict | ready |
 
-**Wave 4 total points: 104**
+**Wave 4 total points: 109**
 
 ---
 
-## Wave 5: CLI + User-Facing Features + Deferred Surfaces (16 stories)
+## Wave 5: CLI + User-Facing Features + Deferred Surfaces (18 stories)
 
 | Story ID | Epic | Title | BCs | Priority | Points | tdd_mode | Status |
 |----------|------|-------|-----|---------|--------|---------|--------|
@@ -151,8 +152,10 @@ stories_merged: 42
 | [STORY-065](stories/STORY-065-workspace-sfconfig-explain.md) | EPIC-17 | Workspace: .sfconfig cascade + config explain provenance | BC-5.04.002-003 | P1 | 5 | strict | draft |
 | [STORY-072](stories/STORY-072-shape-gradient-fills.md) | EPIC-07 | shape: Gradient Fills (FillSpec::Gradient) | BC-3.04.001 | P2 | 3 | strict | draft |
 | [STORY-074](stories/STORY-074-brand-em-sizing.md) | EPIC-07 | Brand-aware Em conversion (font_size_emu) | BC-3.04.001 | P2 | 3 | strict | draft |
+| [STORY-079](stories/STORY-079-diagrams-svg-dos-hardening.md) | EPIC-12 | slideforge-diagrams: SVG DoS hardening (byte-size cap + nesting-depth guard) | BC-1.12.003 | P2 | 3 | strict | draft |
+| [STORY-080](stories/STORY-080-deflake-cross-platform-tests.md) | EPIC-19 | Test reliability: de-flake http_4xx_not_retried + cold_budget | BC-1.03.002 | P2 | 3 | strict | draft |
 
-**Wave 5 total points: 90**
+**Wave 5 total points: 96**
 
 ---
 
@@ -188,10 +191,10 @@ All previously Wave TBD stories have been assigned waves per human approval 2026
 | Wave 1 | 14 | 85 | 6.1 |
 | Wave 2 | 7 | 41 | 5.9 |
 | Wave 3 | 17 | 100 | 5.9 |
-| Wave 4 | 17 | 104 | 6.1 |
-| Wave 5 | 16 | 90 | 5.6 |
+| Wave 4 | 18 | 109 | 6.1 |
+| Wave 5 | 18 | 96 | 5.3 |
 | Wave 6 | 6 | 42 | 7.0 |
-| **Total** | **77** | **462** | **6.0** |
+| **Total** | **80** | **473** | **5.9** |
 
 > No story exceeds 13 points. STORY-023 (brand synthesis — 13 pts) and STORY-037
 > (PPTX core serialization — 13 pts) are the largest stories. Both have well-
@@ -209,9 +212,19 @@ All previously Wave TBD stories have been assigned waves per human approval 2026
 > routing, 8 pts, P0) spun out from STORY-035 descope. Required before STORY-042
 > renders section-level DOCX content.
 >
-> Wave 5 expanded from 14 → 16 stories (84 → 90 pts) per same approval:
+> Wave 4 further expanded from 17 → 18 stories (104 → 109 pts) per DIR-077-001
+> (2026-06-01): STORY-078 (Parser: section block syntax, 5 pts, P0, EPIC-02) created to
+> resolve STORY-027 decomposition gap — parser cannot parse `section <type>:` blocks.
+> STORY-077 is BLOCKED on STORY-078. STORY-078 added to Wave 4 Batch A (blocks 077).
+>
+> Wave 5 expanded from 14 → 16 stories (84 → 90 pts) per same approval 2026-05-31:
 > STORY-072 (gradient fills, 3 pts, P2) and STORY-074 (brand-em-sizing, 3 pts, P2)
 > assigned to Wave 5 (require exporters from Wave 4 to be complete before dispatch).
+>
+> Wave 5 further expanded from 16 → 18 stories (90 → 96 pts) per deferred-tasks
+> sweep (2026-06-01): STORY-079 (slideforge-diagrams SVG DoS hardening, 3 pts, P2,
+> EPIC-12 — DI-4 converted to story) and STORY-080 (test de-flake http_4xx + cold_budget,
+> 3 pts, P2, EPIC-19 — DI-6 converted to story).
 
 ---
 
@@ -220,7 +233,7 @@ All previously Wave TBD stories have been assigned waves per human approval 2026
 | Metric | Count | Status |
 |--------|-------|--------|
 | Total BCs | 112 | — |
-| BCs covered by at least one story | 112 | PASS — 100% (BC-3.02.002 now covered by STORY-027 + STORY-077; BC-1.14.003 now covered by STORY-035 + STORY-077) |
+| BCs covered by at least one story | 112 | PASS — 100% (BC-3.02.002 covered by STORY-027 + STORY-077 + STORY-078; BC-1.14.003 covered by STORY-035 + STORY-077; BC-1.12.003 covered by STORY-034 + STORY-079; BC-1.03.002 covered by STORY-019 + STORY-080) |
 | Orphan BCs (no story) | 0 | PASS |
 | Total VPs | 15 | — |
 | VPs covered | 15 | PASS — 100% |

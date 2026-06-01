@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.1"
+version: "1.2"
 status: draft
 producer: product-owner
 timestamp: 2026-05-24T00:00:00
@@ -10,11 +10,12 @@ inputs: [domain-spec/L2-INDEX.md]
 input-hash: "[pending]"
 traces_to: domain-spec/L2-INDEX.md
 origin: greenfield
-subsystem: SS-TBD
+subsystem: SS-07
 capability: CAP-017
 lifecycle_status: active
 introduced: v1.0.0
-modified: []
+modified:
+  - "2026-06-01: v1.2 — DI-3 spec-hygiene: subsystem anchor filled (SS-TBD → SS-07, confirmed against ARCH-INDEX Subsystem Registry); Architecture Module, Story Anchor, and VP Anchors placeholders resolved."
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -96,8 +97,8 @@ infeasible. This BC specifies the implementation constraint, not just the output
 | L2 Capability | CAP-017 ("PDF, HTML, and Web Preview Export") per capabilities.md §CAP-017 |
 | Capability Anchor Justification | CAP-017 ("PDF, HTML, and Web Preview Export") per capabilities.md §CAP-017 — "tagged, PDF/UA-1 compliant via [direct backend]" (Spike S2 resolved the backend as pdf-writer + krilla, not Chrome) |
 | L2 Domain Invariants | DI-014 (PDF output must be tagged PDF/UA-1 compliant — browser-based pipelines cannot guarantee this for absolute-positioned layouts) |
-| Architecture Module | slideforge-pdf crate (filled by architect) |
-| Stories | (filled by story-writer) |
+| Architecture Module | `slideforge-pdf` crate — `backend` module (pdf-writer + krilla integration, SlideTagEngine instantiation) and `exporter` module (top-level export orchestration, dependency verification) |
+| Stories | STORY-043 (PDF Core: pdf-writer + krilla + SlideTagEngine) is the primary delivering story. STORY-044 (EMU coordinate mapping) extends the implementation. |
 
 ## Related BCs
 
@@ -111,8 +112,9 @@ infeasible. This BC specifies the implementation constraint, not just the output
 
 ## Story Anchor
 
-(filled by story-writer)
+STORY-043 — PDF Core: pdf-writer + krilla + SlideTagEngine (Wave 4, EPIC-13, 8 pts, P0, status: draft)
+STORY-044 — PDF: EMU-to-PDF Coordinate Mapping + Y-Axis Flip (Wave 4, EPIC-13, 5 pts, P0, status: draft; covers BC-4.03.005 and BC-4.03.002)
 
 ## VP Anchors
 
-(filled after VP creation)
+No VP currently assigned directly to BC-4.03.002. The VP-TBD entries in the Verification Properties table above (no browser-PDF deps in Cargo.lock, no child process spawned, chart as vector paths) are future VP assignments pending Phase 6 VP expansion. VP-006 (EMU-to-PDF coordinate mapping) traces to BC-4.03.005, which is a sibling of this BC — not a direct anchor here. No VP file exists yet for BC-4.03.002-specific properties.

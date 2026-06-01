@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.1"
+version: "1.2"
 status: draft
 producer: product-owner
 timestamp: 2026-05-24T00:00:00
@@ -10,11 +10,12 @@ inputs: [domain-spec/L2-INDEX.md]
 input-hash: "[pending]"
 traces_to: domain-spec/L2-INDEX.md
 origin: greenfield
-subsystem: SS-TBD
+subsystem: SS-07
 capability: CAP-017
 lifecycle_status: active
 introduced: v1.0.0
-modified: []
+modified:
+  - "2026-06-01: v1.2 — DI-3 spec-hygiene: subsystem anchor filled (SS-TBD → SS-07, confirmed against ARCH-INDEX Subsystem Registry); Architecture Module, Story Anchor, and VP Anchors placeholders resolved."
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -98,8 +99,8 @@ images are not acceptable. The implementation uses pdf-writer + krilla + a custo
 | L2 Capability | CAP-017 ("PDF, HTML, and Web Preview Export") per capabilities.md §CAP-017 |
 | Capability Anchor Justification | CAP-017 ("PDF, HTML, and Web Preview Export") per capabilities.md §CAP-017 — "tagged, PDF/UA-1 compliant via [direct backend]" is the explicit PDF accessibility requirement in CAP-017 |
 | L2 Domain Invariants | DI-014 (PDF output must be tagged PDF/UA-1 compliant) |
-| Architecture Module | slideforge-pdf crate (filled by architect) |
-| Stories | (filled by story-writer) |
+| Architecture Module | `slideforge-pdf` crate — `slide_tag_engine` module (PDF/UA-1 structure tree generation) and `exporter` module (top-level export orchestration) |
+| Stories | STORY-045 (PDF: PDF/UA-1 Tagging + veraPDF CI Gate) is the primary delivering story. Depends on STORY-043 (PDF Core backend) and STORY-044 (EMU coordinate mapping). |
 
 ## Related BCs
 
@@ -113,8 +114,8 @@ images are not acceptable. The implementation uses pdf-writer + krilla + a custo
 
 ## Story Anchor
 
-(filled by story-writer)
+STORY-045 — PDF: PDF/UA-1 Tagging + veraPDF CI Gate (Wave 4, EPIC-13, 5 pts, P0, status: draft)
 
 ## VP Anchors
 
-(filled after VP creation)
+No VP currently assigned directly to BC-4.03.001. The VP-TBD entries in the Verification Properties table above (veraPDF CI gate, structure tree element count, EMU-to-PDF-units mapping) are future VP assignments. The EMU-to-PDF coordinate mapping VP is BC-4.03.005's domain, covered by VP-006. VP assignment for BC-4.03.001-specific properties (veraPDF gate, structure tree count) is deferred to Phase 6 VP expansion — no VP file exists yet for these properties.

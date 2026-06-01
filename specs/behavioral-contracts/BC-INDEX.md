@@ -140,7 +140,7 @@ traces_to: domain-spec/L2-INDEX.md
 | BC-1.14.001 | notes register routes to presenter notes in PPTX/DOCX/HTML only | P0 | active | [BC-1.14.001.md](BC-1.14.001.md) |
 | BC-1.14.002 | report register routes to DOCX body; excluded from PPTX slide content | P0 | active | [BC-1.14.002.md](BC-1.14.002.md) |
 | BC-1.14.003 | detail register routes to DOCX/PDF only; excluded from PPTX and web preview | P0 | active | [BC-1.14.003.md](BC-1.14.003.md) | v1.2 |
-| BC-1.14.004 | No register content bleeds to wrong format | P0 | active | [BC-1.14.004.md](BC-1.14.004.md) |
+| BC-1.14.004 | No register content bleeds to wrong format | P0 | active | [BC-1.14.004.md](BC-1.14.004.md) | v1.2 (DI-2 hygiene; SS-02 + story anchors filled; stories: STORY-035, STORY-036) |
 
 ### 1.15 — Diagnostic Reporting with Source Spans (CAP-030)
 
@@ -253,8 +253,8 @@ traces_to: domain-spec/L2-INDEX.md
 
 | BC ID | Title | Priority | Status | File |
 |-------|-------|----------|--------|------|
-| BC-4.03.001 | PDF output passes veraPDF --flavour ua1 (PDF/UA-1 compliant, tagged) | P0 | active | [BC-4.03.001.md](BC-4.03.001.md) |
-| BC-4.03.002 | PDF produced via pdf-writer + krilla + SlideTagEngine (no Chrome/headless) | P0 | active | [BC-4.03.002.md](BC-4.03.002.md) |
+| BC-4.03.001 | PDF output passes veraPDF --flavour ua1 (PDF/UA-1 compliant, tagged) | P0 | active | [BC-4.03.001.md](BC-4.03.001.md) | v1.2 (DI-3 hygiene; SS-07 + story/VP anchors filled; story: STORY-045) |
+| BC-4.03.002 | PDF produced via pdf-writer + krilla + SlideTagEngine (no Chrome/headless) | P0 | active | [BC-4.03.002.md](BC-4.03.002.md) | v1.2 (DI-3 hygiene; SS-07 + story/VP anchors filled; stories: STORY-043, STORY-044) |
 | BC-4.03.003 | Static HTML output passes WCAG AA via axe-core on CI | P0 | active | [BC-4.03.003.md](BC-4.03.003.md) |
 | BC-4.03.004 | Web preview served via axum+websocket+SVG canvas; updates on save | P1 | active | [BC-4.03.004.md](BC-4.03.004.md) |
 | BC-4.03.005 | PDF coordinate mapping: EMU to PDF user units with Y-axis flip | P0 | active | [BC-4.03.005.md](BC-4.03.005.md) | v1.2 |

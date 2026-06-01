@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.1"
+version: "1.2"
 status: draft
 producer: product-owner
 timestamp: 2026-05-24T00:00:00
@@ -10,11 +10,12 @@ inputs: [domain-spec/L2-INDEX.md]
 input-hash: "[pending]"
 traces_to: domain-spec/L2-INDEX.md
 origin: greenfield
-subsystem: SS-TBD
+subsystem: SS-02
 capability: CAP-029
 lifecycle_status: active
 introduced: v1.0.0
-modified: []
+modified:
+  - "2026-06-01: v1.2 — DI-2 spec-hygiene: subsystem anchor filled (SS-TBD → SS-02, confirmed against ARCH-INDEX Subsystem Registry and STORY-035 subsystems field); Architecture Module, Story Anchor, and VP Anchors placeholders resolved."
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -83,8 +84,8 @@ value proposition.
 | L2 Capability | CAP-029 ("Writing Register Support") per capabilities.md §CAP-029 |
 | Capability Anchor Justification | CAP-029 ("Writing Register Support") per capabilities.md §CAP-029 — "no register content bleeds across formats" is explicitly stated in CAP-029 as a requirement |
 | L2 Domain Invariants | DI-012 (single .sf source produces all formats consistently) |
-| Architecture Module | slideforge-eval + all exporter crates (filled by architect) |
-| Stories | (filled by story-writer) |
+| Architecture Module | `slideforge-eval` crate — `register_router` module (register tag assignment at Evaluate stage, per Invariant 2: routing determined at Evaluate, not Export); enforced downstream in `slideforge-pptx`, `slideforge-docx`, `slideforge-pdf`, `slideforge-preview` (each exporter filters by register tag). SS-02 owns the routing invariant; exporter crates enforce exclusion. |
+| Stories | STORY-035 (Writing Register Routing in Evaluator, Wave 4, EPIC-18, 5 pts, P0, status: merged) — covers BC-1.14.001/002/003/004. |
 
 ## Related BCs
 
@@ -98,8 +99,8 @@ value proposition.
 
 ## Story Anchor
 
-(filled by story-writer)
+STORY-035 — Writing Register Routing in Evaluator (Wave 4, EPIC-18, 5 pts, P0, status: merged)
 
 ## VP Anchors
 
-(filled after VP creation)
+No VP currently assigned directly to BC-1.14.004. The VP-TBD entry in the Verification Properties table above (integration test: build to all formats, grep XML for cross-bled content) is a future VP assignment. No VP in VP-INDEX (v1.1, 52 VPs) traces to BC-1.14.004 — the register routing properties are planned for the Phase 6 VP expansion. VP assignment will require a multi-format integration test VP that spans all five exporters.

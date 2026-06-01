@@ -5,6 +5,9 @@ created: 2026-05-23
 current_phase: phase-3-tdd-implementation
 status: IN_PROGRESS
 last_updated: 2026-06-01
+story_078_created: 2026-06-01
+story_079_created: 2026-06-01
+story_080_created: 2026-06-01
 phase_1_approved: 2026-05-25
 phase_2_approved: 2026-05-25
 phase_1_convergence: "17 passes, 69 findings, 3/3 clean (passes 15-16-17)"
@@ -15,8 +18,8 @@ prd_vps: 15
 prd_supplements: 4
 spikes_resolved: 7
 spikes_total: 7
-total_stories: 77
-total_points: 462
+total_stories: 80
+total_points: 473
 total_waves: 6
 total_epics: 21
 dtu_required: false
@@ -27,14 +30,14 @@ wave_1_gate: "PASS 2026-05-27 — 3 gate passes, 11 findings fixed"
 wave_2_gate: "PASS 2026-05-27 — 11 gate passes, 19 findings fixed, 3/3 clean (passes 9-10-11)"
 wave_3_gate: "PASSED 2026-05-31 — PR #38 (7d266ad7); #[non_exhaustive] hardening + slideforge-brand [workspace.dependencies] + conventions.md v1.3; adversary pass 8 strict-CLEAN; holdout must-pass 5/5"
 wave_4_batch_a_complete: 4
-wave_4_batch_a_total: 9
+wave_4_batch_a_total: 10
 wave_4_started: 2026-05-31
-wave_4_total_stories: 17
-wave_4_total_points: 104
-wave_4_batch_a: "STORY-035→036, STORY-043→044→045, STORY-073, STORY-075, STORY-076, STORY-077 (parallel)"
+wave_4_total_stories: 18
+wave_4_total_points: 109
+wave_4_batch_a: "STORY-035→036, STORY-043→044→045, STORY-073, STORY-075, STORY-076, STORY-078→STORY-077 (parallel; STORY-077 blocked on STORY-078)"
 wave_4_batch_b: "STORY-037→038→039→040, STORY-041→042 (parallel, after Batch A)"
 wave_4_batch_c: "STORY-049→050 (after Batch B)"
-wave_4_new_p0: "STORY-077 (8pts SectionBlock IR extension) — architect-directed spin-out from STORY-035 F-002 descope; blocks STORY-041/042"
+wave_4_new_p0: "STORY-077 (8pts SectionBlock IR extension) — architect-directed spin-out from STORY-035 F-002 descope; blocks STORY-041/042; BLOCKED on STORY-078 (parser gap). STORY-078 (5pts Parser section-block syntax) — new Wave 4 Batch A story resolving STORY-027 decomposition gap per DIR-077-001 2026-06-01."
 story035_status: "MERGED — PR #39, squash commit 0e7d9fde (2026-05-31). 10-pass LOCAL adversary cascade, 3/3 strict-CLEAN at passes 8/9/10. Option D single-source eval-stage routing. AC-005 descoped → STORY-077."
 story036_status: "MERGED — PR #40, squash commit 094f8dca (2026-05-31). 9-pass LOCAL adversary cascade, 3/3 strict-CLEAN at passes 7/8/9. BleedChecker test utility (test-utils-gated). Exporter ACs deferred to STORY-037/041/046. 6 fix-bursts (XML entity decoder hardening)."
 story043_status: "MERGED — PR #41, squash commit 331d456c (2026-05-31). 14-pass LOCAL adversary cascade, 3/3 strict-CLEAN at passes 12/13/14. New slideforge-pdf crate (krilla 0.6.0 pure-Rust PDF; moved from [workspace] exclude → members). PdfExporter + SlideTagEngine + svg_embed + font + check-pdf-deps CI job. indexmap 2.9→2.10. 2 MED + 3 LOW security findings fixed. Workspace now 16 crates."
@@ -59,9 +62,9 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. Generates branded .pptx
 
 | Field | Value |
 |-------|-------|
-| **Date** | 2026-05-31 |
-| **Position** | Phase 3, Wave 4 Batch A — 4/9 complete. STORY-044 MERGED. Next: STORY-045, then STORY-073/075/076/077 (parallel). |
-| **develop SHA** | 94f74402 (42 merged PRs) |
+| **Date** | 2026-06-01 |
+| **Position** | Phase 3, Wave 4 Batch A — 4/10 complete. STORY-044 MERGED. STORY-077 BLOCKED on STORY-078. Next: deliver STORY-078 (parser, 5pts, P0, unblocks STORY-077), then continue Batch A (STORY-045, 073, 075, 076), then STORY-077 rework. STORY-079/080 in Wave 5. |
+| **develop SHA** | 94f74402 (42 merged PRs) — UNCHANGED |
 | **Active worktrees** | 0 |
 | **Open PRs** | 0 |
 | **Workspace crates** | 16 |
@@ -70,16 +73,18 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. Generates branded .pptx
 | **STORY-036** | MERGED — PR #40, 094f8dca. 9-pass adversary, 3/3 strict-CLEAN (P7/8/9). BleedChecker test-utils feature-gated. Exporter ACs → STORY-037/041/046. |
 | **STORY-043** | MERGED — PR #41, 331d456c. 14-pass adversary, 3/3 strict-CLEAN (P12/13/14). slideforge-pdf crate (krilla 0.6.0, pure-Rust). 2 MED + 3 LOW security fixed. check-pdf-deps CI job. |
 | **STORY-044** | MERGED — PR #42, 94f74402. 27-pass adversary, 3/3 strict-CLEAN (P25/26/27). SVG stroke rendering + paint-state-leak fix. CI 18/18 green. |
-| **STORY-045 next** | PDF/UA-1 + veraPDF. Forward-obligations: (1) decorative frame Artifact tags + drawing in same change; (2) per-block/per-line baselines (no shared baseline); (3) text color from brand/theme palette in same change as bg fills. Plus S036 register sentinels + S043 frame-level Diagram/Chart alt text. |
-| **BC deltas in effect** | BC-4.03.005 v1.2 (coord model corrected for krilla Surface); BC-2.01.001 v1.2 (srgbClr, Option B); BC-2.01.003 v1.9 (EC-003 widened); error-taxonomy v2.3. |
+| **STORY-077** | BLOCKED on STORY-078 (parser cannot parse section <type>: blocks; DIR-077-001 2026-06-01). branch feature/S-077 retained, no active worktree. |
+| **STORY-078** | NEXT TO DELIVER — Parser section-block syntax (5pts, P0, EPIC-02, Wave 4 Batch A). Delivers section_block_parser combinator + un-reserves 'section' keyword. Unblocks STORY-077. |
+| **STORY-045 after 078** | PDF/UA-1 + veraPDF. Forward-obligations: (1) decorative frame Artifact tags + drawing in same change; (2) per-block/per-line baselines; (3) text color from brand/theme palette in same change as bg fills. Plus S036 register sentinels + S043 frame-level Diagram/Chart alt text. |
+| **BC deltas in effect** | BC-4.03.005 v1.2 (coord model); BC-2.01.001 v1.2 (srgbClr); BC-2.01.003 v1.9 (EC-003); error-taxonomy v2.3. DI-2/DI-3 hygiene: BC-1.14.004 v1.2 (SS-02), BC-4.03.001 v1.2 (SS-07), BC-4.03.002 v1.2 (SS-07). |
 | **factory-artifacts** | Local only. Push requires explicit human authorization per CLAUDE.md. |
 | **Archived history** | Prior checkpoints → .factory/cycles/STORY-044/session-checkpoints.md |
 
 ## Current Status
 
-Phase 3 IN PROGRESS. Wave 1 COMPLETE (gate PASSED). Wave 2 COMPLETE (gate PASSED). Wave 3 COMPLETE (22/22 stories, gate PASSED 2026-05-31). **Wave 4 STARTED — 17 stories / 104 pts. Batch A 4/9 complete (STORY-035, 036, 043, 044 MERGED). 0 active worktrees. 0 open PRs.**
+Phase 3 IN PROGRESS. Wave 1 COMPLETE (gate PASSED). Wave 2 COMPLETE (gate PASSED). Wave 3 COMPLETE (22/22 stories, gate PASSED 2026-05-31). **Wave 4 STARTED — 18 stories / 109 pts. Batch A 4/10 complete (STORY-035, 036, 043, 044 MERGED). STORY-077 BLOCKED on STORY-078 (new, parser prerequisite). 0 active worktrees. 0 open PRs.**
 
-develop: `94f74402` (42 merged PRs, 2443 tests, 0 failures). 77 stories / 462 pts total. Workspace: 16 crates.
+develop: `94f74402` (42 merged PRs, 2443 tests, 0 failures). 80 stories / 473 pts total. Workspace: 16 crates.
 
 ## Phase Progress
 
@@ -89,8 +94,8 @@ develop: `94f74402` (42 merged PRs, 2443 tests, 0 failures). 77 stories / 462 pt
 | Market intelligence | DONE 2026-05-23 | GO with medium confidence |
 | Planning (25 DSL decisions) | DONE 2026-05-24 | q1–q25 decision docs + 14 research threads + 7/7 spikes resolved |
 | Phase 1: Spec Crystallization | DONE — APPROVED 2026-05-25 | PRD (109 BCs, 15 HS, 4 supplements) + architecture (14 ADRs, 15 VPs, 20 crates) + UX spec. 17 passes, 69 findings, 3/3 clean. |
-| Phase 2: Story Decomposition | DONE — APPROVED 2026-05-25 | 77 stories, 21 epics, 6 waves, 462 pts. 22 passes, 96+ findings, 3/3 clean. |
-| Phase 3: TDD Implementation | IN PROGRESS — Wave 1: GATE PASSED. Wave 2: GATE PASSED. Wave 3: GATE PASSED 2026-05-31. **Wave 4 STARTED — Batch A 4/9 (STORY-035+036+043+044 MERGED). Next: STORY-045.** | Per-story delivery |
+| Phase 2: Story Decomposition | DONE — APPROVED 2026-05-25 | 80 stories (77 original + 3 added 2026-06-01), 21 epics, 6 waves, 473 pts. 22 passes, 96+ findings, 3/3 clean. |
+| Phase 3: TDD Implementation | IN PROGRESS — Wave 1: GATE PASSED. Wave 2: GATE PASSED. Wave 3: GATE PASSED 2026-05-31. **Wave 4 STARTED — Batch A 4/10 (STORY-035+036+043+044 MERGED; STORY-077 blocked on STORY-078). Next: STORY-078.** | Per-story delivery |
 | Phase 4: Holdout Evaluation | NOT STARTED | Per-wave holdout gates |
 | Phase 5: Adversarial Refinement | NOT STARTED | Post-implementation cascade |
 | Phase 6: Formal Hardening | NOT STARTED | Kani + fuzz + mutants + semgrep |
@@ -104,11 +109,12 @@ develop: `94f74402` (42 merged PRs, 2443 tests, 0 failures). 77 stories / 462 pt
 | STORY-036 | No-Bleed Invariant | MERGED | #40 | 094f8dca |
 | STORY-043 | PDF Core (new crate) | MERGED | #41 | 331d456c |
 | STORY-044 | PDF Layout Integration | MERGED | #42 | 94f74402 |
+| STORY-078 | Parser: section block syntax (P0) | NEXT — unblocks STORY-077 | — | — |
 | STORY-045 | PDF Export Pipeline | NOT STARTED (after 044) | — | — |
 | STORY-073 | Bullets Layout | NOT STARTED | — | — |
 | STORY-075 | Footer Detection | NOT STARTED | — | — |
 | STORY-076 | srgbClr Transform | NOT STARTED | — | — |
-| STORY-077 | SectionBlock IR Extension (P0) | NOT STARTED | — | — |
+| STORY-077 | SectionBlock IR Extension (P0) | BLOCKED on STORY-078 | — | — |
 
 ## Decisions Log (milestones)
 
@@ -128,6 +134,9 @@ develop: `94f74402` (42 merged PRs, 2443 tests, 0 failures). 77 stories / 462 pt
 - 2026-05-31 — STORY-043 MERGED (PR #41, 331d456c) — PDF Core (slideforge-pdf crate). 14-pass adversary cascade, 3/3 strict-CLEAN (passes 12/13/14). krilla 0.6.0 pure-Rust PDF (no FFI). PdfExporter + SlideTagEngine + svg_embed + font subsetting + check-pdf-deps CI. indexmap 2.9→2.10. 2 MED + 3 LOW security fixed. Workspace 16 crates. STORY-044 unblocked. Wave 4 Batch A: 3/9 complete.
 - 2026-05-31 — STORY-044 MERGED (PR #42, 94f74402) — PDF coordinate mapping + Y-axis + SVG/diagram fidelity. 27-pass adversary cascade, 3/3 strict-CLEAN (P25/26/27). Real SVG stroke rendering (usvg→krilla full translation) + paint-state-leak fix (explicit fill/clear stroke before draw_text). 3 STORY-045 forward-obligations recorded; 1 Windows flaky-test drift item recorded. Wave 4 Batch A: 4/9 complete.
 - 2026-06-01 — STORY-077 spec-readiness closed — BC-3.02.002 v1.2 + BC-1.14.003 v1.2 (section-level detail/report register routing + inline-structure preservation + unrecognized-sub-block-key warning clauses); STORY-077 status→ready; entering per-story delivery.
+- 2026-06-01 — STORY-077 BLOCKED: prerequisite parser gap discovered — STORY-027 decomposition gap (parser cannot parse `section <type>:` blocks; STORY-008 reserved keyword not lifted). DIR-077-001 issued (architect directive: parse-stage parsing belongs in STORY-078 new story). DIR-077-001-A addendum: chumsky 0.10.1 research confirmed parse-time sub-block-KEY warning is correct via `validate()`/`emitter.emit()` + `ParseSeverity::Warning`; no BC-3.02.002 amendment needed. TYPE validation → eval stage (STORY-077). KEY warning + reserved-collision check → parse stage (STORY-078). STORY-077 status→blocked-on-078; branch feature/S-077 retained, worktree parked.
+- 2026-06-01 — STORY-078 CREATED — Parser: section block syntax (5pts, P0, EPIC-02, Wave 4 Batch A). Blocks STORY-077. Added to Wave 4 Batch A. Project total: 80 stories / 473 pts.
+- 2026-06-01 — Deferred-tasks sweep: DI-2 RESOLVED (BC-1.14.004 → v1.2: subsystem SS-02 filled; story/arch/VP anchors resolved); DI-3 RESOLVED (BC-4.03.001 + BC-4.03.002 → v1.2: subsystem SS-07 filled; story/arch/VP anchors resolved). DI-4 → STORY-079 created (slideforge-diagrams SVG DoS hardening, 3pts, P2, Wave 5). DI-6 → STORY-080 created (test de-flake, 3pts, P2, Wave 5). DI-5 (CI doctest gap) remains open — code-repo fix-PR dispatched separately. DI-1 remains justified deferral (no action). New low-severity drift row added: BC-1.14.001/002/003 carry subsystem SS-TBD (correct value SS-02 per STORY-035) — fold into next spec-hygiene pass.
 
 ## STORY-045 Forward-Obligations
 
@@ -148,11 +157,13 @@ These obligations MUST be addressed in STORY-045 and cannot be split from each o
 | .factory/specs/architecture/ARCH-INDEX.md | 12 architecture sections, 14 ADRs |
 | .factory/specs/prd.md | PRD + 109 BCs + 15 holdout scenarios |
 | .factory/stories/wave-schedule.md | 6 waves, batching, dependency order |
-| .factory/stories/STORY-INDEX.md | 77 stories with status |
+| .factory/stories/STORY-INDEX.md | 80 stories with status |
 | .factory/stories/sprint-state.yaml | Current sprint/wave state |
 | .factory/planning/q1-decision-final.md | Computation, formats, registers, charts, math, brand, roadmap |
 | .factory/planning/q3-decision-final.md | Plugin-first architecture, 10 surfaces, trait signatures |
 | .factory/cycles/STORY-044/coord-model-directive.md | Binding DIR-044-001: krilla coordinate model correction |
+| .factory/cycles/STORY-077/section-parse-directive.md | Binding DIR-077-001 + addendum DIR-077-001-A: section-block parser ownership + chumsky parse-time-warning correction |
+| .factory/cycles/STORY-077/chumsky-parse-warning-research.md | Research: chumsky 0.10.1 parse-time diagnostics verdict (confirms parse-time sub-block-KEY warning is correct) |
 
 ## Quality Bar (Non-Negotiable)
 
@@ -169,12 +180,13 @@ Production-grade from day 1. Key enforced gates:
 
 | Date | Item | Severity | Notes |
 |------|------|----------|-------|
-| 2026-05-28 | LOCAL adversary 3-CLEAN on STORY-034 ran macOS-only, missed Linux Trebuchet MS substitution failure (BC-1.12.001 violation) | LOW | Required 4 CI iterations. Process-gap: should LOCAL adversary spawn a Linux-container test pass for font/text/SVG/rendering stories? Surface to user for codification decision. |
-| 2026-05-31 | BC-1.14.004 frontmatter has `subsystem: SS-TBD` + unfilled template placeholders (Architecture Module, Stories, Story Anchor, VP Anchors). May affect other BCs. | LOW | Deferred to a future spec-hygiene pass. Owner: architect / spec-steward. No story blocker. |
-| 2026-05-31 | BC-4.03.001 + BC-4.03.002 have unfilled `subsystem: SS-TBD` + Stories/Story-Anchor/VP-Anchor placeholders (subsystem SS-07 is the correct answer for both PDF BCs). | LOW | Future spec-hygiene pass. Not a story blocker. |
-| 2026-05-31 | slideforge-diagrams `src/normalize.rs` usvg_normalize parses externally-sourced mermaid SVG via `usvg::Tree::from_str` WITHOUT a size/depth guard — DoS hardening gap (CWE-400), analogous to STORY-043 SEC-002. | LOW | Target: future slideforge-diagrams hardening story. Security-reviewer to verify when diagrams crate is next touched. |
-| 2026-05-31 | CI has NO doctest job: `test` job uses `cargo nextest` (skips doctests); no `cargo test --doc` step. coords.rs runnable doctests checked by `cargo doc` but NOT executed in CI. | LOW | devops-engineer follow-up: add doctest CI step. Do not block Wave 4. |
-| 2026-05-31 | slideforge-data `http::tests::test_bc_1_03_002_http_4xx_not_retried` is FLAKY on windows-x86_64 — asserts "HTTP 4xx → exactly 1 connection (no retry)" but intermittently observes 2 connections (connection-count race in Windows test harness). Failed once on PR #42 CI, passed on re-run. slideforge-data is byte-identical to develop — not a STORY-044 regression. | LOW-MED | Justified deferral: target a future slideforge-data/test-infrastructure de-flake story. Owner: data-engineer / test-infrastructure. Reinforces STORY-034 cross-platform-LOCAL-adversary-coverage drift item. Do NOT block Wave 4. |
+| 2026-05-28 | LOCAL adversary 3-CLEAN on STORY-034 ran macOS-only, missed Linux Trebuchet MS substitution failure (BC-1.12.001 violation) | LOW | Required 4 CI iterations. Process-gap: should LOCAL adversary spawn a Linux-container test pass for font/text/SVG/rendering stories? Surface to user for codification decision. DI-1: justified deferral (no action 2026-06-01). |
+| 2026-05-31 | BC-1.14.004 frontmatter had `subsystem: SS-TBD` + unfilled template placeholders (Architecture Module, Stories, Story Anchor, VP Anchors). | LOW | **RESOLVED 2026-06-01** — BC-1.14.004 → v1.2: subsystem SS-02 filled; arch/story/VP anchors resolved. DI-2 closed. |
+| 2026-05-31 | BC-4.03.001 + BC-4.03.002 had unfilled `subsystem: SS-TBD` + Stories/Story-Anchor/VP-Anchor placeholders (subsystem SS-07 is the correct answer for both PDF BCs). | LOW | **RESOLVED 2026-06-01** — BC-4.03.001 + BC-4.03.002 → v1.2: subsystem SS-07 filled; arch/story/VP anchors resolved. DI-3 closed. |
+| 2026-05-31 | slideforge-diagrams `src/normalize.rs` usvg_normalize parses externally-sourced mermaid SVG via `usvg::Tree::from_str` WITHOUT a size/depth guard — DoS hardening gap (CWE-400), analogous to STORY-043 SEC-002. | LOW | **→ STORY-079 created 2026-06-01** (3pts, P2, Wave 5, EPIC-12). DI-4 closed (converted to story). |
+| 2026-05-31 | CI has NO doctest job: `test` job uses `cargo nextest` (skips doctests); no `cargo test --doc` step. coords.rs runnable doctests checked by `cargo doc` but NOT executed in CI. | LOW | DI-5: in-progress — code-repo fix-PR dispatched (devops-engineer). Do not block Wave 4. |
+| 2026-05-31 | slideforge-data `http::tests::test_bc_1_03_002_http_4xx_not_retried` is FLAKY on windows-x86_64 — connection-count race in Windows test harness. Cold-budget timing test flaky under CI load. | LOW-MED | **→ STORY-080 created 2026-06-01** (3pts, P2, Wave 5, EPIC-19). DI-6 closed (converted to story). |
+| 2026-06-01 | BC-1.14.001, BC-1.14.002, BC-1.14.003 still carry `subsystem: SS-TBD` (correct value SS-02 per STORY-035 subsystems field). Architect-flagged during DI-2 fix. | LOW | Fold into next spec-hygiene pass alongside any future SS-TBD sweeps. Not a story blocker. |
 
 ## Process Wins (apply to future stories)
 

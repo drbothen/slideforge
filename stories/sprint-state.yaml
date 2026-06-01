@@ -27,14 +27,14 @@ wave_3_gate_adversary_clean_at: "6/7/8"
 wave_3_gate_holdout_must_pass: "5/5 PASS"
 wave_3_gate_tests: 2584
 wave_4_started: 2026-05-31
-wave_4_total_stories: 17
-wave_4_total_points: 104
+wave_4_total_stories: 18
+wave_4_total_points: 109
 wave_4_batch_a:
-  stories: [STORY-035, STORY-036, STORY-043, STORY-044, STORY-045, STORY-073, STORY-075, STORY-076, STORY-077]
+  stories: [STORY-035, STORY-036, STORY-043, STORY-044, STORY-045, STORY-073, STORY-075, STORY-076, STORY-077, STORY-078]
   execution: parallel
-  chains: ["STORY-035→036", "STORY-043→044→045", "STORY-073 independent", "STORY-075 independent", "STORY-076 independent", "STORY-077 independent (blocks STORY-041/042 in Batch B)"]
+  chains: ["STORY-035→036", "STORY-043→044→045", "STORY-073 independent", "STORY-075 independent", "STORY-076 independent", "STORY-078→STORY-077 (STORY-078 unblocks 077; 077 blocks STORY-041/042 in Batch B)"]
   completed: 4
-  total: 9
+  total: 10
 wave_4_batch_b:
   stories: [STORY-037, STORY-038, STORY-039, STORY-040, STORY-041, STORY-042]
   execution: parallel
@@ -479,9 +479,30 @@ stories:
     points: 3
     notes: "srgbClr transform extraction follow-up from STORY-024 cascade; pulled into Wave 4 as P1; BCs: BC-2.01.001 v1.2 + BC-2.01.003 v1.9"
   STORY-077:
-    status: ready
+    status: blocked
     wave: 4
     batch: A
     priority: P0
     points: 8
-    notes: "SectionBlock IR extension: FieldValue body + section-level register routing; architect-directed spin-out from STORY-035 F-002 descope; blocks STORY-041/042; BCs: BC-3.02.002 v1.2 + BC-1.14.003 v1.2; spec-readiness closed 2026-06-01"
+    blocked_on: STORY-078
+    notes: "SectionBlock IR extension: FieldValue body + section-level register routing; architect-directed spin-out from STORY-035 F-002 descope; blocks STORY-041/042; BCs: BC-3.02.002 v1.2 + BC-1.14.003 v1.2; BLOCKED on STORY-078 (parser cannot parse section <type>: blocks; DIR-077-001 2026-06-01); branch feature/S-077 retained, no active worktree"
+  STORY-078:
+    status: ready
+    wave: 4
+    batch: A
+    priority: P0
+    points: 5
+    blocks: [STORY-077]
+    notes: "Parser: section block syntax (section <type>: ... with sub-blocks); created 2026-06-01 per DIR-077-001 to resolve STORY-027 decomposition gap; delivers section_block_parser combinator + un-reserves 'section' keyword; crate: slideforge-syntax; EPIC-02; BC-3.02.002 v1.2; next to deliver (unblocks STORY-077 and transitively STORY-041/042)"
+  STORY-079:
+    status: draft
+    wave: 5
+    priority: P2
+    points: 3
+    notes: "slideforge-diagrams SVG DoS hardening: MAX_SVG_BYTES (50 MiB) + MAX_SVG_NESTING_DEPTH (64) guards on usvg_normalize; CWE-400/CWE-674; mirrors STORY-043 SEC-001/SEC-002 pattern; BC: BC-1.12.003; EPIC-12; created 2026-06-01 from DI-4 (drift item → story)"
+  STORY-080:
+    status: draft
+    wave: 5
+    priority: P2
+    points: 3
+    notes: "Test reliability: de-flake http_4xx_not_retried (slideforge-data, connection-count race on Windows) + cold_budget (slideforge-diagrams, timing gate under CI load); BC: BC-1.03.002; EPICs: EPIC-19 (CI); created 2026-06-01 from DI-6 (drift item → story)"
