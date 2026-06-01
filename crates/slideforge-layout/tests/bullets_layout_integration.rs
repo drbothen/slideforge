@@ -1,4 +1,4 @@
-//! AC-INT-1 integration test — STORY-073: ContentBlock::Bullets → FrameContent::TextRun
+//! AC-INT-1 integration test — STORY-073: `ContentBlock::Bullets` → `FrameContent::TextRun`
 //!
 //! This integration test file exercises the full `layout::run()` pipeline end-to-end
 //! with decks containing `ContentBlock::Bullets` blocks.
@@ -166,10 +166,10 @@ fn text_run_count(deck: &LaidOutDeck, slide_idx: usize) -> usize {
 /// - Slide 0: title slide (no bullets) — establishes a known xref target.
 /// - Slide 1: content slide with 3 bullet items (Plain, Bold, Xref-known).
 ///
-/// Expected: slide 1 has 3 TextRun frames for bullets; no warnings; slide count
+/// Expected: slide 1 has 3 `TextRun` frames for bullets; no warnings; slide count
 /// preserved.
 ///
-/// At Red Gate: 0 TextRun frames for bullet items → assertion fails.
+/// At Red Gate: 0 `TextRun` frames for bullet items → assertion fails.
 #[test]
 fn test_bc_3_05_001_story073_ac_int1_bullets_end_to_end() {
     let title_slide = make_slide_with_title("title", "introduction");
@@ -208,13 +208,13 @@ fn test_bc_3_05_001_story073_ac_int1_bullets_end_to_end() {
     );
 }
 
-/// AC-INT-1 / AC-001 — TextRun frames carry the full `Vec<InlineNode>` sequence
+/// AC-INT-1 / AC-001 — `TextRun` frames carry the full `Vec<InlineNode>` sequence
 /// verbatim — no inline processing occurs at layout time (BC-3.05.001 invariant 6).
 ///
 /// Verifies that the inlines for each bullet item appear unchanged in the corresponding
-/// TextRun frame.
+/// `TextRun` frame.
 ///
-/// At Red Gate: no TextRun frames → no inline content to check → assertion fails.
+/// At Red Gate: no `TextRun` frames → no inline content to check → assertion fails.
 #[test]
 fn test_bc_3_05_001_story073_ac_int1_text_run_carries_inlines_verbatim() {
     let item1 = flat_bullet(vec![
@@ -242,14 +242,12 @@ fn test_bc_3_05_001_story073_ac_int1_text_run_carries_inlines_verbatim() {
     assert!(
         text_run_frames.iter().any(|nodes| nodes == &item1.inlines),
         "item1 inlines must appear verbatim in a TextRun frame; \
-         got frames: {:?}",
-        text_run_frames
+         got frames: {text_run_frames:?}",
     );
     assert!(
         text_run_frames.iter().any(|nodes| nodes == &item2.inlines),
         "item2 inlines must appear verbatim in a TextRun frame; \
-         got frames: {:?}",
-        text_run_frames
+         got frames: {text_run_frames:?}",
     );
 }
 
@@ -259,7 +257,7 @@ fn test_bc_3_05_001_story073_ac_int1_text_run_carries_inlines_verbatim() {
 /// The deck contains a single title slide with one bullet containing
 /// `InlineNode::Xref("missing-slide")`. "missing-slide" is not a slide title.
 ///
-/// At Red Gate: bullet not processed → no TextRun frame → xref not validated →
+/// At Red Gate: bullet not processed → no `TextRun` frame → xref not validated →
 /// no warning in LaidOutDeck.warnings → assertion fails.
 #[test]
 fn test_bc_3_05_001_story073_ac_int1_unknown_xref_in_bullet_warns() {
@@ -380,7 +378,7 @@ fn test_bc_3_05_001_story073_ec001_empty_bullets_no_frames_no_error_no_warning()
 /// EC-002 — A `BulletItem` with `inlines: vec![]` produces one `TextRun` frame
 /// with an empty inline sequence. No depth error; no warning.
 ///
-/// At Red Gate: 0 TextRun frames produced → assertion fails.
+/// At Red Gate: 0 `TextRun` frames produced → assertion fails.
 #[test]
 fn test_bc_3_05_001_story073_ec002_empty_bullet_item_inlines_one_frame_no_error() {
     let empty_item = flat_bullet(vec![]);
@@ -410,7 +408,7 @@ fn test_bc_3_05_001_story073_ec002_empty_bullet_item_inlines_one_frame_no_error(
 /// EC-003 — Nested bullet item: `BulletItem.children` are NOT flattened.
 /// Each item (parent and child) produces its own `FrameContent::TextRun` frame.
 ///
-/// At Red Gate: 0 TextRun frames → assertion fails.
+/// At Red Gate: 0 `TextRun` frames → assertion fails.
 #[test]
 fn test_bc_3_05_001_story073_ec003_nested_bullet_produces_frame_per_item() {
     let child = flat_bullet(vec![InlineNode::Plain(Arc::from("child bullet"))]);
@@ -447,14 +445,12 @@ fn test_bc_3_05_001_story073_ec003_nested_bullet_produces_frame_per_item() {
 
     assert!(
         frame_inlines.iter().any(|nodes| nodes == &parent_inlines),
-        "parent bullet inlines must appear in a TextRun frame; frames: {:?}",
-        frame_inlines
+        "parent bullet inlines must appear in a TextRun frame; frames: {frame_inlines:?}",
     );
     assert!(
         frame_inlines.iter().any(|nodes| nodes == &child_inlines),
         "child bullet inlines must appear in a TextRun frame (not dropped/flattened); \
-         frames: {:?}",
-        frame_inlines
+         frames: {frame_inlines:?}",
     );
 }
 
@@ -467,10 +463,10 @@ fn test_bc_3_05_001_story073_ec003_nested_bullet_produces_frame_per_item() {
 /// `test_..._exact_frame_order_three_levels` in lib.rs).
 ///
 /// Deck: single slide, one parent bullet with one child bullet and one grandchild
-/// bullet.  After `layout::run`, the three TextRun frames in `LaidOutSlide.frames`
+/// bullet.  After `layout::run`, the three `TextRun` frames in `LaidOutSlide.frames`
 /// must appear in source order:
 ///
-///   parent_frame_idx < child_frame_idx < grandchild_frame_idx
+///   `parent_frame_idx` < `child_frame_idx` < `grandchild_frame_idx`
 ///
 /// Regression property: a bug that emits children-before-parents, or flattens/
 /// reorders the tree, will produce frames in the wrong relative position and fail
@@ -655,10 +651,10 @@ fn test_bc_3_05_001_story073_ec005_multiple_depth_exceeded_bullets_returns_error
 /// `inlines` sequence survive the layout pass verbatim in the `FrameContent::TextRun`
 /// frame (BC-3.05.001 invariant 6 / VP-047).
 ///
-/// This is the bullet-specific extension of the VP-047 test (which covers TextBlock
+/// This is the bullet-specific extension of the VP-047 test (which covers `TextBlock`
 /// content). The layout stage must NOT process, transform, or drop any variant.
 ///
-/// At Red Gate: no TextRun frame is produced for bullet items → the inline content
+/// At Red Gate: no `TextRun` frame is produced for bullet items → the inline content
 /// cannot be inspected → assertion fails because the frame doesn't exist.
 #[test]
 fn test_bc_3_05_001_story073_vp047_all_12_inline_variants_in_bullet_survive_layout() {
@@ -727,8 +723,7 @@ fn test_bc_3_05_001_story073_vp047_all_12_inline_variants_in_bullet_survive_layo
     assert_eq!(
         bullet_frame, all_12_inlines,
         "VP-047: all 12 InlineNode variants must survive the layout pass unchanged in the \
-         FrameContent::TextRun frame; got: {:?}",
-        bullet_frame
+         FrameContent::TextRun frame; got: {bullet_frame:?}",
     );
 }
 
@@ -740,11 +735,11 @@ fn test_bc_3_05_001_story073_vp047_all_12_inline_variants_in_bullet_survive_layo
 /// with other content blocks produces correct `LaidOutDeck` output.
 ///
 /// A slide with both `ContentBlock::Text` and `ContentBlock::Bullets` blocks must:
-/// - Produce a TextRun frame for the Text block.
-/// - Produce one TextRun frame per BulletItem.
+/// - Produce a `TextRun` frame for the Text block.
+/// - Produce one `TextRun` frame per `BulletItem`.
 /// - Not produce errors for well-formed input.
 ///
-/// At Red Gate: Bullets block produces no frames → TextRun count is 1 (from Text only),
+/// At Red Gate: Bullets block produces no frames → `TextRun` count is 1 (from Text only),
 /// not 4 (1 from Text + 3 from Bullets) → assertion fails.
 #[test]
 fn test_bc_3_05_001_story073_ac_int1_mixed_text_and_bullets_blocks() {
@@ -805,12 +800,12 @@ fn test_bc_3_05_001_story073_ac_int1_mixed_text_and_bullets_blocks() {
 // EMU correctness — bullet TextRun bbox satisfies is_valid
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// AC-INT-1 / BC-3.06.003 — All bounding boxes for bullet TextRun frames must
+/// AC-INT-1 / BC-3.06.003 — All bounding boxes for bullet `TextRun` frames must
 /// satisfy `BoundingBox::is_valid` (non-negative, non-zero, within page bounds).
 ///
-/// Uses integer EMUs (914_400 per inch) — no f64 (project convention DI-010 / ADR-013).
+/// Uses integer EMUs (`914_400` per inch) — no f64 (project convention DI-010 / ADR-013).
 ///
-/// At Red Gate: no TextRun frames for bullets → loop iterates nothing → trivially
+/// At Red Gate: no `TextRun` frames for bullets → loop iterates nothing → trivially
 /// passes. Becomes load-bearing after implementation.
 #[test]
 fn test_bc_3_05_001_story073_bullet_text_run_bboxes_are_valid() {
