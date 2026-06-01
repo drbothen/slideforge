@@ -327,7 +327,17 @@ pub(crate) fn brand_template_to_toml(
         let field = TOML_FIELD_NAMES[i];
         match &color_slot.value {
             ColorValue::Hex(hex) => {
-                let _ = writeln!(out, "{field} = \"{hex}\"");
+                // BC-2.01.003 EC-003 (widened by STORY-076): emit the inline TOML comment
+                // when is_derived = true, regardless of whether the origin was schemeClr
+                // or srgbClr. The flag is the single source of truth for derivation state.
+                if color_slot.is_derived {
+                    let _ = writeln!(
+                        out,
+                        "{field} = \"{hex}\" # derived via tint/shade; may not match exact color"
+                    );
+                } else {
+                    let _ = writeln!(out, "{field} = \"{hex}\"");
+                }
             },
             ColorValue::SchemeRef(scheme_name) => {
                 // EC-003: the slot contains a relative scheme reference (e.g., from
@@ -1695,10 +1705,12 @@ mod tests {
         let make_hex_slot = |name: &str, hex: &str| ColorSlot {
             name: Arc::from(name),
             value: ColorValue::Hex(Arc::from(hex)),
+            is_derived: false,
         };
         let make_scheme_slot = |name: &str, scheme: &str| ColorSlot {
             name: Arc::from(name),
             value: ColorValue::SchemeRef(Arc::from(scheme)),
+            is_derived: false,
         };
 
         let colors: [ColorSlot; 12] = [
@@ -1800,6 +1812,7 @@ mod tests {
         let make_hex_slot = |name: &str, hex: &str| ColorSlot {
             name: Arc::from(name),
             value: ColorValue::Hex(Arc::from(hex)),
+            is_derived: false,
         };
 
         // acc2 (index 5) references accent1 → acc1 (index 4) which is Hex "#0066CC"
@@ -1812,6 +1825,7 @@ mod tests {
             ColorSlot {
                 name: Arc::from("acc2"),
                 value: ColorValue::SchemeRef(Arc::from("accent1")), // refers to acc1 above
+                is_derived: false,
             },
             make_hex_slot("acc3", "#28A745"),
             make_hex_slot("acc4", "#FFC107"),
@@ -1909,6 +1923,7 @@ mod tests {
                 name: Arc::from(name),
                 // Self-referential: the lowercase of the OOXML name (as stored by color.rs).
                 value: ColorValue::SchemeRef(Arc::from(name.to_lowercase().as_str())),
+                is_derived: false,
             })
             .collect::<Vec<_>>()
             .try_into()
@@ -1995,6 +2010,7 @@ mod tests {
         let make_hex_slot = |name: &str, hex: &str| ColorSlot {
             name: Arc::from(name),
             value: ColorValue::Hex(Arc::from(hex)),
+            is_derived: false,
         };
 
         // hlink (index 10) holds Hex "#AABBCC".
@@ -2040,6 +2056,7 @@ mod tests {
             ColorSlot {
                 name: Arc::from("hlink"),
                 value: ColorValue::SchemeRef(Arc::from("followedhyperlink")),
+                is_derived: false,
             },
             make_hex_slot("folHlink", "#551A8B"), // index 11
         ];
@@ -2106,6 +2123,7 @@ mod tests {
         let make_hex_slot = |name: &str, hex: &str| ColorSlot {
             name: Arc::from(name),
             value: ColorValue::Hex(Arc::from(hex)),
+            is_derived: false,
         };
         let colors: [ColorSlot; 12] = [
             make_hex_slot("dk1", "#000000"),

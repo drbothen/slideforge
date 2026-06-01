@@ -94,6 +94,17 @@ impl ColorValue {
 ///
 /// Use [`ColorSlot::hex`] for the common case of an absolute color.
 /// Use [`ColorSlot::is_resolved`] to detect whether the slot can be used directly.
+///
+/// ## Derived Flag (BC-2.01.001 EC-006 / STORY-076)
+///
+/// `is_derived` is `true` when the color was extracted from an `<a:srgbClr>` or
+/// `<a:schemeClr>` element that carried transform children (`lumMod`, `lumOff`,
+/// `tint`, `shade`). In this case the stored value is the BASE hex verbatim — no
+/// HSL resolution was applied (Option B, deferred to v2). Downstream consumers that
+/// require the visually-rendered color must apply the transform arithmetic themselves.
+///
+/// When `is_derived` is `false`, the stored value is the literal color from the
+/// OOXML theme with no transforms pending.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ColorSlot {
     /// The OOXML slot name (e.g., `"dk1"`, `"acc1"`, `"hlink"`).
@@ -104,6 +115,14 @@ pub struct ColorSlot {
     /// [`ColorValue::SchemeRef`] only appears when the source template used a
     /// self-referential `<a:schemeClr>` element.
     pub value: ColorValue,
+    /// Whether the stored color is a base value with unapplied transform children.
+    ///
+    /// Set to `true` when the source OOXML element (`<a:srgbClr>` or `<a:schemeClr>`)
+    /// carried one or more transform child elements (`lumMod`, `lumOff`, `tint`, `shade`).
+    /// The base hex is stored verbatim; HSL resolution is deferred to v2 (Option B).
+    ///
+    /// When `false`, the stored value is the literal OOXML color with no pending transforms.
+    pub is_derived: bool,
 }
 
 impl ColorSlot {
@@ -379,6 +398,7 @@ mod tests {
         ColorSlot {
             name: Arc::from(name),
             value: ColorValue::Hex(Arc::from(hex)),
+            is_derived: false,
         }
     }
 
@@ -589,6 +609,7 @@ mod tests {
         let slot = ColorSlot {
             name: Arc::from("dk2"),
             value: ColorValue::Hex(Arc::from("#003087")),
+            is_derived: false,
         };
         assert_eq!(slot.hex(), Some("#003087"));
         assert!(slot.is_resolved());
@@ -600,6 +621,7 @@ mod tests {
         let slot = ColorSlot {
             name: Arc::from("dk1"),
             value: ColorValue::SchemeRef(Arc::from("dk1")),
+            is_derived: false,
         };
         assert_eq!(
             slot.hex(),

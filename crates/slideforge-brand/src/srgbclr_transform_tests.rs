@@ -33,6 +33,10 @@
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
+#[allow(non_snake_case)] // test names use BC-ID naming convention (e.g. test_BC_2_01_001_...)
+#[allow(clippy::doc_markdown)] // test doc comments use prose-style type names without backticks
+#[allow(clippy::items_after_statements)] // static COUNTER after let-bindings in test helpers
+#[allow(unused_mut)] // `let mut colors: [ColorSlot; 12]` pattern in tests
 mod tests {
     use std::sync::Arc;
 
@@ -427,7 +431,11 @@ mod tests {
         assert_eq!(slots[0].hex(), Some("#000000"), "dk1 regression: #000000");
         assert_eq!(slots[2].hex(), Some("#003087"), "dk2 regression: #003087");
         assert_eq!(slots[4].hex(), Some("#0066CC"), "acc1 regression: #0066CC");
-        assert_eq!(slots[11].hex(), Some("#551A8B"), "folHlink regression: #551A8B");
+        assert_eq!(
+            slots[11].hex(),
+            Some("#551A8B"),
+            "folHlink regression: #551A8B"
+        );
     }
 
     /// BC-2.01.001 postcondition 1 / AC-004 — `sysClr` slots are NOT derived;
@@ -475,35 +483,58 @@ mod tests {
         // For each: the stored hex must equal the base val, not the transformed result.
 
         // Base: #003087 (navy blue), lumMod=75000 → naively expected darkened ~ #002465.
-        let xml1 =
-            theme_xml_with_dk2_srgbclr(r#"<a:srgbClr val="003087"><a:lumMod val="75000"/></a:srgbClr>"#);
+        let xml1 = theme_xml_with_dk2_srgbclr(
+            r#"<a:srgbClr val="003087"><a:lumMod val="75000"/></a:srgbClr>"#,
+        );
         let (slots1, _) = parse_theme_colors(xml1.as_bytes()).unwrap();
         let dk2_1 = &slots1[2];
         // RED GATE: compile error — `is_derived` not yet on ColorSlot.
         assert!(dk2_1.is_derived, "lumMod navy: is_derived must be true");
-        assert_eq!(dk2_1.hex(), Some("#003087"), "lumMod navy: base hex verbatim");
-        assert_ne!(dk2_1.hex(), Some("#002465"), "lumMod navy: MUST NOT store resolved color");
+        assert_eq!(
+            dk2_1.hex(),
+            Some("#003087"),
+            "lumMod navy: base hex verbatim"
+        );
+        assert_ne!(
+            dk2_1.hex(),
+            Some("#002465"),
+            "lumMod navy: MUST NOT store resolved color"
+        );
 
         // Base: #FF0000 (red), tint=50000 → naive tint → lighter red ~ #FF8080.
-        let xml2 =
-            theme_xml_with_dk2_srgbclr(r#"<a:srgbClr val="FF0000"><a:tint val="50000"/></a:srgbClr>"#);
+        let xml2 = theme_xml_with_dk2_srgbclr(
+            r#"<a:srgbClr val="FF0000"><a:tint val="50000"/></a:srgbClr>"#,
+        );
         let (slots2, _) = parse_theme_colors(xml2.as_bytes()).unwrap();
         let dk2_2 = &slots2[2];
         // RED GATE: compile error — `is_derived` not yet on ColorSlot.
         assert!(dk2_2.is_derived, "tint red: is_derived must be true");
         assert_eq!(dk2_2.hex(), Some("#FF0000"), "tint red: base hex verbatim");
-        assert_ne!(dk2_2.hex(), Some("#FF8080"), "tint red: MUST NOT store resolved color");
+        assert_ne!(
+            dk2_2.hex(),
+            Some("#FF8080"),
+            "tint red: MUST NOT store resolved color"
+        );
 
         // Base: #000000 (black), shade=60000 → naive shade → dark gray ~ #000000 (no change for black)
         // Use a non-trivial base: #808080, shade=50000 → darkened ~ #404040.
-        let xml3 =
-            theme_xml_with_dk2_srgbclr(r#"<a:srgbClr val="808080"><a:shade val="50000"/></a:srgbClr>"#);
+        let xml3 = theme_xml_with_dk2_srgbclr(
+            r#"<a:srgbClr val="808080"><a:shade val="50000"/></a:srgbClr>"#,
+        );
         let (slots3, _) = parse_theme_colors(xml3.as_bytes()).unwrap();
         let dk2_3 = &slots3[2];
         // RED GATE: compile error — `is_derived` not yet on ColorSlot.
         assert!(dk2_3.is_derived, "shade gray: is_derived must be true");
-        assert_eq!(dk2_3.hex(), Some("#808080"), "shade gray: base hex verbatim");
-        assert_ne!(dk2_3.hex(), Some("#404040"), "shade gray: MUST NOT store resolved color");
+        assert_eq!(
+            dk2_3.hex(),
+            Some("#808080"),
+            "shade gray: base hex verbatim"
+        );
+        assert_ne!(
+            dk2_3.hex(),
+            Some("#404040"),
+            "shade gray: MUST NOT store resolved color"
+        );
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -582,8 +613,7 @@ mod tests {
         let xml = theme_xml_with_dk2_srgbclr(
             r#"<a:srgbClr val="003087"><a:lumMod val="75000"/></a:srgbClr>"#,
         );
-        let (slots, _) =
-            parse_theme_colors(xml.as_bytes()).expect("must parse without hard error");
+        let (slots, _) = parse_theme_colors(xml.as_bytes()).expect("must parse without hard error");
 
         // Verify is_derived was set (compile-time Red Gate also fires here).
         // RED GATE: compile error — `is_derived` not yet on ColorSlot.
@@ -754,11 +784,10 @@ mod tests {
         );
 
         // The written brand.toml must still be valid TOML (inline comment after value is legal).
-        let _parsed: crate::toml_schema::BrandConfig = toml::from_str(&content)
-            .expect(
-                "brand.toml with EC-003 inline comment must be parseable as valid TOML — \
-                 inline comments after values are legal TOML syntax"
-            );
+        let _parsed: crate::toml_schema::BrandConfig = toml::from_str(&content).expect(
+            "brand.toml with EC-003 inline comment must be parseable as valid TOML — \
+                 inline comments after values are legal TOML syntax",
+        );
     }
 
     /// BC-2.01.003 invariant / AC-004 — when BrandExtractor serializes a `ColorSlot`

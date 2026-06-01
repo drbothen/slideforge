@@ -333,6 +333,7 @@ fn build_color_slots(hex_slots: &[Arc<str>; 12]) -> [ColorSlot; 12] {
     std::array::from_fn(|i| ColorSlot {
         name: Arc::from(COLOR_SLOT_NAMES[i]),
         value: ColorValue::Hex(Arc::clone(&hex_slots[i])),
+        is_derived: false,
     })
 }
 
