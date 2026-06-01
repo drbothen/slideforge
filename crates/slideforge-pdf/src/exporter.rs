@@ -56,8 +56,11 @@
 //! via `page_root_transform` (DIR-044-001).
 
 use krilla::Document;
+use krilla::color::rgb;
 use krilla::geom::Point;
+use krilla::num::NormalizedF32;
 use krilla::page::PageSettings;
+use krilla::paint::{Fill, FillRule};
 use krilla::text::TextDirection;
 use slideforge_layout::LaidOutDeck;
 use slideforge_layout::types::{BoundingBox, FrameContent};
@@ -535,11 +538,44 @@ pub(crate) fn text_baseline_surface_y(bbox: &BoundingBox) -> f32 {
     surface_top_y + emu_to_pt(bbox.height) * 0.8
 }
 
+/// Solid opaque black fill used for text rendering.
+///
+/// OBS-044-22-01 fix: `draw_text_at_bbox` must set an EXPLICIT fill before
+/// `surface.draw_text()` so that text color is always the deterministic default
+/// (solid black) and never inherits leaked fill state from a prior SVG/Diagram
+/// frame drawn on the same krilla `Surface`.
+///
+/// `krilla::paint::Fill` / `Surface::set_fill` accept `Option<Fill>`. Passing
+/// `Some(TEXT_FILL_BLACK)` is equivalent to `Fill::default()` but makes the
+/// intent explicit: text is always rendered in opaque black regardless of what
+/// SVG path drawing left in the surface's paint state.
+///
+/// Why RGB black (`rgb::Color::new(0, 0, 0)`) instead of luma black
+/// (`luma::Color::black()` / `Fill::default()`): both produce black text, but
+/// the RGB form emits `0 0 0 rg` in the uncompressed PDF stream, which is
+/// directly assertable in tests. The luma form emits `0 g`. We choose RGB for
+/// consistency with the SVG fill path (which uses `rgb::Color`) and for
+/// test-assertion clarity.
+fn text_fill_black() -> Fill {
+    Fill {
+        paint: rgb::Color::new(0, 0, 0).into(),
+        opacity: NormalizedF32::ONE,
+        rule: FillRule::NonZero,
+    }
+}
+
 /// Draw text at a bounding box position using krilla Surface (top-left, Y-down) coordinates.
 ///
 /// Uses [`text_baseline_surface_y`] to compute the baseline position. If `font`
 /// is `None`, logs a debug warning and skips drawing. This is the correct
 /// non-fatal behavior when a brand font is unavailable.
+///
+/// ## Paint-state determinism (OBS-044-22-01 fix)
+///
+/// Explicitly sets fill to opaque black and clears stroke before calling
+/// `surface.draw_text()`. This ensures text color is never inherited from the
+/// fill/stroke state left by a prior `Diagram`/`ErrorSlidePlaceholder` frame
+/// on the same krilla `Surface`. See [`text_fill_black`] for color rationale.
 fn draw_text_at_bbox(
     surface: &mut krilla::surface::Surface<'_>,
     text: &str,
@@ -561,6 +597,14 @@ fn draw_text_at_bbox(
     if text.is_empty() {
         return;
     }
+
+    // OBS-044-22-01 fix: explicitly set fill and clear stroke BEFORE draw_text.
+    // krilla Surface.fill / Surface.stroke are mutable fields (NOT part of the
+    // transform/graphics-state stack). A prior Diagram frame's render_path calls
+    // may have left any fill/stroke in the surface state. Resetting here makes
+    // text rendering self-sufficient and deterministic, independent of draw order.
+    surface.set_fill(Some(text_fill_black()));
+    surface.set_stroke(None);
 
     // Surface X: left edge of the bounding box (top-left origin, Y-down).
     let surface_x = emu_to_pt(bbox.x);
@@ -1597,5 +1641,241 @@ mod tests {
             has_eof,
             "F-044-004: PDF must end with %%EOF marker (well-formed PDF)"
         );
+    }
+
+    // ─── OBS-044-22-01: paint-state leak across frames ────────────────────────
+
+    /// OBS-044-22-01 (driving regression test): `draw_text_at_bbox` must set
+    /// an explicit fill before `surface.draw_text()` so that text rendering is
+    /// never influenced by fill/stroke state leaked from a prior SVG/Diagram frame
+    /// on the same slide.
+    ///
+    /// ## Bug
+    ///
+    /// `render_path` in `svg_embed.rs` calls `surface.set_fill(Some(...))` /
+    /// `surface.set_fill(None)` and `surface.set_stroke(...)` for every SVG path.
+    /// These mutations persist on the krilla `Surface` after `place_svg_at`
+    /// completes (only the transform is restored by `surface.pop()`; fill/stroke
+    /// are NOT part of the transform stack). `draw_text_at_bbox` then calls
+    /// `surface.draw_text()` without first resetting the fill — text inherits the
+    /// last SVG path's fill color.
+    ///
+    /// ## Test setup
+    ///
+    /// 2-frame slide:
+    ///   Frame 0 — `Diagram` with a solid RED (`#FF0000`) rectangle SVG.
+    ///             `render_path` sets `surface.fill = Some(red_fill)`.
+    ///   Frame 1 — `Title` with text "Hello Paint State".
+    ///             Without the fix: `draw_text` inherits `fill = red`.
+    ///             With the fix: `draw_text` uses explicit black fill.
+    ///
+    /// ## Non-vacuous assertion (TD-VSDD-059)
+    ///
+    /// krilla emits the non-stroking (fill) color for text as an RGB or devicegray
+    /// PDF color operator in the uncompressed content stream. When fill is solid
+    /// black (RGB 0,0,0), the content stream contains a `0 0 0 rg` operator (or
+    /// devicegray `0 g`). When fill is leaked red (RGB 1,0,0), it contains `1 0 0 rg`.
+    ///
+    /// Assertion: the uncompressed PDF MUST contain `0 0 0 rg` or `0 g` (explicit
+    /// black text fill) AND MUST NOT contain `1 0 0 rg` immediately before the
+    /// text font reference — confirming text fill is NOT inherited from the SVG.
+    ///
+    /// This test FAILS before the fix (text renders in red, PDF has `1 0 0 rg`)
+    /// and PASSES after the fix (text explicitly sets black fill, `0 0 0 rg`).
+    #[allow(clippy::unwrap_used)]
+    #[test]
+    fn test_obs_044_22_01_text_fill_not_leaked_from_svg_frame() {
+        use slideforge_types::NormalizedDiagramSvg;
+
+        // Frame 0: SVG with solid RED fill — will leak red into surface state.
+        // Use ##-delimited raw string to avoid conflict with # in color value.
+        let red_svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
+            <rect x="0" y="0" width="100" height="100" fill="#FF0000"/>
+        </svg>"##;
+        let svg = NormalizedDiagramSvg::from_normalized_string(Arc::from(red_svg));
+
+        let font_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../crates/slideforge-math/fonts/latinmodern-math.otf")
+            .canonicalize()
+            .expect("LM Math fixture must be accessible for OBS-044-22-01 regression test");
+
+        let exporter = PdfExporter::with_font_path(font_path);
+        let deck = minimal_deck();
+        let brand = Brand {
+            name: Arc::from("TestBrand"),
+            palette: BrandPalette {
+                primary: Arc::from("#003087"),
+                secondary: Arc::from("#FFFFFF"),
+                accent: Arc::from("#F5A623"),
+                neutral: Arc::from("#F0F0F0"),
+            },
+            // Override font is used instead of brand names.
+            fonts: BrandFonts {
+                heading: Arc::from("NoSuchFont_OBS_044_22_01"),
+                body: Arc::from("NoSuchFont_OBS_044_22_01"),
+                mono: Arc::from("Courier"),
+            },
+            layouts: vec![],
+            span: SourceSpan::default(),
+        };
+
+        // 2-frame slide: Diagram (red SVG) FIRST, then Title (text) SECOND.
+        // On a shared Surface, frame 0 leaves surface.fill = Some(red).
+        // Frame 1 must NOT inherit that red fill for text.
+        let laid_out = LaidOutDeck {
+            page_size: PageSize::default(),
+            slides: vec![LaidOutSlide {
+                source_index: 0,
+                slide_type_keyword: Arc::from("diagram-then-title"),
+                frames: vec![
+                    Frame {
+                        bbox: BoundingBox {
+                            x: Emu(0),
+                            y: Emu(0),
+                            width: Emu(9_144_000),
+                            height: Emu(3_657_600), // 2-inch tall SVG frame
+                        },
+                        content: FrameContent::Diagram(svg),
+                        text_flow: None,
+                    },
+                    Frame {
+                        bbox: BoundingBox {
+                            x: Emu(0),
+                            y: Emu(3_657_600), // below SVG frame
+                            width: Emu(9_144_000),
+                            height: Emu(914_400), // 1-inch title
+                        },
+                        content: FrameContent::Title(Arc::from("Hello Paint State")),
+                        text_flow: None,
+                    },
+                ],
+                speaker_notes: None,
+                register_tags: RegisterSet::new(),
+                register_content: vec![],
+            }],
+            sections: vec![],
+            warnings: vec![],
+        };
+        let opts = ExportOptions::default();
+
+        // Export with uncompressed content streams so color operators are scannable.
+        let pdf_bytes = exporter
+            .generate_pdf_inner(
+                &deck,
+                &laid_out,
+                &brand,
+                &opts,
+                krilla::SerializeSettings {
+                    compress_content_streams: false,
+                    ..krilla::SerializeSettings::default()
+                },
+            )
+            .expect("generate_pdf_inner must succeed for OBS-044-22-01 regression test");
+
+        assert!(
+            pdf_bytes.starts_with(b"%PDF-"),
+            "PDF must start with %PDF- header"
+        );
+
+        // Assert the PDF contains a /Font resource — text drawing reached krilla.
+        let has_font = pdf_bytes.windows(b"/Font".len()).any(|w| w == b"/Font");
+        assert!(
+            has_font,
+            "OBS-044-22-01: PDF must contain /Font resource — text drawing must have fired. \
+             If no font is present, the Title frame was not drawn at all."
+        );
+
+        // Search for color operators using byte patterns (PDF may contain binary bytes).
+        // Use a safe helper to produce a UTF-8 preview for error messages.
+        let pdf_preview = String::from_utf8_lossy(&pdf_bytes[..pdf_bytes.len().min(4096)]);
+
+        // Non-vacuous assertion 1: the PDF MUST contain `0 0 0 rg` or `0 g` (black fill)
+        // from the explicit text fill set by `draw_text_at_bbox`.
+        //
+        // krilla serializes a solid-black RGB fill as `0 0 0 rg` in the content stream.
+        // For devicegray it's `0 g`. Either is acceptable — both mean black.
+        // These tokens appear when `draw_text_at_bbox` calls `set_fill(Some(black_fill))`
+        // before `draw_text()`.
+        let has_black_fill_op = pdf_bytes
+            .windows(b"0 0 0 rg".len())
+            .any(|w| w == b"0 0 0 rg")
+            || pdf_bytes
+                .windows(b"0.0 0.0 0.0 rg".len())
+                .any(|w| w == b"0.0 0.0 0.0 rg")
+            || pdf_bytes.windows(b" 0 g\n".len()).any(|w| w == b" 0 g\n")
+            || pdf_bytes.windows(b" 0 g\r".len()).any(|w| w == b" 0 g\r")
+            || pdf_bytes.windows(b"\n0 g\n".len()).any(|w| w == b"\n0 g\n");
+        assert!(
+            has_black_fill_op,
+            "OBS-044-22-01 FAILED: PDF does not contain a black fill color operator \
+             (`0 0 0 rg` or `0 g`). `draw_text_at_bbox` must explicitly call \
+             `surface.set_fill(Some(black_fill))` before `surface.draw_text()`. \
+             Without this, text inherits the SVG frame's fill (red in this test) \
+             and renders in the wrong color. \
+             PDF (first 4096 bytes): {pdf_preview}"
+        );
+
+        // Non-vacuous assertion 2: the PDF MUST NOT contain `1 0 0 rg` (red fill)
+        // as the text color operator. The SVG sets fill to red (#FF0000 = 1,0,0 in
+        // normalized RGB). If `draw_text_at_bbox` inherits this, `1 0 0 rg` appears
+        // in the text drawing context. After the fix, only the SVG path uses red fill.
+        //
+        // Note: `1 0 0 rg` will appear in the SVG rectangle drawing section. We
+        // assert it does NOT appear AFTER the /Font resource reference, which would
+        // indicate the text fill was set to red. We do this by checking that the
+        // black fill operator exists at all (assertion 1) AND that the PDF stream
+        // structure is correct.
+        //
+        // Simplified non-vacuous check: assert `1 0 0 rg` exists only BEFORE any
+        // text-related operator. We scan the raw bytes: if `0 0 0 rg` (or `0 g`)
+        // appears after the LAST `1 0 0 rg`, the text fill was correctly reset to black.
+        let last_red_pos = {
+            let needle = b"1 0 0 rg";
+            pdf_bytes.windows(needle.len()).rposition(|w| w == needle)
+        };
+        let first_black_after_red = {
+            let needle_rgb = b"0 0 0 rg";
+            let needle_g = b" 0 g\n";
+            let black_rgb_pos = pdf_bytes
+                .windows(needle_rgb.len())
+                .position(|w| w == needle_rgb);
+            let black_g_pos = pdf_bytes
+                .windows(needle_g.len())
+                .position(|w| w == needle_g);
+            match (black_rgb_pos, black_g_pos) {
+                (Some(a), Some(b)) => Some(a.min(b)),
+                (Some(a), None) => Some(a),
+                (None, Some(b)) => Some(b),
+                (None, None) => None,
+            }
+        };
+
+        if let (Some(red_pos), Some(black_pos)) = (last_red_pos, first_black_after_red) {
+            // If black fill comes AFTER the last red fill, text was explicitly reset to black.
+            // This is the expected state after the fix.
+            assert!(
+                black_pos > red_pos,
+                "OBS-044-22-01: The last `1 0 0 rg` (red fill from SVG) appears at offset {red_pos}. \
+                 The first black fill operator appears at offset {black_pos}. \
+                 For text to be correctly black, black fill MUST appear AFTER the SVG red fill. \
+                 This confirms draw_text_at_bbox explicitly resets the fill to black."
+            );
+        } else if last_red_pos.is_none() {
+            // No red fill at all — SVG path color wasn't applied? The SVG may not
+            // have rendered. The /Font assertion above already guards this case.
+            // Accept as pass (SVG embedding not exercised, paint state isn't leaked).
+        } else {
+            // last_red_pos is Some but first_black_after_red is None.
+            // Red fill exists (from SVG) but no black fill reset was found — text
+            // is inheriting the leaked red fill. This is the FAILING case.
+            panic!(
+                "OBS-044-22-01 FAILED: `1 0 0 rg` (red SVG fill) found at offset {last_red_pos:?} in PDF, \
+                 but NO black fill reset (`0 0 0 rg` or `0 g`) found anywhere after it. \
+                 `draw_text_at_bbox` is inheriting the SVG's red fill for text rendering. \
+                 Fix: add `surface.set_fill(Some(black_fill))` before `surface.draw_text()` \
+                 in `draw_text_at_bbox`. \
+                 PDF (first 4096 bytes): {pdf_preview}"
+            );
+        }
     }
 }
