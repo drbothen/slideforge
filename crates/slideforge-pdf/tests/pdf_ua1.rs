@@ -463,21 +463,14 @@ fn test_bc_4_03_001_figure_alt_text_in_structure_tree() {
 /// `FrameContent::Diagram` must get REAL alt text from `DiagramSpec.alt`,
 /// NOT the hardcoded placeholder `"diagram"`.
 ///
-/// ## Red Gate trigger — THIS TEST WILL FAIL UNTIL STORY-045 IS IMPLEMENTED
+/// ## State after STORY-045 tag_engine.rs fix
 ///
-/// Currently `tag_engine.rs` uses:
-/// ```rust
-/// let alt_text = if diagram_svg.as_str().is_empty() { None } else { Some("diagram") };
-/// ```
-/// This is the exact placeholder string that must be replaced. This test verifies
-/// that the string `"diagram"` does NOT appear as the sole alt text for a Diagram
-/// frame when a real alt text is available from the spec.
+/// `tag_engine.rs` already emits `None` for frame-level Diagram (no alt-lie).
+/// This test verifies that the `(diagram)` placeholder bytes are NOT present.
 ///
-/// The test constructs a `FrameContent::Diagram` with a real SVG and expects
-/// the PDF to contain the DSL-supplied alt text (not the placeholder).
-/// Since there is no way to inject `DiagramSpec.alt` into `FrameContent::Diagram`
-/// until the IR threading is complete (STORY-045 task), this test will fail
-/// because the placeholder `"diagram"` is still used.
+/// The test also verifies that `tag_content_block` (body-level ContentBlock::Diagram)
+/// does NOT use the `.or(Some("diagram"))` fallback — any Diagram or Chart in a Body
+/// frame must use REAL alt from the spec, or None (never a generic placeholder).
 ///
 /// SID-1 compliance: this test exercises the production tag-engine path
 /// without requiring external dependencies (the SVG is an inline stub).
@@ -600,6 +593,113 @@ fn test_bc_4_03_001_chart_frame_alt_text_from_spec() {
     );
 }
 
+/// BC-4.03.001 AC-004 (F-045-I1 load-bearing): Body-level `ContentBlock::Chart` and
+/// `ContentBlock::Diagram` MUST NOT use the generic placeholder strings "chart" or
+/// "diagram" as /Alt values for /Figure StructElems.
+///
+/// ## Red Gate (F-045-I1)
+///
+/// `tag_content_block` in `tag_engine.rs` currently has:
+/// ```rust
+/// .or(Some("chart"))   // line 317
+/// .or(Some("diagram")) // line 333
+/// ```
+/// These are alt-lies: when `ChartSpec.alt` is `None` or `AltText::Decorative`,
+/// the fallback uses a generic type-name string instead of no alt text.
+///
+/// The correct behavior: if a body-level Chart/Diagram has no AltText::Provided,
+/// the Figure should either be omitted (treated as non-accessible) or the alt
+/// must be None — never a placeholder type-name string.
+///
+/// This test uses the `SlideTagEngine` API directly to inspect the tag tree
+/// without going through PDF byte scanning, making it structurally non-vacuous.
+#[allow(clippy::unwrap_used)]
+#[test]
+fn test_bc_4_03_001_body_level_chart_diagram_no_placeholder_alt() {
+    use krilla::tagging::{Node, TagKind};
+    use slideforge_layout::LaidOutSlide;
+    use slideforge_pdf::SlideTagEngine;
+    use slideforge_types::{AltText, ChartSpec, ContentBlock, DiagramSpec};
+
+    let engine = SlideTagEngine::new();
+
+    // Build a body-frame slide with:
+    // 1. A Chart block with NO alt text (alt: None) — must not produce alt="chart"
+    // 2. A Diagram block with AltText::Decorative — must not produce alt="diagram"
+    let chart_spec = ChartSpec {
+        chart_type: Arc::from("bar"),
+        alt: None, // No alt — must NOT fall back to "chart"
+        decorative: false,
+        span: slideforge_types::SourceSpan::default(),
+    };
+
+    let diagram_spec = DiagramSpec {
+        source: Arc::from("graph TD; A-->B"),
+        alt: Some(AltText::Decorative), // Decorative — must NOT fall back to "diagram"
+        decorative: true,
+        span: slideforge_types::SourceSpan::default(),
+    };
+
+    let body_slide = LaidOutSlide {
+        source_index: 0,
+        slide_type_keyword: Arc::from("content"),
+        frames: vec![Frame {
+            bbox: BoundingBox {
+                x: Emu(0),
+                y: Emu(0),
+                width: Emu(9_144_000),
+                height: Emu(4_572_000),
+            },
+            content: FrameContent::Body(vec![
+                ContentBlock::Chart(chart_spec),
+                ContentBlock::Diagram(diagram_spec),
+            ]),
+            text_flow: None,
+        }],
+        speaker_notes: None,
+        register_tags: RegisterSet::new(),
+        register_content: vec![],
+    };
+
+    let part_result = engine
+        .tag_slide(&body_slide)
+        .expect("tag_slide must succeed for body-level chart+diagram slide");
+
+    // Scan all children of the Part group for Figure nodes with placeholder alt text.
+    let mut chart_placeholder_found = false;
+    let mut diagram_placeholder_found = false;
+
+    for child in &part_result.part.children {
+        if let Node::Group(group) = child {
+            if let TagKind::Figure(ref fig_tag) = group.tag {
+                let alt = fig_tag.alt_text();
+                if alt == Some("chart") {
+                    chart_placeholder_found = true;
+                }
+                if alt == Some("diagram") {
+                    diagram_placeholder_found = true;
+                }
+            }
+        }
+    }
+
+    assert!(
+        !chart_placeholder_found,
+        "F-045-I1 FAILED: body-level ContentBlock::Chart with no alt produced \
+         a Figure with alt='chart' (placeholder alt-lie).\n\
+         tag_content_block must NOT use .or(Some(\"chart\")) as a fallback.\n\
+         When ChartSpec.alt is None, the Figure should use None alt or be omitted."
+    );
+
+    assert!(
+        !diagram_placeholder_found,
+        "F-045-I1 FAILED: body-level ContentBlock::Diagram with AltText::Decorative \
+         produced a Figure with alt='diagram' (placeholder alt-lie).\n\
+         tag_content_block must NOT use .or(Some(\"diagram\")) as a fallback.\n\
+         When DiagramSpec.alt is Decorative, the tag should be omitted (return Ok(None))."
+    );
+}
+
 // ─── AC-005: Decorative elements as PDF Artifacts ────────────────────────────
 
 /// BC-4.03.001 AC-005: A decorative image (empty alt) must NOT produce a `/Figure`
@@ -638,6 +738,114 @@ fn test_bc_4_03_001_decorative_elements_not_in_structure_tree() {
         "AC-005 FAILED: decorative image (empty alt) produced a '/Figure' entry in the \
          structure tree. Decorative elements must be marked as PDF Artifacts and EXCLUDED \
          from the structure tree (BC-4.03.001 postcondition 1)."
+    );
+}
+
+/// BC-4.03.001 AC-005 (F-045-C1 load-bearing): A decorative frame that IS drawn to
+/// the surface MUST produce an `Artifact` content tag in the PDF content stream.
+///
+/// ## What this asserts (load-bearing per TD-VSDD-059)
+///
+/// The test uses `PdfExporter::export_uncompressed` to produce a PDF with
+/// uncompressed content streams, then scans for the `Artifact BMC` sequence.
+/// PDF/UA-1 requires that decorative content is marked as `/Artifact BMC ... EMC`
+/// so PDF readers (including screen readers) skip it as non-semantic.
+///
+/// krilla emits `/Artifact BMC` (begin marked content) for
+/// `ContentTag::Artifact(ArtifactType::Other)` with `requires_properties() == false`.
+/// This is the load-bearing byte-level assertion: NOT the mere absence of `/Figure`,
+/// but the POSITIVE PRESENCE of the `Artifact` marker in the content stream.
+///
+/// ## Red Gate
+///
+/// The exporter currently does NOT call `surface.start_tagged(ContentTag::Artifact(...))`
+/// for frames in `part_result.decorative_frame_indices`. Until that call is added,
+/// the PDF content stream will NOT contain `Artifact BMC`, and this test FAILS.
+/// The decorative frame IS drawn (it goes through `draw_frame`), but it is not
+/// marked as an Artifact in the content stream — a PDF/UA-1 violation.
+#[allow(clippy::unwrap_used)]
+#[test]
+fn test_bc_4_03_001_decorative_artifact_content_tag_present() {
+    use slideforge_types::NormalizedDiagramSvg;
+
+    // Build a slide with a decorative SVG diagram frame (empty alt).
+    // We use Diagram content so the frame IS drawn (SVG path operators appear).
+    // The Diagram + empty_placeholder means no real SVG, but the key is the
+    // Artifact marking around the draw attempt.
+    // We use a minimal real SVG so krilla actually draws content and we can
+    // verify Artifact BMC surrounds real drawing commands.
+    let stub_svg = Arc::from(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10" fill="#003087"/></svg>"##,
+    );
+    let svg = NormalizedDiagramSvg::from_normalized_string(stub_svg);
+
+    let deck = deck_with_lang("en-US");
+    // A slide with: non-decorative title (tagged) + decorative Diagram (Artifact).
+    // We simulate decorative by using Image { alt: Arc::from("") }.
+    let laid_out = LaidOutDeck {
+        page_size: default_page_size(),
+        slides: vec![LaidOutSlide {
+            source_index: 0,
+            slide_type_keyword: Arc::from("photo"),
+            frames: vec![
+                Frame {
+                    bbox: BoundingBox {
+                        x: Emu(0),
+                        y: Emu(0),
+                        width: Emu(9_144_000),
+                        height: Emu(914_400),
+                    },
+                    content: FrameContent::Title(Arc::from("Slide with decorative frame")),
+                    text_flow: None,
+                },
+                Frame {
+                    bbox: BoundingBox {
+                        x: Emu(0),
+                        y: Emu(914_400),
+                        width: Emu(9_144_000),
+                        height: Emu(4_229_100),
+                    },
+                    // Decorative image: empty alt = must become an Artifact.
+                    content: FrameContent::Image { alt: Arc::from("") },
+                    text_flow: None,
+                },
+            ],
+            speaker_notes: None,
+            register_tags: RegisterSet::new(),
+            register_content: vec![],
+        }],
+        sections: vec![],
+        warnings: vec![],
+    };
+
+    // Use uncompressed export so content stream operators are scannable.
+    let exporter = PdfExporter::new();
+    let brand = minimal_brand();
+    let opts = slideforge_plugin_api::ExportOptions::default();
+    let bytes = exporter
+        .export_uncompressed(&deck, &laid_out, &brand, &opts)
+        .unwrap_or_else(|e| panic!("export_uncompressed failed: {e}"));
+
+    // Load-bearing assertion (F-045-C1 — TD-VSDD-059):
+    // The PDF content stream MUST contain `Artifact BMC` — the krilla-emitted
+    // marked-content sequence for ArtifactType::Other.
+    //
+    // krilla emits: `/Artifact BMC ... EMC` via:
+    //   surface.start_tagged(ContentTag::Artifact(ArtifactType::Other))
+    //     -> content.start_marked_content(Name(b"Artifact"))
+    //     -> content.content.begin_marked_content(name)
+    //     -> pdf-writer Content::begin_marked_content -> "/Artifact BMC"
+    //
+    // This is NOT the absence of /Figure — it is the POSITIVE PRESENCE of
+    // the Artifact marker, which proves the decorative frame was correctly
+    // wrapped in a marked-content sequence.
+    assert!(
+        pdf_contains(&bytes, b"Artifact"),
+        "F-045-C1 FAILED: PDF content stream does not contain 'Artifact' marker.\n\
+         The exporter must call surface.start_tagged(ContentTag::Artifact(ArtifactType::Other))\n\
+         before drawing decorative frames and surface.end_tagged() after.\n\
+         This produces `/Artifact BMC ... EMC` in the content stream.\n\
+         Currently: decorative_frame_indices is computed but NOT consumed in the draw loop."
     );
 }
 
@@ -1252,16 +1460,27 @@ fn test_bc_4_03_001_invariant_structure_tree_reading_order() {
 /// BC-4.03.001 invariant 3: Every /Figure element in the structure tree must have
 /// a non-empty /Alt entry. This is enforced at the tag-engine level.
 ///
-/// ## Red Gate trigger
+/// ## Red Gate trigger (strengthened for F-045-I2 per adversary finding)
 ///
-/// `tag_figure` currently accepts `None` alt for Diagram/Chart placeholders.
-/// Once STORY-045 threads real alt text, `tag_figure(Some(alt))` must be called
-/// with a non-empty string. This test verifies that when an Image frame has alt
-/// text, the PDF contains both `/Figure` AND the alt text literal — not just
-/// `/Figure` alone.
+/// The original test only checked that a single Image figure had alt text.
+/// This strengthened version uses the `SlideTagEngine` API directly to scan ALL
+/// Figure elements in the structure tree and assert that none has a None or empty alt.
+/// This catches the `tag_figure(None)` path used for frame-level Diagram/Chart
+/// (which would produce a /Figure without /Alt — a UA-1 violation).
+///
+/// F-045-I2: tag_figure(None) is currently called for FrameContent::Diagram and
+/// FrameContent::Chart in `tag_slide`. Those frames ARE emitted by the v1 layout
+/// engine (regions.rs lines 264, 280). The test verifies that no /Figure node in
+/// the complete tag tree has a None alt text — scanning all children of all Part
+/// groups, not just the first one.
 #[allow(clippy::unwrap_used)]
 #[test]
 fn test_bc_4_03_001_invariant_every_figure_has_non_empty_alt() {
+    use krilla::tagging::{Node, TagKind};
+    use slideforge_layout::LaidOutSlide;
+    use slideforge_pdf::SlideTagEngine;
+    use slideforge_types::NormalizedDiagramSvg;
+
     let deck = deck_with_lang("en-US");
     let alt = "Satellite photo of Earth from orbit";
     let laid_out = figure_slide_with_alt(alt);
@@ -1279,5 +1498,81 @@ fn test_bc_4_03_001_invariant_every_figure_has_non_empty_alt() {
         "invariant-3 FAILED: alt text '{}' not found in PDF bytes — every /Figure \
          must have a non-empty /Alt entry (BC-4.03.001 invariant 3).",
         alt
+    );
+
+    // ── F-045-I2: structural scan — every Figure node must have non-empty alt ──
+    //
+    // Use SlideTagEngine directly to inspect the tag tree for ALL Figure nodes.
+    // This catches the tag_figure(None) path for FrameContent::Diagram/Chart.
+    //
+    // Build a slide with a frame-level Diagram frame (empty_placeholder SVG).
+    // The layout engine emits FrameContent::Diagram(empty_placeholder()) for
+    // "diagram"-type slides (regions.rs:280). This exercises the exact code path
+    // that was using None alt.
+    //
+    // After F-045-I2 fix: the Diagram frame with empty SVG must NOT produce
+    // a Figure node with None alt (it should either be tagged as Artifact if
+    // decorative, or tagged with the real alt if it has one, or guarded with
+    // a debug_assert and code comment for unreachable dead code in v1).
+    let engine = SlideTagEngine::new();
+
+    // Build a slide with one frame-level Diagram (empty placeholder SVG).
+    let empty_svg = NormalizedDiagramSvg::from_normalized_string(Arc::from(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"></svg>"#,
+    ));
+    let diagram_slide = LaidOutSlide {
+        source_index: 0,
+        slide_type_keyword: Arc::from("diagram"),
+        frames: vec![Frame {
+            bbox: BoundingBox {
+                x: Emu(0),
+                y: Emu(0),
+                width: Emu(9_144_000),
+                height: Emu(5_143_500),
+            },
+            content: FrameContent::Diagram(empty_svg),
+            text_flow: None,
+        }],
+        speaker_notes: None,
+        register_tags: RegisterSet::new(),
+        register_content: vec![],
+    };
+    let part_result = engine
+        .tag_slide(&diagram_slide)
+        .expect("tag_slide must succeed for diagram slide");
+
+    // Scan all children of the Part group for Figure nodes.
+    // BC-4.03.001 invariant 3: EVERY Figure node must have non-empty alt.
+    let mut figure_without_alt_count = 0usize;
+    for child in &part_result.part.children {
+        if let Node::Group(group) = child {
+            if let TagKind::Figure(ref fig_tag) = group.tag {
+                let alt_text = fig_tag.alt_text();
+                if alt_text.is_none() || alt_text.unwrap_or("").is_empty() {
+                    figure_without_alt_count += 1;
+                    eprintln!(
+                        "invariant-3/diagram: Figure node has None/empty alt: {:?}",
+                        alt_text
+                    );
+                }
+            }
+        }
+    }
+
+    // Also check: if the Diagram frame is in decorative_frame_indices, that is
+    // also acceptable — it means the frame was treated as an Artifact, not a Figure.
+    // Only fail if there is a Figure node WITHOUT alt AND it is NOT in decorative_frame_indices.
+    let is_in_decorative = part_result.decorative_frame_indices.contains(&0);
+
+    assert!(
+        figure_without_alt_count == 0 || is_in_decorative,
+        "invariant-3/diagram FAILED: {} Figure node(s) have None/empty alt text \
+         and frame 0 is NOT in decorative_frame_indices.\n\
+         FrameContent::Diagram with no alt must either:\n\
+         (a) be excluded from the structure tree (decorative_frame_indices), OR\n\
+         (b) carry a non-empty alt from the real DiagramSpec.alt.\n\
+         Currently tag_slide emits tag_figure(None) for all Diagram frames \
+         regardless of alt text — this is a BC-4.03.001 invariant-3 violation.",
+        figure_without_alt_count
     );
 }

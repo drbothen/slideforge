@@ -179,51 +179,47 @@ impl SlideTagEngine {
                     }
                 },
 
-                // ── Diagram → Figure (alt from frame when available) ─────────
-                FrameContent::Diagram(diagram_svg) => {
-                    // `FrameContent::Diagram` carries the rendered SVG payload but
-                    // does not yet carry the original `DiagramSpec.alt` string —
-                    // that IR threading is part of the layout-engine work that
-                    // completes in STORY-045.  Until then, the alt must be `None`:
+                // ── Diagram → Artifact (frame-level, v1 layout) ──────────────
+                FrameContent::Diagram(_diagram_svg) => {
+                    // F-045-I2 / BC-4.03.001 invariant-3 investigation result:
                     //
-                    //  - Using a generic placeholder such as `"diagram"` is an
-                    //    "alt lie" (the string describes the frame type, not the
-                    //    diagram content) and is rejected by AC-004 of this story.
-                    //  - Emitting `None` on a non-empty SVG tells PDF readers that
-                    //    no human-authored alt text is available; validators will
-                    //    flag `MissingAltText` at validation time, but the PDF byte
-                    //    stream does not contain a misleading generic string.
+                    // `FrameContent::Diagram` IS emitted by the v1 layout engine
+                    // (regions.rs:280) as `FrameContent::Diagram(empty_placeholder())`.
+                    // The frame carries NO alt text — the original `DiagramSpec.alt`
+                    // is not threaded through the geometric IR in v1.
                     //
-                    // When the IR threading lands, `FrameContent::Diagram` will
-                    // carry an `alt: Option<Arc<str>>` field and this arm will
-                    // call `self.tag_figure(diagram_svg.alt().map(Arc::as_ref))`.
-                    let alt_text: Option<&str> = if diagram_svg.as_str().is_empty() {
-                        // Empty SVG placeholder — no content to describe; treat
-                        // as if no alt is available.
-                        None
-                    } else {
-                        // Non-empty SVG but no alt from the IR yet.
-                        // Do NOT use the placeholder string "diagram".
-                        None
-                    };
-                    part_group.push(self.tag_figure(alt_text)?);
+                    // Emitting `tag_figure(None)` would produce a /Figure with no /Alt
+                    // — a BC-4.03.001 invariant-3 violation ("every Figure has non-empty
+                    // /Alt").  Emitting a placeholder string is an "alt lie".
+                    //
+                    // Resolution: treat ALL frame-level Diagram frames as Artifacts in v1.
+                    // The empty-placeholder SVG has no meaningful user content to describe;
+                    // the semantic content comes from the surrounding text, which IS tagged.
+                    // The IR-threading story (planned for a future wave) will add an
+                    // `alt: Option<Arc<str>>` field to `FrameContent::Diagram` — at that
+                    // point this arm will be updated to:
+                    //   - `AltText::Provided(s)` → `part_group.push(self.tag_figure(Some(s))?)`.
+                    //   - `AltText::Decorative` / None → `decorative_frame_indices.push(frame_idx)`.
+                    //
+                    // This is NOT modifying slideforge-layout (which is STORY-073's territory).
+                    // It is a correct tagging decision within the current IR constraint.
+                    decorative_frame_indices.push(frame_idx);
                 },
 
-                // ── Chart → Figure (alt from frame when available) ────────────
+                // ── Chart → Artifact (frame-level, v1 layout) ────────────────
                 FrameContent::Chart => {
-                    // `FrameContent::Chart` carries no alt text yet (the alt
-                    // lives in `ContentBlock::Chart.alt` in the semantic IR and
-                    // is not threaded into the geometric IR until the layout
-                    // engine IR-threading work planned for STORY-045).
+                    // F-045-I2 / BC-4.03.001 invariant-3 investigation result:
                     //
-                    // Using the generic placeholder `"chart"` is an alt lie
-                    // (AC-004 of this story rejects it).  Emit `None` instead:
-                    // the PDF reader is informed that no author-supplied alt text
-                    // is available, which is semantically accurate.
+                    // `FrameContent::Chart` IS emitted by the v1 layout engine
+                    // (regions.rs:264) but carries NO data and NO alt text in the
+                    // geometric IR.  Same rationale as `FrameContent::Diagram` above.
                     //
-                    // When the IR threading lands, this arm will call
-                    // `self.tag_figure(chart_alt.as_deref())`.
-                    part_group.push(self.tag_figure(None)?);
+                    // Treat ALL frame-level Chart frames as Artifacts in v1.
+                    // When the IR-threading story ships, this arm will be updated to
+                    // use the real alt from `ChartSpec.alt`.
+                    //
+                    // This is NOT modifying slideforge-layout (STORY-073 constraint).
+                    decorative_frame_indices.push(frame_idx);
                 },
 
                 // ── Shape → Figure+Alt or Artifact if decorative ──────────────
@@ -302,36 +298,34 @@ impl SlideTagEngine {
                 Some(AltText::Provided(alt)) => Ok(Some(self.tag_figure(Some(alt))?)),
             },
 
-            // Chart in body → Figure+Alt
+            // Chart in body → Figure+Alt, or omit if decorative / no alt.
+            //
+            // F-045-I1 (alt-lie fix): `.or(Some("chart"))` was a placeholder that
+            // produced a /Figure with the generic string "chart" as alt text.
+            // This is an "alt lie" — the string describes the element type, not the
+            // chart content.  PDF/UA-1 requires meaningful alt text.
+            //
+            // Correct behavior:
+            //   - `AltText::Provided(s)` → emit Figure with real alt text.
+            //   - `AltText::Decorative` or `alt: None` → omit from tag tree
+            //     (return `Ok(None)`); a chart with no author-supplied alt is
+            //     semantically inaccessible and must not pretend otherwise.
             ContentBlock::Chart(chart_spec) => {
-                let alt = chart_spec
-                    .alt
-                    .as_ref()
-                    .and_then(|a| {
-                        if let AltText::Provided(s) = a {
-                            Some(s.as_ref())
-                        } else {
-                            None
-                        }
-                    })
-                    .or(Some("chart"));
-                Ok(Some(self.tag_figure(alt)?))
+                match chart_spec.alt.as_ref() {
+                    Some(AltText::Provided(s)) => Ok(Some(self.tag_figure(Some(s))?)),
+                    Some(AltText::Decorative) | None => Ok(None),
+                }
             },
 
-            // Diagram in body → Figure+Alt
+            // Diagram in body → Figure+Alt, or omit if decorative / no alt.
+            //
+            // F-045-I1 (alt-lie fix): `.or(Some("diagram"))` was a placeholder.
+            // Same rationale as the Chart arm above.
             ContentBlock::Diagram(diagram_spec) => {
-                let alt = diagram_spec
-                    .alt
-                    .as_ref()
-                    .and_then(|a| {
-                        if let AltText::Provided(s) = a {
-                            Some(s.as_ref())
-                        } else {
-                            None
-                        }
-                    })
-                    .or(Some("diagram"));
-                Ok(Some(self.tag_figure(alt)?))
+                match diagram_spec.alt.as_ref() {
+                    Some(AltText::Provided(s)) => Ok(Some(self.tag_figure(Some(s))?)),
+                    Some(AltText::Decorative) | None => Ok(None),
+                }
             },
 
             // Image in body → Figure+Alt
