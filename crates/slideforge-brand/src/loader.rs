@@ -208,7 +208,7 @@ impl BrandLoader {
         };
 
         // --- Step 10: Detect footer text and visibility flags (STORY-075) ---
-        // For PPTX: reads slideMaster1.xml + optional slideLayout1.xml + presProps.xml.
+        // For PPTX: reads slideMaster1.xml + optional slideLayout1.xml.
         // For DOCX: returns FooterDetection::default() immediately (no slide master).
         let footer = detect_footer(&mut zip, is_pptx);
 

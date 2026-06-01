@@ -339,11 +339,16 @@ pub struct BrandTemplate {
     /// Optional footer text (from the deck-level footer field).
     pub footer_text: Option<Arc<str>>,
 
-    /// Footer-visibility flags extracted from `ppt/presProps.xml` (STORY-075).
+    /// Footer-visibility flags extracted from the `<p:hf>` (`CT_HeaderFooter`) element
+    /// on `ppt/slideMasters/slideMaster1.xml` (STORY-075, BC-2.01.001 v1.3 corrected).
     ///
-    /// All three flags default to `false` when `presProps.xml` is absent from the
-    /// ZIP, or when the brand was loaded from a DOCX file (which has no slide-master
-    /// footer placeholders).
+    /// Each flag corresponds to one boolean attribute (`ftr`, `dt`, `sldNum`) on the
+    /// `<p:hf>` element.  All three flags default to `false` per EC-004 when `<p:hf>`
+    /// is absent from `slideMaster1.xml`, or when the brand was loaded from a DOCX
+    /// file (which has no slide-master footer element).
+    ///
+    /// `ppt/presProps.xml` is **NOT** consulted for these flags — `CT_ShowProperties`
+    /// has no `ftr`/`dt`/`sldNum` children per ECMA-376.
     pub footer_flags: FooterFlags,
 
     /// Slide layout XML names discovered in `ppt/slideLayouts/slideLayout*.xml`.

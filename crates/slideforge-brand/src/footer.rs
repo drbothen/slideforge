@@ -68,17 +68,21 @@ pub struct FooterFlags {
 ///
 /// Produced by [`detect_footer`].  For DOCX input (`is_pptx = false`) or when
 /// the slide master is absent from the ZIP, all fields hold their default values.
+///
+/// This type is an internal helper consumed by [`crate::loader::BrandLoader`].
+/// External consumers access the extracted data via [`crate::template::BrandTemplate`]
+/// fields (`footer_flags: FooterFlags`, `footer_text: Option<Arc<str>>`).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct FooterDetection {
+pub(crate) struct FooterDetection {
     /// Footer text — the full concatenation of all `<a:t>` runs inside the first
     /// footer placeholder found in the slide master (or layout1 as a fallback).
     /// `None` if no text was found.
-    pub text: Option<Arc<str>>,
+    pub(crate) text: Option<Arc<str>>,
     /// Footer-visibility flags from the `<p:hf>` element on `slideMaster1.xml`.
-    pub flags: FooterFlags,
+    pub(crate) flags: FooterFlags,
 }
 
-// ─── Public API ───────────────────────────────────────────────────────────────
+// ─── Crate-internal API ───────────────────────────────────────────────────────
 
 /// Detect footer text and visibility flags from an already-open PPTX ZIP.
 ///
@@ -111,7 +115,10 @@ pub struct FooterDetection {
 /// `ppt/presProps.xml` is **NOT** read for footer visibility (adversary H-1 /
 /// BC-2.01.001 v1.3).  `CT_ShowProperties` has no `ftr`/`dt`/`sldNum` children.
 #[must_use]
-pub fn detect_footer<R: Read + Seek>(zip: &mut ZipArchive<R>, is_pptx: bool) -> FooterDetection {
+pub(crate) fn detect_footer<R: Read + Seek>(
+    zip: &mut ZipArchive<R>,
+    is_pptx: bool,
+) -> FooterDetection {
     if !is_pptx {
         // AC-006 / EC-005: DOCX has no slide-master footer; skip all detection.
         return FooterDetection::default();
@@ -1799,5 +1806,68 @@ mod tests {
 
         // Cleanup.
         let _ = std::fs::remove_dir_all(&output_dir);
+    }
+
+    // ─── BC-2.01.001 v1.3 canonical test vector (OBS-2) ──────────────────────
+
+    /// BC-2.01.001 v1.3 canonical test vector — `<p:hf ftr="1" dt="1" sldNum="0"/>`.
+    ///
+    /// This is the verbatim test vector from BC-2.01.001 v1.3:
+    ///   `<p:hf ftr="1" dt="1" sldNum="0"/>` →
+    ///   `FooterFlags { show_footer: true, show_date: true, show_slide_number: false }`
+    ///
+    /// The `sldNum="0"` path explicitly exercises the numeric `"0"` → `false` branch
+    /// of `parse_ooxml_bool`, distinct from the absent-attribute path (which also
+    /// yields `false` but via a different code path).
+    #[test]
+    fn test_bc_2_01_001_v1_3_canonical_vector_ftr1_dt1_sldnum0() {
+        // Fixture: exactly the canonical <p:hf> element from BC-2.01.001 v1.3.
+        const MASTER_CANONICAL_VECTOR_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sldMaster xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"
+             xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+  <p:hf ftr="1" dt="1" sldNum="0"/>
+  <p:spTree>
+    <p:sp>
+      <p:nvSpPr>
+        <p:nvPr>
+          <p:ph type="ftr" idx="11"/>
+        </p:nvPr>
+      </p:nvSpPr>
+      <p:txBody>
+        <a:bodyPr/><a:lstStyle/>
+        <a:p><a:r><a:t>Test Footer</a:t></a:r></a:p>
+      </p:txBody>
+    </p:sp>
+  </p:spTree>
+</p:sldMaster>"#;
+
+        let zip_bytes = build_pptx_zip_with_extras(&[(
+            "ppt/slideMasters/slideMaster1.xml",
+            MASTER_CANONICAL_VECTOR_XML.as_bytes(),
+        )]);
+        let cursor = Cursor::new(zip_bytes);
+        let mut zip = zip::ZipArchive::new(cursor).unwrap();
+
+        let detection = detect_footer(&mut zip, true);
+
+        assert!(
+            detection.flags.show_footer,
+            "BC-2.01.001 v1.3 canonical vector: <p:hf ftr=\"1\"/> must yield show_footer = true; \
+             got show_footer={}",
+            detection.flags.show_footer
+        );
+        assert!(
+            detection.flags.show_date,
+            "BC-2.01.001 v1.3 canonical vector: <p:hf dt=\"1\"/> must yield show_date = true; \
+             got show_date={}",
+            detection.flags.show_date
+        );
+        assert!(
+            !detection.flags.show_slide_number,
+            "BC-2.01.001 v1.3 canonical vector: <p:hf sldNum=\"0\"/> must yield \
+             show_slide_number = false (explicit numeric zero); \
+             got show_slide_number={}",
+            detection.flags.show_slide_number
+        );
     }
 }
