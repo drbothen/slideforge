@@ -2365,7 +2365,7 @@ mod tests {
     /// the count assertion below fails (0 frames instead of 1).
     ///
     /// At Red Gate: `layout::run` does not process `ContentBlock::Bullets` at all, so
-    /// 0 TextRun frames are produced — the count assertion fails immediately.
+    /// 0 `TextRun` frames are produced — the count assertion fails immediately.
     #[test]
     fn test_bc_3_05_001_story073_ec002_empty_inlines_bullet_produces_one_frame() {
         use slideforge_types::{Block, BulletItem, ContentBlock, InlineNode, SourceSpan};
@@ -2394,9 +2394,8 @@ mod tests {
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
 
-        let result = run(&deck, &brand).expect(
-            "layout::run must succeed for a bullet item with empty inlines (EC-002)",
-        );
+        let result = run(&deck, &brand)
+            .expect("layout::run must succeed for a bullet item with empty inlines (EC-002)");
 
         let slide_out = &result.slides[0];
 
@@ -2444,16 +2443,16 @@ mod tests {
     ///
     /// This test uses POSITIONAL assertions on the frame vector, not order-independent
     /// `.any()` matching. The expected invariant:
-    ///   frames[parent_idx]       carries the parent inlines
-    ///   frames[parent_idx + 1]   carries the child inlines
-    ///   frames[parent_idx + 2]   carries the grandchild inlines
+    ///   `frames[parent_idx]`       carries the parent inlines
+    ///   `frames[parent_idx + 1]`   carries the child inlines
+    ///   `frames[parent_idx + 2]`   carries the grandchild inlines
     ///
     /// Load-bearing (F-P1-LOW-002): a future change that emits children before parents,
     /// reverses depth-first traversal, or flattens nesting in a different order will cause
     /// these positional assertions to fail. The order-independent `.any()` approach used in
     /// the original EC-003 test would NOT catch such a regression.
     ///
-    /// At Red Gate: `layout::run` does not process `ContentBlock::Bullets` → 0 TextRun
+    /// At Red Gate: `layout::run` does not process `ContentBlock::Bullets` → 0 `TextRun`
     /// frames → the exact-count assertion and all positional assertions fail immediately.
     #[test]
     fn test_bc_3_05_001_story073_ec003_nested_bullets_exact_frame_order_three_levels() {
@@ -2529,7 +2528,10 @@ mod tests {
              Positions: {:?}",
             text_run_positions.len(),
             slide_out.frames.len(),
-            text_run_positions.iter().map(|(i, _)| i).collect::<Vec<_>>()
+            text_run_positions
+                .iter()
+                .map(|(i, _)| i)
+                .collect::<Vec<_>>()
         );
 
         // Extract the three frame-vector indices for readable positional assertions.
@@ -2747,7 +2749,7 @@ mod tests {
     // push_bullet_frames before recursing further.
     // ─────────────────────────────────────────────────────────────────────────
 
-    /// F-P1-MED-001 — A `ContentBlock::Bullets` with a structural BulletItem chain
+    /// F-P1-MED-001 — A `ContentBlock::Bullets` with a structural `BulletItem` chain
     /// nested 65 levels deep (parent → child → ... → 65 levels) must return
     /// `Err(LayoutError::BulletDepthExceeded { depth: 65 })` from `layout::run`,
     /// NOT `Ok(...)` and NOT a stack overflow.
@@ -2811,7 +2813,10 @@ mod tests {
             "bullet structural depth 65 must return Err(BulletDepthExceeded), got Ok"
         );
         match result.unwrap_err() {
-            LayoutError::BulletDepthExceeded { depth } => {
+            LayoutError::BulletDepthExceeded {
+                depth,
+                source_slide_index,
+            } => {
                 assert_eq!(
                     depth,
                     MAX_BULLET_DEPTH + 1,
@@ -2819,10 +2824,12 @@ mod tests {
                     MAX_BULLET_DEPTH + 1,
                     depth
                 );
+                assert_eq!(
+                    source_slide_index, 0,
+                    "source_slide_index must be 0 (the only slide); got {source_slide_index}"
+                );
             },
-            other => panic!(
-                "expected LayoutError::BulletDepthExceeded, got: {other:?}"
-            ),
+            other => panic!("expected LayoutError::BulletDepthExceeded, got: {other:?}"),
         }
     }
 }

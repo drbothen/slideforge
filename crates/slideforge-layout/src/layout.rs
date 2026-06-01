@@ -472,6 +472,7 @@ fn push_bullet_frames_inner(
     // returns the error rather than pushing frames and then recursing further.
     if current_depth > MAX_BULLET_DEPTH {
         return Err(LayoutError::BulletDepthExceeded {
+            source_slide_index,
             depth: current_depth,
         });
     }

@@ -227,7 +227,8 @@ pub enum LayoutError {
     },
 
     /// Bullet item structural nesting depth exceeded the maximum safe level
-    /// (F-P1-MED-001 / BC-3.05.001 invariant 4 — structural-depth analogue).
+    /// (F-P1-MED-001 / BC-3.05.001 invariant 4 — structural-depth analogue /
+    /// error taxonomy code **E-LAY-007**).
     ///
     /// This error is distinct from [`LayoutError::InlineDepthExceeded`]: it
     /// bounds `BulletItem.children` chain depth (structural nesting), NOT the
@@ -242,11 +243,13 @@ pub enum LayoutError {
     /// `depth` is the first rejected depth value (i.e., `MAX_BULLET_DEPTH + 1`
     /// = 65 for the default limit).
     #[error(
-        "layout error: bullet structural nesting depth {depth} exceeds maximum \
-         ({max}) — reduce bullet list nesting depth",
+        "layout error: slide {source_slide_index}: bullet structural nesting depth {depth} exceeds \
+         maximum ({max}) — reduce bullet list nesting depth",
         max = crate::layout::MAX_BULLET_DEPTH
     )]
     BulletDepthExceeded {
+        /// Zero-based index of the slide containing the over-nested bullet list.
+        source_slide_index: usize,
         /// The structural nesting depth at which the limit was exceeded.
         /// This equals `MAX_BULLET_DEPTH + 1` for the first rejected level.
         depth: usize,
