@@ -280,6 +280,9 @@ impl BrandSynthesizer {
             fonts,
             logo,
             footer_text,
+            // Synthesized brands are created from brand.toml, not from a PPTX ZIP.
+            // Footer flags are not applicable to synthesized templates — default to false.
+            footer_flags: crate::footer::FooterFlags::default(),
             layout_names,
             layouts,
             notes_master_stub,

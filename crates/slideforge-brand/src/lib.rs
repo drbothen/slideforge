@@ -82,6 +82,7 @@ pub use error::{
     BrandError, E_BRD_001, E_BRD_002, E_BRD_003, E_BRD_004, E_BRD_005, E_BRD_006, E_BRD_007,
 };
 pub use extractor::{BrandExtractionResult, BrandExtractor};
+pub use footer::FooterFlags;
 pub use layouts::{LayoutPlaceholder, SlideLayoutDef};
 pub use loader::BrandLoader;
 pub use overlay::{BrandOverlay, LogoOverride, resolve_overlay};

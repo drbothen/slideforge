@@ -1,64 +1,368 @@
 //! Footer detection from OOXML `.pptx` slide master and layout XML.
 //!
-//! ## STORY-075 — Red Gate (test-only file, no production implementation)
+//! This module reads `ppt/slideMasters/slideMaster1.xml` and
+//! `ppt/slideLayouts/slideLayout1.xml` from an already-open PPTX ZIP archive to
+//! detect footer placeholder text (`<p:ph type="ftr"/>`).  It also reads
+//! `ppt/presProps.xml` to extract the three footer-visibility flags
+//! (`show_footer`, `show_date`, `show_slide_number`).
 //!
-//! This file declares the **public API surface** that STORY-075 must implement.
-//! Every symbol here is referenced by tests in `#[cfg(test)] mod tests` below.
-//! The tests are the only authoritative specification at the code level —
-//! no implementation exists yet. All tests must fail at the Red Gate.
+//! ## Parsing strategy
 //!
-//! ## Expected API after implementation
+//! Both XML files are parsed with a SAX-style `quick-xml` event loop following
+//! the same pattern established in `color.rs` and `font.rs`.  The state machine
+//! tracks entry into `<p:sp>` elements and looks for a `<p:ph type="ftr"/>` child
+//! within `<p:nvSpPr><p:nvPr>`.  Once a footer placeholder is identified, the
+//! first `<a:t>` text run inside a `<a:r>` element is collected.  An `<a:fld>`
+//! element (EC-006) is treated as no-text because it represents a dynamic field
+//! (date, slide number) rather than static footer text.
 //!
-//! ```text
-//! // Missing symbols that tests reference — listed for implementer orientation:
+//! ## Inheritance order
 //!
-//! pub struct FooterFlags {
-//!     pub show_footer: bool,
-//!     pub show_date: bool,
-//!     pub show_slide_number: bool,
-//! }
-//! impl Default for FooterFlags { ... }  // all false
-//!
-//! pub struct FooterDetection {
-//!     pub text: Option<Arc<str>>,
-//!     pub flags: FooterFlags,
-//! }
-//! impl Default for FooterDetection { ... }
-//!
-//! pub fn detect_footer<R: Read + Seek>(
-//!     zip: &mut ZipArchive<R>,
-//!     is_pptx: bool,
-//! ) -> FooterDetection
-//! ```
-//!
-//! ## OOXML structures detected
-//!
-//! Footer placeholder in `ppt/slideMasters/slideMaster1.xml`:
-//! ```xml
-//! <p:sp>
-//!   <p:nvSpPr><p:nvPr><p:ph type="ftr" sz="quarter" idx="11"/></p:nvPr></p:nvSpPr>
-//!   <p:txBody><a:bodyPr/><a:lstStyle/>
-//!     <a:p><a:r><a:t>Footer text content here</a:t></a:r></a:p>
-//!   </p:txBody>
-//! </p:sp>
-//! ```
-//!
-//! Footer visibility flags in `ppt/presProps.xml`:
-//! ```xml
-//! <p:presentationPr>
-//!   <p:showPr>
-//!     <p:ftr val="1"/>
-//!     <p:dt val="1"/>
-//!     <p:sldNum val="1"/>
-//!   </p:showPr>
-//! </p:presentationPr>
-//! ```
+//! Slide master is checked first; if the footer placeholder is present but has
+//! no text, the slide layout fallback (`slideLayout1.xml`) is tried (AC-002).
+//! This mirrors the OOXML placeholder inheritance chain: layout → master by type.
 
-// NOTE: No production symbols are defined here yet.
-// The test module below references `FooterFlags`, `FooterDetection`, and
-// `detect_footer` — which do not exist. The Rust compiler will reject
-// this file with "cannot find type/function in this scope" errors, proving
-// Red Gate without requiring runtime execution.
+use std::io::{Read, Seek};
+use std::sync::Arc;
+
+use quick_xml::Reader;
+use quick_xml::events::Event;
+use zip::ZipArchive;
+
+// ─── Public types ─────────────────────────────────────────────────────────────
+
+/// Footer-visibility flags extracted from `ppt/presProps.xml`.
+///
+/// Each flag corresponds to one `<p:showPr>` child element in the OOXML
+/// presentation properties.  If `presProps.xml` is absent from the ZIP, all
+/// three flags default to `false` (AC-003 / EC-004).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+pub struct FooterFlags {
+    /// Whether footer text is visible on slides (`<p:ftr val="1"/>`).
+    pub show_footer: bool,
+    /// Whether the date/time placeholder is visible on slides (`<p:dt val="1"/>`).
+    pub show_date: bool,
+    /// Whether the slide-number placeholder is visible on slides (`<p:sldNum val="1"/>`).
+    pub show_slide_number: bool,
+}
+
+/// The combined result of footer detection from a PPTX ZIP archive.
+///
+/// Produced by [`detect_footer`].  For DOCX input (`is_pptx = false`) or when
+/// the slide master is absent from the ZIP, all fields hold their default values.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct FooterDetection {
+    /// Footer text extracted from the first footer placeholder in the slide
+    /// master (or layout1 as a fallback), or `None` if no text was found.
+    pub text: Option<Arc<str>>,
+    /// Footer-visibility flags from `ppt/presProps.xml`.
+    pub flags: FooterFlags,
+}
+
+// ─── Public API ───────────────────────────────────────────────────────────────
+
+/// Detect footer text and visibility flags from an already-open PPTX ZIP.
+///
+/// ## Detection order
+///
+/// 1. If `is_pptx` is `false` (DOCX input), return [`FooterDetection::default`]
+///    immediately without reading any XML (AC-006 / EC-005).
+/// 2. Read `ppt/slideMasters/slideMaster1.xml` and search for
+///    `<p:ph type="ftr"/>` placeholders. Extract the first non-empty
+///    `<a:t>` text run found inside an `<a:r>` element.
+/// 3. If the master placeholder is present but has no text, fall back to
+///    `ppt/slideLayouts/slideLayout1.xml` and repeat (AC-002 / EC-002).
+/// 4. If `slideMaster1.xml` is absent from the ZIP, emit a `tracing::debug!`
+///    and return `None` for the text (AC-005 / EC-001).
+/// 5. Read `ppt/presProps.xml` (if present) and parse the three visibility
+///    flags. Missing file → `FooterFlags::default()` (AC-003 / EC-004).
+///
+/// ## Field element handling
+///
+/// A footer placeholder that contains only `<a:fld>` elements (dynamic date /
+/// slide-number fields) is treated as having no text (EC-006).  Only `<a:t>`
+/// text runs inside `<a:r>` elements count.
+#[must_use]
+pub fn detect_footer<R: Read + Seek>(zip: &mut ZipArchive<R>, is_pptx: bool) -> FooterDetection {
+    if !is_pptx {
+        // AC-006 / EC-005: DOCX has no slide-master footer; skip all detection.
+        return FooterDetection::default();
+    }
+
+    // --- Step 1: Read footer text from slide master (with layout fallback) ---
+    let master_result = read_footer_text_from_zip(zip, "ppt/slideMasters/slideMaster1.xml");
+
+    let text = match master_result {
+        FooterXmlResult::Absent => {
+            // EC-001 / AC-005: master XML not present in ZIP.
+            tracing::debug!(
+                "ppt/slideMasters/slideMaster1.xml absent from ZIP; \
+                 footer detection skipped"
+            );
+            None
+        },
+        FooterXmlResult::NoPlaceholder => {
+            // No <p:ph type="ftr"/> in master; no fallback needed.
+            None
+        },
+        FooterXmlResult::EmptyText => {
+            // Master placeholder present but text is empty; try layout1 (AC-002 / EC-002).
+            match read_footer_text_from_zip(zip, "ppt/slideLayouts/slideLayout1.xml") {
+                FooterXmlResult::FoundText(t) => Some(t),
+                _ => None,
+            }
+        },
+        FooterXmlResult::FoundText(t) => Some(t),
+    };
+
+    // --- Step 2: Read footer-visibility flags from presProps.xml ---
+    let flags = read_pres_props_flags(zip);
+
+    FooterDetection { text, flags }
+}
+
+// ─── Internal types and helpers ───────────────────────────────────────────────
+
+/// Outcome of attempting to extract footer text from one XML file in the ZIP.
+#[derive(Debug)]
+enum FooterXmlResult {
+    /// The ZIP entry did not exist.
+    Absent,
+    /// The XML was parsed successfully but contained no `<p:ph type="ftr"/>` element.
+    NoPlaceholder,
+    /// A footer placeholder was found but its text run was empty or absent.
+    EmptyText,
+    /// A footer placeholder was found with a non-empty text run.
+    FoundText(Arc<str>),
+}
+
+/// Read the bytes of `zip_path` from `zip`, return `None` if absent.
+fn read_zip_entry<R: Read + Seek>(zip: &mut ZipArchive<R>, zip_path: &str) -> Option<Vec<u8>> {
+    let mut entry = zip.by_name(zip_path).ok()?;
+    let mut buf = Vec::new();
+    entry.read_to_end(&mut buf).ok()?;
+    Some(buf)
+}
+
+/// Parse `xml_bytes` looking for a `<p:ph type="ftr"/>` footer placeholder and
+/// extract the first non-empty `<a:t>` text run inside an `<a:r>` element.
+///
+/// Returns [`FooterXmlResult`] describing the outcome.
+///
+/// ## State machine
+///
+/// The parser tracks whether it is inside a `<p:sp>` that has been identified as
+/// a footer placeholder.  Key transitions:
+///
+/// - `<p:sp>` → enter shape scope; reset footer-placeholder flag.
+/// - `<p:ph>` with `type="ftr"` attribute → mark current shape as a footer placeholder.
+/// - `</p:sp>` → if this was a footer placeholder and we accumulated text, return it;
+///   if placeholder was found but text is empty/absent, mark as empty.  If the first
+///   populated footer placeholder has already been found, stop early.
+/// - `<a:r>` inside a footer placeholder → enter run scope.
+/// - `</a:r>` → exit run scope.
+/// - `<a:t>` inside a run inside a footer placeholder → collect characters.
+/// - `<a:fld>` inside a footer placeholder → mark field element seen; NOT a text run.
+fn parse_footer_text_from_xml(xml_bytes: &[u8]) -> FooterXmlResult {
+    let mut reader = Reader::from_reader(xml_bytes);
+    reader.config_mut().trim_text(true);
+
+    let mut buf = Vec::new();
+
+    // State
+    let mut in_sp = false; // inside <p:sp>
+    let mut is_footer_ph = false; // current <p:sp> has <p:ph type="ftr"/>
+    let mut in_run = false; // inside <a:r> within a footer placeholder
+    let mut in_text = false; // inside <a:t> within a run
+    let mut current_text = String::new(); // accumulated <a:t> content for current run
+    let mut sp_text: Option<Arc<str>> = None; // text found in current footer placeholder
+    let mut found_any_footer_ph = false; // did we encounter at least one footer placeholder?
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(ref e)) => {
+                let local = local_name_owned(e);
+                match local.as_str() {
+                    "sp" => {
+                        in_sp = true;
+                        is_footer_ph = false;
+                        in_run = false;
+                        in_text = false;
+                        current_text.clear();
+                        sp_text = None;
+                    },
+                    "ph" if in_sp && attr_equals(e, b"type", b"ftr") => {
+                        is_footer_ph = true;
+                        found_any_footer_ph = true;
+                    },
+                    "r" if is_footer_ph => {
+                        in_run = true;
+                        current_text.clear();
+                    },
+                    "t" if is_footer_ph && in_run => {
+                        in_text = true;
+                    },
+                    _ => {},
+                }
+            },
+            Ok(Event::Empty(ref e)) => {
+                let local = local_name_owned(e);
+                if local == "ph" && in_sp && attr_equals(e, b"type", b"ftr") {
+                    is_footer_ph = true;
+                    found_any_footer_ph = true;
+                }
+                // <a:fld> is handled as an empty element or start — either way,
+                // we do not set in_run, so text inside <a:fld> is never collected.
+            },
+            Ok(Event::End(ref e)) => {
+                let local = local_name_end_owned(e);
+                match local.as_str() {
+                    "sp" => {
+                        if is_footer_ph {
+                            // EC-003: first footer placeholder wins — stop immediately
+                            // once we have processed one footer placeholder.
+                            return if let Some(t) = sp_text {
+                                FooterXmlResult::FoundText(t)
+                            } else {
+                                FooterXmlResult::EmptyText
+                            };
+                        }
+                        in_sp = false;
+                    },
+                    "r" if is_footer_ph => {
+                        in_run = false;
+                        in_text = false;
+                    },
+                    "t" if is_footer_ph && in_run => {
+                        in_text = false;
+                        let trimmed = current_text.trim().to_owned();
+                        if !trimmed.is_empty() && sp_text.is_none() {
+                            sp_text = Some(Arc::from(trimmed.as_str()));
+                        }
+                        current_text.clear();
+                    },
+                    _ => {},
+                }
+            },
+            Ok(Event::Text(ref e)) if in_text && is_footer_ph && in_run => {
+                if let Ok(s) = e.unescape() {
+                    current_text.push_str(s.as_ref());
+                }
+            },
+            Ok(Event::Eof) | Err(_) => break,
+            _ => {},
+        }
+        buf.clear();
+    }
+
+    if found_any_footer_ph {
+        FooterXmlResult::EmptyText
+    } else {
+        FooterXmlResult::NoPlaceholder
+    }
+}
+
+/// Try to read and parse footer text from a ZIP entry at `zip_path`.
+fn read_footer_text_from_zip<R: Read + Seek>(
+    zip: &mut ZipArchive<R>,
+    zip_path: &str,
+) -> FooterXmlResult {
+    match read_zip_entry(zip, zip_path) {
+        None => FooterXmlResult::Absent,
+        Some(bytes) => parse_footer_text_from_xml(&bytes),
+    }
+}
+
+/// Parse `ppt/presProps.xml` from the ZIP for footer-visibility flags.
+///
+/// Returns [`FooterFlags::default`] if `presProps.xml` is absent or `<p:showPr>`
+/// is not found (AC-003 / EC-004 / EC-007).
+fn read_pres_props_flags<R: Read + Seek>(zip: &mut ZipArchive<R>) -> FooterFlags {
+    let Some(bytes) = read_zip_entry(zip, "ppt/presProps.xml") else {
+        return FooterFlags::default();
+    };
+    parse_pres_props_flags_from_xml(&bytes)
+}
+
+/// Parse footer-visibility flags from `presProps.xml` bytes.
+///
+/// Looks for `<p:showPr>` and its `<p:ftr>`, `<p:dt>`, `<p:sldNum>` children.
+/// `val="1"` → `true`; any other value or absent attribute → `false` (AC-003).
+fn parse_pres_props_flags_from_xml(xml_bytes: &[u8]) -> FooterFlags {
+    let mut reader = Reader::from_reader(xml_bytes);
+    reader.config_mut().trim_text(true);
+
+    let mut buf = Vec::new();
+    let mut flags = FooterFlags::default();
+    let mut in_show_pr = false;
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(ref e)) => {
+                let local = local_name_owned(e);
+                if local == "showPr" {
+                    in_show_pr = true;
+                } else if in_show_pr {
+                    match local.as_str() {
+                        "ftr" => flags.show_footer = attr_val_is_one(e),
+                        "dt" => flags.show_date = attr_val_is_one(e),
+                        "sldNum" => flags.show_slide_number = attr_val_is_one(e),
+                        _ => {},
+                    }
+                }
+            },
+            Ok(Event::Empty(ref e)) if in_show_pr => match local_name_owned(e).as_str() {
+                "ftr" => flags.show_footer = attr_val_is_one(e),
+                "dt" => flags.show_date = attr_val_is_one(e),
+                "sldNum" => flags.show_slide_number = attr_val_is_one(e),
+                _ => {},
+            },
+            Ok(Event::End(ref e)) if local_name_end_owned(e) == "showPr" => {
+                in_show_pr = false;
+            },
+            Ok(Event::Eof) | Err(_) => break,
+            _ => {},
+        }
+        buf.clear();
+    }
+
+    flags
+}
+
+// ─── XML attribute helpers ────────────────────────────────────────────────────
+
+/// Extract the local name from a `quick_xml` event element as an owned `String`.
+///
+/// Returns an empty string on invalid UTF-8 (which should never occur in
+/// well-formed OOXML, but is handled gracefully per the production-grade default).
+fn local_name_owned(e: &quick_xml::events::BytesStart<'_>) -> String {
+    std::str::from_utf8(e.local_name().as_ref())
+        .unwrap_or("")
+        .to_owned()
+}
+
+/// Extract the local name from a `quick_xml` end-event element as an owned `String`.
+fn local_name_end_owned(e: &quick_xml::events::BytesEnd<'_>) -> String {
+    std::str::from_utf8(e.local_name().as_ref())
+        .unwrap_or("")
+        .to_owned()
+}
+
+/// Returns `true` if the element `e` has attribute `attr_name` equal to `attr_value`.
+fn attr_equals(e: &quick_xml::events::BytesStart<'_>, attr_name: &[u8], attr_value: &[u8]) -> bool {
+    e.attributes()
+        .filter_map(std::result::Result::ok)
+        .any(|a| a.key.local_name().as_ref() == attr_name && a.value.as_ref() == attr_value)
+}
+
+/// Returns `true` if the element `e` has attribute `val` equal to `"1"`.
+fn attr_val_is_one(e: &quick_xml::events::BytesStart<'_>) -> bool {
+    e.attributes()
+        .filter_map(std::result::Result::ok)
+        .any(|a| a.key.local_name().as_ref() == b"val" && a.value.as_ref() == b"1")
+}
+
+// ─── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
@@ -84,8 +388,7 @@ mod tests {
     // The crate re-exports FooterFlags from footer.rs (story task: lib.rs pub use).
     // Until STORY-075 is implemented, this import itself is the Red Gate:
     // "error[E0432]: unresolved import `crate::footer::FooterFlags`"
-    use crate::footer::{FooterDetection, FooterFlags, detect_footer};
-    use crate::template::BrandTemplate;
+    use crate::footer::{FooterFlags, detect_footer};
 
     // ─── ZIP fixture builders ─────────────────────────────────────────────────
 
@@ -304,8 +607,7 @@ mod tests {
         {
             let cursor = Cursor::new(&mut buf);
             let mut zw = ZipWriter::new(cursor);
-            let opts =
-                SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
+            let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
             for (path, content) in entries {
                 zw.start_file(*path, opts).unwrap();
                 zw.write_all(content).unwrap();
@@ -846,8 +1148,8 @@ mod tests {
     /// BC-2.01.001 AC-001 / AC-004 — `BrandLoader::load_template()` on PPTX with
     /// footer placeholder returns `BrandTemplate.footer_text = Some("Acme Corp Confidential")`.
     ///
-    /// This is the primary integration path: detect_footer() called inside
-    /// load_template() before BrandTemplate is returned.
+    /// This is the primary integration path: `detect_footer()` called inside
+    /// `load_template()` before `BrandTemplate` is returned.
     ///
     /// Test vector from story Integration Tests table: "Acme Corp Confidential".
     #[test]
@@ -925,7 +1227,7 @@ mod tests {
     /// BC-2.01.001 AC-004 — `BrandLoader::load_template()` on PPTX with footer
     /// also populates `footer_flags` from `presProps.xml`.
     ///
-    /// Verifies the flags field is set on the returned BrandTemplate.
+    /// Verifies the flags field is set on the returned `BrandTemplate`.
     #[test]
     fn test_bc_2_01_001_load_pptx_footer_flags_populated_from_presprops() {
         use crate::context::BrandLoadContext;
@@ -948,10 +1250,7 @@ mod tests {
 </p:sldMaster>"#;
 
         let zip_bytes = build_pptx_zip_with_extras(&[
-            (
-                "ppt/slideMasters/slideMaster1.xml",
-                master_xml.as_bytes(),
-            ),
+            ("ppt/slideMasters/slideMaster1.xml", master_xml.as_bytes()),
             (
                 "ppt/presProps.xml",
                 PRESPROPS_FOOTER_AND_SLDNUM_XML.as_bytes(),
@@ -1037,11 +1336,11 @@ mod tests {
     /// `brand.toml` contains `[footer]` section with `text = "Acme Corp Confidential"`.
     ///
     /// This test closes adversary finding F-024A-OBS-1: the [footer] writer in
-    /// BrandExtractor was permanently unreachable before STORY-075 because
-    /// BrandLoader always returned footer_text: None.
+    /// `BrandExtractor` was permanently unreachable before STORY-075 because
+    /// `BrandLoader` always returned `footer_text: None`.
     ///
     /// The test exercises the full pipeline:
-    ///   BrandLoader::load_template() → BrandExtractor::extract() → brand.toml
+    ///   `BrandLoader::load_template()` → `BrandExtractor::extract()` → brand.toml
     #[test]
     fn test_bc_2_01_001_extract_brand_toml_includes_footer_section() {
         use crate::extractor::BrandExtractor;
@@ -1081,12 +1380,8 @@ mod tests {
 
         // Run extractor directly from the PPTX path — BrandExtractor::extract()
         // re-loads the template internally. The PPTX file must still exist when called.
-        let result = BrandExtractor::extract(
-            pptx_path.to_str().unwrap(),
-            &output_dir,
-            false,
-        )
-        .expect("extract must succeed for valid template with footer");
+        let result = BrandExtractor::extract(pptx_path.to_str().unwrap(), &output_dir, false)
+            .expect("extract must succeed for valid template with footer");
         let _ = std::fs::remove_file(&pptx_path);
 
         let brand_toml_path = output_dir.join("brand.toml");
