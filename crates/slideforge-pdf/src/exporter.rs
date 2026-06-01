@@ -1789,22 +1789,37 @@ mod tests {
         // Use a safe helper to produce a UTF-8 preview for error messages.
         let pdf_preview = String::from_utf8_lossy(&pdf_bytes[..pdf_bytes.len().min(4096)]);
 
-        // Non-vacuous assertion 1: the PDF MUST contain `0 0 0 rg` or `0 g` (black fill)
+        // Canonical set of byte patterns that krilla may emit for a solid-black fill.
+        //
+        // Krilla serializes solid-black fills as either:
+        //   - DeviceRGB:  `0 0 0 rg` or `0.0 0.0 0.0 rg`
+        //   - DeviceGray: `0 g` (preceded/followed by whitespace per PDF tokenization)
+        //
+        // This SINGLE shared list is used by BOTH assertion 1 (existence check) and
+        // assertion 2 (ordering check), so they can never silently diverge.
+        //
+        // `find_first_black_fill(slice)` returns the smallest byte offset within
+        // `slice` at which any of these patterns begins, or `None` if none is found.
+        let black_fill_patterns: &[&[u8]] = &[
+            b"0 0 0 rg",
+            b"0.0 0.0 0.0 rg",
+            b" 0 g\n",
+            b" 0 g\r",
+            b"\n0 g\n",
+        ];
+        let find_first_black_fill = |slice: &[u8]| -> Option<usize> {
+            black_fill_patterns
+                .iter()
+                .filter_map(|pat| slice.windows(pat.len()).position(|w| w == *pat))
+                .min()
+        };
+
+        // Non-vacuous assertion 1: the PDF MUST contain a black fill color operator
         // from the explicit text fill set by `draw_text_at_bbox`.
         //
-        // krilla serializes a solid-black RGB fill as `0 0 0 rg` in the content stream.
-        // For devicegray it's `0 g`. Either is acceptable — both mean black.
         // These tokens appear when `draw_text_at_bbox` calls `set_fill(Some(black_fill))`
         // before `draw_text()`.
-        let has_black_fill_op = pdf_bytes
-            .windows(b"0 0 0 rg".len())
-            .any(|w| w == b"0 0 0 rg")
-            || pdf_bytes
-                .windows(b"0.0 0.0 0.0 rg".len())
-                .any(|w| w == b"0.0 0.0 0.0 rg")
-            || pdf_bytes.windows(b" 0 g\n".len()).any(|w| w == b" 0 g\n")
-            || pdf_bytes.windows(b" 0 g\r".len()).any(|w| w == b" 0 g\r")
-            || pdf_bytes.windows(b"\n0 g\n".len()).any(|w| w == b"\n0 g\n");
+        let has_black_fill_op = find_first_black_fill(&pdf_bytes).is_some();
         assert!(
             has_black_fill_op,
             "OBS-044-22-01 FAILED: PDF does not contain a black fill color operator \
@@ -1820,37 +1835,26 @@ mod tests {
         // normalized RGB). If `draw_text_at_bbox` inherits this, `1 0 0 rg` appears
         // in the text drawing context. After the fix, only the SVG path uses red fill.
         //
-        // Note: `1 0 0 rg` will appear in the SVG rectangle drawing section. We
-        // assert it does NOT appear AFTER the /Font resource reference, which would
-        // indicate the text fill was set to red. We do this by checking that the
-        // black fill operator exists at all (assertion 1) AND that the PDF stream
-        // structure is correct.
-        //
         // Simplified non-vacuous check: assert `1 0 0 rg` exists only BEFORE any
-        // text-related operator. We scan the raw bytes: if `0 0 0 rg` (or `0 g`)
+        // text-related operator. We scan the raw bytes: if a black fill operator
         // appears after the LAST `1 0 0 rg`, the text fill was correctly reset to black.
+        //
+        // We use `rposition` (the LAST red occurrence) rather than `position` because
+        // this is safe under krilla's current behavior: the fixture has a single SVG
+        // frame drawn *before* the Title (text) frame. Krilla coalesces identical
+        // consecutive fill-color operators, so `1 0 0 rg` is not re-emitted after the
+        // black reset in the text frame. Therefore `rposition` finds the SVG red-fill
+        // operator, and any black fill strictly after it belongs to the text frame.
         let last_red_pos = {
             let needle = b"1 0 0 rg";
             pdf_bytes.windows(needle.len()).rposition(|w| w == needle)
         };
-        // Search for the first black-fill occurrence STRICTLY AFTER `last_red_pos`.
-        // We slice `pdf_bytes[red_pos..]` so `.position()` returns a relative offset;
-        // we then add `red_pos` to recover the absolute byte position.  This makes the
-        // "after" relationship explicit and robust — it does not rely on the fixture
-        // ordering happening to place the SVG (red) frame before the Title (black text)
-        // frame, nor on the absence of a page-initial black-fill default.
+        // Search for the first black-fill occurrence STRICTLY AFTER `last_red_pos`
+        // using the same shared `find_first_black_fill` matcher as assertion 1.
+        // We slice `pdf_bytes[red_pos..]` so the closure returns a relative offset;
+        // we then add `red_pos` to recover the absolute byte position.
         let first_black_fill_after_red = last_red_pos.and_then(|red_pos| {
-            let needle_rgb = b"0 0 0 rg";
-            let needle_g = b" 0 g\n";
-            let tail = &pdf_bytes[red_pos..];
-            let black_rgb_rel = tail.windows(needle_rgb.len()).position(|w| w == needle_rgb);
-            let black_g_rel = tail.windows(needle_g.len()).position(|w| w == needle_g);
-            match (black_rgb_rel, black_g_rel) {
-                (Some(a), Some(b)) => Some(red_pos + a.min(b)),
-                (Some(a), None) => Some(red_pos + a),
-                (None, Some(b)) => Some(red_pos + b),
-                (None, None) => None,
-            }
+            find_first_black_fill(&pdf_bytes[red_pos..]).map(|rel| red_pos + rel)
         });
 
         if let (Some(red_pos), Some(black_pos)) = (last_red_pos, first_black_fill_after_red) {
