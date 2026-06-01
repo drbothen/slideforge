@@ -26,7 +26,7 @@ dtu_services: []
 wave_1_gate: "PASS 2026-05-27 — 3 gate passes, 11 findings fixed"
 wave_2_gate: "PASS 2026-05-27 — 11 gate passes, 19 findings fixed, 3/3 clean (passes 9-10-11)"
 wave_3_gate: "PASSED 2026-05-31 — PR #38 (7d266ad7); #[non_exhaustive] hardening + slideforge-brand [workspace.dependencies] + conventions.md v1.3; adversary pass 8 strict-CLEAN; holdout must-pass 5/5"
-wave_4_batch_a_complete: 3
+wave_4_batch_a_complete: 4
 wave_4_batch_a_total: 9
 wave_4_started: 2026-05-31
 wave_4_total_stories: 17
@@ -38,10 +38,10 @@ wave_4_new_p0: "STORY-077 (8pts SectionBlock IR extension) — architect-directe
 story035_status: "MERGED — PR #39, squash commit 0e7d9fde (2026-05-31). 10-pass LOCAL adversary cascade, 3/3 strict-CLEAN at passes 8/9/10. Option D single-source eval-stage routing. AC-005 descoped → STORY-077."
 story036_status: "MERGED — PR #40, squash commit 094f8dca (2026-05-31). 9-pass LOCAL adversary cascade, 3/3 strict-CLEAN at passes 7/8/9. BleedChecker test utility (test-utils-gated). Exporter ACs deferred to STORY-037/041/046. 6 fix-bursts (XML entity decoder hardening)."
 story043_status: "MERGED — PR #41, squash commit 331d456c (2026-05-31). 14-pass LOCAL adversary cascade, 3/3 strict-CLEAN at passes 12/13/14. New slideforge-pdf crate (krilla 0.6.0 pure-Rust PDF; moved from [workspace] exclude → members). PdfExporter + SlideTagEngine + svg_embed + font + check-pdf-deps CI job. indexmap 2.9→2.10. 2 MED + 3 LOW security findings fixed. Workspace now 16 crates."
-story044_status: "IN PROGRESS — worktree .worktrees/STORY-044, branch feature/S-044, HEAD a39e068c (PUSHED to origin). 57/57 slideforge-pdf tests PASS; 2394 workspace tests pass (1 flaky timing-only in slideforge-diagrams, passes in isolation). clippy(pedantic+unwrap_used)+fmt+doc ALL clean. SVG transform fix JUST LANDED (a39e068c) — adversary re-verification required (3-CLEAN streak RESET)."
-develop_sha: "331d456c"
-develop_pr_count: 41
-workspace_tests: "2394 (STORY-044 worktree full-suite; 1 timing-flaky skipped in isolation; 57/57 slideforge-pdf green)"
+story044_status: "MERGED — PR #42, squash 94f74402 (2026-05-31). Post-SVG-fix re-verification: 27-pass LOCAL adversary cascade total, 3/3 strict-CLEAN at passes 25/26/27 (BC-5.39.001). CI 18/18 green (1 flaky Windows slideforge-data test, passed on re-run)."
+develop_sha: "94f74402"
+develop_pr_count: 42
+workspace_tests: "2443 (CI Windows; 62/62 slideforge-pdf green)"
 workspace_test_failures: 0
 ---
 
@@ -55,66 +55,31 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. Generates branded .pptx
 **Workspace:** /Users/jmagady/Dev/slideforge
 **Factory worktree:** .factory/ on branch `factory-artifacts`
 
-## Session Resume Brief (2026-05-31 — STORY-044 MID-FLIGHT)
+## Session Resume Checkpoint
 
-### Ground Truth
-
-- **develop:** `331d456c` (41 merged PRs). Wave 4 Batch A: 3/9 MERGED (STORY-035, STORY-036, STORY-043).
-- **STORY-044 worktree:** `/Users/jmagady/Dev/slideforge/.worktrees/STORY-044`
-- **Branch:** `feature/S-044` — HEAD `a39e068c` — PUSHED to `origin/feature/S-044`.
-- **Test status:** 57/57 slideforge-pdf GREEN. 2394 workspace tests pass (1 timing-flaky in slideforge-diagrams cold_budget — passes when run in isolation with `cargo nextest run -p slideforge-diagrams`; not a code regression).
-- **Toolchain clean:** clippy(pedantic + unwrap_used) + fmt + `RUSTDOCFLAGS=-D warnings cargo doc --workspace` all clean.
-
-### STORY-044 Status (PDF: EMU-to-PDF Coordinate Mapping + Y-Axis Flip + Content Drawing)
-
-**MAJOR BUG FOUND AND FIXED (mid-stream):** A vertical-mirror coordinate bug was discovered. krilla 0.6.0's `Surface` uses a **top-left, Y-down** coordinate system and applies the PDF Y-flip internally via `page_root_transform` (`Transform::from_row(1,0,0,-1,0,h)` in page.rs:262-263). Draw-time placement therefore uses `emu_to_pt(ir_y)` directly — NOT `ir_y_to_pdf_y`. The wrong "exporter applies the flip" model had propagated to 5 spec artifacts; all corrected:
-
-| Artifact | Change |
-|----------|--------|
-| BC-4.03.005 | v1.1 → v1.2 (coordinate model corrected; `ir_y_to_pdf_y` retained as pure VP-006 Kani target only) |
-| STORY-044 spec | draw-time formulas corrected; SVG transform section updated |
-| export-architecture.md | PDF section: krilla Surface model documented |
-| ir-design.md | Coordinate system note for PDF exporters |
-| architecture-feasibility-report.md | PDF backend coordinate model section |
-| vp-006-emu-pdf-coordinate.md | AC-001/002 Kani vectors remain valid (pure function arithmetic); draw-time note added |
-
-Architect directive: `.factory/cycles/STORY-044/coord-model-directive.md` (binding, DIR-044-001).
-
-`ir_y_to_pdf_y` is RETAINED as a pure function in `coords.rs` — it is a VP-006 Kani proof target. It is NOT called on the draw path. AC-001/002 test vectors remain valid.
-
-**SVG/Diagram fidelity fix JUST LANDED** (commit a39e068c, human-authorized scope expansion): `svg_embed` now applies usvg `abs_transform` per path + `place_svg_at` does fit-to-frame scaling (translate∘scale∘abs_transform). Non-vacuous geometry tests extract coords from uncompressed content stream. Closes:
-- F-P18-001: transforms dropped → mermaid diagrams collapsed to origin
-- F-P18-002: no scaling → oversize/clip
-- F-P18-003 / F-P16-001: param naming
-
-**AC-009 font subsetting** (re-scoped from STORY-043): driven through real `export()` with uncompressed measurement + <100KB subset bound (observed ~2.1KB). COMPLETE.
-
-### Adversary Cascade History
-
-18 passes run (detail in `.factory/cycles/STORY-044/cascade-log.md` if created). Cascade was converging on the pre-SVG-fix code (pass 17 was strict-CLEAN). The SVG scope-expansion fix (a39e068c) is NEW code — **3-CLEAN streak RESET to 0/3**. The SVG path (svg_embed.rs `render_path`/`abs_transform`, exporter.rs `place_svg_at` scaling) has NOT been adversarially verified yet.
-
-### Top Next Actions (ordered — for fresh session)
-
-1. **RESUME STORY-044 adversary cascade.** Focus on the NEW SVG transform+scaling path (commit a39e068c): `svg_embed.rs::render_path`, `svg_embed.rs::abs_transform` application, `exporter.rs::place_svg_at` scaling (translate∘scale∘abs_transform). Worktree `.worktrees/STORY-044`, HEAD `a39e068c`. Drive to BC-5.39.001 3-CLEAN (3 consecutive strict-CLEAN). Convergence is NEAR — text/coords/AC-009 already converged; only new SVG code needs adversarial verification. Use local adversary, minimum 3-clean.
-
-2. **Demo recording** (after 3-CLEAN). Per per-story-delivery: demo-recorder, per-AC, library/test-harness modality, output to `docs/demo-evidence/STORY-044/`. Branch is already pushed.
-
-3. **PR cycle** (after demos). pr-manager 9-step PR cycle → develop. Security review → CI → squash-merge → devops worktree cleanup (`git worktree remove .worktrees/STORY-044`). NOTE: .factory spec changes (BC v1.2 etc.) are committed in this burst — the PR itself is code-only. Ensure the post-merge state burst records develop SHA and PR count.
-
-4. **Continue Wave 4 Batch A.** After STORY-044 merges: STORY-045 (PDF/UA-1 + veraPDF — CRITICAL forward-obligations: contiguous-run sentinels from STORY-036 + real frame-level Diagram/Chart alt from STORY-043); STORY-073 (Bullets Layout); STORY-075 (Footer Detection); STORY-076 (srgbClr Transform); STORY-077 (SectionBlock IR Extension — P0, blocks STORY-041/042).
-
-### STORY-045 Forward-Obligations (record before context is lost)
-
-- **From STORY-036:** contiguous-run sentinels for register content must be enforced (BleedChecker ACs 001-007 are `#[ignore]`'d pending exporters — STORY-045 implementation notes MUST address register sentinel contiguous-XML-run requirement).
-- **From STORY-043:** real frame-level Diagram/Chart alt text must flow through PDF/UA-1 tagging (SlideTagEngine stub in STORY-043 uses placeholder; STORY-045 must wire real alt text from IR frames).
-
----
+| Field | Value |
+|-------|-------|
+| **Date** | 2026-05-31 |
+| **Position** | Phase 3, Wave 4 Batch A — 4/9 complete. STORY-044 MERGED. Next: STORY-045, then STORY-073/075/076/077 (parallel). |
+| **develop SHA** | 94f74402 (42 merged PRs) |
+| **Active worktrees** | 0 |
+| **Open PRs** | 0 |
+| **Workspace crates** | 16 |
+| **Workspace tests** | 2443 (CI Windows); 62/62 slideforge-pdf |
+| **STORY-035** | MERGED — PR #39, 0e7d9fde. 10-pass adversary, 3/3 strict-CLEAN (P8/9/10). Option D routing. AC-005 → STORY-077. |
+| **STORY-036** | MERGED — PR #40, 094f8dca. 9-pass adversary, 3/3 strict-CLEAN (P7/8/9). BleedChecker test-utils feature-gated. Exporter ACs → STORY-037/041/046. |
+| **STORY-043** | MERGED — PR #41, 331d456c. 14-pass adversary, 3/3 strict-CLEAN (P12/13/14). slideforge-pdf crate (krilla 0.6.0, pure-Rust). 2 MED + 3 LOW security fixed. check-pdf-deps CI job. |
+| **STORY-044** | MERGED — PR #42, 94f74402. 27-pass adversary, 3/3 strict-CLEAN (P25/26/27). SVG stroke rendering + paint-state-leak fix. CI 18/18 green. |
+| **STORY-045 next** | PDF/UA-1 + veraPDF. Forward-obligations: (1) decorative frame Artifact tags + drawing in same change; (2) per-block/per-line baselines (no shared baseline); (3) text color from brand/theme palette in same change as bg fills. Plus S036 register sentinels + S043 frame-level Diagram/Chart alt text. |
+| **BC deltas in effect** | BC-4.03.005 v1.2 (coord model corrected for krilla Surface); BC-2.01.001 v1.2 (srgbClr, Option B); BC-2.01.003 v1.9 (EC-003 widened); error-taxonomy v2.3. |
+| **factory-artifacts** | Local only. Push requires explicit human authorization per CLAUDE.md. |
+| **Archived history** | Prior checkpoints → .factory/cycles/STORY-044/session-checkpoints.md |
 
 ## Current Status
 
-Phase 3 IN PROGRESS. Wave 1 COMPLETE (gate PASSED). Wave 2 COMPLETE (gate PASSED). Wave 3 COMPLETE (22/22 stories, gate PASSED 2026-05-31). **Wave 4 STARTED — 17 stories / 104 pts. Batch A 3/9 complete (STORY-035 + STORY-036 + STORY-043 MERGED). STORY-044 IN PROGRESS.**
+Phase 3 IN PROGRESS. Wave 1 COMPLETE (gate PASSED). Wave 2 COMPLETE (gate PASSED). Wave 3 COMPLETE (22/22 stories, gate PASSED 2026-05-31). **Wave 4 STARTED — 17 stories / 104 pts. Batch A 4/9 complete (STORY-035, 036, 043, 044 MERGED). 0 active worktrees. 0 open PRs.**
 
-develop: `331d456c` (41 merged PRs, 2394 tests, 0 failures). 1 active feature worktree (STORY-044). 0 open PRs. 77 stories / 462 pts total. Workspace: 16 crates.
+develop: `94f74402` (42 merged PRs, 2443 tests, 0 failures). 77 stories / 462 pts total. Workspace: 16 crates.
 
 ## Phase Progress
 
@@ -125,7 +90,7 @@ develop: `331d456c` (41 merged PRs, 2394 tests, 0 failures). 1 active feature wo
 | Planning (25 DSL decisions) | DONE 2026-05-24 | q1–q25 decision docs + 14 research threads + 7/7 spikes resolved |
 | Phase 1: Spec Crystallization | DONE — APPROVED 2026-05-25 | PRD (109 BCs, 15 HS, 4 supplements) + architecture (14 ADRs, 15 VPs, 20 crates) + UX spec. 17 passes, 69 findings, 3/3 clean. |
 | Phase 2: Story Decomposition | DONE — APPROVED 2026-05-25 | 77 stories, 21 epics, 6 waves, 462 pts. 22 passes, 96+ findings, 3/3 clean. |
-| Phase 3: TDD Implementation | IN PROGRESS — Wave 1: GATE PASSED. Wave 2: GATE PASSED. Wave 3: GATE PASSED 2026-05-31. **Wave 4 STARTED — Batch A 3/9 (STORY-035+036+043 MERGED). STORY-044 IN PROGRESS (SVG fix a39e068c; adversary re-verify pending).** | Per-story delivery |
+| Phase 3: TDD Implementation | IN PROGRESS — Wave 1: GATE PASSED. Wave 2: GATE PASSED. Wave 3: GATE PASSED 2026-05-31. **Wave 4 STARTED — Batch A 4/9 (STORY-035+036+043+044 MERGED). Next: STORY-045.** | Per-story delivery |
 | Phase 4: Holdout Evaluation | NOT STARTED | Per-wave holdout gates |
 | Phase 5: Adversarial Refinement | NOT STARTED | Post-implementation cascade |
 | Phase 6: Formal Hardening | NOT STARTED | Kani + fuzz + mutants + semgrep |
@@ -138,7 +103,7 @@ develop: `331d456c` (41 merged PRs, 2394 tests, 0 failures). 1 active feature wo
 | STORY-035 | Writing Register Routing | MERGED | #39 | 0e7d9fde |
 | STORY-036 | No-Bleed Invariant | MERGED | #40 | 094f8dca |
 | STORY-043 | PDF Core (new crate) | MERGED | #41 | 331d456c |
-| STORY-044 | PDF Layout Integration | IN PROGRESS — SVG fix landed (a39e068c); adversary re-verify pending | — | a39e068c |
+| STORY-044 | PDF Layout Integration | MERGED | #42 | 94f74402 |
 | STORY-045 | PDF Export Pipeline | NOT STARTED (after 044) | — | — |
 | STORY-073 | Bullets Layout | NOT STARTED | — | — |
 | STORY-075 | Footer Detection | NOT STARTED | — | — |
@@ -161,40 +126,18 @@ develop: `331d456c` (41 merged PRs, 2394 tests, 0 failures). 1 active feature wo
 - 2026-05-31 — STORY-077 CREATED — SectionBlock IR Extension (architect-directed spin-out, EPIC-18, P0, 8pts). Blocks STORY-041/042. Project total: 77 stories / 462 pts.
 - 2026-05-31 — STORY-036 MERGED (PR #40, 094f8dca) — No-Bleed Invariant / BleedChecker. 9-pass adversary cascade, 3/3 strict-CLEAN (passes 7/8/9). 6 fix-bursts (XML entity decoder). Exporter ACs deferred to STORY-037/041/046. Wave 4 Batch A: 2/9 complete.
 - 2026-05-31 — STORY-043 MERGED (PR #41, 331d456c) — PDF Core (slideforge-pdf crate). 14-pass adversary cascade, 3/3 strict-CLEAN (passes 12/13/14). krilla 0.6.0 pure-Rust PDF (no FFI). PdfExporter + SlideTagEngine + svg_embed + font subsetting + check-pdf-deps CI. indexmap 2.9→2.10. 2 MED + 3 LOW security fixed. Workspace 16 crates. STORY-044 unblocked. Wave 4 Batch A: 3/9 complete.
-- 2026-05-31 — STORY-044 IN PROGRESS — Vertical-mirror coordinate bug found and fixed (krilla Surface is top-left Y-down; exporter MUST NOT apply ir_y_to_pdf_y at draw time — krilla applies the PDF flip internally). BC-4.03.005 bumped to v1.2. 5 spec artifacts corrected. SVG/diagram fidelity fix landed (a39e068c, human-authorized scope expansion): usvg abs_transform per-path + fit-to-frame scaling. 18 adversary passes run; SVG fix RESETS 3-CLEAN streak — re-verification pending.
+- 2026-05-31 — STORY-044 MERGED (PR #42, 94f74402) — PDF coordinate mapping + Y-axis + SVG/diagram fidelity. 27-pass adversary cascade, 3/3 strict-CLEAN (P25/26/27). Real SVG stroke rendering (usvg→krilla full translation) + paint-state-leak fix (explicit fill/clear stroke before draw_text). 3 STORY-045 forward-obligations recorded; 1 Windows flaky-test drift item recorded. Wave 4 Batch A: 4/9 complete.
 
-## Session Resume Checkpoint
+## STORY-045 Forward-Obligations
 
-| Field | Value |
-|-------|-------|
-| **Date** | 2026-05-31 |
-| **Position** | Phase 3, Wave 4 Batch A — 3/9 complete. STORY-044 IN PROGRESS mid-flight. SVG fix (a39e068c) just landed; adversary cascade must re-verify to 3-CLEAN before demos/PR. |
-| **develop SHA** | 331d456c (41 merged PRs) |
-| **STORY-044 worktree** | /Users/jmagady/Dev/slideforge/.worktrees/STORY-044 |
-| **STORY-044 branch** | feature/S-044 HEAD a39e068c (pushed to origin) |
-| **STORY-044 tests** | 57/57 slideforge-pdf GREEN; 2394 workspace (1 timing-flaky cold_budget, passes in isolation) |
-| **STORY-044 adversary** | 18 passes; SVG fix resets streak to 0/3 — focus: svg_embed.rs render_path/abs_transform + exporter.rs place_svg_at scaling |
-| **Workspace crates** | 16 (slideforge-pdf added in STORY-043) |
-| **Active worktrees** | 1 (STORY-044) |
-| **Open PRs** | 0 |
-| **STORY-035** | MERGED — PR #39, 0e7d9fde. 10-pass adversary, 3/3 strict-CLEAN (P8/9/10). Option D routing. AC-005 → STORY-077. |
-| **STORY-036** | MERGED — PR #40, 094f8dca. 9-pass adversary, 3/3 strict-CLEAN (P7/8/9). BleedChecker test-utils feature-gated. 6 fix-bursts (XML entity decoder). Exporter ACs → STORY-037/041/046. |
-| **STORY-043** | MERGED — PR #41, 331d456c. 14-pass adversary, 3/3 strict-CLEAN (P12/13/14). slideforge-pdf crate (krilla 0.6.0, pure-Rust). 2 MED + 3 LOW security fixed. check-pdf-deps CI job. indexmap 2.9→2.10. |
-| **BC deltas in effect** | BC-4.03.005 v1.2 (coord model corrected for krilla Surface); BC-2.01.001 v1.2 (srgbClr, Option B); BC-2.01.003 v1.9 (EC-003 widened); error-taxonomy v2.3. |
-| **Cross-story caveat (S36→S37/S41)** | BleedChecker AC-001..AC-007 tests are `#[ignore]`'d pending PPTX/DOCX exporters. Register sentinels MUST be contiguous XML runs. Add to STORY-037 + STORY-041 implementation notes. |
-| **Cross-story caveat (S45)** | STORY-045 must wire real frame-level Diagram/Chart alt text (SlideTagEngine stub in STORY-043). Also must enforce contiguous-run sentinels from STORY-036. |
-| **factory-artifacts** | Local only. Push requires explicit human authorization per CLAUDE.md. |
-| **Holdout caveat** | Full mean-satisfaction holdout (≥0.85) deferred to post-exporter waves; 9/15 scenarios blocked by missing CLI + exporters. |
-| **Archived history** | Prior checkpoints → .factory/cycles/STORY-043/session-checkpoints.md |
+These obligations MUST be addressed in STORY-045 and cannot be split from each other:
 
-## Per-Story Delivery Flow (reference)
-
-1. Create worktree: `git worktree add .worktrees/STORY-NNN -b feature/S-NNN develop`
-2. test-writer: stubs + failing tests (Red Gate — tests must FAIL before implementer starts)
-3. implementer: TDD (make tests pass, zero `.unwrap()`, clippy::pedantic clean)
-4. adversary: 3 consecutive strict-CLEAN passes (BC-5.39.001)
-5. `git push origin feature/S-NNN` → PR targeting `develop` → CI (17 checks) → squash-merge → state update
-6. Remove worktree: `git worktree remove .worktrees/STORY-NNN`
+- **From STORY-036:** contiguous-run sentinels for register content (BleedChecker ACs 001-007 `#[ignore]`'d pending exporters; register sentinels MUST be contiguous XML runs; add to STORY-045 implementation notes).
+- **From STORY-043:** real frame-level Diagram/Chart alt text wired through SlideTagEngine (STORY-043 stub uses placeholder; STORY-045 must wire real alt text from IR frames).
+- **From STORY-044 (F-P19 cascade adjudication):**
+  1. `decorative_frame_indices` computed in tag_engine but NOT consumed in draw pass. Must emit `ContentTag::Artifact(ArtifactType::Other)` for decorative Image/Shape frames — MUST land in SAME change as decorative drawing, else untagged marked content emitted.
+  2. `draw_body_blocks` uses single shared baseline for all blocks/bullets (multi-block overdraw). Must implement per-block/per-line baselines (real typography).
+  3. `text_fill_black()` hardcodes RGB black. Must resolve text color from brand/theme palette in SAME change as brand/theme background fills — else dark-theme slides get black-on-dark contrast defect.
 
 ## Key Spec References
 
@@ -225,13 +168,15 @@ Production-grade from day 1. Key enforced gates:
 
 | Date | Item | Severity | Notes |
 |------|------|----------|-------|
-| 2026-05-28 | LOCAL adversary 3-CLEAN on STORY-034 ran macOS-only, missed Linux Trebuchet MS substitution failure (BC-1.12.001 violation) | LOW | Required 4 CI iterations. Process-gap candidate: should LOCAL adversary spawn a Linux-container test pass for font/text/SVG/rendering stories? Surface to user for codification decision. |
-| 2026-05-31 | BC-1.14.004 frontmatter has `subsystem: SS-TBD` + unfilled template placeholders (Architecture Module, Stories, Story Anchor, VP Anchors). May affect other BCs. | LOW | Deferred to a future spec-hygiene pass. Owner: architect / spec-steward. No story blocker — do not block Wave 4 delivery on this. |
-| 2026-05-31 | BC-4.03.001 + BC-4.03.002 have unfilled `subsystem: SS-TBD` + Stories/Story-Anchor/VP-Anchor placeholders (same pattern as BC-1.14.004; subsystem SS-07 is the correct answer for both PDF BCs). | LOW | Future spec-hygiene pass. Not a story blocker. |
-| 2026-05-31 | slideforge-diagrams `src/normalize.rs` usvg_normalize parses externally-sourced mermaid SVG via `usvg::Tree::from_str` WITHOUT a size/depth guard — DoS hardening gap (CWE-400), analogous to STORY-043 SEC-002 (SVG recursion cap). | LOW | Target: future slideforge-diagrams hardening story. Security-reviewer to verify when diagrams crate is next touched. |
-| 2026-05-31 | CI has NO doctest job: `test` job uses `cargo nextest` (skips doctests); no `cargo test --doc` step. coords.rs added runnable doctests checked by `cargo doc` but NOT executed in CI (only local `just check` runs them). | LOW | devops-engineer follow-up to add a doctest CI step. Do not block Wave 4 delivery. |
+| 2026-05-28 | LOCAL adversary 3-CLEAN on STORY-034 ran macOS-only, missed Linux Trebuchet MS substitution failure (BC-1.12.001 violation) | LOW | Required 4 CI iterations. Process-gap: should LOCAL adversary spawn a Linux-container test pass for font/text/SVG/rendering stories? Surface to user for codification decision. |
+| 2026-05-31 | BC-1.14.004 frontmatter has `subsystem: SS-TBD` + unfilled template placeholders (Architecture Module, Stories, Story Anchor, VP Anchors). May affect other BCs. | LOW | Deferred to a future spec-hygiene pass. Owner: architect / spec-steward. No story blocker. |
+| 2026-05-31 | BC-4.03.001 + BC-4.03.002 have unfilled `subsystem: SS-TBD` + Stories/Story-Anchor/VP-Anchor placeholders (subsystem SS-07 is the correct answer for both PDF BCs). | LOW | Future spec-hygiene pass. Not a story blocker. |
+| 2026-05-31 | slideforge-diagrams `src/normalize.rs` usvg_normalize parses externally-sourced mermaid SVG via `usvg::Tree::from_str` WITHOUT a size/depth guard — DoS hardening gap (CWE-400), analogous to STORY-043 SEC-002. | LOW | Target: future slideforge-diagrams hardening story. Security-reviewer to verify when diagrams crate is next touched. |
+| 2026-05-31 | CI has NO doctest job: `test` job uses `cargo nextest` (skips doctests); no `cargo test --doc` step. coords.rs runnable doctests checked by `cargo doc` but NOT executed in CI. | LOW | devops-engineer follow-up: add doctest CI step. Do not block Wave 4. |
+| 2026-05-31 | slideforge-data `http::tests::test_bc_1_03_002_http_4xx_not_retried` is FLAKY on windows-x86_64 — asserts "HTTP 4xx → exactly 1 connection (no retry)" but intermittently observes 2 connections (connection-count race in Windows test harness). Failed once on PR #42 CI, passed on re-run. slideforge-data is byte-identical to develop — not a STORY-044 regression. | LOW-MED | Justified deferral: target a future slideforge-data/test-infrastructure de-flake story. Owner: data-engineer / test-infrastructure. Reinforces STORY-034 cross-platform-LOCAL-adversary-coverage drift item. Do NOT block Wave 4. |
 
 ## Process Wins (apply to future stories)
 
-- Pre-implementation tech-validation (research-agent) + architect coordinate-model directive for new-dependency stories catches library-vs-spec coordinate bugs AND wrong crate versions (krilla API drift, zip=4.2.0 ghost in STORY-036, subsetter 0.2.3→0.2.4) BEFORE or DURING implementation. Recommend adding "validate fast-moving external crate API + version against vendored source before Red Gate" as a formal step for new-dependency stories.
+- Pre-implementation tech-validation (research-agent) + architect coordinate-model directive for new-dependency stories catches library-vs-spec coordinate bugs AND wrong crate versions before implementation.
 - Test-utils feature-gating pattern (STORY-036 BleedChecker) avoids test-only deps leaking into production builds.
+- SVG paint-state isolation pattern (STORY-044): explicitly set fill + clear stroke before every text draw to prevent frame-to-frame bleed of paint state.

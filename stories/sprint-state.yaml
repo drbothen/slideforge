@@ -33,7 +33,7 @@ wave_4_batch_a:
   stories: [STORY-035, STORY-036, STORY-043, STORY-044, STORY-045, STORY-073, STORY-075, STORY-076, STORY-077]
   execution: parallel
   chains: ["STORY-035→036", "STORY-043→044→045", "STORY-073 independent", "STORY-075 independent", "STORY-076 independent", "STORY-077 independent (blocks STORY-041/042 in Batch B)"]
-  completed: 3
+  completed: 4
   total: 9
 wave_4_batch_b:
   stories: [STORY-037, STORY-038, STORY-039, STORY-040, STORY-041, STORY-042]
@@ -48,8 +48,8 @@ wave_4_batch_c:
 wave_4_pulled_in_p1: [STORY-073, STORY-075, STORY-076]
 wave_4_deferred_p2_to_wave5: [STORY-072, STORY-074]
 wave_4_bc_deltas: "BC-2.01.001 v1.1→v1.2; BC-2.01.003 v1.8→v1.9; error-taxonomy v2.2→v2.3"
-develop_sha: "331d456c"
-develop_pr_count: 41
+develop_sha: "94f74402"
+develop_pr_count: 42
 last_updated: 2026-05-31
 ---
 
@@ -404,27 +404,26 @@ stories:
     adversary_convergence: "3/3 strict-CLEAN at passes 12/13/14 (14-pass total cascade)"
     notes: "PDF Core: krilla 0.6.0 pure-Rust (no FFI). PdfExporter + SlideTagEngine + svg_embed + font subsetting + check-pdf-deps CI. indexmap 2.9→2.10. 2 MED + 3 LOW security fixed (SVG recursion/size caps, symlink-safe font scan, error hygiene). Workspace now 16 crates. Pre-flight: tech-validation.md + scope-directive.md in cycles/STORY-043/. STORY-044 unblocked."
   STORY-044:
-    status: in-progress
+    status: merged
     wave: 4
     batch: A
     priority: P0
     points: 5
-    branch: feature/S-044
-    head: "a39e068c"
-    worktree: .worktrees/STORY-044
-    worktree_active: true
-    tests_pdf: "57/57 GREEN"
-    tests_workspace: "2394 pass (1 timing-flaky cold_budget, passes in isolation)"
-    adversary_passes: 18
-    adversary_streak: "0/3 — SVG fix (a39e068c) resets streak; re-verify focus: svg_embed render_path/abs_transform + place_svg_at scaling"
+    pr: 42
+    merge_commit: "94f74402"
+    merged: 2026-05-31
+    adversary_passes: 27
+    adversary_convergence: "3/3 strict-CLEAN at passes 25/26/27 (27-pass total cascade)"
     coord_bug_fixed: true
     bc_4_03_005_version: "1.2"
     spec_artifacts_corrected: 5
     svg_fix_commit: "a39e068c"
     svg_fix_scope: "human-authorized expansion — usvg abs_transform per-path + fit-to-frame scaling; closes F-P18-001/002/003"
     ac_009_status: COMPLETE
-    next_step: "adversary re-verify SVG path to 3-CLEAN, then demo-recorder, then pr-manager 9-step"
-    notes: "PDF EMU-to-PDF Coordinate Mapping + Y-Axis Flip + content drawing. SVG fix landed; needs adversary re-verification to 3-CLEAN before demos/PR. Spec artifacts committed in factory-artifacts. PR will be code-only."
+    tests_pdf: "62/62 GREEN (CI)"
+    tests_workspace: "2443 (CI Windows, 0 failures)"
+    ci_checks: "18/18 green (1 flaky Windows slideforge-data http test, passed on re-run)"
+    notes: "PDF EMU-to-PDF Coordinate Mapping + Y-Axis Flip + SVG/diagram fidelity. Full SVG stroke rendering (usvg→krilla: paint/width/opacity/linecap/linejoin/miterlimit/dash; gradient/pattern stroke warn). Paint-state-leak fix (draw_text_at_bbox sets explicit fill + clears stroke). 3 STORY-045 forward-obligations recorded. Windows CI flaky-test drift item recorded."
   STORY-045:
     status: not-started
     wave: 4
