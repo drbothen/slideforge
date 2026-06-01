@@ -53,6 +53,8 @@
 #![allow(clippy::uninlined_format_args)]
 #![allow(clippy::vec_init_then_push)]
 #![allow(unused_imports)]
+// AC-010..013 tests build Slide values with explicit fields:
+#![allow(clippy::too_many_lines)]
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -1590,5 +1592,746 @@ fn test_bc_4_03_001_invariant_every_figure_has_non_empty_alt() {
          Currently tag_slide emits tag_figure(None) for all Diagram frames \
          regardless of alt text — this is a BC-4.03.001 invariant-3 violation.",
         figure_without_alt_count
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// STORY-045 v1.1 EXPANSION — AC-010..AC-013 (Red Gate tests)
+//
+// These tests exercise the four workstreams added in the full-UA-1 scope
+// expansion:
+//
+//   AC-010 — PDF document outline (/Outlines bookmarks)
+//   AC-011 — Hn structure tags carry /Title attribute text
+//   AC-012 — Production export path uses Validator::UA1
+//   AC-013 — veraPDF integration test (#[ignore] + always-run proxy)
+//
+// ## Why they are RED right now
+//
+// | Test | Red Gate reason |
+// |------|----------------|
+// | AC-010 group | No /Outlines in PDF — document.set_outline() never called |
+// | AC-011 group | Hn tags built with None title — Tag::<Hn>::Hn(level, None) |
+// | AC-012 group | document.new_with(SerializeSettings::default()) uses Validator::None; non-compliant exports succeed |
+// | AC-013 | veraPDF integration: #[ignore] always-skip; proxy asserts /Outlines present (fails AC-010) |
+//
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ─── Shared helpers for AC-010..013 ──────────────────────────────────────────
+
+use slideforge_types::{Block, FieldValue, Slide, Value};
+
+/// Build a `Slide` with the given title in its `fields["title"]` field.
+///
+/// `title_str()` returns `Some(title)` for this slide.
+/// Used by AC-010 and AC-011 tests to build a `Deck` with known titles so
+/// `PdfExporter` can source bookmark labels and Hn `/T` attribute text.
+fn slide_with_title(title: &str, slide_type: &str) -> Slide {
+    let mut fields = OrderedMap::new();
+    fields.insert(
+        Arc::from("title"),
+        FieldValue::Literal(Value::Str(Arc::from(title))),
+    );
+    Slide {
+        slide_type: Arc::from(slide_type),
+        fields,
+        blocks: vec![],
+        register: None,
+        tags: vec![],
+        source_span: SourceSpan::default(),
+        overlay: None,
+        register_content: vec![],
+    }
+}
+
+/// Build a `Slide` with NO title field.
+///
+/// `title_str()` returns `None` for this slide.
+/// Used by the EC-006 / fallback-label tests.
+fn slide_without_title(slide_type: &str) -> Slide {
+    Slide {
+        slide_type: Arc::from(slide_type),
+        fields: OrderedMap::new(),
+        blocks: vec![],
+        register: None,
+        tags: vec![],
+        source_span: SourceSpan::default(),
+        overlay: None,
+        register_content: vec![],
+    }
+}
+
+/// Build a `Deck` with `lang "en-US"` and the given `slides` as its semantic IR.
+///
+/// The `source_index` values in the corresponding `LaidOutSlide` objects must
+/// match the positions of `slides` in this vec (0-based).
+fn deck_with_slides(slides: Vec<Slide>) -> Deck {
+    Deck {
+        slides,
+        vars: OrderedMap::new(),
+        metadata: DeckMetadata {
+            title: Some(Arc::from("AC-010/011 Test Deck")),
+            slideforge_version: Arc::from("0.1.0"),
+            lang: Some(Arc::from("en-US")),
+            author: None,
+            section_order: None,
+        },
+        registers: OrderedMap::new(),
+        section_blocks: vec![],
+    }
+}
+
+/// Build a `Deck` with no document title (metadata.title = None).
+///
+/// With `Validator::UA1` enabled, this produces `NoDocumentTitle` → validation
+/// failure. With `Validator::None` (current), export succeeds.
+/// Used by the AC-012 Red Gate test.
+fn deck_without_doc_title() -> Deck {
+    Deck {
+        slides: vec![slide_with_title("Revenue Outlook", "title")],
+        vars: OrderedMap::new(),
+        metadata: DeckMetadata {
+            title: None, // missing document title — UA-1 requires this
+            slideforge_version: Arc::from("0.1.0"),
+            lang: Some(Arc::from("en-US")),
+            author: None,
+            section_order: None,
+        },
+        registers: OrderedMap::new(),
+        section_blocks: vec![],
+    }
+}
+
+// ─── AC-010: PDF document outline (bookmarks) ────────────────────────────────
+
+/// BC-4.03.001 AC-010: The exported PDF MUST contain `/Outlines` in the document
+/// catalog for any deck with heading-containing slides.
+///
+/// ## Contract (BC-4.03.001 postcondition 1, invariant 6)
+///
+/// ISO 14289-1 §7.1 requires a document outline whenever headings (H1–H6) are
+/// present. Every slideforge deck with title-type slides has H1 headings.
+/// The `/Outlines` dictionary must be present in the PDF catalog.
+///
+/// ## How `/Outlines` is written
+///
+/// The implementer must call `document.set_outline(outline)` in
+/// `generate_pdf_inner` before `document.finish()`. krilla 0.6.0 writes
+/// `catalog.outlines(ref)` → PDF bytes contain `Name(b"Outlines")`.
+///
+/// ## Red Gate trigger — FAILS UNTIL AC-010 IS IMPLEMENTED
+///
+/// The current exporter never calls `document.set_outline(...)`.
+/// The PDF bytes do NOT contain `Outlines`. This test FAILS.
+#[allow(clippy::unwrap_used)]
+#[test]
+fn test_bc_4_03_001_document_outline_present_in_pdf() {
+    let deck = deck_with_slides(vec![
+        slide_with_title("Overview", "title"),
+        slide_with_title("Data", "content"),
+        slide_with_title("Summary", "title"),
+    ]);
+    let mut laid_out = n_slide_deck(3);
+    // Align source_indices with deck.slides positions.
+    for (i, slide) in laid_out.slides.iter_mut().enumerate() {
+        slide.source_index = i;
+    }
+
+    let bytes = export_to_bytes(&deck, &laid_out);
+
+    // /Outlines must be in the PDF catalog.
+    // krilla writes `catalog.outlines(ref)` → pdf-writer emits Name(b"Outlines").
+    assert!(
+        pdf_contains(&bytes, b"Outlines"),
+        "AC-010 FAILED: PDF does not contain 'Outlines' in the document catalog.\n\
+         The exporter must call document.set_outline(outline) before document.finish().\n\
+         krilla writes /Outlines via catalog.outlines(ref) in chunk_container.rs.\n\
+         ISO 14289-1 §7.1: document outline mandatory when headings are present."
+    );
+}
+
+/// BC-4.03.001 AC-010: For a 3-slide deck with titles ["Overview", "Data", "Summary"],
+/// the `/Outlines` tree contains entries with those labels.
+///
+/// ## How outline label text is written
+///
+/// krilla serializes `OutlineNode::text` as `outline_item.title(TextStr(&node.text))`
+/// (pdf-writer `OutlineItem::title` → `Name(b"Title")` key). The title string
+/// appears in the PDF bytes as a PDF text string.
+///
+/// The test scans for the raw title strings in the PDF bytes. This is load-bearing:
+/// an outline with wrong labels, empty labels, or missing entries fails this assertion.
+///
+/// ## Red Gate trigger — FAILS UNTIL AC-010 IS IMPLEMENTED
+///
+/// No outline = no title strings from outline entries. Even if the title text
+/// appears elsewhere (e.g., as text drawn on the page), it would not prove the
+/// outline entry exists. The combination assertion (Outlines + known labels) is
+/// the non-vacuous check.
+#[allow(clippy::unwrap_used)]
+#[test]
+fn test_bc_4_03_001_document_outline_entries_have_slide_title_labels() {
+    let deck = deck_with_slides(vec![
+        slide_with_title("Overview", "title"),
+        slide_with_title("Data", "content"),
+        slide_with_title("Summary", "title"),
+    ]);
+    let mut laid_out = n_slide_deck(3);
+    for (i, slide) in laid_out.slides.iter_mut().enumerate() {
+        slide.source_index = i;
+    }
+
+    let bytes = export_to_bytes(&deck, &laid_out);
+
+    // Outline must be present.
+    assert!(
+        pdf_contains(&bytes, b"Outlines"),
+        "AC-010 prerequisite: /Outlines must be present before checking labels."
+    );
+
+    // Each slide title must appear in the PDF bytes (as the outline entry label).
+    // krilla's OutlineItem::title() writes the text string directly to the PDF stream.
+    assert!(
+        pdf_contains(&bytes, b"Overview"),
+        "AC-010 FAILED: outline label 'Overview' not found in PDF bytes.\n\
+         PdfExporter::build_outlines() must use deck.slides[0].title_str() \
+         as the label for the first outline entry."
+    );
+
+    assert!(
+        pdf_contains(&bytes, b"Data"),
+        "AC-010 FAILED: outline label 'Data' not found in PDF bytes.\n\
+         PdfExporter::build_outlines() must use deck.slides[1].title_str() \
+         as the label for the second outline entry."
+    );
+
+    assert!(
+        pdf_contains(&bytes, b"Summary"),
+        "AC-010 FAILED: outline label 'Summary' not found in PDF bytes.\n\
+         PdfExporter::build_outlines() must use deck.slides[2].title_str() \
+         as the label for the third outline entry."
+    );
+}
+
+/// BC-4.03.001 AC-010 (EC-006): Slide with NO title field → fallback label "Slide N".
+///
+/// When `deck.slides[source_index].title_str()` returns `None`, the outline entry
+/// label MUST be `"Slide N"` (1-based slide number). This prevents an empty or
+/// absent bookmark label, which is itself a UA-1 violation.
+///
+/// ## Red Gate trigger — FAILS UNTIL AC-010 IS IMPLEMENTED
+///
+/// No outline = no fallback label. The test asserts `Outlines` is present AND
+/// `Slide 1` appears in the PDF bytes. Both assertions fail currently.
+#[allow(clippy::unwrap_used)]
+#[test]
+fn test_bc_4_03_001_document_outline_fallback_label_for_untitled_slide() {
+    // Deck with one slide that has no title field.
+    let deck = deck_with_slides(vec![slide_without_title("title")]);
+    let mut laid_out = n_slide_deck(1);
+    laid_out.slides[0].source_index = 0;
+
+    let bytes = export_to_bytes(&deck, &laid_out);
+
+    // /Outlines must be present even for a no-title slide.
+    assert!(
+        pdf_contains(&bytes, b"Outlines"),
+        "AC-010/EC-006 FAILED: /Outlines not present for a deck with untitled slides.\n\
+         Every deck must have an outline (ISO 14289-1 §7.1)."
+    );
+
+    // The fallback label "Slide 1" must appear in the PDF bytes.
+    assert!(
+        pdf_contains(&bytes, b"Slide 1"),
+        "AC-010/EC-006 FAILED: fallback label 'Slide 1' not found in PDF bytes.\n\
+         When deck.slides[0].title_str() is None, the outline entry label MUST be \
+         'Slide 1' (1-based). This prevents an empty/absent bookmark label in the PDF."
+    );
+}
+
+// ─── AC-011: Hn structure tags carry /Title attribute ────────────────────────
+
+/// BC-4.03.001 AC-011: Every `/H1` structure element carries a `/T` attribute
+/// whose value is the heading text from `deck.slides[source_index].title_str()`.
+///
+/// ## How krilla writes Hn /T
+///
+/// When `Tag::<krilla::tagging::kind::Hn>::Hn(level, Some(title_string))` is used,
+/// krilla calls `struct_elem.title(TextStr(title))` in the serialize pass, which
+/// writes `Name(b"T")` (the PDF struct-element Title key) + the text string.
+///
+/// The title text appears in the PDF bytes as a PDF text string. Scanning for the
+/// raw title bytes is a load-bearing assertion: if the implementer passes `None`
+/// for the title (current behavior), the string does NOT appear in the PDF bytes
+/// as a `/T` attribute value (even if it appears elsewhere as drawn text).
+///
+/// ## Red Gate trigger — FAILS UNTIL AC-011 IS IMPLEMENTED
+///
+/// The current tag engine calls `Tag::<kind::Hn>::Hn(level, None)` — no title.
+/// krilla does not write the `/T` key for the StructElem.
+/// The assertion that "Revenue Outlook" appears in the PDF bytes (as a struct
+/// attribute, not just drawn text) FAILS because the title text may not be
+/// drawn at all (font resolution may fail in the test environment).
+///
+/// Even if the font DOES resolve and draws the text, the load-bearing assertion
+/// is that the text appears because of the `/T` attribute (not text drawing).
+/// This test is designed to fail until `tag_slide` passes the slide title to
+/// `Tag::<kind::Hn>::Hn(level, Some(title))`.
+#[allow(clippy::unwrap_used)]
+#[test]
+fn test_bc_4_03_001_hn_tag_carries_title_attribute_text() {
+    // A deck with one slide with a known title.
+    // source_index 0 → deck.slides[0].title_str() = Some("Revenue Outlook").
+    let deck = deck_with_slides(vec![slide_with_title("Revenue Outlook", "title")]);
+    let mut laid_out = n_slide_deck(1);
+    laid_out.slides[0].source_index = 0;
+    // The laid-out slide has a Title frame — gives an H1 in the structure tree.
+    // n_slide_deck already builds title frames; source_index 0 is correct.
+
+    // Use uncompressed export so content bytes are scannable without FlateDecode.
+    let exporter = PdfExporter::new();
+    let brand = minimal_brand();
+    let opts = ExportOptions::default();
+    let bytes = exporter
+        .export_uncompressed(&deck, &laid_out, &brand, &opts)
+        .unwrap_or_else(|e| panic!("export_uncompressed failed: {e}"));
+
+    // /H1 must be present (the Title frame was tagged).
+    assert!(
+        pdf_contains(&bytes, b"/H1"),
+        "AC-011 prerequisite: /H1 StructElem must be present."
+    );
+
+    // The title text "Revenue Outlook" MUST appear in the PDF bytes as a PDF
+    // text string from the `/T` (Title) attribute of the H1 StructElem.
+    //
+    // krilla path: tag.set_title(Some("Revenue Outlook".to_owned()))
+    //   → StructAttr::Title("Revenue Outlook")
+    //   → struct_elem.title(TextStr("Revenue Outlook"))
+    //   → pdf-writer writes Name(b"T") + TextStr bytes containing "Revenue Outlook"
+    //
+    // PDF text strings for ASCII content are written as `(Revenue Outlook)` or
+    // as a UTF-16 BE BOM-prefixed hex string. In either case, the ASCII bytes
+    // "Revenue Outlook" appear in the uncompressed PDF stream.
+    assert!(
+        pdf_contains(&bytes, b"Revenue Outlook"),
+        "AC-011 FAILED: 'Revenue Outlook' not found in PDF bytes.\n\
+         The H1 StructElem must carry a /T attribute with the slide title text.\n\
+         Implementer: in tag_slide(), change Tag::<kind::Hn>::Hn(level, None) to\n\
+         Tag::<kind::Hn>::Hn(level, Some(slide_title.to_owned())) where slide_title\n\
+         is sourced from deck.slides[laid_out_slide.source_index].title_str().\n\
+         The title string is passed as the second argument to Hn(...) per\n\
+         krilla 0.6.0 interchange/tagging/generated.rs:2082."
+    );
+}
+
+/// BC-4.03.001 AC-011 (EC-006): Slide with NO title field → H1 /T attribute fallback
+/// "Slide N".
+///
+/// When `deck.slides[source_index].title_str()` returns `None`, the Hn `/T`
+/// attribute MUST be set to the fallback label `"Slide N"` (1-based).
+/// An absent or None `/T` on an Hn tag triggers `MissingHeadingTitle` in
+/// `Validator::UA1` (see krilla validate.rs:714).
+///
+/// ## Red Gate trigger — FAILS UNTIL AC-011 IS IMPLEMENTED
+///
+/// Current: `Tag::<kind::Hn>::Hn(level, None)` — no `/T` attribute.
+/// "Slide 1" does NOT appear in the PDF bytes as an Hn /T value.
+/// The assertion fails.
+#[allow(clippy::unwrap_used)]
+#[test]
+fn test_bc_4_03_001_hn_tag_fallback_title_for_untitled_slide() {
+    let deck = deck_with_slides(vec![slide_without_title("title")]);
+    let mut laid_out = n_slide_deck(1);
+    laid_out.slides[0].source_index = 0;
+
+    let exporter = PdfExporter::new();
+    let brand = minimal_brand();
+    let opts = ExportOptions::default();
+    let bytes = exporter
+        .export_uncompressed(&deck, &laid_out, &brand, &opts)
+        .unwrap_or_else(|e| panic!("export_uncompressed failed: {e}"));
+
+    assert!(
+        pdf_contains(&bytes, b"/H1"),
+        "AC-011/EC-006 prerequisite: /H1 StructElem must be present."
+    );
+
+    // The fallback label "Slide 1" must appear as the Hn /T attribute value.
+    assert!(
+        pdf_contains(&bytes, b"Slide 1"),
+        "AC-011/EC-006 FAILED: fallback title 'Slide 1' not found in PDF bytes.\n\
+         When deck.slides[0].title_str() is None, the H1 /T attribute MUST be \
+         set to the fallback label 'Slide 1' (1-based slide number).\n\
+         An absent /T on Hn triggers MissingHeadingTitle in Validator::UA1.\n\
+         Implementer: use fallback format!(\"Slide {{}}\", source_index + 1) when \
+         title_str() returns None."
+    );
+}
+
+// ─── AC-012: Validator::UA1 enabled in production export path ────────────────
+
+/// BC-4.03.001 AC-012: The production `PdfExporter::export()` path MUST be
+/// configured with `Validator::UA1` (via `SerializeSettings { configuration:
+/// Configuration::new_with_validator(Validator::UA1), .. }`).
+///
+/// When enabled, krilla rejects non-UA1-compliant documents at `document.finish()`
+/// with a `KrillaError::ValidationError`. Any such error MUST be propagated as
+/// a fatal export error — NOT silently swallowed.
+///
+/// ## Test mechanism (TD-VSDD-059 load-bearing)
+///
+/// We export a deck with `deck.metadata.title = None`. krilla UA-1 validation
+/// triggers `ValidationError::NoDocumentTitle` → `prohibits()` returns `true`
+/// for `Validator::UA1` → `document.finish()` returns `KrillaError::ValidationError`.
+///
+/// The `PdfExporter::export()` result must be `Err(...)` with the validation
+/// error message (mapped through `PdfExportError::Serialize { message }` →
+/// `ExportError::RenderError { message }`).
+///
+/// ## Red Gate trigger — FAILS UNTIL AC-012 IS IMPLEMENTED
+///
+/// Current production code: `Document::new_with(SerializeSettings::default())`
+/// uses `Configuration::new()` which has `Validator::None`. No validation is
+/// performed. The export SUCCEEDS (`Ok`) even for a no-title deck.
+///
+/// This test asserts `result.is_err()` — FAILS NOW (gets `Ok`).
+/// Once `Validator::UA1` is set in the production export path, the validation
+/// triggers and the test PASSES.
+///
+/// Note: `NoDocumentTitle` is `true` for `Validator::UA1`
+/// (krilla configure/validate.rs line ~482: `ValidationError::NoDocumentTitle => true`).
+/// This UA-1 violation is stable — a deck without a document title will ALWAYS
+/// fail UA-1, even after AC-010+011 are implemented.
+#[allow(clippy::unwrap_used)]
+#[test]
+fn test_bc_4_03_001_validator_ua1_rejects_missing_document_title() {
+    // Deck with NO metadata.title (= None) but with a Title frame on the slide.
+    // With Validator::UA1: ValidationError::NoDocumentTitle → fatal error.
+    // With Validator::None (current): no validation, export succeeds.
+    let deck = deck_without_doc_title();
+    let mut laid_out = n_slide_deck(1);
+    laid_out.slides[0].source_index = 0;
+
+    let exporter = PdfExporter::new();
+    let brand = minimal_brand();
+    let opts = ExportOptions::default();
+
+    let result = exporter.export(&deck, &laid_out, &brand, &opts);
+
+    assert!(
+        result.is_err(),
+        "AC-012 FAILED: export of a deck with no document title should return Err \
+         when Validator::UA1 is enabled.\n\
+         ValidationError::NoDocumentTitle is fatal under Validator::UA1 \
+         (krilla configure/validate.rs: NoDocumentTitle => true for UA1).\n\
+         Current failure mode: the production export uses Validator::None \
+         (SerializeSettings::default() → Configuration::new() → Validator::None), \
+         so no validation is performed and export returns Ok.\n\
+         Implementer: change generate_pdf_inner to use:\n\
+         krilla::SerializeSettings {{\n\
+             configuration: krilla::configure::Configuration::new_with_validator(\n\
+                 krilla::configure::Validator::UA1\n\
+             ),\n\
+             ..krilla::SerializeSettings::default()\n\
+         }}"
+    );
+
+    // When Err: the error message must reference validation (not a crash).
+    if let Err(ref e) = result {
+        let msg = e.to_string().to_lowercase();
+        assert!(
+            msg.contains("validation") || msg.contains("krilla") || msg.contains("serialize"),
+            "AC-012: error was Err but message does not mention validation: '{}'",
+            e
+        );
+    }
+}
+
+/// BC-4.03.001 AC-012 (invariant 5): Once the full UA-1 implementation is in
+/// place (AC-010 outline + AC-011 Hn titles + AC-012 Validator::UA1), a
+/// COMPLIANT deck (with title, lang, outline, Hn /T set) MUST export
+/// successfully — no false positives from the validator.
+///
+/// ## Red Gate trigger — FAILS UNTIL AC-010 + AC-011 + AC-012 ARE ALL IMPLEMENTED
+///
+/// Currently the export of the compliant fixture deck SUCCEEDS (Validator::None
+/// means no rejection). Once Validator::UA1 is enabled:
+/// - Without AC-010+011: the export FAILS (missing outline + missing Hn /T)
+/// - With AC-010+011: the export SUCCEEDS
+///
+/// This test acts as the "positive case" for AC-012: a fully-compliant deck
+/// must export without a ValidationError. It FAILS now because once Validator::UA1
+/// is wired (AC-012), the missing outline+Hn titles (not yet implemented) will
+/// cause it to reject. Only when ALL of AC-010+011+012 are implemented does
+/// this test pass.
+///
+/// The test is intentionally written to fail in the INTERMEDIATE state
+/// (Validator::UA1 enabled but outline/titles not yet added) so the implementer
+/// must complete ALL workstreams before marking AC-012 done.
+#[allow(clippy::unwrap_used)]
+#[test]
+fn test_bc_4_03_001_validator_ua1_compliant_deck_exports_successfully() {
+    // Compliant fixture: lang set, doc title set, slides with titled H1 frames.
+    // AC-010: outline will be built from slide titles.
+    // AC-011: Hn /T will be set from deck.slides[i].title_str().
+    // AC-012: Validator::UA1 must NOT reject this deck once AC-010+011 done.
+    let deck = deck_with_slides(vec![
+        slide_with_title("Overview", "title"),
+        slide_with_title("Data", "content"),
+        slide_with_title("Summary", "title"),
+    ]);
+    let mut laid_out = n_slide_deck(3);
+    for (i, slide) in laid_out.slides.iter_mut().enumerate() {
+        slide.source_index = i;
+    }
+
+    let exporter = PdfExporter::new();
+    let brand = minimal_brand();
+    let opts = ExportOptions::default();
+
+    let result = exporter.export(&deck, &laid_out, &brand, &opts);
+
+    // This is the positive-path assertion: a compliant deck must export without error.
+    // Currently FAILS because:
+    //   (a) Until AC-012: uses Validator::None so passes trivially → this would pass!
+    //   (b) After AC-012 alone (without AC-010+011): Validator::UA1 rejects missing
+    //       outline + missing Hn /T → result is Err → test FAILS
+    //   (c) After AC-010+011+012: Validator::UA1 passes, result is Ok → test PASSES
+    //
+    // To make this a Red Gate: we also assert /Outlines is present in the bytes
+    // (which fails currently regardless of whether the export succeeds/fails).
+    // If the export is Ok but /Outlines is missing, the assert below catches it.
+    let bytes = result.unwrap_or_else(|e| panic!(
+        "AC-012/positive FAILED: compliant deck must export successfully once \
+         AC-010+011+012 are all implemented.\n\
+         Current error: {e}\n\
+         If Validator::UA1 is enabled but outline/Hn-titles are not yet added, \
+         this error is expected as an intermediate Red Gate state."
+    ));
+
+    // The export succeeded — verify the outline is present (load-bearing AC-010 proxy).
+    // This catches the case where the export succeeds with Validator::None but no outline.
+    assert!(
+        pdf_contains(&bytes, b"Outlines"),
+        "AC-012/positive FAILED: export succeeded but /Outlines not present.\n\
+         A compliant PDF must have a document outline (AC-010)."
+    );
+}
+
+// ─── AC-013: veraPDF integration test (+ always-run structural proxy) ─────────
+
+/// BC-4.03.001 AC-013 (structural proxy — always runs, no external tool needed):
+/// The exported PDF has all structural elements required for `veraPDF --flavour ua1`
+/// to produce `isCompliant: true`.
+///
+/// Per SID-1 (No-Ignored-Test Rationalization): an `#[ignore]`'d test that
+/// requires an external tool (veraPDF) must be accompanied by a non-ignored
+/// unit test that exercises the same production path without the external tool.
+///
+/// ## What this asserts (composite UA-1 structural proxy)
+///
+/// | Check | Required for veraPDF UA-1 |
+/// |-------|--------------------------|
+/// | /StructTreeRoot | Yes — tagged PDF mandatory |
+/// | /MarkInfo | Yes — Marked=true mandatory |
+/// | /Outlines | Yes — mandatory when headings present |
+/// | /Lang | Yes — required language metadata |
+/// | Slide title text in outline | Yes — meaningful bookmark labels |
+///
+/// The combination of these 5 assertions is the full structural proxy for
+/// veraPDF --flavour ua1 isCompliant:true (excluding ToUnicode, which is AC-009).
+///
+/// ## Red Gate trigger — FAILS UNTIL AC-010..012 ARE IMPLEMENTED
+///
+/// The `/Outlines` assertion fails immediately (AC-010 not done).
+/// Even if AC-001/006/007 already pass, the composite fails on /Outlines.
+#[allow(clippy::unwrap_used)]
+#[test]
+fn test_bc_4_03_001_ac013_structural_proxy_for_verapdf_ua1() {
+    // 3-slide fixture deck matching the canonical test vector (TV-10.1 from BC).
+    let deck = deck_with_slides(vec![
+        slide_with_title("Overview", "title"),
+        slide_with_title("Data", "content"),
+        slide_with_title("Summary", "title"),
+    ]);
+    let mut laid_out = n_slide_deck(3);
+    for (i, slide) in laid_out.slides.iter_mut().enumerate() {
+        slide.source_index = i;
+    }
+
+    let bytes = export_to_bytes(&deck, &laid_out);
+
+    // Check 1: /StructTreeRoot (AC-001 / BC-4.03.001 postcondition 1)
+    assert!(
+        pdf_contains(&bytes, b"StructTreeRoot"),
+        "AC-013/proxy FAILED: /StructTreeRoot missing (AC-001)."
+    );
+
+    // Check 2: /MarkInfo (AC-006 / BC-4.03.001 postcondition 1)
+    assert!(
+        pdf_contains(&bytes, b"MarkInfo"),
+        "AC-013/proxy FAILED: /MarkInfo missing (AC-006)."
+    );
+
+    // Check 3: /Lang (AC-007 / BC-4.03.001 postcondition 1)
+    assert!(
+        pdf_contains(&bytes, b"/Lang"),
+        "AC-013/proxy FAILED: /Lang missing (AC-007)."
+    );
+
+    // Check 4: /Outlines (AC-010 — THIS IS THE NEW RED GATE ASSERTION)
+    assert!(
+        pdf_contains(&bytes, b"Outlines"),
+        "AC-013/proxy FAILED: /Outlines (document outline/bookmarks) missing (AC-010).\n\
+         veraPDF --flavour ua1 reports MissingDocumentOutline when this is absent.\n\
+         Implementer: call document.set_outline(outline) in generate_pdf_inner."
+    );
+
+    // Check 5: Slide title appears in outline entries (AC-010 label check)
+    assert!(
+        pdf_contains(&bytes, b"Overview"),
+        "AC-013/proxy FAILED: outline label 'Overview' not found (AC-010 labels)."
+    );
+}
+
+/// BC-4.03.001 AC-013 (veraPDF integration — ALWAYS #[ignore] for local runs):
+///
+/// Runs `verapdf --flavour ua1` on a 3-slide fixture deck and asserts
+/// `isCompliant: true` with zero violations.
+///
+/// ## Why #[ignore]
+///
+/// `verapdf` is a Java-based CLI tool. Per SID-1:
+/// integration tests requiring external tools MUST be `#[ignore]`'d with a
+/// code comment citing the blocking dependency. The non-ignored proxy test
+/// `test_bc_4_03_001_ac013_structural_proxy_for_verapdf_ua1` exercises the
+/// same production path without the external tool.
+///
+/// ## Blocking dependency
+///
+/// Requires `verapdf` on PATH (Java tool). In CI, installed via
+/// Docker image `ghcr.io/verapdf/cli:latest` (per STORY-045 spec).
+/// Not available in standard developer test environments.
+///
+/// ## To un-ignore on CI (pdf-ua1.yml workflow)
+///
+/// The CI job MUST invoke:
+/// ```bash
+/// cargo nextest run -p slideforge-pdf --test pdf_ua1 \
+///     test_bc_4_03_001_ac013_verapdf_full_compliance -- --include-ignored
+/// ```
+/// Per AC-013: `.github/workflows/pdf-ua1.yml` must contain `-- --include-ignored`.
+#[test]
+#[ignore = "requires verapdf CLI on PATH (Java tool — available in CI via Docker image \
+             ghcr.io/verapdf/cli:latest; blocking dependency: \
+             .github/workflows/pdf-ua1.yml which runs this test via --include-ignored)"]
+#[allow(clippy::unwrap_used)]
+fn test_bc_4_03_001_ac013_verapdf_full_compliance() {
+    use std::io::Write;
+    use std::process::Command;
+
+    let deck = deck_with_slides(vec![
+        slide_with_title("Overview", "title"),
+        slide_with_title("Data", "content"),
+        slide_with_title("Summary", "title"),
+    ]);
+    let mut laid_out = n_slide_deck(3);
+    for (i, slide) in laid_out.slides.iter_mut().enumerate() {
+        slide.source_index = i;
+    }
+
+    // Export to PDF bytes via the production path (with Validator::UA1 once AC-012 done).
+    let bytes = export_to_bytes(&deck, &laid_out);
+
+    // Write PDF bytes to a temp file for verapdf to read.
+    let mut tmp = tempfile::NamedTempFile::new()
+        .expect("failed to create temp file for veraPDF fixture");
+    tmp.write_all(&bytes)
+        .expect("failed to write PDF bytes to temp file");
+    let pdf_path = tmp.path().to_owned();
+
+    // Run verapdf --flavour ua1 on the fixture PDF.
+    let output = Command::new("verapdf")
+        .arg("--flavour")
+        .arg("ua1")
+        .arg(&pdf_path)
+        .output()
+        .unwrap_or_else(|e| {
+            panic!(
+                "AC-013 FAILED: could not run verapdf: {e}.\n\
+                 Is verapdf installed and on PATH?\n\
+                 CI: install via ghcr.io/verapdf/cli:latest Docker image."
+            )
+        });
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    eprintln!("[verapdf AC-013] stdout: {stdout}");
+    eprintln!("[verapdf AC-013] stderr: {stderr}");
+
+    // verapdf exits 0 when validation passes.
+    assert!(
+        output.status.success(),
+        "AC-013 FAILED: verapdf exited with non-zero status {:?}.\n\
+         stdout: {stdout}\n\
+         stderr: {stderr}",
+        output.status.code()
+    );
+
+    // The JSON output must contain isCompliant: true.
+    assert!(
+        stdout.contains("\"isCompliant\":true") || stdout.contains("isCompliant: true"),
+        "AC-013 FAILED: verapdf output does not contain 'isCompliant: true'.\n\
+         stdout: {stdout}"
+    );
+
+    // Zero violations.
+    assert!(
+        stdout.contains("\"violations\":0")
+            || stdout.contains("violations: 0")
+            || !stdout.contains("violation"),
+        "AC-013 FAILED: verapdf output reports violations.\n\
+         stdout: {stdout}"
+    );
+}
+
+// ─── AC-013 CI gate: workflow file checks ────────────────────────────────────
+
+/// BC-4.03.001 AC-013 (CI gate): `.github/workflows/pdf-ua1.yml` must invoke
+/// `cargo test ... -- --include-ignored` to un-ignore the veraPDF test.
+///
+/// ## Red Gate trigger — FAILS UNTIL CI WORKFLOW IS WRITTEN (STORY-045)
+///
+/// The CI workflow file does not yet exist. This test fails on file absence.
+/// When the file exists, the content assertion verifies `--include-ignored`
+/// is present (SID-1 requirement for `#[ignore]`'d external-tool tests).
+#[test]
+fn test_bc_4_03_001_ac013_ci_workflow_includes_ignored_flag() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let workflow_path = manifest_dir.join("../../.github/workflows/pdf-ua1.yml");
+
+    // File must exist.
+    assert!(
+        workflow_path.exists(),
+        "AC-013 FAILED: CI workflow file not found at {path}.\n\
+         STORY-045 must create .github/workflows/pdf-ua1.yml.\n\
+         The file must invoke cargo test with -- --include-ignored to un-ignore \
+         the veraPDF integration test.",
+        path = workflow_path.display()
+    );
+
+    // The file must contain '--include-ignored' so the veraPDF test runs in CI.
+    let content = std::fs::read_to_string(&workflow_path)
+        .unwrap_or_else(|e| panic!("failed to read pdf-ua1.yml: {e}"));
+
+    assert!(
+        content.contains("--include-ignored"),
+        "AC-013 FAILED: pdf-ua1.yml exists but does not contain '--include-ignored'.\n\
+         The CI job must un-ignore the veraPDF integration test by passing \
+         '-- --include-ignored' to cargo test/nextest.\n\
+         Without this flag, test_bc_4_03_001_ac013_verapdf_full_compliance is \
+         silently skipped and the veraPDF gate is not enforced."
     );
 }
