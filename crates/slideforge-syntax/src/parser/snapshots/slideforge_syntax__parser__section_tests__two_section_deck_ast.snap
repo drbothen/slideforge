@@ -3,7 +3,16 @@ source: crates/slideforge-syntax/src/parser/section_tests.rs
 expression: result.deck
 ---
 DeckNode {
-    version: None,
+    version: Some(
+        Spanned(
+            "1",
+            Span {
+                file_id: 0,
+                start: 19,
+                end: 22,
+            },
+        ),
+    ),
     lang: None,
     brand: None,
     vars: [],
@@ -18,8 +27,8 @@ DeckNode {
                         "methodology",
                         Span {
                             file_id: 0,
-                            start: 8,
-                            end: 19,
+                            start: 31,
+                            end: 42,
                         },
                     ),
                     fields: [
@@ -28,8 +37,8 @@ DeckNode {
                                 "report",
                                 Span {
                                     file_id: 0,
-                                    start: 23,
-                                    end: 29,
+                                    start: 46,
+                                    end: 52,
                                 },
                             ),
                             value: Spanned(
@@ -42,8 +51,8 @@ DeckNode {
                                 ),
                                 Span {
                                     file_id: 0,
-                                    start: 31,
-                                    end: 53,
+                                    start: 54,
+                                    end: 76,
                                 },
                             ),
                         },
@@ -51,8 +60,8 @@ DeckNode {
                 },
                 Span {
                     file_id: 0,
-                    start: 0,
-                    end: 55,
+                    start: 23,
+                    end: 78,
                 },
             ),
         ),
@@ -63,8 +72,8 @@ DeckNode {
                         "scope",
                         Span {
                             file_id: 0,
-                            start: 63,
-                            end: 68,
+                            start: 86,
+                            end: 91,
                         },
                     ),
                     fields: [
@@ -73,8 +82,8 @@ DeckNode {
                                 "detail",
                                 Span {
                                     file_id: 0,
-                                    start: 72,
-                                    end: 78,
+                                    start: 95,
+                                    end: 101,
                                 },
                             ),
                             value: Spanned(
@@ -87,8 +96,8 @@ DeckNode {
                                 ),
                                 Span {
                                     file_id: 0,
-                                    start: 80,
-                                    end: 95,
+                                    start: 103,
+                                    end: 118,
                                 },
                             ),
                         },
@@ -97,8 +106,8 @@ DeckNode {
                                 "report",
                                 Span {
                                     file_id: 0,
-                                    start: 98,
-                                    end: 104,
+                                    start: 121,
+                                    end: 127,
                                 },
                             ),
                             value: Spanned(
@@ -111,8 +120,8 @@ DeckNode {
                                 ),
                                 Span {
                                     file_id: 0,
-                                    start: 106,
-                                    end: 121,
+                                    start: 129,
+                                    end: 144,
                                 },
                             ),
                         },
@@ -120,8 +129,8 @@ DeckNode {
                 },
                 Span {
                     file_id: 0,
-                    start: 55,
-                    end: 122,
+                    start: 78,
+                    end: 145,
                 },
             ),
         ),
