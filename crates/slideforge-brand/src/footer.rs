@@ -417,12 +417,15 @@ mod tests {
   </a:themeElements>
 </a:theme>"#;
 
-    /// Minimal slide master XML with a populated footer placeholder.
+    /// Minimal slide master XML with a populated footer placeholder AND a `<p:hf>` element
+    /// with all three flags set to "1".
     ///
-    /// Contains `<p:ph type="ftr"/>` with `<a:t>Confidential</a:t>`.
+    /// Contains `<p:ph type="ftr"/>` with `<a:t>Confidential</a:t>` and
+    /// `<p:hf ftr="1" dt="1" sldNum="1"/>`.
     const MASTER_WITH_FOOTER_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <p:sldMaster xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"
              xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+  <p:hf ftr="1" dt="1" sldNum="1"/>
   <p:spTree>
     <p:sp>
       <p:nvSpPr>
@@ -436,6 +439,123 @@ mod tests {
         <a:p>
           <a:r><a:t>Confidential</a:t></a:r>
         </a:p>
+      </p:txBody>
+    </p:sp>
+  </p:spTree>
+</p:sldMaster>"#;
+
+    /// Slide master XML with a footer placeholder containing TWO `<a:r>` runs —
+    /// tests EC-008 / AC-001 (corrected): full concatenation of all runs.
+    ///
+    /// Runs: "Acme Confidential " and "2026" → expected concat "Acme Confidential 2026".
+    /// The `<p:hf>` element is present with ftr="1" only.
+    const MASTER_MULTIRUN_FOOTER_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sldMaster xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"
+             xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+  <p:hf ftr="1" dt="0" sldNum="0"/>
+  <p:spTree>
+    <p:sp>
+      <p:nvSpPr>
+        <p:nvPr>
+          <p:ph type="ftr" sz="quarter" idx="11"/>
+        </p:nvPr>
+      </p:nvSpPr>
+      <p:txBody>
+        <a:bodyPr/>
+        <a:lstStyle/>
+        <a:p>
+          <a:r><a:t>Acme Confidential </a:t></a:r>
+          <a:r><a:t>2026</a:t></a:r>
+        </a:p>
+      </p:txBody>
+    </p:sp>
+  </p:spTree>
+</p:sldMaster>"#;
+
+    /// Slide master XML with `<p:hf ftr="1" sldNum="1"/>` — `dt` attribute ABSENT.
+    ///
+    /// Expected: show_footer=true, show_date=false (absent=false), show_slide_number=true.
+    /// Also contains a footer placeholder so the ZIP is self-consistent.
+    const MASTER_HF_FTR_AND_SLDNUM_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sldMaster xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"
+             xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+  <p:hf ftr="1" sldNum="1"/>
+  <p:spTree>
+    <p:sp>
+      <p:nvSpPr>
+        <p:nvPr>
+          <p:ph type="ftr" sz="quarter" idx="11"/>
+        </p:nvPr>
+      </p:nvSpPr>
+      <p:txBody>
+        <a:bodyPr/>
+        <a:lstStyle/>
+        <a:p><a:r><a:t>Corp Footer</a:t></a:r></a:p>
+      </p:txBody>
+    </p:sp>
+  </p:spTree>
+</p:sldMaster>"#;
+
+    /// Slide master XML with `<p:hf ftr="true" dt="true" sldNum="false"/>` —
+    /// tests OOXML boolean "true"/"false" string form (in addition to "1"/"0").
+    const MASTER_HF_BOOL_STRING_FORM_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sldMaster xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"
+             xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+  <p:hf ftr="true" dt="true" sldNum="false"/>
+  <p:spTree>
+    <p:sp>
+      <p:nvSpPr>
+        <p:nvPr>
+          <p:ph type="ftr" idx="11"/>
+        </p:nvPr>
+      </p:nvSpPr>
+      <p:txBody>
+        <a:bodyPr/><a:lstStyle/>
+        <a:p><a:r><a:t>Bool Form Test</a:t></a:r></a:p>
+      </p:txBody>
+    </p:sp>
+  </p:spTree>
+</p:sldMaster>"#;
+
+    /// Slide master XML with a `<p:hf>` element present but ALL THREE attributes absent.
+    ///
+    /// EC-007: `<p:hf>` present but `ftr`, `dt`, `sldNum` attributes all absent →
+    /// all three flags false (xsd:boolean optional, absent = false).
+    const MASTER_HF_ALL_ATTRS_ABSENT_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sldMaster xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"
+             xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+  <p:hf hdr="0"/>
+  <p:spTree>
+    <p:sp>
+      <p:nvSpPr>
+        <p:nvPr>
+          <p:ph type="ftr" idx="11"/>
+        </p:nvPr>
+      </p:nvSpPr>
+      <p:txBody>
+        <a:bodyPr/><a:lstStyle/>
+        <a:p><a:r><a:t>Footer</a:t></a:r></a:p>
+      </p:txBody>
+    </p:sp>
+  </p:spTree>
+</p:sldMaster>"#;
+
+    /// Slide master XML with NO `<p:hf>` element at all.
+    ///
+    /// EC-004: absent `<p:hf>` → `FooterFlags::default()` (all false); `tracing::debug!` emitted.
+    const MASTER_NO_HF_ELEMENT_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sldMaster xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"
+             xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+  <p:spTree>
+    <p:sp>
+      <p:nvSpPr>
+        <p:nvPr>
+          <p:ph type="ftr" idx="11"/>
+        </p:nvPr>
+      </p:nvSpPr>
+      <p:txBody>
+        <a:bodyPr/><a:lstStyle/>
+        <a:p><a:r><a:t>Footer text</a:t></a:r></a:p>
       </p:txBody>
     </p:sp>
   </p:spTree>
@@ -522,27 +642,11 @@ mod tests {
   </p:spTree>
 </p:sldLayout>"#;
 
-    /// `presProps.xml` with footer visible (val="1"), slide number visible, date hidden.
-    const PRESPROPS_FOOTER_AND_SLDNUM_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<p:presentationPr xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
-  <p:showPr>
-    <p:ftr val="1"/>
-    <p:sldNum val="1"/>
-  </p:showPr>
-</p:presentationPr>"#;
-
-    /// `presProps.xml` with all three flags set to "1".
-    const PRESPROPS_ALL_FLAGS_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<p:presentationPr xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
-  <p:showPr>
-    <p:ftr val="1"/>
-    <p:dt val="1"/>
-    <p:sldNum val="1"/>
-  </p:showPr>
-</p:presentationPr>"#;
-
-    /// `presProps.xml` with no `<p:showPr>` child — flags should default to false.
-    const PRESPROPS_NO_SHOWPR_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    /// `presProps.xml` stub — used in the BrandLoader integration test to verify
+    /// presProps.xml is NOT consulted for footer flags (AC-003 corrected).
+    /// A real presProps.xml present in the ZIP should have no effect on FooterFlags
+    /// because flags come from `<p:hf>` on slideMaster1.xml, not from presProps.xml.
+    const PRESPROPS_STUB_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <p:presentationPr xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
 </p:presentationPr>"#;
 
@@ -811,12 +915,103 @@ mod tests {
         );
     }
 
-    /// BC-2.01.001 AC-003 / EC-004 — `presProps.xml` absent → `FooterFlags::default()`.
+    /// BC-2.01.001 AC-003 / EC-004 (corrected) — `<p:hf>` element absent from
+    /// `slideMaster1.xml` → `FooterFlags::default()` (all false); `tracing::debug!` emitted.
     ///
-    /// Test vector from story Test Strategy table: absent presProps.xml → all false flags.
+    /// Test vector from BC-2.01.001 v1.3 (corrected): NO `<p:hf>` in master XML →
+    /// all flags false. This replaces the old presProps-absent test.
+    ///
+    /// RED GATE: the current implementation reads presProps.xml (not `<p:hf>`), so if
+    /// presProps.xml is absent the old code returns default. However, this test exercises
+    /// the correct source (`<p:hf>` absent from master), which must also yield defaults.
+    /// The new `<p:hf>` tests below (flags_from_hf_element, hf_partial_attrs) are the
+    /// load-bearing Red Gate tests — they fail against the presProps implementation
+    /// because the presProps impl can never read `<p:hf>` attributes.
     #[test]
-    fn test_bc_2_01_001_detect_footer_flags_absent_presprops() {
-        // ZIP has a master but NO presProps.xml.
+    fn test_bc_2_01_001_detect_footer_flags_absent_hf_element() {
+        // ZIP has master but NO <p:hf> element in it (MASTER_NO_HF_ELEMENT_XML).
+        let zip_bytes = build_pptx_zip_with_extras(&[(
+            "ppt/slideMasters/slideMaster1.xml",
+            MASTER_NO_HF_ELEMENT_XML.as_bytes(),
+        )]);
+        let cursor = Cursor::new(zip_bytes);
+        let mut zip = zip::ZipArchive::new(cursor).unwrap();
+
+        let detection = detect_footer(&mut zip, true);
+
+        assert!(
+            !detection.flags.show_footer,
+            "EC-004 (corrected): absent <p:hf> must yield show_footer = false; \
+             got show_footer={}",
+            detection.flags.show_footer
+        );
+        assert!(
+            !detection.flags.show_date,
+            "EC-004 (corrected): absent <p:hf> must yield show_date = false; \
+             got show_date={}",
+            detection.flags.show_date
+        );
+        assert!(
+            !detection.flags.show_slide_number,
+            "EC-004 (corrected): absent <p:hf> must yield show_slide_number = false; \
+             got show_slide_number={}",
+            detection.flags.show_slide_number
+        );
+    }
+
+    /// BC-2.01.001 AC-003 (corrected) — `<p:hf ftr="1" sldNum="1"/>` in slideMaster1.xml
+    /// (no `dt` attribute) → `show_footer=true, show_date=false, show_slide_number=true`.
+    ///
+    /// Test vector from BC-2.01.001 v1.3 canonical test vectors:
+    ///   `.pptx with <p:hf ftr="1" dt="1" sldNum="0"/>` → `{ show_footer: true, show_date: true,
+    ///   show_slide_number: false }`.
+    /// This test uses ftr="1" + sldNum="1" (no dt attr) to verify partial attribute presence.
+    ///
+    /// **RED GATE:** the current implementation reads presProps.xml `<p:showPr>` children.
+    /// MASTER_HF_FTR_AND_SLDNUM_XML has NO presProps.xml in the ZIP, so the old code returns
+    /// all-false. This test expects show_footer=true and show_slide_number=true → FAILS.
+    #[test]
+    fn test_bc_2_01_001_detect_footer_flags_from_hf_element() {
+        let zip_bytes = build_pptx_zip_with_extras(&[(
+            "ppt/slideMasters/slideMaster1.xml",
+            MASTER_HF_FTR_AND_SLDNUM_XML.as_bytes(),
+        )]);
+        let cursor = Cursor::new(zip_bytes);
+        let mut zip = zip::ZipArchive::new(cursor).unwrap();
+
+        let detection = detect_footer(&mut zip, true);
+
+        assert!(
+            detection.flags.show_footer,
+            "AC-003 (corrected): <p:hf ftr=\"1\"/> must set show_footer = true; \
+             got show_footer={}",
+            detection.flags.show_footer
+        );
+        assert!(
+            !detection.flags.show_date,
+            "AC-003 (corrected): absent dt attribute in <p:hf> must leave show_date = false \
+             (xsd:boolean optional default); got show_date={}",
+            detection.flags.show_date
+        );
+        assert!(
+            detection.flags.show_slide_number,
+            "AC-003 (corrected): <p:hf sldNum=\"1\"/> must set show_slide_number = true; \
+             got show_slide_number={}",
+            detection.flags.show_slide_number
+        );
+    }
+
+    /// BC-2.01.001 AC-003 (corrected) — all three flags set via `<p:hf>` in slideMaster1.xml.
+    ///
+    /// Test vector: `<p:hf ftr="1" dt="1" sldNum="1"/>` → all three flags true.
+    /// Canonical test vector from BC-2.01.001 v1.3.
+    ///
+    /// **RED GATE:** old impl reads presProps.xml. MASTER_WITH_FOOTER_XML now contains
+    /// `<p:hf ftr="1" dt="1" sldNum="1"/>` but no presProps.xml is in the ZIP, so the old
+    /// code returns all-false. This test expects all three true → FAILS.
+    #[test]
+    fn test_bc_2_01_001_detect_footer_flags_all_three_from_hf_element() {
+        // MASTER_WITH_FOOTER_XML carries <p:hf ftr="1" dt="1" sldNum="1"/> (updated fixture).
         let zip_bytes = build_pptx_zip_with_extras(&[(
             "ppt/slideMasters/slideMaster1.xml",
             MASTER_WITH_FOOTER_XML.as_bytes(),
@@ -826,100 +1021,38 @@ mod tests {
 
         let detection = detect_footer(&mut zip, true);
 
-        let default_flags = FooterFlags::default();
-        assert_eq!(
-            detection.flags.show_footer, default_flags.show_footer,
-            "AC-003/EC-004: absent presProps.xml must yield show_footer = false"
-        );
-        assert_eq!(
-            detection.flags.show_date, default_flags.show_date,
-            "AC-003/EC-004: absent presProps.xml must yield show_date = false"
-        );
-        assert_eq!(
-            detection.flags.show_slide_number, default_flags.show_slide_number,
-            "AC-003/EC-004: absent presProps.xml must yield show_slide_number = false"
-        );
-    }
-
-    /// BC-2.01.001 AC-003 — `presProps.xml` with `<p:ftr val=\"1\"/>` and `<p:sldNum val=\"1\"/>`.
-    ///
-    /// Test vector from story Test Strategy table: `show_footer=true, show_date=false,
-    /// show_slide_number=true`.
-    #[test]
-    fn test_bc_2_01_001_detect_footer_flags_from_presprops() {
-        let zip_bytes = build_pptx_zip_with_extras(&[
-            (
-                "ppt/slideMasters/slideMaster1.xml",
-                MASTER_WITH_FOOTER_XML.as_bytes(),
-            ),
-            (
-                "ppt/presProps.xml",
-                PRESPROPS_FOOTER_AND_SLDNUM_XML.as_bytes(),
-            ),
-        ]);
-        let cursor = Cursor::new(zip_bytes);
-        let mut zip = zip::ZipArchive::new(cursor).unwrap();
-
-        let detection = detect_footer(&mut zip, true);
-
         assert!(
             detection.flags.show_footer,
-            "AC-003: <p:ftr val=\"1\"/> must set show_footer = true; \
-             got show_footer={}",
-            detection.flags.show_footer
+            "AC-003 (corrected): <p:hf ftr=\"1\"/> must set show_footer = true"
         );
         assert!(
-            !detection.flags.show_date,
-            "AC-003: no <p:dt> in presProps must leave show_date = false; \
-             got show_date={}",
-            detection.flags.show_date
+            detection.flags.show_date,
+            "AC-003 (corrected): <p:hf dt=\"1\"/> must set show_date = true"
         );
         assert!(
             detection.flags.show_slide_number,
-            "AC-003: <p:sldNum val=\"1\"/> must set show_slide_number = true; \
-             got show_slide_number={}",
-            detection.flags.show_slide_number
+            "AC-003 (corrected): <p:hf sldNum=\"1\"/> must set show_slide_number = true"
         );
     }
 
-    /// BC-2.01.001 AC-003 — all three flags parsed from `presProps.xml`.
-    #[test]
-    fn test_bc_2_01_001_detect_footer_flags_all_three_from_presprops() {
-        let zip_bytes = build_pptx_zip_with_extras(&[
-            (
-                "ppt/slideMasters/slideMaster1.xml",
-                MASTER_WITH_FOOTER_XML.as_bytes(),
-            ),
-            ("ppt/presProps.xml", PRESPROPS_ALL_FLAGS_XML.as_bytes()),
-        ]);
-        let cursor = Cursor::new(zip_bytes);
-        let mut zip = zip::ZipArchive::new(cursor).unwrap();
-
-        let detection = detect_footer(&mut zip, true);
-
-        assert!(
-            detection.flags.show_footer,
-            "show_footer must be true (val=1)"
-        );
-        assert!(detection.flags.show_date, "show_date must be true (val=1)");
-        assert!(
-            detection.flags.show_slide_number,
-            "show_slide_number must be true (val=1)"
-        );
-    }
-
-    /// BC-2.01.001 AC-003 / EC-007 — `presProps.xml` present but no `<p:showPr>` element.
+    /// BC-2.01.001 AC-003 / EC-007 (corrected) — `<p:hf>` element present in
+    /// `slideMaster1.xml` but ALL three attributes (`ftr`, `dt`, `sldNum`) are absent.
     ///
-    /// All flags must default to false (EC-007).
+    /// EC-007: all three flags are false (xsd:boolean optional, absent = false per
+    /// ECMA-376 CT_HeaderFooter). No error, no warning.
+    ///
+    /// **RED GATE:** old impl reads presProps.xml `<p:showPr>` children — all-false is
+    /// the expected result for both old and new code in this specific case (no attrs).
+    /// However, the naming asserts `<p:hf>`-awareness is required — a correct impl must
+    /// parse `<p:hf>` at all to distinguish EC-007 from EC-004. The test is structurally
+    /// non-tautological because any impl that reads the right element still gets the
+    /// same result; the other `<p:hf>` tests (above) provide the actual Red Gate signal.
     #[test]
-    fn test_bc_2_01_001_detect_footer_flags_presprops_no_showpr() {
-        let zip_bytes = build_pptx_zip_with_extras(&[
-            (
-                "ppt/slideMasters/slideMaster1.xml",
-                MASTER_WITH_FOOTER_XML.as_bytes(),
-            ),
-            ("ppt/presProps.xml", PRESPROPS_NO_SHOWPR_XML.as_bytes()),
-        ]);
+    fn test_bc_2_01_001_detect_footer_flags_hf_partial_attrs() {
+        let zip_bytes = build_pptx_zip_with_extras(&[(
+            "ppt/slideMasters/slideMaster1.xml",
+            MASTER_HF_ALL_ATTRS_ABSENT_XML.as_bytes(),
+        )]);
         let cursor = Cursor::new(zip_bytes);
         let mut zip = zip::ZipArchive::new(cursor).unwrap();
 
@@ -927,15 +1060,92 @@ mod tests {
 
         assert!(
             !detection.flags.show_footer,
-            "EC-007: presProps with no <p:showPr> must yield show_footer = false"
+            "EC-007 (corrected): <p:hf> with absent ftr attr must yield show_footer = false"
         );
         assert!(
             !detection.flags.show_date,
-            "EC-007: presProps with no <p:showPr> must yield show_date = false"
+            "EC-007 (corrected): <p:hf> with absent dt attr must yield show_date = false"
         );
         assert!(
             !detection.flags.show_slide_number,
-            "EC-007: presProps with no <p:showPr> must yield show_slide_number = false"
+            "EC-007 (corrected): <p:hf> with absent sldNum attr must yield show_slide_number = false"
+        );
+    }
+
+    /// BC-2.01.001 AC-003 (corrected) — OOXML boolean "true"/"false" string form in `<p:hf>`.
+    ///
+    /// ECMA-376 xsd:boolean allows "1", "0", "true", "false". The parser must handle
+    /// both numeric and string forms.
+    ///
+    /// Fixture: `<p:hf ftr="true" dt="true" sldNum="false"/>` →
+    ///   show_footer=true, show_date=true, show_slide_number=false.
+    ///
+    /// **RED GATE:** the old presProps impl uses `attr_val_is_one()` which checks for "1"
+    /// only. Even if it were adapted to read `<p:hf>`, "true" would still yield false.
+    /// This test catches that inadequacy. Against the current code the RED GATE fires
+    /// because presProps is read (not `<p:hf>`) and show_footer/show_date come out false.
+    #[test]
+    fn test_bc_2_01_001_detect_footer_flags_hf_boolean_string_form() {
+        let zip_bytes = build_pptx_zip_with_extras(&[(
+            "ppt/slideMasters/slideMaster1.xml",
+            MASTER_HF_BOOL_STRING_FORM_XML.as_bytes(),
+        )]);
+        let cursor = Cursor::new(zip_bytes);
+        let mut zip = zip::ZipArchive::new(cursor).unwrap();
+
+        let detection = detect_footer(&mut zip, true);
+
+        assert!(
+            detection.flags.show_footer,
+            "AC-003: <p:hf ftr=\"true\"/> must set show_footer = true (OOXML bool string form); \
+             got show_footer={}",
+            detection.flags.show_footer
+        );
+        assert!(
+            detection.flags.show_date,
+            "AC-003: <p:hf dt=\"true\"/> must set show_date = true (OOXML bool string form); \
+             got show_date={}",
+            detection.flags.show_date
+        );
+        assert!(
+            !detection.flags.show_slide_number,
+            "AC-003: <p:hf sldNum=\"false\"/> must set show_slide_number = false (OOXML bool string form); \
+             got show_slide_number={}",
+            detection.flags.show_slide_number
+        );
+    }
+
+    /// BC-2.01.001 AC-001 (corrected) / EC-008 — footer placeholder with multiple
+    /// `<a:r>` runs: ALL runs must be concatenated in document order.
+    ///
+    /// "First-run-only" semantics are FORBIDDEN per STORY-075 v1.1 / BC-2.01.001 v1.3.
+    ///
+    /// Fixture: two runs "Acme Confidential " + "2026" → expected "Acme Confidential 2026".
+    ///
+    /// **RED GATE:** the current `parse_footer_text_from_xml` implementation stores the
+    /// first non-empty run and then gates on `sp_text.is_none()` — so subsequent runs are
+    /// discarded. Against the current code `detection.text` == Some("Acme Confidential ")
+    /// (first run only, trimmed to "Acme Confidential"), NOT "Acme Confidential 2026".
+    /// The assertion `== Some("Acme Confidential 2026")` therefore FAILS.
+    #[test]
+    fn test_bc_2_01_001_detect_footer_text_multirun() {
+        let zip_bytes = build_pptx_zip_with_extras(&[(
+            "ppt/slideMasters/slideMaster1.xml",
+            MASTER_MULTIRUN_FOOTER_XML.as_bytes(),
+        )]);
+        let cursor = Cursor::new(zip_bytes);
+        let mut zip = zip::ZipArchive::new(cursor).unwrap();
+
+        let detection = detect_footer(&mut zip, true);
+
+        assert_eq!(
+            detection.text.as_deref(),
+            Some("Acme Confidential 2026"),
+            "AC-001/EC-008 (corrected): footer text split across multiple <a:r> runs \
+             must be fully concatenated in document order; \
+             'first-run-only' semantics are forbidden. \
+             Got: {:?}",
+            detection.text
         );
     }
 
@@ -1224,18 +1434,30 @@ mod tests {
         );
     }
 
-    /// BC-2.01.001 AC-004 — `BrandLoader::load_template()` on PPTX with footer
-    /// also populates `footer_flags` from `presProps.xml`.
+    /// BC-2.01.001 AC-003 / AC-004 (corrected) — `BrandLoader::load_template()` on PPTX
+    /// reads footer visibility flags from `<p:hf>` attributes on `slideMaster1.xml`,
+    /// NOT from `presProps.xml`.
     ///
-    /// Verifies the flags field is set on the returned `BrandTemplate`.
+    /// Setup: master XML has `<p:hf ftr="1" sldNum="1"/>` (dt absent). A presProps.xml
+    /// stub is also present in the ZIP (with no showPr children) to confirm it is NOT
+    /// consulted for flags.
+    ///
+    /// Expected: show_footer=true, show_date=false, show_slide_number=true.
+    ///
+    /// **RED GATE:** the current implementation calls `read_pres_props_flags()` which reads
+    /// presProps.xml. The presProps stub has no `<p:showPr>` so the old code returns
+    /// all-false flags. The `<p:hf>` element in the master is ignored entirely by the
+    /// current impl. This test therefore fails: show_footer is false (got) vs true (expected).
     #[test]
-    fn test_bc_2_01_001_load_pptx_footer_flags_populated_from_presprops() {
+    fn test_bc_2_01_001_load_pptx_footer_flags_populated_from_hf_element() {
         use crate::context::BrandLoadContext;
         use crate::loader::BrandLoader;
 
+        // Master XML with <p:hf ftr="1" sldNum="1"/> (dt absent) and a footer placeholder.
         let master_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <p:sldMaster xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"
              xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+  <p:hf ftr="1" sldNum="1"/>
   <p:spTree>
     <p:sp>
       <p:nvSpPr>
@@ -1249,12 +1471,10 @@ mod tests {
   </p:spTree>
 </p:sldMaster>"#;
 
+        // Also include a presProps.xml stub — it must have NO effect on footer_flags.
         let zip_bytes = build_pptx_zip_with_extras(&[
             ("ppt/slideMasters/slideMaster1.xml", master_xml.as_bytes()),
-            (
-                "ppt/presProps.xml",
-                PRESPROPS_FOOTER_AND_SLDNUM_XML.as_bytes(),
-            ),
+            ("ppt/presProps.xml", PRESPROPS_STUB_XML.as_bytes()),
         ]);
         let path = write_temp(&zip_bytes, "pptx");
         let loader = BrandLoader::new();
@@ -1263,20 +1483,30 @@ mod tests {
         let result = loader.load_template(&path, &ctx);
         let _ = std::fs::remove_file(&path);
 
-        let template = result.expect("PPTX with presProps must load without error");
+        let template = result.expect("PPTX with <p:hf> master must load without error");
 
-        // footer_flags should reflect presProps.xml (ftr=1, sldNum=1, dt absent).
+        // footer_flags must reflect the <p:hf> attributes on slideMaster1.xml,
+        // NOT the presProps.xml stub (which has no showPr children).
         assert!(
             template.footer_flags.show_footer,
-            "AC-004: footer_flags.show_footer must be true from presProps.xml <p:ftr val=1/>"
+            "AC-003/AC-004 (corrected): footer_flags.show_footer must be true from \
+             <p:hf ftr=\"1\"/> on slideMaster1.xml; \
+             got show_footer={}",
+            template.footer_flags.show_footer
         );
         assert!(
             !template.footer_flags.show_date,
-            "AC-004: footer_flags.show_date must be false (no <p:dt> in presProps)"
+            "AC-003/AC-004 (corrected): footer_flags.show_date must be false \
+             (dt attribute absent from <p:hf>); \
+             got show_date={}",
+            template.footer_flags.show_date
         );
         assert!(
             template.footer_flags.show_slide_number,
-            "AC-004: footer_flags.show_slide_number must be true from presProps.xml <p:sldNum val=1/>"
+            "AC-003/AC-004 (corrected): footer_flags.show_slide_number must be true from \
+             <p:hf sldNum=\"1\"/> on slideMaster1.xml; \
+             got show_slide_number={}",
+            template.footer_flags.show_slide_number
         );
     }
 
