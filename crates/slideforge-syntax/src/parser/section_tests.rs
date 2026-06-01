@@ -2,6 +2,7 @@
 #![allow(non_snake_case)] // test_BC_S_SS_NNN_xxx naming convention per TDD traceability
 #![allow(clippy::doc_markdown)] // test function names in doc comments do not need backticks
 #![allow(clippy::no_effect_underscore_binding)] // _warning type-check bindings in tests
+#![allow(clippy::redundant_closure_for_method_calls)] // closure form is clearer in test assertions
 //! Failing test suite (Red Gate) for STORY-078: Parser section block syntax.
 //!
 //! # TDD Red Gate
@@ -70,7 +71,6 @@ fn parse_src_errors(src: &str) -> Vec<SyntaxError> {
     let file_id = sm.add_file(Arc::from("test.sf"), Arc::from(src));
     parse(src, file_id, &sm).expect_err("expected parse to fail with fatal errors")
 }
-
 
 // ── AC-001 ────────────────────────────────────────────────────────────────────
 
@@ -626,9 +626,9 @@ fn test_reserved_name_collision() {
     // A generic "expected Colon" error is NOT sufficient — the implementer must
     // emit the dedicated EC-006 error for this case.
     let error_messages: Vec<String> = errors.iter().map(|e| format!("{e:?}")).collect();
-    let has_dedicated_ec006_hint = error_messages.iter().any(|msg| {
-        msg.contains("reserved register name") || msg.contains("use `report:`")
-    });
+    let has_dedicated_ec006_hint = error_messages
+        .iter()
+        .any(|msg| msg.contains("reserved register name") || msg.contains("use `report:`"));
     assert!(
         has_dedicated_ec006_hint,
         "EC-006: error must contain the dedicated EC-006 corrective hint \
@@ -655,10 +655,7 @@ fn test_reserved_name_collision() {
 fn test_section_only_deck_missing_version_warns() {
     // Section-only deck — NO slideforge_version declaration.
     // BC-1.13.001 EC-001: missing version is always a warning, regardless of deck type.
-    let src = concat!(
-        "section methodology:\n",
-        "  detail: \"Some content.\"\n",
-    );
+    let src = concat!("section methodology:\n", "  detail: \"Some content.\"\n",);
 
     // The parse must SUCCEED (section-only deck is valid) but emit E-PAR-010.
     let result = parse_src_ok(src);
@@ -821,10 +818,7 @@ fn test_section_error_accumulation() {
     // error positions (not two errors from the same token).
     // sort_position() returns (file, line, col); the two errors must be on
     // different lines (line 3 and line 4 in the fixture).
-    let positions: Vec<(String, u32, u32)> = errors
-        .iter()
-        .map(|e| e.sort_position())
-        .collect();
+    let positions: Vec<(String, u32, u32)> = errors.iter().map(|e| e.sort_position()).collect();
     let distinct_lines: std::collections::HashSet<u32> =
         positions.iter().map(|(_, line, _)| *line).collect();
     assert!(
