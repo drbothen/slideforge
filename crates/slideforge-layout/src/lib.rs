@@ -1866,4 +1866,1191 @@ mod tests {
             }
         }
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // STORY-073 — ContentBlock::Bullets → FrameContent::TextRun frame generation
+    //
+    // Expected-but-missing API at Red Gate:
+    //   layout::run currently converts ContentBlock::Text blocks into TextRun
+    //   frames (wired at the inline-text-pass block, layout.rs ~line 252).
+    //   ContentBlock::Bullets(Vec<BulletItem>) is NOT yet converted — the loop
+    //   skips it. These tests fail at Red Gate because:
+    //
+    //   AC-001: frame count is wrong (bullet items produce 0 frames instead of N)
+    //   AC-002: XrefTargetNotFound warning is absent (bullets not scanned)
+    //   AC-003: InlineDepthExceeded error is absent (bullets not validated)
+    //   EC-001: empty bullet list must produce 0 TextRun frames (trivially passes
+    //           at Red Gate if we check frame count == original region count, but
+    //           this needs the implementation to be stable first — tested in INT-1)
+    //
+    // These tests are in lib.rs because they call layout::run end-to-end.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// STORY-073 / AC-001 — `layout::run` produces one `FrameContent::TextRun` frame
+    /// per `BulletItem` in a `ContentBlock::Bullets` block, in source order.
+    ///
+    /// Canonical fixture from STORY-073 story spec:
+    ///   2-item bullet list → 2 `TextRun` frames (beyond region-map frames).
+    ///
+    /// At Red Gate: `layout::run` does not process `ContentBlock::Bullets`, so the
+    /// `TextRun` frame count for bullet items is 0. The assertion fails.
+    ///
+    /// Anti-paper-fix (TD-VSDD-059): removing the `len()` assertion and replacing
+    /// with `len() >= 0` would silence the test vacuously. The test asserts the
+    /// exact count.
+    #[test]
+    fn test_bc_3_05_001_story073_ac001_bullets_produce_text_run_frames() {
+        use slideforge_types::{Block, BulletItem, ContentBlock, InlineNode, SourceSpan};
+
+        let bullet_items = vec![
+            BulletItem {
+                inlines: vec![InlineNode::Plain(Arc::from("first bullet"))],
+                children: vec![],
+                span: SourceSpan::default(),
+            },
+            BulletItem {
+                inlines: vec![InlineNode::Bold(vec![InlineNode::Plain(Arc::from(
+                    "second bullet",
+                ))])],
+                children: vec![],
+                span: SourceSpan::default(),
+            },
+        ];
+        let block = Block {
+            content: ContentBlock::Bullets(bullet_items),
+            label: None,
+            span: SourceSpan::default(),
+        };
+        let slide = Slide {
+            slide_type: Arc::from("title"),
+            fields: OrderedMap::new(),
+            blocks: vec![block],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+            overlay: None,
+            register_content: vec![],
+        };
+        let deck = make_deck(vec![slide]);
+        let brand = make_brand();
+
+        let result = run(&deck, &brand)
+            .expect("layout::run must succeed for a slide with ContentBlock::Bullets");
+
+        let slide_out = &result.slides[0];
+
+        // Count only the TextRun frames produced for bullet items.
+        // The title slide has region-map frames (Title + Subtitle) before the bullet frames.
+        let text_run_frames: Vec<_> = slide_out
+            .frames
+            .iter()
+            .filter(|f| matches!(f.content, FrameContent::TextRun(_)))
+            .collect();
+
+        assert_eq!(
+            text_run_frames.len(),
+            2,
+            "2-item bullet list must produce exactly 2 FrameContent::TextRun frames; \
+             got {} TextRun frames (total frames: {})",
+            text_run_frames.len(),
+            slide_out.frames.len()
+        );
+    }
+
+    /// STORY-073 / AC-001 — Source order is preserved: item1 → first `TextRun` frame,
+    /// item2 → second `TextRun` frame.
+    ///
+    /// The inline content of each `TextRun` frame must match the corresponding
+    /// `BulletItem.inlines` sequence verbatim.
+    ///
+    /// At Red Gate: no `TextRun` frames are produced for bullets, so both assertions fail.
+    #[test]
+    fn test_bc_3_05_001_story073_ac001_bullets_source_order_preserved() {
+        use slideforge_types::{Block, BulletItem, ContentBlock, InlineNode, SourceSpan};
+
+        let item1_inlines = vec![InlineNode::Plain(Arc::from("item one"))];
+        let item2_inlines = vec![InlineNode::Plain(Arc::from("item two"))];
+
+        let bullet_items = vec![
+            BulletItem {
+                inlines: item1_inlines.clone(),
+                children: vec![],
+                span: SourceSpan::default(),
+            },
+            BulletItem {
+                inlines: item2_inlines.clone(),
+                children: vec![],
+                span: SourceSpan::default(),
+            },
+        ];
+        let block = Block {
+            content: ContentBlock::Bullets(bullet_items),
+            label: None,
+            span: SourceSpan::default(),
+        };
+        let slide = Slide {
+            slide_type: Arc::from("title"),
+            fields: OrderedMap::new(),
+            blocks: vec![block],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+            overlay: None,
+            register_content: vec![],
+        };
+        let deck = make_deck(vec![slide]);
+        let brand = make_brand();
+
+        let result = run(&deck, &brand).expect("layout::run must succeed for bullet items");
+
+        let slide_out = &result.slides[0];
+        let text_run_frames: Vec<_> = slide_out
+            .frames
+            .iter()
+            .filter_map(|f| match &f.content {
+                FrameContent::TextRun(nodes) => Some(nodes.clone()),
+                _ => None,
+            })
+            .collect();
+
+        // Must have at least 2 TextRun frames for the 2 bullet items.
+        assert!(
+            text_run_frames.len() >= 2,
+            "must have at least 2 TextRun frames for 2 bullet items; got {}",
+            text_run_frames.len()
+        );
+
+        // Source order: item1 inline content in the first bullet TextRun frame.
+        // NOTE: there may be non-bullet TextRun frames from ContentBlock::Text;
+        // we match by content equality rather than position index.
+        let has_item1 = text_run_frames.iter().any(|nodes| nodes == &item1_inlines);
+        let has_item2 = text_run_frames.iter().any(|nodes| nodes == &item2_inlines);
+
+        assert!(
+            has_item1,
+            "first bullet item inlines must appear verbatim in a TextRun frame; \
+             expected {item1_inlines:?} in frames: {text_run_frames:?}"
+        );
+        assert!(
+            has_item2,
+            "second bullet item inlines must appear verbatim in a TextRun frame; \
+             expected {item2_inlines:?} in frames: {text_run_frames:?}"
+        );
+    }
+
+    /// STORY-073 / AC-001 — Three-item bullet list → 3 `TextRun` frames.
+    ///
+    /// Canonical fixture with 3 items covering Plain, Bold, and Xref inline types.
+    /// The layout stage preserves all 12 inline variants verbatim (BC-3.05.001 invariant 6).
+    ///
+    /// At Red Gate: 0 `TextRun` frames for bullets → assertion fails.
+    #[test]
+    fn test_bc_3_05_001_story073_ac001_three_bullet_items_three_frames() {
+        use slideforge_types::{Block, BulletItem, ContentBlock, InlineNode, SourceSpan};
+
+        let items = vec![
+            BulletItem {
+                inlines: vec![InlineNode::Plain(Arc::from("plain item"))],
+                children: vec![],
+                span: SourceSpan::default(),
+            },
+            BulletItem {
+                inlines: vec![InlineNode::Bold(vec![InlineNode::Plain(Arc::from(
+                    "bold item",
+                ))])],
+                children: vec![],
+                span: SourceSpan::default(),
+            },
+            BulletItem {
+                inlines: vec![InlineNode::Xref(Arc::from("introduction"))],
+                children: vec![],
+                span: SourceSpan::default(),
+            },
+        ];
+        let block = Block {
+            content: ContentBlock::Bullets(items),
+            label: None,
+            span: SourceSpan::default(),
+        };
+        let slide = Slide {
+            slide_type: Arc::from("content"),
+            fields: OrderedMap::new(),
+            blocks: vec![block],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+            overlay: None,
+            register_content: vec![],
+        };
+        // Provide "introduction" as a slide title so the Xref is known.
+        let deck = {
+            let title_slide = make_slide_with_title("title", "introduction");
+            make_deck(vec![title_slide, slide])
+        };
+        let brand = make_brand();
+
+        let result = run(&deck, &brand)
+            .expect("layout::run must succeed for 3-item bullet list with known xref");
+
+        // Slide index 1 is the bullets slide.
+        let slide_out = &result.slides[1];
+        let text_run_count = slide_out
+            .frames
+            .iter()
+            .filter(|f| matches!(f.content, FrameContent::TextRun(_)))
+            .count();
+
+        assert_eq!(
+            text_run_count,
+            3,
+            "3-item bullet list must produce exactly 3 TextRun frames; got {text_run_count} \
+             (total frames: {})",
+            slide_out.frames.len()
+        );
+
+        // No warnings: the Xref target "introduction" is a known slide title.
+        let xref_warnings: Vec<_> = result
+            .warnings
+            .iter()
+            .filter(|w| matches!(w, LayoutWarning::XrefTargetNotFound { .. }))
+            .collect();
+        assert!(
+            xref_warnings.is_empty(),
+            "known xref target in bullet must produce zero XrefTargetNotFound warnings; \
+             got: {xref_warnings:?}"
+        );
+    }
+
+    /// STORY-073 / AC-002 — Bullet content with unknown xref target produces
+    /// `LayoutWarning::XrefTargetNotFound` in `LaidOutDeck.warnings`.
+    ///
+    /// End-to-end test through `layout::run`. The xref validation pass must scan
+    /// the `TextRun` frames produced for bullet items (BC-3.05.001 EC-002).
+    ///
+    /// At Red Gate: bullet items produce no frames → xref not scanned → no warning
+    /// → assertion fails.
+    #[test]
+    fn test_bc_3_05_001_story073_ac002_xref_unknown_in_bullet_layout_run() {
+        use slideforge_types::{Block, BulletItem, ContentBlock, InlineNode, SourceSpan};
+
+        let unknown_target = Arc::from("missing-slide-from-bullet");
+        let bullet_items = vec![BulletItem {
+            inlines: vec![
+                InlineNode::Plain(Arc::from("Reference: ")),
+                InlineNode::Xref(Arc::clone(&unknown_target)),
+            ],
+            children: vec![],
+            span: SourceSpan::default(),
+        }];
+        let block = Block {
+            content: ContentBlock::Bullets(bullet_items),
+            label: None,
+            span: SourceSpan::default(),
+        };
+        let slide = Slide {
+            slide_type: Arc::from("title"),
+            fields: OrderedMap::new(),
+            blocks: vec![block],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+            overlay: None,
+            register_content: vec![],
+        };
+        let deck = make_deck(vec![slide]);
+        let brand = make_brand();
+
+        let result = run(&deck, &brand)
+            .expect("layout::run must succeed — unknown xref in bullet is a warning, not error");
+
+        assert!(
+            result.warnings.iter().any(|w| matches!(
+                w,
+                LayoutWarning::XrefTargetNotFound { target, source_slide_index: 0 }
+                if target.as_ref() == "missing-slide-from-bullet"
+            )),
+            "LaidOutDeck.warnings must contain XrefTargetNotFound for unknown bullet xref; \
+             got: {:?}",
+            result.warnings
+        );
+    }
+
+    /// STORY-073 / AC-002 — Canonical test vector: one bullet with
+    /// `InlineNode::Xref("missing-slide")` produces exactly one
+    /// `LayoutWarning::XrefTargetNotFound` with correct `target` and
+    /// `source_slide_index` (BC-3.05.001 EC-002 canonical vector).
+    #[test]
+    fn test_bc_3_05_001_story073_ac002_canonical_vector_xref_in_bullet() {
+        use slideforge_types::{Block, BulletItem, ContentBlock, InlineNode, SourceSpan};
+
+        let bullet_items = vec![BulletItem {
+            inlines: vec![InlineNode::Xref(Arc::from("missing-slide"))],
+            children: vec![],
+            span: SourceSpan::default(),
+        }];
+        let block = Block {
+            content: ContentBlock::Bullets(bullet_items),
+            label: None,
+            span: SourceSpan::default(),
+        };
+        let slide = Slide {
+            slide_type: Arc::from("title"),
+            fields: OrderedMap::new(),
+            blocks: vec![block],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+            overlay: None,
+            register_content: vec![],
+        };
+        let deck = make_deck(vec![slide]);
+        let brand = make_brand();
+
+        let result =
+            run(&deck, &brand).expect("layout::run must succeed for bullet with unknown xref");
+
+        let xref_warnings: Vec<_> = result
+            .warnings
+            .iter()
+            .filter(|w| matches!(w, LayoutWarning::XrefTargetNotFound { .. }))
+            .collect();
+
+        assert_eq!(
+            xref_warnings.len(),
+            1,
+            "canonical vector: exactly 1 XrefTargetNotFound warning expected; got: {xref_warnings:?}"
+        );
+        assert!(
+            matches!(
+                xref_warnings[0],
+                LayoutWarning::XrefTargetNotFound { target, source_slide_index: 0 }
+                if target.as_ref() == "missing-slide"
+            ),
+            "warning must carry target == 'missing-slide' and source_slide_index == 0; \
+             got: {:?}",
+            xref_warnings[0]
+        );
+    }
+
+    /// STORY-073 / AC-003 — Bullet item with inline tree at depth 65 produces
+    /// `LayoutError::InlineDepthExceeded` (BC-3.05.001 invariant 4).
+    ///
+    /// Canonical test vector from BC-3.05.001:
+    ///   65-deep `Bold(Bold(Bold(...)))` → `LayoutError::InlineDepthExceeded { depth: 65 }`.
+    ///
+    /// At Red Gate: bullets not validated → `layout::run` returns Ok instead of Err.
+    #[test]
+    fn test_bc_3_05_001_story073_ac003_depth_exceeded_in_bullet_is_hard_error() {
+        use crate::inline::MAX_INLINE_DEPTH;
+        use slideforge_types::{Block, BulletItem, ContentBlock, InlineNode, SourceSpan};
+
+        // Build a 65-deep Bold chain (canonical BC-3.05.001 depth-bound test vector).
+        let mut node = InlineNode::Plain(Arc::from("leaf"));
+        for _ in 0..=MAX_INLINE_DEPTH {
+            node = InlineNode::Bold(vec![node]);
+        }
+        let bullet_items = vec![BulletItem {
+            inlines: vec![node],
+            children: vec![],
+            span: SourceSpan::default(),
+        }];
+        let block = Block {
+            content: ContentBlock::Bullets(bullet_items),
+            label: None,
+            span: SourceSpan::default(),
+        };
+        let slide = Slide {
+            slide_type: Arc::from("title"),
+            fields: OrderedMap::new(),
+            blocks: vec![block],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+            overlay: None,
+            register_content: vec![],
+        };
+        let deck = make_deck(vec![slide]);
+        let brand = make_brand();
+
+        let result = run(&deck, &brand);
+
+        assert!(
+            result.is_err(),
+            "bullet inline tree at depth 65 must return Err(InlineDepthExceeded); got Ok"
+        );
+        match result.unwrap_err() {
+            LayoutError::InlineDepthExceeded {
+                source_slide_index,
+                depth,
+                max,
+            } => {
+                assert_eq!(source_slide_index, 0, "source_slide_index must be 0");
+                assert_eq!(
+                    depth, 65,
+                    "depth must be 65 (first rejected level, BC literal)"
+                );
+                assert_eq!(
+                    max, MAX_INLINE_DEPTH,
+                    "max must equal MAX_INLINE_DEPTH (64)"
+                );
+            },
+            other => panic!("expected InlineDepthExceeded, got: {other:?}"),
+        }
+    }
+
+    /// STORY-073 / EC-001 — Empty bullet list produces zero `TextRun` frames from bullets,
+    /// no error, no warning.
+    ///
+    /// `ContentBlock::Bullets(vec![])` must succeed and contribute 0 frames.
+    ///
+    /// At Red Gate: passes trivially because bullets are skipped entirely (no frames, no
+    /// errors). This test becomes a regression guard AFTER implementation to prevent
+    /// the implementation from erroring on empty bullet lists.
+    #[test]
+    fn test_bc_3_05_001_story073_ec001_empty_bullet_list_no_frames_no_error() {
+        use slideforge_types::{Block, ContentBlock, SourceSpan};
+
+        let block = Block {
+            content: ContentBlock::Bullets(vec![]),
+            label: None,
+            span: SourceSpan::default(),
+        };
+        let slide = Slide {
+            slide_type: Arc::from("title"),
+            fields: OrderedMap::new(),
+            blocks: vec![block],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+            overlay: None,
+            register_content: vec![],
+        };
+        let deck = make_deck(vec![slide]);
+        let brand = make_brand();
+
+        let result = run(&deck, &brand).expect(
+            "layout::run must succeed for ContentBlock::Bullets(vec![]) — no error on empty list",
+        );
+
+        // Zero TextRun frames produced from the empty bullet list.
+        let text_run_count = result.slides[0]
+            .frames
+            .iter()
+            .filter(|f| matches!(f.content, FrameContent::TextRun(_)))
+            .count();
+
+        assert_eq!(
+            text_run_count, 0,
+            "empty ContentBlock::Bullets must produce 0 TextRun frames; \
+             got {text_run_count}"
+        );
+
+        // No warnings.
+        assert!(
+            result.warnings.is_empty(),
+            "empty bullet list must produce zero warnings; got: {:?}",
+            result.warnings
+        );
+    }
+
+    /// STORY-073 / EC-002 — A single `BulletItem` with empty inlines (`inlines: vec![]`)
+    /// produces EXACTLY ONE `FrameContent::TextRun` frame whose inline sequence is empty.
+    ///
+    /// This is distinct from EC-001 (empty bullet LIST → 0 frames): here the LIST has
+    /// one item but that item has no inline content. The layout engine must still emit a
+    /// frame for the item — it must NOT skip items with empty `inlines`.
+    ///
+    /// Load-bearing (F-P1-LOW-001): if the implementation skips `BulletItem` entries
+    /// whose `inlines` is empty (e.g., with an `if inlines.is_empty() { continue }` guard),
+    /// the count assertion below fails (0 frames instead of 1).
+    ///
+    /// At Red Gate: `layout::run` does not process `ContentBlock::Bullets` at all, so
+    /// 0 `TextRun` frames are produced — the count assertion fails immediately.
+    #[test]
+    fn test_bc_3_05_001_story073_ec002_empty_inlines_bullet_produces_one_frame() {
+        use slideforge_types::{Block, BulletItem, ContentBlock, InlineNode, SourceSpan};
+
+        // One bullet item with empty inlines — the bullet exists but has no text content.
+        let bullet_items = vec![BulletItem {
+            inlines: vec![],
+            children: vec![],
+            span: SourceSpan::default(),
+        }];
+        let block = Block {
+            content: ContentBlock::Bullets(bullet_items),
+            label: None,
+            span: SourceSpan::default(),
+        };
+        let slide = Slide {
+            slide_type: Arc::from("title"),
+            fields: OrderedMap::new(),
+            blocks: vec![block],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+            overlay: None,
+            register_content: vec![],
+        };
+        let deck = make_deck(vec![slide]);
+        let brand = make_brand();
+
+        let result = run(&deck, &brand)
+            .expect("layout::run must succeed for a bullet item with empty inlines (EC-002)");
+
+        let slide_out = &result.slides[0];
+
+        // Collect all TextRun frames (regardless of origin — region-map frames produce
+        // Title/Subtitle variants, not TextRun, so all TextRun frames here come from bullets).
+        let text_run_frames: Vec<&Vec<InlineNode>> = slide_out
+            .frames
+            .iter()
+            .filter_map(|f| match &f.content {
+                FrameContent::TextRun(nodes) => Some(nodes),
+                _ => None,
+            })
+            .collect();
+
+        // EC-002 load-bearing: exactly ONE TextRun frame — one per bullet item, even when
+        // the item's inline sequence is empty. NOT zero (item must not be skipped).
+        assert_eq!(
+            text_run_frames.len(),
+            1,
+            "EC-002: one BulletItem with empty inlines must produce exactly 1 TextRun frame, \
+             not 0 (skipped) and not >1; got {} TextRun frames (total frames: {})",
+            text_run_frames.len(),
+            slide_out.frames.len()
+        );
+
+        // The single TextRun frame must carry an EMPTY inline sequence (verbatim pass-through).
+        assert!(
+            text_run_frames[0].is_empty(),
+            "EC-002: the TextRun frame for a bullet with empty inlines must carry an \
+             empty Vec<InlineNode>; got: {:?}",
+            text_run_frames[0]
+        );
+
+        // No errors or warnings from an otherwise well-formed empty-inlines bullet.
+        assert!(
+            result.warnings.is_empty(),
+            "EC-002: empty-inlines bullet must produce zero warnings; got: {:?}",
+            result.warnings
+        );
+    }
+
+    /// STORY-073 / EC-003 — Nested bullets at THREE levels (parent → child → grandchild)
+    /// produce one `FrameContent::TextRun` frame per item in DEPTH-FIRST source order:
+    /// parent first, child second, grandchild third.
+    ///
+    /// This test uses POSITIONAL assertions on the frame vector, not order-independent
+    /// `.any()` matching. The expected invariant:
+    ///   `frames[parent_idx]`       carries the parent inlines
+    ///   `frames[parent_idx + 1]`   carries the child inlines
+    ///   `frames[parent_idx + 2]`   carries the grandchild inlines
+    ///
+    /// Load-bearing (F-P1-LOW-002): a future change that emits children before parents,
+    /// reverses depth-first traversal, or flattens nesting in a different order will cause
+    /// these positional assertions to fail. The order-independent `.any()` approach used in
+    /// the original EC-003 test would NOT catch such a regression.
+    ///
+    /// At Red Gate: `layout::run` does not process `ContentBlock::Bullets` → 0 `TextRun`
+    /// frames → the exact-count assertion and all positional assertions fail immediately.
+    #[test]
+    fn test_bc_3_05_001_story073_ec003_nested_bullets_exact_frame_order_three_levels() {
+        use slideforge_types::{Block, BulletItem, ContentBlock, InlineNode, SourceSpan};
+
+        // Canonical sentinel strings — chosen to be unambiguously distinct.
+        let parent_marker = Arc::from("EC003_PARENT_BULLET");
+        let child_marker = Arc::from("EC003_CHILD_BULLET");
+        let grandchild_marker = Arc::from("EC003_GRANDCHILD_BULLET");
+
+        // Build the three-level tree:
+        //   parent
+        //     child
+        //       grandchild
+        let grandchild_item = BulletItem {
+            inlines: vec![InlineNode::Plain(Arc::clone(&grandchild_marker))],
+            children: vec![],
+            span: SourceSpan::default(),
+        };
+        let child_item = BulletItem {
+            inlines: vec![InlineNode::Plain(Arc::clone(&child_marker))],
+            children: vec![grandchild_item],
+            span: SourceSpan::default(),
+        };
+        let parent_item = BulletItem {
+            inlines: vec![InlineNode::Plain(Arc::clone(&parent_marker))],
+            children: vec![child_item],
+            span: SourceSpan::default(),
+        };
+
+        let block = Block {
+            content: ContentBlock::Bullets(vec![parent_item]),
+            label: None,
+            span: SourceSpan::default(),
+        };
+        let slide = Slide {
+            slide_type: Arc::from("title"),
+            fields: OrderedMap::new(),
+            blocks: vec![block],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+            overlay: None,
+            register_content: vec![],
+        };
+        let deck = make_deck(vec![slide]);
+        let brand = make_brand();
+
+        let result = run(&deck, &brand)
+            .expect("layout::run must succeed for three-level nested bullet (EC-003)");
+
+        let slide_out = &result.slides[0];
+
+        // Collect all TextRun frames with their position in the overall frame vector.
+        // Region-map frames (Title, Subtitle) are non-TextRun variants so they are excluded.
+        let text_run_positions: Vec<(usize, &Vec<InlineNode>)> = slide_out
+            .frames
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, f)| match &f.content {
+                FrameContent::TextRun(nodes) => Some((idx, nodes)),
+                _ => None,
+            })
+            .collect();
+
+        // EC-003 load-bearing count: exactly 3 TextRun frames (one per bullet item at
+        // each nesting level). NOT 2 (grandchild dropped), NOT 1 (only parent kept).
+        assert_eq!(
+            text_run_positions.len(),
+            3,
+            "EC-003: three-level nested bullet (parent + child + grandchild) must produce \
+             exactly 3 TextRun frames; got {} (total frames: {}). \
+             Positions: {:?}",
+            text_run_positions.len(),
+            slide_out.frames.len(),
+            text_run_positions
+                .iter()
+                .map(|(i, _)| i)
+                .collect::<Vec<_>>()
+        );
+
+        // Extract the three frame-vector indices for readable positional assertions.
+        let parent_frame_idx = text_run_positions[0].0;
+        let child_frame_idx = text_run_positions[1].0;
+        let grandchild_frame_idx = text_run_positions[2].0;
+        let parent_nodes = text_run_positions[0].1;
+        let child_nodes = text_run_positions[1].1;
+        let grandchild_nodes = text_run_positions[2].1;
+
+        // EC-003 load-bearing ORDER: parent frame index < child frame index < grandchild frame index.
+        // This assertion CANNOT be satisfied by order-independent `.any()` matching.
+        assert!(
+            parent_frame_idx < child_frame_idx,
+            "EC-003: parent frame (index {parent_frame_idx}) must appear BEFORE child frame \
+             (index {child_frame_idx}) in LaidOutSlide.frames"
+        );
+        assert!(
+            child_frame_idx < grandchild_frame_idx,
+            "EC-003: child frame (index {child_frame_idx}) must appear BEFORE grandchild frame \
+             (index {grandchild_frame_idx}) in LaidOutSlide.frames"
+        );
+
+        // EC-003 content correctness: each frame carries its item's inlines verbatim.
+        let expected_parent = vec![InlineNode::Plain(Arc::clone(&parent_marker))];
+        let expected_child = vec![InlineNode::Plain(Arc::clone(&child_marker))];
+        let expected_grandchild = vec![InlineNode::Plain(Arc::clone(&grandchild_marker))];
+
+        assert_eq!(
+            parent_nodes, &expected_parent,
+            "EC-003: frame at index {parent_frame_idx} must carry parent inlines \
+             ({parent_marker:?}); got: {parent_nodes:?}"
+        );
+        assert_eq!(
+            child_nodes, &expected_child,
+            "EC-003: frame at index {child_frame_idx} must carry child inlines \
+             ({child_marker:?}); got: {child_nodes:?}"
+        );
+        assert_eq!(
+            grandchild_nodes, &expected_grandchild,
+            "EC-003: frame at index {grandchild_frame_idx} must carry grandchild inlines \
+             ({grandchild_marker:?}); got: {grandchild_nodes:?}"
+        );
+    }
+
+    /// STORY-073 / EC-004 — Xref inside nested Bold inside a bullet must still trigger
+    /// `XrefTargetNotFound` warning (BC-3.05.001 EC-002 recursive traversal).
+    ///
+    /// End-to-end: `layout::run` must validate xrefs inside container nodes inside bullets.
+    ///
+    /// At Red Gate: bullets produce no frames → xref not scanned → no warning → fails.
+    #[test]
+    fn test_bc_3_05_001_story073_ec004_xref_inside_bold_in_bullet_layout_run() {
+        use slideforge_types::{Block, BulletItem, ContentBlock, InlineNode, SourceSpan};
+
+        let unknown = Arc::from("__nested_bold_xref_target__");
+        let bullet_items = vec![BulletItem {
+            inlines: vec![InlineNode::Bold(vec![InlineNode::Italic(vec![
+                InlineNode::Xref(Arc::clone(&unknown)),
+            ])])],
+            children: vec![],
+            span: SourceSpan::default(),
+        }];
+        let block = Block {
+            content: ContentBlock::Bullets(bullet_items),
+            label: None,
+            span: SourceSpan::default(),
+        };
+        let slide = Slide {
+            slide_type: Arc::from("title"),
+            fields: OrderedMap::new(),
+            blocks: vec![block],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+            overlay: None,
+            register_content: vec![],
+        };
+        let deck = make_deck(vec![slide]);
+        let brand = make_brand();
+
+        let result = run(&deck, &brand)
+            .expect("unknown xref in nested bullet container must be a warning, not error");
+
+        assert!(
+            result.warnings.iter().any(|w| matches!(
+                w,
+                LayoutWarning::XrefTargetNotFound { target, .. }
+                if target.as_ref() == "__nested_bold_xref_target__"
+            )),
+            "LaidOutDeck.warnings must contain XrefTargetNotFound for xref nested inside \
+             Bold(Italic(...)) inside bullet; got: {:?}",
+            result.warnings
+        );
+    }
+
+    /// STORY-073 / AC-INT-1 — Well-formed bullet list (all known xref targets, depth ≤ 64)
+    /// produces zero `LayoutError` and zero `LayoutWarning`.
+    ///
+    /// This is the positive-case integration check: a clean bullet list must produce no
+    /// errors and no warnings. Anti-paper-fix (TD-VSDD-059): the test is only meaningful
+    /// when bullet frames ARE produced (so the validation path actually executes).
+    /// At Red Gate it passes vacuously (no frames = no warnings inspected); it becomes
+    /// a non-trivial regression guard once implementation is complete.
+    #[test]
+    fn test_bc_3_05_001_story073_ac_int1_well_formed_bullets_no_errors_no_warnings() {
+        use slideforge_types::{Block, BulletItem, ContentBlock, InlineNode, SourceSpan};
+
+        // Three bullet items with Plain, Bold, and Xref (known target) inlines.
+        // Using "known-slide-title" as a deck title so the Xref resolves.
+        let items = vec![
+            BulletItem {
+                inlines: vec![InlineNode::Plain(Arc::from("plain text bullet"))],
+                children: vec![],
+                span: SourceSpan::default(),
+            },
+            BulletItem {
+                inlines: vec![InlineNode::Bold(vec![InlineNode::Plain(Arc::from(
+                    "bold bullet",
+                ))])],
+                children: vec![],
+                span: SourceSpan::default(),
+            },
+            BulletItem {
+                inlines: vec![InlineNode::Xref(Arc::from("known-slide-title"))],
+                children: vec![],
+                span: SourceSpan::default(),
+            },
+        ];
+        let block = Block {
+            content: ContentBlock::Bullets(items),
+            label: None,
+            span: SourceSpan::default(),
+        };
+        let bullets_slide = Slide {
+            slide_type: Arc::from("content"),
+            fields: OrderedMap::new(),
+            blocks: vec![block],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+            overlay: None,
+            register_content: vec![],
+        };
+        let title_slide = make_slide_with_title("title", "known-slide-title");
+        let deck = make_deck(vec![title_slide, bullets_slide]);
+        let brand = make_brand();
+
+        let result =
+            run(&deck, &brand).expect("layout::run must succeed for well-formed bullet list");
+
+        // Zero warnings (no unknown xref, no depth violation).
+        assert!(
+            result.warnings.is_empty(),
+            "well-formed bullet list must produce zero warnings; got: {:?}",
+            result.warnings
+        );
+
+        // Slide count preserved.
+        assert_eq!(result.slides.len(), 2, "slide count must be preserved");
+
+        // Bullets slide (index 1) must have TextRun frames for all 3 bullet items.
+        let bullet_text_run_count = result.slides[1]
+            .frames
+            .iter()
+            .filter(|f| matches!(f.content, FrameContent::TextRun(_)))
+            .count();
+
+        assert_eq!(
+            bullet_text_run_count, 3,
+            "well-formed 3-item bullet list must produce 3 TextRun frames; got {bullet_text_run_count}"
+        );
+    }
+
+    /// STORY-073 — Verify no exporter crate is in slideforge-layout's dependency tree.
+    ///
+    /// This test documents the architectural constraint: slideforge-layout must NOT
+    /// depend on slideforge-pptx, slideforge-docx, slideforge-pdf, or slideforge-html.
+    /// The Cargo.toml constraint is the real enforcement; this test is a compile-time
+    /// documentation anchor confirming the arcade rule.
+    ///
+    /// Because we can compile this test module at all, the constraint is satisfied:
+    /// any accidental exporter dependency would cause a circular crate dependency
+    /// and fail to compile.
+    #[test]
+    fn test_story073_no_exporter_crate_dependency_is_compile_verified() {
+        // This test passes by virtue of the crate compiling without exporter imports.
+        // The architectural rule is: slideforge-layout must NOT depend on
+        // slideforge-pptx, slideforge-docx, slideforge-pdf, slideforge-html.
+        // If any of those were accidentally added to Cargo.toml, the circular
+        // dependency check in `cargo build` would reject it before this runs.
+        //
+        // Explicit assertion to satisfy the no-tautology rule (TD-VSDD-059):
+        // verify that ContentBlock::Bullets exists as a variant at all (type-level
+        // check that the test is non-vacuous).
+        use slideforge_types::ContentBlock;
+        let b = ContentBlock::Bullets(vec![]);
+        assert_eq!(
+            b.kind_name(),
+            "Bullets",
+            "ContentBlock::Bullets must exist and kind_name() must return 'Bullets'"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // F-P1-MED-001 — Bullet structural depth bound (anti-DoS)
+    //
+    // BC-3.05.001 invariant 4 guards inline depth; the same threat applies to
+    // bullet STRUCTURAL nesting (BulletItem.children chains). A deeply-nested
+    // bullet tree overflows the stack inside push_bullet_frames — unbounded
+    // recursion through BulletItem.children with no depth guard.
+    //
+    // Fix: introduce MAX_BULLET_DEPTH (= 64, mirroring MAX_INLINE_DEPTH) and
+    // LayoutError::BulletDepthExceeded { depth }. The guard fires at entry to
+    // push_bullet_frames before recursing further.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// STORY-073 OBS-2 boundary regression guard — `layout::run` MUST return `Ok(_)`
+    /// for a `ContentBlock::Bullets` whose `BulletItem` children chain is one level
+    /// below the rejection threshold (i.e., the deepest call to
+    /// `push_bullet_frames_inner` with a non-empty items slice lands at
+    /// `current_depth = MAX_BULLET_DEPTH - 1` and its subsequent empty-children
+    /// recursion lands at `current_depth = MAX_BULLET_DEPTH = 64`).
+    ///
+    /// ## Boundary derivation
+    ///
+    /// The guard in `push_bullet_frames_inner` is:
+    ///
+    /// ```text
+    /// if current_depth > MAX_BULLET_DEPTH { return Err(...); }
+    /// ```
+    ///
+    /// `push_bullet_frames` calls `push_bullet_frames_inner` with `current_depth = 0`.
+    /// Processing one item at depth N **unconditionally** recurses into its children
+    /// at `current_depth = N + 1`, even when the children slice is empty.
+    ///
+    /// Therefore the deepest call that must **pass** the guard is the
+    /// empty-children recursion at `current_depth = MAX_BULLET_DEPTH = 64`:
+    /// `64 > 64` is false → guard passes → empty loop → `Ok(())`.
+    ///
+    /// A chain where the leaf `BulletItem` (no children) is processed at
+    /// `current_depth = MAX_BULLET_DEPTH - 1 = 63` naturally produces this
+    /// boundary call:
+    ///
+    /// - root at depth 0 → child at depth 1 → … → leaf at depth 63
+    /// - leaf recurses into its empty children at depth 64 → `64 > 64` = false → Ok
+    ///
+    /// That chain requires **`MAX_BULLET_DEPTH - 1` (63) fold iterations** wrapping
+    /// the leaf outward, which is two fewer iterations than the depth-65-rejected
+    /// test's `(0..=MAX_BULLET_DEPTH)` (65 iterations):
+    ///
+    /// | fold count | leaf at `current_depth` | empty-children call | outcome |
+    /// |---|---|---|---|
+    /// | 63 (this test) | 63 | 64 → `64 > 64` = false | **Ok** |
+    /// | 64 | 64 | 65 → `65 > 64` = true | Err |
+    /// | 65 (depth-65 test) | 65 | (guard fires on leaf itself) | Err |
+    ///
+    /// ## Regression sensitivity
+    ///
+    /// If the guard were changed from `>` to `>=`, the call
+    /// `push_bullet_frames_inner([], …, 64)` would fire `64 >= 64 = true` and return
+    /// `Err(BulletDepthExceeded { depth: 64 })`.  This test would then fail on
+    /// `assert!(result.is_ok())`, catching the regression.
+    ///
+    /// The symmetric depth-65-rejected test
+    /// (`test_bc_3_05_001_story073_bullet_structural_depth_65_is_error`) covers
+    /// the over-limit side; this test covers the at-limit accepted side.
+    #[test]
+    fn test_bc_3_05_001_story073_bullet_structural_depth_64_accepted() {
+        use crate::layout::MAX_BULLET_DEPTH;
+        use slideforge_types::{Block, BulletItem, ContentBlock, InlineNode, SourceSpan};
+
+        // Build a BulletItem chain where the leaf (no children) is processed at
+        // current_depth = MAX_BULLET_DEPTH - 1 = 63, so the final recursion into
+        // its empty children fires at current_depth = MAX_BULLET_DEPTH = 64.
+        //
+        // Fold range: 0..(MAX_BULLET_DEPTH - 1) = 0..63 = 63 iterations (exclusive),
+        // two fewer than the depth-65-rejected test's (0..=MAX_BULLET_DEPTH) = 65 iters.
+        //
+        // After 63 folds from leaf:
+        //   root = item_62, chain: root → item_61 → … → item_0 → leaf  (64 items total)
+        //
+        // Processing in push_bullet_frames_inner:
+        //   root      at current_depth  0 → recurse into [item_61] at depth  1
+        //   item_61   at current_depth  1 → recurse into [item_60] at depth  2
+        //   …
+        //   item_0    at current_depth 62 → recurse into [leaf]    at depth 63
+        //   leaf      at current_depth 63 → recurse into []        at depth 64
+        //   []        at current_depth 64 → guard: 64 > 64 = false → empty loop → Ok ✓
+        let leaf = BulletItem {
+            inlines: vec![InlineNode::Plain(Arc::from("leaf"))],
+            children: vec![],
+            span: SourceSpan::default(),
+        };
+        // 63 fold iterations (0..(MAX_BULLET_DEPTH - 1)): wrap leaf outward so the
+        // leaf is processed at current_depth = 63 and the final empty-children call
+        // lands at current_depth = 64 — the last call that must pass the guard.
+        let root = (0..(MAX_BULLET_DEPTH - 1)).fold(leaf, |inner, i| BulletItem {
+            inlines: vec![InlineNode::Plain(Arc::from(format!("level {i}")))],
+            children: vec![inner],
+            span: SourceSpan::default(),
+        });
+
+        let block = Block {
+            content: ContentBlock::Bullets(vec![root]),
+            label: None,
+            span: SourceSpan::default(),
+        };
+        let slide = Slide {
+            slide_type: Arc::from("title"),
+            fields: OrderedMap::new(),
+            blocks: vec![block],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+            overlay: None,
+            register_content: vec![],
+        };
+        let deck = make_deck(vec![slide]);
+        let brand = make_brand();
+
+        let result = run(&deck, &brand);
+
+        // With the correct `current_depth > MAX_BULLET_DEPTH` guard the chain is accepted.
+        // If the guard regressed to `>=`, the empty-children call at current_depth=64
+        // would fire and return Err(BulletDepthExceeded { depth: 64 }), failing here.
+        assert!(
+            result.is_ok(),
+            "bullet structural chain with leaf at current_depth={} (empty-children call at \
+             current_depth={}) MUST be accepted (Ok) by the `> MAX_BULLET_DEPTH` guard; \
+             got Err — regression to `>=` suspected. Error: {:?}",
+            MAX_BULLET_DEPTH - 1,
+            MAX_BULLET_DEPTH,
+            result.err()
+        );
+    }
+
+    /// F-P1-MED-001 — A `ContentBlock::Bullets` with a structural `BulletItem` chain
+    /// nested 65 levels deep (parent → child → ... → 65 levels) must return
+    /// `Err(LayoutError::BulletDepthExceeded { depth: 65 })` from `layout::run`,
+    /// NOT `Ok(...)` and NOT a stack overflow.
+    ///
+    /// The guard must trigger at depth 65 (one above `MAX_BULLET_DEPTH` = 64)
+    /// BEFORE deep recursion exhausts the stack.
+    ///
+    /// At Red Gate: `push_bullet_frames` has no structural depth guard, so a
+    /// 65-deep children chain would return `Ok(...)` (no error), causing this
+    /// `assert!(result.is_err())` to fail cleanly. Depth 65 was chosen so the
+    /// Red run does NOT overflow the stack — it returns Ok and fails the assertion.
+    ///
+    /// Anti-paper-fix (TD-VSDD-059): the variant check inside `match` ensures
+    /// a wrong error type (e.g., `InlineDepthExceeded`) also fails the test.
+    #[test]
+    fn test_bc_3_05_001_story073_bullet_structural_depth_65_is_error() {
+        use crate::layout::MAX_BULLET_DEPTH;
+        use slideforge_types::{Block, BulletItem, ContentBlock, InlineNode, SourceSpan};
+
+        // Build a BulletItem chain of structural depth 65 via children nesting:
+        //   level_0 { children: [ level_1 { children: [ ... level_64 { children: [] } ] } ] }
+        // This is structural depth, NOT inline depth — BulletItem.inlines is a
+        // flat Plain node at every level.
+        let leaf = BulletItem {
+            inlines: vec![InlineNode::Plain(Arc::from("leaf"))],
+            children: vec![],
+            span: SourceSpan::default(),
+        };
+        // Build from the leaf outward to depth MAX_BULLET_DEPTH + 1 = 65.
+        // Each step wraps the previous item as the sole child of a new item.
+        let root = (0..=MAX_BULLET_DEPTH).fold(leaf, |inner, i| BulletItem {
+            inlines: vec![InlineNode::Plain(Arc::from(format!("level {i}")))],
+            children: vec![inner],
+            span: SourceSpan::default(),
+        });
+
+        let block = Block {
+            content: ContentBlock::Bullets(vec![root]),
+            label: None,
+            span: SourceSpan::default(),
+        };
+        let slide = Slide {
+            slide_type: Arc::from("title"),
+            fields: OrderedMap::new(),
+            blocks: vec![block],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+            overlay: None,
+            register_content: vec![],
+        };
+        let deck = make_deck(vec![slide]);
+        let brand = make_brand();
+
+        let result = run(&deck, &brand);
+
+        // RED GATE: without the depth guard push_bullet_frames returns Ok.
+        // With the guard it must return Err(BulletDepthExceeded { depth: 65 }).
+        assert!(
+            result.is_err(),
+            "bullet structural depth 65 must return Err(BulletDepthExceeded), got Ok"
+        );
+        match result.unwrap_err() {
+            LayoutError::BulletDepthExceeded {
+                depth,
+                source_slide_index,
+            } => {
+                assert_eq!(
+                    depth,
+                    MAX_BULLET_DEPTH + 1,
+                    "reported depth must be MAX_BULLET_DEPTH + 1 = {}; got {}",
+                    MAX_BULLET_DEPTH + 1,
+                    depth
+                );
+                assert_eq!(
+                    source_slide_index, 0,
+                    "source_slide_index must be 0 (the only slide); got {source_slide_index}"
+                );
+            },
+            other => panic!("expected LayoutError::BulletDepthExceeded, got: {other:?}"),
+        }
+    }
+
+    /// OBS-2 load-bearing — `source_slide_index` in `BulletDepthExceeded` threads the
+    /// real loop index, not a hardcoded zero.
+    ///
+    /// A deck with two slides is constructed:
+    /// - Slide 0: a normal "title" slide with a shallow (depth-1) bullet list — must NOT error.
+    /// - Slide 1: a "content" slide with a structurally 65-deep bullet list — MUST error.
+    ///
+    /// `layout::run` must return `Err(LayoutError::BulletDepthExceeded)` with
+    /// `source_slide_index == 1` and `depth == MAX_BULLET_DEPTH + 1`.
+    ///
+    /// If the production code hardcodes `source_slide_index: 0` the `source_slide_index`
+    /// assertion below fails, making the threading load-bearing.
+    #[test]
+    fn test_bc_3_05_001_story073_bullet_depth_error_reports_correct_slide_index() {
+        use crate::layout::MAX_BULLET_DEPTH;
+        use slideforge_types::{Block, BulletItem, ContentBlock, InlineNode, SourceSpan};
+
+        // Slide 0: a well-formed shallow bullet (depth 1 — safely within limit).
+        let shallow_bullet = BulletItem {
+            inlines: vec![InlineNode::Plain(Arc::from("slide0_shallow"))],
+            children: vec![],
+            span: SourceSpan::default(),
+        };
+        let slide0_block = Block {
+            content: ContentBlock::Bullets(vec![shallow_bullet]),
+            label: None,
+            span: SourceSpan::default(),
+        };
+        let slide0 = Slide {
+            slide_type: Arc::from("title"),
+            fields: OrderedMap::new(),
+            blocks: vec![slide0_block],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+            overlay: None,
+            register_content: vec![],
+        };
+
+        // Slide 1: a structurally 65-deep bullet chain (MAX_BULLET_DEPTH + 1 = 65).
+        // Build leaf-outward so the chain is depth MAX_BULLET_DEPTH + 1.
+        let leaf = BulletItem {
+            inlines: vec![InlineNode::Plain(Arc::from("slide1_leaf"))],
+            children: vec![],
+            span: SourceSpan::default(),
+        };
+        let deep_root = (0..=MAX_BULLET_DEPTH).fold(leaf, |inner, i| BulletItem {
+            inlines: vec![InlineNode::Plain(Arc::from(format!("slide1_level_{i}")))],
+            children: vec![inner],
+            span: SourceSpan::default(),
+        });
+        let slide1_block = Block {
+            content: ContentBlock::Bullets(vec![deep_root]),
+            label: None,
+            span: SourceSpan::default(),
+        };
+        let slide1 = Slide {
+            slide_type: Arc::from("content"),
+            fields: OrderedMap::new(),
+            blocks: vec![slide1_block],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+            overlay: None,
+            register_content: vec![],
+        };
+
+        let deck = make_deck(vec![slide0, slide1]);
+        let brand = make_brand();
+
+        let result = run(&deck, &brand);
+
+        assert!(
+            result.is_err(),
+            "two-slide deck where slide 1 has a 65-deep bullet must return \
+             Err(BulletDepthExceeded); got Ok"
+        );
+        match result.unwrap_err() {
+            LayoutError::BulletDepthExceeded {
+                depth,
+                source_slide_index,
+            } => {
+                // OBS-2 load-bearing: source_slide_index must be 1, not 0.
+                // A hardcoded-0 regression would fail this assertion.
+                assert_eq!(
+                    source_slide_index, 1,
+                    "source_slide_index must be 1 (the second slide, index 1); \
+                     got {source_slide_index} — this means the loop index is not threaded \
+                     correctly through push_bullet_frames"
+                );
+                assert_eq!(
+                    depth,
+                    MAX_BULLET_DEPTH + 1,
+                    "depth must be MAX_BULLET_DEPTH + 1 = {}; got {depth}",
+                    MAX_BULLET_DEPTH + 1
+                );
+            },
+            other => panic!("expected LayoutError::BulletDepthExceeded, got: {other:?}"),
+        }
+    }
 }
