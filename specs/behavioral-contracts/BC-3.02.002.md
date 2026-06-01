@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.2"
+version: "1.3"
 status: draft
 producer: product-owner
 timestamp: 2026-05-24T00:00:00
@@ -10,12 +10,13 @@ inputs: [domain-spec/L2-INDEX.md]
 input-hash: "[pending]"
 traces_to: domain-spec/L2-INDEX.md
 origin: greenfield
-subsystem: SS-TBD
+subsystem: SS-01
 capability: CAP-011
 lifecycle_status: active
 introduced: v1.0.0
 modified:
   - "2026-06-01: v1.2 — Added postcondition 7 (detail: sub-blocks), postcondition 8 (inline-structure preservation via FieldValue::Inlines), EC-005 (unrecognized sub-block key → non-fatal warning), EC-006 (reserved-name collision); clarified EC-004; added BC-1.14.003 cross-reference. Closes STORY-077 BC-status flag."
+  - "2026-06-01: v1.3 — Anchor/attribution correction (STORY-078 adversary pass 5 OBS-6): subsystem SS-TBD → SS-01 (DSL Parser, slideforge-syntax owns section block PARSING per ARCH-INDEX and STORY-078); Architecture Module line corrected to attribute parsing to slideforge-syntax (SS-01, STORY-078) and eval-stage TYPE validation/register routing to slideforge-eval (SS-02, STORY-077); added STORY-078 to Stories traceability. Behavioral semantics unchanged."
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -117,8 +118,8 @@ sub-block content as `RegisteredContent`.
 | L2 Capability | CAP-011 ("Document Section Generation") per capabilities.md §CAP-011 |
 | Capability Anchor Justification | CAP-011 ("Document Section Generation") per capabilities.md §CAP-011 — "manually authored (section methodology:, section scope:, section approval:)" is explicitly enumerated in CAP-011 |
 | L2 Domain Invariants | DI-008 (SectionType trait API), DI-012 (single source produces all formats) |
-| Architecture Module | slideforge-eval crate — section block parsing; slideforge-docx crate — SectionType rendering (filled by architect) |
-| Stories | STORY-077 |
+| Architecture Module | slideforge-syntax crate (SS-01) — section block PARSING (STORY-078); slideforge-eval crate (SS-02) — eval-stage section TYPE validation + register routing to `RegisteredContent` (STORY-077); slideforge-docx crate — SectionType rendering (filled by architect) |
+| Stories | STORY-077, STORY-078 |
 
 ## Related BCs
 
@@ -132,7 +133,8 @@ sub-block content as `RegisteredContent`.
 
 ## Story Anchor
 
-STORY-077 — SectionBlock IR Extension: FieldValue body + section-level register routing
+STORY-077 — SectionBlock IR Extension: FieldValue body + section-level register routing (eval-stage)
+STORY-078 — Parser Section Block Syntax: `section <type>:` parse-stage implementation (SS-01, slideforge-syntax)
 
 ## VP Anchors
 

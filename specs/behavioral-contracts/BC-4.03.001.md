@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.2"
+version: "1.3"
 status: draft
 producer: product-owner
 timestamp: 2026-05-24T00:00:00
@@ -16,6 +16,7 @@ lifecycle_status: active
 introduced: v1.0.0
 modified:
   - "2026-06-01: v1.2 — DI-3 spec-hygiene: subsystem anchor filled (SS-TBD → SS-07, confirmed against ARCH-INDEX Subsystem Registry); Architecture Module, Story Anchor, and VP Anchors placeholders resolved."
+  - "2026-06-01: v1.3 — STORY-045 full-UA-1 scope expansion (human-directed): added explicit postconditions for (a) PDF document outline (/Outlines tree, one bookmark per slide) and (b) heading-title text on Hn structure tags (/Title attribute), both required by ISO 14289-1 for veraPDF isCompliant:true. Added Validator::UA1 enablement as explicit production precondition. Updated Invariants 5 and 6."
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -30,10 +31,12 @@ removal_reason: null
 
 The slideforge PDF exporter produces tagged PDF with a `/StructTreeRoot`, logical
 reading order, alt text on all non-decorative figures, font ToUnicode CMaps,
-document language metadata, and `/MarkInfo`. The output must pass
+document language metadata, `/MarkInfo`, a PDF document outline (bookmarks tree),
+and heading-title text on all Hn structure tags. The output must pass
 `verapdf --flavour ua1` validation in CI with zero violations. Rasterized slide
 images are not acceptable. The implementation uses pdf-writer + krilla + a custom
-`SlideTagEngine` (Spike S2 resolution — Chrome headless is explicitly rejected).
+`SlideTagEngine` with `Validator::UA1` enabled in the production export path
+(Spike S2 resolution — Chrome headless is explicitly rejected).
 
 ## Preconditions
 
@@ -42,6 +45,13 @@ images are not acceptable. The implementation uses pdf-writer + krilla + a custo
 3. The `slideforge-pdf` crate is built with pdf-writer + krilla.
 4. Font files are available for embedding (required for ToUnicode CMaps).
 5. veraPDF CLI is installed on CI (`brew install verapdf` or Docker image).
+6. `PdfExporter` is configured with `Configuration::new_with_validator(Validator::UA1)` (krilla's
+   built-in UA-1 validator enabled) in the production export path. Test-only paths may use
+   `Validator::None`, but the CI integration test that asserts `isCompliant: true` MUST use
+   `Validator::UA1`.
+7. Every slide in `LaidOutDeck` has an accessible title string reachable via
+   `deck.slides[laid_out_slide.source_index].title_str()` (returns `Option<&str>`) for use as
+   outline label and Hn `/Title` attribute text. A `None` result uses the fallback `"Slide N"`.
 
 ## Postconditions
 
@@ -54,6 +64,16 @@ images are not acceptable. The implementation uses pdf-writer + krilla + a custo
    - `/MarkInfo << /Marked true >>`.
    - `/Lang` set to the deck's declared language.
    - All fonts subsetted with valid `/ToUnicode` CMaps.
+   - **PDF document outline (bookmarks):** a `/Outlines` dictionary is present in the document
+     catalog; for a deck with N slides, the outline contains at least N outline entries (one per
+     slide, using the slide title as the outline item label), linked to the correct page destination.
+     ISO 14289-1 §7.1 — an outline is mandatory when the document has headings, which every
+     slideforge deck with H1/H2 content does.
+   - **Heading-title text on Hn tags:** every `/H1`–`/H6` structure element carries a `/Title`
+     attribute whose value is the slide or section heading text (the same string used as the
+     bookmark label for that slide). This satisfies ISO 14289-1 §7.1 MissingHeadingTitle.
+     The title text is drawn from `deck.slides[source_index].title_str()` — it is NOT
+     re-extracted from glyph streams.
 2. `verapdf --flavour ua1` exits with `isCompliant: true` and zero violations.
 3. Text in the PDF is searchable, copy-pasteable, and screen-reader accessible.
 4. Charts (SVG from plotters) are embedded as vector paths via usvg normalization, not rasterized.
@@ -64,6 +84,13 @@ images are not acceptable. The implementation uses pdf-writer + krilla + a custo
 2. The structure tree reading order matches the `reading_order: Vec<ElementId>` in `LaidOutSlide`.
 3. Every `Figure` element in the structure tree has a non-empty `/Alt` entry.
 4. Font subsetting is performed using the `subsetter` crate (same as Typst).
+5. `Validator::UA1` is ALWAYS enabled in the `PdfExporter` production code path. It must not be
+   silently downgraded to `Validator::None` or `Validator::A2b` in any production export call.
+   Any `KrillaError::Validation` error from the validator is surfaced as a fatal export error
+   (not silently swallowed). (Added v1.3 — STORY-045 full-UA-1 scope expansion)
+6. The PDF `/Outlines` tree MUST be present whenever the deck contains at least one slide with a
+   heading (H1–H6) structure element. An empty or absent `/Outlines` dictionary when headings are
+   present is a PDF/UA-1 violation. (Added v1.3 — STORY-045 full-UA-1 scope expansion)
 
 ## Edge Cases
 
@@ -114,7 +141,7 @@ images are not acceptable. The implementation uses pdf-writer + krilla + a custo
 
 ## Story Anchor
 
-STORY-045 — PDF: PDF/UA-1 Tagging + veraPDF CI Gate (Wave 4, EPIC-13, 5 pts, P0, status: draft)
+STORY-045 — PDF: PDF/UA-1 Tagging + veraPDF CI Gate (Full Compliance) (Wave 4, EPIC-13, 8 pts, P0, status: draft)
 
 ## VP Anchors
 

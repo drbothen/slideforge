@@ -9,6 +9,7 @@ points: 3
 priority: P1
 tdd_mode: strict
 status: ready
+version: "1.1"
 crate: slideforge-brand
 subsystems: [SS-04]
 target_module: slideforge-brand
@@ -68,7 +69,7 @@ This story is now `ready` for Wave 4 dispatch.
 
 | BC | Title | Version | Covered ACs |
 |----|-------|---------|-------------|
-| BC-2.01.001 | Brand Loader: .pptx/.docx Template Extraction | v1.2 | AC-001 (EC-006 loading side), AC-003 (EC-006 warn!), AC-004 (EC-006 clean srgbClr regression) |
+| BC-2.01.001 | Brand Loader: .pptx/.docx Template Extraction | v1.3 | AC-001 (EC-006 loading side), AC-003 (EC-006 warn!), AC-004 (EC-006 clean srgbClr regression) |
 | BC-2.01.003 | Brand Extraction CLI | v1.9 | AC-002 (EC-003 widened — extractor emits comment for is_derived regardless of origin) |
 
 ## Token Budget Estimate
@@ -235,3 +236,10 @@ The v1.0 decision (Option B, confirmed by PO, BC-2.01.001 EC-006) is: store base
 hex verbatim + set `is_derived = true` + emit `tracing::warn!`. No HSL resolution.
 If exact color computation is required in a future version, it would need a separate
 story with a Kani proof obligation for the HSL arithmetic.
+
+## Changelog
+
+| Version | Date | Author | Change |
+|---------|------|--------|--------|
+| v1.0 | 2026-05-31 | story-writer | Initial story creation — srgbClr transform-aware extraction (BC-2.01.001 EC-006 + BC-2.01.003 EC-003 widening). |
+| v1.1 | 2026-06-01 | story-writer | Adversary pass 5 OBS-1: sync BC version labels in Behavioral Contracts table. BC-2.01.001 label corrected from v1.2 to v1.3 (bumped mid-cycle by STORY-075 footer correction, unrelated to EC-006 content). BC-2.01.003 label confirmed current at v1.9. ACs and EC-006/postcondition-1/EC-003 anchors unchanged — label-only sync. |

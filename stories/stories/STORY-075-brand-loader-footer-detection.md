@@ -42,10 +42,12 @@ detected)".
 
 This story adds footer detection to the load path: read the slide master XML
 (`ppt/slideMasters/slideMaster1.xml`) and its corresponding slide layout XMLs, find
-`<p:ph type="ftr">` placeholder elements, and extract their text runs. The detected
-text is stored in `BrandTemplate.footer_text: Option<Arc<str>>`. A secondary check
-reads the presentation properties (`ppt/presProps.xml`) for `<p:showMasterSp>` and
-`<p:dt>` / `<p:ftr>` / `<p:sldNum>` footer visibility flags.
+`<p:ph type="ftr">` placeholder elements, and extract the full concatenated text of all
+`<a:t>` runs. The detected text is stored in `BrandTemplate.footer_text: Option<Arc<str>>`.
+A secondary parse of the same `slideMaster1.xml` reads the `<p:hf>` (CT_HeaderFooter)
+element and extracts the `ftr`, `dt`, and `sldNum` boolean attributes as footer visibility
+flags. **Note:** visibility flags are on `<p:hf>` in the master/layout, NOT in
+`presProps.xml` (see adversary H-1 correction in BC-2.01.001 v1.3).
 
 The `BrandExtractor` in STORY-024 already contains the `[footer]` serialization
 path — this story makes it reachable.
@@ -72,11 +74,16 @@ Agent context budget: 200k tokens. This story is ~7% of budget — within limit.
 
 - [ ] **AC-001:** `BrandLoader::load()` reads `ppt/slideMasters/slideMaster1.xml` from
   the PPTX ZIP and searches for `<p:sp>` elements containing `<p:ph type="ftr"/>`.
-  When at least one footer placeholder is found and has a non-empty `<a:t>` text run
-  child, the first such text run is stored as `BrandTemplate.footer_text = Some(...)`.
-  When no footer placeholder is present or all footer placeholders have empty text runs,
-  `BrandTemplate.footer_text` is `None` (not an error).
-  (traces to BC-2.01.001 postcondition 1 — BrandTemplate includes footer text if detected)
+  When at least one footer placeholder is found and has one or more `<a:t>` children
+  (across any number of `<a:r>` runs in the paragraph), the **full concatenation** of
+  all `<a:t>` text runs in document order is stored as `BrandTemplate.footer_text = Some(...)`.
+  "First run only" semantics are explicitly forbidden — footer text is frequently split
+  across multiple runs (e.g., styled spans), and discarding all but the first run silently
+  loses content. When no footer placeholder is present, or the placeholder exists but all
+  `<a:t>` text runs are empty or whitespace-only (after trimming), `BrandTemplate.footer_text`
+  is `None` (not an error).
+  (traces to BC-2.01.001 postcondition 1 v1.3 — BrandTemplate includes full footer text
+  if detected; adversary M-1 clarification applied)
 
 - [ ] **AC-002:** If `slideMaster1.xml` contains a footer placeholder (`<p:ph type="ftr"/>`)
   but no text run, `BrandLoader` also searches `ppt/slideLayouts/slideLayout1.xml` for a
@@ -84,15 +91,27 @@ Agent context budget: 200k tokens. This story is ~7% of budget — within limit.
   master nor layout has a populated footer, `footer_text` is `None`.
   (traces to BC-2.01.001 postcondition 1 — best-effort detection covers master + layout)
 
-- [ ] **AC-003:** `BrandLoader` reads `ppt/presProps.xml` (if present in the ZIP) and
-  extracts the footer visibility flags from `<p:showPr>` child elements:
-  - `<p:ftr val="1"/>` → footer text is visible on slides
-  - `<p:dt val="1"/>` → date/time is visible on slides
-  - `<p:sldNum val="1"/>` → slide number is visible on slides
+- [ ] **AC-003:** `BrandLoader` reads the `<p:hf>` (CT_HeaderFooter) element from
+  `ppt/slideMasters/slideMaster1.xml` (the same file already opened for footer text
+  detection in AC-001) and extracts the three boolean visibility attributes:
+  - `ftr="1"` (or `true`) → footer text is visible on slides (`show_footer: true`)
+  - `dt="1"` (or `true`) → date/time placeholder is visible on slides (`show_date: true`)
+  - `sldNum="1"` (or `true`) → slide number placeholder is visible on slides (`show_slide_number: true`)
   These three flags are stored in `BrandTemplate.footer_flags: FooterFlags` (a new struct
   with fields `show_footer: bool`, `show_date: bool`, `show_slide_number: bool`).
-  If `presProps.xml` is absent, all three flags default to `false`.
-  (traces to BC-2.01.001 postcondition 1 — footer metadata captured comprehensively)
+  If the `<p:hf>` element is absent from `slideMaster1.xml`, all three flags default to
+  `false` and a `tracing::debug!` is emitted.
+  **CORRECTION from prior spec (adversary H-1, BC-2.01.001 v1.3):** the prior spec
+  incorrectly directed parsing `ppt/presProps.xml` and reading `<p:ftr>`, `<p:dt>`,
+  `<p:sldNum>` child elements of `<p:showPr>`. Those child elements do NOT exist in
+  ECMA-376 CT_ShowProperties — `<p:showPr>` is the slide-show runtime configuration
+  element (present/browse/kiosk, penClr, timings). Footer/date/slide-number visibility
+  is carried exclusively by the `<p:hf>` (CT_HeaderFooter) element's boolean attributes
+  on slide masters, layouts, and individual slides. Reading `presProps.xml` for footer
+  flags would always produce all-false results on real .pptx files, making the feature
+  permanently inert. Do NOT read `presProps.xml` for footer visibility.
+  (traces to BC-2.01.001 postcondition 1 v1.3 — footer visibility flags from <p:hf>
+  attributes on slideMaster1.xml)
 
 - [ ] **AC-004:** `footer_text` and `footer_flags` are populated BEFORE `BrandTemplate` is
   returned from `BrandLoader::load()`. The hardcoded `footer_text: None` at `loader.rs:214`
@@ -140,8 +159,9 @@ Continues from STORY-022 (Brand Loading: .pptx/.docx Template Extraction).
 ## Architecture Compliance Rules
 
 1. **SS-04 (Brand) — Effectful (file I/O):** No change to crate classification.
-2. **SAX parsing required:** `slideMaster1.xml` and `presProps.xml` must use
-   `quick-xml::Reader` event-loop (no serde). Element ordering is schema-significant.
+2. **SAX parsing required:** `slideMaster1.xml` (and `slideLayout1.xml` for the fallback
+   text path) must use `quick-xml::Reader` event-loop (no serde). Element ordering is
+   schema-significant. `presProps.xml` is NOT read for footer detection.
 3. **Read-only invariant:** `BrandLoader` MUST NOT modify the source ZIP. Footer detection
    reads-only. Validated by existing integration test (file hash before/after, inherited
    from STORY-022's `test_load_valid_pptx`).
@@ -160,7 +180,7 @@ STORY-022:
 
 | Library | Pinned Version | Usage |
 |---------|---------------|-------|
-| `quick-xml` | `=0.36.2` | SAX parsing of `slideMaster1.xml` and `presProps.xml` |
+| `quick-xml` | `=0.36.2` | SAX parsing of `slideMaster1.xml` (and `slideLayout1.xml` for fallback) |
 | `zip` | `=2.6.1` | Reading additional files from the already-open ZIP archive |
 | `tracing` | `=0.1` | Debug logging for absent slideMaster1.xml |
 | `slideforge-types` | workspace | `Arc<str>` |
@@ -174,10 +194,14 @@ Files to create:
 
 ```
 crates/slideforge-brand/src/
-└── footer.rs    # detect_footer(zip: &mut ZipArchive<File>) -> FooterDetection
-                 # parse_presProps_flags(xml_bytes: &[u8]) -> FooterFlags
+└── footer.rs    # detect_footer(zip: &mut ZipArchive<File>, is_pptx: bool) -> FooterDetection
+                 #   single-pass SAX over slideMaster1.xml:
+                 #     (1) <p:ph type="ftr"/> → concat all <a:t> runs → text
+                 #     (2) <p:hf ftr=".." dt=".." sldNum=".."/> → FooterFlags
                  # FooterDetection { text: Option<Arc<str>>, flags: FooterFlags }
                  # FooterFlags { show_footer: bool, show_date: bool, show_slide_number: bool }
+                 # NOTE: no parse_presProps_flags function — presProps.xml is NOT the
+                 #       source for footer visibility flags (adversary H-1 correction)
 ```
 
 Files to modify:
@@ -186,21 +210,29 @@ Files to modify:
 crates/slideforge-brand/src/
 ├── template.rs   # Add: FooterFlags struct; add footer_flags: FooterFlags to BrandTemplate
 ├── loader.rs     # Replace: footer_text: None (line 214) with detected value;
-                  # call detect_footer() and presProps_flags() before constructing BrandTemplate
+                  # call detect_footer() before constructing BrandTemplate;
+                  # assign footer_text: footer.text, footer_flags: footer.flags
 └── lib.rs        # Add: pub mod footer; pub use footer::FooterFlags;
 ```
 
 ## Tasks
 
-1. **Write `src/footer.rs`:** (30 min)
+1. **Write `src/footer.rs`:** (35 min)
    - `pub struct FooterFlags { pub show_footer: bool, pub show_date: bool, pub show_slide_number: bool }`
    - `impl Default for FooterFlags` — all `false`
    - `pub struct FooterDetection { pub text: Option<Arc<str>>, pub flags: FooterFlags }`
    - `pub fn detect_footer(zip: &mut ZipArchive<impl Read + Seek>, is_pptx: bool) -> FooterDetection`
      - If `!is_pptx` → return `FooterDetection::default()` immediately (DOCX has no footer detection)
-     - Read `ppt/slideMasters/slideMaster1.xml` → SAX-parse for `<p:ph type="ftr"/>` placeholder
-     - If found but empty text → also try `ppt/slideLayouts/slideLayout1.xml`
-     - Read `ppt/presProps.xml` → SAX-parse `<p:ftr val="...">`, `<p:dt val="...">`, `<p:sldNum val="...">`
+     - Read `ppt/slideMasters/slideMaster1.xml` ONCE — SAX-parse in a single pass for:
+       1. `<p:ph type="ftr"/>` placeholder → collect ALL `<a:t>` text runs (concatenate in
+          document order) → `text: Option<Arc<str>>`
+       2. `<p:hf>` element → read `ftr`, `dt`, `sldNum` boolean attributes → `FooterFlags`
+          (attribute absent or `"0"` or `"false"` → `false`; `"1"` or `"true"` → `true`)
+          If `<p:hf>` element absent → emit `tracing::debug!`; use `FooterFlags::default()`
+     - If master has no footer placeholder text (None) → also try
+       `ppt/slideLayouts/slideLayout1.xml` for placeholder text fallback (AC-002)
+     - **Do NOT read `ppt/presProps.xml`** for footer flags — CT_ShowProperties has no
+       ftr/dt/sldNum children per ECMA-376 (adversary H-1 correction)
      - Return `FooterDetection { text, flags }`
 2. **Extend `src/template.rs`:** (10 min)
    - Add `FooterFlags` struct (or re-export from `footer.rs`)
@@ -224,11 +256,12 @@ crates/slideforge-brand/src/
 | Test Name | Setup | Expected |
 |-----------|-------|----------|
 | `test_detect_footer_text_from_master` | Minimal ZIP with `ppt/slideMasters/slideMaster1.xml` containing `<p:ph type="ftr"/>` with `<a:t>Confidential</a:t>` | `FooterDetection.text = Some("Confidential")` |
+| `test_detect_footer_text_multirun` | ZIP with footer placeholder containing two runs: `<a:r><a:t>Q4 </a:t></a:r><a:r><a:t>Report</a:t></a:r>` | `FooterDetection.text = Some("Q4 Report")` (all runs concatenated) |
 | `test_detect_footer_empty_master_fallback_layout` | ZIP with footer placeholder in master (empty `<a:t>`) + layout1.xml with `<a:t>Q4 Report</a:t>` | `FooterDetection.text = Some("Q4 Report")` |
 | `test_detect_footer_absent_placeholder` | ZIP with slideMaster1.xml that has NO `<p:ph type="ftr"/>` | `FooterDetection.text = None` |
 | `test_detect_footer_absent_master_xml` | ZIP with no `ppt/slideMasters/slideMaster1.xml` entry | `FooterDetection.text = None`; no panic; `tracing::debug!` emitted |
-| `test_detect_footer_flags_from_presprops` | ZIP with `ppt/presProps.xml` containing `<p:ftr val="1"/>`, `<p:sldNum val="1"/>`, no `<p:dt>` | `flags = FooterFlags { show_footer: true, show_date: false, show_slide_number: true }` |
-| `test_detect_footer_flags_absent_presprops` | ZIP with no `ppt/presProps.xml` | `flags = FooterFlags::default()` (all false); no error |
+| `test_detect_footer_flags_from_hf_element` | ZIP with slideMaster1.xml containing `<p:hf ftr="1" sldNum="1"/>` (no `dt` attribute) | `flags = FooterFlags { show_footer: true, show_date: false, show_slide_number: true }` |
+| `test_detect_footer_flags_absent_hf_element` | ZIP with slideMaster1.xml that has NO `<p:hf>` element | `flags = FooterFlags::default()` (all false); `tracing::debug!` emitted; no error |
 | `test_detect_footer_docx_returns_default` | `is_pptx = false` | `FooterDetection::default()` immediately; no XML reads |
 
 ### Integration tests in `loader.rs` (extending STORY-022 test helpers)
@@ -289,25 +322,50 @@ Footer placeholders in slide masters follow this OOXML structure:
 ```
 
 The SAX parser must track: (1) entering a `<p:sp>` element, (2) finding `<p:ph>` with
-`type="ftr"` attribute within it, (3) then collecting `<a:t>` text content from the
-first `<a:r>` in the first `<a:p>` of the `<p:txBody>`. Use a state machine pattern
-consistent with `color.rs`.
+`type="ftr"` attribute within it, (3) then collecting `<a:t>` text content from **ALL**
+`<a:r>` runs in the `<p:txBody>` paragraph (concatenate in document order) — do NOT stop
+after the first run. "First run only" silently discards styled text spans. Use a
+`String` accumulator and push each `<a:t>` text chunk; convert to `Arc<str>` at the end.
+Use a state machine pattern consistent with `color.rs`.
 
-### presProps.xml Footer Visibility Flags
+### Footer Visibility Flags: `<p:hf>` on slideMaster1.xml (CORRECTED)
+
+**CORRECTION (adversary H-1 / BC-2.01.001 v1.3):** Footer visibility flags are NOT in
+`presProps.xml`. The prior spec was wrong — `<p:showPr>` (CT_ShowProperties) is the
+slide-show runtime configuration element with no ftr/dt/sldNum children.
+
+Footer, date, and slide-number visibility are boolean **attributes** on the `<p:hf>`
+(CT_HeaderFooter) element, which lives directly under the master/layout/slide root element:
 
 ```xml
-<!-- ppt/presProps.xml -->
-<p:presentationPr xmlns:p="...">
-  <p:showPr>
-    <p:ftr val="1"/>       <!-- footer text visible on slides -->
-    <p:dt val="1"/>        <!-- date/time visible on slides -->
-    <p:sldNum val="1"/>    <!-- slide number visible on slides -->
-  </p:showPr>
-</p:presentationPr>
+<!-- ppt/slideMasters/slideMaster1.xml — master-level visibility declaration -->
+<p:sldMaster xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" ...>
+  ...
+  <p:hf sldNum="0" hdr="0" ftr="1" dt="1"/>
+  ...
+</p:sldMaster>
 ```
 
-Parse: look for `<p:showPr>` element, then for `<p:ftr>`, `<p:dt>`, `<p:sldNum>` children.
-Extract `val` attribute. `val="1"` → `true`. Any other value or absent attribute → `false`.
+Attribute semantics (ECMA-376 CT_HeaderFooter, all optional `xsd:boolean`):
+- `ftr="1"` or `ftr="true"` → footer text placeholder is visible (`show_footer: true`)
+- `dt="1"` or `dt="true"` → date/time placeholder is visible (`show_date: true`)
+- `sldNum="1"` or `sldNum="true"` → slide number placeholder is visible (`show_slide_number: true`)
+- `hdr` — header visibility (notes/handout context only; ignored for slide brand loading)
+- Attribute absent → `false` (optional boolean, default-absent = off)
+
+The `<p:hf>` element is parsed from the same `slideMaster1.xml` already opened for
+placeholder text detection — no additional file read is required. The SAX state machine
+must be extended to also emit `<p:hf>` start-element events and extract the three
+boolean attributes in the same pass.
+
+**Inheritance note (v1.0 scope):** Slide layouts and individual slides can carry their
+own `<p:hf>` that overrides the master. In v1.0 the brand loader reads ONLY the
+`slideMaster1.xml` `<p:hf>` element as the baseline `FooterFlags` and does **not**
+inspect any `slideLayoutN.xml` for `<p:hf>` at all. Because layout-level `<p:hf>` is
+never read in v1, no `tracing::debug!` is emitted for a layout override — layout-override
+detection and the corresponding debug log are both **v2-deferred** (together with full
+per-layout `FooterFlags` merge). Do NOT add any layout-override detection or debug
+logging in the v1 implementation.
 
 ### Why No New BC is Needed
 
@@ -324,7 +382,16 @@ no new behavioral contract is required.
 | EC-001 | `slideMaster1.xml` absent from ZIP | `footer_text: None`; `debug!` log; no build failure |
 | EC-002 | Footer placeholder present but `<a:t>` is empty string | Try slideLayout1.xml; if also empty → `None` |
 | EC-003 | Multiple `<p:ph type="ftr"/>` in master | Use text from the first one found (document order) |
-| EC-004 | `presProps.xml` absent from ZIP | `FooterFlags::default()` (all false); no error |
+| EC-004 | `<p:hf>` element absent from `slideMaster1.xml` (master declares no header/footer settings) | `FooterFlags::default()` (all false); `tracing::debug!` emitted; no error |
 | EC-005 | DOCX input (`is_pptx = false`) | Skip all detection; return defaults immediately |
 | EC-006 | Footer placeholder has `<a:fld>` field element (date field) instead of `<a:r>` | Treat as no text; `footer_text: None` for that placeholder |
-| EC-007 | `ppt/presProps.xml` is present but `<p:showPr>` is absent | `FooterFlags::default()` (all false); no error |
+| EC-007 | `<p:hf>` element present in `slideMaster1.xml` but all three attributes (`ftr`, `dt`, `sldNum`) are absent | All three flags are `false` (absence = false per ECMA-376 xsd:boolean optional attr default); no error; no warning |
+| EC-008 | Footer placeholder text is split across multiple `<a:r>` runs (e.g., styled spans) | All `<a:t>` text content is concatenated in document order; no truncation at first run |
+
+## Changelog
+
+| Version | Date | Author | Change |
+|---------|------|--------|--------|
+| 1.0 | 2026-05-31 | story-writer | Initial story created from adversary finding F-024A-OBS-1 |
+| 1.1 | 2026-06-01 | product-owner | **SPEC DEFECT correction (adversary H-1 / BC-2.01.001 v1.3):** AC-003 rewritten — footer visibility flags are read from `<p:hf>` boolean attributes (`ftr`, `dt`, `sldNum`) on `slideMaster1.xml`, NOT from `<p:showPr>` children of `presProps.xml`. Prior spec would produce permanently all-false `FooterFlags` on real .pptx files. Task 1, File Structure Requirements, Test Strategy (test cases for presProps replaced with `<p:hf>` tests), Implementation Notes (presProps block replaced with corrected `<p:hf>` block), and EC-004/EC-007 all updated consistently. **Adversary M-1 clarification applied:** AC-001 rewritten to specify full concatenation of all `<a:t>` runs (not first-run-only). EC-008 added for multi-run edge case. Summary and SAX parser notes updated to reflect concatenation requirement. |
+| 1.2 | 2026-06-01 | product-owner | **v1/v2 scope reconciliation (STORY-075 adversary pass 2 OBS-3 — EC-007 scope correction):** Implementation Notes "Inheritance note" rewritten. Previous text stated per-layout `<p:hf>` overrides "are noted via tracing::debug! but not merged," implying v1 inspects layouts and emits a debug log. This is inconsistent with the actual v1 scope: the v1 brand loader reads ONLY `slideMaster1.xml` `<p:hf>` and does not inspect `slideLayoutN.xml` at all. Layout-override detection and the corresponding `tracing::debug!` are both v2-deferred. No AC changes required — no AC promised the layout-override debug. Aligns with BC-2.01.001 v1.4 (EC-007 reconciliation). |

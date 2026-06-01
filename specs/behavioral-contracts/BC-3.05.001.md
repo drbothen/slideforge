@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.3.4"
+version: "1.3.5"
 status: active
 producer: product-owner
 timestamp: 2026-05-29T00:00:00
@@ -10,11 +10,11 @@ inputs: [domain-spec/L2-INDEX.md]
 input-hash: "[pending]"
 traces_to: domain-spec/L2-INDEX.md
 origin: greenfield
-subsystem: SS-TBD
+subsystem: SS-05
 capability: CAP-024
 lifecycle_status: active
 introduced: v1.0.0
-modified: ["v1.2 — adversary pass 1 adjudication: variant count corrected to 12, payload shapes corrected to Vec<InlineNode> for structured variants, inline depth bound added (max 64), math xref validation boundary codified", "v1.3 — story spec AC-005 enum example corrected to match production types", "v1.3.1 — VP propagation burst: assigned VP-043 through VP-047 to all VP-TBD entries", "v1.3.2 — adversary pass 2 adjudications S/O: LayoutError::Multiple smart constructor invariants codified; XrefTargetNotFound warnings must reach LaidOutDeck.warnings (not silently dropped)", "v1.3.3 — pass-7 drift fix (F-P7-HIGH-005): slide_index → source_slide_index in Invariant 4, Inline Depth Bound section, EC-002, EC-006, and Canonical Test Vectors per AC-BC-A9 canonical field name", "v1.3.4 — F-P25-MED-001: Architecture Module corrected — InlineNode enum lives in slideforge-types (not slideforge-eval); inline validation pass (run_inline_validation) lives in slideforge-layout"]
+modified: ["v1.2 — adversary pass 1 adjudication: variant count corrected to 12, payload shapes corrected to Vec<InlineNode> for structured variants, inline depth bound added (max 64), math xref validation boundary codified", "v1.3 — story spec AC-005 enum example corrected to match production types", "v1.3.1 — VP propagation burst: assigned VP-043 through VP-047 to all VP-TBD entries", "v1.3.2 — adversary pass 2 adjudications S/O: LayoutError::Multiple smart constructor invariants codified; XrefTargetNotFound warnings must reach LaidOutDeck.warnings (not silently dropped)", "v1.3.3 — pass-7 drift fix (F-P7-HIGH-005): slide_index → source_slide_index in Invariant 4, Inline Depth Bound section, EC-002, EC-006, and Canonical Test Vectors per AC-BC-A9 canonical field name", "v1.3.4 — F-P25-MED-001: Architecture Module corrected — InlineNode enum lives in slideforge-types (not slideforge-eval); inline validation pass (run_inline_validation) lives in slideforge-layout", "v1.3.5 — adversary pass 2 OBS-2 (STORY-073): subsystem corrected from SS-TBD to SS-05 (Layout Engine); BC governs layout-stage validation and STORY-073 anchors subsystems: [SS-05]"]
 deprecated: null
 deprecated_by: null
 replacement: null

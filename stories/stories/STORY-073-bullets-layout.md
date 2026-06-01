@@ -13,7 +13,7 @@ crate: slideforge-layout
 target_module: slideforge-layout
 subsystems: [SS-05]
 behavioral_contracts: [BC-3.05.001]
-verification_properties: []
+verification_properties: [VP-045, VP-047]
 nfr_refs: [NFR-021, NFR-022, NFR-023, NFR-024, NFR-025]
 depends_on: [STORY-028]
 blocks: []
@@ -70,7 +70,7 @@ story extends the layout engine to:
 
 | BC | Title | Version | Covered ACs |
 |----|-------|---------|-------------|
-| BC-3.05.001 | All 12 inline format types render to correct output per format | v1.3.4 | AC-001, AC-002, AC-003, AC-INT-1 |
+| BC-3.05.001 | All 12 inline format types render to correct output per format | v1.3.5 | AC-001, AC-002, AC-003, AC-INT-1 |
 
 ## Acceptance Criteria
 
@@ -89,10 +89,22 @@ verbatim — no inline processing occurs at layout time.
 ```rust
 // Canonical fixture: 2-item bullet list → 2 frames
 let deck = Deck { slides: vec![Slide {
-    content_blocks: vec![ContentBlock::Bullets(vec![
-        BulletItem { content: vec![InlineNode::Plain(Arc::from("first"))], depth: 0 },
-        BulletItem { content: vec![InlineNode::Bold(vec![InlineNode::Plain(Arc::from("second"))])], depth: 0 },
-    ])],
+    blocks: vec![Block {
+        content: ContentBlock::Bullets(vec![
+            BulletItem {
+                inlines: vec![InlineNode::Plain(Arc::from("first"))],
+                children: vec![],
+                span: SourceSpan::default(),
+            },
+            BulletItem {
+                inlines: vec![InlineNode::Bold(vec![InlineNode::Plain(Arc::from("second"))])],
+                children: vec![],
+                span: SourceSpan::default(),
+            },
+        ]),
+        label: None,
+        span: SourceSpan::default(),
+    }],
     ..Default::default()
 }], ..Default::default() };
 let laid_out = layout::run(&deck, &brand_config)?;
@@ -120,8 +132,8 @@ with `target == "missing-slide"` and the correct `source_slide_index`.
 `run_inline_validation` enforces the 64-level nesting depth limit on
 `BulletItem.content` trees. A bullet item whose inline tree is nested 65 levels
 deep produces `LayoutError::InlineDepthExceeded { source_slide_index, depth: 65 }`.
-This is a hard error — the affected `LaidOutSlide` is NOT produced. The error
-is accumulated via the standard multi-error accumulator (not bail-on-first).
+This is a hard error that terminates processing — the affected `LaidOutSlide` is
+NOT produced and `Err` is returned immediately (not silently truncated).
 
 Canonical test vector: a `BulletItem` with `content:` forming 65 nested
 `Bold(vec![Bold(vec![...])])` nodes → `LayoutError::InlineDepthExceeded` with
@@ -179,7 +191,7 @@ rather than separate per-source passes.
    `slideforge-html`. Bullet frame generation is IR-level only.
 2. **Integer EMU for bounding boxes (DI-010, ADR-013)**: Any bounding box
    associated with bullet frames uses `Emu(i64)`, not `f64`.
-3. **12 InlineNode variants are exhaustive (BC-3.05.001 v1.3.4)**: The layout
+3. **12 InlineNode variants are exhaustive (BC-3.05.001 v1.3.5)**: The layout
    pass handling `BulletItem.content` must handle ALL 12 variants without a
    wildcard catch-all. Missing variants are compile errors.
 4. **Xref validation scope includes bullets**: The validation pass must not
@@ -227,13 +239,16 @@ rather than separate per-source passes.
 | ID | Description | Expected Behavior |
 |----|-------------|-------------------|
 | EC-001 | Empty bullet list (`ContentBlock::Bullets(vec![])`) | Zero `FrameContent::TextRun` frames produced; no error or warning |
-| EC-002 | Bullet item with empty content (`BulletItem { content: vec![], depth: 0 }`) | One frame produced with empty inline sequence; no depth error |
-| EC-003 | Nested bullet (depth > 0) | Frame produced with depth preserved in `BulletItem.depth`; layout does not flatten |
+| EC-002 | Bullet item with empty inline content (`BulletItem { inlines: vec![], children: vec![], span: ... }`) | One frame produced with empty inline sequence; no depth error |
+| EC-003 | Nested bullets (via `BulletItem.children`) | Nested bullets each produce their own frame, depth-first, parent before children; layout does not flatten |
 | EC-004 | Xref inside nested bold inside bullet | Xref validation traverses into container nodes; `XrefTargetNotFound` still accumulated |
-| EC-005 | Multiple bullets on same slide with depth violations | All `InlineDepthExceeded` errors accumulated before returning (not bail-on-first) |
+| EC-005 | Multiple bullets on same slide with depth violations | `InlineDepthExceeded` is a hard error — processing terminates on the first depth violation and `Err` is returned (output not produced); depth violations are not silently truncated |
 
 ## Changelog
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0 | 2026-05-29 | product-owner | Initial story creation — bullets-layout anchor for recurring [process-gap] finding (STORY-028 pass-11 F-P11-MED-002 resolution) |
+| 1.1 | 2026-06-01 | product-owner | Adversary pass 2 OBS-1: set `verification_properties: [VP-045, VP-047]`. VP-047 (all 12 variants survive layout pass in FrameContent::TextRun) is exercised by AC-001 and AC-INT-1; VP-045 (inline tree at depth 65 produces InlineDepthExceeded) is exercised by AC-003. |
+| 1.2 | 2026-06-01 | product-owner | Adversary pass 3 OBS-1: corrected inline Rust fixtures to match production IR. AC-001 fixture: `content_blocks`→`blocks` (wrapped in `Block { content, label, span }`); `BulletItem { content, depth }`→`BulletItem { inlines, children, span }`. EC-002 description updated to use `inlines`/`children` field names. EC-003 reworded: removed `BulletItem.depth` reference; nesting is structural via `children`, layout emits one frame per item depth-first, parent before children. |
+| 1.3 | 2026-06-01 | product-owner | Adversary pass 4 (MED-1 taxonomy note, MED-2 label sync, OBS-1 AC/EC wording reconciliation to BC). MED-2: BC-3.05.001 version label in body BC table updated from v1.3.4 to v1.3.5 (current live version); Architecture Compliance Rules ref updated to match. OBS-1: AC-003 reworded — removed "accumulated via the standard multi-error accumulator (not bail-on-first)"; now states InlineDepthExceeded is a hard error that terminates processing and returns Err immediately (not silently truncated), matching BC-3.05.001 invariant 4 and the implementation. EC-005 reworded to same effect — removed "accumulated before returning (not bail-on-first)" claim. (MED-1 applies to error-taxonomy.md, not this file.) |

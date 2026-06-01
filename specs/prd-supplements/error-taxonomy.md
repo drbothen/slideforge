@@ -2,10 +2,10 @@
 document_type: prd-supplement
 supplement_type: error-taxonomy
 level: L3
-version: "2.3"
+version: "2.8"
 status: active
 producer: product-owner
-timestamp: 2026-05-31T00:00:00
+timestamp: 2026-06-01T00:00:00
 phase: 1a
 traces_to: .factory/specs/prd.md
 primary_consumers: [implementer, test-writer]
@@ -42,6 +42,34 @@ Always fatal. Build halts with accumulated errors. No output produced.
 | E-PAR-014 | broken | 1 | `Unterminated math block at <file>:<line>:<col>. Missing closing $ (or $$).` | CAP-012 |
 | E-PAR-015 | broken | 1 | `Invalid hex color '<value>' at <file>:<line>:<col>. Expected 6-digit hex (#RRGGBB). Short-form #RGB and alpha #RRGGBBAA are not supported.` | CAP-023 |
 | E-PAR-016 | broken | 1 | `Shape gradient fill is not supported in v1.0 at <file>:<line>:<col>. Use a solid hex color or 'none'. Gradient fill is planned for a future release (STORY-072).` | CAP-023 |
+| E-PAR-017 | broken | 1 | `Section sub-block key '<name>' is a reserved register name — use '<name>:' register syntax or choose a different key.` | BC-3.02.002 EC-006, CAP-001 |
+| E-PAR-018 | broken | 1 | `section blocks must be top-level — found inside <context> block at <file>:<line>:<col>. Move the section: declaration to the top level of the .sf file.` | BC-3.02.002 EC-002, CAP-001 |
+
+Note (E-PAR-017): Fires when a key inside a `section:` sub-block collides with a reserved register name (e.g., `notes`, `report`, `detail`). The parser rejects this at parse time to prevent silent shadowing of writing-register syntax. The `<name>` placeholder contains the colliding key name. Maps to STORY-078 (section block parser) and BC-3.02.002 EC-006 (section reserved-name collision). Owner story: STORY-078.
+
+Note (E-PAR-018): The `<context>` placeholder is substituted with one of two values at the error site: `slide` (when the section block appears inside a slide body) or `@for/@if` (when the section block appears inside a control-flow body). The composite `@for/@if` value is the intended behavior — the shared `block_item` combinator that parses both `@for` and `@if` bodies cannot statically distinguish the two control-flow forms without splitting the combinator; reporting the composite accurately tells the user "you are inside a control-flow block" without requiring disproportionate parser restructuring. All contexts are prohibited — section blocks must appear at top-level only. Maps to BC-3.02.002 EC-002 and STORY-078 AC-005.
+
+---
+
+## Parse Warnings (W-PAR)
+
+Non-fatal parse-time lint warnings. Build continues; output is produced. Exit code 0 unless
+a separate fatal error is also present. Routed to `stderr` with a `warning:` prefix (not
+`error:`). Accumulated alongside errors but do not increment the error counter for exit-code
+calculation.
+
+Convention: `W-<CAT>-<NNN>` mirrors the error namespace but signals non-fatal severity.
+
+| Code | Severity | Exit | Message Format | Traces To |
+|------|---------|------|---------------|-----------|
+| W-PAR-001 | cosmetic | 0 | `warning: [W-PAR-001] Unrecognized section sub-block key '<key>' at <file>:<line>:<col> — ignored` | BC-3.02.002 EC-005, CAP-001 |
+
+Note (W-PAR-001): Emitted when the section block parser encounters a sub-block key that is
+neither a known layout key, a reserved register name (which triggers E-PAR-017), nor a
+`<name>:` register block. Per DIR-077-001-A Ruling 2 (unknown section keys are ignored with
+a warning, not rejected). No "Did you mean" suggestion is emitted — the parser does not
+enumerate known keys in this message. Maps to BC-3.02.002 EC-005 / invariant 4
+/ STORY-078 AC-004.
 
 ---
 
@@ -99,6 +127,7 @@ slideforge.toml to promote to a blocking error.
 | E-LAY-004 | broken | 2 | `Shape at slide <source_slide_index> (<file>:<line>:<col>) has no alt text and is not marked decorative: true. Add alt "..." or decorative: true.` | BC-3.04.001 EC-001, DI-001, CAP-023 |
 | E-LAY-005 | broken | 2 | `Inline nesting depth exceeded at slide <source_slide_index>: depth <depth> exceeds maximum of 64. Flatten the inline tree.` | BC-3.05.001 EC-006, CAP-024 |
 | E-LAY-006 | broken | 2 | `Arithmetic overflow computing EMU for shape position at slide <source_slide_index> (<file>:<line>:<col>). Value <value> in <unit> exceeds i64 range after conversion. Use a value ≤ 9,007,199,254 inches (approximately 9.0 × 10⁹ in).` | BC-3.04.001 EC-014, EC-015, CAP-023 |
+| E-LAY-007 | broken | 2 | `Bullet list structural nesting depth exceeds the limit (64) at slide <source_slide_index>. Reduce bullet list nesting depth.` | BC-3.05.001, CAP-024 |
 
 Note (E-LAY-004): This is the layout-layer defensive check for missing alt text on
 shapes. `LayoutError::MissingAlt` maps to E-LAY-004 in the CLI diagnostic renderer.
@@ -123,6 +152,16 @@ is NOT dead code); any implementation that marks it `#[allow(dead_code)]` or doc
 as "future strict-mode validator" is in direct violation of BC-3.04.001 invariant 8 and
 CLAUDE.md Rule 3 (no AI-added tech-debt register entries without explicit human direction).
 Adjudicated in adversary pass 2 on STORY-028, item M (2026-05-29).
+
+Note (E-LAY-007): `LayoutError::BulletDepthExceeded { source_slide_index: usize, depth: usize }`
+maps to E-LAY-007. This error guards the STRUCTURAL bullet-nesting depth (i.e., the depth of the
+`BulletItem.children` chain (the number of nested `children[..]` levels) in the authored .sf file).
+It is DISTINCT from
+E-LAY-005 (`InlineDepthExceeded`), which guards the INLINE tree depth within the `Vec<InlineNode>`
+content of a single `BulletItem`. A document can have bullets nested many structural levels
+deep (triggering E-LAY-007) while each individual bullet's inline content is shallow (no E-LAY-005),
+and vice versa. The same 64-level cap applies to both surfaces (BC-3.05.001 invariant 4).
+Allocated in STORY-073 adversary pass 2 (MED-2 finding). Owner story: STORY-073.
 
 ---
 
@@ -244,3 +283,8 @@ Per DI-018 and BC-1.15.002:
 | 2.1 | 2026-05-30 | product-owner | STORY-025 fix burst taxonomy-completeness gap: E-BRD-001 row expanded to document all three shared `BrandError` variants — `FileNotFound`, `LogoRequired`, and `TomlReadError`. The `LogoRequired` subcase was previously undocumented in the taxonomy; it is user-reachable via per-slide `brand_overlay: logo ""` (empty string) or absent logo key. The context-neutral `LogoRequired` message (`"E-BRD-001: A logo path is required but was empty or absent. Provide a non-empty logo path — either the brand.toml [logo] 'path' (brand synthesis) or the brand_overlay: logo value (per-slide overlay)."`) matches the message emitted by `crates/slideforge-brand/src/error.rs` after the STORY-025 context-neutral refactor. E-BRD-002 row similarly expanded to document its two shared variants (`ParseError` and `TomlParseError`). Code, severity (broken), and exit code (4) unchanged for both. |
 | 2.2 | 2026-05-30 | product-owner | Variant-name correction: E-BRD-001 third variant corrected from `BrandReadError` → `TomlReadError`; E-BRD-002 second variant corrected from `BrandTomlParseError` → `TomlParseError`. Names now match the actual `BrandError` enum variants in `crates/slideforge-brand/src/error.rs` exactly. No semantic change — severity, exit code, message format, and Traces To columns are unchanged. |
 | 2.3 | 2026-05-31 | product-owner | STORY-076 taxonomy decision note: srgbClr transform detection (BC-2.01.001 EC-006) does NOT introduce a new E-BRD-NNN error code. The `tracing::warn!` emitted when a srgbClr element has lumMod/lumOff/tint/shade children is an observability log event (structured field output to the tracing subscriber), not a user-facing diagnostic with an E-BRD code. The inline TOML comment written by BrandExtractor (`# derived via tint/shade; may not match exact color`) is the user-visible signal. This is consistent with the existing schemeClr transform treatment (also no error code — just a TOML comment). No new rows added to the Brand Errors table. |
+| 2.4 | 2026-06-01 | product-owner | STORY-078 adversary pass 3 CRIT-A (E-PAR-015/016 collision) + CRIT-B (undocumented W-PAR-001). CRIT-A resolution: STORY-078 section-block parser code had reused E-PAR-015 and E-PAR-016 — those codes are already assigned to shape parsing (hex color and gradient respectively, per v1.5 changelog). Allocated fresh codes E-PAR-017 (section reserved-name collision, maps to BC-3.02.002 EC-006) and E-PAR-018 (section block inside slide/@for/@if body, maps to BC-3.02.002 EC-002 + STORY-078 AC-005). CRIT-B resolution: created new W-PAR (Parse Warnings) namespace — first entry W-PAR-001 (unrecognized section sub-block key, non-fatal, maps to BC-3.02.002 EC-005 + DIR-077-001-A Ruling 2 + STORY-078 AC-004). Existing E-PAR-015 (hex color) and E-PAR-016 (gradient) are UNCHANGED. |
+| 2.5 | 2026-06-01 | product-owner | STORY-073 adversary pass 2 MED-2 — allocated E-LAY-007 for `BulletDepthExceeded` structural depth guard. E-LAY-007 covers `LayoutError::BulletDepthExceeded { source_slide_index, depth }` — the structural bullet-nesting depth cap (64 levels) distinct from E-LAY-005 (inline tree depth on `Vec<InlineNode>`). Traces to BC-3.05.001 and CAP-024. Owner story: STORY-073. |
+| 2.6 | 2026-06-01 | product-owner | STORY-078 adversary pass 4 OBS-1 — W-PAR-001 message format corrected. Removed the "Did you mean one of: [<known-keys>]?" clause from the documented message: the parser does not emit a known-key suggestion list, so the clause was a code↔taxonomy divergence. The `at <file>:<line>:<col>` location token is retained (consistent with E-PAR namespace convention). W-PAR-001 note updated to state explicitly that no "Did you mean" suggestion is emitted. No other rows touched. |
+| 2.7 | 2026-06-01 | product-owner | STORY-073 adversary pass 4 MED-1 — corrected E-LAY-007 explanatory note. Replaced the incorrect field reference "`BulletItem.depth` field which represents nested bullet levels" with "depth of the `BulletItem.children` chain (the number of nested `children[..]` levels)" — `BulletItem` has no `depth` field; structural depth is the children-chain length. The E-LAY-007 message-format row is unchanged. |
+| 2.8 | 2026-06-01 | product-owner | STORY-078 adversary pass 6 MED-1 — E-PAR-018 context reconciled to `slide` / `@for/@if` composite. The Note previously claimed three emittable values (`slide`, `@for`, `@if`/`@elif`/`@else`); the parser architecturally emits only two: `slide` (slide bodies) and `@for/@if` (control-flow bodies via the shared `block_item` combinator). The composite is the intended behavior — splitting the shared combinator to distinguish `@for` from `@if` would be disproportionate for the marginal UX gain. Note rewritten to document the two actual values and explain the composite as designed, not a limitation. Message-format row (`found inside <context> block`) is unchanged. No other rows touched. |
