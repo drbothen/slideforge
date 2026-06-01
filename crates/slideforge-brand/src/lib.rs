@@ -87,3 +87,11 @@ pub use overlay::{BrandOverlay, LogoOverride, resolve_overlay};
 pub use synthesizer::BrandSynthesizer;
 pub use template::{BrandFonts, BrandTemplate, COLOR_SLOT_NAMES, ColorSlot, LogoAsset, MasterIds};
 pub use toml_schema::{BrandConfig, ColorConfig, FontConfig, FooterConfig, LogoConfig};
+
+// STORY-076 Red Gate tests: Transform-Aware Theme Color Extraction.
+// These tests exercise the `ColorSlot.is_derived` field and the tracing::warn!
+// emitted by `parse_theme_colors` for srgbClr elements with transform children.
+// All tests fail to compile until `ColorSlot.is_derived: bool` is added to
+// `template.rs` and threaded through `color.rs` and `extractor.rs`.
+#[cfg(test)]
+mod srgbclr_transform_tests;

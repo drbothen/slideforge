@@ -48,10 +48,156 @@ fn default_color_value_for_slot(slot_name: &str) -> ColorValue {
     ColorValue::Hex(default_color_for_slot(slot_name))
 }
 
+/// The recognized OOXML transform child element names for `<a:srgbClr>`.
+///
+/// When any of these appear as children of an `<a:srgbClr>` element, the slot
+/// is flagged as derived (`is_derived = true`) and a `tracing::warn!` is emitted
+/// per BC-2.01.001 EC-006 (STORY-076).
+const SRGB_TRANSFORM_NAMES: &[&str] = &["lumMod", "lumOff", "tint", "shade"];
+
+/// Maximum number of transform descriptions collected per `<a:srgbClr>` slot.
+///
+/// OOXML defines exactly 4 transform types for `<a:srgbClr>` children:
+/// `lumMod`, `lumOff`, `tint`, and `shade`. A legitimate theme1.xml will never
+/// have more than 4. This cap of 8 (2× the defined maximum) prevents a crafted
+/// input from causing unbounded `Vec` growth (CWE-789 / SEC-002).
+///
+/// Both push sites in `parse_theme_colors` are gated on this limit.
+pub(crate) const MAX_TRANSFORMS_PER_SLOT: usize = 8;
+
+/// Parse a 6-character OOXML hex value string into a `#RRGGBB` [`Arc<str>`].
+///
+/// Returns `None` if the value is not exactly 6 ASCII hex digits.
+fn parse_ooxml_hex(val: &str) -> Option<Arc<str>> {
+    if val.len() == 6 && val.chars().all(|c| c.is_ascii_hexdigit()) {
+        Some(Arc::from(format!("#{}", val.to_uppercase()).as_str()))
+    } else {
+        None
+    }
+}
+
+/// Build the transform description string for a single transform element, extracting
+/// the `val` attribute for inclusion in the `tracing::warn!` message per AC-003.
+///
+/// # Security: Log Injection Prevention (CWE-117 / SEC-001)
+///
+/// The raw `val` attribute is attacker-controlled in an adversarially crafted
+/// `theme1.xml`. Embedding it verbatim into a log message allows control characters,
+/// newlines, and ANSI escape sequences to corrupt or inject into structured log
+/// output. The value is sanitized before inclusion:
+/// - All control characters (including `\n`, `\r`, `\x1b`) are stripped.
+/// - The result is capped at 32 characters to bound log-line length.
+fn transform_description<'a>(
+    name_str: &str,
+    mut attrs: impl Iterator<Item = quick_xml::events::attributes::Attribute<'a>>,
+) -> String {
+    let transform_val = attrs
+        .find(|a| a.key.local_name().as_ref() == b"val")
+        .and_then(|a| std::str::from_utf8(&a.value).ok().map(str::to_owned));
+    if let Some(v) = transform_val {
+        // Sanitize: allow only ASCII alphanumeric chars plus a minimal safe set
+        // (`._%, +-`), cap at 32 characters (CWE-117 / SEC-001 log injection guard).
+        //
+        // OOXML transform `val` attributes are numeric percent-thousandths (e.g. "75000").
+        // Stripping control chars is necessary but not sufficient — ANSI escape sequences
+        // follow the pattern `\x1b[<digits>m`, where `[`, digits, and `m` are all printable
+        // ASCII. Filtering to only alphanumeric + safe punctuation removes both the escape
+        // char AND the ANSI sequence continuation, preventing any recognizable injection
+        // payload from appearing in log output.
+        let sanitized: String = v
+            .chars()
+            .filter(|c| {
+                c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '%' | ',' | ' ' | '+' | '-')
+            })
+            .take(32)
+            .collect();
+        format!("{name_str} child (val={sanitized})")
+    } else {
+        format!("{name_str} child")
+    }
+}
+
+/// Handle a color element encountered while inside a known color slot (not inside srgbClr).
+///
+/// Inserts into `found` if the element is a recognized color type with a valid value.
+fn handle_color_element(
+    name_str: &str,
+    attrs: &[quick_xml::events::attributes::Attribute<'_>],
+    slot: &'static str,
+    found: &mut HashMap<&'static str, (ColorValue, bool)>,
+) {
+    match name_str {
+        "srgbClr" => {
+            // Self-closing srgbClr: no transform children possible; is_derived = false.
+            for attr in attrs {
+                if attr.key.local_name().as_ref() == b"val"
+                    && let Ok(val) = std::str::from_utf8(&attr.value)
+                {
+                    if let Some(hex) = parse_ooxml_hex(val) {
+                        found.insert(slot, (ColorValue::Hex(hex), false));
+                    } else {
+                        tracing::warn!(
+                            slot,
+                            val,
+                            "srgbClr val is not a 6-character hex string; \
+                             using default color for slot"
+                        );
+                    }
+                }
+            }
+        },
+        "sysClr" => {
+            // Use `lastClr` attribute as the resolved hex value; is_derived = false.
+            for attr in attrs {
+                if attr.key.local_name().as_ref() == b"lastClr"
+                    && let Ok(val) = std::str::from_utf8(&attr.value)
+                {
+                    if let Some(hex) = parse_ooxml_hex(val) {
+                        found.insert(slot, (ColorValue::Hex(hex), false));
+                    } else {
+                        tracing::warn!(
+                            slot,
+                            val,
+                            "sysClr lastClr is not a 6-character hex string; \
+                             using default color for slot"
+                        );
+                    }
+                }
+            }
+        },
+        "schemeClr" => {
+            // Relative scheme color reference. Cannot resolve without a rendering context.
+            for attr in attrs {
+                if attr.key.local_name().as_ref() == b"val"
+                    && let Ok(val) = std::str::from_utf8(&attr.value)
+                {
+                    tracing::warn!(
+                        slot,
+                        scheme_ref = val,
+                        "schemeClr in theme1.xml color slot; \
+                         storing scheme reference — actual hex may differ \
+                         depending on the active theme"
+                    );
+                    let scheme_ref = Arc::from(val.to_lowercase().as_str());
+                    found.insert(slot, (ColorValue::SchemeRef(scheme_ref), false));
+                }
+            }
+        },
+        _ => {},
+    }
+}
+
 /// Parse all 12 OOXML theme color slots from `theme1.xml` bytes.
 ///
 /// Returns the 12-element array on success. Any missing slots produce
 /// [`BrandError::MissingColorSlot`] entries in the returned `Vec<BrandError>`.
+///
+/// ## Transform Detection (BC-2.01.001 EC-006 / STORY-076)
+///
+/// When an `<a:srgbClr>` element carries transform children (`lumMod`, `lumOff`,
+/// `tint`, `shade`), the slot is stored with the BASE hex verbatim and
+/// `is_derived = true`. No HSL resolution is performed (Option B, deferred v2).
+/// A `tracing::warn!` is emitted naming the slot and each transform type found.
 ///
 /// # Errors
 ///
@@ -67,122 +213,136 @@ fn default_color_value_for_slot(slot_name: &str) -> ColorValue {
 pub fn parse_theme_colors(
     xml_bytes: &[u8],
 ) -> Result<([ColorSlot; 12], Vec<BrandError>), BrandError> {
-    // Map from slot name → ColorValue (Hex or SchemeRef).
-    let mut found: HashMap<&'static str, ColorValue> = HashMap::new();
+    // Map from slot name → (ColorValue, is_derived).
+    let mut found: HashMap<&'static str, (ColorValue, bool)> = HashMap::new();
 
     let mut reader = Reader::from_reader(xml_bytes);
     reader.config_mut().trim_text(true);
 
     // Track which color slot element we are currently inside.
-    // e.g. when we see `<a:dk1>` we set current_slot = Some("dk1")
     let mut current_slot: Option<&'static str> = None;
+
+    // When we enter an `<a:srgbClr val="...">` Start event (i.e., it has children),
+    // record: (slot_name, base_hex, collected_transform_descriptions).
+    // `None` = not currently inside an srgbClr Start element.
+    let mut inside_srgbclr: Option<(&'static str, Arc<str>, Vec<String>)> = None;
 
     let mut buf = Vec::new();
 
     loop {
         match reader.read_event_into(&mut buf) {
-            Ok(Event::Start(ref e) | Event::Empty(ref e)) => {
+            Ok(Event::Start(ref e)) => {
                 let local_name = e.local_name();
                 let name_str = std::str::from_utf8(local_name.as_ref()).unwrap_or("");
 
-                // Check if this tag is a known color slot wrapper.
+                // Inside srgbClr: collect recognized transform children.
+                // SEC-002 (CWE-789): cap at MAX_TRANSFORMS_PER_SLOT to prevent
+                // unbounded Vec growth from a crafted theme1.xml.
+                if let Some((_, _, ref mut transforms)) = inside_srgbclr {
+                    if SRGB_TRANSFORM_NAMES.contains(&name_str)
+                        && transforms.len() < MAX_TRANSFORMS_PER_SLOT
+                    {
+                        let desc = transform_description(name_str, e.attributes().flatten());
+                        transforms.push(desc);
+                    }
+                    buf.clear();
+                    continue;
+                }
+
                 if let Some(&slot) = COLOR_SLOT_NAMES.iter().find(|&&n| n == name_str) {
                     current_slot = Some(slot);
                     buf.clear();
                     continue;
                 }
 
-                // Check for color value elements inside a slot.
                 if let Some(slot) = current_slot {
-                    match name_str {
-                        "srgbClr" => {
-                            // Extract the `val` attribute (the base hex color).
-                            //
-                            // Child transform elements (lumMod, lumOff, tint, shade) are
-                            // intentionally NOT applied here — the raw hex is preserved as-is.
-                            // BC-2.01.003 EC-003 scopes transforms to schemeClr only; srgbClr
-                            // transform-aware extraction (widening EC-003) is tracked as STORY-076
-                            // (Brand Loader: Transform-Aware Theme Color Extraction).
-                            for attr in e.attributes().flatten() {
-                                if attr.key.local_name().as_ref() == b"val"
-                                    && let Ok(val) = std::str::from_utf8(&attr.value)
-                                {
-                                    if val.len() == 6 && val.chars().all(|c| c.is_ascii_hexdigit())
-                                    {
-                                        let hex =
-                                            Arc::from(format!("#{}", val.to_uppercase()).as_str());
-                                        found.insert(slot, ColorValue::Hex(hex));
-                                    } else {
-                                        tracing::warn!(
-                                            slot,
-                                            val,
-                                            "srgbClr val is not a 6-character hex string; \
-                                             using default color for slot"
-                                        );
-                                    }
-                                }
-                            }
-                        },
-                        "sysClr" => {
-                            // Use `lastClr` attribute as the resolved hex value.
-                            for attr in e.attributes().flatten() {
-                                if attr.key.local_name().as_ref() == b"lastClr"
-                                    && let Ok(val) = std::str::from_utf8(&attr.value)
-                                {
-                                    if val.len() == 6 && val.chars().all(|c| c.is_ascii_hexdigit())
-                                    {
-                                        let hex =
-                                            Arc::from(format!("#{}", val.to_uppercase()).as_str());
-                                        found.insert(slot, ColorValue::Hex(hex));
-                                    } else {
-                                        tracing::warn!(
-                                            slot,
-                                            val,
-                                            "sysClr lastClr is not a 6-character hex string; \
-                                             using default color for slot"
-                                        );
-                                    }
-                                }
-                            }
-                        },
-                        "schemeClr" => {
-                            // Relative scheme color reference (e.g., val="dk1", val="accent1").
-                            // We cannot resolve the absolute hex without a rendering context,
-                            // so we store a ColorValue::SchemeRef with a warning.
-                            // AC-002: schemeClr with lumMod/tint/shade → extracted value
-                            // with inline warning.
-                            for attr in e.attributes().flatten() {
-                                if attr.key.local_name().as_ref() == b"val"
-                                    && let Ok(val) = std::str::from_utf8(&attr.value)
-                                {
+                    if name_str == "srgbClr" {
+                        // srgbClr with children — enter child-scan state.
+                        let attrs: Vec<_> = e.attributes().flatten().collect();
+                        let mut parsed_hex: Option<Arc<str>> = None;
+                        for attr in &attrs {
+                            if attr.key.local_name().as_ref() == b"val"
+                                && let Ok(val) = std::str::from_utf8(&attr.value)
+                            {
+                                if let Some(hex) = parse_ooxml_hex(val) {
+                                    parsed_hex = Some(hex);
+                                } else {
                                     tracing::warn!(
                                         slot,
-                                        scheme_ref = val,
-                                        "schemeClr in theme1.xml color slot; \
-                                         storing scheme reference — actual hex may differ \
-                                         depending on the active theme"
+                                        val,
+                                        "srgbClr val is not a 6-character hex string; \
+                                         using default color for slot"
                                     );
-                                    let scheme_ref = Arc::from(val.to_lowercase().as_str());
-                                    found.insert(slot, ColorValue::SchemeRef(scheme_ref));
                                 }
                             }
-                        },
-                        _ => {},
+                        }
+                        if let Some(hex) = parsed_hex {
+                            inside_srgbclr = Some((slot, hex, Vec::new()));
+                        }
+                        // Invalid hex: no srgbClr state entered; slot → MissingColorSlot.
+                    } else {
+                        let attrs: Vec<_> = e.attributes().flatten().collect();
+                        handle_color_element(name_str, &attrs, slot, &mut found);
                     }
+                }
+            },
+            Ok(Event::Empty(ref e)) => {
+                let local_name = e.local_name();
+                let name_str = std::str::from_utf8(local_name.as_ref()).unwrap_or("");
+
+                // Self-closing child inside srgbClr — also a transform.
+                // SEC-002 (CWE-789): cap at MAX_TRANSFORMS_PER_SLOT to prevent
+                // unbounded Vec growth from a crafted theme1.xml.
+                if let Some((_, _, ref mut transforms)) = inside_srgbclr {
+                    if SRGB_TRANSFORM_NAMES.contains(&name_str)
+                        && transforms.len() < MAX_TRANSFORMS_PER_SLOT
+                    {
+                        let desc = transform_description(name_str, e.attributes().flatten());
+                        transforms.push(desc);
+                    }
+                    buf.clear();
+                    continue;
+                }
+
+                if let Some(&slot) = COLOR_SLOT_NAMES.iter().find(|&&n| n == name_str) {
+                    current_slot = Some(slot);
+                    buf.clear();
+                    continue;
+                }
+
+                if let Some(slot) = current_slot {
+                    let attrs: Vec<_> = e.attributes().flatten().collect();
+                    handle_color_element(name_str, &attrs, slot, &mut found);
                 }
             },
             Ok(Event::End(ref e)) => {
                 let local_name = e.local_name();
                 let name_str = std::str::from_utf8(local_name.as_ref()).unwrap_or("");
-                // If we close the current slot element, clear tracking.
+
+                // Closing `</a:srgbClr>`: finalize slot with is_derived.
+                if name_str == "srgbClr" {
+                    if let Some((slot, hex, transforms)) = inside_srgbclr.take() {
+                        let is_derived = !transforms.is_empty();
+                        if is_derived {
+                            // AC-003 (BC-2.01.001 EC-006): warn! naming slot and each transform.
+                            // Example: "slot dk2: srgbClr has lumMod child (val=75000); base color #003087 stored with is_derived=true"
+                            let transform_list = transforms.join("; ");
+                            tracing::warn!(
+                                "slot {slot}: srgbClr has {transform_list}; base color {hex} stored with is_derived=true"
+                            );
+                        }
+                        found.insert(slot, (ColorValue::Hex(hex), is_derived));
+                    }
+                    buf.clear();
+                    continue;
+                }
+
                 if let Some(slot) = current_slot
                     && name_str == slot
                 {
                     current_slot = None;
                 }
             },
-            // XML errors: log the error with context then treat as EOF.
-            // We accumulate whatever data was extracted before the error.
             Ok(Event::Eof) => break,
             Err(e) => {
                 tracing::warn!(error = %e, "XML parse error in theme1.xml; partial color data may be incomplete");
@@ -198,10 +358,11 @@ pub fn parse_theme_colors(
     let slots: Vec<ColorSlot> = COLOR_SLOT_NAMES
         .iter()
         .map(|&name| {
-            if let Some(color_value) = found.remove(name) {
+            if let Some((color_value, is_derived)) = found.remove(name) {
                 ColorSlot {
                     name: Arc::from(name),
                     value: color_value,
+                    is_derived,
                 }
             } else {
                 let inferred_hex = default_color_for_slot(name);
@@ -217,12 +378,13 @@ pub fn parse_theme_colors(
                 ColorSlot {
                     name: Arc::from(name),
                     value: default_color_value_for_slot(name),
+                    is_derived: false,
                 }
             }
         })
         .collect();
 
-    // SAFETY: We always produce exactly 12 elements from COLOR_SLOT_NAMES (len == 12).
+    // SAFETY: Always exactly 12 elements from COLOR_SLOT_NAMES (len == 12).
     let array: [ColorSlot; 12] = slots
         .try_into()
         .expect("COLOR_SLOT_NAMES has exactly 12 entries");
