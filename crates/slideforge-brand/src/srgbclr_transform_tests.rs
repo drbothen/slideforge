@@ -313,14 +313,74 @@ mod tests {
 
     /// BC-2.01.001 EC-006 / AC-001 / EC-001 — multiple transform children on the SAME
     /// srgbClr element (both lumMod and tint) set `is_derived = true` exactly once;
-    /// a single tracing::warn! is emitted listing all transform types found.
+    /// a single tracing::warn! is emitted listing ALL transform types found in that
+    /// one message (EC-001 forbids one-warn-per-transform noisy behavior).
+    ///
+    /// Load-bearing assertions (MED-1 fix):
+    /// 1. Exactly ONE warn message captured for the slot (count == 1, not 2).
+    /// 2. That single message contains BOTH "lumMod" AND "tint".
+    ///
+    /// A regression emitting one warn per transform would produce count == 2 and
+    /// FAIL assertion (1). A regression listing only the first transform would
+    /// omit "tint" and FAIL assertion (2).
     ///
     /// # Red Gate
     ///
     /// `ColorSlot.is_derived` does not exist — compile error until implemented.
     #[test]
     fn test_BC_2_01_001_EC006_srgbclr_multiple_transforms_single_warn() {
-        // EC-001: srgbClr with lumMod AND tint — both recognized transforms.
+        use std::sync::{Arc as StdArc, Mutex};
+        use tracing::field::{Field, Visit};
+        use tracing_subscriber::Layer;
+        use tracing_subscriber::layer::SubscriberExt as _;
+
+        // Reuse the MessageCapturingLayer harness pattern from
+        // test_BC_2_01_001_EC006_srgbclr_warn_names_slot_and_transform (lines ~560-637).
+        struct MessageCapturingLayer {
+            messages: StdArc<Mutex<Vec<String>>>,
+        }
+
+        struct MessageVisitor {
+            message: Option<String>,
+        }
+
+        impl Visit for MessageVisitor {
+            fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+                if field.name() == "message" {
+                    self.message = Some(format!("{value:?}"));
+                }
+            }
+            fn record_str(&mut self, field: &Field, value: &str) {
+                if field.name() == "message" {
+                    self.message = Some(value.to_owned());
+                }
+            }
+        }
+
+        impl<S: tracing::Subscriber> Layer<S> for MessageCapturingLayer {
+            fn on_event(
+                &self,
+                event: &tracing::Event<'_>,
+                _ctx: tracing_subscriber::layer::Context<'_, S>,
+            ) {
+                if *event.metadata().level() == tracing::Level::WARN {
+                    let mut visitor = MessageVisitor { message: None };
+                    event.record(&mut visitor);
+                    if let Some(msg) = visitor.message {
+                        let _ = self.messages.lock().map(|mut guard| guard.push(msg));
+                    }
+                }
+            }
+        }
+
+        let captured_messages: StdArc<Mutex<Vec<String>>> = StdArc::new(Mutex::new(Vec::new()));
+        let layer = MessageCapturingLayer {
+            messages: StdArc::clone(&captured_messages),
+        };
+        let subscriber = tracing_subscriber::registry().with(layer);
+        let _guard = tracing::subscriber::set_default(subscriber);
+
+        // EC-001 canonical vector: srgbClr with lumMod AND tint — both recognized transforms.
         let xml = theme_xml_with_dk2_srgbclr(
             r#"<a:srgbClr val="003087"><a:lumMod val="75000"/><a:tint val="30000"/></a:srgbClr>"#,
         );
@@ -349,6 +409,39 @@ mod tests {
             dk2.hex(),
             Some("#003087"),
             "multi-transform srgbClr: base hex must be stored verbatim"
+        );
+
+        // ── EC-001 single-warn load-bearing assertions (MED-1 fix) ──────────────
+        //
+        // Collect only the warn messages that mention the "dk2" slot — isolating
+        // the warn(s) emitted by this parse call from any ambient noise.
+        let messages = captured_messages.lock().unwrap();
+        let dk2_warns: Vec<&String> =
+            messages.iter().filter(|msg| msg.contains("dk2")).collect();
+
+        // Assertion 1: exactly ONE warn for this slot.
+        // If the impl emits one warn per transform this count will be 2, not 1.
+        assert_eq!(
+            dk2_warns.len(),
+            1,
+            "EC-001: exactly ONE tracing::warn! must be emitted for slot 'dk2' when \
+             srgbClr has multiple transform children — got {} warn(s).\n\
+             Captured dk2 WARN messages: {dk2_warns:?}",
+            dk2_warns.len(),
+        );
+
+        // Assertion 2: the single message lists BOTH transforms.
+        // If the impl only lists the first transform "tint" would be absent.
+        let single_warn = dk2_warns[0];
+        assert!(
+            single_warn.contains("lumMod"),
+            "EC-001: the single warn! for slot 'dk2' must name 'lumMod' transform.\n\
+             Actual message: {single_warn:?}"
+        );
+        assert!(
+            single_warn.contains("tint"),
+            "EC-001: the single warn! for slot 'dk2' must name 'tint' transform.\n\
+             Actual message: {single_warn:?}"
         );
     }
 
