@@ -2749,6 +2749,126 @@ mod tests {
     // push_bullet_frames before recursing further.
     // ─────────────────────────────────────────────────────────────────────────
 
+    /// STORY-073 OBS-2 boundary regression guard — `layout::run` MUST return `Ok(_)`
+    /// for a `ContentBlock::Bullets` whose `BulletItem` children chain is one level
+    /// below the rejection threshold (i.e., the deepest call to
+    /// `push_bullet_frames_inner` with a non-empty items slice lands at
+    /// `current_depth = MAX_BULLET_DEPTH - 1` and its subsequent empty-children
+    /// recursion lands at `current_depth = MAX_BULLET_DEPTH = 64`).
+    ///
+    /// ## Boundary derivation
+    ///
+    /// The guard in `push_bullet_frames_inner` is:
+    ///
+    /// ```text
+    /// if current_depth > MAX_BULLET_DEPTH { return Err(...); }
+    /// ```
+    ///
+    /// `push_bullet_frames` calls `push_bullet_frames_inner` with `current_depth = 0`.
+    /// Processing one item at depth N **unconditionally** recurses into its children
+    /// at `current_depth = N + 1`, even when the children slice is empty.
+    ///
+    /// Therefore the deepest call that must **pass** the guard is the
+    /// empty-children recursion at `current_depth = MAX_BULLET_DEPTH = 64`:
+    /// `64 > 64` is false → guard passes → empty loop → `Ok(())`.
+    ///
+    /// A chain where the leaf `BulletItem` (no children) is processed at
+    /// `current_depth = MAX_BULLET_DEPTH - 1 = 63` naturally produces this
+    /// boundary call:
+    ///
+    /// - root at depth 0 → child at depth 1 → … → leaf at depth 63
+    /// - leaf recurses into its empty children at depth 64 → `64 > 64` = false → Ok
+    ///
+    /// That chain requires **`MAX_BULLET_DEPTH - 1` (63) fold iterations** wrapping
+    /// the leaf outward, which is two fewer iterations than the depth-65-rejected
+    /// test's `(0..=MAX_BULLET_DEPTH)` (65 iterations):
+    ///
+    /// | fold count | leaf at current_depth | empty-children call | outcome |
+    /// |---|---|---|---|
+    /// | 63 (this test) | 63 | 64 → `64 > 64` = false | **Ok** |
+    /// | 64 | 64 | 65 → `65 > 64` = true | Err |
+    /// | 65 (depth-65 test) | 65 | (guard fires on leaf itself) | Err |
+    ///
+    /// ## Regression sensitivity
+    ///
+    /// If the guard were changed from `>` to `>=`, the call
+    /// `push_bullet_frames_inner([], …, 64)` would fire `64 >= 64 = true` and return
+    /// `Err(BulletDepthExceeded { depth: 64 })`.  This test would then fail on
+    /// `assert!(result.is_ok())`, catching the regression.
+    ///
+    /// The symmetric depth-65-rejected test
+    /// (`test_bc_3_05_001_story073_bullet_structural_depth_65_is_error`) covers
+    /// the over-limit side; this test covers the at-limit accepted side.
+    #[test]
+    fn test_bc_3_05_001_story073_bullet_structural_depth_64_accepted() {
+        use crate::layout::MAX_BULLET_DEPTH;
+        use slideforge_types::{Block, BulletItem, ContentBlock, InlineNode, SourceSpan};
+
+        // Build a BulletItem chain where the leaf (no children) is processed at
+        // current_depth = MAX_BULLET_DEPTH - 1 = 63, so the final recursion into
+        // its empty children fires at current_depth = MAX_BULLET_DEPTH = 64.
+        //
+        // Fold range: 0..(MAX_BULLET_DEPTH - 1) = 0..63 = 63 iterations (exclusive),
+        // two fewer than the depth-65-rejected test's (0..=MAX_BULLET_DEPTH) = 65 iters.
+        //
+        // After 63 folds from leaf:
+        //   root = item_62, chain: root → item_61 → … → item_0 → leaf  (64 items total)
+        //
+        // Processing in push_bullet_frames_inner:
+        //   root      at current_depth  0 → recurse into [item_61] at depth  1
+        //   item_61   at current_depth  1 → recurse into [item_60] at depth  2
+        //   …
+        //   item_0    at current_depth 62 → recurse into [leaf]    at depth 63
+        //   leaf      at current_depth 63 → recurse into []        at depth 64
+        //   []        at current_depth 64 → guard: 64 > 64 = false → empty loop → Ok ✓
+        let leaf = BulletItem {
+            inlines: vec![InlineNode::Plain(Arc::from("leaf"))],
+            children: vec![],
+            span: SourceSpan::default(),
+        };
+        // 63 fold iterations (0..(MAX_BULLET_DEPTH - 1)): wrap leaf outward so the
+        // leaf is processed at current_depth = 63 and the final empty-children call
+        // lands at current_depth = 64 — the last call that must pass the guard.
+        let root = (0..(MAX_BULLET_DEPTH - 1)).fold(leaf, |inner, i| BulletItem {
+            inlines: vec![InlineNode::Plain(Arc::from(format!("level {i}")))],
+            children: vec![inner],
+            span: SourceSpan::default(),
+        });
+
+        let block = Block {
+            content: ContentBlock::Bullets(vec![root]),
+            label: None,
+            span: SourceSpan::default(),
+        };
+        let slide = Slide {
+            slide_type: Arc::from("title"),
+            fields: OrderedMap::new(),
+            blocks: vec![block],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+            overlay: None,
+            register_content: vec![],
+        };
+        let deck = make_deck(vec![slide]);
+        let brand = make_brand();
+
+        let result = run(&deck, &brand);
+
+        // With the correct `current_depth > MAX_BULLET_DEPTH` guard the chain is accepted.
+        // If the guard regressed to `>=`, the empty-children call at current_depth=64
+        // would fire and return Err(BulletDepthExceeded { depth: 64 }), failing here.
+        assert!(
+            result.is_ok(),
+            "bullet structural chain with leaf at current_depth={} (empty-children call at \
+             current_depth={}) MUST be accepted (Ok) by the `> MAX_BULLET_DEPTH` guard; \
+             got Err — regression to `>=` suspected. Error: {:?}",
+            MAX_BULLET_DEPTH - 1,
+            MAX_BULLET_DEPTH,
+            result.err()
+        );
+    }
+
     /// F-P1-MED-001 — A `ContentBlock::Bullets` with a structural `BulletItem` chain
     /// nested 65 levels deep (parent → child → ... → 65 levels) must return
     /// `Err(LayoutError::BulletDepthExceeded { depth: 65 })` from `layout::run`,
