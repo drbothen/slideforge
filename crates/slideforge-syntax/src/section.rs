@@ -19,9 +19,11 @@
 //!
 //! # STORY-078
 //!
-//! Introduced in STORY-078 (Parser: section block syntax). Previously, a stub
-//! `SECTION_REGISTER_KEYS` constant (since removed) incorrectly included
-//! `"notes"`. DIR-077-001 §5 corrects this to `["report", "detail"]`.
+//! Introduced in STORY-078 (Parser: section block syntax). The STORY-008 stub
+//! for `SECTION_REGISTER_KEYS` incorrectly included `"notes"` as a recognised
+//! key. The live constant (defined at module scope below) is corrected to
+//! `["report", "detail"]` per DIR-077-001 §5, which excludes `"notes"` because
+//! document sections carry no slide canvas or speaker view.
 
 /// The recognised register sub-block keys for `section <type>:` blocks.
 ///

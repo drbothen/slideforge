@@ -300,11 +300,11 @@ where
         // ── `section` block rejection (AC-005) ───────────────────────────────
         // `section` blocks are top-level only (BC-3.02.002 precondition 3).
         // When `section` appears inside a @for/@if body or a slide body (via
-        // the slide_block_cf's own block_item calls), emit E-PAR-016 with a
+        // the slide_block_cf's own block_item calls), emit E-PAR-018 with a
         // corrective message naming the top-level constraint.
         //
         // This combinator is placed at the block_item level (not field_line_cf)
-        // so that the E-PAR-016 Rich error is a terminal error captured by
+        // so that the E-PAR-018 Rich error is a terminal error captured by
         // `into_output_errors()` — not a non-terminal validate error that can
         // be missed by the error accumulator.
         let section_rejected = select! {
@@ -319,7 +319,7 @@ where
         .validate(|_span, info, emitter| {
             emitter.emit(Rich::custom(
                 info.span(),
-                "E-PAR-016: section blocks must be top-level — found inside slide block",
+                "E-PAR-018: section blocks must be top-level — found inside slide block",
             ));
         })
         .map(move |()| {
@@ -467,7 +467,7 @@ where
         // `section` keyword rejection inside slide body (AC-005, BC-3.02.002 EC-002).
         //
         // `section` blocks are top-level only. When encountered inside a slide body
-        // (at element scope), emit E-PAR-016 with a message naming the constraint.
+        // (at element scope), emit E-PAR-018 with a message naming the constraint.
         //
         // The combinator consumes BOTH the section header line AND the optional
         // indented body (Indent ... Dedent). Consuming the entire block prevents the
@@ -501,7 +501,7 @@ where
         .validate(|_span, info, emitter| {
             emitter.emit(Rich::custom(
                 info.span(),
-                "E-PAR-016: section blocks must be top-level — found inside slide block",
+                "E-PAR-018: section blocks must be top-level — found inside slide block",
             ));
         })
         .map(move |()| {

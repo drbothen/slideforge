@@ -503,7 +503,7 @@ fn test_BC_3_02_002_register_key_unknown_returns_false() {
 /// (b) parse SUCCEEDS (result.errors.is_empty()), AND
 /// (c) `notes` is RETAINED in SectionNode.fields alongside `detail`.
 ///
-/// The current implementation incorrectly fires the FATAL E-PAR-015 for `notes:`
+/// The current implementation incorrectly fires the FATAL E-PAR-017 for `notes:`
 /// because `is_reserved_register_name("notes")` returns true. This is wrong:
 /// EC-006 (reserved-name collision → FATAL) applies only when `notes` is used
 /// WITHOUT the colon suffix (as a bare scalar). When used WITH the colon as a
@@ -516,7 +516,7 @@ fn test_BC_3_02_002_register_key_unknown_returns_false() {
 /// EC-005 (unrecognized → warning) even if they match reserved register names.
 ///
 /// RED GATE: this test MUST FAIL against the current implementation which emits
-/// E-PAR-015 (FATAL) for `notes:`, preventing parse success.
+/// E-PAR-017 (FATAL) for `notes:`, preventing parse success.
 #[test]
 fn test_section_notes_key_warns_not_fatal() {
     // Fixture: notes: with colon — EC-005 case per DIR-077-001-A §5.
@@ -583,7 +583,7 @@ fn test_section_notes_key_warns_not_fatal() {
 /// "reserved", or "register" — including the generic missing-colon error, which
 /// would make the test pass even if the dedicated EC-006 path were unreachable.
 /// This version asserts on stable diagnostic markers the implementer controls:
-/// - The phrase "reserved register name" (from the dedicated E-PAR-015 message), OR
+/// - The phrase "reserved register name" (from the dedicated E-PAR-017 message), OR
 /// - The corrective hint substring "use `report:`".
 ///
 /// Fixture: `report "oops"` — "oops" is the payload. The assertion MUST NOT check
@@ -620,8 +620,8 @@ fn test_reserved_name_collision() {
 
     // Assert on stable diagnostic text the implementer controls — NOT on the
     // fixture payload "oops" (OBS-1 discipline: payload echo is tautological).
-    // The dedicated E-PAR-015 message must contain either:
-    //   "reserved register name"   (from E-PAR-015 corrective message), OR
+    // The dedicated E-PAR-017 message must contain either:
+    //   "reserved register name"   (from E-PAR-017 corrective message), OR
     //   "use `report:`"            (corrective hint naming the correct syntax).
     // A generic "expected Colon" error is NOT sufficient — the implementer must
     // emit the dedicated EC-006 error for this case.

@@ -22,7 +22,7 @@
 //!   `validate()`/`emitter.emit(Rich::custom(...))` idiom (DIR-077-001-A Ruling 2).
 //!   The key IS retained in `SectionNode.fields` (not dropped).
 //! - A sub-block key that matches a reserved register name used WITHOUT a colon
-//!   suffix (EC-006) fires a FATAL `E-PAR-015` error with a corrective hint.
+//!   suffix (EC-006) fires a FATAL `E-PAR-017` error with a corrective hint.
 //! - Error recovery via `recover_with(skip_then_retry_until(...))` accumulates
 //!   all errors; never bails on first (Q23, LOCKED).
 //!
@@ -160,7 +160,7 @@ where
     //
     // No-colon path (form b):
     //   - If IDENT is a reserved register name (`report`, `detail`, `notes`) →
-    //     EC-006 FATAL E-PAR-015 with dedicated corrective hint.
+    //     EC-006 FATAL E-PAR-017 with dedicated corrective hint.
     //   - Other IDENT without Colon → FATAL structural error ("expected `:`").
     //     The sub-block grammar requires a Colon; its absence is an error for
     //     all non-reserved keys. This preserves the error-accumulation invariant
@@ -192,7 +192,7 @@ where
                         emitter.emit(Rich::custom(
                             info.span(),
                             format!(
-                                "E-PAR-015: Key '{key}' is a reserved register name — \
+                                "E-PAR-017: Key '{key}' is a reserved register name — \
                                  use `{key}:` register syntax or choose a different key."
                             ),
                         ));
