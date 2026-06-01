@@ -63,6 +63,12 @@ use crate::error::PdfExportError;
 /// tree and emitted as PDF Artifacts during drawing).
 pub struct PartResult {
     /// The `Part` tag group wrapping all tagged content on this slide.
+    ///
+    /// After drawing, the exporter inserts `Identifier` leaf nodes into the
+    /// children of this group (one per non-decorative, non-empty frame) via
+    /// `frame_child_part_indices`. This links the structure tree elements to
+    /// the marked-content sequences in the PDF content stream (MCID linkage,
+    /// BC-4.03.001 F-045-C2).
     pub part: TagGroup,
     /// Frame indices (into `LaidOutSlide::frames`) that are decorative.
     ///
@@ -70,6 +76,18 @@ pub struct PartResult {
     /// as `ContentTag::Artifact(ArtifactType::Other)` instead of linking them
     /// to a tag group identifier.
     pub decorative_frame_indices: Vec<usize>,
+    /// Per-frame index into `part.children` for MCID linkage.
+    ///
+    /// `frame_child_part_indices[frame_idx]` is `Some(child_idx)` when frame
+    /// `frame_idx` has a corresponding child `TagGroup` in `part.children` at
+    /// position `child_idx`. It is `None` for empty or decorative frames.
+    ///
+    /// During the drawing pass, the exporter calls
+    /// `surface.start_tagged(ContentTag::Other)` for each non-decorative frame,
+    /// receives an `Identifier`, and inserts it as a leaf node into the
+    /// matching Part child group. This is the F-045-C2 MCID linkage that makes
+    /// the tag tree reference actual marked content (not empty groups).
+    pub frame_child_part_indices: Vec<Option<usize>>,
 }
 
 /// Engine that maps a [`LaidOutSlide`] to a krilla [`TagTree`].
@@ -128,6 +146,12 @@ impl SlideTagEngine {
         // One Part group per slide — wraps all structural children.
         let mut part_group = TagGroup::new(Tag::<krilla::tagging::kind::Part>::Part);
         let mut decorative_frame_indices: Vec<usize> = Vec::new();
+        // frame_child_part_indices[frame_idx] = Some(child_idx in part_group.children)
+        // when frame_idx contributes at least one child to the Part, None otherwise.
+        // This is used by the exporter for F-045-C2 MCID linkage: after drawing each
+        // non-decorative frame via `surface.start_tagged(ContentTag::Other)`, the
+        // returned `Identifier` is inserted as a leaf node into `part_group.children[child_idx]`.
+        let mut frame_child_part_indices: Vec<Option<usize>> = vec![None; slide.frames.len()];
 
         for (frame_idx, frame) in slide.frames.iter().enumerate() {
             match &frame.content {
@@ -139,31 +163,48 @@ impl SlideTagEngine {
 
                 // ── Title → H1 ───────────────────────────────────────────────
                 FrameContent::Title(_text) => {
+                    let child_idx = part_group.children.len();
                     let heading_group = TagGroup::new(Tag::<krilla::tagging::kind::Hn>::Hn(
                         // NonZeroU16::MIN == 1 (H1); infallible construction.
                         std::num::NonZeroU16::MIN,
                         None,
                     ));
                     part_group.push(heading_group);
+                    frame_child_part_indices[frame_idx] = Some(child_idx);
                 },
 
                 // ── Subtitle → H2 ────────────────────────────────────────────
                 FrameContent::Subtitle(_text) => {
+                    let child_idx = part_group.children.len();
                     let heading_group =
                         TagGroup::new(Tag::<krilla::tagging::kind::Hn>::Hn(H2_LEVEL, None));
                     part_group.push(heading_group);
+                    frame_child_part_indices[frame_idx] = Some(child_idx);
                 },
 
                 // ── Body content → P per paragraph or L+LI+LBody per list ────
+                //
+                // Body frames may push multiple children (one per content block).
+                // For MCID linkage, we map the frame to the FIRST child pushed.
+                // The exporter wraps the entire body frame in one tagged section
+                // (one start_tagged/end_tagged pair), so the single Identifier is
+                // inserted into the first body child group.
                 FrameContent::Body(content_blocks) => {
+                    let first_child_idx = part_group.children.len();
                     if content_blocks.is_empty() {
                         // No blocks — emit a generic P so Part remains non-empty.
                         part_group.push(TagGroup::new(Tag::<krilla::tagging::kind::P>::P));
+                        frame_child_part_indices[frame_idx] = Some(first_child_idx);
                     } else {
+                        let mut pushed_any = false;
                         for block in content_blocks {
                             let group = self.tag_content_block(block)?;
                             if let Some(g) = group {
                                 part_group.push(g);
+                                if !pushed_any {
+                                    frame_child_part_indices[frame_idx] = Some(first_child_idx);
+                                    pushed_any = true;
+                                }
                             }
                         }
                     }
@@ -175,7 +216,9 @@ impl SlideTagEngine {
                         // Empty alt on Image = decorative; mark as Artifact.
                         decorative_frame_indices.push(frame_idx);
                     } else {
+                        let child_idx = part_group.children.len();
                         part_group.push(self.tag_figure(Some(alt))?);
+                        frame_child_part_indices[frame_idx] = Some(child_idx);
                     }
                 },
 
@@ -230,21 +273,27 @@ impl SlideTagEngine {
                             decorative_frame_indices.push(frame_idx);
                         },
                         slideforge_types::AltText::Provided(alt) => {
+                            let child_idx = part_group.children.len();
                             part_group.push(self.tag_figure(Some(alt))?);
+                            frame_child_part_indices[frame_idx] = Some(child_idx);
                         },
                     }
                 },
 
                 // ── TextRun → P ───────────────────────────────────────────────
                 FrameContent::TextRun(_inlines) => {
+                    let child_idx = part_group.children.len();
                     let p_group = TagGroup::new(Tag::<krilla::tagging::kind::P>::P);
                     part_group.push(p_group);
+                    frame_child_part_indices[frame_idx] = Some(child_idx);
                 },
 
                 // ── ErrorSlidePlaceholder → P (error text is readable) ────────
                 FrameContent::ErrorSlidePlaceholder { .. } => {
+                    let child_idx = part_group.children.len();
                     let p_group = TagGroup::new(Tag::<krilla::tagging::kind::P>::P);
                     part_group.push(p_group);
+                    frame_child_part_indices[frame_idx] = Some(child_idx);
                 },
             }
         }
@@ -252,6 +301,7 @@ impl SlideTagEngine {
         Ok(PartResult {
             part: part_group,
             decorative_frame_indices,
+            frame_child_part_indices,
         })
     }
 
@@ -310,22 +360,18 @@ impl SlideTagEngine {
             //   - `AltText::Decorative` or `alt: None` → omit from tag tree
             //     (return `Ok(None)`); a chart with no author-supplied alt is
             //     semantically inaccessible and must not pretend otherwise.
-            ContentBlock::Chart(chart_spec) => {
-                match chart_spec.alt.as_ref() {
-                    Some(AltText::Provided(s)) => Ok(Some(self.tag_figure(Some(s))?)),
-                    Some(AltText::Decorative) | None => Ok(None),
-                }
+            ContentBlock::Chart(chart_spec) => match chart_spec.alt.as_ref() {
+                Some(AltText::Provided(s)) => Ok(Some(self.tag_figure(Some(s))?)),
+                Some(AltText::Decorative) | None => Ok(None),
             },
 
             // Diagram in body → Figure+Alt, or omit if decorative / no alt.
             //
             // F-045-I1 (alt-lie fix): `.or(Some("diagram"))` was a placeholder.
             // Same rationale as the Chart arm above.
-            ContentBlock::Diagram(diagram_spec) => {
-                match diagram_spec.alt.as_ref() {
-                    Some(AltText::Provided(s)) => Ok(Some(self.tag_figure(Some(s))?)),
-                    Some(AltText::Decorative) | None => Ok(None),
-                }
+            ContentBlock::Diagram(diagram_spec) => match diagram_spec.alt.as_ref() {
+                Some(AltText::Provided(s)) => Ok(Some(self.tag_figure(Some(s))?)),
+                Some(AltText::Decorative) | None => Ok(None),
             },
 
             // Image in body → Figure+Alt

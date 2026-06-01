@@ -143,8 +143,7 @@ jobs:
           # The installer JAR supports -console flag for non-interactive install.
           java -jar "verapdf-greenfield-${VERAPDF_VERSION}/verapdf-greenfield-${VERAPDF_VERSION}-installer.jar" \
             -console \
-            -dir "${INSTALL_DIR}" \
-            || true
+            -dir "${INSTALL_DIR}"
           # Create a verapdf shim on PATH.
           if [ -f "${INSTALL_DIR}/verapdf" ]; then
             sudo ln -sf "${INSTALL_DIR}/verapdf" /usr/local/bin/verapdf
@@ -155,7 +154,9 @@ jobs:
               | sudo tee -a /usr/local/bin/verapdf
             sudo chmod +x /usr/local/bin/verapdf
           fi
-          verapdf --version || echo "veraPDF version check failed — will still attempt validation"
+          # F-045-I3: version check must succeed — if veraPDF is broken the CI gate
+          # must fail loudly, not silently pass. Removing || echo to enforce this.
+          verapdf --version
 
       - name: Install cargo-nextest
         uses: taiki-e/install-action@d9be7d8cda89035c9c843f78bd44d4f72d8403d4

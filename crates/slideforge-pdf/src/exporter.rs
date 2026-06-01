@@ -62,6 +62,7 @@ use krilla::metadata::Metadata;
 use krilla::num::NormalizedF32;
 use krilla::page::PageSettings;
 use krilla::paint::{Fill, FillRule};
+use krilla::tagging::{ArtifactType, ContentTag};
 use krilla::text::TextDirection;
 use slideforge_layout::LaidOutDeck;
 use slideforge_layout::types::{BoundingBox, FrameContent};
@@ -282,18 +283,89 @@ impl PdfExporter {
             let mut page = document.start_page_with(page_settings);
 
             // Build the structural tag sub-tree for this slide.
-            let part_result = tag_engine.tag_slide(slide)?;
+            // `mut` required: the draw loop inserts Identifier leaf nodes into
+            // `part_result.part.children` for F-045-C2 MCID linkage.
+            let mut part_result = tag_engine.tag_slide(slide)?;
 
             // Obtain the krilla Surface and draw slide content.
             let mut surface = page.surface();
 
-            for frame in &slide.frames {
-                draw_frame(
-                    &mut surface,
-                    &frame.bbox,
-                    &frame.content,
-                    resolved_font.as_ref(),
-                )?;
+            for (frame_idx, frame) in slide.frames.iter().enumerate() {
+                if part_result.decorative_frame_indices.contains(&frame_idx) {
+                    // F-045-C1: Decorative frames are excluded from the structure tree
+                    // (they are in `decorative_frame_indices`). They MUST also be wrapped
+                    // in a PDF Artifact marked-content sequence in the content stream, so
+                    // PDF readers (screen readers, veraPDF) know to skip them as non-semantic.
+                    //
+                    // `ContentTag::Artifact(ArtifactType::Other)` emits:
+                    //   `/Artifact BMC ... EMC`
+                    // in the content stream when tagging is enabled. This satisfies
+                    // BC-4.03.001 postcondition 1 ("decorative elements marked as Artifacts").
+                    //
+                    // `start_tagged` returns `Identifier::dummy()` for Artifacts (the Artifact
+                    // marking is NOT linked to the structure tree — it is only a content-stream
+                    // marker). We discard the returned identifier.
+                    let _artifact_id =
+                        surface.start_tagged(ContentTag::Artifact(ArtifactType::Other));
+                    draw_frame(
+                        &mut surface,
+                        &frame.bbox,
+                        &frame.content,
+                        resolved_font.as_ref(),
+                    )?;
+                    surface.end_tagged();
+                } else if let Some(child_idx) = part_result
+                    .frame_child_part_indices
+                    .get(frame_idx)
+                    .copied()
+                    .flatten()
+                {
+                    // F-045-C2: Non-decorative frames with a corresponding structure tree
+                    // child group are wrapped in a tagged marked-content sequence.
+                    //
+                    // `ContentTag::Other` emits `/P BDC<</MCID N>>` in the content stream.
+                    // The returned `Identifier` is then pushed as a leaf node into the
+                    // matching Part child group (`part_result.part.children[child_idx]`).
+                    // This links the structure tree element to the marked content on the
+                    // page — satisfying the PDF/UA-1 MCID linkage requirement.
+                    //
+                    // BC-4.03.001 F-045-C2: the tag tree must not be a tree of empty groups.
+                    // A group with no leaf Identifier references no actual page content and
+                    // would fail veraPDF --flavour ua1.
+                    let id = surface.start_tagged(ContentTag::Other);
+                    draw_frame(
+                        &mut surface,
+                        &frame.bbox,
+                        &frame.content,
+                        resolved_font.as_ref(),
+                    )?;
+                    surface.end_tagged();
+                    // Push the Identifier as a leaf node into the matching Part child group.
+                    // Safety: `child_idx` is guaranteed to be in-bounds — it was recorded by
+                    // `tag_slide` as `part_group.children.len()` before the child was pushed,
+                    // so it must be a valid index into `part_result.part.children`.
+                    if let Some(krilla::tagging::Node::Group(child_group)) =
+                        part_result.part.children.get_mut(child_idx)
+                    {
+                        child_group.push(id);
+                    } else {
+                        tracing::debug!(
+                            frame_idx,
+                            child_idx,
+                            "frame_child_part_indices pointed to non-Group or out-of-bounds child; \
+                             Identifier not inserted (tag tree may lack leaf for this frame)"
+                        );
+                    }
+                } else {
+                    // Frame with no corresponding structure tree child AND not decorative
+                    // (e.g., Empty frames). Draw without tagging.
+                    draw_frame(
+                        &mut surface,
+                        &frame.bbox,
+                        &frame.content,
+                        resolved_font.as_ref(),
+                    )?;
+                }
             }
 
             surface.finish();
@@ -472,13 +544,13 @@ fn try_resolve_font(family: &str) -> Option<krilla::text::Font> {
 /// the box top (20% descender allowance below the baseline). Text is guaranteed
 /// to land within `[0, SLIDE_HEIGHT_PT]` for any valid IR layout.
 ///
-/// Precise multi-line typography is deferred to STORY-045 (text flow engine).
+/// Precise multi-line typography (text reflow, line-height, multi-line wrapping)
+/// is deferred to a future story — single-line baseline placement is used in v1.
 ///
 /// ## Font sizes
 ///
 /// Default font sizes: Title 36pt, Subtitle 28pt, Body text 18pt, Bullets 16pt.
-/// These defaults are overridden when brand template font sizes are available
-/// (STORY-045 scope).
+/// Brand-template font size overrides are a future story enhancement.
 ///
 /// # Errors
 ///
@@ -709,7 +781,7 @@ fn draw_body_blocks(
 ///
 /// Traverses `Bold` and `Italic` nodes recursively to collect all
 /// [`InlineNode::Plain`] leaf text. Other inline variants (Code, Xref, etc.)
-/// are skipped in this story — they contribute to the text stream in STORY-045.
+/// are currently skipped — rich inline formatting is a future story enhancement.
 fn extract_inline_text(inlines: &[slideforge_types::InlineNode]) -> String {
     use slideforge_types::InlineNode;
 
@@ -720,7 +792,7 @@ fn extract_inline_text(inlines: &[slideforge_types::InlineNode]) -> String {
             InlineNode::Bold(children) | InlineNode::Italic(children) => {
                 out.push_str(&extract_inline_text(children));
             },
-            // Other variants (Code, Xref, Math, etc.) deferred to STORY-045.
+            // Other variants (Code, Xref, Math, etc.) not yet implemented.
             _ => {},
         }
     }
@@ -787,10 +859,9 @@ impl Exporter for PdfExporter {
     ///
     /// # Parameters
     ///
-    /// - `deck` — the semantic, pre-layout IR. Currently unused by the PDF
-    ///   renderer; it is accepted so the [`Exporter`] trait signature is
-    ///   satisfied. PDF document metadata (title, language) will be populated
-    ///   from this parameter in STORY-045 (PDF/UA-1 metadata wiring).
+    /// - `deck` — the semantic, pre-layout IR. Used for document metadata:
+    ///   `deck.metadata.lang` → `/Lang` in the PDF catalog;
+    ///   `deck.metadata.title` → document title (both wired in STORY-045).
     /// - `laid_out` — the geometric, post-layout IR (slide frames, coordinates)
     /// - `brand` — resolved brand configuration (fonts, palette, page size)
     /// - `opts` — per-export options
