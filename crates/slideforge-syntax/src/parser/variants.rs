@@ -105,7 +105,12 @@ where
     I: ValueInput<'src, Token = Token, Span = TSpan>,
 {
     let template_val = template_value().validate(
-        move |(chunks, errs): (Vec<TemplateChunk>, Vec<crate::parser::template::TemplateError>), info, emitter| {
+        move |(chunks, errs): (
+            Vec<TemplateChunk>,
+            Vec<crate::parser::template::TemplateError>,
+        ),
+              info,
+              emitter| {
             for err in errs {
                 emitter.emit(Rich::custom(info.span(), err.into_message()));
             }

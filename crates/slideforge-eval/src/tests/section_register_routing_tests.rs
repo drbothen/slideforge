@@ -2722,11 +2722,11 @@ fn test_obs_b_empty_ref_id_pipe_proxy_also_produces_error() {
 #[test]
 #[allow(non_snake_case)]
 fn test_F_077_P2_001_genuine_parse_to_eval_end_to_end() {
-    use std::sync::Arc as StdArc;
-    use slideforge_syntax::span::SourceMap;
-    use slideforge_syntax::parse;
     use crate::config::EvalConfig;
     use crate::eval::eval_deck;
+    use slideforge_syntax::parse;
+    use slideforge_syntax::span::SourceMap;
+    use std::sync::Arc as StdArc;
 
     // DSL source with a section whose detail: field contains:
     // - **Bold.** (should parse to TemplateChunk::Bold then eval to InlineNode::Bold)
@@ -2745,9 +2745,8 @@ fn test_F_077_P2_001_genuine_parse_to_eval_end_to_end() {
     let file_id = sm.add_file(StdArc::from("test.sf"), StdArc::from(src));
 
     // CALL THE REAL PARSER on the source string.
-    let parse_result = parse(src, file_id, &sm).expect(
-        "F-077-P2-001: source must parse without fatal errors"
-    );
+    let parse_result =
+        parse(src, file_id, &sm).expect("F-077-P2-001: source must parse without fatal errors");
     // Allow only version-related warnings (e.g., version-mismatch advisory) or
     // section-key warnings (W-PAR-). No inline markup errors should appear for
     // well-formed "**Bold.** See {{ figref(1) }}.".
@@ -2814,7 +2813,13 @@ fn test_F_077_P2_001_genuine_parse_to_eval_end_to_end() {
     if let Some(InlineNode::Bold(children)) = bold_node {
         let child_text: String = children
             .iter()
-            .filter_map(|c| if let InlineNode::Plain(s) = c { Some(s.as_ref()) } else { None })
+            .filter_map(|c| {
+                if let InlineNode::Plain(s) = c {
+                    Some(s.as_ref())
+                } else {
+                    None
+                }
+            })
             .collect();
         assert_eq!(
             child_text, "Bold.",
@@ -2823,7 +2828,9 @@ fn test_F_077_P2_001_genuine_parse_to_eval_end_to_end() {
     }
 
     // ASSERT: contains InlineNode::Xref("fig-1") for figref(1).
-    let xref_node = nodes.iter().find(|n| matches!(n, InlineNode::Xref(id) if id.as_ref() == "fig-1"));
+    let xref_node = nodes
+        .iter()
+        .find(|n| matches!(n, InlineNode::Xref(id) if id.as_ref() == "fig-1"));
     assert!(
         xref_node.is_some(),
         "F-077-P2-001 FAIL: FieldValue::Inlines must contain InlineNode::Xref(\"fig-1\"); \
@@ -2872,9 +2879,9 @@ fn test_F_077_P2_001_genuine_parse_to_eval_end_to_end() {
 #[test]
 #[allow(non_snake_case)]
 fn test_F_077_P2_002_unclosed_bold_error_span_points_to_opening_delimiter() {
-    use std::sync::Arc as StdArc;
     use slideforge_syntax::span::SourceMap;
     use slideforge_syntax::{parse, parse_checked};
+    use std::sync::Arc as StdArc;
 
     // Source: a section with a detail field containing unclosed bold.
     // The `**` opener is at position 0 within the string content "**unclosed".
@@ -2895,9 +2902,10 @@ fn test_F_077_P2_002_unclosed_bold_error_span_points_to_opening_delimiter() {
         .expect("F-077-P2-002: parse must return Ok for unclosed bold (non-fatal accumulation)");
 
     // The warning must mention E-PAR-015.
-    let has_epar015 = parse_result.warnings.iter().any(|w| {
-        format!("{w:?}").contains("E-PAR-015") || format!("{w:?}").contains("unclosed")
-    });
+    let has_epar015 = parse_result
+        .warnings
+        .iter()
+        .any(|w| format!("{w:?}").contains("E-PAR-015") || format!("{w:?}").contains("unclosed"));
     assert!(
         has_epar015,
         "F-077-P2-002: E-PAR-015 unclosed-bold warning must be present; got: {:?}",
@@ -2971,17 +2979,17 @@ fn test_F_077_P2_002_unclosed_bold_error_span_points_to_opening_delimiter() {
 #[test]
 #[allow(non_snake_case)]
 fn test_F_077_P2_003_word_internal_underscore_is_literal_not_italic() {
-    use std::sync::Arc as StdArc;
-    use slideforge_syntax::span::SourceMap;
-    use slideforge_syntax::parse;
     use slideforge_syntax::ast::{BlockItem, FieldValue as SyntaxFieldValue};
+    use slideforge_syntax::parse;
+    use slideforge_syntax::span::SourceMap;
+    use std::sync::Arc as StdArc;
 
     // Parse a slide field value containing SENTINEL_NOTES.
     let src = "slideforge_version \"1\"\n\nslide content:\n  detail \"SENTINEL_NOTES\"\n";
     let mut sm = SourceMap::new();
     let file_id = sm.add_file(StdArc::from("test_guard.sf"), StdArc::from(src));
-    let pr = parse(src, file_id, &sm)
-        .expect("F-077-P2-003: source must parse without fatal errors");
+    let pr =
+        parse(src, file_id, &sm).expect("F-077-P2-003: source must parse without fatal errors");
     let deck = pr.deck;
 
     let BlockItem::Slide(slide_s) = &deck.items[0] else {
@@ -2995,7 +3003,10 @@ fn test_F_077_P2_003_word_internal_underscore_is_literal_not_italic() {
         .expect("F-077-P2-003: 'detail' field must exist");
     // Destructure the field value as FieldValue::Template.
     let SyntaxFieldValue::Template(chunks) = field.value.value() else {
-        panic!("F-077-P2-003: expected FieldValue::Template; got: {:?}", field.value.value());
+        panic!(
+            "F-077-P2-003: expected FieldValue::Template; got: {:?}",
+            field.value.value()
+        );
     };
     assert_eq!(
         chunks.len(),
@@ -3018,9 +3029,7 @@ fn test_F_077_P2_003_word_internal_underscore_is_literal_not_italic() {
             "F-077-P2-003 FAIL: 'SENTINEL_NOTES' produced Italic chunk — \
              word-internal underscore guard is broken (CommonMark §6.1 left-flanking rule)"
         ),
-        other => panic!(
-            "F-077-P2-003 FAIL: expected Literal('SENTINEL_NOTES'); got: {other:?}"
-        ),
+        other => panic!("F-077-P2-003 FAIL: expected Literal('SENTINEL_NOTES'); got: {other:?}"),
     }
 }
 
@@ -3035,10 +3044,10 @@ fn test_F_077_P2_003_word_internal_underscore_is_literal_not_italic() {
 #[test]
 #[allow(non_snake_case)]
 fn test_F_077_P2_003_standalone_underscore_italic_still_works() {
-    use std::sync::Arc as StdArc;
-    use slideforge_syntax::span::SourceMap;
-    use slideforge_syntax::parse;
     use slideforge_syntax::ast::{BlockItem, FieldValue as SyntaxFieldValue};
+    use slideforge_syntax::parse;
+    use slideforge_syntax::span::SourceMap;
+    use std::sync::Arc as StdArc;
 
     let src = "slideforge_version \"1\"\n\nslide content:\n  detail \"a _italic_ b\"\n";
     let mut sm = SourceMap::new();
@@ -3088,9 +3097,7 @@ fn test_F_077_P2_003_standalone_underscore_italic_still_works() {
                 children[0]
             );
         },
-        other => panic!(
-            "F-077-P2-003 positive FAIL: chunk[1] must be Italic; got: {other:?}"
-        ),
+        other => panic!("F-077-P2-003 positive FAIL: chunk[1] must be Italic; got: {other:?}"),
     }
 
     assert!(

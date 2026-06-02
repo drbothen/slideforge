@@ -90,7 +90,12 @@ where
     I: ValueInput<'src, Token = Token, Span = TSpan>,
 {
     let template_val = template_value().validate(
-        move |(chunks, errs): (Vec<TemplateChunk>, Vec<crate::parser::template::TemplateError>), info, emitter| {
+        move |(chunks, errs): (
+            Vec<TemplateChunk>,
+            Vec<crate::parser::template::TemplateError>,
+        ),
+              info,
+              emitter| {
             // For section sub-block fields, use the byte offset carried by each
             // TemplateError to create a sub-span pointing at the OPENING delimiter
             // (DIR-077-002 §5 span requirement: "every inline markup error MUST carry

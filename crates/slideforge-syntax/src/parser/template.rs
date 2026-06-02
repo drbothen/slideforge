@@ -105,11 +105,17 @@ pub struct TemplateError {
 }
 
 impl TemplateError {
+    /// Construct a new `TemplateError` with the byte offset of the opening
+    /// delimiter and the human-readable error message.
     fn new(byte_offset: usize, message: String) -> Self {
-        Self { byte_offset, message }
+        Self {
+            byte_offset,
+            message,
+        }
     }
 
     /// Consume self and return the message string.
+    #[must_use]
     pub fn into_message(self) -> String {
         self.message
     }
@@ -701,7 +707,8 @@ fn find_single_dollar(s: &str, start: usize) -> Option<usize> {
 /// `**bold**` inside `$...$` is verbatim LaTeX content.
 #[must_use]
 pub fn template_value<'src, I>()
--> impl Parser<'src, I, (Vec<TemplateChunk>, Vec<TemplateError>), extra::Err<Rich<'src, Token, TSpan>>> + Clone
+-> impl Parser<'src, I, (Vec<TemplateChunk>, Vec<TemplateError>), extra::Err<Rich<'src, Token, TSpan>>>
++ Clone
 where
     I: ValueInput<'src, Token = Token, Span = TSpan>,
 {

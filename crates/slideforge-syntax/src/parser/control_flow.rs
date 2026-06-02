@@ -96,7 +96,12 @@ where
 {
     // Template string value with E-PAR-012/E-PAR-013/E-PAR-014 error emission.
     let template_val = template_value().validate(
-        move |(chunks, errs): (Vec<TemplateChunk>, Vec<crate::parser::template::TemplateError>), info, emitter| {
+        move |(chunks, errs): (
+            Vec<TemplateChunk>,
+            Vec<crate::parser::template::TemplateError>,
+        ),
+              info,
+              emitter| {
             for err in errs {
                 emitter.emit(Rich::custom(info.span(), err.into_message()));
             }
