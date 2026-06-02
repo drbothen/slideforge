@@ -56,13 +56,24 @@ A new session with zero prior context should proceed in this order:
 
 ### 1. STORY-077 — SectionBlock IR Extension + Inline-Markup Parser (PRIORITY: P0)
 
-**State:** Worktree `.worktrees/STORY-077` on branch `feature/S-077` (HEAD 1dc97f36). Section IR + register routing + inline-markup parser (TemplateChunk + `chunks_to_inline_nodes`) ALL IMPLEMENTED. Adversary cascade: pass-1 (F-077-P5-001 Expr::Call unreachable fixed), pass-2 (F-077-P2-001 genuine parse→eval test; F-077-P2-002 delimiter spans; underscore regression tests), pass-3 (CLEAN 1/3), pass-4 in progress. E-EVL-012/013 added (collision fix from E-EVL taxonomy); E-PAR-019/020 added (collision fix from E-PAR taxonomy). error-taxonomy v2.10. Streak **0/3** (pass-3 was CLEAN but pass-4+ cycle ongoing; see below).
+**State:** Worktree `.worktrees/STORY-077` on branch `feature/S-077` (HEAD b5a161ac — NOT pushed; mid LOCAL adversary cascade). Section IR + register routing + inline-markup parser (TemplateChunk + `chunks_to_inline_nodes`) ALL IMPLEMENTED. Cascade history (all FIXED): pass-1 (F-077-P5-001 Expr::Call unreachable → added Expr::Call); pass-2 (F-077-P2-001 paper-test → genuine parse→eval test; F-077-P2-002 delimiter spans; OBS-B strict-fatal severity); pass-3 (E-EVL collision → E-EVL-012/013; E-PAR-015/016 collision → E-PAR-019/020); pass-4 (F-077-P4-001/002 string-routing + backtick-delimiter → kind-based sentinel routing). E-EVL-012/013 + E-PAR-019/020 added; error-taxonomy v2.10. Streak **0/3**.
 
 **Scope:** 13 pts, P0, EPIC-18, crates: slideforge-types + slideforge-syntax + slideforge-eval. BCs: BC-3.02.002 v1.5, BC-1.14.003 v1.3. `SectionBlock.body: OrderedMap<Arc<str>, FieldValue>` + `register_content` field + inline-markup TemplateChunk parser + `chunks_to_inline_nodes`. ~32 layout call-site adjustments. Blocks STORY-041/042.
 
 **Non-blocking deferred finding:** OBS-077-P4-A — duplicate `SectionBlock` type name across `slideforge-types` + `slideforge-plugin-api`; STORY-041/042 traceability concern. See Drift Items.
 
-**Next step:** Adversary pass 4 → 3/3 strict-CLEAN → demo-recorder → pr-manager → human merge.
+**OPEN — F-077-P5-001 [HIGH] fix NOT yet applied. This is the resume action.**
+
+Root cause: routing sentinel `SLIDEFORGE_INLINE_ROUTE|<kind>|<hex>|<msg>` LEAKS into the user-facing diagnostic `message` field of every E-PAR-019/E-PAR-020 error. Specifically: `parser/mod.rs` ~L301/313 passes the still-tagged `message` (the `Custom("SLIDEFORGE_INLINE_ROUTE|...")` blob) into the SyntaxError `message:` field; `template.rs` ~L271 decodes but DISCARDS the clean original message (`_original_msg`). `SyntaxError` Display (`error.rs` ~L283/320) interpolates `{message}`, so the sentinel+hex blob renders to the user for ALL 8 markup forms.
+
+**Resume action:** Dispatch implementer (cwd `.worktrees/STORY-077`) to fix F-077-P5-001:
+- Extend `InlineMarkupRoute` to keep `original_msg`; stop discarding `_original_msg` at `template.rs` ~L271; pass `original_msg` not `message` at `mod.rs` ~L301/313. OR strip everything up to/including the 3rd `|` after the sentinel prefix.
+- Add load-bearing test: render SyntaxError (`.to_string()`/miette) for unclosed + empty inline markup (backtick AND `**`); assert `!rendered.contains("SLIDEFORGE_INLINE_ROUTE")` and `!rendered.contains("Custom(")`.
+- Run FULL pedantic gate. Then dispatch adversary pass 6. Streak 0/3.
+
+**Adjudicated acceptable (do NOT reopen):** sentinel+hex serialization across chumsky Rich boundary is a legitimate pragmatic pattern — chumsky reason channel is String-backed; typed custom reason would be a large cross-cutting refactor. Pass-5 confirmed: no misroute/collision risk (hex is total; only genuine TemplateErrors get tagged).
+
+**Out-of-perimeter for future passes (do NOT re-flag):** math-chunk silent-drop (pre-existing); OBS-077-P4-A duplicate SectionBlock name (STORY-041/042); slide-level inline markup precise-spans (STORY-081); E-EVL-007..011 taxonomy backfill (pre-existing debt).
 
 ### 2. STORY-081 — Slide-Level Inline Markup (PRIORITY: P0, Wave 5)
 
@@ -79,14 +90,14 @@ A new session with zero prior context should proceed in this order:
 | Field | Value |
 |-------|-------|
 | **Date** | 2026-06-02 |
-| **Position** | Phase 3, Wave 4 Batch A — 9/10 complete. STORY-045 MERGED PR #48 (e5d818e7). STORY-077 cascade rounds 1-3 complete (E-EVL-012/013, E-PAR-019/020; error-taxonomy v2.10); pass 4 NEXT; streak 0/3. STORY-081 draft (Wave 5). Open PRs: 0. |
+| **Position** | PAUSED (user relocating). Wave 4 Batch A 9/10 — STORY-045 + STORY-075 MERGED this session. ONLY STORY-077 remains, mid inline-markup adversary cascade: pass-5 found F-077-P5-001 [HIGH] (sentinel leak into SyntaxError message field), fix pending, then pass 6. Streak 0/3. develop e5d818e7. |
 | **develop SHA** | e5d818e7 (48 merged PRs) |
 | **origin/develop** | authoritative — run `git fetch` before starting; local `develop` ref may be stale |
-| **Active worktrees** | `.worktrees/STORY-077` (feature/S-077 @ 1dc97f36) |
+| **Active worktrees** | `.worktrees/STORY-077` only (feature/S-077 @ b5a161ac — NOT pushed) |
 | **Open PRs** | 0 |
 | **Workspace crates** | 16 |
 | **STORY-045** | MERGED — PR #48 squash-merged 2026-06-02 at develop e5d818e7. Worktree cleaned up. |
-| **STORY-077** | IN PROGRESS — worktree .worktrees/STORY-077 (feature/S-077 @ 1dc97f36). Story v1.5 (13 pts). Inline-markup parser implemented. Cascade pass-1/2/3 done; pass 4 NEXT. Streak 0/3. E-EVL-012/013, E-PAR-019/020 added; error-taxonomy v2.10. |
+| **STORY-077** | IN PROGRESS — worktree .worktrees/STORY-077 (feature/S-077 @ b5a161ac). Story v1.5 (13 pts). Inline-markup parser implemented. Cascade passes 1-5 done; F-077-P5-001 fix PENDING; pass 6 NEXT after fix. Streak 0/3. |
 | **STORY-081** | DRAFT — Wave 5, EPIC-18, 13 pts, P0. Slide-Level Inline Markup. Depends on STORY-077. Not started. |
 | **BC deltas** | BC-2.01.001 v1.4, BC-3.02.002 v1.5 (PC8 inline-markup + recognized-type list 5→7), BC-3.05.001 v1.3.5, BC-1.14.003 v1.3 (SS-02), BC-4.03.001 v1.3, error-taxonomy v2.10 — all local-only on factory-artifacts. |
 | **factory-artifacts** | Local only. Push requires explicit human authorization per CLAUDE.md. |
@@ -95,7 +106,7 @@ A new session with zero prior context should proceed in this order:
 
 ## Current Status
 
-Phase 3 IN PROGRESS. Wave 1/2/3 COMPLETE (gates PASSED). **Wave 4 Batch A: 9/10 complete.** STORY-035/036/043/044/045/073/075/076/078 MERGED. STORY-077 cascade pass-1/2/3 done (pass 4 NEXT; streak 0/3; inline-markup implemented; error-taxonomy v2.10). STORY-081 draft (Wave 5, 13 pts).
+Phase 3 IN PROGRESS. Wave 1/2/3 COMPLETE (gates PASSED). **Wave 4 Batch A: 9/10 complete.** STORY-035/036/043/044/045/073/075/076/078 MERGED. STORY-077 inline-markup cascade passes 1-5 done; F-077-P5-001 [HIGH] fix PENDING; pass 6 NEXT after fix; streak 0/3. PAUSED — user relocating. STORY-081 draft (Wave 5, 13 pts).
 
 develop: `e5d818e7` (48 merged PRs, 0 failures). 81 stories / 491 pts. Workspace: 16 crates. Open PRs: 0.
 
@@ -108,7 +119,7 @@ develop: `e5d818e7` (48 merged PRs, 0 failures). 81 stories / 491 pts. Workspace
 | Planning (25 DSL decisions) | DONE 2026-05-24 | q1–q25 decision docs + 14 research threads + 7/7 spikes resolved |
 | Phase 1: Spec Crystallization | DONE — APPROVED 2026-05-25 | PRD (109 BCs, 15 HS, 4 supplements) + architecture (14 ADRs, 15 VPs, 20 crates) + UX spec. 17 passes, 69 findings, 3/3 clean. |
 | Phase 2: Story Decomposition | DONE — APPROVED 2026-05-25 | 81 stories (77 original + 4 added 2026-06-01/02), 21 epics, 6 waves, 491 pts. 22 passes, 96+ findings, 3/3 clean. |
-| Phase 3: TDD Implementation | IN PROGRESS — Waves 1/2/3 GATE PASSED. **Wave 4 Batch A 9/10 (STORY-035+036+043+044+045+073+075+076+078 MERGED). STORY-077 cascade pass-1/2/3 done (pass 4 NEXT; streak 0/3; inline-markup implemented). STORY-081 DRAFT Wave 5.** | Per-story delivery |
+| Phase 3: TDD Implementation | IN PROGRESS — Waves 1/2/3 GATE PASSED. **Wave 4 Batch A 9/10 (STORY-035+036+043+044+045+073+075+076+078 MERGED). STORY-077 cascade passes 1-5 done; F-077-P5-001 fix PENDING; pass 6 NEXT; streak 0/3. PAUSED. STORY-081 DRAFT Wave 5.** | Per-story delivery |
 | Phase 4: Holdout Evaluation | NOT STARTED | Per-wave holdout gates |
 | Phase 5: Adversarial Refinement | NOT STARTED | Post-implementation cascade |
 | Phase 6: Formal Hardening | NOT STARTED | Kani + fuzz + mutants + semgrep |
@@ -127,7 +138,7 @@ develop: `e5d818e7` (48 merged PRs, 0 failures). 81 stories / 491 pts. Workspace
 | STORY-078 | Parser: section block syntax (P0) | MERGED | #46 | 5ab4cef4 |
 | STORY-073 | Bullets Layout | MERGED | #45 | 47856465 |
 | STORY-045 | PDF/UA-1 + veraPDF (P0) | MERGED | #48 | e5d818e7 |
-| STORY-077 | SectionBlock IR Extension + Inline-Markup Parser (P0) | IN PROGRESS — cascade pass-1/2/3 done; pass 4 NEXT; streak 0/3; inline-markup implemented; E-EVL-012/013 + E-PAR-019/020 | — | 1dc97f36 (wt) |
+| STORY-077 | SectionBlock IR Extension + Inline-Markup Parser (P0) | IN PROGRESS — cascade passes 1-5 done; F-077-P5-001 [HIGH] fix PENDING; pass 6 NEXT after fix; streak 0/3; PAUSED | — | b5a161ac (wt, not pushed) |
 | STORY-081 | Slide-Level Inline Markup (P0, Wave 5) | DRAFT — depends on STORY-077; not started | — | — |
 
 ## Decisions Log (milestones)
@@ -161,7 +172,8 @@ develop: `e5d818e7` (48 merged PRs, 0 failures). 81 stories / 491 pts. Workspace
 - 2026-06-02 — STORY-077 scope expansion (human decision 2026-06-02). DIR-077-002 issued: inline-markup parser (TemplateChunk variants + parser + chunks_to_inline_nodes in slideforge-eval) added to STORY-077 scope. Story v1.4→v1.5, 8→13 pts, est_days 3→5. BC-3.02.002 bumped v1.4→v1.5 (PC8 inline-markup clarification). Pass-5 finding F-077-P5-001 now properly resolved by expansion scope; streak reset 0/3. Worktree HEAD c7c1ae6f (section IR + register routing complete).
 - 2026-06-02 — STORY-081 created (Slide-Level Inline Markup). EPIC-18, Wave 5, P0, 13 pts, status draft. Depends on STORY-077 + STORY-041/042/043/044/046. BC-3.02.002 v1.5 (PC8). BLOCKS v1.0 release. Closes temporary inconsistency where section-level inline markup lands in STORY-077 but slide bodies remain plain strings.
 - 2026-06-02 — STORY-045 MERGED — PR #48 squash-merged at develop e5d818e7. Worktree cleaned up. Wave 4 Batch A: 9/10. develop: e5d818e7 (48 PRs). Open PRs: 0.
-- 2026-06-02 — STORY-077 inline-markup cascade rounds: pass-1 (F-077-P5-001 Expr::Call unreachable fixed), pass-2 (F-077-P2-001 genuine parse→eval test; F-077-P2-002 delimiter spans; underscore regression tests), pass-3 CLEAN (1/3 streak). E-EVL diagnostic-code collision resolved → E-EVL-012 (FigrefInvalidArg) + E-EVL-013 (InlineXrefEmptyId). E-PAR collision resolved → E-PAR-019 (unclosed inline markup) + E-PAR-020 (empty inline markup span). error-taxonomy bumped v2.8→v2.10. HEAD 1dc97f36. Streak reset 0/3 by pass-4 (in progress). Pass 4 NEXT.
+- 2026-06-02 — STORY-077 inline-markup cascade rounds: pass-1 (F-077-P5-001 Expr::Call unreachable fixed), pass-2 (F-077-P2-001 genuine parse→eval test; F-077-P2-002 delimiter spans; underscore regression tests), pass-3 CLEAN (1/3 streak). E-EVL diagnostic-code collision resolved → E-EVL-012 (FigrefInvalidArg) + E-EVL-013 (InlineXrefEmptyId). E-PAR collision resolved → E-PAR-019 (unclosed inline markup) + E-PAR-020 (empty inline markup span). error-taxonomy bumped v2.8→v2.10. Pass-4 fix-burst (kind-based sentinel routing). Pass-5 found F-077-P5-001 [HIGH]: sentinel leaks into SyntaxError message field. HEAD b5a161ac (not pushed). Streak 0/3.
+- 2026-06-02 — PAUSE (user relocating). STORY-077 mid-cascade: passes 1-5 complete; F-077-P5-001 [HIGH] fix NOT yet applied. Resume action: dispatch implementer to fix sentinel leak in parser/mod.rs ~L301/313 + template.rs ~L271, add load-bearing SyntaxError display tests, full pedantic gate, then adversary pass 6. Streak 0/3. All other Wave 4 Batch A stories merged. develop e5d818e7 (48 PRs). Active worktrees: STORY-077 only (.worktrees/STORY-077, feature/S-077 @ b5a161ac). Open PRs: 0.
 
 ## Lessons / Process Gaps (codified 2026-06-01)
 
