@@ -1026,6 +1026,7 @@ mod tests {
     /// it only emits the comment in the `ColorValue::SchemeRef` branch).
     #[test]
     fn test_BC_2_01_003_EC003_extractor_unified_flag_drives_comment() {
+        use crate::footer::FooterFlags;
         use crate::template::{BrandFonts, BrandTemplate, MasterIds};
 
         // Directly construct a BrandTemplate with slot dk2 having:
@@ -1068,6 +1069,7 @@ mod tests {
             },
             logo: None,
             footer_text: None,
+            footer_flags: FooterFlags::default(),
             layout_names: vec![],
             layouts: vec![],
             notes_master_stub: vec![],

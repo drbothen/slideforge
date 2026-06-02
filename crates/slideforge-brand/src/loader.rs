@@ -25,6 +25,7 @@ use crate::color::parse_theme_colors;
 use crate::context::BrandLoadContext;
 use crate::error::BrandError;
 use crate::font::{font_available, parse_theme_fonts, resolve_fallback};
+use crate::footer::detect_footer;
 use crate::logo::extract_logo;
 use crate::template::BrandTemplate;
 
@@ -206,13 +207,17 @@ impl BrandLoader {
             Vec::new()
         };
 
+        // --- Step 10: Detect footer text and visibility flags (STORY-075) ---
+        // For PPTX: reads slideMaster1.xml + optional slideLayout1.xml.
+        // For DOCX: returns FooterDetection::default() immediately (no slide master).
+        let footer = detect_footer(&mut zip, is_pptx);
+
         Ok(BrandTemplate {
             colors,
             fonts,
             logo,
-            // Footer detection deferred to STORY-075 (Brand Loader: Footer Detection).
-            // The extractor's [footer] writer is reachable once this is populated.
-            footer_text: None,
+            footer_text: footer.text,
+            footer_flags: footer.flags,
             layout_names,
             // STORY-023 fields — not populated by the loader; synthesizer fills these.
             layouts: vec![],
