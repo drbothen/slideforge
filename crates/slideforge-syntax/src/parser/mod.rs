@@ -258,16 +258,7 @@ pub fn parse(
             // Route W-PAR-* diagnostics as non-fatal warnings (DIR-077-001-A Ruling 2).
             // These are emitted by `section_block_parser` for unrecognised sub-block
             // keys (EC-005 / BC-3.02.002 invariant 4) and must not fail the parse.
-            //
-            // E-PAR-015 (unclosed inline markup span) and E-PAR-016 (empty inline
-            // markup span) are accumulated as non-fatal warnings per DIR-077-002 §5
-            // (error accumulation — parsing continues after each malformed span).
-            // The test contract (tests 13/14 in template_inline_markup_tests.rs)
-            // requires parse() to return Ok with the error in warnings.
-            if message.contains("W-PAR-")
-                || message.contains("E-PAR-015")
-                || message.contains("E-PAR-016")
-            {
+            if message.contains("W-PAR-") {
                 let warning = SyntaxError::unexpected_token(
                     file_path.to_string(),
                     line,
@@ -276,6 +267,45 @@ pub fn parse(
                     src.to_string(),
                     byte_start,
                     span_len,
+                );
+                parse_time_warnings.push(warning);
+                continue;
+            }
+
+            // E-PAR-019 (unclosed inline markup delimiter) and E-PAR-020 (empty inline
+            // markup span) are accumulated as non-fatal warnings per DIR-077-002 §5
+            // (error accumulation — parsing continues after each malformed span).
+            // The test contract (tests 13/14 in template_inline_markup_tests.rs)
+            // requires parse() to return Ok with the error in warnings.
+            // These must route to dedicated SyntaxError variants — NOT UnexpectedToken
+            // (E-PAR-002) — to avoid diagnostic code collision.
+            if message.contains("E-PAR-019") {
+                let delimiter = extract_backtick_name(&message).unwrap_or("?").to_string();
+                let warning = SyntaxError::unclosed_inline_markup(
+                    file_path.to_string(),
+                    line,
+                    col,
+                    delimiter.clone(),
+                    message,
+                    src.to_string(),
+                    byte_start,
+                    delimiter.len().max(1),
+                );
+                parse_time_warnings.push(warning);
+                continue;
+            }
+
+            if message.contains("E-PAR-020") {
+                let delimiter = extract_backtick_name(&message).unwrap_or("?").to_string();
+                let warning = SyntaxError::empty_inline_markup_span(
+                    file_path.to_string(),
+                    line,
+                    col,
+                    delimiter.clone(),
+                    message,
+                    src.to_string(),
+                    byte_start,
+                    delimiter.len().max(1),
                 );
                 parse_time_warnings.push(warning);
                 continue;
@@ -614,6 +644,17 @@ fn extract_quoted_name(msg: &str) -> Option<&str> {
     let start = msg.find('\'')? + 1;
     let rest = &msg[start..];
     let end = rest.find('\'')?;
+    Some(&rest[..end])
+}
+
+/// Extract the first backtick-delimited name from `msg`.
+///
+/// Used to pull the inline markup delimiter string (e.g. `**`, `_`) from
+/// E-PAR-019 and E-PAR-020 messages which embed it as `` `**` ``.
+fn extract_backtick_name(msg: &str) -> Option<&str> {
+    let start = msg.find('`')? + 1;
+    let rest = &msg[start..];
+    let end = rest.find('`')?;
     Some(&rest[..end])
 }
 

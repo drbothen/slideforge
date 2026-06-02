@@ -20,10 +20,10 @@
 //! chunk as an `Expr::Error` sentinel, allowing parsing to continue (error
 //! accumulation). An empty `{{ }}` emits E-PAR-013. An unterminated math
 //! block (`$` or `$$`) emits E-PAR-014. An unclosed inline markup span
-//! emits E-PAR-015. An empty inline markup span emits E-PAR-016.
+//! emits E-PAR-019. An empty inline markup span emits E-PAR-020.
 //!
 //! Note: E-PAR-004 is owned by slideforge-eval (`IncludeCycle`). These
-//! template-parsing codes (E-PAR-012 to E-PAR-016) are distinct.
+//! template-parsing codes (E-PAR-012, 013, 014, 019, 020) are distinct.
 //!
 //! # STORY-077: Inline markup support (DIR-077-002 §3)
 //!
@@ -71,45 +71,75 @@ fn unterminated_math_msg(is_display: bool) -> String {
     }
 }
 
-/// Produce an E-PAR-015 error message for an unclosed inline markup span.
+/// Produce an E-PAR-019 error message for an unclosed inline markup span.
 fn unclosed_inline_msg(delimiter: &str) -> String {
     format!(
-        "E-PAR-015: unclosed inline markup delimiter `{delimiter}` — \
+        "E-PAR-019: unclosed inline markup delimiter `{delimiter}` — \
          add a closing `{delimiter}` after the markup text, \
          e.g., `{delimiter}text{delimiter}`"
     )
 }
 
-/// Produce an E-PAR-016 error message for an empty inline markup span.
+/// Produce an E-PAR-020 error message for an empty inline markup span.
 fn empty_inline_msg(delimiter: &str) -> String {
     format!(
-        "E-PAR-016: empty inline markup span `{delimiter}{delimiter}` — \
+        "E-PAR-020: empty inline markup span `{delimiter}{delimiter}` — \
          spans must contain at least one character"
     )
 }
 
+/// The semantic kind of a [`TemplateError`].
+///
+/// Using a typed enum avoids embedding the diagnostic code as a string prefix in
+/// the message and allows the error-conversion boundary in `parser/mod.rs` to
+/// produce the correct [`crate::error::SyntaxError`] variant without
+/// fragile `message.contains("E-PAR-NNN")` string checks.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TemplateErrorKind {
+    /// `{{` without closing `}}` (E-PAR-012).
+    UnterminatedInterpolation,
+    /// `{{ }}` with empty expression (E-PAR-013).
+    EmptyInterpolation,
+    /// `$...$` or `$$...$$` without closing delimiter (E-PAR-014).
+    UnterminatedMath,
+    /// Opening inline markup delimiter without a closing counterpart (E-PAR-019).
+    ///
+    /// Carries the delimiter string (e.g. `"**"`, `"_"`).
+    UnclosedInlineMarkup(String),
+    /// Opening and closing inline markup delimiters with nothing between them (E-PAR-020).
+    ///
+    /// Carries the delimiter string (e.g. `"**"`, `"_"`).
+    EmptyInlineMarkupSpan(String),
+}
+
 /// A parse error produced by `scan_template_chunks`, carrying both the byte
-/// offset of the opening delimiter (relative to the field-value string content)
-/// and the human-readable message.
+/// offset of the opening delimiter (relative to the field-value string content),
+/// a typed [`TemplateErrorKind`] for structured routing, and the human-readable
+/// message.
 ///
 /// The byte offset is used by `section_value_parser` (and other callers that
 /// need sub-span precision) to translate the offset into a [`SimpleSpan`] that
 /// points at the OPENING delimiter rather than the whole string literal token.
 /// Callers that only need the message may use `.into_message()`.
+/// Callers that need to route to a specific [`crate::error::SyntaxError`] variant
+/// should inspect `.kind`.
 #[derive(Debug, Clone)]
 pub struct TemplateError {
     /// Byte offset of the problematic construct within the field-value string.
     pub byte_offset: usize,
-    /// Human-readable error message (E-PAR-012 through E-PAR-016).
+    /// Semantic kind used for structured error routing (no string-matching needed).
+    pub kind: TemplateErrorKind,
+    /// Human-readable error message (E-PAR-012, 013, 014, 019, 020).
     pub message: String,
 }
 
 impl TemplateError {
     /// Construct a new `TemplateError` with the byte offset of the opening
-    /// delimiter and the human-readable error message.
-    fn new(byte_offset: usize, message: String) -> Self {
+    /// delimiter, the semantic kind, and the human-readable error message.
+    fn new(byte_offset: usize, kind: TemplateErrorKind, message: String) -> Self {
         Self {
             byte_offset,
+            kind,
             message,
         }
     }
@@ -347,7 +377,11 @@ fn scan_template_chunks(
                 process_math_segments(segs, true, &mut chunks, errors);
                 pos = rel + 2;
             } else {
-                errors.push(TemplateError::new(pos, unterminated_math_msg(true)));
+                errors.push(TemplateError::new(
+                    pos,
+                    TemplateErrorKind::UnterminatedMath,
+                    unterminated_math_msg(true),
+                ));
                 let segs = parse_math_segments(&s[content_start..]);
                 process_math_segments(segs, true, &mut chunks, errors);
                 pos = len;
@@ -366,7 +400,11 @@ fn scan_template_chunks(
                 process_math_segments(segs, false, &mut chunks, errors);
                 pos = close + 1;
             } else {
-                errors.push(TemplateError::new(pos, unterminated_math_msg(false)));
+                errors.push(TemplateError::new(
+                    pos,
+                    TemplateErrorKind::UnterminatedMath,
+                    unterminated_math_msg(false),
+                ));
                 let segs = parse_math_segments(&s[content_start..]);
                 process_math_segments(segs, false, &mut chunks, errors);
                 pos = len;
@@ -382,19 +420,31 @@ fn scan_template_chunks(
             match find_str(s, after_open, "}}") {
                 None => {
                     chunks.push(TemplateChunk::Expr(Expr::Error));
-                    errors.push(TemplateError::new(pos, unterminated_interpolation_msg()));
+                    errors.push(TemplateError::new(
+                        pos,
+                        TemplateErrorKind::UnterminatedInterpolation,
+                        unterminated_interpolation_msg(),
+                    ));
                     pos = len;
                 },
                 Some(close_pos) => {
                     let inner = &s[after_open..close_pos];
                     if inner.trim().is_empty() {
                         chunks.push(TemplateChunk::Expr(Expr::Error));
-                        errors.push(TemplateError::new(pos, empty_interpolation_msg()));
+                        errors.push(TemplateError::new(
+                            pos,
+                            TemplateErrorKind::EmptyInterpolation,
+                            empty_interpolation_msg(),
+                        ));
                     } else if let Ok(expr_val) = parse_inner_expr(inner) {
                         chunks.push(TemplateChunk::Expr(expr_val));
                     } else {
                         chunks.push(TemplateChunk::Expr(Expr::Error));
-                        errors.push(TemplateError::new(pos, unterminated_interpolation_msg()));
+                        errors.push(TemplateError::new(
+                            pos,
+                            TemplateErrorKind::UnterminatedInterpolation,
+                            unterminated_interpolation_msg(),
+                        ));
                     }
                     pos = close_pos + 2;
                 },
@@ -412,7 +462,11 @@ fn scan_template_chunks(
             if let Some(close_rel) = rest.find("~~") {
                 let inner = &rest[..close_rel];
                 if inner.is_empty() {
-                    errors.push(TemplateError::new(open_pos, empty_inline_msg("~~")));
+                    errors.push(TemplateError::new(
+                        open_pos,
+                        TemplateErrorKind::EmptyInlineMarkupSpan("~~".to_string()),
+                        empty_inline_msg("~~"),
+                    ));
                 } else {
                     let (children, _) = scan_template_chunks(inner, None, errors);
                     chunks.push(TemplateChunk::Strikethrough(children));
@@ -420,7 +474,11 @@ fn scan_template_chunks(
                 pos = inner_start + close_rel + 2;
             } else {
                 // Unclosed `~~` — error recovery.
-                errors.push(TemplateError::new(open_pos, unclosed_inline_msg("~~")));
+                errors.push(TemplateError::new(
+                    open_pos,
+                    TemplateErrorKind::UnclosedInlineMarkup("~~".to_string()),
+                    unclosed_inline_msg("~~"),
+                ));
                 if !rest.is_empty() {
                     let (children, _) = scan_template_chunks(rest, None, errors);
                     chunks.push(TemplateChunk::Strikethrough(children));
@@ -440,14 +498,22 @@ fn scan_template_chunks(
             if let Some(close_rel) = rest.find('~') {
                 let inner = &rest[..close_rel];
                 if inner.is_empty() {
-                    errors.push(TemplateError::new(open_pos, empty_inline_msg("~")));
+                    errors.push(TemplateError::new(
+                        open_pos,
+                        TemplateErrorKind::EmptyInlineMarkupSpan("~".to_string()),
+                        empty_inline_msg("~"),
+                    ));
                 } else {
                     let (children, _) = scan_template_chunks(inner, None, errors);
                     chunks.push(TemplateChunk::Subscript(children));
                 }
                 pos = inner_start + close_rel + 1;
             } else {
-                errors.push(TemplateError::new(open_pos, unclosed_inline_msg("~")));
+                errors.push(TemplateError::new(
+                    open_pos,
+                    TemplateErrorKind::UnclosedInlineMarkup("~".to_string()),
+                    unclosed_inline_msg("~"),
+                ));
                 if !rest.is_empty() {
                     let (children, _) = scan_template_chunks(rest, None, errors);
                     chunks.push(TemplateChunk::Subscript(children));
@@ -468,7 +534,11 @@ fn scan_template_chunks(
                 // Scan the interior recursively, stopping at `**`.
                 let (children, consumed) = scan_template_chunks(rest, Some("**"), errors);
                 if children.is_empty() {
-                    errors.push(TemplateError::new(open_pos, empty_inline_msg("**")));
+                    errors.push(TemplateError::new(
+                        open_pos,
+                        TemplateErrorKind::EmptyInlineMarkupSpan("**".to_string()),
+                        empty_inline_msg("**"),
+                    ));
                 } else {
                     chunks.push(TemplateChunk::Bold(children));
                 }
@@ -476,7 +546,11 @@ fn scan_template_chunks(
             } else {
                 // Unclosed `**` — error recovery: treat everything as Bold child.
                 // `open_pos` points to the opening `**` (DIR-077-002 §5 span requirement).
-                errors.push(TemplateError::new(open_pos, unclosed_inline_msg("**")));
+                errors.push(TemplateError::new(
+                    open_pos,
+                    TemplateErrorKind::UnclosedInlineMarkup("**".to_string()),
+                    unclosed_inline_msg("**"),
+                ));
                 if !rest.is_empty() {
                     let (children, _) = scan_template_chunks(rest, None, errors);
                     chunks.push(TemplateChunk::Bold(children));
@@ -521,13 +595,21 @@ fn scan_template_chunks(
             if rest.contains('_') {
                 let (children, consumed) = scan_template_chunks(rest, Some("_"), errors);
                 if children.is_empty() {
-                    errors.push(TemplateError::new(open_pos, empty_inline_msg("_")));
+                    errors.push(TemplateError::new(
+                        open_pos,
+                        TemplateErrorKind::EmptyInlineMarkupSpan("_".to_string()),
+                        empty_inline_msg("_"),
+                    ));
                 } else {
                     chunks.push(TemplateChunk::Italic(children));
                 }
                 pos = inner_start + consumed;
             } else {
-                errors.push(TemplateError::new(open_pos, unclosed_inline_msg("_")));
+                errors.push(TemplateError::new(
+                    open_pos,
+                    TemplateErrorKind::UnclosedInlineMarkup("_".to_string()),
+                    unclosed_inline_msg("_"),
+                ));
                 if !rest.is_empty() {
                     let (children, _) = scan_template_chunks(rest, None, errors);
                     chunks.push(TemplateChunk::Italic(children));
@@ -546,14 +628,22 @@ fn scan_template_chunks(
             if let Some(close_rel) = s[inner_start..].find('`') {
                 let inner = &s[inner_start..inner_start + close_rel];
                 if inner.is_empty() {
-                    errors.push(TemplateError::new(open_pos, empty_inline_msg("`")));
+                    errors.push(TemplateError::new(
+                        open_pos,
+                        TemplateErrorKind::EmptyInlineMarkupSpan("`".to_string()),
+                        empty_inline_msg("`"),
+                    ));
                 } else {
                     // Verbatim: no further processing of the content.
                     chunks.push(TemplateChunk::Code(inner.to_string()));
                 }
                 pos = inner_start + close_rel + 1;
             } else {
-                errors.push(TemplateError::new(open_pos, unclosed_inline_msg("`")));
+                errors.push(TemplateError::new(
+                    open_pos,
+                    TemplateErrorKind::UnclosedInlineMarkup("`".to_string()),
+                    unclosed_inline_msg("`"),
+                ));
                 let inner = &s[inner_start..];
                 if !inner.is_empty() {
                     chunks.push(TemplateChunk::Code(inner.to_string()));
@@ -598,13 +688,21 @@ fn scan_template_chunks(
             if rest.contains('^') {
                 let (children, consumed) = scan_template_chunks(rest, Some("^"), errors);
                 if children.is_empty() {
-                    errors.push(TemplateError::new(open_pos, empty_inline_msg("^")));
+                    errors.push(TemplateError::new(
+                        open_pos,
+                        TemplateErrorKind::EmptyInlineMarkupSpan("^".to_string()),
+                        empty_inline_msg("^"),
+                    ));
                 } else {
                     chunks.push(TemplateChunk::Superscript(children));
                 }
                 pos = inner_start + consumed;
             } else {
-                errors.push(TemplateError::new(open_pos, unclosed_inline_msg("^")));
+                errors.push(TemplateError::new(
+                    open_pos,
+                    TemplateErrorKind::UnclosedInlineMarkup("^".to_string()),
+                    unclosed_inline_msg("^"),
+                ));
                 if !rest.is_empty() {
                     let (children, _) = scan_template_chunks(rest, None, errors);
                     chunks.push(TemplateChunk::Superscript(children));
@@ -624,13 +722,21 @@ fn scan_template_chunks(
             if rest.contains("==") {
                 let (children, consumed) = scan_template_chunks(rest, Some("=="), errors);
                 if children.is_empty() {
-                    errors.push(TemplateError::new(open_pos, empty_inline_msg("==")));
+                    errors.push(TemplateError::new(
+                        open_pos,
+                        TemplateErrorKind::EmptyInlineMarkupSpan("==".to_string()),
+                        empty_inline_msg("=="),
+                    ));
                 } else {
                     chunks.push(TemplateChunk::Highlight(children));
                 }
                 pos = inner_start + consumed;
             } else {
-                errors.push(TemplateError::new(open_pos, unclosed_inline_msg("==")));
+                errors.push(TemplateError::new(
+                    open_pos,
+                    TemplateErrorKind::UnclosedInlineMarkup("==".to_string()),
+                    unclosed_inline_msg("=="),
+                ));
                 if !rest.is_empty() {
                     let (children, _) = scan_template_chunks(rest, None, errors);
                     chunks.push(TemplateChunk::Highlight(children));

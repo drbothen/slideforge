@@ -2873,9 +2873,9 @@ fn test_F_077_P2_001_genuine_parse_to_eval_end_to_end() {
 /// pairs. `section_value_parser` translates each offset into a sub-span.
 /// This test verifies the sub-span is at the correct column.
 ///
-/// Also verifies E-PAR-015/016 are Error-severity in `parse_checked` mode
-/// (strict build fails on inline markup errors per DIR-077-002 §5 and
-/// CLAUDE.md "Strict mode is the default build").
+/// Also verifies E-PAR-019 (unclosed inline markup) is Fatal-severity in
+/// `parse_checked` mode (strict build fails on inline markup errors per
+/// DIR-077-002 §5 and CLAUDE.md "Strict mode is the default build").
 #[test]
 #[allow(non_snake_case)]
 fn test_F_077_P2_002_unclosed_bold_error_span_points_to_opening_delimiter() {
@@ -2901,14 +2901,16 @@ fn test_F_077_P2_002_unclosed_bold_error_span_points_to_opening_delimiter() {
     let parse_result = parse(src, file_id, &sm)
         .expect("F-077-P2-002: parse must return Ok for unclosed bold (non-fatal accumulation)");
 
-    // The warning must mention E-PAR-015.
-    let has_epar015 = parse_result
+    // The warning must mention E-PAR-019 (dedicated unclosed inline markup code).
+    // E-PAR-015 was the COLLIDING code from SHAPE parsing — after the fix it must
+    // no longer appear here; E-PAR-019 is the correct code.
+    let has_epar019 = parse_result
         .warnings
         .iter()
-        .any(|w| format!("{w:?}").contains("E-PAR-015") || format!("{w:?}").contains("unclosed"));
+        .any(|w| format!("{w:?}").contains("E-PAR-019") || format!("{w:?}").contains("unclosed"));
     assert!(
-        has_epar015,
-        "F-077-P2-002: E-PAR-015 unclosed-bold warning must be present; got: {:?}",
+        has_epar019,
+        "F-077-P2-002: E-PAR-019 unclosed-bold warning must be present; got: {:?}",
         parse_result.warnings
     );
 
@@ -2924,8 +2926,8 @@ fn test_F_077_P2_002_unclosed_bold_error_span_points_to_opening_delimiter() {
     // the warning's line matches the section detail line (line 6, 1-indexed).
     for w in &parse_result.warnings {
         let msg = format!("{w:?}");
-        if msg.contains("E-PAR-015") || msg.contains("unclosed") {
-            // The warning span must be on line 6 (the `detail:` line).
+        if msg.contains("E-PAR-019") || msg.contains("unclosed") {
+            // The warning span must be on line 4 (the `detail:` line).
             // sort_position returns (file, line_1idx, col_1idx).
             // We verify this via the byte span by ensuring it is NOT at byte 0
             // (which would mean the error is at the file start, not the delimiter).
@@ -2934,19 +2936,19 @@ fn test_F_077_P2_002_unclosed_bold_error_span_points_to_opening_delimiter() {
             // section methodology: (line 3), detail: "**unclosed" (line 4).
             assert!(
                 line >= 4,
-                "F-077-P2-002: E-PAR-015 span must be on the section detail line (≥ line 4); \
+                "F-077-P2-002: E-PAR-019 span must be on the section detail line (≥ line 4); \
                  got line {line}"
             );
             // Verify the message mentions the correct delimiter.
             assert!(
                 msg.contains("**") || msg.contains("unclosed"),
-                "F-077-P2-002: E-PAR-015 message must mention '**' or 'unclosed'; got: {msg}"
+                "F-077-P2-002: E-PAR-019 message must mention '**' or 'unclosed'; got: {msg}"
             );
         }
     }
 
-    // E-PAR-015 in strict mode (parse_checked): the DiagnosticSink must mark
-    // has_fatal() == true because SyntaxError::UnexpectedToken carries Fatal severity.
+    // E-PAR-019 in strict mode (parse_checked): the DiagnosticSink must mark
+    // has_fatal() == true because SyntaxError::UnclosedInlineMarkup carries Fatal severity.
     // This verifies the strict-build-fails guarantee (DIR-077-002 §5).
     let mut strict_sink = DiagnosticSink::new();
     let ast_opt = parse_checked(src, file_id, &sm, &mut strict_sink);
@@ -2957,9 +2959,9 @@ fn test_F_077_P2_002_unclosed_bold_error_span_points_to_opening_delimiter() {
     // The sink must have a fatal-severity diagnostic (strict build fails).
     assert!(
         strict_sink.has_fatal(),
-        "F-077-P2-002: parse_checked with E-PAR-015 must produce has_fatal()=true in the sink \
+        "F-077-P2-002: parse_checked with E-PAR-019 must produce has_fatal()=true in the sink \
          (strict build must fail on unclosed inline markup per DIR-077-002 §5 + CLAUDE.md); \
-         got has_fatal=false. Check that SyntaxError::UnexpectedToken.severity() == Fatal."
+         got has_fatal=false. Check that SyntaxError::UnclosedInlineMarkup.severity() == Fatal."
     );
 }
 

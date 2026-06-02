@@ -950,3 +950,188 @@ fn test_F077_P5_001_ref_call_composes_with_surrounding_text() {
         chunks[2]
     );
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// E-PAR-019 / E-PAR-020 code-assertion tests (anti-collision guard for STORY-077)
+//
+// These tests assert that:
+//   - unclosed inline markup (`**foo`) produces a warning with code E-PAR-019
+//   - empty inline markup span (`****`) produces a warning with code E-PAR-020
+//
+// This prevents regression of the error-code collision found during adversarial
+// review (STORY-077 fix pass): E-PAR-015 and E-PAR-016 are SHAPE codes; the
+// inline-markup parser must use DEDICATED codes E-PAR-019 and E-PAR-020.
+//
+// The tests assert via miette::Diagnostic::code() — a load-bearing check on the
+// actual diagnostic code attribute, not on the message string.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// E-PAR-019 code assertion: unclosed `**foo` must emit a warning whose
+/// `miette::Diagnostic::code()` is exactly `E-PAR-019`.
+///
+/// This test guards against the E-PAR-015 collision: the unclosed-inline-markup
+/// error must NOT reuse E-PAR-015 (which belongs to SHAPE parsing).
+#[test]
+#[allow(non_snake_case)]
+fn test_E_PAR_019_unclosed_inline_markup_code_assertion() {
+    use crate::parser::parse;
+    use crate::span::SourceMap;
+    use miette::Diagnostic;
+
+    let src = "slide content:\n  detail \"**unclosed\"\n";
+    let mut sm = SourceMap::new();
+    let file_id = sm.add_file(Arc::from("test.sf"), Arc::from(src));
+    let result = parse(src, file_id, &sm);
+
+    let warnings = match result {
+        Ok(pr) => pr.warnings,
+        Err(errs) => {
+            let combined = errs
+                .iter()
+                .map(|e| format!("{e:?}"))
+                .collect::<Vec<_>>()
+                .join("; ");
+            panic!(
+                "test_E_PAR_019_unclosed_inline_markup_code_assertion FAIL: \
+                 unclosed bold produced a FATAL parse error (must be non-fatal, \
+                 DIR-077-002 §5); errors: {combined}"
+            );
+        },
+    };
+
+    assert!(
+        !warnings.is_empty(),
+        "test_E_PAR_019_unclosed_inline_markup_code_assertion FAIL: \
+         unclosed '**foo' must produce at least 1 warning; got 0"
+    );
+
+    // The FIRST warning must carry code E-PAR-019, not E-PAR-002 or E-PAR-015.
+    let first = &warnings[0];
+    let code = first
+        .code()
+        .expect("warning must have a diagnostic code (E-PAR-019)");
+    let code_str = code.to_string();
+    assert!(
+        code_str.contains("E-PAR-019"),
+        "test_E_PAR_019_unclosed_inline_markup_code_assertion FAIL: \
+         expected code E-PAR-019 for unclosed inline markup, got: {code_str}\n\
+         If this shows E-PAR-002: the error is being emitted via UnexpectedToken (wrong variant).\n\
+         If this shows E-PAR-015: the E-PAR-015/019 code collision is not fixed."
+    );
+}
+
+/// E-PAR-020 code assertion: empty `****` must emit a warning whose
+/// `miette::Diagnostic::code()` is exactly `E-PAR-020`.
+///
+/// This test guards against the E-PAR-016 collision: the empty-inline-markup-span
+/// error must NOT reuse E-PAR-016 (which belongs to SHAPE parsing).
+#[test]
+#[allow(non_snake_case)]
+fn test_E_PAR_020_empty_inline_markup_span_code_assertion() {
+    use crate::parser::parse;
+    use crate::span::SourceMap;
+    use miette::Diagnostic;
+
+    let src = "slide content:\n  detail \"****\"\n";
+    let mut sm = SourceMap::new();
+    let file_id = sm.add_file(Arc::from("test.sf"), Arc::from(src));
+    let result = parse(src, file_id, &sm);
+
+    let warnings = match result {
+        Ok(pr) => pr.warnings,
+        Err(errs) => {
+            let combined = errs
+                .iter()
+                .map(|e| format!("{e:?}"))
+                .collect::<Vec<_>>()
+                .join("; ");
+            panic!(
+                "test_E_PAR_020_empty_inline_markup_span_code_assertion FAIL: \
+                 empty bold '****' produced a FATAL parse error (must be non-fatal, \
+                 DIR-077-002 §5); errors: {combined}"
+            );
+        },
+    };
+
+    assert!(
+        !warnings.is_empty(),
+        "test_E_PAR_020_empty_inline_markup_span_code_assertion FAIL: \
+         empty '****' must produce at least 1 warning; got 0"
+    );
+
+    // The FIRST warning must carry code E-PAR-020, not E-PAR-002 or E-PAR-016.
+    let first = &warnings[0];
+    let code = first
+        .code()
+        .expect("warning must have a diagnostic code (E-PAR-020)");
+    let code_str = code.to_string();
+    assert!(
+        code_str.contains("E-PAR-020"),
+        "test_E_PAR_020_empty_inline_markup_span_code_assertion FAIL: \
+         expected code E-PAR-020 for empty inline markup span, got: {code_str}\n\
+         If this shows E-PAR-002: the error is being emitted via UnexpectedToken (wrong variant).\n\
+         If this shows E-PAR-016: the E-PAR-016/020 code collision is not fixed."
+    );
+}
+
+/// E-PAR-019 variant check: the warning variant must be
+/// `SyntaxError::UnclosedInlineMarkup`, not `SyntaxError::UnexpectedToken`.
+///
+/// This structural check ensures the routing in mod.rs produces the correct
+/// variant (TD-VSDD-059: load-bearing assertion, not just a doc comment).
+#[test]
+#[allow(non_snake_case)]
+fn test_E_PAR_019_warning_is_unclosed_inline_markup_variant() {
+    use crate::error::SyntaxError;
+    use crate::parser::parse;
+    use crate::span::SourceMap;
+
+    let src = "slide content:\n  detail \"**unclosed\"\n";
+    let mut sm = SourceMap::new();
+    let file_id = sm.add_file(Arc::from("test.sf"), Arc::from(src));
+    let pr = parse(src, file_id, &sm).expect("unclosed bold must not be fatal");
+
+    assert!(
+        !pr.warnings.is_empty(),
+        "test_E_PAR_019_warning_is_unclosed_inline_markup_variant FAIL: \
+         no warning produced"
+    );
+
+    let first = &pr.warnings[0];
+    assert!(
+        matches!(first, SyntaxError::UnclosedInlineMarkup { .. }),
+        "test_E_PAR_019_warning_is_unclosed_inline_markup_variant FAIL: \
+         expected SyntaxError::UnclosedInlineMarkup variant; got: {first:?}"
+    );
+}
+
+/// E-PAR-020 variant check: the warning variant must be
+/// `SyntaxError::EmptyInlineMarkupSpan`, not `SyntaxError::UnexpectedToken`.
+///
+/// This structural check ensures the routing in mod.rs produces the correct
+/// variant (TD-VSDD-059: load-bearing assertion, not just a doc comment).
+#[test]
+#[allow(non_snake_case)]
+fn test_E_PAR_020_warning_is_empty_inline_markup_span_variant() {
+    use crate::error::SyntaxError;
+    use crate::parser::parse;
+    use crate::span::SourceMap;
+
+    let src = "slide content:\n  detail \"****\"\n";
+    let mut sm = SourceMap::new();
+    let file_id = sm.add_file(Arc::from("test.sf"), Arc::from(src));
+    let pr = parse(src, file_id, &sm).expect("empty bold must not be fatal");
+
+    assert!(
+        !pr.warnings.is_empty(),
+        "test_E_PAR_020_warning_is_empty_inline_markup_span_variant FAIL: \
+         no warning produced"
+    );
+
+    let first = &pr.warnings[0];
+    assert!(
+        matches!(first, SyntaxError::EmptyInlineMarkupSpan { .. }),
+        "test_E_PAR_020_warning_is_empty_inline_markup_span_variant FAIL: \
+         expected SyntaxError::EmptyInlineMarkupSpan variant; got: {first:?}"
+    );
+}
