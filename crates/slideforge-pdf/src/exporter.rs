@@ -1048,6 +1048,53 @@ fn draw_body_blocks(
     }
 }
 
+/// Decide whether a [`ContentBlock`] produces a PDF structure group.
+///
+/// This is the SINGLE SOURCE OF TRUTH for the "is this block structure-producing?"
+/// decision, shared by both [`crate::tag_engine::SlideTagEngine::tag_content_block`]
+/// and [`draw_body_blocks_tagged`] (F-P4-001 / TD-VSDD-060).
+///
+/// Returns `true` if and only if `tag_content_block` returns `Ok(Some(_))` for the
+/// same block — i.e., the block contributes a tag group to the Part and therefore
+/// occupies one entry in `frame_child_part_indices`. Both functions MUST agree
+/// block-for-block so the child-index cursor in `draw_body_blocks_tagged` and the
+/// child-index recorder in `tag_content_block` stay in lockstep.
+///
+/// ## Decision table (must match `tag_content_block` exactly)
+///
+/// | Block kind                          | Returns |
+/// |-------------------------------------|---------|
+/// | `Text(_)`                           | `true`  |
+/// | `Bullets(items)` if non-empty       | `true`  |
+/// | `Bullets(items)` if empty           | `false` |
+/// | `Math(_)`                           | `true`  |
+/// | `Table(_)`                          | `true`  |
+/// | `Image(alt: Provided)`              | `true`  |
+/// | `Image(alt: Decorative \| None)`    | `false` |
+/// | `Chart(alt: Provided)`              | `true`  |
+/// | `Chart(alt: Decorative \| None)`    | `false` |
+/// | `Diagram(alt: Provided)`            | `true`  |
+/// | `Diagram(alt: Decorative \| None)`  | `false` |
+/// | `Shape(alt: Provided)`              | `true`  |
+/// | `Shape(alt: Decorative \| None)`    | `false` |
+fn block_is_structure_producing(block: &slideforge_types::ContentBlock) -> bool {
+    use slideforge_types::{AltText, ContentBlock};
+
+    match block {
+        // Always structure-producing.
+        ContentBlock::Text(_) | ContentBlock::Math(_) | ContentBlock::Table(_) => true,
+
+        // Structure-producing only if non-empty.
+        ContentBlock::Bullets(items) => !items.is_empty(),
+
+        // Structure-producing only if alt text is explicitly provided (not decorative or absent).
+        ContentBlock::Image(spec) => matches!(&spec.alt, Some(AltText::Provided(_))),
+        ContentBlock::Chart(spec) => matches!(spec.alt.as_ref(), Some(AltText::Provided(_))),
+        ContentBlock::Diagram(spec) => matches!(spec.alt.as_ref(), Some(AltText::Provided(_))),
+        ContentBlock::Shape(spec) => matches!(&spec.alt, Some(AltText::Provided(_))),
+    }
+}
+
 /// Draw body content blocks in separate tagged marked-content regions — one per block.
 ///
 /// Called by the export draw loop for Body frames that have multiple content blocks
@@ -1063,14 +1110,24 @@ fn draw_body_blocks(
 /// frame. Combining them would require `draw_body_blocks` to take a `Surface` AND
 /// manage krilla's tagging API, violating the single-responsibility principle.
 ///
-/// ## Contract
+/// ## Contract (F-P4-001 fix)
 ///
 /// `child_indices` is the `Vec<usize>` from `frame_child_part_indices[frame_idx]`.
 /// It has one entry for each content block that `tag_content_block` returned
-/// `Some(group)` for (i.e., blocks that contribute a structure element). The
-/// parallel iteration uses a separate index cursor so that blocks returning
-/// `None` from `tag_content_block` (e.g., decorative shapes, empty bullet lists)
-/// are drawn WITHOUT a tagged region — they are structural no-ops.
+/// `Some(group)` for. `draw_body_blocks_tagged` MUST iterate the SAME block universe
+/// as `tag_content_block` — i.e., advance `child_idx_cursor` for EVERY block where
+/// [`block_is_structure_producing`] returns `true`, regardless of whether the block
+/// is currently drawable (Math, Table, Image, etc. may not yet have a draw path).
+///
+/// Blocks that are not structure-producing (empty Bullets, decorative/None-alt
+/// Image/Chart/Diagram/Shape) are drawn WITHOUT a tagged region — they are structural
+/// no-ops. The cursor is NOT advanced for these blocks.
+///
+/// For structure-producing blocks that have no draw path yet (Math, Table, Image,
+/// Chart, Diagram, Shape with alt), we open a tagged region and immediately close it
+/// (empty-but-tagged region). This satisfies PDF/UA-1's requirement that every
+/// grouping element references at least one MCID leaf (BC-4.03.001 invariant-3 /
+/// F-045-C2), even if no visible content is drawn inside.
 ///
 /// # Errors
 ///
@@ -1095,65 +1152,68 @@ fn draw_body_blocks_tagged(
     let baselines = body_item_baselines(blocks, bbox);
     let mut baseline_iter = baselines.into_iter();
 
-    // `child_idx_cursor` advances only for blocks that produced a structure group
-    // (the same blocks that contributed entries to `child_indices`).
+    // `child_idx_cursor` advances for every block that `block_is_structure_producing`
+    // returns `true` for — IDENTICAL to the set that `tag_content_block` returns Some for.
+    // This keeps the cursor in lockstep with the child_indices recorded by the tag engine.
     let mut child_idx_cursor: usize = 0;
 
     for block in blocks {
-        match block {
-            ContentBlock::Text(text_block) => {
-                let text = extract_inline_text(&text_block.inlines);
-                // Tag the block and draw it in one tagged region.
-                // Even if the text is empty (no baseline consumed), the block has a
-                // structure group (P) — open a tagged region so the group gets an MCID.
-                if let Some(&child_part_idx) = child_indices.get(child_idx_cursor) {
-                    let id = surface.start_tagged(ContentTag::Other);
+        if !block_is_structure_producing(block) {
+            // Not structure-producing (e.g., empty Bullets, decorative/no-alt
+            // Image/Chart/Diagram/Shape): draw nothing and do NOT advance the cursor.
+            // No child_indices slot was allocated by the tag engine for this block.
+            continue;
+        }
+
+        // Structure-producing block: open a tagged region, draw content (if drawable),
+        // close the tagged region, and push the Identifier into the correct Part child group.
+        if let Some(&child_part_idx) = child_indices.get(child_idx_cursor) {
+            let id = surface.start_tagged(ContentTag::Other);
+
+            // Draw whatever content the block has a draw path for.
+            // Blocks without a draw path (Math, Table, Image, Chart, Diagram, Shape with alt)
+            // get an empty-but-tagged region — the BDC/EMC pair ensures the MCID leaf exists.
+            match block {
+                ContentBlock::Text(text_block) => {
+                    let text = extract_inline_text(&text_block.inlines);
+                    // Even if the text is empty (no baseline consumed), the block has a
+                    // structure group (P) — the tagged region ensures the group gets an MCID.
                     if !text.is_empty()
                         && let Some(baseline_y) = baseline_iter.next()
                     {
                         draw_text_at_y(surface, &text, bbox, baseline_y, 18.0, font);
                     }
-                    surface.end_tagged();
-                    if let Some(krilla::tagging::Node::Group(child_group)) =
-                        part.children.get_mut(child_part_idx)
-                    {
-                        child_group.push(id);
-                    }
-                    child_idx_cursor += 1;
-                }
-            },
-            ContentBlock::Bullets(items) => {
-                if !items.is_empty() {
+                },
+                ContentBlock::Bullets(items) => {
                     // The entire Bullets block corresponds to ONE L group in the
-                    // structure tree — open ONE tagged region covering ALL bullet items.
-                    if let Some(&child_part_idx) = child_indices.get(child_idx_cursor) {
-                        let id = surface.start_tagged(ContentTag::Other);
-                        for item in items {
-                            let text = extract_inline_text(&item.inlines);
-                            if !text.is_empty()
-                                && let Some(baseline_y) = baseline_iter.next()
-                            {
-                                draw_text_at_y(surface, &text, bbox, baseline_y, 16.0, font);
-                            }
-                        }
-                        surface.end_tagged();
-                        if let Some(krilla::tagging::Node::Group(child_group)) =
-                            part.children.get_mut(child_part_idx)
+                    // structure tree — draw ALL bullet items inside the SAME tagged region.
+                    for item in items {
+                        let text = extract_inline_text(&item.inlines);
+                        if !text.is_empty()
+                            && let Some(baseline_y) = baseline_iter.next()
                         {
-                            child_group.push(id);
+                            draw_text_at_y(surface, &text, bbox, baseline_y, 16.0, font);
                         }
-                        child_idx_cursor += 1;
                     }
-                }
-                // Empty Bullets → no structure group, no tagged region, no baseline advance.
-            },
-            // Non-text blocks do not advance the cursor or consume a child index.
-            ContentBlock::Chart(_)
-            | ContentBlock::Diagram(_)
-            | ContentBlock::Math(_)
-            | ContentBlock::Image(_)
-            | ContentBlock::Table(_)
-            | ContentBlock::Shape(_) => {},
+                },
+                // Math, Table, Image, Chart, Diagram, Shape with alt: no draw path yet.
+                // The empty-but-tagged region (BDC/EMC with no content operators) gives
+                // the structure group its required MCID leaf (BC-4.03.001 invariant-3).
+                ContentBlock::Math(_)
+                | ContentBlock::Table(_)
+                | ContentBlock::Image(_)
+                | ContentBlock::Chart(_)
+                | ContentBlock::Diagram(_)
+                | ContentBlock::Shape(_) => {},
+            }
+
+            surface.end_tagged();
+            if let Some(krilla::tagging::Node::Group(child_group)) =
+                part.children.get_mut(child_part_idx)
+            {
+                child_group.push(id);
+            }
+            child_idx_cursor += 1;
         }
     }
 

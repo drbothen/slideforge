@@ -83,6 +83,28 @@ jobs:
           --test pdf_ua1
           --no-fail-fast
           --profile ci
+          2>&1 | tee /tmp/structure-nextest-output.txt
+
+      # OBS-P4-001: positive-coverage assertion — a zero-test run must FAIL the job.
+      # Symmetric with the pdf-ua1-verapdf job's TESTS_RUN gate (OBS-009).
+      # Parses nextest's "N tests run" summary line; fails if N < 1.
+      # This prevents silent passes when the test binary is filtered to zero tests.
+      - name: Assert structure proxy tests actually ran (coverage gate)
+        run: |
+          set -euo pipefail
+          OUTPUT_FILE="/tmp/structure-nextest-output.txt"
+          if [ ! -f "${OUTPUT_FILE}" ]; then
+            echo "ERROR: nextest output file not found at ${OUTPUT_FILE}" >&2
+            exit 1
+          fi
+          TESTS_RUN=$(grep -oP '\d+ tests? run' "${OUTPUT_FILE}" | grep -oP '^\d+' || echo "0")
+          echo "Tests run: ${TESTS_RUN}"
+          if [ "${TESTS_RUN}" -lt 1 ]; then
+            echo "ERROR: zero tests ran in the pdf-ua1-structure job." >&2
+            echo "The pdf_ua1 test binary matched no tests — the structure gate was NOT enforced." >&2
+            exit 1
+          fi
+          echo "Coverage assertion PASSED: ${TESTS_RUN} test(s) ran."
 
   # ─── PDF/UA-1 full validation via veraPDF (runs if veraPDF is available) ──
   # Installs veraPDF via the official Docker container and runs

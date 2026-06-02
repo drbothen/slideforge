@@ -2649,6 +2649,208 @@ fn test_f_p3_001_multi_block_body_each_block_has_own_child_index_integration() {
     );
 }
 
+// ─── F-P4-001: mixed-block Body [Text, Math, Bullets] MCID cursor desync ────
+
+/// F-P4-001 regression: `draw_body_blocks_tagged` must advance the child-index
+/// cursor for EVERY block that `tag_content_block` treats as structure-producing,
+/// including `Math`, `Table`, and `Image/Chart/Diagram/Shape` with alt text.
+///
+/// ## Defect (pre-fix)
+///
+/// `draw_body_blocks_tagged` only advances the cursor for `Text` and non-empty
+/// `Bullets`. All other block types (`Chart|Diagram|Math|Image|Table|Shape`) fall
+/// through a catch-all `=> {}` arm that neither opens a tagged region NOR advances
+/// the cursor. For a mixed body [Text, Math, Bullets], the cursor sequence is:
+///
+/// - Text:   cursor=0 → child_indices[0] = text_P group  ✔
+/// - Math:   `=> {}` → cursor STAYS at 0 (BUG: no tagged region, no advance)
+/// - Bullets: cursor=0 → child_indices[0] = text_P group (WRONG — should be
+///   child_indices[2] = bullets_L group)
+///
+/// Result: the Math_P group (child_indices[1]) and the Bullets_L group
+/// (child_indices[2]) are orphaned — no MCID-linked content — violating
+/// PDF/UA-1 ("every grouping element must reference actual marked content").
+///
+/// ## What this test asserts
+///
+/// 1. The tag engine records 3 distinct child indices for a [Text, Math, Bullets]
+///    body frame (one per structure-producing block). This part was already correct.
+/// 2. The full export path produces exactly 3 BDC marked-content regions in the
+///    body content stream — one for each structure-producing block. Before the fix,
+///    only 2 BDC regions are emitted (Text + Bullets; Math is silently skipped).
+///    After the fix, 3 BDC regions are emitted (Text + Math + Bullets).
+///
+/// Assertions:
+/// - Tag engine: `frame_child_part_indices[body_frame].len() == 3` and all indices distinct.
+/// - Export: PDF contains exactly 3 BDC markers (via uncompressed byte scan).
+///
+/// BDC count is a non-vacuous structural assertion satisfying TD-VSDD-059.
+#[allow(clippy::unwrap_used)]
+#[test]
+fn test_f_p4_001_mixed_block_body_text_math_bullets_each_gets_tagged_region() {
+    use slideforge_pdf::tag_engine::SlideTagEngine;
+    use slideforge_types::{BulletItem, ContentBlock, InlineNode, MathNode, SourceSpan, TextBlock};
+
+    // ── Part 1: tag engine produces 3 distinct child indices ──────────────────
+
+    let body_slide = LaidOutSlide {
+        source_index: 0,
+        slide_type_keyword: Arc::from("content"),
+        frames: vec![
+            Frame {
+                bbox: BoundingBox {
+                    x: Emu(0),
+                    y: Emu(0),
+                    width: Emu(9_144_000),
+                    height: Emu(914_400),
+                },
+                content: FrameContent::Title(Arc::from("Mixed-Block Regression")),
+                text_flow: None,
+            },
+            Frame {
+                bbox: BoundingBox {
+                    x: Emu(0),
+                    y: Emu(914_400),
+                    width: Emu(9_144_000),
+                    height: Emu(3_657_600),
+                },
+                content: FrameContent::Body(vec![
+                    ContentBlock::Text(TextBlock {
+                        inlines: vec![InlineNode::Plain(Arc::from("Text paragraph"))],
+                        span: SourceSpan::default(),
+                    }),
+                    ContentBlock::Math(MathNode::display(
+                        Arc::from(r"E = mc^2"),
+                        SourceSpan::default(),
+                    )),
+                    ContentBlock::Bullets(vec![BulletItem {
+                        inlines: vec![InlineNode::Plain(Arc::from("Bullet item"))],
+                        children: vec![],
+                        span: SourceSpan::default(),
+                    }]),
+                ]),
+                text_flow: None,
+            },
+        ],
+        speaker_notes: None,
+        register_tags: RegisterSet::new(),
+        register_content: vec![],
+    };
+
+    let engine = SlideTagEngine::new();
+    let tag_result = engine.tag_slide(&body_slide).unwrap();
+
+    // Title frame (0): 1 child index.
+    let title_indices = tag_result.frame_child_part_indices[0]
+        .as_ref()
+        .expect("Title frame must have Some(Vec) child indices");
+    assert_eq!(
+        title_indices.len(),
+        1,
+        "F-P4-001: Title frame must record exactly 1 child index"
+    );
+
+    // Body frame (1): 3 child indices — Text→P, Math→P, Bullets→L.
+    let body_indices = tag_result.frame_child_part_indices[1]
+        .as_ref()
+        .expect("F-P4-001: Body [Text+Math+Bullets] must have Some(Vec) child indices");
+    assert_eq!(
+        body_indices.len(),
+        3,
+        "F-P4-001: Body [Text, Math, Bullets] must record 3 child indices \
+         (one per structure-producing block); got {}. \
+         If Math is missing, tag_content_block does not return Some for Math.",
+        body_indices.len()
+    );
+
+    // All three indices must be distinct.
+    let text_idx = body_indices[0];
+    let math_idx = body_indices[1];
+    let bullets_idx = body_indices[2];
+
+    assert_ne!(
+        text_idx, math_idx,
+        "F-P4-001: Text and Math body blocks must occupy distinct Part child indices; \
+         both were {text_idx}"
+    );
+    assert_ne!(
+        math_idx, bullets_idx,
+        "F-P4-001: Math and Bullets body blocks must occupy distinct Part child indices; \
+         both were {math_idx}"
+    );
+    assert_ne!(
+        text_idx, bullets_idx,
+        "F-P4-001: Text and Bullets body blocks must occupy distinct Part child indices; \
+         both were {text_idx}"
+    );
+
+    // Part must have: H1(title) + P(text) + P(math) + L(bullets) = 4 children.
+    assert_eq!(
+        tag_result.part.children.len(),
+        4,
+        "F-P4-001: Part must have 4 children: H1 + P(text) + P(math) + L(bullets); got {}",
+        tag_result.part.children.len()
+    );
+
+    // ── Part 2: full export produces 3 BDC regions for the body frame ─────────
+    //
+    // `ContentTag::Other` emits a `BDC` (Begin Marked Content) operator in the
+    // content stream. Before the fix, `draw_body_blocks_tagged` emits BDC only for
+    // Text and Bullets (2 BDC). After the fix it emits BDC for Text, Math, AND
+    // Bullets (3 BDC). We count BDC occurrences in the uncompressed PDF bytes.
+    //
+    // We assert >= 3 (not == 3) to be robust against PDF structure entries that
+    // may also emit BDC for frame-level tagged regions. At minimum, the 3 body
+    // blocks must each produce one BDC.
+
+    let laid_out = LaidOutDeck {
+        page_size: PageSize::default(),
+        slides: vec![body_slide],
+        sections: vec![],
+        warnings: vec![],
+    };
+    let deck = deck_with_lang("en-US");
+    let brand = minimal_brand();
+    let opts = ExportOptions::default();
+    let exporter = PdfExporter::new();
+
+    // Use uncompressed export so BDC operators are scannable in raw bytes.
+    let pdf_bytes = exporter
+        .export_uncompressed(&deck, &laid_out, &brand, &opts)
+        .expect("F-P4-001: export of [Text, Math, Bullets] body must not fail");
+
+    assert!(
+        pdf_bytes.starts_with(b"%PDF-"),
+        "F-P4-001: exported PDF must start with %PDF-"
+    );
+
+    // Count BDC occurrences. `ContentTag::Other` emits `BDC` per krilla's API.
+    // Each `start_tagged(ContentTag::Other)` adds one BDC to the content stream.
+    let bdc_count = pdf_bytes
+        .windows(b"BDC".len())
+        .filter(|w| *w == b"BDC")
+        .count();
+
+    // Expected BDC count breakdown:
+    //   - Title frame (single-block path): 1 BDC (start_tagged for the H1 frame)
+    //   - Body frame, Text block: 1 BDC
+    //   - Body frame, Math block: 1 BDC  ← this is the one missing pre-fix
+    //   - Body frame, Bullets block: 1 BDC
+    //   Total after fix: 4 BDC.
+    //   Total before fix: 3 BDC (Math block skipped with `=> {}`).
+    assert!(
+        bdc_count >= 4,
+        "F-P4-001 FAILED: expected >= 4 BDC marked-content regions for \
+         Title + Body [Text, Math, Bullets]; got {bdc_count}. \
+         The Math block must produce its own tagged region (BDC/EMC pair). \
+         Before the fix, draw_body_blocks_tagged skips Math with `=> {{}}`, \
+         emitting only 3 BDC total (Title + Text + Bullets). \
+         After the fix, 4 BDC are emitted (Title + Text + Math + Bullets). \
+         Fix: make draw_body_blocks_tagged advance the cursor for ALL \
+         structure-producing blocks (Math, Table, Image/Chart/Diagram/Shape with alt)."
+    );
+}
+
 // ─── OBS-P3-002: EC-008 non-ASCII title round-trip ──────────────────────────
 
 /// OBS-P3-002 / EC-008: A non-ASCII slide title (e.g., "Überblick") must
