@@ -616,8 +616,17 @@ fn try_resolve_font(family: &str) -> Option<krilla::text::Font> {
 /// the box top (20% descender allowance below the baseline). Text is guaranteed
 /// to land within `[0, SLIDE_HEIGHT_PT]` for any valid IR layout.
 ///
-/// Precise multi-line typography (text reflow, line-height, multi-line wrapping)
-/// is deferred to a future story — single-line baseline placement is used in v1.
+/// For body frames (`FrameContent::Body`), each paragraph (`ContentBlock::Text`)
+/// and each bullet item (`ContentBlock::Bullets`) is placed at a distinct
+/// baseline using a per-item vertical cursor. The cursor starts at
+/// `text_baseline_surface_y(bbox)` (the same 80%-of-height formula used for
+/// single-item frames) and advances by `font_size * BODY_LINE_LEADING` (1.2×)
+/// after each drawn item. This prevents all body items from overprinting at the
+/// same baseline. Single-block body frames are unaffected — their single baseline
+/// equals the pre-existing formula exactly.
+///
+/// Intra-block text reflow (word-wrapping a single long paragraph across multiple
+/// lines) and brand-driven font-size/color overrides remain future story work.
 ///
 /// ## Font sizes
 ///
@@ -699,6 +708,18 @@ fn draw_frame(
     Ok(())
 }
 
+/// Standard line-height leading multiplier used in body text stacking.
+///
+/// Each successive body item's baseline is advanced by `font_size * BODY_LINE_LEADING`
+/// from the previous item's baseline. The value 1.2 is the standard typographic
+/// "normal" leading (120% of em-size), consistent with CSS `line-height: normal`
+/// and the `OpenDocument` / OOXML default `<a:lnSpc>` of 100% + 20% leading.
+///
+/// Integer EMUs are NOT used here because font sizes are specified in points
+/// (f32), consistent with krilla's Surface API. No EMU-to-pt conversion is
+/// needed for leading arithmetic.
+pub(crate) const BODY_LINE_LEADING: f32 = 1.2;
+
 /// Compute the Surface Y coordinate of the text baseline for a bounding box.
 ///
 /// krilla's `Surface` is top-left, Y-down (DIR-044-001). The text baseline is
@@ -721,6 +742,72 @@ fn draw_frame(
 pub(crate) fn text_baseline_surface_y(bbox: &BoundingBox) -> f32 {
     let surface_top_y = emu_to_pt(bbox.y);
     surface_top_y + emu_to_pt(bbox.height) * 0.8
+}
+
+/// Compute the ordered sequence of Surface-Y baselines for each drawable item in
+/// a body block list.
+///
+/// This pure function encodes the same cursor-advance logic as `draw_body_blocks`
+/// and is `pub(crate)` so that tests can assert concrete baseline values without
+/// needing a krilla `Surface`.
+///
+/// ## Cursor model
+///
+/// - The cursor starts at `text_baseline_surface_y(bbox)` (80% of the body frame
+///   height below the frame's top edge — identical to the single-item formula
+///   that titles and subtitles use, preserving single-block backward compatibility).
+/// - For each drawable item the cursor is used as the baseline Y, then advanced by
+///   `font_size * BODY_LINE_LEADING`:
+///   - `Text` blocks use font size **18.0 pt**.
+///   - `BulletItem`s use font size **16.0 pt**.
+/// - Non-text blocks (`Chart`, `Diagram`, `Math`, `Image`, `Table`, `Shape`) do
+///   not consume cursor space (they are not drawn in this pass).
+///
+/// ## Relationship to `draw_body_blocks`
+///
+/// `draw_body_blocks` calls this function to obtain the baseline sequence and then
+/// passes each value to `draw_text_at_bbox_at_y`, keeping the drawing and geometry
+/// logic cleanly separated. Tests call `body_item_baselines` directly.
+pub(crate) fn body_item_baselines(
+    blocks: &[slideforge_types::ContentBlock],
+    bbox: &BoundingBox,
+) -> Vec<f32> {
+    use slideforge_types::ContentBlock;
+
+    let mut cursor_y: f32 = text_baseline_surface_y(bbox);
+    let mut baselines: Vec<f32> = Vec::new();
+
+    for block in blocks {
+        match block {
+            ContentBlock::Text(text_block) => {
+                let text = extract_inline_text(&text_block.inlines);
+                if !text.is_empty() {
+                    let font_size: f32 = 18.0;
+                    baselines.push(cursor_y);
+                    cursor_y += font_size * BODY_LINE_LEADING;
+                }
+            },
+            ContentBlock::Bullets(items) => {
+                for item in items {
+                    let text = extract_inline_text(&item.inlines);
+                    if !text.is_empty() {
+                        let font_size: f32 = 16.0;
+                        baselines.push(cursor_y);
+                        cursor_y += font_size * BODY_LINE_LEADING;
+                    }
+                }
+            },
+            // Non-text blocks do not advance the cursor in this pass.
+            ContentBlock::Chart(_)
+            | ContentBlock::Diagram(_)
+            | ContentBlock::Math(_)
+            | ContentBlock::Image(_)
+            | ContentBlock::Table(_)
+            | ContentBlock::Shape(_) => {},
+        }
+    }
+
+    baselines
 }
 
 /// Solid opaque black fill used for text rendering.
@@ -809,11 +896,67 @@ fn draw_text_at_bbox(
     );
 }
 
-/// Draw body content blocks at the given bounding box.
+/// Draw text at an explicit Surface-Y baseline position within a bounding box.
 ///
-/// Iterates text-bearing blocks (Text, Bullets) and draws their inline text.
-/// Non-text blocks (Chart, Diagram, Math, Image, Table, Shape) are skipped in
-/// this pass — they are handled separately in their own frame draw logic.
+/// Unlike [`draw_text_at_bbox`] (which computes the baseline from the bounding
+/// box using the 80%-of-height approximation), this function accepts a
+/// pre-computed `baseline_y` in Surface points. The Surface-X origin is still
+/// derived from `bbox.x` via `emu_to_pt`.
+///
+/// Used by `draw_body_blocks` to position each body item at its own cursor
+/// position (computed by [`body_item_baselines`]), preventing all items from
+/// overprinting at the same baseline.
+///
+/// Paint-state determinism: sets fill to opaque black and clears stroke before
+/// `surface.draw_text()`, identical to [`draw_text_at_bbox`] (OBS-044-22-01).
+fn draw_text_at_y(
+    surface: &mut krilla::surface::Surface<'_>,
+    text: &str,
+    bbox: &BoundingBox,
+    baseline_y: f32,
+    font_size: f32,
+    font: Option<&krilla::text::Font>,
+) {
+    let Some(font) = font else {
+        let preview: String = text.chars().take(20).collect();
+        tracing::debug!(
+            text_preview = %preview,
+            baseline_y,
+            "skipping text draw: no resolved font"
+        );
+        return;
+    };
+    if text.is_empty() {
+        return;
+    }
+
+    surface.set_fill(Some(text_fill_black()));
+    surface.set_stroke(None);
+
+    let surface_x = emu_to_pt(bbox.x);
+    let start = Point::from_xy(surface_x, baseline_y);
+    surface.draw_text(
+        start,
+        font.clone(),
+        font_size,
+        text,
+        false,
+        TextDirection::Auto,
+    );
+}
+
+/// Draw body content blocks at the given bounding box, stacking each item
+/// at a distinct baseline to prevent overprinting.
+///
+/// Uses [`body_item_baselines`] to compute a per-item baseline cursor that
+/// advances by `font_size * BODY_LINE_LEADING` (1.2×) after each drawn item.
+/// The first item's baseline equals `text_baseline_surface_y(bbox)` — identical
+/// to the single-item behaviour used by Title and Subtitle frames — so existing
+/// single-block body frames are unaffected by this change.
+///
+/// Non-text blocks (`Chart`, `Diagram`, `Math`, `Image`, `Table`, `Shape`) are
+/// skipped in this pass — they are handled separately in their own frame draw
+/// logic and do not consume cursor space.
 fn draw_body_blocks(
     surface: &mut krilla::surface::Surface<'_>,
     blocks: &[slideforge_types::ContentBlock],
@@ -822,23 +965,28 @@ fn draw_body_blocks(
 ) {
     use slideforge_types::ContentBlock;
 
+    // Compute per-item baselines using the pure cursor-advance function so that
+    // the drawing path and the test path share the identical geometry.
+    let baselines = body_item_baselines(blocks, bbox);
+    let mut baseline_iter = baselines.into_iter();
+
     for block in blocks {
         match block {
             ContentBlock::Text(text_block) => {
                 let text = extract_inline_text(&text_block.inlines);
-                if !text.is_empty() {
-                    draw_text_at_bbox(surface, &text, bbox, 18.0, font);
+                if !text.is_empty() && let Some(baseline_y) = baseline_iter.next() {
+                    draw_text_at_y(surface, &text, bbox, baseline_y, 18.0, font);
                 }
             },
             ContentBlock::Bullets(items) => {
                 for item in items {
                     let text = extract_inline_text(&item.inlines);
-                    if !text.is_empty() {
-                        draw_text_at_bbox(surface, &text, bbox, 16.0, font);
+                    if !text.is_empty() && let Some(baseline_y) = baseline_iter.next() {
+                        draw_text_at_y(surface, &text, bbox, baseline_y, 16.0, font);
                     }
                 }
             },
-            // Other block types are not drawn in this pass.
+            // Non-text blocks do not advance the cursor in this pass.
             ContentBlock::Chart(_)
             | ContentBlock::Diagram(_)
             | ContentBlock::Math(_)
@@ -1824,6 +1972,227 @@ mod tests {
         assert!(
             has_eof,
             "F-044-004: PDF must end with %%EOF marker (well-formed PDF)"
+        );
+    }
+
+    // ─── F-P2-001: body-block overprint (all items share same baseline) ───────
+
+    /// F-P2-001 (failing before fix): `draw_body_blocks` with ≥ 2 text blocks
+    /// must place each block at a DISTINCT baseline that advances downward
+    /// (increasing Surface-Y) through the body frame.
+    ///
+    /// ## What this proves (TD-VSDD-059 load-bearing assertion)
+    ///
+    /// Without the fix every block calls `draw_text_at_bbox(…, bbox, …)` which
+    /// always passes the same `bbox` → `text_baseline_surface_y(bbox)` returns
+    /// the identical value for every call → all N paragraphs OVERPRINT on one line.
+    ///
+    /// The fix maintains a mutable cursor that starts at the first-item baseline
+    /// (`text_baseline_surface_y(bbox)`) and advances by `font_size *
+    /// BODY_LINE_LEADING` (standard 1.2× leading) after each drawn item.
+    ///
+    /// ## Concrete numbers for the fixture in this test
+    ///
+    /// Body frame: `bbox.y = 0`, `bbox.height = 914_400 EMU` (= 72 pt).
+    ///
+    /// Initial cursor (item 0):
+    ///   `text_baseline_surface_y(bbox) = emu_to_pt(0) + emu_to_pt(914_400) * 0.8
+    ///                                  = 0.0 + 72.0 * 0.8 = 57.6 pt`
+    ///
+    /// Item 0 is a `Text` block → `font_size` = 18.0 pt.
+    /// Advance: `18.0 * 1.2 = 21.6 pt` → cursor after item 0 = 57.6 + 21.6 = 79.2 pt.
+    ///
+    /// Item 1 is a `Text` block → `font_size` = 18.0 pt, baseline = 79.2 pt.
+    /// Advance: `18.0 * 1.2 = 21.6 pt` → cursor after item 1 = 79.2 + 21.6 = 100.8 pt.
+    ///
+    /// Item 2 is a `Text` block → `font_size` = 18.0 pt, baseline = 100.8 pt.
+    ///
+    /// Assertions:
+    /// - baselines[1] > baselines[0]  (strictly lower = larger Surface-Y = stacked)
+    /// - baselines[2] > baselines[1]
+    /// - baselines[1] ≈ 79.2, baselines[2] ≈ 100.8
+    ///
+    /// This test drives `body_item_baselines` — a `pub(crate)` pure function that
+    /// the fixed `draw_body_blocks` also uses, giving a non-vacuous load-bearing
+    /// assertion (TD-VSDD-059).
+    #[test]
+    fn test_f_p2_001_body_blocks_baselines_are_distinct_and_stack_downward() {
+        use slideforge_types::{ContentBlock, InlineNode, SourceSpan, TextBlock};
+
+        use crate::coords::emu_to_pt;
+
+        // Body frame: top-left at (0, 0), height = 72 pt (= 914_400 EMU).
+        let bbox = BoundingBox {
+            x: Emu(0),
+            y: Emu(0),
+            width: Emu(9_144_000),
+            height: Emu(72 * 12_700),
+        };
+
+        // 3 text blocks (each a distinct paragraph).
+        let make_text_block = |s: &'static str| {
+            ContentBlock::Text(TextBlock {
+                inlines: vec![InlineNode::Plain(Arc::from(s))],
+                span: SourceSpan::default(),
+            })
+        };
+        let blocks = vec![
+            make_text_block("First paragraph"),
+            make_text_block("Second paragraph"),
+            make_text_block("Third paragraph"),
+        ];
+
+        // Call the pure baseline sequence function (extracted from draw_body_blocks).
+        let baselines = body_item_baselines(&blocks, &bbox);
+
+        assert_eq!(
+            baselines.len(),
+            3,
+            "expected 3 baselines for 3 text blocks; got {}",
+            baselines.len()
+        );
+
+        // Item 0: text_baseline_surface_y(bbox) = 0 + 72 * 0.8 = 57.6 pt.
+        let initial_baseline = text_baseline_surface_y(&bbox);
+        let expected_item0 = initial_baseline; // 57.6
+        let font_size_text: f32 = 18.0;
+        let advance = font_size_text * BODY_LINE_LEADING;
+        let expected_item1 = expected_item0 + advance; // 57.6 + 21.6 = 79.2
+        let expected_item2 = expected_item1 + advance; // 79.2 + 21.6 = 100.8
+
+        assert!(
+            (baselines[0] - expected_item0).abs() < 0.001,
+            "item 0 baseline must equal {expected_item0:.3} pt (= initial cursor); got {:.3}",
+            baselines[0]
+        );
+        assert!(
+            (baselines[1] - expected_item1).abs() < 0.001,
+            "item 1 baseline must equal {expected_item1:.3} pt (= item0 + 18*1.2); got {:.3}",
+            baselines[1]
+        );
+        assert!(
+            (baselines[2] - expected_item2).abs() < 0.001,
+            "item 2 baseline must equal {expected_item2:.3} pt (= item1 + 18*1.2); got {:.3}",
+            baselines[2]
+        );
+
+        // Strict ordering: each baseline strictly greater than previous (stacking downward).
+        assert!(
+            baselines[1] > baselines[0],
+            "F-P2-001: item 1 baseline ({:.3}) must be strictly greater than item 0 baseline \
+             ({:.3}) — overprint means they would be equal",
+            baselines[1],
+            baselines[0]
+        );
+        assert!(
+            baselines[2] > baselines[1],
+            "F-P2-001: item 2 baseline ({:.3}) must be strictly greater than item 1 baseline \
+             ({:.3}) — overprint means they would be equal",
+            baselines[2],
+            baselines[1]
+        );
+
+        // Sanity: initial baseline matches emu_to_pt formula.
+        let expected_initial = emu_to_pt(Emu(0)) + emu_to_pt(Emu(72 * 12_700)) * 0.8;
+        assert!(
+            (baselines[0] - expected_initial).abs() < 0.001,
+            "initial cursor must equal text_baseline_surface_y(bbox) = {expected_initial:.3}; \
+             got {:.3}",
+            baselines[0]
+        );
+    }
+
+    /// F-P2-001 (bullet variant): `draw_body_blocks` with a Bullets block
+    /// containing ≥ 2 items must place each bullet at a DISTINCT baseline.
+    ///
+    /// ## Concrete numbers
+    ///
+    /// Body frame: `bbox.y = 0`, `bbox.height = 914_400 EMU` (= 72 pt).
+    ///
+    /// Initial cursor = `text_baseline_surface_y(bbox)` = 57.6 pt.
+    ///
+    /// Bullets use `font_size` = 16.0 pt.
+    /// Advance per bullet = `16.0 * 1.2 = 19.2 pt`.
+    ///
+    /// Bullet 0 baseline = 57.6 pt.
+    /// Bullet 1 baseline = 57.6 + 19.2 = 76.8 pt.
+    /// Bullet 2 baseline = 76.8 + 19.2 = 96.0 pt.
+    #[test]
+    fn test_f_p2_001_bullet_items_baselines_are_distinct_and_stack_downward() {
+        use slideforge_types::{BulletItem, ContentBlock, InlineNode, SourceSpan};
+
+        use crate::coords::emu_to_pt;
+
+        let bbox = BoundingBox {
+            x: Emu(0),
+            y: Emu(0),
+            width: Emu(9_144_000),
+            height: Emu(72 * 12_700),
+        };
+
+        let make_bullet = |s: &'static str| BulletItem {
+            inlines: vec![InlineNode::Plain(Arc::from(s))],
+            children: vec![],
+            span: SourceSpan::default(),
+        };
+
+        let blocks = vec![ContentBlock::Bullets(vec![
+            make_bullet("First bullet"),
+            make_bullet("Second bullet"),
+            make_bullet("Third bullet"),
+        ])];
+
+        let baselines = body_item_baselines(&blocks, &bbox);
+
+        assert_eq!(
+            baselines.len(),
+            3,
+            "expected 3 baselines for 3 bullet items; got {}",
+            baselines.len()
+        );
+
+        let initial_baseline = text_baseline_surface_y(&bbox); // 57.6
+        let font_size_bullets: f32 = 16.0;
+        let advance = font_size_bullets * BODY_LINE_LEADING; // 19.2
+        let expected_item0 = initial_baseline;
+        let expected_item1 = expected_item0 + advance; // 76.8
+        let expected_item2 = expected_item1 + advance; // 96.0
+
+        assert!(
+            (baselines[0] - expected_item0).abs() < 0.001,
+            "bullet 0 baseline must equal {expected_item0:.3} pt; got {:.3}",
+            baselines[0]
+        );
+        assert!(
+            (baselines[1] - expected_item1).abs() < 0.001,
+            "bullet 1 baseline must equal {expected_item1:.3} pt (= bullet0 + 16*1.2); got {:.3}",
+            baselines[1]
+        );
+        assert!(
+            (baselines[2] - expected_item2).abs() < 0.001,
+            "bullet 2 baseline must equal {expected_item2:.3} pt (= bullet1 + 16*1.2); got {:.3}",
+            baselines[2]
+        );
+
+        assert!(
+            baselines[1] > baselines[0],
+            "F-P2-001: bullet 1 baseline ({:.3}) must be > bullet 0 baseline ({:.3})",
+            baselines[1],
+            baselines[0]
+        );
+        assert!(
+            baselines[2] > baselines[1],
+            "F-P2-001: bullet 2 baseline ({:.3}) must be > bullet 1 baseline ({:.3})",
+            baselines[2],
+            baselines[1]
+        );
+
+        // Verify leading constant value.
+        let expected_advance = emu_to_pt(Emu(72 * 12_700)) * 0.0; // just 0 for now, structure check
+        let _ = expected_advance; // suppress unused warning — advance formula tested above
+        assert!(
+            (advance - 19.2_f32).abs() < 0.001,
+            "BODY_LINE_LEADING (1.2) × 16.0 pt must equal 19.2 pt; got {advance:.3}"
         );
     }
 

@@ -1760,7 +1760,7 @@ fn test_bc_4_03_001_document_outline_present_in_pdf() {
     );
 }
 
-/// BC-4.03.001 AC-010: For a 3-slide deck with titles ["Overview", "Data", "Summary"],
+/// BC-4.03.001 AC-010: For a 3-slide deck with titles \["Overview", "Data", "Summary"\],
 /// the `/Outlines` tree contains entries with those labels.
 ///
 /// ## How outline label text is written
