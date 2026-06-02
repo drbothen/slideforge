@@ -37,7 +37,10 @@
 //!    - Diagram frames: `svg_embed::embed_normalized_svg()`.
 //! 4. Calls `document.set_tag_tree(tag_tree)` with the assembled structural tree.
 //! 5. Calls `document.finish()` → `KrillaResult<Vec<u8>>`.
-//! 6. Maps `KrillaError` → `PdfExportError::Serialize` → `ExportError::RenderError`.
+//! 6. Maps `KrillaError` with two distinct routes:
+//!    `KrillaError::Validation` → `PdfExportError::ValidationFailed`;
+//!    all other `KrillaError` variants → `PdfExportError::Serialize`.
+//!    Both ultimately map to `ExportError::RenderError` at the plugin-trait boundary.
 //! 7. Returns the PDF bytes.
 //!
 //! No subprocess is spawned. No FFI to C libraries. Pure Rust.
@@ -57,10 +60,13 @@
 
 use krilla::Document;
 use krilla::color::rgb;
+use krilla::configure::{Configuration, Validator};
 use krilla::geom::Point;
+use krilla::metadata::Metadata;
 use krilla::num::NormalizedF32;
 use krilla::page::PageSettings;
 use krilla::paint::{Fill, FillRule};
+use krilla::tagging::{ArtifactType, ContentTag};
 use krilla::text::TextDirection;
 use slideforge_layout::LaidOutDeck;
 use slideforge_layout::types::{BoundingBox, FrameContent};
@@ -70,6 +76,7 @@ use slideforge_types::{Brand, Deck};
 use crate::coords::emu_to_pt;
 use crate::error::PdfExportError;
 use crate::font::load_font_data;
+use crate::outline::{build_krilla_outline, build_outline_entries};
 use crate::svg_embed::embed_normalized_svg;
 use crate::tag_engine::SlideTagEngine;
 
@@ -164,6 +171,10 @@ impl PdfExporter {
         brand: &Brand,
         opts: &ExportOptions,
     ) -> Result<Vec<u8>, PdfExportError> {
+        // AC-012: production path uses Validator::UA1 in BOTH export() and
+        // export_uncompressed().  The uncompressed path is used by integration
+        // tests that need to scan PDF content streams — it still must be UA-1
+        // compliant.
         self.generate_pdf_inner(
             deck,
             laid_out,
@@ -171,6 +182,7 @@ impl PdfExporter {
             opts,
             krilla::SerializeSettings {
                 compress_content_streams: false,
+                configuration: Configuration::new_with_validator(Validator::UA1),
                 ..krilla::SerializeSettings::default()
             },
         )
@@ -192,6 +204,12 @@ impl PdfExporter {
     ///   is skipped with a `tracing::warn!` — the page still renders.
     /// - Diagram frames: `svg_embed::embed_normalized_svg()` at the mapped position.
     ///
+    /// ## PDF/UA-1 validator (AC-012 / BC-4.03.001 invariant 5)
+    ///
+    /// The production export path uses `Validator::UA1` via
+    /// `Configuration::new_with_validator(Validator::UA1)`. Any `KrillaError::Validation`
+    /// is propagated as a fatal `PdfExportError::ValidationFailed` — it is NOT silently swallowed.
+    ///
     /// ## Coordinate invariant (BC-4.03.005 / Architecture Compliance Rule 2)
     ///
     /// ALL EMU-to-point conversions go through `coords::emu_to_pt()`. No inline
@@ -204,7 +222,7 @@ impl PdfExporter {
     /// - Invalid page dimensions.
     /// - Tag tree assembly failure.
     /// - SVG embed failure.
-    /// - Document serialization failure.
+    /// - Document serialization failure (including `Validator::UA1` rejection).
     ///
     /// Note: Font resolution failures are non-fatal — text is skipped with a
     /// structured warning, and the export continues. This ensures a partial PDF
@@ -217,13 +235,14 @@ impl PdfExporter {
         brand: &Brand,
         opts: &ExportOptions,
     ) -> Result<Vec<u8>, PdfExportError> {
-        self.generate_pdf_inner(
-            deck,
-            laid_out,
-            brand,
-            opts,
-            krilla::SerializeSettings::default(),
-        )
+        // AC-012 / BC-4.03.001 invariant 5: production export MUST use Validator::UA1.
+        // `Configuration::new_with_validator` never returns None for UA1 (it selects a
+        // compatible PDF version automatically).
+        let settings = krilla::SerializeSettings {
+            configuration: Configuration::new_with_validator(Validator::UA1),
+            ..krilla::SerializeSettings::default()
+        };
+        self.generate_pdf_inner(deck, laid_out, brand, opts, settings)
     }
 
     /// Core PDF generation with explicit [`krilla::SerializeSettings`].
@@ -236,7 +255,7 @@ impl PdfExporter {
     /// Same error conditions as [`generate_pdf`].
     fn generate_pdf_inner(
         &self,
-        _deck: &Deck,
+        deck: &Deck,
         laid_out: &LaidOutDeck,
         brand: &Brand,
         _opts: &ExportOptions,
@@ -264,10 +283,40 @@ impl PdfExporter {
         // Collect per-slide Part groups for later assembly into the deck tag tree.
         let mut slide_parts = Vec::with_capacity(laid_out.slides.len());
 
-        for slide in &laid_out.slides {
-            // Convert page dimensions via coords:: — Architecture Compliance Rule 2.
-            let width_pts = emu_to_pt(laid_out.page_size.width);
-            let height_pts = emu_to_pt(laid_out.page_size.height);
+        // Pre-compute page width/height in points — identical for all slides.
+        let width_pts = emu_to_pt(laid_out.page_size.width);
+        let height_pts = emu_to_pt(laid_out.page_size.height);
+
+        // Build the PDF document outline (AC-010 / BC-4.03.001 postcondition 1).
+        //
+        // ISO 14289-1 §7.1: an outline is mandatory when the document contains headings,
+        // which every slideforge deck with title-type slides does.
+        //
+        // Delegated to `outline::build_outline_entries` + `outline::build_krilla_outline`
+        // (F-045-P1-004): the intermediate `Vec<OutlineEntry>` is unit-testable (count,
+        // labels, destination page indices) without serialising a full PDF.
+        //
+        // F-045-P1-005 invariant: label comes from deck.slides[source_index]; destination
+        // page index is the enumerate position. The debug_assert in build_outline_entries
+        // fires when source_index is out-of-bounds — see outline.rs for details.
+        let outline_entries = build_outline_entries(deck, laid_out);
+        let outline = build_krilla_outline(&outline_entries);
+
+        for (page_idx, slide) in laid_out.slides.iter().enumerate() {
+            // Resolve the slide title for AC-011 Hn /Title attribute.
+            //
+            // AC-011 (BC-4.03.001 postcondition 1): every /H1–/H6 structure element must
+            // carry a /Title attribute whose value is the heading text.  The title is
+            // sourced from deck.slides[source_index].title_str(); fallback "Slide N"
+            // (1-based) is used when title_str() returns None.
+            let slide_title: String = deck
+                .slides
+                .get(slide.source_index)
+                .and_then(|s| s.title_str())
+                .map_or_else(
+                    || format!("Slide {}", page_idx + 1),
+                    std::borrow::ToOwned::to_owned,
+                );
 
             let page_settings = PageSettings::from_wh(width_pts, height_pts).ok_or_else(|| {
                 PdfExportError::Serialize {
@@ -281,18 +330,139 @@ impl PdfExporter {
             let mut page = document.start_page_with(page_settings);
 
             // Build the structural tag sub-tree for this slide.
-            let part_result = tag_engine.tag_slide(slide)?;
+            // `mut` required: the draw loop inserts Identifier leaf nodes into
+            // `part_result.part.children` for F-045-C2 MCID linkage.
+            //
+            // Pass `Some(&slide_title)` so that Hn structure elements carry the
+            // /Title attribute required by PDF/UA-1 (AC-011).
+            let mut part_result = tag_engine.tag_slide_with_title(slide, Some(&slide_title))?;
 
             // Obtain the krilla Surface and draw slide content.
             let mut surface = page.surface();
 
-            for frame in &slide.frames {
-                draw_frame(
-                    &mut surface,
-                    &frame.bbox,
-                    &frame.content,
-                    resolved_font.as_ref(),
-                )?;
+            for (frame_idx, frame) in slide.frames.iter().enumerate() {
+                if part_result.decorative_frame_indices.contains(&frame_idx) {
+                    // F-045-C1: Decorative frames are excluded from the structure tree
+                    // (they are in `decorative_frame_indices`). They MUST also be wrapped
+                    // in a PDF Artifact marked-content sequence in the content stream, so
+                    // PDF readers (screen readers, veraPDF) know to skip them as non-semantic.
+                    //
+                    // `ContentTag::Artifact(ArtifactType::Other)` emits:
+                    //   `/Artifact BMC ... EMC`
+                    // in the content stream when tagging is enabled. This satisfies
+                    // BC-4.03.001 postcondition 1 ("decorative elements marked as Artifacts").
+                    //
+                    // `start_tagged` returns `Identifier::dummy()` for Artifacts (the Artifact
+                    // marking is NOT linked to the structure tree — it is only a content-stream
+                    // marker). We discard the returned identifier.
+                    let _artifact_id =
+                        surface.start_tagged(ContentTag::Artifact(ArtifactType::Other));
+                    draw_frame(
+                        &mut surface,
+                        &frame.bbox,
+                        &frame.content,
+                        resolved_font.as_ref(),
+                    )?;
+                    surface.end_tagged();
+                } else if let Some(child_indices) = part_result
+                    .frame_child_part_indices
+                    .get(frame_idx)
+                    .and_then(|opt| opt.as_ref())
+                {
+                    // F-045-C2 / F-P3-001: Non-decorative frames with a corresponding
+                    // structure tree mapping are wrapped in tagged marked-content sequences.
+                    //
+                    // Single-block frames (Title, Subtitle, TextRun, Image, Shape, ErrorSlide):
+                    //   `child_indices` has exactly one element. We open ONE tagged region
+                    //   for the entire frame and insert the Identifier into that one group.
+                    //
+                    // Multi-block Body frames (e.g., Text + Bullets):
+                    //   `child_indices` has one entry PER content block.  We open ONE tagged
+                    //   region per block and insert each Identifier into its own group.
+                    //   This gives each structure group (P, L/LI/LBody, etc.) its own
+                    //   MCID leaf, satisfying PDF/UA-1's requirement that grouping elements
+                    //   reference actual marked content (BC-4.03.001 F-045-C2).
+                    //
+                    // `ContentTag::Other` emits `/P BDC<</MCID N>>` in the content stream.
+                    // The returned `Identifier` is pushed as a leaf into the matching Part
+                    // child group, linking the structure tree element to the marked content.
+                    if child_indices.len() == 1 {
+                        // Single-block path (unchanged behavior for all non-Body frames).
+                        let child_idx = child_indices[0];
+                        let id = surface.start_tagged(ContentTag::Other);
+                        draw_frame(
+                            &mut surface,
+                            &frame.bbox,
+                            &frame.content,
+                            resolved_font.as_ref(),
+                        )?;
+                        surface.end_tagged();
+                        if let Some(krilla::tagging::Node::Group(child_group)) =
+                            part_result.part.children.get_mut(child_idx)
+                        {
+                            child_group.push(id);
+                        } else {
+                            tracing::debug!(
+                                frame_idx,
+                                child_idx,
+                                "frame_child_part_indices pointed to non-Group or out-of-bounds \
+                                 child; Identifier not inserted (tag tree may lack leaf for this frame)"
+                            );
+                        }
+                    } else {
+                        // Multi-block path (Body frames with ≥2 content blocks).
+                        //
+                        // Open one tagged region per block and route each Identifier into the
+                        // corresponding Part child group.  `child_indices[k]` is the Part
+                        // child index for the k-th block that produced a tag group.
+                        //
+                        // We pair the child_indices with the drawable blocks from the frame.
+                        // `draw_body_blocks_tagged` handles the per-block cursor logic; here
+                        // we replicate the block-iteration structure to emit matching tagged
+                        // regions.
+                        if let FrameContent::Body(content_blocks) = &frame.content {
+                            draw_body_blocks_tagged(
+                                &mut surface,
+                                content_blocks,
+                                &frame.bbox,
+                                resolved_font.as_ref(),
+                                child_indices,
+                                &mut part_result.part,
+                            )?;
+                        } else {
+                            // Defensive: multi-index mapping on a non-Body frame is unexpected.
+                            // Fall back to a single tagged region covering the whole frame.
+                            tracing::debug!(
+                                frame_idx,
+                                "multi-index frame_child_part_indices on non-Body frame; \
+                                 using single tagged region as fallback"
+                            );
+                            let child_idx = child_indices[0];
+                            let id = surface.start_tagged(ContentTag::Other);
+                            draw_frame(
+                                &mut surface,
+                                &frame.bbox,
+                                &frame.content,
+                                resolved_font.as_ref(),
+                            )?;
+                            surface.end_tagged();
+                            if let Some(krilla::tagging::Node::Group(child_group)) =
+                                part_result.part.children.get_mut(child_idx)
+                            {
+                                child_group.push(id);
+                            }
+                        }
+                    }
+                } else {
+                    // Frame with no corresponding structure tree child AND not decorative
+                    // (e.g., Empty frames). Draw without tagging.
+                    draw_frame(
+                        &mut surface,
+                        &frame.bbox,
+                        &frame.content,
+                        resolved_font.as_ref(),
+                    )?;
+                }
             }
 
             surface.finish();
@@ -301,6 +471,54 @@ impl PdfExporter {
             // Collect the Part group for deck-level tree assembly.
             slide_parts.push(part_result.part);
         }
+
+        // Wire document-level metadata (BC-4.03.001 AC-007: /Lang from deck metadata).
+        //
+        // `krilla::Document::set_metadata` writes the document's metadata dictionary
+        // and causes krilla to emit `/Lang` in the PDF catalog (via
+        // `catalog.lang(TextStr(lang))` in `chunk_container.rs:189`).
+        //
+        // F-045-P1-007 / BC-4.03.001 defence-in-depth:
+        //
+        // When `Validator::UA1` is active, a missing `/Lang` is a fatal validation
+        // error (`ValidationError::NoDocumentLanguage`). Rather than silently continuing
+        // and letting krilla catch it at `document.finish()`, we fail fast here with a
+        // structured `ValidationFailed` error. This makes the failure cause explicit to
+        // the caller and prevents shipping a non-compliant PDF.
+        //
+        // The upstream accessibility validator (BC-5.01.001) should have rejected the
+        // deck before reaching the export stage. This check is defence-in-depth — we do
+        // not rely solely on the upstream check.
+        let Some(lang) = &deck.metadata.lang else {
+            return Err(PdfExportError::ValidationFailed {
+                message: "PDF/UA-1 compliance requires a document language (/Lang); \
+                          deck.metadata.lang is None — set lang in the deck metadata"
+                    .to_owned(),
+            });
+        };
+
+        tracing::debug!(
+            lang = lang.as_ref(),
+            "wiring document /Lang from deck metadata"
+        );
+
+        // Build the metadata object: language is always present (guarded above);
+        // title is wired when present.
+        let mut meta = Metadata::new().language(lang.as_ref().to_owned());
+        if let Some(title) = &deck.metadata.title {
+            meta = meta.title(title.as_ref().to_owned());
+        }
+        document.set_metadata(meta);
+
+        // Wire the PDF document outline (AC-010 / BC-4.03.001 postcondition 1 / invariant 6).
+        //
+        // ISO 14289-1 §7.1 requires a document outline whenever headings (H1–H6) are
+        // present. Every slideforge deck with title-type slides has H1 headings.
+        //
+        // The `outline` was built above (one entry per slide, in source order).
+        // `document.set_outline` stores it in the SerializeContext; krilla writes
+        // `catalog.outlines(ref)` → `/Outlines` in the PDF catalog on `document.finish()`.
+        document.set_outline(outline);
 
         // Assemble the per-slide Part groups into a single deck-level TagTree
         // and attach it to the document before finish().
@@ -312,8 +530,25 @@ impl PdfExporter {
 
         // Serialize to PDF bytes. `Document::finish()` returns
         // `KrillaResult<Vec<u8>>` (i.e. `Result<Vec<u8>, KrillaError>`).
-        document.finish().map_err(|e| PdfExportError::Serialize {
-            message: format!("krilla serialization error: {e:?}"),
+        //
+        // F-045-P1-003 / BC-4.03.001 invariant 5: `KrillaError::Validation` MUST map to
+        // `PdfExportError::ValidationFailed`, NOT `Serialize`. Any other `KrillaError`
+        // variant maps to `Serialize`. This distinction is observable in tests that
+        // assert the specific variant type (e.g., test_bc_4_03_001_validator_ua1_rejects_*).
+        document.finish().map_err(|e| match e {
+            krilla::error::KrillaError::Validation(ref violations) => {
+                let message = violations
+                    .iter()
+                    .map(|v| format!("{v:?}"))
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                PdfExportError::ValidationFailed {
+                    message: format!("PDF/UA-1 validation failed: {message}"),
+                }
+            },
+            other => PdfExportError::Serialize {
+                message: format!("krilla serialization error: {other:?}"),
+            },
         })
     }
 }
@@ -431,13 +666,22 @@ fn try_resolve_font(family: &str) -> Option<krilla::text::Font> {
 /// the box top (20% descender allowance below the baseline). Text is guaranteed
 /// to land within `[0, SLIDE_HEIGHT_PT]` for any valid IR layout.
 ///
-/// Precise multi-line typography is deferred to STORY-045 (text flow engine).
+/// For body frames (`FrameContent::Body`), each paragraph (`ContentBlock::Text`)
+/// and each bullet item (`ContentBlock::Bullets`) is placed at a distinct
+/// baseline using a per-item vertical cursor. The cursor starts at
+/// `text_baseline_surface_y(bbox)` (the same 80%-of-height formula used for
+/// single-item frames) and advances by `font_size * BODY_LINE_LEADING` (1.2×)
+/// after each drawn item. This prevents all body items from overprinting at the
+/// same baseline. Single-block body frames are unaffected — their single baseline
+/// equals the pre-existing formula exactly.
+///
+/// Intra-block text reflow (word-wrapping a single long paragraph across multiple
+/// lines) and brand-driven font-size/color overrides remain future story work.
 ///
 /// ## Font sizes
 ///
 /// Default font sizes: Title 36pt, Subtitle 28pt, Body text 18pt, Bullets 16pt.
-/// These defaults are overridden when brand template font sizes are available
-/// (STORY-045 scope).
+/// Brand-template font size overrides are a future story enhancement.
 ///
 /// # Errors
 ///
@@ -514,6 +758,18 @@ fn draw_frame(
     Ok(())
 }
 
+/// Standard line-height leading multiplier used in body text stacking.
+///
+/// Each successive body item's baseline is advanced by `font_size * BODY_LINE_LEADING`
+/// from the previous item's baseline. The value 1.2 is the standard typographic
+/// "normal" leading (120% of em-size), consistent with CSS `line-height: normal`
+/// and the `OpenDocument` / OOXML default `<a:lnSpc>` of 100% + 20% leading.
+///
+/// Integer EMUs are NOT used here because font sizes are specified in points
+/// (f32), consistent with krilla's Surface API. No EMU-to-pt conversion is
+/// needed for leading arithmetic.
+pub(crate) const BODY_LINE_LEADING: f32 = 1.2;
+
 /// Compute the Surface Y coordinate of the text baseline for a bounding box.
 ///
 /// krilla's `Surface` is top-left, Y-down (DIR-044-001). The text baseline is
@@ -536,6 +792,72 @@ fn draw_frame(
 pub(crate) fn text_baseline_surface_y(bbox: &BoundingBox) -> f32 {
     let surface_top_y = emu_to_pt(bbox.y);
     surface_top_y + emu_to_pt(bbox.height) * 0.8
+}
+
+/// Compute the ordered sequence of Surface-Y baselines for each drawable item in
+/// a body block list.
+///
+/// This pure function encodes the same cursor-advance logic as `draw_body_blocks`
+/// and is `pub(crate)` so that tests can assert concrete baseline values without
+/// needing a krilla `Surface`.
+///
+/// ## Cursor model
+///
+/// - The cursor starts at `text_baseline_surface_y(bbox)` (80% of the body frame
+///   height below the frame's top edge — identical to the single-item formula
+///   that titles and subtitles use, preserving single-block backward compatibility).
+/// - For each drawable item the cursor is used as the baseline Y, then advanced by
+///   `font_size * BODY_LINE_LEADING`:
+///   - `Text` blocks use font size **18.0 pt**.
+///   - `BulletItem`s use font size **16.0 pt**.
+/// - Non-text blocks (`Chart`, `Diagram`, `Math`, `Image`, `Table`, `Shape`) do
+///   not consume cursor space (they are not drawn in this pass).
+///
+/// ## Relationship to `draw_body_blocks`
+///
+/// `draw_body_blocks` calls this function to obtain the baseline sequence and then
+/// passes each value to `draw_text_at_bbox_at_y`, keeping the drawing and geometry
+/// logic cleanly separated. Tests call `body_item_baselines` directly.
+pub(crate) fn body_item_baselines(
+    blocks: &[slideforge_types::ContentBlock],
+    bbox: &BoundingBox,
+) -> Vec<f32> {
+    use slideforge_types::ContentBlock;
+
+    let mut cursor_y: f32 = text_baseline_surface_y(bbox);
+    let mut baselines: Vec<f32> = Vec::new();
+
+    for block in blocks {
+        match block {
+            ContentBlock::Text(text_block) => {
+                let text = extract_inline_text(&text_block.inlines);
+                if !text.is_empty() {
+                    let font_size: f32 = 18.0;
+                    baselines.push(cursor_y);
+                    cursor_y += font_size * BODY_LINE_LEADING;
+                }
+            },
+            ContentBlock::Bullets(items) => {
+                for item in items {
+                    let text = extract_inline_text(&item.inlines);
+                    if !text.is_empty() {
+                        let font_size: f32 = 16.0;
+                        baselines.push(cursor_y);
+                        cursor_y += font_size * BODY_LINE_LEADING;
+                    }
+                }
+            },
+            // Non-text blocks do not advance the cursor in this pass.
+            ContentBlock::Chart(_)
+            | ContentBlock::Diagram(_)
+            | ContentBlock::Math(_)
+            | ContentBlock::Image(_)
+            | ContentBlock::Table(_)
+            | ContentBlock::Shape(_) => {},
+        }
+    }
+
+    baselines
 }
 
 /// Solid opaque black fill used for text rendering.
@@ -624,11 +946,67 @@ fn draw_text_at_bbox(
     );
 }
 
-/// Draw body content blocks at the given bounding box.
+/// Draw text at an explicit Surface-Y baseline position within a bounding box.
 ///
-/// Iterates text-bearing blocks (Text, Bullets) and draws their inline text.
-/// Non-text blocks (Chart, Diagram, Math, Image, Table, Shape) are skipped in
-/// this pass — they are handled separately in their own frame draw logic.
+/// Unlike [`draw_text_at_bbox`] (which computes the baseline from the bounding
+/// box using the 80%-of-height approximation), this function accepts a
+/// pre-computed `baseline_y` in Surface points. The Surface-X origin is still
+/// derived from `bbox.x` via `emu_to_pt`.
+///
+/// Used by `draw_body_blocks` to position each body item at its own cursor
+/// position (computed by [`body_item_baselines`]), preventing all items from
+/// overprinting at the same baseline.
+///
+/// Paint-state determinism: sets fill to opaque black and clears stroke before
+/// `surface.draw_text()`, identical to [`draw_text_at_bbox`] (OBS-044-22-01).
+fn draw_text_at_y(
+    surface: &mut krilla::surface::Surface<'_>,
+    text: &str,
+    bbox: &BoundingBox,
+    baseline_y: f32,
+    font_size: f32,
+    font: Option<&krilla::text::Font>,
+) {
+    let Some(font) = font else {
+        let preview: String = text.chars().take(20).collect();
+        tracing::debug!(
+            text_preview = %preview,
+            baseline_y,
+            "skipping text draw: no resolved font"
+        );
+        return;
+    };
+    if text.is_empty() {
+        return;
+    }
+
+    surface.set_fill(Some(text_fill_black()));
+    surface.set_stroke(None);
+
+    let surface_x = emu_to_pt(bbox.x);
+    let start = Point::from_xy(surface_x, baseline_y);
+    surface.draw_text(
+        start,
+        font.clone(),
+        font_size,
+        text,
+        false,
+        TextDirection::Auto,
+    );
+}
+
+/// Draw body content blocks at the given bounding box, stacking each item
+/// at a distinct baseline to prevent overprinting.
+///
+/// Uses [`body_item_baselines`] to compute a per-item baseline cursor that
+/// advances by `font_size * BODY_LINE_LEADING` (1.2×) after each drawn item.
+/// The first item's baseline equals `text_baseline_surface_y(bbox)` — identical
+/// to the single-item behaviour used by Title and Subtitle frames — so existing
+/// single-block body frames are unaffected by this change.
+///
+/// Non-text blocks (`Chart`, `Diagram`, `Math`, `Image`, `Table`, `Shape`) are
+/// skipped in this pass — they are handled separately in their own frame draw
+/// logic and do not consume cursor space.
 fn draw_body_blocks(
     surface: &mut krilla::surface::Surface<'_>,
     blocks: &[slideforge_types::ContentBlock],
@@ -637,23 +1015,32 @@ fn draw_body_blocks(
 ) {
     use slideforge_types::ContentBlock;
 
+    // Compute per-item baselines using the pure cursor-advance function so that
+    // the drawing path and the test path share the identical geometry.
+    let baselines = body_item_baselines(blocks, bbox);
+    let mut baseline_iter = baselines.into_iter();
+
     for block in blocks {
         match block {
             ContentBlock::Text(text_block) => {
                 let text = extract_inline_text(&text_block.inlines);
-                if !text.is_empty() {
-                    draw_text_at_bbox(surface, &text, bbox, 18.0, font);
+                if !text.is_empty()
+                    && let Some(baseline_y) = baseline_iter.next()
+                {
+                    draw_text_at_y(surface, &text, bbox, baseline_y, 18.0, font);
                 }
             },
             ContentBlock::Bullets(items) => {
                 for item in items {
                     let text = extract_inline_text(&item.inlines);
-                    if !text.is_empty() {
-                        draw_text_at_bbox(surface, &text, bbox, 16.0, font);
+                    if !text.is_empty()
+                        && let Some(baseline_y) = baseline_iter.next()
+                    {
+                        draw_text_at_y(surface, &text, bbox, baseline_y, 16.0, font);
                     }
                 }
             },
-            // Other block types are not drawn in this pass.
+            // Non-text blocks do not advance the cursor in this pass.
             ContentBlock::Chart(_)
             | ContentBlock::Diagram(_)
             | ContentBlock::Math(_)
@@ -664,11 +1051,151 @@ fn draw_body_blocks(
     }
 }
 
+/// Decide whether a [`slideforge_types::ContentBlock`] produces a PDF structure group.
+///
+/// **OBS-P5-001 fix:** This function is now a thin wrapper around
+/// [`slideforge_types::ContentBlock::produces_structure_group`], which is the
+/// single authoritative definition of the predicate. The match logic is defined
+/// exactly once in `slideforge-types` — adding a new `ContentBlock` variant
+/// forces a compile error there, preventing silent desync between this call site
+/// and [`crate::tag_engine::SlideTagEngine::tag_content_block`].
+///
+/// See [`slideforge_types::ContentBlock::produces_structure_group`] for the
+/// full decision table.
+fn block_is_structure_producing(block: &slideforge_types::ContentBlock) -> bool {
+    block.produces_structure_group()
+}
+
+/// Draw body content blocks in separate tagged marked-content regions — one per block.
+///
+/// Called by the export draw loop for Body frames that have multiple content blocks
+/// (F-P3-001 fix). Each content block that produced a structure group gets its own
+/// `start_tagged` / `end_tagged` pair, with the resulting `Identifier` pushed into
+/// the corresponding Part child group.
+///
+/// ## Why this is separate from `draw_body_blocks`
+///
+/// `draw_body_blocks` knows nothing about tagging — it just draws text at stacked
+/// baselines. For multi-block tagged PDF, we need to interleave `start_tagged` /
+/// `end_tagged` boundaries around EACH block's drawing, not just around the whole
+/// frame. Combining them would require `draw_body_blocks` to take a `Surface` AND
+/// manage krilla's tagging API, violating the single-responsibility principle.
+///
+/// ## Contract (F-P4-001 fix)
+///
+/// `child_indices` is the `Vec<usize>` from `frame_child_part_indices[frame_idx]`.
+/// It has one entry for each content block that `tag_content_block` returned
+/// `Some(group)` for. `draw_body_blocks_tagged` MUST iterate the SAME block universe
+/// as `tag_content_block` — i.e., advance `child_idx_cursor` for EVERY block where
+/// [`block_is_structure_producing`] returns `true`, regardless of whether the block
+/// is currently drawable (Math, Table, Image, etc. may not yet have a draw path).
+///
+/// Blocks that are not structure-producing (empty Bullets, decorative/None-alt
+/// Image/Chart/Diagram/Shape) are drawn WITHOUT a tagged region — they are structural
+/// no-ops. The cursor is NOT advanced for these blocks.
+///
+/// For structure-producing blocks that have no draw path yet (Math, Table, Image,
+/// Chart, Diagram, Shape with alt), we open a tagged region and immediately close it
+/// (empty-but-tagged region). This satisfies PDF/UA-1's requirement that every
+/// grouping element references at least one MCID leaf (BC-4.03.001 invariant-3 /
+/// F-045-C2), even if no visible content is drawn inside.
+///
+/// # Errors
+///
+/// Currently infallible (all drawing is best-effort and non-fatal). The
+/// `Result` return type is kept for forward compatibility — future iterations
+/// may propagate SVG embedding or tagged-region errors.
+// unnecessary_wraps: kept for forward compatibility — future body-block types
+// (e.g., embedded images) may need to propagate errors from SVG embedding.
+#[allow(clippy::similar_names, clippy::unnecessary_wraps)]
+fn draw_body_blocks_tagged(
+    surface: &mut krilla::surface::Surface<'_>,
+    blocks: &[slideforge_types::ContentBlock],
+    bbox: &BoundingBox,
+    font: Option<&krilla::text::Font>,
+    child_indices: &[usize],
+    part: &mut krilla::tagging::TagGroup,
+) -> Result<(), PdfExportError> {
+    use slideforge_types::ContentBlock;
+
+    // Compute per-item baselines using the same pure function as draw_body_blocks
+    // so that the drawing positions are identical to the non-tagged path.
+    let baselines = body_item_baselines(blocks, bbox);
+    let mut baseline_iter = baselines.into_iter();
+
+    // `child_idx_cursor` advances for every block that `block_is_structure_producing`
+    // returns `true` for — IDENTICAL to the set that `tag_content_block` returns Some for.
+    // This keeps the cursor in lockstep with the child_indices recorded by the tag engine.
+    let mut child_idx_cursor: usize = 0;
+
+    for block in blocks {
+        if !block_is_structure_producing(block) {
+            // Not structure-producing (e.g., empty Bullets, decorative/no-alt
+            // Image/Chart/Diagram/Shape): draw nothing and do NOT advance the cursor.
+            // No child_indices slot was allocated by the tag engine for this block.
+            continue;
+        }
+
+        // Structure-producing block: open a tagged region, draw content (if drawable),
+        // close the tagged region, and push the Identifier into the correct Part child group.
+        if let Some(&child_part_idx) = child_indices.get(child_idx_cursor) {
+            let id = surface.start_tagged(ContentTag::Other);
+
+            // Draw whatever content the block has a draw path for.
+            // Blocks without a draw path (Math, Table, Image, Chart, Diagram, Shape with alt)
+            // get an empty-but-tagged region — the BDC/EMC pair ensures the MCID leaf exists.
+            match block {
+                ContentBlock::Text(text_block) => {
+                    let text = extract_inline_text(&text_block.inlines);
+                    // Even if the text is empty (no baseline consumed), the block has a
+                    // structure group (P) — the tagged region ensures the group gets an MCID.
+                    if !text.is_empty()
+                        && let Some(baseline_y) = baseline_iter.next()
+                    {
+                        draw_text_at_y(surface, &text, bbox, baseline_y, 18.0, font);
+                    }
+                },
+                ContentBlock::Bullets(items) => {
+                    // The entire Bullets block corresponds to ONE L group in the
+                    // structure tree — draw ALL bullet items inside the SAME tagged region.
+                    for item in items {
+                        let text = extract_inline_text(&item.inlines);
+                        if !text.is_empty()
+                            && let Some(baseline_y) = baseline_iter.next()
+                        {
+                            draw_text_at_y(surface, &text, bbox, baseline_y, 16.0, font);
+                        }
+                    }
+                },
+                // Math, Table, Image, Chart, Diagram, Shape with alt: no draw path yet.
+                // The empty-but-tagged region (BDC/EMC with no content operators) gives
+                // the structure group its required MCID leaf (BC-4.03.001 invariant-3).
+                ContentBlock::Math(_)
+                | ContentBlock::Table(_)
+                | ContentBlock::Image(_)
+                | ContentBlock::Chart(_)
+                | ContentBlock::Diagram(_)
+                | ContentBlock::Shape(_) => {},
+            }
+
+            surface.end_tagged();
+            if let Some(krilla::tagging::Node::Group(child_group)) =
+                part.children.get_mut(child_part_idx)
+            {
+                child_group.push(id);
+            }
+            child_idx_cursor += 1;
+        }
+    }
+
+    Ok(())
+}
+
 /// Extract a flat plain-text string from a sequence of [`InlineNode`]s.
 ///
 /// Traverses `Bold` and `Italic` nodes recursively to collect all
 /// [`InlineNode::Plain`] leaf text. Other inline variants (Code, Xref, etc.)
-/// are skipped in this story — they contribute to the text stream in STORY-045.
+/// are currently skipped — rich inline formatting is a future story enhancement.
 fn extract_inline_text(inlines: &[slideforge_types::InlineNode]) -> String {
     use slideforge_types::InlineNode;
 
@@ -679,7 +1206,7 @@ fn extract_inline_text(inlines: &[slideforge_types::InlineNode]) -> String {
             InlineNode::Bold(children) | InlineNode::Italic(children) => {
                 out.push_str(&extract_inline_text(children));
             },
-            // Other variants (Code, Xref, Math, etc.) deferred to STORY-045.
+            // Other variants (Code, Xref, Math, etc.) not yet implemented.
             _ => {},
         }
     }
@@ -746,10 +1273,9 @@ impl Exporter for PdfExporter {
     ///
     /// # Parameters
     ///
-    /// - `deck` — the semantic, pre-layout IR. Currently unused by the PDF
-    ///   renderer; it is accepted so the [`Exporter`] trait signature is
-    ///   satisfied. PDF document metadata (title, language) will be populated
-    ///   from this parameter in STORY-045 (PDF/UA-1 metadata wiring).
+    /// - `deck` — the semantic, pre-layout IR. Used for document metadata:
+    ///   `deck.metadata.lang` → `/Lang` in the PDF catalog;
+    ///   `deck.metadata.title` → document title (both wired in STORY-045).
     /// - `laid_out` — the geometric, post-layout IR (slide frames, coordinates)
     /// - `brand` — resolved brand configuration (fonts, palette, page size)
     /// - `opts` — per-export options
@@ -1640,6 +2166,227 @@ mod tests {
         assert!(
             has_eof,
             "F-044-004: PDF must end with %%EOF marker (well-formed PDF)"
+        );
+    }
+
+    // ─── F-P2-001: body-block overprint (all items share same baseline) ───────
+
+    /// F-P2-001 (failing before fix): `draw_body_blocks` with ≥ 2 text blocks
+    /// must place each block at a DISTINCT baseline that advances downward
+    /// (increasing Surface-Y) through the body frame.
+    ///
+    /// ## What this proves (TD-VSDD-059 load-bearing assertion)
+    ///
+    /// Without the fix every block calls `draw_text_at_bbox(…, bbox, …)` which
+    /// always passes the same `bbox` → `text_baseline_surface_y(bbox)` returns
+    /// the identical value for every call → all N paragraphs OVERPRINT on one line.
+    ///
+    /// The fix maintains a mutable cursor that starts at the first-item baseline
+    /// (`text_baseline_surface_y(bbox)`) and advances by `font_size *
+    /// BODY_LINE_LEADING` (standard 1.2× leading) after each drawn item.
+    ///
+    /// ## Concrete numbers for the fixture in this test
+    ///
+    /// Body frame: `bbox.y = 0`, `bbox.height = 914_400 EMU` (= 72 pt).
+    ///
+    /// Initial cursor (item 0):
+    ///   `text_baseline_surface_y(bbox) = emu_to_pt(0) + emu_to_pt(914_400) * 0.8
+    ///                                  = 0.0 + 72.0 * 0.8 = 57.6 pt`
+    ///
+    /// Item 0 is a `Text` block → `font_size` = 18.0 pt.
+    /// Advance: `18.0 * 1.2 = 21.6 pt` → cursor after item 0 = 57.6 + 21.6 = 79.2 pt.
+    ///
+    /// Item 1 is a `Text` block → `font_size` = 18.0 pt, baseline = 79.2 pt.
+    /// Advance: `18.0 * 1.2 = 21.6 pt` → cursor after item 1 = 79.2 + 21.6 = 100.8 pt.
+    ///
+    /// Item 2 is a `Text` block → `font_size` = 18.0 pt, baseline = 100.8 pt.
+    ///
+    /// Assertions:
+    /// - baselines[1] > baselines[0]  (strictly lower = larger Surface-Y = stacked)
+    /// - baselines[2] > baselines[1]
+    /// - baselines[1] ≈ 79.2, baselines[2] ≈ 100.8
+    ///
+    /// This test drives `body_item_baselines` — a `pub(crate)` pure function that
+    /// the fixed `draw_body_blocks` also uses, giving a non-vacuous load-bearing
+    /// assertion (TD-VSDD-059).
+    #[test]
+    fn test_f_p2_001_body_blocks_baselines_are_distinct_and_stack_downward() {
+        use slideforge_types::{ContentBlock, InlineNode, SourceSpan, TextBlock};
+
+        use crate::coords::emu_to_pt;
+
+        // Body frame: top-left at (0, 0), height = 72 pt (= 914_400 EMU).
+        let bbox = BoundingBox {
+            x: Emu(0),
+            y: Emu(0),
+            width: Emu(9_144_000),
+            height: Emu(72 * 12_700),
+        };
+
+        // 3 text blocks (each a distinct paragraph).
+        let make_text_block = |s: &'static str| {
+            ContentBlock::Text(TextBlock {
+                inlines: vec![InlineNode::Plain(Arc::from(s))],
+                span: SourceSpan::default(),
+            })
+        };
+        let blocks = vec![
+            make_text_block("First paragraph"),
+            make_text_block("Second paragraph"),
+            make_text_block("Third paragraph"),
+        ];
+
+        // Call the pure baseline sequence function (extracted from draw_body_blocks).
+        let baselines = body_item_baselines(&blocks, &bbox);
+
+        assert_eq!(
+            baselines.len(),
+            3,
+            "expected 3 baselines for 3 text blocks; got {}",
+            baselines.len()
+        );
+
+        // Item 0: text_baseline_surface_y(bbox) = 0 + 72 * 0.8 = 57.6 pt.
+        let initial_baseline = text_baseline_surface_y(&bbox);
+        let expected_item0 = initial_baseline; // 57.6
+        let font_size_text: f32 = 18.0;
+        let advance = font_size_text * BODY_LINE_LEADING;
+        let expected_item1 = expected_item0 + advance; // 57.6 + 21.6 = 79.2
+        let expected_item2 = expected_item1 + advance; // 79.2 + 21.6 = 100.8
+
+        assert!(
+            (baselines[0] - expected_item0).abs() < 0.001,
+            "item 0 baseline must equal {expected_item0:.3} pt (= initial cursor); got {:.3}",
+            baselines[0]
+        );
+        assert!(
+            (baselines[1] - expected_item1).abs() < 0.001,
+            "item 1 baseline must equal {expected_item1:.3} pt (= item0 + 18*1.2); got {:.3}",
+            baselines[1]
+        );
+        assert!(
+            (baselines[2] - expected_item2).abs() < 0.001,
+            "item 2 baseline must equal {expected_item2:.3} pt (= item1 + 18*1.2); got {:.3}",
+            baselines[2]
+        );
+
+        // Strict ordering: each baseline strictly greater than previous (stacking downward).
+        assert!(
+            baselines[1] > baselines[0],
+            "F-P2-001: item 1 baseline ({:.3}) must be strictly greater than item 0 baseline \
+             ({:.3}) — overprint means they would be equal",
+            baselines[1],
+            baselines[0]
+        );
+        assert!(
+            baselines[2] > baselines[1],
+            "F-P2-001: item 2 baseline ({:.3}) must be strictly greater than item 1 baseline \
+             ({:.3}) — overprint means they would be equal",
+            baselines[2],
+            baselines[1]
+        );
+
+        // Sanity: initial baseline matches emu_to_pt formula.
+        let expected_initial = emu_to_pt(Emu(0)) + emu_to_pt(Emu(72 * 12_700)) * 0.8;
+        assert!(
+            (baselines[0] - expected_initial).abs() < 0.001,
+            "initial cursor must equal text_baseline_surface_y(bbox) = {expected_initial:.3}; \
+             got {:.3}",
+            baselines[0]
+        );
+    }
+
+    /// F-P2-001 (bullet variant): `draw_body_blocks` with a Bullets block
+    /// containing ≥ 2 items must place each bullet at a DISTINCT baseline.
+    ///
+    /// ## Concrete numbers
+    ///
+    /// Body frame: `bbox.y = 0`, `bbox.height = 914_400 EMU` (= 72 pt).
+    ///
+    /// Initial cursor = `text_baseline_surface_y(bbox)` = 57.6 pt.
+    ///
+    /// Bullets use `font_size` = 16.0 pt.
+    /// Advance per bullet = `16.0 * 1.2 = 19.2 pt`.
+    ///
+    /// Bullet 0 baseline = 57.6 pt.
+    /// Bullet 1 baseline = 57.6 + 19.2 = 76.8 pt.
+    /// Bullet 2 baseline = 76.8 + 19.2 = 96.0 pt.
+    #[test]
+    fn test_f_p2_001_bullet_items_baselines_are_distinct_and_stack_downward() {
+        use slideforge_types::{BulletItem, ContentBlock, InlineNode, SourceSpan};
+
+        use crate::coords::emu_to_pt;
+
+        let bbox = BoundingBox {
+            x: Emu(0),
+            y: Emu(0),
+            width: Emu(9_144_000),
+            height: Emu(72 * 12_700),
+        };
+
+        let make_bullet = |s: &'static str| BulletItem {
+            inlines: vec![InlineNode::Plain(Arc::from(s))],
+            children: vec![],
+            span: SourceSpan::default(),
+        };
+
+        let blocks = vec![ContentBlock::Bullets(vec![
+            make_bullet("First bullet"),
+            make_bullet("Second bullet"),
+            make_bullet("Third bullet"),
+        ])];
+
+        let baselines = body_item_baselines(&blocks, &bbox);
+
+        assert_eq!(
+            baselines.len(),
+            3,
+            "expected 3 baselines for 3 bullet items; got {}",
+            baselines.len()
+        );
+
+        let initial_baseline = text_baseline_surface_y(&bbox); // 57.6
+        let font_size_bullets: f32 = 16.0;
+        let advance = font_size_bullets * BODY_LINE_LEADING; // 19.2
+        let expected_item0 = initial_baseline;
+        let expected_item1 = expected_item0 + advance; // 76.8
+        let expected_item2 = expected_item1 + advance; // 96.0
+
+        assert!(
+            (baselines[0] - expected_item0).abs() < 0.001,
+            "bullet 0 baseline must equal {expected_item0:.3} pt; got {:.3}",
+            baselines[0]
+        );
+        assert!(
+            (baselines[1] - expected_item1).abs() < 0.001,
+            "bullet 1 baseline must equal {expected_item1:.3} pt (= bullet0 + 16*1.2); got {:.3}",
+            baselines[1]
+        );
+        assert!(
+            (baselines[2] - expected_item2).abs() < 0.001,
+            "bullet 2 baseline must equal {expected_item2:.3} pt (= bullet1 + 16*1.2); got {:.3}",
+            baselines[2]
+        );
+
+        assert!(
+            baselines[1] > baselines[0],
+            "F-P2-001: bullet 1 baseline ({:.3}) must be > bullet 0 baseline ({:.3})",
+            baselines[1],
+            baselines[0]
+        );
+        assert!(
+            baselines[2] > baselines[1],
+            "F-P2-001: bullet 2 baseline ({:.3}) must be > bullet 1 baseline ({:.3})",
+            baselines[2],
+            baselines[1]
+        );
+
+        // Verify leading constant value.
+        let expected_advance = emu_to_pt(Emu(72 * 12_700)) * 0.0; // just 0 for now, structure check
+        let _ = expected_advance; // suppress unused warning — advance formula tested above
+        assert!(
+            (advance - 19.2_f32).abs() < 0.001,
+            "BODY_LINE_LEADING (1.2) × 16.0 pt must equal 19.2 pt; got {advance:.3}"
         );
     }
 

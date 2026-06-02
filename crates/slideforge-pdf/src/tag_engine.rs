@@ -63,6 +63,12 @@ use crate::error::PdfExportError;
 /// tree and emitted as PDF Artifacts during drawing).
 pub struct PartResult {
     /// The `Part` tag group wrapping all tagged content on this slide.
+    ///
+    /// After drawing, the exporter inserts `Identifier` leaf nodes into the
+    /// children of this group (one per non-decorative, non-empty content block)
+    /// via `frame_child_part_indices`. This links the structure tree elements to
+    /// the marked-content sequences in the PDF content stream (MCID linkage,
+    /// BC-4.03.001 F-045-C2).
     pub part: TagGroup,
     /// Frame indices (into `LaidOutSlide::frames`) that are decorative.
     ///
@@ -70,6 +76,24 @@ pub struct PartResult {
     /// as `ContentTag::Artifact(ArtifactType::Other)` instead of linking them
     /// to a tag group identifier.
     pub decorative_frame_indices: Vec<usize>,
+    /// Per-frame, per-block child indices into `part.children` for MCID linkage.
+    ///
+    /// `frame_child_part_indices[frame_idx]` is:
+    /// - `None` for empty or decorative frames (no tagged groups in the Part).
+    /// - `Some(vec![child_idx])` for single-block frames (`Title`, `Subtitle`,
+    ///   `TextRun`, `Image` with alt, `Shape` with alt, `ErrorSlidePlaceholder`): one
+    ///   child index pointing to the single group pushed into `part.children`.
+    /// - `Some(vec![idx_0, idx_1, ..., idx_N])` for Body frames with N content
+    ///   blocks that each push a group: each element is the `part.children`
+    ///   index for the corresponding block's structure group.
+    ///
+    /// During the drawing pass, the exporter iterates the Vec and opens one
+    /// `start_tagged(ContentTag::Other)` region per block, inserting the
+    /// resulting `Identifier` into `part.children[idx_k]`. This ensures every
+    /// structure group (P, L/LI/LBody, Table, Figure) has at least one MCID
+    /// leaf — satisfying PDF/UA-1's requirement that grouping elements reference
+    /// actual marked content (F-045-C2 / BC-4.03.001).
+    pub frame_child_part_indices: Vec<Option<Vec<usize>>>,
 }
 
 /// Engine that maps a [`LaidOutSlide`] to a krilla [`TagTree`].
@@ -125,9 +149,46 @@ impl SlideTagEngine {
     /// using a `match` expression that proves `NonZeroU16::new(2)` is `Some(_)`
     /// at compile time — no runtime panic path exists.
     pub fn tag_slide(&self, slide: &LaidOutSlide) -> Result<PartResult, PdfExportError> {
+        self.tag_slide_with_title(slide, None)
+    }
+
+    /// Build the PDF structure tag tree for a single slide, with an explicit
+    /// heading title string for PDF/UA-1 compliance.
+    ///
+    /// `slide_title` is the text to attach as the `/T` (Title) attribute on any
+    /// `Hn` structure element produced for this slide. It is sourced from
+    /// `deck.slides[slide.source_index].title_str()` in the exporter, with
+    /// `"Slide N"` as the fallback when `title_str()` returns `None`.
+    ///
+    /// Per ISO 14289-1 §7.1: every `H1`–`H6` structure element must carry a
+    /// `/Title` attribute (`/T` key in the `StructElem` dictionary). krilla's
+    /// `Validator::UA1` reports `MissingHeadingTitle` when this attribute is
+    /// absent or empty.
+    ///
+    /// When `slide_title` is `None` the behaviour is identical to
+    /// [`tag_slide`](Self::tag_slide) — the `Hn` tag is built without a `/T`
+    /// attribute. Callers that do not have access to the deck's semantic layer
+    /// (e.g., unit tests operating on `LaidOutSlide` directly) should use
+    /// [`tag_slide`](Self::tag_slide) or pass `None` explicitly.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PdfExportError::Serialize`] if the tag tree cannot be
+    /// constructed.
+    pub fn tag_slide_with_title(
+        &self,
+        slide: &LaidOutSlide,
+        slide_title: Option<&str>,
+    ) -> Result<PartResult, PdfExportError> {
         // One Part group per slide — wraps all structural children.
         let mut part_group = TagGroup::new(Tag::<krilla::tagging::kind::Part>::Part);
         let mut decorative_frame_indices: Vec<usize> = Vec::new();
+        // frame_child_part_indices[frame_idx] = Some(child_idx in part_group.children)
+        // when frame_idx contributes at least one child to the Part, None otherwise.
+        // This is used by the exporter for F-045-C2 MCID linkage: after drawing each
+        // non-decorative frame via `surface.start_tagged(ContentTag::Other)`, the
+        // returned `Identifier` is inserted as a leaf node into `part_group.children[child_idx]`.
+        let mut frame_child_part_indices: Vec<Option<Vec<usize>>> = vec![None; slide.frames.len()];
 
         for (frame_idx, frame) in slide.frames.iter().enumerate() {
             match &frame.content {
@@ -138,34 +199,78 @@ impl SlideTagEngine {
                 },
 
                 // ── Title → H1 ───────────────────────────────────────────────
+                //
+                // AC-011 (BC-4.03.001): ISO 14289-1 §7.1 requires every Hn structure
+                // element to carry a /Title attribute (/T key in the StructElem dictionary).
+                // The title text is sourced from `deck.slides[source_index].title_str()` by
+                // the exporter and passed as `slide_title`. When `slide_title` is None
+                // (e.g., unit tests that do not have deck access), Hn is built without /T.
                 FrameContent::Title(_text) => {
+                    let child_idx = part_group.children.len();
                     let heading_group = TagGroup::new(Tag::<krilla::tagging::kind::Hn>::Hn(
                         // NonZeroU16::MIN == 1 (H1); infallible construction.
                         std::num::NonZeroU16::MIN,
-                        None,
+                        slide_title.map(std::borrow::ToOwned::to_owned),
                     ));
                     part_group.push(heading_group);
+                    frame_child_part_indices[frame_idx] = Some(vec![child_idx]);
                 },
 
                 // ── Subtitle → H2 ────────────────────────────────────────────
-                FrameContent::Subtitle(_text) => {
-                    let heading_group =
-                        TagGroup::new(Tag::<krilla::tagging::kind::Hn>::Hn(H2_LEVEL, None));
+                //
+                // OBS-012 / AC-011: body H2-H6 /Title attribute values must be the
+                // first inline run of that frame — NOT the slide title re-used.
+                //
+                // Using the slide_title here was incorrect: a subtitle frame such as
+                // "Q4 2025 Highlights" must carry its OWN text as the H2 /Title, not
+                // the parent slide's H1 title.
+                //
+                // The subtitle text is the first (and typically only) inline run of
+                // the frame; `subtitle_text` is the `Arc<str>` stored in the variant.
+                FrameContent::Subtitle(subtitle_text) => {
+                    let child_idx = part_group.children.len();
+                    let heading_group = TagGroup::new(Tag::<krilla::tagging::kind::Hn>::Hn(
+                        H2_LEVEL,
+                        Some(subtitle_text.as_ref().to_owned()),
+                    ));
                     part_group.push(heading_group);
+                    frame_child_part_indices[frame_idx] = Some(vec![child_idx]);
                 },
 
                 // ── Body content → P per paragraph or L+LI+LBody per list ────
+                //
+                // Body frames may push MULTIPLE children — one per content block.
+                //
+                // F-P3-001 fix: we record a Vec of per-block child indices so the
+                // exporter can open an independent `start_tagged` / `end_tagged`
+                // region for EACH block and insert its Identifier into the correct
+                // structure group. Recording only the first child index left the
+                // L/LI/LBody group (and any 2nd+ block) with no MCID leaf —
+                // a grouping element referencing no marked content, rejected by
+                // veraPDF --flavour ua1.
                 FrameContent::Body(content_blocks) => {
                     if content_blocks.is_empty() {
-                        // No blocks — emit a generic P so Part remains non-empty.
+                        // No blocks — emit a single generic P so Part remains non-empty.
+                        // Single-element Vec keeps the MCID linkage contract uniform.
+                        let child_idx = part_group.children.len();
                         part_group.push(TagGroup::new(Tag::<krilla::tagging::kind::P>::P));
+                        frame_child_part_indices[frame_idx] = Some(vec![child_idx]);
                     } else {
+                        let mut block_child_indices: Vec<usize> = Vec::new();
                         for block in content_blocks {
                             let group = self.tag_content_block(block)?;
                             if let Some(g) = group {
+                                let child_idx = part_group.children.len();
                                 part_group.push(g);
+                                block_child_indices.push(child_idx);
                             }
                         }
+                        if !block_child_indices.is_empty() {
+                            frame_child_part_indices[frame_idx] = Some(block_child_indices);
+                        }
+                        // If all blocks produced None (e.g., all decorative shapes),
+                        // frame_child_part_indices[frame_idx] stays None — the exporter
+                        // draws the frame without tagging (correct: nothing was emitted).
                     }
                 },
 
@@ -175,33 +280,53 @@ impl SlideTagEngine {
                         // Empty alt on Image = decorative; mark as Artifact.
                         decorative_frame_indices.push(frame_idx);
                     } else {
+                        let child_idx = part_group.children.len();
                         part_group.push(self.tag_figure(Some(alt))?);
+                        frame_child_part_indices[frame_idx] = Some(vec![child_idx]);
                     }
                 },
 
-                // ── Diagram → Figure+Alt ──────────────────────────────────────
-                FrameContent::Diagram(diagram_svg) => {
-                    // Diagrams always carry a normalized SVG payload.
-                    // Alt text is not carried directly on NormalizedDiagramSvg;
-                    // the diagram alt comes from the ContentBlock::Diagram spec
-                    // in the semantic IR. For frames that have already been
-                    // resolved to FrameContent::Diagram, we emit a Figure group
-                    // with a generic alt. (STORY-045 will thread the original
-                    // DiagramSpec.alt through the IR to this point.)
-                    let alt_text = if diagram_svg.as_str().is_empty() {
-                        None
-                    } else {
-                        Some("diagram")
-                    };
-                    part_group.push(self.tag_figure(alt_text)?);
+                // ── Diagram → Artifact (frame-level, v1 layout) ──────────────
+                FrameContent::Diagram(_diagram_svg) => {
+                    // F-045-I2 / BC-4.03.001 invariant-3 investigation result:
+                    //
+                    // `FrameContent::Diagram` IS emitted by the v1 layout engine
+                    // (regions.rs:280) as `FrameContent::Diagram(empty_placeholder())`.
+                    // The frame carries NO alt text — the original `DiagramSpec.alt`
+                    // is not threaded through the geometric IR in v1.
+                    //
+                    // Emitting `tag_figure(None)` would produce a /Figure with no /Alt
+                    // — a BC-4.03.001 invariant-3 violation ("every Figure has non-empty
+                    // /Alt").  Emitting a placeholder string is an "alt lie".
+                    //
+                    // Resolution: treat ALL frame-level Diagram frames as Artifacts in v1.
+                    // The empty-placeholder SVG has no meaningful user content to describe;
+                    // the semantic content comes from the surrounding text, which IS tagged.
+                    // The IR-threading story (planned for a future wave) will add an
+                    // `alt: Option<Arc<str>>` field to `FrameContent::Diagram` — at that
+                    // point this arm will be updated to:
+                    //   - `AltText::Provided(s)` → `part_group.push(self.tag_figure(Some(s))?)`.
+                    //   - `AltText::Decorative` / None → `decorative_frame_indices.push(frame_idx)`.
+                    //
+                    // This is NOT modifying slideforge-layout (which is STORY-073's territory).
+                    // It is a correct tagging decision within the current IR constraint.
+                    decorative_frame_indices.push(frame_idx);
                 },
 
-                // ── Chart → Figure+Alt ────────────────────────────────────────
+                // ── Chart → Artifact (frame-level, v1 layout) ────────────────
                 FrameContent::Chart => {
-                    // Chart SVG is generated by plotters; alt text is threaded
-                    // from ChartSpec.alt through the IR (STORY-045 completes
-                    // that path). For now, emit a Figure with generic alt.
-                    part_group.push(self.tag_figure(Some("chart"))?);
+                    // F-045-I2 / BC-4.03.001 invariant-3 investigation result:
+                    //
+                    // `FrameContent::Chart` IS emitted by the v1 layout engine
+                    // (regions.rs:264) but carries NO data and NO alt text in the
+                    // geometric IR.  Same rationale as `FrameContent::Diagram` above.
+                    //
+                    // Treat ALL frame-level Chart frames as Artifacts in v1.
+                    // When the IR-threading story ships, this arm will be updated to
+                    // use the real alt from `ChartSpec.alt`.
+                    //
+                    // This is NOT modifying slideforge-layout (STORY-073 constraint).
+                    decorative_frame_indices.push(frame_idx);
                 },
 
                 // ── Shape → Figure+Alt or Artifact if decorative ──────────────
@@ -212,21 +337,27 @@ impl SlideTagEngine {
                             decorative_frame_indices.push(frame_idx);
                         },
                         slideforge_types::AltText::Provided(alt) => {
+                            let child_idx = part_group.children.len();
                             part_group.push(self.tag_figure(Some(alt))?);
+                            frame_child_part_indices[frame_idx] = Some(vec![child_idx]);
                         },
                     }
                 },
 
                 // ── TextRun → P ───────────────────────────────────────────────
                 FrameContent::TextRun(_inlines) => {
+                    let child_idx = part_group.children.len();
                     let p_group = TagGroup::new(Tag::<krilla::tagging::kind::P>::P);
                     part_group.push(p_group);
+                    frame_child_part_indices[frame_idx] = Some(vec![child_idx]);
                 },
 
                 // ── ErrorSlidePlaceholder → P (error text is readable) ────────
                 FrameContent::ErrorSlidePlaceholder { .. } => {
+                    let child_idx = part_group.children.len();
                     let p_group = TagGroup::new(Tag::<krilla::tagging::kind::P>::P);
                     part_group.push(p_group);
+                    frame_child_part_indices[frame_idx] = Some(vec![child_idx]);
                 },
             }
         }
@@ -234,6 +365,7 @@ impl SlideTagEngine {
         Ok(PartResult {
             part: part_group,
             decorative_frame_indices,
+            frame_child_part_indices,
         })
     }
 
@@ -243,6 +375,19 @@ impl SlideTagEngine {
     /// - `Ok(Some(TagGroup))` for structured content (P, L+LI+LBody, Table, Figure).
     /// - `Ok(None)` for blocks that do not produce a tag (e.g., decorative Shape).
     ///
+    /// ## OBS-P5-001 — Single source of truth
+    ///
+    /// The boolean "does this block produce a structure group?" decision is
+    /// delegated to [`slideforge_types::ContentBlock::produces_structure_group`],
+    /// which is the single authoritative predicate shared with
+    /// `slideforge_pdf::exporter::block_is_structure_producing` (the draw loop).
+    ///
+    /// This function retains the **`TagKind` mapping** (P / L / Table / Figure) —
+    /// only the boolean gating is unified. If `produces_structure_group()` returns
+    /// `false`, this function immediately returns `Ok(None)` without inspecting
+    /// the variant further. If it returns `true`, the variant-specific match arms
+    /// build the correct `TagGroup` structure.
+    ///
     /// # Errors
     ///
     /// Returns [`PdfExportError::Serialize`] if the tag group cannot be built.
@@ -250,6 +395,14 @@ impl SlideTagEngine {
         &self,
         block: &slideforge_types::ContentBlock,
     ) -> Result<Option<TagGroup>, PdfExportError> {
+        // OBS-P5-001: delegate the boolean "structure-producing?" decision to the
+        // single authoritative predicate on ContentBlock. This ensures lockstep
+        // with `block_is_structure_producing` in the draw loop — both call the
+        // same function from the same single exhaustive match in slideforge-types.
+        if !block.produces_structure_group() {
+            return Ok(None);
+        }
+
         match block {
             // Text paragraph → P
             ContentBlock::Text(_text_block) => {
@@ -257,12 +410,8 @@ impl SlideTagEngine {
             },
 
             // Bullet list → L (Disc) with LI+LBody for each item.
-            // An empty items list produces no tag group: a childless L element
-            // has no semantic value in a PDF structure tree and is structurally odd.
+            // Empty Bullets is already filtered out by produces_structure_group() above.
             ContentBlock::Bullets(items) => {
-                if items.is_empty() {
-                    return Ok(None);
-                }
                 let mut list_group =
                     TagGroup::new(Tag::<krilla::tagging::kind::L>::L(ListNumbering::Disc));
                 for _item in items {
@@ -274,48 +423,44 @@ impl SlideTagEngine {
                 Ok(Some(list_group))
             },
 
-            // Shape in body → Figure+Alt or skip if decorative
+            // Shape in body → Figure+Alt.
+            // produces_structure_group() already guarantees alt is Provided here.
             ContentBlock::Shape(shape_spec) => match &shape_spec.alt {
-                Some(AltText::Decorative) | None => Ok(None),
                 Some(AltText::Provided(alt)) => Ok(Some(self.tag_figure(Some(alt))?)),
+                // Unreachable: produces_structure_group() returns false for non-Provided alt.
+                Some(AltText::Decorative) | None => Ok(None),
             },
 
-            // Chart in body → Figure+Alt
-            ContentBlock::Chart(chart_spec) => {
-                let alt = chart_spec
-                    .alt
-                    .as_ref()
-                    .and_then(|a| {
-                        if let AltText::Provided(s) = a {
-                            Some(s.as_ref())
-                        } else {
-                            None
-                        }
-                    })
-                    .or(Some("chart"));
-                Ok(Some(self.tag_figure(alt)?))
+            // Chart in body → Figure+Alt.
+            // produces_structure_group() already guarantees alt is Provided here.
+            //
+            // F-045-I1 (alt-lie fix): `.or(Some("chart"))` was a placeholder that
+            // produced a /Figure with the generic string "chart" as alt text.
+            // This is an "alt lie" — the string describes the element type, not the
+            // chart content. PDF/UA-1 requires meaningful alt text.
+            ContentBlock::Chart(chart_spec) => match chart_spec.alt.as_ref() {
+                Some(AltText::Provided(s)) => Ok(Some(self.tag_figure(Some(s))?)),
+                // Unreachable: produces_structure_group() returns false for non-Provided alt.
+                Some(AltText::Decorative) | None => Ok(None),
             },
 
-            // Diagram in body → Figure+Alt
-            ContentBlock::Diagram(diagram_spec) => {
-                let alt = diagram_spec
-                    .alt
-                    .as_ref()
-                    .and_then(|a| {
-                        if let AltText::Provided(s) = a {
-                            Some(s.as_ref())
-                        } else {
-                            None
-                        }
-                    })
-                    .or(Some("diagram"));
-                Ok(Some(self.tag_figure(alt)?))
+            // Diagram in body → Figure+Alt.
+            // produces_structure_group() already guarantees alt is Provided here.
+            //
+            // F-045-I1 (alt-lie fix): `.or(Some("diagram"))` was a placeholder.
+            // Same rationale as the Chart arm above.
+            ContentBlock::Diagram(diagram_spec) => match diagram_spec.alt.as_ref() {
+                Some(AltText::Provided(s)) => Ok(Some(self.tag_figure(Some(s))?)),
+                // Unreachable: produces_structure_group() returns false for non-Provided alt.
+                Some(AltText::Decorative) | None => Ok(None),
             },
 
-            // Image in body → Figure+Alt
+            // Image in body → Figure+Alt.
+            // produces_structure_group() already guarantees alt is Provided here.
             ContentBlock::Image(image_spec) => match &image_spec.alt {
-                Some(AltText::Decorative) | None => Ok(None),
                 Some(AltText::Provided(alt)) => Ok(Some(self.tag_figure(Some(alt))?)),
+                // Unreachable: produces_structure_group() returns false for non-Provided alt.
+                Some(AltText::Decorative) | None => Ok(None),
             },
 
             // Math block → P (math content is inline text; STORY-045 will
@@ -727,5 +872,214 @@ mod tests {
             result.is_none(),
             "empty Bullets([]) must return Ok(None), not a childless L group"
         );
+    }
+
+    /// F-P3-001 (multi-block Body MCID linkage): a Body frame with TWO content blocks
+    /// (Text + Bullets) must record a SEPARATE Part child index for EACH block.
+    ///
+    /// ## What this drives
+    ///
+    /// `frame_child_part_indices[body_frame_idx]` must be `Some(vec![p_idx, l_idx])`
+    /// — one index per block — so that the exporter can open an independent
+    /// `start_tagged` / `end_tagged` region for each block and insert the resulting
+    /// `Identifier` into the correct group.  Recording only the first-block index
+    /// leaves the L/LI/LBody group with no linked marked content, which veraPDF
+    /// UA-1 rejects.
+    ///
+    /// The assertion is against `frame_child_part_indices`, not byte-substring
+    /// presence, so it exercises the tag-tree API directly (TD-VSDD-059
+    /// load-bearing assertion requirement).
+    #[allow(clippy::unwrap_used)]
+    #[test]
+    fn test_f_p3_001_multi_block_body_records_per_block_child_indices() {
+        use krilla::tagging::{Node, TagKind};
+        use slideforge_types::{BulletItem, ContentBlock, InlineNode, SourceSpan, TextBlock};
+
+        let engine = SlideTagEngine::new();
+
+        // Slide: one Title frame (frame 0) + one Body frame (frame 1) with
+        // a Text block AND a Bullets block — two distinct content blocks.
+        let slide = LaidOutSlide {
+            source_index: 0,
+            slide_type_keyword: Arc::from("content"),
+            frames: vec![
+                Frame {
+                    bbox: BoundingBox {
+                        x: Emu(0),
+                        y: Emu(0),
+                        width: Emu(9_144_000),
+                        height: Emu(914_400),
+                    },
+                    content: FrameContent::Title(Arc::from("Multi-Block Body Test")),
+                    text_flow: None,
+                },
+                Frame {
+                    bbox: BoundingBox {
+                        x: Emu(0),
+                        y: Emu(914_400),
+                        width: Emu(9_144_000),
+                        height: Emu(3_657_600),
+                    },
+                    content: FrameContent::Body(vec![
+                        ContentBlock::Text(TextBlock {
+                            inlines: vec![InlineNode::Plain(Arc::from("Paragraph text"))],
+                            span: SourceSpan::default(),
+                        }),
+                        ContentBlock::Bullets(vec![BulletItem {
+                            inlines: vec![InlineNode::Plain(Arc::from("Bullet item"))],
+                            children: vec![],
+                            span: SourceSpan::default(),
+                        }]),
+                    ]),
+                    text_flow: None,
+                },
+            ],
+            speaker_notes: None,
+            register_tags: RegisterSet::new(),
+            register_content: vec![],
+        };
+
+        let result = engine.tag_slide(&slide).unwrap();
+
+        // frame 0 (Title → H1) must have exactly one child index.
+        assert_eq!(
+            result.frame_child_part_indices.len(),
+            2,
+            "frame_child_part_indices must have one entry per frame"
+        );
+
+        // Title frame (0): single-block mapping — one child index.
+        let title_indices = result.frame_child_part_indices[0].as_ref().unwrap();
+        assert_eq!(
+            title_indices.len(),
+            1,
+            "Title frame must record exactly 1 child index; got {}",
+            title_indices.len()
+        );
+        let title_child_idx = title_indices[0];
+
+        // Body frame (1): MULTI-block mapping — TWO child indices, one per block.
+        let body_indices = result.frame_child_part_indices[1]
+            .as_ref()
+            .expect("Body frame must record Some(Vec) of child indices, not None");
+        assert_eq!(
+            body_indices.len(),
+            2,
+            "Body frame with Text+Bullets must record 2 child indices (one per block); got {}",
+            body_indices.len()
+        );
+
+        let p_child_idx = body_indices[0]; // Text block → P group
+        let l_child_idx = body_indices[1]; // Bullets block → L group
+
+        // The two indices must be DISTINCT — each block occupies a separate
+        // position in part.children (otherwise they'd share the same group,
+        // leaving one group with no Identifier).
+        assert_ne!(
+            p_child_idx, l_child_idx,
+            "each body block must occupy a DISTINCT Part child index; \
+             both were {p_child_idx} — the second block has no MCID linkage slot"
+        );
+
+        // The total number of Part children must equal Title(1) + P(1) + L(1) = 3.
+        // (title_child_idx + two body block children)
+        assert_eq!(
+            result.part.children.len(),
+            3,
+            "Part must have 3 children: H1 (title) + P (text block) + L (bullets block); \
+             got {}",
+            result.part.children.len()
+        );
+
+        // Verify the tag kinds at the recorded positions:
+        // title_child_idx → Hn
+        if let Node::Group(g) = &result.part.children[title_child_idx] {
+            assert!(
+                matches!(g.tag, TagKind::Hn(_)),
+                "title child must be Hn; got {:?}",
+                g.tag
+            );
+        } else {
+            panic!("title child must be a Group node");
+        }
+        // p_child_idx → P
+        if let Node::Group(g) = &result.part.children[p_child_idx] {
+            assert!(
+                matches!(g.tag, TagKind::P(_)),
+                "text block child must be P; got {:?}",
+                g.tag
+            );
+        } else {
+            panic!("text block child must be a Group node");
+        }
+        // l_child_idx → L
+        if let Node::Group(g) = &result.part.children[l_child_idx] {
+            assert!(
+                matches!(g.tag, TagKind::L(_)),
+                "bullets block child must be L; got {:?}",
+                g.tag
+            );
+        } else {
+            panic!("bullets block child must be a Group node");
+        }
+    }
+
+    /// F-P3-001 (single-block Body backward compatibility): a Body frame with a
+    /// SINGLE content block must continue to work — `frame_child_part_indices[frame]`
+    /// is `Some(vec![idx])` with exactly one element, and the Part has the correct
+    /// single-child group.
+    #[allow(clippy::unwrap_used)]
+    #[test]
+    fn test_f_p3_001_single_block_body_backward_compat() {
+        use krilla::tagging::{Node, TagKind};
+        use slideforge_types::{ContentBlock, InlineNode, SourceSpan, TextBlock};
+
+        let engine = SlideTagEngine::new();
+
+        let slide = LaidOutSlide {
+            source_index: 0,
+            slide_type_keyword: Arc::from("content"),
+            frames: vec![Frame {
+                bbox: BoundingBox {
+                    x: Emu(0),
+                    y: Emu(0),
+                    width: Emu(9_144_000),
+                    height: Emu(914_400),
+                },
+                content: FrameContent::Body(vec![ContentBlock::Text(TextBlock {
+                    inlines: vec![InlineNode::Plain(Arc::from("Single paragraph"))],
+                    span: SourceSpan::default(),
+                })]),
+                text_flow: None,
+            }],
+            speaker_notes: None,
+            register_tags: RegisterSet::new(),
+            register_content: vec![],
+        };
+
+        let result = engine.tag_slide(&slide).unwrap();
+
+        let body_indices = result.frame_child_part_indices[0]
+            .as_ref()
+            .expect("single-block Body must have Some(Vec) child indices");
+        assert_eq!(
+            body_indices.len(),
+            1,
+            "single-block Body must record exactly 1 child index"
+        );
+
+        // The Part must have exactly one child (the P group).
+        assert_eq!(
+            result.part.children.len(),
+            1,
+            "Part must have 1 child for single-block Body"
+        );
+        if let Node::Group(g) = &result.part.children[body_indices[0]] {
+            assert!(
+                matches!(g.tag, TagKind::P(_)),
+                "single-block Body child must be P; got {:?}",
+                g.tag
+            );
+        }
     }
 }

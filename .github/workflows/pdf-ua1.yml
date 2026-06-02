@@ -1,0 +1,243 @@
+name: PDF/UA-1 Validation Gate
+
+# Runs on every PR or push that touches PDF export code or this workflow.
+# Validates that the slideforge-pdf exporter produces PDF/UA-1 compliant output
+# by running veraPDF against an exported fixture PDF.
+#
+# BC-4.03.001 AC-008: veraPDF --flavour ua1 must exit with isCompliant: true.
+# BC-4.03.001 Architecture Compliance Rule 1: NO Chrome/Chromium — veraPDF only.
+on:
+  push:
+    branches: [develop, main]
+    paths:
+      - "crates/slideforge-pdf/**"
+      - ".github/workflows/pdf-ua1.yml"
+  pull_request:
+    branches: [develop, main]
+    paths:
+      - "crates/slideforge-pdf/**"
+      - ".github/workflows/pdf-ua1.yml"
+
+# Cancel in-progress runs when a new commit is pushed to the same ref.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/develop' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+  RUST_BACKTRACE: 1
+  CARGO_INCREMENTAL: 0
+
+# ─── Pinned action SHAs ──────────────────────────────────────────────────────
+# All actions are pinned to a full commit SHA (supply chain security).
+# To update: resolve the new tag to its commit SHA and replace below.
+#
+#   actions/checkout          v4  → 34e114876b0b11c390a56381ad16ebd13914f8d5
+#   Swatinem/rust-cache       v2  → 42dc69e1aa15d09112580998cf2ef0119e2e91ae
+#   dtolnay/rust-toolchain  HEAD  → 3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+#   taiki-e/install-action    v2  → d9be7d8cda89035c9c843f78bd44d4f72d8403d4
+# ─────────────────────────────────────────────────────────────────────────────
+
+jobs:
+  # ─── PDF/UA-1 structure validation (fast — runs on every PR) ─────────────
+  # Runs the unit-proxy tests that verify the PDF structure meets UA-1
+  # requirements without requiring the veraPDF CLI tool.  These tests are
+  # always available (no external dependency) and catch structural regressions
+  # immediately.
+  #
+  # Coverage:
+  #   - AC-001: /StructTreeRoot present
+  #   - AC-002: One /Part per slide
+  #   - AC-003: Text elements tagged correctly
+  #   - AC-004: /Figure elements with /Alt text
+  #   - AC-005: Decorative elements as Artifacts
+  #   - AC-006: /MarkInfo present
+  #   - AC-007: /Lang from deck metadata (PRIMARY RED GATE — STORY-045)
+  #   - AC-008: UA-1 proxy (composite of above, without external verapdf)
+  pdf-ua1-structure:
+    name: pdf-ua1-structure
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
+        with:
+          shared-key: pdf-ua1-structure
+      - name: Install core fonts (required for usvg text normalization on Linux)
+        run: |
+          sudo apt-get update -y -q
+          sudo apt-get install -y -q fonts-dejavu-core fonts-noto-core fonts-liberation fonts-freefont-ttf
+          fc-cache -f
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@d9be7d8cda89035c9c843f78bd44d4f72d8403d4
+        with:
+          tool: cargo-nextest
+      - name: Run PDF/UA-1 structure proxy tests (BC-4.03.001 AC-001 through AC-008)
+        run: >
+          cargo nextest run
+          -p slideforge-pdf
+          --test pdf_ua1
+          --no-fail-fast
+          --profile ci
+          --color never
+          2>&1 | tee /tmp/structure-nextest-output.txt
+
+      # OBS-P4-001: positive-coverage assertion — a zero-test run must FAIL the job.
+      # Symmetric with the pdf-ua1-verapdf job's TESTS_RUN gate (OBS-009).
+      # Parses nextest's "N tests run" summary line; fails if N < 1.
+      # This prevents silent passes when the test binary is filtered to zero tests.
+      #
+      # Note: CARGO_TERM_COLOR=always is set globally but --color never overrides
+      # it for this nextest invocation, ensuring the output file is plain text
+      # without ANSI escape sequences that would break the grep pattern.
+      - name: Assert structure proxy tests actually ran (coverage gate)
+        run: |
+          set -euo pipefail
+          OUTPUT_FILE="/tmp/structure-nextest-output.txt"
+          if [ ! -f "${OUTPUT_FILE}" ]; then
+            echo "ERROR: nextest output file not found at ${OUTPUT_FILE}" >&2
+            exit 1
+          fi
+          # Strip any residual ANSI escape sequences (defensive) then grep for
+          # nextest's summary line: "Summary [N.NNs] N tests run: N passed..."
+          # Use sed to strip ANSI codes before counting.
+          TESTS_RUN=$(sed 's/\x1b\[[0-9;]*m//g' "${OUTPUT_FILE}" | grep -oP '\d+ tests? run' | grep -oP '^\d+' || echo "0")
+          echo "Tests run: ${TESTS_RUN}"
+          if [ "${TESTS_RUN}" -lt 1 ]; then
+            echo "ERROR: zero tests ran in the pdf-ua1-structure job." >&2
+            echo "The pdf_ua1 test binary matched no tests — the structure gate was NOT enforced." >&2
+            exit 1
+          fi
+          echo "Coverage assertion PASSED: ${TESTS_RUN} test(s) ran."
+
+  # ─── PDF/UA-1 full validation via veraPDF (runs if veraPDF is available) ──
+  # Installs veraPDF via the official Docker container and runs
+  # `verapdf --flavour ua1` against an exported fixture PDF.
+  #
+  # This job produces the definitive BC-4.03.001 AC-008 gate:
+  # "verapdf --flavour ua1 exits with isCompliant: true".
+  #
+  # Architecture compliance:
+  #   - NO Chrome or Chromium installed (BC-4.03.001 invariant 1)
+  #   - veraPDF is the ONLY PDF validation tool (Java-based CLI)
+  #   - veraPDF is installed via Docker (no apt package available on ubuntu)
+  #
+  # The fixture PDF is exported by running the ignored integration test
+  # with `--include-ignored` once veraPDF is available on PATH via
+  # a Docker wrapper script.  The test writes the PDF to a temp file
+  # and runs `verapdf --flavour ua1` against it.
+  pdf-ua1-verapdf:
+    name: pdf-ua1-verapdf
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
+        with:
+          shared-key: pdf-ua1-verapdf
+      - name: Install core fonts (required for usvg text normalization on Linux)
+        run: |
+          sudo apt-get update -y -q
+          sudo apt-get install -y -q fonts-dejavu-core fonts-noto-core fonts-liberation fonts-freefont-ttf
+          fc-cache -f
+
+      # Install veraPDF via Docker (official veraPDF image from Docker Hub).
+      #
+      # The veraPDF project publishes an official Docker image:
+      #   docker pull verapdf/cli:latest
+      # This is the most reliable installation method in CI — no IzPack installer,
+      # no Java version negotiation, no file path discovery.
+      #
+      # We create a /usr/local/bin/verapdf wrapper that runs the container with:
+      #   - The PDF file bind-mounted at the same absolute path inside the container
+      #   - The working directory mounted so relative paths work
+      #
+      # Architecture compliance: NO Chrome/Chromium (BC-4.03.001 invariant 1).
+      # Docker itself is NOT a browser — it runs the veraPDF Java CLI in isolation.
+      - name: Install veraPDF CLI (Docker wrapper)
+        run: |
+          set -euo pipefail
+          # Pull the veraPDF official CLI image.
+          docker pull verapdf/cli:latest
+          # Create a verapdf wrapper script that delegates to the Docker container.
+          # The wrapper mounts /tmp (where the test writes the PDF) into the container.
+          # Using --rm ensures the container is removed after each run.
+          sudo tee /usr/local/bin/verapdf > /dev/null <<'VERAPDF_WRAPPER'
+          #!/bin/bash
+          # Wrapper: run veraPDF in a Docker container with /tmp bind-mounted.
+          exec docker run --rm \
+            -v /tmp:/tmp \
+            verapdf/cli:latest "$@"
+          VERAPDF_WRAPPER
+          sudo chmod +x /usr/local/bin/verapdf
+          # F-045-I3: version check must succeed — if veraPDF is broken the CI gate
+          # must fail loudly, not silently pass.
+          verapdf --version
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@d9be7d8cda89035c9c843f78bd44d4f72d8403d4
+        with:
+          tool: cargo-nextest
+
+      # Run the veraPDF integration test that was #[ignore]'d on dev machines.
+      # With veraPDF on PATH, the test can now execute the full verapdf --flavour
+      # ua1 check and assert isCompliant: true (BC-4.03.001 AC-013).
+      #
+      # F-045-P1-001: the -E filter targets the AC-013 full-compliance test
+      # (test_bc_4_03_001_ac013_verapdf_full_compliance) which uses a 3-slide
+      # deck with real titles via deck_with_slides. The old filter
+      # 'test(verapdf_integration)' matched the degenerate AC-008 test
+      # (test_bc_4_03_001_verapdf_integration) that uses an empty-slides fixture.
+      #
+      # F-045-P1-002: nextest's flag for running ignored tests is --run-ignored
+      # (not --include-ignored which is a libtest flag).
+      #
+      # OBS-009: the coverage-assertion step below verifies that exactly the
+      # expected test ran (zero-test runs fail the job).
+      - name: Run veraPDF integration test (BC-4.03.001 AC-013)
+        env:
+          # Signal to tests that veraPDF is available.
+          VERAPDF_AVAILABLE: "1"
+        run: >
+          cargo nextest run
+          -p slideforge-pdf
+          --test pdf_ua1
+          -E 'test(ac013_verapdf_full_compliance)'
+          --no-fail-fast
+          --profile ci
+          --run-ignored all
+          --color never
+          2>&1 | tee /tmp/verapdf-nextest-output.txt
+
+      # OBS-009: positive-coverage assertion — a zero-test run must FAIL the job.
+      # Parses nextest's "N tests run" summary line; fails if N < 1.
+      # This prevents silent passes when the -E filter matches nothing.
+      #
+      # Note: --color never is passed to nextest above to ensure plain-text output
+      # in the tee'd file (ANSI escape sequences break the grep count).
+      - name: Assert veraPDF test actually ran (coverage gate)
+        run: |
+          set -euo pipefail
+          OUTPUT_FILE="/tmp/verapdf-nextest-output.txt"
+          if [ ! -f "${OUTPUT_FILE}" ]; then
+            echo "ERROR: nextest output file not found at ${OUTPUT_FILE}" >&2
+            exit 1
+          fi
+          # nextest summary line format: "Summary [N.Ns] N tests run: N passed, N skipped"
+          # Strip any residual ANSI escape sequences (defensive) then count.
+          TESTS_RUN=$(sed 's/\x1b\[[0-9;]*m//g' "${OUTPUT_FILE}" | grep -oP '\d+ tests? run' | grep -oP '^\d+' || echo "0")
+          echo "Tests run: ${TESTS_RUN}"
+          if [ "${TESTS_RUN}" -lt 1 ]; then
+            echo "ERROR: zero tests ran in the veraPDF gate job." >&2
+            echo "The -E filter 'test(ac013_verapdf_full_compliance)' matched no tests." >&2
+            echo "This means the veraPDF compliance gate was NOT enforced." >&2
+            exit 1
+          fi
+          echo "Coverage assertion PASSED: ${TESTS_RUN} test(s) ran."

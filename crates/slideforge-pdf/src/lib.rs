@@ -38,6 +38,7 @@ pub mod coords;
 pub mod error;
 pub mod exporter;
 pub mod font;
+pub mod outline;
 pub mod svg_embed;
 pub mod tag_engine;
 
