@@ -36,10 +36,12 @@
 //! This module is pure-core: no I/O, no filesystem access, no network calls.
 //! The function is a pure transformation from `&Slide` to `Vec<RegisteredContent>`.
 
-use slideforge_syntax::{DiagnosticSink, TemplateChunk};
+use std::sync::Arc;
+
+use slideforge_syntax::{DiagnosticSink, Expr, TemplateChunk};
 use slideforge_types::{
-    CANONICAL_MANUAL_SECTION_TYPES, FieldValue, InlineNode, Register, RegisteredContent,
-    SectionBlock, Slide, Value,
+    CANONICAL_MANUAL_SECTION_TYPES, FieldValue, InlineNode, MathNode, Register, RegisteredContent,
+    SectionBlock, Slide, SourceSpan, Value,
 };
 
 use crate::env::Env;
@@ -176,7 +178,7 @@ pub fn extract_section_register_content(section: &SectionBlock) -> Vec<Registere
 ///
 /// # Mapping (DIR-077-002 §3)
 ///
-/// | TemplateChunk | InlineNode |
+/// | `TemplateChunk` | `InlineNode` |
 /// |---|---|
 /// | `Literal(s)` | `Plain(Arc::from(s))` |
 /// | `Bold(children)` | `Bold(chunks_to_inline_nodes(children))` |
@@ -189,16 +191,17 @@ pub fn extract_section_register_content(section: &SectionBlock) -> Vec<Registere
 /// | `Subscript(children)` | `Subscript(chunks_to_inline_nodes(children))` |
 /// | `Strikethrough(children)` | `Strikethrough(chunks_to_inline_nodes(children))` |
 /// | `Highlight(children)` | `Highlight(chunks_to_inline_nodes(children))` |
-/// | `Expr(Call{ func:"ref", args:[Str(id)] })` | `Xref(Arc::from(id))` |
-/// | `Expr(Call{ func:"footnote", args:[Str(t)] })` | `Footnote([Plain(Arc::from(t))])` |
-/// | `Expr(other)` | evaluate to string → `Plain` |
-/// | `MathInterp(expr)` | evaluate to string → `Plain` |
+/// | `Expr(Pipe{ filter:"ref", lhs:Str(id) })` | `Xref(Arc::from(id))` |
+/// | `Expr(Pipe{ filter:"figref", lhs:Num(n) })` | `Xref(Arc::from(format!("fig-{n}")))` |
+/// | `Expr(Pipe{ filter:"footnote", lhs:Str(text) })` | `Footnote([Plain(Arc::from(text))])` |
+/// | `Expr(other)` | evaluate to string via env → `Plain` |
+/// | `MathInterp(expr)` | evaluate to string → `Plain` (math interp inside math region) |
 ///
-/// # STORY-077 Stub
+/// # Security: no re-parsing of resolved values
 ///
-/// This function body is a `todo!()` stub. The implementer must fill in the
-/// full mapping per DIR-077-002 §3. All tests that call this function will
-/// fail (Red Gate) until the implementation is complete.
+/// Resolved expression values (from `Expr` chunks) are treated as plain text and
+/// NOT re-parsed for inline markup. This prevents injection: a variable whose value
+/// contains `**bold**` will produce `Plain("**bold**")`, not `Bold([Plain("bold")])`.
 ///
 /// # Preconditions
 ///
@@ -211,18 +214,146 @@ pub fn extract_section_register_content(section: &SectionBlock) -> Vec<Registere
 /// A `Vec<InlineNode>` ready to be stored as `FieldValue::Inlines` on
 /// `SectionBlock.body`.
 #[must_use]
-#[allow(unused_variables)]
 pub fn chunks_to_inline_nodes(
     chunks: &[TemplateChunk],
     env: &Env,
     sink: &mut DiagnosticSink,
 ) -> Vec<InlineNode> {
-    // STORY-077 Red Gate stub — implementer fills this in.
-    // All tests that drive chunks_to_inline_nodes will fail here with todo!().
-    todo!(
-        "STORY-077: chunks_to_inline_nodes not yet implemented (DIR-077-002 §3). \
-         Implement the full TemplateChunk → InlineNode mapping before declaring Red Gate closed."
-    )
+    use crate::eval::eval_expr_to_string;
+
+    let mut nodes = Vec::with_capacity(chunks.len());
+
+    for chunk in chunks {
+        match chunk {
+            // ── Literal text → Plain ──────────────────────────────────────
+            TemplateChunk::Literal(s) => {
+                if !s.is_empty() {
+                    nodes.push(InlineNode::Plain(Arc::from(s.as_str())));
+                }
+            },
+
+            // ── Inline markup variants — recursive children ────────────────
+            TemplateChunk::Bold(children) => {
+                let child_nodes = chunks_to_inline_nodes(children, env, sink);
+                nodes.push(InlineNode::Bold(child_nodes));
+            },
+            TemplateChunk::Italic(children) => {
+                let child_nodes = chunks_to_inline_nodes(children, env, sink);
+                nodes.push(InlineNode::Italic(child_nodes));
+            },
+            TemplateChunk::Code(s) => {
+                nodes.push(InlineNode::Code(Arc::from(s.as_str())));
+            },
+            TemplateChunk::Link { text, url } => {
+                let text_nodes = chunks_to_inline_nodes(text, env, sink);
+                nodes.push(InlineNode::Link {
+                    text: text_nodes,
+                    url: Arc::from(url.as_str()),
+                });
+            },
+            TemplateChunk::Superscript(children) => {
+                let child_nodes = chunks_to_inline_nodes(children, env, sink);
+                nodes.push(InlineNode::Superscript(child_nodes));
+            },
+            TemplateChunk::Subscript(children) => {
+                let child_nodes = chunks_to_inline_nodes(children, env, sink);
+                nodes.push(InlineNode::Subscript(child_nodes));
+            },
+            TemplateChunk::Strikethrough(children) => {
+                let child_nodes = chunks_to_inline_nodes(children, env, sink);
+                nodes.push(InlineNode::Strikethrough(child_nodes));
+            },
+            TemplateChunk::Highlight(children) => {
+                let child_nodes = chunks_to_inline_nodes(children, env, sink);
+                nodes.push(InlineNode::Highlight(child_nodes));
+            },
+
+            // ── Math regions → InlineNode::Math ───────────────────────────
+            TemplateChunk::MathInline(latex) => {
+                nodes.push(InlineNode::Math(MathNode {
+                    latex: Arc::from(latex.as_str()),
+                    display: false,
+                    span: SourceSpan::default(),
+                }));
+            },
+            TemplateChunk::MathDisplay(latex) => {
+                nodes.push(InlineNode::Math(MathNode {
+                    latex: Arc::from(latex.as_str()),
+                    display: true,
+                    span: SourceSpan::default(),
+                }));
+            },
+            // MathInterp is math-mode interpolation (@{var} inside $...$).
+            // At eval time, evaluate the expression and produce a Plain node
+            // (the interp result flows into the surrounding math region's LaTeX).
+            TemplateChunk::MathInterp(expr) => {
+                if let Some(s) = eval_expr_to_string(env, expr, sink)
+                    && !s.is_empty()
+                {
+                    nodes.push(InlineNode::Plain(s));
+                }
+            },
+
+            // ── Expression interpolation: {{ expr }} ──────────────────────
+            TemplateChunk::Expr(expr) => {
+                // Check for special pseudo-function forms recognised as semantic
+                // inline nodes (DIR-077-002 §3 + §1 rules 5/6).
+                //
+                // Currently the Expr AST has no Call variant — the test-writer
+                // uses Expr::Pipe as a proxy (see test notes in
+                // template_inline_markup_tests.rs tests 22/23). Match on Pipe:
+                //   filter = "ref"      → Xref
+                //   filter = "figref"   → Xref with "fig-N" id
+                //   filter = "footnote" → Footnote
+                //   other pipes / other Expr → evaluate to string → Plain
+                match expr {
+                    Expr::Pipe { filter, lhs, .. } if filter == "ref" => {
+                        // `{{ "id" | ref }}` proxy for `{{ ref("id") }}`.
+                        if let Expr::Str(id) = lhs.as_ref() {
+                            nodes.push(InlineNode::Xref(Arc::from(id.as_str())));
+                        } else {
+                            // Unexpected lhs — evaluate and wrap as Plain.
+                            if let Some(s) = eval_expr_to_string(env, lhs, sink) {
+                                nodes.push(InlineNode::Xref(s));
+                            }
+                        }
+                    },
+                    Expr::Pipe { filter, lhs, .. } if filter == "figref" => {
+                        // `{{ N | figref }}` proxy for `{{ figref(N) }}`.
+                        let xref_id = if let Expr::Num(n) = lhs.as_ref() {
+                            Arc::from(format!("fig-{n}").as_str())
+                        } else if let Some(s) = eval_expr_to_string(env, lhs, sink) {
+                            Arc::from(format!("fig-{s}").as_str())
+                        } else {
+                            continue;
+                        };
+                        nodes.push(InlineNode::Xref(xref_id));
+                    },
+                    Expr::Pipe { filter, lhs, .. } if filter == "footnote" => {
+                        // `{{ "text" | footnote }}` proxy for `{{ footnote("text") }}`.
+                        if let Expr::Str(text) = lhs.as_ref() {
+                            nodes.push(InlineNode::Footnote(vec![InlineNode::Plain(Arc::from(
+                                text.as_str(),
+                            ))]));
+                        } else if let Some(s) = eval_expr_to_string(env, lhs, sink) {
+                            nodes.push(InlineNode::Footnote(vec![InlineNode::Plain(s)]));
+                        }
+                    },
+                    // All other expressions: evaluate to string → Plain.
+                    // Security: the resolved string is NOT re-parsed for inline markup.
+                    other => {
+                        if let Some(s) = eval_expr_to_string(env, other, sink)
+                            && !s.is_empty()
+                        {
+                            nodes.push(InlineNode::Plain(s));
+                        }
+                    },
+                }
+            },
+        }
+    }
+
+    nodes
 }
 
 /// The known section types recognised by the built-in section type registry.

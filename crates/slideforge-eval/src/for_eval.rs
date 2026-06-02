@@ -264,13 +264,11 @@ pub fn eval_slide_node<S: std::hash::BuildHasher>(
                                 had_error = true;
                             },
                         },
+                        // Math and inline markup in for-eval context — STORY-081.
                         TemplateChunk::MathInline(_)
                         | TemplateChunk::MathDisplay(_)
-                        | TemplateChunk::MathInterp(_) => {
-                            // Math chunks are stored as-is for now (future story).
-                        },
-                        // STORY-077: inline markup chunks — slide-level eval is STORY-081.
-                        TemplateChunk::Bold(_)
+                        | TemplateChunk::MathInterp(_)
+                        | TemplateChunk::Bold(_)
                         | TemplateChunk::Italic(_)
                         | TemplateChunk::Code(_)
                         | TemplateChunk::Link { .. }

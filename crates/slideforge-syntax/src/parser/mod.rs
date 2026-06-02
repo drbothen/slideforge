@@ -258,7 +258,16 @@ pub fn parse(
             // Route W-PAR-* diagnostics as non-fatal warnings (DIR-077-001-A Ruling 2).
             // These are emitted by `section_block_parser` for unrecognised sub-block
             // keys (EC-005 / BC-3.02.002 invariant 4) and must not fail the parse.
-            if message.contains("W-PAR-") {
+            //
+            // E-PAR-015 (unclosed inline markup span) and E-PAR-016 (empty inline
+            // markup span) are accumulated as non-fatal warnings per DIR-077-002 §5
+            // (error accumulation — parsing continues after each malformed span).
+            // The test contract (tests 13/14 in template_inline_markup_tests.rs)
+            // requires parse() to return Ok with the error in warnings.
+            if message.contains("W-PAR-")
+                || message.contains("E-PAR-015")
+                || message.contains("E-PAR-016")
+            {
                 let warning = SyntaxError::unexpected_token(
                     file_path.to_string(),
                     line,

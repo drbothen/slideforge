@@ -27,7 +27,9 @@
     clippy::expect_used,
     clippy::doc_markdown,
     clippy::module_name_repetitions,
-    non_snake_case  // test naming follows BC-NNN convention
+    non_snake_case,  // test naming follows BC-NNN convention
+    // explicit_iter_loop: nodes.iter() is clearer than &nodes in test assertions.
+    clippy::explicit_iter_loop,
 )]
 
 use std::sync::Arc;
@@ -1463,7 +1465,11 @@ fn test_BC_3_02_002_bold_chunk_to_inline_node() {
     );
     match &nodes[0] {
         InlineNode::Bold(children) => {
-            assert_eq!(children.len(), 1, "Bold must have 1 child; got {children:?}");
+            assert_eq!(
+                children.len(),
+                1,
+                "Bold must have 1 child; got {children:?}"
+            );
             assert!(
                 matches!(&children[0], InlineNode::Plain(s) if s.as_ref() == "hi"),
                 "Bold child must be Plain(\"hi\"); got: {:?}",
@@ -1493,10 +1499,18 @@ fn test_BC_3_02_002_italic_chunk_to_inline_node() {
 
     let nodes = crate::register_routing::chunks_to_inline_nodes(&chunks, &env, &mut sink);
 
-    assert_eq!(nodes.len(), 1, "Italic chunk must produce 1 InlineNode; got {nodes:?}");
+    assert_eq!(
+        nodes.len(),
+        1,
+        "Italic chunk must produce 1 InlineNode; got {nodes:?}"
+    );
     match &nodes[0] {
         InlineNode::Italic(children) => {
-            assert_eq!(children.len(), 1, "Italic must have 1 child; got {children:?}");
+            assert_eq!(
+                children.len(),
+                1,
+                "Italic must have 1 child; got {children:?}"
+            );
             assert!(
                 matches!(&children[0], InlineNode::Plain(s) if s.as_ref() == "em"),
                 "Italic child must be Plain(\"em\"); got: {:?}",
@@ -1524,7 +1538,11 @@ fn test_BC_3_02_002_code_chunk_to_inline_node() {
 
     let nodes = crate::register_routing::chunks_to_inline_nodes(&chunks, &env, &mut sink);
 
-    assert_eq!(nodes.len(), 1, "Code chunk must produce 1 InlineNode; got {nodes:?}");
+    assert_eq!(
+        nodes.len(),
+        1,
+        "Code chunk must produce 1 InlineNode; got {nodes:?}"
+    );
     match &nodes[0] {
         InlineNode::Code(content) => {
             assert_eq!(
@@ -1558,7 +1576,11 @@ fn test_BC_3_02_002_link_chunk_to_inline_node() {
 
     let nodes = crate::register_routing::chunks_to_inline_nodes(&chunks, &env, &mut sink);
 
-    assert_eq!(nodes.len(), 1, "Link chunk must produce 1 InlineNode; got {nodes:?}");
+    assert_eq!(
+        nodes.len(),
+        1,
+        "Link chunk must produce 1 InlineNode; got {nodes:?}"
+    );
     match &nodes[0] {
         InlineNode::Link { text, url } => {
             assert_eq!(url.as_ref(), "https://example.com", "Link url must match");
@@ -1592,10 +1614,18 @@ fn test_BC_3_02_002_math_inline_chunk_to_inline_node() {
 
     let nodes = crate::register_routing::chunks_to_inline_nodes(&chunks, &env, &mut sink);
 
-    assert_eq!(nodes.len(), 1, "MathInline chunk must produce 1 InlineNode; got {nodes:?}");
+    assert_eq!(
+        nodes.len(),
+        1,
+        "MathInline chunk must produce 1 InlineNode; got {nodes:?}"
+    );
     match &nodes[0] {
         InlineNode::Math(MathNode { latex, display, .. }) => {
-            assert_eq!(latex.as_ref(), "x^2", "Math latex must be 'x^2'; got: {latex:?}");
+            assert_eq!(
+                latex.as_ref(),
+                "x^2",
+                "Math latex must be 'x^2'; got: {latex:?}"
+            );
             assert!(
                 !display,
                 "MathInline must produce display=false; got display={display}"
@@ -1624,7 +1654,11 @@ fn test_BC_3_02_002_math_display_chunk_to_inline_node() {
 
     let nodes = crate::register_routing::chunks_to_inline_nodes(&chunks, &env, &mut sink);
 
-    assert_eq!(nodes.len(), 1, "MathDisplay chunk must produce 1 InlineNode; got {nodes:?}");
+    assert_eq!(
+        nodes.len(),
+        1,
+        "MathDisplay chunk must produce 1 InlineNode; got {nodes:?}"
+    );
     match &nodes[0] {
         InlineNode::Math(MathNode { latex, display, .. }) => {
             assert_eq!(
@@ -1683,7 +1717,11 @@ fn test_BC_3_02_002_expr_ref_call_to_xref() {
     // must produce InlineNode::Xref(Arc::from("slide-1")).
     // If the implementation uses Expr::Call instead, this test will need updating
     // to use Expr::Call { func: "ref", args: [Expr::Str("slide-1")] }.
-    assert_eq!(nodes.len(), 1, "ref() Expr must produce 1 InlineNode; got {nodes:?}");
+    assert_eq!(
+        nodes.len(),
+        1,
+        "ref() Expr must produce 1 InlineNode; got {nodes:?}"
+    );
     match &nodes[0] {
         InlineNode::Xref(id) => {
             assert_eq!(
@@ -1726,10 +1764,18 @@ fn test_BC_3_02_002_expr_footnote_call_to_footnote_node() {
 
     let nodes = crate::register_routing::chunks_to_inline_nodes(&chunks, &env, &mut sink);
 
-    assert_eq!(nodes.len(), 1, "footnote() Expr must produce 1 InlineNode; got {nodes:?}");
+    assert_eq!(
+        nodes.len(),
+        1,
+        "footnote() Expr must produce 1 InlineNode; got {nodes:?}"
+    );
     match &nodes[0] {
         InlineNode::Footnote(children) => {
-            assert_eq!(children.len(), 1, "Footnote must have 1 child; got {children:?}");
+            assert_eq!(
+                children.len(),
+                1,
+                "Footnote must have 1 child; got {children:?}"
+            );
             assert!(
                 matches!(&children[0], InlineNode::Plain(s) if s.as_ref() == "see appendix"),
                 "Footnote child must be Plain(\"see appendix\"); got: {:?}",
@@ -1825,9 +1871,7 @@ fn test_BC_3_02_002_ac002_bold_in_section_detail_produces_inlines() {
                 ),
             }
         },
-        other => panic!(
-            "AC-002 FAIL: body['detail'] must be FieldValue::Inlines; got: {other:?}"
-        ),
+        other => panic!("AC-002 FAIL: body['detail'] must be FieldValue::Inlines; got: {other:?}"),
     }
 }
 
@@ -1865,8 +1909,7 @@ fn test_BC_3_02_002_ac002_xref_in_section_detail_produces_xref_node() {
 
     let result = crate::eval::eval_section_nodes_for_test(&section_node, &env, &mut sink);
 
-    let (section_block, _) =
-        result.expect("AC-002: eval must return Some for ref() in detail");
+    let (section_block, _) = result.expect("AC-002: eval must return Some for ref() in detail");
 
     let detail_entry = section_block
         .body
@@ -1876,9 +1919,9 @@ fn test_BC_3_02_002_ac002_xref_in_section_detail_produces_xref_node() {
     match detail_entry {
         FieldValue::Inlines(nodes) => {
             // Must contain an Xref node somewhere in the sequence.
-            let has_xref = nodes.iter().any(|n| {
-                matches!(n, InlineNode::Xref(id) if id.as_ref() == "slide-1")
-            });
+            let has_xref = nodes
+                .iter()
+                .any(|n| matches!(n, InlineNode::Xref(id) if id.as_ref() == "slide-1"));
             assert!(
                 has_xref,
                 "AC-002: FieldValue::Inlines must contain InlineNode::Xref(\"slide-1\"); \
@@ -1893,9 +1936,7 @@ fn test_BC_3_02_002_ac002_xref_in_section_detail_produces_xref_node() {
                 "AC-002: no Plain node must contain raw 'ref(' or 'slide-1'; got {nodes:?}"
             );
         },
-        other => panic!(
-            "AC-002 FAIL: body['detail'] must be FieldValue::Inlines; got: {other:?}"
-        ),
+        other => panic!("AC-002 FAIL: body['detail'] must be FieldValue::Inlines; got: {other:?}"),
     }
 }
 
@@ -1928,10 +1969,12 @@ fn test_BC_3_02_002_ac002_plain_text_not_literal_asterisks() {
     let mut sink = DiagnosticSink::new();
 
     let result = crate::eval::eval_section_nodes_for_test(&section_node, &env, &mut sink);
-    let (section_block, _) =
-        result.expect("AC-002: eval must return Some");
+    let (section_block, _) = result.expect("AC-002: eval must return Some");
 
-    let detail_entry = section_block.body.get("detail").expect("detail must be present");
+    let detail_entry = section_block
+        .body
+        .get("detail")
+        .expect("detail must be present");
 
     match detail_entry {
         FieldValue::Inlines(nodes) => {
@@ -1954,9 +1997,7 @@ fn test_BC_3_02_002_ac002_plain_text_not_literal_asterisks() {
                 }
             }
         },
-        other => panic!(
-            "AC-002 FAIL: body['detail'] must be FieldValue::Inlines; got: {other:?}"
-        ),
+        other => panic!("AC-002 FAIL: body['detail'] must be FieldValue::Inlines; got: {other:?}"),
     }
 }
 
@@ -1990,31 +2031,39 @@ fn test_BC_3_02_002_ac002_interpolation_with_bold_context() {
     let mut sink = DiagnosticSink::new();
 
     let result = crate::eval::eval_section_nodes_for_test(&section_node, &env, &mut sink);
-    let (section_block, _) =
-        result.expect("AC-002: eval must return Some with client in scope");
+    let (section_block, _) = result.expect("AC-002: eval must return Some with client in scope");
 
-    let detail_entry = section_block.body.get("detail").expect("detail must be present");
+    let detail_entry = section_block
+        .body
+        .get("detail")
+        .expect("detail must be present");
 
     match detail_entry {
         FieldValue::Inlines(nodes) => {
-            assert_eq!(nodes.len(), 1, "must have 1 InlineNode (Bold); got {nodes:?}");
+            assert_eq!(
+                nodes.len(),
+                1,
+                "must have 1 InlineNode (Bold); got {nodes:?}"
+            );
             match &nodes[0] {
                 InlineNode::Bold(children) => {
-                    assert_eq!(children.len(), 1, "Bold must have 1 child; got {children:?}");
+                    assert_eq!(
+                        children.len(),
+                        1,
+                        "Bold must have 1 child; got {children:?}"
+                    );
                     assert!(
                         matches!(&children[0], InlineNode::Plain(s) if s.as_ref() == "Acme"),
                         "Bold child must be Plain(\"Acme\") after interpolation; got: {:?}",
                         children[0]
                     );
                 },
-                other => panic!(
-                    "AC-002 interpolation FAIL: expected InlineNode::Bold; got: {other:?}"
-                ),
+                other => {
+                    panic!("AC-002 interpolation FAIL: expected InlineNode::Bold; got: {other:?}")
+                },
             }
         },
-        other => panic!(
-            "AC-002 FAIL: body['detail'] must be FieldValue::Inlines; got: {other:?}"
-        ),
+        other => panic!("AC-002 FAIL: body['detail'] must be FieldValue::Inlines; got: {other:?}"),
     }
 }
 
@@ -2045,8 +2094,7 @@ fn test_BC_3_02_002_ac002_report_sub_block_produces_inlines() {
     let mut sink = DiagnosticSink::new();
 
     let result = crate::eval::eval_section_nodes_for_test(&section_node, &env, &mut sink);
-    let (section_block, _) =
-        result.expect("AC-002: eval must return Some for methodology report");
+    let (section_block, _) = result.expect("AC-002: eval must return Some for methodology report");
 
     let report_entry = section_block
         .body
@@ -2081,9 +2129,7 @@ fn test_BC_3_02_002_ac002_report_sub_block_produces_inlines() {
                         );
                     }
                 },
-                other => panic!(
-                    "AC-002 (report) FAIL: expected InlineNode::Bold; got: {other:?}"
-                ),
+                other => panic!("AC-002 (report) FAIL: expected InlineNode::Bold; got: {other:?}"),
             }
         },
         other => panic!(

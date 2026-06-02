@@ -477,52 +477,19 @@ fn eval_section_nodes(
         // Resolve FieldValue::Template to FieldValue::Inlines for register keys.
         let resolved = match field_node.value.value() {
             slideforge_syntax::FieldValue::Template(chunks) => {
-                // Evaluate the template chunks and build a sequence of InlineNodes.
-                let mut inline_nodes: Vec<InlineNode> = Vec::new();
-                let mut had_error = false;
+                // STORY-077: use chunks_to_inline_nodes for the full inline markup pipeline.
+                // This converts all TemplateChunk variants (Literal, Expr, Bold, Italic,
+                // Code, Link, Superscript, Subscript, Strikethrough, Highlight, Math*)
+                // to their InlineNode counterparts per DIR-077-002 §3.
+                //
+                // Error detection: count errors before and after; if new errors were added
+                // (e.g. UndefinedVariable), treat the section as fatal and return None.
+                let error_count_before = sink.errors().len();
 
-                for chunk in chunks {
-                    match chunk {
-                        TemplateChunk::Literal(s) => {
-                            if !s.is_empty() {
-                                inline_nodes.push(InlineNode::Plain(Arc::from(s.as_str())));
-                            }
-                        },
-                        TemplateChunk::Expr(expr) => match eval_expr_to_string(env, expr, sink) {
-                            Some(s) => {
-                                if !s.is_empty() {
-                                    inline_nodes.push(InlineNode::Plain(s));
-                                }
-                            },
-                            None => {
-                                had_error = true;
-                            },
-                        },
-                        TemplateChunk::MathInline(_)
-                        | TemplateChunk::MathDisplay(_)
-                        | TemplateChunk::MathInterp(_) => {
-                            // Math chunks in register sub-blocks are not yet supported;
-                            // they pass through as-is (no inline node emitted).
-                        },
-                        // STORY-077: inline markup chunks — these will be converted via
-                        // chunks_to_inline_nodes at eval time (see register_routing.rs).
-                        // For now (before the full conversion is wired), treat them as
-                        // pass-through (no inline node emitted from this branch).
-                        // This branch is hit only for slide-level template evaluation;
-                        // section sub-blocks use chunks_to_inline_nodes directly.
-                        TemplateChunk::Bold(_)
-                        | TemplateChunk::Italic(_)
-                        | TemplateChunk::Code(_)
-                        | TemplateChunk::Link { .. }
-                        | TemplateChunk::Superscript(_)
-                        | TemplateChunk::Subscript(_)
-                        | TemplateChunk::Strikethrough(_)
-                        | TemplateChunk::Highlight(_) => {
-                            // Slide-level inline markup eval is STORY-081.
-                        },
-                    }
-                }
+                let inline_nodes =
+                    crate::register_routing::chunks_to_inline_nodes(chunks, env, sink);
 
+                let had_error = sink.errors().len() > error_count_before;
                 if had_error {
                     return None;
                 }
@@ -646,14 +613,12 @@ fn eval_field_value_to_value(
                             had_error = true;
                         },
                     },
+                    // Math chunks and inline markup chunks at slide-level are STORY-081.
+                    // Math is stored as-is; inline markup flat-text extraction is deferred.
                     TemplateChunk::MathInline(_)
                     | TemplateChunk::MathDisplay(_)
-                    | TemplateChunk::MathInterp(_) => {
-                        // Math chunks are stored as-is for now.
-                    },
-                    // STORY-077: inline markup chunks at slide-level are STORY-081.
-                    // For now, treat content as flat text (extract inner text).
-                    TemplateChunk::Bold(_)
+                    | TemplateChunk::MathInterp(_)
+                    | TemplateChunk::Bold(_)
                     | TemplateChunk::Italic(_)
                     | TemplateChunk::Code(_)
                     | TemplateChunk::Link { .. }
@@ -742,13 +707,11 @@ fn eval_set_rule_value(
                             },
                         }
                     },
+                    // Math and inline markup in set-rule context — STORY-081.
                     TemplateChunk::MathInline(_)
                     | TemplateChunk::MathDisplay(_)
-                    | TemplateChunk::MathInterp(_) => {
-                        // Math chunks are stored as-is for now.
-                    },
-                    // STORY-077: inline markup chunks in set-rule context — STORY-081.
-                    TemplateChunk::Bold(_)
+                    | TemplateChunk::MathInterp(_)
+                    | TemplateChunk::Bold(_)
                     | TemplateChunk::Italic(_)
                     | TemplateChunk::Code(_)
                     | TemplateChunk::Link { .. }

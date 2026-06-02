@@ -2,6 +2,10 @@
 #![allow(non_snake_case)] // test_BC_S_SS_NNN_xxx naming convention per TDD traceability
 #![allow(clippy::doc_markdown)] // test function names in doc comments do not need backticks
 #![allow(clippy::redundant_closure_for_method_calls)]
+// These lints fire in the test-writer-generated test bodies (Red Gate + Green Gate):
+// collapsible_if: nested if-let chains are clearer when kept separate in tests.
+// used_underscore_binding: comemo/Hash derive test uses _italic, _code, etc. intentionally.
+#![allow(clippy::collapsible_if, clippy::used_underscore_binding)]
 //! Failing test suite (Red Gate) for STORY-077: Inline markup parser extension.
 //!
 //! # TDD Red Gate — template chunk parsing (DIR-077-002 §8, tests 1-15)
@@ -72,7 +76,10 @@ fn parse_template_value(s: &str) -> Vec<TemplateChunk> {
         .find(|f| f.name.value() == "detail")
         .expect("detail field must exist");
     let FieldValue::Template(chunks) = field.value.value() else {
-        panic!("detail field must be Template; got: {:?}", field.value.value());
+        panic!(
+            "detail field must be Template; got: {:?}",
+            field.value.value()
+        );
     };
     chunks.clone()
 }
@@ -509,10 +516,7 @@ fn test_BC_3_02_002_code_span_no_inner_markup() {
                  markup which is WRONG."
             );
             // Verify: the content must NOT have been processed to a Bold node.
-            assert!(
-                !content.is_empty(),
-                "Code span content must not be empty"
-            );
+            assert!(!content.is_empty(), "Code span content must not be empty");
         },
         other => panic!(
             "test_BC_3_02_002_code_span_no_inner_markup FAIL: expected TemplateChunk::Code, \
@@ -739,7 +743,10 @@ fn test_BC_3_02_002_template_chunk_bold_derives_hash_eq_clone_debug() {
 
     // Clone
     let bold2 = bold.clone();
-    assert_eq!(bold, bold2, "Bold must implement PartialEq (clone equality)");
+    assert_eq!(
+        bold, bold2,
+        "Bold must implement PartialEq (clone equality)"
+    );
 
     // Debug
     let debug_str = format!("{bold:?}");

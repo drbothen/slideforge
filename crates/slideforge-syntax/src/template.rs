@@ -113,7 +113,6 @@ pub enum TemplateChunk {
     MathInterp(Expr),
 
     // ── STORY-077: Inline markup variants (DIR-077-002 §3) ────────────────────
-
     /// Bold text span: `**text**`.
     ///
     /// Children may contain any `TemplateChunk` variant (including `Italic`,
