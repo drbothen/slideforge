@@ -541,7 +541,27 @@ fn eval_section_nodes(
                         },
                         slideforge_types::Value::Null => Arc::from(""),
                         _ => {
-                            // List/Map — not valid for register content; skip.
+                            // List/Map — not valid for register content.
+                            //
+                            // Register sub-block fields (`detail:`, `report:`) carry prose
+                            // destined for a writing register. List and Map values cannot be
+                            // rendered as prose and are therefore dropped.
+                            //
+                            // The drop is OBSERVABLE via tracing::warn! (not a silent drop)
+                            // to match the slide-path sibling in `field_value_to_inlines`
+                            // (register_routing.rs) which emits the identical pattern per
+                            // F-035-P5-003. Register fields are text-only per BC-1.14.001/002/003.
+                            //
+                            // F-077-P4-001: before this fix this was a bare `continue` with
+                            // no diagnostic signal — violating the silent-failure ban.
+                            tracing::warn!(
+                                section = section_type,
+                                field = key,
+                                "eval_section_nodes: register sub-block field resolved to \
+                                 List or Map — register fields are text-only \
+                                 (BC-1.14.001/002/003); field dropped, no register entry \
+                                 produced (F-077-P4-001)"
+                            );
                             continue;
                         },
                     };

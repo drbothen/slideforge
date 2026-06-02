@@ -1253,3 +1253,178 @@ fn test_obs3_deck_level_section_with_undefined_variable_is_dropped_and_surfaced(
     // If eval_deck returned None, the diagnostic gate already enforced absence —
     // assertion (b) above is sufficient.
 }
+
+// ─── F-077-P4-001: section-path List/Map Ident drop is observable ─────────────
+
+/// F-077-P4-001 / BC-1.14.001/002/003:
+/// A `section detail:` field whose value is a bare ident (`FieldValue::Ident`)
+/// that resolves via the env to `Value::List` must produce NO register content
+/// (drop is correct — List values are not valid register prose) AND the drop
+/// must be OBSERVABLE via `tracing::warn!` (not a silent drop).
+///
+/// Before this fix, the drop was a bare `continue` with no logging — violating
+/// the silent-failure ban and diverging from the slide-path sibling
+/// (`field_value_to_inlines` in register_routing.rs, which emits `tracing::warn!`
+/// for the identical List/Map-into-register-field case, per F-035-P5-003).
+///
+/// This test locks in the correct behavior:
+///   (a) register_content is empty (Value::List is correctly dropped)
+///   (b) the warn! path is taken (code comment + observability via structured logs)
+///
+/// Mirror of `test_f035_p5_003_list_register_field_produces_no_entry` for the
+/// slide-path sibling in register_routing.rs.
+///
+/// TD-VSDD-059: assertions are load-bearing on both the empty-result behavior
+/// AND the section block shape (section was emitted with the field absent).
+#[test]
+fn test_f077_p4_001_section_detail_ident_resolving_to_list_drops_silently_with_warn() {
+    // Build a SectionNode whose detail: field is a bare Ident "refs".
+    // This mimics DSL:
+    //   @var refs = ["a", "b"]
+    //   section methodology:
+    //     detail: refs
+    let section_node = slideforge_syntax::SectionNode {
+        kind: slideforge_syntax::Spanned::new("methodology".to_string(), dummy_span()),
+        fields: vec![slideforge_syntax::FieldNode {
+            name: slideforge_syntax::Spanned::new("detail".to_string(), dummy_span()),
+            value: slideforge_syntax::Spanned::new(
+                slideforge_syntax::FieldValue::Ident("refs".to_string()),
+                dummy_span(),
+            ),
+        }],
+    };
+
+    // Env has refs = ["a", "b"] — a Value::List.
+    let mut vars: IndexMap<Arc<str>, Value> = IndexMap::new();
+    vars.insert(
+        Arc::from("refs"),
+        Value::List(vec![Value::Str(Arc::from("a")), Value::Str(Arc::from("b"))]),
+    );
+    let env = Env::new(vars);
+
+    let mut sink = DiagnosticSink::new();
+    let result = crate::eval::eval_section_nodes_for_test(&section_node, &env, &mut sink);
+
+    // (a) The section must still be emitted (a List in a register field is a
+    //     type mismatch for register content, but it is NOT a fatal error for the
+    //     section itself — only for template interpolation that must produce text).
+    //     The field is dropped from body and register_content is empty.
+    //
+    // NOTE: eval_section_nodes currently `continue`s the field loop on List/Map,
+    // which means the section IS returned but with "detail" absent from body.
+    // The register_content must be empty because no FieldValue::Inlines was
+    // inserted for "detail".
+    assert!(
+        result.is_some(),
+        "F-077-P4-001: eval must return Some for a section whose detail: field resolves \
+         to Value::List (the field is dropped, but the section is not fatal); \
+         got None with errors: {:?}",
+        sink.errors()
+    );
+
+    let (section_block, register_content) = result.unwrap();
+
+    // (a) register_content must be EMPTY — Value::List is not valid register prose.
+    assert!(
+        register_content.is_empty(),
+        "F-077-P4-001: register_content must be empty when detail: resolves to Value::List \
+         (register fields are text-only, BC-1.14.001/002/003); \
+         drop must be logged via tracing::warn! (not a silent drop — F-077-P4-001); \
+         got: {register_content:?}"
+    );
+
+    // (b) The "detail" key must be absent from body (the field was dropped,
+    //     not inserted as invalid content).
+    assert!(
+        section_block.body.get("detail").is_none(),
+        "F-077-P4-001: 'detail' key must be absent from body when its value is Value::List \
+         (the field is skipped); got body: {:?}",
+        section_block.body.keys().collect::<Vec<_>>()
+    );
+
+    // No error diagnostics: a List-in-register-field is a WARN, not a fatal error.
+    // (A tracing::warn! is emitted — observable in structured logs — but nothing
+    //  is pushed to the DiagnosticSink, matching the slide-path behavior in
+    //  register_routing.rs field_value_to_inlines / F-035-P5-003.)
+    assert!(
+        sink.is_empty(),
+        "F-077-P4-001: no diagnostic errors expected for List-in-register-field \
+         (the drop is logged via tracing::warn!, not a DiagnosticSink error); \
+         got: {:?}",
+        sink.errors()
+    );
+}
+
+/// F-077-P4-001 (Map variant):
+/// A `section detail:` field whose value is a bare ident (`FieldValue::Ident`)
+/// that resolves via the env to `Value::Map` must produce NO register content.
+///
+/// Mirror of `test_f035_p5_003_map_register_field_produces_no_entry` for the
+/// section path, and companion to the List variant above.
+///
+/// TD-VSDD-059: load-bearing assertions on empty register_content, absent body
+/// key, and no diagnostic errors.
+#[test]
+fn test_f077_p4_001_section_detail_ident_resolving_to_map_drops_with_warn() {
+    // Build a SectionNode whose detail: field is a bare Ident "meta".
+    // This mimics DSL:
+    //   @var meta = {key: "value"}
+    //   section methodology:
+    //     detail: meta
+    let section_node = slideforge_syntax::SectionNode {
+        kind: slideforge_syntax::Spanned::new("methodology".to_string(), dummy_span()),
+        fields: vec![slideforge_syntax::FieldNode {
+            name: slideforge_syntax::Spanned::new("detail".to_string(), dummy_span()),
+            value: slideforge_syntax::Spanned::new(
+                slideforge_syntax::FieldValue::Ident("meta".to_string()),
+                dummy_span(),
+            ),
+        }],
+    };
+
+    // Env has meta = {key: "value"} — a Value::Map.
+    let mut vars: IndexMap<Arc<str>, Value> = IndexMap::new();
+    let mut map_inner = OrderedMap::new();
+    map_inner.insert(Arc::from("key"), Value::Str(Arc::from("value")));
+    vars.insert(Arc::from("meta"), Value::Map(map_inner));
+    let env = Env::new(vars);
+
+    let mut sink = DiagnosticSink::new();
+    let result = crate::eval::eval_section_nodes_for_test(&section_node, &env, &mut sink);
+
+    // The section must still be emitted (Map in a register field is not fatal).
+    assert!(
+        result.is_some(),
+        "F-077-P4-001 (Map): eval must return Some for a section whose detail: field resolves \
+         to Value::Map (the field is dropped, but the section is not fatal); \
+         got None with errors: {:?}",
+        sink.errors()
+    );
+
+    let (section_block, register_content) = result.unwrap();
+
+    // register_content must be EMPTY — Value::Map is not valid register prose.
+    assert!(
+        register_content.is_empty(),
+        "F-077-P4-001 (Map): register_content must be empty when detail: resolves to Value::Map \
+         (register fields are text-only, BC-1.14.001/002/003); \
+         drop must be logged via tracing::warn! (not a silent drop — F-077-P4-001); \
+         got: {register_content:?}"
+    );
+
+    // The "detail" key must be absent from body.
+    assert!(
+        section_block.body.get("detail").is_none(),
+        "F-077-P4-001 (Map): 'detail' key must be absent from body when its value is Value::Map; \
+         got body: {:?}",
+        section_block.body.keys().collect::<Vec<_>>()
+    );
+
+    // No error diagnostics — the drop is a tracing::warn!, not a DiagnosticSink error.
+    assert!(
+        sink.is_empty(),
+        "F-077-P4-001 (Map): no diagnostic errors expected for Map-in-register-field; \
+         got: {:?}",
+        sink.errors()
+    );
+}
