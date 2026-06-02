@@ -237,6 +237,29 @@ pub enum EvalError {
         span: SourceSpan,
     },
 
+    /// E-EVL-010: An unrecognised section type was encountered during evaluation.
+    ///
+    /// STORY-077 (BC-3.02.002 invariant 3 / DIR-077-001-A Ruling 3): The parser
+    /// stores the section type name verbatim in `SectionNode.kind`. The evaluator
+    /// (`eval_section_nodes`) validates the name against the full `SectionType`
+    /// plugin registry (built-ins: methodology, scope, approval, appendix, glossary,
+    /// plus any plugin-registered types). An unrecognised name is a FATAL eval error.
+    #[error(
+        "Unknown section type '{name}'. Known types: [{known_types}]"
+    )]
+    #[diagnostic(
+        code("E-EVL-010"),
+        help("Check the section type name for typos, or register a custom SectionType plugin.")
+    )]
+    UnknownSectionType {
+        /// The unrecognised section type name (e.g. `"foobar"`).
+        name: Arc<str>,
+        /// Comma-separated list of known section type names.
+        known_types: String,
+        /// Source location of the `section <type>:` declaration.
+        span: SourceSpan,
+    },
+
     /// E-PAR-004: A circular `@include` chain was detected in the merged AST.
     ///
     /// The evaluator runs a DFS over the include graph (built from `@include`

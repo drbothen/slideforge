@@ -33,7 +33,7 @@
 
 use std::sync::Arc;
 
-use slideforge_types::{Deck, OrderedMap, Register, Value};
+use slideforge_types::{Deck, FieldValue, OrderedMap, Register, Value};
 use tracing::warn;
 
 use crate::error::LayoutError;
@@ -439,11 +439,25 @@ fn collect_manual_sections(deck: &Deck) -> Result<Vec<GeneratedSection>, LayoutE
         // whose keys are not yet known at layout time. Deferred until the
         // SectionType plugin surface (STORY-041/042) defines per-section schemas;
         // at that point each plugin can validate its own field set.
+        // STORY-077: SectionBlock.body is now OrderedMap<Arc<str>, FieldValue>.
+        // For backwards compatibility with SectionItem::Custom (which expects
+        // OrderedMap<Arc<str>, Value>), extract the Value from Literal variants.
+        // Non-Literal variants (Inlines, Template, etc.) are coerced to a Null
+        // placeholder — the DOCX/PDF exporters read register_content for rich
+        // section content, not this legacy Custom map.
         let custom_map: OrderedMap<Arc<str>, Value> = block
             .body
             .iter()
             .filter(|(k, _)| k.as_ref() != "heading")
-            .map(|(k, v)| (Arc::clone(k), v.clone()))
+            .map(|(k, fv)| {
+                let v = match fv {
+                    FieldValue::Literal(val) => val.clone(),
+                    // Rich or template content is handled via register_content;
+                    // the legacy Custom map gets a Null placeholder.
+                    _ => Value::Null,
+                };
+                (Arc::clone(k), v)
+            })
             .collect();
         let items = vec![SectionItem::Custom(custom_map)];
 
@@ -454,8 +468,9 @@ fn collect_manual_sections(deck: &Deck) -> Result<Vec<GeneratedSection>, LayoutE
         // value (e.g., a number, list, or map), the fallback is applied silently.
         // Emit a warning so DSL authors learn that their heading declaration was
         // ignored. This is NOT an error — the build continues with the fallback.
+        // STORY-077: body values are now FieldValue; extract Literal(Str) for heading.
         let heading: Arc<str> = match block.body.get("heading") {
-            Some(Value::Str(s)) => Arc::clone(s),
+            Some(FieldValue::Literal(Value::Str(s))) => Arc::clone(s),
             Some(_non_str) => {
                 warn!(
                     section_name = %name,
@@ -1349,6 +1364,7 @@ mod tests {
         let block = SectionBlock {
             name: Arc::from("methodology"),
             body: OrderedMap::new(),
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         let deck = make_deck_with_section_blocks(vec![make_slide("title")], vec![block]);
@@ -1370,6 +1386,7 @@ mod tests {
         let block = SectionBlock {
             name: Arc::from("scope"),
             body: OrderedMap::new(),
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         let deck = make_deck_with_section_blocks(vec![], vec![block]);
@@ -1392,6 +1409,7 @@ mod tests {
         let block = SectionBlock {
             name: Arc::from("unknown_type"),
             body: OrderedMap::new(),
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         let deck = make_deck_with_section_blocks(vec![], vec![block]);
@@ -1412,6 +1430,7 @@ mod tests {
             let block = SectionBlock {
                 name: Arc::from(type_name),
                 body: OrderedMap::new(),
+                register_content: vec![],
                 span: SourceSpan::default(),
             };
             let deck = make_deck_with_section_blocks(vec![], vec![block]);
@@ -1813,6 +1832,7 @@ mod tests {
         let block = SectionBlock {
             name: Arc::from("methodology"),
             body: OrderedMap::new(),
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         // methodology (manual) + takeaway slide (auto executive_summary):
@@ -1873,6 +1893,7 @@ mod tests {
         let block = SectionBlock {
             name: Arc::from("methodology"),
             body: OrderedMap::new(),
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         let deck = make_deck_with_section_order(
@@ -1981,6 +2002,7 @@ mod tests {
         let block = SectionBlock {
             name: Arc::from("executive_summary"),
             body: OrderedMap::new(),
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         let deck = make_deck_with_section_blocks(vec![], vec![block]);
@@ -2006,6 +2028,7 @@ mod tests {
         let block = SectionBlock {
             name: Arc::from("risk_register"),
             body: OrderedMap::new(),
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         let deck = make_deck_with_section_blocks(vec![], vec![block]);
@@ -2026,6 +2049,7 @@ mod tests {
         let block = SectionBlock {
             name: Arc::from("executive_summary"),
             body: OrderedMap::new(),
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         let deck = make_deck_with_section_blocks(
@@ -2083,12 +2107,16 @@ mod tests {
         let mut body = OrderedMap::new();
         body.insert(
             Arc::from("summary"),
-            Value::Str(Arc::from("Manual executive summary text")),
+            FieldValue::Literal(Value::Str(Arc::from("Manual executive summary text"))),
         );
-        body.insert(Arc::from("author"), Value::Str(Arc::from("Strategy Team")));
+        body.insert(
+            Arc::from("author"),
+            FieldValue::Literal(Value::Str(Arc::from("Strategy Team"))),
+        );
         let block = SectionBlock {
             name: Arc::from("executive_summary"),
             body,
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         // Two takeaway slides that would normally produce auto-generated bullets.
@@ -2171,6 +2199,7 @@ mod tests {
         let block = SectionBlock {
             name: Arc::from("executive_summary"),
             body: OrderedMap::new(),
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         let deck = make_deck_with_section_blocks(
@@ -2192,6 +2221,7 @@ mod tests {
         let block = SectionBlock {
             name: Arc::from("executive_summary"),
             body: OrderedMap::new(),
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         // No takeaway slides — no auto-generated section would have been produced.
@@ -2214,6 +2244,7 @@ mod tests {
         let block = SectionBlock {
             name: Arc::from("executive_summary"),
             body: OrderedMap::new(),
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         // A slide whose `takeaway:` is an unresolved Expr — NOT a Literal(Str).
@@ -2256,6 +2287,7 @@ mod tests {
         let block = SectionBlock {
             name: Arc::from("methodology"),
             body: OrderedMap::new(), // empty body
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         let deck = make_deck_with_section_blocks(vec![make_slide("title")], vec![block]);
@@ -2276,9 +2308,13 @@ mod tests {
             name: Arc::from("methodology"),
             body: {
                 let mut m = OrderedMap::new();
-                m.insert(Arc::from("approach"), Value::Str(Arc::from("Agile")));
+                m.insert(
+                    Arc::from("approach"),
+                    FieldValue::Literal(Value::Str(Arc::from("Agile"))),
+                );
                 m
             },
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         let deck = make_deck_with_section_blocks(vec![make_slide("title")], vec![block]);
@@ -2413,12 +2449,22 @@ mod tests {
     #[test]
     fn test_high_005_manual_section_body_single_custom_item_with_full_map() {
         let mut body = OrderedMap::new();
-        body.insert(Arc::from("author"), Value::Str(Arc::from("Alice")));
-        body.insert(Arc::from("version"), Value::Str(Arc::from("1.0")));
-        body.insert(Arc::from("date"), Value::Str(Arc::from("2026-01-01")));
+        body.insert(
+            Arc::from("author"),
+            FieldValue::Literal(Value::Str(Arc::from("Alice"))),
+        );
+        body.insert(
+            Arc::from("version"),
+            FieldValue::Literal(Value::Str(Arc::from("1.0"))),
+        );
+        body.insert(
+            Arc::from("date"),
+            FieldValue::Literal(Value::Str(Arc::from("2026-01-01"))),
+        );
         let block = SectionBlock {
             name: Arc::from("methodology"),
             body,
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         let deck = make_deck_with_section_blocks(vec![], vec![block]);
@@ -2458,6 +2504,7 @@ mod tests {
         let block = SectionBlock {
             name: Arc::from("scope"),
             body: OrderedMap::new(),
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         let deck = make_deck_with_section_blocks(vec![], vec![block]);
@@ -2493,6 +2540,7 @@ mod tests {
         let block = SectionBlock {
             name: Arc::from("methodology"),
             body: OrderedMap::new(),
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         let deck = make_deck_with_section_blocks(vec![], vec![block]);
@@ -2540,12 +2588,16 @@ mod tests {
         let mut body = OrderedMap::new();
         body.insert(
             Arc::from("heading"),
-            Value::Str(Arc::from("Our Research Methodology")),
+            FieldValue::Literal(Value::Str(Arc::from("Our Research Methodology"))),
         );
-        body.insert(Arc::from("content"), Value::Str(Arc::from("Details here")));
+        body.insert(
+            Arc::from("content"),
+            FieldValue::Literal(Value::Str(Arc::from("Details here"))),
+        );
         let block = SectionBlock {
             name: Arc::from("methodology"),
             body,
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         let deck = make_deck_with_section_blocks(vec![], vec![block]);
@@ -2590,6 +2642,7 @@ mod tests {
         let block = SectionBlock {
             name: Arc::from("methodology"),
             body: OrderedMap::new(),
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         let deck = make_deck_with_section_blocks(vec![], vec![block]);
@@ -2619,6 +2672,7 @@ mod tests {
         let block = SectionBlock {
             name: Arc::from("methodology"),
             body: OrderedMap::new(),
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         let deck = make_deck_with_section_order(
@@ -2693,6 +2747,7 @@ mod tests {
             let block = SectionBlock {
                 name: Arc::from(type_name),
                 body: OrderedMap::new(),
+                register_content: vec![],
                 span: SourceSpan::default(),
             };
             let deck = make_deck_with_section_blocks(vec![], vec![block]);
@@ -2784,6 +2839,7 @@ mod tests {
         let manual_block = SectionBlock {
             name: Arc::from("risk_register"),
             body: OrderedMap::new(),
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         // Only severity_cards slide is Notes-register — it would not have
@@ -2807,6 +2863,7 @@ mod tests {
         let manual_block = SectionBlock {
             name: Arc::from("risk_register"),
             body: OrderedMap::new(),
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         // Non-Notes severity_cards slide — the auto-generated risk_register
@@ -2841,10 +2898,14 @@ mod tests {
             name: Arc::from("methodology"),
             body: {
                 let mut m = OrderedMap::new();
-                // heading key is a number, not a string
-                m.insert(Arc::from("heading"), Value::Int(42));
+                // heading key is a number, not a string (triggers OBS-B warning)
+                m.insert(
+                    Arc::from("heading"),
+                    FieldValue::Literal(Value::Int(42)),
+                );
                 m
             },
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         let deck = make_deck_with_section_blocks(vec![make_slide("title")], vec![block]);
@@ -2869,9 +2930,13 @@ mod tests {
             name: Arc::from("methodology"),
             body: {
                 let mut m = OrderedMap::new();
-                m.insert(Arc::from("heading"), Value::Str(Arc::from("Our Approach")));
+                m.insert(
+                    Arc::from("heading"),
+                    FieldValue::Literal(Value::Str(Arc::from("Our Approach"))),
+                );
                 m
             },
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         let deck = make_deck_with_section_blocks(vec![make_slide("title")], vec![block]);
@@ -2895,18 +2960,26 @@ mod tests {
             name: Arc::from("methodology"),
             body: {
                 let mut m = OrderedMap::new();
-                m.insert(Arc::from("approach"), Value::Str(Arc::from("Agile")));
+                m.insert(
+                    Arc::from("approach"),
+                    FieldValue::Literal(Value::Str(Arc::from("Agile"))),
+                );
                 m
             },
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         let block_b = SectionBlock {
             name: Arc::from("methodology"),
             body: {
                 let mut m = OrderedMap::new();
-                m.insert(Arc::from("approach"), Value::Str(Arc::from("Waterfall")));
+                m.insert(
+                    Arc::from("approach"),
+                    FieldValue::Literal(Value::Str(Arc::from("Waterfall"))),
+                );
                 m
             },
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         let deck = make_deck_with_section_blocks(vec![make_slide("title")], vec![block_a, block_b]);
@@ -2935,11 +3008,13 @@ mod tests {
         let block_a = SectionBlock {
             name: Arc::from("methodology"),
             body: OrderedMap::new(),
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         let block_b = SectionBlock {
             name: Arc::from("scope"),
             body: OrderedMap::new(),
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         let deck = make_deck_with_section_blocks(vec![make_slide("title")], vec![block_a, block_b]);

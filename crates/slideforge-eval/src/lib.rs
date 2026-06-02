@@ -49,6 +49,9 @@ pub mod if_eval;
 pub mod include_cycle;
 pub mod register_routing;
 
+#[cfg(test)]
+pub(crate) mod tests;
+
 #[cfg(kani)]
 pub mod proofs;
 

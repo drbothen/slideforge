@@ -32,6 +32,8 @@ use slideforge_syntax::error::ParseSeverity;
 use slideforge_syntax::{DeckNode, DiagnosticSink, Expr, FieldValue, SetRuleValue, TemplateChunk};
 use slideforge_types::{Deck, DeckMetadata, OrderedMap, SourceSpan, Value};
 
+use slideforge_types::{RegisteredContent, SectionBlock};
+
 use crate::config::EvalConfig;
 use crate::env::Env;
 use crate::error::EvalError;
@@ -39,6 +41,11 @@ use crate::expr::eval_expr;
 use crate::filters::format_float_display;
 use crate::for_eval::eval_block_items;
 use crate::include_cycle::{IncludeGraph, check_include_cycles};
+// extract_section_register_content is called from eval_section_nodes (stub below).
+// It is not called in production code until the implementer wires eval_section_nodes
+// into eval_deck_with_variant.
+#[allow(unused_imports)]
+use crate::register_routing::extract_section_register_content;
 
 // ─── eval_expr_to_string ────────────────────────────────────────────────────
 
@@ -374,6 +381,72 @@ pub fn eval_deck_with_cycle_check(
 
     // ── Delegate to the expression evaluator ──
     eval_deck_with_variant(deck_node, config, active_variant, sink)
+}
+
+// ─── eval_section_nodes ─────────────────────────────────────────────────────
+
+/// Evaluate section nodes from the deck AST into [`SectionBlock`] IR entries
+/// with attached [`RegisteredContent`].
+///
+/// **STORY-077 stub.** This function is the eval-stage pipeline step responsible
+/// for:
+///
+/// 1. Validating the section type name from `SectionNode.kind` against the
+///    `SectionType` plugin registry (built-ins: methodology, scope, approval,
+///    appendix, glossary; DIR-077-001-A Ruling 3 — eval is the authority).
+///    Unknown types → fatal `EvalError::UnknownSectionType`.
+///
+/// 2. For each `FieldNode` in `SectionNode.fields`, resolving `FieldValue::Template`
+///    entries for recognised register keys (`"report"`, `"detail"`) to
+///    `FieldValue::Inlines` (STORY-077 AC-002).
+///
+/// 3. Calling [`extract_section_register_content`] on the resulting
+///    `SectionBlock` to produce `Vec<RegisteredContent>` entries, which are
+///    attached to the section output node (AC-003, AC-004, AC-006).
+///
+/// 4. Silently skipping `FieldNode` entries whose key is NOT in
+///    `SECTION_REGISTER_KEYS` — the parse-time warning was already emitted by
+///    STORY-078's `section_block_parser` (DIR-077-001-A Ruling 2 / AC-EC-001).
+///
+/// # Returns
+///
+/// `None` if any fatal diagnostic was pushed. `Some((section_block, register_content))`
+/// on success, where `register_content` is the extracted register entries for
+/// the section node.
+///
+/// # Errors pushed to `sink`
+///
+/// - [`EvalError::UnknownSectionType`] — section type not in the registry.
+/// - [`EvalError::UndefinedVariable`] — `{{ expr }}` interpolation fails.
+/// Test-only re-export of `eval_section_nodes`.
+///
+/// Tests in `src/tests/section_register_routing_tests.rs` call this function
+/// via `crate::eval::eval_section_nodes_for_test`. The production path will
+/// call the private `eval_section_nodes` directly inside `eval_deck_with_variant`.
+#[cfg(test)]
+pub(crate) fn eval_section_nodes_for_test(
+    section_node: &slideforge_syntax::SectionNode,
+    env: &Env,
+    sink: &mut slideforge_syntax::DiagnosticSink,
+) -> Option<(SectionBlock, Vec<RegisteredContent>)> {
+    eval_section_nodes(section_node, env, sink)
+}
+
+#[allow(dead_code)] // used by tests before the pipeline is wired; implementer wires it into eval_deck
+fn eval_section_nodes(
+    section_node: &slideforge_syntax::SectionNode,
+    env: &Env,
+    sink: &mut slideforge_syntax::DiagnosticSink,
+) -> Option<(SectionBlock, Vec<RegisteredContent>)> {
+    // STORY-077 stub: real implementation validates section type, resolves
+    // FieldValue::Template → FieldValue::Inlines for register keys, and routes
+    // register content.
+    let _ = (section_node, env, sink);
+    todo!(
+        "STORY-077: implement eval_section_nodes — validate section type against registry, \
+         resolve FieldValue::Template to FieldValue::Inlines for detail:/report: sub-blocks, \
+         extract register content via extract_section_register_content"
+    )
 }
 
 /// Evaluate a [`slideforge_syntax::FieldValue`] into a [`Value`] in the

@@ -36,7 +36,7 @@
 //! This module is pure-core: no I/O, no filesystem access, no network calls.
 //! The function is a pure transformation from `&Slide` to `Vec<RegisteredContent>`.
 
-use slideforge_types::{FieldValue, InlineNode, Register, RegisteredContent, Slide, Value};
+use slideforge_types::{FieldValue, InlineNode, Register, RegisteredContent, SectionBlock, Slide, Value};
 
 use crate::filters::format_float_display;
 
@@ -97,6 +97,61 @@ pub fn extract_register_content(slide: &Slide) -> Vec<RegisteredContent> {
 
     result
 }
+
+// ─── Section register routing ─────────────────────────────────────────────────
+
+/// Extract register-gated content from a fully-evaluated section block.
+///
+/// For each of the two document-mode register sub-block keys (`"report"`,
+/// `"detail"`), if the key is present in `section.body` and its value is a
+/// `FieldValue::Inlines` (or other non-null variant), a [`RegisteredContent`]
+/// entry is produced and appended to the result.
+///
+/// # Ownership (STORY-077, BC-3.02.002 postcondition 7)
+///
+/// This function is the section-level parallel to [`extract_register_content`]
+/// for slides. It MUST be called only after the evaluator has resolved all
+/// `{{ expr }}` interpolations in `section.body` (i.e., after `eval_section_nodes`
+/// has upgraded `FieldValue::Template` to `FieldValue::Inlines`).
+///
+/// # Design (DIR-077-001 §5)
+///
+/// `"notes"` is NOT a valid register key for section blocks — sections have no
+/// slide canvas or speaker view. This function processes only `["report", "detail"]`.
+///
+/// # Returns
+///
+/// A `Vec<RegisteredContent>` with 0 to 2 entries. Empty if the section has no
+/// `report:` or `detail:` sub-blocks (or if they resolve to null/empty).
+///
+/// # Preconditions (BC-1.14.003 invariant 1)
+///
+/// All `{{ expr }}` interpolations in `section.body` must be resolved before
+/// this function is called. `FieldValue::Template` variants reaching this
+/// function indicate a caller error (evaluation was not completed).
+#[must_use]
+pub fn extract_section_register_content(_section: &SectionBlock) -> Vec<RegisteredContent> {
+    // STORY-077 stub body: real implementation resolves FieldValue variants and
+    // routes "report" → Register::Report and "detail" → Register::Detail.
+    // The stub panics to guarantee a Red Gate.
+    todo!(
+        "STORY-077: implement extract_section_register_content — extract 'report'/'detail' \
+         from section.body as FieldValue::Inlines and produce Vec<RegisteredContent>"
+    )
+}
+
+/// The known section types recognised by the built-in section type registry.
+///
+/// This compile-time constant is used by `eval_section_nodes` to validate the
+/// section type name from `SectionNode.kind` against the registry
+/// (BC-3.02.002 invariant 3, DIR-077-001-A Ruling 3).
+///
+/// Plugin-registered section types are NOT represented here — they are resolved
+/// at eval time via the plugin registry (which is out-of-scope for the current
+/// evaluator stub; plug-in support requires a later story). For the purposes of
+/// STORY-077, the built-in list is the authoritative validation set.
+pub const KNOWN_SECTION_TYPES: &[&str] =
+    &["methodology", "scope", "approval", "appendix", "glossary"];
 
 // ─── Private helpers ──────────────────────────────────────────────────────────
 

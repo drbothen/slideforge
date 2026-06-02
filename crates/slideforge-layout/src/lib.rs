@@ -708,15 +708,17 @@ mod tests {
                 let mut m = OrderedMap::new();
                 m.insert(
                     Arc::from("heading"),
-                    Value::Str(Arc::from("Custom Executive Summary")),
+                    FieldValue::Literal(Value::Str(Arc::from("Custom Executive Summary"))),
                 );
                 m
             },
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         let methodology_block = SectionBlock {
             name: Arc::from("methodology"),
             body: OrderedMap::new(),
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         let deck = Deck {
