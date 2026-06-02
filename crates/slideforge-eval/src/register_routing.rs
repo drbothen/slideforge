@@ -350,11 +350,7 @@ pub fn chunks_to_inline_nodes(
                                 use crate::error::EvalError;
                                 use slideforge_syntax::error::ParseSeverity;
                                 sink.push_with_severity(
-                                    EvalError::TypeMismatch {
-                                        message:
-                                            "E-PAR-inline-xref-empty-id: ref() requires a non-empty \
-                                             id string (DIR-077-002 §5); got empty string \"\"."
-                                                .to_string(),
+                                    EvalError::InlineXrefEmptyId {
                                         span: slideforge_types::SourceSpan::default(),
                                     },
                                     ParseSeverity::Error,
@@ -392,16 +388,11 @@ pub fn chunks_to_inline_nodes(
                                 continue;
                             }
                         } else {
-                            // figref() with no argument: push a diagnostic (OBS-C).
+                            // figref() with no argument: push a diagnostic (OBS-C / DIR-077-002 §5).
                             use crate::error::EvalError;
                             use slideforge_syntax::error::ParseSeverity;
                             sink.push_with_severity(
-                                EvalError::TypeMismatch {
-                                    message:
-                                        "E-EVL-011: figref() requires a numeric figure number \
-                                         argument (DIR-077-002 §1); got no arguments. \
-                                         Use figref(N) where N is the figure number."
-                                            .to_string(),
+                                EvalError::FigrefInvalidArg {
                                     span: slideforge_types::SourceSpan::default(),
                                 },
                                 ParseSeverity::Error,
@@ -460,11 +451,7 @@ pub fn chunks_to_inline_nodes(
                                 use crate::error::EvalError;
                                 use slideforge_syntax::error::ParseSeverity;
                                 sink.push_with_severity(
-                                    EvalError::TypeMismatch {
-                                        message:
-                                            "E-PAR-inline-xref-empty-id: ref requires a non-empty \
-                                             id string (DIR-077-002 §5); got empty string \"\"."
-                                                .to_string(),
+                                    EvalError::InlineXrefEmptyId {
                                         span: slideforge_types::SourceSpan::default(),
                                     },
                                     ParseSeverity::Error,

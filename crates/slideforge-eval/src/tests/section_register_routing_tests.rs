@@ -3115,3 +3115,150 @@ fn test_F_077_P2_003_standalone_underscore_italic_still_works() {
 // They test the chunks_to_inline_nodes eval path, not the parse→eval pipeline.
 // The GENUINE parse→eval seam test is test_F_077_P2_001_genuine_parse_to_eval_end_to_end
 // above. (F-077-P2-001 finding closure.)
+
+// ─── F-077-P3-001: Structured error code assertions (TD-VSDD-059) ────────────
+
+/// F-077-P3-001 / TD-VSDD-059:
+/// `{{ figref() }}` with no arguments must push an error with STRUCTURED code
+/// `E-EVL-012` (not `E-EVL-003` or any other collision) to the `DiagnosticSink`.
+///
+/// This test is LOAD-BEARING on `err.code()` — a future regression that
+/// accidentally routes the figref-no-arg error through `TypeMismatch` (E-EVL-003)
+/// or `UnsupportedBuiltinCall` (E-EVL-011) would be caught here.
+///
+/// TD-VSDD-059 compliance: code assertion is structural, not just a string substring.
+#[test]
+fn test_f077_p3_001_figref_no_arg_emits_e_evl_012() {
+    let figref_no_args = SyntaxExpr::Call {
+        func: "figref".to_string(),
+        args: vec![], // no arguments — fatal per DIR-077-002 §5 / OBS-C
+    };
+    let chunks = vec![TemplateChunk::Expr(figref_no_args)];
+    let env = Env::new(IndexMap::new());
+    let mut sink = DiagnosticSink::new();
+
+    let nodes = crate::register_routing::chunks_to_inline_nodes(&chunks, &env, &mut sink);
+
+    // (a) No InlineNode must be produced.
+    assert!(
+        nodes.is_empty(),
+        "F-077-P3-001: figref() with no args must produce NO InlineNode; got: {nodes:?}"
+    );
+
+    // (b) Exactly one diagnostic must be pushed.
+    assert!(
+        !sink.is_empty(),
+        "F-077-P3-001: figref() with no args must push a diagnostic to the sink; sink is empty"
+    );
+
+    // (c) LOAD-BEARING: the diagnostic code MUST be E-EVL-012 (FigrefInvalidArg).
+    // This assertion catches any regression that routes this error through
+    // TypeMismatch (E-EVL-003) or UnsupportedBuiltinCall (E-EVL-011).
+    let code = sink
+        .errors()
+        .iter()
+        .find_map(|e| e.code().map(|c| c.to_string()));
+    assert_eq!(
+        code.as_deref(),
+        Some("E-EVL-012"),
+        "F-077-P3-001: figref() no-arg error MUST have code E-EVL-012 (FigrefInvalidArg); \
+         got: {code:?}. A code of E-EVL-003 or E-EVL-011 indicates the error collision \
+         found in F-077-P3-001 has regressed."
+    );
+}
+
+/// F-077-P3-001 / TD-VSDD-059:
+/// `{{ ref("") }}` (empty id, Call form) must push an error with STRUCTURED code
+/// `E-EVL-013` (not `E-EVL-003` with embedded `E-PAR-inline-xref-empty-id` text)
+/// to the `DiagnosticSink`.
+///
+/// This test is LOAD-BEARING on `err.code()` — a future regression that routes
+/// the empty-id error through `TypeMismatch` (E-EVL-003) would be caught here.
+/// A code of E-EVL-003 indicates re-introduction of the code collision.
+///
+/// TD-VSDD-059 compliance: code assertion is structural, not just a string substring.
+#[test]
+fn test_f077_p3_001_ref_empty_id_call_emits_e_evl_013() {
+    let call_empty_ref = SyntaxExpr::Call {
+        func: "ref".to_string(),
+        args: vec![SyntaxExpr::Str(String::new())], // empty string id
+    };
+    let chunks = vec![TemplateChunk::Expr(call_empty_ref)];
+    let env = Env::new(IndexMap::new());
+    let mut sink = DiagnosticSink::new();
+
+    let nodes = crate::register_routing::chunks_to_inline_nodes(&chunks, &env, &mut sink);
+
+    // (a) No InlineNode must be produced for an empty-id ref.
+    assert!(
+        nodes.is_empty(),
+        "F-077-P3-001: ref(\"\") must produce NO InlineNode; got: {nodes:?}"
+    );
+
+    // (b) Exactly one diagnostic must be pushed.
+    assert!(
+        !sink.is_empty(),
+        "F-077-P3-001: ref(\"\") must push a diagnostic to the sink; sink is empty"
+    );
+
+    // (c) LOAD-BEARING: the diagnostic code MUST be E-EVL-013 (InlineXrefEmptyId).
+    // A code of E-EVL-003 indicates the stage/prefix mismatch from F-077-P3-001 has regressed.
+    let code = sink
+        .errors()
+        .iter()
+        .find_map(|e| e.code().map(|c| c.to_string()));
+    assert_eq!(
+        code.as_deref(),
+        Some("E-EVL-013"),
+        "F-077-P3-001: ref(\"\") error MUST have code E-EVL-013 (InlineXrefEmptyId); \
+         got: {code:?}. A code of E-EVL-003 indicates the TypeMismatch collision \
+         from finding F-077-P3-001 has been re-introduced."
+    );
+}
+
+/// F-077-P3-001 / TD-VSDD-059:
+/// `{{ "" | ref }}` (empty id, Pipe proxy form) must push an error with STRUCTURED
+/// code `E-EVL-013` (not `E-EVL-003` with embedded `E-PAR-inline-xref-empty-id` text).
+///
+/// Both the Call form and the legacy Pipe proxy form must use the same dedicated
+/// variant — the same error on both call paths prevents divergent behavior if one
+/// path is refactored.
+///
+/// TD-VSDD-059 compliance: code assertion is structural, not just a string substring.
+#[test]
+fn test_f077_p3_001_ref_empty_id_pipe_emits_e_evl_013() {
+    let pipe_empty_ref = SyntaxExpr::Pipe {
+        lhs: Box::new(SyntaxExpr::Str(String::new())),
+        filter: "ref".to_string(),
+        args: vec![],
+    };
+    let chunks = vec![TemplateChunk::Expr(pipe_empty_ref)];
+    let env = Env::new(IndexMap::new());
+    let mut sink = DiagnosticSink::new();
+
+    let nodes = crate::register_routing::chunks_to_inline_nodes(&chunks, &env, &mut sink);
+
+    // (a) No InlineNode must be produced.
+    assert!(
+        nodes.is_empty(),
+        "F-077-P3-001 (Pipe): ref(\"\") via Pipe must produce NO InlineNode; got: {nodes:?}"
+    );
+
+    // (b) Exactly one diagnostic must be pushed.
+    assert!(
+        !sink.is_empty(),
+        "F-077-P3-001 (Pipe): empty-id ref via Pipe must push a diagnostic; sink is empty"
+    );
+
+    // (c) LOAD-BEARING: the diagnostic code MUST be E-EVL-013 (InlineXrefEmptyId).
+    let code = sink
+        .errors()
+        .iter()
+        .find_map(|e| e.code().map(|c| c.to_string()));
+    assert_eq!(
+        code.as_deref(),
+        Some("E-EVL-013"),
+        "F-077-P3-001 (Pipe): empty-id ref via Pipe MUST have code E-EVL-013 \
+         (InlineXrefEmptyId); got: {code:?}."
+    );
+}

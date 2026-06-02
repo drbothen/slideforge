@@ -17,6 +17,10 @@
 //! | E-EVL-008 | `NotIterable`        |
 //! | E-EVL-009 | `LargeDeckWarning`   |
 //! | E-EVL-003 | `DivisionByZero`     | (shares code with TypeMismatch per BC-1.02.001 invariant 3)
+//! | E-EVL-010 | `UnknownSectionType` |
+//! | E-EVL-011 | `UnsupportedBuiltinCall` |
+//! | E-EVL-012 | `FigrefInvalidArg`   |
+//! | E-EVL-013 | `InlineXrefEmptyId`  |
 
 use std::sync::Arc;
 
@@ -282,6 +286,52 @@ pub enum EvalError {
         span: SourceSpan,
     },
 
+    /// E-EVL-012: `figref()` was called with a missing or non-evaluable argument
+    /// in an inline-markup context.
+    ///
+    /// `figref(N)` requires exactly one argument that evaluates to a numeric or
+    /// string figure number. If no argument is supplied, or the argument cannot be
+    /// evaluated to any value, this error is emitted and no `InlineNode` is produced.
+    ///
+    /// This is an eval-stage error raised by `chunks_to_inline_nodes` (STORY-077,
+    /// DIR-077-002 §5 / OBS-C). It is distinct from [`EvalError::UnsupportedBuiltinCall`]
+    /// (E-EVL-011), which covers `figref()` in non-inline expression contexts.
+    #[error("figref() requires a figure-number argument at {span}")]
+    #[diagnostic(
+        code("E-EVL-012"),
+        help(
+            "Use figref(N) where N is the figure number, e.g. figref(3) inside a \
+             {{ }} interpolation in a section detail:/report: field"
+        )
+    )]
+    FigrefInvalidArg {
+        /// Source location of the `figref()` call expression.
+        span: SourceSpan,
+    },
+
+    /// E-EVL-013: An inline cross-reference `ref("")` was given an empty id string
+    /// in an inline-markup context.
+    ///
+    /// `ref("id")` requires a non-empty string id. An empty string `""` is a fatal
+    /// eval error (DIR-077-002 §5): no `InlineNode::Xref` is produced. The same
+    /// rule applies to the legacy `{{ "" | ref }}` Pipe proxy form.
+    ///
+    /// This is an eval-stage error (E-EVL- prefix) even though the inline xref
+    /// feature originates in the parser — the validation of the resolved id value
+    /// happens at eval time after expression interpolation.
+    #[error("ref() requires a non-empty id string at {span}")]
+    #[diagnostic(
+        code("E-EVL-013"),
+        help(
+            "Provide a non-empty slide or figure id, e.g. ref(\"slide-1\") inside a \
+             {{ }} interpolation in a section detail:/report: field"
+        )
+    )]
+    InlineXrefEmptyId {
+        /// Source location of the `ref("")` or `"" | ref` expression.
+        span: SourceSpan,
+    },
+
     /// E-PAR-004: A circular `@include` chain was detected in the merged AST.
     ///
     /// The evaluator runs a DFS over the include graph (built from `@include`
@@ -466,6 +516,20 @@ mod tests {
         };
         let code = e_par004.code().unwrap().to_string();
         assert_eq!(code, "E-PAR-004", "IncludeCycle must have code E-PAR-004");
+
+        let e_evl012 = EvalError::FigrefInvalidArg { span: test_span() };
+        let code = e_evl012.code().unwrap().to_string();
+        assert_eq!(
+            code, "E-EVL-012",
+            "FigrefInvalidArg must have code E-EVL-012 (not E-EVL-003 or E-EVL-011)"
+        );
+
+        let e_evl013 = EvalError::InlineXrefEmptyId { span: test_span() };
+        let code = e_evl013.code().unwrap().to_string();
+        assert_eq!(
+            code, "E-EVL-013",
+            "InlineXrefEmptyId must have code E-EVL-013 (not E-EVL-003)"
+        );
     }
 
     #[test]
