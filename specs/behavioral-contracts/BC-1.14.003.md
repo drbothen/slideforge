@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.2"
+version: "1.3"
 status: draft
 producer: product-owner
 timestamp: 2026-05-24T00:00:00
@@ -10,12 +10,13 @@ inputs: [domain-spec/L2-INDEX.md]
 input-hash: "[pending]"
 traces_to: domain-spec/L2-INDEX.md
 origin: greenfield
-subsystem: SS-TBD
+subsystem: SS-02
 capability: CAP-029
 lifecycle_status: active
 introduced: v1.0.0
 modified:
   - "2026-06-01: v1.2 — Clarified EC-001 to make explicit that `detail:` sub-blocks inside `section <type>:` blocks are included in scope (not only standalone `section detail:` syntax). Added BC-3.02.002 cross-reference in Related BCs."
+  - "2026-06-01: v1.3 — F-077-P2-003 [MEDIUM]: Resolved stale SS-TBD subsystem placeholder. Set subsystem to SS-02 (Evaluator / slideforge-eval) — confirmed by Architecture Module line (slideforge-eval owns detail register routing at Evaluate stage) and STORY-077 frontmatter (section-level register routing attributed to SS-02). Per CANONICAL PRINCIPLE rule 6: question was answerable in scope."
 deprecated: null
 deprecated_by: null
 replacement: null

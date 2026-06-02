@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.3"
+version: "1.4"
 status: draft
 producer: product-owner
 timestamp: 2026-05-24T00:00:00
@@ -17,6 +17,7 @@ introduced: v1.0.0
 modified:
   - "2026-06-01: v1.2 — Added postcondition 7 (detail: sub-blocks), postcondition 8 (inline-structure preservation via FieldValue::Inlines), EC-005 (unrecognized sub-block key → non-fatal warning), EC-006 (reserved-name collision); clarified EC-004; added BC-1.14.003 cross-reference. Closes STORY-077 BC-status flag."
   - "2026-06-01: v1.3 — Anchor/attribution correction (STORY-078 adversary pass 5 OBS-6): subsystem SS-TBD → SS-01 (DSL Parser, slideforge-syntax owns section block PARSING per ARCH-INDEX and STORY-078); Architecture Module line corrected to attribute parsing to slideforge-syntax (SS-01, STORY-078) and eval-stage TYPE validation/register routing to slideforge-eval (SS-02, STORY-077); added STORY-078 to Stories traceability. Behavioral semantics unchanged."
+  - "2026-06-01: v1.4 — F-077-P2-001 [MEDIUM]: Expanded recognized-section-type enumeration from 5 to 7 canonical manual types — added executive_summary and risk_register (both defined in CANONICAL_MANUAL_SECTION_TYPES in slideforge-types, aliased by eval + layout; manual section blocks supersede auto-generated per BC-3.02.001 EC-002). Updated precondition 2, invariant 3, and EC-001 known-types message to list all 7 types and note the plugin extension point."
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -41,8 +42,14 @@ sub-block content as `RegisteredContent`.
 ## Preconditions
 
 1. The .sf file contains one or more `section <type>:` blocks.
-2. The section type is a recognized `SectionType` (methodology, scope, approval, appendix,
-   glossary, and any type registered via the SectionType plugin trait).
+2. The section type is a recognized `SectionType`. The canonical manual section types
+   (defined as `CANONICAL_MANUAL_SECTION_TYPES` in slideforge-types, aliased by eval and
+   layout) are: `methodology`, `scope`, `approval`, `appendix`, `glossary`,
+   `executive_summary`, and `risk_register` (7 total). Note: `executive_summary` and
+   `risk_register` may also be auto-generated (BC-3.02.001); a manual `section
+   executive_summary:` or `section risk_register:` block supersedes the auto-generated
+   version per BC-3.02.001 EC-002. Additional types may be registered via the SectionType
+   plugin trait.
 3. The section appears at the top level of the deck (not inside a slide block).
 
 ## Postconditions
@@ -75,8 +82,11 @@ sub-block content as `RegisteredContent`.
 1. Section blocks are output-format conditional: DOCX/PDF only. (DI-012)
 2. The SectionType trait handles all section rendering — no per-type hard-coding. (DI-008)
 3. An unrecognized `section <type>:` (unrecognized section TYPE at the block level) is a
-   FATAL compile error naming the unknown type and listing registered types. This is
-   distinct from invariant 4 below, which governs sub-block keys inside a recognized section.
+   FATAL compile error naming the unknown type and listing all registered types. The
+   canonical manual types are: `methodology`, `scope`, `approval`, `appendix`, `glossary`,
+   `executive_summary`, `risk_register` (plus any type registered via the SectionType
+   plugin trait). This is distinct from invariant 4 below, which governs sub-block keys
+   inside a recognized section.
 4. An unrecognized sub-block key inside a RECOGNIZED `section <type>:` block (e.g., `foo:`
    inside `section methodology:`) is a NON-FATAL lint warning naming the key. The warning
    is emitted at parse time. Build continues; the unrecognized key is silently ignored.
@@ -88,7 +98,7 @@ sub-block content as `RegisteredContent`.
 
 | ID | Description | Expected Behavior |
 |----|-------------|-------------------|
-| EC-001 | Unrecognized section type `section foobar:` | E-PAR-007-class error: "Unknown section type 'foobar'. Known types: [methodology, scope, approval, appendix, glossary, ...]"; build exits 1 |
+| EC-001 | Unrecognized section type `section foobar:` | E-PAR-007-class error: "Unknown section type 'foobar'. Known types: [methodology, scope, approval, appendix, glossary, executive_summary, risk_register, <plugin-registered types>]"; build exits 1 |
 | EC-002 | section block inside a slide block | Parse error: section blocks must be top-level, not nested inside slide blocks |
 | EC-003 | section block with only @if content that evaluates to false | Section produces no body content; section heading is still emitted in DOCX (empty section); lint warning |
 | EC-004 | section block with `report:` sub-block | At Evaluate stage: `RegisteredContent { register: Register::Report, content: Vec<InlineNode> }` is attached to the section's output node. DOCX exporter reads this entry and renders it as section body content. PPTX/web preview do not render it. (BC-1.14.002 governs report routing exclusion rules.) |

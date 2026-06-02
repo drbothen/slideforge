@@ -26,14 +26,14 @@ dtu_services: []
 wave_1_gate: "PASS 2026-05-27 — 3 gate passes, 11 findings fixed"
 wave_2_gate: "PASS 2026-05-27 — 11 gate passes, 19 findings fixed, 3/3 clean (passes 9-10-11)"
 wave_3_gate: "PASSED 2026-05-31 — PR #38 (7d266ad7); adversary pass 8 strict-CLEAN; holdout must-pass 5/5"
-wave_4_batch_a_complete: 7
+wave_4_batch_a_complete: 8
 wave_4_batch_a_total: 10
 wave_4_started: 2026-05-31
 wave_4_total_stories: 18
 wave_4_total_points: 109
-develop_sha: "47856465"
-develop_pr_count: 46
-workspace_tests: "~2700+ (46 PRs merged; STORY-073 +TextRun tests; STORY-076 brand tests; STORY-078 parser tests)"
+develop_sha: "953fb5b2"
+develop_pr_count: 47
+workspace_tests: "~2700+ (47 PRs merged; STORY-075 footer detection; STORY-073 +TextRun tests; STORY-076 brand tests; STORY-078 parser tests)"
 workspace_test_failures: 0
 ---
 
@@ -55,35 +55,25 @@ A new session with zero prior context should proceed in this order:
 
 ### 1. STORY-045 — PDF/UA-1 Tagging + veraPDF (PRIORITY: P0, long pole)
 
-**State:** Worktree `/Users/jmagady/Dev/slideforge/.worktrees/STORY-045` on branch `feature/S-045` (HEAD 9d098dd3). Adversary cascade at **0/3 strict-CLEAN** (pass 1 complete + pass 2 complete — F-P2-001 FIXED, F-P2-002 ADJUDICATED out-of-scope). Tests pass. Pass 3 NEXT.
+**State:** Worktree `/Users/jmagady/Dev/slideforge/.worktrees/STORY-045` on branch `feature/S-045` (HEAD 561fecd7). Adversary cascade at **0/3 strict-CLEAN** (passes 1+2+3 complete; pass-3 fixes verified by pass 4). Pass 4 found **F-P4-001 [MEDIUM]** — `draw_body_blocks_tagged` mis-routes MCIDs for mixed Body blocks (sibling-function divergence from `tag_content_block`; latent per STORY-027 v1 layout scope but production-grade fix IN SCOPE). Streak reset. Fix in progress.
 
 **Scope:** Story v1.1, 8 pts, BC-4.03.001 v1.3. ACs: AC-001..AC-009 (original) + AC-010 (/Outlines bookmarks), AC-011 (Hn /Title text), AC-012 (Validator::UA1 both export paths), AC-013 (veraPDF isCompliant CI gate).
 
-**Pass-1 fixes already applied (do NOT re-do):** F-001 CI runs correct test `ac013_verapdf_full_compliance`; F-002 CI flag `--run-ignored all`; F-003 `PdfExportError::ValidationFailed` + `KrillaError::Validation` match; F-004 `src/outline.rs` with `build_outline_entries` (count/order/destination tests); F-005 `source_index`/`page_idx` invariant; F-006 deterministic font via `with_font_path`; F-007 `/Lang`-absent fatal under UA1; F-008 structural outline assertions; OBS-012 Subtitle H2 own text.
+**Pass-1/2/3 fixes already applied (do NOT re-do):** F-001–F-008; OBS-012; F-P2-001 (per-block/bullet baseline stacking BODY_LINE_LEADING=1.2); F-P2-002 adjudicated out-of-scope; pass-3 fixes (per-block MCID, EC-008 test, deterministic font) all verified clean by pass 4.
 
-**Mandatory forward-obligations** (MUST land in STORY-045, not split out): (a) `decorative_frame_indices` → emit `ContentTag::Artifact(ArtifactType::Other)` for decorative Image/Shape frames in SAME change as decorative drawing; (b) per-block/per-line baselines — **DONE** (F-P2-001 fixed: per-block/bullet baseline stacking with BODY_LINE_LEADING=1.2, worktree HEAD 9d098dd3); (c) text color from brand/theme palette — **RE-COUPLED to future bg-fill story (orchestrator ruling 2026-06-01) — NOT a STORY-045 blocker** (see Decisions Log entry 2026-06-01 and STORY-045 Forward-Obligations section).
+**Mandatory forward-obligations** (MUST land in STORY-045, not split out): (a) `decorative_frame_indices` → emit `ContentTag::Artifact(ArtifactType::Other)` for decorative Image/Shape frames in SAME change as decorative drawing; (b) per-block/per-line baselines — **DONE** (F-P2-001 fixed, worktree HEAD 561fecd7); (c) text color from brand/theme palette — **RE-COUPLED to future bg-fill story (orchestrator ruling 2026-06-01) — NOT a STORY-045 blocker**.
 
-**Next step:** Dispatch LOCAL adversary pass 3 against `/Users/jmagady/Dev/slideforge/.worktrees/STORY-045` (ABSOLUTE path — see LESSON-1). Continue cascade to 3/3 strict-CLEAN, then demo-recorder per-AC, push, pr-manager 9-step PR → orchestrator dispatches independent security-reviewer + pr-reviewer → human merge approval.
-
----
-
-### 2. STORY-075 — Brand Loader: Footer Detection from .pptx (PRIORITY: P1)
-
-**State:** Worktree `/Users/jmagady/Dev/slideforge/.worktrees/STORY-075` on branch `feature/S-075` (HEAD d3c9787c). **CONVERGED** (3/3 strict-CLEAN at passes 3/4/5). **PR #47 OPEN** (base develop, rebased onto 47856465). Demo evidence committed. Full pedantic gate green. pr-reviewer APPROVE (0 blocking). Security pass 1 found SEC-001 (IMPORTANT zip-bomb) + 3 SUGGESTIONs — ALL FIXED (MAX_XML_ENTRY_BYTES take() guard + test, doc comments, RAII temp-file). Security RE-REVIEW in progress.
-
-**Next step:** Await security RE-REVIEW CLEAN confirmation → human merge approval (LESSON-6).
+**Next step:** Fix F-P4-001 (`draw_body_blocks_tagged` MCID routing) → adversary pass 5 (ABSOLUTE path — LESSON-1) → continue to 3/3 strict-CLEAN → demo-recorder per-AC → push → pr-manager → human merge.
 
 ---
 
-### 3. STORY-077 — SectionBlock IR Extension (PRIORITY: P0, now UNBLOCKED)
+### 2. STORY-077 — SectionBlock IR Extension (PRIORITY: P0)
 
-**State:** Worktree `.worktrees/STORY-077` on branch `feature/S-077` (fresh from develop). Red Gate DONE (16 RED tests). Implementer GREEN (commit fd539c4e). Adversary pass 1 found 1 CRIT + 2 HIGH + 2 OBS — fix-burst IN PROGRESS (implementer + story-writer). **0/3 strict-CLEAN streak.**
+**State:** Worktree `.worktrees/STORY-077` on branch `feature/S-077` (HEAD 301b55ab). Red Gate DONE. Impl green. Pass-1 fix-burst (CRIT F-077-P1-001: eval/layout section-type SSOT) COMPLETE. Pass-2 fix-burst (register-key SSOT alias, BC corrections, OBS test gaps) COMPLETE. Adversary pass 3: **CLEAN (strict: yes, PR-merge: yes)**. **Streak 1/3 strict-CLEAN.** BC-3.02.002 bumped to v1.4 (recognized-type list 5→7: +executive_summary, +risk_register; F-077-P2-001). BC-1.14.003 bumped to v1.3 (subsystem SS-TBD → SS-02; F-077-P2-003). STORY-077 EC-006 re-scoped to align with top-level-only directive (v1.4). Pass 4 NEXT.
 
-**CRIT:** F-077-P1-001 — eval/layout section-type list divergence rejecting `executive_summary`/`risk_register`. **HIGH:** paper-tested interpolation; untested EC-002 undefined-var handling. **OBS:** EC-006 spec contradiction; missing layout regression test. Fix-burst in progress.
+**Scope:** 8 pts, P0, EPIC-02, crates: slideforge-types + slideforge-syntax + slideforge-eval. BCs: BC-3.02.002 v1.4, BC-1.14.003 v1.3. `SectionBlock.body: OrderedMap<Arc<str>, FieldValue>` + `register_content` field. ~32 layout call-site adjustments. Blocks STORY-041/042.
 
-**Scope:** 8 pts, P0, EPIC-02, crates: slideforge-types + slideforge-syntax + slideforge-eval. BCs: BC-3.02.002 v1.3, BC-1.14.003 v1.4. `SectionBlock.body: OrderedMap<Arc<str>, FieldValue>` + `register_content` field. ~32 layout call-site adjustments. Blocks STORY-041/042.
-
-**Next step:** Complete fix-burst → adversary pass 2 → continue cascade to 3/3 strict-CLEAN → demo-recorder → pr-manager → human merge. **DO NOT touch STORY-077 index/citations mid-fix.**
+**Next step:** Adversary pass 4 (fresh context, absolute path `.worktrees/STORY-077`) → continue cascade to 3/3 strict-CLEAN → demo-recorder → pr-manager → human merge.
 
 ---
 
@@ -92,28 +82,26 @@ A new session with zero prior context should proceed in this order:
 | Field | Value |
 |-------|-------|
 | **Date** | 2026-06-01 |
-| **Position** | Phase 3, Wave 4 Batch A — 7/10 complete. STORY-045 adversary cascade pass-3 next (0/3 streak; F-P2-001 fixed, F-P2-002 adjudicated out-of-scope). STORY-075 PR #47 OPEN awaiting security re-review CLEAN + human merge. STORY-077 fix-burst in progress (pass-1 findings). |
-| **develop SHA** | 47856465 (46 merged PRs) |
+| **Position** | Phase 3, Wave 4 Batch A — 8/10 complete. STORY-045 adversary cascade 0/3 streak; F-P4-001 [MEDIUM] found (draw_body_blocks_tagged MCID routing), fix in progress; pass 5 next. STORY-077 pass-3 strict-CLEAN (1/3 streak); BC corrections + EC-006 re-scope committed; pass 4 next. Open PRs: 0. |
+| **develop SHA** | 953fb5b2 (47 merged PRs; STORY-075 merged) |
 | **origin/develop** | authoritative — run `git fetch` before starting; local `develop` ref may be stale |
-| **Active worktrees** | `.worktrees/STORY-045` (feature/S-045 @ 9d098dd3), `.worktrees/STORY-075` (feature/S-075 @ d3c9787c), `.worktrees/STORY-077` (feature/S-077) |
-| **Open PRs** | 1 — #47 (STORY-075, awaiting security re-review + human merge) |
+| **Active worktrees** | `.worktrees/STORY-045` (feature/S-045 @ 561fecd7), `.worktrees/STORY-077` (feature/S-077 @ 301b55ab) |
+| **Open PRs** | 0 |
 | **Workspace crates** | 16 |
-| **STORY-073** | MERGED — PR #45, squash 47856465 (2026-06-01). slideforge-layout. TextRun per BulletItem (recursive, parent-before-children). MAX_BULLET_DEPTH=64 + LayoutError::BulletDepthExceeded (E-LAY-007). 7-pass adversary, 3/3 strict-CLEAN (P5/6/7). Security CLEAN + pr-reviewer APPROVE. |
-| **STORY-076** | MERGED — PR #44, squash eb78be51 (2026-06-01). slideforge-brand. ColorSlot.is_derived; Option B verbatim base hex; brand.toml derived-comment. 7-pass adversary, 3/3 strict-CLEAN (P4/6/7). Security re-review CLEAN (2 MED fixed: CWE-789 MAX_TRANSFORMS_PER_SLOT=8, CWE-117 val sanitization, commit cbd7fefa). pr-reviewer APPROVE. |
-| **STORY-078** | MERGED — PR #46, squash 5ab4cef4 (2026-06-01). slideforge-syntax. Un-reserved `section` keyword; section_block_parser → SectionNode; W-PAR-001 parse-time warning; E-PAR-017/E-PAR-018. 10-pass adversary, 3/3 strict-CLEAN (P7/8/9). Security CLEAN + pr-reviewer APPROVE. UNBLOCKS STORY-077. |
-| **STORY-045** | IN PROGRESS — worktree .worktrees/STORY-045 (feature/S-045 @ 9d098dd3). Pass 1 + pass 2 done (F-P2-001 FIXED, F-P2-002 adjudicated out-of-scope per orchestrator ruling). Pass-3 NEXT. 0/3 strict-CLEAN streak. Story v1.1 (8 pts). |
-| **STORY-075** | PR #47 OPEN — worktree .worktrees/STORY-075 (feature/S-075 @ d3c9787c). 3/3 CLEAN. Rebased + demo committed + pedantic gate green. pr-reviewer APPROVE. Security re-review in progress. Awaiting CLEAN + human merge. |
-| **STORY-077** | FIX-BURST IN PROGRESS — worktree .worktrees/STORY-077 (feature/S-077). Red Gate done, impl green (fd539c4e). Pass-1 found 1 CRIT + 2 HIGH + 2 OBS; fix-burst ongoing. 0/3 streak. DO NOT touch index/citations mid-fix. |
-| **BC deltas** | BC-2.01.001 v1.4, BC-3.02.002 v1.3 (SS-01), BC-3.05.001 v1.3.5 (SS-05), BC-4.03.001 v1.3, error-taxonomy v2.8 (E-PAR-017, E-PAR-018, W-PAR-001, E-LAY-007) — all committed cfc28426 (factory-artifacts, local-only). |
+| **STORY-075** | MERGED — PR #47, squash 953fb5b2 (2026-06-02). slideforge-brand. Footer detection from .pptx. 5-pass adversary, 3/3 strict-CLEAN (P3/4/5). Security CLEAN (SEC-001 fixed: MAX_XML_ENTRY_BYTES zip-bomb guard). pr-reviewer APPROVE. Worktree cleaned up. |
+| **STORY-073** | MERGED — PR #45, squash 47856465 (2026-06-01). slideforge-layout. TextRun per BulletItem. MAX_BULLET_DEPTH=64 + E-LAY-007. 7-pass adversary, 3/3 strict-CLEAN (P5/6/7). |
+| **STORY-045** | IN PROGRESS — worktree .worktrees/STORY-045 (feature/S-045 @ 561fecd7). Passes 1–3 done + verified by pass 4. Pass-4 found F-P4-001 [MEDIUM] (draw_body_blocks_tagged MCID routing); streak reset 0/3. Fix in progress. Story v1.1 (8 pts). |
+| **STORY-077** | IN PROGRESS — worktree .worktrees/STORY-077 (feature/S-077 @ 301b55ab). Pass-3 CLEAN (strict: yes, PR-merge: yes). Streak 1/3. BC-3.02.002 v1.4, BC-1.14.003 v1.3, STORY-077 v1.4 committed this burst. Pass 4 NEXT. |
+| **BC deltas** | BC-2.01.001 v1.4, BC-3.02.002 v1.4 (recognized-type list 5→7), BC-3.05.001 v1.3.5 (SS-05), BC-1.14.003 v1.3 (SS-TBD→SS-02), BC-4.03.001 v1.3, error-taxonomy v2.8 — all local-only on factory-artifacts. |
 | **factory-artifacts** | Local only. Push requires explicit human authorization per CLAUDE.md. |
 
 ---
 
 ## Current Status
 
-Phase 3 IN PROGRESS. Wave 1/2/3 COMPLETE (gates PASSED). **Wave 4 Batch A: 7/10 complete.** STORY-035/036/043/044/073/076/078 MERGED. STORY-045 adversary cascade pass-3 next (0/3). STORY-075 PR #47 OPEN awaiting security re-review + human merge. STORY-077 fix-burst in progress (0/3).
+Phase 3 IN PROGRESS. Wave 1/2/3 COMPLETE (gates PASSED). **Wave 4 Batch A: 8/10 complete.** STORY-035/036/043/044/073/075/076/078 MERGED. STORY-045 adversary cascade 0/3 (F-P4-001 fix in progress; pass 5 next). STORY-077 adversary cascade 1/3 strict-CLEAN (pass 4 next).
 
-develop: `47856465` (46 merged PRs, 0 failures). 80 stories / 473 pts. Workspace: 16 crates.
+develop: `953fb5b2` (47 merged PRs, 0 failures). 80 stories / 473 pts. Workspace: 16 crates. Open PRs: 0.
 
 ## Phase Progress
 
@@ -139,11 +127,11 @@ develop: `47856465` (46 merged PRs, 0 failures). 80 stories / 473 pts. Workspace
 | STORY-043 | PDF Core (new crate) | MERGED | #41 | 331d456c |
 | STORY-044 | PDF Layout Integration | MERGED | #42 | 94f74402 |
 | STORY-076 | srgbClr Transform | MERGED | #44 | eb78be51 |
-| STORY-075 | Footer Detection | PR #47 OPEN — security re-review in progress | #47 | d3c9787c (wt) |
+| STORY-075 | Footer Detection | MERGED | #47 | 953fb5b2 |
 | STORY-078 | Parser: section block syntax (P0) | MERGED | #46 | 5ab4cef4 |
 | STORY-073 | Bullets Layout | MERGED | #45 | 47856465 |
-| STORY-045 | PDF/UA-1 + veraPDF (P0) | IN PROGRESS — pass-3 next (0/3 streak; F-P2-001 fixed, F-P2-002 adjudicated) | — | 9d098dd3 (wt) |
-| STORY-077 | SectionBlock IR Extension (P0) | IN PROGRESS — fix-burst (pass-1 findings); 0/3 streak | — | fd539c4e (wt) |
+| STORY-045 | PDF/UA-1 + veraPDF (P0) | IN PROGRESS — pass-4 found F-P4-001 [MED]; fix in progress; 0/3 streak | — | 561fecd7 (wt) |
+| STORY-077 | SectionBlock IR Extension (P0) | IN PROGRESS — pass-3 CLEAN (1/3 strict-CLEAN); pass 4 next | — | 301b55ab (wt) |
 
 ## Decisions Log (milestones)
 
@@ -169,6 +157,9 @@ develop: `47856465` (46 merged PRs, 0 failures). 80 stories / 473 pts. Workspace
 - 2026-06-01 — STORY-075 PR #47 OPEN. Rebased onto develop 47856465 (d3c9787c). Demo evidence committed. Full pedantic gate green. pr-reviewer APPROVE (0 blocking). Security pass 1: SEC-001 IMPORTANT (zip-bomb) + 3 SUGGESTIONs — ALL FIXED (MAX_XML_ENTRY_BYTES take() guard + test, doc comments, RAII temp-file). Security re-review in progress. Awaiting CLEAN + human merge approval.
 - 2026-06-01 — STORY-077 fresh delivery from develop. Red Gate done (16 RED). Impl green (fd539c4e). Adversary pass 1: 1 CRIT (F-077-P1-001 eval/layout section-type list divergence rejecting executive_summary/risk_register), 2 HIGH (paper-tested interpolation; untested EC-002 undefined-var), 2 OBS (EC-006 spec contradiction; missing layout regression test). Fix-burst in progress. 0/3 streak.
 - 2026-06-01 — Session lessons LESSON-1..LESSON-6 codified (see Lessons section below).
+- 2026-06-02 — STORY-075 MERGED — PR #47, squash 953fb5b2. slideforge-brand. Footer detection from .pptx. 5-pass adversary, 3/3 strict-CLEAN (P3/4/5). Security CLEAN (SEC-001 zip-bomb fixed: MAX_XML_ENTRY_BYTES take() guard + test). pr-reviewer APPROVE. Worktree .worktrees/STORY-075 cleaned up. Wave 4 Batch A: 8/10. develop: 953fb5b2 (47 PRs).
+- 2026-06-02 — STORY-077 pass-3 CLEAN (strict: yes, PR-merge: yes). Streak 1/3. Pass-1 fix-burst (CRIT F-077-P1-001 section-type SSOT) + pass-2 fix-burst (register-key SSOT alias, BC corrections, OBS test gaps) both complete. BC-3.02.002 bumped v1.3→v1.4 (recognized-type list 5→7: +executive_summary, +risk_register). BC-1.14.003 bumped v1.2→v1.3 (subsystem SS-TBD→SS-02). STORY-077 bumped v1.3→v1.4 (EC-006 re-scoped top-level-only directive). All committed this burst. Pass 4 NEXT.
+- 2026-06-02 — STORY-045 adversary pass 4 found F-P4-001 [MEDIUM]: draw_body_blocks_tagged mis-routes MCIDs for mixed Body blocks (sibling-function divergence from tag_content_block; latent per STORY-027 v1 layout scope, but production-grade fix in scope per canonical principle). Pass-3 fixes (per-block MCID, EC-008 test, deterministic font) all verified clean by pass 4. Streak reset 0/3. Fix in progress; worktree at 561fecd7 (will advance). Pass 5 NEXT.
 
 ## Lessons / Process Gaps (codified 2026-06-01)
 
@@ -225,7 +216,7 @@ Production-grade from day 1. Key enforced gates:
 | Date | Item | Severity | Notes |
 |------|------|----------|-------|
 | 2026-05-28 | LOCAL adversary 3-CLEAN on STORY-034 ran macOS-only, missed Linux Trebuchet MS substitution failure. | LOW | DI-1: justified deferral (no action). Surface to user for Linux-container adversary codification decision. |
-| 2026-06-01 | BC-1.14.001, BC-1.14.002, BC-1.14.003 still carry `subsystem: SS-TBD` (correct value SS-02 per STORY-035). | LOW | Fold into next spec-hygiene pass. Not a story blocker. |
+| 2026-06-01 | BC-1.14.001, BC-1.14.002 still carry `subsystem: SS-TBD` (correct value SS-02 per STORY-035). BC-1.14.003 RESOLVED (bumped v1.2→v1.3, SS-TBD→SS-02, committed 2026-06-02). | LOW | BC-1.14.001/002 fold into next spec-hygiene pass. Not a story blocker. |
 
 ## Process Wins (apply to future stories)
 
