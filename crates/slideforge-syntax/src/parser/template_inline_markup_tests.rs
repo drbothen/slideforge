@@ -1135,3 +1135,159 @@ fn test_E_PAR_020_warning_is_empty_inline_markup_span_variant() {
          expected SyntaxError::EmptyInlineMarkupSpan variant; got: {first:?}"
     );
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// F-077-P4-002 (backtick delimiter preservation)
+//
+// BUG: when the delimiter IS a backtick (`` ` ``), the E-PAR-019 / E-PAR-020
+// message embeds the delimiter as three consecutive backticks, so
+// `extract_backtick_name` returns "" → delimiter field is "" / "?" in the
+// produced SyntaxError.
+//
+// These tests assert that the CORRECT delimiter `` ` `` (backtick) is preserved
+// in the UnclosedInlineMarkup / EmptyInlineMarkupSpan variants.  They FAIL until
+// routing is kind-based (not message-string-based).
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// F-077-P4-002: unclosed backtick code span must produce
+/// `SyntaxError::UnclosedInlineMarkup { delimiter: "`" }` — delimiter is `` ` ``,
+/// NOT empty string or "?".
+///
+/// Fails until routing uses `TemplateErrorKind` instead of `extract_backtick_name`.
+#[test]
+#[allow(non_snake_case)]
+fn test_F077_P4_002_backtick_unclosed_delimiter_preserved() {
+    use crate::error::SyntaxError;
+    use crate::parser::parse;
+    use crate::span::SourceMap;
+
+    // Detail field with an unclosed backtick code span: `unclosed
+    let src = "slide content:\n  detail \"`unclosed\"\n";
+    let mut sm = SourceMap::new();
+    let file_id = sm.add_file(Arc::from("test.sf"), Arc::from(src));
+    let pr = parse(src, file_id, &sm)
+        .expect("unclosed backtick code span must not be a fatal parse error");
+
+    assert!(
+        !pr.warnings.is_empty(),
+        "test_F077_P4_002_backtick_unclosed_delimiter_preserved FAIL: \
+         no warning produced for unclosed backtick span"
+    );
+
+    let first = &pr.warnings[0];
+    match first {
+        SyntaxError::UnclosedInlineMarkup { delimiter, .. } => {
+            assert_eq!(
+                delimiter, "`",
+                "test_F077_P4_002_backtick_unclosed_delimiter_preserved FAIL: \
+                 delimiter must be \"`\" (backtick); got: {delimiter:?}\n\
+                 If empty: extract_backtick_name lost the delimiter when the message \
+                 embedded ` inside backtick pairs. Fix: route via TemplateErrorKind."
+            );
+        },
+        other => panic!(
+            "test_F077_P4_002_backtick_unclosed_delimiter_preserved FAIL: \
+             expected SyntaxError::UnclosedInlineMarkup; got: {other:?}"
+        ),
+    }
+}
+
+/// F-077-P4-002: empty backtick code span (two adjacent backticks `` `` ``) must
+/// produce `SyntaxError::EmptyInlineMarkupSpan { delimiter: "`" }` — delimiter
+/// is `` ` ``, NOT empty string or "?".
+///
+/// Fails until routing uses `TemplateErrorKind` instead of `extract_backtick_name`.
+#[test]
+#[allow(non_snake_case)]
+fn test_F077_P4_002_backtick_empty_span_delimiter_preserved() {
+    use crate::error::SyntaxError;
+    use crate::parser::parse;
+    use crate::span::SourceMap;
+
+    // Detail field with an empty backtick code span: ``
+    let src = "slide content:\n  detail \"``\"\n";
+    let mut sm = SourceMap::new();
+    let file_id = sm.add_file(Arc::from("test.sf"), Arc::from(src));
+    let pr =
+        parse(src, file_id, &sm).expect("empty backtick code span must not be a fatal parse error");
+
+    assert!(
+        !pr.warnings.is_empty(),
+        "test_F077_P4_002_backtick_empty_span_delimiter_preserved FAIL: \
+         no warning produced for empty backtick span"
+    );
+
+    let first = &pr.warnings[0];
+    match first {
+        SyntaxError::EmptyInlineMarkupSpan { delimiter, .. } => {
+            assert_eq!(
+                delimiter, "`",
+                "test_F077_P4_002_backtick_empty_span_delimiter_preserved FAIL: \
+                 delimiter must be \"`\" (backtick); got: {delimiter:?}\n\
+                 If empty: extract_backtick_name lost the delimiter when the message \
+                 embedded ` inside backtick pairs. Fix: route via TemplateErrorKind."
+            );
+        },
+        other => panic!(
+            "test_F077_P4_002_backtick_empty_span_delimiter_preserved FAIL: \
+             expected SyntaxError::EmptyInlineMarkupSpan; got: {other:?}"
+        ),
+    }
+}
+
+/// F-077-P4-001 + F-077-P4-002 combined: verify delimiter field is non-empty and
+/// correct for `**`, `_`, and `` ` `` delimiters (all three must preserve their
+/// delimiter string unmodified in the SyntaxError variant).
+#[test]
+#[allow(non_snake_case)]
+fn test_F077_P4_002_delimiter_preserved_for_all_markup_types() {
+    use crate::error::SyntaxError;
+    use crate::parser::parse;
+    use crate::span::SourceMap;
+
+    let cases: &[(&str, &str, &str)] = &[
+        (
+            "slide content:\n  detail \"**unclosed\"\n",
+            "**",
+            "unclosed bold",
+        ),
+        (
+            "slide content:\n  detail \"_unclosed\"\n",
+            "_",
+            "unclosed italic",
+        ),
+        (
+            "slide content:\n  detail \"`unclosed\"\n",
+            "`",
+            "unclosed code span",
+        ),
+    ];
+
+    for (src, expected_delim, label) in cases {
+        let mut sm = SourceMap::new();
+        let file_id = sm.add_file(Arc::from("test.sf"), Arc::from(*src));
+        let pr =
+            parse(src, file_id, &sm).unwrap_or_else(|_| panic!("{label}: parse must not be fatal"));
+
+        assert!(
+            !pr.warnings.is_empty(),
+            "test_F077_P4_002_delimiter_preserved_for_all_markup_types FAIL ({label}): \
+             no warning produced"
+        );
+
+        let first = &pr.warnings[0];
+        match first {
+            SyntaxError::UnclosedInlineMarkup { delimiter, .. } => {
+                assert_eq!(
+                    delimiter, expected_delim,
+                    "test_F077_P4_002_delimiter_preserved_for_all_markup_types FAIL ({label}): \
+                     delimiter must be {expected_delim:?}; got: {delimiter:?}"
+                );
+            },
+            other => panic!(
+                "test_F077_P4_002_delimiter_preserved_for_all_markup_types FAIL ({label}): \
+                 expected UnclosedInlineMarkup; got: {other:?}"
+            ),
+        }
+    }
+}

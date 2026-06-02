@@ -95,6 +95,11 @@ where
     I: ValueInput<'src, Token = Token, Span = TSpan>,
 {
     // Template string value with E-PAR-012/E-PAR-013/E-PAR-014 error emission.
+    // Use into_routing_message() so inline markup errors (E-PAR-019/020) carry
+    // the SLIDEFORGE_INLINE_ROUTE routing tag with the hex-encoded delimiter.
+    // This ensures the routing boundary in parser/mod.rs can produce the correct
+    // SyntaxError variant with the right delimiter — no extract_backtick_name
+    // re-parsing needed (fixes F-077-P4-002 for slide field paths).
     let template_val = template_value().validate(
         move |(chunks, errs): (
             Vec<TemplateChunk>,
@@ -103,7 +108,7 @@ where
               info,
               emitter| {
             for err in errs {
-                emitter.emit(Rich::custom(info.span(), err.into_message()));
+                emitter.emit(Rich::custom(info.span(), err.into_routing_message()));
             }
             (FieldValue::Template(chunks), info.span())
         },

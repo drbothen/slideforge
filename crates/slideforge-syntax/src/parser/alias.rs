@@ -103,7 +103,7 @@ where
               info,
               emitter| {
             for err in errs {
-                emitter.emit(Rich::custom(info.span(), err.into_message()));
+                emitter.emit(Rich::custom(info.span(), err.into_routing_message()));
             }
             (FieldValue::Template(chunks), info.span())
         },

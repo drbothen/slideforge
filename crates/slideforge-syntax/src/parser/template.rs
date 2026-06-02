@@ -149,6 +149,132 @@ impl TemplateError {
     pub fn into_message(self) -> String {
         self.message
     }
+
+    /// Produce a routing-tagged message that encodes the [`TemplateErrorKind`] and
+    /// (for inline markup errors) the delimiter string in a pipe-separated prefix.
+    ///
+    /// Format: `SLIDEFORGE_INLINE_ROUTE|<KIND>|<DELIM_HEX>|<ORIGINAL_MESSAGE>`
+    ///
+    /// - `SLIDEFORGE_INLINE_ROUTE|` is the sentinel (unique prefix not present in
+    ///   any normal E-PAR-NNN message text).
+    /// - `<KIND>` is `UnclosedInlineMarkup` or `EmptyInlineMarkupSpan`.
+    /// - `<DELIM_HEX>` is the delimiter bytes hex-encoded so `|` cannot appear in
+    ///   the delimiter field (e.g., `` ` `` → `60`, `**` → `2a2a`, `_` → `5f`).
+    /// - `<ORIGINAL_MESSAGE>` is the full human-readable E-PAR-019 / E-PAR-020
+    ///   message, preserved for the `message` field of the produced `SyntaxError`.
+    ///
+    /// Hex encoding avoids all possible delimiter-vs-separator conflicts regardless
+    /// of which ASCII punctuation characters are used as inline markup delimiters.
+    ///
+    /// The routing boundary in `parser/mod.rs` calls `parse_routing_tag()` which
+    /// extracts `KIND` and `DELIM_HEX`, hex-decodes the delimiter, and produces
+    /// the correct [`crate::error::SyntaxError`] variant — no `message.contains()`
+    /// or `extract_backtick_name` re-parsing needed.  This fixes F-077-P4-002.
+    ///
+    /// Non-inline-markup errors (E-PAR-012, 013, 014) do not need the prefix
+    /// because their routing in mod.rs is already correct; this method returns
+    /// the plain message for those kinds.
+    #[must_use]
+    pub fn into_routing_message(self) -> String {
+        match &self.kind {
+            TemplateErrorKind::UnclosedInlineMarkup(delim) => {
+                let hex = hex_encode(delim.as_bytes());
+                format!(
+                    "SLIDEFORGE_INLINE_ROUTE|UnclosedInlineMarkup|{hex}|{msg}",
+                    msg = self.message
+                )
+            },
+            TemplateErrorKind::EmptyInlineMarkupSpan(delim) => {
+                let hex = hex_encode(delim.as_bytes());
+                format!(
+                    "SLIDEFORGE_INLINE_ROUTE|EmptyInlineMarkupSpan|{hex}|{msg}",
+                    msg = self.message
+                )
+            },
+            // E-PAR-012, 013, 014: routing already works via message.contains;
+            // no prefix needed.
+            TemplateErrorKind::UnterminatedInterpolation
+            | TemplateErrorKind::EmptyInterpolation
+            | TemplateErrorKind::UnterminatedMath => self.message,
+        }
+    }
+}
+
+// ─── Hex encoding helpers ─────────────────────────────────────────────────────
+
+/// Encode `bytes` as a lowercase hex string.
+///
+/// Used by [`TemplateError::into_routing_message`] to encode the delimiter
+/// safely — the hex representation can only contain `[0-9a-f]` so it never
+/// conflicts with the `|` separator used in the routing tag.
+fn hex_encode(bytes: &[u8]) -> String {
+    bytes
+        .iter()
+        .fold(String::with_capacity(bytes.len() * 2), |mut acc, b| {
+            use std::fmt::Write as _;
+            let _ = write!(acc, "{b:02x}");
+            acc
+        })
+}
+
+/// Decode a hex string produced by [`hex_encode`] back to a `String`.
+///
+/// Returns `None` if `hex` is not valid lowercase hex or if the decoded bytes
+/// are not valid UTF-8.
+fn hex_decode(hex: &str) -> Option<String> {
+    if !hex.len().is_multiple_of(2) {
+        return None;
+    }
+    let bytes: Option<Vec<u8>> = (0..hex.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).ok())
+        .collect();
+    String::from_utf8(bytes?).ok()
+}
+
+// ─── Routing tag parser ───────────────────────────────────────────────────────
+
+/// The decoded payload of an inline-markup routing tag embedded in a chumsky
+/// `Rich::custom` message by [`TemplateError::into_routing_message`].
+///
+/// Callers in `parser/mod.rs` extract this from the message string to route
+/// E-PAR-019 / E-PAR-020 diagnostics to the correct [`crate::error::SyntaxError`]
+/// variant without fragile `message.contains("E-PAR-NNN")` checks.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum InlineMarkupRoute {
+    /// E-PAR-019 — unclosed inline markup delimiter.  Carries the delimiter.
+    UnclosedInlineMarkup(String),
+    /// E-PAR-020 — empty inline markup span.  Carries the delimiter.
+    EmptyInlineMarkupSpan(String),
+}
+
+/// Try to parse an inline-markup routing tag from `msg`.
+///
+/// Returns `Some(InlineMarkupRoute)` when the message contains the
+/// `SLIDEFORGE_INLINE_ROUTE|` sentinel produced by
+/// [`TemplateError::into_routing_message`], otherwise `None`.
+///
+/// The `msg` parameter is the `format!("{:?}", rich_err.reason())` output from
+/// chumsky, which wraps the raw message string in `Custom("...")` debug format.
+/// Because the routing tag uses only printable ASCII (`[A-Z_|0-9a-f]`), the
+/// `{:?}` escaping does not alter it — the sentinel and hex payload survive
+/// verbatim.
+///
+/// Expected format: `...SLIDEFORGE_INLINE_ROUTE|<KIND>|<DELIM_HEX>|<MESSAGE>...`
+#[must_use]
+pub(super) fn parse_routing_tag(msg: &str) -> Option<InlineMarkupRoute> {
+    const SENTINEL: &str = "SLIDEFORGE_INLINE_ROUTE|";
+    let tag_start = msg.find(SENTINEL)?;
+    let rest = &msg[tag_start + SENTINEL.len()..];
+    // Expected format after sentinel: "<KIND>|<DELIM_HEX>|<ORIGINAL_MESSAGE>"
+    let (kind_str, rest2) = rest.split_once('|')?;
+    let (delim_hex, _original_msg) = rest2.split_once('|')?;
+    let delim = hex_decode(delim_hex)?;
+    match kind_str {
+        "UnclosedInlineMarkup" => Some(InlineMarkupRoute::UnclosedInlineMarkup(delim)),
+        "EmptyInlineMarkupSpan" => Some(InlineMarkupRoute::EmptyInlineMarkupSpan(delim)),
+        _ => None,
+    }
 }
 
 // ─── Inner expression parser ─────────────────────────────────────────────────

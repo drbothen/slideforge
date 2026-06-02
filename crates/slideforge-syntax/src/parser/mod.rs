@@ -62,6 +62,7 @@ use crate::{
 use chumsky::input::Input as _;
 
 use self::deck::deck_parser;
+use self::template::parse_routing_tag;
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
@@ -279,34 +280,43 @@ pub fn parse(
             // requires parse() to return Ok with the error in warnings.
             // These must route to dedicated SyntaxError variants — NOT UnexpectedToken
             // (E-PAR-002) — to avoid diagnostic code collision.
-            if message.contains("E-PAR-019") {
-                let delimiter = extract_backtick_name(&message).unwrap_or("?").to_string();
-                let warning = SyntaxError::unclosed_inline_markup(
-                    file_path.to_string(),
-                    line,
-                    col,
-                    delimiter.clone(),
-                    message,
-                    src.to_string(),
-                    byte_start,
-                    delimiter.len().max(1),
-                );
-                parse_time_warnings.push(warning);
-                continue;
-            }
-
-            if message.contains("E-PAR-020") {
-                let delimiter = extract_backtick_name(&message).unwrap_or("?").to_string();
-                let warning = SyntaxError::empty_inline_markup_span(
-                    file_path.to_string(),
-                    line,
-                    col,
-                    delimiter.clone(),
-                    message,
-                    src.to_string(),
-                    byte_start,
-                    delimiter.len().max(1),
-                );
+            //
+            // Routing is kind-based: all template_value() callers call
+            // TemplateError::into_routing_message() which embeds a
+            // SLIDEFORGE_INLINE_ROUTE|Kind|DelimHex| routing tag in the message.
+            // parse_routing_tag() finds the sentinel, decodes the hex delimiter,
+            // and returns the typed InlineMarkupRoute — no message.contains() checks
+            // or extract_backtick_name re-parsing.  This fixes F-077-P4-002: the
+            // backtick delimiter (`) was previously lost because extract_backtick_name
+            // returned "" when the message embedded ` inside backtick-quoted pairs.
+            if let Some(route) = parse_routing_tag(&message) {
+                use self::template::InlineMarkupRoute;
+                let warning = match route {
+                    InlineMarkupRoute::UnclosedInlineMarkup(delimiter) => {
+                        SyntaxError::unclosed_inline_markup(
+                            file_path.to_string(),
+                            line,
+                            col,
+                            delimiter.clone(),
+                            message,
+                            src.to_string(),
+                            byte_start,
+                            delimiter.len().max(1),
+                        )
+                    },
+                    InlineMarkupRoute::EmptyInlineMarkupSpan(delimiter) => {
+                        SyntaxError::empty_inline_markup_span(
+                            file_path.to_string(),
+                            line,
+                            col,
+                            delimiter.clone(),
+                            message,
+                            src.to_string(),
+                            byte_start,
+                            delimiter.len().max(1),
+                        )
+                    },
+                };
                 parse_time_warnings.push(warning);
                 continue;
             }
@@ -644,17 +654,6 @@ fn extract_quoted_name(msg: &str) -> Option<&str> {
     let start = msg.find('\'')? + 1;
     let rest = &msg[start..];
     let end = rest.find('\'')?;
-    Some(&rest[..end])
-}
-
-/// Extract the first backtick-delimited name from `msg`.
-///
-/// Used to pull the inline markup delimiter string (e.g. `**`, `_`) from
-/// E-PAR-019 and E-PAR-020 messages which embed it as `` `**` ``.
-fn extract_backtick_name(msg: &str) -> Option<&str> {
-    let start = msg.find('`')? + 1;
-    let rest = &msg[start..];
-    let end = rest.find('`')?;
     Some(&rest[..end])
 }
 

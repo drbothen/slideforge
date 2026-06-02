@@ -118,7 +118,16 @@ where
                 // Create a 2-byte sub-span at the opening delimiter position.
                 // This points precisely at the opening `**`, `_`, `` ` ``, etc.
                 let sub_span: TSpan = SimpleSpan::from(delim_abs..delim_abs + 2);
-                emitter.emit(Rich::custom(sub_span, err.message));
+                // Use into_routing_message() instead of .message directly so that
+                // inline-markup errors (E-PAR-019/020) carry a null-byte-separated
+                // routing tag with the KIND and DELIMITER.  The routing boundary in
+                // parser/mod.rs calls parse_routing_tag() first, which extracts the
+                // delimiter directly from the TemplateErrorKind payload — no
+                // message.contains("E-PAR-NNN") or extract_backtick_name re-parsing
+                // needed.  This fixes F-077-P4-002: the backtick delimiter (`` ` ``)
+                // was previously lost because extract_backtick_name returned "" when
+                // the message embedded `` ` `` inside backtick pairs.
+                emitter.emit(Rich::custom(sub_span, err.into_routing_message()));
             }
             (FieldValue::Template(chunks), info.span())
         },
