@@ -254,7 +254,17 @@ pub fn parse(
                 byte_start,
             )
         } else {
-            let message = format!("{:?}", rich_err.reason());
+            // `format!("{:?}", rich_err.reason())` produces `Custom("...")` for
+            // parser-emitted diagnostics (i.e., any Rich::custom error).  The
+            // `Custom("...")` wrapper is chumsky's debug representation — it must
+            // NOT appear in user-facing messages.  Strip it here so every
+            // downstream path receives the clean inner text.
+            //
+            // F-077-P5-001 root cause: this stripping was previously absent, so the
+            // full `Custom("SLIDEFORGE_INLINE_ROUTE|...")` blob leaked into SyntaxError
+            // message fields and was rendered verbatim to the user.
+            let raw_message = format!("{:?}", rich_err.reason());
+            let message = strip_custom_wrapper(&raw_message);
 
             // Route W-PAR-* diagnostics as non-fatal warnings (DIR-077-001-A Ruling 2).
             // These are emitted by `section_block_parser` for unrecognised sub-block
@@ -291,26 +301,31 @@ pub fn parse(
             // returned "" when the message embedded ` inside backtick-quoted pairs.
             if let Some(route) = parse_routing_tag(&message) {
                 use self::template::InlineMarkupRoute;
+                // `clean_msg` is the original human-readable E-PAR-019 / E-PAR-020
+                // text decoded from the routing tag.  Using it (not `message`) as
+                // the SyntaxError `message:` field is the fix for F-077-P5-001 —
+                // the routing sentinel and hex payload must never appear in the
+                // user-facing diagnostic.
                 let warning = match route {
-                    InlineMarkupRoute::UnclosedInlineMarkup(delimiter) => {
+                    InlineMarkupRoute::UnclosedInlineMarkup(delimiter, clean_msg) => {
                         SyntaxError::unclosed_inline_markup(
                             file_path.to_string(),
                             line,
                             col,
                             delimiter.clone(),
-                            message,
+                            clean_msg,
                             src.to_string(),
                             byte_start,
                             delimiter.len().max(1),
                         )
                     },
-                    InlineMarkupRoute::EmptyInlineMarkupSpan(delimiter) => {
+                    InlineMarkupRoute::EmptyInlineMarkupSpan(delimiter, clean_msg) => {
                         SyntaxError::empty_inline_markup_span(
                             file_path.to_string(),
                             line,
                             col,
                             delimiter.clone(),
-                            message,
+                            clean_msg,
                             src.to_string(),
                             byte_start,
                             delimiter.len().max(1),
@@ -643,6 +658,44 @@ fn line_col_to_byte_offset(src: &str, line: u32, col: u32) -> usize {
     }
     // If line is past the end, return the end of the source.
     src.len().saturating_sub(1)
+}
+
+/// Strip the `Custom("...")` wrapper that chumsky's `{:?}` debug format adds to
+/// `Rich::custom` error reasons.
+///
+/// When a parser calls `Rich::custom(span, "some message")`, the `reason()` is
+/// `RichReason::Custom("some message")`.  Formatting that with `{:?}` produces
+/// the string `Custom("some message")` — including the `Custom(` prefix and `")`
+/// suffix that must not appear in user-facing diagnostics.
+///
+/// This function detects that wrapper and returns the inner string (unescaping
+/// simple `\"` sequences).  If `raw` does not match the `Custom("...")` pattern,
+/// it is returned unchanged — covering `Expected`, `Many`, and other reason
+/// variants that produce a different `{:?}` format.
+///
+/// # F-077-P5-001
+///
+/// This was the root cause of the sentinel leak: `raw_message` was used directly
+/// as the `message:` field of every `SyntaxError`, causing `Custom("...")` (and,
+/// for inline-markup errors, `Custom("SLIDEFORGE_INLINE_ROUTE|...")`) to appear
+/// verbatim in rendered diagnostics.
+fn strip_custom_wrapper(raw: &str) -> String {
+    // The pattern is: Custom("...")
+    // The inner string may contain escaped characters (e.g. `\"` for a literal
+    // double-quote inside the message, `\\` for a backslash).
+    // We only need to handle the common E-PAR-NNN messages which never contain
+    // literal double-quotes in the inner text, so a simple prefix/suffix strip
+    // is sufficient for production use.  For robustness, also unescape `\"`.
+    const PREFIX: &str = "Custom(\"";
+    const SUFFIX: &str = "\")";
+    if raw.starts_with(PREFIX) && raw.ends_with(SUFFIX) {
+        let inner = &raw[PREFIX.len()..raw.len() - SUFFIX.len()];
+        // Unescape the two sequences that `{:?}` escapes inside a String:
+        // `\"` → `"` and `\\` → `\`.
+        inner.replace("\\\"", "\"").replace("\\\\", "\\")
+    } else {
+        raw.to_string()
+    }
 }
 
 /// Extract the first single-quoted name from `msg` (e.g. `"'chart'"` → `"chart"`).

@@ -1291,3 +1291,355 @@ fn test_F077_P4_002_delimiter_preserved_for_all_markup_types() {
         }
     }
 }
+
+// ─── Tests for F-077-P5-001: sentinel must not appear in rendered message ────
+
+/// F-077-P5-001 [HIGH]: `SyntaxError::to_string()` for UnclosedInlineMarkup
+/// with a backtick delimiter MUST NOT contain the routing sentinel, hex payload,
+/// or `Custom(` wrapper.
+///
+/// Previously `parse_routing_tag()` discarded the clean original message
+/// (`_original_msg`) and `InlineMarkupRoute` carried only the delimiter; the
+/// tagged `message` blob was then stored verbatim in the SyntaxError `message:`
+/// field, leaking `SLIDEFORGE_INLINE_ROUTE|…|Custom(…)` into every user-facing
+/// diagnostic.
+///
+/// This test FAILS against the unfixed code (proving the leak) and passes after
+/// `InlineMarkupRoute` is extended to carry the clean message and mod.rs uses it.
+#[test]
+#[allow(non_snake_case)]
+fn test_F077_P5_001_unclosed_backtick_message_is_clean() {
+    use crate::error::SyntaxError;
+    use crate::parser::parse;
+    use crate::span::SourceMap;
+
+    // Unclosed backtick inline markup span.
+    let src = "slide content:\n  detail \"`unclosed\"\n";
+    let mut sm = SourceMap::new();
+    let file_id = sm.add_file(Arc::from("test.sf"), Arc::from(src));
+    let pr = parse(src, file_id, &sm).expect("unclosed backtick must not be a fatal parse error");
+
+    assert!(
+        !pr.warnings.is_empty(),
+        "test_F077_P5_001_unclosed_backtick_message_is_clean FAIL: no warning produced"
+    );
+
+    let rendered = pr.warnings[0].to_string();
+
+    assert!(
+        !rendered.contains("SLIDEFORGE_INLINE_ROUTE"),
+        "test_F077_P5_001_unclosed_backtick_message_is_clean FAIL: \
+         rendered message contains routing sentinel — user-facing diagnostic \
+         must not expose internal routing tags.\nRendered: {rendered:?}"
+    );
+    assert!(
+        !rendered.contains("Custom("),
+        "test_F077_P5_001_unclosed_backtick_message_is_clean FAIL: \
+         rendered message contains chumsky Debug wrapper 'Custom(' — \
+         internal representation must not appear in user diagnostics.\nRendered: {rendered:?}"
+    );
+    // Sentinel format uses `|` as separator — assert none of the sentinel's
+    // pipe-separated fields appear.  The check is: the string must NOT contain
+    // a `|` character that would indicate the sentinel leaked through.
+    assert!(
+        !rendered.contains('|'),
+        "test_F077_P5_001_unclosed_backtick_message_is_clean FAIL: \
+         rendered message contains '|' which indicates the routing sentinel payload \
+         leaked into the user-facing message.\nRendered: {rendered:?}"
+    );
+    // The human-readable content must be present: the error code and delimiter.
+    assert!(
+        rendered.contains("E-PAR-019"),
+        "test_F077_P5_001_unclosed_backtick_message_is_clean FAIL: \
+         rendered message must contain the E-PAR-019 code.\nRendered: {rendered:?}"
+    );
+
+    // The backtick delimiter must be visible in the rendered output — either in
+    // the message field or the SyntaxError Display (delimiter field).
+    match &pr.warnings[0] {
+        SyntaxError::UnclosedInlineMarkup {
+            delimiter, message, ..
+        } => {
+            assert_eq!(
+                delimiter, "`",
+                "delimiter field must be backtick; got: {delimiter:?}"
+            );
+            assert!(
+                !message.contains("SLIDEFORGE_INLINE_ROUTE"),
+                "message field must not contain routing sentinel; got: {message:?}"
+            );
+            assert!(
+                !message.contains("Custom("),
+                "message field must not contain chumsky Debug wrapper; got: {message:?}"
+            );
+            assert!(
+                message.contains("E-PAR-019"),
+                "message field must contain E-PAR-019; got: {message:?}"
+            );
+        },
+        other => panic!(
+            "test_F077_P5_001_unclosed_backtick_message_is_clean FAIL: \
+             expected UnclosedInlineMarkup; got: {other:?}"
+        ),
+    }
+}
+
+/// F-077-P5-001 [HIGH]: same sentinel-leak test for `**` (multi-char delimiter).
+///
+/// Exercises the `UnclosedInlineMarkup` path with a two-byte delimiter to
+/// confirm the hex encoding/decoding round-trip does not corrupt the clean message.
+#[test]
+#[allow(non_snake_case)]
+fn test_F077_P5_001_unclosed_bold_message_is_clean() {
+    use crate::error::SyntaxError;
+    use crate::parser::parse;
+    use crate::span::SourceMap;
+
+    let src = "slide content:\n  detail \"**unclosed bold\"\n";
+    let mut sm = SourceMap::new();
+    let file_id = sm.add_file(Arc::from("test.sf"), Arc::from(src));
+    let pr = parse(src, file_id, &sm).expect("unclosed bold must not be a fatal parse error");
+
+    assert!(
+        !pr.warnings.is_empty(),
+        "test_F077_P5_001_unclosed_bold_message_is_clean FAIL: no warning produced"
+    );
+
+    let rendered = pr.warnings[0].to_string();
+
+    assert!(
+        !rendered.contains("SLIDEFORGE_INLINE_ROUTE"),
+        "test_F077_P5_001_unclosed_bold_message_is_clean FAIL: sentinel in rendered message.\n\
+         Rendered: {rendered:?}"
+    );
+    assert!(
+        !rendered.contains("Custom("),
+        "test_F077_P5_001_unclosed_bold_message_is_clean FAIL: Custom( in rendered message.\n\
+         Rendered: {rendered:?}"
+    );
+    assert!(
+        !rendered.contains('|'),
+        "test_F077_P5_001_unclosed_bold_message_is_clean FAIL: '|' in rendered message.\n\
+         Rendered: {rendered:?}"
+    );
+
+    match &pr.warnings[0] {
+        SyntaxError::UnclosedInlineMarkup {
+            delimiter, message, ..
+        } => {
+            assert_eq!(
+                delimiter, "**",
+                "delimiter must be '**'; got: {delimiter:?}"
+            );
+            assert!(
+                !message.contains("SLIDEFORGE_INLINE_ROUTE"),
+                "message field must not contain sentinel; got: {message:?}"
+            );
+            assert!(
+                !message.contains("Custom("),
+                "message field must not contain Custom(; got: {message:?}"
+            );
+            assert!(
+                message.contains("E-PAR-019"),
+                "message field must contain E-PAR-019; got: {message:?}"
+            );
+            assert!(
+                message.contains("**"),
+                "message field must contain the delimiter '**'; got: {message:?}"
+            );
+        },
+        other => panic!(
+            "test_F077_P5_001_unclosed_bold_message_is_clean FAIL: \
+             expected UnclosedInlineMarkup; got: {other:?}"
+        ),
+    }
+}
+
+/// F-077-P5-001 [HIGH]: sentinel-leak test for `EmptyInlineMarkupSpan` with
+/// backtick delimiter.
+#[test]
+#[allow(non_snake_case)]
+fn test_F077_P5_001_empty_backtick_span_message_is_clean() {
+    use crate::error::SyntaxError;
+    use crate::parser::parse;
+    use crate::span::SourceMap;
+
+    // Empty backtick code span: ``
+    let src = "slide content:\n  detail \"``\"\n";
+    let mut sm = SourceMap::new();
+    let file_id = sm.add_file(Arc::from("test.sf"), Arc::from(src));
+    let pr = parse(src, file_id, &sm).expect("empty backtick span must not be a fatal parse error");
+
+    assert!(
+        !pr.warnings.is_empty(),
+        "test_F077_P5_001_empty_backtick_span_message_is_clean FAIL: no warning produced"
+    );
+
+    let rendered = pr.warnings[0].to_string();
+
+    assert!(
+        !rendered.contains("SLIDEFORGE_INLINE_ROUTE"),
+        "test_F077_P5_001_empty_backtick_span_message_is_clean FAIL: sentinel in rendered message.\n\
+         Rendered: {rendered:?}"
+    );
+    assert!(
+        !rendered.contains("Custom("),
+        "test_F077_P5_001_empty_backtick_span_message_is_clean FAIL: Custom( in rendered message.\n\
+         Rendered: {rendered:?}"
+    );
+    assert!(
+        !rendered.contains('|'),
+        "test_F077_P5_001_empty_backtick_span_message_is_clean FAIL: '|' in rendered message.\n\
+         Rendered: {rendered:?}"
+    );
+
+    match &pr.warnings[0] {
+        SyntaxError::EmptyInlineMarkupSpan {
+            delimiter, message, ..
+        } => {
+            assert_eq!(
+                delimiter, "`",
+                "delimiter must be backtick; got: {delimiter:?}"
+            );
+            assert!(
+                !message.contains("SLIDEFORGE_INLINE_ROUTE"),
+                "message field must not contain sentinel; got: {message:?}"
+            );
+            assert!(
+                !message.contains("Custom("),
+                "message field must not contain Custom(; got: {message:?}"
+            );
+            assert!(
+                message.contains("E-PAR-020"),
+                "message field must contain E-PAR-020; got: {message:?}"
+            );
+        },
+        other => panic!(
+            "test_F077_P5_001_empty_backtick_span_message_is_clean FAIL: \
+             expected EmptyInlineMarkupSpan; got: {other:?}"
+        ),
+    }
+}
+
+/// F-077-P5-001 [HIGH]: sentinel-leak test for `EmptyInlineMarkupSpan` with
+/// `**` delimiter.
+#[test]
+#[allow(non_snake_case)]
+fn test_F077_P5_001_empty_bold_span_message_is_clean() {
+    use crate::error::SyntaxError;
+    use crate::parser::parse;
+    use crate::span::SourceMap;
+
+    // Empty bold span: ****
+    let src = "slide content:\n  detail \"****\"\n";
+    let mut sm = SourceMap::new();
+    let file_id = sm.add_file(Arc::from("test.sf"), Arc::from(src));
+    let pr = parse(src, file_id, &sm).expect("empty bold span must not be a fatal parse error");
+
+    assert!(
+        !pr.warnings.is_empty(),
+        "test_F077_P5_001_empty_bold_span_message_is_clean FAIL: no warning produced"
+    );
+
+    let rendered = pr.warnings[0].to_string();
+
+    assert!(
+        !rendered.contains("SLIDEFORGE_INLINE_ROUTE"),
+        "test_F077_P5_001_empty_bold_span_message_is_clean FAIL: sentinel in rendered message.\n\
+         Rendered: {rendered:?}"
+    );
+    assert!(
+        !rendered.contains("Custom("),
+        "test_F077_P5_001_empty_bold_span_message_is_clean FAIL: Custom( in rendered message.\n\
+         Rendered: {rendered:?}"
+    );
+    assert!(
+        !rendered.contains('|'),
+        "test_F077_P5_001_empty_bold_span_message_is_clean FAIL: '|' in rendered message.\n\
+         Rendered: {rendered:?}"
+    );
+
+    match &pr.warnings[0] {
+        SyntaxError::EmptyInlineMarkupSpan {
+            delimiter, message, ..
+        } => {
+            assert_eq!(
+                delimiter, "**",
+                "delimiter must be '**'; got: {delimiter:?}"
+            );
+            assert!(
+                !message.contains("SLIDEFORGE_INLINE_ROUTE"),
+                "message field must not contain sentinel; got: {message:?}"
+            );
+            assert!(
+                !message.contains("Custom("),
+                "message field must not contain Custom(; got: {message:?}"
+            );
+            assert!(
+                message.contains("E-PAR-020"),
+                "message field must contain E-PAR-020; got: {message:?}"
+            );
+            assert!(
+                message.contains("**"),
+                "message field must contain the delimiter '**'; got: {message:?}"
+            );
+        },
+        other => panic!(
+            "test_F077_P5_001_empty_bold_span_message_is_clean FAIL: \
+             expected EmptyInlineMarkupSpan; got: {other:?}"
+        ),
+    }
+}
+
+/// F-077-P5-001 SCRUTINY-2b: non-inline template errors (UnterminatedInterpolation,
+/// EmptyInterpolation, UnterminatedMath) must render clean messages with no sentinel
+/// contamination (they never pass through `into_routing_message` so should already
+/// be clean — this asserts that the fix does not regress them).
+#[test]
+#[allow(non_snake_case)]
+fn test_F077_P5_001_scrutiny_2b_non_inline_errors_render_clean() {
+    use crate::error::SyntaxError;
+    use crate::parser::parse;
+    use crate::span::SourceMap;
+
+    // E-PAR-012: unterminated {{ interpolation
+    let src_012 = "slide content:\n  detail \"{{ unclosed\"\n";
+    // E-PAR-013: empty {{ }} interpolation
+    let src_013 = "slide content:\n  detail \"{{  }}\"\n";
+    // E-PAR-014: unterminated $ math block
+    let src_014 = "slide content:\n  detail \"$unclosed\"\n";
+
+    for (src, label) in &[
+        (src_012, "E-PAR-012 unterminated interpolation"),
+        (src_013, "E-PAR-013 empty interpolation"),
+        (src_014, "E-PAR-014 unterminated math"),
+    ] {
+        let mut sm = SourceMap::new();
+        let file_id = sm.add_file(Arc::from("test.sf"), Arc::from(*src));
+
+        // These may be fatal errors (Err) or produce warnings — check both paths.
+        let warnings: Vec<SyntaxError> = match parse(src, file_id, &sm) {
+            Ok(pr) => pr.warnings,
+            Err(errs) => errs,
+        };
+
+        assert!(
+            !warnings.is_empty(),
+            "test_F077_P5_001_scrutiny_2b FAIL ({label}): no diagnostic produced"
+        );
+
+        for warning in &warnings {
+            let rendered = warning.to_string();
+            assert!(
+                !rendered.contains("SLIDEFORGE_INLINE_ROUTE"),
+                "test_F077_P5_001_scrutiny_2b FAIL ({label}): routing sentinel found in rendered message.\n\
+                 Rendered: {rendered:?}"
+            );
+            assert!(
+                !rendered.contains("Custom("),
+                "test_F077_P5_001_scrutiny_2b FAIL ({label}): Custom( found in rendered message.\n\
+                 Rendered: {rendered:?}"
+            );
+        }
+    }
+}

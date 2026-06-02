@@ -240,12 +240,22 @@ fn hex_decode(hex: &str) -> Option<String> {
 /// Callers in `parser/mod.rs` extract this from the message string to route
 /// E-PAR-019 / E-PAR-020 diagnostics to the correct [`crate::error::SyntaxError`]
 /// variant without fragile `message.contains("E-PAR-NNN")` checks.
+///
+/// Both variants carry `(delimiter, clean_message)` where `clean_message` is the
+/// original human-readable E-PAR-019 / E-PAR-020 text (decoded from the routing
+/// tag by [`parse_routing_tag`]).  The caller in `parser/mod.rs` uses
+/// `clean_message` for the `message:` field of the `SyntaxError` — NOT the raw
+/// tagged blob — so the routing sentinel never appears in user-facing output.
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum InlineMarkupRoute {
-    /// E-PAR-019 — unclosed inline markup delimiter.  Carries the delimiter.
-    UnclosedInlineMarkup(String),
-    /// E-PAR-020 — empty inline markup span.  Carries the delimiter.
-    EmptyInlineMarkupSpan(String),
+    /// E-PAR-019 — unclosed inline markup delimiter.
+    ///
+    /// Fields: `(delimiter, clean_message)`.
+    UnclosedInlineMarkup(String, String),
+    /// E-PAR-020 — empty inline markup span.
+    ///
+    /// Fields: `(delimiter, clean_message)`.
+    EmptyInlineMarkupSpan(String, String),
 }
 
 /// Try to parse an inline-markup routing tag from `msg`.
@@ -268,11 +278,16 @@ pub(super) fn parse_routing_tag(msg: &str) -> Option<InlineMarkupRoute> {
     let rest = &msg[tag_start + SENTINEL.len()..];
     // Expected format after sentinel: "<KIND>|<DELIM_HEX>|<ORIGINAL_MESSAGE>"
     let (kind_str, rest2) = rest.split_once('|')?;
-    let (delim_hex, _original_msg) = rest2.split_once('|')?;
+    let (delim_hex, original_msg) = rest2.split_once('|')?;
     let delim = hex_decode(delim_hex)?;
+    // `original_msg` is the clean human-readable E-PAR-019 / E-PAR-020 text.
+    // It is passed into the SyntaxError `message:` field so users never see the
+    // sentinel or hex payload.  Previously bound to `_original_msg` and discarded,
+    // which was the root cause of F-077-P5-001.
+    let clean_msg = original_msg.to_string();
     match kind_str {
-        "UnclosedInlineMarkup" => Some(InlineMarkupRoute::UnclosedInlineMarkup(delim)),
-        "EmptyInlineMarkupSpan" => Some(InlineMarkupRoute::EmptyInlineMarkupSpan(delim)),
+        "UnclosedInlineMarkup" => Some(InlineMarkupRoute::UnclosedInlineMarkup(delim, clean_msg)),
+        "EmptyInlineMarkupSpan" => Some(InlineMarkupRoute::EmptyInlineMarkupSpan(delim, clean_msg)),
         _ => None,
     }
 }
