@@ -43,6 +43,8 @@ use slideforge_types::{
     Value,
 };
 
+use slideforge_syntax::section::SECTION_REGISTER_KEYS;
+
 use crate::env::Env;
 use crate::register_routing::{KNOWN_SECTION_TYPES, extract_section_register_content};
 
@@ -591,8 +593,10 @@ fn test_BC_3_02_002_ac006_section_with_both_registers_produces_two_entries() {
 /// The parse-time warning was already emitted by STORY-078's `section_block_parser`.
 /// The eval stage must NOT emit a second copy (no duplicate diagnostic).
 ///
-/// After full `eval_deck()` on a deck with `section methodology: / foo: "x"`,
-/// `eval_diagnostics` must contain NO `UnrecognizedSectionSubBlockKey` entry.
+/// This test calls `eval_section_nodes_for_test` directly (not the full
+/// `eval_deck` path) to exercise the unrecognised-key skip at the node level.
+/// After calling `eval_section_nodes_for_test` on a section with `foo: "x"`,
+/// `sink` must contain NO `UnrecognizedSectionSubBlockKey` entry.
 #[test]
 fn test_BC_3_02_002_ac_ec_001_eval_does_not_re_emit_unrecognized_key_warning() {
     // Build a SectionNode with an unrecognized key "foo".
@@ -684,7 +688,11 @@ fn test_BC_3_02_002_inv3_unknown_section_type_produces_fatal_eval_error() {
     );
 }
 
-/// BC-3.02.002 invariant 3: all five built-in section types are accepted.
+/// BC-3.02.002 invariant 3: all canonical manual section types are accepted.
+///
+/// Iterates `KNOWN_SECTION_TYPES` (the complete authoritative list at eval time)
+/// and asserts that each type is accepted by `eval_section_nodes`. The count of
+/// accepted types must equal the length of `KNOWN_SECTION_TYPES`.
 #[test]
 fn test_BC_3_02_002_inv3_all_builtin_section_types_accepted() {
     for &type_name in KNOWN_SECTION_TYPES {
@@ -987,18 +995,20 @@ fn test_F_077_P1_002_real_interpolation_template_to_inlines_via_eval() {
     );
 }
 
-// ─── F-077-P1-003: undefined variable in section detail: is a fatal eval error ─
+// ─── F-077-P1-003: undefined variable in section detail: produces Error and drops section ─
 
 /// F-077-P1-003 / BC-3.02.002 EC-006 (story EC-002):
 /// A `section detail:` field containing `{{ undefined_var }}` where the env
 /// does NOT bind `undefined_var` must:
-/// - return `None` (fatal eval — the section cannot be emitted with broken content)
-/// - push an `UndefinedVariable` error naming the variable into the sink
+/// - return `None` (eval emits ParseSeverity::Error — the section cannot be emitted
+///   with broken content)
+/// - push an `UndefinedVariable` error (ParseSeverity::Error) naming the variable
+///   into the sink
 ///
 /// This test has zero coverage before this fix because no test drove the
 /// undefined-variable branch through `eval_section_nodes`.
 #[test]
-fn test_F_077_P1_003_undefined_variable_in_section_detail_is_fatal() {
+fn test_F_077_P1_003_undefined_variable_in_section_detail_produces_error_and_drops_section() {
     // Build a SectionNode whose detail: field references an undefined variable.
     let section_node = SectionNode {
         kind: Spanned::new("methodology".to_string(), dummy_span()),
@@ -1072,4 +1082,174 @@ fn test_BC_3_02_002_section_block_has_register_content_field() {
         Register::Detail,
         "register_content field must hold Register::Detail entry"
     );
+}
+
+// ─── F-077-P2-002: eval register-key set == syntax SSOT ──────────────────────
+
+/// F-077-P2-002: `SECTION_EVAL_REGISTER_KEYS` (now an alias of
+/// `slideforge_syntax::section::SECTION_REGISTER_KEYS`) and the eval-stage
+/// behavior must accept exactly the same keys as the parse-time constant.
+///
+/// This test verifies the SSOT by exercising eval behaviour for each key in
+/// `SECTION_REGISTER_KEYS`: every key must be recognised and populated by
+/// `eval_section_nodes`. Any key NOT in the set must be silently skipped.
+#[test]
+fn test_F_077_P2_002_eval_register_key_set_matches_syntax_ssot() {
+    // Every key in SECTION_REGISTER_KEYS must be accepted by eval_section_nodes.
+    for &key in SECTION_REGISTER_KEYS {
+        let section_node = SectionNode {
+            kind: Spanned::new("methodology".to_string(), dummy_span()),
+            fields: vec![FieldNode {
+                name: Spanned::new(key.to_string(), dummy_span()),
+                value: Spanned::new(
+                    SyntaxFieldValue::Template(vec![TemplateChunk::Literal("content".to_string())]),
+                    dummy_span(),
+                ),
+            }],
+        };
+
+        let env = Env::new(IndexMap::new());
+        let mut sink = DiagnosticSink::new();
+        let result = crate::eval::eval_section_nodes_for_test(&section_node, &env, &mut sink);
+
+        assert!(
+            result.is_some(),
+            "F-077-P2-002: eval must accept register key '{}' (in SECTION_REGISTER_KEYS); \
+             got None with errors: {:?}",
+            key,
+            sink.errors()
+        );
+
+        let (section_block, _) = result.unwrap();
+        assert!(
+            section_block.body.get(key).is_some(),
+            "F-077-P2-002: eval must populate body key '{key}' for a recognised register key"
+        );
+    }
+
+    // A key NOT in SECTION_REGISTER_KEYS must be silently skipped (not appear in body).
+    let foreign_key = "notes"; // excluded per DIR-077-001 §5
+    assert!(
+        !SECTION_REGISTER_KEYS.contains(&foreign_key),
+        "test precondition: '{foreign_key}' must not be in SECTION_REGISTER_KEYS"
+    );
+
+    let section_node = SectionNode {
+        kind: Spanned::new("methodology".to_string(), dummy_span()),
+        fields: vec![FieldNode {
+            name: Spanned::new(foreign_key.to_string(), dummy_span()),
+            value: Spanned::new(
+                SyntaxFieldValue::Template(vec![TemplateChunk::Literal("x".to_string())]),
+                dummy_span(),
+            ),
+        }],
+    };
+    let env = Env::new(IndexMap::new());
+    let mut sink = DiagnosticSink::new();
+    let result = crate::eval::eval_section_nodes_for_test(&section_node, &env, &mut sink);
+    assert!(
+        result.is_some(),
+        "F-077-P2-002: eval must return Some even when only a foreign key '{foreign_key}' is present \
+         (it is silently skipped)"
+    );
+    let (section_block, _) = result.unwrap();
+    assert!(
+        section_block.body.get(foreign_key).is_none(),
+        "F-077-P2-002: foreign key '{foreign_key}' must NOT appear in section_block.body — \
+         eval must silently skip keys not in SECTION_REGISTER_KEYS"
+    );
+}
+
+// ─── OBS-3: deck-level integration test (eval_deck path) ─────────────────────
+
+/// OBS-3 deck-level integration test:
+/// A top-level `section <type>:` whose ONLY register field (`detail:`) contains
+/// an undefined variable must, when evaluated through `eval_deck`:
+///
+/// 1. Surface an `UndefinedVariable` Error diagnostic naming the variable.
+/// 2. Drop the section from `deck.section_blocks` — the broken section must NOT
+///    be emitted into the IR.
+///
+/// This test exercises the full `eval_deck` → `eval_section_nodes` path,
+/// not just the `eval_section_nodes_for_test` unit helper. It is load-bearing:
+/// it asserts the specific absent section AND that the diagnostic names the
+/// undefined variable.
+///
+/// The documented asymmetry vs slide field-drop is preserved: for slides, an
+/// undefined variable drops the field but keeps the slide; for sections, an
+/// undefined variable in a register field drops the entire section
+/// (BC-3.02.002 postcondition / DIR-077-001 §5).
+#[test]
+fn test_obs3_deck_level_section_with_undefined_variable_is_dropped_and_surfaced() {
+    use slideforge_syntax::expr::Expr as SyntaxExprInner;
+    use slideforge_syntax::{
+        BlockItem, DeckNode, FieldNode, FieldValue as SyntaxFieldValue, SectionNode, Spanned,
+        TemplateChunk,
+    };
+
+    use crate::config::EvalConfig;
+    use crate::eval::eval_deck;
+
+    // Build a DeckNode with a single top-level section "methodology" whose
+    // only field is `detail: {{ missing_var }}` where `missing_var` is not bound.
+    let section_node = SectionNode {
+        kind: Spanned::new("methodology".to_string(), dummy_span()),
+        fields: vec![FieldNode {
+            name: Spanned::new("detail".to_string(), dummy_span()),
+            value: Spanned::new(
+                SyntaxFieldValue::Template(vec![
+                    TemplateChunk::Literal("Prefix: ".to_string()),
+                    TemplateChunk::Expr(SyntaxExprInner::Ident("missing_var".to_string())),
+                ]),
+                dummy_span(),
+            ),
+        }],
+    };
+
+    let deck_node = DeckNode {
+        items: vec![BlockItem::Section(Spanned::new(section_node, dummy_span()))],
+        ..DeckNode::default()
+    };
+
+    let config = EvalConfig::default();
+    let mut sink = DiagnosticSink::new();
+
+    // eval_deck may return Some (the deck is otherwise valid) or None (if the
+    // UndefinedVariable pushes has_fatal() across the gate). Either way:
+    // (a) the section must be absent from deck.section_blocks, and
+    // (b) the diagnostic must name "missing_var".
+    let deck_opt = eval_deck(&deck_node, &config, &mut sink);
+
+    // Assertion (b): the sink must contain an UndefinedVariable error for "missing_var".
+    assert!(
+        !sink.is_empty(),
+        "OBS-3: eval_deck must surface an UndefinedVariable diagnostic for 'missing_var'; \
+         sink is empty"
+    );
+    let combined_errors: String = sink
+        .errors()
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("; ");
+    assert!(
+        combined_errors.contains("missing_var"),
+        "OBS-3: UndefinedVariable diagnostic must name 'missing_var'; got: {combined_errors}"
+    );
+
+    // Assertion (a): the broken section must be absent from deck.section_blocks.
+    if let Some(deck) = deck_opt {
+        assert!(
+            deck.section_blocks.is_empty(),
+            "OBS-3: the 'methodology' section with an undefined variable must be dropped \
+             from deck.section_blocks; got {} section(s): {:?}",
+            deck.section_blocks.len(),
+            deck.section_blocks
+                .iter()
+                .map(|s| s.name.as_ref())
+                .collect::<Vec<_>>()
+        );
+    }
+    // If eval_deck returned None, the diagnostic gate already enforced absence —
+    // assertion (b) above is sufficient.
 }

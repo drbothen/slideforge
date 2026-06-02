@@ -420,10 +420,15 @@ pub(crate) fn eval_section_nodes_for_test(
 
 /// Register keys recognised on section blocks.
 ///
+/// This is a **type alias** of [`slideforge_syntax::section::SECTION_REGISTER_KEYS`]
+/// — both the parse-time and eval-time register-key contracts share a single
+/// source of truth. Any divergence between the parser and evaluator becomes a
+/// compile error (the constant is the same slice, not a copy).
+///
 /// Only `"report"` and `"detail"` are valid document-mode register sub-block keys.
 /// `"notes"` is the presenter register (slide canvas only) and has no meaning on a
 /// section block (DIR-077-001 §5).
-const SECTION_EVAL_REGISTER_KEYS: &[&str] = &["report", "detail"];
+const SECTION_EVAL_REGISTER_KEYS: &[&str] = slideforge_syntax::section::SECTION_REGISTER_KEYS;
 
 /// Evaluate a single [`slideforge_syntax::SectionNode`] into a [`SectionBlock`] IR entry.
 ///

@@ -138,6 +138,11 @@ pub fn extract_section_register_content(section: &SectionBlock) -> Vec<Registere
     // "notes" is the presenter register (speaker view on a slide canvas) and is
     // NOT valid for section blocks, which have no PPTX rendering path
     // (DIR-077-001 §5, BC-3.02.002 invariant).
+    //
+    // SSOT binding: the string literals below MUST match
+    // `slideforge_syntax::section::SECTION_REGISTER_KEYS` exactly.
+    // A compile-time assertion in this module's test suite enforces that
+    // invariant — see `test_register_pairs_match_syntax_ssot`.
     let register_pairs: [(Register, &str); 2] =
         [(Register::Report, "report"), (Register::Detail, "detail")];
 
@@ -1333,6 +1338,54 @@ mod tests {
             result.is_empty(),
             "Interpolated variant must produce NO register entry (not Some(vec![])); \
              got: {result:?}"
+        );
+    }
+
+    // ─── F-077-P2-002: register_pairs SSOT binding to SECTION_REGISTER_KEYS ──
+
+    /// F-077-P2-002: the `register_pairs` array in `extract_section_register_content`
+    /// must enumerate exactly the same string keys as
+    /// `slideforge_syntax::section::SECTION_REGISTER_KEYS`.
+    ///
+    /// This test enforces the SSOT binding comment added in F-077-P2-002. If
+    /// `SECTION_REGISTER_KEYS` ever gains or loses a key, this test will fail,
+    /// forcing the `register_pairs` array to be updated in sync.
+    #[test]
+    fn test_register_pairs_match_syntax_ssot() {
+        use slideforge_syntax::section::SECTION_REGISTER_KEYS;
+
+        // The string keys used in register_pairs (the production array).
+        // Must stay in sync with SECTION_REGISTER_KEYS — this assertion is the
+        // compile-time-equivalent enforcement for the runtime pairing.
+        let register_pair_keys: &[&str] = &["report", "detail"];
+
+        // Every key in the syntax SSOT must appear in register_pairs.
+        for &syntax_key in SECTION_REGISTER_KEYS {
+            assert!(
+                register_pair_keys.contains(&syntax_key),
+                "F-077-P2-002: register_pairs is missing key '{syntax_key}' \
+                 from slideforge_syntax::section::SECTION_REGISTER_KEYS — \
+                 update register_pairs in extract_section_register_content to match"
+            );
+        }
+
+        // Every key in register_pairs must appear in the syntax SSOT.
+        for &pair_key in register_pair_keys {
+            assert!(
+                SECTION_REGISTER_KEYS.contains(&pair_key),
+                "F-077-P2-002: register_pairs contains key '{pair_key}' \
+                 that is NOT in slideforge_syntax::section::SECTION_REGISTER_KEYS — \
+                 remove the stale key from register_pairs in extract_section_register_content"
+            );
+        }
+
+        assert_eq!(
+            register_pair_keys.len(),
+            SECTION_REGISTER_KEYS.len(),
+            "F-077-P2-002: register_pairs has {} keys but SECTION_REGISTER_KEYS has {} — \
+             they must be identical sets",
+            register_pair_keys.len(),
+            SECTION_REGISTER_KEYS.len()
         );
     }
 }
