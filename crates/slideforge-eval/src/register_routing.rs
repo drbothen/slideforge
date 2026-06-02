@@ -37,7 +37,8 @@
 //! The function is a pure transformation from `&Slide` to `Vec<RegisteredContent>`.
 
 use slideforge_types::{
-    FieldValue, InlineNode, Register, RegisteredContent, SectionBlock, Slide, Value,
+    CANONICAL_MANUAL_SECTION_TYPES, FieldValue, InlineNode, Register, RegisteredContent,
+    SectionBlock, Slide, Value,
 };
 
 use crate::filters::format_float_display;
@@ -164,12 +165,17 @@ pub fn extract_section_register_content(section: &SectionBlock) -> Vec<Registere
 /// section type name from `SectionNode.kind` against the registry
 /// (BC-3.02.002 invariant 3, DIR-077-001-A Ruling 3).
 ///
+/// **Single source of truth:** this re-exports
+/// [`slideforge_types::CANONICAL_MANUAL_SECTION_TYPES`] so that the eval and
+/// layout passes are guaranteed to validate against the same list and cannot
+/// drift out of sync (TD-VSDD-060, F-077-P1-001).  The canonical 7-type list
+/// includes `executive_summary` and `risk_register`, which may be manually
+/// authored to supersede the auto-generated equivalents (BC-3.02.001 EC-002).
+///
 /// Plugin-registered section types are NOT represented here — they are resolved
 /// at eval time via the plugin registry (which is out-of-scope for the current
-/// evaluator stub; plug-in support requires a later story). For the purposes of
-/// STORY-077, the built-in list is the authoritative validation set.
-pub const KNOWN_SECTION_TYPES: &[&str] =
-    &["methodology", "scope", "approval", "appendix", "glossary"];
+/// evaluator stub; plug-in support requires a later story).
+pub const KNOWN_SECTION_TYPES: &[&str] = CANONICAL_MANUAL_SECTION_TYPES;
 
 // ─── Private helpers ──────────────────────────────────────────────────────────
 

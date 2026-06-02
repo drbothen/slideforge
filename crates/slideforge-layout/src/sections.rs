@@ -33,7 +33,9 @@
 
 use std::sync::Arc;
 
-use slideforge_types::{Deck, FieldValue, OrderedMap, Register, Value};
+use slideforge_types::{
+    CANONICAL_MANUAL_SECTION_TYPES, Deck, FieldValue, OrderedMap, Register, Value,
+};
 use tracing::warn;
 
 use crate::error::LayoutError;
@@ -41,20 +43,17 @@ use crate::error::LayoutError;
 /// The set of section type names supported by manually authored sections
 /// (BC-3.02.002 AC-004).
 ///
-/// `executive_summary` and `risk_register` are included here because they
-/// can be manually authored to supersede the auto-generated equivalents
+/// **Single source of truth:** this re-exports
+/// [`slideforge_types::CANONICAL_MANUAL_SECTION_TYPES`] so that the layout
+/// and eval passes are guaranteed to validate against the same list and cannot
+/// drift out of sync (TD-VSDD-060, F-077-P1-001).
+///
+/// `executive_summary` and `risk_register` are included because they can be
+/// manually authored to supersede the auto-generated equivalents
 /// (BC-3.02.001 EC-002 / AC-006).  When a manual block with one of these
 /// names is present, `collect_sections` fires the supersession path and
 /// suppresses the auto-generated section of the same kind.
-const SUPPORTED_MANUAL_SECTION_TYPES: &[&str] = &[
-    "executive_summary",
-    "risk_register",
-    "methodology",
-    "scope",
-    "approval",
-    "appendix",
-    "glossary",
-];
+const SUPPORTED_MANUAL_SECTION_TYPES: &[&str] = CANONICAL_MANUAL_SECTION_TYPES;
 
 /// The output format a section should be included in.
 ///
@@ -728,8 +727,8 @@ mod tests {
     use std::sync::Arc;
 
     use slideforge_types::{
-        Deck, DeckMetadata, FieldValue, OrderedMap, Register, SectionBlock, Slide, SourceSpan,
-        Value,
+        Deck, DeckMetadata, FieldValue, InlineNode, OrderedMap, Register, RegisteredContent,
+        SectionBlock, Slide, SourceSpan, Value,
     };
 
     use super::*;
@@ -3019,6 +3018,137 @@ mod tests {
         assert!(
             !logs_contain("declared more than once"),
             "duplicate warning must NOT fire when all section names are unique"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // F-077-P1-005 — FieldValue::Inlines in body → Null placeholder in Custom
+    //                map AND register_content is preserved (no data loss)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// F-077-P1-005 / STORY-077 BC-3.02.002 postconditions 7 and 8:
+    /// A section block whose body contains `FieldValue::Inlines` (rich content)
+    /// must, after `collect_sections`:
+    ///
+    /// 1. Produce a `SectionItem::Custom` map with `Value::Null` for the rich
+    ///    field (the legacy scalar map cannot represent rich content; rich content
+    ///    flows through `register_content`, not the Custom map).
+    ///
+    /// 2. Leave `deck.section_blocks[0].register_content` intact and populated
+    ///    with the Detail entry (layout does NOT clear or modify register_content).
+    ///
+    /// Both invariants must hold simultaneously — asserting only one of them
+    /// would miss the dual-channel design: Null placeholder in Custom + rich
+    /// content preserved in register_content.
+    #[test]
+    fn test_f_077_p1_005_inlines_body_produces_null_placeholder_and_register_content_intact() {
+        // Simulate what eval produces for a section with a detail: sub-block:
+        // - body["detail"] = FieldValue::Inlines([Plain("Rich methodology content")])
+        // - register_content = [RegisteredContent { Detail, [Plain("Rich methodology content")] }]
+        let rich_text = Arc::from("Rich methodology content");
+
+        let mut body: OrderedMap<Arc<str>, FieldValue> = OrderedMap::new();
+        body.insert(
+            Arc::from("detail"),
+            FieldValue::Inlines(vec![InlineNode::Plain(Arc::clone(&rich_text))]),
+        );
+        // Also include a plain literal field to verify Literal values pass through correctly.
+        body.insert(
+            Arc::from("status"),
+            FieldValue::Literal(Value::Str(Arc::from("approved"))),
+        );
+
+        let register_content = vec![RegisteredContent {
+            register: Register::Detail,
+            content: vec![InlineNode::Plain(Arc::clone(&rich_text))],
+        }];
+
+        let block = SectionBlock {
+            name: Arc::from("methodology"),
+            body,
+            register_content,
+            span: SourceSpan::default(),
+        };
+
+        let deck = make_deck_with_section_blocks(vec![], vec![block]);
+        let sections = collect_sections(&deck).expect("collect_sections must succeed");
+
+        // ── Assertion 1: Custom map has Null for the rich 'detail' field ─────
+        // layout cannot represent FieldValue::Inlines in the legacy Custom map.
+        let manual_section = sections
+            .iter()
+            .find(|s| s.kind == SectionKind::ManualSection(Arc::from("methodology")))
+            .expect("F-077-P1-005: methodology section must be present in output");
+
+        assert_eq!(
+            manual_section.items.len(),
+            1,
+            "F-077-P1-005: manual section must produce exactly one Custom item"
+        );
+
+        match &manual_section.items[0] {
+            SectionItem::Custom(map) => {
+                // The 'detail' key has FieldValue::Inlines in the source body.
+                // The layout coercion must produce Value::Null for it (the rich
+                // content is accessed via register_content, not this map).
+                let detail_val = map
+                    .get("detail")
+                    .expect("F-077-P1-005: 'detail' key must be present in Custom map");
+                assert_eq!(
+                    *detail_val,
+                    Value::Null,
+                    "F-077-P1-005: FieldValue::Inlines body field must be coerced to Value::Null \
+                     in the Custom map (rich content flows through register_content, not here); \
+                     got: {detail_val:?}"
+                );
+
+                // The plain 'status' key (Literal(Str)) must pass through as-is.
+                let status_val = map
+                    .get("status")
+                    .expect("F-077-P1-005: 'status' key must be present in Custom map");
+                assert_eq!(
+                    *status_val,
+                    Value::Str(Arc::from("approved")),
+                    "F-077-P1-005: FieldValue::Literal(Str) body field must be preserved verbatim \
+                     in the Custom map; got: {status_val:?}"
+                );
+            },
+            other => panic!("F-077-P1-005: expected SectionItem::Custom, got {other:?}"),
+        }
+
+        // ── Assertion 2: register_content on the source SectionBlock is intact ─
+        // layout must NOT clear or modify the pre-populated register_content.
+        // DOCX/PDF exporters read it directly from deck.section_blocks.
+        let source_block = &deck.section_blocks[0];
+        assert_eq!(
+            source_block.register_content.len(),
+            1,
+            "F-077-P1-005: register_content on the source SectionBlock must remain populated \
+             (layout must not clear it); expected 1 entry, got {}",
+            source_block.register_content.len()
+        );
+        assert_eq!(
+            source_block.register_content[0].register,
+            Register::Detail,
+            "F-077-P1-005: register_content[0] must be tagged Register::Detail"
+        );
+
+        // The content must still hold the rich text — no data loss.
+        let detail_text: String = source_block.register_content[0]
+            .content
+            .iter()
+            .filter_map(|n| {
+                if let InlineNode::Plain(s) = n {
+                    Some(s.as_ref().to_owned())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert_eq!(
+            detail_text, "Rich methodology content",
+            "F-077-P1-005: register_content detail text must be preserved verbatim; \
+             got: {detail_text:?}"
         );
     }
 }

@@ -33,12 +33,14 @@
 use std::sync::Arc;
 
 use indexmap::IndexMap;
+use slideforge_syntax::expr::Expr as SyntaxExpr;
 use slideforge_syntax::span::Span;
 use slideforge_syntax::{
     DiagnosticSink, FieldNode, FieldValue as SyntaxFieldValue, SectionNode, Spanned, TemplateChunk,
 };
 use slideforge_types::{
     FieldValue, InlineNode, OrderedMap, Register, RegisteredContent, SectionBlock, SourceSpan,
+    Value,
 };
 
 use crate::env::Env;
@@ -778,8 +780,11 @@ fn test_BC_3_02_002_ec005_multiple_sections_no_cross_contamination() {
 
 // ─── KNOWN_SECTION_TYPES constant verification ────────────────────────────────
 
-/// The KNOWN_SECTION_TYPES constant must contain the five built-in types
-/// and exclude "notes" (the presenter register, not valid for sections).
+/// The KNOWN_SECTION_TYPES constant must contain all seven canonical types
+/// (including executive_summary and risk_register) and exclude "notes".
+///
+/// F-077-P1-001: the canonical list now has 7 entries so that eval and layout
+/// agree and the BC-3.02.001 EC-002 supersession path is reachable.
 #[test]
 fn test_known_section_types_constant_correct() {
     assert!(
@@ -802,10 +807,243 @@ fn test_known_section_types_constant_correct() {
         KNOWN_SECTION_TYPES.contains(&"glossary"),
         "KNOWN_SECTION_TYPES must include 'glossary'"
     );
+    // F-077-P1-001: executive_summary and risk_register must be in the eval list
+    // so that BC-3.02.001 EC-002 manual supersession is reachable.
+    assert!(
+        KNOWN_SECTION_TYPES.contains(&"executive_summary"),
+        "KNOWN_SECTION_TYPES must include 'executive_summary' \
+         (BC-3.02.001 EC-002 supersession path — F-077-P1-001)"
+    );
+    assert!(
+        KNOWN_SECTION_TYPES.contains(&"risk_register"),
+        "KNOWN_SECTION_TYPES must include 'risk_register' \
+         (BC-3.02.001 EC-002 supersession path — F-077-P1-001)"
+    );
     // "notes" is the PRESENTER register — NOT a section type.
     assert!(
         !KNOWN_SECTION_TYPES.contains(&"notes"),
         "KNOWN_SECTION_TYPES must NOT include 'notes' (notes is the presenter register)"
+    );
+}
+
+// ─── F-077-P1-001: executive_summary and risk_register accepted by eval ────────
+
+/// F-077-P1-001 / BC-3.02.001 EC-002:
+/// `eval_section_nodes` must ACCEPT `section executive_summary:` — it is a
+/// valid manually-authored type that supersedes the auto-generated section.
+///
+/// Before the fix this returned None with UnknownSectionType because
+/// KNOWN_SECTION_TYPES only listed 5 types (missing executive_summary).
+#[test]
+fn test_F_077_P1_001_executive_summary_accepted_by_eval() {
+    let section_node = SectionNode {
+        kind: Spanned::new("executive_summary".to_string(), dummy_span()),
+        fields: vec![],
+    };
+
+    let mut sink = DiagnosticSink::new();
+    let env = Env::new(IndexMap::new());
+    let result = crate::eval::eval_section_nodes_for_test(&section_node, &env, &mut sink);
+
+    assert!(
+        result.is_some(),
+        "F-077-P1-001: eval must ACCEPT 'executive_summary' as a valid section type; \
+         got None with errors: {:?}",
+        sink.errors()
+    );
+    assert!(
+        sink.is_empty(),
+        "F-077-P1-001: no diagnostics expected for valid 'executive_summary' section; \
+         got: {:?}",
+        sink.errors()
+    );
+}
+
+/// F-077-P1-001 / BC-3.02.001 EC-002:
+/// `eval_section_nodes` must ACCEPT `section risk_register:` — it is a
+/// valid manually-authored type that supersedes the auto-generated section.
+///
+/// Before the fix this returned None with UnknownSectionType because
+/// KNOWN_SECTION_TYPES only listed 5 types (missing risk_register).
+#[test]
+fn test_F_077_P1_001_risk_register_accepted_by_eval() {
+    let section_node = SectionNode {
+        kind: Spanned::new("risk_register".to_string(), dummy_span()),
+        fields: vec![],
+    };
+
+    let mut sink = DiagnosticSink::new();
+    let env = Env::new(IndexMap::new());
+    let result = crate::eval::eval_section_nodes_for_test(&section_node, &env, &mut sink);
+
+    assert!(
+        result.is_some(),
+        "F-077-P1-001: eval must ACCEPT 'risk_register' as a valid section type; \
+         got None with errors: {:?}",
+        sink.errors()
+    );
+    assert!(
+        sink.is_empty(),
+        "F-077-P1-001: no diagnostics expected for valid 'risk_register' section; \
+         got: {:?}",
+        sink.errors()
+    );
+}
+
+// ─── F-077-P1-002: real interpolation path exercised ─────────────────────────
+
+/// F-077-P1-002 / BC-3.02.002 AC-003:
+/// A section whose `detail:` field is `FieldValue::Template([Literal("…: "),
+/// Expr("client")])` with `client = "Acme"` in the env must resolve to
+/// `RegisteredContent` whose plain text is `"Methodology detail: Acme"`.
+///
+/// This test exercises the REAL eval `Template→Inlines` production path
+/// (eval.rs ~486-495), unlike the pre-existing paper test that hand-built a
+/// PRE-RESOLVED FieldValue::Inlines and never triggered interpolation.
+///
+/// F-077-P1-002 finding: if the interpolation path regresses, this test fails
+/// because `{{ client }}` (or the variable name "client") appears in the
+/// resolved content.
+#[test]
+fn test_F_077_P1_002_real_interpolation_template_to_inlines_via_eval() {
+    // Build a SectionNode whose detail: field is a Template with an Expr chunk.
+    // This mimics what the parser (STORY-078) produces for:
+    //   section methodology:
+    //     detail: "Methodology detail: {{ client }}"
+    let section_node = SectionNode {
+        kind: Spanned::new("methodology".to_string(), dummy_span()),
+        fields: vec![FieldNode {
+            name: Spanned::new("detail".to_string(), dummy_span()),
+            value: Spanned::new(
+                SyntaxFieldValue::Template(vec![
+                    TemplateChunk::Literal("Methodology detail: ".to_string()),
+                    TemplateChunk::Expr(SyntaxExpr::Ident("client".to_string())),
+                ]),
+                dummy_span(),
+            ),
+        }],
+    };
+
+    // Env has client = "Acme".
+    let mut vars: IndexMap<Arc<str>, Value> = IndexMap::new();
+    vars.insert(Arc::from("client"), Value::Str(Arc::from("Acme")));
+    let env = Env::new(vars);
+
+    let mut sink = DiagnosticSink::new();
+    let result = crate::eval::eval_section_nodes_for_test(&section_node, &env, &mut sink);
+
+    assert!(
+        sink.is_empty(),
+        "F-077-P1-002: no diagnostics expected when client is defined; got: {:?}",
+        sink.errors()
+    );
+
+    let (section_block, register_content) =
+        result.expect("F-077-P1-002: eval must return Some for valid template with defined var");
+
+    // The body must have the 'detail' key resolved to FieldValue::Inlines.
+    let detail = section_block
+        .body
+        .get("detail")
+        .expect("F-077-P1-002: 'detail' key must be present in body after eval");
+    assert!(
+        matches!(detail, FieldValue::Inlines(_)),
+        "F-077-P1-002: 'detail' must be FieldValue::Inlines after template resolution; got: {detail:?}"
+    );
+
+    // The register_content must have one Detail entry.
+    let detail_rc = register_content
+        .iter()
+        .find(|rc| rc.register == Register::Detail)
+        .expect("F-077-P1-002: Detail register_content entry must be present");
+
+    // The plain text must be the fully resolved string — NOT containing "{{" or "client".
+    let resolved_text: String = detail_rc
+        .content
+        .iter()
+        .filter_map(|n| {
+            if let InlineNode::Plain(s) = n {
+                Some(s.as_ref().to_owned())
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    assert_eq!(
+        resolved_text, "Methodology detail: Acme",
+        "F-077-P1-002: interpolation must resolve '{{{{ client }}}}' to 'Acme'; \
+         got: {resolved_text:?}"
+    );
+    assert!(
+        !resolved_text.contains("{{"),
+        "F-077-P1-002: raw '{{{{' token must NOT survive to RegisteredContent; \
+         got: {resolved_text:?}"
+    );
+    assert!(
+        !resolved_text.contains("client"),
+        "F-077-P1-002: variable name 'client' must NOT appear literally; \
+         got: {resolved_text:?}"
+    );
+}
+
+// ─── F-077-P1-003: undefined variable in section detail: is a fatal eval error ─
+
+/// F-077-P1-003 / BC-3.02.002 EC-006 (story EC-002):
+/// A `section detail:` field containing `{{ undefined_var }}` where the env
+/// does NOT bind `undefined_var` must:
+/// - return `None` (fatal eval — the section cannot be emitted with broken content)
+/// - push an `UndefinedVariable` error naming the variable into the sink
+///
+/// This test has zero coverage before this fix because no test drove the
+/// undefined-variable branch through `eval_section_nodes`.
+#[test]
+fn test_F_077_P1_003_undefined_variable_in_section_detail_is_fatal() {
+    // Build a SectionNode whose detail: field references an undefined variable.
+    let section_node = SectionNode {
+        kind: Spanned::new("methodology".to_string(), dummy_span()),
+        fields: vec![FieldNode {
+            name: Spanned::new("detail".to_string(), dummy_span()),
+            value: Spanned::new(
+                SyntaxFieldValue::Template(vec![
+                    TemplateChunk::Literal("Prefix: ".to_string()),
+                    TemplateChunk::Expr(SyntaxExpr::Ident("undefined_var".to_string())),
+                ]),
+                dummy_span(),
+            ),
+        }],
+    };
+
+    // Env is empty — 'undefined_var' is not bound.
+    let env = Env::new(IndexMap::new());
+    let mut sink = DiagnosticSink::new();
+    let result = crate::eval::eval_section_nodes_for_test(&section_node, &env, &mut sink);
+
+    // Must return None: an undefined variable in a register field is fatal.
+    assert!(
+        result.is_none(),
+        "F-077-P1-003: eval must return None when detail: references an undefined variable; \
+         got Some — the broken content must not be emitted"
+    );
+
+    // The sink must contain at least one error mentioning the variable name.
+    assert!(
+        !sink.is_empty(),
+        "F-077-P1-003: at least one diagnostic must be pushed for undefined variable \
+         'undefined_var'; sink is empty"
+    );
+
+    let combined_errors: String = sink
+        .errors()
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("; ");
+
+    assert!(
+        combined_errors.contains("undefined_var"),
+        "F-077-P1-003: error message must name the undefined variable 'undefined_var'; \
+         got: {combined_errors}"
     );
 }
 

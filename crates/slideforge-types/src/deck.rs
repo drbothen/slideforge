@@ -9,6 +9,40 @@
 
 use std::sync::Arc;
 
+/// The canonical set of manually-authored section type names recognised by the
+/// built-in section type registry (BC-3.02.002 AC-004, BC-3.02.001 EC-002).
+///
+/// This is the **single source of truth** for which names are legal in a
+/// `section <type>:` DSL block.  Both `slideforge-eval` (invariant 3 type
+/// validation in `eval_section_nodes`) and `slideforge-layout`
+/// (`collect_manual_sections`) import and compare against this constant so that
+/// the two passes can never drift out of sync (TD-VSDD-060).
+///
+/// ## Semantics of each type
+///
+/// | Name | Auto-generated equivalent | Notes |
+/// |------|--------------------------|-------|
+/// | `executive_summary` | Yes (from `takeaway:` fields) | Manual supersedes auto (EC-002) |
+/// | `risk_register` | Yes (from `severity_cards` slides) | Manual supersedes auto (EC-002) |
+/// | `methodology` | No | Pure manual section |
+/// | `scope` | No | Pure manual section |
+/// | `approval` | No | Pure manual section |
+/// | `appendix` | No | Pure manual section |
+/// | `glossary` | No | Pure manual section |
+///
+/// Plugin-registered section types are NOT represented here — they are resolved
+/// at eval time via the plugin registry (out-of-scope until a future story
+/// activates the `SectionType` plugin surface).
+pub const CANONICAL_MANUAL_SECTION_TYPES: &[&str] = &[
+    "executive_summary",
+    "risk_register",
+    "methodology",
+    "scope",
+    "approval",
+    "appendix",
+    "glossary",
+];
+
 use crate::block::Block;
 use crate::ordered_map::OrderedMap;
 use crate::register::Register;
