@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.4"
+version: "1.5"
 status: draft
 producer: product-owner
 timestamp: 2026-05-24T00:00:00
@@ -18,6 +18,7 @@ modified:
   - "2026-06-01: v1.2 — Added postcondition 7 (detail: sub-blocks), postcondition 8 (inline-structure preservation via FieldValue::Inlines), EC-005 (unrecognized sub-block key → non-fatal warning), EC-006 (reserved-name collision); clarified EC-004; added BC-1.14.003 cross-reference. Closes STORY-077 BC-status flag."
   - "2026-06-01: v1.3 — Anchor/attribution correction (STORY-078 adversary pass 5 OBS-6): subsystem SS-TBD → SS-01 (DSL Parser, slideforge-syntax owns section block PARSING per ARCH-INDEX and STORY-078); Architecture Module line corrected to attribute parsing to slideforge-syntax (SS-01, STORY-078) and eval-stage TYPE validation/register routing to slideforge-eval (SS-02, STORY-077); added STORY-078 to Stories traceability. Behavioral semantics unchanged."
   - "2026-06-01: v1.4 — F-077-P2-001 [MEDIUM]: Expanded recognized-section-type enumeration from 5 to 7 canonical manual types — added executive_summary and risk_register (both defined in CANONICAL_MANUAL_SECTION_TYPES in slideforge-types, aliased by eval + layout; manual section blocks supersede auto-generated per BC-3.02.001 EC-002). Updated precondition 2, invariant 3, and EC-001 known-types message to list all 7 types and note the plugin extension point."
+  - "2026-06-02: v1.5 — DIR-077-002 §9.1: Clarified PC8 to state the two-phase parse/eval representation (TemplateChunk inline-markup variants in slideforge-syntax → Vec<InlineNode> via chunks_to_inline_nodes in slideforge-eval → FieldValue::Inlines), enumerate all 11 supported inline markup forms per Q8 LOCKED decision, state the rendering guarantee through the InlineFormat plugin surface (surface #10), and note that slide-level inline markup conversion is deferred to a follow-up story. Behavioral semantics unchanged; clarification only."
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -70,12 +71,48 @@ sub-block content as `RegisteredContent`.
    extended section. PPTX and web preview exporters do NOT read section node
    `register_content`. (Detail routing exclusion rules are governed by BC-1.14.003; this
    postcondition covers the tagging obligation.)
-8. The body sub-block content of a `section <type>:` block (whether `report:`, `detail:`,
-   or plain narrative body) is stored in `SectionBlock.body` as `FieldValue::Inlines`
-   (not as a flat `Value::Str`). This preserves rich inline structure — bold, xref/links,
-   `{{ }}` interpolation nodes — from parse time through to the Evaluate stage without
-   any loss of structural information. Observable consequence: bold text within a section
-   sub-block renders as bold in DOCX/PDF output (not as literal asterisks).
+8. The `detail:` and `report:` sub-block field values of a `section <type>:` block are
+   stored in `SectionBlock.body` as `slideforge_types::FieldValue::Inlines(Vec<InlineNode>)`,
+   NOT as a flat `Value::Str`. This is produced by a two-phase pipeline:
+   - **Parse time (`slideforge-syntax`):** `template_value()` recognizes inline markup
+     delimiters within sub-block content and produces `TemplateChunk` inline-markup
+     variants — `Bold(Vec<TemplateChunk>)`, `Italic(Vec<TemplateChunk>)`,
+     `Code(String)`, `Link { text: Vec<TemplateChunk>, url: String }`,
+     `Superscript(Vec<TemplateChunk>)`, `Subscript(Vec<TemplateChunk>)`,
+     `Strikethrough(Vec<TemplateChunk>)`, `Highlight(Vec<TemplateChunk>)` —
+     alongside the existing `Literal`, `Expr`, `MathInline`, and `MathDisplay` variants.
+     Footnote and cross-reference forms (`{{ footnote("...") }}`, `{{ ref("id") }}`,
+     `{{ figref(n) }}`) arrive as `TemplateChunk::Expr` (function-call expressions).
+   - **Eval time (`slideforge-eval`):** `chunks_to_inline_nodes(chunks, env, sink)`
+     converts the `Vec<TemplateChunk>` to `Vec<InlineNode>`, mapping each variant:
+     `TemplateChunk::Bold` → `InlineNode::Bold`, `::Italic` → `InlineNode::Italic`,
+     `::Code` → `InlineNode::Code`, `::Link` → `InlineNode::Link`,
+     `::MathInline` → `InlineNode::Math { display: false }`,
+     `::MathDisplay` → `InlineNode::Math { display: true }`,
+     `::Superscript` → `InlineNode::Superscript`, `::Subscript` → `InlineNode::Subscript`,
+     `::Strikethrough` → `InlineNode::Strikethrough`, `::Highlight` → `InlineNode::Highlight`,
+     `::Expr(Call { func: "ref", .. })` → `InlineNode::Xref`,
+     `::Expr(Call { func: "footnote", .. })` → `InlineNode::Footnote`,
+     `::Literal` → `InlineNode::Plain`. The result is stored as `FieldValue::Inlines`.
+   The 11 supported inline markup forms (per Q8 LOCKED decision, DIR-077-002 §1) are:
+   `**bold**`, `_italic_`, `` `code` ``, `[text](url)`, `^sup^`, `~sub~`, `~~del~~`,
+   `==highlight==`, `{{ footnote("...") }}`, `{{ ref("id") }}` / `{{ figref(n) }}`,
+   and `$...$` / `$$...$$` (math, already handled by `MathInline`/`MathDisplay`).
+   Plain text without markup is `InlineNode::Plain`. Math mode (`$...$`) disables
+   text-mode inline markup within its delimiters. `{{ }}` expression interpolation
+   composes with inline markup (e.g., `**{{ client }}**` produces
+   `InlineNode::Bold([InlineNode::Plain(resolved_value)])`); however, a `{{ }}` expression
+   that resolves to a string containing markup characters is NOT further parsed for markup
+   (resolved strings are treated as plain text).
+   **Rendering guarantee:** `InlineNode` variants are consumed by the `InlineFormat` plugin
+   surface (surface #10, `slideforge-plugin-api`) to produce structural formatting in DOCX
+   (e.g., OOXML `<w:rPr><w:b/></w:rPr>` for bold) and PDF (bold run). Observable
+   consequence: `**bold**` in a `detail:` or `report:` sub-block renders as visually bold
+   text in DOCX/PDF output, never as the literal string `**bold**`.
+   **Scope boundary (STORY-077):** This postcondition covers `detail:` and `report:`
+   sub-block field values in section blocks only. Slide-level field values (e.g., `title`,
+   `bullets`, `body` on slide content blocks) are upgraded from `FieldValue::Template` to
+   `FieldValue::Inlines` in a follow-up story (mandatory before v1.0, per DIR-077-002 §4).
 
 ## Invariants
 

@@ -193,7 +193,7 @@ traces_to: domain-spec/L2-INDEX.md
 | BC ID | Title | Priority | Status | File |
 |-------|-------|----------|--------|------|
 | BC-3.02.001 | Auto-generated DOCX sections derived from slide data (executive_summary, risk_register) | P0 | active | [BC-3.02.001.md](BC-3.02.001.md) |
-| BC-3.02.002 | Manually authored section blocks (section methodology:) appear in DOCX/PDF | P0 | active | [BC-3.02.002.md](BC-3.02.002.md) | v1.4 |
+| BC-3.02.002 | Manually authored section blocks (section methodology:) appear in DOCX/PDF | P0 | active | [BC-3.02.002.md](BC-3.02.002.md) | v1.5 |
 
 ### 3.03 — Compile-Time Content Validation (CAP-022)
 
