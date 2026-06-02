@@ -245,6 +245,32 @@ pub fn eval_deck_with_variant(
     // ── Step 4: Evaluate all top-level block items ──
     let mut slides = eval_block_items(&mut env, &deck_node.items, &set_rule_defaults, config, sink);
 
+    // ── Step 4c: Evaluate section blocks (STORY-077) ──
+    // For each top-level BlockItem::Section, run eval_section_nodes to:
+    // 1. Validate the section type against the built-in registry (fatal if unknown)
+    // 2. Resolve FieldValue::Template → FieldValue::Inlines for register keys
+    // 3. Extract RegisteredContent entries attached to each section node
+    // This must run BEFORE the has_fatal() gate (Step 5) so that unknown section
+    // types cause early return (BC-3.02.002 invariant 3 / DIR-077-001-A Ruling 3).
+    use slideforge_syntax::BlockItem;
+    let mut section_blocks = Vec::new();
+    for item in &deck_node.items {
+        if let BlockItem::Section(spanned_section) = item {
+            let section_node = spanned_section.value();
+            match eval_section_nodes(section_node, &env, sink) {
+                Some((mut section_block, register_content)) => {
+                    // Attach extracted register content to the section node.
+                    section_block.register_content = register_content;
+                    section_blocks.push(section_block);
+                },
+                None => {
+                    // Fatal error was pushed (unknown section type or undefined var).
+                    // Continue collecting errors; has_fatal() gate below handles return.
+                },
+            }
+        }
+    }
+
     // ── Step 4b: Deck-level slide cap (F-P2-003 / AC-014) ──
     //
     // The per-`@for` cap inside `eval_for_block` handles intra-loop excess.
@@ -314,7 +340,7 @@ pub fn eval_deck_with_variant(
         vars: deck_vars_ordered,
         metadata,
         registers: OrderedMap::new(),
-        section_blocks: vec![],
+        section_blocks,
     })
 }
 
@@ -432,21 +458,159 @@ pub(crate) fn eval_section_nodes_for_test(
     eval_section_nodes(section_node, env, sink)
 }
 
-#[allow(dead_code)] // used by tests before the pipeline is wired; implementer wires it into eval_deck
 fn eval_section_nodes(
     section_node: &slideforge_syntax::SectionNode,
     env: &Env,
     sink: &mut slideforge_syntax::DiagnosticSink,
 ) -> Option<(SectionBlock, Vec<RegisteredContent>)> {
-    // STORY-077 stub: real implementation validates section type, resolves
-    // FieldValue::Template → FieldValue::Inlines for register keys, and routes
-    // register content.
-    let _ = (section_node, env, sink);
-    todo!(
-        "STORY-077: implement eval_section_nodes — validate section type against registry, \
-         resolve FieldValue::Template to FieldValue::Inlines for detail:/report: sub-blocks, \
-         extract register content via extract_section_register_content"
-    )
+    use crate::register_routing::KNOWN_SECTION_TYPES;
+    use slideforge_syntax::TemplateChunk;
+    use slideforge_types::{FieldValue as TypesFieldValue, InlineNode, OrderedMap, SourceSpan};
+
+    // ── Step 1: Validate section type against the built-in registry ──
+    // (BC-3.02.002 invariant 3 / DIR-077-001-A Ruling 3 — eval is the authority)
+    let section_type = section_node.kind.value().as_str();
+    if !KNOWN_SECTION_TYPES.contains(&section_type) {
+        let known_types = KNOWN_SECTION_TYPES.join(", ");
+        sink.push_with_severity(
+            EvalError::UnknownSectionType {
+                name: Arc::from(section_type),
+                known_types,
+                span: SourceSpan::default(),
+            },
+            ParseSeverity::Fatal,
+        );
+        return None;
+    }
+
+    // ── Step 2: Process each field in the section body ──
+    // For recognised register keys ("report", "detail"), resolve
+    // FieldValue::Template → FieldValue::Inlines (BC-3.02.002 postcondition 8).
+    // For unrecognised keys, silently skip — the parse-time warning was already
+    // emitted by STORY-078's section_block_parser (DIR-077-001-A Ruling 2 / AC-EC-001).
+    const SECTION_REGISTER_KEYS: &[&str] = &["report", "detail"];
+
+    let mut body: OrderedMap<Arc<str>, TypesFieldValue> = OrderedMap::new();
+
+    for field_node in &section_node.fields {
+        let key = field_node.name.value().as_str();
+
+        // Skip unrecognised keys silently (parse-time warning already emitted).
+        if !SECTION_REGISTER_KEYS.contains(&key) {
+            continue;
+        }
+
+        // Resolve FieldValue::Template to FieldValue::Inlines for register keys.
+        let resolved = match field_node.value.value() {
+            slideforge_syntax::FieldValue::Template(chunks) => {
+                // Evaluate the template chunks and build a sequence of InlineNodes.
+                let mut inline_nodes: Vec<InlineNode> = Vec::new();
+                let mut had_error = false;
+
+                for chunk in chunks {
+                    match chunk {
+                        TemplateChunk::Literal(s) => {
+                            if !s.is_empty() {
+                                inline_nodes.push(InlineNode::Plain(Arc::from(s.as_str())));
+                            }
+                        },
+                        TemplateChunk::Expr(expr) => {
+                            match eval_expr_to_string(env, expr, sink) {
+                                Some(s) => {
+                                    if !s.is_empty() {
+                                        inline_nodes.push(InlineNode::Plain(s));
+                                    }
+                                },
+                                None => {
+                                    had_error = true;
+                                },
+                            }
+                        },
+                        TemplateChunk::MathInline(_)
+                        | TemplateChunk::MathDisplay(_)
+                        | TemplateChunk::MathInterp(_) => {
+                            // Math chunks in register sub-blocks are not yet supported;
+                            // they pass through as-is (no inline node emitted).
+                        },
+                    }
+                }
+
+                if had_error {
+                    return None;
+                }
+                TypesFieldValue::Inlines(inline_nodes)
+            },
+            // Scalar literals: coerce to Inlines(Plain) for register fields.
+            slideforge_syntax::FieldValue::Num(n) => {
+                TypesFieldValue::Inlines(vec![InlineNode::Plain(Arc::from(n.to_string().as_str()))])
+            },
+            slideforge_syntax::FieldValue::Bool(b) => TypesFieldValue::Inlines(vec![
+                InlineNode::Plain(Arc::from(if *b { "true" } else { "false" })),
+            ]),
+            slideforge_syntax::FieldValue::Float(f) => TypesFieldValue::Inlines(vec![
+                InlineNode::Plain(Arc::from(format_float_display(f.0).as_str())),
+            ]),
+            slideforge_syntax::FieldValue::Ident(name) => {
+                match env.lookup(name) {
+                    Some(value) => {
+                        let text = match value {
+                            slideforge_types::Value::Str(s) => s.clone(),
+                            slideforge_types::Value::Int(n) => Arc::from(n.to_string().as_str()),
+                            slideforge_types::Value::Bool(b) => {
+                                Arc::from(if *b { "true" } else { "false" })
+                            },
+                            slideforge_types::Value::Float(f) => {
+                                Arc::from(format_float_display(f.0).as_str())
+                            },
+                            slideforge_types::Value::Null => Arc::from(""),
+                            _ => {
+                                // List/Map — not valid for register content; skip.
+                                continue;
+                            },
+                        };
+                        TypesFieldValue::Inlines(vec![InlineNode::Plain(text)])
+                    },
+                    None => {
+                        let scope_list = env
+                            .all_names()
+                            .iter()
+                            .map(|n| n.as_ref().to_owned())
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        sink.push_with_severity(
+                            EvalError::UndefinedVariable {
+                                name: Arc::from(name.as_str()),
+                                scope_list,
+                                span: SourceSpan::default(),
+                            },
+                            ParseSeverity::Error,
+                        );
+                        return None;
+                    },
+                }
+            },
+            slideforge_syntax::FieldValue::Shape(_) | slideforge_syntax::FieldValue::Error => {
+                // Shape/Error variants not valid for section register content; skip.
+                continue;
+            },
+        };
+
+        body.insert(Arc::from(key), resolved);
+    }
+
+    // ── Step 3: Build the SectionBlock ──
+    let section_block = SectionBlock {
+        name: Arc::from(section_type),
+        body,
+        register_content: vec![], // populated below
+        span: slideforge_types::SourceSpan::default(),
+    };
+
+    // ── Step 4: Extract register content via extract_section_register_content ──
+    // (BC-3.02.002 postcondition 7 / BC-1.14.003 invariant 1)
+    let register_content = extract_section_register_content(&section_block);
+
+    Some((section_block, register_content))
 }
 
 /// Evaluate a [`slideforge_syntax::FieldValue`] into a [`Value`] in the

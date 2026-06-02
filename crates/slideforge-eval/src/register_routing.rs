@@ -130,14 +130,32 @@ pub fn extract_register_content(slide: &Slide) -> Vec<RegisteredContent> {
 /// this function is called. `FieldValue::Template` variants reaching this
 /// function indicate a caller error (evaluation was not completed).
 #[must_use]
-pub fn extract_section_register_content(_section: &SectionBlock) -> Vec<RegisteredContent> {
-    // STORY-077 stub body: real implementation resolves FieldValue variants and
-    // routes "report" → Register::Report and "detail" → Register::Detail.
-    // The stub panics to guarantee a Red Gate.
-    todo!(
-        "STORY-077: implement extract_section_register_content — extract 'report'/'detail' \
-         from section.body as FieldValue::Inlines and produce Vec<RegisteredContent>"
-    )
+pub fn extract_section_register_content(section: &SectionBlock) -> Vec<RegisteredContent> {
+    // Process only the two document-mode register keys for sections.
+    // "notes" is the presenter register (speaker view on a slide canvas) and is
+    // NOT valid for section blocks, which have no PPTX rendering path
+    // (DIR-077-001 §5, BC-3.02.002 invariant).
+    let register_pairs: [(Register, &str); 2] = [
+        (Register::Report, "report"),
+        (Register::Detail, "detail"),
+    ];
+
+    let mut result = Vec::with_capacity(2);
+
+    for (register, field_name) in register_pairs {
+        if let Some(inlines) = section
+            .body
+            .get(field_name)
+            .and_then(field_value_to_inlines)
+        {
+            result.push(RegisteredContent {
+                register,
+                content: inlines,
+            });
+        }
+    }
+
+    result
 }
 
 /// The known section types recognised by the built-in section type registry.
