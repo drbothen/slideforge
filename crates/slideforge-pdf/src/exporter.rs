@@ -361,47 +361,94 @@ impl PdfExporter {
                         resolved_font.as_ref(),
                     )?;
                     surface.end_tagged();
-                } else if let Some(child_idx) = part_result
+                } else if let Some(child_indices) = part_result
                     .frame_child_part_indices
                     .get(frame_idx)
-                    .copied()
-                    .flatten()
+                    .and_then(|opt| opt.as_ref())
                 {
-                    // F-045-C2: Non-decorative frames with a corresponding structure tree
-                    // child group are wrapped in a tagged marked-content sequence.
+                    // F-045-C2 / F-P3-001: Non-decorative frames with a corresponding
+                    // structure tree mapping are wrapped in tagged marked-content sequences.
+                    //
+                    // Single-block frames (Title, Subtitle, TextRun, Image, Shape, ErrorSlide):
+                    //   `child_indices` has exactly one element. We open ONE tagged region
+                    //   for the entire frame and insert the Identifier into that one group.
+                    //
+                    // Multi-block Body frames (e.g., Text + Bullets):
+                    //   `child_indices` has one entry PER content block.  We open ONE tagged
+                    //   region per block and insert each Identifier into its own group.
+                    //   This gives each structure group (P, L/LI/LBody, etc.) its own
+                    //   MCID leaf, satisfying PDF/UA-1's requirement that grouping elements
+                    //   reference actual marked content (BC-4.03.001 F-045-C2).
                     //
                     // `ContentTag::Other` emits `/P BDC<</MCID N>>` in the content stream.
-                    // The returned `Identifier` is then pushed as a leaf node into the
-                    // matching Part child group (`part_result.part.children[child_idx]`).
-                    // This links the structure tree element to the marked content on the
-                    // page — satisfying the PDF/UA-1 MCID linkage requirement.
-                    //
-                    // BC-4.03.001 F-045-C2: the tag tree must not be a tree of empty groups.
-                    // A group with no leaf Identifier references no actual page content and
-                    // would fail veraPDF --flavour ua1.
-                    let id = surface.start_tagged(ContentTag::Other);
-                    draw_frame(
-                        &mut surface,
-                        &frame.bbox,
-                        &frame.content,
-                        resolved_font.as_ref(),
-                    )?;
-                    surface.end_tagged();
-                    // Push the Identifier as a leaf node into the matching Part child group.
-                    // Safety: `child_idx` is guaranteed to be in-bounds — it was recorded by
-                    // `tag_slide` as `part_group.children.len()` before the child was pushed,
-                    // so it must be a valid index into `part_result.part.children`.
-                    if let Some(krilla::tagging::Node::Group(child_group)) =
-                        part_result.part.children.get_mut(child_idx)
-                    {
-                        child_group.push(id);
+                    // The returned `Identifier` is pushed as a leaf into the matching Part
+                    // child group, linking the structure tree element to the marked content.
+                    if child_indices.len() == 1 {
+                        // Single-block path (unchanged behavior for all non-Body frames).
+                        let child_idx = child_indices[0];
+                        let id = surface.start_tagged(ContentTag::Other);
+                        draw_frame(
+                            &mut surface,
+                            &frame.bbox,
+                            &frame.content,
+                            resolved_font.as_ref(),
+                        )?;
+                        surface.end_tagged();
+                        if let Some(krilla::tagging::Node::Group(child_group)) =
+                            part_result.part.children.get_mut(child_idx)
+                        {
+                            child_group.push(id);
+                        } else {
+                            tracing::debug!(
+                                frame_idx,
+                                child_idx,
+                                "frame_child_part_indices pointed to non-Group or out-of-bounds \
+                                 child; Identifier not inserted (tag tree may lack leaf for this frame)"
+                            );
+                        }
                     } else {
-                        tracing::debug!(
-                            frame_idx,
-                            child_idx,
-                            "frame_child_part_indices pointed to non-Group or out-of-bounds child; \
-                             Identifier not inserted (tag tree may lack leaf for this frame)"
-                        );
+                        // Multi-block path (Body frames with ≥2 content blocks).
+                        //
+                        // Open one tagged region per block and route each Identifier into the
+                        // corresponding Part child group.  `child_indices[k]` is the Part
+                        // child index for the k-th block that produced a tag group.
+                        //
+                        // We pair the child_indices with the drawable blocks from the frame.
+                        // `draw_body_blocks_tagged` handles the per-block cursor logic; here
+                        // we replicate the block-iteration structure to emit matching tagged
+                        // regions.
+                        if let FrameContent::Body(content_blocks) = &frame.content {
+                            draw_body_blocks_tagged(
+                                &mut surface,
+                                content_blocks,
+                                &frame.bbox,
+                                resolved_font.as_ref(),
+                                child_indices,
+                                &mut part_result.part,
+                            )?;
+                        } else {
+                            // Defensive: multi-index mapping on a non-Body frame is unexpected.
+                            // Fall back to a single tagged region covering the whole frame.
+                            tracing::debug!(
+                                frame_idx,
+                                "multi-index frame_child_part_indices on non-Body frame; \
+                                 using single tagged region as fallback"
+                            );
+                            let child_idx = child_indices[0];
+                            let id = surface.start_tagged(ContentTag::Other);
+                            draw_frame(
+                                &mut surface,
+                                &frame.bbox,
+                                &frame.content,
+                                resolved_font.as_ref(),
+                            )?;
+                            surface.end_tagged();
+                            if let Some(krilla::tagging::Node::Group(child_group)) =
+                                part_result.part.children.get_mut(child_idx)
+                            {
+                                child_group.push(id);
+                            }
+                        }
                     }
                 } else {
                     // Frame with no corresponding structure tree child AND not decorative
@@ -974,14 +1021,18 @@ fn draw_body_blocks(
         match block {
             ContentBlock::Text(text_block) => {
                 let text = extract_inline_text(&text_block.inlines);
-                if !text.is_empty() && let Some(baseline_y) = baseline_iter.next() {
+                if !text.is_empty()
+                    && let Some(baseline_y) = baseline_iter.next()
+                {
                     draw_text_at_y(surface, &text, bbox, baseline_y, 18.0, font);
                 }
             },
             ContentBlock::Bullets(items) => {
                 for item in items {
                     let text = extract_inline_text(&item.inlines);
-                    if !text.is_empty() && let Some(baseline_y) = baseline_iter.next() {
+                    if !text.is_empty()
+                        && let Some(baseline_y) = baseline_iter.next()
+                    {
                         draw_text_at_y(surface, &text, bbox, baseline_y, 16.0, font);
                     }
                 }
@@ -995,6 +1046,118 @@ fn draw_body_blocks(
             | ContentBlock::Shape(_) => {},
         }
     }
+}
+
+/// Draw body content blocks in separate tagged marked-content regions — one per block.
+///
+/// Called by the export draw loop for Body frames that have multiple content blocks
+/// (F-P3-001 fix). Each content block that produced a structure group gets its own
+/// `start_tagged` / `end_tagged` pair, with the resulting `Identifier` pushed into
+/// the corresponding Part child group.
+///
+/// ## Why this is separate from `draw_body_blocks`
+///
+/// `draw_body_blocks` knows nothing about tagging — it just draws text at stacked
+/// baselines. For multi-block tagged PDF, we need to interleave `start_tagged` /
+/// `end_tagged` boundaries around EACH block's drawing, not just around the whole
+/// frame. Combining them would require `draw_body_blocks` to take a `Surface` AND
+/// manage krilla's tagging API, violating the single-responsibility principle.
+///
+/// ## Contract
+///
+/// `child_indices` is the `Vec<usize>` from `frame_child_part_indices[frame_idx]`.
+/// It has one entry for each content block that `tag_content_block` returned
+/// `Some(group)` for (i.e., blocks that contribute a structure element). The
+/// parallel iteration uses a separate index cursor so that blocks returning
+/// `None` from `tag_content_block` (e.g., decorative shapes, empty bullet lists)
+/// are drawn WITHOUT a tagged region — they are structural no-ops.
+///
+/// # Errors
+///
+/// Currently infallible (all drawing is best-effort and non-fatal). The
+/// `Result` return type is kept for forward compatibility — future iterations
+/// may propagate SVG embedding or tagged-region errors.
+// unnecessary_wraps: kept for forward compatibility — future body-block types
+// (e.g., embedded images) may need to propagate errors from SVG embedding.
+#[allow(clippy::similar_names, clippy::unnecessary_wraps)]
+fn draw_body_blocks_tagged(
+    surface: &mut krilla::surface::Surface<'_>,
+    blocks: &[slideforge_types::ContentBlock],
+    bbox: &BoundingBox,
+    font: Option<&krilla::text::Font>,
+    child_indices: &[usize],
+    part: &mut krilla::tagging::TagGroup,
+) -> Result<(), PdfExportError> {
+    use slideforge_types::ContentBlock;
+
+    // Compute per-item baselines using the same pure function as draw_body_blocks
+    // so that the drawing positions are identical to the non-tagged path.
+    let baselines = body_item_baselines(blocks, bbox);
+    let mut baseline_iter = baselines.into_iter();
+
+    // `child_idx_cursor` advances only for blocks that produced a structure group
+    // (the same blocks that contributed entries to `child_indices`).
+    let mut child_idx_cursor: usize = 0;
+
+    for block in blocks {
+        match block {
+            ContentBlock::Text(text_block) => {
+                let text = extract_inline_text(&text_block.inlines);
+                // Tag the block and draw it in one tagged region.
+                // Even if the text is empty (no baseline consumed), the block has a
+                // structure group (P) — open a tagged region so the group gets an MCID.
+                if let Some(&child_part_idx) = child_indices.get(child_idx_cursor) {
+                    let id = surface.start_tagged(ContentTag::Other);
+                    if !text.is_empty()
+                        && let Some(baseline_y) = baseline_iter.next()
+                    {
+                        draw_text_at_y(surface, &text, bbox, baseline_y, 18.0, font);
+                    }
+                    surface.end_tagged();
+                    if let Some(krilla::tagging::Node::Group(child_group)) =
+                        part.children.get_mut(child_part_idx)
+                    {
+                        child_group.push(id);
+                    }
+                    child_idx_cursor += 1;
+                }
+            },
+            ContentBlock::Bullets(items) => {
+                if !items.is_empty() {
+                    // The entire Bullets block corresponds to ONE L group in the
+                    // structure tree — open ONE tagged region covering ALL bullet items.
+                    if let Some(&child_part_idx) = child_indices.get(child_idx_cursor) {
+                        let id = surface.start_tagged(ContentTag::Other);
+                        for item in items {
+                            let text = extract_inline_text(&item.inlines);
+                            if !text.is_empty()
+                                && let Some(baseline_y) = baseline_iter.next()
+                            {
+                                draw_text_at_y(surface, &text, bbox, baseline_y, 16.0, font);
+                            }
+                        }
+                        surface.end_tagged();
+                        if let Some(krilla::tagging::Node::Group(child_group)) =
+                            part.children.get_mut(child_part_idx)
+                        {
+                            child_group.push(id);
+                        }
+                        child_idx_cursor += 1;
+                    }
+                }
+                // Empty Bullets → no structure group, no tagged region, no baseline advance.
+            },
+            // Non-text blocks do not advance the cursor or consume a child index.
+            ContentBlock::Chart(_)
+            | ContentBlock::Diagram(_)
+            | ContentBlock::Math(_)
+            | ContentBlock::Image(_)
+            | ContentBlock::Table(_)
+            | ContentBlock::Shape(_) => {},
+        }
+    }
+
+    Ok(())
 }
 
 /// Extract a flat plain-text string from a sequence of [`InlineNode`]s.

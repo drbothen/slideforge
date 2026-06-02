@@ -287,11 +287,22 @@ fn decorative_only_slide() -> LaidOutDeck {
 
 /// Helper: export `laid_out` + `deck` + minimal brand → raw PDF bytes.
 ///
+/// Uses `PdfExporter::with_font_path` pointing at the committed Latin Modern Math
+/// OTF fixture so text drawing is deterministic across platforms (OBS-P3-003):
+/// on headless Linux the brand fonts (Helvetica, Courier) don't resolve via the
+/// system font fallback, leaving text-less PDFs whose UA-1 acceptance is
+/// environment-dependent. The `with_font_path` seam bypasses brand family-name
+/// resolution and loads the fixture font directly — identical on macOS and Linux.
+///
 /// Panics (using `#[allow(clippy::unwrap_used)]`) on export failure so individual
 /// tests do not need to handle the error plumbing.
 #[allow(clippy::unwrap_used)]
 fn export_to_bytes(deck: &Deck, laid_out: &LaidOutDeck) -> Vec<u8> {
-    let exporter = PdfExporter::new();
+    let font_path = {
+        let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        manifest_dir.join("../slideforge-math/fonts/latinmodern-math.otf")
+    };
+    let exporter = PdfExporter::with_font_path(font_path);
     let brand = minimal_brand();
     let opts = ExportOptions::default();
     exporter
@@ -2517,5 +2528,206 @@ fn test_bc_4_03_001_ac013_ci_workflow_includes_ignored_flag() {
         "OBS-009 FAILED: pdf-ua1.yml does not contain a coverage-assertion step.\n\
          A compliance gate that silently passes when zero tests run is a false gate.\n\
          Add a step that parses nextest's 'N tests run' summary and fails if N < 1."
+    );
+}
+
+// ─── F-P3-001: multi-block Body MCID linkage ────────────────────────────────
+
+/// F-P3-001 (integration): A Body frame with ≥2 content blocks (Text + Bullets)
+/// must produce a tag tree in which EACH block's structure group has its OWN
+/// distinct MCID / Identifier linkage — NOT all sharing the first group's MCID,
+/// and NO group left with zero marked content.
+///
+/// ## Defect (pre-fix)
+///
+/// `tag_engine.rs` records only the FIRST child index for the entire Body frame
+/// (`frame_child_part_indices[frame_idx] = Some(first_child_idx)`). The exporter
+/// opens ONE `start_tagged` region per frame. The resulting `Identifier` is
+/// inserted into `part.children[first_child_idx]` (the P group). The L/LI/LBody
+/// group (the second block's structure element) receives NO Identifier — it is a
+/// grouping element referencing no marked content. veraPDF UA-1 rejects this.
+///
+/// ## What this test asserts
+///
+/// 1. The tag engine records a Vec with 2 entries in `frame_child_part_indices`
+///    for the body frame (one per block, not one for the whole frame).
+/// 2. The two indices are distinct (each block's group occupies a separate slot).
+/// 3. The Part has 3 children: H1 (title) + P (text block) + L (bullets block).
+///
+/// Assertions are against the tag-tree / Identifier API, not byte-substring
+/// presence — satisfying the TD-VSDD-059 load-bearing assertion requirement.
+#[allow(clippy::unwrap_used)]
+#[test]
+fn test_f_p3_001_multi_block_body_each_block_has_own_child_index_integration() {
+    use slideforge_pdf::tag_engine::SlideTagEngine;
+    use slideforge_types::{BulletItem, ContentBlock, InlineNode, SourceSpan, TextBlock};
+
+    // Body frame with 2 content blocks: Text + Bullets.
+    // This is the "title_and_body_slide" configuration (exercised by AC-013 bullets fixture).
+    let slide = LaidOutSlide {
+        source_index: 0,
+        slide_type_keyword: Arc::from("content"),
+        frames: vec![
+            Frame {
+                bbox: BoundingBox {
+                    x: Emu(0),
+                    y: Emu(0),
+                    width: Emu(9_144_000),
+                    height: Emu(914_400),
+                },
+                content: FrameContent::Title(Arc::from("Integration Title")),
+                text_flow: None,
+            },
+            Frame {
+                bbox: BoundingBox {
+                    x: Emu(0),
+                    y: Emu(914_400),
+                    width: Emu(9_144_000),
+                    height: Emu(3_657_600),
+                },
+                content: FrameContent::Body(vec![
+                    ContentBlock::Text(TextBlock {
+                        inlines: vec![InlineNode::Plain(Arc::from("Body paragraph text"))],
+                        span: SourceSpan::default(),
+                    }),
+                    ContentBlock::Bullets(vec![BulletItem {
+                        inlines: vec![InlineNode::Plain(Arc::from("Bullet item one"))],
+                        children: vec![],
+                        span: SourceSpan::default(),
+                    }]),
+                ]),
+                text_flow: None,
+            },
+        ],
+        speaker_notes: None,
+        register_tags: RegisterSet::new(),
+        register_content: vec![],
+    };
+
+    let engine = SlideTagEngine::new();
+    let result = engine.tag_slide(&slide).unwrap();
+
+    // frame 0 = Title (1 child index), frame 1 = Body (must be Vec with 2 entries)
+    assert_eq!(
+        result.frame_child_part_indices.len(),
+        2,
+        "frame_child_part_indices must have one entry per frame (2 frames)"
+    );
+
+    // Title frame: Vec with exactly 1 child index.
+    let title_vec = result.frame_child_part_indices[0]
+        .as_ref()
+        .expect("Title frame must have Some(Vec) child indices");
+    assert_eq!(title_vec.len(), 1, "Title frame: expected 1 child index");
+
+    // Body frame: Vec with exactly 2 child indices (one per block).
+    let body_vec = result.frame_child_part_indices[1]
+        .as_ref()
+        .expect("Body frame must have Some(Vec) child indices, not None");
+    assert_eq!(
+        body_vec.len(),
+        2,
+        "Body frame with Text+Bullets: expected 2 child indices (one per block), got {}",
+        body_vec.len()
+    );
+
+    // The two body block indices must be DISTINCT.
+    let p_idx = body_vec[0];
+    let l_idx = body_vec[1];
+    assert_ne!(
+        p_idx, l_idx,
+        "F-P3-001: body block child indices must be distinct; both were {p_idx}. \
+         The L/LI/LBody group has no MCID slot and will receive no Identifier."
+    );
+
+    // Total Part children: H1(title) + P(text block) + L(bullets block) = 3.
+    assert_eq!(
+        result.part.children.len(),
+        3,
+        "Part must have 3 children: H1 + P + L; got {}",
+        result.part.children.len()
+    );
+}
+
+// ─── OBS-P3-002: EC-008 non-ASCII title round-trip ──────────────────────────
+
+/// OBS-P3-002 / EC-008: A non-ASCII slide title (e.g., "Überblick") must
+/// round-trip correctly through the outline/tag pipeline.
+///
+/// ## Problem (pre-fix)
+///
+/// No test exercises EC-008 (non-ASCII title → PDF string encoding). The
+/// existing title assertions scan for ASCII-only literal bytes and structurally
+/// cannot verify EC-008.
+///
+/// ## What this test asserts
+///
+/// 1. `build_outline_entries` preserves the full non-ASCII title string
+///    in `OutlineEntry::label` — asserting via the OutlineEntry API (not
+///    a byte scan that would miss UTF-16BE-encoded content).
+/// 2. The correct label is sourced from `deck.slides[0].title_str()`.
+/// 3. The page destination index is 0 (correct F-045-P1-005 invariant).
+///
+/// Assertion is via `OutlineEntry::label == "Überblick"` — a direct API
+/// assertion that does not depend on PDF encoding format (UTF-16BE vs PDF
+/// literal string), satisfying the non-ASCII round-trip requirement.
+#[test]
+fn test_obs_p3_002_ec008_non_ascii_title_round_trips_via_outline_entry_api() {
+    use slideforge_pdf::outline::build_outline_entries;
+    use slideforge_types::{FieldValue, OrderedMap, Slide, Value};
+
+    // Build a Deck whose single slide has a non-ASCII title "Überblick"
+    // (German for "overview"), containing the U+00DC LATIN CAPITAL LETTER U WITH DIAERESIS.
+    let non_ascii_title = "Überblick";
+    let mut fields = OrderedMap::new();
+    fields.insert(
+        Arc::from("title"),
+        FieldValue::Literal(Value::Str(Arc::from(non_ascii_title))),
+    );
+    let deck = Deck {
+        slides: vec![Slide {
+            slide_type: Arc::from("title"),
+            fields,
+            blocks: vec![],
+            register: None,
+            tags: vec![],
+            source_span: slideforge_types::SourceSpan::default(),
+            overlay: None,
+            register_content: vec![],
+        }],
+        vars: OrderedMap::new(),
+        metadata: slideforge_types::DeckMetadata {
+            title: Some(Arc::from("Non-ASCII Deck")),
+            slideforge_version: Arc::from("0.1.0"),
+            lang: Some(Arc::from("de-DE")),
+            author: None,
+            section_order: None,
+        },
+        registers: OrderedMap::new(),
+        section_blocks: vec![],
+    };
+
+    // Minimal LaidOutDeck: one slide, source_index 0.
+    let mut laid_out = n_slide_deck(1);
+    laid_out.slides[0].source_index = 0;
+
+    // Assert via the OutlineEntry API — not a PDF byte scan.
+    let entries = build_outline_entries(&deck, &laid_out);
+
+    assert_eq!(
+        entries.len(),
+        1,
+        "OBS-P3-002: expected 1 outline entry for 1-slide deck"
+    );
+    assert_eq!(
+        entries[0].label, non_ascii_title,
+        "OBS-P3-002/EC-008: non-ASCII title '{non_ascii_title}' must round-trip \
+         through build_outline_entries without loss or corruption; \
+         got label '{}'",
+        entries[0].label
+    );
+    assert_eq!(
+        entries[0].page_idx, 0,
+        "OBS-P3-002: destination page index must be 0 (F-045-P1-005 invariant)"
     );
 }
