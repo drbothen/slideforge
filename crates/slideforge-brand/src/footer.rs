@@ -1475,6 +1475,7 @@ mod tests {
             ColorSlot {
                 name: Arc::from(name),
                 value: ColorValue::Hex(Arc::from(hex)),
+                is_derived: false,
             }
         }
 
