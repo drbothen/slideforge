@@ -120,9 +120,8 @@ pub enum TemplateErrorKind {
 /// The byte offset is used by `section_value_parser` (and other callers that
 /// need sub-span precision) to translate the offset into a [`SimpleSpan`] that
 /// points at the OPENING delimiter rather than the whole string literal token.
-/// Callers that only need the message may use `.into_message()`.
 /// Callers that need to route to a specific [`crate::error::SyntaxError`] variant
-/// should inspect `.kind`.
+/// should use `.into_routing_message()` and inspect `.kind`.
 #[derive(Debug, Clone)]
 pub struct TemplateError {
     /// Byte offset of the problematic construct within the field-value string.
@@ -142,12 +141,6 @@ impl TemplateError {
             kind,
             message,
         }
-    }
-
-    /// Consume self and return the message string.
-    #[must_use]
-    pub fn into_message(self) -> String {
-        self.message
     }
 
     /// Produce a routing-tagged message that encodes the [`TemplateErrorKind`] and
@@ -191,8 +184,9 @@ impl TemplateError {
                     msg = self.message
                 )
             },
-            // E-PAR-012, 013, 014: routing already works via message.contains;
-            // no prefix needed.
+            // E-PAR-012/013/014: no routing-tag prefix needed. These errors flow
+            // through the generic UnexpectedToken arm in parser/mod.rs, which
+            // renders the message text directly — no message.contains() dispatch.
             TemplateErrorKind::UnterminatedInterpolation
             | TemplateErrorKind::EmptyInterpolation
             | TemplateErrorKind::UnterminatedMath => self.message,
@@ -940,9 +934,10 @@ fn find_single_dollar(s: &str, start: usize) -> Option<usize> {
 /// first element is the chunk sequence and the second is accumulated errors.
 /// Each [`TemplateError`] carries the byte offset of the problematic construct
 /// within the field-value string and the human-readable message. Callers that
-/// only need the message may call [`TemplateError::into_message()`]; callers
-/// that need sub-span precision (e.g., `section_value_parser`) use the offset
-/// to create a [`SimpleSpan`] pointing at the opening delimiter.
+/// need to route to a specific [`crate::error::SyntaxError`] variant use
+/// [`TemplateError::into_routing_message()`]; callers that need sub-span
+/// precision (e.g., `section_value_parser`) use the offset to create a
+/// [`SimpleSpan`] pointing at the opening delimiter.
 ///
 /// # DIR-077-002 §3: Two-phase inline markup architecture
 ///
