@@ -33,10 +33,10 @@
 use std::sync::Arc;
 
 use indexmap::IndexMap;
+use slideforge_syntax::span::Span;
 use slideforge_syntax::{
     DiagnosticSink, FieldNode, FieldValue as SyntaxFieldValue, SectionNode, Spanned, TemplateChunk,
 };
-use slideforge_syntax::span::Span;
 use slideforge_types::{
     FieldValue, InlineNode, OrderedMap, Register, RegisteredContent, SectionBlock, SourceSpan,
 };
@@ -54,10 +54,7 @@ fn dummy_span() -> Span {
 ///
 /// The `body` is pre-populated with `FieldValue` entries as the implementer
 /// will produce after eval-stage upgrade from `FieldValue::Template`.
-fn make_section_block(
-    name: &str,
-    body: OrderedMap<Arc<str>, FieldValue>,
-) -> SectionBlock {
+fn make_section_block(name: &str, body: OrderedMap<Arc<str>, FieldValue>) -> SectionBlock {
     SectionBlock {
         name: Arc::from(name),
         body,
@@ -109,7 +106,9 @@ fn extract_plain_text(nodes: &[InlineNode]) -> String {
     nodes
         .iter()
         .map(|n| match n {
-            InlineNode::Plain(s) => s.as_ref().to_owned(),
+            InlineNode::Plain(s) | InlineNode::Code(s) | InlineNode::Xref(s) => {
+                s.as_ref().to_owned()
+            },
             InlineNode::Bold(children)
             | InlineNode::Italic(children)
             | InlineNode::Footnote(children)
@@ -118,7 +117,6 @@ fn extract_plain_text(nodes: &[InlineNode]) -> String {
             | InlineNode::Strikethrough(children)
             | InlineNode::Highlight(children) => extract_plain_text(children),
             InlineNode::Link { text, .. } => extract_plain_text(text),
-            InlineNode::Code(s) | InlineNode::Xref(s) => s.as_ref().to_owned(),
             InlineNode::Math(m) => m.latex.as_ref().to_owned(),
         })
         .collect()
@@ -144,7 +142,10 @@ fn test_BC_3_02_002_ac001_section_block_body_holds_field_value_inlines() {
         InlineNode::Plain(Arc::from(" See ")),
         InlineNode::Xref(Arc::from("slide-1")),
     ];
-    body.insert(Arc::from("detail"), FieldValue::Inlines(expected_nodes.clone()));
+    body.insert(
+        Arc::from("detail"),
+        FieldValue::Inlines(expected_nodes.clone()),
+    );
     let section = make_section_block("methodology", body);
 
     // AC-001: the body entry for "detail" must be FieldValue::Inlines, not Value::Str.
@@ -175,10 +176,9 @@ fn test_BC_3_02_002_ac001_section_block_body_holds_field_value_inlines() {
             );
         },
         other => panic!(
-            "AC-001 FAIL: body['detail'] must be FieldValue::Inlines; got {:?}\n\
+            "AC-001 FAIL: body['detail'] must be FieldValue::Inlines; got {other:?}\n\
              If this is FieldValue::Literal(Value::Str), the old flattening bug is present.\n\
-             If this is FieldValue::Template, the parser upgrade (AC-002) did not run.",
-            other
+             If this is FieldValue::Template, the parser upgrade (AC-002) did not run."
         ),
     }
 }
@@ -238,9 +238,9 @@ fn test_BC_3_02_002_ac002_eval_produces_field_value_inlines_for_detail_sub_block
         fields: vec![FieldNode {
             name: Spanned::new("detail".to_string(), dummy_span()),
             value: Spanned::new(
-                SyntaxFieldValue::Template(vec![
-                    TemplateChunk::Literal("Bold claim. See xref(slide-1).".to_string()),
-                ]),
+                SyntaxFieldValue::Template(vec![TemplateChunk::Literal(
+                    "Bold claim. See xref(slide-1).".to_string(),
+                )]),
                 dummy_span(),
             ),
         }],
@@ -251,8 +251,8 @@ fn test_BC_3_02_002_ac002_eval_produces_field_value_inlines_for_detail_sub_block
     let env = Env::new(IndexMap::new());
     let result = crate::eval::eval_section_nodes_for_test(&section_node, &env, &mut sink);
 
-    let (section_block, _register_content) = result
-        .expect("eval_section_nodes must return Some for valid methodology section");
+    let (section_block, _register_content) =
+        result.expect("eval_section_nodes must return Some for valid methodology section");
 
     // AC-002: body["detail"] must be FieldValue::Inlines, NOT FieldValue::Template.
     let detail_entry = section_block
@@ -263,9 +263,8 @@ fn test_BC_3_02_002_ac002_eval_produces_field_value_inlines_for_detail_sub_block
     assert!(
         matches!(detail_entry, FieldValue::Inlines(_)),
         "AC-002 FAIL: body['detail'] must be FieldValue::Inlines after eval upgrade; \
-         got: {:?}\n\
-         FieldValue::Template means eval_section_nodes did not upgrade the value.",
-        detail_entry
+         got: {detail_entry:?}\n\
+         FieldValue::Template means eval_section_nodes did not upgrade the value."
     );
 }
 
@@ -285,18 +284,34 @@ fn test_BC_3_02_002_ac002_round_trip_bold_and_xref_preserved() {
         InlineNode::Plain(Arc::from(" See ")),
         InlineNode::Xref(Arc::from("slide-1")),
     ];
-    body.insert(Arc::from("detail"), FieldValue::Inlines(expected_nodes.clone()));
+    body.insert(
+        Arc::from("detail"),
+        FieldValue::Inlines(expected_nodes.clone()),
+    );
     let section = make_section_block("methodology", body);
 
     // Verify structural preservation.
     match section.body.get("detail") {
         Some(FieldValue::Inlines(nodes)) => {
-            assert_eq!(nodes.len(), 3, "must have 3 inline nodes (Bold, Plain, Xref)");
-            assert!(matches!(nodes[0], InlineNode::Bold(_)), "node[0] must be Bold");
-            assert!(matches!(nodes[1], InlineNode::Plain(_)), "node[1] must be Plain");
-            assert!(matches!(nodes[2], InlineNode::Xref(_)), "node[2] must be Xref");
+            assert_eq!(
+                nodes.len(),
+                3,
+                "must have 3 inline nodes (Bold, Plain, Xref)"
+            );
+            assert!(
+                matches!(nodes[0], InlineNode::Bold(_)),
+                "node[0] must be Bold"
+            );
+            assert!(
+                matches!(nodes[1], InlineNode::Plain(_)),
+                "node[1] must be Plain"
+            );
+            assert!(
+                matches!(nodes[2], InlineNode::Xref(_)),
+                "node[2] must be Xref"
+            );
         },
-        other => panic!("AC-002: expected FieldValue::Inlines with 3 nodes; got: {:?}", other),
+        other => panic!("AC-002: expected FieldValue::Inlines with 3 nodes; got: {other:?}"),
     }
 }
 
@@ -337,8 +352,7 @@ fn test_BC_3_02_002_ac003_extract_section_register_content_produces_detail_entry
     assert_eq!(
         text, "Methodology detail text",
         "AC-003: detail content must match the section body text verbatim; \
-         got: {:?}",
-        text
+         got: {text:?}"
     );
 }
 
@@ -410,8 +424,7 @@ fn test_BC_3_02_002_ac004_extract_section_register_content_produces_report_entry
     let text = extract_plain_text(&result[0].content);
     assert_eq!(
         text, "Scope report text",
-        "AC-004: report content must match the section body text; got: {:?}",
-        text
+        "AC-004: report content must match the section body text; got: {text:?}"
     );
 }
 
@@ -653,21 +666,19 @@ fn test_BC_3_02_002_inv3_unknown_section_type_produces_fatal_eval_error() {
     let err_msg = sink
         .errors()
         .iter()
-        .map(|e| e.to_string())
+        .map(ToString::to_string)
         .collect::<Vec<_>>()
         .join("; ");
     assert!(
         err_msg.contains("foobar"),
         "BC-3.02.002 invariant 3: error message must name the unknown type 'foobar'; \
-         got: {}",
-        err_msg
+         got: {err_msg}"
     );
     assert!(
         err_msg.contains("methodology")
             || err_msg.contains("Known types")
             || err_msg.contains("known"),
-        "BC-3.02.002 invariant 3: error message must list known types; got: {}",
-        err_msg
+        "BC-3.02.002 invariant 3: error message must list known types; got: {err_msg}"
     );
 }
 
@@ -681,17 +692,14 @@ fn test_BC_3_02_002_inv3_all_builtin_section_types_accepted() {
         };
 
         let mut sink = DiagnosticSink::new();
-        use crate::env::Env;
-        use indexmap::IndexMap;
         let env = Env::new(IndexMap::new());
         let result = crate::eval::eval_section_nodes_for_test(&section_node, &env, &mut sink);
+        let errs = sink.errors();
 
         assert!(
             result.is_some(),
-            "BC-3.02.002 invariant 3: built-in section type '{}' must be accepted; \
-             got None with errors: {:?}",
-            type_name,
-            sink.errors()
+            "BC-3.02.002 invariant 3: built-in section type '{type_name}' must be accepted; \
+             got None with errors: {errs:?}"
         );
     }
 }
@@ -709,8 +717,7 @@ fn test_BC_3_02_002_ec001_section_with_no_register_keys_produces_empty_vec() {
     assert!(
         result.is_empty(),
         "EC-001: section with no detail:/report: sub-blocks must produce empty register_content; \
-         got: {:?}",
-        result
+         got: {result:?}"
     );
 }
 
@@ -755,8 +762,14 @@ fn test_BC_3_02_002_ec005_multiple_sections_no_cross_contamination() {
     let text_a = extract_plain_text(&result_a[0].content);
     let text_b = extract_plain_text(&result_b[0].content);
 
-    assert_eq!(text_a, "Methodology detail content", "section_a content must be correct");
-    assert_eq!(text_b, "Scope detail content", "section_b content must be correct");
+    assert_eq!(
+        text_a, "Methodology detail content",
+        "section_a content must be correct"
+    );
+    assert_eq!(
+        text_b, "Scope detail content",
+        "section_b content must be correct"
+    );
     assert_ne!(
         text_a, text_b,
         "EC-005: sections must not cross-contaminate each other's register_content"

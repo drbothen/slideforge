@@ -1,4 +1,4 @@
-//! Integration test: STORY-077 — SectionBlock IR Extension end-to-end pipeline.
+//! Integration test: STORY-077 — [`SectionBlock`] IR Extension end-to-end pipeline.
 //!
 //! Exercises the full `eval_deck()` pipeline with decks containing both slides
 //! (with register fields from STORY-035) AND section blocks (with `detail:` and
@@ -13,14 +13,12 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, non_snake_case)]
 
-use std::sync::Arc;
-
 use slideforge_eval::{EvalConfig, eval_deck};
+use slideforge_syntax::span::Span;
 use slideforge_syntax::{
     BlockItem, DeckNode, DiagnosticSink, FieldNode, FieldValue, SectionNode, SlideNode, Spanned,
     TemplateChunk,
 };
-use slideforge_syntax::span::Span;
 use slideforge_types::{InlineNode, Register};
 
 fn dummy_span() -> Span {
@@ -40,7 +38,7 @@ fn default_config() -> EvalConfig {
 /// - `deck.section_blocks[0].register_content` with the section's detail entry
 ///
 /// Also asserts no cross-contamination: section detail does NOT appear in
-/// any LaidOutSlide.register_content.
+/// any `LaidOutSlide::register_content`.
 #[test]
 fn test_BC_3_02_002_integration_eval_deck_populates_slide_and_section_register_content() {
     // Build a slide with a notes field.
@@ -185,11 +183,10 @@ fn test_BC_3_02_002_integration_unknown_section_type_fatal() {
         "eval_deck must return None for unknown section type 'foobar'"
     );
 
-    let err_msgs: Vec<String> = sink.errors().iter().map(|e| e.to_string()).collect();
+    let err_msgs: Vec<String> = sink.errors().iter().map(ToString::to_string).collect();
     let combined = err_msgs.join("; ");
     assert!(
         combined.contains("foobar"),
-        "error must name the unknown type 'foobar'; got: {}",
-        combined
+        "error must name the unknown type 'foobar'; got: {combined}"
     );
 }

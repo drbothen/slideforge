@@ -36,7 +36,9 @@
 //! This module is pure-core: no I/O, no filesystem access, no network calls.
 //! The function is a pure transformation from `&Slide` to `Vec<RegisteredContent>`.
 
-use slideforge_types::{FieldValue, InlineNode, Register, RegisteredContent, SectionBlock, Slide, Value};
+use slideforge_types::{
+    FieldValue, InlineNode, Register, RegisteredContent, SectionBlock, Slide, Value,
+};
 
 use crate::filters::format_float_display;
 
@@ -135,10 +137,8 @@ pub fn extract_section_register_content(section: &SectionBlock) -> Vec<Registere
     // "notes" is the presenter register (speaker view on a slide canvas) and is
     // NOT valid for section blocks, which have no PPTX rendering path
     // (DIR-077-001 §5, BC-3.02.002 invariant).
-    let register_pairs: [(Register, &str); 2] = [
-        (Register::Report, "report"),
-        (Register::Detail, "detail"),
-    ];
+    let register_pairs: [(Register, &str); 2] =
+        [(Register::Report, "report"), (Register::Detail, "detail")];
 
     let mut result = Vec::with_capacity(2);
 

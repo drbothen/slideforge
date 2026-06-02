@@ -244,9 +244,7 @@ pub enum EvalError {
     /// (`eval_section_nodes`) validates the name against the full `SectionType`
     /// plugin registry (built-ins: methodology, scope, approval, appendix, glossary,
     /// plus any plugin-registered types). An unrecognised name is a FATAL eval error.
-    #[error(
-        "Unknown section type '{name}'. Known types: [{known_types}]"
-    )]
+    #[error("Unknown section type '{name}'. Known types: [{known_types}]")]
     #[diagnostic(
         code("E-EVL-010"),
         help("Check the section type name for typos, or register a custom SectionType plugin.")

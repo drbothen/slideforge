@@ -2899,10 +2899,7 @@ mod tests {
             body: {
                 let mut m = OrderedMap::new();
                 // heading key is a number, not a string (triggers OBS-B warning)
-                m.insert(
-                    Arc::from("heading"),
-                    FieldValue::Literal(Value::Int(42)),
-                );
+                m.insert(Arc::from("heading"), FieldValue::Literal(Value::Int(42)));
                 m
             },
             register_content: vec![],
