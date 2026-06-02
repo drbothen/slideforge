@@ -106,6 +106,66 @@ impl ContentBlock {
             ContentBlock::Table(_) => "Table",
         }
     }
+
+    /// Return `true` if this block produces a PDF structure group (MCID / tag tree child).
+    ///
+    /// This is the **single authoritative predicate** for the structure-producing
+    /// decision (OBS-P5-001 fix). Both the tag engine (`tag_content_block` in
+    /// `slideforge-pdf`) and the draw loop (`draw_body_blocks_tagged` in
+    /// `slideforge-pdf`) MUST call this method rather than independently
+    /// encoding the same logic. A future `ContentBlock` variant that fails to
+    /// update this match will produce a compiler error — enforcing lockstep.
+    ///
+    /// ## Decision table
+    ///
+    /// | Block kind                              | Returns  |
+    /// |-----------------------------------------|----------|
+    /// | `Text(_)`                               | `true`   |
+    /// | `Math(_)`                               | `true`   |
+    /// | `Table(_)`                              | `true`   |
+    /// | `Bullets(items)` if non-empty           | `true`   |
+    /// | `Bullets(items)` if empty               | `false`  |
+    /// | `Image(alt: Provided(_))`               | `true`   |
+    /// | `Image(alt: Decorative \| None)`        | `false`  |
+    /// | `Chart(alt: Provided(_))`               | `true`   |
+    /// | `Chart(alt: Decorative \| None)`        | `false`  |
+    /// | `Diagram(alt: Provided(_))`             | `true`   |
+    /// | `Diagram(alt: Decorative \| None)`      | `false`  |
+    /// | `Shape(alt: Provided(_))`               | `true`   |
+    /// | `Shape(alt: Decorative \| None)`        | `false`  |
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use slideforge_types::{ContentBlock, MathNode, SourceSpan};
+    /// use std::sync::Arc;
+    ///
+    /// let math = ContentBlock::Math(MathNode::display(Arc::from("x^2"), SourceSpan::default()));
+    /// assert!(math.produces_structure_group());
+    ///
+    /// let empty_bullets = ContentBlock::Bullets(vec![]);
+    /// assert!(!empty_bullets.produces_structure_group());
+    /// ```
+    #[must_use]
+    pub fn produces_structure_group(&self) -> bool {
+        use crate::specs::AltText;
+
+        match self {
+            // Always structure-producing: textual/tabular content always gets a tag.
+            ContentBlock::Text(_) | ContentBlock::Math(_) | ContentBlock::Table(_) => true,
+
+            // Structure-producing only when non-empty: an empty list has no semantic value.
+            ContentBlock::Bullets(items) => !items.is_empty(),
+
+            // Visual elements: structure-producing only when the author explicitly provides
+            // meaningful alt text. Decorative elements and elements with no alt text are
+            // marked as PDF Artifacts and do not participate in the structure tree.
+            ContentBlock::Image(spec) => matches!(&spec.alt, Some(AltText::Provided(_))),
+            ContentBlock::Chart(spec) => matches!(spec.alt.as_ref(), Some(AltText::Provided(_))),
+            ContentBlock::Diagram(spec) => matches!(spec.alt.as_ref(), Some(AltText::Provided(_))),
+            ContentBlock::Shape(spec) => matches!(&spec.alt, Some(AltText::Provided(_))),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -242,5 +302,302 @@ mod tests {
             span: SourceSpan::default(),
         };
         assert_eq!(block.label.as_deref(), Some("my-list"));
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // OBS-P5-001 — produces_structure_group() single-source-of-truth predicate
+    // ──────────────────────────────────────────────────────────────────────────
+    //
+    // This test is the LOAD-BEARING assertion that both call sites in
+    // slideforge-pdf (tag_content_block and draw_body_blocks_tagged) depend on.
+    // It exhaustively covers every ContentBlock variant so that adding a new
+    // variant forces an update here AND a compiler error in the match —
+    // preventing silent desync.
+
+    /// OBS-P5-001 — Text block is always structure-producing.
+    #[test]
+    fn test_obs_p5_001_produces_structure_group_text_always_true() {
+        use crate::inline::InlineNode;
+        let block = ContentBlock::Text(TextBlock {
+            inlines: vec![InlineNode::Plain(Arc::from("hello"))],
+            span: SourceSpan::default(),
+        });
+        assert!(
+            block.produces_structure_group(),
+            "Text block must always produce a structure group"
+        );
+    }
+
+    /// OBS-P5-001 — Math block is always structure-producing.
+    #[test]
+    fn test_obs_p5_001_produces_structure_group_math_always_true() {
+        use crate::math::MathNode;
+        let block = ContentBlock::Math(MathNode::display(Arc::from("x^2"), SourceSpan::default()));
+        assert!(
+            block.produces_structure_group(),
+            "Math block must always produce a structure group"
+        );
+    }
+
+    /// OBS-P5-001 — Table block is always structure-producing.
+    #[test]
+    fn test_obs_p5_001_produces_structure_group_table_always_true() {
+        use crate::specs::TableSpec;
+        let block = ContentBlock::Table(TableSpec {
+            headers: vec![Arc::from("Col A")],
+            rows: vec![vec![Arc::from("val")]],
+            alt: None,
+            span: SourceSpan::default(),
+        });
+        assert!(
+            block.produces_structure_group(),
+            "Table block must always produce a structure group"
+        );
+    }
+
+    /// OBS-P5-001 — Non-empty Bullets is structure-producing.
+    #[test]
+    fn test_obs_p5_001_produces_structure_group_nonempty_bullets_true() {
+        use crate::inline::InlineNode;
+        let block = ContentBlock::Bullets(vec![BulletItem {
+            inlines: vec![InlineNode::Plain(Arc::from("item"))],
+            children: vec![],
+            span: SourceSpan::default(),
+        }]);
+        assert!(
+            block.produces_structure_group(),
+            "Non-empty Bullets must produce a structure group"
+        );
+    }
+
+    /// OBS-P5-001 — Empty Bullets is NOT structure-producing.
+    #[test]
+    fn test_obs_p5_001_produces_structure_group_empty_bullets_false() {
+        let block = ContentBlock::Bullets(vec![]);
+        assert!(
+            !block.produces_structure_group(),
+            "Empty Bullets must NOT produce a structure group"
+        );
+    }
+
+    /// OBS-P5-001 — Image with Provided alt is structure-producing.
+    #[test]
+    fn test_obs_p5_001_produces_structure_group_image_provided_alt_true() {
+        use crate::specs::{AltText, ImageSpec};
+        let block = ContentBlock::Image(ImageSpec {
+            path: Arc::from("photo.png"),
+            alt: Some(AltText::Provided(Arc::from("A photo of the campus"))),
+            decorative: false,
+            span: SourceSpan::default(),
+        });
+        assert!(
+            block.produces_structure_group(),
+            "Image with Provided alt must produce a structure group"
+        );
+    }
+
+    /// OBS-P5-001 — Image with Decorative alt is NOT structure-producing.
+    #[test]
+    fn test_obs_p5_001_produces_structure_group_image_decorative_false() {
+        use crate::specs::{AltText, ImageSpec};
+        let block = ContentBlock::Image(ImageSpec {
+            path: Arc::from("decoration.png"),
+            alt: Some(AltText::Decorative),
+            decorative: true,
+            span: SourceSpan::default(),
+        });
+        assert!(
+            !block.produces_structure_group(),
+            "Image with Decorative alt must NOT produce a structure group"
+        );
+    }
+
+    /// OBS-P5-001 — Image with no alt (None) is NOT structure-producing.
+    #[test]
+    fn test_obs_p5_001_produces_structure_group_image_no_alt_false() {
+        use crate::specs::ImageSpec;
+        let block = ContentBlock::Image(ImageSpec {
+            path: Arc::from("photo.png"),
+            alt: None,
+            decorative: false,
+            span: SourceSpan::default(),
+        });
+        assert!(
+            !block.produces_structure_group(),
+            "Image with no alt (None) must NOT produce a structure group"
+        );
+    }
+
+    /// OBS-P5-001 — Chart with Provided alt is structure-producing.
+    #[test]
+    fn test_obs_p5_001_produces_structure_group_chart_provided_alt_true() {
+        use crate::specs::{AltText, ChartSpec};
+        let block = ContentBlock::Chart(ChartSpec {
+            chart_type: Arc::from("bar"),
+            alt: Some(AltText::Provided(Arc::from("Revenue by quarter"))),
+            decorative: false,
+            span: SourceSpan::default(),
+        });
+        assert!(
+            block.produces_structure_group(),
+            "Chart with Provided alt must produce a structure group"
+        );
+    }
+
+    /// OBS-P5-001 — Chart with Decorative alt is NOT structure-producing.
+    #[test]
+    fn test_obs_p5_001_produces_structure_group_chart_decorative_false() {
+        use crate::specs::{AltText, ChartSpec};
+        let block = ContentBlock::Chart(ChartSpec {
+            chart_type: Arc::from("line"),
+            alt: Some(AltText::Decorative),
+            decorative: true,
+            span: SourceSpan::default(),
+        });
+        assert!(
+            !block.produces_structure_group(),
+            "Chart with Decorative alt must NOT produce a structure group"
+        );
+    }
+
+    /// OBS-P5-001 — Chart with no alt (None) is NOT structure-producing.
+    #[test]
+    fn test_obs_p5_001_produces_structure_group_chart_no_alt_false() {
+        use crate::specs::ChartSpec;
+        let block = ContentBlock::Chart(ChartSpec {
+            chart_type: Arc::from("pie"),
+            alt: None,
+            decorative: false,
+            span: SourceSpan::default(),
+        });
+        assert!(
+            !block.produces_structure_group(),
+            "Chart with no alt (None) must NOT produce a structure group"
+        );
+    }
+
+    /// OBS-P5-001 — Diagram with Provided alt is structure-producing.
+    #[test]
+    fn test_obs_p5_001_produces_structure_group_diagram_provided_alt_true() {
+        use crate::specs::{AltText, DiagramSpec};
+        let block = ContentBlock::Diagram(DiagramSpec {
+            source: Arc::from("graph TD; A-->B"),
+            alt: Some(AltText::Provided(Arc::from("Dependency graph"))),
+            decorative: false,
+            span: SourceSpan::default(),
+        });
+        assert!(
+            block.produces_structure_group(),
+            "Diagram with Provided alt must produce a structure group"
+        );
+    }
+
+    /// OBS-P5-001 — Diagram with Decorative alt is NOT structure-producing.
+    #[test]
+    fn test_obs_p5_001_produces_structure_group_diagram_decorative_false() {
+        use crate::specs::{AltText, DiagramSpec};
+        let block = ContentBlock::Diagram(DiagramSpec {
+            source: Arc::from("graph TD; A-->B"),
+            alt: Some(AltText::Decorative),
+            decorative: true,
+            span: SourceSpan::default(),
+        });
+        assert!(
+            !block.produces_structure_group(),
+            "Diagram with Decorative alt must NOT produce a structure group"
+        );
+    }
+
+    /// OBS-P5-001 — Diagram with no alt (None) is NOT structure-producing.
+    #[test]
+    fn test_obs_p5_001_produces_structure_group_diagram_no_alt_false() {
+        use crate::specs::DiagramSpec;
+        let block = ContentBlock::Diagram(DiagramSpec {
+            source: Arc::from("graph TD; A-->B"),
+            alt: None,
+            decorative: false,
+            span: SourceSpan::default(),
+        });
+        assert!(
+            !block.produces_structure_group(),
+            "Diagram with no alt (None) must NOT produce a structure group"
+        );
+    }
+
+    /// OBS-P5-001 — Shape with Provided alt is structure-producing.
+    #[test]
+    fn test_obs_p5_001_produces_structure_group_shape_provided_alt_true() {
+        use crate::shape_types::{FillSpec, ShapeType};
+        use crate::specs::{AltText, ShapePosition, ShapeSpec, ShapeUnit};
+        let block = ContentBlock::Shape(ShapeSpec {
+            shape_type: ShapeType::Rect,
+            position: ShapePosition {
+                x: ShapeUnit::Inches(500),
+                y: ShapeUnit::Inches(500),
+                width: ShapeUnit::Inches(2000),
+                height: ShapeUnit::Inches(1000),
+            },
+            fill: FillSpec::None,
+            text: None,
+            alt: Some(AltText::Provided(Arc::from(
+                "A blue rectangle highlighting the key metric",
+            ))),
+            decorative: false,
+            span: SourceSpan::default(),
+        });
+        assert!(
+            block.produces_structure_group(),
+            "Shape with Provided alt must produce a structure group"
+        );
+    }
+
+    /// OBS-P5-001 — Shape with Decorative alt is NOT structure-producing.
+    #[test]
+    fn test_obs_p5_001_produces_structure_group_shape_decorative_false() {
+        use crate::shape_types::{FillSpec, ShapeType};
+        use crate::specs::{AltText, ShapePosition, ShapeSpec, ShapeUnit};
+        let block = ContentBlock::Shape(ShapeSpec {
+            shape_type: ShapeType::Ellipse,
+            position: ShapePosition {
+                x: ShapeUnit::Inches(500),
+                y: ShapeUnit::Inches(500),
+                width: ShapeUnit::Inches(1000),
+                height: ShapeUnit::Inches(1000),
+            },
+            fill: FillSpec::None,
+            text: None,
+            alt: Some(AltText::Decorative),
+            decorative: true,
+            span: SourceSpan::default(),
+        });
+        assert!(
+            !block.produces_structure_group(),
+            "Shape with Decorative alt must NOT produce a structure group"
+        );
+    }
+
+    /// OBS-P5-001 — Shape with no alt (None) is NOT structure-producing.
+    #[test]
+    fn test_obs_p5_001_produces_structure_group_shape_no_alt_false() {
+        use crate::shape_types::{FillSpec, ShapeType};
+        use crate::specs::{ShapePosition, ShapeSpec, ShapeUnit};
+        let block = ContentBlock::Shape(ShapeSpec {
+            shape_type: ShapeType::Rect,
+            position: ShapePosition {
+                x: ShapeUnit::Inches(0),
+                y: ShapeUnit::Inches(0),
+                width: ShapeUnit::Inches(1000),
+                height: ShapeUnit::Inches(1000),
+            },
+            fill: FillSpec::None,
+            text: None,
+            alt: None,
+            decorative: false,
+            span: SourceSpan::default(),
+        });
+        assert!(
+            !block.produces_structure_group(),
+            "Shape with no alt (None) must NOT produce a structure group"
+        );
     }
 }

@@ -375,6 +375,19 @@ impl SlideTagEngine {
     /// - `Ok(Some(TagGroup))` for structured content (P, L+LI+LBody, Table, Figure).
     /// - `Ok(None)` for blocks that do not produce a tag (e.g., decorative Shape).
     ///
+    /// ## OBS-P5-001 — Single source of truth
+    ///
+    /// The boolean "does this block produce a structure group?" decision is
+    /// delegated to [`slideforge_types::ContentBlock::produces_structure_group`],
+    /// which is the single authoritative predicate shared with
+    /// `slideforge_pdf::exporter::block_is_structure_producing` (the draw loop).
+    ///
+    /// This function retains the **`TagKind` mapping** (P / L / Table / Figure) —
+    /// only the boolean gating is unified. If `produces_structure_group()` returns
+    /// `false`, this function immediately returns `Ok(None)` without inspecting
+    /// the variant further. If it returns `true`, the variant-specific match arms
+    /// build the correct `TagGroup` structure.
+    ///
     /// # Errors
     ///
     /// Returns [`PdfExportError::Serialize`] if the tag group cannot be built.
@@ -382,6 +395,14 @@ impl SlideTagEngine {
         &self,
         block: &slideforge_types::ContentBlock,
     ) -> Result<Option<TagGroup>, PdfExportError> {
+        // OBS-P5-001: delegate the boolean "structure-producing?" decision to the
+        // single authoritative predicate on ContentBlock. This ensures lockstep
+        // with `block_is_structure_producing` in the draw loop — both call the
+        // same function from the same single exhaustive match in slideforge-types.
+        if !block.produces_structure_group() {
+            return Ok(None);
+        }
+
         match block {
             // Text paragraph → P
             ContentBlock::Text(_text_block) => {
@@ -389,12 +410,8 @@ impl SlideTagEngine {
             },
 
             // Bullet list → L (Disc) with LI+LBody for each item.
-            // An empty items list produces no tag group: a childless L element
-            // has no semantic value in a PDF structure tree and is structurally odd.
+            // Empty Bullets is already filtered out by produces_structure_group() above.
             ContentBlock::Bullets(items) => {
-                if items.is_empty() {
-                    return Ok(None);
-                }
                 let mut list_group =
                     TagGroup::new(Tag::<krilla::tagging::kind::L>::L(ListNumbering::Disc));
                 for _item in items {
@@ -406,42 +423,44 @@ impl SlideTagEngine {
                 Ok(Some(list_group))
             },
 
-            // Shape in body → Figure+Alt or skip if decorative
+            // Shape in body → Figure+Alt.
+            // produces_structure_group() already guarantees alt is Provided here.
             ContentBlock::Shape(shape_spec) => match &shape_spec.alt {
-                Some(AltText::Decorative) | None => Ok(None),
                 Some(AltText::Provided(alt)) => Ok(Some(self.tag_figure(Some(alt))?)),
+                // Unreachable: produces_structure_group() returns false for non-Provided alt.
+                Some(AltText::Decorative) | None => Ok(None),
             },
 
-            // Chart in body → Figure+Alt, or omit if decorative / no alt.
+            // Chart in body → Figure+Alt.
+            // produces_structure_group() already guarantees alt is Provided here.
             //
             // F-045-I1 (alt-lie fix): `.or(Some("chart"))` was a placeholder that
             // produced a /Figure with the generic string "chart" as alt text.
             // This is an "alt lie" — the string describes the element type, not the
-            // chart content.  PDF/UA-1 requires meaningful alt text.
-            //
-            // Correct behavior:
-            //   - `AltText::Provided(s)` → emit Figure with real alt text.
-            //   - `AltText::Decorative` or `alt: None` → omit from tag tree
-            //     (return `Ok(None)`); a chart with no author-supplied alt is
-            //     semantically inaccessible and must not pretend otherwise.
+            // chart content. PDF/UA-1 requires meaningful alt text.
             ContentBlock::Chart(chart_spec) => match chart_spec.alt.as_ref() {
                 Some(AltText::Provided(s)) => Ok(Some(self.tag_figure(Some(s))?)),
+                // Unreachable: produces_structure_group() returns false for non-Provided alt.
                 Some(AltText::Decorative) | None => Ok(None),
             },
 
-            // Diagram in body → Figure+Alt, or omit if decorative / no alt.
+            // Diagram in body → Figure+Alt.
+            // produces_structure_group() already guarantees alt is Provided here.
             //
             // F-045-I1 (alt-lie fix): `.or(Some("diagram"))` was a placeholder.
             // Same rationale as the Chart arm above.
             ContentBlock::Diagram(diagram_spec) => match diagram_spec.alt.as_ref() {
                 Some(AltText::Provided(s)) => Ok(Some(self.tag_figure(Some(s))?)),
+                // Unreachable: produces_structure_group() returns false for non-Provided alt.
                 Some(AltText::Decorative) | None => Ok(None),
             },
 
-            // Image in body → Figure+Alt
+            // Image in body → Figure+Alt.
+            // produces_structure_group() already guarantees alt is Provided here.
             ContentBlock::Image(image_spec) => match &image_spec.alt {
-                Some(AltText::Decorative) | None => Ok(None),
                 Some(AltText::Provided(alt)) => Ok(Some(self.tag_figure(Some(alt))?)),
+                // Unreachable: produces_structure_group() returns false for non-Provided alt.
+                Some(AltText::Decorative) | None => Ok(None),
             },
 
             // Math block → P (math content is inline text; STORY-045 will

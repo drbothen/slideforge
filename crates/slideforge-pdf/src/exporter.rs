@@ -1048,51 +1048,19 @@ fn draw_body_blocks(
     }
 }
 
-/// Decide whether a [`ContentBlock`] produces a PDF structure group.
+/// Decide whether a [`slideforge_types::ContentBlock`] produces a PDF structure group.
 ///
-/// This is the SINGLE SOURCE OF TRUTH for the "is this block structure-producing?"
-/// decision, shared by both [`crate::tag_engine::SlideTagEngine::tag_content_block`]
-/// and [`draw_body_blocks_tagged`] (F-P4-001 / TD-VSDD-060).
+/// **OBS-P5-001 fix:** This function is now a thin wrapper around
+/// [`slideforge_types::ContentBlock::produces_structure_group`], which is the
+/// single authoritative definition of the predicate. The match logic is defined
+/// exactly once in `slideforge-types` — adding a new `ContentBlock` variant
+/// forces a compile error there, preventing silent desync between this call site
+/// and [`crate::tag_engine::SlideTagEngine::tag_content_block`].
 ///
-/// Returns `true` if and only if `tag_content_block` returns `Ok(Some(_))` for the
-/// same block — i.e., the block contributes a tag group to the Part and therefore
-/// occupies one entry in `frame_child_part_indices`. Both functions MUST agree
-/// block-for-block so the child-index cursor in `draw_body_blocks_tagged` and the
-/// child-index recorder in `tag_content_block` stay in lockstep.
-///
-/// ## Decision table (must match `tag_content_block` exactly)
-///
-/// | Block kind                          | Returns |
-/// |-------------------------------------|---------|
-/// | `Text(_)`                           | `true`  |
-/// | `Bullets(items)` if non-empty       | `true`  |
-/// | `Bullets(items)` if empty           | `false` |
-/// | `Math(_)`                           | `true`  |
-/// | `Table(_)`                          | `true`  |
-/// | `Image(alt: Provided)`              | `true`  |
-/// | `Image(alt: Decorative \| None)`    | `false` |
-/// | `Chart(alt: Provided)`              | `true`  |
-/// | `Chart(alt: Decorative \| None)`    | `false` |
-/// | `Diagram(alt: Provided)`            | `true`  |
-/// | `Diagram(alt: Decorative \| None)`  | `false` |
-/// | `Shape(alt: Provided)`              | `true`  |
-/// | `Shape(alt: Decorative \| None)`    | `false` |
+/// See [`slideforge_types::ContentBlock::produces_structure_group`] for the
+/// full decision table.
 fn block_is_structure_producing(block: &slideforge_types::ContentBlock) -> bool {
-    use slideforge_types::{AltText, ContentBlock};
-
-    match block {
-        // Always structure-producing.
-        ContentBlock::Text(_) | ContentBlock::Math(_) | ContentBlock::Table(_) => true,
-
-        // Structure-producing only if non-empty.
-        ContentBlock::Bullets(items) => !items.is_empty(),
-
-        // Structure-producing only if alt text is explicitly provided (not decorative or absent).
-        ContentBlock::Image(spec) => matches!(&spec.alt, Some(AltText::Provided(_))),
-        ContentBlock::Chart(spec) => matches!(spec.alt.as_ref(), Some(AltText::Provided(_))),
-        ContentBlock::Diagram(spec) => matches!(spec.alt.as_ref(), Some(AltText::Provided(_))),
-        ContentBlock::Shape(spec) => matches!(&spec.alt, Some(AltText::Provided(_))),
-    }
+    block.produces_structure_group()
 }
 
 /// Draw body content blocks in separate tagged marked-content regions — one per block.
