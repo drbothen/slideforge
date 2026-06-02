@@ -88,6 +88,33 @@ fn empty_inline_msg(delimiter: &str) -> String {
     )
 }
 
+/// A parse error produced by `scan_template_chunks`, carrying both the byte
+/// offset of the opening delimiter (relative to the field-value string content)
+/// and the human-readable message.
+///
+/// The byte offset is used by `section_value_parser` (and other callers that
+/// need sub-span precision) to translate the offset into a [`SimpleSpan`] that
+/// points at the OPENING delimiter rather than the whole string literal token.
+/// Callers that only need the message may use `.into_message()`.
+#[derive(Debug, Clone)]
+pub struct TemplateError {
+    /// Byte offset of the problematic construct within the field-value string.
+    pub byte_offset: usize,
+    /// Human-readable error message (E-PAR-012 through E-PAR-016).
+    pub message: String,
+}
+
+impl TemplateError {
+    fn new(byte_offset: usize, message: String) -> Self {
+        Self { byte_offset, message }
+    }
+
+    /// Consume self and return the message string.
+    pub fn into_message(self) -> String {
+        self.message
+    }
+}
+
 // ─── Inner expression parser ─────────────────────────────────────────────────
 
 /// Lex and parse `inner_src` as an expression.
@@ -197,7 +224,7 @@ fn process_math_segments(
     segs: Vec<MathSegment<'_>>,
     is_display: bool,
     chunks: &mut Vec<TemplateChunk>,
-    _errors: &mut Vec<String>,
+    _errors: &mut Vec<TemplateError>,
 ) {
     let has_interp = segs.iter().any(|s| matches!(s, MathSegment::Interp(_)));
 
@@ -276,7 +303,7 @@ fn process_math_segments(
 fn scan_template_chunks(
     s: &str,
     close_on: Option<&str>,
-    errors: &mut Vec<String>,
+    errors: &mut Vec<TemplateError>,
 ) -> (Vec<TemplateChunk>, usize) {
     let bytes = s.as_bytes();
     let len = s.len();
@@ -314,7 +341,7 @@ fn scan_template_chunks(
                 process_math_segments(segs, true, &mut chunks, errors);
                 pos = rel + 2;
             } else {
-                errors.push(unterminated_math_msg(true));
+                errors.push(TemplateError::new(pos, unterminated_math_msg(true)));
                 let segs = parse_math_segments(&s[content_start..]);
                 process_math_segments(segs, true, &mut chunks, errors);
                 pos = len;
@@ -333,7 +360,7 @@ fn scan_template_chunks(
                 process_math_segments(segs, false, &mut chunks, errors);
                 pos = close + 1;
             } else {
-                errors.push(unterminated_math_msg(false));
+                errors.push(TemplateError::new(pos, unterminated_math_msg(false)));
                 let segs = parse_math_segments(&s[content_start..]);
                 process_math_segments(segs, false, &mut chunks, errors);
                 pos = len;
@@ -349,19 +376,19 @@ fn scan_template_chunks(
             match find_str(s, after_open, "}}") {
                 None => {
                     chunks.push(TemplateChunk::Expr(Expr::Error));
-                    errors.push(unterminated_interpolation_msg());
+                    errors.push(TemplateError::new(pos, unterminated_interpolation_msg()));
                     pos = len;
                 },
                 Some(close_pos) => {
                     let inner = &s[after_open..close_pos];
                     if inner.trim().is_empty() {
                         chunks.push(TemplateChunk::Expr(Expr::Error));
-                        errors.push(empty_interpolation_msg());
+                        errors.push(TemplateError::new(pos, empty_interpolation_msg()));
                     } else if let Ok(expr_val) = parse_inner_expr(inner) {
                         chunks.push(TemplateChunk::Expr(expr_val));
                     } else {
                         chunks.push(TemplateChunk::Expr(Expr::Error));
-                        errors.push(unterminated_interpolation_msg());
+                        errors.push(TemplateError::new(pos, unterminated_interpolation_msg()));
                     }
                     pos = close_pos + 2;
                 },
@@ -373,12 +400,13 @@ fn scan_template_chunks(
         // ── `~~` — Strikethrough (MUST check before `~`) ─────────────────────
         if bytes.get(pos) == Some(&b'~') && bytes.get(pos + 1) == Some(&b'~') {
             flush_lit!();
+            let open_pos = pos; // byte offset of opening `~~`
             let inner_start = pos + 2;
             let rest = &s[inner_start..];
             if let Some(close_rel) = rest.find("~~") {
                 let inner = &rest[..close_rel];
                 if inner.is_empty() {
-                    errors.push(empty_inline_msg("~~"));
+                    errors.push(TemplateError::new(open_pos, empty_inline_msg("~~")));
                 } else {
                     let (children, _) = scan_template_chunks(inner, None, errors);
                     chunks.push(TemplateChunk::Strikethrough(children));
@@ -386,7 +414,7 @@ fn scan_template_chunks(
                 pos = inner_start + close_rel + 2;
             } else {
                 // Unclosed `~~` — error recovery.
-                errors.push(unclosed_inline_msg("~~"));
+                errors.push(TemplateError::new(open_pos, unclosed_inline_msg("~~")));
                 if !rest.is_empty() {
                     let (children, _) = scan_template_chunks(rest, None, errors);
                     chunks.push(TemplateChunk::Strikethrough(children));
@@ -400,19 +428,20 @@ fn scan_template_chunks(
         // ── `~` — Subscript ──────────────────────────────────────────────────
         if bytes.get(pos) == Some(&b'~') {
             flush_lit!();
+            let open_pos = pos; // byte offset of opening `~`
             let inner_start = pos + 1;
             let rest = &s[inner_start..];
             if let Some(close_rel) = rest.find('~') {
                 let inner = &rest[..close_rel];
                 if inner.is_empty() {
-                    errors.push(empty_inline_msg("~"));
+                    errors.push(TemplateError::new(open_pos, empty_inline_msg("~")));
                 } else {
                     let (children, _) = scan_template_chunks(inner, None, errors);
                     chunks.push(TemplateChunk::Subscript(children));
                 }
                 pos = inner_start + close_rel + 1;
             } else {
-                errors.push(unclosed_inline_msg("~"));
+                errors.push(TemplateError::new(open_pos, unclosed_inline_msg("~")));
                 if !rest.is_empty() {
                     let (children, _) = scan_template_chunks(rest, None, errors);
                     chunks.push(TemplateChunk::Subscript(children));
@@ -426,20 +455,22 @@ fn scan_template_chunks(
         // ── `**` — Bold ──────────────────────────────────────────────────────
         if bytes.get(pos) == Some(&b'*') && bytes.get(pos + 1) == Some(&b'*') {
             flush_lit!();
+            let open_pos = pos; // byte offset of opening `**`
             let inner_start = pos + 2;
             let rest = &s[inner_start..];
             if rest.contains("**") {
                 // Scan the interior recursively, stopping at `**`.
                 let (children, consumed) = scan_template_chunks(rest, Some("**"), errors);
                 if children.is_empty() {
-                    errors.push(empty_inline_msg("**"));
+                    errors.push(TemplateError::new(open_pos, empty_inline_msg("**")));
                 } else {
                     chunks.push(TemplateChunk::Bold(children));
                 }
                 pos = inner_start + consumed;
             } else {
                 // Unclosed `**` — error recovery: treat everything as Bold child.
-                errors.push(unclosed_inline_msg("**"));
+                // `open_pos` points to the opening `**` (DIR-077-002 §5 span requirement).
+                errors.push(TemplateError::new(open_pos, unclosed_inline_msg("**")));
                 if !rest.is_empty() {
                     let (children, _) = scan_template_chunks(rest, None, errors);
                     chunks.push(TemplateChunk::Bold(children));
@@ -478,18 +509,19 @@ fn scan_template_chunks(
                 continue;
             }
             flush_lit!();
+            let open_pos = pos; // byte offset of opening `_`
             let inner_start = pos + 1;
             let rest = &s[inner_start..];
             if rest.contains('_') {
                 let (children, consumed) = scan_template_chunks(rest, Some("_"), errors);
                 if children.is_empty() {
-                    errors.push(empty_inline_msg("_"));
+                    errors.push(TemplateError::new(open_pos, empty_inline_msg("_")));
                 } else {
                     chunks.push(TemplateChunk::Italic(children));
                 }
                 pos = inner_start + consumed;
             } else {
-                errors.push(unclosed_inline_msg("_"));
+                errors.push(TemplateError::new(open_pos, unclosed_inline_msg("_")));
                 if !rest.is_empty() {
                     let (children, _) = scan_template_chunks(rest, None, errors);
                     chunks.push(TemplateChunk::Italic(children));
@@ -503,18 +535,19 @@ fn scan_template_chunks(
         // ── `` ` `` — Code span (verbatim — no inner markup or `{{ }}`) ───────
         if bytes.get(pos) == Some(&b'`') {
             flush_lit!();
+            let open_pos = pos; // byte offset of opening backtick
             let inner_start = pos + 1;
             if let Some(close_rel) = s[inner_start..].find('`') {
                 let inner = &s[inner_start..inner_start + close_rel];
                 if inner.is_empty() {
-                    errors.push(empty_inline_msg("`"));
+                    errors.push(TemplateError::new(open_pos, empty_inline_msg("`")));
                 } else {
                     // Verbatim: no further processing of the content.
                     chunks.push(TemplateChunk::Code(inner.to_string()));
                 }
                 pos = inner_start + close_rel + 1;
             } else {
-                errors.push(unclosed_inline_msg("`"));
+                errors.push(TemplateError::new(open_pos, unclosed_inline_msg("`")));
                 let inner = &s[inner_start..];
                 if !inner.is_empty() {
                     chunks.push(TemplateChunk::Code(inner.to_string()));
@@ -553,18 +586,19 @@ fn scan_template_chunks(
         // ── `^` — Superscript ────────────────────────────────────────────────
         if bytes.get(pos) == Some(&b'^') {
             flush_lit!();
+            let open_pos = pos; // byte offset of opening `^`
             let inner_start = pos + 1;
             let rest = &s[inner_start..];
             if rest.contains('^') {
                 let (children, consumed) = scan_template_chunks(rest, Some("^"), errors);
                 if children.is_empty() {
-                    errors.push(empty_inline_msg("^"));
+                    errors.push(TemplateError::new(open_pos, empty_inline_msg("^")));
                 } else {
                     chunks.push(TemplateChunk::Superscript(children));
                 }
                 pos = inner_start + consumed;
             } else {
-                errors.push(unclosed_inline_msg("^"));
+                errors.push(TemplateError::new(open_pos, unclosed_inline_msg("^")));
                 if !rest.is_empty() {
                     let (children, _) = scan_template_chunks(rest, None, errors);
                     chunks.push(TemplateChunk::Superscript(children));
@@ -578,18 +612,19 @@ fn scan_template_chunks(
         // ── `==` — Highlight ─────────────────────────────────────────────────
         if bytes.get(pos) == Some(&b'=') && bytes.get(pos + 1) == Some(&b'=') {
             flush_lit!();
+            let open_pos = pos; // byte offset of opening `==`
             let inner_start = pos + 2;
             let rest = &s[inner_start..];
             if rest.contains("==") {
                 let (children, consumed) = scan_template_chunks(rest, Some("=="), errors);
                 if children.is_empty() {
-                    errors.push(empty_inline_msg("=="));
+                    errors.push(TemplateError::new(open_pos, empty_inline_msg("==")));
                 } else {
                     chunks.push(TemplateChunk::Highlight(children));
                 }
                 pos = inner_start + consumed;
             } else {
-                errors.push(unclosed_inline_msg("=="));
+                errors.push(TemplateError::new(open_pos, unclosed_inline_msg("==")));
                 if !rest.is_empty() {
                     let (children, _) = scan_template_chunks(rest, None, errors);
                     chunks.push(TemplateChunk::Highlight(children));
@@ -648,8 +683,13 @@ fn find_single_dollar(s: &str, start: usize) -> Option<usize> {
 /// [`TemplateChunk`] variant. Errors (unterminated constructs, empty spans)
 /// are accumulated — never fail-on-first.
 ///
-/// On success, returns a `(Vec<TemplateChunk>, Vec<String>)` where the first
-/// element is the chunk sequence and the second is accumulated error messages.
+/// On success, returns a `(Vec<TemplateChunk>, Vec<TemplateError>)` where the
+/// first element is the chunk sequence and the second is accumulated errors.
+/// Each [`TemplateError`] carries the byte offset of the problematic construct
+/// within the field-value string and the human-readable message. Callers that
+/// only need the message may call [`TemplateError::into_message()`]; callers
+/// that need sub-span precision (e.g., `section_value_parser`) use the offset
+/// to create a [`SimpleSpan`] pointing at the opening delimiter.
 ///
 /// # DIR-077-002 §3: Two-phase inline markup architecture
 ///
@@ -661,7 +701,7 @@ fn find_single_dollar(s: &str, start: usize) -> Option<usize> {
 /// `**bold**` inside `$...$` is verbatim LaTeX content.
 #[must_use]
 pub fn template_value<'src, I>()
--> impl Parser<'src, I, (Vec<TemplateChunk>, Vec<String>), extra::Err<Rich<'src, Token, TSpan>>> + Clone
+-> impl Parser<'src, I, (Vec<TemplateChunk>, Vec<TemplateError>), extra::Err<Rich<'src, Token, TSpan>>> + Clone
 where
     I: ValueInput<'src, Token = Token, Span = TSpan>,
 {
@@ -669,7 +709,7 @@ where
         Token::StringLit(s) => s.to_string()
     }
     .map(|content| {
-        let mut errors: Vec<String> = Vec::new();
+        let mut errors: Vec<TemplateError> = Vec::new();
         let (chunks, _) = scan_template_chunks(&content, None, &mut errors);
         (chunks, errors)
     })

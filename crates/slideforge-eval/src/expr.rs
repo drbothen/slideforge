@@ -213,7 +213,7 @@ pub fn eval_expr(env: &Env, expr: &Expr, sink: &mut DiagnosticSink) -> Option<Va
         // When `eval_expr` is called on a `Call` node (e.g., from a vars: binding
         // or a non-inline-markup context), there is no general runtime value to
         // return — built-in pseudo-functions are not user-callable in v1 (Q1 decision).
-        // Emit E-EVL-007 UnsupportedBuiltinCall and return None.
+        // Emit E-EVL-011 UnsupportedBuiltinCall and return None.
         Expr::Call { func, args: _ } => push_error(
             sink,
             EvalError::UnsupportedBuiltinCall {

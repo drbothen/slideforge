@@ -378,15 +378,34 @@ pub fn chunks_to_inline_nodes(
                     },
                     Expr::Call { func, args } if func == "figref" => {
                         // figref(n) → Xref("fig-N"). Empty/zero is treated as valid.
+                        // A missing or unevaluable argument is an error consistent with
+                        // the empty-id handling for ref() (DIR-077-002 §5 / OBS-C):
+                        // silently dropping the node violates the no-silent-fallback principle.
                         let xref_id = if let Some(Expr::Num(n)) = args.first() {
                             Arc::from(format!("fig-{n}").as_str())
                         } else if let Some(first) = args.first() {
                             if let Some(s) = eval_expr_to_string(env, first, sink) {
                                 Arc::from(format!("fig-{s}").as_str())
                             } else {
+                                // eval_expr_to_string already pushed a diagnostic.
+                                // No InlineNode produced — consistent with ref("") behaviour.
                                 continue;
                             }
                         } else {
+                            // figref() with no argument: push a diagnostic (OBS-C).
+                            use crate::error::EvalError;
+                            use slideforge_syntax::error::ParseSeverity;
+                            sink.push_with_severity(
+                                EvalError::TypeMismatch {
+                                    message:
+                                        "E-EVL-011: figref() requires a numeric figure number \
+                                         argument (DIR-077-002 §1); got no arguments. \
+                                         Use figref(N) where N is the figure number."
+                                            .to_string(),
+                                    span: slideforge_types::SourceSpan::default(),
+                                },
+                                ParseSeverity::Error,
+                            );
                             continue;
                         };
                         nodes.push(InlineNode::Xref(xref_id));
