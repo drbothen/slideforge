@@ -189,11 +189,75 @@ struct MasterParseResult {
     hf_found: bool,
 }
 
-/// Read the bytes of `zip_path` from `zip`, return `None` if absent.
+/// Hard limit on the uncompressed size of any single XML entry read from a PPTX ZIP.
+///
+/// A real `slideMaster1.xml` or `slideLayout1.xml` is typically 10–200 KiB.
+/// 10 MiB is four orders of magnitude larger than any legitimate entry and still
+/// small enough to be insignificant for heap usage.
+///
+/// # Security (CWE-409 / CWE-400 — zip bomb / unbounded heap growth)
+///
+/// The check is two-layered because the declared uncompressed size stored in the ZIP
+/// local-file header can be spoofed by a malicious archive:
+///
+/// 1. **Pre-check** (`entry.size()`): fast early-exit if the declared size already
+///    exceeds the cap.  Eliminates the IO cost of reading the entry at all.
+/// 2. **Enforceable hard limit** (`entry.take(MAX_XML_ENTRY_BYTES)`): caps actual
+///    bytes read regardless of what the ZIP header claims.  This is the load-bearing
+///    guard — it limits heap allocation even when the declared size is under the cap.
+///
+/// # Security (CWE-22 — path traversal / zip-slip)
+///
+/// `read_zip_entry` is called exclusively with static literal entry paths
+/// (`"ppt/slideMasters/slideMaster1.xml"`, `"ppt/slideLayouts/slideLayout1.xml"`).
+/// No attacker-controlled path interpolation occurs.  `zip::ZipArchive::by_name`
+/// does not traverse outside the archive root for directory-component strings, so
+/// there is no zip-slip risk at this call site.
+const MAX_XML_ENTRY_BYTES: u64 = 10 * 1024 * 1024; // 10 MiB
+
+/// Read the bytes of `zip_path` from `zip`, return `None` if absent or oversized.
+///
+/// Returns `None` (and emits a `tracing::warn!`) when the entry's declared
+/// uncompressed size exceeds [`MAX_XML_ENTRY_BYTES`] or when the actual bytes read
+/// reach that limit.  See the const docs for the two-layer security rationale.
 fn read_zip_entry<R: Read + Seek>(zip: &mut ZipArchive<R>, zip_path: &str) -> Option<Vec<u8>> {
-    let mut entry = zip.by_name(zip_path).ok()?;
+    let entry = zip.by_name(zip_path).ok()?;
+
+    // Layer 1: fast pre-check on the declared size from the ZIP local-file header.
+    // This eliminates unnecessary IO for clearly oversized entries, but is NOT the
+    // enforceable guard (declared size can be spoofed — see MAX_XML_ENTRY_BYTES docs).
+    let declared_size = entry.size();
+    if declared_size > MAX_XML_ENTRY_BYTES {
+        tracing::warn!(
+            zip_path = zip_path,
+            declared_size_bytes = declared_size,
+            limit_bytes = MAX_XML_ENTRY_BYTES,
+            "ZIP entry exceeds size limit; skipping to prevent unbounded heap growth \
+             (SEC-001 / CWE-409)"
+        );
+        return None;
+    }
+
+    // Layer 2: enforceable hard limit via Read::take().  Even if the declared size
+    // passed the pre-check above, we cap actual bytes read.  If the entry expands
+    // beyond the limit, read_to_end returns a truncated buffer — we detect this by
+    // checking whether the limit was hit (buf.len() == MAX_XML_ENTRY_BYTES as usize)
+    // and treat it as an oversized entry.
     let mut buf = Vec::new();
-    entry.read_to_end(&mut buf).ok()?;
+    #[allow(clippy::cast_possible_truncation)] // MAX_XML_ENTRY_BYTES fits in usize on all targets
+    let limit_usize = MAX_XML_ENTRY_BYTES as usize;
+    entry.take(MAX_XML_ENTRY_BYTES).read_to_end(&mut buf).ok()?;
+    if buf.len() >= limit_usize {
+        tracing::warn!(
+            zip_path = zip_path,
+            declared_size_bytes = declared_size,
+            limit_bytes = MAX_XML_ENTRY_BYTES,
+            "ZIP entry actual size reached limit; skipping to prevent unbounded heap growth \
+             (SEC-001 / CWE-409)"
+        );
+        return None;
+    }
+
     Some(buf)
 }
 
@@ -219,6 +283,14 @@ fn parse_master_xml(xml_bytes: &[u8]) -> MasterParseResult {
     // interior-of-run text (e.g., "Acme Confidential " loses trailing space).
     // We trim only the FINAL concatenated accumulator when finalizing.
     reader.config_mut().trim_text(false);
+
+    // Security note (CWE-611 / CWE-776 — XXE / billion-laughs):
+    // quick-xml 0.36 is a pure SAX/pull-parser.  It does NOT implement an XML
+    // processor, does NOT expand DOCTYPE/DTD declarations, and does NOT fetch
+    // external entities.  Encountering a `<!DOCTYPE>` declaration causes an
+    // `Event::DocType` token to be emitted and then ignored by this match loop —
+    // it is not parsed or expanded.  There is therefore no XXE or billion-laughs
+    // risk in this parser at the current quick-xml version.
 
     let mut buf = Vec::new();
 
@@ -905,27 +977,32 @@ mod tests {
         build_zip(&entries)
     }
 
-    /// Write bytes to a uniquely-named temp file; return the path.
-    fn write_temp(bytes: &[u8], ext: &str) -> std::path::PathBuf {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static CTR: AtomicU64 = AtomicU64::new(0);
-        let seq = CTR.fetch_add(1, Ordering::Relaxed);
-        let name = format!(
-            "slideforge_s075_test_{}_{}_{}_{}.{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos(),
-            seq,
-            "footer",
-            ext
-        );
-        let path = std::env::temp_dir().join(name);
-        let mut f = std::fs::File::create(&path).unwrap();
-        f.write_all(bytes).unwrap();
-        f.sync_all().unwrap();
-        path
+    /// RAII guard for a temporary file (SEC-004 / CWE-459).
+    ///
+    /// Wraps a [`tempfile::NamedTempFile`] so the underlying file is deleted
+    /// automatically when the guard is dropped — including on test panic.
+    /// Previously `write_temp` returned a bare `PathBuf` and relied on
+    /// callers to call `std::fs::remove_file` on the happy path, leaking the
+    /// file whenever a test panicked before reaching the cleanup call.
+    struct TempFile(tempfile::NamedTempFile);
+
+    impl TempFile {
+        /// Write `bytes` to a new temp file with the given `ext` suffix and
+        /// return the RAII guard.  Panics on IO error (acceptable in tests).
+        fn write(bytes: &[u8], ext: &str) -> Self {
+            let named = tempfile::Builder::new()
+                .suffix(&format!(".{ext}"))
+                .tempfile()
+                .unwrap();
+            named.as_file().write_all(bytes).unwrap();
+            named.as_file().sync_all().unwrap();
+            Self(named)
+        }
+
+        /// Return the path of the underlying temp file.
+        fn path(&self) -> &std::path::Path {
+            self.0.path()
+        }
     }
 
     // ─── FooterFlags unit tests ───────────────────────────────────────────────
@@ -1560,12 +1637,12 @@ mod tests {
             "ppt/slideMasters/slideMaster1.xml",
             master_xml.as_bytes(),
         )]);
-        let path = write_temp(&zip_bytes, "pptx");
+        let tmp = TempFile::write(&zip_bytes, "pptx");
         let loader = BrandLoader::new();
         let ctx = BrandLoadContext::for_test();
 
-        let result = loader.load_template(&path, &ctx);
-        let _ = std::fs::remove_file(&path);
+        let result = loader.load_template(tmp.path(), &ctx);
+        // `tmp` is dropped here (and on panic) — no manual remove_file needed.
 
         let template = result.expect("PPTX with footer must load without error");
 
@@ -1589,12 +1666,12 @@ mod tests {
 
         // Minimal PPTX with no slideMaster1.xml at all.
         let zip_bytes = build_pptx_zip_with_extras(&[]);
-        let path = write_temp(&zip_bytes, "pptx");
+        let tmp = TempFile::write(&zip_bytes, "pptx");
         let loader = BrandLoader::new();
         let ctx = BrandLoadContext::for_test();
 
-        let result = loader.load_template(&path, &ctx);
-        let _ = std::fs::remove_file(&path);
+        let result = loader.load_template(tmp.path(), &ctx);
+        // `tmp` dropped here (and on panic).
 
         let template = result.expect("minimal PPTX must load without error");
 
@@ -1648,12 +1725,12 @@ mod tests {
             ("ppt/slideMasters/slideMaster1.xml", master_xml.as_bytes()),
             ("ppt/presProps.xml", PRESPROPS_STUB_XML.as_bytes()),
         ]);
-        let path = write_temp(&zip_bytes, "pptx");
+        let tmp = TempFile::write(&zip_bytes, "pptx");
         let loader = BrandLoader::new();
         let ctx = BrandLoadContext::for_test();
 
-        let result = loader.load_template(&path, &ctx);
-        let _ = std::fs::remove_file(&path);
+        let result = loader.load_template(tmp.path(), &ctx);
+        // `tmp` dropped here (and on panic).
 
         let template = result.expect("PPTX with <p:hf> master must load without error");
 
@@ -1703,12 +1780,12 @@ mod tests {
                 MASTER_WITH_FOOTER_XML.as_bytes(),
             ),
         ]);
-        let path = write_temp(&zip_bytes, "docx");
+        let tmp = TempFile::write(&zip_bytes, "docx");
         let loader = BrandLoader::new();
         let ctx = BrandLoadContext::for_test();
 
-        let result = loader.load_template(&path, &ctx);
-        let _ = std::fs::remove_file(&path);
+        let result = loader.load_template(tmp.path(), &ctx);
+        // `tmp` dropped here (and on panic).
 
         let template = result.expect("DOCX must load without error");
 
@@ -1768,23 +1845,17 @@ mod tests {
             "ppt/slideMasters/slideMaster1.xml",
             master_xml.as_bytes(),
         )]);
-        let pptx_path = write_temp(&zip_bytes, "pptx");
+        let pptx_tmp = TempFile::write(&zip_bytes, "pptx");
 
-        // Create a temporary output directory.
-        let output_dir = {
-            use std::sync::atomic::{AtomicU64, Ordering};
-            static CTR2: AtomicU64 = AtomicU64::new(100);
-            let seq = CTR2.fetch_add(1, Ordering::Relaxed);
-            let d = std::env::temp_dir().join(format!("s075_extract_{seq}"));
-            std::fs::create_dir_all(&d).unwrap();
-            d
-        };
+        // Create a temporary output directory using tempfile for panic-safe cleanup.
+        let output_dir_tmp = tempfile::tempdir().unwrap();
+        let output_dir = output_dir_tmp.path();
 
         // Run extractor directly from the PPTX path — BrandExtractor::extract()
         // re-loads the template internally. The PPTX file must still exist when called.
-        let result = BrandExtractor::extract(pptx_path.to_str().unwrap(), &output_dir, false)
+        let result = BrandExtractor::extract(pptx_tmp.path().to_str().unwrap(), output_dir, false)
             .expect("extract must succeed for valid template with footer");
-        let _ = std::fs::remove_file(&pptx_path);
+        // `pptx_tmp` and `output_dir_tmp` are dropped (and cleaned up) at end of scope.
 
         let brand_toml_path = output_dir.join("brand.toml");
         let brand_toml_content =
@@ -1805,8 +1876,7 @@ mod tests {
         // Check the extraction result indicates footer was written.
         let _ = result;
 
-        // Cleanup.
-        let _ = std::fs::remove_dir_all(&output_dir);
+        // Cleanup is automatic: `pptx_tmp` and `output_dir_tmp` are dropped here.
     }
 
     // ─── BC-2.01.001 v1.3 canonical test vector (OBS-2) ──────────────────────
@@ -1870,5 +1940,148 @@ mod tests {
              got show_slide_number={}",
             detection.flags.show_slide_number
         );
+    }
+
+    // ─── SEC-001: zip-bomb / unbounded-heap-growth guard ─────────────────────
+
+    /// SEC-001 (CWE-409 / CWE-400) — `read_zip_entry` must reject entries whose
+    /// declared uncompressed size exceeds `MAX_XML_ENTRY_BYTES` and return `None`
+    /// so that `detect_footer` falls back to its default rather than allocating
+    /// unbounded heap.
+    ///
+    /// Construction: we build an in-memory ZIP where
+    /// `ppt/slideMasters/slideMaster1.xml` is stored as 1 KiB of `'x'` bytes
+    /// but the ZIP local-file header is NOT used to spoof the size — instead we
+    /// test the pre-check path by building a ZIP entry whose *actual* compressed
+    /// content decompresses to exactly 1 KiB and then separately verify via a
+    /// large declared-size spoof that the pre-check fires.
+    ///
+    /// Two sub-cases are covered:
+    ///
+    /// 1. **Declared-size pre-check path**: construct a ZIP where the entry's
+    ///    uncompressed size field in the central directory exceeds the 10 MiB
+    ///    cap.  `zip::ZipFile::size()` returns this value.  We verify
+    ///    `read_zip_entry` returns `None` without reading any data.
+    ///
+    /// 2. **`take()` hard-limit path**: construct a ZIP with a real (non-spoofed)
+    ///    entry whose actual decompressed content is larger than
+    ///    `MAX_XML_ENTRY_BYTES`.  Since storing >10 MiB in memory for a test is
+    ///    unacceptable, we instead test this path by temporarily overriding the
+    ///    limit indirectly: we use the zip crate's `stored` (uncompressed) mode
+    ///    so that `size() == actual_size`, and verify that a small (1 KiB) entry
+    ///    well under the limit succeeds (returns `Some`), while an entry with a
+    ///    declared size of `MAX_XML_ENTRY_BYTES + 1` is rejected (returns `None`)
+    ///    via the pre-check — avoiding actual allocation of >10 MiB in the test.
+    ///
+    /// The test does NOT exhaust memory; the oversized declaration is only in
+    /// the ZIP metadata.  The `take()` hard-limit (Layer 2) is not independently
+    /// exercised here because doing so would require actually allocating >10 MiB
+    /// of test data; the pre-check (Layer 1) is sufficient to demonstrate that
+    /// the guard fires.  The `take()` call is still present in production code
+    /// as the load-bearing defence against spoofed declarations.
+    #[test]
+    fn test_sec_001_read_zip_entry_rejects_oversized_declared_size() {
+        // MAX_XML_ENTRY_BYTES and read_zip_entry are private to this module;
+        // the test module is a child of footer (mod tests lives in footer.rs)
+        // so it can access them directly via `super::`.
+        use super::{MAX_XML_ENTRY_BYTES, read_zip_entry};
+
+        // ── Sub-case 1: small entry well under the limit must succeed ──
+        {
+            let small_content = vec![b'x'; 1024]; // 1 KiB — far below 10 MiB
+            let zip_bytes = build_zip(&[("ppt/slideMasters/slideMaster1.xml", &small_content)]);
+            let cursor = Cursor::new(zip_bytes);
+            let mut zip = zip::ZipArchive::new(cursor).unwrap();
+            let result = read_zip_entry(&mut zip, "ppt/slideMasters/slideMaster1.xml");
+            assert!(
+                result.is_some(),
+                "SEC-001: small entry (1 KiB) must succeed; read_zip_entry returned None"
+            );
+            assert_eq!(
+                result.unwrap(),
+                small_content,
+                "SEC-001: returned bytes must match the written content"
+            );
+        }
+
+        // ── Sub-case 2: entry with declared size > MAX_XML_ENTRY_BYTES must be rejected ──
+        //
+        // We build a ZIP where the stored entry declares a large uncompressed size.
+        // The zip crate writes the size we give it into the local-file header and
+        // central directory; `ZipFile::size()` returns it.  We use `Stored`
+        // (no-compression) mode so declared == actual for the bytes we write, but
+        // the actual bytes are tiny — we rely on the pre-check firing on the
+        // declared size before any read happens.
+        {
+            // Write a ZIP where the entry *content* is tiny (safe for the test),
+            // but whose declared uncompressed size is over the limit.  We achieve
+            // this by writing content of exactly MAX_XML_ENTRY_BYTES + 1 bytes
+            // chunked: since we use `Stored` compression the zip writer records
+            // the exact byte count.  To avoid allocating 10 MiB in the test we
+            // instead build a ZIP with the tiny content and then use the raw
+            // `by_name` declared size to assert the guard fires when that size
+            // field is inspected.
+            //
+            // However, the zip crate records the *actual* bytes written.  To test
+            // the declared-size pre-check we must write content that is genuinely
+            // larger than the limit, which we cannot do cheaply.
+            //
+            // Alternative approach: verify that an entry whose SIZE equals
+            // MAX_XML_ENTRY_BYTES + 1 bytes of ACTUAL content is rejected.
+            // We write exactly that many NUL bytes using the stored compressor.
+            // 10 MiB + 1 byte.  This is an intentional one-time allocation in the
+            // test; the assert verifies the guard fires BEFORE the second (take())
+            // layer would allocate anything beyond the limit bytes already in the
+            // write buffer.  The test allocates ~20 MiB total (write buf + zip buf)
+            // which is well within normal test limits.
+            let oversized =
+                vec![0u8; usize::try_from(MAX_XML_ENTRY_BYTES).expect("fits on 64-bit") + 1];
+            let zip_bytes = build_zip(&[("ppt/slideMasters/slideMaster1.xml", &oversized)]);
+            let cursor = Cursor::new(zip_bytes);
+            let mut zip = zip::ZipArchive::new(cursor).unwrap();
+
+            // Confirm the zip entry's declared size is what we expect.
+            let declared = {
+                let entry = zip.by_name("ppt/slideMasters/slideMaster1.xml").unwrap();
+                entry.size()
+            };
+            assert!(
+                declared > MAX_XML_ENTRY_BYTES,
+                "SEC-001 test setup: declared size {declared} must be > MAX_XML_ENTRY_BYTES \
+                 ({MAX_XML_ENTRY_BYTES}) for the pre-check to fire"
+            );
+
+            // The guard must reject this entry.
+            let result = read_zip_entry(&mut zip, "ppt/slideMasters/slideMaster1.xml");
+            assert!(
+                result.is_none(),
+                "SEC-001 (CWE-409): read_zip_entry must return None for an entry with \
+                 declared size {declared} > MAX_XML_ENTRY_BYTES ({MAX_XML_ENTRY_BYTES}); \
+                 got Some(len={})",
+                result.map_or(0, |b| b.len())
+            );
+        }
+
+        // ── Sub-case 3: detect_footer falls back to default when master XML is rejected ──
+        {
+            let oversized =
+                vec![0u8; usize::try_from(MAX_XML_ENTRY_BYTES).expect("fits on 64-bit") + 1];
+            let zip_bytes = build_zip(&[("ppt/slideMasters/slideMaster1.xml", &oversized)]);
+            let cursor = Cursor::new(zip_bytes);
+            let mut zip = zip::ZipArchive::new(cursor).unwrap();
+
+            let detection = detect_footer(&mut zip, true);
+
+            assert!(
+                detection.text.is_none(),
+                "SEC-001: detect_footer must return text=None when master XML is rejected; \
+                 got: {:?}",
+                detection.text
+            );
+            assert!(
+                !detection.flags.show_footer,
+                "SEC-001: detect_footer must return default flags when master XML is rejected"
+            );
+        }
     }
 }
