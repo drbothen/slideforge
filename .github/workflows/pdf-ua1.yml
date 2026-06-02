@@ -148,62 +148,35 @@ jobs:
           sudo apt-get install -y -q fonts-dejavu-core fonts-noto-core fonts-liberation fonts-freefont-ttf
           fc-cache -f
 
-      # Install Java (required for veraPDF CLI)
-      - name: Install Java 21 (required for veraPDF)
-        run: |
-          sudo apt-get update -y -q
-          sudo apt-get install -y -q openjdk-21-jre-headless
-          java -version
-
-      # Install veraPDF via the official installer.
-      # Requires Java 8/11/17/21 pre-installed.
+      # Install veraPDF via Docker (official veraPDF image from Docker Hub).
       #
-      # Download source: https://software.verapdf.org/rel/verapdf-installer.zip
-      # (redirects to the latest stable release). The GitHub release page for
-      # veraPDF does not host installer assets directly; the canonical installer
-      # download is via software.verapdf.org.
-      - name: Install veraPDF CLI
+      # The veraPDF project publishes an official Docker image:
+      #   docker pull verapdf/cli:latest
+      # This is the most reliable installation method in CI — no IzPack installer,
+      # no Java version negotiation, no file path discovery.
+      #
+      # We create a /usr/local/bin/verapdf wrapper that runs the container with:
+      #   - The PDF file bind-mounted at the same absolute path inside the container
+      #   - The working directory mounted so relative paths work
+      #
+      # Architecture compliance: NO Chrome/Chromium (BC-4.03.001 invariant 1).
+      # Docker itself is NOT a browser — it runs the veraPDF Java CLI in isolation.
+      - name: Install veraPDF CLI (Docker wrapper)
         run: |
           set -euo pipefail
-          INSTALL_DIR="/opt/verapdf"
-          mkdir -p "${INSTALL_DIR}"
-          # Download the latest stable veraPDF installer from the official CDN.
-          # Uses -L to follow redirects (downloads.verapdf.org → software.verapdf.org).
-          wget -q -L "https://downloads.verapdf.org/rel/verapdf-installer.zip" \
-            -O verapdf-installer.zip
-          unzip -q verapdf-installer.zip
-          # The unzipped installer directory name varies by version.
-          # Use glob to find the installer JAR.
-          INSTALLER_JAR=$(find . -maxdepth 2 -name "verapdf-*-installer.jar" | head -1)
-          if [ -z "${INSTALLER_JAR}" ]; then
-            echo "ERROR: veraPDF installer JAR not found after unzip" >&2
-            ls -la
-            exit 1
-          fi
-          echo "Found veraPDF installer: ${INSTALLER_JAR}"
-          # Run the install4j installer in console mode (non-interactive).
-          # -console: text-based install4j UI
-          # -dir: installation directory
-          java -jar "${INSTALLER_JAR}" \
-            -console \
-            -dir "${INSTALL_DIR}"
-          # Create a verapdf shim on PATH.
-          if [ -f "${INSTALL_DIR}/verapdf" ]; then
-            sudo ln -sf "${INSTALL_DIR}/verapdf" /usr/local/bin/verapdf
-          else
-            # Fallback: run veraPDF via the installed JAR directly.
-            # Find the veraPDF uber-jar in the install directory.
-            VERAPDF_JAR=$(find "${INSTALL_DIR}" -maxdepth 2 -name "verapdf*.jar" ! -name "*installer*" | head -1)
-            if [ -z "${VERAPDF_JAR}" ]; then
-              echo "ERROR: veraPDF JAR not found in ${INSTALL_DIR} after install" >&2
-              find "${INSTALL_DIR}" -name "*.jar" | head -20
-              exit 1
-            fi
-            echo '#!/bin/bash' | sudo tee /usr/local/bin/verapdf
-            echo "exec java -jar ${VERAPDF_JAR} \"\$@\"" \
-              | sudo tee -a /usr/local/bin/verapdf
-            sudo chmod +x /usr/local/bin/verapdf
-          fi
+          # Pull the veraPDF official CLI image.
+          docker pull verapdf/cli:latest
+          # Create a verapdf wrapper script that delegates to the Docker container.
+          # The wrapper mounts /tmp (where the test writes the PDF) into the container.
+          # Using --rm ensures the container is removed after each run.
+          sudo tee /usr/local/bin/verapdf > /dev/null <<'VERAPDF_WRAPPER'
+          #!/bin/bash
+          # Wrapper: run veraPDF in a Docker container with /tmp bind-mounted.
+          exec docker run --rm \
+            -v /tmp:/tmp \
+            verapdf/cli:latest "$@"
+          VERAPDF_WRAPPER
+          sudo chmod +x /usr/local/bin/verapdf
           # F-045-I3: version check must succeed — if veraPDF is broken the CI gate
           # must fail loudly, not silently pass.
           verapdf --version
