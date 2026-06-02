@@ -269,6 +269,17 @@ pub fn eval_slide_node<S: std::hash::BuildHasher>(
                         | TemplateChunk::MathInterp(_) => {
                             // Math chunks are stored as-is for now (future story).
                         },
+                        // STORY-077: inline markup chunks — slide-level eval is STORY-081.
+                        TemplateChunk::Bold(_)
+                        | TemplateChunk::Italic(_)
+                        | TemplateChunk::Code(_)
+                        | TemplateChunk::Link { .. }
+                        | TemplateChunk::Superscript(_)
+                        | TemplateChunk::Subscript(_)
+                        | TemplateChunk::Strikethrough(_)
+                        | TemplateChunk::Highlight(_) => {
+                            // Slide-level inline markup eval is STORY-081.
+                        },
                     }
                 }
                 // Error already accumulated in sink; use partial result for error-recovery.

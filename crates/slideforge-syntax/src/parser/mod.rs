@@ -42,6 +42,14 @@ pub mod variants;
 #[cfg(test)]
 mod section_tests;
 
+// STORY-077 Red Gate: failing test suite for inline markup parser extension.
+// Tests verify that `template_value()` produces structural TemplateChunk variants
+// (Bold, Italic, Code, Link, Superscript, Subscript, Strikethrough, Highlight)
+// for the corresponding DSL inline markup syntax forms.
+// Currently fails because template_value() does not yet recognize these delimiters.
+#[cfg(test)]
+mod template_inline_markup_tests;
+
 use std::sync::Arc;
 
 use chumsky::{Parser, prelude::SimpleSpan};

@@ -1428,3 +1428,666 @@ fn test_f077_p4_001_section_detail_ident_resolving_to_map_drops_with_warn() {
         sink.errors()
     );
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// STORY-077 DIR-077-002 §8 — Red Gate Tests 16–28
+// chunks_to_inline_nodes conversion + AC-002 end-to-end pipeline
+//
+// All tests below MUST FAIL until `chunks_to_inline_nodes` is implemented in
+// `register_routing.rs` (they will panic at the `todo!()` stub).
+// TD-VSDD-059: every test has load-bearing assertions on the specific InlineNode
+// variant produced and its inner content.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ─── Test 16: Bold chunk → InlineNode::Bold (DIR-077-002 §8 item 16) ─────────
+
+/// DIR-077-002 §8 #16 / BC-3.02.002 AC-002:
+/// `TemplateChunk::Bold([Literal("hi")])` → `InlineNode::Bold([InlineNode::Plain(Arc::from("hi"))])`.
+///
+/// FAILS at the todo!() stub until chunks_to_inline_nodes is implemented.
+#[test]
+fn test_BC_3_02_002_bold_chunk_to_inline_node() {
+    let chunks = vec![TemplateChunk::Bold(vec![TemplateChunk::Literal(
+        "hi".to_string(),
+    )])];
+    let env = Env::new(IndexMap::new());
+    let mut sink = DiagnosticSink::new();
+
+    // This will panic at the todo!() stub — Red Gate is active.
+    let nodes = crate::register_routing::chunks_to_inline_nodes(&chunks, &env, &mut sink);
+
+    assert_eq!(
+        nodes.len(),
+        1,
+        "Bold chunk must produce exactly 1 InlineNode; got {nodes:?}"
+    );
+    match &nodes[0] {
+        InlineNode::Bold(children) => {
+            assert_eq!(children.len(), 1, "Bold must have 1 child; got {children:?}");
+            assert!(
+                matches!(&children[0], InlineNode::Plain(s) if s.as_ref() == "hi"),
+                "Bold child must be Plain(\"hi\"); got: {:?}",
+                children[0]
+            );
+        },
+        other => panic!(
+            "test_BC_3_02_002_bold_chunk_to_inline_node FAIL: expected InlineNode::Bold, \
+             got: {other:?}"
+        ),
+    }
+}
+
+// ─── Test 17: Italic chunk → InlineNode::Italic (DIR-077-002 §8 item 17) ─────
+
+/// DIR-077-002 §8 #17 / BC-3.02.002 AC-002:
+/// `TemplateChunk::Italic([Literal("em")])` → `InlineNode::Italic([InlineNode::Plain(Arc::from("em"))])`.
+///
+/// FAILS at the todo!() stub until chunks_to_inline_nodes is implemented.
+#[test]
+fn test_BC_3_02_002_italic_chunk_to_inline_node() {
+    let chunks = vec![TemplateChunk::Italic(vec![TemplateChunk::Literal(
+        "em".to_string(),
+    )])];
+    let env = Env::new(IndexMap::new());
+    let mut sink = DiagnosticSink::new();
+
+    let nodes = crate::register_routing::chunks_to_inline_nodes(&chunks, &env, &mut sink);
+
+    assert_eq!(nodes.len(), 1, "Italic chunk must produce 1 InlineNode; got {nodes:?}");
+    match &nodes[0] {
+        InlineNode::Italic(children) => {
+            assert_eq!(children.len(), 1, "Italic must have 1 child; got {children:?}");
+            assert!(
+                matches!(&children[0], InlineNode::Plain(s) if s.as_ref() == "em"),
+                "Italic child must be Plain(\"em\"); got: {:?}",
+                children[0]
+            );
+        },
+        other => panic!(
+            "test_BC_3_02_002_italic_chunk_to_inline_node FAIL: expected InlineNode::Italic, \
+             got: {other:?}"
+        ),
+    }
+}
+
+// ─── Test 18: Code chunk → InlineNode::Code (DIR-077-002 §8 item 18) ─────────
+
+/// DIR-077-002 §8 #18 / BC-3.02.002 AC-002:
+/// `TemplateChunk::Code("fn x() {}")` → `InlineNode::Code(Arc::from("fn x() {}"))`.
+///
+/// FAILS at the todo!() stub until chunks_to_inline_nodes is implemented.
+#[test]
+fn test_BC_3_02_002_code_chunk_to_inline_node() {
+    let chunks = vec![TemplateChunk::Code("fn x() {}".to_string())];
+    let env = Env::new(IndexMap::new());
+    let mut sink = DiagnosticSink::new();
+
+    let nodes = crate::register_routing::chunks_to_inline_nodes(&chunks, &env, &mut sink);
+
+    assert_eq!(nodes.len(), 1, "Code chunk must produce 1 InlineNode; got {nodes:?}");
+    match &nodes[0] {
+        InlineNode::Code(content) => {
+            assert_eq!(
+                content.as_ref(),
+                "fn x() {}",
+                "Code content must be 'fn x() {{}}'; got: {content:?}"
+            );
+        },
+        other => panic!(
+            "test_BC_3_02_002_code_chunk_to_inline_node FAIL: expected InlineNode::Code, \
+             got: {other:?}"
+        ),
+    }
+}
+
+// ─── Test 19: Link chunk → InlineNode::Link (DIR-077-002 §8 item 19) ─────────
+
+/// DIR-077-002 §8 #19 / BC-3.02.002 AC-002:
+/// `TemplateChunk::Link { text: [Literal("example")], url: "https://example.com" }`
+/// → `InlineNode::Link { text: [Plain("example")], url: Arc::from("https://example.com") }`.
+///
+/// FAILS at the todo!() stub until chunks_to_inline_nodes is implemented.
+#[test]
+fn test_BC_3_02_002_link_chunk_to_inline_node() {
+    let chunks = vec![TemplateChunk::Link {
+        text: vec![TemplateChunk::Literal("example".to_string())],
+        url: "https://example.com".to_string(),
+    }];
+    let env = Env::new(IndexMap::new());
+    let mut sink = DiagnosticSink::new();
+
+    let nodes = crate::register_routing::chunks_to_inline_nodes(&chunks, &env, &mut sink);
+
+    assert_eq!(nodes.len(), 1, "Link chunk must produce 1 InlineNode; got {nodes:?}");
+    match &nodes[0] {
+        InlineNode::Link { text, url } => {
+            assert_eq!(url.as_ref(), "https://example.com", "Link url must match");
+            assert_eq!(text.len(), 1, "Link text must have 1 child; got {text:?}");
+            assert!(
+                matches!(&text[0], InlineNode::Plain(s) if s.as_ref() == "example"),
+                "Link text child must be Plain(\"example\"); got: {:?}",
+                text[0]
+            );
+        },
+        other => panic!(
+            "test_BC_3_02_002_link_chunk_to_inline_node FAIL: expected InlineNode::Link, \
+             got: {other:?}"
+        ),
+    }
+}
+
+// ─── Test 20: MathInline chunk → InlineNode::Math{display:false} (item 20) ───
+
+/// DIR-077-002 §8 #20 / BC-3.02.002 AC-002:
+/// `TemplateChunk::MathInline("x^2")` → `InlineNode::Math(MathNode { latex: "x^2", display: false })`.
+///
+/// FAILS at the todo!() stub until chunks_to_inline_nodes is implemented.
+#[test]
+fn test_BC_3_02_002_math_inline_chunk_to_inline_node() {
+    use slideforge_types::MathNode;
+
+    let chunks = vec![TemplateChunk::MathInline("x^2".to_string())];
+    let env = Env::new(IndexMap::new());
+    let mut sink = DiagnosticSink::new();
+
+    let nodes = crate::register_routing::chunks_to_inline_nodes(&chunks, &env, &mut sink);
+
+    assert_eq!(nodes.len(), 1, "MathInline chunk must produce 1 InlineNode; got {nodes:?}");
+    match &nodes[0] {
+        InlineNode::Math(MathNode { latex, display, .. }) => {
+            assert_eq!(latex.as_ref(), "x^2", "Math latex must be 'x^2'; got: {latex:?}");
+            assert!(
+                !display,
+                "MathInline must produce display=false; got display={display}"
+            );
+        },
+        other => panic!(
+            "test_BC_3_02_002_math_inline_chunk_to_inline_node FAIL: expected InlineNode::Math, \
+             got: {other:?}"
+        ),
+    }
+}
+
+// ─── Test 21: MathDisplay chunk → InlineNode::Math{display:true} (item 21) ───
+
+/// DIR-077-002 §8 #21 / BC-3.02.002 AC-002:
+/// `TemplateChunk::MathDisplay(r"\sum")` → `InlineNode::Math(MathNode { display: true })`.
+///
+/// FAILS at the todo!() stub until chunks_to_inline_nodes is implemented.
+#[test]
+fn test_BC_3_02_002_math_display_chunk_to_inline_node() {
+    use slideforge_types::MathNode;
+
+    let chunks = vec![TemplateChunk::MathDisplay(r"\sum_{i=0}^{n}".to_string())];
+    let env = Env::new(IndexMap::new());
+    let mut sink = DiagnosticSink::new();
+
+    let nodes = crate::register_routing::chunks_to_inline_nodes(&chunks, &env, &mut sink);
+
+    assert_eq!(nodes.len(), 1, "MathDisplay chunk must produce 1 InlineNode; got {nodes:?}");
+    match &nodes[0] {
+        InlineNode::Math(MathNode { latex, display, .. }) => {
+            assert_eq!(
+                latex.as_ref(),
+                r"\sum_{i=0}^{n}",
+                "Math latex must match; got: {latex:?}"
+            );
+            assert!(
+                *display,
+                "MathDisplay must produce display=true; got display={display}"
+            );
+        },
+        other => panic!(
+            "test_BC_3_02_002_math_display_chunk_to_inline_node FAIL: expected InlineNode::Math, \
+             got: {other:?}"
+        ),
+    }
+}
+
+// ─── Test 22: Expr ref call → InlineNode::Xref (DIR-077-002 §8 item 22) ──────
+
+/// DIR-077-002 §8 #22 / BC-3.02.002 AC-002:
+/// A `TemplateChunk::Expr` whose expression represents a `ref("slide-1")` call
+/// must produce `InlineNode::Xref(Arc::from("slide-1"))`.
+///
+/// Per DIR-077-002 §3: `{{ ref("slide-1") }}` is parsed as a `TemplateChunk::Expr`
+/// function-call expression; `chunks_to_inline_nodes` converts it to `Xref`.
+///
+/// Since `Expr` currently has no `Call` variant, this test uses the `Expr::Pipe`
+/// variant as a proxy: `ref | pipe("slide-1")` is not the final form, but the
+/// test exercises the Xref production path. When `Expr::Call` is added (required
+/// for proper ref() support), update this test to use `Expr::Call { func: "ref", ... }`.
+///
+/// FAILS at the todo!() stub until chunks_to_inline_nodes is implemented.
+/// ALSO FAILS when the real impl does not handle the specific Expr form used here.
+/// The implementer must both (a) implement chunks_to_inline_nodes AND (b) add
+/// Expr::Call to the Expr enum to support ref() natively.
+#[test]
+fn test_BC_3_02_002_expr_ref_call_to_xref() {
+    // Use Expr::Pipe as the closest available proxy for a function call in the
+    // current Expr enum. The implementer must add Expr::Call and update this test.
+    // The test is load-bearing: it drives the production chunks_to_inline_nodes path.
+    let ref_expr = SyntaxExpr::Pipe {
+        lhs: Box::new(SyntaxExpr::Str("slide-1".to_string())),
+        filter: "ref".to_string(),
+        args: vec![],
+    };
+    let chunks = vec![TemplateChunk::Expr(ref_expr)];
+    let env = Env::new(IndexMap::new());
+    let mut sink = DiagnosticSink::new();
+
+    // This will panic at todo!() — Red Gate.
+    let nodes = crate::register_routing::chunks_to_inline_nodes(&chunks, &env, &mut sink);
+
+    // After implementation: the Expr(Pipe{ filter: "ref", lhs: Str("slide-1") })
+    // must produce InlineNode::Xref(Arc::from("slide-1")).
+    // If the implementation uses Expr::Call instead, this test will need updating
+    // to use Expr::Call { func: "ref", args: [Expr::Str("slide-1")] }.
+    assert_eq!(nodes.len(), 1, "ref() Expr must produce 1 InlineNode; got {nodes:?}");
+    match &nodes[0] {
+        InlineNode::Xref(id) => {
+            assert_eq!(
+                id.as_ref(),
+                "slide-1",
+                "Xref id must be 'slide-1'; got: {id:?}"
+            );
+        },
+        other => panic!(
+            "test_BC_3_02_002_expr_ref_call_to_xref FAIL: expected InlineNode::Xref, \
+             got: {other:?}\n\
+             Note: if Expr has no Call variant yet, this test uses Pipe as proxy. \
+             The implementer must add Expr::Call {{ func: 'ref', args: [Str(id)] }} \
+             and update this test accordingly."
+        ),
+    }
+}
+
+// ─── Test 23: Expr footnote call → InlineNode::Footnote (item 23) ─────────────
+
+/// DIR-077-002 §8 #23 / BC-3.02.002 AC-002:
+/// A `TemplateChunk::Expr` representing `footnote("see appendix")` must produce
+/// `InlineNode::Footnote([InlineNode::Plain(Arc::from("see appendix"))])`.
+///
+/// Same note as test 22: uses Expr::Pipe as proxy until Expr::Call exists.
+///
+/// FAILS at the todo!() stub until chunks_to_inline_nodes is implemented.
+#[test]
+fn test_BC_3_02_002_expr_footnote_call_to_footnote_node() {
+    // Proxy: Pipe { lhs: Str("see appendix"), filter: "footnote" }
+    // Replace with Expr::Call when that variant is added.
+    let footnote_expr = SyntaxExpr::Pipe {
+        lhs: Box::new(SyntaxExpr::Str("see appendix".to_string())),
+        filter: "footnote".to_string(),
+        args: vec![],
+    };
+    let chunks = vec![TemplateChunk::Expr(footnote_expr)];
+    let env = Env::new(IndexMap::new());
+    let mut sink = DiagnosticSink::new();
+
+    let nodes = crate::register_routing::chunks_to_inline_nodes(&chunks, &env, &mut sink);
+
+    assert_eq!(nodes.len(), 1, "footnote() Expr must produce 1 InlineNode; got {nodes:?}");
+    match &nodes[0] {
+        InlineNode::Footnote(children) => {
+            assert_eq!(children.len(), 1, "Footnote must have 1 child; got {children:?}");
+            assert!(
+                matches!(&children[0], InlineNode::Plain(s) if s.as_ref() == "see appendix"),
+                "Footnote child must be Plain(\"see appendix\"); got: {:?}",
+                children[0]
+            );
+        },
+        other => panic!(
+            "test_BC_3_02_002_expr_footnote_call_to_footnote_node FAIL: expected InlineNode::Footnote, \
+             got: {other:?}"
+        ),
+    }
+}
+
+// ─── Test 24: AC-002 bold in section detail (DIR-077-002 §8 item 24) ──────────
+
+/// DIR-077-002 §8 #24 / BC-3.02.002 AC-002 (full pipeline):
+/// Full pipeline: a SectionNode with `detail: "**Bold claim.**"` must produce
+/// `SectionBlock.body["detail"]` = `FieldValue::Inlines([InlineNode::Bold([Plain("Bold claim.")])])`.
+///
+/// This test drives the PRODUCTION eval path (eval_section_nodes_for_test).
+/// TD-VSDD-059: the assertion verifies the exact InlineNode variant and inner
+/// content — NOT just that FieldValue::Inlines is present.
+///
+/// FAILS because:
+/// (a) template_value() does not yet produce Bold chunk for "**Bold claim.**"
+/// (b) chunks_to_inline_nodes is a todo!() stub
+#[test]
+fn test_BC_3_02_002_ac002_bold_in_section_detail_produces_inlines() {
+    // Build a SectionNode whose detail: field contains **Bold claim.**
+    // The parser (after implementation) will produce:
+    //   FieldValue::Template([Bold([Literal("Bold claim.")])])
+    // For the Red Gate, we construct the expected template manually.
+    let section_node = SectionNode {
+        kind: Spanned::new("methodology".to_string(), dummy_span()),
+        fields: vec![FieldNode {
+            name: Spanned::new("detail".to_string(), dummy_span()),
+            value: Spanned::new(
+                SyntaxFieldValue::Template(vec![TemplateChunk::Bold(vec![
+                    TemplateChunk::Literal("Bold claim.".to_string()),
+                ])]),
+                dummy_span(),
+            ),
+        }],
+    };
+
+    let env = Env::new(IndexMap::new());
+    let mut sink = DiagnosticSink::new();
+
+    // Will panic at todo!() in chunks_to_inline_nodes — Red Gate is active.
+    let result = crate::eval::eval_section_nodes_for_test(&section_node, &env, &mut sink);
+
+    let (section_block, _) =
+        result.expect("AC-002: eval_section_nodes must return Some for valid methodology section");
+
+    let detail_entry = section_block
+        .body
+        .get("detail")
+        .expect("AC-002: 'detail' key must be present after eval");
+
+    match detail_entry {
+        FieldValue::Inlines(nodes) => {
+            assert_eq!(
+                nodes.len(),
+                1,
+                "AC-002: detail must have exactly 1 InlineNode (Bold); got {nodes:?}"
+            );
+            match &nodes[0] {
+                InlineNode::Bold(children) => {
+                    assert_eq!(
+                        children.len(),
+                        1,
+                        "Bold must have 1 child (Plain); got {children:?}"
+                    );
+                    assert!(
+                        matches!(&children[0], InlineNode::Plain(s) if s.as_ref() == "Bold claim."),
+                        "Bold child must be Plain(\"Bold claim.\"); got: {:?}",
+                        children[0]
+                    );
+                    // Forbidden pattern check: NO Literal asterisks in the result.
+                    // InlineNode::Plain must NOT contain "**" or "*".
+                    if let InlineNode::Plain(s) = &children[0] {
+                        assert!(
+                            !s.contains('*'),
+                            "AC-002 FORBIDDEN PATTERN: Plain node must not contain asterisks; \
+                             got: {s:?}. This indicates the parser did not produce Bold."
+                        );
+                    }
+                },
+                other => panic!(
+                    "AC-002 FAIL: expected InlineNode::Bold; got: {other:?}\n\
+                     If this is Plain(\"**Bold claim.**\"), the Bold chunk was not produced by \
+                     template_value() OR chunks_to_inline_nodes did not convert it."
+                ),
+            }
+        },
+        other => panic!(
+            "AC-002 FAIL: body['detail'] must be FieldValue::Inlines; got: {other:?}"
+        ),
+    }
+}
+
+// ─── Test 25: AC-002 xref in section detail (DIR-077-002 §8 item 25) ──────────
+
+/// DIR-077-002 §8 #25 / BC-3.02.002 AC-002:
+/// `{{ ref("slide-1") }}` in section detail must produce `InlineNode::Xref(Arc::from("slide-1"))`.
+///
+/// FAILS because chunks_to_inline_nodes is a todo!() stub.
+#[test]
+fn test_BC_3_02_002_ac002_xref_in_section_detail_produces_xref_node() {
+    // Use Pipe as proxy for Call (see test 22 note).
+    let ref_expr = SyntaxExpr::Pipe {
+        lhs: Box::new(SyntaxExpr::Str("slide-1".to_string())),
+        filter: "ref".to_string(),
+        args: vec![],
+    };
+    let section_node = SectionNode {
+        kind: Spanned::new("methodology".to_string(), dummy_span()),
+        fields: vec![FieldNode {
+            name: Spanned::new("detail".to_string(), dummy_span()),
+            value: Spanned::new(
+                SyntaxFieldValue::Template(vec![
+                    TemplateChunk::Literal("See ".to_string()),
+                    TemplateChunk::Expr(ref_expr),
+                    TemplateChunk::Literal(".".to_string()),
+                ]),
+                dummy_span(),
+            ),
+        }],
+    };
+
+    let env = Env::new(IndexMap::new());
+    let mut sink = DiagnosticSink::new();
+
+    let result = crate::eval::eval_section_nodes_for_test(&section_node, &env, &mut sink);
+
+    let (section_block, _) =
+        result.expect("AC-002: eval must return Some for ref() in detail");
+
+    let detail_entry = section_block
+        .body
+        .get("detail")
+        .expect("AC-002: 'detail' key must be present");
+
+    match detail_entry {
+        FieldValue::Inlines(nodes) => {
+            // Must contain an Xref node somewhere in the sequence.
+            let has_xref = nodes.iter().any(|n| {
+                matches!(n, InlineNode::Xref(id) if id.as_ref() == "slide-1")
+            });
+            assert!(
+                has_xref,
+                "AC-002: FieldValue::Inlines must contain InlineNode::Xref(\"slide-1\"); \
+                 got: {nodes:?}"
+            );
+            // Forbidden pattern: no Plain node must contain the raw "ref(" or "slide-1" as a literal.
+            let has_raw_ref = nodes.iter().any(|n| {
+                matches!(n, InlineNode::Plain(s) if s.contains("ref(") || s.contains("slide-1"))
+            });
+            assert!(
+                !has_raw_ref,
+                "AC-002: no Plain node must contain raw 'ref(' or 'slide-1'; got {nodes:?}"
+            );
+        },
+        other => panic!(
+            "AC-002 FAIL: body['detail'] must be FieldValue::Inlines; got: {other:?}"
+        ),
+    }
+}
+
+// ─── Test 26: AC-002 plain text not literal asterisks (item 26) ───────────────
+
+/// DIR-077-002 §8 #26 / BC-3.02.002 AC-002 (forbidden pattern check):
+/// `**Bold** text.` must produce `[InlineNode::Bold(...), InlineNode::Plain(" text.")]`.
+/// NOT a single `InlineNode::Plain(Arc::from("**Bold** text."))`.
+///
+/// This is the core forbidden-pattern check from CLAUDE.md (R1 finding).
+///
+/// FAILS because chunks_to_inline_nodes is a todo!() stub.
+#[test]
+fn test_BC_3_02_002_ac002_plain_text_not_literal_asterisks() {
+    let section_node = SectionNode {
+        kind: Spanned::new("methodology".to_string(), dummy_span()),
+        fields: vec![FieldNode {
+            name: Spanned::new("detail".to_string(), dummy_span()),
+            value: Spanned::new(
+                SyntaxFieldValue::Template(vec![
+                    TemplateChunk::Bold(vec![TemplateChunk::Literal("Bold".to_string())]),
+                    TemplateChunk::Literal(" text.".to_string()),
+                ]),
+                dummy_span(),
+            ),
+        }],
+    };
+
+    let env = Env::new(IndexMap::new());
+    let mut sink = DiagnosticSink::new();
+
+    let result = crate::eval::eval_section_nodes_for_test(&section_node, &env, &mut sink);
+    let (section_block, _) =
+        result.expect("AC-002: eval must return Some");
+
+    let detail_entry = section_block.body.get("detail").expect("detail must be present");
+
+    match detail_entry {
+        FieldValue::Inlines(nodes) => {
+            // Must have Bold + Plain, not a single Plain with asterisks.
+            let has_bold = nodes.iter().any(|n| matches!(n, InlineNode::Bold(_)));
+            assert!(
+                has_bold,
+                "AC-002: FieldValue::Inlines must contain InlineNode::Bold; got: {nodes:?}"
+            );
+
+            // Forbidden pattern: NO Plain node must contain literal asterisks.
+            for node in nodes.iter() {
+                if let InlineNode::Plain(s) = node {
+                    assert!(
+                        !s.contains('*'),
+                        "AC-002 FORBIDDEN PATTERN (CLAUDE.md R1): Plain node must NOT contain \
+                         literal asterisks. String-prefix bold ('**Bold**') is the R1 anti-pattern. \
+                         Got Plain({s:?}). The Bold chunk must produce InlineNode::Bold, not Plain."
+                    );
+                }
+            }
+        },
+        other => panic!(
+            "AC-002 FAIL: body['detail'] must be FieldValue::Inlines; got: {other:?}"
+        ),
+    }
+}
+
+// ─── Test 27: AC-002 interpolation with bold context (item 27) ────────────────
+
+/// DIR-077-002 §8 #27 / BC-3.02.002 AC-002:
+/// `**{{ client }}**` with `client = "Acme"` must produce
+/// `InlineNode::Bold([InlineNode::Plain(Arc::from("Acme"))])`.
+///
+/// The `{{ client }}` expression is evaluated inside the Bold span.
+///
+/// FAILS because chunks_to_inline_nodes is a todo!() stub.
+#[test]
+fn test_BC_3_02_002_ac002_interpolation_with_bold_context() {
+    let section_node = SectionNode {
+        kind: Spanned::new("methodology".to_string(), dummy_span()),
+        fields: vec![FieldNode {
+            name: Spanned::new("detail".to_string(), dummy_span()),
+            value: Spanned::new(
+                SyntaxFieldValue::Template(vec![TemplateChunk::Bold(vec![TemplateChunk::Expr(
+                    SyntaxExpr::Ident("client".to_string()),
+                )])]),
+                dummy_span(),
+            ),
+        }],
+    };
+
+    let mut vars: IndexMap<Arc<str>, Value> = IndexMap::new();
+    vars.insert(Arc::from("client"), Value::Str(Arc::from("Acme")));
+    let env = Env::new(vars);
+    let mut sink = DiagnosticSink::new();
+
+    let result = crate::eval::eval_section_nodes_for_test(&section_node, &env, &mut sink);
+    let (section_block, _) =
+        result.expect("AC-002: eval must return Some with client in scope");
+
+    let detail_entry = section_block.body.get("detail").expect("detail must be present");
+
+    match detail_entry {
+        FieldValue::Inlines(nodes) => {
+            assert_eq!(nodes.len(), 1, "must have 1 InlineNode (Bold); got {nodes:?}");
+            match &nodes[0] {
+                InlineNode::Bold(children) => {
+                    assert_eq!(children.len(), 1, "Bold must have 1 child; got {children:?}");
+                    assert!(
+                        matches!(&children[0], InlineNode::Plain(s) if s.as_ref() == "Acme"),
+                        "Bold child must be Plain(\"Acme\") after interpolation; got: {:?}",
+                        children[0]
+                    );
+                },
+                other => panic!(
+                    "AC-002 interpolation FAIL: expected InlineNode::Bold; got: {other:?}"
+                ),
+            }
+        },
+        other => panic!(
+            "AC-002 FAIL: body['detail'] must be FieldValue::Inlines; got: {other:?}"
+        ),
+    }
+}
+
+// ─── Test 28: AC-002 report sub-block produces inlines (item 28) ─────────────
+
+/// DIR-077-002 §8 #28 / BC-3.02.002 AC-002:
+/// Same as test 24 but for the `report:` key:
+/// `section methodology: / report: "**Bold claim.**"` must produce
+/// `SectionBlock.body["report"]` = `FieldValue::Inlines([InlineNode::Bold([Plain("Bold claim.")])])`.
+///
+/// FAILS because chunks_to_inline_nodes is a todo!() stub.
+#[test]
+fn test_BC_3_02_002_ac002_report_sub_block_produces_inlines() {
+    let section_node = SectionNode {
+        kind: Spanned::new("methodology".to_string(), dummy_span()),
+        fields: vec![FieldNode {
+            name: Spanned::new("report".to_string(), dummy_span()),
+            value: Spanned::new(
+                SyntaxFieldValue::Template(vec![TemplateChunk::Bold(vec![
+                    TemplateChunk::Literal("Bold claim.".to_string()),
+                ])]),
+                dummy_span(),
+            ),
+        }],
+    };
+
+    let env = Env::new(IndexMap::new());
+    let mut sink = DiagnosticSink::new();
+
+    let result = crate::eval::eval_section_nodes_for_test(&section_node, &env, &mut sink);
+    let (section_block, _) =
+        result.expect("AC-002: eval must return Some for methodology report");
+
+    let report_entry = section_block
+        .body
+        .get("report")
+        .expect("AC-002: 'report' key must be present after eval");
+
+    match report_entry {
+        FieldValue::Inlines(nodes) => {
+            assert_eq!(
+                nodes.len(),
+                1,
+                "AC-002 (report): must have exactly 1 InlineNode (Bold); got {nodes:?}"
+            );
+            match &nodes[0] {
+                InlineNode::Bold(children) => {
+                    assert_eq!(
+                        children.len(),
+                        1,
+                        "Bold must have 1 child; got {children:?}"
+                    );
+                    assert!(
+                        matches!(&children[0], InlineNode::Plain(s) if s.as_ref() == "Bold claim."),
+                        "Bold child must be Plain(\"Bold claim.\"); got: {:?}",
+                        children[0]
+                    );
+                    // Forbidden pattern check.
+                    if let InlineNode::Plain(s) = &children[0] {
+                        assert!(
+                            !s.contains('*'),
+                            "AC-002 (report) FORBIDDEN PATTERN: Plain node must not contain asterisks; \
+                             got: {s:?}"
+                        );
+                    }
+                },
+                other => panic!(
+                    "AC-002 (report) FAIL: expected InlineNode::Bold; got: {other:?}"
+                ),
+            }
+        },
+        other => panic!(
+            "AC-002 (report) FAIL: body['report'] must be FieldValue::Inlines; got: {other:?}"
+        ),
+    }
+}

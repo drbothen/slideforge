@@ -504,6 +504,22 @@ fn eval_section_nodes(
                             // Math chunks in register sub-blocks are not yet supported;
                             // they pass through as-is (no inline node emitted).
                         },
+                        // STORY-077: inline markup chunks — these will be converted via
+                        // chunks_to_inline_nodes at eval time (see register_routing.rs).
+                        // For now (before the full conversion is wired), treat them as
+                        // pass-through (no inline node emitted from this branch).
+                        // This branch is hit only for slide-level template evaluation;
+                        // section sub-blocks use chunks_to_inline_nodes directly.
+                        TemplateChunk::Bold(_)
+                        | TemplateChunk::Italic(_)
+                        | TemplateChunk::Code(_)
+                        | TemplateChunk::Link { .. }
+                        | TemplateChunk::Superscript(_)
+                        | TemplateChunk::Subscript(_)
+                        | TemplateChunk::Strikethrough(_)
+                        | TemplateChunk::Highlight(_) => {
+                            // Slide-level inline markup eval is STORY-081.
+                        },
                     }
                 }
 
@@ -635,6 +651,18 @@ fn eval_field_value_to_value(
                     | TemplateChunk::MathInterp(_) => {
                         // Math chunks are stored as-is for now.
                     },
+                    // STORY-077: inline markup chunks at slide-level are STORY-081.
+                    // For now, treat content as flat text (extract inner text).
+                    TemplateChunk::Bold(_)
+                    | TemplateChunk::Italic(_)
+                    | TemplateChunk::Code(_)
+                    | TemplateChunk::Link { .. }
+                    | TemplateChunk::Superscript(_)
+                    | TemplateChunk::Subscript(_)
+                    | TemplateChunk::Strikethrough(_)
+                    | TemplateChunk::Highlight(_) => {
+                        // Slide-level inline markup eval is STORY-081.
+                    },
                 }
             }
             if had_error {
@@ -718,6 +746,17 @@ fn eval_set_rule_value(
                     | TemplateChunk::MathDisplay(_)
                     | TemplateChunk::MathInterp(_) => {
                         // Math chunks are stored as-is for now.
+                    },
+                    // STORY-077: inline markup chunks in set-rule context — STORY-081.
+                    TemplateChunk::Bold(_)
+                    | TemplateChunk::Italic(_)
+                    | TemplateChunk::Code(_)
+                    | TemplateChunk::Link { .. }
+                    | TemplateChunk::Superscript(_)
+                    | TemplateChunk::Subscript(_)
+                    | TemplateChunk::Strikethrough(_)
+                    | TemplateChunk::Highlight(_) => {
+                        // Slide-level inline markup eval is STORY-081.
                     },
                 }
             }

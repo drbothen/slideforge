@@ -36,11 +36,13 @@
 //! This module is pure-core: no I/O, no filesystem access, no network calls.
 //! The function is a pure transformation from `&Slide` to `Vec<RegisteredContent>`.
 
+use slideforge_syntax::{DiagnosticSink, TemplateChunk};
 use slideforge_types::{
     CANONICAL_MANUAL_SECTION_TYPES, FieldValue, InlineNode, Register, RegisteredContent,
     SectionBlock, Slide, Value,
 };
 
+use crate::env::Env;
 use crate::filters::format_float_display;
 
 // ─── Public API ──────────────────────────────────────────────────────────────
@@ -162,6 +164,65 @@ pub fn extract_section_register_content(section: &SectionBlock) -> Vec<Registere
     }
 
     result
+}
+
+// ─── chunks_to_inline_nodes (STORY-077 stub) ─────────────────────────────────
+
+/// Convert a `TemplateChunk` sequence into a `Vec<InlineNode>`.
+///
+/// This is the eval-time Phase 2 of the inline markup pipeline described in
+/// DIR-077-002 §3. Each `TemplateChunk` variant is mapped to the corresponding
+/// `slideforge_types::InlineNode` variant.
+///
+/// # Mapping (DIR-077-002 §3)
+///
+/// | TemplateChunk | InlineNode |
+/// |---|---|
+/// | `Literal(s)` | `Plain(Arc::from(s))` |
+/// | `Bold(children)` | `Bold(chunks_to_inline_nodes(children))` |
+/// | `Italic(children)` | `Italic(chunks_to_inline_nodes(children))` |
+/// | `Code(s)` | `Code(Arc::from(s))` |
+/// | `Link { text, url }` | `Link { text: chunks_to_inline_nodes(text), url: Arc::from(url) }` |
+/// | `MathInline(latex)` | `Math(MathNode { latex, display: false, .. })` |
+/// | `MathDisplay(latex)` | `Math(MathNode { latex, display: true, .. })` |
+/// | `Superscript(children)` | `Superscript(chunks_to_inline_nodes(children))` |
+/// | `Subscript(children)` | `Subscript(chunks_to_inline_nodes(children))` |
+/// | `Strikethrough(children)` | `Strikethrough(chunks_to_inline_nodes(children))` |
+/// | `Highlight(children)` | `Highlight(chunks_to_inline_nodes(children))` |
+/// | `Expr(Call{ func:"ref", args:[Str(id)] })` | `Xref(Arc::from(id))` |
+/// | `Expr(Call{ func:"footnote", args:[Str(t)] })` | `Footnote([Plain(Arc::from(t))])` |
+/// | `Expr(other)` | evaluate to string → `Plain` |
+/// | `MathInterp(expr)` | evaluate to string → `Plain` |
+///
+/// # STORY-077 Stub
+///
+/// This function body is a `todo!()` stub. The implementer must fill in the
+/// full mapping per DIR-077-002 §3. All tests that call this function will
+/// fail (Red Gate) until the implementation is complete.
+///
+/// # Preconditions
+///
+/// - `chunks` is the result of `template_value()` for a section sub-block field.
+/// - `env` has all variables in scope for the current section block.
+/// - `sink` accumulates any eval-stage errors (e.g., undefined variables).
+///
+/// # Returns
+///
+/// A `Vec<InlineNode>` ready to be stored as `FieldValue::Inlines` on
+/// `SectionBlock.body`.
+#[must_use]
+#[allow(unused_variables)]
+pub fn chunks_to_inline_nodes(
+    chunks: &[TemplateChunk],
+    env: &Env,
+    sink: &mut DiagnosticSink,
+) -> Vec<InlineNode> {
+    // STORY-077 Red Gate stub — implementer fills this in.
+    // All tests that drive chunks_to_inline_nodes will fail here with todo!().
+    todo!(
+        "STORY-077: chunks_to_inline_nodes not yet implemented (DIR-077-002 §3). \
+         Implement the full TemplateChunk → InlineNode mapping before declaring Red Gate closed."
+    )
 }
 
 /// The known section types recognised by the built-in section type registry.
