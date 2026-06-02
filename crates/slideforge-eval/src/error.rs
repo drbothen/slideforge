@@ -258,6 +258,30 @@ pub enum EvalError {
         span: SourceSpan,
     },
 
+    /// E-EVL-011: A built-in pseudo-function call (`ref`, `footnote`, `figref`) was
+    /// used in a context where it cannot be evaluated to a general `Value`.
+    ///
+    /// `Expr::Call` nodes are recognised in inline-markup context by
+    /// `chunks_to_inline_nodes` (which converts them to `InlineNode::Xref` /
+    /// `Footnote`). When `eval_expr` encounters a `Call` node in any other context
+    /// (e.g., a `vars:` binding, an `@if` condition), it emits this error — there
+    /// is no runtime value to return for a cross-reference function (Q1 decision:
+    /// no user-callable functions in v1).
+    #[error("built-in call `{func}(...)` cannot be used in expression context at {span}")]
+    #[diagnostic(
+        code("E-EVL-011"),
+        help(
+            "Built-in functions ref(), footnote(), and figref() are only valid inside \
+             {{ }} interpolations in section detail:/report: fields"
+        )
+    )]
+    UnsupportedBuiltinCall {
+        /// The function name that was called.
+        func: Arc<str>,
+        /// Source location of the call expression.
+        span: SourceSpan,
+    },
+
     /// E-PAR-004: A circular `@include` chain was detected in the merged AST.
     ///
     /// The evaluator runs a DFS over the include graph (built from `@include`

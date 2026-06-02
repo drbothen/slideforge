@@ -95,6 +95,7 @@ fn empty_inline_msg(delimiter: &str) -> String {
 /// Returns `Ok(Expr)` on success, or `Err(())` on lex/parse failure.
 /// The caller is responsible for converting errors to the appropriate
 /// E-PAR-012/E-PAR-013 `SyntaxError` entries.
+///
 fn parse_inner_expr(inner_src: &str) -> Result<Expr, ()> {
     use crate::lexer::lex;
     use chumsky::input::Input as _;
@@ -453,7 +454,29 @@ fn scan_template_chunks(
         // Falls through to the byte-advance below.
 
         // ── `_` — Italic ─────────────────────────────────────────────────────
+        //
+        // A `_` is an italic opener only when it is a left-flanking delimiter:
+        // the character BEFORE it must NOT be an ASCII alphanumeric character.
+        // This prevents false positives for word-internal underscores such as
+        // `SENTINEL_NOTES` or `snake_case` identifiers, which are common in
+        // DSL field values (e.g., field names, enum-like sentinel strings).
+        //
+        // CommonMark §6.1 left-flanking rule (simplified): a `_` starts an
+        // emphasis run only if it is NOT preceded directly by a Unicode
+        // alphanumeric. Using ASCII alphanumeric as the guard is sufficient
+        // for the DSL's identifier and sentinel-string use cases.
         if bytes.get(pos) == Some(&b'_') {
+            // Check left-flanking: if the byte immediately before pos is
+            // alphanumeric or `_`, treat this `_` as a literal.
+            let prev_is_word = pos > 0
+                && bytes
+                    .get(pos - 1)
+                    .is_some_and(|b| b.is_ascii_alphanumeric() || *b == b'_');
+            if prev_is_word {
+                // Word-internal `_` — not an italic marker; advance as literal.
+                pos += 1;
+                continue;
+            }
             flush_lit!();
             let inner_start = pos + 1;
             let rest = &s[inner_start..];
@@ -650,4 +673,21 @@ where
         let (chunks, _) = scan_template_chunks(&content, None, &mut errors);
         (chunks, errors)
     })
+}
+
+// ─── Test access ─────────────────────────────────────────────────────────────
+
+/// Test-only re-export of `parse_inner_expr`.
+///
+/// Exposed as `pub(crate)` for `template_inline_markup_tests` which needs
+/// to verify that `Expr::Call` is produced for `ref("id")`, `footnote("t")`,
+/// etc., without going through the full DSL string-escaping round-trip.
+/// (The DSL lexer stores `StringLit` tokens verbatim, so testing
+/// `{{ ref("id") }}` through `parse_template_value` would require DSL-level
+/// escaping of the inner `"`. Using `parse_inner_expr_for_test` directly
+/// avoids that indirection and tests the `expr()` combinator at the call-site
+/// where `scan_template_chunks` invokes it.)
+#[cfg(test)]
+pub(crate) fn parse_inner_expr_for_test(inner_src: &str) -> Result<Expr, ()> {
+    parse_inner_expr(inner_src)
 }

@@ -191,11 +191,21 @@ pub fn extract_section_register_content(section: &SectionBlock) -> Vec<Registere
 /// | `Subscript(children)` | `Subscript(chunks_to_inline_nodes(children))` |
 /// | `Strikethrough(children)` | `Strikethrough(chunks_to_inline_nodes(children))` |
 /// | `Highlight(children)` | `Highlight(chunks_to_inline_nodes(children))` |
-/// | `Expr(Pipe{ filter:"ref", lhs:Str(id) })` | `Xref(Arc::from(id))` |
-/// | `Expr(Pipe{ filter:"figref", lhs:Num(n) })` | `Xref(Arc::from(format!("fig-{n}")))` |
-/// | `Expr(Pipe{ filter:"footnote", lhs:Str(text) })` | `Footnote([Plain(Arc::from(text))])` |
+/// | `Expr(Call{ func:"ref", args:[Str(id)] })` | `Xref(Arc::from(id))` — real DSL form (DIR-077-002 §1 rule 5) |
+/// | `Expr(Call{ func:"figref", args:[Num(n)] })` | `Xref(Arc::from(format!("fig-{n}")))` |
+/// | `Expr(Call{ func:"footnote", args:[Str(text)] })` | `Footnote([Plain(Arc::from(text))])` |
+/// | `Expr(Pipe{ filter:"ref", lhs:Str(id) })` | `Xref(Arc::from(id))` — legacy test proxy |
+/// | `Expr(Pipe{ filter:"figref", lhs:Num(n) })` | `Xref(Arc::from(format!("fig-{n}")))` — legacy |
+/// | `Expr(Pipe{ filter:"footnote", lhs:Str(text) })` | `Footnote([Plain(Arc::from(text))])` — legacy |
 /// | `Expr(other)` | evaluate to string via env → `Plain` |
 /// | `MathInterp(expr)` | evaluate to string → `Plain` (math interp inside math region) |
+///
+/// # Empty-id validation (DIR-077-002 §5)
+///
+/// `{{ ref("") }}` with an empty string id is a fatal error
+/// (`inline-xref-empty-id`). An error is pushed to `sink` and no `InlineNode`
+/// is produced for that expression. Same for `figref` with an empty string and
+/// `footnote` with empty text.
 ///
 /// # Security: no re-parsing of resolved values
 ///
@@ -213,7 +223,17 @@ pub fn extract_section_register_content(section: &SectionBlock) -> Vec<Registere
 ///
 /// A `Vec<InlineNode>` ready to be stored as `FieldValue::Inlines` on
 /// `SectionBlock.body`.
+/// The function is longer than the 150-line clippy default because it handles
+/// 11 markup variants + 3 built-in function forms + 3 legacy Pipe proxy forms.
+/// Splitting would fragment the semantically unified mapping table into smaller
+/// helpers that are harder to review against the DIR-077-002 §3 spec table.
 #[must_use]
+#[allow(clippy::too_many_lines)]
+// Nested if-let chains in the Call::ref None branch are intentional:
+// they follow the same error-accumulation pattern as all other eval paths
+// (check for first arg, evaluate to string, check non-empty). Collapsing
+// into a single expression would require nesting or closures that reduce clarity.
+#[allow(clippy::collapsible_if)]
 pub fn chunks_to_inline_nodes(
     chunks: &[TemplateChunk],
     env: &Env,
@@ -299,27 +319,149 @@ pub fn chunks_to_inline_nodes(
                 // Check for special pseudo-function forms recognised as semantic
                 // inline nodes (DIR-077-002 §3 + §1 rules 5/6).
                 //
-                // Currently the Expr AST has no Call variant — the test-writer
-                // uses Expr::Pipe as a proxy (see test notes in
-                // template_inline_markup_tests.rs tests 22/23). Match on Pipe:
-                //   filter = "ref"      → Xref
-                //   filter = "figref"   → Xref with "fig-N" id
-                //   filter = "footnote" → Footnote
-                //   other pipes / other Expr → evaluate to string → Plain
+                // Priority order (first match wins):
+                //   1. Expr::Call { func: "ref"|"figref"|"footnote" } — real DSL form
+                //      produced by `parse_inner_expr` when Expr::Call is in the grammar.
+                //   2. Expr::Pipe { filter: "ref"|"figref"|"footnote" } — legacy proxy
+                //      kept for test-writer backward compat (tests 22/23/25 use Pipe).
+                //   3. Other Expr variants → evaluate to string → Plain.
                 match expr {
-                    Expr::Pipe { filter, lhs, .. } if filter == "ref" => {
-                        // `{{ "id" | ref }}` proxy for `{{ ref("id") }}`.
-                        if let Expr::Str(id) = lhs.as_ref() {
-                            nodes.push(InlineNode::Xref(Arc::from(id.as_str())));
+                    // ── Real function-call form (Expr::Call) ───────────────────────
+                    //
+                    // `{{ ref("slide-1") }}` parses as:
+                    //   Expr::Call { func: "ref", args: [Expr::Str("slide-1")] }
+                    //
+                    // `{{ figref(3) }}` parses as:
+                    //   Expr::Call { func: "figref", args: [Expr::Num(3)] }
+                    //
+                    // `{{ footnote("see appendix") }}` parses as:
+                    //   Expr::Call { func: "footnote", args: [Expr::Str("see appendix")] }
+                    Expr::Call { func, args } if func == "ref" => {
+                        // ref("id") → Xref(id). Empty id is fatal (DIR-077-002 §5).
+                        let id = args.first().and_then(|a| {
+                            if let Expr::Str(s) = a {
+                                Some(s.as_str())
+                            } else {
+                                None
+                            }
+                        });
+                        match id {
+                            Some("") => {
+                                use crate::error::EvalError;
+                                use slideforge_syntax::error::ParseSeverity;
+                                sink.push_with_severity(
+                                    EvalError::TypeMismatch {
+                                        message:
+                                            "E-PAR-inline-xref-empty-id: ref() requires a non-empty \
+                                             id string (DIR-077-002 §5); got empty string \"\"."
+                                                .to_string(),
+                                        span: slideforge_types::SourceSpan::default(),
+                                    },
+                                    ParseSeverity::Error,
+                                );
+                                // No InlineNode produced for empty-id ref.
+                            },
+                            Some(id_str) => {
+                                nodes.push(InlineNode::Xref(Arc::from(id_str)));
+                            },
+                            None => {
+                                // Unexpected arg form — evaluate to string and use as id.
+                                if let Some(first) = args.first() {
+                                    if let Some(s) = eval_expr_to_string(env, first, sink) {
+                                        if !s.is_empty() {
+                                            nodes.push(InlineNode::Xref(s));
+                                        }
+                                    }
+                                }
+                            },
+                        }
+                    },
+                    Expr::Call { func, args } if func == "figref" => {
+                        // figref(n) → Xref("fig-N"). Empty/zero is treated as valid.
+                        let xref_id = if let Some(Expr::Num(n)) = args.first() {
+                            Arc::from(format!("fig-{n}").as_str())
+                        } else if let Some(first) = args.first() {
+                            if let Some(s) = eval_expr_to_string(env, first, sink) {
+                                Arc::from(format!("fig-{s}").as_str())
+                            } else {
+                                continue;
+                            }
                         } else {
-                            // Unexpected lhs — evaluate and wrap as Plain.
+                            continue;
+                        };
+                        nodes.push(InlineNode::Xref(xref_id));
+                    },
+                    Expr::Call { func, args } if func == "footnote" => {
+                        // footnote("text") → Footnote([Plain("text")]).
+                        let text = args.first().and_then(|a| {
+                            if let Expr::Str(s) = a {
+                                Some(s.as_str())
+                            } else {
+                                None
+                            }
+                        });
+                        match text {
+                            Some(t) => {
+                                nodes.push(InlineNode::Footnote(vec![InlineNode::Plain(
+                                    Arc::from(t),
+                                )]));
+                            },
+                            None => {
+                                if let Some(first) = args.first() {
+                                    if let Some(s) = eval_expr_to_string(env, first, sink) {
+                                        nodes
+                                            .push(InlineNode::Footnote(vec![InlineNode::Plain(s)]));
+                                    }
+                                }
+                            },
+                        }
+                    },
+                    // Unknown Call func → evaluate to string → Plain (graceful eval).
+                    Expr::Call { .. } => {
+                        // eval_expr will emit E-EVL-011 UnsupportedBuiltinCall for this
+                        // unknown function; we do NOT re-parse the string result.
+                        // The error is already accumulated in `sink` by eval_expr.
+                        if let Some(s) = eval_expr_to_string(env, expr, sink)
+                            && !s.is_empty()
+                        {
+                            nodes.push(InlineNode::Plain(s));
+                        }
+                    },
+
+                    // ── Legacy Pipe proxy (backward compat for tests 22/23/25) ─────
+                    //
+                    // Tests 22/23/25 were written before Expr::Call existed. They use:
+                    //   Expr::Pipe { lhs: Str("id"), filter: "ref" }
+                    // as a proxy. These arms preserve that behavior so those tests
+                    // continue to pass. Real DSL now produces Expr::Call (above).
+                    Expr::Pipe { filter, lhs, .. } if filter == "ref" => {
+                        // `{{ "id" | ref }}` legacy proxy form.
+                        if let Expr::Str(id) = lhs.as_ref() {
+                            if id.is_empty() {
+                                use crate::error::EvalError;
+                                use slideforge_syntax::error::ParseSeverity;
+                                sink.push_with_severity(
+                                    EvalError::TypeMismatch {
+                                        message:
+                                            "E-PAR-inline-xref-empty-id: ref requires a non-empty \
+                                             id string (DIR-077-002 §5); got empty string \"\"."
+                                                .to_string(),
+                                        span: slideforge_types::SourceSpan::default(),
+                                    },
+                                    ParseSeverity::Error,
+                                );
+                            } else {
+                                nodes.push(InlineNode::Xref(Arc::from(id.as_str())));
+                            }
+                        } else {
+                            // Unexpected lhs — evaluate and wrap as Xref.
                             if let Some(s) = eval_expr_to_string(env, lhs, sink) {
                                 nodes.push(InlineNode::Xref(s));
                             }
                         }
                     },
                     Expr::Pipe { filter, lhs, .. } if filter == "figref" => {
-                        // `{{ N | figref }}` proxy for `{{ figref(N) }}`.
+                        // `{{ N | figref }}` legacy proxy form.
                         let xref_id = if let Expr::Num(n) = lhs.as_ref() {
                             Arc::from(format!("fig-{n}").as_str())
                         } else if let Some(s) = eval_expr_to_string(env, lhs, sink) {
@@ -330,7 +472,7 @@ pub fn chunks_to_inline_nodes(
                         nodes.push(InlineNode::Xref(xref_id));
                     },
                     Expr::Pipe { filter, lhs, .. } if filter == "footnote" => {
-                        // `{{ "text" | footnote }}` proxy for `{{ footnote("text") }}`.
+                        // `{{ "text" | footnote }}` legacy proxy form.
                         if let Expr::Str(text) = lhs.as_ref() {
                             nodes.push(InlineNode::Footnote(vec![InlineNode::Plain(Arc::from(
                                 text.as_str(),

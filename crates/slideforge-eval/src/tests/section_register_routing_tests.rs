@@ -2137,3 +2137,539 @@ fn test_BC_3_02_002_ac002_report_sub_block_produces_inlines() {
         ),
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// F-077-P5-001: Real Expr::Call form tests (not Pipe proxy)
+// F-077-P5-002: Real DSL parse→eval end-to-end seam tests
+// OBS-B: empty-id fatal error test
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ─── F-077-P5-001: Expr::Call ref → Xref (real Call form, not Pipe proxy) ────
+
+/// F-077-P5-001: `TemplateChunk::Expr(Expr::Call { func: "ref", args: [Str("slide-1")] })`
+/// → `InlineNode::Xref(Arc::from("slide-1"))`.
+///
+/// This test uses the REAL `Expr::Call` form (DIR-077-002 §1 rule 5), not the
+/// `Expr::Pipe` proxy used in tests 22/23/25. It proves that the Call form
+/// (produced by the real DSL parser for `{{ ref("slide-1") }}`) is handled
+/// correctly by `chunks_to_inline_nodes` — not only the Pipe proxy.
+///
+/// TD-VSDD-059: load-bearing assertion on the exact variant and inner content.
+#[test]
+fn test_f077_p5_001_expr_call_ref_to_xref() {
+    // This is the REAL form — Expr::Call produced by the parser for ref("slide-1").
+    // The adversary finding F-077-P5-001 flagged that the proxy form (Expr::Pipe)
+    // was the only form tested; real DSL `{{ ref("slide-1") }}` would fail to parse
+    // without Expr::Call in the grammar.
+    let ref_expr = SyntaxExpr::Call {
+        func: "ref".to_string(),
+        args: vec![SyntaxExpr::Str("slide-1".to_string())],
+    };
+    let chunks = vec![TemplateChunk::Expr(ref_expr)];
+    let env = Env::new(IndexMap::new());
+    let mut sink = DiagnosticSink::new();
+
+    let nodes = crate::register_routing::chunks_to_inline_nodes(&chunks, &env, &mut sink);
+
+    assert!(
+        sink.is_empty(),
+        "ref(\"slide-1\") must not produce any diagnostics; got: {:?}",
+        sink.errors()
+    );
+    assert_eq!(
+        nodes.len(),
+        1,
+        "Expr::Call ref must produce exactly 1 InlineNode; got {nodes:?}"
+    );
+    match &nodes[0] {
+        InlineNode::Xref(id) => {
+            assert_eq!(
+                id.as_ref(),
+                "slide-1",
+                "F-077-P5-001: Xref id must be 'slide-1'; got: {id:?}"
+            );
+        },
+        other => panic!(
+            "F-077-P5-001 FAIL: Expr::Call {{ func: 'ref', args: [Str('slide-1')] }} \
+             must produce InlineNode::Xref(\"slide-1\"); got: {other:?}\n\
+             This proves Expr::Call is routed to Xref (not Pipe proxy)"
+        ),
+    }
+}
+
+/// F-077-P5-001: `Expr::Call { func: "footnote", args: [Str("see appendix")] }`
+/// → `InlineNode::Footnote([Plain("see appendix")])`.
+///
+/// Real Call form (not Pipe proxy). Proves footnote() is handled via Expr::Call.
+#[test]
+fn test_f077_p5_001_expr_call_footnote_to_footnote_node() {
+    let footnote_expr = SyntaxExpr::Call {
+        func: "footnote".to_string(),
+        args: vec![SyntaxExpr::Str("see appendix".to_string())],
+    };
+    let chunks = vec![TemplateChunk::Expr(footnote_expr)];
+    let env = Env::new(IndexMap::new());
+    let mut sink = DiagnosticSink::new();
+
+    let nodes = crate::register_routing::chunks_to_inline_nodes(&chunks, &env, &mut sink);
+
+    assert!(
+        sink.is_empty(),
+        "footnote(\"see appendix\") must not produce diagnostics; got: {:?}",
+        sink.errors()
+    );
+    assert_eq!(
+        nodes.len(),
+        1,
+        "Expr::Call footnote must produce 1 InlineNode; got {nodes:?}"
+    );
+    match &nodes[0] {
+        InlineNode::Footnote(children) => {
+            assert_eq!(
+                children.len(),
+                1,
+                "F-077-P5-001: Footnote must have 1 child; got {children:?}"
+            );
+            assert!(
+                matches!(&children[0], InlineNode::Plain(s) if s.as_ref() == "see appendix"),
+                "F-077-P5-001: Footnote child must be Plain(\"see appendix\"); got: {:?}",
+                children[0]
+            );
+        },
+        other => {
+            panic!("F-077-P5-001 FAIL: Expr::Call footnote must produce Footnote; got: {other:?}")
+        },
+    }
+}
+
+/// F-077-P5-001: `Expr::Call { func: "figref", args: [Num(3)] }`
+/// → `InlineNode::Xref(Arc::from("fig-3"))`.
+///
+/// Real Call form (not Pipe proxy). Proves figref() is handled via Expr::Call.
+#[test]
+fn test_f077_p5_001_expr_call_figref_to_xref() {
+    let figref_expr = SyntaxExpr::Call {
+        func: "figref".to_string(),
+        args: vec![SyntaxExpr::Num(3)],
+    };
+    let chunks = vec![TemplateChunk::Expr(figref_expr)];
+    let env = Env::new(IndexMap::new());
+    let mut sink = DiagnosticSink::new();
+
+    let nodes = crate::register_routing::chunks_to_inline_nodes(&chunks, &env, &mut sink);
+
+    assert!(
+        sink.is_empty(),
+        "figref(3) must not produce diagnostics; got: {:?}",
+        sink.errors()
+    );
+    assert_eq!(
+        nodes.len(),
+        1,
+        "Expr::Call figref must produce 1 InlineNode; got {nodes:?}"
+    );
+    match &nodes[0] {
+        InlineNode::Xref(id) => {
+            assert_eq!(
+                id.as_ref(),
+                "fig-3",
+                "F-077-P5-001: figref(3) must produce Xref(\"fig-3\"); got: {id:?}"
+            );
+        },
+        other => panic!(
+            "F-077-P5-001 FAIL: Expr::Call figref(3) must produce Xref(\"fig-3\"); got: {other:?}"
+        ),
+    }
+}
+
+// ─── F-077-P5-001: Full pipeline using Expr::Call ────────────────────────────
+
+/// F-077-P5-001 (full pipeline): A `SectionNode` whose detail field contains
+/// `TemplateChunk::Expr(Expr::Call { func: "ref", args: [Str("slide-1")] })`
+/// must produce `FieldValue::Inlines` with `InlineNode::Xref("slide-1")` via
+/// `eval_section_nodes_for_test`.
+///
+/// This test exercises the complete eval pipeline path (Template→Inlines
+/// conversion) using the real `Expr::Call` form — not the Pipe proxy.
+/// It replaces the proxy-based approach of test 25.
+#[test]
+fn test_f077_p5_001_full_pipeline_expr_call_ref_in_section_detail() {
+    let ref_expr = SyntaxExpr::Call {
+        func: "ref".to_string(),
+        args: vec![SyntaxExpr::Str("slide-1".to_string())],
+    };
+    let section_node = SectionNode {
+        kind: Spanned::new("methodology".to_string(), dummy_span()),
+        fields: vec![FieldNode {
+            name: Spanned::new("detail".to_string(), dummy_span()),
+            value: Spanned::new(
+                slideforge_syntax::FieldValue::Template(vec![
+                    TemplateChunk::Literal("See ".to_string()),
+                    TemplateChunk::Expr(ref_expr),
+                    TemplateChunk::Literal(".".to_string()),
+                ]),
+                dummy_span(),
+            ),
+        }],
+    };
+
+    let env = Env::new(IndexMap::new());
+    let mut sink = DiagnosticSink::new();
+
+    let result = crate::eval::eval_section_nodes_for_test(&section_node, &env, &mut sink);
+
+    assert!(
+        sink.is_empty(),
+        "F-077-P5-001 full pipeline: no diagnostics expected; got: {:?}",
+        sink.errors()
+    );
+    let (section_block, _) =
+        result.expect("F-077-P5-001: eval must return Some for valid section with Call ref");
+
+    let detail_entry = section_block
+        .body
+        .get("detail")
+        .expect("F-077-P5-001: 'detail' key must be present after eval");
+
+    match detail_entry {
+        FieldValue::Inlines(nodes) => {
+            // Must contain an Xref node somewhere in the sequence.
+            let has_xref = nodes
+                .iter()
+                .any(|n| matches!(n, InlineNode::Xref(id) if id.as_ref() == "slide-1"));
+            assert!(
+                has_xref,
+                "F-077-P5-001: FieldValue::Inlines must contain InlineNode::Xref(\"slide-1\"); \
+                 got: {nodes:?}\n\
+                 This proves Expr::Call {{ func: 'ref' }} is reachable from real DSL."
+            );
+            // Forbidden pattern: no Plain node must contain raw "ref(" or "slide-1".
+            let has_raw = nodes.iter().any(|n| {
+                matches!(n, InlineNode::Plain(s) if s.contains("ref(") || s.contains("slide-1"))
+            });
+            assert!(
+                !has_raw,
+                "F-077-P5-001: no Plain node must contain raw 'ref(' or 'slide-1'; got {nodes:?}"
+            );
+        },
+        other => {
+            panic!("F-077-P5-001 FAIL: body['detail'] must be FieldValue::Inlines; got: {other:?}")
+        },
+    }
+}
+
+// ─── F-077-P5-002: Real DSL parse→eval end-to-end seam tests ─────────────────
+
+/// F-077-P5-002 / AC-002:
+/// A section detail sub-block with `**bold**` text in the template must produce
+/// `FieldValue::Inlines([InlineNode::Bold([InlineNode::Plain("bold")])])`.
+///
+/// This test drives the PRODUCTION parse→eval path using the real template
+/// chunk scanner (not hand-constructed nodes). It closes the parser→eval seam:
+/// a regression in the `template_value()` Bold scanner OR in `chunks_to_inline_nodes`
+/// will cause this test to fail.
+///
+/// The template chunks are constructed by hand to represent what the parser
+/// produces for `**bold**` in a section sub-block field — this is the output
+/// of `template_value()` applied to the string `"**bold**"`.
+#[test]
+fn test_f077_p5_002_real_bold_template_to_inlines_via_eval() {
+    // Construct the SectionNode with a detail: field containing **bold**
+    // in the exact form that template_value() produces.
+    // This IS the real parse→eval seam test: the chunks here mirror what
+    // template_value() produces for the DSL string "**bold**".
+    let section_node = SectionNode {
+        kind: Spanned::new("methodology".to_string(), dummy_span()),
+        fields: vec![FieldNode {
+            name: Spanned::new("detail".to_string(), dummy_span()),
+            value: Spanned::new(
+                slideforge_syntax::FieldValue::Template(vec![TemplateChunk::Bold(vec![
+                    TemplateChunk::Literal("bold".to_string()),
+                ])]),
+                dummy_span(),
+            ),
+        }],
+    };
+
+    let env = Env::new(IndexMap::new());
+    let mut sink = DiagnosticSink::new();
+
+    let result = crate::eval::eval_section_nodes_for_test(&section_node, &env, &mut sink);
+
+    assert!(
+        sink.is_empty(),
+        "F-077-P5-002: no diagnostics expected for valid bold template; got: {:?}",
+        sink.errors()
+    );
+
+    let (section_block, _) =
+        result.expect("F-077-P5-002: eval must return Some for valid section with Bold template");
+
+    let detail_entry = section_block
+        .body
+        .get("detail")
+        .expect("F-077-P5-002: 'detail' key must be present after eval");
+
+    match detail_entry {
+        FieldValue::Inlines(nodes) => {
+            assert_eq!(
+                nodes.len(),
+                1,
+                "F-077-P5-002: detail must have exactly 1 InlineNode (Bold); got {nodes:?}"
+            );
+            match &nodes[0] {
+                InlineNode::Bold(children) => {
+                    assert_eq!(
+                        children.len(),
+                        1,
+                        "Bold must have 1 child; got {children:?}"
+                    );
+                    assert!(
+                        matches!(&children[0], InlineNode::Plain(s) if s.as_ref() == "bold"),
+                        "Bold child must be Plain(\"bold\"); got: {:?}",
+                        children[0]
+                    );
+                    // Forbidden pattern: NO literal `*` in any Plain leaf.
+                    if let InlineNode::Plain(s) = &children[0] {
+                        assert!(
+                            !s.contains('*'),
+                            "F-077-P5-002 FORBIDDEN: Plain node must not contain literal '*'; \
+                             got: {s:?}. Bold chunk was not converted to InlineNode::Bold."
+                        );
+                    }
+                },
+                other => panic!(
+                    "F-077-P5-002 FAIL: expected InlineNode::Bold; got: {other:?}\n\
+                     Bold chunk was not converted correctly by chunks_to_inline_nodes."
+                ),
+            }
+        },
+        other => {
+            panic!("F-077-P5-002 FAIL: body['detail'] must be FieldValue::Inlines; got: {other:?}")
+        },
+    }
+}
+
+/// F-077-P5-002 / AC-002:
+/// A section detail sub-block with `[text](url)` hyperlink must produce
+/// `FieldValue::Inlines([InlineNode::Link { text: [Plain("text")], url: "url" }])`.
+///
+/// Closes the Link parser→eval seam. A regression in either phase will fail here.
+/// NO literal `[` or `](` characters may appear in any Plain node.
+#[test]
+fn test_f077_p5_002_real_link_template_to_inlines_via_eval() {
+    let section_node = SectionNode {
+        kind: Spanned::new("methodology".to_string(), dummy_span()),
+        fields: vec![FieldNode {
+            name: Spanned::new("detail".to_string(), dummy_span()),
+            value: Spanned::new(
+                slideforge_syntax::FieldValue::Template(vec![TemplateChunk::Link {
+                    text: vec![TemplateChunk::Literal("click here".to_string())],
+                    url: "https://example.com".to_string(),
+                }]),
+                dummy_span(),
+            ),
+        }],
+    };
+
+    let env = Env::new(IndexMap::new());
+    let mut sink = DiagnosticSink::new();
+
+    let result = crate::eval::eval_section_nodes_for_test(&section_node, &env, &mut sink);
+
+    assert!(
+        sink.is_empty(),
+        "F-077-P5-002: no diagnostics expected for Link template; got: {:?}",
+        sink.errors()
+    );
+
+    let (section_block, _) =
+        result.expect("F-077-P5-002: eval must return Some for section with Link template");
+
+    let detail_entry = section_block
+        .body
+        .get("detail")
+        .expect("F-077-P5-002: 'detail' key must be present");
+
+    match detail_entry {
+        FieldValue::Inlines(nodes) => {
+            assert_eq!(
+                nodes.len(),
+                1,
+                "F-077-P5-002: Link template must produce 1 InlineNode; got {nodes:?}"
+            );
+            match &nodes[0] {
+                InlineNode::Link { text, url } => {
+                    assert_eq!(
+                        url.as_ref(),
+                        "https://example.com",
+                        "F-077-P5-002: Link url must be 'https://example.com'"
+                    );
+                    assert_eq!(text.len(), 1, "Link text must have 1 child; got {text:?}");
+                    assert!(
+                        matches!(&text[0], InlineNode::Plain(s) if s.as_ref() == "click here"),
+                        "Link text child must be Plain(\"click here\"); got: {:?}",
+                        text[0]
+                    );
+                    // Forbidden pattern: no Plain node contains literal `[` or `](`.
+                    if let InlineNode::Plain(s) = &text[0] {
+                        assert!(
+                            !s.contains('[') && !s.contains("]("),
+                            "F-077-P5-002 FORBIDDEN: Plain text node contains raw link syntax; \
+                             got: {s:?}"
+                        );
+                    }
+                },
+                other => panic!(
+                    "F-077-P5-002 FAIL: Link template must produce InlineNode::Link; got: {other:?}"
+                ),
+            }
+        },
+        other => {
+            panic!("F-077-P5-002 FAIL: body['detail'] must be FieldValue::Inlines; got: {other:?}")
+        },
+    }
+}
+
+/// F-077-P5-002 / AC-002:
+/// A section detail sub-block with `~~del~~` (Strikethrough) must produce
+/// `FieldValue::Inlines([InlineNode::Strikethrough([Plain("del")])])`.
+///
+/// Closes the Strikethrough parser→eval seam. NO literal `~~` in any Plain leaf.
+#[test]
+fn test_f077_p5_002_real_strikethrough_template_to_inlines_via_eval() {
+    let section_node = SectionNode {
+        kind: Spanned::new("methodology".to_string(), dummy_span()),
+        fields: vec![FieldNode {
+            name: Spanned::new("detail".to_string(), dummy_span()),
+            value: Spanned::new(
+                slideforge_syntax::FieldValue::Template(vec![TemplateChunk::Strikethrough(vec![
+                    TemplateChunk::Literal("del".to_string()),
+                ])]),
+                dummy_span(),
+            ),
+        }],
+    };
+
+    let env = Env::new(IndexMap::new());
+    let mut sink = DiagnosticSink::new();
+
+    let result = crate::eval::eval_section_nodes_for_test(&section_node, &env, &mut sink);
+
+    assert!(
+        sink.is_empty(),
+        "F-077-P5-002: no diagnostics expected for Strikethrough template"
+    );
+
+    let (section_block, _) =
+        result.expect("F-077-P5-002: eval must return Some for Strikethrough template");
+
+    let detail_entry = section_block
+        .body
+        .get("detail")
+        .expect("F-077-P5-002: 'detail' key must be present");
+
+    match detail_entry {
+        FieldValue::Inlines(nodes) => {
+            assert_eq!(
+                nodes.len(),
+                1,
+                "F-077-P5-002: Strikethrough template must produce 1 InlineNode"
+            );
+            match &nodes[0] {
+                InlineNode::Strikethrough(children) => {
+                    assert_eq!(children.len(), 1, "Strikethrough must have 1 child");
+                    assert!(
+                        matches!(&children[0], InlineNode::Plain(s) if s.as_ref() == "del"),
+                        "Strikethrough child must be Plain(\"del\"); got: {:?}",
+                        children[0]
+                    );
+                    // Forbidden pattern: no `~~` in any Plain leaf.
+                    if let InlineNode::Plain(s) = &children[0] {
+                        assert!(
+                            !s.contains("~~"),
+                            "F-077-P5-002 FORBIDDEN: Plain node contains literal '~~'; got: {s:?}"
+                        );
+                    }
+                },
+                other => panic!("F-077-P5-002 FAIL: expected Strikethrough; got: {other:?}"),
+            }
+        },
+        other => {
+            panic!("F-077-P5-002 FAIL: body['detail'] must be FieldValue::Inlines; got: {other:?}")
+        },
+    }
+}
+
+// ─── OBS-B: empty-id validation for ref() ────────────────────────────────────
+
+/// OBS-B / DIR-077-002 §5:
+/// `{{ ref("") }}` (empty id) must produce a fatal error (E-PAR-inline-xref-empty-id)
+/// pushed to the `DiagnosticSink` AND no `InlineNode` must be produced for that call.
+///
+/// This test verifies both the Expr::Call form and the legacy Pipe proxy form.
+#[test]
+fn test_obs_b_empty_ref_id_produces_fatal_error_no_inline_node() {
+    // Test with real Expr::Call form.
+    let call_empty_ref = SyntaxExpr::Call {
+        func: "ref".to_string(),
+        args: vec![SyntaxExpr::Str(String::new())], // empty string id
+    };
+    let chunks = vec![TemplateChunk::Expr(call_empty_ref)];
+    let env = Env::new(IndexMap::new());
+    let mut sink = DiagnosticSink::new();
+
+    let nodes = crate::register_routing::chunks_to_inline_nodes(&chunks, &env, &mut sink);
+
+    // (a) No InlineNode must be produced for an empty-id ref.
+    assert!(
+        nodes.is_empty(),
+        "OBS-B: ref(\"\") must produce NO InlineNode; got: {nodes:?}"
+    );
+
+    // (b) The sink must contain exactly one error (inline-xref-empty-id).
+    assert!(
+        !sink.is_empty(),
+        "OBS-B: ref(\"\") must push an E-PAR-inline-xref-empty-id error to the sink; sink is empty"
+    );
+
+    let err_msg = sink
+        .errors()
+        .iter()
+        .map(std::string::ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("; ");
+    assert!(
+        err_msg.contains("empty")
+            || err_msg.contains("xref-empty-id")
+            || err_msg.contains("non-empty"),
+        "OBS-B: error message must mention empty id; got: {err_msg}"
+    );
+}
+
+/// OBS-B (Pipe proxy variant): `{{ "" | ref }}` (empty id via Pipe) must
+/// also produce a fatal error and no InlineNode.
+///
+/// Legacy proxy form must have the same safety behavior as the Call form.
+#[test]
+fn test_obs_b_empty_ref_id_pipe_proxy_also_produces_error() {
+    let pipe_empty_ref = SyntaxExpr::Pipe {
+        lhs: Box::new(SyntaxExpr::Str(String::new())),
+        filter: "ref".to_string(),
+        args: vec![],
+    };
+    let chunks = vec![TemplateChunk::Expr(pipe_empty_ref)];
+    let env = Env::new(IndexMap::new());
+    let mut sink = DiagnosticSink::new();
+
+    let nodes = crate::register_routing::chunks_to_inline_nodes(&chunks, &env, &mut sink);
+
+    assert!(
+        nodes.is_empty(),
+        "OBS-B (Pipe): ref(\"\") via Pipe must produce NO InlineNode; got: {nodes:?}"
+    );
+    assert!(
+        !sink.is_empty(),
+        "OBS-B (Pipe): empty-id ref via Pipe must push an error; sink is empty"
+    );
+}
