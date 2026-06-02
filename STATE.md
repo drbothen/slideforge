@@ -26,15 +26,15 @@ dtu_services: []
 wave_1_gate: "PASS 2026-05-27 — 3 gate passes, 11 findings fixed"
 wave_2_gate: "PASS 2026-05-27 — 11 gate passes, 19 findings fixed, 3/3 clean (passes 9-10-11)"
 wave_3_gate: "PASSED 2026-05-31 — PR #38 (7d266ad7); adversary pass 8 strict-CLEAN; holdout must-pass 5/5"
-wave_4_batch_a_complete: 8
+wave_4_batch_a_complete: 9
 wave_4_batch_a_total: 10
 wave_4_started: 2026-05-31
 wave_4_total_stories: 18
 wave_4_total_points: 114
 wave_5_total_points: 109
-develop_sha: "953fb5b2"
-develop_pr_count: 47
-workspace_tests: "~2700+ (47 PRs merged; STORY-075 footer detection; STORY-073 +TextRun tests; STORY-076 brand tests; STORY-078 parser tests)"
+develop_sha: "e5d818e7"
+develop_pr_count: 48
+workspace_tests: "~2700+ (48 PRs merged; STORY-045 PDF/UA-1+veraPDF; STORY-075 footer detection; STORY-073 +TextRun tests; STORY-076 brand tests; STORY-078 parser tests)"
 workspace_test_failures: 0
 ---
 
@@ -54,33 +54,17 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. Generates branded .pptx
 
 A new session with zero prior context should proceed in this order:
 
-### 1. STORY-045 — PDF/UA-1 Tagging + veraPDF (PRIORITY: P0, long pole)
+### 1. STORY-077 — SectionBlock IR Extension + Inline-Markup Parser (PRIORITY: P0)
 
-**State:** Worktree `/Users/jmagady/Dev/slideforge/.worktrees/STORY-045` on branch `feature/S-045` (HEAD 2f2ef856). Adversary cascade **CONVERGED — 3/3 strict-CLEAN** (passes 6/7/8 all clean). All pass-1..8 fixes verified (F-001..F-008, F-P2-001, F-P3-001, F-P4-001, OBS-P5-001, EC-008 test, deterministic font).
+**State:** Worktree `.worktrees/STORY-077` on branch `feature/S-077` (HEAD 1dc97f36). Section IR + register routing + inline-markup parser (TemplateChunk + `chunks_to_inline_nodes`) ALL IMPLEMENTED. Adversary cascade: pass-1 (F-077-P5-001 Expr::Call unreachable fixed), pass-2 (F-077-P2-001 genuine parse→eval test; F-077-P2-002 delimiter spans; underscore regression tests), pass-3 (CLEAN 1/3), pass-4 in progress. E-EVL-012/013 added (collision fix from E-EVL taxonomy); E-PAR-019/020 added (collision fix from E-PAR taxonomy). error-taxonomy v2.10. Streak **0/3** (pass-3 was CLEAN but pass-4+ cycle ongoing; see below).
 
-**Scope:** Story v1.1, 8 pts, BC-4.03.001 v1.3. ACs: AC-001..AC-009 (original) + AC-010 (/Outlines bookmarks), AC-011 (Hn /Title text), AC-012 (Validator::UA1 both export paths), AC-013 (veraPDF isCompliant CI gate).
-
-**All fixes applied and cascade complete:** F-001–F-008; OBS-012; F-P2-001 (per-block/bullet baseline stacking BODY_LINE_LEADING=1.2); F-P2-002 adjudicated out-of-scope; F-P3-001, F-P4-001 (draw_body_blocks_tagged MCID routing) all resolved.
-
-**Deferred cross-exporter finding:** OBS-P6-001 — PDF exporter ignores `opts.strict` / `laid_out.warnings`; cross-exporter contract concern. Routed to wave-gate (non-blocking). See Drift Items.
-
-**Mandatory forward-obligations** (MUST land in STORY-045, not split out): (a) `decorative_frame_indices` → emit `ContentTag::Artifact(ArtifactType::Other)` for decorative Image/Shape frames in SAME change as decorative drawing; (b) per-block/per-line baselines — **DONE**; (c) text color from brand/theme palette — **RE-COUPLED to future bg-fill story (orchestrator ruling 2026-06-01) — NOT a STORY-045 blocker**.
-
-**Next step:** demo-recorder per-AC (AC-001..AC-013) → rebase onto develop (953fb5b2) → push → pr-manager 9-step PR cycle → human merge.
-
----
-
-### 2. STORY-077 — SectionBlock IR Extension + Inline-Markup Parser (PRIORITY: P0)
-
-**State:** Worktree `.worktrees/STORY-077` on branch `feature/S-077` (HEAD c7c1ae6f). Section IR extension + register routing COMPLETE. **Scope EXPANDED** by human (2026-06-02) per DIR-077-002: inline-markup parser (TemplateChunk variants + parser + `chunks_to_inline_nodes` in slideforge-eval). Story v1.5, 8→13 pts. Adversary streak **RESET TO 0/3** by pass-5 finding F-077-P5-001 (now properly resolved by expansion scope). BC-3.02.002 bumped to v1.5 (PC8 inline-markup clarification; see DIR-077-002).
-
-**Scope:** 13 pts, P0, EPIC-18, crates: slideforge-types + slideforge-syntax + slideforge-eval. BCs: BC-3.02.002 v1.5, BC-1.14.003 v1.3. `SectionBlock.body: OrderedMap<Arc<str>, FieldValue>` + `register_content` field + inline-markup TemplateChunk parser + `chunks_to_inline_nodes`. ~32 layout call-site adjustments + 28 Red Gate tests for inline-markup. Blocks STORY-041/042.
+**Scope:** 13 pts, P0, EPIC-18, crates: slideforge-types + slideforge-syntax + slideforge-eval. BCs: BC-3.02.002 v1.5, BC-1.14.003 v1.3. `SectionBlock.body: OrderedMap<Arc<str>, FieldValue>` + `register_content` field + inline-markup TemplateChunk parser + `chunks_to_inline_nodes`. ~32 layout call-site adjustments. Blocks STORY-041/042.
 
 **Non-blocking deferred finding:** OBS-077-P4-A — duplicate `SectionBlock` type name across `slideforge-types` + `slideforge-plugin-api`; STORY-041/042 traceability concern. See Drift Items.
 
-**Next step:** test-writer Red Gate for inline-markup (28 tests) → implementer Phase 1 (TemplateChunk variants + parser) + Phase 2 (`chunks_to_inline_nodes`) → resume adversary cascade (fresh context, absolute path `.worktrees/STORY-077`) → 3/3 strict-CLEAN → demo-recorder → pr-manager → human merge.
+**Next step:** Adversary pass 4 → 3/3 strict-CLEAN → demo-recorder → pr-manager → human merge.
 
-### 3. STORY-081 — Slide-Level Inline Markup (PRIORITY: P0, Wave 5)
+### 2. STORY-081 — Slide-Level Inline Markup (PRIORITY: P0, Wave 5)
 
 **State:** DRAFT. New story created 2026-06-02. Depends on STORY-077 (inline-markup parser must land first) + STORY-041/042/043/044/046. BLOCKS v1.0 release.
 
@@ -95,25 +79,25 @@ A new session with zero prior context should proceed in this order:
 | Field | Value |
 |-------|-------|
 | **Date** | 2026-06-02 |
-| **Position** | Phase 3, Wave 4 Batch A — 8/10 complete. STORY-045 adversary cascade CONVERGED 3/3 strict-CLEAN (passes 6/7/8); demo-recorder per-AC next, then PR. STORY-077 scope expanded (v1.5, 13 pts, inline-markup parser, streak reset 0/3); test-writer Red Gate (28 tests) next. STORY-081 created (Wave 5, 13 pts, draft). Open PRs: 0. |
-| **develop SHA** | 953fb5b2 (47 merged PRs) |
+| **Position** | Phase 3, Wave 4 Batch A — 9/10 complete. STORY-045 MERGED PR #48 (e5d818e7). STORY-077 cascade rounds 1-3 complete (E-EVL-012/013, E-PAR-019/020; error-taxonomy v2.10); pass 4 NEXT; streak 0/3. STORY-081 draft (Wave 5). Open PRs: 0. |
+| **develop SHA** | e5d818e7 (48 merged PRs) |
 | **origin/develop** | authoritative — run `git fetch` before starting; local `develop` ref may be stale |
-| **Active worktrees** | `.worktrees/STORY-045` (feature/S-045 @ 2f2ef856), `.worktrees/STORY-077` (feature/S-077 @ c7c1ae6f) |
+| **Active worktrees** | `.worktrees/STORY-077` (feature/S-077 @ 1dc97f36) |
 | **Open PRs** | 0 |
 | **Workspace crates** | 16 |
-| **STORY-045** | CONVERGED — worktree .worktrees/STORY-045 (feature/S-045 @ 2f2ef856). 3/3 strict-CLEAN (passes 6/7/8). All F-001..F-008, F-P2-001, F-P3-001, F-P4-001, OBS-P5-001 fixed. Story v1.1 (8 pts). NEXT: demo-recorder per-AC → rebase → push → pr-manager. |
-| **STORY-077** | IN PROGRESS — worktree .worktrees/STORY-077 (feature/S-077 @ c7c1ae6f). Scope expanded 2026-06-02 (DIR-077-002, inline-markup parser). Story v1.5 (13 pts). Streak 0/3 (reset). BC-3.02.002 v1.5, BC-1.14.003 v1.3. NEXT: test-writer Red Gate (28 tests). |
+| **STORY-045** | MERGED — PR #48 squash-merged 2026-06-02 at develop e5d818e7. Worktree cleaned up. |
+| **STORY-077** | IN PROGRESS — worktree .worktrees/STORY-077 (feature/S-077 @ 1dc97f36). Story v1.5 (13 pts). Inline-markup parser implemented. Cascade pass-1/2/3 done; pass 4 NEXT. Streak 0/3. E-EVL-012/013, E-PAR-019/020 added; error-taxonomy v2.10. |
 | **STORY-081** | DRAFT — Wave 5, EPIC-18, 13 pts, P0. Slide-Level Inline Markup. Depends on STORY-077. Not started. |
-| **BC deltas** | BC-2.01.001 v1.4, BC-3.02.002 v1.5 (PC8 inline-markup + recognized-type list 5→7), BC-3.05.001 v1.3.5, BC-1.14.003 v1.3 (SS-02), BC-4.03.001 v1.3, error-taxonomy v2.8 — all local-only on factory-artifacts. |
+| **BC deltas** | BC-2.01.001 v1.4, BC-3.02.002 v1.5 (PC8 inline-markup + recognized-type list 5→7), BC-3.05.001 v1.3.5, BC-1.14.003 v1.3 (SS-02), BC-4.03.001 v1.3, error-taxonomy v2.10 — all local-only on factory-artifacts. |
 | **factory-artifacts** | Local only. Push requires explicit human authorization per CLAUDE.md. |
 
 ---
 
 ## Current Status
 
-Phase 3 IN PROGRESS. Wave 1/2/3 COMPLETE (gates PASSED). **Wave 4 Batch A: 8/10 complete.** STORY-035/036/043/044/073/075/076/078 MERGED. STORY-045 adversary cascade CONVERGED 3/3 (demo/PR next). STORY-077 scope expanded v1.5 13pts inline-markup parser (streak 0/3; test-writer next). STORY-081 created (Wave 5, 13 pts, draft).
+Phase 3 IN PROGRESS. Wave 1/2/3 COMPLETE (gates PASSED). **Wave 4 Batch A: 9/10 complete.** STORY-035/036/043/044/045/073/075/076/078 MERGED. STORY-077 cascade pass-1/2/3 done (pass 4 NEXT; streak 0/3; inline-markup implemented; error-taxonomy v2.10). STORY-081 draft (Wave 5, 13 pts).
 
-develop: `953fb5b2` (47 merged PRs, 0 failures). 81 stories / 491 pts. Workspace: 16 crates. Open PRs: 0.
+develop: `e5d818e7` (48 merged PRs, 0 failures). 81 stories / 491 pts. Workspace: 16 crates. Open PRs: 0.
 
 ## Phase Progress
 
@@ -124,7 +108,7 @@ develop: `953fb5b2` (47 merged PRs, 0 failures). 81 stories / 491 pts. Workspace
 | Planning (25 DSL decisions) | DONE 2026-05-24 | q1–q25 decision docs + 14 research threads + 7/7 spikes resolved |
 | Phase 1: Spec Crystallization | DONE — APPROVED 2026-05-25 | PRD (109 BCs, 15 HS, 4 supplements) + architecture (14 ADRs, 15 VPs, 20 crates) + UX spec. 17 passes, 69 findings, 3/3 clean. |
 | Phase 2: Story Decomposition | DONE — APPROVED 2026-05-25 | 81 stories (77 original + 4 added 2026-06-01/02), 21 epics, 6 waves, 491 pts. 22 passes, 96+ findings, 3/3 clean. |
-| Phase 3: TDD Implementation | IN PROGRESS — Waves 1/2/3 GATE PASSED. **Wave 4 Batch A 8/10 (STORY-035+036+043+044+073+075+076+078 MERGED). STORY-045 CONVERGED 3/3 (demo/PR next). STORY-077 expanded v1.5 13pts (streak 0/3; test-writer next). STORY-081 DRAFT Wave 5.** | Per-story delivery |
+| Phase 3: TDD Implementation | IN PROGRESS — Waves 1/2/3 GATE PASSED. **Wave 4 Batch A 9/10 (STORY-035+036+043+044+045+073+075+076+078 MERGED). STORY-077 cascade pass-1/2/3 done (pass 4 NEXT; streak 0/3; inline-markup implemented). STORY-081 DRAFT Wave 5.** | Per-story delivery |
 | Phase 4: Holdout Evaluation | NOT STARTED | Per-wave holdout gates |
 | Phase 5: Adversarial Refinement | NOT STARTED | Post-implementation cascade |
 | Phase 6: Formal Hardening | NOT STARTED | Kani + fuzz + mutants + semgrep |
@@ -142,8 +126,8 @@ develop: `953fb5b2` (47 merged PRs, 0 failures). 81 stories / 491 pts. Workspace
 | STORY-075 | Footer Detection | MERGED | #47 | 953fb5b2 |
 | STORY-078 | Parser: section block syntax (P0) | MERGED | #46 | 5ab4cef4 |
 | STORY-073 | Bullets Layout | MERGED | #45 | 47856465 |
-| STORY-045 | PDF/UA-1 + veraPDF (P0) | CONVERGED — 3/3 strict-CLEAN (passes 6/7/8); demo-recorder per-AC next, then PR | — | 2f2ef856 (wt) |
-| STORY-077 | SectionBlock IR Extension + Inline-Markup Parser (P0) | IN PROGRESS — scope expanded v1.5 13pts (DIR-077-002); streak 0/3; test-writer Red Gate next | — | c7c1ae6f (wt) |
+| STORY-045 | PDF/UA-1 + veraPDF (P0) | MERGED | #48 | e5d818e7 |
+| STORY-077 | SectionBlock IR Extension + Inline-Markup Parser (P0) | IN PROGRESS — cascade pass-1/2/3 done; pass 4 NEXT; streak 0/3; inline-markup implemented; E-EVL-012/013 + E-PAR-019/020 | — | 1dc97f36 (wt) |
 | STORY-081 | Slide-Level Inline Markup (P0, Wave 5) | DRAFT — depends on STORY-077; not started | — | — |
 
 ## Decisions Log (milestones)
@@ -176,6 +160,8 @@ develop: `953fb5b2` (47 merged PRs, 0 failures). 81 stories / 491 pts. Workspace
 - 2026-06-02 — STORY-045 adversary cascade CONVERGED — 3/3 strict-CLEAN (passes 6/7/8). All 8-pass cascade fixes applied (F-001..F-008, F-P2-001, F-P3-001, F-P4-001, OBS-P5-001). Worktree HEAD advanced to 2f2ef856. NEXT: demo-recorder per-AC → rebase onto develop → push → pr-manager 9-step PR cycle.
 - 2026-06-02 — STORY-077 scope expansion (human decision 2026-06-02). DIR-077-002 issued: inline-markup parser (TemplateChunk variants + parser + chunks_to_inline_nodes in slideforge-eval) added to STORY-077 scope. Story v1.4→v1.5, 8→13 pts, est_days 3→5. BC-3.02.002 bumped v1.4→v1.5 (PC8 inline-markup clarification). Pass-5 finding F-077-P5-001 now properly resolved by expansion scope; streak reset 0/3. Worktree HEAD c7c1ae6f (section IR + register routing complete).
 - 2026-06-02 — STORY-081 created (Slide-Level Inline Markup). EPIC-18, Wave 5, P0, 13 pts, status draft. Depends on STORY-077 + STORY-041/042/043/044/046. BC-3.02.002 v1.5 (PC8). BLOCKS v1.0 release. Closes temporary inconsistency where section-level inline markup lands in STORY-077 but slide bodies remain plain strings.
+- 2026-06-02 — STORY-045 MERGED — PR #48 squash-merged at develop e5d818e7. Worktree cleaned up. Wave 4 Batch A: 9/10. develop: e5d818e7 (48 PRs). Open PRs: 0.
+- 2026-06-02 — STORY-077 inline-markup cascade rounds: pass-1 (F-077-P5-001 Expr::Call unreachable fixed), pass-2 (F-077-P2-001 genuine parse→eval test; F-077-P2-002 delimiter spans; underscore regression tests), pass-3 CLEAN (1/3 streak). E-EVL diagnostic-code collision resolved → E-EVL-012 (FigrefInvalidArg) + E-EVL-013 (InlineXrefEmptyId). E-PAR collision resolved → E-PAR-019 (unclosed inline markup) + E-PAR-020 (empty inline markup span). error-taxonomy bumped v2.8→v2.10. HEAD 1dc97f36. Streak reset 0/3 by pass-4 (in progress). Pass 4 NEXT.
 
 ## Lessons / Process Gaps (codified 2026-06-01)
 
@@ -235,6 +221,9 @@ Production-grade from day 1. Key enforced gates:
 | 2026-06-01 | BC-1.14.001, BC-1.14.002 still carry `subsystem: SS-TBD` (correct value SS-02 per STORY-035). BC-1.14.003 RESOLVED (bumped v1.2→v1.3, SS-TBD→SS-02, committed 2026-06-02). | LOW | BC-1.14.001/002 fold into next spec-hygiene pass. Not a story blocker. |
 | 2026-06-02 | OBS-P6-001 (STORY-045 pass 6): PDF exporter ignores `opts.strict` and `laid_out.warnings` — cross-exporter contract concern. Exporter-specific opt interpretation is a wave-gate integration question, not a single-story concern. | LOW | Route to wave-gate post-STORY-045 merge. Non-blocking. |
 | 2026-06-02 | OBS-077-P4-A (STORY-077 pass 4): Duplicate `SectionBlock` type name across `slideforge-types` + `slideforge-plugin-api` — STORY-041/042 traceability concern. Name collision could cause confusion but does not block STORY-077 functionality. | LOW | Route to STORY-041/042 (plugin-api consumers). Non-blocking for STORY-077. |
+| 2026-06-02 | E-EVL-007..E-EVL-011 implemented in slideforge-eval/src/error.rs but NOT registered in error-taxonomy.md (pre-existing taxonomy debt, predates STORY-077). | LOW | Follow-up: taxonomy-completeness backfill task. Not a STORY-077 blocker. |
+| 2026-06-02 | SEC-001 (STORY-045 PR #48): veraPDF Docker image `verapdf/cli:latest` in .github/workflows/pdf-ua1.yml not digest-pinned (CWE-494). CI-only risk. | MEDIUM | Fix before v1.0 / Phase 6. Merged in #48 — track for Phase 6 hardening sweep. |
+| 2026-06-02 | SEC-002 (STORY-045 PR #48): emu_to_pt i64→f32 precision loss (low impact; Phase 6 Kani bound). SEC-003: CI tee temp-file uses predictable path (self-hosted runner only, LOW). | LOW | Noted. Phase 6 formal hardening. |
 
 ## Process Wins (apply to future stories)
 
