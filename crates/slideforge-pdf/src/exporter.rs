@@ -37,7 +37,10 @@
 //!    - Diagram frames: `svg_embed::embed_normalized_svg()`.
 //! 4. Calls `document.set_tag_tree(tag_tree)` with the assembled structural tree.
 //! 5. Calls `document.finish()` → `KrillaResult<Vec<u8>>`.
-//! 6. Maps `KrillaError` → `PdfExportError::Serialize` → `ExportError::RenderError`.
+//! 6. Maps `KrillaError` with two distinct routes:
+//!    `KrillaError::Validation` → `PdfExportError::ValidationFailed`;
+//!    all other `KrillaError` variants → `PdfExportError::Serialize`.
+//!    Both ultimately map to `ExportError::RenderError` at the plugin-trait boundary.
 //! 7. Returns the PDF bytes.
 //!
 //! No subprocess is spawned. No FFI to C libraries. Pure Rust.
@@ -205,7 +208,7 @@ impl PdfExporter {
     ///
     /// The production export path uses `Validator::UA1` via
     /// `Configuration::new_with_validator(Validator::UA1)`. Any `KrillaError::Validation`
-    /// is propagated as a fatal `PdfExportError::Serialize` — it is NOT silently swallowed.
+    /// is propagated as a fatal `PdfExportError::ValidationFailed` — it is NOT silently swallowed.
     ///
     /// ## Coordinate invariant (BC-4.03.005 / Architecture Compliance Rule 2)
     ///
