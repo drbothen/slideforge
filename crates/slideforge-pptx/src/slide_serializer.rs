@@ -64,7 +64,7 @@ pub struct SlideSerializer {
     /// Placeholder idx values that exist in the resolved layout definition.
     ///
     /// When `Some(set)`, the serializer only emits `<p:ph>` for a frame if the
-    /// layout contains a matching placeholder idx (AC-011 / BC-4.01.005 §7).
+    /// layout contains a matching placeholder idx (AC-011 / ADR-015 §7).
     ///
     /// When `None` (default from `new()`, i.e., `with_layout` not called):
     ///   - `Title` frames emit `<p:ph>` unconditionally (backward-compatible).
