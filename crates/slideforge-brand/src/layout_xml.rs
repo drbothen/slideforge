@@ -599,8 +599,11 @@ const MASTER_PLACEHOLDER_DEFS: &[(&str, u32, &str, i64, i64, i64, i64)] = &[
 /// - `<a:clrMap>` with all 12 OOXML color-map tokens (ECMA-376 §19.3.1.14).
 /// - `<p:sldLayoutIdLst>` with one `<p:sldLayoutId>` per layout in `template.layouts`
 ///   (IDs from `template.master_ids.layout_id_start` onwards).
-/// - `<p:txStyles>` with heading/body font names from `template.fonts`.
 /// - `<p:hf>` footer visibility flags from `template.footer_flags`.
+/// - `<p:txStyles>` with heading/body font names from `template.fonts`.
+///
+/// Element order follows ECMA-376 §19.3.1.42 CT_SlideMaster sequence model:
+/// `cSld, clrMap, sldLayoutIdLst, hf, txStyles` (ADR-015 §A.3).
 ///
 /// # Panics
 ///
@@ -693,11 +696,15 @@ pub fn serialize_master_to_xml(template: &crate::template::BrandTemplate) -> Vec
         .write_event(Event::End(BytesEnd::new("p:sldLayoutIdLst")))
         .expect("write sldLayoutIdLst end");
 
-    // <p:txStyles> — heading and body font definitions
-    write_master_tx_styles(&mut writer, template);
+    // ECMA-376 §19.3.1.42 CT_SlideMaster sequence model: cSld, clrMap, sldLayoutIdLst, hf, txStyles
+    // <p:hf> MUST precede <p:txStyles> — wrong order causes repair dialogs in PowerPoint/Keynote.
+    // (ADR-015 §A.3 — F-PASS2-H1 fix)
 
     // <p:hf> — footer visibility flags
     write_master_hf(&mut writer, &template.footer_flags);
+
+    // <p:txStyles> — heading and body font definitions
+    write_master_tx_styles(&mut writer, template);
 
     // </p:sldMaster>
     writer
@@ -1707,6 +1714,53 @@ mod tests {
             }
         }
         assert!(count > 0, "round-trip parse produced no events");
+    }
+
+    /// ADR-015 §A.3 (F-PASS2-H1) — ECMA-376 §19.3.1.42 element order:
+    /// `cSld, clrMap, sldLayoutIdLst, hf, txStyles`.
+    ///
+    /// `<p:hf>` MUST appear before `<p:txStyles>` in the serialized XML.
+    /// Also verifies `<a:clrMap>` appears before `<p:sldLayoutIdLst>` which appears
+    /// before `<p:hf>`.
+    ///
+    /// This is a load-bearing order test (TD-VSDD-059). Position is asserted by
+    /// byte-offset comparison, not by tag counting.
+    #[test]
+    fn test_adr015_master_element_order_hf_before_tx_styles() {
+        let template = minimal_brand_template();
+        let xml_bytes = serialize_master_to_xml(&template);
+        let xml = std::str::from_utf8(&xml_bytes).expect("output must be valid UTF-8");
+
+        let clr_map_pos = xml
+            .find("<a:clrMap")
+            .expect("master XML must contain <a:clrMap>");
+        let sld_layout_lst_pos = xml
+            .find("<p:sldLayoutIdLst")
+            .expect("master XML must contain <p:sldLayoutIdLst>");
+        let hf_pos = xml
+            .find("<p:hf")
+            .expect("master XML must contain <p:hf>");
+        let tx_styles_pos = xml
+            .find("<p:txStyles")
+            .expect("master XML must contain <p:txStyles>");
+
+        // ECMA-376 §19.3.1.42 CT_SlideMaster sequence model:
+        // cSld < clrMap < sldLayoutIdLst < hf < txStyles
+        assert!(
+            clr_map_pos < sld_layout_lst_pos,
+            "<a:clrMap> (byte {clr_map_pos}) must appear BEFORE <p:sldLayoutIdLst> \
+             (byte {sld_layout_lst_pos}) — ECMA-376 §19.3.1.42 sequence model (ADR-015 §A.3)"
+        );
+        assert!(
+            sld_layout_lst_pos < hf_pos,
+            "<p:sldLayoutIdLst> (byte {sld_layout_lst_pos}) must appear BEFORE <p:hf> \
+             (byte {hf_pos}) — ECMA-376 §19.3.1.42 sequence model (ADR-015 §A.3)"
+        );
+        assert!(
+            hf_pos < tx_styles_pos,
+            "<p:hf> (byte {hf_pos}) must appear BEFORE <p:txStyles> (byte {tx_styles_pos}) \
+             — ECMA-376 §19.3.1.42 sequence model requires hf before txStyles (ADR-015 §A.3 / F-PASS2-H1)"
+        );
     }
 
     // ─── Tests for serialize_theme_to_xml ────────────────────────────────────
