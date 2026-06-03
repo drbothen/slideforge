@@ -7,8 +7,9 @@
 //! ## Invariant (BC-4.02.002 invariant 3)
 //!
 //! Manual sections are NOT merged with auto-generated sections of the same
-//! logical name. Each manual section is serialized at its declared position as
-//! determined by the [`crate::section_order::SectionOrderer`].
+//! logical name. Each manual section is serialized after all auto-generated
+//! sections, in the deck source order as determined by
+//! [`crate::section_order::SectionOrderer`].
 //!
 //! ## Content blocks
 //!
