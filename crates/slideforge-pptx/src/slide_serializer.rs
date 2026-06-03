@@ -66,13 +66,22 @@ pub struct SlideSerializer {
     /// When `Some(set)`, the serializer only emits `<p:ph>` for a frame if the
     /// layout contains a matching placeholder idx (AC-011 / BC-4.01.005 §7).
     ///
-    /// When `None` (default from `new()`), Body/TextRun frames do NOT emit
-    /// `<p:ph>` (they become non-placeholder shapes), and Title frames always
-    /// emit `<p:ph>` (idx=0 is always valid for title-type layouts).
+    /// When `None` (default from `new()`, i.e., `with_layout` not called):
+    ///   - `Title` frames emit `<p:ph>` unconditionally (backward-compatible).
+    ///   - `Subtitle` frames emit `<p:ph>` unconditionally (backward-compatible).
+    ///   - `Body`/`TextRun` frames do NOT emit `<p:ph>` (conservative fallback).
+    ///
+    /// When `Some(set)` (populated by `with_layout`), `<p:ph>` is emitted only
+    /// when the layout has a matching placeholder idx (ADR-015 §7 item 3):
+    ///   - `Title` emits `<p:ph idx="0">` iff the layout has `idx=0`
+    ///   - `Subtitle` emits `<p:ph idx="1">` iff the layout has `idx=1`
+    ///   - `Body`/`TextRun` emit `<p:ph idx="1">` iff the layout has `idx=1`
+    ///
+    /// When the layout lacks the required idx, `tracing::warn!` is emitted and
+    /// the `<p:ph>` element is omitted (shape remains a free-floating shape).
     ///
     /// Use `with_layout` to populate this from `BrandTemplate.layouts[layout_index]`
-    /// in the full export pipeline. Without layout info, Body frames are emitted
-    /// as non-placeholder shapes.
+    /// in the full export pipeline (`build_slide_parts` always calls `with_layout`).
     layout_placeholder_idxs: Option<std::collections::BTreeSet<u32>>,
 }
 
@@ -120,6 +129,49 @@ impl SlideSerializer {
         self.layout_placeholder_idxs
             .as_ref()
             .is_some_and(|idxs| idxs.contains(&idx))
+    }
+
+    /// Determine the `ShapeKind` for title frames (AC-011 / ADR-015 §7 item 3).
+    ///
+    /// When `with_layout` HAS been called (`layout_placeholder_idxs` is `Some`):
+    ///   - Returns `ShapeKind::Title` if the layout has `idx=0`.
+    ///   - Returns `ShapeKind::TitleNoPlaceholder` otherwise (warn+omit per ADR-015 §7).
+    ///
+    /// When `with_layout` has NOT been called (`layout_placeholder_idxs` is `None`):
+    ///   - Returns `ShapeKind::Title` unconditionally (backward-compatible fallback;
+    ///     the production path always calls `with_layout`).
+    fn title_shape_kind(&self) -> ShapeKind {
+        match &self.layout_placeholder_idxs {
+            None => ShapeKind::Title, // no layout info — emit ph unconditionally
+            Some(_) => {
+                if self.layout_has_placeholder_idx(0) {
+                    ShapeKind::Title
+                } else {
+                    ShapeKind::TitleNoPlaceholder
+                }
+            },
+        }
+    }
+
+    /// Determine the `ShapeKind` for subtitle frames (AC-011 / ADR-015 §7 item 3).
+    ///
+    /// When `with_layout` HAS been called (`layout_placeholder_idxs` is `Some`):
+    ///   - Returns `ShapeKind::Subtitle` if the layout has `idx=1`.
+    ///   - Returns `ShapeKind::SubtitleNoPlaceholder` otherwise (warn+omit).
+    ///
+    /// When `with_layout` has NOT been called (`layout_placeholder_idxs` is `None`):
+    ///   - Returns `ShapeKind::Subtitle` unconditionally (backward-compatible fallback).
+    fn subtitle_shape_kind(&self) -> ShapeKind {
+        match &self.layout_placeholder_idxs {
+            None => ShapeKind::Subtitle, // no layout info — emit ph unconditionally
+            Some(_) => {
+                if self.layout_has_placeholder_idx(1) {
+                    ShapeKind::Subtitle
+                } else {
+                    ShapeKind::SubtitleNoPlaceholder
+                }
+            },
+        }
     }
 
     /// Determine the `ShapeKind` for body / text-run frames (AC-011).
@@ -238,9 +290,21 @@ impl SlideSerializer {
             match &frame.content {
                 FrameContent::Title(t) => {
                     validate_emu(slide_index, frame_idx, &frame.bbox)?;
+                    // ADR-015 §7 item 3: only emit <p:ph idx="0"> if the resolved
+                    // layout has a matching title placeholder (idx=0). When the layout
+                    // lacks idx=0 (e.g., Blank layout), emit warn + omit <p:ph>.
+                    let title_kind = self.title_shape_kind();
+                    if matches!(title_kind, ShapeKind::TitleNoPlaceholder) {
+                        tracing::warn!(
+                            slide_index,
+                            frame_idx,
+                            "Title frame: resolved layout has no idx=0 placeholder; \
+                             emitting shape without <p:ph> (warn+omit per ADR-015 §7)"
+                        );
+                    }
                     let sp = build_shape(
                         shape_id,
-                        ShapeKind::Title,
+                        title_kind,
                         frame.bbox.x.0,
                         frame.bbox.y.0,
                         frame.bbox.width.0,
@@ -256,11 +320,22 @@ impl SlideSerializer {
                 // S3 (PR-52): Subtitle frames must emit type="subTitle" (idx=1),
                 // NOT type="title" (idx=0). PlaceholderValues::SubTitle serializes
                 // as the OOXML "subTitle" string (ECMA-376 §19.7.10).
+                // ADR-015 §7 item 3: only emit <p:ph idx="1"> if the resolved layout
+                // has a matching subtitle placeholder (idx=1). When absent, warn+omit.
                 FrameContent::Subtitle(t) => {
                     validate_emu(slide_index, frame_idx, &frame.bbox)?;
+                    let subtitle_kind = self.subtitle_shape_kind();
+                    if matches!(subtitle_kind, ShapeKind::SubtitleNoPlaceholder) {
+                        tracing::warn!(
+                            slide_index,
+                            frame_idx,
+                            "Subtitle frame: resolved layout has no idx=1 placeholder; \
+                             emitting shape without <p:ph> (warn+omit per ADR-015 §7)"
+                        );
+                    }
                     let sp = build_shape(
                         shape_id,
-                        ShapeKind::Subtitle,
+                        subtitle_kind,
                         frame.bbox.x.0,
                         frame.bbox.y.0,
                         frame.bbox.width.0,
@@ -445,12 +520,29 @@ fn extract_inline_text(nodes: &[InlineNode]) -> String {
 /// Determines the OOXML `<p:ph type="...">` and `idx` attributes on the
 /// placeholder shape element. This separates the Title/Subtitle/Body
 /// distinction from the numeric `ph_idx` parameter.
+///
+/// The `*NoPlaceholder` variants emit no `<p:ph>` element at all — used when
+/// the resolved layout has no matching placeholder idx (AC-011 / ADR-015 §7 item 3).
 #[derive(Debug, Clone, Copy)]
 enum ShapeKind {
     /// Title placeholder: `type="title"`, `idx=0`.
+    ///
+    /// Only used when `SlideSerializer::layout_has_placeholder_idx(0)` is true.
     Title,
+    /// Title frame with NO layout placeholder — emits no `<p:ph>` element.
+    ///
+    /// Used when the resolved layout has no `idx=0` placeholder (e.g., Blank layout).
+    /// `tracing::warn!` is emitted before returning this variant.
+    TitleNoPlaceholder,
     /// Subtitle placeholder: `type="subTitle"`, `idx=1` (S3 / PR-52).
+    ///
+    /// Only used when `SlideSerializer::layout_has_placeholder_idx(1)` is true.
     Subtitle,
+    /// Subtitle frame with NO layout placeholder — emits no `<p:ph>` element.
+    ///
+    /// Used when the resolved layout has no `idx=1` placeholder (e.g., Blank layout).
+    /// `tracing::warn!` is emitted before returning this variant.
+    SubtitleNoPlaceholder,
     /// Body / content placeholder: `type="body"`, `idx=1`.
     ///
     /// Only used when `SlideSerializer::layout_has_placeholder_idx(1)` is true.
@@ -490,7 +582,7 @@ fn build_shape(
 
     // Placeholder shape type and idx based on ShapeKind.
     // S3 (PR-52): Subtitle must use PlaceholderValues::SubTitle, not Title.
-    // AC-011: BodyNoPlaceholder emits no <p:ph> element (no placeholder_shape).
+    // AC-011 / ADR-015 §7 item 3: *NoPlaceholder variants emit no <p:ph> element.
     let placeholder_shape_opt: Option<PlaceholderShape> = match kind {
         ShapeKind::Title => Some(PlaceholderShape {
             r#type: Some(PlaceholderValues::Title),
@@ -516,8 +608,10 @@ fn build_shape(
             has_custom_prompt: None,
             extension_list_with_modification: None,
         }),
-        // AC-011: no <p:ph> element when the layout has no matching placeholder.
-        ShapeKind::BodyNoPlaceholder => None,
+        // ADR-015 §7 item 3: no <p:ph> element when layout lacks matching placeholder.
+        ShapeKind::TitleNoPlaceholder
+        | ShapeKind::SubtitleNoPlaceholder
+        | ShapeKind::BodyNoPlaceholder => None,
     };
 
     let nv_pr = ApplicationNonVisualDrawingProperties {

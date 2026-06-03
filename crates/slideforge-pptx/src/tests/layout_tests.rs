@@ -1580,3 +1580,283 @@ fn test_BC_4_01_005_s3_subtitle_frame_emits_subtitle_placeholder() {
          nearby XML context: {nearby}"
     );
 }
+
+// ─── F-038-P2-M1: Title / Subtitle idx-chain gate (ADR-015 §7 item 3) ─────────
+
+/// F-038-P2-M1 (positive / Title path):
+/// When a `FrameContent::Title` frame is serialized WITH a layout that HAS an
+/// `idx=0` placeholder, the resulting `<p:sp>` MUST contain `<p:ph idx="0">`.
+///
+/// Load-bearing: if the Title path were to always emit `<p:ph idx="0">`
+/// regardless of layout (old behavior), this test alone would still pass — but
+/// the negative test below would also pass, so only the pair is mutation-killing.
+/// Together they prove real discrimination.
+#[test]
+fn test_BC_4_01_005_f038_p2_m1_title_with_layout_having_idx0_emits_ph() {
+    use crate::slide_serializer::SlideSerializer;
+    use slideforge_brand::layouts::{LayoutPlaceholder, SlideLayoutDef};
+
+    // Layout that explicitly HAS idx=0 (title placeholder).
+    let layout_with_title = SlideLayoutDef {
+        index: 0,
+        name: Arc::from("Title"),
+        ooxml_type: Some(Arc::from("title")),
+        slide_type_keyword: Some(Arc::from("title")),
+        has_color_override: false,
+        color_override_bg: None,
+        color_override_tx: None,
+        placeholders: vec![LayoutPlaceholder {
+            ph_type: Arc::from("title"),
+            idx: 0,
+            accessibility_name: Arc::from("Title"),
+            x: 457_200,
+            y: 274_638,
+            cx: 8_229_600,
+            cy: 1_143_000,
+        }],
+    };
+
+    let slide = LaidOutSlide {
+        source_index: 0,
+        slide_type_keyword: Arc::from("title"),
+        frames: vec![Frame {
+            bbox: title_bbox(),
+            content: FrameContent::Title(Arc::from("Main Title")),
+            text_flow: None,
+        }],
+        speaker_notes: None,
+        register_tags: vec![],
+        register_content: vec![],
+    };
+
+    let serializer = SlideSerializer::new(false, 0).with_layout(&layout_with_title);
+    let (bytes, _) = serializer
+        .build(&slide, 0, "rId1", &[])
+        .expect("build must succeed");
+    let xml = String::from_utf8(bytes).expect("valid UTF-8");
+
+    // The title shape MUST emit <p:ph idx="0"> because the layout has idx=0.
+    assert!(
+        xml.contains("idx=\"0\""),
+        "F-038-P2-M1 (positive/Title): layout has idx=0 placeholder — Title frame MUST \
+         emit <p:ph idx=\"0\">; not found. XML excerpt: {}",
+        &xml[..xml.len().min(800)]
+    );
+}
+
+/// F-038-P2-M1 (negative / Title path):
+/// When a `FrameContent::Title` frame is serialized WITH a layout that has NO
+/// placeholder with `idx=0` (i.e., a Blank layout with empty placeholders Vec),
+/// the slide serializer MUST NOT emit `<p:ph idx="0">` for the title shape.
+///
+/// Before this fix, the Title arm always emitted `<p:ph>` unconditionally —
+/// this test catches that regression. The mutation-killing pair is:
+///   positive: layout HAS idx=0 → ph emitted
+///   negative: layout has NO placeholders → ph omitted
+#[test]
+fn test_BC_4_01_005_f038_p2_m1_title_on_blank_layout_omits_ph() {
+    use crate::slide_serializer::SlideSerializer;
+    use slideforge_brand::layouts::SlideLayoutDef;
+
+    // Blank layout: empty placeholders Vec (models the `blank` keyword layout,
+    // index 6, which has no placeholder shapes at all).
+    let blank_layout = SlideLayoutDef {
+        index: 6,
+        name: Arc::from("Blank"),
+        ooxml_type: Some(Arc::from("blank")),
+        slide_type_keyword: Some(Arc::from("blank")),
+        has_color_override: false,
+        color_override_bg: None,
+        color_override_tx: None,
+        placeholders: vec![], // EMPTY — no idx=0 exists
+    };
+
+    let slide = LaidOutSlide {
+        source_index: 0,
+        slide_type_keyword: Arc::from("blank"),
+        frames: vec![Frame {
+            bbox: title_bbox(),
+            content: FrameContent::Title(Arc::from("Title on Blank")),
+            text_flow: None,
+        }],
+        speaker_notes: None,
+        register_tags: vec![],
+        register_content: vec![],
+    };
+
+    let serializer = SlideSerializer::new(false, 6).with_layout(&blank_layout);
+    let (bytes, _) = serializer
+        .build(&slide, 0, "rId1", &[])
+        .expect("build must succeed");
+    let xml = String::from_utf8(bytes).expect("valid UTF-8");
+
+    // The title shape MUST NOT emit <p:ph idx="0"> — the layout has no idx=0.
+    assert!(
+        !xml.contains("idx=\"0\""),
+        "F-038-P2-M1 (negative/Title): blank layout has NO idx=0 placeholder — \
+         Title frame MUST NOT emit <p:ph idx=\"0\">; found it anyway. \
+         XML excerpt: {}",
+        &xml[..xml.len().min(800)]
+    );
+
+    // The <p:ph> element itself must also be absent (no ph element at all
+    // since neither idx=0 nor any other ph should appear).
+    assert!(
+        !xml.contains("<p:ph"),
+        "F-038-P2-M1 (negative/Title): blank layout — <p:ph> must be absent \
+         for a Title frame when the layout has no placeholders. \
+         XML excerpt: {}",
+        &xml[..xml.len().min(800)]
+    );
+}
+
+/// F-038-P2-M1 (positive / Subtitle path):
+/// When a `FrameContent::Subtitle` frame is serialized WITH a layout that HAS
+/// `idx=1`, the slide serializer MUST emit `<p:ph idx="1">` with `type="subTitle"`.
+#[test]
+fn test_BC_4_01_005_f038_p2_m1_subtitle_with_layout_having_idx1_emits_ph() {
+    use crate::slide_serializer::SlideSerializer;
+    use slideforge_brand::layouts::{LayoutPlaceholder, SlideLayoutDef};
+
+    let layout_with_subtitle = SlideLayoutDef {
+        index: 0,
+        name: Arc::from("Title Slide"),
+        ooxml_type: Some(Arc::from("ctrTitle")),
+        slide_type_keyword: Some(Arc::from("title")),
+        has_color_override: false,
+        color_override_bg: None,
+        color_override_tx: None,
+        placeholders: vec![
+            LayoutPlaceholder {
+                ph_type: Arc::from("ctrTitle"),
+                idx: 0,
+                accessibility_name: Arc::from("Title"),
+                x: 457_200,
+                y: 1_600_200,
+                cx: 8_229_600,
+                cy: 1_600_200,
+            },
+            LayoutPlaceholder {
+                ph_type: Arc::from("subTitle"),
+                idx: 1,
+                accessibility_name: Arc::from("Subtitle"),
+                x: 457_200,
+                y: 3_400_000,
+                cx: 8_229_600,
+                cy: 1_200_000,
+            },
+        ],
+    };
+
+    let slide = LaidOutSlide {
+        source_index: 0,
+        slide_type_keyword: Arc::from("title"),
+        frames: vec![Frame {
+            bbox: body_bbox(),
+            content: FrameContent::Subtitle(Arc::from("Subtitle Text")),
+            text_flow: None,
+        }],
+        speaker_notes: None,
+        register_tags: vec![],
+        register_content: vec![],
+    };
+
+    let serializer = SlideSerializer::new(false, 0).with_layout(&layout_with_subtitle);
+    let (bytes, _) = serializer
+        .build(&slide, 0, "rId1", &[])
+        .expect("build must succeed");
+    let xml = String::from_utf8(bytes).expect("valid UTF-8");
+
+    // Subtitle frame MUST emit type="subTitle" with idx="1".
+    assert!(
+        xml.contains("subTitle"),
+        "F-038-P2-M1 (positive/Subtitle): layout has idx=1 — Subtitle frame MUST emit \
+         type=\"subTitle\"; not found. XML excerpt: {}",
+        &xml[..xml.len().min(800)]
+    );
+    assert!(
+        xml.contains("idx=\"1\""),
+        "F-038-P2-M1 (positive/Subtitle): layout has idx=1 — Subtitle frame MUST emit \
+         idx=\"1\"; not found. XML excerpt: {}",
+        &xml[..xml.len().min(800)]
+    );
+}
+
+/// F-038-P2-M1 (negative / Subtitle path):
+/// When a `FrameContent::Subtitle` frame is serialized WITH a layout that has
+/// NO `idx=1` placeholder (Blank layout), the serializer MUST NOT emit
+/// `<p:ph idx="1">` for the subtitle shape.
+#[test]
+fn test_BC_4_01_005_f038_p2_m1_subtitle_on_blank_layout_omits_ph() {
+    use crate::slide_serializer::SlideSerializer;
+    use slideforge_brand::layouts::SlideLayoutDef;
+
+    // Blank layout with no placeholders.
+    let blank_layout = SlideLayoutDef {
+        index: 6,
+        name: Arc::from("Blank"),
+        ooxml_type: Some(Arc::from("blank")),
+        slide_type_keyword: Some(Arc::from("blank")),
+        has_color_override: false,
+        color_override_bg: None,
+        color_override_tx: None,
+        placeholders: vec![],
+    };
+
+    let slide = LaidOutSlide {
+        source_index: 0,
+        slide_type_keyword: Arc::from("blank"),
+        frames: vec![Frame {
+            bbox: body_bbox(),
+            content: FrameContent::Subtitle(Arc::from("Subtitle on Blank")),
+            text_flow: None,
+        }],
+        speaker_notes: None,
+        register_tags: vec![],
+        register_content: vec![],
+    };
+
+    let serializer = SlideSerializer::new(false, 6).with_layout(&blank_layout);
+    let (bytes, _) = serializer
+        .build(&slide, 0, "rId1", &[])
+        .expect("build must succeed");
+    let xml = String::from_utf8(bytes).expect("valid UTF-8");
+
+    // No <p:ph> at all — the layout has no placeholders.
+    assert!(
+        !xml.contains("idx=\"1\""),
+        "F-038-P2-M1 (negative/Subtitle): blank layout has NO idx=1 — Subtitle frame \
+         MUST NOT emit idx=\"1\"; found it anyway. XML excerpt: {}",
+        &xml[..xml.len().min(800)]
+    );
+    assert!(
+        !xml.contains("<p:ph"),
+        "F-038-P2-M1 (negative/Subtitle): blank layout — <p:ph> must be absent \
+         for a Subtitle frame when the layout has no placeholders. XML excerpt: {}",
+        &xml[..xml.len().min(800)]
+    );
+}
+
+// ─── Cheap hardening: LAYOUT_COUNT consistency test ──────────────────────────
+
+/// Cheap hardening: master `.rels` must reference exactly 31 layout parts.
+///
+/// Validates that `build_master_parts` generates exactly 31 `slideLayout` relationship
+/// entries (rId2..=rId32). Before this fix, `layouts.len().max(31)` could produce
+/// 32+ entries if someone fed an oversized brand template; now both paths use
+/// `LAYOUT_COUNT = 31` as the canonical constant.
+#[test]
+fn test_BC_4_01_005_hardening_master_rels_references_exactly_31_layouts() {
+    let laid_out = make_laid_out_deck(1);
+    let bytes = build_pptx(&laid_out);
+
+    let master_rels_xml = zip_read_entry(&bytes, "ppt/slideMasters/_rels/slideMaster1.xml.rels");
+
+    // Count "slideLayout" occurrences in the rels (each layout has one Relationship).
+    let layout_rel_count = master_rels_xml.matches("slideLayouts/slideLayout").count();
+    assert_eq!(
+        layout_rel_count, 31,
+        "hardening: master rels must reference exactly 31 slideLayout parts; \
+         found {layout_rel_count}. Rels content: {master_rels_xml}"
+    );
+}
