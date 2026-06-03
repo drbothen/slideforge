@@ -44,17 +44,25 @@ pub mod zip_assembler;
 #[allow(
     clippy::missing_docs_in_private_items,
     clippy::unwrap_used,
-    clippy::expect_used
+    clippy::expect_used,
+    clippy::doc_markdown,
+    dead_code,
+    clippy::option_if_let_else,
+    clippy::map_unwrap_or
 )]
 mod tests {
     mod core_tests;
 }
 
-use content_types::ContentTypesBuilder;
 use ooxmlsdk::common::XmlNamespaceDecl;
-use ooxmlsdk::schemas::p::{HandoutMaster, NotesMaster};
+use ooxmlsdk::schemas::p::{
+    CommonSlideData, GroupShapeProperties, HandoutMaster, NotesMaster, ShapeTree, SlideLayout,
+    SlideMaster,
+};
+
+use content_types::ContentTypesBuilder;
 use presentation::PresentationSerializer;
-use rels::{rel_types, RelsBuilder};
+use rels::{RelsBuilder, rel_types};
 use slide_serializer::SlideSerializer;
 use slideforge_layout::{FrameContent, LaidOutDeck};
 use slideforge_plugin_api::{ExportError, ExportOptions, Exporter};
@@ -63,10 +71,50 @@ use zip_assembler::{ZipAssembler, ZipPart};
 
 use crate::error::PptxError;
 
+/// Standard `PresentationML` namespace URI.
+const XMLNS_PML: &str = "http://schemas.openxmlformats.org/presentationml/2006/main";
+/// Standard `DrawingML` namespace URI.
+const XMLNS_DML: &str = "http://schemas.openxmlformats.org/drawingml/2006/main";
+/// Standard `OPC` relationships namespace URI.
+const XMLNS_RELS: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+
+/// Build the standard namespace declarations used in `PresentationML` parts.
+fn pml_xmlns() -> Vec<XmlNamespaceDecl> {
+    vec![
+        XmlNamespaceDecl::new("a", XMLNS_DML),
+        XmlNamespaceDecl::new("r", XMLNS_RELS),
+        XmlNamespaceDecl::new("p", XMLNS_PML),
+    ]
+}
+
+/// Build a minimal `ShapeTree` with no shapes (for stubs).
+fn empty_shape_tree() -> ShapeTree {
+    ShapeTree {
+        non_visual_group_shape_properties: None,
+        group_shape_properties: Some(Box::new(GroupShapeProperties::default())),
+        shape_tree_choice: Vec::new(),
+        p_ext_lst: None,
+        xmlns: vec![],
+        xml_other_attrs: vec![],
+    }
+}
+
+/// Build a `CommonSlideData` wrapping the given `ShapeTree`.
+fn common_slide_data(shape_tree: ShapeTree) -> CommonSlideData {
+    CommonSlideData {
+        name: None,
+        background: None,
+        shape_tree: Box::new(shape_tree),
+        customer_data_list: None,
+        control_list: None,
+        common_slide_data_extension_list: None,
+    }
+}
+
 /// The built-in PPTX exporter plugin.
 ///
 /// `PptxExporter` implements the [`Exporter`] plugin trait for the `.pptx`
-/// output format. It is registered with the [`slideforge_plugin_api::PluginRegistry`]
+/// output format. It is registered with the `PluginRegistry`
 /// under the id `"pptx"`.
 ///
 /// ## Thread safety
@@ -90,7 +138,6 @@ impl PptxExporter {
     /// Separated from the trait method so it can return [`PptxError`] directly
     /// before the trait boundary converts it to [`ExportError`].
     fn export_inner(
-        &self,
         deck: &Deck,
         laid_out: &LaidOutDeck,
         brand: &Brand,
@@ -103,202 +150,20 @@ impl PptxExporter {
 
         let mut parts: Vec<ZipPart> = Vec::new();
 
-        // ─── Step 1: Slide XMLs via SlideSerializer ───────────────────────────
-        let mut slide_rel_ids: Vec<String> = Vec::new();
-        // Global media index for deterministic media file naming.
-        let mut media_idx = 1_usize;
+        // Build all parts, collecting into `parts`.
+        build_slide_parts(laid_out, &mut parts)?;
+        let slide_rel_ids = build_presentation_rels(laid_out, &mut parts)?;
+        build_presentation_xml(laid_out, brand, &slide_rel_ids, &mut parts)?;
+        build_master_parts(&mut parts)?;
+        build_layout_parts(&mut parts)?;
+        build_theme_part(&mut parts);
+        build_notes_handout_masters(&mut parts)?;
+        build_doc_props(deck, &mut parts);
+        build_root_rels(&mut parts)?;
 
-        for (i, slide) in laid_out.slides.iter().enumerate() {
-            let slide_path = format!("ppt/slides/slide{}.xml", i + 1);
-            let rels_path = format!("ppt/slides/_rels/slide{}.xml.rels", i + 1);
-
-            // Build slide .rels (slide → layout relationship).
-            let mut slide_rels = RelsBuilder::new();
-            // All slides reference slideLayout1 for now (STORY-037 baseline).
-            let layout_rel_id = slide_rels.add(
-                rel_types::SLIDE_LAYOUT,
-                "../slideLayouts/slideLayout1.xml",
-            );
-
-            // Extract diagram SVG media from this slide's frames.
-            // This is done here (not in SlideSerializer) to preserve the 2-tuple
-            // signature required by the EC-005 test that calls SlideSerializer directly.
-            for frame in &slide.frames {
-                if let FrameContent::Diagram(normalized_svg) = &frame.content {
-                    let media_filename = format!("image{media_idx}.svg");
-                    let media_path = format!("ppt/media/{media_filename}");
-                    // Add relationship from slide to media.
-                    slide_rels.add(
-                        rel_types::IMAGE,
-                        format!("../media/{media_filename}"),
-                    );
-                    parts.push(ZipPart {
-                        path: media_path,
-                        bytes: normalized_svg.as_str().as_bytes().to_vec(),
-                    });
-                    media_idx += 1;
-                }
-            }
-
-            // Serialize the slide XML.
-            let serializer = SlideSerializer::new(false, 0);
-            let (slide_xml, _warnings) = serializer.build(slide, i, &layout_rel_id)?;
-
-            parts.push(ZipPart {
-                path: slide_path,
-                bytes: slide_xml,
-            });
-            parts.push(ZipPart {
-                path: rels_path,
-                bytes: slide_rels.build()?,
-            });
-        }
-
-        // ─── Step 2: presentation.xml.rels ────────────────────────────────────
-        let mut prs_rels = RelsBuilder::new();
-        let master_rel_id = prs_rels.add(
-            rel_types::SLIDE_MASTER,
-            "slideMasters/slideMaster1.xml",
-        );
-        let notes_master_rel_id = prs_rels.add(
-            rel_types::NOTES_MASTER,
-            "notesMasters/notesMaster1.xml",
-        );
-        let handout_master_rel_id = prs_rels.add(
-            rel_types::HANDOUT_MASTER,
-            "handoutMasters/handoutMaster1.xml",
-        );
-        for i in 0..laid_out.slides.len() {
-            let rid =
-                prs_rels.add(rel_types::SLIDE, format!("slides/slide{}.xml", i + 1));
-            slide_rel_ids.push(rid);
-        }
-
-        parts.push(ZipPart {
-            path: "ppt/_rels/presentation.xml.rels".to_string(),
-            bytes: prs_rels.build()?,
-        });
-
-        // ─── Step 3: presentation.xml ─────────────────────────────────────────
-        let prs_xml = PresentationSerializer::build(
-            laid_out,
-            brand,
-            &slide_rel_ids,
-            &master_rel_id,
-            &notes_master_rel_id,
-            &handout_master_rel_id,
-        )?;
-        parts.push(ZipPart {
-            path: "ppt/presentation.xml".to_string(),
-            bytes: prs_xml,
-        });
-
-        // ─── Step 4: Brand master XML (verbatim or minimal stub) ──────────────
-        // The brand embeds master XML. If not available, use a minimal stub.
-        let master_xml = build_minimal_slide_master_xml()?;
-        parts.push(ZipPart {
-            path: "ppt/slideMasters/slideMaster1.xml".to_string(),
-            bytes: master_xml,
-        });
-
-        // master .rels (master → theme + 31 layout relationships)
-        let mut master_rels = RelsBuilder::new();
-        master_rels.add(rel_types::THEME, "../theme/theme1.xml");
-        for n in 1..=31 {
-            master_rels.add(
-                rel_types::SLIDE_LAYOUT,
-                format!("../slideLayouts/slideLayout{n}.xml"),
-            );
-        }
-        parts.push(ZipPart {
-            path: "ppt/slideMasters/_rels/slideMaster1.xml.rels".to_string(),
-            bytes: master_rels.build()?,
-        });
-
-        // ─── Step 5: 31 slide layouts ─────────────────────────────────────────
-        for n in 1..=31 {
-            let layout_xml = build_minimal_slide_layout_xml(n)?;
-            parts.push(ZipPart {
-                path: format!("ppt/slideLayouts/slideLayout{n}.xml"),
-                bytes: layout_xml,
-            });
-
-            // layout .rels (layout → master)
-            let mut layout_rels = RelsBuilder::new();
-            layout_rels.add(
-                rel_types::SLIDE_MASTER_FROM_LAYOUT,
-                "../slideMasters/slideMaster1.xml",
-            );
-            parts.push(ZipPart {
-                path: format!("ppt/slideLayouts/_rels/slideLayout{n}.xml.rels"),
-                bytes: layout_rels.build()?,
-            });
-        }
-
-        // ─── Step 6: Theme XML ────────────────────────────────────────────────
-        let theme_xml = build_minimal_theme_xml()?;
-        parts.push(ZipPart {
-            path: "ppt/theme/theme1.xml".to_string(),
-            bytes: theme_xml,
-        });
-
-        // ─── Step 7: notesMaster1.xml + handoutMaster1.xml (stubs) ───────────
-        // Always written — BC-4.01.006 invariant 1.
-        let notes_master_xml = build_minimal_notes_master_xml()?;
-        parts.push(ZipPart {
-            path: "ppt/notesMasters/notesMaster1.xml".to_string(),
-            bytes: notes_master_xml,
-        });
-
-        let mut notes_master_rels = RelsBuilder::new();
-        notes_master_rels.add(rel_types::THEME, "../theme/theme1.xml");
-        parts.push(ZipPart {
-            path: "ppt/notesMasters/_rels/notesMaster1.xml.rels".to_string(),
-            bytes: notes_master_rels.build()?,
-        });
-
-        let handout_master_xml = build_minimal_handout_master_xml()?;
-        parts.push(ZipPart {
-            path: "ppt/handoutMasters/handoutMaster1.xml".to_string(),
-            bytes: handout_master_xml,
-        });
-
-        let mut handout_master_rels = RelsBuilder::new();
-        handout_master_rels.add(rel_types::THEME, "../theme/theme1.xml");
-        parts.push(ZipPart {
-            path: "ppt/handoutMasters/_rels/handoutMaster1.xml.rels".to_string(),
-            bytes: handout_master_rels.build()?,
-        });
-
-        // ─── Step 8: docProps/core.xml + app.xml ─────────────────────────────
-        let lang = deck
-            .metadata
-            .lang
-            .as_deref()
-            .unwrap_or("en-US");
-        let core_xml = build_core_xml(lang)?;
-        parts.push(ZipPart {
-            path: "docProps/core.xml".to_string(),
-            bytes: core_xml,
-        });
-
-        let app_xml = build_app_xml()?;
-        parts.push(ZipPart {
-            path: "docProps/app.xml".to_string(),
-            bytes: app_xml,
-        });
-
-        // ─── Step 9: _rels/.rels (root) ───────────────────────────────────────
-        let mut root_rels = RelsBuilder::new();
-        root_rels.add(rel_types::OFFICE_DOCUMENT, "ppt/presentation.xml");
-        root_rels.add(rel_types::CORE_PROPERTIES, "docProps/core.xml");
-        root_rels.add(rel_types::EXTENDED_PROPERTIES, "docProps/app.xml");
-        parts.push(ZipPart {
-            path: "_rels/.rels".to_string(),
-            bytes: root_rels.build()?,
-        });
-
-        // ─── Step 10: [Content_Types].xml ─────────────────────────────────────
+        // Content types are built last so all media parts are visible in `parts`.
+        // content_types are pushed inside build_content_types — collect result.
+        // Re-build content types as the last part (after all media parts exist).
         let mut ct = ContentTypesBuilder::new();
         for _ in 0..laid_out.slides.len() {
             ct.add_slide();
@@ -306,18 +171,9 @@ impl PptxExporter {
         for _ in 0..31 {
             ct.add_layout();
         }
-        // Register media parts in content types.
-        // Collect them from `parts` by looking at paths starting with "ppt/media/".
         for part in &parts {
             if part.path.starts_with("ppt/media/") {
-                // Determine content type from extension.
-                let ct_mime = if part.path.ends_with(".svg") {
-                    "image/svg+xml"
-                } else if part.path.ends_with(".png") {
-                    "image/png"
-                } else {
-                    "application/octet-stream"
-                };
+                let ct_mime = content_type_for_media_path(&part.path);
                 ct.add_media(&part.path, ct_mime);
             }
         }
@@ -326,133 +182,179 @@ impl PptxExporter {
             bytes: ct.build()?,
         });
 
-        // ─── Step 11: Assemble ZIP ─────────────────────────────────────────────
         ZipAssembler::assemble(parts)
     }
 }
 
-impl Exporter for PptxExporter {
-    fn id(&self) -> &str {
-        "pptx"
-    }
+/// Build all slide XML parts and slide `.rels` files, including media parts.
+fn build_slide_parts(laid_out: &LaidOutDeck, parts: &mut Vec<ZipPart>) -> Result<(), PptxError> {
+    let mut media_idx = 1_usize;
 
-    fn extension(&self) -> &str {
-        "pptx"
-    }
+    for (i, slide) in laid_out.slides.iter().enumerate() {
+        let slide_path = format!("ppt/slides/slide{}.xml", i + 1);
+        let rels_path = format!("ppt/slides/_rels/slide{}.xml.rels", i + 1);
 
-    fn export(
-        &self,
-        deck: &Deck,
-        laid_out: &LaidOutDeck,
-        brand: &Brand,
-        opts: &ExportOptions,
-    ) -> Result<Vec<u8>, ExportError> {
-        self.export_inner(deck, laid_out, brand, opts)
-            .map_err(|e| ExportError::RenderError {
-                message: e.to_string(),
-            })
+        let mut slide_rels = RelsBuilder::new();
+        let layout_rel_id =
+            slide_rels.add(rel_types::SLIDE_LAYOUT, "../slideLayouts/slideLayout1.xml");
+
+        for frame in &slide.frames {
+            if let FrameContent::Diagram(normalized_svg) = &frame.content {
+                let media_filename = format!("image{media_idx}.svg");
+                let media_path = format!("ppt/media/{media_filename}");
+                slide_rels.add(rel_types::IMAGE, format!("../media/{media_filename}"));
+                parts.push(ZipPart {
+                    path: media_path,
+                    bytes: normalized_svg.as_str().as_bytes().to_vec(),
+                });
+                media_idx += 1;
+            }
+        }
+
+        let serializer = SlideSerializer::new(false, 0);
+        let (slide_xml, _warnings) = serializer.build(slide, i, &layout_rel_id)?;
+
+        parts.push(ZipPart {
+            path: slide_path,
+            bytes: slide_xml,
+        });
+        parts.push(ZipPart {
+            path: rels_path,
+            bytes: slide_rels.build()?,
+        });
     }
+    Ok(())
 }
 
-/// Build a minimal valid `ppt/slideMasters/slideMaster1.xml`.
+/// Build `ppt/_rels/presentation.xml.rels` and return the slide `rId` list.
+fn build_presentation_rels(
+    laid_out: &LaidOutDeck,
+    parts: &mut Vec<ZipPart>,
+) -> Result<Vec<String>, PptxError> {
+    let mut prs_rels = RelsBuilder::new();
+    let _master_rel_id = prs_rels.add(rel_types::SLIDE_MASTER, "slideMasters/slideMaster1.xml");
+    let _notes_master_rel_id =
+        prs_rels.add(rel_types::NOTES_MASTER, "notesMasters/notesMaster1.xml");
+    let _handout_master_rel_id = prs_rels.add(
+        rel_types::HANDOUT_MASTER,
+        "handoutMasters/handoutMaster1.xml",
+    );
+
+    let mut slide_rel_ids: Vec<String> = Vec::new();
+    for i in 0..laid_out.slides.len() {
+        let rid = prs_rels.add(rel_types::SLIDE, format!("slides/slide{}.xml", i + 1));
+        slide_rel_ids.push(rid);
+    }
+
+    parts.push(ZipPart {
+        path: "ppt/_rels/presentation.xml.rels".to_string(),
+        bytes: prs_rels.build()?,
+    });
+    Ok(slide_rel_ids)
+}
+
+/// Build `ppt/presentation.xml`.
+fn build_presentation_xml(
+    laid_out: &LaidOutDeck,
+    brand: &Brand,
+    slide_rel_ids: &[String],
+    parts: &mut Vec<ZipPart>,
+) -> Result<(), PptxError> {
+    // Rebuild rels to get deterministic rIds for presentation.xml referencing.
+    let mut prs_rels_ids = RelsBuilder::new();
+    let master_rel_id = prs_rels_ids.add(rel_types::SLIDE_MASTER, "slideMasters/slideMaster1.xml");
+    let notes_master_rel_id =
+        prs_rels_ids.add(rel_types::NOTES_MASTER, "notesMasters/notesMaster1.xml");
+    let handout_master_rel_id = prs_rels_ids.add(
+        rel_types::HANDOUT_MASTER,
+        "handoutMasters/handoutMaster1.xml",
+    );
+
+    let prs_xml = PresentationSerializer::build(
+        laid_out,
+        brand,
+        slide_rel_ids,
+        &master_rel_id,
+        &notes_master_rel_id,
+        &handout_master_rel_id,
+    )?;
+    parts.push(ZipPart {
+        path: "ppt/presentation.xml".to_string(),
+        bytes: prs_xml,
+    });
+    Ok(())
+}
+
+/// Build `slideMaster1.xml` and its `.rels`.
+fn build_master_parts(parts: &mut Vec<ZipPart>) -> Result<(), PptxError> {
+    let csl = common_slide_data(empty_shape_tree());
+    let master = SlideMaster {
+        xmlns: pml_xmlns(),
+        common_slide_data: Box::new(csl),
+        ..SlideMaster::default()
+    };
+    parts.push(ZipPart {
+        path: "ppt/slideMasters/slideMaster1.xml".to_string(),
+        bytes: master.to_xml_bytes().map_err(|e| PptxError::OoxmlElement {
+            part: "ppt/slideMasters/slideMaster1.xml".to_string(),
+            detail: e.to_string(),
+        })?,
+    });
+
+    let mut master_rels = RelsBuilder::new();
+    master_rels.add(rel_types::THEME, "../theme/theme1.xml");
+    for n in 1..=31 {
+        master_rels.add(
+            rel_types::SLIDE_LAYOUT,
+            format!("../slideLayouts/slideLayout{n}.xml"),
+        );
+    }
+    parts.push(ZipPart {
+        path: "ppt/slideMasters/_rels/slideMaster1.xml.rels".to_string(),
+        bytes: master_rels.build()?,
+    });
+    Ok(())
+}
+
+/// Build all 31 slide layout XML files and their `.rels`.
+fn build_layout_parts(parts: &mut Vec<ZipPart>) -> Result<(), PptxError> {
+    for n in 1..=31_usize {
+        let csl = common_slide_data(empty_shape_tree());
+        let layout = SlideLayout {
+            xmlns: pml_xmlns(),
+            common_slide_data: Box::new(csl),
+            ..SlideLayout::default()
+        };
+        parts.push(ZipPart {
+            path: format!("ppt/slideLayouts/slideLayout{n}.xml"),
+            bytes: layout.to_xml_bytes().map_err(|e| PptxError::OoxmlElement {
+                part: format!("ppt/slideLayouts/slideLayout{n}.xml"),
+                detail: e.to_string(),
+            })?,
+        });
+
+        let mut layout_rels = RelsBuilder::new();
+        layout_rels.add(
+            rel_types::SLIDE_MASTER_FROM_LAYOUT,
+            "../slideMasters/slideMaster1.xml",
+        );
+        parts.push(ZipPart {
+            path: format!("ppt/slideLayouts/_rels/slideLayout{n}.xml.rels"),
+            bytes: layout_rels.build()?,
+        });
+    }
+    Ok(())
+}
+
+/// Build `theme1.xml` and push to parts.
 ///
-/// The master XML embeds the brand data when available. For the STORY-037
-/// baseline, we build a minimal valid stub via ooxmlsdk.
-fn build_minimal_slide_master_xml() -> Result<Vec<u8>, PptxError> {
-    use ooxmlsdk::schemas::p::{CommonSlideData, GroupShapeProperties, ShapeTree, SlideMaster};
-
-    let shape_tree = ShapeTree {
-        non_visual_group_shape_properties: None,
-        group_shape_properties: Some(Box::new(GroupShapeProperties::default())),
-        shape_tree_choice: Vec::new(),
-        p_ext_lst: None,
-        xmlns: vec![],
-        xml_other_attrs: vec![],
-    };
-
-    let csl = CommonSlideData {
-        name: None,
-        background: None,
-        shape_tree: Box::new(shape_tree),
-        customer_data_list: None,
-        control_list: None,
-        common_slide_data_extension_list: None,
-    };
-
-    let mut master = SlideMaster::default();
-    master.xmlns = vec![
-        XmlNamespaceDecl::new("a", "http://schemas.openxmlformats.org/drawingml/2006/main"),
-        XmlNamespaceDecl::new(
-            "r",
-            "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
-        ),
-        XmlNamespaceDecl::new(
-            "p",
-            "http://schemas.openxmlformats.org/presentationml/2006/main",
-        ),
-    ];
-    master.common_slide_data = Box::new(csl);
-
-    master.to_xml_bytes().map_err(|e| PptxError::OoxmlElement {
-        part: "ppt/slideMasters/slideMaster1.xml".to_string(),
-        detail: e.to_string(),
-    })
-}
-
-/// Build a minimal valid `ppt/slideLayouts/slideLayout{n}.xml`.
-fn build_minimal_slide_layout_xml(layout_index: usize) -> Result<Vec<u8>, PptxError> {
-    use ooxmlsdk::schemas::p::{CommonSlideData, GroupShapeProperties, ShapeTree, SlideLayout};
-
-    let shape_tree = ShapeTree {
-        non_visual_group_shape_properties: None,
-        group_shape_properties: Some(Box::new(GroupShapeProperties::default())),
-        shape_tree_choice: Vec::new(),
-        p_ext_lst: None,
-        xmlns: vec![],
-        xml_other_attrs: vec![],
-    };
-
-    let csl = CommonSlideData {
-        name: None,
-        background: None,
-        shape_tree: Box::new(shape_tree),
-        customer_data_list: None,
-        control_list: None,
-        common_slide_data_extension_list: None,
-    };
-
-    let mut layout = SlideLayout::default();
-    layout.xmlns = vec![
-        XmlNamespaceDecl::new("a", "http://schemas.openxmlformats.org/drawingml/2006/main"),
-        XmlNamespaceDecl::new(
-            "r",
-            "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
-        ),
-        XmlNamespaceDecl::new(
-            "p",
-            "http://schemas.openxmlformats.org/presentationml/2006/main",
-        ),
-    ];
-    layout.common_slide_data = Box::new(csl);
-
-    layout.to_xml_bytes().map_err(|e| PptxError::OoxmlElement {
-        part: format!("ppt/slideLayouts/slideLayout{layout_index}.xml"),
-        detail: e.to_string(),
-    })
-}
-
-/// Build a minimal valid `ppt/theme/theme1.xml`.
-///
-/// Theme XML is generated from the brand palette. For STORY-037, we use
-/// a minimal valid theme document.
-fn build_minimal_theme_xml() -> Result<Vec<u8>, PptxError> {
-    // Theme is generated via ooxmlsdk dml theme types.
-    // For the STORY-037 baseline we emit a minimal valid theme via raw XML
-    // because ooxmlsdk's theme types require many mandatory sub-elements
-    // (fontScheme, fmtScheme, etc.). We use raw XML here as a minimal stub;
-    // this is the ONLY place in this crate where we use pre-formed XML bytes
-    // (not string concatenation — the bytes are a static well-formed XML document).
-    let theme_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+/// The theme uses a static well-formed XML byte slice (not string concatenation).
+/// This is the ONLY place in this crate where pre-formed XML bytes are used —
+/// because `ooxmlsdk`'s theme types require many mandatory sub-elements
+/// (`fontScheme`, `fmtScheme`, etc.) that are not worth constructing via typed
+/// builders for a minimal baseline.
+fn build_theme_part(parts: &mut Vec<ZipPart>) {
+    let theme_xml: &[u8] = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="slideforge">
   <a:themeElements>
     <a:clrScheme name="slideforge">
@@ -497,114 +399,149 @@ fn build_minimal_theme_xml() -> Result<Vec<u8>, PptxError> {
     </a:fmtScheme>
   </a:themeElements>
 </a:theme>"#;
-    Ok(theme_xml.to_vec())
+    parts.push(ZipPart {
+        path: "ppt/theme/theme1.xml".to_string(),
+        bytes: theme_xml.to_vec(),
+    });
 }
 
-/// Build a minimal valid `ppt/notesMasters/notesMaster1.xml`.
-fn build_minimal_notes_master_xml() -> Result<Vec<u8>, PptxError> {
-    let mut master = NotesMaster::default();
-    master.xmlns = vec![
-        XmlNamespaceDecl::new("a", "http://schemas.openxmlformats.org/drawingml/2006/main"),
-        XmlNamespaceDecl::new(
-            "r",
-            "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
-        ),
-        XmlNamespaceDecl::new(
-            "p",
-            "http://schemas.openxmlformats.org/presentationml/2006/main",
-        ),
-    ];
-
-    use ooxmlsdk::schemas::p::{CommonSlideData, GroupShapeProperties, ShapeTree};
-    let shape_tree = ShapeTree {
-        non_visual_group_shape_properties: None,
-        group_shape_properties: Some(Box::new(GroupShapeProperties::default())),
-        shape_tree_choice: Vec::new(),
-        p_ext_lst: None,
-        xmlns: vec![],
-        xml_other_attrs: vec![],
+/// Build `notesMaster1.xml` and `handoutMaster1.xml` (always present — BC-4.01.006).
+fn build_notes_handout_masters(parts: &mut Vec<ZipPart>) -> Result<(), PptxError> {
+    let notes_master = NotesMaster {
+        xmlns: pml_xmlns(),
+        common_slide_data: Box::new(common_slide_data(empty_shape_tree())),
+        ..NotesMaster::default()
     };
-    let csl = CommonSlideData {
-        name: None,
-        background: None,
-        shape_tree: Box::new(shape_tree),
-        customer_data_list: None,
-        control_list: None,
-        common_slide_data_extension_list: None,
-    };
-    master.common_slide_data = Box::new(csl);
+    parts.push(ZipPart {
+        path: "ppt/notesMasters/notesMaster1.xml".to_string(),
+        bytes: notes_master
+            .to_xml_bytes()
+            .map_err(|e| PptxError::OoxmlElement {
+                part: "ppt/notesMasters/notesMaster1.xml".to_string(),
+                detail: e.to_string(),
+            })?,
+    });
 
-    master.to_xml_bytes().map_err(|e| PptxError::OoxmlElement {
-        part: "ppt/notesMasters/notesMaster1.xml".to_string(),
-        detail: e.to_string(),
-    })
+    let mut notes_master_rels = RelsBuilder::new();
+    notes_master_rels.add(rel_types::THEME, "../theme/theme1.xml");
+    parts.push(ZipPart {
+        path: "ppt/notesMasters/_rels/notesMaster1.xml.rels".to_string(),
+        bytes: notes_master_rels.build()?,
+    });
+
+    let handout_master = HandoutMaster {
+        xmlns: pml_xmlns(),
+        common_slide_data: Box::new(common_slide_data(empty_shape_tree())),
+        ..HandoutMaster::default()
+    };
+    parts.push(ZipPart {
+        path: "ppt/handoutMasters/handoutMaster1.xml".to_string(),
+        bytes: handout_master
+            .to_xml_bytes()
+            .map_err(|e| PptxError::OoxmlElement {
+                part: "ppt/handoutMasters/handoutMaster1.xml".to_string(),
+                detail: e.to_string(),
+            })?,
+    });
+
+    let mut handout_master_rels = RelsBuilder::new();
+    handout_master_rels.add(rel_types::THEME, "../theme/theme1.xml");
+    parts.push(ZipPart {
+        path: "ppt/handoutMasters/_rels/handoutMaster1.xml.rels".to_string(),
+        bytes: handout_master_rels.build()?,
+    });
+
+    Ok(())
 }
 
-/// Build a minimal valid `ppt/handoutMasters/handoutMaster1.xml`.
-fn build_minimal_handout_master_xml() -> Result<Vec<u8>, PptxError> {
-    let mut master = HandoutMaster::default();
-    master.xmlns = vec![
-        XmlNamespaceDecl::new("a", "http://schemas.openxmlformats.org/drawingml/2006/main"),
-        XmlNamespaceDecl::new(
-            "r",
-            "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
-        ),
-        XmlNamespaceDecl::new(
-            "p",
-            "http://schemas.openxmlformats.org/presentationml/2006/main",
-        ),
-    ];
-
-    use ooxmlsdk::schemas::p::{CommonSlideData, GroupShapeProperties, ShapeTree};
-    let shape_tree = ShapeTree {
-        non_visual_group_shape_properties: None,
-        group_shape_properties: Some(Box::new(GroupShapeProperties::default())),
-        shape_tree_choice: Vec::new(),
-        p_ext_lst: None,
-        xmlns: vec![],
-        xml_other_attrs: vec![],
-    };
-    let csl = CommonSlideData {
-        name: None,
-        background: None,
-        shape_tree: Box::new(shape_tree),
-        customer_data_list: None,
-        control_list: None,
-        common_slide_data_extension_list: None,
-    };
-    master.common_slide_data = Box::new(csl);
-
-    master.to_xml_bytes().map_err(|e| PptxError::OoxmlElement {
-        part: "ppt/handoutMasters/handoutMaster1.xml".to_string(),
-        detail: e.to_string(),
-    })
-}
-
-/// Build a minimal valid `docProps/core.xml`.
+/// Build `docProps/core.xml` and `docProps/app.xml`.
 ///
-/// Emits required Dublin Core metadata fields. Full language embedding
-/// for BC-4.01.004 / BC-5.01.005 is in STORY-039.
-fn build_core_xml(lang: &str) -> Result<Vec<u8>, PptxError> {
-    // core.xml uses Dublin Core / OPC schema. We emit a minimal valid document.
-    // There's no ooxmlsdk type for OPC core properties that maps cleanly here,
-    // so we construct a static minimal valid XML document.
-    let xml = format!(
-        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-  <dc:creator>slideforge</dc:creator>
-  <dc:language>{lang}</dc:language>
-  <dcterms:created xsi:type="dcterms:W3CDTF">1980-01-01T00:00:00Z</dcterms:created>
-</cp:coreProperties>"#
-    );
-    Ok(xml.into_bytes())
-}
+/// These use pre-formed XML strings — the OPC core properties namespace is
+/// outside the `ooxmlsdk` schema module scope for this story.
+fn build_doc_props(deck: &Deck, parts: &mut Vec<ZipPart>) {
+    let lang = deck.metadata.lang.as_deref().unwrap_or("en-US");
 
-/// Build a minimal valid `docProps/app.xml`.
-fn build_app_xml() -> Result<Vec<u8>, PptxError> {
-    let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    let core_xml = format!(
+        concat!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n",
+            "<cp:coreProperties",
+            " xmlns:cp=\"http://schemas.openxmlformats.org/package/2006/metadata/core-properties\"",
+            " xmlns:dc=\"http://purl.org/dc/elements/1.1/\"",
+            " xmlns:dcterms=\"http://purl.org/dc/terms/\"",
+            " xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\n",
+            "  <dc:creator>slideforge</dc:creator>\n",
+            "  <dc:language>{lang}</dc:language>\n",
+            "  <dcterms:created xsi:type=\"dcterms:W3CDTF\">1980-01-01T00:00:00Z</dcterms:created>\n",
+            "</cp:coreProperties>"
+        ),
+        lang = lang,
+    );
+    parts.push(ZipPart {
+        path: "docProps/core.xml".to_string(),
+        bytes: core_xml.into_bytes(),
+    });
+
+    let app_xml: &[u8] = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties">
   <Application>slideforge</Application>
   <AppVersion>0.1.0</AppVersion>
 </Properties>"#;
-    Ok(xml.to_vec())
+    parts.push(ZipPart {
+        path: "docProps/app.xml".to_string(),
+        bytes: app_xml.to_vec(),
+    });
+}
+
+/// Build `_rels/.rels` (root relationships).
+fn build_root_rels(parts: &mut Vec<ZipPart>) -> Result<(), PptxError> {
+    let mut root_rels = RelsBuilder::new();
+    root_rels.add(rel_types::OFFICE_DOCUMENT, "ppt/presentation.xml");
+    root_rels.add(rel_types::CORE_PROPERTIES, "docProps/core.xml");
+    root_rels.add(rel_types::EXTENDED_PROPERTIES, "docProps/app.xml");
+    parts.push(ZipPart {
+        path: "_rels/.rels".to_string(),
+        bytes: root_rels.build()?,
+    });
+    Ok(())
+}
+
+/// Return the MIME type for a media file based on its path extension.
+fn content_type_for_media_path(path: &str) -> &'static str {
+    let ext = std::path::Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+    match ext.to_lowercase().as_str() {
+        "svg" => "image/svg+xml",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        _ => "application/octet-stream",
+    }
+}
+
+impl Exporter for PptxExporter {
+    // The trait declares `&str`; returning a `'static` literal is compatible.
+    // clippy::unnecessary_literal_bound is suppressed here because changing the
+    // trait signature is out of scope for this story.
+    #[allow(clippy::unnecessary_literal_bound)]
+    fn id(&self) -> &str {
+        "pptx"
+    }
+
+    #[allow(clippy::unnecessary_literal_bound)]
+    fn extension(&self) -> &str {
+        "pptx"
+    }
+
+    fn export(
+        &self,
+        deck: &Deck,
+        laid_out: &LaidOutDeck,
+        brand: &Brand,
+        opts: &ExportOptions,
+    ) -> Result<Vec<u8>, ExportError> {
+        Self::export_inner(deck, laid_out, brand, opts).map_err(|e| ExportError::RenderError {
+            message: e.to_string(),
+        })
+    }
 }

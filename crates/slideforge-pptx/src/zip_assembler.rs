@@ -33,7 +33,7 @@ pub struct ZipPart {
 /// - Parts are written in ascending lexicographic order of `ZipPart::path`.
 /// - All ZIP local-file headers use `zip::DateTime::default()` (epoch
 ///   `1980-01-01 00:00:00`) so timestamps never vary between runs.
-/// - No system clocks, random seeds, or HashMap iteration order may influence
+/// - No system clocks, random seeds, or `HashMap` iteration order may influence
 ///   the output byte sequence.
 pub struct ZipAssembler;
 

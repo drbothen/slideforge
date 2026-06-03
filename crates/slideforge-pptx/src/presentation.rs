@@ -1,7 +1,7 @@
 //! `presentation.xml` serializer.
 //!
 //! [`PresentationSerializer`] produces the `ppt/presentation.xml` part using
-//! the `ooxmlsdk` typed API. This is the root PresentationML part; it
+//! the `ooxmlsdk` typed API. This is the root `PresentationML` part; it
 //! declares the slide ID list, slide master ID list, and (when present) the
 //! section list.
 //!
@@ -22,8 +22,8 @@
 //! no section list when sections are absent (empty list is the default).
 
 use ooxmlsdk::schemas::p::{
-    HandoutMasterId, HandoutMasterIdList, NotesMasterId, NotesMasterIdList, Presentation,
-    SlideId, SlideIdList, SlideMasterId, SlideMasterIdList, SlideSize,
+    HandoutMasterId, HandoutMasterIdList, NotesMasterId, NotesMasterIdList, Presentation, SlideId,
+    SlideIdList, SlideMasterId, SlideMasterIdList, SlideSize,
 };
 
 use slideforge_layout::LaidOutDeck;
@@ -70,23 +70,28 @@ impl PresentationSerializer {
         notes_master_rel_id: &str,
         handout_master_rel_id: &str,
     ) -> Result<Vec<u8>, PptxError> {
-        let mut prs = Presentation::default();
-
-        // Set required namespaces for presentation.xml.
-        prs.xmlns = vec![
-            ooxmlsdk::common::XmlNamespaceDecl::new(
-                "a",
-                "http://schemas.openxmlformats.org/drawingml/2006/main",
-            ),
-            ooxmlsdk::common::XmlNamespaceDecl::new(
-                "r",
-                "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
-            ),
-            ooxmlsdk::common::XmlNamespaceDecl::new(
-                "p",
-                "http://schemas.openxmlformats.org/presentationml/2006/main",
-            ),
-        ];
+        // ooxmlsdk-generated types have many optional fields; the most readable
+        // approach is to start from `default()` and set only the fields we need.
+        #[allow(clippy::field_reassign_with_default)]
+        let mut prs = {
+            let mut p = Presentation::default();
+            // Set required namespaces for presentation.xml.
+            p.xmlns = vec![
+                ooxmlsdk::common::XmlNamespaceDecl::new(
+                    "a",
+                    "http://schemas.openxmlformats.org/drawingml/2006/main",
+                ),
+                ooxmlsdk::common::XmlNamespaceDecl::new(
+                    "r",
+                    "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+                ),
+                ooxmlsdk::common::XmlNamespaceDecl::new(
+                    "p",
+                    "http://schemas.openxmlformats.org/presentationml/2006/main",
+                ),
+            ];
+            p
+        };
 
         // Slide master ID list (always exactly one master, ID = 2^31).
         let master_id_list = SlideMasterIdList {
@@ -142,10 +147,10 @@ impl PresentationSerializer {
         });
 
         // Notes size: use a standard 6858000 x 9144000 (portrait letter).
-        prs.notes_size = Box::new(ooxmlsdk::schemas::p::NotesSize {
+        *prs.notes_size = ooxmlsdk::schemas::p::NotesSize {
             cx: 6_858_000,
             cy: 9_144_000,
-        });
+        };
 
         prs.to_xml_bytes().map_err(|e| PptxError::OoxmlElement {
             part: "ppt/presentation.xml".to_string(),

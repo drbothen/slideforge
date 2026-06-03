@@ -33,7 +33,7 @@ pub struct ContentTypesBuilder {
     slide_count: usize,
     /// Number of layouts registered so far.
     layout_count: usize,
-    /// Media parts: (path, mime_type) pairs.
+    /// Media parts: `(path, mime_type)` pairs.
     media_parts: Vec<(String, String)>,
 }
 
@@ -75,21 +75,28 @@ impl ContentTypesBuilder {
     ///
     /// Returns [`PptxError::OoxmlElement`] if serialisation fails.
     pub fn build(self) -> Result<Vec<u8>, PptxError> {
-        let mut types = Types::default();
-        types.xmlns = vec![ooxmlsdk::common::XmlNamespaceDecl::new(
-            "",
-            "http://schemas.openxmlformats.org/package/2006/content-types",
-        )];
+        let mut types = Types {
+            xmlns: vec![ooxmlsdk::common::XmlNamespaceDecl::new(
+                "",
+                "http://schemas.openxmlformats.org/package/2006/content-types",
+            )],
+            ..Types::default()
+        };
 
         // --- Default entries (extension-level) ---
-        types.types_choice.push(TypesChoice::Default(Box::new(CtDefault {
-            extension: "rels".to_string(),
-            content_type: "application/vnd.openxmlformats-package.relationships+xml".to_string(),
-        })));
-        types.types_choice.push(TypesChoice::Default(Box::new(CtDefault {
-            extension: "xml".to_string(),
-            content_type: "application/xml".to_string(),
-        })));
+        types
+            .types_choice
+            .push(TypesChoice::Default(Box::new(CtDefault {
+                extension: "rels".to_string(),
+                content_type: "application/vnd.openxmlformats-package.relationships+xml"
+                    .to_string(),
+            })));
+        types
+            .types_choice
+            .push(TypesChoice::Default(Box::new(CtDefault {
+                extension: "xml".to_string(),
+                content_type: "application/xml".to_string(),
+            })));
 
         // --- Override entries (sorted alphabetically) ---
         // Collect all override (path, content_type) pairs for sorting.
@@ -168,18 +175,18 @@ impl ContentTypesBuilder {
         overrides.sort_by(|a, b| a.0.cmp(&b.0));
 
         for (part_name, content_type) in overrides {
-            types.types_choice.push(TypesChoice::Override(Box::new(Override {
-                part_name,
-                content_type,
-            })));
+            types
+                .types_choice
+                .push(TypesChoice::Override(Box::new(Override {
+                    part_name,
+                    content_type,
+                })));
         }
 
-        types
-            .to_xml_bytes()
-            .map_err(|e| PptxError::OoxmlElement {
-                part: "[Content_Types].xml".to_string(),
-                detail: e.to_string(),
-            })
+        types.to_xml_bytes().map_err(|e| PptxError::OoxmlElement {
+            part: "[Content_Types].xml".to_string(),
+            detail: e.to_string(),
+        })
     }
 }
 

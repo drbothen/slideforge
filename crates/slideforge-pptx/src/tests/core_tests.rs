@@ -47,8 +47,8 @@ use std::sync::Arc;
 
 use sha2::{Digest, Sha256};
 use slideforge_layout::{BoundingBox, Frame, FrameContent, LaidOutDeck, LaidOutSlide, PageSize};
+use slideforge_plugin_api::{ExportOptions, Exporter};
 use slideforge_types::{Brand, BrandFonts, BrandPalette, Deck, Emu};
-use slideforge_plugin_api::{Exporter, ExportOptions};
 use zip::ZipArchive;
 
 use crate::PptxExporter;
@@ -351,10 +351,7 @@ fn test_BC_4_01_001_zip_contains_all_required_parts() {
     }
 
     // Slide-specific parts for a 1-slide deck.
-    for required in [
-        "ppt/slides/slide1.xml",
-        "ppt/slides/_rels/slide1.xml.rels",
-    ] {
+    for required in ["ppt/slides/slide1.xml", "ppt/slides/_rels/slide1.xml.rels"] {
         assert!(
             entries.iter().any(|e| e == required),
             "Required slide part '{required}' is missing from the PPTX output (AC-002)"
@@ -477,8 +474,7 @@ fn test_BC_4_01_001_content_types_has_31_layout_overrides() {
         .count();
 
     assert_eq!(
-        layout_overrides,
-        31,
+        layout_overrides, 31,
         "[Content_Types].xml must have Override entries for all 31 slide layouts; \
          found {layout_overrides} (AC-003)"
     );
@@ -504,8 +500,7 @@ fn test_BC_4_01_001_content_types_has_n_slide_overrides() {
         .count();
 
     assert_eq!(
-        slide_overrides,
-        3,
+        slide_overrides, 3,
         "[Content_Types].xml must have exactly 3 slide Override entries for a 3-slide deck; \
          found {slide_overrides} (AC-003)"
     );
@@ -524,8 +519,7 @@ fn test_BC_4_01_001_content_types_has_required_defaults() {
     let content_types = zip_read_entry(&pptx_bytes, "[Content_Types].xml");
 
     assert!(
-        content_types
-            .contains("application/vnd.openxmlformats-package.relationships+xml"),
+        content_types.contains("application/vnd.openxmlformats-package.relationships+xml"),
         "[Content_Types].xml must have Default for .rels ContentType (AC-003)"
     );
     assert!(
@@ -592,10 +586,7 @@ fn test_BC_4_01_001_placeholder_inheritance_chain() {
     );
 
     // The layout rels file must reference the master.
-    let layout1_rels = zip_read_entry(
-        &pptx_bytes,
-        "ppt/slideLayouts/_rels/slideLayout1.xml.rels",
-    );
+    let layout1_rels = zip_read_entry(&pptx_bytes, "ppt/slideLayouts/_rels/slideLayout1.xml.rels");
     assert!(
         layout1_rels.contains("slideMaster"),
         "ppt/slideLayouts/_rels/slideLayout1.xml.rels must reference a slideMaster \
@@ -603,10 +594,7 @@ fn test_BC_4_01_001_placeholder_inheritance_chain() {
     );
 
     // The master rels must reference the theme.
-    let master_rels = zip_read_entry(
-        &pptx_bytes,
-        "ppt/slideMasters/_rels/slideMaster1.xml.rels",
-    );
+    let master_rels = zip_read_entry(&pptx_bytes, "ppt/slideMasters/_rels/slideMaster1.xml.rels");
     assert!(
         master_rels.contains("theme"),
         "ppt/slideMasters/_rels/slideMaster1.xml.rels must reference the theme \
@@ -842,7 +830,12 @@ fn test_BC_4_01_001_libreoffice_open() {
     std::fs::write(&pptx_path, &pptx_bytes).expect("must write temp PPTX");
 
     let status = std::process::Command::new("libreoffice")
-        .args(["--headless", "--convert-to", "png", pptx_path.to_str().unwrap()])
+        .args([
+            "--headless",
+            "--convert-to",
+            "png",
+            pptx_path.to_str().unwrap(),
+        ])
         .current_dir(&tmp_dir)
         .status()
         .expect("libreoffice must be available in CI");
@@ -912,20 +905,14 @@ fn test_BC_4_01_001_relationship_chain_completeness() {
     );
 
     // Step 2: layout .rels contains a master relationship.
-    let layout1_rels = zip_read_entry(
-        &pptx_bytes,
-        "ppt/slideLayouts/_rels/slideLayout1.xml.rels",
-    );
+    let layout1_rels = zip_read_entry(&pptx_bytes, "ppt/slideLayouts/_rels/slideLayout1.xml.rels");
     assert!(
         layout1_rels.contains("slideMaster"),
         "slideLayout1.xml.rels must contain a slideMaster relationship (AC-009)"
     );
 
     // Step 3: master .rels contains theme relationship.
-    let master_rels = zip_read_entry(
-        &pptx_bytes,
-        "ppt/slideMasters/_rels/slideMaster1.xml.rels",
-    );
+    let master_rels = zip_read_entry(&pptx_bytes, "ppt/slideMasters/_rels/slideMaster1.xml.rels");
     assert!(
         master_rels.contains("theme"),
         "slideMaster1.xml.rels must contain a theme relationship (AC-009)"
@@ -979,9 +966,10 @@ fn test_BC_4_01_001_report_detail_absent_from_slides() {
 
     // Build a deck where one slide has report register content with a sentinel.
     let mut laid_out = make_laid_out_deck(1);
-    laid_out.slides[0].register_content = vec![
-        RegisteredContent::plain(slideforge_types::Register::Report, Arc::from("REPORT_SENTINEL_037")),
-    ];
+    laid_out.slides[0].register_content = vec![RegisteredContent::plain(
+        slideforge_types::Register::Report,
+        Arc::from("REPORT_SENTINEL_037"),
+    )];
     laid_out.slides[0].register_tags = vec![RegisterTag::Report];
 
     let pptx_bytes = build_pptx(&laid_out);
@@ -1007,9 +995,10 @@ fn test_BC_4_01_001_detail_sentinel_absent_from_all_pptx() {
     use slideforge_types::RegisteredContent;
 
     let mut laid_out = make_laid_out_deck(1);
-    laid_out.slides[0].register_content = vec![
-        RegisteredContent::plain(slideforge_types::Register::Detail, Arc::from("DETAIL_SENTINEL_037")),
-    ];
+    laid_out.slides[0].register_content = vec![RegisteredContent::plain(
+        slideforge_types::Register::Detail,
+        Arc::from("DETAIL_SENTINEL_037"),
+    )];
     laid_out.slides[0].register_tags = vec![RegisterTag::Detail];
 
     let pptx_bytes = build_pptx(&laid_out);
@@ -1083,9 +1072,9 @@ fn test_BC_4_01_001_master_id_at_least_2_to_31() {
             let id_rest = &rest[id_start..];
             if let Some(end) = id_rest.find('"') {
                 let id_str = &id_rest[..end];
-                let id: u64 = id_str
-                    .parse()
-                    .unwrap_or_else(|_| panic!("sldMasterId id=\"{id_str}\" must be parseable as u64"));
+                let id: u64 = id_str.parse().unwrap_or_else(|_| {
+                    panic!("sldMasterId id=\"{id_str}\" must be parseable as u64")
+                });
                 assert!(
                     id >= 2_147_483_648,
                     "Master ID {id} is < 2^31 (2,147,483,648) — violates ECMA-376 requirement \
@@ -1121,9 +1110,8 @@ fn test_BC_4_01_001_ec001_empty_slide_valid_zip() {
 
     // The ZIP must still be well-formed.
     let cursor = std::io::Cursor::new(&pptx_bytes);
-    ZipArchive::new(cursor).expect(
-        "An empty-frame slide must still produce a valid ZIP archive (EC-001)"
-    );
+    ZipArchive::new(cursor)
+        .expect("An empty-frame slide must still produce a valid ZIP archive (EC-001)");
 
     // slide1.xml must exist and be valid XML (contain the p:sld namespace element).
     let slide1_xml = zip_read_entry(&pptx_bytes, "ppt/slides/slide1.xml");
@@ -1192,7 +1180,7 @@ fn test_BC_4_01_001_ec004_in_memory_export_no_path_required() {
     // Must return Ok(...) with valid bytes.
     let result = exporter.export(&deck, &laid_out, &brand, &opts);
     let pptx_bytes = result.expect(
-        "PptxExporter::export must return Ok(bytes) — no output directory required (EC-004)"
+        "PptxExporter::export must return Ok(bytes) — no output directory required (EC-004)",
     );
 
     assert!(
@@ -1221,8 +1209,7 @@ fn test_BC_4_01_001_ec005_dark_layout_has_clr_map_ovr() {
         .build(&slide, 0, "rId1")
         .expect("SlideSerializer::build must succeed for dark layout (EC-005)");
 
-    let xml = String::from_utf8(xml_bytes)
-        .expect("slide XML must be valid UTF-8");
+    let xml = String::from_utf8(xml_bytes).expect("slide XML must be valid UTF-8");
 
     // `<p:clrMapOvr>` must be present for dark-themed layouts.
     assert!(
@@ -1237,8 +1224,12 @@ fn test_BC_4_01_001_ec005_dark_layout_has_clr_map_ovr() {
     );
 
     // `<p:clrMapOvr>` must appear after `<p:cSld>` in the XML.
-    let cSld_pos = xml.find("<p:cSld").expect("slide XML must contain <p:cSld>");
-    let clr_pos = xml.find("<p:clrMapOvr>").expect("dark slide must contain <p:clrMapOvr>");
+    let cSld_pos = xml
+        .find("<p:cSld")
+        .expect("slide XML must contain <p:cSld>");
+    let clr_pos = xml
+        .find("<p:clrMapOvr>")
+        .expect("dark slide must contain <p:clrMapOvr>");
     assert!(
         clr_pos > cSld_pos,
         "<p:clrMapOvr> must appear AFTER <p:cSld> in the slide XML \

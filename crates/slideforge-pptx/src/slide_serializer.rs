@@ -32,22 +32,18 @@
 //! `notesSlide` parts (STORY-040). This module never writes report/detail.
 
 use ooxmlsdk::common::XmlNamespaceDecl;
-use ooxmlsdk::schemas::a::{
-    BodyProperties, Extents, Offset, ParagraphChoice, Run, RunProperties, Transform2D,
-};
+use ooxmlsdk::schemas::a::{Extents, Offset, ParagraphChoice, Run, Transform2D};
 use ooxmlsdk::schemas::p::{
     ApplicationNonVisualDrawingProperties, ColorMapOverride, ColorMapOverrideChoice,
     CommonSlideData, GroupShapeProperties, NonVisualDrawingProperties,
-    NonVisualShapeDrawingProperties, NonVisualShapeProperties, PlaceholderShape,
-    PlaceholderValues, Shape, ShapeProperties, ShapePropertiesChoice, ShapeTree, ShapeTreeChoice,
-    Slide, TextBody,
+    NonVisualShapeDrawingProperties, NonVisualShapeProperties, PlaceholderShape, PlaceholderValues,
+    Shape, ShapeProperties, ShapePropertiesChoice, ShapeTree, ShapeTreeChoice, Slide, TextBody,
 };
 
-use slideforge_layout::{FrameContent, LayoutWarning, LaidOutSlide};
+use slideforge_layout::{FrameContent, LaidOutSlide, LayoutWarning};
 use slideforge_types::{BulletItem, ContentBlock, InlineNode};
 
 use crate::error::PptxError;
-
 
 /// Serializes one `LaidOutSlide` into `slide*.xml` bytes.
 ///
@@ -139,7 +135,7 @@ impl SlideSerializer {
                         .shape_tree_choice
                         .push(ShapeTreeChoice::PSp(Box::new(sp)));
                     shape_id += 1;
-                }
+                },
 
                 FrameContent::Body(blocks) => {
                     let text = extract_body_text(blocks);
@@ -157,7 +153,7 @@ impl SlideSerializer {
                         .shape_tree_choice
                         .push(ShapeTreeChoice::PSp(Box::new(sp)));
                     shape_id += 1;
-                }
+                },
 
                 FrameContent::TextRun(nodes) => {
                     let text = extract_inline_text(nodes);
@@ -175,7 +171,7 @@ impl SlideSerializer {
                         .shape_tree_choice
                         .push(ShapeTreeChoice::PSp(Box::new(sp)));
                     shape_id += 1;
-                }
+                },
 
                 // Diagram: skipped here — handled by export_inner (writes to ppt/media/).
                 // Image, Chart, Shape, ErrorSlidePlaceholder, Empty: skipped in STORY-037.
@@ -190,7 +186,7 @@ impl SlideSerializer {
                         frame_idx,
                         "skipping non-text frame in STORY-037 serializer"
                     );
-                }
+                },
             }
         }
 
@@ -205,19 +201,21 @@ impl SlideSerializer {
         };
 
         // Build the Slide.
-        let mut sld = Slide::default();
-        sld.xmlns = vec![
-            XmlNamespaceDecl::new("a", "http://schemas.openxmlformats.org/drawingml/2006/main"),
-            XmlNamespaceDecl::new(
-                "r",
-                "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
-            ),
-            XmlNamespaceDecl::new(
-                "p",
-                "http://schemas.openxmlformats.org/presentationml/2006/main",
-            ),
-        ];
-        sld.common_slide_data = Box::new(csl);
+        let mut sld = Slide {
+            xmlns: vec![
+                XmlNamespaceDecl::new("a", "http://schemas.openxmlformats.org/drawingml/2006/main"),
+                XmlNamespaceDecl::new(
+                    "r",
+                    "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+                ),
+                XmlNamespaceDecl::new(
+                    "p",
+                    "http://schemas.openxmlformats.org/presentationml/2006/main",
+                ),
+            ],
+            common_slide_data: Box::new(csl),
+            ..Slide::default()
+        };
 
         // Emit clrMapOvr for dark-themed layouts (EC-005).
         if self.is_dark_layout {
@@ -247,10 +245,7 @@ fn validate_emu(
         return Err(PptxError::InvalidEmu {
             slide_index,
             frame_index,
-            detail: format!(
-                "negative size: width={} height={}",
-                bb.width.0, bb.height.0
-            ),
+            detail: format!("negative size: width={} height={}", bb.width.0, bb.height.0),
         });
     }
     Ok(())
@@ -263,14 +258,14 @@ fn extract_body_text(blocks: &[ContentBlock]) -> String {
         match block {
             ContentBlock::Text(tb) => {
                 lines.push(extract_inline_text(&tb.inlines));
-            }
+            },
             ContentBlock::Bullets(items) => {
                 for item in items {
                     lines.push(extract_bullet_text(item));
                 }
-            }
+            },
             // Other block types (chart, diagram, shape, etc.) are not plain text.
-            _ => {}
+            _ => {},
         }
     }
     lines.join("\n")
@@ -293,7 +288,7 @@ fn extract_inline_text(nodes: &[InlineNode]) -> String {
         match node {
             InlineNode::Plain(s) | InlineNode::Code(s) | InlineNode::Xref(s) => {
                 out.push_str(s);
-            }
+            },
             InlineNode::Bold(children)
             | InlineNode::Italic(children)
             | InlineNode::Footnote(children)
@@ -302,28 +297,20 @@ fn extract_inline_text(nodes: &[InlineNode]) -> String {
             | InlineNode::Strikethrough(children)
             | InlineNode::Highlight(children) => {
                 out.push_str(&extract_inline_text(children));
-            }
+            },
             InlineNode::Link { text, .. } => {
                 out.push_str(&extract_inline_text(text));
-            }
+            },
             InlineNode::Math(_) => {
                 // Math nodes are not plain text.
-            }
+            },
         }
     }
     out
 }
 
 /// Build a single `<p:sp>` shape for a placeholder.
-fn build_shape(
-    shape_id: u32,
-    ph_idx: u32,
-    x: i64,
-    y: i64,
-    cx: i64,
-    cy: i64,
-    text: &str,
-) -> Shape {
+fn build_shape(shape_id: u32, ph_idx: u32, x: i64, y: i64, cx: i64, cy: i64, text: &str) -> Shape {
     // Non-visual shape properties.
     let cnv_pr = NonVisualDrawingProperties {
         id: shape_id,
@@ -401,17 +388,19 @@ fn build_shape(
 
     // Text body with one paragraph containing the text.
     let run = Run {
-        run_properties: Some(Box::new(RunProperties::default())),
+        run_properties: Some(Box::default()),
         text: text.to_string(),
         xmlns: vec![],
         xml_other_children: vec![],
     };
 
-    let mut para = ooxmlsdk::schemas::a::Paragraph::default();
-    para.paragraph_choice = vec![ParagraphChoice::AR(Box::new(run))];
+    let para = ooxmlsdk::schemas::a::Paragraph {
+        paragraph_choice: vec![ParagraphChoice::AR(Box::new(run))],
+        ..ooxmlsdk::schemas::a::Paragraph::default()
+    };
 
     let tx_body = TextBody {
-        body_properties: Box::new(BodyProperties::default()),
+        body_properties: Box::default(),
         list_style: None,
         a_p: vec![para],
         xmlns: vec![],

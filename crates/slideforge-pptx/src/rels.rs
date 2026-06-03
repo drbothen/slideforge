@@ -72,12 +72,13 @@ impl RelsBuilder {
     ///
     /// Returns [`PptxError::OoxmlElement`] if serialisation fails.
     pub fn build(self) -> Result<Vec<u8>, PptxError> {
-        let mut rels = Relationships::default();
-        // Set the OPC relationships namespace.
-        rels.xmlns = vec![ooxmlsdk::common::XmlNamespaceDecl::new(
-            "",
-            "http://schemas.openxmlformats.org/package/2006/relationships",
-        )];
+        let mut rels = Relationships {
+            xmlns: vec![ooxmlsdk::common::XmlNamespaceDecl::new(
+                "",
+                "http://schemas.openxmlformats.org/package/2006/relationships",
+            )],
+            ..Relationships::default()
+        };
 
         for entry in self.relationships {
             rels.relationship.push(Relationship {
@@ -101,7 +102,7 @@ impl Default for RelsBuilder {
     }
 }
 
-/// Well-known OPC / PresentationML relationship type URIs.
+/// Well-known `OPC` / `PresentationML` relationship type URIs.
 ///
 /// Using named constants avoids typos in long URI strings across the codebase.
 pub mod rel_types {
