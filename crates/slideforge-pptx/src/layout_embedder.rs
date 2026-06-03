@@ -8,7 +8,17 @@
 //!
 //! All layout XML bytes come from
 //! `slideforge_brand::layout_xml::serialize_layout_to_xml(&brand_template.layouts[i])`.
-//! No inline XML string construction is used for layout parts.
+//! No inline XML string construction is used for layout parts — there is no
+//! raw `<p:sldLayout>` string fabrication anywhere in this crate.
+//!
+//! ## Empty-layouts invariant (F-P9-MED-001 fix)
+//!
+//! If `brand_template.layouts` is empty, [`LayoutEmbedder::embed`] returns
+//! [`PptxError::MissingBrandPart`] immediately. This replaces the prior
+//! `minimal_empty_layout_xml` fallback that built raw XML bytes via string
+//! concatenation, violating ADR-001 and ADR-015 Rule 5. The correctly synthesised
+//! brand path (`brand_template_from_brand` → `generate_all_layouts`) always
+//! yields 31 layouts, so this error fires only on a programming error upstream.
 //!
 //! ## STORY-038 tasks covered
 //!
@@ -44,7 +54,11 @@ impl LayoutEmbedder {
     ///
     /// # Errors
     ///
-    /// Returns [`PptxError`] if a layout `.rels` part cannot be serialised.
+    /// - [`PptxError::MissingBrandPart`] — `brand_template.layouts` is empty;
+    ///   the required 31 slide layouts cannot be embedded. A correctly synthesised
+    ///   brand always carries exactly 31 layouts, so this fires only on a
+    ///   programming error upstream (ADR-015 Rule 5 / F-P9-MED-001 guard).
+    /// - [`PptxError`] — a layout `.rels` part cannot be serialised.
     pub fn embed(
         brand_template: &BrandTemplate,
         parts: &mut Vec<ZipPart>,
@@ -52,18 +66,20 @@ impl LayoutEmbedder {
         // Use the crate-level constant so this loop is always in sync with
         // `build_master_parts` (which writes the corresponding rels entries).
         let available_len = brand_template.layouts.len();
+
+        // ADR-015 Rule 5 / F-P9-MED-001: if the brand template has no layouts,
+        // return a hard error instead of fabricating raw XML bytes. A correctly
+        // synthesised brand always has 31 layouts; zero layouts is a programming
+        // error upstream.
+        if available_len == 0 {
+            return Err(PptxError::MissingBrandPart {
+                part: "layouts".to_string(),
+            });
+        }
+
         for n in 1..=crate::LAYOUT_COUNT {
-            let layout_idx = (n - 1).min(available_len.saturating_sub(1));
-            let layout_xml = if available_len == 0 {
-                // Defensive fallback: produce a minimal valid layout XML if the
-                // template has no layouts (should never happen for synthesized brands).
-                tracing::warn!(
-                    layout_n = n,
-                    "LayoutEmbedder::embed: brand_template has no layouts; \
-                     emitting empty layout placeholder"
-                );
-                minimal_empty_layout_xml(n)
-            } else {
+            let layout_idx = (n - 1).min(available_len - 1);
+            let layout_xml = {
                 // Partial-reuse path: when the brand template has fewer than
                 // LAYOUT_COUNT layouts, slots beyond the available set reuse
                 // the last layout. Emit a warning as promised by the docstring
@@ -101,29 +117,6 @@ impl LayoutEmbedder {
         }
         Ok(())
     }
-}
-
-/// Produce a minimal valid `slideLayoutN.xml` for emergency fallback.
-///
-/// This is only called when `brand_template.layouts` is empty (should never
-/// occur for synthesized brands). The result is a bare `<p:sldLayout>` with
-/// no placeholders — schema-valid but visually unstyled.
-fn minimal_empty_layout_xml(n: usize) -> Vec<u8> {
-    format!(
-        concat!(
-            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
-            r#"<p:sldLayout xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main""#,
-            r#" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main""#,
-            r#" type="cust" preserve="1">"#,
-            r#"<p:cSld name="Layout {n}"><p:spTree>"#,
-            r#"<p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>"#,
-            r#"<p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/>"#,
-            r#"<a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>"#,
-            r#"</p:spTree></p:cSld><p:hf/></p:sldLayout>"#,
-        ),
-        n = n
-    )
-    .into_bytes()
 }
 
 #[cfg(test)]
@@ -272,6 +265,62 @@ mod tests {
         assert_eq!(
             rels_count, LAYOUT_COUNT,
             "embed must produce exactly {LAYOUT_COUNT} .rels companion parts; got {rels_count}"
+        );
+    }
+
+    /// F-P9-MED-001 load-bearing test: empty-layouts `BrandTemplate` → Err(`MissingBrandPart`).
+    ///
+    /// CONTRACT:
+    /// (a) `embed` returns `Err(PptxError::MissingBrandPart { part: "layouts" })` when
+    ///     `brand_template.layouts` is empty.
+    /// (b) No raw `<p:sldLayout>` XML bytes are fabricated — the `minimal_empty_layout_xml`
+    ///     function has been deleted and must not exist.
+    ///
+    /// LOAD-BEARING (TD-VSDD-059): if the error path is silently removed or the function
+    /// is restored, this test will fail because `embed` would either succeed (producing
+    /// fabricated XML) or panic — neither is the `Err(MissingBrandPart)` outcome required
+    /// by the ADR-015 Rule 5 invariant.
+    ///
+    /// Resolves DEF-P5-001 (previously-dead `MissingBrandPart` variant now constructed).
+    #[test]
+    fn test_f_p9_med_001_empty_layouts_returns_missing_brand_part_error() {
+        // A BrandTemplate with zero layouts — the invariant-violation scenario.
+        let template = brand_template_with_n_layouts(0);
+        assert_eq!(
+            template.layouts.len(),
+            0,
+            "precondition: template must have exactly 0 layouts"
+        );
+
+        let mut parts = Vec::new();
+        let result = LayoutEmbedder::embed(&template, &mut parts);
+
+        // (a) Must return Err, not Ok.
+        assert!(
+            result.is_err(),
+            "embed must return Err when brand_template.layouts is empty; got Ok"
+        );
+
+        // (b) Error variant must be MissingBrandPart with part == "layouts".
+        match result.unwrap_err() {
+            crate::error::PptxError::MissingBrandPart { part } => {
+                assert_eq!(
+                    part, "layouts",
+                    "MissingBrandPart.part must be \"layouts\"; got \"{part}\""
+                );
+            },
+            other => panic!(
+                "embed must return PptxError::MissingBrandPart for empty layouts; \
+                 got {other:?}"
+            ),
+        }
+
+        // (c) No parts should have been pushed — the error fires before the loop.
+        assert!(
+            parts.is_empty(),
+            "embed must not push any parts before returning Err(MissingBrandPart); \
+             got {} part(s)",
+            parts.len()
         );
     }
 }
