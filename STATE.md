@@ -32,8 +32,8 @@ wave_4_started: 2026-05-31
 wave_4_total_stories: 18
 wave_4_total_points: 114
 wave_5_total_points: 109
-develop_sha: "f2573bb1"
-develop_pr_count: 50
+develop_sha: "a3b47303"
+develop_pr_count: 51
 error_taxonomy_version: "v2.13"
 workspace_tests: "~2700+ (50 PRs merged)"
 workspace_test_failures: 0
@@ -53,10 +53,12 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. Generates branded .pptx
 
 ## POSITION
 
-Phase 3, **Wave 4 Batch A = 10/10 COMPLETE. STORY-077 + all 4 follow-ups MERGED.**
-- develop = `f2573bb1` (50 merged PRs, PR #50 = STORY-077 follow-ups). Open PRs: 0. Active worktrees: none.
-- Follow-up cascade: 7 passes → 3/3 strict-CLEAN. CI 16/16 green. Security-reviewer CLEAN. PR-reviewer APPROVE.
-- **Next:** Wave 4 gate (wave-gate skill) OR Wave 4 Batch B start — STORY-037→038→039→040 + STORY-041→042 (parallel after Batch A, per wave-schedule.md). Confirm with orchestrator before proceeding.
+Phase 3, **Wave 4 Batch B in progress. STORY-041 MERGED (PR #51). STORY-037 CONVERGED + in PR.**
+- develop = `a3b47303` (51 merged PRs, PR #51 = STORY-041). Open PRs: 1 (feature/S-037). Active worktrees: feature/S-037.
+- STORY-041: converged 3/3 strict-CLEAN (passes 3/4/5), merged PR #51 (a3b47303). STORY-042 now unblocked.
+- STORY-037: converged 3/3 strict-CLEAN (passes 6/7/8), cascade reset once at pass 5 (F-PASS5-M1 raw-XML fix). ADR-015 + Addendum A created this session (pptx brand-rendering boundary + STORY-037/038 scope split). In PR (feature/S-037).
+- **Batch B remaining:** STORY-037 PR merge → unblocks STORY-038→039→040. STORY-042 (unblocked by STORY-041 merge). Then Batch C: STORY-049→050.
+- **Wave 4 merged total:** 11/18 (Batch A 10/10 + STORY-041).
 
 ---
 
@@ -75,15 +77,18 @@ Phase 3, **Wave 4 Batch A = 10/10 COMPLETE. STORY-077 + all 4 follow-ups MERGED.
 | Planning (25 DSL decisions) | DONE 2026-05-24 | q1–q25 docs + 14 research threads + 7/7 spikes resolved |
 | Phase 1: Spec Crystallization | DONE — APPROVED 2026-05-25 | PRD (109 BCs, 15 HS, 4 supplements) + arch (14 ADRs, 15 VPs, 20 crates) + UX spec. 17 passes, 69 findings, 3/3 clean. |
 | Phase 2: Story Decomposition | DONE — APPROVED 2026-05-25 | 81 stories, 21 epics, 6 waves, 491 pts. 22 passes, 96+ findings, 3/3 clean. |
-| Phase 3: TDD Implementation | IN PROGRESS — Waves 1/2/3 GATE PASSED. Wave 4 Batch A 10/10 COMPLETE (STORY-077 + follow-ups PR #50 f2573bb1 2026-06-03). Batch B next. | Per-story delivery |
+| Phase 3: TDD Implementation | IN PROGRESS — Waves 1/2/3 GATE PASSED. Wave 4: Batch A 10/10 COMPLETE + STORY-041 MERGED (PR #51 a3b47303) + STORY-037 CONVERGED in PR. 11/18 Wave 4 merged. Batch B: STORY-038→039→040 (after STORY-037 merge), STORY-042 (unblocked). | Per-story delivery |
 | Phases 4–7 | NOT STARTED | Holdout / Adversarial / Formal Hardening / Convergence |
 
-## Wave 4 Batch A Status (10/10 COMPLETE)
+## Wave 4 Batch A Status (10/10 COMPLETE) + Batch B In Progress
 
-ALL MERGED (PRs #39–#49, develop c8913cad): STORY-035, STORY-036, STORY-043, STORY-044, STORY-073, STORY-075, STORY-076, STORY-078, STORY-045, **STORY-077**.
-STORY-077 follow-ups MERGED as PR #50 (f2573bb1, 2026-06-03): E-PAR-022 URL allowlist, italic bilateral flanking, absolute error offsets, round-trip test.
+**Batch A ALL MERGED** (PRs #39–#49, develop c8913cad): STORY-035, STORY-036, STORY-043, STORY-044, STORY-073, STORY-075, STORY-076, STORY-078, STORY-045, **STORY-077**.
+STORY-077 follow-ups MERGED as PR #50 (f2573bb1, 2026-06-03).
 
-Batch B (next, parallel): STORY-037→038→039→040, STORY-041→042.
+**Batch B:**
+- STORY-041 MERGED PR #51 (a3b47303, 2026-06-03). STORY-042 now unblocked.
+- STORY-037 CONVERGED (3/3 strict-CLEAN, 8 passes). In PR (feature/S-037). ADR-015 + Addendum A created (pptx brand-rendering boundary). Remaining: STORY-038→039→040 (after STORY-037 merge).
+
 Batch C (after Batch B): STORY-049→050.
 
 ---
@@ -93,12 +98,12 @@ Batch C (after Batch B): STORY-049→050.
 | Field | Value |
 |-------|-------|
 | **Date** | 2026-06-03 |
-| **Position** | Wave 4 Batch A 10/10 COMPLETE. STORY-077 + all 4 follow-ups merged as PR #50 (f2573bb1). 4 CLOSED follow-ups (SEC-002, taxonomy debt, OBS-P24-A, OBS-P25-A). 4 TRACKED new follow-ups (E-PAR-021 msg, HTML open-redirect, inner-quote round-trip, URL-paren-truncation). Next: Wave 4 gate OR Batch B — confirm with orchestrator. |
-| **develop SHA** | `f2573bb1` (50 merged PRs) |
-| **Active worktrees** | None |
-| **Open PRs** | 0 |
+| **Position** | Wave 4 Batch B in progress. STORY-041 MERGED PR #51 (a3b47303). STORY-037 CONVERGED (3/3 strict-CLEAN, 8 passes) + in PR (feature/S-037). Wave 4: 11/18 merged. ADR-015 + Addendum A on factory-artifacts. STORY-042 unblocked. Next: merge STORY-037 PR → dispatch STORY-038→039→040 + STORY-042 in parallel. |
+| **develop SHA** | `a3b47303` (51 merged PRs) |
+| **Active worktrees** | feature/S-037 (STORY-037, converged, in PR) |
+| **Open PRs** | 1 (STORY-037 feature/S-037) |
 | **Workspace crates** | 16 |
-| **BC deltas** | BC-3.02.002 v1.5, BC-1.14.003 v1.3, error-taxonomy v2.13 — all on factory-artifacts |
+| **BC deltas** | ADR-015 + Addendum A this session; BC-3.02.002 v1.5, BC-1.14.003 v1.3, error-taxonomy v2.13 — all on factory-artifacts |
 | **factory-artifacts** | Local only — push requires explicit human authorization |
 
 ---
@@ -121,6 +126,11 @@ Batch C (after Batch B): STORY-049→050.
 | OBS-FU-P1-C: Link URL `)` truncation | minor | tracked | Link URLs truncated at first `)` — Wikipedia disambiguation links mis-parsed. Pre-existing link-parser follow-up. |
 | BC-1.14.001/002 still `subsystem: SS-TBD` | LOW | open | Fold into next spec-hygiene pass |
 | OBS-P6-001: PDF exporter ignores `opts.strict`/warnings | LOW | open | Wave-gate concern post-STORY-045 |
+| SEC-003 (docx): docx exporter URL-scheme test-doc over-claims vbscript:/file: coverage; add explicit rejection tests | LOW | open | Target: next docx touch / STORY-042 |
+| SafeUrl newtype: pptx/pdf/html exporters will hit the same SEC-001 gap as docx; consider shared slideforge-types SafeUrl across all exporters | cross-exporter | tracked | Dedicated hardening story before Phase 6 |
+| cold_budget flaky perf test (test_cold_budget_under_200ms, slideforge-diagrams): intermittent on macOS CI (332ms vs 300ms budget under runner jitter); passes on re-run | LOW | tracked | Stabilize budget/runner or mark perf-tolerant; target STORY-080 |
+| STORY-038 spec stale ref: line ~223 references `Brand.layout_xmls` (stale field name, same issue ADR-015 corrected for STORY-037); story-writer must fix before STORY-038 impl | spec-hygiene | open | Fix in story spec before dispatching STORY-038 |
+| DEF-041-P5-001: EC-002 paragraph-break preservation depends on upstream STORY-035 evaluator splitting — exporter correct given input contract | integration | deferred to wave-gate | STORY-041 adversary pass 5 deferred finding |
 
 ---
 

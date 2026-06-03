@@ -48,9 +48,9 @@ wave_4_batch_c:
 wave_4_pulled_in_p1: [STORY-073, STORY-075, STORY-076]
 wave_4_deferred_p2_to_wave5: [STORY-072, STORY-074]
 wave_4_bc_deltas: "BC-2.01.001 v1.1→v1.2; BC-2.01.003 v1.8→v1.9; error-taxonomy v2.2→v2.3"
-develop_sha: "47856465"
-develop_pr_count: 46
-last_updated: 2026-06-01
+develop_sha: "a3b47303"
+develop_pr_count: 51
+last_updated: 2026-06-03
 ---
 
 stories:
@@ -351,12 +351,16 @@ stories:
     adversary_convergence: "3/3 strict-CLEAN at passes 7/8/9 (9-pass total cascade)"
     notes: "Register-Aware Rendering: No Content Bleed Invariant. BleedChecker test utility (test-utils feature-gated). Exporter ACs (AC-001..AC-007) deferred to STORY-037/041/046. 6 fix-bursts hardening XML entity decoder. Cross-story: STORY-037/041 must emit register sentinels as contiguous XML runs."
   STORY-037:
-    status: not-started
+    status: in-progress
     wave: 4
     batch: B
     priority: P0
     points: 13
-    notes: "PPTX Core Serialization: ooxmlsdk + ZIP Assembly; chain: STORY-037→038→039→040"
+    worktree: ".worktrees/STORY-037 (feature/S-037)"
+    adversary_convergence: "3/3 strict-CLEAN at passes 6/7/8 (8-pass total cascade)"
+    adversary_streak: "3/3"
+    converged: true
+    notes: "PPTX Core Serialization: ooxmlsdk + ZIP Assembly; chain: STORY-037→038→039→040. CONVERGED — in PR. ADR-015 + Addendum A created this session (pptx brand-rendering boundary + STORY-037/038 scope split)."
   STORY-038:
     status: not-started
     wave: 4
@@ -379,12 +383,16 @@ stories:
     points: 5
     notes: "PPTX Speaker Notes + notesMaster1.xml; depends on STORY-039"
   STORY-041:
-    status: not-started
+    status: merged
     wave: 4
     batch: B
     priority: P0
     points: 8
-    notes: "DOCX Core Serialization; chain: STORY-041→042"
+    pr: 51
+    merge_commit: "a3b47303"
+    merged: 2026-06-03
+    adversary_convergence: "3/3 strict-CLEAN at passes 3/4/5 (5-pass total cascade)"
+    notes: "DOCX Core Serialization; chain: STORY-041→042. MERGED PR #51 (a3b47303). DEF-041-P5-001 (EC-002 para-break preservation) deferred to wave-gate: exporter correct given input contract; splitting is upstream STORY-035 scope."
   STORY-042:
     status: not-started
     wave: 4
