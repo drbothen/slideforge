@@ -38,6 +38,13 @@ use crate::error::ExportError;
 /// W namespace URI for Word processing ML.
 const W_NS: &str = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 
+/// R namespace URI for Office document relationships.
+///
+/// Required for `r:id` attributes used in `<w:hyperlink r:id="...">` elements
+/// (BC-4.02.001 / F-DOCX-001). Without this declaration, any document
+/// containing an `InlineNode::Link` would produce namespace-malformed XML.
+const R_NS: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+
 /// A hyperlink relationship entry for `word/_rels/document.xml.rels`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HyperlinkRel {
@@ -178,7 +185,15 @@ impl DocumentBodySerializer {
         };
 
         let document = Document {
-            xmlns: vec![XmlNamespaceDecl::new("w", W_NS)],
+            // Declare both the w: namespace (Word processing ML) and the r:
+            // namespace (Office relationships). The r: namespace is required
+            // for `r:id` attributes on `<w:hyperlink>` elements (F-DOCX-001).
+            // Omitting it produces namespace-malformed XML for any deck that
+            // contains an InlineNode::Link.
+            xmlns: vec![
+                XmlNamespaceDecl::new("w", W_NS),
+                XmlNamespaceDecl::new("r", R_NS),
+            ],
             xml_header: ooxmlsdk::common::XmlHeaderType::Standalone,
             body: Some(Box::new(body)),
             ..Document::default()
