@@ -18,14 +18,15 @@
 //!
 //! Each `InlineNode::Link { url, .. }` generates a relationship entry in
 //! `word/_rels/document.xml.rels`. The serializer assigns sequential `rId`
-//! values starting at `rId1` and exposes the accumulated relationship map via
+//! values starting at `rId4` (rId1–rId3 are reserved for styles/numbering/settings)
+//! and exposes the accumulated relationship map via
 //! [`DocumentBodySerializer::relationships`].
 
 use ooxmlsdk::common::XmlNamespaceDecl;
 use ooxmlsdk::schemas::schemas_openxmlformats_org_wordprocessingml_2006_main::{
-    Body, BodyChoice, Bold, Document, Italic, Paragraph, ParagraphChoice, ParagraphProperties,
-    ParagraphStyleId, Run, RunChoice, RunFonts, RunProperties, Strike, Text,
-    VerticalPositionValues, VerticalTextAlignment,
+    Body, BodyChoice, Bold, Document, Hyperlink, HyperlinkChoice, Italic, Paragraph,
+    ParagraphChoice, ParagraphProperties, ParagraphStyleId, Run, RunChoice, RunFonts,
+    RunProperties, Strike, Text, VerticalPositionValues, VerticalTextAlignment,
 };
 use ooxmlsdk::sdk::SdkType;
 use slideforge_layout::LaidOutDeck;
@@ -40,7 +41,7 @@ const W_NS: &str = "http://schemas.openxmlformats.org/wordprocessingml/2006/main
 /// A hyperlink relationship entry for `word/_rels/document.xml.rels`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HyperlinkRel {
-    /// The sequential relationship ID (e.g., `"rId1"`).
+    /// The sequential relationship ID (e.g., `"rId4"`).
     pub r_id: String,
     /// The target URL.
     pub target: String,
@@ -52,16 +53,28 @@ pub struct DocumentBodySerializer {
     /// Hyperlink relationships collected during serialization.
     relationships: Vec<HyperlinkRel>,
     /// Next relationship ID counter.
+    ///
+    /// Starts at 4 because `word/_rels/document.xml.rels` reserves:
+    /// - `rId1` → `word/styles.xml`
+    /// - `rId2` → `word/numbering.xml`
+    /// - `rId3` → `word/settings.xml`
+    ///
+    /// Hyperlink IDs must not collide with these fixed relationship IDs.
     next_rel_id: u32,
 }
 
 impl DocumentBodySerializer {
     /// Create a new serializer.
+    ///
+    /// Hyperlink `rId` allocation begins at `rId4` so it cannot collide with
+    /// the three fixed document-relationship IDs (styles, numbering, settings).
     #[must_use]
     pub fn new() -> Self {
         Self {
             relationships: Vec::new(),
-            next_rel_id: 1,
+            // rId1..=rId3 are reserved for fixed document relationships
+            // (styles.xml, numbering.xml, settings.xml) in build_document_rels.
+            next_rel_id: 4,
         }
     }
 
@@ -88,7 +101,8 @@ impl DocumentBodySerializer {
     pub fn serialize(&mut self, deck: &LaidOutDeck) -> Result<Vec<u8>, ExportError> {
         // Reset state for a fresh serialization.
         self.relationships.clear();
-        self.next_rel_id = 1;
+        // rId1..=rId3 are reserved for styles/numbering/settings (see build_document_rels).
+        self.next_rel_id = 4;
 
         let mut body_paragraphs: Vec<BodyChoice> = Vec::new();
         let mut detail_paragraphs: Vec<BodyChoice> = Vec::new();
@@ -170,12 +184,12 @@ impl DocumentBodySerializer {
                 message: format!("document.xml write error: {e}"),
             })?;
 
-        // Normalize ooxmlsdk/quick-xml self-closing tag format: " />" → "/>"
-        // quick_xml emits `<w:b />` (space before />); tests and OOXML processors
-        // accept `<w:b/>` (no space). Both are equivalent XML but the compact
-        // form is conventional in OOXML producers.
-        let normalized = normalize_self_closing_tags(buf);
-        Ok(normalized)
+        // Note: quick_xml emits `<w:b />` (with space before />) for empty
+        // elements. Both `<w:b/>` and `<w:b />` are equivalent per XML §2.1.
+        // We do NOT normalize the byte stream here — a global byte-replace of
+        // " />" would corrupt user text content that contains the literal " />"
+        // (F-041-002). Assertions and snapshot tests must accept both forms.
+        Ok(buf)
     }
 
     /// Return the hyperlink relationships accumulated during the last call to
@@ -204,48 +218,52 @@ impl DocumentBodySerializer {
         };
 
         for node in nodes {
-            let runs = self.inline_node_to_runs(node)?;
-            for run in runs {
-                para.paragraph_choice
-                    .push(ParagraphChoice::WR(Box::new(run)));
-            }
+            let choices = self.inline_node_to_paragraph_choices(node)?;
+            para.paragraph_choice.extend(choices);
         }
 
         Ok(para)
     }
 
-    /// Convert an [`InlineNode`] into one or more Word [`Run`] elements.
-    fn inline_node_to_runs(&mut self, node: &InlineNode) -> Result<Vec<Run>, ExportError> {
+    /// Convert an [`InlineNode`] into one or more [`ParagraphChoice`] elements.
+    ///
+    /// Most variants produce `ParagraphChoice::WR` items. `InlineNode::Link`
+    /// produces a single `ParagraphChoice::WHyperlink` that wraps the run
+    /// inside a `<w:hyperlink r:id="...">` element so the link is clickable.
+    fn inline_node_to_paragraph_choices(
+        &mut self,
+        node: &InlineNode,
+    ) -> Result<Vec<ParagraphChoice>, ExportError> {
         match node {
-            InlineNode::Plain(text) => Ok(vec![make_plain_run(text)]),
+            InlineNode::Plain(text) => {
+                Ok(vec![ParagraphChoice::WR(Box::new(make_plain_run(text)))])
+            },
 
             InlineNode::Bold(children) => {
-                let mut runs = Vec::new();
+                let mut choices = Vec::new();
                 for child in children {
-                    for mut run in self.inline_node_to_runs(child)? {
-                        // Add <w:b/> to existing run properties (or create new).
-                        let rpr = run
-                            .run_properties
-                            .get_or_insert_with(|| Box::new(RunProperties::default()));
-                        rpr.bold = Some(Bold::default());
-                        runs.push(run);
+                    for choice in self.inline_node_to_paragraph_choices(child)? {
+                        // Add <w:b/> to any WR run choices; pass others through unchanged.
+                        let choice = apply_run_property(choice, |rpr| {
+                            rpr.bold = Some(Bold::default());
+                        });
+                        choices.push(choice);
                     }
                 }
-                Ok(runs)
+                Ok(choices)
             },
 
             InlineNode::Italic(children) => {
-                let mut runs = Vec::new();
+                let mut choices = Vec::new();
                 for child in children {
-                    for mut run in self.inline_node_to_runs(child)? {
-                        let rpr = run
-                            .run_properties
-                            .get_or_insert_with(|| Box::new(RunProperties::default()));
-                        rpr.italic = Some(Italic::default());
-                        runs.push(run);
+                    for choice in self.inline_node_to_paragraph_choices(child)? {
+                        let choice = apply_run_property(choice, |rpr| {
+                            rpr.italic = Some(Italic::default());
+                        });
+                        choices.push(choice);
                     }
                 }
-                Ok(runs)
+                Ok(choices)
             },
 
             InlineNode::Code(text) => {
@@ -261,53 +279,50 @@ impl DocumentBodySerializer {
                     run_choice: vec![RunChoice::WT(Box::new(make_text(text)))],
                     ..Run::default()
                 };
-                Ok(vec![run])
+                Ok(vec![ParagraphChoice::WR(Box::new(run))])
             },
 
             InlineNode::Strikethrough(children) => {
-                let mut runs = Vec::new();
+                let mut choices = Vec::new();
                 for child in children {
-                    for mut run in self.inline_node_to_runs(child)? {
-                        let rpr = run
-                            .run_properties
-                            .get_or_insert_with(|| Box::new(RunProperties::default()));
-                        rpr.strike = Some(Strike::default());
-                        runs.push(run);
+                    for choice in self.inline_node_to_paragraph_choices(child)? {
+                        let choice = apply_run_property(choice, |rpr| {
+                            rpr.strike = Some(Strike::default());
+                        });
+                        choices.push(choice);
                     }
                 }
-                Ok(runs)
+                Ok(choices)
             },
 
             InlineNode::Superscript(children) => {
-                let mut runs = Vec::new();
+                let mut choices = Vec::new();
                 for child in children {
-                    for mut run in self.inline_node_to_runs(child)? {
-                        let rpr = run
-                            .run_properties
-                            .get_or_insert_with(|| Box::new(RunProperties::default()));
-                        rpr.vertical_text_alignment = Some(VerticalTextAlignment {
-                            val: VerticalPositionValues::Superscript,
+                    for choice in self.inline_node_to_paragraph_choices(child)? {
+                        let choice = apply_run_property(choice, |rpr| {
+                            rpr.vertical_text_alignment = Some(VerticalTextAlignment {
+                                val: VerticalPositionValues::Superscript,
+                            });
                         });
-                        runs.push(run);
+                        choices.push(choice);
                     }
                 }
-                Ok(runs)
+                Ok(choices)
             },
 
             InlineNode::Subscript(children) => {
-                let mut runs = Vec::new();
+                let mut choices = Vec::new();
                 for child in children {
-                    for mut run in self.inline_node_to_runs(child)? {
-                        let rpr = run
-                            .run_properties
-                            .get_or_insert_with(|| Box::new(RunProperties::default()));
-                        rpr.vertical_text_alignment = Some(VerticalTextAlignment {
-                            val: VerticalPositionValues::Subscript,
+                    for choice in self.inline_node_to_paragraph_choices(child)? {
+                        let choice = apply_run_property(choice, |rpr| {
+                            rpr.vertical_text_alignment = Some(VerticalTextAlignment {
+                                val: VerticalPositionValues::Subscript,
+                            });
                         });
-                        runs.push(run);
+                        choices.push(choice);
                     }
                 }
-                Ok(runs)
+                Ok(choices)
             },
 
             InlineNode::Link { text, url } => {
@@ -319,9 +334,9 @@ impl DocumentBodySerializer {
                     target: url.to_string(),
                 });
 
-                // Emit the link text as a run with the Hyperlink character style.
-                // The hyperlink element itself is emitted as an XmlAny (raw XML) at
-                // the paragraph choice level; here we return runs with the style.
+                // Emit the link text as a run with the Hyperlink character style,
+                // wrapped in a <w:hyperlink r:id="..."> element so the link is
+                // clickable in Word and LibreOffice (EC-003 requirement).
                 let link_run = Run {
                     run_properties: Some(Box::new(RunProperties {
                         run_style: Some(
@@ -331,26 +346,31 @@ impl DocumentBodySerializer {
                         ),
                         ..RunProperties::default()
                     })),
-                    run_choice: {
-                        let mut choices = Vec::new();
-                        // Collect text from child nodes.
-                        let collected = collect_plain_text(text);
-                        choices.push(RunChoice::WT(Box::new(make_text(&collected))));
-                        choices
-                    },
+                    run_choice: vec![RunChoice::WT(Box::new(make_text(&collect_plain_text(text))))],
                     ..Run::default()
                 };
-                Ok(vec![link_run])
+
+                let hyperlink = Hyperlink {
+                    id: Some(r_id.into()),
+                    hyperlink_choice: vec![HyperlinkChoice::WR(Box::new(link_run))],
+                    ..Hyperlink::default()
+                };
+
+                Ok(vec![ParagraphChoice::WHyperlink(Box::new(hyperlink))])
             },
 
             // For unsupported inline variants (Math, Footnote, Xref, Highlight),
             // fall back to plain text extraction.
-            InlineNode::Math(math_node) => Ok(vec![make_plain_run(math_node.latex.as_ref())]),
+            InlineNode::Math(math_node) => Ok(vec![ParagraphChoice::WR(Box::new(
+                make_plain_run(math_node.latex.as_ref()),
+            ))]),
             InlineNode::Footnote(children) | InlineNode::Highlight(children) => {
                 let text = collect_plain_text(children);
-                Ok(vec![make_plain_run(&text)])
+                Ok(vec![ParagraphChoice::WR(Box::new(make_plain_run(&text)))])
             },
-            InlineNode::Xref(target) => Ok(vec![make_plain_run(target.as_ref())]),
+            InlineNode::Xref(target) => Ok(vec![ParagraphChoice::WR(Box::new(make_plain_run(
+                target.as_ref(),
+            )))]),
         }
     }
 }
@@ -362,6 +382,26 @@ impl Default for DocumentBodySerializer {
 }
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
+
+/// Apply a run-property mutation to a [`ParagraphChoice`] if it is a `WR` variant.
+///
+/// For non-`WR` choices (e.g., `WHyperlink`), the choice passes through
+/// unchanged — caller is responsible for handling those cases if needed.
+fn apply_run_property<F>(choice: ParagraphChoice, f: F) -> ParagraphChoice
+where
+    F: FnOnce(&mut RunProperties),
+{
+    match choice {
+        ParagraphChoice::WR(mut run) => {
+            let rpr = run
+                .run_properties
+                .get_or_insert_with(|| Box::new(RunProperties::default()));
+            f(rpr);
+            ParagraphChoice::WR(run)
+        },
+        other => other,
+    }
+}
 
 /// Build a paragraph with the given style containing a single plain-text run.
 fn make_styled_paragraph(style: &str, text: &str) -> Paragraph {
@@ -410,39 +450,6 @@ fn make_text(text: &str) -> Text {
         },
         ..Text::default()
     }
-}
-
-/// Normalize ooxmlsdk/quick-xml self-closing tag output.
-///
-/// `quick_xml` emits `<w:b />` (space before `/>`) for empty elements. This
-/// function replaces ` />` with `/>` throughout the XML bytes to produce the
-/// compact conventional OOXML form `<w:b/>`. Both forms are semantically
-/// equivalent per the XML spec (§2.1); the compact form is conventional for
-/// OOXML producers and matches the assertions in the test suite.
-///
-/// The replacement is byte-safe because ` />` is ASCII and cannot be a
-/// subsequence of a multi-byte UTF-8 character (all multi-byte continuation
-/// bytes have the high bit set, i.e., ≥ 0x80, while the ASCII space is 0x20).
-fn normalize_self_closing_tags(xml: Vec<u8>) -> Vec<u8> {
-    // Fast path: if no " />" pattern exists, return unchanged.
-    if !xml.windows(3).any(|w| w == b" />") {
-        return xml;
-    }
-    // Replace all occurrences of b" />" with b"/>".
-    let mut out = Vec::with_capacity(xml.len());
-    let mut i = 0;
-    while i < xml.len() {
-        if i + 2 < xml.len() && xml[i] == b' ' && xml[i + 1] == b'/' && xml[i + 2] == b'>' {
-            // Skip the leading space — emit just "/>"
-            out.push(b'/');
-            out.push(b'>');
-            i += 3;
-        } else {
-            out.push(xml[i]);
-            i += 1;
-        }
-    }
-    out
 }
 
 /// Recursively extract plain text from a slice of inline nodes (used for

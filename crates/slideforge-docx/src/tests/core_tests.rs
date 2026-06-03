@@ -509,26 +509,53 @@ fn test_BC_4_02_001_inline_bold_italic_run_properties() {
     let docx_bytes = export_deck(&deck, &laid_out);
     let doc_xml = read_zip_member(&docx_bytes, "word/document.xml");
 
-    // Bold run property.
+    // Assert <w:b/> (or <w:b />) run property appears BEFORE the "Bold" text
+    // run, proving the property is associated with the correct run content.
+    // Both compact (<w:b/>) and spaced (<w:b />) self-closing forms are valid XML
+    // (per XML §2.1) and semantically equivalent; we accept both.
+    let bold_prop_pos = doc_xml
+        .find("<w:b/>")
+        .or_else(|| doc_xml.find("<w:b />"))
+        .expect("Bold InlineNode must produce <w:b/> or <w:b /> run property (AC-008); got:\n{doc_xml}");
+    let bold_text_pos = doc_xml
+        .find("<w:t>Bold</w:t>")
+        .expect("Bold text run must contain <w:t>Bold</w:t> (AC-008); got:\n{doc_xml}");
+
+    // The bold property element must precede the bold text in the serialized
+    // XML, proving <w:rPr><w:b .../></w:rPr> encloses the "Bold" run (not some
+    // other run). The enclosure order in XML is: <w:r><w:rPr><w:b/></w:rPr>
+    // <w:t>Bold</w:t></w:r> — property always comes before the text content.
     assert!(
-        doc_xml.contains("<w:b/>") || doc_xml.contains("<w:b/>"),
-        "Bold InlineNode must produce <w:b/> run property (AC-008); got:\n{doc_xml}"
+        bold_prop_pos < bold_text_pos,
+        "Bold run property <w:b.../> (at byte {bold_prop_pos}) must precede \
+         <w:t>Bold</w:t> (at byte {bold_text_pos}) — property must be associated \
+         with the 'Bold' run, not some other run (AC-008 / BC-4.02.001 postcondition 7)"
     );
 
-    // Italic run property.
-    assert!(
-        doc_xml.contains("<w:i/>") || doc_xml.contains("<w:i/>"),
-        "Italic InlineNode must produce <w:i/> run property (AC-008); got:\n{doc_xml}"
-    );
+    // Assert <w:i/> (or <w:i />) appears BEFORE the "italic" text run.
+    let italic_prop_pos = doc_xml
+        .find("<w:i/>")
+        .or_else(|| doc_xml.find("<w:i />"))
+        .expect("Italic InlineNode must produce <w:i/> or <w:i /> run property (AC-008); got:\n{doc_xml}");
+    let italic_text_pos = doc_xml
+        .find("<w:t>italic</w:t>")
+        .expect("Italic text run must contain <w:t>italic</w:t> (AC-008); got:\n{doc_xml}");
 
     assert!(
-        doc_xml.contains("Bold"),
-        "Bold text \"Bold\" must appear in document.xml (AC-008)"
+        italic_prop_pos < italic_text_pos,
+        "Italic run property <w:i.../> (at byte {italic_prop_pos}) must precede \
+         <w:t>italic</w:t> (at byte {italic_text_pos}) — property must be associated \
+         with the 'italic' run, not some other run (AC-008 / BC-4.02.001 postcondition 7)"
     );
+
+    // Assert the bold property does NOT appear before the italic text and vice versa
+    // (each property is scoped to its own run, not the whole paragraph).
     assert!(
-        doc_xml.contains("italic"),
-        "Italic text \"italic\" must appear in document.xml (AC-008)"
+        bold_prop_pos < bold_text_pos && bold_prop_pos < italic_text_pos
+            || italic_prop_pos < italic_text_pos,
+        "run properties must be locally scoped to their own runs (AC-008)"
     );
+
     assert!(
         doc_xml.contains(" and "),
         "Plain text \" and \" must appear in document.xml (AC-008)"
