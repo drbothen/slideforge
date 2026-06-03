@@ -1275,18 +1275,16 @@ fn test_BC_4_01_005_ac011_valid_ph_idx_emits_ph_element() {
 
 /// BC-4.01.005 postcondition 5 / AC-011 (negative / Body path):
 /// When a `FrameContent::Body` frame is serialized WITH a layout that has NO
-/// `idx=1` placeholder, the slide serializer MUST NOT emit `<p:ph idx="1">`.
+/// `idx=1` placeholder, the slide serializer MUST NOT emit `<p:ph idx="1">`
+/// AND MUST emit a `tracing::warn!` log event (AC-011(b) / ADR-015 §7 item 3).
 ///
-/// This test is load-bearing:
-/// - It calls `SlideSerializer::new(...).with_layout(layout)` where `layout` has
-///   had its `idx=1` placeholder removed.
-/// - If `body_shape_kind()` always returns `BodyNoPlaceholder` regardless of layout,
-///   the *positive* test above would fail (not this one) — so both tests together
-///   demonstrate real discrimination.
-/// - If `body_shape_kind()` always returns `Body` regardless of layout, this test
-///   would fail because idx="1" would appear in the output.
-///
-/// Together the positive and negative tests form a mutation-killing pair.
+/// This test is load-bearing for BOTH the omission AND the warn:
+/// - `logs_contain("Body frame: resolved layout has no idx=1 placeholder")` FAILS
+///   if the warn is silently skipped (F-038-P12-M1).
+/// - If `body_shape_kind()` always returns `Body` regardless of layout, the idx="1"
+///   assertion fails.
+/// - Together with the positive test, this forms a mutation-killing pair.
+#[tracing_test::traced_test]
 #[test]
 fn test_BC_4_01_005_ac011_missing_ph_idx_omits_ph_element() {
     use crate::slide_serializer::SlideSerializer;
@@ -1338,22 +1336,113 @@ fn test_BC_4_01_005_ac011_missing_ph_idx_omits_ph_element() {
     };
 
     // Call with_layout — the layout has no idx=1, so body_shape_kind() must
-    // return BodyNoPlaceholder and no <p:ph idx="1"> must appear.
+    // return BodyNoPlaceholder, no <p:ph idx="1"> must appear, AND the warn must fire.
     let serializer = SlideSerializer::new(false, 0).with_layout(&layout_title_only);
     let (slide_xml_bytes, _) = serializer
         .build(&slide, 0, "rId1", &[])
         .expect("serializer must succeed");
     let slide_xml = String::from_utf8(slide_xml_bytes).expect("slide XML must be valid UTF-8");
 
-    // There must be ZERO occurrences of idx="1" in the output.
+    // (a) There must be ZERO occurrences of idx="1" in the output.
     let body_ph_count = slide_xml.matches("idx=\"1\"").count();
     assert_eq!(
         body_ph_count,
         0,
-        "AC-011: when the layout has NO body placeholder (idx=1), the slide serializer \
+        "AC-011(a): when the layout has NO body placeholder (idx=1), the slide serializer \
          must NOT emit <p:ph idx=\"1\"> for a Body frame; found {body_ph_count} occurrences. \
          Slide XML excerpt: {}",
         &slide_xml[..slide_xml.len().min(800)]
+    );
+
+    // (b) The tracing::warn! MUST have fired (AC-011(b) / ADR-015 §7 item 3 / F-038-P12-M1).
+    // This assertion FAILS if the warn is silently skipped, making this test load-bearing
+    // for the warn path.
+    assert!(
+        logs_contain("Body frame: resolved layout has no idx=1 placeholder"),
+        "AC-011(b) / F-038-P12-M1: Body BodyNoPlaceholder path MUST emit tracing::warn! \
+         when the layout has no idx=1 placeholder; the warn was NOT captured. \
+         This means the warn is silently skipped, violating ADR-015 §7 item 3."
+    );
+}
+
+/// BC-4.01.005 / AC-011 (negative / TextRun path):
+/// When a `FrameContent::TextRun` frame is serialized WITH a layout that has NO
+/// `idx=1` placeholder, the slide serializer MUST NOT emit `<p:ph idx="1">`
+/// AND MUST emit a `tracing::warn!` log event (AC-011(b) / ADR-015 §7 item 3).
+///
+/// This is the TextRun-specific sibling of the Body negative test (F-038-P12-M1
+/// sibling audit: TextRun arm must warn + omit identically to the Body arm).
+#[tracing_test::traced_test]
+#[test]
+fn test_BC_4_01_005_ac011_textrun_missing_ph_idx_omits_ph_and_warns() {
+    use crate::slide_serializer::SlideSerializer;
+    use slideforge_brand::layouts::{LayoutPlaceholder, SlideLayoutDef};
+    use slideforge_types::InlineNode;
+
+    // Build a layout that has idx=0 (title) but NO idx=1 (body) placeholder.
+    let layout_title_only = SlideLayoutDef {
+        index: 4,
+        name: Arc::from("Title Only"),
+        ooxml_type: Some(Arc::from("titleOnly")),
+        slide_type_keyword: None,
+        has_color_override: false,
+        color_override_bg: None,
+        color_override_tx: None,
+        placeholders: vec![LayoutPlaceholder {
+            ph_type: Arc::from("title"),
+            idx: 0,
+            accessibility_name: Arc::from("Title"),
+            x: 457_200,
+            y: 274_638,
+            cx: 8_229_600,
+            cy: 1_143_000,
+        }],
+    };
+
+    // Build a slide with a TextRun frame (not Body).
+    let slide = LaidOutSlide {
+        source_index: 0,
+        slide_type_keyword: Arc::from("title_only"),
+        frames: vec![
+            Frame {
+                bbox: title_bbox(),
+                content: FrameContent::Title(Arc::from("Title")),
+                text_flow: None,
+            },
+            Frame {
+                bbox: body_bbox(),
+                content: FrameContent::TextRun(vec![InlineNode::Plain(Arc::from("run text"))]),
+                text_flow: None,
+            },
+        ],
+        speaker_notes: None,
+        register_tags: vec![],
+        register_content: vec![],
+    };
+
+    let serializer = SlideSerializer::new(false, 0).with_layout(&layout_title_only);
+    let (slide_xml_bytes, _) = serializer
+        .build(&slide, 0, "rId1", &[])
+        .expect("serializer must succeed");
+    let slide_xml = String::from_utf8(slide_xml_bytes).expect("slide XML must be valid UTF-8");
+
+    // (a) No idx="1" placeholder element in output.
+    let ph_count = slide_xml.matches("idx=\"1\"").count();
+    assert_eq!(
+        ph_count,
+        0,
+        "AC-011(a) / TextRun: when the layout has NO idx=1 placeholder, the slide serializer \
+         must NOT emit <p:ph idx=\"1\"> for a TextRun frame; found {ph_count} occurrences. \
+         Slide XML excerpt: {}",
+        &slide_xml[..slide_xml.len().min(800)]
+    );
+
+    // (b) The tracing::warn! MUST have fired (F-038-P12-M1 sibling: TextRun arm).
+    assert!(
+        logs_contain("TextRun frame: resolved layout has no idx=1 placeholder"),
+        "F-038-P12-M1 (TextRun sibling): TextRun BodyNoPlaceholder path MUST emit \
+         tracing::warn! when the layout has no idx=1 placeholder; the warn was NOT captured. \
+         This means the warn is silently skipped, violating ADR-015 §7 item 3."
     );
 }
 
@@ -1647,12 +1736,14 @@ fn test_BC_4_01_005_f038_p2_m1_title_with_layout_having_idx0_emits_ph() {
 /// F-038-P2-M1 (negative / Title path):
 /// When a `FrameContent::Title` frame is serialized WITH a layout that has NO
 /// placeholder with `idx=0` (i.e., a Blank layout with empty placeholders Vec),
-/// the slide serializer MUST NOT emit `<p:ph idx="0">` for the title shape.
+/// the slide serializer MUST NOT emit `<p:ph idx="0">` for the title shape
+/// AND MUST emit a `tracing::warn!` log event (ADR-015 §7 item 3 / F-038-P12-M1
+/// sibling audit: Title arm must be load-bearing for the warn).
 ///
-/// Before this fix, the Title arm always emitted `<p:ph>` unconditionally —
-/// this test catches that regression. The mutation-killing pair is:
-///   positive: layout HAS idx=0 → ph emitted
-///   negative: layout has NO placeholders → ph omitted
+/// The mutation-killing pair is:
+///   positive: layout HAS idx=0 → ph emitted (no warn)
+///   negative: layout has NO placeholders → ph omitted + warn fires
+#[tracing_test::traced_test]
 #[test]
 fn test_BC_4_01_005_f038_p2_m1_title_on_blank_layout_omits_ph() {
     use crate::slide_serializer::SlideSerializer;
@@ -1690,10 +1781,10 @@ fn test_BC_4_01_005_f038_p2_m1_title_on_blank_layout_omits_ph() {
         .expect("build must succeed");
     let xml = String::from_utf8(bytes).expect("valid UTF-8");
 
-    // The title shape MUST NOT emit <p:ph idx="0"> — the layout has no idx=0.
+    // (a) The title shape MUST NOT emit <p:ph idx="0"> — the layout has no idx=0.
     assert!(
         !xml.contains("idx=\"0\""),
-        "F-038-P2-M1 (negative/Title): blank layout has NO idx=0 placeholder — \
+        "F-038-P2-M1 (negative/Title, a): blank layout has NO idx=0 placeholder — \
          Title frame MUST NOT emit <p:ph idx=\"0\">; found it anyway. \
          XML excerpt: {}",
         &xml[..xml.len().min(800)]
@@ -1703,10 +1794,18 @@ fn test_BC_4_01_005_f038_p2_m1_title_on_blank_layout_omits_ph() {
     // since neither idx=0 nor any other ph should appear).
     assert!(
         !xml.contains("<p:ph"),
-        "F-038-P2-M1 (negative/Title): blank layout — <p:ph> must be absent \
+        "F-038-P2-M1 (negative/Title, a): blank layout — <p:ph> must be absent \
          for a Title frame when the layout has no placeholders. \
          XML excerpt: {}",
         &xml[..xml.len().min(800)]
+    );
+
+    // (b) The tracing::warn! MUST have fired (F-038-P12-M1 sibling audit: Title arm).
+    assert!(
+        logs_contain("Title frame: resolved layout has no idx=0 placeholder"),
+        "F-038-P12-M1 (Title sibling): Title TitleNoPlaceholder path MUST emit \
+         tracing::warn! when the layout has no idx=0 placeholder; the warn was NOT captured. \
+         This makes this test load-bearing for the warn, not just the omission."
     );
 }
 
@@ -1785,7 +1884,9 @@ fn test_BC_4_01_005_f038_p2_m1_subtitle_with_layout_having_idx1_emits_ph() {
 /// F-038-P2-M1 (negative / Subtitle path):
 /// When a `FrameContent::Subtitle` frame is serialized WITH a layout that has
 /// NO `idx=1` placeholder (Blank layout), the serializer MUST NOT emit
-/// `<p:ph idx="1">` for the subtitle shape.
+/// `<p:ph idx="1">` for the subtitle shape AND MUST emit a `tracing::warn!`
+/// (ADR-015 §7 item 3 / F-038-P12-M1 sibling audit: Subtitle arm must also warn).
+#[tracing_test::traced_test]
 #[test]
 fn test_BC_4_01_005_f038_p2_m1_subtitle_on_blank_layout_omits_ph() {
     use crate::slide_serializer::SlideSerializer;
@@ -1822,18 +1923,25 @@ fn test_BC_4_01_005_f038_p2_m1_subtitle_on_blank_layout_omits_ph() {
         .expect("build must succeed");
     let xml = String::from_utf8(bytes).expect("valid UTF-8");
 
-    // No <p:ph> at all — the layout has no placeholders.
+    // (a) No <p:ph> at all — the layout has no placeholders.
     assert!(
         !xml.contains("idx=\"1\""),
-        "F-038-P2-M1 (negative/Subtitle): blank layout has NO idx=1 — Subtitle frame \
+        "F-038-P2-M1 (negative/Subtitle, a): blank layout has NO idx=1 — Subtitle frame \
          MUST NOT emit idx=\"1\"; found it anyway. XML excerpt: {}",
         &xml[..xml.len().min(800)]
     );
     assert!(
         !xml.contains("<p:ph"),
-        "F-038-P2-M1 (negative/Subtitle): blank layout — <p:ph> must be absent \
+        "F-038-P2-M1 (negative/Subtitle, a): blank layout — <p:ph> must be absent \
          for a Subtitle frame when the layout has no placeholders. XML excerpt: {}",
         &xml[..xml.len().min(800)]
+    );
+
+    // (b) The tracing::warn! MUST have fired (F-038-P12-M1 sibling audit: Subtitle arm).
+    assert!(
+        logs_contain("Subtitle frame: resolved layout has no idx=1 placeholder"),
+        "F-038-P12-M1 (Subtitle sibling): Subtitle SubtitleNoPlaceholder path MUST emit \
+         tracing::warn! when the layout has no idx=1 placeholder; the warn was NOT captured."
     );
 }
 

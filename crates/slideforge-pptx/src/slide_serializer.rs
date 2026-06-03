@@ -174,16 +174,66 @@ impl SlideSerializer {
         }
     }
 
-    /// Determine the `ShapeKind` for body / text-run frames (AC-011).
+    /// Determine the `ShapeKind` for body / text-run frames (AC-011 / ADR-015 §7 item 3).
     ///
-    /// Returns `ShapeKind::Body` if the layout has a body placeholder (idx=1),
-    /// otherwise `ShapeKind::BodyNoPlaceholder` (no `<p:ph>` element emitted).
+    /// When `with_layout` HAS been called (`layout_placeholder_idxs` is `Some`):
+    ///   - Returns `ShapeKind::Body` if the layout has `idx=1`.
+    ///   - Returns `ShapeKind::BodyNoPlaceholder` otherwise (warn+omit per ADR-015 §7).
+    ///
+    /// When `with_layout` has NOT been called (`layout_placeholder_idxs` is `None`):
+    ///   - Returns `ShapeKind::BodyNoPlaceholder` (conservative fallback; no warn
+    ///     because the production path always calls `with_layout`).
     fn body_shape_kind(&self) -> ShapeKind {
-        if self.layout_has_placeholder_idx(1) {
-            ShapeKind::Body
-        } else {
-            ShapeKind::BodyNoPlaceholder
+        match &self.layout_placeholder_idxs {
+            None => ShapeKind::BodyNoPlaceholder, // no layout info — conservative fallback
+            Some(_) => {
+                if self.layout_has_placeholder_idx(1) {
+                    ShapeKind::Body
+                } else {
+                    ShapeKind::BodyNoPlaceholder
+                }
+            },
         }
+    }
+
+    /// Build a `<p:sp>` for a body or text-run frame, emitting the warn+omit
+    /// diagnostic (AC-011 / ADR-015 §7 item 3) when the layout lacks `idx=1`.
+    ///
+    /// Shared by `FrameContent::Body` and `FrameContent::TextRun` arms in
+    /// `build_shape_tree` to keep the per-arm logic in one place and prevent
+    /// the warn from going missing in either arm (F-038-P12-M1 fix).
+    ///
+    /// `frame_label` is a human-readable label for the warn message (`"Body"` or
+    /// `"TextRun"`); `text` is the extracted plain text for the shape.
+    fn build_body_shape(
+        &self,
+        shape_id: u32,
+        slide_index: usize,
+        frame_idx: usize,
+        frame_label: &str,
+        frame: &slideforge_layout::Frame,
+        text: &str,
+    ) -> Shape {
+        let body_kind = self.body_shape_kind();
+        if matches!(body_kind, ShapeKind::BodyNoPlaceholder)
+            && self.layout_placeholder_idxs.is_some()
+        {
+            tracing::warn!(
+                slide_index,
+                frame_idx,
+                "{frame_label} frame: resolved layout has no idx=1 placeholder; \
+                 emitting shape without <p:ph> (warn+omit per ADR-015 §7)"
+            );
+        }
+        build_shape(
+            shape_id,
+            body_kind,
+            frame.bbox.x.0,
+            frame.bbox.y.0,
+            frame.bbox.width.0,
+            frame.bbox.height.0,
+            text,
+        )
     }
 
     /// Generate `slide{n+1}.xml` bytes for `slide` (0-based index `slide_index`).
@@ -351,18 +401,10 @@ impl SlideSerializer {
                 FrameContent::Body(blocks) => {
                     let text = extract_body_text(blocks);
                     validate_emu(slide_index, frame_idx, &frame.bbox)?;
-                    // AC-011: only emit <p:ph idx="1"> if the resolved layout has
-                    // a matching body placeholder (idx=1). Without layout info
-                    // (`with_layout` not called), omit the placeholder element.
-                    let body_kind = self.body_shape_kind();
-                    let sp = build_shape(
-                        shape_id,
-                        body_kind,
-                        frame.bbox.x.0,
-                        frame.bbox.y.0,
-                        frame.bbox.width.0,
-                        frame.bbox.height.0,
-                        &text,
+                    // AC-011 / ADR-015 §7 item 3: shared helper warns+omits when
+                    // the layout has no idx=1 placeholder (F-038-P12-M1 fix).
+                    let sp = self.build_body_shape(
+                        shape_id, slide_index, frame_idx, "Body", frame, &text,
                     );
                     shape_tree
                         .shape_tree_choice
@@ -373,16 +415,10 @@ impl SlideSerializer {
                 FrameContent::TextRun(nodes) => {
                     let text = extract_inline_text(nodes);
                     validate_emu(slide_index, frame_idx, &frame.bbox)?;
-                    // AC-011: same idx-chain check as Body frames.
-                    let body_kind = self.body_shape_kind();
-                    let sp = build_shape(
-                        shape_id,
-                        body_kind,
-                        frame.bbox.x.0,
-                        frame.bbox.y.0,
-                        frame.bbox.width.0,
-                        frame.bbox.height.0,
-                        &text,
+                    // AC-011 / ADR-015 §7 item 3: same idx-chain check as Body frames
+                    // via the shared helper (F-038-P12-M1: single warn site, no drift).
+                    let sp = self.build_body_shape(
+                        shape_id, slide_index, frame_idx, "TextRun", frame, &text,
                     );
                     shape_tree
                         .shape_tree_choice
