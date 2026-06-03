@@ -1,6 +1,6 @@
 [package]
 name = "slideforge-pptx"
-description = "Component crate for slideforge"
+description = "PPTX exporter plugin for slideforge — ooxmlsdk 0.6.1 + ZIP assembly"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,5 +11,17 @@ homepage.workspace = true
 readme = "../../README.md"
 
 [dependencies]
-miette = { workspace = true }
-thiserror = { workspace = true }
+ooxmlsdk        = { version = "=0.6.1" }
+# zip 4.2.0 with lzma/xz disabled to avoid conflict with zip 2.3.0 (used by
+# slideforge-brand / slideforge-eval) — both crates link the native `lzma`
+# library but through different Rust bindings (lzma-sys vs liblzma-sys).
+# PPTX archives only require DEFLATE compression; lzma/xz are not needed.
+zip             = { version = "=4.2.0", default-features = false, features = ["deflate", "time"] }
+thiserror       = { workspace = true }
+tracing         = { workspace = true }
+slideforge-types      = { workspace = true }
+slideforge-plugin-api = { workspace = true }
+slideforge-layout     = { workspace = true }
+
+[dev-dependencies]
+insta = { workspace = true }

@@ -2629,8 +2629,14 @@ dependencies = [
 name = "slideforge-pptx"
 version = "0.1.0"
 dependencies = [
- "miette",
+ "insta",
+ "ooxmlsdk",
+ "slideforge-layout",
+ "slideforge-plugin-api",
+ "slideforge-types",
  "thiserror 2.0.18",
+ "tracing",
+ "zip 4.2.0",
 ]
 
 [[package]]
