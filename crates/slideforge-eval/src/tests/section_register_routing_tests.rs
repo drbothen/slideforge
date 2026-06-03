@@ -3516,3 +3516,74 @@ fn test_f077_footnote_ident_resolves_empty_emits_e_evl_014() {
          got: {code:?}"
     );
 }
+
+// ─── F-077-P11-001: figref(ident) resolves to empty → E-EVL-012 ──────────────
+
+/// F-077-P11-001 / E-EVL-012 (condition 3): `{{ figref(var) }}` where `var` is
+/// bound to an empty string in the environment must push exactly one E-EVL-012
+/// diagnostic and produce NO `InlineNode`.
+///
+/// Covers the non-`Num` path in `chunks_to_inline_nodes` for `figref` after
+/// `eval_expr_to_string` returns `Some("")`:
+/// ```text
+/// Expr::Call { func: "figref", args: [Expr::Ident("var")] }
+///   -> eval_expr_to_string(env, Ident("var"), sink) -> Some(Arc::from(""))
+///   -> s.is_empty() is true -> push E-EVL-012 (FigrefInvalidArg), no InlineNode
+/// ```
+///
+/// RED GATE: before the fix this produces `Xref("fig-")` silently — a malformed
+/// cross-reference — and pushes NO diagnostic, violating the no-silent-fallback
+/// principle and creating inconsistency with `ref`/`footnote`, which both reject
+/// empty-resolved args (E-EVL-013 / E-EVL-014 respectively).
+///
+/// After the fix all THREE inline builtins (figref/ref/footnote) reject empty-
+/// resolved args consistently. E-EVL-012 is reused (its taxonomy note covers
+/// "missing or non-evaluable argument"; empty-resolved is non-usable).
+#[test]
+fn test_f077_p11_001_figref_ident_resolves_empty_emits_e_evl_012() {
+    // Bind var = "" in the env — simulates `@var var = ""` in a .sf file.
+    let mut vars: IndexMap<Arc<str>, slideforge_types::Value> = IndexMap::new();
+    vars.insert(
+        Arc::from("var"),
+        slideforge_types::Value::Str(Arc::from("")),
+    );
+    let env = Env::new(vars);
+
+    // Build {{ figref(var) }} — ident arg, evaluates to "".
+    let figref_ident = SyntaxExpr::Call {
+        func: "figref".to_string(),
+        args: vec![SyntaxExpr::Ident("var".to_string())],
+    };
+    let chunks = vec![TemplateChunk::Expr(figref_ident)];
+    let mut sink = DiagnosticSink::new();
+
+    let nodes = crate::register_routing::chunks_to_inline_nodes(&chunks, &env, &mut sink);
+
+    // (a) No InlineNode produced — empty-resolved figref is invalid; Xref("fig-")
+    //     is a malformed cross-reference and must be rejected, not silently emitted.
+    assert!(
+        nodes.is_empty(),
+        "F-077-P11-001: figref(var) where var=\"\" must produce NO InlineNode; got: {nodes:?}"
+    );
+
+    // (b) Exactly one diagnostic pushed.
+    assert!(
+        !sink.is_empty(),
+        "F-077-P11-001: figref(var) where var=\"\" must push a diagnostic to the sink; \
+         sink is empty"
+    );
+
+    // (c) LOAD-BEARING: diagnostic code MUST be E-EVL-012 (FigrefInvalidArg).
+    //     All three inline builtins now reject empty-resolved args consistently:
+    //       figref → E-EVL-012 | ref → E-EVL-013 | footnote → E-EVL-014
+    let code = sink
+        .errors()
+        .iter()
+        .find_map(|e| e.code().map(|c| c.to_string()));
+    assert_eq!(
+        code.as_deref(),
+        Some("E-EVL-012"),
+        "F-077-P11-001: figref(var) where var=\"\" MUST emit E-EVL-012 (FigrefInvalidArg); \
+         got: {code:?}"
+    );
+}

@@ -404,6 +404,25 @@ pub fn chunks_to_inline_nodes(
                             Arc::from(format!("fig-{n}").as_str())
                         } else if let Some(first) = args.first() {
                             if let Some(s) = eval_expr_to_string(env, first, sink) {
+                                if s.is_empty() {
+                                    // Empty-resolved arg: figref(var) where var="" is a
+                                    // malformed cross-reference — Xref("fig-") is not usable.
+                                    // Emit E-EVL-012 (FigrefInvalidArg) and produce no node,
+                                    // mirroring ref(var→"") → E-EVL-013 and
+                                    // footnote(var→"") → E-EVL-014.
+                                    // All three inline builtins now reject empty-resolved args
+                                    // consistently: figref→E-EVL-012 | ref→E-EVL-013 |
+                                    // footnote→E-EVL-014 (F-077-P11-001).
+                                    use crate::error::EvalError;
+                                    use slideforge_syntax::error::ParseSeverity;
+                                    sink.push_with_severity(
+                                        EvalError::FigrefInvalidArg {
+                                            span: slideforge_types::SourceSpan::default(),
+                                        },
+                                        ParseSeverity::Error,
+                                    );
+                                    continue;
+                                }
                                 Arc::from(format!("fig-{s}").as_str())
                             } else {
                                 // eval_expr_to_string already pushed a diagnostic.

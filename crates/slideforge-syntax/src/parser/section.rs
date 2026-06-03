@@ -108,8 +108,9 @@ where
             // We therefore compute the sub-span as:
             //   start = token_start + 1 (skip the opening `"`) + byte_offset
             //   end   = start + delimiter_length (2 for `**`, 1 for `_`/`` ` ``, etc.)
-            // Since we don't know the delimiter length here, we create a 1-char span
-            // at the delimiter start — sufficient to name the column in the error.
+            // We create a 2-byte span at the delimiter start, which covers the most
+            // common 2-char delimiters (`**`, `~~`) and points closely enough for
+            // 1-char delimiters (`_`, `` ` ``) to name the column in the error.
             for err in errs {
                 let token_span: TSpan = info.span();
                 let token_start: usize = token_span.start;
