@@ -1551,38 +1551,68 @@ fn test_f037_010_presentation_xml_rels_consistent_with_presentation_xml() {
     }
 }
 
-/// F-037-011 / F-037-004 (dark layout wiring): A slide on a dark layout must emit
-/// `<p:clrMapOvr>`. This test goes through `export_inner` not `SlideSerializer::new(true, 0)`
-/// directly, verifying the dark layout flag is wired from brand metadata to the serializer.
+/// F-037-011 / F-037-004 / ADR-015 §A.5 (dark layout wiring end-to-end):
 ///
-/// We use a 1-slide deck where the slide_type_keyword maps to a layout with
-/// `has_color_override = true`. The current impl hardcodes `is_dark_layout: false` —
-/// this test will fail until the wiring is done.
+/// A slide with `slide_type_keyword = "section_divider"` exported through `export_inner`
+/// must produce slide XML containing `<p:clrMapOvr>`.
 ///
-/// Strategy: The `make_brand()` fixture does not have dark layout metadata accessible
-/// to the exporter. We verify that the exporter at minimum does NOT suppress clrMapOvr
-/// when layout_index correctly maps to a dark layout. Since the current `build_slide_parts`
-/// always passes `false`, we can verify via exported PPTX.
+/// This is the PREFERRED strengthened test per ADR-015 Addendum A Obligation 5:
+/// - `find_layout_index("section_divider")` → 0-based index 11 (Obligation 2 fix)
+/// - `brand_template.layouts[11].has_color_override = true` (SF Section Divider is dark)
+/// - `build_slide_parts` reads `has_color_override` → passes `is_dark_layout = true`
+/// - `SlideSerializer::new(true, 11).build(...)` emits `<p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>`
 ///
-/// This test uses `slide_type_keyword = "section-divider"` (CL-01 equivalent).
-/// For now it asserts the implementation doesn't crash; the stronger assertion
-/// (clrMapOvr present) is in `test_BC_4_01_001_ec005_dark_layout_has_clr_map_ovr`.
-///
-/// The real requirement: `build_slide_parts` must look up layout darkness from brand
-/// template rather than hardcoding `false`.
+/// This replaces the prior "does not panic" assertion (TD-VSDD-059 paper-fix prevention).
+/// The full end-to-end `clrMapOvr` integration test (deck → ZIP → slide XML → clrMapOvr)
+/// is exercised here. STORY-038 AC-006 will extend this with all 31 embedded layouts.
 #[test]
-fn test_f037_011_layout_index_is_wired_not_dead_code() {
-    // Build a slide using a type that would map to layout index 11 (section divider).
-    // The exporter must not panic and must produce valid output.
+fn test_f037_011_dark_layout_section_divider_emits_clr_map_ovr_end_to_end() {
+    // Use canonical DSL keyword (underscore, not hyphen) — ADR-015 §A.1.
     let mut laid_out = make_laid_out_deck(1);
-    laid_out.slides[0].slide_type_keyword = Arc::from("section-divider");
+    laid_out.slides[0].slide_type_keyword = Arc::from("section_divider");
 
     let pptx_bytes = build_pptx(&laid_out);
 
-    // At minimum: the PPTX must be a valid ZIP
-    let cursor = std::io::Cursor::new(&pptx_bytes);
-    ZipArchive::new(cursor)
-        .expect("F-037-011: export with non-default slide_type_keyword must produce valid ZIP");
+    // The PPTX must be a valid ZIP.
+    {
+        let cursor = std::io::Cursor::new(&pptx_bytes);
+        ZipArchive::new(cursor)
+            .expect("export with section_divider slide_type_keyword must produce valid ZIP");
+    }
+
+    // The slide XML must contain <p:clrMapOvr>.
+    // This is the load-bearing assertion: without Obligation 2 (find_layout_index),
+    // the lookup returned index 0 (Title Slide, not dark) and clrMapOvr was absent.
+    let slide1_xml = zip_read_entry(&pptx_bytes, "ppt/slides/slide1.xml");
+
+    assert!(
+        slide1_xml.contains("<p:clrMapOvr>"),
+        "F-037-011/F-037-004: A 'section_divider' slide exported through export_inner must \
+         contain <p:clrMapOvr> — the dark layout wiring must flow from \
+         find_layout_index → has_color_override → SlideSerializer(is_dark_layout=true); \
+         slide1.xml excerpt: {}",
+        &slide1_xml[..slide1_xml.len().min(800)]
+    );
+
+    assert!(
+        slide1_xml.contains("<a:masterClrMapping"),
+        "F-037-004: <p:clrMapOvr> for dark layout must contain <a:masterClrMapping/>; \
+         got slide1.xml excerpt: {}",
+        &slide1_xml[..slide1_xml.len().min(800)]
+    );
+
+    // <p:clrMapOvr> must appear after <p:cSld> (ECMA-376 §19.3.1.31 sequence model).
+    let cSld_pos = slide1_xml
+        .find("<p:cSld")
+        .expect("slide XML must contain <p:cSld>");
+    let clr_pos = slide1_xml
+        .find("<p:clrMapOvr>")
+        .expect("section_divider slide XML must contain <p:clrMapOvr>");
+    assert!(
+        clr_pos > cSld_pos,
+        "<p:clrMapOvr> (byte {clr_pos}) must appear AFTER <p:cSld> (byte {cSld_pos}) \
+         in the slide XML (ADR-015 Addendum A Obligation 5)"
+    );
 }
 
 /// F-037-005: `FrameContent::Diagram` must emit a `<p:pic>` shape referencing

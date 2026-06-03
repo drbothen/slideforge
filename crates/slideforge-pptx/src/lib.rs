@@ -161,9 +161,10 @@ impl PptxExporter {
 /// ## Layout index wiring (F-037-011)
 ///
 /// `LaidOutSlide.slide_type_keyword` is used to look up the matching layout
-/// index in `brand_template.layouts`. The lookup uses the layout `name` field
-/// (which stores the slide type keyword). If no match is found, layout 0 is
-/// used as a fallback with a `tracing::warn!`.
+/// index in `brand_template.layouts` via `find_layout_index`. Phase 1 matches
+/// the `slide_type_keyword` field on `SlideLayoutDef` (SF custom layouts).
+/// Phase 2 matches by `ooxml_type` for the 5 standard DSL keywords. Falls back
+/// to layout index 1 (Title and Content) with a `tracing::warn!` if no match.
 ///
 /// ## Dark layout wiring (F-037-004)
 ///
@@ -249,19 +250,184 @@ fn build_slide_parts(
 
 /// Find the 0-based layout index for a given `slide_type_keyword`.
 ///
-/// Matches on layout `name` field (set to the slide type keyword by `generate_all_layouts`).
-/// Returns `0` as a fallback if no match is found (title layout is always present).
+/// ## Two-phase lookup (ADR-015 §A.2, closes F-PASS2-C1 and F-PASS2-M2)
+///
+/// **Phase 1 — custom layout keyword match:**
+/// Search `brand_template.layouts` for a layout whose `slide_type_keyword` field
+/// equals `slide_type_keyword`. This covers the 20 SF custom layouts (CL-01..CL-20).
+///
+/// **Phase 2 — standard layout OOXML type match:**
+/// For the 5 standard layouts that correspond to DSL keywords (`title`, `content`,
+/// `two_column`, `table`, blank), map the DSL keyword to its OOXML type string and
+/// find the layout whose `ooxml_type` matches.
+///
+/// **Fallback:**
+/// If no match is found in either phase, returns layout index 1 (0-based), which is
+/// "Title and Content" (a generic content layout). Index 0 ("Title Slide") is NOT
+/// the fallback — it is reserved for explicit `title` keyword slides. A
+/// `tracing::warn!` is emitted naming the unmatched keyword.
+///
+/// ## Index semantics
+///
+/// Returns a 0-based index into `brand_template.layouts`. The ZIP file name is
+/// `slideLayout{index + 1}.xml` (1-based).
 fn find_layout_index(brand_template: &BrandTemplate, slide_type_keyword: &str) -> usize {
+    // Phase 1: match by slide_type_keyword field (SF custom layouts).
     for (idx, layout) in brand_template.layouts.iter().enumerate() {
-        if layout.name.as_ref() == slide_type_keyword {
+        if layout
+            .slide_type_keyword
+            .as_deref()
+            .is_some_and(|kw| kw == slide_type_keyword)
+        {
             return idx;
         }
     }
+
+    // Phase 2: match by ooxml_type for standard DSL keywords.
+    // Maps the 5 DSL keywords that correspond to standard OOXML layout types.
+    let ooxml_type_for_keyword = match slide_type_keyword {
+        "title" => Some("title"),
+        "content" => Some("obj"),
+        "two_column" => Some("twoObj"),
+        "table" => Some("objTx"),
+        "blank" => Some("blank"),
+        _ => None,
+    };
+
+    if let Some(ooxml_type) = ooxml_type_for_keyword {
+        for (idx, layout) in brand_template.layouts.iter().enumerate() {
+            if layout.ooxml_type.as_deref() == Some(ooxml_type) {
+                return idx;
+            }
+        }
+    }
+
+    // Fallback: "Title and Content" layout (index 1, 0-based).
+    // Index 0 ("Title Slide") is NOT the fallback — it is reserved for explicit
+    // `title` keyword slides. This matches the no-silent-fallback rule (ADR-015 §A.4).
     tracing::warn!(
         slide_type = slide_type_keyword,
-        "no matching layout found for slide_type_keyword; falling back to layout index 0 (title)"
+        fallback_index = 1usize,
+        "no matching layout found for slide_type_keyword; \
+         falling back to layout index 1 (Title and Content, 0-based). \
+         Index 0 (Title Slide) is intentionally NOT the generic fallback."
     );
-    0
+    1
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::missing_docs_in_private_items,
+    clippy::unwrap_used,
+    clippy::expect_used
+)]
+mod layout_index_tests {
+    use super::*;
+
+    /// Build a minimal `BrandTemplate` with the 31 standard layouts for testing
+    /// `find_layout_index` without going through the full export path.
+    fn test_brand_template() -> BrandTemplate {
+        use std::sync::Arc;
+
+        use slideforge_brand::layout_xml::{
+            HANDOUT_MASTER_STUB, NOTES_MASTER_STUB, generate_content_types_layout_entries,
+        };
+        use slideforge_brand::layouts::generate_all_layouts;
+        use slideforge_brand::template::{BrandFonts, ColorSlot, ColorValue, MasterIds};
+        use slideforge_brand::toml_schema::BrandConfig;
+
+        let config = BrandConfig::default_minimal();
+        let layouts = generate_all_layouts(&config);
+        BrandTemplate {
+            colors: std::array::from_fn(|i| ColorSlot {
+                name: Arc::from(slideforge_brand::template::COLOR_SLOT_NAMES[i]),
+                value: ColorValue::Hex(Arc::from("003087")),
+                is_derived: false,
+            }),
+            fonts: BrandFonts {
+                heading: Arc::from("Calibri"),
+                body: Arc::from("Calibri"),
+            },
+            logo: None,
+            footer_text: None,
+            footer_flags: slideforge_brand::FooterFlags::default(),
+            layout_names: vec![],
+            layouts,
+            notes_master_stub: NOTES_MASTER_STUB.to_vec(),
+            handout_master_stub: HANDOUT_MASTER_STUB.to_vec(),
+            master_ids: MasterIds::default(),
+            content_types_layout_entries: Arc::from(
+                generate_content_types_layout_entries(31).as_str(),
+            ),
+        }
+    }
+
+    /// ADR-015 §A.4 — "section_divider" must map to 0-based index 11 (CL-01).
+    ///
+    /// Layout 12 (1-based) is "SF Section Divider". 0-based index = 11.
+    #[test]
+    fn test_find_layout_index_section_divider_maps_to_11() {
+        let template = test_brand_template();
+        let idx = find_layout_index(&template, "section_divider");
+        assert_eq!(
+            idx, 11,
+            "\"section_divider\" must map to 0-based index 11 (SF Section Divider, layout 12) \
+             (ADR-015 §A.4)"
+        );
+    }
+
+    /// ADR-015 §A.4 — "end" must map to 0-based index 21 (CL-11, SF End Slide).
+    ///
+    /// Layout 22 (1-based) is "SF End Slide". 0-based index = 21.
+    #[test]
+    fn test_find_layout_index_end_maps_to_21() {
+        let template = test_brand_template();
+        let idx = find_layout_index(&template, "end");
+        assert_eq!(
+            idx, 21,
+            "\"end\" must map to 0-based index 21 (SF End Slide, layout 22) (ADR-015 §A.4)"
+        );
+    }
+
+    /// ADR-015 §A.4 — "title" must map to 0-based index 0 (SL-01, Title Slide).
+    ///
+    /// Layout 1 (1-based) is "Title Slide" with ooxml_type = "title". 0-based index = 0.
+    #[test]
+    fn test_find_layout_index_title_maps_to_0() {
+        let template = test_brand_template();
+        let idx = find_layout_index(&template, "title");
+        assert_eq!(
+            idx, 0,
+            "\"title\" must map to 0-based index 0 (Title Slide) (ADR-015 §A.4)"
+        );
+    }
+
+    /// ADR-015 §A.4 — unknown keyword must fall back to index 1 (NOT index 0).
+    ///
+    /// Index 1 is "Title and Content" — the generic content fallback.
+    /// Index 0 ("Title Slide") must NOT be used as a generic fallback.
+    #[test]
+    fn test_find_layout_index_unknown_falls_back_to_1() {
+        let template = test_brand_template();
+        let idx = find_layout_index(&template, "totally_unknown_keyword_xyz");
+        assert_eq!(
+            idx, 1,
+            "an unknown keyword must fall back to 0-based index 1 (Title and Content), \
+             NOT index 0 (Title Slide) — index 0 is reserved for explicit 'title' slides \
+             (ADR-015 §A.4)"
+        );
+    }
+
+    /// Verify "content" maps to 0-based index 1 (SL-02, Title and Content, ooxml_type "obj").
+    #[test]
+    fn test_find_layout_index_content_maps_to_1() {
+        let template = test_brand_template();
+        let idx = find_layout_index(&template, "content");
+        assert_eq!(
+            idx, 1,
+            "\"content\" must map to 0-based index 1 (Title and Content, ooxml_type obj)"
+        );
+    }
 }
 
 /// Inject `<p:pic>` XML shapes for diagram frames into the slide XML bytes.
