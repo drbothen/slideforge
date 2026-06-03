@@ -64,9 +64,7 @@ use presentation::PresentationSerializer;
 use rels::{RelsBuilder, rel_types};
 use slide_serializer::SlideSerializer;
 use slideforge_brand::BrandTemplate;
-use slideforge_brand::layout_xml::{
-    serialize_layout_to_xml, serialize_master_to_xml, serialize_theme_to_xml,
-};
+use slideforge_brand::layout_xml::{serialize_master_to_xml, serialize_theme_to_xml};
 use slideforge_layout::{FrameContent, LaidOutDeck};
 use slideforge_plugin_api::{ExportError, ExportOptions, Exporter};
 use slideforge_types::{Brand, Deck};
@@ -197,11 +195,11 @@ fn build_slide_parts(
         let layout_index = find_layout_index(brand_template, slide.slide_type_keyword.as_ref());
         let layout_num = layout_index + 1; // 1-based ZIP name
 
-        // F-037-004: read dark layout flag from brand layout metadata.
-        let is_dark_layout = brand_template
-            .layouts
-            .get(layout_index)
-            .is_some_and(|l| l.has_color_override);
+        // F-037-004: read dark layout flag via ClrMapOvrInjector (F-038-P1-M1).
+        // Routes through the single authoritative code path for dark-layout
+        // detection — no inline has_color_override check outside that module.
+        let is_dark_layout =
+            crate::clrmapovr::ClrMapOvrInjector::needs_clr_map_ovr(brand_template, layout_index);
 
         let mut slide_rels = RelsBuilder::new();
         let layout_rel_id = slide_rels.add(
@@ -540,69 +538,14 @@ fn build_master_parts(
 
 /// Build all 31 slide layout XML files and their `.rels`.
 ///
-/// ADR-015 §1: uses `serialize_layout_to_xml` from `slideforge-brand` for
-/// each layout in `brand_template.layouts`. If the template has fewer than 31
-/// layouts (unlikely for synthesized brands), fills remaining slots with the
-/// last available layout.
+/// Routes through [`LayoutEmbedder::embed`] — the single authoritative code
+/// path for layout part generation (BC-4.01.005 invariant 3; F-038-P1-M1).
+/// No inline loop or duplicate XML generation here.
 fn build_layout_parts(
     brand_template: &BrandTemplate,
     parts: &mut Vec<ZipPart>,
 ) -> Result<(), PptxError> {
-    let layout_count = 31_usize;
-
-    for n in 1..=layout_count {
-        let layout_idx = (n - 1).min(brand_template.layouts.len().saturating_sub(1));
-        let layout_xml = if brand_template.layouts.is_empty() {
-            // Defensive fallback: produce a minimal valid layout XML if the
-            // template has no layouts (should never happen for synthesized brands).
-            tracing::warn!(
-                layout_n = n,
-                "brand_template has no layouts; emitting empty layout placeholder"
-            );
-            minimal_empty_layout_xml(n)
-        } else {
-            serialize_layout_to_xml(&brand_template.layouts[layout_idx])
-        };
-
-        parts.push(ZipPart {
-            path: format!("ppt/slideLayouts/slideLayout{n}.xml"),
-            bytes: layout_xml,
-        });
-
-        let mut layout_rels = RelsBuilder::new();
-        layout_rels.add(
-            rel_types::SLIDE_MASTER_FROM_LAYOUT,
-            "../slideMasters/slideMaster1.xml",
-        );
-        parts.push(ZipPart {
-            path: format!("ppt/slideLayouts/_rels/slideLayout{n}.xml.rels"),
-            bytes: layout_rels.build()?,
-        });
-    }
-    Ok(())
-}
-
-/// Produce a minimal valid `slideLayoutN.xml` for emergency fallback.
-///
-/// This is only called when `brand_template.layouts` is empty (should never
-/// occur for synthesized brands). The result is a bare `<p:sldLayout>` with
-/// no placeholders — schema-valid but visually unstyled.
-fn minimal_empty_layout_xml(n: usize) -> Vec<u8> {
-    format!(
-        concat!(
-            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
-            r#"<p:sldLayout xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main""#,
-            r#" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main""#,
-            r#" type="cust" preserve="1">"#,
-            r#"<p:cSld name="Layout {n}"><p:spTree>"#,
-            r#"<p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>"#,
-            r#"<p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/>"#,
-            r#"<a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>"#,
-            r#"</p:spTree></p:cSld><p:hf/></p:sldLayout>"#,
-        ),
-        n = n
-    )
-    .into_bytes()
+    crate::layout_embedder::LayoutEmbedder::embed(brand_template, parts)
 }
 
 /// Build `theme1.xml` from brand data and push to parts.

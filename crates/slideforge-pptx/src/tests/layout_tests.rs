@@ -1181,145 +1181,179 @@ fn test_BC_4_01_005_ac010_numbered_actions_maps_to_index_29() {
 
 // ─── AC-011: Placeholder idx chain verification ───────────────────────────────
 
-/// BC-4.01.005 postcondition 5 / AC-011:
-/// When a `FrameContent::Title` frame is serialized, the resulting `<p:sp>` must
-/// contain `<p:ph idx="0">` if a layout placeholder with `idx=0` is present in
-/// the resolved layout definition.
+/// BC-4.01.005 postcondition 5 / AC-011 (positive / Body path):
+/// When a `FrameContent::Body` frame is serialized WITH a layout that HAS an
+/// `idx=1` placeholder, the resulting `<p:sp>` MUST contain `<p:ph idx="1">`.
 ///
-/// RED: requires the slide serializer to check `SlideLayoutDef.placeholders`
-/// for a matching idx before emitting `<p:ph>`.
+/// This test is load-bearing: it calls `SlideSerializer::new(...).with_layout(layout)`
+/// with a layout whose `placeholders` includes `idx=1`, then asserts the ph element
+/// IS present. If `body_shape_kind` were to always return `BodyNoPlaceholder` (wrong)
+/// or always emit regardless of layout (wrong), the test would fail.
 #[test]
 fn test_BC_4_01_005_ac011_valid_ph_idx_emits_ph_element() {
-    // A title slide: frame is Title, layout has placeholder with idx=0.
-    let mut laid_out = make_laid_out_deck(1);
-    laid_out.slides[0].slide_type_keyword = Arc::from("title");
+    use crate::slide_serializer::SlideSerializer;
+    use slideforge_brand::layouts::{LayoutPlaceholder, SlideLayoutDef};
 
-    let pptx_bytes = build_pptx(&laid_out);
-    let slide_xml = zip_read_entry(&pptx_bytes, "ppt/slides/slide1.xml");
+    // Build a layout that has BOTH idx=0 (title) and idx=1 (body) placeholders.
+    let layout_with_body = SlideLayoutDef {
+        index: 2,
+        name: Arc::from("Content"),
+        ooxml_type: Some(Arc::from("obj")),
+        slide_type_keyword: Some(Arc::from("content")),
+        has_color_override: false,
+        color_override_bg: None,
+        color_override_tx: None,
+        placeholders: vec![
+            LayoutPlaceholder {
+                ph_type: Arc::from("title"),
+                idx: 0,
+                accessibility_name: Arc::from("Title"),
+                x: 457_200,
+                y: 274_638,
+                cx: 8_229_600,
+                cy: 1_143_000,
+            },
+            LayoutPlaceholder {
+                ph_type: Arc::from("body"),
+                idx: 1,
+                accessibility_name: Arc::from("Content Placeholder"),
+                x: 457_200,
+                y: 1_600_200,
+                cx: 8_229_600,
+                cy: 3_543_300,
+            },
+        ],
+    };
 
-    // The title frame must emit <p:ph> with the CORRECT idx (0 for title).
-    // After AC-011 implementation, the serializer verifies the idx chain.
-    assert!(
-        slide_xml.contains("<p:ph"),
-        "AC-011: a Title frame must produce a <p:ph> element when the layout \
-         has a matching idx=0 placeholder; slide XML did not contain <p:ph>. \
-         Excerpt: {}",
-        &slide_xml[..slide_xml.len().min(600)]
+    // Build a slide with a Body frame.
+    let slide = LaidOutSlide {
+        source_index: 0,
+        slide_type_keyword: Arc::from("content"),
+        frames: vec![
+            Frame {
+                bbox: title_bbox(),
+                content: FrameContent::Title(Arc::from("Slide Title")),
+                text_flow: None,
+            },
+            Frame {
+                bbox: body_bbox(),
+                content: FrameContent::Body(vec![]),
+                text_flow: None,
+            },
+        ],
+        speaker_notes: None,
+        register_tags: vec![],
+        register_content: vec![],
+    };
+
+    // Call with_layout so the serializer can perform idx-chain verification.
+    let serializer = SlideSerializer::new(false, 1).with_layout(&layout_with_body);
+    let (slide_xml_bytes, _) = serializer
+        .build(&slide, 0, "rId1", &[])
+        .expect("serializer must succeed");
+    let slide_xml = String::from_utf8(slide_xml_bytes).expect("slide XML must be valid UTF-8");
+
+    // The body frame MUST emit <p:ph idx="1"> because the layout has idx=1.
+    let body_ph_count = slide_xml.matches("idx=\"1\"").count();
+    assert_eq!(
+        body_ph_count,
+        1,
+        "AC-011: when the layout HAS a body placeholder (idx=1), the slide serializer \
+         MUST emit exactly one <p:ph idx=\"1\"> for a Body frame; found {body_ph_count} \
+         occurrences. Slide XML excerpt: {}",
+        &slide_xml[..slide_xml.len().min(800)]
     );
 
-    // The idx attribute must match the layout placeholder idx (0 for title).
+    // Also assert the ph element is present (belt-and-suspenders).
     assert!(
-        slide_xml.contains("idx=\"0\""),
-        "AC-011: the <p:ph> for a Title frame must have idx=\"0\" matching \
-         the layout's title placeholder; slide XML excerpt: {}",
+        slide_xml.contains("<p:ph"),
+        "AC-011: a Body frame with a matching layout placeholder must produce a \
+         <p:ph> element; slide XML did not contain <p:ph>. Excerpt: {}",
         &slide_xml[..slide_xml.len().min(600)]
     );
 }
 
-/// BC-4.01.005 postcondition 5 / AC-011:
-/// When a frame's idx does NOT match any placeholder in the layout definition,
-/// no `<p:ph>` element is emitted (the shape becomes a non-placeholder shape).
+/// BC-4.01.005 postcondition 5 / AC-011 (negative / Body path):
+/// When a `FrameContent::Body` frame is serialized WITH a layout that has NO
+/// `idx=1` placeholder, the slide serializer MUST NOT emit `<p:ph idx="1">`.
 ///
-/// RED: requires the slide serializer to do the idx chain check and omit `<p:ph>`
-/// when no matching layout placeholder exists.
+/// This test is load-bearing:
+/// - It calls `SlideSerializer::new(...).with_layout(layout)` where `layout` has
+///   had its `idx=1` placeholder removed.
+/// - If `body_shape_kind()` always returns `BodyNoPlaceholder` regardless of layout,
+///   the *positive* test above would fail (not this one) — so both tests together
+///   demonstrate real discrimination.
+/// - If `body_shape_kind()` always returns `Body` regardless of layout, this test
+///   would fail because idx="1" would appear in the output.
 ///
-/// This is tested by constructing a layout with NO body placeholder (idx=1) and
-/// verifying a Body frame produces no `<p:ph>` element.
+/// Together the positive and negative tests form a mutation-killing pair.
 #[test]
 fn test_BC_4_01_005_ac011_missing_ph_idx_omits_ph_element() {
-    #[allow(unused_imports)]
-    use slideforge_brand::BrandTemplate;
-    use slideforge_brand::layout_xml::{
-        HANDOUT_MASTER_STUB, NOTES_MASTER_STUB, generate_content_types_layout_entries,
-    };
-    use slideforge_brand::layouts::generate_all_layouts;
-    use slideforge_brand::template::{BrandFonts as BTFonts, ColorSlot, ColorValue, MasterIds};
-    use slideforge_brand::toml_schema::BrandConfig;
-
-    // Build a BrandTemplate where layout[0] (title layout) has ONLY a title
-    // placeholder (idx=0) and NO body placeholder (idx=1).
-    // The slide_serializer must omit <p:ph> for a Body frame on this layout.
-    let config = BrandConfig::default_minimal();
-    let mut layouts = generate_all_layouts(&config);
-
-    // Mutate layout[1] (content layout, used for "content" slides) to have ZERO
-    // body placeholders — only the title placeholder remains.
-    // This creates a layout where idx=1 does NOT exist.
-    if layouts.len() > 1 {
-        layouts[1].placeholders.retain(|ph| ph.idx == 0);
-    }
-
-    // `_brand_template` is constructed here to document the intent that the
-    // SlideSerializer must receive the brand_template to verify the idx chain
-    // (AC-011 implementation task). The current API does not accept it yet —
-    // the test is RED because the current code always emits <p:ph idx="1">
-    // for Body frames, regardless of whether the layout has a matching idx.
-    let _brand_template = BrandTemplate {
-        colors: std::array::from_fn(|i| ColorSlot {
-            name: Arc::from(slideforge_brand::template::COLOR_SLOT_NAMES[i]),
-            value: ColorValue::Hex(Arc::from("003087")),
-            is_derived: false,
-        }),
-        fonts: BTFonts {
-            heading: Arc::from("Calibri"),
-            body: Arc::from("Calibri"),
-        },
-        logo: None,
-        footer_text: None,
-        footer_flags: slideforge_brand::FooterFlags::default(),
-        layout_names: vec![],
-        layouts,
-        notes_master_stub: NOTES_MASTER_STUB.to_vec(),
-        handout_master_stub: HANDOUT_MASTER_STUB.to_vec(),
-        master_ids: MasterIds::default(),
-        content_types_layout_entries: Arc::from(generate_content_types_layout_entries(31).as_str()),
-    };
-
-    // Build a "content" slide (layout index 1) with a Body frame.
-    // The body frame has idx=1, which is NOT in layout[1].placeholders.
-    let laid_out = LaidOutDeck {
-        page_size: PageSize::default(),
-        slides: vec![LaidOutSlide {
-            source_index: 0,
-            slide_type_keyword: Arc::from("content"),
-            frames: vec![
-                Frame {
-                    bbox: title_bbox(),
-                    content: FrameContent::Title(Arc::from("Title")),
-                    text_flow: None,
-                },
-                Frame {
-                    bbox: body_bbox(),
-                    content: FrameContent::Body(vec![]),
-                    text_flow: None,
-                },
-            ],
-            speaker_notes: None,
-            register_tags: vec![],
-            register_content: vec![],
-        }],
-        sections: vec![],
-        warnings: vec![],
-    };
-
-    // Use the slide serializer directly to get the slide XML.
     use crate::slide_serializer::SlideSerializer;
-    let serializer = SlideSerializer::new(false, 1); // layout_index=1 (content)
+    use slideforge_brand::layouts::{LayoutPlaceholder, SlideLayoutDef};
+
+    // Build a layout that has idx=0 (title) but NO idx=1 (body) placeholder.
+    // This models a layout where a body placeholder was intentionally omitted.
+    let layout_title_only = SlideLayoutDef {
+        index: 4,
+        name: Arc::from("Title Only"),
+        ooxml_type: Some(Arc::from("titleOnly")),
+        slide_type_keyword: None,
+        has_color_override: false,
+        color_override_bg: None,
+        color_override_tx: None,
+        placeholders: vec![
+            LayoutPlaceholder {
+                ph_type: Arc::from("title"),
+                idx: 0,
+                accessibility_name: Arc::from("Title"),
+                x: 457_200,
+                y: 274_638,
+                cx: 8_229_600,
+                cy: 1_143_000,
+            },
+            // Intentionally NO idx=1 placeholder.
+        ],
+    };
+
+    // Build a slide with a Body frame.
+    let slide = LaidOutSlide {
+        source_index: 0,
+        slide_type_keyword: Arc::from("title_only"),
+        frames: vec![
+            Frame {
+                bbox: title_bbox(),
+                content: FrameContent::Title(Arc::from("Title")),
+                text_flow: None,
+            },
+            Frame {
+                bbox: body_bbox(),
+                content: FrameContent::Body(vec![]),
+                text_flow: None,
+            },
+        ],
+        speaker_notes: None,
+        register_tags: vec![],
+        register_content: vec![],
+    };
+
+    // Call with_layout — the layout has no idx=1, so body_shape_kind() must
+    // return BodyNoPlaceholder and no <p:ph idx="1"> must appear.
+    let serializer = SlideSerializer::new(false, 0).with_layout(&layout_title_only);
     let (slide_xml_bytes, _) = serializer
-        .build(&laid_out.slides[0], 0, "rId1", &[])
+        .build(&slide, 0, "rId1", &[])
         .expect("serializer must succeed");
     let slide_xml = String::from_utf8(slide_xml_bytes).expect("slide XML must be valid UTF-8");
 
-    // Count <p:ph idx="1" occurrences: there should be ZERO because layout[1]
-    // has no body placeholder after our mutation.
+    // There must be ZERO occurrences of idx="1" in the output.
     let body_ph_count = slide_xml.matches("idx=\"1\"").count();
     assert_eq!(
         body_ph_count,
         0,
-        "AC-011: when the layout has no body placeholder (idx=1), the slide serializer \
+        "AC-011: when the layout has NO body placeholder (idx=1), the slide serializer \
          must NOT emit <p:ph idx=\"1\"> for a Body frame; found {body_ph_count} occurrences. \
          Slide XML excerpt: {}",
-        &slide_xml[..slide_xml.len().min(600)]
+        &slide_xml[..slide_xml.len().min(800)]
     );
 }
 

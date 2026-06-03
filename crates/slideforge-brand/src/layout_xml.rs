@@ -1741,8 +1741,13 @@ mod tests {
         let clr_map_pos = xml
             .find("<a:clrMap")
             .expect("master XML must contain <a:clrMap>");
-        // Use the first <p:sldLayoutId id= entry as the positional anchor for the section
-        // (the <p:sldLayoutIdLst> container was removed per STORY-038 AC-004).
+        // Use the first <p:sldLayoutId id= entry as the positional anchor for the
+        // <p:sldLayoutIdLst> section. The container IS emitted and ECMA-376 §19.3.1.41
+        // requires it; we search for the first entry element because ooxmlsdk may not
+        // produce the opening container tag as a distinct searchable string. This is
+        // a test-only positional anchor — it does NOT indicate the container is absent
+        // (AC-004 requires and the test test_BC_4_01_005_ac004_* verifies the container
+        // is present in the master XML output).
         let sld_layout_id_pos = xml
             .find("<p:sldLayoutId id=")
             .expect("master XML must contain at least one <p:sldLayoutId id=...> entry");
