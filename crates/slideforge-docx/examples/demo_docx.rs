@@ -32,13 +32,16 @@ use std::io::Read as IoRead;
 use std::sync::Arc;
 
 use slideforge_docx::DocxExporter;
-use slideforge_layout::types::{BoundingBox, Frame, FrameContent, LaidOutDeck, LaidOutSlide, PageSize};
+use slideforge_layout::types::{
+    BoundingBox, Frame, FrameContent, LaidOutDeck, LaidOutSlide, PageSize,
+};
 use slideforge_plugin_api::{ExportOptions, Exporter};
 use slideforge_types::{
     Brand, BrandFonts, BrandPalette, Deck, DeckMetadata, Emu, InlineNode, OrderedMap, Register,
     RegisteredContent, SourceSpan,
 };
 
+#[allow(clippy::too_many_lines)]
 fn main() {
     // ── Build a representative brand ──────────────────────────────────────────
     let brand = Brand {
@@ -219,7 +222,10 @@ fn main() {
     // Print excerpt around Heading1
     let h1_excerpt_start = heading1_pos.saturating_sub(20);
     let h1_excerpt_end = (heading1_pos + 120).min(doc_xml.len());
-    println!("  Heading1 context: ...{}...", &doc_xml[h1_excerpt_start..h1_excerpt_end]);
+    println!(
+        "  Heading1 context: ...{}...",
+        &doc_xml[h1_excerpt_start..h1_excerpt_end]
+    );
     println!();
 
     // ── AC-005: notes sentinel ABSENT ────────────────────────────────────────
@@ -278,11 +284,17 @@ fn main() {
     println!("  Bold run property present: true");
     // Italic: <w:i/> or <w:i />
     let has_italic = doc_xml.contains("<w:i/>") || doc_xml.contains("<w:i />");
-    assert!(has_italic, "Italic run property <w:i/> or <w:i /> must appear");
+    assert!(
+        has_italic,
+        "Italic run property <w:i/> or <w:i /> must appear"
+    );
     println!("  Italic run property present: true");
     // Hyperlink: w:hyperlink element
     let has_hyperlink = doc_xml.contains("w:hyperlink");
-    assert!(has_hyperlink, "<w:hyperlink> must appear for InlineNode::Link");
+    assert!(
+        has_hyperlink,
+        "<w:hyperlink> must appear for InlineNode::Link"
+    );
     println!("  Hyperlink element present: true");
     println!("  PASS — bold, italic, hyperlink all mapped to Word run properties");
     // Print hyperlink rels entry
@@ -321,7 +333,9 @@ fn main() {
         core_xml.contains("en-US"),
         "dc:language en-US must appear in docProps/core.xml"
     );
-    let lang_pos = core_xml.find("en-US").unwrap();
+    let lang_pos = core_xml
+        .find("en-US")
+        .expect("en-US must appear in core.xml (already asserted above)");
     let lang_excerpt_start = lang_pos.saturating_sub(30);
     let lang_excerpt_end = (lang_pos + 40).min(core_xml.len());
     println!(
@@ -349,7 +363,9 @@ fn zip_entry_names(docx_bytes: &[u8]) -> Vec<String> {
 fn read_zip_member(docx_bytes: &[u8], name: &str) -> String {
     let cursor = std::io::Cursor::new(docx_bytes);
     let mut archive = zip::ZipArchive::new(cursor).expect("valid zip");
-    let mut entry = archive.by_name(name).unwrap_or_else(|_| panic!("ZIP entry '{name}' not found"));
+    let mut entry = archive
+        .by_name(name)
+        .unwrap_or_else(|_| panic!("ZIP entry '{name}' not found"));
     let mut buf = String::new();
     entry.read_to_string(&mut buf).expect("UTF-8");
     buf
