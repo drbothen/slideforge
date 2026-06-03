@@ -46,7 +46,7 @@ impl ManualSectionSerializer {
     ///
     /// Emits:
     /// 1. `Heading1` paragraph with `section.heading` as text.
-    /// 2. One `Normal` paragraph per `Register::Report` entry in
+    /// 2. One `Normal` paragraph per `Register::Report` or `Register::Detail` entry in
     ///    `section.register_content`.
     ///
     /// `Register::Notes` entries are silently skipped (BC-4.02.001 invariant 1).
