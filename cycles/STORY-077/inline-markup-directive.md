@@ -36,9 +36,9 @@ delimiter is copied verbatim from Q8.
 | DSL Syntax | Effect | InlineNode Variant | Notes |
 |---|---|---|---|
 | `**text**` | Bold | `InlineNode::Bold(Vec<InlineNode>)` | CommonMark-compatible delimiter pair |
-| `_text_` | Italic | `InlineNode::Italic(Vec<InlineNode>)` | Single-underscore pair; double-underscore is NOT supported in v1 |
+| `_text_` | Italic | `InlineNode::Italic(Vec<InlineNode>)` | Single-underscore pair; BOTH open and close `_` must be flanking (see Disambiguation Rule 2a); double-underscore is NOT supported in v1 |
 | `` `text` `` | Code span | `InlineNode::Code(Arc<str>)` | Single-backtick pair; content is verbatim (no further parsing inside) |
-| `[text](url)` | Hyperlink | `InlineNode::Link { text: Vec<InlineNode>, url: Arc<str> }` | CommonMark link syntax |
+| `[text](url)` | Hyperlink | `InlineNode::Link { text: Vec<InlineNode>, url: Arc<str> }` | CommonMark link syntax; URL scheme must be on the allowlist (http, https, mailto) — see E-PAR-022 |
 | `$math$` / `$$math$$` | Math inline / display | `InlineNode::Math(MathNode)` | Already handled by `TemplateChunk::MathInline` / `MathDisplay`; see Section 3 |
 | `{{ footnote("...") }}` | Footnote | `InlineNode::Footnote(Vec<InlineNode>)` | Built-in pseudo-function in {{ }} expression context |
 | `{{ ref("id") }}` / `{{ figref(n) }}` | Cross-reference | `InlineNode::Xref(Arc<str>)` | Built-in pseudo-functions; id is the target identifier |
@@ -60,12 +60,79 @@ writing.**
 2. `**bold**` uses double-asterisk. Single-asterisk italic is NOT supported (only `_italic_`
    uses single delimiter). This avoids ambiguity with list bullets and arithmetic expressions.
 
+2a. **`_italic_` — CommonMark-style bilateral flanking (AMENDED 2026-06-03, supersedes
+    original "open-side left-flanking only" wording; authorized by OBS-P24-A human decision).**
+
+    A `_` character acts as an ITALIC OPENER only when it is a **left-flanking delimiter**:
+    the byte immediately BEFORE the `_` must NOT be an ASCII alphanumeric character or `_`
+    (word-character). This is the existing open-side guard already implemented in
+    `scan_template_chunks` (see the `prev_is_word` check in the `_` branch).
+
+    A `_` character acts as an ITALIC CLOSER only when it is a **right-flanking delimiter**:
+    the byte immediately AFTER the `_` must NOT be an ASCII alphanumeric character or `_`
+    (word-character). This is the NEW close-side guard added by this amendment.
+
+    Both guards must pass for the `_` to open or close an italic span. A `_` that fails
+    either guard is treated as a literal character.
+
+    **Precise close-side flanking condition for the implementer:**
+    When `scan_template_chunks` is scanning inside an italic span (i.e., with
+    `close_on = Some("_")`), the close-on check at the top of the loop currently fires
+    whenever `s[pos..].starts_with("_")`. After this amendment, before returning the
+    italic close, the implementer must additionally check: is the byte at `pos + 1`
+    (i.e., the byte immediately following the closing `_`) an ASCII alphanumeric or `_`?
+    If YES — word-internal `_` — do NOT treat it as the italic closer; advance `pos` by 1
+    and continue scanning (treating the `_` as literal). If NO — non-word character or end
+    of string — treat it as the italic closer as before.
+
+    Condition in code terms:
+    ```
+    let next_is_word = s.as_bytes().get(pos + 1)
+        .is_some_and(|b| b.is_ascii_alphanumeric() || *b == b'_');
+    if next_is_word {
+        // Word-internal `_` — not an italic closer; advance as literal.
+        pos += 1;
+        continue;
+    }
+    // Passes right-flanking guard — treat as italic closer.
+    ```
+
+    This check is applied inside the `close_on = Some("_")` branch in
+    `scan_template_chunks`, which is also the location where the `close_on` match
+    fires for ALL recursive italic scans. The existing `prev_is_word` check on the
+    OPEN side is unchanged.
+
+    **Example of the new expected parse:**
+
+    Input: `_apply file_path here_`
+
+    - `_` at position 0: prev char = none (start of string) → NOT word-char → left-flanking
+      check PASSES → open italic.
+    - Recursive scan of `apply file_path here_` with `close_on = Some("_")`:
+      - Scans `apply file` as literal.
+      - Reaches `_` at `file_path` (the `_` between `file` and `path`):
+        - Right-flanking check: next byte is `p` (alphanumeric) → `next_is_word = true`
+        → SKIP (word-internal `_`; advance as literal).
+      - Continues scanning `path here`.
+      - Reaches `_` at end: next byte = none (end of string) → `next_is_word = false`
+        → right-flanking check PASSES → close italic.
+    - Result: `Italic([Plain("apply file_path here")])` — ONE italic node containing the
+      full text with the internal underscore preserved as a literal character.
+
+    **Contrast with pre-amendment behavior (now superseded):**
+    The pre-amendment parser had NO close-side guard, so `_apply file_path here_` would
+    close italic at the word-internal `_` in `file_path`, producing
+    `Italic([Plain("apply file")])` followed by `Plain("path here_")` — incorrect.
+
 3. `` `code` `` — content between single-backtick delimiters is verbatim. No further inline
    markup is processed inside a code span (same rule as CommonMark). `{{ }}` interpolation
    does NOT fire inside a code span.
 
 4. `[text](url)` — the `text` portion IS further processed for nested inline markup
-   (e.g., `[**bold link**](url)` is valid). The `url` portion is verbatim text.
+   (e.g., `[**bold link**](url)` is valid). The `url` portion is verbatim text. The
+   URL scheme must be on the v1 allowlist (`http`, `https`, `mailto`) — see E-PAR-022 in
+   the error taxonomy. Relative paths, anchor links, and unrecognized schemes are rejected
+   at parse time.
 
 5. `{{ ref("id") }}` and `{{ figref(n) }}` are EXPRESSION-form cross-references, not
    standalone delimiters. They are recognized as special `{{ expr }}` forms during the
@@ -484,7 +551,17 @@ clean" (which implicitly requires correct structural rendering everywhere, not j
 
 ---
 
-## 10. Architect Self-Audit (DIR-077-002)
+## 10. Changelog
+
+| Date | Author | Change |
+|------|--------|--------|
+| 2026-06-02 | architect | Initial issue — §1 through §9 (inline markup syntax, two-phase architecture, error handling, plugin surface, Red Gate requirements, BC/story amendments) |
+| 2026-06-03 | product-owner | **§1 AMENDMENT — italic `_` bilateral flanking (OBS-P24-A, human-authorized):** Disambiguation Rule 2a added. The prior wording specified only an open-side left-flanking guard for `_`. The amended rule adds a symmetric close-side right-flanking guard: a `_` closes italic only when the byte immediately following it is NOT an ASCII alphanumeric or `_`. This prevents `_apply file_path here_` from closing italic at the word-internal `_` in `file_path`. The amendment is implementable by adding a `next_is_word` guard in the `close_on = Some("_")` branch of `scan_template_chunks`, mirroring the existing `prev_is_word` open-side guard. See Rule 2a for the precise condition and expected parse. Note entry row in `_` italic syntax table updated to cite bilateral flanking. The original "no flanking requirement" wording is superseded and removed. |
+| 2026-06-03 | product-owner | **§1 NOTE — E-PAR-022 link URL scheme allowlist cross-reference added:** The `[text](url)` hyperlink row in §1 syntax table and Disambiguation Rule 4 updated to reference E-PAR-022 (`DisallowedLinkUrlScheme`). Relative/anchor link v1 decision documented in Rule 4 and E-PAR-022 Note (in error taxonomy). |
+
+---
+
+## 11. Architect Self-Audit (DIR-077-002)
 
 - [x] Did I rationalize any decision with "MVP," "for now," or "good enough"?
   NO. The deferral of SLIDE-LEVEL inline markup is a scope boundary, not an MVP shortcut.
