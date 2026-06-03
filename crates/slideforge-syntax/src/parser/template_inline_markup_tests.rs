@@ -1881,3 +1881,189 @@ fn test_F077_P7_002_deep_nesting_produces_E_PAR_021_no_stack_overflow() {
          errors: {errors:?}"
     );
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// F-077-P21-001 (MED): unclosed `[text](url` link must emit E-PAR-019
+//
+// BUG: when `](` IS found (clear link intent) but `)` is MISSING, control
+// falls through to literal — NO error is pushed. Every OTHER delimiter emits
+// E-PAR-019 on its unclosed path; the link delimiter is the sole omission.
+//
+// SPEC BASIS: DIR-077-002 §5 classifies unclosed `[link` as FATAL — same
+// class and recovery pattern as unclosed bold.
+//
+// RED GATE: these tests FAIL before the fix (parse() returns Ok, silent literal).
+// After the fix they must PASS (parse() returns Err, E-PAR-019, clean message).
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// F-077-P21-001 (MED) RED GATE: unclosed `[text](url` link (no closing `)`)
+/// MUST return `Err` from `parse()` in strict (default) mode, accumulate
+/// exactly one E-PAR-019 error, and the first error must be
+/// `SyntaxError::UnclosedInlineMarkup` with delimiter `"["`.
+///
+/// The rendered message must be clean — no SLIDEFORGE_INLINE_ROUTE sentinel,
+/// no `Custom(` wrapper, no `|` pipe character.
+///
+/// FAILS before fix (parse() returns Ok, silent literal — F-077-P21-001).
+/// PASSES after fix (link unclosed path pushes UnclosedInlineMarkup("[")).
+#[test]
+#[allow(non_snake_case)]
+fn test_unclosed_link_error_accumulated() {
+    use crate::error::SyntaxError;
+    use crate::parser::parse;
+    use miette::Diagnostic as _;
+
+    let src = "slide content:\n  detail \"[click here](https://example.com\"\n";
+    let mut sm = SourceMap::new();
+    let file_id = sm.add_file(Arc::from("test.sf"), Arc::from(src));
+    let result = parse(src, file_id, &sm);
+
+    // E-PAR-019 must be FATAL — parse() MUST return Err in strict (default) mode.
+    // Before fix: returns Ok (silent literal). After fix: returns Err.
+    let Err(errors) = result else {
+        panic!(
+            "test_unclosed_link_error_accumulated FAIL (F-077-P21-001 RED GATE): \
+             parse() returned Ok for '[click here](https://example.com' — \
+             unclosed link must be strict-build-fatal E-PAR-019 per DIR-077-002 §5. \
+             (This is the pre-fix silent-literal behavior — the bug is that NO error was emitted.)"
+        )
+    };
+
+    // Error accumulation: at least 1 error (accumulate all, not fail-on-first).
+    assert!(
+        !errors.is_empty(),
+        "test_unclosed_link_error_accumulated FAIL: Err returned but errors vec is empty."
+    );
+
+    // Load-bearing: first error must carry code E-PAR-019 (not E-PAR-002 or other).
+    let first = &errors[0];
+    let code = first
+        .code()
+        .expect("E-PAR-019 error must carry a diagnostic code");
+    let code_str = code.to_string();
+    assert!(
+        code_str.contains("E-PAR-019"),
+        "test_unclosed_link_error_accumulated FAIL (F-077-P21-001): \
+         expected code E-PAR-019 for unclosed link; got: {code_str}. \
+         The link delimiter must use UnclosedInlineMarkup (E-PAR-019) like all other delimiters."
+    );
+
+    // Load-bearing: error variant must be UnclosedInlineMarkup with delimiter "[".
+    match first {
+        SyntaxError::UnclosedInlineMarkup { delimiter, .. } => {
+            assert_eq!(
+                delimiter, "[",
+                "test_unclosed_link_error_accumulated FAIL (F-077-P21-001): \
+                 UnclosedInlineMarkup delimiter must be \"[\"; got: {delimiter:?}"
+            );
+        },
+        other => panic!(
+            "test_unclosed_link_error_accumulated FAIL (F-077-P21-001): \
+             expected SyntaxError::UnclosedInlineMarkup; got: {other:?}"
+        ),
+    }
+
+    // Load-bearing: rendered message must be clean — no routing sentinel leak.
+    let rendered = first.to_string();
+    assert!(
+        !rendered.contains("SLIDEFORGE_INLINE_ROUTE"),
+        "test_unclosed_link_error_accumulated FAIL: routing sentinel in rendered message.\n\
+         Rendered: {rendered:?}"
+    );
+    assert!(
+        !rendered.contains("Custom("),
+        "test_unclosed_link_error_accumulated FAIL: 'Custom(' wrapper in rendered message.\n\
+         Rendered: {rendered:?}"
+    );
+    assert!(
+        !rendered.contains('|'),
+        "test_unclosed_link_error_accumulated FAIL: '|' pipe in rendered message (sentinel leak).\n\
+         Rendered: {rendered:?}"
+    );
+}
+
+/// F-077-P21-001 (MED) REGRESSION GUARD: happy-path `[text](url)` link must
+/// still parse to `TemplateChunk::Link` with NO error after the fix.
+///
+/// This guard must PASS both before and after the fix (it tests the success path).
+#[test]
+#[allow(non_snake_case)]
+fn test_complete_link_still_parses_ok_regression_guard() {
+    // parse_template_value panics on fatal errors — success path must not panic.
+    let chunks = parse_template_value("[click here](https://example.com)");
+
+    assert_eq!(
+        chunks.len(),
+        1,
+        "test_complete_link_still_parses_ok_regression_guard FAIL (F-077-P21-001): \
+         happy-path link must produce exactly 1 chunk; got {chunks:?}"
+    );
+    match &chunks[0] {
+        TemplateChunk::Link { text, url } => {
+            assert_eq!(
+                url, "https://example.com",
+                "Link url must be 'https://example.com'; got: {url:?}"
+            );
+            assert_eq!(
+                text.len(),
+                1,
+                "Link text must have exactly 1 child; got {text:?}"
+            );
+            assert!(
+                matches!(&text[0], TemplateChunk::Literal(s) if s == "click here"),
+                "Link text child must be Literal(\"click here\"); got: {:?}",
+                text[0]
+            );
+        },
+        other => panic!(
+            "test_complete_link_still_parses_ok_regression_guard FAIL (F-077-P21-001): \
+             happy-path `[click here](https://example.com)` must produce TemplateChunk::Link; \
+             got: {other:?}"
+        ),
+    }
+}
+
+/// F-077-P21-001 (MED) REGRESSION GUARD: bare `[text]` (no `](`) must remain
+/// a literal with NO error.
+///
+/// Only the clear-link-intent case (`[…](…` with no closing `)`) emits E-PAR-019.
+/// A bare `[text]` with no `](` is CommonMark-aligned benign prose text.
+///
+/// This guard must PASS both before and after the fix.
+#[test]
+#[allow(non_snake_case)]
+fn test_bare_bracket_stays_literal_no_error_regression_guard() {
+    // parse_template_value panics on fatal errors — bare [text] must not panic.
+    let chunks = parse_template_value("[just text]");
+
+    assert!(
+        !chunks.is_empty(),
+        "test_bare_bracket_stays_literal_no_error_regression_guard FAIL (F-077-P21-001): \
+         bare [text] must produce at least 1 chunk (literal)"
+    );
+    // All chunks must be Literal — NO Link, NO error.
+    for chunk in &chunks {
+        assert!(
+            matches!(chunk, TemplateChunk::Literal(_)),
+            "test_bare_bracket_stays_literal_no_error_regression_guard FAIL (F-077-P21-001): \
+             bare [text] must produce only Literal chunks; got: {chunk:?}\n\
+             A bare '[' with no '](' must NOT be treated as a link opener."
+        );
+    }
+    // The concatenated literal content must contain the bracket text.
+    let all_text: String = chunks
+        .iter()
+        .filter_map(|c| {
+            if let TemplateChunk::Literal(s) = c {
+                Some(s.as_str())
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert!(
+        all_text.contains("just text"),
+        "test_bare_bracket_stays_literal_no_error_regression_guard FAIL: \
+         literal content must contain 'just text'; got all_text={all_text:?}"
+    );
+}

@@ -3854,3 +3854,81 @@ fn test_f077_p12_001_pipe_footnote_ident_resolves_empty_emits_e_evl_014() {
          (FootnoteInvalidArg); got: {code:?}"
     );
 }
+
+// ─── F-077-P21-001 (MED): E2E unclosed link in section detail field ───────────
+
+/// F-077-P21-001 (MED) RED GATE E2E: an unclosed `[link](url` in a section
+/// `detail:` field must be strict-build-fatal E-PAR-019, mirroring the
+/// unclosed-bold E2E test at `test_F_077_P2_002_unclosed_bold_error_span_points_to_opening_delimiter`.
+///
+/// Before fix: parse() returns Ok (silent literal), no E-PAR-019.
+/// After fix:  parse() returns Err, E-PAR-019 present, clean message.
+///
+/// DIR-077-002 §5: unclosed `[link` is FATAL — same class as unclosed bold.
+#[test]
+#[allow(non_snake_case)]
+fn test_F_077_P21_001_unclosed_link_in_section_detail_is_strict_fatal() {
+    use miette::Diagnostic as _;
+    use slideforge_syntax::error::SyntaxError;
+    use slideforge_syntax::parse;
+    use slideforge_syntax::span::SourceMap;
+    use std::sync::Arc as StdArc;
+
+    let src = concat!(
+        "slideforge_version \"1\"\n",
+        "\n",
+        "section methodology:\n",
+        "  detail: \"[click here](http://x\"\n",
+    );
+
+    let mut sm = SourceMap::new();
+    let file_id = sm.add_file(StdArc::from("test_unclosed_link.sf"), StdArc::from(src));
+
+    // E-PAR-019 is ALWAYS FATAL — parse() must return Err in strict (default) mode.
+    // Before fix: parse() returns Ok (silent literal — F-077-P21-001 bug).
+    let errors = parse(src, file_id, &sm).expect_err(
+        "F-077-P21-001 RED GATE E2E: parse() returned Ok for '[click here](http://x' — \
+         unclosed link must be strict-build-fatal E-PAR-019 per DIR-077-002 §5. \
+         (Pre-fix silent-literal behavior — the bug is that NO error was emitted.)",
+    );
+
+    // Error accumulation: at least 1 fatal error.
+    assert!(
+        !errors.is_empty(),
+        "F-077-P21-001 E2E: Err returned but errors vec is empty."
+    );
+
+    // Load-bearing: E-PAR-019 must be present in the fatal errors.
+    let has_epar019 = errors.iter().any(|e| {
+        e.code()
+            .is_some_and(|c| c.to_string().contains("E-PAR-019"))
+    });
+    assert!(
+        has_epar019,
+        "F-077-P21-001 E2E: E-PAR-019 must be present in the fatal errors vec for \
+         unclosed link '[click here](http://x'; got: {errors:?}"
+    );
+
+    // Load-bearing: the UnclosedInlineMarkup variant with delimiter "[" must be present.
+    let has_link_variant = errors.iter().any(
+        |e| matches!(e, SyntaxError::UnclosedInlineMarkup { delimiter, .. } if delimiter == "["),
+    );
+    assert!(
+        has_link_variant,
+        "F-077-P21-001 E2E: SyntaxError::UnclosedInlineMarkup {{ delimiter: \"[\" }} \
+         must be present; got: {errors:?}"
+    );
+
+    // Clean message: no routing sentinel leak.
+    for e in &errors {
+        let rendered = e.to_string();
+        assert!(
+            !rendered.contains("SLIDEFORGE_INLINE_ROUTE"),
+            "F-077-P21-001 E2E: routing sentinel in rendered message. Rendered: {rendered:?}"
+        );
+        assert!(
+            !rendered.contains("Custom("),
+            "F-077-P21-001 E2E: 'Custom(' wrapper in rendered message. Rendered: {rendered:?}"
+        );
+    }
+}

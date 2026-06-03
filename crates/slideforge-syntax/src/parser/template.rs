@@ -890,11 +890,11 @@ fn scan_template_chunks(
             if let Some(bracket_close_rel) = s[pos + 1..].find("](") {
                 let bracket_close = pos + 1 + bracket_close_rel;
                 let url_start = bracket_close + 2;
+                let link_open_pos = pos; // byte offset of `[`
                 if let Some(paren_close_rel) = s[url_start..].find(')') {
                     let paren_close = url_start + paren_close_rel;
                     let text_inner = &s[pos + 1..bracket_close];
                     let url = &s[url_start..paren_close];
-                    let link_open_pos = pos; // byte offset of `[`
                     flush_lit!();
                     // The link text IS processed for nested markup + interpolation.
                     let (text_children, _) =
@@ -907,8 +907,26 @@ fn scan_template_chunks(
                     lit_start = pos;
                     continue;
                 }
+                // Clear link intent (`[…](` found) but no closing `)` —
+                // DIR-077-002 §5: same class as unclosed bold, same recovery.
+                // Push E-PAR-019 at the `[` position and continue accumulating
+                // the remainder as literal text (error accumulation, not fail-on-first).
+                flush_lit!();
+                errors.push(TemplateError::new(
+                    link_open_pos,
+                    TemplateErrorKind::UnclosedInlineMarkup("[".to_string()),
+                    unclosed_inline_msg("["),
+                ));
+                // Recovery: emit the remainder as literal (matching bold recovery style).
+                let remainder = &s[link_open_pos..];
+                if !remainder.is_empty() {
+                    chunks.push(TemplateChunk::Literal(remainder.to_string()));
+                }
+                pos = len;
+                lit_start = pos;
+                continue;
             }
-            // Not a valid link syntax — fall through as literal.
+            // Not a valid link syntax (no `](`) — fall through as literal.
         }
 
         // ── `^` — Superscript ────────────────────────────────────────────────
