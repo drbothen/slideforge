@@ -602,7 +602,7 @@ const MASTER_PLACEHOLDER_DEFS: &[(&str, u32, &str, i64, i64, i64, i64)] = &[
 /// - `<p:hf>` footer visibility flags from `template.footer_flags`.
 /// - `<p:txStyles>` with heading/body font names from `template.fonts`.
 ///
-/// Element order follows ECMA-376 §19.3.1.42 CT_SlideMaster sequence model:
+/// Element order follows ECMA-376 §19.3.1.42 `CT_SlideMaster` sequence model:
 /// `cSld, clrMap, sldLayoutIdLst, hf, txStyles` (ADR-015 §A.3).
 ///
 /// # Panics
@@ -1737,9 +1737,7 @@ mod tests {
         let sld_layout_lst_pos = xml
             .find("<p:sldLayoutIdLst")
             .expect("master XML must contain <p:sldLayoutIdLst>");
-        let hf_pos = xml
-            .find("<p:hf")
-            .expect("master XML must contain <p:hf>");
+        let hf_pos = xml.find("<p:hf").expect("master XML must contain <p:hf>");
         let tx_styles_pos = xml
             .find("<p:txStyles")
             .expect("master XML must contain <p:txStyles>");

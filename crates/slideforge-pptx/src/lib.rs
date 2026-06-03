@@ -362,7 +362,7 @@ mod layout_index_tests {
         }
     }
 
-    /// ADR-015 §A.4 — "section_divider" must map to 0-based index 11 (CL-01).
+    /// ADR-015 §A.4 — `"section_divider"` must map to 0-based index 11 (CL-01).
     ///
     /// Layout 12 (1-based) is "SF Section Divider". 0-based index = 11.
     #[test]
@@ -391,7 +391,7 @@ mod layout_index_tests {
 
     /// ADR-015 §A.4 — "title" must map to 0-based index 0 (SL-01, Title Slide).
     ///
-    /// Layout 1 (1-based) is "Title Slide" with ooxml_type = "title". 0-based index = 0.
+    /// Layout 1 (1-based) is "Title Slide" with `ooxml_type` = `"title"`. 0-based index = 0.
     #[test]
     fn test_find_layout_index_title_maps_to_0() {
         let template = test_brand_template();
@@ -418,7 +418,7 @@ mod layout_index_tests {
         );
     }
 
-    /// Verify "content" maps to 0-based index 1 (SL-02, Title and Content, ooxml_type "obj").
+    /// Verify `"content"` maps to 0-based index 1 (SL-02, Title and Content, `ooxml_type` = `"obj"`).
     #[test]
     fn test_find_layout_index_content_maps_to_1() {
         let template = test_brand_template();

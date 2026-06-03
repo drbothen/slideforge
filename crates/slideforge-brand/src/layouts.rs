@@ -1183,13 +1183,12 @@ mod tests {
     fn test_adr015_standard_layouts_have_none_slide_type_keyword() {
         let config = minimal_config_direct();
         let layouts = generate_all_layouts(&config);
-        for i in 0..11 {
+        for (i, layout) in layouts.iter().enumerate().take(11) {
             assert_eq!(
-                layouts[i].slide_type_keyword,
-                None,
+                layout.slide_type_keyword, None,
                 "standard layout index {i} ('{}') must have slide_type_keyword = None \
                  (ADR-015 §A.4: standard layouts matched by ooxml_type, not keyword)",
-                layouts[i].name
+                layout.name
             );
         }
     }
@@ -1230,12 +1229,12 @@ mod tests {
     fn test_adr015_all_custom_layouts_have_keyword() {
         let config = minimal_config_direct();
         let layouts = generate_all_layouts(&config);
-        for i in 11..31 {
+        for (i, layout) in layouts.iter().enumerate().skip(11) {
             assert!(
-                layouts[i].slide_type_keyword.is_some(),
+                layout.slide_type_keyword.is_some(),
                 "custom layout index {i} ('{}') must have slide_type_keyword = Some(...) \
                  (ADR-015 §A.4: all SF custom layouts require a DSL keyword)",
-                layouts[i].name
+                layout.name
             );
         }
     }
