@@ -33,6 +33,15 @@
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 
+/// Canonical number of slide layouts always embedded in every PPTX archive.
+///
+/// Both `build_master_parts` (master `.rels` relationship count) and
+/// [`crate::layout_embedder::LayoutEmbedder::embed`] (layout XML part generation)
+/// derive their loop bound from this single constant so master rels can never
+/// reference a non-existent `slideLayout{N}.xml` part (cheap hardening,
+/// F-038-P2 follow-up).
+pub(crate) const LAYOUT_COUNT: usize = 31;
+
 pub mod brand_adapter;
 pub mod clrmapovr;
 pub mod content_types;
@@ -140,7 +149,7 @@ impl PptxExporter {
         for _ in 0..laid_out.slides.len() {
             ct.add_slide();
         }
-        for _ in 0..31 {
+        for _ in 0..LAYOUT_COUNT {
             ct.add_layout();
         }
         for part in &parts {
@@ -359,7 +368,7 @@ mod layout_index_tests {
             handout_master_stub: HANDOUT_MASTER_STUB.to_vec(),
             master_ids: MasterIds::default(),
             content_types_layout_entries: Arc::from(
-                generate_content_types_layout_entries(31).as_str(),
+                generate_content_types_layout_entries(LAYOUT_COUNT).as_str(),
             ),
         }
     }
@@ -521,9 +530,9 @@ fn build_master_parts(
     let mut master_rels = RelsBuilder::new();
     // rId1 = theme (matches the rId used in serialize_master_to_xml for theme ref if any)
     master_rels.add(rel_types::THEME, "../theme/theme1.xml");
-    // rId2..=rId32 = layouts
-    let layout_count = brand_template.layouts.len().max(31);
-    for n in 1..=layout_count {
+    // rId2..=rId32 = layouts (always exactly LAYOUT_COUNT = 31 entries,
+    // matching the parts written by LayoutEmbedder::embed).
+    for n in 1..=LAYOUT_COUNT {
         master_rels.add(
             rel_types::SLIDE_LAYOUT,
             format!("../slideLayouts/slideLayout{n}.xml"),

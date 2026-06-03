@@ -49,9 +49,9 @@ impl LayoutEmbedder {
         brand_template: &BrandTemplate,
         parts: &mut Vec<ZipPart>,
     ) -> Result<(), PptxError> {
-        const LAYOUT_COUNT: usize = 31;
-
-        for n in 1..=LAYOUT_COUNT {
+        // Use the crate-level constant so this loop is always in sync with
+        // `build_master_parts` (which writes the corresponding rels entries).
+        for n in 1..=crate::LAYOUT_COUNT {
             let layout_idx = (n - 1).min(brand_template.layouts.len().saturating_sub(1));
             let layout_xml = if brand_template.layouts.is_empty() {
                 // Defensive fallback: produce a minimal valid layout XML if the
