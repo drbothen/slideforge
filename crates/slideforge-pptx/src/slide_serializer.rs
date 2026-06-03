@@ -489,6 +489,15 @@ impl SlideSerializer {
 }
 
 /// Validate EMU coordinates for a frame bounding box.
+///
+/// Two failure modes are checked:
+/// 1. **Negative size** — `width < 0` or `height < 0` produces out-of-spec OOXML.
+/// 2. **i32 overflow** — ECMA-376 EMU coordinates are effectively `i32` in OOXML
+///    (the XML schema type `ST_Coordinate32` is a 32-bit signed integer). Any of
+///    `x`, `y`, `width`, or `height` that does not fit in `i32::MAX` would produce
+///    an out-of-spec `<a:off>` / `<a:ext>` element. `presentation.rs` already
+///    enforces this for slide-level page size (AC-012); this function makes the
+///    frame-level check consistent.
 fn validate_emu(
     slide_index: usize,
     frame_index: usize,
@@ -500,6 +509,18 @@ fn validate_emu(
             frame_index,
             detail: format!("negative size: width={} height={}", bb.width.0, bb.height.0),
         });
+    }
+    // ECMA-376 ST_Coordinate32: all EMU fields used in <a:off>/<a:ext> must fit in i32.
+    for (name, value) in [("x", bb.x.0), ("y", bb.y.0), ("width", bb.width.0), ("height", bb.height.0)] {
+        if i32::try_from(value).is_err() {
+            return Err(PptxError::InvalidEmu {
+                slide_index,
+                frame_index,
+                detail: format!(
+                    "EMU {name}={value} overflows i32::MAX (ECMA-376 ST_Coordinate32 limit)"
+                ),
+            });
+        }
     }
     Ok(())
 }

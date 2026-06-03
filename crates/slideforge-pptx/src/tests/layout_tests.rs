@@ -1600,6 +1600,114 @@ fn test_BC_4_01_005_s1_validate_emu_negative_height_returns_err() {
     }
 }
 
+// ─── SEC-001: validate_emu positive overflow (CWE-190) ───────────────────────
+
+/// SEC-001 (CWE-190): `validate_emu` must return `PptxError::InvalidEmu` when a
+/// frame bbox field (x, y, width, or height) exceeds `i32::MAX`.
+///
+/// ECMA-376 ST_Coordinate32 is a 32-bit signed integer. An Emu(i64::MAX) frame
+/// produces an out-of-spec `<a:ext>` element. This test is a load-bearing
+/// regression guard — the production check is in `slide_serializer::validate_emu`.
+#[test]
+fn test_sec001_validate_emu_i32_overflow_width_returns_invalid_emu() {
+    use crate::slide_serializer::SlideSerializer;
+
+    // i64::MAX overflows i32::MAX — must be rejected at frame-level EMU validation.
+    let slide = LaidOutSlide {
+        source_index: 0,
+        slide_type_keyword: Arc::from("title"),
+        frames: vec![Frame {
+            bbox: BoundingBox {
+                x: Emu(0),
+                y: Emu(0),
+                width: Emu(i64::MAX), // overflows i32::MAX
+                height: Emu(1_143_000),
+            },
+            content: FrameContent::Title(Arc::from("Overflow width test")),
+            text_flow: None,
+        }],
+        speaker_notes: None,
+        register_tags: vec![],
+        register_content: vec![],
+    };
+
+    let serializer = SlideSerializer::new(false, 0);
+    let result = serializer.build(&slide, 0, "rId1", &[]);
+
+    assert!(
+        result.is_err(),
+        "SEC-001: SlideSerializer::build must return Err(PptxError::InvalidEmu) \
+         when a frame width overflows i32::MAX; got Ok(_)"
+    );
+
+    if let Err(crate::error::PptxError::InvalidEmu {
+        slide_index,
+        frame_index,
+        detail,
+    }) = result
+    {
+        assert_eq!(
+            slide_index, 0,
+            "SEC-001: InvalidEmu must report slide_index=0"
+        );
+        assert_eq!(
+            frame_index, 0,
+            "SEC-001: InvalidEmu must report frame_index=0"
+        );
+        assert!(
+            detail.contains("width"),
+            "SEC-001: InvalidEmu detail must name the offending field 'width'; got: {detail}"
+        );
+    } else {
+        panic!(
+            "SEC-001: expected PptxError::InvalidEmu for i64::MAX width; got different error variant"
+        );
+    }
+}
+
+/// SEC-001 (CWE-190): `validate_emu` must return `PptxError::InvalidEmu` when
+/// frame `x` coordinate exceeds `i32::MAX`.
+#[test]
+fn test_sec001_validate_emu_i32_overflow_x_returns_invalid_emu() {
+    use crate::slide_serializer::SlideSerializer;
+
+    let slide = LaidOutSlide {
+        source_index: 0,
+        slide_type_keyword: Arc::from("title"),
+        frames: vec![Frame {
+            bbox: BoundingBox {
+                x: Emu(i64::MAX), // overflows i32::MAX
+                y: Emu(0),
+                width: Emu(1_000_000),
+                height: Emu(1_143_000),
+            },
+            content: FrameContent::Title(Arc::from("Overflow x test")),
+            text_flow: None,
+        }],
+        speaker_notes: None,
+        register_tags: vec![],
+        register_content: vec![],
+    };
+
+    let serializer = SlideSerializer::new(false, 0);
+    let result = serializer.build(&slide, 0, "rId1", &[]);
+
+    assert!(
+        result.is_err(),
+        "SEC-001: SlideSerializer::build must return Err(PptxError::InvalidEmu) \
+         when frame x overflows i32::MAX; got Ok(_)"
+    );
+
+    if let Err(crate::error::PptxError::InvalidEmu { detail, .. }) = result {
+        assert!(
+            detail.contains('x') || detail.contains("overflow"),
+            "SEC-001: InvalidEmu detail must reference 'x' or overflow; got: {detail}"
+        );
+    } else {
+        panic!("SEC-001: expected PptxError::InvalidEmu for i64::MAX x; got different error variant");
+    }
+}
+
 // ─── S3: Subtitle frame → SubTitle placeholder ───────────────────────────────
 
 /// PR-52 S3: A `FrameContent::Subtitle` frame must emit `<p:ph type="subTitle" idx="1">`
