@@ -49,9 +49,12 @@
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 
+pub mod auto_sections;
 pub mod content_types;
 pub mod document_body;
 pub mod error;
+pub mod manual_sections;
+pub mod section_order;
 pub mod styles;
 pub mod xml_escape;
 pub mod zip_assembler;
