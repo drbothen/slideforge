@@ -90,9 +90,45 @@ where
     I: ValueInput<'src, Token = Token, Span = TSpan>,
 {
     let template_val = template_value().validate(
-        move |(chunks, errs): (Vec<TemplateChunk>, Vec<String>), info, emitter| {
-            for msg in errs {
-                emitter.emit(Rich::custom(info.span(), msg));
+        move |(chunks, errs): (
+            Vec<TemplateChunk>,
+            Vec<crate::parser::template::TemplateError>,
+        ),
+              info,
+              emitter| {
+            // For section sub-block fields, use the byte offset carried by each
+            // TemplateError to create a sub-span pointing at the OPENING delimiter
+            // (DIR-077-002 §5 span requirement: "every inline markup error MUST carry
+            // a Span pointing to the opening delimiter of the malformed construct").
+            //
+            // info.span() covers the entire string literal token. The token starts
+            // at `info.span().start` (in the token stream, which is byte-indexed into
+            // the source). The opening delimiter offset (`err.byte_offset`) is relative
+            // to the string content, which begins one byte after the opening quote.
+            // We therefore compute the sub-span as:
+            //   start = token_start + 1 (skip the opening `"`) + byte_offset
+            //   end   = start + delimiter_length (2 for `**`, 1 for `_`/`` ` ``, etc.)
+            // We create a 2-byte span at the delimiter start, which covers the most
+            // common 2-char delimiters (`**`, `~~`) and points closely enough for
+            // 1-char delimiters (`_`, `` ` ``) to name the column in the error.
+            for err in errs {
+                let token_span: TSpan = info.span();
+                let token_start: usize = token_span.start;
+                // +1 to skip the opening `"` quote of the string literal token.
+                let delim_abs: usize = token_start + 1 + err.byte_offset;
+                // Create a 2-byte sub-span at the opening delimiter position.
+                // This points precisely at the opening `**`, `_`, `` ` ``, etc.
+                let sub_span: TSpan = SimpleSpan::from(delim_abs..delim_abs + 2);
+                // Use into_routing_message() instead of .message directly so that
+                // inline-markup errors (E-PAR-019/020/021) carry a pipe-separated,
+                // hex-encoded routing tag with the KIND and DELIMITER.  The routing boundary in
+                // parser/mod.rs calls parse_routing_tag() first, which extracts the
+                // delimiter directly from the TemplateErrorKind payload — no
+                // message.contains("E-PAR-NNN") or extract_backtick_name re-parsing
+                // needed.  This fixes F-077-P4-002: the backtick delimiter (`` ` ``)
+                // was previously lost because extract_backtick_name returned "" when
+                // the message embedded `` ` `` inside backtick pairs.
+                emitter.emit(Rich::custom(sub_span, err.into_routing_message()));
             }
             (FieldValue::Template(chunks), info.span())
         },

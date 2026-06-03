@@ -101,12 +101,19 @@ where
     let string_field = select! { Token::StringLit(s) = e => (s.to_string(), e.span()) };
 
     // A template string value (for "text" field).
-    let template_val = template_value().validate(move |(chunks, errs), info, emitter| {
-        for msg in errs {
-            emitter.emit(Rich::custom(info.span(), msg));
-        }
-        (chunks, info.span())
-    });
+    let template_val = template_value().validate(
+        move |(chunks, errs): (
+            Vec<crate::template::TemplateChunk>,
+            Vec<crate::parser::template::TemplateError>,
+        ),
+              info,
+              emitter| {
+            for err in errs {
+                emitter.emit(Rich::custom(info.span(), err.into_routing_message()));
+            }
+            (chunks, info.span())
+        },
+    );
 
     let type_field = kw("type")
         .ignore_then(string_field)

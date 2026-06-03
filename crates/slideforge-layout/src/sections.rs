@@ -33,7 +33,9 @@
 
 use std::sync::Arc;
 
-use slideforge_types::{Deck, OrderedMap, Register, Value};
+use slideforge_types::{
+    CANONICAL_MANUAL_SECTION_TYPES, Deck, FieldValue, OrderedMap, Register, Value,
+};
 use tracing::warn;
 
 use crate::error::LayoutError;
@@ -41,20 +43,17 @@ use crate::error::LayoutError;
 /// The set of section type names supported by manually authored sections
 /// (BC-3.02.002 AC-004).
 ///
-/// `executive_summary` and `risk_register` are included here because they
-/// can be manually authored to supersede the auto-generated equivalents
+/// **Single source of truth:** this re-exports
+/// [`slideforge_types::CANONICAL_MANUAL_SECTION_TYPES`] so that the layout
+/// and eval passes are guaranteed to validate against the same list and cannot
+/// drift out of sync (TD-VSDD-060, F-077-P1-001).
+///
+/// `executive_summary` and `risk_register` are included because they can be
+/// manually authored to supersede the auto-generated equivalents
 /// (BC-3.02.001 EC-002 / AC-006).  When a manual block with one of these
 /// names is present, `collect_sections` fires the supersession path and
 /// suppresses the auto-generated section of the same kind.
-const SUPPORTED_MANUAL_SECTION_TYPES: &[&str] = &[
-    "executive_summary",
-    "risk_register",
-    "methodology",
-    "scope",
-    "approval",
-    "appendix",
-    "glossary",
-];
+const SUPPORTED_MANUAL_SECTION_TYPES: &[&str] = CANONICAL_MANUAL_SECTION_TYPES;
 
 /// The output format a section should be included in.
 ///
@@ -224,6 +223,28 @@ pub struct GeneratedSection {
     ///
     /// **Invariant:** always sorted by `OutputFormat` discriminant order.
     pub target_formats: Vec<OutputFormat>,
+
+    /// Register-tagged content blocks for this section.
+    ///
+    /// Populated from [`slideforge_types::SectionBlock::register_content`] during
+    /// `collect_manual_sections` (F-077-P10-001). Each entry carries a
+    /// [`slideforge_types::RegisteredContent`] value that pairs a
+    /// [`slideforge_types::Register`] tag with its evaluated inline content.
+    ///
+    /// Exporters read only the entries for their allowed registers:
+    /// - DOCX: reads `Report` and `Detail` entries for section bodies
+    /// - PDF: reads `Report` and `Detail` entries for section bodies
+    /// - PPTX and HTML/preview: MUST NOT read this field
+    ///
+    /// An empty `Vec` means the section has no register-gated content — this is
+    /// always the case for auto-generated sections (`ExecutiveSummary`,
+    /// `RiskRegister`) because those sections have no corresponding
+    /// `SectionBlock.register_content` in the eval IR.
+    ///
+    /// This is the single authoritative source for all register-gated section
+    /// content for DOCX and PDF exporters — the section-level analogue of
+    /// [`crate::types::LaidOutSlide::register_content`].
+    pub register_content: Vec<slideforge_types::RegisteredContent>,
 }
 
 /// Produce a canonical sorted `target_formats` vec for DOCX + PDF sections.
@@ -391,6 +412,10 @@ fn collect_manual_sections(deck: &Deck) -> Result<Vec<GeneratedSection>, LayoutE
             return Err(LayoutError::UnknownSectionType {
                 name: name.to_owned(),
                 span: block.span.clone(),
+                // Derived from CANONICAL_MANUAL_SECTION_TYPES at runtime so the
+                // user-facing message can never drift from the SSOT
+                // (F-077-P13-001 / TD-VSDD-060).
+                known_types: CANONICAL_MANUAL_SECTION_TYPES.join(", "),
             });
         }
 
@@ -439,11 +464,25 @@ fn collect_manual_sections(deck: &Deck) -> Result<Vec<GeneratedSection>, LayoutE
         // whose keys are not yet known at layout time. Deferred until the
         // SectionType plugin surface (STORY-041/042) defines per-section schemas;
         // at that point each plugin can validate its own field set.
+        // STORY-077: SectionBlock.body is now OrderedMap<Arc<str>, FieldValue>.
+        // For backwards compatibility with SectionItem::Custom (which expects
+        // OrderedMap<Arc<str>, Value>), extract the Value from Literal variants.
+        // Non-Literal variants (Inlines, Template, etc.) are coerced to a Null
+        // placeholder — the DOCX/PDF exporters read register_content for rich
+        // section content, not this legacy Custom map.
         let custom_map: OrderedMap<Arc<str>, Value> = block
             .body
             .iter()
             .filter(|(k, _)| k.as_ref() != "heading")
-            .map(|(k, v)| (Arc::clone(k), v.clone()))
+            .map(|(k, fv)| {
+                let v = match fv {
+                    FieldValue::Literal(val) => val.clone(),
+                    // Rich or template content is handled via register_content;
+                    // the legacy Custom map gets a Null placeholder.
+                    _ => Value::Null,
+                };
+                (Arc::clone(k), v)
+            })
             .collect();
         let items = vec![SectionItem::Custom(custom_map)];
 
@@ -454,8 +493,9 @@ fn collect_manual_sections(deck: &Deck) -> Result<Vec<GeneratedSection>, LayoutE
         // value (e.g., a number, list, or map), the fallback is applied silently.
         // Emit a warning so DSL authors learn that their heading declaration was
         // ignored. This is NOT an error — the build continues with the fallback.
+        // STORY-077: body values are now FieldValue; extract Literal(Str) for heading.
         let heading: Arc<str> = match block.body.get("heading") {
-            Some(Value::Str(s)) => Arc::clone(s),
+            Some(FieldValue::Literal(Value::Str(s))) => Arc::clone(s),
             Some(_non_str) => {
                 warn!(
                     section_name = %name,
@@ -475,6 +515,9 @@ fn collect_manual_sections(deck: &Deck) -> Result<Vec<GeneratedSection>, LayoutE
             items,
             heading,
             target_formats: docx_pdf_formats(),
+            // F-077-P10-001: propagate register_content verbatim from the eval IR.
+            // Mirrors the slide path (layout.rs:315): copy without routing logic.
+            register_content: block.register_content.clone(),
         });
     }
 
@@ -575,6 +618,8 @@ pub(crate) fn collect_executive_summary(
         items,
         heading: Arc::from("Executive Summary"),
         target_formats: docx_pdf_formats(),
+        // Auto-generated sections have no SectionBlock.register_content source.
+        register_content: Vec::new(),
     }))
 }
 
@@ -679,6 +724,8 @@ pub(crate) fn collect_risk_register(deck: &Deck) -> Result<Option<GeneratedSecti
         items,
         heading: Arc::from("Risk Register"),
         target_formats: docx_pdf_formats(),
+        // Auto-generated sections have no SectionBlock.register_content source.
+        register_content: Vec::new(),
     }))
 }
 
@@ -713,8 +760,8 @@ mod tests {
     use std::sync::Arc;
 
     use slideforge_types::{
-        Deck, DeckMetadata, FieldValue, OrderedMap, Register, SectionBlock, Slide, SourceSpan,
-        Value,
+        Deck, DeckMetadata, FieldValue, InlineNode, OrderedMap, Register, RegisteredContent,
+        SectionBlock, Slide, SourceSpan, Value,
     };
 
     use super::*;
@@ -1195,6 +1242,7 @@ mod tests {
             items: vec![SectionItem::TakeawayBullet(Arc::from("Key point"))],
             heading: Arc::from("Executive Summary"),
             target_formats: docx_pdf_formats(),
+            register_content: Vec::new(),
         };
         let section2 = section.clone();
         assert_eq!(section, section2);
@@ -1349,6 +1397,7 @@ mod tests {
         let block = SectionBlock {
             name: Arc::from("methodology"),
             body: OrderedMap::new(),
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         let deck = make_deck_with_section_blocks(vec![make_slide("title")], vec![block]);
@@ -1370,6 +1419,7 @@ mod tests {
         let block = SectionBlock {
             name: Arc::from("scope"),
             body: OrderedMap::new(),
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         let deck = make_deck_with_section_blocks(vec![], vec![block]);
@@ -1392,6 +1442,7 @@ mod tests {
         let block = SectionBlock {
             name: Arc::from("unknown_type"),
             body: OrderedMap::new(),
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         let deck = make_deck_with_section_blocks(vec![], vec![block]);
@@ -1412,6 +1463,7 @@ mod tests {
             let block = SectionBlock {
                 name: Arc::from(type_name),
                 body: OrderedMap::new(),
+                register_content: vec![],
                 span: SourceSpan::default(),
             };
             let deck = make_deck_with_section_blocks(vec![], vec![block]);
@@ -1502,9 +1554,11 @@ mod tests {
     #[test]
     fn test_bc_3_02_002_unknown_section_type_error_variant_exists() {
         use crate::error::LayoutError;
+        use slideforge_types::CANONICAL_MANUAL_SECTION_TYPES;
         let err = LayoutError::UnknownSectionType {
             name: "frobnicator".to_owned(),
             span: SourceSpan::default(),
+            known_types: CANONICAL_MANUAL_SECTION_TYPES.join(", "),
         };
         let msg = err.to_string();
         assert!(
@@ -1525,6 +1579,45 @@ mod tests {
         assert!(
             !msg.contains("SourceSpan {"),
             "span must NOT render as a Debug struct dump; got: {msg}"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // F-077-P13-001 — drift-guard: UnknownSectionType known_types is SSOT-derived
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Drift-guard (F-077-P13-001): `LayoutError::UnknownSectionType` must carry
+    /// a `known_types: String` field populated from
+    /// `CANONICAL_MANUAL_SECTION_TYPES` at the construction site, and the
+    /// rendered message must contain every entry from that SSOT constant.
+    ///
+    /// This test will fail to compile until the `known_types` field is added to
+    /// the variant, and will fail at runtime if any entry is missing from the
+    /// rendered message — guaranteeing the message can never drift from the SSOT.
+    #[test]
+    fn test_f077_p13_001_unknown_section_type_known_types_derived_from_ssot() {
+        use crate::error::LayoutError;
+        use slideforge_types::CANONICAL_MANUAL_SECTION_TYPES;
+
+        let known = CANONICAL_MANUAL_SECTION_TYPES.join(", ");
+        let err = LayoutError::UnknownSectionType {
+            name: "frobnicator".to_owned(),
+            span: SourceSpan::default(),
+            known_types: known,
+        };
+        let msg = err.to_string();
+
+        // Every entry from the SSOT constant must appear in the rendered message.
+        for entry in CANONICAL_MANUAL_SECTION_TYPES {
+            assert!(
+                msg.contains(entry),
+                "UnknownSectionType message must contain SSOT entry '{entry}'; got: {msg}"
+            );
+        }
+        // The 'Known types' prefix must still be present.
+        assert!(
+            msg.contains("Known types"),
+            "UnknownSectionType message must include 'Known types' header; got: {msg}"
         );
     }
 
@@ -1813,6 +1906,7 @@ mod tests {
         let block = SectionBlock {
             name: Arc::from("methodology"),
             body: OrderedMap::new(),
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         // methodology (manual) + takeaway slide (auto executive_summary):
@@ -1873,6 +1967,7 @@ mod tests {
         let block = SectionBlock {
             name: Arc::from("methodology"),
             body: OrderedMap::new(),
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         let deck = make_deck_with_section_order(
@@ -1981,6 +2076,7 @@ mod tests {
         let block = SectionBlock {
             name: Arc::from("executive_summary"),
             body: OrderedMap::new(),
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         let deck = make_deck_with_section_blocks(vec![], vec![block]);
@@ -2006,6 +2102,7 @@ mod tests {
         let block = SectionBlock {
             name: Arc::from("risk_register"),
             body: OrderedMap::new(),
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         let deck = make_deck_with_section_blocks(vec![], vec![block]);
@@ -2026,6 +2123,7 @@ mod tests {
         let block = SectionBlock {
             name: Arc::from("executive_summary"),
             body: OrderedMap::new(),
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         let deck = make_deck_with_section_blocks(
@@ -2083,12 +2181,16 @@ mod tests {
         let mut body = OrderedMap::new();
         body.insert(
             Arc::from("summary"),
-            Value::Str(Arc::from("Manual executive summary text")),
+            FieldValue::Literal(Value::Str(Arc::from("Manual executive summary text"))),
         );
-        body.insert(Arc::from("author"), Value::Str(Arc::from("Strategy Team")));
+        body.insert(
+            Arc::from("author"),
+            FieldValue::Literal(Value::Str(Arc::from("Strategy Team"))),
+        );
         let block = SectionBlock {
             name: Arc::from("executive_summary"),
             body,
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         // Two takeaway slides that would normally produce auto-generated bullets.
@@ -2171,6 +2273,7 @@ mod tests {
         let block = SectionBlock {
             name: Arc::from("executive_summary"),
             body: OrderedMap::new(),
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         let deck = make_deck_with_section_blocks(
@@ -2192,6 +2295,7 @@ mod tests {
         let block = SectionBlock {
             name: Arc::from("executive_summary"),
             body: OrderedMap::new(),
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         // No takeaway slides — no auto-generated section would have been produced.
@@ -2214,6 +2318,7 @@ mod tests {
         let block = SectionBlock {
             name: Arc::from("executive_summary"),
             body: OrderedMap::new(),
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         // A slide whose `takeaway:` is an unresolved Expr — NOT a Literal(Str).
@@ -2256,6 +2361,7 @@ mod tests {
         let block = SectionBlock {
             name: Arc::from("methodology"),
             body: OrderedMap::new(), // empty body
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         let deck = make_deck_with_section_blocks(vec![make_slide("title")], vec![block]);
@@ -2276,9 +2382,13 @@ mod tests {
             name: Arc::from("methodology"),
             body: {
                 let mut m = OrderedMap::new();
-                m.insert(Arc::from("approach"), Value::Str(Arc::from("Agile")));
+                m.insert(
+                    Arc::from("approach"),
+                    FieldValue::Literal(Value::Str(Arc::from("Agile"))),
+                );
                 m
             },
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         let deck = make_deck_with_section_blocks(vec![make_slide("title")], vec![block]);
@@ -2413,12 +2523,22 @@ mod tests {
     #[test]
     fn test_high_005_manual_section_body_single_custom_item_with_full_map() {
         let mut body = OrderedMap::new();
-        body.insert(Arc::from("author"), Value::Str(Arc::from("Alice")));
-        body.insert(Arc::from("version"), Value::Str(Arc::from("1.0")));
-        body.insert(Arc::from("date"), Value::Str(Arc::from("2026-01-01")));
+        body.insert(
+            Arc::from("author"),
+            FieldValue::Literal(Value::Str(Arc::from("Alice"))),
+        );
+        body.insert(
+            Arc::from("version"),
+            FieldValue::Literal(Value::Str(Arc::from("1.0"))),
+        );
+        body.insert(
+            Arc::from("date"),
+            FieldValue::Literal(Value::Str(Arc::from("2026-01-01"))),
+        );
         let block = SectionBlock {
             name: Arc::from("methodology"),
             body,
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         let deck = make_deck_with_section_blocks(vec![], vec![block]);
@@ -2458,6 +2578,7 @@ mod tests {
         let block = SectionBlock {
             name: Arc::from("scope"),
             body: OrderedMap::new(),
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         let deck = make_deck_with_section_blocks(vec![], vec![block]);
@@ -2493,6 +2614,7 @@ mod tests {
         let block = SectionBlock {
             name: Arc::from("methodology"),
             body: OrderedMap::new(),
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         let deck = make_deck_with_section_blocks(vec![], vec![block]);
@@ -2540,12 +2662,16 @@ mod tests {
         let mut body = OrderedMap::new();
         body.insert(
             Arc::from("heading"),
-            Value::Str(Arc::from("Our Research Methodology")),
+            FieldValue::Literal(Value::Str(Arc::from("Our Research Methodology"))),
         );
-        body.insert(Arc::from("content"), Value::Str(Arc::from("Details here")));
+        body.insert(
+            Arc::from("content"),
+            FieldValue::Literal(Value::Str(Arc::from("Details here"))),
+        );
         let block = SectionBlock {
             name: Arc::from("methodology"),
             body,
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         let deck = make_deck_with_section_blocks(vec![], vec![block]);
@@ -2590,6 +2716,7 @@ mod tests {
         let block = SectionBlock {
             name: Arc::from("methodology"),
             body: OrderedMap::new(),
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         let deck = make_deck_with_section_blocks(vec![], vec![block]);
@@ -2619,6 +2746,7 @@ mod tests {
         let block = SectionBlock {
             name: Arc::from("methodology"),
             body: OrderedMap::new(),
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         let deck = make_deck_with_section_order(
@@ -2693,6 +2821,7 @@ mod tests {
             let block = SectionBlock {
                 name: Arc::from(type_name),
                 body: OrderedMap::new(),
+                register_content: vec![],
                 span: SourceSpan::default(),
             };
             let deck = make_deck_with_section_blocks(vec![], vec![block]);
@@ -2784,6 +2913,7 @@ mod tests {
         let manual_block = SectionBlock {
             name: Arc::from("risk_register"),
             body: OrderedMap::new(),
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         // Only severity_cards slide is Notes-register — it would not have
@@ -2807,6 +2937,7 @@ mod tests {
         let manual_block = SectionBlock {
             name: Arc::from("risk_register"),
             body: OrderedMap::new(),
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         // Non-Notes severity_cards slide — the auto-generated risk_register
@@ -2841,10 +2972,11 @@ mod tests {
             name: Arc::from("methodology"),
             body: {
                 let mut m = OrderedMap::new();
-                // heading key is a number, not a string
-                m.insert(Arc::from("heading"), Value::Int(42));
+                // heading key is a number, not a string (triggers OBS-B warning)
+                m.insert(Arc::from("heading"), FieldValue::Literal(Value::Int(42)));
                 m
             },
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         let deck = make_deck_with_section_blocks(vec![make_slide("title")], vec![block]);
@@ -2869,9 +3001,13 @@ mod tests {
             name: Arc::from("methodology"),
             body: {
                 let mut m = OrderedMap::new();
-                m.insert(Arc::from("heading"), Value::Str(Arc::from("Our Approach")));
+                m.insert(
+                    Arc::from("heading"),
+                    FieldValue::Literal(Value::Str(Arc::from("Our Approach"))),
+                );
                 m
             },
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         let deck = make_deck_with_section_blocks(vec![make_slide("title")], vec![block]);
@@ -2895,18 +3031,26 @@ mod tests {
             name: Arc::from("methodology"),
             body: {
                 let mut m = OrderedMap::new();
-                m.insert(Arc::from("approach"), Value::Str(Arc::from("Agile")));
+                m.insert(
+                    Arc::from("approach"),
+                    FieldValue::Literal(Value::Str(Arc::from("Agile"))),
+                );
                 m
             },
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         let block_b = SectionBlock {
             name: Arc::from("methodology"),
             body: {
                 let mut m = OrderedMap::new();
-                m.insert(Arc::from("approach"), Value::Str(Arc::from("Waterfall")));
+                m.insert(
+                    Arc::from("approach"),
+                    FieldValue::Literal(Value::Str(Arc::from("Waterfall"))),
+                );
                 m
             },
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         let deck = make_deck_with_section_blocks(vec![make_slide("title")], vec![block_a, block_b]);
@@ -2935,11 +3079,13 @@ mod tests {
         let block_a = SectionBlock {
             name: Arc::from("methodology"),
             body: OrderedMap::new(),
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         let block_b = SectionBlock {
             name: Arc::from("scope"),
             body: OrderedMap::new(),
+            register_content: vec![],
             span: SourceSpan::default(),
         };
         let deck = make_deck_with_section_blocks(vec![make_slide("title")], vec![block_a, block_b]);
@@ -2948,5 +3094,254 @@ mod tests {
             !logs_contain("declared more than once"),
             "duplicate warning must NOT fire when all section names are unique"
         );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // F-077-P1-005 — FieldValue::Inlines in body → Null placeholder in Custom
+    //                map AND register_content is preserved (no data loss)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// F-077-P1-005 / STORY-077 BC-3.02.002 postconditions 7 and 8:
+    /// A section block whose body contains `FieldValue::Inlines` (rich content)
+    /// must, after `collect_sections`:
+    ///
+    /// 1. Produce a `SectionItem::Custom` map with `Value::Null` for the rich
+    ///    field (the legacy scalar map cannot represent rich content; rich content
+    ///    flows through `register_content`, not the Custom map).
+    ///
+    /// 2. Leave `deck.section_blocks[0].register_content` intact and populated
+    ///    with the Detail entry (layout does NOT clear or modify register_content).
+    ///
+    /// Both invariants must hold simultaneously — asserting only one of them
+    /// would miss the dual-channel design: Null placeholder in Custom + rich
+    /// content preserved in register_content.
+    #[test]
+    fn test_f_077_p1_005_inlines_body_produces_null_placeholder_and_register_content_intact() {
+        // Simulate what eval produces for a section with a detail: sub-block:
+        // - body["detail"] = FieldValue::Inlines([Plain("Rich methodology content")])
+        // - register_content = [RegisteredContent { Detail, [Plain("Rich methodology content")] }]
+        let rich_text = Arc::from("Rich methodology content");
+
+        let mut body: OrderedMap<Arc<str>, FieldValue> = OrderedMap::new();
+        body.insert(
+            Arc::from("detail"),
+            FieldValue::Inlines(vec![InlineNode::Plain(Arc::clone(&rich_text))]),
+        );
+        // Also include a plain literal field to verify Literal values pass through correctly.
+        body.insert(
+            Arc::from("status"),
+            FieldValue::Literal(Value::Str(Arc::from("approved"))),
+        );
+
+        let register_content = vec![RegisteredContent {
+            register: Register::Detail,
+            content: vec![InlineNode::Plain(Arc::clone(&rich_text))],
+        }];
+
+        let block = SectionBlock {
+            name: Arc::from("methodology"),
+            body,
+            register_content,
+            span: SourceSpan::default(),
+        };
+
+        let deck = make_deck_with_section_blocks(vec![], vec![block]);
+        let sections = collect_sections(&deck).expect("collect_sections must succeed");
+
+        // ── Assertion 1: Custom map has Null for the rich 'detail' field ─────
+        // layout cannot represent FieldValue::Inlines in the legacy Custom map.
+        let manual_section = sections
+            .iter()
+            .find(|s| s.kind == SectionKind::ManualSection(Arc::from("methodology")))
+            .expect("F-077-P1-005: methodology section must be present in output");
+
+        assert_eq!(
+            manual_section.items.len(),
+            1,
+            "F-077-P1-005: manual section must produce exactly one Custom item"
+        );
+
+        match &manual_section.items[0] {
+            SectionItem::Custom(map) => {
+                // The 'detail' key has FieldValue::Inlines in the source body.
+                // The layout coercion must produce Value::Null for it (the rich
+                // content is accessed via register_content, not this map).
+                let detail_val = map
+                    .get("detail")
+                    .expect("F-077-P1-005: 'detail' key must be present in Custom map");
+                assert_eq!(
+                    *detail_val,
+                    Value::Null,
+                    "F-077-P1-005: FieldValue::Inlines body field must be coerced to Value::Null \
+                     in the Custom map (rich content flows through register_content, not here); \
+                     got: {detail_val:?}"
+                );
+
+                // The plain 'status' key (Literal(Str)) must pass through as-is.
+                let status_val = map
+                    .get("status")
+                    .expect("F-077-P1-005: 'status' key must be present in Custom map");
+                assert_eq!(
+                    *status_val,
+                    Value::Str(Arc::from("approved")),
+                    "F-077-P1-005: FieldValue::Literal(Str) body field must be preserved verbatim \
+                     in the Custom map; got: {status_val:?}"
+                );
+            },
+            other => panic!("F-077-P1-005: expected SectionItem::Custom, got {other:?}"),
+        }
+
+        // ── Assertion 2: register_content on the source SectionBlock is intact ─
+        // layout must NOT clear or modify the pre-populated register_content.
+        // DOCX/PDF exporters read it directly from deck.section_blocks.
+        let source_block = &deck.section_blocks[0];
+        assert_eq!(
+            source_block.register_content.len(),
+            1,
+            "F-077-P1-005: register_content on the source SectionBlock must remain populated \
+             (layout must not clear it); expected 1 entry, got {}",
+            source_block.register_content.len()
+        );
+        assert_eq!(
+            source_block.register_content[0].register,
+            Register::Detail,
+            "F-077-P1-005: register_content[0] must be tagged Register::Detail"
+        );
+
+        // The content must still hold the rich text — no data loss.
+        let detail_text: String = source_block.register_content[0]
+            .content
+            .iter()
+            .filter_map(|n| {
+                if let InlineNode::Plain(s) = n {
+                    Some(s.as_ref().to_owned())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert_eq!(
+            detail_text, "Rich methodology content",
+            "F-077-P1-005: register_content detail text must be preserved verbatim; \
+             got: {detail_text:?}"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // F-077-P10-001 (HIGH) — section register_content propagates to
+    //                         GeneratedSection in LaidOutDeck
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// F-077-P10-001 (HIGH): A `section methodology:` block whose
+    /// `SectionBlock.register_content` is populated by the evaluator (detail: +
+    /// report: entries) must produce a `GeneratedSection` with a matching
+    /// `register_content` field after `collect_sections` runs.
+    ///
+    /// This is the RED GATE test. It FAILS before the fix because `GeneratedSection`
+    /// has no `register_content` field, so the field access does not compile.
+    ///
+    /// After the fix:
+    /// - `GeneratedSection.register_content` carries the same entries that
+    ///   `SectionBlock.register_content` held (Detail + Report).
+    /// - Auto-generated sections (ExecutiveSummary, RiskRegister) have empty
+    ///   `register_content` (no eval-populated register content exists for them).
+    ///
+    /// Mirrors the slide path: `LaidOutSlide.register_content` is copied verbatim
+    /// from `slide.register_content` at `layout.rs:315`. Section path uses the
+    /// same copy-verbatim pattern from `block.register_content`.
+    #[test]
+    fn test_f077_p10_001_section_register_content_propagates_to_generated_section() {
+        // Simulate what eval produces for a methodology section with detail: and report:
+        let detail_text = Arc::from("Detailed methodology description");
+        let report_text = Arc::from("Report-level methodology summary");
+
+        let register_content = vec![
+            RegisteredContent {
+                register: Register::Detail,
+                content: vec![InlineNode::Plain(Arc::clone(&detail_text))],
+            },
+            RegisteredContent {
+                register: Register::Report,
+                content: vec![InlineNode::Plain(Arc::clone(&report_text))],
+            },
+        ];
+
+        let block = SectionBlock {
+            name: Arc::from("methodology"),
+            body: OrderedMap::new(),
+            register_content,
+            span: SourceSpan::default(),
+        };
+
+        let deck = make_deck_with_section_blocks(vec![], vec![block]);
+        let sections = collect_sections(&deck).expect("collect_sections must succeed");
+
+        let manual_section = sections
+            .iter()
+            .find(|s| s.kind == SectionKind::ManualSection(Arc::from("methodology")))
+            .expect("F-077-P10-001: methodology GeneratedSection must be present");
+
+        // PRIMARY ASSERTION: register_content must be propagated to GeneratedSection.
+        assert_eq!(
+            manual_section.register_content.len(),
+            2,
+            "F-077-P10-001: GeneratedSection.register_content must carry 2 entries \
+             (Detail + Report) from the source SectionBlock; got {} entries",
+            manual_section.register_content.len()
+        );
+
+        // Verify Detail entry
+        assert_eq!(
+            manual_section.register_content[0].register,
+            Register::Detail,
+            "F-077-P10-001: register_content[0] must be tagged Register::Detail"
+        );
+        assert!(
+            matches!(
+                manual_section.register_content[0].content.first(),
+                Some(InlineNode::Plain(s)) if s.as_ref() == "Detailed methodology description"
+            ),
+            "F-077-P10-001: register_content[0] content must be Plain('Detailed methodology description'); \
+             got: {:?}",
+            manual_section.register_content[0].content
+        );
+
+        // Verify Report entry
+        assert_eq!(
+            manual_section.register_content[1].register,
+            Register::Report,
+            "F-077-P10-001: register_content[1] must be tagged Register::Report"
+        );
+        assert!(
+            matches!(
+                manual_section.register_content[1].content.first(),
+                Some(InlineNode::Plain(s)) if s.as_ref() == "Report-level methodology summary"
+            ),
+            "F-077-P10-001: register_content[1] content must be Plain('Report-level methodology summary'); \
+             got: {:?}",
+            manual_section.register_content[1].content
+        );
+    }
+
+    /// F-077-P10-001 (HIGH): Auto-generated sections (ExecutiveSummary,
+    /// RiskRegister) have no eval-populated register_content and must carry an
+    /// empty Vec for that field.
+    #[test]
+    fn test_f077_p10_001_auto_generated_sections_have_empty_register_content() {
+        let deck = make_deck(vec![
+            make_slide_with_takeaway("content", "Key finding"),
+            make_severity_card_slide("Budget Risk", "High", "10% over plan", "CFO"),
+        ]);
+        let sections = collect_sections(&deck).expect("collect_sections must succeed");
+
+        for section in &sections {
+            assert!(
+                section.register_content.is_empty(),
+                "F-077-P10-001: auto-generated section {:?} must have empty register_content; \
+                 got: {:?}",
+                section.kind,
+                section.register_content
+            );
+        }
     }
 }

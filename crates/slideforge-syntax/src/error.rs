@@ -65,6 +65,9 @@ pub enum ParseSeverity {
 /// | `VarNameCollision` | `E-PAR-008` |
 /// | `RawKeyword` | `E-PAR-009` |
 /// | `VersionError` | `E-PAR-010` |
+/// | `UnclosedInlineMarkup` | `E-PAR-019` |
+/// | `EmptyInlineMarkupSpan` | `E-PAR-020` |
+/// | `InlineNestingDepthExceeded` | `E-PAR-021` |
 ///
 /// # Extensibility
 ///
@@ -268,6 +271,125 @@ pub enum SyntaxError {
         at: SourceSpan,
     },
 
+    /// An unclosed inline markup delimiter was encountered.
+    ///
+    /// Code: `E-PAR-019`
+    ///
+    /// Emitted when a template string contains an opening inline markup delimiter
+    /// (`**`, `_`, `` ` ``, `^`, `~`, `~~`, `==`) without a matching closing
+    /// delimiter before the end of the string. Parsing continues — the construct
+    /// is treated as a best-effort recovery (error accumulation, DIR-077-002 §5).
+    ///
+    /// The span points at the OPENING delimiter.
+    #[error("Unclosed inline markup '{delimiter}' at {file}:{line}:{col}: {message}")]
+    #[diagnostic(
+        code("E-PAR-019"),
+        help(
+            "Add a closing '{delimiter}' after the markup text, \
+             e.g., '{delimiter}text{delimiter}'."
+        )
+    )]
+    UnclosedInlineMarkup {
+        /// Source file path.
+        file: String,
+        /// One-based line number.
+        line: u32,
+        /// One-based column number.
+        col: u32,
+        /// The opening delimiter that was not closed (e.g. `**`, `_`, `` ` ``).
+        delimiter: String,
+        /// Human-readable description.
+        message: String,
+        /// Source code context for miette rendering.
+        #[source_code]
+        src: NamedSource<String>,
+        /// Span pointing at the opening delimiter.
+        #[label("opening delimiter here")]
+        at: SourceSpan,
+    },
+
+    /// An empty inline markup span was encountered.
+    ///
+    /// Code: `E-PAR-020`
+    ///
+    /// Emitted when a template string contains an opening inline markup delimiter
+    /// immediately followed by its closing counterpart with no content between them
+    /// (e.g., `****`, `__`, double-backtick, `^^`). Parsing continues — the empty span
+    /// is a parse error but does not abort (error accumulation, DIR-077-002 §5).
+    ///
+    /// The span points at the OPENING delimiter.
+    #[error("Empty inline markup span '{delimiter}' at {file}:{line}:{col}: {message}")]
+    #[diagnostic(
+        code("E-PAR-020"),
+        help(
+            "Spans must contain at least one character. \
+             Add content between the delimiters: '{delimiter}text{delimiter}'."
+        )
+    )]
+    EmptyInlineMarkupSpan {
+        /// Source file path.
+        file: String,
+        /// One-based line number.
+        line: u32,
+        /// One-based column number.
+        col: u32,
+        /// The delimiter pair that enclosed an empty span (e.g. `**`, `_`).
+        delimiter: String,
+        /// Human-readable description.
+        message: String,
+        /// Source code context for miette rendering.
+        #[source_code]
+        src: NamedSource<String>,
+        /// Span pointing at the opening delimiter.
+        #[label("empty span starts here")]
+        at: SourceSpan,
+    },
+
+    /// Inline markup nesting depth exceeded the maximum cap.
+    ///
+    /// Code: `E-PAR-021`
+    ///
+    /// Emitted when `scan_template_chunks` recurses deeper than `MAX_INLINE_NESTING`
+    /// (64 levels). The remainder of the input at that position is treated as a
+    /// `Literal` chunk to allow the parser to collect all remaining errors in one
+    /// pass (error accumulation, DIR-077-002 §5 + error-taxonomy.md).
+    ///
+    /// **Severity: strict-build-fatal.** Like all Parse Errors (E-PAR-*), this
+    /// diagnostic is routed to the fatal `errors` path — `parse()` returns `Err`
+    /// in strict (default) mode and the build halts with exit 1. "Accumulated"
+    /// means all errors are collected before halting, NOT that the build succeeds.
+    /// This error is never placed in `ParseResult::warnings`. (F-077-P14-001)
+    ///
+    /// The span points at the byte offset of the opening delimiter that pushed
+    /// over the cap (or the best-available absolute position when the exact
+    /// opener is not recoverable in the current recursion context).
+    #[error("Inline-markup nesting depth exceeded at {file}:{line}:{col}: {message}")]
+    #[diagnostic(
+        code("E-PAR-021"),
+        help(
+            "Reduce the number of nested inline markup spans. \
+             slideforge supports a maximum of 64 nesting levels. \
+             Flatten deeply nested formatting like '**_`code`_**' \
+             into adjacent spans where possible."
+        )
+    )]
+    InlineNestingDepthExceeded {
+        /// Source file path.
+        file: String,
+        /// One-based line number.
+        line: u32,
+        /// One-based column number.
+        col: u32,
+        /// Human-readable description (includes depth and maximum).
+        message: String,
+        /// Source code context for miette rendering.
+        #[source_code]
+        src: NamedSource<String>,
+        /// Span pointing at the opening delimiter that exceeded the cap.
+        #[label("nesting depth exceeded here")]
+        at: SourceSpan,
+    },
+
     /// A version declaration error.
     ///
     /// Code: `E-PAR-010`
@@ -449,6 +571,102 @@ impl SyntaxError {
         }
     }
 
+    /// Construct an `UnclosedInlineMarkup` error (E-PAR-019).
+    ///
+    /// `delimiter` is the opening delimiter string (e.g. `"**"`, `"_"`).
+    /// `byte_offset` is the byte position of the opening delimiter within `source_text`.
+    /// `delimiter_len` is the byte length of the delimiter (used for the span).
+    #[must_use]
+    pub fn unclosed_inline_markup(
+        file: String,
+        line: u32,
+        col: u32,
+        delimiter: String,
+        message: String,
+        source_text: String,
+        byte_offset: usize,
+        delimiter_len: usize,
+    ) -> Self {
+        let span_len = delimiter_len.max(1);
+        let src = NamedSource::new(file.as_str(), source_text);
+        Self::UnclosedInlineMarkup {
+            file,
+            line,
+            col,
+            delimiter,
+            message,
+            src,
+            at: SourceSpan::from((byte_offset, span_len)),
+        }
+    }
+
+    /// Construct an `EmptyInlineMarkupSpan` error (E-PAR-020).
+    ///
+    /// `delimiter` is the opening delimiter string.
+    /// `byte_offset` is the byte position of the opening delimiter within `source_text`.
+    /// `delimiter_len` is the byte length of the delimiter.
+    #[must_use]
+    pub fn empty_inline_markup_span(
+        file: String,
+        line: u32,
+        col: u32,
+        delimiter: String,
+        message: String,
+        source_text: String,
+        byte_offset: usize,
+        delimiter_len: usize,
+    ) -> Self {
+        let span_len = delimiter_len.max(1);
+        let src = NamedSource::new(file.as_str(), source_text);
+        Self::EmptyInlineMarkupSpan {
+            file,
+            line,
+            col,
+            delimiter,
+            message,
+            src,
+            at: SourceSpan::from((byte_offset, span_len)),
+        }
+    }
+
+    /// Construct an `InlineNestingDepthExceeded` error (E-PAR-021).
+    ///
+    /// Parallel to [`Self::unclosed_inline_markup`] and [`Self::empty_inline_markup_span`]:
+    /// - `byte_offset` is the absolute byte position of the opening delimiter that
+    ///   triggered the over-cap recursion (or the best-available position when the
+    ///   exact opener is not available at the recursion site).
+    /// - `span_len` is the byte length of the opening delimiter (1 is a safe fallback).
+    ///
+    /// **Accumulation semantics (E-PAR-021 is strict-build-fatal):**
+    /// The parser accumulates this diagnostic (collects all errors rather than halting
+    /// at the first failure, per DIR-077-002 §5), but routes it to the fatal `errors`
+    /// path — NOT to `ParseResult::warnings`. `parse()` returns `Err` in strict
+    /// (default) mode; the build halts with exit 1. "Accumulated" means every error
+    /// in the file is reported at once; it does NOT mean the build succeeds.
+    /// See error-taxonomy.md: "Parse Errors (E-PAR) — Always fatal. Build halts."
+    /// (F-077-P14-001; cross-ref: F-077-P15-001)
+    #[must_use]
+    pub fn inline_nesting_depth_exceeded(
+        file: String,
+        line: u32,
+        col: u32,
+        message: String,
+        source_text: String,
+        byte_offset: usize,
+        span_len: usize,
+    ) -> Self {
+        let span_len = span_len.max(1);
+        let src = NamedSource::new(file.as_str(), source_text);
+        Self::InlineNestingDepthExceeded {
+            file,
+            line,
+            col,
+            message,
+            src,
+            at: SourceSpan::from((byte_offset, span_len)),
+        }
+    }
+
     /// Construct a `VersionError` (E-PAR-010).
     #[must_use]
     pub fn version_error(
@@ -535,6 +753,15 @@ impl SyntaxError {
             }
             | Self::RawKeyword {
                 file, line, col, ..
+            }
+            | Self::UnclosedInlineMarkup {
+                file, line, col, ..
+            }
+            | Self::EmptyInlineMarkupSpan {
+                file, line, col, ..
+            }
+            | Self::InlineNestingDepthExceeded {
+                file, line, col, ..
             } => (file.as_str(), *line, *col),
             Self::UnexpectedEof { file, .. } | Self::VersionError { file, .. } => {
                 (file.as_str(), 0, 0)
@@ -557,6 +784,9 @@ impl SyntaxError {
             Self::VarNameCollision { .. } => 4,
             Self::RawKeyword { .. } => 5,
             Self::VersionError { .. } => 6,
+            Self::UnclosedInlineMarkup { .. } => 7,
+            Self::EmptyInlineMarkupSpan { .. } => 8,
+            Self::InlineNestingDepthExceeded { .. } => 9,
         }
     }
 }
@@ -1005,6 +1235,26 @@ mod tests {
                 "slideforge_version \"2\"\n".to_string(),
                 0,
             ),
+            SyntaxError::unclosed_inline_markup(
+                "a.sf".to_string(),
+                1,
+                1,
+                "**".to_string(),
+                "unclosed bold".to_string(),
+                "**foo\n".to_string(),
+                0,
+                2,
+            ),
+            SyntaxError::empty_inline_markup_span(
+                "a.sf".to_string(),
+                1,
+                1,
+                "**".to_string(),
+                "empty bold span".to_string(),
+                "****\n".to_string(),
+                0,
+                2,
+            ),
         ];
 
         for variant in &variants {
@@ -1068,6 +1318,26 @@ mod tests {
                 true,
                 "slideforge_version \"2\"\n".to_string(),
                 0,
+            ),
+            SyntaxError::unclosed_inline_markup(
+                "a.sf".to_string(),
+                1,
+                1,
+                "**".to_string(),
+                "unclosed bold".to_string(),
+                "**foo\n".to_string(),
+                0,
+                2,
+            ),
+            SyntaxError::empty_inline_markup_span(
+                "a.sf".to_string(),
+                1,
+                1,
+                "**".to_string(),
+                "empty bold span".to_string(),
+                "****\n".to_string(),
+                0,
+                2,
             ),
         ];
 
@@ -1223,6 +1493,26 @@ mod tests {
                 "slideforge_version \"2\"\n".to_string(),
                 0,
             ),
+            SyntaxError::unclosed_inline_markup(
+                "a.sf".to_string(),
+                1,
+                1,
+                "**".to_string(),
+                "unclosed bold".to_string(),
+                "**foo\n".to_string(),
+                0,
+                2,
+            ),
+            SyntaxError::empty_inline_markup_span(
+                "a.sf".to_string(),
+                1,
+                1,
+                "**".to_string(),
+                "empty bold span".to_string(),
+                "****\n".to_string(),
+                0,
+                2,
+            ),
         ];
 
         for variant in &variants {
@@ -1232,6 +1522,108 @@ mod tests {
                 "every E-PAR-* variant must have severity Fatal; failed for: {variant:?}"
             );
         }
+    }
+
+    // ─── E-PAR-019 / E-PAR-020 code-assertion tests ──────────────────────────
+
+    /// E-PAR-019: `UnclosedInlineMarkup` must have code `E-PAR-019`.
+    ///
+    /// Guards the anti-collision contract: this variant must NOT share a code
+    /// with E-PAR-015 (SHAPE parser — "Invalid hex color", CAP-023).
+    #[test]
+    fn test_unclosed_inline_markup_code_e_par_019() {
+        use miette::Diagnostic;
+        let e = SyntaxError::unclosed_inline_markup(
+            "t.sf".to_string(),
+            1,
+            1,
+            "**".to_string(),
+            "unclosed bold".to_string(),
+            "**foo\n".to_string(),
+            0,
+            2,
+        );
+        let code = e
+            .code()
+            .expect("UnclosedInlineMarkup must have a diagnostic code");
+        let code_str = code.to_string();
+        assert!(
+            code_str.contains("E-PAR-019"),
+            "UnclosedInlineMarkup code must be E-PAR-019; got: {code_str}"
+        );
+        // Explicitly assert it is NOT E-PAR-015 (SHAPE code).
+        assert!(
+            !code_str.contains("E-PAR-015"),
+            "UnclosedInlineMarkup must NOT reuse E-PAR-015 (SHAPE code); got: {code_str}"
+        );
+    }
+
+    /// E-PAR-020: `EmptyInlineMarkupSpan` must have code `E-PAR-020`.
+    ///
+    /// Guards the anti-collision contract: this variant must NOT share a code
+    /// with E-PAR-016 (SHAPE parser — "Shape gradient fill not supported", CAP-023).
+    #[test]
+    fn test_empty_inline_markup_span_code_e_par_020() {
+        use miette::Diagnostic;
+        let e = SyntaxError::empty_inline_markup_span(
+            "t.sf".to_string(),
+            1,
+            1,
+            "**".to_string(),
+            "empty bold".to_string(),
+            "****\n".to_string(),
+            0,
+            2,
+        );
+        let code = e
+            .code()
+            .expect("EmptyInlineMarkupSpan must have a diagnostic code");
+        let code_str = code.to_string();
+        assert!(
+            code_str.contains("E-PAR-020"),
+            "EmptyInlineMarkupSpan code must be E-PAR-020; got: {code_str}"
+        );
+        // Explicitly assert it is NOT E-PAR-016 (SHAPE code).
+        assert!(
+            !code_str.contains("E-PAR-016"),
+            "EmptyInlineMarkupSpan must NOT reuse E-PAR-016 (SHAPE code); got: {code_str}"
+        );
+    }
+
+    // ─── E-PAR-021 code-assertion test (F-077-P8-001) ────────────────────────
+
+    /// E-PAR-021: `InlineNestingDepthExceeded` must have code `E-PAR-021`.
+    ///
+    /// Guards the sibling-site contract (TD-VSDD-060): E-PAR-021 must have a
+    /// dedicated `SyntaxError` variant with `.code()` == "E-PAR-021", NOT
+    /// fall through to the `UnexpectedToken` (E-PAR-002) catch-all arm.
+    ///
+    /// The structured `.code()` must be "E-PAR-021" regardless of message text.
+    #[test]
+    fn test_inline_nesting_depth_exceeded_code_e_par_021() {
+        use miette::Diagnostic;
+        let e = SyntaxError::inline_nesting_depth_exceeded(
+            "t.sf".to_string(),
+            1,
+            1,
+            "E-PAR-021: Inline-markup nesting depth exceeded at byte offset 5: depth 64 exceeds maximum of 64. Flatten or reduce nested inline markup.".to_string(),
+            "^_^_^_\n".to_string(),
+            5,
+            1,
+        );
+        let code = e
+            .code()
+            .expect("InlineNestingDepthExceeded must have a diagnostic code");
+        let code_str = code.to_string();
+        assert!(
+            code_str.contains("E-PAR-021"),
+            "InlineNestingDepthExceeded code must be E-PAR-021; got: {code_str}"
+        );
+        // Must NOT fall through to E-PAR-002 (UnexpectedToken catch-all).
+        assert!(
+            !code_str.contains("E-PAR-002"),
+            "InlineNestingDepthExceeded must NOT reuse E-PAR-002; got: {code_str}"
+        );
     }
 
     // ── F-003: VersionError non-fatal → Warning severity ─────────────────────

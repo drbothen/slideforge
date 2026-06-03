@@ -113,8 +113,55 @@ where
     .or(paren)
     .or(list);
 
+    // ── Level 2a: function call  `ident(arg, ...)` ───────────────────────
+    //
+    // A postfix call is an identifier immediately followed by a parenthesised
+    // comma-separated argument list: `ref("slide-1")`, `figref(3)`,
+    // `footnote("see appendix")`. This is the only supported call form in v1
+    // (Q1 decision: no user-defined functions; only built-in pseudo-functions
+    // ref/footnote/figref for inline-markup cross-references and footnotes).
+    //
+    // Grammar: Ident `(` (expr (`,` expr)*)? `)` → Expr::Call
+    //
+    // Placement: postfix/primary level (Level 2a), BEFORE field access (Level 2).
+    // A call `ref("id")` is not a valid target for field access, but the grammar
+    // allows it compositionally: `ref("id").field` would parse as FieldAccess on
+    // a Call, which `eval_expr` would then reject as UnsupportedBuiltinCall.
+    //
+    // The call parser is deliberately NARROW: it matches ONLY when the atom is
+    // an `Expr::Ident` (a named identifier). Arbitrary postfix-call on non-ident
+    // expressions (e.g., `(expr)(args)`) is NOT supported in v1 and is not parsed
+    // here. This matches the Q1 decision: only built-in pseudo-functions, no
+    // first-class functions.
+    let call_args = e
+        .clone()
+        .separated_by(just(Token::Comma))
+        .allow_trailing()
+        .collect::<Vec<_>>()
+        .delimited_by(just(Token::LParen), just(Token::RParen));
+
+    let call_or_atom = atom.then(call_args.or_not()).map(|(base, args_opt)| {
+        match (base, args_opt) {
+            // Ident followed by `(args)` → function call.
+            (Expr::Ident(name), Some(args)) => Expr::Call { func: name, args },
+            // Any non-Call case: return the base expression unchanged.
+            //
+            // This covers two sub-cases that share the same result:
+            //   (a) Ident NOT followed by `(` → normal variable reference (leave as Ident).
+            //   (b) Non-Ident expression followed by `(...)` → unsupported call form;
+            //       silently drop the args and return the base. Prevents confusing parse
+            //       errors; the eval stage can report the semantic issue if needed.
+            //
+            // Clippy note: `None` and `Some(_)` branches are intentionally merged here
+            // because the result is the same (return `other`). The distinction is documented
+            // above for readability, not for behavior — merging avoids the `match_same_arms`
+            // lint without losing clarity.
+            (other, _) => other,
+        }
+    });
+
     // ── Level 2: field access  `ident.field.nested` ───────────────────────
-    let field_access = atom.foldl(
+    let field_access = call_or_atom.foldl(
         just(Token::Dot)
             .ignore_then(select! { Token::Ident(s) => s.to_string() })
             .repeated(),

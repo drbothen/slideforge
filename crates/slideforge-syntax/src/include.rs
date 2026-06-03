@@ -194,6 +194,18 @@ pub fn evaluate_template_path(chunks: &[TemplateChunk], vars: &VarsScope) -> Str
                     out.push_str(val);
                 }
             },
+            // STORY-077: inline markup chunks in @include path context are opaque —
+            // include paths should not contain markup delimiters. Emit a placeholder.
+            TemplateChunk::Bold(_)
+            | TemplateChunk::Italic(_)
+            | TemplateChunk::Code(_)
+            | TemplateChunk::Link { .. }
+            | TemplateChunk::Superscript(_)
+            | TemplateChunk::Subscript(_)
+            | TemplateChunk::Strikethrough(_)
+            | TemplateChunk::Highlight(_) => {
+                out.push_str("{{ <markup> }}");
+            },
         }
     }
     out

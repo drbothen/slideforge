@@ -17,6 +17,11 @@
 //! | E-EVL-008 | `NotIterable`        |
 //! | E-EVL-009 | `LargeDeckWarning`   |
 //! | E-EVL-003 | `DivisionByZero`     | (shares code with TypeMismatch per BC-1.02.001 invariant 3)
+//! | E-EVL-010 | `UnknownSectionType` |
+//! | E-EVL-011 | `UnsupportedBuiltinCall` |
+//! | E-EVL-012 | `FigrefInvalidArg`   |
+//! | E-EVL-013 | `InlineXrefEmptyId`  |
+//! | E-EVL-014 | `FootnoteInvalidArg` |
 
 use std::sync::Arc;
 
@@ -237,6 +242,122 @@ pub enum EvalError {
         span: SourceSpan,
     },
 
+    /// E-EVL-010: An unrecognised section type was encountered during evaluation.
+    ///
+    /// STORY-077 (BC-3.02.002 invariant 3 / DIR-077-001-A Ruling 3): The parser
+    /// stores the section type name verbatim in `SectionNode.kind`. The evaluator
+    /// (`eval_section_nodes`) validates the name against the full `SectionType`
+    /// plugin registry (built-ins per `CANONICAL_MANUAL_SECTION_TYPES` in
+    /// `slideforge-types`: `executive_summary`, `risk_register`, `methodology`,
+    /// `scope`, `approval`, `appendix`, `glossary` — plus any plugin-registered
+    /// types). An unrecognised name is a FATAL eval error.
+    #[error("Unknown section type '{name}'. Known types: [{known_types}]")]
+    #[diagnostic(
+        code("E-EVL-010"),
+        help("Check the section type name for typos, or register a custom SectionType plugin.")
+    )]
+    UnknownSectionType {
+        /// The unrecognised section type name (e.g. `"foobar"`).
+        name: Arc<str>,
+        /// Comma-separated list of known section type names.
+        known_types: String,
+        /// Source location of the `section <type>:` declaration.
+        span: SourceSpan,
+    },
+
+    /// E-EVL-011: A built-in pseudo-function call (`ref`, `footnote`, `figref`) was
+    /// used in a context where it cannot be evaluated to a general `Value`.
+    ///
+    /// `Expr::Call` nodes are recognised in inline-markup context by
+    /// `chunks_to_inline_nodes` (which converts them to `InlineNode::Xref` /
+    /// `Footnote`). When `eval_expr` encounters a `Call` node in any other context
+    /// (e.g., a `vars:` binding, an `@if` condition), it emits this error — there
+    /// is no runtime value to return for a cross-reference function (Q1 decision:
+    /// no user-callable functions in v1).
+    #[error("built-in call `{func}(...)` cannot be used in expression context at {span}")]
+    #[diagnostic(
+        code("E-EVL-011"),
+        help(
+            "Built-in functions ref(), footnote(), and figref() are only valid inside \
+             {{ }} interpolations in section detail:/report: fields"
+        )
+    )]
+    UnsupportedBuiltinCall {
+        /// The function name that was called.
+        func: Arc<str>,
+        /// Source location of the call expression.
+        span: SourceSpan,
+    },
+
+    /// E-EVL-012: `figref()` was called with a missing or non-evaluable argument
+    /// in an inline-markup context.
+    ///
+    /// `figref(N)` requires exactly one argument that evaluates to a numeric or
+    /// string figure number. If no argument is supplied, or the argument cannot be
+    /// evaluated to any value, this error is emitted and no `InlineNode` is produced.
+    ///
+    /// This is an eval-stage error raised by `chunks_to_inline_nodes` (STORY-077,
+    /// DIR-077-002 §5 / OBS-C). It is distinct from [`EvalError::UnsupportedBuiltinCall`]
+    /// (E-EVL-011), which covers `figref()` in non-inline expression contexts.
+    #[error("figref() requires a figure-number argument at {span}")]
+    #[diagnostic(
+        code("E-EVL-012"),
+        help(
+            "Use figref(N) where N is the figure number, e.g. figref(3) inside a \
+             {{ }} interpolation in a section detail:/report: field"
+        )
+    )]
+    FigrefInvalidArg {
+        /// Source location of the `figref()` call expression.
+        span: SourceSpan,
+    },
+
+    /// E-EVL-013: An inline cross-reference `ref("")` was given an empty id string
+    /// in an inline-markup context.
+    ///
+    /// `ref("id")` requires a non-empty string id. An empty string `""` is a fatal
+    /// eval error (DIR-077-002 §5): no `InlineNode::Xref` is produced. The same
+    /// rule applies to the legacy `{{ "" | ref }}` Pipe proxy form.
+    ///
+    /// This is an eval-stage error (E-EVL- prefix) even though the inline xref
+    /// feature originates in the parser — the validation of the resolved id value
+    /// happens at eval time after expression interpolation.
+    #[error("ref() requires a non-empty id string at {span}")]
+    #[diagnostic(
+        code("E-EVL-013"),
+        help(
+            "Provide a non-empty slide or figure id, e.g. ref(\"slide-1\") inside a \
+             {{ }} interpolation in a section detail:/report: field"
+        )
+    )]
+    InlineXrefEmptyId {
+        /// Source location of the `ref("")` or `"" | ref` expression.
+        span: SourceSpan,
+    },
+
+    /// E-EVL-014: `footnote()` was called with a missing or empty argument
+    /// in an inline-markup context.
+    ///
+    /// `footnote("text")` requires exactly one argument that evaluates to a
+    /// non-empty string. If no argument is supplied, or the argument is an empty
+    /// string `""`, this error is emitted and no `InlineNode` is produced.
+    ///
+    /// This is an eval-stage error raised by `chunks_to_inline_nodes` (STORY-077,
+    /// F-077-P9-001). It is distinct from [`EvalError::UnsupportedBuiltinCall`]
+    /// (E-EVL-011), which covers `footnote()` in non-inline expression contexts.
+    #[error("footnote() requires a text argument at {span}")]
+    #[diagnostic(
+        code("E-EVL-014"),
+        help(
+            "footnote(\"your note text\") inside a {{ }} interpolation in a \
+             section detail:/report: field"
+        )
+    )]
+    FootnoteInvalidArg {
+        /// Source location of the `footnote()` call expression.
+        span: SourceSpan,
+    },
+
     /// E-PAR-004: A circular `@include` chain was detected in the merged AST.
     ///
     /// The evaluator runs a DFS over the include graph (built from `@include`
@@ -421,6 +542,27 @@ mod tests {
         };
         let code = e_par004.code().unwrap().to_string();
         assert_eq!(code, "E-PAR-004", "IncludeCycle must have code E-PAR-004");
+
+        let e_evl012 = EvalError::FigrefInvalidArg { span: test_span() };
+        let code = e_evl012.code().unwrap().to_string();
+        assert_eq!(
+            code, "E-EVL-012",
+            "FigrefInvalidArg must have code E-EVL-012 (not E-EVL-003 or E-EVL-011)"
+        );
+
+        let e_evl013 = EvalError::InlineXrefEmptyId { span: test_span() };
+        let code = e_evl013.code().unwrap().to_string();
+        assert_eq!(
+            code, "E-EVL-013",
+            "InlineXrefEmptyId must have code E-EVL-013 (not E-EVL-003)"
+        );
+
+        let e_evl014 = EvalError::FootnoteInvalidArg { span: test_span() };
+        let code = e_evl014.code().unwrap().to_string();
+        assert_eq!(
+            code, "E-EVL-014",
+            "FootnoteInvalidArg must have code E-EVL-014 (F-077-P9-001)"
+        );
     }
 
     #[test]

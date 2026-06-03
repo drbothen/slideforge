@@ -185,6 +185,21 @@ impl DiagnosticSink {
         &self.diagnostics
     }
 
+    /// Return the count of diagnostics with [`ParseSeverity::Error`] or
+    /// [`ParseSeverity::Fatal`] severity.
+    ///
+    /// Unlike [`DiagnosticSink::len`], this excludes [`ParseSeverity::Warning`]
+    /// diagnostics.  Use this when gating on whether a parse produced *errors*
+    /// (as opposed to mere advisories), e.g., to detect whether a sub-pass
+    /// introduced new errors without triggering on pre-existing warnings.
+    #[must_use]
+    pub fn error_and_fatal_count(&self) -> usize {
+        self.severities
+            .iter()
+            .filter(|sev| !matches!(sev, ParseSeverity::Warning))
+            .count()
+    }
+
     /// Serialise all diagnostics to a [`serde_json::Value`] object.
     ///
     /// # Schema
@@ -577,6 +592,47 @@ mod tests {
     }
 
     // ── AC-009: push_with_severity ───────────────────────────────────────────
+
+    // ── F-077-P7-005: error_and_fatal_count() excludes Warning ──────────────
+
+    /// F-077-P7-005: `error_and_fatal_count()` must return 0 when only Warning
+    /// diagnostics are present, so a Warning pushed by `chunks_to_inline_nodes`
+    /// does NOT trigger the section-drop gate in `eval_section_nodes`.
+    #[test]
+    fn test_p7_005_error_and_fatal_count_excludes_warning() {
+        let mut sink = DiagnosticSink::new();
+        // Push a SyntaxError overridden to Warning severity.
+        sink.push_with_severity(make_error(1, 1), ParseSeverity::Warning);
+        assert_eq!(
+            sink.error_and_fatal_count(),
+            0,
+            "error_and_fatal_count must be 0 when only Warning diagnostics are present"
+        );
+        assert_eq!(
+            sink.len(),
+            1,
+            "len() must still reflect all diagnostics including Warnings"
+        );
+    }
+
+    /// F-077-P7-005: `error_and_fatal_count()` must count Error and Fatal diagnostics
+    /// but NOT Warning diagnostics.
+    #[test]
+    fn test_p7_005_error_and_fatal_count_counts_error_and_fatal() {
+        let mut sink = DiagnosticSink::new();
+        // Push one Warning (should not count).
+        sink.push_with_severity(make_error(1, 1), ParseSeverity::Warning);
+        // Push one Error (should count).
+        sink.push_with_severity(make_error(2, 1), ParseSeverity::Error);
+        // Push one Fatal (should count).
+        sink.push_with_severity(make_error(3, 1), ParseSeverity::Fatal);
+        assert_eq!(
+            sink.error_and_fatal_count(),
+            2,
+            "error_and_fatal_count must be 2 (Error + Fatal); Warning excluded"
+        );
+        assert_eq!(sink.len(), 3, "len() must be 3 (all diagnostics)");
+    }
 
     /// AC-009: `push_with_severity` stores the explicit severity rather than
     /// auto-detecting it from the concrete type.

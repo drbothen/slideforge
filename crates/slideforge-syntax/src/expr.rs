@@ -151,6 +151,38 @@ pub enum Expr {
         args: Vec<Expr>,
     },
 
+    /// A function call: `ref("slide-1")`, `footnote("see appendix")`, `figref(3)`.
+    ///
+    /// Used for the built-in cross-reference and footnote pseudo-functions that
+    /// appear inside `{{ ... }}` interpolations:
+    ///   - `{{ ref("id") }}` → `InlineNode::Xref(Arc::from("id"))`
+    ///   - `{{ footnote("text") }}` → `InlineNode::Footnote([Plain("text")])`
+    ///   - `{{ figref(n) }}` → `InlineNode::Xref(Arc::from("fig-N"))`
+    ///
+    /// Unknown calls are evaluated at eval time: `eval_expr` maps them to
+    /// `EvalError::UnsupportedBuiltinCall` (E-EVL-007) and returns `None`
+    /// rather than panicking. This is NOT a user-callable function mechanism —
+    /// no user-defined functions exist in v1 (Q1 decision: deferred to v2).
+    ///
+    /// # Grammar position
+    ///
+    /// Call is a postfix/primary form: an identifier immediately followed by
+    /// a parenthesised comma-separated argument list. It sits at the same level
+    /// as `FieldAccess` (postfix after atom) and is parsed before unary / binary
+    /// operators. Call composes with pipe: `ref("id") | upper` is a valid but
+    /// semantically unusual expression.
+    ///
+    /// # Comemo / Kani compatibility
+    ///
+    /// Derives `Hash + Eq + Clone + Debug` (same as all other `Expr` variants),
+    /// required by ADR-013 and the Kani proof harness.
+    Call {
+        /// The function name (e.g., `"ref"`, `"footnote"`, `"figref"`).
+        func: String,
+        /// The positional arguments.
+        args: Vec<Expr>,
+    },
+
     // ── Error recovery ────────────────────────────────────────────────────
     /// Error sentinel produced by the error-recovery path.
     ///
@@ -206,6 +238,10 @@ mod tests {
             lhs: Box::new(Expr::Ident("name".to_string())),
             filter: "upper".to_string(),
             args: vec![],
+        };
+        let _ = Expr::Call {
+            func: "ref".to_string(),
+            args: vec![Expr::Str("slide-1".to_string())],
         };
         let _ = Expr::Error;
     }

@@ -51,13 +51,13 @@ use std::sync::Arc;
 
 use indexmap::IndexMap;
 use slideforge_syntax::error::ParseSeverity;
-use slideforge_syntax::{BlockItem, DiagnosticSink, Expr, FieldValue, SlideNode, TemplateChunk};
+use slideforge_syntax::{BlockItem, DiagnosticSink, Expr, FieldValue, SlideNode};
 use slideforge_types::{OrderedMap, Slide, SourceSpan, Value};
 
 use crate::config::EvalConfig;
 use crate::env::Env;
 use crate::error::EvalError;
-use crate::eval::eval_expr_to_string;
+use crate::eval::flatten_chunks_to_string;
 use crate::expr::eval_expr;
 
 // ─── eval_for_block ──────────────────────────────────────────────────────────
@@ -252,27 +252,14 @@ pub fn eval_slide_node<S: std::hash::BuildHasher>(
         let field_name: Arc<str> = Arc::from(field_node.name.value().as_str());
         let field_value = match field_node.value.value() {
             FieldValue::Template(chunks) => {
-                // Evaluate each chunk and concatenate into a string.
-                let mut result = String::new();
-                let mut had_error = false;
-                for chunk in chunks {
-                    match chunk {
-                        TemplateChunk::Literal(s) => result.push_str(s),
-                        TemplateChunk::Expr(expr) => match eval_expr_to_string(env, expr, sink) {
-                            Some(s) => result.push_str(s.as_ref()),
-                            None => {
-                                had_error = true;
-                            },
-                        },
-                        TemplateChunk::MathInline(_)
-                        | TemplateChunk::MathDisplay(_)
-                        | TemplateChunk::MathInterp(_) => {
-                            // Math chunks are stored as-is for now (future story).
-                        },
-                    }
-                }
+                // Flatten all chunks — including inline-markup variants introduced in
+                // STORY-077 — to their plain-text content (DIR-077-002 §4 / EC-013).
+                // Site 3 (@for body): brand refs are NOT preserved here — only
+                // the set-rule path (Site 2) preserves brand refs (AC-015).
+                let (result, had_error) =
+                    flatten_chunks_to_string(chunks, env, sink, /*preserve_brand_ref=*/ false);
                 // Error already accumulated in sink; use partial result for error-recovery.
-                let _ = had_error; // consumed above; used only for sink accumulation
+                let _ = had_error;
                 slideforge_types::FieldValue::Literal(Value::Str(Arc::from(result.as_str())))
             },
             FieldValue::Num(n) => slideforge_types::FieldValue::Literal(Value::Int(*n)),

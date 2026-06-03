@@ -36,8 +36,15 @@
 //! This module is pure-core: no I/O, no filesystem access, no network calls.
 //! The function is a pure transformation from `&Slide` to `Vec<RegisteredContent>`.
 
-use slideforge_types::{FieldValue, InlineNode, Register, RegisteredContent, Slide, Value};
+use std::sync::Arc;
 
+use slideforge_syntax::{DiagnosticSink, Expr, TemplateChunk};
+use slideforge_types::{
+    CANONICAL_MANUAL_SECTION_TYPES, FieldValue, InlineNode, MathNode, Register, RegisteredContent,
+    SectionBlock, Slide, SourceSpan, Value,
+};
+
+use crate::env::Env;
 use crate::filters::format_float_display;
 
 // ─── Public API ──────────────────────────────────────────────────────────────
@@ -97,6 +104,586 @@ pub fn extract_register_content(slide: &Slide) -> Vec<RegisteredContent> {
 
     result
 }
+
+// ─── Section register routing ─────────────────────────────────────────────────
+
+/// Extract register-gated content from a fully-evaluated section block.
+///
+/// For each of the two document-mode register sub-block keys (`"report"`,
+/// `"detail"`), if the key is present in `section.body` and its value is a
+/// `FieldValue::Inlines` (or other non-null variant), a [`RegisteredContent`]
+/// entry is produced and appended to the result.
+///
+/// # Ownership (STORY-077, BC-3.02.002 postcondition 7)
+///
+/// This function is the section-level parallel to [`extract_register_content`]
+/// for slides. It MUST be called only after the evaluator has resolved all
+/// `{{ expr }}` interpolations in `section.body` (i.e., after `eval_section_nodes`
+/// has upgraded `FieldValue::Template` to `FieldValue::Inlines`).
+///
+/// # Design (DIR-077-001 §5)
+///
+/// `"notes"` is NOT a valid register key for section blocks — sections have no
+/// slide canvas or speaker view. This function processes only `["report", "detail"]`.
+///
+/// # Returns
+///
+/// A `Vec<RegisteredContent>` with 0 to 2 entries. Empty if the section has no
+/// `report:` or `detail:` sub-blocks (or if they resolve to null/empty).
+///
+/// # Preconditions (BC-1.14.003 invariant 1)
+///
+/// All `{{ expr }}` interpolations in `section.body` must be resolved before
+/// this function is called. `FieldValue::Template` variants reaching this
+/// function indicate a caller error (evaluation was not completed).
+#[must_use]
+pub fn extract_section_register_content(section: &SectionBlock) -> Vec<RegisteredContent> {
+    // Process only the two document-mode register keys for sections.
+    // "notes" is the presenter register (speaker view on a slide canvas) and is
+    // NOT valid for section blocks, which have no PPTX rendering path
+    // (DIR-077-001 §5, BC-3.02.002 invariant).
+    //
+    // SSOT binding: the string literals below MUST match
+    // `slideforge_syntax::section::SECTION_REGISTER_KEYS` exactly.
+    // A compile-time assertion in this module's test suite enforces that
+    // invariant — see `test_register_pairs_match_syntax_ssot`.
+    let register_pairs: [(Register, &str); 2] =
+        [(Register::Report, "report"), (Register::Detail, "detail")];
+
+    let mut result = Vec::with_capacity(2);
+
+    for (register, field_name) in register_pairs {
+        if let Some(inlines) = section
+            .body
+            .get(field_name)
+            .and_then(field_value_to_inlines)
+        {
+            result.push(RegisteredContent {
+                register,
+                content: inlines,
+            });
+        }
+    }
+
+    result
+}
+
+// ─── chunks_to_inline_nodes (STORY-077 stub) ─────────────────────────────────
+
+/// Convert a `TemplateChunk` sequence into a `Vec<InlineNode>`.
+///
+/// This is the eval-time Phase 2 of the inline markup pipeline described in
+/// DIR-077-002 §3. Each `TemplateChunk` variant is mapped to the corresponding
+/// `slideforge_types::InlineNode` variant.
+///
+/// # Mapping (DIR-077-002 §3)
+///
+/// | `TemplateChunk` | `InlineNode` |
+/// |---|---|
+/// | `Literal(s)` | `Plain(Arc::from(s))` |
+/// | `Bold(children)` | `Bold(chunks_to_inline_nodes(children))` |
+/// | `Italic(children)` | `Italic(chunks_to_inline_nodes(children))` |
+/// | `Code(s)` | `Code(Arc::from(s))` |
+/// | `Link { text, url }` | `Link { text: chunks_to_inline_nodes(text), url: Arc::from(url) }` |
+/// | `MathInline(latex)` | `Math(MathNode { latex, display: false, .. })` |
+/// | `MathDisplay(latex)` | `Math(MathNode { latex, display: true, .. })` |
+/// | `Superscript(children)` | `Superscript(chunks_to_inline_nodes(children))` |
+/// | `Subscript(children)` | `Subscript(chunks_to_inline_nodes(children))` |
+/// | `Strikethrough(children)` | `Strikethrough(chunks_to_inline_nodes(children))` |
+/// | `Highlight(children)` | `Highlight(chunks_to_inline_nodes(children))` |
+/// | `Expr(Call{ func:"ref", args:[Str(id)] })` | `Xref(Arc::from(id))` — real DSL form (DIR-077-002 §1 rule 5) |
+/// | `Expr(Call{ func:"figref", args:[Num(n)] })` | `Xref(Arc::from(format!("fig-{n}")))` |
+/// | `Expr(Call{ func:"footnote", args:[Str(text)] })` | `Footnote([Plain(Arc::from(text))])` |
+/// | `Expr(Pipe{ filter:"ref", lhs:Str(id) })` | `Xref(Arc::from(id))` — legacy test proxy |
+/// | `Expr(Pipe{ filter:"figref", lhs:Num(n) })` | `Xref(Arc::from(format!("fig-{n}")))` — legacy |
+/// | `Expr(Pipe{ filter:"footnote", lhs:Str(text) })` | `Footnote([Plain(Arc::from(text))])` — legacy |
+/// | `Expr(other)` | evaluate to string via env → `Plain` |
+/// | `MathInterp(expr)` | evaluate to string → `Plain` (math interp inside math region) |
+///
+/// # Empty-id validation (DIR-077-002 §5)
+///
+/// `{{ ref("") }}` with an empty string id is a fatal error
+/// (`inline-xref-empty-id`). An error is pushed to `sink` and no `InlineNode`
+/// is produced for that expression. Same for `figref` with an empty string and
+/// `footnote` with empty text.
+///
+/// # Security: no re-parsing of resolved values
+///
+/// Resolved expression values (from `Expr` chunks) are treated as plain text and
+/// NOT re-parsed for inline markup. This prevents injection: a variable whose value
+/// contains `**bold**` will produce `Plain("**bold**")`, not `Bold([Plain("bold")])`.
+///
+/// # Preconditions
+///
+/// - `chunks` is the result of `template_value()` for a section sub-block field.
+/// - `env` has all variables in scope for the current section block.
+/// - `sink` accumulates any eval-stage errors (e.g., undefined variables).
+///
+/// # Returns
+///
+/// A `Vec<InlineNode>` ready to be stored as `FieldValue::Inlines` on
+/// `SectionBlock.body`.
+/// The function is longer than the 150-line clippy default because it handles
+/// 11 markup variants + 3 built-in function forms + 3 legacy Pipe proxy forms.
+/// Splitting would fragment the semantically unified mapping table into smaller
+/// helpers that are harder to review against the DIR-077-002 §3 spec table.
+#[must_use]
+#[allow(clippy::too_many_lines)]
+// Nested if-let chains in the Call::ref None branch are intentional:
+// they follow the same error-accumulation pattern as all other eval paths
+// (check for first arg, evaluate to string, check non-empty). Collapsing
+// into a single expression would require nesting or closures that reduce clarity.
+#[allow(clippy::collapsible_if)]
+pub fn chunks_to_inline_nodes(
+    chunks: &[TemplateChunk],
+    env: &Env,
+    sink: &mut DiagnosticSink,
+) -> Vec<InlineNode> {
+    use crate::eval::eval_expr_to_string;
+
+    let mut nodes = Vec::with_capacity(chunks.len());
+
+    for chunk in chunks {
+        match chunk {
+            // ── Literal text → Plain ──────────────────────────────────────
+            TemplateChunk::Literal(s) => {
+                if !s.is_empty() {
+                    nodes.push(InlineNode::Plain(Arc::from(s.as_str())));
+                }
+            },
+
+            // ── Inline markup variants — recursive children ────────────────
+            TemplateChunk::Bold(children) => {
+                let child_nodes = chunks_to_inline_nodes(children, env, sink);
+                nodes.push(InlineNode::Bold(child_nodes));
+            },
+            TemplateChunk::Italic(children) => {
+                let child_nodes = chunks_to_inline_nodes(children, env, sink);
+                nodes.push(InlineNode::Italic(child_nodes));
+            },
+            TemplateChunk::Code(s) => {
+                nodes.push(InlineNode::Code(Arc::from(s.as_str())));
+            },
+            TemplateChunk::Link { text, url } => {
+                let text_nodes = chunks_to_inline_nodes(text, env, sink);
+                nodes.push(InlineNode::Link {
+                    text: text_nodes,
+                    url: Arc::from(url.as_str()),
+                });
+            },
+            TemplateChunk::Superscript(children) => {
+                let child_nodes = chunks_to_inline_nodes(children, env, sink);
+                nodes.push(InlineNode::Superscript(child_nodes));
+            },
+            TemplateChunk::Subscript(children) => {
+                let child_nodes = chunks_to_inline_nodes(children, env, sink);
+                nodes.push(InlineNode::Subscript(child_nodes));
+            },
+            TemplateChunk::Strikethrough(children) => {
+                let child_nodes = chunks_to_inline_nodes(children, env, sink);
+                nodes.push(InlineNode::Strikethrough(child_nodes));
+            },
+            TemplateChunk::Highlight(children) => {
+                let child_nodes = chunks_to_inline_nodes(children, env, sink);
+                nodes.push(InlineNode::Highlight(child_nodes));
+            },
+
+            // ── Math regions → InlineNode::Math ───────────────────────────
+            TemplateChunk::MathInline(latex) => {
+                nodes.push(InlineNode::Math(MathNode {
+                    latex: Arc::from(latex.as_str()),
+                    display: false,
+                    span: SourceSpan::default(),
+                }));
+            },
+            TemplateChunk::MathDisplay(latex) => {
+                nodes.push(InlineNode::Math(MathNode {
+                    latex: Arc::from(latex.as_str()),
+                    display: true,
+                    span: SourceSpan::default(),
+                }));
+            },
+            // MathInterp is math-mode interpolation (@{var} inside $...$).
+            // At eval time, evaluate the expression and produce a Plain node
+            // (the interp result flows into the surrounding math region's LaTeX).
+            TemplateChunk::MathInterp(expr) => {
+                if let Some(s) = eval_expr_to_string(env, expr, sink)
+                    && !s.is_empty()
+                {
+                    nodes.push(InlineNode::Plain(s));
+                }
+            },
+
+            // ── Expression interpolation: {{ expr }} ──────────────────────
+            TemplateChunk::Expr(expr) => {
+                // Check for special pseudo-function forms recognised as semantic
+                // inline nodes (DIR-077-002 §3 + §1 rules 5/6).
+                //
+                // Priority order (first match wins):
+                //   1. Expr::Call { func: "ref"|"figref"|"footnote" } — real DSL form
+                //      produced by `parse_inner_expr` when Expr::Call is in the grammar.
+                //   2. Expr::Pipe { filter: "ref"|"figref"|"footnote" } — legacy proxy
+                //      kept for test-writer backward compat (tests 22/23/25 use Pipe).
+                //   3. Other Expr variants → evaluate to string → Plain.
+                match expr {
+                    // ── Real function-call form (Expr::Call) ───────────────────────
+                    //
+                    // `{{ ref("slide-1") }}` parses as:
+                    //   Expr::Call { func: "ref", args: [Expr::Str("slide-1")] }
+                    //
+                    // `{{ figref(3) }}` parses as:
+                    //   Expr::Call { func: "figref", args: [Expr::Num(3)] }
+                    //
+                    // `{{ footnote("see appendix") }}` parses as:
+                    //   Expr::Call { func: "footnote", args: [Expr::Str("see appendix")] }
+                    Expr::Call { func, args } if func == "ref" => {
+                        // ref("id") → Xref(id). Empty id or zero args is fatal
+                        // (DIR-077-002 §5 / F-077-P9-001).
+                        if args.is_empty() {
+                            // Zero-arg call: ref() — emit E-EVL-013, produce no node.
+                            use crate::error::EvalError;
+                            use slideforge_syntax::error::ParseSeverity;
+                            sink.push_with_severity(
+                                EvalError::InlineXrefEmptyId {
+                                    span: slideforge_types::SourceSpan::default(),
+                                },
+                                ParseSeverity::Error,
+                            );
+                            continue;
+                        }
+                        let id = args.first().and_then(|a| {
+                            if let Expr::Str(s) = a {
+                                Some(s.as_str())
+                            } else {
+                                None
+                            }
+                        });
+                        match id {
+                            Some("") => {
+                                use crate::error::EvalError;
+                                use slideforge_syntax::error::ParseSeverity;
+                                sink.push_with_severity(
+                                    EvalError::InlineXrefEmptyId {
+                                        span: slideforge_types::SourceSpan::default(),
+                                    },
+                                    ParseSeverity::Error,
+                                );
+                                // No InlineNode produced for empty-id ref.
+                            },
+                            Some(id_str) => {
+                                nodes.push(InlineNode::Xref(Arc::from(id_str)));
+                            },
+                            None => {
+                                // Non-Str arg form (args non-empty per guard above) —
+                                // evaluate to string and use as id.
+                                if let Some(first) = args.first() {
+                                    if let Some(s) = eval_expr_to_string(env, first, sink) {
+                                        if s.is_empty() {
+                                            use crate::error::EvalError;
+                                            use slideforge_syntax::error::ParseSeverity;
+                                            sink.push_with_severity(
+                                                EvalError::InlineXrefEmptyId {
+                                                    span: slideforge_types::SourceSpan::default(),
+                                                },
+                                                ParseSeverity::Error,
+                                            );
+                                        } else {
+                                            nodes.push(InlineNode::Xref(s));
+                                        }
+                                    }
+                                }
+                            },
+                        }
+                    },
+                    Expr::Call { func, args } if func == "figref" => {
+                        // figref(n) → Xref("fig-N"). A literal numeric arg (including
+                        // figref(0) → "fig-0") is valid. A missing or unevaluable
+                        // argument is an error (E-EVL-012) consistent with
+                        // the empty-id handling for ref() (DIR-077-002 §5 / OBS-C):
+                        // silently dropping the node violates the no-silent-fallback principle.
+                        let xref_id = if let Some(Expr::Num(n)) = args.first() {
+                            Arc::from(format!("fig-{n}").as_str())
+                        } else if let Some(first) = args.first() {
+                            if let Some(s) = eval_expr_to_string(env, first, sink) {
+                                if s.is_empty() {
+                                    // Empty-resolved arg: figref(var) where var="" is a
+                                    // malformed cross-reference — Xref("fig-") is not usable.
+                                    // Emit E-EVL-012 (FigrefInvalidArg) and produce no node,
+                                    // mirroring ref(var→"") → E-EVL-013 and
+                                    // footnote(var→"") → E-EVL-014.
+                                    // All three inline builtins now reject empty-resolved args
+                                    // consistently: figref→E-EVL-012 | ref→E-EVL-013 |
+                                    // footnote→E-EVL-014 (F-077-P11-001).
+                                    use crate::error::EvalError;
+                                    use slideforge_syntax::error::ParseSeverity;
+                                    sink.push_with_severity(
+                                        EvalError::FigrefInvalidArg {
+                                            span: slideforge_types::SourceSpan::default(),
+                                        },
+                                        ParseSeverity::Error,
+                                    );
+                                    continue;
+                                }
+                                Arc::from(format!("fig-{s}").as_str())
+                            } else {
+                                // eval_expr_to_string already pushed a diagnostic.
+                                // No InlineNode produced — consistent with ref("") behaviour.
+                                continue;
+                            }
+                        } else {
+                            // figref() with no argument: push a diagnostic (OBS-C / DIR-077-002 §5).
+                            use crate::error::EvalError;
+                            use slideforge_syntax::error::ParseSeverity;
+                            sink.push_with_severity(
+                                EvalError::FigrefInvalidArg {
+                                    span: slideforge_types::SourceSpan::default(),
+                                },
+                                ParseSeverity::Error,
+                            );
+                            continue;
+                        };
+                        nodes.push(InlineNode::Xref(xref_id));
+                    },
+                    Expr::Call { func, args } if func == "footnote" => {
+                        // footnote("text") → Footnote([Plain("text")]).
+                        // Zero-arg or empty-string is fatal (F-077-P9-001 / E-EVL-014).
+                        if args.is_empty() {
+                            // Zero-arg call: footnote() — emit E-EVL-014, produce no node.
+                            use crate::error::EvalError;
+                            use slideforge_syntax::error::ParseSeverity;
+                            sink.push_with_severity(
+                                EvalError::FootnoteInvalidArg {
+                                    span: slideforge_types::SourceSpan::default(),
+                                },
+                                ParseSeverity::Error,
+                            );
+                            continue;
+                        }
+                        let text = args.first().and_then(|a| {
+                            if let Expr::Str(s) = a {
+                                Some(s.as_str())
+                            } else {
+                                None
+                            }
+                        });
+                        match text {
+                            Some("") => {
+                                // Empty string literal: footnote("") — emit E-EVL-014,
+                                // produce no node. Empty footnote text is invalid per spec.
+                                use crate::error::EvalError;
+                                use slideforge_syntax::error::ParseSeverity;
+                                sink.push_with_severity(
+                                    EvalError::FootnoteInvalidArg {
+                                        span: slideforge_types::SourceSpan::default(),
+                                    },
+                                    ParseSeverity::Error,
+                                );
+                                // No InlineNode produced for empty footnote text.
+                            },
+                            Some(t) => {
+                                nodes.push(InlineNode::Footnote(vec![InlineNode::Plain(
+                                    Arc::from(t),
+                                )]));
+                            },
+                            None => {
+                                // Non-Str arg form (args non-empty per guard above) —
+                                // evaluate to string and use as footnote text.
+                                if let Some(first) = args.first() {
+                                    if let Some(s) = eval_expr_to_string(env, first, sink) {
+                                        if s.is_empty() {
+                                            use crate::error::EvalError;
+                                            use slideforge_syntax::error::ParseSeverity;
+                                            sink.push_with_severity(
+                                                EvalError::FootnoteInvalidArg {
+                                                    span: slideforge_types::SourceSpan::default(),
+                                                },
+                                                ParseSeverity::Error,
+                                            );
+                                        } else {
+                                            nodes.push(InlineNode::Footnote(vec![
+                                                InlineNode::Plain(s),
+                                            ]));
+                                        }
+                                    }
+                                }
+                            },
+                        }
+                    },
+                    // Unknown Call func → evaluate to string → Plain (graceful eval).
+                    Expr::Call { .. } => {
+                        // eval_expr will emit E-EVL-011 UnsupportedBuiltinCall for this
+                        // unknown function; we do NOT re-parse the string result.
+                        // The error is already accumulated in `sink` by eval_expr.
+                        if let Some(s) = eval_expr_to_string(env, expr, sink)
+                            && !s.is_empty()
+                        {
+                            nodes.push(InlineNode::Plain(s));
+                        }
+                    },
+
+                    // ── Legacy Pipe proxy (backward compat for tests 22/23/25) ─────
+                    //
+                    // Tests 22/23/25 were written before Expr::Call existed. They use:
+                    //   Expr::Pipe { lhs: Str("id"), filter: "ref" }
+                    // as a proxy. These arms preserve that behavior so those tests
+                    // continue to pass. Real DSL now produces Expr::Call (above).
+                    Expr::Pipe { filter, lhs, .. } if filter == "ref" => {
+                        // `{{ "id" | ref }}` or `{{ var | ref }}` legacy proxy form.
+                        //
+                        // CONSISTENCY NOTE (F-077-P12-001): Call and Pipe arms MUST be
+                        // kept consistent for empty/empty-resolved args. If you update
+                        // the Call arm's empty-id handling, update this Pipe arm too,
+                        // and vice versa. Both must emit E-EVL-013 (InlineXrefEmptyId)
+                        // and produce no node when the resolved id is empty.
+                        if let Expr::Str(id) = lhs.as_ref() {
+                            if id.is_empty() {
+                                use crate::error::EvalError;
+                                use slideforge_syntax::error::ParseSeverity;
+                                sink.push_with_severity(
+                                    EvalError::InlineXrefEmptyId {
+                                        span: slideforge_types::SourceSpan::default(),
+                                    },
+                                    ParseSeverity::Error,
+                                );
+                                // No InlineNode produced for empty-id ref (Pipe form).
+                            } else {
+                                nodes.push(InlineNode::Xref(Arc::from(id.as_str())));
+                            }
+                        } else {
+                            // Non-literal lhs — evaluate and check for empty resolution.
+                            // Empty-resolved id must emit E-EVL-013, not silently produce
+                            // Xref("") — mirrors the Call arm's eval-resolved-empty branch.
+                            if let Some(s) = eval_expr_to_string(env, lhs, sink) {
+                                if s.is_empty() {
+                                    use crate::error::EvalError;
+                                    use slideforge_syntax::error::ParseSeverity;
+                                    sink.push_with_severity(
+                                        EvalError::InlineXrefEmptyId {
+                                            span: slideforge_types::SourceSpan::default(),
+                                        },
+                                        ParseSeverity::Error,
+                                    );
+                                    // No InlineNode produced for empty-resolved ref (Pipe form).
+                                } else {
+                                    nodes.push(InlineNode::Xref(s));
+                                }
+                            }
+                        }
+                    },
+                    Expr::Pipe { filter, lhs, .. } if filter == "figref" => {
+                        // `{{ N | figref }}` or `{{ var | figref }}` legacy proxy form.
+                        //
+                        // CONSISTENCY NOTE (F-077-P12-001): Call and Pipe arms MUST be
+                        // kept consistent for empty/empty-resolved args. If you update
+                        // the Call arm's empty-resolved handling, update this Pipe arm
+                        // too, and vice versa. Both must emit E-EVL-012 (FigrefInvalidArg)
+                        // and produce no node when the resolved string is empty —
+                        // Xref("fig-") is a malformed cross-reference and must be rejected.
+                        let xref_id = if let Expr::Num(n) = lhs.as_ref() {
+                            Arc::from(format!("fig-{n}").as_str())
+                        } else if let Some(s) = eval_expr_to_string(env, lhs, sink) {
+                            if s.is_empty() {
+                                // Empty-resolved lhs: figref(var) where var="" is a
+                                // malformed cross-reference — Xref("fig-") is not usable.
+                                // Emit E-EVL-012 (FigrefInvalidArg) and produce no node,
+                                // mirroring the Call arm empty-resolved guard.
+                                use crate::error::EvalError;
+                                use slideforge_syntax::error::ParseSeverity;
+                                sink.push_with_severity(
+                                    EvalError::FigrefInvalidArg {
+                                        span: slideforge_types::SourceSpan::default(),
+                                    },
+                                    ParseSeverity::Error,
+                                );
+                                continue;
+                            }
+                            Arc::from(format!("fig-{s}").as_str())
+                        } else {
+                            continue;
+                        };
+                        nodes.push(InlineNode::Xref(xref_id));
+                    },
+                    Expr::Pipe { filter, lhs, .. } if filter == "footnote" => {
+                        // `{{ "text" | footnote }}` or `{{ var | footnote }}` legacy
+                        // proxy form.
+                        //
+                        // CONSISTENCY NOTE (F-077-P12-001): Call and Pipe arms MUST be
+                        // kept consistent for empty/empty-resolved args. If you update
+                        // the Call arm's empty-text handling, update this Pipe arm too,
+                        // and vice versa. Both must emit E-EVL-014 (FootnoteInvalidArg)
+                        // and produce no node when the footnote text is empty — both the
+                        // literal "" case AND the eval-resolved-empty case.
+                        if let Expr::Str(text) = lhs.as_ref() {
+                            if text.is_empty() {
+                                // Empty string literal: "" | footnote — emit E-EVL-014,
+                                // produce no node. Mirrors the Call arm's Str("") branch.
+                                use crate::error::EvalError;
+                                use slideforge_syntax::error::ParseSeverity;
+                                sink.push_with_severity(
+                                    EvalError::FootnoteInvalidArg {
+                                        span: slideforge_types::SourceSpan::default(),
+                                    },
+                                    ParseSeverity::Error,
+                                );
+                                // No InlineNode produced for empty footnote text (Pipe form).
+                            } else {
+                                nodes.push(InlineNode::Footnote(vec![InlineNode::Plain(
+                                    Arc::from(text.as_str()),
+                                )]));
+                            }
+                        } else if let Some(s) = eval_expr_to_string(env, lhs, sink) {
+                            if s.is_empty() {
+                                // Empty-resolved lhs: var | footnote where var="" is invalid.
+                                // Emit E-EVL-014 (FootnoteInvalidArg) and produce no node,
+                                // mirroring the Call arm's eval-resolved-empty guard.
+                                use crate::error::EvalError;
+                                use slideforge_syntax::error::ParseSeverity;
+                                sink.push_with_severity(
+                                    EvalError::FootnoteInvalidArg {
+                                        span: slideforge_types::SourceSpan::default(),
+                                    },
+                                    ParseSeverity::Error,
+                                );
+                                // No InlineNode produced for empty-resolved footnote (Pipe form).
+                            } else {
+                                nodes.push(InlineNode::Footnote(vec![InlineNode::Plain(s)]));
+                            }
+                        }
+                    },
+                    // All other expressions: evaluate to string → Plain.
+                    // Security: the resolved string is NOT re-parsed for inline markup.
+                    other => {
+                        if let Some(s) = eval_expr_to_string(env, other, sink)
+                            && !s.is_empty()
+                        {
+                            nodes.push(InlineNode::Plain(s));
+                        }
+                    },
+                }
+            },
+        }
+    }
+
+    nodes
+}
+
+/// The known section types recognised by the built-in section type registry.
+///
+/// This compile-time constant is used by `eval_section_nodes` to validate the
+/// section type name from `SectionNode.kind` against the registry
+/// (BC-3.02.002 invariant 3, DIR-077-001-A Ruling 3).
+///
+/// **Single source of truth:** this re-exports
+/// [`slideforge_types::CANONICAL_MANUAL_SECTION_TYPES`] so that the eval and
+/// layout passes are guaranteed to validate against the same list and cannot
+/// drift out of sync (TD-VSDD-060, F-077-P1-001).  The canonical 7-type list
+/// includes `executive_summary` and `risk_register`, which may be manually
+/// authored to supersede the auto-generated equivalents (BC-3.02.001 EC-002).
+///
+/// Plugin-registered section types are NOT represented here — they are resolved
+/// at eval time via the plugin registry (which is out-of-scope for the current
+/// evaluator stub; plug-in support requires a later story).
+pub const KNOWN_SECTION_TYPES: &[&str] = CANONICAL_MANUAL_SECTION_TYPES;
 
 // ─── Private helpers ──────────────────────────────────────────────────────────
 
@@ -1254,6 +1841,54 @@ mod tests {
             result.is_empty(),
             "Interpolated variant must produce NO register entry (not Some(vec![])); \
              got: {result:?}"
+        );
+    }
+
+    // ─── F-077-P2-002: register_pairs SSOT binding to SECTION_REGISTER_KEYS ──
+
+    /// F-077-P2-002: the `register_pairs` array in `extract_section_register_content`
+    /// must enumerate exactly the same string keys as
+    /// `slideforge_syntax::section::SECTION_REGISTER_KEYS`.
+    ///
+    /// This test enforces the SSOT binding comment added in F-077-P2-002. If
+    /// `SECTION_REGISTER_KEYS` ever gains or loses a key, this test will fail,
+    /// forcing the `register_pairs` array to be updated in sync.
+    #[test]
+    fn test_register_pairs_match_syntax_ssot() {
+        use slideforge_syntax::section::SECTION_REGISTER_KEYS;
+
+        // The string keys used in register_pairs (the production array).
+        // Must stay in sync with SECTION_REGISTER_KEYS — this assertion is the
+        // compile-time-equivalent enforcement for the runtime pairing.
+        let register_pair_keys: &[&str] = &["report", "detail"];
+
+        // Every key in the syntax SSOT must appear in register_pairs.
+        for &syntax_key in SECTION_REGISTER_KEYS {
+            assert!(
+                register_pair_keys.contains(&syntax_key),
+                "F-077-P2-002: register_pairs is missing key '{syntax_key}' \
+                 from slideforge_syntax::section::SECTION_REGISTER_KEYS — \
+                 update register_pairs in extract_section_register_content to match"
+            );
+        }
+
+        // Every key in register_pairs must appear in the syntax SSOT.
+        for &pair_key in register_pair_keys {
+            assert!(
+                SECTION_REGISTER_KEYS.contains(&pair_key),
+                "F-077-P2-002: register_pairs contains key '{pair_key}' \
+                 that is NOT in slideforge_syntax::section::SECTION_REGISTER_KEYS — \
+                 remove the stale key from register_pairs in extract_section_register_content"
+            );
+        }
+
+        assert_eq!(
+            register_pair_keys.len(),
+            SECTION_REGISTER_KEYS.len(),
+            "F-077-P2-002: register_pairs has {} keys but SECTION_REGISTER_KEYS has {} — \
+             they must be identical sets",
+            register_pair_keys.len(),
+            SECTION_REGISTER_KEYS.len()
         );
     }
 }

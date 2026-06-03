@@ -29,8 +29,11 @@ use std::sync::Arc;
 
 use indexmap::IndexMap;
 use slideforge_syntax::error::ParseSeverity;
-use slideforge_syntax::{DeckNode, DiagnosticSink, Expr, FieldValue, SetRuleValue, TemplateChunk};
+use slideforge_syntax::{
+    BlockItem, DeckNode, DiagnosticSink, Expr, FieldValue, SetRuleValue, TemplateChunk,
+};
 use slideforge_types::{Deck, DeckMetadata, OrderedMap, SourceSpan, Value};
+use slideforge_types::{RegisteredContent, SectionBlock};
 
 use crate::config::EvalConfig;
 use crate::env::Env;
@@ -39,6 +42,7 @@ use crate::expr::eval_expr;
 use crate::filters::format_float_display;
 use crate::for_eval::eval_block_items;
 use crate::include_cycle::{IncludeGraph, check_include_cycles};
+use crate::register_routing::{KNOWN_SECTION_TYPES, extract_section_register_content};
 
 // ─── eval_expr_to_string ────────────────────────────────────────────────────
 
@@ -91,6 +95,137 @@ pub fn eval_expr_to_string(env: &Env, expr: &Expr, sink: &mut DiagnosticSink) ->
     }
 }
 
+// ─── flatten_chunks_to_string ────────────────────────────────────────────────
+
+/// Detect `Expr::FieldAccess { base: Ident("brand"), field }` — the AC-015
+/// brand-ref pattern that must be preserved as a placeholder in set-rules.
+///
+/// Returns `Some(field_name)` when the expression matches `brand.<field>`,
+/// `None` otherwise.  This is the single canonical detection point shared by
+/// the top-level set-rule arm in `eval_set_rule_value` and the in-markup arm
+/// in `flatten_chunks_to_string` (TD-VSDD-060: one implementation, no copies).
+#[inline]
+fn brand_ref_field(expr: &Expr) -> Option<&str> {
+    if let Expr::FieldAccess { base, field } = expr
+        && let Expr::Ident(base_name) = base.as_ref()
+        && base_name == "brand"
+    {
+        Some(field.as_str())
+    } else {
+        None
+    }
+}
+
+/// Flatten a slice of [`TemplateChunk`]s to their plain-text content.
+///
+/// This is the shared helper used by all three slide-level eval paths
+/// (`eval_field_value_to_value`, `eval_set_rule_value`, and
+/// `eval_slide_node` in `for_eval`) to handle the inline-markup chunk
+/// variants introduced in STORY-077.
+///
+/// Per DIR-077-002 §4 and EC-013, slide-level fields evaluate inline markup
+/// to `Value::Str` by **flattening to the inner text** — structural `InlineNode`
+/// representation is deferred to STORY-081.  The delimiters (`**`, `_`, etc.)
+/// are NOT re-synthesized; only the content is appended.
+///
+/// # `preserve_brand_ref` flag
+///
+/// When `true`, `Expr` chunks that match the AC-015 brand-ref pattern
+/// (`brand.<field>`) emit `"__brand_ref:<field>__"` instead of being evaluated
+/// normally.  This must be `true` for the set-rule path (`eval_set_rule_value`)
+/// and `false` for all other paths (vars block, `@for` slide body).
+///
+/// The brand-ref detection uses [`brand_ref_field`] — a single shared predicate
+/// (TD-VSDD-060) so the top-level and in-markup arms both produce identical
+/// `__brand_ref:<field>__` placeholders for the same brand field.
+///
+/// # Variant handling
+///
+/// | Variant | Flat-text result |
+/// |---------|-----------------|
+/// | `Literal(s)` | append `s` verbatim |
+/// | `Expr(e)` | if `preserve_brand_ref` and `e` is `brand.<f>`: emit `"__brand_ref:<f>__"`; otherwise evaluate `e` via `eval_expr_to_string` |
+/// | `Bold(children)` | recurse into children (threading `preserve_brand_ref`), append their flat text |
+/// | `Italic(children)` | recurse into children, append their flat text |
+/// | `Superscript(children)` | recurse into children, append their flat text |
+/// | `Subscript(children)` | recurse into children, append their flat text |
+/// | `Strikethrough(children)` | recurse into children, append their flat text |
+/// | `Highlight(children)` | recurse into children, append their flat text |
+/// | `Code(s)` | append `s` verbatim (code span content, no delimiters) |
+/// | `Link { text, url }` | recurse into `text`, append flat text (visible label; URL is not appended) |
+/// | `MathInline(_)` / `MathDisplay(_)` / `MathInterp(_)` | unchanged pre-STORY-077 behavior: silently skipped (math rendering is out of scope for this eval layer; STORY-009) |
+///
+/// Returns a `(String, bool)` — the accumulated flat text and a flag that is
+/// `true` if any `Expr` chunk failed to evaluate (propagates `had_error` from
+/// callers).
+pub(crate) fn flatten_chunks_to_string(
+    chunks: &[TemplateChunk],
+    env: &Env,
+    sink: &mut DiagnosticSink,
+    preserve_brand_ref: bool,
+) -> (String, bool) {
+    let mut result = String::new();
+    let mut had_error = false;
+    for chunk in chunks {
+        match chunk {
+            TemplateChunk::Literal(s) => result.push_str(s),
+            TemplateChunk::Expr(expr) => {
+                // AC-015 / F-077-P18-001: when preserve_brand_ref is true,
+                // detect `brand.<field>` and emit the placeholder without
+                // evaluating — identical to the top-level set-rule arm below
+                // (shared via brand_ref_field, TD-VSDD-060).
+                if preserve_brand_ref && let Some(field) = brand_ref_field(expr) {
+                    let _ = write!(result, "__brand_ref:{field}__");
+                    continue;
+                }
+                match eval_expr_to_string(env, expr, sink) {
+                    Some(s) => result.push_str(s.as_ref()),
+                    None => {
+                        had_error = true;
+                    },
+                }
+            },
+            // Inline markup variants (STORY-077): flatten to inner text content.
+            // The structural InlineNode upgrade is deferred to STORY-081; at this
+            // eval layer, slide-level fields produce Value::Str with markup stripped.
+            // preserve_brand_ref is threaded down so brand refs at ANY markup depth
+            // in a set-rule produce the correct placeholder (F-077-P18-001).
+            TemplateChunk::Bold(inner)
+            | TemplateChunk::Italic(inner)
+            | TemplateChunk::Superscript(inner)
+            | TemplateChunk::Subscript(inner)
+            | TemplateChunk::Strikethrough(inner)
+            | TemplateChunk::Highlight(inner) => {
+                let (inner_text, inner_err) =
+                    flatten_chunks_to_string(inner, env, sink, preserve_brand_ref);
+                result.push_str(&inner_text);
+                had_error |= inner_err;
+            },
+            TemplateChunk::Code(s) => {
+                // Code span: verbatim content, no backtick delimiters.
+                result.push_str(s);
+            },
+            TemplateChunk::Link { text, .. } => {
+                // Hyperlink: append the visible label text; discard the URL.
+                // Per "content as flat text" (DIR-077-002 §4): only the displayed
+                // text contributes to the flattened string value.
+                let (link_text, link_err) =
+                    flatten_chunks_to_string(text, env, sink, preserve_brand_ref);
+                result.push_str(&link_text);
+                had_error |= link_err;
+            },
+            // Math chunks are out of scope for this flat-text path.
+            // Pre-STORY-077 behavior: math spans are silently skipped at the
+            // slide-level eval layer (math rendering is a STORY-009 concern).
+            // This is unchanged — do NOT alter math handling here.
+            TemplateChunk::MathInline(_)
+            | TemplateChunk::MathDisplay(_)
+            | TemplateChunk::MathInterp(_) => {},
+        }
+    }
+    (result, had_error)
+}
+
 // ─── eval_deck ──────────────────────────────────────────────────────────────
 
 /// Evaluate a fully-parsed [`DeckNode`] into a semantic [`Deck`] IR.
@@ -107,7 +242,7 @@ pub fn eval_expr_to_string(env: &Env, expr: &Expr, sink: &mut DiagnosticSink) ->
 ///    defaults keyed by `(slide_type, field_name)`.
 /// 3. Applies active variant vars (C02): if `active_variant` is `Some`, pushes
 ///    that variant's `vars` onto the env as a scope frame before slide evaluation.
-/// 4. Evaluates all top-level [`BlockItem`](slideforge_syntax::BlockItem)s
+/// 4. Evaluates all top-level [`BlockItem`]s
 ///    (slides, `@for` blocks, `@if` blocks) in source order.
 /// 5. Returns `None` if any **fatal** diagnostic was pushed; `Some(Deck)` otherwise.
 ///
@@ -238,6 +373,28 @@ pub fn eval_deck_with_variant(
     // ── Step 4: Evaluate all top-level block items ──
     let mut slides = eval_block_items(&mut env, &deck_node.items, &set_rule_defaults, config, sink);
 
+    // ── Step 4c: Evaluate section blocks (STORY-077) ──
+    // For each top-level BlockItem::Section, run eval_section_nodes to:
+    // 1. Validate the section type against the built-in registry (fatal if unknown)
+    // 2. Resolve FieldValue::Template → FieldValue::Inlines for register keys
+    // 3. Extract RegisteredContent entries attached to each section node
+    // This must run BEFORE the has_fatal() gate (Step 5) so that unknown section
+    // types cause early return (BC-3.02.002 invariant 3 / DIR-077-001-A Ruling 3).
+    let mut section_blocks = Vec::new();
+    for item in &deck_node.items {
+        if let BlockItem::Section(spanned_section) = item {
+            let section_node = spanned_section.value();
+            if let Some((mut section_block, register_content)) =
+                eval_section_nodes(section_node, &env, sink)
+            {
+                // Attach extracted register content to the section node.
+                section_block.register_content = register_content;
+                section_blocks.push(section_block);
+            }
+            // If None: fatal error was pushed; has_fatal() gate below handles return.
+        }
+    }
+
     // ── Step 4b: Deck-level slide cap (F-P2-003 / AC-014) ──
     //
     // The per-`@for` cap inside `eval_for_block` handles intra-loop excess.
@@ -307,7 +464,7 @@ pub fn eval_deck_with_variant(
         vars: deck_vars_ordered,
         metadata,
         registers: OrderedMap::new(),
-        section_blocks: vec![],
+        section_blocks,
     })
 }
 
@@ -376,6 +533,223 @@ pub fn eval_deck_with_cycle_check(
     eval_deck_with_variant(deck_node, config, active_variant, sink)
 }
 
+// ─── eval_section_nodes ─────────────────────────────────────────────────────
+
+/// Test-only re-export of the private `eval_section_nodes` function.
+///
+/// Tests in `src/tests/section_register_routing_tests.rs` call this function
+/// via `crate::eval::eval_section_nodes_for_test`. The production path calls
+/// `eval_section_nodes` directly from `eval_deck_with_variant`.
+#[cfg(test)]
+pub(crate) fn eval_section_nodes_for_test(
+    section_node: &slideforge_syntax::SectionNode,
+    env: &Env,
+    sink: &mut slideforge_syntax::DiagnosticSink,
+) -> Option<(SectionBlock, Vec<RegisteredContent>)> {
+    eval_section_nodes(section_node, env, sink)
+}
+
+/// Register keys recognised on section blocks.
+///
+/// This is a **type alias** of [`slideforge_syntax::section::SECTION_REGISTER_KEYS`]
+/// — both the parse-time and eval-time register-key contracts share a single
+/// source of truth. Any divergence between the parser and evaluator becomes a
+/// compile error (the constant is the same slice, not a copy).
+///
+/// Only `"report"` and `"detail"` are valid document-mode register sub-block keys.
+/// `"notes"` is the presenter register (slide canvas only) and has no meaning on a
+/// section block (DIR-077-001 §5).
+const SECTION_EVAL_REGISTER_KEYS: &[&str] = slideforge_syntax::section::SECTION_REGISTER_KEYS;
+
+/// Evaluate a single [`slideforge_syntax::SectionNode`] into a [`SectionBlock`] IR entry.
+///
+/// Validates the section type against the built-in registry, resolves
+/// `FieldValue::Template` to `FieldValue::Inlines` for recognised register keys,
+/// and extracts [`RegisteredContent`] entries. Returns `None` on any fatal error.
+fn eval_section_nodes(
+    section_node: &slideforge_syntax::SectionNode,
+    env: &Env,
+    sink: &mut slideforge_syntax::DiagnosticSink,
+) -> Option<(SectionBlock, Vec<RegisteredContent>)> {
+    use slideforge_types::{FieldValue as TypesFieldValue, InlineNode, OrderedMap};
+
+    // ── Step 1: Validate section type against the built-in registry ──
+    // (BC-3.02.002 invariant 3 / DIR-077-001-A Ruling 3 — eval is the authority)
+    let section_type = section_node.kind.value().as_str();
+    if !KNOWN_SECTION_TYPES.contains(&section_type) {
+        let known_types = KNOWN_SECTION_TYPES.join(", ");
+        sink.push_with_severity(
+            EvalError::UnknownSectionType {
+                name: Arc::from(section_type),
+                known_types,
+                span: SourceSpan::default(),
+            },
+            ParseSeverity::Fatal,
+        );
+        return None;
+    }
+
+    // ── Step 2: Process each field in the section body ──
+    // For recognised register keys ("report", "detail"), resolve
+    // FieldValue::Template → FieldValue::Inlines (BC-3.02.002 postcondition 8).
+    // For unrecognised keys, silently skip — the parse-time warning was already
+    // emitted by STORY-078's section_block_parser (DIR-077-001-A Ruling 2 / AC-EC-001).
+
+    let mut body: OrderedMap<Arc<str>, TypesFieldValue> = OrderedMap::new();
+
+    for field_node in &section_node.fields {
+        let key = field_node.name.value().as_str();
+
+        // Skip unrecognised keys silently (parse-time warning already emitted).
+        if !SECTION_EVAL_REGISTER_KEYS.contains(&key) {
+            continue;
+        }
+
+        // Resolve FieldValue::Template to FieldValue::Inlines for register keys.
+        let resolved = match field_node.value.value() {
+            slideforge_syntax::FieldValue::Template(chunks) => {
+                // STORY-077: use chunks_to_inline_nodes for the full inline markup pipeline.
+                // This converts all TemplateChunk variants (Literal, Expr, Bold, Italic,
+                // Code, Link, Superscript, Subscript, Strikethrough, Highlight, Math*)
+                // to their InlineNode counterparts per DIR-077-002 §3.
+                //
+                // Error detection: count Error+Fatal diagnostics before and after
+                // (F-077-P7-005). Using error_and_fatal_count() rather than errors().len()
+                // ensures that pre-existing Warning-severity diagnostics (e.g. a missing-
+                // version advisory pushed before eval) do NOT count as errors here, and
+                // that a new Warning pushed by chunks_to_inline_nodes does NOT incorrectly
+                // drop the section. Only newly added Error or Fatal diagnostics trigger
+                // the guard.
+                let error_count_before = sink.error_and_fatal_count();
+
+                let inline_nodes =
+                    crate::register_routing::chunks_to_inline_nodes(chunks, env, sink);
+
+                let had_error = sink.error_and_fatal_count() > error_count_before;
+                if had_error {
+                    return None;
+                }
+                TypesFieldValue::Inlines(inline_nodes)
+            },
+            // Scalar literals: coerce to Inlines(Plain) for register fields.
+            slideforge_syntax::FieldValue::Num(n) => {
+                TypesFieldValue::Inlines(vec![InlineNode::Plain(Arc::from(n.to_string().as_str()))])
+            },
+            slideforge_syntax::FieldValue::Bool(b) => {
+                TypesFieldValue::Inlines(vec![InlineNode::Plain(Arc::from(if *b {
+                    "true"
+                } else {
+                    "false"
+                }))])
+            },
+            slideforge_syntax::FieldValue::Float(f) => {
+                TypesFieldValue::Inlines(vec![InlineNode::Plain(Arc::from(
+                    format_float_display(f.0).as_str(),
+                ))])
+            },
+            slideforge_syntax::FieldValue::Ident(name) => {
+                if let Some(value) = env.lookup(name) {
+                    let text = match value {
+                        slideforge_types::Value::Str(s) => s.clone(),
+                        slideforge_types::Value::Int(n) => Arc::from(n.to_string().as_str()),
+                        slideforge_types::Value::Bool(b) => {
+                            Arc::from(if *b { "true" } else { "false" })
+                        },
+                        slideforge_types::Value::Float(f) => {
+                            Arc::from(format_float_display(f.0).as_str())
+                        },
+                        slideforge_types::Value::Null => Arc::from(""),
+                        _ => {
+                            // List/Map — not valid for register content.
+                            //
+                            // Register sub-block fields (`detail:`, `report:`) carry prose
+                            // destined for a writing register. List and Map values cannot be
+                            // rendered as prose and are therefore dropped.
+                            //
+                            // The drop is OBSERVABLE via tracing::warn! (not a silent drop)
+                            // to match the slide-path sibling in `field_value_to_inlines`
+                            // (register_routing.rs) which emits the identical pattern per
+                            // F-035-P5-003. Register fields are text-only per BC-1.14.001/002/003.
+                            //
+                            // F-077-P4-001: before this fix this was a bare `continue` with
+                            // no diagnostic signal — violating the silent-failure ban.
+                            tracing::warn!(
+                                section = section_type,
+                                field = key,
+                                "eval_section_nodes: register sub-block field resolved to \
+                                 List or Map — register fields are text-only \
+                                 (BC-1.14.001/002/003); field dropped, no register entry \
+                                 produced (F-077-P4-001)"
+                            );
+                            continue;
+                        },
+                    };
+                    TypesFieldValue::Inlines(vec![InlineNode::Plain(text)])
+                } else {
+                    let scope_list = env
+                        .all_names()
+                        .iter()
+                        .map(|n| n.as_ref().to_owned())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    sink.push_with_severity(
+                        EvalError::UndefinedVariable {
+                            name: Arc::from(name.as_str()),
+                            scope_list,
+                            span: SourceSpan::default(),
+                        },
+                        ParseSeverity::Error,
+                    );
+                    return None;
+                }
+            },
+            slideforge_syntax::FieldValue::Shape(_) => {
+                // OBS-P8-B analysis: FieldValue::Shape is STRUCTURALLY UNREACHABLE
+                // in the section register-key evaluation path. The section sub-block
+                // field parser (`section_value_parser` in parser/section.rs:87) is
+                // defined as `template_val.or(other_val)` where `other_val` is a
+                // `select!` over IntLit/FloatLit/BoolLit/Ident only — no Shape path.
+                // Shape is produced exclusively by `shape_block()` in control_flow.rs,
+                // which is wired only into slide body field parsing (not section parsing).
+                //
+                // Proof: `section_value_parser` (parser/section.rs:87) composes only
+                // `template_val` and the scalar `other_val` select — no `shape_block`
+                // combinator is present. Therefore this arm can only be reached via
+                // direct construction in tests — NOT via the parser.
+                //
+                // The `#[non_exhaustive]` on FieldValue means we must still handle
+                // it, but a silent `continue` without a diagnostic violates the
+                // no-silent-failure ban (F-077-P4-001). Per the adversary's direction
+                // (OBS-P8-B), we keep this arm explicit but document the impossibility
+                // clearly rather than adding a tracing::warn! for an unreachable path.
+                continue;
+            },
+            slideforge_syntax::FieldValue::Error => {
+                // Error sentinel produced by error-recovery in the parser; the parser
+                // already emitted a diagnostic for this field. Drop silently to avoid
+                // double-reporting (the SyntaxError is already in the DiagnosticSink).
+                continue;
+            },
+        };
+
+        body.insert(Arc::from(key), resolved);
+    }
+
+    // ── Step 3: Build the SectionBlock ──
+    let section_block = SectionBlock {
+        name: Arc::from(section_type),
+        body,
+        register_content: vec![], // populated below
+        span: slideforge_types::SourceSpan::default(),
+    };
+
+    // ── Step 4: Extract register content via extract_section_register_content ──
+    // (BC-3.02.002 postcondition 7 / BC-1.14.003 invariant 1)
+    let register_content = extract_section_register_content(&section_block);
+
+    Some((section_block, register_content))
+}
+
 /// Evaluate a [`slideforge_syntax::FieldValue`] into a [`Value`] in the
 /// context of a given [`Env`].
 ///
@@ -387,24 +761,12 @@ fn eval_field_value_to_value(
 ) -> Option<Value> {
     match field_value {
         FieldValue::Template(chunks) => {
-            let mut result = String::new();
-            let mut had_error = false;
-            for chunk in chunks {
-                match chunk {
-                    TemplateChunk::Literal(s) => result.push_str(s),
-                    TemplateChunk::Expr(expr) => match eval_expr_to_string(env, expr, sink) {
-                        Some(s) => result.push_str(s.as_ref()),
-                        None => {
-                            had_error = true;
-                        },
-                    },
-                    TemplateChunk::MathInline(_)
-                    | TemplateChunk::MathDisplay(_)
-                    | TemplateChunk::MathInterp(_) => {
-                        // Math chunks are stored as-is for now.
-                    },
-                }
-            }
+            // Flatten all chunks — including inline-markup variants introduced in
+            // STORY-077 — to their plain-text content (DIR-077-002 §4 / EC-013).
+            // Site 1 (vars block): brand refs are NOT preserved here — only the
+            // set-rule path (Site 2) preserves brand refs (AC-015).
+            let (result, had_error) =
+                flatten_chunks_to_string(chunks, env, sink, /*preserve_brand_ref=*/ false);
             if had_error {
                 None
             } else {
@@ -464,13 +826,11 @@ fn eval_set_rule_value(
                     TemplateChunk::Expr(expr) => {
                         // AC-015: brand.* references are preserved as placeholders.
                         // The evaluator cannot resolve `brand` at this stage
-                        // (brand loading happens after eval). Detect the pattern
-                        // `Expr::FieldAccess { base: Ident("brand"), field }` and
-                        // produce `"__brand_ref:<field>__"` placeholder.
-                        if let Expr::FieldAccess { base, field } = expr
-                            && let Expr::Ident(base_name) = base.as_ref()
-                            && base_name == "brand"
-                        {
+                        // (brand loading happens after eval). Use brand_ref_field
+                        // (shared predicate, TD-VSDD-060) so this arm and the
+                        // in-markup arm (flatten_chunks_to_string with
+                        // preserve_brand_ref=true) produce identical placeholders.
+                        if let Some(field) = brand_ref_field(expr) {
                             // Use write! to avoid extra allocation (clippy::format_push_string).
                             let _ = write!(result, "__brand_ref:{field}__");
                             continue;
@@ -482,10 +842,19 @@ fn eval_set_rule_value(
                             },
                         }
                     },
-                    TemplateChunk::MathInline(_)
-                    | TemplateChunk::MathDisplay(_)
-                    | TemplateChunk::MathInterp(_) => {
-                        // Math chunks are stored as-is for now.
+                    // Inline markup variants (STORY-077): flatten to inner text content.
+                    // F-077-P18-001: preserve_brand_ref=true is threaded through so
+                    // brand refs wrapped in any markup level emit the placeholder
+                    // (AC-015). Math chunks are silently skipped — unchanged behavior.
+                    _ => {
+                        let (inner_text, inner_err) = flatten_chunks_to_string(
+                            std::slice::from_ref(chunk),
+                            env,
+                            sink,
+                            /*preserve_brand_ref=*/ true,
+                        );
+                        result.push_str(&inner_text);
+                        had_error |= inner_err;
                     },
                 }
             }
@@ -535,8 +904,8 @@ mod tests {
     use ordered_float::OrderedFloat;
     use slideforge_syntax::span::Span;
     use slideforge_syntax::{
-        BlockItem, DeckNode, DiagnosticSink, Expr, FieldNode, FieldValue, ForNode, SlideNode,
-        Spanned, TemplateChunk, VarsBlock,
+        BlockItem, DeckNode, DiagnosticSink, Expr, FieldNode, FieldValue, ForNode, SetRuleValue,
+        SlideNode, Spanned, TemplateChunk, VarsBlock,
     };
     use slideforge_types::Value;
 
@@ -2145,6 +2514,283 @@ mod tests {
         assert!(
             !notes_text.contains("quarter"),
             "variable name 'quarter' must not appear literally in register_content; got: {notes_text}"
+        );
+    }
+
+    // ─── F-077-P17-001: slide-level inline-markup flat-text preservation ──────
+    //
+    // RED GATE tests — these MUST fail before the fix and PASS after.
+    // Spec basis: DIR-077-002 §4 / EC-013 — inline markup at slide-level is
+    // flattened to its INNER TEXT (not dropped, not left as markup syntax).
+
+    /// Site 1: eval_field_value_to_value — `title "**Important**"` must evaluate
+    /// to `Value::Str("Important")`, NOT `Value::Str("")` (the current silent drop).
+    #[test]
+    fn test_f077_p17_001_field_value_bold_text_preserved_as_flat_text() {
+        let env = Env::new(IndexMap::new());
+        let mut sink = DiagnosticSink::new();
+
+        // Simulate: title "**Important**"
+        // Parser emits: TemplateChunk::Bold(vec![TemplateChunk::Literal("Important")])
+        let field_value =
+            FieldValue::Template(vec![TemplateChunk::Bold(vec![TemplateChunk::Literal(
+                "Important".to_string(),
+            )])]);
+
+        let result = eval_field_value_to_value(&field_value, &env, &mut sink);
+
+        assert!(
+            sink.is_empty(),
+            "no diagnostics expected for valid bold field value; got: {:?}",
+            sink.errors()
+        );
+        assert_eq!(
+            result,
+            Some(Value::Str(Arc::from("Important"))),
+            "Bold inner text must be preserved as flat text; expected Some(Str(\"Important\")), got: {result:?}"
+        );
+    }
+
+    /// Site 1 (mixed): `title "Hello **world**"` — literal prefix + bold →
+    /// `Value::Str("Hello world")` (text preserved, no double-star syntax).
+    #[test]
+    fn test_f077_p17_001_field_value_mixed_literal_and_bold_flat_text() {
+        let env = Env::new(IndexMap::new());
+        let mut sink = DiagnosticSink::new();
+
+        // Simulate: title "Hello **world**"
+        // Parser emits: [Literal("Hello "), Bold([Literal("world")])]
+        let field_value = FieldValue::Template(vec![
+            TemplateChunk::Literal("Hello ".to_string()),
+            TemplateChunk::Bold(vec![TemplateChunk::Literal("world".to_string())]),
+        ]);
+
+        let result = eval_field_value_to_value(&field_value, &env, &mut sink);
+
+        assert!(
+            sink.is_empty(),
+            "no diagnostics expected; got: {:?}",
+            sink.errors()
+        );
+        assert_eq!(
+            result,
+            Some(Value::Str(Arc::from("Hello world"))),
+            "Mixed literal + bold must flatten to 'Hello world'; got: {result:?}"
+        );
+    }
+
+    /// Site 2: eval_set_rule_value — `@set` rule with inline markup preserves text.
+    /// `set content: title "**Bold default**"` must evaluate to
+    /// `Value::Str("Bold default")`.
+    #[test]
+    fn test_f077_p17_001_set_rule_value_bold_text_preserved_as_flat_text() {
+        let env = Env::new(IndexMap::new());
+        let mut sink = DiagnosticSink::new();
+
+        // Simulate: set content: title "**Bold default**"
+        let set_rule_value =
+            SetRuleValue::Template(vec![TemplateChunk::Bold(vec![TemplateChunk::Literal(
+                "Bold default".to_string(),
+            )])]);
+
+        let result = eval_set_rule_value(&set_rule_value, &env, &mut sink);
+
+        assert!(
+            sink.is_empty(),
+            "no diagnostics expected for valid set-rule bold value; got: {:?}",
+            sink.errors()
+        );
+        assert_eq!(
+            result,
+            Some(Value::Str(Arc::from("Bold default"))),
+            "Bold inner text in set-rule must be preserved as flat text; expected Some(Str(\"Bold default\")), got: {result:?}"
+        );
+    }
+
+    /// Site 3 (@for body): eval_slide_node in a @for body — slide field with
+    /// inline markup must preserve the inner text.
+    /// A slide with `title "**Loop title**"` evaluated in a @for context
+    /// must produce a `Slide` whose `title` field is `Value::Str("Loop title")`.
+    #[test]
+    fn test_f077_p17_001_for_body_slide_field_bold_preserved_as_flat_text() {
+        use crate::for_eval::eval_slide_node;
+
+        let env = Env::new(IndexMap::new());
+        let mut sink = DiagnosticSink::new();
+        let defaults: std::collections::HashMap<(Arc<str>, Arc<str>), Value> =
+            std::collections::HashMap::new();
+
+        // Build a slide node: slide content: title "**Loop title**"
+        let title_field = FieldNode {
+            name: Spanned::new("title".to_string(), dummy_span()),
+            value: Spanned::new(
+                FieldValue::Template(vec![TemplateChunk::Bold(vec![TemplateChunk::Literal(
+                    "Loop title".to_string(),
+                )])]),
+                dummy_span(),
+            ),
+        };
+        let slide_node = SlideNode {
+            kind: Spanned::new("content".to_string(), dummy_span()),
+            tags: vec![],
+            fields: vec![title_field],
+            inline_items: vec![],
+        };
+
+        let slide = eval_slide_node(&env, &slide_node, &defaults, &mut sink);
+
+        assert!(
+            sink.is_empty(),
+            "no diagnostics expected for valid @for-body slide with bold title; got: {:?}",
+            sink.errors()
+        );
+        let slide = slide.expect("eval_slide_node must return Some for valid slide");
+        let title_val = slide
+            .fields
+            .get("title")
+            .expect("slide must have a 'title' field");
+
+        assert_eq!(
+            *title_val,
+            slideforge_types::FieldValue::Literal(Value::Str(Arc::from("Loop title"))),
+            "@for-body slide bold title must flatten to 'Loop title'; got: {title_val:?}"
+        );
+    }
+
+    // ─── F-077-P18-001: markup-wrapped brand-ref in set-rules ────────────────
+
+    /// F-077-P18-001 (RED GATE): A brand-ref wrapped in bold markup inside a
+    /// set-rule must preserve the `__brand_ref:<field>__` placeholder, not
+    /// produce an `UndefinedVariable` error.
+    ///
+    /// `set content: company "**{{ brand.company }}**"` parses to:
+    /// `Template([Bold([Expr(FieldAccess{brand.company})])])`
+    ///
+    /// Before the fix: routes through `flatten_chunks_to_string` (no brand-ref
+    /// preservation) → `eval_expr_to_string` → `UndefinedVariable{name:"brand"}`.
+    /// After the fix: preserves `"**__brand_ref:company__**"` — no error, sink
+    /// empty for the brand-ref, placeholder present.
+    ///
+    /// Per AC-015 — the KEY assertion is NO error and the `__brand_ref:company__`
+    /// substring is present in the result.
+    #[test]
+    fn test_f077_p18_001_set_rule_markup_wrapped_brand_ref_preserved() {
+        let env = Env::new(IndexMap::new());
+        let mut sink = DiagnosticSink::new();
+
+        // Simulate: set content: company "**{{ brand.company }}**"
+        // Parser emits: Template([Bold([Expr(FieldAccess{base: Ident("brand"), field: "company"})])])
+        let set_rule_value =
+            SetRuleValue::Template(vec![TemplateChunk::Bold(vec![TemplateChunk::Expr(
+                Expr::FieldAccess {
+                    base: Box::new(Expr::Ident("brand".to_string())),
+                    field: "company".to_string(),
+                },
+            )])]);
+
+        let result = eval_set_rule_value(&set_rule_value, &env, &mut sink);
+
+        // Must not produce an error — brand refs inside markup in set-rules
+        // are preserved, not resolved.
+        assert!(
+            sink.is_empty(),
+            "markup-wrapped brand-ref in set-rule must not push any diagnostic; got: {:?}",
+            sink.errors()
+        );
+
+        // Must return Some — not fail.
+        assert!(
+            result.is_some(),
+            "markup-wrapped brand-ref in set-rule must return Some(Value::Str(...)); got None"
+        );
+
+        // The __brand_ref:company__ placeholder must be present in the result.
+        // The exact wrapper text (from Bold flattening) is "__brand_ref:company__"
+        // (markup delimiters are stripped by flatten-to-string, same as for literals).
+        match result {
+            Some(Value::Str(ref s)) => {
+                assert!(
+                    s.contains("__brand_ref:company__"),
+                    "result must contain '__brand_ref:company__' placeholder; got: {s:?}"
+                );
+            },
+            other => panic!(
+                "result must be Some(Value::Str(...)) containing brand-ref placeholder; got: {other:?}"
+            ),
+        }
+    }
+
+    /// F-077-P18-001 regression guard: brand-ref nested TWO markup levels deep
+    /// (e.g. `**_{{ brand.product }}_**`) must also preserve the placeholder.
+    ///
+    /// Parser emits: `Template([Bold([Italic([Expr(FieldAccess{brand.product})])])])`
+    #[test]
+    fn test_f077_p18_001_set_rule_doubly_nested_markup_brand_ref_preserved() {
+        let env = Env::new(IndexMap::new());
+        let mut sink = DiagnosticSink::new();
+
+        // Simulate: set content: product "**_{{ brand.product }}_**"
+        // Parser emits: Template([Bold([Italic([Expr(FieldAccess{brand.product})])])])
+        let set_rule_value =
+            SetRuleValue::Template(vec![TemplateChunk::Bold(vec![TemplateChunk::Italic(
+                vec![TemplateChunk::Expr(Expr::FieldAccess {
+                    base: Box::new(Expr::Ident("brand".to_string())),
+                    field: "product".to_string(),
+                })],
+            )])]);
+
+        let result = eval_set_rule_value(&set_rule_value, &env, &mut sink);
+
+        assert!(
+            sink.is_empty(),
+            "doubly-nested markup brand-ref in set-rule must not push diagnostic; got: {:?}",
+            sink.errors()
+        );
+        assert!(
+            result.is_some(),
+            "doubly-nested markup brand-ref in set-rule must return Some; got None"
+        );
+        match result {
+            Some(Value::Str(ref s)) => {
+                assert!(
+                    s.contains("__brand_ref:product__"),
+                    "result must contain '__brand_ref:product__'; got: {s:?}"
+                );
+            },
+            other => panic!("result must be Some(Value::Str(...)); got: {other:?}"),
+        }
+    }
+
+    /// F-077-P18-001 Site 1 guard: a vars-block field value with a markup-wrapped
+    /// brand-ref (e.g. `company: "**{{ brand.company }}**"` in `vars:`) MUST
+    /// still error (Site 1 does NOT preserve brand refs — unchanged behavior).
+    ///
+    /// This test ensures the fix does NOT accidentally add brand-ref preservation
+    /// to `eval_field_value_to_value` (Site 1).
+    #[test]
+    fn test_f077_p18_001_site1_vars_block_markup_wrapped_brand_ref_still_errors() {
+        let env = Env::new(IndexMap::new());
+        let mut sink = DiagnosticSink::new();
+
+        // Site 1: FieldValue (vars block), not SetRuleValue.
+        let field_value =
+            FieldValue::Template(vec![TemplateChunk::Bold(vec![TemplateChunk::Expr(
+                Expr::FieldAccess {
+                    base: Box::new(Expr::Ident("brand".to_string())),
+                    field: "company".to_string(),
+                },
+            )])]);
+
+        let result = eval_field_value_to_value(&field_value, &env, &mut sink);
+
+        // Site 1 does NOT preserve brand refs — must error (UndefinedVariable).
+        assert!(
+            result.is_none(),
+            "vars-block markup-wrapped brand-ref must fail (Site 1 has no brand-ref preservation); got: {result:?}"
+        );
+        assert!(
+            !sink.is_empty(),
+            "vars-block markup-wrapped brand-ref must push a diagnostic; sink was empty"
         );
     }
 }

@@ -203,6 +203,25 @@ pub fn eval_expr(env: &Env, expr: &Expr, sink: &mut DiagnosticSink) -> Option<Va
             }
         },
 
+        // ── Function call (built-in pseudo-functions: ref, footnote, figref) ──
+        //
+        // `Expr::Call` is produced by the parser for `{{ ref("id") }}`,
+        // `{{ footnote("text") }}`, and `{{ figref(N) }}` forms. At eval time
+        // these are recognised and converted to `InlineNode` by
+        // `chunks_to_inline_nodes` in `slideforge-eval::register_routing`.
+        //
+        // When `eval_expr` is called on a `Call` node (e.g., from a vars: binding
+        // or a non-inline-markup context), there is no general runtime value to
+        // return — built-in pseudo-functions are not user-callable in v1 (Q1 decision).
+        // Emit E-EVL-011 UnsupportedBuiltinCall and return None.
+        Expr::Call { func, args: _ } => push_error(
+            sink,
+            EvalError::UnsupportedBuiltinCall {
+                func: Arc::from(func.as_str()),
+                span,
+            },
+        ),
+
         // ── Error recovery sentinel ─────────────────────────────────────────
         Expr::Error => None,
     }

@@ -42,6 +42,14 @@ pub mod variants;
 #[cfg(test)]
 mod section_tests;
 
+// STORY-077 Red Gate: failing test suite for inline markup parser extension.
+// Tests verify that `template_value()` produces structural TemplateChunk variants
+// (Bold, Italic, Code, Link, Superscript, Subscript, Strikethrough, Highlight)
+// for the corresponding DSL inline markup syntax forms.
+// Currently fails because template_value() does not yet recognize these delimiters.
+#[cfg(test)]
+mod template_inline_markup_tests;
+
 use std::sync::Arc;
 
 use chumsky::{Parser, prelude::SimpleSpan};
@@ -54,6 +62,7 @@ use crate::{
 use chumsky::input::Input as _;
 
 use self::deck::deck_parser;
+use self::template::parse_routing_tag;
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
@@ -161,32 +170,18 @@ pub fn parse(
         .map(|e| lex_error_to_syntax_error(e, src))
         .collect();
 
-    // Phase 3: Pre-parse version gate (BC-1.13.001 / AC-002 fail-fast).
-    //
-    // Scan the token stream for `slideforge_version` before running the full
-    // chumsky parser. A forward-incompatible version (major != 1) is a fatal
-    // error — return immediately without running the chumsky parser.
-    //
-    // Token layout:  Ident("slideforge_version")  StringLit(ver)  Newline
+    // Phase 3: pre-parse version gate — fail-fast on incompatible version.
     let version_gate_result = pre_parse_version_gate(src, &tokens, &file_path, &mut errors);
-
     if version_gate_result == VersionGateResult::FatalVersionError {
-        // AC-002: a forward-incompatible version was detected.  No further
-        // parsing occurs (BC-1.13.001 postcondition 1).
         return Err(errors);
     }
 
     // Phase 4: run the chumsky parser over the token stream.
-    // Convert lexer spans (Range<usize>) to chumsky SimpleSpan.
-    // We build an owned vec of (Token, SimpleSpan) and parse from a slice of it.
     let spanned_tokens: Vec<(Token, SimpleSpan)> = tokens
         .into_iter()
         .map(|(t, s)| (t, SimpleSpan::from(s)))
         .collect();
-
     let eoi = SimpleSpan::from(src.len()..src.len());
-    // For &[(Token, SimpleSpan)], MaybeToken is &(Token, SimpleSpan).
-    // The map closure receives &(Token, SimpleSpan) and must return (&Token, &SimpleSpan).
     let input = spanned_tokens
         .as_slice()
         .map(eoi, |(t, s): &(Token, SimpleSpan)| (t, s));
@@ -194,37 +189,8 @@ pub fn parse(
     let (deck_opt, parse_errors) = deck_parser(file_id).parse(input).into_output_errors();
 
     // Phase 5: convert chumsky Rich errors to SyntaxError.
-    //
-    // Two categories are distinguished:
-    //
-    // A) `W-PAR-*` prefixed messages — non-fatal parse-time warnings emitted by
-    //    `section_block_parser` (and future warning-emitting parsers). These are
-    //    accumulated in `parse_time_warnings` and later merged into
-    //    `ParseResult::warnings`, allowing the parse to succeed.
-    //
-    // B) All other messages (E-PAR-*, unexpected tokens, indent errors) — fatal;
-    //    accumulated in `errors` and cause an `Err` return.
-    //
-    // When the found token is `Indent(n)`, classify as IndentError (E-PAR-001)
-    // since it means the parser encountered an unexpected indentation level.
-    //
-    // Real tab errors are caught by the lexer (LexError::TabIndentation).
-    // Misaligned dedents are caught by the lexer (LexError::IndentationInconsistency).
-    //
-    // The parser sees an unexpected Indent(n) token when the grammar does not
-    // expect any further nesting at the current position — for example, a
-    // second Indent inside a slide field list. The "found" level is the value
-    // carried by the Indent token. The "expected" level is derived as
-    // `found_n - 1` (one space less than found), which correctly identifies
-    // the last valid indentation level for the common case:
-    //
-    // - Indent(3) inside a 2-space block → expected=2, found=3  ✓
-    // - Indent(4) inside a 2-space block → expected=3, found=4  ✓
-    //
-    // The definitively correct solution would thread the open-block indent
-    // level through the chumsky State context, which is STORY-007+ scope.
-    // The `found_n - 1` formula removes the prior hardcoding of `expected=2`
-    // and is correct for all cases where exactly one extra space is added.
+    // W-PAR-* → non-fatal warnings; E-PAR-019/020/021 → fatal inline-markup errors;
+    // Indent(n) → IndentError; all others → fatal errors.
     let mut parse_time_warnings: Vec<SyntaxError> = Vec::new();
 
     for rich_err in parse_errors {
@@ -245,11 +211,11 @@ pub fn parse(
                 byte_start,
             )
         } else {
-            let message = format!("{:?}", rich_err.reason());
+            // Strip the `Custom("...")` debug wrapper that chumsky adds to
+            // `Rich::custom` reasons (F-077-P5-001 fix: prevents sentinel leak).
+            let raw_message = format!("{:?}", rich_err.reason());
+            let message = strip_custom_wrapper(&raw_message);
 
-            // Route W-PAR-* diagnostics as non-fatal warnings (DIR-077-001-A Ruling 2).
-            // These are emitted by `section_block_parser` for unrecognised sub-block
-            // keys (EC-005 / BC-3.02.002 invariant 4) and must not fail the parse.
             if message.contains("W-PAR-") {
                 let warning = SyntaxError::unexpected_token(
                     file_path.to_string(),
@@ -264,11 +230,26 @@ pub fn parse(
                 continue;
             }
 
-            // Classify structured error messages by their E-PAR-NNN prefix.
-            // Parsers emit these as `Rich::custom(span, "E-PAR-NNN: ...")` so
-            // that the conversion layer can produce the correct typed variant.
+            // E-PAR-019/020/021: route via sentinel → InlineMarkupRoute → fatal error.
+            //
+            // error-taxonomy.md:24 — "Parse Errors (E-PAR) — Always fatal. Build halts
+            // with accumulated errors. No output produced." (exit 1, notes 55/57/59).
+            // STORY-077 EC-007: "in strict mode (default) the build fails with the
+            // accumulated error."
+            //
+            // KEEP the `continue` so we don't double-push via `errors.push(syntax_err)`
+            // below. Error ACCUMULATION is preserved (all E-PAR-019/020/021 errors in a
+            // field are collected before the gate at Phase 6 halts the build). Only the
+            // DESTINATION sink changes: warnings → errors (fatal path). (F-077-P14-001)
+            if let Some(route) = parse_routing_tag(&message) {
+                let error = inline_markup_route_to_error(
+                    route, &file_path, line, col, src, byte_start, span_len,
+                );
+                errors.push(error);
+                continue;
+            }
+
             if message.contains("E-PAR-008") {
-                // Extract the variable name from the message (between `'`..`'`).
                 let name = extract_quoted_name(&message).unwrap_or_default();
                 SyntaxError::var_name_collision(
                     file_path.to_string(),
@@ -291,7 +272,6 @@ pub fn parse(
                     span_len,
                 )
             } else if message.contains("E-PAR-006") {
-                // Extract the keyword from the message.
                 let keyword = extract_quoted_name(&message).unwrap_or_default();
                 SyntaxError::reserved_keyword(
                     file_path.to_string(),
@@ -323,13 +303,7 @@ pub fn parse(
         return Err(errors);
     }
 
-    // Phase 7: accumulate warnings.
-    //
-    // Missing `slideforge_version` is a non-fatal warning per BC-1.09.010 /
-    // BC-1.13.001 postcondition 2.  Emit it whenever the deck has any items
-    // (BC-1.13.001 EC-001: no exemption for section-only decks).
-    //
-    // Parse-time warnings (W-PAR-*) accumulated during Phase 5 are merged here.
+    // Phase 7: accumulate warnings (W-PAR-* from Phase 5 + missing-version advisory).
     let mut warnings: Vec<SyntaxError> = parse_time_warnings;
     let deck = deck_opt.unwrap_or_default();
     if version_gate_result == VersionGateResult::MissingVersion && !deck.items.is_empty() {
@@ -564,6 +538,66 @@ fn lex_error_to_syntax_error(e: LexError, src: &str) -> SyntaxError {
     }
 }
 
+/// Convert an [`InlineMarkupRoute`] to the appropriate [`SyntaxError`] fatal error variant.
+///
+/// Extracted from `parse()` to keep that function within the clippy line-count limit.
+/// All three routes (E-PAR-019 / E-PAR-020 / E-PAR-021) are ALWAYS FATAL per
+/// error-taxonomy.md:24 ("Parse Errors (E-PAR) — Always fatal. Build halts with
+/// accumulated errors. No output produced."). They are routed to the `errors` vec
+/// (fatal path), which causes `parse()` to return `Err` after Phase 6 gate.
+///
+/// Error accumulation is preserved: all malformed-markup errors in a field are
+/// collected before the gate halts the build (not fail-on-first). (F-077-P14-001)
+fn inline_markup_route_to_error(
+    route: self::template::InlineMarkupRoute,
+    file_path: &str,
+    line: u32,
+    col: u32,
+    src: &str,
+    byte_start: usize,
+    span_len: usize,
+) -> SyntaxError {
+    use self::template::InlineMarkupRoute;
+    match route {
+        InlineMarkupRoute::UnclosedInlineMarkup(delimiter, clean_msg) => {
+            SyntaxError::unclosed_inline_markup(
+                file_path.to_string(),
+                line,
+                col,
+                delimiter.clone(),
+                clean_msg,
+                src.to_string(),
+                byte_start,
+                delimiter.len().max(1),
+            )
+        },
+        InlineMarkupRoute::EmptyInlineMarkupSpan(delimiter, clean_msg) => {
+            SyntaxError::empty_inline_markup_span(
+                file_path.to_string(),
+                line,
+                col,
+                delimiter.clone(),
+                clean_msg,
+                src.to_string(),
+                byte_start,
+                delimiter.len().max(1),
+            )
+        },
+        // E-PAR-021: same sink as 019/020; real offset in `clean_msg` (OBS-P8-A).
+        InlineMarkupRoute::InlineNestingDepthExceeded(clean_msg) => {
+            SyntaxError::inline_nesting_depth_exceeded(
+                file_path.to_string(),
+                line,
+                col,
+                clean_msg,
+                src.to_string(),
+                byte_start,
+                span_len,
+            )
+        },
+    }
+}
+
 /// Convert a 1-based `(line, col)` pair to a byte offset in `src`.
 ///
 /// Used when the lex error carries `(line, col)` but the miette `SourceSpan`
@@ -586,6 +620,44 @@ fn line_col_to_byte_offset(src: &str, line: u32, col: u32) -> usize {
     }
     // If line is past the end, return the end of the source.
     src.len().saturating_sub(1)
+}
+
+/// Strip the `Custom("...")` wrapper that chumsky's `{:?}` debug format adds to
+/// `Rich::custom` error reasons.
+///
+/// When a parser calls `Rich::custom(span, "some message")`, the `reason()` is
+/// `RichReason::Custom("some message")`.  Formatting that with `{:?}` produces
+/// the string `Custom("some message")` — including the `Custom(` prefix and `")`
+/// suffix that must not appear in user-facing diagnostics.
+///
+/// This function detects that wrapper and returns the inner string (unescaping
+/// simple `\"` sequences).  If `raw` does not match the `Custom("...")` pattern,
+/// it is returned unchanged — covering `Expected`, `Many`, and other reason
+/// variants that produce a different `{:?}` format.
+///
+/// # F-077-P5-001
+///
+/// This was the root cause of the sentinel leak: `raw_message` was used directly
+/// as the `message:` field of every `SyntaxError`, causing `Custom("...")` (and,
+/// for inline-markup errors, `Custom("SLIDEFORGE_INLINE_ROUTE|...")`) to appear
+/// verbatim in rendered diagnostics.
+fn strip_custom_wrapper(raw: &str) -> String {
+    // The pattern is: Custom("...")
+    // The inner string may contain escaped characters (e.g. `\"` for a literal
+    // double-quote inside the message, `\\` for a backslash).
+    // We only need to handle the common E-PAR-NNN messages which never contain
+    // literal double-quotes in the inner text, so a simple prefix/suffix strip
+    // is sufficient for production use.  For robustness, also unescape `\"`.
+    const PREFIX: &str = "Custom(\"";
+    const SUFFIX: &str = "\")";
+    if raw.starts_with(PREFIX) && raw.ends_with(SUFFIX) {
+        let inner = &raw[PREFIX.len()..raw.len() - SUFFIX.len()];
+        // Unescape the two sequences that `{:?}` escapes inside a String:
+        // `\"` → `"` and `\\` → `\`.
+        inner.replace("\\\"", "\"").replace("\\\\", "\\")
+    } else {
+        raw.to_string()
+    }
 }
 
 /// Extract the first single-quoted name from `msg` (e.g. `"'chart'"` → `"chart"`).

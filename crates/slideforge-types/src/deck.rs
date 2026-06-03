@@ -9,10 +9,44 @@
 
 use std::sync::Arc;
 
+/// The canonical set of manually-authored section type names recognised by the
+/// built-in section type registry (BC-3.02.002 AC-004, BC-3.02.001 EC-002).
+///
+/// This is the **single source of truth** for which names are legal in a
+/// `section <type>:` DSL block.  Both `slideforge-eval` (invariant 3 type
+/// validation in `eval_section_nodes`) and `slideforge-layout`
+/// (`collect_manual_sections`) import and compare against this constant so that
+/// the two passes can never drift out of sync (TD-VSDD-060).
+///
+/// ## Semantics of each type
+///
+/// | Name | Auto-generated equivalent | Notes |
+/// |------|--------------------------|-------|
+/// | `executive_summary` | Yes (from `takeaway:` fields) | Manual supersedes auto (EC-002) |
+/// | `risk_register` | Yes (from `severity_cards` slides) | Manual supersedes auto (EC-002) |
+/// | `methodology` | No | Pure manual section |
+/// | `scope` | No | Pure manual section |
+/// | `approval` | No | Pure manual section |
+/// | `appendix` | No | Pure manual section |
+/// | `glossary` | No | Pure manual section |
+///
+/// Plugin-registered section types are NOT represented here — they are resolved
+/// at eval time via the plugin registry (out-of-scope until a future story
+/// activates the `SectionType` plugin surface).
+pub const CANONICAL_MANUAL_SECTION_TYPES: &[&str] = &[
+    "executive_summary",
+    "risk_register",
+    "methodology",
+    "scope",
+    "approval",
+    "appendix",
+    "glossary",
+];
+
 use crate::block::Block;
 use crate::ordered_map::OrderedMap;
 use crate::register::Register;
-use crate::slide::Slide;
+use crate::slide::{FieldValue, Slide};
 use crate::span::SourceSpan;
 use crate::value::Value;
 
@@ -41,16 +75,28 @@ pub struct SectionBlock {
 
     /// Section content fields declared inside the block.
     ///
-    /// Keys are field names; values are the resolved field values. Uses
+    /// Keys are field names; values are typed [`FieldValue`] entries. Uses
     /// [`OrderedMap`] to preserve insertion order (determinism requirement)
     /// and satisfy the `Hash` bound on all IR types.
     ///
-    /// NOTE: body uses `Value` (not `FieldValue`) so it cannot represent rich
-    /// inline formatting or nested `report:` sub-blocks today. BC-3.02.002
-    /// postcondition 1 and EC-004 require these capabilities; full support is
-    /// deferred to a future IR-extension story (cross-crate work needed to
-    /// introduce `FieldValue::Inlines` and nested `Vec<Block>` in `SectionBlock`).
-    pub body: OrderedMap<Arc<str>, Value>,
+    /// STORY-077 (BC-3.02.002 postcondition 8): body now uses `FieldValue`
+    /// (not `Value`) so that rich inline content — `FieldValue::Inlines(Vec<InlineNode>)` —
+    /// is preserved from parse time through to evaluation without information loss.
+    /// `detail:` and `report:` sub-blocks are stored as `FieldValue::Inlines`
+    /// after the STORY-077 evaluator pass upgrades them from `FieldValue::Template`.
+    pub body: OrderedMap<Arc<str>, FieldValue>,
+
+    /// Post-evaluation register-gated content for this section node.
+    ///
+    /// Populated by `slideforge-eval::eval_section_nodes` (STORY-077) after
+    /// all `{{ expr }}` interpolations in `body` are resolved. Initialized to
+    /// `vec![]` before evaluation; the eval pass populates it as a post-evaluation
+    /// annotation (BC-3.02.002 postcondition 7, BC-1.14.003 invariant 1).
+    ///
+    /// DOCX and PDF exporters read this field to render section-level register
+    /// content (`report:` and `detail:` sub-blocks). PPTX and web preview
+    /// exporters MUST NOT read this field (BC-1.14.003 postconditions 3 and 5).
+    pub register_content: Vec<crate::register::RegisteredContent>,
 
     /// Source location of the `section <type>:` declaration.
     pub span: SourceSpan,

@@ -25,6 +25,25 @@
 //! produce [`TemplateChunk::MathInline`] or [`TemplateChunk::MathDisplay`]
 //! respectively.  Inside a math region the only interpolation form is `@{var}`
 //! (not `{{ var }}`); those produce [`TemplateChunk::MathInterp`].
+//!
+//! # STORY-077: Inline markup chunks (DIR-077-002 §3)
+//!
+//! Fields containing inline markup delimiters produce structural `TemplateChunk`
+//! variants at parse time. These mirror `slideforge_types::InlineNode` structurally
+//! but use only `TemplateChunk` children — preserving the crate boundary (syntax
+//! must NOT depend on types). The eval stage converts these to `InlineNode` via
+//! `chunks_to_inline_nodes` (in `slideforge-eval`).
+//!
+//! | DSL syntax | TemplateChunk variant |
+//! |---|---|
+//! | `**text**` | `Bold(Vec<TemplateChunk>)` |
+//! | `_text_` | `Italic(Vec<TemplateChunk>)` |
+//! | `` `text` `` | `Code(String)` (verbatim — no inner markup) |
+//! | `[text](url)` | `Link { text: Vec<TemplateChunk>, url: String }` |
+//! | `^text^` | `Superscript(Vec<TemplateChunk>)` |
+//! | `~text~` | `Subscript(Vec<TemplateChunk>)` |
+//! | `~~text~~` | `Strikethrough(Vec<TemplateChunk>)` (checked before `~`) |
+//! | `==text==` | `Highlight(Vec<TemplateChunk>)` |
 
 use crate::expr::Expr;
 
@@ -41,6 +60,19 @@ use crate::expr::Expr;
 /// | `MathInline(s)` | `$...$` inline math region (raw LaTeX content) |
 /// | `MathDisplay(s)` | `$$...$$` display math region (raw LaTeX content) |
 /// | `MathInterp(e)` | `@{expr}` variable interpolation inside a math region |
+///
+/// # STORY-077 Additions (DIR-077-002 §3)
+///
+/// | Variant | Source construct |
+/// |---------|----------------|
+/// | `Bold(children)` | `**text**` bold span |
+/// | `Italic(children)` | `_text_` italic span |
+/// | `Code(s)` | `` `text` `` code span (verbatim) |
+/// | `Link { text, url }` | `[text](url)` hyperlink |
+/// | `Superscript(children)` | `^text^` superscript |
+/// | `Subscript(children)` | `~text~` subscript |
+/// | `Strikethrough(children)` | `~~text~~` strikethrough |
+/// | `Highlight(children)` | `==text==` highlighted |
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum TemplateChunk {
     /// A run of literal (non-interpolated) text.
@@ -79,6 +111,73 @@ pub enum TemplateChunk {
     /// `{{ var }}` inside a math region is treated as literal text (the `{{`
     /// characters become part of the LaTeX source), not an interpolation.
     MathInterp(Expr),
+
+    // ── STORY-077: Inline markup variants (DIR-077-002 §3) ────────────────────
+    /// Bold text span: `**text**`.
+    ///
+    /// Children may contain any `TemplateChunk` variant (including `Italic`,
+    /// `Expr`, `Code`, `Link`, etc.) but NOT another `Bold` at the same nesting
+    /// level (a closing `**` ends the bold span).
+    ///
+    /// Eval-time mapping: `Bold(children)` → `InlineNode::Bold(chunks_to_inline_nodes(children))`
+    Bold(Vec<TemplateChunk>),
+
+    /// Italic text span: `_text_`.
+    ///
+    /// Single-underscore pair. Double-underscore is NOT supported in v1.
+    /// (DIR-077-002 §1 disambiguation rule 2: single `*` is NOT italic — only `_`.)
+    ///
+    /// Eval-time mapping: `Italic(children)` → `InlineNode::Italic(chunks_to_inline_nodes(children))`
+    Italic(Vec<TemplateChunk>),
+
+    /// Inline code span: `` `text` ``.
+    ///
+    /// Content is verbatim — no further inline markup processing occurs inside
+    /// a code span (`{{ }}` interpolation does NOT fire inside a code span).
+    ///
+    /// Eval-time mapping: `Code(s)` → `InlineNode::Code(Arc::from(s))`
+    Code(String),
+
+    /// Hyperlink: `[text](url)`.
+    ///
+    /// The `text` portion IS further processed for nested inline markup.
+    /// The `url` portion is verbatim text (not processed for markup or interpolation).
+    ///
+    /// Eval-time mapping: `Link { text, url }` → `InlineNode::Link { text: chunks_to_inline_nodes(text), url: Arc::from(url) }`
+    Link {
+        /// The display content of the link (processed for nested inline markup).
+        text: Vec<TemplateChunk>,
+        /// The target URL (verbatim — not processed for markup or `{{ }}`).
+        url: String,
+    },
+
+    /// Superscript span: `^text^`.
+    ///
+    /// Eval-time mapping: `Superscript(children)` → `InlineNode::Superscript(chunks_to_inline_nodes(children))`
+    Superscript(Vec<TemplateChunk>),
+
+    /// Subscript span: `~text~`.
+    ///
+    /// Single-tilde pair. The parser MUST check `~~` (Strikethrough) BEFORE
+    /// checking `~` (Subscript) to resolve the disambiguation (DIR-077-002 §1
+    /// disambiguation rule 1).
+    ///
+    /// Eval-time mapping: `Subscript(children)` → `InlineNode::Subscript(chunks_to_inline_nodes(children))`
+    Subscript(Vec<TemplateChunk>),
+
+    /// Strikethrough span: `~~text~~`.
+    ///
+    /// Double-tilde pair. Consumed greedily before single-tilde subscript.
+    ///
+    /// Eval-time mapping: `Strikethrough(children)` → `InlineNode::Strikethrough(chunks_to_inline_nodes(children))`
+    Strikethrough(Vec<TemplateChunk>),
+
+    /// Highlighted span: `==text==`.
+    ///
+    /// Double-equals pair.
+    ///
+    /// Eval-time mapping: `Highlight(children)` → `InlineNode::Highlight(chunks_to_inline_nodes(children))`
+    Highlight(Vec<TemplateChunk>),
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────

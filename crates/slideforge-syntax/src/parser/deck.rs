@@ -70,9 +70,14 @@ where
 {
     // Template string: emit any E-PAR-012/E-PAR-013/E-PAR-014 errors via validate().
     let template_val = template_value().validate(
-        move |(chunks, errs): (Vec<TemplateChunk>, Vec<String>), info, emitter| {
-            for msg in errs {
-                emitter.emit(Rich::custom(info.span(), msg));
+        move |(chunks, errs): (
+            Vec<TemplateChunk>,
+            Vec<crate::parser::template::TemplateError>,
+        ),
+              info,
+              emitter| {
+            for err in errs {
+                emitter.emit(Rich::custom(info.span(), err.into_routing_message()));
             }
             (FieldValue::Template(chunks), info.span())
         },
@@ -105,9 +110,14 @@ where
     I: ValueInput<'src, Token = Token, Span = TSpan>,
 {
     let template_val = template_value().validate(
-        move |(chunks, errs): (Vec<TemplateChunk>, Vec<String>), info, emitter| {
-            for msg in errs {
-                emitter.emit(Rich::custom(info.span(), msg));
+        move |(chunks, errs): (
+            Vec<TemplateChunk>,
+            Vec<crate::parser::template::TemplateError>,
+        ),
+              info,
+              emitter| {
+            for err in errs {
+                emitter.emit(Rich::custom(info.span(), err.into_routing_message()));
             }
             (SetRuleValue::Template(chunks), info.span())
         },
@@ -354,9 +364,14 @@ where
     just(Token::At)
         .ignore_then(keyword("include"))
         .then(template_value().validate(
-            move |(chunks, errs): (Vec<TemplateChunk>, Vec<String>), info, emitter| {
-                for msg in errs {
-                    emitter.emit(Rich::custom(info.span(), msg));
+            move |(chunks, errs): (
+                Vec<TemplateChunk>,
+                Vec<crate::parser::template::TemplateError>,
+            ),
+                  info,
+                  emitter| {
+                for err in errs {
+                    emitter.emit(Rich::custom(info.span(), err.into_routing_message()));
                 }
                 (FieldValue::Template(chunks), info.span())
             },
