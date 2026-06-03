@@ -242,7 +242,7 @@ pub(crate) fn flatten_chunks_to_string(
 ///    defaults keyed by `(slide_type, field_name)`.
 /// 3. Applies active variant vars (C02): if `active_variant` is `Some`, pushes
 ///    that variant's `vars` onto the env as a scope frame before slide evaluation.
-/// 4. Evaluates all top-level [`BlockItem`](slideforge_syntax::BlockItem)s
+/// 4. Evaluates all top-level [`BlockItem`]s
 ///    (slides, `@for` blocks, `@if` blocks) in source order.
 /// 5. Returns `None` if any **fatal** diagnostic was pushed; `Some(Deck)` otherwise.
 ///

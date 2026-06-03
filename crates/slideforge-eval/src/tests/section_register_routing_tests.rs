@@ -645,7 +645,8 @@ fn test_BC_3_02_002_ac_ec_001_eval_does_not_re_emit_unrecognized_key_warning() {
 
 /// BC-3.02.002 invariant 3 / DIR-077-001-A Ruling 3:
 /// `eval_section_nodes` validates the section type name against the built-in
-/// `SectionType` registry (methodology, scope, approval, appendix, glossary).
+/// `SectionType` registry (see `CANONICAL_MANUAL_SECTION_TYPES`: `executive_summary`,
+/// `risk_register`, `methodology`, `scope`, `approval`, `appendix`, `glossary`).
 /// An unrecognized type (e.g., "foobar") must produce a fatal eval error.
 #[test]
 fn test_BC_3_02_002_inv3_unknown_section_type_produces_fatal_eval_error() {

@@ -247,8 +247,10 @@ pub enum EvalError {
     /// STORY-077 (BC-3.02.002 invariant 3 / DIR-077-001-A Ruling 3): The parser
     /// stores the section type name verbatim in `SectionNode.kind`. The evaluator
     /// (`eval_section_nodes`) validates the name against the full `SectionType`
-    /// plugin registry (built-ins: methodology, scope, approval, appendix, glossary,
-    /// plus any plugin-registered types). An unrecognised name is a FATAL eval error.
+    /// plugin registry (built-ins per `CANONICAL_MANUAL_SECTION_TYPES` in
+    /// `slideforge-types`: `executive_summary`, `risk_register`, `methodology`,
+    /// `scope`, `approval`, `appendix`, `glossary` — plus any plugin-registered
+    /// types). An unrecognised name is a FATAL eval error.
     #[error("Unknown section type '{name}'. Known types: [{known_types}]")]
     #[diagnostic(
         code("E-EVL-010"),
