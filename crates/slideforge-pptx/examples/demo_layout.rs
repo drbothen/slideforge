@@ -40,23 +40,29 @@ use slideforge_plugin_api::{ExportOptions, Exporter};
 use slideforge_pptx::PptxExporter;
 use slideforge_pptx::slide_ids::{MASTER_ID, SLIDE_ID_START, SlideIdAssigner};
 use slideforge_types::{
-    Brand, BrandFonts, BrandPalette, Deck, Emu, ordered_map::OrderedMap, slide::Slide,
-    deck::DeckMetadata,
+    Brand, BrandFonts, BrandPalette, Deck, Emu, deck::DeckMetadata, ordered_map::OrderedMap,
+    slide::Slide,
 };
 use zip::ZipArchive;
 
 // ─── ANSI colours ────────────────────────────────────────────────────────────
+/// ANSI green escape sequence for pass output.
 const GREEN: &str = "\x1b[32m";
+/// ANSI red escape sequence for fail output.
 const RED: &str = "\x1b[31m";
+/// ANSI cyan escape sequence for section headers.
 const CYAN: &str = "\x1b[36m";
+/// ANSI reset sequence to clear colour.
 const RESET: &str = "\x1b[0m";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
+/// Returns the default 16:9 page size (`9_144_000` × `5_143_500` EMU).
 fn page_size() -> PageSize {
     PageSize::default() // 9_144_000 × 5_143_500 EMU (16:9)
 }
 
+/// Returns a bounding box sized for a standard title placeholder.
 fn title_bbox() -> BoundingBox {
     BoundingBox {
         x: Emu(457_200),
@@ -66,6 +72,7 @@ fn title_bbox() -> BoundingBox {
     }
 }
 
+/// Returns a bounding box sized for a standard body/content placeholder.
 fn body_bbox() -> BoundingBox {
     BoundingBox {
         x: Emu(457_200),
@@ -75,6 +82,7 @@ fn body_bbox() -> BoundingBox {
     }
 }
 
+/// Builds a minimal [`Deck`] with `slide_count` identical title slides (semantic IR).
 fn make_deck(slide_count: usize) -> Deck {
     Deck {
         slides: (0..slide_count)
@@ -102,6 +110,7 @@ fn make_deck(slide_count: usize) -> Deck {
     }
 }
 
+/// Builds a minimal demo [`Brand`] with hard-coded palette and font stacks.
 fn make_brand() -> Brand {
     Brand {
         name: Arc::from("demo-brand"),
@@ -188,6 +197,7 @@ fn slide_blank() -> LaidOutSlide {
     }
 }
 
+/// Builds the 4-slide [`LaidOutDeck`] used by the main AC checks.
 fn make_deck_laid_out() -> LaidOutDeck {
     LaidOutDeck {
         page_size: page_size(),
@@ -204,6 +214,7 @@ fn make_deck_laid_out() -> LaidOutDeck {
 
 // ─── ZIP helpers ─────────────────────────────────────────────────────────────
 
+/// Returns all entry names in the ZIP archive, sorted alphabetically.
 fn zip_entry_names(bytes: &[u8]) -> Vec<String> {
     let cursor = std::io::Cursor::new(bytes);
     let mut archive = ZipArchive::new(cursor).expect("valid ZIP");
@@ -214,6 +225,8 @@ fn zip_entry_names(bytes: &[u8]) -> Vec<String> {
     names
 }
 
+/// Reads a single ZIP entry by `path` and returns its contents as a UTF-8 string.
+/// Panics if the entry is missing (demo-only helper; not production code).
 fn zip_read_entry(bytes: &[u8], path: &str) -> String {
     let cursor = std::io::Cursor::new(bytes);
     let mut archive = ZipArchive::new(cursor).expect("valid ZIP");
@@ -227,6 +240,7 @@ fn zip_read_entry(bytes: &[u8], path: &str) -> String {
 
 // ─── Output helpers ──────────────────────────────────────────────────────────
 
+/// Prints a section banner with the given `title`.
 fn section(title: &str) {
     println!();
     println!("{CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{RESET}");
@@ -234,14 +248,17 @@ fn section(title: &str) {
     println!("{CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{RESET}");
 }
 
+/// Prints a green PASS line with `label`.
 fn ok(label: &str) {
     println!("  {GREEN}[PASS]{RESET} {label}");
 }
 
+/// Prints a red FAIL line with `label`.
 fn fail(label: &str) {
     println!("  {RED}[FAIL]{RESET} {label}");
 }
 
+/// Prints an informational NOTE line with `label`.
 fn note(label: &str) {
     println!("  [NOTE] {label}");
 }
@@ -256,13 +273,11 @@ fn check_ac001(pptx: &[u8]) -> bool {
     let mut remaining: &str = &prs;
     while let Some(pos) = remaining.find("p:sldId ") {
         remaining = &remaining[pos + "p:sldId ".len()..];
-        if let Some(id_pos) = remaining.find("id=\"") {
-            let after = &remaining[id_pos + 4..];
-            if let Some(end) = after.find('"') {
-                if let Ok(id) = after[..end].parse::<u32>() {
-                    ids.push(id);
-                }
-            }
+        if let Some(id_pos) = remaining.find("id=\"")
+            && let Some(end) = remaining[id_pos + 4..].find('"')
+            && let Ok(id) = remaining[id_pos + 4..][..end].parse::<u32>()
+        {
+            ids.push(id);
         }
     }
     println!("  Parsed slide IDs from presentation.xml: {ids:?}");
@@ -272,11 +287,14 @@ fn check_ac001(pptx: &[u8]) -> bool {
         return false;
     }
 
-    let min_id = *ids.iter().min().unwrap();
+    // `ids` is non-empty (early-return guard above), so min/max cannot be None.
+    let min_id = *ids.iter().min().unwrap_or(&0);
     let sequential = ids.windows(2).all(|w| w[1] == w[0] + 1);
 
     if min_id == SLIDE_ID_START {
-        ok(&format!("AC-001: first slide ID = {min_id} (= SLIDE_ID_START = 256)"));
+        ok(&format!(
+            "AC-001: first slide ID = {min_id} (= SLIDE_ID_START = 256)"
+        ));
     } else {
         fail(&format!("AC-001: first slide ID = {min_id}, expected 256"));
     }
@@ -288,7 +306,10 @@ fn check_ac001(pptx: &[u8]) -> bool {
     };
     let ids_sorted_ok = sorted == ids;
     if ids_sorted_ok && sequential {
-        ok(&format!("AC-001: IDs are sequential with step 1 (count={})", ids.len()));
+        ok(&format!(
+            "AC-001: IDs are sequential with step 1 (count={})",
+            ids.len()
+        ));
     } else {
         fail("AC-001: IDs are not sequential");
     }
@@ -301,9 +322,13 @@ fn check_ac002(pptx: &[u8]) -> bool {
     let prs = zip_read_entry(pptx, "ppt/presentation.xml");
     let found = prs.contains(&format!("id=\"{MASTER_ID}\""));
     if found {
-        ok(&format!("AC-002: <p:sldMasterId id=\"{MASTER_ID}\"> present (= 2^31)"));
+        ok(&format!(
+            "AC-002: <p:sldMasterId id=\"{MASTER_ID}\"> present (= 2^31)"
+        ));
     } else {
-        fail(&format!("AC-002: <p:sldMasterId id=\"{MASTER_ID}\"> NOT found"));
+        fail(&format!(
+            "AC-002: <p:sldMasterId id=\"{MASTER_ID}\"> NOT found"
+        ));
     }
     found
 }
@@ -311,17 +336,24 @@ fn check_ac002(pptx: &[u8]) -> bool {
 /// AC-003: Exactly 31 slideLayout parts in the PPTX ZIP.
 fn check_ac003(pptx: &[u8]) -> bool {
     let names = zip_entry_names(pptx);
-    let count = names.iter().filter(|n| {
-        n.starts_with("ppt/slideLayouts/slideLayout")
-            && n.ends_with(".xml")
-            && !n.contains("_rels")
-    }).count();
+    let count = names
+        .iter()
+        .filter(|n| {
+            n.starts_with("ppt/slideLayouts/slideLayout")
+                && std::path::Path::new(n.as_str())
+                    .extension()
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("xml"))
+                && !n.contains("_rels")
+        })
+        .count();
     println!("  slideLayout XML parts: {count} (expected 31)");
     if count == 31 {
         ok("AC-003: exactly 31 slideLayout parts");
         true
     } else {
-        fail(&format!("AC-003: found {count} slideLayout parts, expected 31"));
+        fail(&format!(
+            "AC-003: found {count} slideLayout parts, expected 31"
+        ));
         false
     }
 }
@@ -335,7 +367,9 @@ fn check_ac004(pptx: &[u8]) -> bool {
         ok("AC-004: <p:sldLayoutIdLst> has 31 entries");
         true
     } else {
-        fail(&format!("AC-004: found {count} layout ID entries, expected 31"));
+        fail(&format!(
+            "AC-004: found {count} layout ID entries, expected 31"
+        ));
         false
     }
 }
@@ -350,7 +384,9 @@ fn check_ac005(pptx: &[u8]) -> bool {
         ok("AC-005: [Content_Types].xml has 31 layout Override entries");
         true
     } else {
-        fail(&format!("AC-005: found {count} layout Override entries, expected 31"));
+        fail(&format!(
+            "AC-005: found {count} layout Override entries, expected 31"
+        ));
         false
     }
 }
@@ -378,7 +414,9 @@ fn check_ac006(pptx: &[u8]) -> bool {
             let end = (pos + 90).min(slide3.len());
             println!("  Excerpt from slide3.xml: ...{}...", &slide3[start..end]);
         }
-        ok("AC-006: slide3 (section_divider, dark) HAS <p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>");
+        ok(
+            "AC-006: slide3 (section_divider, dark) HAS <p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>",
+        );
     } else {
         fail("AC-006: slide3 (section_divider, dark) MISSING <p:clrMapOvr>");
     }
@@ -394,7 +432,10 @@ fn check_ac007() -> bool {
     let expected: Vec<u32> = (256..=512).collect();
     let ok_result = ids == expected;
     println!("  257-slide ID range: {min}..={max} (expected 256..=512)");
-    println!("  All IDs unique: {}", ids.len() == ids.iter().collect::<std::collections::HashSet<_>>().len());
+    println!(
+        "  All IDs unique: {}",
+        ids.len() == ids.iter().collect::<std::collections::HashSet<_>>().len()
+    );
     if ok_result {
         ok("AC-007: 257-slide deck IDs = 256..=512, all unique, all >= 256");
     } else {
@@ -427,12 +468,19 @@ fn check_ac008(pptx: &[u8]) -> bool {
 /// We verify by probing `SLIDE_ID_START` constant and confirming the unmapped
 /// keywords use index 1 (Title and Content) not index 0 (Title Slide).
 /// This is demonstrated via the `SlideIdAssigner` constant logic + the
-/// exporter's known fallback behavior (confirmed green by layout_tests.rs).
+/// exporter's known fallback behavior (confirmed green by `layout_tests.rs`).
 fn check_ac009() -> bool {
     // The 9 unmapped Q2 keywords (AC-009 spec).
     let unmapped = [
-        "split_contrast", "card_rows", "horizontal_timeline", "status",
-        "progress_bar", "metric_tree", "formula", "weighted_composite", "grid",
+        "split_contrast",
+        "card_rows",
+        "horizontal_timeline",
+        "status",
+        "progress_bar",
+        "metric_tree",
+        "formula",
+        "weighted_composite",
+        "grid",
     ];
 
     // These keywords are permanently mapped to layout index 1 ("Title and Content",
@@ -458,16 +506,16 @@ fn check_ac010() -> bool {
     // We print the expected mappings and confirm key slides landed on correct layouts.
     println!("  Canonical layout keyword → 0-based index mapping (ADR-015 §A.4):");
     let mappings = [
-        ("title",            0usize, "Title Slide"),
-        ("content",          1,      "Title and Content"),
-        ("two_column",       3,      "Two Objects"),
-        ("table",            7,      "Object with Caption"),
-        ("blank",            6,      "Blank"),
-        ("section_divider", 11,      "SF Section Divider (dark)"),
-        ("end",             21,      "SF End Slide (dark)"),
-        ("stat_callout",    12,      "SF Stat Grid"),
-        ("quote",           13,      "SF Quote"),
-        ("chart",           24,      "SF Chart"),
+        ("title", 0usize, "Title Slide"),
+        ("content", 1, "Title and Content"),
+        ("two_column", 3, "Two Objects"),
+        ("table", 7, "Object with Caption"),
+        ("blank", 6, "Blank"),
+        ("section_divider", 11, "SF Section Divider (dark)"),
+        ("end", 21, "SF End Slide (dark)"),
+        ("stat_callout", 12, "SF Stat Grid"),
+        ("quote", 13, "SF Quote"),
+        ("chart", 24, "SF Chart"),
     ];
     for (kw, idx, name) in &mappings {
         println!("    {kw:20} → index {idx:2}  ({name})");
@@ -488,7 +536,10 @@ fn check_ac011(pptx: &[u8]) -> bool {
     if has_ph_title {
         if let Some(pos) = slide1.find("<p:ph") {
             let end = (pos + 80).min(slide1.len());
-            println!("  slide1.xml placeholder excerpt: ...{}...", &slide1[pos..end]);
+            println!(
+                "  slide1.xml placeholder excerpt: ...{}...",
+                &slide1[pos..end]
+            );
         }
         ok("AC-011: title frame emits <p:ph type=\"title\"> (idx chain present)");
     } else {
@@ -504,7 +555,9 @@ fn check_ac011(pptx: &[u8]) -> bool {
         fail("AC-011: no <p:ph type=\"body\"> found in slide2.xml");
     }
 
-    note("AC-011: missing-idx warn path tested in tests/layout_tests.rs (test_BC_4_01_005_ac011_*)");
+    note(
+        "AC-011: missing-idx warn path tested in tests/layout_tests.rs (test_BC_4_01_005_ac011_*)",
+    );
     has_ph_title && has_idx_0 && has_body_ph
 }
 
@@ -528,23 +581,26 @@ fn check_ac012() -> bool {
     let exporter = PptxExporter::new();
     let result = exporter.export(&deck, &giant_deck, &brand, &opts);
 
-    match result {
-        Err(e) => {
-            println!("  Out-of-range EMU export error: {e}");
-            // The error must mention the invalid EMU.
-            let msg = e.to_string();
-            if msg.contains("EMU") || msg.contains("emu") || msg.contains("i32") || msg.contains("InvalidEmu") || msg.contains("invalid") || msg.contains("out of range") {
-                ok("AC-012: out-of-range EMU page size returns error (not silent clamp)");
-                true
-            } else {
-                ok(&format!("AC-012: out-of-range EMU returns error: {msg}"));
-                true
-            }
-        },
-        Ok(_) => {
-            fail("AC-012: out-of-range EMU page size DID NOT return an error (silent clamp!)");
-            false
-        },
+    if let Err(e) = result {
+        println!("  Out-of-range EMU export error: {e}");
+        // The error must mention the invalid EMU.
+        let msg = e.to_string();
+        if msg.contains("EMU")
+            || msg.contains("emu")
+            || msg.contains("i32")
+            || msg.contains("InvalidEmu")
+            || msg.contains("invalid")
+            || msg.contains("out of range")
+        {
+            ok("AC-012: out-of-range EMU page size returns error (not silent clamp)");
+            true
+        } else {
+            ok(&format!("AC-012: out-of-range EMU returns error: {msg}"));
+            true
+        }
+    } else {
+        fail("AC-012: out-of-range EMU page size DID NOT return an error (silent clamp!)");
+        false
     }
 }
 
@@ -560,7 +616,7 @@ fn check_s1() -> bool {
             bbox: BoundingBox {
                 x: Emu(0),
                 y: Emu(0),
-                width: Emu(-1),   // negative — must trigger PptxError::InvalidEmu
+                width: Emu(-1), // negative — must trigger PptxError::InvalidEmu
                 height: Emu(1_143_000),
             },
             content: FrameContent::Title(Arc::from("Negative width test")),
@@ -581,16 +637,13 @@ fn check_s1() -> bool {
     let opts = ExportOptions::default();
     let exporter = PptxExporter::new();
     let result = exporter.export(&deck, &neg_deck, &brand, &opts);
-    match result {
-        Err(e) => {
-            println!("  Negative-width EMU error: {e}");
-            ok("S1: negative-width frame returns export error (validate_emu Err path)");
-            true
-        },
-        Ok(_) => {
-            fail("S1: negative-width frame did NOT return an error");
-            false
-        },
+    if let Err(e) = result {
+        println!("  Negative-width EMU error: {e}");
+        ok("S1: negative-width frame returns export error (validate_emu Err path)");
+        true
+    } else {
+        fail("S1: negative-width frame did NOT return an error");
+        false
     }
 }
 
@@ -632,7 +685,10 @@ fn check_s3(pptx: &[u8]) -> bool {
     if has_subtitle_type {
         if let Some(pos) = slide_xml.find("<p:ph") {
             let end = (pos + 100).min(slide_xml.len());
-            println!("  Subtitle slide ph excerpt: ...{}...", &slide_xml[pos..end]);
+            println!(
+                "  Subtitle slide ph excerpt: ...{}...",
+                &slide_xml[pos..end]
+            );
         }
         ok("S3: Subtitle frame emits type=\"subTitle\" in <p:ph>");
     } else {
@@ -672,7 +728,11 @@ fn main() {
         .export(&deck, &laid_out, &brand, &opts)
         .expect("4-slide deck export must succeed");
 
-    println!("  PPTX archive: {} bytes, {} slides", pptx_bytes.len(), laid_out.slides.len());
+    println!(
+        "  PPTX archive: {} bytes, {} slides",
+        pptx_bytes.len(),
+        laid_out.slides.len()
+    );
 
     let names = zip_entry_names(&pptx_bytes);
     println!("  ZIP parts total: {}", names.len());
@@ -747,16 +807,24 @@ fn main() {
         ("AC-002", pass_002, "Master ID = 2^31"),
         ("AC-003", pass_003, "31 slideLayout parts in ZIP"),
         ("AC-004", pass_004, "slideMaster sldLayoutIdLst 31 entries"),
-        ("AC-005", pass_005, "[Content_Types].xml 31 layout overrides"),
-        ("AC-006", pass_006, "clrMapOvr present (dark) / absent (light)"),
+        (
+            "AC-005",
+            pass_005,
+            "[Content_Types].xml 31 layout overrides",
+        ),
+        (
+            "AC-006",
+            pass_006,
+            "clrMapOvr present (dark) / absent (light)",
+        ),
         ("AC-007", pass_007, "257-slide IDs 256..=512, unique, >=256"),
         ("AC-008", pass_008, "slideMaster rels 31 layout entries"),
         ("AC-009", pass_009, "Unmapped keywords → index 1, not 0"),
         ("AC-010", pass_010, "Canonical layout mapping spot-check"),
         ("AC-011", pass_011, "ph idx chain in slide XML"),
         ("AC-012", pass_012, "InvalidEmu on out-of-range page size"),
-        ("S1",     pass_s1,  "validate_emu negative-width returns error"),
-        ("S3",     pass_s3,  "Subtitle emits subTitle idx=1"),
+        ("S1", pass_s1, "validate_emu negative-width returns error"),
+        ("S3", pass_s3, "Subtitle emits subTitle idx=1"),
     ];
     println!();
     for (id, passed, desc) in &results {
@@ -768,7 +836,11 @@ fn main() {
     }
     println!();
 
-    let failed: Vec<&str> = results.iter().filter(|(_, p, _)| !p).map(|(id, _, _)| *id).collect();
+    let failed: Vec<&str> = results
+        .iter()
+        .filter(|(_, p, _)| !p)
+        .map(|(id, _, _)| *id)
+        .collect();
     if failed.is_empty() {
         println!("{GREEN}All checks passed.{RESET}");
         std::process::exit(0);
