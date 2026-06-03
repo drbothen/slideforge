@@ -295,3 +295,268 @@ to a default shell.
 | 2026-06-03 | Route master/theme XML generation to slideforge-brand | Purity boundary consistency; brand data lives in brand crate |
 | 2026-06-03 | Revoke pptx→layout prohibition for IR types only | LaidOutDeck is in slideforge-layout; prohibition was structurally self-contradictory |
 | 2026-06-03 | Classify as in-STORY-037 scope | Items 1–4 fit Task 7 + Task 9 budget; no new story warranted |
+| 2026-06-03 | Addendum A — layout-selection scope boundary and mapping mechanism | Adversary pass 2 findings F-PASS2-C1/C2/M1/M2/H1; see §Addendum A below |
+
+---
+
+## Addendum A — Layout Selection Scope Boundary and Mapping Mechanism
+
+**Date:** 2026-06-03
+**Triggered by:** STORY-037 adversary pass 2 findings F-PASS2-C1 (CRITICAL), F-PASS2-C2
+(CRITICAL), F-PASS2-H1 (HIGH), F-PASS2-M1 (MEDIUM), F-PASS2-M2 (MEDIUM).
+**Binding on:** STORY-037 implementer (current), STORY-038 implementer (next).
+
+### A.1 Root Cause of the Vocabulary Mismatch
+
+Three distinct vocabularies exist for slide type identification:
+
+1. **DSL slide-type keywords** (`LaidOutSlide.slide_type_keyword`): lowercase
+   snake_case as declared in Q2 decisions — `title`, `content`, `two_column`,
+   `stat_callout`, `section_divider` (hypothetical), `end`, etc. These are the
+   authoritative user-visible names.
+
+2. **`SlideLayoutDef.name`** (display names in `slideforge-brand`): human-readable
+   strings like `"Title Slide"`, `"SF Section Divider"`, `"SF End Slide"`. These are
+   OOXML presentation names, not DSL keywords.
+
+3. **STORY-038 mapping table** (§"All 31 Layouts Present"): uses `title_slide`,
+   `section_divider`, etc. — a third vocabulary, neither DSL nor display-name.
+   **This table is stale and incorrect.** It was written before the DSL keyword list
+   was finalized in Q2 and does not match vocabulary #1 or #2 above.
+
+`find_layout_index` at `crates/slideforge-pptx/src/lib.rs:254` attempts to match
+vocabulary #1 against vocabulary #2. They never match because `"section_divider"
+!= "SF Section Divider"`, `"content" != "Title and Content"`, etc. The result is
+that every slide silently falls back to layout index 0 (Title Slide layout).
+
+### A.2 Scope Boundary Ruling
+
+**STORY-037 scope (Core Serialization):**
+- Must NOT ship `find_layout_index` with a lookup that is structurally guaranteed
+  to fail (current state).
+- Must implement a **minimal correct mapping** using `ooxml_type` for the 11
+  standard layouts and an explicit keyword-to-layout-index function for the 20 custom
+  SF layouts — sufficient to make the dark-layout wiring (F-PASS2-C2) exercisable
+  through the real export path, not a bypassed unit test.
+- Specifically: `SlideLayoutDef` MUST gain a `slide_type_keyword: Option<Arc<str>>`
+  field, and `generate_all_layouts` MUST populate it with the canonical Q2 DSL
+  keywords. This field is the **source of truth** for keyword-to-layout lookup.
+  See §A.4 for the canonical mapping table.
+- The `brand_adapter::brand_template_from_brand` function that silently discards
+  `Brand.layouts` (F-PASS2-M1) is a STORY-037 defect if `Brand.layouts` carries
+  non-empty layout data; the adapter MUST either use `Brand.layouts` as a source
+  of overrides or document why the synthesized layouts take precedence with a
+  `tracing::debug!`. It MUST NOT silently lose data without a documented invariant.
+  See §A.5.
+- The master XML element order (F-PASS2-H1) is a STORY-037 serializer defect and
+  MUST be fixed in STORY-037 scope. See §A.3.
+
+**STORY-038 scope (Layout Compliance):**
+- Full per-slide-type layout selection correctness is CONFIRMED as STORY-038
+  responsibility when it requires coordinating with `Brand.dark_layout_indices`
+  or with the full 31-layout embedding pass.
+- The STORY-038 mapping table (§"All 31 Layouts Present") MUST be replaced with
+  the canonical keyword-to-index table from §A.4.
+- Full `clrMapOvr` integration test (a slide with `slide_type_keyword` matching a
+  known-dark layout keyword flowing end-to-end through `export_inner` and producing
+  `<p:clrMapOvr>` in the output ZIP) belongs to STORY-038 AC-006, not STORY-037.
+  F-PASS2-C2 adversary finding is therefore a **legitimate cross-story deferral**
+  from STORY-037 to STORY-038, SUBJECT to §A.2 STORY-037 obligations being met
+  (i.e., the lookup must not be structurally broken before STORY-038 runs).
+
+### A.3 Master XML Element Order (F-PASS2-H1) — STORY-037 Non-Deferrable Fix
+
+ECMA-376 §19.3.1.42 (`CT_SlideMaster`) specifies the sequence model for
+`<p:sldMaster>` children. The correct order is:
+
+```
+cSld, clrMap, sldLayoutIdLst, hf, txStyles
+```
+
+The current implementation in `crates/slideforge-brand/src/layout_xml.rs:696-700`
+emits `txStyles` BEFORE `hf`:
+
+```rust
+// <p:txStyles> — heading and body font definitions
+write_master_tx_styles(&mut writer, template);
+
+// <p:hf> — footer visibility flags
+write_master_hf(&mut writer, &template.footer_flags);
+```
+
+This is schema-invalid. PowerPoint/Keynote process children in sequence-model
+order; a wrong-ordered `<p:txStyles>` either causes a repair dialog or silently
+drops txStyles content.
+
+**Fix required in STORY-037:** Swap the two calls so `hf` is emitted before
+`txStyles`. Also update the `serialize_master_to_xml` docstring at line 602-603
+to reflect the corrected order:
+
+```
+/// - `<p:hf>` footer visibility flags from `template.footer_flags`.
+/// - `<p:txStyles>` with heading/body font names from `template.fonts`.
+```
+
+The fix is a two-line swap plus a docstring update. No new API, no new test (existing
+master XML tests will catch the ordering implicitly once snapshot tests are added;
+an explicit element-order assertion must be added as part of this fix to satisfy
+TD-VSDD-059 — paper-fix detection requires a load-bearing test).
+
+### A.4 Canonical DSL Keyword → Layout Index Mapping
+
+**Owner: STORY-037** adds `slide_type_keyword: Option<Arc<str>>` to `SlideLayoutDef`.
+**Owner: STORY-038** replaces its stale mapping table with this table.
+
+`SlideLayoutDef.slide_type_keyword` is `None` for standard OOXML layouts (indices 1–11)
+that have no direct DSL slide-type keyword equivalent (they are referenced by OOXML
+type, not by user keyword). It is `Some(keyword)` for every SF custom layout.
+
+For the 11 standard layouts, `find_layout_index` matches by `ooxml_type`:
+
+| DSL keyword | OOXML type match | Layout index (1-based) |
+|-------------|-----------------|----------------------|
+| `title` | `"title"` (ooxml_type SL-01) | 1 |
+| `content` | `"obj"` (ooxml_type SL-02) | 2 |
+| `two_column` | `"twoObj"` (ooxml_type SL-04) | 4 |
+| `table` | `"objTx"` (ooxml_type SL-08) | 8 |
+| (blank slide) | `"blank"` (ooxml_type SL-07) | 7 |
+
+For the 20 SF custom layouts, `slide_type_keyword` is set directly:
+
+| DSL keyword | `SlideLayoutDef.name` | Layout index (1-based) |
+|-------------|----------------------|----------------------|
+| `section_divider` | `"SF Section Divider"` (dark) | 12 |
+| `stat_callout` | `"SF Stat Grid"` | 13 |
+| `quote` | `"SF Quote"` | 14 |
+| `vertical_timeline` | `"SF Timeline"` | 15 |
+| `agenda` | `"SF Agenda"` | 16 |
+| `toc` | `"SF TOC"` | 17 |
+| `bio` | `"SF Bio"` | 18 |
+| `team` | `"SF Team Grid"` | 19 |
+| `enhanced_table` | `"SF Comparison Table"` | 20 |
+| `image` | `"SF Full-Bleed Image"` | 21 |
+| `end` | `"SF End Slide"` (dark) | 22 |
+| `content_stat` | `"SF Data"` | 23 |
+| `diagram` | `"SF Diagram"` | 24 |
+| `chart` | `"SF Chart"` | 25 |
+| `highlight` | `"SF Map"` | 26 |
+| `severity_cards` | `"SF Risk Register"` | 27 |
+| `highlight_boxes` | `"SF Executive Summary"` | 28 |
+| `stats_summary` | `"SF Two Column"` | 29 |
+| `numbered_actions` | `"SF Methodology"` | 30 |
+| (appendix/overflow) | `"SF Appendix"` | 31 |
+
+**Note:** Several DSL keywords from Q2 (`split_contrast`, `card_rows`,
+`horizontal_timeline`, `status`, `progress_bar`, `metric_tree`, `formula`,
+`weighted_composite`, `grid`) do not have a dedicated custom layout slot in the
+current 20 SF custom layouts. The correct fallback for these is layout index 2
+("Title and Content", `ooxml_type = "obj"`) — a generic content layout, NOT layout
+index 0 (Title Slide). This fallback MUST emit a `tracing::warn!` naming the
+unmatched keyword and the fallback index, satisfying the no-silent-fallback rule.
+
+The architecture decision is: **STORY-038 assigns any DSL keywords that currently
+lack a dedicated SF custom layout to the generic "Title and Content" layout (index 2)
+with a logged warning.** If a future story adds new SF layouts for those types, it
+adds the `slide_type_keyword` entries and removes the fallback warning.
+
+The dark layout indices (for `clrMapOvr`) are: 12 (`section_divider`) and 22 (`end`).
+These are fully determined by `SlideLayoutDef.has_color_override`, which is already
+set correctly. Once `find_layout_index` returns the correct index, the existing
+`is_dark_layout` logic in `lib.rs:196-199` requires no change.
+
+### A.5 `brand_template_from_brand` and `Brand.layouts` (F-PASS2-M1)
+
+`Brand` in `slideforge-types` carries `layouts: Vec<LayoutDefinition>` (or equivalent).
+`brand_template_from_brand` in `crates/slideforge-pptx/src/brand_adapter.rs` builds a
+`BrandTemplate` by calling `generate_all_layouts` from scratch, ignoring whatever is
+in `Brand.layouts`.
+
+**Ruling:** This is NOT a silent data-loss defect if — and only if — `Brand.layouts`
+is always empty at the point `export` is called (i.e., the synthesizer fills
+`BrandTemplate.layouts` not `Brand.layouts`). The implementer MUST add an assertion or
+`debug_assert!` at the top of `brand_template_from_brand`:
+
+```rust
+debug_assert!(
+    brand.layouts.is_empty(),
+    "brand_template_from_brand: Brand.layouts is non-empty ({} entries) \
+     but brand_adapter synthesizes layouts from scratch; non-empty Brand.layouts \
+     will be ignored. If this is intentional, remove this assertion and document why.",
+    brand.layouts.len()
+);
+```
+
+If `Brand.layouts` is already a `Vec` with 31 populated entries at export time (i.e.,
+the synthesizer puts layout data in `Brand`, not `BrandTemplate`), then
+`brand_template_from_brand` is discarding those entries and is a STORY-037 defect
+requiring a fix in scope. The implementer must verify which case applies and act
+accordingly. This check MUST be added in STORY-037 scope.
+
+### A.6 Summary of STORY-037 Non-Deferrable Obligations
+
+The following items are in STORY-037 scope and MUST NOT be deferred to STORY-038:
+
+1. **Add `slide_type_keyword: Option<Arc<str>>` field to `SlideLayoutDef`** in
+   `crates/slideforge-brand/src/layouts.rs`. Populate with the canonical DSL keyword
+   for each SF custom layout per the table in §A.4.
+
+2. **Replace `find_layout_index` lookup logic** in
+   `crates/slideforge-pptx/src/lib.rs:254`. The new implementation must:
+   - First match by `SlideLayoutDef.slide_type_keyword` (for SF custom layouts).
+   - Second match by `ooxml_type` string for the ~5 standard OOXML layouts that
+     correspond to DSL keywords.
+   - Fall back to layout index 1 (0-based: index 1 = "Title and Content") on no match,
+     with a `tracing::warn!` that names the unmatched keyword. Layout index 0 ("Title
+     Slide") must NOT be the fallback for non-title content slides.
+   - The function must have a unit test that asserts: (a) `"section_divider"` maps to
+     index 11 (0-based), (b) `"end"` maps to index 21 (0-based), (c) `"title"` maps
+     to index 0 (0-based), (d) an unknown keyword maps to index 1 (0-based) with a
+     warning (not index 0).
+
+3. **Fix master XML element order** in `serialize_master_to_xml` in
+   `crates/slideforge-brand/src/layout_xml.rs:696-700`. Swap `hf` before `txStyles`.
+   Add an element-order assertion test in the `#[cfg(test)] mod tests` block.
+
+4. **Add `Brand.layouts` assertion** in `brand_template_from_brand` per §A.5.
+
+5. **Remove or fix the paper-fix dark-layout test** in
+   `crates/slideforge-pptx/src/tests/core_tests.rs:1554-1586`
+   (`test_f037_011_layout_index_is_wired_not_dead_code`). This test currently only
+   verifies "does not panic" — it does NOT verify `<p:clrMapOvr>` is present in the
+   output. It MUST be strengthened to assert that a `section_divider` slide in the
+   exported ZIP contains `<p:clrMapOvr>`. If this requires additional fixture work
+   that cannot complete in STORY-037 scope, the test must be marked `#[ignore]`
+   with a comment citing `STORY-038 AC-006` as the story that will un-ignore it —
+   the existing "does not panic" assertion is NOT a substitute for the load-bearing
+   contract (TD-VSDD-059).
+
+### A.7 Items Deferred to STORY-038
+
+The following items from the adversary's F-PASS2 findings are CONFIRMED as
+cross-story deferrals from STORY-037 to STORY-038. They become STORY-038 input
+obligations, not open defects when STORY-037 ships:
+
+1. **F-PASS2-C2 (full `clrMapOvr` end-to-end integration test):** A deck with a
+   `section_divider` slide must produce a PPTX ZIP where `slide1.xml` contains
+   `<p:clrMapOvr>`, verified via `ZipArchive::read`. This requires the full 31-layout
+   embedding (STORY-038 AC-003) and the corrected `find_layout_index` from obligation
+   #2 above working together. It cannot be tested end-to-end until STORY-038 embeds all
+   31 layouts. STORY-038 AC-006 covers this.
+
+2. **STORY-038 mapping table replacement:** The stale layout-index mapping table in
+   `STORY-038-pptx-layout-compliance.md` §"All 31 Layouts Present" MUST be replaced
+   with the canonical table from §A.4 before STORY-038 implementation begins.
+   The story-writer must make this update when STORY-037 ships.
+
+3. **Unmapped DSL keywords (split_contrast, card_rows, etc.):** The definitive
+   resolution of which SF custom layout each receives, or whether new layouts are
+   needed, is a STORY-038 scope item. STORY-037 uses the generic "Title and Content"
+   fallback with a warning for all unmatched keywords.
+
+### A.8 No Dependency Graph Changes Required
+
+The dependency graph (`dependency-graph.md`) already records `slideforge-pptx →
+slideforge-brand` and `slideforge-pptx → slideforge-layout` as of the original
+ADR-015 (2026-06-03). No new edges are introduced by Addendum A. The addition of
+`slide_type_keyword` to `SlideLayoutDef` is an additive, non-breaking change within
+`slideforge-brand` that does not alter any crate dependency edge.
