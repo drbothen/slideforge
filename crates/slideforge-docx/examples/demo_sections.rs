@@ -192,7 +192,11 @@ fn main() {
 
     let slides = vec![
         make_slide(0, "Q1 Market Analysis", "Revenue grew 12% year-over-year."),
-        make_slide(1, "Competitive Landscape", "Three new entrants identified in Q1."),
+        make_slide(
+            1,
+            "Competitive Landscape",
+            "Three new entrants identified in Q1.",
+        ),
         make_slide(2, "Operational Risks", "Infrastructure capacity at 78%."),
     ];
 
@@ -288,15 +292,27 @@ fn main() {
     println!("  Header columns: Risk | Severity | Description");
     // Show the table header columns
     let tbl_start = doc_xml.find("<w:tbl").expect("<w:tbl> present");
-    let tbl_end = doc_xml.find("</w:tbl>").map(|p| p + "</w:tbl>".len()).unwrap_or(doc_xml.len());
+    let tbl_end = doc_xml
+        .find("</w:tbl>")
+        .map(|p| p + "</w:tbl>".len())
+        .unwrap_or(doc_xml.len());
     let tbl_excerpt = &doc_xml[tbl_start..tbl_end.min(tbl_start + 600)];
     // Show header cell text
     let has_risk_col = tbl_excerpt.contains(">Risk</w:t>");
     let has_severity_col = tbl_excerpt.contains(">Severity</w:t>");
     let has_description_col = tbl_excerpt.contains(">Description</w:t>");
-    assert!(has_risk_col, "AC-002: 'Risk' column header must appear in table");
-    assert!(has_severity_col, "AC-002: 'Severity' column header must appear in table");
-    assert!(has_description_col, "AC-002: 'Description' column header must appear in table");
+    assert!(
+        has_risk_col,
+        "AC-002: 'Risk' column header must appear in table"
+    );
+    assert!(
+        has_severity_col,
+        "AC-002: 'Severity' column header must appear in table"
+    );
+    assert!(
+        has_description_col,
+        "AC-002: 'Description' column header must appear in table"
+    );
     println!("  Risk/Severity/Description columns    VERIFIED in header row");
     println!("  PASS");
     println!();
@@ -359,7 +375,9 @@ fn main() {
     println!("  Executive Summary (auto)             at offset {exec_pos}");
     println!("  Risk Register (auto)                 at offset {risk_pos}");
     println!("  Methodology (manual)                 at offset {methodology_pos}");
-    println!("  Order: narrative({narrative_pos}) < auto({exec_pos}/{risk_pos}) < manual({methodology_pos})");
+    println!(
+        "  Order: narrative({narrative_pos}) < auto({exec_pos}/{risk_pos}) < manual({methodology_pos})"
+    );
     println!("  NOTES_SENTINEL                       ABSENT from document.xml");
     println!("  PASS");
     println!();
@@ -370,7 +388,11 @@ fn main() {
     // Export a deck with NO sections at all
     let empty_laid_out = LaidOutDeck {
         page_size: PageSize::default(),
-        slides: vec![make_slide(0, "Simple Overview", "Only narrative content here.")],
+        slides: vec![make_slide(
+            0,
+            "Simple Overview",
+            "Only narrative content here.",
+        )],
         sections: vec![],
         warnings: vec![],
     };
@@ -422,7 +444,11 @@ fn main() {
             } else {
                 "LOW"
             };
-            (format!("R{i:03}"), severity, format!("Risk description for item {i}"))
+            (
+                format!("R{i:03}"),
+                severity,
+                format!("Risk description for item {i}"),
+            )
         })
         .collect();
     let row_refs: Vec<(&str, &str, &str)> = rows_20
