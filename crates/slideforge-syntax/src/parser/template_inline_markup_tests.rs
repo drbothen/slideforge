@@ -2067,3 +2067,302 @@ fn test_bare_bracket_stays_literal_no_error_regression_guard() {
          literal content must contain 'just text'; got all_text={all_text:?}"
     );
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SEC-002 / E-PAR-022: Link URL scheme allowlist (STORY-077 follow-up)
+//
+// All link URLs must have a permitted scheme: http, https, or mailto.
+// Any other scheme (javascript, data, vbscript, file, etc.) and any URL
+// with no scheme (no `:`) must be rejected with E-PAR-022.
+//
+// Allowlist is case-insensitive: HTTPS and https are both permitted.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// Helper: parse a DSL string containing a link and assert E-PAR-022 is raised.
+///
+/// Uses the production `parse()` path — E-PAR-022 is fatal like all E-PAR codes.
+#[allow(dead_code)]
+fn assert_e_par_022(dsl_string_content: &str, expected_scheme: &str) {
+    use crate::parser::parse;
+    use crate::span::SourceMap;
+    use miette::Diagnostic as _;
+
+    let src = format!("slide content:\n  detail \"{dsl_string_content}\"\n");
+    let mut sm = SourceMap::new();
+    let file_id = sm.add_file(Arc::from("test.sf"), Arc::from(src.as_str()));
+    let result = parse(src.as_str(), file_id, &sm);
+
+    let Err(errors) = result else {
+        panic!(
+            "assert_e_par_022: parse() returned Ok for {dsl_string_content:?} — \
+             E-PAR-022 must be strict-build-fatal (exit 1). \
+             Scheme {expected_scheme:?} must be rejected."
+        )
+    };
+
+    assert!(
+        !errors.is_empty(),
+        "assert_e_par_022: Err returned but errors vec is empty (scheme={expected_scheme:?})"
+    );
+
+    let first = &errors[0];
+    let code = first
+        .code()
+        .expect("E-PAR-022 error must carry a diagnostic code");
+    let code_str = code.to_string();
+    assert!(
+        code_str.contains("E-PAR-022"),
+        "assert_e_par_022: expected code E-PAR-022 for disallowed scheme {expected_scheme:?}; \
+         got: {code_str}. Error: {first:?}"
+    );
+
+    // Message must contain the scheme string.
+    let rendered = first.to_string();
+    assert!(
+        rendered.contains(expected_scheme),
+        "assert_e_par_022: rendered message must contain scheme {expected_scheme:?}; \
+         got: {rendered:?}"
+    );
+
+    // Message must NOT leak the routing sentinel.
+    assert!(
+        !rendered.contains("SLIDEFORGE_INLINE_ROUTE"),
+        "assert_e_par_022: rendered message must not contain routing sentinel; \
+         got: {rendered:?}"
+    );
+
+    // Error variant must be DisallowedLinkUrlScheme.
+    assert!(
+        matches!(
+            first,
+            crate::error::SyntaxError::DisallowedLinkUrlScheme { .. }
+        ),
+        "assert_e_par_022: expected SyntaxError::DisallowedLinkUrlScheme variant; got: {first:?}"
+    );
+}
+
+/// SEC-002 / E-PAR-022: `javascript:alert(1)` scheme must be rejected.
+///
+/// RED GATE: fails until DisallowedLinkUrlScheme variant + routing is added.
+#[test]
+#[allow(non_snake_case)]
+fn test_SEC_002_javascript_scheme_rejected() {
+    assert_e_par_022("[click](javascript:alert(1))", "javascript");
+}
+
+/// SEC-002 / E-PAR-022: `data:text/html,...` scheme must be rejected.
+#[test]
+#[allow(non_snake_case)]
+fn test_SEC_002_data_scheme_rejected() {
+    assert_e_par_022("[x](data:text/html,<h1>xss</h1>)", "data");
+}
+
+/// SEC-002 / E-PAR-022: relative URL (no `:`) must be rejected with scheme "(none)".
+#[test]
+#[allow(non_snake_case)]
+fn test_SEC_002_relative_url_no_scheme_rejected() {
+    assert_e_par_022("[x](relative/path)", "(none)");
+}
+
+/// SEC-002 / E-PAR-022: anchor URL (no `:`) must be rejected with scheme "(none)".
+#[test]
+#[allow(non_snake_case)]
+fn test_SEC_002_anchor_url_no_scheme_rejected() {
+    assert_e_par_022("[x](#anchor)", "(none)");
+}
+
+/// SEC-002 / E-PAR-022 REGRESSION GUARD: `https://example.com` must parse to Link (no error).
+///
+/// This guard must PASS before and after the fix.
+#[test]
+#[allow(non_snake_case)]
+fn test_SEC_002_https_allowed_regression_guard() {
+    let chunks = parse_template_value("[x](https://example.com)");
+    assert_eq!(
+        chunks.len(),
+        1,
+        "https link must produce 1 chunk; got {chunks:?}"
+    );
+    assert!(
+        matches!(&chunks[0], TemplateChunk::Link { url, .. } if url == "https://example.com"),
+        "https link must produce TemplateChunk::Link; got: {:?}",
+        chunks[0]
+    );
+}
+
+/// SEC-002 / E-PAR-022 REGRESSION GUARD: `http://e.com` must parse to Link (no error).
+#[test]
+#[allow(non_snake_case)]
+fn test_SEC_002_http_allowed_regression_guard() {
+    let chunks = parse_template_value("[x](http://e.com)");
+    assert_eq!(
+        chunks.len(),
+        1,
+        "http link must produce 1 chunk; got {chunks:?}"
+    );
+    assert!(
+        matches!(&chunks[0], TemplateChunk::Link { url, .. } if url == "http://e.com"),
+        "http link must produce TemplateChunk::Link; got: {:?}",
+        chunks[0]
+    );
+}
+
+/// SEC-002 / E-PAR-022 REGRESSION GUARD: `mailto:a@b.com` must parse to Link (no error).
+#[test]
+#[allow(non_snake_case)]
+fn test_SEC_002_mailto_allowed_regression_guard() {
+    let chunks = parse_template_value("[x](mailto:a@b.com)");
+    assert_eq!(
+        chunks.len(),
+        1,
+        "mailto link must produce 1 chunk; got {chunks:?}"
+    );
+    assert!(
+        matches!(&chunks[0], TemplateChunk::Link { url, .. } if url == "mailto:a@b.com"),
+        "mailto link must produce TemplateChunk::Link; got: {:?}",
+        chunks[0]
+    );
+}
+
+/// SEC-002 / E-PAR-022 REGRESSION GUARD: `HTTPS://e.com` (case-insensitive) must parse to Link.
+#[test]
+#[allow(non_snake_case)]
+fn test_SEC_002_https_uppercase_case_insensitive_regression_guard() {
+    let chunks = parse_template_value("[x](HTTPS://e.com)");
+    assert_eq!(
+        chunks.len(),
+        1,
+        "HTTPS link must produce 1 chunk; got {chunks:?}"
+    );
+    assert!(
+        matches!(&chunks[0], TemplateChunk::Link { url, .. } if url == "HTTPS://e.com"),
+        "HTTPS link must produce TemplateChunk::Link; got: {:?}",
+        chunks[0]
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// OBS-P24-A: Italic `_` bilateral flanking — close-side guard (STORY-077 follow-up)
+//
+// The `_` close guard must mirror the open-side guard: a `_` that is followed
+// immediately by an alphanumeric or `_` is word-internal and must NOT close
+// the italic span.
+//
+// Example: `_apply file_path here_`
+//   Before fix: closes at `file_` (producing Italic("apply file") + Literal("path here_"))
+//   After fix:  `_` in `file_path` is word-internal (followed by `p`), so it is treated
+//               as literal — the span closes at the FINAL `_`.
+//               Produces: Italic("apply file_path here")
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// OBS-P24-A: `_apply file_path here_` — internal `_` before `p` must NOT close.
+///
+/// The `_` in `file_path` is right-flanked by `p` (alphanumeric), so it is
+/// word-internal and must be treated as a literal character inside the italic span.
+/// The FINAL `_` (before end-of-string, followed by nothing) is the valid closer.
+///
+/// RED GATE: fails until the close-side flanking guard is added.
+#[test]
+#[allow(non_snake_case)]
+fn test_OBS_P24_A_italic_bilateral_flanking_internal_underscore_not_close() {
+    let chunks = parse_template_value("_apply file_path here_");
+
+    assert_eq!(
+        chunks.len(),
+        1,
+        "OBS-P24-A: `_apply file_path here_` must produce exactly 1 chunk (Italic); \
+         got {chunks:?}. \
+         Internal `_` in `file_path` must NOT close the italic span."
+    );
+    match &chunks[0] {
+        TemplateChunk::Italic(children) => {
+            // Children must represent "apply file_path here" as a single literal.
+            assert_eq!(
+                children.len(),
+                1,
+                "OBS-P24-A: Italic must have exactly 1 child (the full literal); \
+                 got {children:?}"
+            );
+            assert!(
+                matches!(&children[0], TemplateChunk::Literal(s) if s == "apply file_path here"),
+                "OBS-P24-A: Italic child must be Literal(\"apply file_path here\"); \
+                 got: {:?}",
+                children[0]
+            );
+        },
+        other => panic!(
+            "OBS-P24-A: expected TemplateChunk::Italic for `_apply file_path here_`; \
+             got: {other:?}. \
+             Before fix: early close at `file_` produces Italic(\"apply file\") + remainder."
+        ),
+    }
+}
+
+/// OBS-P24-A: Simple `_word_` still works (both flanking guards satisfied).
+#[test]
+#[allow(non_snake_case)]
+fn test_OBS_P24_A_simple_italic_word_still_works() {
+    let chunks = parse_template_value("_word_");
+    assert_eq!(
+        chunks.len(),
+        1,
+        "simple `_word_` must produce 1 chunk; got {chunks:?}"
+    );
+    assert!(
+        matches!(&chunks[0], TemplateChunk::Italic(c) if c.len() == 1),
+        "simple `_word_` must produce Italic with 1 child; got: {:?}",
+        chunks[0]
+    );
+}
+
+/// OBS-P24-A: `_a_b_` — the `_` after `a` is followed by `b` (word char), so it
+/// must NOT close the italic. The span closes at the final `_`.
+#[test]
+#[allow(non_snake_case)]
+fn test_OBS_P24_A_italic_a_b_closes_at_final_underscore() {
+    let chunks = parse_template_value("_a_b_");
+
+    assert_eq!(
+        chunks.len(),
+        1,
+        "OBS-P24-A: `_a_b_` must produce exactly 1 Italic chunk; got {chunks:?}"
+    );
+    assert!(
+        matches!(&chunks[0], TemplateChunk::Italic(_)),
+        "OBS-P24-A: `_a_b_` must produce Italic; got: {:?}",
+        chunks[0]
+    );
+    // The italic content must contain "a_b" (the middle `_` stays as literal).
+    if let TemplateChunk::Italic(children) = &chunks[0] {
+        let text: String = children
+            .iter()
+            .filter_map(|c| {
+                if let TemplateChunk::Literal(s) = c {
+                    Some(s.as_str())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert_eq!(
+            text, "a_b",
+            "OBS-P24-A: Italic content must be \"a_b\" (middle `_` is literal); got: {text:?}"
+        );
+    }
+}
+
+/// OBS-P24-A: `snake_case_word` (no opening italic) must remain literal.
+///
+/// The open-guard prevents `snake_case_word` from opening an italic span.
+/// This regression guard must pass before and after the close-guard fix.
+#[test]
+#[allow(non_snake_case)]
+fn test_OBS_P24_A_snake_case_stays_literal_regression_guard() {
+    let chunks = parse_template_value("snake_case_word");
+    for chunk in &chunks {
+        assert!(
+            matches!(chunk, TemplateChunk::Literal(_)),
+            "OBS-P24-A: snake_case_word must remain literal; got: {chunk:?}"
+        );
+    }
+}

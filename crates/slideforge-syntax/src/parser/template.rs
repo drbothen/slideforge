@@ -101,6 +101,36 @@ fn nesting_depth_exceeded_msg(open_offset: usize, depth: usize) -> String {
     )
 }
 
+/// Produce an E-PAR-022 message for a disallowed link URL scheme.
+///
+/// `scheme` is the scheme extracted from the URL (lowercased), or `"(none)"`
+/// when the URL contains no `:` separator (scheme-less / relative URL).
+/// The `file:line:col` fields are supplied by the `SyntaxError` variant's
+/// `#[error(...)]` format at error-conversion time — NOT embedded in this message.
+fn disallowed_link_url_scheme_msg(scheme: &str) -> String {
+    format!(
+        "E-PAR-022: link URL scheme '{scheme}' is not permitted. \
+         Allowed schemes: http, https, mailto."
+    )
+}
+
+/// Allowlist of permitted link URL schemes (case-insensitive comparison).
+///
+/// Relative URLs (no `:`) are represented as scheme `"(none)"` and are NOT
+/// in the allowlist. Internal slide refs must use `{{ ref("id") }}` instead.
+const ALLOWED_LINK_SCHEMES: &[&str] = &["http", "https", "mailto"];
+
+/// Extract the URL scheme from a link URL string.
+///
+/// Returns the portion of the URL before the first `:`, lowercased.
+/// Returns `"(none)"` when the URL contains no `:` (scheme-less / relative URL).
+fn extract_url_scheme(url: &str) -> String {
+    match url.find(':') {
+        Some(colon_pos) => url[..colon_pos].to_lowercase(),
+        None => "(none)".to_string(),
+    }
+}
+
 /// Maximum recursion depth for `scan_template_chunks`.
 ///
 /// Prevents crafted inputs (e.g. thousands of alternating `^_` pairs) from
@@ -135,6 +165,11 @@ pub enum TemplateErrorKind {
     ///
     /// Carries the depth at which the cap was triggered.
     InlineNestingDepthExceeded(usize),
+    /// A `[text](url)` link used a URL scheme that is not in the allowlist (E-PAR-022).
+    ///
+    /// Carries the disallowed scheme string (e.g. `"javascript"`, `"data"`, `"(none)"`).
+    /// The allowlist is `{"http", "https", "mailto"}` (case-insensitive).
+    DisallowedLinkUrlScheme(String),
 }
 
 /// A parse error produced by `scan_template_chunks`, carrying both the byte
@@ -223,6 +258,17 @@ impl TemplateError {
                     msg = self.message
                 )
             },
+            // E-PAR-022: disallowed link URL scheme — route through sentinel so
+            // parser/mod.rs produces the dedicated DisallowedLinkUrlScheme variant.
+            // The "delimiter" slot carries the scheme string (hex-encoded to avoid
+            // pipe conflicts). The clean message carries the full diagnostic text.
+            TemplateErrorKind::DisallowedLinkUrlScheme(scheme) => {
+                let hex = hex_encode(scheme.as_bytes());
+                format!(
+                    "SLIDEFORGE_INLINE_ROUTE|DisallowedLinkUrlScheme|{hex}|{msg}",
+                    msg = self.message
+                )
+            },
             // E-PAR-012/013/014: no routing-tag prefix needed. These errors flow
             // through the generic UnexpectedToken arm in parser/mod.rs, which
             // renders the message text directly — no message.contains() dispatch.
@@ -295,6 +341,11 @@ pub(super) enum InlineMarkupRoute {
     ///
     /// Field: `clean_message` (depth info is embedded in the message text).
     InlineNestingDepthExceeded(String),
+    /// E-PAR-022 — disallowed link URL scheme.
+    ///
+    /// Fields: `(scheme, clean_message)`.
+    /// `scheme` is the disallowed scheme string (e.g. `"javascript"`, `"(none)"`).
+    DisallowedLinkUrlScheme(String, String),
 }
 
 /// Try to parse an inline-markup routing tag from `msg`.
@@ -335,6 +386,11 @@ pub(super) fn parse_routing_tag(msg: &str) -> Option<InlineMarkupRoute> {
         // The empty-string value is safe: InlineNestingDepthExceeded has no delimiter.
         "InlineNestingDepthExceeded" => {
             Some(InlineMarkupRoute::InlineNestingDepthExceeded(clean_msg))
+        },
+        // E-PAR-022: the "delimiter" slot carries the scheme string (hex-encoded).
+        // `delim` after hex_decode is the scheme (e.g. "javascript", "(none)").
+        "DisallowedLinkUrlScheme" => {
+            Some(InlineMarkupRoute::DisallowedLinkUrlScheme(delim, clean_msg))
         },
         _ => None,
     }
@@ -586,6 +642,32 @@ fn scan_template_chunks(
             && s.is_char_boundary(pos)
             && s[pos..].starts_with(close)
         {
+            // OBS-P24-A: bilateral flanking guard for `_` closes.
+            //
+            // A `_` that is IMMEDIATELY FOLLOWED by an alphanumeric character or
+            // another `_` is word-internal (right-flanking) and must NOT close the
+            // italic span. This mirrors the open-side left-flanking guard (~line 866)
+            // which rejects `_` preceded by alphanumeric/`_` as an italic opener.
+            //
+            // CommonMark §6.1 right-flanking rule (simplified): a `_` ends an
+            // emphasis run only if it is NOT followed directly by a Unicode
+            // alphanumeric. Using ASCII alphanumeric as the guard is sufficient
+            // for DSL identifier and sentinel-string use cases.
+            //
+            // Example: `_apply file_path here_`
+            //   pos at the `_` in `file_path`: next byte is `p` (alphanumeric) →
+            //   word-internal closer — skip as literal, advance pos by 1.
+            //   pos at the final `_`: next byte is end-of-string → valid closer.
+            if close == "_" {
+                let next_is_word = bytes
+                    .get(pos + 1)
+                    .is_some_and(|b| b.is_ascii_alphanumeric() || *b == b'_');
+                if next_is_word {
+                    // Word-internal `_` — not a valid closer. Treat as literal.
+                    pos += 1;
+                    continue;
+                }
+            }
             flush_lit!();
             return (chunks, pos + close.len());
         }
@@ -898,6 +980,29 @@ fn scan_template_chunks(
                     let paren_close = url_start + paren_close_rel;
                     let text_inner = &s[pos + 1..bracket_close];
                     let url = &s[url_start..paren_close];
+
+                    // SEC-002 / E-PAR-022: validate the URL scheme against the allowlist.
+                    // Allowlist (case-insensitive): http, https, mailto.
+                    // Relative / anchor URLs (no `:`) → scheme "(none)" → reject.
+                    let scheme = extract_url_scheme(url);
+                    if !ALLOWED_LINK_SCHEMES.contains(&scheme.as_str()) {
+                        flush_lit!();
+                        errors.push(TemplateError::new(
+                            link_open_pos,
+                            TemplateErrorKind::DisallowedLinkUrlScheme(scheme.clone()),
+                            disallowed_link_url_scheme_msg(&scheme),
+                        ));
+                        // Recovery: treat remainder as literal and continue accumulation
+                        // (mirrors unclosed-link recovery for error accumulation).
+                        let remainder = &s[link_open_pos..];
+                        if !remainder.is_empty() {
+                            chunks.push(TemplateChunk::Literal(remainder.to_string()));
+                        }
+                        pos = len;
+                        lit_start = pos;
+                        continue;
+                    }
+
                     flush_lit!();
                     // The link text IS processed for nested markup + interpolation.
                     let (text_children, _) =
