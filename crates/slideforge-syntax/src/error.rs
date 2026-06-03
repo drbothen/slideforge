@@ -351,8 +351,14 @@ pub enum SyntaxError {
     ///
     /// Emitted when `scan_template_chunks` recurses deeper than `MAX_INLINE_NESTING`
     /// (64 levels). The remainder of the input at that position is treated as a
-    /// `Literal` chunk. Parsing continues — the error is accumulated like
-    /// E-PAR-019 and E-PAR-020 (non-fatal, returned in `ParseResult::warnings`).
+    /// `Literal` chunk to allow the parser to collect all remaining errors in one
+    /// pass (error accumulation, DIR-077-002 §5 + error-taxonomy.md).
+    ///
+    /// **Severity: strict-build-fatal.** Like all Parse Errors (E-PAR-*), this
+    /// diagnostic is routed to the fatal `errors` path — `parse()` returns `Err`
+    /// in strict (default) mode and the build halts with exit 1. "Accumulated"
+    /// means all errors are collected before halting, NOT that the build succeeds.
+    /// This error is never placed in `ParseResult::warnings`. (F-077-P14-001)
     ///
     /// The span points at the byte offset of the opening delimiter that pushed
     /// over the cap (or the best-available absolute position when the exact
@@ -631,11 +637,14 @@ impl SyntaxError {
     ///   exact opener is not available at the recursion site).
     /// - `span_len` is the byte length of the opening delimiter (1 is a safe fallback).
     ///
-    /// Accumulation: E-PAR-021 is ACCUMULATED (not hard-Err) — the parser continues
-    /// and the diagnostic is placed in `ParseResult::warnings`, identical to E-PAR-019/020.
-    /// This is enforced by the routing path in `parser/mod.rs`: the sentinel-tagged
-    /// message is decoded by `parse_routing_tag`, producing this variant, and then pushed
-    /// to `parse_time_warnings` (the same non-fatal sink used by E-PAR-019/020).
+    /// **Accumulation semantics (E-PAR-021 is strict-build-fatal):**
+    /// The parser accumulates this diagnostic (collects all errors rather than halting
+    /// at the first failure, per DIR-077-002 §5), but routes it to the fatal `errors`
+    /// path — NOT to `ParseResult::warnings`. `parse()` returns `Err` in strict
+    /// (default) mode; the build halts with exit 1. "Accumulated" means every error
+    /// in the file is reported at once; it does NOT mean the build succeeds.
+    /// See error-taxonomy.md: "Parse Errors (E-PAR) — Always fatal. Build halts."
+    /// (F-077-P14-001; cross-ref: F-077-P15-001)
     #[must_use]
     pub fn inline_nesting_depth_exceeded(
         file: String,

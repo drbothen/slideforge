@@ -1832,12 +1832,15 @@ fn test_F077_P7_001_bold_with_emoji_no_panic() {
 /// nesting-depth cap this would recurse until a stack overflow.
 ///
 /// Uses `parse()` directly (not `parse_template_value`). E-PAR-021 is ALWAYS
-/// FATAL (error-taxonomy.md:24), so parse() returns Err in strict (default) mode.
-/// The test collects errors from either path for robustness. (F-077-P14-001)
+/// FATAL (error-taxonomy.md + DIR-077-002 §5), so `parse()` MUST return `Err`
+/// in strict (default) mode. (F-077-P14-001, F-077-P15-002)
+///
+/// Two load-bearing properties are verified:
+/// 1. **No stack overflow** — reaching the assertions proves the depth cap fired.
+/// 2. **Strict-build-fatal** — `parse()` must return `Err`; `Ok` is a regression.
 #[test]
 #[allow(non_snake_case)]
 fn test_F077_P7_002_deep_nesting_produces_E_PAR_021_no_stack_overflow() {
-    use crate::error::SyntaxError;
     use crate::parser::parse;
     use miette::Diagnostic as _;
 
@@ -1849,34 +1852,32 @@ fn test_F077_P7_002_deep_nesting_produces_E_PAR_021_no_stack_overflow() {
     let file_id = sm.add_file(Arc::from("test.sf"), Arc::from(src.as_str()));
 
     // Must not panic — reaching here means no stack overflow.
-    let result = parse(src.as_str(), file_id, &sm);
+    // E-PAR-021 is strict-build-fatal: parse() MUST return Err, never Ok.
+    // If E-PAR-021 were routed to ParseResult::warnings, parse() would return
+    // Ok and this expect_err call would fail — that is the regression this test
+    // is designed to catch. (F-077-P15-002)
+    let errors = parse(src.as_str(), file_id, &sm).expect_err(
+        "E-PAR-021 must be strict-build-fatal: parse() must return Err (F-077-P14-001)",
+    );
 
-    // Collect all warnings/errors.
-    let (warnings, errs): (Vec<SyntaxError>, Vec<SyntaxError>) = match result {
-        Ok(pr) => (pr.warnings, vec![]),
-        Err(errs) => (vec![], errs),
-    };
-    let all: Vec<&SyntaxError> = warnings.iter().chain(errs.iter()).collect();
-
-    // At least one E-PAR-021 diagnostic must be produced via the new dedicated
-    // SyntaxError::InlineNestingDepthExceeded variant (F-077-P8-001 code-assertion).
+    // At least one E-PAR-021 diagnostic must appear in the ERRORS vec (not warnings).
     // Guards the anti-regression contract: must NOT be E-PAR-002 (UnexpectedToken).
-    let has_021_by_code = all.iter().any(|e| {
+    let has_021_by_code = errors.iter().any(|e| {
         e.code()
             .is_some_and(|c| c.to_string().contains("E-PAR-021"))
     });
     assert!(
         has_021_by_code,
         "test_F077_P7_002 FAIL: no InlineNestingDepthExceeded (E-PAR-021) diagnostic \
-         produced for deeply-nested input (by structured .code(), not message text).\n\
-         diagnostics: {all:?}"
+         in the fatal errors vec for deeply-nested input (by structured .code()).\n\
+         errors: {errors:?}"
     );
 
-    // Confirm the message text also contains E-PAR-021 (belt-and-suspenders check).
-    let has_021_by_msg = all.iter().any(|e| e.to_string().contains("E-PAR-021"));
+    // Belt-and-suspenders: message text must also contain E-PAR-021.
+    let has_021_by_msg = errors.iter().any(|e| e.to_string().contains("E-PAR-021"));
     assert!(
         has_021_by_msg,
         "test_F077_P7_002 FAIL: E-PAR-021 not found in diagnostic message text.\n\
-         diagnostics: {all:?}"
+         errors: {errors:?}"
     );
 }
