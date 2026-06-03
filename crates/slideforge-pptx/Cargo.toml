@@ -22,6 +22,10 @@ tracing         = { workspace = true }
 slideforge-types      = { workspace = true }
 slideforge-plugin-api = { workspace = true }
 slideforge-layout     = { workspace = true }
+# ADR-015: slideforge-pptx calls brand XML serializers (serialize_master_to_xml,
+# serialize_theme_to_xml, serialize_layout_to_xml). No brand computation is called —
+# the exporter consumes pre-serialized bytes only.
+slideforge-brand      = { workspace = true }
 
 [dev-dependencies]
 insta = { workspace = true }
