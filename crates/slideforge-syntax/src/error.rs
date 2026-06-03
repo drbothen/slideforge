@@ -68,6 +68,7 @@ pub enum ParseSeverity {
 /// | `UnclosedInlineMarkup` | `E-PAR-019` |
 /// | `EmptyInlineMarkupSpan` | `E-PAR-020` |
 /// | `InlineNestingDepthExceeded` | `E-PAR-021` |
+/// | `DisallowedLinkUrlScheme` | `E-PAR-022` |
 ///
 /// # Extensibility
 ///
@@ -390,6 +391,47 @@ pub enum SyntaxError {
         at: SourceSpan,
     },
 
+    /// A disallowed link URL scheme was used in a `[text](url)` inline link.
+    ///
+    /// Code: `E-PAR-022`
+    ///
+    /// Emitted when the URL in a `[text](url)` link uses a scheme other than the
+    /// permitted set: `http`, `https`, `mailto`. Case-insensitive comparison is used.
+    ///
+    /// Forbidden schemes include (but are not limited to): `javascript`, `data`,
+    /// `vbscript`, `file`. Relative URLs (no scheme, no `:`) are also rejected —
+    /// the scheme field contains `"(none)"` in that case.
+    ///
+    /// Internal references must use `{{ ref("id") }}` instead of a bare link URL.
+    ///
+    /// The span points at the opening `[` of the link.
+    #[error(
+        "Link URL scheme not permitted at {file}:{line}:{col}: '{scheme}'. Allowed: http, https, mailto."
+    )]
+    #[diagnostic(
+        code("E-PAR-022"),
+        help(
+            "Use an absolute URL with a permitted scheme: https://, http://, or mailto:. \
+             For internal slide references, use `{{ ref(\"id\") }}` instead of a link URL."
+        )
+    )]
+    DisallowedLinkUrlScheme {
+        /// Source file path.
+        file: String,
+        /// One-based line number.
+        line: u32,
+        /// One-based column number.
+        col: u32,
+        /// The disallowed scheme (e.g. `"javascript"`, `"data"`, `"(none)"`).
+        scheme: String,
+        /// Source code context for miette rendering.
+        #[source_code]
+        src: NamedSource<String>,
+        /// Span pointing at the opening `[` of the link.
+        #[label("disallowed link URL scheme here")]
+        at: SourceSpan,
+    },
+
     /// A version declaration error.
     ///
     /// Code: `E-PAR-010`
@@ -667,6 +709,31 @@ impl SyntaxError {
         }
     }
 
+    /// Construct a `DisallowedLinkUrlScheme` error (E-PAR-022).
+    ///
+    /// `scheme` is the disallowed scheme extracted from the URL (e.g. `"javascript"`,
+    /// `"data"`, `"(none)"` for scheme-less URLs).
+    /// `byte_offset` is the byte position of the opening `[` of the link.
+    #[must_use]
+    pub fn disallowed_link_url_scheme(
+        file: String,
+        line: u32,
+        col: u32,
+        scheme: String,
+        source_text: String,
+        byte_offset: usize,
+    ) -> Self {
+        let src = NamedSource::new(file.as_str(), source_text);
+        Self::DisallowedLinkUrlScheme {
+            file,
+            line,
+            col,
+            scheme,
+            src,
+            at: SourceSpan::from((byte_offset, 1)),
+        }
+    }
+
     /// Construct a `VersionError` (E-PAR-010).
     #[must_use]
     pub fn version_error(
@@ -762,6 +829,9 @@ impl SyntaxError {
             }
             | Self::InlineNestingDepthExceeded {
                 file, line, col, ..
+            }
+            | Self::DisallowedLinkUrlScheme {
+                file, line, col, ..
             } => (file.as_str(), *line, *col),
             Self::UnexpectedEof { file, .. } | Self::VersionError { file, .. } => {
                 (file.as_str(), 0, 0)
@@ -787,6 +857,7 @@ impl SyntaxError {
             Self::UnclosedInlineMarkup { .. } => 7,
             Self::EmptyInlineMarkupSpan { .. } => 8,
             Self::InlineNestingDepthExceeded { .. } => 9,
+            Self::DisallowedLinkUrlScheme { .. } => 10,
         }
     }
 }

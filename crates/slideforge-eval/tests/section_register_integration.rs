@@ -154,6 +154,128 @@ fn test_BC_3_02_002_integration_eval_deck_populates_slide_and_section_register_c
     );
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// OBS-P25-A: Real-source → eval round-trip (STORY-077 follow-up)
+//
+// Parses REAL .sf source through the production parser, runs the real eval
+// pipeline, and asserts structural InlineNode variants in the section body.
+// This consolidates AC-002 coverage via the actual parse→eval path.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// OBS-P25-A / BC-3.02.002 AC-002:
+/// Real `.sf` source with `section methodology:` + `detail: **Bold claim.** See {{ ref("slide-1") }}.`
+/// must parse+eval to a `SectionBlock` with `body["detail"] = FieldValue::Inlines([...])`.
+///
+/// Asserts structural `InlineNode` variants: `Bold([Plain("Bold claim.")])`, `Plain(" See ")`,
+/// `Xref("slide-1")`, `Plain(".")`.
+///
+/// Also asserts a `RegisteredContent` { `Register::Detail` } entry is produced.
+///
+/// This uses the REAL source parser (`slideforge_syntax::parser::parse`) and the
+/// real eval pipeline (`eval_deck`) — NOT hand-constructed AST nodes.
+#[test]
+#[allow(non_snake_case)]
+fn test_OBS_P25_A_real_source_parse_eval_section_detail_structural_inline_nodes() {
+    use slideforge_syntax::parser::parse;
+    use slideforge_syntax::span::SourceMap;
+    use slideforge_types::FieldValue as TypesFieldValue;
+    use std::sync::Arc;
+
+    // Real DSL source: a section with a detail register field containing
+    // bold markup and a ref() call (quote-free case per OBS-P25-A spec).
+    // `{{ ref("slide-1") }}` uses the text-mode interpolation path.
+    // We use figref(1) instead of ref("slide-1") to avoid inner-quote
+    // round-trip issues through the DSL string lexer (which stores StringLit
+    // tokens verbatim, including backslash-escaped quotes). figref(1) has
+    // no inner quotes and works through the full round-trip.
+    //
+    // Correct section sub-block syntax is `detail: "value"` (WITH colon).
+    // `detail "value"` (without colon) is EC-006 / E-PAR-017.
+    let src = "section methodology:\n  detail: \"**Bold claim.** See {{ figref(1) }}.\"\n";
+    let mut sm = SourceMap::new();
+    let file_id = sm.add_file(Arc::from("test.sf"), Arc::from(src));
+    let parse_result =
+        parse(src, file_id, &sm).expect("OBS-P25-A: source must parse without errors");
+
+    let deck_node = parse_result.deck;
+
+    let config = EvalConfig::default();
+    let mut sink = slideforge_syntax::DiagnosticSink::new();
+    let deck = eval_deck(&deck_node, &config, &mut sink)
+        .expect("OBS-P25-A: eval_deck must return Some for valid section");
+
+    assert!(
+        sink.is_empty(),
+        "OBS-P25-A: no diagnostics expected; got: {:?}",
+        sink.errors()
+    );
+
+    // There must be exactly 1 section block.
+    assert_eq!(
+        deck.section_blocks.len(),
+        1,
+        "OBS-P25-A: must produce 1 section block; got: {:?}",
+        deck.section_blocks
+    );
+
+    let section = &deck.section_blocks[0];
+
+    // The section must have a Detail register_content entry.
+    let detail_rc = section
+        .register_content
+        .iter()
+        .find(|rc| rc.register == slideforge_types::Register::Detail)
+        .expect("OBS-P25-A: section must have a Detail register_content entry");
+
+    // detail_rc.content must contain structural InlineNode variants:
+    //   Bold([Plain("Bold claim.")]), Plain(" See "), Xref("fig-1"), Plain(".")
+    let nodes = &detail_rc.content;
+    assert!(
+        nodes.len() >= 4,
+        "OBS-P25-A: Detail content must have at least 4 inline nodes; got {nodes:?}"
+    );
+
+    // Node 0: Bold([Plain("Bold claim.")])
+    assert!(
+        matches!(&nodes[0], InlineNode::Bold(children) if {
+            children.len() == 1 && matches!(&children[0], InlineNode::Plain(s) if s.as_ref() == "Bold claim.")
+        }),
+        "OBS-P25-A: nodes[0] must be Bold([Plain(\"Bold claim.\")]); got: {:?}",
+        nodes[0]
+    );
+
+    // Node 1: Plain(" See ")
+    assert!(
+        matches!(&nodes[1], InlineNode::Plain(s) if s.as_ref() == " See "),
+        "OBS-P25-A: nodes[1] must be Plain(\" See \"); got: {:?}",
+        nodes[1]
+    );
+
+    // Node 2: Xref("fig-1")  (figref(1) → Xref("fig-1"))
+    assert!(
+        matches!(&nodes[2], InlineNode::Xref(id) if id.as_ref() == "fig-1"),
+        "OBS-P25-A: nodes[2] must be Xref(\"fig-1\"); got: {:?}",
+        nodes[2]
+    );
+
+    // Node 3: Plain(".")
+    assert!(
+        matches!(&nodes[3], InlineNode::Plain(s) if s.as_ref() == "."),
+        "OBS-P25-A: nodes[3] must be Plain(\".\"); got: {:?}",
+        nodes[3]
+    );
+
+    // Also verify the body map contains "detail" as FieldValue::Inlines.
+    let detail_field = section
+        .body
+        .get("detail")
+        .expect("OBS-P25-A: section body must contain key \"detail\"");
+    assert!(
+        matches!(detail_field, TypesFieldValue::Inlines(_)),
+        "OBS-P25-A: body[\"detail\"] must be FieldValue::Inlines; got: {detail_field:?}"
+    );
+}
+
 /// BC-3.02.002 invariant 3: `eval_deck` with an unknown section type produces
 /// a fatal error and returns None.
 #[test]
