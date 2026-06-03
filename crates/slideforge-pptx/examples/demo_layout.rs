@@ -509,9 +509,7 @@ fn check_ac009() -> bool {
         let pptx = match exporter.export(&deck, &laid_out, &brand, &opts) {
             Ok(b) => b,
             Err(e) => {
-                fail(&format!(
-                    "AC-009: export failed for keyword '{kw}': {e}"
-                ));
+                fail(&format!("AC-009: export failed for keyword '{kw}': {e}"));
                 all_ok = false;
                 continue;
             },
@@ -520,8 +518,7 @@ fn check_ac009() -> bool {
         let uses_correct_layout = rels.contains(expected_layout_file);
         let uses_wrong_layout = rels.contains("slideLayout1.xml");
         println!(
-            "    {kw:25} → {} (uses_index_1={}  uses_index_0={})",
-            expected_layout_file, uses_correct_layout, uses_wrong_layout
+            "    {kw:25} → {expected_layout_file} (uses_index_1={uses_correct_layout}  uses_index_0={uses_wrong_layout})"
         );
         if !uses_correct_layout || uses_wrong_layout {
             fail(&format!(
@@ -585,9 +582,7 @@ fn check_ac010() -> bool {
         let pptx = match exporter.export(&deck, &laid_out, &brand, &opts) {
             Ok(b) => b,
             Err(e) => {
-                fail(&format!(
-                    "AC-010: export failed for keyword '{kw}': {e}"
-                ));
+                fail(&format!("AC-010: export failed for keyword '{kw}': {e}"));
                 all_ok = false;
                 continue;
             },
@@ -633,9 +628,14 @@ fn check_ac011(pptx: &[u8]) -> bool {
                 &slide1[pos..end]
             );
         }
-        ok("AC-011: title frame emits <p:ph type=\"title\"> (idx chain present)");
+        ok("AC-011: title frame emits <p:ph type=\"title\">");
     } else {
         fail("AC-011: no <p:ph type=\"title\"> found in slide1.xml");
+    }
+    if has_idx_0 {
+        ok("AC-011: title frame carries idx=\"0\" attribute");
+    } else {
+        fail("AC-011: idx=\"0\" missing from slide1.xml <p:ph> — idx chain broken");
     }
 
     // Content slide2 body frame → ph type="body" idx=1.

@@ -464,7 +464,10 @@ fn test_sec002_notes_master_rels_non_empty_in_zip() {
 fn test_sec002_handout_master_rels_non_empty_in_zip() {
     let laid_out = make_laid_out_deck(1);
     let pptx_bytes = build_pptx(&laid_out);
-    let rels = zip_read_entry(&pptx_bytes, "ppt/handoutMasters/_rels/handoutMaster1.xml.rels");
+    let rels = zip_read_entry(
+        &pptx_bytes,
+        "ppt/handoutMasters/_rels/handoutMaster1.xml.rels",
+    );
     assert!(
         !rels.is_empty(),
         "SEC-002: ppt/handoutMasters/_rels/handoutMaster1.xml.rels must be non-empty; \

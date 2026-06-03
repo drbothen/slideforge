@@ -1704,7 +1704,9 @@ fn test_sec001_validate_emu_i32_overflow_x_returns_invalid_emu() {
             "SEC-001: InvalidEmu detail must reference 'x' or overflow; got: {detail}"
         );
     } else {
-        panic!("SEC-001: expected PptxError::InvalidEmu for i64::MAX x; got different error variant");
+        panic!(
+            "SEC-001: expected PptxError::InvalidEmu for i64::MAX x; got different error variant"
+        );
     }
 }
 
