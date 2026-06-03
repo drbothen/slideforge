@@ -1,3 +1,3 @@
-// Tests for slideforge-docx (STORY-041).
-// Empty at stub stage — tests are written in Step 3 (test-writer pass).
+// Tests for slideforge-docx (STORY-041 and STORY-042).
 pub mod core_tests;
+pub mod section_tests;
