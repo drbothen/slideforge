@@ -2366,3 +2366,271 @@ fn test_OBS_P24_A_snake_case_stays_literal_regression_guard() {
         );
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// F-FU-P1-001 (MED): unclosed `_italic` silently accepted when only `_` in rest
+// is right-flanked (word-internal).
+//
+// The open `_` branch uses `rest.contains('_')` to decide whether a closer
+// exists. The close-guard (OBS-P24-A) means a `_` followed by an alphanumeric
+// or `_` is NOT a valid closer. So `_word_x` — whose only `_` in `rest` is
+// right-flanked by `x` — has NO valid closer, but `rest.contains('_')` is true.
+// Result (pre-fix): `Italic([Plain("word_x")])` with NO E-PAR-019 — silent
+// acceptance of an unclosed italic, violating DIR-077-002 §5.
+//
+// Fix (spec-correct): factor a shared helper `is_valid_italic_closer(bytes, pos)`
+// that mirrors the close-guard predicate, then use it in the open-`_` branch to
+// pre-scan `rest` for the FIRST valid closer. If none found → emit E-PAR-019 +
+// recovery (like unclosed-bold). The helper must be the single source of truth
+// for both pre-scan and close-guard.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// Helper: parse a DSL string that should produce E-PAR-019 UnclosedInlineMarkup("_").
+///
+/// Returns the full error list from parse() for load-bearing assertions.
+fn assert_unclosed_italic_error(dsl_string_content: &str) -> Vec<crate::error::SyntaxError> {
+    use crate::parser::parse;
+    use crate::span::SourceMap;
+    use miette::Diagnostic as _;
+
+    let src = format!("slide content:\n  detail \"{dsl_string_content}\"\n");
+    let mut sm = SourceMap::new();
+    let file_id = sm.add_file(Arc::from("test.sf"), Arc::from(src.as_str()));
+    let result = parse(src.as_str(), file_id, &sm);
+
+    let Err(errors) = result else {
+        panic!(
+            "assert_unclosed_italic_error: parse() returned Ok for {dsl_string_content:?} — \
+             unclosed `_italic` must produce E-PAR-019 (strict-build-fatal). \
+             Pre-fix: silently produces Italic([...]) with no error."
+        )
+    };
+    assert!(
+        !errors.is_empty(),
+        "assert_unclosed_italic_error: Err returned but errors vec is empty for \
+         {dsl_string_content:?}"
+    );
+
+    {
+        let first = &errors[0];
+        let code = first
+            .code()
+            .expect("E-PAR-019 error must carry a diagnostic code");
+        let code_str = code.to_string();
+        assert!(
+            code_str.contains("E-PAR-019"),
+            "assert_unclosed_italic_error: expected code E-PAR-019; got: {code_str}. \
+             Input: {dsl_string_content:?}. Error: {first:?}"
+        );
+
+        // Variant must be UnclosedInlineMarkup with delimiter "_".
+        match first {
+            crate::error::SyntaxError::UnclosedInlineMarkup { delimiter, .. } => {
+                assert_eq!(
+                    delimiter, "_",
+                    "assert_unclosed_italic_error: delimiter must be \"_\"; got: {delimiter:?}"
+                );
+            },
+            other => panic!(
+                "assert_unclosed_italic_error: expected SyntaxError::UnclosedInlineMarkup; \
+                 got: {other:?} for input {dsl_string_content:?}"
+            ),
+        }
+    }
+
+    errors
+}
+
+/// F-FU-P1-001 RED GATE: `_word_x` — the only `_` in rest is right-flanked by
+/// `x`, so there is NO valid closer. Must emit exactly one E-PAR-019, NOT
+/// silently produce `Italic([Plain("word_x")])`.
+///
+/// Pre-fix behavior: `rest.contains('_')` is true → recursive scan runs →
+/// the `_` before `x` is skipped by the close-guard → scan falls off end →
+/// Italic([Plain("word_x")]) is emitted silently with NO error.
+/// Post-fix: shared helper finds no valid closer → E-PAR-019.
+#[test]
+#[allow(non_snake_case)]
+fn test_F_FU_P1_001_unclosed_italic_right_flanked_closer_emits_e_par_019() {
+    assert_unclosed_italic_error("_word_x");
+}
+
+/// F-FU-P1-001: `_VALUE_X` — final `_` followed by `X` (uppercase alphanumeric)
+/// is right-flanked → no valid closer → E-PAR-019.
+#[test]
+#[allow(non_snake_case)]
+fn test_F_FU_P1_001_unclosed_italic_uppercase_suffix_emits_e_par_019() {
+    assert_unclosed_italic_error("_VALUE_X");
+}
+
+/// F-FU-P1-001: `_a_1` — final `_` followed by digit `1` (ascii_alphanumeric)
+/// is right-flanked → no valid closer → E-PAR-019.
+#[test]
+#[allow(non_snake_case)]
+fn test_F_FU_P1_001_unclosed_italic_digit_suffix_emits_e_par_019() {
+    assert_unclosed_italic_error("_a_1");
+}
+
+/// F-FU-P1-001 REGRESSION GUARD: `_internal_api_ here` must produce
+/// `Italic([Plain("internal_api")])` + `Plain(" here")`, NO error.
+///
+/// The `_` after `internal` is right-flanked by `a` → skipped (word-internal).
+/// The `_` after `api` is followed by ` ` (space) → valid closer.
+/// Must pass before AND after the fix.
+#[test]
+#[allow(non_snake_case)]
+fn test_F_FU_P1_001_internal_api_italic_valid_closer_no_error() {
+    let chunks = parse_template_value("_internal_api_ here");
+    // Must produce exactly 2 chunks: Italic + Literal
+    assert_eq!(
+        chunks.len(),
+        2,
+        "F-FU-P1-001: `_internal_api_ here` must produce 2 chunks (Italic + Literal); \
+         got {chunks:?}"
+    );
+    // First chunk: Italic containing "internal_api"
+    match &chunks[0] {
+        TemplateChunk::Italic(children) => {
+            let text: String = children
+                .iter()
+                .filter_map(|c| {
+                    if let TemplateChunk::Literal(s) = c {
+                        Some(s.as_str())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            assert_eq!(
+                text, "internal_api",
+                "F-FU-P1-001: Italic content must be \"internal_api\"; got: {text:?}"
+            );
+        },
+        other => panic!("F-FU-P1-001: first chunk must be Italic; got: {other:?}"),
+    }
+    // Second chunk: Literal " here"
+    assert!(
+        matches!(&chunks[1], TemplateChunk::Literal(s) if s == " here"),
+        "F-FU-P1-001: second chunk must be Literal(\" here\"); got: {:?}",
+        chunks[1]
+    );
+}
+
+/// F-FU-P1-001 REGRESSION GUARD: `_word_ x` — simple close still works.
+///
+/// The `_` after `word` is followed by ` ` (space) → NOT right-flanked → valid closer.
+/// Must pass before AND after the fix.
+#[test]
+#[allow(non_snake_case)]
+fn test_F_FU_P1_001_word_space_italic_closes_normally() {
+    let chunks = parse_template_value("_word_ x");
+    assert_eq!(
+        chunks.len(),
+        2,
+        "F-FU-P1-001: `_word_ x` must produce 2 chunks; got {chunks:?}"
+    );
+    assert!(
+        matches!(&chunks[0], TemplateChunk::Italic(_)),
+        "F-FU-P1-001: first chunk must be Italic; got: {:?}",
+        chunks[0]
+    );
+    assert!(
+        matches!(&chunks[1], TemplateChunk::Literal(s) if s == " x"),
+        "F-FU-P1-001: second chunk must be Literal(\" x\"); got: {:?}",
+        chunks[1]
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// F-FU-P1-002 (MED): E-PAR-022 recovery halts field scan after first disallowed link.
+//
+// When a disallowed URL scheme is found, the recovery sets `pos = len` which
+// terminates the entire field scan. But the link is well-formed (closing `)` was
+// found at `paren_close`), so scanning should resume at `paren_close + 1`.
+//
+// error-taxonomy v2.13 E-PAR-022 Note: "accumulated (does not halt parsing —
+// remaining field content continues to be parsed)."
+//
+// Pre-fix: a field with two disallowed links reports only ONE E-PAR-022.
+// Post-fix: scanning resumes at `paren_close + 1` → both E-PAR-022 errors are
+// accumulated.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// F-FU-P1-002 RED GATE: a field with two disallowed links must produce
+/// exactly two E-PAR-022 errors (both are accumulated).
+///
+/// Pre-fix behavior: first E-PAR-022 sets pos=len → second link is never reached →
+/// only one error reported.
+/// Post-fix: recovery resumes at `paren_close + 1` → second link is scanned →
+/// second E-PAR-022 accumulated.
+#[test]
+#[allow(non_snake_case)]
+fn test_F_FU_P1_002_two_disallowed_links_both_errors_accumulated() {
+    use crate::parser::parse;
+    use crate::span::SourceMap;
+    use miette::Diagnostic as _;
+
+    // Two disallowed links in the same field value.
+    let dsl = "[a](file:x) [b](data:y)";
+    let src = format!("slide content:\n  detail \"{dsl}\"\n");
+    let mut sm = SourceMap::new();
+    let file_id = sm.add_file(Arc::from("test.sf"), Arc::from(src.as_str()));
+    let result = parse(src.as_str(), file_id, &sm);
+
+    let Err(errors) = result else {
+        panic!(
+            "F-FU-P1-002: parse() returned Ok for {dsl:?} — both disallowed schemes must \
+             produce E-PAR-022 (strict-build-fatal)."
+        )
+    };
+
+    // Load-bearing: BOTH E-PAR-022 errors must be accumulated.
+    // Pre-fix: only 1 error (second link never reached). Post-fix: 2 errors.
+    assert_eq!(
+        errors.len(),
+        2,
+        "F-FU-P1-002: expected exactly 2 E-PAR-022 errors for two disallowed links; \
+         got {} error(s): {errors:?}. \
+         Pre-fix: recovery sets pos=len after first error, suppressing the second.",
+        errors.len()
+    );
+
+    // Both must be E-PAR-022 / DisallowedLinkUrlScheme.
+    for (i, err) in errors.iter().enumerate() {
+        let code = err
+            .code()
+            .expect("E-PAR-022 error must carry a diagnostic code");
+        let code_str = code.to_string();
+        assert!(
+            code_str.contains("E-PAR-022"),
+            "F-FU-P1-002: error[{i}] must be E-PAR-022; got: {code_str}. Error: {err:?}"
+        );
+        assert!(
+            matches!(
+                err,
+                crate::error::SyntaxError::DisallowedLinkUrlScheme { .. }
+            ),
+            "F-FU-P1-002: error[{i}] must be DisallowedLinkUrlScheme; got: {err:?}"
+        );
+    }
+
+    // First error must mention "file", second must mention "data".
+    let rendered_0 = errors[0].to_string();
+    let rendered_1 = errors[1].to_string();
+    assert!(
+        rendered_0.contains("file"),
+        "F-FU-P1-002: first error must mention scheme \"file\"; got: {rendered_0:?}"
+    );
+    assert!(
+        rendered_1.contains("data"),
+        "F-FU-P1-002: second error must mention scheme \"data\"; got: {rendered_1:?}"
+    );
+}
+
+/// F-FU-P1-002 REGRESSION GUARD: a single disallowed link still produces
+/// exactly one E-PAR-022 (no regression from the fix).
+#[test]
+#[allow(non_snake_case)]
+fn test_F_FU_P1_002_single_disallowed_link_one_error_regression_guard() {
+    assert_e_par_022("[a](file:x)", "file");
+}

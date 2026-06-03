@@ -596,7 +596,8 @@ fn inline_markup_route_to_error(
             )
         },
         // E-PAR-022: disallowed link URL scheme. Fatal like all E-PAR codes.
-        InlineMarkupRoute::DisallowedLinkUrlScheme(scheme, _clean_msg) => {
+        // The user-facing message is from SyntaxError::DisallowedLinkUrlScheme's #[error(...)].
+        InlineMarkupRoute::DisallowedLinkUrlScheme(scheme) => {
             SyntaxError::disallowed_link_url_scheme(
                 file_path.to_string(),
                 line,
