@@ -1223,6 +1223,7 @@ mod tests {
             index: 1,
             name: Arc::from("Title Slide"),
             ooxml_type: Some(Arc::from("title")),
+            slide_type_keyword: None, // standard layout — matched by ooxml_type
             placeholders: vec![LayoutPlaceholder {
                 ph_type: Arc::from("ctrTitle"),
                 idx: 0,
@@ -1244,6 +1245,7 @@ mod tests {
             index: 12,
             name: Arc::from("SF Section Divider"),
             ooxml_type: None,
+            slide_type_keyword: Some(Arc::from("section_divider")),
             placeholders: vec![LayoutPlaceholder {
                 ph_type: Arc::from("title"),
                 idx: 0,
@@ -1494,6 +1496,7 @@ mod tests {
             index: 1,
             name: Arc::from("Test Layout"),
             ooxml_type: Some(Arc::from("title")),
+            slide_type_keyword: None, // standard layout — matched by ooxml_type
             placeholders: vec![LayoutPlaceholder {
                 ph_type: Arc::from("ctrTitle"),
                 idx: 0,
@@ -1574,6 +1577,7 @@ mod tests {
                 index: 1,
                 name: Arc::from("Title Slide"),
                 ooxml_type: Some(Arc::from("title")),
+                slide_type_keyword: None, // standard layout — matched by ooxml_type
                 placeholders: vec![LayoutPlaceholder {
                     ph_type: Arc::from("ctrTitle"),
                     idx: 0,
