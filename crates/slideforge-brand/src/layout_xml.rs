@@ -1643,30 +1643,29 @@ mod tests {
         }
     }
 
-    /// ADR-015 §2 — master XML contains one `<p:sldLayoutId>` entry per layout.
+    /// ADR-015 §2 — master XML contains `<p:sldLayoutIdLst>` container with one
+    /// `<p:sldLayoutId>` entry per layout.
     ///
-    /// Note: The `<p:sldLayoutIdLst>` container element was removed to satisfy
-    /// STORY-038 AC-004: the test suite counts `<p:sldLayoutId` occurrences to
-    /// verify exactly 31 entries; the container element name would cause a false
-    /// off-by-one count. The `<p:sldLayoutId id=` entries are written directly
-    /// inside `<p:sldMaster>`.
+    /// ECMA-376 §19.3.1.41 requires the `<p:sldLayoutIdLst>` wrapper element.
     #[test]
     fn test_adr015_serialize_master_to_xml_has_sld_layout_id_lst() {
         let template = minimal_brand_template();
         let xml_bytes = serialize_master_to_xml(&template);
         let xml = std::str::from_utf8(&xml_bytes).expect("output must be valid UTF-8");
+
+        // The container element must be present.
+        assert!(
+            xml.contains("<p:sldLayoutIdLst"),
+            "master XML must contain <p:sldLayoutIdLst> container (ECMA-376 §19.3.1.41); got: {}",
+            &xml[..xml.len().min(400)]
+        );
+
         // For a template with 1 layout, there must be exactly 1 <p:sldLayoutId id=...> entry.
-        // Count `<p:sldLayoutId id=` to match only actual entries (not any container).
+        // Count `<p:sldLayoutId id=` to match only actual entries (not the container).
         let count = xml.matches("<p:sldLayoutId id=").count();
         assert_eq!(
             count, 1,
             "master XML must have 1 <p:sldLayoutId id=...> entry for a template with 1 layout; got {count}"
-        );
-        // Verify the entry has a valid rId reference.
-        assert!(
-            xml.contains("<p:sldLayoutId id="),
-            "master XML must contain at least one <p:sldLayoutId id=...> entry; got: {}",
-            &xml[..xml.len().min(400)]
         );
     }
 
@@ -1725,15 +1724,11 @@ mod tests {
     }
 
     /// ADR-015 §A.3 (F-PASS2-H1) — ECMA-376 §19.3.1.42 element order:
-    /// `cSld, clrMap, [sldLayoutId entries], hf, txStyles`.
+    /// `cSld, clrMap, sldLayoutIdLst, hf, txStyles`.
     ///
     /// `<p:hf>` MUST appear before `<p:txStyles>` in the serialized XML.
-    /// Also verifies `<a:clrMap>` appears before the first `<p:sldLayoutId id=`
-    /// entry, which in turn appears before `<p:hf>`.
-    ///
-    /// Note: The `<p:sldLayoutIdLst>` container was removed (STORY-038 AC-004
-    /// compliance). The element-order test now uses the first `<p:sldLayoutId id=`
-    /// entry as the positional anchor for the layout-IDs section.
+    /// Also verifies `<a:clrMap>` appears before the `<p:sldLayoutIdLst>` container,
+    /// which in turn appears before `<p:hf>`.
     ///
     /// This is a load-bearing order test (TD-VSDD-059). Position is asserted by
     /// byte-offset comparison, not by tag counting.
@@ -1746,7 +1741,7 @@ mod tests {
         let clr_map_pos = xml
             .find("<a:clrMap")
             .expect("master XML must contain <a:clrMap>");
-        // Use the first <p:sldLayoutId id= entry as the positional anchor
+        // Use the first <p:sldLayoutId id= entry as the positional anchor for the section
         // (the <p:sldLayoutIdLst> container was removed per STORY-038 AC-004).
         let sld_layout_id_pos = xml
             .find("<p:sldLayoutId id=")
