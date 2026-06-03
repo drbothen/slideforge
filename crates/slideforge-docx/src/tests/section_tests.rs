@@ -780,6 +780,36 @@ fn test_BC_4_02_002_ooxml_parse_back_document_with_sections() {
         "word/document.xml must have a <w:body> element after ooxmlsdk parse-back \
          with sections present (BC-4.02.002 postcondition 6)"
     );
+
+    // F-042-P1-001 LOAD-BEARING ASSERTION: ECMA-376 CT_Tbl requires exactly one
+    // <w:tblGrid> (minOccurs=1) with one <w:gridCol> per column before any <w:tr>.
+    // The risk register has 3 columns: Risk, Severity, Description.
+    assert!(
+        doc_xml.contains("<w:tblGrid"),
+        "word/document.xml risk register table must contain <w:tblGrid> \
+         (ECMA-376 CT_Tbl minOccurs=1 — schema-invalid without it); got:\n{doc_xml}"
+    );
+
+    let gridcol_count = doc_xml.matches("<w:gridCol").count();
+    assert_eq!(
+        gridcol_count, 3,
+        "risk register table must have exactly 3 <w:gridCol> entries (Risk, Severity, \
+         Description); found {gridcol_count} (F-042-P1-001 load-bearing assertion)"
+    );
+
+    // tblGrid must precede the first <w:tr (column definitions before row data).
+    let tblgrid_pos = doc_xml
+        .find("<w:tblGrid")
+        .expect("<w:tblGrid> must be present in document.xml");
+    let first_tr_pos = doc_xml
+        .find("<w:tr")
+        .expect("<w:tr> must be present in document.xml");
+    assert!(
+        tblgrid_pos < first_tr_pos,
+        "<w:tblGrid> must appear before first <w:tr> \
+         (ECMA-376 element ordering: tblGrid after tblPr, before rows); \
+         tblGrid at {tblgrid_pos}, first <w:tr> at {first_tr_pos}"
+    );
 }
 
 // ─── BC-4.02.002 canonical test vector: no auto-generatable slides ────────────

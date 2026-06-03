@@ -29,9 +29,9 @@
 //! concatenation for dynamic content.
 
 use ooxmlsdk::schemas::schemas_openxmlformats_org_wordprocessingml_2006_main::{
-    BodyChoice, Paragraph, ParagraphChoice, ParagraphProperties, ParagraphStyleId, Run, RunChoice,
-    Table, TableCell, TableCellChoice, TableChoice2, TableProperties, TableRow, TableRowChoice,
-    TableStyle, TableWidth, TableWidthUnitValues, Text,
+    BodyChoice, GridColumn, Paragraph, ParagraphChoice, ParagraphProperties, ParagraphStyleId,
+    Run, RunChoice, Table, TableCell, TableCellChoice, TableChoice2, TableGrid, TableProperties,
+    TableRow, TableRowChoice, TableStyle, TableWidth, TableWidthUnitValues, Text,
 };
 use slideforge_layout::sections::{GeneratedSection, SectionItem, SectionKind};
 
@@ -157,6 +157,8 @@ pub fn serialize_risk_register(section: &GeneratedSection) -> Result<Vec<BodyCho
 ///
 /// Structure:
 /// - `<w:tblPr>` with `<w:tblStyle w:val="TableGrid"/>` and auto-width
+/// - `<w:tblGrid>` with one `<w:gridCol>` per column (ECMA-376 CT_Tbl minOccurs=1)
+///   Columns: Risk | Severity | Description (3 columns, equal auto width)
 /// - Header row: Risk | Severity | Description (using `TableHeader` paragraph style)
 /// - Data rows: one per `SectionItem::RiskRow`
 fn build_risk_register_table(section: &GeneratedSection) -> Table {
@@ -186,6 +188,28 @@ fn build_risk_register_table(section: &GeneratedSection) -> Table {
         }
     }
 
+    // ECMA-376 CT_Tbl requires exactly one <w:tblGrid> (minOccurs=1) after
+    // <w:tblPr> and before the rows, containing one <w:gridCol> per column.
+    // Without this, the table is schema-invalid and collapses in strict OOXML
+    // validators (LibreOffice, Word strict mode). The risk register has 3 columns.
+    let tbl_grid = TableGrid {
+        w_grid_col: vec![
+            GridColumn {
+                width: None,
+                ..GridColumn::default()
+            },
+            GridColumn {
+                width: None,
+                ..GridColumn::default()
+            },
+            GridColumn {
+                width: None,
+                ..GridColumn::default()
+            },
+        ],
+        ..TableGrid::default()
+    };
+
     Table {
         w_tbl_pr: Some(Box::new(TableProperties {
             table_style: Some(TableStyle {
@@ -197,6 +221,7 @@ fn build_risk_register_table(section: &GeneratedSection) -> Table {
             }),
             ..TableProperties::default()
         })),
+        w_tbl_grid: Some(Box::new(tbl_grid)),
         table_choice2: table_rows,
         ..Table::default()
     }
