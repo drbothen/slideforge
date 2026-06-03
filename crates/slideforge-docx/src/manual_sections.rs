@@ -17,10 +17,16 @@
 //! `Register::Report` and `Register::Detail` entries are emitted.
 //! `Register::Notes` is excluded per BC-4.02.001 invariant 1 / DI-012.
 
-use ooxmlsdk::schemas::schemas_openxmlformats_org_wordprocessingml_2006_main::BodyChoice;
+use ooxmlsdk::schemas::schemas_openxmlformats_org_wordprocessingml_2006_main::{
+    BodyChoice, Paragraph, ParagraphChoice, ParagraphProperties, ParagraphStyleId, Run, RunChoice,
+    Text,
+};
 use slideforge_layout::sections::GeneratedSection;
+use slideforge_types::InlineNode;
+use slideforge_types::register::Register;
 
 use crate::error::ExportError;
+use crate::xml_escape::strip_xml10_invalid_chars;
 
 /// Serializes manually-authored [`GeneratedSection`] entries into `<w:body>` XML.
 ///
@@ -51,12 +57,27 @@ impl ManualSectionSerializer {
         &self,
         section: &GeneratedSection,
     ) -> Result<Vec<BodyChoice>, ExportError> {
-        todo!(
-            "ManualSectionSerializer::serialize_section — not yet implemented (STORY-042 Step 4). \
-             Heading: {:?}, register_content entries: {}",
-            section.heading,
-            section.register_content.len()
-        )
+        let mut output: Vec<BodyChoice> = Vec::new();
+
+        // Heading1 paragraph for the section heading.
+        output.push(BodyChoice::WP(Box::new(make_styled_paragraph(
+            "Heading1",
+            section.heading.as_ref(),
+        ))));
+
+        // Emit one Normal paragraph per Report/Detail entry in register_content.
+        // Notes entries are skipped (BC-4.02.001 invariant 1 / DI-012).
+        for rc in &section.register_content {
+            if rc.register == Register::Notes {
+                continue;
+            }
+            let text = collect_plain_text(&rc.content);
+            output.push(BodyChoice::WP(Box::new(make_styled_paragraph(
+                "Normal", &text,
+            ))));
+        }
+
+        Ok(output)
     }
 }
 
@@ -64,4 +85,59 @@ impl Default for ManualSectionSerializer {
     fn default() -> Self {
         Self::new()
     }
+}
+
+// ─── Internal helpers ─────────────────────────────────────────────────────────
+
+/// Build a paragraph with the given style containing a single plain-text run.
+fn make_styled_paragraph(style: &str, text: &str) -> Paragraph {
+    let sanitized = strip_xml10_invalid_chars(text);
+    let needs_preserve = sanitized.starts_with(' ')
+        || sanitized.ends_with(' ')
+        || sanitized.starts_with('\t')
+        || sanitized.ends_with('\t');
+
+    Paragraph {
+        paragraph_properties: Some(Box::new(ParagraphProperties {
+            paragraph_style_id: Some(ParagraphStyleId {
+                val: style.to_owned(),
+            }),
+            ..ParagraphProperties::default()
+        })),
+        paragraph_choice: vec![ParagraphChoice::WR(Box::new(Run {
+            run_choice: vec![RunChoice::WT(Box::new(Text {
+                xml_content: Some(sanitized),
+                space: if needs_preserve {
+                    Some(ooxmlsdk::schemas::xml::SpaceProcessingModeValues::Preserve)
+                } else {
+                    None
+                },
+                ..Text::default()
+            }))],
+            ..Run::default()
+        }))],
+        ..Paragraph::default()
+    }
+}
+
+/// Recursively extract plain text from a slice of inline nodes.
+fn collect_plain_text(nodes: &[InlineNode]) -> String {
+    let mut out = String::new();
+    for node in nodes {
+        match node {
+            InlineNode::Bold(ch)
+            | InlineNode::Italic(ch)
+            | InlineNode::Strikethrough(ch)
+            | InlineNode::Superscript(ch)
+            | InlineNode::Subscript(ch)
+            | InlineNode::Footnote(ch)
+            | InlineNode::Highlight(ch) => out.push_str(&collect_plain_text(ch)),
+            InlineNode::Link { text, .. } => out.push_str(&collect_plain_text(text)),
+            InlineNode::Math(m) => out.push_str(&m.latex),
+            InlineNode::Plain(t) | InlineNode::Code(t) | InlineNode::Xref(t) => {
+                out.push_str(t);
+            },
+        }
+    }
+    out
 }

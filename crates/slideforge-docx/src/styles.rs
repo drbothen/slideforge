@@ -86,6 +86,29 @@ pub fn build_styles(brand: Option<&Brand>) -> Result<Vec<u8>, ExportError> {
       <w:sz w:val="20"/>
     </w:rPr>
   </w:style>
+  <w:style w:type="table" w:styleId="TableGrid">
+    <w:name w:val="Table Grid"/>
+    <w:basedOn w:val="TableNormal"/>
+    <w:tblPr>
+      <w:tblBorders>
+        <w:top w:val="single" w:sz="4" w:space="0" w:color="auto"/>
+        <w:left w:val="single" w:sz="4" w:space="0" w:color="auto"/>
+        <w:bottom w:val="single" w:sz="4" w:space="0" w:color="auto"/>
+        <w:right w:val="single" w:sz="4" w:space="0" w:color="auto"/>
+        <w:insideH w:val="single" w:sz="4" w:space="0" w:color="auto"/>
+        <w:insideV w:val="single" w:sz="4" w:space="0" w:color="auto"/>
+      </w:tblBorders>
+    </w:tblPr>
+  </w:style>
+  <w:style w:type="paragraph" w:styleId="TableHeader">
+    <w:name w:val="Table Header"/>
+    <w:basedOn w:val="Normal"/>
+    <w:rPr>
+      <w:rFonts w:ascii="{heading}" w:hAnsi="{heading}"/>
+      <w:b/>
+      <w:sz w:val="22"/>
+    </w:rPr>
+  </w:style>
 </w:styles>"#,
         body = xml_attr_escape(body_font),
         heading = xml_attr_escape(heading_font),

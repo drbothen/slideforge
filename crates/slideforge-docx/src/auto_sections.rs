@@ -7,7 +7,7 @@
 //!
 //! ## Dispatch model (BC-4.02.002 invariant 1 / DI-008)
 //!
-//! Section rendering is dispatched on the section kind string — no hardcoded
+//! Section rendering is dispatched on the section kind — no hardcoded
 //! `if section_name == "executive_summary"` chains. The dispatcher calls the
 //! appropriate serialization helper based on [`slideforge_layout::sections::SectionKind`]:
 //!
@@ -29,11 +29,14 @@
 //! concatenation for dynamic content.
 
 use ooxmlsdk::schemas::schemas_openxmlformats_org_wordprocessingml_2006_main::{
-    Body, BodyChoice,
+    BodyChoice, Paragraph, ParagraphChoice, ParagraphProperties, ParagraphStyleId, Run, RunChoice,
+    Table, TableCell, TableCellChoice, TableChoice2, TableProperties, TableRow, TableRowChoice,
+    TableStyle, TableWidth, TableWidthUnitValues, Text,
 };
-use slideforge_layout::sections::GeneratedSection;
+use slideforge_layout::sections::{GeneratedSection, SectionItem, SectionKind};
 
 use crate::error::ExportError;
+use crate::xml_escape::strip_xml10_invalid_chars;
 
 /// Serializes auto-generated [`GeneratedSection`] entries into `<w:body>` XML.
 ///
@@ -60,12 +63,20 @@ impl AutoSectionSerializer {
         &self,
         section: &GeneratedSection,
     ) -> Result<Vec<BodyChoice>, ExportError> {
-        todo!(
-            "AutoSectionSerializer::serialize_section — not yet implemented (STORY-042 Step 4). \
-             Section kind: {:?}, items: {}",
-            section.kind,
-            section.items.len()
-        )
+        // Invariant 2: empty items → no output.
+        if section.items.is_empty() {
+            return Ok(vec![]);
+        }
+
+        match &section.kind {
+            SectionKind::RiskRegister => serialize_risk_register(section),
+            // ExecutiveSummary and ManualSection both render as heading + bullet list.
+            // ManualSection should not normally be dispatched here (ManualSectionSerializer
+            // handles it), but for robustness the fallback mirrors ExecutiveSummary rendering.
+            SectionKind::ExecutiveSummary | SectionKind::ManualSection(_) => {
+                serialize_executive_summary(section)
+            },
+        }
     }
 }
 
@@ -76,7 +87,7 @@ impl Default for AutoSectionSerializer {
 }
 
 /// Serialize an executive-summary section into a `Heading1` paragraph followed
-/// by one `Normal` bullet paragraph per `TakeawayBullet` item.
+/// by one `Normal` paragraph per `TakeawayBullet` item.
 ///
 /// Returns an empty `Vec` when `section.items` is empty (invariant 2).
 ///
@@ -86,11 +97,29 @@ impl Default for AutoSectionSerializer {
 pub fn serialize_executive_summary(
     section: &GeneratedSection,
 ) -> Result<Vec<BodyChoice>, ExportError> {
-    todo!(
-        "serialize_executive_summary — not yet implemented (STORY-042 Step 4). \
-         Items: {}",
-        section.items.len()
-    )
+    if section.items.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let mut output: Vec<BodyChoice> = Vec::new();
+
+    // Heading1 paragraph for section title.
+    output.push(BodyChoice::WP(Box::new(make_styled_paragraph(
+        "Heading1",
+        section.heading.as_ref(),
+    ))));
+
+    // One Normal paragraph per TakeawayBullet item.
+    for item in &section.items {
+        if let SectionItem::TakeawayBullet(text) = item {
+            output.push(BodyChoice::WP(Box::new(make_styled_paragraph(
+                "Normal",
+                text.as_ref(),
+            ))));
+        }
+    }
+
+    Ok(output)
 }
 
 /// Serialize a risk-register section into a `Heading1` paragraph followed by a
@@ -104,18 +133,128 @@ pub fn serialize_executive_summary(
 /// # Errors
 ///
 /// Returns [`ExportError::OoxmlError`] on OOXML construction failure.
-pub fn serialize_risk_register(
-    section: &GeneratedSection,
-) -> Result<Vec<BodyChoice>, ExportError> {
-    todo!(
-        "serialize_risk_register — not yet implemented (STORY-042 Step 4). \
-         Items: {}",
-        section.items.len()
-    )
+pub fn serialize_risk_register(section: &GeneratedSection) -> Result<Vec<BodyChoice>, ExportError> {
+    if section.items.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let mut output: Vec<BodyChoice> = Vec::new();
+
+    // Heading1 paragraph for section title.
+    output.push(BodyChoice::WP(Box::new(make_styled_paragraph(
+        "Heading1",
+        section.heading.as_ref(),
+    ))));
+
+    // Build the risk register table.
+    let table = build_risk_register_table(section);
+    output.push(BodyChoice::WTbl(Box::new(table)));
+
+    Ok(output)
 }
 
-// Silence unused-import warnings on the `Body` import that will be used in
-// Step 4 implementation.
-const _: () = {
-    let _ = std::mem::size_of::<Body>();
-};
+/// Build the `<w:tbl>` element for a risk register section.
+///
+/// Structure:
+/// - `<w:tblPr>` with `<w:tblStyle w:val="TableGrid"/>` and auto-width
+/// - Header row: Risk | Severity | Description (using `TableHeader` paragraph style)
+/// - Data rows: one per `SectionItem::RiskRow`
+fn build_risk_register_table(section: &GeneratedSection) -> Table {
+    let mut table_rows: Vec<TableChoice2> = Vec::new();
+
+    // Header row.
+    table_rows.push(TableChoice2::WTr(Box::new(build_table_row(&[
+        ("Risk", true),
+        ("Severity", true),
+        ("Description", true),
+    ]))));
+
+    // Data rows — one per RiskRow item.
+    for item in &section.items {
+        if let SectionItem::RiskRow {
+            title,
+            severity,
+            description,
+            ..
+        } = item
+        {
+            table_rows.push(TableChoice2::WTr(Box::new(build_table_row(&[
+                (title.as_ref(), false),
+                (severity.as_ref(), false),
+                (description.as_ref(), false),
+            ]))));
+        }
+    }
+
+    Table {
+        w_tbl_pr: Some(Box::new(TableProperties {
+            table_style: Some(TableStyle {
+                val: ooxmlsdk::simple_type::StringValue::from("TableGrid"),
+            }),
+            table_width: Some(TableWidth {
+                width: Some(ooxmlsdk::simple_type::StringValue::from("0")),
+                r#type: Some(TableWidthUnitValues::Auto),
+            }),
+            ..TableProperties::default()
+        })),
+        table_choice2: table_rows,
+        ..Table::default()
+    }
+}
+
+/// Build a `<w:tr>` element containing `<w:tc>` cells.
+///
+/// Each cell is given a paragraph with text. When `is_header` is `true`, the
+/// paragraph uses the `TableHeader` style; otherwise it uses `Normal`.
+fn build_table_row(cells: &[(&str, bool)]) -> TableRow {
+    let row_cells: Vec<TableRowChoice> = cells
+        .iter()
+        .map(|(text, is_header)| {
+            let style = if *is_header { "TableHeader" } else { "Normal" };
+            let para = make_styled_paragraph(style, text);
+            let cell = TableCell {
+                table_cell_choice: vec![TableCellChoice::WP(Box::new(para))],
+                ..TableCell::default()
+            };
+            TableRowChoice::WTc(Box::new(cell))
+        })
+        .collect();
+
+    TableRow {
+        table_row_choice: row_cells,
+        ..TableRow::default()
+    }
+}
+
+// ─── Internal helpers ─────────────────────────────────────────────────────────
+
+/// Build a paragraph with the given style containing a single plain-text run.
+fn make_styled_paragraph(style: &str, text: &str) -> Paragraph {
+    let sanitized = strip_xml10_invalid_chars(text);
+    let needs_preserve = sanitized.starts_with(' ')
+        || sanitized.ends_with(' ')
+        || sanitized.starts_with('\t')
+        || sanitized.ends_with('\t');
+
+    Paragraph {
+        paragraph_properties: Some(Box::new(ParagraphProperties {
+            paragraph_style_id: Some(ParagraphStyleId {
+                val: style.to_owned(),
+            }),
+            ..ParagraphProperties::default()
+        })),
+        paragraph_choice: vec![ParagraphChoice::WR(Box::new(Run {
+            run_choice: vec![RunChoice::WT(Box::new(Text {
+                xml_content: Some(sanitized),
+                space: if needs_preserve {
+                    Some(ooxmlsdk::schemas::xml::SpaceProcessingModeValues::Preserve)
+                } else {
+                    None
+                },
+                ..Text::default()
+            }))],
+            ..Run::default()
+        }))],
+        ..Paragraph::default()
+    }
+}

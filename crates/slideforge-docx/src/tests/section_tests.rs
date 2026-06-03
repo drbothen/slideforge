@@ -34,6 +34,7 @@
 #![allow(clippy::panic)]
 #![allow(non_snake_case)]
 #![allow(clippy::doc_markdown)]
+#![allow(clippy::similar_names)]
 
 use std::io::Read as IoRead;
 use std::sync::Arc;
@@ -626,10 +627,7 @@ fn test_BC_4_02_002_ac008_twenty_severity_cards_twenty_rows() {
         .collect();
 
     // Convert to &str tuples and build section.
-    let row_refs: Vec<(&str, &str, &str)> = rows
-        .iter()
-        .map(|&(t, s, d)| (t, s, d))
-        .collect();
+    let row_refs: Vec<(&str, &str, &str)> = rows.iter().map(|&(t, s, d)| (t, s, d)).collect();
 
     let risk_register = make_risk_register_section(&row_refs);
     let laid_out = make_laid_out_deck(vec![slide], vec![risk_register]);
@@ -764,10 +762,7 @@ fn test_BC_4_02_002_ooxml_parse_back_document_with_sections() {
     let exec_summary = make_executive_summary_section(&["Key finding: Production is stable."]);
     let risk_register = make_risk_register_section(&[("R001", "HIGH", "Critical infrastructure")]);
     let methodology = make_manual_section("methodology", "Standard methodology applied.");
-    let laid_out = make_laid_out_deck(
-        vec![slide],
-        vec![exec_summary, risk_register, methodology],
-    );
+    let laid_out = make_laid_out_deck(vec![slide], vec![exec_summary, risk_register, methodology]);
 
     let docx_bytes = export_deck(&deck, &laid_out);
     let doc_xml = read_zip_member(&docx_bytes, "word/document.xml");
