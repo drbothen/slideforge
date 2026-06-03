@@ -412,6 +412,10 @@ fn collect_manual_sections(deck: &Deck) -> Result<Vec<GeneratedSection>, LayoutE
             return Err(LayoutError::UnknownSectionType {
                 name: name.to_owned(),
                 span: block.span.clone(),
+                // Derived from CANONICAL_MANUAL_SECTION_TYPES at runtime so the
+                // user-facing message can never drift from the SSOT
+                // (F-077-P13-001 / TD-VSDD-060).
+                known_types: CANONICAL_MANUAL_SECTION_TYPES.join(", "),
             });
         }
 
@@ -1550,9 +1554,11 @@ mod tests {
     #[test]
     fn test_bc_3_02_002_unknown_section_type_error_variant_exists() {
         use crate::error::LayoutError;
+        use slideforge_types::CANONICAL_MANUAL_SECTION_TYPES;
         let err = LayoutError::UnknownSectionType {
             name: "frobnicator".to_owned(),
             span: SourceSpan::default(),
+            known_types: CANONICAL_MANUAL_SECTION_TYPES.join(", "),
         };
         let msg = err.to_string();
         assert!(
@@ -1573,6 +1579,45 @@ mod tests {
         assert!(
             !msg.contains("SourceSpan {"),
             "span must NOT render as a Debug struct dump; got: {msg}"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // F-077-P13-001 — drift-guard: UnknownSectionType known_types is SSOT-derived
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Drift-guard (F-077-P13-001): `LayoutError::UnknownSectionType` must carry
+    /// a `known_types: String` field populated from
+    /// `CANONICAL_MANUAL_SECTION_TYPES` at the construction site, and the
+    /// rendered message must contain every entry from that SSOT constant.
+    ///
+    /// This test will fail to compile until the `known_types` field is added to
+    /// the variant, and will fail at runtime if any entry is missing from the
+    /// rendered message — guaranteeing the message can never drift from the SSOT.
+    #[test]
+    fn test_f077_p13_001_unknown_section_type_known_types_derived_from_ssot() {
+        use crate::error::LayoutError;
+        use slideforge_types::CANONICAL_MANUAL_SECTION_TYPES;
+
+        let known = CANONICAL_MANUAL_SECTION_TYPES.join(", ");
+        let err = LayoutError::UnknownSectionType {
+            name: "frobnicator".to_owned(),
+            span: SourceSpan::default(),
+            known_types: known,
+        };
+        let msg = err.to_string();
+
+        // Every entry from the SSOT constant must appear in the rendered message.
+        for entry in CANONICAL_MANUAL_SECTION_TYPES {
+            assert!(
+                msg.contains(entry),
+                "UnknownSectionType message must contain SSOT entry '{entry}'; got: {msg}"
+            );
+        }
+        // The 'Known types' prefix must still be present.
+        assert!(
+            msg.contains("Known types"),
+            "UnknownSectionType message must include 'Known types' header; got: {msg}"
         );
     }
 

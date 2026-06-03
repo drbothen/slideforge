@@ -78,21 +78,27 @@ pub enum LayoutError {
 
     /// A manually authored `section <type>:` block has an unrecognised type name.
     ///
-    /// Supported section types are: `executive_summary`, `risk_register`,
-    /// `methodology`, `scope`, `approval`, `appendix`, `glossary`.
-    /// `executive_summary` and `risk_register` are allowed as manual overrides
-    /// (AC-006 / BC-3.02.001 EC-002).  Any other name produces this error
-    /// (AC-004 / BC-3.02.002 EC-001).
+    /// Supported section types are enumerated at runtime from
+    /// [`slideforge_types::CANONICAL_MANUAL_SECTION_TYPES`] — the single source
+    /// of truth for the allowed list. `executive_summary` and `risk_register`
+    /// are allowed as manual overrides (AC-006 / BC-3.02.001 EC-002). Any other
+    /// name produces this error (AC-004 / BC-3.02.002 EC-001).
+    ///
+    /// The `known_types` field is populated at the construction site via
+    /// `CANONICAL_MANUAL_SECTION_TYPES.join(", ")` so the user-facing message
+    /// can never drift from the SSOT (F-077-P13-001).
     #[error(
         "layout error: unknown section type '{name}' at {span}. \
-         Known types: [executive_summary, risk_register, methodology, scope, \
-         approval, appendix, glossary]"
+         Known types: [{known_types}]"
     )]
     UnknownSectionType {
         /// The unrecognised section type name from the `.sf` source.
         name: String,
         /// Source location of the unrecognised `section <type>:` block.
         span: SourceSpan,
+        /// Comma-separated list of known section type names, derived at
+        /// construction time from [`slideforge_types::CANONICAL_MANUAL_SECTION_TYPES`].
+        known_types: String,
     },
 
     /// A `BoundingBox` in the produced layout has invalid coordinates.
