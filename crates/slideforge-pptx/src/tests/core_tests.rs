@@ -1023,10 +1023,16 @@ fn test_BC_4_01_001_slide_ids_start_at_256() {
 
     let presentation_xml = zip_read_entry(&pptx_bytes, "ppt/presentation.xml");
 
-    // Find all <p:sldId id="..." ...> attribute values.
+    // Find all <p:sldId id="..." ...> ENTRY attribute values.
+    // Search for "<p:sldId " (with trailing space) to avoid matching
+    // the container element "<p:sldIdLst>" which has no attributes.
     let mut rest = presentation_xml.as_str();
     let mut found_any = false;
-    while let Some(pos) = rest.find("<p:sldId") {
+    while let Some(pos) = rest
+        .find("<p:sldId ")
+        .or_else(|| rest.find("<p:sldId\t"))
+        .or_else(|| rest.find("<p:sldId\n"))
+    {
         rest = &rest[pos + 8..];
         if let Some(id_pos) = rest.find("id=\"") {
             let id_start = id_pos + 4;
@@ -1257,21 +1263,21 @@ fn test_f037_001_master_has_clr_map_and_sld_layout_id_lst() {
         &master_xml[..master_xml.len().min(400)]
     );
 
-    // Note: <p:sldLayoutIdLst> container was removed (STORY-038 AC-004): the AC-004 test
-    // counts "<p:sldLayoutId" occurrences to verify 31 entries, and the container element
-    // would be counted as an extra entry. The layout IDs are now written directly.
-    // Check for the first layout ID entry instead of the container.
+    // <p:sldLayoutIdLst> container must be present (ECMA-376 §19.3.1.41 requirement).
     assert!(
-        master_xml.contains("<p:sldLayoutId id="),
-        "F-037-003: slideMaster1.xml must contain <p:sldLayoutId id=...> entries; got: {}",
+        master_xml.contains("<p:sldLayoutIdLst"),
+        "F-037-003: slideMaster1.xml must contain <p:sldLayoutIdLst> container; got: {}",
         &master_xml[..master_xml.len().min(400)]
     );
 
-    // Must have 31 layout ID entries
-    let layout_id_count = master_xml.matches("<p:sldLayoutId id=").count();
+    // Must have exactly 31 layout ID entry elements inside the container.
+    // Count "<p:sldLayoutId " (with trailing space before id=) to avoid
+    // matching the container "<p:sldLayoutIdLst>" which ends in "Lst".
+    let layout_id_count = master_xml.matches("<p:sldLayoutId ").count();
     assert_eq!(
         layout_id_count, 31,
-        "F-037-003: master must have 31 <p:sldLayoutId id=...> entries; got {layout_id_count}"
+        "F-037-003: master must have 31 <p:sldLayoutId> entries inside <p:sldLayoutIdLst>; \
+         got {layout_id_count}"
     );
 }
 

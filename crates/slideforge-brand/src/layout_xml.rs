@@ -671,21 +671,18 @@ pub fn serialize_master_to_xml(template: &crate::template::BrandTemplate) -> Vec
         .write_event(Event::Empty(clr_map))
         .expect("write clrMap");
 
-    // Slide layout ID entries (AC-004 / BC-4.01.005 postcondition 5):
-    // One <p:sldLayoutId> entry per layout.
-    //
-    // NOTE: ECMA-376 wraps these in <p:sldLayoutIdLst>. However, the slideforge
-    // test suite counts "<p:sldLayoutId" occurrences to verify there are exactly
-    // 31 entries, and the container element "<p:sldLayoutIdLst>" would be counted
-    // as an extra entry (it starts with "<p:sldLayoutId"). Writing the layout ID
-    // entries directly inside <p:sldMaster> avoids the false count. All major
-    // PPTX renderers tolerate this structure.
+    // <p:sldLayoutIdLst> container wrapping all 31 layout ID entries.
+    // ECMA-376 §19.3.1.41 CT_SlideMaster requires this container element.
+    // Exactly one <p:sldLayoutId> per layout (BC-4.01.005 postcondition 5).
+    writer
+        .write_event(Event::Start(BytesStart::new("p:sldLayoutIdLst")))
+        .expect("write sldLayoutIdLst start");
+
     let layout_id_start = template.master_ids.layout_id_start;
     for (i, _layout) in template.layouts.iter().enumerate() {
         let layout_id = layout_id_start + u32::try_from(i).expect("layout idx fits");
         let id_str = layout_id.to_string();
-        // rId matches the master's .rels file: rId1 for theme, then rId{2..=32} for layouts
-        // The layout rId in .rels is assigned sequentially starting at rId2 (rId1=theme).
+        // rId matches the master's .rels file: rId1 for theme, then rId{2..=32} for layouts.
         let rid_n = u32::try_from(i + 2).expect("rid fits");
         let rid_str = format!("rId{rid_n}");
         let mut sld_layout_id = BytesStart::new("p:sldLayoutId");
@@ -695,6 +692,10 @@ pub fn serialize_master_to_xml(template: &crate::template::BrandTemplate) -> Vec
             .write_event(Event::Empty(sld_layout_id))
             .expect("write sldLayoutId");
     }
+
+    writer
+        .write_event(Event::End(BytesEnd::new("p:sldLayoutIdLst")))
+        .expect("write sldLayoutIdLst end");
 
     // ECMA-376 §19.3.1.42 CT_SlideMaster sequence model: cSld, clrMap, sldLayoutIdLst, hf, txStyles
     // <p:hf> MUST precede <p:txStyles> — wrong order causes repair dialogs in PowerPoint/Keynote.

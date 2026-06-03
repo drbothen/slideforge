@@ -282,10 +282,24 @@ fn test_BC_4_01_005_ac001_slide_ids_exact_sequence_3_slides() {
     let pptx_bytes = build_pptx(&laid_out);
     let prs_xml = zip_read_entry(&pptx_bytes, "ppt/presentation.xml");
 
-    // Parse all sldId id= values in document order.
+    // Assert exactly one <p:sldIdLst> container is present.
+    let sldidlst_count = prs_xml.matches("<p:sldIdLst").count();
+    assert_eq!(
+        sldidlst_count, 1,
+        "AC-001: presentation.xml must contain exactly one <p:sldIdLst> container; \
+         found {sldidlst_count}"
+    );
+
+    // Parse only <p:sldId> ENTRY elements (not the <p:sldIdLst> container).
+    // An entry element has attributes: "<p:sldId " (trailing space before id=).
+    // The container "<p:sldIdLst>" has no attributes so it does not match.
     let mut ids: Vec<u32> = Vec::new();
     let mut rest = prs_xml.as_str();
-    while let Some(pos) = rest.find("<p:sldId") {
+    while let Some(pos) = rest
+        .find("<p:sldId ")
+        .or_else(|| rest.find("<p:sldId\t"))
+        .or_else(|| rest.find("<p:sldId\n"))
+    {
         rest = &rest[pos + 8..];
         if let Some(id_pos) = rest.find("id=\"") {
             let id_start = id_pos + 4;
@@ -444,13 +458,23 @@ fn test_BC_4_01_005_ac004_slide_master_sldlayoutidlst_has_31_entries() {
     let pptx_bytes = build_pptx(&laid_out);
     let master_xml = zip_read_entry(&pptx_bytes, "ppt/slideMasters/slideMaster1.xml");
 
-    // Count <p:sldLayoutId occurrences in the master XML.
-    let count = master_xml.matches("<p:sldLayoutId").count();
+    // Assert exactly one <p:sldLayoutIdLst> container is present.
+    let container_count = master_xml.matches("<p:sldLayoutIdLst").count();
+    assert_eq!(
+        container_count, 1,
+        "AC-004 (BC-4.01.005 postcondition 5): slideMaster1.xml must contain exactly one \
+         <p:sldLayoutIdLst> container; found {container_count}"
+    );
+
+    // Count <p:sldLayoutId> ENTRY elements only (not the <p:sldLayoutIdLst> container).
+    // Entry elements have attributes: "<p:sldLayoutId " (trailing space before id=).
+    // The container "<p:sldLayoutIdLst>" ends in "Lst" and does not match this pattern.
+    let count = master_xml.matches("<p:sldLayoutId ").count();
 
     assert_eq!(
         count, 31,
         "AC-004 (BC-4.01.005 postcondition 5): slideMaster1.xml must contain exactly 31 \
-         <p:sldLayoutId> entries in <p:sldLayoutIdLst>; found {count}. \
+         <p:sldLayoutId> entries inside <p:sldLayoutIdLst>; found {count}. \
          This requires serialize_master_to_xml to emit all 31 layout IDs."
     );
 }
@@ -604,9 +628,22 @@ fn test_BC_4_01_005_ac007_ec003_257_slides_unique_ids_256_to_512() {
     let pptx_bytes = build_pptx(&laid_out);
     let prs_xml = zip_read_entry(&pptx_bytes, "ppt/presentation.xml");
 
+    // Assert exactly one <p:sldIdLst> container is present.
+    let sldidlst_count = prs_xml.matches("<p:sldIdLst").count();
+    assert_eq!(
+        sldidlst_count, 1,
+        "AC-007 EC-003: presentation.xml must contain exactly one <p:sldIdLst> container; \
+         found {sldidlst_count}"
+    );
+
+    // Parse only <p:sldId> ENTRY elements (not the <p:sldIdLst> container).
     let mut ids: Vec<u32> = Vec::new();
     let mut rest = prs_xml.as_str();
-    while let Some(pos) = rest.find("<p:sldId") {
+    while let Some(pos) = rest
+        .find("<p:sldId ")
+        .or_else(|| rest.find("<p:sldId\t"))
+        .or_else(|| rest.find("<p:sldId\n"))
+    {
         rest = &rest[pos + 8..];
         if let Some(id_pos) = rest.find("id=\"") {
             let id_start = id_pos + 4;
