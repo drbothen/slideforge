@@ -465,48 +465,88 @@ fn check_ac008(pptx: &[u8]) -> bool {
 
 /// AC-009: Unmapped Q2 DSL keywords do not fall back to layout index 0.
 ///
-/// We verify by probing `SLIDE_ID_START` constant and confirming the unmapped
-/// keywords use index 1 (Title and Content) not index 0 (Title Slide).
-/// This is demonstrated via the `SlideIdAssigner` constant logic + the
-/// exporter's known fallback behavior (confirmed green by `layout_tests.rs`).
+/// Verifies by exporting a 1-slide deck with an unmapped keyword and inspecting
+/// the slide's `.rels` file.  Index 1 ("Title and Content") → `slideLayout2.xml`.
+/// Index 0 ("Title Slide") → `slideLayout1.xml`.  A PASS requires the rels
+/// reference `slideLayout2.xml`, not `slideLayout1.xml`.
 fn check_ac009() -> bool {
     // The 9 unmapped Q2 keywords (AC-009 spec).
-    let unmapped = [
-        "split_contrast",
-        "card_rows",
-        "horizontal_timeline",
-        "status",
-        "progress_bar",
-        "metric_tree",
-        "formula",
-        "weighted_composite",
-        "grid",
+    let unmapped: &[(&str, &str)] = &[
+        ("split_contrast", "slideLayout2.xml"),
+        ("card_rows", "slideLayout2.xml"),
+        ("horizontal_timeline", "slideLayout2.xml"),
+        ("status", "slideLayout2.xml"),
+        ("progress_bar", "slideLayout2.xml"),
+        ("metric_tree", "slideLayout2.xml"),
+        ("formula", "slideLayout2.xml"),
+        ("weighted_composite", "slideLayout2.xml"),
+        ("grid", "slideLayout2.xml"),
     ];
 
-    // These keywords are permanently mapped to layout index 1 ("Title and Content",
-    // ooxml_type = "obj") via the no-silent-fallback rule (ADR-015 §A.4).
-    // We validate this indirectly by confirming they are NOT mapped to index 0.
-    // (The full per-keyword assertions live in layout_tests.rs:
-    //   test_BC_4_01_005_ac009_*_maps_to_index_1_not_0)
-    //
-    // Here we confirm the constant contract: SLIDE_ID_START is 256 (not 0),
-    // which proves the fallback index choice matches the documented rule.
-    println!("  Unmapped Q2 keywords that fall back to layout index 1 (not 0):");
-    for kw in &unmapped {
-        println!("    {kw} → index 1 (Title and Content) — confirmed by layout_tests.rs");
+    println!("  Unmapped Q2 keywords → slide rels layout reference (expected: slideLayout2.xml):");
+    let mut all_ok = true;
+
+    let exporter = PptxExporter::new();
+    let brand = make_brand();
+    let opts = ExportOptions::default();
+
+    for (kw, expected_layout_file) in unmapped {
+        let deck = make_deck(1);
+        let slide = LaidOutSlide {
+            source_index: 0,
+            slide_type_keyword: Arc::from(*kw),
+            frames: vec![],
+            speaker_notes: None,
+            register_tags: vec![],
+            register_content: vec![],
+        };
+        let laid_out = LaidOutDeck {
+            page_size: page_size(),
+            slides: vec![slide],
+            sections: vec![],
+            warnings: vec![],
+        };
+        let pptx = match exporter.export(&deck, &laid_out, &brand, &opts) {
+            Ok(b) => b,
+            Err(e) => {
+                fail(&format!(
+                    "AC-009: export failed for keyword '{kw}': {e}"
+                ));
+                all_ok = false;
+                continue;
+            },
+        };
+        let rels = zip_read_entry(&pptx, "ppt/slides/_rels/slide1.xml.rels");
+        let uses_correct_layout = rels.contains(expected_layout_file);
+        let uses_wrong_layout = rels.contains("slideLayout1.xml");
+        println!(
+            "    {kw:25} → {} (uses_index_1={}  uses_index_0={})",
+            expected_layout_file, uses_correct_layout, uses_wrong_layout
+        );
+        if !uses_correct_layout || uses_wrong_layout {
+            fail(&format!(
+                "AC-009: keyword '{kw}' did not produce a rels reference to \
+                 '{expected_layout_file}'; rels: {rels}"
+            ));
+            all_ok = false;
+        }
     }
+
     note("AC-009: full per-keyword unit test coverage in tests/layout_tests.rs (50 tests)");
-    ok("AC-009: all 9 unmapped keywords → index 1 (no silent fallback to index 0)");
-    true
+    if all_ok {
+        ok("AC-009: all 9 unmapped keywords → slideLayout2.xml (index 1, not index 0)");
+    }
+    all_ok
 }
 
 /// AC-010: Canonical layout mapping correctness — spot-check key mappings.
+///
+/// Exports a 1-slide deck for each keyword and verifies the slide's `.rels`
+/// references the expected `slideLayout{index+1}.xml` (1-based file name).
 fn check_ac010() -> bool {
-    // These are verified end-to-end by the layout index wiring in build_slide_parts.
-    // We print the expected mappings and confirm key slides landed on correct layouts.
-    println!("  Canonical layout keyword → 0-based index mapping (ADR-015 §A.4):");
-    let mappings = [
-        ("title", 0usize, "Title Slide"),
+    // (keyword, 0-based layout index, layout name for display)
+    let mappings: &[(&str, usize, &str)] = &[
+        ("title", 0, "Title Slide"),
         ("content", 1, "Title and Content"),
         ("two_column", 3, "Two Objects"),
         ("table", 7, "Object with Caption"),
@@ -517,12 +557,62 @@ fn check_ac010() -> bool {
         ("quote", 13, "SF Quote"),
         ("chart", 24, "SF Chart"),
     ];
-    for (kw, idx, name) in &mappings {
-        println!("    {kw:20} → index {idx:2}  ({name})");
+
+    println!("  Canonical layout keyword → slideLayoutN.xml (1-based, ADR-015 §A.4):");
+    let mut all_ok = true;
+
+    let exporter = PptxExporter::new();
+    let brand = make_brand();
+    let opts = ExportOptions::default();
+
+    for (kw, idx, name) in mappings {
+        let expected_layout_file = format!("slideLayout{}.xml", idx + 1);
+        let deck = make_deck(1);
+        let slide = LaidOutSlide {
+            source_index: 0,
+            slide_type_keyword: Arc::from(*kw),
+            frames: vec![],
+            speaker_notes: None,
+            register_tags: vec![],
+            register_content: vec![],
+        };
+        let laid_out = LaidOutDeck {
+            page_size: page_size(),
+            slides: vec![slide],
+            sections: vec![],
+            warnings: vec![],
+        };
+        let pptx = match exporter.export(&deck, &laid_out, &brand, &opts) {
+            Ok(b) => b,
+            Err(e) => {
+                fail(&format!(
+                    "AC-010: export failed for keyword '{kw}': {e}"
+                ));
+                all_ok = false;
+                continue;
+            },
+        };
+        let rels = zip_read_entry(&pptx, "ppt/slides/_rels/slide1.xml.rels");
+        let correct = rels.contains(&expected_layout_file);
+        println!(
+            "    {kw:20} → index {:2}  ({name})  [{}]",
+            idx,
+            if correct { "OK" } else { "FAIL" }
+        );
+        if !correct {
+            fail(&format!(
+                "AC-010: keyword '{kw}' expected rels→'{expected_layout_file}'; \
+                 got rels: {rels}"
+            ));
+            all_ok = false;
+        }
     }
+
     note("AC-010: full per-slide-type assertions in tests/layout_tests.rs");
-    ok("AC-010: layout keyword mapping table confirmed (spot-check; full suite in tests)");
-    true
+    if all_ok {
+        ok("AC-010: layout keyword mapping spot-check passed (all 10 keywords correct)");
+    }
+    all_ok
 }
 
 /// AC-011: Placeholder inheritance — check that slide1.xml has `<p:ph>` with idx attribute.
@@ -531,7 +621,9 @@ fn check_ac011(pptx: &[u8]) -> bool {
 
     // Title frame → ph type="title" idx=0.
     let has_ph_title = slide1.contains("type=\"title\"");
-    let has_idx_0 = slide1.contains("idx=\"0\"") || slide1.contains("type=\"title\"");
+    // Check idx="0" independently — the OR with type="title" was a tautology
+    // (always true when has_ph_title was true) that masked a missing idx attribute.
+    let has_idx_0 = slide1.contains("idx=\"0\"");
 
     if has_ph_title {
         if let Some(pos) = slide1.find("<p:ph") {
