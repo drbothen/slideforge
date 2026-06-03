@@ -3587,3 +3587,280 @@ fn test_f077_p11_001_figref_ident_resolves_empty_emits_e_evl_012() {
          got: {code:?}"
     );
 }
+
+// ─── F-077-P12-001: Pipe-form empty-arg guards (sibling-site consistency) ─────
+//
+// The Call form and Pipe form MUST behave identically for empty/empty-resolved
+// args. These tests mirror the P11-001/P10-A tests but use Expr::Pipe instead
+// of Expr::Call.
+
+/// F-077-P12-001 (LOW→consistency):
+/// `{{ "" | ref }}` (Pipe form, literal empty string) must push E-EVL-013 and
+/// produce NO InlineNode.
+///
+/// This is already guarded in the Pipe::ref arm (literal `""` branch) — this
+/// test is kept as a regression guard to prevent future breakage.
+#[test]
+fn test_f077_p12_001_pipe_ref_empty_literal_emits_e_evl_013() {
+    let pipe_empty_ref = SyntaxExpr::Pipe {
+        lhs: Box::new(SyntaxExpr::Str(String::new())),
+        filter: "ref".to_string(),
+        args: vec![],
+    };
+    let chunks = vec![TemplateChunk::Expr(pipe_empty_ref)];
+    let env = Env::new(IndexMap::new());
+    let mut sink = DiagnosticSink::new();
+
+    let nodes = crate::register_routing::chunks_to_inline_nodes(&chunks, &env, &mut sink);
+
+    // (a) No InlineNode must be produced.
+    assert!(
+        nodes.is_empty(),
+        "F-077-P12-001: {{ \"\" | ref }} must produce NO InlineNode; got: {nodes:?}"
+    );
+
+    // (b) Exactly one diagnostic must be pushed.
+    assert!(
+        !sink.is_empty(),
+        "F-077-P12-001: {{ \"\" | ref }} must push a diagnostic; sink is empty"
+    );
+
+    // (c) LOAD-BEARING: the diagnostic code MUST be E-EVL-013 (InlineXrefEmptyId).
+    let code = sink
+        .errors()
+        .iter()
+        .find_map(|e| e.code().map(|c| c.to_string()));
+    assert_eq!(
+        code.as_deref(),
+        Some("E-EVL-013"),
+        "F-077-P12-001: {{ \"\" | ref }} MUST emit E-EVL-013 (InlineXrefEmptyId); got: {code:?}"
+    );
+}
+
+/// F-077-P12-001 (LOW→consistency):
+/// `{{ var | ref }}` where `var` is bound to `""` in the environment must push
+/// E-EVL-013 and produce NO InlineNode.
+///
+/// RED GATE: before the fix, the eval-resolved-empty branch in the Pipe::ref arm
+/// pushes `Xref(s)` with no empty check (silent `Xref("")`). After the fix it
+/// emits E-EVL-013, matching the Call form behaviour.
+///
+/// Call+Pipe consistency: both forms MUST behave identically for empty args
+/// (see `test_f077_ref_ident_resolves_empty_emits_e_evl_013` for the Call form).
+#[test]
+fn test_f077_p12_001_pipe_ref_ident_resolves_empty_emits_e_evl_013() {
+    // Bind var = "" in the env.
+    let mut vars: IndexMap<Arc<str>, slideforge_types::Value> = IndexMap::new();
+    vars.insert(
+        Arc::from("var"),
+        slideforge_types::Value::Str(Arc::from("")),
+    );
+    let env = Env::new(vars);
+
+    // Build {{ var | ref }} — ident lhs, not a string literal.
+    let pipe_ref_ident = SyntaxExpr::Pipe {
+        lhs: Box::new(SyntaxExpr::Ident("var".to_string())),
+        filter: "ref".to_string(),
+        args: vec![],
+    };
+    let chunks = vec![TemplateChunk::Expr(pipe_ref_ident)];
+    let mut sink = DiagnosticSink::new();
+
+    let nodes = crate::register_routing::chunks_to_inline_nodes(&chunks, &env, &mut sink);
+
+    // (a) No InlineNode produced — empty id is invalid.
+    assert!(
+        nodes.is_empty(),
+        "F-077-P12-001: {{ var | ref }} where var=\"\" must produce NO InlineNode; got: {nodes:?}"
+    );
+
+    // (b) Exactly one diagnostic pushed.
+    assert!(
+        !sink.is_empty(),
+        "F-077-P12-001: {{ var | ref }} where var=\"\" must push a diagnostic; sink is empty"
+    );
+
+    // (c) LOAD-BEARING: diagnostic code MUST be E-EVL-013 (InlineXrefEmptyId).
+    //     Call form and Pipe form must be consistent — both emit E-EVL-013 for
+    //     empty-resolved ref args (F-077-P12-001 sibling-site consistency).
+    let code = sink
+        .errors()
+        .iter()
+        .find_map(|e| e.code().map(|c| c.to_string()));
+    assert_eq!(
+        code.as_deref(),
+        Some("E-EVL-013"),
+        "F-077-P12-001: {{ var | ref }} where var=\"\" MUST emit E-EVL-013 (InlineXrefEmptyId); \
+         got: {code:?}"
+    );
+}
+
+/// F-077-P12-001 (LOW→consistency):
+/// `{{ var | figref }}` where `var` is bound to `""` in the environment must
+/// push E-EVL-012 and produce NO InlineNode.
+///
+/// RED GATE: before the fix, the eval-resolved branch in the Pipe::figref arm
+/// does `Arc::from(format!("fig-{s}"))` with no empty check → silently yields
+/// `Xref("fig-")`, a malformed cross-reference. After the fix it emits E-EVL-012,
+/// matching the Call form behaviour.
+///
+/// Call+Pipe consistency: both forms MUST behave identically for empty args
+/// (see `test_f077_p11_001_figref_ident_resolves_empty_emits_e_evl_012` for the
+/// Call form).
+#[test]
+fn test_f077_p12_001_pipe_figref_ident_resolves_empty_emits_e_evl_012() {
+    // Bind var = "" in the env.
+    let mut vars: IndexMap<Arc<str>, slideforge_types::Value> = IndexMap::new();
+    vars.insert(
+        Arc::from("var"),
+        slideforge_types::Value::Str(Arc::from("")),
+    );
+    let env = Env::new(vars);
+
+    // Build {{ var | figref }} — ident lhs, evaluates to "".
+    let pipe_figref_ident = SyntaxExpr::Pipe {
+        lhs: Box::new(SyntaxExpr::Ident("var".to_string())),
+        filter: "figref".to_string(),
+        args: vec![],
+    };
+    let chunks = vec![TemplateChunk::Expr(pipe_figref_ident)];
+    let mut sink = DiagnosticSink::new();
+
+    let nodes = crate::register_routing::chunks_to_inline_nodes(&chunks, &env, &mut sink);
+
+    // (a) No InlineNode produced — Xref("fig-") is a malformed cross-reference
+    //     and must be rejected, not silently emitted.
+    assert!(
+        nodes.is_empty(),
+        "F-077-P12-001: {{ var | figref }} where var=\"\" must produce NO InlineNode; \
+         got: {nodes:?}"
+    );
+
+    // (b) Exactly one diagnostic pushed.
+    assert!(
+        !sink.is_empty(),
+        "F-077-P12-001: {{ var | figref }} where var=\"\" must push a diagnostic; sink is empty"
+    );
+
+    // (c) LOAD-BEARING: diagnostic code MUST be E-EVL-012 (FigrefInvalidArg).
+    //     All three inline builtins reject empty-resolved args consistently via
+    //     both Call AND Pipe forms:
+    //       figref → E-EVL-012 | ref → E-EVL-013 | footnote → E-EVL-014
+    let code = sink
+        .errors()
+        .iter()
+        .find_map(|e| e.code().map(|c| c.to_string()));
+    assert_eq!(
+        code.as_deref(),
+        Some("E-EVL-012"),
+        "F-077-P12-001: {{ var | figref }} where var=\"\" MUST emit E-EVL-012 \
+         (FigrefInvalidArg); got: {code:?}"
+    );
+}
+
+/// F-077-P12-001 (LOW→consistency):
+/// `{{ "" | footnote }}` (Pipe form, literal empty string) must push E-EVL-014
+/// and produce NO InlineNode.
+///
+/// RED GATE: before the fix, the Pipe::footnote arm has no empty check on the
+/// literal `""` path — it pushes `Footnote([Plain("")])` silently. After the fix
+/// it emits E-EVL-014, matching the Call form behaviour.
+///
+/// Call+Pipe consistency: both forms MUST behave identically for empty args
+/// (see `test_f077_p9_001_footnote_empty_string_emits_e_evl_014` for the Call form).
+#[test]
+fn test_f077_p12_001_pipe_footnote_empty_literal_emits_e_evl_014() {
+    let pipe_empty_footnote = SyntaxExpr::Pipe {
+        lhs: Box::new(SyntaxExpr::Str(String::new())),
+        filter: "footnote".to_string(),
+        args: vec![],
+    };
+    let chunks = vec![TemplateChunk::Expr(pipe_empty_footnote)];
+    let env = Env::new(IndexMap::new());
+    let mut sink = DiagnosticSink::new();
+
+    let nodes = crate::register_routing::chunks_to_inline_nodes(&chunks, &env, &mut sink);
+
+    // (a) No InlineNode must be produced — Footnote([Plain("")]) is invalid.
+    assert!(
+        nodes.is_empty(),
+        "F-077-P12-001: {{ \"\" | footnote }} must produce NO InlineNode; got: {nodes:?}"
+    );
+
+    // (b) Exactly one diagnostic must be pushed.
+    assert!(
+        !sink.is_empty(),
+        "F-077-P12-001: {{ \"\" | footnote }} must push a diagnostic; sink is empty"
+    );
+
+    // (c) LOAD-BEARING: the diagnostic code MUST be E-EVL-014 (FootnoteInvalidArg).
+    let code = sink
+        .errors()
+        .iter()
+        .find_map(|e| e.code().map(|c| c.to_string()));
+    assert_eq!(
+        code.as_deref(),
+        Some("E-EVL-014"),
+        "F-077-P12-001: {{ \"\" | footnote }} MUST emit E-EVL-014 (FootnoteInvalidArg); \
+         got: {code:?}"
+    );
+}
+
+/// F-077-P12-001 (LOW→consistency):
+/// `{{ var | footnote }}` where `var` is bound to `""` in the environment must
+/// push E-EVL-014 and produce NO InlineNode.
+///
+/// RED GATE: before the fix, the Pipe::footnote arm has no empty check on the
+/// eval-resolved path — it pushes `Footnote([Plain("")])` silently. After the
+/// fix it emits E-EVL-014, matching the Call form behaviour.
+///
+/// Call+Pipe consistency: both forms MUST behave identically for empty args
+/// (see `test_f077_footnote_ident_resolves_empty_emits_e_evl_014` for the Call form).
+#[test]
+fn test_f077_p12_001_pipe_footnote_ident_resolves_empty_emits_e_evl_014() {
+    // Bind var = "" in the env.
+    let mut vars: IndexMap<Arc<str>, slideforge_types::Value> = IndexMap::new();
+    vars.insert(
+        Arc::from("var"),
+        slideforge_types::Value::Str(Arc::from("")),
+    );
+    let env = Env::new(vars);
+
+    // Build {{ var | footnote }} — ident lhs, evaluates to "".
+    let pipe_footnote_ident = SyntaxExpr::Pipe {
+        lhs: Box::new(SyntaxExpr::Ident("var".to_string())),
+        filter: "footnote".to_string(),
+        args: vec![],
+    };
+    let chunks = vec![TemplateChunk::Expr(pipe_footnote_ident)];
+    let mut sink = DiagnosticSink::new();
+
+    let nodes = crate::register_routing::chunks_to_inline_nodes(&chunks, &env, &mut sink);
+
+    // (a) No InlineNode produced — empty footnote text is invalid.
+    assert!(
+        nodes.is_empty(),
+        "F-077-P12-001: {{ var | footnote }} where var=\"\" must produce NO InlineNode; \
+         got: {nodes:?}"
+    );
+
+    // (b) Exactly one diagnostic pushed.
+    assert!(
+        !sink.is_empty(),
+        "F-077-P12-001: {{ var | footnote }} where var=\"\" must push a diagnostic; sink is empty"
+    );
+
+    // (c) LOAD-BEARING: diagnostic code MUST be E-EVL-014 (FootnoteInvalidArg).
+    //     Call form and Pipe form must be consistent — both emit E-EVL-014 for
+    //     empty-resolved footnote args (F-077-P12-001 sibling-site consistency).
+    let code = sink
+        .errors()
+        .iter()
+        .find_map(|e| e.code().map(|c| c.to_string()));
+    assert_eq!(
+        code.as_deref(),
+        Some("E-EVL-014"),
+        "F-077-P12-001: {{ var | footnote }} where var=\"\" MUST emit E-EVL-014 \
+         (FootnoteInvalidArg); got: {code:?}"
+    );
+}

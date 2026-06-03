@@ -527,7 +527,13 @@ pub fn chunks_to_inline_nodes(
                     // as a proxy. These arms preserve that behavior so those tests
                     // continue to pass. Real DSL now produces Expr::Call (above).
                     Expr::Pipe { filter, lhs, .. } if filter == "ref" => {
-                        // `{{ "id" | ref }}` legacy proxy form.
+                        // `{{ "id" | ref }}` or `{{ var | ref }}` legacy proxy form.
+                        //
+                        // CONSISTENCY NOTE (F-077-P12-001): Call and Pipe arms MUST be
+                        // kept consistent for empty/empty-resolved args. If you update
+                        // the Call arm's empty-id handling, update this Pipe arm too,
+                        // and vice versa. Both must emit E-EVL-013 (InlineXrefEmptyId)
+                        // and produce no node when the resolved id is empty.
                         if let Expr::Str(id) = lhs.as_ref() {
                             if id.is_empty() {
                                 use crate::error::EvalError;
@@ -538,21 +544,58 @@ pub fn chunks_to_inline_nodes(
                                     },
                                     ParseSeverity::Error,
                                 );
+                                // No InlineNode produced for empty-id ref (Pipe form).
                             } else {
                                 nodes.push(InlineNode::Xref(Arc::from(id.as_str())));
                             }
                         } else {
-                            // Unexpected lhs — evaluate and wrap as Xref.
+                            // Non-literal lhs — evaluate and check for empty resolution.
+                            // Empty-resolved id must emit E-EVL-013, not silently produce
+                            // Xref("") — mirrors the Call arm's eval-resolved-empty branch.
                             if let Some(s) = eval_expr_to_string(env, lhs, sink) {
-                                nodes.push(InlineNode::Xref(s));
+                                if s.is_empty() {
+                                    use crate::error::EvalError;
+                                    use slideforge_syntax::error::ParseSeverity;
+                                    sink.push_with_severity(
+                                        EvalError::InlineXrefEmptyId {
+                                            span: slideforge_types::SourceSpan::default(),
+                                        },
+                                        ParseSeverity::Error,
+                                    );
+                                    // No InlineNode produced for empty-resolved ref (Pipe form).
+                                } else {
+                                    nodes.push(InlineNode::Xref(s));
+                                }
                             }
                         }
                     },
                     Expr::Pipe { filter, lhs, .. } if filter == "figref" => {
-                        // `{{ N | figref }}` legacy proxy form.
+                        // `{{ N | figref }}` or `{{ var | figref }}` legacy proxy form.
+                        //
+                        // CONSISTENCY NOTE (F-077-P12-001): Call and Pipe arms MUST be
+                        // kept consistent for empty/empty-resolved args. If you update
+                        // the Call arm's empty-resolved handling, update this Pipe arm
+                        // too, and vice versa. Both must emit E-EVL-012 (FigrefInvalidArg)
+                        // and produce no node when the resolved string is empty —
+                        // Xref("fig-") is a malformed cross-reference and must be rejected.
                         let xref_id = if let Expr::Num(n) = lhs.as_ref() {
                             Arc::from(format!("fig-{n}").as_str())
                         } else if let Some(s) = eval_expr_to_string(env, lhs, sink) {
+                            if s.is_empty() {
+                                // Empty-resolved lhs: figref(var) where var="" is a
+                                // malformed cross-reference — Xref("fig-") is not usable.
+                                // Emit E-EVL-012 (FigrefInvalidArg) and produce no node,
+                                // mirroring the Call arm empty-resolved guard.
+                                use crate::error::EvalError;
+                                use slideforge_syntax::error::ParseSeverity;
+                                sink.push_with_severity(
+                                    EvalError::FigrefInvalidArg {
+                                        span: slideforge_types::SourceSpan::default(),
+                                    },
+                                    ParseSeverity::Error,
+                                );
+                                continue;
+                            }
                             Arc::from(format!("fig-{s}").as_str())
                         } else {
                             continue;
@@ -560,13 +603,50 @@ pub fn chunks_to_inline_nodes(
                         nodes.push(InlineNode::Xref(xref_id));
                     },
                     Expr::Pipe { filter, lhs, .. } if filter == "footnote" => {
-                        // `{{ "text" | footnote }}` legacy proxy form.
+                        // `{{ "text" | footnote }}` or `{{ var | footnote }}` legacy
+                        // proxy form.
+                        //
+                        // CONSISTENCY NOTE (F-077-P12-001): Call and Pipe arms MUST be
+                        // kept consistent for empty/empty-resolved args. If you update
+                        // the Call arm's empty-text handling, update this Pipe arm too,
+                        // and vice versa. Both must emit E-EVL-014 (FootnoteInvalidArg)
+                        // and produce no node when the footnote text is empty — both the
+                        // literal "" case AND the eval-resolved-empty case.
                         if let Expr::Str(text) = lhs.as_ref() {
-                            nodes.push(InlineNode::Footnote(vec![InlineNode::Plain(Arc::from(
-                                text.as_str(),
-                            ))]));
+                            if text.is_empty() {
+                                // Empty string literal: "" | footnote — emit E-EVL-014,
+                                // produce no node. Mirrors the Call arm's Str("") branch.
+                                use crate::error::EvalError;
+                                use slideforge_syntax::error::ParseSeverity;
+                                sink.push_with_severity(
+                                    EvalError::FootnoteInvalidArg {
+                                        span: slideforge_types::SourceSpan::default(),
+                                    },
+                                    ParseSeverity::Error,
+                                );
+                                // No InlineNode produced for empty footnote text (Pipe form).
+                            } else {
+                                nodes.push(InlineNode::Footnote(vec![InlineNode::Plain(
+                                    Arc::from(text.as_str()),
+                                )]));
+                            }
                         } else if let Some(s) = eval_expr_to_string(env, lhs, sink) {
-                            nodes.push(InlineNode::Footnote(vec![InlineNode::Plain(s)]));
+                            if s.is_empty() {
+                                // Empty-resolved lhs: var | footnote where var="" is invalid.
+                                // Emit E-EVL-014 (FootnoteInvalidArg) and produce no node,
+                                // mirroring the Call arm's eval-resolved-empty guard.
+                                use crate::error::EvalError;
+                                use slideforge_syntax::error::ParseSeverity;
+                                sink.push_with_severity(
+                                    EvalError::FootnoteInvalidArg {
+                                        span: slideforge_types::SourceSpan::default(),
+                                    },
+                                    ParseSeverity::Error,
+                                );
+                                // No InlineNode produced for empty-resolved footnote (Pipe form).
+                            } else {
+                                nodes.push(InlineNode::Footnote(vec![InlineNode::Plain(s)]));
+                            }
                         }
                     },
                     // All other expressions: evaluate to string → Plain.
