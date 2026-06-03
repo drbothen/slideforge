@@ -48,8 +48,8 @@ wave_4_batch_c:
 wave_4_pulled_in_p1: [STORY-073, STORY-075, STORY-076]
 wave_4_deferred_p2_to_wave5: [STORY-072, STORY-074]
 wave_4_bc_deltas: "BC-2.01.001 v1.1→v1.2; BC-2.01.003 v1.8→v1.9; error-taxonomy v2.2→v2.3"
-develop_sha: "2ebf184f"
-develop_pr_count: 52
+develop_sha: "56f3f57d"
+develop_pr_count: 53
 last_updated: 2026-06-03
 ---
 
@@ -396,12 +396,15 @@ stories:
     adversary_convergence: "3/3 strict-CLEAN at passes 3/4/5 (5-pass total cascade)"
     notes: "DOCX Core Serialization; chain: STORY-041→042. MERGED PR #51 (a3b47303). DEF-041-P5-001 (EC-002 para-break preservation) deferred to wave-gate: exporter correct given input contract; splitting is upstream STORY-035 scope."
   STORY-042:
-    status: not-started
+    status: merged
     wave: 4
     batch: B
     priority: P0
     points: 5
-    notes: "DOCX Auto-Generated Document Sections; depends on STORY-041"
+    pr: 53
+    merge_commit: "56f3f57d"
+    merged: 2026-06-03
+    notes: "DOCX Auto-Generated Document Sections; depends on STORY-041. MERGED PR #53 (56f3f57d). Docx chain (041→042) COMPLETE."
   STORY-043:
     status: merged
     wave: 4

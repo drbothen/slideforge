@@ -32,10 +32,10 @@ wave_4_started: 2026-05-31
 wave_4_total_stories: 18
 wave_4_total_points: 114
 wave_5_total_points: 109
-develop_sha: "2ebf184f"
-develop_pr_count: 52
+develop_sha: "56f3f57d"
+develop_pr_count: 53
 error_taxonomy_version: "v2.13"
-workspace_tests: "~2700+ (50 PRs merged)"
+workspace_tests: "~2700+ (51 PRs merged)"
 workspace_test_failures: 0
 ---
 
@@ -53,12 +53,12 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. Generates branded .pptx
 
 ## POSITION
 
-Phase 3, **Wave 4 Batch B — chain HEADS COMPLETE: STORY-037 MERGED (PR #52, 2ebf184f) + STORY-041 MERGED (PR #51, a3b47303).**
-- develop = `2ebf184f` (52 merged PRs). Open PRs: 0. Active worktrees: none.
-- STORY-037: converged 3/3 strict-CLEAN (passes 6/7/8), merged PR #52 (2ebf184f). STORY-038→039→040 now unblocked.
-- STORY-041: converged 3/3 strict-CLEAN (passes 3/4/5), merged PR #51 (a3b47303). STORY-042 now unblocked.
-- **Batch B remaining:** STORY-038→039→040 (pptx chain, unblocked by STORY-037) + STORY-042 (docx, unblocked by STORY-041). All can dispatch in parallel (STORY-038 and STORY-042 independent; each chain is sequential internally).
-- **Wave 4 merged total:** 12/18 (Batch A 10/10 + STORY-041 + STORY-037).
+Phase 3, **Wave 4 Batch B — docx chain COMPLETE: STORY-041 MERGED (PR #51, a3b47303) + STORY-042 MERGED (PR #53, 56f3f57d).**
+- develop = `56f3f57d` (53 merged PRs). Open PRs: 0. Active worktree: feature/S-038 (in progress).
+- STORY-042: merged PR #53 (56f3f57d). Docx chain (041→042) COMPLETE.
+- STORY-038 (pptx layout compliance): CONVERGING — adversary cascade in progress, strict 3-CLEAN; functionally complete, polishing cosmetic residue. Worktree feature/S-038 active, not yet PR'd.
+- **Batch B remaining after STORY-038 merges:** STORY-039→040 (pptx chain). Then Batch C: STORY-049→050.
+- **Wave 4 merged total:** 13/18 (Batch A 10/10 + STORY-037 + STORY-041 + STORY-042).
 
 ---
 
@@ -77,7 +77,7 @@ Phase 3, **Wave 4 Batch B — chain HEADS COMPLETE: STORY-037 MERGED (PR #52, 2e
 | Planning (25 DSL decisions) | DONE 2026-05-24 | q1–q25 docs + 14 research threads + 7/7 spikes resolved |
 | Phase 1: Spec Crystallization | DONE — APPROVED 2026-05-25 | PRD (109 BCs, 15 HS, 4 supplements) + arch (14 ADRs, 15 VPs, 20 crates) + UX spec. 17 passes, 69 findings, 3/3 clean. |
 | Phase 2: Story Decomposition | DONE — APPROVED 2026-05-25 | 81 stories, 21 epics, 6 waves, 491 pts. 22 passes, 96+ findings, 3/3 clean. |
-| Phase 3: TDD Implementation | IN PROGRESS — Waves 1/2/3 GATE PASSED. Wave 4: Batch A 10/10 COMPLETE + STORY-041 MERGED (PR #51 a3b47303) + STORY-037 MERGED (PR #52 2ebf184f). 12/18 Wave 4 merged. Batch B remaining: STORY-038→039→040 (pptx chain) + STORY-042 (docx). | Per-story delivery |
+| Phase 3: TDD Implementation | IN PROGRESS — Waves 1/2/3 GATE PASSED. Wave 4: Batch A 10/10 COMPLETE + STORY-037 MERGED (PR #52 2ebf184f) + STORY-041 MERGED (PR #51 a3b47303) + STORY-042 MERGED (PR #53 56f3f57d). 13/18 Wave 4 merged. Docx chain COMPLETE. STORY-038 CONVERGING. Batch B remaining after 038: STORY-039→040. Then Batch C: STORY-049→050. | Per-story delivery |
 | Phases 4–7 | NOT STARTED | Holdout / Adversarial / Formal Hardening / Convergence |
 
 ## Wave 4 Batch A Status (10/10 COMPLETE) + Batch B In Progress
@@ -88,6 +88,7 @@ STORY-077 follow-ups MERGED as PR #50 (f2573bb1, 2026-06-03).
 **Batch B:**
 - STORY-041 MERGED PR #51 (a3b47303, 2026-06-03). STORY-042 now unblocked.
 - STORY-037 MERGED PR #52 (2ebf184f, 2026-06-03). STORY-038→039→040 now unblocked. ADR-015 + Addendum A on factory-artifacts. PR-52 follow-ups recorded in Follow-Ups table (SEC-037-001, S1–S4).
+- STORY-042 MERGED PR #53 (56f3f57d, 2026-06-03). Docx chain (041→042) COMPLETE. SEC-042-001 follow-up recorded in Follow-Ups table.
 
 Batch C (after Batch B): STORY-049→050.
 
@@ -98,9 +99,9 @@ Batch C (after Batch B): STORY-049→050.
 | Field | Value |
 |-------|-------|
 | **Date** | 2026-06-03 |
-| **Position** | Wave 4 Batch B — chain heads complete. STORY-037 MERGED PR #52 (2ebf184f). STORY-041 MERGED PR #51 (a3b47303). Wave 4: 12/18 merged. No open PRs, no active worktrees. Next: dispatch STORY-038→039→040 (pptx chain) + STORY-042 (docx) in parallel. |
-| **develop SHA** | `2ebf184f` (52 merged PRs) |
-| **Active worktrees** | none |
+| **Position** | Wave 4 Batch B — docx chain COMPLETE. STORY-042 MERGED PR #53 (56f3f57d). STORY-038 (pptx layout compliance) CONVERGING — adversary cascade in progress, worktree feature/S-038 active, not yet PR'd. Wave 4: 13/18 merged. Next: STORY-038 converge → PR → merge → dispatch STORY-039→040. Then Batch C: STORY-049→050. |
+| **develop SHA** | `56f3f57d` (53 merged PRs) |
+| **Active worktrees** | feature/S-038 |
 | **Open PRs** | 0 |
 | **Workspace crates** | 16 |
 | **BC deltas** | ADR-015 + Addendum A this session; BC-3.02.002 v1.5, BC-1.14.003 v1.3, error-taxonomy v2.13 — all on factory-artifacts |
@@ -136,6 +137,7 @@ Batch C (after Batch B): STORY-049→050.
 | S2 (pptx): silent i32 slide-size clamp (presentation.rs:159-160) at odds with no-silent-fallback rule — propagate error instead | LOW | open | PR #52 reviewer suggestion. Target: STORY-038. |
 | S3 (pptx): Subtitle frames map to PlaceholderValues::Title (idx 0) not a subTitle placeholder — confirm/resolve | LOW | open | PR #52 reviewer suggestion. Target: STORY-038. |
 | S4 (pptx): `build_notes_handout_masters` swallows rels-build failure with empty bytes (lib.rs:632,650) — propagate error instead | LOW | open | PR #52 reviewer suggestion. Target: STORY-040 (notes/handout master story). |
+| SEC-042-001 (CWE-400): DOCX section serializers have no upper bound on items count — unbounded allocation; local-tool threat model only. Fix at LAYOUT stage where GeneratedSection.items is populated (bound by deck size). | LOW | open | PR #53 follow-up. Target: STORY-049 / layout hardening. |
 
 ---
 

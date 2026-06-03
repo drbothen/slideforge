@@ -13,7 +13,7 @@ total_stories: 81
 stories_written: 81
 stories_ready: 0
 stories_in_progress: 0
-stories_merged: 50
+stories_merged: 51
 ---
 
 # STORY-INDEX — slideforge v1.0
@@ -33,10 +33,10 @@ stories_merged: 50
 | Wave 1 | 14 | 0 | 0 | 0 | 14 | 0 |
 | Wave 2 | 7 | 0 | 0 | 0 | 7 | 0 |
 | Wave 3 | 17 | 0 | 0 | 0 | 17 | 0 |
-| Wave 4 | 18 | 6 | 0 | 0 | 12 | 0 |
+| Wave 4 | 18 | 5 | 0 | 0 | 13 | 0 |
 | Wave 5 | 19 | 19 | 0 | 0 | 0 | 0 |
 | Wave 6 | 6 | 6 | 0 | 0 | 0 | 0 |
-| **Total** | **81** | **31** | **0** | **0** | **50** | **0** |
+| **Total** | **81** | **30** | **0** | **0** | **51** | **0** |
 
 ---
 
@@ -116,7 +116,7 @@ stories_merged: 50
 | [STORY-039](stories/STORY-039-pptx-a11y-metadata.md) | EPIC-08 | PPTX Accessibility Metadata | BC-4.01.004, BC-5.01.005 | P0 | 5 | strict | draft |
 | [STORY-040](stories/STORY-040-pptx-notes-sections-masters.md) | EPIC-08 | PPTX: Speaker Notes + Slide Sections + notesMaster1.xml | BC-4.01.003, BC-4.01.006 | P0 | 5 | strict | draft |
 | [STORY-041](stories/STORY-041-docx-core-serialization.md) | EPIC-09 | DOCX Core Serialization: report register + ooxmlsdk | BC-4.02.001 | P0 | 8 | strict | merged |
-| [STORY-042](stories/STORY-042-docx-auto-sections.md) | EPIC-09 | DOCX: Auto-Generated Document Sections | BC-4.02.002 | P0 | 5 | strict | draft |
+| [STORY-042](stories/STORY-042-docx-auto-sections.md) | EPIC-09 | DOCX: Auto-Generated Document Sections | BC-4.02.002 | P0 | 5 | strict | merged |
 | [STORY-043](stories/STORY-043-pdf-core-backend.md) | EPIC-13 | PDF Core: pdf-writer + krilla + SlideTagEngine | BC-4.03.002 | P0 | 8 | strict | merged |
 | [STORY-044](stories/STORY-044-pdf-coordinate-mapping.md) | EPIC-13 | PDF: EMU-to-PDF Coordinate Mapping + Y-Axis Flip | BC-4.03.005 | P0 | 5 | strict | merged |
 | [STORY-045](stories/STORY-045-pdf-ua1-tagging-verapdf.md) | EPIC-13 | PDF: PDF/UA-1 Tagging + veraPDF CI Gate | BC-4.03.001 | P0 | 8 | strict | merged |
