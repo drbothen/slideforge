@@ -95,6 +95,10 @@
 #![allow(clippy::unwrap_used)]
 #![allow(clippy::expect_used)]
 #![allow(clippy::panic)]
+// Pre-existing test infrastructure: file extension comparison in ZIP entry filters.
+#![allow(clippy::case_sensitive_file_extension_comparisons)]
+// Pre-existing test: use imports inside function bodies (test-writer style).
+#![allow(clippy::items_after_statements)]
 
 use std::io::Read as _;
 use std::sync::Arc;
@@ -256,9 +260,7 @@ fn test_brand_template() -> slideforge_brand::BrandTemplate {
         notes_master_stub: NOTES_MASTER_STUB.to_vec(),
         handout_master_stub: HANDOUT_MASTER_STUB.to_vec(),
         master_ids: MasterIds::default(),
-        content_types_layout_entries: Arc::from(
-            generate_content_types_layout_entries(31).as_str(),
-        ),
+        content_types_layout_entries: Arc::from(generate_content_types_layout_entries(31).as_str()),
     }
 }
 
@@ -505,8 +507,7 @@ fn test_BC_4_01_005_ac006_section_divider_slide_has_clrmapovr_in_zip() {
     // Verify the ZIP itself is valid.
     {
         let cursor = std::io::Cursor::new(&pptx_bytes);
-        ZipArchive::new(cursor)
-            .expect("section_divider export must produce valid ZIP");
+        ZipArchive::new(cursor).expect("section_divider export must produce valid ZIP");
     }
 
     let slide1_xml = zip_read_entry(&pptx_bytes, "ppt/slides/slide1.xml");
@@ -642,8 +643,14 @@ fn test_BC_4_01_005_ac007_ec003_257_slides_unique_ids_256_to_512() {
 
     let min = ids.iter().copied().min().unwrap();
     let max = ids.iter().copied().max().unwrap();
-    assert_eq!(min, 256, "AC-007 EC-003: minimum slide ID must be 256; got {min}");
-    assert_eq!(max, 512, "AC-007 EC-003: maximum slide ID for 257 slides must be 512; got {max}");
+    assert_eq!(
+        min, 256,
+        "AC-007 EC-003: minimum slide ID must be 256; got {min}"
+    );
+    assert_eq!(
+        max, 512,
+        "AC-007 EC-003: maximum slide ID for 257 slides must be 512; got {max}"
+    );
 }
 
 // ─── AC-008: Master rels has 31 layout entries ────────────────────────────────
@@ -657,8 +664,7 @@ fn test_BC_4_01_005_ac007_ec003_257_slides_unique_ids_256_to_512() {
 fn test_BC_4_01_005_ac008_master_rels_has_31_layout_relationships() {
     let laid_out = make_laid_out_deck(1);
     let pptx_bytes = build_pptx(&laid_out);
-    let master_rels =
-        zip_read_entry(&pptx_bytes, "ppt/slideMasters/_rels/slideMaster1.xml.rels");
+    let master_rels = zip_read_entry(&pptx_bytes, "ppt/slideMasters/_rels/slideMaster1.xml.rels");
 
     // The slideLayout relationship type.
     let layout_type =
@@ -705,8 +711,14 @@ fn test_BC_4_01_005_ac009_split_contrast_maps_to_index_1_not_0() {
 fn test_BC_4_01_005_ac009_card_rows_maps_to_index_1_not_0() {
     let template = test_brand_template();
     let idx = crate::find_layout_index(&template, "card_rows");
-    assert_ne!(idx, 0, "AC-009: 'card_rows' must NOT map to layout index 0; got {idx}");
-    assert_eq!(idx, 1, "AC-009: 'card_rows' must fall back to index 1; got {idx}");
+    assert_ne!(
+        idx, 0,
+        "AC-009: 'card_rows' must NOT map to layout index 0; got {idx}"
+    );
+    assert_eq!(
+        idx, 1,
+        "AC-009: 'card_rows' must fall back to index 1; got {idx}"
+    );
 }
 
 /// AC-009: `horizontal_timeline` must map to index 1 (not 0).
@@ -714,8 +726,14 @@ fn test_BC_4_01_005_ac009_card_rows_maps_to_index_1_not_0() {
 fn test_BC_4_01_005_ac009_horizontal_timeline_maps_to_index_1_not_0() {
     let template = test_brand_template();
     let idx = crate::find_layout_index(&template, "horizontal_timeline");
-    assert_ne!(idx, 0, "AC-009: 'horizontal_timeline' must NOT map to layout index 0; got {idx}");
-    assert_eq!(idx, 1, "AC-009: 'horizontal_timeline' must fall back to index 1; got {idx}");
+    assert_ne!(
+        idx, 0,
+        "AC-009: 'horizontal_timeline' must NOT map to layout index 0; got {idx}"
+    );
+    assert_eq!(
+        idx, 1,
+        "AC-009: 'horizontal_timeline' must fall back to index 1; got {idx}"
+    );
 }
 
 /// AC-009: `status` must map to index 1 (not 0).
@@ -723,8 +741,14 @@ fn test_BC_4_01_005_ac009_horizontal_timeline_maps_to_index_1_not_0() {
 fn test_BC_4_01_005_ac009_status_maps_to_index_1_not_0() {
     let template = test_brand_template();
     let idx = crate::find_layout_index(&template, "status");
-    assert_ne!(idx, 0, "AC-009: 'status' must NOT map to layout index 0; got {idx}");
-    assert_eq!(idx, 1, "AC-009: 'status' must fall back to index 1; got {idx}");
+    assert_ne!(
+        idx, 0,
+        "AC-009: 'status' must NOT map to layout index 0; got {idx}"
+    );
+    assert_eq!(
+        idx, 1,
+        "AC-009: 'status' must fall back to index 1; got {idx}"
+    );
 }
 
 /// AC-009: `progress_bar` must map to index 1 (not 0).
@@ -732,8 +756,14 @@ fn test_BC_4_01_005_ac009_status_maps_to_index_1_not_0() {
 fn test_BC_4_01_005_ac009_progress_bar_maps_to_index_1_not_0() {
     let template = test_brand_template();
     let idx = crate::find_layout_index(&template, "progress_bar");
-    assert_ne!(idx, 0, "AC-009: 'progress_bar' must NOT map to layout index 0; got {idx}");
-    assert_eq!(idx, 1, "AC-009: 'progress_bar' must fall back to index 1; got {idx}");
+    assert_ne!(
+        idx, 0,
+        "AC-009: 'progress_bar' must NOT map to layout index 0; got {idx}"
+    );
+    assert_eq!(
+        idx, 1,
+        "AC-009: 'progress_bar' must fall back to index 1; got {idx}"
+    );
 }
 
 /// AC-009: `metric_tree` must map to index 1 (not 0).
@@ -741,8 +771,14 @@ fn test_BC_4_01_005_ac009_progress_bar_maps_to_index_1_not_0() {
 fn test_BC_4_01_005_ac009_metric_tree_maps_to_index_1_not_0() {
     let template = test_brand_template();
     let idx = crate::find_layout_index(&template, "metric_tree");
-    assert_ne!(idx, 0, "AC-009: 'metric_tree' must NOT map to layout index 0; got {idx}");
-    assert_eq!(idx, 1, "AC-009: 'metric_tree' must fall back to index 1; got {idx}");
+    assert_ne!(
+        idx, 0,
+        "AC-009: 'metric_tree' must NOT map to layout index 0; got {idx}"
+    );
+    assert_eq!(
+        idx, 1,
+        "AC-009: 'metric_tree' must fall back to index 1; got {idx}"
+    );
 }
 
 /// AC-009: `formula` must map to index 1 (not 0).
@@ -750,8 +786,14 @@ fn test_BC_4_01_005_ac009_metric_tree_maps_to_index_1_not_0() {
 fn test_BC_4_01_005_ac009_formula_maps_to_index_1_not_0() {
     let template = test_brand_template();
     let idx = crate::find_layout_index(&template, "formula");
-    assert_ne!(idx, 0, "AC-009: 'formula' must NOT map to layout index 0; got {idx}");
-    assert_eq!(idx, 1, "AC-009: 'formula' must fall back to index 1; got {idx}");
+    assert_ne!(
+        idx, 0,
+        "AC-009: 'formula' must NOT map to layout index 0; got {idx}"
+    );
+    assert_eq!(
+        idx, 1,
+        "AC-009: 'formula' must fall back to index 1; got {idx}"
+    );
 }
 
 /// AC-009: `weighted_composite` must map to index 1 (not 0).
@@ -759,8 +801,14 @@ fn test_BC_4_01_005_ac009_formula_maps_to_index_1_not_0() {
 fn test_BC_4_01_005_ac009_weighted_composite_maps_to_index_1_not_0() {
     let template = test_brand_template();
     let idx = crate::find_layout_index(&template, "weighted_composite");
-    assert_ne!(idx, 0, "AC-009: 'weighted_composite' must NOT map to layout index 0; got {idx}");
-    assert_eq!(idx, 1, "AC-009: 'weighted_composite' must fall back to index 1; got {idx}");
+    assert_ne!(
+        idx, 0,
+        "AC-009: 'weighted_composite' must NOT map to layout index 0; got {idx}"
+    );
+    assert_eq!(
+        idx, 1,
+        "AC-009: 'weighted_composite' must fall back to index 1; got {idx}"
+    );
 }
 
 /// AC-009: `grid` must map to index 1 (not 0).
@@ -768,8 +816,14 @@ fn test_BC_4_01_005_ac009_weighted_composite_maps_to_index_1_not_0() {
 fn test_BC_4_01_005_ac009_grid_maps_to_index_1_not_0() {
     let template = test_brand_template();
     let idx = crate::find_layout_index(&template, "grid");
-    assert_ne!(idx, 0, "AC-009: 'grid' must NOT map to layout index 0; got {idx}");
-    assert_eq!(idx, 1, "AC-009: 'grid' must fall back to index 1; got {idx}");
+    assert_ne!(
+        idx, 0,
+        "AC-009: 'grid' must NOT map to layout index 0; got {idx}"
+    );
+    assert_eq!(
+        idx, 1,
+        "AC-009: 'grid' must fall back to index 1; got {idx}"
+    );
 }
 
 /// AC-009 aggregate: verify NONE of the 9 unmapped keywords maps to index 0.
@@ -1181,9 +1235,7 @@ fn test_BC_4_01_005_ac011_missing_ph_idx_omits_ph_element() {
         notes_master_stub: NOTES_MASTER_STUB.to_vec(),
         handout_master_stub: HANDOUT_MASTER_STUB.to_vec(),
         master_ids: MasterIds::default(),
-        content_types_layout_entries: Arc::from(
-            generate_content_types_layout_entries(31).as_str(),
-        ),
+        content_types_layout_entries: Arc::from(generate_content_types_layout_entries(31).as_str()),
     };
 
     // Build a "content" slide (layout index 1) with a Body frame.
@@ -1225,7 +1277,8 @@ fn test_BC_4_01_005_ac011_missing_ph_idx_omits_ph_element() {
     // has no body placeholder after our mutation.
     let body_ph_count = slide_xml.matches("idx=\"1\"").count();
     assert_eq!(
-        body_ph_count, 0,
+        body_ph_count,
+        0,
         "AC-011: when the layout has no body placeholder (idx=1), the slide serializer \
          must NOT emit <p:ph idx=\"1\"> for a Body frame; found {body_ph_count} occurrences. \
          Slide XML excerpt: {}",
@@ -1335,9 +1388,7 @@ fn test_BC_4_01_005_s1_validate_emu_negative_width_returns_err() {
         assert_eq!(slide_index, 0, "S1: InvalidEmu must report slide_index=0");
         assert_eq!(frame_index, 0, "S1: InvalidEmu must report frame_index=0");
     } else {
-        panic!(
-            "PR-52 S1: expected PptxError::InvalidEmu for negative width; got different error"
-        );
+        panic!("PR-52 S1: expected PptxError::InvalidEmu for negative width; got different error");
     }
 }
 
@@ -1385,9 +1436,7 @@ fn test_BC_4_01_005_s1_validate_emu_negative_height_returns_err() {
         assert_eq!(slide_index, 0, "S1: InvalidEmu must report slide_index=0");
         assert_eq!(frame_index, 0, "S1: InvalidEmu must report frame_index=0");
     } else {
-        panic!(
-            "PR-52 S1: expected PptxError::InvalidEmu for negative height; got different error"
-        );
+        panic!("PR-52 S1: expected PptxError::InvalidEmu for negative height; got different error");
     }
 }
 
@@ -1452,8 +1501,8 @@ fn test_BC_4_01_005_s3_subtitle_frame_emits_subtitle_placeholder() {
     let subtitle_pos = slide_xml
         .find("subTitle")
         .expect("subTitle must appear in slide XML");
-    let nearby = &slide_xml[subtitle_pos.saturating_sub(200)..
-        (subtitle_pos + 200).min(slide_xml.len())];
+    let nearby =
+        &slide_xml[subtitle_pos.saturating_sub(200)..(subtitle_pos + 200).min(slide_xml.len())];
     assert!(
         nearby.contains("idx=\"1\""),
         "PR-52 S3: the SubTitle placeholder must have idx=\"1\"; \

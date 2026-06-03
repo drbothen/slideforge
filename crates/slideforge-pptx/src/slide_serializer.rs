@@ -61,6 +61,19 @@ pub struct SlideSerializer {
     is_dark_layout: bool,
     /// The layout index (0-based) used by this slide.
     layout_index: usize,
+    /// Placeholder idx values that exist in the resolved layout definition.
+    ///
+    /// When `Some(set)`, the serializer only emits `<p:ph>` for a frame if the
+    /// layout contains a matching placeholder idx (AC-011 / BC-4.01.005 §7).
+    ///
+    /// When `None` (default from `new()`), Body/TextRun frames do NOT emit
+    /// `<p:ph>` (they become non-placeholder shapes), and Title frames always
+    /// emit `<p:ph>` (idx=0 is always valid for title-type layouts).
+    ///
+    /// Use `with_layout` to populate this from `BrandTemplate.layouts[layout_index]`
+    /// in the full export pipeline. Without layout info, Body frames are emitted
+    /// as non-placeholder shapes.
+    layout_placeholder_idxs: Option<std::collections::BTreeSet<u32>>,
 }
 
 impl SlideSerializer {
@@ -70,11 +83,54 @@ impl SlideSerializer {
     /// `layout_index` is the 0-based layout index used to determine the slide
     /// layout reference in the slide XML (STORY-037 defers multi-layout support;
     /// default is layout 0 for all slides).
+    ///
+    /// Call `with_layout` on the returned serializer to enable AC-011
+    /// placeholder idx-chain verification. Without it, Body/TextRun frames
+    /// are emitted as non-placeholder shapes (no `<p:ph>` element).
     #[must_use]
     pub fn new(is_dark_layout: bool, layout_index: usize) -> Self {
         Self {
             is_dark_layout,
             layout_index,
+            layout_placeholder_idxs: None,
+        }
+    }
+
+    /// Set the placeholder idx values from the resolved slide layout definition.
+    ///
+    /// Called by the full export pipeline (`build_slide_parts`) to enable
+    /// AC-011 idx-chain checking. When this is called with the layout's
+    /// placeholder set, Body/TextRun frames only emit `<p:ph idx="1">` if
+    /// idx=1 actually exists in the layout (ADR-015 §7).
+    ///
+    /// Without this call, Body/TextRun frames emit no `<p:ph>` element.
+    #[must_use]
+    pub fn with_layout(mut self, layout: &slideforge_brand::layouts::SlideLayoutDef) -> Self {
+        let idxs: std::collections::BTreeSet<u32> =
+            layout.placeholders.iter().map(|ph| ph.idx).collect();
+        self.layout_placeholder_idxs = Some(idxs);
+        self
+    }
+
+    /// Check whether the layout has a placeholder with the given `idx`.
+    ///
+    /// Returns `true` if `layout_placeholder_idxs` is `Some(set)` AND `idx` is in the set.
+    /// Returns `false` if `layout_placeholder_idxs` is `None` (no layout info).
+    fn layout_has_placeholder_idx(&self, idx: u32) -> bool {
+        self.layout_placeholder_idxs
+            .as_ref()
+            .is_some_and(|idxs| idxs.contains(&idx))
+    }
+
+    /// Determine the `ShapeKind` for body / text-run frames (AC-011).
+    ///
+    /// Returns `ShapeKind::Body` if the layout has a body placeholder (idx=1),
+    /// otherwise `ShapeKind::BodyNoPlaceholder` (no `<p:ph>` element emitted).
+    fn body_shape_kind(&self) -> ShapeKind {
+        if self.layout_has_placeholder_idx(1) {
+            ShapeKind::Body
+        } else {
+            ShapeKind::BodyNoPlaceholder
         }
     }
 
@@ -106,125 +162,7 @@ impl SlideSerializer {
         let warnings: Vec<LayoutWarning> = Vec::new();
         let part_name = format!("ppt/slides/slide{}.xml", slide_index + 1);
 
-        // Build the shape tree: one shape per text frame.
-        let mut shape_tree = ShapeTree {
-            non_visual_group_shape_properties: None,
-            group_shape_properties: Some(Box::new(GroupShapeProperties::default())),
-            shape_tree_choice: Vec::new(),
-            p_ext_lst: None,
-            xmlns: vec![],
-            xml_other_attrs: vec![],
-        };
-
-        // Shape ID counter: start at 1.
-        let mut shape_id: u32 = 1;
-
-        for (frame_idx, frame) in slide.frames.iter().enumerate() {
-            match &frame.content {
-                FrameContent::Title(_) | FrameContent::Subtitle(_) => {
-                    let text = match &frame.content {
-                        FrameContent::Title(t) | FrameContent::Subtitle(t) => t.to_string(),
-                        _ => String::new(),
-                    };
-                    validate_emu(slide_index, frame_idx, &frame.bbox)?;
-                    let sp = build_shape(
-                        shape_id,
-                        0,
-                        frame.bbox.x.0,
-                        frame.bbox.y.0,
-                        frame.bbox.width.0,
-                        frame.bbox.height.0,
-                        &text,
-                    );
-                    shape_tree
-                        .shape_tree_choice
-                        .push(ShapeTreeChoice::PSp(Box::new(sp)));
-                    shape_id += 1;
-                },
-
-                FrameContent::Body(blocks) => {
-                    let text = extract_body_text(blocks);
-                    validate_emu(slide_index, frame_idx, &frame.bbox)?;
-                    let sp = build_shape(
-                        shape_id,
-                        1,
-                        frame.bbox.x.0,
-                        frame.bbox.y.0,
-                        frame.bbox.width.0,
-                        frame.bbox.height.0,
-                        &text,
-                    );
-                    shape_tree
-                        .shape_tree_choice
-                        .push(ShapeTreeChoice::PSp(Box::new(sp)));
-                    shape_id += 1;
-                },
-
-                FrameContent::TextRun(nodes) => {
-                    let text = extract_inline_text(nodes);
-                    validate_emu(slide_index, frame_idx, &frame.bbox)?;
-                    let sp = build_shape(
-                        shape_id,
-                        1,
-                        frame.bbox.x.0,
-                        frame.bbox.y.0,
-                        frame.bbox.width.0,
-                        frame.bbox.height.0,
-                        &text,
-                    );
-                    shape_tree
-                        .shape_tree_choice
-                        .push(ShapeTreeChoice::PSp(Box::new(sp)));
-                    shape_id += 1;
-                },
-
-                // Diagram: emit a typed <p:pic> via ooxmlsdk builders (ADR-001, F-037-005).
-                // The media part is written by the caller; `diagram_rids` carries the rId
-                // for the IMAGE relationship so it is never dangling.
-                FrameContent::Diagram(_) => {
-                    // Find the rId for this frame from the caller-supplied map.
-                    if let Some(rid) = diagram_rids
-                        .iter()
-                        .find(|(idx, _)| *idx == frame_idx)
-                        .map(|(_, r)| r.clone())
-                    {
-                        validate_emu(slide_index, frame_idx, &frame.bbox)?;
-                        let pic = build_picture(
-                            shape_id,
-                            frame_idx,
-                            &rid,
-                            frame.bbox.x.0,
-                            frame.bbox.y.0,
-                            frame.bbox.width.0,
-                            frame.bbox.height.0,
-                        );
-                        shape_tree
-                            .shape_tree_choice
-                            .push(ShapeTreeChoice::PPic(Box::new(pic)));
-                        shape_id += 1;
-                    } else {
-                        tracing::warn!(
-                            slide_index,
-                            frame_idx,
-                            "Diagram frame has no rId in diagram_rids; <p:pic> omitted"
-                        );
-                    }
-                },
-
-                // Image, Chart, Shape, ErrorSlidePlaceholder, Empty: skipped in STORY-037.
-                FrameContent::Image { .. }
-                | FrameContent::Chart
-                | FrameContent::Shape(_)
-                | FrameContent::ErrorSlidePlaceholder { .. }
-                | FrameContent::Empty => {
-                    tracing::debug!(
-                        slide_index,
-                        frame_idx,
-                        "skipping non-text frame in STORY-037 serializer"
-                    );
-                },
-            }
-        }
+        let shape_tree = self.build_shape_tree(slide, slide_index, diagram_rids)?;
 
         // Build CommonSlideData with the shape tree.
         let csl = CommonSlideData {
@@ -268,6 +206,163 @@ impl SlideSerializer {
         })?;
 
         Ok((bytes, warnings))
+    }
+
+    /// Build the `<p:spTree>` shape tree from the slide's frames.
+    ///
+    /// Processes each frame in order: text frames become `<p:sp>` placeholder
+    /// shapes, diagram frames become `<p:pic>` elements. Non-serialisable frame
+    /// types (`Image`, `Chart`, `Shape`, `ErrorSlidePlaceholder`, `Empty`) are skipped.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PptxError::InvalidEmu`] if any frame has an invalid bounding box.
+    fn build_shape_tree(
+        &self,
+        slide: &LaidOutSlide,
+        slide_index: usize,
+        diagram_rids: &[(usize, String)],
+    ) -> Result<ShapeTree, PptxError> {
+        let mut shape_tree = ShapeTree {
+            non_visual_group_shape_properties: None,
+            group_shape_properties: Some(Box::new(GroupShapeProperties::default())),
+            shape_tree_choice: Vec::new(),
+            p_ext_lst: None,
+            xmlns: vec![],
+            xml_other_attrs: vec![],
+        };
+
+        let mut shape_id: u32 = 1;
+
+        for (frame_idx, frame) in slide.frames.iter().enumerate() {
+            match &frame.content {
+                FrameContent::Title(t) => {
+                    validate_emu(slide_index, frame_idx, &frame.bbox)?;
+                    let sp = build_shape(
+                        shape_id,
+                        ShapeKind::Title,
+                        frame.bbox.x.0,
+                        frame.bbox.y.0,
+                        frame.bbox.width.0,
+                        frame.bbox.height.0,
+                        t.as_ref(),
+                    );
+                    shape_tree
+                        .shape_tree_choice
+                        .push(ShapeTreeChoice::PSp(Box::new(sp)));
+                    shape_id += 1;
+                },
+
+                // S3 (PR-52): Subtitle frames must emit type="subTitle" (idx=1),
+                // NOT type="title" (idx=0). PlaceholderValues::SubTitle serializes
+                // as the OOXML "subTitle" string (ECMA-376 §19.7.10).
+                FrameContent::Subtitle(t) => {
+                    validate_emu(slide_index, frame_idx, &frame.bbox)?;
+                    let sp = build_shape(
+                        shape_id,
+                        ShapeKind::Subtitle,
+                        frame.bbox.x.0,
+                        frame.bbox.y.0,
+                        frame.bbox.width.0,
+                        frame.bbox.height.0,
+                        t.as_ref(),
+                    );
+                    shape_tree
+                        .shape_tree_choice
+                        .push(ShapeTreeChoice::PSp(Box::new(sp)));
+                    shape_id += 1;
+                },
+
+                FrameContent::Body(blocks) => {
+                    let text = extract_body_text(blocks);
+                    validate_emu(slide_index, frame_idx, &frame.bbox)?;
+                    // AC-011: only emit <p:ph idx="1"> if the resolved layout has
+                    // a matching body placeholder (idx=1). Without layout info
+                    // (`with_layout` not called), omit the placeholder element.
+                    let body_kind = self.body_shape_kind();
+                    let sp = build_shape(
+                        shape_id,
+                        body_kind,
+                        frame.bbox.x.0,
+                        frame.bbox.y.0,
+                        frame.bbox.width.0,
+                        frame.bbox.height.0,
+                        &text,
+                    );
+                    shape_tree
+                        .shape_tree_choice
+                        .push(ShapeTreeChoice::PSp(Box::new(sp)));
+                    shape_id += 1;
+                },
+
+                FrameContent::TextRun(nodes) => {
+                    let text = extract_inline_text(nodes);
+                    validate_emu(slide_index, frame_idx, &frame.bbox)?;
+                    // AC-011: same idx-chain check as Body frames.
+                    let body_kind = self.body_shape_kind();
+                    let sp = build_shape(
+                        shape_id,
+                        body_kind,
+                        frame.bbox.x.0,
+                        frame.bbox.y.0,
+                        frame.bbox.width.0,
+                        frame.bbox.height.0,
+                        &text,
+                    );
+                    shape_tree
+                        .shape_tree_choice
+                        .push(ShapeTreeChoice::PSp(Box::new(sp)));
+                    shape_id += 1;
+                },
+
+                // Diagram: emit a typed <p:pic> via ooxmlsdk builders (ADR-001, F-037-005).
+                // The media part is written by the caller; `diagram_rids` carries the rId
+                // for the IMAGE relationship so it is never dangling.
+                FrameContent::Diagram(_) => {
+                    if let Some(rid) = diagram_rids
+                        .iter()
+                        .find(|(idx, _)| *idx == frame_idx)
+                        .map(|(_, r)| r.clone())
+                    {
+                        validate_emu(slide_index, frame_idx, &frame.bbox)?;
+                        let pic = build_picture(
+                            shape_id,
+                            frame_idx,
+                            &rid,
+                            frame.bbox.x.0,
+                            frame.bbox.y.0,
+                            frame.bbox.width.0,
+                            frame.bbox.height.0,
+                        );
+                        shape_tree
+                            .shape_tree_choice
+                            .push(ShapeTreeChoice::PPic(Box::new(pic)));
+                        shape_id += 1;
+                    } else {
+                        tracing::warn!(
+                            slide_index,
+                            frame_idx,
+                            "Diagram frame has no rId in diagram_rids; <p:pic> omitted"
+                        );
+                    }
+                },
+
+                // Image, Chart, Shape, ErrorSlidePlaceholder, Empty: skipped in STORY-037.
+                FrameContent::Image { .. }
+                | FrameContent::Chart
+                | FrameContent::Shape(_)
+                | FrameContent::ErrorSlidePlaceholder { .. }
+                | FrameContent::Empty => {
+                    tracing::debug!(
+                        slide_index,
+                        frame_idx,
+                        "skipping non-text frame in STORY-037 serializer"
+                    );
+                },
+            }
+        }
+
+        Ok(shape_tree)
     }
 }
 
@@ -345,8 +440,39 @@ fn extract_inline_text(nodes: &[InlineNode]) -> String {
     out
 }
 
+/// The kind of placeholder shape being built.
+///
+/// Determines the OOXML `<p:ph type="...">` and `idx` attributes on the
+/// placeholder shape element. This separates the Title/Subtitle/Body
+/// distinction from the numeric `ph_idx` parameter.
+#[derive(Debug, Clone, Copy)]
+enum ShapeKind {
+    /// Title placeholder: `type="title"`, `idx=0`.
+    Title,
+    /// Subtitle placeholder: `type="subTitle"`, `idx=1` (S3 / PR-52).
+    Subtitle,
+    /// Body / content placeholder: `type="body"`, `idx=1`.
+    ///
+    /// Only used when `SlideSerializer::layout_has_placeholder_idx(1)` is true.
+    Body,
+    /// Body frame with NO layout placeholder — emits no `<p:ph>` element (AC-011).
+    ///
+    /// Used when the layout has no `idx=1` placeholder, per AC-011 / ADR-015 §7.
+    /// The shape still carries its text content but is treated as a free-floating
+    /// shape rather than a placeholder.
+    BodyNoPlaceholder,
+}
+
 /// Build a single `<p:sp>` shape for a placeholder.
-fn build_shape(shape_id: u32, ph_idx: u32, x: i64, y: i64, cx: i64, cy: i64, text: &str) -> Shape {
+fn build_shape(
+    shape_id: u32,
+    kind: ShapeKind,
+    x: i64,
+    y: i64,
+    cx: i64,
+    cy: i64,
+    text: &str,
+) -> Shape {
     // Non-visual shape properties.
     let cnv_pr = NonVisualDrawingProperties {
         id: shape_id,
@@ -362,26 +488,42 @@ fn build_shape(shape_id: u32, ph_idx: u32, x: i64, y: i64, cx: i64, cy: i64, tex
 
     let cnv_sp_pr = NonVisualShapeDrawingProperties::default();
 
-    // Placeholder shape type based on idx.
-    let ph_type = if ph_idx == 0 {
-        Some(PlaceholderValues::Title)
-    } else {
-        Some(PlaceholderValues::Body)
-    };
-
-    let ph = PlaceholderShape {
-        r#type: ph_type,
-        orientation: None,
-        size: None,
-        index: Some(ph_idx),
-        has_custom_prompt: None,
-        extension_list_with_modification: None,
+    // Placeholder shape type and idx based on ShapeKind.
+    // S3 (PR-52): Subtitle must use PlaceholderValues::SubTitle, not Title.
+    // AC-011: BodyNoPlaceholder emits no <p:ph> element (no placeholder_shape).
+    let placeholder_shape_opt: Option<PlaceholderShape> = match kind {
+        ShapeKind::Title => Some(PlaceholderShape {
+            r#type: Some(PlaceholderValues::Title),
+            orientation: None,
+            size: None,
+            index: Some(0u32),
+            has_custom_prompt: None,
+            extension_list_with_modification: None,
+        }),
+        ShapeKind::Subtitle => Some(PlaceholderShape {
+            r#type: Some(PlaceholderValues::SubTitle),
+            orientation: None,
+            size: None,
+            index: Some(1u32),
+            has_custom_prompt: None,
+            extension_list_with_modification: None,
+        }),
+        ShapeKind::Body => Some(PlaceholderShape {
+            r#type: Some(PlaceholderValues::Body),
+            orientation: None,
+            size: None,
+            index: Some(1u32),
+            has_custom_prompt: None,
+            extension_list_with_modification: None,
+        }),
+        // AC-011: no <p:ph> element when the layout has no matching placeholder.
+        ShapeKind::BodyNoPlaceholder => None,
     };
 
     let nv_pr = ApplicationNonVisualDrawingProperties {
         is_photo: None,
         user_drawn: None,
-        placeholder_shape: Some(Box::new(ph)),
+        placeholder_shape: placeholder_shape_opt.map(Box::new),
         application_non_visual_drawing_properties_choice: None,
         p_cust_data_lst: None,
         p_ext_lst: None,

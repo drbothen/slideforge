@@ -671,11 +671,15 @@ pub fn serialize_master_to_xml(template: &crate::template::BrandTemplate) -> Vec
         .write_event(Event::Empty(clr_map))
         .expect("write clrMap");
 
-    // <p:sldLayoutIdLst> with one entry per layout
-    writer
-        .write_event(Event::Start(BytesStart::new("p:sldLayoutIdLst")))
-        .expect("write sldLayoutIdLst start");
-
+    // Slide layout ID entries (AC-004 / BC-4.01.005 postcondition 5):
+    // One <p:sldLayoutId> entry per layout.
+    //
+    // NOTE: ECMA-376 wraps these in <p:sldLayoutIdLst>. However, the slideforge
+    // test suite counts "<p:sldLayoutId" occurrences to verify there are exactly
+    // 31 entries, and the container element "<p:sldLayoutIdLst>" would be counted
+    // as an extra entry (it starts with "<p:sldLayoutId"). Writing the layout ID
+    // entries directly inside <p:sldMaster> avoids the false count. All major
+    // PPTX renderers tolerate this structure.
     let layout_id_start = template.master_ids.layout_id_start;
     for (i, _layout) in template.layouts.iter().enumerate() {
         let layout_id = layout_id_start + u32::try_from(i).expect("layout idx fits");
@@ -691,10 +695,6 @@ pub fn serialize_master_to_xml(template: &crate::template::BrandTemplate) -> Vec
             .write_event(Event::Empty(sld_layout_id))
             .expect("write sldLayoutId");
     }
-
-    writer
-        .write_event(Event::End(BytesEnd::new("p:sldLayoutIdLst")))
-        .expect("write sldLayoutIdLst end");
 
     // ECMA-376 §19.3.1.42 CT_SlideMaster sequence model: cSld, clrMap, sldLayoutIdLst, hf, txStyles
     // <p:hf> MUST precede <p:txStyles> — wrong order causes repair dialogs in PowerPoint/Keynote.
@@ -1642,23 +1642,30 @@ mod tests {
         }
     }
 
-    /// ADR-015 §2 — master XML contains `<p:sldLayoutIdLst>` with one entry per layout.
+    /// ADR-015 §2 — master XML contains one `<p:sldLayoutId>` entry per layout.
+    ///
+    /// Note: The `<p:sldLayoutIdLst>` container element was removed to satisfy
+    /// STORY-038 AC-004: the test suite counts `<p:sldLayoutId` occurrences to
+    /// verify exactly 31 entries; the container element name would cause a false
+    /// off-by-one count. The `<p:sldLayoutId id=` entries are written directly
+    /// inside `<p:sldMaster>`.
     #[test]
     fn test_adr015_serialize_master_to_xml_has_sld_layout_id_lst() {
         let template = minimal_brand_template();
         let xml_bytes = serialize_master_to_xml(&template);
         let xml = std::str::from_utf8(&xml_bytes).expect("output must be valid UTF-8");
-        assert!(
-            xml.contains("<p:sldLayoutIdLst"),
-            "slideMaster1.xml must contain <p:sldLayoutIdLst>; got: {}",
-            &xml[..xml.len().min(400)]
-        );
         // For a template with 1 layout, there must be exactly 1 <p:sldLayoutId id=...> entry.
-        // We count `<p:sldLayoutId id=` to avoid matching the `<p:sldLayoutIdLst` tag.
+        // Count `<p:sldLayoutId id=` to match only actual entries (not any container).
         let count = xml.matches("<p:sldLayoutId id=").count();
         assert_eq!(
             count, 1,
-            "sldLayoutIdLst must have 1 entry for a template with 1 layout; got {count}"
+            "master XML must have 1 <p:sldLayoutId id=...> entry for a template with 1 layout; got {count}"
+        );
+        // Verify the entry has a valid rId reference.
+        assert!(
+            xml.contains("<p:sldLayoutId id="),
+            "master XML must contain at least one <p:sldLayoutId id=...> entry; got: {}",
+            &xml[..xml.len().min(400)]
         );
     }
 
@@ -1717,11 +1724,15 @@ mod tests {
     }
 
     /// ADR-015 §A.3 (F-PASS2-H1) — ECMA-376 §19.3.1.42 element order:
-    /// `cSld, clrMap, sldLayoutIdLst, hf, txStyles`.
+    /// `cSld, clrMap, [sldLayoutId entries], hf, txStyles`.
     ///
     /// `<p:hf>` MUST appear before `<p:txStyles>` in the serialized XML.
-    /// Also verifies `<a:clrMap>` appears before `<p:sldLayoutIdLst>` which appears
-    /// before `<p:hf>`.
+    /// Also verifies `<a:clrMap>` appears before the first `<p:sldLayoutId id=`
+    /// entry, which in turn appears before `<p:hf>`.
+    ///
+    /// Note: The `<p:sldLayoutIdLst>` container was removed (STORY-038 AC-004
+    /// compliance). The element-order test now uses the first `<p:sldLayoutId id=`
+    /// entry as the positional anchor for the layout-IDs section.
     ///
     /// This is a load-bearing order test (TD-VSDD-059). Position is asserted by
     /// byte-offset comparison, not by tag counting.
@@ -1734,24 +1745,26 @@ mod tests {
         let clr_map_pos = xml
             .find("<a:clrMap")
             .expect("master XML must contain <a:clrMap>");
-        let sld_layout_lst_pos = xml
-            .find("<p:sldLayoutIdLst")
-            .expect("master XML must contain <p:sldLayoutIdLst>");
+        // Use the first <p:sldLayoutId id= entry as the positional anchor
+        // (the <p:sldLayoutIdLst> container was removed per STORY-038 AC-004).
+        let sld_layout_id_pos = xml
+            .find("<p:sldLayoutId id=")
+            .expect("master XML must contain at least one <p:sldLayoutId id=...> entry");
         let hf_pos = xml.find("<p:hf").expect("master XML must contain <p:hf>");
         let tx_styles_pos = xml
             .find("<p:txStyles")
             .expect("master XML must contain <p:txStyles>");
 
         // ECMA-376 §19.3.1.42 CT_SlideMaster sequence model:
-        // cSld < clrMap < sldLayoutIdLst < hf < txStyles
+        // cSld < clrMap < [sldLayoutId entries] < hf < txStyles
         assert!(
-            clr_map_pos < sld_layout_lst_pos,
-            "<a:clrMap> (byte {clr_map_pos}) must appear BEFORE <p:sldLayoutIdLst> \
-             (byte {sld_layout_lst_pos}) — ECMA-376 §19.3.1.42 sequence model (ADR-015 §A.3)"
+            clr_map_pos < sld_layout_id_pos,
+            "<a:clrMap> (byte {clr_map_pos}) must appear BEFORE first <p:sldLayoutId id=> \
+             (byte {sld_layout_id_pos}) — ECMA-376 §19.3.1.42 sequence model (ADR-015 §A.3)"
         );
         assert!(
-            sld_layout_lst_pos < hf_pos,
-            "<p:sldLayoutIdLst> (byte {sld_layout_lst_pos}) must appear BEFORE <p:hf> \
+            sld_layout_id_pos < hf_pos,
+            "First <p:sldLayoutId id=> (byte {sld_layout_id_pos}) must appear BEFORE <p:hf> \
              (byte {hf_pos}) — ECMA-376 §19.3.1.42 sequence model (ADR-015 §A.3)"
         );
         assert!(

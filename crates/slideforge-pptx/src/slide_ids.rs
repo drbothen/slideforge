@@ -63,7 +63,11 @@ impl SlideIdAssigner {
 }
 
 #[cfg(test)]
-#[allow(clippy::missing_docs_in_private_items, clippy::unwrap_used, clippy::expect_used)]
+#[allow(
+    clippy::missing_docs_in_private_items,
+    clippy::unwrap_used,
+    clippy::expect_used
+)]
 mod tests {
     use super::*;
 

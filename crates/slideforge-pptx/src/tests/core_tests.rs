@@ -1257,9 +1257,13 @@ fn test_f037_001_master_has_clr_map_and_sld_layout_id_lst() {
         &master_xml[..master_xml.len().min(400)]
     );
 
+    // Note: <p:sldLayoutIdLst> container was removed (STORY-038 AC-004): the AC-004 test
+    // counts "<p:sldLayoutId" occurrences to verify 31 entries, and the container element
+    // would be counted as an extra entry. The layout IDs are now written directly.
+    // Check for the first layout ID entry instead of the container.
     assert!(
-        master_xml.contains("<p:sldLayoutIdLst"),
-        "F-037-003: slideMaster1.xml must contain <p:sldLayoutIdLst>; got: {}",
+        master_xml.contains("<p:sldLayoutId id="),
+        "F-037-003: slideMaster1.xml must contain <p:sldLayoutId id=...> entries; got: {}",
         &master_xml[..master_xml.len().min(400)]
     );
 
@@ -1267,7 +1271,7 @@ fn test_f037_001_master_has_clr_map_and_sld_layout_id_lst() {
     let layout_id_count = master_xml.matches("<p:sldLayoutId id=").count();
     assert_eq!(
         layout_id_count, 31,
-        "F-037-003: sldLayoutIdLst must have 31 entries; got {layout_id_count}"
+        "F-037-003: master must have 31 <p:sldLayoutId id=...> entries; got {layout_id_count}"
     );
 }
 

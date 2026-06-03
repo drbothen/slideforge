@@ -230,7 +230,13 @@ fn build_slide_parts(
 
         // Build the slide XML. SlideSerializer handles text frames AND diagram
         // <p:pic> shapes via typed ooxmlsdk builders (ADR-001, F-037-005).
-        let serializer = SlideSerializer::new(is_dark_layout, layout_index);
+        // AC-011: thread the resolved layout's placeholder info into the serializer
+        // so it can perform idx-chain verification (ADR-015 §7).
+        let serializer = if let Some(layout) = brand_template.layouts.get(layout_index) {
+            SlideSerializer::new(is_dark_layout, layout_index).with_layout(layout)
+        } else {
+            SlideSerializer::new(is_dark_layout, layout_index)
+        };
         let (slide_xml_bytes, _warnings) =
             serializer.build(slide, i, &layout_rel_id, &diagram_rids)?;
 

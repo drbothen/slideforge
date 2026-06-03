@@ -40,7 +40,11 @@ impl ClrMapOvrInjector {
 }
 
 #[cfg(test)]
-#[allow(clippy::missing_docs_in_private_items, clippy::unwrap_used, clippy::expect_used)]
+#[allow(
+    clippy::missing_docs_in_private_items,
+    clippy::unwrap_used,
+    clippy::expect_used
+)]
 mod tests {
     // No tests in this module — full ClrMapOvrInjector tests are in tests/layout_tests.rs.
 

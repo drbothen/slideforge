@@ -12,6 +12,9 @@ readme = "../../README.md"
 
 [dependencies]
 ooxmlsdk        = { version = "=0.6.1" }
+# quick-xml: used for precise presentation.xml and slide XML serialization
+# where we need direct control over element names (AC-001, AC-007, AC-012).
+quick-xml       = { workspace = true }
 # zip 4.2.0 with lzma/xz disabled to avoid conflict with zip 2.3.0 (used by
 # slideforge-brand / slideforge-eval) — both crates link the native `lzma`
 # library but through different Rust bindings (lzma-sys vs liblzma-sys).
