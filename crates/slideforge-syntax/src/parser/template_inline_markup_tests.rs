@@ -575,154 +575,159 @@ fn test_BC_3_02_002_math_mode_no_inline_markup() {
     }
 }
 
-// ─── Test 13: Unclosed bold error accumulated (DIR-077-002 §8 item 13) ────────
+// ─── Test 13: Unclosed bold error is strict-build-fatal (EC-007 / F-077-P14-001) ─
 
-/// DIR-077-002 §8 #13 / BC-3.02.002 AC-002 (error accumulation — EC-007):
+/// EC-007 / BC-3.02.002 AC-002 / error-taxonomy.md:24 (E-PAR always fatal):
 /// `"**unclosed"` (no closing `**`) must:
-/// - Accumulate a non-fatal parse error (error count == 1)
-/// - Produce a Bold or Literal sentinel (not panic)
-/// - The error span must point to the opening `**`
+/// - Return `Err(errors)` from `parse()` in strict (default) mode — E-PAR-019 is
+///   ALWAYS FATAL per error-taxonomy.md ("Parse Errors (E-PAR) — Always fatal.
+///   Build halts with accumulated errors. No output produced." exit 1).
+/// - Accumulate the error (not fail-on-first) — error ACCUMULATION is preserved.
+/// - The E-PAR-019 error code must appear in the accumulated errors.
+/// - Error message must be CLEAN (no SLIDEFORGE_INLINE_ROUTE / Custom( sentinel leak).
 ///
-/// This test calls `split_template()` directly via the parser to capture the
-/// (chunks, errors) tuple. Because parse_template_value() does not expose the
-/// errors vector, we use a direct `template_value()` call via the public
-/// `parse()` entry that propagates template errors to `ParseResult::warnings`.
+/// Note: error accumulation (continue parsing, collect all errors) is PRESERVED.
+/// The conflation that was wrong: "accumulation" ≠ "non-fatal". The build is fatal
+/// in strict mode (default) even after accumulating all errors. (F-077-P14-001)
 ///
-/// FAILS until `template_value()` implements unclosed-bold error accumulation.
+/// REWROTE from the original non-fatal assertion (which encoded the spec violation).
 #[test]
 fn test_BC_3_02_002_unclosed_bold_error_accumulated() {
     use crate::parser::parse;
+    use miette::Diagnostic as _;
 
-    // parse() surfaces template errors via ParseResult::warnings (or Err).
-    // An unclosed bold must produce an error (accumulated, not fatal).
     let src = "slide content:\n  detail \"**unclosed\"\n";
     let mut sm = SourceMap::new();
     let file_id = sm.add_file(Arc::from("test.sf"), Arc::from(src));
     let result = parse(src, file_id, &sm);
 
-    match result {
-        Ok(pr) => {
-            // If parse succeeds, errors must be in warnings (non-fatal accumulation).
-            // The deck must have exactly 1 slide.
-            let deck = pr.deck;
-            assert_eq!(
-                deck.items.len(),
-                1,
-                "deck must still have 1 slide (error recovery, not fatal)"
-            );
-            // Warnings must contain at least 1 entry (the unclosed bold error).
-            // Note: this test checks the WARNING path because inline markup errors
-            // are non-fatal per DIR-077-002 §5.
-            assert!(
-                !pr.warnings.is_empty() || {
-                    // Alternatively, the error may be surfaced via the template chunk's
-                    // error sentinel (the errors vec inside template_value). Either path
-                    // is acceptable as long as the overall parse did not succeed silently.
-                    // Check the field value for an error sentinel.
-                    use crate::ast::{BlockItem, FieldValue};
-                    if let BlockItem::Slide(s) = &deck.items[0] {
-                        let field = s.value().fields.iter().find(|f| f.name.value() == "detail");
-                        if let Some(f) = field {
-                            if let FieldValue::Template(chunks) = f.value.value() {
-                                // An unclosed bold should produce Bold or a Literal fallback.
-                                // The important thing is the asterisks are NOT in a plain Literal.
-                                chunks.iter().any(|c| matches!(c, TemplateChunk::Bold(_)))
-                            } else {
-                                false
-                            }
-                        } else {
-                            false
-                        }
-                    } else {
-                        false
-                    }
-                },
-                "test_BC_3_02_002_unclosed_bold_error_accumulated FAIL: \
-                 unclosed bold '**unclosed' must produce a Bold chunk or a warning; \
-                 got no bold chunk and no warnings. The error accumulation is not active."
-            );
-        },
-        Err(errors) => {
-            // If it's a fatal error, the error must mention the unclosed bold.
-            let combined = errors
-                .iter()
-                .map(|e| format!("{e:?}"))
-                .collect::<Vec<_>>()
-                .join("; ");
-            // An unclosed bold in a field value should be NON-FATAL (parse should succeed
-            // with the error accumulated). Getting Err here means the parser fatally rejected
-            // the unclosed bold, which violates the error accumulation convention.
-            panic!(
-                "test_BC_3_02_002_unclosed_bold_error_accumulated FAIL: \
-                 unclosed bold produced a FATAL parse error (should be non-fatal, \
-                 DIR-077-002 §5); errors: {combined}"
-            );
-        },
-    }
+    // E-PAR-019 is ALWAYS FATAL — parse() MUST return Err in strict (default) mode.
+    // (error-taxonomy.md:24 + error-taxonomy.md:55 + STORY-077 EC-007)
+    let Err(errors) = result else {
+        panic!(
+            "test_BC_3_02_002_unclosed_bold_error_accumulated FAIL: \
+             parse() returned Ok for '**unclosed' — E-PAR-019 must be strict-build-fatal \
+             (exit 1) in default mode. error-taxonomy.md:24: E-PAR errors are Always fatal. \
+             (F-077-P14-001)"
+        )
+    };
+
+    // The errors vec must contain at least 1 entry (error accumulation is preserved).
+    assert!(
+        !errors.is_empty(),
+        "test_BC_3_02_002_unclosed_bold_error_accumulated FAIL: \
+         Err was returned but with an empty errors vec — error accumulation broken."
+    );
+
+    // The first error must carry code E-PAR-019 (not E-PAR-002 / UnexpectedToken).
+    let first = &errors[0];
+    let code = first
+        .code()
+        .expect("E-PAR-019 error must carry a diagnostic code");
+    let code_str = code.to_string();
+    assert!(
+        code_str.contains("E-PAR-019"),
+        "test_BC_3_02_002_unclosed_bold_error_accumulated FAIL: \
+         expected code E-PAR-019 for unclosed bold; got: {code_str}. \
+         (F-077-P14-001)"
+    );
+
+    // The error variant must be UnclosedInlineMarkup (not UnexpectedToken).
+    assert!(
+        matches!(
+            first,
+            crate::error::SyntaxError::UnclosedInlineMarkup { .. }
+        ),
+        "test_BC_3_02_002_unclosed_bold_error_accumulated FAIL: \
+         expected SyntaxError::UnclosedInlineMarkup variant; got: {first:?}"
+    );
+
+    // The rendered message must be CLEAN — no routing sentinel leak.
+    let rendered = first.to_string();
+    assert!(
+        !rendered.contains("SLIDEFORGE_INLINE_ROUTE"),
+        "test_BC_3_02_002_unclosed_bold_error_accumulated FAIL: \
+         rendered message contains routing sentinel. Rendered: {rendered:?}"
+    );
+    assert!(
+        !rendered.contains("Custom("),
+        "test_BC_3_02_002_unclosed_bold_error_accumulated FAIL: \
+         rendered message contains 'Custom(' wrapper. Rendered: {rendered:?}"
+    );
 }
 
-// ─── Test 14: Empty bold error accumulated (DIR-077-002 §8 item 14) ──────────
+// ─── Test 14: Empty bold error is strict-build-fatal (EC-008 / F-077-P14-001) ──
 
-/// DIR-077-002 §8 #14 / BC-3.02.002 AC-002 (error accumulation — EC-008):
-/// `"****"` (empty bold span) must accumulate a parse error.
+/// EC-008 / BC-3.02.002 AC-002 / error-taxonomy.md:24 (E-PAR always fatal):
+/// `"****"` (empty bold span) must:
+/// - Return `Err(errors)` from `parse()` in strict (default) mode — E-PAR-020 is
+///   ALWAYS FATAL (error-taxonomy.md:24, exit 1, note 57).
+/// - The E-PAR-020 error code must appear in the accumulated errors.
+/// - Error message must be CLEAN (no routing sentinel leak).
 ///
-/// An empty bold span (`**` immediately followed by `**`) is a parse error per
-/// DIR-077-002 §2. Error accumulation applies — the parse is non-fatal.
-///
-/// FAILS until `template_value()` detects and reports empty spans.
+/// REWROTE from the original non-fatal assertion (which encoded the spec violation).
+/// (F-077-P14-001)
 #[test]
 fn test_BC_3_02_002_empty_bold_error_accumulated() {
     use crate::parser::parse;
+    use miette::Diagnostic as _;
 
     let src = "slide content:\n  detail \"****\"\n";
     let mut sm = SourceMap::new();
     let file_id = sm.add_file(Arc::from("test.sf"), Arc::from(src));
     let result = parse(src, file_id, &sm);
 
-    match result {
-        Ok(pr) => {
-            // Non-fatal path: parse succeeded with accumulated error in warnings.
-            // Must have produced either a warning OR the "****" was correctly parsed
-            // as an error sentinel (not silently as a Literal("****")).
-            use crate::ast::{BlockItem, FieldValue};
-            if let BlockItem::Slide(s) = &pr.deck.items[0] {
-                let field = s.value().fields.iter().find(|f| f.name.value() == "detail");
-                if let Some(f) = field {
-                    if let FieldValue::Template(chunks) = f.value.value() {
-                        // "****" must NOT silently produce Literal("****").
-                        let is_plain_four_asterisks = chunks.len() == 1
-                            && matches!(&chunks[0], TemplateChunk::Literal(s) if s == "****");
-                        assert!(
-                            !is_plain_four_asterisks || !pr.warnings.is_empty(),
-                            "test_BC_3_02_002_empty_bold_error_accumulated FAIL: \
-                             '****' silently produced Literal(\"****\") with no warning. \
-                             Empty bold span must produce an error (DIR-077-002 §2)."
-                        );
-                    }
-                }
-            }
-            // The parse must have produced at least 1 warning (the empty-span error).
-            assert!(
-                !pr.warnings.is_empty(),
-                "test_BC_3_02_002_empty_bold_error_accumulated FAIL: \
-                 empty bold '****' must produce at least 1 warning (non-fatal error); \
-                 got 0 warnings. Error accumulation is not active for empty spans."
-            );
-        },
-        Err(errors) => {
-            // Fatal error for an empty bold span violates the non-fatal convention.
-            let combined = errors
-                .iter()
-                .map(|e| format!("{e:?}"))
-                .collect::<Vec<_>>()
-                .join("; ");
-            panic!(
-                "test_BC_3_02_002_empty_bold_error_accumulated FAIL: \
-                 empty bold produced a FATAL parse error (should be non-fatal, \
-                 DIR-077-002 §5); errors: {combined}"
-            );
-        },
-    }
+    // E-PAR-020 is ALWAYS FATAL — parse() MUST return Err in strict (default) mode.
+    let Err(errors) = result else {
+        panic!(
+            "test_BC_3_02_002_empty_bold_error_accumulated FAIL: \
+             parse() returned Ok for '****' — E-PAR-020 must be strict-build-fatal \
+             (exit 1) in default mode. error-taxonomy.md:24: E-PAR errors are Always fatal. \
+             (F-077-P14-001)"
+        )
+    };
+
+    assert!(
+        !errors.is_empty(),
+        "test_BC_3_02_002_empty_bold_error_accumulated FAIL: \
+         Err returned but errors vec is empty — accumulation broken."
+    );
+
+    // The first error must carry code E-PAR-020 (not E-PAR-002 / UnexpectedToken).
+    let first = &errors[0];
+    let code = first
+        .code()
+        .expect("E-PAR-020 error must carry a diagnostic code");
+    let code_str = code.to_string();
+    assert!(
+        code_str.contains("E-PAR-020"),
+        "test_BC_3_02_002_empty_bold_error_accumulated FAIL: \
+         expected code E-PAR-020 for empty bold span; got: {code_str}. \
+         (F-077-P14-001)"
+    );
+
+    // The error variant must be EmptyInlineMarkupSpan.
+    assert!(
+        matches!(
+            first,
+            crate::error::SyntaxError::EmptyInlineMarkupSpan { .. }
+        ),
+        "test_BC_3_02_002_empty_bold_error_accumulated FAIL: \
+         expected SyntaxError::EmptyInlineMarkupSpan variant; got: {first:?}"
+    );
+
+    // The rendered message must be CLEAN.
+    let rendered = first.to_string();
+    assert!(
+        !rendered.contains("SLIDEFORGE_INLINE_ROUTE"),
+        "test_BC_3_02_002_empty_bold_error_accumulated FAIL: \
+         rendered message contains routing sentinel. Rendered: {rendered:?}"
+    );
+    assert!(
+        !rendered.contains("Custom("),
+        "test_BC_3_02_002_empty_bold_error_accumulated FAIL: \
+         rendered message contains 'Custom(' wrapper. Rendered: {rendered:?}"
+    );
 }
 
 // ─── Test 15: TemplateChunk::Bold derives Hash + Eq + Clone + Debug (DIR-077-002 §8 item 15) ─
@@ -966,11 +971,14 @@ fn test_F077_P5_001_ref_call_composes_with_surrounding_text() {
 // actual diagnostic code attribute, not on the message string.
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/// E-PAR-019 code assertion: unclosed `**foo` must emit a warning whose
-/// `miette::Diagnostic::code()` is exactly `E-PAR-019`.
+/// E-PAR-019 code assertion: unclosed `**foo` must return `Err` from `parse()` in
+/// strict (default) mode, and the first error must carry code `E-PAR-019`.
 ///
 /// This test guards against the E-PAR-015 collision: the unclosed-inline-markup
 /// error must NOT reuse E-PAR-015 (which belongs to SHAPE parsing).
+///
+/// REWROTE: original asserted Ok(pr.warnings) — wrong, E-PAR-019 is ALWAYS FATAL
+/// per error-taxonomy.md:24. (F-077-P14-001)
 #[test]
 #[allow(non_snake_case)]
 fn test_E_PAR_019_unclosed_inline_markup_code_assertion() {
@@ -983,33 +991,26 @@ fn test_E_PAR_019_unclosed_inline_markup_code_assertion() {
     let file_id = sm.add_file(Arc::from("test.sf"), Arc::from(src));
     let result = parse(src, file_id, &sm);
 
-    let warnings = match result {
-        Ok(pr) => pr.warnings,
-        Err(errs) => {
-            let combined = errs
-                .iter()
-                .map(|e| format!("{e:?}"))
-                .collect::<Vec<_>>()
-                .join("; ");
-            panic!(
-                "test_E_PAR_019_unclosed_inline_markup_code_assertion FAIL: \
-                 unclosed bold produced a FATAL parse error (must be non-fatal, \
-                 DIR-077-002 §5); errors: {combined}"
-            );
-        },
+    // E-PAR-019 is ALWAYS FATAL — must return Err in strict (default) mode.
+    let Err(errors) = result else {
+        panic!(
+            "test_E_PAR_019_unclosed_inline_markup_code_assertion FAIL: \
+             parse() returned Ok — E-PAR-019 must be strict-build-fatal (exit 1). \
+             error-taxonomy.md:24: E-PAR errors are Always fatal. (F-077-P14-001)"
+        )
     };
 
     assert!(
-        !warnings.is_empty(),
+        !errors.is_empty(),
         "test_E_PAR_019_unclosed_inline_markup_code_assertion FAIL: \
-         unclosed '**foo' must produce at least 1 warning; got 0"
+         unclosed '**foo' must produce at least 1 fatal error; got 0"
     );
 
-    // The FIRST warning must carry code E-PAR-019, not E-PAR-002 or E-PAR-015.
-    let first = &warnings[0];
+    // The FIRST error must carry code E-PAR-019, not E-PAR-002 or E-PAR-015.
+    let first = &errors[0];
     let code = first
         .code()
-        .expect("warning must have a diagnostic code (E-PAR-019)");
+        .expect("error must have a diagnostic code (E-PAR-019)");
     let code_str = code.to_string();
     assert!(
         code_str.contains("E-PAR-019"),
@@ -1020,11 +1021,14 @@ fn test_E_PAR_019_unclosed_inline_markup_code_assertion() {
     );
 }
 
-/// E-PAR-020 code assertion: empty `****` must emit a warning whose
-/// `miette::Diagnostic::code()` is exactly `E-PAR-020`.
+/// E-PAR-020 code assertion: empty `****` must return `Err` from `parse()` in
+/// strict (default) mode, and the first error must carry code `E-PAR-020`.
 ///
 /// This test guards against the E-PAR-016 collision: the empty-inline-markup-span
 /// error must NOT reuse E-PAR-016 (which belongs to SHAPE parsing).
+///
+/// REWROTE: original asserted Ok(pr.warnings) — wrong, E-PAR-020 is ALWAYS FATAL
+/// per error-taxonomy.md:24. (F-077-P14-001)
 #[test]
 #[allow(non_snake_case)]
 fn test_E_PAR_020_empty_inline_markup_span_code_assertion() {
@@ -1037,33 +1041,26 @@ fn test_E_PAR_020_empty_inline_markup_span_code_assertion() {
     let file_id = sm.add_file(Arc::from("test.sf"), Arc::from(src));
     let result = parse(src, file_id, &sm);
 
-    let warnings = match result {
-        Ok(pr) => pr.warnings,
-        Err(errs) => {
-            let combined = errs
-                .iter()
-                .map(|e| format!("{e:?}"))
-                .collect::<Vec<_>>()
-                .join("; ");
-            panic!(
-                "test_E_PAR_020_empty_inline_markup_span_code_assertion FAIL: \
-                 empty bold '****' produced a FATAL parse error (must be non-fatal, \
-                 DIR-077-002 §5); errors: {combined}"
-            );
-        },
+    // E-PAR-020 is ALWAYS FATAL — must return Err in strict (default) mode.
+    let Err(errors) = result else {
+        panic!(
+            "test_E_PAR_020_empty_inline_markup_span_code_assertion FAIL: \
+             parse() returned Ok — E-PAR-020 must be strict-build-fatal (exit 1). \
+             error-taxonomy.md:24: E-PAR errors are Always fatal. (F-077-P14-001)"
+        )
     };
 
     assert!(
-        !warnings.is_empty(),
+        !errors.is_empty(),
         "test_E_PAR_020_empty_inline_markup_span_code_assertion FAIL: \
-         empty '****' must produce at least 1 warning; got 0"
+         empty '****' must produce at least 1 fatal error; got 0"
     );
 
-    // The FIRST warning must carry code E-PAR-020, not E-PAR-002 or E-PAR-016.
-    let first = &warnings[0];
+    // The FIRST error must carry code E-PAR-020, not E-PAR-002 or E-PAR-016.
+    let first = &errors[0];
     let code = first
         .code()
-        .expect("warning must have a diagnostic code (E-PAR-020)");
+        .expect("error must have a diagnostic code (E-PAR-020)");
     let code_str = code.to_string();
     assert!(
         code_str.contains("E-PAR-020"),
@@ -1074,11 +1071,14 @@ fn test_E_PAR_020_empty_inline_markup_span_code_assertion() {
     );
 }
 
-/// E-PAR-019 variant check: the warning variant must be
+/// E-PAR-019 variant check: the fatal error variant must be
 /// `SyntaxError::UnclosedInlineMarkup`, not `SyntaxError::UnexpectedToken`.
 ///
 /// This structural check ensures the routing in mod.rs produces the correct
 /// variant (TD-VSDD-059: load-bearing assertion, not just a doc comment).
+///
+/// REWROTE: original used .expect("...not fatal") — E-PAR-019 is ALWAYS FATAL
+/// per error-taxonomy.md:24. (F-077-P14-001)
 #[test]
 #[allow(non_snake_case)]
 fn test_E_PAR_019_warning_is_unclosed_inline_markup_variant() {
@@ -1089,15 +1089,20 @@ fn test_E_PAR_019_warning_is_unclosed_inline_markup_variant() {
     let src = "slide content:\n  detail \"**unclosed\"\n";
     let mut sm = SourceMap::new();
     let file_id = sm.add_file(Arc::from("test.sf"), Arc::from(src));
-    let pr = parse(src, file_id, &sm).expect("unclosed bold must not be fatal");
 
-    assert!(
-        !pr.warnings.is_empty(),
+    // E-PAR-019 must be fatal in strict mode — parse() must return Err.
+    let errors = parse(src, file_id, &sm).expect_err(
         "test_E_PAR_019_warning_is_unclosed_inline_markup_variant FAIL: \
-         no warning produced"
+         parse() returned Ok — E-PAR-019 must be strict-build-fatal. (F-077-P14-001)",
     );
 
-    let first = &pr.warnings[0];
+    assert!(
+        !errors.is_empty(),
+        "test_E_PAR_019_warning_is_unclosed_inline_markup_variant FAIL: \
+         no error produced"
+    );
+
+    let first = &errors[0];
     assert!(
         matches!(first, SyntaxError::UnclosedInlineMarkup { .. }),
         "test_E_PAR_019_warning_is_unclosed_inline_markup_variant FAIL: \
@@ -1105,11 +1110,14 @@ fn test_E_PAR_019_warning_is_unclosed_inline_markup_variant() {
     );
 }
 
-/// E-PAR-020 variant check: the warning variant must be
+/// E-PAR-020 variant check: the fatal error variant must be
 /// `SyntaxError::EmptyInlineMarkupSpan`, not `SyntaxError::UnexpectedToken`.
 ///
 /// This structural check ensures the routing in mod.rs produces the correct
 /// variant (TD-VSDD-059: load-bearing assertion, not just a doc comment).
+///
+/// REWROTE: original used .expect("...not fatal") — E-PAR-020 is ALWAYS FATAL
+/// per error-taxonomy.md:24. (F-077-P14-001)
 #[test]
 #[allow(non_snake_case)]
 fn test_E_PAR_020_warning_is_empty_inline_markup_span_variant() {
@@ -1120,15 +1128,20 @@ fn test_E_PAR_020_warning_is_empty_inline_markup_span_variant() {
     let src = "slide content:\n  detail \"****\"\n";
     let mut sm = SourceMap::new();
     let file_id = sm.add_file(Arc::from("test.sf"), Arc::from(src));
-    let pr = parse(src, file_id, &sm).expect("empty bold must not be fatal");
 
-    assert!(
-        !pr.warnings.is_empty(),
+    // E-PAR-020 must be fatal in strict mode — parse() must return Err.
+    let errors = parse(src, file_id, &sm).expect_err(
         "test_E_PAR_020_warning_is_empty_inline_markup_span_variant FAIL: \
-         no warning produced"
+         parse() returned Ok — E-PAR-020 must be strict-build-fatal. (F-077-P14-001)",
     );
 
-    let first = &pr.warnings[0];
+    assert!(
+        !errors.is_empty(),
+        "test_E_PAR_020_warning_is_empty_inline_markup_span_variant FAIL: \
+         no error produced"
+    );
+
+    let first = &errors[0];
     assert!(
         matches!(first, SyntaxError::EmptyInlineMarkupSpan { .. }),
         "test_E_PAR_020_warning_is_empty_inline_markup_span_variant FAIL: \
@@ -1149,11 +1162,12 @@ fn test_E_PAR_020_warning_is_empty_inline_markup_span_variant() {
 // routing is kind-based (not message-string-based).
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/// F-077-P4-002: unclosed backtick code span must produce
-/// `SyntaxError::UnclosedInlineMarkup { delimiter: "`" }` — delimiter is `` ` ``,
+/// F-077-P4-002: unclosed backtick code span must produce a FATAL E-PAR-019 error
+/// with `SyntaxError::UnclosedInlineMarkup { delimiter: "`" }` — delimiter is `` ` ``,
 /// NOT empty string or "?".
 ///
-/// Fails until routing uses `TemplateErrorKind` instead of `extract_backtick_name`.
+/// REWROTE: original used .expect("...not fatal") — E-PAR-019 is ALWAYS FATAL
+/// per error-taxonomy.md:24. (F-077-P14-001)
 #[test]
 #[allow(non_snake_case)]
 fn test_F077_P4_002_backtick_unclosed_delimiter_preserved() {
@@ -1165,16 +1179,20 @@ fn test_F077_P4_002_backtick_unclosed_delimiter_preserved() {
     let src = "slide content:\n  detail \"`unclosed\"\n";
     let mut sm = SourceMap::new();
     let file_id = sm.add_file(Arc::from("test.sf"), Arc::from(src));
-    let pr = parse(src, file_id, &sm)
-        .expect("unclosed backtick code span must not be a fatal parse error");
 
-    assert!(
-        !pr.warnings.is_empty(),
+    // E-PAR-019 must be fatal — parse() must return Err in strict mode.
+    let errors = parse(src, file_id, &sm).expect_err(
         "test_F077_P4_002_backtick_unclosed_delimiter_preserved FAIL: \
-         no warning produced for unclosed backtick span"
+         parse() returned Ok — E-PAR-019 must be strict-build-fatal. (F-077-P14-001)",
     );
 
-    let first = &pr.warnings[0];
+    assert!(
+        !errors.is_empty(),
+        "test_F077_P4_002_backtick_unclosed_delimiter_preserved FAIL: \
+         no error produced for unclosed backtick span"
+    );
+
+    let first = &errors[0];
     match first {
         SyntaxError::UnclosedInlineMarkup { delimiter, .. } => {
             assert_eq!(
@@ -1193,10 +1211,12 @@ fn test_F077_P4_002_backtick_unclosed_delimiter_preserved() {
 }
 
 /// F-077-P4-002: empty backtick code span (two adjacent backticks `` `` ``) must
-/// produce `SyntaxError::EmptyInlineMarkupSpan { delimiter: "`" }` — delimiter
-/// is `` ` ``, NOT empty string or "?".
+/// produce a FATAL E-PAR-020 error with
+/// `SyntaxError::EmptyInlineMarkupSpan { delimiter: "`" }` — delimiter is `` ` ``,
+/// NOT empty string or "?".
 ///
-/// Fails until routing uses `TemplateErrorKind` instead of `extract_backtick_name`.
+/// REWROTE: original used .expect("...not fatal") — E-PAR-020 is ALWAYS FATAL
+/// per error-taxonomy.md:24. (F-077-P14-001)
 #[test]
 #[allow(non_snake_case)]
 fn test_F077_P4_002_backtick_empty_span_delimiter_preserved() {
@@ -1208,16 +1228,20 @@ fn test_F077_P4_002_backtick_empty_span_delimiter_preserved() {
     let src = "slide content:\n  detail \"``\"\n";
     let mut sm = SourceMap::new();
     let file_id = sm.add_file(Arc::from("test.sf"), Arc::from(src));
-    let pr =
-        parse(src, file_id, &sm).expect("empty backtick code span must not be a fatal parse error");
 
-    assert!(
-        !pr.warnings.is_empty(),
+    // E-PAR-020 must be fatal — parse() must return Err in strict mode.
+    let errors = parse(src, file_id, &sm).expect_err(
         "test_F077_P4_002_backtick_empty_span_delimiter_preserved FAIL: \
-         no warning produced for empty backtick span"
+         parse() returned Ok — E-PAR-020 must be strict-build-fatal. (F-077-P14-001)",
     );
 
-    let first = &pr.warnings[0];
+    assert!(
+        !errors.is_empty(),
+        "test_F077_P4_002_backtick_empty_span_delimiter_preserved FAIL: \
+         no error produced for empty backtick span"
+    );
+
+    let first = &errors[0];
     match first {
         SyntaxError::EmptyInlineMarkupSpan { delimiter, .. } => {
             assert_eq!(
@@ -1238,6 +1262,9 @@ fn test_F077_P4_002_backtick_empty_span_delimiter_preserved() {
 /// F-077-P4-001 + F-077-P4-002 combined: verify delimiter field is non-empty and
 /// correct for `**`, `_`, and `` ` `` delimiters (all three must preserve their
 /// delimiter string unmodified in the SyntaxError variant).
+///
+/// REWROTE: original used unwrap_or_else(|_| panic!("...not fatal")) — E-PAR-019
+/// is ALWAYS FATAL per error-taxonomy.md:24. (F-077-P14-001)
 #[test]
 #[allow(non_snake_case)]
 fn test_F077_P4_002_delimiter_preserved_for_all_markup_types() {
@@ -1266,16 +1293,22 @@ fn test_F077_P4_002_delimiter_preserved_for_all_markup_types() {
     for (src, expected_delim, label) in cases {
         let mut sm = SourceMap::new();
         let file_id = sm.add_file(Arc::from("test.sf"), Arc::from(*src));
-        let pr =
-            parse(src, file_id, &sm).unwrap_or_else(|_| panic!("{label}: parse must not be fatal"));
+
+        // E-PAR-019 is ALWAYS FATAL — parse() must return Err in strict mode.
+        let Err(errors) = parse(src, file_id, &sm) else {
+            panic!(
+                "test_F077_P4_002_delimiter_preserved_for_all_markup_types FAIL ({label}): \
+                 parse() returned Ok — E-PAR-019 must be strict-build-fatal. (F-077-P14-001)"
+            )
+        };
 
         assert!(
-            !pr.warnings.is_empty(),
+            !errors.is_empty(),
             "test_F077_P4_002_delimiter_preserved_for_all_markup_types FAIL ({label}): \
-             no warning produced"
+             no error produced"
         );
 
-        let first = &pr.warnings[0];
+        let first = &errors[0];
         match first {
             SyntaxError::UnclosedInlineMarkup { delimiter, .. } => {
                 assert_eq!(
@@ -1298,14 +1331,12 @@ fn test_F077_P4_002_delimiter_preserved_for_all_markup_types() {
 /// with a backtick delimiter MUST NOT contain the routing sentinel, hex payload,
 /// or `Custom(` wrapper.
 ///
-/// Previously `parse_routing_tag()` discarded the clean original message
-/// (`_original_msg`) and `InlineMarkupRoute` carried only the delimiter; the
-/// tagged `message` blob was then stored verbatim in the SyntaxError `message:`
-/// field, leaking `SLIDEFORGE_INLINE_ROUTE|…|Custom(…)` into every user-facing
-/// diagnostic.
+/// The error is FATAL (Err return) in strict mode — we inspect the error in the
+/// Err vec. The clean-message assertion still holds: the fatal E-PAR-019 error
+/// must have a clean rendered message.
 ///
-/// This test FAILS against the unfixed code (proving the leak) and passes after
-/// `InlineMarkupRoute` is extended to carry the clean message and mod.rs uses it.
+/// REWROTE: original used .expect("...not fatal") — E-PAR-019 is ALWAYS FATAL
+/// per error-taxonomy.md:24. (F-077-P14-001)
 #[test]
 #[allow(non_snake_case)]
 fn test_F077_P5_001_unclosed_backtick_message_is_clean() {
@@ -1317,14 +1348,19 @@ fn test_F077_P5_001_unclosed_backtick_message_is_clean() {
     let src = "slide content:\n  detail \"`unclosed\"\n";
     let mut sm = SourceMap::new();
     let file_id = sm.add_file(Arc::from("test.sf"), Arc::from(src));
-    let pr = parse(src, file_id, &sm).expect("unclosed backtick must not be a fatal parse error");
 
-    assert!(
-        !pr.warnings.is_empty(),
-        "test_F077_P5_001_unclosed_backtick_message_is_clean FAIL: no warning produced"
+    // E-PAR-019 is ALWAYS FATAL — parse() must return Err.
+    let errors = parse(src, file_id, &sm).expect_err(
+        "test_F077_P5_001_unclosed_backtick_message_is_clean FAIL: \
+         parse() returned Ok — E-PAR-019 must be strict-build-fatal. (F-077-P14-001)",
     );
 
-    let rendered = pr.warnings[0].to_string();
+    assert!(
+        !errors.is_empty(),
+        "test_F077_P5_001_unclosed_backtick_message_is_clean FAIL: no error produced"
+    );
+
+    let rendered = errors[0].to_string();
 
     assert!(
         !rendered.contains("SLIDEFORGE_INLINE_ROUTE"),
@@ -1339,8 +1375,7 @@ fn test_F077_P5_001_unclosed_backtick_message_is_clean() {
          internal representation must not appear in user diagnostics.\nRendered: {rendered:?}"
     );
     // Sentinel format uses `|` as separator — assert none of the sentinel's
-    // pipe-separated fields appear.  The check is: the string must NOT contain
-    // a `|` character that would indicate the sentinel leaked through.
+    // pipe-separated fields appear.
     assert!(
         !rendered.contains('|'),
         "test_F077_P5_001_unclosed_backtick_message_is_clean FAIL: \
@@ -1354,9 +1389,8 @@ fn test_F077_P5_001_unclosed_backtick_message_is_clean() {
          rendered message must contain the E-PAR-019 code.\nRendered: {rendered:?}"
     );
 
-    // The backtick delimiter must be visible in the rendered output — either in
-    // the message field or the SyntaxError Display (delimiter field).
-    match &pr.warnings[0] {
+    // The backtick delimiter must be visible in the rendered output.
+    match &errors[0] {
         SyntaxError::UnclosedInlineMarkup {
             delimiter, message, ..
         } => {
@@ -1388,6 +1422,9 @@ fn test_F077_P5_001_unclosed_backtick_message_is_clean() {
 ///
 /// Exercises the `UnclosedInlineMarkup` path with a two-byte delimiter to
 /// confirm the hex encoding/decoding round-trip does not corrupt the clean message.
+///
+/// REWROTE: original used .expect("...not fatal") — E-PAR-019 is ALWAYS FATAL
+/// per error-taxonomy.md:24. (F-077-P14-001)
 #[test]
 #[allow(non_snake_case)]
 fn test_F077_P5_001_unclosed_bold_message_is_clean() {
@@ -1398,14 +1435,19 @@ fn test_F077_P5_001_unclosed_bold_message_is_clean() {
     let src = "slide content:\n  detail \"**unclosed bold\"\n";
     let mut sm = SourceMap::new();
     let file_id = sm.add_file(Arc::from("test.sf"), Arc::from(src));
-    let pr = parse(src, file_id, &sm).expect("unclosed bold must not be a fatal parse error");
 
-    assert!(
-        !pr.warnings.is_empty(),
-        "test_F077_P5_001_unclosed_bold_message_is_clean FAIL: no warning produced"
+    // E-PAR-019 is ALWAYS FATAL — parse() must return Err.
+    let errors = parse(src, file_id, &sm).expect_err(
+        "test_F077_P5_001_unclosed_bold_message_is_clean FAIL: \
+         parse() returned Ok — E-PAR-019 must be strict-build-fatal. (F-077-P14-001)",
     );
 
-    let rendered = pr.warnings[0].to_string();
+    assert!(
+        !errors.is_empty(),
+        "test_F077_P5_001_unclosed_bold_message_is_clean FAIL: no error produced"
+    );
+
+    let rendered = errors[0].to_string();
 
     assert!(
         !rendered.contains("SLIDEFORGE_INLINE_ROUTE"),
@@ -1423,7 +1465,7 @@ fn test_F077_P5_001_unclosed_bold_message_is_clean() {
          Rendered: {rendered:?}"
     );
 
-    match &pr.warnings[0] {
+    match &errors[0] {
         SyntaxError::UnclosedInlineMarkup {
             delimiter, message, ..
         } => {
@@ -1457,6 +1499,9 @@ fn test_F077_P5_001_unclosed_bold_message_is_clean() {
 
 /// F-077-P5-001 [HIGH]: sentinel-leak test for `EmptyInlineMarkupSpan` with
 /// backtick delimiter.
+///
+/// REWROTE: original used .expect("...not fatal") — E-PAR-020 is ALWAYS FATAL
+/// per error-taxonomy.md:24. (F-077-P14-001)
 #[test]
 #[allow(non_snake_case)]
 fn test_F077_P5_001_empty_backtick_span_message_is_clean() {
@@ -1468,14 +1513,19 @@ fn test_F077_P5_001_empty_backtick_span_message_is_clean() {
     let src = "slide content:\n  detail \"``\"\n";
     let mut sm = SourceMap::new();
     let file_id = sm.add_file(Arc::from("test.sf"), Arc::from(src));
-    let pr = parse(src, file_id, &sm).expect("empty backtick span must not be a fatal parse error");
 
-    assert!(
-        !pr.warnings.is_empty(),
-        "test_F077_P5_001_empty_backtick_span_message_is_clean FAIL: no warning produced"
+    // E-PAR-020 is ALWAYS FATAL — parse() must return Err.
+    let errors = parse(src, file_id, &sm).expect_err(
+        "test_F077_P5_001_empty_backtick_span_message_is_clean FAIL: \
+         parse() returned Ok — E-PAR-020 must be strict-build-fatal. (F-077-P14-001)",
     );
 
-    let rendered = pr.warnings[0].to_string();
+    assert!(
+        !errors.is_empty(),
+        "test_F077_P5_001_empty_backtick_span_message_is_clean FAIL: no error produced"
+    );
+
+    let rendered = errors[0].to_string();
 
     assert!(
         !rendered.contains("SLIDEFORGE_INLINE_ROUTE"),
@@ -1493,7 +1543,7 @@ fn test_F077_P5_001_empty_backtick_span_message_is_clean() {
          Rendered: {rendered:?}"
     );
 
-    match &pr.warnings[0] {
+    match &errors[0] {
         SyntaxError::EmptyInlineMarkupSpan {
             delimiter, message, ..
         } => {
@@ -1523,6 +1573,9 @@ fn test_F077_P5_001_empty_backtick_span_message_is_clean() {
 
 /// F-077-P5-001 [HIGH]: sentinel-leak test for `EmptyInlineMarkupSpan` with
 /// `**` delimiter.
+///
+/// REWROTE: original used .expect("...not fatal") — E-PAR-020 is ALWAYS FATAL
+/// per error-taxonomy.md:24. (F-077-P14-001)
 #[test]
 #[allow(non_snake_case)]
 fn test_F077_P5_001_empty_bold_span_message_is_clean() {
@@ -1534,14 +1587,19 @@ fn test_F077_P5_001_empty_bold_span_message_is_clean() {
     let src = "slide content:\n  detail \"****\"\n";
     let mut sm = SourceMap::new();
     let file_id = sm.add_file(Arc::from("test.sf"), Arc::from(src));
-    let pr = parse(src, file_id, &sm).expect("empty bold span must not be a fatal parse error");
 
-    assert!(
-        !pr.warnings.is_empty(),
-        "test_F077_P5_001_empty_bold_span_message_is_clean FAIL: no warning produced"
+    // E-PAR-020 is ALWAYS FATAL — parse() must return Err.
+    let errors = parse(src, file_id, &sm).expect_err(
+        "test_F077_P5_001_empty_bold_span_message_is_clean FAIL: \
+         parse() returned Ok — E-PAR-020 must be strict-build-fatal. (F-077-P14-001)",
     );
 
-    let rendered = pr.warnings[0].to_string();
+    assert!(
+        !errors.is_empty(),
+        "test_F077_P5_001_empty_bold_span_message_is_clean FAIL: no error produced"
+    );
+
+    let rendered = errors[0].to_string();
 
     assert!(
         !rendered.contains("SLIDEFORGE_INLINE_ROUTE"),
@@ -1559,7 +1617,7 @@ fn test_F077_P5_001_empty_bold_span_message_is_clean() {
          Rendered: {rendered:?}"
     );
 
-    match &pr.warnings[0] {
+    match &errors[0] {
         SyntaxError::EmptyInlineMarkupSpan {
             delimiter, message, ..
         } => {
@@ -1773,9 +1831,9 @@ fn test_F077_P7_001_bold_with_emoji_no_panic() {
 /// Input: 200 alternating `^_` pairs (400 opening delimiters).  Before the
 /// nesting-depth cap this would recurse until a stack overflow.
 ///
-/// Uses `parse()` directly (not `parse_template_value`) because the deeply-
-/// nested input produces non-fatal accumulated errors, which `parse()` surfaces
-/// in `ParseResult::warnings` rather than as a fatal `Err`.
+/// Uses `parse()` directly (not `parse_template_value`). E-PAR-021 is ALWAYS
+/// FATAL (error-taxonomy.md:24), so parse() returns Err in strict (default) mode.
+/// The test collects errors from either path for robustness. (F-077-P14-001)
 #[test]
 #[allow(non_snake_case)]
 fn test_F077_P7_002_deep_nesting_produces_E_PAR_021_no_stack_overflow() {

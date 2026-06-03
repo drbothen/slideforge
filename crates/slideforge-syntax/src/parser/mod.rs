@@ -189,7 +189,7 @@ pub fn parse(
     let (deck_opt, parse_errors) = deck_parser(file_id).parse(input).into_output_errors();
 
     // Phase 5: convert chumsky Rich errors to SyntaxError.
-    // W-PAR-* → non-fatal warnings; E-PAR-019/020/021 → inline-markup warnings;
+    // W-PAR-* → non-fatal warnings; E-PAR-019/020/021 → fatal inline-markup errors;
     // Indent(n) → IndentError; all others → fatal errors.
     let mut parse_time_warnings: Vec<SyntaxError> = Vec::new();
 
@@ -230,12 +230,22 @@ pub fn parse(
                 continue;
             }
 
-            // E-PAR-019/020/021: route via sentinel → InlineMarkupRoute → non-fatal warning.
+            // E-PAR-019/020/021: route via sentinel → InlineMarkupRoute → fatal error.
+            //
+            // error-taxonomy.md:24 — "Parse Errors (E-PAR) — Always fatal. Build halts
+            // with accumulated errors. No output produced." (exit 1, notes 55/57/59).
+            // STORY-077 EC-007: "in strict mode (default) the build fails with the
+            // accumulated error."
+            //
+            // KEEP the `continue` so we don't double-push via `errors.push(syntax_err)`
+            // below. Error ACCUMULATION is preserved (all E-PAR-019/020/021 errors in a
+            // field are collected before the gate at Phase 6 halts the build). Only the
+            // DESTINATION sink changes: warnings → errors (fatal path). (F-077-P14-001)
             if let Some(route) = parse_routing_tag(&message) {
-                let warning = inline_markup_route_to_warning(
+                let error = inline_markup_route_to_error(
                     route, &file_path, line, col, src, byte_start, span_len,
                 );
-                parse_time_warnings.push(warning);
+                errors.push(error);
                 continue;
             }
 
@@ -528,12 +538,17 @@ fn lex_error_to_syntax_error(e: LexError, src: &str) -> SyntaxError {
     }
 }
 
-/// Convert an [`InlineMarkupRoute`] to the appropriate [`SyntaxError`] warning variant.
+/// Convert an [`InlineMarkupRoute`] to the appropriate [`SyntaxError`] fatal error variant.
 ///
 /// Extracted from `parse()` to keep that function within the clippy line-count limit.
-/// All three routes (E-PAR-019 / E-PAR-020 / E-PAR-021) produce non-fatal warnings
-/// with identical accumulation behavior (pushed to `parse_time_warnings`).
-fn inline_markup_route_to_warning(
+/// All three routes (E-PAR-019 / E-PAR-020 / E-PAR-021) are ALWAYS FATAL per
+/// error-taxonomy.md:24 ("Parse Errors (E-PAR) — Always fatal. Build halts with
+/// accumulated errors. No output produced."). They are routed to the `errors` vec
+/// (fatal path), which causes `parse()` to return `Err` after Phase 6 gate.
+///
+/// Error accumulation is preserved: all malformed-markup errors in a field are
+/// collected before the gate halts the build (not fail-on-first). (F-077-P14-001)
+fn inline_markup_route_to_error(
     route: self::template::InlineMarkupRoute,
     file_path: &str,
     line: u32,

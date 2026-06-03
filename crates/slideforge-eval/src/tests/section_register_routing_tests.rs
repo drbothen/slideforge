@@ -2873,9 +2873,9 @@ fn test_F_077_P2_001_genuine_parse_to_eval_end_to_end() {
 /// pairs. `section_value_parser` translates each offset into a sub-span.
 /// This test verifies the sub-span is at the correct column.
 ///
-/// Also verifies E-PAR-019 (unclosed inline markup) is Fatal-severity in
-/// `parse_checked` mode (strict build fails on inline markup errors per
-/// DIR-077-002 §5 and CLAUDE.md "Strict mode is the default build").
+/// E-PAR-019 (unclosed inline markup) is ALWAYS FATAL per error-taxonomy.md:24.
+/// parse() returns Err; parse_checked returns None + has_fatal()=true in the sink.
+/// (F-077-P14-001 fix: rewrote from wrong Ok-path assertion.)
 #[test]
 #[allow(non_snake_case)]
 fn test_F_077_P2_002_unclosed_bold_error_span_points_to_opening_delimiter() {
@@ -2896,44 +2896,31 @@ fn test_F_077_P2_002_unclosed_bold_error_span_points_to_opening_delimiter() {
     let mut sm = SourceMap::new();
     let file_id = sm.add_file(StdArc::from("test_span.sf"), StdArc::from(src));
 
-    // parse() returns Ok with the error in warnings (non-fatal accumulation per
-    // DIR-077-002 §5 error-accumulation rule — parse produces partial AST).
-    let parse_result = parse(src, file_id, &sm)
-        .expect("F-077-P2-002: parse must return Ok for unclosed bold (non-fatal accumulation)");
+    // E-PAR-019 is ALWAYS FATAL — parse() must return Err in strict (default) mode.
+    // error-taxonomy.md:24: "Parse Errors (E-PAR) — Always fatal." (F-077-P14-001)
+    let errors = parse(src, file_id, &sm)
+        .expect_err("F-077-P2-002: parse must return Err for unclosed bold — E-PAR-019 is strict-build-fatal (F-077-P14-001)");
 
-    // The warning must mention E-PAR-019 (dedicated unclosed inline markup code).
+    // The fatal error must mention E-PAR-019 (dedicated unclosed inline markup code).
     // E-PAR-015 was the COLLIDING code from SHAPE parsing — after the fix it must
     // no longer appear here; E-PAR-019 is the correct code.
-    let has_epar019 = parse_result
-        .warnings
+    let has_epar019 = errors
         .iter()
-        .any(|w| format!("{w:?}").contains("E-PAR-019") || format!("{w:?}").contains("unclosed"));
+        .any(|e| format!("{e:?}").contains("E-PAR-019") || format!("{e:?}").contains("unclosed"));
     assert!(
         has_epar019,
-        "F-077-P2-002: E-PAR-019 unclosed-bold warning must be present; got: {:?}",
-        parse_result.warnings
+        "F-077-P2-002: E-PAR-019 unclosed-bold error must be present in the Err vec; got: {errors:?}"
     );
 
-    // The span on the warning must point at the opening `**` byte offset,
+    // The span on the error must point at the opening `**` byte offset,
     // NOT at the first byte of the whole field-value token.
     // The section source line is: `  detail: "**unclosed"`
-    // The `"` opens at byte (col-adjusted). The `**` is immediately after `"`, so
-    // the error column must be GREATER than the column of `  detail: ` prefix,
-    // confirming it is NOT at column 1 (start of line). It must be at the `**` position.
-    //
-    // We check that the error exists (column check via string rep):
-    // Since SyntaxError::sort_position() returns (file, line, col), we verify
-    // the warning's line matches the section detail line (line 6, 1-indexed).
-    for w in &parse_result.warnings {
-        let msg = format!("{w:?}");
+    // Source has slideforge_version "1" (line 1), empty line (line 2),
+    // section methodology: (line 3), detail: "**unclosed" (line 4).
+    for e in &errors {
+        let msg = format!("{e:?}");
         if msg.contains("E-PAR-019") || msg.contains("unclosed") {
-            // The warning span must be on line 4 (the `detail:` line).
-            // sort_position returns (file, line_1idx, col_1idx).
-            // We verify this via the byte span by ensuring it is NOT at byte 0
-            // (which would mean the error is at the file start, not the delimiter).
-            let (_, line, _col) = w.sort_position();
-            // Source has slideforge_version "1" (line 1), empty line (line 2),
-            // section methodology: (line 3), detail: "**unclosed" (line 4).
+            let (_, line, _col) = e.sort_position();
             assert!(
                 line >= 4,
                 "F-077-P2-002: E-PAR-019 span must be on the section detail line (≥ line 4); \
@@ -2947,20 +2934,23 @@ fn test_F_077_P2_002_unclosed_bold_error_span_points_to_opening_delimiter() {
         }
     }
 
-    // E-PAR-019 in strict mode (parse_checked): the DiagnosticSink must mark
-    // has_fatal() == true because SyntaxError::UnclosedInlineMarkup carries Fatal severity.
-    // This verifies the strict-build-fails guarantee (DIR-077-002 §5).
+    // E-PAR-019 in strict mode (parse_checked): parse_checked routes Err → None + sink.
+    // The DiagnosticSink must mark has_fatal() == true.
+    // parse_checked returns None because the parse failed (no usable AST).
+    let mut sm2 = SourceMap::new();
+    let file_id2 = sm2.add_file(StdArc::from("test_span.sf"), StdArc::from(src));
     let mut strict_sink = DiagnosticSink::new();
-    let ast_opt = parse_checked(src, file_id, &sm, &mut strict_sink);
+    let ast_opt = parse_checked(src, file_id2, &sm2, &mut strict_sink);
     assert!(
-        ast_opt.is_some(),
-        "F-077-P2-002: parse_checked must return Some (AST is available, error accumulated)"
+        ast_opt.is_none(),
+        "F-077-P2-002: parse_checked must return None when E-PAR-019 is fatal \
+         (no usable AST produced, strict build fails). (F-077-P14-001)"
     );
     // The sink must have a fatal-severity diagnostic (strict build fails).
     assert!(
         strict_sink.has_fatal(),
         "F-077-P2-002: parse_checked with E-PAR-019 must produce has_fatal()=true in the sink \
-         (strict build must fail on unclosed inline markup per DIR-077-002 §5 + CLAUDE.md); \
+         (strict build must fail on unclosed inline markup per error-taxonomy.md:24); \
          got has_fatal=false. Check that SyntaxError::UnclosedInlineMarkup.severity() == Fatal."
     );
 }
