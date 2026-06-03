@@ -166,13 +166,13 @@ fn test_BC_3_02_002_integration_eval_deck_populates_slide_and_section_register_c
 /// Real `.sf` source with `section methodology:` + `detail: **Bold claim.** See {{ ref("slide-1") }}.`
 /// must parse+eval to a `SectionBlock` with `body["detail"] = FieldValue::Inlines([...])`.
 ///
-/// Asserts structural InlineNode variants: Bold([Plain("Bold claim.")]), Plain(" See "),
-/// Xref("slide-1"), Plain(".").
+/// Asserts structural `InlineNode` variants: `Bold([Plain("Bold claim.")])`, `Plain(" See ")`,
+/// `Xref("slide-1")`, `Plain(".")`.
 ///
-/// Also asserts a RegisteredContent { Register::Detail } entry is produced.
+/// Also asserts a `RegisteredContent` { `Register::Detail` } entry is produced.
 ///
-/// This uses the REAL source parser (slideforge_syntax::parser::parse) and the
-/// real eval pipeline (eval_deck) — NOT hand-constructed AST nodes.
+/// This uses the REAL source parser (`slideforge_syntax::parser::parse`) and the
+/// real eval pipeline (`eval_deck`) — NOT hand-constructed AST nodes.
 #[test]
 #[allow(non_snake_case)]
 fn test_OBS_P25_A_real_source_parse_eval_section_detail_structural_inline_nodes() {
