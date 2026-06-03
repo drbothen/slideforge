@@ -1,0 +1,30 @@
+[package]
+name = "slideforge-docx"
+description = "DOCX exporter plugin for slideforge — report register as Word document body paragraphs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "../../README.md"
+
+[dependencies]
+ooxmlsdk = { workspace = true }
+# zip =4.2.0 with default-features=false disables the lzma/xz feature (links="lzma"),
+# eliminating the native-library link conflict with slideforge-brand/slideforge-eval's
+# zip 2.3.0.  Matches the sibling slideforge-pptx pin exactly (STORY-037 proved this
+# config compiles).  ooxmlsdk 0.6.1 already pulls zip ^4.2.0 transitively, so this
+# pin unifies to a single zip 4.x major in slideforge-docx's subtree.
+zip = { version = "=4.2.0", default-features = false, features = ["deflate", "time"] }
+slideforge-types = { workspace = true }
+slideforge-plugin-api = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+# slideforge-layout is the source of LaidOutDeck — required by the Exporter trait.
+slideforge-layout = { workspace = true }
+
+[dev-dependencies]
+insta = { workspace = true }
+slideforge-eval = { workspace = true, features = ["test-utils"] }
