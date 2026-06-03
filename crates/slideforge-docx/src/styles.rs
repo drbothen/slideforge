@@ -86,6 +86,18 @@ pub fn build_styles(brand: Option<&Brand>) -> Result<Vec<u8>, ExportError> {
       <w:sz w:val="20"/>
     </w:rPr>
   </w:style>
+  <w:style w:type="table" w:styleId="TableNormal" w:default="1">
+    <w:name w:val="Normal Table"/>
+    <w:tblPr>
+      <w:tblInd w:w="0" w:type="dxa"/>
+      <w:tblCellMar>
+        <w:top w:w="0" w:type="dxa"/>
+        <w:left w:w="108" w:type="dxa"/>
+        <w:bottom w:w="0" w:type="dxa"/>
+        <w:right w:w="108" w:type="dxa"/>
+      </w:tblCellMar>
+    </w:tblPr>
+  </w:style>
   <w:style w:type="table" w:styleId="TableGrid">
     <w:name w:val="Table Grid"/>
     <w:basedOn w:val="TableNormal"/>

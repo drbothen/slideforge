@@ -672,6 +672,53 @@ fn test_BC_4_02_002_styles_xml_contains_table_styles() {
     );
 }
 
+// ─── F-042-P1-002: no dangling basedOn references in styles.xml ───────────────
+
+/// F-042-P1-002 load-bearing assertion:
+/// Every `<w:basedOn w:val="..."/>` reference in `word/styles.xml` must point to
+/// a `<w:style w:styleId="...">` that is also defined in the same styles.xml.
+/// A dangling basedOn (e.g., basedOn="TableNormal" with no TableNormal style)
+/// is a strict OOXML conformance error that corrupts the style chain.
+///
+/// This test parses all styleId and basedOn values via regex and asserts
+/// every basedOn target is present in the styleId set.
+#[test]
+fn test_BC_4_02_002_styles_xml_no_dangling_based_on() {
+    let deck = minimal_deck();
+    let slide = make_slide("Style Check");
+    let laid_out = make_laid_out_deck(vec![slide], vec![]);
+
+    let docx_bytes = export_deck(&deck, &laid_out);
+    let styles_xml = read_zip_member(&docx_bytes, "word/styles.xml");
+
+    // Collect all defined styleId values.
+    let mut defined_ids: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    let mut search = styles_xml.as_str();
+    while let Some(pos) = search.find("w:styleId=\"") {
+        let after = &search[pos + "w:styleId=\"".len()..];
+        if let Some(end) = after.find('"') {
+            defined_ids.insert(&after[..end]);
+        }
+        search = &search[pos + 1..];
+    }
+
+    // Collect all basedOn target values and verify each one is defined.
+    let mut check = styles_xml.as_str();
+    while let Some(pos) = check.find("w:basedOn w:val=\"") {
+        let after = &check[pos + "w:basedOn w:val=\"".len()..];
+        if let Some(end) = after.find('"') {
+            let target = &after[..end];
+            assert!(
+                defined_ids.contains(target),
+                "styles.xml has a dangling <w:basedOn w:val=\"{target}\"/> — no style with \
+                 styleId=\"{target}\" is defined in this document. Defined styleIds: \
+                 {defined_ids:?} (F-042-P1-002 load-bearing assertion)"
+            );
+        }
+        check = &check[pos + 1..];
+    }
+}
+
 // ─── SectionOrderer unit tests ────────────────────────────────────────────────
 
 /// BC-4.02.002 postcondition 5 (ordering) — `SectionOrderer`:
