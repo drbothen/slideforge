@@ -48,8 +48,8 @@ wave_4_batch_c:
 wave_4_pulled_in_p1: [STORY-073, STORY-075, STORY-076]
 wave_4_deferred_p2_to_wave5: [STORY-072, STORY-074]
 wave_4_bc_deltas: "BC-2.01.001 v1.1→v1.2; BC-2.01.003 v1.8→v1.9; error-taxonomy v2.2→v2.3"
-develop_sha: "a3b47303"
-develop_pr_count: 51
+develop_sha: "2ebf184f"
+develop_pr_count: 52
 last_updated: 2026-06-03
 ---
 
@@ -351,16 +351,18 @@ stories:
     adversary_convergence: "3/3 strict-CLEAN at passes 7/8/9 (9-pass total cascade)"
     notes: "Register-Aware Rendering: No Content Bleed Invariant. BleedChecker test utility (test-utils feature-gated). Exporter ACs (AC-001..AC-007) deferred to STORY-037/041/046. 6 fix-bursts hardening XML entity decoder. Cross-story: STORY-037/041 must emit register sentinels as contiguous XML runs."
   STORY-037:
-    status: in-progress
+    status: merged
     wave: 4
     batch: B
     priority: P0
     points: 13
-    worktree: ".worktrees/STORY-037 (feature/S-037)"
+    pr: 52
+    merge_commit: "2ebf184f"
+    merged: 2026-06-03
     adversary_convergence: "3/3 strict-CLEAN at passes 6/7/8 (8-pass total cascade)"
     adversary_streak: "3/3"
     converged: true
-    notes: "PPTX Core Serialization: ooxmlsdk + ZIP Assembly; chain: STORY-037→038→039→040. CONVERGED — in PR. ADR-015 + Addendum A created this session (pptx brand-rendering boundary + STORY-037/038 scope split)."
+    notes: "PPTX Core Serialization: ooxmlsdk + ZIP Assembly; chain: STORY-037→038→039→040. MERGED PR #52 (2ebf184f). ADR-015 + Addendum A created this session (pptx brand-rendering boundary + STORY-037/038 scope split). Follow-ups: SEC-037-001 (pptx link SafeUrl), S1-S4 (validate_emu, slide-size clamp, subtitle placeholder, notes/handout rels) anchored to STORY-038/040."
   STORY-038:
     status: not-started
     wave: 4
