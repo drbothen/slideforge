@@ -1291,6 +1291,226 @@ fn test_BC_4_02_001_f_docx_001_hyperlink_doc_declares_xmlns_r_and_parses_back() 
     );
 }
 
+// ─── SEC-001: Exporter-layer URL scheme validation (CWE-601) ─────────────────
+
+/// SEC-001 (MEDIUM, CWE-601):
+/// `InlineNode::Link` with a `javascript:` URL must return
+/// `Err(ExportError::ValidationError)` — never written to the ZIP.
+///
+/// The parse-layer allowlist (E-PAR-022) covers DSL-sourced input, but
+/// programmatic `InlineNode::Link` callers bypass it. The exporter must
+/// independently validate the URL scheme as a defense-in-depth measure.
+#[test]
+fn test_sec_001_javascript_url_rejected_by_exporter() {
+    use crate::document_body::DocumentBodySerializer;
+
+    let link_node = InlineNode::Link {
+        text: vec![InlineNode::Plain(Arc::from("Click"))],
+        url: Arc::from("javascript:alert('xss')"),
+    };
+
+    let rc = slideforge_types::RegisteredContent {
+        register: slideforge_types::Register::Report,
+        content: vec![link_node],
+    };
+
+    let slide = make_slide("XSS Slide", vec![rc]);
+    let laid_out = make_laid_out_deck(vec![slide]);
+
+    let mut body_ser = DocumentBodySerializer::new();
+    let result = body_ser.serialize(&laid_out);
+
+    assert!(
+        result.is_err(),
+        "serialize() must return Err for a javascript: URL (SEC-001 / CWE-601); \
+         got Ok — dangerous URL would have been written to the ZIP"
+    );
+
+    // Confirm the error is a ValidationError, not a different error kind.
+    let err = result.unwrap_err();
+    let err_string = err.to_string();
+    assert!(
+        err_string.contains("javascript")
+            || err_string.to_lowercase().contains("scheme")
+            || err_string.to_lowercase().contains("url")
+            || err_string.to_lowercase().contains("validation"),
+        "error must mention the disallowed scheme or be a ValidationError; got: {err_string}"
+    );
+}
+
+/// SEC-001 (MEDIUM, CWE-601):
+/// `InlineNode::Link` with `https://` URL must succeed and bind the URL
+/// correctly in `word/_rels/document.xml.rels`.
+#[test]
+fn test_sec_001_https_url_accepted_by_exporter() {
+    let deck = minimal_deck();
+    let link_node = InlineNode::Link {
+        text: vec![InlineNode::Plain(Arc::from("Visit docs"))],
+        url: Arc::from("https://docs.example.com/guide"),
+    };
+    let rc = slideforge_types::RegisteredContent {
+        register: slideforge_types::Register::Report,
+        content: vec![link_node],
+    };
+    let slide = make_slide("Docs Slide", vec![rc]);
+    let laid_out = make_laid_out_deck(vec![slide]);
+
+    let docx_bytes = export_deck(&deck, &laid_out);
+    let rels_xml = read_zip_member(&docx_bytes, "word/_rels/document.xml.rels");
+
+    assert!(
+        rels_xml.contains("https://docs.example.com/guide"),
+        "https:// URL must be written to document.xml.rels (SEC-001); got:\n{rels_xml}"
+    );
+}
+
+/// SEC-001 (MEDIUM, CWE-601):
+/// `InlineNode::Link` with `mailto:` URL must succeed and bind the target
+/// correctly in `word/_rels/document.xml.rels`.
+#[test]
+fn test_sec_001_mailto_url_accepted_by_exporter() {
+    let deck = minimal_deck();
+    let link_node = InlineNode::Link {
+        text: vec![InlineNode::Plain(Arc::from("Email us"))],
+        url: Arc::from("mailto:hello@example.com"),
+    };
+    let rc = slideforge_types::RegisteredContent {
+        register: slideforge_types::Register::Report,
+        content: vec![link_node],
+    };
+    let slide = make_slide("Email Slide", vec![rc]);
+    let laid_out = make_laid_out_deck(vec![slide]);
+
+    let docx_bytes = export_deck(&deck, &laid_out);
+    let rels_xml = read_zip_member(&docx_bytes, "word/_rels/document.xml.rels");
+
+    assert!(
+        rels_xml.contains("mailto:hello@example.com"),
+        "mailto: URL must be written to document.xml.rels (SEC-001); got:\n{rels_xml}"
+    );
+}
+
+/// SEC-001 (MEDIUM, CWE-601):
+/// Additional disallowed schemes: `data:`, `vbscript:`, `file:`.
+#[test]
+fn test_sec_001_data_url_rejected_by_exporter() {
+    use crate::document_body::DocumentBodySerializer;
+
+    let link_node = InlineNode::Link {
+        text: vec![InlineNode::Plain(Arc::from("Evil link"))],
+        url: Arc::from("data:text/html,<script>alert(1)</script>"),
+    };
+    let rc = slideforge_types::RegisteredContent {
+        register: slideforge_types::Register::Report,
+        content: vec![link_node],
+    };
+    let slide = make_slide("Data Slide", vec![rc]);
+    let laid_out = make_laid_out_deck(vec![slide]);
+
+    let mut body_ser = DocumentBodySerializer::new();
+    let result = body_ser.serialize(&laid_out);
+
+    assert!(
+        result.is_err(),
+        "serialize() must return Err for a data: URL (SEC-001 / CWE-601); got Ok"
+    );
+}
+
+// ─── SEC-002: XML control character stripping ─────────────────────────────────
+
+/// SEC-002 (LOW, CWE-116):
+/// Font names from brand containing XML-1.0-invalid control characters
+/// must produce well-formed XML in `word/styles.xml`.
+///
+/// XML-1.0 valid characters: #x9, #xA, #xD, and #x20–#xD7FF and #xE000–#xFFFD.
+/// Control chars \x00–\x08, \x0B–\x0C, \x0E–\x1F must be stripped.
+///
+/// This test verifies that a brand with a NUL (`\x00`) and ESC (`\x1B`)
+/// in the heading font name does NOT produce those chars in styles.xml.
+#[test]
+fn test_sec_002_control_chars_stripped_from_xml_attribute_values() {
+    use crate::styles::build_styles;
+    use slideforge_types::{Brand, BrandFonts, BrandPalette};
+    use std::sync::Arc as StdArc;
+
+    // Brand with a heading font name containing control characters.
+    let evil_brand = Brand {
+        name: StdArc::from("evil-brand"),
+        palette: BrandPalette {
+            primary: StdArc::from("#003087"),
+            secondary: StdArc::from("#0066CC"),
+            accent: StdArc::from("#FF6B35"),
+            neutral: StdArc::from("#F5F5F5"),
+        },
+        fonts: BrandFonts {
+            heading: StdArc::from("Calibri\x00Light\x1B"),
+            body: StdArc::from("Calibri"),
+            mono: StdArc::from("Courier New"),
+        },
+        layouts: vec![],
+        span: slideforge_types::span::SourceSpan::default(),
+    };
+
+    let styles_xml_bytes =
+        build_styles(Some(&evil_brand)).expect("build_styles must succeed even with control chars");
+    let styles_xml = String::from_utf8(styles_xml_bytes).expect("styles.xml must be valid UTF-8");
+
+    // The NUL and ESC bytes must NOT appear in the output.
+    assert!(
+        !styles_xml.contains('\x00'),
+        "styles.xml must not contain NUL (\\x00) control char (SEC-002 / CWE-116); \
+         got:\n{styles_xml}"
+    );
+    assert!(
+        !styles_xml.contains('\x1B'),
+        "styles.xml must not contain ESC (\\x1B) control char (SEC-002 / CWE-116); \
+         got:\n{styles_xml}"
+    );
+
+    // The font name with control chars stripped must still appear (just clean).
+    // "CalibrLight" without the NUL and ESC would be "CalibrLight" but the
+    // exact stripping result depends on implementation; the KEY assertion is
+    // the control chars are gone.
+    assert!(
+        styles_xml.contains("Calibri"),
+        "sanitized heading font name must still contain 'Calibri' after stripping (SEC-002)"
+    );
+}
+
+/// SEC-002 (LOW, CWE-116):
+/// Text content in document.xml containing XML-1.0-invalid control characters
+/// must have those characters stripped (not passed through).
+#[test]
+fn test_sec_002_control_chars_stripped_from_xml_text_content() {
+    let deck = minimal_deck();
+    // Report text with NUL and form-feed (\x0C) — both invalid in XML 1.0.
+    let rc = slideforge_types::RegisteredContent::plain(
+        slideforge_types::Register::Report,
+        std::sync::Arc::from("Hello\x00World\x0CEnd"),
+    );
+    let slide = make_slide("Control Chars Slide", vec![rc]);
+    let laid_out = make_laid_out_deck(vec![slide]);
+
+    let docx_bytes = export_deck(&deck, &laid_out);
+    let doc_xml = read_zip_member(&docx_bytes, "word/document.xml");
+
+    // NUL and \x0C must be stripped.
+    assert!(
+        !doc_xml.contains('\x00'),
+        "document.xml must not contain NUL control char from user text (SEC-002 / CWE-116)"
+    );
+    assert!(
+        !doc_xml.contains('\x0C'),
+        "document.xml must not contain form-feed control char from user text (SEC-002 / CWE-116)"
+    );
+
+    // The safe text portions must remain.
+    assert!(
+        doc_xml.contains("Hello") && doc_xml.contains("World") && doc_xml.contains("End"),
+        "text content with control chars stripped must still contain safe characters (SEC-002)"
+    );
+}
+
 // ─── F-041-008: Paragraph count must count <w:p> and <w:p  only ──────────────
 
 /// F-041-008:

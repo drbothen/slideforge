@@ -34,6 +34,26 @@ use slideforge_types::InlineNode;
 use slideforge_types::register::Register;
 
 use crate::error::ExportError;
+use crate::xml_escape::strip_xml10_invalid_chars;
+
+/// Allowlist of permitted link URL schemes at the exporter layer (defense-in-depth).
+///
+/// Mirrors `slideforge_syntax::parser::template::ALLOWED_LINK_SCHEMES` (E-PAR-022).
+/// The parse-layer allowlist covers DSL-sourced input; this check covers
+/// programmatic `InlineNode::Link` callers that bypass the parser.
+///
+/// Comparison is case-insensitive (scheme is lowercased before checking).
+const ALLOWED_LINK_SCHEMES: &[&str] = &["http", "https", "mailto"];
+
+/// Extract the URL scheme (the portion before the first `:`), lowercased.
+///
+/// Returns `"(none)"` when the URL contains no `:` separator.
+fn extract_url_scheme(url: &str) -> String {
+    match url.find(':') {
+        Some(pos) => url[..pos].to_lowercase(),
+        None => "(none)".to_string(),
+    }
+}
 
 /// W namespace URI for Word processing ML.
 const W_NS: &str = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
@@ -348,6 +368,21 @@ impl DocumentBodySerializer {
             },
 
             InlineNode::Link { text, url } => {
+                // SEC-001 (defense-in-depth): validate the URL scheme at the
+                // exporter layer. The parse-layer allowlist (E-PAR-022) covers
+                // DSL-sourced input; programmatic InlineNode::Link callers
+                // bypass the parser and reach us directly.
+                let scheme = extract_url_scheme(url);
+                if !ALLOWED_LINK_SCHEMES.contains(&scheme.as_str()) {
+                    return Err(ExportError::ValidationError {
+                        message: format!(
+                            "link URL scheme '{scheme}' is not permitted in DOCX export \
+                             (SEC-001 / CWE-601). Allowed schemes: http, https, mailto. \
+                             URL: {url}"
+                        ),
+                    });
+                }
+
                 // Record the hyperlink relationship.
                 let r_id = format!("rId{}", self.next_rel_id);
                 self.next_rel_id += 1;
@@ -457,14 +492,21 @@ fn make_plain_run(text: &str) -> Run {
 
 /// Build a `<w:t>` element with `xml:space="preserve"` when the text has
 /// leading or trailing whitespace (per STORY-041 requirement).
+///
+/// SEC-002 / CWE-116: XML-1.0-invalid control characters are stripped before
+/// the text is stored. ooxmlsdk serializes `xml_content` directly as element
+/// text, so the stripping must happen here rather than at the escape layer.
 fn make_text(text: &str) -> Text {
-    let needs_preserve = text.starts_with(' ')
-        || text.ends_with(' ')
-        || text.starts_with('\t')
-        || text.ends_with('\t');
+    // Strip XML-1.0-invalid control chars (SEC-002).
+    let sanitized = strip_xml10_invalid_chars(text);
+
+    let needs_preserve = sanitized.starts_with(' ')
+        || sanitized.ends_with(' ')
+        || sanitized.starts_with('\t')
+        || sanitized.ends_with('\t');
 
     Text {
-        xml_content: Some(text.to_owned()),
+        xml_content: Some(sanitized),
         space: if needs_preserve {
             Some(ooxmlsdk::schemas::xml::SpaceProcessingModeValues::Preserve)
         } else {

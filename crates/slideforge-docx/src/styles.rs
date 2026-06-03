@@ -15,6 +15,7 @@
 use slideforge_types::Brand;
 
 use crate::error::ExportError;
+use crate::xml_escape::xml_attr_escape;
 
 /// Builds the `word/styles.xml` byte buffer.
 ///
@@ -92,22 +93,4 @@ pub fn build_styles(brand: Option<&Brand>) -> Result<Vec<u8>, ExportError> {
     );
 
     Ok(xml.into_bytes())
-}
-
-/// Escape a string for embedding in an XML attribute value.
-///
-/// Escapes `&`, `<`, `>`, `"`, and `'` per XML spec.
-fn xml_attr_escape(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for ch in s.chars() {
-        match ch {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            '\'' => out.push_str("&apos;"),
-            c => out.push(c),
-        }
-    }
-    out
 }

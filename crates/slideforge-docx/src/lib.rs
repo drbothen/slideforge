@@ -21,10 +21,14 @@
 //! word/styles.xml
 //! word/numbering.xml
 //! word/settings.xml
-//! word/theme/theme1.xml
 //! docProps/core.xml
 //! docProps/app.xml
 //! ```
+//!
+//! Note: `word/theme/theme1.xml` is NOT emitted by this crate. No BC-4.02.001
+//! acceptance criterion requires a theme part for the DOCX exporter. PPTX-style
+//! theme embedding (for custom color schemes) is deferred to a future story
+//! under the brand system, not required for DOCX v1.0 correctness.
 //!
 //! ## Dependencies
 //!
@@ -49,6 +53,7 @@ pub mod content_types;
 pub mod document_body;
 pub mod error;
 pub mod styles;
+pub mod xml_escape;
 pub mod zip_assembler;
 
 #[cfg(test)]
@@ -66,6 +71,7 @@ use tracing::instrument;
 
 use crate::document_body::DocumentBodySerializer;
 use crate::error::ExportError;
+use crate::xml_escape::{xml_attr_escape, xml_content_escape};
 use crate::zip_assembler::DocxZipAssembler;
 
 /// The DOCX exporter plugin.
@@ -240,13 +246,14 @@ fn build_settings_xml() -> Vec<u8> {
 fn build_core_xml(deck: &Deck) -> Vec<u8> {
     let lang = deck.metadata.lang.as_deref().unwrap_or("en-US");
 
+    // Declare only the namespaces that are actually used: cp: and dc:.
+    // xmlns:dcterms and xmlns:xsi are omitted — no dcterms:created/modified
+    // is emitted and xsi would flag as unused by XML linters (S-2 fix).
     let xml = format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n\
          <cp:coreProperties \
            xmlns:cp=\"http://schemas.openxmlformats.org/package/2006/metadata/core-properties\" \
-           xmlns:dc=\"http://purl.org/dc/elements/1.1/\" \
-           xmlns:dcterms=\"http://purl.org/dc/terms/\" \
-           xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\n\
+           xmlns:dc=\"http://purl.org/dc/elements/1.1/\">\n\
            <dc:language>{lang}</dc:language>\n\
          </cp:coreProperties>",
         lang = xml_content_escape(lang),
@@ -264,38 +271,4 @@ fn build_app_xml() -> Vec<u8> {
 "#
     .as_bytes()
     .to_vec()
-}
-
-/// Escape a string for embedding as XML element text content.
-///
-/// Escapes `&`, `<`, and `>` per XML spec.
-fn xml_content_escape(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for ch in s.chars() {
-        match ch {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            c => out.push(c),
-        }
-    }
-    out
-}
-
-/// Escape a string for embedding in an XML attribute value.
-///
-/// Escapes `&`, `<`, `>`, `"`, and `'` per XML spec.
-fn xml_attr_escape(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for ch in s.chars() {
-        match ch {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            '\'' => out.push_str("&apos;"),
-            c => out.push(c),
-        }
-    }
-    out
 }
