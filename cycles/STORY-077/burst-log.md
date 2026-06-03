@@ -31,6 +31,32 @@ STORY-045 merged at PR #48, develop e5d818e7. All obligations below are resolved
 
 ---
 
+## STORY-077 Inline-Markup Cascade — Passes 6–21 (archived 2026-06-02)
+
+Cascade ran from 6c72e686 through 9c862fef on feature/S-077 (LOCAL-ONLY).
+Full detail in git log of feature/S-077. Condensed narrative below.
+
+- **Pass 6:** F-077-P6-001 (LOW) misleading comment + dead `into_message()` → fixed 48003e86.
+- **Pass 7:** F-077-P7-001 (CRIT) UTF-8 char-boundary panic in `scan_template_chunks` + F-077-P7-002 (MED) unbounded recursion → E-PAR-021 depth cap (MAX_INLINE_NESTING=64) + 3 LOW → fixed ed56066d. error-taxonomy advanced: E-PAR-021 registered.
+- **Pass 8:** F-077-P8-001 (MED) E-PAR-021 wrong structured code (emitted generic SyntaxError) → dedicated SyntaxError variant + accumulation parity → fixed ad321f52.
+- **Pass 9:** F-077-P9-001 (MED) `ref()`/`footnote()` zero-arg silently dropped → E-EVL-013/E-EVL-014 + comment fixes → fixed 5427d854. error-taxonomy advanced: E-EVL-014 registered.
+- **Pass 10:** F-077-P10-001 (HIGH) section `register_content` dropped at layout boundary → `GeneratedSection.register_content` propagation + eval coverage → fixed e205bec4. Adjudication: F-077-P10-001 IN-SCOPE (applies existing `LaidOutSlide.register_content` slide-path pattern; no new architecture decision).
+- **Pass 11:** F-077-P11-001 (LOW) `figref()` empty-resolved arg → E-EVL-012 raised → fixed 3502d947.
+- **Pass 12:** F-077-P12-001 (LOW) empty-arg guard missing on `Pipe` sibling arms → fixed 931d053e.
+- **Pass 13:** F-077-P13-001 (LOW) layout `UnknownSectionType` hardcoded type list → SSOT-derived + drift-guard → fixed d433d019.
+- **Pass 14:** F-077-P14-001 (HIGH) E-PAR-019/020/021 emitted as non-fatal warnings; spec mandates strict-build-fatal → routed to fatal errors; 14 tests rewritten → fixed 2d94395f. Adjudication: E-PAR-019/020/021 are strict-build-fatal (consistent with E-PAR-017; `--warn-only` demotion is a future global concern).
+- **Pass 15:** F-077-P15-001/002 (MED×2) stale fatal-semantics rustdoc + non-load-bearing E-PAR-021 fatality test → fixed 4be94e4b.
+- **Pass 16:** strict-CLEAN (streak 1/3). Build verified green.
+- **Pass 17:** F-077-P17-001 (HIGH) slide-level inline-markup chunks silently dropped (text data loss) → `flatten_chunks_to_string` flat-text preservation per DIR-077-002 §4 → fixed 99b6262e. Streak reset to 0/3. Adjudication: slide-level flat-text preservation IN-SCOPE (DIR-077-002 §4 mandates `Value::Str` flat text); structural `InlineNode` upgrade deferred to STORY-081.
+- **Pass 18:** F-077-P18-001 (MED) markup-wrapped brand-ref regressed to fatal error in set-rules → `brand_ref_field` shared predicate + `preserve_brand_ref` threading (set-rules only) → fixed 2dbce955. Adjudication: markup-wrapped brand-ref preserved in SET-RULES ONLY (slide/vars brand-ref preservation is NOT existing behavior; out of scope, STORY-081/PO).
+- **Pass 19:** strict-CLEAN (streak 1/3). Build verified green (2595 passed / 3 skipped; 1 pre-existing perf flake `test_cold_budget_under_200ms` in slideforge-diagrams).
+- **Pass 20:** strict-CLEAN (streak 2/3).
+- **Pass 21:** F-077-P21-001 (MED) unclosed `[link](url` emitted no error; DIR-077-002 §5 mandates Fatal → strict-fatal E-PAR-019, all 8 delimiters now uniform → fixed 9c862fef. 4 new tests (unclosed-link). Workspace 2598/2599 (same pre-existing flake). Streak reset to 0/3.
+
+**error-taxonomy status after pass 21:** v2.12 — E-PAR-019/020/021 + E-EVL-012/013/014 all registered this cascade.
+
+---
+
 ## Process Wins (archived 2026-06-02)
 
 - Pre-implementation tech-validation (research-agent) + architect coordinate-model directive for new-dependency stories catches library-vs-spec coordinate bugs before implementation.
