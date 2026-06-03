@@ -13,7 +13,7 @@ total_stories: 81
 stories_written: 81
 stories_ready: 0
 stories_in_progress: 0
-stories_merged: 51
+stories_merged: 52
 ---
 
 # STORY-INDEX — slideforge v1.0
@@ -33,10 +33,10 @@ stories_merged: 51
 | Wave 1 | 14 | 0 | 0 | 0 | 14 | 0 |
 | Wave 2 | 7 | 0 | 0 | 0 | 7 | 0 |
 | Wave 3 | 17 | 0 | 0 | 0 | 17 | 0 |
-| Wave 4 | 18 | 5 | 0 | 0 | 13 | 0 |
+| Wave 4 | 18 | 4 | 0 | 0 | 14 | 0 |
 | Wave 5 | 19 | 19 | 0 | 0 | 0 | 0 |
 | Wave 6 | 6 | 6 | 0 | 0 | 0 | 0 |
-| **Total** | **81** | **30** | **0** | **0** | **51** | **0** |
+| **Total** | **81** | **29** | **0** | **0** | **52** | **0** |
 
 ---
 
@@ -112,7 +112,7 @@ stories_merged: 51
 | [STORY-035](stories/STORY-035-register-routing-eval.md) | EPIC-18 | Writing Register Routing in Evaluator | BC-1.14.001-004 | P0 | 5 | strict | merged |
 | [STORY-036](stories/STORY-036-register-no-bleed-invariant.md) | EPIC-18 | Register-Aware Rendering: No Content Bleed Invariant | BC-1.14.004 | P0 | 5 | strict | merged |
 | [STORY-037](stories/STORY-037-pptx-core-serialization.md) | EPIC-08 | PPTX Core Serialization: ooxmlsdk 0.6.1 + ZIP Assembly | BC-4.01.001 | P0 | 13 | strict | merged |
-| [STORY-038](stories/STORY-038-pptx-layout-compliance.md) | EPIC-08 | PPTX Layout Compliance: Placeholder Inheritance + Slide IDs + Layouts | BC-4.01.005 | P0 | 8 | strict | draft |
+| [STORY-038](stories/STORY-038-pptx-layout-compliance.md) | EPIC-08 | PPTX Layout Compliance: Placeholder Inheritance + Slide IDs + Layouts | BC-4.01.005 | P0 | 8 | strict | Merged |
 | [STORY-039](stories/STORY-039-pptx-a11y-metadata.md) | EPIC-08 | PPTX Accessibility Metadata | BC-4.01.004, BC-5.01.005 | P0 | 5 | strict | draft |
 | [STORY-040](stories/STORY-040-pptx-notes-sections-masters.md) | EPIC-08 | PPTX: Speaker Notes + Slide Sections + notesMaster1.xml | BC-4.01.003, BC-4.01.006 | P0 | 5 | strict | draft |
 | [STORY-041](stories/STORY-041-docx-core-serialization.md) | EPIC-09 | DOCX Core Serialization: report register + ooxmlsdk | BC-4.02.001 | P0 | 8 | strict | merged |

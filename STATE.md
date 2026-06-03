@@ -32,10 +32,10 @@ wave_4_started: 2026-05-31
 wave_4_total_stories: 18
 wave_4_total_points: 114
 wave_5_total_points: 109
-develop_sha: "56f3f57d"
-develop_pr_count: 53
+develop_sha: "c031805c"
+develop_pr_count: 54
 error_taxonomy_version: "v2.13"
-workspace_tests: "~2700+ (51 PRs merged)"
+workspace_tests: "~2700+ (54 PRs merged)"
 workspace_test_failures: 0
 ---
 
@@ -53,12 +53,12 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. Generates branded .pptx
 
 ## POSITION
 
-Phase 3, **Wave 4 Batch B — docx chain COMPLETE: STORY-041 MERGED (PR #51, a3b47303) + STORY-042 MERGED (PR #53, 56f3f57d).**
-- develop = `56f3f57d` (53 merged PRs). Open PRs: 0. Active worktree: feature/S-038 (in progress).
-- STORY-042: merged PR #53 (56f3f57d). Docx chain (041→042) COMPLETE.
-- STORY-038 (pptx layout compliance): CONVERGING — adversary cascade in progress, strict 3-CLEAN; functionally complete, polishing cosmetic residue. Worktree feature/S-038 active, not yet PR'd.
-- **Batch B remaining after STORY-038 merges:** STORY-039→040 (pptx chain). Then Batch C: STORY-049→050.
-- **Wave 4 merged total:** 13/18 (Batch A 10/10 + STORY-037 + STORY-041 + STORY-042).
+Phase 3, **Wave 4 Batch B — pptx chain 037→038 DONE: STORY-038 MERGED (PR #54, c031805c).**
+- develop = `c031805c` (54 merged PRs). Open PRs: 0. Active worktree: none.
+- STORY-038: merged PR #54 (c031805c). pptx chain 037→038 DONE. 16-pass adversary cascade; every reset a genuine defect (silent fallbacks, raw-XML ADR-001 violation, Body/TextRun warn gap, doc-vs-code contradictions). ADR-015 + Addendum A established brand→pptx OOXML rendering boundary.
+- S4 (build_notes_handout_masters rels-error swallow): RESOLVED in scope in STORY-038 — build_notes_handout_masters now returns Result and propagates. SEC-001 (CWE-190 validate_emu i32 overflow): RESOLVED in scope. DEF-P5-001 (dead MissingBrandPart variant): RESOLVED in scope. S1/S2/S3 (validate_emu test, i32-clamp→error, Subtitle placeholder): RESOLVED absorbed in STORY-038.
+- **Batch B remaining:** STORY-039→040 (pptx chain). Then Batch C: STORY-049→050.
+- **Wave 4 merged total:** 14/18 (Batch A 10/10 + STORY-037 + STORY-038 + STORY-041 + STORY-042).
 
 ---
 
@@ -77,7 +77,7 @@ Phase 3, **Wave 4 Batch B — docx chain COMPLETE: STORY-041 MERGED (PR #51, a3b
 | Planning (25 DSL decisions) | DONE 2026-05-24 | q1–q25 docs + 14 research threads + 7/7 spikes resolved |
 | Phase 1: Spec Crystallization | DONE — APPROVED 2026-05-25 | PRD (109 BCs, 15 HS, 4 supplements) + arch (14 ADRs, 15 VPs, 20 crates) + UX spec. 17 passes, 69 findings, 3/3 clean. |
 | Phase 2: Story Decomposition | DONE — APPROVED 2026-05-25 | 81 stories, 21 epics, 6 waves, 491 pts. 22 passes, 96+ findings, 3/3 clean. |
-| Phase 3: TDD Implementation | IN PROGRESS — Waves 1/2/3 GATE PASSED. Wave 4: Batch A 10/10 COMPLETE + STORY-037 MERGED (PR #52 2ebf184f) + STORY-041 MERGED (PR #51 a3b47303) + STORY-042 MERGED (PR #53 56f3f57d). 13/18 Wave 4 merged. Docx chain COMPLETE. STORY-038 CONVERGING. Batch B remaining after 038: STORY-039→040. Then Batch C: STORY-049→050. | Per-story delivery |
+| Phase 3: TDD Implementation | IN PROGRESS — Waves 1/2/3 GATE PASSED. Wave 4: Batch A 10/10 COMPLETE + STORY-037 MERGED (PR #52 2ebf184f) + STORY-038 MERGED (PR #54 c031805c) + STORY-041 MERGED (PR #51 a3b47303) + STORY-042 MERGED (PR #53 56f3f57d). 14/18 Wave 4 merged. pptx chain 037→038 DONE. Docx chain COMPLETE. Batch B remaining: STORY-039→040. Then Batch C: STORY-049→050. | Per-story delivery |
 | Phases 4–7 | NOT STARTED | Holdout / Adversarial / Formal Hardening / Convergence |
 
 ## Wave 4 Batch A Status (10/10 COMPLETE) + Batch B In Progress
@@ -89,6 +89,7 @@ STORY-077 follow-ups MERGED as PR #50 (f2573bb1, 2026-06-03).
 - STORY-041 MERGED PR #51 (a3b47303, 2026-06-03). STORY-042 now unblocked.
 - STORY-037 MERGED PR #52 (2ebf184f, 2026-06-03). STORY-038→039→040 now unblocked. ADR-015 + Addendum A on factory-artifacts. PR-52 follow-ups recorded in Follow-Ups table (SEC-037-001, S1–S4).
 - STORY-042 MERGED PR #53 (56f3f57d, 2026-06-03). Docx chain (041→042) COMPLETE. SEC-042-001 follow-up recorded in Follow-Ups table.
+- STORY-038 MERGED PR #54 (c031805c, 2026-06-03). pptx chain 037→038 DONE. S1/S2/S3/S4 + SEC-001 + DEF-P5-001 all resolved in scope.
 
 Batch C (after Batch B): STORY-049→050.
 
@@ -99,9 +100,9 @@ Batch C (after Batch B): STORY-049→050.
 | Field | Value |
 |-------|-------|
 | **Date** | 2026-06-03 |
-| **Position** | Wave 4 Batch B — docx chain COMPLETE. STORY-042 MERGED PR #53 (56f3f57d). STORY-038 (pptx layout compliance) CONVERGING — adversary cascade in progress, worktree feature/S-038 active, not yet PR'd. Wave 4: 13/18 merged. Next: STORY-038 converge → PR → merge → dispatch STORY-039→040. Then Batch C: STORY-049→050. |
-| **develop SHA** | `56f3f57d` (53 merged PRs) |
-| **Active worktrees** | feature/S-038 |
+| **Position** | Wave 4 Batch B — pptx chain 037→038 DONE. STORY-038 MERGED PR #54 (c031805c). 14/18 Wave 4 merged. S4/SEC-001/DEF-P5-001/S1/S2/S3 all resolved in scope in STORY-038. Next: dispatch STORY-039→040 (pptx chain). Then Batch C: STORY-049→050. |
+| **develop SHA** | `c031805c` (54 merged PRs) |
+| **Active worktrees** | none |
 | **Open PRs** | 0 |
 | **Workspace crates** | 16 |
 | **BC deltas** | ADR-015 + Addendum A this session; BC-3.02.002 v1.5, BC-1.14.003 v1.3, error-taxonomy v2.13 — all on factory-artifacts |
@@ -114,7 +115,8 @@ Batch C (after Batch B): STORY-049→050.
 | Item | Severity | Status | Notes |
 |------|----------|--------|-------|
 | STORY-081: slide-level inline markup | P0 blocker for v1.0 | draft | Wave 5, 13 pts, EPIC-18. Depends on STORY-077 (now merged). Not started. |
-| SEC-001: veraPDF Docker `verapdf/cli:latest` not digest-pinned (CWE-494) | MED | open | CI-only; merged in #48; fix before v1.0 / Phase 6 |
+| SEC-001 (CWE-190, pptx): `validate_emu` i32 positive overflow on frame bbox | IMPORTANT | **RESOLVED** | Fixed in scope in STORY-038 (PR #54, c031805c). `validate_emu` now rejects positive i32 EMU overflow. |
+| SEC-001 (CWE-494, veraPDF): Docker `verapdf/cli:latest` not digest-pinned | MED | open | CI-only; merged in #48; fix before v1.0 / Phase 6 |
 | SEC-002: link URL allowlist | LOW | **RESOLVED** | Fixed at parse boundary via E-PAR-022 (http/https/mailto allowlist) in PR #50 / f2573bb1. Closed earlier than STORY-046 deferral. STORY-046 retains the open-redirect (CWE-601) concern for the HTML exporter layer — see OBS-FU-HTML-REDIR below. |
 | SEC-003 (formerly SEC-002): `emu_to_pt` i64→f32 precision loss | LOW | open | Phase 6 Kani |
 | SEC-004 (formerly SEC-003): CI tee predictable temp path (self-hosted only) | LOW | open | Phase 6 |
@@ -130,13 +132,14 @@ Batch C (after Batch B): STORY-049→050.
 | SEC-003 (docx): docx exporter URL-scheme test-doc over-claims vbscript:/file: coverage; add explicit rejection tests | LOW | open | Target: next docx touch / STORY-042 |
 | SafeUrl newtype: pptx/pdf/html exporters will hit the same SEC-001 gap as docx; consider shared slideforge-types SafeUrl across all exporters | cross-exporter | tracked | Dedicated hardening story before Phase 6 |
 | cold_budget flaky perf test (test_cold_budget_under_200ms, slideforge-diagrams): intermittent on macOS CI (332ms vs 300ms budget under runner jitter); passes on re-run | LOW | tracked | Stabilize budget/runner or mark perf-tolerant; target STORY-080 |
-| STORY-038 spec stale ref: line ~223 references `Brand.layout_xmls` (stale field name, same issue ADR-015 corrected for STORY-037); story-writer must fix before STORY-038 impl | spec-hygiene | open | Fix in story spec before dispatching STORY-038 |
+| STORY-038 spec stale ref: `Brand.layout_xmls` stale field name | spec-hygiene | **RESOLVED** | Corrected in scope before STORY-038 delivery (PR #54, c031805c). |
+| DEF-P5-001 (dead MissingBrandPart variant) | LOW | **RESOLVED** | `MissingBrandPart` variant now constructed for real (empty-layouts → Err(MissingBrandPart)) in STORY-038 (PR #54, c031805c). |
 | DEF-041-P5-001: EC-002 paragraph-break preservation depends on upstream STORY-035 evaluator splitting — exporter correct given input contract | integration | deferred to wave-gate | STORY-041 adversary pass 5 deferred finding |
 | SEC-037-001: pptx InlineNode::Link rendering needs ALLOWED_LINK_SCHEMES forward-guard + SafeUrl (CWE-601 defense-in-depth; mirrors docx SEC-001) | LOW | open | PR #52 reviewer suggestion. Target: pptx link-rendering story / shared SafeUrl hardening. |
-| S1 (pptx): `validate_emu` Err path (slide_serializer.rs:275) untested — add negative-width unit test | LOW | open | PR #52 reviewer suggestion. Target: STORY-038. |
-| S2 (pptx): silent i32 slide-size clamp (presentation.rs:159-160) at odds with no-silent-fallback rule — propagate error instead | LOW | open | PR #52 reviewer suggestion. Target: STORY-038. |
-| S3 (pptx): Subtitle frames map to PlaceholderValues::Title (idx 0) not a subTitle placeholder — confirm/resolve | LOW | open | PR #52 reviewer suggestion. Target: STORY-038. |
-| S4 (pptx): `build_notes_handout_masters` swallows rels-build failure with empty bytes (lib.rs:632,650) — propagate error instead | LOW | open | PR #52 reviewer suggestion. Target: STORY-040 (notes/handout master story). |
+| S1 (pptx): `validate_emu` Err path untested | LOW | **RESOLVED** | Negative-width unit test added in scope in STORY-038 (PR #54, c031805c). |
+| S2 (pptx): silent i32 slide-size clamp | LOW | **RESOLVED** | `presentation.rs` now propagates error instead of clamping silently. Fixed in scope in STORY-038 (PR #54, c031805c). |
+| S3 (pptx): Subtitle placeholder mapping | LOW | **RESOLVED** | Subtitle frames corrected to subTitle placeholder. Fixed in scope in STORY-038 (PR #54, c031805c). |
+| S4 (pptx): `build_notes_handout_masters` swallows rels-build failure | LOW | **RESOLVED** | `build_notes_handout_masters` now returns Result and propagates. Fixed in scope in STORY-038 (PR #54, c031805c) — earlier than STORY-040 deferral target. |
 | SEC-042-001 (CWE-400): DOCX section serializers have no upper bound on items count — unbounded allocation; local-tool threat model only. Fix at LAYOUT stage where GeneratedSection.items is populated (bound by deck size). | LOW | open | PR #53 follow-up. Target: STORY-049 / layout hardening. |
 
 ---

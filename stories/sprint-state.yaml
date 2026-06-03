@@ -48,8 +48,8 @@ wave_4_batch_c:
 wave_4_pulled_in_p1: [STORY-073, STORY-075, STORY-076]
 wave_4_deferred_p2_to_wave5: [STORY-072, STORY-074]
 wave_4_bc_deltas: "BC-2.01.001 v1.1→v1.2; BC-2.01.003 v1.8→v1.9; error-taxonomy v2.2→v2.3"
-develop_sha: "56f3f57d"
-develop_pr_count: 53
+develop_sha: "c031805c"
+develop_pr_count: 54
 last_updated: 2026-06-03
 ---
 
@@ -364,12 +364,18 @@ stories:
     converged: true
     notes: "PPTX Core Serialization: ooxmlsdk + ZIP Assembly; chain: STORY-037→038→039→040. MERGED PR #52 (2ebf184f). ADR-015 + Addendum A created this session (pptx brand-rendering boundary + STORY-037/038 scope split). Follow-ups: SEC-037-001 (pptx link SafeUrl), S1-S4 (validate_emu, slide-size clamp, subtitle placeholder, notes/handout rels) anchored to STORY-038/040."
   STORY-038:
-    status: not-started
+    status: merged
     wave: 4
     batch: B
     priority: P0
     points: 8
-    notes: "PPTX Layout Compliance: Placeholder Inheritance; depends on STORY-037"
+    pr: 54
+    merge_commit: "c031805c"
+    merged: 2026-06-03
+    adversary_convergence: "3/3 strict-CLEAN (16-pass total cascade — every reset a genuine defect)"
+    adversary_streak: "3/3"
+    converged: true
+    notes: "PPTX Layout Compliance: Placeholder Inheritance + Slide IDs + Layouts. MERGED PR #54 (c031805c). 16-pass cascade: silent fallbacks, raw-XML ADR-001 violation, Body/TextRun warn gap, doc-vs-code contradictions. ADR-015 + Addendum A established brand→pptx OOXML rendering boundary. S1 (validate_emu test), S2 (i32 clamp→error), S3 (Subtitle placeholder), SEC-001 (CWE-190 validate_emu i32 overflow), DEF-P5-001 (MissingBrandPart now constructed) all resolved in scope. S4 (notes/handout rels) resolved in scope (build_notes_handout_masters now propagates Result). pptx chain 037→038 DONE."
   STORY-039:
     status: not-started
     wave: 4
