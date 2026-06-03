@@ -1,0 +1,18 @@
+{
+  "story_id": "STORY-041",
+  "bc": "BC-4.02.001",
+  "perimeter": "per-story",
+  "protocol": "BC-5.39.001",
+  "pass_number": 5,
+  "passes_clean": 3,
+  "converged": true,
+  "last_classification": "NITPICK_ONLY",
+  "clean_strict": true,
+  "clean_pr_merge": true,
+  "last_timestamp": "2026-06-03T00:00:00Z",
+  "in_scope_findings": [],
+  "deferred_findings": [
+    {"finding_id": "DEF-041-P5-001", "category": "integration", "target": "wave-gate", "note": "EC-002 'paragraph breaks preserved': exporter emits one <w:p> per RegisteredContent entry; whether a single report field's internal newlines split into entries vs embed as \\n is governed by upstream STORY-035 evaluator. Exporter correct given its input contract; splitting is cross-story."}
+  ],
+  "notes": "Converged after 5 passes (passes 3-4-5 strict-CLEAN). Pass-1: 2H/2M/3L/1N; pass-2: 1C/2M (F-DOCX-001 xmlns:r regression); fixed; passes 3/4/5 clean."
+}

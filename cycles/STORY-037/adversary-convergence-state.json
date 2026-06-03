@@ -1,0 +1,20 @@
+{
+  "story_id": "STORY-037",
+  "bcs": ["BC-4.01.001", "BC-4.01.005", "BC-4.01.006"],
+  "perimeter": "per-story",
+  "protocol": "BC-5.39.001",
+  "pass_number": 4,
+  "passes_clean": 2,
+  "converged": false,
+  "last_classification": "NITPICK_ONLY",
+  "clean_strict": true,
+  "clean_pr_merge": true,
+  "last_timestamp": "2026-06-03T00:00:00Z",
+  "in_scope_findings": [],
+  "deferred_findings": [
+    {"finding_id": "F-PASS4-D1", "category": "integration", "target": "wave-gate", "note": "SVG <a:blip r:embed> lacks PNG raster fallback + svgBlip extension for PowerPoint/Keynote SVG rendering. STORY-037 obligation (non-dangling relationship) met + tested (test_f037_005). Diagram media/SVG-blip parity is STORY-038/040 scope per ADR-015 Addendum A."},
+    {"finding_id": "OBS-2-PPTX-PIC-RAWXML", "category": "cross-story", "target": "wave-gate", "note": "Diagram <p:pic> injected via raw format! XML instead of ooxmlsdk typed builders (ADR-001). Full diagram/media embedding is STORY-038/040 scope."},
+    {"finding_id": "OBS-3-SLIDE-SHAPE-ALTTEXT", "category": "cross-story", "target": "STORY-039", "note": "Slide-body placeholder <p:cNvPr name='Shape {id}'> + descr None; slide-shape alt-text wiring is STORY-039 scope (Task 10)."}
+  ],
+  "notes": "Pass 4 strict-CLEAN, 2/3. Architecture: ADR-015 + Addendum A drove brand-rendering boundary + STORY-037/038 scope split. All 5 Addendum-A obligations verified load-bearing. Awaiting pass 5 to converge."
+}
