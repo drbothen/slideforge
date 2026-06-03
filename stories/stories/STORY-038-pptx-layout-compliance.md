@@ -125,13 +125,15 @@ The canonical DSL keyword → layout index table (from ADR-015 §A.4):
 |------------------------|--------------------------|------------|
 | 1 | `title` | `"title"` (SL-01) |
 | 2 | `content` | `"obj"` (SL-02) |
-| 3 | (standard layout, no SF keyword) | `"titleOnly"` (SL-03) |
+| 3 | (standard layout, no SF keyword) | `"secHead"` (SL-03) |
 | 4 | `two_column` | `"twoObj"` (SL-04) |
-| 5 | (standard layout, no SF keyword) | `"tx"` (SL-05) |
-| 6 | (standard layout, no SF keyword) | `"picTx"` (SL-06) |
+| 5 | (standard layout, no SF keyword) | `"twoColTx"` (SL-05) |
+| 6 | (standard layout, no SF keyword) | `"titleOnly"` (SL-06) |
 | 7 | (blank slide) | `"blank"` (SL-07) |
 | 8 | `table` | `"objTx"` (SL-08) |
-| 9–11 | (standard layouts, no SF keyword) | various |
+| 9 | (standard layout, no SF keyword) | `"picTx"` (SL-09) |
+| 10 | (standard layout, no SF keyword) | `"vertTitleAndTx"` (SL-10) |
+| 11 | (standard layout, no SF keyword) | `"vertTx"` (SL-11) |
 
 #### SF Custom Layouts (matched by `SlideLayoutDef.slide_type_keyword`, indices 12–31)
 
