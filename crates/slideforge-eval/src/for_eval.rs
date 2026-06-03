@@ -254,7 +254,10 @@ pub fn eval_slide_node<S: std::hash::BuildHasher>(
             FieldValue::Template(chunks) => {
                 // Flatten all chunks — including inline-markup variants introduced in
                 // STORY-077 — to their plain-text content (DIR-077-002 §4 / EC-013).
-                let (result, had_error) = flatten_chunks_to_string(chunks, env, sink);
+                // Site 3 (@for body): brand refs are NOT preserved here — only
+                // the set-rule path (Site 2) preserves brand refs (AC-015).
+                let (result, had_error) =
+                    flatten_chunks_to_string(chunks, env, sink, /*preserve_brand_ref=*/ false);
                 // Error already accumulated in sink; use partial result for error-recovery.
                 let _ = had_error;
                 slideforge_types::FieldValue::Literal(Value::Str(Arc::from(result.as_str())))

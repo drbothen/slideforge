@@ -97,6 +97,25 @@ pub fn eval_expr_to_string(env: &Env, expr: &Expr, sink: &mut DiagnosticSink) ->
 
 // ─── flatten_chunks_to_string ────────────────────────────────────────────────
 
+/// Detect `Expr::FieldAccess { base: Ident("brand"), field }` — the AC-015
+/// brand-ref pattern that must be preserved as a placeholder in set-rules.
+///
+/// Returns `Some(field_name)` when the expression matches `brand.<field>`,
+/// `None` otherwise.  This is the single canonical detection point shared by
+/// the top-level set-rule arm in `eval_set_rule_value` and the in-markup arm
+/// in `flatten_chunks_to_string` (TD-VSDD-060: one implementation, no copies).
+#[inline]
+fn brand_ref_field(expr: &Expr) -> Option<&str> {
+    if let Expr::FieldAccess { base, field } = expr
+        && let Expr::Ident(base_name) = base.as_ref()
+        && base_name == "brand"
+    {
+        Some(field.as_str())
+    } else {
+        None
+    }
+}
+
 /// Flatten a slice of [`TemplateChunk`]s to their plain-text content.
 ///
 /// This is the shared helper used by all three slide-level eval paths
@@ -109,13 +128,24 @@ pub fn eval_expr_to_string(env: &Env, expr: &Expr, sink: &mut DiagnosticSink) ->
 /// representation is deferred to STORY-081.  The delimiters (`**`, `_`, etc.)
 /// are NOT re-synthesized; only the content is appended.
 ///
+/// # `preserve_brand_ref` flag
+///
+/// When `true`, `Expr` chunks that match the AC-015 brand-ref pattern
+/// (`brand.<field>`) emit `"__brand_ref:<field>__"` instead of being evaluated
+/// normally.  This must be `true` for the set-rule path (`eval_set_rule_value`)
+/// and `false` for all other paths (vars block, `@for` slide body).
+///
+/// The brand-ref detection uses [`brand_ref_field`] — a single shared predicate
+/// (TD-VSDD-060) so the top-level and in-markup arms both produce identical
+/// `__brand_ref:<field>__` placeholders for the same brand field.
+///
 /// # Variant handling
 ///
 /// | Variant | Flat-text result |
 /// |---------|-----------------|
 /// | `Literal(s)` | append `s` verbatim |
-/// | `Expr(e)` | evaluate `e`; append string result (delegates to `eval_expr_to_string`) |
-/// | `Bold(children)` | recurse into children, append their flat text |
+/// | `Expr(e)` | if `preserve_brand_ref` and `e` is `brand.<f>`: emit `"__brand_ref:<f>__"`; otherwise evaluate `e` via `eval_expr_to_string` |
+/// | `Bold(children)` | recurse into children (threading `preserve_brand_ref`), append their flat text |
 /// | `Italic(children)` | recurse into children, append their flat text |
 /// | `Superscript(children)` | recurse into children, append their flat text |
 /// | `Subscript(children)` | recurse into children, append their flat text |
@@ -132,28 +162,42 @@ pub(crate) fn flatten_chunks_to_string(
     chunks: &[TemplateChunk],
     env: &Env,
     sink: &mut DiagnosticSink,
+    preserve_brand_ref: bool,
 ) -> (String, bool) {
     let mut result = String::new();
     let mut had_error = false;
     for chunk in chunks {
         match chunk {
             TemplateChunk::Literal(s) => result.push_str(s),
-            TemplateChunk::Expr(expr) => match eval_expr_to_string(env, expr, sink) {
-                Some(s) => result.push_str(s.as_ref()),
-                None => {
-                    had_error = true;
-                },
+            TemplateChunk::Expr(expr) => {
+                // AC-015 / F-077-P18-001: when preserve_brand_ref is true,
+                // detect `brand.<field>` and emit the placeholder without
+                // evaluating — identical to the top-level set-rule arm below
+                // (shared via brand_ref_field, TD-VSDD-060).
+                if preserve_brand_ref && let Some(field) = brand_ref_field(expr) {
+                    let _ = write!(result, "__brand_ref:{field}__");
+                    continue;
+                }
+                match eval_expr_to_string(env, expr, sink) {
+                    Some(s) => result.push_str(s.as_ref()),
+                    None => {
+                        had_error = true;
+                    },
+                }
             },
             // Inline markup variants (STORY-077): flatten to inner text content.
             // The structural InlineNode upgrade is deferred to STORY-081; at this
             // eval layer, slide-level fields produce Value::Str with markup stripped.
+            // preserve_brand_ref is threaded down so brand refs at ANY markup depth
+            // in a set-rule produce the correct placeholder (F-077-P18-001).
             TemplateChunk::Bold(inner)
             | TemplateChunk::Italic(inner)
             | TemplateChunk::Superscript(inner)
             | TemplateChunk::Subscript(inner)
             | TemplateChunk::Strikethrough(inner)
             | TemplateChunk::Highlight(inner) => {
-                let (inner_text, inner_err) = flatten_chunks_to_string(inner, env, sink);
+                let (inner_text, inner_err) =
+                    flatten_chunks_to_string(inner, env, sink, preserve_brand_ref);
                 result.push_str(&inner_text);
                 had_error |= inner_err;
             },
@@ -165,7 +209,8 @@ pub(crate) fn flatten_chunks_to_string(
                 // Hyperlink: append the visible label text; discard the URL.
                 // Per "content as flat text" (DIR-077-002 §4): only the displayed
                 // text contributes to the flattened string value.
-                let (link_text, link_err) = flatten_chunks_to_string(text, env, sink);
+                let (link_text, link_err) =
+                    flatten_chunks_to_string(text, env, sink, preserve_brand_ref);
                 result.push_str(&link_text);
                 had_error |= link_err;
             },
@@ -718,7 +763,10 @@ fn eval_field_value_to_value(
         FieldValue::Template(chunks) => {
             // Flatten all chunks — including inline-markup variants introduced in
             // STORY-077 — to their plain-text content (DIR-077-002 §4 / EC-013).
-            let (result, had_error) = flatten_chunks_to_string(chunks, env, sink);
+            // Site 1 (vars block): brand refs are NOT preserved here — only the
+            // set-rule path (Site 2) preserves brand refs (AC-015).
+            let (result, had_error) =
+                flatten_chunks_to_string(chunks, env, sink, /*preserve_brand_ref=*/ false);
             if had_error {
                 None
             } else {
@@ -778,13 +826,11 @@ fn eval_set_rule_value(
                     TemplateChunk::Expr(expr) => {
                         // AC-015: brand.* references are preserved as placeholders.
                         // The evaluator cannot resolve `brand` at this stage
-                        // (brand loading happens after eval). Detect the pattern
-                        // `Expr::FieldAccess { base: Ident("brand"), field }` and
-                        // produce `"__brand_ref:<field>__"` placeholder.
-                        if let Expr::FieldAccess { base, field } = expr
-                            && let Expr::Ident(base_name) = base.as_ref()
-                            && base_name == "brand"
-                        {
+                        // (brand loading happens after eval). Use brand_ref_field
+                        // (shared predicate, TD-VSDD-060) so this arm and the
+                        // in-markup arm (flatten_chunks_to_string with
+                        // preserve_brand_ref=true) produce identical placeholders.
+                        if let Some(field) = brand_ref_field(expr) {
                             // Use write! to avoid extra allocation (clippy::format_push_string).
                             let _ = write!(result, "__brand_ref:{field}__");
                             continue;
@@ -797,12 +843,16 @@ fn eval_set_rule_value(
                         }
                     },
                     // Inline markup variants (STORY-077): flatten to inner text content.
-                    // `Expr` chunks inside markup children go through eval_expr_to_string
-                    // (no brand-ref preservation needed inside markup child content).
-                    // Math chunks are silently skipped — unchanged pre-STORY-077 behavior.
+                    // F-077-P18-001: preserve_brand_ref=true is threaded through so
+                    // brand refs wrapped in any markup level emit the placeholder
+                    // (AC-015). Math chunks are silently skipped — unchanged behavior.
                     _ => {
-                        let (inner_text, inner_err) =
-                            flatten_chunks_to_string(std::slice::from_ref(chunk), env, sink);
+                        let (inner_text, inner_err) = flatten_chunks_to_string(
+                            std::slice::from_ref(chunk),
+                            env,
+                            sink,
+                            /*preserve_brand_ref=*/ true,
+                        );
                         result.push_str(&inner_text);
                         had_error |= inner_err;
                     },
@@ -2604,6 +2654,143 @@ mod tests {
             *title_val,
             slideforge_types::FieldValue::Literal(Value::Str(Arc::from("Loop title"))),
             "@for-body slide bold title must flatten to 'Loop title'; got: {title_val:?}"
+        );
+    }
+
+    // ─── F-077-P18-001: markup-wrapped brand-ref in set-rules ────────────────
+
+    /// F-077-P18-001 (RED GATE): A brand-ref wrapped in bold markup inside a
+    /// set-rule must preserve the `__brand_ref:<field>__` placeholder, not
+    /// produce an `UndefinedVariable` error.
+    ///
+    /// `set content: company "**{{ brand.company }}**"` parses to:
+    /// `Template([Bold([Expr(FieldAccess{brand.company})])])`
+    ///
+    /// Before the fix: routes through `flatten_chunks_to_string` (no brand-ref
+    /// preservation) → `eval_expr_to_string` → `UndefinedVariable{name:"brand"}`.
+    /// After the fix: preserves `"**__brand_ref:company__**"` — no error, sink
+    /// empty for the brand-ref, placeholder present.
+    ///
+    /// Per AC-015 — the KEY assertion is NO error and the `__brand_ref:company__`
+    /// substring is present in the result.
+    #[test]
+    fn test_f077_p18_001_set_rule_markup_wrapped_brand_ref_preserved() {
+        let env = Env::new(IndexMap::new());
+        let mut sink = DiagnosticSink::new();
+
+        // Simulate: set content: company "**{{ brand.company }}**"
+        // Parser emits: Template([Bold([Expr(FieldAccess{base: Ident("brand"), field: "company"})])])
+        let set_rule_value =
+            SetRuleValue::Template(vec![TemplateChunk::Bold(vec![TemplateChunk::Expr(
+                Expr::FieldAccess {
+                    base: Box::new(Expr::Ident("brand".to_string())),
+                    field: "company".to_string(),
+                },
+            )])]);
+
+        let result = eval_set_rule_value(&set_rule_value, &env, &mut sink);
+
+        // Must not produce an error — brand refs inside markup in set-rules
+        // are preserved, not resolved.
+        assert!(
+            sink.is_empty(),
+            "markup-wrapped brand-ref in set-rule must not push any diagnostic; got: {:?}",
+            sink.errors()
+        );
+
+        // Must return Some — not fail.
+        assert!(
+            result.is_some(),
+            "markup-wrapped brand-ref in set-rule must return Some(Value::Str(...)); got None"
+        );
+
+        // The __brand_ref:company__ placeholder must be present in the result.
+        // The exact wrapper text (from Bold flattening) is "__brand_ref:company__"
+        // (markup delimiters are stripped by flatten-to-string, same as for literals).
+        match result {
+            Some(Value::Str(ref s)) => {
+                assert!(
+                    s.contains("__brand_ref:company__"),
+                    "result must contain '__brand_ref:company__' placeholder; got: {s:?}"
+                );
+            },
+            other => panic!(
+                "result must be Some(Value::Str(...)) containing brand-ref placeholder; got: {other:?}"
+            ),
+        }
+    }
+
+    /// F-077-P18-001 regression guard: brand-ref nested TWO markup levels deep
+    /// (e.g. `**_{{ brand.product }}_**`) must also preserve the placeholder.
+    ///
+    /// Parser emits: `Template([Bold([Italic([Expr(FieldAccess{brand.product})])])])`
+    #[test]
+    fn test_f077_p18_001_set_rule_doubly_nested_markup_brand_ref_preserved() {
+        let env = Env::new(IndexMap::new());
+        let mut sink = DiagnosticSink::new();
+
+        // Simulate: set content: product "**_{{ brand.product }}_**"
+        // Parser emits: Template([Bold([Italic([Expr(FieldAccess{brand.product})])])])
+        let set_rule_value =
+            SetRuleValue::Template(vec![TemplateChunk::Bold(vec![TemplateChunk::Italic(
+                vec![TemplateChunk::Expr(Expr::FieldAccess {
+                    base: Box::new(Expr::Ident("brand".to_string())),
+                    field: "product".to_string(),
+                })],
+            )])]);
+
+        let result = eval_set_rule_value(&set_rule_value, &env, &mut sink);
+
+        assert!(
+            sink.is_empty(),
+            "doubly-nested markup brand-ref in set-rule must not push diagnostic; got: {:?}",
+            sink.errors()
+        );
+        assert!(
+            result.is_some(),
+            "doubly-nested markup brand-ref in set-rule must return Some; got None"
+        );
+        match result {
+            Some(Value::Str(ref s)) => {
+                assert!(
+                    s.contains("__brand_ref:product__"),
+                    "result must contain '__brand_ref:product__'; got: {s:?}"
+                );
+            },
+            other => panic!("result must be Some(Value::Str(...)); got: {other:?}"),
+        }
+    }
+
+    /// F-077-P18-001 Site 1 guard: a vars-block field value with a markup-wrapped
+    /// brand-ref (e.g. `company: "**{{ brand.company }}**"` in `vars:`) MUST
+    /// still error (Site 1 does NOT preserve brand refs — unchanged behavior).
+    ///
+    /// This test ensures the fix does NOT accidentally add brand-ref preservation
+    /// to `eval_field_value_to_value` (Site 1).
+    #[test]
+    fn test_f077_p18_001_site1_vars_block_markup_wrapped_brand_ref_still_errors() {
+        let env = Env::new(IndexMap::new());
+        let mut sink = DiagnosticSink::new();
+
+        // Site 1: FieldValue (vars block), not SetRuleValue.
+        let field_value =
+            FieldValue::Template(vec![TemplateChunk::Bold(vec![TemplateChunk::Expr(
+                Expr::FieldAccess {
+                    base: Box::new(Expr::Ident("brand".to_string())),
+                    field: "company".to_string(),
+                },
+            )])]);
+
+        let result = eval_field_value_to_value(&field_value, &env, &mut sink);
+
+        // Site 1 does NOT preserve brand refs — must error (UndefinedVariable).
+        assert!(
+            result.is_none(),
+            "vars-block markup-wrapped brand-ref must fail (Site 1 has no brand-ref preservation); got: {result:?}"
+        );
+        assert!(
+            !sink.is_empty(),
+            "vars-block markup-wrapped brand-ref must push a diagnostic; sink was empty"
         );
     }
 }
