@@ -140,7 +140,7 @@ impl PptxExporter {
         build_master_parts(&brand_template, &mut parts)?;
         build_layout_parts(&brand_template, &mut parts)?;
         build_theme_part(&brand_template, &mut parts);
-        build_notes_handout_masters(&brand_template, &mut parts);
+        build_notes_handout_masters(&brand_template, &mut parts)?;
         build_doc_props(deck, &mut parts);
         build_root_rels(&mut parts)?;
 
@@ -574,7 +574,19 @@ fn build_theme_part(brand_template: &BrandTemplate, parts: &mut Vec<ZipPart>) {
 /// ADR-015 §4: uses pre-serialized stub bytes from `BrandTemplate::notes_master_stub`
 /// and `BrandTemplate::handout_master_stub`. For synthesized brands these are populated
 /// from `NOTES_MASTER_STUB` / `HANDOUT_MASTER_STUB` constants in `layout_xml.rs`.
-fn build_notes_handout_masters(brand_template: &BrandTemplate, parts: &mut Vec<ZipPart>) {
+///
+/// ## Error handling (SEC-002 / CWE-755)
+///
+/// Both rels builds are `?`-propagated. The previous `unwrap_or_else(|_| b"".to_vec())`
+/// pattern violated the no-silent-fallback Forbidden Pattern (CLAUDE.md): an empty rels
+/// byte sequence produces a structurally-invalid PPTX. `RelsBuilder::build()` only fails
+/// when no entries have been added; since we always add one entry before calling `build()`,
+/// a failure here indicates a bug in `RelsBuilder` itself, which must surface as an error
+/// rather than silently producing a malformed archive.
+fn build_notes_handout_masters(
+    brand_template: &BrandTemplate,
+    parts: &mut Vec<ZipPart>,
+) -> Result<(), PptxError> {
     // Use brand template stubs — always non-empty for synthesized brands.
     let notes_bytes = if brand_template.notes_master_stub.is_empty() {
         slideforge_brand::layout_xml::NOTES_MASTER_STUB.to_vec()
@@ -586,12 +598,16 @@ fn build_notes_handout_masters(brand_template: &BrandTemplate, parts: &mut Vec<Z
         bytes: notes_bytes,
     });
 
-    // notesMaster.rels — references theme.
-    // SAFETY: RelsBuilder::build() only fails if no entries are added;
-    // we always add one entry, so this is infallible in practice.
+    // notesMaster.rels — references theme.  Propagate rels-build error with `?`
+    // instead of silently substituting empty bytes (SEC-002 / CWE-755).
     let mut notes_master_rels = RelsBuilder::new();
     notes_master_rels.add(rel_types::THEME, "../theme/theme1.xml");
-    let notes_rels_bytes = notes_master_rels.build().unwrap_or_else(|_| b"".to_vec());
+    let notes_rels_bytes = notes_master_rels
+        .build()
+        .map_err(|e| PptxError::OoxmlElement {
+            part: "ppt/notesMasters/_rels/notesMaster1.xml.rels".to_string(),
+            detail: format!("RelsBuilder::build failed: {e}"),
+        })?;
     parts.push(ZipPart {
         path: "ppt/notesMasters/_rels/notesMaster1.xml.rels".to_string(),
         bytes: notes_rels_bytes,
@@ -607,13 +623,21 @@ fn build_notes_handout_masters(brand_template: &BrandTemplate, parts: &mut Vec<Z
         bytes: handout_bytes,
     });
 
+    // handoutMaster.rels — same propagation pattern as notesMaster.rels.
     let mut handout_master_rels = RelsBuilder::new();
     handout_master_rels.add(rel_types::THEME, "../theme/theme1.xml");
-    let handout_rels_bytes = handout_master_rels.build().unwrap_or_else(|_| b"".to_vec());
+    let handout_rels_bytes = handout_master_rels
+        .build()
+        .map_err(|e| PptxError::OoxmlElement {
+            part: "ppt/handoutMasters/_rels/handoutMaster1.xml.rels".to_string(),
+            detail: format!("RelsBuilder::build failed: {e}"),
+        })?;
     parts.push(ZipPart {
         path: "ppt/handoutMasters/_rels/handoutMaster1.xml.rels".to_string(),
         bytes: handout_rels_bytes,
     });
+
+    Ok(())
 }
 
 /// Build `docProps/core.xml` and `docProps/app.xml`.

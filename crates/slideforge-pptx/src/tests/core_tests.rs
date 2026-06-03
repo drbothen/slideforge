@@ -432,6 +432,51 @@ fn test_BC_4_01_001_handout_master_always_present() {
     );
 }
 
+// ─── SEC-002: notes/handout rels non-empty (CWE-755) ─────────────────────────
+
+/// SEC-002 (CWE-755): `notesMaster1.xml.rels` in the produced ZIP must be
+/// non-empty (i.e., not an empty byte sequence from a silent error swallow).
+///
+/// The previous `unwrap_or_else(|_| b"".to_vec())` pattern would substitute
+/// empty bytes on a `RelsBuilder::build()` error — producing a structurally
+/// invalid PPTX archive. Now the error is `?`-propagated; this test asserts
+/// the happy path produces a valid, non-empty rels document.
+#[test]
+fn test_sec002_notes_master_rels_non_empty_in_zip() {
+    let laid_out = make_laid_out_deck(1);
+    let pptx_bytes = build_pptx(&laid_out);
+    let rels = zip_read_entry(&pptx_bytes, "ppt/notesMasters/_rels/notesMaster1.xml.rels");
+    assert!(
+        !rels.is_empty(),
+        "SEC-002: ppt/notesMasters/_rels/notesMaster1.xml.rels must be non-empty; \
+         empty bytes indicate a silent rels-build error (CWE-755 / CLAUDE.md Forbidden Pattern)"
+    );
+    assert!(
+        rels.contains("Relationship"),
+        "SEC-002: notesMaster1.xml.rels must contain at least one <Relationship> entry; \
+         got: {rels}"
+    );
+}
+
+/// SEC-002 (CWE-755): `handoutMaster1.xml.rels` in the produced ZIP must be
+/// non-empty.
+#[test]
+fn test_sec002_handout_master_rels_non_empty_in_zip() {
+    let laid_out = make_laid_out_deck(1);
+    let pptx_bytes = build_pptx(&laid_out);
+    let rels = zip_read_entry(&pptx_bytes, "ppt/handoutMasters/_rels/handoutMaster1.xml.rels");
+    assert!(
+        !rels.is_empty(),
+        "SEC-002: ppt/handoutMasters/_rels/handoutMaster1.xml.rels must be non-empty; \
+         empty bytes indicate a silent rels-build error (CWE-755 / CLAUDE.md Forbidden Pattern)"
+    );
+    assert!(
+        rels.contains("Relationship"),
+        "SEC-002: handoutMaster1.xml.rels must contain at least one <Relationship> entry; \
+         got: {rels}"
+    );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // AC-003: [Content_Types].xml snapshot for 3-slide deck
 // ─────────────────────────────────────────────────────────────────────────────
