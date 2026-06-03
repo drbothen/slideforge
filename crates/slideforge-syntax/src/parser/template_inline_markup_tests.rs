@@ -3305,22 +3305,22 @@ fn test_F_FU_P3_001_depth1_unclosed_bold_offset_absolute_regression_guard() {
 //   Outer `**` at fv-offset 0, closer `**` at fv-offset 4
 //   Recursion enters with inner content "_x" (fv-offset 2..4)
 //   Inner `_` at local pos 0 within "_x", absolute fv-offset 2
-//   Pre-fix: byte_offset = 0 (local) → at = 25 + 0 = 25 (points at outer `*`)
-//   Post-fix: byte_offset = 2 (absolute) → at = 25 + 2 = 27 (points at `_`)
+//   Pre-fix: byte_offset = 0 (local) → at = 26 + 0 = 26 (points at outer `*`)
+//   Post-fix: byte_offset = 2 (absolute) → at = 26 + 2 = 28 (points at `_`)
 //
 // Field-value: "^_z^" (4 chars):
 //   Outer `^` at fv-offset 0, closer `^` at fv-offset 3
 //   Recursion enters with inner content "_z" (fv-offset 1..3)
 //   Inner `_` at local pos 0 within "_z", absolute fv-offset 1
-//   Pre-fix: byte_offset = 0 → at = 25 + 0 = 25
-//   Post-fix: byte_offset = 1 → at = 25 + 1 = 26
+//   Pre-fix: byte_offset = 0 → at = 26 + 0 = 26
+//   Post-fix: byte_offset = 1 → at = 26 + 1 = 27
 
 /// F-FU-P3-001 RED GATE depth-2: `**_x**` — outer bold closes correctly;
 /// inner italic `_` is unclosed. Absolute field-value offset of `_` = 2.
-/// Post-fix: at = 25 + 2 = 27.
+/// Post-fix: at = 26 + 2 = 28.
 ///
-/// Pre-fix: inner `_` emits byte_offset = 0 (local to "_x") → at = 25.
-/// Post-fix: byte_offset = 2 (absolute) → at = 27 (points at `_`).
+/// Pre-fix: inner `_` emits byte_offset = 0 (local to "_x") → at = 26.
+/// Post-fix: byte_offset = 2 (absolute) → at = 28 (points at `_`).
 ///
 /// FAILS pre-fix. PASSES post-fix (frame_base threading makes byte_offset absolute).
 #[test]
@@ -3360,18 +3360,18 @@ fn test_F_FU_P3_001_depth2_bold_italic_unclosed_inner_italic_offset_absolute() {
         at_offset, expected_at,
         "F-FU-P3-001 depth-2 `**_x**`: unclosed inner `_` at fv-offset {expected_fv_offset} \
          must report absolute src offset {expected_at}; got {at_offset}. \
-         Pre-fix: byte_offset=0 (local to \"_x\") → at=25 (points at outer `*`). \
-         Post-fix: byte_offset=2 (absolute) → at=27 (points at `_`). \
+         Pre-fix: byte_offset=0 (local to \"_x\") → at=26 (points at outer `*`). \
+         Post-fix: byte_offset=2 (absolute) → at=28 (points at `_`). \
          (F-FU-P3-001: frame_base threading fix required)"
     );
 }
 
 /// F-FU-P3-001 RED GATE depth-2: `^_z^` — outer superscript closes correctly;
 /// inner italic `_` is unclosed. Absolute field-value offset of `_` = 1.
-/// Post-fix: at = 25 + 1 = 26.
+/// Post-fix: at = 26 + 1 = 27.
 ///
-/// Pre-fix: byte_offset = 0 (local to "_z") → at = 25.
-/// Post-fix: byte_offset = 1 → at = 26.
+/// Pre-fix: byte_offset = 0 (local to "_z") → at = 26.
+/// Post-fix: byte_offset = 1 → at = 27.
 ///
 /// FAILS pre-fix. PASSES post-fix.
 #[test]
@@ -3410,7 +3410,7 @@ fn test_F_FU_P3_001_depth2_superscript_italic_unclosed_inner_italic_offset_absol
         at_offset, expected_at,
         "F-FU-P3-001 depth-2 `^_z^`: unclosed inner `_` at fv-offset {expected_fv_offset} \
          must report absolute src offset {expected_at}; got {at_offset}. \
-         Pre-fix: byte_offset=0 → at=25. Post-fix: byte_offset=1 → at=26. \
+         Pre-fix: byte_offset=0 → at=26. Post-fix: byte_offset=1 → at=27. \
          (F-FU-P3-001)"
     );
 }
@@ -3427,10 +3427,10 @@ fn test_F_FU_P3_001_depth2_superscript_italic_unclosed_inner_italic_offset_absol
 ///   Italic recursion enters with "`_`", close_on=Some("_"), frame_base=3.
 ///   Code span consumed (`` `_` ``), the `_` inside consumed; no `_` closer found.
 ///   EOF backstop fires: emits call_site_offset.
-///   Pre-fix: call_site_offset = 0 (local open_pos within "_`_`") → at = 25.
-///   Post-fix: call_site_offset = frame_base(2) + 0 = 2 → at = 25 + 2 = 27.
+///   Pre-fix: call_site_offset = 0 (local open_pos within "_`_`") → at = 26.
+///   Post-fix: call_site_offset = frame_base(2) + 0 = 2 → at = 26 + 2 = 28.
 ///
-/// FAILS pre-fix (at=25). PASSES post-fix (at=27).
+/// FAILS pre-fix (at=26). PASSES post-fix (at=28).
 #[test]
 #[allow(non_snake_case)]
 fn test_F_FU_P3_001_depth2_eof_backstop_italic_inside_highlight_offset_absolute() {
@@ -3468,8 +3468,8 @@ fn test_F_FU_P3_001_depth2_eof_backstop_italic_inside_highlight_offset_absolute(
         italic_at, expected_at,
         "F-FU-P3-001 depth-2 EOF backstop `==_`_`==`: unclosed `_` at fv-offset \
          {expected_fv_offset} must report absolute src offset {expected_at}; got {italic_at}. \
-         Pre-fix: call_site_offset=0 (local) → at=25 (points at outer `=`). \
-         Post-fix: call_site_offset=2 (frame_base+open_pos) → at=27 (points at `_`). \
+         Pre-fix: call_site_offset=0 (local) → at=26 (points at outer `=`). \
+         Post-fix: call_site_offset=2 (frame_base+open_pos) → at=28 (points at `_`). \
          (F-FU-P3-001)"
     );
 }
@@ -3481,17 +3481,17 @@ fn test_F_FU_P3_001_depth2_eof_backstop_italic_inside_highlight_offset_absolute(
 //   Middle `^` at local pos 0 (fv-offset 2, closer at local pos 3/fv 5) → recursion with "_x"
 //   Inner `_` at local pos 0 (fv-offset 3) → no valid italic closer in "x"
 //   Simple unclosed fires for `_`.
-//   Pre-fix: byte_offset = 0 (local to "_x") → at = 25 + 0 = 25
-//   Post-fix: byte_offset = 3 (absolute) → at = 25 + 3 = 28
+//   Pre-fix: byte_offset = 0 (local to "_x") → at = 26 + 0 = 26
+//   Post-fix: byte_offset = 3 (absolute) → at = 26 + 3 = 29
 
 /// F-FU-P3-001 RED GATE depth-3: `**^_x^**` — outer bold and middle superscript
 /// both have closers; inner italic `_` is unclosed. Absolute field-value offset
-/// of `_` = 3. Post-fix: at = 25 + 3 = 28.
+/// of `_` = 3. Post-fix: at = 26 + 3 = 29.
 ///
 /// Chain: bold(fv=0,close=6) → superscript(fv=2,close=5) → italic(fv=3, unclosed)
 ///
-/// FAILS pre-fix (byte_offset=0 at all depths → at=25).
-/// PASSES post-fix (frame_base propagated: depth-3 emits fv-offset 3 → at=28).
+/// FAILS pre-fix (byte_offset=0 at all depths → at=26).
+/// PASSES post-fix (frame_base propagated: depth-3 emits fv-offset 3 → at=29).
 #[test]
 #[allow(non_snake_case)]
 fn test_F_FU_P3_001_depth3_bold_superscript_italic_unclosed_inner_offset_absolute() {
@@ -3534,8 +3534,8 @@ fn test_F_FU_P3_001_depth3_bold_superscript_italic_unclosed_inner_offset_absolut
         italic_at, expected_at,
         "F-FU-P3-001 depth-3 `**^_x^**`: unclosed `_` at fv-offset {expected_fv_offset} \
          must report absolute src offset {expected_at}; got {italic_at}. \
-         Pre-fix: byte_offset=0 for innermost frame → at=25 (points at outer `*`). \
-         Post-fix: frame_base propagated to depth-2 → byte_offset=3 → at=28 (points at `_`). \
+         Pre-fix: byte_offset=0 for innermost frame → at=26 (points at outer `*`). \
+         Post-fix: frame_base propagated to depth-2 → byte_offset=3 → at=29 (points at `_`). \
          (F-FU-P3-001)"
     );
 }
@@ -3551,16 +3551,16 @@ fn test_F_FU_P3_001_depth3_bold_superscript_italic_unclosed_inner_offset_absolut
 
 /// F-FU-P3-001 E-PAR-021 SIBLING FIX: depth-cap span must be at an absolute offset.
 ///
-/// Uses "^^...^" (65 opening `^` chars) via a SECTION BLOCK to exercise the
-/// section_value_parser code path (which creates precise sub-spans).
+/// Uses `"^_".repeat(65)` (130 chars, alternating) via a SECTION BLOCK to exercise
+/// the section_value_parser code path (which creates precise sub-spans).
 ///
-/// Layout: "section intro:\n  report \"<65 `^`>\"\n"
-///   token_start = 24 (position of `"`)
-///   fv-offset of 65th `^` = 64
-///   at_expected = token_start + 1 + 64 = 25 + 64 = 89
+/// Layout: "section intro:\n  report: \"<fv>\"\n"
+///   token_start = 25 (position of `"`)
+///   fv-offset of depth-63 opener = 63 (the char that triggers the depth-64 cap)
+///   at_expected = token_start + 1 + 63 = 26 + 63 = 89
 ///
-/// Pre-fix: call_site_offset = 0 (local to deepest frame's `s`) → at = 25.
-/// Post-fix: call_site_offset = 64 (absolute) → at = 89.
+/// Pre-fix: call_site_offset = 0 (local to deepest frame's `s`) → at = 26 (wrong).
+/// Post-fix: call_site_offset = 63 (absolute) → at = 89.
 ///
 /// Note: this extends the existing E-PAR-021 test (test_F077_P7_002) by adding
 /// an OFFSET assertion that was previously missing (finding F-FU-P3-001).
@@ -3573,13 +3573,13 @@ fn test_F_FU_P3_001_E_PAR_021_depth_cap_offset_is_absolute() {
     use miette::Diagnostic as _;
     use miette::LabeledSpan;
 
-    // Build alternating "^_" (128 chars) in a SECTION BLOCK with `report:` colon syntax.
+    // Build alternating "^_" (130 chars) in a SECTION BLOCK with `report:` colon syntax.
     // section_value_parser applies the precise sub-span.
     // Alternating openers ensure we hit the depth cap via recursion (not empty-span pairs).
-    // After 64 levels, depth cap fires. The opener at depth 64 is at some fv-offset.
-    // For "^_" repeated: each `^` opens at even positions (0,2,4,...), each `_` at odds (1,3,...).
-    // Depth 64 is reached after opening 64 delimiters. Each `^` adds one depth (^ then _).
-    // The 65th opener (at depth 64) is at fv-offset 64 (the `^` at the start of pair 33).
+    // Each recursive level strips 1 char from the front; frame_base advances by 1.
+    // At depth N: frame_base=N, open_pos=0, abs_open=N; recurse(d=N+1, call_site_offset=N, fb=N+1).
+    // At depth 63: abs_open=63, recurse(d=64, call_site_offset=63, fb=64).
+    // Depth 64 ≥ MAX_INLINE_NESTING → fires E-PAR-021 with call_site_offset=63.
     let deep_content: String = "^_".repeat(65); // 130 chars
     let src = format!("section intro:\n  report: \"{deep_content}\"\n");
     let mut sm = crate::span::SourceMap::new();
@@ -3610,23 +3610,26 @@ fn test_F_FU_P3_001_E_PAR_021_depth_cap_offset_is_absolute() {
         .map(|ls| ls.inner().offset())
         .unwrap_or(usize::MAX);
 
-    // The depth-64 cap fires when the 65th recursive call is attempted.
-    // The call_site_offset at that point is the fv-offset of the opener triggering the cap.
-    // Pre-fix: call_site_offset is always 0 (local to deepest frame) → at = 26 + 0 = 26.
-    // Post-fix: call_site_offset = fv-offset of the depth-64 triggering opener.
-    // We don't need to know the exact fv-offset for the pre-fix/post-fix assertion to hold;
-    // we just assert that post-fix at_offset > 26 (not the local-zero case).
-    // The key invariant: pre-fix at_offset == 26 (base + 0); post-fix at_offset > 26.
-    assert!(
-        at_offset > 26,
-        "F-FU-P3-001 E-PAR-021: depth-cap must report an absolute offset > 26 (not the \
-         base-only local-zero value). Got at_offset={at_offset}. \
+    // F-FU-P4-001: pin the exact depth-cap offset (empirically verified: at_offset=89).
+    //
+    // Recursion trace for "^_".repeat(65):
+    //   Each recursive level strips 1 char from the front; frame_base advances by 1.
+    //   At depth N: frame_base=N, open_pos=0, abs_open=N, recurse with d=N+1,
+    //               call_site_offset=N, fb=N+1.
+    //   At depth 63: abs_open=63, recurse(d=64, call_site_offset=63, fb=64).
+    //   Depth 64 ≥ MAX_INLINE_NESTING → fires E-PAR-021 with call_site_offset=63.
+    //   at_offset = token_start + 1 + fv_offset = 26 + 63 = 89.
+    let expected_at = expected_at_for_fv_offset(63);
+    assert_eq!(
+        at_offset, expected_at,
+        "F-FU-P3-001 E-PAR-021: depth-cap must report absolute src offset {expected_at} \
+         (call_site_offset=63, fv-offset=63, token_start=25, at=26+63=89). \
+         Got at_offset={at_offset}. \
          Pre-fix: call_site_offset=0 (local) → at=26 (wrong). \
-         Post-fix: call_site_offset=N>0 (absolute) → at > 26. \
-         (F-FU-P3-001 sibling fix — E-PAR-021 same root cause as E-PAR-019)"
+         Post-fix: call_site_offset=63 (absolute) → at=89. \
+         (F-FU-P4-001 + F-FU-P3-001 sibling fix — E-PAR-021 same root cause as E-PAR-019)"
     );
-    // Belt: also assert at_offset matches expected_at_for_fv_offset for some N > 0.
-    // At minimum, assert the at is within range of the source string.
+    // Belt: also verify at_offset is within range of the source string.
     assert!(
         at_offset < src.len(),
         "F-FU-P3-001 E-PAR-021: at_offset={at_offset} must be within src.len()={}",
@@ -3741,7 +3744,7 @@ fn test_F_FU_P3_001_E_PAR_022_depth1_offset_unchanged_regression_guard() {
 /// `~~_x~~` — strikethrough outer at fv-offset 0 closes at fv-offset 4;
 /// inner `_` at fv-offset 2 has no valid closer ("x" has no `_` after).
 /// Simple unclosed fires for inner `_`.
-/// Pre-fix: byte_offset=0. Post-fix: byte_offset=2 → at=27.
+/// Pre-fix: byte_offset=0 → at=26. Post-fix: byte_offset=2 → at=28.
 ///
 /// FAILS pre-fix. PASSES post-fix.
 #[test]
@@ -3781,7 +3784,7 @@ fn test_F_FU_P3_001_depth2_strikethrough_italic_explicit_unclosed_offset_absolut
         italic_at, expected_at,
         "F-FU-P3-001 depth-2 `~~_x~~`: unclosed `_` at fv-offset {expected_fv_offset} \
          must report absolute src offset {expected_at}; got {italic_at}. \
-         Pre-fix: byte_offset=0 → at=25. Post-fix: byte_offset=2 → at=27. \
+         Pre-fix: byte_offset=0 → at=26. Post-fix: byte_offset=2 → at=28. \
          (F-FU-P3-001)"
     );
 }
@@ -3799,18 +3802,18 @@ fn test_F_FU_P3_001_depth2_strikethrough_italic_explicit_unclosed_offset_absolut
 /// `section_value_parser` which applies the precise sub-span:
 ///   `delim_abs = token_start + 1 + err.byte_offset` (section.rs:118).
 ///
-/// Source layout: "section intro:\n  report \"**_x\"\n"
+/// Source layout: "section intro:\n  report: \"**_x\"\n"
 ///   "section intro:" = 14 bytes (0..13): s-e-c-t-i-o-n- -i-n-t-r-o-:
 ///   "\n" at 14
-///   "  report " = 9 bytes (15..23)
-///   '"' at 24 = token_start
-///   "**_x" starts at 25:  *(25) *(26) _(27) x(28)
-///   '"' at 29
-///   "\n" at 30
-/// Expected `at.offset()` = 25 + 2 = 27 (points at `_`).
+///   "  report: " = 10 bytes (15..24): sp-sp-r-e-p-o-r-t-:-sp
+///   '"' at 25 = token_start
+///   "**_x" starts at 26:  *(26) *(27) _(28) x(29)
+///   '"' at 30
+///   "\n" at 31
+/// Expected `at.offset()` = 26 + 2 = 28 (points at `_`).
 ///
-/// FAILS pre-fix (err.byte_offset=0 → at=25, points at `*`).
-/// PASSES post-fix (err.byte_offset=2 → at=27, points at `_`).
+/// FAILS pre-fix (err.byte_offset=0 → at=26, points at `*`).
+/// PASSES post-fix (err.byte_offset=2 → at=28, points at `_`).
 #[test]
 #[allow(non_snake_case)]
 fn test_F_FU_P3_001_section_rs_delim_abs_contract_depth2_points_at_delimiter() {
