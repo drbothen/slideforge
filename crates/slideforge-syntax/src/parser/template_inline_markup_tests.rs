@@ -2634,3 +2634,485 @@ fn test_F_FU_P1_002_two_disallowed_links_both_errors_accumulated() {
 fn test_F_FU_P1_002_single_disallowed_link_one_error_regression_guard() {
     assert_e_par_022("[a](file:x)", "file");
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// F-FU-P2-001 (MED): unclosed inline span silently accepted when its closer is
+// consumed inside a nested non-recursive span (code span or link URL).
+//
+// ROOT CAUSE: the opener pre-scan (has_valid_italic_closer for `_`, or
+// rest.contains(delim) for others) is a FLAT scan — it reports "a closer exists"
+// even when that candidate closer sits inside a code span (`...`) or a link URL
+// ([..](..)) whose contents are consumed verbatim and never tested as closers.
+// When the recursion enters but the candidate closer was already consumed inside
+// the verbatim span, the recursive scan reaches EOF without finding a closer and
+// returns silently — no E-PAR-019.
+//
+// FIX (adversary-preferred): EOF backstop in scan_template_chunks — when the loop
+// exhausts `s` with close_on.is_some() (meaning we're in a recursive call looking
+// for a closer that was never found), emit E-PAR-019 at call_site_offset and
+// return partial chunks for recovery.
+//
+// REPRODUCERS (currently parse with ZERO errors — must become strict-fatal E-PAR-019):
+//   `_\`_\`` — the only `_` is inside a code span; italic never closed.
+//   `_see [x](http://a.com/_)` — the only non-right-flanking `_` is inside link URL.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// Helper: parse a DSL string and return the errors, asserting parse() returns Err.
+///
+/// Used by the F-FU-P2-001 tests to check that the EOF backstop fires.
+fn assert_parse_fails_with_errors(dsl_string_content: &str) -> Vec<crate::error::SyntaxError> {
+    use crate::parser::parse;
+    use crate::span::SourceMap;
+
+    let src = format!("slide content:\n  detail \"{dsl_string_content}\"\n");
+    let mut sm = SourceMap::new();
+    let file_id = sm.add_file(Arc::from("test.sf"), Arc::from(src.as_str()));
+    let result = parse(src.as_str(), file_id, &sm);
+
+    let Err(errors) = result else {
+        panic!(
+            "assert_parse_fails_with_errors: parse() returned Ok for {dsl_string_content:?} \
+             — expected E-PAR-019 (strict-build-fatal). \
+             Pre-fix: the EOF-on-recursive-call path silently returns with no error (F-FU-P2-001)."
+        )
+    };
+    assert!(
+        !errors.is_empty(),
+        "assert_parse_fails_with_errors: Err returned but errors vec is empty for \
+         {dsl_string_content:?}"
+    );
+    errors
+}
+
+// ─── F-FU-P2-001 Core reproducers ────────────────────────────────────────────
+
+/// F-FU-P2-001 RED GATE: `_\`_\`` — italic opener sees `has_valid_italic_closer`
+/// return true (the `_` inside the code span looks like a valid closer to the flat
+/// scan), recurses, finds the `_` has been consumed verbatim inside the code span,
+/// hits EOF, and (pre-fix) returns silently with no error.
+///
+/// Post-fix: the EOF backstop in scan_template_chunks fires when close_on is
+/// Some("_") and the loop exhausts `rest` — emits exactly ONE E-PAR-019 with
+/// UnclosedInlineMarkup { delimiter: "_" }.
+///
+/// Asserts:
+/// - parse() returns Err (E-PAR-019 is strict-build-fatal)
+/// - exactly ONE error (no double-emit: the EOF backstop fires; the pre-scan
+///   said a closer exists so the existing else-branch does NOT fire)
+/// - error code is E-PAR-019
+/// - variant is UnclosedInlineMarkup with delimiter "_"
+/// - span points at the OPENING `_` (byte offset 0 in the field value)
+#[test]
+#[allow(non_snake_case)]
+fn test_F_FU_P2_001_italic_closer_inside_code_span_eof_backstop() {
+    use crate::error::SyntaxError;
+    use miette::Diagnostic as _;
+
+    // Input: _`_`  (opening italic underscore, then code span containing the only other `_`)
+    // The has_valid_italic_closer pre-scan sees `_` in "`_`" and returns true.
+    // The recursive scan opens, enters the code span verbatim, consumes the `_`,
+    // reaches EOF — pre-fix: silently returns; post-fix: EOF backstop fires.
+    let errors = assert_parse_fails_with_errors("_`_`");
+
+    // Load-bearing: exactly ONE E-PAR-019 — no double-emit.
+    // The pre-scan returned true (closer appears to exist) so the existing else-branch
+    // (which would emit E-PAR-019 when pre-scan returns false) does NOT fire.
+    // Only the EOF backstop fires — exactly one error.
+    assert_eq!(
+        errors.len(),
+        1,
+        "F-FU-P2-001: `_\"`_`\"` must produce exactly 1 error (no double-emit); \
+         got {} error(s): {errors:?}. \
+         If 2 errors: both the pre-scan else-branch AND the EOF backstop fired (double-emit bug). \
+         If 0 errors: the EOF backstop does not exist yet (pre-fix silent accept).",
+        errors.len()
+    );
+
+    let first = &errors[0];
+
+    // Load-bearing: code must be E-PAR-019.
+    let code = first
+        .code()
+        .expect("F-FU-P2-001: E-PAR-019 error must carry a diagnostic code");
+    let code_str = code.to_string();
+    assert!(
+        code_str.contains("E-PAR-019"),
+        "F-FU-P2-001: expected code E-PAR-019; got: {code_str}. Error: {first:?}"
+    );
+
+    // Load-bearing: variant must be UnclosedInlineMarkup with delimiter "_".
+    match first {
+        SyntaxError::UnclosedInlineMarkup { delimiter, .. } => {
+            assert_eq!(
+                delimiter, "_",
+                "F-FU-P2-001: UnclosedInlineMarkup delimiter must be \"_\"; got: {delimiter:?}"
+            );
+        },
+        other => panic!("F-FU-P2-001: expected SyntaxError::UnclosedInlineMarkup; got: {other:?}"),
+    }
+}
+
+/// F-FU-P2-001 RED GATE: `_see [x](http://a.com/_)` — italic opener sees that
+/// `has_valid_italic_closer` returns true (the `_` before `)` in the URL is not
+/// right-flanked from the flat-scan perspective), recurses, scans the link
+/// `[x](http://a.com/_)`, the link URL is consumed verbatim, the `_` in the URL
+/// is consumed as part of the URL — scan hits EOF with close_on = Some("_").
+///
+/// Pre-fix: EOF return path is silent — no E-PAR-019.
+/// Post-fix: EOF backstop fires — exactly ONE E-PAR-019.
+///
+/// Note: `http://a.com/_` is an allowlisted http URL, so NO E-PAR-022 is emitted.
+/// The ONLY error must be the unclosed italic E-PAR-019.
+#[test]
+#[allow(non_snake_case)]
+fn test_F_FU_P2_001_italic_closer_inside_link_url_eof_backstop() {
+    use crate::error::SyntaxError;
+    use miette::Diagnostic as _;
+
+    // Input: _see [x](http://a.com/_)
+    // The http scheme is allowlisted → no E-PAR-022.
+    // The only non-right-flanking `_` is inside the link URL (after the last `/`).
+    // Pre-fix: scan enters recursive italic, processes link as Link chunk (consuming
+    // the `_` in the URL), hits EOF with no closer found — silently returns.
+    // Post-fix: EOF backstop fires — exactly ONE E-PAR-019.
+    let errors = assert_parse_fails_with_errors("_see [x](http://a.com/_)");
+
+    // Load-bearing: exactly ONE error — only E-PAR-019, not also E-PAR-022.
+    // The http scheme is allowlisted, so the link must NOT produce E-PAR-022.
+    // The only error must be the unclosed italic.
+    assert_eq!(
+        errors.len(),
+        1,
+        "F-FU-P2-001: `_see [x](http://a.com/_)` must produce exactly 1 error; \
+         got {} error(s): {errors:?}. \
+         The http scheme is allowlisted so no E-PAR-022 must appear. \
+         If 0 errors: EOF backstop missing (pre-fix silent accept). \
+         If 2 errors: E-PAR-022 wrongly fired on the allowlisted URL (regression).",
+        errors.len()
+    );
+
+    let first = &errors[0];
+
+    // Load-bearing: must be E-PAR-019 (not E-PAR-022).
+    let code = first
+        .code()
+        .expect("F-FU-P2-001: error must carry a diagnostic code");
+    let code_str = code.to_string();
+    assert!(
+        code_str.contains("E-PAR-019"),
+        "F-FU-P2-001: expected E-PAR-019 for unclosed italic; got: {code_str}. \
+         If E-PAR-022: the http URL was wrongly rejected. Error: {first:?}"
+    );
+
+    // Load-bearing: variant must be UnclosedInlineMarkup with delimiter "_".
+    match first {
+        SyntaxError::UnclosedInlineMarkup { delimiter, .. } => {
+            assert_eq!(
+                delimiter, "_",
+                "F-FU-P2-001: delimiter must be \"_\"; got: {delimiter:?}"
+            );
+        },
+        other => panic!("F-FU-P2-001: expected UnclosedInlineMarkup; got: {other:?}"),
+    }
+}
+
+// ─── F-FU-P2-001 Sibling backstop regression guards ─────────────────────────
+//
+// The EOF backstop in scan_template_chunks applies uniformly to ALL recursive
+// delimiters (close_on is Some("_"), Some("**"), Some("^"), etc.). These tests
+// verify the sibling delimiters are also fixed — the pre-scan flat check for
+// `**`, `^`, `==` uses `rest.contains(delim)` which has the same class of bug.
+
+/// F-FU-P2-001 SIBLING BACKSTOP: `**\`**\`` — bold pre-scan sees `**` in `` `**` ``
+/// (inside the code span) and recurses. The `**` is consumed verbatim inside the code
+/// span. Scan hits EOF with close_on = Some("**") — EOF backstop must fire.
+///
+/// Pre-fix: silent accept. Post-fix: exactly ONE E-PAR-019 with delimiter "**".
+#[test]
+#[allow(non_snake_case)]
+fn test_F_FU_P2_001_bold_closer_inside_code_span_eof_backstop() {
+    use crate::error::SyntaxError;
+    use miette::Diagnostic as _;
+
+    // Input: **`**`
+    // Bold pre-scan: rest.contains("**") is true (the `**` inside the code span).
+    // Recursive scan: code span consumed verbatim → `**` consumed → EOF with close_on = Some("**").
+    let errors = assert_parse_fails_with_errors("**`**`");
+
+    assert_eq!(
+        errors.len(),
+        1,
+        "F-FU-P2-001 sibling: `**\"`**`\"` must produce exactly 1 error; \
+         got {} error(s): {errors:?}",
+        errors.len()
+    );
+
+    let first = &errors[0];
+    let code = first.code().expect("must carry a diagnostic code");
+    assert!(
+        code.to_string().contains("E-PAR-019"),
+        "F-FU-P2-001 sibling: expected E-PAR-019; got: {code}"
+    );
+    match first {
+        SyntaxError::UnclosedInlineMarkup { delimiter, .. } => {
+            assert_eq!(
+                delimiter, "**",
+                "sibling: delimiter must be \"**\"; got: {delimiter:?}"
+            );
+        },
+        other => panic!("sibling: expected UnclosedInlineMarkup; got: {other:?}"),
+    }
+}
+
+/// F-FU-P2-001 SIBLING BACKSTOP: `^\`^\`` — superscript pre-scan sees `^` in
+/// `` `^` `` and recurses. The `^` is consumed verbatim inside the code span.
+/// Scan hits EOF with close_on = Some("^") — EOF backstop must fire.
+///
+/// Pre-fix: silent accept. Post-fix: exactly ONE E-PAR-019 with delimiter "^".
+#[test]
+#[allow(non_snake_case)]
+fn test_F_FU_P2_001_superscript_closer_inside_code_span_eof_backstop() {
+    use crate::error::SyntaxError;
+    use miette::Diagnostic as _;
+
+    // Input: ^`^`
+    let errors = assert_parse_fails_with_errors("^`^`");
+
+    assert_eq!(
+        errors.len(),
+        1,
+        "F-FU-P2-001 sibling ^: `^\"`^`\"` must produce exactly 1 error; \
+         got {} error(s): {errors:?}",
+        errors.len()
+    );
+
+    let first = &errors[0];
+    assert!(
+        first
+            .code()
+            .is_some_and(|c| c.to_string().contains("E-PAR-019")),
+        "sibling ^: expected E-PAR-019; got: {first:?}"
+    );
+    match first {
+        SyntaxError::UnclosedInlineMarkup { delimiter, .. } => {
+            assert_eq!(
+                delimiter, "^",
+                "sibling ^: delimiter must be \"^\"; got: {delimiter:?}"
+            );
+        },
+        other => panic!("sibling ^: expected UnclosedInlineMarkup; got: {other:?}"),
+    }
+}
+
+/// F-FU-P2-001 SIBLING BACKSTOP: `==\`==\`` — highlight pre-scan sees `==` in
+/// `` `==` `` and recurses. The `==` is consumed verbatim inside the code span.
+/// Scan hits EOF with close_on = Some("==") — EOF backstop must fire.
+///
+/// Pre-fix: silent accept. Post-fix: exactly ONE E-PAR-019 with delimiter "==".
+#[test]
+#[allow(non_snake_case)]
+fn test_F_FU_P2_001_highlight_closer_inside_code_span_eof_backstop() {
+    use crate::error::SyntaxError;
+    use miette::Diagnostic as _;
+
+    // Input: ==`==`
+    let errors = assert_parse_fails_with_errors("==`==`");
+
+    assert_eq!(
+        errors.len(),
+        1,
+        "F-FU-P2-001 sibling ==: `==\"==`\"` must produce exactly 1 error; \
+         got {} error(s): {errors:?}",
+        errors.len()
+    );
+
+    let first = &errors[0];
+    assert!(
+        first
+            .code()
+            .is_some_and(|c| c.to_string().contains("E-PAR-019")),
+        "sibling ==: expected E-PAR-019; got: {first:?}"
+    );
+    match first {
+        SyntaxError::UnclosedInlineMarkup { delimiter, .. } => {
+            assert_eq!(
+                delimiter, "==",
+                "sibling ==: delimiter must be \"==\"; got: {delimiter:?}"
+            );
+        },
+        other => panic!("sibling ==: expected UnclosedInlineMarkup; got: {other:?}"),
+    }
+}
+
+// ─── F-FU-P2-001 No-double-emit guards ───────────────────────────────────────
+//
+// These guards verify that the SIMPLE unclosed case (pre-scan returned false,
+// existing else-branch fires) still produces exactly ONE E-PAR-019, and that
+// the EOF backstop does NOT also fire (which would produce two errors).
+// The two paths are mutually exclusive:
+//   - Simple unclosed: pre-scan returns false → else-branch fires → NO recursion → NO EOF backstop.
+//   - Nested-consumed unclosed: pre-scan returns true → recursion entered → EOF backstop fires.
+
+/// F-FU-P2-001 NO-DOUBLE-EMIT: simple `_word` (no closer at all) must produce
+/// exactly ONE E-PAR-019 — the existing pre-scan else-branch fires, NO recursion
+/// is entered, the EOF backstop does NOT fire.
+#[test]
+#[allow(non_snake_case)]
+fn test_F_FU_P2_001_no_double_emit_simple_unclosed_italic() {
+    use crate::error::SyntaxError;
+    use miette::Diagnostic as _;
+
+    let errors = assert_parse_fails_with_errors("_word");
+
+    assert_eq!(
+        errors.len(),
+        1,
+        "F-FU-P2-001 no-double-emit: simple `_word` must produce exactly 1 error; \
+         got {} error(s): {errors:?}. \
+         If 2: the pre-scan else-branch AND EOF backstop both fired — double-emit bug.",
+        errors.len()
+    );
+
+    let first = &errors[0];
+    assert!(
+        first
+            .code()
+            .is_some_and(|c| c.to_string().contains("E-PAR-019")),
+        "no-double-emit: expected E-PAR-019; got: {first:?}"
+    );
+    match first {
+        SyntaxError::UnclosedInlineMarkup { delimiter, .. } => {
+            assert_eq!(
+                delimiter, "_",
+                "no-double-emit: delimiter must be \"_\"; got: {delimiter:?}"
+            );
+        },
+        other => panic!("no-double-emit: expected UnclosedInlineMarkup; got: {other:?}"),
+    }
+}
+
+/// F-FU-P2-001 NO-DOUBLE-EMIT: simple `**bold` (no closer at all) must produce
+/// exactly ONE E-PAR-019 — the existing else-branch fires, NO recursion entered,
+/// the EOF backstop does NOT fire.
+#[test]
+#[allow(non_snake_case)]
+fn test_F_FU_P2_001_no_double_emit_simple_unclosed_bold() {
+    use crate::error::SyntaxError;
+    use miette::Diagnostic as _;
+
+    let errors = assert_parse_fails_with_errors("**bold");
+
+    assert_eq!(
+        errors.len(),
+        1,
+        "F-FU-P2-001 no-double-emit: simple `**bold` must produce exactly 1 error; \
+         got {} error(s): {errors:?}.",
+        errors.len()
+    );
+
+    let first = &errors[0];
+    assert!(
+        first
+            .code()
+            .is_some_and(|c| c.to_string().contains("E-PAR-019")),
+        "no-double-emit: expected E-PAR-019 for **bold; got: {first:?}"
+    );
+    match first {
+        SyntaxError::UnclosedInlineMarkup { delimiter, .. } => {
+            assert_eq!(
+                delimiter, "**",
+                "no-double-emit: delimiter must be \"**\"; got: {delimiter:?}"
+            );
+        },
+        other => panic!("no-double-emit: expected UnclosedInlineMarkup for **bold; got: {other:?}"),
+    }
+}
+
+// ─── F-FU-P2-001 Backstop does NOT fire at top-level ────────────────────────
+//
+// The EOF backstop MUST NOT fire when close_on is None (top-level call).
+// Reaching EOF at the top level is normal — not an unclosed span.
+// These guards verify the backstop is properly guarded by close_on.is_some().
+
+/// F-FU-P2-001 BACKSTOP TOP-LEVEL GUARD: plain text "hello world" at the top level
+/// reaches EOF normally — the EOF backstop must NOT fire (no E-PAR-019).
+#[test]
+#[allow(non_snake_case)]
+fn test_F_FU_P2_001_backstop_does_not_fire_at_top_level_plain_text() {
+    // parse_template_value panics on fatal errors — plain text must not panic.
+    let chunks = parse_template_value("hello world");
+    assert!(
+        !chunks.is_empty(),
+        "F-FU-P2-001: plain text must produce at least 1 chunk"
+    );
+    // All chunks must be Literal — no spurious markup or error chunks.
+    for chunk in &chunks {
+        assert!(
+            matches!(chunk, TemplateChunk::Literal(_)),
+            "F-FU-P2-001: plain text chunk must be Literal; got: {chunk:?}"
+        );
+    }
+}
+
+/// F-FU-P2-001 BACKSTOP TOP-LEVEL GUARD: a well-formed bold span `**word**`
+/// must still parse to a Bold chunk — the EOF backstop must NOT fire for a
+/// span that successfully finds its closer.
+#[test]
+#[allow(non_snake_case)]
+fn test_F_FU_P2_001_backstop_does_not_fire_when_closer_found() {
+    // parse_template_value panics on fatal errors — well-formed spans must not panic.
+    let chunks = parse_template_value("**word**");
+    assert_eq!(
+        chunks.len(),
+        1,
+        "F-FU-P2-001: `**word**` must produce exactly 1 Bold chunk; got {chunks:?}"
+    );
+    assert!(
+        matches!(&chunks[0], TemplateChunk::Bold(_)),
+        "F-FU-P2-001: `**word**` must produce Bold; got: {:?}",
+        chunks[0]
+    );
+}
+
+/// F-FU-P2-001 BACKSTOP TOP-LEVEL GUARD: well-formed italic `_word_` still works.
+#[test]
+#[allow(non_snake_case)]
+fn test_F_FU_P2_001_backstop_does_not_fire_for_valid_italic() {
+    let chunks = parse_template_value("_word_");
+    assert_eq!(
+        chunks.len(),
+        1,
+        "F-FU-P2-001: `_word_` must produce 1 chunk; got {chunks:?}"
+    );
+    assert!(
+        matches!(&chunks[0], TemplateChunk::Italic(_)),
+        "F-FU-P2-001: `_word_` must produce Italic; got: {:?}",
+        chunks[0]
+    );
+}
+
+/// F-FU-P2-001 BACKSTOP TOP-LEVEL GUARD: italic with code span content inside
+/// `_` that DOES have a real closer must still parse correctly.
+/// Input: `_see \`code\` here_` — the `_` outside the code span is the valid closer.
+/// The EOF backstop must NOT fire (the closer IS found before EOF).
+#[test]
+#[allow(non_snake_case)]
+fn test_F_FU_P2_001_italic_with_code_inside_valid_closer_no_error() {
+    // parse_template_value panics on fatal errors.
+    // Input: _see `code` here_
+    // The italic opener sees `_` in rest at the end (after "here") — valid closer.
+    // The code span is consumed verbatim. The `_` at the end closes the italic.
+    let chunks = parse_template_value("_see `code` here_");
+    assert_eq!(
+        chunks.len(),
+        1,
+        "F-FU-P2-001: `_see `code` here_` must produce exactly 1 Italic chunk; \
+         got {chunks:?}. \
+         If this panics with E-PAR-019: the EOF backstop fired incorrectly (there IS a closer)."
+    );
+    assert!(
+        matches!(&chunks[0], TemplateChunk::Italic(_)),
+        "F-FU-P2-001: `_see `code` here_` must produce Italic; got: {:?}",
+        chunks[0]
+    );
+}

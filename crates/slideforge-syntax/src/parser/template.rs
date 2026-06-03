@@ -1136,6 +1136,33 @@ fn scan_template_chunks(
         pos += advance;
     }
 
+    // ── F-FU-P2-001: EOF backstop — unclosed span in recursive call ─────────
+    //
+    // If we reach this point with `close_on.is_some()`, the recursive call was
+    // looking for a closer delimiter that was never found before EOF. This
+    // happens when the opener's flat pre-scan reported "a closer exists" (e.g.,
+    // `has_valid_italic_closer` or `rest.contains(delim)` returned true) but
+    // the candidate closer was consumed verbatim inside a nested non-recursive
+    // span (a code span `` `...` `` or a link URL `[..](..)`), so the closer
+    // was never matched by the recursive scanning loop.
+    //
+    // In the simple-unclosed case (pre-scan returned false → else-branch fires)
+    // NO recursion is entered, so the EOF backstop is NEVER reached for that
+    // path. The two paths are mutually exclusive → exactly ONE E-PAR-019 per
+    // unclosed span (no double-emit).
+    //
+    // The backstop must NOT fire for the top-level call (close_on == None):
+    // reaching EOF at the top level is normal and correct.
+    if let Some(close_delim) = close_on {
+        flush_lit!();
+        errors.push(TemplateError::new(
+            call_site_offset,
+            TemplateErrorKind::UnclosedInlineMarkup(close_delim.to_string()),
+            unclosed_inline_msg(close_delim),
+        ));
+        return (chunks, pos);
+    }
+
     // Flush any trailing literal.
     // `pos` is always at a char boundary here (all delimiters are ASCII, and
     // the default advance step above always lands on a boundary).
