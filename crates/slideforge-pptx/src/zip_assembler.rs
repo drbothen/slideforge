@@ -9,6 +9,10 @@
 //! This module does NOT construct any OOXML content — it is purely a ZIP
 //! container. Content bytes are supplied by the caller.
 
+use std::io::{Cursor, Write as _};
+
+use zip::write::SimpleFileOptions;
+
 use crate::error::PptxError;
 
 /// A part to be written into the PPTX ZIP archive.
@@ -36,11 +40,33 @@ pub struct ZipAssembler;
 impl ZipAssembler {
     /// Assemble `parts` into a PPTX ZIP and return the raw bytes.
     ///
+    /// Parts are sorted alphabetically before writing to guarantee byte-identical
+    /// output for the same input (AC-007).
+    ///
     /// # Errors
     ///
     /// Returns [`PptxError::Zip`] if the underlying `zip` crate fails to
     /// write or finalise the archive.
-    pub fn assemble(parts: Vec<ZipPart>) -> Result<Vec<u8>, PptxError> {
-        todo!("ZipAssembler::assemble — sort parts, write to ZipWriter with epoch timestamps, finalise")
+    pub fn assemble(mut parts: Vec<ZipPart>) -> Result<Vec<u8>, PptxError> {
+        // Deterministic ordering: sort parts alphabetically by path.
+        parts.sort_by(|a, b| a.path.cmp(&b.path));
+
+        let buf = Cursor::new(Vec::new());
+        let mut zip = zip::ZipWriter::new(buf);
+
+        // Use epoch timestamp (1980-01-01 00:00:00) for all entries.
+        // `zip::DateTime::default()` is 1980-01-01 00:00:00 in zip 4.x.
+        let options = SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated)
+            .last_modified_time(zip::DateTime::default());
+
+        for part in parts {
+            tracing::debug!(path = %part.path, bytes = part.bytes.len(), "writing ZIP part");
+            zip.start_file(&part.path, options)?;
+            zip.write_all(&part.bytes).map_err(PptxError::Io)?;
+        }
+
+        let cursor = zip.finish()?;
+        Ok(cursor.into_inner())
     }
 }

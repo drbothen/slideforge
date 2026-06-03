@@ -16,12 +16,14 @@
 //! unique within a single `.rels` file but imposes no global uniqueness
 //! constraint.
 
+use ooxmlsdk::schemas::opc_relationships::{Relationship, Relationships};
+
 use crate::error::PptxError;
 
 /// A single relationship entry for a `.rels` file.
 ///
 /// Corresponds to one `<Relationship>` element in the XML.
-pub struct Relationship {
+pub struct RelEntry {
     /// The relationship ID within this `.rels` file (e.g., `"rId1"`).
     pub id: String,
     /// The OPC relationship type URI.
@@ -36,14 +38,16 @@ pub struct Relationship {
 /// emits them in that same order so output is deterministic.
 pub struct RelsBuilder {
     /// Accumulated relationships.
-    relationships: Vec<Relationship>,
+    relationships: Vec<RelEntry>,
 }
 
 impl RelsBuilder {
     /// Create an empty builder for one `.rels` file.
     #[must_use]
     pub fn new() -> Self {
-        todo!("RelsBuilder::new")
+        Self {
+            relationships: Vec::new(),
+        }
     }
 
     /// Add a relationship and return the assigned `rId` string.
@@ -51,22 +55,49 @@ impl RelsBuilder {
     /// IDs are assigned sequentially: first call returns `"rId1"`, second
     /// returns `"rId2"`, and so on.
     pub fn add(&mut self, rel_type: impl Into<String>, target: impl Into<String>) -> String {
-        todo!("RelsBuilder::add — assign next rId, push Relationship, return id string")
+        let id = format!("rId{}", self.relationships.len() + 1);
+        self.relationships.push(RelEntry {
+            id: id.clone(),
+            rel_type: rel_type.into(),
+            target: target.into(),
+        });
+        id
     }
 
     /// Serialise all relationships into `.rels` XML bytes.
+    ///
+    /// Uses the ooxmlsdk `Relationships` type for schema-correct serialisation.
     ///
     /// # Errors
     ///
     /// Returns [`PptxError::OoxmlElement`] if serialisation fails.
     pub fn build(self) -> Result<Vec<u8>, PptxError> {
-        todo!("RelsBuilder::build — emit <Relationships> XML with all entries")
+        let mut rels = Relationships::default();
+        // Set the OPC relationships namespace.
+        rels.xmlns = vec![ooxmlsdk::common::XmlNamespaceDecl::new(
+            "",
+            "http://schemas.openxmlformats.org/package/2006/relationships",
+        )];
+
+        for entry in self.relationships {
+            rels.relationship.push(Relationship {
+                id: entry.id,
+                r#type: entry.rel_type,
+                target: entry.target,
+                target_mode: None,
+            });
+        }
+
+        rels.to_xml_bytes().map_err(|e| PptxError::OoxmlElement {
+            part: ".rels".to_string(),
+            detail: e.to_string(),
+        })
     }
 }
 
 impl Default for RelsBuilder {
     fn default() -> Self {
-        todo!("RelsBuilder::default — delegate to new()")
+        Self::new()
     }
 }
 
