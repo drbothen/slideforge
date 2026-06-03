@@ -48,14 +48,11 @@ pub enum ExportError {
 impl From<ExportError> for slideforge_plugin_api::ExportError {
     fn from(e: ExportError) -> Self {
         match e {
-            ExportError::ZipError { message } => {
+            ExportError::ZipError { message } | ExportError::OutputPathError { message } => {
                 slideforge_plugin_api::ExportError::IoError { message }
             },
             ExportError::OoxmlError { message } => {
                 slideforge_plugin_api::ExportError::RenderError { message }
-            },
-            ExportError::OutputPathError { message } => {
-                slideforge_plugin_api::ExportError::IoError { message }
             },
             ExportError::ValidationError { message } => {
                 slideforge_plugin_api::ExportError::ValidationError { message }

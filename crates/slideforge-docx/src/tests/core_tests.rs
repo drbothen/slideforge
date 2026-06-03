@@ -148,13 +148,7 @@ fn zip_entry_names(docx_bytes: &[u8]) -> Vec<String> {
     let cursor = std::io::Cursor::new(docx_bytes);
     let mut archive = zip::ZipArchive::new(cursor).expect("valid zip");
     (0..archive.len())
-        .map(|i| {
-            archive
-                .by_index(i)
-                .expect("valid index")
-                .name()
-                .to_owned()
-        })
+        .map(|i| archive.by_index(i).expect("valid index").name().to_owned())
         .collect()
 }
 
