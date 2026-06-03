@@ -30,7 +30,7 @@
 //! | `test_BC_4_02_001_inline_bold_italic_run_properties` | postcondition 7 | AC-008 |
 //! | `test_BC_4_02_001_inline_code_courier_new_font` | postcondition 7 | AC-008 |
 //! | `test_BC_4_02_001_visual_only_slide_heading_plus_empty_para` | postcondition 6 | AC-009 |
-//! | `test_BC_4_02_001_exporter_trait_id_and_extension` | precondition 3 | AC-001 |
+//! | `test_BC_4_02_001_exporter_trait_id_and_extension` | postcondition 1 / Exporter trait clause | AC-001 |
 //! | `test_BC_4_02_001_determinism_same_deck_twice` | invariant 4 | Test Strategy |
 //! | `test_BC_4_02_001_two_slides_two_headings` | postcondition 3 | AC-003 |
 //! | `test_BC_4_02_001_ec001_only_notes_slide_no_notes_in_body` | EC-001 | AC-005 |
@@ -39,6 +39,7 @@
 //! | `test_BC_4_02_001_zip_assembler_deterministic_entry_order` | invariant 4 | Task 2 |
 //! | `test_BC_4_02_001_zip_assembler_epoch_timestamps` | invariant 4 | Task 2 |
 //! | `test_BC_4_02_001_styles_xml_contains_required_styles` | postcondition 2 | Task 4 |
+//! | `test_BC_4_02_001_f_docx_001_hyperlink_doc_declares_xmlns_r_and_parses_back` | postcondition 2 / namespace well-formedness | F-DOCX-001 / F-DOCX-003 |
 
 #![allow(clippy::unwrap_used)]
 #![allow(clippy::expect_used)]
@@ -169,7 +170,7 @@ fn read_zip_member(docx_bytes: &[u8], name: &str) -> String {
 // test verifies the wiring is correct and will pass even at Red Gate. It does
 // not exercise any serialization logic.
 
-/// BC-4.02.001 precondition 3 / AC-001:
+/// BC-4.02.001 postcondition 1 / Exporter trait clause / AC-001:
 /// `DocxExporter` implements `Exporter` with `id() == "docx"` and
 /// `extension() == "docx"`.
 ///
@@ -490,6 +491,13 @@ fn test_BC_4_02_001_detail_in_extended_section_after_report() {
 /// `<w:i/>` run properties respectively.
 ///
 /// RED: will panic at `todo!()` in `DocxExporter::export`.
+///
+/// # Enclosure proof (F-DOCX-002)
+///
+/// The test extracts the individual `<w:r>…</w:r>` fragment that ENCLOSES
+/// the target text and asserts the run property is present WITHIN that same
+/// fragment. This is stronger than a byte-offset ordering check, which would
+/// pass even if `<w:b/>` were emitted on an earlier run in the same paragraph.
 #[test]
 fn test_BC_4_02_001_inline_bold_italic_run_properties() {
     let deck = minimal_deck();
@@ -509,58 +517,78 @@ fn test_BC_4_02_001_inline_bold_italic_run_properties() {
     let docx_bytes = export_deck(&deck, &laid_out);
     let doc_xml = read_zip_member(&docx_bytes, "word/document.xml");
 
-    // Assert <w:b/> (or <w:b />) run property appears BEFORE the "Bold" text
-    // run, proving the property is associated with the correct run content.
-    // Both compact (<w:b/>) and spaced (<w:b />) self-closing forms are valid XML
-    // (per XML §2.1) and semantically equivalent; we accept both.
-    let bold_prop_pos = doc_xml
-        .find("<w:b/>")
-        .or_else(|| doc_xml.find("<w:b />"))
-        .expect(
-            "Bold InlineNode must produce <w:b/> or <w:b /> run property (AC-008); got:\n{doc_xml}",
-        );
+    // ── Bold run enclosure proof (F-DOCX-002) ────────────────────────────────
+    // Extract the <w:r>…</w:r> fragment that encloses <w:t>Bold</w:t>.
+    // The structure is: <w:r><w:rPr><w:b/></w:rPr><w:t>Bold</w:t></w:r>
+    let bold_text_marker = "<w:t>Bold</w:t>";
     let bold_text_pos = doc_xml
-        .find("<w:t>Bold</w:t>")
-        .expect("Bold text run must contain <w:t>Bold</w:t> (AC-008); got:\n{doc_xml}");
+        .find(bold_text_marker)
+        .expect("Bold text run must contain <w:t>Bold</w:t> (AC-008)");
 
-    // The bold property element must precede the bold text in the serialized
-    // XML, proving <w:rPr><w:b .../></w:rPr> encloses the "Bold" run (not some
-    // other run). The enclosure order in XML is: <w:r><w:rPr><w:b/></w:rPr>
-    // <w:t>Bold</w:t></w:r> — property always comes before the text content.
+    // Walk backwards from bold_text_pos to find the enclosing <w:r> start.
+    let bold_run_start = doc_xml[..bold_text_pos]
+        .rfind("<w:r>")
+        .or_else(|| doc_xml[..bold_text_pos].rfind("<w:r "))
+        .expect("bold text must be enclosed in a <w:r> element (AC-008 / F-DOCX-002)");
+
+    // Walk forwards to find the matching </w:r> end.
+    let bold_run_close_offset = doc_xml[bold_text_pos..]
+        .find("</w:r>")
+        .expect("bold run must be closed by </w:r> (AC-008 / F-DOCX-002)");
+    let bold_run_end = bold_text_pos + bold_run_close_offset + "</w:r>".len();
+    let bold_run_fragment = &doc_xml[bold_run_start..bold_run_end];
+
+    // Assert <w:b/> or <w:b /> is WITHIN the bold run fragment.
     assert!(
-        bold_prop_pos < bold_text_pos,
-        "Bold run property <w:b.../> (at byte {bold_prop_pos}) must precede \
-         <w:t>Bold</w:t> (at byte {bold_text_pos}) — property must be associated \
-         with the 'Bold' run, not some other run (AC-008 / BC-4.02.001 postcondition 7)"
+        bold_run_fragment.contains("<w:b/>") || bold_run_fragment.contains("<w:b />"),
+        "Bold run property <w:b/> or <w:b /> must appear WITHIN the <w:r>…</w:r> \
+         fragment enclosing 'Bold' text (AC-008 / F-DOCX-002 enclosure proof). \
+         Got bold run fragment:\n{bold_run_fragment}"
     );
 
-    // Assert <w:i/> (or <w:i />) appears BEFORE the "italic" text run.
-    let italic_prop_pos = doc_xml
-        .find("<w:i/>")
-        .or_else(|| doc_xml.find("<w:i />"))
-        .expect("Italic InlineNode must produce <w:i/> or <w:i /> run property (AC-008); got:\n{doc_xml}");
+    // ── Plain " and " run does NOT contain <w:b> (F-DOCX-002) ──────────────
+    let and_marker = "<w:t xml:space=\"preserve\"> and </w:t>";
+    let and_text_pos = doc_xml
+        .find(and_marker)
+        .expect("Plain \" and \" text with xml:space preserve must appear (AC-008)");
+    let and_run_start = doc_xml[..and_text_pos]
+        .rfind("<w:r>")
+        .or_else(|| doc_xml[..and_text_pos].rfind("<w:r "))
+        .expect("' and ' text must be enclosed in a <w:r> element (AC-008 / F-DOCX-002)");
+    let and_run_close_offset = doc_xml[and_text_pos..]
+        .find("</w:r>")
+        .expect("' and ' run must close with </w:r>");
+    let and_run_end = and_text_pos + and_run_close_offset + "</w:r>".len();
+    let and_run_fragment = &doc_xml[and_run_start..and_run_end];
+
+    assert!(
+        !and_run_fragment.contains("<w:b/>") && !and_run_fragment.contains("<w:b />"),
+        "The plain ' and ' run must NOT contain <w:b/> (F-DOCX-002: bold property \
+         must be scoped to the Bold run only, not bleed into sibling runs). \
+         Got ' and ' run fragment:\n{and_run_fragment}"
+    );
+
+    // ── Italic run enclosure proof (F-DOCX-002) ──────────────────────────────
+    let italic_text_marker = "<w:t>italic</w:t>";
     let italic_text_pos = doc_xml
-        .find("<w:t>italic</w:t>")
-        .expect("Italic text run must contain <w:t>italic</w:t> (AC-008); got:\n{doc_xml}");
+        .find(italic_text_marker)
+        .expect("Italic text run must contain <w:t>italic</w:t> (AC-008)");
+
+    let italic_run_start = doc_xml[..italic_text_pos]
+        .rfind("<w:r>")
+        .or_else(|| doc_xml[..italic_text_pos].rfind("<w:r "))
+        .expect("italic text must be enclosed in a <w:r> element (AC-008 / F-DOCX-002)");
+    let italic_run_close_offset = doc_xml[italic_text_pos..]
+        .find("</w:r>")
+        .expect("italic run must be closed by </w:r> (AC-008 / F-DOCX-002)");
+    let italic_run_end = italic_text_pos + italic_run_close_offset + "</w:r>".len();
+    let italic_run_fragment = &doc_xml[italic_run_start..italic_run_end];
 
     assert!(
-        italic_prop_pos < italic_text_pos,
-        "Italic run property <w:i.../> (at byte {italic_prop_pos}) must precede \
-         <w:t>italic</w:t> (at byte {italic_text_pos}) — property must be associated \
-         with the 'italic' run, not some other run (AC-008 / BC-4.02.001 postcondition 7)"
-    );
-
-    // Assert the bold property does NOT appear before the italic text and vice versa
-    // (each property is scoped to its own run, not the whole paragraph).
-    assert!(
-        bold_prop_pos < bold_text_pos && bold_prop_pos < italic_text_pos
-            || italic_prop_pos < italic_text_pos,
-        "run properties must be locally scoped to their own runs (AC-008)"
-    );
-
-    assert!(
-        doc_xml.contains(" and "),
-        "Plain text \" and \" must appear in document.xml (AC-008)"
+        italic_run_fragment.contains("<w:i/>") || italic_run_fragment.contains("<w:i />"),
+        "Italic run property <w:i/> or <w:i /> must appear WITHIN the <w:r>…</w:r> \
+         fragment enclosing 'italic' text (AC-008 / F-DOCX-002 enclosure proof). \
+         Got italic run fragment:\n{italic_run_fragment}"
     );
 
     insta::assert_snapshot!("inline_bold_italic_document_xml", doc_xml);
@@ -1192,6 +1220,74 @@ fn test_BC_4_02_001_f041_007_hyperlink_rid_no_collision_with_reserved_ids() {
     assert!(
         !ids.iter().any(|&id| id == "rId3" && rels_xml.contains(&format!("Id=\"{id}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink\""))),
         "hyperlink relationship must not use reserved Id 'rId3' (F-041-007); got rels:\n{rels_xml}"
+    );
+}
+
+// ─── F-DOCX-001: xmlns:r declared on document root for hyperlink docs ────────
+
+/// F-DOCX-001 (CRITICAL):
+/// `word/document.xml` MUST declare `xmlns:r="…/relationships"` on the
+/// `<w:document>` root whenever it contains `<w:hyperlink r:id="...">` elements.
+///
+/// Without this declaration the XML is namespace-malformed: the `r:` prefix
+/// used in `r:id` attributes is undeclared, and any conformant XML processor
+/// (Word, LibreOffice, veraPDF) is required to reject the document.
+///
+/// Guards: loads the hyperlink document.xml back through
+/// `Document::from_bytes` to confirm it round-trips as well-formed XML.
+#[test]
+fn test_BC_4_02_001_f_docx_001_hyperlink_doc_declares_xmlns_r_and_parses_back() {
+    use ooxmlsdk::schemas::schemas_openxmlformats_org_wordprocessingml_2006_main::Document;
+
+    let deck = minimal_deck();
+    let link_node = InlineNode::Link {
+        text: vec![InlineNode::Plain(Arc::from("Visit site"))],
+        url: Arc::from("https://slideforge.example/docs"),
+    };
+    let rc = RegisteredContent {
+        register: Register::Report,
+        content: vec![link_node],
+    };
+    let slide = make_slide("Hyperlink Slide", vec![rc]);
+    let laid_out = make_laid_out_deck(vec![slide]);
+
+    let docx_bytes = export_deck(&deck, &laid_out);
+    let doc_xml = read_zip_member(&docx_bytes, "word/document.xml");
+
+    // ── Guard 1: xmlns:r MUST be declared on the document root ──────────────
+    assert!(
+        doc_xml.contains(
+            "xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\""
+        ),
+        "word/document.xml MUST declare xmlns:r=\"...relationships\" on the <w:document> \
+         root when the document contains <w:hyperlink r:id=\"...\"> elements (F-DOCX-001). \
+         Without this declaration the XML is namespace-malformed and will be rejected by \
+         conformant processors. Got document.xml opening:\n{}",
+        &doc_xml[..doc_xml.find('>').unwrap_or(doc_xml.len()).min(512)]
+    );
+
+    // ── Guard 2: the document must contain a hyperlink element with r:id ────
+    assert!(
+        doc_xml.contains("r:id="),
+        "hyperlink document.xml must contain r:id attribute (F-DOCX-001 precondition)"
+    );
+
+    // ── Guard 3: parse-back through ooxmlsdk confirms well-formed XML ────────
+    // ooxmlsdk parses qnames literally: if xmlns:r is absent, round-trip
+    // deserialization may still succeed for the outer Document structure (it
+    // uses the registered prefix table), but the namespace declaration
+    // assertion above is the definitive semantic guard. We include parse-back
+    // to confirm no structural corruption occurs.
+    let document = Document::from_bytes(doc_xml.as_bytes()).unwrap_or_else(|e| {
+        panic!(
+            "word/document.xml for a hyperlink deck must parse back through \
+             ooxmlsdk::Document without error (F-DOCX-001 / F-DOCX-003). \
+             error: {e}\nGot:\n{doc_xml}"
+        )
+    });
+    assert!(
+        document.body.is_some(),
+        "hyperlink document.xml must have a <w:body> after parse-back (F-DOCX-001 / F-DOCX-003)"
     );
 }
 
