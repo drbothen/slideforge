@@ -21,6 +21,7 @@
 //! | E-EVL-011 | `UnsupportedBuiltinCall` |
 //! | E-EVL-012 | `FigrefInvalidArg`   |
 //! | E-EVL-013 | `InlineXrefEmptyId`  |
+//! | E-EVL-014 | `FootnoteInvalidArg` |
 
 use std::sync::Arc;
 
@@ -332,6 +333,29 @@ pub enum EvalError {
         span: SourceSpan,
     },
 
+    /// E-EVL-014: `footnote()` was called with a missing or empty argument
+    /// in an inline-markup context.
+    ///
+    /// `footnote("text")` requires exactly one argument that evaluates to a
+    /// non-empty string. If no argument is supplied, or the argument is an empty
+    /// string `""`, this error is emitted and no `InlineNode` is produced.
+    ///
+    /// This is an eval-stage error raised by `chunks_to_inline_nodes` (STORY-077,
+    /// F-077-P9-001). It is distinct from [`EvalError::UnsupportedBuiltinCall`]
+    /// (E-EVL-011), which covers `footnote()` in non-inline expression contexts.
+    #[error("footnote() requires a text argument at {span}")]
+    #[diagnostic(
+        code("E-EVL-014"),
+        help(
+            "footnote(\"your note text\") inside a {{ }} interpolation in a \
+             section detail:/report: field"
+        )
+    )]
+    FootnoteInvalidArg {
+        /// Source location of the `footnote()` call expression.
+        span: SourceSpan,
+    },
+
     /// E-PAR-004: A circular `@include` chain was detected in the merged AST.
     ///
     /// The evaluator runs a DFS over the include graph (built from `@include`
@@ -529,6 +553,13 @@ mod tests {
         assert_eq!(
             code, "E-EVL-013",
             "InlineXrefEmptyId must have code E-EVL-013 (not E-EVL-003)"
+        );
+
+        let e_evl014 = EvalError::FootnoteInvalidArg { span: test_span() };
+        let code = e_evl014.code().unwrap().to_string();
+        assert_eq!(
+            code, "E-EVL-014",
+            "FootnoteInvalidArg must have code E-EVL-014 (F-077-P9-001)"
         );
     }
 

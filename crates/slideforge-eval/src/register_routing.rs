@@ -337,7 +337,20 @@ pub fn chunks_to_inline_nodes(
                     // `{{ footnote("see appendix") }}` parses as:
                     //   Expr::Call { func: "footnote", args: [Expr::Str("see appendix")] }
                     Expr::Call { func, args } if func == "ref" => {
-                        // ref("id") → Xref(id). Empty id is fatal (DIR-077-002 §5).
+                        // ref("id") → Xref(id). Empty id or zero args is fatal
+                        // (DIR-077-002 §5 / F-077-P9-001).
+                        if args.is_empty() {
+                            // Zero-arg call: ref() — emit E-EVL-013, produce no node.
+                            use crate::error::EvalError;
+                            use slideforge_syntax::error::ParseSeverity;
+                            sink.push_with_severity(
+                                EvalError::InlineXrefEmptyId {
+                                    span: slideforge_types::SourceSpan::default(),
+                                },
+                                ParseSeverity::Error,
+                            );
+                            continue;
+                        }
                         let id = args.first().and_then(|a| {
                             if let Expr::Str(s) = a {
                                 Some(s.as_str())
@@ -361,10 +374,20 @@ pub fn chunks_to_inline_nodes(
                                 nodes.push(InlineNode::Xref(Arc::from(id_str)));
                             },
                             None => {
-                                // Unexpected arg form — evaluate to string and use as id.
+                                // Non-Str arg form (args non-empty per guard above) —
+                                // evaluate to string and use as id.
                                 if let Some(first) = args.first() {
                                     if let Some(s) = eval_expr_to_string(env, first, sink) {
-                                        if !s.is_empty() {
+                                        if s.is_empty() {
+                                            use crate::error::EvalError;
+                                            use slideforge_syntax::error::ParseSeverity;
+                                            sink.push_with_severity(
+                                                EvalError::InlineXrefEmptyId {
+                                                    span: slideforge_types::SourceSpan::default(),
+                                                },
+                                                ParseSeverity::Error,
+                                            );
+                                        } else {
                                             nodes.push(InlineNode::Xref(s));
                                         }
                                     }
@@ -403,6 +426,19 @@ pub fn chunks_to_inline_nodes(
                     },
                     Expr::Call { func, args } if func == "footnote" => {
                         // footnote("text") → Footnote([Plain("text")]).
+                        // Zero-arg or empty-string is fatal (F-077-P9-001 / E-EVL-014).
+                        if args.is_empty() {
+                            // Zero-arg call: footnote() — emit E-EVL-014, produce no node.
+                            use crate::error::EvalError;
+                            use slideforge_syntax::error::ParseSeverity;
+                            sink.push_with_severity(
+                                EvalError::FootnoteInvalidArg {
+                                    span: slideforge_types::SourceSpan::default(),
+                                },
+                                ParseSeverity::Error,
+                            );
+                            continue;
+                        }
                         let text = args.first().and_then(|a| {
                             if let Expr::Str(s) = a {
                                 Some(s.as_str())
@@ -411,16 +447,43 @@ pub fn chunks_to_inline_nodes(
                             }
                         });
                         match text {
+                            Some("") => {
+                                // Empty string literal: footnote("") — emit E-EVL-014,
+                                // produce no node. Empty footnote text is invalid per spec.
+                                use crate::error::EvalError;
+                                use slideforge_syntax::error::ParseSeverity;
+                                sink.push_with_severity(
+                                    EvalError::FootnoteInvalidArg {
+                                        span: slideforge_types::SourceSpan::default(),
+                                    },
+                                    ParseSeverity::Error,
+                                );
+                                // No InlineNode produced for empty footnote text.
+                            },
                             Some(t) => {
                                 nodes.push(InlineNode::Footnote(vec![InlineNode::Plain(
                                     Arc::from(t),
                                 )]));
                             },
                             None => {
+                                // Non-Str arg form (args non-empty per guard above) —
+                                // evaluate to string and use as footnote text.
                                 if let Some(first) = args.first() {
                                     if let Some(s) = eval_expr_to_string(env, first, sink) {
-                                        nodes
-                                            .push(InlineNode::Footnote(vec![InlineNode::Plain(s)]));
+                                        if s.is_empty() {
+                                            use crate::error::EvalError;
+                                            use slideforge_syntax::error::ParseSeverity;
+                                            sink.push_with_severity(
+                                                EvalError::FootnoteInvalidArg {
+                                                    span: slideforge_types::SourceSpan::default(),
+                                                },
+                                                ParseSeverity::Error,
+                                            );
+                                        } else {
+                                            nodes.push(InlineNode::Footnote(vec![
+                                                InlineNode::Plain(s),
+                                            ]));
+                                        }
                                     }
                                 }
                             },

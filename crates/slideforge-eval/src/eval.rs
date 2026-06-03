@@ -575,15 +575,16 @@ fn eval_section_nodes(
             slideforge_syntax::FieldValue::Shape(_) => {
                 // OBS-P8-B analysis: FieldValue::Shape is STRUCTURALLY UNREACHABLE
                 // in the section register-key evaluation path. The section sub-block
-                // field parser (`field_value_parser` in deck.rs) can produce only
-                // Template / Num / Float / Bool / Ident / Error variants — never Shape.
+                // field parser (`section_value_parser` in parser/section.rs:87) is
+                // defined as `template_val.or(other_val)` where `other_val` is a
+                // `select!` over IntLit/FloatLit/BoolLit/Ident only — no Shape path.
                 // Shape is produced exclusively by `shape_block()` in control_flow.rs,
                 // which is wired only into slide body field parsing (not section parsing).
                 //
-                // Proof: `section_block_parser` in parser/section.rs calls the same
-                // `field_value_parser` as deck.rs (no `shape_block` combinator is
-                // composed into the section field parser). Therefore this arm can only
-                // be reached via direct construction in tests — NOT via the parser.
+                // Proof: `section_value_parser` (parser/section.rs:87) composes only
+                // `template_val` and the scalar `other_val` select — no `shape_block`
+                // combinator is present. Therefore this arm can only be reached via
+                // direct construction in tests — NOT via the parser.
                 //
                 // The `#[non_exhaustive]` on FieldValue means we must still handle
                 // it, but a silent `continue` without a diagnostic violates the

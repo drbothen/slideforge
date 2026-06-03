@@ -327,8 +327,9 @@ pub(super) fn parse_routing_tag(msg: &str) -> Option<InlineMarkupRoute> {
         // E-PAR-021: the "delimiter" field is empty (encoded as empty hex ""); we
         // just need the clean message. `delim` will be an empty string here because
         // into_routing_message emits `InlineNestingDepthExceeded||<message>` with
-        // an empty hex payload — hex_decode("") returns None, so we fall back to "".
-        // The empty-string fallback is safe: InlineNestingDepthExceeded has no delimiter.
+        // an empty hex payload — hex_decode("") returns Some("") (empty length is a
+        // multiple of 2), so `delim` is the empty string "".
+        // The empty-string value is safe: InlineNestingDepthExceeded has no delimiter.
         "InlineNestingDepthExceeded" => {
             Some(InlineMarkupRoute::InlineNestingDepthExceeded(clean_msg))
         },

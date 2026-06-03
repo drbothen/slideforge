@@ -3264,3 +3264,135 @@ fn test_f077_p3_001_ref_empty_id_pipe_emits_e_evl_013() {
          (InlineXrefEmptyId); got: {code:?}."
     );
 }
+
+// ─── F-077-P9-001: ref()/footnote() zero-arg silent drop ─────────────────────
+
+/// F-077-P9-001 (MED): `{{ ref() }}` with ZERO arguments must push E-EVL-013
+/// and produce NO InlineNode.
+///
+/// Before this fix, the `None` arm in the ref branch only executed
+/// `if let Some(first) = args.first()` — for zero args this is `None`, so
+/// NOTHING executed (no node, no diagnostic = silent failure). This test
+/// drives the fix.
+#[test]
+fn test_f077_p9_001_ref_zero_arg_emits_e_evl_013() {
+    let ref_no_args = SyntaxExpr::Call {
+        func: "ref".to_string(),
+        args: vec![], // zero arguments — must emit E-EVL-013, not silently drop
+    };
+    let chunks = vec![TemplateChunk::Expr(ref_no_args)];
+    let env = Env::new(IndexMap::new());
+    let mut sink = DiagnosticSink::new();
+
+    let nodes = crate::register_routing::chunks_to_inline_nodes(&chunks, &env, &mut sink);
+
+    // (a) No InlineNode must be produced.
+    assert!(
+        nodes.is_empty(),
+        "F-077-P9-001: ref() with no args must produce NO InlineNode; got: {nodes:?}"
+    );
+
+    // (b) Exactly one diagnostic must be pushed.
+    assert!(
+        !sink.is_empty(),
+        "F-077-P9-001: ref() with no args must push a diagnostic to the sink; sink is empty"
+    );
+
+    // (c) LOAD-BEARING: the diagnostic code MUST be E-EVL-013 (InlineXrefEmptyId).
+    let code = sink
+        .errors()
+        .iter()
+        .find_map(|e| e.code().map(|c| c.to_string()));
+    assert_eq!(
+        code.as_deref(),
+        Some("E-EVL-013"),
+        "F-077-P9-001: ref() no-arg error MUST have code E-EVL-013 (InlineXrefEmptyId); \
+         got: {code:?}."
+    );
+}
+
+/// F-077-P9-001 (MED): `{{ footnote() }}` with ZERO arguments must push E-EVL-014
+/// and produce NO InlineNode.
+///
+/// Before this fix, the `None` arm in the footnote branch only executed
+/// `if let Some(first) = args.first()` — for zero args this is `None`, so
+/// NOTHING executed (silent failure). This test drives the fix.
+#[test]
+fn test_f077_p9_001_footnote_zero_arg_emits_e_evl_014() {
+    let footnote_no_args = SyntaxExpr::Call {
+        func: "footnote".to_string(),
+        args: vec![], // zero arguments — must emit E-EVL-014, not silently drop
+    };
+    let chunks = vec![TemplateChunk::Expr(footnote_no_args)];
+    let env = Env::new(IndexMap::new());
+    let mut sink = DiagnosticSink::new();
+
+    let nodes = crate::register_routing::chunks_to_inline_nodes(&chunks, &env, &mut sink);
+
+    // (a) No InlineNode must be produced.
+    assert!(
+        nodes.is_empty(),
+        "F-077-P9-001: footnote() with no args must produce NO InlineNode; got: {nodes:?}"
+    );
+
+    // (b) Exactly one diagnostic must be pushed.
+    assert!(
+        !sink.is_empty(),
+        "F-077-P9-001: footnote() with no args must push a diagnostic to the sink; sink is empty"
+    );
+
+    // (c) LOAD-BEARING: the diagnostic code MUST be E-EVL-014 (FootnoteInvalidArg).
+    let code = sink
+        .errors()
+        .iter()
+        .find_map(|e| e.code().map(|c| c.to_string()));
+    assert_eq!(
+        code.as_deref(),
+        Some("E-EVL-014"),
+        "F-077-P9-001: footnote() no-arg error MUST have code E-EVL-014 (FootnoteInvalidArg); \
+         got: {code:?}."
+    );
+}
+
+/// F-077-P9-001 (MED): `{{ footnote("") }}` with an EMPTY string argument must
+/// push E-EVL-014 and produce NO InlineNode.
+///
+/// Empty footnote text is invalid per the PO spec — a footnote with no text
+/// is meaningless and must be rejected with a diagnostic, not silently produce
+/// an empty Footnote node.
+#[test]
+fn test_f077_p9_001_footnote_empty_string_emits_e_evl_014() {
+    let footnote_empty = SyntaxExpr::Call {
+        func: "footnote".to_string(),
+        args: vec![SyntaxExpr::Str(String::new())], // empty string — must emit E-EVL-014
+    };
+    let chunks = vec![TemplateChunk::Expr(footnote_empty)];
+    let env = Env::new(IndexMap::new());
+    let mut sink = DiagnosticSink::new();
+
+    let nodes = crate::register_routing::chunks_to_inline_nodes(&chunks, &env, &mut sink);
+
+    // (a) No InlineNode must be produced for empty footnote text.
+    assert!(
+        nodes.is_empty(),
+        "F-077-P9-001: footnote(\"\") must produce NO InlineNode; got: {nodes:?}"
+    );
+
+    // (b) Exactly one diagnostic must be pushed.
+    assert!(
+        !sink.is_empty(),
+        "F-077-P9-001: footnote(\"\") must push a diagnostic to the sink; sink is empty"
+    );
+
+    // (c) LOAD-BEARING: the diagnostic code MUST be E-EVL-014 (FootnoteInvalidArg).
+    let code = sink
+        .errors()
+        .iter()
+        .find_map(|e| e.code().map(|c| c.to_string()));
+    assert_eq!(
+        code.as_deref(),
+        Some("E-EVL-014"),
+        "F-077-P9-001: footnote(\"\") error MUST have code E-EVL-014 (FootnoteInvalidArg); \
+         got: {code:?}."
+    );
+}
