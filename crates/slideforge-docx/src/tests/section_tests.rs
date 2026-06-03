@@ -206,6 +206,48 @@ fn read_zip_member(docx_bytes: &[u8], name: &str) -> String {
     buf
 }
 
+/// Count `<w:p>` paragraphs in `doc_xml` that are:
+///   1. Styled as `Heading1` (`w:val="Heading1"` inside the paragraph), AND
+///   2. Contain a `<w:t>` run whose content is exactly `target_text`.
+///
+/// Used by AC-007 to load-bearingly verify that the manual section heading
+/// appears exactly once — not zero times (missing) and not more than once
+/// (spurious duplicate from a merge bug).
+fn count_heading1_paragraphs_with_text(doc_xml: &str, target_text: &str) -> usize {
+    // Split on paragraph open tags to obtain per-paragraph chunks.
+    // Each chunk starts just after a `<w:p` and ends just before the next
+    // `<w:p` (or at the end of the string).
+    let para_marker = "<w:p";
+    let mut count = 0_usize;
+    let mut rest = doc_xml;
+
+    while let Some(start) = rest.find(para_marker) {
+        // Advance past the opening tag so we're inside this paragraph's content.
+        rest = &rest[start + para_marker.len()..];
+
+        // Find the matching close tag for this paragraph.
+        let end = rest.find("</w:p>").unwrap_or(rest.len());
+        let para_body = &rest[..end];
+
+        let has_heading1 = para_body.contains(r#"w:val="Heading1""#);
+        // Match <w:t>Methodology</w:t> or <w:t xml:space="preserve">Methodology</w:t>
+        let has_exact_text = para_body.contains(&format!(">{target_text}</w:t>"));
+
+        if has_heading1 && has_exact_text {
+            count += 1;
+        }
+
+        // Advance past the close tag (if present) to avoid double-counting.
+        if end < rest.len() {
+            rest = &rest[end + "</w:p>".len()..];
+        } else {
+            break;
+        }
+    }
+
+    count
+}
+
 /// Collect the byte positions of all `Heading1` occurrences in a document XML
 /// string.
 ///
@@ -580,12 +622,26 @@ fn test_BC_4_02_002_ac007_manual_section_not_merged_with_auto() {
     let docx_bytes = export_deck(&deck, &laid_out);
     let doc_xml = read_zip_member(&docx_bytes, "word/document.xml");
 
-    // "Methodology" heading must appear exactly once (the manual section).
-    let count = doc_xml.matches("Methodology").count();
-    assert!(
-        count >= 1,
-        "word/document.xml must contain at least one 'Methodology' occurrence \
-         for the manual section (AC-007)"
+    // Count paragraphs that are BOTH styled Heading1 AND contain exactly the
+    // text "Methodology" in a run.  A raw substring count over the full XML is
+    // deliberately avoided here — it would also match body paragraphs or
+    // duplicated auto-sections, so it would fail to catch the no-merge
+    // invariant (AC-007).
+    //
+    // We split on paragraph boundaries and check each <w:p>...</w:p> chunk
+    // independently for the two required markers:
+    //   1. `w:val="Heading1"` inside <w:pStyle …/>
+    //   2. a <w:t> run whose content is exactly "Methodology"
+    //
+    // This assertion WOULD FAIL if:
+    //   - the section were emitted zero times (missing heading)
+    //   - the section were merged/duplicated (count > 1 Heading1 paragraphs)
+    let heading1_methodology_count = count_heading1_paragraphs_with_text(&doc_xml, "Methodology");
+    assert_eq!(
+        heading1_methodology_count, 1,
+        "word/document.xml must contain exactly one Heading1 paragraph with \
+         text 'Methodology' — no duplicated/merged manual section (AC-007); \
+         found {heading1_methodology_count}"
     );
 
     // The manual section body must be present.
