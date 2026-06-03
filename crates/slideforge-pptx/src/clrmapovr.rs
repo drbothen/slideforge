@@ -5,7 +5,7 @@
 //! Dark status is determined by `SlideLayoutDef.has_color_override` on the
 //! layout resolved for the slide — never by a hardcoded index list.
 //!
-//! ## ADR-015 §A.4 / BC-4.01.005 postcondition 1
+//! ## ADR-015 §A.4
 //!
 //! Dark layouts: index 12 (`section_divider`, `has_color_override = true`) and
 //! index 22 (`end`, `has_color_override = true`).
@@ -37,18 +37,4 @@ impl ClrMapOvrInjector {
             .get(layout_index)
             .is_some_and(|l| l.has_color_override)
     }
-}
-
-#[cfg(test)]
-#[allow(
-    clippy::missing_docs_in_private_items,
-    clippy::unwrap_used,
-    clippy::expect_used
-)]
-mod tests {
-    // No tests in this module — full ClrMapOvrInjector tests are in tests/layout_tests.rs.
-
-    // Tests for ClrMapOvrInjector are minimal here; the full AC-006 integration
-    // test is in tests/layout_tests.rs. These unit tests verify the type-level
-    // behavior without requiring a full BrandTemplate fixture.
 }

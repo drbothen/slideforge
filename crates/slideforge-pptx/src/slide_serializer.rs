@@ -20,7 +20,7 @@
 //! The expected child order within `<p:sp>` is:
 //! `<p:nvSpPr>` → `<p:spPr>` → `<p:txBody>`.
 //!
-//! ## Dark layout `<p:clrMapOvr>` (AC-EC-005 / brand-architecture §Dark Layout)
+//! ## Dark layout `<p:clrMapOvr>` (AC-006 / brand-architecture §Dark Layout)
 //!
 //! Slides whose layout is dark-themed include
 //! `<p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>` after `<p:cSld>`.
