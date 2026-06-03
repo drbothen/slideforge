@@ -175,11 +175,14 @@ impl TemplateError {
     ///
     /// - `SLIDEFORGE_INLINE_ROUTE|` is the sentinel (unique prefix not present in
     ///   any normal E-PAR-NNN message text).
-    /// - `<KIND>` is `UnclosedInlineMarkup` or `EmptyInlineMarkupSpan`.
+    /// - `<KIND>` is `UnclosedInlineMarkup`, `EmptyInlineMarkupSpan`, or
+    ///   `InlineNestingDepthExceeded`.
     /// - `<DELIM_HEX>` is the delimiter bytes hex-encoded so `|` cannot appear in
     ///   the delimiter field (e.g., `` ` `` → `60`, `**` → `2a2a`, `_` → `5f`).
-    /// - `<ORIGINAL_MESSAGE>` is the full human-readable E-PAR-019 / E-PAR-020
-    ///   message, preserved for the `message` field of the produced `SyntaxError`.
+    ///   For `InlineNestingDepthExceeded` this field is empty (no delimiter applies).
+    /// - `<ORIGINAL_MESSAGE>` is the full human-readable E-PAR-019 / E-PAR-020 /
+    ///   E-PAR-021 message, preserved for the `message` field of the produced
+    ///   `SyntaxError`.
     ///
     /// Hex encoding avoids all possible delimiter-vs-separator conflicts regardless
     /// of which ASCII punctuation characters are used as inline markup delimiters.

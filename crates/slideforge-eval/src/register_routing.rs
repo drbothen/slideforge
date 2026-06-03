@@ -396,8 +396,9 @@ pub fn chunks_to_inline_nodes(
                         }
                     },
                     Expr::Call { func, args } if func == "figref" => {
-                        // figref(n) → Xref("fig-N"). Empty/zero is treated as valid.
-                        // A missing or unevaluable argument is an error consistent with
+                        // figref(n) → Xref("fig-N"). A literal numeric arg (including
+                        // figref(0) → "fig-0") is valid. A missing or unevaluable
+                        // argument is an error (E-EVL-012) consistent with
                         // the empty-id handling for ref() (DIR-077-002 §5 / OBS-C):
                         // silently dropping the node violates the no-silent-fallback principle.
                         let xref_id = if let Some(Expr::Num(n)) = args.first() {

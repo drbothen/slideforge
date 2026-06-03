@@ -95,7 +95,7 @@ where
     I: ValueInput<'src, Token = Token, Span = TSpan>,
 {
     // Template string value with E-PAR-012/E-PAR-013/E-PAR-014 error emission.
-    // Use into_routing_message() so inline markup errors (E-PAR-019/020) carry
+    // Use into_routing_message() so inline markup errors (E-PAR-019/020/021) carry
     // the SLIDEFORGE_INLINE_ROUTE routing tag with the hex-encoded delimiter.
     // This ensures the routing boundary in parser/mod.rs can produce the correct
     // SyntaxError variant with the right delimiter — no extract_backtick_name
