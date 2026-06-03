@@ -1779,7 +1779,9 @@ fn test_F077_P7_001_bold_with_emoji_no_panic() {
 #[test]
 #[allow(non_snake_case)]
 fn test_F077_P7_002_deep_nesting_produces_E_PAR_021_no_stack_overflow() {
+    use crate::error::SyntaxError;
     use crate::parser::parse;
+    use miette::Diagnostic as _;
 
     // Build a pathological string: `^_^_^_…` (200 pairs = 400 chars).
     // Each `^` or `_` tries to open a new markup span, triggering recursion.
@@ -1791,17 +1793,32 @@ fn test_F077_P7_002_deep_nesting_produces_E_PAR_021_no_stack_overflow() {
     // Must not panic — reaching here means no stack overflow.
     let result = parse(src.as_str(), file_id, &sm);
 
-    // Collect all warning/error messages.
-    let warnings: Vec<String> = match result {
-        Ok(pr) => pr.warnings.iter().map(|w| w.to_string()).collect(),
-        Err(errs) => errs.iter().map(|e| e.to_string()).collect(),
+    // Collect all warnings/errors.
+    let (warnings, errs): (Vec<SyntaxError>, Vec<SyntaxError>) = match result {
+        Ok(pr) => (pr.warnings, vec![]),
+        Err(errs) => (vec![], errs),
     };
+    let all: Vec<&SyntaxError> = warnings.iter().chain(errs.iter()).collect();
 
-    // At least one E-PAR-021 diagnostic must be produced.
-    let has_021 = warnings.iter().any(|msg| msg.contains("E-PAR-021"));
+    // At least one E-PAR-021 diagnostic must be produced via the new dedicated
+    // SyntaxError::InlineNestingDepthExceeded variant (F-077-P8-001 code-assertion).
+    // Guards the anti-regression contract: must NOT be E-PAR-002 (UnexpectedToken).
+    let has_021_by_code = all.iter().any(|e| {
+        e.code()
+            .is_some_and(|c| c.to_string().contains("E-PAR-021"))
+    });
     assert!(
-        has_021,
-        "test_F077_P7_002 FAIL: no E-PAR-021 diagnostic produced for deeply-nested input.\n\
-         warnings: {warnings:?}"
+        has_021_by_code,
+        "test_F077_P7_002 FAIL: no InlineNestingDepthExceeded (E-PAR-021) diagnostic \
+         produced for deeply-nested input (by structured .code(), not message text).\n\
+         diagnostics: {all:?}"
+    );
+
+    // Confirm the message text also contains E-PAR-021 (belt-and-suspenders check).
+    let has_021_by_msg = all.iter().any(|e| e.to_string().contains("E-PAR-021"));
+    assert!(
+        has_021_by_msg,
+        "test_F077_P7_002 FAIL: E-PAR-021 not found in diagnostic message text.\n\
+         diagnostics: {all:?}"
     );
 }

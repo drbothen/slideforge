@@ -89,9 +89,13 @@ fn empty_inline_msg(delimiter: &str) -> String {
 }
 
 /// Produce an E-PAR-021 error message for inline-markup nesting depth exceeded.
-fn nesting_depth_exceeded_msg(byte_offset: usize, depth: usize) -> String {
+///
+/// `open_offset` is the absolute byte offset (within the field-value string)
+/// of the opening delimiter that pushed recursion over the cap. Threaded from
+/// the parent `scan_template_chunks` call via `call_site_offset` (OBS-P8-A fix).
+fn nesting_depth_exceeded_msg(open_offset: usize, depth: usize) -> String {
     format!(
-        "E-PAR-021: Inline-markup nesting depth exceeded at byte offset {byte_offset}: \
+        "E-PAR-021: Inline-markup nesting depth exceeded at byte offset {open_offset}: \
          depth {depth} exceeds maximum of {MAX_INLINE_NESTING}. \
          Flatten or reduce nested inline markup."
     )
@@ -205,13 +209,23 @@ impl TemplateError {
                     msg = self.message
                 )
             },
-            // E-PAR-012/013/014/021: no routing-tag prefix needed. These errors flow
+            // E-PAR-021: nesting depth exceeded — route through the sentinel so
+            // parser/mod.rs produces the dedicated InlineNestingDepthExceeded variant
+            // with code "E-PAR-021", not the UnexpectedToken catch-all (E-PAR-002).
+            // The "delimiter" slot is empty (no delimiter applies here); the
+            // original message carries all the diagnostic text the variant needs.
+            TemplateErrorKind::InlineNestingDepthExceeded(_) => {
+                format!(
+                    "SLIDEFORGE_INLINE_ROUTE|InlineNestingDepthExceeded||{msg}",
+                    msg = self.message
+                )
+            },
+            // E-PAR-012/013/014: no routing-tag prefix needed. These errors flow
             // through the generic UnexpectedToken arm in parser/mod.rs, which
             // renders the message text directly — no message.contains() dispatch.
             TemplateErrorKind::UnterminatedInterpolation
             | TemplateErrorKind::EmptyInterpolation
-            | TemplateErrorKind::UnterminatedMath
-            | TemplateErrorKind::InlineNestingDepthExceeded(_) => self.message,
+            | TemplateErrorKind::UnterminatedMath => self.message,
         }
     }
 }
@@ -254,14 +268,16 @@ fn hex_decode(hex: &str) -> Option<String> {
 /// `Rich::custom` message by [`TemplateError::into_routing_message`].
 ///
 /// Callers in `parser/mod.rs` extract this from the message string to route
-/// E-PAR-019 / E-PAR-020 diagnostics to the correct [`crate::error::SyntaxError`]
-/// variant without fragile `message.contains("E-PAR-NNN")` checks.
+/// E-PAR-019 / E-PAR-020 / E-PAR-021 diagnostics to the correct
+/// [`crate::error::SyntaxError`] variant without fragile `message.contains("E-PAR-NNN")`
+/// checks.
 ///
-/// Both variants carry `(delimiter, clean_message)` where `clean_message` is the
-/// original human-readable E-PAR-019 / E-PAR-020 text (decoded from the routing
-/// tag by [`parse_routing_tag`]).  The caller in `parser/mod.rs` uses
-/// `clean_message` for the `message:` field of the `SyntaxError` — NOT the raw
-/// tagged blob — so the routing sentinel never appears in user-facing output.
+/// E-PAR-019/020 variants carry `(delimiter, clean_message)`.
+/// E-PAR-021 carries only `(clean_message)` — no delimiter applies.
+///
+/// The caller in `parser/mod.rs` uses `clean_message` for the `message:` field of
+/// the `SyntaxError` — NOT the raw tagged blob — so the routing sentinel never
+/// appears in user-facing output.
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum InlineMarkupRoute {
     /// E-PAR-019 — unclosed inline markup delimiter.
@@ -272,6 +288,10 @@ pub(super) enum InlineMarkupRoute {
     ///
     /// Fields: `(delimiter, clean_message)`.
     EmptyInlineMarkupSpan(String, String),
+    /// E-PAR-021 — inline-markup nesting depth exceeded.
+    ///
+    /// Field: `clean_message` (depth info is embedded in the message text).
+    InlineNestingDepthExceeded(String),
 }
 
 /// Try to parse an inline-markup routing tag from `msg`.
@@ -304,6 +324,14 @@ pub(super) fn parse_routing_tag(msg: &str) -> Option<InlineMarkupRoute> {
     match kind_str {
         "UnclosedInlineMarkup" => Some(InlineMarkupRoute::UnclosedInlineMarkup(delim, clean_msg)),
         "EmptyInlineMarkupSpan" => Some(InlineMarkupRoute::EmptyInlineMarkupSpan(delim, clean_msg)),
+        // E-PAR-021: the "delimiter" field is empty (encoded as empty hex ""); we
+        // just need the clean message. `delim` will be an empty string here because
+        // into_routing_message emits `InlineNestingDepthExceeded||<message>` with
+        // an empty hex payload — hex_decode("") returns None, so we fall back to "".
+        // The empty-string fallback is safe: InlineNestingDepthExceeded has no delimiter.
+        "InlineNestingDepthExceeded" => {
+            Some(InlineMarkupRoute::InlineNestingDepthExceeded(clean_msg))
+        },
         _ => None,
     }
 }
@@ -475,6 +503,13 @@ fn process_math_segments(
 /// span (e.g., `"**"` when scanning the interior of a Bold span). When `None`
 /// is passed, scanning continues until the end of `s`.
 ///
+/// The `call_site_offset` parameter is the absolute byte offset (within the
+/// field-value string) of the opening delimiter that triggered THIS recursive
+/// call. The top-level call passes `0` (no opener). Recursive calls pass the
+/// `open_pos` of the delimiter that initiated the span — this offset is used
+/// in the E-PAR-021 depth-exceeded diagnostic to point at the actual over-cap
+/// construct rather than a misleading byte offset 0 (OBS-P8-A fix).
+///
 /// # Inline markup composition with `{{ }}`
 ///
 /// `**{{ client }}**` is handled by a single pass: when the scanner is inside
@@ -498,14 +533,18 @@ fn scan_template_chunks(
     close_on: Option<&str>,
     errors: &mut Vec<TemplateError>,
     depth: usize,
+    call_site_offset: usize,
 ) -> (Vec<TemplateChunk>, usize) {
-    // F-077-P7-002: cap recursion depth to prevent stack overflow from crafted
-    // inputs with deeply-nested alternating delimiters (e.g. `^_^_^_…`).
+    // F-077-P7-002 / OBS-P8-A: cap recursion depth to prevent stack overflow
+    // from crafted inputs with deeply-nested alternating delimiters (e.g. `^_^_^_…`).
+    // `call_site_offset` is the absolute byte offset of the opening delimiter that
+    // triggered THIS call — it points at the actual over-cap construct rather than
+    // the misleading hardcoded 0 from the previous implementation.
     if depth >= MAX_INLINE_NESTING {
         errors.push(TemplateError::new(
-            0,
+            call_site_offset,
             TemplateErrorKind::InlineNestingDepthExceeded(depth),
-            nesting_depth_exceeded_msg(0, depth),
+            nesting_depth_exceeded_msg(call_site_offset, depth),
         ));
         // Treat the entire remainder as a literal (in addition to the diagnostic).
         let remainder = s.to_string();
@@ -648,7 +687,8 @@ fn scan_template_chunks(
                         empty_inline_msg("~~"),
                     ));
                 } else {
-                    let (children, _) = scan_template_chunks(inner, None, errors, depth + 1);
+                    let (children, _) =
+                        scan_template_chunks(inner, None, errors, depth + 1, open_pos);
                     chunks.push(TemplateChunk::Strikethrough(children));
                 }
                 pos = inner_start + close_rel + 2;
@@ -660,7 +700,8 @@ fn scan_template_chunks(
                     unclosed_inline_msg("~~"),
                 ));
                 if !rest.is_empty() {
-                    let (children, _) = scan_template_chunks(rest, None, errors, depth + 1);
+                    let (children, _) =
+                        scan_template_chunks(rest, None, errors, depth + 1, open_pos);
                     chunks.push(TemplateChunk::Strikethrough(children));
                 }
                 pos = len;
@@ -684,7 +725,8 @@ fn scan_template_chunks(
                         empty_inline_msg("~"),
                     ));
                 } else {
-                    let (children, _) = scan_template_chunks(inner, None, errors, depth + 1);
+                    let (children, _) =
+                        scan_template_chunks(inner, None, errors, depth + 1, open_pos);
                     chunks.push(TemplateChunk::Subscript(children));
                 }
                 pos = inner_start + close_rel + 1;
@@ -695,7 +737,8 @@ fn scan_template_chunks(
                     unclosed_inline_msg("~"),
                 ));
                 if !rest.is_empty() {
-                    let (children, _) = scan_template_chunks(rest, None, errors, depth + 1);
+                    let (children, _) =
+                        scan_template_chunks(rest, None, errors, depth + 1, open_pos);
                     chunks.push(TemplateChunk::Subscript(children));
                 }
                 pos = len;
@@ -713,7 +756,7 @@ fn scan_template_chunks(
             if rest.contains("**") {
                 // Scan the interior recursively, stopping at `**`.
                 let (children, consumed) =
-                    scan_template_chunks(rest, Some("**"), errors, depth + 1);
+                    scan_template_chunks(rest, Some("**"), errors, depth + 1, open_pos);
                 if children.is_empty() {
                     errors.push(TemplateError::new(
                         open_pos,
@@ -733,7 +776,8 @@ fn scan_template_chunks(
                     unclosed_inline_msg("**"),
                 ));
                 if !rest.is_empty() {
-                    let (children, _) = scan_template_chunks(rest, None, errors, depth + 1);
+                    let (children, _) =
+                        scan_template_chunks(rest, None, errors, depth + 1, open_pos);
                     chunks.push(TemplateChunk::Bold(children));
                 }
                 pos = len;
@@ -774,7 +818,8 @@ fn scan_template_chunks(
             let inner_start = pos + 1;
             let rest = &s[inner_start..];
             if rest.contains('_') {
-                let (children, consumed) = scan_template_chunks(rest, Some("_"), errors, depth + 1);
+                let (children, consumed) =
+                    scan_template_chunks(rest, Some("_"), errors, depth + 1, open_pos);
                 if children.is_empty() {
                     errors.push(TemplateError::new(
                         open_pos,
@@ -792,7 +837,8 @@ fn scan_template_chunks(
                     unclosed_inline_msg("_"),
                 ));
                 if !rest.is_empty() {
-                    let (children, _) = scan_template_chunks(rest, None, errors, depth + 1);
+                    let (children, _) =
+                        scan_template_chunks(rest, None, errors, depth + 1, open_pos);
                     chunks.push(TemplateChunk::Italic(children));
                 }
                 pos = len;
@@ -802,6 +848,8 @@ fn scan_template_chunks(
         }
 
         // ── `` ` `` — Code span (verbatim — no inner markup or `{{ }}`) ───────
+        // Backtick spans are verbatim — no recursive scan of the content, so
+        // `call_site_offset` does not propagate here.
         if bytes.get(pos) == Some(&b'`') {
             flush_lit!();
             let open_pos = pos; // byte offset of opening backtick
@@ -845,10 +893,11 @@ fn scan_template_chunks(
                     let paren_close = url_start + paren_close_rel;
                     let text_inner = &s[pos + 1..bracket_close];
                     let url = &s[url_start..paren_close];
+                    let link_open_pos = pos; // byte offset of `[`
                     flush_lit!();
                     // The link text IS processed for nested markup + interpolation.
                     let (text_children, _) =
-                        scan_template_chunks(text_inner, None, errors, depth + 1);
+                        scan_template_chunks(text_inner, None, errors, depth + 1, link_open_pos);
                     chunks.push(TemplateChunk::Link {
                         text: text_children,
                         url: url.to_string(),
@@ -868,7 +917,8 @@ fn scan_template_chunks(
             let inner_start = pos + 1;
             let rest = &s[inner_start..];
             if rest.contains('^') {
-                let (children, consumed) = scan_template_chunks(rest, Some("^"), errors, depth + 1);
+                let (children, consumed) =
+                    scan_template_chunks(rest, Some("^"), errors, depth + 1, open_pos);
                 if children.is_empty() {
                     errors.push(TemplateError::new(
                         open_pos,
@@ -886,7 +936,8 @@ fn scan_template_chunks(
                     unclosed_inline_msg("^"),
                 ));
                 if !rest.is_empty() {
-                    let (children, _) = scan_template_chunks(rest, None, errors, depth + 1);
+                    let (children, _) =
+                        scan_template_chunks(rest, None, errors, depth + 1, open_pos);
                     chunks.push(TemplateChunk::Superscript(children));
                 }
                 pos = len;
@@ -903,7 +954,7 @@ fn scan_template_chunks(
             let rest = &s[inner_start..];
             if rest.contains("==") {
                 let (children, consumed) =
-                    scan_template_chunks(rest, Some("=="), errors, depth + 1);
+                    scan_template_chunks(rest, Some("=="), errors, depth + 1, open_pos);
                 if children.is_empty() {
                     errors.push(TemplateError::new(
                         open_pos,
@@ -921,7 +972,8 @@ fn scan_template_chunks(
                     unclosed_inline_msg("=="),
                 ));
                 if !rest.is_empty() {
-                    let (children, _) = scan_template_chunks(rest, None, errors, depth + 1);
+                    let (children, _) =
+                        scan_template_chunks(rest, None, errors, depth + 1, open_pos);
                     chunks.push(TemplateChunk::Highlight(children));
                 }
                 pos = len;
@@ -1021,7 +1073,8 @@ where
     }
     .map(|content| {
         let mut errors: Vec<TemplateError> = Vec::new();
-        let (chunks, _) = scan_template_chunks(&content, None, &mut errors, 0);
+        // Top-level call: depth=0, call_site_offset=0 (no enclosing opener).
+        let (chunks, _) = scan_template_chunks(&content, None, &mut errors, 0, 0);
         (chunks, errors)
     })
 }

@@ -67,6 +67,7 @@ pub enum ParseSeverity {
 /// | `VersionError` | `E-PAR-010` |
 /// | `UnclosedInlineMarkup` | `E-PAR-019` |
 /// | `EmptyInlineMarkupSpan` | `E-PAR-020` |
+/// | `InlineNestingDepthExceeded` | `E-PAR-021` |
 ///
 /// # Extensibility
 ///
@@ -344,6 +345,45 @@ pub enum SyntaxError {
         at: SourceSpan,
     },
 
+    /// Inline markup nesting depth exceeded the maximum cap.
+    ///
+    /// Code: `E-PAR-021`
+    ///
+    /// Emitted when `scan_template_chunks` recurses deeper than `MAX_INLINE_NESTING`
+    /// (64 levels). The remainder of the input at that position is treated as a
+    /// `Literal` chunk. Parsing continues — the error is accumulated like
+    /// E-PAR-019 and E-PAR-020 (non-fatal, returned in `ParseResult::warnings`).
+    ///
+    /// The span points at the byte offset of the opening delimiter that pushed
+    /// over the cap (or the best-available absolute position when the exact
+    /// opener is not recoverable in the current recursion context).
+    #[error("Inline-markup nesting depth exceeded at {file}:{line}:{col}: {message}")]
+    #[diagnostic(
+        code("E-PAR-021"),
+        help(
+            "Reduce the number of nested inline markup spans. \
+             slideforge supports a maximum of 64 nesting levels. \
+             Flatten deeply nested formatting like '**_`code`_**' \
+             into adjacent spans where possible."
+        )
+    )]
+    InlineNestingDepthExceeded {
+        /// Source file path.
+        file: String,
+        /// One-based line number.
+        line: u32,
+        /// One-based column number.
+        col: u32,
+        /// Human-readable description (includes depth and maximum).
+        message: String,
+        /// Source code context for miette rendering.
+        #[source_code]
+        src: NamedSource<String>,
+        /// Span pointing at the opening delimiter that exceeded the cap.
+        #[label("nesting depth exceeded here")]
+        at: SourceSpan,
+    },
+
     /// A version declaration error.
     ///
     /// Code: `E-PAR-010`
@@ -583,6 +623,41 @@ impl SyntaxError {
         }
     }
 
+    /// Construct an `InlineNestingDepthExceeded` error (E-PAR-021).
+    ///
+    /// Parallel to [`Self::unclosed_inline_markup`] and [`Self::empty_inline_markup_span`]:
+    /// - `byte_offset` is the absolute byte position of the opening delimiter that
+    ///   triggered the over-cap recursion (or the best-available position when the
+    ///   exact opener is not available at the recursion site).
+    /// - `span_len` is the byte length of the opening delimiter (1 is a safe fallback).
+    ///
+    /// Accumulation: E-PAR-021 is ACCUMULATED (not hard-Err) — the parser continues
+    /// and the diagnostic is placed in `ParseResult::warnings`, identical to E-PAR-019/020.
+    /// This is enforced by the routing path in `parser/mod.rs`: the sentinel-tagged
+    /// message is decoded by `parse_routing_tag`, producing this variant, and then pushed
+    /// to `parse_time_warnings` (the same non-fatal sink used by E-PAR-019/020).
+    #[must_use]
+    pub fn inline_nesting_depth_exceeded(
+        file: String,
+        line: u32,
+        col: u32,
+        message: String,
+        source_text: String,
+        byte_offset: usize,
+        span_len: usize,
+    ) -> Self {
+        let span_len = span_len.max(1);
+        let src = NamedSource::new(file.as_str(), source_text);
+        Self::InlineNestingDepthExceeded {
+            file,
+            line,
+            col,
+            message,
+            src,
+            at: SourceSpan::from((byte_offset, span_len)),
+        }
+    }
+
     /// Construct a `VersionError` (E-PAR-010).
     #[must_use]
     pub fn version_error(
@@ -675,6 +750,9 @@ impl SyntaxError {
             }
             | Self::EmptyInlineMarkupSpan {
                 file, line, col, ..
+            }
+            | Self::InlineNestingDepthExceeded {
+                file, line, col, ..
             } => (file.as_str(), *line, *col),
             Self::UnexpectedEof { file, .. } | Self::VersionError { file, .. } => {
                 (file.as_str(), 0, 0)
@@ -699,6 +777,7 @@ impl SyntaxError {
             Self::VersionError { .. } => 6,
             Self::UnclosedInlineMarkup { .. } => 7,
             Self::EmptyInlineMarkupSpan { .. } => 8,
+            Self::InlineNestingDepthExceeded { .. } => 9,
         }
     }
 }
@@ -1499,6 +1578,42 @@ mod tests {
         assert!(
             !code_str.contains("E-PAR-016"),
             "EmptyInlineMarkupSpan must NOT reuse E-PAR-016 (SHAPE code); got: {code_str}"
+        );
+    }
+
+    // ─── E-PAR-021 code-assertion test (F-077-P8-001) ────────────────────────
+
+    /// E-PAR-021: `InlineNestingDepthExceeded` must have code `E-PAR-021`.
+    ///
+    /// Guards the sibling-site contract (TD-VSDD-060): E-PAR-021 must have a
+    /// dedicated `SyntaxError` variant with `.code()` == "E-PAR-021", NOT
+    /// fall through to the `UnexpectedToken` (E-PAR-002) catch-all arm.
+    ///
+    /// The structured `.code()` must be "E-PAR-021" regardless of message text.
+    #[test]
+    fn test_inline_nesting_depth_exceeded_code_e_par_021() {
+        use miette::Diagnostic;
+        let e = SyntaxError::inline_nesting_depth_exceeded(
+            "t.sf".to_string(),
+            1,
+            1,
+            "E-PAR-021: Inline-markup nesting depth exceeded at byte offset 5: depth 64 exceeds maximum of 64. Flatten or reduce nested inline markup.".to_string(),
+            "^_^_^_\n".to_string(),
+            5,
+            1,
+        );
+        let code = e
+            .code()
+            .expect("InlineNestingDepthExceeded must have a diagnostic code");
+        let code_str = code.to_string();
+        assert!(
+            code_str.contains("E-PAR-021"),
+            "InlineNestingDepthExceeded code must be E-PAR-021; got: {code_str}"
+        );
+        // Must NOT fall through to E-PAR-002 (UnexpectedToken catch-all).
+        assert!(
+            !code_str.contains("E-PAR-002"),
+            "InlineNestingDepthExceeded must NOT reuse E-PAR-002; got: {code_str}"
         );
     }
 

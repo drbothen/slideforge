@@ -572,8 +572,30 @@ fn eval_section_nodes(
                     return None;
                 }
             },
-            slideforge_syntax::FieldValue::Shape(_) | slideforge_syntax::FieldValue::Error => {
-                // Shape/Error variants not valid for section register content; skip.
+            slideforge_syntax::FieldValue::Shape(_) => {
+                // OBS-P8-B analysis: FieldValue::Shape is STRUCTURALLY UNREACHABLE
+                // in the section register-key evaluation path. The section sub-block
+                // field parser (`field_value_parser` in deck.rs) can produce only
+                // Template / Num / Float / Bool / Ident / Error variants — never Shape.
+                // Shape is produced exclusively by `shape_block()` in control_flow.rs,
+                // which is wired only into slide body field parsing (not section parsing).
+                //
+                // Proof: `section_block_parser` in parser/section.rs calls the same
+                // `field_value_parser` as deck.rs (no `shape_block` combinator is
+                // composed into the section field parser). Therefore this arm can only
+                // be reached via direct construction in tests — NOT via the parser.
+                //
+                // The `#[non_exhaustive]` on FieldValue means we must still handle
+                // it, but a silent `continue` without a diagnostic violates the
+                // no-silent-failure ban (F-077-P4-001). Per the adversary's direction
+                // (OBS-P8-B), we keep this arm explicit but document the impossibility
+                // clearly rather than adding a tracing::warn! for an unreachable path.
+                continue;
+            },
+            slideforge_syntax::FieldValue::Error => {
+                // Error sentinel produced by error-recovery in the parser; the parser
+                // already emitted a diagnostic for this field. Drop silently to avoid
+                // double-reporting (the SyntaxError is already in the DiagnosticSink).
                 continue;
             },
         };

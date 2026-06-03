@@ -170,32 +170,18 @@ pub fn parse(
         .map(|e| lex_error_to_syntax_error(e, src))
         .collect();
 
-    // Phase 3: Pre-parse version gate (BC-1.13.001 / AC-002 fail-fast).
-    //
-    // Scan the token stream for `slideforge_version` before running the full
-    // chumsky parser. A forward-incompatible version (major != 1) is a fatal
-    // error — return immediately without running the chumsky parser.
-    //
-    // Token layout:  Ident("slideforge_version")  StringLit(ver)  Newline
+    // Phase 3: pre-parse version gate — fail-fast on incompatible version.
     let version_gate_result = pre_parse_version_gate(src, &tokens, &file_path, &mut errors);
-
     if version_gate_result == VersionGateResult::FatalVersionError {
-        // AC-002: a forward-incompatible version was detected.  No further
-        // parsing occurs (BC-1.13.001 postcondition 1).
         return Err(errors);
     }
 
     // Phase 4: run the chumsky parser over the token stream.
-    // Convert lexer spans (Range<usize>) to chumsky SimpleSpan.
-    // We build an owned vec of (Token, SimpleSpan) and parse from a slice of it.
     let spanned_tokens: Vec<(Token, SimpleSpan)> = tokens
         .into_iter()
         .map(|(t, s)| (t, SimpleSpan::from(s)))
         .collect();
-
     let eoi = SimpleSpan::from(src.len()..src.len());
-    // For &[(Token, SimpleSpan)], MaybeToken is &(Token, SimpleSpan).
-    // The map closure receives &(Token, SimpleSpan) and must return (&Token, &SimpleSpan).
     let input = spanned_tokens
         .as_slice()
         .map(eoi, |(t, s): &(Token, SimpleSpan)| (t, s));
@@ -203,37 +189,8 @@ pub fn parse(
     let (deck_opt, parse_errors) = deck_parser(file_id).parse(input).into_output_errors();
 
     // Phase 5: convert chumsky Rich errors to SyntaxError.
-    //
-    // Two categories are distinguished:
-    //
-    // A) `W-PAR-*` prefixed messages — non-fatal parse-time warnings emitted by
-    //    `section_block_parser` (and future warning-emitting parsers). These are
-    //    accumulated in `parse_time_warnings` and later merged into
-    //    `ParseResult::warnings`, allowing the parse to succeed.
-    //
-    // B) All other messages (E-PAR-*, unexpected tokens, indent errors) — fatal;
-    //    accumulated in `errors` and cause an `Err` return.
-    //
-    // When the found token is `Indent(n)`, classify as IndentError (E-PAR-001)
-    // since it means the parser encountered an unexpected indentation level.
-    //
-    // Real tab errors are caught by the lexer (LexError::TabIndentation).
-    // Misaligned dedents are caught by the lexer (LexError::IndentationInconsistency).
-    //
-    // The parser sees an unexpected Indent(n) token when the grammar does not
-    // expect any further nesting at the current position — for example, a
-    // second Indent inside a slide field list. The "found" level is the value
-    // carried by the Indent token. The "expected" level is derived as
-    // `found_n - 1` (one space less than found), which correctly identifies
-    // the last valid indentation level for the common case:
-    //
-    // - Indent(3) inside a 2-space block → expected=2, found=3  ✓
-    // - Indent(4) inside a 2-space block → expected=3, found=4  ✓
-    //
-    // The definitively correct solution would thread the open-block indent
-    // level through the chumsky State context, which is STORY-007+ scope.
-    // The `found_n - 1` formula removes the prior hardcoding of `expected=2`
-    // and is correct for all cases where exactly one extra space is added.
+    // W-PAR-* → non-fatal warnings; E-PAR-019/020/021 → inline-markup warnings;
+    // Indent(n) → IndentError; all others → fatal errors.
     let mut parse_time_warnings: Vec<SyntaxError> = Vec::new();
 
     for rich_err in parse_errors {
@@ -254,21 +211,11 @@ pub fn parse(
                 byte_start,
             )
         } else {
-            // `format!("{:?}", rich_err.reason())` produces `Custom("...")` for
-            // parser-emitted diagnostics (i.e., any Rich::custom error).  The
-            // `Custom("...")` wrapper is chumsky's debug representation — it must
-            // NOT appear in user-facing messages.  Strip it here so every
-            // downstream path receives the clean inner text.
-            //
-            // F-077-P5-001 root cause: this stripping was previously absent, so the
-            // full `Custom("SLIDEFORGE_INLINE_ROUTE|...")` blob leaked into SyntaxError
-            // message fields and was rendered verbatim to the user.
+            // Strip the `Custom("...")` debug wrapper that chumsky adds to
+            // `Rich::custom` reasons (F-077-P5-001 fix: prevents sentinel leak).
             let raw_message = format!("{:?}", rich_err.reason());
             let message = strip_custom_wrapper(&raw_message);
 
-            // Route W-PAR-* diagnostics as non-fatal warnings (DIR-077-001-A Ruling 2).
-            // These are emitted by `section_block_parser` for unrecognised sub-block
-            // keys (EC-005 / BC-3.02.002 invariant 4) and must not fail the parse.
             if message.contains("W-PAR-") {
                 let warning = SyntaxError::unexpected_token(
                     file_path.to_string(),
@@ -283,64 +230,16 @@ pub fn parse(
                 continue;
             }
 
-            // E-PAR-019 (unclosed inline markup delimiter) and E-PAR-020 (empty inline
-            // markup span) are accumulated as non-fatal warnings per DIR-077-002 §5
-            // (error accumulation — parsing continues after each malformed span).
-            // The test contract (tests 13/14 in template_inline_markup_tests.rs)
-            // requires parse() to return Ok with the error in warnings.
-            // These must route to dedicated SyntaxError variants — NOT UnexpectedToken
-            // (E-PAR-002) — to avoid diagnostic code collision.
-            //
-            // Routing is kind-based: all template_value() callers call
-            // TemplateError::into_routing_message() which embeds a
-            // SLIDEFORGE_INLINE_ROUTE|Kind|DelimHex| routing tag in the message.
-            // parse_routing_tag() finds the sentinel, decodes the hex delimiter,
-            // and returns the typed InlineMarkupRoute — no message.contains() checks
-            // or extract_backtick_name re-parsing.  This fixes F-077-P4-002: the
-            // backtick delimiter (`) was previously lost because extract_backtick_name
-            // returned "" when the message embedded ` inside backtick-quoted pairs.
+            // E-PAR-019/020/021: route via sentinel → InlineMarkupRoute → non-fatal warning.
             if let Some(route) = parse_routing_tag(&message) {
-                use self::template::InlineMarkupRoute;
-                // `clean_msg` is the original human-readable E-PAR-019 / E-PAR-020
-                // text decoded from the routing tag.  Using it (not `message`) as
-                // the SyntaxError `message:` field is the fix for F-077-P5-001 —
-                // the routing sentinel and hex payload must never appear in the
-                // user-facing diagnostic.
-                let warning = match route {
-                    InlineMarkupRoute::UnclosedInlineMarkup(delimiter, clean_msg) => {
-                        SyntaxError::unclosed_inline_markup(
-                            file_path.to_string(),
-                            line,
-                            col,
-                            delimiter.clone(),
-                            clean_msg,
-                            src.to_string(),
-                            byte_start,
-                            delimiter.len().max(1),
-                        )
-                    },
-                    InlineMarkupRoute::EmptyInlineMarkupSpan(delimiter, clean_msg) => {
-                        SyntaxError::empty_inline_markup_span(
-                            file_path.to_string(),
-                            line,
-                            col,
-                            delimiter.clone(),
-                            clean_msg,
-                            src.to_string(),
-                            byte_start,
-                            delimiter.len().max(1),
-                        )
-                    },
-                };
+                let warning = inline_markup_route_to_warning(
+                    route, &file_path, line, col, src, byte_start, span_len,
+                );
                 parse_time_warnings.push(warning);
                 continue;
             }
 
-            // Classify structured error messages by their E-PAR-NNN prefix.
-            // Parsers emit these as `Rich::custom(span, "E-PAR-NNN: ...")` so
-            // that the conversion layer can produce the correct typed variant.
             if message.contains("E-PAR-008") {
-                // Extract the variable name from the message (between `'`..`'`).
                 let name = extract_quoted_name(&message).unwrap_or_default();
                 SyntaxError::var_name_collision(
                     file_path.to_string(),
@@ -363,7 +262,6 @@ pub fn parse(
                     span_len,
                 )
             } else if message.contains("E-PAR-006") {
-                // Extract the keyword from the message.
                 let keyword = extract_quoted_name(&message).unwrap_or_default();
                 SyntaxError::reserved_keyword(
                     file_path.to_string(),
@@ -395,13 +293,7 @@ pub fn parse(
         return Err(errors);
     }
 
-    // Phase 7: accumulate warnings.
-    //
-    // Missing `slideforge_version` is a non-fatal warning per BC-1.09.010 /
-    // BC-1.13.001 postcondition 2.  Emit it whenever the deck has any items
-    // (BC-1.13.001 EC-001: no exemption for section-only decks).
-    //
-    // Parse-time warnings (W-PAR-*) accumulated during Phase 5 are merged here.
+    // Phase 7: accumulate warnings (W-PAR-* from Phase 5 + missing-version advisory).
     let mut warnings: Vec<SyntaxError> = parse_time_warnings;
     let deck = deck_opt.unwrap_or_default();
     if version_gate_result == VersionGateResult::MissingVersion && !deck.items.is_empty() {
@@ -631,6 +523,61 @@ fn lex_error_to_syntax_error(e: LexError, src: &str) -> SyntaxError {
                 src_string,
                 byte_offset,
                 text.len(),
+            )
+        },
+    }
+}
+
+/// Convert an [`InlineMarkupRoute`] to the appropriate [`SyntaxError`] warning variant.
+///
+/// Extracted from `parse()` to keep that function within the clippy line-count limit.
+/// All three routes (E-PAR-019 / E-PAR-020 / E-PAR-021) produce non-fatal warnings
+/// with identical accumulation behavior (pushed to `parse_time_warnings`).
+fn inline_markup_route_to_warning(
+    route: self::template::InlineMarkupRoute,
+    file_path: &str,
+    line: u32,
+    col: u32,
+    src: &str,
+    byte_start: usize,
+    span_len: usize,
+) -> SyntaxError {
+    use self::template::InlineMarkupRoute;
+    match route {
+        InlineMarkupRoute::UnclosedInlineMarkup(delimiter, clean_msg) => {
+            SyntaxError::unclosed_inline_markup(
+                file_path.to_string(),
+                line,
+                col,
+                delimiter.clone(),
+                clean_msg,
+                src.to_string(),
+                byte_start,
+                delimiter.len().max(1),
+            )
+        },
+        InlineMarkupRoute::EmptyInlineMarkupSpan(delimiter, clean_msg) => {
+            SyntaxError::empty_inline_markup_span(
+                file_path.to_string(),
+                line,
+                col,
+                delimiter.clone(),
+                clean_msg,
+                src.to_string(),
+                byte_start,
+                delimiter.len().max(1),
+            )
+        },
+        // E-PAR-021: same sink as 019/020; real offset in `clean_msg` (OBS-P8-A).
+        InlineMarkupRoute::InlineNestingDepthExceeded(clean_msg) => {
+            SyntaxError::inline_nesting_depth_exceeded(
+                file_path.to_string(),
+                line,
+                col,
+                clean_msg,
+                src.to_string(),
+                byte_start,
+                span_len,
             )
         },
     }
