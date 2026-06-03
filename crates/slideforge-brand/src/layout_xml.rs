@@ -1742,12 +1742,14 @@ mod tests {
             .find("<a:clrMap")
             .expect("master XML must contain <a:clrMap>");
         // Use the first <p:sldLayoutId id= entry as the positional anchor for the
-        // <p:sldLayoutIdLst> section. The container IS emitted and ECMA-376 §19.3.1.41
-        // requires it; we search for the first entry element because ooxmlsdk may not
-        // produce the opening container tag as a distinct searchable string. This is
-        // a test-only positional anchor — it does NOT indicate the container is absent
-        // (AC-004 requires and the test test_BC_4_01_005_ac004_* verifies the container
-        // is present in the master XML output).
+        // <p:sldLayoutIdLst> section. The container IS written by the quick_xml
+        // serializer (serialize_master_to_xml uses quick_xml::Writer, not ooxmlsdk,
+        // so the opening <p:sldLayoutIdLst> tag is always emitted as a distinct byte
+        // sequence). We anchor on the first <p:sldLayoutId id= child element here
+        // for position comparison only — it appears immediately after the opening
+        // container tag, making it a reliable byte-offset proxy for the section start.
+        // AC-004 and test_BC_4_01_005_ac004_* verify the container element itself
+        // is present in the master XML output.
         let sld_layout_id_pos = xml
             .find("<p:sldLayoutId id=")
             .expect("master XML must contain at least one <p:sldLayoutId id=...> entry");
