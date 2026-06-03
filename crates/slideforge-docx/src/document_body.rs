@@ -145,20 +145,27 @@ impl DocumentBodySerializer {
             }
 
             // Collect detail entries for this slide into the extended section.
-            for rc in slide
+            // Emit ONE "Appendix: <title>" Heading2 per slide that has detail
+            // content, then emit each detail entry as a Normal paragraph.
+            // (F-041-003: heading must not repeat for every detail entry.)
+            let detail_entries: Vec<&slideforge_types::RegisteredContent> = slide
                 .register_content
                 .iter()
                 .filter(|rc| rc.register == Register::Detail)
-            {
-                // Heading2 for "Appendix: <title>".
+                .collect();
+
+            if !detail_entries.is_empty() {
+                // One Heading2 per slide, hoisted out of the per-entry loop.
                 let heading2_text = format!("Appendix: {title}");
                 detail_paragraphs.push(BodyChoice::WP(Box::new(make_styled_paragraph(
                     "Heading2",
                     &heading2_text,
                 ))));
 
-                let para = self.make_inline_paragraph("Normal", &rc.content)?;
-                detail_paragraphs.push(BodyChoice::WP(Box::new(para)));
+                for rc in detail_entries {
+                    let para = self.make_inline_paragraph("Normal", &rc.content)?;
+                    detail_paragraphs.push(BodyChoice::WP(Box::new(para)));
+                }
             }
         }
 
@@ -351,7 +358,7 @@ impl DocumentBodySerializer {
                 };
 
                 let hyperlink = Hyperlink {
-                    id: Some(r_id.into()),
+                    id: Some(r_id),
                     hyperlink_choice: vec![HyperlinkChoice::WR(Box::new(link_run))],
                     ..Hyperlink::default()
                 };
@@ -361,9 +368,9 @@ impl DocumentBodySerializer {
 
             // For unsupported inline variants (Math, Footnote, Xref, Highlight),
             // fall back to plain text extraction.
-            InlineNode::Math(math_node) => Ok(vec![ParagraphChoice::WR(Box::new(
-                make_plain_run(math_node.latex.as_ref()),
-            ))]),
+            InlineNode::Math(math_node) => Ok(vec![ParagraphChoice::WR(Box::new(make_plain_run(
+                math_node.latex.as_ref(),
+            )))]),
             InlineNode::Footnote(children) | InlineNode::Highlight(children) => {
                 let text = collect_plain_text(children);
                 Ok(vec![ParagraphChoice::WR(Box::new(make_plain_run(&text)))])

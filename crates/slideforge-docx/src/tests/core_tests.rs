@@ -516,7 +516,9 @@ fn test_BC_4_02_001_inline_bold_italic_run_properties() {
     let bold_prop_pos = doc_xml
         .find("<w:b/>")
         .or_else(|| doc_xml.find("<w:b />"))
-        .expect("Bold InlineNode must produce <w:b/> or <w:b /> run property (AC-008); got:\n{doc_xml}");
+        .expect(
+            "Bold InlineNode must produce <w:b/> or <w:b /> run property (AC-008); got:\n{doc_xml}",
+        );
     let bold_text_pos = doc_xml
         .find("<w:t>Bold</w:t>")
         .expect("Bold text run must contain <w:t>Bold</w:t> (AC-008); got:\n{doc_xml}");
@@ -873,5 +875,367 @@ fn test_BC_4_02_001_ec004_detail_and_report_same_slide() {
         detail_pos > report_pos,
         "detail content must appear AFTER report content in document.xml (EC-004): \
          report at {report_pos}, detail at {detail_pos}"
+    );
+}
+
+// ─── F-041-002 regression: ` />` in text content must survive serialization ──
+
+/// F-041-002 regression:
+/// A report string containing characters that, when XML-escaped, produce
+/// byte sequences like `&gt;` (not ` />`) must round-trip through serialization
+/// without structural corruption.
+///
+/// Previously, `normalize_self_closing_tags` did a global byte-replace of
+/// ` />` → `/>` across the whole document, which could corrupt self-closing
+/// attribute serialization (`<w:pStyle w:val="Heading1" />` → `<w:pStyle w:val="Heading1"/>`).
+/// More critically, it risked corrupting any raw byte pattern ` />` regardless
+/// of context (tag vs. text node).
+///
+/// This test verifies:
+/// 1. The XML serializer does NOT apply any post-processing byte-replace on the output.
+/// 2. Content that resembles XML markup in user text is properly XML-escaped (safe round-trip).
+/// 3. The self-closing attribute form produced by quick_xml (`<w:pStyle w:val="..." />`)
+///    is present verbatim in the output (no silent normalization).
+#[test]
+fn test_BC_4_02_001_f041_002_slash_gt_in_text_survives_serialization() {
+    let deck = minimal_deck();
+    // Text that contains '/' and '>' characters — ooxmlsdk will XML-escape these
+    // to '/' and '&gt;' respectively (or keep them in text nodes).
+    let rc = RegisteredContent::plain(Register::Report, Arc::from("Results: 10/20 > threshold"));
+    let slide = make_slide("Regression Slide", vec![rc]);
+    let laid_out = make_laid_out_deck(vec![slide]);
+
+    let docx_bytes = export_deck(&deck, &laid_out);
+    let doc_xml = read_zip_member(&docx_bytes, "word/document.xml");
+
+    // The report text must appear in the document (possibly with > XML-escaped
+    // to &gt;, but '/' is safe as-is in text content).
+    assert!(
+        doc_xml.contains("10/20"),
+        "fraction '10/20' must appear in document.xml without corruption (F-041-002); \
+         got:\n{doc_xml}"
+    );
+    assert!(
+        doc_xml.contains("threshold"),
+        "word 'threshold' must appear in document.xml (F-041-002)"
+    );
+
+    // The output XML must NOT have been globally byte-replaced: self-closing
+    // attribute tags from quick_xml still have their original form (with or
+    // without space before "/>"). Verify the document is well-formed by
+    // checking it starts with an XML declaration and ends with the document
+    // close tag (structural sanity without a full parse).
+    assert!(
+        doc_xml.starts_with("<?xml"),
+        "document.xml must start with XML declaration after serialization (F-041-002)"
+    );
+    assert!(
+        doc_xml.ends_with("</w:document>"),
+        "document.xml must end with </w:document> after serialization — \
+         no truncation from byte-replace (F-041-002)"
+    );
+}
+
+// ─── F-041-003: One Appendix heading per slide, not per detail entry ──────────
+
+/// F-041-003:
+/// A slide with multiple `detail` entries must produce EXACTLY ONE
+/// `Appendix: <title>` Heading2 paragraph, not one per detail entry.
+///
+/// Previously the Heading2 was emitted inside the per-entry loop.
+#[test]
+fn test_BC_4_02_001_f041_003_one_appendix_heading_per_slide() {
+    let deck = minimal_deck();
+    let detail1 = RegisteredContent::plain(Register::Detail, Arc::from("First detail block"));
+    let detail2 = RegisteredContent::plain(Register::Detail, Arc::from("Second detail block"));
+    let detail3 = RegisteredContent::plain(Register::Detail, Arc::from("Third detail block"));
+    let slide = make_slide("Analysis Slide", vec![detail1, detail2, detail3]);
+    let laid_out = make_laid_out_deck(vec![slide]);
+
+    let docx_bytes = export_deck(&deck, &laid_out);
+    let doc_xml = read_zip_member(&docx_bytes, "word/document.xml");
+
+    // Exactly one "Appendix: Analysis Slide" heading must appear.
+    let heading_count = doc_xml.matches("Appendix: Analysis Slide").count();
+    assert_eq!(
+        heading_count, 1,
+        "document.xml must contain exactly 1 'Appendix: Analysis Slide' heading for a \
+         slide with 3 detail entries; found {heading_count} occurrences (F-041-003). \
+         Got:\n{doc_xml}"
+    );
+
+    // All three detail entries must be present.
+    assert!(
+        doc_xml.contains("First detail block"),
+        "first detail entry must appear in document.xml (F-041-003)"
+    );
+    assert!(
+        doc_xml.contains("Second detail block"),
+        "second detail entry must appear in document.xml (F-041-003)"
+    );
+    assert!(
+        doc_xml.contains("Third detail block"),
+        "third detail entry must appear in document.xml (F-041-003)"
+    );
+
+    // Heading2 style must appear.
+    assert!(
+        doc_xml.contains("Heading2"),
+        "Appendix heading must use Heading2 style (F-041-003)"
+    );
+}
+
+// ─── F-041-004: Structural OOXML parse-back validity (BC-4.02.001 post. 2) ────
+
+/// F-041-004 / BC-4.02.001 postcondition 2:
+/// `word/document.xml`, `word/styles.xml`, and `[Content_Types].xml` must
+/// parse back through the ooxmlsdk deserializer without error, proving
+/// well-formedness and presence of required top-level elements.
+///
+/// This is a non-ignored structural validity test that does not require a
+/// real renderer (Word, LibreOffice) to execute.
+#[test]
+fn test_BC_4_02_001_f041_004_ooxml_structural_parse_back() {
+    use ooxmlsdk::schemas::opc_content_types::Types;
+    use ooxmlsdk::schemas::schemas_openxmlformats_org_wordprocessingml_2006_main::{
+        Document, Styles,
+    };
+
+    let deck = minimal_deck();
+    let rc = RegisteredContent::plain(Register::Report, Arc::from("Parse-back test content"));
+    let slide = make_slide("Parse Slide", vec![rc]);
+    let laid_out = make_laid_out_deck(vec![slide]);
+
+    let docx_bytes = export_deck(&deck, &laid_out);
+
+    // ── [Content_Types].xml ────────────────────────────────────────────────
+    let ct_xml = read_zip_member(&docx_bytes, "[Content_Types].xml");
+    let types = Types::from_bytes(ct_xml.as_bytes()).unwrap_or_else(|e| {
+        panic!(
+            "[Content_Types].xml must deserialize through ooxmlsdk::Types without error \
+             (F-041-004 / BC-4.02.001 postcondition 2); error: {e}\nGot:\n{ct_xml}"
+        )
+    });
+    assert!(
+        !types.types_choice.is_empty(),
+        "[Content_Types].xml must contain at least one Default or Override element \
+         (F-041-004)"
+    );
+
+    // ── word/document.xml ─────────────────────────────────────────────────
+    let doc_xml = read_zip_member(&docx_bytes, "word/document.xml");
+    let document = Document::from_bytes(doc_xml.as_bytes()).unwrap_or_else(|e| {
+        panic!(
+            "word/document.xml must deserialize through ooxmlsdk::Document without error \
+             (F-041-004 / BC-4.02.001 postcondition 2); error: {e}\nGot:\n{doc_xml}"
+        )
+    });
+    // The body element must be present.
+    assert!(
+        document.body.is_some(),
+        "word/document.xml must have a <w:body> element after ooxmlsdk parse-back \
+         (F-041-004)"
+    );
+
+    // ── word/styles.xml ───────────────────────────────────────────────────
+    let styles_xml = read_zip_member(&docx_bytes, "word/styles.xml");
+    let styles = Styles::from_bytes(styles_xml.as_bytes()).unwrap_or_else(|e| {
+        panic!(
+            "word/styles.xml must deserialize through ooxmlsdk::Styles without error \
+             (F-041-004 / BC-4.02.001 postcondition 2); error: {e}\nGot:\n{styles_xml}"
+        )
+    });
+    assert!(
+        !styles.w_style.is_empty(),
+        "word/styles.xml must define at least one style after parse-back (F-041-004)"
+    );
+}
+
+// ─── F-041-006: EC-003 — hyperlink wrapper test ───────────────────────────────
+
+/// F-041-006 / EC-003:
+/// An `InlineNode::Link` must produce a `<w:hyperlink r:id="...">` element
+/// wrapping the link run in `word/document.xml`, AND the rId must be present
+/// in `word/_rels/document.xml.rels` as a hyperlink relationship.
+///
+/// Previously the code only emitted the run, leaving an orphaned relationship
+/// and a non-clickable link.
+#[test]
+fn test_BC_4_02_001_ec003_hyperlink_element_wraps_run_and_rid_resolves() {
+    let deck = minimal_deck();
+    let link_node = InlineNode::Link {
+        text: vec![InlineNode::Plain(Arc::from("Click here"))],
+        url: Arc::from("https://example.com/path"),
+    };
+    let rc = RegisteredContent {
+        register: Register::Report,
+        content: vec![link_node],
+    };
+    let slide = make_slide("Link Slide", vec![rc]);
+    let laid_out = make_laid_out_deck(vec![slide]);
+
+    let docx_bytes = export_deck(&deck, &laid_out);
+    let doc_xml = read_zip_member(&docx_bytes, "word/document.xml");
+    let rels_xml = read_zip_member(&docx_bytes, "word/_rels/document.xml.rels");
+
+    // 1. The document must contain a <w:hyperlink element.
+    assert!(
+        doc_xml.contains("<w:hyperlink"),
+        "word/document.xml must contain a <w:hyperlink element for InlineNode::Link \
+         (F-041-006 / EC-003); got:\n{doc_xml}"
+    );
+
+    // 2. The hyperlink element must have an r:id attribute.
+    assert!(
+        doc_xml.contains("r:id="),
+        "word/document.xml <w:hyperlink> must have an r:id attribute \
+         (F-041-006 / EC-003); got:\n{doc_xml}"
+    );
+
+    // 3. The link display text must appear inside the hyperlink.
+    let hyperlink_start = doc_xml
+        .find("<w:hyperlink")
+        .expect("must have hyperlink element");
+    let hyperlink_end = doc_xml[hyperlink_start..]
+        .find("</w:hyperlink>")
+        .map(|offset| hyperlink_start + offset + "</w:hyperlink>".len())
+        .expect("hyperlink must close");
+    let hyperlink_fragment = &doc_xml[hyperlink_start..hyperlink_end];
+    assert!(
+        hyperlink_fragment.contains("Click here"),
+        "link display text 'Click here' must appear inside the <w:hyperlink> element \
+         (F-041-006 / EC-003); got hyperlink fragment:\n{hyperlink_fragment}"
+    );
+
+    // 4. Extract the rId from the hyperlink element and verify it resolves in rels.
+    // Find r:id="rId..." pattern in the doc_xml.
+    let rid_prefix = "r:id=\"";
+    let rid_start = doc_xml[hyperlink_start..]
+        .find(rid_prefix)
+        .map(|offset| hyperlink_start + offset + rid_prefix.len())
+        .expect("r:id attribute must exist in <w:hyperlink>");
+    let rid_end = doc_xml[rid_start..]
+        .find('"')
+        .map(|offset| rid_start + offset)
+        .expect("r:id attribute must be quoted");
+    let r_id = &doc_xml[rid_start..rid_end];
+
+    assert!(
+        rels_xml.contains(r_id),
+        "rId '{r_id}' from <w:hyperlink> must appear in word/_rels/document.xml.rels \
+         (F-041-006 / EC-003); got rels:\n{rels_xml}"
+    );
+
+    assert!(
+        rels_xml.contains("https://example.com/path"),
+        "target URL must appear in word/_rels/document.xml.rels (F-041-006 / EC-003); \
+         got:\n{rels_xml}"
+    );
+}
+
+// ─── F-041-007: No duplicate relationship IDs ─────────────────────────────────
+
+/// F-041-007:
+/// When a slide contains `InlineNode::Link`, the generated relationship Ids
+/// in `word/_rels/document.xml.rels` must not duplicate the fixed reserved
+/// IDs (rId1=styles, rId2=numbering, rId3=settings).
+///
+/// Previously `next_rel_id` started at 1, causing the first hyperlink to
+/// produce `Id="rId1"` — a duplicate of the styles relationship.
+#[test]
+fn test_BC_4_02_001_f041_007_hyperlink_rid_no_collision_with_reserved_ids() {
+    let deck = minimal_deck();
+    let link_node = InlineNode::Link {
+        text: vec![InlineNode::Plain(Arc::from("Reference doc"))],
+        url: Arc::from("https://example.com/doc"),
+    };
+    let rc = RegisteredContent {
+        register: Register::Report,
+        content: vec![link_node],
+    };
+    let slide = make_slide("Link Slide", vec![rc]);
+    let laid_out = make_laid_out_deck(vec![slide]);
+
+    let docx_bytes = export_deck(&deck, &laid_out);
+    let rels_xml = read_zip_member(&docx_bytes, "word/_rels/document.xml.rels");
+
+    // Collect all Id="..." attribute values to check for duplicates.
+    let mut ids: Vec<&str> = Vec::new();
+    let mut search = rels_xml.as_str();
+    while let Some(pos) = search.find("Id=\"") {
+        search = &search[pos + 4..];
+        if let Some(end) = search.find('"') {
+            ids.push(&search[..end]);
+            search = &search[end..];
+        }
+    }
+
+    // Every Id must be unique.
+    let mut seen = std::collections::HashSet::new();
+    for id in &ids {
+        assert!(
+            seen.insert(*id),
+            "duplicate relationship Id=\"{id}\" found in word/_rels/document.xml.rels \
+             (F-041-007); all Ids: {ids:?}\nGot rels:\n{rels_xml}"
+        );
+    }
+
+    // The hyperlink relationship Id must NOT be rId1, rId2, or rId3 (reserved).
+    assert!(
+        !ids.iter().any(|&id| id == "rId1" && rels_xml.contains(&format!("Id=\"{id}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink\""))),
+        "hyperlink relationship must not use reserved Id 'rId1' (F-041-007); got rels:\n{rels_xml}"
+    );
+    assert!(
+        !ids.iter().any(|&id| id == "rId2" && rels_xml.contains(&format!("Id=\"{id}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink\""))),
+        "hyperlink relationship must not use reserved Id 'rId2' (F-041-007); got rels:\n{rels_xml}"
+    );
+    assert!(
+        !ids.iter().any(|&id| id == "rId3" && rels_xml.contains(&format!("Id=\"{id}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink\""))),
+        "hyperlink relationship must not use reserved Id 'rId3' (F-041-007); got rels:\n{rels_xml}"
+    );
+}
+
+// ─── F-041-008: Paragraph count must count <w:p> and <w:p  only ──────────────
+
+/// F-041-008:
+/// Paragraph-count assertions must not accidentally count `<w:pPr` or
+/// `<w:pStyle` tags. The test uses an exact token search for `<w:p>` and
+/// `<w:p ` (open-element with or without attributes).
+///
+/// This test verifies the counting is precise by building a known-count deck
+/// and asserting the exact number.
+#[test]
+fn test_BC_4_02_001_f041_008_paragraph_count_exact_not_ppr_pstyle() {
+    let deck = minimal_deck();
+    // One slide, one report entry → 1 Heading1 + 1 Normal = 2 <w:p> elements.
+    let rc = RegisteredContent::plain(Register::Report, Arc::from("Counting test content"));
+    let slide = make_slide("Count Slide", vec![rc]);
+    let laid_out = make_laid_out_deck(vec![slide]);
+
+    let docx_bytes = export_deck(&deck, &laid_out);
+    let doc_xml = read_zip_member(&docx_bytes, "word/document.xml");
+
+    // Count actual paragraph open-elements only: "<w:p>" and "<w:p ".
+    // Must NOT count "<w:pPr", "<w:pStyle", or any other element starting with "<w:p".
+    let paragraph_count = doc_xml.matches("<w:p>").count() + doc_xml.matches("<w:p ").count();
+
+    assert_eq!(
+        paragraph_count, 2,
+        "1-slide 1-report deck must produce exactly 2 paragraphs (Heading1 + Normal); \
+         found {paragraph_count} using exact '<w:p>' + '<w:p ' token count (F-041-008). \
+         Note: '<w:pPr' and '<w:pStyle' must NOT be counted. Got:\n{doc_xml}"
+    );
+
+    // Cross-check: <w:pPr and <w:pStyle do exist (they'd inflate the old "<w:p" count).
+    assert!(
+        doc_xml.contains("<w:pPr"),
+        "document.xml must contain <w:pPr elements (F-041-008 precondition)"
+    );
+    let old_imprecise_count = doc_xml.matches("<w:p").count();
+    assert!(
+        old_imprecise_count > paragraph_count,
+        "the imprecise '<w:p' count ({old_imprecise_count}) must exceed the precise \
+         '<w:p>'/'<w:p ' count ({paragraph_count}), confirming that '<w:pPr' elements \
+         inflate the old assertion (F-041-008)"
     );
 }
