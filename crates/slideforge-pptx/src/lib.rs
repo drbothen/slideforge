@@ -34,10 +34,13 @@
 #![allow(clippy::module_name_repetitions)]
 
 pub mod brand_adapter;
+pub mod clrmapovr;
 pub mod content_types;
 pub mod error;
+pub mod layout_embedder;
 pub mod presentation;
 pub mod rels;
+pub mod slide_ids;
 pub mod slide_serializer;
 pub mod zip_assembler;
 
@@ -53,6 +56,7 @@ pub mod zip_assembler;
 )]
 mod tests {
     mod core_tests;
+    mod layout_tests;
 }
 
 use content_types::ContentTypesBuilder;
