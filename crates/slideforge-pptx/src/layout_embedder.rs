@@ -40,7 +40,7 @@ impl LayoutEmbedder {
     /// # Errors
     ///
     /// Returns [`PptxError`] if a layout XML part cannot be assembled.
-    pub fn embed(brand_template: &BrandTemplate, parts: &mut Vec<ZipPart>) -> Result<(), PptxError> {
+    pub fn embed(_brand_template: &BrandTemplate, _parts: &mut Vec<ZipPart>) -> Result<(), PptxError> {
         todo!(
             "STORY-038 Step 4 — implement LayoutEmbedder::embed: \
              iterate brand_template.layouts[0..31], call serialize_layout_to_xml, \

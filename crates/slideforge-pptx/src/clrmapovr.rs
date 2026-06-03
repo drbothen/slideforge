@@ -42,7 +42,7 @@ impl ClrMapOvrInjector {
 #[cfg(test)]
 #[allow(clippy::missing_docs_in_private_items, clippy::unwrap_used, clippy::expect_used)]
 mod tests {
-    use super::*;
+    // No tests in this module — full ClrMapOvrInjector tests are in tests/layout_tests.rs.
 
     // Tests for ClrMapOvrInjector are minimal here; the full AC-006 integration
     // test is in tests/layout_tests.rs. These unit tests verify the type-level
