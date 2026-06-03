@@ -223,6 +223,28 @@ pub struct GeneratedSection {
     ///
     /// **Invariant:** always sorted by `OutputFormat` discriminant order.
     pub target_formats: Vec<OutputFormat>,
+
+    /// Register-tagged content blocks for this section.
+    ///
+    /// Populated from [`slideforge_types::SectionBlock::register_content`] during
+    /// `collect_manual_sections` (F-077-P10-001). Each entry carries a
+    /// [`slideforge_types::RegisteredContent`] value that pairs a
+    /// [`slideforge_types::Register`] tag with its evaluated inline content.
+    ///
+    /// Exporters read only the entries for their allowed registers:
+    /// - DOCX: reads `Report` and `Detail` entries for section bodies
+    /// - PDF: reads `Report` and `Detail` entries for section bodies
+    /// - PPTX and HTML/preview: MUST NOT read this field
+    ///
+    /// An empty `Vec` means the section has no register-gated content — this is
+    /// always the case for auto-generated sections (`ExecutiveSummary`,
+    /// `RiskRegister`) because those sections have no corresponding
+    /// `SectionBlock.register_content` in the eval IR.
+    ///
+    /// This is the single authoritative source for all register-gated section
+    /// content for DOCX and PDF exporters — the section-level analogue of
+    /// [`crate::types::LaidOutSlide::register_content`].
+    pub register_content: Vec<slideforge_types::RegisteredContent>,
 }
 
 /// Produce a canonical sorted `target_formats` vec for DOCX + PDF sections.
@@ -489,6 +511,9 @@ fn collect_manual_sections(deck: &Deck) -> Result<Vec<GeneratedSection>, LayoutE
             items,
             heading,
             target_formats: docx_pdf_formats(),
+            // F-077-P10-001: propagate register_content verbatim from the eval IR.
+            // Mirrors the slide path (layout.rs:315): copy without routing logic.
+            register_content: block.register_content.clone(),
         });
     }
 
@@ -589,6 +614,8 @@ pub(crate) fn collect_executive_summary(
         items,
         heading: Arc::from("Executive Summary"),
         target_formats: docx_pdf_formats(),
+        // Auto-generated sections have no SectionBlock.register_content source.
+        register_content: Vec::new(),
     }))
 }
 
@@ -693,6 +720,8 @@ pub(crate) fn collect_risk_register(deck: &Deck) -> Result<Option<GeneratedSecti
         items,
         heading: Arc::from("Risk Register"),
         target_formats: docx_pdf_formats(),
+        // Auto-generated sections have no SectionBlock.register_content source.
+        register_content: Vec::new(),
     }))
 }
 
@@ -1209,6 +1238,7 @@ mod tests {
             items: vec![SectionItem::TakeawayBullet(Arc::from("Key point"))],
             heading: Arc::from("Executive Summary"),
             target_formats: docx_pdf_formats(),
+            register_content: Vec::new(),
         };
         let section2 = section.clone();
         assert_eq!(section, section2);
@@ -3150,5 +3180,123 @@ mod tests {
             "F-077-P1-005: register_content detail text must be preserved verbatim; \
              got: {detail_text:?}"
         );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // F-077-P10-001 (HIGH) — section register_content propagates to
+    //                         GeneratedSection in LaidOutDeck
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// F-077-P10-001 (HIGH): A `section methodology:` block whose
+    /// `SectionBlock.register_content` is populated by the evaluator (detail: +
+    /// report: entries) must produce a `GeneratedSection` with a matching
+    /// `register_content` field after `collect_sections` runs.
+    ///
+    /// This is the RED GATE test. It FAILS before the fix because `GeneratedSection`
+    /// has no `register_content` field, so the field access does not compile.
+    ///
+    /// After the fix:
+    /// - `GeneratedSection.register_content` carries the same entries that
+    ///   `SectionBlock.register_content` held (Detail + Report).
+    /// - Auto-generated sections (ExecutiveSummary, RiskRegister) have empty
+    ///   `register_content` (no eval-populated register content exists for them).
+    ///
+    /// Mirrors the slide path: `LaidOutSlide.register_content` is copied verbatim
+    /// from `slide.register_content` at `layout.rs:315`. Section path uses the
+    /// same copy-verbatim pattern from `block.register_content`.
+    #[test]
+    fn test_f077_p10_001_section_register_content_propagates_to_generated_section() {
+        // Simulate what eval produces for a methodology section with detail: and report:
+        let detail_text = Arc::from("Detailed methodology description");
+        let report_text = Arc::from("Report-level methodology summary");
+
+        let register_content = vec![
+            RegisteredContent {
+                register: Register::Detail,
+                content: vec![InlineNode::Plain(Arc::clone(&detail_text))],
+            },
+            RegisteredContent {
+                register: Register::Report,
+                content: vec![InlineNode::Plain(Arc::clone(&report_text))],
+            },
+        ];
+
+        let block = SectionBlock {
+            name: Arc::from("methodology"),
+            body: OrderedMap::new(),
+            register_content,
+            span: SourceSpan::default(),
+        };
+
+        let deck = make_deck_with_section_blocks(vec![], vec![block]);
+        let sections = collect_sections(&deck).expect("collect_sections must succeed");
+
+        let manual_section = sections
+            .iter()
+            .find(|s| s.kind == SectionKind::ManualSection(Arc::from("methodology")))
+            .expect("F-077-P10-001: methodology GeneratedSection must be present");
+
+        // PRIMARY ASSERTION: register_content must be propagated to GeneratedSection.
+        assert_eq!(
+            manual_section.register_content.len(),
+            2,
+            "F-077-P10-001: GeneratedSection.register_content must carry 2 entries \
+             (Detail + Report) from the source SectionBlock; got {} entries",
+            manual_section.register_content.len()
+        );
+
+        // Verify Detail entry
+        assert_eq!(
+            manual_section.register_content[0].register,
+            Register::Detail,
+            "F-077-P10-001: register_content[0] must be tagged Register::Detail"
+        );
+        assert!(
+            matches!(
+                manual_section.register_content[0].content.first(),
+                Some(InlineNode::Plain(s)) if s.as_ref() == "Detailed methodology description"
+            ),
+            "F-077-P10-001: register_content[0] content must be Plain('Detailed methodology description'); \
+             got: {:?}",
+            manual_section.register_content[0].content
+        );
+
+        // Verify Report entry
+        assert_eq!(
+            manual_section.register_content[1].register,
+            Register::Report,
+            "F-077-P10-001: register_content[1] must be tagged Register::Report"
+        );
+        assert!(
+            matches!(
+                manual_section.register_content[1].content.first(),
+                Some(InlineNode::Plain(s)) if s.as_ref() == "Report-level methodology summary"
+            ),
+            "F-077-P10-001: register_content[1] content must be Plain('Report-level methodology summary'); \
+             got: {:?}",
+            manual_section.register_content[1].content
+        );
+    }
+
+    /// F-077-P10-001 (HIGH): Auto-generated sections (ExecutiveSummary,
+    /// RiskRegister) have no eval-populated register_content and must carry an
+    /// empty Vec for that field.
+    #[test]
+    fn test_f077_p10_001_auto_generated_sections_have_empty_register_content() {
+        let deck = make_deck(vec![
+            make_slide_with_takeaway("content", "Key finding"),
+            make_severity_card_slide("Budget Risk", "High", "10% over plan", "CFO"),
+        ]);
+        let sections = collect_sections(&deck).expect("collect_sections must succeed");
+
+        for section in &sections {
+            assert!(
+                section.register_content.is_empty(),
+                "F-077-P10-001: auto-generated section {:?} must have empty register_content; \
+                 got: {:?}",
+                section.kind,
+                section.register_content
+            );
+        }
     }
 }

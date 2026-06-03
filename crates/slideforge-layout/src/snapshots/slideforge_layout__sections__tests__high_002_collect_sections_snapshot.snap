@@ -19,6 +19,7 @@ expression: sections
             Docx,
             Pdf,
         ],
+        register_content: [],
     },
     GeneratedSection {
         kind: RiskRegister,
@@ -36,5 +37,6 @@ expression: sections
             Docx,
             Pdf,
         ],
+        register_content: [],
     },
 ]

@@ -3396,3 +3396,123 @@ fn test_f077_p9_001_footnote_empty_string_emits_e_evl_014() {
          got: {code:?}."
     );
 }
+
+// ─── OBS-077-P10-A: ref(ident) resolves to empty → E-EVL-013 ─────────────────
+
+/// OBS-077-P10-A / E-EVL-013 (condition 3): `{{ ref(var) }}` where `var` is
+/// bound to an empty string in the environment must push exactly one E-EVL-013
+/// diagnostic and produce NO `InlineNode`.
+///
+/// This covers the non-Str-literal path in `chunks_to_inline_nodes`:
+/// ```text
+/// Expr::Call { func: "ref", args: [Expr::Ident("var")] }
+///   -> eval_expr_to_string(env, Ident("var"), sink)  -> Some(Arc::from(""))
+///   -> s.is_empty() is true  -> push E-EVL-013, no InlineNode
+/// ```
+///
+/// Previously only the `Expr::Str("")` literal case had test coverage.
+/// This test covers condition (3) — ident resolves to empty string.
+#[test]
+fn test_f077_ref_ident_resolves_empty_emits_e_evl_013() {
+    // Bind var = "" in the env — simulates `@var var = ""` in a .sf file.
+    let mut vars: IndexMap<Arc<str>, slideforge_types::Value> = IndexMap::new();
+    vars.insert(
+        Arc::from("var"),
+        slideforge_types::Value::Str(Arc::from("")),
+    );
+    let env = Env::new(vars);
+
+    // Build {{ ref(var) }} — ident arg, not a string literal.
+    let ref_ident = SyntaxExpr::Call {
+        func: "ref".to_string(),
+        args: vec![SyntaxExpr::Ident("var".to_string())],
+    };
+    let chunks = vec![TemplateChunk::Expr(ref_ident)];
+    let mut sink = DiagnosticSink::new();
+
+    let nodes = crate::register_routing::chunks_to_inline_nodes(&chunks, &env, &mut sink);
+
+    // (a) No InlineNode produced — empty id is invalid.
+    assert!(
+        nodes.is_empty(),
+        "OBS-077-P10-A: ref(var) where var=\"\" must produce NO InlineNode; got: {nodes:?}"
+    );
+
+    // (b) Exactly one diagnostic pushed.
+    assert!(
+        !sink.is_empty(),
+        "OBS-077-P10-A: ref(var) where var=\"\" must push a diagnostic to the sink; sink is empty"
+    );
+
+    // (c) LOAD-BEARING: diagnostic code MUST be E-EVL-013 (InlineXrefEmptyId).
+    let code = sink
+        .errors()
+        .iter()
+        .find_map(|e| e.code().map(|c| c.to_string()));
+    assert_eq!(
+        code.as_deref(),
+        Some("E-EVL-013"),
+        "OBS-077-P10-A: ref(var) where var=\"\" MUST emit E-EVL-013 (InlineXrefEmptyId); \
+         got: {code:?}"
+    );
+}
+
+// ─── OBS-077-P10-A: footnote(ident) resolves to empty → E-EVL-014 ───────────
+
+/// OBS-077-P10-A / E-EVL-014 (condition 3): `{{ footnote(var) }}` where `var`
+/// is bound to an empty string in the environment must push exactly one E-EVL-014
+/// diagnostic and produce NO `InlineNode`.
+///
+/// Covers the non-Str-literal path in `chunks_to_inline_nodes` for `footnote`:
+/// ```text
+/// Expr::Call { func: "footnote", args: [Expr::Ident("var")] }
+///   -> eval_expr_to_string(env, Ident("var"), sink) -> Some(Arc::from(""))
+///   -> s.is_empty() is true -> push E-EVL-014, no InlineNode
+/// ```
+///
+/// Previously only the `Expr::Str("")` literal case had test coverage.
+/// This test covers condition (3) — ident resolves to empty string.
+#[test]
+fn test_f077_footnote_ident_resolves_empty_emits_e_evl_014() {
+    // Bind var = "" in the env.
+    let mut vars: IndexMap<Arc<str>, slideforge_types::Value> = IndexMap::new();
+    vars.insert(
+        Arc::from("var"),
+        slideforge_types::Value::Str(Arc::from("")),
+    );
+    let env = Env::new(vars);
+
+    // Build {{ footnote(var) }} — ident arg, not a string literal.
+    let footnote_ident = SyntaxExpr::Call {
+        func: "footnote".to_string(),
+        args: vec![SyntaxExpr::Ident("var".to_string())],
+    };
+    let chunks = vec![TemplateChunk::Expr(footnote_ident)];
+    let mut sink = DiagnosticSink::new();
+
+    let nodes = crate::register_routing::chunks_to_inline_nodes(&chunks, &env, &mut sink);
+
+    // (a) No InlineNode produced — empty footnote text is invalid.
+    assert!(
+        nodes.is_empty(),
+        "OBS-077-P10-A: footnote(var) where var=\"\" must produce NO InlineNode; got: {nodes:?}"
+    );
+
+    // (b) Exactly one diagnostic pushed.
+    assert!(
+        !sink.is_empty(),
+        "OBS-077-P10-A: footnote(var) where var=\"\" must push a diagnostic; sink is empty"
+    );
+
+    // (c) LOAD-BEARING: diagnostic code MUST be E-EVL-014 (FootnoteInvalidArg).
+    let code = sink
+        .errors()
+        .iter()
+        .find_map(|e| e.code().map(|c| c.to_string()));
+    assert_eq!(
+        code.as_deref(),
+        Some("E-EVL-014"),
+        "OBS-077-P10-A: footnote(var) where var=\"\" MUST emit E-EVL-014 (FootnoteInvalidArg); \
+         got: {code:?}"
+    );
+}
