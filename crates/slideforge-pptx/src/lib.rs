@@ -33,11 +33,23 @@
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 
+/// Canonical number of slide layouts always embedded in every PPTX archive.
+///
+/// Both `build_master_parts` (master `.rels` relationship count) and
+/// [`crate::layout_embedder::LayoutEmbedder::embed`] (layout XML part generation)
+/// derive their loop bound from this single constant so master rels can never
+/// reference a non-existent `slideLayout{N}.xml` part (cheap hardening,
+/// F-038-P2 follow-up).
+pub(crate) const LAYOUT_COUNT: usize = 31;
+
 pub mod brand_adapter;
+pub mod clrmapovr;
 pub mod content_types;
 pub mod error;
+pub mod layout_embedder;
 pub mod presentation;
 pub mod rels;
+pub mod slide_ids;
 pub mod slide_serializer;
 pub mod zip_assembler;
 
@@ -53,6 +65,7 @@ pub mod zip_assembler;
 )]
 mod tests {
     mod core_tests;
+    mod layout_tests;
 }
 
 use content_types::ContentTypesBuilder;
@@ -60,9 +73,7 @@ use presentation::PresentationSerializer;
 use rels::{RelsBuilder, rel_types};
 use slide_serializer::SlideSerializer;
 use slideforge_brand::BrandTemplate;
-use slideforge_brand::layout_xml::{
-    serialize_layout_to_xml, serialize_master_to_xml, serialize_theme_to_xml,
-};
+use slideforge_brand::layout_xml::{serialize_master_to_xml, serialize_theme_to_xml};
 use slideforge_layout::{FrameContent, LaidOutDeck};
 use slideforge_plugin_api::{ExportError, ExportOptions, Exporter};
 use slideforge_types::{Brand, Deck};
@@ -129,7 +140,7 @@ impl PptxExporter {
         build_master_parts(&brand_template, &mut parts)?;
         build_layout_parts(&brand_template, &mut parts)?;
         build_theme_part(&brand_template, &mut parts);
-        build_notes_handout_masters(&brand_template, &mut parts);
+        build_notes_handout_masters(&brand_template, &mut parts)?;
         build_doc_props(deck, &mut parts);
         build_root_rels(&mut parts)?;
 
@@ -138,7 +149,7 @@ impl PptxExporter {
         for _ in 0..laid_out.slides.len() {
             ct.add_slide();
         }
-        for _ in 0..31 {
+        for _ in 0..LAYOUT_COUNT {
             ct.add_layout();
         }
         for part in &parts {
@@ -193,11 +204,11 @@ fn build_slide_parts(
         let layout_index = find_layout_index(brand_template, slide.slide_type_keyword.as_ref());
         let layout_num = layout_index + 1; // 1-based ZIP name
 
-        // F-037-004: read dark layout flag from brand layout metadata.
-        let is_dark_layout = brand_template
-            .layouts
-            .get(layout_index)
-            .is_some_and(|l| l.has_color_override);
+        // F-037-004: read dark layout flag via ClrMapOvrInjector (F-038-P1-M1).
+        // Routes through the single authoritative code path for dark-layout
+        // detection — no inline has_color_override check outside that module.
+        let is_dark_layout =
+            crate::clrmapovr::ClrMapOvrInjector::needs_clr_map_ovr(brand_template, layout_index);
 
         let mut slide_rels = RelsBuilder::new();
         let layout_rel_id = slide_rels.add(
@@ -226,7 +237,13 @@ fn build_slide_parts(
 
         // Build the slide XML. SlideSerializer handles text frames AND diagram
         // <p:pic> shapes via typed ooxmlsdk builders (ADR-001, F-037-005).
-        let serializer = SlideSerializer::new(is_dark_layout, layout_index);
+        // AC-011: thread the resolved layout's placeholder info into the serializer
+        // so it can perform idx-chain verification (ADR-015 §7).
+        let serializer = if let Some(layout) = brand_template.layouts.get(layout_index) {
+            SlideSerializer::new(is_dark_layout, layout_index).with_layout(layout)
+        } else {
+            SlideSerializer::new(is_dark_layout, layout_index)
+        };
         let (slide_xml_bytes, _warnings) =
             serializer.build(slide, i, &layout_rel_id, &diagram_rids)?;
 
@@ -351,7 +368,7 @@ mod layout_index_tests {
             handout_master_stub: HANDOUT_MASTER_STUB.to_vec(),
             master_ids: MasterIds::default(),
             content_types_layout_entries: Arc::from(
-                generate_content_types_layout_entries(31).as_str(),
+                generate_content_types_layout_entries(LAYOUT_COUNT).as_str(),
             ),
         }
     }
@@ -513,9 +530,9 @@ fn build_master_parts(
     let mut master_rels = RelsBuilder::new();
     // rId1 = theme (matches the rId used in serialize_master_to_xml for theme ref if any)
     master_rels.add(rel_types::THEME, "../theme/theme1.xml");
-    // rId2..=rId32 = layouts
-    let layout_count = brand_template.layouts.len().max(31);
-    for n in 1..=layout_count {
+    // rId2..=rId32 = layouts (always exactly LAYOUT_COUNT = 31 entries,
+    // matching the parts written by LayoutEmbedder::embed).
+    for n in 1..=LAYOUT_COUNT {
         master_rels.add(
             rel_types::SLIDE_LAYOUT,
             format!("../slideLayouts/slideLayout{n}.xml"),
@@ -530,69 +547,14 @@ fn build_master_parts(
 
 /// Build all 31 slide layout XML files and their `.rels`.
 ///
-/// ADR-015 §1: uses `serialize_layout_to_xml` from `slideforge-brand` for
-/// each layout in `brand_template.layouts`. If the template has fewer than 31
-/// layouts (unlikely for synthesized brands), fills remaining slots with the
-/// last available layout.
+/// Routes through [`LayoutEmbedder::embed`] — the single authoritative code
+/// path for layout part generation (BC-4.01.005 invariant 3; F-038-P1-M1).
+/// No inline loop or duplicate XML generation here.
 fn build_layout_parts(
     brand_template: &BrandTemplate,
     parts: &mut Vec<ZipPart>,
 ) -> Result<(), PptxError> {
-    let layout_count = 31_usize;
-
-    for n in 1..=layout_count {
-        let layout_idx = (n - 1).min(brand_template.layouts.len().saturating_sub(1));
-        let layout_xml = if brand_template.layouts.is_empty() {
-            // Defensive fallback: produce a minimal valid layout XML if the
-            // template has no layouts (should never happen for synthesized brands).
-            tracing::warn!(
-                layout_n = n,
-                "brand_template has no layouts; emitting empty layout placeholder"
-            );
-            minimal_empty_layout_xml(n)
-        } else {
-            serialize_layout_to_xml(&brand_template.layouts[layout_idx])
-        };
-
-        parts.push(ZipPart {
-            path: format!("ppt/slideLayouts/slideLayout{n}.xml"),
-            bytes: layout_xml,
-        });
-
-        let mut layout_rels = RelsBuilder::new();
-        layout_rels.add(
-            rel_types::SLIDE_MASTER_FROM_LAYOUT,
-            "../slideMasters/slideMaster1.xml",
-        );
-        parts.push(ZipPart {
-            path: format!("ppt/slideLayouts/_rels/slideLayout{n}.xml.rels"),
-            bytes: layout_rels.build()?,
-        });
-    }
-    Ok(())
-}
-
-/// Produce a minimal valid `slideLayoutN.xml` for emergency fallback.
-///
-/// This is only called when `brand_template.layouts` is empty (should never
-/// occur for synthesized brands). The result is a bare `<p:sldLayout>` with
-/// no placeholders — schema-valid but visually unstyled.
-fn minimal_empty_layout_xml(n: usize) -> Vec<u8> {
-    format!(
-        concat!(
-            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
-            r#"<p:sldLayout xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main""#,
-            r#" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main""#,
-            r#" type="cust" preserve="1">"#,
-            r#"<p:cSld name="Layout {n}"><p:spTree>"#,
-            r#"<p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>"#,
-            r#"<p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/>"#,
-            r#"<a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>"#,
-            r#"</p:spTree></p:cSld><p:hf/></p:sldLayout>"#,
-        ),
-        n = n
-    )
-    .into_bytes()
+    crate::layout_embedder::LayoutEmbedder::embed(brand_template, parts)
 }
 
 /// Build `theme1.xml` from brand data and push to parts.
@@ -612,7 +574,19 @@ fn build_theme_part(brand_template: &BrandTemplate, parts: &mut Vec<ZipPart>) {
 /// ADR-015 §4: uses pre-serialized stub bytes from `BrandTemplate::notes_master_stub`
 /// and `BrandTemplate::handout_master_stub`. For synthesized brands these are populated
 /// from `NOTES_MASTER_STUB` / `HANDOUT_MASTER_STUB` constants in `layout_xml.rs`.
-fn build_notes_handout_masters(brand_template: &BrandTemplate, parts: &mut Vec<ZipPart>) {
+///
+/// ## Error handling (SEC-002 / CWE-755)
+///
+/// Both rels builds are `?`-propagated. The previous `unwrap_or_else(|_| b"".to_vec())`
+/// pattern violated the no-silent-fallback Forbidden Pattern (CLAUDE.md): an empty rels
+/// byte sequence produces a structurally-invalid PPTX. `RelsBuilder::build()` only fails
+/// when no entries have been added; since we always add one entry before calling `build()`,
+/// a failure here indicates a bug in `RelsBuilder` itself, which must surface as an error
+/// rather than silently producing a malformed archive.
+fn build_notes_handout_masters(
+    brand_template: &BrandTemplate,
+    parts: &mut Vec<ZipPart>,
+) -> Result<(), PptxError> {
     // Use brand template stubs — always non-empty for synthesized brands.
     let notes_bytes = if brand_template.notes_master_stub.is_empty() {
         slideforge_brand::layout_xml::NOTES_MASTER_STUB.to_vec()
@@ -624,12 +598,16 @@ fn build_notes_handout_masters(brand_template: &BrandTemplate, parts: &mut Vec<Z
         bytes: notes_bytes,
     });
 
-    // notesMaster.rels — references theme.
-    // SAFETY: RelsBuilder::build() only fails if no entries are added;
-    // we always add one entry, so this is infallible in practice.
+    // notesMaster.rels — references theme.  Propagate rels-build error with `?`
+    // instead of silently substituting empty bytes (SEC-002 / CWE-755).
     let mut notes_master_rels = RelsBuilder::new();
     notes_master_rels.add(rel_types::THEME, "../theme/theme1.xml");
-    let notes_rels_bytes = notes_master_rels.build().unwrap_or_else(|_| b"".to_vec());
+    let notes_rels_bytes = notes_master_rels
+        .build()
+        .map_err(|e| PptxError::OoxmlElement {
+            part: "ppt/notesMasters/_rels/notesMaster1.xml.rels".to_string(),
+            detail: format!("RelsBuilder::build failed: {e}"),
+        })?;
     parts.push(ZipPart {
         path: "ppt/notesMasters/_rels/notesMaster1.xml.rels".to_string(),
         bytes: notes_rels_bytes,
@@ -645,13 +623,21 @@ fn build_notes_handout_masters(brand_template: &BrandTemplate, parts: &mut Vec<Z
         bytes: handout_bytes,
     });
 
+    // handoutMaster.rels — same propagation pattern as notesMaster.rels.
     let mut handout_master_rels = RelsBuilder::new();
     handout_master_rels.add(rel_types::THEME, "../theme/theme1.xml");
-    let handout_rels_bytes = handout_master_rels.build().unwrap_or_else(|_| b"".to_vec());
+    let handout_rels_bytes = handout_master_rels
+        .build()
+        .map_err(|e| PptxError::OoxmlElement {
+            part: "ppt/handoutMasters/_rels/handoutMaster1.xml.rels".to_string(),
+            detail: format!("RelsBuilder::build failed: {e}"),
+        })?;
     parts.push(ZipPart {
         path: "ppt/handoutMasters/_rels/handoutMaster1.xml.rels".to_string(),
         bytes: handout_rels_bytes,
     });
+
+    Ok(())
 }
 
 /// Build `docProps/core.xml` and `docProps/app.xml`.

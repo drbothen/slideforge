@@ -30,12 +30,7 @@ use slideforge_layout::LaidOutDeck;
 use slideforge_types::Brand;
 
 use crate::error::PptxError;
-
-/// The minimum slide ID permitted by the PPTX spec (BC-4.01.005).
-pub const SLIDE_ID_START: u32 = 256;
-
-/// The slide master ID required by several renderers (BC-4.01.005 / BUG-006).
-pub const MASTER_ID: u32 = 2_147_483_648;
+use crate::slide_ids::{MASTER_ID, SlideIdAssigner};
 
 /// Serializes `presentation.xml` from a `LaidOutDeck` and `Brand`.
 ///
@@ -58,15 +53,20 @@ impl PresentationSerializer {
     ///
     /// `handout_master_rel_id` is the `rId` for `handoutMaster1.xml`.
     ///
+    /// # Errors
+    ///
+    /// Returns [`PptxError::InvalidEmu`] if `page_size.width.0` or
+    /// `page_size.height.0` exceeds `i32::MAX` (slide size out of range).
+    /// Silent clamping is forbidden (BC-4.01.005 invariant 1; CLAUDE.md
+    /// Forbidden Patterns).
+    ///
+    /// Returns [`PptxError::OoxmlElement`] if `ooxmlsdk` fails to serialise
+    /// any required element.
+    ///
     /// # Panics
     ///
     /// Panics if `slide_rel_ids` has more than `u32::MAX` entries (impossible in practice:
     /// a deck cannot have 4 billion slides). Documented infallible path.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`PptxError::OoxmlElement`] if `ooxmlsdk` fails to serialise
-    /// any required element.
     pub fn build(
         deck: &LaidOutDeck,
         _brand: &Brand,
@@ -75,6 +75,29 @@ impl PresentationSerializer {
         notes_master_rel_id: &str,
         handout_master_rel_id: &str,
     ) -> Result<Vec<u8>, PptxError> {
+        // Validate page size: i32 range check (AC-012 / BC-4.01.005 invariant 1).
+        // Silent clamping is forbidden (BC-4.01.005 invariant 1; CLAUDE.md Forbidden Patterns).
+        let cx = i32::try_from(deck.page_size.width.0).map_err(|_| PptxError::InvalidEmu {
+            slide_index: 0,
+            frame_index: 0,
+            detail: format!(
+                "slide size width EMU {} exceeds i32::MAX ({}); \
+                 cannot represent as OOXML cx attribute",
+                deck.page_size.width.0,
+                i32::MAX
+            ),
+        })?;
+        let cy = i32::try_from(deck.page_size.height.0).map_err(|_| PptxError::InvalidEmu {
+            slide_index: 0,
+            frame_index: 0,
+            detail: format!(
+                "slide size height EMU {} exceeds i32::MAX ({}); \
+                 cannot represent as OOXML cy attribute",
+                deck.page_size.height.0,
+                i32::MAX
+            ),
+        })?;
+
         // ooxmlsdk-generated types have many optional fields; the most readable
         // approach is to start from `default()` and set only the fields we need.
         #[allow(clippy::field_reassign_with_default)]
@@ -126,25 +149,19 @@ impl PresentationSerializer {
 
         // Slide ID list: IDs start at 256, one per slide.
         //
-        // F-037-008: `u32::try_from(i).unwrap_or(0)` silently collapses any
-        // slide beyond u32::MAX (impossible in practice — a deck cannot have
-        // 4 billion slides) to ID 256, duplicating the first slide ID and
-        // corrupting the presentation. The correct path is `expect` with an
-        // actionable message: the precondition (slide count fits in u32) is
-        // documented and guaranteed by the layout engine. This is a documented
-        // infallible path per the production-grade convention (CLAUDE.md:
-        // "Zero .unwrap() outside of tests and clearly-infallible paths").
+        // Routes through SlideIdAssigner::assign — the single authoritative
+        // code path for slide ID generation (BC-4.01.005 invariant 1;
+        // F-038-P1-M1). SlideIdAssigner encapsulates the SLIDE_ID_START offset
+        // and the u32-fit precondition, keeping this caller free of ad-hoc
+        // ID arithmetic.
         if !slide_rel_ids.is_empty() {
+            let ids = SlideIdAssigner::assign(slide_rel_ids.len());
             let sld_id_list = SlideIdList {
                 p_sld_id: slide_rel_ids
                     .iter()
-                    .enumerate()
-                    .map(|(i, rid)| SlideId {
-                        id: SLIDE_ID_START
-                            + u32::try_from(i).expect(
-                                "slide count must fit in u32: \
-                                 a deck cannot have more than ~4 billion slides",
-                            ),
+                    .zip(ids)
+                    .map(|(rid, id)| SlideId {
+                        id,
                         relationship_id: rid.clone(),
                         extension_list: None,
                     })
@@ -154,10 +171,7 @@ impl PresentationSerializer {
         }
 
         // Slide size: use the page_size from the LaidOutDeck.
-        // The PPTX exporter emits the layout-engine canvas size here.
-        // Future stories may apply a scaling factor for exact PPTX native dims.
-        let cx = i32::try_from(deck.page_size.width.0).unwrap_or(9_144_000_i32);
-        let cy = i32::try_from(deck.page_size.height.0).unwrap_or(5_143_500_i32);
+        // cx and cy are validated above — i32 range check guarantees no silent clamp.
         prs.slide_size = Some(SlideSize {
             cx,
             cy,

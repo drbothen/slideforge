@@ -2650,6 +2650,7 @@ dependencies = [
  "slideforge-types",
  "thiserror 2.0.18",
  "tracing",
+ "tracing-test",
  "zip 4.2.0",
 ]
 

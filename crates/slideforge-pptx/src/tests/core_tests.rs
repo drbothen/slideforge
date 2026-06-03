@@ -432,6 +432,54 @@ fn test_BC_4_01_001_handout_master_always_present() {
     );
 }
 
+// ─── SEC-002: notes/handout rels non-empty (CWE-755) ─────────────────────────
+
+/// SEC-002 (CWE-755): `notesMaster1.xml.rels` in the produced ZIP must be
+/// non-empty (i.e., not an empty byte sequence from a silent error swallow).
+///
+/// The previous `unwrap_or_else(|_| b"".to_vec())` pattern would substitute
+/// empty bytes on a `RelsBuilder::build()` error — producing a structurally
+/// invalid PPTX archive. Now the error is `?`-propagated; this test asserts
+/// the happy path produces a valid, non-empty rels document.
+#[test]
+fn test_sec002_notes_master_rels_non_empty_in_zip() {
+    let laid_out = make_laid_out_deck(1);
+    let pptx_bytes = build_pptx(&laid_out);
+    let rels = zip_read_entry(&pptx_bytes, "ppt/notesMasters/_rels/notesMaster1.xml.rels");
+    assert!(
+        !rels.is_empty(),
+        "SEC-002: ppt/notesMasters/_rels/notesMaster1.xml.rels must be non-empty; \
+         empty bytes indicate a silent rels-build error (CWE-755 / CLAUDE.md Forbidden Pattern)"
+    );
+    assert!(
+        rels.contains("Relationship"),
+        "SEC-002: notesMaster1.xml.rels must contain at least one <Relationship> entry; \
+         got: {rels}"
+    );
+}
+
+/// SEC-002 (CWE-755): `handoutMaster1.xml.rels` in the produced ZIP must be
+/// non-empty.
+#[test]
+fn test_sec002_handout_master_rels_non_empty_in_zip() {
+    let laid_out = make_laid_out_deck(1);
+    let pptx_bytes = build_pptx(&laid_out);
+    let rels = zip_read_entry(
+        &pptx_bytes,
+        "ppt/handoutMasters/_rels/handoutMaster1.xml.rels",
+    );
+    assert!(
+        !rels.is_empty(),
+        "SEC-002: ppt/handoutMasters/_rels/handoutMaster1.xml.rels must be non-empty; \
+         empty bytes indicate a silent rels-build error (CWE-755 / CLAUDE.md Forbidden Pattern)"
+    );
+    assert!(
+        rels.contains("Relationship"),
+        "SEC-002: handoutMaster1.xml.rels must contain at least one <Relationship> entry; \
+         got: {rels}"
+    );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // AC-003: [Content_Types].xml snapshot for 3-slide deck
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1023,10 +1071,16 @@ fn test_BC_4_01_001_slide_ids_start_at_256() {
 
     let presentation_xml = zip_read_entry(&pptx_bytes, "ppt/presentation.xml");
 
-    // Find all <p:sldId id="..." ...> attribute values.
+    // Find all <p:sldId id="..." ...> ENTRY attribute values.
+    // Search for "<p:sldId " (with trailing space) to avoid matching
+    // the container element "<p:sldIdLst>" which has no attributes.
     let mut rest = presentation_xml.as_str();
     let mut found_any = false;
-    while let Some(pos) = rest.find("<p:sldId") {
+    while let Some(pos) = rest
+        .find("<p:sldId ")
+        .or_else(|| rest.find("<p:sldId\t"))
+        .or_else(|| rest.find("<p:sldId\n"))
+    {
         rest = &rest[pos + 8..];
         if let Some(id_pos) = rest.find("id=\"") {
             let id_start = id_pos + 4;
@@ -1257,17 +1311,21 @@ fn test_f037_001_master_has_clr_map_and_sld_layout_id_lst() {
         &master_xml[..master_xml.len().min(400)]
     );
 
+    // <p:sldLayoutIdLst> container must be present (ECMA-376 §19.3.1.41 requirement).
     assert!(
         master_xml.contains("<p:sldLayoutIdLst"),
-        "F-037-003: slideMaster1.xml must contain <p:sldLayoutIdLst>; got: {}",
+        "F-037-003: slideMaster1.xml must contain <p:sldLayoutIdLst> container; got: {}",
         &master_xml[..master_xml.len().min(400)]
     );
 
-    // Must have 31 layout ID entries
-    let layout_id_count = master_xml.matches("<p:sldLayoutId id=").count();
+    // Must have exactly 31 layout ID entry elements inside the container.
+    // Count "<p:sldLayoutId " (with trailing space before id=) to avoid
+    // matching the container "<p:sldLayoutIdLst>" which ends in "Lst".
+    let layout_id_count = master_xml.matches("<p:sldLayoutId ").count();
     assert_eq!(
         layout_id_count, 31,
-        "F-037-003: sldLayoutIdLst must have 31 entries; got {layout_id_count}"
+        "F-037-003: master must have 31 <p:sldLayoutId> entries inside <p:sldLayoutIdLst>; \
+         got {layout_id_count}"
     );
 }
 

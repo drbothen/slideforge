@@ -42,11 +42,22 @@ pub enum PptxError {
         rid: String,
     },
 
-    /// The `Brand` provided to the exporter is missing a required XML part
-    /// (e.g., `master_xml` is empty, or fewer than 31 `layout_xmls` are present).
+    /// The `BrandTemplate` supplied to the exporter carries no slide layouts, so
+    /// the required 31 slide layouts cannot be embedded into the PPTX archive.
+    ///
+    /// This error is returned by [`crate::layout_embedder::LayoutEmbedder::embed`]
+    /// when `brand_template.layouts.is_empty()`. A correctly synthesised brand
+    /// (via `brand_template_from_brand`) always produces exactly 31 layouts, so
+    /// this variant is a hard invariant guard rather than a normal error path.
+    ///
+    /// `part` is `"layouts"` in this context.
     #[error("brand is missing required PPTX part: {part}")]
     MissingBrandPart {
-        /// Name of the missing brand part (e.g., `"master_xml"`, `"layout_xml[5]"`).
+        /// Name of the missing brand part.
+        ///
+        /// For the empty-layouts guard this is `"layouts"`.
+        /// For other potential missing-part errors, this is the descriptive part name
+        /// (e.g., `"master_xml"`).
         part: String,
     },
 

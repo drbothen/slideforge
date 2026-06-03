@@ -671,7 +671,9 @@ pub fn serialize_master_to_xml(template: &crate::template::BrandTemplate) -> Vec
         .write_event(Event::Empty(clr_map))
         .expect("write clrMap");
 
-    // <p:sldLayoutIdLst> with one entry per layout
+    // <p:sldLayoutIdLst> container wrapping all 31 layout ID entries.
+    // ECMA-376 §19.3.1.41 CT_SlideMaster requires this container element.
+    // Exactly one <p:sldLayoutId> per layout (BC-4.01.005 postcondition 5).
     writer
         .write_event(Event::Start(BytesStart::new("p:sldLayoutIdLst")))
         .expect("write sldLayoutIdLst start");
@@ -680,8 +682,7 @@ pub fn serialize_master_to_xml(template: &crate::template::BrandTemplate) -> Vec
     for (i, _layout) in template.layouts.iter().enumerate() {
         let layout_id = layout_id_start + u32::try_from(i).expect("layout idx fits");
         let id_str = layout_id.to_string();
-        // rId matches the master's .rels file: rId1 for theme, then rId{2..=32} for layouts
-        // The layout rId in .rels is assigned sequentially starting at rId2 (rId1=theme).
+        // rId matches the master's .rels file: rId1 for theme, then rId{2..=32} for layouts.
         let rid_n = u32::try_from(i + 2).expect("rid fits");
         let rid_str = format!("rId{rid_n}");
         let mut sld_layout_id = BytesStart::new("p:sldLayoutId");
@@ -1642,23 +1643,29 @@ mod tests {
         }
     }
 
-    /// ADR-015 §2 — master XML contains `<p:sldLayoutIdLst>` with one entry per layout.
+    /// ADR-015 §2 — master XML contains `<p:sldLayoutIdLst>` container with one
+    /// `<p:sldLayoutId>` entry per layout.
+    ///
+    /// ECMA-376 §19.3.1.41 requires the `<p:sldLayoutIdLst>` wrapper element.
     #[test]
     fn test_adr015_serialize_master_to_xml_has_sld_layout_id_lst() {
         let template = minimal_brand_template();
         let xml_bytes = serialize_master_to_xml(&template);
         let xml = std::str::from_utf8(&xml_bytes).expect("output must be valid UTF-8");
+
+        // The container element must be present.
         assert!(
             xml.contains("<p:sldLayoutIdLst"),
-            "slideMaster1.xml must contain <p:sldLayoutIdLst>; got: {}",
+            "master XML must contain <p:sldLayoutIdLst> container (ECMA-376 §19.3.1.41); got: {}",
             &xml[..xml.len().min(400)]
         );
+
         // For a template with 1 layout, there must be exactly 1 <p:sldLayoutId id=...> entry.
-        // We count `<p:sldLayoutId id=` to avoid matching the `<p:sldLayoutIdLst` tag.
+        // Count `<p:sldLayoutId id=` to match only actual entries (not the container).
         let count = xml.matches("<p:sldLayoutId id=").count();
         assert_eq!(
             count, 1,
-            "sldLayoutIdLst must have 1 entry for a template with 1 layout; got {count}"
+            "master XML must have 1 <p:sldLayoutId id=...> entry for a template with 1 layout; got {count}"
         );
     }
 
@@ -1720,8 +1727,8 @@ mod tests {
     /// `cSld, clrMap, sldLayoutIdLst, hf, txStyles`.
     ///
     /// `<p:hf>` MUST appear before `<p:txStyles>` in the serialized XML.
-    /// Also verifies `<a:clrMap>` appears before `<p:sldLayoutIdLst>` which appears
-    /// before `<p:hf>`.
+    /// Also verifies `<a:clrMap>` appears before the `<p:sldLayoutIdLst>` container,
+    /// which in turn appears before `<p:hf>`.
     ///
     /// This is a load-bearing order test (TD-VSDD-059). Position is asserted by
     /// byte-offset comparison, not by tag counting.
@@ -1734,24 +1741,33 @@ mod tests {
         let clr_map_pos = xml
             .find("<a:clrMap")
             .expect("master XML must contain <a:clrMap>");
-        let sld_layout_lst_pos = xml
-            .find("<p:sldLayoutIdLst")
-            .expect("master XML must contain <p:sldLayoutIdLst>");
+        // Use the first <p:sldLayoutId id= entry as the positional anchor for the
+        // <p:sldLayoutIdLst> section. The container IS written by the quick_xml
+        // serializer (serialize_master_to_xml uses quick_xml::Writer, not ooxmlsdk,
+        // so the opening <p:sldLayoutIdLst> tag is always emitted as a distinct byte
+        // sequence). We anchor on the first <p:sldLayoutId id= child element here
+        // for position comparison only — it appears immediately after the opening
+        // container tag, making it a reliable byte-offset proxy for the section start.
+        // AC-004 and test_BC_4_01_005_ac004_* verify the container element itself
+        // is present in the master XML output.
+        let sld_layout_id_pos = xml
+            .find("<p:sldLayoutId id=")
+            .expect("master XML must contain at least one <p:sldLayoutId id=...> entry");
         let hf_pos = xml.find("<p:hf").expect("master XML must contain <p:hf>");
         let tx_styles_pos = xml
             .find("<p:txStyles")
             .expect("master XML must contain <p:txStyles>");
 
         // ECMA-376 §19.3.1.42 CT_SlideMaster sequence model:
-        // cSld < clrMap < sldLayoutIdLst < hf < txStyles
+        // cSld < clrMap < [sldLayoutId entries] < hf < txStyles
         assert!(
-            clr_map_pos < sld_layout_lst_pos,
-            "<a:clrMap> (byte {clr_map_pos}) must appear BEFORE <p:sldLayoutIdLst> \
-             (byte {sld_layout_lst_pos}) — ECMA-376 §19.3.1.42 sequence model (ADR-015 §A.3)"
+            clr_map_pos < sld_layout_id_pos,
+            "<a:clrMap> (byte {clr_map_pos}) must appear BEFORE first <p:sldLayoutId id=> \
+             (byte {sld_layout_id_pos}) — ECMA-376 §19.3.1.42 sequence model (ADR-015 §A.3)"
         );
         assert!(
-            sld_layout_lst_pos < hf_pos,
-            "<p:sldLayoutIdLst> (byte {sld_layout_lst_pos}) must appear BEFORE <p:hf> \
+            sld_layout_id_pos < hf_pos,
+            "First <p:sldLayoutId id=> (byte {sld_layout_id_pos}) must appear BEFORE <p:hf> \
              (byte {hf_pos}) — ECMA-376 §19.3.1.42 sequence model (ADR-015 §A.3)"
         );
         assert!(
