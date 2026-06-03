@@ -33,6 +33,7 @@
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 
+pub mod brand_adapter;
 pub mod content_types;
 pub mod error;
 pub mod presentation;
@@ -54,62 +55,19 @@ mod tests {
     mod core_tests;
 }
 
-use ooxmlsdk::common::XmlNamespaceDecl;
-use ooxmlsdk::schemas::p::{
-    CommonSlideData, GroupShapeProperties, HandoutMaster, NotesMaster, ShapeTree, SlideLayout,
-    SlideMaster,
-};
-
 use content_types::ContentTypesBuilder;
 use presentation::PresentationSerializer;
 use rels::{RelsBuilder, rel_types};
 use slide_serializer::SlideSerializer;
+use slideforge_brand::BrandTemplate;
+use slideforge_brand::layout_xml::{serialize_layout_to_xml, serialize_master_to_xml, serialize_theme_to_xml};
 use slideforge_layout::{FrameContent, LaidOutDeck};
 use slideforge_plugin_api::{ExportError, ExportOptions, Exporter};
 use slideforge_types::{Brand, Deck};
 use zip_assembler::{ZipAssembler, ZipPart};
 
+use crate::brand_adapter::brand_template_from_brand;
 use crate::error::PptxError;
-
-/// Standard `PresentationML` namespace URI.
-const XMLNS_PML: &str = "http://schemas.openxmlformats.org/presentationml/2006/main";
-/// Standard `DrawingML` namespace URI.
-const XMLNS_DML: &str = "http://schemas.openxmlformats.org/drawingml/2006/main";
-/// Standard `OPC` relationships namespace URI.
-const XMLNS_RELS: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
-
-/// Build the standard namespace declarations used in `PresentationML` parts.
-fn pml_xmlns() -> Vec<XmlNamespaceDecl> {
-    vec![
-        XmlNamespaceDecl::new("a", XMLNS_DML),
-        XmlNamespaceDecl::new("r", XMLNS_RELS),
-        XmlNamespaceDecl::new("p", XMLNS_PML),
-    ]
-}
-
-/// Build a minimal `ShapeTree` with no shapes (for stubs).
-fn empty_shape_tree() -> ShapeTree {
-    ShapeTree {
-        non_visual_group_shape_properties: None,
-        group_shape_properties: Some(Box::new(GroupShapeProperties::default())),
-        shape_tree_choice: Vec::new(),
-        p_ext_lst: None,
-        xmlns: vec![],
-        xml_other_attrs: vec![],
-    }
-}
-
-/// Build a `CommonSlideData` wrapping the given `ShapeTree`.
-fn common_slide_data(shape_tree: ShapeTree) -> CommonSlideData {
-    CommonSlideData {
-        name: None,
-        background: None,
-        shape_tree: Box::new(shape_tree),
-        customer_data_list: None,
-        control_list: None,
-        common_slide_data_extension_list: None,
-    }
-}
 
 /// The built-in PPTX exporter plugin.
 ///
@@ -148,22 +106,33 @@ impl PptxExporter {
             "PptxExporter::export_inner starting"
         );
 
+        // ADR-015: synthesize BrandTemplate from &Brand once for all serializers.
+        let brand_template = brand_template_from_brand(brand);
+
         let mut parts: Vec<ZipPart> = Vec::new();
 
         // Build all parts, collecting into `parts`.
-        build_slide_parts(laid_out, &mut parts)?;
-        let slide_rel_ids = build_presentation_rels(laid_out, &mut parts)?;
+        //
+        // F-037-010 fix: build presentation rels ONCE and thread the resulting rIds
+        // to both `build_presentation_xml` and `build_presentation_rels_part`.
+        // Previously rels were rebuilt twice (once for slide rIds, once for XML).
+        let (slide_rel_ids, prs_rels_bytes) =
+            build_presentation_rels_bytes(laid_out)?;
+
+        build_slide_parts(laid_out, &brand_template, &mut parts)?;
         build_presentation_xml(laid_out, brand, &slide_rel_ids, &mut parts)?;
-        build_master_parts(&mut parts)?;
-        build_layout_parts(&mut parts)?;
-        build_theme_part(&mut parts);
-        build_notes_handout_masters(&mut parts)?;
+        parts.push(ZipPart {
+            path: "ppt/_rels/presentation.xml.rels".to_string(),
+            bytes: prs_rels_bytes,
+        });
+        build_master_parts(&brand_template, &mut parts)?;
+        build_layout_parts(&brand_template, &mut parts)?;
+        build_theme_part(&brand_template, &mut parts);
+        build_notes_handout_masters(&brand_template, &mut parts);
         build_doc_props(deck, &mut parts);
         build_root_rels(&mut parts)?;
 
         // Content types are built last so all media parts are visible in `parts`.
-        // content_types are pushed inside build_content_types — collect result.
-        // Re-build content types as the last part (after all media parts exist).
         let mut ct = ContentTypesBuilder::new();
         for _ in 0..laid_out.slides.len() {
             ct.add_slide();
@@ -187,36 +156,87 @@ impl PptxExporter {
 }
 
 /// Build all slide XML parts and slide `.rels` files, including media parts.
-fn build_slide_parts(laid_out: &LaidOutDeck, parts: &mut Vec<ZipPart>) -> Result<(), PptxError> {
+///
+/// ## Layout index wiring (F-037-011)
+///
+/// `LaidOutSlide.slide_type_keyword` is used to look up the matching layout
+/// index in `brand_template.layouts`. The lookup uses the layout `name` field
+/// (which stores the slide type keyword). If no match is found, layout 0 is
+/// used as a fallback with a `tracing::warn!`.
+///
+/// ## Dark layout wiring (F-037-004)
+///
+/// The `is_dark_layout` flag is read from the layout's `has_color_override`
+/// field (not hardcoded to `false`).
+///
+/// ## Diagram media wiring (F-037-005)
+///
+/// For `FrameContent::Diagram` frames, the SVG is written to `ppt/media/` and
+/// an IMAGE relationship is added. A `<p:pic>` shape is also emitted in the
+/// slide XML that references the media `rId` via `r:embed`, so the relationship
+/// is never dangling.
+fn build_slide_parts(
+    laid_out: &LaidOutDeck,
+    brand_template: &BrandTemplate,
+    parts: &mut Vec<ZipPart>,
+) -> Result<(), PptxError> {
     let mut media_idx = 1_usize;
 
     for (i, slide) in laid_out.slides.iter().enumerate() {
         let slide_path = format!("ppt/slides/slide{}.xml", i + 1);
         let rels_path = format!("ppt/slides/_rels/slide{}.xml.rels", i + 1);
 
-        let mut slide_rels = RelsBuilder::new();
-        let layout_rel_id =
-            slide_rels.add(rel_types::SLIDE_LAYOUT, "../slideLayouts/slideLayout1.xml");
+        // F-037-011: look up layout index from slide_type_keyword.
+        // Layouts are 1-indexed in the ZIP (slideLayout1.xml = layouts[0]).
+        let layout_index = find_layout_index(brand_template, slide.slide_type_keyword.as_ref());
+        let layout_num = layout_index + 1; // 1-based ZIP name
 
-        for frame in &slide.frames {
+        // F-037-004: read dark layout flag from brand layout metadata.
+        let is_dark_layout = brand_template
+            .layouts
+            .get(layout_index)
+            .is_some_and(|l| l.has_color_override);
+
+        let mut slide_rels = RelsBuilder::new();
+        let layout_rel_id = slide_rels.add(
+            rel_types::SLIDE_LAYOUT,
+            format!("../slideLayouts/slideLayout{layout_num}.xml"),
+        );
+
+        // F-037-005: collect diagram frames and emit both media and <p:pic> shapes.
+        // The diagram rIds must be collected before calling SlideSerializer so
+        // the serializer can reference them in the slide XML.
+        let mut diagram_rids: Vec<(usize, String)> = Vec::new(); // (frame_idx, rId)
+
+        for (frame_idx, frame) in slide.frames.iter().enumerate() {
             if let FrameContent::Diagram(normalized_svg) = &frame.content {
                 let media_filename = format!("image{media_idx}.svg");
                 let media_path = format!("ppt/media/{media_filename}");
-                slide_rels.add(rel_types::IMAGE, format!("../media/{media_filename}"));
+                let rid = slide_rels.add(rel_types::IMAGE, format!("../media/{media_filename}"));
                 parts.push(ZipPart {
                     path: media_path,
                     bytes: normalized_svg.as_str().as_bytes().to_vec(),
                 });
+                diagram_rids.push((frame_idx, rid));
                 media_idx += 1;
             }
         }
 
-        let serializer = SlideSerializer::new(false, 0);
-        let (slide_xml, _warnings) = serializer.build(slide, i, &layout_rel_id)?;
+        // Build the slide XML. SlideSerializer handles text frames; diagram
+        // <p:pic> shapes are injected below (F-037-005).
+        let serializer = SlideSerializer::new(is_dark_layout, layout_index);
+        let (mut slide_xml_bytes, _warnings) = serializer.build(slide, i, &layout_rel_id)?;
+
+        // F-037-005: inject <p:pic> shapes for all diagram frames.
+        // We append them into the slide XML's <p:spTree> before </p:spTree>.
+        if !diagram_rids.is_empty() {
+            slide_xml_bytes =
+                inject_pic_shapes_for_diagrams(slide, &slide_xml_bytes, &diagram_rids)?;
+        }
 
         parts.push(ZipPart {
             path: slide_path,
-            bytes: slide_xml,
+            bytes: slide_xml_bytes,
         });
         parts.push(ZipPart {
             path: rels_path,
@@ -226,11 +246,113 @@ fn build_slide_parts(laid_out: &LaidOutDeck, parts: &mut Vec<ZipPart>) -> Result
     Ok(())
 }
 
-/// Build `ppt/_rels/presentation.xml.rels` and return the slide `rId` list.
-fn build_presentation_rels(
+/// Find the 0-based layout index for a given `slide_type_keyword`.
+///
+/// Matches on layout `name` field (set to the slide type keyword by `generate_all_layouts`).
+/// Returns `0` as a fallback if no match is found (title layout is always present).
+fn find_layout_index(brand_template: &BrandTemplate, slide_type_keyword: &str) -> usize {
+    for (idx, layout) in brand_template.layouts.iter().enumerate() {
+        if layout.name.as_ref() == slide_type_keyword {
+            return idx;
+        }
+    }
+    tracing::warn!(
+        slide_type = slide_type_keyword,
+        "no matching layout found for slide_type_keyword; falling back to layout index 0 (title)"
+    );
+    0
+}
+
+/// Inject `<p:pic>` XML shapes for diagram frames into the slide XML bytes.
+///
+/// For each (frame_idx, rId) pair, a `<p:pic>` element is appended before
+/// `</p:spTree>` in the slide XML. The `<p:pic>` references the media via
+/// `r:embed="{rId}"` (F-037-005).
+fn inject_pic_shapes_for_diagrams(
+    slide: &slideforge_layout::LaidOutSlide,
+    xml_bytes: &[u8],
+    diagram_rids: &[(usize, String)],
+) -> Result<Vec<u8>, PptxError> {
+    let xml_str = std::str::from_utf8(xml_bytes).map_err(|e| PptxError::OoxmlElement {
+        part: "ppt/slides/slide?.xml".to_string(),
+        detail: format!("slide XML is not valid UTF-8: {e}"),
+    })?;
+
+    let mut pic_xml = String::new();
+    for (frame_idx, rid) in diagram_rids {
+        let frame = &slide.frames[*frame_idx];
+        let x = frame.bbox.x.0;
+        let y = frame.bbox.y.0;
+        let cx = frame.bbox.width.0;
+        let cy = frame.bbox.height.0;
+
+        // sp_id for picture shapes: start from 1000 + frame_idx to avoid collision
+        // with text placeholder shape IDs (which start at 1).
+        // This range is safe: text placeholders use 1..=N for at most ~5 frames.
+        let sp_id = 1000u32 + u32::try_from(*frame_idx).unwrap_or(0);
+
+        // Emit a minimal <p:pic> with:
+        //   - <p:nvPicPr> carrying an empty non-visual-picture-drawing-properties
+        //   - <p:blipFill> referencing the media rId via r:embed
+        //   - <p:spPr> with xfrm position/size
+        pic_xml.push_str(&format!(
+            concat!(
+                r#"<p:pic xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main""#,
+                r#" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main""#,
+                r#" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">"#,
+                r#"<p:nvPicPr>"#,
+                r#"<p:cNvPr id="{sp_id}" name="Diagram {frame_idx}"/>"#,
+                r#"<p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr>"#,
+                r#"<p:nvPr/>"#,
+                r#"</p:nvPicPr>"#,
+                r#"<p:blipFill>"#,
+                r#"<a:blip r:embed="{rid}"/>"#,
+                r#"<a:stretch><a:fillRect/></a:stretch>"#,
+                r#"</p:blipFill>"#,
+                r#"<p:spPr>"#,
+                r#"<a:xfrm><a:off x="{x}" y="{y}"/><a:ext cx="{cx}" cy="{cy}"/></a:xfrm>"#,
+                r#"<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>"#,
+                r#"</p:spPr>"#,
+                r#"</p:pic>"#,
+            ),
+            sp_id = sp_id,
+            frame_idx = frame_idx,
+            rid = rid,
+            x = x,
+            y = y,
+            cx = cx,
+            cy = cy,
+        ));
+    }
+
+    // Inject pic shapes before the closing </p:spTree> tag.
+    let insert_before = "</p:spTree>";
+    let result = if let Some(pos) = xml_str.rfind(insert_before) {
+        let (before, after) = xml_str.split_at(pos);
+        format!("{before}{pic_xml}{after}")
+    } else {
+        // Fallback: if </p:spTree> is not found (should never happen for valid slide XML),
+        // return original bytes unchanged and log a warning.
+        tracing::warn!(
+            "inject_pic_shapes: </p:spTree> not found in slide XML; diagram pic shapes omitted"
+        );
+        return Ok(xml_bytes.to_vec());
+    };
+
+    Ok(result.into_bytes())
+}
+
+/// Build `ppt/_rels/presentation.xml.rels` and return the slide `rId` list AND the bytes.
+///
+/// F-037-010: Previously presentation.xml.rels was built twice — once in
+/// `build_presentation_rels` (to get rIds for `presentation.xml`) and again in
+/// `build_presentation_xml` via a second `RelsBuilder`. The second build assigned
+/// rIds independently, risking desynchronization. Now we build the rels ONCE and
+/// return both the serialized bytes (to write as the part) and the rId list (to pass
+/// into `PresentationSerializer`).
+fn build_presentation_rels_bytes(
     laid_out: &LaidOutDeck,
-    parts: &mut Vec<ZipPart>,
-) -> Result<Vec<String>, PptxError> {
+) -> Result<(Vec<String>, Vec<u8>), PptxError> {
     let mut prs_rels = RelsBuilder::new();
     let _master_rel_id = prs_rels.add(rel_types::SLIDE_MASTER, "slideMasters/slideMaster1.xml");
     let _notes_master_rel_id =
@@ -246,37 +368,37 @@ fn build_presentation_rels(
         slide_rel_ids.push(rid);
     }
 
-    parts.push(ZipPart {
-        path: "ppt/_rels/presentation.xml.rels".to_string(),
-        bytes: prs_rels.build()?,
-    });
-    Ok(slide_rel_ids)
+    let bytes = prs_rels.build()?;
+    Ok((slide_rel_ids, bytes))
 }
 
 /// Build `ppt/presentation.xml`.
+///
+/// F-037-010: rIds are now derived from the same `RelsBuilder` that produced
+/// `presentation.xml.rels` (via `build_presentation_rels_bytes`). rId1 = master,
+/// rId2 = notes master, rId3 = handout master, rId4..=rId{N+3} = slides.
+/// These are the canonical rIds — hardcoded by convention to match the
+/// `build_presentation_rels_bytes` assignment order.
 fn build_presentation_xml(
     laid_out: &LaidOutDeck,
     brand: &Brand,
     slide_rel_ids: &[String],
     parts: &mut Vec<ZipPart>,
 ) -> Result<(), PptxError> {
-    // Rebuild rels to get deterministic rIds for presentation.xml referencing.
-    let mut prs_rels_ids = RelsBuilder::new();
-    let master_rel_id = prs_rels_ids.add(rel_types::SLIDE_MASTER, "slideMasters/slideMaster1.xml");
-    let notes_master_rel_id =
-        prs_rels_ids.add(rel_types::NOTES_MASTER, "notesMasters/notesMaster1.xml");
-    let handout_master_rel_id = prs_rels_ids.add(
-        rel_types::HANDOUT_MASTER,
-        "handoutMasters/handoutMaster1.xml",
-    );
+    // These rId values MUST match the order in `build_presentation_rels_bytes`.
+    // rId1 = slide master, rId2 = notes master, rId3 = handout master.
+    // slide_rel_ids[i] = rId{4+i}.
+    let master_rel_id = "rId1";
+    let notes_master_rel_id = "rId2";
+    let handout_master_rel_id = "rId3";
 
     let prs_xml = PresentationSerializer::build(
         laid_out,
         brand,
         slide_rel_ids,
-        &master_rel_id,
-        &notes_master_rel_id,
-        &handout_master_rel_id,
+        master_rel_id,
+        notes_master_rel_id,
+        handout_master_rel_id,
     )?;
     parts.push(ZipPart {
         path: "ppt/presentation.xml".to_string(),
@@ -286,24 +408,29 @@ fn build_presentation_xml(
 }
 
 /// Build `slideMaster1.xml` and its `.rels`.
-fn build_master_parts(parts: &mut Vec<ZipPart>) -> Result<(), PptxError> {
-    let csl = common_slide_data(empty_shape_tree());
-    let master = SlideMaster {
-        xmlns: pml_xmlns(),
-        common_slide_data: Box::new(csl),
-        ..SlideMaster::default()
-    };
+///
+/// ADR-015 §2: uses `serialize_master_to_xml` from `slideforge-brand` to
+/// produce a schema-valid master with `<a:clrMap>`, `<p:sldLayoutIdLst>`,
+/// `<p:txStyles>`, 5 master placeholder shapes, and `<p:hf>` flags.
+///
+/// The master `.rels` file references:
+/// - rId1: the theme
+/// - rId2..=rId32: the 31 slide layouts
+///
+/// These rId values match the `sldLayoutIdLst` entries in master XML
+/// (which use r:id="rId2".."rId32").
+fn build_master_parts(brand_template: &BrandTemplate, parts: &mut Vec<ZipPart>) -> Result<(), PptxError> {
     parts.push(ZipPart {
         path: "ppt/slideMasters/slideMaster1.xml".to_string(),
-        bytes: master.to_xml_bytes().map_err(|e| PptxError::OoxmlElement {
-            part: "ppt/slideMasters/slideMaster1.xml".to_string(),
-            detail: e.to_string(),
-        })?,
+        bytes: serialize_master_to_xml(brand_template),
     });
 
     let mut master_rels = RelsBuilder::new();
+    // rId1 = theme (matches the rId used in serialize_master_to_xml for theme ref if any)
     master_rels.add(rel_types::THEME, "../theme/theme1.xml");
-    for n in 1..=31 {
+    // rId2..=rId32 = layouts
+    let layout_count = brand_template.layouts.len().max(31);
+    for n in 1..=layout_count {
         master_rels.add(
             rel_types::SLIDE_LAYOUT,
             format!("../slideLayouts/slideLayout{n}.xml"),
@@ -317,20 +444,31 @@ fn build_master_parts(parts: &mut Vec<ZipPart>) -> Result<(), PptxError> {
 }
 
 /// Build all 31 slide layout XML files and their `.rels`.
-fn build_layout_parts(parts: &mut Vec<ZipPart>) -> Result<(), PptxError> {
-    for n in 1..=31_usize {
-        let csl = common_slide_data(empty_shape_tree());
-        let layout = SlideLayout {
-            xmlns: pml_xmlns(),
-            common_slide_data: Box::new(csl),
-            ..SlideLayout::default()
+///
+/// ADR-015 §1: uses `serialize_layout_to_xml` from `slideforge-brand` for
+/// each layout in `brand_template.layouts`. If the template has fewer than 31
+/// layouts (unlikely for synthesized brands), fills remaining slots with the
+/// last available layout.
+fn build_layout_parts(brand_template: &BrandTemplate, parts: &mut Vec<ZipPart>) -> Result<(), PptxError> {
+    let layout_count = 31_usize;
+
+    for n in 1..=layout_count {
+        let layout_idx = (n - 1).min(brand_template.layouts.len().saturating_sub(1));
+        let layout_xml = if brand_template.layouts.is_empty() {
+            // Defensive fallback: produce a minimal valid layout XML if the
+            // template has no layouts (should never happen for synthesized brands).
+            tracing::warn!(
+                layout_n = n,
+                "brand_template has no layouts; emitting empty layout placeholder"
+            );
+            minimal_empty_layout_xml(n)
+        } else {
+            serialize_layout_to_xml(&brand_template.layouts[layout_idx])
         };
+
         parts.push(ZipPart {
             path: format!("ppt/slideLayouts/slideLayout{n}.xml"),
-            bytes: layout.to_xml_bytes().map_err(|e| PptxError::OoxmlElement {
-                part: format!("ppt/slideLayouts/slideLayout{n}.xml"),
-                detail: e.to_string(),
-            })?,
+            bytes: layout_xml,
         });
 
         let mut layout_rels = RelsBuilder::new();
@@ -346,120 +484,111 @@ fn build_layout_parts(parts: &mut Vec<ZipPart>) -> Result<(), PptxError> {
     Ok(())
 }
 
-/// Build `theme1.xml` and push to parts.
+/// Produce a minimal valid `slideLayoutN.xml` for emergency fallback.
 ///
-/// The theme uses a static well-formed XML byte slice (not string concatenation).
-/// This is the ONLY place in this crate where pre-formed XML bytes are used —
-/// because `ooxmlsdk`'s theme types require many mandatory sub-elements
-/// (`fontScheme`, `fmtScheme`, etc.) that are not worth constructing via typed
-/// builders for a minimal baseline.
-fn build_theme_part(parts: &mut Vec<ZipPart>) {
-    let theme_xml: &[u8] = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="slideforge">
-  <a:themeElements>
-    <a:clrScheme name="slideforge">
-      <a:dk1><a:srgbClr val="000000"/></a:dk1>
-      <a:lt1><a:srgbClr val="FFFFFF"/></a:lt1>
-      <a:dk2><a:srgbClr val="1F3864"/></a:dk2>
-      <a:lt2><a:srgbClr val="E7E6E6"/></a:lt2>
-      <a:accent1><a:srgbClr val="003087"/></a:accent1>
-      <a:accent2><a:srgbClr val="0066CC"/></a:accent2>
-      <a:accent3><a:srgbClr val="FF6B35"/></a:accent3>
-      <a:accent4><a:srgbClr val="F5F5F5"/></a:accent4>
-      <a:accent5><a:srgbClr val="4BACC6"/></a:accent5>
-      <a:accent6><a:srgbClr val="F79646"/></a:accent6>
-      <a:hlink><a:srgbClr val="0563C1"/></a:hlink>
-      <a:folHlink><a:srgbClr val="954F72"/></a:folHlink>
-    </a:clrScheme>
-    <a:fontScheme name="slideforge">
-      <a:majorFont><a:latin typeface="Calibri Light"/><a:ea typeface=""/><a:cs typeface=""/></a:majorFont>
-      <a:minorFont><a:latin typeface="Calibri"/><a:ea typeface=""/><a:cs typeface=""/></a:minorFont>
-    </a:fontScheme>
-    <a:fmtScheme name="slideforge">
-      <a:fillStyleLst>
-        <a:solidFill><a:schemeClr val="phClr"/></a:solidFill>
-        <a:solidFill><a:schemeClr val="phClr"><a:tint val="95000"/><a:satMod val="105000"/></a:schemeClr></a:solidFill>
-        <a:solidFill><a:schemeClr val="phClr"><a:tint val="75000"/><a:satMod val="105000"/></a:schemeClr></a:solidFill>
-      </a:fillStyleLst>
-      <a:lnStyleLst>
-        <a:ln w="6350" cap="flat" cmpd="sng" algn="ctr"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:prstDash val="solid"/></a:ln>
-        <a:ln w="12700" cap="flat" cmpd="sng" algn="ctr"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:prstDash val="solid"/></a:ln>
-        <a:ln w="19050" cap="flat" cmpd="sng" algn="ctr"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:prstDash val="solid"/></a:ln>
-      </a:lnStyleLst>
-      <a:effectStyleLst>
-        <a:effectStyle><a:effectLst/></a:effectStyle>
-        <a:effectStyle><a:effectLst/></a:effectStyle>
-        <a:effectStyle><a:effectLst><a:outerShdw blurRad="40000" dist="23000" dir="5400000" rotWithShape="0"><a:srgbClr val="000000"><a:alpha val="35000"/></a:srgbClr></a:outerShdw></a:effectLst></a:effectStyle>
-      </a:effectStyleLst>
-      <a:bgFillStyleLst>
-        <a:solidFill><a:schemeClr val="phClr"/></a:solidFill>
-        <a:solidFill><a:schemeClr val="phClr"><a:tint val="95000"/><a:satMod val="170000"/></a:schemeClr></a:solidFill>
-        <a:gradFill rotate="1"><a:gsLst><a:gs pos="0"><a:schemeClr val="phClr"><a:tint val="93000"/><a:satMod val="150000"/><a:shade val="98000"/><a:lumMod val="102000"/></a:schemeClr></a:gs><a:gs pos="50000"><a:schemeClr val="phClr"><a:tint val="98000"/><a:satMod val="130000"/><a:shade val="90000"/><a:lumMod val="103000"/></a:schemeClr></a:gs><a:gs pos="100000"><a:schemeClr val="phClr"><a:shade val="63000"/><a:satMod val="120000"/></a:schemeClr></a:gs></a:gsLst><a:lin ang="16200000" scaled="0"/></a:gradFill>
-      </a:bgFillStyleLst>
-    </a:fmtScheme>
-  </a:themeElements>
-</a:theme>"#;
+/// This is only called when `brand_template.layouts` is empty (should never
+/// occur for synthesized brands). The result is a bare `<p:sldLayout>` with
+/// no placeholders — schema-valid but visually unstyled.
+fn minimal_empty_layout_xml(n: usize) -> Vec<u8> {
+    format!(
+        concat!(
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+            r#"<p:sldLayout xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main""#,
+            r#" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main""#,
+            r#" type="cust" preserve="1">"#,
+            r#"<p:cSld name="Layout {n}"><p:spTree>"#,
+            r#"<p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>"#,
+            r#"<p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/>"#,
+            r#"<a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>"#,
+            r#"</p:spTree></p:cSld><p:hf/></p:sldLayout>"#,
+        ),
+        n = n
+    )
+    .into_bytes()
+}
+
+/// Build `theme1.xml` from brand data and push to parts.
+///
+/// ADR-015 §3: uses `serialize_theme_to_xml` from `slideforge-brand` to
+/// produce a `theme1.xml` from the brand's 12 color slots and font names.
+/// Closes F-037-007 (hardcoded theme bytes removed).
+fn build_theme_part(brand_template: &BrandTemplate, parts: &mut Vec<ZipPart>) {
     parts.push(ZipPart {
         path: "ppt/theme/theme1.xml".to_string(),
-        bytes: theme_xml.to_vec(),
+        bytes: serialize_theme_to_xml(brand_template),
     });
 }
 
 /// Build `notesMaster1.xml` and `handoutMaster1.xml` (always present — BC-4.01.006).
-fn build_notes_handout_masters(parts: &mut Vec<ZipPart>) -> Result<(), PptxError> {
-    let notes_master = NotesMaster {
-        xmlns: pml_xmlns(),
-        common_slide_data: Box::new(common_slide_data(empty_shape_tree())),
-        ..NotesMaster::default()
+///
+/// ADR-015 §4: uses pre-serialized stub bytes from `BrandTemplate::notes_master_stub`
+/// and `BrandTemplate::handout_master_stub`. For synthesized brands these are populated
+/// from `NOTES_MASTER_STUB` / `HANDOUT_MASTER_STUB` constants in `layout_xml.rs`.
+fn build_notes_handout_masters(brand_template: &BrandTemplate, parts: &mut Vec<ZipPart>) {
+    // Use brand template stubs — always non-empty for synthesized brands.
+    let notes_bytes = if brand_template.notes_master_stub.is_empty() {
+        slideforge_brand::layout_xml::NOTES_MASTER_STUB.to_vec()
+    } else {
+        brand_template.notes_master_stub.clone()
     };
     parts.push(ZipPart {
         path: "ppt/notesMasters/notesMaster1.xml".to_string(),
-        bytes: notes_master
-            .to_xml_bytes()
-            .map_err(|e| PptxError::OoxmlElement {
-                part: "ppt/notesMasters/notesMaster1.xml".to_string(),
-                detail: e.to_string(),
-            })?,
+        bytes: notes_bytes,
     });
 
+    // notesMaster.rels — references theme.
+    // SAFETY: RelsBuilder::build() only fails if no entries are added;
+    // we always add one entry, so this is infallible in practice.
     let mut notes_master_rels = RelsBuilder::new();
     notes_master_rels.add(rel_types::THEME, "../theme/theme1.xml");
+    let notes_rels_bytes = notes_master_rels
+        .build()
+        .unwrap_or_else(|_| b"".to_vec());
     parts.push(ZipPart {
         path: "ppt/notesMasters/_rels/notesMaster1.xml.rels".to_string(),
-        bytes: notes_master_rels.build()?,
+        bytes: notes_rels_bytes,
     });
 
-    let handout_master = HandoutMaster {
-        xmlns: pml_xmlns(),
-        common_slide_data: Box::new(common_slide_data(empty_shape_tree())),
-        ..HandoutMaster::default()
+    let handout_bytes = if brand_template.handout_master_stub.is_empty() {
+        slideforge_brand::layout_xml::HANDOUT_MASTER_STUB.to_vec()
+    } else {
+        brand_template.handout_master_stub.clone()
     };
     parts.push(ZipPart {
         path: "ppt/handoutMasters/handoutMaster1.xml".to_string(),
-        bytes: handout_master
-            .to_xml_bytes()
-            .map_err(|e| PptxError::OoxmlElement {
-                part: "ppt/handoutMasters/handoutMaster1.xml".to_string(),
-                detail: e.to_string(),
-            })?,
+        bytes: handout_bytes,
     });
 
     let mut handout_master_rels = RelsBuilder::new();
     handout_master_rels.add(rel_types::THEME, "../theme/theme1.xml");
+    let handout_rels_bytes = handout_master_rels
+        .build()
+        .unwrap_or_else(|_| b"".to_vec());
     parts.push(ZipPart {
         path: "ppt/handoutMasters/_rels/handoutMaster1.xml.rels".to_string(),
-        bytes: handout_master_rels.build()?,
+        bytes: handout_rels_bytes,
     });
-
-    Ok(())
 }
 
 /// Build `docProps/core.xml` and `docProps/app.xml`.
 ///
 /// These use pre-formed XML strings — the OPC core properties namespace is
 /// outside the `ooxmlsdk` schema module scope for this story.
+///
+/// ## XML escaping (F-037-006)
+///
+/// The `dc:language` value is XML-escaped before interpolation. A user-supplied
+/// lang value like `"en-US<script>"` must not produce malformed XML.
+/// Characters escaped: `&` → `&amp;`, `<` → `&lt;`, `>` → `&gt;`,
+/// `"` → `&quot;`, `'` → `&apos;`.
+///
+/// This is the bounded exception for string-built XML (referenced in ADR-001):
+/// the OPC core properties namespace is not covered by `ooxmlsdk` schemas in
+/// this story's scope. Escaping is the correct mitigation.
 fn build_doc_props(deck: &Deck, parts: &mut Vec<ZipPart>) {
-    let lang = deck.metadata.lang.as_deref().unwrap_or("en-US");
+    let lang_raw = deck.metadata.lang.as_deref().unwrap_or("en-US");
+    // F-037-006: XML-escape the lang value before interpolating into the XML body.
+    let lang = xml_escape(lang_raw);
 
     let core_xml = format!(
         concat!(
@@ -490,6 +619,24 @@ fn build_doc_props(deck: &Deck, parts: &mut Vec<ZipPart>) {
         path: "docProps/app.xml".to_string(),
         bytes: app_xml.to_vec(),
     });
+}
+
+/// XML-escape a string for safe embedding in XML element text content.
+///
+/// Replaces the 5 XML-reserved characters:
+/// - `&` → `&amp;` (must be first to avoid double-escaping)
+/// - `<` → `&lt;`
+/// - `>` → `&gt;`
+/// - `"` → `&quot;`
+/// - `'` → `&apos;`
+///
+/// Used by [`build_doc_props`] to escape the `dc:language` value (F-037-006).
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
 }
 
 /// Build `_rels/.rels` (root relationships).

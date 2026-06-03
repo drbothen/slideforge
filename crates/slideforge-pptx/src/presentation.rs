@@ -120,13 +120,26 @@ impl PresentationSerializer {
         }));
 
         // Slide ID list: IDs start at 256, one per slide.
+        //
+        // F-037-008: `u32::try_from(i).unwrap_or(0)` silently collapses any
+        // slide beyond u32::MAX (impossible in practice — a deck cannot have
+        // 4 billion slides) to ID 256, duplicating the first slide ID and
+        // corrupting the presentation. The correct path is `expect` with an
+        // actionable message: the precondition (slide count fits in u32) is
+        // documented and guaranteed by the layout engine. This is a documented
+        // infallible path per the production-grade convention (CLAUDE.md:
+        // "Zero .unwrap() outside of tests and clearly-infallible paths").
         if !slide_rel_ids.is_empty() {
             let sld_id_list = SlideIdList {
                 p_sld_id: slide_rel_ids
                     .iter()
                     .enumerate()
                     .map(|(i, rid)| SlideId {
-                        id: SLIDE_ID_START + u32::try_from(i).unwrap_or(0),
+                        id: SLIDE_ID_START
+                            + u32::try_from(i).expect(
+                                "slide count must fit in u32: \
+                                 a deck cannot have more than ~4 billion slides",
+                            ),
                         relationship_id: rid.clone(),
                         extension_list: None,
                     })
