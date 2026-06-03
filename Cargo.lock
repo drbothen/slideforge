@@ -1582,6 +1582,29 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6790f58c7ff633d8771f42965289203411a5e5c68388703c06e14f24770b41e"
 
 [[package]]
+name = "ooxmlsdk"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "34b45ea6f1e1469abaeb80b98b8dd35e29e31359af15866aece1c9f9f9c407d8"
+dependencies = [
+ "ooxmlsdk-derive",
+ "quick-xml 0.39.4",
+ "thiserror 2.0.18",
+ "zip 8.6.0",
+]
+
+[[package]]
+name = "ooxmlsdk-derive"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "de826c426342d25b29162cebe20472b9361b41d423336ac68b85774eccef97c6"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "option-ext"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1862,6 +1885,15 @@ name = "quick-xml"
 version = "0.36.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4091e032efecb09d7b1f711f487b85ab925632a842627e3200fb088382cde32c"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
+name = "quick-xml"
+version = "0.39.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cdcc8dd4e2f670d309a5f0e83fe36dfdc05af317008fea29144da1a2ac858e5e"
 dependencies = [
  "memchr",
 ]
@@ -2508,6 +2540,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "slideforge-docx"
+version = "0.1.0"
+dependencies = [
+ "insta",
+ "ooxmlsdk",
+ "slideforge-layout",
+ "slideforge-plugin-api",
+ "slideforge-types",
+ "thiserror 2.0.18",
+ "tracing",
+ "zip 2.3.0",
+]
+
+[[package]]
 name = "slideforge-eval"
 version = "0.1.0"
 dependencies = [
@@ -3030,6 +3076,12 @@ checksum = "d2df906b07856748fa3f6e0ad0cbaa047052d4a7dd609e231c4f72cee8c36f31"
 dependencies = [
  "core_maths",
 ]
+
+[[package]]
+name = "typed-path"
+version = "0.12.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8e28f89b80c87b8fb0cf04ab448d5dd0dd0ade2f8891bae878de66a75a28600e"
 
 [[package]]
 name = "typenum"
@@ -3709,6 +3761,20 @@ dependencies = [
  "zeroize",
  "zopfli",
  "zstd",
+]
+
+[[package]]
+name = "zip"
+version = "8.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2d04a6b5381502aa6087c94c669499eb1602eb9c5e8198e534de571f7154809b"
+dependencies = [
+ "crc32fast",
+ "flate2",
+ "indexmap",
+ "memchr",
+ "typed-path",
+ "zopfli",
 ]
 
 [[package]]
