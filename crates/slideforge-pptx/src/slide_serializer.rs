@@ -7,12 +7,13 @@
 //!
 //! Each `FrameContent` variant maps to a specific PPTX placeholder `idx`:
 //!
-//! | `FrameContent` variant | `<p:ph>` idx | Notes |
-//! |------------------------|-------------|-------|
-//! | `Title` / `Subtitle`   | `0`         | Title placeholder |
-//! | `Body` / `TextRun`     | `1`         | Content/body placeholder |
-//! | `Diagram`              | media embed | SVG written to ppt/media/ |
-//! | Others                 | — skipped — | Media handled in STORY-038/039 |
+//! | `FrameContent` variant | `<p:ph>` idx | `<p:ph>` type | Notes |
+//! |------------------------|-------------|--------------|-------|
+//! | `Title`                | `0`         | `"title"`    | Title placeholder |
+//! | `Subtitle`             | `1`         | `"subTitle"` | Subtitle placeholder (S3 / PR-52) |
+//! | `Body` / `TextRun`     | `1`         | `"body"`     | Content/body placeholder |
+//! | `Diagram`              | media embed | —            | SVG written to ppt/media/ |
+//! | Others                 | — skipped — | —            | Media handled in STORY-038/039 |
 //!
 //! ## Element ordering (AC-006 / R4 finding)
 //!
@@ -404,7 +405,12 @@ impl SlideSerializer {
                     // AC-011 / ADR-015 §7 item 3: shared helper warns+omits when
                     // the layout has no idx=1 placeholder (F-038-P12-M1 fix).
                     let sp = self.build_body_shape(
-                        shape_id, slide_index, frame_idx, "Body", frame, &text,
+                        shape_id,
+                        slide_index,
+                        frame_idx,
+                        "Body",
+                        frame,
+                        &text,
                     );
                     shape_tree
                         .shape_tree_choice
@@ -418,7 +424,12 @@ impl SlideSerializer {
                     // AC-011 / ADR-015 §7 item 3: same idx-chain check as Body frames
                     // via the shared helper (F-038-P12-M1: single warn site, no drift).
                     let sp = self.build_body_shape(
-                        shape_id, slide_index, frame_idx, "TextRun", frame, &text,
+                        shape_id,
+                        slide_index,
+                        frame_idx,
+                        "TextRun",
+                        frame,
+                        &text,
                     );
                     shape_tree
                         .shape_tree_choice
