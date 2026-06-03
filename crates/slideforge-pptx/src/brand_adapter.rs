@@ -55,8 +55,42 @@ use slideforge_types::Brand;
 /// that would normally surface in the CLI are discarded here because the exporter
 /// has no user-facing warning channel. The brand palette validity is guaranteed
 /// upstream — by the time `export` is called, the brand has been validated.
+/// # Invariant: `Brand.layouts` must be empty at export time
+///
+/// `Brand.layouts` carries `LayoutDefinition` entries used by the layout engine
+/// for canvas dimension overrides. The synthesizer populates `BrandTemplate.layouts`
+/// (a `Vec<SlideLayoutDef>`) directly from `generate_all_layouts`; it does NOT
+/// consume `Brand.layouts`.
+///
+/// In the current pipeline, `Brand.layouts` is always empty when `export` is called:
+/// - `BrandSynthesizer::synthesize` sets `layouts: vec![]` on the `Brand` it returns.
+/// - `loader.rs` and `extractor.rs` set `layouts: Vec::new()`.
+/// - The layout engine (slideforge-layout) reads `Brand.layouts[0]` for canvas size but
+///   does NOT write to it in production; the test-side `brand.layouts.push(...)` calls
+///   are confined to `#[cfg(test)]` test functions.
+///
+/// If this assertion fires, it means a new code path is populating `Brand.layouts` and
+/// those entries would be silently discarded. Fix: map `Brand.layouts` to `SlideLayoutDef`
+/// entries and merge them into `BrandTemplate.layouts` instead of regenerating from
+/// default config.
+///
+/// (ADR-015 §A.5 — F-PASS2-M1)
 #[must_use]
 pub fn brand_template_from_brand(brand: &Brand) -> BrandTemplate {
+    // ADR-015 §A.5: Assert Brand.layouts is empty. If non-empty, a production code path
+    // has started populating it and this adapter is silently discarding those entries.
+    // Fix the root cause (map Brand.layouts → BrandTemplate.layouts) rather than
+    // removing this assertion.
+    debug_assert!(
+        brand.layouts.is_empty(),
+        "brand_template_from_brand: Brand.layouts is non-empty ({} entries) \
+         but brand_adapter synthesizes layouts from scratch; non-empty Brand.layouts \
+         will be ignored. If this is intentional, remove this assertion and document why. \
+         Otherwise, map Brand.layouts entries to SlideLayoutDef and merge them into \
+         BrandTemplate.layouts instead of regenerating from default config (ADR-015 §A.5).",
+        brand.layouts.len()
+    );
+
     // Step 1: extract the 4 palette hex values as owned Strings.
     // We'll map them to specific OOXML slots:
     //   dk2 = primary, lt2 = neutral, acc1 = primary, acc2 = secondary, acc3 = accent
