@@ -41,7 +41,7 @@ compatible-version constraints. `Cargo.lock` is committed.
 | sha2 | =0.10 | SHA-256 | MIT/Apache-2.0 | slideforge-package |
 | calamine | =0.24 | Excel reading | MIT | slideforge-data |
 | rusqlite | =0.31 | SQLite | MIT | slideforge-data |
-| quick-xml | =0.36 | XML parsing | MIT | slideforge-brand (extraction) |
+| quick-xml | =0.36 | XML parsing | MIT | slideforge-brand (extraction + serialization) |
 
 ## cargo deny Policy
 
@@ -63,8 +63,15 @@ slideforge-cli
        ├─ slideforge-eval      (pure core)
        ├─ slideforge-validate  (pure core)
        ├─ slideforge-brand     (effectful)
+       │    └─ slideforge-types
+       │    └─ slideforge-plugin-api
        ├─ slideforge-layout    (pure core)
-       ├─ slideforge-pptx      (effectful)
+       │    └─ slideforge-types
+       ├─ slideforge-pptx      (effectful)         ← ADR-015
+       │    ├─ slideforge-brand   (layout/master/theme XML serialization)
+       │    ├─ slideforge-layout  (LaidOutDeck IR types only — no layout::run calls)
+       │    ├─ slideforge-types
+       │    └─ slideforge-plugin-api
        ├─ slideforge-preview   (effectful)
        ├─ slideforge-data      (effectful)
        └─ slideforge-plugin-api (pure types, root of dep graph)
@@ -72,3 +79,17 @@ slideforge-cli
 
 `slideforge-types` and `slideforge-plugin-api` are leaves — they have no workspace
 crate dependencies.
+
+### Dependency Notes (ADR-015)
+
+**`slideforge-pptx → slideforge-brand`** (added 2026-06-03, ADR-015): The PPTX
+exporter calls `slideforge_brand::layout_xml::serialize_layout_to_xml`,
+`serialize_master_to_xml`, and `serialize_theme_to_xml` to obtain XML bytes for
+brand parts. No cycle risk: `slideforge-brand` explicitly forbids depending on
+`slideforge-pptx` (Architecture Compliance Rule 5, STORY-022).
+
+**`slideforge-pptx → slideforge-layout`** (added 2026-06-03, ADR-015): `LaidOutDeck`
+is defined in `slideforge-layout::types`, not `slideforge-types`. The exporter
+receives `&LaidOutDeck` as input and may depend on `slideforge-layout` for IR type
+access only. The prohibition on calling `slideforge_layout::layout::run` (or any
+layout computation function) from within `slideforge-pptx` remains in full force.
