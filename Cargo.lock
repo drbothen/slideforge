@@ -2545,12 +2545,13 @@ version = "0.1.0"
 dependencies = [
  "insta",
  "ooxmlsdk",
+ "slideforge-eval",
  "slideforge-layout",
  "slideforge-plugin-api",
  "slideforge-types",
  "thiserror 2.0.18",
  "tracing",
- "zip 2.3.0",
+ "zip 4.2.0",
 ]
 
 [[package]]
@@ -3761,6 +3762,21 @@ dependencies = [
  "zeroize",
  "zopfli",
  "zstd",
+]
+
+[[package]]
+name = "zip"
+version = "4.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "95ab361742de920c5535880f89bbd611ee62002bf11341d16a5f057bb8ba6899"
+dependencies = [
+ "arbitrary",
+ "crc32fast",
+ "flate2",
+ "indexmap",
+ "memchr",
+ "time",
+ "zopfli",
 ]
 
 [[package]]
