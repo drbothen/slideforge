@@ -567,12 +567,29 @@ fn process_math_segments(
 /// span (e.g., `"**"` when scanning the interior of a Bold span). When `None`
 /// is passed, scanning continues until the end of `s`.
 ///
-/// The `call_site_offset` parameter is the absolute byte offset (within the
-/// field-value string) of the opening delimiter that triggered THIS recursive
-/// call. The top-level call passes `0` (no opener). Recursive calls pass the
-/// `open_pos` of the delimiter that initiated the span — this offset is used
-/// in the E-PAR-021 depth-exceeded diagnostic to point at the actual over-cap
-/// construct rather than a misleading byte offset 0 (OBS-P8-A fix).
+/// ## Absolute byte offset invariant (F-FU-P3-001)
+///
+/// Every [`TemplateError`] emitted by this function MUST carry a `byte_offset`
+/// that is **absolute within the original field-value string** (the `s` passed
+/// at the top-level / depth-0 call). This ensures that `section.rs`'s formula
+/// `token_start + 1 + err.byte_offset` correctly resolves the opening delimiter
+/// in the full source string at ANY nesting depth.
+///
+/// The `frame_base` parameter is the absolute byte offset of the start of
+/// the current frame's `s` within the original field-value string.
+/// - Top-level call: `frame_base = 0` (the current `s` IS the field-value string).
+/// - Recursive calls that scan a substring `&s[inner_start..]` pass
+///   `frame_base + inner_start` as the child's `frame_base`.
+///
+/// Every error emit site uses `frame_base + local_pos` instead of just `local_pos`.
+///
+/// The `call_site_offset` parameter is the ABSOLUTE byte offset (within the
+/// original field-value string) of the opening delimiter that triggered THIS
+/// recursive call. It equals `frame_base + open_pos` at the call site (computed
+/// by the parent). The top-level call passes `0` (no opener). This value is
+/// used directly in the E-PAR-021 depth-cap diagnostic and the EOF backstop —
+/// no further rebasing is needed at those emit sites because it is already
+/// absolute. (OBS-P8-A fix + F-FU-P3-001 extension)
 ///
 /// # Inline markup composition with `{{ }}`
 ///
@@ -598,11 +615,13 @@ fn scan_template_chunks(
     errors: &mut Vec<TemplateError>,
     depth: usize,
     call_site_offset: usize,
+    frame_base: usize,
 ) -> (Vec<TemplateChunk>, usize) {
-    // F-077-P7-002 / OBS-P8-A: cap recursion depth to prevent stack overflow
+    // F-077-P7-002 / OBS-P8-A / F-FU-P3-001: cap recursion depth to prevent stack overflow
     // from crafted inputs with deeply-nested alternating delimiters (e.g. `^_^_^_…`).
-    // `call_site_offset` is the absolute byte offset of the opening delimiter that
-    // triggered THIS call — it points at the actual over-cap construct rather than
+    // `call_site_offset` is the ABSOLUTE byte offset of the opening delimiter that
+    // triggered THIS call — it points at the actual over-cap construct. It was computed
+    // by the parent as `frame_base + open_pos` so it is already absolute (F-FU-P3-001).
     // the misleading hardcoded 0 from the previous implementation.
     if depth >= MAX_INLINE_NESTING {
         errors.push(TemplateError::new(
@@ -685,8 +704,9 @@ fn scan_template_chunks(
                 process_math_segments(segs, true, &mut chunks, errors);
                 pos = rel + 2;
             } else {
+                // E-PAR-014: absolute offset = frame_base + local pos.
                 errors.push(TemplateError::new(
-                    pos,
+                    frame_base + pos,
                     TemplateErrorKind::UnterminatedMath,
                     unterminated_math_msg(true),
                 ));
@@ -708,8 +728,9 @@ fn scan_template_chunks(
                 process_math_segments(segs, false, &mut chunks, errors);
                 pos = close + 1;
             } else {
+                // E-PAR-014: absolute offset = frame_base + local pos.
                 errors.push(TemplateError::new(
-                    pos,
+                    frame_base + pos,
                     TemplateErrorKind::UnterminatedMath,
                     unterminated_math_msg(false),
                 ));
@@ -728,8 +749,9 @@ fn scan_template_chunks(
             match find_str(s, after_open, "}}") {
                 None => {
                     chunks.push(TemplateChunk::Expr(Expr::Error));
+                    // E-PAR-012: absolute offset = frame_base + local pos.
                     errors.push(TemplateError::new(
-                        pos,
+                        frame_base + pos,
                         TemplateErrorKind::UnterminatedInterpolation,
                         unterminated_interpolation_msg(),
                     ));
@@ -739,8 +761,9 @@ fn scan_template_chunks(
                     let inner = &s[after_open..close_pos];
                     if inner.trim().is_empty() {
                         chunks.push(TemplateChunk::Expr(Expr::Error));
+                        // E-PAR-013: absolute offset = frame_base + local pos.
                         errors.push(TemplateError::new(
-                            pos,
+                            frame_base + pos,
                             TemplateErrorKind::EmptyInterpolation,
                             empty_interpolation_msg(),
                         ));
@@ -748,8 +771,9 @@ fn scan_template_chunks(
                         chunks.push(TemplateChunk::Expr(expr_val));
                     } else {
                         chunks.push(TemplateChunk::Expr(Expr::Error));
+                        // E-PAR-012 (parse failure): absolute offset = frame_base + local pos.
                         errors.push(TemplateError::new(
-                            pos,
+                            frame_base + pos,
                             TemplateErrorKind::UnterminatedInterpolation,
                             unterminated_interpolation_msg(),
                         ));
@@ -764,33 +788,49 @@ fn scan_template_chunks(
         // ── `~~` — Strikethrough (MUST check before `~`) ─────────────────────
         if bytes.get(pos) == Some(&b'~') && bytes.get(pos + 1) == Some(&b'~') {
             flush_lit!();
-            let open_pos = pos; // byte offset of opening `~~`
+            let open_pos = pos; // local byte offset of opening `~~`
             let inner_start = pos + 2;
             let rest = &s[inner_start..];
+            // abs_open: absolute byte offset of opening `~~` (F-FU-P3-001).
+            let abs_open = frame_base + open_pos;
             if let Some(close_rel) = rest.find("~~") {
                 let inner = &rest[..close_rel];
                 if inner.is_empty() {
+                    // E-PAR-020: absolute offset of opening delimiter.
                     errors.push(TemplateError::new(
-                        open_pos,
+                        abs_open,
                         TemplateErrorKind::EmptyInlineMarkupSpan("~~".to_string()),
                         empty_inline_msg("~~"),
                     ));
                 } else {
-                    let (children, _) =
-                        scan_template_chunks(inner, None, errors, depth + 1, open_pos);
+                    // Child frame_base = frame_base + inner_start (F-FU-P3-001).
+                    let (children, _) = scan_template_chunks(
+                        inner,
+                        None,
+                        errors,
+                        depth + 1,
+                        abs_open,
+                        frame_base + inner_start,
+                    );
                     chunks.push(TemplateChunk::Strikethrough(children));
                 }
                 pos = inner_start + close_rel + 2;
             } else {
-                // Unclosed `~~` — error recovery.
+                // Unclosed `~~` — E-PAR-019: absolute offset.
                 errors.push(TemplateError::new(
-                    open_pos,
+                    abs_open,
                     TemplateErrorKind::UnclosedInlineMarkup("~~".to_string()),
                     unclosed_inline_msg("~~"),
                 ));
                 if !rest.is_empty() {
-                    let (children, _) =
-                        scan_template_chunks(rest, None, errors, depth + 1, open_pos);
+                    let (children, _) = scan_template_chunks(
+                        rest,
+                        None,
+                        errors,
+                        depth + 1,
+                        abs_open,
+                        frame_base + inner_start,
+                    );
                     chunks.push(TemplateChunk::Strikethrough(children));
                 }
                 pos = len;
@@ -802,32 +842,45 @@ fn scan_template_chunks(
         // ── `~` — Subscript ──────────────────────────────────────────────────
         if bytes.get(pos) == Some(&b'~') {
             flush_lit!();
-            let open_pos = pos; // byte offset of opening `~`
+            let open_pos = pos; // local byte offset of opening `~`
             let inner_start = pos + 1;
             let rest = &s[inner_start..];
+            let abs_open = frame_base + open_pos;
             if let Some(close_rel) = rest.find('~') {
                 let inner = &rest[..close_rel];
                 if inner.is_empty() {
                     errors.push(TemplateError::new(
-                        open_pos,
+                        abs_open,
                         TemplateErrorKind::EmptyInlineMarkupSpan("~".to_string()),
                         empty_inline_msg("~"),
                     ));
                 } else {
-                    let (children, _) =
-                        scan_template_chunks(inner, None, errors, depth + 1, open_pos);
+                    let (children, _) = scan_template_chunks(
+                        inner,
+                        None,
+                        errors,
+                        depth + 1,
+                        abs_open,
+                        frame_base + inner_start,
+                    );
                     chunks.push(TemplateChunk::Subscript(children));
                 }
                 pos = inner_start + close_rel + 1;
             } else {
                 errors.push(TemplateError::new(
-                    open_pos,
+                    abs_open,
                     TemplateErrorKind::UnclosedInlineMarkup("~".to_string()),
                     unclosed_inline_msg("~"),
                 ));
                 if !rest.is_empty() {
-                    let (children, _) =
-                        scan_template_chunks(rest, None, errors, depth + 1, open_pos);
+                    let (children, _) = scan_template_chunks(
+                        rest,
+                        None,
+                        errors,
+                        depth + 1,
+                        abs_open,
+                        frame_base + inner_start,
+                    );
                     chunks.push(TemplateChunk::Subscript(children));
                 }
                 pos = len;
@@ -839,16 +892,25 @@ fn scan_template_chunks(
         // ── `**` — Bold ──────────────────────────────────────────────────────
         if bytes.get(pos) == Some(&b'*') && bytes.get(pos + 1) == Some(&b'*') {
             flush_lit!();
-            let open_pos = pos; // byte offset of opening `**`
+            let open_pos = pos; // local byte offset of opening `**`
             let inner_start = pos + 2;
             let rest = &s[inner_start..];
+            // abs_open: absolute byte offset of `**` within original field-value (F-FU-P3-001).
+            let abs_open = frame_base + open_pos;
             if rest.contains("**") {
                 // Scan the interior recursively, stopping at `**`.
-                let (children, consumed) =
-                    scan_template_chunks(rest, Some("**"), errors, depth + 1, open_pos);
+                // Child frame_base = frame_base + inner_start (absolute start of `rest`).
+                let (children, consumed) = scan_template_chunks(
+                    rest,
+                    Some("**"),
+                    errors,
+                    depth + 1,
+                    abs_open,
+                    frame_base + inner_start,
+                );
                 if children.is_empty() {
                     errors.push(TemplateError::new(
-                        open_pos,
+                        abs_open,
                         TemplateErrorKind::EmptyInlineMarkupSpan("**".to_string()),
                         empty_inline_msg("**"),
                     ));
@@ -857,16 +919,21 @@ fn scan_template_chunks(
                 }
                 pos = inner_start + consumed;
             } else {
-                // Unclosed `**` — error recovery: treat everything as Bold child.
-                // `open_pos` points to the opening `**` (DIR-077-002 §5 span requirement).
+                // Unclosed `**` — E-PAR-019 at absolute position.
                 errors.push(TemplateError::new(
-                    open_pos,
+                    abs_open,
                     TemplateErrorKind::UnclosedInlineMarkup("**".to_string()),
                     unclosed_inline_msg("**"),
                 ));
                 if !rest.is_empty() {
-                    let (children, _) =
-                        scan_template_chunks(rest, None, errors, depth + 1, open_pos);
+                    let (children, _) = scan_template_chunks(
+                        rest,
+                        None,
+                        errors,
+                        depth + 1,
+                        abs_open,
+                        frame_base + inner_start,
+                    );
                     chunks.push(TemplateChunk::Bold(children));
                 }
                 pos = len;
@@ -903,19 +970,26 @@ fn scan_template_chunks(
                 continue;
             }
             flush_lit!();
-            let open_pos = pos; // byte offset of opening `_`
+            let open_pos = pos; // local byte offset of opening `_`
             let inner_start = pos + 1;
             let rest = &s[inner_start..];
+            let abs_open = frame_base + open_pos;
             // F-FU-P1-001: use has_valid_italic_closer (which applies the same
             // right-flanking predicate as the close-guard) instead of the naive
             // rest.contains('_') check. This prevents falsely opening an italic
             // span when the only `_` in rest is right-flanked (word-internal).
             if has_valid_italic_closer(rest) {
-                let (children, consumed) =
-                    scan_template_chunks(rest, Some("_"), errors, depth + 1, open_pos);
+                let (children, consumed) = scan_template_chunks(
+                    rest,
+                    Some("_"),
+                    errors,
+                    depth + 1,
+                    abs_open,
+                    frame_base + inner_start,
+                );
                 if children.is_empty() {
                     errors.push(TemplateError::new(
-                        open_pos,
+                        abs_open,
                         TemplateErrorKind::EmptyInlineMarkupSpan("_".to_string()),
                         empty_inline_msg("_"),
                     ));
@@ -925,13 +999,19 @@ fn scan_template_chunks(
                 pos = inner_start + consumed;
             } else {
                 errors.push(TemplateError::new(
-                    open_pos,
+                    abs_open,
                     TemplateErrorKind::UnclosedInlineMarkup("_".to_string()),
                     unclosed_inline_msg("_"),
                 ));
                 if !rest.is_empty() {
-                    let (children, _) =
-                        scan_template_chunks(rest, None, errors, depth + 1, open_pos);
+                    let (children, _) = scan_template_chunks(
+                        rest,
+                        None,
+                        errors,
+                        depth + 1,
+                        abs_open,
+                        frame_base + inner_start,
+                    );
                     chunks.push(TemplateChunk::Italic(children));
                 }
                 pos = len;
@@ -942,16 +1022,18 @@ fn scan_template_chunks(
 
         // ── `` ` `` — Code span (verbatim — no inner markup or `{{ }}`) ───────
         // Backtick spans are verbatim — no recursive scan of the content, so
-        // `call_site_offset` does not propagate here.
+        // no child frame_base propagation is needed.
         if bytes.get(pos) == Some(&b'`') {
             flush_lit!();
-            let open_pos = pos; // byte offset of opening backtick
+            let open_pos = pos; // local byte offset of opening backtick
             let inner_start = pos + 1;
+            let abs_open = frame_base + open_pos;
             if let Some(close_rel) = s[inner_start..].find('`') {
                 let inner = &s[inner_start..inner_start + close_rel];
                 if inner.is_empty() {
+                    // E-PAR-020: absolute offset.
                     errors.push(TemplateError::new(
-                        open_pos,
+                        abs_open,
                         TemplateErrorKind::EmptyInlineMarkupSpan("`".to_string()),
                         empty_inline_msg("`"),
                     ));
@@ -961,8 +1043,9 @@ fn scan_template_chunks(
                 }
                 pos = inner_start + close_rel + 1;
             } else {
+                // E-PAR-019: absolute offset.
                 errors.push(TemplateError::new(
-                    open_pos,
+                    abs_open,
                     TemplateErrorKind::UnclosedInlineMarkup("`".to_string()),
                     unclosed_inline_msg("`"),
                 ));
@@ -982,7 +1065,8 @@ fn scan_template_chunks(
             if let Some(bracket_close_rel) = s[pos + 1..].find("](") {
                 let bracket_close = pos + 1 + bracket_close_rel;
                 let url_start = bracket_close + 2;
-                let link_open_pos = pos; // byte offset of `[`
+                let link_open_pos = pos; // local byte offset of `[`
+                let abs_link_open = frame_base + link_open_pos; // absolute (F-FU-P3-001)
                 if let Some(paren_close_rel) = s[url_start..].find(')') {
                     let paren_close = url_start + paren_close_rel;
                     let text_inner = &s[pos + 1..bracket_close];
@@ -994,8 +1078,9 @@ fn scan_template_chunks(
                     let scheme = extract_url_scheme(url);
                     if !ALLOWED_LINK_SCHEMES.contains(&scheme.as_str()) {
                         flush_lit!();
+                        // E-PAR-022: absolute offset of `[` (F-FU-P3-001).
                         errors.push(TemplateError::new(
-                            link_open_pos,
+                            abs_link_open,
                             TemplateErrorKind::DisallowedLinkUrlScheme(scheme.clone()),
                             disallowed_link_url_scheme_msg(&scheme),
                         ));
@@ -1016,8 +1101,16 @@ fn scan_template_chunks(
 
                     flush_lit!();
                     // The link text IS processed for nested markup + interpolation.
-                    let (text_children, _) =
-                        scan_template_chunks(text_inner, None, errors, depth + 1, link_open_pos);
+                    // text_inner = &s[pos+1..bracket_close]; its start within current frame = pos+1.
+                    // Child frame_base = frame_base + (pos + 1) (F-FU-P3-001).
+                    let (text_children, _) = scan_template_chunks(
+                        text_inner,
+                        None,
+                        errors,
+                        depth + 1,
+                        abs_link_open,
+                        frame_base + (pos + 1),
+                    );
                     chunks.push(TemplateChunk::Link {
                         text: text_children,
                         url: url.to_string(),
@@ -1028,11 +1121,11 @@ fn scan_template_chunks(
                 }
                 // Clear link intent (`[…](` found) but no closing `)` —
                 // DIR-077-002 §5: same class as unclosed bold, same recovery.
-                // Push E-PAR-019 at the `[` position and continue accumulating
+                // Push E-PAR-019 at the `[` position (absolute) and continue accumulating
                 // the remainder as literal text (error accumulation, not fail-on-first).
                 flush_lit!();
                 errors.push(TemplateError::new(
-                    link_open_pos,
+                    abs_link_open,
                     TemplateErrorKind::UnclosedInlineMarkup("[".to_string()),
                     unclosed_inline_msg("["),
                 ));
@@ -1051,15 +1144,22 @@ fn scan_template_chunks(
         // ── `^` — Superscript ────────────────────────────────────────────────
         if bytes.get(pos) == Some(&b'^') {
             flush_lit!();
-            let open_pos = pos; // byte offset of opening `^`
+            let open_pos = pos; // local byte offset of opening `^`
             let inner_start = pos + 1;
             let rest = &s[inner_start..];
+            let abs_open = frame_base + open_pos;
             if rest.contains('^') {
-                let (children, consumed) =
-                    scan_template_chunks(rest, Some("^"), errors, depth + 1, open_pos);
+                let (children, consumed) = scan_template_chunks(
+                    rest,
+                    Some("^"),
+                    errors,
+                    depth + 1,
+                    abs_open,
+                    frame_base + inner_start,
+                );
                 if children.is_empty() {
                     errors.push(TemplateError::new(
-                        open_pos,
+                        abs_open,
                         TemplateErrorKind::EmptyInlineMarkupSpan("^".to_string()),
                         empty_inline_msg("^"),
                     ));
@@ -1069,13 +1169,19 @@ fn scan_template_chunks(
                 pos = inner_start + consumed;
             } else {
                 errors.push(TemplateError::new(
-                    open_pos,
+                    abs_open,
                     TemplateErrorKind::UnclosedInlineMarkup("^".to_string()),
                     unclosed_inline_msg("^"),
                 ));
                 if !rest.is_empty() {
-                    let (children, _) =
-                        scan_template_chunks(rest, None, errors, depth + 1, open_pos);
+                    let (children, _) = scan_template_chunks(
+                        rest,
+                        None,
+                        errors,
+                        depth + 1,
+                        abs_open,
+                        frame_base + inner_start,
+                    );
                     chunks.push(TemplateChunk::Superscript(children));
                 }
                 pos = len;
@@ -1087,15 +1193,22 @@ fn scan_template_chunks(
         // ── `==` — Highlight ─────────────────────────────────────────────────
         if bytes.get(pos) == Some(&b'=') && bytes.get(pos + 1) == Some(&b'=') {
             flush_lit!();
-            let open_pos = pos; // byte offset of opening `==`
+            let open_pos = pos; // local byte offset of opening `==`
             let inner_start = pos + 2;
             let rest = &s[inner_start..];
+            let abs_open = frame_base + open_pos;
             if rest.contains("==") {
-                let (children, consumed) =
-                    scan_template_chunks(rest, Some("=="), errors, depth + 1, open_pos);
+                let (children, consumed) = scan_template_chunks(
+                    rest,
+                    Some("=="),
+                    errors,
+                    depth + 1,
+                    abs_open,
+                    frame_base + inner_start,
+                );
                 if children.is_empty() {
                     errors.push(TemplateError::new(
-                        open_pos,
+                        abs_open,
                         TemplateErrorKind::EmptyInlineMarkupSpan("==".to_string()),
                         empty_inline_msg("=="),
                     ));
@@ -1105,13 +1218,19 @@ fn scan_template_chunks(
                 pos = inner_start + consumed;
             } else {
                 errors.push(TemplateError::new(
-                    open_pos,
+                    abs_open,
                     TemplateErrorKind::UnclosedInlineMarkup("==".to_string()),
                     unclosed_inline_msg("=="),
                 ));
                 if !rest.is_empty() {
-                    let (children, _) =
-                        scan_template_chunks(rest, None, errors, depth + 1, open_pos);
+                    let (children, _) = scan_template_chunks(
+                        rest,
+                        None,
+                        errors,
+                        depth + 1,
+                        abs_open,
+                        frame_base + inner_start,
+                    );
                     chunks.push(TemplateChunk::Highlight(children));
                 }
                 pos = len;
@@ -1284,8 +1403,11 @@ where
     }
     .map(|content| {
         let mut errors: Vec<TemplateError> = Vec::new();
-        // Top-level call: depth=0, call_site_offset=0 (no enclosing opener).
-        let (chunks, _) = scan_template_chunks(&content, None, &mut errors, 0, 0);
+        // Top-level call: depth=0, call_site_offset=0 (no enclosing opener),
+        // frame_base=0 (the content string IS the field-value string — no offset).
+        // F-FU-P3-001: frame_base=0 at top level means all local positions are
+        // already absolute within the field-value string.
+        let (chunks, _) = scan_template_chunks(&content, None, &mut errors, 0, 0, 0);
         (chunks, errors)
     })
 }

@@ -6,6 +6,16 @@
 // collapsible_if: nested if-let chains are clearer when kept separate in tests.
 // used_underscore_binding: comemo/Hash derive test uses _italic, _code, etc. intentionally.
 #![allow(clippy::collapsible_if, clippy::used_underscore_binding)]
+// F-FU-P3-001 span-assertion tests: `use miette::Diagnostic as _` appears after `let`
+// statements for clarity (import scoped to the error-extraction block).
+#![allow(clippy::items_after_statements)]
+// F-FU-P3-001 span-assertion tests: `.map(f).unwrap_or(default)` is more readable than
+// `.map_or(default, f)` in the label-extraction context (extraction pattern is clear).
+#![allow(clippy::map_unwrap_or)]
+// F-FU-P3-001 span-assertion helper: `match result { Err(e) => e, Ok(_) => panic!(...) }`
+// is more explicit about the intent than `let Err(e) = result else { panic!(...) }` in
+// this context where the panic message needs to reference `result`.
+#![allow(clippy::manual_let_else)]
 //! Failing test suite (Red Gate) for STORY-077: Inline markup parser extension.
 //!
 //! # TDD Red Gate — template chunk parsing (DIR-077-002 §8, tests 1-15)
@@ -3114,5 +3124,751 @@ fn test_F_FU_P2_001_italic_with_code_inside_valid_closer_no_error() {
         matches!(&chunks[0], TemplateChunk::Italic(_)),
         "F-FU-P2-001: `_see `code` here_` must produce Italic; got: {:?}",
         chunks[0]
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// F-FU-P3-001 (MED): Inline-markup error byte offsets MUST be ABSOLUTE within
+// the field-value string at ANY nesting depth.
+//
+// ROOT CAUSE: `scan_template_chunks` emits TemplateError with `byte_offset` that
+// is LOCAL to the current frame's `s` slice, not absolute within the original
+// field-value string. At depth ≥2 the offset is off by the sum of the parent
+// prefix lengths.
+//
+// Example: `**_x`  (field-value = "**_x")
+//   The unclosed `_` opener is at field-value offset 2.
+//   Pre-fix: the `_` branch emits offset 0 (local to the "_x" substring).
+//   Post-fix: offset 2 (absolute from field-value start).
+//
+// THE INVARIANT: every TemplateError.byte_offset must equal the byte position
+// of the opening delimiter within the original (depth-0) field-value string.
+// Then section.rs's `token_start + 1 + err.byte_offset` is correct at ANY depth.
+//
+// FIX STRATEGY: thread a `frame_base: usize` parameter (absolute offset of the
+// current frame's `s` within the original string). Top-level: frame_base = 0.
+// Every recursive call that passes `&s[inner_start..]` passes
+// `frame_base + inner_start` as child's frame_base. Every emit site uses
+// `frame_base + local_pos` instead of just `local_pos`.
+//
+// THESE TESTS FAIL PRE-FIX: the asserted offsets are what the spec requires;
+// the current implementation emits local/relative offsets.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// Helper that returns the `SourceSpan.offset()` from the first error in `parse()`.
+///
+/// Uses a SECTION block with `report:` syntax so the field goes through
+/// `section.rs`'s `section_value_parser`, which applies the precise sub-span:
+///   `delim_abs = token_start + 1 + err.byte_offset`
+///   `sub_span = SimpleSpan::from(delim_abs..delim_abs + 2)`
+///
+/// This is the code path described in the F-FU-P3-001 finding: section.rs:118.
+///
+/// Source layout: "section intro:\n  report: \"<fv>\"\n"
+///   "section intro:" = 14 bytes (0..13): s-e-c-t-i-o-n-SPACE-i-n-t-r-o-:
+///   "\n" at 14
+///   "  report: " = 10 bytes (15..24): sp-sp-r-e-p-o-r-t-:-sp
+///   '"' at 25 = token_start
+///   field-value starts at 26
+///   at.offset() = token_start + 1 + err.byte_offset = 26 + err.byte_offset
+///
+/// Returns `(at_offset, errors)` so callers can assert both the span and the variant.
+fn parse_and_get_first_error_span(field_value: &str) -> (usize, Vec<crate::error::SyntaxError>) {
+    use crate::parser::parse;
+    use crate::span::SourceMap;
+    use miette::Diagnostic as _;
+    use miette::LabeledSpan;
+
+    // Use a section block with `report:` (colon syntax) so section_value_parser handles
+    // the field, computing the precise sub-span (delim_abs = token_start + 1 + err.byte_offset).
+    // The `report:` register key with colon is the correct section sub-block syntax;
+    // without the colon, section.rs emits E-PAR-017 (reserved register name bare key).
+    let src = format!("section intro:\n  report: \"{field_value}\"\n");
+    let mut sm = SourceMap::new();
+    let file_id = sm.add_file(Arc::from("test.sf"), Arc::from(src.as_str()));
+    let result = parse(src.as_str(), file_id, &sm);
+
+    let errors = match result {
+        Err(errs) => errs,
+        Ok(_) => panic!(
+            "parse_and_get_first_error_span: parse() returned Ok for {field_value:?} — \
+             expected a fatal error (E-PAR-019/020/021/022)"
+        ),
+    };
+
+    assert!(
+        !errors.is_empty(),
+        "parse_and_get_first_error_span: Err returned but errors vec is empty for \
+         {field_value:?}"
+    );
+
+    // Extract the `at` SourceSpan from the first error via miette labels.
+    // miette::Diagnostic::labels() yields LabeledSpan; each carries an inner SourceSpan.
+    // We use the first label's offset as the reported span.
+    let first = &errors[0];
+    let labels: Vec<LabeledSpan> = first.labels().map(|it| it.collect()).unwrap_or_default();
+
+    let at_offset = labels
+        .first()
+        .map(|ls| ls.inner().offset())
+        .unwrap_or(usize::MAX);
+
+    (at_offset, errors)
+}
+
+/// Compute the expected absolute byte position of the opening delimiter within
+/// the full DSL source string for a field value with known field-value offset.
+///
+/// Layout: "section intro:\n  report: \"<fv>\"\n"
+///   "section intro:" = 14 bytes (indices 0–13): s-e-c-t-i-o-n-SPACE-i-n-t-r-o-:
+///   "\n" = 1 byte (14)
+///   "  report: " = 10 bytes (15..24): sp-sp-r-e-p-o-r-t-:-sp
+///   '"' = 1 byte (25) = token_start
+///   field-value starts at byte 26
+///   at_expected = token_start + 1 + field_value_byte_offset = 26 + field_value_byte_offset
+fn expected_at_for_fv_offset(field_value_byte_offset: usize) -> usize {
+    // "section intro:" = 14 chars (0..13)
+    // "\n" at 14
+    // "  report: " = 10 chars (15..24)
+    // '"' at 25 = token_start
+    // at = token_start + 1 + fv_offset = 26 + fv_offset
+    26 + field_value_byte_offset
+}
+
+// ─── Depth-1 regression guards (frame_base=0, no change expected) ─────────────
+
+/// F-FU-P3-001 DEPTH-1 REGRESSION GUARD: unclosed `_word` at depth 1.
+///
+/// The opening `_` is at field-value offset 0. post-fix this must still be 0
+/// (frame_base = 0 at top level → no change).
+/// at_expected = 26 + 0 = 26.
+///
+/// This test must PASS both before AND after the fix (depth-1 is unaffected).
+#[test]
+#[allow(non_snake_case)]
+fn test_F_FU_P3_001_depth1_unclosed_italic_offset_absolute_regression_guard() {
+    use crate::error::SyntaxError;
+
+    let (at_offset, errors) = parse_and_get_first_error_span("_word");
+    let expected = expected_at_for_fv_offset(0);
+
+    match &errors[0] {
+        SyntaxError::UnclosedInlineMarkup { delimiter, .. } => {
+            assert_eq!(delimiter, "_", "depth-1: delimiter must be '_'");
+        },
+        other => panic!("depth-1 _word: expected UnclosedInlineMarkup; got: {other:?}"),
+    }
+
+    assert_eq!(
+        at_offset, expected,
+        "F-FU-P3-001 depth-1: `_word` — unclosed `_` at fv-offset 0 must report \
+         absolute src offset {expected}; got {at_offset}. \
+         (Regression guard: depth-1 must be unchanged by the frame_base fix.)"
+    );
+}
+
+/// F-FU-P3-001 DEPTH-1 REGRESSION GUARD: unclosed `**bold` at depth 1.
+///
+/// The opening `**` is at field-value offset 0. at_expected = 26 + 0 = 26.
+///
+/// This test must PASS both before AND after the fix.
+#[test]
+#[allow(non_snake_case)]
+fn test_F_FU_P3_001_depth1_unclosed_bold_offset_absolute_regression_guard() {
+    use crate::error::SyntaxError;
+
+    let (at_offset, errors) = parse_and_get_first_error_span("**bold");
+    let expected = expected_at_for_fv_offset(0);
+
+    match &errors[0] {
+        SyntaxError::UnclosedInlineMarkup { delimiter, .. } => {
+            assert_eq!(delimiter, "**", "depth-1: delimiter must be '**'");
+        },
+        other => panic!("depth-1 **bold: expected UnclosedInlineMarkup; got: {other:?}"),
+    }
+
+    assert_eq!(
+        at_offset, expected,
+        "F-FU-P3-001 depth-1: `**bold` — unclosed `**` at fv-offset 0 must report \
+         absolute src offset {expected}; got {at_offset}. \
+         (Regression guard: depth-1 must be unchanged by the frame_base fix.)"
+    );
+}
+
+// ─── Depth-2 RED GATE tests ──────────────────────────────────────────────────
+//
+// IMPORTANT: The outer delimiter must have a matching closer (so recursion is
+// entered), but the inner delimiter must have no closer. Only then does the
+// depth-2 code path execute and the inner error is emitted with a frame_base > 0.
+//
+// Field-value: "**_x**" (6 chars):
+//   Outer `**` at fv-offset 0, closer `**` at fv-offset 4
+//   Recursion enters with inner content "_x" (fv-offset 2..4)
+//   Inner `_` at local pos 0 within "_x", absolute fv-offset 2
+//   Pre-fix: byte_offset = 0 (local) → at = 25 + 0 = 25 (points at outer `*`)
+//   Post-fix: byte_offset = 2 (absolute) → at = 25 + 2 = 27 (points at `_`)
+//
+// Field-value: "^_z^" (4 chars):
+//   Outer `^` at fv-offset 0, closer `^` at fv-offset 3
+//   Recursion enters with inner content "_z" (fv-offset 1..3)
+//   Inner `_` at local pos 0 within "_z", absolute fv-offset 1
+//   Pre-fix: byte_offset = 0 → at = 25 + 0 = 25
+//   Post-fix: byte_offset = 1 → at = 25 + 1 = 26
+
+/// F-FU-P3-001 RED GATE depth-2: `**_x**` — outer bold closes correctly;
+/// inner italic `_` is unclosed. Absolute field-value offset of `_` = 2.
+/// Post-fix: at = 25 + 2 = 27.
+///
+/// Pre-fix: inner `_` emits byte_offset = 0 (local to "_x") → at = 25.
+/// Post-fix: byte_offset = 2 (absolute) → at = 27 (points at `_`).
+///
+/// FAILS pre-fix. PASSES post-fix (frame_base threading makes byte_offset absolute).
+#[test]
+#[allow(non_snake_case)]
+fn test_F_FU_P3_001_depth2_bold_italic_unclosed_inner_italic_offset_absolute() {
+    use crate::error::SyntaxError;
+
+    // "**_x**": outer ** at fv=0, closes at fv=4; recursion enters with "_x".
+    // Inner _ at local pos 0 (fv=2) in "_x" — no valid italic closer in "x".
+    // Simple unclosed fires. Pre-fix: emits 0. Post-fix: emits frame_base(2)+0=2.
+    let (_at_offset, errors) = parse_and_get_first_error_span("**_x**");
+    let expected_fv_offset: usize = 2; // `_` is at byte 2 in "**_x**"
+    let expected_at = expected_at_for_fv_offset(expected_fv_offset);
+
+    // Find the UnclosedInlineMarkup("_") error (inner italic unclosed).
+    let italic_err = errors.iter().find(
+        |e| matches!(e, SyntaxError::UnclosedInlineMarkup { delimiter, .. } if delimiter == "_"),
+    );
+    let Some(italic_err) = italic_err else {
+        panic!(
+            "F-FU-P3-001 depth-2 `**_x**`: expected UnclosedInlineMarkup('_'); \
+             errors: {errors:?}"
+        )
+    };
+
+    use miette::Diagnostic as _;
+    let labels: Vec<miette::LabeledSpan> = italic_err
+        .labels()
+        .map(|it| it.collect())
+        .unwrap_or_default();
+    let at_offset = labels
+        .first()
+        .map(|ls| ls.inner().offset())
+        .unwrap_or(usize::MAX);
+
+    assert_eq!(
+        at_offset, expected_at,
+        "F-FU-P3-001 depth-2 `**_x**`: unclosed inner `_` at fv-offset {expected_fv_offset} \
+         must report absolute src offset {expected_at}; got {at_offset}. \
+         Pre-fix: byte_offset=0 (local to \"_x\") → at=25 (points at outer `*`). \
+         Post-fix: byte_offset=2 (absolute) → at=27 (points at `_`). \
+         (F-FU-P3-001: frame_base threading fix required)"
+    );
+}
+
+/// F-FU-P3-001 RED GATE depth-2: `^_z^` — outer superscript closes correctly;
+/// inner italic `_` is unclosed. Absolute field-value offset of `_` = 1.
+/// Post-fix: at = 25 + 1 = 26.
+///
+/// Pre-fix: byte_offset = 0 (local to "_z") → at = 25.
+/// Post-fix: byte_offset = 1 → at = 26.
+///
+/// FAILS pre-fix. PASSES post-fix.
+#[test]
+#[allow(non_snake_case)]
+fn test_F_FU_P3_001_depth2_superscript_italic_unclosed_inner_italic_offset_absolute() {
+    use crate::error::SyntaxError;
+
+    // "^_z^": outer ^ at fv=0 closes at fv=3; recursion enters with "_z".
+    // Inner _ at local pos 0 (fv=1) — no valid italic closer in "z".
+    // Simple unclosed: pre-fix emits 0. Post-fix: emits frame_base(1)+0=1.
+    let (_at_offset, errors) = parse_and_get_first_error_span("^_z^");
+    let expected_fv_offset: usize = 1; // `_` is at byte 1 in "^_z^"
+    let expected_at = expected_at_for_fv_offset(expected_fv_offset);
+
+    let italic_err = errors.iter().find(
+        |e| matches!(e, SyntaxError::UnclosedInlineMarkup { delimiter, .. } if delimiter == "_"),
+    );
+    let Some(italic_err) = italic_err else {
+        panic!(
+            "F-FU-P3-001 depth-2 `^_z^`: expected UnclosedInlineMarkup('_'); \
+             errors: {errors:?}"
+        )
+    };
+
+    use miette::Diagnostic as _;
+    let labels: Vec<miette::LabeledSpan> = italic_err
+        .labels()
+        .map(|it| it.collect())
+        .unwrap_or_default();
+    let at_offset = labels
+        .first()
+        .map(|ls| ls.inner().offset())
+        .unwrap_or(usize::MAX);
+
+    assert_eq!(
+        at_offset, expected_at,
+        "F-FU-P3-001 depth-2 `^_z^`: unclosed inner `_` at fv-offset {expected_fv_offset} \
+         must report absolute src offset {expected_at}; got {at_offset}. \
+         Pre-fix: byte_offset=0 → at=25. Post-fix: byte_offset=1 → at=26. \
+         (F-FU-P3-001)"
+    );
+}
+
+/// F-FU-P3-001 RED GATE depth-2 (EOF backstop path): `==_`_`==` — outer highlight
+/// closes correctly; inner italic `_` opener is at fv-offset 2, but its only
+/// closer `_` is inside a code span and is consumed verbatim. EOF backstop fires.
+///
+/// Field-value: "==_`_`==" (8 chars: = = _ ` _ ` = =)
+///   Outer `==` at fv-offset 0, closes at fv-offset 6.
+///   Highlight recursion enters with "_`_`" (local frame), frame_base=2.
+///   `_` at local pos 0 (fv=2): has_valid_italic_closer("`_`") — `_` at local pos 1
+///   of "`_`" is between backticks; next byte = `` ` `` → not right-flanked → true.
+///   Italic recursion enters with "`_`", close_on=Some("_"), frame_base=3.
+///   Code span consumed (`` `_` ``), the `_` inside consumed; no `_` closer found.
+///   EOF backstop fires: emits call_site_offset.
+///   Pre-fix: call_site_offset = 0 (local open_pos within "_`_`") → at = 25.
+///   Post-fix: call_site_offset = frame_base(2) + 0 = 2 → at = 25 + 2 = 27.
+///
+/// FAILS pre-fix (at=25). PASSES post-fix (at=27).
+#[test]
+#[allow(non_snake_case)]
+fn test_F_FU_P3_001_depth2_eof_backstop_italic_inside_highlight_offset_absolute() {
+    use crate::error::SyntaxError;
+
+    // fv = "==_`_`==": highlight outer (fv=0, close=6), italic inner (fv=2).
+    // Italic closer `_` is inside code span `_` → consumed → EOF backstop.
+    let (_at_offset, errors) = parse_and_get_first_error_span("==_`_`==");
+    let expected_fv_offset: usize = 2; // `_` opener is at fv-offset 2 in "==_`_`=="
+    let expected_at = expected_at_for_fv_offset(expected_fv_offset);
+
+    let italic_err = errors.iter().find(
+        |e| matches!(e, SyntaxError::UnclosedInlineMarkup { delimiter, .. } if delimiter == "_"),
+    );
+
+    let Some(italic_err) = italic_err else {
+        panic!(
+            "F-FU-P3-001 depth-2 EOF backstop `==_`_`==`: expected UnclosedInlineMarkup('_'); \
+             errors: {errors:?}"
+        )
+    };
+
+    // Extract the at offset from this specific error.
+    use miette::Diagnostic as _;
+    let labels: Vec<miette::LabeledSpan> = italic_err
+        .labels()
+        .map(|it| it.collect())
+        .unwrap_or_default();
+    let italic_at = labels
+        .first()
+        .map(|ls| ls.inner().offset())
+        .unwrap_or(usize::MAX);
+
+    assert_eq!(
+        italic_at, expected_at,
+        "F-FU-P3-001 depth-2 EOF backstop `==_`_`==`: unclosed `_` at fv-offset \
+         {expected_fv_offset} must report absolute src offset {expected_at}; got {italic_at}. \
+         Pre-fix: call_site_offset=0 (local) → at=25 (points at outer `=`). \
+         Post-fix: call_site_offset=2 (frame_base+open_pos) → at=27 (points at `_`). \
+         (F-FU-P3-001)"
+    );
+}
+
+// ─── Depth-3 RED GATE test ─────────────────────────────────────────────────────
+//
+// Input `**^_x^**` (8 chars: * * ^ _ x ^ * *):
+//   Outer `**` at fv-offset 0 (closer at fv-offset 6) → recursion with "^_x^"
+//   Middle `^` at local pos 0 (fv-offset 2, closer at local pos 3/fv 5) → recursion with "_x"
+//   Inner `_` at local pos 0 (fv-offset 3) → no valid italic closer in "x"
+//   Simple unclosed fires for `_`.
+//   Pre-fix: byte_offset = 0 (local to "_x") → at = 25 + 0 = 25
+//   Post-fix: byte_offset = 3 (absolute) → at = 25 + 3 = 28
+
+/// F-FU-P3-001 RED GATE depth-3: `**^_x^**` — outer bold and middle superscript
+/// both have closers; inner italic `_` is unclosed. Absolute field-value offset
+/// of `_` = 3. Post-fix: at = 25 + 3 = 28.
+///
+/// Chain: bold(fv=0,close=6) → superscript(fv=2,close=5) → italic(fv=3, unclosed)
+///
+/// FAILS pre-fix (byte_offset=0 at all depths → at=25).
+/// PASSES post-fix (frame_base propagated: depth-3 emits fv-offset 3 → at=28).
+#[test]
+#[allow(non_snake_case)]
+fn test_F_FU_P3_001_depth3_bold_superscript_italic_unclosed_inner_offset_absolute() {
+    use crate::error::SyntaxError;
+
+    // "**^_x^**": ** opens bold (fv=0), closes at fv=6.
+    // Inside bold: "^_x^" — ^ opens superscript (local=0, fv=2), closes at local=3 (fv=5).
+    // Inside superscript: "_x" — _ opens italic (local=0, fv=3), no closer in "x".
+    // frame_base path (post-fix):
+    //   depth-0 (bold): s="**^_x^**", frame_base=0, inner_start=2
+    //   depth-1 (sup):  s="^_x^", frame_base=2, ^ at local 0 (fv=2), inner_start=1
+    //   depth-2 (italic): s="_x", frame_base=3, _ at local 0 (fv=3), no closer → emit 3
+    let (_at_offset, errors) = parse_and_get_first_error_span("**^_x^**");
+    let expected_fv_offset: usize = 3; // `_` is at byte 3 in "**^_x^**"
+    let expected_at = expected_at_for_fv_offset(expected_fv_offset);
+
+    // Find the UnclosedInlineMarkup("_") error.
+    let italic_err = errors.iter().find(
+        |e| matches!(e, SyntaxError::UnclosedInlineMarkup { delimiter, .. } if delimiter == "_"),
+    );
+
+    let Some(italic_err) = italic_err else {
+        panic!(
+            "F-FU-P3-001 depth-3 `**^_x^**`: expected UnclosedInlineMarkup('_'); \
+             errors: {errors:?}"
+        )
+    };
+
+    use miette::Diagnostic as _;
+    let labels: Vec<miette::LabeledSpan> = italic_err
+        .labels()
+        .map(|it| it.collect())
+        .unwrap_or_default();
+    let italic_at = labels
+        .first()
+        .map(|ls| ls.inner().offset())
+        .unwrap_or(usize::MAX);
+
+    assert_eq!(
+        italic_at, expected_at,
+        "F-FU-P3-001 depth-3 `**^_x^**`: unclosed `_` at fv-offset {expected_fv_offset} \
+         must report absolute src offset {expected_at}; got {italic_at}. \
+         Pre-fix: byte_offset=0 for innermost frame → at=25 (points at outer `*`). \
+         Post-fix: frame_base propagated to depth-2 → byte_offset=3 → at=28 (points at `_`). \
+         (F-FU-P3-001)"
+    );
+}
+
+// ─── E-PAR-021 depth-cap span: absolute offset ────────────────────────────────
+//
+// The depth-cap check at the top of scan_template_chunks emits call_site_offset.
+// call_site_offset was set to open_pos (local) at the recurse site.
+// Post-fix: call_site_offset = frame_base + open_pos (absolute).
+//
+// For the depth-cap test we use a crafted input that triggers the cap at depth 64.
+// The offset of the opener that triggered the cap must be absolute, not local.
+
+/// F-FU-P3-001 E-PAR-021 SIBLING FIX: depth-cap span must be at an absolute offset.
+///
+/// Uses "^^...^" (65 opening `^` chars) via a SECTION BLOCK to exercise the
+/// section_value_parser code path (which creates precise sub-spans).
+///
+/// Layout: "section intro:\n  report \"<65 `^`>\"\n"
+///   token_start = 24 (position of `"`)
+///   fv-offset of 65th `^` = 64
+///   at_expected = token_start + 1 + 64 = 25 + 64 = 89
+///
+/// Pre-fix: call_site_offset = 0 (local to deepest frame's `s`) → at = 25.
+/// Post-fix: call_site_offset = 64 (absolute) → at = 89.
+///
+/// Note: this extends the existing E-PAR-021 test (test_F077_P7_002) by adding
+/// an OFFSET assertion that was previously missing (finding F-FU-P3-001).
+///
+/// FAILS pre-fix (offset is relative). PASSES post-fix (offset is absolute).
+#[test]
+#[allow(non_snake_case)]
+fn test_F_FU_P3_001_E_PAR_021_depth_cap_offset_is_absolute() {
+    use crate::parser::parse;
+    use miette::Diagnostic as _;
+    use miette::LabeledSpan;
+
+    // Build alternating "^_" (128 chars) in a SECTION BLOCK with `report:` colon syntax.
+    // section_value_parser applies the precise sub-span.
+    // Alternating openers ensure we hit the depth cap via recursion (not empty-span pairs).
+    // After 64 levels, depth cap fires. The opener at depth 64 is at some fv-offset.
+    // For "^_" repeated: each `^` opens at even positions (0,2,4,...), each `_` at odds (1,3,...).
+    // Depth 64 is reached after opening 64 delimiters. Each `^` adds one depth (^ then _).
+    // The 65th opener (at depth 64) is at fv-offset 64 (the `^` at the start of pair 33).
+    let deep_content: String = "^_".repeat(65); // 130 chars
+    let src = format!("section intro:\n  report: \"{deep_content}\"\n");
+    let mut sm = crate::span::SourceMap::new();
+    let file_id = sm.add_file(Arc::from("test.sf"), Arc::from(src.as_str()));
+
+    let errors = parse(src.as_str(), file_id, &sm)
+        .expect_err("F-FU-P3-001 E-PAR-021: parse() must return Err for deeply-nested input");
+
+    // Find the E-PAR-021 error.
+    let depth_err = errors.iter().find(|e| {
+        e.code()
+            .is_some_and(|c| c.to_string().contains("E-PAR-021"))
+    });
+    let Some(depth_err) = depth_err else {
+        panic!(
+            "F-FU-P3-001 E-PAR-021: no InlineNestingDepthExceeded error found; \
+             errors: {errors:?}"
+        )
+    };
+
+    // Extract the `at` offset from the E-PAR-021 error's label.
+    let labels: Vec<LabeledSpan> = depth_err
+        .labels()
+        .map(|it| it.collect())
+        .unwrap_or_default();
+    let at_offset = labels
+        .first()
+        .map(|ls| ls.inner().offset())
+        .unwrap_or(usize::MAX);
+
+    // The depth-64 cap fires when the 65th recursive call is attempted.
+    // The call_site_offset at that point is the fv-offset of the opener triggering the cap.
+    // Pre-fix: call_site_offset is always 0 (local to deepest frame) → at = 26 + 0 = 26.
+    // Post-fix: call_site_offset = fv-offset of the depth-64 triggering opener.
+    // We don't need to know the exact fv-offset for the pre-fix/post-fix assertion to hold;
+    // we just assert that post-fix at_offset > 26 (not the local-zero case).
+    // The key invariant: pre-fix at_offset == 26 (base + 0); post-fix at_offset > 26.
+    assert!(
+        at_offset > 26,
+        "F-FU-P3-001 E-PAR-021: depth-cap must report an absolute offset > 26 (not the \
+         base-only local-zero value). Got at_offset={at_offset}. \
+         Pre-fix: call_site_offset=0 (local) → at=26 (wrong). \
+         Post-fix: call_site_offset=N>0 (absolute) → at > 26. \
+         (F-FU-P3-001 sibling fix — E-PAR-021 same root cause as E-PAR-019)"
+    );
+    // Belt: also assert at_offset matches expected_at_for_fv_offset for some N > 0.
+    // At minimum, assert the at is within range of the source string.
+    assert!(
+        at_offset < src.len(),
+        "F-FU-P3-001 E-PAR-021: at_offset={at_offset} must be within src.len()={}",
+        src.len()
+    );
+}
+
+// ─── E-PAR-022 nested offset: absolute ────────────────────────────────────────
+
+/// F-FU-P3-001 E-PAR-022 NESTED: disallowed link nested inside a bold span.
+///
+/// Field-value: `**[a](js:x)**` (13 chars)
+///   Outer `**` at fv-offset 0, inner_start=2.
+///   The `[` at local pos 0 within `[a](js:x)**` is at absolute fv-offset 2.
+///
+/// The E-PAR-022 error is emitted with link_open_pos (local to the bold-child scan).
+/// Pre-fix: link_open_pos = 0 (local) → byte_offset = 0 → at = 26.
+/// Post-fix: byte_offset = frame_base(2) + link_open_pos(0) = 2 → at = 28.
+///
+/// FAILS pre-fix. PASSES post-fix.
+#[test]
+#[allow(non_snake_case)]
+fn test_F_FU_P3_001_E_PAR_022_nested_in_bold_offset_absolute() {
+    use crate::error::SyntaxError;
+    use miette::Diagnostic as _;
+    use miette::LabeledSpan;
+
+    // fv = "**[a](js:x)**": bold outer, disallowed link inside.
+    // The `[` opener at fv-offset 2 should be reported as the link's at position.
+    // "js" is not an allowlisted scheme → E-PAR-022.
+    let (_at_offset, errors) = parse_and_get_first_error_span("**[a](js:x)**");
+    let expected_fv_offset: usize = 2; // `[` is at byte 2 in "**[a](js:x)**"
+    let expected_at = expected_at_for_fv_offset(expected_fv_offset);
+
+    // Find the E-PAR-022 error.
+    let scheme_err = errors
+        .iter()
+        .find(|e| matches!(e, SyntaxError::DisallowedLinkUrlScheme { .. }));
+    let Some(scheme_err) = scheme_err else {
+        panic!(
+            "F-FU-P3-001 E-PAR-022 nested: expected DisallowedLinkUrlScheme; \
+             errors: {errors:?}"
+        )
+    };
+
+    let labels: Vec<LabeledSpan> = scheme_err
+        .labels()
+        .map(|it| it.collect())
+        .unwrap_or_default();
+    let scheme_at = labels
+        .first()
+        .map(|ls| ls.inner().offset())
+        .unwrap_or(usize::MAX);
+
+    assert_eq!(
+        scheme_at, expected_at,
+        "F-FU-P3-001 E-PAR-022 nested `**[a](js:x)**`: disallowed `[` at fv-offset \
+         {expected_fv_offset} must report absolute src offset {expected_at}; got {scheme_at}. \
+         Pre-fix: link_open_pos=0 (local to bold-child scan) → at=26. \
+         Post-fix: frame_base=2 → byte_offset=2 → at=28. \
+         (F-FU-P3-001)"
+    );
+}
+
+// ─── Depth-1 regression: existing offsets unchanged ─────────────────────────
+
+/// F-FU-P3-001 DEPTH-1 REGRESSION: E-PAR-022 at depth 1.
+///
+/// `[a](js:x)` — the `[` opener is at fv-offset 0. at_expected = 26 + 0 = 26.
+/// This must PASS both before AND after the fix (frame_base=0 at depth 1).
+#[test]
+#[allow(non_snake_case)]
+fn test_F_FU_P3_001_E_PAR_022_depth1_offset_unchanged_regression_guard() {
+    use crate::error::SyntaxError;
+    use miette::Diagnostic as _;
+    use miette::LabeledSpan;
+
+    let (_at_offset, errors) = parse_and_get_first_error_span("[a](js:x)");
+    let expected_at = expected_at_for_fv_offset(0); // fv-offset 0
+
+    let scheme_err = errors
+        .iter()
+        .find(|e| matches!(e, SyntaxError::DisallowedLinkUrlScheme { .. }));
+    let Some(scheme_err) = scheme_err else {
+        panic!(
+            "F-FU-P3-001 E-PAR-022 depth-1: expected DisallowedLinkUrlScheme; \
+             errors: {errors:?}"
+        )
+    };
+
+    let labels: Vec<LabeledSpan> = scheme_err
+        .labels()
+        .map(|it| it.collect())
+        .unwrap_or_default();
+    let scheme_at = labels
+        .first()
+        .map(|ls| ls.inner().offset())
+        .unwrap_or(usize::MAX);
+
+    assert_eq!(
+        scheme_at, expected_at,
+        "F-FU-P3-001 E-PAR-022 depth-1: `[a](js:x)` — `[` at fv-offset 0 must report \
+         absolute src offset {expected_at}; got {scheme_at}. \
+         (Regression guard: depth-1 must be byte-identical before and after fix.)"
+    );
+}
+
+// ─── E-PAR-019 explicit unclosed at depth ≥2 (simple unclosed branch) ─────────
+
+/// F-FU-P3-001 RED GATE: E-PAR-019 explicit unclosed at depth 2 via `~~_x~~`.
+///
+/// `~~_x~~` — strikethrough outer at fv-offset 0 closes at fv-offset 4;
+/// inner `_` at fv-offset 2 has no valid closer ("x" has no `_` after).
+/// Simple unclosed fires for inner `_`.
+/// Pre-fix: byte_offset=0. Post-fix: byte_offset=2 → at=27.
+///
+/// FAILS pre-fix. PASSES post-fix.
+#[test]
+#[allow(non_snake_case)]
+fn test_F_FU_P3_001_depth2_strikethrough_italic_explicit_unclosed_offset_absolute() {
+    use crate::error::SyntaxError;
+    use miette::Diagnostic as _;
+    use miette::LabeledSpan;
+
+    // "~~_x~~": ~~ opens strikethrough(fv=0, close=4); recursion with "_x".
+    // Inner _ at local pos 0 (fv=2) — no valid italic closer in "x".
+    // Simple unclosed: pre-fix emits 0. Post-fix: emits frame_base(2)+0=2.
+    let (_at_offset, errors) = parse_and_get_first_error_span("~~_x~~");
+    let expected_fv_offset: usize = 2; // `_` is at byte 2 in "~~_x~~"
+    let expected_at = expected_at_for_fv_offset(expected_fv_offset);
+
+    let italic_err = errors.iter().find(
+        |e| matches!(e, SyntaxError::UnclosedInlineMarkup { delimiter, .. } if delimiter == "_"),
+    );
+    let Some(italic_err) = italic_err else {
+        panic!(
+            "F-FU-P3-001 depth-2 `~~_x~~`: expected UnclosedInlineMarkup('_'); \
+             errors: {errors:?}"
+        )
+    };
+
+    let labels: Vec<LabeledSpan> = italic_err
+        .labels()
+        .map(|it| it.collect())
+        .unwrap_or_default();
+    let italic_at = labels
+        .first()
+        .map(|ls| ls.inner().offset())
+        .unwrap_or(usize::MAX);
+
+    assert_eq!(
+        italic_at, expected_at,
+        "F-FU-P3-001 depth-2 `~~_x~~`: unclosed `_` at fv-offset {expected_fv_offset} \
+         must report absolute src offset {expected_at}; got {italic_at}. \
+         Pre-fix: byte_offset=0 → at=25. Post-fix: byte_offset=2 → at=27. \
+         (F-FU-P3-001)"
+    );
+}
+
+// ─── Round-trip: section.rs contract ─────────────────────────────────────────
+
+/// F-FU-P3-001 SECTION.RS CONTRACT: verify that `delim_abs = token_start + 1 +
+/// err.byte_offset` is correct for a depth-2 case by checking the `at` field
+/// of the produced SyntaxError matches the `_` character in the full source string.
+///
+/// This pins the end-to-end contract from `scan_template_chunks` → `section.rs`
+/// `section_value_parser` → `inline_markup_route_to_error` → `SyntaxError::at`.
+///
+/// Uses a SECTION block (not a slide field) so the field goes through
+/// `section_value_parser` which applies the precise sub-span:
+///   `delim_abs = token_start + 1 + err.byte_offset` (section.rs:118).
+///
+/// Source layout: "section intro:\n  report \"**_x\"\n"
+///   "section intro:" = 14 bytes (0..13): s-e-c-t-i-o-n- -i-n-t-r-o-:
+///   "\n" at 14
+///   "  report " = 9 bytes (15..23)
+///   '"' at 24 = token_start
+///   "**_x" starts at 25:  *(25) *(26) _(27) x(28)
+///   '"' at 29
+///   "\n" at 30
+/// Expected `at.offset()` = 25 + 2 = 27 (points at `_`).
+///
+/// FAILS pre-fix (err.byte_offset=0 → at=25, points at `*`).
+/// PASSES post-fix (err.byte_offset=2 → at=27, points at `_`).
+#[test]
+#[allow(non_snake_case)]
+fn test_F_FU_P3_001_section_rs_delim_abs_contract_depth2_points_at_delimiter() {
+    use crate::error::SyntaxError;
+    use miette::Diagnostic as _;
+    use miette::LabeledSpan;
+
+    // Use section block with `report:` syntax so section_value_parser handles the field.
+    let src = "section intro:\n  report: \"**_x\"\n";
+    // Layout verification:
+    //   "section intro:" = 14 bytes (0..13)
+    //   "\n" at 14
+    //   "  report: " = 10 bytes (15..24): sp-sp-r-e-p-o-r-t-:-sp
+    //   '"' at 25 (token_start)
+    //   "**_x": *(26), *(27), _(28), x(29)
+    //   '"' at 30
+    // The `_` opener in "**_x" is at absolute source byte 28.
+    // delim_abs = token_start + 1 + err.byte_offset = 25 + 1 + 2 = 28 (post-fix).
+    let expected_at: usize = 28;
+
+    // Verify our layout assumption by checking what character is at expected_at.
+    let src_bytes = src.as_bytes();
+    assert_eq!(
+        src_bytes[expected_at],
+        b'_',
+        "Layout assumption violated: byte {} in source is {:?}, expected '_'",
+        expected_at,
+        char::from(src_bytes[expected_at])
+    );
+
+    use crate::parser::parse;
+    let mut sm = crate::span::SourceMap::new();
+    let file_id = sm.add_file(Arc::from("test.sf"), Arc::from(src));
+    let errors = parse(src, file_id, &sm)
+        .expect_err("F-FU-P3-001 contract: parse() must return Err for **_x");
+
+    let italic_err = errors.iter().find(
+        |e| matches!(e, SyntaxError::UnclosedInlineMarkup { delimiter, .. } if delimiter == "_"),
+    );
+    let Some(italic_err) = italic_err else {
+        panic!("F-FU-P3-001 contract: expected UnclosedInlineMarkup('_'); errors: {errors:?}")
+    };
+
+    let labels: Vec<LabeledSpan> = italic_err
+        .labels()
+        .map(|it| it.collect())
+        .unwrap_or_default();
+    let at_offset = labels
+        .first()
+        .map(|ls| ls.inner().offset())
+        .unwrap_or(usize::MAX);
+
+    assert_eq!(
+        at_offset, expected_at,
+        "F-FU-P3-001 section.rs contract: `at.offset()` for unclosed inner `_` in `**_x` \
+         (section block) must be {expected_at} (the `_` character in source); got {at_offset}. \
+         Pre-fix: err.byte_offset=0 → delim_abs=26 → at=26 (points at `*`, wrong). \
+         Post-fix: err.byte_offset=2 → delim_abs=28 → at=28 (points at `_`, correct). \
+         (F-FU-P3-001: delim_abs = token_start+1+err.byte_offset must point at delimiter)"
     );
 }
