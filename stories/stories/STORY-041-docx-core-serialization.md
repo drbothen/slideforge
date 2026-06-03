@@ -141,7 +141,7 @@ Style definitions sourced from the brand when available; minimal valid stubs oth
 ## Acceptance Criteria
 
 ### AC-001: Exporter plugin trait implemented
-(traces to BC-4.02.001 precondition 3 — target directory exists and writable)
+(traces to BC-4.02.001 postcondition 1 — a valid .docx file is written at the output path)
 
 `slideforge-docx` implements `Exporter` via the plugin trait API. The `DocxExporter`
 struct is registered via the plugin registry. Method signature matches `Exporter` trait.

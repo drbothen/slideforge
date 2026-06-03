@@ -365,10 +365,21 @@ sentinel appears in any `ppt/slides/slide*.xml`. Use `BleedChecker::assert_absen
   - EMU coordinates from `LaidOutFrame.position` and `.size`
   - Inline text: map `InlineSpan` variants to `<a:r>` + `<a:rPr>` (bold, italic, code)
 
-- [ ] **Task 7: Master + layout + theme embedding**
-  - Import `Brand.master_xml`, `Brand.layout_xmls[0..31]`, `Brand.theme_xml` verbatim
-  - Write to `ppt/slideMasters/slideMaster1.xml`, `ppt/slideLayouts/slideLayout{N}.xml`, `ppt/theme/theme1.xml`
-  - Generate `.rels` for master and each layout
+- [ ] **Task 7: Master + layout + theme embedding (per ADR-015)**
+  - Generate 31 layout XML parts by calling
+    `slideforge_brand::layout_xml::serialize_layout_to_xml(&template.layouts[i])`
+    for each `i` in `0..template.layouts.len()` (guaranteed 31 entries for synthesized brands).
+    Write results to `ppt/slideLayouts/slideLayout{N}.xml` for N in 1..=31.
+  - Generate master XML by calling `slideforge_brand::layout_xml::serialize_master_to_xml(template)`.
+    Write result to `ppt/slideMasters/slideMaster1.xml`.
+  - Generate theme XML by calling `slideforge_brand::layout_xml::serialize_theme_to_xml(template)`.
+    Write result to `ppt/theme/theme1.xml`.
+  - Write notes/handout master stubs from `template.notes_master_stub` and
+    `template.handout_master_stub` to `ppt/notesMasters/notesMaster1.xml` and
+    `ppt/handoutMasters/handoutMaster1.xml` respectively.
+  - Generate `.rels` for master and each layout.
+  - Do NOT use `SlideMaster::default()` / `SlideLayout::default()` shells or hardcoded theme XML.
+  - Cite: ADR-015 §1 (layout API), §2 (master API), §3 (theme API), §4 (stubs).
 
 - [ ] **Task 8: notesMaster + handoutMaster (empty stubs)**
   - Write minimal valid `notesMaster1.xml` and `handoutMaster1.xml`
@@ -433,8 +444,10 @@ are addressed here.
 |---------|---------|---------|
 | `ooxmlsdk` | `=0.6.1` | All OOXML element construction (ADR-001) |
 | `zip` | `=4.2.0` | ZIP archive assembly (must be compatible with ooxmlsdk's zip dep) |
-| `slideforge-types` | workspace | `LaidOutDeck`, `LaidOutSlide`, `Register`, `InlineSpan` |
+| `slideforge-types` | workspace | `Register`, `InlineSpan`, and shared types |
 | `slideforge-plugin-api` | workspace | `Exporter` trait |
+| `slideforge-brand` | workspace | `BrandTemplate`, `serialize_layout_to_xml`, `serialize_master_to_xml`, `serialize_theme_to_xml` (per ADR-015) |
+| `slideforge-layout` | workspace (IR types only) | `LaidOutDeck`, `LaidOutSlide`, `LaidOutFrame` — no layout-computation calls (per ADR-015 §6) |
 | `thiserror` | `=2.0.18` | `ExportError` enum |
 | `tracing` | `=0.1.43` | Structured logging of serialization stages |
 | `insta` | `=1.42.0` | Snapshot tests for XML output |
@@ -498,12 +511,21 @@ many new files.
 
 `slideforge-pptx` must NOT depend on:
 - `slideforge-eval` — evaluator is upstream; no circular dependency
-- `slideforge-layout` — layout is upstream
 - `slideforge-syntax` — parser is upstream
 - `slideforge-docx` — sibling exporter; no cross-exporter deps
 - `slideforge-pdf` — sibling exporter
 - `slideforge-html` — sibling exporter
 - Any crate not in the approved dependency list in `architecture/dependency-graph.md`
+
+**Amended per ADR-015:**
+- `slideforge-pptx` must NOT call `slideforge-layout` layout-computation functions
+  (e.g., `layout::run`), but MAY depend on `slideforge-layout` for `LaidOutDeck`,
+  `LaidOutSlide`, and associated IR types (per ADR-015 §6).
+
+**Approved dependencies (per ADR-015):**
+- `slideforge-brand` — APPROVED; `slideforge-pptx` MUST call
+  `slideforge_brand::layout_xml::serialize_layout_to_xml`,
+  `serialize_master_to_xml`, and `serialize_theme_to_xml` (per ADR-015 §1–3 and §5).
 
 **ooxmlsdk 0.6.1 verification (as of 2026-05-25):** Confirmed published on crates.io
 with MSRV 1.88.0 (matches project toolchain). Dependencies: `quick-xml ^0.38.0`,
