@@ -10,7 +10,7 @@
 //!   - Shows placeholder idx in slide1.xml (AC-004)
 //!   - Shows integer-EMU coordinates (AC-005)
 //!   - Shows `<p:clrMapOvr>` in the dark slide (EC-005)
-//!   - Shows REPORT_SENTINEL / DETAIL_SENTINEL absent from slide bodies (AC-010)
+//!   - Shows `REPORT_SENTINEL` / `DETAIL_SENTINEL` absent from slide bodies (AC-010)
 //!   - Builds the same deck twice and prints the matching SHA-256 (AC-007)
 //!
 //! Run:
@@ -25,10 +25,8 @@ use sha2::{Digest, Sha256};
 use slideforge_layout::{BoundingBox, Frame, FrameContent, LaidOutDeck, LaidOutSlide, PageSize};
 use slideforge_plugin_api::{ExportOptions, Exporter};
 use slideforge_types::{
-    Brand, BrandFonts, BrandPalette, Deck, Emu, Register, RegisteredContent,
-    deck::DeckMetadata,
-    ordered_map::OrderedMap,
-    slide::Slide,
+    Brand, BrandFonts, BrandPalette, Deck, Emu, Register, RegisteredContent, deck::DeckMetadata,
+    ordered_map::OrderedMap, slide::Slide,
 };
 use zip::ZipArchive;
 
@@ -41,7 +39,7 @@ fn page_size() -> PageSize {
     PageSize::default()
 }
 
-/// Title region (matches test fixtures in core_tests.rs).
+/// Title region (matches test fixtures in `core_tests.rs`).
 fn title_bbox() -> BoundingBox {
     BoundingBox {
         x: Emu(457_200),
@@ -129,7 +127,7 @@ fn slide_title() -> LaidOutSlide {
 
 /// Slide 2: Content slide with report+detail register entries.
 ///
-/// Demonstrates AC-010: REPORT_SENTINEL and DETAIL_SENTINEL must NOT appear in
+/// Demonstrates AC-010: `REPORT_SENTINEL` and `DETAIL_SENTINEL` must NOT appear in
 /// `ppt/slides/slide2.xml` even though they live in `register_content`.
 fn slide_content_with_registers() -> LaidOutSlide {
     LaidOutSlide {
@@ -192,6 +190,7 @@ fn make_deck_laid_out() -> LaidOutDeck {
 
 // ─── ZIP helpers ─────────────────────────────────────────────────────────────
 
+/// Returns a sorted list of all entry names in the ZIP archive.
 fn zip_entry_names(bytes: &[u8]) -> Vec<String> {
     let cursor = std::io::Cursor::new(bytes);
     let mut archive = ZipArchive::new(cursor).expect("valid ZIP");
@@ -202,15 +201,19 @@ fn zip_entry_names(bytes: &[u8]) -> Vec<String> {
     names
 }
 
+/// Reads and returns the UTF-8 text content of a named ZIP entry.
 fn zip_read_entry(bytes: &[u8], path: &str) -> String {
     let cursor = std::io::Cursor::new(bytes);
     let mut archive = ZipArchive::new(cursor).expect("valid ZIP");
-    let mut entry = archive.by_name(path).unwrap_or_else(|_| panic!("entry '{path}' not found"));
+    let mut entry = archive
+        .by_name(path)
+        .unwrap_or_else(|_| panic!("entry '{path}' not found"));
     let mut buf = String::new();
     entry.read_to_string(&mut buf).expect("valid UTF-8");
     buf
 }
 
+/// Returns the lowercase hex SHA-256 digest of the given bytes.
 fn sha256_hex(bytes: &[u8]) -> String {
     let mut h = Sha256::new();
     h.update(bytes);
@@ -219,6 +222,7 @@ fn sha256_hex(bytes: &[u8]) -> String {
 
 // ─── Section printers ────────────────────────────────────────────────────────
 
+/// Prints a visually delimited section header to stdout.
 fn print_section(title: &str) {
     println!();
     println!("══════════════════════════════════════════════════════");
@@ -226,16 +230,22 @@ fn print_section(title: &str) {
     println!("══════════════════════════════════════════════════════");
 }
 
+/// Prints a passing check line to stdout.
 fn print_ok(label: &str) {
     println!("  [OK] {label}");
 }
 
+/// Prints a failing check line to stdout.
 fn print_fail(label: &str) {
     println!("  [FAIL] {label}");
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
+// The main function is intentionally long: it exercises 10 acceptance criteria
+// sequentially and prints evidence for each one. Splitting it into smaller
+// functions would obscure the per-AC narrative flow without adding clarity.
+#[allow(clippy::too_many_lines)]
 fn main() {
     println!("slideforge-pptx demo — STORY-037 per-AC evidence");
     println!("=================================================");
@@ -306,7 +316,16 @@ fn main() {
         }
     }
 
-    let layout_count = names.iter().filter(|n| n.starts_with("ppt/slideLayouts/slideLayout") && n.ends_with(".xml") && !n.contains("_rels")).count();
+    let layout_count = names
+        .iter()
+        .filter(|n| {
+            n.starts_with("ppt/slideLayouts/slideLayout")
+                && std::path::Path::new(n)
+                    .extension()
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("xml"))
+                && !n.contains("_rels")
+        })
+        .count();
     println!("  slideLayoutN.xml count: {layout_count} (expected 31)");
 
     if all_present && layout_count == 31 {
@@ -411,11 +430,11 @@ fn main() {
         (Some(a), Some(b), Some(c)) if a < b && b < c => {
             println!("  Positions: nvSpPr={a}, spPr={b}, txBody={c}");
             print_ok("AC-006: nvSpPr < spPr < txBody — schema-correct element order");
-        }
+        },
         (a, b, c) => {
             println!("  Positions: nvSpPr={a:?}, spPr={b:?}, txBody={c:?}");
             print_fail("AC-006: element order violation");
-        }
+        },
     }
 
     // ─── AC-007: Deterministic output (SHA-256 comparison) ──────────────────
@@ -487,9 +506,15 @@ fn main() {
     if prs_has_slide1 && prs_has_notes && prs_has_handout {
         print_ok("presentation.xml.rels → references slide1, notesMaster, handoutMaster");
     } else {
-        if !prs_has_slide1 { print_fail("presentation.xml.rels → missing slide1 reference"); }
-        if !prs_has_notes  { print_fail("presentation.xml.rels → missing notesMaster reference"); }
-        if !prs_has_handout { print_fail("presentation.xml.rels → missing handoutMaster reference"); }
+        if !prs_has_slide1 {
+            print_fail("presentation.xml.rels → missing slide1 reference");
+        }
+        if !prs_has_notes {
+            print_fail("presentation.xml.rels → missing notesMaster reference");
+        }
+        if !prs_has_handout {
+            print_fail("presentation.xml.rels → missing handoutMaster reference");
+        }
     }
 
     if slide1_rels_has_layout && master_rels_has_theme && layout1_rels_has_master {
@@ -560,13 +585,54 @@ fn main() {
 
     print_section("STORY-037 Evidence Summary");
     println!("  AC-001  Exporter trait: id()='pptx', extension()='pptx'  [structural — always OK]");
-    println!("  AC-002  ZIP part list: {}", if all_present && layout_count == 31 { "PASS" } else { "FAIL" });
-    println!("  AC-003  [Content_Types].xml: {}", if ct_ok { "PASS" } else { "FAIL" });
-    println!("  AC-004  Placeholder idx=0: {}", if slide1_xml.contains("idx=\"0\"") { "PASS" } else { "FAIL" });
-    println!("  AC-005  Integer EMU coords: {}", if coord_ok { "PASS" } else { "FAIL" });
-    println!("  AC-006  Element ordering: {}", if matches!((nvsppr_pos, spppr_pos, txbody_pos), (Some(a), Some(b), Some(c)) if a < b && b < c) { "PASS" } else { "FAIL" });
-    println!("  AC-007  Determinism (SHA-256): {}", if hash1 == hash2 { "PASS" } else { "FAIL" });
+    println!(
+        "  AC-002  ZIP part list: {}",
+        if all_present && layout_count == 31 {
+            "PASS"
+        } else {
+            "FAIL"
+        }
+    );
+    println!(
+        "  AC-003  [Content_Types].xml: {}",
+        if ct_ok { "PASS" } else { "FAIL" }
+    );
+    println!(
+        "  AC-004  Placeholder idx=0: {}",
+        if slide1_xml.contains("idx=\"0\"") {
+            "PASS"
+        } else {
+            "FAIL"
+        }
+    );
+    println!(
+        "  AC-005  Integer EMU coords: {}",
+        if coord_ok { "PASS" } else { "FAIL" }
+    );
+    println!(
+        "  AC-006  Element ordering: {}",
+        if matches!((nvsppr_pos, spppr_pos, txbody_pos), (Some(a), Some(b), Some(c)) if a < b && b < c)
+        {
+            "PASS"
+        } else {
+            "FAIL"
+        }
+    );
+    println!(
+        "  AC-007  Determinism (SHA-256): {}",
+        if hash1 == hash2 { "PASS" } else { "FAIL" }
+    );
     println!("  AC-008  LibreOffice: CI gate (STORY-052) — skipped locally");
-    println!("  AC-009  Rel chain: {}", if slide1_rels_has_layout && master_rels_has_theme && layout1_rels_has_master { "PASS" } else { "FAIL" });
-    println!("  AC-010  Register bleed: {}", if all_slides_clean { "PASS" } else { "FAIL" });
+    println!(
+        "  AC-009  Rel chain: {}",
+        if slide1_rels_has_layout && master_rels_has_theme && layout1_rels_has_master {
+            "PASS"
+        } else {
+            "FAIL"
+        }
+    );
+    println!(
+        "  AC-010  Register bleed: {}",
+        if all_slides_clean { "PASS" } else { "FAIL" }
+    );
 }
