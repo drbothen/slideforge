@@ -3,7 +3,7 @@
 //! Builds a representative [`LaidOutDeck`] containing:
 //! - 3 narrative slides (body content)
 //! - Auto-generated `executive_summary` section from takeaway fields (AC-001)
-//! - Auto-generated `risk_register` section from severity_cards data (AC-002)
+//! - Auto-generated `risk_register` section from `severity_cards` data (AC-002)
 //! - Manually-authored `methodology` section (AC-003)
 //!
 //! The deck is exported via [`DocxExporter`].  The binary:
@@ -39,6 +39,7 @@ use slideforge_types::{
 
 // ─── Fixture builders ─────────────────────────────────────────────────────────
 
+/// Build a representative [`Brand`] fixture for demo use.
 fn demo_brand() -> Brand {
     Brand {
         name: Arc::from("demo-brand"),
@@ -58,6 +59,7 @@ fn demo_brand() -> Brand {
     }
 }
 
+/// Build an empty [`Deck`] fixture with the given title.
 fn demo_deck(title: &str) -> Deck {
     Deck {
         slides: vec![],
@@ -74,6 +76,7 @@ fn demo_deck(title: &str) -> Deck {
     }
 }
 
+/// Build a minimal single-frame [`LaidOutSlide`] carrying a title and report paragraph.
 fn make_slide(index: usize, title: &str, report_text: &str) -> LaidOutSlide {
     LaidOutSlide {
         source_index: index,
@@ -109,6 +112,7 @@ fn make_slide(index: usize, title: &str, report_text: &str) -> LaidOutSlide {
     }
 }
 
+/// Build an auto-generated `executive_summary` [`GeneratedSection`] from takeaway strings.
 fn make_executive_summary(takeaways: &[&str]) -> GeneratedSection {
     GeneratedSection {
         kind: SectionKind::ExecutiveSummary,
@@ -123,6 +127,7 @@ fn make_executive_summary(takeaways: &[&str]) -> GeneratedSection {
     }
 }
 
+/// Build an auto-generated `risk_register` [`GeneratedSection`] from (title, severity, desc) tuples.
 fn make_risk_register(rows: &[(&str, &str, &str)]) -> GeneratedSection {
     GeneratedSection {
         kind: SectionKind::RiskRegister,
@@ -142,6 +147,7 @@ fn make_risk_register(rows: &[(&str, &str, &str)]) -> GeneratedSection {
     }
 }
 
+/// Build a manually-authored [`GeneratedSection`] with a single report-register paragraph.
 fn make_manual_section(name: &str, heading: &str, report_text: &str) -> GeneratedSection {
     GeneratedSection {
         kind: SectionKind::ManualSection(Arc::from(name)),
@@ -156,6 +162,7 @@ fn make_manual_section(name: &str, heading: &str, report_text: &str) -> Generate
     }
 }
 
+/// Export a [`Deck`] + [`LaidOutDeck`] pair to raw DOCX bytes using the demo brand.
 fn export(deck: &Deck, laid_out: &LaidOutDeck) -> Vec<u8> {
     let brand = demo_brand();
     let opts = ExportOptions::default();
@@ -164,6 +171,7 @@ fn export(deck: &Deck, laid_out: &LaidOutDeck) -> Vec<u8> {
         .expect("DocxExporter::export must succeed")
 }
 
+/// Read a named entry from a DOCX ZIP archive and return its UTF-8 content.
 fn read_zip_member(docx_bytes: &[u8], name: &str) -> String {
     let cursor = std::io::Cursor::new(docx_bytes);
     let mut archive = zip::ZipArchive::new(cursor).expect("valid zip");
@@ -294,8 +302,7 @@ fn main() {
     let tbl_start = doc_xml.find("<w:tbl").expect("<w:tbl> present");
     let tbl_end = doc_xml
         .find("</w:tbl>")
-        .map(|p| p + "</w:tbl>".len())
-        .unwrap_or(doc_xml.len());
+        .map_or(doc_xml.len(), |p| p + "</w:tbl>".len());
     let tbl_excerpt = &doc_xml[tbl_start..tbl_end.min(tbl_start + 600)];
     // Show header cell text
     let has_risk_col = tbl_excerpt.contains(">Risk</w:t>");
@@ -465,10 +472,10 @@ fn main() {
         warnings: vec![],
     };
     let docx_20 = export(&deck_20, &laid_out_20);
-    let doc_20 = read_zip_member(&docx_20, "word/document.xml");
+    let xml_20 = read_zip_member(&docx_20, "word/document.xml");
 
     // Count <w:tr elements: 1 header + 20 data = 21
-    let tr_count_20 = doc_20.matches("<w:tr").count();
+    let tr_count_20 = xml_20.matches("<w:tr").count();
     assert_eq!(
         tr_count_20, 21,
         "AC-008: risk register must have 21 rows (1 header + 20 data); found {tr_count_20}"
