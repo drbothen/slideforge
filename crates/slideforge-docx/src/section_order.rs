@@ -27,7 +27,7 @@
 //! Manual sections are NOT merged with auto-generated sections of the same name.
 //! They are appended after all auto-generated sections in deck source order.
 //!
-//! ## Deferred: section_order deck-metadata override
+//! ## Deferred: `section_order` deck-metadata override
 //!
 //! The DSL `section_order:` metadata field (which would allow a manual section
 //! to declare an earlier position) is NOT propagated by this module. Manual

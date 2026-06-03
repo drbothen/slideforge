@@ -29,8 +29,8 @@
 //! concatenation for dynamic content.
 
 use ooxmlsdk::schemas::schemas_openxmlformats_org_wordprocessingml_2006_main::{
-    BodyChoice, GridColumn, Paragraph, ParagraphChoice, ParagraphProperties, ParagraphStyleId,
-    Run, RunChoice, Table, TableCell, TableCellChoice, TableChoice2, TableGrid, TableProperties,
+    BodyChoice, GridColumn, Paragraph, ParagraphChoice, ParagraphProperties, ParagraphStyleId, Run,
+    RunChoice, Table, TableCell, TableCellChoice, TableChoice2, TableGrid, TableProperties,
     TableRow, TableRowChoice, TableStyle, TableWidth, TableWidthUnitValues, Text,
 };
 use slideforge_layout::sections::{GeneratedSection, SectionItem, SectionKind};
@@ -157,7 +157,7 @@ pub fn serialize_risk_register(section: &GeneratedSection) -> Result<Vec<BodyCho
 ///
 /// Structure:
 /// - `<w:tblPr>` with `<w:tblStyle w:val="TableGrid"/>` and auto-width
-/// - `<w:tblGrid>` with one `<w:gridCol>` per column (ECMA-376 CT_Tbl minOccurs=1)
+/// - `<w:tblGrid>` with one `<w:gridCol>` per column (ECMA-376 `CT_Tbl` minOccurs=1)
 ///   Columns: Risk | Severity | Description (3 columns, equal auto width)
 /// - Header row: Risk | Severity | Description (using `TableHeader` paragraph style)
 /// - Data rows: one per `SectionItem::RiskRow`
@@ -194,18 +194,9 @@ fn build_risk_register_table(section: &GeneratedSection) -> Table {
     // validators (LibreOffice, Word strict mode). The risk register has 3 columns.
     let tbl_grid = TableGrid {
         w_grid_col: vec![
-            GridColumn {
-                width: None,
-                ..GridColumn::default()
-            },
-            GridColumn {
-                width: None,
-                ..GridColumn::default()
-            },
-            GridColumn {
-                width: None,
-                ..GridColumn::default()
-            },
+            GridColumn { width: None },
+            GridColumn { width: None },
+            GridColumn { width: None },
         ],
         ..TableGrid::default()
     };
