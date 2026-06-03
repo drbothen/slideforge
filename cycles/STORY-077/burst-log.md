@@ -57,6 +57,30 @@ Full detail in git log of feature/S-077. Condensed narrative below.
 
 ---
 
+## Post-Merge Burst (2026-06-03)
+
+STORY-077 MERGED to develop as PR #49, squash commit c8913cad ("feat(syntax,eval,types,layout): SectionBlock IR extension + inline-markup parser (STORY-077)"). develop advanced e5d818e7 → c8913cad. develop PR count: 49.
+
+Final cascade summary: 26 adversary passes. Streak achieved at passes 24-25-26 (3/3 strict-CLEAN). CI 16/16 green. Security-reviewer CLEAN (0 crit/0 important). PR-reviewer APPROVE (0 blocking).
+
+Post-merge cleanup: feature/S-077 branch deleted (remote + local). Worktree `.worktrees/STORY-077` removed.
+
+Wave 4 Batch A = 10/10 COMPLETE. All 10 stories merged (PRs #39–#49, develop c8913cad).
+
+STATE.md updated: develop c8913cad, pr_count 49, wave_4_batch_a_complete 10/10, STORY-077 DONE, stale "RESUME HERE" turnkey section removed, Session Resume Checkpoint replaced.
+
+STORY-INDEX.md: STORY-045 ready→merged, STORY-075 ready→merged, STORY-077 ready→merged.
+
+Cycle-closing items recorded in cycles/STORY-077/lessons.md:
+- SEC-002 (link URL no scheme validation): deferred to STORY-046 with concrete dependency [codified]
+- OBS-077-P24-A (underscore italic flanking): pending-intent for PO + STORY-081 [recorded]
+- OBS-077-P25-A (parse→eval round-trip test): optional follow-up [recorded]
+- E-EVL-007..011 + E-PAR-012 taxonomy debt: follow-up story to be created (3+ recurrences → codified) [codified]
+- LESSON-P077-A (fresh-context pass validates protocol): no process change, confirmation [codified]
+- LESSON-P077-B (sibling enumeration sweep scope): refinement to TD-VSDD-060 sweep discipline [codified]
+
+---
+
 ## Process Wins (archived 2026-06-02)
 
 - Pre-implementation tech-validation (research-agent) + architect coordinate-model directive for new-dependency stories catches library-vs-spec coordinate bugs before implementation.
