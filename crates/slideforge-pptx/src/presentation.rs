@@ -58,6 +58,11 @@ impl PresentationSerializer {
     ///
     /// `handout_master_rel_id` is the `rId` for `handoutMaster1.xml`.
     ///
+    /// # Panics
+    ///
+    /// Panics if `slide_rel_ids` has more than `u32::MAX` entries (impossible in practice:
+    /// a deck cannot have 4 billion slides). Documented infallible path.
+    ///
     /// # Errors
     ///
     /// Returns [`PptxError::OoxmlElement`] if `ooxmlsdk` fails to serialise

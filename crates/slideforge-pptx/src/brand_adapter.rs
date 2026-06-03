@@ -26,6 +26,8 @@
 
 use std::sync::Arc;
 
+use slideforge_brand::error::BrandError;
+use slideforge_brand::inference;
 use slideforge_brand::layout_xml::{
     HANDOUT_MASTER_STUB, NOTES_MASTER_STUB, generate_content_types_layout_entries,
 };
@@ -34,8 +36,6 @@ use slideforge_brand::template::{
     BrandFonts, BrandTemplate, COLOR_SLOT_NAMES, ColorSlot, ColorValue, MasterIds,
 };
 use slideforge_brand::toml_schema::BrandConfig;
-use slideforge_brand::inference;
-use slideforge_brand::error::BrandError;
 use slideforge_types::Brand;
 
 /// Construct a `BrandTemplate` from a `&Brand` for use by the PPTX exporter.
@@ -84,9 +84,7 @@ pub fn brand_template_from_brand(brand: &Brand) -> BrandTemplate {
     ];
 
     // Build the `[Option<&str>; 12]` array by borrowing from the owned Strings.
-    let slot_refs: [Option<&str>; 12] = std::array::from_fn(|i| {
-        palette_slots[i].as_deref()
-    });
+    let slot_refs: [Option<&str>; 12] = std::array::from_fn(|i| palette_slots[i].as_deref());
 
     let mut warnings: Vec<BrandError> = Vec::new();
     let hex_slots = inference::infer_missing_slots(slot_refs, &mut warnings);
@@ -126,9 +124,7 @@ pub fn brand_template_from_brand(brand: &Brand) -> BrandTemplate {
         notes_master_stub: NOTES_MASTER_STUB.to_vec(),
         handout_master_stub: HANDOUT_MASTER_STUB.to_vec(),
         master_ids: MasterIds::default(),
-        content_types_layout_entries: Arc::from(
-            generate_content_types_layout_entries(31).as_str(),
-        ),
+        content_types_layout_entries: Arc::from(generate_content_types_layout_entries(31).as_str()),
     }
 }
 

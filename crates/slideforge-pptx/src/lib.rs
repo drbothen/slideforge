@@ -60,7 +60,9 @@ use presentation::PresentationSerializer;
 use rels::{RelsBuilder, rel_types};
 use slide_serializer::SlideSerializer;
 use slideforge_brand::BrandTemplate;
-use slideforge_brand::layout_xml::{serialize_layout_to_xml, serialize_master_to_xml, serialize_theme_to_xml};
+use slideforge_brand::layout_xml::{
+    serialize_layout_to_xml, serialize_master_to_xml, serialize_theme_to_xml,
+};
 use slideforge_layout::{FrameContent, LaidOutDeck};
 use slideforge_plugin_api::{ExportError, ExportOptions, Exporter};
 use slideforge_types::{Brand, Deck};
@@ -116,8 +118,7 @@ impl PptxExporter {
         // F-037-010 fix: build presentation rels ONCE and thread the resulting rIds
         // to both `build_presentation_xml` and `build_presentation_rels_part`.
         // Previously rels were rebuilt twice (once for slide rIds, once for XML).
-        let (slide_rel_ids, prs_rels_bytes) =
-            build_presentation_rels_bytes(laid_out)?;
+        let (slide_rel_ids, prs_rels_bytes) = build_presentation_rels_bytes(laid_out)?;
 
         build_slide_parts(laid_out, &brand_template, &mut parts)?;
         build_presentation_xml(laid_out, brand, &slide_rel_ids, &mut parts)?;
@@ -265,7 +266,7 @@ fn find_layout_index(brand_template: &BrandTemplate, slide_type_keyword: &str) -
 
 /// Inject `<p:pic>` XML shapes for diagram frames into the slide XML bytes.
 ///
-/// For each (frame_idx, rId) pair, a `<p:pic>` element is appended before
+/// For each (`frame_idx`, `rId`) pair, a `<p:pic>` element is appended before
 /// `</p:spTree>` in the slide XML. The `<p:pic>` references the media via
 /// `r:embed="{rId}"` (F-037-005).
 fn inject_pic_shapes_for_diagrams(
@@ -419,7 +420,10 @@ fn build_presentation_xml(
 ///
 /// These rId values match the `sldLayoutIdLst` entries in master XML
 /// (which use r:id="rId2".."rId32").
-fn build_master_parts(brand_template: &BrandTemplate, parts: &mut Vec<ZipPart>) -> Result<(), PptxError> {
+fn build_master_parts(
+    brand_template: &BrandTemplate,
+    parts: &mut Vec<ZipPart>,
+) -> Result<(), PptxError> {
     parts.push(ZipPart {
         path: "ppt/slideMasters/slideMaster1.xml".to_string(),
         bytes: serialize_master_to_xml(brand_template),
@@ -449,7 +453,10 @@ fn build_master_parts(brand_template: &BrandTemplate, parts: &mut Vec<ZipPart>) 
 /// each layout in `brand_template.layouts`. If the template has fewer than 31
 /// layouts (unlikely for synthesized brands), fills remaining slots with the
 /// last available layout.
-fn build_layout_parts(brand_template: &BrandTemplate, parts: &mut Vec<ZipPart>) -> Result<(), PptxError> {
+fn build_layout_parts(
+    brand_template: &BrandTemplate,
+    parts: &mut Vec<ZipPart>,
+) -> Result<(), PptxError> {
     let layout_count = 31_usize;
 
     for n in 1..=layout_count {
@@ -541,9 +548,7 @@ fn build_notes_handout_masters(brand_template: &BrandTemplate, parts: &mut Vec<Z
     // we always add one entry, so this is infallible in practice.
     let mut notes_master_rels = RelsBuilder::new();
     notes_master_rels.add(rel_types::THEME, "../theme/theme1.xml");
-    let notes_rels_bytes = notes_master_rels
-        .build()
-        .unwrap_or_else(|_| b"".to_vec());
+    let notes_rels_bytes = notes_master_rels.build().unwrap_or_else(|_| b"".to_vec());
     parts.push(ZipPart {
         path: "ppt/notesMasters/_rels/notesMaster1.xml.rels".to_string(),
         bytes: notes_rels_bytes,
@@ -561,9 +566,7 @@ fn build_notes_handout_masters(brand_template: &BrandTemplate, parts: &mut Vec<Z
 
     let mut handout_master_rels = RelsBuilder::new();
     handout_master_rels.add(rel_types::THEME, "../theme/theme1.xml");
-    let handout_rels_bytes = handout_master_rels
-        .build()
-        .unwrap_or_else(|_| b"".to_vec());
+    let handout_rels_bytes = handout_master_rels.build().unwrap_or_else(|_| b"".to_vec());
     parts.push(ZipPart {
         path: "ppt/handoutMasters/_rels/handoutMaster1.xml.rels".to_string(),
         bytes: handout_rels_bytes,

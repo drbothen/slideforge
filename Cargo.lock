@@ -2643,6 +2643,7 @@ dependencies = [
  "insta",
  "ooxmlsdk",
  "sha2 0.10.9",
+ "slideforge-brand",
  "slideforge-eval",
  "slideforge-layout",
  "slideforge-plugin-api",

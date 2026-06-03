@@ -540,21 +540,61 @@ const CLR_MAP_ATTRS: &[(&str, &str)] = &[
 /// Geometry matches standard 10-inch wide × 7.5-inch tall slide canvas (914400 EMU/inch).
 const MASTER_PLACEHOLDER_DEFS: &[(&str, u32, &str, i64, i64, i64, i64)] = &[
     // title: full-width title region
-    ("title", 0, "Title Placeholder", 457_200, 274_638, 8_229_600, 1_143_000),
+    (
+        "title",
+        0,
+        "Title Placeholder",
+        457_200,
+        274_638,
+        8_229_600,
+        1_143_000,
+    ),
     // body: main content region
-    ("body", 1, "Content Placeholder", 457_200, 1_600_200, 8_229_600, 4_525_963),
+    (
+        "body",
+        1,
+        "Content Placeholder",
+        457_200,
+        1_600_200,
+        8_229_600,
+        4_525_963,
+    ),
     // dt: date/time footer — bottom left
-    ("dt", 10, "Date Placeholder", 457_200, 6_356_350, 2_286_000, 365_125),
+    (
+        "dt",
+        10,
+        "Date Placeholder",
+        457_200,
+        6_356_350,
+        2_286_000,
+        365_125,
+    ),
     // ftr: footer text — bottom center
-    ("ftr", 11, "Footer Placeholder", 3_657_600, 6_356_350, 2_743_200, 365_125),
+    (
+        "ftr",
+        11,
+        "Footer Placeholder",
+        3_657_600,
+        6_356_350,
+        2_743_200,
+        365_125,
+    ),
     // sldNum: slide number — bottom right
-    ("sldNum", 12, "Slide Number Placeholder", 7_086_000, 6_356_350, 1_600_200, 365_125),
+    (
+        "sldNum",
+        12,
+        "Slide Number Placeholder",
+        7_086_000,
+        6_356_350,
+        1_600_200,
+        365_125,
+    ),
 ];
 
 /// Serialize `BrandTemplate` data to a complete `slideMaster1.xml` document.
 ///
 /// The returned `Vec<u8>` is a valid `slideMaster1.xml` document containing:
-/// - `<p:sldMaster>` root with PresentationML + DrawingML namespace declarations.
+/// - `<p:sldMaster>` root with `PresentationML` + `DrawingML` namespace declarations.
 /// - `<p:cSld><p:spTree>` with 5 master placeholder shapes (title, body, dt, ftr, sldNum).
 /// - `<a:clrMap>` with all 12 OOXML color-map tokens (ECMA-376 §19.3.1.14).
 /// - `<p:sldLayoutIdLst>` with one `<p:sldLayoutId>` per layout in `template.layouts`
@@ -573,7 +613,11 @@ pub fn serialize_master_to_xml(template: &crate::template::BrandTemplate) -> Vec
 
     // XML declaration
     writer
-        .write_event(Event::Decl(BytesDecl::new("1.0", Some("UTF-8"), Some("yes"))))
+        .write_event(Event::Decl(BytesDecl::new(
+            "1.0",
+            Some("UTF-8"),
+            Some("yes"),
+        )))
         .expect("write xml decl");
 
     // <p:sldMaster> root element with namespace declarations
@@ -599,9 +643,7 @@ pub fn serialize_master_to_xml(template: &crate::template::BrandTemplate) -> Vec
     write_grpsppr(&mut writer);
 
     // Write the 5 master placeholder shapes
-    for (sp_idx, (ph_type, idx, name, x, y, cx, cy)) in
-        MASTER_PLACEHOLDER_DEFS.iter().enumerate()
-    {
+    for (sp_idx, (ph_type, idx, name, x, y, cx, cy)) in MASTER_PLACEHOLDER_DEFS.iter().enumerate() {
         // sp id starts at 2 (1 reserved for group shape)
         let sp_id = u32::try_from(sp_idx + 2).expect("sp_id always fits");
         write_master_placeholder(&mut writer, ph_type, *idx, name, sp_id, *x, *y, *cx, *cy);
@@ -666,6 +708,9 @@ pub fn serialize_master_to_xml(template: &crate::template::BrandTemplate) -> Vec
 }
 
 /// Write a single master placeholder `<p:sp>` element.
+// 9 arguments is one over the clippy::pedantic limit of 8 — all are required for
+// ECMA-376 master placeholder serialization with no meaningful grouping alternative.
+#[allow(clippy::too_many_arguments)]
 fn write_master_placeholder(
     writer: &mut Writer<Cursor<Vec<u8>>>,
     ph_type: &str,
@@ -811,11 +856,7 @@ fn write_master_tx_styles(
 }
 
 /// Write a single `<a:lvlNpPr>` within a txStyles paragraph style list.
-fn write_tx_style_level(
-    writer: &mut Writer<Cursor<Vec<u8>>>,
-    typeface: &str,
-    lvl: u8,
-) {
+fn write_tx_style_level(writer: &mut Writer<Cursor<Vec<u8>>>, typeface: &str, lvl: u8) {
     let tag = format!("a:lvl{lvl}pPr");
 
     writer
@@ -828,7 +869,9 @@ fn write_tx_style_level(
 
     let mut latin = BytesStart::new("a:latin");
     latin.push_attribute(("typeface", typeface));
-    writer.write_event(Event::Empty(latin)).expect("write latin");
+    writer
+        .write_event(Event::Empty(latin))
+        .expect("write latin");
 
     writer
         .write_event(Event::End(BytesEnd::new("a:defRPr")))
@@ -840,10 +883,7 @@ fn write_tx_style_level(
 }
 
 /// Write `<p:hf>` footer visibility flags.
-fn write_master_hf(
-    writer: &mut Writer<Cursor<Vec<u8>>>,
-    flags: &crate::footer::FooterFlags,
-) {
+fn write_master_hf(writer: &mut Writer<Cursor<Vec<u8>>>, flags: &crate::footer::FooterFlags) {
     let mut hf = BytesStart::new("p:hf");
     let ftr_str = if flags.show_footer { "1" } else { "0" };
     let dt_str = if flags.show_date { "1" } else { "0" };
@@ -862,9 +902,18 @@ fn write_master_hf(
 /// the `COLOR_SLOT_NAMES` keys (`acc1`–`acc6`) which use abbreviated forms,
 /// while `<a:clrScheme>` uses the full `accent1`–`accent6` element names.
 const THEME_COLOR_ELEMENT_NAMES: [&str; 12] = [
-    "a:dk1", "a:lt1", "a:dk2", "a:lt2",
-    "a:accent1", "a:accent2", "a:accent3", "a:accent4",
-    "a:accent5", "a:accent6", "a:hlink", "a:folHlink",
+    "a:dk1",
+    "a:lt1",
+    "a:dk2",
+    "a:lt2",
+    "a:accent1",
+    "a:accent2",
+    "a:accent3",
+    "a:accent4",
+    "a:accent5",
+    "a:accent6",
+    "a:hlink",
+    "a:folHlink",
 ];
 
 /// Serialize `BrandTemplate` color and font data to a complete `theme1.xml` document.
@@ -885,7 +934,11 @@ pub fn serialize_theme_to_xml(template: &crate::template::BrandTemplate) -> Vec<
     let mut writer = Writer::new(buf);
 
     writer
-        .write_event(Event::Decl(BytesDecl::new("1.0", Some("UTF-8"), Some("yes"))))
+        .write_event(Event::Decl(BytesDecl::new(
+            "1.0",
+            Some("UTF-8"),
+            Some("yes"),
+        )))
         .expect("write xml decl");
 
     // <a:theme xmlns:a="..." name="slideforge">
@@ -929,15 +982,6 @@ pub fn serialize_theme_to_xml(template: &crate::template::BrandTemplate) -> Vec<
                     slot = %color_slot.name,
                     scheme_ref = r.as_ref(),
                     "theme color slot contains unresolved SchemeRef; \
-                     emitting neutral fallback #808080 in theme1.xml"
-                );
-                "808080".to_owned()
-            },
-            // non_exhaustive: future variants produce a neutral fallback + warn.
-            _ => {
-                tracing::warn!(
-                    slot = %color_slot.name,
-                    "theme color slot has unknown ColorValue variant; \
                      emitting neutral fallback #808080 in theme1.xml"
                 );
                 "808080".to_owned()
@@ -1493,8 +1537,8 @@ mod tests {
 
     // ─── Tests for serialize_master_to_xml ───────────────────────────────────
 
-    /// Helper: build a minimal BrandTemplate with 12 color slots, fonts, and
-    /// a default MasterIds/FooterFlags for master/theme XML tests.
+    /// Helper: build a minimal `BrandTemplate` with 12 color slots, fonts, and
+    /// a default `MasterIds`/`FooterFlags` for master/theme XML tests.
     fn minimal_brand_template() -> crate::template::BrandTemplate {
         use crate::template::{BrandFonts, BrandTemplate, ColorSlot, ColorValue, MasterIds};
 
@@ -1526,25 +1570,23 @@ mod tests {
             footer_text: None,
             footer_flags: crate::footer::FooterFlags::default(),
             layout_names: vec![],
-            layouts: vec![
-                SlideLayoutDef {
-                    index: 1,
-                    name: Arc::from("Title Slide"),
-                    ooxml_type: Some(Arc::from("title")),
-                    placeholders: vec![LayoutPlaceholder {
-                        ph_type: Arc::from("ctrTitle"),
-                        idx: 0,
-                        accessibility_name: Arc::from("Title Placeholder"),
-                        x: 457_200,
-                        y: 274_638,
-                        cx: 8_229_600,
-                        cy: 1_143_000,
-                    }],
-                    has_color_override: false,
-                    color_override_bg: None,
-                    color_override_tx: None,
-                },
-            ],
+            layouts: vec![SlideLayoutDef {
+                index: 1,
+                name: Arc::from("Title Slide"),
+                ooxml_type: Some(Arc::from("title")),
+                placeholders: vec![LayoutPlaceholder {
+                    ph_type: Arc::from("ctrTitle"),
+                    idx: 0,
+                    accessibility_name: Arc::from("Title Placeholder"),
+                    x: 457_200,
+                    y: 274_638,
+                    cx: 8_229_600,
+                    cy: 1_143_000,
+                }],
+                has_color_override: false,
+                color_override_bg: None,
+                color_override_tx: None,
+            }],
             notes_master_stub: NOTES_MASTER_STUB.to_vec(),
             handout_master_stub: HANDOUT_MASTER_STUB.to_vec(),
             master_ids: MasterIds::default(),
@@ -1577,11 +1619,14 @@ mod tests {
             &xml[..xml.len().min(400)]
         );
         // All 8 OOXML standard clrMap tokens must be present.
-        for token in &["bg1", "bg2", "tx1", "tx2", "accent1", "accent2", "hlink", "folHlink"] {
+        for token in &[
+            "bg1", "bg2", "tx1", "tx2", "accent1", "accent2", "hlink", "folHlink",
+        ] {
             assert!(
                 xml.contains(token),
                 "clrMap must contain token '{}'; xml snippet: {}",
-                token, &xml[..xml.len().min(400)]
+                token,
+                &xml[..xml.len().min(400)]
             );
         }
     }
@@ -1616,7 +1661,8 @@ mod tests {
             assert!(
                 xml.contains(ph_type),
                 "slideMaster1.xml must contain master placeholder type '{}'; xml: {}",
-                ph_type, &xml[..xml.len().min(500)]
+                ph_type,
+                &xml[..xml.len().min(500)]
             );
         }
     }
@@ -1686,12 +1732,14 @@ mod tests {
             &xml[..xml.len().min(400)]
         );
         // All 12 OOXML color slot element names must be present.
-        for slot in &["dk1", "lt1", "dk2", "lt2", "accent1", "accent2", "accent3",
-                       "accent4", "accent5", "accent6", "hlink", "folHlink"] {
+        for slot in &[
+            "dk1", "lt1", "dk2", "lt2", "accent1", "accent2", "accent3", "accent4", "accent5",
+            "accent6", "hlink", "folHlink",
+        ] {
+            let slot_elem = format!("a:{slot}");
             assert!(
-                xml.contains(&format!("a:{slot}")),
-                "clrScheme must contain slot element 'a:{slot}'; xml snippet: {}",
-                slot
+                xml.contains(&slot_elem),
+                "clrScheme must contain slot element 'a:{slot}'"
             );
         }
     }
@@ -1732,7 +1780,7 @@ mod tests {
         );
     }
 
-    /// ADR-015 §3 — theme XML colors use the correct hex values from BrandTemplate.
+    /// ADR-015 §3 — theme XML colors use the correct hex values from `BrandTemplate`.
     #[test]
     fn test_adr015_serialize_theme_to_xml_uses_brand_colors() {
         let template = minimal_brand_template();

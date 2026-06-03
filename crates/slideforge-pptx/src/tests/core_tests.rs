@@ -1310,7 +1310,8 @@ fn test_f037_002_master_has_title_and_body_ph_types() {
         assert!(
             master_xml.contains(ph_type),
             "F-037-002: slideMaster1.xml must contain master placeholder type '{}'; got: {}",
-            ph_type, &master_xml[..master_xml.len().min(500)]
+            ph_type,
+            &master_xml[..master_xml.len().min(500)]
         );
     }
 }
@@ -1392,7 +1393,10 @@ fn test_f037_006_core_xml_escapes_language_value() {
     // A correct implementation uses XML-safe escaping for attribute content.
     // We verify the output is valid XML by checking the absence of the unescaped form.
     let has_lang_element = core_xml.contains("dc:language");
-    assert!(has_lang_element, "F-037-006: core.xml must have a <dc:language> element");
+    assert!(
+        has_lang_element,
+        "F-037-006: core.xml must have a <dc:language> element"
+    );
 }
 
 /// F-037-008: `u32::try_from(i).unwrap_or(0)` silent collapse must not exist.
@@ -1412,7 +1416,11 @@ fn test_f037_008_slide_id_no_silent_duplicate_on_overflow() {
     let mut slide_ids: Vec<u32> = Vec::new();
     let mut rest = presentation_xml.as_str();
     // Match only <p:sldId> (not <p:sldIdLst or <p:sldIdList)
-    while let Some(pos) = rest.find("<p:sldId ").or_else(|| rest.find("<p:sldId\t")).or_else(|| rest.find("<p:sldId\n")) {
+    while let Some(pos) = rest
+        .find("<p:sldId ")
+        .or_else(|| rest.find("<p:sldId\t"))
+        .or_else(|| rest.find("<p:sldId\n"))
+    {
         rest = &rest[pos + 9..];
         if let Some(id_pos) = rest.find("id=\"") {
             let id_start = id_pos + 4;
@@ -1427,14 +1435,18 @@ fn test_f037_008_slide_id_no_silent_duplicate_on_overflow() {
     }
 
     // Must have exactly 3 slide IDs
-    assert_eq!(slide_ids.len(), 3, "3-slide deck must have 3 <p:sldId> entries");
+    assert_eq!(
+        slide_ids.len(),
+        3,
+        "3-slide deck must have 3 <p:sldId> entries"
+    );
 
     // IDs must be unique (no silent duplicate-ID collapse)
-    let unique: std::collections::BTreeSet<u32> = slide_ids.iter().cloned().collect();
+    let unique: std::collections::BTreeSet<u32> = slide_ids.iter().copied().collect();
     assert_eq!(
-        unique.len(), 3,
-        "F-037-008: all 3 slide IDs must be unique; got {:?}",
-        slide_ids
+        unique.len(),
+        3,
+        "F-037-008: all 3 slide IDs must be unique; got {slide_ids:?}"
     );
 
     // IDs must be 256, 257, 258
@@ -1467,23 +1479,28 @@ fn test_f037_009_zip_entries_have_epoch_timestamp_present_and_correct() {
         let dt = entry.last_modified();
         // The new contract: timestamp MUST be set (not None) AND must be epoch.
         // This catches both "no timestamp" (None) and "wrong timestamp" (Some(non-epoch)).
-        let dt = dt.unwrap_or_else(|| panic!(
-            "F-037-009: ZIP entry '{entry_name}' must have a timestamp set; got None — \
+        let dt = dt.unwrap_or_else(|| {
+            panic!(
+                "F-037-009: ZIP entry '{entry_name}' must have a timestamp set; got None — \
              epoch datetime must be explicitly written, not omitted"
-        ));
+            )
+        });
         entries_with_timestamp += 1;
         assert_eq!(
-            dt.year(), 1980,
+            dt.year(),
+            1980,
             "F-037-009: ZIP entry '{entry_name}' must have epoch year 1980; got {}",
             dt.year()
         );
         assert_eq!(
-            dt.month(), 1,
+            dt.month(),
+            1,
             "F-037-009: ZIP entry '{entry_name}' must have epoch month 1; got {}",
             dt.month()
         );
         assert_eq!(
-            dt.day(), 1,
+            dt.day(),
+            1,
             "F-037-009: ZIP entry '{entry_name}' must have epoch day 1; got {}",
             dt.day()
         );
@@ -1564,9 +1581,8 @@ fn test_f037_011_layout_index_is_wired_not_dead_code() {
 
     // At minimum: the PPTX must be a valid ZIP
     let cursor = std::io::Cursor::new(&pptx_bytes);
-    ZipArchive::new(cursor).expect(
-        "F-037-011: export with non-default slide_type_keyword must produce valid ZIP"
-    );
+    ZipArchive::new(cursor)
+        .expect("F-037-011: export with non-default slide_type_keyword must produce valid ZIP");
 }
 
 /// F-037-005: `FrameContent::Diagram` must emit a `<p:pic>` shape referencing
@@ -1627,7 +1643,8 @@ fn test_f037_005_diagram_frame_emits_pic_shape_referencing_media_rid() {
             "F-037-005: media rId '{}' must be referenced in slide1.xml as r:embed; \
              found in .rels but not in slide XML — dangling relationship. \
              slide1.xml: {}",
-            rid, &slide1_xml[..slide1_xml.len().min(600)]
+            rid,
+            &slide1_xml[..slide1_xml.len().min(600)]
         );
     }
 }
