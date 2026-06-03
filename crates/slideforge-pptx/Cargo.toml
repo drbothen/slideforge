@@ -33,3 +33,5 @@ insta = { workspace = true }
 slideforge-eval = { workspace = true, features = ["test-utils"] }
 # sha2 for AC-007 determinism test (SHA-256 byte-identical comparison).
 sha2 = "=0.10.9"
+# tracing-test for load-bearing warn-capture tests (F-P5-LOW-001 partial-reuse warn).
+tracing-test = "=0.2.5"
