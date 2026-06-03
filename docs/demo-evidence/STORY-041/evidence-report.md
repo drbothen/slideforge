@@ -25,7 +25,9 @@
 | `AC-001-009-docx-core-serialization.gif` | 187 KB | VHS-generated animated GIF — all 9 ACs in one run |
 | `AC-001-009-docx-core-serialization.webm` | 295 KB | VHS-generated WebM video — archival format |
 | `AC-001-009-docx-core-serialization.tape` | 751 B | VHS tape script source |
-| `demo_docx_stdout.log` | 2.0 KB | Captured stdout from `cargo run --example demo_docx` |
+
+Note: `demo_docx_stdout.log` is gitignored (`.log` pattern). Full output is quoted
+inline in this report under each AC heading.
 
 ---
 
