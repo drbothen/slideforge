@@ -32,9 +32,10 @@ wave_4_started: 2026-05-31
 wave_4_total_stories: 18
 wave_4_total_points: 114
 wave_5_total_points: 109
-develop_sha: "c8913cad"
-develop_pr_count: 49
-workspace_tests: "~2680+ (49 PRs merged)"
+develop_sha: "f2573bb1"
+develop_pr_count: 50
+error_taxonomy_version: "v2.13"
+workspace_tests: "~2700+ (50 PRs merged)"
 workspace_test_failures: 0
 ---
 
@@ -52,8 +53,9 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. Generates branded .pptx
 
 ## POSITION
 
-Phase 3, **Wave 4 Batch A = 10/10 COMPLETE.**
-- develop = `c8913cad` (49 merged PRs). Open PRs: 0. Active worktrees: none (`.worktrees/STORY-077` removed post-merge).
+Phase 3, **Wave 4 Batch A = 10/10 COMPLETE. STORY-077 + all 4 follow-ups MERGED.**
+- develop = `f2573bb1` (50 merged PRs, PR #50 = STORY-077 follow-ups). Open PRs: 0. Active worktrees: none.
+- Follow-up cascade: 7 passes → 3/3 strict-CLEAN. CI 16/16 green. Security-reviewer CLEAN. PR-reviewer APPROVE.
 - **Next:** Wave 4 gate (wave-gate skill) OR Wave 4 Batch B start — STORY-037→038→039→040 + STORY-041→042 (parallel after Batch A, per wave-schedule.md). Confirm with orchestrator before proceeding.
 
 ---
@@ -73,12 +75,13 @@ Phase 3, **Wave 4 Batch A = 10/10 COMPLETE.**
 | Planning (25 DSL decisions) | DONE 2026-05-24 | q1–q25 docs + 14 research threads + 7/7 spikes resolved |
 | Phase 1: Spec Crystallization | DONE — APPROVED 2026-05-25 | PRD (109 BCs, 15 HS, 4 supplements) + arch (14 ADRs, 15 VPs, 20 crates) + UX spec. 17 passes, 69 findings, 3/3 clean. |
 | Phase 2: Story Decomposition | DONE — APPROVED 2026-05-25 | 81 stories, 21 epics, 6 waves, 491 pts. 22 passes, 96+ findings, 3/3 clean. |
-| Phase 3: TDD Implementation | IN PROGRESS — Waves 1/2/3 GATE PASSED. Wave 4 Batch A 10/10 COMPLETE (STORY-077 merged PR #49 c8913cad 2026-06-03). Batch B next. | Per-story delivery |
+| Phase 3: TDD Implementation | IN PROGRESS — Waves 1/2/3 GATE PASSED. Wave 4 Batch A 10/10 COMPLETE (STORY-077 + follow-ups PR #50 f2573bb1 2026-06-03). Batch B next. | Per-story delivery |
 | Phases 4–7 | NOT STARTED | Holdout / Adversarial / Formal Hardening / Convergence |
 
 ## Wave 4 Batch A Status (10/10 COMPLETE)
 
 ALL MERGED (PRs #39–#49, develop c8913cad): STORY-035, STORY-036, STORY-043, STORY-044, STORY-073, STORY-075, STORY-076, STORY-078, STORY-045, **STORY-077**.
+STORY-077 follow-ups MERGED as PR #50 (f2573bb1, 2026-06-03): E-PAR-022 URL allowlist, italic bilateral flanking, absolute error offsets, round-trip test.
 
 Batch B (next, parallel): STORY-037→038→039→040, STORY-041→042.
 Batch C (after Batch B): STORY-049→050.
@@ -90,12 +93,12 @@ Batch C (after Batch B): STORY-049→050.
 | Field | Value |
 |-------|-------|
 | **Date** | 2026-06-03 |
-| **Position** | Wave 4 Batch A 10/10 COMPLETE. STORY-077 merged as PR #49 (c8913cad). Next: Wave 4 gate OR Batch B — confirm with orchestrator. |
-| **develop SHA** | `c8913cad` (49 merged PRs) |
+| **Position** | Wave 4 Batch A 10/10 COMPLETE. STORY-077 + all 4 follow-ups merged as PR #50 (f2573bb1). 4 CLOSED follow-ups (SEC-002, taxonomy debt, OBS-P24-A, OBS-P25-A). 4 TRACKED new follow-ups (E-PAR-021 msg, HTML open-redirect, inner-quote round-trip, URL-paren-truncation). Next: Wave 4 gate OR Batch B — confirm with orchestrator. |
+| **develop SHA** | `f2573bb1` (50 merged PRs) |
 | **Active worktrees** | None |
 | **Open PRs** | 0 |
 | **Workspace crates** | 16 |
-| **BC deltas** | BC-3.02.002 v1.5, BC-1.14.003 v1.3, error-taxonomy v2.12 — all on factory-artifacts |
+| **BC deltas** | BC-3.02.002 v1.5, BC-1.14.003 v1.3, error-taxonomy v2.13 — all on factory-artifacts |
 | **factory-artifacts** | Local only — push requires explicit human authorization |
 
 ---
@@ -106,12 +109,16 @@ Batch C (after Batch B): STORY-049→050.
 |------|----------|--------|-------|
 | STORY-081: slide-level inline markup | P0 blocker for v1.0 | draft | Wave 5, 13 pts, EPIC-18. Depends on STORY-077 (now merged). Not started. |
 | SEC-001: veraPDF Docker `verapdf/cli:latest` not digest-pinned (CWE-494) | MED | open | CI-only; merged in #48; fix before v1.0 / Phase 6 |
-| SEC-002: `[text](url)` link URL has no scheme validation — `javascript:`/`data:` stored verbatim | LOW | deferred | No HTML exporter yet; enforce at parse boundary (allowlist http/https/mailto, new E-PAR code) BEFORE STORY-046 (HTML exporter) ships. Concrete dependency = STORY-046. |
+| SEC-002: link URL allowlist | LOW | **RESOLVED** | Fixed at parse boundary via E-PAR-022 (http/https/mailto allowlist) in PR #50 / f2573bb1. Closed earlier than STORY-046 deferral. STORY-046 retains the open-redirect (CWE-601) concern for the HTML exporter layer — see OBS-FU-HTML-REDIR below. |
 | SEC-003 (formerly SEC-002): `emu_to_pt` i64→f32 precision loss | LOW | open | Phase 6 Kani |
 | SEC-004 (formerly SEC-003): CI tee predictable temp path (self-hosted only) | LOW | open | Phase 6 |
-| E-EVL-007..011 unregistered + E-PAR-012 retired-code reuse | LOW | follow-up story drafted | See STORY-077 lessons. Taxonomy-completeness story needed before Phase 6. Recurred 3+ times in cascade — codified as follow-up. |
-| OBS-077-P24-A: `_` italic flanking guard (open-only) | LOW | pending-intent | `_apply file_path here_` closes italic at word-internal `_`. Spec-conformant (DIR-077-002 §1 mandates NO flanking). Right-flanking symmetry is a UX enhancement; PO decision + STORY-081 candidate. |
-| OBS-077-P25-A: parse→eval round-trip integration test consolidation | LOW | optional | AC-002 covered across two test layers; single source-to-eval round-trip would consolidate. Optional follow-up. |
+| E-EVL-007..011 unregistered + E-PAR-012 retired-code reuse | LOW | **RESOLVED** | Registered/reconciled in error-taxonomy v2.13 (factory-artifacts 7f2e52d7, PR-independent). Taxonomy now exhaustive for these codes. |
+| OBS-077-P24-A: `_` italic bilateral flanking | LOW | **RESOLVED** | Bilateral flanking shipped in PR #50 / f2573bb1 (DIR-077-002 §1 amended). |
+| OBS-077-P25-A: parse→eval round-trip test | LOW | **RESOLVED** | Round-trip test added in PR #50 / f2573bb1. |
+| E-PAR-021 message format cosmetic | minor | tracked | `nesting_depth_exceeded_msg` embeds raw byte offset + double-prints prefix. Pre-existing; affects only the rare E-PAR-021 path. Target: message-cleanup follow-up (no story dependency). |
+| OBS-FU-HTML-REDIR: HTML exporter URL open-redirect (CWE-601) | security | deferred to STORY-046 | Parse-time allowlist validates outer scheme only. A query-embedded redirect (`https://trusted/redir?to=javascript:evil`) is NOT caught at parse (correct). HTML exporter must handle `href` safety when rendering `InlineNode::Link`. Attach to STORY-046. |
+| OBS-FU-P1-A: DSL inner-quote round-trip | minor | tracked | `Token::StringLit` retains backslash-escapes verbatim — no unescape pass. `detail: "ref(\"x\")"` cannot round-trip nested escaped quotes. Pre-existing lexer follow-up. |
+| OBS-FU-P1-C: Link URL `)` truncation | minor | tracked | Link URLs truncated at first `)` — Wikipedia disambiguation links mis-parsed. Pre-existing link-parser follow-up. |
 | BC-1.14.001/002 still `subsystem: SS-TBD` | LOW | open | Fold into next spec-hygiene pass |
 | OBS-P6-001: PDF exporter ignores `opts.strict`/warnings | LOW | open | Wave-gate concern post-STORY-045 |
 

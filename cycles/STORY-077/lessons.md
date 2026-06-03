@@ -145,17 +145,46 @@ just the specific enumeration that the current finding flagged.
 
 ---
 
-## Cycle Summary
+## Follow-Up Cycle Lessons
+
+### LESSON-FU-A: Scanner Changes Require Upfront Invariant Analysis [process — scanner discipline]
+
+Touching the inline-markup scanner after 3/3 strict-CLEAN convergence triggered a 5-pass sub-cascade (P1 through P5) before re-achieving 3/3 strict-CLEAN. Each pass exposed a deeper invariant in the scanner's closer-prediction / absolute-offset machinery:
+
+- Pass 1 (F-FU-P1-001): closer-prediction desync after offset threading change.
+- Pass 2 (F-FU-P2-001): EOF unclosed-delimiter detection missed the new absolute-offset invariant.
+- Pass 3 (F-FU-P3-001): stale rustdoc referencing the pre-threading parameter semantics.
+
+Root cause: the fix touched one invariant (bilateral flanking) but the offset-threading change had downstream invariant consequences in closer-prediction agreement, EOF detection, and documentation — none of which were enumerated before implementation began.
+
+**Corrective discipline for all future scanner changes:**
+
+Before implementing any change to the inline-markup scanner (`slideforge-syntax`), explicitly enumerate:
+1. **Closer-prediction agreement**: will this change alter which closing delimiter is predicted? Re-verify all opener/closer pairing logic.
+2. **Absolute-offset threading**: does this change touch any byte offset passed through the scanner? Re-verify EOF and unclosed-delimiter paths.
+3. **EOF unclosed detection**: does the scanner's unclosed-at-EOF path depend on any value this change modifies?
+4. **Rustdoc / comment currency**: are any doc comments on modified functions or parameters still accurate?
+
+This is not a new protocol — it is a specific application of TD-VSDD-060 (sibling-site sweep) to the scanner's internal invariant graph. The strict 3-CLEAN + fresh-context cascade correctly surfaced each layer; the lesson is to front-load this analysis and fix all layers in one burst rather than discovering them pass-by-pass.
+
+**Disposition:** [codified — scanner-specific invariant analysis discipline, no process rule change needed beyond this lesson]
+
+---
+
+## Cycle Summary (including follow-up cycle)
 
 | Metric | Value |
 |--------|-------|
-| Total adversary passes | 26 |
-| Total findings | ~40+ (across all passes; see burst-log.md) |
-| Streak passes | 24, 25, 26 (3/3 strict-CLEAN) |
-| PR | #49 — merged to develop as c8913cad 2026-06-03 |
-| CI gate | 16/16 green |
-| Security-reviewer | CLEAN (0 crit, 0 important) |
-| PR-reviewer | APPROVE (0 blocking) |
+| Total adversary passes (main cascade) | 26 |
+| Total adversary passes (follow-up cascade) | 7 |
+| Total findings | ~45+ (across all passes; see burst-log.md) |
+| Streak passes (main) | 24, 25, 26 (3/3 strict-CLEAN) |
+| Streak passes (follow-up) | passes 3–5 / PR-6 / post-CI-7 (3/3 strict-CLEAN re-achieved) |
+| PR (main) | #49 — merged to develop as c8913cad 2026-06-03 |
+| PR (follow-up) | #50 — merged to develop as f2573bb1 2026-06-03 |
+| CI gate | 16/16 green (both PRs) |
+| Security-reviewer | CLEAN (0 crit, 0 important, both PRs) |
+| PR-reviewer | APPROVE (0 blocking, both PRs) |
 | BCs satisfied | BC-3.02.002 v1.5 (AC-001..006), BC-1.14.003 v1.3 (AC-EC-001) |
-| Error taxonomy | v2.12 — E-PAR-019/020/021 + E-EVL-012/013/014 registered |
-| Wave 4 Batch A | 10/10 COMPLETE (this was the final story) |
+| Error taxonomy | v2.13 — E-PAR-022 + E-EVL-007–011 registered; E-PAR-012 retired |
+| Wave 4 Batch A | 10/10 COMPLETE (STORY-077 was the final story; follow-up PRs are post-batch cleanup) |

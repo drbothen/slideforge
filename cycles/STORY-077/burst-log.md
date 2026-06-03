@@ -81,6 +81,42 @@ Cycle-closing items recorded in cycles/STORY-077/lessons.md:
 
 ---
 
+## STORY-077 Follow-Ups Burst (2026-06-03)
+
+Follow-up cycle dispatched after STORY-077 post-merge burst. Four approved follow-ups shipped as PR #50.
+
+**Scope of PR #50 (squash commit f2573bb1, "STORY-077 follow-ups"):**
+- E-PAR-022 link URL scheme allowlist (http/https/mailto) — parse-boundary enforcement; closed SEC-002 earlier than the STORY-046 deferral.
+- Italic bilateral flanking: DIR-077-002 §1 amended to add right-flanking guard parity with `*`; closed OBS-077-P24-A.
+- Absolute error offsets in inline-markup scanner — corrected embedded byte-offset threading through closer-prediction machinery.
+- Parse→eval round-trip integration test consolidating AC-002 seam coverage; closed OBS-077-P25-A.
+
+**Spec artifacts shipped to factory-artifacts at 7f2e52d7 (PR-independent):**
+- error-taxonomy v2.13: E-PAR-022 registered; E-EVL-007–011 registered; E-PAR-012 slot marked RETIRED + new code allocated; closed taxonomy debt item.
+- DIR-077-002 §1 bilateral-flanking amendment committed to inline-markup-directive.md.
+
+**Follow-up LOCAL adversarial cascade:**
+- Pass 1: F-FU-P1-001 (MED) closer-prediction desync after offset threading change + F-FU-P1-B (minor) absolute-offset edge at EOF + OBS-FU-P1-A (lexer inner-quote) + OBS-FU-P1-C (link URL `)` truncation). Fixed.
+- Pass 2: F-FU-P2-001 (MED) EOF unclosed-delimiter detection missed new absolute-offset invariant. Fixed.
+- Pass 3: F-FU-P3-001 (LOW) stale rustdoc comment on offset parameter. Fixed. Streak 1/3.
+- Pass 4: strict-CLEAN. Streak 2/3.
+- Pass 5: strict-CLEAN. Streak 3/3.
+- Pass 6 (PR-level, after push): strict-CLEAN.
+- Pass 7 (post-CI verify): strict-CLEAN.
+
+**CI:** 16/16 green. **Security-reviewer:** CLEAN (0 crit/0 important). **PR-reviewer:** APPROVE (0 blocking).
+
+**Post-merge cleanup:** fix/story-077-followups branch deleted (remote + local). Worktree removed. Only main (develop @ f2573bb1) + .factory worktrees remain.
+
+**develop advanced:** c8913cad → f2573bb1. develop PR count: 50.
+
+**4 follow-ups CLOSED:** SEC-002, E-EVL-007..011/E-PAR-012 taxonomy debt, OBS-077-P24-A, OBS-077-P25-A.
+**4 follow-ups TRACKED (new):** E-PAR-021 message cosmetic, OBS-FU-HTML-REDIR (CWE-601, deferred to STORY-046), OBS-FU-P1-A (inner-quote round-trip), OBS-FU-P1-C (URL `)` truncation).
+
+**Lesson LESSON-FU-A recorded** (scanner cascade invariant analysis discipline — see lessons.md).
+
+---
+
 ## Process Wins (archived 2026-06-02)
 
 - Pre-implementation tech-validation (research-agent) + architect coordinate-model directive for new-dependency stories catches library-vs-spec coordinate bugs before implementation.
