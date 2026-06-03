@@ -32,12 +32,15 @@
 //! `notesSlide` parts (STORY-040). This module never writes report/detail.
 
 use ooxmlsdk::common::XmlNamespaceDecl;
-use ooxmlsdk::schemas::a::{Extents, Offset, ParagraphChoice, Run, Transform2D};
+use ooxmlsdk::schemas::a::{
+    Extents, FillRectangle, Offset, ParagraphChoice, PictureLocks, Run, Stretch, Transform2D,
+};
 use ooxmlsdk::schemas::p::{
-    ApplicationNonVisualDrawingProperties, ColorMapOverride, ColorMapOverrideChoice,
-    CommonSlideData, GroupShapeProperties, NonVisualDrawingProperties,
-    NonVisualShapeDrawingProperties, NonVisualShapeProperties, PlaceholderShape, PlaceholderValues,
-    Shape, ShapeProperties, ShapePropertiesChoice, ShapeTree, ShapeTreeChoice, Slide, TextBody,
+    ApplicationNonVisualDrawingProperties, BlipFill, BlipFillChoice, ColorMapOverride,
+    ColorMapOverrideChoice, CommonSlideData, GroupShapeProperties, NonVisualDrawingProperties,
+    NonVisualPictureDrawingProperties, NonVisualPictureProperties, NonVisualShapeDrawingProperties,
+    NonVisualShapeProperties, Picture, PlaceholderShape, PlaceholderValues, Shape, ShapeProperties,
+    ShapePropertiesChoice, ShapeTree, ShapeTreeChoice, Slide, TextBody,
 };
 
 use slideforge_layout::{FrameContent, LaidOutSlide, LayoutWarning};
@@ -80,12 +83,13 @@ impl SlideSerializer {
     /// `layout_rel_id` is the `rId` of the layout relationship in
     /// `ppt/slides/_rels/slide{n+1}.xml.rels`.
     ///
+    /// `diagram_rids` is a slice of `(frame_idx, rId)` pairs for all
+    /// `FrameContent::Diagram` frames on this slide. For each pair, a typed
+    /// `<p:pic>` element (`ShapeTreeChoice::PPic`) is added to the shape tree,
+    /// referencing the media via `r:embed` (ADR-001 — no raw XML, F-037-005).
+    ///
     /// Returns the XML bytes and any non-fatal warnings detected during
     /// serialisation (e.g., a frame with zero-height content).
-    ///
-    /// Note: `Diagram` frames are serialised to `ppt/media/` by the caller
-    /// (`PptxExporter::export_inner`) which reads `LaidOutSlide::frames` directly.
-    /// This method only handles text placeholders.
     ///
     /// # Errors
     ///
@@ -97,6 +101,7 @@ impl SlideSerializer {
         slide: &LaidOutSlide,
         slide_index: usize,
         _layout_rel_id: &str,
+        diagram_rids: &[(usize, String)],
     ) -> Result<(Vec<u8>, Vec<LayoutWarning>), PptxError> {
         let warnings: Vec<LayoutWarning> = Vec::new();
         let part_name = format!("ppt/slides/slide{}.xml", slide_index + 1);
@@ -173,10 +178,41 @@ impl SlideSerializer {
                     shape_id += 1;
                 },
 
-                // Diagram: skipped here — handled by export_inner (writes to ppt/media/).
+                // Diagram: emit a typed <p:pic> via ooxmlsdk builders (ADR-001, F-037-005).
+                // The media part is written by the caller; `diagram_rids` carries the rId
+                // for the IMAGE relationship so it is never dangling.
+                FrameContent::Diagram(_) => {
+                    // Find the rId for this frame from the caller-supplied map.
+                    if let Some(rid) = diagram_rids
+                        .iter()
+                        .find(|(idx, _)| *idx == frame_idx)
+                        .map(|(_, r)| r.clone())
+                    {
+                        validate_emu(slide_index, frame_idx, &frame.bbox)?;
+                        let pic = build_picture(
+                            shape_id,
+                            frame_idx,
+                            &rid,
+                            frame.bbox.x.0,
+                            frame.bbox.y.0,
+                            frame.bbox.width.0,
+                            frame.bbox.height.0,
+                        );
+                        shape_tree
+                            .shape_tree_choice
+                            .push(ShapeTreeChoice::PPic(Box::new(pic)));
+                        shape_id += 1;
+                    } else {
+                        tracing::warn!(
+                            slide_index,
+                            frame_idx,
+                            "Diagram frame has no rId in diagram_rids; <p:pic> omitted"
+                        );
+                    }
+                },
+
                 // Image, Chart, Shape, ErrorSlidePlaceholder, Empty: skipped in STORY-037.
-                FrameContent::Diagram(_)
-                | FrameContent::Image { .. }
+                FrameContent::Image { .. }
                 | FrameContent::Chart
                 | FrameContent::Shape(_)
                 | FrameContent::ErrorSlidePlaceholder { .. }
@@ -412,6 +448,120 @@ fn build_shape(shape_id: u32, ph_idx: u32, x: i64, y: i64, cx: i64, cy: i64, tex
         shape_properties: Box::new(sp_pr),
         shape_style: None,
         text_body: Some(Box::new(tx_body)),
+        extension_list_with_modification: None,
+    }
+}
+
+/// Build a typed `<p:pic>` element for a diagram media frame (ADR-001, F-037-005).
+///
+/// `shape_id` is the numeric shape ID for `<p:cNvPr id="...">`.
+/// `frame_idx` is the 0-based frame index, used for the shape name.
+/// `r_embed` is the relationship ID string (e.g. `"rId2"`) from the slide `.rels`.
+/// Position and size are given in integer EMU.
+///
+/// The resulting element embeds the media via `<a:blip r:embed="..."/>` inside
+/// `<p:blipFill>` with a stretch fill, and positions it via `<a:xfrm>` inside
+/// `<p:spPr>` with a rect preset geometry — matching the schema produced by the
+/// previous raw-XML path but through typed ooxmlsdk builders.
+fn build_picture(
+    shape_id: u32,
+    frame_idx: usize,
+    r_embed: &str,
+    x: i64,
+    y: i64,
+    cx: i64,
+    cy: i64,
+) -> Picture {
+    // --- Non-visual properties ---
+    let cnv_pr = NonVisualDrawingProperties {
+        id: shape_id,
+        name: format!("Diagram {frame_idx}"),
+        description: None,
+        hidden: None,
+        title: None,
+        hyperlink_on_click: None,
+        hyperlink_on_hover: None,
+        non_visual_drawing_properties_extension_list: None,
+        xmlns: vec![],
+    };
+
+    // <p:cNvPicPr> with noChangeAspect="1"
+    let cnv_pic_pr = NonVisualPictureDrawingProperties {
+        prefer_relative_resize: None,
+        picture_locks: Some(Box::new(PictureLocks {
+            no_change_aspect: Some(true),
+            ..PictureLocks::default()
+        })),
+        non_visual_picture_properties_extension_list: None,
+    };
+
+    let nv_pr = ApplicationNonVisualDrawingProperties {
+        is_photo: None,
+        user_drawn: None,
+        placeholder_shape: None,
+        application_non_visual_drawing_properties_choice: None,
+        p_cust_data_lst: None,
+        p_ext_lst: None,
+    };
+
+    let nv_pic_pr = NonVisualPictureProperties {
+        non_visual_drawing_properties: Box::new(cnv_pr),
+        non_visual_picture_drawing_properties: Box::new(cnv_pic_pr),
+        application_non_visual_drawing_properties: Box::new(nv_pr),
+    };
+
+    // --- Blip fill: <a:blip r:embed="..."/> + <a:stretch><a:fillRect/></a:stretch> ---
+    let blip = ooxmlsdk::schemas::a::Blip {
+        embed: Some(r_embed.to_owned()),
+        ..ooxmlsdk::schemas::a::Blip::default()
+    };
+
+    let stretch = Stretch {
+        fill_rectangle: Some(FillRectangle::default()),
+    };
+
+    let blip_fill = BlipFill {
+        dpi: None,
+        rotate_with_shape: None,
+        blip: Some(Box::new(blip)),
+        source_rectangle: None,
+        blip_fill_choice: Some(BlipFillChoice::AStretch(Box::new(stretch))),
+    };
+
+    // --- Shape properties: xfrm off/ext + prstGeom rect ---
+    let xfrm = Transform2D {
+        rotation: None,
+        horizontal_flip: None,
+        vertical_flip: None,
+        offset: Some(Offset { x, y }),
+        extents: Some(Extents { cx, cy }),
+        xmlns: vec![],
+    };
+
+    let sp_pr = ShapeProperties {
+        transform2_d: Some(Box::new(xfrm)),
+        shape_properties_choice1: Some(ShapePropertiesChoice::APrstGeom(Box::new(
+            ooxmlsdk::schemas::a::PresetGeometry {
+                preset: ooxmlsdk::schemas::a::ShapeTypeValues::Rectangle,
+                adjust_value_list: None,
+                xmlns: vec![],
+            },
+        ))),
+        shape_properties_choice2: None,
+        shape_properties_choice3: None,
+        black_white_mode: None,
+        a_ln: None,
+        a_scene3d: None,
+        a_sp3d: None,
+        a_ext_lst: None,
+        xmlns: vec![],
+    };
+
+    Picture {
+        non_visual_picture_properties: Box::new(nv_pic_pr),
+        blip_fill: Box::new(blip_fill),
+        shape_properties: Box::new(sp_pr),
+        shape_style: None,
         extension_list_with_modification: None,
     }
 }

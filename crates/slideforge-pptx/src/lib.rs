@@ -224,17 +224,11 @@ fn build_slide_parts(
             }
         }
 
-        // Build the slide XML. SlideSerializer handles text frames; diagram
-        // <p:pic> shapes are injected below (F-037-005).
+        // Build the slide XML. SlideSerializer handles text frames AND diagram
+        // <p:pic> shapes via typed ooxmlsdk builders (ADR-001, F-037-005).
         let serializer = SlideSerializer::new(is_dark_layout, layout_index);
-        let (mut slide_xml_bytes, _warnings) = serializer.build(slide, i, &layout_rel_id)?;
-
-        // F-037-005: inject <p:pic> shapes for all diagram frames.
-        // We append them into the slide XML's <p:spTree> before </p:spTree>.
-        if !diagram_rids.is_empty() {
-            slide_xml_bytes =
-                inject_pic_shapes_for_diagrams(slide, &slide_xml_bytes, &diagram_rids)?;
-        }
+        let (slide_xml_bytes, _warnings) =
+            serializer.build(slide, i, &layout_rel_id, &diagram_rids)?;
 
         parts.push(ZipPart {
             path: slide_path,
@@ -428,85 +422,6 @@ mod layout_index_tests {
             "\"content\" must map to 0-based index 1 (Title and Content, ooxml_type obj)"
         );
     }
-}
-
-/// Inject `<p:pic>` XML shapes for diagram frames into the slide XML bytes.
-///
-/// For each (`frame_idx`, `rId`) pair, a `<p:pic>` element is appended before
-/// `</p:spTree>` in the slide XML. The `<p:pic>` references the media via
-/// `r:embed="{rId}"` (F-037-005).
-fn inject_pic_shapes_for_diagrams(
-    slide: &slideforge_layout::LaidOutSlide,
-    xml_bytes: &[u8],
-    diagram_rids: &[(usize, String)],
-) -> Result<Vec<u8>, PptxError> {
-    let xml_str = std::str::from_utf8(xml_bytes).map_err(|e| PptxError::OoxmlElement {
-        part: "ppt/slides/slide?.xml".to_string(),
-        detail: format!("slide XML is not valid UTF-8: {e}"),
-    })?;
-
-    let mut pic_xml = String::new();
-    for (frame_idx, rid) in diagram_rids {
-        let frame = &slide.frames[*frame_idx];
-        let x = frame.bbox.x.0;
-        let y = frame.bbox.y.0;
-        let cx = frame.bbox.width.0;
-        let cy = frame.bbox.height.0;
-
-        // sp_id for picture shapes: start from 1000 + frame_idx to avoid collision
-        // with text placeholder shape IDs (which start at 1).
-        // This range is safe: text placeholders use 1..=N for at most ~5 frames.
-        let sp_id = 1000u32 + u32::try_from(*frame_idx).unwrap_or(0);
-
-        // Emit a minimal <p:pic> with:
-        //   - <p:nvPicPr> carrying an empty non-visual-picture-drawing-properties
-        //   - <p:blipFill> referencing the media rId via r:embed
-        //   - <p:spPr> with xfrm position/size
-        pic_xml.push_str(&format!(
-            concat!(
-                r#"<p:pic xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main""#,
-                r#" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main""#,
-                r#" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">"#,
-                r#"<p:nvPicPr>"#,
-                r#"<p:cNvPr id="{sp_id}" name="Diagram {frame_idx}"/>"#,
-                r#"<p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr>"#,
-                r#"<p:nvPr/>"#,
-                r#"</p:nvPicPr>"#,
-                r#"<p:blipFill>"#,
-                r#"<a:blip r:embed="{rid}"/>"#,
-                r#"<a:stretch><a:fillRect/></a:stretch>"#,
-                r#"</p:blipFill>"#,
-                r#"<p:spPr>"#,
-                r#"<a:xfrm><a:off x="{x}" y="{y}"/><a:ext cx="{cx}" cy="{cy}"/></a:xfrm>"#,
-                r#"<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>"#,
-                r#"</p:spPr>"#,
-                r#"</p:pic>"#,
-            ),
-            sp_id = sp_id,
-            frame_idx = frame_idx,
-            rid = rid,
-            x = x,
-            y = y,
-            cx = cx,
-            cy = cy,
-        ));
-    }
-
-    // Inject pic shapes before the closing </p:spTree> tag.
-    let insert_before = "</p:spTree>";
-    let result = if let Some(pos) = xml_str.rfind(insert_before) {
-        let (before, after) = xml_str.split_at(pos);
-        format!("{before}{pic_xml}{after}")
-    } else {
-        // Fallback: if </p:spTree> is not found (should never happen for valid slide XML),
-        // return original bytes unchanged and log a warning.
-        tracing::warn!(
-            "inject_pic_shapes: </p:spTree> not found in slide XML; diagram pic shapes omitted"
-        );
-        return Ok(xml_bytes.to_vec());
-    };
-
-    Ok(result.into_bytes())
 }
 
 /// Build `ppt/_rels/presentation.xml.rels` and return the slide `rId` list AND the bytes.
