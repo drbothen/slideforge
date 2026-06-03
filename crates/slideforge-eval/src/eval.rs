@@ -482,14 +482,19 @@ fn eval_section_nodes(
                 // Code, Link, Superscript, Subscript, Strikethrough, Highlight, Math*)
                 // to their InlineNode counterparts per DIR-077-002 §3.
                 //
-                // Error detection: count errors before and after; if new errors were added
-                // (e.g. UndefinedVariable), treat the section as fatal and return None.
-                let error_count_before = sink.errors().len();
+                // Error detection: count Error+Fatal diagnostics before and after
+                // (F-077-P7-005). Using error_and_fatal_count() rather than errors().len()
+                // ensures that pre-existing Warning-severity diagnostics (e.g. a missing-
+                // version advisory pushed before eval) do NOT count as errors here, and
+                // that a new Warning pushed by chunks_to_inline_nodes does NOT incorrectly
+                // drop the section. Only newly added Error or Fatal diagnostics trigger
+                // the guard.
+                let error_count_before = sink.error_and_fatal_count();
 
                 let inline_nodes =
                     crate::register_routing::chunks_to_inline_nodes(chunks, env, sink);
 
-                let had_error = sink.errors().len() > error_count_before;
+                let had_error = sink.error_and_fatal_count() > error_count_before;
                 if had_error {
                     return None;
                 }

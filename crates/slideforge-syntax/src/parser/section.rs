@@ -119,8 +119,8 @@ where
                 // This points precisely at the opening `**`, `_`, `` ` ``, etc.
                 let sub_span: TSpan = SimpleSpan::from(delim_abs..delim_abs + 2);
                 // Use into_routing_message() instead of .message directly so that
-                // inline-markup errors (E-PAR-019/020) carry a null-byte-separated
-                // routing tag with the KIND and DELIMITER.  The routing boundary in
+                // inline-markup errors (E-PAR-019/020) carry a pipe-separated,
+                // hex-encoded routing tag with the KIND and DELIMITER.  The routing boundary in
                 // parser/mod.rs calls parse_routing_tag() first, which extracts the
                 // delimiter directly from the TemplateErrorKind payload — no
                 // message.contains("E-PAR-NNN") or extract_backtick_name re-parsing

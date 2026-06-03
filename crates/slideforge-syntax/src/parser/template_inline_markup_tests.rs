@@ -1593,8 +1593,8 @@ fn test_F077_P5_001_empty_bold_span_message_is_clean() {
 
 /// F-077-P5-001 SCRUTINY-2b: non-inline template errors (UnterminatedInterpolation,
 /// EmptyInterpolation, UnterminatedMath) must render clean messages with no sentinel
-/// contamination (they never pass through `into_routing_message` so should already
-/// be clean — this asserts that the fix does not regress them).
+/// contamination (they pass through `into_routing_message` but receive no routing-tag
+/// prefix, so they render clean — this asserts that the fix does not regress them).
 #[test]
 #[allow(non_snake_case)]
 fn test_F077_P5_001_scrutiny_2b_non_inline_errors_render_clean() {
@@ -1642,4 +1642,166 @@ fn test_F077_P5_001_scrutiny_2b_non_inline_errors_render_clean() {
             );
         }
     }
+}
+
+// ─── F-077-P7-001: UTF-8 char-boundary safety (Red Gate) ─────────────────────
+
+/// F-077-P7-001: `**café**` must parse without panic and produce a `Bold` chunk
+/// wrapping a `Literal("café")` child.  A single-byte advance at a multi-byte
+/// UTF-8 char-lead byte panics with "byte index N is not a char boundary"
+/// before the fix.
+#[test]
+#[allow(non_snake_case)]
+fn test_F077_P7_001_bold_with_multibyte_char_no_panic() {
+    // parse_template_value panics on fatal errors; a clean valid string must
+    // not panic and must return the correct chunk structure.
+    let chunks = parse_template_value("**café**");
+    assert_eq!(
+        chunks.len(),
+        1,
+        "test_F077_P7_001 FAIL: expected 1 Bold chunk, got: {chunks:?}"
+    );
+    match &chunks[0] {
+        TemplateChunk::Bold(children) => {
+            assert_eq!(
+                children.len(),
+                1,
+                "test_F077_P7_001 FAIL: Bold must have 1 child, got: {children:?}"
+            );
+            assert!(
+                matches!(&children[0], TemplateChunk::Literal(s) if s == "café"),
+                "test_F077_P7_001 FAIL: Bold child must be Literal(\"café\"), got: {ch:?}",
+                ch = &children[0]
+            );
+        },
+        other => panic!("test_F077_P7_001 FAIL: expected Bold chunk, got: {other:?}"),
+    }
+}
+
+/// F-077-P7-001: `_naïve_` must parse without panic to `Italic([Literal("naïve")])`.
+#[test]
+#[allow(non_snake_case)]
+fn test_F077_P7_001_italic_with_multibyte_char_no_panic() {
+    let chunks = parse_template_value("_naïve_");
+    assert_eq!(chunks.len(), 1, "expected 1 chunk, got: {chunks:?}");
+    match &chunks[0] {
+        TemplateChunk::Italic(children) => {
+            assert!(
+                matches!(&children[0], TemplateChunk::Literal(s) if s == "naïve"),
+                "Italic child must be Literal(\"naïve\"), got: {children:?}"
+            );
+        },
+        other => panic!("expected Italic, got: {other:?}"),
+    }
+}
+
+/// F-077-P7-001: `==über==` must parse without panic to `Highlight([Literal("über")])`.
+#[test]
+#[allow(non_snake_case)]
+fn test_F077_P7_001_highlight_with_multibyte_char_no_panic() {
+    let chunks = parse_template_value("==über==");
+    assert_eq!(chunks.len(), 1, "expected 1 chunk, got: {chunks:?}");
+    match &chunks[0] {
+        TemplateChunk::Highlight(children) => {
+            assert!(
+                matches!(&children[0], TemplateChunk::Literal(s) if s == "über"),
+                "Highlight child must be Literal(\"über\"), got: {children:?}"
+            );
+        },
+        other => panic!("expected Highlight, got: {other:?}"),
+    }
+}
+
+/// F-077-P7-001: `~~déjà~~` must parse without panic to `Strikethrough([Literal("déjà")])`.
+#[test]
+#[allow(non_snake_case)]
+fn test_F077_P7_001_strikethrough_with_multibyte_char_no_panic() {
+    let chunks = parse_template_value("~~déjà~~");
+    assert_eq!(chunks.len(), 1, "expected 1 chunk, got: {chunks:?}");
+    match &chunks[0] {
+        TemplateChunk::Strikethrough(children) => {
+            assert!(
+                matches!(&children[0], TemplateChunk::Literal(s) if s == "déjà"),
+                "Strikethrough child must be Literal(\"déjà\"), got: {children:?}"
+            );
+        },
+        other => panic!("expected Strikethrough, got: {other:?}"),
+    }
+}
+
+/// F-077-P7-001: `[café](u)` must parse without panic to a Link with `Literal("café")`.
+#[test]
+#[allow(non_snake_case)]
+fn test_F077_P7_001_link_with_multibyte_text_no_panic() {
+    let chunks = parse_template_value("[café](https://example.com)");
+    assert_eq!(chunks.len(), 1, "expected 1 Link chunk, got: {chunks:?}");
+    match &chunks[0] {
+        TemplateChunk::Link { text, url } => {
+            assert_eq!(url, "https://example.com", "url must be preserved");
+            assert!(
+                matches!(&text[0], TemplateChunk::Literal(s) if s == "café"),
+                "link text must be Literal(\"café\"), got: {text:?}"
+            );
+        },
+        other => panic!("expected Link, got: {other:?}"),
+    }
+}
+
+/// F-077-P7-001: emoji in bold span must parse without panic.
+/// `**🎉**` → `Bold([Literal("🎉")])` — emoji is a 4-byte UTF-8 sequence.
+#[test]
+#[allow(non_snake_case)]
+fn test_F077_P7_001_bold_with_emoji_no_panic() {
+    let chunks = parse_template_value("**🎉**");
+    assert_eq!(chunks.len(), 1, "expected 1 Bold chunk, got: {chunks:?}");
+    match &chunks[0] {
+        TemplateChunk::Bold(children) => {
+            assert!(
+                matches!(&children[0], TemplateChunk::Literal(s) if s == "🎉"),
+                "Bold child must be Literal(\"🎉\"), got: {children:?}"
+            );
+        },
+        other => panic!("expected Bold, got: {other:?}"),
+    }
+}
+
+// ─── F-077-P7-002: Nesting depth cap E-PAR-021 (Red Gate) ────────────────────
+
+/// F-077-P7-002: deeply-nested alternating delimiters must NOT overflow the
+/// stack and must produce an E-PAR-021 diagnostic.
+///
+/// Input: 200 alternating `^_` pairs (400 opening delimiters).  Before the
+/// nesting-depth cap this would recurse until a stack overflow.
+///
+/// Uses `parse()` directly (not `parse_template_value`) because the deeply-
+/// nested input produces non-fatal accumulated errors, which `parse()` surfaces
+/// in `ParseResult::warnings` rather than as a fatal `Err`.
+#[test]
+#[allow(non_snake_case)]
+fn test_F077_P7_002_deep_nesting_produces_E_PAR_021_no_stack_overflow() {
+    use crate::parser::parse;
+
+    // Build a pathological string: `^_^_^_…` (200 pairs = 400 chars).
+    // Each `^` or `_` tries to open a new markup span, triggering recursion.
+    let deep_content: String = "^_".repeat(200);
+    let src = format!("slide content:\n  detail \"{deep_content}\"\n");
+    let mut sm = SourceMap::new();
+    let file_id = sm.add_file(Arc::from("test.sf"), Arc::from(src.as_str()));
+
+    // Must not panic — reaching here means no stack overflow.
+    let result = parse(src.as_str(), file_id, &sm);
+
+    // Collect all warning/error messages.
+    let warnings: Vec<String> = match result {
+        Ok(pr) => pr.warnings.iter().map(|w| w.to_string()).collect(),
+        Err(errs) => errs.iter().map(|e| e.to_string()).collect(),
+    };
+
+    // At least one E-PAR-021 diagnostic must be produced.
+    let has_021 = warnings.iter().any(|msg| msg.contains("E-PAR-021"));
+    assert!(
+        has_021,
+        "test_F077_P7_002 FAIL: no E-PAR-021 diagnostic produced for deeply-nested input.\n\
+         warnings: {warnings:?}"
+    );
 }

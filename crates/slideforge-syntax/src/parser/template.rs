@@ -88,6 +88,23 @@ fn empty_inline_msg(delimiter: &str) -> String {
     )
 }
 
+/// Produce an E-PAR-021 error message for inline-markup nesting depth exceeded.
+fn nesting_depth_exceeded_msg(byte_offset: usize, depth: usize) -> String {
+    format!(
+        "E-PAR-021: Inline-markup nesting depth exceeded at byte offset {byte_offset}: \
+         depth {depth} exceeds maximum of {MAX_INLINE_NESTING}. \
+         Flatten or reduce nested inline markup."
+    )
+}
+
+/// Maximum recursion depth for `scan_template_chunks`.
+///
+/// Prevents crafted inputs (e.g. thousands of alternating `^_` pairs) from
+/// exhausting the stack via unbounded mutual recursion (F-077-P7-002).
+/// When this cap is reached an E-PAR-021 diagnostic is accumulated and the
+/// remainder of the input is treated as a `Literal` chunk.
+const MAX_INLINE_NESTING: usize = 64;
+
 /// The semantic kind of a [`TemplateError`].
 ///
 /// Using a typed enum avoids embedding the diagnostic code as a string prefix in
@@ -110,6 +127,10 @@ pub enum TemplateErrorKind {
     ///
     /// Carries the delimiter string (e.g. `"**"`, `"_"`).
     EmptyInlineMarkupSpan(String),
+    /// Inline markup nesting depth exceeded `MAX_INLINE_NESTING` (E-PAR-021).
+    ///
+    /// Carries the depth at which the cap was triggered.
+    InlineNestingDepthExceeded(usize),
 }
 
 /// A parse error produced by `scan_template_chunks`, carrying both the byte
@@ -184,12 +205,13 @@ impl TemplateError {
                     msg = self.message
                 )
             },
-            // E-PAR-012/013/014: no routing-tag prefix needed. These errors flow
+            // E-PAR-012/013/014/021: no routing-tag prefix needed. These errors flow
             // through the generic UnexpectedToken arm in parser/mod.rs, which
             // renders the message text directly — no message.contains() dispatch.
             TemplateErrorKind::UnterminatedInterpolation
             | TemplateErrorKind::EmptyInterpolation
-            | TemplateErrorKind::UnterminatedMath => self.message,
+            | TemplateErrorKind::UnterminatedMath
+            | TemplateErrorKind::InlineNestingDepthExceeded(_) => self.message,
         }
     }
 }
@@ -475,7 +497,26 @@ fn scan_template_chunks(
     s: &str,
     close_on: Option<&str>,
     errors: &mut Vec<TemplateError>,
+    depth: usize,
 ) -> (Vec<TemplateChunk>, usize) {
+    // F-077-P7-002: cap recursion depth to prevent stack overflow from crafted
+    // inputs with deeply-nested alternating delimiters (e.g. `^_^_^_…`).
+    if depth >= MAX_INLINE_NESTING {
+        errors.push(TemplateError::new(
+            0,
+            TemplateErrorKind::InlineNestingDepthExceeded(depth),
+            nesting_depth_exceeded_msg(0, depth),
+        ));
+        // Treat the entire remainder as a literal (in addition to the diagnostic).
+        let remainder = s.to_string();
+        let consumed = s.len();
+        let mut fallback = Vec::new();
+        if !remainder.is_empty() {
+            fallback.push(TemplateChunk::Literal(remainder));
+        }
+        return (fallback, consumed);
+    }
+
     let bytes = s.as_bytes();
     let len = s.len();
     let mut chunks = Vec::new();
@@ -495,7 +536,11 @@ fn scan_template_chunks(
 
     while pos < len {
         // ── Check for closing delimiter (recursive call context) ─────────────
+        // Guard with `is_char_boundary` before slicing: `pos` may be inside a
+        // multi-byte UTF-8 char (after a byte-level advance through literal text).
+        // All closing delimiters are ASCII so `starts_with` is pure byte comparison.
         if let Some(close) = close_on
+            && s.is_char_boundary(pos)
             && s[pos..].starts_with(close)
         {
             flush_lit!();
@@ -603,7 +648,7 @@ fn scan_template_chunks(
                         empty_inline_msg("~~"),
                     ));
                 } else {
-                    let (children, _) = scan_template_chunks(inner, None, errors);
+                    let (children, _) = scan_template_chunks(inner, None, errors, depth + 1);
                     chunks.push(TemplateChunk::Strikethrough(children));
                 }
                 pos = inner_start + close_rel + 2;
@@ -615,7 +660,7 @@ fn scan_template_chunks(
                     unclosed_inline_msg("~~"),
                 ));
                 if !rest.is_empty() {
-                    let (children, _) = scan_template_chunks(rest, None, errors);
+                    let (children, _) = scan_template_chunks(rest, None, errors, depth + 1);
                     chunks.push(TemplateChunk::Strikethrough(children));
                 }
                 pos = len;
@@ -639,7 +684,7 @@ fn scan_template_chunks(
                         empty_inline_msg("~"),
                     ));
                 } else {
-                    let (children, _) = scan_template_chunks(inner, None, errors);
+                    let (children, _) = scan_template_chunks(inner, None, errors, depth + 1);
                     chunks.push(TemplateChunk::Subscript(children));
                 }
                 pos = inner_start + close_rel + 1;
@@ -650,7 +695,7 @@ fn scan_template_chunks(
                     unclosed_inline_msg("~"),
                 ));
                 if !rest.is_empty() {
-                    let (children, _) = scan_template_chunks(rest, None, errors);
+                    let (children, _) = scan_template_chunks(rest, None, errors, depth + 1);
                     chunks.push(TemplateChunk::Subscript(children));
                 }
                 pos = len;
@@ -667,7 +712,8 @@ fn scan_template_chunks(
             let rest = &s[inner_start..];
             if rest.contains("**") {
                 // Scan the interior recursively, stopping at `**`.
-                let (children, consumed) = scan_template_chunks(rest, Some("**"), errors);
+                let (children, consumed) =
+                    scan_template_chunks(rest, Some("**"), errors, depth + 1);
                 if children.is_empty() {
                     errors.push(TemplateError::new(
                         open_pos,
@@ -687,7 +733,7 @@ fn scan_template_chunks(
                     unclosed_inline_msg("**"),
                 ));
                 if !rest.is_empty() {
-                    let (children, _) = scan_template_chunks(rest, None, errors);
+                    let (children, _) = scan_template_chunks(rest, None, errors, depth + 1);
                     chunks.push(TemplateChunk::Bold(children));
                 }
                 pos = len;
@@ -728,7 +774,7 @@ fn scan_template_chunks(
             let inner_start = pos + 1;
             let rest = &s[inner_start..];
             if rest.contains('_') {
-                let (children, consumed) = scan_template_chunks(rest, Some("_"), errors);
+                let (children, consumed) = scan_template_chunks(rest, Some("_"), errors, depth + 1);
                 if children.is_empty() {
                     errors.push(TemplateError::new(
                         open_pos,
@@ -746,7 +792,7 @@ fn scan_template_chunks(
                     unclosed_inline_msg("_"),
                 ));
                 if !rest.is_empty() {
-                    let (children, _) = scan_template_chunks(rest, None, errors);
+                    let (children, _) = scan_template_chunks(rest, None, errors, depth + 1);
                     chunks.push(TemplateChunk::Italic(children));
                 }
                 pos = len;
@@ -801,7 +847,8 @@ fn scan_template_chunks(
                     let url = &s[url_start..paren_close];
                     flush_lit!();
                     // The link text IS processed for nested markup + interpolation.
-                    let (text_children, _) = scan_template_chunks(text_inner, None, errors);
+                    let (text_children, _) =
+                        scan_template_chunks(text_inner, None, errors, depth + 1);
                     chunks.push(TemplateChunk::Link {
                         text: text_children,
                         url: url.to_string(),
@@ -821,7 +868,7 @@ fn scan_template_chunks(
             let inner_start = pos + 1;
             let rest = &s[inner_start..];
             if rest.contains('^') {
-                let (children, consumed) = scan_template_chunks(rest, Some("^"), errors);
+                let (children, consumed) = scan_template_chunks(rest, Some("^"), errors, depth + 1);
                 if children.is_empty() {
                     errors.push(TemplateError::new(
                         open_pos,
@@ -839,7 +886,7 @@ fn scan_template_chunks(
                     unclosed_inline_msg("^"),
                 ));
                 if !rest.is_empty() {
-                    let (children, _) = scan_template_chunks(rest, None, errors);
+                    let (children, _) = scan_template_chunks(rest, None, errors, depth + 1);
                     chunks.push(TemplateChunk::Superscript(children));
                 }
                 pos = len;
@@ -855,7 +902,8 @@ fn scan_template_chunks(
             let inner_start = pos + 2;
             let rest = &s[inner_start..];
             if rest.contains("==") {
-                let (children, consumed) = scan_template_chunks(rest, Some("=="), errors);
+                let (children, consumed) =
+                    scan_template_chunks(rest, Some("=="), errors, depth + 1);
                 if children.is_empty() {
                     errors.push(TemplateError::new(
                         open_pos,
@@ -873,7 +921,7 @@ fn scan_template_chunks(
                     unclosed_inline_msg("=="),
                 ));
                 if !rest.is_empty() {
-                    let (children, _) = scan_template_chunks(rest, None, errors);
+                    let (children, _) = scan_template_chunks(rest, None, errors, depth + 1);
                     chunks.push(TemplateChunk::Highlight(children));
                 }
                 pos = len;
@@ -882,11 +930,25 @@ fn scan_template_chunks(
             continue;
         }
 
-        // No special form at this position — advance by one byte.
-        pos += 1;
+        // No special form at this position — advance by the full UTF-8 char width
+        // (F-077-P7-001). A single-byte advance would leave `pos` at a mid-char
+        // byte offset, causing the next `s[pos..]` slice to panic.
+        //
+        // Use the leading byte to determine char width per RFC 3629:
+        //   110xxxxx → 2 bytes, 1110xxxx → 3 bytes, 11110xxx → 4 bytes.
+        //   0xxxxxxx (ASCII) and continuation bytes / invalid → 1 byte.
+        let advance = match bytes[pos] {
+            0xC0..=0xDF => 2,
+            0xE0..=0xEF => 3,
+            0xF0..=0xF7 => 4,
+            _ => 1, // ASCII (0x00-0x7F), continuation bytes, or invalid — advance 1
+        };
+        pos += advance;
     }
 
     // Flush any trailing literal.
+    // `pos` is always at a char boundary here (all delimiters are ASCII, and
+    // the default advance step above always lands on a boundary).
     flush_lit!();
 
     (chunks, pos)
@@ -959,7 +1021,7 @@ where
     }
     .map(|content| {
         let mut errors: Vec<TemplateError> = Vec::new();
-        let (chunks, _) = scan_template_chunks(&content, None, &mut errors);
+        let (chunks, _) = scan_template_chunks(&content, None, &mut errors, 0);
         (chunks, errors)
     })
 }
