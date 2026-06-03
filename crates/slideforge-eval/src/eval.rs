@@ -95,6 +95,92 @@ pub fn eval_expr_to_string(env: &Env, expr: &Expr, sink: &mut DiagnosticSink) ->
     }
 }
 
+// ─── flatten_chunks_to_string ────────────────────────────────────────────────
+
+/// Flatten a slice of [`TemplateChunk`]s to their plain-text content.
+///
+/// This is the shared helper used by all three slide-level eval paths
+/// (`eval_field_value_to_value`, `eval_set_rule_value`, and
+/// `eval_slide_node` in `for_eval`) to handle the inline-markup chunk
+/// variants introduced in STORY-077.
+///
+/// Per DIR-077-002 §4 and EC-013, slide-level fields evaluate inline markup
+/// to `Value::Str` by **flattening to the inner text** — structural `InlineNode`
+/// representation is deferred to STORY-081.  The delimiters (`**`, `_`, etc.)
+/// are NOT re-synthesized; only the content is appended.
+///
+/// # Variant handling
+///
+/// | Variant | Flat-text result |
+/// |---------|-----------------|
+/// | `Literal(s)` | append `s` verbatim |
+/// | `Expr(e)` | evaluate `e`; append string result (delegates to `eval_expr_to_string`) |
+/// | `Bold(children)` | recurse into children, append their flat text |
+/// | `Italic(children)` | recurse into children, append their flat text |
+/// | `Superscript(children)` | recurse into children, append their flat text |
+/// | `Subscript(children)` | recurse into children, append their flat text |
+/// | `Strikethrough(children)` | recurse into children, append their flat text |
+/// | `Highlight(children)` | recurse into children, append their flat text |
+/// | `Code(s)` | append `s` verbatim (code span content, no delimiters) |
+/// | `Link { text, url }` | recurse into `text`, append flat text (visible label; URL is not appended) |
+/// | `MathInline(_)` / `MathDisplay(_)` / `MathInterp(_)` | unchanged pre-STORY-077 behavior: silently skipped (math rendering is out of scope for this eval layer; STORY-009) |
+///
+/// Returns a `(String, bool)` — the accumulated flat text and a flag that is
+/// `true` if any `Expr` chunk failed to evaluate (propagates `had_error` from
+/// callers).
+pub(crate) fn flatten_chunks_to_string(
+    chunks: &[TemplateChunk],
+    env: &Env,
+    sink: &mut DiagnosticSink,
+) -> (String, bool) {
+    let mut result = String::new();
+    let mut had_error = false;
+    for chunk in chunks {
+        match chunk {
+            TemplateChunk::Literal(s) => result.push_str(s),
+            TemplateChunk::Expr(expr) => match eval_expr_to_string(env, expr, sink) {
+                Some(s) => result.push_str(s.as_ref()),
+                None => {
+                    had_error = true;
+                },
+            },
+            // Inline markup variants (STORY-077): flatten to inner text content.
+            // The structural InlineNode upgrade is deferred to STORY-081; at this
+            // eval layer, slide-level fields produce Value::Str with markup stripped.
+            TemplateChunk::Bold(inner)
+            | TemplateChunk::Italic(inner)
+            | TemplateChunk::Superscript(inner)
+            | TemplateChunk::Subscript(inner)
+            | TemplateChunk::Strikethrough(inner)
+            | TemplateChunk::Highlight(inner) => {
+                let (inner_text, inner_err) = flatten_chunks_to_string(inner, env, sink);
+                result.push_str(&inner_text);
+                had_error |= inner_err;
+            },
+            TemplateChunk::Code(s) => {
+                // Code span: verbatim content, no backtick delimiters.
+                result.push_str(s);
+            },
+            TemplateChunk::Link { text, .. } => {
+                // Hyperlink: append the visible label text; discard the URL.
+                // Per "content as flat text" (DIR-077-002 §4): only the displayed
+                // text contributes to the flattened string value.
+                let (link_text, link_err) = flatten_chunks_to_string(text, env, sink);
+                result.push_str(&link_text);
+                had_error |= link_err;
+            },
+            // Math chunks are out of scope for this flat-text path.
+            // Pre-STORY-077 behavior: math spans are silently skipped at the
+            // slide-level eval layer (math rendering is a STORY-009 concern).
+            // This is unchanged — do NOT alter math handling here.
+            TemplateChunk::MathInline(_)
+            | TemplateChunk::MathDisplay(_)
+            | TemplateChunk::MathInterp(_) => {},
+        }
+    }
+    (result, had_error)
+}
+
 // ─── eval_deck ──────────────────────────────────────────────────────────────
 
 /// Evaluate a fully-parsed [`DeckNode`] into a semantic [`Deck`] IR.
@@ -630,34 +716,9 @@ fn eval_field_value_to_value(
 ) -> Option<Value> {
     match field_value {
         FieldValue::Template(chunks) => {
-            let mut result = String::new();
-            let mut had_error = false;
-            for chunk in chunks {
-                match chunk {
-                    TemplateChunk::Literal(s) => result.push_str(s),
-                    TemplateChunk::Expr(expr) => match eval_expr_to_string(env, expr, sink) {
-                        Some(s) => result.push_str(s.as_ref()),
-                        None => {
-                            had_error = true;
-                        },
-                    },
-                    // Math chunks and inline markup chunks at slide-level are STORY-081.
-                    // Math is stored as-is; inline markup flat-text extraction is deferred.
-                    TemplateChunk::MathInline(_)
-                    | TemplateChunk::MathDisplay(_)
-                    | TemplateChunk::MathInterp(_)
-                    | TemplateChunk::Bold(_)
-                    | TemplateChunk::Italic(_)
-                    | TemplateChunk::Code(_)
-                    | TemplateChunk::Link { .. }
-                    | TemplateChunk::Superscript(_)
-                    | TemplateChunk::Subscript(_)
-                    | TemplateChunk::Strikethrough(_)
-                    | TemplateChunk::Highlight(_) => {
-                        // Slide-level inline markup eval is STORY-081.
-                    },
-                }
-            }
+            // Flatten all chunks — including inline-markup variants introduced in
+            // STORY-077 — to their plain-text content (DIR-077-002 §4 / EC-013).
+            let (result, had_error) = flatten_chunks_to_string(chunks, env, sink);
             if had_error {
                 None
             } else {
@@ -735,19 +796,15 @@ fn eval_set_rule_value(
                             },
                         }
                     },
-                    // Math and inline markup in set-rule context — STORY-081.
-                    TemplateChunk::MathInline(_)
-                    | TemplateChunk::MathDisplay(_)
-                    | TemplateChunk::MathInterp(_)
-                    | TemplateChunk::Bold(_)
-                    | TemplateChunk::Italic(_)
-                    | TemplateChunk::Code(_)
-                    | TemplateChunk::Link { .. }
-                    | TemplateChunk::Superscript(_)
-                    | TemplateChunk::Subscript(_)
-                    | TemplateChunk::Strikethrough(_)
-                    | TemplateChunk::Highlight(_) => {
-                        // Slide-level inline markup eval is STORY-081.
+                    // Inline markup variants (STORY-077): flatten to inner text content.
+                    // `Expr` chunks inside markup children go through eval_expr_to_string
+                    // (no brand-ref preservation needed inside markup child content).
+                    // Math chunks are silently skipped — unchanged pre-STORY-077 behavior.
+                    _ => {
+                        let (inner_text, inner_err) =
+                            flatten_chunks_to_string(std::slice::from_ref(chunk), env, sink);
+                        result.push_str(&inner_text);
+                        had_error |= inner_err;
                     },
                 }
             }
@@ -797,8 +854,8 @@ mod tests {
     use ordered_float::OrderedFloat;
     use slideforge_syntax::span::Span;
     use slideforge_syntax::{
-        BlockItem, DeckNode, DiagnosticSink, Expr, FieldNode, FieldValue, ForNode, SlideNode,
-        Spanned, TemplateChunk, VarsBlock,
+        BlockItem, DeckNode, DiagnosticSink, Expr, FieldNode, FieldValue, ForNode, SetRuleValue,
+        SlideNode, Spanned, TemplateChunk, VarsBlock,
     };
     use slideforge_types::Value;
 
@@ -2407,6 +2464,146 @@ mod tests {
         assert!(
             !notes_text.contains("quarter"),
             "variable name 'quarter' must not appear literally in register_content; got: {notes_text}"
+        );
+    }
+
+    // ─── F-077-P17-001: slide-level inline-markup flat-text preservation ──────
+    //
+    // RED GATE tests — these MUST fail before the fix and PASS after.
+    // Spec basis: DIR-077-002 §4 / EC-013 — inline markup at slide-level is
+    // flattened to its INNER TEXT (not dropped, not left as markup syntax).
+
+    /// Site 1: eval_field_value_to_value — `title "**Important**"` must evaluate
+    /// to `Value::Str("Important")`, NOT `Value::Str("")` (the current silent drop).
+    #[test]
+    fn test_f077_p17_001_field_value_bold_text_preserved_as_flat_text() {
+        let env = Env::new(IndexMap::new());
+        let mut sink = DiagnosticSink::new();
+
+        // Simulate: title "**Important**"
+        // Parser emits: TemplateChunk::Bold(vec![TemplateChunk::Literal("Important")])
+        let field_value =
+            FieldValue::Template(vec![TemplateChunk::Bold(vec![TemplateChunk::Literal(
+                "Important".to_string(),
+            )])]);
+
+        let result = eval_field_value_to_value(&field_value, &env, &mut sink);
+
+        assert!(
+            sink.is_empty(),
+            "no diagnostics expected for valid bold field value; got: {:?}",
+            sink.errors()
+        );
+        assert_eq!(
+            result,
+            Some(Value::Str(Arc::from("Important"))),
+            "Bold inner text must be preserved as flat text; expected Some(Str(\"Important\")), got: {result:?}"
+        );
+    }
+
+    /// Site 1 (mixed): `title "Hello **world**"` — literal prefix + bold →
+    /// `Value::Str("Hello world")` (text preserved, no double-star syntax).
+    #[test]
+    fn test_f077_p17_001_field_value_mixed_literal_and_bold_flat_text() {
+        let env = Env::new(IndexMap::new());
+        let mut sink = DiagnosticSink::new();
+
+        // Simulate: title "Hello **world**"
+        // Parser emits: [Literal("Hello "), Bold([Literal("world")])]
+        let field_value = FieldValue::Template(vec![
+            TemplateChunk::Literal("Hello ".to_string()),
+            TemplateChunk::Bold(vec![TemplateChunk::Literal("world".to_string())]),
+        ]);
+
+        let result = eval_field_value_to_value(&field_value, &env, &mut sink);
+
+        assert!(
+            sink.is_empty(),
+            "no diagnostics expected; got: {:?}",
+            sink.errors()
+        );
+        assert_eq!(
+            result,
+            Some(Value::Str(Arc::from("Hello world"))),
+            "Mixed literal + bold must flatten to 'Hello world'; got: {result:?}"
+        );
+    }
+
+    /// Site 2: eval_set_rule_value — `@set` rule with inline markup preserves text.
+    /// `set content: title "**Bold default**"` must evaluate to
+    /// `Value::Str("Bold default")`.
+    #[test]
+    fn test_f077_p17_001_set_rule_value_bold_text_preserved_as_flat_text() {
+        let env = Env::new(IndexMap::new());
+        let mut sink = DiagnosticSink::new();
+
+        // Simulate: set content: title "**Bold default**"
+        let set_rule_value =
+            SetRuleValue::Template(vec![TemplateChunk::Bold(vec![TemplateChunk::Literal(
+                "Bold default".to_string(),
+            )])]);
+
+        let result = eval_set_rule_value(&set_rule_value, &env, &mut sink);
+
+        assert!(
+            sink.is_empty(),
+            "no diagnostics expected for valid set-rule bold value; got: {:?}",
+            sink.errors()
+        );
+        assert_eq!(
+            result,
+            Some(Value::Str(Arc::from("Bold default"))),
+            "Bold inner text in set-rule must be preserved as flat text; expected Some(Str(\"Bold default\")), got: {result:?}"
+        );
+    }
+
+    /// Site 3 (@for body): eval_slide_node in a @for body — slide field with
+    /// inline markup must preserve the inner text.
+    /// A slide with `title "**Loop title**"` evaluated in a @for context
+    /// must produce a `Slide` whose `title` field is `Value::Str("Loop title")`.
+    #[test]
+    fn test_f077_p17_001_for_body_slide_field_bold_preserved_as_flat_text() {
+        use crate::for_eval::eval_slide_node;
+
+        let env = Env::new(IndexMap::new());
+        let mut sink = DiagnosticSink::new();
+        let defaults: std::collections::HashMap<(Arc<str>, Arc<str>), Value> =
+            std::collections::HashMap::new();
+
+        // Build a slide node: slide content: title "**Loop title**"
+        let title_field = FieldNode {
+            name: Spanned::new("title".to_string(), dummy_span()),
+            value: Spanned::new(
+                FieldValue::Template(vec![TemplateChunk::Bold(vec![TemplateChunk::Literal(
+                    "Loop title".to_string(),
+                )])]),
+                dummy_span(),
+            ),
+        };
+        let slide_node = SlideNode {
+            kind: Spanned::new("content".to_string(), dummy_span()),
+            tags: vec![],
+            fields: vec![title_field],
+            inline_items: vec![],
+        };
+
+        let slide = eval_slide_node(&env, &slide_node, &defaults, &mut sink);
+
+        assert!(
+            sink.is_empty(),
+            "no diagnostics expected for valid @for-body slide with bold title; got: {:?}",
+            sink.errors()
+        );
+        let slide = slide.expect("eval_slide_node must return Some for valid slide");
+        let title_val = slide
+            .fields
+            .get("title")
+            .expect("slide must have a 'title' field");
+
+        assert_eq!(
+            *title_val,
+            slideforge_types::FieldValue::Literal(Value::Str(Arc::from("Loop title"))),
+            "@for-body slide bold title must flatten to 'Loop title'; got: {title_val:?}"
         );
     }
 }
