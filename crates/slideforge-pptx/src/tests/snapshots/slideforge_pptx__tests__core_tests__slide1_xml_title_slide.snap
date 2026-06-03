@@ -1,0 +1,5 @@
+---
+source: crates/slideforge-pptx/src/tests/core_tests.rs
+expression: slide1_xml
+---
+<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:cSld><p:spTree><p:grpSpPr></p:grpSpPr><p:sp><p:nvSpPr><p:cNvPr id="1" name="Shape 1"></p:cNvPr><p:cNvSpPr></p:cNvSpPr><p:nvPr><p:ph type="title" idx="0"></p:ph></p:nvPr></p:nvSpPr><p:spPr><a:xfrm><a:off x="457200" y="274638" /><a:ext cx="8229600" cy="1143000" /></a:xfrm><a:prstGeom prst="rect"></a:prstGeom></p:spPr><p:txBody><a:bodyPr></a:bodyPr><a:p><a:r><a:rPr></a:rPr><a:t>Test Slide 1</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>

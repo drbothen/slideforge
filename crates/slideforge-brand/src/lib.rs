@@ -83,6 +83,7 @@ pub use error::{
 };
 pub use extractor::{BrandExtractionResult, BrandExtractor};
 pub use footer::FooterFlags;
+pub use layout_xml::{serialize_layout_to_xml, serialize_master_to_xml, serialize_theme_to_xml};
 pub use layouts::{LayoutPlaceholder, SlideLayoutDef};
 pub use loader::BrandLoader;
 pub use overlay::{BrandOverlay, LogoOverride, resolve_overlay};

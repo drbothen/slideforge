@@ -1,6 +1,6 @@
 [package]
 name = "slideforge-pptx"
-description = "Component crate for slideforge"
+description = "PPTX exporter plugin for slideforge — ooxmlsdk 0.6.1 + ZIP assembly"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,5 +11,25 @@ homepage.workspace = true
 readme = "../../README.md"
 
 [dependencies]
-miette = { workspace = true }
-thiserror = { workspace = true }
+ooxmlsdk        = { version = "=0.6.1" }
+# zip 4.2.0 with lzma/xz disabled to avoid conflict with zip 2.3.0 (used by
+# slideforge-brand / slideforge-eval) — both crates link the native `lzma`
+# library but through different Rust bindings (lzma-sys vs liblzma-sys).
+# PPTX archives only require DEFLATE compression; lzma/xz are not needed.
+zip             = { version = "=4.2.0", default-features = false, features = ["deflate", "time"] }
+thiserror       = { workspace = true }
+tracing         = { workspace = true }
+slideforge-types      = { workspace = true }
+slideforge-plugin-api = { workspace = true }
+slideforge-layout     = { workspace = true }
+# ADR-015: slideforge-pptx calls brand XML serializers (serialize_master_to_xml,
+# serialize_theme_to_xml, serialize_layout_to_xml). No brand computation is called —
+# the exporter consumes pre-serialized bytes only.
+slideforge-brand      = { workspace = true }
+
+[dev-dependencies]
+insta = { workspace = true }
+# slideforge-eval with test-utils feature exposes BleedChecker for AC-010 bleed tests.
+slideforge-eval = { workspace = true, features = ["test-utils"] }
+# sha2 for AC-007 determinism test (SHA-256 byte-identical comparison).
+sha2 = "=0.10.9"

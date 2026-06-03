@@ -60,6 +60,15 @@ pub struct SlideLayoutDef {
     /// All other layouts have at least one placeholder (AC-010 invariant).
     pub placeholders: Vec<LayoutPlaceholder>,
 
+    /// DSL slide-type keyword for this layout (e.g., `"section_divider"`, `"end"`).
+    ///
+    /// `Some(keyword)` for the 20 SF custom layouts; the keyword matches the
+    /// canonical Q2 DSL keyword for that layout type (ADR-015 §A.4).
+    ///
+    /// `None` for the 11 standard OOXML layouts (SL-01..SL-11) — these are
+    /// looked up by `ooxml_type`, not by DSL keyword.
+    pub slide_type_keyword: Option<Arc<str>>,
+
     /// Whether this layout has a dark color map override.
     ///
     /// `true` for CL-01 ("SF Section Divider") and CL-11 ("SF End Slide").
@@ -179,7 +188,10 @@ fn body_ph(idx: u32, name: &str) -> LayoutPlaceholder {
     }
 }
 
-/// Build a light (no color override) layout.
+/// Build a light (no color override) standard layout.
+///
+/// Standard layouts (SL-01..SL-11) are referenced by `ooxml_type`, not by
+/// DSL keyword. They receive `slide_type_keyword = None`.
 fn light_layout(
     index: usize,
     name: &str,
@@ -190,6 +202,7 @@ fn light_layout(
         index,
         name: Arc::from(name),
         ooxml_type: Some(Arc::from(ooxml_type)),
+        slide_type_keyword: None,
         placeholders,
         has_color_override: false,
         color_override_bg: None,
@@ -197,12 +210,22 @@ fn light_layout(
     }
 }
 
-/// Build a custom (no OOXML type) light layout.
-fn custom_layout(index: usize, name: &str, placeholders: Vec<LayoutPlaceholder>) -> SlideLayoutDef {
+/// Build a custom (no OOXML type) light layout with a canonical DSL keyword.
+///
+/// Custom layouts (CL-01..CL-20) receive a `slide_type_keyword` from the
+/// canonical Q2 DSL keyword table (ADR-015 §A.4). This keyword is the
+/// source of truth for `find_layout_index` in `slideforge-pptx`.
+fn custom_layout(
+    index: usize,
+    name: &str,
+    keyword: &str,
+    placeholders: Vec<LayoutPlaceholder>,
+) -> SlideLayoutDef {
     SlideLayoutDef {
         index,
         name: Arc::from(name),
         ooxml_type: None,
+        slide_type_keyword: Some(Arc::from(keyword)),
         placeholders,
         has_color_override: false,
         color_override_bg: None,
@@ -210,12 +233,21 @@ fn custom_layout(index: usize, name: &str, placeholders: Vec<LayoutPlaceholder>)
     }
 }
 
-/// Build a dark custom layout (with clrMapOvr).
-fn dark_layout(index: usize, name: &str, placeholders: Vec<LayoutPlaceholder>) -> SlideLayoutDef {
+/// Build a dark custom layout (with clrMapOvr) and a canonical DSL keyword.
+///
+/// Dark layouts carry `<p:clrMapOvr>` with `bg1="dk2" tx1="lt1"` (AC-009)
+/// and a `slide_type_keyword` from the canonical Q2 DSL keyword table (ADR-015 §A.4).
+fn dark_layout(
+    index: usize,
+    name: &str,
+    keyword: &str,
+    placeholders: Vec<LayoutPlaceholder>,
+) -> SlideLayoutDef {
     SlideLayoutDef {
         index,
         name: Arc::from(name),
         ooxml_type: None,
+        slide_type_keyword: Some(Arc::from(keyword)),
         placeholders,
         has_color_override: true,
         color_override_bg: Some(Arc::from("dk2")),
@@ -490,10 +522,11 @@ pub fn generate_all_layouts(_config: &BrandConfig) -> Vec<SlideLayoutDef> {
         ),
         // ── Custom layouts (CL-01..CL-20) ─────────────────────────────────────
 
-        // CL-01: SF Section Divider (DARK LAYOUT)
+        // CL-01: SF Section Divider (DARK LAYOUT) — DSL keyword: section_divider
         dark_layout(
             12,
             "SF Section Divider",
+            "section_divider",
             vec![
                 title_ph("title", "Section Title"),
                 LayoutPlaceholder {
@@ -507,10 +540,11 @@ pub fn generate_all_layouts(_config: &BrandConfig) -> Vec<SlideLayoutDef> {
                 },
             ],
         ),
-        // CL-02: SF Stat Grid
+        // CL-02: SF Stat Grid — DSL keyword: stat_callout
         custom_layout(
             13,
             "SF Stat Grid",
+            "stat_callout",
             vec![
                 title_ph("title", "Stats Title"),
                 LayoutPlaceholder {
@@ -524,13 +558,14 @@ pub fn generate_all_layouts(_config: &BrandConfig) -> Vec<SlideLayoutDef> {
                 },
             ],
         ),
-        // CL-03: SF Quote
+        // CL-03: SF Quote — DSL keyword: quote
         // AC-010 requires a title-type placeholder. The quote title sits at the top
         // of the slide (standard title position), followed by the pullquote body and
         // attribution body below.
         custom_layout(
             14,
             "SF Quote",
+            "quote",
             vec![
                 title_ph("title", "Quote Title"),
                 LayoutPlaceholder {
@@ -553,10 +588,11 @@ pub fn generate_all_layouts(_config: &BrandConfig) -> Vec<SlideLayoutDef> {
                 },
             ],
         ),
-        // CL-04: SF Timeline
+        // CL-04: SF Timeline — DSL keyword: vertical_timeline
         custom_layout(
             15,
             "SF Timeline",
+            "vertical_timeline",
             vec![
                 title_ph("title", "Timeline Title"),
                 LayoutPlaceholder {
@@ -570,28 +606,31 @@ pub fn generate_all_layouts(_config: &BrandConfig) -> Vec<SlideLayoutDef> {
                 },
             ],
         ),
-        // CL-05: SF Agenda
+        // CL-05: SF Agenda — DSL keyword: agenda
         custom_layout(
             16,
             "SF Agenda",
+            "agenda",
             vec![
                 title_ph("title", "Agenda Title"),
                 body_ph(1, "Agenda Items"),
             ],
         ),
-        // CL-06: SF TOC
+        // CL-06: SF TOC — DSL keyword: toc
         custom_layout(
             17,
             "SF TOC",
+            "toc",
             vec![
                 title_ph("title", "Table of Contents Title"),
                 body_ph(1, "TOC Items"),
             ],
         ),
-        // CL-07: SF Bio
+        // CL-07: SF Bio — DSL keyword: bio
         custom_layout(
             18,
             "SF Bio",
+            "bio",
             vec![
                 title_ph("title", "Name"),
                 LayoutPlaceholder {
@@ -614,25 +653,28 @@ pub fn generate_all_layouts(_config: &BrandConfig) -> Vec<SlideLayoutDef> {
                 },
             ],
         ),
-        // CL-08: SF Team Grid
+        // CL-08: SF Team Grid — DSL keyword: team
         custom_layout(
             19,
             "SF Team Grid",
+            "team",
             vec![title_ph("title", "Team Title"), body_ph(1, "Team Members")],
         ),
-        // CL-09: SF Comparison Table
+        // CL-09: SF Comparison Table — DSL keyword: enhanced_table
         custom_layout(
             20,
             "SF Comparison Table",
+            "enhanced_table",
             vec![
                 title_ph("title", "Comparison Title"),
                 body_ph(1, "Comparison Table"),
             ],
         ),
-        // CL-10: SF Full-Bleed Image
+        // CL-10: SF Full-Bleed Image — DSL keyword: image
         custom_layout(
             21,
             "SF Full-Bleed Image",
+            "image",
             vec![
                 LayoutPlaceholder {
                     ph_type: Arc::from("pic"),
@@ -646,10 +688,11 @@ pub fn generate_all_layouts(_config: &BrandConfig) -> Vec<SlideLayoutDef> {
                 title_ph("title", "Image Caption"),
             ],
         ),
-        // CL-11: SF End Slide (DARK LAYOUT)
+        // CL-11: SF End Slide (DARK LAYOUT) — DSL keyword: end
         dark_layout(
             22,
             "SF End Slide",
+            "end",
             vec![
                 title_ph("ctrTitle", "Closing Title"),
                 LayoutPlaceholder {
@@ -663,16 +706,18 @@ pub fn generate_all_layouts(_config: &BrandConfig) -> Vec<SlideLayoutDef> {
                 },
             ],
         ),
-        // CL-12: SF Data
+        // CL-12: SF Data — DSL keyword: content_stat
         custom_layout(
             23,
             "SF Data",
+            "content_stat",
             vec![title_ph("title", "Data Title"), body_ph(1, "Data Content")],
         ),
-        // CL-13: SF Diagram
+        // CL-13: SF Diagram — DSL keyword: diagram
         custom_layout(
             24,
             "SF Diagram",
+            "diagram",
             vec![
                 title_ph("title", "Diagram Title"),
                 LayoutPlaceholder {
@@ -686,10 +731,11 @@ pub fn generate_all_layouts(_config: &BrandConfig) -> Vec<SlideLayoutDef> {
                 },
             ],
         ),
-        // CL-14: SF Chart
+        // CL-14: SF Chart — DSL keyword: chart
         custom_layout(
             25,
             "SF Chart",
+            "chart",
             vec![
                 title_ph("title", "Chart Title"),
                 LayoutPlaceholder {
@@ -703,10 +749,11 @@ pub fn generate_all_layouts(_config: &BrandConfig) -> Vec<SlideLayoutDef> {
                 },
             ],
         ),
-        // CL-15: SF Map
+        // CL-15: SF Map — DSL keyword: highlight
         custom_layout(
             26,
             "SF Map",
+            "highlight",
             vec![
                 title_ph("title", "Map Title"),
                 LayoutPlaceholder {
@@ -720,28 +767,31 @@ pub fn generate_all_layouts(_config: &BrandConfig) -> Vec<SlideLayoutDef> {
                 },
             ],
         ),
-        // CL-16: SF Risk Register
+        // CL-16: SF Risk Register — DSL keyword: severity_cards
         custom_layout(
             27,
             "SF Risk Register",
+            "severity_cards",
             vec![
                 title_ph("title", "Risk Register Title"),
                 body_ph(1, "Risk Items"),
             ],
         ),
-        // CL-17: SF Executive Summary
+        // CL-17: SF Executive Summary — DSL keyword: highlight_boxes
         custom_layout(
             28,
             "SF Executive Summary",
+            "highlight_boxes",
             vec![
                 title_ph("title", "Executive Summary Title"),
                 body_ph(1, "Summary Content"),
             ],
         ),
-        // CL-18: SF Two Column
+        // CL-18: SF Two Column — DSL keyword: stats_summary
         custom_layout(
             29,
             "SF Two Column",
+            "stats_summary",
             vec![
                 title_ph("title", "Title"),
                 LayoutPlaceholder {
@@ -764,19 +814,24 @@ pub fn generate_all_layouts(_config: &BrandConfig) -> Vec<SlideLayoutDef> {
                 },
             ],
         ),
-        // CL-19: SF Methodology
+        // CL-19: SF Methodology — DSL keyword: numbered_actions
         custom_layout(
             30,
             "SF Methodology",
+            "numbered_actions",
             vec![
                 title_ph("title", "Methodology Title"),
                 body_ph(1, "Methodology Steps"),
             ],
         ),
-        // CL-20: SF Appendix
+        // CL-20: SF Appendix — no dedicated Q2 DSL keyword; uses generic content fallback.
+        // This layout slot serves appendix/overflow content. `find_layout_index` in
+        // slideforge-pptx falls back to layout index 1 ("Title and Content") for
+        // unmapped DSL keywords. If a future story adds an `appendix` keyword, add it here.
         custom_layout(
             31,
             "SF Appendix",
+            "appendix",
             vec![
                 title_ph("title", "Appendix Title"),
                 body_ph(1, "Appendix Content"),
@@ -1115,6 +1170,112 @@ mod tests {
             assert_eq!(
                 a.has_color_override, b.has_color_override,
                 "layout index {i}: has_color_override must be deterministic"
+            );
+        }
+    }
+
+    // ─── ADR-015 §A.4 — slide_type_keyword field tests ───────────────────────
+
+    /// ADR-015 §A.4 — standard layouts (SL-01..SL-11) have `slide_type_keyword = None`.
+    ///
+    /// Standard layouts are looked up by `ooxml_type`, not by DSL keyword.
+    #[test]
+    fn test_adr015_standard_layouts_have_none_slide_type_keyword() {
+        let config = minimal_config_direct();
+        let layouts = generate_all_layouts(&config);
+        for (i, layout) in layouts.iter().enumerate().take(11) {
+            assert_eq!(
+                layout.slide_type_keyword, None,
+                "standard layout index {i} ('{}') must have slide_type_keyword = None \
+                 (ADR-015 §A.4: standard layouts matched by ooxml_type, not keyword)",
+                layout.name
+            );
+        }
+    }
+
+    /// ADR-015 §A.4 — CL-01 "SF Section Divider" (0-based index 11) has
+    /// `slide_type_keyword = Some("section_divider")`.
+    #[test]
+    fn test_adr015_section_divider_has_correct_keyword() {
+        let config = minimal_config_direct();
+        let layouts = generate_all_layouts(&config);
+        let cl01 = &layouts[11]; // CL-01 (0-based index 11, 1-based index 12)
+        assert_eq!(
+            cl01.slide_type_keyword.as_deref(),
+            Some("section_divider"),
+            "SF Section Divider must have slide_type_keyword = Some(\"section_divider\") \
+             (ADR-015 §A.4 canonical mapping table)"
+        );
+    }
+
+    /// ADR-015 §A.4 — CL-11 "SF End Slide" (0-based index 21) has
+    /// `slide_type_keyword = Some("end")`.
+    #[test]
+    fn test_adr015_end_slide_has_correct_keyword() {
+        let config = minimal_config_direct();
+        let layouts = generate_all_layouts(&config);
+        let cl11 = &layouts[21]; // CL-11 (0-based index 21, 1-based index 22)
+        assert_eq!(
+            cl11.slide_type_keyword.as_deref(),
+            Some("end"),
+            "SF End Slide must have slide_type_keyword = Some(\"end\") \
+             (ADR-015 §A.4 canonical mapping table)"
+        );
+    }
+
+    /// ADR-015 §A.4 — all 20 SF custom layouts (0-based indices 11..=30) have
+    /// `slide_type_keyword = Some(...)` (non-None).
+    #[test]
+    fn test_adr015_all_custom_layouts_have_keyword() {
+        let config = minimal_config_direct();
+        let layouts = generate_all_layouts(&config);
+        for (i, layout) in layouts.iter().enumerate().skip(11) {
+            assert!(
+                layout.slide_type_keyword.is_some(),
+                "custom layout index {i} ('{}') must have slide_type_keyword = Some(...) \
+                 (ADR-015 §A.4: all SF custom layouts require a DSL keyword)",
+                layout.name
+            );
+        }
+    }
+
+    /// ADR-015 §A.4 — canonical mapping spot-checks for 5 custom layouts.
+    ///
+    /// Verifies the full §A.4 table for the most critical entries.
+    #[test]
+    fn test_adr015_canonical_keyword_mapping_spot_checks() {
+        let config = minimal_config_direct();
+        let layouts = generate_all_layouts(&config);
+
+        // (0-based index, expected keyword, layout name)
+        let spot_checks: &[(usize, &str, &str)] = &[
+            (11, "section_divider", "SF Section Divider"),
+            (12, "stat_callout", "SF Stat Grid"),
+            (13, "quote", "SF Quote"),
+            (20, "image", "SF Full-Bleed Image"),
+            (21, "end", "SF End Slide"),
+            (22, "content_stat", "SF Data"),
+            (23, "diagram", "SF Diagram"),
+            (24, "chart", "SF Chart"),
+            (25, "highlight", "SF Map"),
+            (26, "severity_cards", "SF Risk Register"),
+            (27, "highlight_boxes", "SF Executive Summary"),
+            (28, "stats_summary", "SF Two Column"),
+            (29, "numbered_actions", "SF Methodology"),
+            (30, "appendix", "SF Appendix"),
+        ];
+        for &(idx, expected_keyword, expected_name) in spot_checks {
+            assert_eq!(
+                layouts[idx].name.as_ref(),
+                expected_name,
+                "layout[{idx}] name mismatch"
+            );
+            assert_eq!(
+                layouts[idx].slide_type_keyword.as_deref(),
+                Some(expected_keyword),
+                "layout[{idx}] ('{}') slide_type_keyword must be Some(\"{expected_keyword}\") \
+                 (ADR-015 §A.4 canonical mapping table)",
+                layouts[idx].name
             );
         }
     }
