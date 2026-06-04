@@ -28,6 +28,7 @@ use slideforge_types::register::RegisteredContent;
 use slideforge_types::{InlineNode, Register};
 
 use crate::error::PptxError;
+use crate::link_safety::is_safe_link_scheme;
 use crate::rels::{RelsBuilder, rel_types};
 
 /// Relationship type for a notesSlide → its owning slide.
@@ -103,7 +104,8 @@ impl NotesSlideSerializer {
     ///
     /// Uses string-based XML construction with XML-escaping for all user text.
     /// This is the bounded exception for `ooxmlsdk` usage: `ooxmlsdk 0.6.1`
-    /// does not expose typed builders for `p:notes` (notesSlide root element).
+    /// does not expose typed builders for `p:notes` (notesSlide root element) —
+    /// same precedent as `docProps/core.xml` in `build_doc_props` (ADR-001).
     ///
     /// ## OOXML structure
     ///
@@ -159,11 +161,11 @@ impl NotesSlideSerializer {
         // Slide image placeholder — ph is self-closing inside nvPr (no txBody).
         xml.push_str("      <p:sp>\n");
         xml.push_str("        <p:nvSpPr>\n");
-        writeln!(
+        // `writeln!` to `String` is infallible (fmt::Write for String never returns Err).
+        let _ = writeln!(
             xml,
             "          <p:cNvPr id=\"2\" name=\"Slide Image Placeholder {slide_index}\"/>"
-        )
-        .expect("writeln to String is infallible");
+        );
         xml.push_str("          <p:cNvSpPr><a:spLocks noGrp=\"1\"/></p:cNvSpPr>\n");
         xml.push_str("          <p:nvPr><p:ph type=\"sldImg\"/></p:nvPr>\n");
         xml.push_str("        </p:nvSpPr>\n");
@@ -176,11 +178,11 @@ impl NotesSlideSerializer {
         let body_ph_idx = slide_index + 1;
         xml.push_str("      <p:sp>\n");
         xml.push_str("        <p:nvSpPr>\n");
-        writeln!(
+        // `writeln!` to `String` is infallible (fmt::Write for String never returns Err).
+        let _ = writeln!(
             xml,
             "          <p:cNvPr id=\"3\" name=\"Notes Placeholder {body_ph_idx}\"/>"
-        )
-        .expect("writeln to String is infallible");
+        );
         xml.push_str("          <p:cNvSpPr><a:spLocks noGrp=\"1\"/></p:cNvSpPr>\n");
         xml.push_str("          <p:nvPr><p:ph type=\"body\" idx=\"1\"/></p:nvPr>\n");
         xml.push_str("        </p:nvSpPr>\n");
@@ -288,31 +290,56 @@ fn serialize_nodes_with_context(
                 serialize_nodes_with_context(children, bold, italic, hlink_urls, out);
             },
             InlineNode::Link { text, url } => {
-                // Find the rId for this URL (rId3 = index 0, rId4 = index 1, …)
-                let rid_index = hlink_urls.iter().position(|u| u == url.as_ref());
-                let hlink_rid = rid_index.map(|idx| format!("rId{}", idx + 3));
-                // Emit the link as a hyperlink run wrapping the display text.
-                // OOXML hyperlink in a notesSlide uses <a:hlinkClick r:id="rIdN"/>
-                // on the run's <a:rPr>. We emit the display text with the link rId.
-                if let Some(rid) = &hlink_rid {
-                    // Wrap in <a:r> with <a:rPr> carrying the hyperlink reference.
-                    out.push_str("<a:r><a:rPr");
-                    if bold {
-                        out.push_str(" b=\"1\"");
+                // F-040-P2-001 (CWE-601) defense-in-depth: check scheme before embedding.
+                // Safe URLs are in hlink_urls (collected by collect_hyperlink_urls) and
+                // get a clickable hlinkClick. Unsafe-scheme URLs are not in hlink_urls
+                // (filtered at collection time) — they degrade gracefully to a plain text
+                // run with a tracing::warn! so the export does not silently embed a
+                // dangerous TargetMode="External" rel.
+                if is_safe_link_scheme(url.as_ref()) {
+                    // Find the rId for this URL (rId3 = index 0, rId4 = index 1, …)
+                    let rid_index = hlink_urls.iter().position(|u| u == url.as_ref());
+                    let hlink_rid = rid_index.map(|idx| format!("rId{}", idx + 3));
+                    // Emit the link as a hyperlink run wrapping the display text.
+                    // OOXML hyperlink in a notesSlide uses <a:hlinkClick r:id="rIdN"/>
+                    // on the run's <a:rPr>. We emit the display text with the link rId.
+                    if let Some(rid) = &hlink_rid {
+                        // Wrap in <a:r> with <a:rPr> carrying the hyperlink reference.
+                        out.push_str("<a:r><a:rPr");
+                        if bold {
+                            out.push_str(" b=\"1\"");
+                        }
+                        if italic {
+                            out.push_str(" i=\"1\"");
+                        }
+                        out.push_str("><a:hlinkClick r:id=\"");
+                        out.push_str(&xml_escape(rid));
+                        out.push_str("\"/></a:rPr><a:t>");
+                        // Emit display text (recursively extracting plain text).
+                        let display_text = extract_plain_text(text);
+                        out.push_str(&xml_escape(&display_text));
+                        out.push_str("</a:t></a:r>");
+                    } else {
+                        // No rId found (shouldn't happen for a safe URL if hlink_urls is complete);
+                        // emit as plain text run.
+                        let display_text = extract_plain_text(text);
+                        emit_run(&display_text, bold, italic, None, out);
                     }
-                    if italic {
-                        out.push_str(" i=\"1\"");
-                    }
-                    out.push_str("><a:hlinkClick r:id=\"");
-                    out.push_str(&xml_escape(rid));
-                    out.push_str("\"/></a:rPr><a:t>");
-                    // Emit display text (recursively extracting plain text).
-                    let display_text = extract_plain_text(text);
-                    out.push_str(&xml_escape(&display_text));
-                    out.push_str("</a:t></a:r>");
                 } else {
-                    // No rId found (shouldn't happen if hlink_urls is complete);
-                    // emit as plain text run.
+                    // Unsafe scheme: extract for the warning then degrade to plain text.
+                    // Emit display text as a plain run; do NOT emit hlinkClick or External rel.
+                    let scheme_end = url.find(':').unwrap_or(0);
+                    let scheme = if scheme_end > 0 {
+                        &url[..scheme_end]
+                    } else {
+                        "(none)"
+                    };
+                    tracing::warn!(
+                        url_scheme = scheme,
+                        "notes link has disallowed URL scheme; \
+                         embedding as plain text run (no External rel emitted). \
+                         SEC-037-001 / CWE-601 / F-040-P2-001"
+                    );
                     let display_text = extract_plain_text(text);
                     emit_run(&display_text, bold, italic, None, out);
                 }
@@ -352,14 +379,28 @@ fn emit_run(text: &str, bold: bool, italic: bool, _rid: Option<&str>, out: &mut 
     out.push_str("</a:t></a:r>");
 }
 
-/// Collect all hyperlink URLs from an inline node tree, depth-first.
+/// Collect all **safe-scheme** hyperlink URLs from an inline node tree, depth-first.
 ///
-/// Used to build the hyperlink relationship list for the notesSlide `.rels` file.
+/// URLs whose scheme is not in [`crate::link_safety::ALLOWED_LINK_SCHEMES`] are
+/// silently skipped here (they will also be handled gracefully in
+/// [`serialize_nodes_with_context`] — the `Link` arm falls through to a plain text
+/// run when no `rId` is found).  A `tracing::warn!` is emitted for each rejected
+/// URL so the caller has an audit trail.
+///
+/// This is the defense-in-depth guard at the PPTX exporter boundary
+/// (F-040-P2-001 / CWE-601).  The parser already enforces `E-PAR-022`; this guard
+/// catches programmatically-constructed IR that bypasses the parser.
 fn collect_hyperlink_urls(nodes: &[InlineNode], urls: &mut Vec<String>) {
     for node in nodes {
         match node {
             InlineNode::Link { url, text } => {
-                urls.push(url.as_ref().to_owned());
+                // F-040-P2-001 defense-in-depth: only register URLs with safe schemes.
+                // Unsafe-scheme URLs are NOT added to the hlink_urls list; the Link
+                // arm in serialize_nodes_with_context will emit them as plain text runs.
+                if is_safe_link_scheme(url.as_ref()) {
+                    urls.push(url.as_ref().to_owned());
+                }
+                // Always recurse into the link's display text (may contain nested inlines).
                 collect_hyperlink_urls(text, urls);
             },
             InlineNode::Bold(c)

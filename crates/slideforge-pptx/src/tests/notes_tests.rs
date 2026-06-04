@@ -847,3 +847,403 @@ fn test_f040_p1_004_ac003_no_bleed_with_positive_routing() {
     // No-bleed: sentinel must NOT be in any slide body.
     BleedChecker::assert_absent_from_pptx_slides(&pptx, notes_sentinel);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// F-040-P2-001 (CRIT): CWE-601 — unsafe URL scheme → plain text, no rel
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// F-040-P2-001 (CRIT / CWE-601): A notes `Link` with `javascript:` scheme
+/// must NOT produce a `TargetMode="External"` relationship or `<a:hlinkClick>`
+/// in the output. The display text must appear as a plain run.
+///
+/// Verifies the defense-in-depth guard at the PPTX exporter boundary.
+/// Drives the production code path through a full `PptxExporter::export`.
+#[test]
+fn test_f040_p2_001_unsafe_scheme_javascript_no_external_rel() {
+    let url: Arc<str> = Arc::from("javascript:alert(1)");
+    let link_node = slideforge_types::InlineNode::Link {
+        text: vec![slideforge_types::InlineNode::Plain(Arc::from("click me"))],
+        url: url.clone(),
+    };
+    let rc = slideforge_types::register::RegisteredContent {
+        register: Register::Notes,
+        content: vec![link_node],
+    };
+
+    let slide = LaidOutSlide {
+        source_index: 0,
+        slide_type_keyword: Arc::from("title"),
+        frames: vec![Frame {
+            bbox: title_bbox(),
+            content: FrameContent::Empty,
+            text_flow: None,
+        }],
+        speaker_notes: Some(Arc::from("click me")),
+        register_tags: vec![],
+        register_content: vec![rc],
+    };
+
+    let deck = make_deck_with_notes(&[Some("click me")]);
+    let laid_out = LaidOutDeck {
+        page_size: slideforge_layout::PageSize::default(),
+        slides: vec![slide],
+        sections: vec![],
+        warnings: vec![],
+    };
+    let pptx = export_pptx(&deck, &laid_out);
+
+    // The notesSlide1.xml.rels must NOT contain the javascript: URL.
+    let rels = read_zip_member(&pptx, "ppt/notesSlides/_rels/notesSlide1.xml.rels");
+    assert!(
+        !rels.contains("javascript"),
+        "F-040-P2-001: javascript: URL must NOT appear in notesSlide1.xml.rels; \
+         got:\n{rels}"
+    );
+    assert!(
+        !rels.contains("TargetMode=\"External\"") || !rels.contains("javascript"),
+        "F-040-P2-001: no External rel with javascript: scheme; got:\n{rels}"
+    );
+
+    // The notesSlide1.xml must NOT contain <a:hlinkClick for this URL.
+    let notes_xml = read_zip_member(&pptx, "ppt/notesSlides/notesSlide1.xml");
+    assert!(
+        !notes_xml.contains("javascript"),
+        "F-040-P2-001: javascript: must not appear anywhere in notesSlide1.xml; \
+         got:\n{notes_xml}"
+    );
+    // The display text must appear as a plain run (not silently dropped).
+    assert!(
+        notes_xml.contains("click me"),
+        "F-040-P2-001: display text 'click me' must appear as a plain text run; \
+         got:\n{notes_xml}"
+    );
+}
+
+/// F-040-P2-001 (CRIT / CWE-601): Same assertion for `data:` and `file:` schemes.
+#[test]
+fn test_f040_p2_001_unsafe_schemes_data_file_no_external_rel() {
+    for (scheme_url, label) in &[
+        ("data:text/html,<script>evil()</script>", "data:"),
+        ("file:///etc/passwd", "file:"),
+    ] {
+        let url: Arc<str> = Arc::from(*scheme_url);
+        let link_node = slideforge_types::InlineNode::Link {
+            text: vec![slideforge_types::InlineNode::Plain(Arc::from("link text"))],
+            url: url.clone(),
+        };
+        let rc = slideforge_types::register::RegisteredContent {
+            register: Register::Notes,
+            content: vec![link_node],
+        };
+
+        let slide = LaidOutSlide {
+            source_index: 0,
+            slide_type_keyword: Arc::from("title"),
+            frames: vec![Frame {
+                bbox: title_bbox(),
+                content: FrameContent::Empty,
+                text_flow: None,
+            }],
+            speaker_notes: Some(Arc::from("link text")),
+            register_tags: vec![],
+            register_content: vec![rc],
+        };
+
+        let deck = make_deck_with_notes(&[Some("link text")]);
+        let laid_out = LaidOutDeck {
+            page_size: slideforge_layout::PageSize::default(),
+            slides: vec![slide],
+            sections: vec![],
+            warnings: vec![],
+        };
+        let pptx = export_pptx(&deck, &laid_out);
+
+        let rels = read_zip_member(&pptx, "ppt/notesSlides/_rels/notesSlide1.xml.rels");
+        // Only rId1 (slide) and rId2 (notesMaster) should be present — no rId3+.
+        assert!(
+            !rels.contains("TargetMode=\"External\""),
+            "F-040-P2-001: {label} URL must produce no TargetMode=External rel; \
+             got:\n{rels}"
+        );
+        // Display text must survive as a plain run.
+        let notes_xml = read_zip_member(&pptx, "ppt/notesSlides/notesSlide1.xml");
+        assert!(
+            notes_xml.contains("link text"),
+            "F-040-P2-001: display text must appear for {label} disallowed link; \
+             got:\n{notes_xml}"
+        );
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// F-040-P2-002 (HIGH): Hyperlink relationship presence and determinism
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// F-040-P2-002 (HIGH): A single safe-scheme `https:` notes link produces:
+/// - `<a:hlinkClick r:id="rId3"/>` in `notesSlide1.xml`, AND
+/// - a matching `<Relationship Id="rId3" ... TargetMode="External"/>` in
+///   `notesSlide1.xml.rels`.
+///
+/// Parses the real ZIP — not mock strings.
+#[test]
+fn test_f040_p2_002_single_safe_https_link_has_hlinkclick_and_external_rel() {
+    let target_url = "https://example.com/notes-link";
+    let link_node = slideforge_types::InlineNode::Link {
+        text: vec![slideforge_types::InlineNode::Plain(Arc::from("example"))],
+        url: Arc::from(target_url),
+    };
+    let rc = slideforge_types::register::RegisteredContent {
+        register: Register::Notes,
+        content: vec![link_node],
+    };
+
+    let slide = LaidOutSlide {
+        source_index: 0,
+        slide_type_keyword: Arc::from("title"),
+        frames: vec![Frame {
+            bbox: title_bbox(),
+            content: FrameContent::Empty,
+            text_flow: None,
+        }],
+        speaker_notes: Some(Arc::from("example")),
+        register_tags: vec![],
+        register_content: vec![rc],
+    };
+
+    let deck = make_deck_with_notes(&[Some("example")]);
+    let laid_out = LaidOutDeck {
+        page_size: slideforge_layout::PageSize::default(),
+        slides: vec![slide],
+        sections: vec![],
+        warnings: vec![],
+    };
+    let pptx = export_pptx(&deck, &laid_out);
+
+    // notesSlide1.xml must contain <a:hlinkClick r:id="rId3"/>
+    let notes_xml = read_zip_member(&pptx, "ppt/notesSlides/notesSlide1.xml");
+    assert!(
+        notes_xml.contains("hlinkClick"),
+        "F-040-P2-002: notesSlide1.xml must contain <a:hlinkClick>; got:\n{notes_xml}"
+    );
+    assert!(
+        notes_xml.contains("rId3"),
+        "F-040-P2-002: hlinkClick must reference rId3 (first hyperlink); got:\n{notes_xml}"
+    );
+
+    // notesSlide1.xml.rels must contain rId3 as TargetMode="External" with the URL.
+    let rels = read_zip_member(&pptx, "ppt/notesSlides/_rels/notesSlide1.xml.rels");
+    assert!(
+        rels.contains("rId3"),
+        "F-040-P2-002: notesSlide1.xml.rels must contain rId3 relationship; got:\n{rels}"
+    );
+    assert!(
+        rels.contains("TargetMode=\"External\""),
+        "F-040-P2-002: hyperlink rel must have TargetMode=\"External\"; got:\n{rels}"
+    );
+    assert!(
+        rels.contains(target_url),
+        "F-040-P2-002: hyperlink rel Target must be the URL {target_url:?}; got:\n{rels}"
+    );
+}
+
+/// F-040-P2-002 (HIGH): Two distinct safe URLs produce two separate rels with
+/// stable, deterministic rIds.  Export twice and assert byte-identical output.
+#[test]
+fn test_f040_p2_002_two_distinct_links_stable_deterministic_rids() {
+    let url_a = "https://alpha.example.com/";
+    let url_b = "https://beta.example.com/";
+
+    let link_a = slideforge_types::InlineNode::Link {
+        text: vec![slideforge_types::InlineNode::Plain(Arc::from("alpha"))],
+        url: Arc::from(url_a),
+    };
+    let link_b = slideforge_types::InlineNode::Link {
+        text: vec![slideforge_types::InlineNode::Plain(Arc::from("beta"))],
+        url: Arc::from(url_b),
+    };
+    let rc = slideforge_types::register::RegisteredContent {
+        register: Register::Notes,
+        content: vec![link_a, link_b],
+    };
+
+    let make_slide_with_two_links = || LaidOutSlide {
+        source_index: 0,
+        slide_type_keyword: Arc::from("title"),
+        frames: vec![Frame {
+            bbox: title_bbox(),
+            content: FrameContent::Empty,
+            text_flow: None,
+        }],
+        speaker_notes: Some(Arc::from("alpha")),
+        register_tags: vec![],
+        register_content: vec![rc.clone()],
+    };
+
+    let deck = make_deck_with_notes(&[Some("alpha")]);
+
+    // First export
+    let laid_out_1 = LaidOutDeck {
+        page_size: slideforge_layout::PageSize::default(),
+        slides: vec![make_slide_with_two_links()],
+        sections: vec![],
+        warnings: vec![],
+    };
+    let pptx_1 = export_pptx(&deck, &laid_out_1);
+
+    // Second export (same inputs)
+    let laid_out_2 = LaidOutDeck {
+        page_size: slideforge_layout::PageSize::default(),
+        slides: vec![make_slide_with_two_links()],
+        sections: vec![],
+        warnings: vec![],
+    };
+    let pptx_2 = export_pptx(&deck, &laid_out_2);
+
+    // Both exports must be byte-identical (determinism).
+    assert_eq!(
+        pptx_1, pptx_2,
+        "F-040-P2-002: export must be deterministic — same inputs must produce \
+         byte-identical PPTX bytes"
+    );
+
+    // The rels must contain rId3 and rId4 for the two distinct URLs.
+    let rels = read_zip_member(&pptx_1, "ppt/notesSlides/_rels/notesSlide1.xml.rels");
+    assert!(
+        rels.contains("rId3"),
+        "F-040-P2-002: first distinct URL must be rId3; got:\n{rels}"
+    );
+    assert!(
+        rels.contains("rId4"),
+        "F-040-P2-002: second distinct URL must be rId4; got:\n{rels}"
+    );
+    assert!(
+        rels.contains(url_a),
+        "F-040-P2-002: rId3 must target {url_a}; got:\n{rels}"
+    );
+    assert!(
+        rels.contains(url_b),
+        "F-040-P2-002: rId4 must target {url_b}; got:\n{rels}"
+    );
+}
+
+/// F-040-P2-002 (HIGH): Duplicate URL (same URL appearing twice) is deduplicated
+/// to a single rId in the rels file.
+#[test]
+fn test_f040_p2_002_duplicate_url_deduped_to_single_rel() {
+    let url = "https://example.com/shared-link";
+
+    let link_1 = slideforge_types::InlineNode::Link {
+        text: vec![slideforge_types::InlineNode::Plain(Arc::from("first"))],
+        url: Arc::from(url),
+    };
+    let link_2 = slideforge_types::InlineNode::Link {
+        text: vec![slideforge_types::InlineNode::Plain(Arc::from("second"))],
+        url: Arc::from(url), // same URL
+    };
+    let rc = slideforge_types::register::RegisteredContent {
+        register: Register::Notes,
+        content: vec![link_1, link_2],
+    };
+
+    let slide = LaidOutSlide {
+        source_index: 0,
+        slide_type_keyword: Arc::from("title"),
+        frames: vec![Frame {
+            bbox: title_bbox(),
+            content: FrameContent::Empty,
+            text_flow: None,
+        }],
+        speaker_notes: Some(Arc::from("first")),
+        register_tags: vec![],
+        register_content: vec![rc],
+    };
+
+    let deck = make_deck_with_notes(&[Some("first")]);
+    let laid_out = LaidOutDeck {
+        page_size: slideforge_layout::PageSize::default(),
+        slides: vec![slide],
+        sections: vec![],
+        warnings: vec![],
+    };
+    let pptx = export_pptx(&deck, &laid_out);
+
+    let rels = read_zip_member(&pptx, "ppt/notesSlides/_rels/notesSlide1.xml.rels");
+    // rId3 must exist (the deduplicated URL).
+    assert!(
+        rels.contains("rId3"),
+        "F-040-P2-002: deduplicated URL must produce rId3; got:\n{rels}"
+    );
+    // rId4 must NOT exist (duplicate URL must not create a second rel).
+    assert!(
+        !rels.contains("rId4"),
+        "F-040-P2-002: duplicate URL must NOT produce a second rId4 rel; got:\n{rels}"
+    );
+    // The URL must appear exactly once in rels.
+    let occurrences = rels.matches(url).count();
+    assert_eq!(
+        occurrences, 1,
+        "F-040-P2-002: deduplicated URL must appear exactly once in rels (got {occurrences}); \
+         got:\n{rels}"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// F-040-P2-003 (HIGH): XML-escape for notes text (BC-4.01.003 test vector)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// F-040-P2-003 (HIGH / BC-4.01.003 canonical test vector):
+/// Notes text containing `< & > " '` must be XML-escaped so the output is
+/// well-formed XML AND the round-tripped `<a:t>` text equals the original input.
+///
+/// Drives the real export path (not the xml_escape helper directly) to ensure
+/// the production code path is covered end-to-end.
+#[test]
+fn test_f040_p2_003_notes_text_xml_escape_well_formed_and_lossless() {
+    // BC-4.01.003 canonical escape test vector.
+    let raw_text = r#"A < B & C > D " E ' F"#;
+
+    let deck = make_deck_with_notes(&[Some(raw_text)]);
+    let laid_out = make_laid_out_deck_with_notes(&[Some(raw_text)]);
+    let pptx = export_pptx(&deck, &laid_out);
+
+    let notes_xml = read_zip_member(&pptx, "ppt/notesSlides/notesSlide1.xml");
+
+    // 1. The XML must be well-formed (quick-xml parses without error).
+    let mut reader = Reader::from_str(&notes_xml);
+    reader.config_mut().trim_text(false);
+    let mut event_count = 0_usize;
+    loop {
+        match reader.read_event() {
+            Ok(Event::Eof) => break,
+            Ok(_) => event_count += 1,
+            Err(e) => panic!(
+                "F-040-P2-003: notesSlide1.xml is not well-formed XML after escaping \
+                 text containing '<', '&', '>', '\"', \"'\": {e}\n\
+                 XML content:\n{notes_xml}"
+            ),
+        }
+    }
+    assert!(
+        event_count > 0,
+        "F-040-P2-003: XML event count must be > 0 (non-empty XML)"
+    );
+
+    // 2. The round-tripped text must equal the original (lossless escape).
+    let extracted = extract_body_placeholder_text(&notes_xml);
+    assert_eq!(
+        extracted.as_deref(),
+        Some(raw_text),
+        "F-040-P2-003: round-tripped <a:t> text must equal original input \
+         (lossless XML escaping); got: {extracted:?}"
+    );
+
+    // 3. The raw characters must NOT appear unescaped in the XML body section.
+    // The raw '<' and '&' appearing unescaped would be an XML parse error
+    // (already caught by the well-formedness check), but we assert explicitly
+    // for clarity.
+    let xml_body = notes_xml.split("<p:notes").nth(1).unwrap_or(&notes_xml);
+    assert!(
+        !xml_body.contains(" < "),
+        "F-040-P2-003: literal ' < ' must not appear unescaped in XML body"
+    );
+}

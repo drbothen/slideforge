@@ -71,10 +71,10 @@ impl RelsBuilder {
     /// a relative package path. This is the correct mechanism for `<a:hlinkClick>`
     /// relationships in slide and notesSlide XML.
     ///
-    /// # Errors
-    ///
-    /// Returns [`PptxError::OoxmlElement`] if the internal entry cannot be pushed
-    /// (in practice this never fails — the error path is for API consistency).
+    /// The caller is responsible for ensuring that `url` has a scheme in
+    /// [`crate::link_safety::ALLOWED_LINK_SCHEMES`] before calling this method.
+    /// Use [`crate::link_safety::is_safe_link_scheme`] at the call site
+    /// (F-040-P2-001 / CWE-601 defense-in-depth).
     pub fn add_external_hyperlink(&mut self, url: impl Into<String>) -> String {
         let id = format!("rId{}", self.relationships.len() + 1);
         self.relationships.push(RelEntry {

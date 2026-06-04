@@ -48,6 +48,7 @@ pub mod clrmapovr;
 pub mod content_types;
 pub mod error;
 pub mod layout_embedder;
+pub mod link_safety;
 pub mod notes_master;
 pub mod notes_slide;
 pub mod presentation;
