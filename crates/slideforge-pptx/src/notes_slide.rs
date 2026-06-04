@@ -22,8 +22,6 @@
 //! - `InlineNode::Link` → hyperlink relationship + `<a:rPr>` with `r:id`
 //! - All other nodes (Code, Xref, Footnote, etc.) → plain text run
 
-use std::fmt::Write as _;
-
 use slideforge_types::register::RegisteredContent;
 use slideforge_types::{InlineNode, Register};
 
@@ -92,7 +90,7 @@ impl NotesSlideSerializer {
         // Deduplicate while preserving order (URL order → rId order).
         let unique_hlinks: Vec<String> = deduplicate_preserve_order(hlink_urls);
 
-        let xml_bytes = Self::build_xml(slide_index, &notes_entries, &unique_hlinks);
+        let xml_bytes = Self::build_xml(&notes_entries, &unique_hlinks);
         let rels_bytes = Self::build_rels(slide_index, &unique_hlinks)?;
         Ok(NotesSlideOutput {
             xml_bytes,
@@ -128,11 +126,7 @@ impl NotesSlideSerializer {
     ///   </p:txBody>
     /// </p:sp>
     /// ```
-    fn build_xml(
-        slide_index: usize,
-        notes_entries: &[&[InlineNode]],
-        hlink_urls: &[String],
-    ) -> Vec<u8> {
+    fn build_xml(notes_entries: &[&[InlineNode]], hlink_urls: &[String]) -> Vec<u8> {
         let mut xml = String::new();
 
         xml.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n");
@@ -161,11 +155,13 @@ impl NotesSlideSerializer {
         // Slide image placeholder — ph is self-closing inside nvPr (no txBody).
         xml.push_str("      <p:sp>\n");
         xml.push_str("        <p:nvSpPr>\n");
-        // `writeln!` to `String` is infallible (fmt::Write for String never returns Err).
-        let _ = writeln!(
-            xml,
-            "          <p:cNvPr id=\"2\" name=\"Slide Image Placeholder {slide_index}\"/>"
-        );
+        // cNvPr @name is free-text / non-schema-significant.  Use a fixed role
+        // name ("Slide Image Placeholder 1") that matches the notesMaster template
+        // rather than varying it by slide index — a slide-index-derived name would
+        // differ across slides without adding semantic value and would cause rId
+        // count mismatches to appear larger than they are in diff output.
+        // (F-040-P3-001 tidy — confirmed cosmetic-only, no schema impact.)
+        xml.push_str("          <p:cNvPr id=\"2\" name=\"Slide Image Placeholder 1\"/>\n");
         xml.push_str("          <p:cNvSpPr><a:spLocks noGrp=\"1\"/></p:cNvSpPr>\n");
         xml.push_str("          <p:nvPr><p:ph type=\"sldImg\"/></p:nvPr>\n");
         xml.push_str("        </p:nvSpPr>\n");
@@ -175,14 +171,12 @@ impl NotesSlideSerializer {
         // Notes body placeholder — ph is self-closing inside nvPr;
         // txBody is a SIBLING of nvSpPr under p:sp (CT_Shape ordering:
         // nvSpPr → spPr → txBody).
-        let body_ph_idx = slide_index + 1;
+        // cNvPr @name is fixed ("Notes Placeholder 2") matching the notesMaster
+        // template — slide-index variation is non-schema-significant and confusing.
+        // (F-040-P3-001 tidy — cosmetic, no schema impact.)
         xml.push_str("      <p:sp>\n");
         xml.push_str("        <p:nvSpPr>\n");
-        // `writeln!` to `String` is infallible (fmt::Write for String never returns Err).
-        let _ = writeln!(
-            xml,
-            "          <p:cNvPr id=\"3\" name=\"Notes Placeholder {body_ph_idx}\"/>"
-        );
+        xml.push_str("          <p:cNvPr id=\"3\" name=\"Notes Placeholder 2\"/>\n");
         xml.push_str("          <p:cNvSpPr><a:spLocks noGrp=\"1\"/></p:cNvSpPr>\n");
         xml.push_str("          <p:nvPr><p:ph type=\"body\" idx=\"1\"/></p:nvPr>\n");
         xml.push_str("        </p:nvSpPr>\n");
@@ -390,18 +384,38 @@ fn emit_run(text: &str, bold: bool, italic: bool, _rid: Option<&str>, out: &mut 
 /// This is the defense-in-depth guard at the PPTX exporter boundary
 /// (F-040-P2-001 / CWE-601).  The parser already enforces `E-PAR-022`; this guard
 /// catches programmatically-constructed IR that bypasses the parser.
+///
+/// ## F-040-P3-001: No recursion into a `Link`'s display text
+///
+/// The serializer (`serialize_nodes_with_context`) flattens a `Link`'s display
+/// `text` children to plain text via `extract_plain_text` — it does NOT recurse
+/// through them with `serialize_nodes_with_context`.  Therefore any nested `Link`
+/// inside display text is never serialized as an `<a:hlinkClick>`.
+///
+/// Consequence: we must NOT descend into `text` here either.  Collecting a nested
+/// URL would assign it an rId in the `.rels` file with no corresponding
+/// `<a:hlinkClick>` referencing it — an orphan External relationship that OOXML
+/// linters flag (rId count ≠ hlinkClick count).
+///
+/// Fix (option b — least change): collect ONLY the outer `Link`'s URL (when its
+/// scheme is safe).  Nested `Link` nodes inside display text are ignored; they
+/// will be rendered as plain text by the serializer (consistent behavior).
 fn collect_hyperlink_urls(nodes: &[InlineNode], urls: &mut Vec<String>) {
     for node in nodes {
         match node {
-            InlineNode::Link { url, text } => {
+            InlineNode::Link { url, text: _ } => {
                 // F-040-P2-001 defense-in-depth: only register URLs with safe schemes.
                 // Unsafe-scheme URLs are NOT added to the hlink_urls list; the Link
                 // arm in serialize_nodes_with_context will emit them as plain text runs.
                 if is_safe_link_scheme(url.as_ref()) {
                     urls.push(url.as_ref().to_owned());
                 }
-                // Always recurse into the link's display text (may contain nested inlines).
-                collect_hyperlink_urls(text, urls);
+                // F-040-P3-001: Do NOT recurse into `text` children here.
+                // The serializer flattens display text via extract_plain_text, so any
+                // nested Link inside display text produces NO hlinkClick.  Collecting
+                // its URL here would create an orphan External rel (rId with no
+                // referencing hlinkClick).  Nested URLs in display text are intentionally
+                // rendered as plain text — consistent with the serializer's behavior.
             },
             InlineNode::Bold(c)
             | InlineNode::Italic(c)

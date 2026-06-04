@@ -1247,3 +1247,132 @@ fn test_f040_p2_003_notes_text_xml_escape_well_formed_and_lossless() {
         "F-040-P2-003: literal ' < ' must not appear unescaped in XML body"
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// F-040-P3-001 (LOW): Nested Link inside display text — no orphan External rel
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// F-040-P3-001 (LOW): A `Link` whose display `text` children contain a NESTED
+/// `Link` (both with safe `https:` URLs) must NOT produce an orphan External
+/// relationship in `notesSlide{N}.xml.rels`.
+///
+/// ## What is being guarded
+///
+/// `collect_hyperlink_urls` used to recurse into a `Link`'s display `text`
+/// children, registering any nested safe-scheme URL as an rId in the `.rels`
+/// file.  However, `serialize_nodes_with_context` flattens display text via
+/// `extract_plain_text` — nested `Link` nodes are rendered as plain text and
+/// NO `<a:hlinkClick>` is emitted for them.  This caused:
+///   - rId count in `.rels` > `<a:hlinkClick>` count in `.xml`
+///   - An orphan `TargetMode="External"` relationship with no referencing element
+///   - OOXML linters flag this as invalid (rId count ≠ hlinkClick count)
+///
+/// ## Fix verified here (F-040-P3-001, option b)
+///
+/// `collect_hyperlink_urls` no longer descends into `text` children of a `Link`.
+/// Only the outer link's URL is registered (when safe).  The nested URL inside
+/// display text is intentionally ignored — the serializer renders it as plain text.
+///
+/// ## Assertions (real ZIP, real XML — no mocks)
+///
+/// - Count of `<Relationship ... TargetMode="External">` in `notesSlide1.xml.rels`
+///   EQUALS count of `<a:hlinkClick` in `notesSlide1.xml` (no orphan rel).
+/// - Both counts equal 1 (only the outer link's URL; nested URL is plain text).
+/// - The outer URL appears as the Target of the one External relationship.
+/// - The nested URL does NOT appear anywhere in `.rels` (no orphan rel for it).
+#[test]
+fn test_f040_p3_001_nested_link_in_display_text_no_orphan_rel() {
+    let outer_url = "https://outer.example.com/page";
+    let nested_url = "https://nested.example.com/inner";
+
+    // Build: Link { url: outer_url, text: [ Link { url: nested_url, text: ["nested label"] } ] }
+    let nested_link = slideforge_types::InlineNode::Link {
+        url: Arc::from(nested_url),
+        text: vec![slideforge_types::InlineNode::Plain(Arc::from(
+            "nested label",
+        ))],
+    };
+    let outer_link = slideforge_types::InlineNode::Link {
+        url: Arc::from(outer_url),
+        text: vec![nested_link],
+    };
+    let rc = slideforge_types::register::RegisteredContent {
+        register: Register::Notes,
+        content: vec![outer_link],
+    };
+
+    let slide = LaidOutSlide {
+        source_index: 0,
+        slide_type_keyword: Arc::from("title"),
+        frames: vec![Frame {
+            bbox: title_bbox(),
+            content: FrameContent::Empty,
+            text_flow: None,
+        }],
+        speaker_notes: Some(Arc::from("outer link")),
+        register_tags: vec![],
+        register_content: vec![rc],
+    };
+
+    let deck = make_deck_with_notes(&[Some("outer link")]);
+    let laid_out = LaidOutDeck {
+        page_size: slideforge_layout::PageSize::default(),
+        slides: vec![slide],
+        sections: vec![],
+        warnings: vec![],
+    };
+    let pptx = export_pptx(&deck, &laid_out);
+
+    // Parse the notesSlide1.xml.rels — count External rels.
+    let rels_xml = read_zip_member(&pptx, "ppt/notesSlides/_rels/notesSlide1.xml.rels");
+
+    // Count External relationships.  Each appears as:
+    //   Type="...hyperlink" TargetMode="External"
+    // We count by counting occurrences of TargetMode="External" in the file
+    // (rId1 and rId2 are slide/master rels without TargetMode="External").
+    let external_rel_count = rels_xml.matches("TargetMode=\"External\"").count();
+
+    // Parse the notesSlide1.xml — count hlinkClick elements.
+    let notes_xml = read_zip_member(&pptx, "ppt/notesSlides/notesSlide1.xml");
+    let hlinkclick_count = notes_xml.matches("<a:hlinkClick").count();
+
+    // CORE ASSERTION: rId count for External rels must equal hlinkClick count.
+    // An orphan rel would cause external_rel_count > hlinkclick_count.
+    assert_eq!(
+        external_rel_count, hlinkclick_count,
+        "F-040-P3-001: orphan External rel detected — \
+         TargetMode=External count ({external_rel_count}) != \
+         <a:hlinkClick count ({hlinkclick_count}). \
+         The nested link's URL inside the outer link's display text must NOT \
+         produce an External rel (it has no corresponding hlinkClick)."
+    );
+
+    // Both counts must be exactly 1: only the outer link gets an rId + hlinkClick.
+    assert_eq!(
+        external_rel_count, 1,
+        "F-040-P3-001: expected exactly 1 External rel (the outer link's URL); \
+         got {external_rel_count}. \
+         rels:\n{rels_xml}"
+    );
+    assert_eq!(
+        hlinkclick_count, 1,
+        "F-040-P3-001: expected exactly 1 <a:hlinkClick> (the outer link's); \
+         got {hlinkclick_count}. \
+         notes_xml:\n{notes_xml}"
+    );
+
+    // The outer URL must appear in rels (it has a valid External rel).
+    assert!(
+        rels_xml.contains(outer_url),
+        "F-040-P3-001: outer URL {outer_url:?} must appear as an External rel Target; \
+         got rels:\n{rels_xml}"
+    );
+
+    // The nested URL must NOT appear in rels (it is plain text only — no External rel).
+    assert!(
+        !rels_xml.contains(nested_url),
+        "F-040-P3-001: nested URL {nested_url:?} must NOT appear in rels \
+         (it is rendered as plain text by the serializer); \
+         got rels:\n{rels_xml}"
+    );
+}
