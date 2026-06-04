@@ -1,7 +1,12 @@
-//! Tests for STORY-040: PPTX Speaker Notes + Slide Sections + notesMaster1.xml.
+//! Tests for STORY-040: PPTX Speaker Notes + notesMaster1.xml + handoutMaster1.xml.
 //!
-//! Covers BC-4.01.003 (speaker notes, masters, slide sections) and
-//! BC-4.01.006 (notesMaster1.xml + handoutMaster1.xml always present).
+//! Covers BC-4.01.003 (speaker notes) and BC-4.01.006 (notesMaster1.xml +
+//! handoutMaster1.xml always present).
+//!
+//! Slide sections (`<p:sectionLst>`) were split to STORY-082 per human-authorized
+//! scope split 2026-06-04. All section-related tests (former AC-004..AC-006,
+//! EC-004..EC-005, GUID determinism) have been removed. `sections.rs` and the
+//! `sha2` production dependency have been removed from this crate.
 //!
 //! ## Upstream Data Verification (STORY-039 lesson — REQUIRED READING)
 //!
@@ -22,46 +27,9 @@
 //!                                                             .register_content
 //! → PptxExporter → NotesSlideSerializer (STORY-040 stub)
 //! ```
-//! No gap: the data IS threaded.  Tests should construct semantic `Deck` objects
-//! with `Slide::register_content` populated, run `layout::run`, then export.
-//!
-//! ### Slide Sections for PPTX — GAP (RED FLAG)
-//!
-//! **`LaidOutDeck::sections` is NOT the source for PPTX slide sections.**
-//!
-//! `LaidOutDeck::sections` carries `GeneratedSection` values from
-//! `slideforge_layout::sections::collect_sections`.  These are DOCX/PDF
-//! document-structure sections (`methodology`, `executive_summary`, etc.) —
-//! NOT `section "Name":` slide groupings that map to PPTX `<p:sectionLst>`.
-//!
-//! The `Deck::section_blocks` field carries DOCX/PDF `SectionBlock`s (e.g.,
-//! `section methodology: ...`) — also NOT PPTX slide groupings.
-//!
-//! As of STORY-040 scope, there is no IR field that carries the PPTX-native
-//! `section "Background":` slide grouping through the pipeline.  The
-//! `SectionListBuilder` stub in `sections.rs` documents this gap in its
-//! module-level comment.
-//!
-//! **Impact on tests:** The section tests (AC-004, AC-005, AC-006, EC-004,
-//! EC-005) must drive `SectionListBuilder::build` DIRECTLY (bypassing the
-//! full pipeline) because the data source does not yet exist in the IR.
-//! Tests use `crate::sections::PptxSection` structs constructed in-test.
-//!
-//! The implementer MUST either:
-//! (a) add a `pptx_sections: Vec<PptxSection>` field to `LaidOutDeck`, OR
-//! (b) add a parallel `pptx_sections` field to a new wrapper struct,
-//! and thread `section "Name":` DSL blocks through the pipeline into it.
-//! This wiring is part of STORY-040's implementation scope.
-//!
-//! ## Test Approach
-//!
-//! All tests that check notes content (AC-001..AC-003) construct a semantic
-//! `Deck` with `register_content` populated on slides, run `layout::run`,
-//! then call `PptxExporter::export` to get real PPTX bytes.  Tests then open
-//! the PPTX ZIP and parse XML — no mock strings.
-//!
-//! Section tests (AC-004..AC-006, EC-004..EC-005) call `SectionListBuilder`
-//! directly with `PptxSection` fixtures until the pipeline wiring exists.
+//! No gap: the data IS threaded.  Tests construct semantic `Deck` objects
+//! with `Slide::register_content` populated, run through `PptxExporter::export`,
+//! then open the PPTX ZIP and parse XML — no mock strings.
 //!
 //! ## Traceability
 //!
@@ -71,14 +39,8 @@
 //! | `test_BC_4_01_003_ac001_ec001_no_notes_slide_for_empty_notes` | AC-001 / EC-001 | postcondition 2 | slide with empty notes → no notesSlide |
 //! | `test_BC_4_01_003_ac002_notes_text_in_body_placeholder` | AC-002 | postcondition 6 | notes text in <p:ph type="body" idx="1"> txBody |
 //! | `test_BC_4_01_003_ac003_notes_absent_from_slide_bodies` | AC-003 | invariant 1 | notes text not in any ppt/slides/slide*.xml |
-//! | `test_BC_4_01_003_ac004_sections_produce_section_lst` | AC-004 | postcondition 5 | <p:sectionLst> with 2 sections in presentation.xml |
-//! | `test_BC_4_01_003_ac005_no_sections_no_section_lst` | AC-005 | EC-002 | no sections → no <p:sectionLst> |
-//! | `test_BC_4_01_003_ac006_section_name_xml_escaped` | AC-006 | EC-004 | "Background & Overview" → name="Background &amp; Overview" |
-//! | `test_BC_4_01_006_ac007_notes_master_always_present` | AC-007 | invariant 1 | ppt/notesMasters/notesMaster1.xml always in ZIP |
-//! | `test_BC_4_01_006_ac008_handout_master_always_present` | AC-008 | postcondition 2 | ppt/handoutMasters/handoutMaster1.xml always in ZIP |
-//! | `test_BC_4_01_003_ec004_section_name_special_chars_well_formed` | EC-004 | EC-004 | section name with special chars → well-formed XML |
-//! | `test_BC_4_01_003_ec005_two_single_slide_sections` | EC-005 | EC-005 | two sections, one slide each, both in sectionLst |
-//! | `test_BC_4_01_003_section_guid_deterministic` | invariant 3 | invariant 3 | same name → same GUID, NOT random, two exports agree |
+//! | `test_BC_4_01_006_ac004_notes_master_always_present` | AC-004 | invariant 1 | ppt/notesMasters/notesMaster1.xml always in ZIP |
+//! | `test_BC_4_01_006_ac005_handout_master_always_present` | AC-005 | postcondition 2 | ppt/handoutMasters/handoutMaster1.xml always in ZIP |
 
 #![allow(non_snake_case)]
 #![allow(clippy::unwrap_used)]
@@ -93,12 +55,11 @@ use quick_xml::events::Event;
 use slideforge_eval::BleedChecker;
 use slideforge_layout::{BoundingBox, Frame, FrameContent, LaidOutDeck, LaidOutSlide, PageSize};
 use slideforge_plugin_api::{ExportOptions, Exporter};
-use slideforge_types::{Brand, BrandFonts, BrandPalette, Deck, Emu, Register, SourceSpan};
 use slideforge_types::register::RegisteredContent;
+use slideforge_types::{Brand, BrandFonts, BrandPalette, Deck, Emu, Register, SourceSpan};
 use zip::ZipArchive;
 
 use crate::PptxExporter;
-use crate::sections::{PptxSection, SectionListBuilder};
 
 // ─── Fixture builders ────────────────────────────────────────────────────────
 
@@ -144,12 +105,7 @@ fn title_bbox() -> BoundingBox {
 /// Build a minimal `LaidOutSlide` with no frames and optional speaker notes.
 fn make_slide(index: usize, notes_text: Option<&str>) -> LaidOutSlide {
     let register_content: Vec<RegisteredContent> = notes_text
-        .map(|t| {
-            vec![RegisteredContent::plain(
-                Register::Notes,
-                Arc::from(t),
-            )]
-        })
+        .map(|t| vec![RegisteredContent::plain(Register::Notes, Arc::from(t))])
         .unwrap_or_default();
     let speaker_notes = notes_text.map(Arc::from);
     LaidOutSlide {
@@ -182,12 +138,7 @@ fn make_deck_with_notes(notes_per_slide: &[Option<&str>]) -> Deck {
                 source_span: SourceSpan::default(),
                 overlay: None,
                 register_content: maybe_notes
-                    .map(|t| {
-                        vec![RegisteredContent::plain(
-                            Register::Notes,
-                            Arc::from(t),
-                        )]
-                    })
+                    .map(|t| vec![RegisteredContent::plain(Register::Notes, Arc::from(t))])
                     .unwrap_or_default(),
             })
             .collect(),
@@ -287,62 +238,6 @@ fn assert_zip_entry_present(pptx_bytes: &[u8], member_name: &str) {
     );
 }
 
-/// Parse a `<p:sectionLst>` element from XML bytes, returning section names.
-/// Returns an empty Vec if `<p:sectionLst>` is absent.
-fn parse_section_names_from_xml(xml: &str) -> Vec<String> {
-    let mut reader = Reader::from_str(xml);
-    reader.config_mut().trim_text(true);
-    let mut names: Vec<String> = Vec::new();
-    let mut in_section_lst = false;
-    loop {
-        match reader.read_event() {
-            Ok(Event::Start(e)) | Ok(Event::Empty(e)) => {
-                let local = e.local_name();
-                let local_str = std::str::from_utf8(local.as_ref()).unwrap_or("");
-                if local_str == "sectionLst" {
-                    in_section_lst = true;
-                }
-                if in_section_lst && local_str == "section" {
-                    let decoder = reader.decoder();
-                    for attr in e.attributes().flatten() {
-                        if attr.key.local_name().as_ref() == b"name" {
-                            let val = attr.decode_and_unescape_value(decoder).unwrap_or_default();
-                            names.push(val.into_owned());
-                        }
-                    }
-                }
-            },
-            Ok(Event::End(e)) => {
-                if e.local_name().as_ref() == b"sectionLst" {
-                    in_section_lst = false;
-                }
-            },
-            Ok(Event::Eof) => break,
-            Err(e) => panic!("XML parse error: {e}"),
-            _ => {},
-        }
-    }
-    names
-}
-
-/// Returns `true` if the XML contains a `<p:sectionLst>` element.
-fn xml_contains_section_lst(xml: &str) -> bool {
-    let mut reader = Reader::from_str(xml);
-    reader.config_mut().trim_text(true);
-    loop {
-        match reader.read_event() {
-            Ok(Event::Start(e)) | Ok(Event::Empty(e)) => {
-                if e.local_name().as_ref() == b"sectionLst" {
-                    return true;
-                }
-            },
-            Ok(Event::Eof) => return false,
-            Err(e) => panic!("XML parse error while checking for sectionLst: {e}"),
-            _ => {},
-        }
-    }
-}
-
 /// Extract the text content from the `<p:ph type="body" idx="1">` txBody in
 /// a notesSlide XML string.  Returns `None` if the placeholder is absent.
 fn extract_body_placeholder_text(xml: &str) -> Option<String> {
@@ -357,7 +252,9 @@ fn extract_body_placeholder_text(xml: &str) -> Option<String> {
     loop {
         match reader.read_event() {
             Ok(Event::Start(e)) => {
-                let local = std::str::from_utf8(e.local_name().as_ref()).unwrap_or("").to_owned();
+                let local = std::str::from_utf8(e.local_name().as_ref())
+                    .unwrap_or("")
+                    .to_owned();
                 if local == "sp" {
                     // Scan sp's children for a nvPr → ph with type="body" idx="1".
                     // We use a simpler scan: track nvPr/ph attributes.
@@ -440,8 +337,11 @@ fn test_BC_4_01_003_ac001_notes_slide_count_equals_slides_with_notes() {
         None,
         Some("Speaker note for slide 3"),
     ]);
-    let laid_out =
-        make_laid_out_deck_with_notes(&[Some("Speaker note for slide 1"), None, Some("Speaker note for slide 3")]);
+    let laid_out = make_laid_out_deck_with_notes(&[
+        Some("Speaker note for slide 1"),
+        None,
+        Some("Speaker note for slide 3"),
+    ]);
 
     let pptx = export_pptx(&deck, &laid_out);
     let notes_count = count_notes_slides(&pptx);
@@ -574,181 +474,11 @@ fn test_BC_4_01_003_ac003_notes_absent_from_slide_bodies() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AC-004: sections → <p:sectionLst> in presentation.xml
-// BC-4.01.003 postcondition 5
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// AC-004 / BC-4.01.003 postcondition 5:
-/// Two PPTX sections produce `<p:sectionLst>` in `presentation.xml` with
-/// two `<p:section>` elements. Section names match the input.
-///
-/// Red Gate: fails because `SectionListBuilder::build` is `todo!()`.
-#[test]
-fn test_BC_4_01_003_ac004_sections_produce_section_lst() {
-    // F-040-RG-3: asserted symbol: `SectionListBuilder::build` (sections.rs).
-    let sections = vec![
-        PptxSection {
-            name: "Background".to_string(),
-            slide_ids: vec![256, 257],
-        },
-        PptxSection {
-            name: "Analysis".to_string(),
-            slide_ids: vec![258, 259],
-        },
-    ];
-
-    let section_lst_bytes = SectionListBuilder::build(&sections)
-        .expect("SectionListBuilder::build must succeed for valid sections");
-
-    let xml = match section_lst_bytes {
-        Some(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
-        None => panic!(
-            "AC-004: SectionListBuilder::build must return Some(bytes) for non-empty sections; \
-             got None. (BC-4.01.003 postcondition 5)"
-        ),
-    };
-
-    // Verify well-formedness: parse without error.
-    {
-        let mut reader = Reader::from_str(&xml);
-        reader.config_mut().trim_text(true);
-        loop {
-            match reader.read_event() {
-                Ok(Event::Eof) => break,
-                Err(e) => panic!("AC-004: sectionLst XML is not well-formed: {e}"),
-                _ => {},
-            }
-        }
-    }
-
-    let names = parse_section_names_from_xml(&xml);
-    assert_eq!(
-        names.len(), 2,
-        "AC-004: expected 2 section elements in <p:sectionLst>; got {}: {names:?}. \
-         (BC-4.01.003 postcondition 5)",
-        names.len()
-    );
-    assert_eq!(
-        names[0], "Background",
-        "AC-004: first section name must be \"Background\"; got {:?}",
-        names[0]
-    );
-    assert_eq!(
-        names[1], "Analysis",
-        "AC-004: second section name must be \"Analysis\"; got {:?}",
-        names[1]
-    );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// AC-005: no sections → no <p:sectionLst>
-// BC-4.01.003 EC-002
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// AC-005 / BC-4.01.003 EC-002:
-/// When the deck has no sections, `SectionListBuilder::build` returns `None`
-/// and `presentation.xml` must not contain `<p:sectionLst>`.
-///
-/// Red Gate: fails because `SectionListBuilder::build` is `todo!()`.
-#[test]
-fn test_BC_4_01_003_ac005_no_sections_no_section_lst() {
-    // F-040-RG-4: asserted symbol: `SectionListBuilder::build` (sections.rs).
-    let sections: Vec<PptxSection> = vec![];
-
-    let result = SectionListBuilder::build(&sections)
-        .expect("SectionListBuilder::build must not error for empty sections");
-
-    assert!(
-        result.is_none(),
-        "AC-005: SectionListBuilder::build must return None for an empty sections list; \
-         got Some(bytes). \
-         (BC-4.01.003 EC-002)"
-    );
-
-    // Also verify via full export: a deck with no sections must produce
-    // presentation.xml without <p:sectionLst>.
-    let deck = make_deck_with_notes(&[None]);
-    let laid_out = make_laid_out_deck_with_notes(&[None]);
-    let pptx = export_pptx(&deck, &laid_out);
-    let prs_xml = read_zip_member(&pptx, "ppt/presentation.xml");
-
-    assert!(
-        !xml_contains_section_lst(&prs_xml),
-        "AC-005: presentation.xml must not contain <p:sectionLst> when the deck has no sections. \
-         (BC-4.01.003 EC-002)"
-    );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// AC-006: XML-escaped section names
-// BC-4.01.003 EC-004
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// AC-006 / BC-4.01.003 EC-004:
-/// A section named "Background & Overview" produces
-/// `<p:section name="Background &amp; Overview">` in the sectionLst XML.
-/// The resulting XML is well-formed (parseable without error).
-///
-/// Red Gate: fails because `SectionListBuilder::build` is `todo!()`.
-#[test]
-fn test_BC_4_01_003_ac006_section_name_xml_escaped() {
-    // F-040-RG-5: asserted symbol: `SectionListBuilder::build` (sections.rs).
-    let sections = vec![PptxSection {
-        name: "Background & Overview".to_string(),
-        slide_ids: vec![256, 257, 258],
-    }];
-
-    let bytes = SectionListBuilder::build(&sections)
-        .expect("SectionListBuilder::build must succeed")
-        .expect("must return Some(bytes) for non-empty sections");
-
-    let xml = String::from_utf8_lossy(&bytes).into_owned();
-
-    // Well-formedness check.
-    {
-        let mut reader = Reader::from_str(&xml);
-        reader.config_mut().trim_text(true);
-        loop {
-            match reader.read_event() {
-                Ok(Event::Eof) => break,
-                Err(e) => panic!(
-                    "AC-006: sectionLst XML with special-char section name is not well-formed: {e}\n\
-                     XML: {xml}"
-                ),
-                _ => {},
-            }
-        }
-    }
-
-    // Verify the unescaped name round-trips correctly via quick-xml.
-    let names = parse_section_names_from_xml(&xml);
-    assert_eq!(
-        names.len(), 1,
-        "AC-006: expected 1 section in sectionLst; got {}: {names:?}",
-        names.len()
-    );
-    assert_eq!(
-        names[0], "Background & Overview",
-        "AC-006: section name must round-trip via XML escaping; \
-         expected \"Background & Overview\" (unescaped), got {:?}. \
-         (BC-4.01.003 EC-004)",
-        names[0]
-    );
-
-    // Direct byte check: the raw XML must contain &amp; for the ampersand.
-    assert!(
-        xml.contains("&amp;"),
-        "AC-006: raw XML must contain &amp; for the escaped ampersand; \
-         got: {xml}"
-    );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// AC-007: notesMaster1.xml always present
+// AC-004: notesMaster1.xml always present
 // BC-4.01.006 invariant 1
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// AC-007 / BC-4.01.006 invariant 1:
+/// AC-004 / BC-4.01.006 invariant 1:
 /// `ppt/notesMasters/notesMaster1.xml` must be present in the PPTX ZIP even
 /// when the deck has zero notes.
 ///
@@ -760,7 +490,7 @@ fn test_BC_4_01_003_ac006_section_name_xml_escaped() {
 /// The STORY-040 implementer must replace the NOTES_MASTER_STUB with a proper
 /// notesMaster generated by `NotesMasterSerializer::build_notes_master`.
 #[test]
-fn test_BC_4_01_006_ac007_notes_master_always_present() {
+fn test_BC_4_01_006_ac004_notes_master_always_present() {
     // Zero-notes deck to verify the "always present regardless of deck content" invariant.
     let deck = make_deck_with_notes(&[None]);
     let laid_out = make_laid_out_deck_with_notes(&[None]);
@@ -770,181 +500,21 @@ fn test_BC_4_01_006_ac007_notes_master_always_present() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AC-008: handoutMaster1.xml always present
+// AC-005: handoutMaster1.xml always present
 // BC-4.01.006 postcondition 2
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// AC-008 / BC-4.01.006 postcondition 2:
+/// AC-005 / BC-4.01.006 postcondition 2:
 /// `ppt/handoutMasters/handoutMaster1.xml` must be present in the PPTX ZIP
 /// always, regardless of deck content.
 ///
-/// Red Gate note: same as AC-007 — this was already wired by STORY-037.
+/// Red Gate note: same as AC-004 — this was already wired by STORY-037.
 /// This test should be GREEN. Included for BC-4.01.006 traceability.
 #[test]
-fn test_BC_4_01_006_ac008_handout_master_always_present() {
+fn test_BC_4_01_006_ac005_handout_master_always_present() {
     let deck = make_deck_with_notes(&[None]);
     let laid_out = make_laid_out_deck_with_notes(&[None]);
     let pptx = export_pptx(&deck, &laid_out);
 
     assert_zip_entry_present(&pptx, "ppt/handoutMasters/handoutMaster1.xml");
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// EC-004: section with special XML characters → well-formed
-// BC-4.01.003 EC-004
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// EC-004 / BC-4.01.003 EC-004:
-/// A section name with multiple XML-special characters (`<`, `>`, `&`, `"`, `'`)
-/// produces well-formed XML where the name attribute is fully escaped.
-///
-/// Red Gate: fails because `SectionListBuilder::build` is `todo!()`.
-#[test]
-fn test_BC_4_01_003_ec004_section_name_special_chars_well_formed() {
-    // F-040-RG-6: asserted symbol: `SectionListBuilder::build`.
-    let sections = vec![PptxSection {
-        name: "Q1 <Revenue> & 'Costs' \"Analysis\"".to_string(),
-        slide_ids: vec![256],
-    }];
-
-    let bytes = SectionListBuilder::build(&sections)
-        .expect("SectionListBuilder::build must succeed for any valid section name")
-        .expect("must return Some(bytes) for non-empty sections");
-
-    let xml = String::from_utf8_lossy(&bytes).into_owned();
-
-    // Well-formedness is the primary assertion.
-    let mut reader = Reader::from_str(&xml);
-    reader.config_mut().trim_text(true);
-    loop {
-        match reader.read_event() {
-            Ok(Event::Eof) => break,
-            Err(e) => panic!(
-                "EC-004: sectionLst XML with special-char section name is not well-formed: {e}\n\
-                 XML: {xml}"
-            ),
-            _ => {},
-        }
-    }
-
-    // Name round-trips through XML escaping.
-    let names = parse_section_names_from_xml(&xml);
-    assert_eq!(
-        names.first().map(String::as_str),
-        Some("Q1 <Revenue> & 'Costs' \"Analysis\""),
-        "EC-004: section name must round-trip via XML escaping; got: {names:?}"
-    );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// EC-005: two sections, one slide each
-// BC-4.01.003 EC-005
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// EC-005 / BC-4.01.003 EC-005:
-/// Two sections each containing exactly one slide produce two `<p:section>`
-/// elements in `<p:sectionLst>`, each with one `<p:sldId>`.
-///
-/// Red Gate: fails because `SectionListBuilder::build` is `todo!()`.
-#[test]
-fn test_BC_4_01_003_ec005_two_single_slide_sections() {
-    // F-040-RG-7: asserted symbol: `SectionListBuilder::build`.
-    let sections = vec![
-        PptxSection {
-            name: "Introduction".to_string(),
-            slide_ids: vec![256],
-        },
-        PptxSection {
-            name: "Conclusion".to_string(),
-            slide_ids: vec![257],
-        },
-    ];
-
-    let bytes = SectionListBuilder::build(&sections)
-        .expect("SectionListBuilder::build must succeed")
-        .expect("must return Some(bytes) for non-empty sections");
-
-    let xml = String::from_utf8_lossy(&bytes).into_owned();
-
-    let names = parse_section_names_from_xml(&xml);
-    assert_eq!(
-        names.len(), 2,
-        "EC-005: expected 2 section elements; got {}: {names:?}",
-        names.len()
-    );
-    assert_eq!(names[0], "Introduction");
-    assert_eq!(names[1], "Conclusion");
-
-    // Verify each section has exactly one sldId.
-    // Count <p:sldId> elements (quick scan).
-    let sld_id_count = {
-        let mut reader = Reader::from_str(&xml);
-        reader.config_mut().trim_text(true);
-        let mut count = 0usize;
-        loop {
-            match reader.read_event() {
-                Ok(Event::Start(e)) | Ok(Event::Empty(e)) => {
-                    if e.local_name().as_ref() == b"sldId" {
-                        count += 1;
-                    }
-                },
-                Ok(Event::Eof) => break,
-                Err(e) => panic!("EC-005: XML parse error: {e}"),
-                _ => {},
-            }
-        }
-        count
-    };
-    assert_eq!(
-        sld_id_count, 2,
-        "EC-005: expected 2 <p:sldId> elements (one per section); got {sld_id_count}. \
-         (BC-4.01.003 EC-005)"
-    );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Invariant 3: section GUID is deterministic (NOT random)
-// BC-4.01.003 invariant 3
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// BC-4.01.003 invariant 3:
-/// The same section name must produce the same GUID in two separate calls to
-/// `SectionListBuilder::guid_for_name`. GUIDs must NOT be random (`Uuid::new_v4`).
-///
-/// Red Gate: fails because `SectionListBuilder::guid_for_name` is `todo!()`.
-#[test]
-fn test_BC_4_01_003_section_guid_deterministic() {
-    // F-040-RG-8: asserted symbol: `SectionListBuilder::guid_for_name` (sections.rs).
-    let name = "Background";
-    let guid1 = SectionListBuilder::guid_for_name(name);
-    let guid2 = SectionListBuilder::guid_for_name(name);
-
-    assert_eq!(
-        guid1, guid2,
-        "BC-4.01.003 invariant 3: the same section name must produce the same GUID \
-         across two calls to guid_for_name; got {guid1:?} != {guid2:?}"
-    );
-
-    // Different names must produce different GUIDs.
-    let guid_other = SectionListBuilder::guid_for_name("Analysis");
-    assert_ne!(
-        guid1, guid_other,
-        "BC-4.01.003 invariant 3: different section names must produce different GUIDs; \
-         both produced {guid1:?}"
-    );
-
-    // GUID must look like a UUID (8-4-4-4-12 hex with braces or standard form).
-    // We accept either `{XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX}` or the bare
-    // `XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX` form.
-    let bare = guid1.trim_matches('{').trim_matches('}');
-    let parts: Vec<&str> = bare.split('-').collect();
-    assert_eq!(
-        parts.len(), 5,
-        "BC-4.01.003 invariant 3: GUID must be formatted as UUID (8-4-4-4-12 hex groups); \
-         got: {guid1:?}"
-    );
-    assert!(
-        parts.iter().all(|p| p.chars().all(|c| c.is_ascii_hexdigit())),
-        "BC-4.01.003 invariant 3: all GUID parts must be hex digits; got: {guid1:?}"
-    );
 }

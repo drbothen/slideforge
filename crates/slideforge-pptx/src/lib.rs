@@ -52,7 +52,6 @@ pub mod notes_master;
 pub mod notes_slide;
 pub mod presentation;
 pub mod rels;
-pub mod sections;
 pub mod slide_ids;
 pub mod slide_serializer;
 pub mod zip_assembler;

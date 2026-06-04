@@ -40,9 +40,7 @@ impl NotesMasterSerializer {
     /// # Stub
     ///
     /// This function is unimplemented (STORY-040 Red Gate).
-    pub fn build_notes_master(
-        _brand_notes_master_bytes: &[u8],
-    ) -> Result<Vec<u8>, PptxError> {
+    pub fn build_notes_master(_brand_notes_master_bytes: &[u8]) -> Result<Vec<u8>, PptxError> {
         todo!(
             "STORY-040 stub: NotesMasterSerializer::build_notes_master is not yet implemented. \
              Implement this to produce a minimal valid notesMaster1.xml with sldImg and body \
@@ -62,9 +60,7 @@ impl NotesMasterSerializer {
     /// # Stub
     ///
     /// This function is unimplemented (STORY-040 Red Gate).
-    pub fn build_handout_master(
-        _brand_handout_master_bytes: &[u8],
-    ) -> Result<Vec<u8>, PptxError> {
+    pub fn build_handout_master(_brand_handout_master_bytes: &[u8]) -> Result<Vec<u8>, PptxError> {
         todo!(
             "STORY-040 stub: NotesMasterSerializer::build_handout_master is not yet implemented. \
              Implement this to produce a minimal valid handoutMaster1.xml \
