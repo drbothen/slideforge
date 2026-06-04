@@ -480,17 +480,17 @@ fn test_bc_4_03_001_figure_alt_text_in_structure_tree() {
 ///
 /// ## Resolution in STORY-045
 ///
-/// STORY-045 investigation found that `FrameContent::Diagram` IS emitted by the v1
-/// layout engine (regions.rs:280) as `empty_placeholder()` with NO alt text in the
-/// geometric IR. The correct resolution per BC-4.03.001 invariant-3:
+/// STORY-039 added `alt: AltText` to `FrameContent::Diagram` and threaded it
+/// through `layout::run`. The correct tagging resolution per BC-4.03.001 invariant-3:
 ///
 /// - Treating it as a /Figure with no alt → UA-1 violation (invariant-3).
 /// - Using `"diagram"` placeholder → alt-lie (rejected by AC-004).
-/// - Treating it as an Artifact → correct for v1 (empty SVG has no user content).
+/// - Treating it as an Artifact when `AltText::Decorative` → correct for empty SVG
+///   placeholder frames that carry no semantic user content.
 ///
-/// `tag_slide` now pushes frame-level Diagram frames to `decorative_frame_indices`,
-/// which causes the exporter to wrap them in `ContentTag::Artifact(ArtifactType::Other)`.
-/// A future IR-threading story will add `alt: Option<Arc<str>>` to `FrameContent::Diagram`.
+/// `tag_slide` branches on `AltText`: `Decorative` pushes to `decorative_frame_indices`
+/// (Artifact), `Provided(s)` produces a tagged Figure with the real /Alt string.
+/// This test uses `AltText::Decorative` to exercise the Artifact path.
 ///
 /// This test verifies:
 /// 1. NO `/Figure` for a frame-level Diagram (it's an Artifact in v1).
@@ -524,8 +524,10 @@ fn test_bc_4_03_001_diagram_frame_alt_text_from_spec() {
                     height: Emu(5_143_500),
                 },
                 // STORY-039 IR reshape: Diagram is now struct with svg + alt fields.
-                // Using AltText::Decorative because the alt-threading from DiagramSpec
-                // through layout::run is NOT YET IMPLEMENTED (implementer's job).
+                // Using AltText::Decorative to exercise the Artifact path: an empty
+                // placeholder SVG with no semantic user content is correctly treated
+                // as decorative (not a Figure). Alt-threading from DiagramSpec through
+                // layout::run was implemented in STORY-039.
                 content: FrameContent::Diagram {
                     svg: normalized_svg,
                     alt: slideforge_types::AltText::Decorative,
@@ -577,12 +579,11 @@ fn test_bc_4_03_001_diagram_frame_alt_text_from_spec() {
 ///
 /// ## Red Gate trigger — THIS TEST WILL FAIL UNTIL STORY-045 IS IMPLEMENTED
 ///
-/// Same issue as the Diagram case. The current tag_engine.rs uses:
-/// ```rust
-/// part_group.push(self.tag_figure(Some("chart"))?);
-/// ```
-/// This must be replaced with real alt text from `ChartSpec.alt` threaded
-/// through the IR.
+/// STORY-039 replaced the old hardcoded-placeholder path with `AltText`-aware
+/// branching in `tag_engine.rs`. The test exercises `AltText::Decorative` (Artifact
+/// path) because a bare chart frame with no user-supplied SVG content is correctly
+/// treated as decorative. STORY-045 will wire `/Lang`, `Validator::UA1`, and
+/// the full veraPDF gate.
 ///
 /// The test verifies the raw PDF bytes do NOT contain `(chart)` as a /Alt value,
 /// and that frame-level Chart is treated as an Artifact in v1 (no alt in geometric IR).
@@ -606,8 +607,10 @@ fn test_bc_4_03_001_chart_frame_alt_text_from_spec() {
                     height: Emu(5_143_500),
                 },
                 // STORY-039 IR reshape: Chart is now struct with alt field.
-                // Using AltText::Decorative because the alt-threading from ChartSpec
-                // through layout::run is NOT YET IMPLEMENTED (implementer's job).
+                // Using AltText::Decorative to exercise the Artifact path: an empty
+                // placeholder chart frame with no semantic user content is correctly
+                // treated as decorative. Alt-threading from ChartSpec through
+                // layout::run was implemented in STORY-039.
                 content: FrameContent::Chart {
                     alt: slideforge_types::AltText::Decorative,
                 },
@@ -1587,7 +1590,9 @@ fn test_bc_4_03_001_invariant_every_figure_has_non_empty_alt() {
                 height: Emu(5_143_500),
             },
             // STORY-039 IR reshape: Diagram is now struct with svg + alt fields.
-            // AltText::Decorative = stub placeholder (alt-threading not yet implemented).
+            // Using AltText::Decorative to exercise the Artifact path for this
+            // empty-placeholder SVG. Alt-threading from DiagramSpec through
+            // layout::run was implemented in STORY-039.
             content: FrameContent::Diagram {
                 svg: empty_svg,
                 alt: slideforge_types::AltText::Decorative,

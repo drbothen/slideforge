@@ -132,8 +132,8 @@ impl SlideTagEngine {
     ///   P           ← for Shape, ErrorSlidePlaceholder, and unknown frames
     /// ```
     ///
-    /// Decorative frames (frames containing `FrameContent::Image { alt }`
-    /// where alt is empty, or `FrameContent::Shape` with `AltText::Decorative`)
+    /// Decorative frames (frames containing `FrameContent::Image { alt: AltText::Decorative }`
+    /// or `FrameContent::Shape` with `AltText::Decorative`)
     /// are NOT added to the Part group.
     ///
     /// Empty frames (`FrameContent::Empty`) are skipped.

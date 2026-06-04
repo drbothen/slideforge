@@ -495,7 +495,7 @@ fn thread_media_alt_into_frames(
                     tracing::warn!(
                         source_slide_index,
                         slide_type,
-                        "EC-006: ImageSpec.alt is None — upstream validator \
+                        "ImageSpec.alt is None — upstream validator \
                          should have rejected this document; mapping to \
                          AltText::Decorative at layout time"
                     );
