@@ -1,0 +1,35 @@
+STORY-039 — AC-003 Evidence: 300-char alt text not truncated
+BC-4.01.004 invariant 1
+
+Tests:
+  test_BC_4_01_004_ac003_300_char_alt_not_truncated
+  test_BC_4_01_004_ec005_300_char_alt_exact_length
+Path: crates/slideforge-pptx/src/tests/a11y_tests.rs
+
+FIXTURE
+  Frame: FrameContent::Image { alt: AltText::Provided("A" * 300) }
+  Alt text length: 300 chars (all ASCII 'A')
+  Deck lang: "en-US"
+
+PIPELINE
+  PptxExporter::export → ZIP → ppt/slides/slide1.xml
+
+EXTRACTED XML (cNvPr, first 80 chars of the element)
+  <p:cNvPr id="1" name="Image 0" descr="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA...
+
+MEASURED RESULT
+  Input alt length:   300
+  Extracted descr length: 300
+  Truncated: NO
+
+ASSERTIONS
+  descr_values.iter().any(|d| d == &alt_300)   → true (full 300-char match)
+  descr_values.iter().filter(|d| d.len() == 300).count() == 1  → true
+
+EC-005 additional assertion (exact-length test with varied char sequence):
+  slide1.xml well-formed after embedding 300-char alt  → YES
+  descr length == 300 exactly                           → PASS
+
+TEST RESULTS
+  PASS [   0.034s] slideforge-pptx tests::a11y_tests::test_BC_4_01_004_ac003_300_char_alt_not_truncated
+  PASS [   0.042s] slideforge-pptx tests::a11y_tests::test_BC_4_01_004_ec005_300_char_alt_exact_length

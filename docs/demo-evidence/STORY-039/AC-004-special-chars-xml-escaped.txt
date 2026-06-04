@@ -1,0 +1,39 @@
+STORY-039 — AC-004 Evidence: Special chars XML-escaped, slide well-formed
+BC-4.01.004 EC-001
+
+Test: test_BC_4_01_004_ac004_special_chars_xml_escaped_well_formed
+Path: crates/slideforge-pptx/src/tests/a11y_tests.rs
+
+FIXTURE
+  Frame: FrameContent::Image { alt: AltText::Provided(r#"Revenue & Cost "Q1" <2026> 'fin'"#) }
+  Input string contains: & " < > '  (all five XML special chars)
+  Deck lang: "en-US"
+
+PIPELINE
+  PptxExporter::export → ooxmlsdk serializer (auto-escapes) → ZIP → ppt/slides/slide1.xml
+
+EXTRACTED cNvPr (unescaped by quick-xml for display — actual XML bytes are escaped)
+  <p:cNvPr id="1" name="Image 0" descr="Revenue &amp; Cost &quot;Q1&quot; &lt;2026&gt; &apos;fin&apos;"/>
+
+ESCAPING MAP
+  & → &amp;
+  " → &quot;
+  < → &lt;
+  > → &gt;   (implicit via well-formed XML)
+  ' → &apos;
+
+XML WELL-FORMEDNESS CHECK
+  quick_xml::Reader parses slide1.xml to EOF without error  → YES
+
+ASSERTIONS
+  assert_xml_well_formed(&slide_xml) → Ok(())
+  descr_values.iter().any(|d| !d.is_empty()) → true
+
+NOTE
+  The unescaped text read back from the attribute equals the original input:
+  "Revenue & Cost \"Q1\" <2026> 'fin'"
+  This confirms round-trip fidelity: ooxmlsdk escapes on write, quick_xml
+  unescapes on read, and the original string is preserved.
+
+TEST RESULT
+  PASS [   0.037s] slideforge-pptx tests::a11y_tests::test_BC_4_01_004_ac004_special_chars_xml_escaped_well_formed

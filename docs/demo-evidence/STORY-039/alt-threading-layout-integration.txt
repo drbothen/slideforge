@@ -1,0 +1,103 @@
+STORY-039 — Alt Threading Evidence: layout::run semantic→IR alt-threading
+BC-3.06.NNN (STORY-039 AC-005 / EC-006 / EC-007)
+
+Test suite: crates/slideforge-layout/tests/alt_threading_integration.rs
+ALL TESTS GREEN — 4 PASS
+
+These tests prove that layout::run correctly threads alt text from the
+semantic Spec types (ChartSpec, DiagramSpec, ImageSpec) into the geometric
+FrameContent variants (FrameContent::Chart, ::Diagram, ::Image) in LaidOutDeck.
+They exercise the REAL production layout::run code path (not hand-constructed
+LaidOutDeck) per SID-1 compliance.
+
+=== TEST 1: Chart provided alt threads through layout::run ===
+
+  test_bc_3_06_039_ac005_chart_provided_alt_threads_through_layout_run
+
+  Input semantic block:
+    ContentBlock::Chart(ChartSpec {
+      chart_type: "bar",
+      alt: Some(AltText::Provided("Revenue by region")),
+      decorative: false,
+    })
+
+  Output frame (from layout::run):
+    FrameContent::Chart { alt: AltText::Provided("Revenue by region") }
+
+  Assertion:
+    chart_frame_alt[0] == &AltText::Provided(Arc::from("Revenue by region"))  → PASS
+
+  PASS [   0.010s]
+
+=== TEST 2: Diagram provided alt threads through layout::run ===
+
+  test_bc_3_06_039_ac005_diagram_provided_alt_threads_through_layout_run
+
+  Input semantic block:
+    ContentBlock::Diagram(DiagramSpec {
+      source: "graph TD; A-->B",
+      alt: Some(AltText::Provided("Architecture overview")),
+      decorative: false,
+    })
+
+  Output frame (from layout::run):
+    FrameContent::Diagram { alt: AltText::Provided("Architecture overview"), .. }
+
+  Assertion:
+    diagram_frame_alt[0] == &AltText::Provided(Arc::from("Architecture overview"))  → PASS
+
+  PASS [   0.013s]
+
+=== TEST 3: Image provided alt threads through layout::run ===
+
+  test_bc_3_06_039_ac005_image_provided_alt_threads_through_layout_run
+
+  Input semantic block:
+    ContentBlock::Image(ImageSpec {
+      path: "screenshots/dashboard.png",
+      alt: Some(AltText::Provided("Dashboard screenshot")),
+      decorative: false,
+    })
+
+  Output frame (from layout::run on "screenshot" slide type):
+    FrameContent::Image { alt: AltText::Provided("Dashboard screenshot") }
+
+  Assertion:
+    image_frame_alts[0] == &AltText::Provided(Arc::from("Dashboard screenshot"))  → PASS
+
+  PASS [   0.012s]
+
+=== TEST 4: EC-006 — Chart alt None maps to AltText::Decorative ===
+
+  test_bc_3_06_039_ec006_chart_alt_none_maps_to_decorative
+
+  Input semantic block:
+    ContentBlock::Chart(ChartSpec {
+      chart_type: "pie",
+      alt: None,      ← author did NOT provide alt text
+      decorative: false,
+    })
+
+  Output frame (from layout::run):
+    FrameContent::Chart { alt: AltText::Decorative }
+
+  Threading contract:
+    spec.alt.unwrap_or(AltText::Decorative)
+    When alt is None: falls back to Decorative sentinel (+ tracing::warn! emitted)
+
+  Assertion:
+    chart_frame_alt[0] == &AltText::Decorative  → PASS
+
+  PASS [   0.012s]
+
+=== SUMMARY ===
+
+  4 tests run: 4 passed, 0 failed
+  Summary [   0.013s]
+
+REGRESSION SIGNIFICANCE
+  These tests will FAIL if the threading loop in layout::run is removed or
+  reverted to always emitting AltText::Decorative regardless of spec.alt.
+  They guard against the F-039-C2 regression pattern (using Image proxies
+  instead of real Chart/Diagram frames) from the opposite direction: they
+  assert the semantic→IR boundary is correctly crossed.

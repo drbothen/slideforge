@@ -1,0 +1,16 @@
+STORY-039 — Layout Alt-Threading Integration Test Suite Run Log
+Command: cargo nextest run -p slideforge-layout -E 'test(test_bc_3_06_039)' --no-fail-fast
+Crate: slideforge-layout
+Date: 2026-06-04
+
+────────────
+ Nextest run ID a99694dd-80e1-4235-a493-c6a62b2c72f8 with nextest profile: default
+    Starting 4 tests across 3 binaries (348 tests skipped)
+        PASS [   0.012s] (1/4) slideforge-layout::alt_threading_integration test_bc_3_06_039_ec006_chart_alt_none_maps_to_decorative
+        PASS [   0.013s] (2/4) slideforge-layout::alt_threading_integration test_bc_3_06_039_ac005_chart_provided_alt_threads_through_layout_run
+        PASS [   0.013s] (3/4) slideforge-layout::alt_threading_integration test_bc_3_06_039_ac005_image_provided_alt_threads_through_layout_run
+        PASS [   0.012s] (4/4) slideforge-layout::alt_threading_integration test_bc_3_06_039_ac005_diagram_provided_alt_threads_through_layout_run
+────────────
+     Summary [   0.013s] 4 tests run: 4 passed, 348 skipped
+
+RESULT: ALL 4 LAYOUT ALT-THREADING TESTS PASS

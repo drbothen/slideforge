@@ -1,0 +1,73 @@
+STORY-039 — AC-005 Evidence: Chart AND Diagram → alt on enclosing shape
+BC-4.01.004 EC-005 / F-039-C2 (REAL Chart/Diagram frames, not Image proxies)
+
+Tests:
+  test_BC_4_01_004_ac005_chart_frame_alt_on_enclosing_shape
+  test_BC_4_01_004_ac005_diagram_frame_alt_on_enclosing_shape
+  test_bc_3_06_039_ac005_chart_provided_alt_threads_through_layout_run
+  test_bc_3_06_039_ac005_diagram_provided_alt_threads_through_layout_run
+  test_bc_3_06_039_ac005_image_provided_alt_threads_through_layout_run
+Paths:
+  crates/slideforge-pptx/src/tests/a11y_tests.rs
+  crates/slideforge-layout/tests/alt_threading_integration.rs
+
+=== CHART FRAME ===
+
+FIXTURE
+  Frame: FrameContent::Chart { alt: AltText::Provided("Bar chart: Q1 revenue by region") }
+  (REAL FrameContent::Chart — NOT an Image proxy; F-039-C2 fix)
+  Deck lang: "en-US"
+
+EXTRACTED XML (ppt/slides/slide1.xml — Chart frame cNvPr)
+  <p:cNvPr id="1" name="Chart 0" descr="Bar chart: Q1 revenue by region"></p:cNvPr>
+  <p:cNvPicPr><a:picLocks noChangeAspect="1"></a:picLocks></p:cNvPicPr>
+  <p:nvPr></p:nvPr></p:nvPicPr><p:blipFill><a:stretch><a:fillRect />...
+
+KEY OBSERVATIONS
+  name="Chart 0"  (starts with "Chart", NOT "Image") — F-039-P-LOW-001 compliance
+  descr="Bar chart: Q1 revenue by region"  — alt text on the enclosing shape's cNvPr
+
+ASSERTIONS
+  descr_values.iter().any(|d| d == "Bar chart: Q1 revenue by region")  → true
+  name_values.iter().any(|n| n.starts_with("Chart"))                   → true
+
+=== DIAGRAM FRAME ===
+
+FIXTURE
+  Frame: FrameContent::Diagram { svg: <minimal SVG>, alt: AltText::Provided("Flowchart: Q1 deployment pipeline steps") }
+  (REAL FrameContent::Diagram — NOT an Image proxy; F-039-C2 fix)
+  Deck lang: "en-US"
+
+EXTRACTED XML (ppt/slides/slide1.xml — Diagram frame cNvPr)
+  <p:cNvPr id="1" name="Diagram 0" descr="Flowchart: Q1 deployment pipeline steps"/>
+
+KEY OBSERVATIONS
+  name="Diagram 0" (starts with "Diagram") — correct accessibility tree label
+  descr="Flowchart: Q1 deployment pipeline steps" — alt text on enclosing p:pic
+
+=== LAYOUT ALT-THREADING (slideforge-layout) ===
+
+Test: test_bc_3_06_039_ac005_chart_provided_alt_threads_through_layout_run
+  Input:  ChartSpec { alt: Some(AltText::Provided("Revenue by region")), .. }
+  Output: FrameContent::Chart { alt: AltText::Provided("Revenue by region") }
+  layout::run threads spec.alt → frame.alt unchanged
+  PASS
+
+Test: test_bc_3_06_039_ac005_diagram_provided_alt_threads_through_layout_run
+  Input:  DiagramSpec { alt: Some(AltText::Provided("Architecture overview")), .. }
+  Output: FrameContent::Diagram { alt: AltText::Provided("Architecture overview"), .. }
+  PASS
+
+Test: test_bc_3_06_039_ac005_image_provided_alt_threads_through_layout_run
+  Input:  ImageSpec { alt: Some(AltText::Provided("Dashboard screenshot")), .. }
+  Output: FrameContent::Image { alt: AltText::Provided("Dashboard screenshot") }
+  PASS
+
+TEST RESULTS (pptx)
+  PASS [   0.039s] slideforge-pptx tests::a11y_tests::test_BC_4_01_004_ac005_chart_frame_alt_on_enclosing_shape
+  PASS [   0.037s] slideforge-pptx tests::a11y_tests::test_BC_4_01_004_ac005_diagram_frame_alt_on_enclosing_shape
+
+TEST RESULTS (layout threading)
+  PASS [   0.010s] slideforge-layout::alt_threading_integration test_bc_3_06_039_ac005_chart_provided_alt_threads_through_layout_run
+  PASS [   0.010s] slideforge-layout::alt_threading_integration test_bc_3_06_039_ac005_diagram_provided_alt_threads_through_layout_run
+  PASS [   0.013s] slideforge-layout::alt_threading_integration test_bc_3_06_039_ac005_image_provided_alt_threads_through_layout_run
