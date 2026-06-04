@@ -31,8 +31,7 @@ const NOTES_MASTER_XML: &[u8] = br#"<?xml version="1.0" encoding="UTF-8" standal
   <p:cSld>
     <p:spTree>
       <p:grpSpPr>
-        <a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/></a:xfrm>
-        <a:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></a:grpSpPr>
+        <a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm>
       </p:grpSpPr>
       <p:sp>
         <p:nvSpPr>
@@ -80,8 +79,7 @@ const HANDOUT_MASTER_XML: &[u8] = br#"<?xml version="1.0" encoding="UTF-8" stand
   <p:cSld>
     <p:spTree>
       <p:grpSpPr>
-        <a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/></a:xfrm>
-        <a:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></a:grpSpPr>
+        <a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm>
       </p:grpSpPr>
     </p:spTree>
   </p:cSld>

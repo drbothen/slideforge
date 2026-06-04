@@ -139,17 +139,13 @@ impl NotesSlideSerializer {
         xml.push_str(">\n");
         xml.push_str("  <p:cSld>\n");
         xml.push_str("    <p:spTree>\n");
-        // grpSpPr with identity transform (required by schema)
+        // Schema-valid grpSpPr: CT_GroupShapeProperties allows only <a:xfrm> (and
+        // a few others) — there is NO child element named <a:grpSpPr> in that type.
+        // Emit a single <a:xfrm> with all four required children (off/ext/chOff/chExt).
+        // This matches the canonical form in slideforge-brand::write_grpsppr.
         xml.push_str("      <p:grpSpPr>\n");
-        xml.push_str(
-            "        <a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"0\" cy=\"0\"/></a:xfrm>\n",
-        );
-        xml.push_str(
-            "        <a:grpSpPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"0\" cy=\"0\"/>",
-        );
-        xml.push_str(
-            "<a:chOff x=\"0\" y=\"0\"/><a:chExt cx=\"0\" cy=\"0\"/></a:xfrm></a:grpSpPr>\n",
-        );
+        xml.push_str("        <a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"0\" cy=\"0\"/>");
+        xml.push_str("<a:chOff x=\"0\" y=\"0\"/><a:chExt cx=\"0\" cy=\"0\"/></a:xfrm>\n");
         xml.push_str("      </p:grpSpPr>\n");
 
         // Slide image placeholder — ph is self-closing inside nvPr (no txBody).

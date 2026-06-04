@@ -690,6 +690,66 @@ fn test_f040_p1_002_notes_master_xml_is_structurally_valid() {
          got (first 500 chars):\n{}",
         &notes_master_xml[..notes_master_xml.len().min(500)]
     );
+
+    // F-040-A1 (HIGH) assertion: CT_GroupShapeProperties has no child named
+    // <a:grpSpPr>.  Any occurrence of that tag would be schema-invalid and
+    // rejected by PowerPoint / the OOXML linter.
+    assert!(
+        !notes_master_xml.contains("<a:grpSpPr"),
+        "F-040-A1: notesMaster1.xml must NOT contain <a:grpSpPr> (schema-invalid: \
+         CT_GroupShapeProperties has no such child element); got:\n{notes_master_xml}"
+    );
+
+    // Also verify handoutMaster1.xml for the same schema-validity constraint.
+    let handout_master_xml = read_zip_member(&pptx, "ppt/handoutMasters/handoutMaster1.xml");
+    assert!(
+        !handout_master_xml.contains("<a:grpSpPr"),
+        "F-040-A1: handoutMaster1.xml must NOT contain <a:grpSpPr> (schema-invalid: \
+         CT_GroupShapeProperties has no such child element); got:\n{handout_master_xml}"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// F-040-A1 (HIGH): Schema-valid grpSpPr in notesSlide XML
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// F-040-A1 (HIGH): The `<p:grpSpPr>` in emitted `notesSlide{N}.xml` must be
+/// schema-valid: `CT_GroupShapeProperties` permits `<a:xfrm>` as a child but
+/// has NO child element named `<a:grpSpPr>`.  The previous hand-built XML
+/// emitted a nested `<a:grpSpPr>` inside `<p:grpSpPr>`, which is schema-invalid.
+///
+/// Asserts (parsing real exported ZIP/XML):
+/// (a) `<a:grpSpPr` does NOT appear in notesSlide{N}.xml
+/// (b) `<p:grpSpPr>` is present (spTree requires it)
+/// (c) `<a:xfrm>` appears inside `<p:grpSpPr>` (confirmed by well-formed XML structure)
+#[test]
+fn test_f040_a1_notes_slide_grpsppr_is_schema_valid() {
+    let deck = make_deck_with_notes(&[Some("schema check notes")]);
+    let laid_out = make_laid_out_deck_with_notes(&[Some("schema check notes")]);
+    let pptx = export_pptx(&deck, &laid_out);
+
+    let notes_xml = read_zip_member(&pptx, "ppt/notesSlides/notesSlide1.xml");
+
+    // (a) NO nested <a:grpSpPr> — this tag is schema-invalid inside p:grpSpPr.
+    assert!(
+        !notes_xml.contains("<a:grpSpPr"),
+        "F-040-A1: notesSlide1.xml must NOT contain <a:grpSpPr> (schema-invalid: \
+         CT_GroupShapeProperties has no such child element); got:\n{notes_xml}"
+    );
+
+    // (b) <p:grpSpPr> must be present (spTree requires it as first child).
+    assert!(
+        notes_xml.contains("<p:grpSpPr>"),
+        "F-040-A1: notesSlide1.xml must contain <p:grpSpPr> as spTree's first child; \
+         got:\n{notes_xml}"
+    );
+
+    // (c) <a:xfrm> must appear (schema-valid identity transform).
+    assert!(
+        notes_xml.contains("<a:xfrm>"),
+        "F-040-A1: notesSlide1.xml <p:grpSpPr> must contain <a:xfrm>; \
+         got:\n{notes_xml}"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
