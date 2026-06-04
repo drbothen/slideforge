@@ -37,6 +37,7 @@ use slideforge_pptx::PptxExporter;
 
 // ─── Fixture builders (mirrors notes_tests.rs) ────────────────────────────────
 
+/// Build a minimal `Brand` fixture for evidence generation.
 fn make_brand() -> Brand {
     Brand {
         name: Arc::from("evidence-brand"),
@@ -56,6 +57,7 @@ fn make_brand() -> Brand {
     }
 }
 
+/// Build a minimal `DeckMetadata` fixture for evidence generation.
 fn make_metadata() -> DeckMetadata {
     DeckMetadata {
         title: Some(Arc::from("Notes Evidence Deck")),
@@ -66,6 +68,7 @@ fn make_metadata() -> DeckMetadata {
     }
 }
 
+/// Return a standard title-placeholder bounding box for evidence slides.
 fn title_bbox() -> BoundingBox {
     BoundingBox {
         x: Emu(457_200),
@@ -75,6 +78,7 @@ fn title_bbox() -> BoundingBox {
     }
 }
 
+/// Build a single `LaidOutSlide` with an optional speaker-notes string.
 fn make_laid_out_slide(index: usize, notes_text: Option<&str>) -> LaidOutSlide {
     let register_content: Vec<RegisteredContent> = notes_text
         .map(|t| vec![RegisteredContent::plain(Register::Notes, Arc::from(t))])
@@ -94,6 +98,7 @@ fn make_laid_out_slide(index: usize, notes_text: Option<&str>) -> LaidOutSlide {
     }
 }
 
+/// Build a `Deck` whose slides carry the given per-slide notes strings.
 fn make_deck_with_notes(notes_per_slide: &[Option<&str>]) -> Deck {
     Deck {
         slides: notes_per_slide
@@ -118,6 +123,7 @@ fn make_deck_with_notes(notes_per_slide: &[Option<&str>]) -> Deck {
     }
 }
 
+/// Build a `LaidOutDeck` whose slides carry the given per-slide notes strings.
 fn make_laid_out_deck(notes_per_slide: &[Option<&str>]) -> LaidOutDeck {
     let slides: Vec<LaidOutSlide> = notes_per_slide
         .iter()
@@ -132,6 +138,7 @@ fn make_laid_out_deck(notes_per_slide: &[Option<&str>]) -> LaidOutDeck {
     }
 }
 
+/// Export the given `Deck` + `LaidOutDeck` through `PptxExporter` and return raw PPTX bytes.
 fn export_pptx(deck: &Deck, laid_out: &LaidOutDeck) -> Vec<u8> {
     let brand = make_brand();
     let opts = ExportOptions::default();
@@ -142,6 +149,7 @@ fn export_pptx(deck: &Deck, laid_out: &LaidOutDeck) -> Vec<u8> {
 
 // ─── ZIP helpers ──────────────────────────────────────────────────────────────
 
+/// Return all ZIP entry names found in the given PPTX byte slice.
 fn list_zip_entries(pptx_bytes: &[u8]) -> Vec<String> {
     let cursor = std::io::Cursor::new(pptx_bytes);
     let mut archive = ZipArchive::new(cursor).expect("valid ZIP");
@@ -150,6 +158,7 @@ fn list_zip_entries(pptx_bytes: &[u8]) -> Vec<String> {
         .collect()
 }
 
+/// Read a ZIP entry by name, returning `None` if the entry is absent.
 fn read_zip_member_opt(pptx_bytes: &[u8], member_name: &str) -> Option<String> {
     let cursor = std::io::Cursor::new(pptx_bytes);
     let mut archive = ZipArchive::new(cursor).expect("valid ZIP");
@@ -168,6 +177,7 @@ fn read_zip_member_opt(pptx_bytes: &[u8], member_name: &str) -> Option<String> {
     None
 }
 
+/// Read a ZIP entry by name, panicking if the entry is absent.
 fn read_zip_member(pptx_bytes: &[u8], member_name: &str) -> String {
     read_zip_member_opt(pptx_bytes, member_name)
         .unwrap_or_else(|| panic!("ZIP member {member_name:?} not found"))
@@ -213,6 +223,7 @@ fn xml_snippet(xml: &str, keyword: &str, context_chars: usize) -> String {
     }
 }
 
+/// Append a boxed section header to `buf` for evidence report formatting.
 fn section_header(buf: &mut String, title: &str) {
     let line = "=".repeat(title.len() + 4);
     let _ = writeln!(buf, "\n{line}");
@@ -222,6 +233,7 @@ fn section_header(buf: &mut String, title: &str) {
 
 // ─── Per-AC evidence functions ────────────────────────────────────────────────
 
+/// Write AC-001 evidence: notesSlide ZIP entry count matches slides-with-notes count.
 fn evidence_ac001(out_dir: &std::path::Path) {
     println!("[AC-001] Exporting 3-slide deck (slides 1+3 have notes, slide 2 none)...");
     let deck = make_deck_with_notes(&[
@@ -276,6 +288,7 @@ fn evidence_ac001(out_dir: &std::path::Path) {
     println!("  -> wrote {}", path.display());
 }
 
+/// Write EC-001 evidence: no notesSlide ZIP entry is produced when the deck has no notes.
 fn evidence_ec001(out_dir: &std::path::Path) {
     println!("[EC-001] Exporting 1-slide deck with no notes...");
     let deck = make_deck_with_notes(&[None]);
@@ -323,6 +336,7 @@ fn evidence_ec001(out_dir: &std::path::Path) {
     println!("  -> wrote {}", path.display());
 }
 
+/// Write AC-002 evidence: notes text appears inside the body placeholder txBody.
 fn evidence_ac002(out_dir: &std::path::Path) {
     println!("[AC-002] Exporting deck with specific notes text, extracting body placeholder...");
     let notes_text = "Click here to rehearse your speaking points carefully.";
@@ -380,6 +394,7 @@ fn evidence_ac002(out_dir: &std::path::Path) {
     );
 }
 
+/// Write AC-003 evidence: notes sentinel string is absent from all slide body XML files.
 fn evidence_ac003(out_dir: &std::path::Path) {
     println!("[AC-003] BleedChecker evidence -- sentinel absent from slide bodies...");
     let notes_sentinel = "NOTES_BLEED_SENTINEL_X7Q2Z9";
@@ -454,6 +469,7 @@ fn evidence_ac003(out_dir: &std::path::Path) {
     println!("  -> wrote {}", path.display());
 }
 
+/// Write AC-004 evidence: `notesMaster1.xml` is always present and structurally valid.
 fn evidence_ac004(out_dir: &std::path::Path) {
     println!("[AC-004] Extracting notesMaster1.xml from no-notes deck...");
     let deck = make_deck_with_notes(&[None]);
@@ -525,6 +541,7 @@ fn evidence_ac004(out_dir: &std::path::Path) {
     );
 }
 
+/// Write AC-005 evidence: `handoutMaster1.xml` is always present in the ZIP.
 fn evidence_ac005(out_dir: &std::path::Path) {
     println!("[AC-005] Confirming handoutMaster1.xml presence...");
     let deck = make_deck_with_notes(&[None]);
@@ -562,6 +579,7 @@ fn evidence_ac005(out_dir: &std::path::Path) {
     println!("  -> wrote {}", path.display());
 }
 
+/// Write RELS evidence: slide-to-notesSlide relationship in `_rels` files.
 fn evidence_rels(out_dir: &std::path::Path) {
     println!("[RELS] Extracting slide1 and slide2 .rels to show notesSlide relationship...");
     let deck = make_deck_with_notes(&[Some("Speaker notes here"), None]);
@@ -621,6 +639,7 @@ fn evidence_rels(out_dir: &std::path::Path) {
     println!("  -> wrote {}", path.display());
 }
 
+/// Write RICH evidence: bold and italic `InlineNode` trees produce correct `<a:rPr>` attributes.
 fn evidence_rich(out_dir: &std::path::Path) {
     println!("[RICH] Exporting deck with bold+italic notes, extracting rPr...");
     let bold_node = InlineNode::Bold(vec![InlineNode::Plain(Arc::from("bold content"))]);
@@ -713,6 +732,7 @@ fn evidence_rich(out_dir: &std::path::Path) {
     println!("  -> wrote {}", path.display());
 }
 
+/// Write SAFEURL evidence: `javascript:` links degrade to plain text with no External rel.
 fn evidence_safeurl(out_dir: &std::path::Path) {
     println!(
         "[SAFEURL] Exporting deck with javascript: link, confirming plain text degradation..."
@@ -818,6 +838,7 @@ fn evidence_safeurl(out_dir: &std::path::Path) {
     println!("  -> wrote {}", path.display());
 }
 
+/// Write LINK evidence: safe `https:` links produce `<a:hlinkClick>` and an External rel.
 fn evidence_link(out_dir: &std::path::Path) {
     println!("[LINK] Exporting deck with https: link, confirming hlinkClick + External rel...");
     let target_url = "https://example.com/notes-link";
@@ -917,6 +938,7 @@ fn evidence_link(out_dir: &std::path::Path) {
     println!("  -> wrote {}", path.display());
 }
 
+/// Write SCHEMA evidence: notesSlide XML uses `<p:grpSpPr>` (not `<a:grpSpPr>`) — schema-valid.
 fn evidence_schema(out_dir: &std::path::Path) {
     println!("[SCHEMA] Verifying grpSpPr schema validity in notesSlide XML...");
     let deck = make_deck_with_notes(&[Some("schema check notes")]);

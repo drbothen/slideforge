@@ -1436,3 +1436,161 @@ fn test_f040_p3_001_nested_link_in_display_text_no_orphan_rel() {
          got rels:\n{rels_xml}"
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SEC-040-001 (LOW / CWE-116): Ampersand in URL query string is &amp;-escaped
+// in .rels XML — well-formed XML + lossless URL round-trip
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// SEC-040-001 (LOW / CWE-116): A safe `https:` URL containing an unencoded
+/// ampersand in the query string (`?q=rust&lang=en`) must appear in
+/// `ppt/notesSlides/_rels/notesSlide{N}.xml.rels` with the `&` properly
+/// XML-escaped as `&amp;` in the `Target` attribute.
+///
+/// ## Threat model (CWE-116)
+///
+/// An unescaped `&` in an XML attribute is a well-formedness violation.  If the
+/// `.rels` file is malformed, OOXML consumers (PowerPoint, LibreOffice) may
+/// silently truncate the URL at the `&`, losing the query-string tail, or refuse
+/// to open the file entirely.
+///
+/// ## Assertions
+///
+/// 1. `ppt/notesSlides/_rels/notesSlide1.xml.rels` is **well-formed XML**
+///    (quick-xml parses it without error).
+/// 2. The `Target` attribute **round-trips** to the original URL — the `&`
+///    that was XML-escaped as `&amp;` in the attribute is decoded back to `&`
+///    when quick-xml unescapes it.
+///
+/// ## Pass / fail semantics
+///
+/// - **PASS** (no production change needed): ooxmlsdk's typed serializer
+///   XML-escapes the attribute automatically. Both assertions hold.
+/// - **FAIL** (production fix required): the `.rels` contains a raw `&` in
+///   the Target attribute — the file is malformed XML. Fix: XML-escape the URL
+///   before storing it in `Relationship.target`, or percent-encode `&` to `%26`
+///   at the `add_external_hyperlink` call site.
+#[test]
+fn test_sec040_001_ampersand_in_url_query_string_is_xml_escaped_in_rels() {
+    // A safe https: URL whose query string contains an unencoded ampersand.
+    let target_url = "https://example.com/search?q=rust&lang=en";
+
+    let link_node = slideforge_types::InlineNode::Link {
+        text: vec![slideforge_types::InlineNode::Plain(Arc::from("search"))],
+        url: Arc::from(target_url),
+    };
+    let rc = slideforge_types::register::RegisteredContent {
+        register: Register::Notes,
+        content: vec![link_node],
+    };
+
+    let slide = LaidOutSlide {
+        source_index: 0,
+        slide_type_keyword: Arc::from("title"),
+        frames: vec![Frame {
+            bbox: title_bbox(),
+            content: FrameContent::Empty,
+            text_flow: None,
+        }],
+        speaker_notes: Some(Arc::from("search")),
+        register_tags: vec![],
+        register_content: vec![rc],
+    };
+
+    let deck = make_deck_with_notes(&[Some("search")]);
+    let laid_out = LaidOutDeck {
+        page_size: slideforge_layout::PageSize::default(),
+        slides: vec![slide],
+        sections: vec![],
+        warnings: vec![],
+    };
+    let pptx = export_pptx(&deck, &laid_out);
+
+    // Open the real ZIP and read the .rels file for this notesSlide.
+    let rels_xml = read_zip_member(&pptx, "ppt/notesSlides/_rels/notesSlide1.xml.rels");
+
+    // ── Assertion 1: well-formed XML ──────────────────────────────────────────
+    // If the `&` is unescaped in the Target attribute the quick-xml parser will
+    // return an error (malformed entity / bare ampersand).
+    let mut reader = Reader::from_str(&rels_xml);
+    reader.config_mut().trim_text(false);
+    loop {
+        match reader.read_event() {
+            Ok(Event::Eof) => break,
+            Ok(_) => {},
+            Err(e) => panic!(
+                "SEC-040-001: notesSlide1.xml.rels is NOT well-formed XML — \
+                 the '&' in the Target URL was not XML-escaped as '&amp;'. \
+                 This is CWE-116 (improper encoding). \
+                 quick-xml error: {e}\n\
+                 rels XML:\n{rels_xml}"
+            ),
+        }
+    }
+
+    // ── Assertion 2: URL round-trip via attribute decode ──────────────────────
+    // Parse the Relationships element and extract the Target attribute value of
+    // the External hyperlink relationship.  quick-xml unescapes `&amp;` → `&`
+    // during attribute decoding, so the round-tripped value must equal the
+    // original URL (including the `&`).
+    let mut reader2 = Reader::from_str(&rels_xml);
+    reader2.config_mut().trim_text(false);
+    let mut round_tripped_url: Option<String> = None;
+    loop {
+        match reader2.read_event() {
+            Ok(Event::Eof | Event::End(_)) => {
+                if round_tripped_url.is_some() {
+                    break;
+                }
+                if matches!(reader2.read_event(), Ok(Event::Eof)) {
+                    break;
+                }
+            },
+            Ok(Event::Empty(e) | Event::Start(e)) => {
+                let local = std::str::from_utf8(e.local_name().as_ref())
+                    .unwrap_or("")
+                    .to_owned();
+                if local == "Relationship" {
+                    let decoder = reader2.decoder();
+                    let mut is_external = false;
+                    let mut target_val = String::new();
+                    for attr in e.attributes().flatten() {
+                        let key = std::str::from_utf8(attr.key.local_name().as_ref())
+                            .unwrap_or("")
+                            .to_owned();
+                        let val = attr
+                            .decode_and_unescape_value(decoder)
+                            .unwrap_or_default()
+                            .into_owned();
+                        if key == "TargetMode" && val == "External" {
+                            is_external = true;
+                        }
+                        if key == "Target" {
+                            target_val = val;
+                        }
+                    }
+                    if is_external && !target_val.is_empty() {
+                        round_tripped_url = Some(target_val);
+                        break;
+                    }
+                }
+            },
+            Ok(_) => {},
+            Err(e) => panic!(
+                "SEC-040-001: XML parse error during attribute decode phase: {e}\n\
+                 rels XML:\n{rels_xml}"
+            ),
+        }
+    }
+
+    assert_eq!(
+        round_tripped_url.as_deref(),
+        Some(target_url),
+        "SEC-040-001: The External hyperlink Target round-trip failed. \
+         Expected URL: {target_url:?}\n\
+         Got (decoded): {round_tripped_url:?}\n\
+         Raw rels XML:\n{rels_xml}\n\
+         (CWE-116: if the '&' was not XML-escaped, quick-xml would either \
+         error during well-formedness check or decode a truncated URL here.)"
+    );
+}
