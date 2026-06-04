@@ -228,10 +228,9 @@ fn make_laid_out_deck_with_lang_only() -> LaidOutDeck {
 /// STORY-039: AC-005 requires REAL Chart/Diagram frames — NOT Image proxies (F-039-C2).
 /// The alt text is `AltText::Provided(...)` as threaded from `ChartSpec.alt`.
 ///
-/// Red Gate reason: `slide_serializer.rs` currently skips `Chart { .. }` frames
-/// (they fall into the `FrameContent::Chart { .. } | ... => { debug }` arm and
-/// produce no `<p:cNvPr descr=...>` output). The implementer must route Chart
-/// frames through `AltTextEmbedder` to emit `descr` on the enclosing `<p:grpSp>`.
+/// `slide_serializer.rs` routes `Chart { alt }` frames through `AltTextEmbedder`
+/// and emits `descr` on the enclosing `<p:grpSp>`. The accompanying test guards
+/// against regressions that would skip Chart frames or omit the `descr` attribute.
 fn make_laid_out_deck_with_chart_frame(alt: &str) -> LaidOutDeck {
     use slideforge_types::AltText;
     LaidOutDeck {
@@ -260,6 +259,7 @@ fn make_laid_out_deck_with_chart_frame(alt: &str) -> LaidOutDeck {
 /// Build a `LaidOutDeck` with one slide containing a REAL `FrameContent::Diagram` frame (AC-005).
 ///
 /// STORY-039: AC-005 requires REAL Diagram frames — NOT Image proxies (F-039-C2).
+/// The alt text is `AltText::Provided(...)` as threaded from `DiagramSpec.alt`.
 fn make_laid_out_deck_with_diagram_frame(alt: &str) -> LaidOutDeck {
     use slideforge_types::AltText;
     // Minimal valid SVG for the frame payload.
@@ -294,9 +294,9 @@ fn make_laid_out_deck_with_diagram_frame(alt: &str) -> LaidOutDeck {
 /// Build a `LaidOutDeck` with one slide containing a `FrameContent::Chart`
 /// where `ChartSpec.alt = None` was mapped to `AltText::Decorative` (EC-006).
 ///
-/// Red Gate reason: layout::run does NOT yet thread ChartSpec.alt. The test
-/// asserts that when `alt = AltText::Decorative`, the PPTX emits `descr=""`
-/// (not absent). This tests the Decorative-distinction code path in AltTextEmbedder.
+/// The test asserts that when `alt = AltText::Decorative`, the PPTX emits `descr=""`
+/// (not absent). This tests the Decorative-distinction code path in `AltTextEmbedder`
+/// and guards against regressions that would omit the `descr` attribute entirely.
 fn make_laid_out_deck_with_chart_none_alt() -> LaidOutDeck {
     use slideforge_types::AltText;
     LaidOutDeck {
@@ -656,15 +656,10 @@ fn test_BC_4_01_004_ac004_special_chars_xml_escaped_well_formed() {
 /// (not an Image proxy — F-039-C2 fix). The alt text is threaded from `ChartSpec.alt`
 /// via the IR.
 ///
-/// Red Gate: `build_shape_tree` in `slide_serializer.rs` currently skips
-/// `FrameContent::Chart { .. }` frames (falls through to the
-/// `Chart { .. } | Shape(_) | ... => { debug }` arm) and emits NO `<p:grpSp>` or
-/// `<p:pic>` shape at all. As a result, no `<p:cNvPr descr=...>` is emitted for
-/// chart frames. The test fails because `descr_values` will be empty.
-///
-/// The implementer must route `FrameContent::Chart { alt }` through
-/// `AltTextEmbedder` and emit an enclosing shape (p:grpSp or p:pic) with the
-/// correct `descr` attribute.
+/// `build_shape_tree` in `slide_serializer.rs` routes `FrameContent::Chart { alt }` through
+/// `AltTextEmbedder` and emits a `<p:grpSp>` or `<p:pic>` shape with the `descr` attribute
+/// set from the alt decision. This test guards against regressions that would cause Chart
+/// frames to be skipped or the `descr` attribute to be omitted.
 #[test]
 fn test_BC_4_01_004_ac005_chart_frame_alt_on_enclosing_shape() {
     let alt_text = "Bar chart: Q1 revenue by region";
@@ -676,15 +671,15 @@ fn test_BC_4_01_004_ac005_chart_frame_alt_on_enclosing_shape() {
     let slide_xml = zip_read_entry(&pptx_bytes, "ppt/slides/slide1.xml");
 
     // The cNvPr on the enclosing group shape (p:grpSp or p:pic) must carry the alt text.
-    // Red Gate failure: `slide_serializer.rs` currently skips Chart { .. } frames
-    // (they fall into the `skipping non-text frame` debug arm) so no descr is emitted.
+    // Regression guard: `slide_serializer.rs` routes Chart { alt } through AltTextEmbedder
+    // and emits descr on the enclosing shape. Any regression that skips Chart frames
+    // will be caught here.
     let descr_values = collect_cnvpr_descr_values(&slide_xml);
 
     assert!(
         descr_values.iter().any(|d| d == alt_text),
         "slide1.xml must have descr=\"{alt_text}\" on the enclosing <p:grpSp>/<p:pic> \
          shape for the FrameContent::Chart frame (BC-4.01.004 EC-005). \
-         The implementer must route Chart {{ alt }} through AltTextEmbedder. \
          Found descr values: {descr_values:?}"
     );
 }
@@ -695,10 +690,9 @@ fn test_BC_4_01_004_ac005_chart_frame_alt_on_enclosing_shape() {
 /// This test uses a REAL `FrameContent::Diagram { svg, alt: AltText::Provided(...) }` frame
 /// (not an Image proxy — F-039-C2 fix). The alt text is threaded from `DiagramSpec.alt`.
 ///
-/// Red Gate: `slide_serializer.rs` currently calls `build_picture` for Diagram frames
-/// but does NOT pass the `alt` through to `<p:cNvPr descr=...>`. The `build_picture`
-/// function sets `description: None` on the `<p:cNvPr>`, so no `descr` attribute appears.
-/// The implementer must update the Diagram arm to pass `alt` to the cNvPr description field.
+/// `slide_serializer.rs` calls `build_picture` for Diagram frames and passes `alt` through
+/// to `<p:cNvPr descr=...>`. This test guards against regressions that would cause
+/// `build_picture` to revert to setting `description: None` and omit the `descr` attribute.
 #[test]
 fn test_BC_4_01_004_ac005_diagram_frame_alt_on_enclosing_shape() {
     let alt_text = "Flowchart: Q1 deployment pipeline steps";
@@ -710,15 +704,14 @@ fn test_BC_4_01_004_ac005_diagram_frame_alt_on_enclosing_shape() {
     let slide_xml = zip_read_entry(&pptx_bytes, "ppt/slides/slide1.xml");
 
     // The cNvPr on the enclosing <p:pic> for the diagram must carry the alt text.
-    // Red Gate failure: `build_picture` in `slide_serializer.rs` sets description: None
-    // (line ~942: `description: None`). No descr attribute is emitted for Diagram frames.
+    // Regression guard: `build_picture` passes `alt` to the cNvPr description field.
+    // Any regression that reverts description back to None will be caught here.
     let descr_values = collect_cnvpr_descr_values(&slide_xml);
 
     assert!(
         descr_values.iter().any(|d| d == alt_text),
         "slide1.xml must have descr=\"{alt_text}\" on the enclosing <p:pic> shape \
          for the FrameContent::Diagram frame (BC-4.01.004 EC-005). \
-         The implementer must pass alt to build_picture's cNvPr description field. \
          Found descr values: {descr_values:?}"
     );
 }
@@ -943,14 +936,11 @@ fn test_BC_4_01_004_ec005_300_char_alt_exact_length() {
 /// `FrameContent::Chart { alt: AltText::Decorative }` frame must produce
 /// `descr=""` on its enclosing shape (attribute PRESENT with empty value, NOT absent).
 ///
-/// Red Gate reason: `slide_serializer.rs` currently falls through Chart { .. } frames
-/// to the `skipping non-text frame` debug arm — no shape and no `<p:cNvPr>` is emitted
-/// at all. The test fails because `descr_values.iter().any(|d| d.is_empty())` is false
-/// (there are no cNvPr elements with descr at all for Chart frames).
-///
-/// The implementer must:
-/// 1. Route `FrameContent::Chart { alt: AltText::Decorative }` through AltTextEmbedder.
-/// 2. Emit `descr=""` (present, empty) on the enclosing `<p:grpSp>/<p:pic>` cNvPr.
+/// `slide_serializer.rs` routes `Chart { alt: AltText::Decorative }` through
+/// `AltTextEmbedder` and emits `descr=""` (present, empty) on the enclosing
+/// `<p:grpSp>/<p:pic>` cNvPr. This test guards against regressions that would
+/// skip Chart frames entirely or emit the `descr` attribute as absent rather than
+/// empty.
 #[test]
 fn test_BC_4_01_004_ec006_chart_none_alt_maps_to_decorative_descr_empty() {
     let deck = make_deck_with_lang("en-US");
@@ -963,16 +953,17 @@ fn test_BC_4_01_004_ec006_chart_none_alt_maps_to_decorative_descr_empty() {
     // Assertion: a cNvPr with descr="" must be present (Decorative = empty descr).
     // The attribute MUST be present (not absent) — OOXML accessibility contract.
     //
-    // Red Gate: slide_serializer.rs skips Chart { .. } entirely. No cNvPr is emitted.
-    // This fails because collect_cnvpr_descr_values returns an empty vec.
+    // Regression guard: slide_serializer.rs routes Chart { AltText::Decorative } through
+    // AltTextEmbedder and emits descr="". Any regression that skips Chart frames or
+    // omits the descr attribute will cause collect_cnvpr_descr_values to return an
+    // empty vec, failing the assertion.
     let descr_values = collect_cnvpr_descr_values(&slide_xml);
     assert!(
         descr_values.iter().any(String::is_empty),
         "slide1.xml must contain <p:cNvPr descr=\"\"> for a Chart frame with \
          AltText::Decorative (EC-006 — ChartSpec.alt = None safe-sentinel path). \
          The descr attribute MUST be present with empty value. \
-         Found descr values: {descr_values:?}\n\
-         Red Gate: chart frames are currently skipped by slide_serializer.rs."
+         Found descr values: {descr_values:?}"
     );
 }
 
@@ -986,13 +977,10 @@ fn test_BC_4_01_004_ec006_chart_none_alt_maps_to_decorative_descr_empty() {
 /// `FrameContent::Diagram { svg, alt: AltText::Decorative }` frame must produce
 /// `descr=""` on its enclosing `<p:pic>` shape.
 ///
-/// Red Gate reason: `build_picture` in `slide_serializer.rs` currently sets
-/// `description: None` (line ~942). The `description` field on `NonVisualDrawingProperties`
-/// maps to the `descr` XML attribute; when it is `None`, no `descr` attribute is emitted.
-/// For Decorative frames, the attribute MUST be present (even if empty).
-///
-/// The implementer must pass `AltText::Decorative` through build_picture's `description` field
-/// as `Some("".to_owned())` rather than `None`.
+/// `build_picture` in `slide_serializer.rs` passes `AltText::Decorative` through
+/// to the `description` field as `Some("".to_owned())` so that the `descr` attribute
+/// is present (even if empty) for decorative frames. This test guards against
+/// regressions that would revert `description` to `None` and omit the `descr` attribute.
 #[test]
 fn test_BC_4_01_004_ec007_diagram_none_alt_maps_to_decorative_descr_empty() {
     let deck = make_deck_with_lang("en-US");
@@ -1004,17 +992,16 @@ fn test_BC_4_01_004_ec007_diagram_none_alt_maps_to_decorative_descr_empty() {
 
     // Assertion: a cNvPr with descr="" must be present (Decorative = empty descr attribute).
     //
-    // Red Gate: `build_picture` in slide_serializer.rs sets description: None for Diagram frames.
-    // `collect_cnvpr_descr_values` only collects cNvPr elements that HAVE a descr attribute.
-    // Since description: None emits no descr attribute, the collected vec will not contain "".
-    // This will be empty or contain only non-decorative values from other shapes.
+    // Regression guard: `build_picture` sets description: Some("".to_owned()) for Decorative
+    // frames so that `descr=""` is emitted. `collect_cnvpr_descr_values` only collects
+    // cNvPr elements that have a descr attribute; any regression reverting to description: None
+    // (which emits no descr attribute) will cause this assertion to fail.
     let descr_values = collect_cnvpr_descr_values(&slide_xml);
     assert!(
         descr_values.iter().any(String::is_empty),
         "slide1.xml must contain <p:cNvPr descr=\"\"> for a Diagram frame with \
          AltText::Decorative (EC-007 — DiagramSpec.alt = None safe-sentinel path). \
          The descr attribute MUST be present with empty value (not absent). \
-         Found descr values: {descr_values:?}\n\
-         Red Gate: build_picture sets description: None instead of Some(\"\".to_owned())."
+         Found descr values: {descr_values:?}"
     );
 }

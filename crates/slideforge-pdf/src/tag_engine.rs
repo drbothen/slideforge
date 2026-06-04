@@ -505,9 +505,9 @@ impl SlideTagEngine {
     /// Tag a figure element with an optional `/Alt` attribute for PDF/UA-1 compliance.
     ///
     /// Returns a [`TagGroup`] using `TagKind::Figure` with the alt text set when
-    /// provided. Pass `Some(alt)` for accessible figures; `None` for figures
-    /// where alt text is not yet available (e.g., diagrams before STORY-045
-    /// threads the original `DiagramSpec.alt` through the IR).
+    /// provided. Pass `Some(alt)` for accessible figures (including diagrams, whose
+    /// `DiagramSpec.alt` is now threaded through the IR by STORY-039); pass `None`
+    /// only for genuinely decorative figures where no alt text is appropriate.
     ///
     /// # Errors
     ///

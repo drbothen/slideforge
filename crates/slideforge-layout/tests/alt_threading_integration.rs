@@ -1,17 +1,15 @@
-//! STORY-039 Red Gate: `layout::run` alt-threading for Chart / Diagram / Image.
+//! STORY-039 regression guards: `layout::run` alt-threading for Chart / Diagram / Image.
 //!
 //! ## What these tests prove
 //!
-//! `layout::run` currently produces placeholder frames with `AltText::Decorative`
-//! for every chart, diagram, and image slide-type frame — it never reads the
-//! semantic spec's `.alt` field. These tests assert the INTENDED behaviour: the
-//! alt text from the semantic `ChartSpec` / `DiagramSpec` / `ImageSpec` carried on
-//! `Slide.blocks` must be threaded through to the corresponding `FrameContent`
-//! variant in `LaidOutSlide.frames`.
+//! `layout::run` threads the alt text from the semantic `ChartSpec` / `DiagramSpec` /
+//! `ImageSpec` carried on `Slide.blocks` through to the corresponding `FrameContent`
+//! variant in `LaidOutSlide.frames`. These tests guard against regressions that would
+//! cause `layout::run` to revert to emitting `AltText::Decorative` placeholders
+//! regardless of the author-supplied `.alt` field.
 //!
-//! All four tests MUST FAIL until the implementer wires
-//!   `layout.rs` → thread `ChartSpec.alt / DiagramSpec.alt / ImageSpec.alt`
-//! into the frame produced for each slide type.
+//! All four tests are GREEN. They will FAIL if the alt-threading logic in `layout.rs`
+//! is removed or regresses — that is their purpose as regression guards.
 //!
 //! ## BC traceability
 //!
@@ -98,23 +96,23 @@ fn slide_with_block(slide_type: &str, block: ContentBlock) -> Slide {
 // Test 1 — Chart slide-type: provided alt threads through layout::run
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// STORY-039 AC-005 / EC-006 Red Gate — `layout::run` must thread
+/// STORY-039 AC-005 / EC-006 regression guard — `layout::run` threads
 /// `ChartSpec.alt = Some(AltText::Provided("Revenue by region"))` from the
 /// semantic block into the `FrameContent::Chart { alt }` frame it produces.
 ///
-/// ## Why this FAILS at Red Gate
+/// ## What this test guards
 ///
-/// `region_frames_for("chart", ...)` returns a `FrameContent::Chart { alt: AltText::Decorative }`
-/// placeholder. `layout::run` does NOT iterate `slide.blocks` for `ContentBlock::Chart`
-/// and therefore never overwrites the placeholder alt with the author-supplied text.
-/// The assertion `alt == AltText::Provided("Revenue by region")` fails because the
-/// frame still carries `AltText::Decorative`.
+/// `layout::run` iterates `slide.blocks` for `ContentBlock::Chart` and replaces the
+/// layout placeholder's alt with `spec.alt.unwrap_or(AltText::Decorative)`. This test
+/// will FAIL if that threading is removed or regresses, detecting any change that
+/// causes the frame to revert to carrying `AltText::Decorative` instead of the
+/// author-supplied `AltText::Provided("Revenue by region")`.
 ///
-/// ## What the implementer must do
+/// ## Threading contract
 ///
 /// In the slide-processing loop in `layout::run`, for each `ContentBlock::Chart(spec)`,
-/// find the `FrameContent::Chart` frame in the placeholder list and replace its `alt`
-/// with `spec.alt.unwrap_or(AltText::Decorative)` (emitting `tracing::warn!` when
+/// the `FrameContent::Chart` frame's `alt` is replaced with
+/// `spec.alt.unwrap_or(AltText::Decorative)` (emitting `tracing::warn!` when
 /// `spec.alt` is `None`).
 #[test]
 fn test_bc_3_06_039_ac005_chart_provided_alt_threads_through_layout_run() {
@@ -151,13 +149,13 @@ fn test_bc_3_06_039_ac005_chart_provided_alt_threads_through_layout_run() {
         result.slides[0].frames.len()
     );
 
-    // RED GATE assertion: layout::run does NOT thread alt yet → still Decorative → FAILS.
+    // Regression guard: layout::run must thread ChartSpec.alt into the frame.
     assert_eq!(
         chart_frame_alt[0],
         &AltText::Provided(Arc::clone(&provided_alt)),
         "FrameContent::Chart.alt must be Provided(\"Revenue by region\") — \
          threaded from ChartSpec.alt by layout::run; \
-         got: {:?} (EXPECTED FAILURE at Red Gate: layout::run does not thread alt)",
+         got: {:?} (regression: alt not threaded through layout::run)",
         chart_frame_alt[0]
     );
 }
@@ -166,23 +164,23 @@ fn test_bc_3_06_039_ac005_chart_provided_alt_threads_through_layout_run() {
 // Test 2 — Diagram slide-type: provided alt threads through layout::run
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// STORY-039 AC-005 Red Gate — `layout::run` must thread
+/// STORY-039 AC-005 regression guard — `layout::run` threads
 /// `DiagramSpec.alt = Some(AltText::Provided("Architecture overview"))` into
 /// the `FrameContent::Diagram { alt, .. }` frame it produces.
 ///
-/// ## Why this FAILS at Red Gate
+/// ## What this test guards
 ///
-/// `region_frames_for("diagram", ...)` returns a
-/// `FrameContent::Diagram { svg: empty_placeholder(), alt: AltText::Decorative }`.
-/// `layout::run` does NOT iterate `ContentBlock::Diagram` blocks and therefore
-/// the placeholder alt is never overwritten. The assertion that
-/// `alt == AltText::Provided("Architecture overview")` fails.
+/// `layout::run` iterates `ContentBlock::Diagram` blocks and replaces the layout
+/// placeholder's `alt` with `spec.alt.unwrap_or(AltText::Decorative)`. This test
+/// will FAIL if that threading is removed or regresses, detecting any change that
+/// causes the Diagram frame to revert to carrying `AltText::Decorative` instead of
+/// the author-supplied `AltText::Provided("Architecture overview")`.
 ///
-/// ## What the implementer must do
+/// ## Threading contract
 ///
 /// In the slide-processing loop in `layout::run`, for each `ContentBlock::Diagram(spec)`,
-/// find the `FrameContent::Diagram` frame in the placeholder list and replace its `alt`
-/// with `spec.alt.unwrap_or(AltText::Decorative)` (emitting `tracing::warn!` when
+/// the `FrameContent::Diagram` frame's `alt` is replaced with
+/// `spec.alt.unwrap_or(AltText::Decorative)` (emitting `tracing::warn!` when
 /// `spec.alt` is `None`). The `svg` field stays as the existing placeholder; SVG
 /// rendering is a separate pipeline concern.
 #[test]
@@ -220,13 +218,13 @@ fn test_bc_3_06_039_ac005_diagram_provided_alt_threads_through_layout_run() {
         result.slides[0].frames.len()
     );
 
-    // RED GATE assertion: layout::run does NOT thread alt yet → still Decorative → FAILS.
+    // Regression guard: layout::run must thread DiagramSpec.alt into the frame.
     assert_eq!(
         diagram_frame_alt[0],
         &AltText::Provided(Arc::clone(&provided_alt)),
         "FrameContent::Diagram.alt must be Provided(\"Architecture overview\") — \
          threaded from DiagramSpec.alt by layout::run; \
-         got: {:?} (EXPECTED FAILURE at Red Gate: layout::run does not thread alt)",
+         got: {:?} (regression: alt not threaded through layout::run)",
         diagram_frame_alt[0]
     );
 }
@@ -235,7 +233,7 @@ fn test_bc_3_06_039_ac005_diagram_provided_alt_threads_through_layout_run() {
 // Test 3 — Screenshot slide-type: provided alt threads through layout::run
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// STORY-039 AC-005 Red Gate — `layout::run` must thread
+/// STORY-039 AC-005 regression guard — `layout::run` threads
 /// `ImageSpec.alt = Some(AltText::Provided("Dashboard screenshot"))` from the
 /// semantic block into the `FrameContent::Image { alt }` frame it produces.
 ///
@@ -243,18 +241,19 @@ fn test_bc_3_06_039_ac005_diagram_provided_alt_threads_through_layout_run() {
 /// (title + `FrameContent::Image` placeholder). The `"bio"` slide type
 /// would also qualify (it has a `FrameContent::Image` frame at index 0).
 ///
-/// ## Why this FAILS at Red Gate
+/// ## What this test guards
 ///
-/// `region_frames_for("screenshot", ...)` returns a
-/// `FrameContent::Image { alt: AltText::Decorative }` placeholder at frame index 1.
-/// `layout::run` does NOT iterate `ContentBlock::Image` blocks and therefore the
-/// placeholder alt is never overwritten. The assertion fails.
+/// `layout::run` iterates `ContentBlock::Image` blocks and replaces the layout
+/// placeholder's `alt` with `spec.alt.unwrap_or(AltText::Decorative)`. This test
+/// will FAIL if that threading is removed or regresses, detecting any change that
+/// causes the Image frame to revert to carrying `AltText::Decorative` instead of
+/// the author-supplied `AltText::Provided("Dashboard screenshot")`.
 ///
-/// ## What the implementer must do
+/// ## Threading contract
 ///
 /// In the slide-processing loop in `layout::run`, for each `ContentBlock::Image(spec)`,
-/// find the `FrameContent::Image` frame in the placeholder list and replace its `alt`
-/// with `spec.alt.unwrap_or(AltText::Decorative)` (emitting `tracing::warn!` when
+/// the `FrameContent::Image` frame's `alt` is replaced with
+/// `spec.alt.unwrap_or(AltText::Decorative)` (emitting `tracing::warn!` when
 /// `spec.alt` is `None`).
 #[test]
 fn test_bc_3_06_039_ac005_image_provided_alt_threads_through_layout_run() {
@@ -291,13 +290,13 @@ fn test_bc_3_06_039_ac005_image_provided_alt_threads_through_layout_run() {
         result.slides[0].frames.len()
     );
 
-    // RED GATE assertion: layout::run does NOT thread alt yet → still Decorative → FAILS.
+    // Regression guard: layout::run must thread ImageSpec.alt into the frame.
     assert_eq!(
         image_frame_alts[0],
         &AltText::Provided(Arc::clone(&provided_alt)),
         "FrameContent::Image.alt must be Provided(\"Dashboard screenshot\") — \
          threaded from ImageSpec.alt by layout::run; \
-         got: {:?} (EXPECTED FAILURE at Red Gate: layout::run does not thread alt)",
+         got: {:?} (regression: alt not threaded through layout::run)",
         image_frame_alts[0]
     );
 }
@@ -306,33 +305,28 @@ fn test_bc_3_06_039_ac005_image_provided_alt_threads_through_layout_run() {
 // Test 4 — EC-006: Chart with alt == None maps to AltText::Decorative
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// STORY-039 EC-006 Red Gate — When `ChartSpec.alt` is `None` (author did not
-/// supply alt text), `layout::run` must produce `FrameContent::Chart { alt: AltText::Decorative }`.
+/// STORY-039 EC-006 regression guard — When `ChartSpec.alt` is `None` (author did
+/// not supply alt text), `layout::run` must produce
+/// `FrameContent::Chart { alt: AltText::Decorative }`.
 ///
 /// This is the None → Decorative fallback rule specified by EC-006 / EC-007.
 ///
-/// ## Why this PASSES at Red Gate (but for the wrong reason)
+/// ## What this test guards
 ///
-/// The placeholder produced by `region_frames_for("chart", ...)` already carries
-/// `AltText::Decorative`, so this test passes even without the threading
-/// implementation — it passes because the placeholder is NEVER overwritten, which
-/// is coincidentally the correct outcome for the `alt: None` case.
+/// `layout::run` maps `ChartSpec.alt = None` to `AltText::Decorative` (the safe
+/// sentinel) and emits `tracing::warn!` per EC-006. This test ensures the fallback
+/// cannot regress: if the threading loop were to propagate `None` or an empty string
+/// instead of `AltText::Decorative`, this assertion would catch it.
 ///
-/// However, the implementer MUST NOT use this as justification to skip threading:
-/// once tests 1–3 are implemented (overwriting the placeholder for `Provided` alt),
-/// this test becomes the regression guard ensuring `alt: None` still falls back to
-/// `Decorative` and does NOT erroneously carry `None` or an empty string.
+/// This test was included alongside tests 1–3 so that the correct `None → Decorative`
+/// fallback is exercised at the same time as the `Provided` threading path, making
+/// it impossible to accidentally break the fallback while implementing `Provided`
+/// threading. All four tests must pass simultaneously for a correct implementation.
 ///
-/// This test is included in the Red Gate suite so the implementer cannot accidentally
-/// break the fallback while fixing tests 1–3. A correct implementation must pass all
-/// four tests simultaneously.
+/// ## Threading contract
 ///
-/// ## What the implementer must produce
-///
-/// `FrameContent::Chart { alt: AltText::Decorative }` — this is already the
-/// placeholder value, so the implementer only needs to ensure that `None` is
-/// explicitly mapped to `Decorative` (not left as a silent empty or propagated as
-/// `None`). The `tracing::warn!` must also be emitted per EC-006 spec.
+/// `FrameContent::Chart { alt: AltText::Decorative }` is produced when
+/// `ChartSpec.alt` is `None`. The `tracing::warn!` sentinel is emitted per EC-006.
 #[test]
 fn test_bc_3_06_039_ec006_chart_alt_none_maps_to_decorative() {
     // ChartSpec with alt: None — author provided NO alt text.
@@ -369,9 +363,8 @@ fn test_bc_3_06_039_ec006_chart_alt_none_maps_to_decorative() {
     );
 
     // EC-006: alt: None in ChartSpec must map to AltText::Decorative in the frame.
-    // NOTE: This assertion coincidentally passes at Red Gate because the placeholder
-    // already carries Decorative. It becomes a regression guard after tests 1–3 are
-    // implemented to ensure None still produces Decorative (not a propagated None).
+    // Regression guard: ensures None is explicitly mapped to Decorative (not a
+    // propagated None or empty string) even after Provided-threading is active.
     assert_eq!(
         chart_frame_alt[0],
         &AltText::Decorative,

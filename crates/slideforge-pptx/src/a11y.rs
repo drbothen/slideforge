@@ -45,8 +45,10 @@ use crate::error::PptxError;
 ///
 /// ## Errors
 ///
-/// Returns [`PptxError::OoxmlElement`] if a visual frame is encountered
-/// without an alt text decision (programming error in upstream evaluator).
+/// The public API surfaces a `Result` return type on [`AltTextEmbedder::decisions_for_slide`]
+/// for forward-compatibility with future frame types that may require fallible processing.
+/// The current implementation is infallible — every `FrameContent` variant maps to either
+/// a concrete `AltDecision` or is skipped. No `PptxError` is returned at this time.
 pub struct AltTextEmbedder;
 
 /// The alt text decision for a visual frame.
@@ -106,7 +108,9 @@ impl AltTextEmbedder {
     ///
     /// # Errors
     ///
-    /// This function is infallible for the current set of frame types.
+    /// Currently infallible — returns `Ok` unconditionally. The `Result` wrapper is
+    /// retained for forward-compatibility: future frame types (e.g., video, 3D model)
+    /// may require fallible alt text extraction. Callers should propagate `?` normally.
     pub fn decisions_for_slide(
         slide: &LaidOutSlide,
     ) -> Result<Vec<(usize, AltDecision)>, PptxError> {
