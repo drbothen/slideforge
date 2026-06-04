@@ -289,49 +289,21 @@ impl SlideTagEngine {
                     }
                 },
 
-                // ── Diagram → Figure+Alt (or Artifact if decorative) ─────────
+                // ── Diagram / Chart → Figure+Alt (or Artifact if decorative) ──
                 //
-                // STORY-039: `FrameContent::Diagram` now carries `alt: AltText`.
+                // STORY-039: both `FrameContent::Diagram` and `FrameContent::Chart`
+                // carry `alt: AltText`. Same branching logic:
                 // - `AltText::Provided(s)` → tagged Figure with /Alt (BC-4.03.001 AC-004).
                 // - `AltText::Decorative` → Artifact (stub placeholder or explicit opt-out).
-                //
-                // NOTE: the STUB path from `regions.rs` produces `AltText::Decorative`
-                // (the safe default for structural stubs). The REAL threading from
-                // `DiagramSpec.alt` through `layout::run` is UNIMPLEMENTED — the
-                // implementer's job. Until then, all frame-level Diagram frames that
-                // arrive with `AltText::Decorative` are correctly treated as Artifacts.
-                FrameContent::Diagram { alt, .. } => {
-                    match alt {
-                        slideforge_types::AltText::Provided(alt_str) => {
-                            let child_idx = part_group.children.len();
-                            part_group.push(self.tag_figure(Some(alt_str.as_ref()))?);
-                            frame_child_part_indices[frame_idx] = Some(vec![child_idx]);
-                        },
-                        slideforge_types::AltText::Decorative => {
-                            decorative_frame_indices.push(frame_idx);
-                        },
-                    }
-                },
-
-                // ── Chart → Figure+Alt (or Artifact if decorative) ───────────
-                //
-                // STORY-039: `FrameContent::Chart` now carries `alt: AltText`.
-                // Same branching logic as Diagram above.
-                //
-                // NOTE: the STUB path from `regions.rs` produces `AltText::Decorative`.
-                // Real threading from `ChartSpec.alt` through `layout::run` is
-                // UNIMPLEMENTED — implementer's job (STORY-039 IR threading task).
-                FrameContent::Chart { alt } => {
-                    match alt {
-                        slideforge_types::AltText::Provided(alt_str) => {
-                            let child_idx = part_group.children.len();
-                            part_group.push(self.tag_figure(Some(alt_str.as_ref()))?);
-                            frame_child_part_indices[frame_idx] = Some(vec![child_idx]);
-                        },
-                        slideforge_types::AltText::Decorative => {
-                            decorative_frame_indices.push(frame_idx);
-                        },
-                    }
+                FrameContent::Diagram { alt, .. } | FrameContent::Chart { alt } => match alt {
+                    slideforge_types::AltText::Provided(alt_str) => {
+                        let child_idx = part_group.children.len();
+                        part_group.push(self.tag_figure(Some(alt_str.as_ref()))?);
+                        frame_child_part_indices[frame_idx] = Some(vec![child_idx]);
+                    },
+                    slideforge_types::AltText::Decorative => {
+                        decorative_frame_indices.push(frame_idx);
+                    },
                 },
 
                 // ── Shape → Figure+Alt or Artifact if decorative ──────────────

@@ -343,18 +343,42 @@ impl SlideSerializer {
     /// Build the `<p:spTree>` shape tree from the slide's frames.
     ///
     /// Processes each frame in order: text frames become `<p:sp>` placeholder
-    /// shapes, diagram frames become `<p:pic>` elements. Non-serialisable frame
-    /// types (`Chart`, `Shape`, `ErrorSlidePlaceholder`, `Empty`) are skipped.
+    /// shapes, diagram/image/chart frames become `<p:pic>` elements with `descr`
+    /// set from `AltTextEmbedder` (the single authoritative descr-setting path,
+    /// ADR-001 / BC-4.01.004). Non-serialisable frame types (`Shape`,
+    /// `ErrorSlidePlaceholder`, `Empty`) are skipped.
+    ///
+    /// ## `AltTextEmbedder` authority (BC-4.01.004 / STORY-039)
+    ///
+    /// `AltTextEmbedder::decisions_for_slide` is called once per slide to extract
+    /// the alt text decisions for all visual frames. The resulting `Vec<(frame_idx,
+    /// AltDecision)>` is used to look up the `descr` value for each image/chart/diagram
+    /// frame. This ensures there is ONE code path for all `descr` decisions —
+    /// `SlideSerializer` never sets `descr` inline; it always routes through the
+    /// embedder.
     ///
     /// # Errors
     ///
     /// Returns [`PptxError::InvalidEmu`] if any frame has an invalid bounding box.
+    #[allow(clippy::too_many_lines)]
     fn build_shape_tree(
         &self,
         slide: &LaidOutSlide,
         slide_index: usize,
         diagram_rids: &[(usize, String)],
     ) -> Result<ShapeTree, PptxError> {
+        // AltTextEmbedder is the SINGLE AUTHORITATIVE path for descr decisions.
+        // Compute decisions once for all visual frames before the frame loop.
+        // This satisfies ADR-001 (no parallel inline descr-setting logic) and
+        // ensures AltTextEmbedder is never dead code (F-039-I2 resolution).
+        let alt_decisions =
+            crate::a11y::AltTextEmbedder::decisions_for_slide(slide).map_err(|e| {
+                PptxError::OoxmlElement {
+                    part: format!("ppt/slides/slide{}.xml", slide_index + 1),
+                    detail: e.to_string(),
+                }
+            })?;
+
         let mut shape_tree = ShapeTree {
             non_visual_group_shape_properties: None,
             group_shape_properties: Some(Box::new(GroupShapeProperties::default())),
@@ -367,6 +391,13 @@ impl SlideSerializer {
         let mut shape_id: u32 = 1;
 
         for (frame_idx, frame) in slide.frames.iter().enumerate() {
+            // Look up the alt decision for this frame (visual frames only).
+            // For non-visual frames (text, shape, etc.) the lookup returns None.
+            let alt_decision_str: Option<String> = alt_decisions
+                .iter()
+                .find(|(idx, _)| *idx == frame_idx)
+                .map(|(_, d)| d.descr_value().to_owned());
+
             match &frame.content {
                 FrameContent::Title(t) => {
                     validate_emu(slide_index, frame_idx, &frame.bbox)?;
@@ -469,10 +500,11 @@ impl SlideSerializer {
                 // Diagram: emit a typed <p:pic> via ooxmlsdk builders (ADR-001, F-037-005).
                 // The media part is written by the caller; `diagram_rids` carries the rId
                 // for the IMAGE relationship so it is never dangling.
-                // STORY-039 STUB: alt-threading from FrameContent::Diagram { alt } to
-                // the <p:cNvPr descr> attribute is NOT yet implemented here. The implementer
-                // must route through AltTextEmbedder for real alt-text embedding.
+                // STORY-039: alt is threaded from FrameContent::Diagram { alt } to
+                // the <p:cNvPr descr> attribute via AltTextEmbedder (BC-4.01.004 AC-005).
                 FrameContent::Diagram { .. } => {
+                    // descr value resolved by AltTextEmbedder::decisions_for_slide above.
+                    let alt_str = alt_decision_str.as_deref().unwrap_or("");
                     if let Some(rid) = diagram_rids
                         .iter()
                         .find(|(idx, _)| *idx == frame_idx)
@@ -483,6 +515,7 @@ impl SlideSerializer {
                             shape_id,
                             frame_idx,
                             &rid,
+                            alt_str,
                             frame.bbox.x.0,
                             frame.bbox.y.0,
                             frame.bbox.width.0,
@@ -501,14 +534,12 @@ impl SlideSerializer {
                     }
                 },
 
-                // Image: emit <p:pic> with descr from alt (AC-001..005, BC-4.01.004).
-                // STORY-039: AltText is now used; Provided → non-empty descr, Decorative → "".
-                FrameContent::Image { alt } => {
-                    use slideforge_types::AltText;
-                    let alt_str: &str = match alt {
-                        AltText::Provided(s) => s.as_ref(),
-                        AltText::Decorative => "",
-                    };
+                // Image: emit <p:pic> with descr from AltTextEmbedder decision.
+                // The descr value was resolved above via decisions_for_slide (single path).
+                FrameContent::Image { .. } => {
+                    // alt_decision_str is always Some for Image frames (guaranteed by
+                    // AltTextEmbedder::decisions_for_slide which covers all Image variants).
+                    let alt_str = alt_decision_str.as_deref().unwrap_or("");
                     Self::push_image_frame(
                         &mut shape_tree,
                         &mut shape_id,
@@ -519,10 +550,33 @@ impl SlideSerializer {
                     )?;
                 },
 
-                // Chart, Shape, ErrorSlidePlaceholder, Empty: skipped in STORY-037.
-                // Chart now carries `alt` field but embedding is deferred to STORY-039 implementer.
-                FrameContent::Chart { .. }
-                | FrameContent::Shape(_)
+                // Chart: emit a <p:pic> placeholder with descr from AltTextEmbedder.
+                // The chart SVG/media embedding is handled by a later story; this ensures
+                // the enclosing shape always carries the accessibility descr attribute.
+                // descr value is resolved by AltTextEmbedder::decisions_for_slide above —
+                // NOT set inline here (ADR-001: single authoritative path).
+                FrameContent::Chart { .. } => {
+                    // alt_decision_str is always Some for Chart frames (guaranteed by
+                    // AltTextEmbedder::decisions_for_slide which covers all Chart variants).
+                    let alt_str = alt_decision_str.as_deref().unwrap_or("");
+                    validate_emu(slide_index, frame_idx, &frame.bbox)?;
+                    let pic = build_image_picture(
+                        shape_id,
+                        frame_idx,
+                        alt_str,
+                        frame.bbox.x.0,
+                        frame.bbox.y.0,
+                        frame.bbox.width.0,
+                        frame.bbox.height.0,
+                    );
+                    shape_tree
+                        .shape_tree_choice
+                        .push(ShapeTreeChoice::PPic(Box::new(pic)));
+                    shape_id += 1;
+                },
+
+                // Shape, ErrorSlidePlaceholder, Empty: skipped in STORY-037.
+                FrameContent::Shape(_)
                 | FrameContent::ErrorSlidePlaceholder { .. }
                 | FrameContent::Empty => {
                     tracing::debug!(
@@ -932,26 +986,43 @@ fn build_image_picture(
 /// `shape_id` is the numeric shape ID for `<p:cNvPr id="...">`.
 /// `frame_idx` is the 0-based frame index, used for the shape name.
 /// `r_embed` is the relationship ID string (e.g. `"rId2"`) from the slide `.rels`.
+/// `alt_text` is the accessibility alt text for `descr` (BC-4.01.004, STORY-039).
+///
+///   - Non-empty: `descr="<alt_text>"` (BC-4.01.004 postcondition 1).
+///   - Empty: `descr=""` (BC-4.01.004 postcondition 2 — attribute present, empty value).
+///
 /// Position and size are given in integer EMU.
 ///
 /// The resulting element embeds the media via `<a:blip r:embed="..."/>` inside
 /// `<p:blipFill>` with a stretch fill, and positions it via `<a:xfrm>` inside
 /// `<p:spPr>` with a rect preset geometry — matching the schema produced by the
 /// previous raw-XML path but through typed ooxmlsdk builders.
+///
+/// Alt text is NEVER truncated (BC-4.01.004 invariant 1). XML special characters
+/// in `alt_text` are escaped by `ooxmlsdk` automatically (BC-4.01.004 EC-001).
+///
+/// The `descr` attribute is placed on `<p:cNvPr>` (BC-4.01.004 invariant 2),
+/// NOT on `<p:ph altText>`. `AltTextEmbedder` is the single authoritative
+/// descr-setting path (ADR-001).
 fn build_picture(
     shape_id: u32,
     frame_idx: usize,
     r_embed: &str,
+    alt_text: &str,
     x: i64,
     y: i64,
     cx: i64,
     cy: i64,
 ) -> Picture {
     // --- Non-visual properties ---
+    // BC-4.01.004 invariant 2: descr is on cNvPr, not on ph.altText.
+    // Some("") for decorative (descr="" — attribute present, empty value).
+    // Some(non_empty) for non-decorative (descr="alt text").
+    // ooxmlsdk writes Some(v) as descr="v" for any v, including empty string.
     let cnv_pr = NonVisualDrawingProperties {
         id: shape_id,
         name: format!("Diagram {frame_idx}"),
-        description: None,
+        description: Some(alt_text.to_owned()),
         hidden: None,
         title: None,
         hyperlink_on_click: None,

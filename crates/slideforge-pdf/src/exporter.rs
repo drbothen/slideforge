@@ -2493,10 +2493,10 @@ mod tests {
                             height: Emu(3_657_600), // 2-inch tall SVG frame
                         },
                         // STORY-039 IR reshape: Diagram is now struct with svg + alt fields.
-                    content: FrameContent::Diagram {
-                        svg,
-                        alt: slideforge_types::AltText::Decorative,
-                    },
+                        content: FrameContent::Diagram {
+                            svg,
+                            alt: slideforge_types::AltText::Decorative,
+                        },
                         text_flow: None,
                     },
                     Frame {

@@ -142,19 +142,11 @@ impl AltTextEmbedder {
         let mut decisions = Vec::new();
         for (frame_idx, frame) in slide.frames.iter().enumerate() {
             let decision = match &frame.content {
-                // STORY-039: Image now carries AltText enum (Provided or Decorative).
-                FrameContent::Image { alt } => match alt {
-                    slideforge_types::AltText::Provided(s) => {
-                        Some(AltDecision::Provided(s.clone()))
-                    },
-                    slideforge_types::AltText::Decorative => Some(AltDecision::Decorative),
-                },
-                // STORY-039: Chart and Diagram now carry alt: AltText.
-                // The real alt-threading from layout::run is NOT YET IMPLEMENTED;
-                // the stub path from regions.rs produces AltText::Decorative.
-                // Once layout::run threads ChartSpec.alt / DiagramSpec.alt, this
-                // arm will correctly carry Provided alt through to the PPTX descr.
-                FrameContent::Chart { alt } | FrameContent::Diagram { alt, .. } => match alt {
+                // STORY-039: Image, Chart, and Diagram all carry `alt: AltText`.
+                // Single arm: Provided → AltDecision::Provided, Decorative → AltDecision::Decorative.
+                FrameContent::Image { alt }
+                | FrameContent::Chart { alt }
+                | FrameContent::Diagram { alt, .. } => match alt {
                     slideforge_types::AltText::Provided(s) => {
                         Some(AltDecision::Provided(s.clone()))
                     },

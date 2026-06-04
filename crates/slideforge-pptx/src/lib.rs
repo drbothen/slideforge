@@ -225,7 +225,11 @@ fn build_slide_parts(
 
         for (frame_idx, frame) in slide.frames.iter().enumerate() {
             // STORY-039 IR reshape: Diagram is now struct with svg + alt fields.
-            if let FrameContent::Diagram { svg: normalized_svg, .. } = &frame.content {
+            if let FrameContent::Diagram {
+                svg: normalized_svg,
+                ..
+            } = &frame.content
+            {
                 let media_filename = format!("image{media_idx}.svg");
                 let media_path = format!("ppt/media/{media_filename}");
                 let rid = slide_rels.add(rel_types::IMAGE, format!("../media/{media_filename}"));
