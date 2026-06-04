@@ -24,7 +24,7 @@ pub use slideforge_types::NormalizedDiagramSvg;
 pub use slideforge_types::RegisteredContent;
 // Re-export shape/warning types relocated to slideforge-types (STORY-028 pass-2).
 // Downstream code that imports these through slideforge-layout sees no change.
-pub use slideforge_types::{FillSpec, LayoutWarning, Rgb, ShapeType};
+pub use slideforge_types::{AltText, FillSpec, LayoutWarning, Rgb, ShapeType};
 
 use crate::sections::GeneratedSection;
 
@@ -351,12 +351,29 @@ pub enum FrameContent {
     /// Structured body content (bullet list, numbered list, etc.).
     Body(Vec<ContentBlock>),
     /// An image placeholder with required alt text.
+    ///
+    /// `AltText::Provided(s)` — non-empty alt text for this image (BC-4.01.004).
+    /// `AltText::Decorative` — image explicitly marked decorative (`decorative: true`);
+    /// the PPTX exporter emits `descr=""` and the PDF exporter emits an Artifact tag.
     Image {
-        /// Required accessibility alt text for this image.
-        alt: Arc<str>,
+        /// Accessibility alt text for this image (STORY-039 IR alt-threading).
+        ///
+        /// Threaded from `ImageSpec.alt` in the semantic IR via `layout::run`.
+        /// When `ImageSpec.alt` is `None` (upstream validator miss), layout maps it
+        /// to `AltText::Decorative` and emits `tracing::warn!` (EC-006/EC-007).
+        alt: AltText,
     },
     /// A chart rendered from a chart spec.
-    Chart,
+    ///
+    /// `AltText::Provided(s)` — non-empty alt text for this chart (BC-4.01.004 EC-005).
+    /// `AltText::Decorative` — chart explicitly marked decorative.
+    ///
+    /// Alt text is threaded from `ChartSpec.alt` via `layout::run` (STORY-039).
+    /// When `ChartSpec.alt` is `None`, maps to `AltText::Decorative` + `tracing::warn!`.
+    Chart {
+        /// Accessibility alt text for the chart, threaded from `ChartSpec.alt`.
+        alt: AltText,
+    },
     /// A diagram rendered from a diagram source (e.g., Mermaid).
     ///
     /// Carries the PPTX-safe, usvg-normalized SVG payload produced by
@@ -364,7 +381,18 @@ pub enum FrameContent {
     /// The type system enforces that only a [`NormalizedDiagramSvg`] — never a
     /// raw SVG string — can be stored in this frame, preventing un-normalized
     /// SVG from reaching exporters.
-    Diagram(NormalizedDiagramSvg),
+    ///
+    /// `AltText::Provided(s)` — non-empty alt text for this diagram (BC-4.01.004 EC-005).
+    /// `AltText::Decorative` — diagram explicitly marked decorative.
+    ///
+    /// Alt text is threaded from `DiagramSpec.alt` via `layout::run` (STORY-039).
+    /// When `DiagramSpec.alt` is `None`, maps to `AltText::Decorative` + `tracing::warn!`.
+    Diagram {
+        /// The PPTX-safe, usvg-normalized SVG payload.
+        svg: NormalizedDiagramSvg,
+        /// Accessibility alt text, threaded from `DiagramSpec.alt`.
+        alt: AltText,
+    },
     /// A shape from the shape DSL (BC-3.04.001, STORY-028).
     ///
     /// Carries the fully-resolved shape geometry, fill, text content, and
@@ -690,14 +718,19 @@ mod tests {
         let subtitle = FrameContent::Subtitle(Arc::from("World"));
         let body = FrameContent::Body(vec![]);
         let image = FrameContent::Image {
-            alt: Arc::from("A bar chart"),
+            alt: slideforge_types::AltText::Provided(Arc::from("A bar chart")),
         };
-        let chart = FrameContent::Chart;
+        let chart = FrameContent::Chart {
+            alt: slideforge_types::AltText::Decorative,
+        };
         // Construct a minimal NormalizedDiagramSvg for the Diagram variant test.
         let normalized_svg = NormalizedDiagramSvg::from_normalized_string(Arc::from(
             r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><title>test</title></svg>"#,
         ));
-        let diagram = FrameContent::Diagram(normalized_svg);
+        let diagram = FrameContent::Diagram {
+            svg: normalized_svg,
+            alt: slideforge_types::AltText::Decorative,
+        };
         // BC-3.04.001 / STORY-028: Shape now carries a ShapeFrame.
         let shape = FrameContent::Shape(ShapeFrame {
             shape_type: ShapeType::Rect,
@@ -717,8 +750,8 @@ mod tests {
         assert!(matches!(subtitle, FrameContent::Subtitle(_)));
         assert!(matches!(body, FrameContent::Body(_)));
         assert!(matches!(image, FrameContent::Image { .. }));
-        assert!(matches!(chart, FrameContent::Chart));
-        assert!(matches!(diagram, FrameContent::Diagram(_)));
+        assert!(matches!(chart, FrameContent::Chart { .. }));
+        assert!(matches!(diagram, FrameContent::Diagram { .. }));
         assert!(matches!(shape, FrameContent::Shape(_)));
         assert!(matches!(text_run, FrameContent::TextRun(_)));
         assert!(matches!(empty, FrameContent::Empty));
@@ -775,10 +808,13 @@ mod tests {
 
         let svg_str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300" aria-label="test" role="img"><title>test</title><rect x="0" y="0" width="400" height="300"/></svg>"#;
         let normalized = NormalizedDiagramSvg::from_normalized_string(Arc::from(svg_str));
-        let content = FrameContent::Diagram(normalized);
+        let content = FrameContent::Diagram {
+            svg: normalized,
+            alt: slideforge_types::AltText::Decorative,
+        };
 
         match content {
-            FrameContent::Diagram(svg) => {
+            FrameContent::Diagram { svg, .. } => {
                 assert!(
                     svg.as_str().contains("<svg"),
                     "FrameContent::Diagram payload must be an SVG; got: {}",

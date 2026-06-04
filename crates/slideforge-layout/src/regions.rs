@@ -21,7 +21,7 @@
 //! `x >= 0`, `y >= 0`, `width > 0`, `height > 0`,
 //! `x + width <= page_width`, `y + height <= page_height`.
 
-use crate::types::{BoundingBox, Emu, Frame, FrameContent, NormalizedDiagramSvg};
+use crate::types::{AltText, BoundingBox, Emu, Frame, FrameContent, NormalizedDiagramSvg};
 
 /// Produce the canonical [`Frame`] list for a given slide type keyword on the
 /// given page dimensions.
@@ -170,8 +170,11 @@ pub fn region_frames_for(
             },
             Frame {
                 bbox: bbox(1_371_600, 1_188_720, 6_400_800, 3_657_600),
+                // STORY-039: stub placeholder — `layout::run` overwrites with real content.
+                // `AltText::Decorative` is the safe default for structural stubs
+                // (explicit opt-out, not silent empty string).
                 content: FrameContent::Image {
-                    alt: std::sync::Arc::from(""),
+                    alt: AltText::Decorative,
                 },
                 text_flow: None,
             },
@@ -204,8 +207,11 @@ pub fn region_frames_for(
         "bio" => vec![
             Frame {
                 bbox: bbox(457_200, 457_200, 2_743_200, 4_114_800),
+                // STORY-039: stub placeholder — `layout::run` overwrites with real content.
+                // `AltText::Decorative` is the safe default for structural stubs
+                // (explicit opt-out, not silent empty string).
                 content: FrameContent::Image {
-                    alt: std::sync::Arc::from(""),
+                    alt: AltText::Decorative,
                 },
                 text_flow: None,
             },
@@ -261,7 +267,11 @@ pub fn region_frames_for(
             },
             Frame {
                 bbox: bbox(457_200, 1_188_720, 8_229_600, 3_657_600),
-                content: FrameContent::Chart,
+                // STORY-039: stub placeholder — `layout::run` overwrites with real content.
+                // `AltText::Decorative` is the safe default for structural stubs.
+                content: FrameContent::Chart {
+                    alt: AltText::Decorative,
+                },
                 text_flow: None,
             },
         ],
@@ -277,7 +287,12 @@ pub fn region_frames_for(
             },
             Frame {
                 bbox: bbox(457_200, 1_188_720, 8_229_600, 3_657_600),
-                content: FrameContent::Diagram(NormalizedDiagramSvg::empty_placeholder()),
+                // STORY-039: stub placeholder — `layout::run` overwrites with real content.
+                // `AltText::Decorative` is the safe default for structural stubs.
+                content: FrameContent::Diagram {
+                    svg: NormalizedDiagramSvg::empty_placeholder(),
+                    alt: AltText::Decorative,
+                },
                 text_flow: None,
             },
         ],
@@ -293,8 +308,11 @@ pub fn region_frames_for(
             },
             Frame {
                 bbox: bbox(457_200, 1_188_720, 8_229_600, 3_657_600),
+                // STORY-039: stub placeholder — `layout::run` overwrites with real content.
+                // `AltText::Decorative` is the safe default for structural stubs
+                // (explicit opt-out, not silent empty string).
                 content: FrameContent::Image {
-                    alt: std::sync::Arc::from(""),
+                    alt: AltText::Decorative,
                 },
                 text_flow: None,
             },

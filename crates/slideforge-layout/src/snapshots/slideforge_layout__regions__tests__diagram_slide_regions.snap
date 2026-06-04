@@ -36,11 +36,12 @@ expression: frames
                 3657600,
             ),
         },
-        content: Diagram(
-            NormalizedDiagramSvg(
+        content: Diagram {
+            svg: NormalizedDiagramSvg(
                 "",
             ),
-        ),
+            alt: Decorative,
+        },
         text_flow: None,
     },
 ]

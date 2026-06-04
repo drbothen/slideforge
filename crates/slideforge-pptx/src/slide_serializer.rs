@@ -469,7 +469,10 @@ impl SlideSerializer {
                 // Diagram: emit a typed <p:pic> via ooxmlsdk builders (ADR-001, F-037-005).
                 // The media part is written by the caller; `diagram_rids` carries the rId
                 // for the IMAGE relationship so it is never dangling.
-                FrameContent::Diagram(_) => {
+                // STORY-039 STUB: alt-threading from FrameContent::Diagram { alt } to
+                // the <p:cNvPr descr> attribute is NOT yet implemented here. The implementer
+                // must route through AltTextEmbedder for real alt-text embedding.
+                FrameContent::Diagram { .. } => {
                     if let Some(rid) = diagram_rids
                         .iter()
                         .find(|(idx, _)| *idx == frame_idx)
@@ -499,19 +502,26 @@ impl SlideSerializer {
                 },
 
                 // Image: emit <p:pic> with descr from alt (AC-001..005, BC-4.01.004).
+                // STORY-039: AltText is now used; Provided → non-empty descr, Decorative → "".
                 FrameContent::Image { alt } => {
+                    use slideforge_types::AltText;
+                    let alt_str: &str = match alt {
+                        AltText::Provided(s) => s.as_ref(),
+                        AltText::Decorative => "",
+                    };
                     Self::push_image_frame(
                         &mut shape_tree,
                         &mut shape_id,
                         slide_index,
                         frame_idx,
                         frame,
-                        alt.as_ref(),
+                        alt_str,
                     )?;
                 },
 
                 // Chart, Shape, ErrorSlidePlaceholder, Empty: skipped in STORY-037.
-                FrameContent::Chart
+                // Chart now carries `alt` field but embedding is deferred to STORY-039 implementer.
+                FrameContent::Chart { .. }
                 | FrameContent::Shape(_)
                 | FrameContent::ErrorSlidePlaceholder { .. }
                 | FrameContent::Empty => {

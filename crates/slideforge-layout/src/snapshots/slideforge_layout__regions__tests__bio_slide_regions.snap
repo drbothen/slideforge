@@ -19,7 +19,7 @@ expression: frames
             ),
         },
         content: Image {
-            alt: "",
+            alt: Decorative,
         },
         text_flow: None,
     },

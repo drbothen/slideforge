@@ -1191,7 +1191,11 @@ fn test_BC_4_01_001_ec003_chart_svg_has_content_type_override() {
     let mut laid_out = make_laid_out_deck(1);
     laid_out.slides[0].frames = vec![Frame {
         bbox: body_bbox(),
-        content: FrameContent::Diagram(normalized_svg),
+        // STORY-039 IR reshape: Diagram is now struct with svg + alt fields.
+        content: FrameContent::Diagram {
+            svg: normalized_svg,
+            alt: slideforge_types::AltText::Decorative,
+        },
         text_flow: None,
     }];
 
@@ -1688,7 +1692,11 @@ fn test_f037_005_diagram_frame_emits_pic_shape_referencing_media_rid() {
     let mut laid_out = make_laid_out_deck(1);
     laid_out.slides[0].frames = vec![Frame {
         bbox: body_bbox(),
-        content: FrameContent::Diagram(normalized_svg),
+        // STORY-039 IR reshape: Diagram is now struct with svg + alt fields.
+        content: FrameContent::Diagram {
+            svg: normalized_svg,
+            alt: slideforge_types::AltText::Decorative,
+        },
         text_flow: None,
     }];
 

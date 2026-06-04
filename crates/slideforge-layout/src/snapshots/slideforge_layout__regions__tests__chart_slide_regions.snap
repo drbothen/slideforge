@@ -36,7 +36,9 @@ expression: frames
                 3657600,
             ),
         },
-        content: Chart,
+        content: Chart {
+            alt: Decorative,
+        },
         text_flow: None,
     },
 ]

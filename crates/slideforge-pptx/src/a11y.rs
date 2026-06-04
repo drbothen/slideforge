@@ -121,14 +121,16 @@ impl AltTextEmbedder {
     /// every frame that corresponds to a visual shape (image, chart, diagram).
     /// Text-only frames (title, subtitle, body, text-run) are skipped.
     ///
-    /// ## Frame type mapping
+    /// ## Frame type mapping (STORY-039 IR alt-threading)
     ///
     /// | `FrameContent` variant | Alt decision source |
     /// |------------------------|---------------------|
-    /// | `Image { alt }` where `!alt.is_empty()` | `AltDecision::Provided(alt.clone())` |
-    /// | `Image { alt }` where `alt.is_empty()` | `AltDecision::Decorative` |
-    /// | `Diagram(_)` | `AltDecision::Decorative` (alt field not yet on `Diagram` — STORY-015) |
-    /// | `Chart` | `AltDecision::Decorative` (alt field not yet on `Chart` — STORY-015) |
+    /// | `Image { alt: AltText::Provided(s) }` | `AltDecision::Provided(s.clone())` |
+    /// | `Image { alt: AltText::Decorative }` | `AltDecision::Decorative` |
+    /// | `Diagram { alt: AltText::Provided(s), .. }` | `AltDecision::Provided(s.clone())` |
+    /// | `Diagram { alt: AltText::Decorative, .. }` | `AltDecision::Decorative` (stub: threading not impl) |
+    /// | `Chart { alt: AltText::Provided(s) }` | `AltDecision::Provided(s.clone())` |
+    /// | `Chart { alt: AltText::Decorative }` | `AltDecision::Decorative` (stub: threading not impl) |
     /// | All others | Skipped |
     ///
     /// # Errors
@@ -140,18 +142,23 @@ impl AltTextEmbedder {
         let mut decisions = Vec::new();
         for (frame_idx, frame) in slide.frames.iter().enumerate() {
             let decision = match &frame.content {
-                FrameContent::Image { alt } => {
-                    if alt.is_empty() {
-                        Some(AltDecision::Decorative)
-                    } else {
-                        Some(AltDecision::Provided(alt.clone()))
-                    }
+                // STORY-039: Image now carries AltText enum (Provided or Decorative).
+                FrameContent::Image { alt } => match alt {
+                    slideforge_types::AltText::Provided(s) => {
+                        Some(AltDecision::Provided(s.clone()))
+                    },
+                    slideforge_types::AltText::Decorative => Some(AltDecision::Decorative),
                 },
-                FrameContent::Diagram(_) | FrameContent::Chart => {
-                    // STORY-015 will add alt fields to these frame types.
-                    // Until then, emit decorative (empty descr) to satisfy the
-                    // OOXML requirement that cNvPr always has a descr attribute.
-                    Some(AltDecision::Decorative)
+                // STORY-039: Chart and Diagram now carry alt: AltText.
+                // The real alt-threading from layout::run is NOT YET IMPLEMENTED;
+                // the stub path from regions.rs produces AltText::Decorative.
+                // Once layout::run threads ChartSpec.alt / DiagramSpec.alt, this
+                // arm will correctly carry Provided alt through to the PPTX descr.
+                FrameContent::Chart { alt } | FrameContent::Diagram { alt, .. } => match alt {
+                    slideforge_types::AltText::Provided(s) => {
+                        Some(AltDecision::Provided(s.clone()))
+                    },
+                    slideforge_types::AltText::Decorative => Some(AltDecision::Decorative),
                 },
                 // Text frames and non-visual frames do not get descr attributes.
                 FrameContent::Title(_)

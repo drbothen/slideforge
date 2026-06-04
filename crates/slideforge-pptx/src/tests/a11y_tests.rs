@@ -5,21 +5,28 @@
 //! implementation begins (Red Gate). Tests parse REAL serialized PPTX output —
 //! no mock strings.
 //!
+//! STORY-039 scope expansion (human-authorized 2026-06-03):
+//! AC-005 uses REAL FrameContent::Chart/Diagram frames (not Image proxies — F-039-C2 fix).
+//! EC-006/EC-007 test the Decorative-sentinel path (ChartSpec.alt = None / DiagramSpec.alt = None).
+//!
 //! ## Traceability
 //!
-//! | Test function | AC | BC clause | Red Gate status |
+//! | Test function | AC | BC clause | Red Gate reason |
 //! |---|---|---|---|
-//! | `test_BC_4_01_004_ac001_non_decorative_image_has_non_empty_descr` | AC-001 | postcondition 1 | RED |
-//! | `test_BC_4_01_004_ac002_decorative_image_has_empty_descr_attribute_present` | AC-002 | postcondition 2 | RED |
-//! | `test_BC_4_01_004_ac003_300_char_alt_not_truncated` | AC-003 | invariant 1 | RED |
-//! | `test_BC_4_01_004_ac004_special_chars_xml_escaped_well_formed` | AC-004 | EC-001 | RED |
-//! | `test_BC_4_01_004_ac005_chart_diagram_alt_on_enclosing_shape` | AC-005 | EC-005 | RED |
-//! | `test_BC_5_01_005_ac006_dc_language_exact_bcp47_en_us` | AC-006 | postcondition 1 | RED |
-//! | `test_BC_5_01_005_ac006_dc_language_exact_bcp47_zh_hant_tw` | AC-006 | postcondition 1 | RED |
-//! | `test_BC_5_01_005_ac007_no_lang_defaults_to_en` | AC-007 | EC-003 | RED |
-//! | `test_BC_4_01_004_ec001_all_decorative_slide` | EC-001 | postcondition 2 | RED |
-//! | `test_BC_4_01_004_ec002_zh_tw_lang_bcp47_embedded` | EC-002 | EC-003 | RED |
-//! | `test_BC_4_01_004_ec005_300_char_alt_exact_length` | EC-005 | invariant 1 | RED |
+//! | `test_BC_4_01_004_ac001_non_decorative_image_has_non_empty_descr` | AC-001 | postcondition 1 | `build_image_picture` sets description: None (no AltTextEmbedder call) |
+//! | `test_BC_4_01_004_ac002_decorative_image_has_empty_descr_attribute_present` | AC-002 | postcondition 2 | `build_image_picture` sets description: None for Decorative (not Some("")) |
+//! | `test_BC_4_01_004_ac003_300_char_alt_not_truncated` | AC-003 | invariant 1 | same as AC-001 |
+//! | `test_BC_4_01_004_ac004_special_chars_xml_escaped_well_formed` | AC-004 | EC-001 | same as AC-001 |
+//! | `test_BC_4_01_004_ac005_chart_frame_alt_on_enclosing_shape` | AC-005 | EC-005 | `build_shape_tree` skips `Chart { .. }` (debug arm, no shape emitted) |
+//! | `test_BC_4_01_004_ac005_diagram_frame_alt_on_enclosing_shape` | AC-005 | EC-005 | `build_picture` sets description: None for Diagram (ignores alt field) |
+//! | `test_BC_5_01_005_ac006_dc_language_exact_bcp47_en_us` | AC-006 | postcondition 1 | GREEN (build_doc_props already correct) — verify stays green |
+//! | `test_BC_5_01_005_ac006_dc_language_exact_bcp47_zh_hant_tw` | AC-006 | postcondition 1 | GREEN (build_doc_props already correct) |
+//! | `test_BC_5_01_005_ac007_no_lang_defaults_to_en` | AC-007 | EC-003 | `build_doc_props` uses unwrap_or("en-US") — must change to "en" |
+//! | `test_BC_4_01_004_ec001_all_decorative_slide` | EC-001 | postcondition 2 | same as AC-002 |
+//! | `test_BC_4_01_004_ec002_zh_tw_lang_bcp47_embedded` | EC-002 | EC-003 | GREEN |
+//! | `test_BC_4_01_004_ec005_300_char_alt_exact_length` | EC-005 | invariant 1 | same as AC-001 |
+//! | `test_BC_4_01_004_ec006_chart_none_alt_maps_to_decorative_descr_empty` | EC-006 | EC-006 | `build_shape_tree` skips `Chart { .. }` entirely |
+//! | `test_BC_4_01_004_ec007_diagram_none_alt_maps_to_decorative_descr_empty` | EC-007 | EC-007 | `build_picture` sets description: None (not Some("")) |
 
 #![allow(non_snake_case)]
 #![allow(clippy::unwrap_used)]
@@ -134,15 +141,16 @@ fn title_bbox() -> BoundingBox {
     }
 }
 
-/// Build a `LaidOutSlide` with one `FrameContent::Image { alt }` frame.
+/// Build a `LaidOutSlide` with one `FrameContent::Image { alt: AltText::Provided }` frame.
 fn make_slide_with_image_alt(index: usize, alt: &str) -> LaidOutSlide {
+    use slideforge_types::AltText;
     LaidOutSlide {
         source_index: index,
         slide_type_keyword: Arc::from("title"),
         frames: vec![Frame {
             bbox: title_bbox(),
             content: FrameContent::Image {
-                alt: Arc::from(alt),
+                alt: AltText::Provided(Arc::from(alt)),
             },
             text_flow: None,
         }],
@@ -152,22 +160,21 @@ fn make_slide_with_image_alt(index: usize, alt: &str) -> LaidOutSlide {
     }
 }
 
-/// Build a `LaidOutSlide` with one `FrameContent::Image { alt: "" }` frame
-/// to simulate a decorative image (empty alt text = decorative per story spec).
+/// Build a `LaidOutSlide` with one `FrameContent::Image { alt: AltText::Decorative }` frame
+/// to simulate a decorative image.
 ///
-/// Note: STORY-015 guarantees that by the time frames reach the PPTX exporter,
-/// every visual element has either a non-empty `alt` or `decorative: true`.
-/// For STORY-039 tests, we use the existing `FrameContent::Image { alt }` where
-/// `alt.is_empty()` signals decorative — matching what `AltTextEmbedder` will
-/// need to handle.
+/// STORY-039: AltText::Decorative is the explicit opt-out marker (not empty Arc<str>).
+/// The PPTX exporter emits `descr=""` for decorative frames (attribute present, empty value).
 fn make_slide_with_decorative_image(index: usize) -> LaidOutSlide {
-    // Decorative: represented as Image with empty alt (per AltTextEmbedder contract).
+    use slideforge_types::AltText;
     LaidOutSlide {
         source_index: index,
         slide_type_keyword: Arc::from("title"),
         frames: vec![Frame {
             bbox: title_bbox(),
-            content: FrameContent::Image { alt: Arc::from("") },
+            content: FrameContent::Image {
+                alt: AltText::Decorative,
+            },
             text_flow: None,
         }],
         speaker_notes: None,
@@ -217,37 +224,125 @@ fn make_laid_out_deck_with_lang_only() -> LaidOutDeck {
     }
 }
 
-/// Build a `LaidOutDeck` with one slide containing a `Diagram` frame (for AC-005).
-fn make_laid_out_deck_with_diagram(alt: &str) -> LaidOutDeck {
-    // Use a minimal valid SVG that passes NormalizedDiagramSvg::from_normalized_string.
-    let svg = Arc::from(
-        r#"<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300" aria-label="chart" role="img"><title>chart</title></svg>"#,
-    );
-    let normalized = NormalizedDiagramSvg::from_normalized_string(svg);
-
-    // For the diagram frame, the alt text should come from the frame metadata.
-    // In STORY-039, AltTextEmbedder reads alt from FrameContent::Image or ShapeFrame.
-    // For Diagram frames, the enclosing <p:pic> should get the alt from the deck-level
-    // alt field that would be attached alongside the diagram content.
-    //
-    // Since FrameContent::Diagram does not yet carry an alt field (that is STORY-015),
-    // this test exercises the path through AltTextEmbedder where the diagram's
-    // enclosing <p:pic> shape gets the alt text. We represent this via an Image
-    // frame with the given alt text (simulating the output of a chart encoder).
-    let _ = normalized; // normalized svg is built, used below for the slide image variant
-
+/// Build a `LaidOutDeck` with one slide containing a REAL `FrameContent::Chart` frame (AC-005).
+///
+/// STORY-039: AC-005 requires REAL Chart/Diagram frames — NOT Image proxies (F-039-C2).
+/// The alt text is `AltText::Provided(...)` as threaded from `ChartSpec.alt`.
+///
+/// Red Gate reason: `slide_serializer.rs` currently skips `Chart { .. }` frames
+/// (they fall into the `FrameContent::Chart { .. } | ... => { debug }` arm and
+/// produce no `<p:cNvPr descr=...>` output). The implementer must route Chart
+/// frames through `AltTextEmbedder` to emit `descr` on the enclosing `<p:grpSp>`.
+fn make_laid_out_deck_with_chart_frame(alt: &str) -> LaidOutDeck {
+    use slideforge_types::AltText;
     LaidOutDeck {
         page_size: PageSize::default(),
         slides: vec![LaidOutSlide {
             source_index: 0,
-            slide_type_keyword: Arc::from("title"),
+            slide_type_keyword: Arc::from("chart"),
             frames: vec![Frame {
                 bbox: title_bbox(),
-                // Use Image variant to test alt-on-enclosing-shape path.
-                // STORY-039 implementer: AltTextEmbedder must set descr on the <p:pic>
-                // that wraps chart/diagram SVG (AC-005 / BC-4.01.004 EC-005).
-                content: FrameContent::Image {
-                    alt: Arc::from(alt),
+                // REAL FrameContent::Chart with Provided alt text.
+                // This is the CORRECT fixture for AC-005 (not an Image proxy — F-039-C2).
+                content: FrameContent::Chart {
+                    alt: AltText::Provided(Arc::from(alt)),
+                },
+                text_flow: None,
+            }],
+            speaker_notes: None,
+            register_tags: vec![],
+            register_content: vec![],
+        }],
+        sections: vec![],
+        warnings: vec![],
+    }
+}
+
+/// Build a `LaidOutDeck` with one slide containing a REAL `FrameContent::Diagram` frame (AC-005).
+///
+/// STORY-039: AC-005 requires REAL Diagram frames — NOT Image proxies (F-039-C2).
+fn make_laid_out_deck_with_diagram_frame(alt: &str) -> LaidOutDeck {
+    use slideforge_types::AltText;
+    // Minimal valid SVG for the frame payload.
+    let svg = Arc::from(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300" aria-label="diagram" role="img"><title>diagram</title></svg>"#,
+    );
+    let normalized = NormalizedDiagramSvg::from_normalized_string(svg);
+    LaidOutDeck {
+        page_size: PageSize::default(),
+        slides: vec![LaidOutSlide {
+            source_index: 0,
+            slide_type_keyword: Arc::from("diagram"),
+            frames: vec![Frame {
+                bbox: title_bbox(),
+                // REAL FrameContent::Diagram with Provided alt text.
+                // Alt text threaded from DiagramSpec.alt (STORY-039 IR threading).
+                content: FrameContent::Diagram {
+                    svg: normalized,
+                    alt: AltText::Provided(Arc::from(alt)),
+                },
+                text_flow: None,
+            }],
+            speaker_notes: None,
+            register_tags: vec![],
+            register_content: vec![],
+        }],
+        sections: vec![],
+        warnings: vec![],
+    }
+}
+
+/// Build a `LaidOutDeck` with one slide containing a `FrameContent::Chart`
+/// where `ChartSpec.alt = None` was mapped to `AltText::Decorative` (EC-006).
+///
+/// Red Gate reason: layout::run does NOT yet thread ChartSpec.alt. The test
+/// asserts that when `alt = AltText::Decorative`, the PPTX emits `descr=""`
+/// (not absent). This tests the Decorative-distinction code path in AltTextEmbedder.
+fn make_laid_out_deck_with_chart_none_alt() -> LaidOutDeck {
+    use slideforge_types::AltText;
+    LaidOutDeck {
+        page_size: PageSize::default(),
+        slides: vec![LaidOutSlide {
+            source_index: 0,
+            slide_type_keyword: Arc::from("chart"),
+            frames: vec![Frame {
+                bbox: title_bbox(),
+                // AltText::Decorative = what layout::run produces when ChartSpec.alt = None
+                // (safe sentinel + tracing::warn! per EC-006).
+                content: FrameContent::Chart {
+                    alt: AltText::Decorative,
+                },
+                text_flow: None,
+            }],
+            speaker_notes: None,
+            register_tags: vec![],
+            register_content: vec![],
+        }],
+        sections: vec![],
+        warnings: vec![],
+    }
+}
+
+/// Build a `LaidOutDeck` with one slide containing a `FrameContent::Diagram`
+/// where `DiagramSpec.alt = None` was mapped to `AltText::Decorative` (EC-007).
+fn make_laid_out_deck_with_diagram_none_alt() -> LaidOutDeck {
+    use slideforge_types::AltText;
+    let svg = Arc::from(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"><title>empty</title></svg>"#,
+    );
+    let normalized = NormalizedDiagramSvg::from_normalized_string(svg);
+    LaidOutDeck {
+        page_size: PageSize::default(),
+        slides: vec![LaidOutSlide {
+            source_index: 0,
+            slide_type_keyword: Arc::from("diagram"),
+            frames: vec![Frame {
+                bbox: title_bbox(),
+                // AltText::Decorative = what layout::run produces when DiagramSpec.alt = None
+                // (safe sentinel + tracing::warn! per EC-007).
+                content: FrameContent::Diagram {
+                    svg: normalized,
+                    alt: AltText::Decorative,
                 },
                 text_flow: None,
             }],
@@ -563,31 +658,77 @@ fn test_BC_4_01_004_ac004_special_chars_xml_escaped_well_formed() {
     );
 }
 
-// ─── AC-005: Chart/diagram alt on enclosing shape ─────────────────────────────
+// ─── AC-005: Chart/diagram alt on enclosing shape (REAL frames, not Image proxies) ────
 
-/// BC-4.01.004 EC-005: A chart shape's alt text goes on the enclosing shape.
+/// BC-4.01.004 EC-005: A chart frame's alt text goes on the enclosing shape's `<p:cNvPr>`.
 ///
-/// A slide with a chart frame must have the alt text on the `<p:cNvPr>` of the
-/// `<p:pic>` or `<p:grpSp>` shape that contains the SVG media, not on any
-/// inner text box.
+/// This test uses a REAL `FrameContent::Chart { alt: AltText::Provided(...) }` frame
+/// (not an Image proxy — F-039-C2 fix). The alt text is threaded from `ChartSpec.alt`
+/// via the IR.
 ///
-/// Red Gate: `AltTextEmbedder::embed` is `todo!()`.
+/// Red Gate: `build_shape_tree` in `slide_serializer.rs` currently skips
+/// `FrameContent::Chart { .. }` frames (falls through to the
+/// `Chart { .. } | Shape(_) | ... => { debug }` arm) and emits NO `<p:grpSp>` or
+/// `<p:pic>` shape at all. As a result, no `<p:cNvPr descr=...>` is emitted for
+/// chart frames. The test fails because `descr_values` will be empty.
+///
+/// The implementer must route `FrameContent::Chart { alt }` through
+/// `AltTextEmbedder` and emit an enclosing shape (p:grpSp or p:pic) with the
+/// correct `descr` attribute.
 #[test]
-fn test_BC_4_01_004_ac005_chart_diagram_alt_on_enclosing_shape() {
+fn test_BC_4_01_004_ac005_chart_frame_alt_on_enclosing_shape() {
     let alt_text = "Bar chart: Q1 revenue by region";
     let deck = make_deck_with_lang("en-US");
-    let laid_out = make_laid_out_deck_with_diagram(alt_text);
+    // REAL FrameContent::Chart { alt: AltText::Provided } — NOT an Image proxy.
+    let laid_out = make_laid_out_deck_with_chart_frame(alt_text);
 
     let pptx_bytes = build_pptx(&deck, &laid_out);
     let slide_xml = zip_read_entry(&pptx_bytes, "ppt/slides/slide1.xml");
 
-    // The cNvPr on the enclosing pic/grpSp must have the alt text.
+    // The cNvPr on the enclosing group shape (p:grpSp or p:pic) must carry the alt text.
+    // Red Gate failure: `slide_serializer.rs` currently skips Chart { .. } frames
+    // (they fall into the `skipping non-text frame` debug arm) so no descr is emitted.
     let descr_values = collect_cnvpr_descr_values(&slide_xml);
 
     assert!(
         descr_values.iter().any(|d| d == alt_text),
-        "slide1.xml must have descr=\"{alt_text}\" on the enclosing <p:pic>/<p:grpSp> \
-         shape for the chart frame (BC-4.01.004 EC-005). \
+        "slide1.xml must have descr=\"{alt_text}\" on the enclosing <p:grpSp>/<p:pic> \
+         shape for the FrameContent::Chart frame (BC-4.01.004 EC-005). \
+         The implementer must route Chart {{ alt }} through AltTextEmbedder. \
+         Found descr values: {descr_values:?}"
+    );
+}
+
+/// BC-4.01.004 EC-005 (Diagram variant): A diagram frame's alt text goes on the
+/// enclosing shape's `<p:cNvPr>`.
+///
+/// This test uses a REAL `FrameContent::Diagram { svg, alt: AltText::Provided(...) }` frame
+/// (not an Image proxy — F-039-C2 fix). The alt text is threaded from `DiagramSpec.alt`.
+///
+/// Red Gate: `slide_serializer.rs` currently calls `build_picture` for Diagram frames
+/// but does NOT pass the `alt` through to `<p:cNvPr descr=...>`. The `build_picture`
+/// function sets `description: None` on the `<p:cNvPr>`, so no `descr` attribute appears.
+/// The implementer must update the Diagram arm to pass `alt` to the cNvPr description field.
+#[test]
+fn test_BC_4_01_004_ac005_diagram_frame_alt_on_enclosing_shape() {
+    let alt_text = "Flowchart: Q1 deployment pipeline steps";
+    let deck = make_deck_with_lang("en-US");
+    // REAL FrameContent::Diagram { svg, alt: AltText::Provided } — NOT an Image proxy.
+    let laid_out = make_laid_out_deck_with_diagram_frame(alt_text);
+
+    let pptx_bytes = build_pptx(&deck, &laid_out);
+    let slide_xml = zip_read_entry(&pptx_bytes, "ppt/slides/slide1.xml");
+
+    // The cNvPr on the enclosing <p:pic> for the diagram must carry the alt text.
+    // Red Gate failure: `build_picture` in `slide_serializer.rs` sets description: None
+    // (line ~942: `description: None`). No descr attribute is emitted for Diagram frames.
+    let descr_values = collect_cnvpr_descr_values(&slide_xml);
+
+    assert!(
+        descr_values.iter().any(|d| d == alt_text),
+        "slide1.xml must have descr=\"{alt_text}\" on the enclosing <p:pic> shape \
+         for the FrameContent::Diagram frame (BC-4.01.004 EC-005). \
+         The implementer must pass alt to build_picture's cNvPr description field. \
          Found descr values: {descr_values:?}"
     );
 }
@@ -821,5 +962,91 @@ fn test_BC_4_01_004_ec005_300_char_alt_exact_length() {
         "exactly one cNvPr descr must carry the full 300-char string \
          (BC-4.01.004 invariant 1). Found descr lengths: {:?}",
         descr_values.iter().map(String::len).collect::<Vec<_>>()
+    );
+}
+
+// ─── EC-006: ChartSpec.alt = None → AltText::Decorative + descr="" ───────────
+
+/// BC-4.01.004 EC-006 (amended story spec):
+/// When `ChartSpec.alt = None` reaches the layout engine (upstream validator miss),
+/// `layout::run` must map it to `AltText::Decorative` and emit `tracing::warn!`.
+///
+/// This test verifies the PPTX output side of that contract: a
+/// `FrameContent::Chart { alt: AltText::Decorative }` frame must produce
+/// `descr=""` on its enclosing shape (attribute PRESENT with empty value, NOT absent).
+///
+/// Red Gate reason: `slide_serializer.rs` currently falls through Chart { .. } frames
+/// to the `skipping non-text frame` debug arm — no shape and no `<p:cNvPr>` is emitted
+/// at all. The test fails because `descr_values.iter().any(|d| d.is_empty())` is false
+/// (there are no cNvPr elements with descr at all for Chart frames).
+///
+/// The implementer must:
+/// 1. Route `FrameContent::Chart { alt: AltText::Decorative }` through AltTextEmbedder.
+/// 2. Emit `descr=""` (present, empty) on the enclosing `<p:grpSp>/<p:pic>` cNvPr.
+#[test]
+fn test_BC_4_01_004_ec006_chart_none_alt_maps_to_decorative_descr_empty() {
+    let deck = make_deck_with_lang("en-US");
+    // Chart frame with AltText::Decorative (simulates ChartSpec.alt = None path).
+    let laid_out = make_laid_out_deck_with_chart_none_alt();
+
+    let pptx_bytes = build_pptx(&deck, &laid_out);
+    let slide_xml = zip_read_entry(&pptx_bytes, "ppt/slides/slide1.xml");
+
+    // Assertion: a cNvPr with descr="" must be present (Decorative = empty descr).
+    // The attribute MUST be present (not absent) — OOXML accessibility contract.
+    //
+    // Red Gate: slide_serializer.rs skips Chart { .. } entirely. No cNvPr is emitted.
+    // This fails because collect_cnvpr_descr_values returns an empty vec.
+    let descr_values = collect_cnvpr_descr_values(&slide_xml);
+    assert!(
+        descr_values.iter().any(String::is_empty),
+        "slide1.xml must contain <p:cNvPr descr=\"\"> for a Chart frame with \
+         AltText::Decorative (EC-006 — ChartSpec.alt = None safe-sentinel path). \
+         The descr attribute MUST be present with empty value. \
+         Found descr values: {descr_values:?}\n\
+         Red Gate: chart frames are currently skipped by slide_serializer.rs."
+    );
+}
+
+// ─── EC-007: DiagramSpec.alt = None → AltText::Decorative + descr="" ─────────
+
+/// BC-4.01.004 EC-007 (amended story spec):
+/// When `DiagramSpec.alt = None` reaches the layout engine (upstream validator miss),
+/// `layout::run` must map it to `AltText::Decorative` and emit `tracing::warn!`.
+///
+/// This test verifies the PPTX output side: a
+/// `FrameContent::Diagram { svg, alt: AltText::Decorative }` frame must produce
+/// `descr=""` on its enclosing `<p:pic>` shape.
+///
+/// Red Gate reason: `build_picture` in `slide_serializer.rs` currently sets
+/// `description: None` (line ~942). The `description` field on `NonVisualDrawingProperties`
+/// maps to the `descr` XML attribute; when it is `None`, no `descr` attribute is emitted.
+/// For Decorative frames, the attribute MUST be present (even if empty).
+///
+/// The implementer must pass `AltText::Decorative` through build_picture's `description` field
+/// as `Some("".to_owned())` rather than `None`.
+#[test]
+fn test_BC_4_01_004_ec007_diagram_none_alt_maps_to_decorative_descr_empty() {
+    let deck = make_deck_with_lang("en-US");
+    // Diagram frame with AltText::Decorative (simulates DiagramSpec.alt = None path).
+    let laid_out = make_laid_out_deck_with_diagram_none_alt();
+
+    let pptx_bytes = build_pptx(&deck, &laid_out);
+    let slide_xml = zip_read_entry(&pptx_bytes, "ppt/slides/slide1.xml");
+
+    // Assertion: a cNvPr with descr="" must be present (Decorative = empty descr attribute).
+    //
+    // Red Gate: `build_picture` in slide_serializer.rs sets description: None for Diagram frames.
+    // `collect_cnvpr_descr_values` only collects cNvPr elements that HAVE a descr attribute.
+    // Since description: None emits no descr attribute, the collected vec will not contain "".
+    // This will be empty or contain only non-decorative values from other shapes.
+    let descr_values = collect_cnvpr_descr_values(&slide_xml);
+    assert!(
+        descr_values.iter().any(String::is_empty),
+        "slide1.xml must contain <p:cNvPr descr=\"\"> for a Diagram frame with \
+         AltText::Decorative (EC-007 — DiagramSpec.alt = None safe-sentinel path). \
+         The descr attribute MUST be present with empty value (not absent). \
+         Found descr values: {descr_values:?}\n\
+         Red Gate: build_picture sets description: None instead of Some(\"\".to_owned())."
     );
 }

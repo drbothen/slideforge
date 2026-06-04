@@ -195,8 +195,8 @@ pub fn run_inline_validation(
                 | crate::types::FrameContent::Subtitle(_)
                 | crate::types::FrameContent::Body(_)
                 | crate::types::FrameContent::Image { .. }
-                | crate::types::FrameContent::Chart
-                | crate::types::FrameContent::Diagram(_)
+                | crate::types::FrameContent::Chart { .. }
+                | crate::types::FrameContent::Diagram { .. }
                 | crate::types::FrameContent::Empty
                 | crate::types::FrameContent::ErrorSlidePlaceholder { .. } => {},
             }

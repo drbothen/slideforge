@@ -244,7 +244,7 @@ fn figure_slide_with_alt(alt_text: &str) -> LaidOutDeck {
                         height: Emu(4_229_100),
                     },
                     content: FrameContent::Image {
-                        alt: Arc::from(alt_text),
+                        alt: slideforge_types::AltText::Provided(Arc::from(alt_text)),
                     },
                     text_flow: None,
                 },
@@ -272,8 +272,10 @@ fn decorative_only_slide() -> LaidOutDeck {
                     width: Emu(9_144_000),
                     height: Emu(5_143_500),
                 },
-                // Empty alt = decorative — must become a PDF Artifact.
-                content: FrameContent::Image { alt: Arc::from("") },
+                // Decorative image — must become a PDF Artifact (STORY-039 IR reshape).
+                content: FrameContent::Image {
+                    alt: slideforge_types::AltText::Decorative,
+                },
                 text_flow: None,
             }],
             speaker_notes: None,
@@ -521,7 +523,13 @@ fn test_bc_4_03_001_diagram_frame_alt_text_from_spec() {
                     width: Emu(9_144_000),
                     height: Emu(5_143_500),
                 },
-                content: FrameContent::Diagram(normalized_svg),
+                // STORY-039 IR reshape: Diagram is now struct with svg + alt fields.
+                // Using AltText::Decorative because the alt-threading from DiagramSpec
+                // through layout::run is NOT YET IMPLEMENTED (implementer's job).
+                content: FrameContent::Diagram {
+                    svg: normalized_svg,
+                    alt: slideforge_types::AltText::Decorative,
+                },
                 text_flow: None,
             }],
             speaker_notes: None,
@@ -597,7 +605,12 @@ fn test_bc_4_03_001_chart_frame_alt_text_from_spec() {
                     width: Emu(9_144_000),
                     height: Emu(5_143_500),
                 },
-                content: FrameContent::Chart,
+                // STORY-039 IR reshape: Chart is now struct with alt field.
+                // Using AltText::Decorative because the alt-threading from ChartSpec
+                // through layout::run is NOT YET IMPLEMENTED (implementer's job).
+                content: FrameContent::Chart {
+                    alt: slideforge_types::AltText::Decorative,
+                },
                 text_flow: None,
             }],
             speaker_notes: None,
@@ -834,8 +847,10 @@ fn test_bc_4_03_001_decorative_artifact_content_tag_present() {
                         width: Emu(9_144_000),
                         height: Emu(4_229_100),
                     },
-                    // Decorative image: empty alt = must become an Artifact.
-                    content: FrameContent::Image { alt: Arc::from("") },
+                    // Decorative image: AltText::Decorative = must become an Artifact.
+                    content: FrameContent::Image {
+                        alt: slideforge_types::AltText::Decorative,
+                    },
                     text_flow: None,
                 },
             ],
@@ -1152,7 +1167,9 @@ fn test_bc_4_03_001_ua1_export_proxy_validation() {
                     height: Emu(3_657_600),
                 },
                 content: FrameContent::Image {
-                    alt: Arc::from("Bar chart showing revenue by quarter"),
+                    alt: slideforge_types::AltText::Provided(Arc::from(
+                        "Bar chart showing revenue by quarter",
+                    )),
                 },
                 text_flow: None,
             },
@@ -1569,7 +1586,12 @@ fn test_bc_4_03_001_invariant_every_figure_has_non_empty_alt() {
                 width: Emu(9_144_000),
                 height: Emu(5_143_500),
             },
-            content: FrameContent::Diagram(empty_svg),
+            // STORY-039 IR reshape: Diagram is now struct with svg + alt fields.
+            // AltText::Decorative = stub placeholder (alt-threading not yet implemented).
+            content: FrameContent::Diagram {
+                svg: empty_svg,
+                alt: slideforge_types::AltText::Decorative,
+            },
             text_flow: None,
         }],
         speaker_notes: None,

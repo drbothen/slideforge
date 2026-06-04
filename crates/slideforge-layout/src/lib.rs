@@ -1804,8 +1804,8 @@ mod tests {
             // Non-text-bearing variants: Image, Chart, Diagram, Empty,
             // ErrorSlidePlaceholder. Return empty — no user text in frames.
             FrameContent::Image { .. }
-            | FrameContent::Chart
-            | FrameContent::Diagram(_)
+            | FrameContent::Chart { .. }
+            | FrameContent::Diagram { .. }
             | FrameContent::Empty
             | FrameContent::ErrorSlidePlaceholder { .. } => String::new(),
         }

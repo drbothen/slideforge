@@ -720,10 +720,12 @@ fn draw_frame(
                 draw_text_at_bbox(surface, &text, bbox, 18.0, font);
             }
         },
-        FrameContent::Diagram(svg) => {
+        FrameContent::Diagram { svg, .. } => {
             // Place the SVG at the frame's Surface coordinates (top-left, Y-down).
             // krilla's Surface origin is top-left; bbox.y is the top edge (Y-down).
             // No ir_y_to_pdf_y flip — krilla applies the PDF Y-flip internally.
+            // STORY-039: alt is now in the IR but PDF Figure tagging is handled by
+            // tag_engine.rs; the draw path just renders the SVG content here.
             let surface_x = emu_to_pt(bbox.x);
             let surface_y = emu_to_pt(bbox.y);
             let frame_w_pt = emu_to_pt(bbox.width);
@@ -750,7 +752,8 @@ fn draw_frame(
         },
         // Chart: no SVG payload at frame level — drawn via ChartRenderer pass.
         // Image, Shape, Empty: no drawing in this story.
-        FrameContent::Chart
+        // STORY-039: Chart now carries `alt` field; drawing stub unchanged.
+        FrameContent::Chart { .. }
         | FrameContent::Image { .. }
         | FrameContent::Shape(_)
         | FrameContent::Empty => {},
@@ -1363,8 +1366,11 @@ mod tests {
                             width: Emu(9_144_000),
                             height: Emu(5_143_500),
                         },
+                        // STORY-039 IR reshape: Image alt is now AltText enum.
                         content: FrameContent::Image {
-                            alt: Arc::from("A mountain landscape at sunrise"),
+                            alt: slideforge_types::AltText::Provided(Arc::from(
+                                "A mountain landscape at sunrise",
+                            )),
                         },
                         text_flow: None,
                     },
@@ -2103,7 +2109,11 @@ mod tests {
                         width: Emu(9_144_000),
                         height: Emu(5_143_500),
                     },
-                    content: FrameContent::Diagram(svg),
+                    // STORY-039 IR reshape: Diagram is now struct with svg + alt fields.
+                    content: FrameContent::Diagram {
+                        svg,
+                        alt: slideforge_types::AltText::Decorative,
+                    },
                     text_flow: None,
                 }],
                 speaker_notes: None,
@@ -2482,7 +2492,11 @@ mod tests {
                             width: Emu(9_144_000),
                             height: Emu(3_657_600), // 2-inch tall SVG frame
                         },
-                        content: FrameContent::Diagram(svg),
+                        // STORY-039 IR reshape: Diagram is now struct with svg + alt fields.
+                    content: FrameContent::Diagram {
+                        svg,
+                        alt: slideforge_types::AltText::Decorative,
+                    },
                         text_flow: None,
                     },
                     Frame {
