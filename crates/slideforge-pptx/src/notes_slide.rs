@@ -76,6 +76,28 @@ impl NotesSlideSerializer {
     /// This is the bounded exception for `ooxmlsdk` usage: `ooxmlsdk 0.6.1`
     /// does not expose typed builders for `p:notes` (notesSlide root element).
     /// The notes text is XML-escaped before embedding to prevent injection.
+    ///
+    /// ## OOXML structure
+    ///
+    /// Per the OOXML schema (`CT_Shape` / `CT_Placeholder`), `<p:ph>` is a
+    /// non-textual placeholder descriptor.  It is **not** a container and
+    /// **cannot** hold `<p:txBody>` as a child.  The correct structure is:
+    ///
+    /// ```xml
+    /// <p:sp>
+    ///   <p:nvSpPr>
+    ///     <p:cNvPr id="3" name="Notes Placeholder 2"/>
+    ///     <p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr>
+    ///     <p:nvPr><p:ph type="body" idx="1"/></p:nvPr>  <!-- self-closing -->
+    ///   </p:nvSpPr>
+    ///   <p:spPr/>
+    ///   <p:txBody>                <!-- sibling of nvSpPr, direct child of p:sp -->
+    ///     <a:bodyPr/>
+    ///     <a:lstStyle/>
+    ///     <a:p><a:r><a:t>notes text</a:t></a:r></a:p>
+    ///   </p:txBody>
+    /// </p:sp>
+    /// ```
     fn build_xml(
         slide_index: usize,
         notes_text: &str,
@@ -85,25 +107,11 @@ impl NotesSlideSerializer {
         // XML-escape the notes text to prevent injection into the XML body.
         let escaped = xml_escape(notes_text);
 
-        // XML structure note for the body placeholder:
-        //
-        // The test scanner (extract_body_placeholder_text in notes_tests.rs) works
-        // as follows:
-        //   1. Scans for Event::Start(ph) with attributes type="body" idx="1".
-        //   2. When found: sets in_body_placeholder=true, depth=1.
-        //   3. Subsequent Event::Start events increment depth.
-        //   4. Event::End events: if depth==0, reset; else decrement.
-        //   5. Event::Text events while in_body_placeholder: collected.
-        //
-        // For the text in <a:t> to be collected, it must be a DESCENDANT of the
-        // ph element — i.e., <p:txBody> and its children must be INSIDE <p:ph>.
-        //
-        // Standard OOXML places <p:txBody> as a sibling of <p:nvSpPr>, not inside
-        // <p:ph>. However, placing <p:txBody> inside <p:ph type="body" idx="1">
-        // is semantically valid per the OOXML schema (ph is a container that can
-        // hold txBody children), and real PowerPoint parsers accept this structure.
-        // The test's scanner is designed for this compact form, which is also the
-        // most direct way to express "this txBody belongs to the body placeholder".
+        // Schema-valid notesSlide structure (STORY-040 spec, section "notesSlide XML
+        // Structure"):
+        //   - sldImg placeholder sp: nvSpPr (with self-closing ph type="sldImg") + spPr
+        //   - body placeholder sp: nvSpPr (with self-closing ph type="body" idx="1")
+        //                          + spPr + txBody (sibling of nvSpPr, NOT inside ph)
         let xml = format!(
             concat!(
                 "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n",
@@ -118,6 +126,7 @@ impl NotesSlideSerializer {
                 "        <a:grpSpPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"0\" cy=\"0\"/>",
                 "<a:chOff x=\"0\" y=\"0\"/><a:chExt cx=\"0\" cy=\"0\"/></a:xfrm></a:grpSpPr>\n",
                 "      </p:grpSpPr>\n",
+                // Slide image placeholder — ph is self-closing inside nvPr (no txBody).
                 "      <p:sp>\n",
                 "        <p:nvSpPr>\n",
                 "          <p:cNvPr id=\"2\" name=\"Slide Image Placeholder {idx1}\"/>\n",
@@ -126,21 +135,21 @@ impl NotesSlideSerializer {
                 "        </p:nvSpPr>\n",
                 "        <p:spPr/>\n",
                 "      </p:sp>\n",
+                // Notes body placeholder — ph is self-closing inside nvPr;
+                // txBody is a SIBLING of nvSpPr under p:sp (CT_Shape ordering:
+                // nvSpPr → spPr → txBody).
                 "      <p:sp>\n",
                 "        <p:nvSpPr>\n",
                 "          <p:cNvPr id=\"3\" name=\"Notes Placeholder {idx2}\"/>\n",
                 "          <p:cNvSpPr><a:spLocks noGrp=\"1\"/></p:cNvSpPr>\n",
-                // <p:ph type="body" idx="1"> wraps the txBody so the test scanner
-                // (which tracks depth from the ph Start event) can collect <a:t> text.
-                "          <p:nvPr><p:ph type=\"body\" idx=\"1\">",
-                "<p:txBody>",
-                "<a:bodyPr/>",
-                "<a:lstStyle/>",
-                "<a:p><a:r><a:t>{notes}</a:t></a:r></a:p>",
-                "</p:txBody>",
-                "</p:ph></p:nvPr>\n",
+                "          <p:nvPr><p:ph type=\"body\" idx=\"1\"/></p:nvPr>\n",
                 "        </p:nvSpPr>\n",
                 "        <p:spPr/>\n",
+                "        <p:txBody>\n",
+                "          <a:bodyPr/>\n",
+                "          <a:lstStyle/>\n",
+                "          <a:p><a:r><a:t>{notes}</a:t></a:r></a:p>\n",
+                "        </p:txBody>\n",
                 "      </p:sp>\n",
                 "    </p:spTree>\n",
                 "  </p:cSld>\n",

@@ -240,28 +240,125 @@ fn assert_zip_entry_present(pptx_bytes: &[u8], member_name: &str) {
     );
 }
 
-/// Extract the text content from the `<p:ph type="body" idx="1">` txBody in
-/// a notesSlide XML string.  Returns `None` if the placeholder is absent.
+/// Extract the text content from the body placeholder's `<p:txBody>` in a
+/// notesSlide XML string.  Returns `None` if the placeholder or its text is
+/// absent.
+///
+/// ## Correct OOXML structure this function parses
+///
+/// Per the OOXML schema (CT_Shape / CT_Placeholder), `<p:ph>` is a
+/// non-textual descriptor — it is **self-closing** and lives inside
+/// `<p:nvPr>`, not wrapping `<p:txBody>`.  The `<p:txBody>` is a **sibling**
+/// of `<p:nvSpPr>` directly under `<p:sp>`:
+///
+/// ```xml
+/// <p:sp>
+///   <p:nvSpPr>
+///     <p:cNvPr .../>
+///     <p:cNvSpPr>...</p:cNvSpPr>
+///     <p:nvPr><p:ph type="body" idx="1"/></p:nvPr>  <!-- Event::Empty -->
+///   </p:nvSpPr>
+///   <p:spPr/>
+///   <p:txBody>                <!-- sibling of nvSpPr, direct child of p:sp -->
+///     <a:bodyPr/>
+///     <a:lstStyle/>
+///     <a:p><a:r><a:t>notes text</a:t></a:r></a:p>
+///   </p:txBody>
+/// </p:sp>
+/// ```
+///
+/// ## Parse strategy (two-pass over the same `<p:sp>` region)
+///
+/// Because `<p:ph>` fires `Event::Empty` (not `Event::Start`), and because
+/// `<p:txBody>` is a sibling — not a descendant — of `<p:ph>`, we track state
+/// across the entire `<p:sp>`:
+///
+/// 1. When we enter a `<p:sp>` (`Event::Start("sp")`), record `sp_depth`.
+/// 2. If we see `Event::Empty("ph")` with `type="body"` and `idx="1"` while
+///    inside that sp, mark `sp_has_body_ph = true`.
+/// 3. If `sp_has_body_ph` is set AND we enter `<p:txBody>`, set
+///    `in_body_txbody = true`.
+/// 4. While `in_body_txbody`, collect `Event::Text` from any `<a:t>`.
+/// 5. When we exit `<p:sp>` (depth back to pre-sp), reset all flags.
+///
+/// ## Regression guard
+///
+/// This function also asserts that `<p:txBody>` is **never** found directly
+/// inside a `<p:ph>` element.  If it were, the OOXML would be schema-invalid
+/// (regression to the pre-fix invalid form).
 fn extract_body_placeholder_text(xml: &str) -> Option<String> {
-    // Quick parse: find <p:ph type="body" idx="1"> then collect <a:t> text.
-    // We do a simple scan rather than full DOM traversal.
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
-    let mut in_body_placeholder = false;
-    let mut depth = 0_usize;
+
+    // State machine
+    let mut in_sp = false;
+    let mut sp_depth = 0_usize; // element depth when we entered the current sp
+    let mut sp_has_body_ph = false; // did we see <p:ph type="body" idx="1"/> inside this sp?
+    let mut global_depth = 0_usize; // absolute element depth (Start increments, End decrements)
+    let mut in_txbody = false; // inside the txBody that belongs to the body-ph sp
+    let mut txbody_depth = 0_usize; // element depth when we entered <p:txBody>
+    let mut in_ph_start = false; // true while inside a <p:ph> that was Start (regression guard)
     let mut collected = String::new();
 
     loop {
         match reader.read_event() {
             Ok(Event::Start(e)) => {
+                global_depth += 1;
                 let local = std::str::from_utf8(e.local_name().as_ref())
                     .unwrap_or("")
                     .to_owned();
-                if local == "sp" {
-                    // Scan sp's children for a nvPr → ph with type="body" idx="1".
-                    // We use a simpler scan: track nvPr/ph attributes.
-                }
+
+                // Regression guard: <p:ph> must never appear as a Start event
+                // (it should always be self-closing / Event::Empty).  If it
+                // does, it means <p:txBody> could be nested inside <p:ph>,
+                // which is schema-invalid OOXML.
                 if local == "ph" {
+                    in_ph_start = true;
+                }
+                assert!(
+                    !(in_ph_start && local == "txBody"),
+                    "extract_body_placeholder_text: found <p:txBody> nested inside <p:ph> — \
+                     this is schema-invalid OOXML (regression to pre-fix invalid structure). \
+                     <p:ph> must be self-closing (Event::Empty) inside <p:nvPr>, and \
+                     <p:txBody> must be a sibling of <p:nvSpPr> under <p:sp>."
+                );
+
+                match local.as_str() {
+                    "sp" if !in_sp => {
+                        in_sp = true;
+                        sp_depth = global_depth;
+                        sp_has_body_ph = false;
+                    },
+                    "txBody" if in_sp && sp_has_body_ph && !in_txbody => {
+                        in_txbody = true;
+                        txbody_depth = global_depth;
+                    },
+                    _ => {},
+                }
+            },
+            Ok(Event::End(e)) => {
+                let local = std::str::from_utf8(e.local_name().as_ref())
+                    .unwrap_or("")
+                    .to_owned();
+                if local == "ph" {
+                    in_ph_start = false;
+                }
+                if in_txbody && global_depth == txbody_depth {
+                    in_txbody = false;
+                }
+                if in_sp && global_depth == sp_depth {
+                    in_sp = false;
+                    sp_has_body_ph = false;
+                }
+                global_depth = global_depth.saturating_sub(1);
+            },
+            // <p:ph type="body" idx="1"/> fires Event::Empty (self-closing) —
+            // this is the correct form.  No depth change.
+            Ok(Event::Empty(e)) => {
+                let local = std::str::from_utf8(e.local_name().as_ref())
+                    .unwrap_or("")
+                    .to_owned();
+                if local == "ph" && in_sp {
                     let mut has_body_type = false;
                     let mut has_idx_1 = false;
                     let decoder = reader.decoder();
@@ -281,25 +378,12 @@ fn extract_body_placeholder_text(xml: &str) -> Option<String> {
                         }
                     }
                     if has_body_type && has_idx_1 {
-                        in_body_placeholder = true;
-                        depth = 1;
+                        sp_has_body_ph = true;
                     }
-                } else if in_body_placeholder {
-                    depth += 1;
-                }
-            },
-            Ok(Event::End(e)) => {
-                if in_body_placeholder {
-                    if depth == 0 {
-                        in_body_placeholder = false;
-                    } else {
-                        depth -= 1;
-                    }
-                    let _ = e; // suppress unused warning
                 }
             },
             Ok(Event::Text(e)) => {
-                if in_body_placeholder {
+                if in_txbody {
                     let text = e.unescape().unwrap_or_default();
                     collected.push_str(&text);
                 }
