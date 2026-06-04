@@ -9,16 +9,16 @@ traces_to:
   - .factory/stories/epics.md
   - .factory/stories/dependency-graph.md
   - .factory/stories/wave-schedule.md
-total_stories: 81
-stories_written: 81
+total_stories: 82
+stories_written: 82
 stories_ready: 0
 stories_in_progress: 0
-stories_merged: 53
+stories_merged: 54
 ---
 
 # STORY-INDEX — slideforge v1.0
 
-> Authoritative index of all 81 stories across 6 waves and 21 epics.
+> Authoritative index of all 82 stories across 6 waves and 21 epics.
 > Update `status` and `merged_sha` fields as stories progress.
 > Story files live in `.factory/stories/stories/STORY-NNN-[short].md`.
 >
@@ -33,10 +33,10 @@ stories_merged: 53
 | Wave 1 | 14 | 0 | 0 | 0 | 14 | 0 |
 | Wave 2 | 7 | 0 | 0 | 0 | 7 | 0 |
 | Wave 3 | 17 | 0 | 0 | 0 | 17 | 0 |
-| Wave 4 | 18 | 3 | 0 | 0 | 15 | 0 |
-| Wave 5 | 19 | 19 | 0 | 0 | 0 | 0 |
+| Wave 4 | 18 | 2 | 0 | 0 | 16 | 0 |
+| Wave 5 | 20 | 20 | 0 | 0 | 0 | 0 |
 | Wave 6 | 6 | 6 | 0 | 0 | 0 | 0 |
-| **Total** | **81** | **28** | **0** | **0** | **53** | **0** |
+| **Total** | **82** | **28** | **0** | **0** | **54** | **0** |
 
 ---
 
@@ -114,7 +114,7 @@ stories_merged: 53
 | [STORY-037](stories/STORY-037-pptx-core-serialization.md) | EPIC-08 | PPTX Core Serialization: ooxmlsdk 0.6.1 + ZIP Assembly | BC-4.01.001 | P0 | 13 | strict | merged |
 | [STORY-038](stories/STORY-038-pptx-layout-compliance.md) | EPIC-08 | PPTX Layout Compliance: Placeholder Inheritance + Slide IDs + Layouts | BC-4.01.005 | P0 | 8 | strict | Merged |
 | [STORY-039](stories/STORY-039-pptx-a11y-metadata.md) | EPIC-08 | PPTX Accessibility Metadata + Layout IR Alt-Threading | BC-4.01.004, BC-5.01.005 | P0 | 8 | strict | merged |
-| [STORY-040](stories/STORY-040-pptx-notes-sections-masters.md) | EPIC-08 | PPTX: Speaker Notes + Slide Sections + notesMaster1.xml | BC-4.01.003, BC-4.01.006 | P0 | 5 | strict | draft |
+| [STORY-040](stories/STORY-040-pptx-notes-sections-masters.md) | EPIC-08 | PPTX: Speaker Notes + notesMaster1.xml + handoutMaster1.xml | BC-4.01.003, BC-4.01.006 | P0 | 3 | strict | merged |
 | [STORY-041](stories/STORY-041-docx-core-serialization.md) | EPIC-09 | DOCX Core Serialization: report register + ooxmlsdk | BC-4.02.001 | P0 | 8 | strict | merged |
 | [STORY-042](stories/STORY-042-docx-auto-sections.md) | EPIC-09 | DOCX: Auto-Generated Document Sections | BC-4.02.002 | P0 | 5 | strict | merged |
 | [STORY-043](stories/STORY-043-pdf-core-backend.md) | EPIC-13 | PDF Core: pdf-writer + krilla + SlideTagEngine | BC-4.03.002 | P0 | 8 | strict | merged |
@@ -128,11 +128,11 @@ stories_merged: 53
 | [STORY-077](stories/STORY-077-section-block-ir-extension.md) | EPIC-18 | SectionBlock IR Extension: FieldValue body + section-level register routing + inline-markup parser | BC-3.02.002, BC-1.14.003 | P0 | 13 | strict | merged |
 | [STORY-078](stories/STORY-078-parser-section-block-syntax.md) | EPIC-02 | Parser: section block syntax (section &lt;type&gt;: ... with sub-blocks) | BC-3.02.002 | P0 | 5 | strict | merged |
 
-**Wave 4 total points: 117**
+**Wave 4 total points: 115**
 
 ---
 
-## Wave 5: CLI + User-Facing Features + Deferred Surfaces (18 stories)
+## Wave 5: CLI + User-Facing Features + Deferred Surfaces (20 stories)
 
 | Story ID | Epic | Title | BCs | Priority | Points | tdd_mode | Status |
 |----------|------|-------|-----|---------|--------|---------|--------|
@@ -155,8 +155,9 @@ stories_merged: 53
 | [STORY-079](stories/STORY-079-diagrams-svg-dos-hardening.md) | EPIC-12 | slideforge-diagrams: SVG DoS hardening (byte-size cap + nesting-depth guard) | BC-1.12.003 | P2 | 3 | strict | draft |
 | [STORY-080](stories/STORY-080-deflake-cross-platform-tests.md) | EPIC-19 | Test reliability: de-flake http_4xx_not_retried + cold_budget | BC-1.03.002 | P2 | 3 | strict | draft |
 | [STORY-081](stories/STORY-081-slide-level-inline-markup.md) | EPIC-18 | Slide-Level Inline Markup: eval + layout + all-exporter structural formatting | BC-3.02.002 | P0 | 13 | strict | draft |
+| [STORY-082](stories/STORY-082-pptx-slide-sections.md) | EPIC-08 | PPTX: Slide-Grouping Sections (sectionLst) — DSL + IR + Eval + Exporter | BC-4.01.003, BC-1.14.003 | P0 | 5 | strict | draft |
 
-**Wave 5 total points: 109**
+**Wave 5 total points: 114**
 
 ---
 
@@ -192,10 +193,10 @@ All previously Wave TBD stories have been assigned waves per human approval 2026
 | Wave 1 | 14 | 85 | 6.1 |
 | Wave 2 | 7 | 41 | 5.9 |
 | Wave 3 | 17 | 100 | 5.9 |
-| Wave 4 | 18 | 117 | 6.5 |
-| Wave 5 | 19 | 109 | 5.7 |
+| Wave 4 | 18 | 115 | 6.4 |
+| Wave 5 | 20 | 114 | 5.7 |
 | Wave 6 | 6 | 42 | 7.0 |
-| **Total** | **81** | **494** | **6.1** |
+| **Total** | **82** | **497** | **6.1** |
 
 > No story exceeds 13 points. STORY-023 (brand synthesis — 13 pts), STORY-037
 > (PPTX core serialization — 13 pts), STORY-077 (SectionBlock IR + inline-markup parser
@@ -247,6 +248,15 @@ All previously Wave TBD stories have been assigned waves per human approval 2026
 > follow-up to STORY-077. Closes the temporary inconsistency where slide-level
 > `**bold**` parses correctly but evaluates to literal asterisks. BLOCKS v1.0 release.
 > Depends on STORY-077 + all Wave 4 exporter stories (041-044, 046).
+>
+> STORY-040 scope split (human-authorized 2026-06-04): Slide-sections Half B
+> (`section "Name":` DSL + `slide_sections` IR + `SectionListBuilder`) carved out to new
+> STORY-082 (5 pts, P0, Wave 5, EPIC-08). STORY-040 trimmed from 5 → 3 pts (speaker notes
+> + notesMaster1.xml + handoutMaster1.xml only). Net effect: Wave 4 -2 pts (117→115),
+> Wave 5 +5 pts (109→114), total 494→497. BC-4.01.003 Half A owned by STORY-040 (now),
+> Half B owned by STORY-082 (v1.0, Wave 5). BC-1.14.003 non-interference constraint
+> explicitly added to STORY-082 ACs. Multi-renderer parity exception (PPT-only element)
+> human-accepted 2026-06-04.
 
 ---
 
@@ -255,7 +265,7 @@ All previously Wave TBD stories have been assigned waves per human approval 2026
 | Metric | Count | Status |
 |--------|-------|--------|
 | Total BCs | 112 | — |
-| BCs covered by at least one story | 112 | PASS — 100% (BC-3.02.002 covered by STORY-027 + STORY-077 + STORY-078 + STORY-081; BC-1.14.003 covered by STORY-035 + STORY-077; BC-1.12.003 covered by STORY-034 + STORY-079; BC-1.03.002 covered by STORY-019 + STORY-080) |
+| BCs covered by at least one story | 112 | PASS — 100% (BC-3.02.002 covered by STORY-027 + STORY-077 + STORY-078 + STORY-081; BC-1.14.003 covered by STORY-035 + STORY-077 + STORY-082; BC-1.12.003 covered by STORY-034 + STORY-079; BC-1.03.002 covered by STORY-019 + STORY-080; BC-4.01.003 Half A covered by STORY-040, Half B covered by STORY-082) |
 | Orphan BCs (no story) | 0 | PASS |
 | Total VPs | 15 | — |
 | VPs covered | 15 | PASS — 100% |

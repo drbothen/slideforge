@@ -11,7 +11,7 @@ traces_to:
   - .factory/specs/behavioral-contracts/BC-INDEX.md
 topological_sort: validated
 cycle_check: PASS
-total_stories: 77
+total_stories: 82
 ---
 
 # Story Dependency Graph — slideforge v1.0
@@ -175,7 +175,7 @@ canonical — individual story files use these exact IDs.
 | STORY-037 | EPIC-08 | PPTX Core Serialization: ooxmlsdk 0.6.1 + ZIP Assembly | STORY-023, STORY-026, STORY-034, STORY-035, STORY-036 | STORY-038, STORY-039, STORY-040, STORY-049, STORY-050 |
 | STORY-038 | EPIC-08 | PPTX Layout Compliance: Placeholder Inheritance + Slide IDs + Layouts | STORY-037, STORY-023 | STORY-039, STORY-040, STORY-049, STORY-050 |
 | STORY-039 | EPIC-08 | PPTX Accessibility Metadata: alt text, lang, WCAG contrast | STORY-038, STORY-015 | STORY-049, STORY-050 |
-| STORY-040 | EPIC-08 | PPTX: Speaker Notes + Slide Sections + notesMaster1.xml | STORY-038, STORY-035 | STORY-049, STORY-050 |
+| STORY-040 | EPIC-08 | PPTX: Speaker Notes + notesMaster1.xml + handoutMaster1.xml | STORY-038, STORY-035 | STORY-049, STORY-050 |
 | STORY-041 | EPIC-09 | DOCX Core Serialization: report register + ooxmlsdk | STORY-026, STORY-035, STORY-036, STORY-077 | STORY-042, STORY-049, STORY-050 |
 | STORY-042 | EPIC-09 | DOCX: Auto-Generated Document Sections | STORY-041, STORY-027, STORY-077 | STORY-049, STORY-050 |
 | STORY-077 | EPIC-18 | SectionBlock IR Extension: FieldValue body + section-level register routing | STORY-006, STORY-007, STORY-008, STORY-011, STORY-012, STORY-013, STORY-027 | STORY-041, STORY-042 |
@@ -203,6 +203,8 @@ canonical — individual story files use these exact IDs.
 | STORY-063 | EPIC-16 | Package: verify (SHA-256 checksum audit) | STORY-060 | — |
 | STORY-064 | EPIC-17 | Workspace: slideforge.toml [workspace] + build --workspace | STORY-055 | STORY-065 |
 | STORY-065 | EPIC-17 | Workspace: .sfconfig cascade + config explain provenance | STORY-064 | — |
+
+| STORY-082 | EPIC-08 | PPTX: Slide-Grouping Sections (sectionLst) — DSL + IR + Eval + Exporter | STORY-040, STORY-078 | — |
 
 ### Wave 6 Stories (Phase 6 Formal Verification)
 
@@ -262,7 +264,7 @@ canonical — individual story files use these exact IDs.
 | STORY-037 | EPIC-08 | pptx-core-serialization | 4 | P0 | 13 |
 | STORY-038 | EPIC-08 | pptx-layout-compliance | 4 | P0 | 8 |
 | STORY-039 | EPIC-08 | pptx-a11y-metadata | 4 | P0 | 5 |
-| STORY-040 | EPIC-08 | pptx-notes-sections-masters | 4 | P0 | 5 |
+| STORY-040 | EPIC-08 | pptx-notes-sections-masters | 4 | P0 | 3 |
 | STORY-041 | EPIC-09 | docx-core-serialization | 4 | P0 | 8 |
 | STORY-042 | EPIC-09 | docx-auto-sections | 4 | P0 | 5 |
 | STORY-043 | EPIC-13 | pdf-core-backend | 4 | P0 | 8 |
@@ -300,6 +302,11 @@ canonical — individual story files use these exact IDs.
 | STORY-075 | EPIC-06 | brand-loader-footer-detection | 4 | P1 | 3 |
 | STORY-076 | EPIC-06 | brand-srgbclr-transform-extraction | 4 | P1 | 3 |
 | STORY-077 | EPIC-18 | section-block-ir-extension | 4 | P0 | 8 |
+| STORY-078 | EPIC-02 | parser-section-block-syntax | 4 | P0 | 5 |
+| STORY-079 | EPIC-12 | diagrams-svg-dos-hardening | 5 | P2 | 3 |
+| STORY-080 | EPIC-19 | deflake-cross-platform-tests | 5 | P2 | 3 |
+| STORY-081 | EPIC-18 | slide-level-inline-markup | 5 | P0 | 13 |
+| STORY-082 | EPIC-08 | pptx-slide-sections | 5 | P0 | 5 |
 
 > Note: Stories STORY-051 through STORY-054 are the EPIC-19 CI stories (Wave 1).
 > Stories STORY-055 through STORY-059 are EPIC-15 CLI stories (Wave 5).
@@ -344,7 +351,9 @@ Wave 5 (prereqs all in Waves 1-4):
   STORY-046, STORY-047, STORY-048,              ← EPIC-14
   STORY-055, STORY-056, STORY-057, STORY-058, STORY-059,  ← EPIC-15
   STORY-060, STORY-061, STORY-062, STORY-063,   ← EPIC-16
-  STORY-064, STORY-065                          ← EPIC-17
+  STORY-064, STORY-065,                         ← EPIC-17
+  STORY-072, STORY-074, STORY-079, STORY-080,   ← EPIC-07/12/19 (deferred surfaces)
+  STORY-081, STORY-082                          ← EPIC-18/08 (follow-up stories)
 
 Wave 6 (prereqs all in Waves 1-5):
   STORY-066, STORY-067, STORY-068, STORY-069, STORY-070, STORY-071  ← EPIC-20
@@ -407,7 +416,7 @@ its dependencies. The dependency graph is a DAG.
 | BC-1.13.001 | STORY-009 | Full |
 | BC-1.14.001 | STORY-035 | Full |
 | BC-1.14.002 | STORY-035 | Full |
-| BC-1.14.003 | STORY-035, STORY-077 | Full (slide-level: STORY-035; section-level: STORY-077) |
+| BC-1.14.003 | STORY-035, STORY-077, STORY-082 | Full (slide-level: STORY-035; section-level: STORY-077; sectionLst non-interference: STORY-082 AC-008) |
 | BC-1.14.004 | STORY-035, STORY-036 | Full (invariant 3 unit test: STORY-035 AC-008; integration: STORY-036) |
 | BC-1.15.001 | STORY-010, STORY-055, STORY-058 | Full |
 | BC-1.15.002 | STORY-010, STORY-055 | Full |
@@ -434,7 +443,7 @@ its dependencies. The dependency graph is a DAG.
 | BC-3.05.001 | STORY-028 | Full |
 | BC-4.01.001 | STORY-037 | Full |
 | BC-4.01.002 | STORY-052 | Full |
-| BC-4.01.003 | STORY-040 | Full |
+| BC-4.01.003 | STORY-040 (Half A: speaker notes + master), STORY-082 (Half B: sectionLst) | Full — human-authorized scope split 2026-06-04 |
 | BC-4.01.004 | STORY-039 | Full |
 | BC-4.01.005 | STORY-038 | Full |
 | BC-4.01.006 | STORY-040 | Full |
@@ -473,7 +482,7 @@ its dependencies. The dependency graph is a DAG.
 | BC-3.06.003 | STORY-026 | Full |
 
 **Coverage result: 112/112 BCs covered. Zero orphan BCs.**
-(BC-3.02.002 now covered by STORY-027 + STORY-077; BC-1.14.003 now covered by STORY-035 + STORY-077; BC-1.14.004 now covered by STORY-035 + STORY-036 — updated 2026-05-31 per architect directive F-002.)
+(BC-3.02.002 now covered by STORY-027 + STORY-077; BC-1.14.003 now covered by STORY-035 + STORY-077 + STORY-082; BC-1.14.004 now covered by STORY-035 + STORY-036 — updated 2026-05-31 per architect directive F-002. BC-4.01.003 Half A covered by STORY-040, Half B covered by STORY-082 — updated 2026-06-04 per human-authorized scope split.)
 
 ---
 

@@ -9,7 +9,7 @@ traces_to:
   - .factory/stories/dependency-graph.md
   - .factory/stories/epics.md
 total_waves: 6
-total_stories: 77
+total_stories: 82
 ---
 
 # Wave Schedule — slideforge v1.0
@@ -31,11 +31,13 @@ total_stories: 77
 | Wave 2 | EPIC-03, EPIC-04 | 7 | Partial — STORY-011→012→013 chain; STORY-011+012→014 (fork, not sequential after 013); STORY-015→016→017 chain | Wave 1 gate PASS |
 | Wave 3 | EPIC-05, EPIC-06, EPIC-07, EPIC-10, EPIC-11, EPIC-12 | 17 | Partial — multiple sub-chains within epics (EPIC-05: 018→019/020→021; EPIC-06: 022→023→024/025; EPIC-07: 026→027/028; EPIC-10: 029→030; EPIC-11: 031→032; EPIC-12: 033→034) | Wave 2 gate PASS |
 | Wave 4 | EPIC-06, EPIC-07, EPIC-08, EPIC-09, EPIC-13, EPIC-18, EPIC-21 | 17 | Partial — Batch A parallel: STORY-035→036, STORY-043→044→045, STORY-073, STORY-075, STORY-076, STORY-077; Batch B parallel: STORY-037→038→039→040, STORY-041→042; Batch C: STORY-049→050 | Wave 3 gate PASS; Phase 4 crates added to workspace |
-| Wave 5 | EPIC-07, EPIC-14, EPIC-15, EPIC-16, EPIC-17 | 16 | Partial — EPIC-16 and EPIC-17 independent of EPIC-14/15; EPIC-15 depends on EPIC-14 (STORY-056 requires STORY-047 for live reload). Chains: EPIC-14: 046→047→048; EPIC-15: 055→056→059 (056 also needs 047); EPIC-16: 060→061→062/063; EPIC-17: 064→065; STORY-072, STORY-074 independent (deferred P2 surfaces) | Wave 4 gate PASS |
+| Wave 5 | EPIC-07, EPIC-08, EPIC-12, EPIC-14, EPIC-15, EPIC-16, EPIC-17, EPIC-18, EPIC-19 | 20 | Partial — EPIC-16 and EPIC-17 independent of EPIC-14/15; EPIC-15 depends on EPIC-14 (STORY-056 requires STORY-047 for live reload). Chains: EPIC-14: 046→047→048; EPIC-15: 055→056→059 (056 also needs 047); EPIC-16: 060→061→062/063; EPIC-17: 064→065; STORY-072, STORY-074, STORY-079, STORY-080, STORY-082 independent of EPIC-14/15 chain; STORY-081 independent; STORY-082 depends on STORY-040 (Wave 4) | Wave 4 gate PASS |
 | Wave 6 | EPIC-20 (Phase 6) | 6 | Partial — STORY-066/067/068 independent; STORY-071 depends on 066+067; STORY-069/070 independent | Wave 5 gate PASS; Kani + cargo-fuzz available on CI |
 
-**Total: 77 stories, 462 points across 6 waves.**
-(Wave 4: 17 stories / 104 pts — updated 2026-05-31: STORY-077 added per architect directive F-002; Wave 5: 16 stories / 90 pts — updated 2026-05-31 per human approval)
+**Total: 82 stories, 497 points across 6 waves.**
+(Wave 4: 18 stories / 115 pts — STORY-040 trimmed 5→3 pts per scope split 2026-06-04; Wave 5: 20 stories / 114 pts — STORY-082 added per scope split 2026-06-04)
+
+> History: Wave 4 was 17 stories / 104 pts (2026-05-31: STORY-077 added per architect directive F-002); Wave 5 was 16 stories / 90 pts (2026-05-31 per human approval). All subsequent expansions documented in STORY-INDEX.md Story Points Summary notes.
 
 ---
 
@@ -521,7 +523,7 @@ synthesis produces 31 layouts; proptest VP-011, VP-012 pass.
 
 ---
 
-## Wave 4: Exporters + Registry (16 stories)
+## Wave 4: Exporters + Registry (18 stories)
 
 **Theme:** All output format exporters and plugin registry assembly, plus three
 pulled-in P1 follow-ups (STORY-073, STORY-075, STORY-076). Depends on brand,
@@ -529,7 +531,7 @@ layout, and all renderers being complete.
 
 **Prerequisite:** Wave 3 gate PASS. Phase 4 crates (`slideforge-pdf`, `slideforge-html`)
 added to `[workspace] members` at start of wave (previously in `exclude`).
-**Gate:** All 16 stories merged; `.pptx` output validated by LibreOffice headless;
+**Gate:** All 18 stories merged; `.pptx` output validated by LibreOffice headless;
 `veraPDF` passes; `cargo deny` green.
 
 **Human-Approved Batch Plan (Wave 4):**
@@ -607,17 +609,17 @@ added to `[workspace] members` at start of wave (previously in `exclude`).
   `lang` in Core Properties (`<cp:defaultLocale>`). WCAG contrast metadata.
   Custom PPTX linter test verifies 100% alt coverage on fixture.
 
-### STORY-040 — PPTX: Speaker Notes + Slide Sections + notesMaster1.xml
+### STORY-040 — PPTX: Speaker Notes + notesMaster1.xml + handoutMaster1.xml
 - **Epic:** EPIC-08
 - **Crate:** slideforge-pptx
-- **BCs:** BC-4.01.003, BC-4.01.006
-- **Points:** 5
+- **BCs:** BC-4.01.003 (Half A: postconditions 1-4, 6), BC-4.01.006
+- **Points:** 3
 - **Priority:** P0
 - **tdd_mode:** strict
-- Speaker notes via `notes` register → `<p:notes>` part. Slide sections from
-  variant/section markers. `notesMaster1.xml` and `handoutMaster1.xml` always
-  present even if empty (R2 finding). Visual regression fixture: all 31 slide
-  types.
+- Speaker notes via `notes` register → `<p:notes>` (notesSlide) parts. `notesMaster1.xml`
+  and `handoutMaster1.xml` always present even if empty (R2 finding, BC-4.01.006 invariant 1).
+  Slide sections (`<p:sectionLst>`) are out of scope — delivered by STORY-082
+  (human-authorized scope split 2026-06-04).
 
 ### STORY-041 — DOCX Core Serialization: report register + ooxmlsdk
 - **Epic:** EPIC-09
@@ -759,7 +761,7 @@ added to `[workspace] members` at start of wave (previously in `exclude`).
 
 ---
 
-## Wave 5: CLI + User-Facing Features + Deferred Surfaces (16 stories)
+## Wave 5: CLI + User-Facing Features + Deferred Surfaces (20 stories)
 
 **Theme:** CLI binary, web preview, package management, workspace configuration.
 The complete user-facing product. Depends on all exporters being complete.
@@ -773,6 +775,11 @@ reloads. All CI gates pass including performance benchmarks (NFR-001 < 500ms).
 **Added to Wave 5 (deferred P2 stories from Wave TBD, 2026-05-31):**
 - STORY-072 (3 pts) — shape: Gradient Fills (FillSpec::Gradient) — P2
 - STORY-074 (3 pts) — Brand-aware Em conversion (font_size_emu) — P2
+
+**Added to Wave 5 (scope-split follow-up, human-authorized 2026-06-04):**
+- STORY-082 (5 pts) — PPTX: Slide-Grouping Sections (sectionLst) — P0, EPIC-08
+  (Half B of BC-4.01.003; carved from STORY-040 because requires new DSL construct +
+  `slide_sections` IR field + eval mapping not yet implemented)
 
 ### STORY-055 — CLI: build command + miette error rendering
 - **Epic:** EPIC-15
@@ -956,6 +963,22 @@ reloads. All CI gates pass including performance benchmarks (NFR-001 < 500ms).
   brand body font size through `layout::run` → `layout_shapes()` replacing
   `DEFAULT_EM_IN_EMU` constant. Closes structural deferral from STORY-028.
   Deferred from Wave TBD to Wave 5 per human approval 2026-05-31 (P2).
+
+### STORY-082 — PPTX: Slide-Grouping Sections (sectionLst) (Scope-Split Follow-Up P0)
+- **Epic:** EPIC-08
+- **Crate:** slideforge-syntax + slideforge-layout + slideforge-eval + slideforge-pptx (SS-01, SS-02, SS-05, SS-06)
+- **BCs:** BC-4.01.003 (Half B — postcondition 5, invariants 3-4), BC-1.14.003
+- **Points:** 5
+- **Priority:** P0
+- **tdd_mode:** strict
+- **Batch:** Independent of EPIC-14/15 chain. Depends on STORY-040 (Wave 4) and STORY-078 (Wave 4).
+- Delivers BC-4.01.003 Half B (human-authorized scope split 2026-06-04): new
+  `section "Name":` DSL slide-grouping construct (quoted-string, distinct from
+  bare-ident document-structure blocks); `slide_sections: Vec<SlideSectionEntry>` on
+  `LaidOutDeck`; eval-stage slide membership mapping; `SectionListBuilder` in
+  `slideforge-pptx` emitting `<p:sectionLst>`. Deterministic GUIDs via `sha2 =0.10.9`.
+  BC-1.14.003 non-interference: sectionLst NEVER carries register content. PPT-only
+  element — multi-renderer parity exception human-accepted 2026-06-04.
 
 ---
 

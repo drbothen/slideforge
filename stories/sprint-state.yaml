@@ -28,7 +28,7 @@ wave_3_gate_holdout_must_pass: "5/5 PASS"
 wave_3_gate_tests: 2584
 wave_4_started: 2026-05-31
 wave_4_total_stories: 18
-wave_4_total_points: 117
+wave_4_total_points: 115
 wave_4_batch_a:
   stories: [STORY-035, STORY-036, STORY-043, STORY-044, STORY-045, STORY-073, STORY-075, STORY-076, STORY-077, STORY-078]
   execution: parallel
@@ -48,8 +48,8 @@ wave_4_batch_c:
 wave_4_pulled_in_p1: [STORY-073, STORY-075, STORY-076]
 wave_4_deferred_p2_to_wave5: [STORY-072, STORY-074]
 wave_4_bc_deltas: "BC-2.01.001 v1.1→v1.2; BC-2.01.003 v1.8→v1.9; error-taxonomy v2.2→v2.3"
-develop_sha: "a4f29e5a"
-develop_pr_count: 55
+develop_sha: "869fb401"
+develop_pr_count: 56
 last_updated: 2026-06-04
 ---
 
@@ -391,12 +391,25 @@ stories:
     security_findings_fixed: "SEC-039-001 (CWE-116, MED) + SEC-039-002 (CWE-754, LOW) fixed in scope — validate_lang_for_xml + loud tracing::error fallback"
     notes: "PPTX Accessibility Metadata + Layout IR Alt-Threading. 3-crate refactor: FrameContent::Image/Chart/Diagram carry AltText; layout::run threads alt; pptx embeds descr + dc:language; pdf tag_engine branches AltText. Human-authorized scope expansion 5→8 pts. PptxError::InvalidLanguageTag added. Governed by ADR-005. Batch B pptx chain 037→038→039 DONE."
   STORY-040:
-    status: not-started
+    status: merged
     wave: 4
     batch: B
     priority: P0
+    points: 3
+    pr: 56
+    merge_commit: "869fb401"
+    merged: 2026-06-04
+    adversary_convergence: "3/3 strict-CLEAN at passes 5/6/7 (7-pass total cascade)"
+    adversary_streak: "3/3"
+    converged: true
+    security_review: "CLEAN (2 LOW only — SEC-040-001 URL safety verified via test; SEC-040-002 deferred)"
+    notes: "PPTX Speaker Notes + notesMaster1.xml + handoutMaster1.xml (BC-4.01.003 Half A, BC-4.01.006). Re-scoped 5→3 pts; slide-grouping sections split to STORY-082 (human-authorized 2026-06-04). SafeUrl guard (link_safety.rs is_safe_link_scheme, CWE-601) shipped. Missing slide→notesSlide rel fixed; NotesMasterSerializer dead-code issue resolved; lossy+insecure notes links fixed; schema-invalid grpSpPr fixed. Batch B pptx chain 037→038→039→040 COMPLETE."
+  STORY-082:
+    status: draft
+    wave: 5
+    priority: P0
     points: 5
-    notes: "PPTX Speaker Notes + Slide Sections + notesMaster1.xml (BC-4.01.003, BC-4.01.006); depends on STORY-039 (MERGED a4f29e5a). Completes Batch B pptx chain. Authorized."
+    notes: "PPTX: Slide-Grouping Sections (sectionLst) — DSL + IR + Eval + Exporter. BC-4.01.003 Half B + BC-1.14.003. Split from STORY-040 (human-authorized 2026-06-04). EPIC-08."
   STORY-041:
     status: merged
     wave: 4
