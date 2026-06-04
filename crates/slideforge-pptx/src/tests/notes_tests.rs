@@ -604,3 +604,246 @@ fn test_BC_4_01_006_ac005_handout_master_always_present() {
 
     assert_zip_entry_present(&pptx, "ppt/handoutMasters/handoutMaster1.xml");
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// F-040-P1-001: slide→notesSlide back-relationship (CRIT fix)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// F-040-P1-001 (CRIT): A slide WITH notes must have a notesSlide relationship
+/// in its own `ppt/slides/_rels/slide{N}.xml.rels` file.
+///
+/// This is the SLIDE-side relationship. PowerPoint discovers notes via this
+/// relationship. The notesSlide→slide back-rel alone (which always existed)
+/// is insufficient — without the slide→notesSlide rel, notes are orphaned.
+///
+/// Also verifies that a slide WITHOUT notes has NO such relationship.
+#[test]
+fn test_f040_p1_001_slide_has_notes_slide_rel_in_slide_rels() {
+    // 2-slide deck: slide 1 has notes, slide 2 does not.
+    let deck = make_deck_with_notes(&[Some("Speaker notes here"), None]);
+    let laid_out = make_laid_out_deck_with_notes(&[Some("Speaker notes here"), None]);
+    let pptx = export_pptx(&deck, &laid_out);
+
+    // Slide 1 (with notes): rels must contain a Relationship of Type .../notesSlide
+    // targeting ../notesSlides/notesSlide1.xml
+    let slide1_rels = read_zip_member(&pptx, "ppt/slides/_rels/slide1.xml.rels");
+    assert!(
+        slide1_rels.contains("notesSlide"),
+        "F-040-P1-001: ppt/slides/_rels/slide1.xml.rels must contain a notesSlide \
+         relationship; got:\n{slide1_rels}"
+    );
+    assert!(
+        slide1_rels.contains("notesSlides/notesSlide1.xml"),
+        "F-040-P1-001: notesSlide relationship must target ../notesSlides/notesSlide1.xml; \
+         got:\n{slide1_rels}"
+    );
+    assert!(
+        slide1_rels.contains(
+            "http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesSlide"
+        ),
+        "F-040-P1-001: notesSlide relationship must use the correct Type URI; got:\n{slide1_rels}"
+    );
+
+    // Slide 2 (without notes): rels must NOT contain a notesSlide relationship.
+    let slide2_rels = read_zip_member(&pptx, "ppt/slides/_rels/slide2.xml.rels");
+    assert!(
+        !slide2_rels.contains("notesSlide"),
+        "F-040-P1-001: ppt/slides/_rels/slide2.xml.rels must NOT contain a notesSlide \
+         relationship (slide 2 has no notes); got:\n{slide2_rels}"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// F-040-P1-002: notesMaster1.xml validity (CRIT fix)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// F-040-P1-002 (CRIT): The emitted `notesMaster1.xml` must contain the required
+/// structural elements: `<p:clrMap`, `<p:ph type="sldImg"`, and
+/// `<p:ph type="body" idx="1"`.
+///
+/// Strengthens AC-004 (presence-only) to a content-validity assertion.
+/// Previously the empty NOTES_MASTER_STUB was emitted instead of the valid
+/// master from `NotesMasterSerializer`.
+#[test]
+fn test_f040_p1_002_notes_master_xml_is_structurally_valid() {
+    let deck = make_deck_with_notes(&[None]);
+    let laid_out = make_laid_out_deck_with_notes(&[None]);
+    let pptx = export_pptx(&deck, &laid_out);
+
+    let notes_master_xml = read_zip_member(&pptx, "ppt/notesMasters/notesMaster1.xml");
+
+    assert!(
+        notes_master_xml.contains("<p:clrMap"),
+        "F-040-P1-002: notesMaster1.xml must contain <p:clrMap> (required by OOXML schema); \
+         got (first 500 chars):\n{}",
+        &notes_master_xml[..notes_master_xml.len().min(500)]
+    );
+    assert!(
+        notes_master_xml.contains("type=\"sldImg\""),
+        "F-040-P1-002: notesMaster1.xml must contain <p:ph type=\"sldImg\"/> placeholder; \
+         got (first 500 chars):\n{}",
+        &notes_master_xml[..notes_master_xml.len().min(500)]
+    );
+    assert!(
+        notes_master_xml.contains("type=\"body\"") && notes_master_xml.contains("idx=\"1\""),
+        "F-040-P1-002: notesMaster1.xml must contain <p:ph type=\"body\" idx=\"1\"/> placeholder; \
+         got (first 500 chars):\n{}",
+        &notes_master_xml[..notes_master_xml.len().min(500)]
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// F-040-P1-003: Rich notes — multi-entry, bold/italic formatting
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// F-040-P1-003 (HIGH): Notes with bold inline formatting produce `<a:rPr b="1">` runs.
+/// Notes with italic inline formatting produce `<a:rPr i="1">` runs.
+///
+/// Uses real ZIP/XML parsing (not mock strings).
+#[test]
+fn test_f040_p1_003_rich_notes_bold_and_italic_runs() {
+    use slideforge_types::register::RegisteredContent;
+
+    // Build a slide with rich notes: bold text, italic text, plain text.
+    let bold_node = slideforge_types::InlineNode::Bold(vec![slideforge_types::InlineNode::Plain(
+        Arc::from("bold content"),
+    )]);
+    let italic_node =
+        slideforge_types::InlineNode::Italic(vec![slideforge_types::InlineNode::Plain(Arc::from(
+            "italic content",
+        ))]);
+    let plain_node = slideforge_types::InlineNode::Plain(Arc::from("plain text"));
+
+    let rich_rc = RegisteredContent {
+        register: slideforge_types::Register::Notes,
+        content: vec![bold_node, italic_node, plain_node],
+    };
+
+    let slide_with_rich_notes = LaidOutSlide {
+        source_index: 0,
+        slide_type_keyword: Arc::from("title"),
+        frames: vec![Frame {
+            bbox: title_bbox(),
+            content: FrameContent::Empty,
+            text_flow: None,
+        }],
+        speaker_notes: Some(Arc::from("rich notes")),
+        register_tags: vec![],
+        register_content: vec![rich_rc],
+    };
+
+    let deck = make_deck_with_notes(&[Some("rich notes")]);
+    let laid_out = LaidOutDeck {
+        page_size: slideforge_layout::PageSize::default(),
+        slides: vec![slide_with_rich_notes],
+        sections: vec![],
+        warnings: vec![],
+    };
+    let pptx = export_pptx(&deck, &laid_out);
+
+    let notes_xml = read_zip_member(&pptx, "ppt/notesSlides/notesSlide1.xml");
+
+    assert!(
+        notes_xml.contains("b=\"1\""),
+        "F-040-P1-003: bold notes run must produce <a:rPr b=\"1\">; got:\n{notes_xml}"
+    );
+    assert!(
+        notes_xml.contains("i=\"1\""),
+        "F-040-P1-003: italic notes run must produce <a:rPr i=\"1\">; got:\n{notes_xml}"
+    );
+    assert!(
+        notes_xml.contains("bold content"),
+        "F-040-P1-003: bold text content must be present; got:\n{notes_xml}"
+    );
+    assert!(
+        notes_xml.contains("italic content"),
+        "F-040-P1-003: italic text content must be present; got:\n{notes_xml}"
+    );
+    assert!(
+        notes_xml.contains("plain text"),
+        "F-040-P1-003: plain text must be present; got:\n{notes_xml}"
+    );
+}
+
+/// F-040-P1-003 (HIGH): Multiple `Register::Notes` entries are ALL emitted —
+/// not just the first.
+///
+/// A slide with two separate Notes register entries produces both in the
+/// notesSlide txBody (one paragraph per entry).
+#[test]
+fn test_f040_p1_003_multi_entry_notes_all_emitted() {
+    use slideforge_types::register::RegisteredContent;
+
+    let rc1 = RegisteredContent::plain(Register::Notes, Arc::from("First notes entry"));
+    let rc2 = RegisteredContent::plain(Register::Notes, Arc::from("Second notes entry"));
+
+    let slide_with_two_notes = LaidOutSlide {
+        source_index: 0,
+        slide_type_keyword: Arc::from("title"),
+        frames: vec![Frame {
+            bbox: title_bbox(),
+            content: FrameContent::Empty,
+            text_flow: None,
+        }],
+        speaker_notes: Some(Arc::from("First notes entry")), // only first in convenience field
+        register_tags: vec![],
+        register_content: vec![rc1, rc2],
+    };
+
+    let deck = make_deck_with_notes(&[Some("First notes entry")]);
+    let laid_out = LaidOutDeck {
+        page_size: slideforge_layout::PageSize::default(),
+        slides: vec![slide_with_two_notes],
+        sections: vec![],
+        warnings: vec![],
+    };
+    let pptx = export_pptx(&deck, &laid_out);
+
+    let notes_xml = read_zip_member(&pptx, "ppt/notesSlides/notesSlide1.xml");
+
+    assert!(
+        notes_xml.contains("First notes entry"),
+        "F-040-P1-003: first notes entry must be present; got:\n{notes_xml}"
+    );
+    assert!(
+        notes_xml.contains("Second notes entry"),
+        "F-040-P1-003: second notes entry must also be present (multi-entry fix); got:\n{notes_xml}"
+    );
+    // Two separate <a:p> paragraphs — one per Notes entry.
+    let para_count = notes_xml.matches("<a:p>").count() + notes_xml.matches("<a:p/>").count();
+    assert!(
+        para_count >= 2,
+        "F-040-P1-003: must produce at least 2 paragraphs for 2 Notes entries; got {para_count}"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// F-040-P1-004: AC-003 positive routing coverage (HIGH fix)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// F-040-P1-004 (HIGH): Strengthen AC-003 — the no-bleed test now also asserts
+/// that the sentinel IS present in the notesSlide (positive routing). This
+/// prevents the test from passing vacuously if notes silently vanish.
+///
+/// The paired assertions prove BOTH:
+/// 1. Notes ARE in `ppt/notesSlides/notesSlide1.xml` (positive routing)
+/// 2. Notes are NOT in any `ppt/slides/slide*.xml` (no-bleed invariant)
+#[test]
+fn test_f040_p1_004_ac003_no_bleed_with_positive_routing() {
+    let notes_sentinel = "NOTES_ROUTING_SENTINEL_F040_P1_004";
+    let deck = make_deck_with_notes(&[Some(notes_sentinel)]);
+    let laid_out = make_laid_out_deck_with_notes(&[Some(notes_sentinel)]);
+    let pptx = export_pptx(&deck, &laid_out);
+
+    // Positive routing: sentinel MUST be in notesSlide1.xml
+    let notes_xml = read_zip_member(&pptx, "ppt/notesSlides/notesSlide1.xml");
+    assert!(
+        notes_xml.contains(notes_sentinel),
+        "F-040-P1-004: notes sentinel must be present in notesSlide1.xml \
+         (positive routing coverage — prevents silent loss of notes); \
+         got:\n{notes_xml}"
+    );
+
+    // No-bleed: sentinel must NOT be in any slide body.
+    BleedChecker::assert_absent_from_pptx_slides(&pptx, notes_sentinel);
+}

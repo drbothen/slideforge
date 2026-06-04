@@ -74,15 +74,16 @@ mod tests {
 }
 
 use content_types::ContentTypesBuilder;
+use notes_master::NotesMasterSerializer;
 use notes_slide::NotesSlideSerializer;
 use presentation::PresentationSerializer;
 use rels::{RelsBuilder, rel_types};
 use slide_serializer::SlideSerializer;
 use slideforge_brand::BrandTemplate;
 use slideforge_brand::layout_xml::{serialize_master_to_xml, serialize_theme_to_xml};
-use slideforge_layout::{FrameContent, LaidOutDeck};
+use slideforge_layout::{FrameContent, LaidOutDeck, LaidOutSlide};
 use slideforge_plugin_api::{ExportError, ExportOptions, Exporter};
-use slideforge_types::{Brand, Deck};
+use slideforge_types::{Brand, Deck, Register};
 use zip_assembler::{ZipAssembler, ZipPart};
 
 use crate::brand_adapter::brand_template_from_brand;
@@ -137,7 +138,24 @@ impl PptxExporter {
         // Previously rels were rebuilt twice (once for slide rIds, once for XML).
         let (slide_rel_ids, prs_rels_bytes) = build_presentation_rels_bytes(laid_out)?;
 
-        build_slide_parts(laid_out, &brand_template, &mut parts)?;
+        // F-040-P1-001: compute the set of slides that HAVE non-empty notes once,
+        // so build_slide_parts and build_notes_slide_parts use the SAME decision.
+        // A slide "has notes" iff it has at least one non-whitespace-only
+        // Register::Notes entry in register_content.
+        let slides_with_notes: std::collections::HashSet<usize> = laid_out
+            .slides
+            .iter()
+            .enumerate()
+            .filter_map(|(i, slide)| {
+                if slide_has_notes(slide) {
+                    Some(i)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        build_slide_parts(laid_out, &brand_template, &slides_with_notes, &mut parts)?;
         build_presentation_xml(laid_out, brand, &slide_rel_ids, &mut parts)?;
         parts.push(ZipPart {
             path: "ppt/_rels/presentation.xml.rels".to_string(),
@@ -147,7 +165,7 @@ impl PptxExporter {
         build_layout_parts(&brand_template, &mut parts)?;
         build_theme_part(&brand_template, &mut parts);
         build_notes_handout_masters(&brand_template, &mut parts)?;
-        let notes_slide_count = build_notes_slide_parts(laid_out, &mut parts)?;
+        let notes_slide_count = build_notes_slide_parts(laid_out, &slides_with_notes, &mut parts)?;
         build_doc_props(deck, &mut parts)?;
         build_root_rels(&mut parts)?;
 
@@ -210,9 +228,16 @@ impl PptxExporter {
 /// an IMAGE relationship is added. A `<p:pic>` shape is also emitted in the
 /// slide XML that references the media `rId` via `r:embed`, so the relationship
 /// is never dangling.
+///
+/// ## Notes slide back-relationship (F-040-P1-001)
+///
+/// For each slide in `slides_with_notes`, a `rel_types::NOTES_SLIDE` relationship
+/// is added to the slide's `.rels` file so `PowerPoint` can discover the slide's
+/// notesSlide part. Without this the notesSlide is orphaned even if it exists.
 fn build_slide_parts(
     laid_out: &LaidOutDeck,
     brand_template: &BrandTemplate,
+    slides_with_notes: &std::collections::HashSet<usize>,
     parts: &mut Vec<ZipPart>,
 ) -> Result<(), PptxError> {
     let mut media_idx = 1_usize;
@@ -278,6 +303,18 @@ fn build_slide_parts(
             path: slide_path,
             bytes: slide_xml_bytes,
         });
+
+        // F-040-P1-001: add notesSlide relationship to slide's rels if this slide
+        // has notes. This is the SLIDE-side relationship that PowerPoint uses to
+        // discover the slide's notes part. The notesSlide→slide back-rel alone
+        // is insufficient for PowerPoint to find the notes.
+        if slides_with_notes.contains(&i) {
+            slide_rels.add(
+                rel_types::NOTES_SLIDE,
+                format!("../notesSlides/notesSlide{}.xml", i + 1),
+            );
+        }
+
         parts.push(ZipPart {
             path: rels_path,
             bytes: slide_rels.build()?,
@@ -612,45 +649,46 @@ fn build_theme_part(brand_template: &BrandTemplate, parts: &mut Vec<ZipPart>) {
 /// Each notesSlide's `.rels` file uses relative paths:
 /// - `rId1` → `../slides/slide{N}.xml`  (the owning slide)
 /// - `rId2` → `../notesMasters/notesMaster1.xml`  (notes master)
+/// - `rId3..` → external hyperlinks (if any in notes content)
+///
+/// ## Notes sourcing (F-040-P1-003)
+///
+/// Sources notes from `register_content` filtered to `Register::Notes`,
+/// covering ALL Notes entries (not just the first). The `slides_with_notes`
+/// set is pre-computed in `export_inner` so the decision is consistent with
+/// `build_slide_parts` (F-040-P1-001 same-set invariant).
 fn build_notes_slide_parts(
     laid_out: &LaidOutDeck,
+    slides_with_notes: &std::collections::HashSet<usize>,
     parts: &mut Vec<ZipPart>,
 ) -> Result<usize, PptxError> {
     let mut count = 0_usize;
 
     for (i, slide) in laid_out.slides.iter().enumerate() {
-        let slide_num = i + 1; // 1-based
-
-        // Use speaker_notes as the canonical notes source (derived from
-        // register_content by layout::run — the single authoritative field).
-        let Some(notes_text) = slide.speaker_notes.as_deref() else {
-            continue;
-        };
-        // EC-001: skip slides whose notes text is empty or whitespace-only.
-        if notes_text.trim().is_empty() {
+        // Only process slides that are in the precomputed notes set.
+        if !slides_with_notes.contains(&i) {
             continue;
         }
 
+        let slide_num = i + 1; // 1-based
+
         tracing::debug!(
             slide = slide_num,
-            notes_len = notes_text.len(),
+            notes_entries = slide
+                .register_content
+                .iter()
+                .filter(|rc| rc.register == Register::Notes)
+                .count(),
             "building notesSlide part"
         );
 
-        // These rId values are unused by NotesSlideSerializer::build since the
-        // serializer builds its own RelsBuilder. The parameters are forwarded for
-        // API symmetry and potential future brand-template override (e.g., if the
-        // brand supplies pre-formed notesSlide rels).
-        let output = NotesSlideSerializer::build(
-            slide_num,
-            notes_text,
-            &format!("rId1-slide{slide_num}"), // placeholder — not used by builder
-            "rId2-notesMaster",                // placeholder — not used by builder
-        )
-        .map_err(|e| PptxError::OoxmlElement {
-            part: format!("ppt/notesSlides/notesSlide{slide_num}.xml"),
-            detail: format!("NotesSlideSerializer::build failed: {e}"),
-        })?;
+        let output =
+            NotesSlideSerializer::build(slide_num, &slide.register_content).map_err(|e| {
+                PptxError::OoxmlElement {
+                    part: format!("ppt/notesSlides/notesSlide{slide_num}.xml"),
+                    detail: format!("NotesSlideSerializer::build failed: {e}"),
+                }
+            })?;
 
         parts.push(ZipPart {
             path: format!("ppt/notesSlides/notesSlide{slide_num}.xml"),
@@ -669,9 +707,16 @@ fn build_notes_slide_parts(
 
 /// Build `notesMaster1.xml` and `handoutMaster1.xml` (always present — BC-4.01.006).
 ///
-/// ADR-015 §4: uses pre-serialized stub bytes from `BrandTemplate::notes_master_stub`
-/// and `BrandTemplate::handout_master_stub`. For synthesized brands these are populated
-/// from `NOTES_MASTER_STUB` / `HANDOUT_MASTER_STUB` constants in `layout_xml.rs`.
+/// ## Notes master sourcing (F-040-P1-002, F-040-P1-005)
+///
+/// The emitted `notesMaster1.xml` is ALWAYS a valid master containing `<p:clrMap>`,
+/// `<p:ph type="sldImg"/>`, and `<p:ph type="body" idx="1"/>`. This is produced by
+/// `NotesMasterSerializer::build_notes_master` — the single authoritative source.
+///
+/// A brand-provided notes master is only used if it is non-empty (i.e., the brand
+/// extracted a real notes master from a .pptx template). The empty `NOTES_MASTER_STUB`
+/// from `slideforge_brand::layout_xml` is NEVER emitted as the final part; it is
+/// only used as a sentinel for "brand has no custom notes master".
 ///
 /// ## Error handling (SEC-002 / CWE-755)
 ///
@@ -685,11 +730,19 @@ fn build_notes_handout_masters(
     brand_template: &BrandTemplate,
     parts: &mut Vec<ZipPart>,
 ) -> Result<(), PptxError> {
-    // Use brand template stubs — always non-empty for synthesized brands.
-    let notes_bytes = if brand_template.notes_master_stub.is_empty() {
-        slideforge_brand::layout_xml::NOTES_MASTER_STUB.to_vec()
+    // F-040-P1-002: route through NotesMasterSerializer — the single authoritative
+    // source for a valid notesMaster1.xml. The brand stub is used ONLY if it is a
+    // non-empty brand-extracted master (not the empty default stub).
+    // The empty NOTES_MASTER_STUB is never the final emitted bytes.
+    let brand_notes = brand_template.notes_master_stub.as_slice();
+    let is_brand_stub_empty =
+        brand_notes == slideforge_brand::layout_xml::NOTES_MASTER_STUB || brand_notes.is_empty();
+    let notes_bytes = if is_brand_stub_empty {
+        // Brand has no custom notes master: emit the valid default from NotesMasterSerializer.
+        NotesMasterSerializer::build_notes_master(b"")?
     } else {
-        brand_template.notes_master_stub.clone()
+        // Brand has a real extracted notes master: use it verbatim.
+        NotesMasterSerializer::build_notes_master(brand_notes)?
     };
     parts.push(ZipPart {
         path: "ppt/notesMasters/notesMaster1.xml".to_string(),
@@ -711,10 +764,16 @@ fn build_notes_handout_masters(
         bytes: notes_rels_bytes,
     });
 
-    let handout_bytes = if brand_template.handout_master_stub.is_empty() {
-        slideforge_brand::layout_xml::HANDOUT_MASTER_STUB.to_vec()
+    // F-040-P1-002 (handout): same pattern as notesMaster — route through
+    // NotesMasterSerializer::build_handout_master for the authoritative valid bytes.
+    let brand_handout = brand_template.handout_master_stub.as_slice();
+    let is_brand_handout_stub_empty = brand_handout
+        == slideforge_brand::layout_xml::HANDOUT_MASTER_STUB
+        || brand_handout.is_empty();
+    let handout_bytes = if is_brand_handout_stub_empty {
+        NotesMasterSerializer::build_handout_master(b"")?
     } else {
-        brand_template.handout_master_stub.clone()
+        NotesMasterSerializer::build_handout_master(brand_handout)?
     };
     parts.push(ZipPart {
         path: "ppt/handoutMasters/handoutMaster1.xml".to_string(),
@@ -857,6 +916,56 @@ fn build_root_rels(parts: &mut Vec<ZipPart>) -> Result<(), PptxError> {
         bytes: root_rels.build()?,
     });
     Ok(())
+}
+
+/// Return `true` if a slide has at least one non-empty `Register::Notes` entry.
+///
+/// A slide "has notes" iff its `register_content` contains at least one entry
+/// with `register == Register::Notes` whose plain-text content is non-empty
+/// after whitespace trimming.
+///
+/// This is the single authoritative definition used by both `build_slide_parts`
+/// (adds the notesSlide→slide relationship) and `build_notes_slide_parts`
+/// (decides whether to emit a notesSlide part) — F-040-P1-001 same-set invariant.
+fn slide_has_notes(slide: &LaidOutSlide) -> bool {
+    slide.register_content.iter().any(|rc| {
+        if rc.register != Register::Notes {
+            return false;
+        }
+        // Check that the content is non-empty after whitespace trimming.
+        // We flatten the inline tree to plain text for this check.
+        let text = inline_nodes_to_plain_text(&rc.content);
+        !text.trim().is_empty()
+    })
+}
+
+/// Extract plain text from a slice of `InlineNode`s for whitespace-trimming checks.
+fn inline_nodes_to_plain_text(nodes: &[slideforge_types::InlineNode]) -> String {
+    use slideforge_types::InlineNode;
+    let mut out = String::new();
+    for node in nodes {
+        match node {
+            InlineNode::Plain(s) | InlineNode::Code(s) | InlineNode::Xref(s) => {
+                out.push_str(s);
+            },
+            InlineNode::Bold(c)
+            | InlineNode::Italic(c)
+            | InlineNode::Footnote(c)
+            | InlineNode::Superscript(c)
+            | InlineNode::Subscript(c)
+            | InlineNode::Strikethrough(c)
+            | InlineNode::Highlight(c) => {
+                out.push_str(&inline_nodes_to_plain_text(c));
+            },
+            InlineNode::Link { text, .. } => {
+                out.push_str(&inline_nodes_to_plain_text(text));
+            },
+            InlineNode::Math(m) => {
+                out.push_str(m.latex.as_ref());
+            },
+        }
+    }
+    out
 }
 
 /// Return the MIME type for a media file based on its path extension.
