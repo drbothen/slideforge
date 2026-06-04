@@ -2642,6 +2642,7 @@ version = "0.1.0"
 dependencies = [
  "insta",
  "ooxmlsdk",
+ "quick-xml 0.36.0",
  "sha2 0.10.9",
  "slideforge-brand",
  "slideforge-eval",

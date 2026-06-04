@@ -76,4 +76,21 @@ pub enum PptxError {
     /// An I/O error occurred while writing to the output sink.
     #[error("output I/O error: {0}")]
     Io(#[from] std::io::Error),
+
+    /// The resolved `dc:language` value contains an XML-1.0-illegal control character
+    /// (U+0000–U+0008, U+000B, U+000C, U+000E–U+001F, U+FFFE, U+FFFF) and cannot be
+    /// safely embedded in `docProps/core.xml`.
+    ///
+    /// A valid BCP-47 tag (ASCII alphanumeric + hyphen) is always accepted unchanged
+    /// (lossless pass-through per BC-5.01.005 invariant 1). This error only fires for
+    /// lang values that would produce malformed XML-1.0 output (CWE-116 / SEC-039-001).
+    ///
+    /// `lang` is the offending value; `reason` names the specific violation.
+    #[error("dc:language value {lang:?} is not safe for XML-1.0 embedding: {reason}")]
+    InvalidLanguageTag {
+        /// The lang value that failed validation.
+        lang: String,
+        /// A human-readable description of the XML-1.0 violation.
+        reason: String,
+    },
 }

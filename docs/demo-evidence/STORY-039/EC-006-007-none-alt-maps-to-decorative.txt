@@ -1,0 +1,58 @@
+STORY-039 — EC-006 / EC-007 Evidence: None alt → AltText::Decorative → descr=""
+BC-4.01.004 EC-006 + EC-007
+
+Tests (PPTX exporter side):
+  test_BC_4_01_004_ec006_chart_none_alt_maps_to_decorative_descr_empty
+  test_BC_4_01_004_ec007_diagram_none_alt_maps_to_decorative_descr_empty
+Tests (layout threading side):
+  test_bc_3_06_039_ec006_chart_alt_none_maps_to_decorative
+Paths:
+  crates/slideforge-pptx/src/tests/a11y_tests.rs
+  crates/slideforge-layout/tests/alt_threading_integration.rs
+
+=== EC-006: ChartSpec.alt = None ===
+
+FIXTURE (PPTX side)
+  Frame: FrameContent::Chart { alt: AltText::Decorative }
+  (Simulates what layout::run produces when ChartSpec.alt = None per EC-006)
+
+EXTRACTED XML (ppt/slides/slide1.xml)
+  <p:cNvPr id="1" name="Chart 0" descr=""/>
+
+KEY INVARIANT
+  descr="" PRESENT (not absent) — OOXML accessibility contract requires presence
+  name="Chart 0" (NOT "Image 0") — F-039-P-LOW-001: correct selection pane label
+
+ASSERTION
+  descr_values.iter().any(String::is_empty)  → true
+  (collect_cnvpr_descr_values only collects cNvPr WITH descr attr; empty vec = absent = FAIL)
+
+LAYOUT THREADING TEST
+  Input:  ChartSpec { alt: None, decorative: false }
+  Output: FrameContent::Chart { alt: AltText::Decorative }
+  chart_frame_alt[0] == &AltText::Decorative  → PASS
+  layout::run maps None → Decorative (safe sentinel) + emits tracing::warn!
+
+=== EC-007: DiagramSpec.alt = None ===
+
+FIXTURE (PPTX side)
+  Frame: FrameContent::Diagram { svg: <minimal SVG>, alt: AltText::Decorative }
+  (Simulates what layout::run produces when DiagramSpec.alt = None per EC-007)
+
+EXTRACTED XML (ppt/slides/slide1.xml)
+  <p:cNvPr id="1" name="Diagram 0" descr=""/>
+
+KEY INVARIANT
+  descr="" PRESENT — build_picture passes description: Some("".to_owned()) for
+  AltText::Decorative, ensuring the attribute is always present on decorative
+  diagram shapes (not description: None which would omit the attribute entirely)
+
+ASSERTION
+  descr_values.iter().any(String::is_empty)  → true
+
+TEST RESULTS (PPTX exporter)
+  PASS [   0.042s] slideforge-pptx tests::a11y_tests::test_BC_4_01_004_ec006_chart_none_alt_maps_to_decorative_descr_empty
+  PASS [   0.042s] slideforge-pptx tests::a11y_tests::test_BC_4_01_004_ec007_diagram_none_alt_maps_to_decorative_descr_empty
+
+TEST RESULT (layout threading)
+  PASS [   0.012s] slideforge-layout::alt_threading_integration test_bc_3_06_039_ec006_chart_alt_none_maps_to_decorative

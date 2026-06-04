@@ -195,8 +195,8 @@ pub fn run_inline_validation(
                 | crate::types::FrameContent::Subtitle(_)
                 | crate::types::FrameContent::Body(_)
                 | crate::types::FrameContent::Image { .. }
-                | crate::types::FrameContent::Chart
-                | crate::types::FrameContent::Diagram(_)
+                | crate::types::FrameContent::Chart { .. }
+                | crate::types::FrameContent::Diagram { .. }
                 | crate::types::FrameContent::Empty
                 | crate::types::FrameContent::ErrorSlidePlaceholder { .. } => {},
             }
@@ -445,7 +445,7 @@ mod tests {
     /// AC-005 — `validate_inline_nodes` handles all 12 variants without wildcard.
     /// With a known Xref target ("introduction"), produces zero warnings.
     ///
-    /// Red Gate: panics with `todo!()`.
+    /// Regression guard: exercises the implemented `validate_inline_nodes` path.
     #[test]
     fn test_bc_3_05_001_ac005_all_12_inline_variants_no_warnings_with_known_xref() {
         let nodes = all_12_variants();
@@ -464,7 +464,7 @@ mod tests {
     /// The layout stage is a read-only pass; it MUST NOT mutate the inline
     /// content sequence.
     ///
-    /// Red Gate: panics with `todo!()`.
+    /// Regression guard: exercises the implemented `validate_inline_nodes` path.
     #[test]
     fn test_bc_3_05_001_ac005_nodes_unchanged_after_validation() {
         let original = vec![
@@ -532,7 +532,7 @@ mod tests {
     ///
     /// Edge case: empty text run (e.g., blank body block).
     ///
-    /// Red Gate: panics with `todo!()`.
+    /// Regression guard: exercises the implemented `validate_inline_nodes` path.
     #[test]
     fn test_bc_3_05_001_ac005_empty_nodes_produces_no_warnings() {
         let nodes: Vec<InlineNode> = vec![];
@@ -546,7 +546,7 @@ mod tests {
 
     /// AC-005 — Plain text node produces no warnings.
     ///
-    /// Red Gate: panics with `todo!()`.
+    /// Regression guard: exercises the implemented `validate_inline_nodes` path.
     #[test]
     fn test_bc_3_05_001_ac005_plain_node_no_warning() {
         let nodes = vec![InlineNode::Plain(Arc::from("Hello world"))];
@@ -557,7 +557,7 @@ mod tests {
 
     /// AC-005 — Code node produces no warnings.
     ///
-    /// Red Gate: panics with `todo!()`.
+    /// Regression guard: exercises the implemented `validate_inline_nodes` path.
     #[test]
     fn test_bc_3_05_001_ac005_code_node_no_warning() {
         let nodes = vec![InlineNode::Code(Arc::from("let x = 42;"))];
@@ -568,7 +568,7 @@ mod tests {
 
     /// AC-005 — Math node produces no warnings.
     ///
-    /// Red Gate: panics with `todo!()`.
+    /// Regression guard: exercises the implemented `validate_inline_nodes` path.
     #[test]
     fn test_bc_3_05_001_ac005_math_node_no_warning() {
         let nodes = vec![InlineNode::Math(MathNode {
@@ -583,7 +583,7 @@ mod tests {
 
     /// AC-005 — Link node produces no warnings.
     ///
-    /// Red Gate: panics with `todo!()`.
+    /// Regression guard: exercises the implemented `validate_inline_nodes` path.
     #[test]
     fn test_bc_3_05_001_ac005_link_node_no_warning() {
         let nodes = vec![InlineNode::Link {
@@ -600,7 +600,7 @@ mod tests {
     /// Canonical test vector from BC-3.05.001:
     ///   `superscript: "2"` → `<a:rPr baseline="30000">`; `<sup>2</sup>`.
     ///
-    /// Red Gate: panics with `todo!()`.
+    /// Regression guard: exercises the implemented `validate_inline_nodes` path.
     #[test]
     fn test_bc_3_05_001_ac005_superscript_node_no_warning() {
         let nodes = vec![InlineNode::Superscript(vec![InlineNode::Plain(Arc::from(
@@ -616,7 +616,7 @@ mod tests {
 
     /// AC-005 — Subscript node produces no warnings.
     ///
-    /// Red Gate: panics with `todo!()`.
+    /// Regression guard: exercises the implemented `validate_inline_nodes` path.
     #[test]
     fn test_bc_3_05_001_ac005_subscript_node_no_warning() {
         let nodes = vec![InlineNode::Subscript(vec![InlineNode::Plain(Arc::from(
@@ -632,7 +632,7 @@ mod tests {
 
     /// AC-005 — Strikethrough node produces no warnings.
     ///
-    /// Red Gate: panics with `todo!()`.
+    /// Regression guard: exercises the implemented `validate_inline_nodes` path.
     #[test]
     fn test_bc_3_05_001_ac005_strikethrough_node_no_warning() {
         let nodes = vec![InlineNode::Strikethrough(vec![InlineNode::Plain(
@@ -648,7 +648,7 @@ mod tests {
 
     /// AC-005 — Highlight node produces no warnings.
     ///
-    /// Red Gate: panics with `todo!()`.
+    /// Regression guard: exercises the implemented `validate_inline_nodes` path.
     #[test]
     fn test_bc_3_05_001_ac005_highlight_node_no_warning() {
         let nodes = vec![InlineNode::Highlight(vec![InlineNode::Plain(Arc::from(
@@ -664,7 +664,7 @@ mod tests {
 
     /// AC-005 — Footnote node produces no warnings.
     ///
-    /// Red Gate: panics with `todo!()`.
+    /// Regression guard: exercises the implemented `validate_inline_nodes` path.
     #[test]
     fn test_bc_3_05_001_ac005_footnote_node_no_warning() {
         let nodes = vec![InlineNode::Footnote(vec![InlineNode::Plain(Arc::from(
@@ -688,7 +688,7 @@ mod tests {
     /// Canonical edge case from BC-3.05.001 EC-001:
     ///   `italic: bold: "text"` → Both applied: PPTX `<a:rPr b="1" i="1">`.
     ///
-    /// Red Gate: panics with `todo!()`.
+    /// Regression guard: exercises the implemented `validate_inline_nodes` path.
     #[test]
     fn test_bc_3_05_001_ac006_nested_bold_italic_preserved() {
         let inner = InlineNode::Plain(Arc::from("doubly styled"));
@@ -732,7 +732,7 @@ mod tests {
 
     /// AC-006 — Deeply nested `Highlight(Superscript(Plain))` is preserved.
     ///
-    /// Red Gate: panics with `todo!()`.
+    /// Regression guard: exercises the implemented `validate_inline_nodes` path.
     #[test]
     fn test_bc_3_05_001_ac006_nested_highlight_superscript_preserved() {
         let nodes = vec![InlineNode::Highlight(vec![InlineNode::Superscript(vec![
@@ -754,7 +754,7 @@ mod tests {
     /// The recursive helper must descend into Bold's children, not only the
     /// top-level node. Verify by nesting an unknown Xref inside Bold.
     ///
-    /// Red Gate: panics with `todo!()`.
+    /// Regression guard: exercises the implemented `validate_inline_nodes` path.
     #[test]
     fn test_bc_3_05_001_ac006_check_inline_node_recurses_into_bold_children() {
         let unknown_xref = InlineNode::Xref(Arc::from("nonexistent-slide"));
@@ -785,7 +785,7 @@ mod tests {
     ///
     /// Canonical test: xref to "introduction" where "introduction" is in known titles.
     ///
-    /// Red Gate: panics with `todo!()`.
+    /// Regression guard: exercises the implemented `validate_inline_nodes` path.
     #[test]
     fn test_bc_3_05_001_ac007_known_xref_target_produces_no_warning() {
         let nodes = vec![InlineNode::Xref(Arc::from("introduction"))];
@@ -804,7 +804,7 @@ mod tests {
     /// Canonical test vector from BC-3.05.001 EC-002:
     ///   Xref to "slide-title-that-does-not-exist" → E-EVL-001-class warning.
     ///
-    /// Red Gate: panics with `todo!()`.
+    /// Regression guard: exercises the implemented `validate_inline_nodes` path.
     #[test]
     fn test_bc_3_05_001_ac007_unknown_xref_target_produces_warning() {
         let nodes = vec![InlineNode::Xref(Arc::from("nonexistent-slide"))];
@@ -829,7 +829,7 @@ mod tests {
     /// AC-007 — Two unknown xref targets in the same node slice accumulate
     /// two separate warnings (DI-018: accumulate ALL errors).
     ///
-    /// Red Gate: panics with `todo!()`.
+    /// Regression guard: exercises the implemented `validate_inline_nodes` path.
     #[test]
     fn test_bc_3_05_001_ac007_multiple_unknown_xrefs_accumulate_all_warnings() {
         let nodes = vec![
@@ -867,7 +867,7 @@ mod tests {
     /// AC-007 — Mixed slice: one known xref and one unknown xref produces exactly
     /// one warning (for the unknown one only).
     ///
-    /// Red Gate: panics with `todo!()`.
+    /// Regression guard: exercises the implemented `validate_inline_nodes` path.
     #[test]
     fn test_bc_3_05_001_ac007_known_and_unknown_xref_produces_one_warning() {
         let nodes = vec![
@@ -890,7 +890,7 @@ mod tests {
 
     /// AC-007 — `check_inline_node` on a known Xref target produces no warning.
     ///
-    /// Red Gate: panics with `todo!()`.
+    /// Regression guard: exercises the implemented `validate_inline_nodes` path.
     #[test]
     fn test_bc_3_05_001_ac007_check_inline_node_known_xref_no_warning() {
         let node = InlineNode::Xref(Arc::from("executive-summary"));
@@ -905,7 +905,7 @@ mod tests {
 
     /// AC-007 — `check_inline_node` on an unknown Xref target pushes one warning.
     ///
-    /// Red Gate: panics with `todo!()`.
+    /// Regression guard: exercises the implemented `validate_inline_nodes` path.
     #[test]
     fn test_bc_3_05_001_ac007_check_inline_node_unknown_xref_pushes_warning() {
         let node = InlineNode::Xref(Arc::from("slide-99"));
@@ -926,7 +926,7 @@ mod tests {
 
     /// `collect_slide_titles` returns a set containing the slide title strings.
     ///
-    /// Red Gate: panics with `todo!()`.
+    /// Regression guard: exercises the implemented `validate_inline_nodes` path.
     #[test]
     fn test_bc_3_05_001_collect_slide_titles_returns_title_set() {
         let deck = make_deck_with_titles(&["Introduction", "Methodology", "Conclusion"]);
@@ -939,7 +939,7 @@ mod tests {
 
     /// `collect_slide_titles` on an empty deck returns an empty set.
     ///
-    /// Red Gate: panics with `todo!()`.
+    /// Regression guard: exercises the implemented `validate_inline_nodes` path.
     #[test]
     fn test_bc_3_05_001_collect_slide_titles_empty_deck_returns_empty_set() {
         let deck = make_deck_with_titles(&[]);
@@ -949,7 +949,7 @@ mod tests {
 
     /// `collect_slide_titles` on a deck with one slide returns a set of size 1.
     ///
-    /// Red Gate: panics with `todo!()`.
+    /// Regression guard: exercises the implemented `validate_inline_nodes` path.
     #[test]
     fn test_bc_3_05_001_collect_slide_titles_single_slide() {
         let deck = make_deck_with_titles(&["Executive Summary"]);
@@ -964,7 +964,7 @@ mod tests {
 
     /// `run_inline_validation` on a deck with no `TextRun` frames returns no warnings.
     ///
-    /// Red Gate: panics with `todo!()`.
+    /// Regression guard: exercises the implemented `validate_inline_nodes` path.
     #[test]
     fn test_bc_3_05_001_run_inline_validation_no_text_run_frames_no_warnings() {
         let deck = make_deck_with_titles(&["Introduction"]);
@@ -980,7 +980,7 @@ mod tests {
     /// `run_inline_validation` on a deck with one `TextRun` frame containing no
     /// xref nodes returns no warnings.
     ///
-    /// Red Gate: panics with `todo!()`.
+    /// Regression guard: exercises the implemented `validate_inline_nodes` path.
     #[test]
     fn test_bc_3_05_001_run_inline_validation_text_run_no_xref_no_warnings() {
         let deck = make_deck_with_titles(&["Introduction"]);
@@ -999,7 +999,7 @@ mod tests {
 
     /// `run_inline_validation` detects an unknown xref target in a `TextRun` frame.
     ///
-    /// Red Gate: panics with `todo!()`.
+    /// Regression guard: exercises the implemented `validate_inline_nodes` path.
     #[test]
     fn test_bc_3_05_001_run_inline_validation_unknown_xref_in_text_run_produces_warning() {
         let deck = make_deck_with_titles(&["Introduction"]);
@@ -1027,7 +1027,7 @@ mod tests {
 
     /// `run_inline_validation` with a known xref target produces no warnings.
     ///
-    /// Red Gate: panics with `todo!()`.
+    /// Regression guard: exercises the implemented `validate_inline_nodes` path.
     #[test]
     fn test_bc_3_05_001_run_inline_validation_known_xref_no_warning() {
         let deck = make_deck_with_titles(&["Introduction", "Methodology"]);
@@ -1045,7 +1045,7 @@ mod tests {
     ///
     /// Two slides each with one unknown xref → two warnings total.
     ///
-    /// Red Gate: panics with `todo!()`.
+    /// Regression guard: exercises the implemented `validate_inline_nodes` path.
     #[test]
     fn test_bc_3_05_001_run_inline_validation_accumulates_across_slides() {
         let deck = make_deck_with_titles(&["Slide 0", "Slide 1"]);
@@ -1271,26 +1271,15 @@ mod tests {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // STORY-073 — run_inline_validation must scan bullet inline content
+    // STORY-073 — run_inline_validation scanning of bullet TextRun frames
     //
-    // Expected-but-missing symbols at Red Gate:
-    //   - `run_inline_validation` must be extended to traverse `BulletItem.inlines`
-    //     within `ContentBlock::Bullets` on each slide. Currently the function
-    //     scans `LaidOutSlide.frames` (TextRun + Shape variants only) and does NOT
-    //     inspect bullets because no frame is produced for bullet items yet.
+    // `layout::run` produces one `FrameContent::TextRun` per `BulletItem` (STORY-073).
+    // `run_inline_validation` scans all `TextRun` frames (including bullet-derived ones)
+    // for xref depth violations and unknown xref targets.
     //
-    //   The tests below construct LaidOutSlides that carry bullet-item inline content
-    //   **via FrameContent::TextRun frames** (one per BulletItem, as the story requires).
-    //   At Red Gate, layout::run does NOT produce TextRun frames for Bullets blocks,
-    //   so the integration tests calling layout::run will fail because:
-    //     - frame counts do not match expectations
-    //     - xref warnings are not present (bullets not scanned)
-    //     - depth errors are not returned (bullets not validated)
-    //
-    //   The unit tests for run_inline_validation (which take pre-built LaidOutSlides)
-    //   verify the validation logic itself once frames exist. They pass only when the
-    //   implementation produces bullet-derived TextRun frames that run_inline_validation
-    //   can inspect.
+    // The tests below construct `LaidOutSlide`s with pre-built `TextRun` frames
+    // (one per BulletItem). They serve as unit tests for `run_inline_validation`
+    // and as regression guards for the bullet-frame scanning path.
     // ─────────────────────────────────────────────────────────────────────────
 
     /// STORY-073 / AC-002 — `run_inline_validation` detects unknown xref in bullet
@@ -1299,9 +1288,8 @@ mod tests {
     /// This verifies BC-3.05.001 EC-002 applies to bullet content.
     /// The bullet produces a `TextRun` frame; `run_inline_validation` scans it.
     ///
-    /// At Red Gate: `layout::run` does not produce a TextRun frame for bullet items,
-    /// so the frame slice will be empty for bullets-based slides and this test
-    /// (when called via `layout::run`) will fail.
+    /// Regression guard: `layout::run` produces a `TextRun` frame for the bullet item,
+    /// and `run_inline_validation` scans it, detecting the unknown xref and emitting a warning.
     #[test]
     fn test_bc_3_05_001_story073_ac002_xref_unknown_in_bullet_warns() {
         // Pre-build the LaidOutSlide as if bullet frame-generation were complete:

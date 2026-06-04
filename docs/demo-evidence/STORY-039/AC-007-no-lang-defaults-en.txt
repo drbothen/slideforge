@@ -1,0 +1,28 @@
+STORY-039 — AC-007 Evidence: No lang declaration → dc:language "en"
+BC-5.01.005 EC-003 / BC-5.01.004 default
+
+Test: test_BC_5_01_005_ac007_no_lang_defaults_to_en
+Path: crates/slideforge-pptx/src/tests/a11y_tests.rs
+
+FIXTURE
+  DeckMetadata.lang = None  (author did not declare lang in deck)
+
+PIPELINE
+  make_deck_no_lang() → PptxExporter::export → ZIP → docProps/core.xml
+
+EXTRACTED VALUE
+  Input lang:          None
+  Extracted dc:language: "en"
+
+ASSERTION
+  find_element_text(&core_xml, "language") == "en"  → PASS
+  NOT "en-US" (the default is the bare subtag "en", not a region-qualified tag)
+  dc:language element IS present (not absent) — BC-5.01.005 postcondition 1
+
+NOTE
+  This tests the fallback path in PptxExporter: when Deck.metadata.lang is None,
+  the exporter writes dc:language = "en" per BC-5.01.004 ("no lang → default en").
+  This is distinct from lang "en-US" (which writes "en-US" exactly).
+
+TEST RESULT
+  PASS [   0.047s] slideforge-pptx tests::a11y_tests::test_BC_5_01_005_ac007_no_lang_defaults_to_en

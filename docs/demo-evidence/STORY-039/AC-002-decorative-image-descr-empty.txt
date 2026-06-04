@@ -1,0 +1,28 @@
+STORY-039 — AC-002 Evidence: Decorative → descr="" (attribute present, empty)
+BC-4.01.004 postcondition 2
+
+Test: test_BC_4_01_004_ac002_decorative_image_has_empty_descr_attribute_present
+Path: crates/slideforge-pptx/src/tests/a11y_tests.rs
+
+FIXTURE
+  Frame: FrameContent::Image { alt: AltText::Decorative }
+  Deck lang: "en-US"
+
+PIPELINE
+  PptxExporter::export → ZIP → ppt/slides/slide1.xml
+
+EXTRACTED XML (ppt/slides/slide1.xml — cNvPr element with descr attribute)
+  <p:cNvPr id="1" name="Image 0" descr=""></p:cNvPr>
+
+KEY INVARIANT
+  The descr attribute MUST be present (not absent).
+  An absent descr attribute is not the same as descr="".
+  OOXML accessibility tools use the presence of descr="" to signal a decorative
+  element; an absent descr is treated as "no information provided."
+
+ASSERTION
+  descr_values.iter().any(String::is_empty)  → true  (attribute present, empty)
+  attribute is NOT absent                     → true (collect_cnvpr_descr_values finds it)
+
+TEST RESULT
+  PASS [   0.033s] slideforge-pptx tests::a11y_tests::test_BC_4_01_004_ac002_decorative_image_has_empty_descr_attribute_present

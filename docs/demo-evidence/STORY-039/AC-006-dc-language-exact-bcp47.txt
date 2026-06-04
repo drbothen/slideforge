@@ -1,0 +1,42 @@
+STORY-039 — AC-006 Evidence: dc:language exact BCP-47 in core.xml
+BC-5.01.005 postcondition 1 + invariant 1
+
+Tests:
+  test_BC_5_01_005_ac006_dc_language_exact_bcp47_en_us
+  test_BC_5_01_005_ac006_dc_language_exact_bcp47_zh_hant_tw
+  test_BC_4_01_004_ec002_zh_tw_lang_bcp47_embedded
+Path: crates/slideforge-pptx/src/tests/a11y_tests.rs
+
+=== CASE 1: lang "en-US" ===
+
+FIXTURE
+  DeckMetadata.lang = Some("en-US")
+
+EXTRACTED XML (docProps/core.xml)
+  <dc:language>en-US</dc:language>
+  <dcterms:created xsi:type="dcterms:W3CDTF">1980-01-01T00:00:00Z</dcterms:created>
+
+ASSERTION
+  find_element_text(&core_xml, "language") == "en-US"  → PASS
+  No normalization, no case change (NOT "EN-US", NOT "en_US")
+
+TEST RESULT
+  PASS [   0.044s] slideforge-pptx tests::a11y_tests::test_BC_5_01_005_ac006_dc_language_exact_bcp47_en_us
+
+=== CASE 2: lang "zh-Hant-TW" (4-part BCP-47) ===
+
+FIXTURE
+  DeckMetadata.lang = Some("zh-Hant-TW")
+
+EXTRACTED VALUE
+  dc:language: "zh-Hant-TW"
+
+ASSERTION
+  find_element_text(&core_xml, "language") == "zh-Hant-TW"  → PASS
+  Invariant: lossless embedding — no case folding, no truncation, no subtag removal
+  (NOT "zh-tw", NOT "zh-TW", NOT "zh-Hant")
+
+TEST RESULTS
+  PASS [   0.042s] slideforge-pptx tests::a11y_tests::test_BC_5_01_005_ac006_dc_language_exact_bcp47_zh_hant_tw
+  PASS [   0.035s] slideforge-pptx tests::a11y_tests::test_BC_4_01_004_ec002_zh_tw_lang_bcp47_embedded
+  (ec002 also asserts core.xml is well-formed XML when lang is zh-Hant-TW)

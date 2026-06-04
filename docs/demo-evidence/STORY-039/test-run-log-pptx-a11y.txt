@@ -1,0 +1,27 @@
+STORY-039 — PPTX Accessibility Test Suite Run Log
+Command: cargo nextest run -p slideforge-pptx -E 'test(a11y)' --no-fail-fast
+Crate: slideforge-pptx
+Date: 2026-06-04
+
+────────────
+ Nextest run ID 267a315f-490f-4761-8149-6c561f79f859 with nextest profile: default
+    Starting 14 tests across 1 binary (116 tests skipped)
+        PASS [   0.049s] ( 1/14) slideforge-pptx tests::a11y_tests::test_BC_4_01_004_ec005_300_char_alt_exact_length
+        PASS [   0.047s] ( 2/14) slideforge-pptx tests::a11y_tests::test_BC_5_01_005_ac007_no_lang_defaults_to_en
+        PASS [   0.047s] ( 3/14) slideforge-pptx tests::a11y_tests::test_BC_4_01_004_ac003_300_char_alt_not_truncated
+        PASS [   0.051s] ( 4/14) slideforge-pptx tests::a11y_tests::test_BC_4_01_004_ac001_non_decorative_image_has_non_empty_descr
+        PASS [   0.051s] ( 5/14) slideforge-pptx tests::a11y_tests::test_BC_4_01_004_ac004_special_chars_xml_escaped_well_formed
+        PASS [   0.052s] ( 6/14) slideforge-pptx tests::a11y_tests::test_BC_5_01_005_ac006_dc_language_exact_bcp47_en_us
+        PASS [   0.053s] ( 7/14) slideforge-pptx tests::a11y_tests::test_BC_4_01_004_ac005_diagram_frame_alt_on_enclosing_shape
+        PASS [   0.054s] ( 8/14) slideforge-pptx tests::a11y_tests::test_BC_4_01_004_ac005_chart_frame_alt_on_enclosing_shape
+        PASS [   0.053s] ( 9/14) slideforge-pptx tests::a11y_tests::test_BC_4_01_004_ec006_chart_none_alt_maps_to_decorative_descr_empty
+        PASS [   0.053s] ( 9/14) slideforge-pptx tests::a11y_tests::test_BC_5_01_005_ac006_dc_language_exact_bcp47_zh_hant_tw
+        PASS [   0.056s] (10/14) slideforge-pptx tests::a11y_tests::test_BC_4_01_004_ec006_chart_none_alt_maps_to_decorative_descr_empty
+        PASS [   0.056s] (11/14) slideforge-pptx tests::a11y_tests::test_BC_4_01_004_ac002_decorative_image_has_empty_descr_attribute_present
+        PASS [   0.057s] (12/14) slideforge-pptx tests::a11y_tests::test_BC_4_01_004_ec007_diagram_none_alt_maps_to_decorative_descr_empty
+        PASS [   0.058s] (13/14) slideforge-pptx tests::a11y_tests::test_BC_4_01_004_ec001_all_decorative_slide
+        PASS [   0.058s] (14/14) slideforge-pptx tests::a11y_tests::test_BC_4_01_004_ec002_zh_tw_lang_bcp47_embedded
+────────────
+     Summary [   0.059s] 14 tests run: 14 passed, 116 skipped
+
+RESULT: ALL 14 PPTX A11Y TESTS PASS

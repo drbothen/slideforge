@@ -1,7 +1,7 @@
 //! SVG embedding via `usvg` parse → krilla `Surface` path-drawing operations.
 //!
-//! For each `FrameContent::Diagram(NormalizedDiagramSvg)` or
-//! `FrameContent::Chart` frame in a [`slideforge_layout::LaidOutSlide`], this module:
+//! For each `FrameContent::Diagram { svg: NormalizedDiagramSvg, alt: AltText }` or
+//! `FrameContent::Chart { alt: AltText }` frame in a [`slideforge_layout::LaidOutSlide`], this module:
 //!
 //! 1. Parses the SVG via `usvg::Tree::from_str()`.
 //! 2. Pushes a frame-level transform (translate + scale) so the SVG viewport

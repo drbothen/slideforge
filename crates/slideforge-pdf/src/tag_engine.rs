@@ -132,8 +132,8 @@ impl SlideTagEngine {
     ///   P           ← for Shape, ErrorSlidePlaceholder, and unknown frames
     /// ```
     ///
-    /// Decorative frames (frames containing `FrameContent::Image { alt }`
-    /// where alt is empty, or `FrameContent::Shape` with `AltText::Decorative`)
+    /// Decorative frames (frames containing `FrameContent::Image { alt: AltText::Decorative }`
+    /// or `FrameContent::Shape` with `AltText::Decorative`)
     /// are NOT added to the Part group.
     ///
     /// Empty frames (`FrameContent::Empty`) are skipped.
@@ -276,57 +276,34 @@ impl SlideTagEngine {
 
                 // ── Image → Figure+Alt (or Artifact if decorative) ───────────
                 FrameContent::Image { alt } => {
-                    if alt.is_empty() {
-                        // Empty alt on Image = decorative; mark as Artifact.
-                        decorative_frame_indices.push(frame_idx);
-                    } else {
-                        let child_idx = part_group.children.len();
-                        part_group.push(self.tag_figure(Some(alt))?);
-                        frame_child_part_indices[frame_idx] = Some(vec![child_idx]);
+                    match alt {
+                        slideforge_types::AltText::Decorative => {
+                            // Decorative image: mark as Artifact.
+                            decorative_frame_indices.push(frame_idx);
+                        },
+                        slideforge_types::AltText::Provided(alt_str) => {
+                            let child_idx = part_group.children.len();
+                            part_group.push(self.tag_figure(Some(alt_str.as_ref()))?);
+                            frame_child_part_indices[frame_idx] = Some(vec![child_idx]);
+                        },
                     }
                 },
 
-                // ── Diagram → Artifact (frame-level, v1 layout) ──────────────
-                FrameContent::Diagram(_diagram_svg) => {
-                    // F-045-I2 / BC-4.03.001 invariant-3 investigation result:
-                    //
-                    // `FrameContent::Diagram` IS emitted by the v1 layout engine
-                    // (regions.rs:280) as `FrameContent::Diagram(empty_placeholder())`.
-                    // The frame carries NO alt text — the original `DiagramSpec.alt`
-                    // is not threaded through the geometric IR in v1.
-                    //
-                    // Emitting `tag_figure(None)` would produce a /Figure with no /Alt
-                    // — a BC-4.03.001 invariant-3 violation ("every Figure has non-empty
-                    // /Alt").  Emitting a placeholder string is an "alt lie".
-                    //
-                    // Resolution: treat ALL frame-level Diagram frames as Artifacts in v1.
-                    // The empty-placeholder SVG has no meaningful user content to describe;
-                    // the semantic content comes from the surrounding text, which IS tagged.
-                    // The IR-threading story (planned for a future wave) will add an
-                    // `alt: Option<Arc<str>>` field to `FrameContent::Diagram` — at that
-                    // point this arm will be updated to:
-                    //   - `AltText::Provided(s)` → `part_group.push(self.tag_figure(Some(s))?)`.
-                    //   - `AltText::Decorative` / None → `decorative_frame_indices.push(frame_idx)`.
-                    //
-                    // This is NOT modifying slideforge-layout (which is STORY-073's territory).
-                    // It is a correct tagging decision within the current IR constraint.
-                    decorative_frame_indices.push(frame_idx);
-                },
-
-                // ── Chart → Artifact (frame-level, v1 layout) ────────────────
-                FrameContent::Chart => {
-                    // F-045-I2 / BC-4.03.001 invariant-3 investigation result:
-                    //
-                    // `FrameContent::Chart` IS emitted by the v1 layout engine
-                    // (regions.rs:264) but carries NO data and NO alt text in the
-                    // geometric IR.  Same rationale as `FrameContent::Diagram` above.
-                    //
-                    // Treat ALL frame-level Chart frames as Artifacts in v1.
-                    // When the IR-threading story ships, this arm will be updated to
-                    // use the real alt from `ChartSpec.alt`.
-                    //
-                    // This is NOT modifying slideforge-layout (STORY-073 constraint).
-                    decorative_frame_indices.push(frame_idx);
+                // ── Diagram / Chart → Figure+Alt (or Artifact if decorative) ──
+                //
+                // STORY-039: both `FrameContent::Diagram` and `FrameContent::Chart`
+                // carry `alt: AltText`. Same branching logic:
+                // - `AltText::Provided(s)` → tagged Figure with /Alt (BC-4.03.001 AC-004).
+                // - `AltText::Decorative` → Artifact (stub placeholder or explicit opt-out).
+                FrameContent::Diagram { alt, .. } | FrameContent::Chart { alt } => match alt {
+                    slideforge_types::AltText::Provided(alt_str) => {
+                        let child_idx = part_group.children.len();
+                        part_group.push(self.tag_figure(Some(alt_str.as_ref()))?);
+                        frame_child_part_indices[frame_idx] = Some(vec![child_idx]);
+                    },
+                    slideforge_types::AltText::Decorative => {
+                        decorative_frame_indices.push(frame_idx);
+                    },
                 },
 
                 // ── Shape → Figure+Alt or Artifact if decorative ──────────────
@@ -528,9 +505,9 @@ impl SlideTagEngine {
     /// Tag a figure element with an optional `/Alt` attribute for PDF/UA-1 compliance.
     ///
     /// Returns a [`TagGroup`] using `TagKind::Figure` with the alt text set when
-    /// provided. Pass `Some(alt)` for accessible figures; `None` for figures
-    /// where alt text is not yet available (e.g., diagrams before STORY-045
-    /// threads the original `DiagramSpec.alt` through the IR).
+    /// provided. Pass `Some(alt)` for accessible figures (including diagrams, whose
+    /// `DiagramSpec.alt` is now threaded through the IR by STORY-039); pass `None`
+    /// only for genuinely decorative figures where no alt text is appropriate.
     ///
     /// # Errors
     ///
@@ -667,8 +644,10 @@ mod tests {
                         width: Emu(9_144_000),
                         height: Emu(5_143_500),
                     },
-                    // Decorative image: empty alt string.
-                    content: FrameContent::Image { alt: Arc::from("") },
+                    // Decorative image: AltText::Decorative (STORY-039 IR reshape).
+                    content: FrameContent::Image {
+                        alt: slideforge_types::AltText::Decorative,
+                    },
                     text_flow: None,
                 },
             ],
@@ -711,9 +690,11 @@ mod tests {
                     width: Emu(9_144_000),
                     height: Emu(5_143_500),
                 },
-                // Non-decorative image with real alt text.
+                // Non-decorative image with real alt text (STORY-039 IR reshape).
                 content: FrameContent::Image {
-                    alt: Arc::from("A mountain landscape at sunrise"),
+                    alt: slideforge_types::AltText::Provided(Arc::from(
+                        "A mountain landscape at sunrise",
+                    )),
                 },
                 text_flow: None,
             }],

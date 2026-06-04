@@ -167,7 +167,7 @@ mod tests {
 
     /// AC-001 — `layout::run` exists and returns `Result<LaidOutDeck, LayoutError>`.
     ///
-    /// FAILS at Red Gate: `layout::run` returns `todo!()`.
+    /// Regression guard: `layout::run` is implemented and returns `Ok(LaidOutDeck)`.
     #[test]
     fn test_bc_3_06_001_layout_run_returns_result() {
         let deck = make_deck(vec![make_slide("title")]);
@@ -178,7 +178,7 @@ mod tests {
 
     /// AC-002 / BC-3.06.001 — `layout::run` preserves slide count (3 slides → 3 slides).
     ///
-    /// FAILS at Red Gate: `layout::run` returns `todo!()`.
+    /// Regression guard: `layout::run` is implemented and returns `Ok(LaidOutDeck)`.
     #[test]
     fn test_bc_3_06_001_layout_run_preserves_slide_count() {
         let slides = vec![
@@ -198,7 +198,7 @@ mod tests {
 
     /// EC-001 — `layout::run` on a zero-slide `Deck` returns `Err(LayoutError::EmptyDeck)`.
     ///
-    /// FAILS at Red Gate: `layout::run` returns `todo!()`.
+    /// Regression guard: `layout::run` is implemented and returns `Ok(LaidOutDeck)`.
     #[test]
     fn test_bc_3_06_001_layout_run_empty_deck_error() {
         let deck = make_deck(vec![]);
@@ -220,7 +220,7 @@ mod tests {
 
     /// BC-3.06.002 — `layout::run` is deterministic: same deck + brand → identical output.
     ///
-    /// FAILS at Red Gate: `layout::run` returns `todo!()`.
+    /// Regression guard: `layout::run` is implemented and returns `Ok(LaidOutDeck)`.
     #[test]
     fn test_bc_3_06_002_layout_run_deterministic() {
         let slides = vec![
@@ -239,7 +239,7 @@ mod tests {
 
     /// AC-004 — Default brand produces `LaidOutDeck` with the 16:9 default page size.
     ///
-    /// FAILS at Red Gate: `layout::run` returns `todo!()`.
+    /// Regression guard: `layout::run` is implemented and returns `Ok(LaidOutDeck)`.
     #[test]
     fn test_bc_3_06_001_layout_run_default_page_size() {
         let deck = make_deck(vec![make_slide("title")]);
@@ -257,7 +257,7 @@ mod tests {
 
     /// AC-004 — Brand with custom canvas dimensions overrides the default page size.
     ///
-    /// FAILS at Red Gate: `layout::run` returns `todo!()`.
+    /// Regression guard: `layout::run` is implemented and returns `Ok(LaidOutDeck)`.
     #[test]
     fn test_bc_3_06_001_layout_run_page_size_from_brand() {
         use slideforge_types::{Emu, LayoutDefinition, SourceSpan};
@@ -289,7 +289,7 @@ mod tests {
 
     /// BC-3.06.003 — All frames in the produced `LaidOutDeck` have valid EMU coords.
     ///
-    /// FAILS at Red Gate: `layout::run` returns `todo!()`.
+    /// Regression guard: `layout::run` is implemented and returns `Ok(LaidOutDeck)`.
     #[test]
     fn test_bc_3_06_003_layout_run_all_frames_valid_bounding_boxes() {
         let slides = vec![
@@ -315,7 +315,7 @@ mod tests {
 
     /// AC-005 — `LaidOutSlide.source_index` matches the slide's position in input deck.
     ///
-    /// FAILS at Red Gate: `layout::run` returns `todo!()`.
+    /// Regression guard: `layout::run` is implemented and returns `Ok(LaidOutDeck)`.
     #[test]
     fn test_bc_3_06_001_laid_out_slide_source_index_correct() {
         let slides = vec![
@@ -336,7 +336,7 @@ mod tests {
 
     /// AC-005 — `LaidOutSlide.slide_type_keyword` matches the semantic `Slide.slide_type`.
     ///
-    /// FAILS at Red Gate: `layout::run` returns `todo!()`.
+    /// Regression guard: `layout::run` is implemented and returns `Ok(LaidOutDeck)`.
     #[test]
     fn test_bc_3_06_001_laid_out_slide_type_keyword_matches() {
         let slides = vec![
@@ -361,7 +361,7 @@ mod tests {
 
     /// AC-006 — title slide produces frames for title and subtitle regions.
     ///
-    /// FAILS at Red Gate: `layout::run` returns `todo!()`.
+    /// Regression guard: `layout::run` is implemented and returns `Ok(LaidOutDeck)`.
     #[test]
     fn test_bc_3_06_002_title_slide_has_frames() {
         let deck = make_deck(vec![make_slide("title")]);
@@ -377,7 +377,7 @@ mod tests {
 
     /// AC-006 — blank slide produces zero frames.
     ///
-    /// FAILS at Red Gate: `layout::run` returns `todo!()`.
+    /// Regression guard: `layout::run` is implemented and returns `Ok(LaidOutDeck)`.
     #[test]
     fn test_bc_3_06_002_blank_slide_has_zero_frames() {
         let deck = make_deck(vec![make_slide("blank")]);
@@ -392,7 +392,7 @@ mod tests {
 
     /// EC-002 — Unknown slide type keyword returns `Err(LayoutError::UnknownSlideType)`.
     ///
-    /// FAILS at Red Gate: `layout::run` returns `todo!()`.
+    /// Regression guard: `layout::run` is implemented and returns `Ok(LaidOutDeck)`.
     #[test]
     fn test_bc_3_06_002_unknown_slide_type_returns_error() {
         let deck = make_deck(vec![make_slide("not_a_real_slide_type_xyz")]);
@@ -411,7 +411,7 @@ mod tests {
 
     /// AC-010 — `LaidOutDeck` (and all IR types) implement `Hash + Eq + Clone`.
     ///
-    /// FAILS at Red Gate: `layout::run` returns `todo!()`.
+    /// Regression guard: `layout::run` is implemented and returns `Ok(LaidOutDeck)`.
     #[test]
     fn test_bc_3_06_001_laid_out_deck_implements_hash_eq_clone() {
         use std::collections::HashSet;
@@ -535,8 +535,7 @@ mod tests {
     /// `Vec::new()` with a comment citing STORY-027; the implementer must
     /// replace that placeholder with `collect_sections(&deck)`.
     ///
-    /// FAILS at Red Gate: `layout::run` returns sections: `Vec::new()` (empty),
-    /// so the assertion `!result.sections.is_empty()` fails.
+    /// Regression guard: `layout::run` populates `sections` via `collect_sections`.
     #[test]
     fn test_layout_run_populates_sections_from_takeaway_slides() {
         use slideforge_types::{Brand, BrandFonts, BrandPalette, SourceSpan};
@@ -1804,8 +1803,8 @@ mod tests {
             // Non-text-bearing variants: Image, Chart, Diagram, Empty,
             // ErrorSlidePlaceholder. Return empty — no user text in frames.
             FrameContent::Image { .. }
-            | FrameContent::Chart
-            | FrameContent::Diagram(_)
+            | FrameContent::Chart { .. }
+            | FrameContent::Diagram { .. }
             | FrameContent::Empty
             | FrameContent::ErrorSlidePlaceholder { .. } => String::new(),
         }
@@ -1820,7 +1819,7 @@ mod tests {
     /// This is the VP-011 proptest skeleton (to be expanded in STORY-069 with
     /// full Arbitrary impl for Deck). Uses bounded random generation.
     ///
-    /// FAILS at Red Gate: `layout::run` returns `todo!()`.
+    /// Regression guard: `layout::run` is implemented and returns `Ok(LaidOutDeck)`.
     #[cfg(test)]
     mod proptest_vp011 {
         use super::*;
@@ -1872,18 +1871,14 @@ mod tests {
     // ─────────────────────────────────────────────────────────────────────────
     // STORY-073 — ContentBlock::Bullets → FrameContent::TextRun frame generation
     //
-    // Expected-but-missing API at Red Gate:
-    //   layout::run currently converts ContentBlock::Text blocks into TextRun
-    //   frames (wired at the inline-text-pass block, layout.rs ~line 252).
-    //   ContentBlock::Bullets(Vec<BulletItem>) is NOT yet converted — the loop
-    //   skips it. These tests fail at Red Gate because:
+    // `layout::run` converts both ContentBlock::Text and ContentBlock::Bullets
+    // into TextRun frames (inline-text-pass, layout.rs ~line 252 and ~line 301).
+    // These are regression tests for the implemented behavior:
     //
-    //   AC-001: frame count is wrong (bullet items produce 0 frames instead of N)
-    //   AC-002: XrefTargetNotFound warning is absent (bullets not scanned)
-    //   AC-003: InlineDepthExceeded error is absent (bullets not validated)
-    //   EC-001: empty bullet list must produce 0 TextRun frames (trivially passes
-    //           at Red Gate if we check frame count == original region count, but
-    //           this needs the implementation to be stable first — tested in INT-1)
+    //   AC-001: each BulletItem → one TextRun frame in source order
+    //   AC-002: xref targets in bullet inlines are scanned; unknown → warning
+    //   AC-003: deeply-nested bullet inlines → InlineDepthExceeded error
+    //   EC-001: empty bullet list → 0 TextRun frames, no error
     //
     // These tests are in lib.rs because they call layout::run end-to-end.
     // ─────────────────────────────────────────────────────────────────────────
@@ -1894,8 +1889,8 @@ mod tests {
     /// Canonical fixture from STORY-073 story spec:
     ///   2-item bullet list → 2 `TextRun` frames (beyond region-map frames).
     ///
-    /// At Red Gate: `layout::run` does not process `ContentBlock::Bullets`, so the
-    /// `TextRun` frame count for bullet items is 0. The assertion fails.
+    /// `layout::run` processes `ContentBlock::Bullets` (STORY-073) — each item
+    /// produces a `TextRun` frame. Regression guard: 2 frames expected, not 0.
     ///
     /// Anti-paper-fix (TD-VSDD-059): removing the `len()` assertion and replacing
     /// with `len() >= 0` would silence the test vacuously. The test asserts the
@@ -1965,7 +1960,7 @@ mod tests {
     /// The inline content of each `TextRun` frame must match the corresponding
     /// `BulletItem.inlines` sequence verbatim.
     ///
-    /// At Red Gate: no `TextRun` frames are produced for bullets, so both assertions fail.
+    /// Regression guard: `TextRun` frames are produced for bullets in source order.
     #[test]
     fn test_bc_3_05_001_story073_ac001_bullets_source_order_preserved() {
         use slideforge_types::{Block, BulletItem, ContentBlock, InlineNode, SourceSpan};
@@ -2045,7 +2040,7 @@ mod tests {
     /// Canonical fixture with 3 items covering Plain, Bold, and Xref inline types.
     /// The layout stage preserves all 12 inline variants verbatim (BC-3.05.001 invariant 6).
     ///
-    /// At Red Gate: 0 `TextRun` frames for bullets → assertion fails.
+    /// Regression guard: 3 bullet items → 3 `TextRun` frames.
     #[test]
     fn test_bc_3_05_001_story073_ac001_three_bullet_items_three_frames() {
         use slideforge_types::{Block, BulletItem, ContentBlock, InlineNode, SourceSpan};
@@ -2129,8 +2124,7 @@ mod tests {
     /// End-to-end test through `layout::run`. The xref validation pass must scan
     /// the `TextRun` frames produced for bullet items (BC-3.05.001 EC-002).
     ///
-    /// At Red Gate: bullet items produce no frames → xref not scanned → no warning
-    /// → assertion fails.
+    /// Regression guard: bullet `TextRun` frames are xref-scanned; unknown xref → warning.
     #[test]
     fn test_bc_3_05_001_story073_ac002_xref_unknown_in_bullet_layout_run() {
         use slideforge_types::{Block, BulletItem, ContentBlock, InlineNode, SourceSpan};
@@ -2240,7 +2234,7 @@ mod tests {
     /// Canonical test vector from BC-3.05.001:
     ///   65-deep `Bold(Bold(Bold(...)))` → `LayoutError::InlineDepthExceeded { depth: 65 }`.
     ///
-    /// At Red Gate: bullets not validated → `layout::run` returns Ok instead of Err.
+    /// Regression guard: deeply-nested bullet inline triggers `LayoutError::InlineDepthExceeded`.
     #[test]
     fn test_bc_3_05_001_story073_ac003_depth_exceeded_in_bullet_is_hard_error() {
         use crate::inline::MAX_INLINE_DEPTH;
@@ -2305,9 +2299,7 @@ mod tests {
     ///
     /// `ContentBlock::Bullets(vec![])` must succeed and contribute 0 frames.
     ///
-    /// At Red Gate: passes trivially because bullets are skipped entirely (no frames, no
-    /// errors). This test becomes a regression guard AFTER implementation to prevent
-    /// the implementation from erroring on empty bullet lists.
+    /// Regression guard: empty bullet list succeeds and contributes 0 frames (not an error).
     #[test]
     fn test_bc_3_05_001_story073_ec001_empty_bullet_list_no_frames_no_error() {
         use slideforge_types::{Block, ContentBlock, SourceSpan};
@@ -2366,8 +2358,7 @@ mod tests {
     /// whose `inlines` is empty (e.g., with an `if inlines.is_empty() { continue }` guard),
     /// the count assertion below fails (0 frames instead of 1).
     ///
-    /// At Red Gate: `layout::run` does not process `ContentBlock::Bullets` at all, so
-    /// 0 `TextRun` frames are produced — the count assertion fails immediately.
+    /// Regression guard: a bullet item with empty inlines still produces 1 `TextRun` frame.
     #[test]
     fn test_bc_3_05_001_story073_ec002_empty_inlines_bullet_produces_one_frame() {
         use slideforge_types::{Block, BulletItem, ContentBlock, InlineNode, SourceSpan};
@@ -2454,8 +2445,8 @@ mod tests {
     /// these positional assertions to fail. The order-independent `.any()` approach used in
     /// the original EC-003 test would NOT catch such a regression.
     ///
-    /// At Red Gate: `layout::run` does not process `ContentBlock::Bullets` → 0 `TextRun`
-    /// frames → the exact-count assertion and all positional assertions fail immediately.
+    /// Regression guard: nested bullets produce `TextRun` frames in depth-first order
+    /// (parent before children) with exact count.
     #[test]
     fn test_bc_3_05_001_story073_ec003_nested_bullets_exact_frame_order_three_levels() {
         use slideforge_types::{Block, BulletItem, ContentBlock, InlineNode, SourceSpan};
@@ -2584,7 +2575,7 @@ mod tests {
     ///
     /// End-to-end: `layout::run` must validate xrefs inside container nodes inside bullets.
     ///
-    /// At Red Gate: bullets produce no frames → xref not scanned → no warning → fails.
+    /// Regression guard: xref inside Bold inside bullet inline is scanned and produces a warning.
     #[test]
     fn test_bc_3_05_001_story073_ec004_xref_inside_bold_in_bullet_layout_run() {
         use slideforge_types::{Block, BulletItem, ContentBlock, InlineNode, SourceSpan};
@@ -2636,8 +2627,8 @@ mod tests {
     /// This is the positive-case integration check: a clean bullet list must produce no
     /// errors and no warnings. Anti-paper-fix (TD-VSDD-059): the test is only meaningful
     /// when bullet frames ARE produced (so the validation path actually executes).
-    /// At Red Gate it passes vacuously (no frames = no warnings inspected); it becomes
-    /// a non-trivial regression guard once implementation is complete.
+    /// Regression guard (non-trivial since implementation): bullet frames ARE produced,
+    /// so the validation path executes and zero warnings is the load-bearing assertion.
     #[test]
     fn test_bc_3_05_001_story073_ac_int1_well_formed_bullets_no_errors_no_warnings() {
         use slideforge_types::{Block, BulletItem, ContentBlock, InlineNode, SourceSpan};
@@ -2879,10 +2870,9 @@ mod tests {
     /// The guard must trigger at depth 65 (one above `MAX_BULLET_DEPTH` = 64)
     /// BEFORE deep recursion exhausts the stack.
     ///
-    /// At Red Gate: `push_bullet_frames` has no structural depth guard, so a
-    /// 65-deep children chain would return `Ok(...)` (no error), causing this
-    /// `assert!(result.is_err())` to fail cleanly. Depth 65 was chosen so the
-    /// Red run does NOT overflow the stack — it returns Ok and fails the assertion.
+    /// Regression guard: `push_bullet_frames` has a structural depth guard.
+    /// A 65-deep children chain returns `Err(LayoutError::InlineDepthExceeded)`.
+    /// Depth 65 is chosen to be above the limit but below stack overflow depth.
     ///
     /// Anti-paper-fix (TD-VSDD-059): the variant check inside `match` ensures
     /// a wrong error type (e.g., `InlineDepthExceeded`) also fails the test.
@@ -2928,8 +2918,7 @@ mod tests {
 
         let result = run(&deck, &brand);
 
-        // RED GATE: without the depth guard push_bullet_frames returns Ok.
-        // With the guard it must return Err(BulletDepthExceeded { depth: 65 }).
+        // Depth guard is active: push_bullet_frames returns Err(BulletDepthExceeded { depth: 65 }).
         assert!(
             result.is_err(),
             "bullet structural depth 65 must return Err(BulletDepthExceeded), got Ok"

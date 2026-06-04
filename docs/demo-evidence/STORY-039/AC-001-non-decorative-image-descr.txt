@@ -1,0 +1,24 @@
+STORY-039 — AC-001 Evidence: Non-decorative visual → non-empty descr
+BC-4.01.004 postcondition 1
+
+Test: test_BC_4_01_004_ac001_non_decorative_image_has_non_empty_descr
+Path: crates/slideforge-pptx/src/tests/a11y_tests.rs
+
+FIXTURE
+  Frame: FrameContent::Image { alt: AltText::Provided("Revenue chart Q1 2026") }
+  Deck lang: "en-US"
+
+PIPELINE
+  PptxExporter::export → ZIP → ppt/slides/slide1.xml
+
+EXTRACTED XML (ppt/slides/slide1.xml — cNvPr element with descr attribute)
+  <p:cNvPr id="1" name="Image 0" descr="Revenue chart Q1 2026"></p:cNvPr>
+  <p:cNvPicPr><a:picLocks noChangeAspect="1"></a:picLocks></p:cNvPicPr>
+  <p:nvPr></p:nvPr></p:nvPicPr>
+
+ASSERTION
+  descr_values.iter().any(|d| d == "Revenue chart Q1 2026")  → true
+  descr is non-empty                                           → PASS
+
+TEST RESULT
+  PASS [   0.034s] slideforge-pptx tests::a11y_tests::test_BC_4_01_004_ac001_non_decorative_image_has_non_empty_descr
