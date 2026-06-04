@@ -346,8 +346,8 @@ fn test_bc_3_06_039_ec006_chart_alt_none_maps_to_decorative() {
     let deck = make_deck(vec![slide]);
     let brand = make_brand();
 
-    let result = run(&deck, &brand)
-        .expect("layout::run must succeed for chart slide with alt: None");
+    let result =
+        run(&deck, &brand).expect("layout::run must succeed for chart slide with alt: None");
 
     // Find the FrameContent::Chart frame.
     let chart_frame_alt: Vec<&AltText> = result.slides[0]

@@ -39,7 +39,9 @@
 
 use std::sync::Arc;
 
-use slideforge_types::{Brand, BulletItem, ContentBlock, Deck, FieldValue, Register, Value};
+use slideforge_types::{
+    AltText, Brand, BulletItem, ContentBlock, Deck, FieldValue, Register, Value,
+};
 
 use crate::error::LayoutError;
 
@@ -245,6 +247,12 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
         )?;
 
         let mut all_frames = frames;
+
+        // STORY-039 AC-005 / EC-006 / EC-007 — Alt-threading pass.
+        // Delegates to `thread_media_alt_into_frames` to stay within the
+        // `clippy::too_many_lines` budget for `run`.
+        thread_media_alt_into_frames(&slide.blocks, &mut all_frames, source_index, keyword_str);
+
         all_frames.extend(shape_output.frames);
         // Merge shape-level warnings (off-canvas) into the deck-level sink.
         // They are stored on LaidOutDeck::warnings (BC-3.04.001 EC-002).
@@ -375,6 +383,118 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
         sections,
         warnings: deck_warnings,
     })
+}
+
+/// Thread author-supplied alt text from semantic blocks into region-map frame placeholders.
+///
+/// # STORY-039 AC-005 / EC-006 / EC-007
+///
+/// Region-map frames for `chart`, `diagram`, and `image`/`screenshot`/`bio` slide
+/// types carry `AltText::Decorative` as a structural placeholder. This function
+/// reads each `ContentBlock::Chart` / `Diagram` / `Image` block's `.alt` field
+/// and overwrites the corresponding placeholder frame.
+///
+/// ## Mapping rule (lossless — no normalisation, no truncation)
+///
+/// | `spec.alt` value       | Frame alt written    | Side-effect              |
+/// |------------------------|----------------------|--------------------------|
+/// | `Some(Provided(s))`    | `Provided(s)`        | none                     |
+/// | `Some(Decorative)`     | `Decorative`         | none                     |
+/// | `None`                 | `Decorative`         | `tracing::warn!` (EC-006/EC-007): upstream validator miss |
+///
+/// ## Scope discipline
+///
+/// ONLY the `alt` field is written. The SVG payload of `FrameContent::Diagram`
+/// and any image-path data are not populated here — those are separate pipeline
+/// concerns (STORY-027 / future chart-content scope).
+///
+/// ## Matching strategy
+///
+/// For each block, the FIRST frame of the matching `FrameContent` variant in
+/// `frames` is updated. Each built-in slide type has at most one `Chart`,
+/// `Diagram`, or `Image` frame from the region map, so first-match is correct.
+/// Shape frames (appended after this pass) never carry these variants, so there
+/// is no collision risk.
+fn thread_media_alt_into_frames(
+    blocks: &[slideforge_types::Block],
+    frames: &mut [crate::types::Frame],
+    source_slide_index: usize,
+    slide_type: &str,
+) {
+    use slideforge_types::Block;
+
+    for Block { content, .. } in blocks {
+        match content {
+            ContentBlock::Chart(spec) => {
+                let resolved_alt = if let Some(alt) = &spec.alt {
+                    alt.clone()
+                } else {
+                    tracing::warn!(
+                        source_slide_index,
+                        slide_type,
+                        "EC-006: ChartSpec.alt is None — upstream validator \
+                         should have rejected this document; mapping to \
+                         AltText::Decorative at layout time"
+                    );
+                    AltText::Decorative
+                };
+                if let Some(frame) = frames
+                    .iter_mut()
+                    .find(|f| matches!(f.content, FrameContent::Chart { .. }))
+                {
+                    frame.content = FrameContent::Chart { alt: resolved_alt };
+                }
+            },
+            ContentBlock::Diagram(spec) => {
+                let resolved_alt = if let Some(alt) = &spec.alt {
+                    alt.clone()
+                } else {
+                    tracing::warn!(
+                        source_slide_index,
+                        slide_type,
+                        "EC-007: DiagramSpec.alt is None — upstream validator \
+                         should have rejected this document; mapping to \
+                         AltText::Decorative at layout time"
+                    );
+                    AltText::Decorative
+                };
+                if let Some(frame) = frames
+                    .iter_mut()
+                    .find(|f| matches!(f.content, FrameContent::Diagram { .. }))
+                {
+                    // Preserve the existing SVG placeholder; only update alt.
+                    if let FrameContent::Diagram { svg, .. } = frame.content.clone() {
+                        frame.content = FrameContent::Diagram {
+                            svg,
+                            alt: resolved_alt,
+                        };
+                    }
+                }
+            },
+            ContentBlock::Image(spec) => {
+                let resolved_alt = if let Some(alt) = &spec.alt {
+                    alt.clone()
+                } else {
+                    tracing::warn!(
+                        source_slide_index,
+                        slide_type,
+                        "EC-006: ImageSpec.alt is None — upstream validator \
+                         should have rejected this document; mapping to \
+                         AltText::Decorative at layout time"
+                    );
+                    AltText::Decorative
+                };
+                if let Some(frame) = frames
+                    .iter_mut()
+                    .find(|f| matches!(f.content, FrameContent::Image { .. }))
+                {
+                    frame.content = FrameContent::Image { alt: resolved_alt };
+                }
+            },
+            // Other ContentBlock variants are handled in their respective passes.
+            _ => {},
+        }
+    }
 }
 
 /// Derive `speaker_notes` from the canonical `register_content` vector.
