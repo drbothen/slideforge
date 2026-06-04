@@ -491,8 +491,7 @@ fn collect_cnvpr_descr_values(xml: &str) -> Vec<String> {
 
 /// Run `PptxExporter::export` with the given deck + laid_out and return the bytes.
 ///
-/// Panics with a descriptive message if the exporter returns an error (from a
-/// `todo!()` stub or a real implementation error).
+/// Panics with a descriptive message if the exporter returns an error.
 fn build_pptx(deck: &Deck, laid_out: &LaidOutDeck) -> Vec<u8> {
     let brand = make_brand();
     let opts = ExportOptions::default();

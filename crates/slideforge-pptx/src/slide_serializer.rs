@@ -5,15 +5,18 @@
 //!
 //! ## Placeholder mapping (AC-004)
 //!
-//! Each `FrameContent` variant maps to a specific PPTX placeholder `idx`:
+//! Each `FrameContent` variant maps to a specific PPTX placeholder `idx` or
+//! produces a `<p:pic>` element with an accessibility `descr` attribute:
 //!
-//! | `FrameContent` variant | `<p:ph>` idx | `<p:ph>` type | Notes |
-//! |------------------------|-------------|--------------|-------|
-//! | `Title`                | `0`         | `"title"`    | Title placeholder |
-//! | `Subtitle`             | `1`         | `"subTitle"` | Subtitle placeholder (S3 / PR-52) |
-//! | `Body` / `TextRun`     | `1`         | `"body"`     | Content/body placeholder |
-//! | `Diagram`              | media embed | —            | SVG written to ppt/media/ |
-//! | Others                 | — skipped — | —            | Media handled in STORY-038/039 |
+//! | `FrameContent` variant | Output element | `<p:ph>` idx / Notes |
+//! |------------------------|---------------|----------------------|
+//! | `Title`                | `<p:sp>`      | `idx=0`, `type="title"` — Title placeholder |
+//! | `Subtitle`             | `<p:sp>`      | `idx=1`, `type="subTitle"` — Subtitle placeholder (S3 / PR-52) |
+//! | `Body` / `TextRun`     | `<p:sp>`      | `idx=1`, `type="body"` — Content/body placeholder |
+//! | `Diagram`              | `<p:pic>`     | SVG written to `ppt/media/`; `descr` from `AltText` (STORY-039) |
+//! | `Image`                | `<p:pic>`     | `descr` from `AltText` via `AltTextEmbedder` (STORY-039) |
+//! | `Chart`                | `<p:pic>`     | Placeholder `<p:pic>` with `descr` from `AltText` (STORY-039); SVG embed in future story |
+//! | `Shape`, `Empty`, `ErrorSlidePlaceholder` | — skipped — | Logged at `debug!` level |
 //!
 //! ## Element ordering (AC-006 / R4 finding)
 //!
@@ -575,14 +578,15 @@ impl SlideSerializer {
                     shape_id += 1;
                 },
 
-                // Shape, ErrorSlidePlaceholder, Empty: skipped in STORY-037.
+                // Shape, ErrorSlidePlaceholder, Empty: no PPTX element emitted.
+                // Shape serialization is deferred to a future story.
                 FrameContent::Shape(_)
                 | FrameContent::ErrorSlidePlaceholder { .. }
                 | FrameContent::Empty => {
                     tracing::debug!(
                         slide_index,
                         frame_idx,
-                        "skipping non-text frame in STORY-037 serializer"
+                        "no PPTX element emitted for Shape/ErrorSlidePlaceholder/Empty frame"
                     );
                 },
             }

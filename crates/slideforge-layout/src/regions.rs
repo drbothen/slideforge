@@ -207,9 +207,10 @@ pub fn region_frames_for(
         "bio" => vec![
             Frame {
                 bbox: bbox(457_200, 457_200, 2_743_200, 4_114_800),
-                // STORY-039: stub placeholder — `layout::run` overwrites with real content.
-                // `AltText::Decorative` is the safe default for structural stubs
-                // (explicit opt-out, not silent empty string).
+                // Structural placeholder: `layout::run` threads the `alt` field from
+                // `ImageSpec.alt` (STORY-039 AC-005). Content resolution is deferred to a
+                // later story. `AltText::Decorative` is the safe default when no alt has
+                // been threaded yet (explicit opt-out, not silent empty string).
                 content: FrameContent::Image {
                     alt: AltText::Decorative,
                 },
@@ -267,8 +268,10 @@ pub fn region_frames_for(
             },
             Frame {
                 bbox: bbox(457_200, 1_188_720, 8_229_600, 3_657_600),
-                // STORY-039: stub placeholder — `layout::run` overwrites with real content.
-                // `AltText::Decorative` is the safe default for structural stubs.
+                // Structural placeholder: `layout::run` threads the `alt` field from
+                // `ChartSpec.alt` (STORY-039 AC-005). Content/SVG resolution is deferred
+                // to a later story. `AltText::Decorative` is the safe default when no
+                // alt has been threaded yet.
                 content: FrameContent::Chart {
                     alt: AltText::Decorative,
                 },
@@ -287,8 +290,10 @@ pub fn region_frames_for(
             },
             Frame {
                 bbox: bbox(457_200, 1_188_720, 8_229_600, 3_657_600),
-                // STORY-039: stub placeholder — `layout::run` overwrites with real content.
-                // `AltText::Decorative` is the safe default for structural stubs.
+                // Structural placeholder: `layout::run` threads the `alt` field from
+                // `DiagramSpec.alt` (STORY-039 AC-005). SVG content resolution is deferred
+                // to a later story. `AltText::Decorative` and `empty_placeholder()` are
+                // the safe defaults when no content has been threaded yet.
                 content: FrameContent::Diagram {
                     svg: NormalizedDiagramSvg::empty_placeholder(),
                     alt: AltText::Decorative,
@@ -308,9 +313,10 @@ pub fn region_frames_for(
             },
             Frame {
                 bbox: bbox(457_200, 1_188_720, 8_229_600, 3_657_600),
-                // STORY-039: stub placeholder — `layout::run` overwrites with real content.
-                // `AltText::Decorative` is the safe default for structural stubs
-                // (explicit opt-out, not silent empty string).
+                // Structural placeholder: `layout::run` threads the `alt` field from
+                // `ImageSpec.alt` (STORY-039 AC-005). Content resolution is deferred to a
+                // later story. `AltText::Decorative` is the safe default when no alt has
+                // been threaded yet (explicit opt-out, not silent empty string).
                 content: FrameContent::Image {
                     alt: AltText::Decorative,
                 },

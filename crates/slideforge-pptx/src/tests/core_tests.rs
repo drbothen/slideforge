@@ -1,41 +1,41 @@
-//! Core failing tests for `slideforge-pptx` — BC-4.01.001 AC-001 through AC-010.
+//! Regression tests for `slideforge-pptx` — BC-4.01.001 AC-001 through AC-010.
 //!
 //! These tests cover every acceptance criterion for STORY-037 PPTX Core
-//! Serialization. ALL tests in this file must FAIL before implementation
-//! begins (Red Gate). Any test that compiles but passes against `todo!()`
-//! stubs is flagged as GREEN-BY-DESIGN / WIRING-EXEMPT and noted in the report.
+//! Serialization. All tests pass against the fully implemented `PptxExporter`
+//! (STORY-037, merged). WIRING-EXEMPT tests verified the trait wiring even before
+//! the serializer was implemented.
 //!
 //! ## Traceability
 //!
-//! | Test function | AC | BC-4.01.001 clause | Red Gate status |
+//! | Test function | AC | BC-4.01.001 clause | Status |
 //! |---|---|---|---|
-//! | `test_BC_4_01_001_exporter_trait_id_is_pptx` | AC-001 | precondition 4 | WIRING-EXEMPT (structural) |
-//! | `test_BC_4_01_001_exporter_trait_extension_is_pptx` | AC-001 | precondition 4 | WIRING-EXEMPT (structural) |
-//! | `test_BC_4_01_001_zip_contains_all_required_parts` | AC-002 | postcondition 2 | RED |
-//! | `test_BC_4_01_001_zip_one_slide_minimum_required_parts` | AC-002 EC-002 | postcondition 2 | RED |
-//! | `test_BC_4_01_001_content_types_snapshot_3_slides` | AC-003 | postcondition 7 | RED |
-//! | `test_BC_4_01_001_content_types_has_31_layout_overrides` | AC-003 | postcondition 7 | RED |
-//! | `test_BC_4_01_001_placeholder_inheritance_chain` | AC-004 | postcondition 3 | RED |
-//! | `test_BC_4_01_001_title_placeholder_has_idx_zero` | AC-004 | postcondition 3 | RED |
-//! | `test_BC_4_01_001_all_coordinates_integer_i64` | AC-005 | precondition 5 | RED |
-//! | `test_BC_4_01_001_no_decimal_in_off_ext_attributes` | AC-005 | precondition 5 | RED |
-//! | `test_BC_4_01_001_slide_xml_element_order_snapshot` | AC-006 | postcondition 2 | RED |
-//! | `test_BC_4_01_001_sp_child_order_nvSpPr_then_spPr_then_txBody` | AC-006 | postcondition 2 | RED |
-//! | `test_BC_4_01_001_deterministic_output_sha256` | AC-007 | invariant 4 | RED |
-//! | `test_BC_4_01_001_determinism_5_slides` | AC-007 EC-006 | invariant 4 | RED |
-//! | `test_BC_4_01_001_libreoffice_open` | AC-008 | postcondition 4 | IGNORED |
-//! | `test_BC_4_01_001_relationship_chain_completeness` | AC-009 | postcondition 7 | RED |
-//! | `test_BC_4_01_001_all_rids_resolve_in_slide_rels` | AC-009 | postcondition 7 | RED |
-//! | `test_BC_4_01_001_report_detail_absent_from_slides` | AC-010 | invariant 1 | RED |
-//! | `test_BC_4_01_001_detail_sentinel_absent_from_all_pptx` | AC-010 | invariant 1 | RED |
-//! | `test_BC_4_01_001_ec001_empty_slide_valid_zip` | EC-001 | postcondition 2 | RED |
-//! | `test_BC_4_01_001_ec003_chart_svg_has_content_type_override` | EC-003 | postcondition 7 | RED |
-//! | `test_BC_4_01_001_ec004_missing_output_dir_not_crash_in_memory` | EC-004 | postcondition 1 | RED |
-//! | `test_BC_4_01_001_ec005_dark_layout_has_clr_map_ovr` | EC-005 | postcondition 2 | RED |
-//! | `test_BC_4_01_001_slide_ids_start_at_256` | BC postcondition 5 | postcondition 5 | RED |
-//! | `test_BC_4_01_001_master_id_at_least_2_to_31` | BC postcondition 6 | postcondition 6 | RED |
-//! | `test_BC_4_01_001_notes_master_always_present` | AC-002 | postcondition 2 | RED |
-//! | `test_BC_4_01_001_handout_master_always_present` | AC-002 | postcondition 2 | RED |
+//! | `test_BC_4_01_001_exporter_trait_id_is_pptx` | AC-001 | precondition 4 | GREEN (WIRING-EXEMPT) |
+//! | `test_BC_4_01_001_exporter_trait_extension_is_pptx` | AC-001 | precondition 4 | GREEN (WIRING-EXEMPT) |
+//! | `test_BC_4_01_001_zip_contains_all_required_parts` | AC-002 | postcondition 2 | GREEN |
+//! | `test_BC_4_01_001_zip_one_slide_minimum_required_parts` | AC-002 EC-002 | postcondition 2 | GREEN |
+//! | `test_BC_4_01_001_content_types_snapshot_3_slides` | AC-003 | postcondition 7 | GREEN |
+//! | `test_BC_4_01_001_content_types_has_31_layout_overrides` | AC-003 | postcondition 7 | GREEN |
+//! | `test_BC_4_01_001_placeholder_inheritance_chain` | AC-004 | postcondition 3 | GREEN |
+//! | `test_BC_4_01_001_title_placeholder_has_idx_zero` | AC-004 | postcondition 3 | GREEN |
+//! | `test_BC_4_01_001_all_coordinates_integer_i64` | AC-005 | precondition 5 | GREEN |
+//! | `test_BC_4_01_001_no_decimal_in_off_ext_attributes` | AC-005 | precondition 5 | GREEN |
+//! | `test_BC_4_01_001_slide_xml_element_order_snapshot` | AC-006 | postcondition 2 | GREEN |
+//! | `test_BC_4_01_001_sp_child_order_nvSpPr_then_spPr_then_txBody` | AC-006 | postcondition 2 | GREEN |
+//! | `test_BC_4_01_001_deterministic_output_sha256` | AC-007 | invariant 4 | GREEN |
+//! | `test_BC_4_01_001_determinism_5_slides` | AC-007 EC-006 | invariant 4 | GREEN |
+//! | `test_BC_4_01_001_libreoffice_open` | AC-008 | postcondition 4 | IGNORED (requires LibreOffice) |
+//! | `test_BC_4_01_001_relationship_chain_completeness` | AC-009 | postcondition 7 | GREEN |
+//! | `test_BC_4_01_001_all_rids_resolve_in_slide_rels` | AC-009 | postcondition 7 | GREEN |
+//! | `test_BC_4_01_001_report_detail_absent_from_slides` | AC-010 | invariant 1 | GREEN |
+//! | `test_BC_4_01_001_detail_sentinel_absent_from_all_pptx` | AC-010 | invariant 1 | GREEN |
+//! | `test_BC_4_01_001_ec001_empty_slide_valid_zip` | EC-001 | postcondition 2 | GREEN |
+//! | `test_BC_4_01_001_ec003_chart_svg_has_content_type_override` | EC-003 | postcondition 7 | GREEN |
+//! | `test_BC_4_01_001_ec004_missing_output_dir_not_crash_in_memory` | EC-004 | postcondition 1 | GREEN |
+//! | `test_BC_4_01_001_ec005_dark_layout_has_clr_map_ovr` | EC-005 | postcondition 2 | GREEN |
+//! | `test_BC_4_01_001_slide_ids_start_at_256` | BC postcondition 5 | postcondition 5 | GREEN |
+//! | `test_BC_4_01_001_master_id_at_least_2_to_31` | BC postcondition 6 | postcondition 6 | GREEN |
+//! | `test_BC_4_01_001_notes_master_always_present` | AC-002 | postcondition 2 | GREEN |
+//! | `test_BC_4_01_001_handout_master_always_present` | AC-002 | postcondition 2 | GREEN |
 
 #![allow(non_snake_case)]
 #![allow(clippy::unwrap_used)]
@@ -184,7 +184,6 @@ fn make_laid_out_deck(n: usize) -> LaidOutDeck {
 }
 
 /// Run the exporter on a minimal deck and return raw PPTX bytes.
-/// Panics with a descriptive message if the `todo!()` fires.
 fn build_pptx(laid_out: &LaidOutDeck) -> Vec<u8> {
     let deck = make_deck(laid_out.slides.len());
     let brand = make_brand();
@@ -192,7 +191,7 @@ fn build_pptx(laid_out: &LaidOutDeck) -> Vec<u8> {
     let exporter = PptxExporter::new();
     exporter
         .export(&deck, laid_out, &brand, &opts)
-        .expect("PptxExporter::export must succeed — is the todo!() stub still in place?")
+        .expect("PptxExporter::export must succeed")
 }
 
 /// Open `bytes` as a ZIP archive and return all entry names.
@@ -277,17 +276,15 @@ const REQUIRED_PARTS_BASE: &[&str] = &[
 //
 // Classification: WIRING-EXEMPT (GREEN-BY-DESIGN)
 //
-// `PptxExporter` already has `id()` and `extension()` implemented correctly
-// in the stub (they return string literals, not todo!()). These tests exercise
-// the structural wiring, not the serialization logic.
+// `PptxExporter` has `id()` and `extension()` implemented as string literals.
+// These tests exercise the structural wiring, not the serialization logic.
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// BC-4.01.001 precondition 4 / AC-001:
 /// `PptxExporter` implements `Exporter` and returns `"pptx"` from `id()`.
 ///
-/// CLASSIFICATION: WIRING-EXEMPT — `id()` is already implemented in the stub;
-/// this test passes even before implementation (it tests trait wiring, not
-/// serialization logic).
+/// CLASSIFICATION: WIRING-EXEMPT — `id()` returns a string literal (trait wiring,
+/// not serialization logic).
 #[test]
 fn test_BC_4_01_001_exporter_trait_id_is_pptx() {
     let exporter = PptxExporter::new();
@@ -301,8 +298,8 @@ fn test_BC_4_01_001_exporter_trait_id_is_pptx() {
 /// BC-4.01.001 precondition 4 / AC-001:
 /// `PptxExporter` implements `Exporter` and returns `"pptx"` from `extension()`.
 ///
-/// CLASSIFICATION: WIRING-EXEMPT — `extension()` is already implemented in the
-/// stub; this test passes even before implementation.
+/// CLASSIFICATION: WIRING-EXEMPT — `extension()` returns a string literal (trait wiring,
+/// not serialization logic).
 #[test]
 fn test_BC_4_01_001_exporter_trait_extension_is_pptx() {
     let exporter = PptxExporter::new();
@@ -333,8 +330,7 @@ fn test_BC_4_01_001_exporter_is_send_sync() {
 /// A 1-slide deck must produce a ZIP containing all base required parts and
 /// the slide-specific parts (`ppt/slides/slide1.xml`, layout rels, etc.).
 ///
-/// RED: `PptxExporter::export_inner` is `todo!()` — this test panics with the
-/// todo!() message before any assertion runs.
+/// Regression guard: `PptxExporter::export_inner` is implemented; `build_pptx` returns bytes.
 #[test]
 fn test_BC_4_01_001_zip_contains_all_required_parts() {
     let laid_out = make_laid_out_deck(1);
@@ -371,7 +367,7 @@ fn test_BC_4_01_001_zip_contains_all_required_parts() {
 /// Even a 1-slide deck must include all 31 layout parts (invariant 3 from spec:
 /// all 31 layouts are always present regardless of slide count).
 ///
-/// RED: panics at `build_pptx` (todo!() stub).
+/// Regression guard: `PptxExporter::export` returns `Ok(bytes)`.
 #[test]
 fn test_BC_4_01_001_zip_one_slide_all_31_layouts_present() {
     let laid_out = make_laid_out_deck(1);
@@ -398,7 +394,7 @@ fn test_BC_4_01_001_zip_one_slide_all_31_layouts_present() {
 /// BC-4.01.001 postcondition 2 / AC-002:
 /// `notesMaster1.xml` and `handoutMaster1.xml` are always present (BC-4.01.006).
 ///
-/// RED: panics at `build_pptx` (todo!() stub).
+/// Regression guard: `PptxExporter::export` returns `Ok(bytes)`.
 #[test]
 fn test_BC_4_01_001_notes_master_always_present() {
     let laid_out = make_laid_out_deck(1);
@@ -416,7 +412,7 @@ fn test_BC_4_01_001_notes_master_always_present() {
 /// BC-4.01.001 postcondition 2 / AC-002:
 /// `handoutMaster1.xml` must be present even for a 1-slide deck.
 ///
-/// RED: panics at `build_pptx` (todo!() stub).
+/// Regression guard: `PptxExporter::export` returns `Ok(bytes)`.
 #[test]
 fn test_BC_4_01_001_handout_master_always_present() {
     let laid_out = make_laid_out_deck(1);
@@ -489,7 +485,7 @@ fn test_sec002_handout_master_rels_non_empty_in_zip() {
 /// The snapshot must include Override entries for each of the 3 slides, all 31
 /// layouts, slideMaster1, theme1, notesMaster1, handoutMaster1, core.xml, app.xml.
 ///
-/// RED: panics at `build_pptx` (todo!() stub).
+/// Regression guard: `PptxExporter::export` returns `Ok(bytes)`.
 #[test]
 fn test_BC_4_01_001_content_types_snapshot_3_slides() {
     let laid_out = make_laid_out_deck(3);
@@ -505,7 +501,7 @@ fn test_BC_4_01_001_content_types_snapshot_3_slides() {
 /// The `[Content_Types].xml` must have exactly 31 slideLayout Override entries
 /// for a 3-slide deck.
 ///
-/// RED: panics at `build_pptx` (todo!() stub).
+/// Regression guard: `PptxExporter::export` returns `Ok(bytes)`.
 #[test]
 fn test_BC_4_01_001_content_types_has_31_layout_overrides() {
     let laid_out = make_laid_out_deck(3);
@@ -532,7 +528,7 @@ fn test_BC_4_01_001_content_types_has_31_layout_overrides() {
 /// The `[Content_Types].xml` for a 3-slide deck must have exactly 3 slide
 /// Override entries.
 ///
-/// RED: panics at `build_pptx` (todo!() stub).
+/// Regression guard: `PptxExporter::export` returns `Ok(bytes)`.
 #[test]
 fn test_BC_4_01_001_content_types_has_n_slide_overrides() {
     let laid_out = make_laid_out_deck(3);
@@ -558,7 +554,7 @@ fn test_BC_4_01_001_content_types_has_n_slide_overrides() {
 /// The `[Content_Types].xml` must contain the required Default extension entries
 /// for `.rels` and `.xml` files.
 ///
-/// RED: panics at `build_pptx` (todo!() stub).
+/// Regression guard: `PptxExporter::export` returns `Ok(bytes)`.
 #[test]
 fn test_BC_4_01_001_content_types_has_required_defaults() {
     let laid_out = make_laid_out_deck(1);
@@ -590,7 +586,7 @@ fn test_BC_4_01_001_content_types_has_required_defaults() {
 /// A title slide's `slide1.xml` must contain a `<p:ph idx="0">` (title placeholder)
 /// element inside its `<p:nvSpPr><p:nvPr>` nesting.
 ///
-/// RED: panics at `build_pptx` (todo!() stub).
+/// Regression guard: `PptxExporter::export` returns `Ok(bytes)`.
 #[test]
 fn test_BC_4_01_001_title_placeholder_has_idx_zero() {
     let laid_out = make_laid_out_deck(1);
@@ -611,7 +607,7 @@ fn test_BC_4_01_001_title_placeholder_has_idx_zero() {
 /// (slide → layout by idx, layout → master by type) is traceable. The slide's
 /// `.rels` file must point to a slideLayout XML.
 ///
-/// RED: panics at `build_pptx` (todo!() stub).
+/// Regression guard: `PptxExporter::export` returns `Ok(bytes)`.
 #[test]
 fn test_BC_4_01_001_placeholder_inheritance_chain() {
     let laid_out = make_laid_out_deck(1);
@@ -659,7 +655,7 @@ fn test_BC_4_01_001_placeholder_inheritance_chain() {
 /// attribute in the 1-slide PPTX must parse as a valid `i64` with no decimal
 /// point or scientific notation.
 ///
-/// RED: panics at `build_pptx` (todo!() stub).
+/// Regression guard: `PptxExporter::export` returns `Ok(bytes)`.
 #[test]
 fn test_BC_4_01_001_all_coordinates_integer_i64() {
     let laid_out = make_laid_out_deck(1);
@@ -672,7 +668,7 @@ fn test_BC_4_01_001_all_coordinates_integer_i64() {
 /// BC-4.01.001 precondition 5 / AC-005:
 /// For a 3-slide deck, ALL slides must have integer-only EMU coordinates.
 ///
-/// RED: panics at `build_pptx` (todo!() stub).
+/// Regression guard: `PptxExporter::export` returns `Ok(bytes)`.
 #[test]
 fn test_BC_4_01_001_no_decimal_in_off_ext_attributes() {
     let laid_out = make_laid_out_deck(3);
@@ -717,7 +713,7 @@ fn test_BC_4_01_001_no_decimal_in_off_ext_attributes() {
 /// In `slide1.xml`, every `<p:sp>` element must have its children in the
 /// schema-correct order: `<p:nvSpPr>` first, then `<p:spPr>`, then `<p:txBody>`.
 ///
-/// RED: panics at `build_pptx` (todo!() stub).
+/// Regression guard: `PptxExporter::export` returns `Ok(bytes)`.
 #[test]
 fn test_BC_4_01_001_sp_child_order_nvSpPr_then_spPr_then_txBody() {
     let laid_out = make_laid_out_deck(1);
@@ -763,7 +759,7 @@ fn test_BC_4_01_001_sp_child_order_nvSpPr_then_spPr_then_txBody() {
 /// regression detection. The snapshot reviewer verifies OOXML structural
 /// compliance before accepting.
 ///
-/// RED: panics at `build_pptx` (todo!() stub).
+/// Regression guard: `PptxExporter::export` returns `Ok(bytes)`.
 #[test]
 fn test_BC_4_01_001_slide_xml_element_order_snapshot() {
     let laid_out = make_laid_out_deck(1);
@@ -783,7 +779,7 @@ fn test_BC_4_01_001_slide_xml_element_order_snapshot() {
 /// PPTX output. The ZIP entries must use epoch timestamps (1980-01-01 00:00:00)
 /// so that repeated builds are not sensitive to wall-clock time.
 ///
-/// RED: panics at `build_pptx` (todo!() stub).
+/// Regression guard: `PptxExporter::export` returns `Ok(bytes)`.
 #[test]
 fn test_BC_4_01_001_deterministic_output_sha256() {
     let laid_out = make_laid_out_deck(1);
@@ -805,7 +801,7 @@ fn test_BC_4_01_001_deterministic_output_sha256() {
 /// the deterministic ordering across a larger entry set (more parts = more
 /// opportunity for HashMap or BTreeMap ordering bugs to manifest).
 ///
-/// RED: panics at `build_pptx` (todo!() stub).
+/// Regression guard: `PptxExporter::export` returns `Ok(bytes)`.
 #[test]
 fn test_BC_4_01_001_determinism_5_slides() {
     let laid_out = make_laid_out_deck(5);
@@ -825,7 +821,7 @@ fn test_BC_4_01_001_determinism_5_slides() {
 /// a non-epoch datetime would cause non-determinism across runs at different
 /// wall-clock times.
 ///
-/// RED: panics at `build_pptx` (todo!() stub).
+/// Regression guard: `PptxExporter::export` returns `Ok(bytes)`.
 #[test]
 fn test_BC_4_01_001_zip_entries_use_epoch_datetime() {
     let laid_out = make_laid_out_deck(1);
@@ -903,7 +899,7 @@ fn test_BC_4_01_001_libreoffice_open() {
 /// entry in `ppt/slides/_rels/slide1.xml.rels`. The `.rels` file must have at
 /// least one entry (the layout relationship is mandatory).
 ///
-/// RED: panics at `build_pptx` (todo!() stub).
+/// Regression guard: `PptxExporter::export` returns `Ok(bytes)`.
 #[test]
 fn test_BC_4_01_001_all_rids_resolve_in_slide_rels() {
     let laid_out = make_laid_out_deck(1);
@@ -939,7 +935,7 @@ fn test_BC_4_01_001_all_rids_resolve_in_slide_rels() {
 /// Full relationship chain: slide → layout → master → theme. Each `.rels` file
 /// in the chain must be present and non-empty.
 ///
-/// RED: panics at `build_pptx` (todo!() stub).
+/// Regression guard: `PptxExporter::export` returns `Ok(bytes)`.
 #[test]
 fn test_BC_4_01_001_relationship_chain_completeness() {
     let laid_out = make_laid_out_deck(1);
@@ -981,7 +977,7 @@ fn test_BC_4_01_001_relationship_chain_completeness() {
 /// BC-4.01.001 postcondition 7 / AC-009:
 /// The root `_rels/.rels` must reference `ppt/presentation.xml`.
 ///
-/// RED: panics at `build_pptx` (todo!() stub).
+/// Regression guard: `PptxExporter::export` returns `Ok(bytes)`.
 #[test]
 fn test_BC_4_01_001_root_rels_references_presentation() {
     let laid_out = make_laid_out_deck(1);
@@ -1005,7 +1001,7 @@ fn test_BC_4_01_001_root_rels_references_presentation() {
 ///
 /// This un-ignores STORY-036 AC-001/AC-002 for the PPTX exporter.
 ///
-/// RED: panics at `build_pptx` (todo!() stub).
+/// Regression guard: `PptxExporter::export` returns `Ok(bytes)`.
 #[test]
 fn test_BC_4_01_001_report_detail_absent_from_slides() {
     use slideforge_eval::BleedChecker;
@@ -1035,7 +1031,7 @@ fn test_BC_4_01_001_report_detail_absent_from_slides() {
 /// Detail content is PPTX-excluded entirely (BC-4.01.001 invariant 1: "reads
 /// from LaidOutDeck only" — and detail content is never forwarded to PPTX).
 ///
-/// RED: panics at `build_pptx` (todo!() stub).
+/// Regression guard: `PptxExporter::export` returns `Ok(bytes)`.
 #[test]
 fn test_BC_4_01_001_detail_sentinel_absent_from_all_pptx() {
     use slideforge_eval::BleedChecker;
@@ -1063,7 +1059,7 @@ fn test_BC_4_01_001_detail_sentinel_absent_from_all_pptx() {
 /// All `<p:sldId id="...">` values in `presentation.xml` must be ≥ 256.
 /// IDs < 256 cause corruption in some PPTX renderers (BUG-006 from Spike S6).
 ///
-/// RED: panics at `build_pptx` (todo!() stub).
+/// Regression guard: `PptxExporter::export` returns `Ok(bytes)`.
 #[test]
 fn test_BC_4_01_001_slide_ids_start_at_256() {
     let laid_out = make_laid_out_deck(3);
@@ -1108,7 +1104,7 @@ fn test_BC_4_01_001_slide_ids_start_at_256() {
 /// BC-4.01.001 postcondition 6:
 /// The `<p:sldMasterId id="...">` in `presentation.xml` must be ≥ 2^31 (2,147,483,648).
 ///
-/// RED: panics at `build_pptx` (todo!() stub).
+/// Regression guard: `PptxExporter::export` returns `Ok(bytes)`.
 #[test]
 fn test_BC_4_01_001_master_id_at_least_2_to_31() {
     let laid_out = make_laid_out_deck(1);
@@ -1153,7 +1149,7 @@ fn test_BC_4_01_001_master_id_at_least_2_to_31() {
 /// ZIP with a well-formed `slide1.xml`. The slide body is allowed to be empty
 /// (just `<p:spTree>` with no shapes), but the ZIP structure must still be valid.
 ///
-/// RED: panics at `build_pptx` (todo!() stub).
+/// Regression guard: `PptxExporter::export` returns `Ok(bytes)`.
 #[test]
 fn test_BC_4_01_001_ec001_empty_slide_valid_zip() {
     let mut laid_out = make_laid_out_deck(1);
@@ -1180,7 +1176,7 @@ fn test_BC_4_01_001_ec001_empty_slide_valid_zip() {
 /// must contain a `ppt/media/` entry and `[Content_Types].xml` must have an
 /// Override (or Default) entry for the SVG part.
 ///
-/// RED: panics at `build_pptx` (todo!() stub).
+/// Regression guard: `PptxExporter::export` returns `Ok(bytes)`.
 #[test]
 fn test_BC_4_01_001_ec003_chart_svg_has_content_type_override() {
     use slideforge_types::NormalizedDiagramSvg;
@@ -1223,7 +1219,7 @@ fn test_BC_4_01_001_ec003_chart_svg_has_content_type_override() {
 /// for the in-memory `Vec<u8>` return path. This test verifies that the export
 /// returns `Ok(bytes)` without requiring any filesystem paths to exist.
 ///
-/// RED: panics at `build_pptx` (todo!() stub).
+/// Regression guard: `PptxExporter::export` returns `Ok(bytes)`.
 #[test]
 fn test_BC_4_01_001_ec004_in_memory_export_no_path_required() {
     // The exporter signature returns `Vec<u8>` — no output path needed.
@@ -1252,13 +1248,12 @@ fn test_BC_4_01_001_ec004_in_memory_export_no_path_required() {
 /// The `<p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>` element must appear
 /// after `<p:cSld>` in the `<p:sld>` element.
 ///
-/// RED: panics at `build_pptx` (todo!() stub).
+/// Regression guard: `PptxExporter::export` returns `Ok(bytes)`.
 #[test]
 fn test_BC_4_01_001_ec005_dark_layout_has_clr_map_ovr() {
     // The `SlideSerializer` is constructed with `is_dark_layout: true` to
-    // indicate a dark-themed layout. We need to exercise the exporter with a
-    // slide type that maps to a dark layout. For now, we test the SlideSerializer
-    // directly to avoid requiring full brand dark-layout metadata.
+    // indicate a dark-themed layout. We exercise the SlideSerializer directly
+    // to avoid requiring full brand dark-layout metadata in this unit test.
     use crate::slide_serializer::SlideSerializer;
 
     let slide = make_title_slide(0, "Dark Layout Slide");

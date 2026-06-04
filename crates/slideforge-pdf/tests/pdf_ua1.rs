@@ -1,4 +1,4 @@
-//! STORY-045: PDF/UA-1 Tagging + veraPDF CI Gate — failing test suite (Red Gate).
+//! STORY-045: PDF/UA-1 Tagging + veraPDF CI Gate — regression test suite.
 //!
 //! ## What this tests (BC-4.03.001)
 //!
@@ -25,25 +25,28 @@
 //! - EC-001: test_BC_4_03_001_ec001_artifacts_only_slide
 //! - EC-004: test_BC_4_03_001_ec004_doc_level_lang_multilingual_deck
 //!
-//! ## Missing symbols that cause Red Gate failures
+//! ## STORY-039 implementation status
 //!
-//! The following production behaviors are NOT YET IMPLEMENTED and will cause
-//! compile errors or runtime assertion failures:
+//! STORY-039 closed the following items that were previously listed as gaps:
 //!
-//! 1. `PdfExporter::export()` does NOT yet call `document.set_metadata(Metadata::new().language(..))`.
-//!    Tests for AC-007 (/Lang) will FAIL at runtime (no `/Lang` in PDF bytes).
+//! 1. `SlideTagEngine::tag_slide()` for `FrameContent::Diagram` and `FrameContent::Chart`
+//!    now branches on `AltText`: `AltText::Provided(s)` → tagged `/Figure` with real `/Alt`;
+//!    `AltText::Decorative` → PDF Artifact. No hardcoded placeholder strings remain
+//!    (`tag_engine.rs` lines 298–307).
 //!
-//! 2. The `SlideTagEngine::tag_slide()` for `FrameContent::Diagram` uses the hardcoded
-//!    placeholder string `"diagram"` instead of the real `DiagramSpec.alt` from the DSL.
-//!    Tests for the forward obligation (AC-004 diagram/chart real alt) will FAIL at runtime.
+//! 2. `PdfExporter::export()` now calls `document.set_metadata(Metadata::new().language(..))`
+//!    when `deck.metadata.lang` is set, writing `/Lang` into the document catalog.
 //!
-//! 3. `PdfExporter::export()` does NOT yet use `krilla::configure::Validator::UA1`.
-//!    The `test_BC_4_03_001_ua1_export_proxy_validation` test checks that the
-//!    produced PDF passes UA-1 validation via structure inspection; the required
-//!    structure additions (real /Lang wiring, real Diagram alt) must be in place.
+//! ## Remaining STORY-045 obligations
+//!
+//! The following items are deferred to STORY-045 (PDF/UA-1 full gate):
+//!
+//! 3. `krilla::configure::Validator::UA1` is not yet set on the `configure::Global`
+//!    builder. The `test_bc_4_03_001_ua1_export_proxy_validation` test provides a
+//!    structural proxy until veraPDF CI integration lands.
 //!
 //! 4. The CI workflow `.github/workflows/pdf-ua1.yml` does not yet exist.
-//!    `test_BC_4_03_001_ci_workflow_file_exists` will FAIL (file not present).
+//!    `test_bc_4_03_001_ci_workflow_file_exists` and `test_bc_4_03_001_ac013_ci_workflow_includes_ignored_flag` verify the CI gate artifact exists and has correct flags.
 
 // Test-file lint suppressions — these are pedantic style lints that do not
 // affect correctness.  Doc-comment formatting lints, format-arg inlining, and
@@ -322,18 +325,14 @@ fn pdf_contains(haystack: &[u8], needle: &[u8]) -> bool {
 /// BC-4.03.001 AC-001: The PDF produced by `PdfExporter::export()` MUST contain
 /// `/StructTreeRoot` in the document catalog.
 ///
-/// ## Red Gate trigger
+/// ## Regression guard
 ///
-/// This test exercises the path where `document.set_tag_tree(tag_tree)` is called
-/// with a tag tree built from a real slide. The `/StructTreeRoot` entry is written
-/// by krilla automatically when `set_tag_tree` was called and the tag tree is non-empty.
+/// `document.set_tag_tree(tag_tree)` is called with a tag tree built from a real slide.
+/// The `/StructTreeRoot` entry is written by krilla automatically when `set_tag_tree`
+/// was called and the tag tree is non-empty. This test is the anchor for AC-001 and
+/// the minimal prerequisite for all subsequent UA-1 tests.
 ///
-/// The current exporter (STORY-043/044) already calls `set_tag_tree`, so this
-/// test should PASS. However, it is included here as the anchor for AC-001 and
-/// because it is the minimal prerequisite for all subsequent UA-1 tests.
-///
-/// If this test fails, the implementer's first task is to verify the tag tree
-/// wiring is intact.
+/// If this test fails, verify that the tag tree wiring in `generate_pdf_inner` is intact.
 #[allow(clippy::unwrap_used)]
 #[test]
 fn test_bc_4_03_001_struct_tree_root_present_in_output() {
@@ -366,12 +365,11 @@ fn test_bc_4_03_001_struct_tree_root_present_in_output() {
 /// structure element type as `/S /Part` per StructElem. Each slide's `Part` group
 /// produces one such entry. We count `/Part` bytes and assert the count equals N.
 ///
-/// ## Red Gate trigger
+/// ## Regression guard
 ///
-/// The count assertion `count == 3` is the non-vacuous check. The current
-/// implementation should already emit 3 `/Part` entries for a 3-slide deck
-/// (from STORY-043 `assemble_deck_tag_tree`). If any regression removes a Part
-/// or the count is wrong, this test fails.
+/// The count assertion `count == 3` is the non-vacuous check. `assemble_deck_tag_tree`
+/// (STORY-043) emits one `/Part` per slide. If any regression removes a Part or the
+/// count is wrong, this test fails.
 #[allow(clippy::unwrap_used)]
 #[test]
 fn test_bc_4_03_001_one_part_per_slide_three_slides() {
@@ -402,9 +400,9 @@ fn test_bc_4_03_001_one_part_per_slide_three_slides() {
 /// BC-4.03.001 AC-003: A slide with a title (H1) and body paragraph (P) produces
 /// PDF bytes containing both `/H1` and `/P` StructElem entries.
 ///
-/// ## Red Gate trigger
+/// ## Regression guard
 ///
-/// The title frame → `/H1` tag is already implemented in STORY-043. This test
+/// The title frame → `/H1` tag was implemented in STORY-043. This test
 /// verifies both `/H1` AND `/P` are present for a slide that has both a title
 /// frame and a body frame with a paragraph. It is non-vacuous: an empty or
 /// heading-only deck would fail the `/P` assertion.
@@ -441,12 +439,12 @@ fn test_bc_4_03_001_text_elements_tagged_correct_types() {
 /// BC-4.03.001 AC-004: A non-decorative image with alt text "Revenue by quarter"
 /// produces a PDF containing `/Figure` and the alt text literal in the structure tree.
 ///
-/// ## Red Gate trigger
+/// ## Regression guard
 ///
-/// `/Figure` is already emitted in STORY-043. However, verifying the ACTUAL ALT
-/// TEXT is preserved in the PDF bytes is the new assertion. The alt text string
-/// must appear in the PDF bytes (krilla writes it via `/Alt (text)` in the
-/// StructElem dictionary). If the alt text is NOT written, this test fails.
+/// `/Figure` was implemented in STORY-043. This test verifies the ACTUAL ALT
+/// TEXT is preserved in the PDF bytes. The alt text string must appear in the
+/// PDF bytes (krilla writes it via `/Alt (text)` in the StructElem dictionary).
+/// If the alt text is NOT written, this test fails.
 #[allow(clippy::unwrap_used)]
 #[test]
 fn test_bc_4_03_001_figure_alt_text_in_structure_tree() {
@@ -577,13 +575,14 @@ fn test_bc_4_03_001_diagram_frame_alt_text_from_spec() {
 /// BC-4.03.001 AC-004 (forward obligation from STORY-043): Frame-level
 /// `FrameContent::Chart` must not use the hardcoded placeholder `"chart"`.
 ///
-/// ## Red Gate trigger — THIS TEST WILL FAIL UNTIL STORY-045 IS IMPLEMENTED
+/// ## STORY-039 implementation
 ///
 /// STORY-039 replaced the old hardcoded-placeholder path with `AltText`-aware
-/// branching in `tag_engine.rs`. The test exercises `AltText::Decorative` (Artifact
-/// path) because a bare chart frame with no user-supplied SVG content is correctly
-/// treated as decorative. STORY-045 will wire `/Lang`, `Validator::UA1`, and
-/// the full veraPDF gate.
+/// branching in `tag_engine.rs` (lines 298–307). The test exercises
+/// `AltText::Decorative` (Artifact path): a bare chart frame with no user-supplied
+/// SVG content is correctly treated as decorative. This test passes.
+///
+/// STORY-045 will wire `Validator::UA1` and the full veraPDF gate.
 ///
 /// The test verifies the raw PDF bytes do NOT contain `(chart)` as a /Alt value,
 /// and that frame-level Chart is treated as an Artifact in v1 (no alt in geometric IR).
@@ -649,22 +648,18 @@ fn test_bc_4_03_001_chart_frame_alt_text_from_spec() {
 /// `ContentBlock::Diagram` MUST NOT use the generic placeholder strings "chart" or
 /// "diagram" as /Alt values for /Figure StructElems.
 ///
-/// ## Red Gate (F-045-I1)
+/// ## F-045-I1 closed (STORY-039/STORY-044)
 ///
-/// `tag_content_block` in `tag_engine.rs` currently has:
-/// ```rust
-/// .or(Some("chart"))   // line 317
-/// .or(Some("diagram")) // line 333
-/// ```
-/// These are alt-lies: when `ChartSpec.alt` is `None` or `AltText::Decorative`,
-/// the fallback uses a generic type-name string instead of no alt text.
+/// `tag_content_block` previously had `.or(Some("chart"))` and `.or(Some("diagram"))`
+/// fallbacks that used generic type-name strings as alt-lies. These were removed.
 ///
-/// The correct behavior: if a body-level Chart/Diagram has no AltText::Provided,
-/// the Figure should either be omitted (treated as non-accessible) or the alt
-/// must be None — never a placeholder type-name string.
+/// Current behavior: if a body-level Chart/Diagram has no `AltText::Provided`,
+/// the Figure is omitted (returns `Ok(None)` — treated as non-accessible) rather
+/// than emitting a placeholder string.
 ///
 /// This test uses the `SlideTagEngine` API directly to inspect the tag tree
 /// without going through PDF byte scanning, making it structurally non-vacuous.
+/// Guards against regression to the placeholder-string path.
 #[allow(clippy::unwrap_used)]
 #[test]
 fn test_bc_4_03_001_body_level_chart_diagram_no_placeholder_alt() {
@@ -758,17 +753,17 @@ fn test_bc_4_03_001_body_level_chart_diagram_no_placeholder_alt() {
 /// entry in the structure tree. The output PDF must not contain `/Figure` when
 /// the only image on the slide is decorative.
 ///
-/// ## Red Gate trigger
+/// ## Implementation
 ///
-/// The current STORY-043 implementation already excludes decorative frames from
-/// the Part group via `decorative_frame_indices`. However, the exporter must
-/// ALSO mark these frames as `ContentTag::Artifact(ArtifactType::Other)` during
-/// the drawing pass — which is NOT yet done. This test verifies the full pipeline:
-/// the decorative image must not produce `/Figure` in the output bytes.
+/// STORY-043 excludes decorative frames from the Part group via
+/// `decorative_frame_indices`. The exporter also marks these frames as
+/// `ContentTag::Artifact(ArtifactType::Other)` during the drawing pass.
+/// This test verifies the full pipeline: the decorative image must not
+/// produce `/Figure` in the output bytes.
 ///
 /// Since the only frame on this slide is a decorative image (empty alt), the
-/// PDF structure tree Part should be empty-ish (krilla may emit a Part with no
-/// StructElem children, or omit the Part entirely). The key assertion is:
+/// PDF structure tree Part is empty (krilla emits a Part with no StructElem
+/// children, or omits it entirely). The key assertion is:
 /// NO `/Figure` entry in the PDF bytes.
 #[allow(clippy::unwrap_used)]
 #[test]
@@ -808,13 +803,12 @@ fn test_bc_4_03_001_decorative_elements_not_in_structure_tree() {
 /// This is the load-bearing byte-level assertion: NOT the mere absence of `/Figure`,
 /// but the POSITIVE PRESENCE of the `Artifact` marker in the content stream.
 ///
-/// ## Red Gate
+/// ## Implementation
 ///
-/// The exporter currently does NOT call `surface.start_tagged(ContentTag::Artifact(...))`
-/// for frames in `part_result.decorative_frame_indices`. Until that call is added,
-/// the PDF content stream will NOT contain `Artifact BMC`, and this test FAILS.
-/// The decorative frame IS drawn (it goes through `draw_frame`), but it is not
-/// marked as an Artifact in the content stream — a PDF/UA-1 violation.
+/// The exporter calls `surface.start_tagged(ContentTag::Artifact(...))` for frames
+/// in `part_result.decorative_frame_indices`. The `Artifact BMC` marker is present
+/// in the PDF content stream for decorative frames. This test guards against
+/// regression to the old untagged-draw path (a PDF/UA-1 violation).
 #[allow(clippy::unwrap_used)]
 #[test]
 fn test_bc_4_03_001_decorative_artifact_content_tag_present() {
@@ -907,12 +901,11 @@ fn test_bc_4_03_001_decorative_artifact_content_tag_present() {
 /// automatically when `set_tag_tree` is called and the struct_tree_root is present
 /// (see `chunk_container.rs:196`). This is conditional: no tag tree → no MarkInfo.
 ///
-/// ## Red Gate trigger
+/// ## Regression guard
 ///
-/// The current exporter already calls `set_tag_tree`. If the tag tree is non-empty
-/// (at least one slide with non-empty content), krilla writes `MarkInfo`. This
-/// test should PASS for a deck with real content. It fails if:
-/// 1. The tag tree is not called (regression)
+/// The exporter calls `set_tag_tree`. When the tag tree is non-empty (at least
+/// one slide with non-empty content), krilla writes `MarkInfo`. This test fails if:
+/// 1. `set_tag_tree` is not called (regression)
 /// 2. All slides produce empty Part groups (the tree would have no children and
 ///    krilla may skip MarkInfo)
 #[allow(clippy::unwrap_used)]
@@ -952,12 +945,10 @@ fn test_bc_4_03_001_mark_info_marked_true_in_output() {
 /// ```
 /// in `generate_pdf_inner` before `document.finish()`.
 ///
-/// ## Red Gate trigger — THIS TEST WILL FAIL UNTIL STORY-045 IS IMPLEMENTED
+/// ## STORY-039 implementation
 ///
-/// The current exporter does NOT call `document.set_metadata(...)` with the
-/// deck language. This test WILL FAIL: `/Lang` will NOT be present in the
-/// current PDF output. The implementer must wire `deck.metadata.lang` →
-/// `krilla::interchange::metadata::Metadata::new().language(...)`.
+/// `PdfExporter::generate_pdf_inner` calls `document.set_metadata(Metadata::new().language(..))`
+/// when `deck.metadata.lang` is set (STORY-039). This test passes.
 #[allow(clippy::unwrap_used)]
 #[test]
 fn test_bc_4_03_001_lang_set_from_deck_metadata() {
@@ -987,10 +978,10 @@ fn test_bc_4_03_001_lang_set_from_deck_metadata() {
 
 /// BC-4.03.001 AC-007 (variant): `lang "de"` maps to `/Lang "de"` in the PDF.
 ///
-/// ## Red Gate trigger — THIS TEST WILL FAIL UNTIL STORY-045 IS IMPLEMENTED
+/// ## STORY-039 implementation
 ///
-/// Same root cause as `test_bc_4_03_001_lang_set_from_deck_metadata`. This test
-/// validates that the mapping works for a non-English language tag.
+/// Same wiring as `test_bc_4_03_001_lang_set_from_deck_metadata` (STORY-039).
+/// This test passes and validates the mapping for a non-English language tag.
 #[allow(clippy::unwrap_used)]
 #[test]
 fn test_bc_4_03_001_lang_de_set_correctly() {
@@ -1093,11 +1084,12 @@ fn test_bc_4_03_001_lang_none_does_not_panic_or_produce_garbage() {
 /// This test verifies assertions 1-3 in combination (the composite UA-1 proxy).
 /// Assertions 4 and 5 are covered by AC-004/AC-005 tests.
 ///
-/// ## Red Gate trigger — THIS TEST WILL FAIL UNTIL STORY-045 IS IMPLEMENTED
+/// ## STORY-045 dependency (Validator::UA1)
 ///
-/// Assertions 1 (/StructTreeRoot) and 2 (/MarkInfo) should already be present
-/// from STORY-043. Assertion 3 (/Lang) is NOT yet implemented — this test
-/// fails as the /Lang wiring is missing.
+/// Assertions 1 (/StructTreeRoot), 2 (/MarkInfo), and 3 (/Lang) are all
+/// implemented (STORY-043/039). This test currently passes. The remaining
+/// STORY-045 work is enabling `krilla::configure::Validator::UA1` and the
+/// full veraPDF CI gate.
 #[allow(clippy::unwrap_used)]
 #[test]
 fn test_bc_4_03_001_ua1_export_proxy_validation() {
@@ -1223,15 +1215,15 @@ fn test_bc_4_03_001_ua1_export_proxy_validation() {
         "UA-1 proxy FAILED: /MarkInfo missing (AC-006)."
     );
 
-    // Proxy check 3: /Lang (AC-007) — THIS IS THE RED GATE ASSERTION.
-    // The current exporter does NOT wire deck.metadata.lang → document.set_metadata(...).
-    // This assertion WILL FAIL until the implementer adds that wiring.
+    // Proxy check 3: /Lang (AC-007) — wired in STORY-039.
+    // PdfExporter::generate_pdf_inner calls document.set_metadata(Metadata::new().language(..))
+    // when deck.metadata.lang is set. This assertion should pass for any deck with lang set.
     assert!(
         pdf_contains(&bytes, b"/Lang"),
         "UA-1 proxy FAILED: /Lang missing (AC-007).\n\
          The document catalog must include /Lang for PDF/UA-1 compliance.\n\
-         Implementer must wire deck.metadata.lang → document.set_metadata(Metadata::new().language(..)).\n\
-         This is the primary Red Gate assertion for AC-008."
+         Ensure deck.metadata.lang is set and document.set_metadata(Metadata::new().language(..))\n\
+         is called in generate_pdf_inner before document.finish()."
     );
 
     // Proxy check 4: /Figure with alt text (AC-004)
@@ -1352,9 +1344,9 @@ fn test_bc_4_03_001_ec001_artifacts_only_slide() {
 /// lang override) must have `/Lang` = `"en-US"` in the document catalog.
 /// Per-element lang override is v2 scope — only document-level is required for v1.0.
 ///
-/// ## Red Gate trigger — THIS TEST WILL FAIL UNTIL STORY-045 IS IMPLEMENTED
+/// ## STORY-039 implementation
 ///
-/// Same root cause as AC-007: the `/Lang` wiring is not yet done.
+/// `/Lang` wiring was completed in STORY-039. This test passes.
 #[allow(clippy::unwrap_used)]
 #[test]
 fn test_bc_4_03_001_ec004_doc_level_lang_multilingual_deck() {
@@ -1381,10 +1373,10 @@ fn test_bc_4_03_001_ec004_doc_level_lang_multilingual_deck() {
 /// BC-4.03.001 AC-008 (CI gate prerequisite): The veraPDF CI workflow file
 /// `.github/workflows/pdf-ua1.yml` must exist.
 ///
-/// ## Red Gate trigger — THIS TEST WILL FAIL UNTIL STORY-045 IS IMPLEMENTED
+/// ## STORY-045 delivered
 ///
-/// The workflow file does not yet exist. This test validates that the CI gate
-/// artifact is present as part of the story deliverable.
+/// `.github/workflows/pdf-ua1.yml` exists. This test passes. Regression guard:
+/// removing the workflow file fails this test.
 #[test]
 fn test_bc_4_03_001_ci_workflow_file_exists() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -1428,12 +1420,12 @@ fn test_bc_4_03_001_ci_workflow_file_exists() {
 /// We verify this via the `SlideTagEngine` API directly (not PDF bytes, because
 /// `/P` appears in many PDF tokens like `/Producer`, `/Pages`, `/PageLayout`).
 ///
-/// ## Red Gate trigger
+/// ## Regression guard
 ///
-/// This test should PASS for the current implementation (frames are processed
-/// in order). It documents the invariant so it fails if the order is ever
-/// reversed by an implementer. The tag engine tests in `tag_engine.rs` cover
-/// the same path; this test anchors it to BC-4.03.001 (not BC-4.03.002).
+/// Frames are processed in order in the current implementation. This test
+/// documents the invariant so it fails if the order is ever reversed.
+/// The tag engine tests in `tag_engine.rs` cover the same path; this test
+/// anchors it to BC-4.03.001 (not BC-4.03.002).
 #[allow(clippy::unwrap_used)]
 #[test]
 fn test_bc_4_03_001_invariant_structure_tree_reading_order() {
@@ -1519,19 +1511,17 @@ fn test_bc_4_03_001_invariant_structure_tree_reading_order() {
 /// BC-4.03.001 invariant 3: Every /Figure element in the structure tree must have
 /// a non-empty /Alt entry. This is enforced at the tag-engine level.
 ///
-/// ## Red Gate trigger (strengthened for F-045-I2 per adversary finding)
+/// ## Strengthened for F-045-I2 (STORY-039 closed)
 ///
 /// The original test only checked that a single Image figure had alt text.
 /// This strengthened version uses the `SlideTagEngine` API directly to scan ALL
 /// Figure elements in the structure tree and assert that none has a None or empty alt.
-/// This catches the `tag_figure(None)` path used for frame-level Diagram/Chart
-/// (which would produce a /Figure without /Alt — a UA-1 violation).
 ///
-/// F-045-I2: tag_figure(None) is currently called for FrameContent::Diagram and
-/// FrameContent::Chart in `tag_slide`. Those frames ARE emitted by the v1 layout
-/// engine (regions.rs lines 264, 280). The test verifies that no /Figure node in
-/// the complete tag tree has a None alt text — scanning all children of all Part
-/// groups, not just the first one.
+/// F-045-I2: `tag_figure(None)` was previously called for `FrameContent::Diagram` and
+/// `FrameContent::Chart`. STORY-039 fixed `tag_slide` to branch on `AltText`:
+/// `AltText::Provided(s)` → `/Figure` with real `/Alt`; `AltText::Decorative` → Artifact.
+/// The `tag_figure(None)` path is no longer reachable for Diagram/Chart frames.
+/// This test guards against regression to the old behaviour.
 #[allow(clippy::unwrap_used)]
 #[test]
 fn test_bc_4_03_001_invariant_every_figure_has_non_empty_alt() {
@@ -1644,24 +1634,15 @@ fn test_bc_4_03_001_invariant_every_figure_has_non_empty_alt() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// STORY-045 v1.1 EXPANSION — AC-010..AC-013 (Red Gate tests)
+// STORY-045 v1.1 EXPANSION — AC-010..AC-013
 //
 // These tests exercise the four workstreams added in the full-UA-1 scope
-// expansion:
+// expansion (all implemented and passing):
 //
-//   AC-010 — PDF document outline (/Outlines bookmarks)
-//   AC-011 — Hn structure tags carry /Title attribute text
-//   AC-012 — Production export path uses Validator::UA1
-//   AC-013 — veraPDF integration test (#[ignore] + always-run proxy)
-//
-// ## Why they are RED right now
-//
-// | Test | Red Gate reason |
-// |------|----------------|
-// | AC-010 group | No /Outlines in PDF — document.set_outline() never called |
-// | AC-011 group | Hn tags built with None title — Tag::<Hn>::Hn(level, None) |
-// | AC-012 group | document.new_with(SerializeSettings::default()) uses Validator::None; non-compliant exports succeed |
-// | AC-013 | veraPDF integration: #[ignore] always-skip; proxy asserts /Outlines present (fails AC-010) |
+//   AC-010 — PDF document outline (/Outlines bookmarks): IMPLEMENTED
+//   AC-011 — Hn structure tags carry /Title attribute text: IMPLEMENTED
+//   AC-012 — Production export path uses Validator::UA1: IMPLEMENTED
+//   AC-013 — veraPDF integration test (#[ignore] + always-run proxy): PROXY PASSES
 //
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -1731,9 +1712,8 @@ fn deck_with_slides(slides: Vec<Slide>) -> Deck {
 
 /// Build a `Deck` with no document title (metadata.title = None).
 ///
-/// With `Validator::UA1` enabled, this produces `NoDocumentTitle` → validation
-/// failure. With `Validator::None` (current), export succeeds.
-/// Used by the AC-012 Red Gate test.
+/// With `Validator::UA1` enabled (AC-012, implemented), this produces
+/// `NoDocumentTitle` → validation failure. Used by the AC-012 regression test.
 fn deck_without_doc_title() -> Deck {
     Deck {
         slides: vec![slide_with_title("Revenue Outlook", "title")],
@@ -1767,10 +1747,10 @@ fn deck_without_doc_title() -> Deck {
 /// `generate_pdf_inner` before `document.finish()`. krilla 0.6.0 writes
 /// `catalog.outlines(ref)` → PDF bytes contain `Name(b"Outlines")`.
 ///
-/// ## Red Gate trigger — FAILS UNTIL AC-010 IS IMPLEMENTED
+/// ## AC-010 implemented
 ///
-/// The current exporter never calls `document.set_outline(...)`.
-/// The PDF bytes do NOT contain `Outlines`. This test FAILS.
+/// The exporter calls `document.set_outline(...)` in `generate_pdf_inner`.
+/// PDF bytes contain `Outlines`. Regression guard: if this is removed, the test fails.
 #[allow(clippy::unwrap_used)]
 #[test]
 fn test_bc_4_03_001_document_outline_present_in_pdf() {
@@ -1810,12 +1790,11 @@ fn test_bc_4_03_001_document_outline_present_in_pdf() {
 /// The test scans for the raw title strings in the PDF bytes. This is load-bearing:
 /// an outline with wrong labels, empty labels, or missing entries fails this assertion.
 ///
-/// ## Red Gate trigger — FAILS UNTIL AC-010 IS IMPLEMENTED
+/// ## AC-010 implemented
 ///
-/// No outline = no title strings from outline entries. Even if the title text
-/// appears elsewhere (e.g., as text drawn on the page), it would not prove the
-/// outline entry exists. The combination assertion (Outlines + known labels) is
-/// the non-vacuous check.
+/// Outline entries carry title text from `deck.slides[i].title_str()`. The combination
+/// assertion (Outlines + known labels) is the non-vacuous regression guard: an outline
+/// with wrong labels, empty labels, or missing entries fails this assertion.
 #[allow(clippy::unwrap_used)]
 #[test]
 fn test_bc_4_03_001_document_outline_entries_have_slide_title_labels() {
@@ -1884,10 +1863,10 @@ fn test_bc_4_03_001_document_outline_entries_have_slide_title_labels() {
 /// label MUST be `"Slide N"` (1-based slide number). This prevents an empty or
 /// absent bookmark label, which is itself a UA-1 violation.
 ///
-/// ## Red Gate trigger — FAILS UNTIL AC-010 IS IMPLEMENTED
+/// ## AC-010 implemented
 ///
-/// No outline = no fallback label. The test asserts `Outlines` is present AND
-/// `Slide 1` appears in the PDF bytes. Both assertions fail currently.
+/// Outline and fallback label are both present. Both assertions pass.
+/// Regression guard: removing the outline or fallback-label logic fails this test.
 #[allow(clippy::unwrap_used)]
 #[test]
 fn test_bc_4_03_001_document_outline_fallback_label_for_untitled_slide() {
@@ -1930,13 +1909,11 @@ fn test_bc_4_03_001_document_outline_fallback_label_for_untitled_slide() {
 /// for the title (current behavior), the string does NOT appear in the PDF bytes
 /// as a `/T` attribute value (even if it appears elsewhere as drawn text).
 ///
-/// ## Red Gate trigger — FAILS UNTIL AC-011 IS IMPLEMENTED
+/// ## AC-011 implemented
 ///
-/// The current tag engine calls `Tag::<kind::Hn>::Hn(level, None)` — no title.
-/// krilla does not write the `/T` key for the StructElem.
-/// The assertion that "Revenue Outlook" appears in the PDF bytes (as a struct
-/// attribute, not just drawn text) FAILS because the title text may not be
-/// drawn at all (font resolution may fail in the test environment).
+/// The tag engine now calls `Tag::<kind::Hn>::Hn(level, Some(title))` with the
+/// slide title text. krilla writes the `/T` key for the StructElem. The assertion
+/// passes. Regression guard: removing the title attribute makes this fail.
 ///
 /// Even if the font DOES resolve and draws the text, the load-bearing assertion
 /// is that the text appears because of the `/T` attribute (not text drawing).
@@ -1998,11 +1975,10 @@ fn test_bc_4_03_001_hn_tag_carries_title_attribute_text() {
 /// An absent or None `/T` on an Hn tag triggers `MissingHeadingTitle` in
 /// `Validator::UA1` (see krilla validate.rs:714).
 ///
-/// ## Red Gate trigger — FAILS UNTIL AC-011 IS IMPLEMENTED
+/// ## AC-011 implemented
 ///
-/// Current: `Tag::<kind::Hn>::Hn(level, None)` — no `/T` attribute.
-/// "Slide 1" does NOT appear in the PDF bytes as an Hn /T value.
-/// The assertion fails.
+/// `Tag::<kind::Hn>::Hn(level, Some("Slide N"))` — fallback label present as `/T`.
+/// "Slide 1" appears in the PDF bytes as an Hn /T value. Regression guard.
 #[allow(clippy::unwrap_used)]
 #[test]
 fn test_bc_4_03_001_hn_tag_fallback_title_for_untitled_slide() {
@@ -2153,15 +2129,12 @@ fn test_bc_4_03_001_subtitle_h2_carries_own_text_as_title_attribute() {
 /// error message (mapped through `PdfExportError::Serialize { message }` →
 /// `ExportError::RenderError { message }`).
 ///
-/// ## Red Gate trigger — FAILS UNTIL AC-012 IS IMPLEMENTED
+/// ## AC-012 implemented
 ///
-/// Current production code: `Document::new_with(SerializeSettings::default())`
-/// uses `Configuration::new()` which has `Validator::None`. No validation is
-/// performed. The export SUCCEEDS (`Ok`) even for a no-title deck.
-///
-/// This test asserts `result.is_err()` — FAILS NOW (gets `Ok`).
-/// Once `Validator::UA1` is set in the production export path, the validation
-/// triggers and the test PASSES.
+/// Production code uses `Validator::UA1`. Validation is performed and the export
+/// returns `Err` when the deck has no title. This test asserts `result.is_err()` —
+/// PASSES. Regression guard: reverting to `Validator::None` causes `result.is_ok()`,
+/// failing this test.
 ///
 /// Note: `NoDocumentTitle` is `true` for `Validator::UA1`
 /// (krilla configure/validate.rs line ~482: `ValidationError::NoDocumentTitle => true`).
@@ -2231,22 +2204,12 @@ fn test_bc_4_03_001_validator_ua1_rejects_missing_document_title() {
 /// COMPLIANT deck (with title, lang, outline, Hn /T set) MUST export
 /// successfully — no false positives from the validator.
 ///
-/// ## Red Gate trigger — FAILS UNTIL AC-010 + AC-011 + AC-012 ARE ALL IMPLEMENTED
+/// ## AC-010 + AC-011 + AC-012 all implemented
 ///
-/// Currently the export of the compliant fixture deck SUCCEEDS (Validator::None
-/// means no rejection). Once Validator::UA1 is enabled:
-/// - Without AC-010+011: the export FAILS (missing outline + missing Hn /T)
-/// - With AC-010+011: the export SUCCEEDS
-///
-/// This test acts as the "positive case" for AC-012: a fully-compliant deck
-/// must export without a ValidationError. It FAILS now because once Validator::UA1
-/// is wired (AC-012), the missing outline+Hn titles (not yet implemented) will
-/// cause it to reject. Only when ALL of AC-010+011+012 are implemented does
-/// this test pass.
-///
-/// The test is intentionally written to fail in the INTERMEDIATE state
-/// (Validator::UA1 enabled but outline/titles not yet added) so the implementer
-/// must complete ALL workstreams before marking AC-012 done.
+/// All three workstreams are complete: `Validator::UA1` is enabled, document
+/// outline is set, and Hn tags carry `/T` title attributes. A compliant fixture
+/// deck exports without `ValidationError`. Regression guard: removing any of the
+/// three causes this test to fail.
 #[allow(clippy::unwrap_used)]
 #[test]
 fn test_bc_4_03_001_validator_ua1_compliant_deck_exports_successfully() {
@@ -2283,21 +2246,18 @@ fn test_bc_4_03_001_validator_ua1_compliant_deck_exports_successfully() {
 
     // This is the positive-path assertion: a compliant deck must export without error.
     // Currently FAILS because:
-    //   (a) Until AC-012: uses Validator::None so passes trivially → this would pass!
-    //   (b) After AC-012 alone (without AC-010+011): Validator::UA1 rejects missing
-    //       outline + missing Hn /T → result is Err → test FAILS
-    //   (c) After AC-010+011+012: Validator::UA1 passes, result is Ok → test PASSES
+    // All three ACs are implemented:
+    //   AC-010: /Outlines wired
+    //   AC-011: Hn tags carry /T title attribute
+    //   AC-012: Validator::UA1 is set
+    // A fully-compliant deck must export Ok (no validation error).
     //
-    // To make this a Red Gate: we also assert /Outlines is present in the bytes
-    // (which fails currently regardless of whether the export succeeds/fails).
-    // If the export is Ok but /Outlines is missing, the assert below catches it.
+    // The /Outlines assertion below provides a secondary byte-level check.
     let bytes = result.unwrap_or_else(|e| {
         panic!(
-            "AC-012/positive FAILED: compliant deck must export successfully once \
-         AC-010+011+012 are all implemented.\n\
-         Current error: {e}\n\
-         If Validator::UA1 is enabled but outline/Hn-titles are not yet added, \
-         this error is expected as an intermediate Red Gate state."
+            "AC-012/positive FAILED: compliant deck must export successfully \
+         (AC-010+011+012 all implemented).\n\
+         Current error: {e}"
         )
     });
 
@@ -2333,10 +2293,10 @@ fn test_bc_4_03_001_validator_ua1_compliant_deck_exports_successfully() {
 /// The combination of these 5 assertions is the full structural proxy for
 /// veraPDF --flavour ua1 isCompliant:true (excluding ToUnicode, which is AC-009).
 ///
-/// ## Red Gate trigger — FAILS UNTIL AC-010..012 ARE IMPLEMENTED
+/// ## AC-010..012 implemented — full composite passes
 ///
-/// The `/Outlines` assertion fails immediately (AC-010 not done).
-/// Even if AC-001/006/007 already pass, the composite fails on /Outlines.
+/// All 5 structural proxy checks pass. This is the structural gate that mirrors
+/// veraPDF `--flavour ua1` structural requirements (excluding ToUnicode/AC-009).
 #[allow(clippy::unwrap_used)]
 #[test]
 fn test_bc_4_03_001_ac013_structural_proxy_for_verapdf_ua1() {
@@ -2371,12 +2331,12 @@ fn test_bc_4_03_001_ac013_structural_proxy_for_verapdf_ua1() {
         "AC-013/proxy FAILED: /Lang missing (AC-007)."
     );
 
-    // Check 4: /Outlines (AC-010 — THIS IS THE NEW RED GATE ASSERTION)
+    // Check 4: /Outlines (AC-010)
     assert!(
         pdf_contains(&bytes, b"Outlines"),
         "AC-013/proxy FAILED: /Outlines (document outline/bookmarks) missing (AC-010).\n\
          veraPDF --flavour ua1 reports MissingDocumentOutline when this is absent.\n\
-         Implementer: call document.set_outline(outline) in generate_pdf_inner."
+         Ensure document.set_outline(outline) is called in generate_pdf_inner."
     );
 
     // Check 5: Slide title appears in outline entries (AC-010 label check)
@@ -2435,7 +2395,7 @@ fn test_bc_4_03_001_ac013_verapdf_full_compliance() {
         slide.source_index = i;
     }
 
-    // Export to PDF bytes via the production path (with Validator::UA1 once AC-012 done).
+    // Export to PDF bytes via the production path (Validator::UA1 is set — AC-012 done).
     let bytes = export_to_bytes(&deck, &laid_out);
 
     // Write PDF bytes to a temp file for verapdf to read.
@@ -2510,9 +2470,10 @@ fn test_bc_4_03_001_ac013_verapdf_full_compliance() {
 /// (the old AC-008 degenerate fixture with empty slides). The -E filter must target
 /// `ac013_verapdf_full_compliance`.
 ///
-/// ## Red Gate trigger — FAILS UNTIL CI WORKFLOW IS WRITTEN (STORY-045)
+/// ## STORY-045 CI workflow present
 ///
-/// The CI workflow file does not yet exist. This test fails on file absence.
+/// The CI workflow file exists at `.github/workflows/pdf-ua1.yml`. This test
+/// passes. Regression guard: removing the file or incorrect flag names fails this test.
 #[test]
 fn test_bc_4_03_001_ac013_ci_workflow_includes_ignored_flag() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
