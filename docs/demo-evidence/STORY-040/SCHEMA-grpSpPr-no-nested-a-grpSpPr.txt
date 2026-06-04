@@ -1,0 +1,24 @@
+
+===============================================================================
+= Schema-valid grpSpPr: <p:grpSpPr> with <a:xfrm>, NOT <a:grpSpPr> (F-040-A1) =
+===============================================================================
+
+Test: test_f040_a1_notes_slide_grpsppr_is_schema_valid
+Requirement: CT_GroupShapeProperties permits <a:xfrm> child but has NO <a:grpSpPr> child.
+
+Snippet around grpSpPr: ...entationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <p:cSld>
+    <p:spTree>
+      <p:grpSpPr>
+        <a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm>
+      </p:grpSpPr>
+      <p:sp>
+        <p:nvSpPr>
+          <p:cNvPr id="2" name="S...
+
+Schema assertions:
+  NO <a:grpSpPr> (would be schema-invalid): true
+  <p:grpSpPr> present (spTree first child):  true
+  <a:xfrm> identity transform present:        true
+
+All assertions pass: true

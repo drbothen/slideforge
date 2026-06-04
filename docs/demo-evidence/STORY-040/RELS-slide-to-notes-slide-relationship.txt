@@ -1,0 +1,26 @@
+
+=========================================================
+= Slide-to-notesSlide relationship (F-040-P1-001, CRIT) =
+=========================================================
+
+Test: test_f040_p1_001_slide_has_notes_slide_rel_in_slide_rels
+Requirement: slide WITH notes must have notesSlide rel in _rels file.
+
+ppt/slides/_rels/slide1.xml.rels (slide WITH notes):
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Target="../slideLayouts/slideLayout1.xml" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Id="rId1" />
+  <Relationship Target="../notesSlides/notesSlide1.xml" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesSlide" Id="rId2" />
+</Relationships>
+
+
+ppt/slides/_rels/slide2.xml.rels (slide WITHOUT notes):
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Target="../slideLayouts/slideLayout1.xml" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Id="rId1" />
+</Relationships>
+
+
+Assertions:
+  slide1 has notesSlide relationship:    true
+  slide2 has NO notesSlide relationship: true
+
+All assertions pass: true

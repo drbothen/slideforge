@@ -1,0 +1,13 @@
+
+================================================================
+= EC-001: no notesSlide when deck has no notes (no-notes deck) =
+================================================================
+
+Test: test_BC_4_01_003_ac001_ec001_no_notes_slide_for_empty_notes
+BC:   BC-4.01.003 postcondition 2 / EC-001
+
+notesSlide ZIP entries (expected 0): 0
+slide ZIP entries (expected >=1): 1
+
+Assertion: notes_count == 0 -> true
+Assertion: slide_count >= 1 -> true

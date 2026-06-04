@@ -16,7 +16,7 @@
 //! unique within a single `.rels` file but imposes no global uniqueness
 //! constraint.
 
-use ooxmlsdk::schemas::opc_relationships::{Relationship, Relationships};
+use ooxmlsdk::schemas::opc_relationships::{Relationship, Relationships, TargetMode};
 
 use crate::error::PptxError;
 
@@ -64,9 +64,34 @@ impl RelsBuilder {
         id
     }
 
+    /// Add an external hyperlink relationship and return the assigned `rId` string.
+    ///
+    /// External hyperlinks require `TargetMode="External"` in the `.rels` XML so
+    /// that consuming applications treat the target as an absolute URL rather than
+    /// a relative package path. This is the correct mechanism for `<a:hlinkClick>`
+    /// relationships in slide and notesSlide XML.
+    ///
+    /// The caller is responsible for ensuring that `url` has a scheme in
+    /// [`crate::link_safety::ALLOWED_LINK_SCHEMES`] before calling this method.
+    /// Use [`crate::link_safety::is_safe_link_scheme`] at the call site
+    /// (F-040-P2-001 / CWE-601 defense-in-depth).
+    pub fn add_external_hyperlink(&mut self, url: impl Into<String>) -> String {
+        let id = format!("rId{}", self.relationships.len() + 1);
+        self.relationships.push(RelEntry {
+            id: id.clone(),
+            rel_type: rel_types::HYPERLINK.to_string(),
+            target: format!("EXTERNAL:{}", url.into()), // sentinel for build()
+        });
+        id
+    }
+
     /// Serialise all relationships into `.rels` XML bytes.
     ///
     /// Uses the ooxmlsdk `Relationships` type for schema-correct serialisation.
+    ///
+    /// Entries whose target starts with `"EXTERNAL:"` (added via
+    /// [`add_external_hyperlink`][RelsBuilder::add_external_hyperlink]) are
+    /// emitted with `TargetMode="External"` and the sentinel prefix stripped.
     ///
     /// # Errors
     ///
@@ -81,11 +106,17 @@ impl RelsBuilder {
         };
 
         for entry in self.relationships {
+            let (target_mode, actual_target) =
+                if let Some(url) = entry.target.strip_prefix("EXTERNAL:") {
+                    (Some(TargetMode::External), url.to_string())
+                } else {
+                    (None, entry.target)
+                };
             rels.relationship.push(Relationship {
                 id: entry.id,
                 r#type: entry.rel_type,
-                target: entry.target,
-                target_mode: None,
+                target: actual_target,
+                target_mode,
             });
         }
 
@@ -146,7 +177,24 @@ pub mod rel_types {
     pub const EXTENDED_PROPERTIES: &str =
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties";
 
+    /// `slide{N}.xml` → `notesSlide{N}.xml` (slide's own notes part).
+    ///
+    /// This is the SLIDE-side relationship (F-040-P1-001): each slide that has
+    /// non-empty speaker notes MUST reference its notesSlide via its own `.rels`
+    /// file at `ppt/slides/_rels/slide{N}.xml.rels`. Without this relationship
+    /// `PowerPoint` cannot discover the slide's notes — the notesSlide→slide
+    /// back-rel alone is insufficient.
+    pub const NOTES_SLIDE: &str =
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesSlide";
+
     /// Slide → image/media part.
     pub const IMAGE: &str =
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image";
+
+    /// External hyperlink target.
+    ///
+    /// Used in `<a:hlinkClick>` runs via `RelsBuilder::add_external_hyperlink`.
+    /// The corresponding `.rels` entry must have `TargetMode="External"`.
+    pub const HYPERLINK: &str =
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink";
 }

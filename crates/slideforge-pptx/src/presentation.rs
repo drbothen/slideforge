@@ -16,10 +16,11 @@
 //! The slide master ID is `2^31` (`2_147_483_648`). This value is required by
 //! several renderers.
 //!
-//! ## Section list (STORY-040 deferred)
+//! ## Section list
 //!
-//! Full section list population is deferred to STORY-040. This module emits
-//! no section list when sections are absent (empty list is the default).
+//! Slide grouping via `<p:sectionLst>` is deferred to STORY-082. This module
+//! emits no section list (the typed `Presentation` default omits `sectionLst`,
+//! which is correct for presentation.xml when sections are absent).
 
 use ooxmlsdk::schemas::p::{
     HandoutMasterId, HandoutMasterIdList, NotesMasterId, NotesMasterIdList, Presentation, SlideId,

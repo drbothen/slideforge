@@ -828,9 +828,9 @@ fn test_BC_5_01_005_ac006_dc_language_exact_bcp47_zh_hant_tw() {
 // ─── AC-007: No lang → default "en" ──────────────────────────────────────────
 
 /// BC-5.01.005 EC-003:
-/// A deck with no `lang` declaration has `LaidOutDeck.lang = "en"` (set by
-/// upstream evaluator per BC-5.01.004). The PPTX must embed
-/// `<dc:language>en</dc:language>`.
+/// A deck with no `lang` declaration has `deck.metadata.lang = None`, which the
+/// evaluator resolves to "en" (set by the caller of `PptxExporter::export` per
+/// BC-5.01.004). The PPTX must embed `<dc:language>en</dc:language>`.
 ///
 /// Test vector (BC-5.01.005 canonical):
 ///   Input: No lang declared → any export

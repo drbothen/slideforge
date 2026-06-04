@@ -16,6 +16,7 @@
 //! - `ppt/theme/theme1.xml`
 //! - `ppt/notesMasters/notesMaster1.xml`
 //! - `ppt/handoutMasters/handoutMaster1.xml`
+//! - `ppt/notesSlides/notesSlide*.xml` — one per slide with notes (STORY-040)
 //! - `docProps/core.xml`
 //! - `docProps/app.xml`
 //! - `<Default>` for `.rels` and `.xml` extensions
@@ -33,6 +34,12 @@ pub struct ContentTypesBuilder {
     slide_count: usize,
     /// Number of layouts registered so far.
     layout_count: usize,
+    /// Paths of notesSlide parts registered so far (`ppt/notesSlides/notesSlide{N}.xml`).
+    ///
+    /// Sparse: only slides with non-empty notes get a notesSlide part, so the
+    /// indices are not necessarily contiguous.  Paths are stored verbatim (without
+    /// leading `/`) and a `/` is prepended when writing the Override entry.
+    notes_slide_paths: Vec<String>,
     /// Media parts: `(path, mime_type)` pairs.
     media_parts: Vec<(String, String)>,
 }
@@ -44,6 +51,7 @@ impl ContentTypesBuilder {
         Self {
             slide_count: 0,
             layout_count: 0,
+            notes_slide_paths: Vec::new(),
             media_parts: Vec::new(),
         }
     }
@@ -56,6 +64,16 @@ impl ContentTypesBuilder {
     /// Register one layout part (`ppt/slideLayouts/slideLayout{n}.xml`).
     pub fn add_layout(&mut self) {
         self.layout_count += 1;
+    }
+
+    /// Register one notesSlide part by its exact ZIP path.
+    ///
+    /// `path` is the ZIP-internal path (e.g., `"ppt/notesSlides/notesSlide1.xml"`).
+    /// Called once per notesSlide produced by `NotesSlideSerializer`.
+    /// The path is stored verbatim and a leading `/` is prepended when writing
+    /// the `<Override PartName="...">` entry.
+    pub fn add_notes_slide(&mut self, path: impl Into<String>) {
+        self.notes_slide_paths.push(path.into());
     }
 
     /// Register a media part (SVG or PNG image in `ppt/media/`).
@@ -123,6 +141,16 @@ impl ContentTypesBuilder {
             overrides.push((
                 format!("/ppt/slideLayouts/slideLayout{n}.xml"),
                 "application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"
+                    .to_string(),
+            ));
+        }
+
+        // notesSlides — sparse: only slides with non-empty notes get a part.
+        // Paths are the actual ZIP paths registered by `add_notes_slide`.
+        for path in &self.notes_slide_paths {
+            overrides.push((
+                format!("/{path}"),
+                "application/vnd.openxmlformats-officedocument.presentationml.notesSlide+xml"
                     .to_string(),
             ));
         }
