@@ -13,7 +13,7 @@ total_stories: 81
 stories_written: 81
 stories_ready: 0
 stories_in_progress: 0
-stories_merged: 52
+stories_merged: 53
 ---
 
 # STORY-INDEX — slideforge v1.0
@@ -33,10 +33,10 @@ stories_merged: 52
 | Wave 1 | 14 | 0 | 0 | 0 | 14 | 0 |
 | Wave 2 | 7 | 0 | 0 | 0 | 7 | 0 |
 | Wave 3 | 17 | 0 | 0 | 0 | 17 | 0 |
-| Wave 4 | 18 | 4 | 0 | 0 | 14 | 0 |
+| Wave 4 | 18 | 3 | 0 | 0 | 15 | 0 |
 | Wave 5 | 19 | 19 | 0 | 0 | 0 | 0 |
 | Wave 6 | 6 | 6 | 0 | 0 | 0 | 0 |
-| **Total** | **81** | **29** | **0** | **0** | **52** | **0** |
+| **Total** | **81** | **28** | **0** | **0** | **53** | **0** |
 
 ---
 
@@ -113,7 +113,7 @@ stories_merged: 52
 | [STORY-036](stories/STORY-036-register-no-bleed-invariant.md) | EPIC-18 | Register-Aware Rendering: No Content Bleed Invariant | BC-1.14.004 | P0 | 5 | strict | merged |
 | [STORY-037](stories/STORY-037-pptx-core-serialization.md) | EPIC-08 | PPTX Core Serialization: ooxmlsdk 0.6.1 + ZIP Assembly | BC-4.01.001 | P0 | 13 | strict | merged |
 | [STORY-038](stories/STORY-038-pptx-layout-compliance.md) | EPIC-08 | PPTX Layout Compliance: Placeholder Inheritance + Slide IDs + Layouts | BC-4.01.005 | P0 | 8 | strict | Merged |
-| [STORY-039](stories/STORY-039-pptx-a11y-metadata.md) | EPIC-08 | PPTX Accessibility Metadata | BC-4.01.004, BC-5.01.005 | P0 | 5 | strict | draft |
+| [STORY-039](stories/STORY-039-pptx-a11y-metadata.md) | EPIC-08 | PPTX Accessibility Metadata + Layout IR Alt-Threading | BC-4.01.004, BC-5.01.005 | P0 | 8 | strict | merged |
 | [STORY-040](stories/STORY-040-pptx-notes-sections-masters.md) | EPIC-08 | PPTX: Speaker Notes + Slide Sections + notesMaster1.xml | BC-4.01.003, BC-4.01.006 | P0 | 5 | strict | draft |
 | [STORY-041](stories/STORY-041-docx-core-serialization.md) | EPIC-09 | DOCX Core Serialization: report register + ooxmlsdk | BC-4.02.001 | P0 | 8 | strict | merged |
 | [STORY-042](stories/STORY-042-docx-auto-sections.md) | EPIC-09 | DOCX: Auto-Generated Document Sections | BC-4.02.002 | P0 | 5 | strict | merged |
@@ -128,7 +128,7 @@ stories_merged: 52
 | [STORY-077](stories/STORY-077-section-block-ir-extension.md) | EPIC-18 | SectionBlock IR Extension: FieldValue body + section-level register routing + inline-markup parser | BC-3.02.002, BC-1.14.003 | P0 | 13 | strict | merged |
 | [STORY-078](stories/STORY-078-parser-section-block-syntax.md) | EPIC-02 | Parser: section block syntax (section &lt;type&gt;: ... with sub-blocks) | BC-3.02.002 | P0 | 5 | strict | merged |
 
-**Wave 4 total points: 114**
+**Wave 4 total points: 117**
 
 ---
 
@@ -192,10 +192,10 @@ All previously Wave TBD stories have been assigned waves per human approval 2026
 | Wave 1 | 14 | 85 | 6.1 |
 | Wave 2 | 7 | 41 | 5.9 |
 | Wave 3 | 17 | 100 | 5.9 |
-| Wave 4 | 18 | 114 | 6.3 |
+| Wave 4 | 18 | 117 | 6.5 |
 | Wave 5 | 19 | 109 | 5.7 |
 | Wave 6 | 6 | 42 | 7.0 |
-| **Total** | **81** | **491** | **6.1** |
+| **Total** | **81** | **494** | **6.1** |
 
 > No story exceeds 13 points. STORY-023 (brand synthesis — 13 pts), STORY-037
 > (PPTX core serialization — 13 pts), STORY-077 (SectionBlock IR + inline-markup parser
@@ -223,6 +223,14 @@ All previously Wave TBD stories have been assigned waves per human approval 2026
 > (2026-06-02): inline-markup parser (TemplateChunk extension in slideforge-syntax +
 > chunks_to_inline_nodes in slideforge-eval + 28 Red Gate tests) added to STORY-077 scope.
 > Wave 4 total adjusted from 109 → 114 pts.
+>
+> STORY-039 points bumped from 5 → 8 per human-authorized scope expansion (2026-06-03):
+> layout IR alt-threading added to scope (FrameContent::Chart/Diagram now carry AltText,
+> FrameContent::Image gains AltText instead of Arc<str>). Scope spans 3 crates
+> (slideforge-layout SS-05, slideforge-pptx SS-06, slideforge-pdf SS-07). Root cause:
+> adversary + architect found chart/diagram alt text was silently dropped by the layout IR,
+> making BC-4.01.004 unsatisfiable for chart/diagram frames without this fix. Governed by
+> ADR-005 (Two-IR Model). Wave 4 total adjusted from 114 → 117 pts.
 >
 > Wave 5 expanded from 14 → 16 stories (84 → 90 pts) per same approval 2026-05-31:
 > STORY-072 (gradient fills, 3 pts, P2) and STORY-074 (brand-em-sizing, 3 pts, P2)

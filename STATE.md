@@ -4,7 +4,7 @@ mode: greenfield
 created: 2026-05-23
 current_phase: phase-3-tdd-implementation
 status: IN_PROGRESS
-last_updated: 2026-06-03
+last_updated: 2026-06-04
 phase_1_approved: 2026-05-25
 phase_2_approved: 2026-05-25
 phase_1_convergence: "17 passes, 69 findings, 3/3 clean (passes 15-16-17)"
@@ -16,7 +16,7 @@ prd_supplements: 4
 spikes_resolved: 7
 spikes_total: 7
 total_stories: 81
-total_points: 491
+total_points: 494
 total_waves: 6
 total_epics: 21
 dtu_required: false
@@ -28,14 +28,15 @@ wave_2_gate: "PASS 2026-05-27 — 11 gate passes, 19 findings fixed, 3/3 clean (
 wave_3_gate: "PASSED 2026-05-31 — PR #38 (7d266ad7); adversary pass 8 strict-CLEAN; holdout must-pass 5/5"
 wave_4_batch_a_complete: 10
 wave_4_batch_a_total: 10
+wave_4_merged: 15
 wave_4_started: 2026-05-31
 wave_4_total_stories: 18
-wave_4_total_points: 114
+wave_4_total_points: 117
 wave_5_total_points: 109
-develop_sha: "c031805c"
-develop_pr_count: 54
+develop_sha: "a4f29e5a"
+develop_pr_count: 55
 error_taxonomy_version: "v2.13"
-workspace_tests: "~2900+ (54 merged PRs + 1 fix commit)"
+workspace_tests: "~2984 (55 merged PRs)"
 workspace_test_failures: 0
 ---
 
@@ -53,16 +54,14 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. Generates branded .pptx
 
 ## CURRENT POSITION
 
-Phase 3, **Wave 4 — 14/18 merged. Batch B pptx chain (037→038) DONE. Batch B docx chain (041→042) DONE.**
+Phase 3, **Wave 4 — 15/18 merged. Batch B pptx chain (037→038→039) DONE. Batch B docx chain (041→042) DONE.**
 
-- `develop` = `c031805c` (54 merged PRs; origin/develop = local develop). **Open PRs: 0. Active worktrees: none.**
-- Workspace builds clean. ~2900+ tests pass, 0 failures.
-- STORY-037 MERGED PR #52 (2ebf184f). STORY-038 MERGED PR #54 (c031805c). Squash-merge c031805c IS the canonical develop HEAD (stray post-merge commit 9730e6a3 was discarded via hard-reset to origin/develop).
-- STORY-041 MERGED PR #51 (a3b47303). STORY-042 MERGED PR #53 (56f3f57d). Docx chain COMPLETE.
-- ADR-015 + Addendum A on factory-artifacts: governs brand→pptx OOXML rendering boundary + STORY-037/038 scope split. Relevant to STORY-039/040.
-- S1/S2/S3/S4 + SEC-001 (CWE-190) + DEF-P5-001: all resolved in scope in STORY-038.
+- `develop` = `a4f29e5a` (55 merged PRs; origin/develop = local develop). **Open PRs: 0. Active worktrees: none.**
+- Workspace builds clean. ~2984 tests pass, 0 failures.
+- STORY-039 MERGED PR #55 (a4f29e5a, 2026-06-04). 3-crate IR refactor: layout FrameContent carries AltText, pptx embeds descr + dc:language, pdf tag_engine branches AltText. Human-authorized scope expansion 5→8 pts. PptxError::InvalidLanguageTag added (validate_lang_for_xml). SEC-039-001 (CWE-116, MED) + SEC-039-002 (CWE-754, LOW) fixed in scope.
+- STORY-037 MERGED PR #52 (2ebf184f). STORY-038 MERGED PR #54 (c031805c). STORY-041 MERGED PR #51 (a3b47303). STORY-042 MERGED PR #53 (56f3f57d).
 
-**Batch B remaining:** STORY-039 → STORY-040 (pptx accessibility + speaker notes). **USER HAS AUTHORIZED proceeding.**
+**Batch B remaining:** STORY-040 (pptx speaker notes + notesMaster1.xml). **USER HAS AUTHORIZED proceeding.**
 **Batch C (after Batch B):** STORY-049 → STORY-050.
 **Wave 4 gate** runs only after ALL 18 Wave 4 stories merge.
 
@@ -70,17 +69,14 @@ Phase 3, **Wave 4 — 14/18 merged. Batch B pptx chain (037→038) DONE. Batch B
 
 ## NEXT ACTIONS (fresh orchestrator — execute in order)
 
-1. **STORY-039** — PPTX Accessibility Metadata. Depends on STORY-038 (MERGED). Authorized.
-   - Full per-story delivery: `git worktree add .worktrees/S-039 -b feature/S-039 develop`
+1. **STORY-040** — PPTX Speaker Notes + Slide Sections + notesMaster1.xml (BC-4.01.003, BC-4.01.006). Depends on STORY-039 (MERGED). Authorized. Completes Batch B pptx chain.
+   - Full per-story delivery: `git worktree add .worktrees/S-040 -b feature/S-040 develop`
    - Flow: stubs → failing tests → Red Gate + density → implement → per-story adversary 3-CLEAN → demo → push → PR → security-reviewer + pr-reviewer → CI green → `gh pr merge --squash` → cleanup → state-manager burst.
    - Architecture context: ADR-015 + Addendum A (`.factory/specs/architecture/adr/`) governs pptx rendering boundary.
-   - Reference: `workflows/phases/per-story-delivery.md`
 
-2. **STORY-040** — PPTX Speaker Notes + notesMaster1.xml. Depends on STORY-039. Completes Batch B pptx chain.
+2. **Batch C:** STORY-049 → STORY-050. After Batch B complete.
 
-3. **Batch C:** STORY-049 → STORY-050. After Batch B complete.
-
-4. **Wave 4 gate** after all 18 stories merged.
+3. **Wave 4 gate** after all 18 stories merged.
 
 ---
 
@@ -101,20 +97,21 @@ Phase 3, **Wave 4 — 14/18 merged. Batch B pptx chain (037→038) DONE. Batch B
 | Planning (25 DSL decisions) | DONE 2026-05-24 | q1–q25 docs + 14 research threads + 7/7 spikes resolved |
 | Phase 1: Spec Crystallization | DONE — APPROVED 2026-05-25 | PRD (109 BCs, 15 HS, 4 supplements) + arch (14 ADRs, 15 VPs, 20 crates) + UX spec. 17 passes, 69 findings, 3/3 clean. |
 | Phase 2: Story Decomposition | DONE — APPROVED 2026-05-25 | 81 stories, 21 epics, 6 waves, 491 pts. 22 passes, 96+ findings, 3/3 clean. |
-| Phase 3: TDD Implementation | IN PROGRESS — Waves 1/2/3 GATE PASSED. Wave 4: 14/18 merged. Batch B remaining: STORY-039→040. Then Batch C: STORY-049→050. | Per-story delivery |
+| Phase 3: TDD Implementation | IN PROGRESS — Waves 1/2/3 GATE PASSED. Wave 4: 15/18 merged. Batch B remaining: STORY-040. Then Batch C: STORY-049→050. | Per-story delivery |
 | Phases 4–7 | NOT STARTED | Holdout / Adversarial / Formal Hardening / Convergence |
 
 ## Wave 4 Story Status
 
 **Batch A — ALL MERGED (10/10):** PRs #39–#49 (develop c8913cad). STORY-035, -036, -043, -044, -073, -075, -076, -078, -045, -077. STORY-077 follow-ups PR #50 (f2573bb1, 2026-06-03).
 
-**Batch B — 4/4 MERGED:**
+**Batch B — 5/6 MERGED:**
 - STORY-041 MERGED PR #51 (a3b47303, 2026-06-03)
 - STORY-042 MERGED PR #53 (56f3f57d, 2026-06-03) — docx chain COMPLETE
 - STORY-037 MERGED PR #52 (2ebf184f, 2026-06-03)
-- STORY-038 MERGED PR #54 (c031805c, 2026-06-03) — pptx chain 037→038 DONE; develop = c031805c (stray 9730e6a3 discarded)
+- STORY-038 MERGED PR #54 (c031805c, 2026-06-03)
+- STORY-039 MERGED PR #55 (a4f29e5a, 2026-06-04) — pptx chain 037→038→039 DONE
 
-**Batch B remaining (pptx):** STORY-039 → STORY-040 (authorized)
+**Batch B remaining (pptx):** STORY-040 (authorized)
 **Batch C (after Batch B):** STORY-049 → STORY-050
 
 ---
@@ -123,13 +120,13 @@ Phase 3, **Wave 4 — 14/18 merged. Batch B pptx chain (037→038) DONE. Batch B
 
 | Field | Value |
 |-------|-------|
-| **Date** | 2026-06-03 |
-| **Position** | Wave 4: 14/18 merged. Batch B pptx (037→038) DONE + docx (041→042) DONE. NEXT: STORY-039 (authorized). |
-| **develop SHA** | `c031805c` (54 merged PRs; origin/develop = local develop) |
+| **Date** | 2026-06-04 |
+| **Position** | Wave 4: 15/18 merged. Batch B pptx (037→038→039) DONE + docx (041→042) DONE. NEXT: STORY-040 (authorized). |
+| **develop SHA** | `a4f29e5a` (55 merged PRs; origin/develop = local develop) |
 | **Active worktrees** | none |
 | **Open PRs** | 0 |
 | **Workspace crates** | 16 |
-| **Spec deltas this session** | ADR-015 + Addendum A; BC-3.02.002 v1.5; BC-1.14.003 v1.3; error-taxonomy v2.13 — all on factory-artifacts |
+| **Spec deltas this session** | STORY-039 spec amended to 8 pts + cross-crate (slideforge-layout/pptx/pdf); Library table corrected to Deck.metadata.lang/ShapeFrame.alt; AC-007 default "en". All on factory-artifacts. |
 | **factory-artifacts** | Local only — push requires explicit human authorization |
 
 ---
@@ -171,6 +168,18 @@ Phase 3, **Wave 4 — 14/18 merged. Batch B pptx chain (037→038) DONE. Batch B
 | OBS-P6-001: PDF exporter ignores `opts.strict`/warnings | LOW | Post-STORY-045 wave-gate |
 | DEF-041-P5-001: EC-002 paragraph-break preservation depends on STORY-035 evaluator (deferred) | integration | Wave-gate |
 | STORY-081: slide-level inline markup (P0 for v1.0, Wave 5, EPIC-18, depends STORY-077) | P0 | Wave 5 |
+| BC-5.01.005 invariant 2 references non-existent `LaidOutDeck.lang`; impl reads `deck.metadata.lang`. Architectural: lang on LaidOutDeck vs DeckMetadata affects all exporters' Two-IR boundary. HUMAN-GATED per SoT precedence rule 7 (spec-vs-code: needs human auth to amend BC or story to bring code to spec). | LOW/architectural | Phase 5 / pre-v1.0 |
+| Empty-string lang `lang ""` (Some("")) normalization to "en" — owned by slideforge-validate (SS-03), not exporter. | LOW | wave-gate / validator story |
+| Diagram frame with no media rId emits no `<p:pic>` → its alt descr is not emitted (pre-existing STORY-037 media structure; latent a11y gap). | LOW | pptx diagram-media story / Phase 6 a11y audit |
+| [process-gap] TDD Red-Gate citation discipline: per-test Red-Gate rationale must name a symbol PROVABLY on the production code path the test asserts (STORY-039 pass-1 F-039-PG1 — cited `AltTextEmbedder::embed` was not on the asserted path). | process | self-improvement epic (test-writer/implementer Red-Gate gate) |
+
+---
+
+## Decisions Log
+
+| Date | ID | Decision |
+|------|-----|---------|
+| 2026-06-04 | SEC-039 | SEC-039-001 (CWE-116, MED) + SEC-039-002 (CWE-754, LOW) FIXED IN-SCOPE during STORY-039 PR review — validate_lang_for_xml rejects XML-1.0-illegal control chars in dc:language; loud tracing::error fallback for unexpected AltText variants. Neither deferred. |
 
 ---
 

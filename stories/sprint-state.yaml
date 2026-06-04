@@ -28,7 +28,7 @@ wave_3_gate_holdout_must_pass: "5/5 PASS"
 wave_3_gate_tests: 2584
 wave_4_started: 2026-05-31
 wave_4_total_stories: 18
-wave_4_total_points: 109
+wave_4_total_points: 117
 wave_4_batch_a:
   stories: [STORY-035, STORY-036, STORY-043, STORY-044, STORY-045, STORY-073, STORY-075, STORY-076, STORY-077, STORY-078]
   execution: parallel
@@ -48,9 +48,9 @@ wave_4_batch_c:
 wave_4_pulled_in_p1: [STORY-073, STORY-075, STORY-076]
 wave_4_deferred_p2_to_wave5: [STORY-072, STORY-074]
 wave_4_bc_deltas: "BC-2.01.001 v1.1→v1.2; BC-2.01.003 v1.8→v1.9; error-taxonomy v2.2→v2.3"
-develop_sha: "c031805c"
-develop_pr_count: 54
-last_updated: 2026-06-03
+develop_sha: "a4f29e5a"
+develop_pr_count: 55
+last_updated: 2026-06-04
 ---
 
 stories:
@@ -377,19 +377,26 @@ stories:
     converged: true
     notes: "PPTX Layout Compliance: Placeholder Inheritance + Slide IDs + Layouts. MERGED PR #54 (c031805c). 16-pass cascade: silent fallbacks, raw-XML ADR-001 violation, Body/TextRun warn gap, doc-vs-code contradictions. ADR-015 + Addendum A established brand→pptx OOXML rendering boundary. S1 (validate_emu test), S2 (i32 clamp→error), S3 (Subtitle placeholder), SEC-001 (CWE-190 validate_emu i32 overflow), DEF-P5-001 (MissingBrandPart now constructed) all resolved in scope. S4 (notes/handout rels) resolved in scope (build_notes_handout_masters now propagates Result). pptx chain 037→038 DONE."
   STORY-039:
-    status: not-started
+    status: merged
     wave: 4
     batch: B
     priority: P0
-    points: 5
-    notes: "PPTX Accessibility Metadata; depends on STORY-038"
+    points: 8
+    pr: 55
+    merge_commit: "a4f29e5a"
+    merged: 2026-06-04
+    adversary_convergence: "3/3 strict-CLEAN (11-pass total cascade; strict-CLEAN on passes 9/10/11) + 1 confirming pass on security delta"
+    adversary_streak: "3/3"
+    converged: true
+    security_findings_fixed: "SEC-039-001 (CWE-116, MED) + SEC-039-002 (CWE-754, LOW) fixed in scope — validate_lang_for_xml + loud tracing::error fallback"
+    notes: "PPTX Accessibility Metadata + Layout IR Alt-Threading. 3-crate refactor: FrameContent::Image/Chart/Diagram carry AltText; layout::run threads alt; pptx embeds descr + dc:language; pdf tag_engine branches AltText. Human-authorized scope expansion 5→8 pts. PptxError::InvalidLanguageTag added. Governed by ADR-005. Batch B pptx chain 037→038→039 DONE."
   STORY-040:
     status: not-started
     wave: 4
     batch: B
     priority: P0
     points: 5
-    notes: "PPTX Speaker Notes + notesMaster1.xml; depends on STORY-039"
+    notes: "PPTX Speaker Notes + Slide Sections + notesMaster1.xml (BC-4.01.003, BC-4.01.006); depends on STORY-039 (MERGED a4f29e5a). Completes Batch B pptx chain. Authorized."
   STORY-041:
     status: merged
     wave: 4
