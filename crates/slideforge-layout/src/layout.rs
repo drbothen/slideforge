@@ -438,11 +438,21 @@ fn thread_media_alt_into_frames(
                     );
                     AltText::Decorative
                 };
-                if let Some(frame) = frames
+                match frames
                     .iter_mut()
                     .find(|f| matches!(f.content, FrameContent::Chart { .. }))
                 {
-                    frame.content = FrameContent::Chart { alt: resolved_alt };
+                    Some(frame) => {
+                        frame.content = FrameContent::Chart { alt: resolved_alt };
+                    },
+                    None => {
+                        tracing::warn!(
+                            source_slide_index,
+                            slide_type,
+                            "ContentBlock::Chart present but no matching Chart region frame \
+                             found — author alt text silently dropped"
+                        );
+                    },
                 }
             },
             ContentBlock::Diagram(spec) => {
@@ -458,17 +468,24 @@ fn thread_media_alt_into_frames(
                     );
                     AltText::Decorative
                 };
-                if let Some(frame) = frames
+                match frames
                     .iter_mut()
                     .find(|f| matches!(f.content, FrameContent::Diagram { .. }))
                 {
-                    // Preserve the existing SVG placeholder; only update alt.
-                    if let FrameContent::Diagram { svg, .. } = frame.content.clone() {
-                        frame.content = FrameContent::Diagram {
-                            svg,
-                            alt: resolved_alt,
-                        };
-                    }
+                    Some(frame) => {
+                        // Update only the alt field; preserve the existing SVG.
+                        if let FrameContent::Diagram { alt, .. } = &mut frame.content {
+                            *alt = resolved_alt;
+                        }
+                    },
+                    None => {
+                        tracing::warn!(
+                            source_slide_index,
+                            slide_type,
+                            "ContentBlock::Diagram present but no matching Diagram region frame \
+                             found — author alt text silently dropped"
+                        );
+                    },
                 }
             },
             ContentBlock::Image(spec) => {
@@ -484,11 +501,21 @@ fn thread_media_alt_into_frames(
                     );
                     AltText::Decorative
                 };
-                if let Some(frame) = frames
+                match frames
                     .iter_mut()
                     .find(|f| matches!(f.content, FrameContent::Image { .. }))
                 {
-                    frame.content = FrameContent::Image { alt: resolved_alt };
+                    Some(frame) => {
+                        frame.content = FrameContent::Image { alt: resolved_alt };
+                    },
+                    None => {
+                        tracing::warn!(
+                            source_slide_index,
+                            slide_type,
+                            "ContentBlock::Image present but no matching Image region frame \
+                             found — author alt text silently dropped"
+                        );
+                    },
                 }
             },
             // Other ContentBlock variants are handled in their respective passes.

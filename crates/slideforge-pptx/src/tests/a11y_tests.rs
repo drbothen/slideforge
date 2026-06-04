@@ -1,9 +1,8 @@
-//! Failing tests for STORY-039: PPTX Accessibility Metadata.
+//! Tests for STORY-039: PPTX Accessibility Metadata.
 //!
 //! Covers BC-4.01.004 (alt text embedding) and BC-5.01.005 (lang propagation
-//! to PPTX Core Properties). ALL tests in this file MUST FAIL before
-//! implementation begins (Red Gate). Tests parse REAL serialized PPTX output —
-//! no mock strings.
+//! to PPTX Core Properties). All tests pass in Green state — implementation is
+//! complete. Tests parse REAL serialized PPTX output — no mock strings.
 //!
 //! STORY-039 scope expansion (human-authorized 2026-06-03):
 //! AC-005 uses REAL FrameContent::Chart/Diagram frames (not Image proxies — F-039-C2 fix).
@@ -11,22 +10,22 @@
 //!
 //! ## Traceability
 //!
-//! | Test function | AC | BC clause | Red Gate reason |
+//! | Test function | AC | BC clause | What is verified |
 //! |---|---|---|---|
-//! | `test_BC_4_01_004_ac001_non_decorative_image_has_non_empty_descr` | AC-001 | postcondition 1 | `build_image_picture` sets description: None (no AltTextEmbedder call) |
-//! | `test_BC_4_01_004_ac002_decorative_image_has_empty_descr_attribute_present` | AC-002 | postcondition 2 | `build_image_picture` sets description: None for Decorative (not Some("")) |
-//! | `test_BC_4_01_004_ac003_300_char_alt_not_truncated` | AC-003 | invariant 1 | same as AC-001 |
-//! | `test_BC_4_01_004_ac004_special_chars_xml_escaped_well_formed` | AC-004 | EC-001 | same as AC-001 |
-//! | `test_BC_4_01_004_ac005_chart_frame_alt_on_enclosing_shape` | AC-005 | EC-005 | `build_shape_tree` skips `Chart { .. }` (debug arm, no shape emitted) |
-//! | `test_BC_4_01_004_ac005_diagram_frame_alt_on_enclosing_shape` | AC-005 | EC-005 | `build_picture` sets description: None for Diagram (ignores alt field) |
-//! | `test_BC_5_01_005_ac006_dc_language_exact_bcp47_en_us` | AC-006 | postcondition 1 | GREEN (build_doc_props already correct) — verify stays green |
-//! | `test_BC_5_01_005_ac006_dc_language_exact_bcp47_zh_hant_tw` | AC-006 | postcondition 1 | GREEN (build_doc_props already correct) |
-//! | `test_BC_5_01_005_ac007_no_lang_defaults_to_en` | AC-007 | EC-003 | `build_doc_props` uses unwrap_or("en-US") — must change to "en" |
-//! | `test_BC_4_01_004_ec001_all_decorative_slide` | EC-001 | postcondition 2 | same as AC-002 |
-//! | `test_BC_4_01_004_ec002_zh_tw_lang_bcp47_embedded` | EC-002 | EC-003 | GREEN |
-//! | `test_BC_4_01_004_ec005_300_char_alt_exact_length` | EC-005 | invariant 1 | same as AC-001 |
-//! | `test_BC_4_01_004_ec006_chart_none_alt_maps_to_decorative_descr_empty` | EC-006 | EC-006 | `build_shape_tree` skips `Chart { .. }` entirely |
-//! | `test_BC_4_01_004_ec007_diagram_none_alt_maps_to_decorative_descr_empty` | EC-007 | EC-007 | `build_picture` sets description: None (not Some("")) |
+//! | `test_BC_4_01_004_ac001_non_decorative_image_has_non_empty_descr` | AC-001 | postcondition 1 | `build_image_picture` sets descr from AltTextEmbedder |
+//! | `test_BC_4_01_004_ac002_decorative_image_has_empty_descr_attribute_present` | AC-002 | postcondition 2 | `build_image_picture` sets descr="" for Decorative |
+//! | `test_BC_4_01_004_ac003_300_char_alt_not_truncated` | AC-003 | invariant 1 | 300-char alt text embedded without truncation |
+//! | `test_BC_4_01_004_ac004_special_chars_xml_escaped_well_formed` | AC-004 | EC-001 | XML special chars escaped; slide XML is well-formed |
+//! | `test_BC_4_01_004_ac005_chart_frame_alt_on_enclosing_shape` | AC-005 | EC-005 | Chart frame alt threaded to enclosing shape cNvPr |
+//! | `test_BC_4_01_004_ac005_diagram_frame_alt_on_enclosing_shape` | AC-005 | EC-005 | Diagram frame alt threaded to enclosing shape cNvPr |
+//! | `test_BC_5_01_005_ac006_dc_language_exact_bcp47_en_us` | AC-006 | postcondition 1 | dc:language = "en-US" exact BCP-47 |
+//! | `test_BC_5_01_005_ac006_dc_language_exact_bcp47_zh_hant_tw` | AC-006 | postcondition 1 | dc:language = "zh-Hant-TW" exact BCP-47 |
+//! | `test_BC_5_01_005_ac007_no_lang_defaults_to_en` | AC-007 | EC-003 | No lang declaration defaults to "en" |
+//! | `test_BC_4_01_004_ec001_all_decorative_slide` | EC-001 | postcondition 2 | All decorative frames produce descr="" |
+//! | `test_BC_4_01_004_ec002_zh_tw_lang_bcp47_embedded` | EC-002 | EC-003 | zh-Hant-TW lang embedded unchanged |
+//! | `test_BC_4_01_004_ec005_300_char_alt_exact_length` | EC-005 | invariant 1 | 300-char descr exact length verified |
+//! | `test_BC_4_01_004_ec006_chart_none_alt_maps_to_decorative_descr_empty` | EC-006 | EC-006 | Chart AltText::Decorative produces descr="" |
+//! | `test_BC_4_01_004_ec007_diagram_none_alt_maps_to_decorative_descr_empty` | EC-007 | EC-007 | Diagram AltText::Decorative produces descr="" |
 
 #![allow(non_snake_case)]
 #![allow(clippy::unwrap_used)]
@@ -515,9 +514,6 @@ fn build_pptx(deck: &Deck, laid_out: &LaidOutDeck) -> Vec<u8> {
 /// Test vector (BC-4.01.004 canonical):
 ///   Input: Image with `alt "Revenue chart Q1 2026"`
 ///   Expected: `<p:cNvPr descr="Revenue chart Q1 2026">`
-///
-/// Red Gate: `AltTextEmbedder::embed` is `todo!()` — test panics before any
-/// assertion.
 #[test]
 fn test_BC_4_01_004_ac001_non_decorative_image_has_non_empty_descr() {
     let alt_text = "Revenue chart Q1 2026";
@@ -557,8 +553,6 @@ fn test_BC_4_01_004_ac001_non_decorative_image_has_non_empty_descr() {
 /// Test vector (BC-4.01.004 canonical):
 ///   Input: Image with `decorative: true`
 ///   Expected: `<p:cNvPr descr="">`
-///
-/// Red Gate: `AltTextEmbedder::embed` is `todo!()`.
 #[test]
 fn test_BC_4_01_004_ac002_decorative_image_has_empty_descr_attribute_present() {
     let deck = make_deck_with_lang("en-US");
@@ -586,8 +580,6 @@ fn test_BC_4_01_004_ac002_decorative_image_has_empty_descr_attribute_present() {
 ///
 /// An alt text value of 300 characters must be embedded in full.
 /// The `descr` attribute value length must equal the input length.
-///
-/// Red Gate: `AltTextEmbedder::embed` is `todo!()`.
 #[test]
 fn test_BC_4_01_004_ac003_300_char_alt_not_truncated() {
     let alt_300 = "A".repeat(300);
@@ -629,8 +621,6 @@ fn test_BC_4_01_004_ac003_300_char_alt_not_truncated() {
 /// Test vector (BC-4.01.004 canonical):
 ///   Input: `alt "Revenue & Cost"` (ampersand)
 ///   Expected: well-formed XML with `descr="Revenue &amp; Cost"`
-///
-/// Red Gate: `AltTextEmbedder::embed` is `todo!()`.
 #[test]
 fn test_BC_4_01_004_ac004_special_chars_xml_escaped_well_formed() {
     let alt_with_specials = r#"Revenue & Cost "Q1" <2026> 'fin'"#;
@@ -744,13 +734,6 @@ fn test_BC_4_01_004_ac005_diagram_frame_alt_on_enclosing_shape() {
 /// Test vector (BC-5.01.005 canonical):
 ///   Input: `lang "en-US"` → PPTX export
 ///   Expected: `<dc:language>en-US</dc:language>` in core.xml
-///
-/// Red Gate: Tests parse the actual `docProps/core.xml` from the PPTX ZIP.
-/// Currently `build_doc_props` in `lib.rs` uses `deck.metadata.lang` and
-/// already writes this. The test fails because `AltTextEmbedder::embed` (called
-/// during slide serialization) is `todo!()`, preventing the PPTX from being
-/// built at all. Once the stub compiles and the exporter runs end-to-end, this
-/// test must verify the exact dc:language value.
 #[test]
 fn test_BC_5_01_005_ac006_dc_language_exact_bcp47_en_us() {
     let deck = make_deck_with_lang("en-US");
@@ -781,8 +764,6 @@ fn test_BC_5_01_005_ac006_dc_language_exact_bcp47_en_us() {
 /// Test vector (BC-5.01.005 EC-002):
 ///   Input: `lang "zh-Hant-TW"` (4-part BCP-47)
 ///   Expected: all formats embed "zh-Hant-TW" unchanged
-///
-/// Red Gate: `AltTextEmbedder::embed` is `todo!()`.
 #[test]
 fn test_BC_5_01_005_ac006_dc_language_exact_bcp47_zh_hant_tw() {
     let deck = make_deck_with_lang("zh-Hant-TW");
@@ -815,13 +796,6 @@ fn test_BC_5_01_005_ac006_dc_language_exact_bcp47_zh_hant_tw() {
 /// Test vector (BC-5.01.005 canonical):
 ///   Input: No lang declared → any export
 ///   Expected: All formats embed "en" (default)
-///
-/// Note: The current `build_doc_props` uses `deck.metadata.lang.as_deref().unwrap_or("en-US")`.
-/// AC-007 requires the default to be "en" (not "en-US"). This test drives that
-/// behavior change — the implementer must change the fallback from "en-US" to "en".
-///
-/// Red Gate: Test will fail because either `AltTextEmbedder` is `todo!()` or
-/// the default fallback is the wrong value ("en-US" instead of "en").
 #[test]
 fn test_BC_5_01_005_ac007_no_lang_defaults_to_en() {
     let deck = make_deck_no_lang();
@@ -850,8 +824,6 @@ fn test_BC_5_01_005_ac007_no_lang_defaults_to_en() {
 /// When ALL images on a slide are decorative, every `<p:cNvPr>` for visual
 /// frames must have `descr=""`. No violations (non-empty descr on a decorative
 /// frame) should appear.
-///
-/// Red Gate: `AltTextEmbedder::embed` is `todo!()`.
 #[test]
 fn test_BC_4_01_004_ec001_all_decorative_slide() {
     let deck = make_deck_with_lang("en-US");
@@ -886,8 +858,6 @@ fn test_BC_4_01_004_ec001_all_decorative_slide() {
 /// This is verified by `test_BC_5_01_005_ac006_dc_language_exact_bcp47_zh_hant_tw`
 /// above. This test exercises it from the AC angle (checking the slide XML is
 /// also well-formed when the lang tag is non-ASCII BCP-47).
-///
-/// Red Gate: `AltTextEmbedder::embed` is `todo!()`.
 #[test]
 fn test_BC_4_01_004_ec002_zh_tw_lang_bcp47_embedded() {
     let deck = make_deck_with_lang("zh-Hant-TW");
@@ -921,8 +891,6 @@ fn test_BC_4_01_004_ec002_zh_tw_lang_bcp47_embedded() {
 /// This test is distinct from AC-003: it checks the EXACT character count
 /// (not just contains the string) and also verifies the slide XML remains
 /// well-formed after embedding.
-///
-/// Red Gate: `AltTextEmbedder::embed` is `todo!()`.
 #[test]
 fn test_BC_4_01_004_ec005_300_char_alt_exact_length() {
     // 300-char sentinel with varied characters to avoid naive truncation detection.

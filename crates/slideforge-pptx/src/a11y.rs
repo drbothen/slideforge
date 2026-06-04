@@ -86,35 +86,6 @@ impl AltDecision {
 }
 
 impl AltTextEmbedder {
-    /// Embed `descr` attributes into slide XML for all visual frames.
-    ///
-    /// `slide_xml` is the raw `ppt/slides/slide{n}.xml` bytes as produced by
-    /// [`crate::slide_serializer::SlideSerializer::build`].
-    ///
-    /// `_alt_decisions` is a parallel slice indexed by frame order (same as
-    /// `LaidOutSlide::frames`). Only frames that correspond to visual shapes
-    /// (image, chart, diagram) contribute entries; text-only frames do not.
-    /// The caller is responsible for building this slice from `LaidOutSlide`.
-    ///
-    /// In the current implementation, alt text is embedded directly during
-    /// shape construction in `SlideSerializer::build_shape_tree` via the
-    /// `description` field on `NonVisualDrawingProperties`. This method is
-    /// provided for callers that need to post-process already-serialized XML;
-    /// it returns the bytes unchanged since the attributes are already present.
-    ///
-    /// Returns the slide XML bytes (unchanged — alt text is embedded at
-    /// shape-construction time by the slide serializer).
-    ///
-    /// # Errors
-    ///
-    /// This implementation is infallible; it returns the input bytes unchanged.
-    /// The `PptxError` return type is preserved for API stability.
-    pub fn embed(slide_xml: Vec<u8>, _alt_decisions: &[AltDecision]) -> Result<Vec<u8>, PptxError> {
-        // Alt text is embedded at shape-construction time by SlideSerializer
-        // via NonVisualDrawingProperties::description. No post-processing needed.
-        Ok(slide_xml)
-    }
-
     /// Extract the alt text decisions for all visual frames in a `LaidOutSlide`.
     ///
     /// Walks `slide.frames` and returns a `Vec<(frame_idx, AltDecision)>` for
@@ -128,9 +99,9 @@ impl AltTextEmbedder {
     /// | `Image { alt: AltText::Provided(s) }` | `AltDecision::Provided(s.clone())` |
     /// | `Image { alt: AltText::Decorative }` | `AltDecision::Decorative` |
     /// | `Diagram { alt: AltText::Provided(s), .. }` | `AltDecision::Provided(s.clone())` |
-    /// | `Diagram { alt: AltText::Decorative, .. }` | `AltDecision::Decorative` (stub: threading not impl) |
+    /// | `Diagram { alt: AltText::Decorative, .. }` | `AltDecision::Decorative` |
     /// | `Chart { alt: AltText::Provided(s) }` | `AltDecision::Provided(s.clone())` |
-    /// | `Chart { alt: AltText::Decorative }` | `AltDecision::Decorative` (stub: threading not impl) |
+    /// | `Chart { alt: AltText::Decorative }` | `AltDecision::Decorative` |
     /// | All others | Skipped |
     ///
     /// # Errors
