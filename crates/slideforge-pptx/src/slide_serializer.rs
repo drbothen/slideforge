@@ -311,11 +311,40 @@ impl SlideSerializer {
         Ok((bytes, warnings))
     }
 
+    /// Build and push a `<p:pic>` for an image frame with `descr` set from alt text.
+    ///
+    /// Encapsulates the Image arm of `build_shape_tree` so that function stays
+    /// within the 150-line limit (BC-4.01.004, STORY-039).
+    fn push_image_frame(
+        shape_tree: &mut ShapeTree,
+        shape_id: &mut u32,
+        slide_index: usize,
+        frame_idx: usize,
+        frame: &slideforge_layout::Frame,
+        alt: &str,
+    ) -> Result<(), PptxError> {
+        validate_emu(slide_index, frame_idx, &frame.bbox)?;
+        let pic = build_image_picture(
+            *shape_id,
+            frame_idx,
+            alt,
+            frame.bbox.x.0,
+            frame.bbox.y.0,
+            frame.bbox.width.0,
+            frame.bbox.height.0,
+        );
+        shape_tree
+            .shape_tree_choice
+            .push(ShapeTreeChoice::PPic(Box::new(pic)));
+        *shape_id += 1;
+        Ok(())
+    }
+
     /// Build the `<p:spTree>` shape tree from the slide's frames.
     ///
     /// Processes each frame in order: text frames become `<p:sp>` placeholder
     /// shapes, diagram frames become `<p:pic>` elements. Non-serialisable frame
-    /// types (`Image`, `Chart`, `Shape`, `ErrorSlidePlaceholder`, `Empty`) are skipped.
+    /// types (`Chart`, `Shape`, `ErrorSlidePlaceholder`, `Empty`) are skipped.
     ///
     /// # Errors
     ///
@@ -469,9 +498,20 @@ impl SlideSerializer {
                     }
                 },
 
-                // Image, Chart, Shape, ErrorSlidePlaceholder, Empty: skipped in STORY-037.
-                FrameContent::Image { .. }
-                | FrameContent::Chart
+                // Image: emit <p:pic> with descr from alt (AC-001..005, BC-4.01.004).
+                FrameContent::Image { alt } => {
+                    Self::push_image_frame(
+                        &mut shape_tree,
+                        &mut shape_id,
+                        slide_index,
+                        frame_idx,
+                        frame,
+                        alt.as_ref(),
+                    )?;
+                },
+
+                // Chart, Shape, ErrorSlidePlaceholder, Empty: skipped in STORY-037.
+                FrameContent::Chart
                 | FrameContent::Shape(_)
                 | FrameContent::ErrorSlidePlaceholder { .. }
                 | FrameContent::Empty => {
@@ -757,6 +797,122 @@ fn build_shape(
         shape_properties: Box::new(sp_pr),
         shape_style: None,
         text_body: Some(Box::new(tx_body)),
+        extension_list_with_modification: None,
+    }
+}
+
+/// Build a typed `<p:pic>` element for an image frame with accessibility metadata.
+///
+/// `shape_id` is the numeric shape ID for `<p:cNvPr id="...">`.
+/// `frame_idx` is the 0-based frame index, used for the shape name.
+/// `alt_text` is the alt text value for `descr` (empty string for decorative elements).
+///   - Non-empty → `descr="<alt_text>"` (BC-4.01.004 postcondition 1).
+///   - Empty → `descr=""` (BC-4.01.004 postcondition 2 — attribute present, empty value).
+///
+/// Alt text is NEVER truncated (BC-4.01.004 invariant 1). XML special characters
+/// in `alt_text` are escaped by `ooxmlsdk` automatically (BC-4.01.004 EC-001).
+///
+/// The `descr` attribute is placed on `<p:cNvPr>` (BC-4.01.004 invariant 2),
+/// NOT on `<p:ph altText>` (which is for placeholder names only).
+///
+/// The resulting element is a placeholder picture with no media reference (no
+/// `r:embed` attribute) since image media embedding is deferred to a later story.
+fn build_image_picture(
+    shape_id: u32,
+    frame_idx: usize,
+    alt_text: &str,
+    x: i64,
+    y: i64,
+    cx: i64,
+    cy: i64,
+) -> Picture {
+    // <p:cNvPr>: set description to alt_text (maps to descr= attribute in XML).
+    // BC-4.01.004 invariant 2: descr is on cNvPr, not on ph.altText.
+    // BC-4.01.004 invariant 1: full alt_text, never truncated.
+    // BC-4.01.004 EC-001: ooxmlsdk escapes XML special chars automatically.
+    let cnv_pr = NonVisualDrawingProperties {
+        id: shape_id,
+        name: format!("Image {frame_idx}"),
+        // Some("") for decorative (descr="" — attribute present, empty value).
+        // Some(non_empty) for non-decorative (descr="alt text").
+        // ooxmlsdk writes Some(v) as descr="v" for any v, including empty string.
+        description: Some(alt_text.to_owned()),
+        hidden: None,
+        title: None,
+        hyperlink_on_click: None,
+        hyperlink_on_hover: None,
+        non_visual_drawing_properties_extension_list: None,
+        xmlns: vec![],
+    };
+
+    let cnv_pic_pr = NonVisualPictureDrawingProperties {
+        prefer_relative_resize: None,
+        picture_locks: Some(Box::new(PictureLocks {
+            no_change_aspect: Some(true),
+            ..PictureLocks::default()
+        })),
+        non_visual_picture_properties_extension_list: None,
+    };
+
+    let nv_pr = ApplicationNonVisualDrawingProperties {
+        is_photo: None,
+        user_drawn: None,
+        placeholder_shape: None,
+        application_non_visual_drawing_properties_choice: None,
+        p_cust_data_lst: None,
+        p_ext_lst: None,
+    };
+
+    let nv_pic_pr = NonVisualPictureProperties {
+        non_visual_drawing_properties: Box::new(cnv_pr),
+        non_visual_picture_drawing_properties: Box::new(cnv_pic_pr),
+        application_non_visual_drawing_properties: Box::new(nv_pr),
+    };
+
+    // Blip fill with no media reference (image media embedding is deferred).
+    let blip_fill = BlipFill {
+        dpi: None,
+        rotate_with_shape: None,
+        blip: None,
+        source_rectangle: None,
+        blip_fill_choice: Some(BlipFillChoice::AStretch(Box::new(Stretch {
+            fill_rectangle: Some(FillRectangle::default()),
+        }))),
+    };
+
+    let xfrm = Transform2D {
+        rotation: None,
+        horizontal_flip: None,
+        vertical_flip: None,
+        offset: Some(Offset { x, y }),
+        extents: Some(Extents { cx, cy }),
+        xmlns: vec![],
+    };
+
+    let sp_pr = ShapeProperties {
+        transform2_d: Some(Box::new(xfrm)),
+        shape_properties_choice1: Some(ShapePropertiesChoice::APrstGeom(Box::new(
+            ooxmlsdk::schemas::a::PresetGeometry {
+                preset: ooxmlsdk::schemas::a::ShapeTypeValues::Rectangle,
+                adjust_value_list: None,
+                xmlns: vec![],
+            },
+        ))),
+        shape_properties_choice2: None,
+        shape_properties_choice3: None,
+        black_white_mode: None,
+        a_ln: None,
+        a_scene3d: None,
+        a_sp3d: None,
+        a_ext_lst: None,
+        xmlns: vec![],
+    };
+
+    Picture {
+        non_visual_picture_properties: Box::new(nv_pic_pr),
+        blip_fill: Box::new(blip_fill),
+        shape_properties: Box::new(sp_pr),
+        shape_style: None,
         extension_list_with_modification: None,
     }
 }

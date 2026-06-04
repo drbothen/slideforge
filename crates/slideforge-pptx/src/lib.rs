@@ -42,6 +42,7 @@
 /// F-038-P2 follow-up).
 pub(crate) const LAYOUT_COUNT: usize = 31;
 
+pub mod a11y;
 pub mod brand_adapter;
 pub mod clrmapovr;
 pub mod content_types;
@@ -64,6 +65,7 @@ pub mod zip_assembler;
     clippy::map_unwrap_or
 )]
 mod tests {
+    mod a11y_tests;
     mod core_tests;
     mod layout_tests;
 }
@@ -656,7 +658,7 @@ fn build_notes_handout_masters(
 /// the OPC core properties namespace is not covered by `ooxmlsdk` schemas in
 /// this story's scope. Escaping is the correct mitigation.
 fn build_doc_props(deck: &Deck, parts: &mut Vec<ZipPart>) {
-    let lang_raw = deck.metadata.lang.as_deref().unwrap_or("en-US");
+    let lang_raw = deck.metadata.lang.as_deref().unwrap_or("en");
     // F-037-006: XML-escape the lang value before interpolating into the XML body.
     let lang = xml_escape(lang_raw);
 
