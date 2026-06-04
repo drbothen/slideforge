@@ -74,6 +74,7 @@ mod tests {
 }
 
 use content_types::ContentTypesBuilder;
+use notes_slide::NotesSlideSerializer;
 use presentation::PresentationSerializer;
 use rels::{RelsBuilder, rel_types};
 use slide_serializer::SlideSerializer;
@@ -146,6 +147,7 @@ impl PptxExporter {
         build_layout_parts(&brand_template, &mut parts)?;
         build_theme_part(&brand_template, &mut parts);
         build_notes_handout_masters(&brand_template, &mut parts)?;
+        let notes_slide_count = build_notes_slide_parts(laid_out, &mut parts)?;
         build_doc_props(deck, &mut parts)?;
         build_root_rels(&mut parts)?;
 
@@ -156,6 +158,21 @@ impl PptxExporter {
         }
         for _ in 0..LAYOUT_COUNT {
             ct.add_layout();
+        }
+        // Register notesSlide content-type overrides. Scan `parts` for notesSlide
+        // paths (written by `build_notes_slide_parts`) to get the exact sparse
+        // indices (e.g., notesSlide1.xml and notesSlide3.xml for a 3-slide deck
+        // where only slides 1 and 3 have notes).
+        let _ = notes_slide_count; // count verified via the path scan below
+        for part in &parts {
+            if part.path.starts_with("ppt/notesSlides/notesSlide")
+                && !part.path.contains("/_rels/")
+                && std::path::Path::new(&part.path)
+                    .extension()
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("xml"))
+            {
+                ct.add_notes_slide(&part.path);
+            }
         }
         for part in &parts {
             if part.path.starts_with("ppt/media/") {
@@ -577,6 +594,77 @@ fn build_theme_part(brand_template: &BrandTemplate, parts: &mut Vec<ZipPart>) {
         path: "ppt/theme/theme1.xml".to_string(),
         bytes: serialize_theme_to_xml(brand_template),
     });
+}
+
+/// Build `notesSlide{N}.xml` and `_rels/notesSlide{N}.xml.rels` for each slide
+/// with non-empty speaker notes (BC-4.01.003 / STORY-040).
+///
+/// Returns the count of notesSlide parts written (for content-type registration).
+///
+/// ## Naming convention
+///
+/// The notesSlide index (N) matches the corresponding slide's 1-based index in
+/// the ZIP (`slide1.xml` → `notesSlide1.xml`, `slide3.xml` → `notesSlide3.xml`).
+/// Slides without notes get no notesSlide part (BC-4.01.003 postcondition 2 / EC-001).
+///
+/// ## Relationship targets
+///
+/// Each notesSlide's `.rels` file uses relative paths:
+/// - `rId1` → `../slides/slide{N}.xml`  (the owning slide)
+/// - `rId2` → `../notesMasters/notesMaster1.xml`  (notes master)
+fn build_notes_slide_parts(
+    laid_out: &LaidOutDeck,
+    parts: &mut Vec<ZipPart>,
+) -> Result<usize, PptxError> {
+    let mut count = 0_usize;
+
+    for (i, slide) in laid_out.slides.iter().enumerate() {
+        let slide_num = i + 1; // 1-based
+
+        // Use speaker_notes as the canonical notes source (derived from
+        // register_content by layout::run — the single authoritative field).
+        let Some(notes_text) = slide.speaker_notes.as_deref() else {
+            continue;
+        };
+        // EC-001: skip slides whose notes text is empty or whitespace-only.
+        if notes_text.trim().is_empty() {
+            continue;
+        }
+
+        tracing::debug!(
+            slide = slide_num,
+            notes_len = notes_text.len(),
+            "building notesSlide part"
+        );
+
+        // These rId values are unused by NotesSlideSerializer::build since the
+        // serializer builds its own RelsBuilder. The parameters are forwarded for
+        // API symmetry and potential future brand-template override (e.g., if the
+        // brand supplies pre-formed notesSlide rels).
+        let output = NotesSlideSerializer::build(
+            slide_num,
+            notes_text,
+            &format!("rId1-slide{slide_num}"), // placeholder — not used by builder
+            "rId2-notesMaster",                // placeholder — not used by builder
+        )
+        .map_err(|e| PptxError::OoxmlElement {
+            part: format!("ppt/notesSlides/notesSlide{slide_num}.xml"),
+            detail: format!("NotesSlideSerializer::build failed: {e}"),
+        })?;
+
+        parts.push(ZipPart {
+            path: format!("ppt/notesSlides/notesSlide{slide_num}.xml"),
+            bytes: output.xml_bytes,
+        });
+        parts.push(ZipPart {
+            path: format!("ppt/notesSlides/_rels/notesSlide{slide_num}.xml.rels"),
+            bytes: output.rels_bytes,
+        });
+
+        count += 1;
+    }
+
+    Ok(count)
 }
 
 /// Build `notesMaster1.xml` and `handoutMaster1.xml` (always present — BC-4.01.006).

@@ -46,6 +46,8 @@
 #![allow(clippy::unwrap_used)]
 #![allow(clippy::expect_used)]
 #![allow(clippy::panic)]
+#![allow(clippy::collapsible_match)]
+#![allow(clippy::case_sensitive_file_extension_comparisons)]
 
 use std::io::Read as _;
 use std::sync::Arc;
