@@ -32,7 +32,7 @@ wave_4_started: 2026-05-31
 wave_4_total_stories: 18
 wave_4_total_points: 114
 wave_5_total_points: 109
-develop_sha: "9730e6a3"
+develop_sha: "c031805c"
 develop_pr_count: 54
 error_taxonomy_version: "v2.13"
 workspace_tests: "~2900+ (54 merged PRs + 1 fix commit)"
@@ -55,9 +55,9 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. Generates branded .pptx
 
 Phase 3, **Wave 4 — 14/18 merged. Batch B pptx chain (037→038) DONE. Batch B docx chain (041→042) DONE.**
 
-- `develop` = `9730e6a3` (54 merged PRs + 1 post-merge fix commit). **Open PRs: 0. Active worktrees: none.**
+- `develop` = `c031805c` (54 merged PRs; origin/develop = local develop). **Open PRs: 0. Active worktrees: none.**
 - Workspace builds clean. ~2900+ tests pass, 0 failures.
-- STORY-037 MERGED PR #52 (2ebf184f). STORY-038 MERGED PR #54 (c031805c). Post-merge fix commit `9730e6a3` closes F-038-P2-M1 (Title/Subtitle shapes gate through AC-011 idx-chain).
+- STORY-037 MERGED PR #52 (2ebf184f). STORY-038 MERGED PR #54 (c031805c). Squash-merge c031805c IS the canonical develop HEAD (stray post-merge commit 9730e6a3 was discarded via hard-reset to origin/develop).
 - STORY-041 MERGED PR #51 (a3b47303). STORY-042 MERGED PR #53 (56f3f57d). Docx chain COMPLETE.
 - ADR-015 + Addendum A on factory-artifacts: governs brand→pptx OOXML rendering boundary + STORY-037/038 scope split. Relevant to STORY-039/040.
 - S1/S2/S3/S4 + SEC-001 (CWE-190) + DEF-P5-001: all resolved in scope in STORY-038.
@@ -112,7 +112,7 @@ Phase 3, **Wave 4 — 14/18 merged. Batch B pptx chain (037→038) DONE. Batch B
 - STORY-041 MERGED PR #51 (a3b47303, 2026-06-03)
 - STORY-042 MERGED PR #53 (56f3f57d, 2026-06-03) — docx chain COMPLETE
 - STORY-037 MERGED PR #52 (2ebf184f, 2026-06-03)
-- STORY-038 MERGED PR #54 (c031805c, 2026-06-03) — pptx chain 037→038 DONE; post-merge fix 9730e6a3
+- STORY-038 MERGED PR #54 (c031805c, 2026-06-03) — pptx chain 037→038 DONE; develop = c031805c (stray 9730e6a3 discarded)
 
 **Batch B remaining (pptx):** STORY-039 → STORY-040 (authorized)
 **Batch C (after Batch B):** STORY-049 → STORY-050
@@ -125,7 +125,7 @@ Phase 3, **Wave 4 — 14/18 merged. Batch B pptx chain (037→038) DONE. Batch B
 |-------|-------|
 | **Date** | 2026-06-03 |
 | **Position** | Wave 4: 14/18 merged. Batch B pptx (037→038) DONE + docx (041→042) DONE. NEXT: STORY-039 (authorized). |
-| **develop SHA** | `9730e6a3` (54 PRs + 1 fix commit) |
+| **develop SHA** | `c031805c` (54 merged PRs; origin/develop = local develop) |
 | **Active worktrees** | none |
 | **Open PRs** | 0 |
 | **Workspace crates** | 16 |
@@ -148,6 +148,7 @@ Phase 3, **Wave 4 — 14/18 merged. Batch B pptx chain (037→038) DONE. Batch B
 | LESSON-9 | When PR-level security/pr-reviewer findings are fixed AFTER per-story adversary convergence, the code diff changes — RE-RUN security-reviewer + pr-reviewer + wait for CI before merge. Do not assume prior convergence still holds. |
 | LESSON-10 | For strict 3-CLEAN on compliance/extension stories: do a PROACTIVE exhaustive doc-vs-code + sibling-site (warn/error-propagation) consistency audit BEFORE final convergence passes, to avoid per-finding ping-pong (STORY-038 took 16 passes). |
 | LESSON-11 | Stub/test-writer for EXTENSION stories often produces a high GREEN-BY-DESIGN ratio (prior-merged behavior is legitimate PRE-EXISTING-BEHAVIOR). But stricter new tests can expose REAL bugs in already-merged code — treat such finds as in-scope fixes for the compliance story. |
+| LESSON-12 | Agents working in feature worktrees MUST NEVER commit to the `develop` branch. Twice this session a STORY-038 fix-burst commit accidentally landed on LOCAL develop (28636fae, 9730e6a3) — both unpushed and discarded via hard-reset to origin/develop. Mitigations: (a) worktree dispatches operate ONLY within `.worktrees/STORY-NNN` and never `git switch`/checkout develop in the main worktree; (b) after EVERY PR squash-merge, orchestrator verifies `git rev-parse develop == git rev-parse origin/develop` and resets local develop to origin if drifted, BEFORE creating the next story's worktree so new branches fork from the correct base; (c) fresh-session factory-worktree-health startup check MUST include this develop==origin/develop assertion. |
 
 ---
 
