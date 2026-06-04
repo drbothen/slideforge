@@ -546,8 +546,9 @@ fn test_bc_4_03_001_diagram_frame_alt_text_from_spec() {
         .unwrap_or_else(|e| panic!("export_uncompressed failed: {e}"));
 
     // Assertion 1: Frame-level Diagram is treated as Artifact in v1, NOT /Figure.
-    // The invariant-3 analysis: Diagram has no alt in the geometric IR, so it cannot
-    // be a /Figure (that would require a non-empty /Alt). It must be an Artifact.
+    // The invariant-3 analysis: this test constructs the Diagram frame with
+    // AltText::Decorative (no semantic user content), so tag_slide correctly routes
+    // it to decorative_frame_indices (Artifact) rather than a /Figure. It must be an Artifact.
     assert!(
         !pdf_contains(&bytes, b"/Figure"),
         "AC-004/diagram: Frame-level Diagram must NOT produce a /Figure StructElem in v1.\n\
@@ -585,7 +586,8 @@ fn test_bc_4_03_001_diagram_frame_alt_text_from_spec() {
 /// STORY-045 will wire `Validator::UA1` and the full veraPDF gate.
 ///
 /// The test verifies the raw PDF bytes do NOT contain `(chart)` as a /Alt value,
-/// and that frame-level Chart is treated as an Artifact in v1 (no alt in geometric IR).
+/// and that frame-level `FrameContent::Chart { alt: AltText::Decorative }` is treated
+/// as an Artifact in v1 (tag_slide branches on AltText; Decorative → Artifact path).
 #[allow(clippy::unwrap_used)]
 #[test]
 fn test_bc_4_03_001_chart_frame_alt_text_from_spec() {
@@ -635,7 +637,8 @@ fn test_bc_4_03_001_chart_frame_alt_text_from_spec() {
          The tag engine must not use the generic 'chart' placeholder string."
     );
 
-    // Assertion 2: Frame-level Chart is an Artifact in v1 (no alt in geometric IR).
+    // Assertion 2: Frame-level Chart with AltText::Decorative is an Artifact in v1
+    // (tag_slide branches on AltText; Decorative → decorative_frame_indices → Artifact).
     assert!(
         !pdf_contains(&bytes, b"/Figure"),
         "AC-004/chart: Frame-level Chart must NOT produce a /Figure StructElem in v1.\n\
@@ -1555,9 +1558,9 @@ fn test_bc_4_03_001_invariant_every_figure_has_non_empty_alt() {
     // This catches the tag_figure(None) path for FrameContent::Diagram/Chart.
     //
     // Build a slide with a frame-level Diagram frame (empty_placeholder SVG).
-    // The layout engine emits FrameContent::Diagram(empty_placeholder()) for
-    // "diagram"-type slides (regions.rs:280). This exercises the exact code path
-    // that was using None alt.
+    // The layout engine emits FrameContent::Diagram { svg: empty_placeholder(), alt: AltText }
+    // for "diagram"-type slides (regions.rs:280). This exercises the exact code path
+    // that was using None alt (pre-STORY-039 old tuple form: Diagram(NormalizedDiagramSvg)).
     //
     // After F-045-I2 fix: the Diagram frame with empty SVG must NOT produce
     // a Figure node with None alt (it should either be tagged as Artifact if

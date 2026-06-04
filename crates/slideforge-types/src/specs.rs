@@ -31,7 +31,7 @@ use crate::span::SourceSpan;
 ///
 /// `slideforge-diagrams` produces `NormalizedDiagramSvg` values via
 /// `usvg_normalize`. `slideforge-layout` stores them in
-/// `FrameContent::Diagram(NormalizedDiagramSvg)`.
+/// `FrameContent::Diagram { svg: NormalizedDiagramSvg, alt: AltText }`.
 ///
 /// ## IR compatibility
 ///
