@@ -32,10 +32,10 @@ wave_4_started: 2026-05-31
 wave_4_total_stories: 18
 wave_4_total_points: 114
 wave_5_total_points: 109
-develop_sha: "c031805c"
+develop_sha: "9730e6a3"
 develop_pr_count: 54
 error_taxonomy_version: "v2.13"
-workspace_tests: "~2700+ (54 PRs merged)"
+workspace_tests: "~2900+ (54 merged PRs + 1 fix commit)"
 workspace_test_failures: 0
 ---
 
@@ -51,20 +51,44 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. Generates branded .pptx
 
 ---
 
-## POSITION
+## CURRENT POSITION
 
-Phase 3, **Wave 4 Batch B — pptx chain 037→038 DONE: STORY-038 MERGED (PR #54, c031805c).**
-- develop = `c031805c` (54 merged PRs). Open PRs: 0. Active worktree: none.
-- STORY-038: merged PR #54 (c031805c). pptx chain 037→038 DONE. 16-pass adversary cascade; every reset a genuine defect (silent fallbacks, raw-XML ADR-001 violation, Body/TextRun warn gap, doc-vs-code contradictions). ADR-015 + Addendum A established brand→pptx OOXML rendering boundary.
-- S4 (build_notes_handout_masters rels-error swallow): RESOLVED in scope in STORY-038 — build_notes_handout_masters now returns Result and propagates. SEC-001 (CWE-190 validate_emu i32 overflow): RESOLVED in scope. DEF-P5-001 (dead MissingBrandPart variant): RESOLVED in scope. S1/S2/S3 (validate_emu test, i32-clamp→error, Subtitle placeholder): RESOLVED absorbed in STORY-038.
-- **Batch B remaining:** STORY-039→040 (pptx chain). Then Batch C: STORY-049→050.
-- **Wave 4 merged total:** 14/18 (Batch A 10/10 + STORY-037 + STORY-038 + STORY-041 + STORY-042).
+Phase 3, **Wave 4 — 14/18 merged. Batch B pptx chain (037→038) DONE. Batch B docx chain (041→042) DONE.**
+
+- `develop` = `9730e6a3` (54 merged PRs + 1 post-merge fix commit). **Open PRs: 0. Active worktrees: none.**
+- Workspace builds clean. ~2900+ tests pass, 0 failures.
+- STORY-037 MERGED PR #52 (2ebf184f). STORY-038 MERGED PR #54 (c031805c). Post-merge fix commit `9730e6a3` closes F-038-P2-M1 (Title/Subtitle shapes gate through AC-011 idx-chain).
+- STORY-041 MERGED PR #51 (a3b47303). STORY-042 MERGED PR #53 (56f3f57d). Docx chain COMPLETE.
+- ADR-015 + Addendum A on factory-artifacts: governs brand→pptx OOXML rendering boundary + STORY-037/038 scope split. Relevant to STORY-039/040.
+- S1/S2/S3/S4 + SEC-001 (CWE-190) + DEF-P5-001: all resolved in scope in STORY-038.
+
+**Batch B remaining:** STORY-039 → STORY-040 (pptx accessibility + speaker notes). **USER HAS AUTHORIZED proceeding.**
+**Batch C (after Batch B):** STORY-049 → STORY-050.
+**Wave 4 gate** runs only after ALL 18 Wave 4 stories merge.
+
+---
+
+## NEXT ACTIONS (fresh orchestrator — execute in order)
+
+1. **STORY-039** — PPTX Accessibility Metadata. Depends on STORY-038 (MERGED). Authorized.
+   - Full per-story delivery: `git worktree add .worktrees/S-039 -b feature/S-039 develop`
+   - Flow: stubs → failing tests → Red Gate + density → implement → per-story adversary 3-CLEAN → demo → push → PR → security-reviewer + pr-reviewer → CI green → `gh pr merge --squash` → cleanup → state-manager burst.
+   - Architecture context: ADR-015 + Addendum A (`.factory/specs/architecture/adr/`) governs pptx rendering boundary.
+   - Reference: `workflows/phases/per-story-delivery.md`
+
+2. **STORY-040** — PPTX Speaker Notes + notesMaster1.xml. Depends on STORY-039. Completes Batch B pptx chain.
+
+3. **Batch C:** STORY-049 → STORY-050. After Batch B complete.
+
+4. **Wave 4 gate** after all 18 stories merged.
 
 ---
 
 ## STANDING AUTHORIZATIONS
 
-**STANDING MERGE AUTH (granted by human 2026-06-02):** The orchestrator MAY auto-merge any PR that is fully CI-green + security-reviewer CLEAN + pr-reviewer APPROVE, WITHOUT asking the human each time (revocable by human). This RELAXES LESSON-6 for converged PRs. LESSON-6's "GitHub blocks author self-approve" means the orchestrator does `gh pr merge --squash` itself once those gates pass.
+**STANDING MERGE AUTH (granted 2026-06-02):** Orchestrator MAY squash-merge any PR that is CI-green + security-reviewer CLEAN + pr-reviewer APPROVE, without re-asking the human. GitHub blocks author self-approve, so orchestrator runs `gh pr merge --squash` directly once those gates pass. Revocable by human.
+
+**factory-artifacts LOCAL ONLY:** Many unpushed commits accumulated this session. A fresh session on this machine resumes from local `.factory/` worktree. Pushing factory-artifacts to remote requires explicit human authorization.
 
 ---
 
@@ -77,21 +101,21 @@ Phase 3, **Wave 4 Batch B — pptx chain 037→038 DONE: STORY-038 MERGED (PR #5
 | Planning (25 DSL decisions) | DONE 2026-05-24 | q1–q25 docs + 14 research threads + 7/7 spikes resolved |
 | Phase 1: Spec Crystallization | DONE — APPROVED 2026-05-25 | PRD (109 BCs, 15 HS, 4 supplements) + arch (14 ADRs, 15 VPs, 20 crates) + UX spec. 17 passes, 69 findings, 3/3 clean. |
 | Phase 2: Story Decomposition | DONE — APPROVED 2026-05-25 | 81 stories, 21 epics, 6 waves, 491 pts. 22 passes, 96+ findings, 3/3 clean. |
-| Phase 3: TDD Implementation | IN PROGRESS — Waves 1/2/3 GATE PASSED. Wave 4: Batch A 10/10 COMPLETE + STORY-037 MERGED (PR #52 2ebf184f) + STORY-038 MERGED (PR #54 c031805c) + STORY-041 MERGED (PR #51 a3b47303) + STORY-042 MERGED (PR #53 56f3f57d). 14/18 Wave 4 merged. pptx chain 037→038 DONE. Docx chain COMPLETE. Batch B remaining: STORY-039→040. Then Batch C: STORY-049→050. | Per-story delivery |
+| Phase 3: TDD Implementation | IN PROGRESS — Waves 1/2/3 GATE PASSED. Wave 4: 14/18 merged. Batch B remaining: STORY-039→040. Then Batch C: STORY-049→050. | Per-story delivery |
 | Phases 4–7 | NOT STARTED | Holdout / Adversarial / Formal Hardening / Convergence |
 
-## Wave 4 Batch A Status (10/10 COMPLETE) + Batch B In Progress
+## Wave 4 Story Status
 
-**Batch A ALL MERGED** (PRs #39–#49, develop c8913cad): STORY-035, STORY-036, STORY-043, STORY-044, STORY-073, STORY-075, STORY-076, STORY-078, STORY-045, **STORY-077**.
-STORY-077 follow-ups MERGED as PR #50 (f2573bb1, 2026-06-03).
+**Batch A — ALL MERGED (10/10):** PRs #39–#49 (develop c8913cad). STORY-035, -036, -043, -044, -073, -075, -076, -078, -045, -077. STORY-077 follow-ups PR #50 (f2573bb1, 2026-06-03).
 
-**Batch B:**
-- STORY-041 MERGED PR #51 (a3b47303, 2026-06-03). STORY-042 now unblocked.
-- STORY-037 MERGED PR #52 (2ebf184f, 2026-06-03). STORY-038→039→040 now unblocked. ADR-015 + Addendum A on factory-artifacts. PR-52 follow-ups recorded in Follow-Ups table (SEC-037-001, S1–S4).
-- STORY-042 MERGED PR #53 (56f3f57d, 2026-06-03). Docx chain (041→042) COMPLETE. SEC-042-001 follow-up recorded in Follow-Ups table.
-- STORY-038 MERGED PR #54 (c031805c, 2026-06-03). pptx chain 037→038 DONE. S1/S2/S3/S4 + SEC-001 + DEF-P5-001 all resolved in scope.
+**Batch B — 4/4 MERGED:**
+- STORY-041 MERGED PR #51 (a3b47303, 2026-06-03)
+- STORY-042 MERGED PR #53 (56f3f57d, 2026-06-03) — docx chain COMPLETE
+- STORY-037 MERGED PR #52 (2ebf184f, 2026-06-03)
+- STORY-038 MERGED PR #54 (c031805c, 2026-06-03) — pptx chain 037→038 DONE; post-merge fix 9730e6a3
 
-Batch C (after Batch B): STORY-049→050.
+**Batch B remaining (pptx):** STORY-039 → STORY-040 (authorized)
+**Batch C (after Batch B):** STORY-049 → STORY-050
 
 ---
 
@@ -100,59 +124,52 @@ Batch C (after Batch B): STORY-049→050.
 | Field | Value |
 |-------|-------|
 | **Date** | 2026-06-03 |
-| **Position** | Wave 4 Batch B — pptx chain 037→038 DONE. STORY-038 MERGED PR #54 (c031805c). 14/18 Wave 4 merged. S4/SEC-001/DEF-P5-001/S1/S2/S3 all resolved in scope in STORY-038. Next: dispatch STORY-039→040 (pptx chain). Then Batch C: STORY-049→050. |
-| **develop SHA** | `c031805c` (54 merged PRs) |
+| **Position** | Wave 4: 14/18 merged. Batch B pptx (037→038) DONE + docx (041→042) DONE. NEXT: STORY-039 (authorized). |
+| **develop SHA** | `9730e6a3` (54 PRs + 1 fix commit) |
 | **Active worktrees** | none |
 | **Open PRs** | 0 |
 | **Workspace crates** | 16 |
-| **BC deltas** | ADR-015 + Addendum A this session; BC-3.02.002 v1.5, BC-1.14.003 v1.3, error-taxonomy v2.13 — all on factory-artifacts |
+| **Spec deltas this session** | ADR-015 + Addendum A; BC-3.02.002 v1.5; BC-1.14.003 v1.3; error-taxonomy v2.13 — all on factory-artifacts |
 | **factory-artifacts** | Local only — push requires explicit human authorization |
 
 ---
 
-## Follow-Ups / Drift (non-blocking)
-
-| Item | Severity | Status | Notes |
-|------|----------|--------|-------|
-| STORY-081: slide-level inline markup | P0 blocker for v1.0 | draft | Wave 5, 13 pts, EPIC-18. Depends on STORY-077 (now merged). Not started. |
-| SEC-001 (CWE-190, pptx): `validate_emu` i32 positive overflow on frame bbox | IMPORTANT | **RESOLVED** | Fixed in scope in STORY-038 (PR #54, c031805c). `validate_emu` now rejects positive i32 EMU overflow. |
-| SEC-001 (CWE-494, veraPDF): Docker `verapdf/cli:latest` not digest-pinned | MED | open | CI-only; merged in #48; fix before v1.0 / Phase 6 |
-| SEC-002: link URL allowlist | LOW | **RESOLVED** | Fixed at parse boundary via E-PAR-022 (http/https/mailto allowlist) in PR #50 / f2573bb1. Closed earlier than STORY-046 deferral. STORY-046 retains the open-redirect (CWE-601) concern for the HTML exporter layer — see OBS-FU-HTML-REDIR below. |
-| SEC-003 (formerly SEC-002): `emu_to_pt` i64→f32 precision loss | LOW | open | Phase 6 Kani |
-| SEC-004 (formerly SEC-003): CI tee predictable temp path (self-hosted only) | LOW | open | Phase 6 |
-| E-EVL-007..011 unregistered + E-PAR-012 retired-code reuse | LOW | **RESOLVED** | Registered/reconciled in error-taxonomy v2.13 (factory-artifacts 7f2e52d7, PR-independent). Taxonomy now exhaustive for these codes. |
-| OBS-077-P24-A: `_` italic bilateral flanking | LOW | **RESOLVED** | Bilateral flanking shipped in PR #50 / f2573bb1 (DIR-077-002 §1 amended). |
-| OBS-077-P25-A: parse→eval round-trip test | LOW | **RESOLVED** | Round-trip test added in PR #50 / f2573bb1. |
-| E-PAR-021 message format cosmetic | minor | tracked | `nesting_depth_exceeded_msg` embeds raw byte offset + double-prints prefix. Pre-existing; affects only the rare E-PAR-021 path. Target: message-cleanup follow-up (no story dependency). |
-| OBS-FU-HTML-REDIR: HTML exporter URL open-redirect (CWE-601) | security | deferred to STORY-046 | Parse-time allowlist validates outer scheme only. A query-embedded redirect (`https://trusted/redir?to=javascript:evil`) is NOT caught at parse (correct). HTML exporter must handle `href` safety when rendering `InlineNode::Link`. Attach to STORY-046. |
-| OBS-FU-P1-A: DSL inner-quote round-trip | minor | tracked | `Token::StringLit` retains backslash-escapes verbatim — no unescape pass. `detail: "ref(\"x\")"` cannot round-trip nested escaped quotes. Pre-existing lexer follow-up. |
-| OBS-FU-P1-C: Link URL `)` truncation | minor | tracked | Link URLs truncated at first `)` — Wikipedia disambiguation links mis-parsed. Pre-existing link-parser follow-up. |
-| BC-1.14.001/002 still `subsystem: SS-TBD` | LOW | open | Fold into next spec-hygiene pass |
-| OBS-P6-001: PDF exporter ignores `opts.strict`/warnings | LOW | open | Wave-gate concern post-STORY-045 |
-| SEC-003 (docx): docx exporter URL-scheme test-doc over-claims vbscript:/file: coverage; add explicit rejection tests | LOW | open | Target: next docx touch / STORY-042 |
-| SafeUrl newtype: pptx/pdf/html exporters will hit the same SEC-001 gap as docx; consider shared slideforge-types SafeUrl across all exporters | cross-exporter | tracked | Dedicated hardening story before Phase 6 |
-| cold_budget flaky perf test (test_cold_budget_under_200ms, slideforge-diagrams): intermittent on macOS CI (332ms vs 300ms budget under runner jitter); passes on re-run | LOW | tracked | Stabilize budget/runner or mark perf-tolerant; target STORY-080 |
-| STORY-038 spec stale ref: `Brand.layout_xmls` stale field name | spec-hygiene | **RESOLVED** | Corrected in scope before STORY-038 delivery (PR #54, c031805c). |
-| DEF-P5-001 (dead MissingBrandPart variant) | LOW | **RESOLVED** | `MissingBrandPart` variant now constructed for real (empty-layouts → Err(MissingBrandPart)) in STORY-038 (PR #54, c031805c). |
-| DEF-041-P5-001: EC-002 paragraph-break preservation depends on upstream STORY-035 evaluator splitting — exporter correct given input contract | integration | deferred to wave-gate | STORY-041 adversary pass 5 deferred finding |
-| SEC-037-001: pptx InlineNode::Link rendering needs ALLOWED_LINK_SCHEMES forward-guard + SafeUrl (CWE-601 defense-in-depth; mirrors docx SEC-001) | LOW | open | PR #52 reviewer suggestion. Target: pptx link-rendering story / shared SafeUrl hardening. |
-| S1 (pptx): `validate_emu` Err path untested | LOW | **RESOLVED** | Negative-width unit test added in scope in STORY-038 (PR #54, c031805c). |
-| S2 (pptx): silent i32 slide-size clamp | LOW | **RESOLVED** | `presentation.rs` now propagates error instead of clamping silently. Fixed in scope in STORY-038 (PR #54, c031805c). |
-| S3 (pptx): Subtitle placeholder mapping | LOW | **RESOLVED** | Subtitle frames corrected to subTitle placeholder. Fixed in scope in STORY-038 (PR #54, c031805c). |
-| S4 (pptx): `build_notes_handout_masters` swallows rels-build failure | LOW | **RESOLVED** | `build_notes_handout_masters` now returns Result and propagates. Fixed in scope in STORY-038 (PR #54, c031805c) — earlier than STORY-040 deferral target. |
-| SEC-042-001 (CWE-400): DOCX section serializers have no upper bound on items count — unbounded allocation; local-tool threat model only. Fix at LAYOUT stage where GeneratedSection.items is populated (bound by deck size). | LOW | open | PR #53 follow-up. Target: STORY-049 / layout hardening. |
-
----
-
-## Standing Process Rules (reminders for fresh session)
+## Standing Process Rules
 
 | ID | Rule |
 |----|------|
 | LESSON-1 | Adversary dispatches MUST pass the ABSOLUTE worktree path (`--cwd /Users/jmagady/Dev/slideforge/.worktrees/STORY-NNN`). |
-| LESSON-2 | Canonical clippy gate: `cargo clippy --workspace --all-targets --all-features -- -D warnings -D clippy::pedantic -D clippy::unwrap_used -W clippy::missing_docs_in_private_items`. Bare `-D warnings` misses pedantic lints. |
+| LESSON-2 | Canonical clippy gate: `cargo clippy --workspace --all-targets --all-features -- -D warnings -D clippy::pedantic -D clippy::unwrap_used -W clippy::missing_docs_in_private_items`. Bare `-D warnings` misses pedantic lints. Also run `RUSTDOCFLAGS="-D warnings" cargo doc` for doc-link gates. |
 | LESSON-3 | Re-run full pre-push gate (fmt + pedantic clippy + nextest) after EVERY commit to a feature branch before PR. |
 | LESSON-5 | pr-manager CANNOT spawn sub-agents. Orchestrator dispatches security-reviewer + pr-reviewer independently. |
 | LESSON-6 | RELAXED by STANDING MERGE AUTH: orchestrator may merge when CI-green + security-reviewer CLEAN + pr-reviewer APPROVE. |
+| LESSON-7 | Per-story adversary convergence passes run SEQUENTIALLY (one at a time). Never parallelize passes of one story — parallel final passes can disagree, wasting a pass and creating adjudication ambiguity. Only parallelize across DIFFERENT stories. |
+| LESSON-8 | Every pre-push gate AND implementer exit-gate MUST run the FULL canonical clippy (LESSON-2) + `cargo fmt --all -- --check`. Bare `-D warnings` misses pedantic + fmt and ships CI-RED PRs (happened twice on STORY-038). |
+| LESSON-9 | When PR-level security/pr-reviewer findings are fixed AFTER per-story adversary convergence, the code diff changes — RE-RUN security-reviewer + pr-reviewer + wait for CI before merge. Do not assume prior convergence still holds. |
+| LESSON-10 | For strict 3-CLEAN on compliance/extension stories: do a PROACTIVE exhaustive doc-vs-code + sibling-site (warn/error-propagation) consistency audit BEFORE final convergence passes, to avoid per-finding ping-pong (STORY-038 took 16 passes). |
+| LESSON-11 | Stub/test-writer for EXTENSION stories often produces a high GREEN-BY-DESIGN ratio (prior-merged behavior is legitimate PRE-EXISTING-BEHAVIOR). But stricter new tests can expose REAL bugs in already-merged code — treat such finds as in-scope fixes for the compliance story. |
+
+---
+
+## Open Follow-Ups (non-blocking)
+
+| Item | Severity | Target |
+|------|----------|--------|
+| SEC-042-001 (CWE-400): docx section serializers no upper bound on items count | LOW | STORY-049 / layout hardening |
+| SEC-001 (CWE-494, veraPDF): Docker `verapdf/cli:latest` not digest-pinned | MED | Before v1.0 / Phase 6 |
+| SEC-003 (CWE-189): `emu_to_pt` i64→f32 precision loss | LOW | Phase 6 Kani |
+| SEC-004: CI tee predictable temp path (self-hosted only) | LOW | Phase 6 |
+| SEC-037-001: pptx InlineNode::Link needs ALLOWED_LINK_SCHEMES + SafeUrl (CWE-601) | LOW | pptx link-rendering story / shared SafeUrl hardening |
+| SafeUrl shared newtype (pptx/pdf/html will hit same docx SEC-001 gap) | cross-exporter | Hardening story before Phase 6 |
+| cold_budget flaky perf test (test_cold_budget_under_200ms, slideforge-diagrams): macOS CI jitter | LOW | STORY-080 |
+| OBS-FU-HTML-REDIR: HTML exporter URL open-redirect (CWE-601) | security | STORY-046 |
+| E-PAR-021 cosmetic message format (nesting_depth_exceeded_msg raw byte offset) | minor | Message-cleanup follow-up |
+| OBS-FU-P1-A: DSL inner-quote round-trip | minor | Lexer follow-up |
+| OBS-FU-P1-C: Link URL `)` truncation (Wikipedia disambiguation links) | minor | Link-parser follow-up |
+| BC-1.14.001/002 still `subsystem: SS-TBD` | LOW | Next spec-hygiene pass |
+| OBS-P6-001: PDF exporter ignores `opts.strict`/warnings | LOW | Post-STORY-045 wave-gate |
+| DEF-041-P5-001: EC-002 paragraph-break preservation depends on STORY-035 evaluator (deferred) | integration | Wave-gate |
+| STORY-081: slide-level inline markup (P0 for v1.0, Wave 5, EPIC-18, depends STORY-077) | P0 | Wave 5 |
 
 ---
 
