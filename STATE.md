@@ -126,7 +126,7 @@ Phase 3, **Wave 4 — 15/18 merged. Batch B pptx chain (037→038→039) DONE. B
 | **Active worktrees** | none |
 | **Open PRs** | 0 |
 | **Workspace crates** | 16 |
-| **Spec deltas this session** | STORY-039 spec amended to 8 pts + cross-crate (slideforge-layout/pptx/pdf); Library table corrected to Deck.metadata.lang/ShapeFrame.alt; AC-007 default "en". All on factory-artifacts. |
+| **Spec deltas this session** | STORY-039 spec amended to 8 pts + cross-crate (slideforge-layout/pptx/pdf); Library table corrected to Deck.metadata.lang/ShapeFrame.alt; AC-007 default "en". BC-5.01.005 amended to v1.2 (human-authorized 2026-06-04): invariant 2 lang SoT corrected to deck.metadata.lang; 5 story-spec stale refs fixed. All on factory-artifacts. |
 | **factory-artifacts** | Local only — push requires explicit human authorization |
 
 ---
@@ -168,7 +168,8 @@ Phase 3, **Wave 4 — 15/18 merged. Batch B pptx chain (037→038→039) DONE. B
 | OBS-P6-001: PDF exporter ignores `opts.strict`/warnings | LOW | Post-STORY-045 wave-gate |
 | DEF-041-P5-001: EC-002 paragraph-break preservation depends on STORY-035 evaluator (deferred) | integration | Wave-gate |
 | STORY-081: slide-level inline markup (P0 for v1.0, Wave 5, EPIC-18, depends STORY-077) | P0 | Wave 5 |
-| BC-5.01.005 invariant 2 references non-existent `LaidOutDeck.lang`; impl reads `deck.metadata.lang`. Architectural: lang on LaidOutDeck vs DeckMetadata affects all exporters' Two-IR boundary. HUMAN-GATED per SoT precedence rule 7 (spec-vs-code: needs human auth to amend BC or story to bring code to spec). | LOW/architectural | Phase 5 / pre-v1.0 |
+| ~~BC-5.01.005 invariant 2 LaidOutDeck.lang~~ **RESOLVED 2026-06-04** — BC amended to v1.2 (human-authorized, rule 7); `deck.metadata.lang` is now the spec-canonical SoT; 5 stale story-spec refs corrected (STORY-017, STORY-039 ×3, STORY-041). No code change — impl was already correct. | CLOSED | — |
+| a11y_tests.rs:831 stale doc-comment (`` `LaidOutDeck.lang = "en"` ``) in merged code — fix as drive-by in STORY-040 branch (slideforge-pptx). | trivial/doc | STORY-040 drive-by |
 | Empty-string lang `lang ""` (Some("")) normalization to "en" — owned by slideforge-validate (SS-03), not exporter. | LOW | wave-gate / validator story |
 | Diagram frame with no media rId emits no `<p:pic>` → its alt descr is not emitted (pre-existing STORY-037 media structure; latent a11y gap). | LOW | pptx diagram-media story / Phase 6 a11y audit |
 | [process-gap] TDD Red-Gate citation discipline: per-test Red-Gate rationale must name a symbol PROVABLY on the production code path the test asserts (STORY-039 pass-1 F-039-PG1 — cited `AltTextEmbedder::embed` was not on the asserted path). | process | self-improvement epic (test-writer/implementer Red-Gate gate) |
@@ -180,6 +181,7 @@ Phase 3, **Wave 4 — 15/18 merged. Batch B pptx chain (037→038→039) DONE. B
 | Date | ID | Decision |
 |------|-----|---------|
 | 2026-06-04 | SEC-039 | SEC-039-001 (CWE-116, MED) + SEC-039-002 (CWE-754, LOW) FIXED IN-SCOPE during STORY-039 PR review — validate_lang_for_xml rejects XML-1.0-illegal control chars in dc:language; loud tracing::error fallback for unexpected AltText variants. Neither deferred. |
+| 2026-06-04 | BC-5.01.005-v1.2 | Invariant 2 amended: lang SoT corrected to `deck.metadata.lang` (`DeckMetadata.lang`) — human-authorized (SoT rule 7), architect-recommended Option 2. `LaidOutDeck` carries no lang field and will not gain one; all exporters read lang via `Exporter` trait `deck: &Deck` param. No code change — impl was already correct. 5 stale story-spec refs corrected (STORY-017, STORY-039 ×3, STORY-041); 1 residual test doc-comment (a11y_tests.rs:831) → STORY-040 drive-by. |
 
 ---
 

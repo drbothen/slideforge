@@ -244,7 +244,7 @@ spacing problems.
   - Use sequential `rId` values
 
 - [ ] **Task 7: docProps/core.xml with dc:language**
-  - `dc:language` from `LaidOutDeck.lang`
+  - `dc:language` from `deck.metadata.lang`
 
 - [ ] **Task 8: Unit tests**
   - AC-002: ZIP structure

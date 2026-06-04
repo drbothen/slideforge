@@ -103,7 +103,7 @@ Extend the PPTX exporter with accessibility metadata embedding:
 1. **Alt text**: Every non-decorative image, chart, or diagram shape in the PPTX
    gets `<p:cNvPr descr="alt text value">`. Decorative elements get `descr=""`.
 2. **Language**: `docProps/core.xml` gets `<dc:language>LANG</dc:language>` from
-   `LaidOutDeck.lang`. **NOTE:** `build_doc_props` in `lib.rs` is the correct
+   `deck.metadata.lang`. **NOTE:** `build_doc_props` in `lib.rs` is the correct
    implementation site (per STORY-037), but its fallback default was `"en-US"` — a
    bug. STORY-039 corrects the fallback to `"en"` (per BC-5.01.004). The function
    signature and XML-escaping are otherwise correct; only the `unwrap_or` value
@@ -129,10 +129,7 @@ and production-grade (it XML-escapes `dc:language` per F-037-006). However, its
 `None`-fallback default was `"en-US"` — a bug relative to BC-5.01.004, which
 specifies `"en"` as the canonical default. STORY-039 corrects that `unwrap_or` value
 to `"en"`. This story does NOT create `src/doc_props.rs` or `CorePropertiesBuilder`.
-Instead, STORY-039 also ensures that `build_doc_props` reads `LaidOutDeck.lang`
-(currently it reads `deck.metadata.lang` from the semantic IR — verify this is the
-canonical source of the already-resolved lang value and leave it if correct, or
-update to read from `LaidOutDeck` if the evaluator resolves it there). File structure
+Instead, STORY-039 reads `deck.metadata.lang` — the canonical source per BC-5.01.005 invariant 2 (amended 2026-06-04). The laid-out IR carries no lang field and will not gain one. File structure
 table updated accordingly.
 
 ### Alt Text Embedding Protocol
@@ -177,9 +174,7 @@ For group shapes containing SVG (chart, diagram):
 The `docProps/core.xml` update for BC-5.01.005 is already in place from STORY-037.
 The `build_doc_props` function in `lib.rs` reads `deck.metadata.lang` and writes
 `<dc:language>{lang}</dc:language>` with XML escaping. STORY-039 verifies this
-code path with dedicated unit tests and ensures consistency with the `LaidOutDeck.lang`
-field (which must equal `deck.metadata.lang` after evaluation — if not, update the
-call site to use `laid_out.lang` when `LaidOutDeck` gains a `lang` field).
+code path with dedicated unit tests (per BC-5.01.005 invariant 2, amended 2026-06-04: `LaidOutDeck` carries no `lang` field and will not gain one — `deck.metadata.lang` is the canonical, final source).
 
 ```xml
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>

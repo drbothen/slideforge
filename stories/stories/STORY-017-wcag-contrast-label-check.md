@@ -51,7 +51,7 @@ foreground/background color pair is checked against WCAG AA contrast ratios:
 
 **Lang declaration (BC-5.01.004 + BC-5.01.005):** Missing `lang "..."` in deck
 metadata produces E-A11-003 as a cosmetic warning (exit 0). The default "en" is
-applied. The lang value propagates to `LaidOutDeck.lang` (used by all exporters).
+applied. The lang value is read by all exporters from `deck.metadata.lang` (`DeckMetadata.lang` in the semantic Deck IR) via the `Exporter` trait's `deck: &Deck` parameter.
 
 ## Behavioral Contracts
 

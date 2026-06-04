@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.1"
+version: "1.2"
 status: draft
 producer: product-owner
 timestamp: 2026-05-24T00:00:00
@@ -14,7 +14,7 @@ subsystem: SS-TBD
 capability: CAP-020
 lifecycle_status: active
 introduced: v1.0.0
-modified: []
+modified: ["2026-06-04"]
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -53,8 +53,12 @@ format is consumed. The propagation is a semantic requirement, not a cosmetic on
 
 1. Language propagation is lossless — no truncation, normalization, or case change.
    "zh-Hant-TW" stays "zh-Hant-TW" in all formats.
-2. The lang value in the IR (`LaidOutDeck.lang`) is the single source of truth — it is
-   set once and read by all exporters. No exporter hardcodes a language value.
+2. `deck.metadata.lang` (`DeckMetadata.lang: Option<Arc<str>>` in the semantic IR) is the
+   single source of truth for the language tag. All exporters read lang from this field via
+   the `deck: &Deck` parameter provided by the `Exporter` trait. No exporter may derive or
+   override the lang value from any other source. (`LaidOutDeck` carries no `lang` field;
+   threading lang through the geometric IR is unnecessary because every exporter already
+   receives the semantic `Deck`.)
 3. The propagation is unconditional — even when building only one format (e.g., `--format
    pptx`), the lang is embedded in that format.
 
@@ -105,7 +109,7 @@ format is consumed. The propagation is a semantic requirement, not a cosmetic on
 ## Architecture Anchors
 
 - `architecture/plugin-architecture.md` — language propagation pipeline
-- `architecture/ir-design.md` — LaidOutDeck.lang field as single source of truth
+- `architecture/ir-design.md` — DeckMetadata.lang as single source of truth for language (semantic IR; LaidOutDeck carries no lang field)
 
 ## Story Anchor
 
@@ -114,3 +118,11 @@ format is consumed. The propagation is a semantic requirement, not a cosmetic on
 ## VP Anchors
 
 (filled after VP creation)
+
+## Changelog
+
+| Version | Date | Author | Change |
+|---------|------|--------|--------|
+| 1.0 | 2026-05-24 | product-owner | Initial draft |
+| 1.1 | 2026-05-24 | product-owner | Added EC-004/EC-005, related BCs, architecture anchors |
+| 1.2 | 2026-06-04 | product-owner | Invariant 2 corrected: lang source-of-truth is `deck.metadata.lang` (`DeckMetadata.lang: Option<Arc<str>>`), not `LaidOutDeck.lang` (which never existed). Architecture Anchors updated to match. Human-authorized spec amendment 2026-06-04 per Source-of-Truth rule 7; architect-recommended. No code change required — all exporters were already reading `deck.metadata.lang` correctly via the `Exporter` trait `deck: &Deck` parameter. |
