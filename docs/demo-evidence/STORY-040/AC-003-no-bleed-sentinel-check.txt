@@ -1,0 +1,19 @@
+
+======================================================================
+= AC-003: notes text NOT in any ppt/slides/slide*.xml (BleedChecker) =
+======================================================================
+
+Test: test_BC_4_01_003_ac003_notes_absent_from_slide_bodies
+Test: test_f040_p1_004_ac003_no_bleed_with_positive_routing
+BC:   BC-4.01.003 invariant 1 / DI-012
+
+Sentinel: "NOTES_BLEED_SENTINEL_X7Q2Z9"
+
+Slide bodies checked (1 slides):
+  ppt/slides/slide1.xml: contains sentinel = false
+
+Sentinel in notesSlide1.xml (positive routing): true
+Sentinel bleeds to any slide body:              false
+
+Assertion: bleed_found == false -> true
+Assertion: in_notes_slide == true  -> true

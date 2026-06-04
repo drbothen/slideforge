@@ -1,0 +1,83 @@
+
+====================================================================
+= Rich notes: bold + italic inline formatting (F-040-P1-003, HIGH) =
+====================================================================
+
+Test: test_f040_p1_003_rich_notes_bold_and_italic_runs
+Requirement: bold InlineNode -> <a:rPr b="1">, italic -> <a:rPr i="1">
+
+notesSlide1.xml (formatted):
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+  <p:notes xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+    <p:cSld>
+      <p:spTree>
+        <p:grpSpPr>
+          <a:xfrm>
+            <a:off x="0" y="0"/>
+            <a:ext cx="0" cy="0"/>
+            <a:chOff x="0" y="0"/>
+            <a:chExt cx="0" cy="0"/>
+          </a:xfrm>
+        </p:grpSpPr>
+        <p:sp>
+          <p:nvSpPr>
+            <p:cNvPr id="2" name="Slide Image Placeholder 1"/>
+            <p:cNvSpPr>
+              <a:spLocks noGrp="1"/>
+            </p:cNvSpPr>
+            <p:nvPr>
+              <p:ph type="sldImg"/>
+            </p:nvPr>
+          </p:nvSpPr>
+          <p:spPr/>
+        </p:sp>
+        <p:sp>
+          <p:nvSpPr>
+            <p:cNvPr id="3" name="Notes Placeholder 2"/>
+            <p:cNvSpPr>
+              <a:spLocks noGrp="1"/>
+            </p:cNvSpPr>
+            <p:nvPr>
+              <p:ph type="body" idx="1"/>
+            </p:nvPr>
+          </p:nvSpPr>
+          <p:spPr/>
+          <p:txBody>
+            <a:bodyPr/>
+            <a:lstStyle/>
+            <a:p>
+              <a:r>
+                <a:rPr b="1"/>
+                <a:t>bold content</a:t>
+                </a:r>
+                <a:r>
+                  <a:rPr i="1"/>
+                  <a:t>italic content</a:t>
+                  </a:r>
+                  <a:r>
+                    <a:t>plain text</a:t>
+                    </a:r>
+                  </a:p>
+                </p:txBody>
+              </p:sp>
+            </p:spTree>
+          </p:cSld>
+        </p:notes>
+
+
+Formatting evidence:
+  <a:rPr b="1"> (bold run):     true
+  <a:rPr i="1"> (italic run):   true
+  'bold content' text present:   true
+  'italic content' text present: true
+  'plain text' text present:     true
+
+All assertions pass: true
+
+Snippet around b="1": ...xBody>
+          <a:bodyPr/>
+          <a:lstStyle/>
+          <a:p><a:r><a:rPr b="1"/><a:t>bold content</a:t></a:r><a:r><a:rPr i="1"/><a:t>italic content</a:t></a:r...
+Snippet around i="1": ...le/>
+          <a:p><a:r><a:rPr b="1"/><a:t>bold content</a:t></a:r><a:r><a:rPr i="1"/><a:t>italic content</a:t></a:r><a:r><a:t>plain text</a:t></a:r></a:p>
+        ...

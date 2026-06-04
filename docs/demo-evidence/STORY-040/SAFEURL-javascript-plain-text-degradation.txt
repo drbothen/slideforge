@@ -1,0 +1,36 @@
+
+====================================================================================
+= SafeUrl: javascript: link -> plain text, NO External rel (F-040-P2-001, CWE-601) =
+====================================================================================
+
+Test: test_f040_p2_001_unsafe_scheme_javascript_no_external_rel
+BC:   CWE-601 defense: unsafe URL schemes must degrade to plain text.
+
+Input URL: "javascript:alert(1)"
+
+ppt/notesSlides/_rels/notesSlide1.xml.rels:
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Target="../slides/slide1.xml" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Id="rId1" />
+  <Relationship Target="../notesMasters/notesMaster1.xml" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesMaster" Id="rId2" />
+</Relationships>
+
+
+ppt/notesSlides/notesSlide1.xml (txBody excerpt):
+<p:txBody>
+  <a:bodyPr/>
+  <a:lstStyle/>
+  <a:p>
+    <a:r>
+      <a:t>click me</a:t>
+      </a:r>
+    </a:p>
+  </p:txBody>
+
+
+Security assertions (CWE-601):
+  'javascript' absent from .rels:          true
+  NO TargetMode=External rel:              true
+  'javascript' absent from notesSlide xml: true
+  'click me' display text preserved:       true
+
+All assertions pass: true

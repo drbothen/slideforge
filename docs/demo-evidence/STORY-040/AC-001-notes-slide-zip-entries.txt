@@ -1,0 +1,96 @@
+
+========================================================================
+= AC-001: notesSlide ZIP entries (3-slide deck, slides 1+3 have notes) =
+========================================================================
+
+Test: test_BC_4_01_003_ac001_notes_slide_count_equals_slides_with_notes
+BC:   BC-4.01.003 postcondition 1
+
+ZIP entries matching ppt/notesSlides/notesSlide*.xml (2 found):
+  - ppt/notesSlides/notesSlide1.xml
+  - ppt/notesSlides/notesSlide3.xml
+
+All ZIP entries (ppt/ only, for context):
+  ppt/_rels/presentation.xml.rels
+  ppt/handoutMasters/_rels/handoutMaster1.xml.rels
+  ppt/handoutMasters/handoutMaster1.xml
+  ppt/notesMasters/_rels/notesMaster1.xml.rels
+  ppt/notesMasters/notesMaster1.xml
+  ppt/notesSlides/_rels/notesSlide1.xml.rels
+  ppt/notesSlides/_rels/notesSlide3.xml.rels
+  ppt/notesSlides/notesSlide1.xml
+  ppt/notesSlides/notesSlide3.xml
+  ppt/presentation.xml
+  ppt/slideLayouts/_rels/slideLayout1.xml.rels
+  ppt/slideLayouts/_rels/slideLayout10.xml.rels
+  ppt/slideLayouts/_rels/slideLayout11.xml.rels
+  ppt/slideLayouts/_rels/slideLayout12.xml.rels
+  ppt/slideLayouts/_rels/slideLayout13.xml.rels
+  ppt/slideLayouts/_rels/slideLayout14.xml.rels
+  ppt/slideLayouts/_rels/slideLayout15.xml.rels
+  ppt/slideLayouts/_rels/slideLayout16.xml.rels
+  ppt/slideLayouts/_rels/slideLayout17.xml.rels
+  ppt/slideLayouts/_rels/slideLayout18.xml.rels
+  ppt/slideLayouts/_rels/slideLayout19.xml.rels
+  ppt/slideLayouts/_rels/slideLayout2.xml.rels
+  ppt/slideLayouts/_rels/slideLayout20.xml.rels
+  ppt/slideLayouts/_rels/slideLayout21.xml.rels
+  ppt/slideLayouts/_rels/slideLayout22.xml.rels
+  ppt/slideLayouts/_rels/slideLayout23.xml.rels
+  ppt/slideLayouts/_rels/slideLayout24.xml.rels
+  ppt/slideLayouts/_rels/slideLayout25.xml.rels
+  ppt/slideLayouts/_rels/slideLayout26.xml.rels
+  ppt/slideLayouts/_rels/slideLayout27.xml.rels
+  ppt/slideLayouts/_rels/slideLayout28.xml.rels
+  ppt/slideLayouts/_rels/slideLayout29.xml.rels
+  ppt/slideLayouts/_rels/slideLayout3.xml.rels
+  ppt/slideLayouts/_rels/slideLayout30.xml.rels
+  ppt/slideLayouts/_rels/slideLayout31.xml.rels
+  ppt/slideLayouts/_rels/slideLayout4.xml.rels
+  ppt/slideLayouts/_rels/slideLayout5.xml.rels
+  ppt/slideLayouts/_rels/slideLayout6.xml.rels
+  ppt/slideLayouts/_rels/slideLayout7.xml.rels
+  ppt/slideLayouts/_rels/slideLayout8.xml.rels
+  ppt/slideLayouts/_rels/slideLayout9.xml.rels
+  ppt/slideLayouts/slideLayout1.xml
+  ppt/slideLayouts/slideLayout10.xml
+  ppt/slideLayouts/slideLayout11.xml
+  ppt/slideLayouts/slideLayout12.xml
+  ppt/slideLayouts/slideLayout13.xml
+  ppt/slideLayouts/slideLayout14.xml
+  ppt/slideLayouts/slideLayout15.xml
+  ppt/slideLayouts/slideLayout16.xml
+  ppt/slideLayouts/slideLayout17.xml
+  ppt/slideLayouts/slideLayout18.xml
+  ppt/slideLayouts/slideLayout19.xml
+  ppt/slideLayouts/slideLayout2.xml
+  ppt/slideLayouts/slideLayout20.xml
+  ppt/slideLayouts/slideLayout21.xml
+  ppt/slideLayouts/slideLayout22.xml
+  ppt/slideLayouts/slideLayout23.xml
+  ppt/slideLayouts/slideLayout24.xml
+  ppt/slideLayouts/slideLayout25.xml
+  ppt/slideLayouts/slideLayout26.xml
+  ppt/slideLayouts/slideLayout27.xml
+  ppt/slideLayouts/slideLayout28.xml
+  ppt/slideLayouts/slideLayout29.xml
+  ppt/slideLayouts/slideLayout3.xml
+  ppt/slideLayouts/slideLayout30.xml
+  ppt/slideLayouts/slideLayout31.xml
+  ppt/slideLayouts/slideLayout4.xml
+  ppt/slideLayouts/slideLayout5.xml
+  ppt/slideLayouts/slideLayout6.xml
+  ppt/slideLayouts/slideLayout7.xml
+  ppt/slideLayouts/slideLayout8.xml
+  ppt/slideLayouts/slideLayout9.xml
+  ppt/slideMasters/_rels/slideMaster1.xml.rels
+  ppt/slideMasters/slideMaster1.xml
+  ppt/slides/_rels/slide1.xml.rels
+  ppt/slides/_rels/slide2.xml.rels
+  ppt/slides/_rels/slide3.xml.rels
+  ppt/slides/slide1.xml
+  ppt/slides/slide2.xml
+  ppt/slides/slide3.xml
+  ppt/theme/theme1.xml
+
+Assertion: notes_entries.len() == 2 -> true

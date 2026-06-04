@@ -1,0 +1,20 @@
+        PASS [   0.051s] (139/160) slideforge-pptx tests::notes_tests::test_BC_4_01_003_ac002_notes_text_in_body_placeholder
+        PASS [   0.055s] (140/160) slideforge-pptx tests::notes_tests::test_BC_4_01_003_ac001_notes_slide_count_equals_slides_with_notes
+        PASS [   0.061s] (143/160) slideforge-pptx tests::notes_tests::test_f040_a1_notes_slide_grpsppr_is_schema_valid
+        PASS [   0.068s] (144/160) slideforge-pptx tests::notes_tests::test_BC_4_01_003_ac003_notes_absent_from_slide_bodies
+        PASS [   0.068s] (145/160) slideforge-pptx tests::notes_tests::test_f040_p1_002_notes_master_xml_is_structurally_valid
+        PASS [   0.058s] (146/160) slideforge-pptx tests::notes_tests::test_f040_p1_004_ac003_no_bleed_with_positive_routing
+        PASS [   0.060s] (147/160) slideforge-pptx tests::notes_tests::test_f040_p1_003_rich_notes_bold_and_italic_runs
+        PASS [   0.057s] (148/160) slideforge-pptx tests::notes_tests::test_f040_p2_001_unsafe_scheme_javascript_no_external_rel
+        PASS [   0.073s] (149/160) slideforge-pptx tests::notes_tests::test_f040_p1_003_multi_entry_notes_all_emitted
+        PASS [   0.090s] (150/160) slideforge-pptx tests::notes_tests::test_BC_4_01_003_ac001_ec001_no_notes_slide_for_empty_notes
+        PASS [   0.082s] (151/160) slideforge-pptx tests::notes_tests::test_BC_4_01_006_ac005_handout_master_always_present
+        PASS [   0.088s] (152/160) slideforge-pptx tests::notes_tests::test_BC_4_01_006_ac004_notes_master_always_present
+        PASS [   0.044s] (153/160) slideforge-pptx tests::notes_tests::test_f040_p2_002_duplicate_url_deduped_to_single_rel
+        PASS [   0.098s] (154/160) slideforge-pptx tests::notes_tests::test_f040_p1_001_slide_has_notes_slide_rel_in_slide_rels
+        PASS [   0.041s] (155/160) slideforge-pptx tests::notes_tests::test_f040_p2_003_notes_text_xml_escape_well_formed_and_lossless
+        PASS [   0.050s] (156/160) slideforge-pptx tests::notes_tests::test_f040_p2_002_single_safe_https_link_has_hlinkclick_and_external_rel
+        PASS [   0.040s] (157/160) slideforge-pptx tests::notes_tests::test_f040_p3_001_nested_link_in_display_text_no_orphan_rel
+        PASS [   0.069s] (158/160) slideforge-pptx tests::notes_tests::test_f040_p2_001_unsafe_schemes_data_file_no_external_rel
+        PASS [   0.068s] (159/160) slideforge-pptx tests::notes_tests::test_f040_p2_002_two_distinct_links_stable_deterministic_rids
+     Summary [   0.680s] 160 tests run: 160 passed, 1 skipped

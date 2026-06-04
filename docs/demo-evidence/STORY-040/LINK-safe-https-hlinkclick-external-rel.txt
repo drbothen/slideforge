@@ -1,0 +1,38 @@
+
+======================================================================
+= Safe https: link -> hlinkClick + External rel (F-040-P2-002, HIGH) =
+======================================================================
+
+Test: test_f040_p2_002_single_safe_https_link_has_hlinkclick_and_external_rel
+Requirement: https: URL -> <a:hlinkClick r:id="rId3"/> + TargetMode=External rel.
+
+Input URL: "https://example.com/notes-link"
+
+ppt/notesSlides/_rels/notesSlide1.xml.rels:
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Target="../slides/slide1.xml" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Id="rId1" />
+  <Relationship Target="../notesMasters/notesMaster1.xml" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesMaster" Id="rId2" />
+  <Relationship TargetMode="External" Target="https://example.com/notes-link" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Id="rId3" />
+</Relationships>
+
+
+Snippet around hlinkClick: ...vSpPr>
+        <p:spPr/>
+        <p:txBody>
+          <a:bodyPr/>
+          <a:lstStyle/>
+          <a:p><a:r><a:rPr><a:hlinkClick r:id="rId3"/></a:rPr><a:t>example</a:t></a:r></a:p>
+        </p:txBody>
+      </p:sp>
+    </p:spTree>
+  </p:cSld>
+</p:n...
+
+Assertions:
+  <a:hlinkClick> present in notesSlide xml: true
+  rId3 referenced in notesSlide xml:        true
+  rId3 Relationship in .rels:               true
+  TargetMode=External in .rels:             true
+  Target URL in .rels:                      true
+
+All assertions pass: true

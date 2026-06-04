@@ -1,0 +1,36 @@
+
+=============================================
+= AC-005: handoutMaster1.xml always present =
+=============================================
+
+Test: test_BC_4_01_006_ac005_handout_master_always_present
+BC:   BC-4.01.006 postcondition 2
+
+ppt/handoutMasters/handoutMaster1.xml (formatted):
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+  <p:handoutMaster xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"
+    xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+    xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+    <p:cSld>
+      <p:spTree>
+        <p:grpSpPr>
+          <a:xfrm>
+            <a:off x="0" y="0"/>
+            <a:ext cx="0" cy="0"/>
+            <a:chOff x="0" y="0"/>
+            <a:chExt cx="0" cy="0"/>
+          </a:xfrm>
+        </p:grpSpPr>
+      </p:spTree>
+    </p:cSld>
+    <p:clrMap bg1="lt1" tx1="dk1" bg2="lt2" tx2="dk2" accent1="accent1"
+      accent2="accent2" accent3="accent3" accent4="accent4"
+      accent5="accent5" accent6="accent6" hlink="hlink" folHlink="folHlink"/>
+    </p:handoutMaster>
+
+
+Structural assertions:
+  NO <a:grpSpPr> (schema-valid): true  [F-040-A1]
+
+Assertion: handoutMaster1.xml present -> true
+Assertion: no schema-invalid <a:grpSpPr> -> true
