@@ -12,6 +12,7 @@ readme = "../../README.md"
 
 [dependencies]
 ooxmlsdk        = { version = "=0.6.1" }
+sha2            = "=0.10.9"
 # zip 4.2.0 with lzma/xz disabled to avoid conflict with zip 2.3.0 (used by
 # slideforge-brand / slideforge-eval) — both crates link the native `lzma`
 # library but through different Rust bindings (lzma-sys vs liblzma-sys).

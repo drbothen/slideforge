@@ -48,8 +48,11 @@ pub mod clrmapovr;
 pub mod content_types;
 pub mod error;
 pub mod layout_embedder;
+pub mod notes_master;
+pub mod notes_slide;
 pub mod presentation;
 pub mod rels;
+pub mod sections;
 pub mod slide_ids;
 pub mod slide_serializer;
 pub mod zip_assembler;
@@ -68,6 +71,7 @@ mod tests {
     mod a11y_tests;
     mod core_tests;
     mod layout_tests;
+    mod notes_tests;
 }
 
 use content_types::ContentTypesBuilder;
