@@ -489,6 +489,41 @@ fn collect_cnvpr_descr_values(xml: &str) -> Vec<String> {
     descr_values
 }
 
+/// Collect all `name` attribute values from `<*:cNvPr name="...">` elements in `xml`.
+///
+/// Mirrors `collect_cnvpr_descr_values` but reads the `name` attribute instead.
+/// Used to assert that chart shapes carry `name="Chart N"` rather than `name="Image N"`
+/// (F-039-P-LOW-001: Selection Pane / accessibility-tree label correctness).
+fn collect_cnvpr_name_values(xml: &str) -> Vec<String> {
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(false);
+    let mut buf = Vec::new();
+    let mut name_values: Vec<String> = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e) | Event::Empty(e)) => {
+                let local_name = e.local_name();
+                // Match "cNvPr" regardless of namespace prefix.
+                if local_name.as_ref() == b"cNvPr" {
+                    for attr in e.attributes().flatten() {
+                        let key = attr.key.local_name();
+                        if key.as_ref() == b"name" {
+                            name_values.push(
+                                String::from_utf8(attr.value.into_owned())
+                                    .expect("name value must be UTF-8"),
+                            );
+                        }
+                    }
+                }
+            },
+            Ok(Event::Eof) => break,
+            _ => {},
+        }
+        buf.clear();
+    }
+    name_values
+}
+
 /// Run `PptxExporter::export` with the given deck + laid_out and return the bytes.
 ///
 /// Panics with a descriptive message if the exporter returns an error.
@@ -680,6 +715,18 @@ fn test_BC_4_01_004_ac005_chart_frame_alt_on_enclosing_shape() {
         "slide1.xml must have descr=\"{alt_text}\" on the enclosing <p:grpSp>/<p:pic> \
          shape for the FrameContent::Chart frame (BC-4.01.004 EC-005). \
          Found descr values: {descr_values:?}"
+    );
+
+    // F-039-P-LOW-001: The cNvPr `name` attribute for a chart shape must start with
+    // "Chart", not "Image". PowerPoint Selection Pane and OOXML accessibility trees
+    // display this label — "Image N" is misleading for chart shapes.
+    // The `descr` attribute must be unaffected (asserted above).
+    let name_values = collect_cnvpr_name_values(&slide_xml);
+    assert!(
+        name_values.iter().any(|n| n.starts_with("Chart")),
+        "slide1.xml must have name=\"Chart N\" (starts with \"Chart\") on the enclosing \
+         <p:cNvPr> for the FrameContent::Chart frame (F-039-P-LOW-001). \
+         Got name values: {name_values:?}"
     );
 }
 

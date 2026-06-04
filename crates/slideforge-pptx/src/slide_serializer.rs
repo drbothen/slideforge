@@ -330,6 +330,7 @@ impl SlideSerializer {
         let pic = build_image_picture(
             *shape_id,
             frame_idx,
+            "Image",
             alt,
             frame.bbox.x.0,
             frame.bbox.y.0,
@@ -566,6 +567,7 @@ impl SlideSerializer {
                     let pic = build_image_picture(
                         shape_id,
                         frame_idx,
+                        "Chart",
                         alt_str,
                         frame.bbox.x.0,
                         frame.bbox.y.0,
@@ -869,10 +871,18 @@ fn build_shape(
     }
 }
 
-/// Build a typed `<p:pic>` element for an image frame with accessibility metadata.
+/// Build a typed `<p:pic>` element for a media frame with accessibility metadata.
 ///
 /// `shape_id` is the numeric shape ID for `<p:cNvPr id="...">`.
 /// `frame_idx` is the 0-based frame index, used for the shape name.
+/// `kind` is the human-readable media type label used in `<p:cNvPr name="...">`.
+///
+///   - Pass `"Image"` for image frames → `name="Image N"`.
+///   - Pass `"Chart"` for chart frames → `name="Chart N"`.
+///
+///   This matches how `build_picture` names diagram frames (`"Diagram N"`), ensuring
+///   consistent `PowerPoint` Selection Pane and accessibility-tree labels.
+///
 /// `alt_text` is the alt text value for `descr` (empty string for decorative elements).
 ///   - Non-empty → `descr="<alt_text>"` (BC-4.01.004 postcondition 1).
 ///   - Empty → `descr=""` (BC-4.01.004 postcondition 2 — attribute present, empty value).
@@ -888,6 +898,7 @@ fn build_shape(
 fn build_image_picture(
     shape_id: u32,
     frame_idx: usize,
+    kind: &str,
     alt_text: &str,
     x: i64,
     y: i64,
@@ -900,7 +911,7 @@ fn build_image_picture(
     // BC-4.01.004 EC-001: ooxmlsdk escapes XML special chars automatically.
     let cnv_pr = NonVisualDrawingProperties {
         id: shape_id,
-        name: format!("Image {frame_idx}"),
+        name: format!("{kind} {frame_idx}"),
         // Some("") for decorative (descr="" — attribute present, empty value).
         // Some(non_empty) for non-decorative (descr="alt text").
         // ooxmlsdk writes Some(v) as descr="v" for any v, including empty string.
