@@ -508,7 +508,21 @@ impl SlideSerializer {
                 // the <p:cNvPr descr> attribute via AltTextEmbedder (BC-4.01.004 AC-005).
                 FrameContent::Diagram { .. } => {
                     // descr value resolved by AltTextEmbedder::decisions_for_slide above.
-                    let alt_str = alt_decision_str.as_deref().unwrap_or("");
+                    // SEC-039-002: None is impossible per AltTextEmbedder contract, but if the
+                    // coupling ever breaks a silent descr="" would be an unobservable a11y failure.
+                    // Emit a structured error log so the regression is visible in traces.
+                    let alt_str = if let Some(s) = alt_decision_str.as_deref() {
+                        s
+                    } else {
+                        tracing::error!(
+                            slide_index,
+                            frame_idx,
+                            "AltTextEmbedder returned None for Diagram frame — \
+                             AltTextEmbedder::decisions_for_slide coupling invariant violated; \
+                             falling back to descr=\"\" (SEC-039-002)"
+                        );
+                        ""
+                    };
                     if let Some(rid) = diagram_rids
                         .iter()
                         .find(|(idx, _)| *idx == frame_idx)
@@ -543,7 +557,21 @@ impl SlideSerializer {
                 FrameContent::Image { .. } => {
                     // alt_decision_str is always Some for Image frames (guaranteed by
                     // AltTextEmbedder::decisions_for_slide which covers all Image variants).
-                    let alt_str = alt_decision_str.as_deref().unwrap_or("");
+                    // SEC-039-002: None is impossible per AltTextEmbedder contract, but if the
+                    // coupling ever breaks a silent descr="" would be an unobservable a11y failure.
+                    // Emit a structured error log so the regression is visible in traces.
+                    let alt_str = if let Some(s) = alt_decision_str.as_deref() {
+                        s
+                    } else {
+                        tracing::error!(
+                            slide_index,
+                            frame_idx,
+                            "AltTextEmbedder returned None for Image frame — \
+                             AltTextEmbedder::decisions_for_slide coupling invariant violated; \
+                             falling back to descr=\"\" (SEC-039-002)"
+                        );
+                        ""
+                    };
                     Self::push_image_frame(
                         &mut shape_tree,
                         &mut shape_id,
@@ -562,7 +590,21 @@ impl SlideSerializer {
                 FrameContent::Chart { .. } => {
                     // alt_decision_str is always Some for Chart frames (guaranteed by
                     // AltTextEmbedder::decisions_for_slide which covers all Chart variants).
-                    let alt_str = alt_decision_str.as_deref().unwrap_or("");
+                    // SEC-039-002: None is impossible per AltTextEmbedder contract, but if the
+                    // coupling ever breaks a silent descr="" would be an unobservable a11y failure.
+                    // Emit a structured error log so the regression is visible in traces.
+                    let alt_str = if let Some(s) = alt_decision_str.as_deref() {
+                        s
+                    } else {
+                        tracing::error!(
+                            slide_index,
+                            frame_idx,
+                            "AltTextEmbedder returned None for Chart frame — \
+                             AltTextEmbedder::decisions_for_slide coupling invariant violated; \
+                             falling back to descr=\"\" (SEC-039-002)"
+                        );
+                        ""
+                    };
                     validate_emu(slide_index, frame_idx, &frame.bbox)?;
                     let pic = build_image_picture(
                         shape_id,

@@ -143,7 +143,7 @@ impl PptxExporter {
         build_layout_parts(&brand_template, &mut parts)?;
         build_theme_part(&brand_template, &mut parts);
         build_notes_handout_masters(&brand_template, &mut parts)?;
-        build_doc_props(deck, &mut parts);
+        build_doc_props(deck, &mut parts)?;
         build_root_rels(&mut parts)?;
 
         // Content types are built last so all media parts are visible in `parts`.
@@ -647,6 +647,34 @@ fn build_notes_handout_masters(
     Ok(())
 }
 
+/// Validate that `lang` contains no XML-1.0-illegal control characters.
+///
+/// XML 1.0 §2.2 defines legal characters as:
+/// `#x9 | #xA | #xD | [#x20-#xD7FF] | [#xE000-#xFFFD] | [#x10000-#x10FFFF]`
+///
+/// The illegal ranges relevant here are: U+0000–U+0008, U+000B, U+000C,
+/// U+000E–U+001F, U+FFFE, U+FFFF. A valid BCP-47 tag (ASCII alphanumeric + `-`)
+/// always passes unchanged (lossless per BC-5.01.005 invariant 1).
+///
+/// On success the original `lang` string is returned unmodified (lossless).
+/// On failure a [`PptxError::InvalidLanguageTag`] is returned (SEC-039-001 / CWE-116).
+fn validate_lang_for_xml(lang: &str) -> Result<(), PptxError> {
+    for ch in lang.chars() {
+        let code = ch as u32;
+        let illegal = matches!(
+            code,
+            0x0000..=0x0008 | 0x000B | 0x000C | 0x000E..=0x001F | 0xFFFE | 0xFFFF
+        );
+        if illegal {
+            return Err(PptxError::InvalidLanguageTag {
+                lang: lang.to_owned(),
+                reason: format!("contains XML-1.0-illegal control character U+{code:04X}"),
+            });
+        }
+    }
+    Ok(())
+}
+
 /// Build `docProps/core.xml` and `docProps/app.xml`.
 ///
 /// These use pre-formed XML strings — the OPC core properties namespace is
@@ -659,11 +687,21 @@ fn build_notes_handout_masters(
 /// Characters escaped: `&` → `&amp;`, `<` → `&lt;`, `>` → `&gt;`,
 /// `"` → `&quot;`, `'` → `&apos;`.
 ///
+/// ## XML-1.0 control-character validation (SEC-039-001 / CWE-116)
+///
+/// Before escaping, the raw lang value is validated against the XML-1.0 legal
+/// character set. A lang containing U+0000–U+0008, U+000B, U+000C, U+000E–U+001F,
+/// U+FFFE, or U+FFFF returns [`PptxError::InvalidLanguageTag`] instead of emitting
+/// malformed XML. Valid BCP-47 tags (ASCII alphanumeric + hyphen) pass through
+/// unchanged (lossless — BC-5.01.005 invariant 1).
+///
 /// This is the bounded exception for string-built XML (referenced in ADR-001):
 /// the OPC core properties namespace is not covered by `ooxmlsdk` schemas in
-/// this story's scope. Escaping is the correct mitigation.
-fn build_doc_props(deck: &Deck, parts: &mut Vec<ZipPart>) {
+/// this story's scope. Escaping + validation is the correct mitigation.
+fn build_doc_props(deck: &Deck, parts: &mut Vec<ZipPart>) -> Result<(), PptxError> {
     let lang_raw = deck.metadata.lang.as_deref().unwrap_or("en");
+    // SEC-039-001: validate before escaping — fail safe on XML-1.0-illegal chars.
+    validate_lang_for_xml(lang_raw)?;
     // F-037-006: XML-escape the lang value before interpolating into the XML body.
     let lang = xml_escape(lang_raw);
 
@@ -696,6 +734,7 @@ fn build_doc_props(deck: &Deck, parts: &mut Vec<ZipPart>) {
         path: "docProps/app.xml".to_string(),
         bytes: app_xml.to_vec(),
     });
+    Ok(())
 }
 
 /// XML-escape a string for safe embedding in XML element text content.

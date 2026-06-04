@@ -1739,3 +1739,114 @@ fn test_f037_005_diagram_frame_emits_pic_shape_referencing_media_rid() {
         );
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SEC-039-001: dc:language XML-1.0 control-character validation (CWE-116 / CWE-20)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// SEC-039-001 (CWE-116 / CWE-20):
+/// A `dc:language` value containing an XML-1.0-illegal control character
+/// (U+0000–U+0008) must return `PptxError::InvalidLanguageTag` instead of
+/// producing malformed XML. The export call must NOT panic.
+#[test]
+fn test_sec039_001_lang_with_nul_control_char_returns_invalid_language_tag_error() {
+    use slideforge_types::deck::DeckMetadata;
+
+    // Build a deck whose lang contains a NUL byte (U+0000) — XML-1.0-illegal.
+    let mut deck = make_deck(1);
+    deck.metadata = DeckMetadata {
+        title: Some(Arc::from("Test")),
+        slideforge_version: Arc::from("0.1.0"),
+        lang: Some(Arc::from("en\u{0000}US")),
+        author: None,
+        section_order: None,
+    };
+    let laid_out = make_laid_out_deck(1);
+    let brand = make_brand();
+    let opts = ExportOptions::default();
+    let exporter = PptxExporter::new();
+
+    let result = exporter.export(&deck, &laid_out, &brand, &opts);
+
+    // Must return an Err — NOT Ok(malformed XML), NOT a panic.
+    assert!(
+        result.is_err(),
+        "SEC-039-001: export with a NUL-byte lang must return Err, not Ok(malformed XML)"
+    );
+
+    // The error message must mention the offending lang value or the control character.
+    let err_str = result.unwrap_err().to_string();
+    assert!(
+        err_str.contains("en") || err_str.contains("U+0000") || err_str.contains("InvalidLanguage"),
+        "SEC-039-001: error message must mention the invalid lang or the violation; got: {err_str}"
+    );
+}
+
+/// SEC-039-001 (CWE-116): a lang containing U+0001 (SOH, another XML-1.0-illegal
+/// control char) must also be rejected.
+#[test]
+fn test_sec039_001_lang_with_soh_control_char_returns_error() {
+    use slideforge_types::deck::DeckMetadata;
+
+    let mut deck = make_deck(1);
+    deck.metadata = DeckMetadata {
+        title: Some(Arc::from("Test")),
+        slideforge_version: Arc::from("0.1.0"),
+        lang: Some(Arc::from("en\u{0001}")),
+        author: None,
+        section_order: None,
+    };
+    let laid_out = make_laid_out_deck(1);
+    let brand = make_brand();
+    let opts = ExportOptions::default();
+    let exporter = PptxExporter::new();
+
+    let result = exporter.export(&deck, &laid_out, &brand, &opts);
+
+    assert!(
+        result.is_err(),
+        "SEC-039-001: export with U+0001 in lang must return Err (XML-1.0-illegal)"
+    );
+}
+
+/// SEC-039-001 losslessness (BC-5.01.005 invariant 1):
+/// Valid BCP-47 tags — "en-US" and the 4-part "zh-Hant-TW" — must still export
+/// successfully (lossless pass-through; no false positives from the validator).
+#[test]
+fn test_sec039_001_valid_bcp47_lang_passes_through_lossless() {
+    use slideforge_types::deck::DeckMetadata;
+
+    for valid_lang in &["en-US", "zh-Hant-TW"] {
+        let mut deck = make_deck(1);
+        deck.metadata = DeckMetadata {
+            title: Some(Arc::from("Test")),
+            slideforge_version: Arc::from("0.1.0"),
+            lang: Some(Arc::from(*valid_lang)),
+            author: None,
+            section_order: None,
+        };
+        let laid_out = make_laid_out_deck(1);
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+        let exporter = PptxExporter::new();
+
+        let result = exporter.export(&deck, &laid_out, &brand, &opts);
+
+        assert!(
+            result.is_ok(),
+            "SEC-039-001 losslessness: valid BCP-47 lang {valid_lang:?} must not be rejected; \
+             got: {:?}",
+            result.err()
+        );
+
+        // The lang value must appear unchanged in core.xml (lossless pass-through).
+        let pptx_bytes = result.unwrap();
+        let core_xml = zip_read_entry(&pptx_bytes, "docProps/core.xml");
+        assert!(
+            core_xml.contains(valid_lang),
+            "SEC-039-001 losslessness: {valid_lang:?} must appear unchanged in dc:language; \
+             got core.xml excerpt: {}",
+            &core_xml[..core_xml.len().min(400)]
+        );
+    }
+}
