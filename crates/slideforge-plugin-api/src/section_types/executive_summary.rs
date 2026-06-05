@@ -2,12 +2,14 @@
 //! `takeaway:` field.
 //!
 //! [`ExecutiveSummarySectionType`] scans a slide sequence and produces one
-//! [`SectionBlock`](crate::traits::SectionBlock) per slide whose fields map
-//! contains a `"takeaway"` entry. Slides without a `takeaway` field are skipped.
+//! [`SectionBlock`] per slide whose fields map contains a `"takeaway"` entry.
+//! Slides without a `takeaway` field are skipped.
 //!
 //! If the DSL author also provides an explicit `section executive_summary:` block,
 //! the layout engine applies the supersession rule (BC-3.02.001 EC-002) and uses
 //! the manual block instead of this plugin's output.
+
+use std::sync::Arc;
 
 use slideforge_types::Slide;
 
@@ -45,16 +47,38 @@ impl SectionType for ExecutiveSummarySectionType {
     /// Scan `slides` and produce one [`SectionBlock`] per slide that has a
     /// `takeaway` field.
     ///
-    /// # Implementation note
+    /// Each qualifying slide must:
+    /// - Contain a `"takeaway"` key in its `fields` map, AND
+    /// - NOT have `register == Some(Register::Notes)` (BC-3.02.001 invariant 4).
     ///
-    /// The full scanning logic is implemented by STORY-084's TDD green phase.
-    /// This stub body satisfies the compiler without revealing the algorithm.
+    /// The emitted `SectionBlock` carries:
+    /// - `title`: the slide's resolved title string (empty string if absent)
+    /// - `subtitle`: `None`
+    /// - `level`: `1`
+    /// - `start_slide_index`: the slide's position in `slides`
+    /// - `end_slide_index`: `None`
+    /// - `include_in_toc`: `true`
     fn generate(&self, slides: &[Slide]) -> Vec<SectionBlock> {
-        todo!(
-            "STORY-084: scan slides for takeaway fields and emit SectionBlocks; \
-             received {} slide(s)",
-            slides.len()
-        )
+        use slideforge_types::Register;
+
+        slides
+            .iter()
+            .enumerate()
+            .filter(|(_, slide)| {
+                // Must have a takeaway field.
+                slide.fields.contains_key("takeaway")
+                    // Must NOT be a notes-register slide (BC-3.02.001 invariant 4).
+                    && slide.register != Some(Register::Notes)
+            })
+            .map(|(index, slide)| SectionBlock {
+                title: Arc::from(slide.title_str().unwrap_or("")),
+                subtitle: None,
+                level: 1,
+                start_slide_index: index,
+                end_slide_index: None,
+                include_in_toc: true,
+            })
+            .collect()
     }
 }
 
@@ -175,7 +199,11 @@ mod tests {
             "one takeaway slide must produce exactly 1 SectionBlock"
         );
         let block = &result[0];
-        assert_eq!(block.level, 1, "SectionBlock.level must be 1; got {}", block.level);
+        assert_eq!(
+            block.level, 1,
+            "SectionBlock.level must be 1; got {}",
+            block.level
+        );
         assert!(
             block.include_in_toc,
             "SectionBlock.include_in_toc must be true"
@@ -216,7 +244,11 @@ mod tests {
     fn test_bc_3_02_001_inv4_notes_register_slide_excluded_from_executive_summary() {
         let slides = vec![
             // This slide has takeaway + notes register → must be EXCLUDED
-            slide_with_takeaway("Speaker Notes Slide", "Internal takeaway", Some(Register::Notes)),
+            slide_with_takeaway(
+                "Speaker Notes Slide",
+                "Internal takeaway",
+                Some(Register::Notes),
+            ),
             // This slide has takeaway + no register → must be INCLUDED
             slide_with_takeaway("Revenue Summary", "Revenue up 12%", None),
         ];
@@ -272,11 +304,7 @@ mod tests {
              ExecutiveSummarySectionType; got {} block(s)",
             result.len()
         );
-        assert_eq!(
-            result[0].level,
-            1,
-            "SectionBlock.level must be 1"
-        );
+        assert_eq!(result[0].level, 1, "SectionBlock.level must be 1");
         assert!(
             result[0].include_in_toc,
             "SectionBlock.include_in_toc must be true"
