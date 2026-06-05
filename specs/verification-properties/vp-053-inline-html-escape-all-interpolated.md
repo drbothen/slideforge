@@ -84,6 +84,7 @@ use std::sync::Arc;
 use crate::inline_formats::DefaultInlineFormat;
 use slideforge_plugin_api::traits::inline_format::{InlineFormat, InlineOutputFormat};
 use slideforge_types::inline::{InlineNode, MathNode};
+use slideforge_types::span::SourceSpan;
 
 /// Returns true if the string contains a raw (unescaped) HTML meta-character
 /// that is NOT part of a structural HTML tag or entity.
@@ -160,7 +161,7 @@ proptest! {
     /// EC-010: Math LaTeX with < in content must be escaped in HTML span
     #[test]
     fn prop_math_latex_escaped_in_html_span(latex in ".*[<>&\"]+.*") {
-        let node = InlineNode::Math(MathNode { latex: Arc::from(latex.as_str()), omml: None });
+        let node = InlineNode::Math(MathNode::inline(Arc::from(latex.as_str()), SourceSpan::default()));
         let html = DefaultInlineFormat.render(&node, InlineOutputFormat::Html)
             .expect("Math html render must not fail");
         // LaTeX content inside <span class="math"> must not contain unescaped < > &

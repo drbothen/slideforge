@@ -240,16 +240,28 @@ returns zero matches EXCEPT for:
 The internal function `serialize_inline_nodes_to_xml()` in `notes_slide.rs` is
 removed. Its callers are updated to use the registered `InlineFormat`.
 
-### AC-006: PPTX notes XML output is unchanged after the refactor
+### AC-006: PPTX notes XML output is correct after the refactor
 (traces to BC-5.02.002 postcondition 1 — cross-component via trait API)
 
-All existing PPTX snapshot tests that cover note content pass unchanged after the
-refactor. The rendered `<a:r>` markup produced via `DefaultInlineFormat::render(node,
-Ooxml)` must be byte-for-byte identical to the markup previously produced by the
-removed `serialize_inline_nodes_to_xml()` function (for the same input).
+All existing PPTX snapshot tests that cover note content pass after the refactor,
+with the following fidelity expectations derived from the variant matrix above:
+
+- **Plain / Bold / Italic:** The rendered `<a:r>` markup produced via
+  `DefaultInlineFormat::render(node, Ooxml)` is byte-for-byte identical to the markup
+  previously produced by the removed `serialize_inline_nodes_to_xml()` function. No
+  regressions are tolerable for these three variants.
+- **Code / Footnote / Superscript / Subscript / Strikethrough / Highlight:** The new
+  output is deliberately richer than the legacy function's output. The legacy
+  `serialize_inline_nodes_to_xml()` flattened these variants to plain or plain bold/italic
+  runs; `DefaultInlineFormat` instead emits correct dedicated run properties
+  (`Code` → `<a:latin typeface="Courier New"/>`, `Superscript` → `baseline="30000"`,
+  `Subscript` → `baseline="-25000"`, `Strikethrough` → `strike="sngStrike"`,
+  `Highlight` → `highlight="yellow"`). This is an intentional fidelity improvement,
+  not a regression. The variant matrix in Scope A is the authority for expected output.
 
 Verified by: existing snapshot tests in `slideforge-pptx` pass with `cargo insta test`.
-No snapshot deltas are introduced by the refactor.
+Snapshot deltas for the six enriched variants above are expected and must be reviewed and
+accepted; no unexpected deltas outside those six variants may be introduced by the refactor.
 
 ### AC-007: No production catch_unwind added; existing tests unaffected
 (traces to BC-5.02.002 invariant 3 — verified continuously in CI)
@@ -281,9 +293,12 @@ propagation uses `?` or `map_err`. Clippy pedantic passes on `slideforge-pptx`.
     for `Link + Ooxml + None`, fall back to display-text plain run with `tracing::warn!`
   - Recursive rendering for nested variants (`Bold`, `Italic`, `Highlight`, etc.):
     inner `Vec<InlineNode>` nodes are rendered recursively and their outputs concatenated
-  - Math OOXML path: for `InlineNode::Math`, the OMML source is already in `MathNode.omml`
-    (if available from STORY-029); otherwise emit a fallback
-    `<a:r><a:t>{latex}</a:t></a:r>` with `tracing::warn!` — do NOT panic
+  - Math OOXML path: for `InlineNode::Math`, the `MathNode` struct has no pre-rendered
+    OMML field (`MathNode` exposes only `latex`, `display`, and `span` in v1.0 — no
+    `omml` field exists). Always emit the fallback
+    `<a:r><a:t>{latex}</a:t></a:r>` with `tracing::warn!("Math OMML rendering not
+    pre-computed for OOXML")` — do NOT panic. OMML pre-rendering is future work;
+    do NOT reference a `MathNode.omml` field that does not exist.
   - XML special-character escaping for OOXML text content (`<a:t>` content must escape
     `&`, `<`, `>` as XML entities)
   - HTML character escaping for ALL interpolated positions per BC-3.05.001 v1.3.6:
