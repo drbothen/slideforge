@@ -41,6 +41,14 @@ SS-06 (PPTX Exporter) is also in scope because this story refactors
 function that generates `<a:r>` OOXML directly) to route through the registered
 `InlineFormat` plugin trait — satisfying BC-5.02.002 postcondition 5 and EC-004.
 
+A third crate — `slideforge-types` — is touched by the pass-5 fix (F-P5-001/OBS-P5-001)
+to add the shared `display_text_is_empty` predicate (see Scope B cross-crate note below).
+`slideforge-types` is the foundational leaf crate that both SS-14 (slideforge-plugin-api)
+and SS-06 (slideforge-pptx) already depend on; adding a pure helper function there
+introduces no new dependency edge and no cycle. No subsystem frontmatter change is
+required — `slideforge-types` carries no SS designator of its own; it is a shared
+infrastructure crate underlying all subsystems.
+
 ## Dependency Anchor Justifications
 
 - Depends on STORY-002: STORY-002 delivered the `InlineFormat` trait and `InlineOutputFormat`
@@ -154,6 +162,17 @@ After the refactor:
   InlineOutputFormat::Ooxml)`
 
 This satisfies BC-5.02.002 postcondition 5 and the architectural grep-zero test vector.
+
+**Cross-crate shared predicate (F-P5-001 / OBS-P5-001).** The orphan-External-relationship
+invariant — rId registration count == `hlinkClick` emission count — is enforced by a single
+shared predicate `display_text_is_empty(&[InlineNode]) -> bool` placed in
+`slideforge-types/src/inline.rs`. Both the pptx exporter (rId registration guard in
+`notes_slide.rs`) and the plugin-api formatter (`hlinkClick` emission in
+`default_formatter.rs`) call this one function. Placing the predicate in any other location
+would require either duplicating the logic across crates or creating a dependency inversion
+that violates the DAG; `slideforge-types` is the only dependency-legal leaf crate reachable
+by both consumers without introducing a new edge. This was introduced during the pass-5 fix
+burst to close F-P5-001/OBS-P5-001.
 
 **Registry routing note (F-006).** The notes serializer in `notes_slide.rs` is
 registry-ready — it accepts `&dyn InlineFormat` at the call site. Full `PluginRegistry`
@@ -404,6 +423,7 @@ as substitutes — the conventions section explicitly forbids `println!` in libr
 | `crates/slideforge-plugin-api/src/inline_formats/default_formatter.rs` | Create | DefaultInlineFormat impl (12 variants × 3 formats + render_with_context override) |
 | `crates/slideforge-plugin-api/src/lib.rs` | Modify | Add `pub mod inline_formats;` + re-export `DefaultInlineFormat`, `InlineRenderContext` |
 | `crates/slideforge-pptx/src/notes_slide.rs` | Modify | Remove serialize_inline_nodes_to_xml; add trait dispatch via `DefaultInlineFormat` |
+| `crates/slideforge-types/src/inline.rs` | Modify | Add shared `pub fn display_text_is_empty(nodes: &[InlineNode]) -> bool` — single source of truth for Link display-text emptiness, used by both the pptx exporter (rId registration guard) and the plugin-api formatter (hlinkClick emission), preventing the F-P5-001 orphan-relationship drift (OBS-P5-001) |
 | `crates/slideforge-plugin-api/tests/module_boundary_test.rs` | Create | Fitness-function test scanning `inline_formats/*.rs` for forbidden `use` imports |
 
 ## Token Budget Estimate
