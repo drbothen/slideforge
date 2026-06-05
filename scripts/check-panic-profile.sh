@@ -31,8 +31,8 @@ CARGO_TOML="${WORKSPACE_ROOT}/Cargo.toml"
 if [[ "${1:-}" == "--help" ]]; then
     echo "Usage: scripts/check-panic-profile.sh"
     echo ""
-    echo "Verifies that shipped Cargo profiles (release, dist, bench) declare"
-    echo "panic = \"unwind\" and contain no panic = \"abort\"."
+    echo "Verifies that [profile.release] and [profile.dist] declare panic = \"unwind\","
+    echo "and that no shipped profile (release, dist, bench) contains panic = \"abort\"."
     echo "BC-5.02.001 EC-003 / STORY-049 AC-008 compliance check."
     exit 0
 fi

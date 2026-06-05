@@ -329,6 +329,14 @@ fn build_inner(
     use slideforge_plugin_api::{BrandSource, DiagnosticSeverity, ExportOptions, ValidatorOptions};
     use slideforge_syntax::{DiagnosticSink, SourceMap, parse_checked};
 
+    let format = options.format.as_deref().unwrap_or("pptx");
+    tracing::info!(
+        stage = "pipeline_start",
+        format,
+        strict = options.strict,
+        "build_inner: starting pipeline"
+    );
+
     // Stage 2: load brand via the BrandProvider plugin.
     //
     // CRIT-1 fix: route by BrandSource variant.
@@ -341,6 +349,10 @@ fn build_inner(
     //
     // H1: BrandProvider::load is a plugin surface — wrap in dispatch_plugin to
     // catch panics from third-party brand providers. (EC-003 / AC-008.)
+    tracing::info!(
+        stage = "brand_load",
+        "build_inner: loading brand configuration"
+    );
     let brand_source = options
         .brand_source
         .as_ref()
@@ -371,6 +383,11 @@ fn build_inner(
     //
     // M1 fix: on parse failure, carry the full structured DiagnosticSink
     // diagnostics (not just a count) so callers retain file:line:col + hints.
+    tracing::info!(
+        stage = "parse",
+        source_len = source.len(),
+        "build_inner: parsing DSL source"
+    );
     let mut source_map = SourceMap::new();
     let file_id = source_map.add_file(
         std::sync::Arc::from("<build>"),
@@ -392,6 +409,10 @@ fn build_inner(
     // be called after the validator loop without rebinding. The Validator trait
     // takes `&Deck` (immutable), so the mutation is deferred to after all
     // validator dispatch is complete.
+    tracing::info!(
+        stage = "eval",
+        "build_inner: evaluating AST into semantic Deck"
+    );
     let eval_config = EvalConfig::default();
     let mut eval_sink = DiagnosticSink::new();
     let mut deck = eval_deck(&deck_node, &eval_config, &mut eval_sink).ok_or_else(|| {
@@ -417,6 +438,11 @@ fn build_inner(
     // strict=true  → ValidationFailed if any Error-severity diagnostic present;
     //                carries ALL diagnostics (Error + Warning + Info).
     // strict=false → emit tracing::warn for each diagnostic, then continue.
+    tracing::info!(
+        stage = "validate",
+        strict = options.strict,
+        "build_inner: running validators"
+    );
     let validator_opts = ValidatorOptions::default();
     let mut all_validator_diagnostics: Vec<slideforge_plugin_api::Diagnostic> = vec![];
     for validator in registry.iter_validators() {
@@ -468,9 +494,14 @@ fn build_inner(
     // Returns `true` if a default was injected (lang was absent or blank),
     // `false` if lang was already set. The return value is not used here (the
     // diagnostic was already emitted by LangValidator above if needed).
+    tracing::info!(
+        stage = "inject_lang_default",
+        "build_inner: injecting lang default (post-validate)"
+    );
     slideforge_validate::inject_lang_default(&mut deck);
 
     // Stage 6: lay out the Deck into a LaidOutDeck.
+    tracing::info!(stage = "layout", "build_inner: laying out Deck");
     let laid_out = layout_run(&deck, &brand).map_err(error::BuildError::Layout)?;
 
     // Stage 7: select the exporter and produce output bytes.
@@ -482,7 +513,12 @@ fn build_inner(
     // (lookup key, e.g. "pptx") from extension() (file extension, e.g. "pptx"
     // for most, but may differ for custom exporters). This ensures BuildOutput
     // carries the authoritative file extension declared by the exporter.
-    let format = options.format.as_deref().unwrap_or("pptx");
+    // `format` is already bound above (used for pipeline_start span).
+    tracing::info!(
+        stage = "export",
+        format,
+        "build_inner: exporting to output format"
+    );
     let exporter = registry
         .lookup_exporter(format)
         .ok_or_else(|| error::BuildError::UnknownFormat(format.to_owned()))?;
