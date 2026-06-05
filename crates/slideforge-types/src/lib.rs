@@ -55,7 +55,7 @@ pub use brand::{Brand, BrandFonts, BrandPalette, LayoutDefinition};
 pub use deck::{CANONICAL_MANUAL_SECTION_TYPES, Deck, DeckMetadata, SectionBlock};
 pub use emu::{CANVAS_HEIGHT, CANVAS_WIDTH, Emu, SLIDE_HEIGHT, SLIDE_WIDTH};
 pub use error::TypeError;
-pub use inline::InlineNode;
+pub use inline::{display_text_is_empty, InlineNode};
 pub use math::MathNode;
 pub use ordered_map::OrderedMap;
 pub use precedence::MergePrecedence;

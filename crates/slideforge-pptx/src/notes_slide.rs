@@ -30,7 +30,7 @@ use slideforge_plugin_api::traits::inline_format::{
     InlineFormat, InlineOutputFormat, InlineRenderContext,
 };
 use slideforge_types::register::RegisteredContent;
-use slideforge_types::{InlineNode, Register};
+use slideforge_types::{display_text_is_empty, InlineNode, Register};
 
 use crate::error::PptxError;
 use crate::link_safety::is_safe_link_scheme;
@@ -357,15 +357,22 @@ fn collect_hyperlink_urls(nodes: &[InlineNode], urls: &mut Vec<String>) {
                 // DefaultInlineFormat::render_with_context, which falls back to a plain
                 // text run when no rId is available.
                 //
-                // OBS-1 fix: also guard that the Link's display text is non-empty.
-                // DefaultInlineFormat::render_with_context returns Ok(String::new())
-                // when the display text flattens to empty (line ~107-109 in
-                // default_formatter.rs) — emitting NO <a:hlinkClick> run.  Registering
-                // a URL for a Link with no emitted hlinkClick creates an orphan
-                // External relationship (rId count > hlinkClick count) that OOXML
-                // linters flag.  Guard: !text.is_empty() ensures we only allocate an
-                // rId when the Link will actually emit a visible run.
-                if is_safe_link_scheme(url.as_ref()) && !text.is_empty() {
+                // F-P5-001 / OBS-1 fix: guard that the Link's display text is
+                // non-empty BY THE FLATTEN DEFINITION, not Vec-length.
+                //
+                // `display_text_is_empty(text)` (from slideforge-types) uses the
+                // same recursive flatten-to-plain-text semantics as
+                // `extract_plain_text_depth_limited` inside
+                // DefaultInlineFormat::render_with_context.  Both sites now share
+                // ONE predicate, making it structurally impossible for the
+                // registration site and emission site to drift.
+                //
+                // The original OBS-1 guard `!text.is_empty()` was a Vec-length
+                // check: `vec![Plain("")]` passes it (Vec has 1 element) but
+                // flattens to "" → render_with_context emits NO <a:hlinkClick>
+                // → orphan External relationship.  Replaced with the flatten
+                // predicate to close the gap.
+                if is_safe_link_scheme(url.as_ref()) && !display_text_is_empty(text) {
                     urls.push(url.as_ref().to_owned());
                 }
                 // F-040-P3-001: Do NOT recurse into `text` children here.

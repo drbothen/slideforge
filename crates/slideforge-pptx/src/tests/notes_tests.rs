@@ -2665,3 +2665,169 @@ fn test_obs1_non_empty_display_text_link_still_produces_rel_and_hlinkclick() {
          got:\n{notes_xml}"
     );
 }
+
+// =============================================================================
+// F-P5-001 [MED]: Non-empty Vec, but flattens-to-empty — no orphan External rel
+//
+// The OBS-1 fix used `!text.is_empty()` (Vec-length check) which is INSUFFICIENT.
+// A Link with `text: vec![Plain("")]` has `!text.is_empty() == true` (Vec holds
+// one element), so the old fix STILL registers the URL → orphan External rel.
+// The correct guard is: "does the display text flatten to a non-empty string?"
+// i.e., `display_text_is_empty(text)` — same semantics as render_with_context.
+//
+// These tests confirm the gap and enforce the invariant:
+//   external_rel_count == hlinkclick_count for ALL empty-flatten variants.
+// =============================================================================
+
+/// F-P5-001 [MED]: `Link { text: vec![Plain("")], url: <safe> }` — Vec is
+/// non-empty (length 1) but flattens to "" → render_with_context emits nothing →
+/// must produce zero External rels AND zero hlinkClick elements.
+///
+/// FAILS before fix (Vec-length guard): external_rel_count=1, hlinkclick_count=0.
+/// PASSES after fix (flatten-emptiness guard): both counts 0.
+#[test]
+fn test_fp5_001_link_nonempty_vec_empty_flatten_no_orphan_rel_plain() {
+    let url = "https://example.com/fp5-plain-empty";
+
+    // Plain("") — Vec has 1 element, but flattens to empty string.
+    let link_node = slideforge_types::InlineNode::Link {
+        text: vec![slideforge_types::InlineNode::Plain(Arc::from(""))],
+        url: Arc::from(url),
+    };
+    let plain_node = slideforge_types::InlineNode::Plain(Arc::from("anchor text"));
+
+    let rc = slideforge_types::register::RegisteredContent {
+        register: Register::Notes,
+        content: vec![plain_node, link_node],
+    };
+
+    let slide = LaidOutSlide {
+        source_index: 0,
+        slide_type_keyword: Arc::from("title"),
+        frames: vec![Frame {
+            bbox: title_bbox(),
+            content: FrameContent::Empty,
+            text_flow: None,
+        }],
+        speaker_notes: Some(Arc::from("anchor text")),
+        register_tags: vec![],
+        register_content: vec![rc],
+    };
+
+    let deck = make_deck_with_notes(&[Some("anchor text")]);
+    let laid_out = LaidOutDeck {
+        page_size: slideforge_layout::PageSize::default(),
+        slides: vec![slide],
+        sections: vec![],
+        warnings: vec![],
+    };
+    let pptx = export_pptx(&deck, &laid_out);
+
+    let rels_xml = read_zip_member(&pptx, "ppt/notesSlides/_rels/notesSlide1.xml.rels");
+    let notes_xml = read_zip_member(&pptx, "ppt/notesSlides/notesSlide1.xml");
+
+    let external_rel_count = rels_xml.matches("TargetMode=\"External\"").count();
+    let hlinkclick_count = notes_xml.matches("<a:hlinkClick").count();
+
+    // CORE INVARIANT: no orphan rels (count-equality).
+    assert_eq!(
+        external_rel_count, hlinkclick_count,
+        "F-P5-001 [Plain(\"\")]: orphan External rel — \
+         TargetMode=External ({external_rel_count}) != <a:hlinkClick ({hlinkclick_count}). \
+         Link with Plain(\"\") display text must not register an rId. \
+         rels:\n{rels_xml}\nnotes:\n{notes_xml}"
+    );
+
+    // Both must be exactly 0.
+    assert_eq!(
+        external_rel_count, 0,
+        "F-P5-001 [Plain(\"\")]: expected 0 External rels; got {external_rel_count}. \
+         rels:\n{rels_xml}"
+    );
+    assert_eq!(
+        hlinkclick_count, 0,
+        "F-P5-001 [Plain(\"\")]: expected 0 <a:hlinkClick; got {hlinkclick_count}. \
+         notes:\n{notes_xml}"
+    );
+
+    // URL must NOT appear in rels.
+    assert!(
+        !rels_xml.contains(url),
+        "F-P5-001 [Plain(\"\")]: URL must NOT appear in rels; got:\n{rels_xml}"
+    );
+}
+
+/// F-P5-001 [MED] sibling: `Link { text: vec![Bold(vec![])], url: <safe> }` —
+/// Vec is non-empty (holds one Bold), Bold has empty children, flattens to "" →
+/// same orphan-rel gap as Plain("").
+///
+/// FAILS before fix (Vec-length guard): external_rel_count=1, hlinkclick_count=0.
+/// PASSES after fix (flatten-emptiness guard): both counts 0.
+#[test]
+fn test_fp5_001_link_nonempty_vec_empty_flatten_no_orphan_rel_bold_empty() {
+    let url = "https://example.com/fp5-bold-empty";
+
+    // Bold(vec![]) — outer Vec has 1 element; Bold has no children → flattens to "".
+    let link_node = slideforge_types::InlineNode::Link {
+        text: vec![slideforge_types::InlineNode::Bold(vec![])],
+        url: Arc::from(url),
+    };
+    let plain_node = slideforge_types::InlineNode::Plain(Arc::from("notes content"));
+
+    let rc = slideforge_types::register::RegisteredContent {
+        register: Register::Notes,
+        content: vec![plain_node, link_node],
+    };
+
+    let slide = LaidOutSlide {
+        source_index: 0,
+        slide_type_keyword: Arc::from("title"),
+        frames: vec![Frame {
+            bbox: title_bbox(),
+            content: FrameContent::Empty,
+            text_flow: None,
+        }],
+        speaker_notes: Some(Arc::from("notes content")),
+        register_tags: vec![],
+        register_content: vec![rc],
+    };
+
+    let deck = make_deck_with_notes(&[Some("notes content")]);
+    let laid_out = LaidOutDeck {
+        page_size: slideforge_layout::PageSize::default(),
+        slides: vec![slide],
+        sections: vec![],
+        warnings: vec![],
+    };
+    let pptx = export_pptx(&deck, &laid_out);
+
+    let rels_xml = read_zip_member(&pptx, "ppt/notesSlides/_rels/notesSlide1.xml.rels");
+    let notes_xml = read_zip_member(&pptx, "ppt/notesSlides/notesSlide1.xml");
+
+    let external_rel_count = rels_xml.matches("TargetMode=\"External\"").count();
+    let hlinkclick_count = notes_xml.matches("<a:hlinkClick").count();
+
+    // CORE INVARIANT: no orphan rels.
+    assert_eq!(
+        external_rel_count, hlinkclick_count,
+        "F-P5-001 [Bold(vec![])]: orphan External rel — \
+         TargetMode=External ({external_rel_count}) != <a:hlinkClick ({hlinkclick_count}). \
+         rels:\n{rels_xml}\nnotes:\n{notes_xml}"
+    );
+
+    assert_eq!(
+        external_rel_count, 0,
+        "F-P5-001 [Bold(vec![])]: expected 0 External rels; got {external_rel_count}. \
+         rels:\n{rels_xml}"
+    );
+    assert_eq!(
+        hlinkclick_count, 0,
+        "F-P5-001 [Bold(vec![])]: expected 0 <a:hlinkClick; got {hlinkclick_count}. \
+         notes:\n{notes_xml}"
+    );
+
+    assert!(
+        !rels_xml.contains(url),
+        "F-P5-001 [Bold(vec![])]: URL must NOT appear in rels; got:\n{rels_xml}"
+    );
+}

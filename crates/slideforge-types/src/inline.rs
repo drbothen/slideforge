@@ -63,6 +63,107 @@ pub enum InlineNode {
     Highlight(Vec<InlineNode>),
 }
 
+/// Returns `true` if flattening `nodes` to plain text yields an empty string.
+///
+/// This is the **shared emptiness predicate** that both the OOXML relationship
+/// registration site (`collect_hyperlink_urls` in `slideforge-pptx`) and the
+/// OOXML emission site (`render_with_context` in `slideforge-plugin-api`) must
+/// use to decide "does this Link have display text?"
+///
+/// # Semantic contract
+///
+/// A node sequence is considered **display-empty** when recursively extracting
+/// all leaf text (Plain, Code, Xref, Math.latex) yields an empty string.
+/// This mirrors the behavior of `extract_plain_text_depth_limited` in
+/// `DefaultInlineFormat::render_with_context`: a `Link` whose display text
+/// flattens to `""` emits no `<a:hlinkClick>` run, so no rId must be
+/// registered for it either.
+///
+/// # Depth limit
+///
+/// To remain a pure function suitable for Kani proofs (Phase 6), this predicate
+/// does NOT impose an error-returning depth limit — it simply returns `true`
+/// (treats the content as empty) if `depth > 64`, which is consistent with
+/// `render_with_context` bailing out on pathological inputs.
+///
+/// # OOXML orphan-rel invariant (F-P5-001)
+///
+/// Both `collect_hyperlink_urls` AND `render_with_context` MUST call this
+/// predicate (or the same recursive helper) to guarantee:
+///
+/// ```text
+/// external_rel_count == <a:hlinkClick_count  ∀ inline trees
+/// ```
+///
+/// Using a Vec-length check (`!text.is_empty()`) at the registration site while
+/// a flatten-emptiness check is used at the emission site creates an unavoidable
+/// drift: `vec![Plain("")]` passes the Vec-length guard but fails the flatten
+/// check → orphan External relationship.
+///
+/// # Examples
+///
+/// ```
+/// use slideforge_types::{InlineNode, inline::display_text_is_empty};
+/// use std::sync::Arc;
+///
+/// // Truly empty — no nodes.
+/// assert!(display_text_is_empty(&[]));
+///
+/// // Non-empty Vec but flattens to "" — the gap case.
+/// assert!(display_text_is_empty(&[InlineNode::Plain(Arc::from(""))]));
+///
+/// // Normal non-empty link text.
+/// assert!(!display_text_is_empty(&[InlineNode::Plain(Arc::from("click"))]));
+/// ```
+#[must_use]
+pub fn display_text_is_empty(nodes: &[InlineNode]) -> bool {
+    display_text_is_empty_inner(nodes, 0)
+}
+
+/// Depth-limited recursive helper for [`display_text_is_empty`].
+///
+/// Returns `true` (treats content as empty) if `depth > 64`, consistent with
+/// `render_with_context` behavior on pathological nesting.
+fn display_text_is_empty_inner(nodes: &[InlineNode], depth: usize) -> bool {
+    const MAX_DEPTH: usize = 64;
+    if depth > MAX_DEPTH {
+        // Treat over-deep nesting as empty — consistent with render_with_context
+        // returning an error (which callers map to empty output).
+        return true;
+    }
+    for node in nodes {
+        match node {
+            InlineNode::Plain(s) | InlineNode::Code(s) | InlineNode::Xref(s) => {
+                if !s.is_empty() {
+                    return false;
+                }
+            },
+            InlineNode::Math(m) => {
+                if !m.latex.is_empty() {
+                    return false;
+                }
+            },
+            InlineNode::Bold(c)
+            | InlineNode::Italic(c)
+            | InlineNode::Footnote(c)
+            | InlineNode::Superscript(c)
+            | InlineNode::Subscript(c)
+            | InlineNode::Strikethrough(c)
+            | InlineNode::Highlight(c) => {
+                if !display_text_is_empty_inner(c, depth + 1) {
+                    return false;
+                }
+            },
+            InlineNode::Link { text, .. } => {
+                if !display_text_is_empty_inner(text, depth + 1) {
+                    return false;
+                }
+            },
+        }
+    }
+    true
+}
+
 impl InlineNode {
     /// Return the discriminant name for error messages and serialization.
     ///
@@ -211,5 +312,63 @@ mod tests {
             },
             _ => panic!("expected Bold"),
         }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // display_text_is_empty — shared predicate for F-P5-001 fix
+    // Guards the rId-allocation/hlinkClick-emission invariant: both sites
+    // MUST use identical flatten-emptiness semantics so rel-count == click-count.
+    // ──────────────────────────────────────────────────────────────────────────
+
+    /// Truly-empty Vec → empty (baseline; was already guarded by OBS-1 vec![]).
+    #[test]
+    fn test_display_text_is_empty_truly_empty_vec() {
+        assert!(display_text_is_empty(&[]));
+    }
+
+    /// `vec![Plain("")]` — non-empty Vec, but flattens to "" → empty.
+    #[test]
+    fn test_display_text_is_empty_plain_empty_string() {
+        assert!(display_text_is_empty(&[InlineNode::Plain(Arc::from(""))]));
+    }
+
+    /// `vec![Bold(vec![])]` — Bold wrapping nothing → flattens to "" → empty.
+    #[test]
+    fn test_display_text_is_empty_bold_empty_children() {
+        assert!(display_text_is_empty(&[InlineNode::Bold(vec![])]));
+    }
+
+    /// `vec![Plain("hello")]` — non-empty text → NOT empty.
+    #[test]
+    fn test_display_text_is_empty_plain_nonempty() {
+        assert!(!display_text_is_empty(&[InlineNode::Plain(Arc::from(
+            "hello"
+        ))]));
+    }
+
+    /// `vec![Bold(vec![Plain("x")])]` — nested non-empty → NOT empty.
+    #[test]
+    fn test_display_text_is_empty_bold_with_text() {
+        assert!(!display_text_is_empty(&[InlineNode::Bold(vec![
+            InlineNode::Plain(Arc::from("x"))
+        ])]));
+    }
+
+    /// `vec![Plain(""), Plain("")]` — multiple empty strings → empty.
+    #[test]
+    fn test_display_text_is_empty_multiple_empty_strings() {
+        assert!(display_text_is_empty(&[
+            InlineNode::Plain(Arc::from("")),
+            InlineNode::Plain(Arc::from("")),
+        ]));
+    }
+
+    /// `vec![Plain(""), Plain("hi")]` — first empty but second non-empty → NOT empty.
+    #[test]
+    fn test_display_text_is_empty_mixed_empty_and_nonempty() {
+        assert!(!display_text_is_empty(&[
+            InlineNode::Plain(Arc::from("")),
+            InlineNode::Plain(Arc::from("hi")),
+        ]));
     }
 }
