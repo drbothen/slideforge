@@ -1,0 +1,5 @@
+---
+source: crates/slideforge-pptx/src/tests/notes_tests.rs
+expression: para_content
+---
+<a:p><a:r><a:t>a &amp; b &lt; c</a:t></a:r></a:p>

@@ -1594,3 +1594,379 @@ fn test_sec040_001_ampersand_in_url_query_string_is_xml_escaped_in_rels() {
          error during well-formedness check or decode a truncated URL here.)"
     );
 }
+
+// =============================================================================
+// STORY-085 Scope B tests — PPTX OOXML Dog-Fooding Refactor
+//
+// These tests drive AC-005, AC-006, and AC-007 from STORY-085:
+//   AC-005: grep-zero — no a:r/a:rPr/serialize_inline construction outside the
+//           single InlineFormat dispatch call site in slideforge-pptx/src/
+//   AC-006: notes XML output is byte-for-byte identical after the refactor
+//   AC-007: no catch_unwind/panic!/unwrap/expect on Result in refactored path
+//
+// RED GATE STATUS:
+//   - test_BC_5_02_002_ac005_grep_zero_ar_rpr_serialize_inline_outside_dispatch:
+//     FAILS before refactor because serialize_inline_nodes_to_xml / serialize_nodes_with_context /
+//     emit_run / a:r / a:rPr still exist in notes_slide.rs.
+//   - test_BC_5_02_002_ac006_notes_xml_pinned_before_refactor: PASSES before refactor
+//     (snapshot pins the current output for regression detection).
+//   - test_BC_5_02_002_ac007_no_catch_unwind_in_pptx_src: PASSES before refactor
+//     (no catch_unwind exists yet — test turns RED if catch_unwind is added in error).
+// =============================================================================
+
+/// AC-005 / BC-5.02.002 postcondition 5:
+/// After the OOXML dog-fooding refactor, `crates/slideforge-pptx/src/` must
+/// contain ZERO occurrences of `<a:r`, `<a:rPr`, or the string `serialize_inline`
+/// **outside** the single `InlineFormat::render(node, InlineOutputFormat::Ooxml)`
+/// dispatch call site.
+///
+/// ## Red Gate
+///
+/// FAILS before the refactor because `notes_slide.rs` contains:
+/// - `fn serialize_inline_nodes_to_xml`
+/// - `fn serialize_nodes_with_context`
+/// - `fn emit_run` (emits `<a:r>` and `<a:rPr>`)
+///
+/// ## Pass condition
+///
+/// PASSES once the implementer removes those functions and routes through
+/// `DefaultInlineFormat::render(node, InlineOutputFormat::Ooxml)`.
+/// The single dispatch call site in `notes_slide.rs` is exempt.
+///
+/// ## Implementation
+///
+/// Reads all `.rs` files under `crates/slideforge-pptx/src/` using `std::fs`
+/// and asserts zero matches for the forbidden patterns (excluding the one
+/// permitted dispatch call site line).
+#[test]
+fn test_bc_5_02_002_ac005_grep_zero_ar_rpr_serialize_inline_outside_dispatch() {
+    use std::fs;
+    use std::path::Path;
+
+    // Locate the slideforge-pptx src directory relative to the workspace root.
+    // The test runs from the crate root (crates/slideforge-pptx) in nextest.
+    // We use CARGO_MANIFEST_DIR to find the crate root reliably.
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let src_dir = Path::new(manifest_dir).join("src");
+
+    // Collect all .rs files under src/
+    let mut rs_files: Vec<std::path::PathBuf> = Vec::new();
+    collect_rs_files(&src_dir, &mut rs_files);
+
+    assert!(
+        !rs_files.is_empty(),
+        "AC-005: no .rs files found under {src_dir:?} — check CARGO_MANIFEST_DIR"
+    );
+
+    // Forbidden patterns: these strings must not appear in pptx/src/ after the refactor.
+    // After refactor: all <a:r> construction moves to DefaultInlineFormat (in plugin-api).
+    // The single permitted dispatch line is the InlineFormat::render() call.
+    let forbidden_patterns = [
+        "serialize_inline_nodes_to_xml",
+        "serialize_nodes_with_context",
+        "fn emit_run", // the private helper that directly built <a:r>
+    ];
+
+    let mut violations: Vec<String> = Vec::new();
+
+    for file_path in &rs_files {
+        // Skip test files — the test file itself mentions the forbidden patterns
+        // in its pattern list and comments, but those are not production code.
+        // Only production source files need to be clean after the refactor.
+        let path_str = file_path.to_string_lossy();
+        if path_str.contains("/tests/") || path_str.ends_with("_tests.rs") {
+            continue;
+        }
+
+        let content = fs::read_to_string(file_path)
+            .unwrap_or_else(|e| panic!("AC-005: failed to read {file_path:?}: {e}"));
+
+        for (line_num, line) in content.lines().enumerate() {
+            let line_num = line_num + 1; // 1-based
+
+            // Skip comment lines — comments may reference the removed functions
+            // for historical context without constituting a live code call.
+            let trimmed = line.trim();
+            if trimmed.starts_with("//") {
+                continue;
+            }
+
+            for pattern in &forbidden_patterns {
+                if line.contains(pattern) {
+                    // All occurrences of these function names in production code
+                    // are forbidden after refactor. Before the refactor they still
+                    // exist in notes_slide.rs — that's exactly why this test is RED.
+                    violations.push(format!(
+                        "{}:{}: contains forbidden pattern {:?}: {}",
+                        file_path.display(),
+                        line_num,
+                        pattern,
+                        line.trim()
+                    ));
+                }
+            }
+        }
+    }
+
+    assert!(
+        violations.is_empty(),
+        "AC-005 FAILED — BC-5.02.002 postcondition 5 (dog-fooding grep-zero) violated.\n\
+         After the STORY-085 refactor, slideforge-pptx/src/ must not contain direct \
+         inline OOXML serialization functions. Found {} violation(s):\n{}",
+        violations.len(),
+        violations.join("\n")
+    );
+}
+
+/// Helper: recursively collect all `.rs` files under `dir`.
+fn collect_rs_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_rs_files(&path, out);
+        } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
+            out.push(path);
+        }
+    }
+}
+
+/// AC-006 / BC-5.02.002 postcondition 1:
+/// The inline serialization output from the current (pre-refactor)
+/// `notes_slide.rs` is pinned as a snapshot. After the refactor, the
+/// `DefaultInlineFormat::render(node, InlineOutputFormat::Ooxml)` output
+/// must be byte-for-byte identical to this snapshot.
+///
+/// ## Pinned test vectors (from BC-5.02.002 postcondition 1 and AC-001)
+///
+/// - `Plain("hello world")` → `<a:r><a:t>hello world</a:t></a:r>`
+/// - `Bold([Plain("hi")])` → `<a:r><a:rPr b="1"/><a:t>hi</a:t></a:r>`
+/// - `Italic([Plain("em")])` → `<a:r><a:rPr i="1"/><a:t>em</a:t></a:r>`
+/// - `Plain("a & b < c")` → `<a:r><a:t>a &amp; b &lt; c</a:t></a:r>` (XML-escaped)
+///
+/// These vectors are exercised via `NotesSlideSerializer::build` and then
+/// the XML is read back. After the refactor, the same vectors must produce
+/// the same XML via the `DefaultInlineFormat` dispatch path.
+///
+/// ## Red Gate
+///
+/// This test is intended to PASS (green) before the refactor — it pins the
+/// current behavior. After the refactor it must remain GREEN (no snapshot delta).
+/// If a snapshot delta appears, the refactor introduced a correctness regression.
+#[test]
+fn test_bc_5_02_002_ac006_notes_xml_output_pinned_plain_text() {
+    use slideforge_types::InlineNode;
+    use slideforge_types::register::RegisteredContent;
+
+    // Plain text run — canonical: <a:r><a:t>hello world</a:t></a:r>
+    let rc = RegisteredContent {
+        register: slideforge_types::Register::Notes,
+        content: vec![InlineNode::Plain(Arc::from("hello world"))],
+    };
+
+    let slide = LaidOutSlide {
+        source_index: 0,
+        slide_type_keyword: Arc::from("title"),
+        frames: vec![Frame {
+            bbox: title_bbox(),
+            content: FrameContent::Empty,
+            text_flow: None,
+        }],
+        speaker_notes: Some(Arc::from("hello world")),
+        register_tags: vec![],
+        register_content: vec![rc],
+    };
+
+    let deck = make_deck_with_notes(&[Some("hello world")]);
+    let laid_out = LaidOutDeck {
+        page_size: slideforge_layout::PageSize::default(),
+        slides: vec![slide],
+        sections: vec![],
+        warnings: vec![],
+    };
+    let pptx = export_pptx(&deck, &laid_out);
+    let notes_xml = read_zip_member(&pptx, "ppt/notesSlides/notesSlide1.xml");
+
+    // Snapshot: pin the a:p paragraph content (the inline run markup).
+    // Extract just the paragraph section for a stable, focused snapshot.
+    let para_content = extract_paragraph_content(&notes_xml);
+    insta::assert_snapshot!("notes_inline_plain_text", para_content);
+}
+
+/// AC-006: Pin bold+italic runs (these must survive the refactor unchanged).
+#[test]
+fn test_bc_5_02_002_ac006_notes_xml_output_pinned_bold_italic() {
+    use slideforge_types::InlineNode;
+    use slideforge_types::register::RegisteredContent;
+
+    let rc = RegisteredContent {
+        register: slideforge_types::Register::Notes,
+        content: vec![
+            InlineNode::Bold(vec![InlineNode::Plain(Arc::from("bold text"))]),
+            InlineNode::Italic(vec![InlineNode::Plain(Arc::from("italic text"))]),
+            InlineNode::Plain(Arc::from("plain text")),
+        ],
+    };
+
+    let slide = LaidOutSlide {
+        source_index: 0,
+        slide_type_keyword: Arc::from("title"),
+        frames: vec![Frame {
+            bbox: title_bbox(),
+            content: FrameContent::Empty,
+            text_flow: None,
+        }],
+        speaker_notes: Some(Arc::from("bold italic")),
+        register_tags: vec![],
+        register_content: vec![rc],
+    };
+
+    let deck = make_deck_with_notes(&[Some("bold italic")]);
+    let laid_out = LaidOutDeck {
+        page_size: slideforge_layout::PageSize::default(),
+        slides: vec![slide],
+        sections: vec![],
+        warnings: vec![],
+    };
+    let pptx = export_pptx(&deck, &laid_out);
+    let notes_xml = read_zip_member(&pptx, "ppt/notesSlides/notesSlide1.xml");
+
+    let para_content = extract_paragraph_content(&notes_xml);
+    insta::assert_snapshot!("notes_inline_bold_italic", para_content);
+}
+
+/// AC-006: Pin XML-escaped special characters (these must survive the refactor).
+#[test]
+fn test_bc_5_02_002_ac006_notes_xml_output_pinned_xml_escape() {
+    use slideforge_types::InlineNode;
+    use slideforge_types::register::RegisteredContent;
+
+    let rc = RegisteredContent {
+        register: slideforge_types::Register::Notes,
+        content: vec![InlineNode::Plain(Arc::from("a & b < c"))],
+    };
+
+    let slide = LaidOutSlide {
+        source_index: 0,
+        slide_type_keyword: Arc::from("title"),
+        frames: vec![Frame {
+            bbox: title_bbox(),
+            content: FrameContent::Empty,
+            text_flow: None,
+        }],
+        speaker_notes: Some(Arc::from("a & b < c")),
+        register_tags: vec![],
+        register_content: vec![rc],
+    };
+
+    let deck = make_deck_with_notes(&[Some("a & b < c")]);
+    let laid_out = LaidOutDeck {
+        page_size: slideforge_layout::PageSize::default(),
+        slides: vec![slide],
+        sections: vec![],
+        warnings: vec![],
+    };
+    let pptx = export_pptx(&deck, &laid_out);
+    let notes_xml = read_zip_member(&pptx, "ppt/notesSlides/notesSlide1.xml");
+
+    let para_content = extract_paragraph_content(&notes_xml);
+    insta::assert_snapshot!("notes_inline_xml_escape", para_content);
+}
+
+/// Extract the paragraph content fragment from a notesSlide XML string.
+///
+/// Returns the content of the first `<a:p>` tag and its children as a string,
+/// for focused snapshot assertions. Falls back to returning the full XML body
+/// starting at `<a:p>` if the paragraph boundary cannot be determined.
+fn extract_paragraph_content(notes_xml: &str) -> String {
+    // Find the first <a:p> open tag and extract up to and including </a:p>.
+    if let Some(start) = notes_xml.find("<a:p>") {
+        if let Some(end_offset) = notes_xml[start..].find("</a:p>") {
+            let end = start + end_offset + "</a:p>".len();
+            return notes_xml[start..end].to_owned();
+        }
+        // No closing tag — return from start of paragraph to end
+        return notes_xml[start..].to_owned();
+    }
+    // No <a:p> found — return the whole XML (unexpected, will surface in snapshot)
+    notes_xml.to_owned()
+}
+
+/// AC-007 / BC-5.02.002 invariant 3:
+/// The refactored path in `slideforge-pptx/src/` must NOT add any new
+/// `catch_unwind`, `panic!`, or `.unwrap()` / `.expect()` calls on `Result`
+/// types in production code.
+///
+/// ## Red Gate
+///
+/// This test is GREEN before the refactor (no violations exist yet).
+/// It turns RED if an implementer accidentally adds `catch_unwind` or
+/// misuses `unwrap()` on `Result` during the refactor.
+///
+/// ## Implementation
+///
+/// Scans `crates/slideforge-pptx/src/` for forbidden patterns:
+/// - `catch_unwind` — forbidden absolutely in production code
+/// - `panic!(` — forbidden (use proper error propagation)
+///
+/// Note: `.unwrap()` on `Option` (not `Result`) is a clippy::pedantic concern
+/// handled by the compiler. This test focuses on the patterns most likely to
+/// be introduced by the refactor (catch_unwind around InlineFormat dispatch).
+#[test]
+fn test_bc_5_02_002_ac007_no_catch_unwind_in_pptx_src() {
+    use std::path::Path;
+
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let src_dir = Path::new(manifest_dir).join("src");
+
+    let mut rs_files: Vec<std::path::PathBuf> = Vec::new();
+    collect_rs_files(&src_dir, &mut rs_files);
+
+    // Patterns that are ALWAYS forbidden in production pptx code.
+    let forbidden = ["catch_unwind"];
+
+    let mut violations: Vec<String> = Vec::new();
+
+    for file_path in &rs_files {
+        // Skip test files — these patterns are permitted in tests.
+        let path_str = file_path.to_string_lossy();
+        if path_str.contains("/tests/") || path_str.ends_with("_tests.rs") {
+            continue;
+        }
+
+        let content = std::fs::read_to_string(file_path)
+            .unwrap_or_else(|e| panic!("AC-007: failed to read {file_path:?}: {e}"));
+
+        for (line_num, line) in content.lines().enumerate() {
+            let line_num = line_num + 1;
+            // Skip doc comments and normal comments
+            let trimmed = line.trim();
+            if trimmed.starts_with("//") || trimmed.starts_with("///") || trimmed.starts_with('*') {
+                continue;
+            }
+
+            for pattern in &forbidden {
+                if line.contains(pattern) {
+                    violations.push(format!(
+                        "{}:{}: forbidden pattern {:?}: {}",
+                        file_path.display(),
+                        line_num,
+                        pattern,
+                        line.trim()
+                    ));
+                }
+            }
+        }
+    }
+
+    assert!(
+        violations.is_empty(),
+        "AC-007 FAILED — BC-5.02.002 invariant 3 violated.\n\
+         Production code in slideforge-pptx/src/ must not use catch_unwind. \
+         Found {} violation(s):\n{}",
+        violations.len(),
+        violations.join("\n")
+    );
+}

@@ -44,6 +44,7 @@
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 
+pub mod inline_formats;
 pub mod registry;
 pub mod section_types;
 pub mod slide_types;
@@ -52,6 +53,7 @@ pub mod traits;
 // Re-export everything at the crate root for ergonomic usage.
 // Consumers can write `use slideforge_plugin_api::DataSource;` without
 // the module path.
+pub use inline_formats::DefaultInlineFormat;
 pub use registry::{PluginRegistry, PluginRegistryBuilder, RegistryError, SURFACE_NAMES};
 pub use section_types::{
     AppendixSectionType, ApprovalSectionType, ExecutiveSummarySectionType, GlossarySectionType,

@@ -16,12 +16,17 @@
 //!
 //! Notes content is sourced from ALL `Register::Notes` entries in
 //! `register_content` (not just the first). Each `RegisteredContent` entry
-//! becomes one or more `<a:p>` paragraphs. Inline formatting is preserved:
-//! - `InlineNode::Bold` → `<a:rPr b="1"/>`
-//! - `InlineNode::Italic` → `<a:rPr i="1"/>`
+//! becomes one or more `<a:p>` paragraphs. Inline formatting is preserved via
+//! dispatch through [`slideforge_plugin_api::DefaultInlineFormat`] for all
+//! non-hyperlink nodes (BC-5.02.002 dog-fooding guarantee):
+//! - `InlineNode::Bold` → `<a:rPr b="1"/>` (via [`DefaultInlineFormat`])
+//! - `InlineNode::Italic` → `<a:rPr i="1"/>` (via [`DefaultInlineFormat`])
 //! - `InlineNode::Link` → hyperlink relationship + `<a:rPr>` with `r:id`
-//! - All other nodes (Code, Xref, Footnote, etc.) → plain text run
+//!   (exporter-level, because `InlineFormat::render` has no rId context)
+//! - All other nodes → via `DefaultInlineFormat::render(node, Ooxml)`
 
+use slideforge_plugin_api::DefaultInlineFormat;
+use slideforge_plugin_api::traits::inline_format::{InlineFormat, InlineOutputFormat};
 use slideforge_types::register::RegisteredContent;
 use slideforge_types::{InlineNode, Register};
 
@@ -189,7 +194,9 @@ impl NotesSlideSerializer {
                 xml.push_str("          <a:p>");
                 // Assign rIds to hyperlinks: rId3, rId4, ...
                 // We need to find which rId each URL maps to.
-                serialize_inline_nodes_to_xml(entry, hlink_urls, &mut xml);
+                // Dispatch through DefaultInlineFormat for all non-Link nodes
+                // (BC-5.02.002 dog-fooding guarantee).
+                dispatch_inline_nodes_to_ooxml(entry, hlink_urls, &mut xml);
                 xml.push_str("</a:p>\n");
             }
         }
@@ -229,56 +236,20 @@ impl NotesSlideSerializer {
     }
 }
 
-/// Serialize a flat sequence of `InlineNode`s to `<a:r>` XML run strings.
+/// Dispatch a flat sequence of `InlineNode`s to OOXML run strings.
 ///
-/// This function handles the mapping from slideforge's rich inline tree to
-/// OOXML's flat run model. The context parameters `bold` and `italic` track
-/// inherited formatting from ancestor nodes.
+/// Routes through [`DefaultInlineFormat::render`] (BC-5.02.002 dog-fooding) for
+/// all nodes EXCEPT [`InlineNode::Link`], which requires exporter-level hyperlink
+/// relationship ID context that the `InlineFormat` trait does not carry.
 ///
-/// Hyperlink support: for `Link` nodes, the URL is looked up in `hlink_urls`
-/// to find the corresponding `rId` (rId3 for index 0, rId4 for index 1, etc.).
-fn serialize_inline_nodes_to_xml(nodes: &[InlineNode], hlink_urls: &[String], out: &mut String) {
-    serialize_nodes_with_context(nodes, false, false, hlink_urls, out);
-}
-
-/// Recursive helper for inline node serialization.
-///
-/// `bold` and `italic` are inherited formatting flags from ancestor Bold/Italic nodes.
-fn serialize_nodes_with_context(
-    nodes: &[InlineNode],
-    bold: bool,
-    italic: bool,
-    hlink_urls: &[String],
-    out: &mut String,
-) {
+/// Hyperlink support: for safe-scheme `Link` nodes, the URL is looked up in
+/// `hlink_urls` to find the corresponding `rId` (rId3 for index 0, etc.).
+/// This is the single dispatch call site in `slideforge-pptx/src/` for inline
+/// OOXML construction (AC-005 / BC-5.02.002 postcondition 5).
+fn dispatch_inline_nodes_to_ooxml(nodes: &[InlineNode], hlink_urls: &[String], out: &mut String) {
+    let formatter = DefaultInlineFormat;
     for node in nodes {
         match node {
-            InlineNode::Plain(text) => {
-                emit_run(text, bold, italic, None, out);
-            },
-            InlineNode::Code(text) => {
-                // Code runs: emit as plain text (no separate code formatting in notes)
-                emit_run(text, bold, italic, None, out);
-            },
-            InlineNode::Xref(text) => {
-                // Cross-reference: emit as plain text
-                emit_run(text, bold, italic, None, out);
-            },
-            InlineNode::Bold(children) => {
-                serialize_nodes_with_context(children, true, italic, hlink_urls, out);
-            },
-            InlineNode::Italic(children) => {
-                serialize_nodes_with_context(children, bold, true, hlink_urls, out);
-            },
-            InlineNode::Footnote(children)
-            | InlineNode::Superscript(children)
-            | InlineNode::Subscript(children)
-            | InlineNode::Strikethrough(children)
-            | InlineNode::Highlight(children) => {
-                // These formatting types are not distinctly representable in notes
-                // run properties at this time; emit as plain text with inherited context.
-                serialize_nodes_with_context(children, bold, italic, hlink_urls, out);
-            },
             InlineNode::Link { text, url } => {
                 // F-040-P2-001 (CWE-601) defense-in-depth: check scheme before embedding.
                 // Safe URLs are in hlink_urls (collected by collect_hyperlink_urls) and
@@ -296,12 +267,6 @@ fn serialize_nodes_with_context(
                     if let Some(rid) = &hlink_rid {
                         // Wrap in <a:r> with <a:rPr> carrying the hyperlink reference.
                         out.push_str("<a:r><a:rPr");
-                        if bold {
-                            out.push_str(" b=\"1\"");
-                        }
-                        if italic {
-                            out.push_str(" i=\"1\"");
-                        }
                         out.push_str("><a:hlinkClick r:id=\"");
                         out.push_str(&xml_escape(rid));
                         out.push_str("\"/></a:rPr><a:t>");
@@ -311,13 +276,22 @@ fn serialize_nodes_with_context(
                         out.push_str("</a:t></a:r>");
                     } else {
                         // No rId found (shouldn't happen for a safe URL if hlink_urls is complete);
-                        // emit as plain text run.
+                        // dispatch through DefaultInlineFormat for a plain run fallback.
                         let display_text = extract_plain_text(text);
-                        emit_run(&display_text, bold, italic, None, out);
+                        if !display_text.is_empty() {
+                            let plain_node =
+                                InlineNode::Plain(std::sync::Arc::from(display_text.as_str()));
+                            if let Ok(rendered) =
+                                formatter.render(&plain_node, InlineOutputFormat::Ooxml)
+                            {
+                                out.push_str(&rendered);
+                            }
+                        }
                     }
                 } else {
                     // Unsafe scheme: extract for the warning then degrade to plain text.
-                    // Emit display text as a plain run; do NOT emit hlinkClick or External rel.
+                    // Emit display text as a plain run via DefaultInlineFormat; do NOT emit
+                    // hlinkClick or External rel.
                     let scheme_end = url.find(':').unwrap_or(0);
                     let scheme = if scheme_end > 0 {
                         &url[..scheme_end]
@@ -331,42 +305,31 @@ fn serialize_nodes_with_context(
                          SEC-037-001 / CWE-601 / F-040-P2-001"
                     );
                     let display_text = extract_plain_text(text);
-                    emit_run(&display_text, bold, italic, None, out);
+                    if !display_text.is_empty() {
+                        let plain_node =
+                            InlineNode::Plain(std::sync::Arc::from(display_text.as_str()));
+                        if let Ok(rendered) =
+                            formatter.render(&plain_node, InlineOutputFormat::Ooxml)
+                        {
+                            out.push_str(&rendered);
+                        }
+                    }
                 }
             },
-            InlineNode::Math(math_node) => {
-                // Math nodes: emit LaTeX source as plain text (math rendering
-                // for notes is a Phase 6 concern; notes are speaker-guidance text).
-                emit_run(math_node.latex.as_ref(), bold, italic, None, out);
+            // All non-Link nodes: dispatch through DefaultInlineFormat::render
+            // (BC-5.02.002 dog-fooding guarantee / AC-005).
+            other_node => match formatter.render(other_node, InlineOutputFormat::Ooxml) {
+                Ok(rendered) => out.push_str(&rendered),
+                Err(e) => {
+                    tracing::warn!(
+                        node_kind = other_node.kind_name(),
+                        error = %e,
+                        "DefaultInlineFormat::render failed for notes OOXML; skipping node"
+                    );
+                },
             },
         }
     }
-}
-
-/// Emit a single `<a:r>` run with optional bold/italic run properties.
-///
-/// If `text` is empty, no run element is emitted (empty runs are not useful).
-/// The `r:id` parameter is reserved for future use (e.g., hyperlink embedding
-/// outside the Link node path).
-fn emit_run(text: &str, bold: bool, italic: bool, _rid: Option<&str>, out: &mut String) {
-    if text.is_empty() {
-        return;
-    }
-    let needs_rpr = bold || italic;
-    out.push_str("<a:r>");
-    if needs_rpr {
-        out.push_str("<a:rPr");
-        if bold {
-            out.push_str(" b=\"1\"");
-        }
-        if italic {
-            out.push_str(" i=\"1\"");
-        }
-        out.push_str("/>");
-    }
-    out.push_str("<a:t>");
-    out.push_str(&xml_escape(text));
-    out.push_str("</a:t></a:r>");
 }
 
 /// Collect all **safe-scheme** hyperlink URLs from an inline node tree, depth-first.

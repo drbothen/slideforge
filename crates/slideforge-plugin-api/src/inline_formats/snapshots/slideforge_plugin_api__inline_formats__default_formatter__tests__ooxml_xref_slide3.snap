@@ -1,0 +1,5 @@
+---
+source: crates/slideforge-plugin-api/src/inline_formats/default_formatter.rs
+expression: result
+---
+<a:r><a:t>slide-3</a:t></a:r>

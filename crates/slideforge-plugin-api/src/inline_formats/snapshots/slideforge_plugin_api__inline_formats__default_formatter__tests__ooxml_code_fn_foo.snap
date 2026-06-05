@@ -1,0 +1,5 @@
+---
+source: crates/slideforge-plugin-api/src/inline_formats/default_formatter.rs
+expression: result
+---
+<a:r><a:rPr><a:latin typeface="Courier New"/></a:rPr><a:t>fn foo()</a:t></a:r>
