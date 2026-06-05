@@ -89,8 +89,8 @@ pub enum RegistryError {
 /// Used by [`PluginRegistryBuilder::build`] to report the first missing surface
 /// and by [`PluginRegistry::surface_names`] to enumerate registered surfaces.
 ///
-/// The ordering matches the surface numbering in `slideforge-plugin-api/src/traits.rs`
-/// and BC-5.02.001 invariant 1.
+/// The ordering matches the canonical surface table in the crate-root docs
+/// (`lib.rs`, "The 10 Plugin Surfaces") and BC-5.02.001 invariant 1.
 pub const SURFACE_NAMES: [&str; 10] = [
     "DataSource",
     "Exporter",
