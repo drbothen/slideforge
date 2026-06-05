@@ -420,7 +420,7 @@ mod tests {
     ///
     /// This locks the current `SectionBlock` shape contract: title is the slide's
     /// resolved title string or the empty string; the trait carries only a title,
-    /// not the full takeaway text.
+    /// not the full `severity_cards` card content.
     #[test]
     fn test_bc_3_02_001_med084_003_missing_title_field_emits_block_with_empty_title() {
         // severity_cards slide with NO title field.
