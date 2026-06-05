@@ -123,7 +123,7 @@ stories_merged: 57
 | [STORY-083](stories/STORY-083-plugin-registry-builder.md) | EPIC-21 | Plugin Registry Builder + Surface Enforcement | BC-5.02.001 | P0 | 3 | strict | merged |
 | [STORY-084](stories/STORY-084-bundled-section-types.md) | EPIC-21 | Bundled SectionType Implementations | BC-5.02.001 | P0 | 3 | strict | merged |
 | [STORY-085](stories/STORY-085-bundled-inline-formats.md) | EPIC-21 | Bundled DefaultInlineFormat + PPTX OOXML Dog-Fooding Refactor | BC-5.02.001, BC-5.02.002, BC-3.05.001 | P0 | 8 | strict | merged |
-| [STORY-049](stories/STORY-049-plugin-registry-assembly.md) | EPIC-21 | Plugin Registry Assembly (root crate) | BC-5.02.001-002 | P0 | 5 | strict | draft |
+| [STORY-049](stories/STORY-049-plugin-registry-assembly.md) | EPIC-21 | Plugin Registry Assembly (root crate) | BC-5.02.001-002 | P0 | 5 | strict | merged |
 | [STORY-050](stories/STORY-050-e2e-integration-tests.md) | EPIC-21 | End-to-End Integration Test Suite | BC-5.02.001-002 | P0 | 8 | strict | draft |
 | [STORY-073](stories/STORY-073-bullets-layout.md) | EPIC-07 | Layout: ContentBlock::Bullets → FrameContent::TextRun frame generation | BC-3.05.001 | P1 | 5 | strict | merged |
 | [STORY-075](stories/STORY-075-brand-loader-footer-detection.md) | EPIC-06 | Brand Loader: Footer Detection from .pptx Slide Master/Layout Placeholders | BC-2.01.001 | P1 | 3 | strict | merged |

@@ -28,15 +28,15 @@ wave_2_gate: "PASS 2026-05-27 — 11 gate passes, 19 findings fixed, 3/3 clean (
 wave_3_gate: "PASSED 2026-05-31 — PR #38 (7d266ad7); adversary pass 8 strict-CLEAN; holdout must-pass 5/5"
 wave_4_batch_a_complete: 10
 wave_4_batch_a_total: 10
-wave_4_merged: 19
+wave_4_merged: 20
 wave_4_started: 2026-05-31
 wave_4_total_stories: 21
 wave_4_total_points: 129
 wave_5_total_points: 114
-develop_sha: "e704e700"
-develop_pr_count: 59
+develop_sha: "e6f7832d"
+develop_pr_count: 60
 error_taxonomy_version: "v2.13"
-workspace_tests: "~3214 (59 merged PRs; STORY-049 LOCAL adversary CONVERGED — 12 passes, passes 10-11-12 strict-CLEAN; 3214/3215 pass, 1 pre-existing cold_budget flake)"
+workspace_tests: "~3214 (60 merged PRs; 3214/3215 pass, 1 pre-existing cold_budget flake tracked under STORY-080)"
 workspace_test_failures: 0
 ---
 
@@ -54,27 +54,25 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. Generates branded .pptx
 
 ## CURRENT POSITION
 
-Phase 3, **Wave 4 — 19/21 merged. STORY-049 LOCAL CONVERGED (12 passes, passes 10-11-12 strict-CLEAN). Demo-recorder + PR + merge pending.**
+Phase 3, **Wave 4 — 20/21 merged. Batch C COMPLETE. Only STORY-050 remains.**
 
-- `develop` = `e704e700` (59 merged PRs; origin/develop confirmed). **Open PRs: 0. Active worktrees: .worktrees/STORY-049.**
-- Workspace: ~3214/3215 pass (1 pre-existing cold_budget flake). 0 CI failures.
-- STORY-049 code HEAD: 402b28e6. LOCAL adversary cascade CONVERGED: 12 passes total; passes 10-11-12 strict-CLEAN (3/3 per BC-5.39.001). All AC-001..AC-008 load-bearing. fmt + clippy pedantic + doc + nextest GREEN (implementer/devops-verified). OBS-E (multi-slide E2E) anchored to STORY-050.
-- STORY-085 MERGED PR #59 (e704e700, 2026-06-05). STORY-084 MERGED PR #58 (801f351b). STORY-083 MERGED PR #57 (5aaa27d2).
+- `develop` = `e6f7832d` (60 merged PRs; origin/develop confirmed). **Open PRs: 0. Active worktrees: none.**
+- Workspace: ~3214/3215 pass (1 pre-existing cold_budget flake tracked under STORY-080). 0 CI failures.
+- STORY-049 MERGED PR #60 (e6f7832d, 2026-06-05). 21/21 CI checks green; security-reviewer APPROVE/CLEAN; pr-reviewer APPROVE. LOCAL adversary cascade CONVERGED (12 passes, 3/3 strict-CLEAN).
+- STORY-085 MERGED PR #59 (e704e700). STORY-084 MERGED PR #58 (801f351b). STORY-083 MERGED PR #57 (5aaa27d2).
 
-**Batch C COMPLETE (3/3):** STORY-083 + STORY-084 + STORY-085 ALL MERGED. Remaining Wave 4: STORY-049 (local-converged; demo+PR+merge pending) → STORY-050.
-**Wave 4 gate** runs only after ALL 21 Wave 4 stories merge. **STORY-082** (slide-grouping sections) → Wave 5.
+**Batch C COMPLETE (4/4):** STORY-083 + STORY-084 + STORY-085 + STORY-049 ALL MERGED. STORY-050 now UNGATED (STORY-049 merged).
+**Wave 4 gate** runs after STORY-050 merges (all 21 done). **STORY-082** (slide-grouping sections) → Wave 5.
 
 ---
 
 ## NEXT ACTIONS (fresh orchestrator — execute in order)
 
-**STORY-049 LOCAL CONVERGED. Demo-recorder → PR → merge → STORY-050.**
+**STORY-049 MERGED. STORY-050 UNGATED. Deliver STORY-050, then Wave 4 gate.**
 
-1. **STORY-049 demo-recorder** — Record demo evidence per AC-001 through AC-008 in worktree `.worktrees/STORY-049` (absolute cwd: `/Users/jmagady/Dev/slideforge/.worktrees/STORY-049`). Code HEAD: 402b28e6. LOCAL cascade CONVERGED (12 passes, 3/3 strict-CLEAN at passes 10-11-12).
-2. **STORY-049 pr-manager** — full 9-step PR cycle after demo evidence. Security-reviewer + pr-reviewer required; standing merge auth applies.
-3. **STORY-050** — End-to-End Integration Test Suite (8 pts, P0) — gated on STORY-049 merge. Must include multi-slide deck with inline formatting + data binding through build() (OBS-E closure, BC-5.02.002 EC-004).
-4. **Wave 4 gate** after all 21 stories merged (19/21 done; remaining: STORY-049, STORY-050).
-5. **STORY-082** — PPTX Slide-Grouping Sections (Wave 5, 5 pts, P0, BC-4.01.003 Half B). After Wave 4 gate passes.
+1. **STORY-050** — End-to-End Integration Test Suite (8 pts, P0) — UNGATED (STORY-049 merged PR #60). Deliver via full per-story flow (stubs → failing tests → TDD green → LOCAL adversary 3-CLEAN → demo-recorder → pr-manager). Must include multi-slide deck with inline formatting + data binding routed through slideforge::build() to close BC-5.02.002 EC-004 end-to-end (OBS-E scope, required). Branch from `e6f7832d`.
+2. **Wave 4 gate** after STORY-050 merges (all 21 stories done: 20/21 merged + STORY-050).
+3. **STORY-082** — PPTX Slide-Grouping Sections (Wave 5, 5 pts, P0, BC-4.01.003 Half B). After Wave 4 gate passes.
 
 ---
 
@@ -95,7 +93,7 @@ Phase 3, **Wave 4 — 19/21 merged. STORY-049 LOCAL CONVERGED (12 passes, passes
 | Planning (25 DSL decisions) | DONE 2026-05-24 | q1–q25 docs + 14 research threads + 7/7 spikes resolved |
 | Phase 1: Spec Crystallization | DONE — APPROVED 2026-05-25 | PRD (109 BCs, 15 HS, 4 supplements) + arch (14 ADRs, 15 VPs, 20 crates) + UX spec. 17 passes, 69 findings, 3/3 clean. |
 | Phase 2: Story Decomposition | DONE — APPROVED 2026-05-25 | 85 stories, 21 epics, 6 waves, 511 pts (LESSON-13 reconciliation: +4 stories/+14 pts added 2026-06-04). 22 passes, 96+ findings, 3/3 clean. |
-| Phase 3: TDD Implementation | IN PROGRESS — Waves 1/2/3 GATE PASSED. Wave 4: 19/21 merged. Batch C COMPLETE (083+084+085 all merged). Remaining: STORY-049 (UNGATED) → STORY-050 → Wave 4 gate. | Per-story delivery |
+| Phase 3: TDD Implementation | IN PROGRESS — Waves 1/2/3 GATE PASSED. Wave 4: 20/21 merged. Batch C COMPLETE (083+084+085+049 all merged). Remaining: STORY-050 (UNGATED) → Wave 4 gate. | Per-story delivery |
 | Phases 4–7 | NOT STARTED | Holdout / Adversarial / Formal Hardening / Convergence |
 
 ## Wave 4 Story Status
@@ -110,29 +108,29 @@ Phase 3, **Wave 4 — 19/21 merged. STORY-049 LOCAL CONVERGED (12 passes, passes
 - STORY-039 MERGED PR #55 (a4f29e5a, 2026-06-04)
 - STORY-040 MERGED PR #56 (869fb401, 2026-06-04) — pptx chain 037→038→039→040 COMPLETE
 
-**Batch C — ALL MERGED (3/3):**
+**Batch C — ALL MERGED (4/4):**
 - STORY-083: Plugin Registry Builder — MERGED PR #57 (5aaa27d2, 2026-06-05) — 6-pass cascade, 3/3 strict-CLEAN
 - STORY-084: Bundled SectionType Implementations — MERGED PR #58 (801f351b, 2026-06-05) — 7-pass cascade, 3/3 strict-CLEAN
 - STORY-085: Bundled DefaultInlineFormat + PPTX dog-fooding — MERGED PR #59 (e704e700, 2026-06-05) — 9-pass cascade, 3/3 strict-CLEAN (passes 7-8-9). 20/20 CI green; security APPROVE/CLEAN; pr-reviewer APPROVE.
-- STORY-049: Plugin Registry Assembly — root crate pipeline driver (5 pts; LOCAL CONVERGED — 12 passes, passes 10-11-12 strict-CLEAN). Demo+PR+merge pending. Active worktree: .worktrees/STORY-049. Code HEAD: 402b28e6.
-- STORY-050: E2E Integration Test Suite (gates on STORY-049)
+- STORY-049: Plugin Registry Assembly — MERGED PR #60 (e6f7832d, 2026-06-05) — 12-pass cascade, 3/3 strict-CLEAN (passes 10-11-12). 21/21 CI green; security APPROVE/CLEAN; pr-reviewer APPROVE.
+- STORY-050: E2E Integration Test Suite — UNGATED (gated on STORY-049; now unblocked)
 **STORY-082** (slide-grouping sections) moved to Wave 5 (human-authorized split from STORY-040)
 
 ---
 
 ## Session Resume Checkpoint
 
-**POST-CONVERGENCE CHECKPOINT — STORY-049 LOCAL CONVERGED (12 passes, 3/3 strict-CLEAN). Resume: dispatch demo-recorder in .worktrees/STORY-049.**
+**CLEAN CHECKPOINT — STORY-049 MERGED (PR #60, e6f7832d). Resume: deliver STORY-050 (UNGATED).**
 
 | Field | Value |
 |-------|-------|
 | **Date** | 2026-06-05 |
-| **Position** | Wave 4: 19/21 merged. STORY-049 LOCAL CONVERGED — 12 passes total; passes 10-11-12 strict-CLEAN (3/3 per BC-5.39.001). All AC-001..AC-008 have load-bearing tests. Code HEAD: 402b28e6. Workspace: 3214/3215 pass (1 pre-existing cold_budget flake). fmt + clippy pedantic + doc GREEN. Next: demo-recorder → pr-manager → STORY-050. |
-| **develop SHA** | `e704e700` (59 merged PRs; origin/develop confirmed) |
-| **Active worktrees** | `.worktrees/STORY-049` (branch: feature/STORY-049) |
+| **Position** | Wave 4: 20/21 merged. Batch C COMPLETE (083+084+085+049 all merged). Only STORY-050 (E2E Integration Test Suite, 8 pts, P0) remains. STORY-050 is UNGATED — branch from `e6f7832d`, deliver via full per-story flow. Must include multi-slide deck + inline formatting + data binding through build() (OBS-E, BC-5.02.002 EC-004). Wave 4 gate after STORY-050. |
+| **develop SHA** | `e6f7832d` (60 merged PRs; origin/develop confirmed) |
+| **Active worktrees** | none (STORY-049 cleaned up post-merge) |
 | **Open PRs** | 0 |
-| **Workspace crates** | 17 (slideforge root crate now populated) |
-| **Spec deltas (passes 1-12)** | build() end-to-end functional (parse→eval→validate→layout→export); strict=true default; brand routing corrected; catch_unwind wired; panic=unwind [profile.dist]; inject_lang_default; BuildError::Export #[source]; extension() from exporter; doc/DSL-example fixes (pass 6); tracing stage spans (pass 9); scripts/check-panic-profile.sh + ci.yml check-panic-profile job (Architecture Compliance Rule 4 CI-enforced). |
+| **Workspace crates** | 17 (slideforge root crate populated) |
+| **Workspace tests** | ~3214/3215 pass (1 pre-existing cold_budget flake, STORY-080) |
 | **factory-artifacts** | PUSHED to remote (origin/factory-artifacts) — human-authorized 2026-06-04. Upstream tracking set. Fresh sessions: clone repo + `git worktree add .factory factory-artifacts`. |
 
 ---
@@ -196,6 +194,7 @@ Phase 3, **Wave 4 — 19/21 merged. STORY-049 LOCAL CONVERGED (12 passes, passes
 
 | Date | ID | Decision |
 |------|-----|---------|
+| 2026-06-05 | STORY-049-MERGE | STORY-049 MERGED PR #60 (e6f7832d, 2026-06-05). 21/21 CI checks green (note: doctest+snapshots failure on default_registry rustdoc example fixed in commit 65ee62e6 before merge); security-reviewer APPROVE/CLEAN; pr-reviewer APPROVE. LOCAL adversary cascade CONVERGED (12 passes, 3/3 strict-CLEAN passes 10-11-12). develop SHA e6f7832d (60 merged PRs). Wave 4: 20/21 merged. Batch C COMPLETE. STORY-050 now UNGATED. |
 | 2026-06-05 | STORY-049-CONV | STORY-049 LOCAL adversary cascade CONVERGED. 12 passes total; passes 10-11-12 strict-CLEAN (3/3 per BC-5.39.001). Code HEAD 402b28e6; workspace 3214/3215 pass (1 pre-existing cold_budget flake); all canonical gates GREEN (fmt, clippy pedantic, doc) — implementer/devops-verified. Findings fixed across passes 1-9: build() was non-functional (C1 inverted brand routing, C2 zero end-to-end coverage, C3 paper-fix strict test) → now works end-to-end (parse→eval→validate→layout→export, proven by load-bearing Ok(BuildOutput) test); strict defaults true (IMP-1); diagnostics preserve spans (HIGH-3); catch_unwind wired into build() + panic=unwind shipped profiles + CI guard (scripts/check-panic-profile.sh, F-PASS8-001); inject_lang_default (MED-C); extension from exporter.extension() (MED-D); doc/DSL-example fixes (pass 6); tracing stage spans (pass 9). All AC-001..AC-008 load-bearing. OBS-E (multi-slide/inline E2E through build()) anchored to STORY-050. Next: demo-recorder → pr-manager → STORY-050. |
 | 2026-06-05 | STORY-049-P6-8 | STORY-049 adversary passes 6-8. Pass 5: strict-CLEAN (streak 1/3). Pass 6: 3 doc defects — DSL doctest syntax error, inverted brand-provider doc comment, missing validate stage in rustdoc example — FIXED commit 1c8af9a2; streak reset to 0/3. Pass 7: strict-CLEAN (streak 1/3). Pass 8: F-PASS8-001 (panic=unwind safety perimeter had no CI enforcement: Architecture Compliance Rule 4 stated "enforced by scripts/check-panic-profile.sh" but script did not yet exist) — FIXED by creating scripts/check-panic-profile.sh (exits 0 on compliance, non-zero on violation; both branches verified) + adding check-panic-profile CI job in .github/workflows/ci.yml wired into all-checks-pass (commit 70622461); streak reset to 0/3. Code HEAD: 70622461. Behavioral dimensions fully converged (clean passes 5+7); remaining findings peripheral (docs, CI enforcement). Passes 9-11 pending. |
 | 2026-06-05 | STORY-049-R4 | STORY-049 adversary round 4 — ALL FIXED (commits bd1ce67b + d4727841). HIGH-A: strict=true happy path had no test — test added driving build() to Ok(BuildOutput) with strict enforcement. HIGH-B: BuildError::Export missing #[source] attribute breaking error-chain — added. MED-C: build_inner() did not call inject_lang_default() per slideforge-validate contract — wired. MED-D: BuildOutput.extension derived from format map key, not exporter.extension() — corrected. Workspace: 3214/3215 pass (1 pre-existing cold_budget flake). Streak: 0/3 strict-CLEAN. Pass 5 pending. |

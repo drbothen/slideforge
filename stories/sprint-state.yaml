@@ -45,12 +45,12 @@ wave_4_batch_c:
   execution: sequential
   chains: ["STORY-083 independent (dep: STORY-002 only)", "STORY-084 (dep: STORY-002+042+077)", "STORY-085 (dep: STORY-002+028+037+038)", "083+084+085→STORY-049→STORY-050"]
   prerequisite: Batch B gate check
-  lesson_13_note: "STORY-083/084/085 added 2026-06-04 per LESSON-13 reconciliation (ADR-016). STORY-083 MERGED PR #57 (5aaa27d2, 2026-06-05). STORY-084 MERGED PR #58 (801f351b, 2026-06-05). STORY-085 MERGED PR #59 (e704e700, 2026-06-05). Batch C COMPLETE. STORY-049 NOW UNGATED (all 3 prerequisites merged)."
+  lesson_13_note: "STORY-083/084/085 added 2026-06-04 per LESSON-13 reconciliation (ADR-016). STORY-083 MERGED PR #57 (5aaa27d2, 2026-06-05). STORY-084 MERGED PR #58 (801f351b, 2026-06-05). STORY-085 MERGED PR #59 (e704e700, 2026-06-05). STORY-049 MERGED PR #60 (e6f7832d, 2026-06-05). Batch C COMPLETE (4/4). STORY-050 NOW UNGATED."
 wave_4_pulled_in_p1: [STORY-073, STORY-075, STORY-076]
 wave_4_deferred_p2_to_wave5: [STORY-072, STORY-074]
 wave_4_bc_deltas: "BC-2.01.001 v1.1→v1.2; BC-2.01.003 v1.8→v1.9; error-taxonomy v2.2→v2.3"
-develop_sha: "e704e700"
-develop_pr_count: 59
+develop_sha: "e6f7832d"
+develop_pr_count: 60
 last_updated: 2026-06-05
 ---
 
@@ -526,28 +526,31 @@ stories:
     workspace_tests: "~3177 (inline_formats + pptx dog-fooding + types display_text_is_empty)"
     notes: "Bundled DefaultInlineFormat + PPTX OOXML Dog-Fooding Refactor. 12 InlineNode variants x 3 formats in slideforge-plugin-api/src/inline_formats/; notes_slide.rs dog-fooded through InlineFormat trait (BC-5.02.002 EC-004); display_text_is_empty shared SoT in slideforge-types/src/inline.rs. 20/20 CI green. OBS-1 CWE-601 anchored STORY-046 AC-010; OBS-2 process-gap anchored self-improvement epic. LESSON-13/ADR-016 Decision 2+3."
   STORY-049:
-    status: local-converged
+    status: done
     wave: 4
     batch: C
     priority: P0
     points: 5
     depends_on: [STORY-002, STORY-003, STORY-015, STORY-016, STORY-017, STORY-018, STORY-019, STORY-020, STORY-021, STORY-022, STORY-023, STORY-029, STORY-031, STORY-033, STORY-034, STORY-037, STORY-038, STORY-039, STORY-040, STORY-041, STORY-042, STORY-043, STORY-044, STORY-045, STORY-083, STORY-084, STORY-085]
     blocks: [STORY-050]
-    ungated: 2026-06-05
+    pr: 60
+    merge_commit: "e6f7832d"
+    merged: 2026-06-05
     adversary_convergence: "3/3 strict-CLEAN at passes 10/11/12 (12-pass total cascade)"
     adversary_streak: "3/3"
     converged: true
-    code_head: "402b28e6"
-    notes: "Plugin Registry Assembly (root crate); all prerequisites merged (083/084/085 DONE 2026-06-05); build() end-to-end functional (parse→eval→validate→layout→export); catch_unwind + panic=unwind + CI guard; inject_lang_default; extension from exporter; strict=true default; all AC-001..AC-008 load-bearing. LOCAL adversary cascade CONVERGED 2026-06-05 (12 passes, 3/3 strict-CLEAN). OBS-E anchored STORY-050. Next: demo-recorder → pr-manager."
+    security_review: "APPROVE — CLEAN"
+    notes: "Plugin Registry Assembly (root crate); build() end-to-end functional (parse→eval→validate→layout→export); catch_unwind + panic=unwind + CI guard; inject_lang_default; extension from exporter; strict=true default; all AC-001..AC-008 load-bearing. 21/21 CI checks green (doctest+snapshots failure fixed in 65ee62e6 before merge). OBS-E anchored STORY-050. STORY-050 UNBLOCKED."
   STORY-050:
-    status: not-started
+    status: ready
     wave: 4
     batch: C
     priority: P0
     points: 8
     depends_on: [STORY-049]
     blocks: [STORY-055]
-    notes: "End-to-End Integration Test Suite; depends on STORY-049"
+    ungated: 2026-06-05
+    notes: "End-to-End Integration Test Suite; UNGATED (STORY-049 merged PR #60, e6f7832d). Must include multi-slide deck + inline formatting + data binding through build() (OBS-E scope, BC-5.02.002 EC-004). Branch from e6f7832d."
   STORY-072:
     status: draft
     wave: 5
