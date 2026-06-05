@@ -1070,4 +1070,303 @@ mod tests {
         fn assert_send_sync<T: Send + Sync>() {}
         assert_send_sync::<PluginRegistry>();
     }
+
+    // ── STORY-083 / BC-5.02.001 invariant 3: PluginRegistryBuilder tests ─────
+
+    // Compile-time check: RegistryError implements std::error::Error.
+    // If this function compiles, the trait bound is satisfied.
+    fn _assert_registry_error_is_std_error<E: std::error::Error>() {}
+    const _: fn() = || {
+        _assert_registry_error_is_std_error::<RegistryError>();
+    };
+
+    // ── AC-001: empty builder returns Err(MissingSurface { surface: "DataSource" }) ──
+
+    /// BC-5.02.001 invariant 3: `PluginRegistryBuilder::default().build()` with no
+    /// registrations MUST return `Err(RegistryError::MissingSurface { .. })` — not
+    /// `Ok(..)`, not a panic, not an `anyhow` error.
+    ///
+    /// Also asserts the FIRST missing surface is `"DataSource"` — the first name in
+    /// `SURFACE_NAMES` declaration order.
+    // The `Err(other)` arms below are unreachable *within* this crate because
+    // `RegistryError` is defined here and is exhaustively matched. They are kept
+    // to document — and guard against — new variants added in the future. The
+    // `#[allow(unreachable_patterns)]` suppresses the intra-crate lint while
+    // preserving the intent.
+    #[test]
+    #[allow(unreachable_patterns)]
+    fn test_bc_5_02_001_empty_builder_returns_err_missing_surface_datasource() {
+        let result = PluginRegistryBuilder::default().build();
+        match result {
+            Err(RegistryError::MissingSurface { surface }) => {
+                assert_eq!(
+                    surface, "DataSource",
+                    "first missing surface must be \"DataSource\" (declaration order per SURFACE_NAMES)"
+                );
+            }
+            Ok(_) => panic!(
+                "AC-001 VIOLATED: empty builder must return Err(MissingSurface), got Ok"
+            ),
+            Err(other) => panic!(
+                "AC-001 VIOLATED: expected MissingSurface variant, got: {:?}",
+                other
+            ),
+        }
+    }
+
+    /// BC-5.02.001 invariant 3: the `matches!` form from the BC inline test vector.
+    #[test]
+    fn test_bc_5_02_001_empty_builder_matches_missing_surface_variant() {
+        let result = PluginRegistryBuilder::default().build();
+        assert!(
+            matches!(result, Err(RegistryError::MissingSurface { .. })),
+            "AC-001: PluginRegistryBuilder::default().build() must return Err(MissingSurface {{ .. }})"
+        );
+    }
+
+    // ── AC-002: fully-registered builder returns Ok(registry) ─────────────────
+
+    /// BC-5.02.001 invariant 3: a builder with all 10 surfaces registered must
+    /// return `Ok(PluginRegistry)`.
+    #[test]
+    fn test_bc_5_02_001_fully_registered_builder_returns_ok() {
+        let mut builder = PluginRegistryBuilder::default();
+        builder.register_data_source(Box::new(StubDataSource));
+        builder.register_exporter(Box::new(StubExporter));
+        builder.register_chart_renderer(Box::new(StubChartRenderer));
+        builder.register_diagram_renderer(Box::new(StubDiagramRenderer));
+        builder.register_validator(Box::new(StubValidator));
+        builder.register_math_renderer(Box::new(StubMathRenderer));
+        builder.register_brand_provider(Box::new(StubBrandProvider));
+        builder.register_slide_type(Box::new(StubSlideType));
+        builder.register_section_type(Box::new(StubSectionType));
+        builder.register_inline_format(Box::new(StubInlineFormat));
+
+        let result = builder.build();
+        assert!(
+            result.is_ok(),
+            "AC-002: fully-registered builder must return Ok(registry), got: {:?}",
+            result.err()
+        );
+    }
+
+    // ── AC-003: fully-registered registry has surface_count() == 10 ───────────
+
+    /// BC-5.02.001 postcondition 2: `surface_count()` on the fully-registered
+    /// registry returned by a 10-surface builder must equal 10.
+    #[test]
+    fn test_bc_5_02_001_surface_count_is_10_for_fully_registered_registry() {
+        let mut builder = PluginRegistryBuilder::default();
+        builder.register_data_source(Box::new(StubDataSource));
+        builder.register_exporter(Box::new(StubExporter));
+        builder.register_chart_renderer(Box::new(StubChartRenderer));
+        builder.register_diagram_renderer(Box::new(StubDiagramRenderer));
+        builder.register_validator(Box::new(StubValidator));
+        builder.register_math_renderer(Box::new(StubMathRenderer));
+        builder.register_brand_provider(Box::new(StubBrandProvider));
+        builder.register_slide_type(Box::new(StubSlideType));
+        builder.register_section_type(Box::new(StubSectionType));
+        builder.register_inline_format(Box::new(StubInlineFormat));
+
+        let registry = builder.build().expect("all 10 surfaces registered; build must succeed");
+        assert_eq!(
+            registry.surface_count(),
+            10,
+            "AC-003: fully-registered registry must have surface_count() == 10"
+        );
+    }
+
+    // ── AC-004: surface_names() returns all 10 canonical names in order ────────
+
+    /// BC-5.02.001 invariant 1: `surface_names()` on the fully-registered registry
+    /// must return exactly the 10 canonical names equal to `SURFACE_NAMES`, in
+    /// declaration order.
+    #[test]
+    fn test_bc_5_02_001_surface_names_returns_all_10_canonical_names() {
+        let mut builder = PluginRegistryBuilder::default();
+        builder.register_data_source(Box::new(StubDataSource));
+        builder.register_exporter(Box::new(StubExporter));
+        builder.register_chart_renderer(Box::new(StubChartRenderer));
+        builder.register_diagram_renderer(Box::new(StubDiagramRenderer));
+        builder.register_validator(Box::new(StubValidator));
+        builder.register_math_renderer(Box::new(StubMathRenderer));
+        builder.register_brand_provider(Box::new(StubBrandProvider));
+        builder.register_slide_type(Box::new(StubSlideType));
+        builder.register_section_type(Box::new(StubSectionType));
+        builder.register_inline_format(Box::new(StubInlineFormat));
+
+        let registry = builder.build().expect("all 10 surfaces registered; build must succeed");
+        let names = registry.surface_names();
+
+        assert_eq!(
+            names.len(),
+            10,
+            "AC-004: fully-registered registry must have surface_names().len() == 10, got: {:?}",
+            names
+        );
+
+        // Assert exact contents and order match SURFACE_NAMES.
+        let expected: Vec<&'static str> = SURFACE_NAMES.to_vec();
+        assert_eq!(
+            names, expected,
+            "AC-004: surface_names() must return names in SURFACE_NAMES declaration order"
+        );
+    }
+
+    // ── AC-005: RegistryError Display produces expected human-readable message ──
+
+    /// BC-5.02.001 invariant 3 / AC-005: `RegistryError::MissingSurface { surface }`
+    /// Display output must name the missing surface in a human-readable message.
+    ///
+    /// Specified format (from STORY-083 AC-005):
+    ///   "required plugin surface '{surface}' has no registered implementations"
+    #[test]
+    fn test_bc_5_02_001_registry_error_display_names_missing_surface() {
+        let err = RegistryError::MissingSurface { surface: "DataSource" };
+        let msg = err.to_string();
+        assert!(
+            msg.contains("DataSource"),
+            "AC-005: Display must name the missing surface; got: {:?}",
+            msg
+        );
+        assert_eq!(
+            msg,
+            "required plugin surface 'DataSource' has no registered implementations",
+            "AC-005: exact Display format must match the thiserror template"
+        );
+    }
+
+    /// AC-005: RegistryError implements Debug.
+    #[test]
+    fn test_bc_5_02_001_registry_error_implements_debug() {
+        let err = RegistryError::MissingSurface { surface: "Exporter" };
+        let debug_str = format!("{:?}", err);
+        assert!(
+            debug_str.contains("MissingSurface"),
+            "AC-005: Debug output must contain variant name; got: {:?}",
+            debug_str
+        );
+    }
+
+    /// AC-005: RegistryError is #[non_exhaustive] — callers must have a wildcard arm.
+    ///
+    /// `#[non_exhaustive]` only applies across crate boundaries. Within this crate
+    /// the compiler sees the enum exhaustively, so the wildcard arm is unreachable
+    /// here. We suppress the lint with `#[allow(unreachable_patterns)]` while
+    /// keeping the wildcard to document the required external-caller pattern and to
+    /// guard against future variant additions that would silently drop into the arm.
+    #[test]
+    #[allow(unreachable_patterns)]
+    fn test_bc_5_02_001_registry_error_non_exhaustive_requires_wildcard() {
+        let err = RegistryError::MissingSurface { surface: "Validator" };
+        let matched = match err {
+            RegistryError::MissingSurface { surface } => {
+                format!("missing: {surface}")
+            }
+            _ => String::from("other"),
+        };
+        assert!(
+            matched.starts_with("missing:"),
+            "AC-005: MissingSurface branch must match; got: {:?}",
+            matched
+        );
+    }
+
+    // ── Edge case: 9-of-10 surfaces registered → Err naming the missing one ───
+
+    /// BC-5.02.001 invariant 3 edge case: registering exactly 9 surfaces (missing
+    /// `InlineFormat`, the last in declaration order) must return
+    /// `Err(MissingSurface { surface: "InlineFormat" })`.
+    #[test]
+    #[allow(unreachable_patterns)]
+    fn test_bc_5_02_001_missing_last_surface_inline_format_reports_inline_format() {
+        let mut builder = PluginRegistryBuilder::default();
+        builder.register_data_source(Box::new(StubDataSource));
+        builder.register_exporter(Box::new(StubExporter));
+        builder.register_chart_renderer(Box::new(StubChartRenderer));
+        builder.register_diagram_renderer(Box::new(StubDiagramRenderer));
+        builder.register_validator(Box::new(StubValidator));
+        builder.register_math_renderer(Box::new(StubMathRenderer));
+        builder.register_brand_provider(Box::new(StubBrandProvider));
+        builder.register_slide_type(Box::new(StubSlideType));
+        builder.register_section_type(Box::new(StubSectionType));
+        // InlineFormat deliberately NOT registered.
+
+        let result = builder.build();
+        match result {
+            Err(RegistryError::MissingSurface { surface }) => {
+                assert_eq!(
+                    surface, "InlineFormat",
+                    "missing InlineFormat (last in SURFACE_NAMES) must be reported; got: {:?}",
+                    surface
+                );
+            }
+            Ok(_) => panic!("9-of-10 builder must return Err(MissingSurface), got Ok"),
+            Err(other) => panic!("expected MissingSurface variant, got: {:?}", other),
+        }
+    }
+
+    /// BC-5.02.001 invariant 3 edge case: registering exactly 9 surfaces (missing
+    /// `BrandProvider`, a middle surface at index 6) must return
+    /// `Err(MissingSurface { surface: "BrandProvider" })`.
+    #[test]
+    #[allow(unreachable_patterns)]
+    fn test_bc_5_02_001_missing_middle_surface_brand_provider_reports_brand_provider() {
+        let mut builder = PluginRegistryBuilder::default();
+        builder.register_data_source(Box::new(StubDataSource));
+        builder.register_exporter(Box::new(StubExporter));
+        builder.register_chart_renderer(Box::new(StubChartRenderer));
+        builder.register_diagram_renderer(Box::new(StubDiagramRenderer));
+        builder.register_validator(Box::new(StubValidator));
+        builder.register_math_renderer(Box::new(StubMathRenderer));
+        // BrandProvider deliberately NOT registered.
+        builder.register_slide_type(Box::new(StubSlideType));
+        builder.register_section_type(Box::new(StubSectionType));
+        builder.register_inline_format(Box::new(StubInlineFormat));
+
+        let result = builder.build();
+        match result {
+            Err(RegistryError::MissingSurface { surface }) => {
+                assert_eq!(
+                    surface, "BrandProvider",
+                    "missing BrandProvider must be reported; got: {:?}",
+                    surface
+                );
+            }
+            Ok(_) => panic!("9-of-10 builder (no BrandProvider) must return Err(MissingSurface), got Ok"),
+            Err(other) => panic!("expected MissingSurface variant, got: {:?}", other),
+        }
+    }
+
+    // ── EC-001 (builder): multiple register_* calls for same surface ──────────
+
+    /// BC-5.02.001 EC-001 / STORY-083 EC-001: registering the same surface twice is
+    /// additive — both are stored; `surface_count()` counts surfaces, not total
+    /// plugins; `build()` succeeds if all 10 surfaces have at least 1 each.
+    #[test]
+    fn test_bc_5_02_001_duplicate_surface_registration_counts_as_one_surface() {
+        let mut builder = PluginRegistryBuilder::default();
+        // Register DataSource TWICE — surface_count() must still count it as 1 surface.
+        builder.register_data_source(Box::new(StubDataSource));
+        builder.register_data_source(Box::new(StubDataSource));
+        builder.register_exporter(Box::new(StubExporter));
+        builder.register_chart_renderer(Box::new(StubChartRenderer));
+        builder.register_diagram_renderer(Box::new(StubDiagramRenderer));
+        builder.register_validator(Box::new(StubValidator));
+        builder.register_math_renderer(Box::new(StubMathRenderer));
+        builder.register_brand_provider(Box::new(StubBrandProvider));
+        builder.register_slide_type(Box::new(StubSlideType));
+        builder.register_section_type(Box::new(StubSectionType));
+        builder.register_inline_format(Box::new(StubInlineFormat));
+
+        let registry = builder
+            .build()
+            .expect("all 10 surfaces registered (DataSource twice); build must succeed");
+        assert_eq!(
+            registry.surface_count(),
+            10,
+            "EC-001: surface_count() counts surfaces, not total plugins; \
+             registering DataSource twice must still yield 10, not 11"
+        );
+    }
 }
