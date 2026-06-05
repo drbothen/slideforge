@@ -12,12 +12,12 @@
 //! ```no_run
 //! # use slideforge_plugin_api::PluginRegistryBuilder;
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! // All register_* methods take &mut self and return &mut Self.
-//! // Call build() as a separate statement after registering all surfaces.
+//! // All register_* methods take &mut self — declare the builder as `mut`.
+//! // Call build() as a separate statement after registering all 10 surfaces.
 //! let mut builder = PluginRegistryBuilder::default();
-//! // builder.register_data_source(Box::new(my_data_source));
-//! // … register all 10 surfaces …
-//! let registry = builder.build()?;
+//! builder.register_data_source(todo!()); // replace todo! with your DataSource impl
+//! // … register the remaining 9 surfaces …
+//! let _registry = builder.build()?;
 //! # Ok(())
 //! # }
 //! ```
@@ -120,11 +120,11 @@ pub const SURFACE_NAMES: [&str; 10] = [
 /// ```no_run
 /// # use slideforge_plugin_api::PluginRegistryBuilder;
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// // All register_* methods take &mut self — declare the builder as `mut`.
 /// let mut builder = PluginRegistryBuilder::default();
-/// // builder.register_data_source(Box::new(JsonDataSource::new()));
-/// // builder.register_exporter(Box::new(PptxExporter::new()));
-/// // … register all 10 surfaces …
-/// let registry = builder.build()?;
+/// builder.register_data_source(todo!()); // replace with Box::new(JsonDataSource::new())
+/// // … register the remaining 9 surfaces …
+/// let _registry = builder.build()?;
 /// # Ok(())
 /// # }
 /// ```
