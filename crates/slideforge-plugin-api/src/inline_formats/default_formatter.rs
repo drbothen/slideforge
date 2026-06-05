@@ -12,8 +12,8 @@
 //! | `Italic` | `<a:r><a:rPr i="1"/><a:t>{content}</a:t></a:r>` | `<em>{content}</em>` | `*{content}*` |
 //! | `Code` | `<a:r><a:rPr .../><a:t>{text}</a:t></a:r>` | `<code>{text}</code>` | `` `{text}` `` |
 //! | `Link` | hyperlink run (with warn fallback) | `<a href="{url}">{text}</a>` | `[{text}]({url})` |
-//! | `Math` | OMML passthrough (with warn fallback) | `<span class="math">{latex}</span>` | `${latex}$` |
-//! | `Footnote` | superscript marker + run | `<sup>[{n}]</sup>` | `[^{n}]` |
+//! | `Math` | LaTeX-source plain run (warn fallback; no OMML) | `<span class="math">{latex}</span>` | `${latex}$` |
+//! | `Footnote` | inline body run (marker deferred) | `<sup>[{content}]</sup>` (no numbering) | `[{content}]` (no numbering) |
 //! | `Xref` | plain text run | `<a href="#{id}">{id}</a>` | `[{id}](#{id})` |
 //! | `Superscript` | `baseline="30000"` | `<sup>{content}</sup>` | `^{content}^` |
 //! | `Subscript` | `baseline="-25000"` | `<sub>{content}</sub>` | `~{content}~` |
@@ -167,6 +167,18 @@ fn render_node(
 ///
 /// This ordering is stable across all single-property cases that have accepted
 /// snapshots.  Combined-property cases produce attributes in the same order.
+///
+/// ## Why multiple booleans (not an enum / bit-flags)
+///
+/// OOXML run properties are independent, combinable axes — they are NOT
+/// mutually exclusive states.  A run can simultaneously be bold, italic,
+/// struck-through, and highlighted.  An enum cannot represent these combinations
+/// without exponential variants.  Bit-flags (`u8`) would reduce readability and
+/// add unsafe index arithmetic.  Five named booleans + one `Option<i32>` is the
+/// clearest representation for a six-axis accumulator.  The clippy lint is
+/// suppressed here because the alternative (a state machine) does not model this
+/// domain correctly.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, Copy)]
 struct RunProps {
     /// `b="1"` — from a `Bold` ancestor.
@@ -187,6 +199,8 @@ struct RunProps {
 }
 
 impl RunProps {
+    /// Construct a [`RunProps`] with all properties unset (the default for a
+    /// top-level node with no inherited formatting context).
     const fn new() -> Self {
         Self {
             bold: false,
@@ -357,7 +371,11 @@ fn render_ooxml_accumulate(
             Ok(out)
         },
         InlineNode::Footnote(children) => {
-            // Footnote inherits all props and recurses (footnote marker is a future story).
+            // Footnote renders its inner body content inline.
+            // The numbered-marker form ([^{n}] / <sup>[n]</sup>) is intentionally
+            // DEFERRED — no footnote-numbering mechanism exists in v1.0.
+            // Mandatory deferral log per STORY-085 spec F-010 / Tasks.
+            tracing::debug!("Footnote marker numbering deferred");
             let mut out = String::new();
             for child in children {
                 out.push_str(&render_ooxml_accumulate(child, props, depth + 1)?);
@@ -476,6 +494,9 @@ fn render_html(node: &InlineNode, depth: usize) -> Result<String, InlineError> {
             ))
         },
         InlineNode::Footnote(children) => {
+            // Footnote renders inline body content; numbered marker DEFERRED.
+            // Mandatory deferral log per STORY-085 spec F-010 / Tasks.
+            tracing::debug!("Footnote marker numbering deferred");
             let content = render_children_html(children, depth)?;
             Ok(format!("<sup>[{content}]</sup>"))
         },
@@ -542,8 +563,13 @@ fn render_markdown(node: &InlineNode, depth: usize) -> Result<String, InlineErro
             }
         },
         InlineNode::Footnote(children) => {
+            // Spec matrix: Markdown column = `[{inline body}]` (no numbered `^` marker).
+            // The `[^{n}]` numbered-marker form is explicitly DEFERRED to the future
+            // cross-reference resolution story.
+            // Mandatory deferral log per STORY-085 spec F-010 / Tasks.
+            tracing::debug!("Footnote marker numbering deferred");
             let content = render_children_markdown(children, depth)?;
-            Ok(format!("[^{content}]"))
+            Ok(format!("[{content}]"))
         },
         InlineNode::Xref(id) => Ok(format!("[{id}](#{id})")),
         InlineNode::Superscript(children) => {
@@ -1051,7 +1077,7 @@ mod tests {
         assert_eq!(result, "<mark>marked</mark>");
     }
 
-    /// AC-002: Footnote HTML → `<sup>[{n}]</sup>` style (content rendered)
+    /// AC-002: Footnote HTML → `<sup>[{content}]</sup>` (inline body, no numbering)
     #[test]
     fn test_bc_5_02_001_html_footnote() {
         let result = fmt()
@@ -1177,15 +1203,81 @@ mod tests {
         assert_eq!(result, "==marked==");
     }
 
-    /// AC-003: Footnote Markdown → `[^{n}]`
+    /// AC-003: Footnote Markdown → `[{inline body}]` (no numbered marker per spec; deferral)
+    ///
+    /// Spec matrix (STORY-085 authoritative): Markdown column for Footnote = `[{inline body}]`.
+    /// The `[^{n}]` numbered-marker form is explicitly DEFERRED and MUST NOT be emitted in v1.0.
     #[test]
     fn test_bc_5_02_001_markdown_footnote() {
         let result = fmt()
             .render(&footnote(vec![plain("note")]), InlineOutputFormat::Markdown)
             .unwrap();
+        // Full-value assertion — the spec says exactly `[{content}]` (no `^`).
+        assert_eq!(
+            result, "[note]",
+            "Footnote Markdown must be [note] (no numbered ^ marker); got: {result}"
+        );
+    }
+
+    // ── F-085-P3-002: tracing::debug! "Footnote marker numbering deferred" ────
+
+    /// F-085-P3-002: Every Footnote render (any format) MUST emit
+    /// `tracing::debug!("Footnote marker numbering deferred")`.
+    ///
+    /// LOAD-BEARING (TD-VSDD-059): removing the `tracing::debug!` call silently
+    /// breaks this test. The debug event is mandated by STORY-085 spec F-010 and
+    /// the Tasks section: "emit `tracing::debug!("Footnote marker numbering
+    /// deferred")` — no numeric marker".
+    ///
+    /// Tested via OOXML path (accumulate arm) which is the canonical single site.
+    #[tracing_test::traced_test]
+    #[test]
+    fn test_f085_p3_002_footnote_ooxml_emits_debug_deferral_log() {
+        let _ = fmt()
+            .render(
+                &footnote(vec![plain("body text")]),
+                InlineOutputFormat::Ooxml,
+            )
+            .unwrap();
         assert!(
-            result.starts_with("[^"),
-            "Footnote Markdown must start with [^, got: {result}"
+            logs_contain("Footnote marker numbering deferred"),
+            "F-085-P3-002: Footnote render must emit tracing::debug! containing \
+             'Footnote marker numbering deferred'; no such event was captured. \
+             This means the F-010 mandated deferral log is absent."
+        );
+    }
+
+    /// F-085-P3-002: Footnote render in Markdown format also emits the deferral log.
+    #[tracing_test::traced_test]
+    #[test]
+    fn test_f085_p3_002_footnote_markdown_emits_debug_deferral_log() {
+        let _ = fmt()
+            .render(
+                &footnote(vec![plain("body text")]),
+                InlineOutputFormat::Markdown,
+            )
+            .unwrap();
+        assert!(
+            logs_contain("Footnote marker numbering deferred"),
+            "F-085-P3-002: Footnote Markdown render must emit tracing::debug! containing \
+             'Footnote marker numbering deferred'; no such event was captured."
+        );
+    }
+
+    /// F-085-P3-002: Footnote render in HTML format also emits the deferral log.
+    #[tracing_test::traced_test]
+    #[test]
+    fn test_f085_p3_002_footnote_html_emits_debug_deferral_log() {
+        let _ = fmt()
+            .render(
+                &footnote(vec![plain("body text")]),
+                InlineOutputFormat::Html,
+            )
+            .unwrap();
+        assert!(
+            logs_contain("Footnote marker numbering deferred"),
+            "F-085-P3-002: Footnote HTML render must emit tracing::debug! containing \
+             'Footnote marker numbering deferred'; no such event was captured."
         );
     }
 
@@ -1718,6 +1810,57 @@ mod tests {
         assert!(
             result.contains("<a:t>x</a:t>"),
             "F-009: text must be preserved in triple-nested, got: {result}"
+        );
+    }
+
+    // ── OBS-1: Superscript/Subscript baseline last-wins (innermost-wins) ─────
+
+    /// OBS-1: `Superscript([Subscript([Plain("x")])])` — the innermost node is
+    /// Subscript, so the emitted `<a:rPr>` carries `baseline="-25000"` (sub wins).
+    ///
+    /// The accumulate model sets `baseline` when entering each vertical-shift node
+    /// and overwrites on the way down. The last (innermost) assignment wins.
+    ///
+    /// This test closes the matrix corner documented in the STORY-085 spec (OBS-1).
+    #[test]
+    fn test_obs1_superscript_wraps_subscript_innermost_baseline_wins() {
+        let node = superscript(vec![subscript(vec![plain("x")])]);
+        let result = fmt().render(&node, InlineOutputFormat::Ooxml).unwrap();
+        assert!(
+            result.contains("baseline=\"-25000\""),
+            "OBS-1: Superscript([Subscript([Plain])]) — innermost Subscript baseline \
+             must win; expected baseline=\"-25000\", got: {result}"
+        );
+        assert!(
+            !result.contains("baseline=\"30000\""),
+            "OBS-1: outer Superscript baseline must NOT appear when Subscript is innermost; \
+             got: {result}"
+        );
+        assert!(
+            result.contains("<a:t>x</a:t>"),
+            "OBS-1: text must be preserved; got: {result}"
+        );
+    }
+
+    /// OBS-1 reverse: `Subscript([Superscript([Plain("x")])])` — innermost is
+    /// Superscript, so `baseline="30000"` wins.
+    #[test]
+    fn test_obs1_subscript_wraps_superscript_innermost_baseline_wins() {
+        let node = subscript(vec![superscript(vec![plain("x")])]);
+        let result = fmt().render(&node, InlineOutputFormat::Ooxml).unwrap();
+        assert!(
+            result.contains("baseline=\"30000\""),
+            "OBS-1: Subscript([Superscript([Plain])]) — innermost Superscript baseline \
+             must win; expected baseline=\"30000\", got: {result}"
+        );
+        assert!(
+            !result.contains("baseline=\"-25000\""),
+            "OBS-1: outer Subscript baseline must NOT appear when Superscript is innermost; \
+             got: {result}"
+        );
+        assert!(
+            result.contains("<a:t>x</a:t>"),
+            "OBS-1: text must be preserved; got: {result}"
         );
     }
 }
