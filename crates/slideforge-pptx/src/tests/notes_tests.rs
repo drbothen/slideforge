@@ -2444,3 +2444,224 @@ fn test_f006_registry_routing_notes_produces_same_ooxml() {
         "F-006: italic must be i=\"1\"; got:\n{notes_xml}"
     );
 }
+
+// =============================================================================
+// OBS-1 (LOW): Empty-display-text Link must NOT produce orphan External rel
+//
+// A Link whose display text is empty (text: vec![]) has no visible run emitted
+// by DefaultInlineFormat::render_with_context (returns Ok("") at line ~108).
+// Before the fix, collect_hyperlink_urls still registered the safe-scheme URL,
+// allocating an rId + TargetMode="External" entry in .rels with no corresponding
+// <a:hlinkClick> referencing it — an orphan External rel that OOXML linters flag.
+//
+// Fix: collect_hyperlink_urls guards !text.is_empty() before registering a URL,
+// so no rId is allocated and no orphan rel is produced for empty-text links.
+// =============================================================================
+
+/// OBS-1 (LOW): A Notes-register inline tree containing a plain text node PLUS
+/// `Link { text: vec![], url: "https://example.com" }` (safe scheme, empty
+/// display text) must produce OOXML where the count of
+/// `TargetMode="External"` relationships EQUALS the count of
+/// `<a:hlinkClick` elements — i.e., zero orphan rels.
+///
+/// ## What is being guarded
+///
+/// `collect_hyperlink_urls` registers ANY safe-scheme URL, allocating an rId +
+/// `TargetMode="External"` entry in `.rels`.  But `render_with_context` in
+/// `DefaultInlineFormat` returns `Ok(String::new())` when the Link display text
+/// flattens to empty — no `<a:hlinkClick>` is emitted.  This creates an orphan
+/// External relationship (`external_rel_count > hlinkClick_count`).
+///
+/// ## Test setup (why plain text + empty link)
+///
+/// `slide_has_notes` calls `inline_nodes_to_plain_text` and checks for non-empty
+/// content before producing a notesSlide part.  A Notes entry containing ONLY an
+/// empty-text Link would return `""` → no notesSlide.  The defect manifests when
+/// a Notes entry mixes a non-empty node (which causes the notesSlide to be built)
+/// with an empty-text Link (which `collect_hyperlink_urls` incorrectly registers).
+/// We must include a non-empty Plain node to trigger notesSlide creation, then
+/// the empty-text Link is the defect vector.
+///
+/// ## Mirroring F-040-P3-001 style
+///
+/// Mirrors `test_f040_p3_001_nested_link_in_display_text_no_orphan_rel` but for
+/// the empty-text case (text: vec![]) rather than the nested-link case.
+/// Both tests assert the same count-equality invariant:
+///   `external_rel_count == hlinkclick_count` (zero orphan rels).
+///
+/// ## RED → GREEN (OBS-1 fix in collect_hyperlink_urls)
+///
+/// FAILS before fix: `collect_hyperlink_urls` registers the URL → external_rel_count=1,
+/// hlinkclick_count=0 → count-equality assertion fails.
+/// PASSES after fix: URL is not registered for empty-text link → both counts 0.
+#[test]
+fn test_obs1_empty_display_text_link_no_orphan_external_rel() {
+    let url = "https://example.com/empty-text-link";
+
+    // Link with genuinely empty display-text vector (vec![]).
+    // DefaultInlineFormat::render_with_context returns Ok("") for this and
+    // emits NO <a:hlinkClick> — so no rId must be allocated either.
+    let empty_text_link = slideforge_types::InlineNode::Link {
+        text: vec![],
+        url: Arc::from(url),
+    };
+    // Plain text node ensures slide_has_notes returns true → notesSlide is built.
+    // Without at least one non-empty node the file would not be created, making
+    // the test vacuously pass (notesSlide absent → no rels → 0==0).
+    let plain_node = slideforge_types::InlineNode::Plain(Arc::from("see also"));
+
+    // Single RegisteredContent with two nodes: a plain text node (non-empty, so
+    // slide_has_notes passes) followed by the empty-text Link (the defect vector).
+    let rc = slideforge_types::register::RegisteredContent {
+        register: Register::Notes,
+        content: vec![plain_node, empty_text_link],
+    };
+
+    let slide = LaidOutSlide {
+        source_index: 0,
+        slide_type_keyword: Arc::from("title"),
+        frames: vec![Frame {
+            bbox: title_bbox(),
+            content: FrameContent::Empty,
+            text_flow: None,
+        }],
+        speaker_notes: Some(Arc::from("see also")),
+        register_tags: vec![],
+        register_content: vec![rc],
+    };
+
+    let deck = make_deck_with_notes(&[Some("see also")]);
+    let laid_out = LaidOutDeck {
+        page_size: slideforge_layout::PageSize::default(),
+        slides: vec![slide],
+        sections: vec![],
+        warnings: vec![],
+    };
+    let pptx = export_pptx(&deck, &laid_out);
+
+    let rels_xml = read_zip_member(&pptx, "ppt/notesSlides/_rels/notesSlide1.xml.rels");
+    let notes_xml = read_zip_member(&pptx, "ppt/notesSlides/notesSlide1.xml");
+
+    // Count External relationships (rId1=slide, rId2=notesMaster have no TargetMode).
+    let external_rel_count = rels_xml.matches("TargetMode=\"External\"").count();
+    // Count <a:hlinkClick elements in the notes XML.
+    let hlinkclick_count = notes_xml.matches("<a:hlinkClick").count();
+
+    // CORE INVARIANT: rId↔hlinkClick count-equality (no orphan rels).
+    // Before fix: external_rel_count=1, hlinkclick_count=0 → assertion fails.
+    // After fix:  external_rel_count=0, hlinkclick_count=0 → assertion passes.
+    assert_eq!(
+        external_rel_count, hlinkclick_count,
+        "OBS-1: orphan External rel detected for empty-display-text Link — \
+         TargetMode=External count ({external_rel_count}) != \
+         <a:hlinkClick count ({hlinkclick_count}). \
+         An empty-text Link must not register an rId (no run is emitted). \
+         rels:\n{rels_xml}\nnotes_xml:\n{notes_xml}"
+    );
+
+    // Both counts must be exactly 0: empty-text link produces no run and no rel.
+    assert_eq!(
+        external_rel_count, 0,
+        "OBS-1: expected 0 External rels for empty-display-text Link; \
+         got {external_rel_count}.\nrels:\n{rels_xml}"
+    );
+    assert_eq!(
+        hlinkclick_count, 0,
+        "OBS-1: expected 0 <a:hlinkClick for empty-display-text Link; \
+         got {hlinkclick_count}.\nnotes_xml:\n{notes_xml}"
+    );
+
+    // The URL must NOT appear in rels (no orphan External rel).
+    assert!(
+        !rels_xml.contains(url),
+        "OBS-1: URL {url:?} must NOT appear in rels (empty-text link → no rel); \
+         got rels:\n{rels_xml}"
+    );
+
+    // The plain text node must still appear (non-empty content survives).
+    assert!(
+        notes_xml.contains("see also"),
+        "OBS-1: plain text 'see also' must appear in notes XML; got:\n{notes_xml}"
+    );
+}
+
+/// OBS-1 regression guard: a non-empty-text safe-scheme Link still produces
+/// exactly 1 External rel AND 1 `<a:hlinkClick>` (count-equal).
+///
+/// This test ensures the fix for empty-text Links does NOT accidentally suppress
+/// External rels for normal Links with non-empty display text.
+#[test]
+fn test_obs1_non_empty_display_text_link_still_produces_rel_and_hlinkclick() {
+    let url = "https://example.com/non-empty-link";
+
+    let link_node = slideforge_types::InlineNode::Link {
+        text: vec![slideforge_types::InlineNode::Plain(Arc::from("click here"))],
+        url: Arc::from(url),
+    };
+    let rc = slideforge_types::register::RegisteredContent {
+        register: Register::Notes,
+        content: vec![link_node],
+    };
+
+    let slide = LaidOutSlide {
+        source_index: 0,
+        slide_type_keyword: Arc::from("title"),
+        frames: vec![Frame {
+            bbox: title_bbox(),
+            content: FrameContent::Empty,
+            text_flow: None,
+        }],
+        speaker_notes: Some(Arc::from("click here")),
+        register_tags: vec![],
+        register_content: vec![rc],
+    };
+
+    let deck = make_deck_with_notes(&[Some("click here")]);
+    let laid_out = LaidOutDeck {
+        page_size: slideforge_layout::PageSize::default(),
+        slides: vec![slide],
+        sections: vec![],
+        warnings: vec![],
+    };
+    let pptx = export_pptx(&deck, &laid_out);
+
+    let rels_xml = read_zip_member(&pptx, "ppt/notesSlides/_rels/notesSlide1.xml.rels");
+    let notes_xml = read_zip_member(&pptx, "ppt/notesSlides/notesSlide1.xml");
+
+    let external_rel_count = rels_xml.matches("TargetMode=\"External\"").count();
+    let hlinkclick_count = notes_xml.matches("<a:hlinkClick").count();
+
+    // CORE INVARIANT: count-equality (no orphan rels).
+    assert_eq!(
+        external_rel_count, hlinkclick_count,
+        "OBS-1 regression: non-empty Link must have equal External rel and hlinkClick counts; \
+         TargetMode=External count ({external_rel_count}) != \
+         <a:hlinkClick count ({hlinkclick_count}).\nrels:\n{rels_xml}\nnotes:\n{notes_xml}"
+    );
+
+    // Both counts must be exactly 1.
+    assert_eq!(
+        external_rel_count, 1,
+        "OBS-1 regression: non-empty Link must produce exactly 1 External rel; \
+         got {external_rel_count}.\nrels:\n{rels_xml}"
+    );
+    assert_eq!(
+        hlinkclick_count, 1,
+        "OBS-1 regression: non-empty Link must produce exactly 1 <a:hlinkClick>; \
+         got {hlinkclick_count}.\nnotes:\n{notes_xml}"
+    );
+
+    // The URL must appear in rels.
+    assert!(
+        rels_xml.contains(url),
+        "OBS-1 regression: URL {url:?} must appear in rels for non-empty Link; \
+         got rels:\n{rels_xml}"
+    );
+
+    // The display text must appear in the notes XML.
+    assert!(
+        notes_xml.contains("click here"),
+        "OBS-1 regression: display text 'click here' must appear in notes XML; \
+         got:\n{notes_xml}"
+    );
+}

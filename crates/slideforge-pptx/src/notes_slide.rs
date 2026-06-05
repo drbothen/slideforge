@@ -350,13 +350,22 @@ fn dispatch_inline_nodes_to_ooxml(
 fn collect_hyperlink_urls(nodes: &[InlineNode], urls: &mut Vec<String>) {
     for node in nodes {
         match node {
-            InlineNode::Link { url, text: _ } => {
+            InlineNode::Link { url, text } => {
                 // F-040-P2-001 defense-in-depth: only register URLs with safe schemes.
                 // Unsafe-scheme URLs are NOT added to the hlink_urls list; the Link
                 // arm in dispatch_inline_nodes_to_ooxml routes through
                 // DefaultInlineFormat::render_with_context, which falls back to a plain
                 // text run when no rId is available.
-                if is_safe_link_scheme(url.as_ref()) {
+                //
+                // OBS-1 fix: also guard that the Link's display text is non-empty.
+                // DefaultInlineFormat::render_with_context returns Ok(String::new())
+                // when the display text flattens to empty (line ~107-109 in
+                // default_formatter.rs) — emitting NO <a:hlinkClick> run.  Registering
+                // a URL for a Link with no emitted hlinkClick creates an orphan
+                // External relationship (rId count > hlinkClick count) that OOXML
+                // linters flag.  Guard: !text.is_empty() ensures we only allocate an
+                // rId when the Link will actually emit a visible run.
+                if is_safe_link_scheme(url.as_ref()) && !text.is_empty() {
                     urls.push(url.as_ref().to_owned());
                 }
                 // F-040-P3-001: Do NOT recurse into `text` children here.
