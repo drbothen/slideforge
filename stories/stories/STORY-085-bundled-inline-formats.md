@@ -385,6 +385,7 @@ and the display text as a plain run (EC-002).
 | `slideforge-types` | workspace (already dep) | `InlineNode`, `MathNode` types | slideforge-plugin-api |
 | `slideforge-plugin-api` | workspace | `InlineFormat` trait, `InlineOutputFormat`, `InlineError` | slideforge-pptx |
 | `insta` | workspace (already dep in slideforge-pptx) | Snapshot tests for render output | both (dev-dep) |
+| `tracing-test` | `=0.2.5` (dev-dep) | Assert tracing log events fire in unit tests (footnote-deferral debug, Math/Link warn fallbacks) — load-bearing per TD-VSDD-059 | slideforge-plugin-api |
 | `ooxmlsdk` | `=0.6.1` | OOXML types reference (no new dep — already in slideforge-pptx) | slideforge-pptx |
 | `tracing` | `{ workspace = true }` | `tracing::warn!` for EC-001 (Math OMML missing) and EC-002 (Link RID not available) fallback paths — mandated by EC-001/EC-002 | slideforge-plugin-api |
 
