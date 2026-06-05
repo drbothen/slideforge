@@ -56,8 +56,8 @@ pub enum PluginError {
 
 /// Error returned by [`crate::build`].
 ///
-/// Wraps errors from each stage of the pipeline: registry assembly, parsing,
-/// evaluation, layout, and export.
+/// Wraps errors from each stage of the pipeline: registry assembly, brand
+/// loading, parsing, evaluation, layout, and export.
 ///
 /// ## Non-exhaustive
 ///
@@ -71,30 +71,67 @@ pub enum BuildError {
     #[error("plugin registry error: {0}")]
     Registry(#[from] RegistryError),
 
+    /// No brand source was provided in [`crate::BuildOptions::brand_source`].
+    ///
+    /// The `build()` pipeline requires a brand configuration to load colors,
+    /// fonts, and layout geometry. Callers must set
+    /// `BuildOptions::brand_source` to a [`slideforge_plugin_api::BrandSource`].
+    #[error(
+        "no brand source configured; set BuildOptions::brand_source to a BrandSource (TomlFile, \
+         PptxFile, or DocxFile)"
+    )]
+    NoBrandSource,
+
+    /// No `BrandProvider` plugin is registered for the requested brand source.
+    ///
+    /// This typically indicates the brand provider with id `"file"` was not
+    /// registered during plugin assembly. It should never occur with the default
+    /// bundled plugin set (which always registers `BrandLoader` as `"file"`).
+    #[error(
+        "no BrandProvider plugin found for id 'file'; ensure register_bundled_plugins was called"
+    )]
+    NoBrandProvider,
+
+    /// The brand source could not be loaded.
+    ///
+    /// Wraps [`slideforge_plugin_api::BrandError`].
+    #[error("brand loading failed: {0}")]
+    Brand(#[source] slideforge_plugin_api::BrandError),
+
     /// The DSL source could not be parsed.
     ///
-    /// Wraps `slideforge_syntax::ParseError` — concrete type TBD when
-    /// `slideforge-syntax` exposes its error type (STORY-002).
-    #[error("parse error: {0}")]
-    Parse(#[source] Box<dyn std::error::Error + Send + Sync + 'static>),
+    /// Contains the count of fatal parse errors collected in the diagnostic sink.
+    /// Callers that need structured error messages should use
+    /// `slideforge_syntax::parse` directly and inspect the returned
+    /// `Vec<SyntaxError>`.
+    #[error("parse failed with {0} error(s)")]
+    ParseFailed(usize),
 
     /// The parsed AST could not be evaluated into a semantic `Deck`.
     ///
-    /// Wraps `slideforge_eval::EvalError` (STORY-003).
-    #[error("eval error: {0}")]
-    Eval(#[source] Box<dyn std::error::Error + Send + Sync + 'static>),
+    /// This is returned when `eval_deck` produces `None`, indicating that
+    /// fatal evaluation errors were pushed to the diagnostic sink.
+    #[error("evaluation failed; check the diagnostic sink for details")]
+    EvalFailed,
 
     /// The `Deck` could not be laid out into a `LaidOutDeck`.
     ///
-    /// Wraps `slideforge_layout::LayoutError` (STORY-015).
-    #[error("layout error: {0}")]
-    Layout(#[source] Box<dyn std::error::Error + Send + Sync + 'static>),
+    /// Wraps [`slideforge_layout::LayoutError`].
+    #[error("layout failed: {0}")]
+    Layout(#[source] slideforge_layout::LayoutError),
+
+    /// No exporter is registered for the requested format.
+    ///
+    /// `format` is the format string from [`crate::BuildOptions::format`]
+    /// (or `"pptx"` if none was set).
+    #[error("no exporter registered for format '{0}'; supported: pptx, docx, pdf")]
+    UnknownFormat(String),
 
     /// The export stage failed to produce output bytes.
     ///
-    /// Wraps `slideforge_plugin_api::ExportError`.
+    /// Wraps [`slideforge_plugin_api::ExportError`].
     #[error("export error: {0}")]
-    Export(#[from] slideforge_plugin_api::ExportError),
+    Export(slideforge_plugin_api::ExportError),
 
     /// A plugin panicked during the pipeline.
     #[error("plugin dispatch error: {0}")]
