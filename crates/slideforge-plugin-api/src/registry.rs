@@ -5,6 +5,20 @@
 //! stages. Registration is synchronous and single-threaded during startup;
 //! lookups are read-only and can occur from any thread.
 //!
+//! ## Construction
+//!
+//! The preferred construction path is [`PluginRegistryBuilder`]:
+//!
+//! ```ignore
+//! let registry = PluginRegistryBuilder::default()
+//!     .register_data_source(Box::new(my_data_source))
+//!     // … register all 10 surfaces …
+//!     .build()?;
+//! ```
+//!
+//! [`PluginRegistryBuilder::build`] returns [`Err(RegistryError::MissingSurface)`] if
+//! any of the 10 required surfaces has zero registrations (BC-5.02.001 invariant 3).
+//!
 //! ## Design constraints
 //!
 //! - Stores `Box<dyn Trait + Send + Sync>` per surface — dynamic dispatch.
@@ -19,6 +33,284 @@ use crate::traits::{
     BrandProvider, ChartRenderer, DataSource, DiagramRenderer, Exporter, InlineFormat,
     MathRenderer, SectionType, SlideType, Validator,
 };
+
+// ──────────────────────────────────────────────────────────────────────────────
+// RegistryError
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// Error returned by [`PluginRegistryBuilder::build`] when registry finalization
+/// fails because a required plugin surface has no registered implementations.
+///
+/// ## Non-exhaustive
+///
+/// This enum is `#[non_exhaustive]`: future slideforge versions may add new error
+/// variants (e.g., `DuplicateId`, `InvalidPlugin`) without a breaking API change.
+/// Callers must include a wildcard arm when matching:
+///
+/// ```ignore
+/// match err {
+///     RegistryError::MissingSurface { surface } => { /* … */ }
+///     _ => { /* future variants */ }
+/// }
+/// ```
+///
+/// ## Traceability
+///
+/// - BC-5.02.001 invariant 3: all 10 surfaces are required; enforcement is at
+///   `PluginRegistryBuilder::build()`.
+/// - AC-005 (STORY-083): `thiserror`-derived `Display` + `std::error::Error`.
+#[non_exhaustive]
+#[derive(Debug, thiserror::Error)]
+pub enum RegistryError {
+    /// A required plugin surface has zero registered implementations.
+    ///
+    /// `surface` is the canonical name of the missing surface
+    /// (e.g., `"DataSource"`, `"Exporter"`). The first missing surface
+    /// in declaration order is reported.
+    #[error("required plugin surface '{surface}' has no registered implementations")]
+    MissingSurface {
+        /// The canonical name of the surface that has no registrations.
+        surface: &'static str,
+    },
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Canonical surface names (declaration order)
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// Canonical names of all 10 plugin surfaces, in declaration order.
+///
+/// Used by [`PluginRegistryBuilder::build`] to report the first missing surface
+/// and by [`PluginRegistry::surface_names`] to enumerate registered surfaces.
+///
+/// The ordering matches the surface numbering in `slideforge-plugin-api/src/traits.rs`
+/// and BC-5.02.001 invariant 1.
+pub const SURFACE_NAMES: [&str; 10] = [
+    "DataSource",
+    "Exporter",
+    "ChartRenderer",
+    "DiagramRenderer",
+    "Validator",
+    "MathRenderer",
+    "BrandProvider",
+    "SlideType",
+    "SectionType",
+    "InlineFormat",
+];
+
+// ──────────────────────────────────────────────────────────────────────────────
+// PluginRegistryBuilder
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// Builder for [`PluginRegistry`] that enforces all-10-surfaces coverage at
+/// finalization time (BC-5.02.001 invariant 3).
+///
+/// ## Usage
+///
+/// ```ignore
+/// let registry = PluginRegistryBuilder::default()
+///     .register_data_source(Box::new(JsonDataSource::new()))
+///     .register_exporter(Box::new(PptxExporter::new()))
+///     // … register all 10 surfaces …
+///     .build()?;
+/// ```
+///
+/// ## Enforcement
+///
+/// [`build`](PluginRegistryBuilder::build) checks that every surface has at
+/// least one registration. If any surface is empty, it returns
+/// [`Err(RegistryError::MissingSurface)`] naming the first unregistered
+/// surface in declaration order. A silent no-op or panic are both contract
+/// violations (BC-5.02.001 invariant 3).
+///
+/// ## Multiple registrations per surface
+///
+/// All `register_*` methods are additive — registering the same surface twice
+/// stores both plugins. On lookup, `PluginRegistry` returns the first
+/// registration (insertion order, EC-001). `surface_count()` counts surfaces,
+/// not total plugins.
+// The fields are intentionally unread in stub bodies (all `todo!()`).
+// The implementer will access them when filling in the real logic.
+#[allow(dead_code)]
+#[derive(Default)]
+pub struct PluginRegistryBuilder {
+    /// Accumulated data source plugins.
+    data_sources: Vec<Box<dyn DataSource + Send + Sync>>,
+    /// Accumulated exporter plugins.
+    exporters: Vec<Box<dyn Exporter + Send + Sync>>,
+    /// Accumulated chart renderer plugins.
+    chart_renderers: Vec<Box<dyn ChartRenderer + Send + Sync>>,
+    /// Accumulated diagram renderer plugins.
+    diagram_renderers: Vec<Box<dyn DiagramRenderer + Send + Sync>>,
+    /// Accumulated validator plugins.
+    validators: Vec<Box<dyn Validator + Send + Sync>>,
+    /// Accumulated math renderer plugins.
+    math_renderers: Vec<Box<dyn MathRenderer + Send + Sync>>,
+    /// Accumulated brand provider plugins.
+    brand_providers: Vec<Box<dyn BrandProvider + Send + Sync>>,
+    /// Accumulated slide type plugins.
+    slide_types: Vec<Box<dyn SlideType + Send + Sync>>,
+    /// Accumulated section type plugins.
+    section_types: Vec<Box<dyn SectionType + Send + Sync>>,
+    /// Accumulated inline format plugins.
+    inline_formats: Vec<Box<dyn InlineFormat + Send + Sync>>,
+}
+
+impl PluginRegistryBuilder {
+    // ── Per-surface register_* builder methods ────────────────────────────────
+    //
+    // Each method appends to the corresponding surface vec and returns `&mut Self`
+    // for method chaining. The methods are intentionally `&mut self -> &mut Self`
+    // (not consuming `self -> Self`) to allow conditional registration patterns
+    // without losing ownership:
+    //
+    //     let mut builder = PluginRegistryBuilder::default();
+    //     builder.register_data_source(Box::new(JsonDataSource::new()));
+    //     if cfg!(feature = "csv") {
+    //         builder.register_data_source(Box::new(CsvDataSource::new()));
+    //     }
+    //     let registry = builder.build()?;
+
+    /// Register a [`DataSource`] plugin.
+    ///
+    /// Appends to the `DataSource` surface list; may be called multiple times.
+    /// Returns `&mut self` for chaining.
+    pub fn register_data_source(
+        &mut self,
+        _plugin: Box<dyn DataSource + Send + Sync>,
+    ) -> &mut Self {
+        todo!("STORY-083 stub — implementer fills in: self.data_sources.push(_plugin); self")
+    }
+
+    /// Register an [`Exporter`] plugin.
+    ///
+    /// Appends to the `Exporter` surface list; may be called multiple times.
+    /// Returns `&mut self` for chaining.
+    pub fn register_exporter(
+        &mut self,
+        _plugin: Box<dyn Exporter + Send + Sync>,
+    ) -> &mut Self {
+        todo!("STORY-083 stub — implementer fills in: self.exporters.push(_plugin); self")
+    }
+
+    /// Register a [`ChartRenderer`] plugin.
+    ///
+    /// Appends to the `ChartRenderer` surface list; may be called multiple times.
+    /// Returns `&mut self` for chaining.
+    pub fn register_chart_renderer(
+        &mut self,
+        _plugin: Box<dyn ChartRenderer + Send + Sync>,
+    ) -> &mut Self {
+        todo!("STORY-083 stub — implementer fills in: self.chart_renderers.push(_plugin); self")
+    }
+
+    /// Register a [`DiagramRenderer`] plugin.
+    ///
+    /// Appends to the `DiagramRenderer` surface list; may be called multiple times.
+    /// Returns `&mut self` for chaining.
+    pub fn register_diagram_renderer(
+        &mut self,
+        _plugin: Box<dyn DiagramRenderer + Send + Sync>,
+    ) -> &mut Self {
+        todo!(
+            "STORY-083 stub — implementer fills in: self.diagram_renderers.push(_plugin); self"
+        )
+    }
+
+    /// Register a [`Validator`] plugin.
+    ///
+    /// Appends to the `Validator` surface list; may be called multiple times.
+    /// Returns `&mut self` for chaining.
+    pub fn register_validator(
+        &mut self,
+        _plugin: Box<dyn Validator + Send + Sync>,
+    ) -> &mut Self {
+        todo!("STORY-083 stub — implementer fills in: self.validators.push(_plugin); self")
+    }
+
+    /// Register a [`MathRenderer`] plugin.
+    ///
+    /// Appends to the `MathRenderer` surface list; may be called multiple times.
+    /// Returns `&mut self` for chaining.
+    pub fn register_math_renderer(
+        &mut self,
+        _plugin: Box<dyn MathRenderer + Send + Sync>,
+    ) -> &mut Self {
+        todo!("STORY-083 stub — implementer fills in: self.math_renderers.push(_plugin); self")
+    }
+
+    /// Register a [`BrandProvider`] plugin.
+    ///
+    /// Appends to the `BrandProvider` surface list; may be called multiple times.
+    /// Returns `&mut self` for chaining.
+    pub fn register_brand_provider(
+        &mut self,
+        _plugin: Box<dyn BrandProvider + Send + Sync>,
+    ) -> &mut Self {
+        todo!(
+            "STORY-083 stub — implementer fills in: self.brand_providers.push(_plugin); self"
+        )
+    }
+
+    /// Register a [`SlideType`] plugin.
+    ///
+    /// Appends to the `SlideType` surface list; may be called multiple times.
+    /// Returns `&mut self` for chaining.
+    pub fn register_slide_type(
+        &mut self,
+        _plugin: Box<dyn SlideType + Send + Sync>,
+    ) -> &mut Self {
+        todo!("STORY-083 stub — implementer fills in: self.slide_types.push(_plugin); self")
+    }
+
+    /// Register a [`SectionType`] plugin.
+    ///
+    /// Appends to the `SectionType` surface list; may be called multiple times.
+    /// Returns `&mut self` for chaining.
+    pub fn register_section_type(
+        &mut self,
+        _plugin: Box<dyn SectionType + Send + Sync>,
+    ) -> &mut Self {
+        todo!("STORY-083 stub — implementer fills in: self.section_types.push(_plugin); self")
+    }
+
+    /// Register an [`InlineFormat`] plugin.
+    ///
+    /// Appends to the `InlineFormat` surface list; may be called multiple times.
+    /// Returns `&mut self` for chaining.
+    pub fn register_inline_format(
+        &mut self,
+        _plugin: Box<dyn InlineFormat + Send + Sync>,
+    ) -> &mut Self {
+        todo!("STORY-083 stub — implementer fills in: self.inline_formats.push(_plugin); self")
+    }
+
+    // ── Finalization ──────────────────────────────────────────────────────────
+
+    /// Finalize the builder into a [`PluginRegistry`].
+    ///
+    /// ## Enforcement (BC-5.02.001 invariant 3)
+    ///
+    /// Checks that all 10 required surfaces have at least one registration.
+    /// If any surface is empty, returns
+    /// `Err(RegistryError::MissingSurface { surface: "<name>" })` naming the
+    /// first unregistered surface in declaration order.
+    ///
+    /// Returns `Ok(PluginRegistry)` only when all 10 surfaces are non-empty.
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`RegistryError::MissingSurface`] if any required surface has
+    /// zero registrations at call time.
+    #[must_use = "registry build result must be checked; an Err means a required surface is missing"]
+    pub fn build(self) -> Result<PluginRegistry, RegistryError> {
+        todo!(
+            "STORY-083 stub — implementer fills in: \
+             check each surface vec is non-empty (reporting the first empty surface name from \
+             SURFACE_NAMES), then move vecs into PluginRegistry fields and return Ok(registry)"
+        )
+    }
+}
 
 /// The central registry for all slideforge plugin implementations.
 ///
@@ -74,9 +366,58 @@ impl PluginRegistry {
     ///
     /// No plugins are registered by default. The CLI assembles the registry
     /// by calling each `register_*` method before passing it to the pipeline.
+    ///
+    /// For the recommended construction path that enforces all-10-surfaces
+    /// coverage, use [`PluginRegistryBuilder`] instead.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Introspection (AC-003, AC-004 — STORY-083)
+    // ──────────────────────────────────────────────────────────────────────────
+
+    /// Return the number of plugin surfaces that have at least one registration.
+    ///
+    /// For a fully-registered registry (all 10 surfaces), returns `10`.
+    /// For a partially-assembled registry built with the mutation API
+    /// (`register_*` on `PluginRegistry` directly), returns the count of
+    /// non-empty surface vecs.
+    ///
+    /// ## Traceability
+    ///
+    /// - AC-003 (STORY-083): "fully-registered registry → `surface_count() == 10`"
+    /// - BC-5.02.001 postcondition 2
+    #[must_use]
+    pub fn surface_count(&self) -> usize {
+        todo!(
+            "STORY-083 stub — implementer fills in: \
+             count how many of the 10 surface vecs are non-empty"
+        )
+    }
+
+    /// Return the canonical names of all surfaces that have at least one
+    /// registration, in declaration order.
+    ///
+    /// For a fully-registered registry, returns all 10 canonical names:
+    /// `["DataSource", "Exporter", "ChartRenderer", "DiagramRenderer",
+    ///   "Validator", "MathRenderer", "BrandProvider", "SlideType",
+    ///   "SectionType", "InlineFormat"]`.
+    ///
+    /// For a partially-assembled registry, returns only the names of non-empty
+    /// surfaces (EC-002).
+    ///
+    /// ## Traceability
+    ///
+    /// - AC-004 (STORY-083): "fully-registered → `surface_names().len() == 10`"
+    /// - BC-5.02.001 invariant 1
+    #[must_use]
+    pub fn surface_names(&self) -> Vec<&'static str> {
+        todo!(
+            "STORY-083 stub — implementer fills in: \
+             iterate SURFACE_NAMES zipped with surface vecs; collect names where vec is non-empty"
+        )
     }
 
     // ──────────────────────────────────────────────────────────────────────────

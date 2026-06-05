@@ -51,7 +51,7 @@ pub mod traits;
 // Re-export everything at the crate root for ergonomic usage.
 // Consumers can write `use slideforge_plugin_api::DataSource;` without
 // the module path.
-pub use registry::PluginRegistry;
+pub use registry::{PluginRegistry, PluginRegistryBuilder, RegistryError, SURFACE_NAMES};
 pub use slide_types::{SLIDE_TYPE_REGISTRY, SlideTypeRegistry, validate_fields};
 pub use traits::{
     BrandError, BrandProvider, BrandSource, Canvas, ChartError, ChartRenderer, DataSource,
