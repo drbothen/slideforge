@@ -339,10 +339,10 @@ mod tests {
     // ── EC-004: two bundled plugins for same surface — both registered ─────────
 
     /// BC-5.02.001 EC-004: multiple plugins registered for the same surface
-    /// (e.g., BrandLoader + BrandSynthesizer for BrandProvider) must both be
+    /// (e.g., `BrandLoader` + `BrandSynthesizer` for `BrandProvider`) must both be
     /// accessible; the first registered is returned on `lookup_brand_provider`.
     ///
-    /// This verifies the EC-004 edge case specifically for the BrandProvider
+    /// This verifies the EC-004 edge case specifically for the `BrandProvider`
     /// surface which ships with 2 bundled implementations.
     #[test]
     fn test_bc_5_02_001_ec004_multiple_brand_providers_registered() {
