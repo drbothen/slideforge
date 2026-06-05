@@ -1534,7 +1534,7 @@ mod tests {
         let output = result.expect(
             "HIGH-A: build() with strict=true (production default) must return Ok(BuildOutput) \
              for a valid deck with lang 'en-US'; if this returns ValidationFailed, a bundled \
-             validator is incorrectly emitting Error-severity diagnostics for a valid input"
+             validator is incorrectly emitting Error-severity diagnostics for a valid input",
         );
         assert!(
             !output.bytes.is_empty(),
@@ -1700,10 +1700,10 @@ mod tests {
     /// returns `"stub-ext"`.
     #[test]
     fn test_med_d_build_output_extension_from_exporter_not_format_key() {
-        use std::io::Write as _;
         use slideforge_layout::LaidOutDeck;
         use slideforge_plugin_api::{ExportError, ExportOptions, Exporter};
         use slideforge_types::{Brand, Deck};
+        use std::io::Write as _;
 
         /// Stub exporter where id() != extension() to prove the distinction.
         struct StubExtExporter;
@@ -1786,9 +1786,8 @@ mod tests {
         let result = build_with_registry(source, &opts, &registry);
         let _ = std::fs::remove_dir_all(&tmp_dir);
 
-        let output = result.expect(
-            "MED-D: build_with_registry with StubExtExporter must return Ok(BuildOutput)"
-        );
+        let output = result
+            .expect("MED-D: build_with_registry with StubExtExporter must return Ok(BuildOutput)");
         assert_eq!(
             output.extension, "stub-ext",
             "MED-D: BuildOutput.extension must be 'stub-ext' (from exporter.extension()), \
