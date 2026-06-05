@@ -44,7 +44,17 @@ miette = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
-# External plugin test (AC-007) needs slideforge-types to construct test Value instances.
+# External plugin test (STORY-049 AC-007) needs slideforge-types for test Value instances.
 slideforge-types = { workspace = true }
-# Plugin API trait access for external plugin dog-fooding test.
+# Plugin API trait access for external plugin dog-fooding test and STORY-050 E2E tests.
 slideforge-plugin-api = { workspace = true }
+
+# STORY-050 E2E test dependencies.
+# tracing-test: capture tracing events for AC-007 observability assertions.
+tracing-test = "=0.2.5"
+# zip: validate PPTX/DOCX ZIP structure (AC-001, AC-002, AC-008).
+# Same feature set as slideforge-pptx to avoid lzma conflict.
+zip = { version = "=4.2.0", default-features = false, features = ["deflate", "time"] }
+# tempfile: not used directly — BrandTmpDir uses std::env::temp_dir() instead.
+# Retained per story spec in case future tests require it.
+tempfile = "=3.10.0"

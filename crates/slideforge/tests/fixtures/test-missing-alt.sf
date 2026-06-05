@@ -1,0 +1,11 @@
+# STORY-050 validation-error fixture: a chart block with no alt text.
+# AltTextValidator emits E-A11-001 on the chart block.
+# In strict mode (default), build() returns Err(BuildError::ValidationFailed).
+
+slideforge_version "1"
+lang "en-US"
+
+slide chart:
+  title "Revenue Trend"
+  chart_type "bar"
+  data "revenue.json"

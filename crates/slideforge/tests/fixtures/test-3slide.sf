@@ -1,0 +1,30 @@
+# STORY-050 happy-path fixture: 3-slide deck with title + two content slides.
+#
+# Design constraints:
+# - slideforge_version "1" required by parser
+# - lang "en-US" satisfies LangValidator (prevents E-A11-003)
+# - 3 slides → ZeroSlideValidator passes; PPTX has 3 slides; PDF has 3 pages
+# - No image/chart/shape → AltTextValidator has nothing to flag
+# - notes "..." on slide 1 (Register::Notes — presenter register)
+# - report "..." on slide 2 (Register::Report — reader register)
+# - Only scalar fields (no nested colon-blocks) to ensure parse compatibility
+#   with the current parser implementation
+
+slideforge_version "1"
+lang "en-US"
+
+slide title:
+  title "Incident Response Review"
+  subtitle "Q1 2026 — INC-2026-0320"
+  notes "Presenter: open with a brief overview of the incident timeline."
+
+slide content:
+  title "Five Lessons Learned"
+  body "Improve alerting thresholds. Automate SBOM generation. Enforce signed artefacts. Require two-person rule for dependency pinning. Conduct quarterly red-team exercises."
+  takeaway "Every lesson maps directly to a Q2 OKR."
+  report "For the board pack: lessons map to OKR-Q2-019 through OKR-Q2-023."
+
+slide content:
+  title "Outstanding Action Items"
+  body "Patch scanner in legacy pipeline by 2026-07-01. Obtain SBOM attestation from third-party vendor. Automate dependency review via Dependabot and CODEOWNERS."
+  takeaway "All three items are assigned with clear owners and deadlines."
