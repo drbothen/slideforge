@@ -683,14 +683,13 @@ fn build_notes_slide_parts(
             "building notesSlide part"
         );
 
-        // F-006: pass the registry-resolved InlineFormat to the serializer.
-        // Until PptxExporter holds a PluginRegistry reference, we resolve the
-        // bundled default formatter here. When a registry is threaded through
-        // PptxExporter, replace `&DefaultInlineFormat` with the registry lookup.
+        // STORY-049 wires the assembled PluginRegistry here; until then the
+        // bundled DefaultInlineFormat ("default") is passed directly. The
+        // serializer is already registry-ready (&dyn InlineFormat).
         let output = NotesSlideSerializer::build(
             slide_num,
             &slide.register_content,
-            &DefaultInlineFormat, // F-006: registry-resolved formatter call site
+            &DefaultInlineFormat, // STORY-049: replace with registry.lookup_inline_format("default")
         )
         .map_err(|e| PptxError::OoxmlElement {
             part: format!("ppt/notesSlides/notesSlide{slide_num}.xml"),
