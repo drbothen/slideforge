@@ -101,7 +101,9 @@ impl InlineFormat for DefaultInlineFormat {
         {
             // Extract display text from the link children (flatten to plain text,
             // same as the EC-002 fallback path but here we have a valid rId).
-            let display_text = extract_plain_text_from_nodes(text);
+            // Use the depth-limited extractor (EC-004 guard) to prevent stack overflow
+            // on pathological deeply-nested Link display text (F-008-OBS).
+            let display_text = extract_plain_text_depth_limited(text, 0)?;
             if display_text.is_empty() {
                 return Ok(String::new());
             }
@@ -151,35 +153,134 @@ fn render_node(
 // OOXML renderer
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Render children of a nested OOXML node by collecting their plain-text
-/// representation (for embedding inside a single `<a:t>` element).
+/// Accumulated run properties threaded through the OOXML recursion.
 ///
-/// For OOXML, nested variants like `Bold([Italic([Plain("x")])])` are flattened
-/// into a single run with combined run properties. This matches the behavior of
-/// the legacy `serialize_nodes_with_context` function that STORY-085 replaces.
-fn render_children_ooxml(
-    children: &[InlineNode],
+/// All formatting nodes set their property on this struct and recurse into
+/// children with the updated state.  At each leaf (Plain, Xref, Code) exactly
+/// one `<a:r>` is emitted with ALL accumulated properties.
+///
+/// ## Attribute order (must match existing snapshots byte-for-byte)
+///
+/// `<a:rPr>` attributes are emitted in this order by [`RunProps::emit_run`]:
+/// `b`, `i`, `baseline`, `strike`, `highlight`.  The `<a:latin>` child element
+/// (Code nodes) follows any attributes, before the closing `>`.
+///
+/// This ordering is stable across all single-property cases that have accepted
+/// snapshots.  Combined-property cases produce attributes in the same order.
+#[derive(Debug, Clone, Copy)]
+struct RunProps {
+    /// `b="1"` — from a `Bold` ancestor.
     bold: bool,
+    /// `i="1"` — from an `Italic` ancestor.
     italic: bool,
-    depth: usize,
-) -> Result<String, InlineError> {
-    let mut out = String::new();
-    for child in children {
-        let child_xml = render_ooxml_with_context(child, bold, italic, depth + 1)?;
-        out.push_str(&child_xml);
-    }
-    Ok(out)
+    /// `baseline="{n}"` — from a `Superscript` (+30 000) or `Subscript` (−25 000).
+    /// Only the innermost (most-recently-set) value is used; overlapping
+    /// Superscript/Subscript combinations are not representable in OOXML and are
+    /// extremely unlikely in practice.
+    baseline: Option<i32>,
+    /// `strike="sngStrike"` — from a `Strikethrough` ancestor.
+    strike: bool,
+    /// `highlight="yellow"` — from a `Highlight` ancestor.
+    highlight: bool,
+    /// Triggers `<a:latin typeface="Courier New"/>` child element — set by `Code` leaf.
+    code_font: bool,
 }
 
-/// Render a single `InlineNode` to OOXML with inherited bold/italic context.
+impl RunProps {
+    const fn new() -> Self {
+        Self {
+            bold: false,
+            italic: false,
+            baseline: None,
+            strike: false,
+            highlight: false,
+            code_font: false,
+        }
+    }
+
+    /// Emit a single `<a:r>` run with ALL accumulated properties.
+    ///
+    /// Returns an empty string if `text` is empty (empty runs are inert in OOXML).
+    ///
+    /// # Attribute / child-element order
+    ///
+    /// `<a:rPr {b} {i} {baseline} {strike} {highlight}>{latin-child}</a:rPr>`
+    ///
+    /// This order preserves byte-identity with all previously accepted snapshots:
+    /// - `Bold` snapshots: `b="1"` first ✓
+    /// - `Italic` snapshots: `i="1"` only ✓
+    /// - `Superscript`/`Subscript` snapshots: `baseline` only ✓
+    /// - `Strikethrough` snapshots: `strike` only ✓
+    /// - `Highlight` snapshots: `highlight` only ✓
+    /// - `Code` snapshot: no attributes, `<a:latin>` child inside `<a:rPr>` ✓
+    fn emit_run(&self, text: &str) -> String {
+        if text.is_empty() {
+            return String::new();
+        }
+        let needs_rpr = self.bold
+            || self.italic
+            || self.baseline.is_some()
+            || self.strike
+            || self.highlight
+            || self.code_font;
+
+        let mut out = String::new();
+        out.push_str("<a:r>");
+        if needs_rpr {
+            out.push_str("<a:rPr");
+            if self.bold {
+                out.push_str(" b=\"1\"");
+            }
+            if self.italic {
+                out.push_str(" i=\"1\"");
+            }
+            if let Some(baseline) = self.baseline {
+                out.push_str(" baseline=\"");
+                out.push_str(&baseline.to_string());
+                out.push('"');
+            }
+            if self.strike {
+                out.push_str(" strike=\"sngStrike\"");
+            }
+            if self.highlight {
+                out.push_str(" highlight=\"yellow\"");
+            }
+            if self.code_font {
+                // `<a:latin>` is a child element — must be inside `<a:rPr>…</a:rPr>`
+                out.push_str("><a:latin typeface=\"Courier New\"/></a:rPr>");
+            } else {
+                out.push_str("/>");
+            }
+        }
+        out.push_str("<a:t>");
+        out.push_str(&xml_escape(text));
+        out.push_str("</a:t></a:r>");
+        out
+    }
+}
+
+/// Render a node to OOXML `<a:r>` run markup, accumulating run properties.
 ///
-/// This mirrors the behavior of the legacy `serialize_nodes_with_context`:
-/// - Bold/Italic nodes pass their flag down and recurse into children
-/// - Leaf nodes (Plain, Code, etc.) emit a single `<a:r>` run
-fn render_ooxml_with_context(
+/// `props` carries all run-property flags inherited from ancestor nodes.
+/// Formatting nodes (`Bold`, `Italic`, `Strikethrough`, etc.) set their flag and
+/// recurse; leaf nodes (`Plain`, `Xref`, `Code`) emit a single run with all
+/// accumulated properties.
+///
+/// ## Combined run properties (F-009-MED)
+///
+/// Nesting in BOTH directions produces combined properties:
+/// - `Bold([Strikethrough([Plain("x")])])` → `<a:rPr b="1" strike="sngStrike"/>`
+/// - `Strikethrough([Bold([Plain("x")])])` → same
+/// - `Bold([Italic([Strikethrough([Plain("x")])])])` →
+///   `<a:rPr b="1" i="1" strike="sngStrike"/>`
+///
+/// ## Byte identity with existing snapshots
+///
+/// Single-property cases are unchanged — the same attribute is emitted in the
+/// same position (see [`RunProps::emit_run`] attribute order).
+fn render_ooxml_accumulate(
     node: &InlineNode,
-    bold: bool,
-    italic: bool,
+    props: RunProps,
     depth: usize,
 ) -> Result<String, InlineError> {
     if depth > MAX_DEPTH {
@@ -190,223 +291,113 @@ fn render_ooxml_with_context(
     }
 
     match node {
-        InlineNode::Plain(text) | InlineNode::Code(text) | InlineNode::Xref(text) => {
-            Ok(emit_ooxml_run(text, bold, italic))
+        // ── Leaf: Plain text run ─────────────────────────────────────────────
+        InlineNode::Plain(text) | InlineNode::Xref(text) => Ok(props.emit_run(text)),
+
+        // ── Leaf: Code — adds monospace font to accumulated props ────────────
+        InlineNode::Code(text) => {
+            let mut code_props = props;
+            code_props.code_font = true;
+            Ok(code_props.emit_run(text))
         },
+
+        // ── Formatting: set property and recurse into children ───────────────
         InlineNode::Bold(children) => {
+            let mut child_props = props;
+            child_props.bold = true;
             let mut out = String::new();
             for child in children {
-                out.push_str(&render_ooxml_with_context(child, true, italic, depth + 1)?);
+                out.push_str(&render_ooxml_accumulate(child, child_props, depth + 1)?);
             }
             Ok(out)
         },
         InlineNode::Italic(children) => {
+            let mut child_props = props;
+            child_props.italic = true;
             let mut out = String::new();
             for child in children {
-                out.push_str(&render_ooxml_with_context(child, bold, true, depth + 1)?);
+                out.push_str(&render_ooxml_accumulate(child, child_props, depth + 1)?);
             }
             Ok(out)
         },
-        // Footnote, Superscript, Subscript, Strikethrough, Highlight:
-        // inherit context and recurse — not distinctly representable in the
-        // flat run model (matches legacy serializer behavior for most, but
-        // we emit the correct run properties for these dedicated types when
-        // called from the top-level render_ooxml entry point).
-        InlineNode::Footnote(children)
-        | InlineNode::Superscript(children)
-        | InlineNode::Subscript(children)
-        | InlineNode::Strikethrough(children)
-        | InlineNode::Highlight(children) => {
-            // When recursing from top-level OOXML render (not from Bold/Italic),
-            // we use the dedicated run-property logic. Here in the context path,
-            // just inherit flags (matches legacy behavior for nested use).
+        InlineNode::Strikethrough(children) => {
+            let mut child_props = props;
+            child_props.strike = true;
             let mut out = String::new();
             for child in children {
-                out.push_str(&render_ooxml_with_context(child, bold, italic, depth + 1)?);
+                out.push_str(&render_ooxml_accumulate(child, child_props, depth + 1)?);
             }
             Ok(out)
         },
+        InlineNode::Superscript(children) => {
+            let mut child_props = props;
+            child_props.baseline = Some(30_000);
+            let mut out = String::new();
+            for child in children {
+                out.push_str(&render_ooxml_accumulate(child, child_props, depth + 1)?);
+            }
+            Ok(out)
+        },
+        InlineNode::Subscript(children) => {
+            let mut child_props = props;
+            child_props.baseline = Some(-25_000);
+            let mut out = String::new();
+            for child in children {
+                out.push_str(&render_ooxml_accumulate(child, child_props, depth + 1)?);
+            }
+            Ok(out)
+        },
+        InlineNode::Highlight(children) => {
+            let mut child_props = props;
+            child_props.highlight = true;
+            let mut out = String::new();
+            for child in children {
+                out.push_str(&render_ooxml_accumulate(child, child_props, depth + 1)?);
+            }
+            Ok(out)
+        },
+        InlineNode::Footnote(children) => {
+            // Footnote inherits all props and recurses (footnote marker is a future story).
+            let mut out = String::new();
+            for child in children {
+                out.push_str(&render_ooxml_accumulate(child, props, depth + 1)?);
+            }
+            Ok(out)
+        },
+
+        // ── Link: EC-002 fallback — emit display text with warn ──────────────
         InlineNode::Link { text, url } => {
-            // EC-002: no relationship context available — emit display text as plain run
             tracing::warn!(
                 url = %url,
                 "Hyperlink relationship not registered for OOXML link to {url}; \
                  emitting display text as plain run (EC-002 / v1.0 limitation)"
             );
-            let display_text = extract_plain_text_from_nodes(text);
+            let display_text = extract_plain_text_depth_limited(text, depth + 1)?;
             if display_text.is_empty() {
                 Ok(String::new())
             } else {
-                Ok(emit_ooxml_run(&display_text, bold, italic))
+                Ok(props.emit_run(&display_text))
             }
         },
+
+        // ── Math: EC-001 fallback — emit LaTeX source as plain run ───────────
         InlineNode::Math(math_node) => {
-            // EC-001: no pre-rendered OMML — emit LaTeX source as plain run
             tracing::warn!(
                 "Math OMML rendering not pre-computed for OOXML; \
                  emitting LaTeX source as plain text run (EC-001)"
             );
-            Ok(emit_ooxml_run(math_node.latex.as_ref(), bold, italic))
+            Ok(props.emit_run(math_node.latex.as_ref()))
         },
     }
 }
 
 /// Render a node to OOXML `<a:r>` run markup (top-level entry).
+///
+/// Delegates to [`render_ooxml_accumulate`] with an empty [`RunProps`] so all
+/// single-property cases produce the same output as before (byte-identical with
+/// existing accepted snapshots).
 fn render_ooxml(node: &InlineNode, depth: usize) -> Result<String, InlineError> {
-    match node {
-        InlineNode::Plain(text) => Ok(emit_ooxml_run(text, false, false)),
-        InlineNode::Bold(children) => {
-            // Bold: emit children with bold=true context
-            let mut out = String::new();
-            for child in children {
-                out.push_str(&render_ooxml_with_context(child, true, false, depth + 1)?);
-            }
-            Ok(out)
-        },
-        InlineNode::Italic(children) => {
-            // Italic: emit children with italic=true context
-            let mut out = String::new();
-            for child in children {
-                out.push_str(&render_ooxml_with_context(child, false, true, depth + 1)?);
-            }
-            Ok(out)
-        },
-        InlineNode::Code(text) => {
-            // Code: monospace via latin font override (Courier New), no bold/italic
-            let mut out = String::new();
-            out.push_str("<a:r><a:rPr><a:latin typeface=\"Courier New\"/></a:rPr><a:t>");
-            out.push_str(&xml_escape(text));
-            out.push_str("</a:t></a:r>");
-            Ok(out)
-        },
-        InlineNode::Link { text, url } => {
-            // EC-002: no relationship context — emit display text as plain run with warn
-            tracing::warn!(
-                url = %url,
-                "Hyperlink relationship not registered for OOXML link to {url}; \
-                 emitting display text as plain run (EC-002 / v1.0 limitation)"
-            );
-            let display_text = extract_plain_text_from_nodes(text);
-            if display_text.is_empty() {
-                Ok(String::new())
-            } else {
-                Ok(emit_ooxml_run(&display_text, false, false))
-            }
-        },
-        InlineNode::Math(math_node) => {
-            // EC-001: no pre-rendered OMML — emit LaTeX source as plain run with warn
-            tracing::warn!(
-                "Math OMML rendering not pre-computed for OOXML; \
-                 emitting LaTeX source as plain text run (EC-001)"
-            );
-            Ok(emit_ooxml_run(math_node.latex.as_ref(), false, false))
-        },
-        InlineNode::Footnote(children) => {
-            // Footnote: emit children (footnote number marker is a future story)
-            let content = render_children_ooxml(children, false, false, depth)?;
-            Ok(content)
-        },
-        InlineNode::Xref(id) => {
-            // Xref: plain text run (cross-ref resolution is a future story)
-            Ok(emit_ooxml_run(id, false, false))
-        },
-        InlineNode::Superscript(children) => {
-            // Superscript: baseline=30000
-            let text_content = extract_plain_text_from_renders(children, depth)?;
-            let mut out = String::new();
-            out.push_str("<a:r><a:rPr baseline=\"30000\"/><a:t>");
-            out.push_str(&xml_escape(&text_content));
-            out.push_str("</a:t></a:r>");
-            Ok(out)
-        },
-        InlineNode::Subscript(children) => {
-            // Subscript: baseline=-25000
-            let text_content = extract_plain_text_from_renders(children, depth)?;
-            let mut out = String::new();
-            out.push_str("<a:r><a:rPr baseline=\"-25000\"/><a:t>");
-            out.push_str(&xml_escape(&text_content));
-            out.push_str("</a:t></a:r>");
-            Ok(out)
-        },
-        InlineNode::Strikethrough(children) => {
-            // Strikethrough: strike="sngStrike"
-            let text_content = extract_plain_text_from_renders(children, depth)?;
-            let mut out = String::new();
-            out.push_str("<a:r><a:rPr strike=\"sngStrike\"/><a:t>");
-            out.push_str(&xml_escape(&text_content));
-            out.push_str("</a:t></a:r>");
-            Ok(out)
-        },
-        InlineNode::Highlight(children) => {
-            // Highlight: highlight="yellow"
-            let text_content = extract_plain_text_from_renders(children, depth)?;
-            let mut out = String::new();
-            out.push_str("<a:r><a:rPr highlight=\"yellow\"/><a:t>");
-            out.push_str(&xml_escape(&text_content));
-            out.push_str("</a:t></a:r>");
-            Ok(out)
-        },
-    }
-}
-
-/// Emit a single OOXML `<a:r>` run with optional bold/italic run properties.
-///
-/// Skips emission if `text` is empty (empty runs are not useful in OOXML).
-fn emit_ooxml_run(text: &str, bold: bool, italic: bool) -> String {
-    if text.is_empty() {
-        return String::new();
-    }
-    let needs_rpr = bold || italic;
-    let mut out = String::new();
-    out.push_str("<a:r>");
-    if needs_rpr {
-        out.push_str("<a:rPr");
-        if bold {
-            out.push_str(" b=\"1\"");
-        }
-        if italic {
-            out.push_str(" i=\"1\"");
-        }
-        out.push_str("/>");
-    }
-    out.push_str("<a:t>");
-    out.push_str(&xml_escape(text));
-    out.push_str("</a:t></a:r>");
-    out
-}
-
-/// Render children as OOXML and collect the resulting plain text (for
-/// specialized run-property nodes like Superscript/Subscript/Strikethrough/Highlight).
-///
-/// Since these nodes produce a single run with special properties, we need
-/// to extract the text content of the children to embed in `<a:t>`.
-///
-/// ## Depth guard (F-005 / BC-3.05.001)
-///
-/// `depth` is threaded through the recursive child traversal via
-/// [`extract_plain_text_depth_limited`]. This ensures that nesting depth > 64
-/// returns [`InlineError::RenderError`] instead of stack-overflowing, even for
-/// nodes nested under Superscript/Subscript/Strikethrough/Highlight.
-///
-/// ## Nested formatting (F-005)
-///
-/// The flat `<a:t>` model for these nodes cannot represent combined run properties
-/// (e.g., bold+superscript requires two separate runs in OOXML, which the current
-/// single-run implementation does not emit). When nested formatting is present,
-/// the formatting flags are silently dropped — only the text content is preserved.
-/// A `tracing::warn!` is emitted for each nested Bold/Italic child so the caller
-/// has an audit trail (not a silent loss).
-fn extract_plain_text_from_renders(
-    children: &[InlineNode],
-    depth: usize,
-) -> Result<String, InlineError> {
-    if depth > MAX_DEPTH {
-        return Err(InlineError::RenderError {
-            node_kind: "children".to_owned(),
-            message: "inline nesting depth exceeds maximum of 64".to_owned(),
-        });
-    }
-    extract_plain_text_depth_limited(children, depth + 1)
+    render_ooxml_accumulate(node, RunProps::new(), depth)
 }
 
 /// Depth-limited plain text extractor.
@@ -414,8 +405,8 @@ fn extract_plain_text_from_renders(
 /// Recursively extracts plain text from inline node trees, tracking nesting depth.
 /// Returns [`InlineError::RenderError`] if `depth > MAX_DEPTH` at any level.
 ///
-/// Emits `tracing::warn!` for Bold/Italic children whose formatting is dropped
-/// (F-005: not a silent loss — the caller gets an audit trail).
+/// Used by the `render_with_context` Link path (F-008-OBS / EC-004) to flatten
+/// link display text while enforcing the 64-level depth guard.
 fn extract_plain_text_depth_limited(
     nodes: &[InlineNode],
     depth: usize,
@@ -432,24 +423,9 @@ fn extract_plain_text_depth_limited(
             InlineNode::Plain(s) | InlineNode::Code(s) | InlineNode::Xref(s) => {
                 out.push_str(s);
             },
-            InlineNode::Bold(c) => {
-                // F-005: Bold inside Super/Sub/Strike/Highlight drops bold formatting
-                // (single-run OOXML cannot combine these properties). Warn, don't drop silently.
-                tracing::warn!(
-                    "nested Bold inside specialized OOXML run (Superscript/Subscript/ \
-                     Strikethrough/Highlight): bold formatting dropped in flat-run model (F-005)"
-                );
-                out.push_str(&extract_plain_text_depth_limited(c, depth + 1)?);
-            },
-            InlineNode::Italic(c) => {
-                // F-005: same as Bold.
-                tracing::warn!(
-                    "nested Italic inside specialized OOXML run (Superscript/Subscript/ \
-                     Strikethrough/Highlight): italic formatting dropped in flat-run model (F-005)"
-                );
-                out.push_str(&extract_plain_text_depth_limited(c, depth + 1)?);
-            },
-            InlineNode::Footnote(c)
+            InlineNode::Bold(c)
+            | InlineNode::Italic(c)
+            | InlineNode::Footnote(c)
             | InlineNode::Superscript(c)
             | InlineNode::Subscript(c)
             | InlineNode::Strikethrough(c)
@@ -635,37 +611,6 @@ fn html_escape(s: &str) -> String {
         .replace('<', "&lt;")
         .replace('>', "&gt;")
         .replace('"', "&quot;")
-}
-
-/// Extract all plain-text content from an inline node tree, depth-first.
-///
-/// Used for link display text extraction and for generating plain-text
-/// content to embed in specialized OOXML runs (Superscript, Subscript, etc.).
-fn extract_plain_text_from_nodes(nodes: &[InlineNode]) -> String {
-    let mut out = String::new();
-    for node in nodes {
-        match node {
-            InlineNode::Plain(s) | InlineNode::Code(s) | InlineNode::Xref(s) => {
-                out.push_str(s);
-            },
-            InlineNode::Bold(c)
-            | InlineNode::Italic(c)
-            | InlineNode::Footnote(c)
-            | InlineNode::Superscript(c)
-            | InlineNode::Subscript(c)
-            | InlineNode::Strikethrough(c)
-            | InlineNode::Highlight(c) => {
-                out.push_str(&extract_plain_text_from_nodes(c));
-            },
-            InlineNode::Link { text, .. } => {
-                out.push_str(&extract_plain_text_from_nodes(text));
-            },
-            InlineNode::Math(m) => {
-                out.push_str(m.latex.as_ref());
-            },
-        }
-    }
-    out
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1637,6 +1582,142 @@ mod tests {
         assert_eq!(
             bold_result, render_bold,
             "F-001: render_with_context for Bold must delegate to render"
+        );
+    }
+
+    // ── F-008 (OBS): EC-004 depth guard on render_with_context link path ──────
+
+    /// F-008-OBS: A deeply-nested (>64) Link display-text tree passed to
+    /// `render_with_context` with `Some(rid)` must return `InlineError::RenderError`
+    /// instead of recursing unbounded (no stack overflow).
+    ///
+    /// Before the fix, `render_with_context` calls `extract_plain_text_from_nodes`
+    /// which has no depth guard and recurses unbounded.
+    #[test]
+    fn test_f008_render_with_context_link_deep_display_text_returns_render_error() {
+        use crate::traits::inline_format::InlineRenderContext;
+
+        // Build 65 levels of Bold nested as Link display text (each Bold wraps the
+        // previous, and the innermost is Plain("x")).
+        let mut inner: InlineNode = plain("x");
+        for _ in 0..65 {
+            inner = bold(vec![inner]);
+        }
+        let node = link(vec![inner], "https://example.com");
+        let ctx = InlineRenderContext {
+            hyperlink_rid: Some("rId1"),
+        };
+        let result = fmt().render_with_context(&node, InlineOutputFormat::Ooxml, &ctx);
+        match result {
+            Err(InlineError::RenderError { message, .. }) => {
+                assert!(
+                    message.contains("nesting depth exceeds maximum of 64"),
+                    "F-008-OBS: expected depth-exceeded message, got: {message}"
+                );
+            },
+            Ok(s) => panic!(
+                "F-008-OBS: expected RenderError for >64 deep Link display text via \
+                 render_with_context, got Ok({s:?})"
+            ),
+            Err(e) => panic!(
+                "F-008-OBS: expected RenderError for >64 deep Link display text, \
+                 got different error: {e:?}"
+            ),
+        }
+    }
+
+    /// F-008-OBS: Depth exactly 64 in Link display text via `render_with_context`
+    /// must SUCCEED (the boundary is depth > 64, so depth 64 is allowed).
+    #[test]
+    fn test_f008_render_with_context_link_depth_64_display_text_succeeds() {
+        use crate::traits::inline_format::InlineRenderContext;
+
+        let mut inner: InlineNode = plain("x");
+        for _ in 0..64 {
+            inner = bold(vec![inner]);
+        }
+        let node = link(vec![inner], "https://example.com");
+        let ctx = InlineRenderContext {
+            hyperlink_rid: Some("rId1"),
+        };
+        let result = fmt().render_with_context(&node, InlineOutputFormat::Ooxml, &ctx);
+        assert!(
+            result.is_ok(),
+            "F-008-OBS: depth exactly 64 in Link display text must succeed, got: {result:?}"
+        );
+    }
+
+    // ── F-009 (MED): nested formatting combined run properties ────────────────
+
+    /// F-009-MED: Bold([Strikethrough([Plain("x")])]) → OOXML run with BOTH b="1"
+    /// AND strike="sngStrike" in a single `<a:rPr>`.
+    ///
+    /// Before the fix, `render_ooxml_with_context` is called with bold=true but
+    /// Strikethrough arm just recurses inheriting bold/italic only — the
+    /// strike property is silently dropped, producing only `<a:rPr b="1"/>`.
+    #[test]
+    fn test_f009_bold_wraps_strikethrough_combines_run_props() {
+        let node = bold(vec![strikethrough(vec![plain("x")])]);
+        let result = fmt().render(&node, InlineOutputFormat::Ooxml).unwrap();
+        assert!(
+            result.contains("b=\"1\""),
+            "F-009: Bold([Strikethrough([Plain])]) must have b=\"1\", got: {result}"
+        );
+        assert!(
+            result.contains("strike=\"sngStrike\""),
+            "F-009: Bold([Strikethrough([Plain])]) must have strike=\"sngStrike\", got: {result}"
+        );
+        assert!(
+            result.contains("<a:t>x</a:t>"),
+            "F-009: text must be preserved, got: {result}"
+        );
+    }
+
+    /// F-009-MED: Strikethrough([Bold([Plain("x")])]) → OOXML run with BOTH
+    /// strike="sngStrike" AND b="1" in the `<a:rPr>`.
+    ///
+    /// Before the fix, `render_ooxml` Strikethrough arm calls
+    /// `extract_plain_text_from_renders` which emits `strike="sngStrike"` but
+    /// the inner bold is dropped (only warn emitted).
+    #[test]
+    fn test_f009_strikethrough_wraps_bold_combines_run_props() {
+        let node = strikethrough(vec![bold(vec![plain("x")])]);
+        let result = fmt().render(&node, InlineOutputFormat::Ooxml).unwrap();
+        assert!(
+            result.contains("strike=\"sngStrike\""),
+            "F-009: Strikethrough([Bold([Plain])]) must have strike=\"sngStrike\", got: {result}"
+        );
+        assert!(
+            result.contains("b=\"1\""),
+            "F-009: Strikethrough([Bold([Plain])]) must have b=\"1\", got: {result}"
+        );
+        assert!(
+            result.contains("<a:t>x</a:t>"),
+            "F-009: text must be preserved, got: {result}"
+        );
+    }
+
+    /// F-009-MED: Bold([Italic([Strikethrough([Plain("x")])])]) → combined
+    /// `<a:rPr b="1" i="1" strike="sngStrike"/>` in a single run.
+    #[test]
+    fn test_f009_triple_nesting_bold_italic_strikethrough_combines_all() {
+        let node = bold(vec![italic(vec![strikethrough(vec![plain("x")])])]);
+        let result = fmt().render(&node, InlineOutputFormat::Ooxml).unwrap();
+        assert!(
+            result.contains("b=\"1\""),
+            "F-009: triple-nested must have b=\"1\", got: {result}"
+        );
+        assert!(
+            result.contains("i=\"1\""),
+            "F-009: triple-nested must have i=\"1\", got: {result}"
+        );
+        assert!(
+            result.contains("strike=\"sngStrike\""),
+            "F-009: triple-nested must have strike=\"sngStrike\", got: {result}"
+        );
+        assert!(
+            result.contains("<a:t>x</a:t>"),
+            "F-009: text must be preserved in triple-nested, got: {result}"
         );
     }
 }

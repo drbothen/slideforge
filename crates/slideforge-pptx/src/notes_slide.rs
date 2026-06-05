@@ -323,7 +323,8 @@ fn dispatch_inline_nodes_to_ooxml(
 ///
 /// URLs whose scheme is not in [`crate::link_safety::ALLOWED_LINK_SCHEMES`] are
 /// silently skipped here (they will also be handled gracefully in
-/// [`serialize_nodes_with_context`] — the `Link` arm falls through to a plain text
+/// `dispatch_inline_nodes_to_ooxml` — the `Link` arm routes through
+/// `DefaultInlineFormat::render_with_context`, which falls back to a plain text
 /// run when no `rId` is found).  A `tracing::warn!` is emitted for each rejected
 /// URL so the caller has an audit trail.
 ///
@@ -333,10 +334,10 @@ fn dispatch_inline_nodes_to_ooxml(
 ///
 /// ## F-040-P3-001: No recursion into a `Link`'s display text
 ///
-/// The serializer (`serialize_nodes_with_context`) flattens a `Link`'s display
-/// `text` children to plain text via `extract_plain_text` — it does NOT recurse
-/// through them with `serialize_nodes_with_context`.  Therefore any nested `Link`
-/// inside display text is never serialized as an `<a:hlinkClick>`.
+/// The dispatcher (`dispatch_inline_nodes_to_ooxml`) routes `Link` nodes through
+/// `DefaultInlineFormat::render_with_context`, which flattens a `Link`'s display
+/// `text` children to plain text inside `DefaultInlineFormat` — it does NOT emit
+/// nested `Link` nodes inside display text as `<a:hlinkClick>` elements.
 ///
 /// Consequence: we must NOT descend into `text` here either.  Collecting a nested
 /// URL would assign it an rId in the `.rels` file with no corresponding
@@ -345,23 +346,26 @@ fn dispatch_inline_nodes_to_ooxml(
 ///
 /// Fix (option b — least change): collect ONLY the outer `Link`'s URL (when its
 /// scheme is safe).  Nested `Link` nodes inside display text are ignored; they
-/// will be rendered as plain text by the serializer (consistent behavior).
+/// will be rendered as plain text by the dispatcher (consistent behavior).
 fn collect_hyperlink_urls(nodes: &[InlineNode], urls: &mut Vec<String>) {
     for node in nodes {
         match node {
             InlineNode::Link { url, text: _ } => {
                 // F-040-P2-001 defense-in-depth: only register URLs with safe schemes.
                 // Unsafe-scheme URLs are NOT added to the hlink_urls list; the Link
-                // arm in serialize_nodes_with_context will emit them as plain text runs.
+                // arm in dispatch_inline_nodes_to_ooxml routes through
+                // DefaultInlineFormat::render_with_context, which falls back to a plain
+                // text run when no rId is available.
                 if is_safe_link_scheme(url.as_ref()) {
                     urls.push(url.as_ref().to_owned());
                 }
                 // F-040-P3-001: Do NOT recurse into `text` children here.
-                // The serializer flattens display text via extract_plain_text, so any
-                // nested Link inside display text produces NO hlinkClick.  Collecting
-                // its URL here would create an orphan External rel (rId with no
-                // referencing hlinkClick).  Nested URLs in display text are intentionally
-                // rendered as plain text — consistent with the serializer's behavior.
+                // DefaultInlineFormat flattens Link display text to plain text inside
+                // render_with_context — nested Link nodes in display text produce NO
+                // hlinkClick.  Collecting a nested URL here would create an orphan
+                // External rel (rId with no referencing hlinkClick).  Nested URLs in
+                // display text are intentionally rendered as plain text — consistent
+                // with the dispatcher's behavior.
             },
             InlineNode::Bold(c)
             | InlineNode::Italic(c)
