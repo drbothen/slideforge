@@ -14,10 +14,37 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
+# Pipeline orchestration (ADR-016 Decision 3: root crate IS the pipeline driver)
 slideforge-syntax = { workspace = true }
 slideforge-eval = { workspace = true }
 slideforge-layout = { workspace = true }
-slideforge-pptx = { workspace = true }
 slideforge-validate = { workspace = true }
-miette = { workspace = true }
+
+# Plugin API — PluginRegistry, PluginRegistryBuilder, RegistryError, all 10 trait surfaces
+slideforge-plugin-api = { workspace = true }
+
+# Bundled plugin implementations — one entry per surface
+slideforge-data = { workspace = true }
+slideforge-pptx = { workspace = true }
+slideforge-docx = { workspace = true }
+slideforge-pdf = { workspace = true }
+slideforge-charts = { workspace = true }
+slideforge-diagrams = { workspace = true }
+slideforge-math = { workspace = true }
+slideforge-brand = { workspace = true }
+# slideforge-html is excluded from workspace (Phase 4) — registered in STORY-050
+
+# Error handling
 thiserror = { workspace = true }
+
+# Diagnostics rendering for CLI errors
+miette = { workspace = true }
+
+# Structured logging — pipeline stage diagnostics (CLAUDE.md: no println! in library crates)
+tracing = { workspace = true }
+
+[dev-dependencies]
+# External plugin test (AC-007) needs slideforge-types to construct test Value instances.
+slideforge-types = { workspace = true }
+# Plugin API trait access for external plugin dog-fooding test.
+slideforge-plugin-api = { workspace = true }

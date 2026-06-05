@@ -16,6 +16,8 @@
 
 use std::sync::Arc;
 
+use slideforge_plugin_api::Diagnostic;
+
 // Re-export RegistryError so callers of `slideforge` don't need to depend on
 // `slideforge-plugin-api` just to match on registry errors.
 pub use slideforge_plugin_api::RegistryError;
@@ -84,11 +86,13 @@ pub enum BuildError {
 
     /// No `BrandProvider` plugin is registered for the requested brand source.
     ///
-    /// This typically indicates the brand provider with id `"file"` was not
-    /// registered during plugin assembly. It should never occur with the default
-    /// bundled plugin set (which always registers `BrandLoader` as `"file"`).
+    /// This typically indicates the brand provider with id
+    /// `"slideforge-brand/default"` (the `BrandLoader`) was not registered
+    /// during plugin assembly. It should never occur with the default bundled
+    /// plugin set (which always registers `BrandLoader` under its canonical id).
     #[error(
-        "no BrandProvider plugin found for id 'file'; ensure register_bundled_plugins was called"
+        "no BrandProvider plugin found for the requested brand source; \
+         ensure register_bundled_plugins was called and the BrandSource variant is supported"
     )]
     NoBrandProvider,
 
@@ -100,19 +104,52 @@ pub enum BuildError {
 
     /// The DSL source could not be parsed.
     ///
-    /// Contains the count of fatal parse errors collected in the diagnostic sink.
-    /// Callers that need structured error messages should use
-    /// `slideforge_syntax::parse` directly and inspect the returned
-    /// `Vec<SyntaxError>`.
-    #[error("parse failed with {0} error(s)")]
-    ParseFailed(usize),
+    /// Contains the structured diagnostics collected in the diagnostic sink
+    /// during parsing. Each entry carries a `file:line:col` span, an error code
+    /// from the error taxonomy, a human-readable message, and an optional
+    /// correction hint (as required by CLAUDE.md error-handling mandate).
+    ///
+    /// The `count` field is the number of diagnostics for ergonomic Display.
+    #[error("parse failed with {count} error(s); inspect `diagnostics` for file:line:col details")]
+    ParseFailed {
+        /// Structured parse diagnostics with spans and error codes.
+        diagnostics: Vec<slideforge_syntax::BoxDiagnostic>,
+        /// Cached count of diagnostics (equals `diagnostics.len()`).
+        count: usize,
+    },
 
     /// The parsed AST could not be evaluated into a semantic `Deck`.
     ///
-    /// This is returned when `eval_deck` produces `None`, indicating that
-    /// fatal evaluation errors were pushed to the diagnostic sink.
-    #[error("evaluation failed; check the diagnostic sink for details")]
-    EvalFailed,
+    /// Contains the structured diagnostics accumulated in the evaluation
+    /// diagnostic sink. Callers can inspect these for evaluation-phase errors
+    /// (undefined variables, type mismatches, unknown slide types).
+    #[error("evaluation failed with {count} error(s); inspect `diagnostics` for details")]
+    EvalFailed {
+        /// Structured evaluation diagnostics.
+        diagnostics: Vec<slideforge_syntax::BoxDiagnostic>,
+        /// Cached count of diagnostics.
+        count: usize,
+    },
+
+    /// One or more validators reported `Error`-severity diagnostics and
+    /// `BuildOptions::strict` was `true`.
+    ///
+    /// Contains the full list of diagnostics from all validators. In
+    /// `strict=false` (warn-only) mode these diagnostics are emitted as
+    /// tracing warnings and the build continues. In `strict=true` mode
+    /// (the default for `slideforge build`) this error is returned.
+    ///
+    /// ## Traceability
+    ///
+    /// - ADR-016 Decision 3: validate stage in the pipeline
+    /// - STORY-049 C3
+    #[error("validation failed with {count} error(s); run with --warn-only to demote to warnings")]
+    ValidationFailed {
+        /// All diagnostics from all registered validators.
+        diagnostics: Vec<Diagnostic>,
+        /// Cached count of error-severity diagnostics.
+        count: usize,
+    },
 
     /// The `Deck` could not be laid out into a `LaidOutDeck`.
     ///
