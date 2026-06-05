@@ -1,12 +1,14 @@
 //! The `risk_register` section type — auto-generated from `severity_cards` slides.
 //!
 //! [`RiskRegisterSectionType`] scans a slide sequence and produces one
-//! [`SectionBlock`](crate::traits::SectionBlock) per slide whose
-//! `slide_type` field is `"severity_cards"`. All other slide types are skipped.
+//! [`SectionBlock`] per slide whose `slide_type` field is `"severity_cards"`.
+//! All other slide types are skipped.
 //!
 //! If the DSL author also provides an explicit `section risk_register:` block,
 //! the layout engine applies the supersession rule (BC-3.02.001 EC-002) and uses
 //! the manual block instead of this plugin's output.
+
+use std::sync::Arc;
 
 use slideforge_types::Slide;
 
@@ -40,16 +42,27 @@ impl SectionType for RiskRegisterSectionType {
     /// Scan `slides` and produce one [`SectionBlock`] per slide whose type is
     /// `"severity_cards"`.
     ///
-    /// # Implementation note
-    ///
-    /// The full scanning logic is implemented by STORY-084's TDD green phase.
-    /// This stub body satisfies the compiler without revealing the algorithm.
+    /// The emitted `SectionBlock` carries:
+    /// - `title`: the slide's resolved title string (empty string if absent)
+    /// - `subtitle`: `None`
+    /// - `level`: `1`
+    /// - `start_slide_index`: the slide's position in `slides`
+    /// - `end_slide_index`: `None`
+    /// - `include_in_toc`: `true`
     fn generate(&self, slides: &[Slide]) -> Vec<SectionBlock> {
-        todo!(
-            "STORY-084: scan slides for severity_cards type and emit SectionBlocks; \
-             received {} slide(s)",
-            slides.len()
-        )
+        slides
+            .iter()
+            .enumerate()
+            .filter(|(_, slide)| slide.slide_type.as_ref() == "severity_cards")
+            .map(|(index, slide)| SectionBlock {
+                title: Arc::from(slide.title_str().unwrap_or("")),
+                subtitle: None,
+                level: 1,
+                start_slide_index: index,
+                end_slide_index: None,
+                include_in_toc: true,
+            })
+            .collect()
     }
 }
 
@@ -161,7 +174,11 @@ mod tests {
             "one severity_cards slide must produce exactly 1 SectionBlock"
         );
         let block = &result[0];
-        assert_eq!(block.level, 1, "SectionBlock.level must be 1; got {}", block.level);
+        assert_eq!(
+            block.level, 1,
+            "SectionBlock.level must be 1; got {}",
+            block.level
+        );
         assert!(
             block.include_in_toc,
             "SectionBlock.include_in_toc must be true"
