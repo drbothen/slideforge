@@ -116,6 +116,7 @@ axum process but this is a local development feature, not a deployed service.
 | ADR-014 | Mermaid via mermaid-rs-renderer | Accepted |
 | ADR-015 | PPTX brand rendering boundary | Accepted |
 | ADR-016 | Plugin registry Builder + surface ownership + root-crate pipeline driver | Accepted |
+| ADR-017 | InlineFormat relationship context and hyperlink-run ownership boundary | Accepted (2026-06-05) |
 
 ---
 

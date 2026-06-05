@@ -47,6 +47,7 @@ property-based testing provides strong guarantees.
 | slideforge-layout | LaidOutDeck always has same slide count as Deck | proptest |
 | slideforge-brand | 12-slot palette round-trip: synthesize → extract → same colors | proptest |
 | slideforge-pptx | Every synthesized PPTX is a valid ZIP with [Content_Types].xml | proptest |
+| slideforge-plugin-api | Inline HTML: all interpolated values HTML-escaped in all output positions (text + attribute) — covers EC-009/EC-010 | proptest |
 
 ### Fuzz Targets (Phase 6)
 
@@ -104,6 +105,7 @@ Must pass before v1.0 release (formal-verifier gate):
 - VP-048: Shape ArithmeticOverflow (Kani); VP-049: layout warnings not dropped (unit); VP-050: shape frame ordering (unit)
 - VP-051: Brand round-trip extraction (integration — effectful I/O, anchored by named tests in slideforge-brand)
 - VP-052: Brand extraction read-only invariant (integration — file-hash check before/after, anchored by named test in slideforge-brand)
+- VP-053: Inline HTML escaping invariant (proptest — DefaultInlineFormat::render(_, Html) must HTML-escape all interpolated values in text and attribute positions; covers BC-3.05.001 v1.3.6, EC-009, EC-010; module: slideforge-plugin-api)
 
 ## Tooling (ADR-011, Feasibility Notes)
 

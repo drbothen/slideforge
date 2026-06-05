@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.3"
+version: "1.4"
 status: draft
 producer: product-owner
 timestamp: 2026-05-24T00:00:00
@@ -15,6 +15,10 @@ capability: CAP-021
 lifecycle_status: active
 introduced: v1.0.0
 modified:
+  - version: "1.4"
+    date: 2026-06-05
+    author: product-owner
+    reason: "STORY-085 / ADR-017 Option A (human-authorized 2026-06-05): Clarify Invariant 2 — additive defaulted trait methods (new methods with a default body that do not break existing implementors) are PERMITTED and do not constitute a contract violation. Non-additive changes (removal, rename, signature change of existing methods) and any bypass API remain forbidden. References ADR-017 as the authorizing decision for the render_with_context extension."
   - version: "1.3"
     date: 2026-06-04
     author: product-owner
@@ -70,8 +74,25 @@ SectionType, InlineFormat.
 
 1. The plugin API surface count is exactly 10. Adding an 11th surface requires updating
    this BC and BC-INDEX.
-2. The trait definitions in `slideforge-plugin-api` are the contracts — no alternate
-   unstable API exists.
+2. **Trait-signature stability: additive defaulted methods are permitted; non-additive
+   changes are forbidden.**
+   The trait definitions in `slideforge-plugin-api` are the contracts — no alternate
+   unstable API exists. This invariant governs backward compatibility for external
+   implementors:
+   - **PERMITTED (additive-defaulted extension):** Adding a new trait method that
+     carries a complete default body (i.e., the method has a sensible default
+     implementation and existing implementors are NOT required to override it) does not
+     break existing implementations and is allowed. This is how ADR-017 Option A
+     authorizes `InlineFormat::render_with_context(node, format, &InlineRenderContext)`
+     — a new method with a default body that delegates to `render(node, format)` so
+     existing implementors compile unchanged. (ADR-017, human-authorized 2026-06-05)
+   - **FORBIDDEN (non-additive changes):** Removing or renaming an existing method;
+     changing the signature of an existing method (parameter types, return type, or
+     generic bounds); adding a new method WITHOUT a default body that forces
+     implementors to add code.
+   - **FORBIDDEN (bypass API):** Any API path — function, associated constant, blanket
+     impl, or re-export — that allows a caller to serialize an `InlineNode` or invoke
+     plugin logic without going through the trait dispatch mechanism.
 3. **Registry finalization enforces all-10-surfaces coverage with a typed error.**
    All 10 surfaces (DataSource, Exporter, ChartRenderer, DiagramRenderer, Validator,
    MathRenderer, BrandProvider, SlideType, SectionType, InlineFormat) are "required"

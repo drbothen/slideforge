@@ -9,7 +9,7 @@ points: 8
 priority: P0
 tdd_mode: strict
 status: draft
-behavioral_contracts: [BC-5.02.001, BC-5.02.002]
+behavioral_contracts: [BC-5.02.001, BC-5.02.002, BC-3.05.001]
 verification_properties: []
 nfr_refs: [NFR-021, NFR-022, NFR-023]
 crate: slideforge-plugin-api
@@ -68,6 +68,38 @@ Two scopes, one story (inseparable because the OOXML render path must exist in
 
 ### Scope A: DefaultInlineFormat (slideforge-plugin-api)
 
+Per ADR-017 (Option A, human-approved), Scope A also includes adding a defaulted
+`render_with_context` method to the `InlineFormat` trait along with the
+`InlineRenderContext` struct. This resolves the hyperlink relationship-ID problem
+identified in the Previous Story Intelligence section without a breaking trait change.
+
+```rust
+pub struct InlineRenderContext<'a> {
+    pub hyperlink_rid: Option<&'a str>,
+}
+
+// Default method added to InlineFormat trait (additive, non-breaking):
+fn render_with_context(
+    &self,
+    node: &InlineNode,
+    format: InlineOutputFormat,
+    ctx: &InlineRenderContext<'_>,
+) -> Result<String, InlineError> {
+    self.render(node, format) // default: ignores context
+}
+```
+
+`DefaultInlineFormat` overrides `render_with_context` specifically for the
+`Link + Ooxml + Some(rid)` case: when `ctx.hyperlink_rid` is `Some(rid)`, it
+emits the full `<a:r><a:rPr><a:hlinkClick r:id="{rid}"/></a:rPr><a:t>{text}</a:t></a:r>`
+run. When `ctx.hyperlink_rid` is `None`, it falls back to display-text as a plain
+run and emits `tracing::warn!("Hyperlink relationship not registered for OOXML link
+to {url}")`. See EC-002 for the fallback behavior.
+
+BC-5.02.001 v1.4 permits additive-defaulted methods (invariant 2 updated accordingly).
+BC-5.02.002 v1.4 confirms hyperlink runs route through `render_with_context` — no
+carve-out. Reference: ADR-017.
+
 Create `slideforge-plugin-api/src/inline_formats/` module containing `DefaultInlineFormat`,
 which implements `InlineFormat` for ALL 12 `InlineNode` variants × 3 output formats:
 
@@ -79,7 +111,7 @@ which implements `InlineFormat` for ALL 12 `InlineNode` variants × 3 output for
 | `Code(Arc<str>)` | `<a:r><a:rPr ...monospace/><a:t>{text}</a:t></a:r>` | `<code>{text}</code>` | `` `{text}` `` |
 | `Link { text, url }` | `<a:r>` with hyperlink relationship r:id + rendered text | `<a href="{url}">{text}</a>` | `[{text}]({url})` |
 | `Math(MathNode)` | OMML passthrough (emit `<a14:m>` or `<m:oMath>` wrapper) | `<span class="math">{latex}</span>` | `${latex}$` or `$${latex}$$` |
-| `Footnote(Vec<InlineNode>)` | Footnote superscript marker + run | `<sup>[{n}]</sup>` | `[^{n}]` |
+| `Footnote(Vec<InlineNode>)` | Inline body content rendered; numbered marker (`[^{n}]` / `<sup>[{n}]</sup>`) is DEFERRED — see note below | `<sup>[inline body]</sup>` (no numbering) | `[inline body]` (no numbering) |
 | `Xref(Arc<str>)` | Plain text run (cross-ref link resolution is a future story) | `<a href="#{id}">{id}</a>` | `[{id}](#{id})` |
 | `Superscript(Vec<InlineNode>)` | `<a:r><a:rPr baseline="30000"/><a:t>{content}</a:t></a:r>` | `<sup>{content}</sup>` | `^{content}^` |
 | `Subscript(Vec<InlineNode>)` | `<a:r><a:rPr baseline="-25000"/><a:t>{content}</a:t></a:r>` | `<sub>{content}</sub>` | `~{content}~` |
@@ -89,6 +121,22 @@ which implements `InlineFormat` for ALL 12 `InlineNode` variants × 3 output for
 The 12 variant × 3 format matrix is complete — no `InlineError::UnsupportedNode` paths
 for the `DefaultInlineFormat` implementation. Nested variants (`Bold(Vec<InlineNode>)`)
 recursively render inner nodes and concatenate their output.
+
+**Footnote numbering deferral note.** v1.0 `DefaultInlineFormat` renders the
+`Footnote(Vec<InlineNode>)` variant by rendering its inner body content inline — it
+does NOT emit a numbered superscript marker (`[^{n}]` / `<sup>[n]</sup>`) because no
+footnote-numbering mechanism exists yet. Numbered-marker footnote references (where a
+sequential counter assigns `{n}` and the marker links to a footnote list) are
+intentionally deferred to the same future story that implements cross-reference
+resolution — currently noted in the `Xref` row as "cross-ref link resolution is a
+future story". Until that story is scheduled and delivered, `Footnote` renders its body
+content without a marker. This is a known limitation, not a bug. The absence of a
+marker is explicitly logged via `tracing::debug!("Footnote marker numbering deferred")`.
+
+**Xref cross-ref resolution note.** The `Xref(Arc<str>)` row emits `<a href="#{id}">` in
+HTML/Ooxml modes. Full cross-reference link resolution (verifying the target anchor
+exists, resolving across slides) is a future story. The current implementation produces
+the `href` attribute mechanically from the `id` string.
 
 ### Scope B: PPTX OOXML Dog-Fooding Refactor (slideforge-pptx)
 
@@ -107,12 +155,22 @@ After the refactor:
 
 This satisfies BC-5.02.002 postcondition 5 and the architectural grep-zero test vector.
 
+**Registry routing note (F-006).** The notes serializer in `notes_slide.rs` is
+registry-ready — it accepts `&dyn InlineFormat` at the call site. Full `PluginRegistry`
+resolution (where the registry looks up the registered `"default"` `InlineFormat` by
+name at the PPTX exporter call site) is wired in STORY-049 (Plugin Registry Assembly).
+Until STORY-049 is delivered, STORY-085 passes the bundled `DefaultInlineFormat`
+directly (as a concrete `&DefaultInlineFormat` instance, not a registry lookup). This is
+not a shortcut — STORY-049 already blocks on STORY-085 (see `blocks` frontmatter), so
+registry resolution arrives in the immediately following story.
+
 ## Behavioral Contracts
 
-| BC | Title | Covered ACs |
-|----|-------|-------------|
-| BC-5.02.001 | All 10 Plugin Trait Surfaces Implemented by Bundled Plugins via the Public Trait API | AC-001 through AC-004 |
-| BC-5.02.002 | No Bundled Plugin Bypasses the Registered Trait Interface (Dog-Fooding Guarantee) | AC-005 through AC-007 |
+| BC | Version | Title | Covered ACs | Notes |
+|----|---------|-------|-------------|-------|
+| BC-5.02.001 | v1.4 | All 10 Plugin Trait Surfaces Implemented by Bundled Plugins via the Public Trait API | AC-001 through AC-004 | v1.4: invariant 2 now permits additive-defaulted methods; `render_with_context` addition is conformant |
+| BC-5.02.002 | v1.4 | No Bundled Plugin Bypasses the Registered Trait Interface (Dog-Fooding Guarantee) | AC-005 through AC-007 | v1.4: registration-vs-construction split clarified; hyperlink runs route through `render_with_context`; no carve-out for Link+OOXML path |
+| BC-3.05.001 | v1.3.6 | HTML/OOXML Escaping of All Interpolated Values | AC-002 | v1.3.6: ALL interpolated values must be escaped (`& < > "`) — attribute positions (Link.url, Xref.id in href) AND text positions (Math.latex), not only Plain text; covers EC-009/EC-010 |
 
 ## Acceptance Criteria
 
@@ -126,15 +184,28 @@ The output for `Bold(vec![Plain("hi")])` contains `<a:rPr b="1"/>` and `<a:t>hi<
 
 Unit test: cover all 12 variants for Ooxml. Snapshot each output via `insta`.
 
-### AC-002: DefaultInlineFormat covers all 12 InlineNode variants for Html
-(traces to BC-5.02.001 postcondition 2)
+### AC-002: DefaultInlineFormat covers all 12 InlineNode variants for Html with full escaping
+(traces to BC-5.02.001 postcondition 2; traces to BC-3.05.001 v1.3.6 postcondition 1 — all interpolated values escaped)
 
 `DefaultInlineFormat::render(node, InlineOutputFormat::Html)` returns `Ok(String)`
 for all 12 `InlineNode` variants. The output for `Bold(vec![Plain("hi")])` is
 `<strong>hi</strong>`. The output for `Code("fn foo()")` is `<code>fn foo()</code>`.
-HTML special characters in `Plain` text are escaped (`&`, `<`, `>`, `"` → entities).
 
-Unit test: cover all 12 variants for Html.
+Per BC-3.05.001 v1.3.6, escaping applies to ALL interpolated positions — not only
+`Plain` text content:
+- **Text positions:** `Plain` text, `Code` text, `Math.latex` — escape `&`, `<`, `>`, `"`
+- **Attribute positions:** `Link.url` (in `href="..."`), `Xref.id` (in `href="#{id}"`) —
+  escape `&`, `<`, `>`, `"` per EC-009/EC-010
+
+Specific assertions:
+- `Plain("a & b < c")` → Html: `"a &amp; b &lt; c"`
+- `Link { text: "R&D", url: "https://ex.com/a&b" }` → Html:
+  `<a href="https://ex.com/a&amp;b">R&amp;D</a>`
+- `Xref("sec<1>")` → Html: `<a href="#sec&lt;1&gt;">sec&lt;1&gt;</a>`
+- `Math(latex: "x & y")` → Html: `<span class="math">x &amp; y</span>`
+
+Unit test: cover all 12 variants for Html; add dedicated escaping tests for url, id,
+and latex attribute/text positions per BC-3.05.001 v1.3.6.
 
 ### AC-003: DefaultInlineFormat covers all 12 InlineNode variants for Markdown
 (traces to BC-5.02.001 postcondition 2)
@@ -194,28 +265,49 @@ propagation uses `?` or `map_err`. Clippy pedantic passes on `slideforge-pptx`.
 - [ ] Create `crates/slideforge-plugin-api/src/inline_formats/mod.rs`:
   - Declare submodule `default_formatter`
   - Re-export `DefaultInlineFormat` as public
+- [ ] Add `InlineRenderContext` struct to `crates/slideforge-plugin-api/src/traits/inline_format.rs`
+  and add the defaulted `render_with_context(&self, node, format, ctx: &InlineRenderContext)`
+  method to the `InlineFormat` trait (per ADR-017 Option A); default impl delegates to
+  `self.render(node, format)` — non-breaking for all existing implementors
+- [ ] Add `tracing = { workspace = true }` to `crates/slideforge-plugin-api/Cargo.toml`
+  (required for EC-001/EC-002 `tracing::warn!` fallback paths; workspace-managed, pinned)
 - [ ] Create `crates/slideforge-plugin-api/src/inline_formats/default_formatter.rs`:
   - `DefaultInlineFormat` struct (unit struct — stateless formatter)
   - `impl InlineFormat for DefaultInlineFormat`
   - `id()` returns `"default"`
   - `render(node, format)` — full `match (node, format)` over all 12 × 3 combinations
+  - `render_with_context(node, format, ctx)` — override for `Link + Ooxml + Some(rid)`:
+    emit `<a:r><a:rPr><a:hlinkClick r:id="{rid}"/></a:rPr><a:t>{text}</a:t></a:r>`;
+    for `Link + Ooxml + None`, fall back to display-text plain run with `tracing::warn!`
   - Recursive rendering for nested variants (`Bold`, `Italic`, `Highlight`, etc.):
     inner `Vec<InlineNode>` nodes are rendered recursively and their outputs concatenated
   - Math OOXML path: for `InlineNode::Math`, the OMML source is already in `MathNode.omml`
-    (if available from STORY-029); otherwise emit a fallback `<a:t>{latex}</a:t>` with a
-    `tracing::warn!` — do NOT panic
+    (if available from STORY-029); otherwise emit a fallback
+    `<a:r><a:t>{latex}</a:t></a:r>` with `tracing::warn!` — do NOT panic
   - XML special-character escaping for OOXML text content (`<a:t>` content must escape
     `&`, `<`, `>` as XML entities)
-  - HTML character escaping for the Html format
+  - HTML character escaping for ALL interpolated positions per BC-3.05.001 v1.3.6:
+    text content AND attribute positions (`Link.url`, `Xref.id`, `Math.latex`)
+  - Footnote: render inner body content inline; emit
+    `tracing::debug!("Footnote marker numbering deferred")` — no numeric marker
 - [ ] Add `pub mod inline_formats;` to `crates/slideforge-plugin-api/src/lib.rs`
-- [ ] Export `DefaultInlineFormat` from `lib.rs` public API
+- [ ] Export `DefaultInlineFormat` and `InlineRenderContext` from `lib.rs` public API
 - [ ] Write unit tests (in `default_formatter.rs` `#[cfg(test)] mod tests`):
   - All 12 variants × Ooxml: snapshot via `insta`
   - All 12 variants × Html: snapshot via `insta`
   - All 12 variants × Markdown: snapshot via `insta`
   - Nested variant: `Bold(vec![Italic(vec![Plain("text")])])` → verify nesting works
-  - HTML escaping: `Plain("a & b < c")` → Html: `"a &amp; b &lt; c"`
+  - HTML escaping (text position): `Plain("a & b < c")` → Html: `"a &amp; b &lt; c"`
+  - HTML escaping (attribute position — EC-009): `Link { text: "R&D", url: "https://ex.com/a&b" }`
+    → Html: `<a href="https://ex.com/a&amp;b">R&amp;D</a>`
+  - HTML escaping (attribute position — EC-010): `Xref("sec<1>")` → Html:
+    `<a href="#sec&lt;1&gt;">sec&lt;1&gt;</a>`
+  - HTML escaping (text position — EC-010): `Math(latex: "x & y")` → Html:
+    `<span class="math">x &amp; y</span>`
   - OOXML XML escaping: `Plain("a & b")` → Ooxml: `"<a:r><a:t>a &amp; b</a:t></a:r>"`
+  - `render_with_context` with `Some(rid)`: `Link { text: "click", url: "..." }` + Ooxml
+    → `<a:r><a:rPr><a:hlinkClick r:id="rId1"/></a:rPr><a:t>click</a:t></a:r>`
+  - `render_with_context` with `None`: emits plain text run + `tracing::warn!` fired
 
 ### Scope B — PPTX Refactor
 
@@ -239,79 +331,89 @@ for plain text must always wrap `<a:t>` inside `<a:r>`, even for unstyled runs. 
 `<a:r>` element is mandatory — naked `<a:t>` is not valid OOXML.
 
 The refactor in Scope B follows the pattern of replacing a local private function with a
-trait dispatch call. The key risk is that the existing `serialize_inline_nodes_to_xml()`
-function took `hlink_urls: &[String]` as a context parameter for hyperlink relationship
-IDs. The `DefaultInlineFormat::render()` method does not have access to relationship IDs
-— the `Link` OOXML path will need to be handled differently:
-- Either the `InlineFormat::render()` signature is extended to accept a relationship
-  context (breaking change to the trait — evaluate against BC-5.02.001 invariant 2),
-- Or the `Link` variant in OOXML mode emits a simplified hyperlink run without a
-  relationship (emitting the URL as plain text with a `tracing::warn!` that relationship-based
-  hyperlinks require the exporter to call a separate relationship-registration API).
+trait dispatch call. The previous open question about the `Link` OOXML hyperlink path
+(whether to extend the trait signature or fall back to display-text with a warning) has
+been resolved by ADR-017 Option A (human-approved): the `InlineFormat` trait receives a
+defaulted `render_with_context` method plus the `InlineRenderContext { hyperlink_rid:
+Option<&str> }` struct. This is non-breaking (default impl delegates to `render`) and
+production-grade (the exporter can supply the relationship ID when available). See Scope
+A summary above and the Tasks section for implementation details.
 
-The implementer must choose the production-grade path: if the trait signature extension
-is the correct fix, create a follow-up story or expand scope (human-authorized). If the
-simplified URL-as-text fallback is acceptable for v1.0 with a warning, document it.
-**Do not silently drop link information** — the OOXML output must either have a working
-hyperlink relationship or explicitly log that the relationship was not registered.
+**Do not silently drop link information** — the `None` path must emit `tracing::warn!`
+and the display text as a plain run (EC-002).
 
 ## Architecture Compliance Rules
 
 1. **`DefaultInlineFormat` in slideforge-plugin-api only.** No OOXML generation code
    in the slideforge-plugin-api module may be moved into `slideforge-pptx`.
-2. **Dog-fooding enforced (BC-5.02.002).** After the refactor, `slideforge-pptx` produces
+2. **`InlineRenderContext` and `render_with_context` in the trait file.** Per ADR-017,
+   these additions go in `crates/slideforge-plugin-api/src/traits/inline_format.rs`
+   alongside `InlineFormat`. They are part of the public plugin API surface, not
+   internal to `default_formatter.rs`.
+3. **Dog-fooding enforced (BC-5.02.002).** After the refactor, `slideforge-pptx` produces
    zero `<a:r>` markup outside the single dispatch call site. The grep-zero test vector
    is the architectural invariant check.
-3. **Snapshot test stability.** The refactor is output-preserving. If any snapshot delta
+4. **Snapshot test stability.** The refactor is output-preserving. If any snapshot delta
    is introduced, the implementer must investigate whether the `DefaultInlineFormat` output
    differs from the removed private function — this is a correctness regression, not a
    "snapshot update" scenario.
-4. **`#![forbid(unsafe_code)]`** in force for both crates; no unsafe additions.
-5. **`clippy::pedantic` clean** on both `slideforge-plugin-api` and `slideforge-pptx`
+5. **`#![forbid(unsafe_code)]`** in force for both crates; no unsafe additions.
+6. **`clippy::pedantic` clean** on both `slideforge-plugin-api` and `slideforge-pptx`
    after all changes.
-6. **No new catch_unwind** in production code. The `InlineFormat::render()` returns
+7. **No new catch_unwind** in production code. The `InlineFormat::render()` returns
    `Result<String, InlineError>` — propagate errors properly.
 
 ## Library & Framework Requirements
 
-| Library | Version | Purpose |
-|---------|---------|---------|
-| `slideforge-types` | workspace (already dep) | `InlineNode`, `MathNode` types |
-| `slideforge-plugin-api` | workspace | `InlineFormat` trait, `InlineOutputFormat`, `InlineError` |
-| `insta` | workspace (already dep in slideforge-pptx) | Snapshot tests for render output |
-| `ooxmlsdk` | `=0.6.1` | OOXML types reference (no new dep — already in slideforge-pptx) |
+| Library | Version | Purpose | Crate |
+|---------|---------|---------|-------|
+| `slideforge-types` | workspace (already dep) | `InlineNode`, `MathNode` types | slideforge-plugin-api |
+| `slideforge-plugin-api` | workspace | `InlineFormat` trait, `InlineOutputFormat`, `InlineError` | slideforge-pptx |
+| `insta` | workspace (already dep in slideforge-pptx) | Snapshot tests for render output | both (dev-dep) |
+| `ooxmlsdk` | `=0.6.1` | OOXML types reference (no new dep — already in slideforge-pptx) | slideforge-pptx |
+| `tracing` | `{ workspace = true }` | `tracing::warn!` for EC-001 (Math OMML missing) and EC-002 (Link RID not available) fallback paths — mandated by EC-001/EC-002 | slideforge-plugin-api |
 
-No new library dependencies required for either crate.
+`tracing` is a new dependency for `slideforge-plugin-api` (workspace-managed, pinned).
+It is required because EC-001 and EC-002 mandate non-silent fallback via `tracing::warn!`
+on the Math OMML and Link RID missing code paths. Do not use `eprintln!` or `println!`
+as substitutes — the conventions section explicitly forbids `println!` in library crates.
 
 ## File Structure Requirements
 
 | File | Action | Purpose |
 |------|--------|---------|
+| `crates/slideforge-plugin-api/src/traits/inline_format.rs` | Modify | Add `InlineRenderContext` struct + defaulted `render_with_context` method to `InlineFormat` trait (ADR-017) |
+| `crates/slideforge-plugin-api/Cargo.toml` | Modify | Add `tracing = { workspace = true }` dependency |
 | `crates/slideforge-plugin-api/src/inline_formats/mod.rs` | Create | Module root, re-exports |
-| `crates/slideforge-plugin-api/src/inline_formats/default_formatter.rs` | Create | DefaultInlineFormat impl (12 variants × 3 formats) |
-| `crates/slideforge-plugin-api/src/lib.rs` | Modify | Add `pub mod inline_formats;` + re-export |
-| `crates/slideforge-pptx/src/notes_slide.rs` | Modify | Remove serialize_inline_nodes_to_xml; add trait dispatch |
+| `crates/slideforge-plugin-api/src/inline_formats/default_formatter.rs` | Create | DefaultInlineFormat impl (12 variants × 3 formats + render_with_context override) |
+| `crates/slideforge-plugin-api/src/lib.rs` | Modify | Add `pub mod inline_formats;` + re-export `DefaultInlineFormat`, `InlineRenderContext` |
+| `crates/slideforge-pptx/src/notes_slide.rs` | Modify | Remove serialize_inline_nodes_to_xml; add trait dispatch via `DefaultInlineFormat` |
+| `crates/slideforge-plugin-api/tests/module_boundary_test.rs` | Create | Fitness-function test scanning `inline_formats/*.rs` for forbidden `use` imports |
 
 ## Token Budget Estimate
 
 | Component | Estimated Tokens |
 |-----------|-----------------|
-| This story spec | ~3,000 |
-| BC-5.02.001 (postcondition 2-3) | ~800 |
-| BC-5.02.002 (postconditions 1, 5; EC-004) | ~1,000 |
+| This story spec | ~4,000 |
+| BC-5.02.001 v1.4 (postcondition 2-3, invariant 2) | ~800 |
+| BC-5.02.002 v1.4 (postconditions 1, 5; EC-004) | ~1,000 |
+| BC-3.05.001 v1.3.6 (all interpolated positions — EC-009/EC-010) | ~600 |
 | ADR-016 Decisions 2+3 | ~600 |
-| `InlineFormat` trait + `InlineOutputFormat` + `InlineError` (inline_format.rs) | ~2,000 |
+| ADR-017 Option A (render_with_context + InlineRenderContext) | ~400 |
+| `InlineFormat` trait + `InlineRenderContext` + `InlineOutputFormat` + `InlineError` (inline_format.rs) | ~2,200 |
 | `InlineNode` enum all 12 variants (inline.rs) | ~1,500 |
 | `notes_slide.rs` serialize_inline_nodes_to_xml (lines 232–311) | ~1,500 |
-| Test and snapshot files to write | ~2,000 |
-| **Total** | **~12,400** |
+| Test and snapshot files to write | ~2,500 |
+| **Total** | **~15,100** |
 
-Context budget: ~12% of a 100k-token context window. Within limit for a 8-point story.
+Context budget: ~15% of a 100k-token context window. Within limit for an 8-point story.
 
 ## Test Strategy
 
 - **Unit tests in `default_formatter.rs`**: Full 12 × 3 matrix via `insta` snapshots.
-  Nesting tests for recursive variants. Escaping tests for HTML and OOXML text content.
+  Nesting tests for recursive variants. Escaping tests for HTML and OOXML text content,
+  including attribute-position escaping for `Link.url`, `Xref.id`, and `Math.latex`
+  per BC-3.05.001 v1.3.6.
 - **Snapshot regression**: Run `cargo insta test -p slideforge-pptx` before and after
   the refactor. Zero new snapshots should appear (the rendered output should be identical).
   If new snapshots appear, investigate the diff before accepting.
@@ -319,6 +421,13 @@ Context budget: ~12% of a 100k-token context window. Within limit for a 8-point 
   must return only the dispatch call site after the refactor. Add this as an explicit
   test that runs in CI (via `#[test]` that shells out to grep or via a dedicated audit
   test that scans the source tree).
+- **VP-053 formal backing note**: The concrete escaping unit tests in `default_formatter.rs`
+  (verifying `& < > "` are escaped in all interpolated positions) are formally backed by
+  VP-053 (inline-html-escape-all-interpolated). VP-053's exhaustive proptest harness —
+  which exercises arbitrary Unicode input across all 12 × 3 render paths — is implemented
+  in Phase 6 formal hardening. The `verification_properties` frontmatter remains `[]`
+  because the VP-053 proptest implementation is Phase 6 work; the concrete unit tests
+  delivered by this story provide deterministic spot-coverage of the same property.
 
 ## Edge Cases
 
@@ -328,6 +437,8 @@ Context budget: ~12% of a 100k-token context window. Within limit for a 8-point 
 | EC-002 | `InlineNode::Link` in OOXML — relationship ID not available in render context | Emit display text as plain run with `tracing::warn!("Hyperlink relationship not registered for OOXML link to {url}")` — do NOT silently drop the text |
 | EC-003 | `InlineNode::Plain` with `&` or `<` in OOXML mode | XML-escape to `&amp;` / `&lt;` before wrapping in `<a:t>` |
 | EC-004 | Recursive nesting depth > 64 (BC-3.05.001 invariant — max 64 depth) | Return `Err(InlineError::RenderError { node_kind, message: "inline nesting depth exceeds maximum of 64" })` — do NOT stack overflow |
+| EC-009 | `Link.url` contains `&` or `<` in HTML attribute position (BC-3.05.001 v1.3.6) | Escape to `&amp;` / `&lt;` inside the `href="..."` attribute value; e.g., `href="https://ex.com/a&amp;b"` |
+| EC-010 | `Xref.id` or `Math.latex` contains `&`, `<`, `>`, or `"` in HTML output | Escape ALL four characters in attribute positions (`href="#{id}"`) and text positions (`<span class="math">{latex}</span>`); do NOT pass raw values through |
 
 ## Forbidden Dependencies
 
@@ -342,5 +453,9 @@ Context budget: ~12% of a 100k-token context window. Within limit for a 8-point 
 - Introduce new `catch_unwind` in the dispatch path
 - Add `slideforge-eval`, `slideforge-syntax`, or `slideforge-layout` as dependencies
 
-Build-time enforcement: any import from a forbidden crate produces a compilation error
-because the forbidden crates are not in the respective `Cargo.toml` dep lists.
+Build-time enforcement: enforced by
+`crates/slideforge-plugin-api/tests/module_boundary_test.rs` — a fitness-function test
+that scans `inline_formats/*.rs` for forbidden `use` imports and fails the test suite if
+any are found. Note: `slideforge-layout` is already linked by `slideforge-plugin-api`, so
+the crate-not-in-Cargo.toml guard does NOT apply to it — the fitness-function test is the
+authoritative enforcement mechanism for all six forbidden crates listed above.

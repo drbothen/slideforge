@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.3"
+version: "1.4"
 status: draft
 producer: product-owner
 timestamp: 2026-05-24T00:00:00
@@ -15,6 +15,10 @@ capability: CAP-021
 lifecycle_status: active
 introduced: v1.0.0
 modified:
+  - version: "1.4"
+    date: 2026-06-05
+    author: product-owner
+    reason: "STORY-085 / ADR-017 Option A (human-authorized 2026-06-05): Clarify Postcondition 5 — (a) .rels relationship REGISTRATION is exporter-owned and distinct from run construction; (b) ALL <a:r> run construction including hyperlink runs flows through the InlineFormat trait dispatch (now including render_with_context); (c) the AC-005 grep-zero vector still holds with a single dispatch site. Update EC-004 to reflect that the OOXML bypass is the gap STORY-085 closes via render_with_context. No carve-out exception added — dog-fooding guarantee intact."
   - version: "1.3"
     date: 2026-06-04
     author: product-owner
@@ -65,10 +69,27 @@ registered `InlineFormat` implementation for the OOXML output format.
 3. The plugin compiles and passes tests using only the declared trait interfaces.
 4. The plugin's trait implementation is architecturally identical to what a third-party plugin
    would write.
-5. The PPTX exporter (`slideforge-pptx`) calls `InlineFormat::render(node, InlineOutputFormat::Ooxml)`
-   through the registry for every `InlineNode` it serializes. No production code path in
-   `slideforge-pptx` performs `<a:r>` run construction outside of the `InlineFormat` trait
-   dispatch.
+5. **Relationship registration is exporter-owned; run construction is trait-owned — no
+   carve-out exception.**
+   The PPTX exporter (`slideforge-pptx`) is responsible for two distinct operations on
+   hyperlink `Link` nodes:
+   - **Relationship registration (exporter-owned):** The exporter registers the link URL
+     in the slide's `.rels` package part to obtain an `rId`. This is a PPTX packaging
+     concern — the exporter owns the package state and is the correct site for this call.
+     This step does NOT produce any `<a:r>` XML and is NOT subject to trait dispatch.
+   - **Run construction (trait-owned):** ALL `<a:r>` OOXML run markup construction —
+     including the `<a:rPr>` element and `<a:t>` text for Link nodes — MUST be produced
+     by calling `InlineFormat::render_with_context(node, InlineOutputFormat::Ooxml, &ctx)`
+     (where `ctx: InlineRenderContext` carries the `hyperlink_rid` obtained from the
+     registration step). Under ADR-017 Option A, `render_with_context` is the new
+     dispatch method added to the `InlineFormat` trait with a defaulted body; existing
+     implementations are not broken. No production code path in `slideforge-pptx`
+     constructs `<a:r>` / `<a:rPr>` markup outside of this single trait dispatch call
+     site.
+   The invariant holds: the dog-fooding guarantee is intact. The split is
+   registration (packaging concern, exporter-owned) vs. construction (rendering concern,
+   trait-owned). The AC-005 grep-zero vector (`a:r` / `a:rPr` / `serialize_inline`
+   outside the dispatch site) continues to hold — there is exactly one dispatch site.
 
 ## Invariants
 
@@ -83,7 +104,7 @@ registered `InlineFormat` implementation for the OOXML output format.
 | EC-001 | PPTX exporter needs a Brand field not in the Brand trait | The Brand trait/struct is extended with that field. Not: PPTX exporter reads from an internal BrandImpl struct. |
 | EC-002 | ChartRenderer plugin needs layout information not in ChartSpec | ChartSpec is extended. Not: plugin reaches into LaidOutDeck internals. |
 | EC-003 | A new bundled plugin is added that works for all tests but bypasses the API | CI lint or review catches the violation. This is a DI-008 violation = bug. |
-| EC-004 | `slideforge-pptx` contains a private `serialize_inline_node()` function that generates `<a:r>` OOXML without going through the `InlineFormat` trait | This is an explicit contract violation of this BC. The function MUST be removed and replaced with a call to the registered `InlineFormat` implementation for `InlineOutputFormat::Ooxml`. CI adversarial review MUST flag any such function as a blocker. The existing internal inline serialization in `slideforge-pptx` at the time of STORY-085 is a known gap; STORY-085 closes it. |
+| EC-004 | `slideforge-pptx` contains a private `serialize_inline_node()` function that generates `<a:r>` OOXML without going through the `InlineFormat` trait | This is an explicit contract violation of this BC. The function MUST be removed and replaced with a call to the registered `InlineFormat` implementation via `render_with_context(node, InlineOutputFormat::Ooxml, &ctx)`. For Link nodes, `ctx` carries the `hyperlink_rid` obtained from the prior `.rels` registration step (which is exporter-owned and not subject to replacement). CI adversarial review MUST flag any remaining `<a:r>` construction outside the single dispatch site as a blocker. The existing internal inline serialization in `slideforge-pptx` at the time of STORY-085 is a known gap; STORY-085 closes it. |
 
 ## Canonical Test Vectors
 

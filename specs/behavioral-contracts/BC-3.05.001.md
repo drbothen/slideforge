@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.3.5"
+version: "1.3.6"
 status: active
 producer: product-owner
 timestamp: 2026-05-29T00:00:00
@@ -14,7 +14,7 @@ subsystem: SS-05
 capability: CAP-024
 lifecycle_status: active
 introduced: v1.0.0
-modified: ["v1.2 — adversary pass 1 adjudication: variant count corrected to 12, payload shapes corrected to Vec<InlineNode> for structured variants, inline depth bound added (max 64), math xref validation boundary codified", "v1.3 — story spec AC-005 enum example corrected to match production types", "v1.3.1 — VP propagation burst: assigned VP-043 through VP-047 to all VP-TBD entries", "v1.3.2 — adversary pass 2 adjudications S/O: LayoutError::Multiple smart constructor invariants codified; XrefTargetNotFound warnings must reach LaidOutDeck.warnings (not silently dropped)", "v1.3.3 — pass-7 drift fix (F-P7-HIGH-005): slide_index → source_slide_index in Invariant 4, Inline Depth Bound section, EC-002, EC-006, and Canonical Test Vectors per AC-BC-A9 canonical field name", "v1.3.4 — F-P25-MED-001: Architecture Module corrected — InlineNode enum lives in slideforge-types (not slideforge-eval); inline validation pass (run_inline_validation) lives in slideforge-layout", "v1.3.5 — adversary pass 2 OBS-2 (STORY-073): subsystem corrected from SS-TBD to SS-05 (Layout Engine); BC governs layout-stage validation and STORY-073 anchors subsystems: [SS-05]"]
+modified: ["v1.2 — adversary pass 1 adjudication: variant count corrected to 12, payload shapes corrected to Vec<InlineNode> for structured variants, inline depth bound added (max 64), math xref validation boundary codified", "v1.3 — story spec AC-005 enum example corrected to match production types", "v1.3.1 — VP propagation burst: assigned VP-043 through VP-047 to all VP-TBD entries", "v1.3.2 — adversary pass 2 adjudications S/O: LayoutError::Multiple smart constructor invariants codified; XrefTargetNotFound warnings must reach LaidOutDeck.warnings (not silently dropped)", "v1.3.3 — pass-7 drift fix (F-P7-HIGH-005): slide_index → source_slide_index in Invariant 4, Inline Depth Bound section, EC-002, EC-006, and Canonical Test Vectors per AC-BC-A9 canonical field name", "v1.3.4 — F-P25-MED-001: Architecture Module corrected — InlineNode enum lives in slideforge-types (not slideforge-eval); inline validation pass (run_inline_validation) lives in slideforge-layout", "v1.3.5 — adversary pass 2 OBS-2 (STORY-073): subsystem corrected from SS-TBD to SS-05 (Layout Engine); BC governs layout-stage validation and STORY-073 anchors subsystems: [SS-05]", "v1.3.6 — STORY-085 adversary F-004 [HIGH]: tighten HTML postcondition to require HTML-escaping of ALL interpolated values — attribute values (href/url/Xref id) AND text content (Math latex source) — not just Plain text. Added EC-009. Escaping rule: &, <, >, \" must be escaped in all HTML output positions (both attribute and content contexts)."]
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -107,6 +107,23 @@ Per output format:
   Link → `<a href>`, Math → MathML `<math>`, Footnote → `<span role="note">`,
   Xref → `<a href="#">`, Superscript → `<sup>`, Subscript → `<sub>`,
   Strikethrough → `<del>`, Highlight → `<mark>`
+- **HTML escaping is mandatory for ALL interpolated values in HTML output — not only
+  `Plain` text.** The characters `&`, `<`, `>`, and `"` MUST be escaped to their HTML
+  entity equivalents in every position they appear, regardless of which `InlineNode`
+  variant they originate from:
+  - **Attribute values** (href, data-* attributes, etc.): The `url` field of `Link`
+    nodes and the `id` field of `Xref` nodes MUST be HTML-attribute-escaped before
+    being written into `href="..."` or equivalent attribute positions. A raw `url`
+    containing `"` would break attribute quoting; a `url` containing `<` would break
+    HTML structure.
+  - **Text content** (rendered inside element tags): The `latex` source string carried
+    by `Math` nodes, the inner text of `Plain`, `Code`, and all other leaf nodes MUST
+    be HTML-content-escaped before being written between tags. An unescaped `<` in
+    LaTeX source would be interpreted as a tag open.
+  - Failure to escape ANY of these positions is a security defect (XSS injection via
+    crafted slide content) and a correctness defect (malformed HTML). `DefaultInlineFormat`
+    MUST escape all positions. Third-party `InlineFormat` implementors are strongly
+    advised to do the same — the trait contract documents this requirement.
 
 **PDF:**
 - Bold/Italic/Strike/Super/Sub → equivalent tagged text spans with PDF structure tags
@@ -191,6 +208,8 @@ must produce `LayoutError::InlineDepthExceeded`.
 | EC-006 | Inline nesting at depth 65 | `LayoutError::InlineDepthExceeded { source_slide_index, depth: 65 }`; hard error |
 | EC-007 | `Xref("slide-title")` inside a `MathNode` | NOT validated by xref pass; math is a separate validation surface |
 | EC-008 | `"**bold using markdown"` (forbidden pattern) | No bold applied; literal `**bold using markdown` rendered as Plain text; lint warning |
+| EC-009 | `Link { text: vec![Plain("click")], url: "https://evil.com?a=1&b=<script>" }` rendered to HTML | `href` attribute value is HTML-attribute-escaped: `href="https://evil.com?a=1&amp;b=&lt;script&gt;"`. The unescaped raw URL is NEVER written directly into attribute position. Similarly, `Xref("my\"id")` produces `href="#my&quot;id"` — not `href="#my"id"`. |
+| EC-010 | `Math(MathNode { latex: "<b>not bold</b>" })` rendered to HTML | LaTeX source is HTML-content-escaped before being written to the `<math>` element or its children: `&lt;b&gt;not bold&lt;/b&gt;`. An unescaped `<` would break the HTML parse tree. |
 
 ## Canonical Test Vectors
 
@@ -203,6 +222,9 @@ must produce `LayoutError::InlineDepthExceeded`.
 | 65-deep nested `Bold(vec![Bold(vec![...])])` | `LayoutError::InlineDepthExceeded { source_slide_index: 0, depth: 65 }` | depth-bound |
 | `Xref("nonexistent-slide")` in top-level text | `LayoutWarning::XrefTargetNotFound { target: "nonexistent-slide", source_slide_index: 0 }` | warning |
 | All 12 variants present in one `Vec<InlineNode>` | All 12 variants survive layout pass unchanged; `FrameContent::TextRun` preserves all | exhaustive |
+| `Link { text: vec![Plain("x")], url: "https://a.com?q=1&lang=<en>" }` → HTML | `<a href="https://a.com?q=1&amp;lang=&lt;en&gt;">x</a>` — `&` and `<` escaped in attribute | escaping-attribute |
+| `Math(MathNode { latex: "a < b & c > d" })` → HTML | LaTeX source escaped in HTML content: `a &lt; b &amp; c &gt; d` inside `<math>` element | escaping-content |
+| `Xref("slide\"with-quote")` → HTML | `<a href="#slide&quot;with-quote">` — `"` escaped in attribute value | escaping-attribute |
 
 ## Verification Properties
 
