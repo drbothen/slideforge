@@ -13,7 +13,7 @@ total_stories: 85
 stories_written: 85
 stories_ready: 0
 stories_in_progress: 0
-stories_merged: 55
+stories_merged: 56
 ---
 
 # STORY-INDEX — slideforge v1.0
@@ -33,10 +33,10 @@ stories_merged: 55
 | Wave 1 | 14 | 0 | 0 | 0 | 14 | 0 |
 | Wave 2 | 7 | 0 | 0 | 0 | 7 | 0 |
 | Wave 3 | 17 | 0 | 0 | 0 | 17 | 0 |
-| Wave 4 | 21 | 4 | 0 | 0 | 17 | 0 |
+| Wave 4 | 21 | 3 | 0 | 0 | 18 | 0 |
 | Wave 5 | 20 | 20 | 0 | 0 | 0 | 0 |
 | Wave 6 | 6 | 6 | 0 | 0 | 0 | 0 |
-| **Total** | **85** | **30** | **0** | **0** | **55** | **0** |
+| **Total** | **85** | **29** | **0** | **0** | **56** | **0** |
 
 ---
 
@@ -121,7 +121,7 @@ stories_merged: 55
 | [STORY-044](stories/STORY-044-pdf-coordinate-mapping.md) | EPIC-13 | PDF: EMU-to-PDF Coordinate Mapping + Y-Axis Flip | BC-4.03.005 | P0 | 5 | strict | merged |
 | [STORY-045](stories/STORY-045-pdf-ua1-tagging-verapdf.md) | EPIC-13 | PDF: PDF/UA-1 Tagging + veraPDF CI Gate | BC-4.03.001 | P0 | 8 | strict | merged |
 | [STORY-083](stories/STORY-083-plugin-registry-builder.md) | EPIC-21 | Plugin Registry Builder + Surface Enforcement | BC-5.02.001 | P0 | 3 | strict | merged |
-| [STORY-084](stories/STORY-084-bundled-section-types.md) | EPIC-21 | Bundled SectionType Implementations | BC-5.02.001 | P0 | 3 | strict | draft |
+| [STORY-084](stories/STORY-084-bundled-section-types.md) | EPIC-21 | Bundled SectionType Implementations | BC-5.02.001 | P0 | 3 | strict | merged |
 | [STORY-085](stories/STORY-085-bundled-inline-formats.md) | EPIC-21 | Bundled DefaultInlineFormat + PPTX OOXML Dog-Fooding Refactor | BC-5.02.001, BC-5.02.002 | P0 | 8 | strict | draft |
 | [STORY-049](stories/STORY-049-plugin-registry-assembly.md) | EPIC-21 | Plugin Registry Assembly (root crate) | BC-5.02.001-002 | P0 | 5 | strict | draft |
 | [STORY-050](stories/STORY-050-e2e-integration-tests.md) | EPIC-21 | End-to-End Integration Test Suite | BC-5.02.001-002 | P0 | 8 | strict | draft |

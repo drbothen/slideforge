@@ -45,12 +45,12 @@ wave_4_batch_c:
   execution: sequential
   chains: ["STORY-083 independent (dep: STORY-002 only)", "STORY-084 (dep: STORY-002+042+077)", "STORY-085 (dep: STORY-002+028+037+038)", "083+084+085→STORY-049→STORY-050"]
   prerequisite: Batch B gate check
-  lesson_13_note: "STORY-083/084/085 added 2026-06-04 per LESSON-13 reconciliation (ADR-016). STORY-083 MERGED PR #57 (5aaa27d2, 2026-06-05). STORY-084 + STORY-085 + STORY-049 + STORY-050 remaining. STORY-049 gates on all three (083 DONE; 084+085 remaining)."
+  lesson_13_note: "STORY-083/084/085 added 2026-06-04 per LESSON-13 reconciliation (ADR-016). STORY-083 MERGED PR #57 (5aaa27d2, 2026-06-05). STORY-084 MERGED PR #58 (801f351b, 2026-06-05). STORY-085 + STORY-049 + STORY-050 remaining. STORY-049 gates on all three (083+084 DONE; 085 remaining)."
 wave_4_pulled_in_p1: [STORY-073, STORY-075, STORY-076]
 wave_4_deferred_p2_to_wave5: [STORY-072, STORY-074]
 wave_4_bc_deltas: "BC-2.01.001 v1.1→v1.2; BC-2.01.003 v1.8→v1.9; error-taxonomy v2.2→v2.3"
-develop_sha: "5aaa27d2"
-develop_pr_count: 57
+develop_sha: "801f351b"
+develop_pr_count: 58
 last_updated: 2026-06-05
 ---
 
@@ -492,14 +492,22 @@ stories:
     workspace_tests: 133
     notes: "Plugin Registry Builder + Surface Enforcement; PluginRegistryBuilder, RegistryError::MissingSurface, surface_count(), surface_names(), SURFACE_NAMES const; closes BC-5.02.001 invariant 3. CI-gate fixes: clippy pedantic (demo example binary — doc_markdown/unnecessary_literal_bound/uninlined_format_args) + rustdoc intra-doc link fix (MissingSurface) — see LESSON-16. LESSON-13/ADR-016 Decision 1."
   STORY-084:
-    status: not-started
+    status: merged
     wave: 4
     batch: C
     priority: P0
     points: 3
     depends_on: [STORY-002, STORY-042, STORY-077]
     blocks: [STORY-049]
-    notes: "Bundled SectionType Implementations; new slideforge-plugin-api/src/section_types/ module; 7 bundled impls (executive_summary, risk_register, methodology, scope, approval, appendix, glossary); LESSON-13/ADR-016 Decision 2"
+    pr: 58
+    merge_commit: "801f351b"
+    merged: 2026-06-05
+    adversary_convergence: "3/3 strict-CLEAN at passes 5/6/7 (7-pass total cascade)"
+    adversary_streak: "3/3"
+    converged: true
+    security_review: "APPROVE — CLEAN (DoS/panic/notes-disclosure all clean; no new deps)"
+    workspace_tests: 171
+    notes: "Bundled SectionType Implementations; 7 impls in slideforge-plugin-api/src/section_types/ (executive_summary + risk_register auto; methodology/scope/approval/appendix/glossary manual). BC-5.02.001 SectionType surface + BC-3.02.001 invariant 4 closed. CRIT-084-001 (risk_register notes-exclusion, mirrors layout sections.rs HIGH-002) closed in scope. Inverted-Red-Gate anti-pattern caught/corrected before implementer (LESSON-17). PR also removed 4 stray .factory/ files from develop (hygiene). LESSON-13/ADR-016 Decision 2."
   STORY-085:
     status: not-started
     wave: 4
