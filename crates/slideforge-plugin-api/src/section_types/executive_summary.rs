@@ -137,12 +137,10 @@ mod tests {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // AC-002 + EC-001: generate() scanning — RED GATE (panic at todo!())
+    // AC-002 + EC-001: generate() scanning
     // ─────────────────────────────────────────────────────────────────────────
 
     /// EC-001: empty slide slice → `generate()` must return `vec![]`.
-    ///
-    /// RED GATE: panics at `todo!()` until implemented.
     #[test]
     fn test_bc_5_02_001_executive_summary_ec001_empty_slice_returns_empty() {
         let result = ExecutiveSummarySectionType.generate(&[]);
@@ -154,8 +152,6 @@ mod tests {
     }
 
     /// Deck with no slides that have a `takeaway` field → returns `vec![]`.
-    ///
-    /// RED GATE: panics at `todo!()` until implemented.
     #[test]
     fn test_bc_5_02_001_executive_summary_no_takeaway_slides_returns_empty() {
         let slides = vec![blank_slide("title"), blank_slide("bullets")];
@@ -168,8 +164,6 @@ mod tests {
     }
 
     /// AC-002: mixed deck — 3 slides, 2 have `takeaway:`, 1 does not → exactly 2 `SectionBlock`s.
-    ///
-    /// RED GATE: panics at `todo!()` until implemented.
     #[test]
     fn test_bc_5_02_001_executive_summary_mixed_deck_returns_exact_count_2() {
         let slides = vec![
@@ -187,8 +181,6 @@ mod tests {
     }
 
     /// AC-002: each emitted `SectionBlock` carries `level == 1` and `include_in_toc == true`.
-    ///
-    /// RED GATE: panics at `todo!()` until implemented.
     #[test]
     fn test_bc_5_02_001_executive_summary_block_has_level_1_and_include_in_toc_true() {
         let slides = vec![slide_with_takeaway("My Slide", "Key insight", None)];
@@ -211,8 +203,6 @@ mod tests {
     }
 
     /// AC-002: `SectionBlock.title` is derived from the contributing slide's title field.
-    ///
-    /// RED GATE: panics at `todo!()` until implemented.
     #[test]
     fn test_bc_5_02_001_executive_summary_block_title_matches_slide_title() {
         let slides = vec![slide_with_takeaway("Revenue Summary", "Up 12%", None)];
@@ -230,7 +220,7 @@ mod tests {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // BC-3.02.001 invariant 4: Notes-register slides EXCLUDED — RED GATE
+    // BC-3.02.001 invariant 4: Notes-register slides EXCLUDED
     // ─────────────────────────────────────────────────────────────────────────
 
     /// BC-3.02.001 inv-4: a slide with a `takeaway` field but `register:
@@ -238,8 +228,6 @@ mod tests {
     ///
     /// Deck: 2 takeaway slides where 1 is register:notes → returns exactly 1 block
     /// (only the non-notes slide contributes).
-    ///
-    /// RED GATE: panics at `todo!()` until implemented.
     #[test]
     fn test_bc_3_02_001_inv4_notes_register_slide_excluded_from_executive_summary() {
         let slides = vec![
@@ -267,14 +255,12 @@ mod tests {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // EC-002: slide that is BOTH takeaway AND severity_cards — RED GATE
+    // EC-002: slide that is BOTH takeaway AND severity_cards
     // ─────────────────────────────────────────────────────────────────────────
 
     /// EC-002: a slide that has both a `takeaway` field AND `slide_type ==
     /// "severity_cards"` is counted by `ExecutiveSummarySectionType` (because this
     /// plugin scans for `takeaway` fields independently of slide type).
-    ///
-    /// RED GATE: panics at `todo!()` until implemented.
     #[test]
     fn test_bc_5_02_001_ec002_severity_cards_with_takeaway_counted_by_executive_summary() {
         let mut fields = OrderedMap::new();

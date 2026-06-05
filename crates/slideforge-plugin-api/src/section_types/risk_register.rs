@@ -10,7 +10,7 @@
 
 use std::sync::Arc;
 
-use slideforge_types::Slide;
+use slideforge_types::{Register, Slide};
 
 use crate::traits::section_type::{SectionBlock, SectionType};
 
@@ -24,10 +24,14 @@ use crate::traits::section_type::{SectionBlock, SectionType};
 /// ## Generation logic
 ///
 /// `generate(slides)` iterates the slide sequence. For each slide whose
-/// `slide_type` field equals `"severity_cards"`, the plugin emits one
-/// [`SectionBlock`] at level 1 with `include_in_toc: true`. The block title is
-/// the slide's resolved title string, falling back to the empty string when no
-/// `title` field is present.
+/// `slide_type` field equals `"severity_cards"` AND whose `register` is NOT
+/// `Some(Register::Notes)`, the plugin emits one [`SectionBlock`] at level 1
+/// with `include_in_toc: true`. The block title is the slide's resolved title
+/// string, falling back to the empty string when no `title` field is present.
+///
+/// Slides with `register: Some(Register::Notes)` are excluded per
+/// BC-3.02.001 invariant 4 — the notes register is speaker-facing content
+/// and must not leak into formal document output.
 ///
 /// Registered by the `PluginRegistryBuilder` (STORY-049).
 #[derive(Debug, Default)]
@@ -42,6 +46,12 @@ impl SectionType for RiskRegisterSectionType {
     /// Scan `slides` and produce one [`SectionBlock`] per slide whose type is
     /// `"severity_cards"`.
     ///
+    /// Each qualifying slide must:
+    /// - Have `slide_type == "severity_cards"`, AND
+    /// - NOT have `register == Some(Register::Notes)` (BC-3.02.001 invariant 4 —
+    ///   the notes register is speaker-facing content and must not appear in formal
+    ///   document output; this mirrors the same exclusion in `executive_summary`).
+    ///
     /// The emitted `SectionBlock` carries:
     /// - `title`: the slide's resolved title string (empty string if absent)
     /// - `subtitle`: `None`
@@ -49,11 +59,26 @@ impl SectionType for RiskRegisterSectionType {
     /// - `start_slide_index`: the slide's position in `slides`
     /// - `end_slide_index`: `None`
     /// - `include_in_toc`: `true`
+    ///
+    /// ## Empty-title behavior (intentional)
+    ///
+    /// The [`SectionBlock`] type carries only a `title` string, not the richer
+    /// `severity_cards` card content that the layout pipeline's `GeneratedSection`
+    /// carries. When a contributing slide has no resolvable `title` field, the
+    /// emitted block has `title == ""`. The block is **still emitted** — it is a
+    /// genuine contributing slide and dropping it would lose a real section entry.
+    /// This is an intentional trait-shape limitation, locked by
+    /// `test_bc_3_02_001_med084_003_missing_title_field_emits_block_with_empty_title`.
     fn generate(&self, slides: &[Slide]) -> Vec<SectionBlock> {
         slides
             .iter()
             .enumerate()
-            .filter(|(_, slide)| slide.slide_type.as_ref() == "severity_cards")
+            .filter(|(_, slide)| {
+                // Must be a severity_cards slide.
+                slide.slide_type.as_ref() == "severity_cards"
+                    // Must NOT be a notes-register slide (BC-3.02.001 invariant 4).
+                    && slide.register != Some(Register::Notes)
+            })
             .map(|(index, slide)| SectionBlock {
                 title: Arc::from(slide.title_str().unwrap_or("")),
                 subtitle: None,
@@ -125,12 +150,10 @@ mod tests {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // AC-003 + EC-001: generate() scanning — RED GATE (panic at todo!())
+    // AC-003 + EC-001: generate() scanning
     // ─────────────────────────────────────────────────────────────────────────
 
     /// EC-001: empty slide slice → `generate()` must return `vec![]`.
-    ///
-    /// RED GATE: panics at `todo!()` until implemented.
     #[test]
     fn test_bc_5_02_001_risk_register_ec001_empty_slice_returns_empty() {
         let result = RiskRegisterSectionType.generate(&[]);
@@ -142,8 +165,6 @@ mod tests {
     }
 
     /// AC-003: deck with no `severity_cards` slides → returns `vec![]`.
-    ///
-    /// RED GATE: panics at `todo!()` until implemented.
     #[test]
     fn test_bc_5_02_001_risk_register_no_severity_cards_returns_empty() {
         let slides = vec![
@@ -161,8 +182,6 @@ mod tests {
     }
 
     /// AC-003: 5-slide deck with 2 `severity_cards` slides and 3 others → exactly 2 `SectionBlock`s.
-    ///
-    /// RED GATE: panics at `todo!()` until implemented.
     #[test]
     fn test_bc_5_02_001_risk_register_mixed_deck_returns_exact_count_2() {
         let slides = vec![
@@ -183,8 +202,6 @@ mod tests {
     }
 
     /// AC-003: each emitted `SectionBlock` carries `level == 1` and `include_in_toc == true`.
-    ///
-    /// RED GATE: panics at `todo!()` until implemented.
     #[test]
     fn test_bc_5_02_001_risk_register_block_has_level_1_and_include_in_toc_true() {
         let slides = vec![make_slide("severity_cards", Some("Supply-Chain Risks"))];
@@ -207,8 +224,6 @@ mod tests {
     }
 
     /// AC-003: `SectionBlock.title` is derived from the contributing slide's title field.
-    ///
-    /// RED GATE: panics at `todo!()` until implemented.
     #[test]
     fn test_bc_5_02_001_risk_register_block_title_matches_slide_title() {
         let slides = vec![make_slide("severity_cards", Some("Vendor Risks"))];
@@ -226,14 +241,12 @@ mod tests {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // EC-002: slide that is BOTH severity_cards AND has takeaway — RED GATE
+    // EC-002: slide that is BOTH severity_cards AND has takeaway
     // ─────────────────────────────────────────────────────────────────────────
 
     /// EC-002: a slide that is `severity_cards` AND has a `takeaway` field is
     /// counted by `RiskRegisterSectionType` (this plugin scans on `slide_type`,
     /// not on field presence; the two plugins are independent).
-    ///
-    /// RED GATE: panics at `todo!()` until implemented.
     #[test]
     fn test_bc_5_02_001_ec002_severity_cards_with_takeaway_counted_by_risk_register() {
         let mut fields = OrderedMap::new();
