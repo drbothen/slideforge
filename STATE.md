@@ -36,7 +36,7 @@ wave_5_total_points: 114
 develop_sha: "e704e700"
 develop_pr_count: 59
 error_taxonomy_version: "v2.13"
-workspace_tests: "~3201 (59 merged PRs; STORY-049 implemented — build() wired parse→eval→validate→layout→export + catch_unwind + panic=unwind; 3201/3202 pass, 1 pre-existing cold_budget flake)"
+workspace_tests: "~3214 (59 merged PRs; STORY-049 rounds 2-4 fixed — build() end-to-end Ok path confirmed; 3214/3215 pass, 1 pre-existing cold_budget flake)"
 workspace_test_failures: 0
 ---
 
@@ -54,11 +54,11 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. Generates branded .pptx
 
 ## CURRENT POSITION
 
-Phase 3, **Wave 4 — 19/21 merged. STORY-049 IN PROGRESS (adversary round 1 complete — 0/3 strict-CLEAN; pass 2 pending).**
+Phase 3, **Wave 4 — 19/21 merged. STORY-049 IN PROGRESS (adversary rounds 2-4 complete — 0/3 strict-CLEAN; pass 5 pending).**
 
 - `develop` = `e704e700` (59 merged PRs; origin/develop confirmed). **Open PRs: 0. Active worktrees: .worktrees/STORY-049.**
-- Workspace: ~3201/3202 pass (1 pre-existing cold_budget flake). 0 CI failures.
-- STORY-049 Red Gate: 6 failing tests. Implementation: commits f3d026f9 + 97faa709. `build()` now real end-to-end (parse→eval→validate→layout→export); `catch_unwind` wired in dispatch.rs; `panic=unwind` in profile.release + profile.dist; `iter_validators()` on public API; validate stage preserves diagnostics. Adversary round 1: 3 CRIT + 3 HIGH + 4 MED + 2 LOW — ALL FIXED. Pass 2 dispatched pending.
+- Workspace: ~3214/3215 pass (1 pre-existing cold_budget flake). 0 CI failures.
+- STORY-049 build() confirmed end-to-end Ok path via real .sf source + brand.toml→synthesizer (commit 7aa9fe67). Rounds 2-4 fixed: strict defaults true (was false — spec contradiction fixed); NoBrandSource/UnknownFormat tested; panic=unwind explicit on [profile.dist]; HIGH-A/HIGH-B/MED-C/MED-D all closed (commits 817ab0b5, bd1ce67b, d4727841). Streak: 0/3 strict-CLEAN. Pass 5 pending.
 - STORY-085 MERGED PR #59 (e704e700, 2026-06-05). STORY-084 MERGED PR #58 (801f351b). STORY-083 MERGED PR #57 (5aaa27d2).
 
 **Batch C COMPLETE (3/3):** STORY-083 + STORY-084 + STORY-085 ALL MERGED. Remaining Wave 4: STORY-049 (in-progress) → STORY-050.
@@ -68,9 +68,9 @@ Phase 3, **Wave 4 — 19/21 merged. STORY-049 IN PROGRESS (adversary round 1 com
 
 ## NEXT ACTIONS (fresh orchestrator — execute in order)
 
-**STORY-049 IN PROGRESS. Adversary round 1 FIXED. Pass 2 is next.**
+**STORY-049 IN PROGRESS. Adversary rounds 2-4 ALL FIXED. Pass 5 is next.**
 
-1. **STORY-049 adversary pass 2** — Dispatch adversary (absolute cwd: `/Users/jmagady/Dev/slideforge/.worktrees/STORY-049`) for pass 2. All round-1 findings (C1 build() always-Err, C2 zero test coverage, C3 missing validate stage, H1 catch_unwind dead code, H2 panic=abort, H3 gratuitous unsafe impl, + 4 MED + 2 LOW) were fixed in commits f3d026f9 + 97faa709. Streak: 0/3 strict-CLEAN. MUST reach 3/3 before demo-recorder.
+1. **STORY-049 adversary pass 5** — Dispatch adversary (absolute cwd: `/Users/jmagady/Dev/slideforge/.worktrees/STORY-049`) for pass 5. Rounds 2-4 findings all fixed: round-2 CRIT×3 (brand routing inverted/paper fix/build() never reached Ok) + HIGH×2 (empty deck/span-strip) fixed commit 7aa9fe67; round-3 IMP-1 (strict defaulted false) + IMP-2 (doc drift) fixed commit 817ab0b5; round-4 HIGH-A (strict happy path untested) + HIGH-B (BuildError::Export missing #[source]) + MED-C (inject_lang_default not called) + MED-D (extension from key not exporter.extension()) fixed commits bd1ce67b + d4727841. Streak: 0/3 strict-CLEAN. MUST reach 3/3 before demo-recorder.
 2. **STORY-049 demo-recorder** — after 3/3 strict-CLEAN, record demo evidence per AC-001 through AC-008.
 3. **STORY-049 pr-manager** — full 9-step PR cycle after demo evidence.
 4. **STORY-050** — End-to-End Integration Test Suite (8 pts, P0) — gated on STORY-049 merge.
@@ -115,7 +115,7 @@ Phase 3, **Wave 4 — 19/21 merged. STORY-049 IN PROGRESS (adversary round 1 com
 - STORY-083: Plugin Registry Builder — MERGED PR #57 (5aaa27d2, 2026-06-05) — 6-pass cascade, 3/3 strict-CLEAN
 - STORY-084: Bundled SectionType Implementations — MERGED PR #58 (801f351b, 2026-06-05) — 7-pass cascade, 3/3 strict-CLEAN
 - STORY-085: Bundled DefaultInlineFormat + PPTX dog-fooding — MERGED PR #59 (e704e700, 2026-06-05) — 9-pass cascade, 3/3 strict-CLEAN (passes 7-8-9). 20/20 CI green; security APPROVE/CLEAN; pr-reviewer APPROVE.
-- STORY-049: Plugin Registry Assembly — root crate pipeline driver (5 pts; IN PROGRESS — adversary round 1 ALL FIXED; pass 2 pending; 0/3 strict-CLEAN). Active worktree: .worktrees/STORY-049. Code HEAD: 97faa709.
+- STORY-049: Plugin Registry Assembly — root crate pipeline driver (5 pts; IN PROGRESS — adversary rounds 2-4 ALL FIXED; pass 5 pending; 0/3 strict-CLEAN). Active worktree: .worktrees/STORY-049. Code HEAD: d4727841.
 - STORY-050: E2E Integration Test Suite (gates on STORY-049)
 **STORY-082** (slide-grouping sections) moved to Wave 5 (human-authorized split from STORY-040)
 
@@ -123,17 +123,17 @@ Phase 3, **Wave 4 — 19/21 merged. STORY-049 IN PROGRESS (adversary round 1 com
 
 ## Session Resume Checkpoint
 
-**IN-FLIGHT CHECKPOINT — STORY-049 adversary round 1 fixed; pass 2 pending. Resume: dispatch adversary pass 2 in worktree .worktrees/STORY-049 (absolute path). Streak 0/3 strict-CLEAN.**
+**IN-FLIGHT CHECKPOINT — STORY-049 adversary rounds 2-4 fixed; pass 5 pending. Resume: dispatch adversary pass 5 in worktree .worktrees/STORY-049 (absolute path). Streak 0/3 strict-CLEAN.**
 
 | Field | Value |
 |-------|-------|
 | **Date** | 2026-06-05 |
-| **Position** | Wave 4: 19/21 merged. STORY-049 IN PROGRESS — adversary round 1 complete: 3 CRIT (C1 build() brand-id always-Err; C2 build() zero test coverage; C3 missing validate stage) + 3 HIGH (H1 catch_unwind dead code; H2 panic=abort defeats catch_unwind; H3 gratuitous unsafe impl) + 4 MED + 2 LOW — ALL FIXED (commits f3d026f9 + 97faa709). Streak: 0/3 strict-CLEAN. Pass 2 next. |
+| **Position** | Wave 4: 19/21 merged. STORY-049 IN PROGRESS — adversary rounds 2-4 complete, all findings fixed. Round-2: 3 CRIT (brand routing inverted; paper-fix test; build() never Ok) + 2 HIGH (empty deck rejected; span-strip) — ALL FIXED commit 7aa9fe67 (build() reaches Ok end-to-end via real .sf + brand.toml→synthesizer). Round-3: IMP-1 (strict defaulted false — spec contradiction) + IMP-2 (doc drift) + untested branches — FIXED commit 817ab0b5. Round-4: HIGH-A (strict happy-path untested) + HIGH-B (BuildError::Export missing #[source]) + MED-C (inject_lang_default not called per slideforge-validate contract) + MED-D (extension from format key not exporter.extension()) — ALL FIXED commits bd1ce67b + d4727841. Streak: 0/3 strict-CLEAN. Pass 5 next. |
 | **develop SHA** | `e704e700` (59 merged PRs; origin/develop confirmed) |
 | **Active worktrees** | `.worktrees/STORY-049` (branch: feature/STORY-049) |
 | **Open PRs** | 0 |
 | **Workspace crates** | 17 (slideforge root crate now populated) |
-| **Spec deltas this session** | STORY-049: File Structure + validate-stage/panic-profile/diagnostics/iter_validators notes added from pass-1 fixes. build() pipeline: parse→eval→validate→layout→export fully wired; catch_unwind in dispatch.rs load-bearing; panic=unwind in profile.release+dist; iter_validators() on public PluginRegistry API. |
+| **Spec deltas this session** | STORY-049: strict defaults true (was false, spec contradiction); NoBrandSource/UnknownFormat tested; panic=unwind explicit on [profile.dist]; inject_lang_default wired per slideforge-validate contract; BuildError::Export carries #[source]; extension() from exporter not format key. |
 | **factory-artifacts** | PUSHED to remote (origin/factory-artifacts) — human-authorized 2026-06-04. Upstream tracking set. Fresh sessions: clone repo + `git worktree add .factory factory-artifacts`. |
 
 ---
@@ -165,6 +165,7 @@ Phase 3, **Wave 4 — 19/21 merged. STORY-049 IN PROGRESS (adversary round 1 com
 
 | Item | Severity | Target |
 |------|----------|--------|
+| OBS-E (STORY-049 pass-4): STORY-050 E2E must include multi-slide deck with inline formatting + data binding routed through build() to close BC-5.02.002 EC-004 end-to-end — build()'s own tests cover only a trivial title slide (appropriate; E2E owns deep coverage). Anchored to STORY-050 as required scope. | STORY-050 scope | STORY-050 |
 | SEC-042-001 (CWE-400): docx section serializers no upper bound on items count | LOW | STORY-049 / layout hardening |
 | SEC-001 (CWE-494, veraPDF): Docker `verapdf/cli:latest` not digest-pinned | MED | Before v1.0 / Phase 6 |
 | SEC-003 (CWE-189): `emu_to_pt` i64→f32 precision loss | LOW | Phase 6 Kani |
@@ -196,6 +197,9 @@ Phase 3, **Wave 4 — 19/21 merged. STORY-049 IN PROGRESS (adversary round 1 com
 
 | Date | ID | Decision |
 |------|-----|---------|
+| 2026-06-05 | STORY-049-R4 | STORY-049 adversary round 4 — ALL FIXED (commits bd1ce67b + d4727841). HIGH-A: strict=true happy path had no test — test added driving build() to Ok(BuildOutput) with strict enforcement. HIGH-B: BuildError::Export missing #[source] attribute breaking error-chain — added. MED-C: build_inner() did not call inject_lang_default() per slideforge-validate contract — wired. MED-D: BuildOutput.extension derived from format map key, not exporter.extension() — corrected. Workspace: 3214/3215 pass (1 pre-existing cold_budget flake). Streak: 0/3 strict-CLEAN. Pass 5 pending. |
+| 2026-06-05 | STORY-049-R3 | STORY-049 adversary round 3 — ALL FIXED (commit 817ab0b5). IMP-1: strict defaulted false — contradicts spec (strict=true is default per CLAUDE.md and STORY-049 spec); corrected to default true. IMP-2: doc drift — stale docstring from round-1 era updated. Untested branches: NoBrandSource and UnknownFormat error paths now tested. panic=unwind added explicitly to [profile.dist] (was already in [profile.release] from round-1 fix but dist was missing). Workspace: ~3210 pass. Streak: 0/3 strict-CLEAN. Pass 4 pending. |
+| 2026-06-05 | STORY-049-R2 | STORY-049 adversary round 2 — ALL FIXED (commit 7aa9fe67). C1: brand routing inverted — TomlFile path always returned Err due to incorrect variant check; corrected routing logic. C2: no end-to-end Ok test — paper fix: added test that actually drives build() to Ok(BuildOutput) via real .sf source + brand.toml→BrandProvider::Synthesize; test fails if build() never reaches Ok. C3: strict-validation test never called build() — test restructured to call build() and assert on BuildOutput. HIGH: layout rejected empty decks; diagnostics span-stripping. All fixed. Workspace: ~3207 pass. Streak: 0/3 strict-CLEAN. Pass 3 pending. |
 | 2026-06-05 | STORY-049-R1 | STORY-049 adversary round 1 complete — ALL FIXED (commits f3d026f9 + 97faa709). C1: build() always returned Err(RegistryError::RegistryBuildFailed) due to brand-id path; now routes correctly through real registry. C2: build() had zero direct test coverage despite 3192 green tests; end-to-end tests added. C3: validate stage entirely absent from build(); now wired via registry.iter_validators() on public API; diagnostics preserved through BuildError::ValidationFailed. H1: catch_unwind in dispatch.rs was dead code (build() bypassed it); now all BrandProvider::load/Validator::validate/Exporter::export calls route through it. H2: Cargo.toml [profile.release]/[profile.dist] had panic="abort" silently disabling catch_unwind; corrected to panic="unwind". H3: gratuitous `unsafe impl Send` removed. 4 MED + 2 LOW also fixed. Spec delta: STORY-049 File Structure table updated; validate-stage/panic-profile/diagnostics/iter_validators prose added. Workspace: 3201/3202 pass (1 pre-existing cold_budget flake). Streak: 0/3 strict-CLEAN. Pass 2 pending. Validates per-story LOCAL cascade: build() could never succeed despite 3192 green tests. |
 | 2026-06-05 | STORY-085 | STORY-085 MERGED PR #59 (e704e700, mergedAt 2026-06-05T08:00:18Z). 20/20 CI checks green; security-reviewer APPROVE/CLEAN; pr-reviewer APPROVE. LOCAL adversary cascade 9 passes, 3/3 strict-CLEAN (passes 7-8-9). 12 InlineNode variants × 3 formats bundled; notes_slide.rs dog-fooded through InlineFormat trait (BC-5.02.002 EC-004); display_text_is_empty shared SoT in slideforge-types. Wave 4: 19/21 merged. Batch C COMPLETE. STORY-049 now UNGATED. |
 | 2026-06-05 | STORY-085-CONV | STORY-085 LOCAL adversary cascade CONVERGED. 9 passes total; passes 7-8-9 strict-CLEAN (3/3 per BC-5.39.001). All findings F-001 through F-085-P6-001 closed. Code HEAD 29903a1a; 3177 workspace tests pass; fmt + pedantic clippy + doc + grep-zero + nextest all GREEN (orchestrator-verified). Two anchored deferrals: (1) OBS-1 CWE-601 — DefaultInlineFormat intentionally omits URL scheme filtering (format-agnostic layer); anchored as STORY-046 AC-010 (required security gate before HTML exporter ships); (2) OBS-2 process-gap — AC-005 audit test filename-exemption nit, low priority, anchored to self-improvement epic. |
