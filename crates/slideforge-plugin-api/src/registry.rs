@@ -1427,6 +1427,115 @@ mod tests {
 
     // ── EC-001 (builder): multiple register_* calls for same surface ──────────
 
+    // ── AC-003 / AC-004 / EC-002: partial registry (3-of-10 surfaces) ──────────
+    //
+    // F-083-03 gap closure: the non-10 branch of surface_count() / surface_names()
+    // had no behavioral coverage. An impl hardcoding `10` would pass all tests
+    // above (TD-VSDD-059 paper-fix risk). These tests use the mutation API directly
+    // on `PluginRegistry::new()` — the builder rejects partial registries, so only
+    // the direct register_* path can construct one.
+    //
+    // The 3 surfaces chosen are the first 3 in SURFACE_NAMES canonical declaration
+    // order: DataSource (index 0), Exporter (index 1), ChartRenderer (index 2).
+
+    /// AC-003 (partial): `surface_count()` on a partially-assembled 3-of-10
+    /// registry via the mutation API must return 3, NOT 10.
+    ///
+    /// This test falsifies any impl that hardcodes `10` or unconditionally
+    /// returns the total number of struct fields.
+    ///
+    /// Traceability: AC-003 (STORY-083), BC-5.02.001 postcondition 2, F-083-03.
+    #[test]
+    fn test_bc_5_02_001_partial_registry_surface_count_returns_actual_nonzero_count() {
+        let mut registry = PluginRegistry::new();
+        // Register exactly 3 surfaces — first 3 in SURFACE_NAMES declaration order.
+        registry.register_data_source(Box::new(StubDataSource));
+        registry.register_exporter(Box::new(StubExporter));
+        registry.register_chart_renderer(Box::new(StubChartRenderer));
+
+        let count = registry.surface_count();
+        assert_eq!(
+            count, 3,
+            "AC-003 (partial): surface_count() on a 3-of-10 partial registry must \
+             return 3, not 10 — an impl hardcoding 10 would fail here (F-083-03)"
+        );
+    }
+
+    /// AC-004 / EC-002 (partial): `surface_names()` on a partially-assembled
+    /// 3-of-10 registry must return ONLY the names of the 3 registered surfaces,
+    /// in canonical SURFACE_NAMES declaration order.
+    ///
+    /// Asserts both exact contents AND exact order.  The 7 unregistered surfaces
+    /// must NOT appear in the result.
+    ///
+    /// Traceability: AC-004 (STORY-083), EC-002, BC-5.02.001 invariant 1, F-083-03.
+    #[test]
+    fn test_bc_5_02_001_partial_registry_surface_names_returns_only_registered_surfaces() {
+        let mut registry = PluginRegistry::new();
+        // Register exactly 3 surfaces — first 3 in SURFACE_NAMES declaration order.
+        registry.register_data_source(Box::new(StubDataSource));
+        registry.register_exporter(Box::new(StubExporter));
+        registry.register_chart_renderer(Box::new(StubChartRenderer));
+
+        let names = registry.surface_names();
+
+        // Assert exact length.
+        assert_eq!(
+            names.len(),
+            3,
+            "AC-004 / EC-002 (partial): surface_names() must return exactly 3 names \
+             for a 3-of-10 partial registry; got: {:?}",
+            names
+        );
+
+        // Assert exact contents AND canonical declaration order (SURFACE_NAMES[0..=2]).
+        let expected: Vec<&'static str> = vec!["DataSource", "Exporter", "ChartRenderer"];
+        assert_eq!(
+            names, expected,
+            "AC-004 / EC-002 (partial): surface_names() must return exactly \
+             [\"DataSource\", \"Exporter\", \"ChartRenderer\"] in declaration order; \
+             got: {:?}",
+            names
+        );
+
+        // Verify the expected names are the actual first 3 entries of SURFACE_NAMES
+        // (guards against SURFACE_NAMES reordering breaking this test silently).
+        assert_eq!(
+            SURFACE_NAMES[0], "DataSource",
+            "SURFACE_NAMES[0] must be \"DataSource\" per spec"
+        );
+        assert_eq!(
+            SURFACE_NAMES[1], "Exporter",
+            "SURFACE_NAMES[1] must be \"Exporter\" per spec"
+        );
+        assert_eq!(
+            SURFACE_NAMES[2], "ChartRenderer",
+            "SURFACE_NAMES[2] must be \"ChartRenderer\" per spec"
+        );
+    }
+
+    /// Cross-consistency: `surface_names().len() == surface_count()` on a partial
+    /// registry.  These two introspection methods must never diverge.
+    ///
+    /// Traceability: AC-003 + AC-004 consistency invariant, F-083-03.
+    #[test]
+    fn test_bc_5_02_001_partial_registry_surface_names_len_equals_surface_count() {
+        let mut registry = PluginRegistry::new();
+        registry.register_data_source(Box::new(StubDataSource));
+        registry.register_exporter(Box::new(StubExporter));
+        registry.register_chart_renderer(Box::new(StubChartRenderer));
+
+        let count = registry.surface_count();
+        let names_len = registry.surface_names().len();
+        assert_eq!(
+            names_len, count,
+            "surface_names().len() must equal surface_count() on a partial registry; \
+             got names_len={names_len}, surface_count={count}"
+        );
+    }
+
+    // ── EC-001 (builder): multiple register_* calls for same surface ──────────
+
     /// BC-5.02.001 EC-001 / STORY-083 EC-001: registering the same surface twice is
     /// additive — both are stored; `surface_count()` counts surfaces, not total
     /// plugins; `build()` succeeds if all 10 surfaces have at least 1 each.
