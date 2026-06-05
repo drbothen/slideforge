@@ -44,6 +44,7 @@
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 
+pub mod inline_formats;
 pub mod registry;
 pub mod section_types;
 pub mod slide_types;
@@ -52,6 +53,7 @@ pub mod traits;
 // Re-export everything at the crate root for ergonomic usage.
 // Consumers can write `use slideforge_plugin_api::DataSource;` without
 // the module path.
+pub use inline_formats::DefaultInlineFormat;
 pub use registry::{PluginRegistry, PluginRegistryBuilder, RegistryError, SURFACE_NAMES};
 pub use section_types::{
     AppendixSectionType, ApprovalSectionType, ExecutiveSummarySectionType, GlossarySectionType,
@@ -62,8 +64,9 @@ pub use traits::{
     BrandError, BrandProvider, BrandSource, Canvas, ChartError, ChartRenderer, DataSource,
     DataSourceError, DataSourceOptions, Diagnostic, DiagnosticSeverity, DiagramError,
     DiagramOptions, DiagramRenderer, ExportError, ExportOptions, Exporter, FieldDef, InlineError,
-    InlineFormat, InlineOutputFormat, LayoutError, MathError, MathOutputFormat, MathRenderer,
-    SectionBlock, SectionType, SlideType, Validator, ValidatorOptions,
+    InlineFormat, InlineOutputFormat, InlineRenderContext, LayoutError, MathError,
+    MathOutputFormat, MathRenderer, SectionBlock, SectionType, SlideType, Validator,
+    ValidatorOptions,
 };
 
 // Compile-time assertion: PluginRegistry is Send + Sync (AC-014).

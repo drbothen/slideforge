@@ -21,3 +21,9 @@ slideforge-types.workspace = true
 slideforge-layout = { workspace = true }
 thiserror = { workspace = true }
 strsim = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+insta = { workspace = true }
+# tracing-test: load-bearing test capturing tracing::debug! for Footnote deferral log (F-010 / STORY-085)
+tracing-test = "=0.2.5"

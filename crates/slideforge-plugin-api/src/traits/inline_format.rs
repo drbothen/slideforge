@@ -14,6 +14,41 @@
 use slideforge_types::InlineNode;
 use thiserror::Error;
 
+// ─────────────────────────────────────────────────────────────────────────────
+// InlineRenderContext
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Context passed to [`InlineFormat::render_with_context`] for runs that need
+/// exporter-owned package state — specifically, the pre-registered relationship
+/// ID for a hyperlink.
+///
+/// This struct is passed by reference and is zero-cost when unused: the default
+/// implementation of `render_with_context` ignores it and delegates to `render`.
+///
+/// ## OOXML hyperlinks (F-001 / AC-005 / BC-5.02.002)
+///
+/// OOXML hyperlinks require a relationship ID (`rId`) that must be pre-registered
+/// in the `.rels` file by the exporter before the XML body is serialized.
+/// The `InlineFormat::render` signature has no mechanism to receive this state,
+/// so exporters that need proper hyperlink runs must call `render_with_context`
+/// and supply the pre-registered `rId` via `hyperlink_rid`.
+///
+/// - Non-OOXML formats (HTML, Markdown) set `hyperlink_rid = None`; the
+///   formatter ignores it and produces native link markup.
+/// - OOXML exporters without a relationship manager set `hyperlink_rid = None`;
+///   the formatter falls back to the display-text-plus-warn behavior from `render`.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct InlineRenderContext<'a> {
+    /// Relationship ID (`rId`) pre-registered by the exporter for a `Link` node's URL.
+    ///
+    /// - `Some(rid)` — emit a full `<a:r><a:rPr><a:hlinkClick r:id="{rid}"/>` run.
+    /// - `None` — fall back to the display-text plain-run behavior from `render`.
+    ///
+    /// Only meaningful for OOXML output; HTML and Markdown formatters must ignore
+    /// this field.
+    pub hyperlink_rid: Option<&'a str>,
+}
+
 /// The output format for an inline formatting operation.
 ///
 /// `#[non_exhaustive]` — external [`InlineFormat`] plugins pattern-match
@@ -101,6 +136,33 @@ pub trait InlineFormat: Send + Sync {
     /// Returns [`InlineError`] when the node type is not supported in the
     /// requested format, or when rendering fails internally.
     fn render(&self, node: &InlineNode, format: InlineOutputFormat) -> Result<String, InlineError>;
+
+    /// Render `node` to a string in `format`, with optional exporter-owned context.
+    ///
+    /// The default implementation ignores `context` and delegates to [`Self::render`].
+    /// Implementations that need `context` (e.g., to embed a hyperlink
+    /// relationship ID for OOXML) SHOULD override this method.
+    ///
+    /// ## Overriding
+    ///
+    /// Override this method to handle the `Link + Ooxml` case when a relationship
+    /// ID is available in `context.hyperlink_rid`. All other cases must still
+    /// delegate to [`Self::render`].
+    ///
+    /// See [`InlineRenderContext`] for the full contract.
+    ///
+    /// # Errors
+    ///
+    /// Same error conditions as [`Self::render`].
+    fn render_with_context(
+        &self,
+        node: &InlineNode,
+        format: InlineOutputFormat,
+        context: &InlineRenderContext<'_>,
+    ) -> Result<String, InlineError> {
+        let _ = context; // default: ignore context, delegate to render
+        self.render(node, format)
+    }
 }
 
 #[cfg(test)]
@@ -154,5 +216,73 @@ mod tests {
             message: "LaTeX source is empty".to_owned(),
         };
         assert!(err.to_string().contains("inline render error"));
+    }
+
+    // ── F-001: InlineRenderContext + render_with_context ──────────────────────
+
+    /// F-001 (CRIT): `InlineRenderContext` must exist and expose `hyperlink_rid: Option<&'a str>`.
+    /// This test fails before F-001 because `InlineRenderContext` does not exist.
+    #[test]
+    fn test_f001_inline_render_context_struct_exists() {
+        let ctx: InlineRenderContext<'_> = InlineRenderContext::default();
+        assert!(
+            ctx.hyperlink_rid.is_none(),
+            "Default context must have no hyperlink_rid"
+        );
+    }
+
+    /// F-001 (CRIT): `InlineRenderContext` with a `hyperlink_rid` can be constructed.
+    #[test]
+    fn test_f001_inline_render_context_with_rid() {
+        let rid = "rId3";
+        let ctx = InlineRenderContext {
+            hyperlink_rid: Some(rid),
+        };
+        assert_eq!(ctx.hyperlink_rid, Some("rId3"));
+    }
+
+    /// F-001 (CRIT): `InlineRenderContext` is `Copy` (carries only `Option<&'a str>`).
+    #[test]
+    fn test_f001_inline_render_context_is_copy() {
+        let ctx = InlineRenderContext {
+            hyperlink_rid: Some("rId5"),
+        };
+        let ctx2 = ctx; // Copy
+        let ctx3 = ctx; // Still usable
+        assert_eq!(ctx2.hyperlink_rid, ctx3.hyperlink_rid);
+    }
+
+    /// F-001 (CRIT): The `InlineFormat` trait has a `render_with_context` method
+    /// with the correct signature. We verify via a concrete implementation.
+    /// This test fails before F-001 because the method does not exist on the trait.
+    #[test]
+    fn test_f001_render_with_context_exists_on_trait() {
+        use slideforge_types::InlineNode;
+        use std::sync::Arc;
+
+        // A minimal stub implementation — only needs to compile and return Ok.
+        struct StubFormatter;
+        impl InlineFormat for StubFormatter {
+            fn id(&self) -> &'static str {
+                "stub"
+            }
+            fn render(
+                &self,
+                _node: &InlineNode,
+                _format: InlineOutputFormat,
+            ) -> Result<String, InlineError> {
+                Ok(String::new())
+            }
+            // Inherits the default `render_with_context` — must compile.
+        }
+
+        let node = InlineNode::Plain(Arc::from("hello"));
+        let ctx = InlineRenderContext::default();
+        let result = StubFormatter.render_with_context(&node, InlineOutputFormat::Html, &ctx);
+        // The default implementation delegates to render(), which returns Ok("").
+        assert!(
+            result.is_ok(),
+            "render_with_context default must succeed: {result:?}"
+        );
     }
 }

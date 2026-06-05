@@ -2630,10 +2630,13 @@ dependencies = [
 name = "slideforge-plugin-api"
 version = "0.1.0"
 dependencies = [
+ "insta",
  "slideforge-layout",
  "slideforge-types",
  "strsim",
  "thiserror 2.0.18",
+ "tracing",
+ "tracing-test",
 ]
 
 [[package]]

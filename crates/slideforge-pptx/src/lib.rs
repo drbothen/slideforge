@@ -83,7 +83,7 @@ use slide_serializer::SlideSerializer;
 use slideforge_brand::BrandTemplate;
 use slideforge_brand::layout_xml::{serialize_master_to_xml, serialize_theme_to_xml};
 use slideforge_layout::{FrameContent, LaidOutDeck, LaidOutSlide};
-use slideforge_plugin_api::{ExportError, ExportOptions, Exporter};
+use slideforge_plugin_api::{DefaultInlineFormat, ExportError, ExportOptions, Exporter};
 use slideforge_types::{Brand, Deck, Register};
 use zip_assembler::{ZipAssembler, ZipPart};
 
@@ -683,13 +683,18 @@ fn build_notes_slide_parts(
             "building notesSlide part"
         );
 
-        let output =
-            NotesSlideSerializer::build(slide_num, &slide.register_content).map_err(|e| {
-                PptxError::OoxmlElement {
-                    part: format!("ppt/notesSlides/notesSlide{slide_num}.xml"),
-                    detail: format!("NotesSlideSerializer::build failed: {e}"),
-                }
-            })?;
+        // STORY-049 wires the assembled PluginRegistry here; until then the
+        // bundled DefaultInlineFormat ("default") is passed directly. The
+        // serializer is already registry-ready (&dyn InlineFormat).
+        let output = NotesSlideSerializer::build(
+            slide_num,
+            &slide.register_content,
+            &DefaultInlineFormat, // STORY-049: replace with registry.lookup_inline_format("default")
+        )
+        .map_err(|e| PptxError::OoxmlElement {
+            part: format!("ppt/notesSlides/notesSlide{slide_num}.xml"),
+            detail: format!("NotesSlideSerializer::build failed: {e}"),
+        })?;
 
         parts.push(ZipPart {
             path: format!("ppt/notesSlides/notesSlide{slide_num}.xml"),

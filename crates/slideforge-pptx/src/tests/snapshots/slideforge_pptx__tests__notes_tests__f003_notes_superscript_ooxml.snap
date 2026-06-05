@@ -1,0 +1,5 @@
+---
+source: crates/slideforge-pptx/src/tests/notes_tests.rs
+expression: extract_paragraph_content(&notes_xml)
+---
+<a:p><a:r><a:rPr baseline="30000"/><a:t>2</a:t></a:r></a:p>
