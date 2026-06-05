@@ -9,11 +9,17 @@
 //!
 //! The preferred construction path is [`PluginRegistryBuilder`]:
 //!
-//! ```ignore
-//! let registry = PluginRegistryBuilder::default()
-//!     .register_data_source(Box::new(my_data_source))
-//!     // … register all 10 surfaces …
-//!     .build()?;
+//! ```no_run
+//! # use slideforge_plugin_api::PluginRegistryBuilder;
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! // All register_* methods take &mut self and return &mut Self.
+//! // Call build() as a separate statement after registering all surfaces.
+//! let mut builder = PluginRegistryBuilder::default();
+//! // builder.register_data_source(Box::new(my_data_source));
+//! // … register all 10 surfaces …
+//! let registry = builder.build()?;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! [`PluginRegistryBuilder::build`] returns [`Err(RegistryError::MissingSurface)`] if
@@ -107,12 +113,20 @@ pub const SURFACE_NAMES: [&str; 10] = [
 ///
 /// ## Usage
 ///
-/// ```ignore
-/// let registry = PluginRegistryBuilder::default()
-///     .register_data_source(Box::new(JsonDataSource::new()))
-///     .register_exporter(Box::new(PptxExporter::new()))
-///     // … register all 10 surfaces …
-///     .build()?;
+/// All `register_*` methods take `&mut self` and return `&mut Self`. Because
+/// `build()` consumes `self`, chaining `register_*(...).build()` off a
+/// temporary does not compile. Use separate statements instead:
+///
+/// ```no_run
+/// # use slideforge_plugin_api::PluginRegistryBuilder;
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let mut builder = PluginRegistryBuilder::default();
+/// // builder.register_data_source(Box::new(JsonDataSource::new()));
+/// // builder.register_exporter(Box::new(PptxExporter::new()));
+/// // … register all 10 surfaces …
+/// let registry = builder.build()?;
+/// # Ok(())
+/// # }
 /// ```
 ///
 /// ## Enforcement
