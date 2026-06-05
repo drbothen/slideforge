@@ -290,6 +290,31 @@ impl PluginRegistryBuilder {
         self
     }
 
+    // ── Surface-presence mapping (single source of truth) ────────────────────
+
+    /// Return a fixed-size array pairing each canonical surface name with a
+    /// flag indicating whether that surface has at least one registration.
+    ///
+    /// The order matches [`SURFACE_NAMES`] declaration order (BC-5.02.001
+    /// invariant 1). This is the **single source of truth** for the
+    /// name↔vec mapping: [`build`](Self::build) uses it for the empty-surface
+    /// check. Adding an 11th surface requires touching only this method and the
+    /// corresponding struct field.
+    fn surface_presence(&self) -> [(&'static str, bool); 10] {
+        [
+            (SURFACE_NAMES[0], !self.data_sources.is_empty()),
+            (SURFACE_NAMES[1], !self.exporters.is_empty()),
+            (SURFACE_NAMES[2], !self.chart_renderers.is_empty()),
+            (SURFACE_NAMES[3], !self.diagram_renderers.is_empty()),
+            (SURFACE_NAMES[4], !self.validators.is_empty()),
+            (SURFACE_NAMES[5], !self.math_renderers.is_empty()),
+            (SURFACE_NAMES[6], !self.brand_providers.is_empty()),
+            (SURFACE_NAMES[7], !self.slide_types.is_empty()),
+            (SURFACE_NAMES[8], !self.section_types.is_empty()),
+            (SURFACE_NAMES[9], !self.inline_formats.is_empty()),
+        ]
+    }
+
     // ── Finalization ──────────────────────────────────────────────────────────
 
     /// Finalize the builder into a [`PluginRegistry`].
@@ -309,22 +334,11 @@ impl PluginRegistryBuilder {
     /// zero registrations at call time.
     #[must_use = "registry build result must be checked; an Err means a required surface is missing"]
     pub fn build(self) -> Result<PluginRegistry, RegistryError> {
-        // Check each required surface in SURFACE_NAMES declaration order.
+        // Check each required surface in SURFACE_NAMES declaration order via the
+        // single-source surface_presence mapping (TD-VSDD-060 compliance).
         // Report the first empty surface with a typed error (BC-5.02.001 invariant 3).
-        let surface_vecs_empty = [
-            (SURFACE_NAMES[0], self.data_sources.is_empty()),
-            (SURFACE_NAMES[1], self.exporters.is_empty()),
-            (SURFACE_NAMES[2], self.chart_renderers.is_empty()),
-            (SURFACE_NAMES[3], self.diagram_renderers.is_empty()),
-            (SURFACE_NAMES[4], self.validators.is_empty()),
-            (SURFACE_NAMES[5], self.math_renderers.is_empty()),
-            (SURFACE_NAMES[6], self.brand_providers.is_empty()),
-            (SURFACE_NAMES[7], self.slide_types.is_empty()),
-            (SURFACE_NAMES[8], self.section_types.is_empty()),
-            (SURFACE_NAMES[9], self.inline_formats.is_empty()),
-        ];
-        for (surface, is_empty) in surface_vecs_empty {
-            if is_empty {
+        for (surface, present) in self.surface_presence() {
+            if !present {
                 return Err(RegistryError::MissingSurface { surface });
             }
         }
@@ -409,6 +423,30 @@ impl PluginRegistry {
     // Introspection (AC-003, AC-004 — STORY-083)
     // ──────────────────────────────────────────────────────────────────────────
 
+    /// Return a fixed-size array pairing each canonical surface name with a
+    /// flag indicating whether that surface has at least one registration.
+    ///
+    /// The order matches [`SURFACE_NAMES`] declaration order (BC-5.02.001
+    /// invariant 1). This is the **single source of truth** for the
+    /// name↔vec mapping on `PluginRegistry`: [`surface_count`](Self::surface_count)
+    /// and [`surface_names`](Self::surface_names) both derive from it. Adding
+    /// an 11th surface requires touching only this method and the corresponding
+    /// struct field.
+    fn surface_presence(&self) -> [(&'static str, bool); 10] {
+        [
+            (SURFACE_NAMES[0], !self.data_sources.is_empty()),
+            (SURFACE_NAMES[1], !self.exporters.is_empty()),
+            (SURFACE_NAMES[2], !self.chart_renderers.is_empty()),
+            (SURFACE_NAMES[3], !self.diagram_renderers.is_empty()),
+            (SURFACE_NAMES[4], !self.validators.is_empty()),
+            (SURFACE_NAMES[5], !self.math_renderers.is_empty()),
+            (SURFACE_NAMES[6], !self.brand_providers.is_empty()),
+            (SURFACE_NAMES[7], !self.slide_types.is_empty()),
+            (SURFACE_NAMES[8], !self.section_types.is_empty()),
+            (SURFACE_NAMES[9], !self.inline_formats.is_empty()),
+        ]
+    }
+
     /// Return the number of plugin surfaces that have at least one registration.
     ///
     /// For a fully-registered registry (all 10 surfaces), returns `10`.
@@ -422,23 +460,11 @@ impl PluginRegistry {
     /// - BC-5.02.001 postcondition 2
     #[must_use]
     pub fn surface_count(&self) -> usize {
-        // Count the number of surface vecs that have at least one registration.
-        // Uses the same declaration order as SURFACE_NAMES (BC-5.02.001 postcondition 2).
-        [
-            !self.data_sources.is_empty(),
-            !self.exporters.is_empty(),
-            !self.chart_renderers.is_empty(),
-            !self.diagram_renderers.is_empty(),
-            !self.validators.is_empty(),
-            !self.math_renderers.is_empty(),
-            !self.brand_providers.is_empty(),
-            !self.slide_types.is_empty(),
-            !self.section_types.is_empty(),
-            !self.inline_formats.is_empty(),
-        ]
-        .iter()
-        .filter(|&&non_empty| non_empty)
-        .count()
+        // Delegate to the single-source surface_presence mapping (TD-VSDD-060).
+        self.surface_presence()
+            .iter()
+            .filter(|&&(_, present)| present)
+            .count()
     }
 
     /// Return the canonical names of all surfaces that have at least one
@@ -458,22 +484,10 @@ impl PluginRegistry {
     /// - BC-5.02.001 invariant 1
     #[must_use]
     pub fn surface_names(&self) -> Vec<&'static str> {
-        // Pair each canonical name with its non-emptiness flag, in declaration order.
+        // Delegate to the single-source surface_presence mapping (TD-VSDD-060).
         // Collect only names whose corresponding surface vec has at least one plugin
         // (EC-002: partial registries return only registered surface names).
-        let surface_presence = [
-            (SURFACE_NAMES[0], !self.data_sources.is_empty()),
-            (SURFACE_NAMES[1], !self.exporters.is_empty()),
-            (SURFACE_NAMES[2], !self.chart_renderers.is_empty()),
-            (SURFACE_NAMES[3], !self.diagram_renderers.is_empty()),
-            (SURFACE_NAMES[4], !self.validators.is_empty()),
-            (SURFACE_NAMES[5], !self.math_renderers.is_empty()),
-            (SURFACE_NAMES[6], !self.brand_providers.is_empty()),
-            (SURFACE_NAMES[7], !self.slide_types.is_empty()),
-            (SURFACE_NAMES[8], !self.section_types.is_empty()),
-            (SURFACE_NAMES[9], !self.inline_formats.is_empty()),
-        ];
-        surface_presence
+        self.surface_presence()
             .iter()
             .filter_map(|&(name, present)| if present { Some(name) } else { None })
             .collect()
