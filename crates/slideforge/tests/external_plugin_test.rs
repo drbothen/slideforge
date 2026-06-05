@@ -55,12 +55,11 @@ impl DataSource for TestDataSource {
     }
 }
 
-// SAFETY: TestDataSource holds only a `Value` (which is Clone + Send + Sync).
-// Required to box as `Box<dyn DataSource + Send + Sync>`.
-// SAFETY: Value is Send (no Rc/RefCell/raw pointers).
-unsafe impl Send for TestDataSource {}
-// SAFETY: TestDataSource has no interior mutability.
-unsafe impl Sync for TestDataSource {}
+// `Send` and `Sync` are auto-derived for `TestDataSource` because its only
+// field, `Value`, is `Send + Sync`. No manual `unsafe impl` is needed and
+// writing one would teach the WRONG pattern to external plugin authors
+// (who should rely on auto-derive, not unsafe). The compiler will reject this
+// file if `Value` ever becomes non-Send/Sync, which is the correct signal.
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
 

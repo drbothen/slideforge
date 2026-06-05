@@ -192,8 +192,6 @@ pub fn register_bundled_plugins(builder: &mut PluginRegistryBuilder) {
 ///
 /// - STORY-049 AC-001: `default_registry().surface_count() == 10`
 pub fn default_registry() -> Result<PluginRegistry, RegistryError> {
-    // STORY-049 RED GATE STUB.
-    // Implementation: call register_bundled_plugins then builder.build().
     let mut builder = PluginRegistryBuilder::default();
     register_bundled_plugins(&mut builder);
     builder.build()
@@ -340,29 +338,73 @@ mod tests {
 
     /// BC-5.02.001 EC-004: multiple plugins registered for the same surface
     /// (e.g., `BrandLoader` + `BrandSynthesizer` for `BrandProvider`) must both be
-    /// accessible; the first registered is returned on `lookup_brand_provider`.
+    /// accessible via their canonical ids.
     ///
-    /// This verifies the EC-004 edge case specifically for the `BrandProvider`
-    /// surface which ships with 2 bundled implementations.
+    /// - `BrandLoader` id = `"slideforge-brand/default"` — handles `TomlFile`,
+    ///   `PptxFile`, and `DocxFile` `BrandSource` variants.
+    /// - `BrandSynthesizer` id = `"slideforge-brand-synthesizer"` — handles
+    ///   `TomlFile` only (synthesizes from toml config); `PptxFile`/`DocxFile` return
+    ///   `Err(NotImplemented)`.
+    ///
+    /// Both must be `Some` after `register_bundled_plugins` to prove EC-004
+    /// (multi-registration on one surface).
     #[test]
     fn test_bc_5_02_001_ec004_multiple_brand_providers_registered() {
         let registry =
             default_registry().expect("default_registry() must return Ok(PluginRegistry)");
 
-        // The BrandProvider surface must be present (≥1 implementation).
-        let brand_provider = registry.lookup_brand_provider("file");
-        // brand_provider may be None if the id is different — the critical assertion
-        // is that the surface is registered (surface_count() == 10, which covers it).
-        // We additionally assert the "default" brand-loader id is present.
-        // If "file" is not the id, the surface_count assertion already covers coverage.
-        let _ = brand_provider; // consulted for id naming — see below
+        // EC-004a: BrandLoader must be accessible by its canonical id.
+        let brand_loader = registry.lookup_brand_provider("slideforge-brand/default");
+        assert!(
+            brand_loader.is_some(),
+            "EC-004: BrandLoader must be accessible via id 'slideforge-brand/default'; \
+             returned None — check register_bundled_plugins BrandProvider registrations"
+        );
 
-        // Assert at minimum that surface_count includes BrandProvider (index 6 in order).
+        // EC-004b: BrandSynthesizer must be accessible by its canonical id.
+        let brand_synthesizer = registry.lookup_brand_provider("slideforge-brand-synthesizer");
+        assert!(
+            brand_synthesizer.is_some(),
+            "EC-004: BrandSynthesizer must be accessible via id 'slideforge-brand-synthesizer'; \
+             returned None — check register_bundled_plugins BrandProvider registrations"
+        );
+
+        // surface_count must still be 10 (counts surfaces, not plugins).
         assert_eq!(
             registry.surface_count(),
             10,
-            "EC-004: BrandProvider surface must be covered; surface_count must remain 10"
+            "EC-004: surface_count must remain 10 after registering 2 BrandProviders \
+             (surface count, not plugin count)"
         );
+    }
+
+    // ── M4: assert bundled DataSource ids (EC-002 regression guard) ──────────
+
+    /// BC-5.02.001 EC-002 regression guard: the four bundled `DataSource`
+    /// plugins must remain accessible by their canonical ids after
+    /// `register_bundled_plugins`. Silently dropping one (e.g. by renaming
+    /// the plugin or missing a registration) would cause EC-002 failures at
+    /// runtime without triggering a compilation error.
+    ///
+    /// Canonical bundled ids:
+    /// - `"file"` — `FileDataSource` (JSON, CSV, YAML, TOML by extension)
+    /// - `"http"` — `HttpDataSource` (HTTP/HTTPS remote sources)
+    /// - `"xlsx"` — `XlsxDataSource` (Excel spreadsheets)
+    /// - `"sqlite"` — `SqliteDataSource` (`SQLite` query results)
+    #[test]
+    fn test_bc_5_02_001_m4_bundled_data_source_ids_all_registered() {
+        let registry =
+            default_registry().expect("default_registry() must return Ok(PluginRegistry)");
+
+        let expected_ids = ["file", "http", "xlsx", "sqlite"];
+        for id in &expected_ids {
+            assert!(
+                registry.lookup_data_source(id).is_some(),
+                "M4: bundled DataSource with id '{id}' must be registered; \
+                 lookup_data_source returned None — \
+                 check register_bundled_plugins DataSource registrations"
+            );
+        }
     }
 
     // ── EC-003: partial builder (only DataSource registered) → MissingSurface ──

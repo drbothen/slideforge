@@ -90,12 +90,22 @@ slideforge-pdf = { path = "crates/slideforge-pdf", version = "0.1.0" }
 slideforge-docx = { path = "crates/slideforge-docx", version = "0.1.0" }
 
 # Release profile tuned for binary size and runtime perf.
+#
+# IMPORTANT: panic = "unwind" is required by BC-5.02.001 EC-003 / STORY-049 AC-008.
+# The plugin dispatch boundary uses `std::panic::catch_unwind` to isolate
+# third-party plugin panics from the slideforge process. `catch_unwind` is a
+# no-op when `panic = "abort"` is set, which would make EC-003 FALSE in shipped
+# builds. Use `panic = "unwind"` so that plugin panics are caught at the
+# dispatch boundary, not the OS signal handler.
+#
+# Binary size impact: unwind tables add ~2-5% to binary size. This is
+# acceptable given the safety guarantee (no process crash from plugin panics).
 [profile.release]
 opt-level = 3
 lto = "thin"
 codegen-units = 1
 strip = "symbols"
-panic = "abort"
+panic = "unwind"
 
 # Profile for distribution binaries — smaller, slower link.
 [profile.dist]
