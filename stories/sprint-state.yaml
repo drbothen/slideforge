@@ -526,7 +526,7 @@ stories:
     workspace_tests: "~3177 (inline_formats + pptx dog-fooding + types display_text_is_empty)"
     notes: "Bundled DefaultInlineFormat + PPTX OOXML Dog-Fooding Refactor. 12 InlineNode variants x 3 formats in slideforge-plugin-api/src/inline_formats/; notes_slide.rs dog-fooded through InlineFormat trait (BC-5.02.002 EC-004); display_text_is_empty shared SoT in slideforge-types/src/inline.rs. 20/20 CI green. OBS-1 CWE-601 anchored STORY-046 AC-010; OBS-2 process-gap anchored self-improvement epic. LESSON-13/ADR-016 Decision 2+3."
   STORY-049:
-    status: ready
+    status: local-converged
     wave: 4
     batch: C
     priority: P0
@@ -534,7 +534,11 @@ stories:
     depends_on: [STORY-002, STORY-003, STORY-015, STORY-016, STORY-017, STORY-018, STORY-019, STORY-020, STORY-021, STORY-022, STORY-023, STORY-029, STORY-031, STORY-033, STORY-034, STORY-037, STORY-038, STORY-039, STORY-040, STORY-041, STORY-042, STORY-043, STORY-044, STORY-045, STORY-083, STORY-084, STORY-085]
     blocks: [STORY-050]
     ungated: 2026-06-05
-    notes: "Plugin Registry Assembly (root crate); all prerequisites merged (083/084/085 DONE 2026-06-05); calls PluginRegistryBuilder from slideforge-plugin-api; chain: STORY-049→050; amended per LESSON-13 (2026-06-04). NOW READY — deliver via full per-story flow."
+    adversary_convergence: "3/3 strict-CLEAN at passes 10/11/12 (12-pass total cascade)"
+    adversary_streak: "3/3"
+    converged: true
+    code_head: "402b28e6"
+    notes: "Plugin Registry Assembly (root crate); all prerequisites merged (083/084/085 DONE 2026-06-05); build() end-to-end functional (parse→eval→validate→layout→export); catch_unwind + panic=unwind + CI guard; inject_lang_default; extension from exporter; strict=true default; all AC-001..AC-008 load-bearing. LOCAL adversary cascade CONVERGED 2026-06-05 (12 passes, 3/3 strict-CLEAN). OBS-E anchored STORY-050. Next: demo-recorder → pr-manager."
   STORY-050:
     status: not-started
     wave: 4
