@@ -302,8 +302,13 @@ replaced by the ADR-016 formulation (see Forbidden Dependencies section).
    `[profile.release]` and `[profile.dist]` in the workspace root `Cargo.toml` MUST
    declare `panic = "unwind"`. Setting either profile to `panic = "abort"` silently
    disables `catch_unwind` and causes plugin panics to kill the process — a direct
-   violation of AC-008 / BC-5.02.001 EC-003. This is a CI-enforced build-time
-   constraint: any PR that changes these profiles to `abort` MUST be blocked.
+   violation of AC-008 / BC-5.02.001 EC-003. This rule is CI-enforced by
+   `scripts/check-panic-profile.sh`, which exits non-zero if any shipped profile
+   contains `panic = "abort"`. The script is wired into the `check-panic-profile` CI
+   job (`.github/workflows/ci.yml`) and is listed in `all-checks-pass`'s `needs:`,
+   so any PR that flips a shipped profile to `panic = "abort"` is blocked before
+   merge. Verified: script exits 0 on compliant Cargo.toml and non-zero when
+   `panic = "abort"` is injected (commit 70622461).
 5. **`iter_validators()` on public API only**: The validate stage in `build()` must
    iterate registered `Validator` implementations via `registry.iter_validators()` on
    the `PluginRegistry` public API (defined in `slideforge-plugin-api/src/registry.rs`).
@@ -332,6 +337,8 @@ replaced by the ADR-016 formulation (see Forbidden Dependencies section).
 | `crates/slideforge-plugin-api/src/registry.rs` | Modify | Add `iter_validators()` introspection method so the root crate's `build()` validate stage can iterate all registered `Validator` implementations via the public API — no private cross-crate access permitted (Architecture Compliance Rule 5) |
 | `Cargo.toml` (workspace root) | Modify | Set `[profile.release]` and `[profile.dist]` `panic = "unwind"` so `catch_unwind` plugin-panic isolation (BC-5.02.001 EC-003 / AC-008) is effective in all shipped builds; `panic = "abort"` in any shipped profile silently disables catch_unwind and is forbidden (Architecture Compliance Rule 4) |
 | `crates/slideforge/Cargo.toml` | Modify | Add `tracing` dep (structured pipeline logging in `build()`) |
+| `scripts/check-panic-profile.sh` | Create — DONE (commit 70622461) | CI guard enforcing `panic = "unwind"` in `[profile.release]`/`[profile.dist]` (no shipped profile may use `panic = "abort"`) — realizes Architecture Compliance Rule 4 / BC-5.02.001 EC-003 so `catch_unwind` cannot be silently disabled. Script exits 0 on compliance, non-zero on violation; both branches verified. |
+| `.github/workflows/ci.yml` | Modify — DONE (commit 70622461) | Added `check-panic-profile` job (mirrors `check-pdf-deps`) wired into the `all-checks-pass` aggregate gate's `needs:` so a PR flipping a shipped profile to `panic = "abort"` is BLOCKED. |
 
 ## Token Budget Estimate
 
