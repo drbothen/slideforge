@@ -2831,3 +2831,374 @@ fn test_fp5_001_link_nonempty_vec_empty_flatten_no_orphan_rel_bold_empty() {
         "F-P5-001 [Bold(vec![])]: URL must NOT appear in rels; got:\n{rels_xml}"
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// F-085-P6-001 [HIGH] — orphan External rel for Link nested inside formatting wrapper
+//
+// Root cause: collect_hyperlink_urls recurses into Bold/Italic/Strikethrough/
+// Superscript/Subscript/Highlight/Footnote and registers any safe Link URL
+// it finds — but dispatch_inline_nodes_to_ooxml only emits <a:hlinkClick>
+// for TOP-LEVEL Link nodes. A Link nested in a formatting wrapper gets
+// hyperlink_rid=None → renders as plain text + warn → no hlinkClick. Result:
+// external_rel_count=1, hlinkclick_count=0 → orphan rel.
+//
+// Fix: collect_hyperlink_urls must NOT recurse into formatting wrappers.
+// Registration and emission are now both top-level-only; count invariant holds.
+//
+// All tests below FAIL before the fix (orphan rel) and PASS after the fix (counts equal).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// F-085-P6-001 [HIGH]: `Bold([Link{url:safe, text:[Plain("x")]}])` — Link nested
+/// inside Bold creates an orphan External rel before the fix.
+///
+/// FAILS before fix: external_rel_count=1, hlinkclick_count=0.
+/// PASSES after fix: both counts 0 (nested link is plain text, no rel registered).
+#[test]
+fn test_f085_p6_001_bold_wrapping_link_no_orphan_rel() {
+    let nested_url = "https://example.com/bold-wrapped-link";
+
+    let link_inside_bold = slideforge_types::InlineNode::Link {
+        url: Arc::from(nested_url),
+        text: vec![slideforge_types::InlineNode::Plain(Arc::from("x"))],
+    };
+    let bold_node = slideforge_types::InlineNode::Bold(vec![link_inside_bold]);
+
+    let rc = slideforge_types::register::RegisteredContent {
+        register: Register::Notes,
+        content: vec![bold_node],
+    };
+
+    let slide = LaidOutSlide {
+        source_index: 0,
+        slide_type_keyword: Arc::from("title"),
+        frames: vec![Frame {
+            bbox: title_bbox(),
+            content: FrameContent::Empty,
+            text_flow: None,
+        }],
+        speaker_notes: Some(Arc::from("x")),
+        register_tags: vec![],
+        register_content: vec![rc],
+    };
+
+    let deck = make_deck_with_notes(&[Some("x")]);
+    let laid_out = LaidOutDeck {
+        page_size: slideforge_layout::PageSize::default(),
+        slides: vec![slide],
+        sections: vec![],
+        warnings: vec![],
+    };
+    let pptx = export_pptx(&deck, &laid_out);
+
+    let rels_xml = read_zip_member(&pptx, "ppt/notesSlides/_rels/notesSlide1.xml.rels");
+    let notes_xml = read_zip_member(&pptx, "ppt/notesSlides/notesSlide1.xml");
+
+    let external_rel_count = rels_xml.matches("TargetMode=\"External\"").count();
+    let hlinkclick_count = notes_xml.matches("<a:hlinkClick").count();
+
+    assert_eq!(
+        external_rel_count, hlinkclick_count,
+        "F-085-P6-001 [Bold(Link)]: orphan External rel — \
+         TargetMode=External ({external_rel_count}) != <a:hlinkClick ({hlinkclick_count}). \
+         A Link nested inside Bold must NOT produce an External rel. \
+         rels:\n{rels_xml}\nnotes:\n{notes_xml}"
+    );
+    assert_eq!(
+        external_rel_count, 0,
+        "F-085-P6-001 [Bold(Link)]: expected 0 External rels (nested link is plain text); \
+         got {external_rel_count}. rels:\n{rels_xml}"
+    );
+    assert_eq!(
+        hlinkclick_count, 0,
+        "F-085-P6-001 [Bold(Link)]: expected 0 <a:hlinkClick (nested link is plain text); \
+         got {hlinkclick_count}. notes:\n{notes_xml}"
+    );
+    assert!(
+        !rels_xml.contains(nested_url),
+        "F-085-P6-001 [Bold(Link)]: nested URL must NOT appear in rels; got:\n{rels_xml}"
+    );
+}
+
+/// F-085-P6-001 [HIGH]: `Italic([Link{...}])` — Link nested inside Italic.
+///
+/// FAILS before fix: external_rel_count=1, hlinkclick_count=0.
+/// PASSES after fix: both counts 0.
+#[test]
+fn test_f085_p6_001_italic_wrapping_link_no_orphan_rel() {
+    let nested_url = "https://example.com/italic-wrapped-link";
+
+    let link_inside_italic = slideforge_types::InlineNode::Link {
+        url: Arc::from(nested_url),
+        text: vec![slideforge_types::InlineNode::Plain(Arc::from("y"))],
+    };
+    let italic_node = slideforge_types::InlineNode::Italic(vec![link_inside_italic]);
+
+    let rc = slideforge_types::register::RegisteredContent {
+        register: Register::Notes,
+        content: vec![italic_node],
+    };
+
+    let slide = LaidOutSlide {
+        source_index: 0,
+        slide_type_keyword: Arc::from("title"),
+        frames: vec![Frame {
+            bbox: title_bbox(),
+            content: FrameContent::Empty,
+            text_flow: None,
+        }],
+        speaker_notes: Some(Arc::from("y")),
+        register_tags: vec![],
+        register_content: vec![rc],
+    };
+
+    let deck = make_deck_with_notes(&[Some("y")]);
+    let laid_out = LaidOutDeck {
+        page_size: slideforge_layout::PageSize::default(),
+        slides: vec![slide],
+        sections: vec![],
+        warnings: vec![],
+    };
+    let pptx = export_pptx(&deck, &laid_out);
+
+    let rels_xml = read_zip_member(&pptx, "ppt/notesSlides/_rels/notesSlide1.xml.rels");
+    let notes_xml = read_zip_member(&pptx, "ppt/notesSlides/notesSlide1.xml");
+
+    let external_rel_count = rels_xml.matches("TargetMode=\"External\"").count();
+    let hlinkclick_count = notes_xml.matches("<a:hlinkClick").count();
+
+    assert_eq!(
+        external_rel_count, hlinkclick_count,
+        "F-085-P6-001 [Italic(Link)]: orphan External rel — counts mismatch. \
+         rels:\n{rels_xml}\nnotes:\n{notes_xml}"
+    );
+    assert_eq!(
+        external_rel_count, 0,
+        "F-085-P6-001 [Italic(Link)]: expected 0 External rels; got {external_rel_count}. \
+         rels:\n{rels_xml}"
+    );
+    assert!(
+        !rels_xml.contains(nested_url),
+        "F-085-P6-001 [Italic(Link)]: nested URL must NOT appear in rels; got:\n{rels_xml}"
+    );
+}
+
+/// F-085-P6-001 [HIGH]: `Strikethrough([Link{...}])` — Link nested inside Strikethrough.
+///
+/// FAILS before fix: external_rel_count=1, hlinkclick_count=0.
+/// PASSES after fix: both counts 0.
+#[test]
+fn test_f085_p6_001_strikethrough_wrapping_link_no_orphan_rel() {
+    let nested_url = "https://example.com/strike-wrapped-link";
+
+    let link_inside_strike = slideforge_types::InlineNode::Link {
+        url: Arc::from(nested_url),
+        text: vec![slideforge_types::InlineNode::Plain(Arc::from("z"))],
+    };
+    let strike_node = slideforge_types::InlineNode::Strikethrough(vec![link_inside_strike]);
+
+    let rc = slideforge_types::register::RegisteredContent {
+        register: Register::Notes,
+        content: vec![strike_node],
+    };
+
+    let slide = LaidOutSlide {
+        source_index: 0,
+        slide_type_keyword: Arc::from("title"),
+        frames: vec![Frame {
+            bbox: title_bbox(),
+            content: FrameContent::Empty,
+            text_flow: None,
+        }],
+        speaker_notes: Some(Arc::from("z")),
+        register_tags: vec![],
+        register_content: vec![rc],
+    };
+
+    let deck = make_deck_with_notes(&[Some("z")]);
+    let laid_out = LaidOutDeck {
+        page_size: slideforge_layout::PageSize::default(),
+        slides: vec![slide],
+        sections: vec![],
+        warnings: vec![],
+    };
+    let pptx = export_pptx(&deck, &laid_out);
+
+    let rels_xml = read_zip_member(&pptx, "ppt/notesSlides/_rels/notesSlide1.xml.rels");
+    let notes_xml = read_zip_member(&pptx, "ppt/notesSlides/notesSlide1.xml");
+
+    let external_rel_count = rels_xml.matches("TargetMode=\"External\"").count();
+    let hlinkclick_count = notes_xml.matches("<a:hlinkClick").count();
+
+    assert_eq!(
+        external_rel_count, hlinkclick_count,
+        "F-085-P6-001 [Strikethrough(Link)]: orphan External rel — counts mismatch. \
+         rels:\n{rels_xml}\nnotes:\n{notes_xml}"
+    );
+    assert_eq!(
+        external_rel_count, 0,
+        "F-085-P6-001 [Strikethrough(Link)]: expected 0 External rels; got {external_rel_count}. \
+         rels:\n{rels_xml}"
+    );
+    assert!(
+        !rels_xml.contains(nested_url),
+        "F-085-P6-001 [Strikethrough(Link)]: nested URL must NOT appear in rels; got:\n{rels_xml}"
+    );
+}
+
+/// F-085-P6-001 [HIGH]: deeply nested `Bold([Italic([Link{...}])])`.
+///
+/// FAILS before fix: external_rel_count=1, hlinkclick_count=0.
+/// PASSES after fix: both counts 0.
+#[test]
+fn test_f085_p6_001_deeply_nested_bold_italic_link_no_orphan_rel() {
+    let nested_url = "https://example.com/deep-nested-link";
+
+    let link_deep = slideforge_types::InlineNode::Link {
+        url: Arc::from(nested_url),
+        text: vec![slideforge_types::InlineNode::Plain(Arc::from("deep"))],
+    };
+    let italic_node = slideforge_types::InlineNode::Italic(vec![link_deep]);
+    let bold_node = slideforge_types::InlineNode::Bold(vec![italic_node]);
+
+    let rc = slideforge_types::register::RegisteredContent {
+        register: Register::Notes,
+        content: vec![bold_node],
+    };
+
+    let slide = LaidOutSlide {
+        source_index: 0,
+        slide_type_keyword: Arc::from("title"),
+        frames: vec![Frame {
+            bbox: title_bbox(),
+            content: FrameContent::Empty,
+            text_flow: None,
+        }],
+        speaker_notes: Some(Arc::from("deep")),
+        register_tags: vec![],
+        register_content: vec![rc],
+    };
+
+    let deck = make_deck_with_notes(&[Some("deep")]);
+    let laid_out = LaidOutDeck {
+        page_size: slideforge_layout::PageSize::default(),
+        slides: vec![slide],
+        sections: vec![],
+        warnings: vec![],
+    };
+    let pptx = export_pptx(&deck, &laid_out);
+
+    let rels_xml = read_zip_member(&pptx, "ppt/notesSlides/_rels/notesSlide1.xml.rels");
+    let notes_xml = read_zip_member(&pptx, "ppt/notesSlides/notesSlide1.xml");
+
+    let external_rel_count = rels_xml.matches("TargetMode=\"External\"").count();
+    let hlinkclick_count = notes_xml.matches("<a:hlinkClick").count();
+
+    assert_eq!(
+        external_rel_count, hlinkclick_count,
+        "F-085-P6-001 [Bold(Italic(Link))]: orphan External rel — counts mismatch. \
+         rels:\n{rels_xml}\nnotes:\n{notes_xml}"
+    );
+    assert_eq!(
+        external_rel_count, 0,
+        "F-085-P6-001 [Bold(Italic(Link))]: expected 0 External rels; got {external_rel_count}. \
+         rels:\n{rels_xml}"
+    );
+    assert!(
+        !rels_xml.contains(nested_url),
+        "F-085-P6-001 [Bold(Italic(Link))]: nested URL must NOT appear in rels; got:\n{rels_xml}"
+    );
+}
+
+/// F-085-P6-001 [HIGH]: MIXED entry — `[Link{top-level safe}, Bold([Link{nested safe}])]`.
+///
+/// The top-level Link registers an rId + emits hlinkClick.
+/// The nested Link (inside Bold) renders as plain text — no External rel registered.
+/// Result: exactly 1 External rel AND 1 hlinkClick — count-equal, no orphan.
+///
+/// FAILS before fix: external_rel_count=2, hlinkclick_count=1 (orphan from nested).
+/// PASSES after fix: external_rel_count=1, hlinkclick_count=1.
+#[test]
+fn test_f085_p6_001_mixed_toplevel_and_nested_link_exactly_one_rel_one_click() {
+    let toplevel_url = "https://example.com/toplevel";
+    let nested_url = "https://example.com/nested-inside-bold";
+
+    // Top-level Link (registers + emits hlinkClick)
+    let toplevel_link = slideforge_types::InlineNode::Link {
+        url: Arc::from(toplevel_url),
+        text: vec![slideforge_types::InlineNode::Plain(Arc::from("top"))],
+    };
+
+    // Nested Link inside Bold (renders as plain text — no rel, no hlinkClick)
+    let link_inside_bold = slideforge_types::InlineNode::Link {
+        url: Arc::from(nested_url),
+        text: vec![slideforge_types::InlineNode::Plain(Arc::from("nested"))],
+    };
+    let bold_node = slideforge_types::InlineNode::Bold(vec![link_inside_bold]);
+
+    let rc = slideforge_types::register::RegisteredContent {
+        register: Register::Notes,
+        content: vec![toplevel_link, bold_node],
+    };
+
+    let slide = LaidOutSlide {
+        source_index: 0,
+        slide_type_keyword: Arc::from("title"),
+        frames: vec![Frame {
+            bbox: title_bbox(),
+            content: FrameContent::Empty,
+            text_flow: None,
+        }],
+        speaker_notes: Some(Arc::from("top nested")),
+        register_tags: vec![],
+        register_content: vec![rc],
+    };
+
+    let deck = make_deck_with_notes(&[Some("top nested")]);
+    let laid_out = LaidOutDeck {
+        page_size: slideforge_layout::PageSize::default(),
+        slides: vec![slide],
+        sections: vec![],
+        warnings: vec![],
+    };
+    let pptx = export_pptx(&deck, &laid_out);
+
+    let rels_xml = read_zip_member(&pptx, "ppt/notesSlides/_rels/notesSlide1.xml.rels");
+    let notes_xml = read_zip_member(&pptx, "ppt/notesSlides/notesSlide1.xml");
+
+    let external_rel_count = rels_xml.matches("TargetMode=\"External\"").count();
+    let hlinkclick_count = notes_xml.matches("<a:hlinkClick").count();
+
+    // COUNT-EQUAL invariant: no orphan rel.
+    assert_eq!(
+        external_rel_count, hlinkclick_count,
+        "F-085-P6-001 [mixed]: orphan External rel — \
+         TargetMode=External ({external_rel_count}) != <a:hlinkClick ({hlinkclick_count}). \
+         Only the top-level Link should register+emit; the Bold-nested Link renders plain. \
+         rels:\n{rels_xml}\nnotes:\n{notes_xml}"
+    );
+
+    // Exactly 1 rel (top-level URL only), exactly 1 hlinkClick.
+    assert_eq!(
+        external_rel_count, 1,
+        "F-085-P6-001 [mixed]: expected exactly 1 External rel (top-level Link only); \
+         got {external_rel_count}. rels:\n{rels_xml}"
+    );
+    assert_eq!(
+        hlinkclick_count, 1,
+        "F-085-P6-001 [mixed]: expected exactly 1 <a:hlinkClick (top-level Link only); \
+         got {hlinkclick_count}. notes:\n{notes_xml}"
+    );
+
+    // Top-level URL appears in rels.
+    assert!(
+        rels_xml.contains(toplevel_url),
+        "F-085-P6-001 [mixed]: top-level URL must appear in rels; got:\n{rels_xml}"
+    );
+
+    // Nested URL must NOT appear in rels.
+    assert!(
+        !rels_xml.contains(nested_url),
+        "F-085-P6-001 [mixed]: nested URL must NOT appear in rels (it is plain text); \
+         got:\n{rels_xml}"
+    );
+}

@@ -30,7 +30,7 @@ use slideforge_plugin_api::traits::inline_format::{
     InlineFormat, InlineOutputFormat, InlineRenderContext,
 };
 use slideforge_types::register::RegisteredContent;
-use slideforge_types::{display_text_is_empty, InlineNode, Register};
+use slideforge_types::{InlineNode, Register, display_text_is_empty};
 
 use crate::error::PptxError;
 use crate::link_safety::is_safe_link_scheme;
@@ -319,34 +319,51 @@ fn dispatch_inline_nodes_to_ooxml(
     }
 }
 
-/// Collect all **safe-scheme** hyperlink URLs from an inline node tree, depth-first.
+/// Collect all **safe-scheme** hyperlink URLs from the **top-level** nodes only.
+///
+/// ## Registration scope: top-level Links only (F-085-P6-001)
+///
+/// `dispatch_inline_nodes_to_ooxml` iterates the entry slice and emits
+/// `<a:hlinkClick>` ONLY for `InlineNode::Link` nodes it encounters directly
+/// at the top level of that slice.  A `Link` nested inside a formatting wrapper
+/// (`Bold`, `Italic`, `Strikethrough`, `Superscript`, `Subscript`, `Highlight`,
+/// `Footnote`) gets `hyperlink_rid = None` in the dispatcher — the formatter
+/// falls back to the plain-text-plus-warn path and emits NO `<a:hlinkClick>`.
+///
+/// Consequence: this function must NOT recurse into formatting wrappers.
+/// Recursing would register a URL (allocating an rId + writing a
+/// `TargetMode="External"` rel) for a Link that the dispatcher will NOT emit
+/// as `<a:hlinkClick>` — producing an orphan External relationship
+/// (`external_rel_count > hlinkclick_count`).  OOXML linters flag this; some
+/// consumers (`PowerPoint`, `LibreOffice`) warn or refuse to open the file.
+///
+/// The fix (F-085-P6-001 / Option A — align registration to emission):
+/// iterate only the top-level nodes, register only top-level `Link` nodes.
+/// Formatting-wrapper variants are no-ops here (same as `Plain`/`Code`).
+/// Links nested inside wrappers render as plain text + `tracing::warn!` at
+/// the dispatch site — consistent behavior, zero orphan rels.
+///
+/// ## rId↔hlinkClick count invariant
+///
+/// Because registration and emission are now both top-level-only, no inline
+/// tree shape can produce an orphan rel:
+///
+/// ```text
+/// external_rel_count == <a:hlinkClick_count  ∀ inline entry slices
+/// ```
+///
+/// ## Unsafe-scheme filtering (F-040-P2-001 / CWE-601)
 ///
 /// URLs whose scheme is not in [`crate::link_safety::ALLOWED_LINK_SCHEMES`] are
-/// silently skipped here (they will also be handled gracefully in
-/// `dispatch_inline_nodes_to_ooxml` — the `Link` arm routes through
-/// `DefaultInlineFormat::render_with_context`, which falls back to a plain text
-/// run when no `rId` is found).  A `tracing::warn!` is emitted for each rejected
-/// URL so the caller has an audit trail.
+/// silently skipped here.  The dispatcher also emits a `tracing::warn!` for
+/// unsafe-scheme top-level Links.  The parser already enforces `E-PAR-022`;
+/// this guard catches programmatically-constructed IR that bypasses the parser.
 ///
-/// This is the defense-in-depth guard at the PPTX exporter boundary
-/// (F-040-P2-001 / CWE-601).  The parser already enforces `E-PAR-022`; this guard
-/// catches programmatically-constructed IR that bypasses the parser.
+/// ## Display-text emptiness guard (F-P5-001)
 ///
-/// ## F-040-P3-001: No recursion into a `Link`'s display text
-///
-/// The dispatcher (`dispatch_inline_nodes_to_ooxml`) routes `Link` nodes through
-/// `DefaultInlineFormat::render_with_context`, which flattens a `Link`'s display
-/// `text` children to plain text inside `DefaultInlineFormat` — it does NOT emit
-/// nested `Link` nodes inside display text as `<a:hlinkClick>` elements.
-///
-/// Consequence: we must NOT descend into `text` here either.  Collecting a nested
-/// URL would assign it an rId in the `.rels` file with no corresponding
-/// `<a:hlinkClick>` referencing it — an orphan External relationship that OOXML
-/// linters flag (rId count ≠ hlinkClick count).
-///
-/// Fix (option b — least change): collect ONLY the outer `Link`'s URL (when its
-/// scheme is safe).  Nested `Link` nodes inside display text are ignored; they
-/// will be rendered as plain text by the dispatcher (consistent behavior).
+/// A `Link` whose display text flattens to `""` emits no `<a:hlinkClick>` run
+/// in `DefaultInlineFormat::render_with_context`.  We apply the same predicate
+/// here (`display_text_is_empty`) so registration and emission stay in sync.
 fn collect_hyperlink_urls(nodes: &[InlineNode], urls: &mut Vec<String>) {
     for node in nodes {
         match node {
@@ -357,42 +374,29 @@ fn collect_hyperlink_urls(nodes: &[InlineNode], urls: &mut Vec<String>) {
                 // DefaultInlineFormat::render_with_context, which falls back to a plain
                 // text run when no rId is available.
                 //
-                // F-P5-001 / OBS-1 fix: guard that the Link's display text is
-                // non-empty BY THE FLATTEN DEFINITION, not Vec-length.
-                //
-                // `display_text_is_empty(text)` (from slideforge-types) uses the
-                // same recursive flatten-to-plain-text semantics as
-                // `extract_plain_text_depth_limited` inside
-                // DefaultInlineFormat::render_with_context.  Both sites now share
-                // ONE predicate, making it structurally impossible for the
-                // registration site and emission site to drift.
-                //
-                // The original OBS-1 guard `!text.is_empty()` was a Vec-length
-                // check: `vec![Plain("")]` passes it (Vec has 1 element) but
-                // flattens to "" → render_with_context emits NO <a:hlinkClick>
-                // → orphan External relationship.  Replaced with the flatten
-                // predicate to close the gap.
+                // F-P5-001: guard that the Link's display text is non-empty BY THE
+                // FLATTEN DEFINITION, not Vec-length.  `display_text_is_empty(text)`
+                // uses the same recursive flatten-to-plain-text semantics as
+                // `extract_plain_text_depth_limited` inside render_with_context.
                 if is_safe_link_scheme(url.as_ref()) && !display_text_is_empty(text) {
                     urls.push(url.as_ref().to_owned());
                 }
-                // F-040-P3-001: Do NOT recurse into `text` children here.
-                // DefaultInlineFormat flattens Link display text to plain text inside
-                // render_with_context — nested Link nodes in display text produce NO
-                // hlinkClick.  Collecting a nested URL here would create an orphan
-                // External rel (rId with no referencing hlinkClick).  Nested URLs in
-                // display text are intentionally rendered as plain text — consistent
-                // with the dispatcher's behavior.
+                // F-040-P3-001 + F-085-P6-001: do NOT recurse into `text` children here.
+                // Nested Link nodes (in display text or inside a wrapper) produce no
+                // hlinkClick; collecting their URLs would create orphan External rels.
             },
-            InlineNode::Bold(c)
-            | InlineNode::Italic(c)
-            | InlineNode::Footnote(c)
-            | InlineNode::Superscript(c)
-            | InlineNode::Subscript(c)
-            | InlineNode::Strikethrough(c)
-            | InlineNode::Highlight(c) => {
-                collect_hyperlink_urls(c, urls);
-            },
-            InlineNode::Plain(_)
+            // F-085-P6-001: formatting wrappers are no-ops for URL registration.
+            // The dispatcher only emits <a:hlinkClick> for top-level Link nodes;
+            // a Link inside a wrapper is rendered as plain text + warn at the
+            // dispatch site, so no External rel must be registered for it.
+            InlineNode::Bold(_)
+            | InlineNode::Italic(_)
+            | InlineNode::Footnote(_)
+            | InlineNode::Superscript(_)
+            | InlineNode::Subscript(_)
+            | InlineNode::Strikethrough(_)
+            | InlineNode::Highlight(_)
+            | InlineNode::Plain(_)
             | InlineNode::Code(_)
             | InlineNode::Xref(_)
             | InlineNode::Math(_) => {},

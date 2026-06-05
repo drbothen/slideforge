@@ -65,10 +65,10 @@ pub enum InlineNode {
 
 /// Returns `true` if flattening `nodes` to plain text yields an empty string.
 ///
-/// This is the **shared emptiness predicate** that both the OOXML relationship
-/// registration site (`collect_hyperlink_urls` in `slideforge-pptx`) and the
-/// OOXML emission site (`render_with_context` in `slideforge-plugin-api`) must
-/// use to decide "does this Link have display text?"
+/// This is the **shared display-text emptiness predicate** used by the OOXML
+/// relationship registration site (`collect_hyperlink_urls` in `slideforge-pptx`)
+/// and the OOXML emission site (`render_with_context` in `slideforge-plugin-api`)
+/// to decide "does this Link have non-empty display text?"
 ///
 /// # Semantic contract
 ///
@@ -86,14 +86,29 @@ pub enum InlineNode {
 /// (treats the content as empty) if `depth > 64`, which is consistent with
 /// `render_with_context` bailing out on pathological inputs.
 ///
-/// # OOXML orphan-rel invariant (F-P5-001)
+/// # OOXML orphan-rel invariant (F-P5-001 / F-085-P6-001)
 ///
-/// Both `collect_hyperlink_urls` AND `render_with_context` MUST call this
-/// predicate (or the same recursive helper) to guarantee:
+/// The rId↔hlinkClick count invariant
 ///
 /// ```text
-/// external_rel_count == <a:hlinkClick_count  ∀ inline trees
+/// external_rel_count == <a:hlinkClick_count  ∀ entry slices
 /// ```
+///
+/// is maintained by TWO cooperating constraints, neither sufficient alone:
+///
+/// 1. **This predicate** — `collect_hyperlink_urls` calls `display_text_is_empty`
+///    so that a Link with empty display text is not registered (it would produce
+///    no `<a:hlinkClick>` at the emission site either).
+///
+/// 2. **Top-level-only scope** (F-085-P6-001) — `collect_hyperlink_urls` iterates
+///    only the top-level nodes of an entry slice and does NOT recurse into
+///    formatting wrappers (`Bold`, `Italic`, etc.).  `dispatch_inline_nodes_to_ooxml`
+///    likewise only emits `<a:hlinkClick>` for top-level `Link` nodes; a Link
+///    nested inside a wrapper gets `hyperlink_rid = None` and renders as plain text.
+///    Recursing into wrappers during registration would allocate rIds for Links
+///    that the dispatcher will never emit as `<a:hlinkClick>` — orphan rels.
+///
+/// Neither constraint alone is sufficient.  Both must hold simultaneously.
 ///
 /// Using a Vec-length check (`!text.is_empty()`) at the registration site while
 /// a flatten-emptiness check is used at the emission site creates an unavoidable
