@@ -29,6 +29,7 @@ wave_3_gate: "PASSED 2026-05-31 — PR #38 (7d266ad7); adversary pass 8 strict-C
 wave_4_batch_a_complete: 10
 wave_4_batch_a_total: 10
 wave_4_merged: 20
+story_050_status: BLOCKED_HUMAN_DECISION
 wave_4_started: 2026-05-31
 wave_4_total_stories: 21
 wave_4_total_points: 129
@@ -54,25 +55,59 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. Generates branded .pptx
 
 ## CURRENT POSITION
 
-Phase 3, **Wave 4 — 20/21 merged. Batch C COMPLETE. Only STORY-050 remains.**
+Phase 3, **Wave 4 — 20/21 merged. STORY-050 BLOCKED ON HUMAN DECISION (Gap-2 authorization).**
 
-- `develop` = `e6f7832d` (60 merged PRs; origin/develop confirmed). **Open PRs: 0. Active worktrees: none.**
+- `develop` = `e6f7832d` (60 merged PRs; origin/develop confirmed). **Open PRs: 0.**
+- Active worktrees: `.worktrees/STORY-050` (branch `feature/STORY-050`; Red Gate work UNCOMMITTED on disk — 55 pass / 7 fail).
 - Workspace: ~3214/3215 pass (1 pre-existing cold_budget flake tracked under STORY-080). 0 CI failures.
 - STORY-049 MERGED PR #60 (e6f7832d, 2026-06-05). 21/21 CI checks green; security-reviewer APPROVE/CLEAN; pr-reviewer APPROVE. LOCAL adversary cascade CONVERGED (12 passes, 3/3 strict-CLEAN).
-- STORY-085 MERGED PR #59 (e704e700). STORY-084 MERGED PR #58 (801f351b). STORY-083 MERGED PR #57 (5aaa27d2).
 
-**Batch C COMPLETE (4/4):** STORY-083 + STORY-084 + STORY-085 + STORY-049 ALL MERGED. STORY-050 now UNGATED (STORY-049 merged).
-**Wave 4 gate** runs after STORY-050 merges (all 21 done). **STORY-082** (slide-grouping sections) → Wave 5.
+**Batch C COMPLETE (4/4):** STORY-083 + STORY-084 + STORY-085 + STORY-049 ALL MERGED.
+**STORY-050 E2E Red Gate delivered; 7 tests fail; pipeline gaps exposed in already-merged code (see below).**
+**Wave 4 gate** runs after STORY-050 merges. **STORY-082** (slide-grouping sections) → Wave 5.
+
+### STORY-050 Pipeline Gaps (E2E suite exposed in already-merged code)
+
+**Gap 1 [CRITICAL — in-scope fix]** — PDF export fails for ALL decks.
+`slideforge-eval/src/eval.rs:441` always sets `metadata.title = None`; PDF/UA-1 requires non-empty
+document title → `NoDocumentTitle`. PDF has been non-functional since STORY-044 merged (4 failing tests).
+Fix: ~5 lines in `eval_deck_with_variant` — derive title from first `slide title:` block's `title` field.
+Blast radius: slideforge-eval only. No BC change needed before fix.
+
+**Gap 2 [CRITICAL — BLOCKED ON HUMAN]** — Alt-text enforcement non-functional end-to-end.
+Validators run pre-layout (lib.rs:441) on `Slide.blocks` which eval always leaves empty
+(`for_eval.rs:342`). `ContentBlock::Chart`/`Image` only exist post-layout — after the validate gate.
+A deck with a chart and no `alt` builds to `Ok` silently. AC-009 (2 tests) cannot pass.
+This is a v1 release-gate risk (`alt "..."` declared "compile error if absent" in CLAUDE.md).
+Human must authorize ONE of:
+- (A) Post-layout validation pass [architectural — changes Validator trait / pipeline; touches plugin-api BC]
+- (B) Eval-time ContentBlock construction from DSL fields [depends on charts/images-in-eval story]
+- (C) `#[ignore]` the 2 AC-009 tests with SPECIFIC story anchor + isolated unit test proving validator logic
+Full analysis: `.factory/specs/story-050-gap-analysis.md`.
+
+**Gap 3 [in-scope]** — AC-007 observability: `tracing_test` captures WARN+ by default; `build_inner`
+emits INFO; 8 events vs 6 spans (NFR-032 mismatch). Fix: promote 6 canonical stages to
+`tracing::info_span!` + fix subscriber filter. Blast radius: slideforge lib.rs + e2e observability.rs.
+
+**Gap 4 [defer]** — `BuildOptions::pptx()/all_formats()` convenience ctors absent; tests already
+adapted (0 additional failures). Defer to DX story; PO to amend AC-008 wording.
 
 ---
 
 ## NEXT ACTIONS (fresh orchestrator — execute in order)
 
-**STORY-049 MERGED. STORY-050 UNGATED. Deliver STORY-050, then Wave 4 gate.**
+**STORY-050 BLOCKED. Human Gap-2 authorization required before resuming.**
 
-1. **STORY-050** — End-to-End Integration Test Suite (8 pts, P0) — UNGATED (STORY-049 merged PR #60). Deliver via full per-story flow (stubs → failing tests → TDD green → LOCAL adversary 3-CLEAN → demo-recorder → pr-manager). Must include multi-slide deck with inline formatting + data binding routed through slideforge::build() to close BC-5.02.002 EC-004 end-to-end (OBS-E scope, required). Branch from `e6f7832d`.
-2. **Wave 4 gate** after STORY-050 merges (all 21 stories done: 20/21 merged + STORY-050).
-3. **STORY-082** — PPTX Slide-Grouping Sections (Wave 5, 5 pts, P0, BC-4.01.003 Half B). After Wave 4 gate passes.
+1. **[HUMAN DECISION REQUIRED]** — Authorize STORY-050 Gap-2 resolution path (A, B, or C above).
+   Until authorized: DO NOT dispatch implementer on STORY-050. Red Gate work is uncommitted in
+   `.worktrees/STORY-050` on `feature/STORY-050`; it is safe — do NOT delete this worktree.
+2. **After Gap-2 authorization** — Resume STORY-050 implementer with gap analysis as input. Gaps 1 and 3
+   are in-scope; Gap 2 per authorized path; Gap 4 defer confirmed. Continue TDD green → LOCAL adversary
+   3-CLEAN → demo-recorder → pr-manager.
+3. **Wave 4 gate** after STORY-050 merges (all 21 stories done: 20/21 merged + STORY-050). Note: Wave 4
+   gate must account for CRITICAL discoveries (PDF non-functional since STORY-044; alt-text enforcement
+   gap) as integration risks even for already-merged stories.
+4. **STORY-082** — PPTX Slide-Grouping Sections (Wave 5, 5 pts, P0, BC-4.01.003 Half B). After Wave 4 gate passes.
 
 ---
 
@@ -113,21 +148,21 @@ Phase 3, **Wave 4 — 20/21 merged. Batch C COMPLETE. Only STORY-050 remains.**
 - STORY-084: Bundled SectionType Implementations — MERGED PR #58 (801f351b, 2026-06-05) — 7-pass cascade, 3/3 strict-CLEAN
 - STORY-085: Bundled DefaultInlineFormat + PPTX dog-fooding — MERGED PR #59 (e704e700, 2026-06-05) — 9-pass cascade, 3/3 strict-CLEAN (passes 7-8-9). 20/20 CI green; security APPROVE/CLEAN; pr-reviewer APPROVE.
 - STORY-049: Plugin Registry Assembly — MERGED PR #60 (e6f7832d, 2026-06-05) — 12-pass cascade, 3/3 strict-CLEAN (passes 10-11-12). 21/21 CI green; security APPROVE/CLEAN; pr-reviewer APPROVE.
-- STORY-050: E2E Integration Test Suite — UNGATED (gated on STORY-049; now unblocked)
+- STORY-050: E2E Integration Test Suite — **IN PROGRESS / BLOCKED** — Red Gate delivered (55 pass / 7 fail; uncommitted in `.worktrees/STORY-050`). BLOCKED on Gap-2 human authorization. See pipeline gaps section above.
 **STORY-082** (slide-grouping sections) moved to Wave 5 (human-authorized split from STORY-040)
 
 ---
 
 ## Session Resume Checkpoint
 
-**CLEAN CHECKPOINT — STORY-049 MERGED (PR #60, e6f7832d). Resume: deliver STORY-050 (UNGATED).**
+**BLOCKED CHECKPOINT — STORY-050 Red Gate delivered; 7 failing tests; awaiting human Gap-2 decision.**
 
 | Field | Value |
 |-------|-------|
 | **Date** | 2026-06-05 |
-| **Position** | Wave 4: 20/21 merged. Batch C COMPLETE (083+084+085+049 all merged). Only STORY-050 (E2E Integration Test Suite, 8 pts, P0) remains. STORY-050 is UNGATED — branch from `e6f7832d`, deliver via full per-story flow. Must include multi-slide deck + inline formatting + data binding through build() (OBS-E, BC-5.02.002 EC-004). Wave 4 gate after STORY-050. |
+| **Position** | Wave 4: 20/21 merged. STORY-050 IN PROGRESS / BLOCKED. Red Gate: 55 pass / 7 fail in `.worktrees/STORY-050` (branch `feature/STORY-050`, UNCOMMITTED on disk). E2E suite exposed CRITICAL pipeline gaps: PDF non-functional since STORY-044 (Gap 1, in-scope fix); alt-text validation bypassed end-to-end (Gap 2, BLOCKED — human must authorize fix path). Gap 3 (observability spans) in-scope. Gap 4 (API ergonomics) deferred. Full analysis: `.factory/specs/story-050-gap-analysis.md`. DO NOT delete `.worktrees/STORY-050`. |
 | **develop SHA** | `e6f7832d` (60 merged PRs; origin/develop confirmed) |
-| **Active worktrees** | none (STORY-049 cleaned up post-merge) |
+| **Active worktrees** | `.worktrees/STORY-050` on `feature/STORY-050` (uncommitted Red Gate work) |
 | **Open PRs** | 0 |
 | **Workspace crates** | 17 (slideforge root crate populated) |
 | **Workspace tests** | ~3214/3215 pass (1 pre-existing cold_budget flake, STORY-080) |
@@ -158,10 +193,20 @@ Phase 3, **Wave 4 — 20/21 merged. Batch C COMPLETE. Only STORY-050 remains.**
 
 ---
 
+## Blocking Issues
+
+| ID | Issue | Severity | Gating |
+|----|-------|----------|--------|
+| BLK-001 | **STORY-050 Gap-2: Alt-text enforcement non-functional end-to-end.** Validators run pre-layout on `Slide.blocks` which eval always leaves empty; `ContentBlock::Chart`/`Image` created only at layout (after validate gate). A deck with a chart and no `alt` builds to `Ok` silently. AC-009 (2 tests) cannot pass without architectural decision. Human must authorize: (A) post-layout validation pass [architectural, touches plugin-api], (B) eval-time ContentBlock construction, or (C) #[ignore] with anchored follow-up story. This is a v1 RELEASE-GATE risk. Full analysis: `.factory/specs/story-050-gap-analysis.md#gap-2`. | CRITICAL | STORY-050 merge + Wave 4 gate + v1.0 release |
+
+---
+
 ## Open Follow-Ups (non-blocking)
 
 | Item | Severity | Target |
 |------|----------|--------|
+| **[DRIFT-CRITICAL-1] PDF export non-functional since STORY-044 merged.** `eval.rs:441` always sets `DeckMetadata.title = None`; PDF/UA-1 requires non-empty document title → `NoDocumentTitle`. Every `build(..., "pdf")` call fails. Wave 4 gate and v1.0 release gate must account for this — PDF was "merged/done" in STORY-044 but was not end-to-end functional. STORY-050 in-scope fix (Gap 1, ~5 lines, eval.rs). | CRITICAL | STORY-050 Gap 1 / Wave 4 gate |
+| **[DRIFT-CRITICAL-2] Alt-text enforcement non-functional end-to-end since validate gate was wired (STORY-049).** Validator runs pre-layout; `Slide.blocks` always empty at that stage; `alt "..."` declared a compile error in CLAUDE.md but silently passes. Prior "merged/done" stories (STORY-043, STORY-044) that claimed WCAG-AA compliance have an integration gap. Wave 4 gate and v1.0 release gate must account for this. Resolution gated on BLK-001. | CRITICAL | BLK-001 / Wave 4 gate / v1.0 |
 | OBS-E (STORY-049 pass-4): STORY-050 E2E must include multi-slide deck with inline formatting + data binding routed through build() to close BC-5.02.002 EC-004 end-to-end — build()'s own tests cover only a trivial title slide (appropriate; E2E owns deep coverage). Anchored to STORY-050 as required scope. | STORY-050 scope | STORY-050 |
 | SEC-042-001 (CWE-400): docx section serializers no upper bound on items count | LOW | STORY-049 / layout hardening |
 | SEC-001 (CWE-494, veraPDF): Docker `verapdf/cli:latest` not digest-pinned | MED | Before v1.0 / Phase 6 |
@@ -194,6 +239,7 @@ Phase 3, **Wave 4 — 20/21 merged. Batch C COMPLETE. Only STORY-050 remains.**
 
 | Date | ID | Decision |
 |------|-----|---------|
+| 2026-06-05 | STORY-050-BLOCKED | STORY-050 E2E Red Gate delivered (55 pass / 7 fail; `.worktrees/STORY-050`, branch `feature/STORY-050`, UNCOMMITTED). E2E suite surfaced CRITICAL pipeline gaps in already-merged code. Gap 1 (PDF NoDocumentTitle, in-scope, ~5-line fix in eval.rs). Gap 2 (alt-text validation bypassed end-to-end — BLOCKED, needs human authorization on fix path A/B/C). Gap 3 (observability events vs spans, in-scope). Gap 4 (API ergonomics, defer). Full architect gap analysis: `.factory/specs/story-050-gap-analysis.md`. STORY-050 status: BLOCKED awaiting human Gap-2 decision. |
 | 2026-06-05 | STORY-049-MERGE | STORY-049 MERGED PR #60 (e6f7832d, 2026-06-05). 21/21 CI checks green (note: doctest+snapshots failure on default_registry rustdoc example fixed in commit 65ee62e6 before merge); security-reviewer APPROVE/CLEAN; pr-reviewer APPROVE. LOCAL adversary cascade CONVERGED (12 passes, 3/3 strict-CLEAN passes 10-11-12). develop SHA e6f7832d (60 merged PRs). Wave 4: 20/21 merged. Batch C COMPLETE. STORY-050 now UNGATED. |
 | 2026-06-05 | STORY-049-CONV | STORY-049 LOCAL adversary cascade CONVERGED. 12 passes total; passes 10-11-12 strict-CLEAN (3/3 per BC-5.39.001). Code HEAD 402b28e6; workspace 3214/3215 pass (1 pre-existing cold_budget flake); all canonical gates GREEN (fmt, clippy pedantic, doc) — implementer/devops-verified. Findings fixed across passes 1-9: build() was non-functional (C1 inverted brand routing, C2 zero end-to-end coverage, C3 paper-fix strict test) → now works end-to-end (parse→eval→validate→layout→export, proven by load-bearing Ok(BuildOutput) test); strict defaults true (IMP-1); diagnostics preserve spans (HIGH-3); catch_unwind wired into build() + panic=unwind shipped profiles + CI guard (scripts/check-panic-profile.sh, F-PASS8-001); inject_lang_default (MED-C); extension from exporter.extension() (MED-D); doc/DSL-example fixes (pass 6); tracing stage spans (pass 9). All AC-001..AC-008 load-bearing. OBS-E (multi-slide/inline E2E through build()) anchored to STORY-050. Next: demo-recorder → pr-manager → STORY-050. |
 | 2026-06-05 | STORY-049-P6-8 | STORY-049 adversary passes 6-8. Pass 5: strict-CLEAN (streak 1/3). Pass 6: 3 doc defects — DSL doctest syntax error, inverted brand-provider doc comment, missing validate stage in rustdoc example — FIXED commit 1c8af9a2; streak reset to 0/3. Pass 7: strict-CLEAN (streak 1/3). Pass 8: F-PASS8-001 (panic=unwind safety perimeter had no CI enforcement: Architecture Compliance Rule 4 stated "enforced by scripts/check-panic-profile.sh" but script did not yet exist) — FIXED by creating scripts/check-panic-profile.sh (exits 0 on compliance, non-zero on violation; both branches verified) + adding check-panic-profile CI job in .github/workflows/ci.yml wired into all-checks-pass (commit 70622461); streak reset to 0/3. Code HEAD: 70622461. Behavioral dimensions fully converged (clean passes 5+7); remaining findings peripheral (docs, CI enforcement). Passes 9-11 pending. |
