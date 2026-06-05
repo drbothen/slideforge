@@ -4,7 +4,7 @@ mode: greenfield
 created: 2026-05-23
 current_phase: phase-3-tdd-implementation
 status: IN_PROGRESS
-last_updated: 2026-06-04
+last_updated: 2026-06-05
 phase_1_approved: 2026-05-25
 phase_2_approved: 2026-05-25
 phase_1_convergence: "17 passes, 69 findings, 3/3 clean (passes 15-16-17)"
@@ -33,10 +33,10 @@ wave_4_started: 2026-05-31
 wave_4_total_stories: 21
 wave_4_total_points: 129
 wave_5_total_points: 114
-develop_sha: "869fb401"
-develop_pr_count: 56
+develop_sha: "5aaa27d2"
+develop_pr_count: 57
 error_taxonomy_version: "v2.13"
-workspace_tests: "~3013 (56 merged PRs)"
+workspace_tests: "~3146 (57 merged PRs)"
 workspace_test_failures: 0
 ---
 
@@ -54,29 +54,28 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. Generates branded .pptx
 
 ## CURRENT POSITION
 
-Phase 3, **Wave 4 — 16/21 merged. Batch B pptx chain (037→038→039→040) COMPLETE. Batch B docx chain (041→042) DONE.**
+Phase 3, **Wave 4 — 17/21 merged. Batch B COMPLETE. Batch C: STORY-083 MERGED PR #57.**
 
-- `develop` = `869fb401` (56 merged PRs; origin/develop = local develop). **Open PRs: 0. Active worktrees: none.**
-- Workspace builds clean. ~3013 tests pass, 0 failures.
-- STORY-040 MERGED PR #56 (869fb401, 2026-06-04). Speaker notes (`.rels` + NotesSlidePart + `<p:notes>`), notesMaster1.xml, handoutMaster1.xml. 7-pass adversary cascade; strict-CLEAN on passes 5/6/7. SafeUrl guard (link_safety.rs) shipped — CWE-601 defense-in-depth for notes hyperlinks. Re-scoped 5→3 pts; slide-grouping sections split to STORY-082 (Wave 5, human-authorized).
-- STORY-039 MERGED PR #55 (a4f29e5a). STORY-037 PR #52 (2ebf184f). STORY-038 PR #54 (c031805c). STORY-041 PR #51 (a3b47303). STORY-042 PR #53 (56f3f57d).
+- `develop` = `5aaa27d2` (57 merged PRs; origin/develop confirmed). **Open PRs: 0. Active worktrees: none.**
+- Workspace builds clean. ~3146 tests pass, 0 failures.
+- STORY-083 MERGED PR #57 (5aaa27d2, 2026-06-05). PluginRegistryBuilder + RegistryError::MissingSurface + surface_count()/surface_names() + SURFACE_NAMES const in slideforge-plugin-api. Closes BC-5.02.001 invariant 3. 6-pass adversary cascade; strict-CLEAN passes 4/5/6. 133 plugin-api tests. CI-gate required fix commit bc52da1a (pedantic clippy on demo example + rustdoc intra-doc link — see LESSON-16).
+- STORY-040 MERGED PR #56 (869fb401, 2026-06-04). STORY-039 PR #55. STORY-037 PR #52. STORY-038 PR #54. STORY-041 PR #51. STORY-042 PR #53.
 
-**Batch B COMPLETE.** **LESSON-13 reconciliation completed 2026-06-04** — STORY-049 was found NOT implementation-ready (plugin registry RegistryBuilder + surface ownership not defined; SectionType/InlineFormat bundled impls missing). Three prerequisite stories added (STORY-083/084/085, ADR-016 authored). Wave 4 now has 21 stories (was 18). **Batch C (next):** STORY-083/084/085 (parallel-eligible) → STORY-049 → STORY-050.
+**Batch C in progress:** STORY-083 DONE. Remaining: STORY-084 + STORY-085 (parallel-eligible) → STORY-049 → STORY-050.
 **Wave 4 gate** runs only after ALL 21 Wave 4 stories merge. **STORY-082** (slide-grouping sections) → Wave 5.
 
 ---
 
 ## NEXT ACTIONS (fresh orchestrator — execute in order)
 
-**Batch C — LESSON-13 reconciliation applied. Three prerequisites added before STORY-049.**
+**Batch C — STORY-083 MERGED. Next: STORY-084 + STORY-085 (parallel-eligible), then STORY-049 → STORY-050.**
 
-1. **STORY-083** — Plugin Registry Builder + Surface Enforcement (slideforge-plugin-api, 3 pts; dep STORY-002 only; parallel-safe). Full per-story delivery flow. Defines `RegistryBuilder`, `RegistryError::MissingSurface`, `surface_count()`, `surface_names()`.
-2. **STORY-084** — Bundled SectionType Implementations (slideforge-plugin-api, 3 pts; deps STORY-002/042/077). Can run **parallel** to STORY-083 (both dep-free from Batch B COMPLETE).
-3. **STORY-085** — Bundled DefaultInlineFormat + PPTX OOXML dog-fooding refactor (slideforge-plugin-api + slideforge-pptx, 8 pts; deps STORY-002/028/037/038). Can run **parallel** to STORY-083.
-4. **STORY-049** — Plugin Registry Assembly (root crate, pipeline driver, exposes `build()`; 5 pts) — **GATED on STORY-083 + STORY-084 + STORY-085 ALL merged**.
-5. **STORY-050** — End-to-End Integration Test Suite — gated on STORY-049.
-6. **Wave 4 gate** after all 21 stories merged (16/21 done; remaining: STORY-083, STORY-084, STORY-085, STORY-049, STORY-050).
-7. **STORY-082** — PPTX Slide-Grouping Sections (Wave 5, 5 pts, P0, BC-4.01.003 Half B). After Wave 4 gate passes.
+1. **STORY-084** — Bundled SectionType Implementations (slideforge-plugin-api, 3 pts; deps STORY-002/042/077). Full per-story delivery flow.
+2. **STORY-085** — Bundled DefaultInlineFormat + PPTX OOXML dog-fooding refactor (slideforge-plugin-api + slideforge-pptx, 8 pts; deps STORY-002/028/037/038). Can run **parallel** to STORY-084.
+3. **STORY-049** — Plugin Registry Assembly (root crate, pipeline driver, exposes `build()`; 5 pts) — **GATED on STORY-083 (DONE) + STORY-084 + STORY-085 ALL merged**.
+4. **STORY-050** — End-to-End Integration Test Suite — gated on STORY-049.
+5. **Wave 4 gate** after all 21 stories merged (17/21 done; remaining: STORY-084, STORY-085, STORY-049, STORY-050).
+6. **STORY-082** — PPTX Slide-Grouping Sections (Wave 5, 5 pts, P0, BC-4.01.003 Half B). After Wave 4 gate passes.
 
 ---
 
@@ -97,7 +96,7 @@ Phase 3, **Wave 4 — 16/21 merged. Batch B pptx chain (037→038→039→040) C
 | Planning (25 DSL decisions) | DONE 2026-05-24 | q1–q25 docs + 14 research threads + 7/7 spikes resolved |
 | Phase 1: Spec Crystallization | DONE — APPROVED 2026-05-25 | PRD (109 BCs, 15 HS, 4 supplements) + arch (14 ADRs, 15 VPs, 20 crates) + UX spec. 17 passes, 69 findings, 3/3 clean. |
 | Phase 2: Story Decomposition | DONE — APPROVED 2026-05-25 | 85 stories, 21 epics, 6 waves, 511 pts (LESSON-13 reconciliation: +4 stories/+14 pts added 2026-06-04). 22 passes, 96+ findings, 3/3 clean. |
-| Phase 3: TDD Implementation | IN PROGRESS — Waves 1/2/3 GATE PASSED. Wave 4: 16/21 merged. Batch B COMPLETE (037→040, 041→042). Batch C: STORY-083/084/085→049→050. | Per-story delivery |
+| Phase 3: TDD Implementation | IN PROGRESS — Waves 1/2/3 GATE PASSED. Wave 4: 17/21 merged. Batch B COMPLETE. Batch C: STORY-083 MERGED PR #57; STORY-084+085 next (parallel). | Per-story delivery |
 | Phases 4–7 | NOT STARTED | Holdout / Adversarial / Formal Hardening / Convergence |
 
 ## Wave 4 Story Status
@@ -112,10 +111,10 @@ Phase 3, **Wave 4 — 16/21 merged. Batch B pptx chain (037→038→039→040) C
 - STORY-039 MERGED PR #55 (a4f29e5a, 2026-06-04)
 - STORY-040 MERGED PR #56 (869fb401, 2026-06-04) — pptx chain 037→038→039→040 COMPLETE
 
-**Batch C (next):** STORY-083 + STORY-084 + STORY-085 (parallel-eligible) → STORY-049 → STORY-050
-- STORY-083: Plugin Registry Builder (3 pts, slideforge-plugin-api; dep STORY-002 only)
-- STORY-084: Bundled SectionType Implementations (3 pts; deps STORY-002/042/077)
-- STORY-085: Bundled DefaultInlineFormat + PPTX dog-fooding (8 pts; deps STORY-002/028/037/038)
+**Batch C (in progress):**
+- STORY-083: Plugin Registry Builder — MERGED PR #57 (5aaa27d2, 2026-06-05) — 6-pass cascade, 3/3 strict-CLEAN
+- STORY-084: Bundled SectionType Implementations (3 pts; deps STORY-002/042/077) — NEXT
+- STORY-085: Bundled DefaultInlineFormat + PPTX dog-fooding (8 pts; deps STORY-002/028/037/038) — NEXT (parallel to 084)
 - STORY-049: Plugin Registry Assembly — root crate pipeline driver (5 pts; gates on 083+084+085)
 - STORY-050: E2E Integration Test Suite (gates on STORY-049)
 **STORY-082** (slide-grouping sections) moved to Wave 5 (human-authorized split from STORY-040)
@@ -124,17 +123,17 @@ Phase 3, **Wave 4 — 16/21 merged. Batch B pptx chain (037→038→039→040) C
 
 ## Session Resume Checkpoint
 
-**CLEAN CHECKPOINT — safe to clear context and resume in a fresh session. No in-flight worktree/PR. A fresh orchestrator resumes by reading this STATE.md and starting at STORY-083 (Batch C first step — see NEXT ACTIONS).**
+**CLEAN CHECKPOINT — safe to clear context and resume in a fresh session. No in-flight worktree/PR. A fresh orchestrator resumes by reading this STATE.md and starting at STORY-084 + STORY-085 in parallel (Batch C — see NEXT ACTIONS).**
 
 | Field | Value |
 |-------|-------|
-| **Date** | 2026-06-04 |
-| **Position** | Wave 4: 16/21 merged. Batch B COMPLETE. LESSON-13 reconciliation applied — STORY-083/084/085 added as Batch C prerequisites. STORY-049 gated on all three. NEXT: start STORY-083 (parallel-eligible with 084/085). |
-| **develop SHA** | `869fb401` (56 merged PRs; origin/develop = local develop) |
+| **Date** | 2026-06-05 |
+| **Position** | Wave 4: 17/21 merged. Batch B COMPLETE. Batch C: STORY-083 MERGED PR #57 (5aaa27d2). NEXT: STORY-084 + STORY-085 in parallel, then STORY-049 → STORY-050 → Wave 4 gate. |
+| **develop SHA** | `5aaa27d2` (57 merged PRs; origin/develop confirmed) |
 | **Active worktrees** | none |
 | **Open PRs** | 0 |
 | **Workspace crates** | 16 |
-| **Spec deltas this session** | STORY-040 re-scoped 5→3 pts (slide-grouping split to STORY-082, human-authorized). STORY-082 → Wave 5 (5 pts, P0, BC-4.01.003 Half B). BC-4.01.003 v1.2 (Half A notes+masters; Half B deferred). BC-5.01.005 v1.2 (deck.metadata.lang SoT). LESSON-13 reconciliation 2026-06-04: ADR-016 authored; BC-5.02.001→v1.3 (invariant 3 + postcondition 2 counts); BC-5.02.002→v1.3 (PC-5/EC-004 OOXML dog-fooding); plugin-architecture.md/ARCH-INDEX.md/crate-architecture.md corrected (owner-crate + root-crate definitions); STORY-083/084/085 added (14 pts new); STORY-049 amended (5 pts, gates on 083/084/085). Total stories 81→85; total points 497→511; Wave 4 stories 18→21; Wave 4 points 115→129. |
+| **Spec deltas this session** | STORY-083 delivered: PluginRegistryBuilder + RegistryError::MissingSurface + surface_count()/surface_names() + SURFACE_NAMES in slideforge-plugin-api. BC-5.02.001 invariant 3 now satisfied. LESSON-16 added: pre-push gate must mirror EXACT CI invocations (pedantic clippy + rustdoc doc link gate; evidence: STORY-083 PR #57 first CI run failure → fix bc52da1a). |
 | **factory-artifacts** | PUSHED to remote (origin/factory-artifacts) — human-authorized 2026-06-04. Upstream tracking set. Fresh sessions: clone repo + `git worktree add .factory factory-artifacts`. |
 
 ---
@@ -157,6 +156,7 @@ Phase 3, **Wave 4 — 16/21 merged. Batch B pptx chain (037→038→039→040) C
 | LESSON-13 | UPSTREAM-DATA VERIFICATION (highest value). Before implementing a story that CONSUMES IR data produced by an upstream pipeline stage (e.g. layout::run threading, register content, sections), VERIFY the data is ACTUALLY threaded through the real pipeline (semantic Deck → eval → layout::run → LaidOutDeck), not merely present as a type. Instruct test-writer to confirm upstream-data availability FIRST and drive the REAL end-to-end path (construct semantic input, run the pipeline, assert) so any threading gap surfaces in the Red Gate, not adversary review. When the gap is large/architectural, get an architect assessment + human scope decision (expand vs split) BEFORE implementation. Evidence: STORY-039 (chart/diagram alt not threaded through layout::run — caught late, required cross-crate IR refactor); STORY-040 (slide-grouping sections data did not exist in IR at all — required split to STORY-082). |
 | LESSON-14 | PRESENCE-VS-CONTENT TESTS. Acceptance tests that assert an artifact merely EXISTS (e.g. a ZIP part is present) can pass while the artifact is empty/orphaned/schema-invalid. Strengthen ACs/tests to assert CONTENT and VALIDITY: parse the real output and assert required child elements/attributes, relationship wiring (e.g. slide→notesSlide back-rel), and schema correctness — not just presence. When emitting hand-built OOXML, audit element-by-element against ECMA-376 CT content models (the canonical valid form usually exists elsewhere in the codebase — reuse/compare it). Evidence: STORY-040 presence-only tests passed while notesMaster was an empty stub, notes were orphaned (no slide→notesSlide rel), and grpSpPr was schema-invalid; adversary caught all three. |
 | LESSON-15 | DEMO-EXAMPLE CANONICAL CLIPPY. demo-recorder example binaries (`crates/*/examples/*.rs`) are built by `--all-targets` and MUST pass the FULL canonical clippy including `-W clippy::missing_docs_in_private_items` (LESSON-2) — example private items need doc comments. The demo-recorder's own clippy check has twice omitted that flag → CI-red (STORY-039 too_many_lines; STORY-040 missing_docs). Orchestrator: after demo recording, run the FULL canonical clippy (with `-W missing_docs_in_private_items`) on the example before push, OR dispatch demo-recorder with the explicit full flag set. |
+| LESSON-16 | PRE-PUSH GATE MUST MIRROR EXACT CI INVOCATIONS. Local per-story gates that run a narrower clippy (`cargo clippy -p <crate> --all-targets -- -D warnings`) and skip the docs gate will miss CI-catching defects. STORY-083 PR #57 first CI run FAILED on: (a) pedantic clippy escalated to deny caught `doc_markdown` + `unnecessary_literal_bound` + `uninlined_format_args` in the demo example binary; (b) `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps` caught a broken intra-doc link `[Err(RegistryError::MissingSurface)]`. Fix commit bc52da1a was required before CI went green. **Remediation:** before push, orchestrator/implementer MUST run the EXACT canonical CI commands: `cargo clippy --workspace --all-targets --all-features -- -D warnings -D clippy::pedantic -D clippy::unwrap_used -W clippy::missing_docs_in_private_items` AND `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps` — especially when a story adds an example binary or new intra-doc links. Also note (process-gap): adversary pass-3 first attempt produced a false "non-deterministic file" report because it read the main-checkout path instead of the worktree path; re-dispatch with explicit worktree-absolute path discipline resolved it. Going-forward adversary dispatches in worktree stories MUST pin worktree-absolute paths (re-enforces LESSON-1). |
 
 ---
 
@@ -193,6 +193,7 @@ Phase 3, **Wave 4 — 16/21 merged. Batch B pptx chain (037→038→039→040) C
 
 | Date | ID | Decision |
 |------|-----|---------|
+| 2026-06-05 | STORY-083 | STORY-083 MERGED PR #57 (5aaa27d2) — PluginRegistryBuilder + RegistryError::MissingSurface + surface_count()/surface_names() + SURFACE_NAMES. BC-5.02.001 invariant 3 closed. 6-pass adversary cascade; strict-CLEAN passes 4/5/6. Security: APPROVE (2 LOW — CWE-400 bounded by CLI-startup; CWE-209 true negative). CI required fix commit bc52da1a (pedantic clippy: doc_markdown + unnecessary_literal_bound + uninlined_format_args in demo example; rustdoc broken intra-doc link MissingSurface). LESSON-16 added. Batch C: 1/5 done. |
 | 2026-06-04 | LESSON-13-STORY-049 | STORY-049 LESSON-13 reconciliation (human-authorized 2026-06-04). STORY-049 found NOT implementation-ready: RegistryBuilder/surface enforcement absent from BC-5.02.001; SectionType (7 impls) + InlineFormat (12 impls) bundled ownership undefined; root crate vs owner-crate confusion in arch docs. Three decisions: (A) code-conforms-to-spec — RegistryBuilder + RegistryError::MissingSurface + surface_count/surface_names → STORY-083 (slideforge-plugin-api, 3 pts); (B) SectionType (7) + InlineFormat (12) bundled impls owned by slideforge-plugin-api → STORY-084 (3 pts) + STORY-085 (8 pts); (C) root crate = pipeline driver exposing build(), NOT owner-crate. Artifacts: ADR-016 authored; BC-5.02.001→v1.3 (invariant 3 + postcondition 2 counts corrected); BC-5.02.002→v1.3 (PC-5/EC-004 OOXML dog-fooding); plugin-architecture.md/ARCH-INDEX.md/crate-architecture.md corrected; reconciliation assessment at .factory/planning/story-049-reconciliation-assessment.md. Wave 4: 18→21 stories, 115→129 pts. Total: 81→85 stories, 497→511 pts. |
 | 2026-06-04 | STORY-040 | STORY-040 MERGED PR #56 (869fb401) — Batch B pptx chain complete (037→038→039→040). Slide-grouping split to STORY-082 (human-authorized). SafeUrl guard (link_safety.rs is_safe_link_scheme, CWE-601) shipped. SEC-040-001 (URL safety + XML escaping for notes hyperlinks) verified via test — ooxmlsdk escapes correctly, no prod change required. |
 | 2026-06-04 | SEC-039 | SEC-039-001 (CWE-116, MED) + SEC-039-002 (CWE-754, LOW) FIXED IN-SCOPE during STORY-039 PR review — validate_lang_for_xml rejects XML-1.0-illegal control chars in dc:language; loud tracing::error fallback for unexpected AltText variants. Neither deferred. |

@@ -45,13 +45,13 @@ wave_4_batch_c:
   execution: sequential
   chains: ["STORY-083 independent (dep: STORY-002 only)", "STORY-084 (dep: STORY-002+042+077)", "STORY-085 (dep: STORY-002+028+037+038)", "083+084+085→STORY-049→STORY-050"]
   prerequisite: Batch B gate check
-  lesson_13_note: "STORY-083/084/085 added 2026-06-04 per LESSON-13 reconciliation (ADR-016). STORY-083 and STORY-084+085 may execute in parallel after Batch B gate (083 has shortest dep chain; 084 needs 042+077 which are Batch B; 085 needs 037+038 which are Batch B). STORY-049 gates on all three."
+  lesson_13_note: "STORY-083/084/085 added 2026-06-04 per LESSON-13 reconciliation (ADR-016). STORY-083 MERGED PR #57 (5aaa27d2, 2026-06-05). STORY-084 + STORY-085 + STORY-049 + STORY-050 remaining. STORY-049 gates on all three (083 DONE; 084+085 remaining)."
 wave_4_pulled_in_p1: [STORY-073, STORY-075, STORY-076]
 wave_4_deferred_p2_to_wave5: [STORY-072, STORY-074]
 wave_4_bc_deltas: "BC-2.01.001 v1.1→v1.2; BC-2.01.003 v1.8→v1.9; error-taxonomy v2.2→v2.3"
-develop_sha: "869fb401"
-develop_pr_count: 56
-last_updated: 2026-06-04
+develop_sha: "5aaa27d2"
+develop_pr_count: 57
+last_updated: 2026-06-05
 ---
 
 stories:
@@ -475,14 +475,22 @@ stories:
     worktree: ".worktrees/STORY-045 (feature/S-045)"
     notes: "PDF/UA-1 Full Compliance (scope expanded by human 2026-06-01 — story v1.1, 8 pts, BC-4.03.001 v1.3). AC-010..AC-013 added. Pass-1 fixes: CI nextest flag; CI runs ac013_verapdf_full_compliance; PdfExportError::ValidationFailed; src/outline.rs build_outline_entries; source_index/page_idx invariant; deterministic font path; /Lang-absent fatal under UA1; structural outline assertions. NEXT: adversary pass 2."
   STORY-083:
-    status: not-started
+    status: merged
     wave: 4
     batch: C
     priority: P0
     points: 3
     depends_on: [STORY-002]
     blocks: [STORY-049]
-    notes: "Plugin Registry Builder + Surface Enforcement; extends slideforge-plugin-api/src/registry.rs with PluginRegistryBuilder, RegistryError::MissingSurface, surface_count(), surface_names(); closes BC-5.02.001 invariant 3 gap in STORY-002 delivered code; LESSON-13/ADR-016 Decision 1"
+    pr: 57
+    merge_commit: "5aaa27d2"
+    merged: 2026-06-05
+    adversary_convergence: "3/3 strict-CLEAN at passes 4/5/6 (6-pass total cascade)"
+    adversary_streak: "3/3"
+    converged: true
+    security_review: "APPROVE — 0 CRIT/HIGH; 2 LOW (CWE-400 bounded by CLI-startup context; CWE-209 true negative)"
+    workspace_tests: 133
+    notes: "Plugin Registry Builder + Surface Enforcement; PluginRegistryBuilder, RegistryError::MissingSurface, surface_count(), surface_names(), SURFACE_NAMES const; closes BC-5.02.001 invariant 3. CI-gate fixes: clippy pedantic (demo example binary — doc_markdown/unnecessary_literal_bound/uninlined_format_args) + rustdoc intra-doc link fix (MissingSurface) — see LESSON-16. LESSON-13/ADR-016 Decision 1."
   STORY-084:
     status: not-started
     wave: 4
