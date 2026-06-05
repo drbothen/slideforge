@@ -79,7 +79,7 @@ Phase 3, **Wave 4 — 16/18 merged. Batch B pptx chain (037→038→039→040) C
 
 **STANDING MERGE AUTH (granted 2026-06-02):** Orchestrator MAY squash-merge any PR that is CI-green + security-reviewer CLEAN + pr-reviewer APPROVE, without re-asking the human. GitHub blocks author self-approve, so orchestrator runs `gh pr merge --squash` directly once those gates pass. Revocable by human.
 
-**factory-artifacts LOCAL ONLY:** Many unpushed commits accumulated this session. A fresh session on this machine resumes from local `.factory/` worktree. Pushing factory-artifacts to remote requires explicit human authorization.
+**factory-artifacts PUSHED to remote (origin/factory-artifacts) — human-authorized 2026-06-04 for cross-machine durability; ongoing pushes of factory-artifacts to remote are now authorized.** Upstream tracking set (`-u origin factory-artifacts`). Fresh sessions on any machine may clone + `git worktree add .factory factory-artifacts` to restore all artifacts.
 
 ---
 
@@ -125,7 +125,7 @@ Phase 3, **Wave 4 — 16/18 merged. Batch B pptx chain (037→038→039→040) C
 | **Open PRs** | 0 |
 | **Workspace crates** | 16 |
 | **Spec deltas this session** | STORY-040 re-scoped 5→3 pts (slide-grouping split to STORY-082, human-authorized). STORY-082 created Wave 5 (5 pts, P0, BC-4.01.003 Half B). BC-4.01.003 amended to v1.2 (Half A: notes+masters; Half B deferred to STORY-082). BC-5.01.005 amended to v1.2 (deck.metadata.lang SoT, human-authorized). Total points updated 494→497; Wave 4 115 pts; Wave 5 114 pts. SafeUrl guard (link_safety.rs, CWE-601) shipped in slideforge-pptx. |
-| **factory-artifacts** | LOCAL ONLY (unpushed). Fresh session on this machine resumes from local `.factory/` worktree. Cross-machine durability requires pushing factory-artifacts — needs explicit human authorization. |
+| **factory-artifacts** | PUSHED to remote (origin/factory-artifacts) — human-authorized 2026-06-04. Upstream tracking set. Fresh sessions: clone repo + `git worktree add .factory factory-artifacts`. |
 
 ---
 
