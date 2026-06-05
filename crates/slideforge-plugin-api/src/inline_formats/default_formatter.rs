@@ -33,7 +33,9 @@
 
 use slideforge_types::InlineNode;
 
-use crate::traits::inline_format::{InlineError, InlineFormat, InlineOutputFormat};
+use crate::traits::inline_format::{
+    InlineError, InlineFormat, InlineOutputFormat, InlineRenderContext,
+};
 
 /// The built-in stateless inline formatter.
 ///
@@ -67,6 +69,54 @@ impl InlineFormat for DefaultInlineFormat {
 
     fn render(&self, node: &InlineNode, format: InlineOutputFormat) -> Result<String, InlineError> {
         render_node(node, format, 0)
+    }
+
+    /// Render `node` with optional exporter-owned context.
+    ///
+    /// For `Link + Ooxml` with a `Some(rid)` in `context.hyperlink_rid`,
+    /// emits the full OOXML hyperlink run:
+    ///
+    /// ```xml
+    /// <a:r><a:rPr><a:hlinkClick r:id="{rid}"/></a:rPr><a:t>{escaped display text}</a:t></a:r>
+    /// ```
+    ///
+    /// Both `rid` and display text are XML-escaped.
+    ///
+    /// For all other `(node, format)` combinations, or for `Link + Ooxml` with
+    /// `context.hyperlink_rid == None`, delegates to [`Self::render`].
+    ///
+    /// This override is the SOLE place in `slideforge-plugin-api` where OOXML
+    /// hyperlink run markup is constructed. The `slideforge-pptx` exporter must
+    /// route all `Link + Ooxml` rendering through this method (AC-005).
+    fn render_with_context(
+        &self,
+        node: &InlineNode,
+        format: InlineOutputFormat,
+        context: &InlineRenderContext<'_>,
+    ) -> Result<String, InlineError> {
+        // Only the Link + Ooxml combination with a provided rId is handled here.
+        // All other cases delegate to the standard render path.
+        if let (InlineNode::Link { text, .. }, InlineOutputFormat::Ooxml, Some(rid)) =
+            (node, format, context.hyperlink_rid)
+        {
+            // Extract display text from the link children (flatten to plain text,
+            // same as the EC-002 fallback path but here we have a valid rId).
+            let display_text = extract_plain_text_from_nodes(text);
+            if display_text.is_empty() {
+                return Ok(String::new());
+            }
+            // Emit: <a:r><a:rPr><a:hlinkClick r:id="{rid}"/></a:rPr><a:t>{text}</a:t></a:r>
+            // Both rid and text are XML-escaped (CWE-116 defense — attribute + text content).
+            let mut out = String::new();
+            out.push_str("<a:r><a:rPr><a:hlinkClick r:id=\"");
+            out.push_str(&xml_escape(rid));
+            out.push_str("\"/></a:rPr><a:t>");
+            out.push_str(&xml_escape(&display_text));
+            out.push_str("</a:t></a:r>");
+            return Ok(out);
+        }
+        // All other cases: delegate to the standard render path.
+        self.render(node, format)
     }
 }
 
@@ -330,19 +380,91 @@ fn emit_ooxml_run(text: &str, bold: bool, italic: bool) -> String {
 ///
 /// Since these nodes produce a single run with special properties, we need
 /// to extract the text content of the children to embed in `<a:t>`.
+///
+/// ## Depth guard (F-005 / BC-3.05.001)
+///
+/// `depth` is threaded through the recursive child traversal via
+/// [`extract_plain_text_depth_limited`]. This ensures that nesting depth > 64
+/// returns [`InlineError::RenderError`] instead of stack-overflowing, even for
+/// nodes nested under Superscript/Subscript/Strikethrough/Highlight.
+///
+/// ## Nested formatting (F-005)
+///
+/// The flat `<a:t>` model for these nodes cannot represent combined run properties
+/// (e.g., bold+superscript requires two separate runs in OOXML, which the current
+/// single-run implementation does not emit). When nested formatting is present,
+/// the formatting flags are silently dropped — only the text content is preserved.
+/// A `tracing::warn!` is emitted for each nested Bold/Italic child so the caller
+/// has an audit trail (not a silent loss).
 fn extract_plain_text_from_renders(
     children: &[InlineNode],
     depth: usize,
 ) -> Result<String, InlineError> {
-    // We need the plain text content for embedding in a specialized run.
-    // Use the plain-text extractor which handles nesting correctly.
     if depth > MAX_DEPTH {
         return Err(InlineError::RenderError {
             node_kind: "children".to_owned(),
             message: "inline nesting depth exceeds maximum of 64".to_owned(),
         });
     }
-    Ok(extract_plain_text_from_nodes(children))
+    extract_plain_text_depth_limited(children, depth + 1)
+}
+
+/// Depth-limited plain text extractor.
+///
+/// Recursively extracts plain text from inline node trees, tracking nesting depth.
+/// Returns [`InlineError::RenderError`] if `depth > MAX_DEPTH` at any level.
+///
+/// Emits `tracing::warn!` for Bold/Italic children whose formatting is dropped
+/// (F-005: not a silent loss — the caller gets an audit trail).
+fn extract_plain_text_depth_limited(
+    nodes: &[InlineNode],
+    depth: usize,
+) -> Result<String, InlineError> {
+    if depth > MAX_DEPTH {
+        return Err(InlineError::RenderError {
+            node_kind: "children".to_owned(),
+            message: "inline nesting depth exceeds maximum of 64".to_owned(),
+        });
+    }
+    let mut out = String::new();
+    for node in nodes {
+        match node {
+            InlineNode::Plain(s) | InlineNode::Code(s) | InlineNode::Xref(s) => {
+                out.push_str(s);
+            },
+            InlineNode::Bold(c) => {
+                // F-005: Bold inside Super/Sub/Strike/Highlight drops bold formatting
+                // (single-run OOXML cannot combine these properties). Warn, don't drop silently.
+                tracing::warn!(
+                    "nested Bold inside specialized OOXML run (Superscript/Subscript/ \
+                     Strikethrough/Highlight): bold formatting dropped in flat-run model (F-005)"
+                );
+                out.push_str(&extract_plain_text_depth_limited(c, depth + 1)?);
+            },
+            InlineNode::Italic(c) => {
+                // F-005: same as Bold.
+                tracing::warn!(
+                    "nested Italic inside specialized OOXML run (Superscript/Subscript/ \
+                     Strikethrough/Highlight): italic formatting dropped in flat-run model (F-005)"
+                );
+                out.push_str(&extract_plain_text_depth_limited(c, depth + 1)?);
+            },
+            InlineNode::Footnote(c)
+            | InlineNode::Superscript(c)
+            | InlineNode::Subscript(c)
+            | InlineNode::Strikethrough(c)
+            | InlineNode::Highlight(c) => {
+                out.push_str(&extract_plain_text_depth_limited(c, depth + 1)?);
+            },
+            InlineNode::Link { text, .. } => {
+                out.push_str(&extract_plain_text_depth_limited(text, depth + 1)?);
+            },
+            InlineNode::Math(m) => {
+                out.push_str(m.latex.as_ref());
+            },
+        }
+    }
+    Ok(out)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -364,16 +486,29 @@ fn render_html(node: &InlineNode, depth: usize) -> Result<String, InlineError> {
         InlineNode::Code(text) => Ok(format!("<code>{}</code>", html_escape(text))),
         InlineNode::Link { text, url } => {
             let display = render_children_html(text, depth)?;
-            Ok(format!("<a href=\"{url}\">{display}</a>"))
+            // F-004: HTML-escape the URL for safe embedding in the href attribute.
+            // A `"` in the URL would prematurely close the attribute (CWE-116).
+            let escaped_url = html_escape(url);
+            Ok(format!("<a href=\"{escaped_url}\">{display}</a>"))
         },
         InlineNode::Math(math_node) => {
-            Ok(format!("<span class=\"math\">{}</span>", math_node.latex))
+            // F-004: HTML-escape the LaTeX body. A raw `<` inside the span
+            // would break HTML parsing (CWE-116 / XSS vector).
+            Ok(format!(
+                "<span class=\"math\">{}</span>",
+                html_escape(math_node.latex.as_ref())
+            ))
         },
         InlineNode::Footnote(children) => {
             let content = render_children_html(children, depth)?;
             Ok(format!("<sup>[{content}]</sup>"))
         },
-        InlineNode::Xref(id) => Ok(format!("<a href=\"#{id}\">{id}</a>")),
+        InlineNode::Xref(id) => {
+            // F-004: HTML-escape the id in both the href attribute and link text.
+            // A `<` or `"` in the id would break the attribute / text content.
+            let escaped_id = html_escape(id);
+            Ok(format!("<a href=\"#{escaped_id}\">{escaped_id}</a>"))
+        },
         InlineNode::Superscript(children) => {
             let content = render_children_html(children, depth)?;
             Ok(format!("<sup>{content}</sup>"))
@@ -1274,5 +1409,234 @@ mod tests {
     fn test_bc_5_02_001_default_inline_format_send_sync() {
         fn assert_send_sync<T: Send + Sync>() {}
         assert_send_sync::<DefaultInlineFormat>();
+    }
+
+    // ── F-004 (HIGH): HTML-escape url, id, latex in HTML output ─────────────
+
+    /// F-004 (HIGH): Link HTML — URL containing a double-quote must be escaped.
+    ///
+    /// `<a href="url-with-"quote"">` is not valid HTML because the `"` inside
+    /// the attribute closes it prematurely. Must become `&quot;`.
+    ///
+    /// This test FAILS before F-004 because `render_html` for Link interpolates
+    /// the url directly: `format!("<a href=\"{url}\">{display}</a>")`.
+    #[test]
+    fn test_f004_html_link_url_quote_escaped() {
+        // URL containing a double-quote — must be &quot; in the href attribute.
+        let node = link(vec![plain("click")], "https://example.com/path?a=\"1\"&b=2");
+        let result = fmt().render(&node, InlineOutputFormat::Html).unwrap();
+        assert!(
+            !result.contains("\"1\""),
+            "F-004: raw \" in URL must be &quot;-escaped; got: {result}"
+        );
+        assert!(
+            result.contains("&quot;"),
+            "F-004: URL double-quote must become &quot; in href; got: {result}"
+        );
+    }
+
+    /// F-004 (HIGH): Xref HTML — id containing `<` must be escaped in both
+    /// the `href="#id"` attribute and the link text.
+    ///
+    /// This test FAILS before F-004 because `render_html` for Xref:
+    ///   `format!("<a href=\"#{id}\">{id}</a>")`
+    /// does not escape the id value.
+    #[test]
+    fn test_f004_html_xref_id_with_angle_bracket_escaped() {
+        let node = InlineNode::Xref(Arc::from("fig<1>"));
+        let result = fmt().render(&node, InlineOutputFormat::Html).unwrap();
+        assert!(
+            !result.contains("<1>"),
+            "F-004: raw < in xref id must be escaped; got: {result}"
+        );
+        assert!(
+            result.contains("&lt;"),
+            "F-004: < in xref id must become &lt;; got: {result}"
+        );
+    }
+
+    /// F-004 (HIGH): Math HTML — latex body containing `a < b` must be escaped.
+    ///
+    /// A raw `<` inside `<span class="math">...</span>` breaks HTML parsing.
+    ///
+    /// This test FAILS before F-004 because `render_html` for Math:
+    ///   `format!("<span class=\"math\">{}</span>", math_node.latex)`
+    /// does not escape the latex value.
+    #[test]
+    fn test_f004_html_math_latex_with_lt_escaped() {
+        let node = InlineNode::Math(slideforge_types::MathNode {
+            latex: Arc::from("a < b"),
+            display: false,
+            span: slideforge_types::SourceSpan::default(),
+        });
+        let result = fmt().render(&node, InlineOutputFormat::Html).unwrap();
+        assert!(
+            !result.contains(" < "),
+            "F-004: raw < in math latex must be escaped in HTML output; got: {result}"
+        );
+        assert!(
+            result.contains("&lt;"),
+            "F-004: < in math latex must become &lt; in HTML; got: {result}"
+        );
+    }
+
+    // ── F-005 (MED): Nested formatting + depth guard for Super/Sub/Strike/Highlight
+
+    /// F-005 (MED): Superscript([Bold([Plain("x")])]) in OOXML — the nested Bold
+    /// formatting must either be preserved (combined run properties) OR a
+    /// `tracing::warn!` must be emitted. EITHER WAY, the depth counter must be
+    /// correctly threaded so EC-004 still holds for nodes nested under Superscript.
+    ///
+    /// We verify the depth guard: nesting > 64 levels under Superscript returns
+    /// `InlineError::RenderError`, not a stack overflow.
+    ///
+    /// This test FAILS before F-005 because `extract_plain_text_from_renders`
+    /// does NOT propagate `depth` — it calls `extract_plain_text_from_nodes`
+    /// with no depth tracking, so the depth guard in the outer path is bypassed.
+    #[test]
+    fn test_f005_ec004_depth_guard_under_superscript() {
+        // Build 65 levels of Bold nested under a Superscript.
+        let mut inner: InlineNode = plain("x");
+        for _ in 0..65 {
+            inner = bold(vec![inner]);
+        }
+        let node = superscript(vec![inner]);
+
+        let result = fmt().render(&node, InlineOutputFormat::Ooxml);
+        // Must return an error (depth > 64), not stack-overflow.
+        match result {
+            Err(InlineError::RenderError { message, .. }) => {
+                assert!(
+                    message.contains("nesting depth exceeds maximum of 64"),
+                    "F-005: expected depth-exceeded error, got: {message}"
+                );
+            },
+            Ok(s) => panic!(
+                "F-005: expected RenderError for depth > 64 under Superscript, got Ok({s:?})"
+            ),
+            Err(e) => panic!(
+                "F-005: expected RenderError for depth > 64 under Superscript, got different error: {e:?}"
+            ),
+        }
+    }
+
+    /// F-005 (MED): Superscript([Bold([Plain("x")])]) — nested Bold inside
+    /// Superscript. The nested Bold MUST either be preserved in the output (as
+    /// combined run properties or a dedicated bold run) OR a `tracing::warn!`
+    /// must be emitted. We assert the output is non-empty and contains "x".
+    ///
+    /// This is the "non-silent" requirement: the text must not be silently dropped.
+    /// Before F-005, the text is present (`extract_plain_text_from_nodes` handles it)
+    /// so this test PASSES currently — it is included as a regression guard for F-005.
+    #[test]
+    fn test_f005_nested_bold_inside_superscript_text_not_dropped() {
+        let node = superscript(vec![bold(vec![plain("x")])]);
+        let result = fmt().render(&node, InlineOutputFormat::Ooxml).unwrap();
+        assert!(
+            result.contains('x'),
+            "F-005: text inside Bold([Superscript([Plain(\"x\")])]) must not be silently dropped; got: {result}"
+        );
+    }
+
+    // ── F-001 (CRIT): render_with_context on DefaultInlineFormat ─────────────
+
+    /// F-001 (CRIT): `DefaultInlineFormat::render_with_context` for `Link + Ooxml`
+    /// with `Some(rid)` must emit a full `<a:r><a:rPr><a:hlinkClick r:id="rId3"/>
+    /// </a:rPr><a:t>display text</a:t></a:r>` — NOT a plain text fallback.
+    ///
+    /// This test FAILS before F-001 because `render_with_context` does not exist
+    /// on the `InlineFormat` trait (compilation error).
+    #[test]
+    fn test_f001_render_with_context_link_ooxml_with_rid_emits_hlinkclick() {
+        use crate::traits::inline_format::InlineRenderContext;
+
+        let node = link(vec![plain("click here")], "https://example.com");
+        let ctx = InlineRenderContext {
+            hyperlink_rid: Some("rId3"),
+        };
+        let result = fmt()
+            .render_with_context(&node, InlineOutputFormat::Ooxml, &ctx)
+            .unwrap();
+
+        // Must contain the hlinkClick with the given rId.
+        assert!(
+            result.contains("hlinkClick"),
+            "F-001: render_with_context Link+Ooxml with rId must emit hlinkClick; got: {result}"
+        );
+        assert!(
+            result.contains("rId3"),
+            "F-001: render_with_context Link+Ooxml must embed the rId; got: {result}"
+        );
+        // Must contain the display text.
+        assert!(
+            result.contains("click here"),
+            "F-001: render_with_context Link+Ooxml must include display text; got: {result}"
+        );
+        // Must be a proper OOXML run (starts with <a:r>).
+        assert!(
+            result.contains("<a:r>"),
+            "F-001: render_with_context Link+Ooxml must emit a <a:r> run; got: {result}"
+        );
+    }
+
+    /// F-001 (CRIT): `DefaultInlineFormat::render_with_context` for `Link + Ooxml`
+    /// with `None` (no rId) must fall back to the existing display-text-plus-warn
+    /// behavior (same as plain `render`).
+    ///
+    /// This test FAILS before F-001 because `render_with_context` does not exist.
+    #[test]
+    fn test_f001_render_with_context_link_ooxml_no_rid_falls_back_to_render() {
+        use crate::traits::inline_format::InlineRenderContext;
+
+        let node = link(vec![plain("my link")], "https://example.com");
+        // Default context (no rId).
+        let ctx = InlineRenderContext::default();
+        let result = fmt()
+            .render_with_context(&node, InlineOutputFormat::Ooxml, &ctx)
+            .unwrap();
+
+        // Must contain the display text (not silently dropped).
+        assert!(
+            result.contains("my link"),
+            "F-001: render_with_context Link+Ooxml with None rId must preserve display text; got: {result}"
+        );
+        // Must NOT contain hlinkClick (no rId available).
+        assert!(
+            !result.contains("hlinkClick"),
+            "F-001: render_with_context Link+Ooxml with None rId must NOT emit hlinkClick; got: {result}"
+        );
+    }
+
+    /// F-001 (CRIT): For non-Link nodes, `render_with_context` must delegate
+    /// to `render` (the default implementation). This ensures the default
+    /// method is not overridden for other node types.
+    #[test]
+    fn test_f001_render_with_context_non_link_delegates_to_render() {
+        use crate::traits::inline_format::InlineRenderContext;
+
+        let ctx = InlineRenderContext::default();
+        // Plain node — should delegate to render.
+        let plain_result = fmt()
+            .render_with_context(&plain("hello"), InlineOutputFormat::Ooxml, &ctx)
+            .unwrap();
+        let render_result = fmt()
+            .render(&plain("hello"), InlineOutputFormat::Ooxml)
+            .unwrap();
+        assert_eq!(
+            plain_result, render_result,
+            "F-001: render_with_context for Plain must delegate to render"
+        );
+
+        // Bold node.
+        let bold_result = fmt()
+            .render_with_context(&bold(vec![plain("hi")]), InlineOutputFormat::Html, &ctx)
+            .unwrap();
+        let render_bold = fmt()
+            .render(&bold(vec![plain("hi")]), InlineOutputFormat::Html)
+            .unwrap();
+        assert_eq!(
+            bold_result, render_bold,
+            "F-001: render_with_context for Bold must delegate to render"
+        );
     }
 }

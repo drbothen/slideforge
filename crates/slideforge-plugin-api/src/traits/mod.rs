@@ -22,7 +22,7 @@ pub use chart_renderer::{ChartError, ChartRenderer};
 pub use data_source::{DataSource, DataSourceError, DataSourceOptions};
 pub use diagram_renderer::{DiagramError, DiagramOptions, DiagramRenderer};
 pub use exporter::{ExportError, ExportOptions, Exporter};
-pub use inline_format::{InlineError, InlineFormat, InlineOutputFormat};
+pub use inline_format::{InlineError, InlineFormat, InlineOutputFormat, InlineRenderContext};
 pub use math_renderer::{MathError, MathOutputFormat, MathRenderer};
 pub use section_type::{SectionBlock, SectionType};
 pub use slide_type::{Canvas, FieldDef, LayoutError, SlideType};

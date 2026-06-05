@@ -1616,40 +1616,48 @@ fn test_sec040_001_ampersand_in_url_query_string_is_xml_escaped_in_rels() {
 
 /// AC-005 / BC-5.02.002 postcondition 5:
 /// After the OOXML dog-fooding refactor, `crates/slideforge-pptx/src/` must
-/// contain ZERO occurrences of `<a:r`, `<a:rPr`, or the string `serialize_inline`
-/// **outside** the single `InlineFormat::render(node, InlineOutputFormat::Ooxml)`
-/// dispatch call site.
+/// contain ZERO occurrences of:
+///   - the substring `"a:r"` (literal OOXML run tag fragment)
+///   - the substring `"a:rPr"` (literal OOXML run properties tag fragment)
+///   - the string `serialize_inline` (legacy inline serializer function names)
 ///
-/// ## Red Gate
+/// These are forbidden everywhere except the single documented dispatch call site
+/// (identified by the stable comment `// AC-005-DISPATCH-SITE` on that line).
 ///
-/// FAILS before the refactor because `notes_slide.rs` contains:
-/// - `fn serialize_inline_nodes_to_xml`
-/// - `fn serialize_nodes_with_context`
-/// - `fn emit_run` (emits `<a:r>` and `<a:rPr>`)
+/// ## Why this test (F-002 / LESSON-17 / TD-VSDD-059)
 ///
-/// ## Pass condition
+/// The previous version of this test checked only for legacy FUNCTION NAMES
+/// (`serialize_inline_nodes_to_xml`, `fn emit_run`). That was a paper-fix
+/// (TD-VSDD-059): the functions were removed, but the refactored code still
+/// hand-constructs `<a:r><a:rPr` strings inside `dispatch_inline_nodes_to_ooxml`
+/// for the `Link` arm — violating AC-005 / BC-5.02.002 postcondition 5.
 ///
-/// PASSES once the implementer removes those functions and routes through
-/// `DefaultInlineFormat::render(node, InlineOutputFormat::Ooxml)`.
-/// The single dispatch call site in `notes_slide.rs` is exempt.
+/// This rewritten test enforces the LITERAL AC-005/BC-5.02.002 vector: scan all
+/// production `.rs` files under `crates/slideforge-pptx/src/` (excluding
+/// `tests/` and `#[cfg(test)]` blocks) for the substrings `a:r`, `a:rPr`, and
+/// `serialize_inline`, and assert ZERO occurrences EXCEPT:
+///   1. Lines that are comments (starting with `//` or `///` after trimming).
+///   2. The single documented dispatch call site marked with `// AC-005-DISPATCH-SITE`.
 ///
-/// ## Implementation
+/// ## Red Gate (F-002)
 ///
-/// Reads all `.rs` files under `crates/slideforge-pptx/src/` using `std::fs`
-/// and asserts zero matches for the forbidden patterns (excluding the one
-/// permitted dispatch call site line).
+/// FAILS before the F-001 fix because `notes_slide.rs` line ~269 contains:
+///   `out.push_str("<a:r><a:rPr");`
+/// This is not a comment and not the dispatch site — it is a forbidden
+/// hand-construction of `<a:r>` and `<a:rPr>` in the pptx exporter.
+///
+/// PASSES after F-001 routes the Link arm through `render_with_context` (which
+/// emits the OOXML from within `DefaultInlineFormat` in `slideforge-plugin-api`).
+/// The one permitted dispatch call site in `notes_slide.rs` must be marked:
+///   `// AC-005-DISPATCH-SITE`
 #[test]
 fn test_bc_5_02_002_ac005_grep_zero_ar_rpr_serialize_inline_outside_dispatch() {
     use std::fs;
     use std::path::Path;
 
-    // Locate the slideforge-pptx src directory relative to the workspace root.
-    // The test runs from the crate root (crates/slideforge-pptx) in nextest.
-    // We use CARGO_MANIFEST_DIR to find the crate root reliably.
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
     let src_dir = Path::new(manifest_dir).join("src");
 
-    // Collect all .rs files under src/
     let mut rs_files: Vec<std::path::PathBuf> = Vec::new();
     collect_rs_files(&src_dir, &mut rs_files);
 
@@ -1658,21 +1666,21 @@ fn test_bc_5_02_002_ac005_grep_zero_ar_rpr_serialize_inline_outside_dispatch() {
         "AC-005: no .rs files found under {src_dir:?} — check CARGO_MANIFEST_DIR"
     );
 
-    // Forbidden patterns: these strings must not appear in pptx/src/ after the refactor.
-    // After refactor: all <a:r> construction moves to DefaultInlineFormat (in plugin-api).
-    // The single permitted dispatch line is the InlineFormat::render() call.
-    let forbidden_patterns = [
-        "serialize_inline_nodes_to_xml",
-        "serialize_nodes_with_context",
-        "fn emit_run", // the private helper that directly built <a:r>
-    ];
+    // These literal substrings must not appear in slideforge-pptx production code
+    // outside the single AC-005-DISPATCH-SITE marked line.
+    // NOTE: "a:r" as a pattern will match both "a:r>" and "a:rPr" — we list them
+    // separately for clear violation messages.
+    let forbidden_substrings = ["<a:r", "<a:rPr", "serialize_inline"];
+
+    // The single permitted dispatch call site marker. Any line containing this
+    // marker is exempt from the forbidden-substring check.
+    let dispatch_site_marker = "// AC-005-DISPATCH-SITE";
 
     let mut violations: Vec<String> = Vec::new();
 
     for file_path in &rs_files {
-        // Skip test files — the test file itself mentions the forbidden patterns
-        // in its pattern list and comments, but those are not production code.
-        // Only production source files need to be clean after the refactor.
+        // Skip test files entirely — they may reference these patterns in
+        // assertions and comments. Only production source is checked.
         let path_str = file_path.to_string_lossy();
         if path_str.contains("/tests/") || path_str.ends_with("_tests.rs") {
             continue;
@@ -1684,22 +1692,25 @@ fn test_bc_5_02_002_ac005_grep_zero_ar_rpr_serialize_inline_outside_dispatch() {
         for (line_num, line) in content.lines().enumerate() {
             let line_num = line_num + 1; // 1-based
 
-            // Skip comment lines — comments may reference the removed functions
-            // for historical context without constituting a live code call.
+            // Skip pure comment lines (no production code on this line).
             let trimmed = line.trim();
-            if trimmed.starts_with("//") {
+            if trimmed.starts_with("//") || trimmed.starts_with("///") {
                 continue;
             }
 
-            for pattern in &forbidden_patterns {
+            // The single permitted dispatch site: the one line where the
+            // InlineFormat::render / render_with_context call is made.
+            // That line must carry the marker `// AC-005-DISPATCH-SITE`.
+            if line.contains(dispatch_site_marker) {
+                continue;
+            }
+
+            for pattern in &forbidden_substrings {
                 if line.contains(pattern) {
-                    // All occurrences of these function names in production code
-                    // are forbidden after refactor. Before the refactor they still
-                    // exist in notes_slide.rs — that's exactly why this test is RED.
                     violations.push(format!(
-                        "{}:{}: contains forbidden pattern {:?}: {}",
+                        "{}:{line_num}: forbidden literal {:?} in production PPTX code \
+                         (AC-005 / BC-5.02.002 postcondition 5): {}",
                         file_path.display(),
-                        line_num,
                         pattern,
                         line.trim()
                     ));
@@ -1710,9 +1721,10 @@ fn test_bc_5_02_002_ac005_grep_zero_ar_rpr_serialize_inline_outside_dispatch() {
 
     assert!(
         violations.is_empty(),
-        "AC-005 FAILED — BC-5.02.002 postcondition 5 (dog-fooding grep-zero) violated.\n\
-         After the STORY-085 refactor, slideforge-pptx/src/ must not contain direct \
-         inline OOXML serialization functions. Found {} violation(s):\n{}",
+        "AC-005 FAILED — BC-5.02.002 postcondition 5 (literal grep-zero) violated.\n\
+         Production code in slideforge-pptx/src/ must not hand-construct OOXML run \
+         markup. All OOXML run emission must go through InlineFormat::render_with_context \
+         at the single AC-005-DISPATCH-SITE. Found {} violation(s):\n{}",
         violations.len(),
         violations.join("\n")
     );
@@ -1968,5 +1980,467 @@ fn test_bc_5_02_002_ac007_no_catch_unwind_in_pptx_src() {
          Found {} violation(s):\n{}",
         violations.len(),
         violations.join("\n")
+    );
+}
+
+// =============================================================================
+// F-003 (HIGH): AC-006 variant coverage — all 12 InlineNode variants in notes
+//
+// The legacy `serialize_nodes_with_context` handled all 12 variants. The
+// refactored `DefaultInlineFormat` dispatch path must handle them too.
+// AC-006 previously only pinned 3/12 variants (Plain, Bold+Italic, xml-escape).
+// F-003 adds explicit assertions for the remaining variants in the NOTES path.
+//
+// Investigation result (git show develop:notes_slide.rs):
+//   - Plain/Code/Xref → emit_run (plain text with bold/italic flags inherited)
+//   - Bold → recurse with bold=true
+//   - Italic → recurse with italic=true
+//   - Footnote/Superscript/Subscript/Strikethrough/Highlight → recurse children
+//     inheriting bold/italic (NO distinct run properties — flattened to plain/bold/italic)
+//   - Math → LaTeX source as plain text run
+//   - Link → hyperlink run (with rId) or plain text fallback
+//
+// The NEW `DefaultInlineFormat` behavior is PRODUCTION-GRADE: Super/Sub/Strike/
+// Highlight emit dedicated run properties (baseline, strike, highlight) instead
+// of silently flattening. This is intentional improvement, not a regression.
+// The tests here assert the NEW correct production behavior.
+// =============================================================================
+
+/// F-003 (HIGH): Code node in notes path → emits OOXML run containing the code text.
+/// The legacy path emitted a plain text run (emit_run). The new path emits a
+/// monospace run via DefaultInlineFormat (Courier New). Either way, the text must
+/// appear in the output.
+#[test]
+fn test_f003_ac006_notes_code_variant_in_ooxml() {
+    use slideforge_types::InlineNode;
+    use slideforge_types::register::RegisteredContent;
+
+    let rc = RegisteredContent {
+        register: slideforge_types::Register::Notes,
+        content: vec![InlineNode::Code(Arc::from("fn main()"))],
+    };
+
+    let slide = LaidOutSlide {
+        source_index: 0,
+        slide_type_keyword: Arc::from("title"),
+        frames: vec![Frame {
+            bbox: title_bbox(),
+            content: FrameContent::Empty,
+            text_flow: None,
+        }],
+        speaker_notes: Some(Arc::from("fn main()")),
+        register_tags: vec![],
+        register_content: vec![rc],
+    };
+    let deck = make_deck_with_notes(&[Some("fn main()")]);
+    let laid_out = LaidOutDeck {
+        page_size: slideforge_layout::PageSize::default(),
+        slides: vec![slide],
+        sections: vec![],
+        warnings: vec![],
+    };
+    let pptx = export_pptx(&deck, &laid_out);
+    let notes_xml = read_zip_member(&pptx, "ppt/notesSlides/notesSlide1.xml");
+
+    assert!(
+        notes_xml.contains("fn main()"),
+        "F-003: Code variant in notes must emit the code text; got:\n{notes_xml}"
+    );
+    // Code in OOXML via DefaultInlineFormat emits a monospace run.
+    insta::assert_snapshot!(
+        "f003_notes_code_ooxml",
+        extract_paragraph_content(&notes_xml)
+    );
+}
+
+/// F-003 (HIGH): Xref node in notes path → emits OOXML run containing the xref id.
+#[test]
+fn test_f003_ac006_notes_xref_variant_in_ooxml() {
+    use slideforge_types::InlineNode;
+    use slideforge_types::register::RegisteredContent;
+
+    let rc = RegisteredContent {
+        register: slideforge_types::Register::Notes,
+        content: vec![InlineNode::Xref(Arc::from("slide-5"))],
+    };
+    let slide = LaidOutSlide {
+        source_index: 0,
+        slide_type_keyword: Arc::from("title"),
+        frames: vec![Frame {
+            bbox: title_bbox(),
+            content: FrameContent::Empty,
+            text_flow: None,
+        }],
+        speaker_notes: Some(Arc::from("slide-5")),
+        register_tags: vec![],
+        register_content: vec![rc],
+    };
+    let deck = make_deck_with_notes(&[Some("slide-5")]);
+    let laid_out = LaidOutDeck {
+        page_size: slideforge_layout::PageSize::default(),
+        slides: vec![slide],
+        sections: vec![],
+        warnings: vec![],
+    };
+    let pptx = export_pptx(&deck, &laid_out);
+    let notes_xml = read_zip_member(&pptx, "ppt/notesSlides/notesSlide1.xml");
+
+    assert!(
+        notes_xml.contains("slide-5"),
+        "F-003: Xref variant in notes must emit the xref id; got:\n{notes_xml}"
+    );
+    insta::assert_snapshot!(
+        "f003_notes_xref_ooxml",
+        extract_paragraph_content(&notes_xml)
+    );
+}
+
+/// F-003 (HIGH): Superscript node in notes path → emits OOXML run with
+/// `baseline="30000"` (production-grade; legacy flattened to plain/bold/italic).
+#[test]
+fn test_f003_ac006_notes_superscript_variant_in_ooxml() {
+    use slideforge_types::InlineNode;
+    use slideforge_types::register::RegisteredContent;
+
+    let rc = RegisteredContent {
+        register: slideforge_types::Register::Notes,
+        content: vec![InlineNode::Superscript(vec![InlineNode::Plain(Arc::from(
+            "2",
+        ))])],
+    };
+    let slide = LaidOutSlide {
+        source_index: 0,
+        slide_type_keyword: Arc::from("title"),
+        frames: vec![Frame {
+            bbox: title_bbox(),
+            content: FrameContent::Empty,
+            text_flow: None,
+        }],
+        speaker_notes: Some(Arc::from("2")),
+        register_tags: vec![],
+        register_content: vec![rc],
+    };
+    let deck = make_deck_with_notes(&[Some("2")]);
+    let laid_out = LaidOutDeck {
+        page_size: slideforge_layout::PageSize::default(),
+        slides: vec![slide],
+        sections: vec![],
+        warnings: vec![],
+    };
+    let pptx = export_pptx(&deck, &laid_out);
+    let notes_xml = read_zip_member(&pptx, "ppt/notesSlides/notesSlide1.xml");
+
+    assert!(
+        notes_xml.contains('2'),
+        "F-003: Superscript text must appear in notes; got:\n{notes_xml}"
+    );
+    // New production-grade behavior: baseline="30000" (improvement over legacy).
+    assert!(
+        notes_xml.contains("baseline=\"30000\""),
+        "F-003: Superscript in notes must use baseline=\"30000\" (production-grade); got:\n{notes_xml}"
+    );
+    insta::assert_snapshot!(
+        "f003_notes_superscript_ooxml",
+        extract_paragraph_content(&notes_xml)
+    );
+}
+
+/// F-003 (HIGH): Subscript node in notes path → `baseline="-25000"`.
+#[test]
+fn test_f003_ac006_notes_subscript_variant_in_ooxml() {
+    use slideforge_types::InlineNode;
+    use slideforge_types::register::RegisteredContent;
+
+    let rc = RegisteredContent {
+        register: slideforge_types::Register::Notes,
+        content: vec![InlineNode::Subscript(vec![InlineNode::Plain(Arc::from(
+            "n",
+        ))])],
+    };
+    let slide = LaidOutSlide {
+        source_index: 0,
+        slide_type_keyword: Arc::from("title"),
+        frames: vec![Frame {
+            bbox: title_bbox(),
+            content: FrameContent::Empty,
+            text_flow: None,
+        }],
+        speaker_notes: Some(Arc::from("n")),
+        register_tags: vec![],
+        register_content: vec![rc],
+    };
+    let deck = make_deck_with_notes(&[Some("n")]);
+    let laid_out = LaidOutDeck {
+        page_size: slideforge_layout::PageSize::default(),
+        slides: vec![slide],
+        sections: vec![],
+        warnings: vec![],
+    };
+    let pptx = export_pptx(&deck, &laid_out);
+    let notes_xml = read_zip_member(&pptx, "ppt/notesSlides/notesSlide1.xml");
+
+    assert!(
+        notes_xml.contains("baseline=\"-25000\""),
+        "F-003: Subscript in notes must use baseline=\"-25000\"; got:\n{notes_xml}"
+    );
+    insta::assert_snapshot!(
+        "f003_notes_subscript_ooxml",
+        extract_paragraph_content(&notes_xml)
+    );
+}
+
+/// F-003 (HIGH): Strikethrough node in notes path → `strike="sngStrike"`.
+#[test]
+fn test_f003_ac006_notes_strikethrough_variant_in_ooxml() {
+    use slideforge_types::InlineNode;
+    use slideforge_types::register::RegisteredContent;
+
+    let rc = RegisteredContent {
+        register: slideforge_types::Register::Notes,
+        content: vec![InlineNode::Strikethrough(vec![InlineNode::Plain(
+            Arc::from("removed"),
+        )])],
+    };
+    let slide = LaidOutSlide {
+        source_index: 0,
+        slide_type_keyword: Arc::from("title"),
+        frames: vec![Frame {
+            bbox: title_bbox(),
+            content: FrameContent::Empty,
+            text_flow: None,
+        }],
+        speaker_notes: Some(Arc::from("removed")),
+        register_tags: vec![],
+        register_content: vec![rc],
+    };
+    let deck = make_deck_with_notes(&[Some("removed")]);
+    let laid_out = LaidOutDeck {
+        page_size: slideforge_layout::PageSize::default(),
+        slides: vec![slide],
+        sections: vec![],
+        warnings: vec![],
+    };
+    let pptx = export_pptx(&deck, &laid_out);
+    let notes_xml = read_zip_member(&pptx, "ppt/notesSlides/notesSlide1.xml");
+
+    assert!(
+        notes_xml.contains("strike=\"sngStrike\""),
+        "F-003: Strikethrough in notes must use strike=\"sngStrike\"; got:\n{notes_xml}"
+    );
+    insta::assert_snapshot!(
+        "f003_notes_strikethrough_ooxml",
+        extract_paragraph_content(&notes_xml)
+    );
+}
+
+/// F-003 (HIGH): Highlight node in notes path → `highlight="yellow"`.
+#[test]
+fn test_f003_ac006_notes_highlight_variant_in_ooxml() {
+    use slideforge_types::InlineNode;
+    use slideforge_types::register::RegisteredContent;
+
+    let rc = RegisteredContent {
+        register: slideforge_types::Register::Notes,
+        content: vec![InlineNode::Highlight(vec![InlineNode::Plain(Arc::from(
+            "important",
+        ))])],
+    };
+    let slide = LaidOutSlide {
+        source_index: 0,
+        slide_type_keyword: Arc::from("title"),
+        frames: vec![Frame {
+            bbox: title_bbox(),
+            content: FrameContent::Empty,
+            text_flow: None,
+        }],
+        speaker_notes: Some(Arc::from("important")),
+        register_tags: vec![],
+        register_content: vec![rc],
+    };
+    let deck = make_deck_with_notes(&[Some("important")]);
+    let laid_out = LaidOutDeck {
+        page_size: slideforge_layout::PageSize::default(),
+        slides: vec![slide],
+        sections: vec![],
+        warnings: vec![],
+    };
+    let pptx = export_pptx(&deck, &laid_out);
+    let notes_xml = read_zip_member(&pptx, "ppt/notesSlides/notesSlide1.xml");
+
+    assert!(
+        notes_xml.contains("highlight=\"yellow\""),
+        "F-003: Highlight in notes must use highlight=\"yellow\"; got:\n{notes_xml}"
+    );
+    insta::assert_snapshot!(
+        "f003_notes_highlight_ooxml",
+        extract_paragraph_content(&notes_xml)
+    );
+}
+
+/// F-003 (HIGH): Footnote node in notes path → emits children as OOXML runs
+/// (non-empty output containing the footnote text).
+#[test]
+fn test_f003_ac006_notes_footnote_variant_in_ooxml() {
+    use slideforge_types::InlineNode;
+    use slideforge_types::register::RegisteredContent;
+
+    let rc = RegisteredContent {
+        register: slideforge_types::Register::Notes,
+        content: vec![InlineNode::Footnote(vec![InlineNode::Plain(Arc::from(
+            "footnote body",
+        ))])],
+    };
+    let slide = LaidOutSlide {
+        source_index: 0,
+        slide_type_keyword: Arc::from("title"),
+        frames: vec![Frame {
+            bbox: title_bbox(),
+            content: FrameContent::Empty,
+            text_flow: None,
+        }],
+        speaker_notes: Some(Arc::from("footnote body")),
+        register_tags: vec![],
+        register_content: vec![rc],
+    };
+    let deck = make_deck_with_notes(&[Some("footnote body")]);
+    let laid_out = LaidOutDeck {
+        page_size: slideforge_layout::PageSize::default(),
+        slides: vec![slide],
+        sections: vec![],
+        warnings: vec![],
+    };
+    let pptx = export_pptx(&deck, &laid_out);
+    let notes_xml = read_zip_member(&pptx, "ppt/notesSlides/notesSlide1.xml");
+
+    assert!(
+        notes_xml.contains("footnote body"),
+        "F-003: Footnote text must appear in notes; got:\n{notes_xml}"
+    );
+    insta::assert_snapshot!(
+        "f003_notes_footnote_ooxml",
+        extract_paragraph_content(&notes_xml)
+    );
+}
+
+/// F-003 (HIGH): Math node in notes path → emits the LaTeX source as a plain
+/// text run (EC-001 fallback, same as legacy behavior).
+#[test]
+fn test_f003_ac006_notes_math_variant_in_ooxml() {
+    use slideforge_types::register::RegisteredContent;
+    use slideforge_types::{InlineNode, MathNode, SourceSpan};
+
+    let rc = RegisteredContent {
+        register: slideforge_types::Register::Notes,
+        content: vec![InlineNode::Math(MathNode {
+            latex: Arc::from("x^2 + y^2"),
+            display: false,
+            span: SourceSpan::default(),
+        })],
+    };
+    let slide = LaidOutSlide {
+        source_index: 0,
+        slide_type_keyword: Arc::from("title"),
+        frames: vec![Frame {
+            bbox: title_bbox(),
+            content: FrameContent::Empty,
+            text_flow: None,
+        }],
+        speaker_notes: Some(Arc::from("x^2 + y^2")),
+        register_tags: vec![],
+        register_content: vec![rc],
+    };
+    let deck = make_deck_with_notes(&[Some("x^2 + y^2")]);
+    let laid_out = LaidOutDeck {
+        page_size: slideforge_layout::PageSize::default(),
+        slides: vec![slide],
+        sections: vec![],
+        warnings: vec![],
+    };
+    let pptx = export_pptx(&deck, &laid_out);
+    let notes_xml = read_zip_member(&pptx, "ppt/notesSlides/notesSlide1.xml");
+
+    assert!(
+        notes_xml.contains("x^2 + y^2"),
+        "F-003: Math LaTeX must appear as plain text in notes (EC-001 fallback); got:\n{notes_xml}"
+    );
+    insta::assert_snapshot!(
+        "f003_notes_math_ooxml",
+        extract_paragraph_content(&notes_xml)
+    );
+}
+
+// =============================================================================
+// F-006 (MED): Registry routing — notes serializer uses registry formatter
+//
+// After F-006, `dispatch_inline_nodes_to_ooxml` must resolve the InlineFormat
+// from the PluginRegistry (id "default") rather than hardcoding `DefaultInlineFormat`.
+// This test is GREEN before F-006 (the existing behavior produces correct output)
+// and must STAY GREEN after F-006 (no behavioral regression from the routing change).
+//
+// NOTE: F-006 is a structural refactor (registry routing), not a behavioral change.
+// The test verifies the OUTCOME (correct OOXML output) is preserved — the
+// mechanism change (hardcoded → registry) is verified by code review.
+// =============================================================================
+
+/// F-006 (MED): Registry-routed InlineFormat still produces correct OOXML for
+/// all node types exercised via the notes path. This is a regression guard.
+///
+/// This test PASSES before F-006 (hardcoded DefaultInlineFormat works) and must
+/// remain GREEN after F-006 (registry-resolved DefaultInlineFormat gives same output).
+#[test]
+fn test_f006_registry_routing_notes_produces_same_ooxml() {
+    use slideforge_types::InlineNode;
+    use slideforge_types::register::RegisteredContent;
+
+    // Mix of node types: Plain, Bold, Italic, Code, Xref.
+    let rc = RegisteredContent {
+        register: slideforge_types::Register::Notes,
+        content: vec![
+            InlineNode::Plain(Arc::from("plain")),
+            InlineNode::Bold(vec![InlineNode::Plain(Arc::from("bold"))]),
+            InlineNode::Italic(vec![InlineNode::Plain(Arc::from("italic"))]),
+            InlineNode::Code(Arc::from("code()")),
+            InlineNode::Xref(Arc::from("ref-1")),
+        ],
+    };
+
+    let slide = LaidOutSlide {
+        source_index: 0,
+        slide_type_keyword: Arc::from("title"),
+        frames: vec![Frame {
+            bbox: title_bbox(),
+            content: FrameContent::Empty,
+            text_flow: None,
+        }],
+        speaker_notes: Some(Arc::from("mixed")),
+        register_tags: vec![],
+        register_content: vec![rc],
+    };
+    let deck = make_deck_with_notes(&[Some("mixed")]);
+    let laid_out = LaidOutDeck {
+        page_size: slideforge_layout::PageSize::default(),
+        slides: vec![slide],
+        sections: vec![],
+        warnings: vec![],
+    };
+    let pptx = export_pptx(&deck, &laid_out);
+    let notes_xml = read_zip_member(&pptx, "ppt/notesSlides/notesSlide1.xml");
+
+    // All text content must appear.
+    for text in &["plain", "bold", "italic", "code()", "ref-1"] {
+        assert!(
+            notes_xml.contains(text),
+            "F-006: notes XML must contain {text:?}; got:\n{notes_xml}"
+        );
+    }
+    // Bold run properties must be present.
+    assert!(
+        notes_xml.contains("b=\"1\""),
+        "F-006: bold must be b=\"1\"; got:\n{notes_xml}"
+    );
+    // Italic run properties must be present.
+    assert!(
+        notes_xml.contains("i=\"1\""),
+        "F-006: italic must be i=\"1\"; got:\n{notes_xml}"
     );
 }

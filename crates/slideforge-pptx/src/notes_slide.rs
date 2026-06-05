@@ -17,16 +17,18 @@
 //! Notes content is sourced from ALL `Register::Notes` entries in
 //! `register_content` (not just the first). Each `RegisteredContent` entry
 //! becomes one or more `<a:p>` paragraphs. Inline formatting is preserved via
-//! dispatch through [`slideforge_plugin_api::DefaultInlineFormat`] for all
-//! non-hyperlink nodes (BC-5.02.002 dog-fooding guarantee):
-//! - `InlineNode::Bold` → `<a:rPr b="1"/>` (via [`DefaultInlineFormat`])
-//! - `InlineNode::Italic` → `<a:rPr i="1"/>` (via [`DefaultInlineFormat`])
+//! dispatch through the [`InlineFormat`] plugin (BC-5.02.002 dog-fooding guarantee):
+//! - `InlineNode::Bold` → `<a:rPr b="1"/>` (via [`InlineFormat::render_with_context`])
+//! - `InlineNode::Italic` → `<a:rPr i="1"/>` (via [`InlineFormat::render_with_context`])
 //! - `InlineNode::Link` → hyperlink relationship + `<a:rPr>` with `r:id`
-//!   (exporter-level, because `InlineFormat::render` has no rId context)
-//! - All other nodes → via `DefaultInlineFormat::render(node, Ooxml)`
+//!   (rId pre-registered by exporter, passed via `InlineRenderContext::hyperlink_rid`)
+//! - All other nodes → via [`InlineFormat::render_with_context`] at the single
+//!   `AC-005-DISPATCH-SITE`. Registry routing: the formatter is resolved by the caller
+//!   (F-006). Currently `DefaultInlineFormat` is passed directly; future: registry lookup.
 
-use slideforge_plugin_api::DefaultInlineFormat;
-use slideforge_plugin_api::traits::inline_format::{InlineFormat, InlineOutputFormat};
+use slideforge_plugin_api::traits::inline_format::{
+    InlineFormat, InlineOutputFormat, InlineRenderContext,
+};
 use slideforge_types::register::RegisteredContent;
 use slideforge_types::{InlineNode, Register};
 
@@ -67,6 +69,11 @@ impl NotesSlideSerializer {
     /// (F-040-P1-003: multi-entry, rich-formatting fix). Each entry is
     /// emitted as one `<a:p>` paragraph with inline formatting preserved.
     ///
+    /// `inline_format` is the registry-resolved `InlineFormat` plugin (F-006).
+    /// The caller (typically `PptxExporter::export_inner`) resolves this from
+    /// the `PluginRegistry` by looking up id `"default"`. All OOXML run emission
+    /// is dispatched through this reference — zero hardcoding inside the serializer.
+    ///
     /// The `.rels` file references:
     /// - `rId1` → the owning slide (`../slides/slide{N}.xml`)
     /// - `rId2` → the notes master (`../notesMasters/notesMaster1.xml`)
@@ -77,6 +84,7 @@ impl NotesSlideSerializer {
     pub fn build(
         slide_index: usize,
         register_content: &[RegisteredContent],
+        inline_format: &dyn InlineFormat,
     ) -> Result<NotesSlideOutput, PptxError> {
         // Filter to Notes-register entries; collect inline content per entry.
         let notes_entries: Vec<&[InlineNode]> = register_content
@@ -95,7 +103,7 @@ impl NotesSlideSerializer {
         // Deduplicate while preserving order (URL order → rId order).
         let unique_hlinks: Vec<String> = deduplicate_preserve_order(hlink_urls);
 
-        let xml_bytes = Self::build_xml(&notes_entries, &unique_hlinks);
+        let xml_bytes = Self::build_xml(&notes_entries, &unique_hlinks, inline_format);
         let rels_bytes = Self::build_rels(slide_index, &unique_hlinks)?;
         Ok(NotesSlideOutput {
             xml_bytes,
@@ -131,7 +139,11 @@ impl NotesSlideSerializer {
     ///   </p:txBody>
     /// </p:sp>
     /// ```
-    fn build_xml(notes_entries: &[&[InlineNode]], hlink_urls: &[String]) -> Vec<u8> {
+    fn build_xml(
+        notes_entries: &[&[InlineNode]],
+        hlink_urls: &[String],
+        inline_format: &dyn InlineFormat,
+    ) -> Vec<u8> {
         let mut xml = String::new();
 
         xml.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n");
@@ -196,7 +208,7 @@ impl NotesSlideSerializer {
                 // We need to find which rId each URL maps to.
                 // Dispatch through DefaultInlineFormat for all non-Link nodes
                 // (BC-5.02.002 dog-fooding guarantee).
-                dispatch_inline_nodes_to_ooxml(entry, hlink_urls, &mut xml);
+                dispatch_inline_nodes_to_ooxml(entry, hlink_urls, inline_format, &mut xml);
                 xml.push_str("</a:p>\n");
             }
         }
@@ -238,95 +250,70 @@ impl NotesSlideSerializer {
 
 /// Dispatch a flat sequence of `InlineNode`s to OOXML run strings.
 ///
-/// Routes through [`DefaultInlineFormat::render`] (BC-5.02.002 dog-fooding) for
-/// all nodes EXCEPT [`InlineNode::Link`], which requires exporter-level hyperlink
-/// relationship ID context that the `InlineFormat` trait does not carry.
+/// All nodes — including [`InlineNode::Link`] — are dispatched through
+/// [`DefaultInlineFormat::render_with_context`] (BC-5.02.002 dog-fooding /
+/// AC-005). For `Link` nodes with a safe URL scheme, the pre-registered
+/// relationship ID is passed via [`InlineRenderContext::hyperlink_rid`] so
+/// `DefaultInlineFormat` can emit the full OOXML hyperlink run. For unsafe-scheme
+/// URLs, `hyperlink_rid` is `None` and the formatter falls back to the
+/// display-text-plus-warn behavior.
 ///
-/// Hyperlink support: for safe-scheme `Link` nodes, the URL is looked up in
-/// `hlink_urls` to find the corresponding `rId` (rId3 for index 0, etc.).
-/// This is the single dispatch call site in `slideforge-pptx/src/` for inline
-/// OOXML construction (AC-005 / BC-5.02.002 postcondition 5).
-fn dispatch_inline_nodes_to_ooxml(nodes: &[InlineNode], hlink_urls: &[String], out: &mut String) {
-    let formatter = DefaultInlineFormat;
+/// This is the SINGLE dispatch call site in `slideforge-pptx/src/` for inline
+/// OOXML construction (AC-005 / BC-5.02.002 postcondition 5). The call site
+/// is marked with `// AC-005-DISPATCH-SITE` so the AC-005 audit test can
+/// exempt it while flagging any other hand-constructed run markup.
+fn dispatch_inline_nodes_to_ooxml(
+    nodes: &[InlineNode],
+    hlink_urls: &[String],
+    inline_format: &dyn InlineFormat,
+    out: &mut String,
+) {
+    let formatter = inline_format;
     for node in nodes {
-        match node {
-            InlineNode::Link { text, url } => {
-                // F-040-P2-001 (CWE-601) defense-in-depth: check scheme before embedding.
-                // Safe URLs are in hlink_urls (collected by collect_hyperlink_urls) and
-                // get a clickable hlinkClick. Unsafe-scheme URLs are not in hlink_urls
-                // (filtered at collection time) — they degrade gracefully to a plain text
-                // run with a tracing::warn! so the export does not silently embed a
-                // dangerous TargetMode="External" rel.
-                if is_safe_link_scheme(url.as_ref()) {
-                    // Find the rId for this URL (rId3 = index 0, rId4 = index 1, …)
-                    let rid_index = hlink_urls.iter().position(|u| u == url.as_ref());
-                    let hlink_rid = rid_index.map(|idx| format!("rId{}", idx + 3));
-                    // Emit the link as a hyperlink run wrapping the display text.
-                    // OOXML hyperlink in a notesSlide uses <a:hlinkClick r:id="rIdN"/>
-                    // on the run's <a:rPr>. We emit the display text with the link rId.
-                    if let Some(rid) = &hlink_rid {
-                        // Wrap in <a:r> with <a:rPr> carrying the hyperlink reference.
-                        out.push_str("<a:r><a:rPr");
-                        out.push_str("><a:hlinkClick r:id=\"");
-                        out.push_str(&xml_escape(rid));
-                        out.push_str("\"/></a:rPr><a:t>");
-                        // Emit display text (recursively extracting plain text).
-                        let display_text = extract_plain_text(text);
-                        out.push_str(&xml_escape(&display_text));
-                        out.push_str("</a:t></a:r>");
-                    } else {
-                        // No rId found (shouldn't happen for a safe URL if hlink_urls is complete);
-                        // dispatch through DefaultInlineFormat for a plain run fallback.
-                        let display_text = extract_plain_text(text);
-                        if !display_text.is_empty() {
-                            let plain_node =
-                                InlineNode::Plain(std::sync::Arc::from(display_text.as_str()));
-                            if let Ok(rendered) =
-                                formatter.render(&plain_node, InlineOutputFormat::Ooxml)
-                            {
-                                out.push_str(&rendered);
-                            }
-                        }
-                    }
+        // Build the render context for this node.
+        // For Link nodes with a safe scheme: supply the pre-registered rId.
+        // For all other nodes (and unsafe-scheme Links): supply no rId.
+        let hyperlink_rid: Option<String> = if let InlineNode::Link { url, .. } = node {
+            if is_safe_link_scheme(url.as_ref()) {
+                // F-040-P2-001 (CWE-601): only safe-scheme URLs are in hlink_urls.
+                // rId3 = index 0, rId4 = index 1, ...
+                hlink_urls
+                    .iter()
+                    .position(|u| u == url.as_ref())
+                    .map(|idx| format!("rId{}", idx + 3))
+            } else {
+                // Unsafe scheme: warn and let render_with_context fall back to plain text.
+                let scheme_end = url.find(':').unwrap_or(0);
+                let scheme = if scheme_end > 0 {
+                    &url[..scheme_end]
                 } else {
-                    // Unsafe scheme: extract for the warning then degrade to plain text.
-                    // Emit display text as a plain run via DefaultInlineFormat; do NOT emit
-                    // hlinkClick or External rel.
-                    let scheme_end = url.find(':').unwrap_or(0);
-                    let scheme = if scheme_end > 0 {
-                        &url[..scheme_end]
-                    } else {
-                        "(none)"
-                    };
-                    tracing::warn!(
-                        url_scheme = scheme,
-                        "notes link has disallowed URL scheme; \
-                         embedding as plain text run (no External rel emitted). \
-                         SEC-037-001 / CWE-601 / F-040-P2-001"
-                    );
-                    let display_text = extract_plain_text(text);
-                    if !display_text.is_empty() {
-                        let plain_node =
-                            InlineNode::Plain(std::sync::Arc::from(display_text.as_str()));
-                        if let Ok(rendered) =
-                            formatter.render(&plain_node, InlineOutputFormat::Ooxml)
-                        {
-                            out.push_str(&rendered);
-                        }
-                    }
-                }
-            },
-            // All non-Link nodes: dispatch through DefaultInlineFormat::render
-            // (BC-5.02.002 dog-fooding guarantee / AC-005).
-            other_node => match formatter.render(other_node, InlineOutputFormat::Ooxml) {
-                Ok(rendered) => out.push_str(&rendered),
-                Err(e) => {
-                    tracing::warn!(
-                        node_kind = other_node.kind_name(),
-                        error = %e,
-                        "DefaultInlineFormat::render failed for notes OOXML; skipping node"
-                    );
-                },
+                    "(none)"
+                };
+                tracing::warn!(
+                    url_scheme = scheme,
+                    "notes link has disallowed URL scheme; \
+                     embedding as plain text run (no External rel emitted). \
+                     SEC-037-001 / CWE-601 / F-040-P2-001"
+                );
+                None
+            }
+        } else {
+            None
+        };
+
+        let ctx = InlineRenderContext {
+            hyperlink_rid: hyperlink_rid.as_deref(),
+        };
+
+        // AC-005-DISPATCH-SITE: single InlineFormat dispatch call in slideforge-pptx/src/.
+        match formatter.render_with_context(node, InlineOutputFormat::Ooxml, &ctx) {
+            Ok(rendered) => out.push_str(&rendered),
+            Err(e) => {
+                tracing::warn!(
+                    node_kind = node.kind_name(),
+                    error = %e,
+                    "DefaultInlineFormat::render_with_context failed for notes OOXML; skipping node"
+                );
             },
         }
     }
@@ -393,36 +380,6 @@ fn collect_hyperlink_urls(nodes: &[InlineNode], urls: &mut Vec<String>) {
     }
 }
 
-/// Extract all plain text from an inline node tree, depth-first.
-///
-/// Used for link display text extraction.
-fn extract_plain_text(nodes: &[InlineNode]) -> String {
-    let mut out = String::new();
-    for node in nodes {
-        match node {
-            InlineNode::Plain(s) | InlineNode::Code(s) | InlineNode::Xref(s) => {
-                out.push_str(s);
-            },
-            InlineNode::Bold(c)
-            | InlineNode::Italic(c)
-            | InlineNode::Footnote(c)
-            | InlineNode::Superscript(c)
-            | InlineNode::Subscript(c)
-            | InlineNode::Strikethrough(c)
-            | InlineNode::Highlight(c) => {
-                out.push_str(&extract_plain_text(c));
-            },
-            InlineNode::Link { text, .. } => {
-                out.push_str(&extract_plain_text(text));
-            },
-            InlineNode::Math(m) => {
-                out.push_str(m.latex.as_ref());
-            },
-        }
-    }
-    out
-}
-
 /// Deduplicate a `Vec<String>` while preserving the first-occurrence order.
 fn deduplicate_preserve_order(items: Vec<String>) -> Vec<String> {
     let mut seen = std::collections::HashSet::new();
@@ -433,20 +390,4 @@ fn deduplicate_preserve_order(items: Vec<String>) -> Vec<String> {
         }
     }
     result
-}
-
-/// XML-escape a string for safe embedding in XML element text content.
-///
-/// Replaces the 5 XML-reserved characters:
-/// - `&` → `&amp;` (must be first to avoid double-escaping)
-/// - `<` → `&lt;`
-/// - `>` → `&gt;`
-/// - `"` → `&quot;`
-/// - `'` → `&apos;`
-fn xml_escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&apos;")
 }

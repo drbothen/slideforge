@@ -64,8 +64,9 @@ pub use traits::{
     BrandError, BrandProvider, BrandSource, Canvas, ChartError, ChartRenderer, DataSource,
     DataSourceError, DataSourceOptions, Diagnostic, DiagnosticSeverity, DiagramError,
     DiagramOptions, DiagramRenderer, ExportError, ExportOptions, Exporter, FieldDef, InlineError,
-    InlineFormat, InlineOutputFormat, LayoutError, MathError, MathOutputFormat, MathRenderer,
-    SectionBlock, SectionType, SlideType, Validator, ValidatorOptions,
+    InlineFormat, InlineOutputFormat, InlineRenderContext, LayoutError, MathError,
+    MathOutputFormat, MathRenderer, SectionBlock, SectionType, SlideType, Validator,
+    ValidatorOptions,
 };
 
 // Compile-time assertion: PluginRegistry is Send + Sync (AC-014).
