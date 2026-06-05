@@ -2454,12 +2454,22 @@ name = "slideforge"
 version = "0.1.0"
 dependencies = [
  "miette",
+ "slideforge-brand",
+ "slideforge-charts",
+ "slideforge-data",
+ "slideforge-diagrams",
+ "slideforge-docx",
  "slideforge-eval",
  "slideforge-layout",
+ "slideforge-math",
+ "slideforge-pdf",
+ "slideforge-plugin-api",
  "slideforge-pptx",
  "slideforge-syntax",
+ "slideforge-types",
  "slideforge-validate",
  "thiserror 2.0.18",
+ "tracing",
 ]
 
 [[package]]

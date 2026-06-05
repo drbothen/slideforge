@@ -134,20 +134,30 @@ pub enum BuildError {
     /// One or more validators reported `Error`-severity diagnostics and
     /// `BuildOptions::strict` was `true`.
     ///
-    /// Contains the full list of diagnostics from all validators. In
-    /// `strict=false` (warn-only) mode these diagnostics are emitted as
-    /// tracing warnings and the build continues. In `strict=true` mode
-    /// (the default for `slideforge build`) this error is returned.
+    /// `diagnostics` contains **all** diagnostics from all validators — both
+    /// Error-severity and Warning-severity entries are included so that nothing
+    /// is silently dropped. The strict-failure decision is made by checking
+    /// whether any `Error`-severity diagnostic is present; `count` reflects
+    /// only the number of `Error`-severity entries.
+    ///
+    /// In `strict=false` (warn-only) mode all diagnostics are emitted as
+    /// `tracing::warn` events and the build continues.
     ///
     /// ## Traceability
     ///
     /// - ADR-016 Decision 3: validate stage in the pipeline
-    /// - STORY-049 C3
+    /// - STORY-049 C3, HIGH-2
     #[error("validation failed with {count} error(s); run with --warn-only to demote to warnings")]
     ValidationFailed {
-        /// All diagnostics from all registered validators.
+        /// All diagnostics from all registered validators (Error + Warning + Info).
+        ///
+        /// Never a strict subset — all collected diagnostics are carried so
+        /// callers can show the complete picture to the user.
         diagnostics: Vec<Diagnostic>,
-        /// Cached count of error-severity diagnostics.
+        /// Count of `Error`-severity diagnostics only (not total diagnostics).
+        ///
+        /// Equals `diagnostics.iter().filter(|d| d.severity == Error).count()`.
+        /// Used in the `Display` message.
         count: usize,
     },
 
