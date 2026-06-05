@@ -81,40 +81,56 @@ mod tests {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // BC-5.02.001: AC-003 — RiskRegisterSectionType scanning tests
+    // id() — implemented in the stub; must pass at Red Gate
     // ─────────────────────────────────────────────────────────────────────────
 
-    /// `id()` returns `"risk_register"`.
+    /// `id()` returns `"risk_register"` — implemented in the stub, must pass.
     #[test]
     fn test_bc_5_02_001_risk_register_id() {
         assert_eq!(RiskRegisterSectionType.id(), "risk_register");
     }
 
-    /// RED GATE: empty slice returns empty Vec (EC-001).
+    // ─────────────────────────────────────────────────────────────────────────
+    // AC-003 + EC-001: generate() scanning — RED GATE (panic at todo!())
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// EC-001: empty slide slice → `generate()` must return `vec![]`.
+    ///
+    /// RED GATE: panics at `todo!()` until implemented.
     #[test]
-    #[should_panic(expected = "STORY-084")]
-    fn test_bc_5_02_001_risk_register_generate_empty_slice() {
+    fn test_bc_5_02_001_risk_register_ec001_empty_slice_returns_empty() {
         let result = RiskRegisterSectionType.generate(&[]);
-        assert!(result.is_empty());
+        assert!(
+            result.is_empty(),
+            "empty slide slice must produce no SectionBlocks; got {} block(s)",
+            result.len()
+        );
     }
 
-    /// RED GATE: deck with no `severity_cards` slides produces no `SectionBlock`s.
+    /// AC-003: deck with no `severity_cards` slides → returns `vec![]`.
+    ///
+    /// RED GATE: panics at `todo!()` until implemented.
     #[test]
-    #[should_panic(expected = "STORY-084")]
-    fn test_bc_5_02_001_risk_register_generate_no_severity_cards() {
+    fn test_bc_5_02_001_risk_register_no_severity_cards_returns_empty() {
         let slides = vec![
             make_slide("title", Some("Intro")),
             make_slide("bullets", Some("Key Points")),
             make_slide("chart", Some("Revenue")),
         ];
         let result = RiskRegisterSectionType.generate(&slides);
-        assert!(result.is_empty(), "expected empty; got {result:?}");
+        assert!(
+            result.is_empty(),
+            "slides without severity_cards type must produce no SectionBlocks; \
+             got {} block(s)",
+            result.len()
+        );
     }
 
-    /// RED GATE: 5-slide deck, 2 are `severity_cards` → 2 `SectionBlock`s.
+    /// AC-003: 5-slide deck with 2 `severity_cards` slides and 3 others → exactly 2 `SectionBlock`s.
+    ///
+    /// RED GATE: panics at `todo!()` until implemented.
     #[test]
-    #[should_panic(expected = "STORY-084")]
-    fn test_bc_5_02_001_risk_register_generate_two_severity_cards() {
+    fn test_bc_5_02_001_risk_register_mixed_deck_returns_exact_count_2() {
         let slides = vec![
             make_slide("title", Some("Overview")),
             make_slide("severity_cards", Some("Technical Risks")),
@@ -126,49 +142,62 @@ mod tests {
         assert_eq!(
             result.len(),
             2,
-            "expected 2 SectionBlocks for 2 severity_cards slides; got {result:?}"
+            "deck with 2 severity_cards slides must produce exactly 2 SectionBlocks; \
+             got {}",
+            result.len()
         );
     }
 
-    /// RED GATE: all slides are `severity_cards` → one `SectionBlock` each.
+    /// AC-003: each emitted `SectionBlock` carries `level == 1` and `include_in_toc == true`.
+    ///
+    /// RED GATE: panics at `todo!()` until implemented.
     #[test]
-    #[should_panic(expected = "STORY-084")]
-    fn test_bc_5_02_001_risk_register_generate_all_severity_cards() {
-        let slides = vec![
-            make_slide("severity_cards", Some("Risk A")),
-            make_slide("severity_cards", Some("Risk B")),
-        ];
-        let result = RiskRegisterSectionType.generate(&slides);
-        assert_eq!(result.len(), 2);
-    }
-
-    /// RED GATE: emitted `SectionBlock` has `level=1`, `include_in_toc=true`.
-    #[test]
-    #[should_panic(expected = "STORY-084")]
-    fn test_bc_5_02_001_risk_register_section_block_fields_level_and_toc() {
+    fn test_bc_5_02_001_risk_register_block_has_level_1_and_include_in_toc_true() {
         let slides = vec![make_slide("severity_cards", Some("Supply-Chain Risks"))];
         let result = RiskRegisterSectionType.generate(&slides);
-        assert_eq!(result.len(), 1);
+        assert_eq!(
+            result.len(),
+            1,
+            "one severity_cards slide must produce exactly 1 SectionBlock"
+        );
         let block = &result[0];
-        assert_eq!(block.level, 1, "level must be 1");
-        assert!(block.include_in_toc, "include_in_toc must be true");
+        assert_eq!(block.level, 1, "SectionBlock.level must be 1; got {}", block.level);
+        assert!(
+            block.include_in_toc,
+            "SectionBlock.include_in_toc must be true"
+        );
     }
 
-    /// RED GATE: `SectionBlock.title` is the slide's title field value.
+    /// AC-003: `SectionBlock.title` is derived from the contributing slide's title field.
+    ///
+    /// RED GATE: panics at `todo!()` until implemented.
     #[test]
-    #[should_panic(expected = "STORY-084")]
-    fn test_bc_5_02_001_risk_register_section_block_title_from_slide_title() {
+    fn test_bc_5_02_001_risk_register_block_title_matches_slide_title() {
         let slides = vec![make_slide("severity_cards", Some("Vendor Risks"))];
         let result = RiskRegisterSectionType.generate(&slides);
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].title.as_ref(), "Vendor Risks");
+        assert_eq!(
+            result.len(),
+            1,
+            "one severity_cards slide must produce exactly 1 SectionBlock"
+        );
+        assert_eq!(
+            result[0].title.as_ref(),
+            "Vendor Risks",
+            "SectionBlock.title must match the slide's title field"
+        );
     }
 
-    /// RED GATE: EC-002 — a slide that is BOTH `severity_cards` AND has a takeaway
-    /// field is included by this plugin (plugins are independent).
+    // ─────────────────────────────────────────────────────────────────────────
+    // EC-002: slide that is BOTH severity_cards AND has takeaway — RED GATE
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// EC-002: a slide that is `severity_cards` AND has a `takeaway` field is
+    /// counted by `RiskRegisterSectionType` (this plugin scans on `slide_type`,
+    /// not on field presence; the two plugins are independent).
+    ///
+    /// RED GATE: panics at `todo!()` until implemented.
     #[test]
-    #[should_panic(expected = "STORY-084")]
-    fn test_bc_5_02_001_risk_register_ec002_severity_cards_with_takeaway_included() {
+    fn test_bc_5_02_001_ec002_severity_cards_with_takeaway_counted_by_risk_register() {
         let mut fields = OrderedMap::new();
         fields.insert(
             Arc::from("title"),
@@ -192,7 +221,19 @@ mod tests {
         assert_eq!(
             result.len(),
             1,
-            "severity_cards slide must be included regardless of takeaway field"
+            "severity_cards slide with a takeaway field must still be included by \
+             RiskRegisterSectionType; got {} block(s)",
+            result.len()
+        );
+        assert_eq!(
+            result[0].title.as_ref(),
+            "Dual Slide",
+            "SectionBlock.title must match the slide's title field"
+        );
+        assert_eq!(result[0].level, 1, "SectionBlock.level must be 1");
+        assert!(
+            result[0].include_in_toc,
+            "SectionBlock.include_in_toc must be true"
         );
     }
 }
