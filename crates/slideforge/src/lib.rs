@@ -170,15 +170,18 @@ pub fn build(source: &str, options: &BuildOptions) -> Result<BuildOutput, error:
 
     // Stage 3: parse the DSL source.
     let mut source_map = SourceMap::new();
-    let file_id = source_map.add_file(std::sync::Arc::from("<build>"), std::sync::Arc::from(source));
+    let file_id = source_map.add_file(
+        std::sync::Arc::from("<build>"),
+        std::sync::Arc::from(source),
+    );
     let mut sink = DiagnosticSink::new();
     let deck_node = parse_checked(source, file_id, &source_map, &mut sink)
         .ok_or_else(|| error::BuildError::ParseFailed(sink.errors().len()))?;
 
     // Stage 4: evaluate the AST into a semantic Deck.
     let eval_config = EvalConfig::default();
-    let deck = eval_deck(&deck_node, &eval_config, &mut sink)
-        .ok_or(error::BuildError::EvalFailed)?;
+    let deck =
+        eval_deck(&deck_node, &eval_config, &mut sink).ok_or(error::BuildError::EvalFailed)?;
 
     // Stage 5: lay out the Deck into a LaidOutDeck.
     let laid_out = layout_run(&deck, &brand).map_err(error::BuildError::Layout)?;
