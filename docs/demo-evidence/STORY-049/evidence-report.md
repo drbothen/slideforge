@@ -138,7 +138,7 @@ The compile-time `const _: fn() = || { assert_test_data_source_implements_trait:
 - `test_bc_5_02_001_ec003_panic_string_returns_plugin_panic_error` — `String` payload caught; `PluginPanic` returned
 - `test_bc_5_02_001_ec003_no_panic_returns_ok` — non-panicking closure returns `Ok(42)`
 - `test_bc_5_02_001_ec003_plugin_panic_carries_plugin_name` — `plugin_name` field matches the name passed to `dispatch_plugin`
-- `test_h1_dispatch_plugin_catches_panicking_exporter` — panicking exporter wired through `build()` dispatch path returns `Err(BuildError::ExportFailed { .. })` via `PluginError::PluginPanic`
+- `test_h1_dispatch_plugin_catches_panicking_exporter` — panicking exporter called via `dispatch_plugin` returns `Err(PluginError::PluginPanic { .. })`; the process does not crash (AC-008)
 
 Recording shows `5 tests run: 5 passed`. The process continued running after all 5 panicking-plugin tests — proving `catch_unwind` absorbed every panic.
 

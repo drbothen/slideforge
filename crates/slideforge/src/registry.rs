@@ -174,12 +174,14 @@ pub fn register_bundled_plugins(builder: &mut PluginRegistryBuilder) {
 ///
 /// Equivalent to:
 /// ```rust,no_run
+/// # fn main() -> Result<(), slideforge_plugin_api::RegistryError> {
 /// # use slideforge::registry::register_bundled_plugins;
-/// # use slideforge_plugin_api::{PluginRegistry, PluginRegistryBuilder, RegistryError};
+/// # use slideforge_plugin_api::{PluginRegistryBuilder};
 /// let mut builder = PluginRegistryBuilder::default();
 /// register_bundled_plugins(&mut builder);
-/// let registry = builder.build()?;
-/// # Ok::<PluginRegistry, RegistryError>(registry)
+/// let _registry = builder.build()?;
+/// # Ok(())
+/// # }
 /// ```
 ///
 /// ## Errors
