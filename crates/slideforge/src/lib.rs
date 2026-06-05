@@ -19,10 +19,12 @@
 //! use slideforge_plugin_api::BrandSource;
 //! use std::sync::Arc;
 //!
-//! let source = r#"
-//! slide: title
-//!   title: "Hello, slideforge"
-//! "#;
+//! let source = concat!(
+//!     "slideforge_version \"1\"\n",
+//!     "lang \"en-US\"\n",
+//!     "slide title:\n",
+//!     "  title \"Hello, slideforge\"\n",
+//! );
 //!
 //! let options = BuildOptions {
 //!     brand_source: Some(BrandSource::TomlFile(Arc::from("brand.toml"))),
@@ -35,10 +37,10 @@
 //! ## Architecture
 //!
 //! Per ADR-016 Decision 3, this crate is the **pipeline driver** — not merely
-//! an assembly facade. The `build()` function wires the four pipeline stages:
+//! an assembly facade. The `build()` function wires the full pipeline:
 //!
 //! ```text
-//! slideforge-syntax → slideforge-eval → slideforge-layout → (exporter via plugin)
+//! slideforge-syntax → slideforge-eval → validate → slideforge-layout → (exporter via plugin)
 //! ```
 //!
 //! All cross-crate plugin interaction goes through `Box<dyn Trait>` dispatch.
@@ -263,11 +265,13 @@ pub(crate) fn build_with_registry(
 /// This is the primary library API. It runs the full pipeline:
 ///
 /// 1. Assemble the plugin registry (all 10 bundled surfaces).
-/// 2. Parse `source` into an AST (`slideforge-syntax`).
-/// 3. Evaluate the AST into a semantic `Deck` IR (`slideforge-eval`).
-/// 4. Lay out the `Deck` into a [`slideforge_layout::LaidOutDeck`]
+/// 2. Load brand configuration via the `BrandProvider` plugin.
+/// 3. Parse `source` into an AST (`slideforge-syntax`).
+/// 4. Evaluate the AST into a semantic `Deck` IR (`slideforge-eval`).
+/// 5. Validate the `Deck` using all registered validator plugins.
+/// 6. Lay out the `Deck` into a [`slideforge_layout::LaidOutDeck`]
 ///    (`slideforge-layout`).
-/// 5. Export the `LaidOutDeck` using the configured exporter plugin.
+/// 7. Export the `LaidOutDeck` using the configured exporter plugin.
 ///
 /// ## Brand configuration
 ///
@@ -289,7 +293,13 @@ pub(crate) fn build_with_registry(
 ///     brand_source: Some(BrandSource::TomlFile(Arc::from("brand.toml"))),
 ///     ..Default::default()
 /// };
-/// let output = build("slide: title\n  title: \"Hello\"\n", &opts)?;
+/// let source = concat!(
+///     "slideforge_version \"1\"\n",
+///     "lang \"en-US\"\n",
+///     "slide title:\n",
+///     "  title \"Hello, slideforge\"\n",
+/// );
+/// let output = build(source, &opts)?;
 /// std::fs::write("output.pptx", &output.bytes)?;
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
@@ -533,7 +543,7 @@ mod tests {
             strict: false,
         };
         let result = build(
-            "slide: title\n  title: \"Hello\"\n  alt: \"title slide\"\n",
+            "slideforge_version \"1\"\nlang \"en-US\"\nslide title:\n  title \"Hello\"\n",
             &opts,
         );
         // After C1 fix: error is Brand(IoError), not NoBrandProvider.
@@ -1297,7 +1307,7 @@ mod tests {
     /// This covers the "doctest path at runtime" requirement (L2).
     #[test]
     fn test_l2_build_doctest_path_executes_and_reaches_brand_load() {
-        let source = "slide: title\n  title: \"Hello, slideforge\"\n";
+        let source = "slideforge_version \"1\"\nlang \"en-US\"\nslide title:\n  title \"Hello, slideforge\"\n";
         let options = BuildOptions {
             brand_source: Some(BrandSource::TomlFile(Arc::from("brand.toml"))),
             ..Default::default()

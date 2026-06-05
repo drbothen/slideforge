@@ -340,11 +340,12 @@ mod tests {
     /// (e.g., `BrandLoader` + `BrandSynthesizer` for `BrandProvider`) must both be
     /// accessible via their canonical ids.
     ///
-    /// - `BrandLoader` id = `"slideforge-brand/default"` — handles `TomlFile`,
-    ///   `PptxFile`, and `DocxFile` `BrandSource` variants.
+    /// - `BrandLoader` id = `"slideforge-brand/default"` — handles `PptxFile` and
+    ///   `DocxFile` `BrandSource` variants (extracts brand from existing documents);
+    ///   returns `Err(BrandError::ValidationError)` for `TomlFile` sources.
     /// - `BrandSynthesizer` id = `"slideforge-brand-synthesizer"` — handles
-    ///   `TomlFile` only (synthesizes from toml config); `PptxFile`/`DocxFile` return
-    ///   `Err(NotImplemented)`.
+    ///   `TomlFile` only (synthesizes brand config from a toml file);
+    ///   returns `Err(BrandError::ValidationError)` for `PptxFile`/`DocxFile` sources.
     ///
     /// Both must be `Some` after `register_bundled_plugins` to prove EC-004
     /// (multi-registration on one surface).
