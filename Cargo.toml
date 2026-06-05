@@ -112,6 +112,9 @@ panic = "unwind"
 inherits = "release"
 lto = "fat"
 strip = "symbols"
+# Explicit declaration — prevents a future [profile.release] panic=abort edit from
+# silently flipping dist to abort. Functionally already unwind via inheritance.
+panic = "unwind"
 
 # Dev profile is default but verified explicit for clarity.
 [profile.dev]

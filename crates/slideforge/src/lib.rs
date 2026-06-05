@@ -177,7 +177,13 @@ pub use slideforge_plugin_api::RegistryError;
 ///
 /// Controls output format, brand configuration, validation mode, and other
 /// pipeline knobs.
-#[derive(Debug, Default, Clone)]
+///
+/// # Default
+///
+/// [`Default`] uses `strict: true` (the safety default per spec and CLAUDE.md:
+/// "Strict mode is the default build. `slideforge build` fails on validation
+/// errors. `--warn-only` for iteration."). All other fields default to `None`.
+#[derive(Debug, Clone)]
 pub struct BuildOptions {
     /// Output format identifier (e.g., `"pptx"`, `"pdf"`, `"docx"`).
     ///
@@ -199,8 +205,23 @@ pub struct BuildOptions {
     ///   an existing DOCX template.
     pub brand_source: Option<slideforge_plugin_api::BrandSource>,
 
-    /// If `true`, validation warnings are treated as errors.
+    /// If `true` (the default), any Error-severity validation diagnostic fails the
+    /// build with [`error::BuildError::ValidationFailed`]; Warning-severity
+    /// diagnostics are reported but do not block. Set `false` (`--warn-only`) to
+    /// proceed despite Error diagnostics.
     pub strict: bool,
+}
+
+impl Default for BuildOptions {
+    /// Returns `BuildOptions` with `strict: true` (the spec safety default),
+    /// `brand_source: None`, and `format: None`.
+    fn default() -> Self {
+        Self {
+            format: None,
+            brand_source: None,
+            strict: true,
+        }
+    }
 }
 
 /// Output produced by [`build`].
@@ -278,7 +299,7 @@ pub fn build(source: &str, options: &BuildOptions) -> Result<BuildOutput, error:
     build_inner(source, options, &registry)
 }
 
-/// Core pipeline implementation shared by [`build`] and (under `test-utils`)
+/// Core pipeline implementation shared by [`build`] and (in tests)
 /// [`build_with_registry`].
 ///
 /// Stages:
@@ -1269,6 +1290,137 @@ mod tests {
             "L2: doctest path returned NoBrandProvider — C1 fix not in effect. \
              The pipeline should reach brand loading (Brand error), not abort at lookup."
         );
+    }
+
+    // ── IMP-1: BuildOptions::default().strict must be true ────────────────────
+
+    /// IMP-1: `BuildOptions::default().strict` must be `true`.
+    ///
+    /// Spec + CLAUDE.md both state "strict=true (default)". Before this fix,
+    /// `BuildOptions` derived `Default`, so `strict` defaulted to `false`.
+    /// After the fix, a manual `impl Default` sets `strict: true`.
+    #[test]
+    fn test_imp1_build_options_default_strict_is_true() {
+        let opts = BuildOptions::default();
+        assert!(
+            opts.strict,
+            "IMP-1: BuildOptions::default().strict must be true (spec safety default); \
+             got false — manual impl Default is missing"
+        );
+        // Also verify the other fields retain sensible defaults.
+        assert!(
+            opts.brand_source.is_none(),
+            "IMP-1: BuildOptions::default().brand_source must be None"
+        );
+        assert!(
+            opts.format.is_none(),
+            "IMP-1: BuildOptions::default().format must be None"
+        );
+    }
+
+    // ── OBS-A: NoBrandSource branch coverage ──────────────────────────────────
+
+    /// OBS-A: `build()` with `brand_source: None` must return `Err(BuildError::NoBrandSource)`.
+    ///
+    /// Exercises the early-return guard at the top of `build_inner` that maps
+    /// `None` brand source to `BuildError::NoBrandSource`.
+    #[test]
+    fn test_obs_a_no_brand_source_returns_no_brand_source_error() {
+        let opts = BuildOptions {
+            brand_source: None,
+            format: None,
+            strict: false,
+        };
+        let result = build(
+            "slideforge_version \"1\"\nlang \"en-US\"\nslide title:\n  title \"Hello\"\n",
+            &opts,
+        );
+        assert!(
+            matches!(result, Err(error::BuildError::NoBrandSource)),
+            "OBS-A: build() with brand_source=None must return Err(NoBrandSource); got: {result:?}"
+        );
+    }
+
+    // ── OBS-B: UnknownFormat branch coverage ──────────────────────────────────
+
+    /// OBS-B: `build()` with an unknown format string must return
+    /// `Err(BuildError::UnknownFormat(_))` after brand loading and parsing succeed.
+    ///
+    /// Uses `build_with_registry` with a real brand tempfile to ensure the pipeline
+    /// reaches the exporter-selection stage, which is where `UnknownFormat` fires.
+    #[test]
+    fn test_obs_b_unknown_format_returns_unknown_format_error() {
+        use std::io::Write as _;
+
+        let tmp_dir = std::env::temp_dir().join(format!(
+            "slideforge_obsb_test_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&tmp_dir).expect("create tmpdir");
+
+        let logo_bytes: &[u8] = &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+        let logo_path = tmp_dir.join("logo.png");
+        {
+            let mut f = std::fs::File::create(&logo_path).expect("create logo.png");
+            f.write_all(logo_bytes).expect("write logo bytes");
+        }
+
+        let brand_toml_content = concat!(
+            "[colors]\n",
+            "dk1 = \"#1F2937\"\n",
+            "acc1 = \"#3B82F6\"\n",
+            "\n",
+            "[fonts]\n",
+            "heading = \"Arial\"\n",
+            "body = \"Arial\"\n",
+            "\n",
+            "[logo]\n",
+            "path = \"logo.png\"\n",
+        );
+        let brand_toml_path = tmp_dir.join("brand.toml");
+        {
+            let mut f = std::fs::File::create(&brand_toml_path).expect("create brand.toml");
+            f.write_all(brand_toml_content.as_bytes())
+                .expect("write brand.toml");
+        }
+
+        let source = concat!(
+            "slideforge_version \"1\"\n",
+            "lang \"en-US\"\n",
+            "slide title:\n",
+            "  title \"Format test\"\n",
+        );
+
+        // Build with a valid brand but a nonexistent format id.
+        let opts = BuildOptions {
+            brand_source: Some(BrandSource::TomlFile(Arc::from(
+                brand_toml_path.to_string_lossy().as_ref(),
+            ))),
+            format: Some("nonexistent".to_owned()),
+            strict: false,
+        };
+
+        // Use the default registry (confirms exporter selection is by options.format).
+        let result = build(source, &opts);
+
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+
+        assert!(
+            matches!(result, Err(error::BuildError::UnknownFormat(_))),
+            "OBS-B: build() with format='nonexistent' must return Err(UnknownFormat); \
+             got: {result:?}"
+        );
+        // Confirm the error carries the unknown format string.
+        if let Err(error::BuildError::UnknownFormat(ref fmt)) = result {
+            assert_eq!(
+                fmt, "nonexistent",
+                "OBS-B: UnknownFormat must carry the rejected format string"
+            );
+        }
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
