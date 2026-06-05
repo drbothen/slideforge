@@ -310,4 +310,113 @@ mod tests {
             "SectionBlock.include_in_toc must be true"
         );
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // MED-084-002: absolute start_slide_index contract + subtitle/end_slide_index
+    // These tests PASS against the current impl (coverage backfill).
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// MED-084-002: in a 3-slide deck where contributing slides are at ABSOLUTE
+    /// indices 0 and 2 (non-contiguous, with a non-contributing slide at index 1),
+    /// the second block's `start_slide_index` must be 2.
+    ///
+    /// This locks the `.enumerate()`-before-`.filter()` absolute-index contract —
+    /// the index reflects the slide's position in the full input slice, not its
+    /// position among filtered slides.
+    #[test]
+    fn test_bc_3_02_001_med084_002_absolute_start_slide_index_non_contiguous() {
+        let slides = vec![
+            // index 0 — has takeaway → INCLUDED
+            slide_with_takeaway("Q1 Results", "Revenue up 12%", None),
+            // index 1 — no takeaway → EXCLUDED
+            blank_slide("bullets"),
+            // index 2 — has takeaway → INCLUDED
+            slide_with_takeaway("Market Share", "Grew 3 pts YoY", None),
+        ];
+        let result = ExecutiveSummarySectionType.generate(&slides);
+        assert_eq!(
+            result.len(),
+            2,
+            "expected 2 blocks for 2 takeaway slides; got {}",
+            result.len()
+        );
+        assert_eq!(
+            result[0].start_slide_index, 0,
+            "first block must have start_slide_index == 0 (absolute index)"
+        );
+        assert_eq!(
+            result[1].start_slide_index, 2,
+            "second block must have start_slide_index == 2 (absolute index, \
+             not 1 after filtering)"
+        );
+    }
+
+    /// MED-084-002: each emitted block has `end_slide_index == None` and
+    /// `subtitle == None` — both fields are `None` per the generation spec.
+    #[test]
+    fn test_bc_3_02_001_med084_002_block_end_slide_index_and_subtitle_are_none() {
+        let slides = vec![slide_with_takeaway("Revenue Summary", "Up 12%", None)];
+        let result = ExecutiveSummarySectionType.generate(&slides);
+        assert_eq!(result.len(), 1, "expected 1 block");
+        assert!(
+            result[0].end_slide_index.is_none(),
+            "SectionBlock.end_slide_index must be None; \
+             got {:?}",
+            result[0].end_slide_index
+        );
+        assert!(
+            result[0].subtitle.is_none(),
+            "SectionBlock.subtitle must be None; got {:?}",
+            result[0].subtitle
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // MED-084-003: empty-title fallback — document intentional behavior
+    // This test PASSES against the current impl (coverage backfill).
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// MED-084-003: a slide that has a `takeaway` field but NO `title` field
+    /// emits a `SectionBlock` with `title == ""` (the intentional fallback from
+    /// `title_str().unwrap_or("")`). The block IS still emitted — it is NOT
+    /// dropped due to the absent title.
+    ///
+    /// This locks the current `SectionBlock` shape contract: title is the slide's
+    /// resolved title string or the empty string; the trait carries only a title,
+    /// not the full takeaway text. The implementer should add a doc comment to
+    /// `generate()` explaining this intentional fallback.
+    #[test]
+    fn test_bc_3_02_001_med084_003_missing_title_field_emits_block_with_empty_title() {
+        let mut fields = OrderedMap::new();
+        // Takeaway present, title absent.
+        fields.insert(
+            Arc::from("takeaway"),
+            FieldValue::Literal(Value::Str(Arc::from("Key insight without a title"))),
+        );
+        let untitled_slide = Slide {
+            slide_type: Arc::from("bullets"),
+            fields,
+            blocks: vec![],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+            overlay: None,
+            register_content: vec![],
+        };
+        let result = ExecutiveSummarySectionType.generate(&[untitled_slide]);
+        assert_eq!(
+            result.len(),
+            1,
+            "takeaway slide without a title must still emit 1 SectionBlock; \
+             got {} block(s)",
+            result.len()
+        );
+        assert_eq!(
+            result[0].title.as_ref(),
+            "",
+            "SectionBlock.title must be \"\" when the slide has no title field; \
+             got {:?}",
+            result[0].title
+        );
+    }
 }

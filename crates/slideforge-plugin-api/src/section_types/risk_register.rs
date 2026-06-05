@@ -69,7 +69,7 @@ impl SectionType for RiskRegisterSectionType {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use slideforge_types::{FieldValue, OrderedMap, SourceSpan, Value};
+    use slideforge_types::{FieldValue, OrderedMap, Register, SourceSpan, Value};
     use std::sync::Arc;
 
     /// Build a minimal slide of the given slide type, with an optional title.
@@ -86,6 +86,27 @@ mod tests {
             fields,
             blocks: vec![],
             register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+            overlay: None,
+            register_content: vec![],
+        }
+    }
+
+    /// Build a `severity_cards` slide with an optional title and an optional register.
+    fn make_severity_cards(title: Option<&str>, register: Option<Register>) -> Slide {
+        let mut fields = OrderedMap::new();
+        if let Some(t) = title {
+            fields.insert(
+                Arc::from("title"),
+                FieldValue::Literal(Value::Str(Arc::from(t))),
+            );
+        }
+        Slide {
+            slide_type: Arc::from("severity_cards"),
+            fields,
+            blocks: vec![],
+            register,
             tags: vec![],
             source_span: SourceSpan::default(),
             overlay: None,
@@ -251,6 +272,158 @@ mod tests {
         assert!(
             result[0].include_in_toc,
             "SectionBlock.include_in_toc must be true"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // CRIT-084-001: BC-3.02.001 invariant 4 — Notes-register severity_cards EXCLUDED
+    // These tests FAIL until the implementer fixes risk_register.rs (RED GATE).
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// CRIT-084-001 / BC-3.02.001 inv-4: a `severity_cards` slide with
+    /// `register: Some(Register::Notes)` MUST be excluded from `risk_register`
+    /// output — the same rule that `executive_summary` already enforces.
+    ///
+    /// Deck: 2 `severity_cards` slides where 1 has `register: Notes` → exactly
+    /// 1 block (only the non-notes slide contributes).
+    ///
+    /// RED GATE: FAILS until implementer adds the `register != Notes` filter
+    /// to `RiskRegisterSectionType::generate`.
+    #[test]
+    fn test_bc_3_02_001_inv4_notes_register_severity_cards_excluded_from_risk_register() {
+        let slides = vec![
+            // This slide is severity_cards + notes register → must be EXCLUDED.
+            make_severity_cards(Some("Speaker Notes Risk"), Some(Register::Notes)),
+            // This slide is severity_cards + no register → must be INCLUDED.
+            make_severity_cards(Some("Vendor Risks"), None),
+        ];
+        let result = RiskRegisterSectionType.generate(&slides);
+        assert_eq!(
+            result.len(),
+            1,
+            "notes-register severity_cards slide must be excluded; \
+             expected 1 block but got {}",
+            result.len()
+        );
+        assert_eq!(
+            result[0].title.as_ref(),
+            "Vendor Risks",
+            "the surviving block must be the non-notes slide"
+        );
+    }
+
+    /// CRIT-084-001 / BC-3.02.001 inv-4: when ALL `severity_cards` slides have
+    /// `register: Some(Register::Notes)`, `generate()` must return `vec![]`.
+    ///
+    /// RED GATE: FAILS until implementer adds the notes-exclusion filter.
+    #[test]
+    fn test_bc_3_02_001_inv4_all_severity_cards_notes_register_returns_empty() {
+        let slides = vec![
+            make_slide("title", Some("Intro")),
+            make_severity_cards(Some("Internal Risk A"), Some(Register::Notes)),
+            make_severity_cards(Some("Internal Risk B"), Some(Register::Notes)),
+            make_slide("bullets", Some("Summary")),
+        ];
+        let result = RiskRegisterSectionType.generate(&slides);
+        assert!(
+            result.is_empty(),
+            "all severity_cards slides are notes-register; \
+             generate() must return vec![]; got {} block(s)",
+            result.len()
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // MED-084-002: absolute start_slide_index contract + subtitle/end_slide_index
+    // These tests PASS against the current impl (coverage backfill).
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// MED-084-002: in a 3-slide deck where contributing slides are at ABSOLUTE
+    /// indices 0 and 2 (non-contiguous, with a non-contributing slide at index 1),
+    /// the second block's `start_slide_index` must be 2.
+    ///
+    /// This locks the `.enumerate()`-before-`.filter()` absolute-index contract —
+    /// the index reflects the slide's position in the full input slice, not its
+    /// position among filtered slides.
+    #[test]
+    fn test_bc_3_02_001_med084_002_absolute_start_slide_index_non_contiguous() {
+        let slides = vec![
+            // index 0 — severity_cards → INCLUDED
+            make_severity_cards(Some("Technical Risks"), None),
+            // index 1 — not severity_cards → EXCLUDED
+            make_slide("bullets", Some("Mitigations")),
+            // index 2 — severity_cards → INCLUDED
+            make_severity_cards(Some("Vendor Risks"), None),
+        ];
+        let result = RiskRegisterSectionType.generate(&slides);
+        assert_eq!(
+            result.len(),
+            2,
+            "expected 2 blocks for 2 severity_cards slides; got {}",
+            result.len()
+        );
+        assert_eq!(
+            result[0].start_slide_index, 0,
+            "first block must have start_slide_index == 0 (absolute index)"
+        );
+        assert_eq!(
+            result[1].start_slide_index, 2,
+            "second block must have start_slide_index == 2 (absolute index, \
+             not 1 after filtering)"
+        );
+    }
+
+    /// MED-084-002: each emitted block has `end_slide_index == None` and
+    /// `subtitle == None` — both fields are `None` per the generation spec.
+    #[test]
+    fn test_bc_3_02_001_med084_002_block_end_slide_index_and_subtitle_are_none() {
+        let slides = vec![make_severity_cards(Some("Supply-Chain Risks"), None)];
+        let result = RiskRegisterSectionType.generate(&slides);
+        assert_eq!(result.len(), 1, "expected 1 block");
+        assert!(
+            result[0].end_slide_index.is_none(),
+            "SectionBlock.end_slide_index must be None; \
+             got {:?}",
+            result[0].end_slide_index
+        );
+        assert!(
+            result[0].subtitle.is_none(),
+            "SectionBlock.subtitle must be None; got {:?}",
+            result[0].subtitle
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // MED-084-003: empty-title fallback — document intentional behavior
+    // This test PASSES against the current impl (coverage backfill).
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// MED-084-003: a `severity_cards` slide that has NO `title` field emits a
+    /// `SectionBlock` with `title == ""` (the intentional fallback from
+    /// `title_str().unwrap_or("")`). The block IS still emitted — it is NOT
+    /// dropped due to the absent title.
+    ///
+    /// This locks the current `SectionBlock` shape contract: title is the slide's
+    /// resolved title string or the empty string; the trait carries only a title,
+    /// not the full takeaway text.
+    #[test]
+    fn test_bc_3_02_001_med084_003_missing_title_field_emits_block_with_empty_title() {
+        // severity_cards slide with NO title field.
+        let slides = vec![make_severity_cards(None, None)];
+        let result = RiskRegisterSectionType.generate(&slides);
+        assert_eq!(
+            result.len(),
+            1,
+            "severity_cards slide without a title must still emit 1 SectionBlock; \
+             got {} block(s)",
+            result.len()
+        );
+        assert_eq!(
+            result[0].title.as_ref(),
+            "",
+            "SectionBlock.title must be \"\" when the slide has no title field; \
+             got {:?}",
+            result[0].title
         );
     }
 }
