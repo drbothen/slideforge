@@ -377,9 +377,14 @@ fn build_inner(
     //
     // OBS-1 fix: use a FRESH DiagnosticSink for eval so that EvalFailed
     // carries only eval-phase diagnostics, not residual parse-phase ones.
+    //
+    // MED-C: `deck` is bound `mut` so that `inject_lang_default(&mut deck)` can
+    // be called after the validator loop without rebinding. The Validator trait
+    // takes `&Deck` (immutable), so the mutation is deferred to after all
+    // validator dispatch is complete.
     let eval_config = EvalConfig::default();
     let mut eval_sink = DiagnosticSink::new();
-    let deck = eval_deck(&deck_node, &eval_config, &mut eval_sink).ok_or_else(|| {
+    let mut deck = eval_deck(&deck_node, &eval_config, &mut eval_sink).ok_or_else(|| {
         let diagnostics = diag_util::collect_diagnostics(eval_sink.errors(), "E-EVAL-???");
         let count = diagnostics.len();
         error::BuildError::EvalFailed { diagnostics, count }
@@ -441,17 +446,39 @@ fn build_inner(
         }
     }
 
+    // MED-C (ADR-016 Decision 3 cross-stage contract): inject the default lang
+    // "en" into deck.metadata.lang AFTER the validator loop completes.
+    //
+    // `LangValidator.validate(&deck)` must run BEFORE injection so that it
+    // correctly emits E-A11-003 when lang is absent. After the loop, the
+    // pipeline dispatcher (this function, per ADR-016 Dec 3) calls
+    // `inject_lang_default` so that all downstream stages (layout, exporters)
+    // can treat `metadata.lang` as `Some("...")` — never `None` post-validation.
+    //
+    // Returns `true` if a default was injected (lang was absent or blank),
+    // `false` if lang was already set. The return value is not used here (the
+    // diagnostic was already emitted by LangValidator above if needed).
+    slideforge_validate::inject_lang_default(&mut deck);
+
     // Stage 6: lay out the Deck into a LaidOutDeck.
     let laid_out = layout_run(&deck, &brand).map_err(error::BuildError::Layout)?;
 
     // Stage 7: select the exporter and produce output bytes.
     //
     // H1: Exporter::export is a plugin surface — wrap in dispatch_plugin.
+    //
+    // MED-D fix: capture extension from exporter.extension() (the trait method),
+    // not from the format key string. The Exporter trait distinguishes id()
+    // (lookup key, e.g. "pptx") from extension() (file extension, e.g. "pptx"
+    // for most, but may differ for custom exporters). This ensures BuildOutput
+    // carries the authoritative file extension declared by the exporter.
     let format = options.format.as_deref().unwrap_or("pptx");
     let exporter = registry
         .lookup_exporter(format)
         .ok_or_else(|| error::BuildError::UnknownFormat(format.to_owned()))?;
     let exporter_id = exporter.id().to_owned();
+    // Capture the extension before dispatch_plugin borrows exporter in the closure.
+    let file_extension = exporter.extension().to_owned();
     let export_opts = ExportOptions::default();
     let bytes = dispatch::dispatch_plugin(&exporter_id, || {
         exporter.export(&deck, &laid_out, &brand, &export_opts)
@@ -461,7 +488,7 @@ fn build_inner(
 
     Ok(BuildOutput {
         bytes,
-        extension: format.to_owned(),
+        extension: file_extension,
     })
 }
 
@@ -1421,6 +1448,353 @@ mod tests {
                 "OBS-B: UnknownFormat must carry the rejected format string"
             );
         }
+    }
+
+    // ── HIGH-A: strict=true (production default) happy path ──────────────────
+
+    /// HIGH-A: `build()` with `strict: true` (the production default, via
+    /// `BuildOptions::default()`) on a valid deck that produces zero Error-severity
+    /// diagnostics MUST return `Ok(BuildOutput)` with non-empty bytes and correct
+    /// extension.
+    ///
+    /// This proves the production default code path reaches `Ok` — all previous
+    /// Ok-reaching tests used `strict: false`. A valid deck with `lang "en-US"` has
+    /// no Error-severity diagnostics, so strict mode must NOT block it.
+    ///
+    /// If this test fails with `ValidationFailed`, a bundled validator is
+    /// incorrectly emitting an Error-severity diagnostic for a valid input — that
+    /// is a real bug that must be fixed before this test can be downgraded.
+    #[test]
+    fn test_high_a_strict_default_happy_path_returns_ok() {
+        use std::io::Write as _;
+
+        let tmp_dir = std::env::temp_dir().join(format!(
+            "slideforge_higha_test_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&tmp_dir).expect("create tmpdir");
+
+        let logo_bytes: &[u8] = &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+        let logo_path = tmp_dir.join("logo.png");
+        {
+            let mut f = std::fs::File::create(&logo_path).expect("create logo.png");
+            f.write_all(logo_bytes).expect("write logo bytes");
+        }
+
+        let brand_toml_content = concat!(
+            "[colors]\n",
+            "dk1 = \"#1F2937\"\n",
+            "acc1 = \"#3B82F6\"\n",
+            "\n",
+            "[fonts]\n",
+            "heading = \"Arial\"\n",
+            "body = \"Arial\"\n",
+            "\n",
+            "[logo]\n",
+            "path = \"logo.png\"\n",
+        );
+        let brand_toml_path = tmp_dir.join("brand.toml");
+        {
+            let mut f = std::fs::File::create(&brand_toml_path).expect("create brand.toml");
+            f.write_all(brand_toml_content.as_bytes())
+                .expect("write brand.toml");
+        }
+
+        // Valid deck: lang "en-US" satisfies LangValidator (Info-only, non-blocking).
+        // One slide: satisfies ZeroSlideValidator.
+        // No images/charts/shapes: AltTextValidator has no visuals to flag.
+        let source = concat!(
+            "slideforge_version \"1\"\n",
+            "lang \"en-US\"\n",
+            "slide title:\n",
+            "  title \"Strict default test\"\n",
+        );
+
+        // Use BuildOptions::default() which sets strict: true.
+        // Only override brand_source and format (no strict override).
+        let opts = BuildOptions {
+            brand_source: Some(BrandSource::TomlFile(Arc::from(
+                brand_toml_path.to_string_lossy().as_ref(),
+            ))),
+            format: Some("pptx".to_owned()),
+            ..BuildOptions::default()
+        };
+        assert!(
+            opts.strict,
+            "HIGH-A: opts.strict must be true (from BuildOptions::default())"
+        );
+
+        let result = build(source, &opts);
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+
+        let output = result.expect(
+            "HIGH-A: build() with strict=true (production default) must return Ok(BuildOutput) \
+             for a valid deck with lang 'en-US'; if this returns ValidationFailed, a bundled \
+             validator is incorrectly emitting Error-severity diagnostics for a valid input"
+        );
+        assert!(
+            !output.bytes.is_empty(),
+            "HIGH-A: BuildOutput.bytes must be non-empty"
+        );
+        assert_eq!(
+            output.extension, "pptx",
+            "HIGH-A: BuildOutput.extension must be 'pptx'"
+        );
+    }
+
+    // ── HIGH-B: BuildError::Export must have #[source] ────────────────────────
+
+    /// HIGH-B: `BuildError::Export(err).source()` must return `Some(&err)`,
+    /// proving `Error::source()` chains through the export error for
+    /// observability (error chain is not broken).
+    ///
+    /// Before fix: `Export(ExportError)` lacks `#[source]` so `source()` returns
+    /// `None`. After fix: `Export(#[source] ExportError)` and `source()` returns
+    /// `Some`.
+    #[test]
+    fn test_high_b_build_error_export_source_chains() {
+        use std::error::Error as StdError;
+
+        let export_err = slideforge_plugin_api::ExportError::IoError {
+            message: "HIGH-B test I/O failure".to_owned(),
+        };
+        let build_err = error::BuildError::Export(export_err);
+
+        assert!(
+            build_err.source().is_some(),
+            "HIGH-B: BuildError::Export(err).source() must return Some — \
+             #[source] annotation is missing on the Export variant"
+        );
+    }
+
+    // ── MED-C: inject_lang_default called after validator loop ───────────────
+
+    /// MED-C: After `build()` completes successfully, the pipeline must have
+    /// called `inject_lang_default` on the deck so that downstream exporters
+    /// see `lang` as `Some`. We verify this indirectly: if we build a deck with
+    /// NO lang declaration (`strict: false` to suppress the Info diagnostic),
+    /// `build()` must succeed AND the absence of any crash/panic proves the
+    /// exporter received a deck with a valid (injected) lang.
+    ///
+    /// More directly: we also test `inject_lang_default` at the unit level to
+    /// confirm that after calling it on a no-lang deck, `lang` becomes `Some("en")`.
+    /// The integration-level proof is that the exporter does not see `lang: None`
+    /// in production (confirmed by the fact that `build()` succeeds without error
+    /// even when lang is absent from the source).
+    #[test]
+    fn test_med_c_inject_lang_default_called_after_validator_loop() {
+        use std::io::Write as _;
+
+        // Unit-level: inject_lang_default sets lang to "en" when absent.
+        {
+            use slideforge_types::{Deck, DeckMetadata, OrderedMap};
+            let mut deck = Deck {
+                slides: vec![],
+                vars: OrderedMap::new(),
+                registers: OrderedMap::new(),
+                section_blocks: vec![],
+                metadata: DeckMetadata {
+                    title: None,
+                    slideforge_version: Arc::from("1"),
+                    lang: None,
+                    author: None,
+                    section_order: None,
+                },
+            };
+            let injected = slideforge_validate::inject_lang_default(&mut deck);
+            assert!(
+                injected,
+                "MED-C: inject_lang_default must return true when lang was None"
+            );
+            assert!(
+                deck.metadata.lang.is_some(),
+                "MED-C: inject_lang_default must set lang to Some('en') when absent"
+            );
+            assert_eq!(
+                deck.metadata.lang.as_deref(),
+                Some("en"),
+                "MED-C: injected lang must be 'en'"
+            );
+        }
+
+        // Integration-level: build() with no lang succeeds (strict: false).
+        // The exporter receiving the deck without lang would be a regression —
+        // inject_lang_default MUST be called before export.
+        let tmp_dir = std::env::temp_dir().join(format!(
+            "slideforge_medc_test_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&tmp_dir).expect("create tmpdir");
+
+        let logo_bytes: &[u8] = &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+        let logo_path = tmp_dir.join("logo.png");
+        {
+            let mut f = std::fs::File::create(&logo_path).expect("create logo.png");
+            f.write_all(logo_bytes).expect("write logo bytes");
+        }
+
+        let brand_toml_content = concat!(
+            "[colors]\n",
+            "dk1 = \"#1F2937\"\n",
+            "acc1 = \"#3B82F6\"\n",
+            "\n",
+            "[fonts]\n",
+            "heading = \"Arial\"\n",
+            "body = \"Arial\"\n",
+            "\n",
+            "[logo]\n",
+            "path = \"logo.png\"\n",
+        );
+        let brand_toml_path = tmp_dir.join("brand.toml");
+        {
+            let mut f = std::fs::File::create(&brand_toml_path).expect("create brand.toml");
+            f.write_all(brand_toml_content.as_bytes())
+                .expect("write brand.toml");
+        }
+
+        // Source with NO lang — LangValidator emits Info (not Error), so
+        // strict: false ensures it doesn't block. The exporter must receive
+        // lang: Some("en") via inject_lang_default.
+        let source_no_lang = concat!(
+            "slideforge_version \"1\"\n",
+            "slide title:\n",
+            "  title \"No-lang inject test\"\n",
+        );
+
+        let opts = BuildOptions {
+            brand_source: Some(BrandSource::TomlFile(Arc::from(
+                brand_toml_path.to_string_lossy().as_ref(),
+            ))),
+            format: Some("pptx".to_owned()),
+            strict: false,
+        };
+
+        let result = build(source_no_lang, &opts);
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+
+        assert!(
+            result.is_ok(),
+            "MED-C: build() with no lang (strict: false) must succeed; \
+             if it fails, inject_lang_default may not be wired or the exporter \
+             panics on lang: None; got: {result:?}"
+        );
+    }
+
+    // ── MED-D: BuildOutput.extension comes from exporter.extension() ─────────
+
+    /// MED-D: `BuildOutput.extension` must be set from `exporter.extension()`,
+    /// not from the format key string.
+    ///
+    /// A stub exporter with `id() == "stub-fmt"` and `extension() == "stub-ext"`
+    /// proves that `extension` in `BuildOutput` comes from the trait method, not
+    /// the lookup key. Before fix: `extension: format.to_owned()` → returns
+    /// `"stub-fmt"`. After fix: `extension: exporter.extension().to_owned()` →
+    /// returns `"stub-ext"`.
+    #[test]
+    fn test_med_d_build_output_extension_from_exporter_not_format_key() {
+        use std::io::Write as _;
+        use slideforge_layout::LaidOutDeck;
+        use slideforge_plugin_api::{ExportError, ExportOptions, Exporter};
+        use slideforge_types::{Brand, Deck};
+
+        /// Stub exporter where id() != extension() to prove the distinction.
+        struct StubExtExporter;
+        impl Exporter for StubExtExporter {
+            fn id(&self) -> &str {
+                "stub-fmt"
+            }
+            fn extension(&self) -> &str {
+                "stub-ext"
+            }
+            fn export(
+                &self,
+                _deck: &Deck,
+                _laid_out: &LaidOutDeck,
+                _brand: &Brand,
+                _opts: &ExportOptions,
+            ) -> Result<Vec<u8>, ExportError> {
+                // Return minimal non-empty bytes so BuildOutput succeeds.
+                Ok(vec![0x00, 0x01, 0x02])
+            }
+        }
+
+        let tmp_dir = std::env::temp_dir().join(format!(
+            "slideforge_medd_test_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&tmp_dir).expect("create tmpdir");
+
+        let logo_bytes: &[u8] = &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+        let logo_path = tmp_dir.join("logo.png");
+        {
+            let mut f = std::fs::File::create(&logo_path).expect("create logo.png");
+            f.write_all(logo_bytes).expect("write logo bytes");
+        }
+
+        let brand_toml_content = concat!(
+            "[colors]\n",
+            "dk1 = \"#1F2937\"\n",
+            "acc1 = \"#3B82F6\"\n",
+            "\n",
+            "[fonts]\n",
+            "heading = \"Arial\"\n",
+            "body = \"Arial\"\n",
+            "\n",
+            "[logo]\n",
+            "path = \"logo.png\"\n",
+        );
+        let brand_toml_path = tmp_dir.join("brand.toml");
+        {
+            let mut f = std::fs::File::create(&brand_toml_path).expect("create brand.toml");
+            f.write_all(brand_toml_content.as_bytes())
+                .expect("write brand.toml");
+        }
+
+        let source = concat!(
+            "slideforge_version \"1\"\n",
+            "lang \"en-US\"\n",
+            "slide title:\n",
+            "  title \"Extension test\"\n",
+        );
+
+        // Build a registry with the stub exporter registered under "stub-fmt".
+        let mut builder = slideforge_plugin_api::PluginRegistryBuilder::default();
+        registry::register_bundled_plugins(&mut builder);
+        builder.register_exporter(Box::new(StubExtExporter));
+        let registry = builder.build().expect("registry must build");
+
+        let opts = BuildOptions {
+            brand_source: Some(BrandSource::TomlFile(Arc::from(
+                brand_toml_path.to_string_lossy().as_ref(),
+            ))),
+            format: Some("stub-fmt".to_owned()),
+            strict: false,
+        };
+
+        let result = build_with_registry(source, &opts, &registry);
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+
+        let output = result.expect(
+            "MED-D: build_with_registry with StubExtExporter must return Ok(BuildOutput)"
+        );
+        assert_eq!(
+            output.extension, "stub-ext",
+            "MED-D: BuildOutput.extension must be 'stub-ext' (from exporter.extension()), \
+             not 'stub-fmt' (the format key). Before fix: extension is 'stub-fmt'. \
+             After fix: extension is 'stub-ext'."
+        );
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

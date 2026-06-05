@@ -177,8 +177,12 @@ pub enum BuildError {
     /// The export stage failed to produce output bytes.
     ///
     /// Wraps [`slideforge_plugin_api::ExportError`].
+    ///
+    /// `#[source]` ensures `Error::source()` chains through to the inner
+    /// `ExportError`, which preserves the full error chain for observability.
+    /// Matches the pattern of `Brand(#[source]..)` and `Layout(#[source]..)`.
     #[error("export error: {0}")]
-    Export(slideforge_plugin_api::ExportError),
+    Export(#[source] slideforge_plugin_api::ExportError),
 
     /// A plugin panicked during the pipeline.
     #[error("plugin dispatch error: {0}")]
