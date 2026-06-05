@@ -22,8 +22,9 @@
 //! # }
 //! ```
 //!
-//! [`PluginRegistryBuilder::build`] returns [`Err(RegistryError::MissingSurface)`] if
-//! any of the 10 required surfaces has zero registrations (BC-5.02.001 invariant 3).
+//! [`PluginRegistryBuilder::build`] returns [`RegistryError::MissingSurface`] (as the
+//! `Err` variant) if any of the 10 required surfaces has zero registrations
+//! (BC-5.02.001 invariant 3).
 //!
 //! ## Design constraints
 //!
@@ -133,9 +134,9 @@ pub const SURFACE_NAMES: [&str; 10] = [
 ///
 /// [`build`](PluginRegistryBuilder::build) checks that every surface has at
 /// least one registration. If any surface is empty, it returns
-/// [`Err(RegistryError::MissingSurface)`] naming the first unregistered
-/// surface in declaration order. A silent no-op or panic are both contract
-/// violations (BC-5.02.001 invariant 3).
+/// [`RegistryError::MissingSurface`] (as the `Err` variant) naming the first
+/// unregistered surface in declaration order. A silent no-op or panic are both
+/// contract violations (BC-5.02.001 invariant 3).
 ///
 /// ## Multiple registrations per surface
 ///

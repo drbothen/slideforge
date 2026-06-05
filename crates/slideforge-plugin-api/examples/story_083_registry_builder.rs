@@ -1,4 +1,4 @@
-//! STORY-083 demo: PluginRegistryBuilder + Surface Enforcement.
+//! STORY-083 demo: `PluginRegistryBuilder` + Surface Enforcement.
 //!
 //! Demonstrates all five acceptance criteria:
 //!
@@ -12,10 +12,13 @@
 //! to exercise the non-10 branch of `surface_count()` / `surface_names()`.
 //!
 //! Run with:
-//!   cargo run --example story_083_registry_builder -p slideforge-plugin-api
+//!   cargo run --example `story_083_registry_builder` -p slideforge-plugin-api
 
 // ── Suppress lints that are unavoidable in a demo binary ──────────────────
 #![allow(clippy::print_stdout)]
+// The trait signatures define `id(&self) -> &str` without `'static`; stub impls
+// must mirror the trait signature exactly and cannot change it to `&'static str`.
+#![allow(clippy::unnecessary_literal_bound)]
 
 use std::sync::Arc;
 
@@ -40,7 +43,7 @@ use slideforge_types::{
 // "at least one registration per surface" invariant.
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Stub implementation of the DataSource plugin surface.
+/// Stub implementation of the `DataSource` plugin surface.
 struct DemoDataSource;
 
 impl DataSource for DemoDataSource {
@@ -53,7 +56,7 @@ impl DataSource for DemoDataSource {
     }
 }
 
-/// Stub implementation of the Exporter plugin surface.
+/// Stub implementation of the `Exporter` plugin surface.
 struct DemoExporter;
 
 impl Exporter for DemoExporter {
@@ -76,7 +79,7 @@ impl Exporter for DemoExporter {
     }
 }
 
-/// Stub implementation of the ChartRenderer plugin surface.
+/// Stub implementation of the `ChartRenderer` plugin surface.
 struct DemoChartRenderer;
 
 impl ChartRenderer for DemoChartRenderer {
@@ -89,7 +92,7 @@ impl ChartRenderer for DemoChartRenderer {
     }
 }
 
-/// Stub implementation of the DiagramRenderer plugin surface.
+/// Stub implementation of the `DiagramRenderer` plugin surface.
 struct DemoDiagramRenderer;
 
 impl DiagramRenderer for DemoDiagramRenderer {
@@ -102,7 +105,7 @@ impl DiagramRenderer for DemoDiagramRenderer {
     }
 }
 
-/// Stub implementation of the Validator plugin surface.
+/// Stub implementation of the `Validator` plugin surface.
 struct DemoValidator;
 
 impl Validator for DemoValidator {
@@ -115,7 +118,7 @@ impl Validator for DemoValidator {
     }
 }
 
-/// Stub implementation of the MathRenderer plugin surface.
+/// Stub implementation of the `MathRenderer` plugin surface.
 struct DemoMathRenderer;
 
 impl MathRenderer for DemoMathRenderer {
@@ -128,7 +131,7 @@ impl MathRenderer for DemoMathRenderer {
     }
 }
 
-/// Stub implementation of the BrandProvider plugin surface.
+/// Stub implementation of the `BrandProvider` plugin surface.
 struct DemoBrandProvider;
 
 impl BrandProvider for DemoBrandProvider {
@@ -156,7 +159,7 @@ impl BrandProvider for DemoBrandProvider {
     }
 }
 
-/// Stub implementation of the SlideType plugin surface.
+/// Stub implementation of the `SlideType` plugin surface.
 struct DemoSlideType;
 
 impl SlideType for DemoSlideType {
@@ -193,7 +196,7 @@ impl SlideType for DemoSlideType {
     }
 }
 
-/// Stub implementation of the SectionType plugin surface.
+/// Stub implementation of the `SectionType` plugin surface.
 struct DemoSectionType;
 
 impl SectionType for DemoSectionType {
@@ -206,7 +209,7 @@ impl SectionType for DemoSectionType {
     }
 }
 
-/// Stub implementation of the InlineFormat plugin surface.
+/// Stub implementation of the `InlineFormat` plugin surface.
 struct DemoInlineFormat;
 
 impl InlineFormat for DemoInlineFormat {
@@ -263,17 +266,14 @@ fn main() {
     let empty_result = PluginRegistryBuilder::default().build();
     match &empty_result {
         Err(RegistryError::MissingSurface { surface }) => {
-            println!(
-                "  result : Err(MissingSurface {{ surface: {:?} }})",
-                surface
-            );
+            println!("  result : Err(MissingSurface {{ surface: {surface:?} }})");
             println!("  PASS   first missing surface in declaration order = DataSource");
         },
         Ok(_) => {
             println!("  FAIL   expected Err, got Ok");
         },
         Err(other) => {
-            println!("  FAIL   unexpected error variant: {:?}", other);
+            println!("  FAIL   unexpected error variant: {other:?}");
         },
     }
     println!();
@@ -294,11 +294,11 @@ fn main() {
             println!(" AC-003  surface_count() == 10 for a fully-registered registry");
             println!("-----------------------------------------------------------------");
             let count = registry.surface_count();
-            println!("  surface_count() = {}", count);
+            println!("  surface_count() = {count}");
             if count == 10 {
                 println!("  PASS   surface_count() == 10");
             } else {
-                println!("  FAIL   expected 10, got {}", count);
+                println!("  FAIL   expected 10, got {count}");
             }
 
             // ── AC-004: surface_names() lists all 10 canonical names ──────────
@@ -307,7 +307,7 @@ fn main() {
             println!(" AC-004  surface_names() returns all 10 canonical names");
             println!("-----------------------------------------------------------------");
             let names = registry.surface_names();
-            println!("  surface_names() = {:?}", names);
+            println!("  surface_names() = {names:?}");
             if names.len() == 10 {
                 println!("  PASS   surface_names().len() == 10");
             } else {
@@ -332,7 +332,7 @@ fn main() {
             }
         },
         Err(e) => {
-            println!("  FAIL   expected Ok, got Err: {}", e);
+            println!("  FAIL   expected Ok, got Err: {e}");
         },
     }
 
@@ -348,8 +348,8 @@ fn main() {
     partial.register_chart_renderer(Box::new(DemoChartRenderer));
     let partial_count = partial.surface_count();
     let partial_names = partial.surface_names();
-    println!("  surface_count() = {} (expected 3)", partial_count);
-    println!("  surface_names() = {:?}", partial_names);
+    println!("  surface_count() = {partial_count} (expected 3)");
+    println!("  surface_names() = {partial_names:?}");
     if partial_count == 3 && partial_names == vec!["DataSource", "Exporter", "ChartRenderer"] {
         println!("  PASS   partial registry reports only 3 registered surfaces");
     } else {
@@ -364,16 +364,13 @@ fn main() {
     let err = RegistryError::MissingSurface {
         surface: "DataSource",
     };
-    println!("  Display : {}", err);
-    println!("  Debug   : {:?}", err);
+    println!("  Display : {err}");
+    println!("  Debug   : {err:?}");
     let expected_display = "required plugin surface 'DataSource' has no registered implementations";
     if err.to_string() == expected_display {
         println!("  PASS   Display matches expected format");
     } else {
-        println!(
-            "  FAIL   Display mismatch; expected: {:?}",
-            expected_display
-        );
+        println!("  FAIL   Display mismatch; expected: {expected_display:?}");
     }
     println!();
     println!("=================================================================");
