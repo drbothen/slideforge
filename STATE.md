@@ -68,7 +68,7 @@ Phase 3, **Wave 4 — 16/18 merged. Batch B pptx chain (037→038→039→040) C
 
 ## NEXT ACTIONS (fresh orchestrator — execute in order)
 
-1. **Batch C: STORY-049** — Plugin Registry Assembly (Wave 4, depends on Batch B COMPLETE). Full per-story delivery flow.
+1. **Batch C: STORY-049** — Plugin Registry Assembly (Wave 4, depends on Batch B COMPLETE). Full per-story delivery flow (see `workflows/phases/per-story-delivery.md`). **FIRST read the STORY-049 spec and verify upstream data availability per LESSON-13 before writing the Red Gate.**
 2. **STORY-050** — End-to-End Integration Test Suite (depends on STORY-049).
 3. **Wave 4 gate** after all 18 stories merged (16/18 done; remaining: STORY-049, STORY-050).
 4. **STORY-082** — PPTX Slide-Grouping Sections (Wave 5, 5 pts, P0, BC-4.01.003 Half B). After Wave 4 gate passes.
@@ -114,6 +114,8 @@ Phase 3, **Wave 4 — 16/18 merged. Batch B pptx chain (037→038→039→040) C
 
 ## Session Resume Checkpoint
 
+**CLEAN CHECKPOINT — safe to clear context and resume in a fresh session. No in-flight worktree/PR. A fresh orchestrator resumes by reading this STATE.md and starting at STORY-049 (see NEXT ACTIONS).**
+
 | Field | Value |
 |-------|-------|
 | **Date** | 2026-06-04 |
@@ -123,7 +125,7 @@ Phase 3, **Wave 4 — 16/18 merged. Batch B pptx chain (037→038→039→040) C
 | **Open PRs** | 0 |
 | **Workspace crates** | 16 |
 | **Spec deltas this session** | STORY-040 re-scoped 5→3 pts (slide-grouping split to STORY-082, human-authorized). STORY-082 created Wave 5 (5 pts, P0, BC-4.01.003 Half B). BC-4.01.003 amended to v1.2 (Half A: notes+masters; Half B deferred to STORY-082). BC-5.01.005 amended to v1.2 (deck.metadata.lang SoT, human-authorized). Total points updated 494→497; Wave 4 115 pts; Wave 5 114 pts. SafeUrl guard (link_safety.rs, CWE-601) shipped in slideforge-pptx. |
-| **factory-artifacts** | Local only — push requires explicit human authorization |
+| **factory-artifacts** | LOCAL ONLY (unpushed). Fresh session on this machine resumes from local `.factory/` worktree. Cross-machine durability requires pushing factory-artifacts — needs explicit human authorization. |
 
 ---
 
@@ -142,6 +144,9 @@ Phase 3, **Wave 4 — 16/18 merged. Batch B pptx chain (037→038→039→040) C
 | LESSON-10 | For strict 3-CLEAN on compliance/extension stories: do a PROACTIVE exhaustive doc-vs-code + sibling-site (warn/error-propagation) consistency audit BEFORE final convergence passes, to avoid per-finding ping-pong (STORY-038 took 16 passes). |
 | LESSON-11 | Stub/test-writer for EXTENSION stories often produces a high GREEN-BY-DESIGN ratio (prior-merged behavior is legitimate PRE-EXISTING-BEHAVIOR). But stricter new tests can expose REAL bugs in already-merged code — treat such finds as in-scope fixes for the compliance story. |
 | LESSON-12 | Agents working in feature worktrees MUST NEVER commit to the `develop` branch. Twice this session a STORY-038 fix-burst commit accidentally landed on LOCAL develop (28636fae, 9730e6a3) — both unpushed and discarded via hard-reset to origin/develop. Mitigations: (a) worktree dispatches operate ONLY within `.worktrees/STORY-NNN` and never `git switch`/checkout develop in the main worktree; (b) after EVERY PR squash-merge, orchestrator verifies `git rev-parse develop == git rev-parse origin/develop` and resets local develop to origin if drifted, BEFORE creating the next story's worktree so new branches fork from the correct base; (c) fresh-session factory-worktree-health startup check MUST include this develop==origin/develop assertion. |
+| LESSON-13 | UPSTREAM-DATA VERIFICATION (highest value). Before implementing a story that CONSUMES IR data produced by an upstream pipeline stage (e.g. layout::run threading, register content, sections), VERIFY the data is ACTUALLY threaded through the real pipeline (semantic Deck → eval → layout::run → LaidOutDeck), not merely present as a type. Instruct test-writer to confirm upstream-data availability FIRST and drive the REAL end-to-end path (construct semantic input, run the pipeline, assert) so any threading gap surfaces in the Red Gate, not adversary review. When the gap is large/architectural, get an architect assessment + human scope decision (expand vs split) BEFORE implementation. Evidence: STORY-039 (chart/diagram alt not threaded through layout::run — caught late, required cross-crate IR refactor); STORY-040 (slide-grouping sections data did not exist in IR at all — required split to STORY-082). |
+| LESSON-14 | PRESENCE-VS-CONTENT TESTS. Acceptance tests that assert an artifact merely EXISTS (e.g. a ZIP part is present) can pass while the artifact is empty/orphaned/schema-invalid. Strengthen ACs/tests to assert CONTENT and VALIDITY: parse the real output and assert required child elements/attributes, relationship wiring (e.g. slide→notesSlide back-rel), and schema correctness — not just presence. When emitting hand-built OOXML, audit element-by-element against ECMA-376 CT content models (the canonical valid form usually exists elsewhere in the codebase — reuse/compare it). Evidence: STORY-040 presence-only tests passed while notesMaster was an empty stub, notes were orphaned (no slide→notesSlide rel), and grpSpPr was schema-invalid; adversary caught all three. |
+| LESSON-15 | DEMO-EXAMPLE CANONICAL CLIPPY. demo-recorder example binaries (`crates/*/examples/*.rs`) are built by `--all-targets` and MUST pass the FULL canonical clippy including `-W clippy::missing_docs_in_private_items` (LESSON-2) — example private items need doc comments. The demo-recorder's own clippy check has twice omitted that flag → CI-red (STORY-039 too_many_lines; STORY-040 missing_docs). Orchestrator: after demo recording, run the FULL canonical clippy (with `-W missing_docs_in_private_items`) on the example before push, OR dispatch demo-recorder with the explicit full flag set. |
 
 ---
 
