@@ -45,7 +45,7 @@ wave_4_batch_c:
   execution: sequential
   chains: ["STORY-083 independent (dep: STORY-002 only)", "STORY-084 (dep: STORY-002+042+077)", "STORY-085 (dep: STORY-002+028+037+038)", "083+084+085→STORY-049→STORY-050"]
   prerequisite: Batch B gate check
-  lesson_13_note: "STORY-083/084/085 added 2026-06-04 per LESSON-13 reconciliation (ADR-016). STORY-083 MERGED PR #57 (5aaa27d2, 2026-06-05). STORY-084 MERGED PR #58 (801f351b, 2026-06-05). STORY-085 MERGED PR #59 (e704e700, 2026-06-05). STORY-049 MERGED PR #60 (e6f7832d, 2026-06-05). Batch C COMPLETE (4/4). STORY-050 NOW UNGATED."
+  lesson_13_note: "STORY-083/084/085 added 2026-06-04 per LESSON-13 reconciliation (ADR-016). STORY-083 MERGED PR #57 (5aaa27d2, 2026-06-05). STORY-084 MERGED PR #58 (801f351b, 2026-06-05). STORY-085 MERGED PR #59 (e704e700, 2026-06-05). STORY-049 MERGED PR #60 (e6f7832d, 2026-06-05). Batch C COMPLETE (4/4). STORY-050 IN PROGRESS — Red Gate 6bbe80fc; Gap-2 Option A authorized 2026-06-05; resume-ready."
 wave_4_pulled_in_p1: [STORY-073, STORY-075, STORY-076]
 wave_4_deferred_p2_to_wave5: [STORY-072, STORY-074]
 wave_4_bc_deltas: "BC-2.01.001 v1.1→v1.2; BC-2.01.003 v1.8→v1.9; error-taxonomy v2.2→v2.3"
@@ -542,7 +542,7 @@ stories:
     security_review: "APPROVE — CLEAN"
     notes: "Plugin Registry Assembly (root crate); build() end-to-end functional (parse→eval→validate→layout→export); catch_unwind + panic=unwind + CI guard; inject_lang_default; extension from exporter; strict=true default; all AC-001..AC-008 load-bearing. 21/21 CI checks green (doctest+snapshots failure fixed in 65ee62e6 before merge). OBS-E anchored STORY-050. STORY-050 UNBLOCKED."
   STORY-050:
-    status: ready
+    status: in-progress
     wave: 4
     batch: C
     priority: P0
@@ -550,7 +550,16 @@ stories:
     depends_on: [STORY-049]
     blocks: [STORY-055]
     ungated: 2026-06-05
-    notes: "End-to-End Integration Test Suite; UNGATED (STORY-049 merged PR #60, e6f7832d). Must include multi-slide deck + inline formatting + data binding through build() (OBS-E scope, BC-5.02.002 EC-004). Branch from e6f7832d."
+    worktree: "/Users/jmagady/Dev/slideforge/.worktrees/STORY-050"
+    branch: "feature/STORY-050"
+    branch_pushed: true
+    red_gate_commit: "6bbe80fc"
+    red_gate_tests: "55 pass / 7 fail (intended Red Gate)"
+    red_gate_date: 2026-06-05
+    gap2_authorized: "Option A — post-layout validation pass (2026-06-05)"
+    blk001_resolved: true
+    resume_step: "Step 1 — Architect: design Gap-2 Option A + ADR (see STATE.md NEXT ACTIONS)"
+    notes: "End-to-End Integration Test Suite; Red Gate committed 6bbe80fc; 7 failing tests = Gaps 1/2/3. Gap-2 Option A authorized 2026-06-05. BLK-001 RESOLVED. Resume at architect step (STATE.md NEXT ACTIONS Step 1). Off develop e6f7832d. Architect gap analysis: .factory/specs/story-050-gap-analysis.md. OBS-E multi-slide/inline/data-binding in scope. BC-5.02.002 EC-004."
   STORY-072:
     status: draft
     wave: 5
