@@ -54,23 +54,23 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. Generates branded .pptx
 
 ## CURRENT POSITION
 
-Phase 3, **Wave 4 — 18/21 merged. Batch B COMPLETE. Batch C: STORY-083 + STORY-084 MERGED.**
+Phase 3, **Wave 4 — 18/21 merged. Batch B COMPLETE. Batch C: STORY-083 + STORY-084 MERGED. STORY-085 LOCAL adversary CONVERGED — demos + PR pending.**
 
 - `develop` = `801f351b` (58 merged PRs; origin/develop confirmed). **Open PRs: 0. Active worktrees: none.**
 - Workspace builds clean. ~3317 tests pass, 0 failures.
 - STORY-084 MERGED PR #58 (801f351b, 2026-06-05). 7 bundled SectionType impls in slideforge-plugin-api/src/section_types/ (executive_summary + risk_register auto types; methodology/scope/approval/appendix/glossary manual types). 171 plugin-api tests. Closes SectionType-surface portion of BC-5.02.001 + BC-3.02.001 invariant 4 (notes-register exclusion on both auto types). CRIT-084-001 closed. 7-pass adversary cascade; strict-CLEAN passes 5/6/7. Security: APPROVE, CLEAN.
 - STORY-083 MERGED PR #57 (5aaa27d2, 2026-06-05). STORY-040 MERGED PR #56 (869fb401, 2026-06-04).
 
-**Batch C in progress:** STORY-083 + STORY-084 DONE. Remaining: STORY-085 → STORY-049 → STORY-050.
+**Batch C in progress:** STORY-083 + STORY-084 DONE. STORY-085 LOCAL-CONVERGED (demos + PR next). Remaining: STORY-085 PR → STORY-049 → STORY-050.
 **Wave 4 gate** runs only after ALL 21 Wave 4 stories merge. **STORY-082** (slide-grouping sections) → Wave 5.
 
 ---
 
 ## NEXT ACTIONS (fresh orchestrator — execute in order)
 
-**Batch C — STORY-083 + STORY-084 MERGED. Next: STORY-085, then STORY-049 → STORY-050.**
+**Batch C — STORY-083 + STORY-084 MERGED. STORY-085 LOCAL-CONVERGED. Next: STORY-085 demos + push + PR, then STORY-049 → STORY-050.**
 
-1. **STORY-085** — Bundled DefaultInlineFormat + PPTX OOXML dog-fooding refactor (slideforge-plugin-api + slideforge-pptx, 8 pts; deps STORY-002/028/037/038). Full per-story delivery flow.
+1. **STORY-085** — LOCAL adversary CONVERGED (9 passes, 7-8-9 strict-CLEAN). Next steps: demo-recorder, push worktree branch, PR via pr-manager. Worktree: `.worktrees/STORY-085`. Code HEAD 29903a1a.
 2. **STORY-049** — Plugin Registry Assembly (root crate, pipeline driver, exposes `build()`; 5 pts) — **GATED on STORY-083 (DONE) + STORY-084 (DONE) + STORY-085 ALL merged**.
 3. **STORY-050** — End-to-End Integration Test Suite — gated on STORY-049.
 4. **Wave 4 gate** after all 21 stories merged (18/21 done; remaining: STORY-085, STORY-049, STORY-050).
@@ -95,7 +95,7 @@ Phase 3, **Wave 4 — 18/21 merged. Batch B COMPLETE. Batch C: STORY-083 + STORY
 | Planning (25 DSL decisions) | DONE 2026-05-24 | q1–q25 docs + 14 research threads + 7/7 spikes resolved |
 | Phase 1: Spec Crystallization | DONE — APPROVED 2026-05-25 | PRD (109 BCs, 15 HS, 4 supplements) + arch (14 ADRs, 15 VPs, 20 crates) + UX spec. 17 passes, 69 findings, 3/3 clean. |
 | Phase 2: Story Decomposition | DONE — APPROVED 2026-05-25 | 85 stories, 21 epics, 6 waves, 511 pts (LESSON-13 reconciliation: +4 stories/+14 pts added 2026-06-04). 22 passes, 96+ findings, 3/3 clean. |
-| Phase 3: TDD Implementation | IN PROGRESS — Waves 1/2/3 GATE PASSED. Wave 4: 18/21 merged. Batch B COMPLETE. Batch C: STORY-083 + STORY-084 MERGED; STORY-085 next. | Per-story delivery |
+| Phase 3: TDD Implementation | IN PROGRESS — Waves 1/2/3 GATE PASSED. Wave 4: 18/21 merged. Batch B COMPLETE. Batch C: STORY-083 + STORY-084 MERGED; STORY-085 LOCAL-CONVERGED (demos+PR pending). | Per-story delivery |
 | Phases 4–7 | NOT STARTED | Holdout / Adversarial / Formal Hardening / Convergence |
 
 ## Wave 4 Story Status
@@ -113,7 +113,7 @@ Phase 3, **Wave 4 — 18/21 merged. Batch B COMPLETE. Batch C: STORY-083 + STORY
 **Batch C (in progress):**
 - STORY-083: Plugin Registry Builder — MERGED PR #57 (5aaa27d2, 2026-06-05) — 6-pass cascade, 3/3 strict-CLEAN
 - STORY-084: Bundled SectionType Implementations — MERGED PR #58 (801f351b, 2026-06-05) — 7-pass cascade, 3/3 strict-CLEAN
-- STORY-085: Bundled DefaultInlineFormat + PPTX dog-fooding (8 pts; deps STORY-002/028/037/038) — NEXT
+- STORY-085: Bundled DefaultInlineFormat + PPTX dog-fooding (8 pts; deps STORY-002/028/037/038) — LOCAL adversary CONVERGED (9 passes, passes 7-8-9 strict-CLEAN per BC-5.39.001). Code HEAD 29903a1a; 3177 tests; all gates GREEN. Demos + push + PR PENDING.
 - STORY-049: Plugin Registry Assembly — root crate pipeline driver (5 pts; gates on 083+084+085)
 - STORY-050: E2E Integration Test Suite (gates on STORY-049)
 **STORY-082** (slide-grouping sections) moved to Wave 5 (human-authorized split from STORY-040)
@@ -127,12 +127,12 @@ Phase 3, **Wave 4 — 18/21 merged. Batch B COMPLETE. Batch C: STORY-083 + STORY
 | Field | Value |
 |-------|-------|
 | **Date** | 2026-06-05 |
-| **Position** | Wave 4: 18/21 merged. Batch B COMPLETE. Batch C: STORY-083 MERGED PR #57 (5aaa27d2) + STORY-084 MERGED PR #58 (801f351b). NEXT: STORY-085, then STORY-049 → STORY-050 → Wave 4 gate. |
+| **Position** | Wave 4: 18/21 merged. Batch B COMPLETE. Batch C: STORY-083 MERGED PR #57 (5aaa27d2) + STORY-084 MERGED PR #58 (801f351b) + STORY-085 LOCAL-CONVERGED (9 passes, 7-8-9 strict-CLEAN; code HEAD 29903a1a; 3177 tests). NEXT: STORY-085 demos + push + PR, then STORY-049 → STORY-050 → Wave 4 gate. |
 | **develop SHA** | `801f351b` (58 merged PRs; origin/develop confirmed) |
 | **Active worktrees** | none |
 | **Open PRs** | 0 |
 | **Workspace crates** | 16 |
-| **Spec deltas this session** | STORY-084 delivered: 7 bundled SectionType impls in slideforge-plugin-api. BC-5.02.001 SectionType surface closed. BC-3.02.001 invariant 4 (notes-exclusion) enforced on both auto types. LESSON-17 added: inverted-Red-Gate anti-pattern. // STORY-085 adversary round 1 (6 findings fixed): F-001 ADR-017 Option A, BC-5.02.001 → v1.4; F-002 AC-005 paper-fix corrected; F-003 byte-identity 12-variant; F-004 HTML escaping BC-3.05.001 → v1.3.6 EC-009/EC-010, VP-053 created; F-005 depth guard; F-006 STORY-049 anchor; F-008 module-boundary fitness. BC-5.02.002 → v1.4. ADR-017 accepted. // STORY-085 adversary round 2: 6 prior findings verified closed; new findings fixed: combined run-property accumulator (no silent drop of nested formatting in any direction, commit d9daad0a), stale docstring corrected, depth guard threaded through render_with_context link path. Spec: AC-006 prose split by variant group (Plain/Bold/Italic byte-identical, 6 richer variants), VP-053 harness field fix (MathNode::inline latex/display/span). HIGH-1 doc-gate prediction was FALSE POSITIVE (cargo doc passes; private-item links unchecked). Convergence: still 0/3 strict-CLEAN (pass 2 had findings; pass 3 pending). // STORY-085 adversary round 3: 3 MED footnote-variant findings fixed in code; tracing-test dev-dep added to story spec Library table (TD-VSDD-059 load-bearing). OBS-4 process-gap captured. Code HEAD 5a99962f; 3161 tests pass. // STORY-085 adversary round 4: all prior findings re-verified closed. I-1 (ADR-017 over-claimed F-006 scope) reconciled via ADR Amendment Log — Question 3 + Consequence #4 + Decision table updated to reflect two-story split (STORY-085=registry-ready, STORY-049=live-resolution). OBS-1 (empty-text Link orphan-rel) fixed in code (75bd321d, rId-count-invariant tests). Code HEAD 75bd321d; 3163 tests pass. Convergence: still 0/3 strict-CLEAN (pass 4 had findings; pass 5 pending). // STORY-085 adversary round 5: all prior findings re-verified closed. F-P5-001 + OBS-P5-001 (orphan-rel drift from non-empty Vec flattening to empty display text) fixed structurally — shared pub fn display_text_is_empty in slideforge-types/src/inline.rs, single SoT for both rId-guard (notes_slide.rs) and hlinkClick-guard (default_formatter.rs). Story File Structure table updated (slideforge-types/src/inline.rs row added). Code HEAD 4283a17c; 3172 tests pass. Convergence: still 0/3 strict-CLEAN (pass 5 had findings; pass 6 pending). |
+| **Spec deltas this session** | STORY-085 LOCAL adversary cascade CONVERGED: 9 passes total; passes 7-8-9 strict-CLEAN (3/3 per BC-5.39.001). Key fixes across passes 1-6: F-001 (ADR-017 Option A, render_with_context), F-002 (AC-005 literal-grep audit), F-003 (12-variant byte-identity), F-004 (HTML escape url/id/latex; BC-3.05.001→v1.3.6; VP-053), F-005 (no silent drop), F-006 (registry-ready, STORY-049 anchor), F-008 (module-boundary test), combined RunProps accumulator, depth guards, footnote [note] + tracing::debug, I-1 (ADR-017 F-006 reconciliation), OBS-1 (orphan-rel via display_text_is_empty), F-P5-001 (shared SoT in slideforge-types), F-085-P6-001 (top-level-only Link registration). Code HEAD 29903a1a; workspace 3177 tests pass; all canonical gates GREEN. Two anchored deferrals recorded (see Decisions Log STORY-085-CONV-2026-06-05): OBS-1 security (CWE-601) anchored to STORY-046 AC-010; OBS-2 process-gap (AC-005 cfg(test) audit nit) anchored to self-improvement epic. STORY-085 status: LOCAL-CONVERGED, demos + push + PR pending. |
 | **factory-artifacts** | PUSHED to remote (origin/factory-artifacts) — human-authorized 2026-06-04. Upstream tracking set. Fresh sessions: clone repo + `git worktree add .factory factory-artifacts`. |
 
 ---
@@ -171,8 +171,9 @@ Phase 3, **Wave 4 — 18/21 merged. Batch B COMPLETE. Batch C: STORY-083 + STORY
 | SEC-037-001: pptx InlineNode::Link (slide body) must adopt `is_safe_link_scheme` from link_safety.rs (SafeUrl guard now EXISTS in slideforge-pptx — wire slide-body Link path). CWE-601. | LOW | pptx link-rendering story / Phase 5 |
 | SafeUrl shared newtype (pptx/pdf/html will hit same docx SEC-001 gap) | cross-exporter | Hardening story before Phase 6 |
 | cold_budget flaky perf test (`slideforge-diagrams::cold_budget_under_200ms`): reproduces on develop HEAD `801f351b` — intermittent CI-red risk (macOS timing jitter); pre-existing, not introduced by STORY-085 | LOW | STORY-080 (maintenance follow-up) |
-| OBS-FU-HTML-REDIR: HTML exporter URL open-redirect (CWE-601) | security | STORY-046 |
+| OBS-FU-HTML-REDIR (OBS-1 from STORY-085): HTML exporter Link/Xref URL scheme allowlist (CWE-601) — ANCHORED to STORY-046 AC-010 (added 2026-06-05). Required security acceptance criterion before STORY-046 ships. | security | STORY-046 AC-010 |
 | E-PAR-021 cosmetic message format (nesting_depth_exceeded_msg raw byte offset) | minor | Message-cleanup follow-up |
+| OBS-2 from STORY-085 (process-gap): AC-005 dog-fooding audit test uses filename/comment-prefix exemptions instead of #[cfg(test)] semantics — robustness nit with no current trigger; could false-positive if a production file gains an inline cfg(test) block with `<a:r` literals. Low priority. | process | self-improvement epic |
 | OBS-FU-P1-A: DSL inner-quote round-trip | minor | Lexer follow-up |
 | OBS-FU-P1-C: Link URL `)` truncation (Wikipedia disambiguation links) | minor | Link-parser follow-up |
 | BC-1.14.001/002 still `subsystem: SS-TBD` | LOW | Next spec-hygiene pass |
@@ -194,6 +195,7 @@ Phase 3, **Wave 4 — 18/21 merged. Batch B COMPLETE. Batch C: STORY-083 + STORY
 
 | Date | ID | Decision |
 |------|-----|---------|
+| 2026-06-05 | STORY-085-CONV | STORY-085 LOCAL adversary cascade CONVERGED. 9 passes total; passes 7-8-9 strict-CLEAN (3/3 per BC-5.39.001). All findings F-001 through F-085-P6-001 closed. Code HEAD 29903a1a; 3177 workspace tests pass; fmt + pedantic clippy + doc + grep-zero + nextest all GREEN (orchestrator-verified). Two anchored deferrals: (1) OBS-1 CWE-601 — DefaultInlineFormat intentionally omits URL scheme filtering (format-agnostic layer); anchored as STORY-046 AC-010 (required security gate before HTML exporter ships); (2) OBS-2 process-gap — AC-005 audit test filename-exemption nit, low priority, anchored to self-improvement epic. STORY-085 status: LOCAL-CONVERGED. Demos + push + PR pending. |
 | 2026-06-05 | STORY-085-R5 | STORY-085 adversary round 5 — all prior findings (F-001 through I-1/OBS-1) re-verified closed. F-P5-001 (orphan-External-relationship invariant: non-empty Vec<InlineNode> that flattens to empty display text causes rId-registration/hlinkClick count mismatch) + OBS-P5-001 (drift cause: rId guard in notes_slide.rs and hlinkClick guard in default_formatter.rs used separate copies of the emptiness predicate): fixed STRUCTURALLY via shared `pub fn display_text_is_empty(nodes: &[InlineNode]) -> bool` in `slideforge-types/src/inline.rs` — single source of truth reachable by both consumers without new dependency edges. Story File Structure table updated to list `crates/slideforge-types/src/inline.rs` (Modify row + justification); Subsystem Anchor Justification prose extended with slideforge-types DAG rationale. Code HEAD 4283a17c; workspace 3172 tests pass. Convergence: still 0/3 strict-CLEAN (pass 5 had findings; pass 6 pending — do NOT mark STORY-085 done). |
 | 2026-06-05 | STORY-085-R4 | STORY-085 adversary round 4 — all prior findings (F-001 through OBS-4) re-verified closed. I-1 (ADR-017 over-claimed F-006 scope as fully delivered in STORY-085): reconciled via ADR text correction — Question 3, F-006 Decision table row, and Consequence #4 updated to accurately describe the intentional two-story split (STORY-085 = registry-ready signature; STORY-049 = live registry resolution). Amendment Log added to ADR-017. OBS-1 (empty-text Link node orphan-rel): fixed in code (commit 75bd321d, guard added to render_with_context Link arm + rId-count-invariant tests). No BC or story-spec files modified. Code HEAD 75bd321d; workspace 3163 tests pass. Convergence: still 0/3 strict-CLEAN (pass 4 had findings; pass 5 pending — do NOT mark STORY-085 done). |
 | 2026-06-05 | STORY-085-R3 | STORY-085 adversary round 3 — 3 MED footnote-variant findings fixed in code: (1) Markdown footnote output corrected to `[note]` per spec (was `[inline body]`); (2) mandated `tracing::debug!("Footnote marker numbering deferred")` deferral log added with load-bearing `tracing-test` assertions (TD-VSDD-059); (3) stale module/test docstrings corrected. OBS-1 baseline last-wins behavior tested and confirmed passing. Spec delta: `tracing-test = "=0.2.5"` dev-dep added to Library & Framework Requirements table in STORY-085. Code HEAD now 5a99962f; workspace 3161 tests pass. Convergence: still 0/3 strict-CLEAN (pass 3 had findings; pass 4 pending — do NOT mark STORY-085 done). Process-gap OBS-4 captured: adversary (Read/Grep/Glob profile) cannot execute cargo gates — LOCAL-pass dispatches must not instruct it to "run gates"; gate-execution-of-record is implementer exit-gate + orchestrator spot-verification (see Open Follow-Ups). |

@@ -72,6 +72,7 @@ The `HtmlExporter` implements the `Exporter` trait from `slideforge-plugin-api`.
 | BC | Title | Covered ACs |
 |----|-------|-------------|
 | BC-4.03.003 | Static HTML Output Passes WCAG AA via axe-core on CI | AC-001 through AC-009 |
+| (security) | Link/Xref URL scheme allowlist — CWE-601 (OBS-1 from STORY-085) | AC-010 |
 
 ## Acceptance Criteria
 
@@ -142,6 +143,31 @@ reaching HTML export). The HTML exporter emits the brand colors as inline CSS
 `color` and `background-color` properties. The axe-core `color-contrast` rule in
 the CI gate confirms 4.5:1 for normal text, 3:1 for large text. If the brand
 passes the compile-time validator, it passes axe-core.
+
+### AC-010: Link/Xref URL scheme allowlist — CWE-601 open-redirect/XSS prevention
+(security acceptance criterion — added 2026-06-05, anchored from STORY-085 OBS-1)
+
+Before rendering any `Link` or `Xref` inline node to an HTML `<a href="...">` attribute,
+the `HtmlExporter` MUST validate the URL scheme against an explicit allowlist
+(`http`, `https`, `mailto`, `tel`). URLs with disallowed schemes (`javascript:`,
+`data:`, `vbscript:`, `blob:`, etc.) MUST be silently dropped (href omitted or element
+rendered as plain text), and a `tracing::warn!` must be emitted with the rejected scheme.
+
+Background: `DefaultInlineFormat` in `slideforge-plugin-api` intentionally does NOT
+perform scheme filtering — it produces format-agnostic output and delegates security
+enforcement to the exporter layer. `slideforge-pptx` implements `is_safe_link_scheme`
+in `link_safety.rs` for OOXML hyperlinks (the PPTX rId path is already guarded).
+`slideforge-html` MUST apply equivalent protection at HTML rendering time. CWE-601
+(Open Redirect) / reflected XSS via `javascript:` href are the relevant attack vectors.
+
+Verification: unit test — construct a `LaidOutSlide` (or inline render context) with
+a `Link` node whose URL is `javascript:alert(1)`. Assert the rendered HTML output
+contains NO `href` attribute (or the element is rendered as `<span>` instead of
+`<a>`). Repeat for `data:text/html,...` and `vbscript:foo`. Assert a `tracing::warn!`
+is emitted for each rejected URL (use `tracing-test = "=0.2.5"` dev-dependency).
+
+Note: `slideforge-pdf` and `slideforge-preview` will require analogous scheme filtering
+when they implement inline node rendering. This AC establishes the pattern for SS-09.
 
 ## Tasks
 

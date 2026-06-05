@@ -8,7 +8,7 @@ wave: 4
 points: 8
 priority: P0
 tdd_mode: strict
-status: draft
+status: local-converged
 behavioral_contracts: [BC-5.02.001, BC-5.02.002, BC-3.05.001]
 verification_properties: []
 nfr_refs: [NFR-021, NFR-022, NFR-023]
