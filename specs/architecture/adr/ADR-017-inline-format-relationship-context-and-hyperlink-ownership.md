@@ -241,21 +241,29 @@ non-OOXML formats, and no existing impls break. Option C is rejected.
 
 ### Question 3: F-006 registry-routing fix
 
-F-006 is independently correct and in-scope-feasible for STORY-085. The fix is:
+F-006 is independently correct. However, the delivered scope is a **two-story split**
+that is anchored and intentional, not a gap:
 
-1. The `PptxExporter` (or `NotesSlideSerializer`) must accept the registered
-   `InlineFormat` from the `PluginRegistry` rather than constructing
-   `DefaultInlineFormat` directly.
-2. The exporter already receives a `PluginRegistry` reference (or can be threaded
-   one) — this is the `default_registry()` pattern from `plugin-architecture.md`.
-3. The call becomes: `registry.lookup_inline_format("default")?.render_with_context(...)`.
+- **STORY-085 (this story):** Makes the notes serializer registry-**ready** by
+  accepting `&dyn InlineFormat` as an injected dependency instead of constructing
+  `DefaultInlineFormat` internally. The pptx export call site
+  (`crates/slideforge-pptx/src/lib.rs`) still passes the bundled `DefaultInlineFormat`
+  ("default") directly, because no assembled `PluginRegistry` exists at that call
+  site until STORY-049.
+- **STORY-049 (Plugin Registry Assembly):** Assembles the `PluginRegistry` and
+  exposes `build()`. Once STORY-049 ships, the exporter call site becomes
+  `registry.lookup_inline_format("default")?.render_with_context(...)` — live
+  registry resolution. STORY-085 explicitly `blocks` STORY-049, making the
+  dependency sequence correct and traceable.
 
-This fix does NOT require a BC amendment and does NOT require human authorization.
-It is a production-grade correctness fix that the implementer can apply in-scope.
+This split does NOT require a BC amendment and does NOT require additional human
+authorization. The registry-ready signature (accepting `&dyn InlineFormat`) is
+sufficient for STORY-085 delivery; the live registry lookup is STORY-049's
+responsibility.
 
 The F-006 fix must be paired with the Option A trait extension — without the context
 parameter, routing through the registry still cannot deliver rIds to the formatter.
-The two are jointly necessary.
+The two are jointly necessary within their respective scopes.
 
 ## Decision
 
@@ -290,7 +298,8 @@ violating this invariant, provided no existing implementors are required to chan
 |------|--------|
 | `InlineRenderContext` struct + `render_with_context` defaulted method in `slideforge-plugin-api/src/traits/inline_format.rs` | Authorized by HG-1 above |
 | `DefaultInlineFormat::render_with_context` — Link + Ooxml arm using supplied rId | Bundled plugin impl; within BC-5.02.001/BC-5.02.002 scope |
-| F-006: Thread the registry-resolved `InlineFormat` into notes serializer instead of direct `DefaultInlineFormat` construction | Production-grade correctness fix; no BC amendment needed |
+| F-006 (partial — STORY-085 scope): Make notes serializer accept `&dyn InlineFormat` (registry-ready signature) instead of constructing `DefaultInlineFormat` directly | Production-grade correctness fix; no BC amendment needed |
+| F-006 (completion — STORY-049 scope): Wire live `registry.lookup_inline_format("default")` at the pptx exporter call site once `PluginRegistry::build()` is available | Deferred to STORY-049 by intentional anchored split; STORY-085 `blocks` STORY-049 |
 | Updating the STORY-085 AC-005 grep test to account for the new dispatch pattern | Test alignment to the agreed architecture |
 
 ## Consequences
@@ -307,8 +316,14 @@ violating this invariant, provided no existing implementors are required to chan
    calls `formatter.render_with_context(node, Ooxml, &ctx)` where `ctx` carries the
    pre-registered rId. The relationship registration (`hlink_urls` + `build_rels()`) stays
    in the exporter — it is not touched by the trait.
-4. F-006 is resolved simultaneously: `formatter` is the registry-resolved instance, not
-   a directly-constructed `DefaultInlineFormat`.
+4. F-006 is resolved in two stages across an anchored story split. STORY-085 delivers
+   the registry-ready signature: `notes_slide.rs` accepts `&dyn InlineFormat` as an
+   injected dependency (not a directly-constructed `DefaultInlineFormat`), making the
+   serializer polymorphic. The pptx exporter call site (`lib.rs`) still passes the
+   bundled `DefaultInlineFormat` directly because no assembled `PluginRegistry` exists
+   at that call site until STORY-049. Full live registry resolution
+   (`registry.lookup_inline_format("default")?.render_with_context(...)`) is delivered
+   in STORY-049 (Plugin Registry Assembly), which STORY-085 explicitly `blocks`.
 5. The AC-005 grep vector confirms zero `<a:r>` / `<a:rPr>` construction in
    `slideforge-pptx/src/` (all construction is in `slideforge-plugin-api/src/inline_formats/`).
 6. No existing `InlineFormat` implementors (current or future third-party) are broken.
@@ -328,6 +343,29 @@ breaking return-type change to `render()` affecting all existing implementations
 no benefit over Option A's simpler additive-defaulted design. Not reconsidered without
 new information.
 
+## Amendment Log
+
+### Amendment 1 — 2026-06-05 (adversary pass 4 finding I-1, MED)
+
+**Finding:** ADR-017 over-claimed F-006 registry-routing scope as fully delivered in
+STORY-085. The original text stated "F-006 is resolved simultaneously" (Consequence #4),
+"F-006 is independently correct and in-scope-feasible for STORY-085" (Question 3), and
+listed F-006 as a single implementer-executable item in the Decision table — all implying
+live `PluginRegistry` resolution at the pptx call site was part of STORY-085 delivery.
+
+**Actual delivered reality (matches STORY-085 story spec lines 158-165 and code):**
+STORY-085 makes the notes serializer registry-ready by accepting `&dyn InlineFormat` as
+an injected dependency. The pptx exporter call site (`crates/slideforge-pptx/src/lib.rs`)
+still passes `DefaultInlineFormat` directly because no assembled `PluginRegistry` exists
+at that call site until STORY-049. This is an intentional, anchored split: STORY-085
+`blocks` STORY-049, whose entire purpose is `PluginRegistry::build()` assembly.
+
+**Correction scope:** Question 3, the F-006 Decision table row, and Consequence #4 were
+updated to accurately describe the two-story split. The core Option A decision, the
+BC-5.02.001 invariant-2 rationale, and the `status: accepted` designation are unchanged.
+
+**No code, story, or BC files were modified as part of this amendment.**
+
 ## References
 
 - BC-5.02.001 v1.3 — invariant 2: "The trait definitions in slideforge-plugin-api are
@@ -338,4 +376,6 @@ new information.
   slideforge-plugin-api; STORY-085 owns the refactor).
 - STORY-085 "Previous Story Intelligence" section — named the two-path choice explicitly:
   "extend trait signature vs URL-as-text fallback."
+- STORY-049 — Plugin Registry Assembly; assembles `PluginRegistry::build()` and completes
+  live registry resolution at the pptx exporter call site (F-006 completion).
 - OOXML spec §12.3.6 — hyperlink relationship type `hyperlink` with `TargetMode="External"`.
