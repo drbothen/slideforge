@@ -106,6 +106,18 @@ The assembly is compile-time verified: if any of the 10 required trait surfaces 
 unregistered when `build()` is called, a `RegistryError::MissingSurface { surface }` is
 returned (not a panic).
 
+`build()` is the pipeline driver per ADR-016 Decision 3. It runs the stages in order:
+parse (`slideforge-syntax`) → eval (`slideforge-eval`) → **validate** → layout
+(`slideforge-layout`) → export (via the registered `Exporter`). The validate stage
+iterates all registered `Validator` implementations on the semantic `Deck` (pre-layout)
+via `registry.iter_validators()` on the public API (see `crates/slideforge-plugin-api/src/registry.rs`).
+`BuildOptions.strict` controls error disposition: `strict=true` (default) causes
+`BuildError::ValidationFailed { diagnostics }` on any validation errors; `strict=false`
+(`--warn-only` CLI flag) logs warnings and proceeds. Plugin-surface calls
+(`BrandProvider::load`, `Validator::validate`, `Exporter::export`) are all routed through
+the `catch_unwind` dispatch boundary in `crates/slideforge/src/dispatch.rs` (H1 — see
+AC-008).
+
 ## Behavioral Contracts
 
 | BC | Title | Covered ACs |
@@ -193,10 +205,18 @@ The test verifies this compiles and the minimal plugin can be registered in a
 If a registered plugin implementation panics during execution, the panic is caught
 at the plugin dispatch boundary (using `std::panic::catch_unwind`) and returned as
 `Err(PluginError::PluginPanic { plugin_name, message })`. The `slideforge` process
-does not crash. Verified by unit test using a test plugin that panics. Note: the
-`catch_unwind` in `crates/slideforge/src/dispatch.rs` is the only PRODUCTION use
-of `catch_unwind`; existing test-only uses in `slideforge-eval/tests/bleed_tests.rs`
-and `slideforge-diagrams/src/normalize.rs` (inside `#[cfg(test)]` contexts) are not
+does not crash. Verified by unit test using a test plugin that panics.
+
+`catch_unwind` is genuinely load-bearing: it is wired into `build()`'s plugin dispatch
+path in `crates/slideforge/src/dispatch.rs` (not only into unit tests). Every
+`BrandProvider::load`, `Validator::validate`, and `Exporter::export` call in `build()`
+goes through this boundary. `catch_unwind` is only effective when the process's panic
+strategy is `unwind`; `panic = "abort"` silently disables it and causes process
+termination on plugin panic. Therefore `[profile.release]` and `[profile.dist]` in the
+workspace root `Cargo.toml` MUST set `panic = "unwind"` (see Architecture Compliance
+Rules and Forbidden Dependencies for the binding enforcement rule). Note: existing
+test-only uses of `catch_unwind` in `slideforge-eval/tests/bleed_tests.rs` and
+`slideforge-diagrams/src/normalize.rs` (inside `#[cfg(test)]` contexts) are not
 production code and are not affected by this constraint.
 
 ## Tasks
@@ -222,7 +242,10 @@ production code and are not affected by this constraint.
 - [ ] Create `crates/slideforge/src/error.rs`:
   - `PluginError` enum (root-crate-specific error types)
   - `BuildError` enum wrapping all pipeline errors (RegistryError, parse, eval, layout,
-    export)
+    export); variants carry structured diagnostics with file:line:col spans + hints:
+    `ParseFailed { diagnostics: Vec<Diagnostic>, count: usize }`,
+    `EvalFailed { diagnostics: Vec<Diagnostic>, count: usize }`,
+    `ValidationFailed { diagnostics: Vec<Diagnostic> }` — not raw counts alone
   - Note: `RegistryError` is defined in `slideforge-plugin-api` and re-exported here;
     not redefined
 - [ ] Create `crates/slideforge/src/dispatch.rs`:
@@ -275,6 +298,17 @@ replaced by the ADR-016 formulation (see Forbidden Dependencies section).
    — it is the plugin dispatch boundary. Test-only uses of `catch_unwind` exist in
    `slideforge-eval/tests/bleed_tests.rs` and inside `#[cfg(test)]` gates in
    `slideforge-diagrams/src/normalize.rs`; those are test code and do not conflict.
+4. **`panic = "unwind"` in shipped profiles (BC-5.02.001 EC-003, binding)**:
+   `[profile.release]` and `[profile.dist]` in the workspace root `Cargo.toml` MUST
+   declare `panic = "unwind"`. Setting either profile to `panic = "abort"` silently
+   disables `catch_unwind` and causes plugin panics to kill the process — a direct
+   violation of AC-008 / BC-5.02.001 EC-003. This is a CI-enforced build-time
+   constraint: any PR that changes these profiles to `abort` MUST be blocked.
+5. **`iter_validators()` on public API only**: The validate stage in `build()` must
+   iterate registered `Validator` implementations via `registry.iter_validators()` on
+   the `PluginRegistry` public API (defined in `slideforge-plugin-api/src/registry.rs`).
+   Direct field access or `pub(crate)` shortcuts into `PluginRegistry` internals from
+   the root crate are forbidden.
 
 ## Library & Framework Requirements
 
@@ -283,23 +317,27 @@ replaced by the ADR-016 formulation (see Forbidden Dependencies section).
 | All plugin workspace crates | workspace | Plugin implementations to register |
 | `slideforge-plugin-api` | workspace | PluginRegistry, all trait surfaces |
 | `thiserror` | `=2.0.18` | Error enums |
+| `tracing` | workspace | Structured pipeline logging (info/warn/error spans in build()) |
 
 ## File Structure Requirements
 
 | File | Action | Purpose |
 |------|--------|---------|
-| `crates/slideforge/Cargo.toml` | Create (or already exists as stub) | All plugin deps |
+| `crates/slideforge/Cargo.toml` | Create (or already exists as stub) | All plugin deps; add `tracing` dep |
 | `crates/slideforge/src/lib.rs` | Create | Public API + re-exports |
 | `crates/slideforge/src/registry.rs` | Create | register_bundled_plugins() |
 | `crates/slideforge/src/error.rs` | Create | RegistryError, PluginError, BuildError |
 | `crates/slideforge/src/dispatch.rs` | Create | catch_unwind plugin dispatch wrapper |
 | `crates/slideforge/tests/external_plugin_test.rs` | Create | Dog-fooding test |
+| `crates/slideforge-plugin-api/src/registry.rs` | Modify | Add `iter_validators()` introspection method so the root crate's `build()` validate stage can iterate all registered `Validator` implementations via the public API — no private cross-crate access permitted (Architecture Compliance Rule 5) |
+| `Cargo.toml` (workspace root) | Modify | Set `[profile.release]` and `[profile.dist]` `panic = "unwind"` so `catch_unwind` plugin-panic isolation (BC-5.02.001 EC-003 / AC-008) is effective in all shipped builds; `panic = "abort"` in any shipped profile silently disables catch_unwind and is forbidden (Architecture Compliance Rule 4) |
+| `crates/slideforge/Cargo.toml` | Modify | Add `tracing` dep (structured pipeline logging in `build()`) |
 
 ## Token Budget Estimate
 
 | Component | Estimated Tokens |
 |-----------|-----------------|
-| This story spec | ~3,000 |
+| This story spec | ~3,500 |
 | BC-5.02.001 | ~1,200 |
 | BC-5.02.002 | ~1,000 |
 | ADR-016 (Decisions 1-3) | ~700 |
@@ -308,10 +346,11 @@ replaced by the ADR-016 formulation (see Forbidden Dependencies section).
 | STORY-084: SectionType impls (public API surface) | ~600 |
 | STORY-085: DefaultInlineFormat (public API surface) | ~600 |
 | Each Wave 4 exporter's public API (4 × 400) | ~1,600 |
+| BC files (2 BCs) | ~2,200 |
 | Test files to write | ~1,500 |
-| **Total** | **~12,500** |
+| **Total** | **~15,200** |
 
-Context budget: ~12% of a 100k-token context window. Within limit for a 5-point story.
+Context budget: ~15% of a 100k-token context window. Within limit for a 5-point story.
 
 ## Test Strategy
 
