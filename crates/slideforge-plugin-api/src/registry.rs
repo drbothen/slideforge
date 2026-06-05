@@ -591,6 +591,20 @@ impl PluginRegistry {
             .map(|p| p.as_ref() as &dyn Validator)
     }
 
+    /// Iterate over all registered [`Validator`] plugins.
+    ///
+    /// Used by the pipeline to run every registered validator against the
+    /// semantic [`slideforge_types::Deck`] IR after evaluation. Returns
+    /// validators in registration order (insertion order is preserved).
+    ///
+    /// ## Traceability
+    ///
+    /// - ADR-016 Decision 3: validate stage in the pipeline
+    /// - STORY-049 C3: validate stage + strict mode
+    pub fn iter_validators(&self) -> impl Iterator<Item = &dyn Validator> {
+        self.validators.iter().map(|p| p.as_ref() as &dyn Validator)
+    }
+
     // ──────────────────────────────────────────────────────────────────────────
     // Surface 6: MathRenderer
     // ──────────────────────────────────────────────────────────────────────────
