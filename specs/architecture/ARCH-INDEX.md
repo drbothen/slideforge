@@ -59,8 +59,8 @@ axum process but this is a local development feature, not a deployed service.
 | SS-11 | Diagrams | slideforge-diagrams | Effectful shell (font DB scan). Mostly pure. |
 | SS-12 | Charts | slideforge-charts | Pure core. plotters SVG generation. |
 | SS-13 | Math | slideforge-math | Pure core. LaTeX transformation. |
-| SS-14 | Plugin API | slideforge-plugin-api | Pure types. 10 trait surfaces. |
-| SS-15 | IR Types + Slide Type Impls | slideforge-types | Pure types. Hash + Eq + Clone on all. Includes 31 SlideType trait implementations as a logical module within the crate. |
+| SS-14 | Plugin API | slideforge-plugin-api | Pure types. 10 trait surfaces. Owns bundled SlideType impls (`src/slide_types/`), SectionType impls (`src/section_types/`), and InlineFormat impls (`src/inline_formats/`). PluginRegistryBuilder + RegistryError live here (ADR-016). |
+| SS-15 | IR Types | slideforge-types | Pure types. Hash + Eq + Clone on all. Deck, LaidOutDeck, Brand, Value. SlideType trait impls live in slideforge-plugin-api (see SS-14). |
 | SS-16 | Package Mgmt | slideforge-package | Effectful shell. Git + sf.lock. |
 | SS-17 | Workspace Config | slideforge-config | Effectful shell. File I/O only. |
 | SS-18 | CLI Orchestrator | slideforge-cli | Effectful shell. All lifecycle I/O. |
@@ -68,10 +68,12 @@ axum process but this is a local development feature, not a deployed service.
 > **Note on SS-ID vs crate counts:** The Subsystem Registry lists 18 SS-IDs. The Cargo
 > workspace contains 20 crates. The discrepancy is accounted for by: (1) `slideforge-html`
 > (the HTML exporter) shares SS-09 with `slideforge-preview` — both are HTML/preview
-> surface concerns; (2) the root `slideforge` crate has no SS-ID because it is a thin
-> re-export facade that assembles the plugin registry from the subsystem crates and
-> exposes the public library API. No code lives in the root crate beyond registry
-> construction. Total workspace crates: 20.
+> surface concerns; (2) the root `slideforge` crate has no SS-ID because it is the
+> pipeline driver crate — it assembles the plugin registry and exposes the public
+> `build(source, options) -> Result<BuildOutput, BuildError>` library API. No plugin
+> logic lives in the root crate; pipeline wiring via `build()` is permitted. All
+> cross-crate plugin interaction goes through `Box<dyn Trait>` dispatch — no
+> internal-function calls across crate boundaries (ADR-016). Total workspace crates: 20.
 
 ---
 
@@ -112,6 +114,8 @@ axum process but this is a local development feature, not a deployed service.
 | ADR-012 | Error accumulation and miette rendering | Accepted |
 | ADR-013 | Integer EMU coordinate system | Accepted |
 | ADR-014 | Mermaid via mermaid-rs-renderer | Accepted |
+| ADR-015 | PPTX brand rendering boundary | Accepted |
+| ADR-016 | Plugin registry Builder + surface ownership + root-crate pipeline driver | Accepted |
 
 ---
 

@@ -9,8 +9,8 @@ traces_to:
   - .factory/stories/epics.md
   - .factory/stories/dependency-graph.md
   - .factory/stories/wave-schedule.md
-total_stories: 82
-stories_written: 82
+total_stories: 85
+stories_written: 85
 stories_ready: 0
 stories_in_progress: 0
 stories_merged: 54
@@ -18,7 +18,7 @@ stories_merged: 54
 
 # STORY-INDEX — slideforge v1.0
 
-> Authoritative index of all 82 stories across 6 waves and 21 epics.
+> Authoritative index of all 85 stories across 6 waves and 21 epics.
 > Update `status` and `merged_sha` fields as stories progress.
 > Story files live in `.factory/stories/stories/STORY-NNN-[short].md`.
 >
@@ -33,10 +33,10 @@ stories_merged: 54
 | Wave 1 | 14 | 0 | 0 | 0 | 14 | 0 |
 | Wave 2 | 7 | 0 | 0 | 0 | 7 | 0 |
 | Wave 3 | 17 | 0 | 0 | 0 | 17 | 0 |
-| Wave 4 | 18 | 2 | 0 | 0 | 16 | 0 |
+| Wave 4 | 21 | 5 | 0 | 0 | 16 | 0 |
 | Wave 5 | 20 | 20 | 0 | 0 | 0 | 0 |
 | Wave 6 | 6 | 6 | 0 | 0 | 0 | 0 |
-| **Total** | **82** | **28** | **0** | **0** | **54** | **0** |
+| **Total** | **85** | **31** | **0** | **0** | **54** | **0** |
 
 ---
 
@@ -105,7 +105,7 @@ stories_merged: 54
 
 ---
 
-## Wave 4: Exporters + Registry (18 stories)
+## Wave 4: Exporters + Registry (21 stories)
 
 | Story ID | Epic | Title | BCs | Priority | Points | tdd_mode | Status |
 |----------|------|-------|-----|---------|--------|---------|--------|
@@ -120,6 +120,9 @@ stories_merged: 54
 | [STORY-043](stories/STORY-043-pdf-core-backend.md) | EPIC-13 | PDF Core: pdf-writer + krilla + SlideTagEngine | BC-4.03.002 | P0 | 8 | strict | merged |
 | [STORY-044](stories/STORY-044-pdf-coordinate-mapping.md) | EPIC-13 | PDF: EMU-to-PDF Coordinate Mapping + Y-Axis Flip | BC-4.03.005 | P0 | 5 | strict | merged |
 | [STORY-045](stories/STORY-045-pdf-ua1-tagging-verapdf.md) | EPIC-13 | PDF: PDF/UA-1 Tagging + veraPDF CI Gate | BC-4.03.001 | P0 | 8 | strict | merged |
+| [STORY-083](stories/STORY-083-plugin-registry-builder.md) | EPIC-21 | Plugin Registry Builder + Surface Enforcement | BC-5.02.001 | P0 | 3 | strict | draft |
+| [STORY-084](stories/STORY-084-bundled-section-types.md) | EPIC-21 | Bundled SectionType Implementations | BC-5.02.001 | P0 | 3 | strict | draft |
+| [STORY-085](stories/STORY-085-bundled-inline-formats.md) | EPIC-21 | Bundled DefaultInlineFormat + PPTX OOXML Dog-Fooding Refactor | BC-5.02.001, BC-5.02.002 | P0 | 8 | strict | draft |
 | [STORY-049](stories/STORY-049-plugin-registry-assembly.md) | EPIC-21 | Plugin Registry Assembly (root crate) | BC-5.02.001-002 | P0 | 5 | strict | draft |
 | [STORY-050](stories/STORY-050-e2e-integration-tests.md) | EPIC-21 | End-to-End Integration Test Suite | BC-5.02.001-002 | P0 | 8 | strict | draft |
 | [STORY-073](stories/STORY-073-bullets-layout.md) | EPIC-07 | Layout: ContentBlock::Bullets → FrameContent::TextRun frame generation | BC-3.05.001 | P1 | 5 | strict | merged |
@@ -128,7 +131,7 @@ stories_merged: 54
 | [STORY-077](stories/STORY-077-section-block-ir-extension.md) | EPIC-18 | SectionBlock IR Extension: FieldValue body + section-level register routing + inline-markup parser | BC-3.02.002, BC-1.14.003 | P0 | 13 | strict | merged |
 | [STORY-078](stories/STORY-078-parser-section-block-syntax.md) | EPIC-02 | Parser: section block syntax (section &lt;type&gt;: ... with sub-blocks) | BC-3.02.002 | P0 | 5 | strict | merged |
 
-**Wave 4 total points: 115**
+**Wave 4 total points: 129**
 
 ---
 
@@ -193,10 +196,10 @@ All previously Wave TBD stories have been assigned waves per human approval 2026
 | Wave 1 | 14 | 85 | 6.1 |
 | Wave 2 | 7 | 41 | 5.9 |
 | Wave 3 | 17 | 100 | 5.9 |
-| Wave 4 | 18 | 115 | 6.4 |
+| Wave 4 | 21 | 129 | 6.1 |
 | Wave 5 | 20 | 114 | 5.7 |
 | Wave 6 | 6 | 42 | 7.0 |
-| **Total** | **82** | **497** | **6.1** |
+| **Total** | **85** | **511** | **6.0** |
 
 > No story exceeds 13 points. STORY-023 (brand synthesis — 13 pts), STORY-037
 > (PPTX core serialization — 13 pts), STORY-077 (SectionBlock IR + inline-markup parser
@@ -257,6 +260,17 @@ All previously Wave TBD stories have been assigned waves per human approval 2026
 > Half B owned by STORY-082 (v1.0, Wave 5). BC-1.14.003 non-interference constraint
 > explicitly added to STORY-082 ACs. Multi-renderer parity exception (PPT-only element)
 > human-accepted 2026-06-04.
+>
+> Wave 4 further expanded from 18 → 21 stories (115 → 129 pts) per LESSON-13
+> reconciliation (human-approved 2026-06-04): Three prerequisite stories added to EPIC-21
+> Wave 4 Batch C before STORY-049: STORY-083 (Plugin Registry Builder + Surface
+> Enforcement, 3 pts, P0, slideforge-plugin-api — closes BC-5.02.001 invariant 3 gap in
+> STORY-002 delivered code), STORY-084 (Bundled SectionType Implementations, 3 pts, P0,
+> slideforge-plugin-api — executive_summary, risk_register, + 5 manual-only types),
+> STORY-085 (Bundled DefaultInlineFormat + PPTX OOXML Dog-Fooding Refactor, 8 pts, P0,
+> slideforge-plugin-api + slideforge-pptx — all 12 InlineNode variants × 3 formats + BC-
+> 5.02.002 EC-004 refactor). STORY-049 gains 3 new depends_on entries. ADR-016 governs.
+> Total workspace: 82 → 85 stories, 497 → 511 pts.
 
 ---
 
@@ -297,7 +311,7 @@ to stay within context budget:
 - **Burst E:** STORY-018 through STORY-025 (Wave 3, EPIC-05 + EPIC-06)
 - **Burst F:** STORY-026 through STORY-034 (Wave 3, EPIC-07 + EPIC-10-12)
 - **Burst G:** STORY-035 through STORY-042 (Wave 4, EPIC-18 + EPIC-08 + EPIC-09)
-- **Burst H:** STORY-043 through STORY-045, STORY-049, STORY-050 (Wave 4, EPIC-13 + EPIC-21)
+- **Burst H:** STORY-043 through STORY-045 (Wave 4, EPIC-13); then STORY-083, STORY-084, STORY-085 (Wave 4 Batch C prerequisites — 083 parallel-safe, 084/085 parallel); then STORY-049, STORY-050
 - **Burst I:** STORY-046 through STORY-048 + STORY-055 through STORY-059 (Wave 5, EPIC-14 + EPIC-15)
 - **Burst J:** STORY-060 through STORY-065 (Wave 5, EPIC-16 + EPIC-17)
 - **Burst K:** STORY-066 through STORY-071 (Wave 6, EPIC-20)

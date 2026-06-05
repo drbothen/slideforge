@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.1"
+version: "1.3"
 status: draft
 producer: product-owner
 timestamp: 2026-05-24T00:00:00
@@ -14,7 +14,15 @@ subsystem: SS-TBD
 capability: CAP-021
 lifecycle_status: active
 introduced: v1.0.0
-modified: []
+modified:
+  - version: "1.3"
+    date: 2026-06-04
+    author: product-owner
+    reason: "M-1 staleness fix (STORY-049 audit): correct SectionType count from ~15 to 7 bundled implementations (per CANONICAL_MANUAL_SECTION_TYPES in deck.rs) and InlineFormat count from 11 to 12 variants (Plain, Bold, Italic, Code, Link, Math, Footnote, Xref, Superscript, Subscript, Strikethrough, Highlight)."
+  - version: "1.2"
+    date: 2026-06-04
+    author: product-owner
+    reason: "LESSON-13 reconciliation (STORY-049): Strengthen Invariant 3 — make registry enforcement unambiguous: specifies all 10 surfaces are required, enforcement point is registry finalization (PluginRegistryBuilder::build()), and the error is typed RegistryError::MissingSurface { surface } not a panic (Decision 1 of 3 approved 2026-06-04)."
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -52,8 +60,8 @@ SectionType, InlineFormat.
    - MathRenderer: pulldown-latex + KaTeX math renderer
    - BrandProvider: file-based brand provider
    - SlideType: all 31 slide type implementations
-   - SectionType: all ~15 auto-generated section types
-   - InlineFormat: all 11 inline formatting types
+   - SectionType: 7 bundled implementations (executive_summary, risk_register, methodology, scope, approval, appendix, glossary — per CANONICAL_MANUAL_SECTION_TYPES in deck.rs)
+   - InlineFormat: all 12 InlineNode variants (Plain, Bold, Italic, Code, Link, Math, Footnote, Xref, Superscript, Subscript, Strikethrough, Highlight)
 3. Each bundled plugin implementation compiles using only the public API exposed by
    `slideforge-plugin-api` — no direct imports of non-plugin-api crate internals.
 4. `cargo test --workspace` passes for all plugin implementations.
@@ -64,8 +72,22 @@ SectionType, InlineFormat.
    this BC and BC-INDEX.
 2. The trait definitions in `slideforge-plugin-api` are the contracts — no alternate
    unstable API exists.
-3. The plugin registry (at runtime) maps each trait to its registered bundled
-   implementations; unregistered surfaces cause an initialization error (not a silent no-op).
+3. **Registry finalization enforces all-10-surfaces coverage with a typed error.**
+   All 10 surfaces (DataSource, Exporter, ChartRenderer, DiagramRenderer, Validator,
+   MathRenderer, BrandProvider, SlideType, SectionType, InlineFormat) are "required"
+   surfaces. The enforcement point is `PluginRegistryBuilder::build()` — the call that
+   converts a builder-in-progress into a usable `PluginRegistry`. If any required surface
+   has zero registered implementations at that point, `build()` MUST return
+   `Err(RegistryError::MissingSurface { surface: &'static str })` naming the first
+   unregistered surface. A silent no-op (returning an empty-surface registry without error)
+   is a contract violation. A panic is a contract violation. The error MUST be a typed
+   `RegistryError` variant so callers can match on it programmatically.
+   Precondition on builder: zero or more `register_*` calls may precede `build()`.
+   Postcondition on `build()`: returns `Ok(PluginRegistry)` only when all 10 surfaces have
+   at least one registration; returns `Err(RegistryError::MissingSurface { surface })` otherwise.
+   Test: `PluginRegistryBuilder::default().build()` (no registrations) MUST return
+   `Err(RegistryError::MissingSurface { .. })`.
+   Test: `PluginRegistryBuilder` with all 10 surfaces registered MUST return `Ok(..)`.
 
 ## Edge Cases
 

@@ -11,7 +11,7 @@ traces_to:
   - .factory/specs/behavioral-contracts/BC-INDEX.md
 topological_sort: validated
 cycle_check: PASS
-total_stories: 82
+total_stories: 85
 ---
 
 # Story Dependency Graph — slideforge v1.0
@@ -182,7 +182,10 @@ canonical — individual story files use these exact IDs.
 | STORY-043 | EPIC-13 | PDF Core: pdf-writer + krilla + SlideTagEngine | STORY-026, STORY-034 | STORY-044, STORY-045, STORY-049, STORY-050 |
 | STORY-044 | EPIC-13 | PDF: EMU-to-PDF Coordinate Mapping + Y-Axis Flip | STORY-043 | STORY-045, STORY-049, STORY-050 |
 | STORY-045 | EPIC-13 | PDF: PDF/UA-1 Tagging + veraPDF CI Gate | STORY-043, STORY-044 | STORY-049, STORY-050 |
-| STORY-049 | EPIC-21 | Plugin Registry Assembly (root crate) | STORY-002, STORY-003, STORY-015, STORY-016, STORY-017, STORY-018, STORY-019, STORY-020, STORY-021, STORY-022, STORY-023, STORY-029, STORY-031, STORY-033, STORY-034, STORY-037, STORY-038, STORY-039, STORY-040, STORY-041, STORY-042, STORY-043, STORY-044, STORY-045 | STORY-050 |
+| STORY-083 | EPIC-21 | Plugin Registry Builder + Surface Enforcement | STORY-002 | STORY-049 |
+| STORY-084 | EPIC-21 | Bundled SectionType Implementations | STORY-002, STORY-042, STORY-077 | STORY-049 |
+| STORY-085 | EPIC-21 | Bundled DefaultInlineFormat + PPTX OOXML Dog-Fooding Refactor | STORY-002, STORY-028, STORY-037, STORY-038 | STORY-049 |
+| STORY-049 | EPIC-21 | Plugin Registry Assembly (root crate) | STORY-002, STORY-003, STORY-015, STORY-016, STORY-017, STORY-018, STORY-019, STORY-020, STORY-021, STORY-022, STORY-023, STORY-029, STORY-031, STORY-033, STORY-034, STORY-037, STORY-038, STORY-039, STORY-040, STORY-041, STORY-042, STORY-043, STORY-044, STORY-045, STORY-083, STORY-084, STORY-085 | STORY-050 |
 | STORY-050 | EPIC-21 | End-to-End Integration Test Suite (all formats, all slide types) | STORY-049 | STORY-055 |
 
 ### Wave 5 Stories (depend on Wave 4)
@@ -263,7 +266,7 @@ canonical — individual story files use these exact IDs.
 | STORY-036 | EPIC-18 | register-no-bleed-invariant | 4 | P0 | 5 |
 | STORY-037 | EPIC-08 | pptx-core-serialization | 4 | P0 | 13 |
 | STORY-038 | EPIC-08 | pptx-layout-compliance | 4 | P0 | 8 |
-| STORY-039 | EPIC-08 | pptx-a11y-metadata | 4 | P0 | 5 |
+| STORY-039 | EPIC-08 | pptx-a11y-metadata | 4 | P0 | 8 |
 | STORY-040 | EPIC-08 | pptx-notes-sections-masters | 4 | P0 | 3 |
 | STORY-041 | EPIC-09 | docx-core-serialization | 4 | P0 | 8 |
 | STORY-042 | EPIC-09 | docx-auto-sections | 4 | P0 | 5 |
@@ -301,12 +304,15 @@ canonical — individual story files use these exact IDs.
 | STORY-074 | EPIC-07 | brand-em-sizing | 5 | P2 | 3 |
 | STORY-075 | EPIC-06 | brand-loader-footer-detection | 4 | P1 | 3 |
 | STORY-076 | EPIC-06 | brand-srgbclr-transform-extraction | 4 | P1 | 3 |
-| STORY-077 | EPIC-18 | section-block-ir-extension | 4 | P0 | 8 |
+| STORY-077 | EPIC-18 | section-block-ir-extension | 4 | P0 | 13 |
 | STORY-078 | EPIC-02 | parser-section-block-syntax | 4 | P0 | 5 |
 | STORY-079 | EPIC-12 | diagrams-svg-dos-hardening | 5 | P2 | 3 |
 | STORY-080 | EPIC-19 | deflake-cross-platform-tests | 5 | P2 | 3 |
 | STORY-081 | EPIC-18 | slide-level-inline-markup | 5 | P0 | 13 |
 | STORY-082 | EPIC-08 | pptx-slide-sections | 5 | P0 | 5 |
+| STORY-083 | EPIC-21 | plugin-registry-builder | 4 | P0 | 3 |
+| STORY-084 | EPIC-21 | bundled-section-types | 4 | P0 | 3 |
+| STORY-085 | EPIC-21 | bundled-inline-formats | 4 | P0 | 8 |
 
 > Note: Stories STORY-051 through STORY-054 are the EPIC-19 CI stories (Wave 1).
 > Stories STORY-055 through STORY-059 are EPIC-15 CLI stories (Wave 5).
@@ -344,8 +350,10 @@ Wave 4 (prereqs all in Waves 1-3):
   STORY-037, STORY-038, STORY-039, STORY-040,   ← EPIC-08
   STORY-041, STORY-042,                         ← EPIC-09
   STORY-043, STORY-044, STORY-045,              ← EPIC-13
-  STORY-049, STORY-050,                         ← EPIC-21
-  STORY-073, STORY-075, STORY-076               ← EPIC-06/07 (pulled-in P1)
+  STORY-073, STORY-075, STORY-076,              ← EPIC-06/07 (pulled-in P1)
+  STORY-078,                                    ← EPIC-02 (Batch A prerequisite)
+  STORY-083, STORY-084, STORY-085,              ← EPIC-21 Batch C prerequisites (LESSON-13)
+  STORY-049, STORY-050                          ← EPIC-21 (depend on 083+084+085)
 
 Wave 5 (prereqs all in Waves 1-4):
   STORY-046, STORY-047, STORY-048,              ← EPIC-14
@@ -459,8 +467,8 @@ its dependencies. The dependency graph is a DAG.
 | BC-5.01.003 | STORY-017 | Full |
 | BC-5.01.004 | STORY-017 | Full |
 | BC-5.01.005 | STORY-017, STORY-039 | Full |
-| BC-5.02.001 | STORY-002, STORY-049 | Full |
-| BC-5.02.002 | STORY-002, STORY-049 | Full |
+| BC-5.02.001 | STORY-002, STORY-083, STORY-084, STORY-085, STORY-049 | Full |
+| BC-5.02.002 | STORY-002, STORY-085, STORY-049 | Full |
 | BC-5.03.001 | STORY-060 | Full |
 | BC-5.03.002 | STORY-061 | Full |
 | BC-5.03.003 | STORY-060 | Full |

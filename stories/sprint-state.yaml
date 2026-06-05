@@ -27,8 +27,8 @@ wave_3_gate_adversary_clean_at: "6/7/8"
 wave_3_gate_holdout_must_pass: "5/5 PASS"
 wave_3_gate_tests: 2584
 wave_4_started: 2026-05-31
-wave_4_total_stories: 18
-wave_4_total_points: 115
+wave_4_total_stories: 21
+wave_4_total_points: 129
 wave_4_batch_a:
   stories: [STORY-035, STORY-036, STORY-043, STORY-044, STORY-045, STORY-073, STORY-075, STORY-076, STORY-077, STORY-078]
   execution: parallel
@@ -41,10 +41,11 @@ wave_4_batch_b:
   chains: ["STORY-037→038→039→040", "STORY-041→042"]
   prerequisite: Batch A gate check
 wave_4_batch_c:
-  stories: [STORY-049, STORY-050]
+  stories: [STORY-083, STORY-084, STORY-085, STORY-049, STORY-050]
   execution: sequential
-  chains: ["STORY-049→050"]
+  chains: ["STORY-083 independent (dep: STORY-002 only)", "STORY-084 (dep: STORY-002+042+077)", "STORY-085 (dep: STORY-002+028+037+038)", "083+084+085→STORY-049→STORY-050"]
   prerequisite: Batch B gate check
+  lesson_13_note: "STORY-083/084/085 added 2026-06-04 per LESSON-13 reconciliation (ADR-016). STORY-083 and STORY-084+085 may execute in parallel after Batch B gate (083 has shortest dep chain; 084 needs 042+077 which are Batch B; 085 needs 037+038 which are Batch B). STORY-049 gates on all three."
 wave_4_pulled_in_p1: [STORY-073, STORY-075, STORY-076]
 wave_4_deferred_p2_to_wave5: [STORY-072, STORY-074]
 wave_4_bc_deltas: "BC-2.01.001 v1.1→v1.2; BC-2.01.003 v1.8→v1.9; error-taxonomy v2.2→v2.3"
@@ -473,19 +474,50 @@ stories:
     adversary_pass_1: "3 CRIT + 3 HIGH + 2 MED — all fixed in pass-1 fix-burst (95 tests pass); pushed to feature/S-045 ~0e01c254"
     worktree: ".worktrees/STORY-045 (feature/S-045)"
     notes: "PDF/UA-1 Full Compliance (scope expanded by human 2026-06-01 — story v1.1, 8 pts, BC-4.03.001 v1.3). AC-010..AC-013 added. Pass-1 fixes: CI nextest flag; CI runs ac013_verapdf_full_compliance; PdfExportError::ValidationFailed; src/outline.rs build_outline_entries; source_index/page_idx invariant; deterministic font path; /Lang-absent fatal under UA1; structural outline assertions. NEXT: adversary pass 2."
+  STORY-083:
+    status: not-started
+    wave: 4
+    batch: C
+    priority: P0
+    points: 3
+    depends_on: [STORY-002]
+    blocks: [STORY-049]
+    notes: "Plugin Registry Builder + Surface Enforcement; extends slideforge-plugin-api/src/registry.rs with PluginRegistryBuilder, RegistryError::MissingSurface, surface_count(), surface_names(); closes BC-5.02.001 invariant 3 gap in STORY-002 delivered code; LESSON-13/ADR-016 Decision 1"
+  STORY-084:
+    status: not-started
+    wave: 4
+    batch: C
+    priority: P0
+    points: 3
+    depends_on: [STORY-002, STORY-042, STORY-077]
+    blocks: [STORY-049]
+    notes: "Bundled SectionType Implementations; new slideforge-plugin-api/src/section_types/ module; 7 bundled impls (executive_summary, risk_register, methodology, scope, approval, appendix, glossary); LESSON-13/ADR-016 Decision 2"
+  STORY-085:
+    status: not-started
+    wave: 4
+    batch: C
+    priority: P0
+    points: 8
+    depends_on: [STORY-002, STORY-028, STORY-037, STORY-038]
+    blocks: [STORY-049]
+    notes: "Bundled DefaultInlineFormat + PPTX OOXML Dog-Fooding Refactor; new slideforge-plugin-api/src/inline_formats/ module (12 InlineNode variants x 3 formats); refactors slideforge-pptx/src/notes_slide.rs to route through InlineFormat trait (BC-5.02.002 EC-004); grep-zero architectural test; LESSON-13/ADR-016 Decision 2+3"
   STORY-049:
     status: not-started
     wave: 4
     batch: C
     priority: P0
     points: 5
-    notes: "Plugin Registry Assembly; depends on Batch B; chain: STORY-049→050"
+    depends_on: [STORY-002, STORY-003, STORY-015, STORY-016, STORY-017, STORY-018, STORY-019, STORY-020, STORY-021, STORY-022, STORY-023, STORY-029, STORY-031, STORY-033, STORY-034, STORY-037, STORY-038, STORY-039, STORY-040, STORY-041, STORY-042, STORY-043, STORY-044, STORY-045, STORY-083, STORY-084, STORY-085]
+    blocks: [STORY-050]
+    notes: "Plugin Registry Assembly (root crate); depends on Batch A+B+Batch-C-prerequisites (083/084/085); calls PluginRegistryBuilder from slideforge-plugin-api; chain: STORY-049→050; amended per LESSON-13 (2026-06-04)"
   STORY-050:
     status: not-started
     wave: 4
     batch: C
     priority: P0
     points: 8
+    depends_on: [STORY-049]
+    blocks: [STORY-055]
     notes: "End-to-End Integration Test Suite; depends on STORY-049"
   STORY-072:
     status: draft

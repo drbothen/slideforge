@@ -40,6 +40,9 @@ depends_on:
   - STORY-043
   - STORY-044
   - STORY-045
+  - STORY-083
+  - STORY-084
+  - STORY-085
 blocks:
   - STORY-050
 estimated_days: 2
@@ -67,8 +70,20 @@ because it is a thin re-export facade that assembles the plugin registry."
   HTML — noting HTML/preview is Wave 5) must be registered. STORY-049 registers
   PPTX + DOCX + PDF exporters (Wave 4); HTML registration is deferred to STORY-050
   which assembles the full registry for E2E tests.
-- Blocks STORY-050: E2E integration tests require a working `PluginRegistry::default()`
-  that registers all 10 plugin surfaces.
+- Depends on STORY-083: STORY-083 delivers `PluginRegistryBuilder`, `RegistryError::MissingSurface`,
+  `surface_count()`, and `surface_names()` in `slideforge-plugin-api`. STORY-049's AC-002
+  (typed error on empty builder) and AC-004 (surface introspection) cannot be satisfied
+  without STORY-083 being merged first.
+- Depends on STORY-084: STORY-084 delivers production `SectionType` plugin implementations
+  (`ExecutiveSummarySectionType`, `RiskRegisterSectionType`, and 5 manual-only types) in
+  `slideforge-plugin-api/src/section_types/`. AC-001 requires all 10 surfaces registered;
+  without STORY-084, `SectionType` has only stub implementations.
+- Depends on STORY-085: STORY-085 delivers `DefaultInlineFormat` (all 12 `InlineNode`
+  variants × 3 output formats) in `slideforge-plugin-api/src/inline_formats/`. AC-001
+  requires all 10 surfaces registered; without STORY-085, `InlineFormat` has only stubs.
+  STORY-085 also completes the BC-5.02.002 dog-fooding refactor in `slideforge-pptx`.
+- Blocks STORY-050: E2E integration tests require a working `PluginRegistryBuilder`-assembled
+  registry with all 10 surfaces registered.
 
 ## Summary
 
@@ -100,11 +115,12 @@ returned (not a panic).
 
 ## Acceptance Criteria
 
-### AC-001: PluginRegistry::default() registers all 10 trait surfaces
+### AC-001: PluginRegistryBuilder::default_bundled().build() registers all 10 trait surfaces
 (traces to BC-5.02.001 postcondition 1)
 
-`PluginRegistry::default()` completes without error and has non-empty registration
-for all 10 trait surfaces:
+A fully-assembled `PluginRegistry` (built via `PluginRegistryBuilder` with all bundled
+plugins registered) returns `Ok(registry)` from `build()` where `registry.surface_count()`
+== 10 and each surface has at least 1 implementation:
 - DataSource: JSON, CSV, YAML, TOML, HTTP sources (from `slideforge-data`)
 - Exporter: PPTX (`slideforge-pptx`), DOCX (`slideforge-docx`), PDF (`slideforge-pdf`)
 - ChartRenderer: plotters-backed renderer (`slideforge-charts`)
@@ -112,20 +128,23 @@ for all 10 trait surfaces:
 - Validator: accessibility + overflow validators (`slideforge-validate`)
 - MathRenderer: pulldown-latex math renderer (`slideforge-math`)
 - BrandProvider: file-based brand provider (`slideforge-brand`)
-- SlideType: all 31 slide type implementations (`slideforge-types`)
-- SectionType: all auto-generated section types (`slideforge-types`)
-- InlineFormat: all 11 inline format types (`slideforge-types`)
+- SlideType: all 31 slide type implementations (`slideforge-plugin-api/src/slide_types/`)
+- SectionType: all 7 bundled section type implementations (`slideforge-plugin-api/src/section_types/` — delivered by STORY-084)
+- InlineFormat: `DefaultInlineFormat` covering all 12 inline format types (`slideforge-plugin-api/src/inline_formats/` — delivered by STORY-085)
 
-Unit test: `PluginRegistry::default()` returns `Ok(registry)` where `registry.
-surface_count()` == 10 and each surface has at least 1 implementation.
+Unit test: call `register_bundled_plugins(&mut builder)` then `builder.build()`, assert
+`Ok(registry)` where `registry.surface_count() == 10` and each surface has at least 1
+implementation.
 
-### AC-002: Unregistered surface returns RegistryError, not panic
+### AC-002: PluginRegistryBuilder with missing surface returns RegistryError::MissingSurface, not panic
 (traces to BC-5.02.001 invariant 3)
 
-`PluginRegistry::builder().build()` (without registering all surfaces) returns
-`Err(RegistryError::MissingSurface { surface: "DataSource" })` (or similar) when
-`DataSource` has no registered implementation. This is verified by unit test:
-build an empty registry and call `build()`, assert the error is returned.
+`PluginRegistryBuilder::default().build()` (with zero registrations) returns
+`Err(RegistryError::MissingSurface { surface: "<first-missing-surface>" })`. The
+`RegistryError::MissingSurface` variant is a typed error (delivered by STORY-083 in
+`slideforge-plugin-api`). This is verified by unit test: create an empty builder,
+call `build()`, assert `Err(RegistryError::MissingSurface { .. })` is returned — not
+a panic, not an `Ok(registry)` with an empty surface vec.
 
 ### AC-003: cargo build --workspace passes with all 10 surfaces covered
 (traces to BC-5.02.001 postcondition 4)
@@ -133,12 +152,15 @@ build an empty registry and call `build()`, assert the error is returned.
 `cargo build --workspace` and `cargo test --workspace` both pass. This is the
 CI gate that confirms all 10 surfaces are implemented and compile correctly.
 
-### AC-004: PluginRegistry exposes surface_count() and surface_names()
+### AC-004: PluginRegistry exposes surface_count() and surface_names() (delivered by STORY-083)
 (traces to BC-5.02.001 postcondition 2)
 
-`PluginRegistry::surface_count() -> usize` returns 10 for the default registry.
-`PluginRegistry::surface_names() -> Vec<&str>` returns the canonical names of all
-registered surfaces.
+`PluginRegistry::surface_count() -> usize` returns 10 for the fully-assembled default
+registry (all 10 surfaces registered). `PluginRegistry::surface_names() -> Vec<&'static str>`
+returns the 10 canonical surface names: `["DataSource", "Exporter", "ChartRenderer",
+"DiagramRenderer", "Validator", "MathRenderer", "BrandProvider", "SlideType",
+"SectionType", "InlineFormat"]`. These methods are defined in `slideforge-plugin-api`
+(STORY-083); STORY-049 exercises them in the assembly integration test.
 
 ### AC-005: Each bundled plugin compiles using only slideforge-plugin-api imports
 (traces to BC-5.02.001 postcondition 3)
@@ -165,49 +187,81 @@ minimal `TestDataSource` that implements the `DataSource` trait using ONLY
 The test verifies this compiles and the minimal plugin can be registered in a
 `PluginRegistry` alongside the bundled plugins.
 
-### AC-008: Plugin registered but panics → E-PLG-001 error, not process crash
+### AC-008: Plugin registered but panics → PluginError::PluginPanic error, not process crash
 (traces to BC-5.02.001 edge case EC-003)
 
 If a registered plugin implementation panics during execution, the panic is caught
 at the plugin dispatch boundary (using `std::panic::catch_unwind`) and returned as
 `Err(PluginError::PluginPanic { plugin_name, message })`. The `slideforge` process
-does not crash. Verified by unit test using a test plugin that panics.
+does not crash. Verified by unit test using a test plugin that panics. Note: the
+`catch_unwind` in `crates/slideforge/src/dispatch.rs` is the only PRODUCTION use
+of `catch_unwind`; existing test-only uses in `slideforge-eval/tests/bleed_tests.rs`
+and `slideforge-diagrams/src/normalize.rs` (inside `#[cfg(test)]` contexts) are not
+production code and are not affected by this constraint.
 
 ## Tasks
 
-- [ ] Create `crates/slideforge/Cargo.toml`:
-  - All plugin crates as workspace dependencies
-  - `slideforge-plugin-api` (workspace)
+- [ ] Update `crates/slideforge/Cargo.toml` (already exists as stub):
+  - Confirm all plugin crates as workspace dependencies (slideforge-data, slideforge-pptx,
+    slideforge-docx, slideforge-pdf, slideforge-charts, slideforge-diagrams,
+    slideforge-validate, slideforge-math, slideforge-brand, slideforge-plugin-api)
+  - Confirm pipeline crates: slideforge-syntax, slideforge-eval, slideforge-layout,
+    slideforge-validate (per ADR-016 Decision 3 — these are correct deps)
   - `thiserror = "=2.0.18"`
 - [ ] Create `crates/slideforge/src/lib.rs`:
-  - `pub use slideforge_plugin_api::PluginRegistry;`
+  - `pub use slideforge_plugin_api::{PluginRegistry, PluginRegistryBuilder, RegistryError};`
   - `pub fn build(source: &str, options: BuildOptions) -> Result<BuildOutput, BuildError>`
   - `#![forbid(unsafe_code)]`
 - [ ] Create `crates/slideforge/src/registry.rs`:
-  - `PluginRegistryBuilder` (or extend plugin-api's builder)
-  - `register_bundled_plugins(builder: &mut Builder)` — registers all 10 surfaces
-  - `PluginRegistry::default()` calls `register_bundled_plugins`
+  - `register_bundled_plugins(builder: &mut PluginRegistryBuilder)` — calls all 10
+    `builder.register_*()` methods with the production bundled implementations
+  - `pub fn default_registry() -> Result<PluginRegistry, RegistryError>` — calls
+    `register_bundled_plugins` then `builder.build()`
+  - NOTE: `PluginRegistryBuilder` is defined in `slideforge-plugin-api` (STORY-083);
+    this file only CALLS it — no builder type is defined in the root crate
 - [ ] Create `crates/slideforge/src/error.rs`:
-  - `RegistryError`, `PluginError` enums
-  - `BuildError` enum wrapping all pipeline errors
+  - `PluginError` enum (root-crate-specific error types)
+  - `BuildError` enum wrapping all pipeline errors (RegistryError, parse, eval, layout,
+    export)
+  - Note: `RegistryError` is defined in `slideforge-plugin-api` and re-exported here;
+    not redefined
 - [ ] Create `crates/slideforge/src/dispatch.rs`:
   - `catch_unwind` wrapper for plugin calls → `PluginError::PluginPanic`
+  - This is the only PRODUCTION use of `catch_unwind` in the workspace
 - [ ] Write unit tests:
-  - `PluginRegistry::default()` → `surface_count() == 10`
-  - Empty registry → `RegistryError::MissingSurface`
-  - Panic-catching dispatch test
+  - `default_registry()` → `Ok(registry)` where `registry.surface_count() == 10`
+  - `PluginRegistryBuilder::default().build()` → `Err(RegistryError::MissingSurface { .. })`
+  - Panic-catching dispatch test (test plugin that panics → `PluginError::PluginPanic`)
 - [ ] Write dog-fooding test in `tests/external_plugin_test.rs`
-- [ ] Verify `slideforge` is the root crate in `Cargo.toml` `[workspace]`
+- [ ] Verify `slideforge` is the root crate in workspace `Cargo.toml` `[workspace]`
 
 ## Previous Story Intelligence
 
-N/A — first story in EPIC-21. However, this story is the culmination of all Wave 1
-through Wave 4 plugin implementation stories. The root crate is intentionally thin:
-it contains no logic of its own, only assembly.
+Three prerequisite stories (STORY-083, STORY-084, STORY-085) were created by the
+LESSON-13 reconciliation (2026-06-04) to close capability gaps that blocked STORY-049:
 
-Design principle from ARCH-INDEX: "No code lives in the root crate beyond registry
-construction." If the implementer finds themselves adding parsing, evaluation, or
-export logic to the root crate, it belongs in a subsystem crate instead.
+- **STORY-083** delivered `PluginRegistryBuilder`, `RegistryError::MissingSurface`,
+  `surface_count()`, and `surface_names()` in `slideforge-plugin-api/src/registry.rs`.
+  Before STORY-083, the `PluginRegistry` was silently permissive (no fail-on-empty
+  semantics), violating BC-5.02.001 invariant 3. STORY-049 calls `PluginRegistryBuilder`
+  to assemble the registry; STORY-083 defines that builder.
+
+- **STORY-084** delivered 7 bundled `SectionType` implementations in
+  `slideforge-plugin-api/src/section_types/`. Before STORY-084, no production `SectionType`
+  implementation existed — only test stubs. AC-001 of this story requires the `SectionType`
+  surface to be populated with production implementations.
+
+- **STORY-085** delivered `DefaultInlineFormat` (12 `InlineNode` variants × 3 output
+  formats) in `slideforge-plugin-api/src/inline_formats/`, and refactored
+  `slideforge-pptx`'s inline serialization to dispatch through the plugin trait
+  (satisfying BC-5.02.002 EC-004). Before STORY-085, no production `InlineFormat`
+  implementation existed.
+
+Architecture authority: per ADR-016 Decision 3, the root crate IS the pipeline driver
+(not assembly-only). `build(source, options) -> Result<BuildOutput, BuildError>` belongs
+here. The previous "Forbidden Dependencies" clause that excluded `slideforge-syntax`,
+`slideforge-eval`, `slideforge-layout`, `slideforge-validate` was incorrect and has been
+replaced by the ADR-016 formulation (see Forbidden Dependencies section).
 
 ## Architecture Compliance Rules
 
@@ -217,8 +271,10 @@ export logic to the root crate, it belongs in a subsystem crate instead.
    uses the `Box<dyn PluginTrait>` pattern, not a direct struct reference. The
    compiler enforces this because the registration API accepts `Box<dyn Trait>`.
 3. **Panic isolation (BC-5.02.001 edge case EC-003)**: Plugin calls are wrapped in
-   `catch_unwind`. This is the ONLY use of `catch_unwind` in the codebase — it is
-   the plugin dispatch boundary.
+   `catch_unwind`. This is the only PRODUCTION use of `catch_unwind` in the codebase
+   — it is the plugin dispatch boundary. Test-only uses of `catch_unwind` exist in
+   `slideforge-eval/tests/bleed_tests.rs` and inside `#[cfg(test)]` gates in
+   `slideforge-diagrams/src/normalize.rs`; those are test code and do not conflict.
 
 ## Library & Framework Requirements
 
@@ -243,15 +299,19 @@ export logic to the root crate, it belongs in a subsystem crate instead.
 
 | Component | Estimated Tokens |
 |-----------|-----------------|
-| This story spec | ~2,500 |
+| This story spec | ~3,000 |
 | BC-5.02.001 | ~1,200 |
 | BC-5.02.002 | ~1,000 |
+| ADR-016 (Decisions 1-3) | ~700 |
 | Plugin trait definitions (STORY-002) | ~1,500 |
+| STORY-083: PluginRegistryBuilder API | ~800 |
+| STORY-084: SectionType impls (public API surface) | ~600 |
+| STORY-085: DefaultInlineFormat (public API surface) | ~600 |
 | Each Wave 4 exporter's public API (4 × 400) | ~1,600 |
 | Test files to write | ~1,500 |
-| **Total** | **~9,300** |
+| **Total** | **~12,500** |
 
-Context budget: ~9% of a 100k-token context window. Within limit.
+Context budget: ~12% of a 100k-token context window. Within limit for a 5-point story.
 
 ## Test Strategy
 
@@ -273,12 +333,23 @@ Context budget: ~9% of a 100k-token context window. Within limit.
 
 ## Forbidden Dependencies
 
-The root `slideforge` crate MUST NOT depend on any crate that is not a direct
-plugin implementation. In particular:
-- No `slideforge-syntax`, `slideforge-eval`, `slideforge-layout`, `slideforge-validate`
-  as direct dependencies (these are accessed via the plugin trait API, not directly)
-- Exception: `slideforge-types` for `LaidOutDeck` and `BuildOptions` types
-- Exception: `slideforge-plugin-api` for the registry infrastructure
+Per ADR-016 Decision 3, the root `slideforge` crate IS the pipeline driver — it MAY
+depend on pipeline crates (`slideforge-syntax`, `slideforge-eval`, `slideforge-layout`,
+`slideforge-validate`) to wire the parse → eval → layout → export pipeline and expose
+`build()`. The existing `crates/slideforge/Cargo.toml` entries for these crates are
+CORRECT and intentional.
 
-If the root crate gains direct dependencies on subsystem implementation crates,
-the plugin architecture is compromised.
+The constraint is: **no plugin logic lives in the root crate**. Specifically:
+- The root crate MUST NOT call internal/private functions across crate boundaries.
+  All cross-crate plugin interaction goes through `Box<dyn Trait>` dispatch (e.g.,
+  `Box<dyn Exporter>::export()` — NOT `PptxExporter::internal_method()` directly).
+- The root crate MUST NOT define new plugin trait implementations. Plugin implementations
+  live in their respective crates (`slideforge-plugin-api/src/{slide_types,section_types,
+  inline_formats}/`, `slideforge-data/`, `slideforge-pptx/`, etc.).
+- The `build()` function in `crates/slideforge/src/lib.rs` is permitted and required.
+  It wires the pipeline stages using the assembled `PluginRegistry`. This is the public
+  library API for library consumers.
+
+If the implementer finds `crates/slideforge/src/` accumulating plugin logic (rendering,
+serialization, format-specific code), that is a violation and must be moved to the
+appropriate subsystem crate.

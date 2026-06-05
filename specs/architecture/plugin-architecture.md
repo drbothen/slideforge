@@ -28,27 +28,34 @@ needs to bypass the API, the API is wrong and must be fixed (q3-decision-final.m
 | 5 | `Validator` | slideforge-validate | canvas-overflow, wcag-contrast, alt-text, color-name, bullet-length, weight-normalization |
 | 6 | `MathRenderer` | slideforge-math | pulldown-latex + KaTeX (OMML via spike S-MATH-01) |
 | 7 | `BrandProvider` | slideforge-brand | file-based (.pptx, .toml) |
-| 8 | `SlideType` | slideforge-types | 31 built-in types (CL-01 through CL-20 + 11 standard) |
-| 9 | `SectionType` | slideforge-types | auto-generated + manual sections |
-| 10 | `InlineFormat` | slideforge-types | bold, italic, code, link, math, footnote, cross-ref |
+| 8 | `SlideType` | slideforge-plugin-api | 31 built-in types in `src/slide_types/` (CL-01 through CL-20 + 11 standard) |
+| 9 | `SectionType` | slideforge-plugin-api | bundled impls in `src/section_types/` (ExecutiveSummarySectionType, RiskRegisterSectionType, + 5 manual-only types) — delivered by STORY-084 |
+| 10 | `InlineFormat` | slideforge-plugin-api | bundled impls in `src/inline_formats/` (DefaultInlineFormat — all 12 InlineNode variants × 3 output formats) — delivered by STORY-085 |
 
 ## Plugin Registry
 
-The `slideforge` root crate assembles the `PluginRegistry` using all bundled plugins.
-Registry lookup is by `id()` string returned by each trait implementation.
+The `slideforge` root crate assembles the `PluginRegistry` via `PluginRegistryBuilder`
+(defined in `slideforge-plugin-api`). Registry lookup is by `id()` string returned
+by each trait implementation. `PluginRegistryBuilder::build()` returns
+`Result<PluginRegistry, RegistryError>`, failing with `RegistryError::MissingSurface`
+if any of the 10 surfaces has zero registrations at finalization time
+(ADR-016; satisfies BC-5.02.001 invariant 3).
 
 ```rust
 // slideforge/src/registry.rs
-pub fn default_registry() -> PluginRegistry {
-    let mut r = PluginRegistry::new();
-    r.register_data_source(Box::new(JsonDataSource));
-    r.register_exporter(Box::new(PptxExporter));
-    r.register_chart_renderer(Box::new(PlottersRenderer));
-    r.register_diagram_renderer(Box::new(MermaidRenderer));
-    // ... all 31 slide types ...
-    r
+pub fn default_registry() -> Result<PluginRegistry, RegistryError> {
+    PluginRegistryBuilder::default()
+        .register_data_source(Box::new(JsonDataSource))
+        .register_exporter(Box::new(PptxExporter))
+        .register_chart_renderer(Box::new(PlottersRenderer))
+        .register_diagram_renderer(Box::new(MermaidRenderer))
+        // ... all bundled surface impls ...
+        .build()  // Err(RegistryError::MissingSurface { .. }) if any surface empty
 }
 ```
+
+`surface_count() -> usize` and `surface_names() -> Vec<&'static str>` are available
+on `PluginRegistry` for runtime initialization auditing (ADR-016).
 
 Registry is constructed once at process startup (or test setup). All lookups
 are immutable borrows after initialization. The registry is `Send + Sync`.

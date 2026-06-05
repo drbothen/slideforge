@@ -15,8 +15,8 @@ prd_vps: 15
 prd_supplements: 4
 spikes_resolved: 7
 spikes_total: 7
-total_stories: 81
-total_points: 497
+total_stories: 85
+total_points: 511
 total_waves: 6
 total_epics: 21
 dtu_required: false
@@ -30,8 +30,8 @@ wave_4_batch_a_complete: 10
 wave_4_batch_a_total: 10
 wave_4_merged: 16
 wave_4_started: 2026-05-31
-wave_4_total_stories: 18
-wave_4_total_points: 115
+wave_4_total_stories: 21
+wave_4_total_points: 129
 wave_5_total_points: 114
 develop_sha: "869fb401"
 develop_pr_count: 56
@@ -54,24 +54,29 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. Generates branded .pptx
 
 ## CURRENT POSITION
 
-Phase 3, **Wave 4 — 16/18 merged. Batch B pptx chain (037→038→039→040) COMPLETE. Batch B docx chain (041→042) DONE.**
+Phase 3, **Wave 4 — 16/21 merged. Batch B pptx chain (037→038→039→040) COMPLETE. Batch B docx chain (041→042) DONE.**
 
 - `develop` = `869fb401` (56 merged PRs; origin/develop = local develop). **Open PRs: 0. Active worktrees: none.**
 - Workspace builds clean. ~3013 tests pass, 0 failures.
 - STORY-040 MERGED PR #56 (869fb401, 2026-06-04). Speaker notes (`.rels` + NotesSlidePart + `<p:notes>`), notesMaster1.xml, handoutMaster1.xml. 7-pass adversary cascade; strict-CLEAN on passes 5/6/7. SafeUrl guard (link_safety.rs) shipped — CWE-601 defense-in-depth for notes hyperlinks. Re-scoped 5→3 pts; slide-grouping sections split to STORY-082 (Wave 5, human-authorized).
 - STORY-039 MERGED PR #55 (a4f29e5a). STORY-037 PR #52 (2ebf184f). STORY-038 PR #54 (c031805c). STORY-041 PR #51 (a3b47303). STORY-042 PR #53 (56f3f57d).
 
-**Batch B COMPLETE.** **Batch C (next):** STORY-049 → STORY-050.
-**Wave 4 gate** runs only after ALL 18 Wave 4 stories merge. **STORY-082** (slide-grouping sections) → Wave 5.
+**Batch B COMPLETE.** **LESSON-13 reconciliation completed 2026-06-04** — STORY-049 was found NOT implementation-ready (plugin registry RegistryBuilder + surface ownership not defined; SectionType/InlineFormat bundled impls missing). Three prerequisite stories added (STORY-083/084/085, ADR-016 authored). Wave 4 now has 21 stories (was 18). **Batch C (next):** STORY-083/084/085 (parallel-eligible) → STORY-049 → STORY-050.
+**Wave 4 gate** runs only after ALL 21 Wave 4 stories merge. **STORY-082** (slide-grouping sections) → Wave 5.
 
 ---
 
 ## NEXT ACTIONS (fresh orchestrator — execute in order)
 
-1. **Batch C: STORY-049** — Plugin Registry Assembly (Wave 4, depends on Batch B COMPLETE). Full per-story delivery flow (see `workflows/phases/per-story-delivery.md`). **FIRST read the STORY-049 spec and verify upstream data availability per LESSON-13 before writing the Red Gate.**
-2. **STORY-050** — End-to-End Integration Test Suite (depends on STORY-049).
-3. **Wave 4 gate** after all 18 stories merged (16/18 done; remaining: STORY-049, STORY-050).
-4. **STORY-082** — PPTX Slide-Grouping Sections (Wave 5, 5 pts, P0, BC-4.01.003 Half B). After Wave 4 gate passes.
+**Batch C — LESSON-13 reconciliation applied. Three prerequisites added before STORY-049.**
+
+1. **STORY-083** — Plugin Registry Builder + Surface Enforcement (slideforge-plugin-api, 3 pts; dep STORY-002 only; parallel-safe). Full per-story delivery flow. Defines `RegistryBuilder`, `RegistryError::MissingSurface`, `surface_count()`, `surface_names()`.
+2. **STORY-084** — Bundled SectionType Implementations (slideforge-plugin-api, 3 pts; deps STORY-002/042/077). Can run **parallel** to STORY-083 (both dep-free from Batch B COMPLETE).
+3. **STORY-085** — Bundled DefaultInlineFormat + PPTX OOXML dog-fooding refactor (slideforge-plugin-api + slideforge-pptx, 8 pts; deps STORY-002/028/037/038). Can run **parallel** to STORY-083.
+4. **STORY-049** — Plugin Registry Assembly (root crate, pipeline driver, exposes `build()`; 5 pts) — **GATED on STORY-083 + STORY-084 + STORY-085 ALL merged**.
+5. **STORY-050** — End-to-End Integration Test Suite — gated on STORY-049.
+6. **Wave 4 gate** after all 21 stories merged (16/21 done; remaining: STORY-083, STORY-084, STORY-085, STORY-049, STORY-050).
+7. **STORY-082** — PPTX Slide-Grouping Sections (Wave 5, 5 pts, P0, BC-4.01.003 Half B). After Wave 4 gate passes.
 
 ---
 
@@ -91,8 +96,8 @@ Phase 3, **Wave 4 — 16/18 merged. Batch B pptx chain (037→038→039→040) C
 | Market intelligence | DONE 2026-05-23 | GO with medium confidence |
 | Planning (25 DSL decisions) | DONE 2026-05-24 | q1–q25 docs + 14 research threads + 7/7 spikes resolved |
 | Phase 1: Spec Crystallization | DONE — APPROVED 2026-05-25 | PRD (109 BCs, 15 HS, 4 supplements) + arch (14 ADRs, 15 VPs, 20 crates) + UX spec. 17 passes, 69 findings, 3/3 clean. |
-| Phase 2: Story Decomposition | DONE — APPROVED 2026-05-25 | 81 stories, 21 epics, 6 waves, 491 pts. 22 passes, 96+ findings, 3/3 clean. |
-| Phase 3: TDD Implementation | IN PROGRESS — Waves 1/2/3 GATE PASSED. Wave 4: 16/18 merged. Batch B pptx COMPLETE (037→040). Batch C: STORY-049→050. | Per-story delivery |
+| Phase 2: Story Decomposition | DONE — APPROVED 2026-05-25 | 85 stories, 21 epics, 6 waves, 511 pts (LESSON-13 reconciliation: +4 stories/+14 pts added 2026-06-04). 22 passes, 96+ findings, 3/3 clean. |
+| Phase 3: TDD Implementation | IN PROGRESS — Waves 1/2/3 GATE PASSED. Wave 4: 16/21 merged. Batch B COMPLETE (037→040, 041→042). Batch C: STORY-083/084/085→049→050. | Per-story delivery |
 | Phases 4–7 | NOT STARTED | Holdout / Adversarial / Formal Hardening / Convergence |
 
 ## Wave 4 Story Status
@@ -107,24 +112,29 @@ Phase 3, **Wave 4 — 16/18 merged. Batch B pptx chain (037→038→039→040) C
 - STORY-039 MERGED PR #55 (a4f29e5a, 2026-06-04)
 - STORY-040 MERGED PR #56 (869fb401, 2026-06-04) — pptx chain 037→038→039→040 COMPLETE
 
-**Batch C (next):** STORY-049 → STORY-050
+**Batch C (next):** STORY-083 + STORY-084 + STORY-085 (parallel-eligible) → STORY-049 → STORY-050
+- STORY-083: Plugin Registry Builder (3 pts, slideforge-plugin-api; dep STORY-002 only)
+- STORY-084: Bundled SectionType Implementations (3 pts; deps STORY-002/042/077)
+- STORY-085: Bundled DefaultInlineFormat + PPTX dog-fooding (8 pts; deps STORY-002/028/037/038)
+- STORY-049: Plugin Registry Assembly — root crate pipeline driver (5 pts; gates on 083+084+085)
+- STORY-050: E2E Integration Test Suite (gates on STORY-049)
 **STORY-082** (slide-grouping sections) moved to Wave 5 (human-authorized split from STORY-040)
 
 ---
 
 ## Session Resume Checkpoint
 
-**CLEAN CHECKPOINT — safe to clear context and resume in a fresh session. No in-flight worktree/PR. A fresh orchestrator resumes by reading this STATE.md and starting at STORY-049 (see NEXT ACTIONS).**
+**CLEAN CHECKPOINT — safe to clear context and resume in a fresh session. No in-flight worktree/PR. A fresh orchestrator resumes by reading this STATE.md and starting at STORY-083 (Batch C first step — see NEXT ACTIONS).**
 
 | Field | Value |
 |-------|-------|
 | **Date** | 2026-06-04 |
-| **Position** | Wave 4: 16/18 merged. Batch B pptx (037→038→039→040) COMPLETE + docx (041→042) DONE. NEXT: Batch C STORY-049→050. |
+| **Position** | Wave 4: 16/21 merged. Batch B COMPLETE. LESSON-13 reconciliation applied — STORY-083/084/085 added as Batch C prerequisites. STORY-049 gated on all three. NEXT: start STORY-083 (parallel-eligible with 084/085). |
 | **develop SHA** | `869fb401` (56 merged PRs; origin/develop = local develop) |
 | **Active worktrees** | none |
 | **Open PRs** | 0 |
 | **Workspace crates** | 16 |
-| **Spec deltas this session** | STORY-040 re-scoped 5→3 pts (slide-grouping split to STORY-082, human-authorized). STORY-082 created Wave 5 (5 pts, P0, BC-4.01.003 Half B). BC-4.01.003 amended to v1.2 (Half A: notes+masters; Half B deferred to STORY-082). BC-5.01.005 amended to v1.2 (deck.metadata.lang SoT, human-authorized). Total points updated 494→497; Wave 4 115 pts; Wave 5 114 pts. SafeUrl guard (link_safety.rs, CWE-601) shipped in slideforge-pptx. |
+| **Spec deltas this session** | STORY-040 re-scoped 5→3 pts (slide-grouping split to STORY-082, human-authorized). STORY-082 → Wave 5 (5 pts, P0, BC-4.01.003 Half B). BC-4.01.003 v1.2 (Half A notes+masters; Half B deferred). BC-5.01.005 v1.2 (deck.metadata.lang SoT). LESSON-13 reconciliation 2026-06-04: ADR-016 authored; BC-5.02.001→v1.3 (invariant 3 + postcondition 2 counts); BC-5.02.002→v1.3 (PC-5/EC-004 OOXML dog-fooding); plugin-architecture.md/ARCH-INDEX.md/crate-architecture.md corrected (owner-crate + root-crate definitions); STORY-083/084/085 added (14 pts new); STORY-049 amended (5 pts, gates on 083/084/085). Total stories 81→85; total points 497→511; Wave 4 stories 18→21; Wave 4 points 115→129. |
 | **factory-artifacts** | PUSHED to remote (origin/factory-artifacts) — human-authorized 2026-06-04. Upstream tracking set. Fresh sessions: clone repo + `git worktree add .factory factory-artifacts`. |
 
 ---
@@ -183,6 +193,7 @@ Phase 3, **Wave 4 — 16/18 merged. Batch B pptx chain (037→038→039→040) C
 
 | Date | ID | Decision |
 |------|-----|---------|
+| 2026-06-04 | LESSON-13-STORY-049 | STORY-049 LESSON-13 reconciliation (human-authorized 2026-06-04). STORY-049 found NOT implementation-ready: RegistryBuilder/surface enforcement absent from BC-5.02.001; SectionType (7 impls) + InlineFormat (12 impls) bundled ownership undefined; root crate vs owner-crate confusion in arch docs. Three decisions: (A) code-conforms-to-spec — RegistryBuilder + RegistryError::MissingSurface + surface_count/surface_names → STORY-083 (slideforge-plugin-api, 3 pts); (B) SectionType (7) + InlineFormat (12) bundled impls owned by slideforge-plugin-api → STORY-084 (3 pts) + STORY-085 (8 pts); (C) root crate = pipeline driver exposing build(), NOT owner-crate. Artifacts: ADR-016 authored; BC-5.02.001→v1.3 (invariant 3 + postcondition 2 counts corrected); BC-5.02.002→v1.3 (PC-5/EC-004 OOXML dog-fooding); plugin-architecture.md/ARCH-INDEX.md/crate-architecture.md corrected; reconciliation assessment at .factory/planning/story-049-reconciliation-assessment.md. Wave 4: 18→21 stories, 115→129 pts. Total: 81→85 stories, 497→511 pts. |
 | 2026-06-04 | STORY-040 | STORY-040 MERGED PR #56 (869fb401) — Batch B pptx chain complete (037→038→039→040). Slide-grouping split to STORY-082 (human-authorized). SafeUrl guard (link_safety.rs is_safe_link_scheme, CWE-601) shipped. SEC-040-001 (URL safety + XML escaping for notes hyperlinks) verified via test — ooxmlsdk escapes correctly, no prod change required. |
 | 2026-06-04 | SEC-039 | SEC-039-001 (CWE-116, MED) + SEC-039-002 (CWE-754, LOW) FIXED IN-SCOPE during STORY-039 PR review — validate_lang_for_xml rejects XML-1.0-illegal control chars in dc:language; loud tracing::error fallback for unexpected AltText variants. Neither deferred. |
 | 2026-06-04 | BC-5.01.005-v1.2 | Invariant 2 amended: lang SoT corrected to `deck.metadata.lang` (`DeckMetadata.lang`) — human-authorized (SoT rule 7), architect-recommended Option 2. `LaidOutDeck` carries no lang field and will not gain one; all exporters read lang via `Exporter` trait `deck: &Deck` param. No code change — impl was already correct. 5 stale story-spec refs corrected (STORY-017, STORY-039 ×3, STORY-041); 1 residual test doc-comment (a11y_tests.rs:831) → STORY-040 drive-by. |

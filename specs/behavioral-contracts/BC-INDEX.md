@@ -279,7 +279,7 @@ traces_to: domain-spec/L2-INDEX.md
 
 | BC ID | Title | Priority | Status | File |
 |-------|-------|----------|--------|------|
-| BC-5.02.001 | All 10 plugin trait surfaces are implemented by bundled plugins via the public trait API | P0 | active | [BC-5.02.001.md](BC-5.02.001.md) |
+| BC-5.02.001 | All 10 Plugin Trait Surfaces Implemented by Bundled Plugins via the Public Trait API | P0 | active | [BC-5.02.001.md](BC-5.02.001.md) |
 | BC-5.02.002 | No bundled plugin bypasses the registered trait interface (dog-fooding guarantee) | P0 | active | [BC-5.02.002.md](BC-5.02.002.md) |
 
 ### 5.03 — Package Management (CAP-025)

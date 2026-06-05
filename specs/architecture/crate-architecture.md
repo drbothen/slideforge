@@ -17,8 +17,8 @@ The workspace uses Cargo resolver 3, edition 2024. All crates enforce
 
 ```
 crates/
-├── slideforge-plugin-api/   # [SS-14] 10 trait surfaces — pure types, no I/O
-├── slideforge-types/        # [SS-15] Deck, LaidOutDeck, Brand, Value + 31 SlideType impls — pure types
+├── slideforge-plugin-api/   # [SS-14] 10 trait surfaces + bundled SlideType/SectionType/InlineFormat impls — pure types, no I/O
+├── slideforge-types/        # [SS-15] Deck, LaidOutDeck, Brand, Value — pure IR types (plugin impls live in slideforge-plugin-api)
 ├── slideforge-syntax/       # [SS-01] Lexer + chumsky parser → Typed AST — PURE CORE
 ├── slideforge-eval/         # [SS-02] Expression eval, type checking — PURE CORE
 ├── slideforge-validate/     # [SS-03] All compile-time validation — PURE CORE
@@ -35,7 +35,7 @@ crates/
 ├── slideforge-data/         # [SS-10] DataSource plugins — EFFECTFUL (all I/O)
 ├── slideforge-package/      # [SS-16] sf.lock, git-based package install — EFFECTFUL
 ├── slideforge-config/       # [SS-17] slideforge.toml + .sfconfig cascade — EFFECTFUL
-├── slideforge/              # Root library — assembles PluginRegistry — EFFECTFUL
+├── slideforge/              # Root library — assembles PluginRegistry + exposes build() pipeline API — EFFECTFUL
 └── slideforge-cli/          # [SS-18] CLI binary, watch mode, lifecycle — EFFECTFUL
 ```
 
