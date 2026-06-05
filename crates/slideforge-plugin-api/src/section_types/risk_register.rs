@@ -290,7 +290,8 @@ mod tests {
 
     // ─────────────────────────────────────────────────────────────────────────
     // CRIT-084-001: BC-3.02.001 invariant 4 — Notes-register severity_cards EXCLUDED
-    // These tests FAIL until the implementer fixes risk_register.rs (RED GATE).
+    // RED GATE (closed): failed prior to the `register != Notes` filter; now
+    // asserts the exclusion is enforced by RiskRegisterSectionType::generate.
     // ─────────────────────────────────────────────────────────────────────────
 
     /// CRIT-084-001 / BC-3.02.001 inv-4: a `severity_cards` slide with
@@ -300,8 +301,8 @@ mod tests {
     /// Deck: 2 `severity_cards` slides where 1 has `register: Notes` → exactly
     /// 1 block (only the non-notes slide contributes).
     ///
-    /// RED GATE: FAILS until implementer adds the `register != Notes` filter
-    /// to `RiskRegisterSectionType::generate`.
+    /// RED GATE (closed): failed prior to the `register != Notes` filter being
+    /// added to `RiskRegisterSectionType::generate`; now asserts the exclusion.
     #[test]
     fn test_bc_3_02_001_inv4_notes_register_severity_cards_excluded_from_risk_register() {
         let slides = vec![
@@ -328,7 +329,8 @@ mod tests {
     /// CRIT-084-001 / BC-3.02.001 inv-4: when ALL `severity_cards` slides have
     /// `register: Some(Register::Notes)`, `generate()` must return `vec![]`.
     ///
-    /// RED GATE: FAILS until implementer adds the notes-exclusion filter.
+    /// RED GATE (closed): failed prior to the notes-exclusion filter; now
+    /// asserts that all-notes-register decks produce an empty result.
     #[test]
     fn test_bc_3_02_001_inv4_all_severity_cards_notes_register_returns_empty() {
         let slides = vec![

@@ -369,8 +369,7 @@ mod tests {
     ///
     /// This locks the current `SectionBlock` shape contract: title is the slide's
     /// resolved title string or the empty string; the trait carries only a title,
-    /// not the full takeaway text. The implementer should add a doc comment to
-    /// `generate()` explaining this intentional fallback.
+    /// not the full takeaway text.
     #[test]
     fn test_bc_3_02_001_med084_003_missing_title_field_emits_block_with_empty_title() {
         let mut fields = OrderedMap::new();
