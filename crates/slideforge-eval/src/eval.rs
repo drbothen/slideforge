@@ -438,7 +438,19 @@ pub fn eval_deck_with_variant(
         .lang
         .as_ref()
         .map(|l| Arc::from(l.value().as_str()));
-    let title = None; // Title is not present in DeckNode (comes from a slide); leave None.
+    // Populate title from the FIRST `slide title:` block that has a resolved `title` field.
+    //
+    // Gap 1 (STORY-050): `DeckMetadata.title` must be non-None for PDF/UA-1 compliance.
+    // The evaluator derives it from the first slide whose `slide_type == "title"` and whose
+    // resolved `title` field is a `FieldValue::Literal(Value::Str(...))`.
+    //
+    // Deck-level `metadata: title` DSL is a deferred feature (Wave 3+). Until then, the
+    // evaluator derives the document title from the first title-type slide as the
+    // architecturally-correct source per ADR-016 Decision 3 + STORY-050 gap analysis.
+    let title: Option<Arc<str>> = slides
+        .iter()
+        .find(|s| s.slide_type.as_ref() == "title")
+        .and_then(|s| s.title_str().map(Arc::from));
 
     let version_str: Arc<str> = deck_node.version.as_ref().map_or_else(
         || Arc::from(FALLBACK_VERSION),
@@ -2791,6 +2803,141 @@ mod tests {
         assert!(
             !sink.is_empty(),
             "vars-block markup-wrapped brand-ref must push a diagnostic; sink was empty"
+        );
+    }
+
+    // ─── Gap-1 title derivation coverage (OBS-050-P2-001) ────────────────────
+
+    /// OBS-050-P2-001 Some-path: a deck whose first `title`-type slide has a
+    /// literal title field → `metadata.title` must be `Some("<that title>")`.
+    ///
+    /// Gap 1 (STORY-050): `DeckMetadata.title` is derived in `eval_deck_with_variant`
+    /// from the first slide whose `slide_type == "title"` and whose resolved `title`
+    /// field is a `FieldValue::Literal(Value::Str(...))`. This test exercises the
+    /// Some-path of that branch via `eval_deck_with_variant` (the real production path).
+    ///
+    /// Adjudication (STORY-050 v1.2): a title-less deck → `None` → PDF correctly
+    /// fails PDF/UA-1; no fabricated fallback.
+    #[test]
+    fn test_gap1_title_derivation_some_path() {
+        // Build a deck with one "title"-type slide that has an explicit title field.
+        let title_field = FieldNode {
+            name: Spanned::new("title".to_string(), dummy_span()),
+            value: Spanned::new(
+                FieldValue::Template(vec![TemplateChunk::Literal("My Presentation".to_string())]),
+                dummy_span(),
+            ),
+        };
+        let slide_item = BlockItem::Slide(Spanned::new(
+            SlideNode {
+                kind: Spanned::new("title".to_string(), dummy_span()),
+                tags: vec![],
+                fields: vec![title_field],
+                inline_items: vec![],
+            },
+            dummy_span(),
+        ));
+        let deck_node = DeckNode {
+            items: vec![slide_item],
+            ..DeckNode::default()
+        };
+
+        let config = default_config();
+        let mut sink = DiagnosticSink::new();
+
+        // Call the real production path: eval_deck_with_variant.
+        let deck = eval_deck_with_variant(&deck_node, &config, None, &mut sink);
+        let deck = deck.expect("eval_deck_with_variant must return Some for valid title slide");
+        assert!(sink.is_empty(), "no errors expected for valid deck");
+
+        assert_eq!(
+            deck.metadata.title.as_deref(),
+            Some("My Presentation"),
+            "Gap-1 Some-path: metadata.title must be Some('My Presentation') \
+             when the first title-type slide has a literal title field \
+             (STORY-050 Gap-1, ADR-016 Decision 3)"
+        );
+    }
+
+    /// OBS-050-P2-001 None-path: a deck with NO `title`-type slide →
+    /// `metadata.title` must be `None`.
+    ///
+    /// Adjudication (STORY-050 v1.2): a title-less deck produces `None` — the PDF
+    /// exporter handles the missing title by failing PDF/UA-1 (correct behaviour,
+    /// no fabricated fallback allowed).
+    ///
+    /// This test exercises the None-branch of the `slides.iter().find(...)` in
+    /// `eval_deck_with_variant`. It covers two None-causing scenarios:
+    ///
+    /// - A deck with no `title`-type slide at all (only `content` slides).
+    /// - (Same code path) a deck with a `title`-type slide that has no `title`
+    ///   field (title_str() returns None).
+    #[test]
+    fn test_gap1_title_derivation_none_path_no_title_slide() {
+        // Deck with only a "content" slide — no "title" type slide at all.
+        let slide_item = BlockItem::Slide(Spanned::new(
+            SlideNode {
+                kind: Spanned::new("content".to_string(), dummy_span()),
+                tags: vec![],
+                fields: vec![],
+                inline_items: vec![],
+            },
+            dummy_span(),
+        ));
+        let deck_node = DeckNode {
+            items: vec![slide_item],
+            ..DeckNode::default()
+        };
+
+        let config = default_config();
+        let mut sink = DiagnosticSink::new();
+
+        let deck = eval_deck_with_variant(&deck_node, &config, None, &mut sink);
+        let deck = deck
+            .expect("eval_deck_with_variant must return Some for valid deck without title slide");
+        assert!(sink.is_empty(), "no errors expected");
+
+        assert_eq!(
+            deck.metadata.title, None,
+            "Gap-1 None-path: metadata.title must be None when no title-type slide exists \
+             (STORY-050 Gap-1 adjudication: no fabricated fallback, PDF/UA-1 enforcement downstream)"
+        );
+    }
+
+    /// OBS-050-P2-001 None-path (variant 2): a `title`-type slide with NO `title`
+    /// field → `metadata.title` must still be `None`.
+    ///
+    /// `title_str()` returns `None` when the slide has no `title` field, so the
+    /// `and_then` in `eval_deck_with_variant` produces `None` even though a
+    /// `title`-type slide exists.
+    #[test]
+    fn test_gap1_title_derivation_none_path_title_slide_without_title_field() {
+        // A "title"-type slide with no fields at all.
+        let slide_item = BlockItem::Slide(Spanned::new(
+            SlideNode {
+                kind: Spanned::new("title".to_string(), dummy_span()),
+                tags: vec![],
+                fields: vec![], // no title field
+                inline_items: vec![],
+            },
+            dummy_span(),
+        ));
+        let deck_node = DeckNode {
+            items: vec![slide_item],
+            ..DeckNode::default()
+        };
+
+        let config = default_config();
+        let mut sink = DiagnosticSink::new();
+
+        let deck = eval_deck_with_variant(&deck_node, &config, None, &mut sink);
+        let deck = deck.expect("eval_deck_with_variant must return Some");
+        assert!(sink.is_empty(), "no errors expected");
+
+        assert_eq!(
+            deck.metadata.title, None,
+            "Gap-1 None-path variant 2: metadata.title must be None when the title-type \
+             slide exists but has no 'title' field (title_str() returns None)"
         );
     }
 }

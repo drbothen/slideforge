@@ -11,6 +11,7 @@
 //! | `E-A11-001` | Error | Visual element is missing alt text and is not marked decorative |
 //! | `W-A11-002` | Warning | Visual element has both alt text AND `decorative: true`; alt takes precedence, decorative flag ignored (BC-3.04.001 v1.5.2 Invariant 11) |
 
+use slideforge_layout::{FrameContent, LaidOutDeck};
 use slideforge_plugin_api::{Diagnostic, DiagnosticSeverity, Validator, ValidatorOptions};
 use slideforge_types::{Deck, SourceSpan, specs::AltText};
 
@@ -54,6 +55,25 @@ impl Validator for AltTextValidator {
         "alt-text"
     }
 
+    /// Stage 5 (pre-layout) alt-text check on the semantic [`Deck`] IR.
+    ///
+    /// Iterates `deck.slides[*].blocks` looking for `ContentBlock::Chart`,
+    /// `ContentBlock::Image`, and `ContentBlock::Diagram` entries with missing
+    /// or blank alt text.
+    ///
+    /// ## Current pipeline state
+    ///
+    /// `slideforge-eval` always sets `Slide.blocks = vec![]` (see
+    /// `slideforge_eval::for_eval:342`). `ContentBlock` construction is deferred to
+    /// layout + Wave 3+ stories. As a result, this method currently produces zero
+    /// diagnostics — not because the logic is wrong, but because there are no blocks
+    /// to iterate. The authoritative alt-text enforcement for the current pipeline
+    /// is in [`AltTextValidator::validate_post_layout`] (ADR-018 Decision 3).
+    ///
+    /// When a future story populates `Slide.blocks` from eval-time DSL fields,
+    /// this method will provide earlier detection (before layout). Both passes are
+    /// additive: combined diagnostics from Stage 5 and Stage 6b are accumulated
+    /// into one list before the strict-mode gate fires.
     fn validate(&self, deck: &Deck, _opts: &ValidatorOptions) -> Vec<Diagnostic> {
         use slideforge_types::ContentBlock;
 
@@ -120,6 +140,107 @@ impl Validator for AltTextValidator {
                     | ContentBlock::Bullets(_)
                     | ContentBlock::Math(_)
                     | ContentBlock::Table(_) => {},
+                }
+            }
+        }
+
+        diagnostics
+    }
+
+    /// Stage 6b (post-layout) alt-text check on the geometric [`LaidOutDeck`] IR.
+    ///
+    /// Iterates `laid_out.slides[*].frames` looking for `FrameContent::Chart`,
+    /// `FrameContent::Image`, and `FrameContent::Diagram` entries with
+    /// `AltText::Decorative`. In the current pipeline, `AltText::Decorative` on
+    /// these frame variants is the structural placeholder set by the region map when
+    /// no alt text has been threaded from a `ContentBlock` (ADR-018 §Context;
+    /// `slideforge_eval::for_eval:342`). Since `Slide.blocks` is always `vec![]`
+    /// after eval, no alt text can be threaded before this pass.
+    ///
+    /// A `FrameContent::Chart/Image/Diagram` with `AltText::Decorative` therefore
+    /// indicates a visual element whose author-supplied alt text was absent — the
+    /// authoritative evidence of a missing `alt "..."` in the DSL source.
+    ///
+    /// Emits `E-A11-001` (Error severity) for each such frame. In strict mode,
+    /// these errors cause `BuildError::ValidationFailed`.
+    ///
+    /// ## Current correctness (Wave 1–2 scope)
+    ///
+    /// Today `Slide.blocks` is always `vec![]` after eval, so the layout engine
+    /// never calls `thread_media_alt_into_frames` with author-supplied content.
+    /// As a result, every `FrameContent::Chart/Image/Diagram` that reaches this
+    /// pass carries the `AltText::Decorative` placeholder that the region map
+    /// set unconditionally — this placeholder means "no alt text was threaded",
+    /// which is correct evidence of a missing `alt "..."` in the DSL source.
+    ///
+    /// ## IMPORTANT — this match MUST be revisited for Wave 3+
+    ///
+    /// When Wave 3+ stories populate `Slide.blocks` from eval-time DSL fields,
+    /// `layout::thread_media_alt_into_frames` will overwrite the placeholder with:
+    /// - `AltText::Provided(s)` for frames with author-supplied alt text.
+    /// - `AltText::Decorative` for frames explicitly marked `decorative: true`.
+    ///
+    /// At that point, an `AltText::Decorative` frame will mean EITHER:
+    /// 1. Author-supplied `decorative: true` → VALID, no error should be emitted.
+    /// 2. Missing alt text (placeholder never replaced) → INVALID, E-A11-001.
+    ///
+    /// This match arm currently cannot distinguish these two cases. Once
+    /// `thread_media_alt_into_frames` lands, flagging ANY `AltText::Decorative`
+    /// as an error will be a false positive for case 1.
+    ///
+    /// **The match logic here MUST be updated when Wave 3+ alt-text threading
+    /// lands.** Track this as follow-up in the story that implements
+    /// `thread_media_alt_into_frames` (OBS-1 from SEC-050 adversary pass).
+    ///
+    /// Traceability: ADR-018 Decision 3, BC-5.02.001 §Accessibility,
+    /// STORY-050 AC-009, CLAUDE.md §Accessibility ("alt required — compile error").
+    fn validate_post_layout(
+        &self,
+        laid_out: &LaidOutDeck,
+        _opts: &ValidatorOptions,
+    ) -> Vec<Diagnostic> {
+        let mut diagnostics: Vec<Diagnostic> = Vec::new();
+
+        for laid_out_slide in &laid_out.slides {
+            // source_index is the ordinal position in the semantic Deck (0-based); display
+            // as 1-based for user-facing diagnostics.
+            let display_slide = laid_out_slide.source_index + 1;
+            for frame in &laid_out_slide.frames {
+                let slide_type = laid_out_slide.slide_type_keyword.as_ref();
+                match &frame.content {
+                    FrameContent::Chart {
+                        alt: AltText::Decorative,
+                    } => {
+                        // AltText::Decorative on a Chart frame = missing alt text
+                        // (structural placeholder; no ContentBlock threaded it yet).
+                        diagnostics.push(make_post_layout_error(
+                            "chart",
+                            slide_type,
+                            display_slide,
+                        ));
+                    },
+                    FrameContent::Image {
+                        alt: AltText::Decorative,
+                    } => {
+                        diagnostics.push(make_post_layout_error(
+                            "image",
+                            slide_type,
+                            display_slide,
+                        ));
+                    },
+                    FrameContent::Diagram {
+                        alt: AltText::Decorative,
+                        ..
+                    } => {
+                        diagnostics.push(make_post_layout_error(
+                            "diagram",
+                            slide_type,
+                            display_slide,
+                        ));
+                    },
+                    // AltText::Provided(_) — valid alt text, no diagnostic.
+                    // All other FrameContent variants are non-visual or text-bearing.
+                    _ => {},
                 }
             }
         }
@@ -200,6 +321,33 @@ fn check_visual_element(
 
     if is_missing {
         diagnostics.push(make_error(element_type, identifier, span));
+    }
+}
+
+/// Construct an `E-A11-001` error diagnostic for a missing alt text discovered
+/// in the post-layout pass ([`AltTextValidator::validate_post_layout`]).
+///
+/// Unlike [`make_error`] (which has an identifier and span from the semantic IR),
+/// the post-layout pass operates on the geometric [`LaidOutDeck`] IR where the
+/// original source spans and element identifiers are not yet threaded
+/// (Wave 3+ will supply them). Until then the diagnostic message includes:
+/// - the element type (`"chart"`, `"image"`, `"diagram"`)
+/// - the slide type keyword (e.g., `"content"`, `"photo"`)
+/// - the 1-based slide number from `LaidOutSlide::source_index + 1`
+///
+/// This makes the diagnostic actionable: the user knows which slide to fix.
+fn make_post_layout_error(element_type: &str, slide_type: &str, slide_number: usize) -> Diagnostic {
+    Diagnostic {
+        severity: DiagnosticSeverity::Error,
+        code: std::sync::Arc::from(E_A11_001),
+        message: std::sync::Arc::from(format!(
+            "slide {slide_number} ({slide_type}): {element_type} missing alt text. \
+             Add alt \"...\" or mark decorative: true"
+        )),
+        span: SourceSpan::default(),
+        hint: Some(std::sync::Arc::from(
+            "All visual elements require alt text or decorative: true (DI-001)",
+        )),
     }
 }
 
@@ -953,5 +1101,104 @@ mod tests {
         let diags = AltTextValidator.validate(&deck, &default_opts());
         assert_eq!(diags.len(), 1);
         insta::assert_snapshot!(diags[0].message.as_ref());
+    }
+
+    // ── Post-layout locator: slide N in diagnostic message ────────────────────
+
+    /// Direct test for the post-layout locator path in `validate_post_layout`.
+    ///
+    /// Constructs a `LaidOutDeck` with two slides:
+    /// - slide 0 (`source_index` 0): a Chart frame with `AltText::Provided` (valid)
+    /// - slide 1 (`source_index` 1): a Chart frame with `AltText::Decorative` (missing alt)
+    ///
+    /// Asserts that:
+    /// 1. Exactly one diagnostic is emitted (the second slide, not the first).
+    /// 2. The diagnostic carries code `E-A11-001`.
+    /// 3. The diagnostic message contains `"slide 2"` (`source_index` 1 → 1-based = 2).
+    ///
+    /// Load-bearing: if `display_slide` were computed from an enumerate index
+    /// instead of `source_index + 1`, this test would fail when `source_index`
+    /// differs from the loop iteration order (e.g., after reordering slides).
+    /// If the locator were absent entirely, the `contains("slide 2")` assertion
+    /// would also fail.
+    #[test]
+    fn test_post_layout_locator_slide_number_in_diagnostic() {
+        use slideforge_layout::{
+            BoundingBox, Frame, FrameContent, LaidOutDeck, LaidOutSlide, PageSize,
+        };
+        use slideforge_types::{AltText, Emu};
+
+        let make_frame = |content: FrameContent| Frame {
+            bbox: BoundingBox {
+                x: Emu(0),
+                y: Emu(0),
+                width: Emu(1_000_000),
+                height: Emu(500_000),
+            },
+            content,
+            text_flow: None,
+        };
+
+        // Slide 0 (source_index=0, "title"): Chart with valid alt — no diagnostic expected.
+        let slide0 = LaidOutSlide {
+            source_index: 0,
+            slide_type_keyword: Arc::from("title"),
+            frames: vec![make_frame(FrameContent::Chart {
+                alt: AltText::Provided(Arc::from("Q1 revenue bar chart")),
+            })],
+            speaker_notes: None,
+            register_tags: vec![],
+            register_content: vec![],
+        };
+
+        // Slide 1 (source_index=1, "content"): Chart with AltText::Decorative — E-A11-001
+        // expected with locator "slide 2".
+        let slide1 = LaidOutSlide {
+            source_index: 1,
+            slide_type_keyword: Arc::from("content"),
+            frames: vec![make_frame(FrameContent::Chart {
+                alt: AltText::Decorative,
+            })],
+            speaker_notes: None,
+            register_tags: vec![],
+            register_content: vec![],
+        };
+
+        let laid_out = LaidOutDeck {
+            page_size: PageSize::default(),
+            slides: vec![slide0, slide1],
+            sections: vec![],
+            warnings: vec![],
+        };
+
+        let diags = AltTextValidator.validate_post_layout(&laid_out, &default_opts());
+
+        // Exactly one diagnostic — only the second slide triggers E-A11-001.
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected exactly 1 diagnostic (slide 1 has Decorative chart); got {diags:?}"
+        );
+
+        // Must be E-A11-001 error severity.
+        assert_eq!(
+            diags[0].code.as_ref(),
+            E_A11_001,
+            "diagnostic code must be E-A11-001; got {}",
+            diags[0].code
+        );
+        assert_eq!(
+            diags[0].severity,
+            DiagnosticSeverity::Error,
+            "diagnostic must be Error severity; got {:?}",
+            diags[0].severity
+        );
+
+        // The message must carry the correct 1-based slide locator: "slide 2".
+        assert!(
+            diags[0].message.contains("slide 2"),
+            "diagnostic message must contain 'slide 2' (source_index 1 → 1-based); got: {}",
+            diags[0].message
+        );
     }
 }

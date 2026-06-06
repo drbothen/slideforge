@@ -1,0 +1,20 @@
+# STORY-050 brand fixture.
+# Mirrors the brand.toml written by test_crit2_end_to_end_build_ok_with_toml_brand
+# in crates/slideforge/src/lib.rs (the LYNCHPIN test).
+# BrandSynthesizer accepts this minimal structure with logo.path + color tokens.
+#
+# NOTE: [logo].path is intentionally empty here — E2E tests that need a real
+# brand.toml use the make_brand_tmpdir() helper in tests/e2e/mod.rs which
+# writes a real logo.png to a tempdir and sets logo.path to an absolute path.
+# This file documents the schema; tests must not use it directly with build().
+
+[colors]
+dk1 = "#1F2937"
+acc1 = "#3B82F6"
+
+[fonts]
+heading = "Arial"
+body = "Arial"
+
+[logo]
+path = "logo.png"

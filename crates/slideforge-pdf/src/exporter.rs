@@ -504,8 +504,15 @@ impl PdfExporter {
 
         // Build the metadata object: language is always present (guarded above);
         // title is wired when present.
+        //
+        // SEC-050-001 / CWE-116: validate title for XML-1.0 legality before
+        // embedding in XMP metadata. `xmp_writer` escapes XML-reserved chars but
+        // does NOT strip XML-1.0-illegal control characters (U+0000–U+0008,
+        // U+000B, U+000C, U+000E–U+001F, U+FFFE, U+FFFF). We REJECT loudly
+        // (same policy as `validate_lang_for_xml` in slideforge-pptx).
         let mut meta = Metadata::new().language(lang.as_ref().to_owned());
         if let Some(title) = &deck.metadata.title {
+            validate_title_for_xmp(title.as_ref())?;
             meta = meta.title(title.as_ref().to_owned());
         }
         document.set_metadata(meta);
@@ -1256,6 +1263,54 @@ fn place_svg_at(
     let result = embed_normalized_svg(svg, surface, frame_w_pt, frame_h_pt);
     surface.pop();
     result
+}
+
+/// Guard: reject deck titles containing XML-1.0-illegal control characters
+/// before they are embedded in XMP metadata.
+///
+/// ## Rationale (SEC-050-001 / CWE-116)
+///
+/// XMP metadata is an XML-1.0 document. `xmp_writer` escapes the 5 XML-reserved
+/// characters (`&`, `<`, `>`, `"`, `'`) but does NOT strip XML-1.0-illegal
+/// control characters. The illegal ranges are:
+///
+/// - U+0000–U+0008 (C0 controls, excluding HT/LF/CR)
+/// - U+000B (Vertical Tab)
+/// - U+000C (Form Feed)
+/// - U+000E–U+001F (remaining C0 controls)
+/// - U+FFFE (UTF-16 BOM, wrong byte order — noncharacter)
+/// - U+FFFF (noncharacter)
+///
+/// Embedding such code points produces a malformed XMP stream, which violates
+/// PDF/UA-1 constraints and may cause downstream PDF readers to reject or
+/// silently corrupt the file.
+///
+/// ## Behaviour
+///
+/// This function REJECTS (returns `Err`) on the first illegal character found.
+/// It does NOT silently strip. This is consistent with
+/// `validate_lang_for_xml` in `slideforge-pptx` (SEC-039-001).
+///
+/// ## Losslessness invariant
+///
+/// A title containing only printable Unicode (the overwhelming majority of
+/// real deck titles) always passes through unchanged — this guard never
+/// modifies the title string, it only rejects.
+fn validate_title_for_xmp(title: &str) -> Result<(), PdfExportError> {
+    for ch in title.chars() {
+        let code = ch as u32;
+        let illegal = matches!(
+            code,
+            0x0000..=0x0008 | 0x000B | 0x000C | 0x000E..=0x001F | 0xFFFE | 0xFFFF
+        );
+        if illegal {
+            return Err(PdfExportError::InvalidXmpTitle {
+                title: title.to_owned(),
+                code_point: code,
+            });
+        }
+    }
+    Ok(())
 }
 
 impl Exporter for PdfExporter {
@@ -2645,5 +2700,150 @@ mod tests {
                  PDF (first 4096 bytes): {pdf_preview}"
             );
         }
+    }
+
+    // ── SEC-050-001: XMP title control-character guard ────────────────────────
+
+    /// Unit test for [`validate_title_for_xmp`] — U+0001 (SOH) must be REJECTED.
+    ///
+    /// This test is LOAD-BEARING: removing the `validate_title_for_xmp` call
+    /// in `generate_pdf_inner` (or this test) must cause the assertion to fail.
+    ///
+    /// Proof the guard fires on the real export path: the test calls
+    /// `PdfExporter::export()` (the full public trait method), which calls
+    /// `generate_pdf` → `generate_pdf_inner` → `validate_title_for_xmp`.
+    /// There is no mock or stub between the test and the guard.
+    ///
+    /// SEC-050-001 / CWE-116.
+    #[test]
+    fn test_sec_050_001_control_char_in_title_rejects() {
+        use slideforge_types::{DeckMetadata, OrderedMap};
+
+        let exporter = PdfExporter::new();
+        // Title containing U+0001 (SOH) — XML-1.0-illegal control character.
+        let deck = Deck {
+            slides: vec![],
+            vars: OrderedMap::new(),
+            metadata: DeckMetadata {
+                title: Some(Arc::from("Bad\u{0001}Title")),
+                slideforge_version: Arc::from("0.1.0"),
+                lang: Some(Arc::from("en-US")),
+                author: None,
+                section_order: None,
+            },
+            registers: OrderedMap::new(),
+            section_blocks: vec![],
+        };
+        let laid_out = minimal_laid_out_deck();
+        let brand = minimal_brand();
+        let opts = ExportOptions::default();
+
+        let result = exporter.export(&deck, &laid_out, &brand, &opts);
+
+        // Must return an error — the control-character guard must fire.
+        match result {
+            Err(ref e) => {
+                let err_msg = e.to_string();
+                assert!(
+                    err_msg.contains("XMP metadata")
+                        || err_msg.contains("control character")
+                        || err_msg.contains("0001"),
+                    "SEC-050-001: error message must mention XMP metadata or control character; \
+                     got: {err_msg}"
+                );
+            },
+            Ok(_) => {
+                panic!("SEC-050-001: export with a title containing U+0001 must return Err; got Ok")
+            },
+        }
+    }
+
+    /// Companion test: a normal title (no control chars) must still export Ok.
+    ///
+    /// Confirms the guard does not reject valid titles (losslessness invariant).
+    /// SEC-050-001 regression guard.
+    #[allow(clippy::unwrap_used)]
+    #[test]
+    fn test_sec_050_001_normal_title_exports_ok() {
+        use slideforge_types::{DeckMetadata, OrderedMap};
+
+        let exporter = PdfExporter::new();
+        let deck = Deck {
+            slides: vec![],
+            vars: OrderedMap::new(),
+            metadata: DeckMetadata {
+                title: Some(Arc::from("Q4 Results — Product Strategy 2026")),
+                slideforge_version: Arc::from("0.1.0"),
+                lang: Some(Arc::from("en-US")),
+                author: None,
+                section_order: None,
+            },
+            registers: OrderedMap::new(),
+            section_blocks: vec![],
+        };
+        let laid_out = minimal_laid_out_deck();
+        let brand = minimal_brand();
+        let opts = ExportOptions::default();
+
+        let result = exporter.export(&deck, &laid_out, &brand, &opts);
+        assert!(
+            result.is_ok(),
+            "SEC-050-001: a normal title must export successfully; got: {:?}",
+            result.err()
+        );
+    }
+
+    /// Unit test for `validate_title_for_xmp` — directly exercises each
+    /// boundary of the XML-1.0-illegal character ranges.
+    ///
+    /// Load-bearing: tests the pure guard function directly to cover all
+    /// illegal ranges (U+0000–U+0008, U+000B, U+000C, U+000E–U+001F, U+FFFE,
+    /// U+FFFF) without going through the full export pipeline.
+    #[test]
+    fn test_sec_050_001_validate_title_for_xmp_illegal_ranges() {
+        // Every illegal code point must be rejected.
+        let illegal_codepoints: &[u32] = &[
+            0x0000, 0x0001, 0x0008, // U+0000–U+0008
+            0x000B, // U+000B VT
+            0x000C, // U+000C FF
+            0x000E, 0x001F, // U+000E–U+001F
+            0xFFFE, 0xFFFF, // noncharacters
+        ];
+        for &cp in illegal_codepoints {
+            // Safety: build title string containing the illegal code point.
+            // Code points in these ranges are all valid Rust char values (except
+            // U+0000 which is also a valid char in Rust).
+            if let Some(ch) = char::from_u32(cp) {
+                let title = format!("bad{ch}title");
+                let result = validate_title_for_xmp(&title);
+                assert!(
+                    result.is_err(),
+                    "validate_title_for_xmp must reject U+{cp:04X}; got Ok for title {title:?}"
+                );
+                if let Err(PdfExportError::InvalidXmpTitle { code_point, .. }) = result {
+                    assert_eq!(
+                        code_point, cp,
+                        "InvalidXmpTitle.code_point must be U+{cp:04X}; got {code_point:04X}"
+                    );
+                } else {
+                    panic!("validate_title_for_xmp must return InvalidXmpTitle for U+{cp:04X}");
+                }
+            }
+        }
+
+        // Legal title — must pass.
+        assert!(
+            validate_title_for_xmp("Normal Title — with em-dash and café").is_ok(),
+            "validate_title_for_xmp must accept a normal title"
+        );
+        // U+0009 (HT), U+000A (LF), U+000D (CR) are legal in XML-1.0.
+        assert!(
+            validate_title_for_xmp("Title\twith\ttabs").is_ok(),
+            "validate_title_for_xmp must accept U+0009 (tab)"
+        );
+        assert!(
+            validate_title_for_xmp("Title\nwith\nnewlines").is_ok(),
+            "validate_title_for_xmp must accept U+000A (LF)"
+        );
     }
 }

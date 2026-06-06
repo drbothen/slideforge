@@ -1,0 +1,5 @@
+slideforge_version "1"
+lang "en-US"
+	bad_field "tab-indented line triggers E-PAR-001"
+slide title:
+  title "This slide is unreachable due to the tab error above"

@@ -73,4 +73,25 @@ pub enum PdfExportError {
         /// Description of the I/O failure.
         message: String,
     },
+
+    /// The deck title contains an XML-1.0-illegal control character and cannot
+    /// be safely embedded in XMP metadata.
+    ///
+    /// XMP metadata is an XML-1.0 document. The legal character set excludes
+    /// U+0000–U+0008, U+000B, U+000C, U+000E–U+001F, U+FFFE, and U+FFFF.
+    /// Embedding such characters would produce a malformed XMP stream
+    /// (CWE-116 / SEC-050-001).
+    ///
+    /// Callers must sanitize the deck title before passing it to the exporter,
+    /// or strip/replace illegal characters upstream (e.g., in the DSL parser).
+    #[error(
+        "PDF XMP metadata error: deck title contains XML-1.0-illegal \
+         control character U+{code_point:04X} — title: {title:?}"
+    )]
+    InvalidXmpTitle {
+        /// The raw title string that triggered the rejection.
+        title: String,
+        /// The Unicode code point of the first illegal character found.
+        code_point: u32,
+    },
 }

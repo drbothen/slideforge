@@ -44,7 +44,18 @@ miette = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
-# External plugin test (AC-007) needs slideforge-types to construct test Value instances.
+# External plugin test (STORY-049 AC-007) needs slideforge-types for test Value instances.
 slideforge-types = { workspace = true }
-# Plugin API trait access for external plugin dog-fooding test.
+# Plugin API trait access for external plugin dog-fooding test and STORY-050 E2E tests.
 slideforge-plugin-api = { workspace = true }
+
+# STORY-050 E2E test dependencies.
+# tracing-test: capture tracing events for AC-007 observability assertions.
+# no-env-filter: required for integration tests (tests/ crate) to capture INFO events
+# from the slideforge production crate. Without it, the env_filter uses the integration
+# test crate name ("e2e_tests") as the target prefix, which does not match the
+# production "slideforge::lib" target (STORY-050 Gap 3 / AC-007).
+tracing-test = { version = "=0.2.5", features = ["no-env-filter"] }
+# zip: validate PPTX/DOCX ZIP structure (AC-001, AC-002, AC-008).
+# Same feature set as slideforge-pptx to avoid lzma conflict.
+zip = { version = "=4.2.0", default-features = false, features = ["deflate", "time"] }

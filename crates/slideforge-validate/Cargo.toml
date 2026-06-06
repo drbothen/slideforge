@@ -16,6 +16,10 @@ slideforge-types = { workspace = true }
 # so no separate error enum is needed. thiserror and miette are intentionally
 # absent — errors are expressed via the plugin-api's Diagnostic type.
 slideforge-plugin-api = { workspace = true }
+# slideforge-layout: required by AltTextValidator::validate_post_layout to iterate
+# LaidOutDeck.slides[*].frames for FrameContent::Chart/Image/Diagram with missing
+# alt text (ADR-018 Decision 3 post-layout validation pass).
+slideforge-layout = { workspace = true }
 
 [dev-dependencies]
 insta = { workspace = true }
