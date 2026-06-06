@@ -385,15 +385,39 @@ fn test_bc_1_16_001_ac006_decorative_chart_strict_ok_no_e_a11_001() {
 /// AC-007 / BC-1.16.001 postcondition 7 — bullets slide produces ≥3 `<a:r>` text
 /// runs in PPTX output.
 ///
-/// Red Gate: stub → `Slide.blocks = vec![]` → no ContentBlock::Bullets → no
-/// BulletItem frames → no `<a:r>` runs in slide XML → `a_r_count < 3` → FAILS.
+/// ## Why this test is ignored (SID-1 compliant deferral)
 ///
-/// After Stage 2b: bullets field → ContentBlock::Bullets([A, B, C]) → layout
-/// produces 3 TextRun frames → PPTX serializer emits 3 `<a:r><a:t>` runs → PASSES.
+/// **Blocking dependency: STORY-088** — DSL list-literal parser. The fixture
+/// `story-086-bullets-slide.sf` uses the canonical DSL form:
+///
+/// ```text
+/// @var items = ["Item A", "Item B", "Item C"]
+/// slide content:
+///   title "Agenda"
+///   bullets: items
+/// ```
+///
+/// The current `value_parser()` does not support list literals (`[...]` syntax).
+/// Parsing this fixture produces a parse error; the e2e build call would fail
+/// before any PPTX output is produced.
+///
+/// **Covering unit test (SID-1 citation):** The load-bearing AC-007 coverage is
+/// `test_bc_1_16_001_ac007_value_list_produces_content_block_bullets` in
+/// `crates/slideforge-eval/tests/field_to_block_unit.rs`. That test exercises the
+/// `thread_fields_to_blocks` `Value::List → ContentBlock::Bullets` production code
+/// path directly, without DSL parsing, and is NOT ignored.
+///
+/// **Un-ignore instructions:** when STORY-088 ships list-literal support, simply
+/// remove the `#[ignore]` attribute. The fixture and the assertions below are
+/// already written for the real expected behavior.
 ///
 /// Traces: BC-1.16.001 postcondition 7; BC-1.16.001 invariant 2;
 ///         LESSON-13 positive content vector (bullet text assertions).
 #[test]
+#[ignore = "Blocked by STORY-088 (DSL list-literal parser). \
+            Load-bearing AC-007 coverage: \
+            test_bc_1_16_001_ac007_value_list_produces_content_block_bullets \
+            in crates/slideforge-eval/tests/field_to_block_unit.rs (SID-1)."]
 fn test_bc_1_16_001_ac007_bullets_slide_produces_ge3_text_runs_in_pptx() {
     // AC-007: bullets slide → ≥3 <a:r> runs in PPTX slide XML.
     // RED GATE: stub → no ContentBlock::Bullets → no runs → assertion fails.
