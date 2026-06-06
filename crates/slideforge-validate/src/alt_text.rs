@@ -201,13 +201,10 @@ impl Validator for AltTextValidator {
     ) -> Vec<Diagnostic> {
         let mut diagnostics: Vec<Diagnostic> = Vec::new();
 
-        for (slide_index, laid_out_slide) in laid_out.slides.iter().enumerate() {
-            // Use source_index for human-readable 1-based slide locator when available.
+        for laid_out_slide in &laid_out.slides {
             // source_index is the ordinal position in the semantic Deck (0-based); display
-            // as 1-based for user-facing diagnostics. Fallback to the enumerate index when
-            // source_index is not threaded (future-proofing).
+            // as 1-based for user-facing diagnostics.
             let display_slide = laid_out_slide.source_index + 1;
-            let _ = slide_index; // enumerate index kept for potential future use
             for frame in &laid_out_slide.frames {
                 let slide_type = laid_out_slide.slide_type_keyword.as_ref();
                 match &frame.content {
@@ -1104,5 +1101,104 @@ mod tests {
         let diags = AltTextValidator.validate(&deck, &default_opts());
         assert_eq!(diags.len(), 1);
         insta::assert_snapshot!(diags[0].message.as_ref());
+    }
+
+    // ── Post-layout locator: slide N in diagnostic message ────────────────────
+
+    /// Direct test for the post-layout locator path in `validate_post_layout`.
+    ///
+    /// Constructs a `LaidOutDeck` with two slides:
+    /// - slide 0 (`source_index` 0): a Chart frame with `AltText::Provided` (valid)
+    /// - slide 1 (`source_index` 1): a Chart frame with `AltText::Decorative` (missing alt)
+    ///
+    /// Asserts that:
+    /// 1. Exactly one diagnostic is emitted (the second slide, not the first).
+    /// 2. The diagnostic carries code `E-A11-001`.
+    /// 3. The diagnostic message contains `"slide 2"` (`source_index` 1 → 1-based = 2).
+    ///
+    /// Load-bearing: if `display_slide` were computed from an enumerate index
+    /// instead of `source_index + 1`, this test would fail when `source_index`
+    /// differs from the loop iteration order (e.g., after reordering slides).
+    /// If the locator were absent entirely, the `contains("slide 2")` assertion
+    /// would also fail.
+    #[test]
+    fn test_post_layout_locator_slide_number_in_diagnostic() {
+        use slideforge_layout::{
+            BoundingBox, Frame, FrameContent, LaidOutDeck, LaidOutSlide, PageSize,
+        };
+        use slideforge_types::{AltText, Emu};
+
+        let make_frame = |content: FrameContent| Frame {
+            bbox: BoundingBox {
+                x: Emu(0),
+                y: Emu(0),
+                width: Emu(1_000_000),
+                height: Emu(500_000),
+            },
+            content,
+            text_flow: None,
+        };
+
+        // Slide 0 (source_index=0, "title"): Chart with valid alt — no diagnostic expected.
+        let slide0 = LaidOutSlide {
+            source_index: 0,
+            slide_type_keyword: Arc::from("title"),
+            frames: vec![make_frame(FrameContent::Chart {
+                alt: AltText::Provided(Arc::from("Q1 revenue bar chart")),
+            })],
+            speaker_notes: None,
+            register_tags: vec![],
+            register_content: vec![],
+        };
+
+        // Slide 1 (source_index=1, "content"): Chart with AltText::Decorative — E-A11-001
+        // expected with locator "slide 2".
+        let slide1 = LaidOutSlide {
+            source_index: 1,
+            slide_type_keyword: Arc::from("content"),
+            frames: vec![make_frame(FrameContent::Chart {
+                alt: AltText::Decorative,
+            })],
+            speaker_notes: None,
+            register_tags: vec![],
+            register_content: vec![],
+        };
+
+        let laid_out = LaidOutDeck {
+            page_size: PageSize::default(),
+            slides: vec![slide0, slide1],
+            sections: vec![],
+            warnings: vec![],
+        };
+
+        let diags = AltTextValidator.validate_post_layout(&laid_out, &default_opts());
+
+        // Exactly one diagnostic — only the second slide triggers E-A11-001.
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected exactly 1 diagnostic (slide 1 has Decorative chart); got {diags:?}"
+        );
+
+        // Must be E-A11-001 error severity.
+        assert_eq!(
+            diags[0].code.as_ref(),
+            E_A11_001,
+            "diagnostic code must be E-A11-001; got {}",
+            diags[0].code
+        );
+        assert_eq!(
+            diags[0].severity,
+            DiagnosticSeverity::Error,
+            "diagnostic must be Error severity; got {:?}",
+            diags[0].severity
+        );
+
+        // The message must carry the correct 1-based slide locator: "slide 2".
+        assert!(
+            diags[0].message.contains("slide 2"),
+            "diagnostic message must contain 'slide 2' (source_index 1 → 1-based); got: {}",
+            diags[0].message
+        );
     }
 }
