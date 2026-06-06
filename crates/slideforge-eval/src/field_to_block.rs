@@ -83,24 +83,30 @@ use slideforge_types::{
 pub fn thread_fields_to_blocks(deck: &mut Deck) {
     for slide in &mut deck.slides {
         // ── 1. Title ─────────────────────────────────────────────────────────
+        // TextTag::Title is set so layout.rs routes this block to FrameContent::Title
+        // instead of the generic FrameContent::TextRun (ADR-019 Decision 3 / AC-019).
         if let Some(text) = extract_str_field(slide, "title")
             && !text.trim().is_empty()
         {
-            slide.blocks.push(make_text_block(text));
+            slide.blocks.push(make_text_block_tagged(text, TextTag::Title));
         }
 
         // ── 2. Subtitle ──────────────────────────────────────────────────────
+        // TextTag::Subtitle routes to FrameContent::Subtitle (PPTX subTitle placeholder,
+        // DOCX Heading2 paragraph) per BC-4.01.001 v1.2 postcondition 10 / BC-4.02.001 v1.2 PC-9.
         if let Some(text) = extract_str_field(slide, "subtitle")
             && !text.trim().is_empty()
         {
-            slide.blocks.push(make_text_block(text));
+            slide.blocks.push(make_text_block_tagged(text, TextTag::Subtitle));
         }
 
         // ── 3. Body ──────────────────────────────────────────────────────────
+        // TextTag::Body routes to FrameContent::Body (PPTX body placeholder,
+        // DOCX Normal paragraph) per BC-4.01.001 v1.2 postcondition 11 / BC-4.02.001 v1.2 PC-10.
         if let Some(text) = extract_str_field(slide, "body")
             && !text.trim().is_empty()
         {
-            slide.blocks.push(make_text_block(text));
+            slide.blocks.push(make_text_block_tagged(text, TextTag::Body));
         }
 
         // ── 4. Bullets ───────────────────────────────────────────────────────
@@ -155,48 +161,29 @@ pub fn thread_fields_to_blocks(deck: &mut Deck) {
         // Chart: slide_type == "chart" (or any ChartRenderer surface type).
         // For v1.0, keyed on slide_type == "chart".
         //
-        // NOTE on alt=None handling (ADR-019 Decision 3 / anti-double-fire):
-        // When the author provides neither `alt "..."` nor `decorative true`, Stage 2b
-        // produces `alt = None` for the resolved alt field. In this case, Stage 2b does NOT
-        // emit a ContentBlock::Chart — the structural placeholder in regions.rs retains
-        // `AltText::Unspecified`, and the post-layout validator (`validate_post_layout`)
-        // emits exactly one E-A11-001 for the missing alt.
+        // NOTE on alt=None handling (ADR-019 Decision 3 / ADR-018 v1.2 Decision-3):
+        // Stage 2b emits ContentBlock::Chart even when alt=None. The pre-layout
+        // AltTextValidator::validate() is restricted to ContentBlock::Shape ONLY (ADR-018 v1.2
+        // Decision-3), so no double-fire occurs. thread_media_alt_into_frames maps None →
+        // AltText::Unspecified on the frame, and validate_post_layout emits exactly one
+        // E-A11-001 for the missing alt (BC-5.01.001 postcondition 1 / AC-005).
         //
-        // If Stage 2b were to emit ContentBlock::Chart { alt: None }, the pre-layout
-        // validator (AltTextValidator::validate) would ALSO fire E-A11-001 for the same
-        // missing alt, producing a double-diagnostic in the combined strict-mode report.
-        // Skipping ContentBlock::Chart creation when alt=None ensures exactly one E-A11-001
-        // per missing-alt chart (ADR-019 Decision 3.3 / BC-5.01.001 postcondition 1).
-        //
-        // For alt=Some(Provided(...)) or alt=Some(Decorative), a ContentBlock::Chart IS
-        // emitted so that thread_media_alt_into_frames can thread the author-supplied
-        // alt text into the frame, overwriting the Unspecified placeholder.
+        // This design change (architect-pass-1-adjudication Issue 1 verdict CODE-CONFORMS)
+        // supersedes the prior anti-double-fire skip logic.
         if slide_type == "chart" {
             if let Some(chart_type) = extract_str_field(slide, "chart_type") {
-                if alt.is_some() {
-                    // Author supplied alt or decorative — thread into the chart block.
-                    slide.blocks.push(Block {
-                        content: ContentBlock::Chart(ChartSpec {
-                            chart_type: Arc::from(chart_type),
-                            alt,
-                            decorative,
-                            span: SourceSpan::default(),
-                        }),
-                        label: None,
+                // Always emit the ContentBlock::Chart, even when alt=None.
+                // Pre-layout validate() is restricted to Shape; post-layout fires exactly once.
+                slide.blocks.push(Block {
+                    content: ContentBlock::Chart(ChartSpec {
+                        chart_type: Arc::from(chart_type),
+                        alt,
+                        decorative,
                         span: SourceSpan::default(),
-                    });
-                } else {
-                    // No alt and not decorative: skip ContentBlock::Chart.
-                    // The structural placeholder in regions.rs carries AltText::Unspecified,
-                    // and validate_post_layout will fire E-A11-001 exactly once.
-                    tracing::debug!(
-                        slide_type,
-                        chart_type,
-                        "Stage 2b: chart has no alt and is not decorative — \
-                         skipping ContentBlock::Chart; regions.rs Unspecified placeholder \
-                         retained; validate_post_layout will emit E-A11-001 (ADR-019 Decision 3.3)"
-                    );
-                }
+                    }),
+                    label: None,
+                    span: SourceSpan::default(),
+                });
             } else {
                 tracing::warn!(
                     slide_type,
@@ -207,27 +194,19 @@ pub fn thread_fields_to_blocks(deck: &mut Deck) {
             }
         } else if matches!(slide_type, "image" | "screenshot" | "bio") {
             // Image: slide_type in {image, screenshot, bio}.
-            // Same anti-double-fire rule as chart: skip when alt=None.
+            // Same rule as chart: emit unconditionally; pre-layout validate() is Shape-only.
             if let Some(src) = extract_str_field(slide, "src") {
-                if alt.is_some() {
-                    slide.blocks.push(Block {
-                        content: ContentBlock::Image(ImageSpec {
-                            path: Arc::from(src),
-                            alt,
-                            decorative,
-                            span: SourceSpan::default(),
-                        }),
-                        label: None,
+                // Always emit the ContentBlock::Image, even when alt=None.
+                slide.blocks.push(Block {
+                    content: ContentBlock::Image(ImageSpec {
+                        path: Arc::from(src),
+                        alt,
+                        decorative,
                         span: SourceSpan::default(),
-                    });
-                } else {
-                    tracing::debug!(
-                        slide_type,
-                        src,
-                        "Stage 2b: image has no alt and is not decorative — \
-                         skipping ContentBlock::Image; Unspecified placeholder retained"
-                    );
-                }
+                    }),
+                    label: None,
+                    span: SourceSpan::default(),
+                });
             } else {
                 tracing::warn!(
                     slide_type,
@@ -237,27 +216,20 @@ pub fn thread_fields_to_blocks(deck: &mut Deck) {
                 );
             }
         } else if slide_type == "diagram" {
-            // Diagram: slide_type == "diagram". Same anti-double-fire rule.
+            // Diagram: slide_type == "diagram".
+            // Same rule as chart/image: emit unconditionally; pre-layout validate() is Shape-only.
             if let Some(source) = extract_str_field(slide, "source") {
-                if alt.is_some() {
-                    slide.blocks.push(Block {
-                        content: ContentBlock::Diagram(DiagramSpec {
-                            source: Arc::from(source),
-                            alt,
-                            decorative,
-                            span: SourceSpan::default(),
-                        }),
-                        label: None,
+                // Always emit the ContentBlock::Diagram, even when alt=None.
+                slide.blocks.push(Block {
+                    content: ContentBlock::Diagram(DiagramSpec {
+                        source: Arc::from(source),
+                        alt,
+                        decorative,
                         span: SourceSpan::default(),
-                    });
-                } else {
-                    tracing::debug!(
-                        slide_type,
-                        source,
-                        "Stage 2b: diagram has no alt and is not decorative — \
-                         skipping ContentBlock::Diagram; Unspecified placeholder retained"
-                    );
-                }
+                    }),
+                    label: None,
+                    span: SourceSpan::default(),
+                });
             } else {
                 tracing::warn!(
                     slide_type,
@@ -321,12 +293,18 @@ fn is_decorative(slide: &slideforge_types::Slide) -> bool {
 /// Construct a `Block` wrapping a `ContentBlock::Text` from a plain string.
 ///
 /// Uses `TextTag::Untagged` as the default tag. Stage 2b callers must update
-/// the tag to the correct semantic value after construction.
-fn make_text_block(text: &str) -> Block {
+/// Construct a `Block` wrapping a `ContentBlock::Text` with the specified [`TextTag`].
+///
+/// Stage 2b callers use this to set the correct semantic tag when constructing
+/// text blocks from DSL fields (`title`, `subtitle`, `body`). The tag drives the
+/// routing decision in `layout.rs` (`TextTag::Title` → `FrameContent::Title`,
+/// `TextTag::Subtitle` → `FrameContent::Subtitle`, `TextTag::Body` → `FrameContent::Body`,
+/// `TextTag::Untagged` → `FrameContent::TextRun`).
+fn make_text_block_tagged(text: &str, tag: TextTag) -> Block {
     Block {
         content: ContentBlock::Text(TextBlock {
             inlines: vec![InlineNode::Plain(Arc::from(text))],
-            tag: TextTag::Untagged,
+            tag,
             span: SourceSpan::default(),
         }),
         label: None,
