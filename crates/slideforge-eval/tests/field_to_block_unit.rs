@@ -976,7 +976,11 @@ fn test_bc_1_16_001_decorative_only_still_produces_decorative_after_fix() {
         .iter()
         .filter(|b| matches!(b.content, ContentBlock::Chart(_)))
         .collect();
-    assert_eq!(chart_blocks.len(), 1, "decorative chart must produce ContentBlock::Chart");
+    assert_eq!(
+        chart_blocks.len(),
+        1,
+        "decorative chart must produce ContentBlock::Chart"
+    );
     if let ContentBlock::Chart(spec) = &chart_blocks[0].content {
         assert_eq!(
             spec.alt,

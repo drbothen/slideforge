@@ -49,15 +49,20 @@ use slideforge_types::{
 /// Empty strings (after trim) are silently skipped — no `ContentBlock` is
 /// emitted for empty-string field values (BC-1.16.001 EC-001).
 ///
-/// # `AltText` contract
+/// # `AltText` contract (decorative-first, BC-1.16.001 PC-12)
 ///
 /// When constructing `ContentBlock::Chart`, `ContentBlock::Image`, or
 /// `ContentBlock::Diagram`, the threading pass uses the following alt-resolution
-/// precedence (see ADR-019 Decision 4, `AltText` state machine):
+/// precedence (BC-1.16.001 PC-12 / EC-004, ADR-019 Decision 4):
 ///
 /// 1. `Slide.fields["decorative"] == Value::Bool(true)` → `ContentBlock.alt = Some(AltText::Decorative)`
+///    (wins unconditionally, even if `alt` is also set — see W-A11-002 below).
 /// 2. `Slide.fields["alt"] == Value::Str(s)` (non-empty, non-whitespace) → `ContentBlock.alt = Some(AltText::Provided(Arc::from(s)))`
 /// 3. Neither present → `ContentBlock.alt = None`
+///
+/// When both `decorative: true` AND a non-empty `alt` are present, rule 1 wins
+/// and `tracing::warn!(code = "W-A11-002", ...)` is emitted to surface the
+/// conflict to the author (error-taxonomy v2.17 W-A11-002).
 ///
 /// The layout `thread_media_alt_into_frames` function then maps `None` to
 /// `AltText::Unspecified` on the resulting frame (ADR-019 Decision 5).
@@ -255,31 +260,46 @@ fn extract_str_field<'s>(slide: &'s slideforge_types::Slide, key: &str) -> Optio
 
 /// Resolve the `alt` field from a slide into an `Option<AltText>`.
 ///
-/// Precedence (ADR-019 Decision 4):
-/// 1. `decorative: true` → `Some(AltText::Decorative)` (checked by caller
-///    via [`is_decorative`]; here we handle the alt-wins case).
+/// Precedence (BC-1.16.001 PC-12, ADR-019 Decision 4 — decorative-first):
+/// 1. `decorative: true` → `Some(AltText::Decorative)` (decorative opt-out
+///    wins unconditionally, even when a non-empty `alt` is also present).
 /// 2. `alt "..."` (non-empty after trim) → `Some(AltText::Provided(s))`.
 /// 3. Neither → `None`.
 ///
-/// When both `decorative: true` AND a non-empty `alt` are present, `alt`
-/// takes precedence per BC-3.04.001 Invariant 11: returns
-/// `Some(AltText::Provided(s))` so the pre-layout validator can emit W-A11-002.
+/// When both `decorative: true` AND a non-empty `alt` are present (conflict
+/// case), this function:
+/// - Returns `Some(AltText::Decorative)` (decorative wins — BC-1.16.001 PC-12 / EC-004).
+/// - Emits `tracing::warn!(code = "W-A11-002", ...)` to surface the conflict
+///   so authors can clean up the contradictory field pair. The warning is only
+///   emitted when BOTH are set; single-field cases are silent.
+///
+/// The former "alt-first" rule (BC-3.04.001 Invariant 11) is superseded by
+/// BC-1.16.001 PC-12 per architect pass-5 adjudication (finding F-086-P5-CRIT-001).
 fn resolve_alt(slide: &slideforge_types::Slide) -> Option<AltText> {
     let has_decorative = is_decorative(slide);
     let alt_str = extract_str_field(slide, "alt");
+    let has_alt = alt_str.is_some_and(|s| !s.trim().is_empty());
 
-    match alt_str {
-        Some(s) if !s.trim().is_empty() => {
-            // alt takes precedence over decorative (BC-3.04.001 Invariant 11).
-            Some(AltText::Provided(Arc::from(s)))
-        },
-        _ => {
-            if has_decorative {
-                Some(AltText::Decorative)
-            } else {
-                None
-            }
-        },
+    if has_decorative {
+        if has_alt {
+            // Both fields set: decorative wins, but warn the author (W-A11-002).
+            // error-taxonomy v2.17 W-A11-002: decorative opt-out takes precedence
+            // over a provided alt string; the alt string is discarded.
+            tracing::warn!(
+                code = "W-A11-002",
+                slide_type = %slide.slide_type,
+                "accessibility conflict: both `decorative: true` and a non-empty `alt` \
+                 are set on this slide; the decorative opt-out wins (BC-1.16.001 PC-12 / EC-004) \
+                 and the alt string is discarded. Remove one field to silence this warning."
+            );
+        }
+        Some(AltText::Decorative)
+    } else if let Some(s) = alt_str
+        && !s.trim().is_empty()
+    {
+        Some(AltText::Provided(Arc::from(s)))
+    } else {
+        None
     }
 }
 
