@@ -2,7 +2,7 @@
 document_type: prd-supplement
 supplement_type: error-taxonomy
 level: L3
-version: "2.16"
+version: "2.17"
 status: active
 producer: product-owner
 timestamp: 2026-06-05T00:00:00
@@ -332,6 +332,44 @@ checked "before layout" — the authoritative sources are ADR-018 Decision 3 and
 
 ---
 
+## Accessibility Warnings (W-A11)
+
+Non-fatal accessibility lint warnings. Output is produced; exit code is 0. Routed to
+`stderr` with a `warning:` prefix. Emitted via `tracing::warn!` with structured `code`
+field — they are tracing events, not diagnostic-accumulator entries.
+
+| Code | Severity | Exit | Message Format | Traces To |
+|------|---------|------|---------------|-----------|
+| W-A11-002 | cosmetic | 0 | Emitted in two contexts: (1) **Stage-2b `resolve_alt` (charts/images/diagrams):** `"warning: [W-A11-002] slide has both decorative: true and a non-empty alt; decorative takes precedence in Stage 2b (chart/image/diagram). Consider removing the alt field or removing decorative: true."` (2) **Shape DSL path (`slideforge-validate`):** `"warning: [W-A11-002] shape has both alt and decorative: true; alt takes precedence. Consider removing one."` | DI-001, BC-1.16.001 PC-12, BC-3.04.001 Inv-11 |
+
+Note (W-A11-002): This warning fires when an element declares both `decorative: true` and
+a non-empty `alt "..."`, flagging a likely authoring mistake where the author's accessibility
+intent is ambiguous. The resolution direction differs by domain:
+
+- **Stage-2b `thread_fields_to_blocks::resolve_alt` (charts, images, diagrams):** Decorative
+  wins. `resolve_alt` returns `AltText::Decorative` and emits W-A11-002 via
+  `tracing::warn!(code = "W-A11-002", ...)` at resolution time. The `alt` string is discarded.
+  This warning is emitted by Stage-2b itself — NOT by `AltTextValidator::validate()`, which is
+  Shape-only per ADR-018 v1.2 Decision-3 and cannot reach charts/images/diagrams pre-layout.
+  Governed by BC-1.16.001 PC-12 (decorative-first).
+
+- **Shape DSL path (`layout_shapes` → `ShapeFrame`, `slideforge-validate` validator):** Alt
+  wins. The `ShapeFrame.alt` carries `AltText::Provided(s)` at layout resolution time;
+  `ShapeSpec.decorative` is preserved in the IR (not mutated). W-A11-002 is emitted by
+  `slideforge-validate` after layout to prompt the author to clean up the ambiguity, but
+  the alt text MUST NOT be suppressed. Governed by BC-3.04.001 Invariant 11 (alt-first,
+  shape DSL path only).
+
+W-A11-001 is a DEPRECATED code (was used in BC-5.01.002 §3 prior to v1.2). All references
+should use W-A11-002. W-A11-001 is not registered here — it is retired.
+
+Pre-registration check (2026-06-06): W-A11-002 was referenced in BC-3.04.001 v1.5.1+,
+BC-1.16.001 EC-004, and the STORY-086 pass-5 adjudication (F-086-P5-MED-002), but had
+no taxonomy row prior to this entry. No collision with existing codes — the W-A11 warning
+namespace was previously empty in this taxonomy.
+
+---
+
 ## Diagnostic Severity Definitions
 
 | Severity | Meaning | Strict Mode | Warn-Only Mode |
@@ -385,3 +423,4 @@ Per DI-018 and BC-1.15.002:
 | 2.14 | 2026-06-05 | product-owner | STORY-050 Gap-2 / ADR-018 (human-authorized 2026-06-05): **E-A11-001 pipeline-stage note added.** E-A11-001 is emitted during the post-layout validation pass (Stage 6b, `validate_post_layout(&LaidOutDeck)`) per ADR-018, not the pre-layout pass (Stage 5). Root cause confirmed: `Deck.slides[*].blocks == vec![]` after eval (`for_eval.rs:342`); `FrameContent::Chart/Image/Diagram` only exist in `LaidOutDeck` post-layout. The error code, severity (broken), and exit code (2) are **unchanged** — only the pipeline stage where enforcement fires has changed. Note appended to E-A11-001 documenting this for implementers. This note supersedes any existing spec text or code comment stating E-A11-001 is checked "before layout." BC-5.02.001 v1.5 and BC-5.01.001 v1.2 updated in same burst. |
 | 2.16 | 2026-06-05 | product-owner | ADR-019 (Stage 2b, human-authorized 2026-06-05): **E-A11-001 trigger condition precisely documented.** E-A11-001 fires on `AltText::Unspecified` frames (NOT on `AltText::Decorative` frames). `AltText::Unspecified` is the new third enum variant (ADR-019 Decision 4) meaning "structural pipeline placeholder; no author alt-text data threaded." `AltText::Decorative` (author wrote `decorative: true`) is a valid opt-out — `validate_post_layout` now distinguishes these two cases unambiguously. Five `regions.rs` structural placeholder sites changed from `Decorative` to `Unspecified` (ADR-019 Decision 5.1); three `thread_media_alt_into_frames` fallback sites changed from `Decorative` to `Unspecified` (ADR-019 Decision 5.2); three `validate_post_layout` match arms updated accordingly (ADR-019 Decision 5.3). Dual-remedy message note added: "Add alt \"...\" or decorative: true" — both remedies work because Stage 2b (ADR-019) reads both fields and sets ContentBlock.alt → propagates to AltText::Provided or AltText::Decorative on frame → neither triggers E-A11-001. Error code, severity (broken), and exit code (2) are UNCHANGED — only the triggering variant name is narrowed from any-non-Provided to specifically Unspecified. BC-5.01.001 v1.3 and BC-5.02.001 v1.6 updated in same burst. |
 | 2.15 | 2026-06-05 | product-owner | STORY-050 PR #61 security review (SEC-050-001) taxonomy consistency: **E-EXP-003 note added** for `PdfExportError::InvalidXmpTitle`. Confirmed that the analogous PPTX variant `PptxError::InvalidLanguageTag` (SEC-039-001) has no dedicated taxonomy code — it routes through E-EXP-001 as a variant-only pattern. Per consistency-mirror rule: `InvalidXmpTitle` likewise receives no dedicated code; it routes through E-EXP-003 as a variant-only pattern. E-EXP-003 table row updated to cite the variant; explanatory note added documenting the routing, the CWE-116 security context, the parallel with SEC-039-001, and confirming no Rust variant change is required. No new E-EXP-NNN code allocated. |
+| 2.17 | 2026-06-06 | product-owner | STORY-086 pass-5 adjudication (F-086-P5-MED-002): **W-A11-002 registered** — new "Accessibility Warnings (W-A11)" section added. W-A11-002 was referenced in BC-3.04.001 v1.5.1+, BC-1.16.001 EC-004, and STORY-086 adjudication but had no taxonomy entry (the W-A11 warning namespace was empty prior to this version). Pre-registration collision check confirmed W-A11-002 free. Semantics: fires when both `decorative: true` and a non-empty `alt "..."` are set on the same element, flagging a likely authoring mistake. Two-context warning: (1) Stage-2b `resolve_alt` for charts/images/diagrams — decorative wins, W-A11-002 emitted via `tracing::warn!(code = "W-A11-002")` at resolution time; (2) shape DSL `slideforge-validate` — alt wins (BC-3.04.001 Inv-11), W-A11-002 emitted post-layout. W-A11-001 (deprecated predecessor) is NOT registered — it is retired. Taxonomy version 2.16 → 2.17. Note: changelog row 2.15 appears after 2.16 in the table due to authoring order — this is a documentation sequencing artifact, not a retcon; both v2.15 and v2.16 were produced on the same date (2026-06-05) in separate bursts. |

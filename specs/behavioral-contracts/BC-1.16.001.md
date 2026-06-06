@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.0"
+version: "1.1"
 status: active
 producer: product-owner
 timestamp: 2026-06-05T00:00:00
@@ -14,7 +14,7 @@ subsystem: SS-02
 capability: CAP-001
 lifecycle_status: active
 introduced: v1.0.0
-modified: []
+modified: ["v1.1 — STORY-086 pass-5 adjudication (F-086-P5-CRIT-001, F-086-P5-MED-002): EC-004 mechanism corrected. The prior text stated 'the pre-layout validator emits W-A11-002' — that mechanism is unreachable because AltTextValidator::validate() is Shape-only per ADR-018 v1.2 Decision-3; charts are never validated pre-layout. Corrected: when both decorative: true and a non-empty alt are set, resolve_alt returns AltText::Decorative (decorative wins) AND emits W-A11-002 via tracing::warn!(code = \"W-A11-002\") at Stage-2b resolution time. PC-12 alt-resolution rule reworded to make the decorative-first ordering explicit and unambiguous. No behavioral change — decorative-first was already the canonical postcondition per PC-12."]
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -86,8 +86,17 @@ NOT populated by this threading pass.
     if `fields["source"]` is `FieldValue::Literal(Value::Str(s))`, a `ContentBlock::Diagram(DiagramSpec { source: Arc::from(s), alt: <alt>, decorative: <decorative>, span })` is appended.
     If `fields["source"]` is absent, emit `tracing::warn!` and skip.
 12. **Alt-resolution rule** (applied identically for Chart, Image, and Diagram):
+    Decorative-first: when `decorative: true` is set, it takes unconditional precedence
+    over any supplied `alt` string. This is the canonical ordering for Stage-2b media
+    alt-resolution (BC-1.16.001 PC-12), which differs from the shape DSL path
+    (BC-3.04.001 Invariant 11, alt-first) — those BCs govern non-overlapping domains
+    and must NOT be cross-applied.
     - If `fields["decorative"] == FieldValue::Literal(Value::Bool(true))`:
       `alt = Some(AltText::Decorative)`, `decorative = true`.
+      If `fields["alt"]` is ALSO set to a non-empty string, `resolve_alt` still returns
+      `AltText::Decorative` (decorative wins) AND emits
+      `tracing::warn!(code = "W-A11-002", ...)` at resolution time to flag the authoring
+      conflict. The alt string is discarded. (See also: EC-004, W-A11-002 taxonomy entry.)
     - Else if `fields["alt"] == FieldValue::Literal(Value::Str(s))` and `s.trim()` is non-empty:
       `alt = Some(AltText::Provided(Arc::from(s.trim())))`, `decorative = false`.
     - Else (neither present, or `alt` is empty/whitespace-only, or `decorative` is false/absent):
@@ -150,7 +159,7 @@ NOT populated by this threading pass.
 | EC-001 | `fields["title"]` is `Value::Str("")` (empty string) | No `ContentBlock::Text` for title. Empty strings are silently skipped per Postcondition 6. |
 | EC-002 | `fields["title"]` is `Value::Str("  ")` (whitespace-only) | No `ContentBlock::Text` for title. Whitespace-only after trim is treated as empty. |
 | EC-003 | `fields["alt"]` is `Value::Str("")` on a chart slide | `alt = None`. The empty-string alt is NOT treated as `AltText::Provided`. Layout will produce `AltText::Unspecified`; E-A11-001 fires in strict mode. |
-| EC-004 | `fields["decorative"] = Value::Bool(true)` AND `fields["alt"] = Value::Str("desc")` on same chart slide | `alt = Some(AltText::Decorative)`, `decorative = true`. Decorative takes precedence in Stage 2b. Note: ADR-019 Decision 4.1 documents this conflict; the pre-layout validator emits W-A11-002. |
+| EC-004 | `fields["decorative"] = Value::Bool(true)` AND `fields["alt"] = Value::Str("desc")` on same chart slide | `alt = Some(AltText::Decorative)`, `decorative = true`. Decorative takes precedence in Stage 2b (PC-12). `resolve_alt` returns `AltText::Decorative` and emits `tracing::warn!(code = "W-A11-002")` at resolution time; the alt string "desc" is discarded. The pre-layout `AltTextValidator::validate()` does NOT emit W-A11-002 for charts/images/diagrams — that validator is Shape-only per ADR-018 v1.2 Decision-3. W-A11-002 is a Stage-2b resolution-time warning, not a validation-stage finding. (F-086-P5-MED-002 mechanism correction, 2026-06-06) |
 | EC-005 | Chart slide with no `fields["chart_type"]` | `tracing::warn!` emitted. No `ContentBlock::Chart` produced. Layout region for the chart slide will carry `AltText::Unspecified` structural placeholder; E-A11-001 fires in strict mode if no alt was provided. |
 | EC-006 | Image slide with no `fields["src"]` | `tracing::warn!` emitted. No `ContentBlock::Image` produced. Same Unspecified outcome as EC-005. |
 | EC-007 | Slide with all three of title, body, and bullets fields | Three blocks produced: `[ContentBlock::Text(Title), ContentBlock::Text(Body), ContentBlock::Bullets(...)]` in canonical order. |

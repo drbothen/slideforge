@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.5.2"
+version: "1.6"
 status: active
 producer: product-owner
 timestamp: 2026-05-29T00:00:00
@@ -14,7 +14,7 @@ subsystem: SS-TBD
 capability: CAP-023
 lifecycle_status: active
 introduced: v1.0.0
-modified: ["v1.2 — adversary pass 1 adjudication: codified ShapeSpec position schema, hex color contract, shape_type closed vocabulary, off-canvas boundary semantics, gradient deferral, MissingAlt span, multi-error accumulation", "v1.3 — roundRect added to closed vocabulary per Q7 decision example", "v1.3.1 — STORY-TBD-shape-gradient-fills placeholder resolved to STORY-072", "v1.3.2 — VP propagation burst: assigned VP-037 through VP-042 to all VP-TBD entries", "v1.4 — adversary pass 2 adjudications M/N/O/P/Q/R/T: ArithmeticOverflow Result return, LayoutError::Multiple uniformity, LaidOutDeck warnings field, fill+text fields on ShapeSpec, canonical test vectors, uppercase normalization phrasing, shape frame order enforcement", "v1.4.1 — pass-7 drift fix (F-P7-HIGH-004): slide_index → source_slide_index in EC-001 and EC-003 per AC-BC-A9 canonical field name", "v1.4.2 — pass-8 fix (F-P8-MED-001): Deferred Surfaces section rewritten to be consistent with Postcondition 1 — FillSpec::Gradient is NOT in the v1.0 enum (code confirmed absent); removed contradictory claim that variant is defined in IR", "v1.4.3 — pass-9 fix (F-P9-HIGH-002): E-PAR-013 → E-PAR-015 (hex color invalid) and E-PAR-014 → E-PAR-016 (gradient unsupported) to resolve namespace collision with parser template codes; updated precondition 5, EC-008, EC-009, EC-011, canonical test vectors, and Deferred Surfaces section", "v1.5.0 — pass-18 spec adjudication (F-P18-HIGH-001): added Invariant 11 (alt-wins over decorative when both supplied); updated Precondition 3 wording from exclusive-OR to explicit precedence; added EC-018 and canonical test vector for alt+decorative conflict; updated slideforge-validate handoff note. WCAG canonical: explicit alt text supersedes implicit-decorative inference.", "v1.5.1 — pass-19 prose fix (F-P19-MED-003): Invariant 11 reworded to remove ambiguous 'slideforge-validate W-A11-001' phrase (W-A11-001 is a deprecated warning code, NOT a validator name). Now reads: the slideforge-validate alt-text validator MUST emit W-A11-002 (replacing deprecated W-A11-001 from BC-5.01.002 §3 prior to v1.2).", "v1.5.2 — F-P20-LOW-003 prose precision: Invariant 11 rewritten to clarify that ShapeSpec.decorative is NOT mutated; the alt-wins effect is achieved via the typed ShapeFrame.alt enum (AltText::Provided) at layout resolution time. EC-018 canonical test vector updated to assert on ShapeFrame.alt typed enum instead of ShapeSpec.decorative field mutation. Canonical test vector row for alt+decorative conflict updated to match. STORY-028 AC-BC-A10 updated."]
+modified: ["v1.2 — adversary pass 1 adjudication: codified ShapeSpec position schema, hex color contract, shape_type closed vocabulary, off-canvas boundary semantics, gradient deferral, MissingAlt span, multi-error accumulation", "v1.3 — roundRect added to closed vocabulary per Q7 decision example", "v1.3.1 — STORY-TBD-shape-gradient-fills placeholder resolved to STORY-072", "v1.3.2 — VP propagation burst: assigned VP-037 through VP-042 to all VP-TBD entries", "v1.4 — adversary pass 2 adjudications M/N/O/P/Q/R/T: ArithmeticOverflow Result return, LayoutError::Multiple uniformity, LaidOutDeck warnings field, fill+text fields on ShapeSpec, canonical test vectors, uppercase normalization phrasing, shape frame order enforcement", "v1.4.1 — pass-7 drift fix (F-P7-HIGH-004): slide_index → source_slide_index in EC-001 and EC-003 per AC-BC-A9 canonical field name", "v1.4.2 — pass-8 fix (F-P8-MED-001): Deferred Surfaces section rewritten to be consistent with Postcondition 1 — FillSpec::Gradient is NOT in the v1.0 enum (code confirmed absent); removed contradictory claim that variant is defined in IR", "v1.4.3 — pass-9 fix (F-P9-HIGH-002): E-PAR-013 → E-PAR-015 (hex color invalid) and E-PAR-014 → E-PAR-016 (gradient unsupported) to resolve namespace collision with parser template codes; updated precondition 5, EC-008, EC-009, EC-011, canonical test vectors, and Deferred Surfaces section", "v1.5.0 — pass-18 spec adjudication (F-P18-HIGH-001): added Invariant 11 (alt-wins over decorative when both supplied); updated Precondition 3 wording from exclusive-OR to explicit precedence; added EC-018 and canonical test vector for alt+decorative conflict; updated slideforge-validate handoff note. WCAG canonical: explicit alt text supersedes implicit-decorative inference.", "v1.5.1 — pass-19 prose fix (F-P19-MED-003): Invariant 11 reworded to remove ambiguous 'slideforge-validate W-A11-001' phrase (W-A11-001 is a deprecated warning code, NOT a validator name). Now reads: the slideforge-validate alt-text validator MUST emit W-A11-002 (replacing deprecated W-A11-001 from BC-5.01.002 §3 prior to v1.2).", "v1.5.2 — F-P20-LOW-003 prose precision: Invariant 11 rewritten to clarify that ShapeSpec.decorative is NOT mutated; the alt-wins effect is achieved via the typed ShapeFrame.alt enum (AltText::Provided) at layout resolution time. EC-018 canonical test vector updated to assert on ShapeFrame.alt typed enum instead of ShapeSpec.decorative field mutation. Canonical test vector row for alt+decorative conflict updated to match. STORY-028 AC-BC-A10 updated.", "v1.6 — STORY-086 pass-5 adjudication (F-086-P5-CRIT-001): Invariant 11 domain-scope clarification. Invariant 11 (alt-first) applies ONLY to the shape DSL alt-resolution path (ShapeSpec → ShapeFrame via layout_shapes). It does NOT govern Stage-2b thread_fields_to_blocks::resolve_alt for ChartSpec/ImageSpec/DiagramSpec, which is governed by BC-1.16.001 PC-12 (decorative-first). The two BCs cover non-overlapping implementation domains. W-A11-002 for the shape path is emitted by slideforge-validate; W-A11-002 for Stage-2b is emitted by resolve_alt via tracing::warn!. Domain-scope note added to Invariant 11 body."]
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -198,20 +198,27 @@ coordinates. ALL errors from a slide's shape set are accumulated before returnin
     a `text:` directive means `None`. Both fields MUST be present in the struct
     definition. (CLAUDE.md Rule 1: "shape: type/position/fill/text/alt" is the v1.0
     shape contract; Item Q adjudication)
-11. **When both `alt "..."` and `decorative: true` are supplied on the same shape,
-    `alt` takes precedence. The resulting `ShapeFrame.alt` carries
-    `AltText::Provided(s)` regardless of the input `ShapeSpec.decorative` value.
-    The IR-level `ShapeSpec.decorative` field is preserved (not mutated); the
-    alt-wins effect is achieved via the typed `ShapeFrame.alt` enum at layout
-    resolution time.** Rationale: explicit accessibility annotations always
-    supersede implicit-decorative inference per WCAG AA. An author supplying both has
-    provided a textual description that MUST be preserved — silently discarding it
-    would be an accessibility regression. The `slideforge-validate` `alt-text` validator
-    MUST emit W-A11-002 (replacing the deprecated W-A11-001 from BC-5.01.002 §3 prior to
-    v1.2) — "shape has both alt and decorative: true; alt takes precedence, decorative
+11. **Domain scope: This invariant governs the `shape:` block alt-resolution path ONLY
+    (`layout_shapes` → `ShapeFrame` construction in `slideforge-layout`). It does NOT
+    apply to Stage-2b `thread_fields_to_blocks::resolve_alt` for ChartSpec/ImageSpec/
+    DiagramSpec, which is governed exclusively by BC-1.16.001 PC-12 (decorative-first).**
+    The two BCs cover non-overlapping implementation domains and must NOT be cross-applied.
+    **Within the shape DSL path:** When both `alt "..."` and `decorative: true` are supplied
+    on the same `shape:` block, `alt` takes precedence. The resulting `ShapeFrame.alt`
+    carries `AltText::Provided(s)` regardless of the input `ShapeSpec.decorative` value.
+    The IR-level `ShapeSpec.decorative` field is preserved (not mutated); the alt-wins
+    effect is achieved via the typed `ShapeFrame.alt` enum at layout resolution time.
+    Rationale: explicit accessibility annotations always supersede implicit-decorative
+    inference per WCAG AA in the shape DSL domain. An author supplying both has provided a
+    textual description that MUST be preserved — silently discarding it would be an
+    accessibility regression. The `slideforge-validate` `alt-text` validator MUST emit
+    W-A11-002 — "shape has both alt and decorative: true; alt takes precedence, decorative
     flag ignored. Consider removing one." — to prompt the author to clean up the ambiguity,
-    but MUST NOT suppress the alt text.
-    (F-P18-HIGH-001 adjudication, 2026-05-29; F-P19-MED-003 prose fix, 2026-05-29; F-P20-LOW-003 precision fix, 2026-05-29; WCAG 2.1 §1.1.1)
+    but MUST NOT suppress the alt text. (Note: for Stage-2b media blocks, W-A11-002 is
+    emitted by `resolve_alt` via `tracing::warn!(code = "W-A11-002")` at resolution time,
+    NOT by `slideforge-validate`, because `AltTextValidator::validate()` is Shape-only
+    per ADR-018 v1.2 Decision-3.)
+    (F-P18-HIGH-001 adjudication, 2026-05-29; F-P19-MED-003 prose fix, 2026-05-29; F-P20-LOW-003 precision fix, 2026-05-29; F-086-P5-CRIT-001 domain-scope clarification, 2026-06-06; WCAG 2.1 §1.1.1)
 
 ## Edge Cases
 
