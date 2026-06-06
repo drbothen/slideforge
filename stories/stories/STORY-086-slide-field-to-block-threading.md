@@ -10,8 +10,9 @@ points: 21
 priority: P0
 tdd_mode: strict
 status: draft
-spec_version: "1.4"
+spec_version: "1.5"
 last_updated: "2026-06-06"
+# pass-7 cosmetic path corrections: stale e2e test path corrected (tests/integration/e2e_build_tests.rs → crates/slideforge/tests/e2e/story_086_content_threading.rs)
 target_module: slideforge-types, slideforge-eval, slideforge-layout, slideforge-validate, slideforge-pptx, slideforge-pdf
 subsystems: [SS-02, SS-03, SS-05, SS-06, SS-07, SS-15]
 behavioral_contracts: [BC-1.16.001, BC-5.02.001, BC-5.01.001]
@@ -748,7 +749,7 @@ respectively.
 Files that RECEIVE new tests or test updates:
 ```
 crates/slideforge-eval/tests/field_to_block_unit.rs    [new: unit tests for Stage 2b (AC-007 Value::List path, AC-009, AC-010, AC-011)]
-tests/integration/e2e_build_tests.rs                   [update: add placement assertions for Wave 4 Gate 3 re-pass (AC-001..AC-007, AC-018, AC-019, AC-020, AC-021, AC-022, AC-023)]
+crates/slideforge/tests/e2e/story_086_content_threading.rs   [update: add placement assertions for Wave 4 Gate 3 re-pass (AC-001..AC-007, AC-018, AC-019, AC-020, AC-021, AC-022, AC-023)]
 crates/slideforge-validate/src/alt_text.rs             [cfg(test) block: add AC-013, AC-014, AC-015 unit tests]
 crates/slideforge-layout/src/regions.rs                [cfg(test) block: add AC-013 unit test for Unspecified placeholder]
 crates/slideforge-layout/src/layout.rs                 [cfg(test) block: add AC-023 tag-over-position invariant test; AC-019/AC-020 TextTag routing unit tests]
