@@ -37,8 +37,8 @@ crate, which is the assembly point for both subsystems.
 - Depends on STORY-049: The plugin registry (`PluginRegistry::default()`) must be
   fully assembled before E2E tests can drive the full pipeline. Without the complete
   registry, the tests have nothing to exercise.
-- Blocks nothing: STORY-050 is the last story in Wave 4. It blocks no further
-  Wave 4 stories.
+- Blocks STORY-055 (Wave 5 CLI build command). STORY-050's E2E suite must pass
+  before Wave 5 CLI work begins, as the CLI depends on a functional end-to-end pipeline.
 
 ## Summary
 

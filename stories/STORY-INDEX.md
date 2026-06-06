@@ -13,7 +13,7 @@ total_stories: 85
 stories_written: 85
 stories_ready: 0
 stories_in_progress: 0
-stories_merged: 57
+stories_merged: 59
 ---
 
 # STORY-INDEX — slideforge v1.0
@@ -33,10 +33,10 @@ stories_merged: 57
 | Wave 1 | 14 | 0 | 0 | 0 | 14 | 0 |
 | Wave 2 | 7 | 0 | 0 | 0 | 7 | 0 |
 | Wave 3 | 17 | 0 | 0 | 0 | 17 | 0 |
-| Wave 4 | 21 | 2 | 0 | 0 | 19 | 0 |
+| Wave 4 | 21 | 0 | 0 | 0 | 21 | 0 |
 | Wave 5 | 20 | 20 | 0 | 0 | 0 | 0 |
 | Wave 6 | 6 | 6 | 0 | 0 | 0 | 0 |
-| **Total** | **85** | **28** | **0** | **0** | **57** | **0** |
+| **Total** | **85** | **26** | **0** | **0** | **59** | **0** |
 
 ---
 
@@ -112,7 +112,7 @@ stories_merged: 57
 | [STORY-035](stories/STORY-035-register-routing-eval.md) | EPIC-18 | Writing Register Routing in Evaluator | BC-1.14.001-004 | P0 | 5 | strict | merged |
 | [STORY-036](stories/STORY-036-register-no-bleed-invariant.md) | EPIC-18 | Register-Aware Rendering: No Content Bleed Invariant | BC-1.14.004 | P0 | 5 | strict | merged |
 | [STORY-037](stories/STORY-037-pptx-core-serialization.md) | EPIC-08 | PPTX Core Serialization: ooxmlsdk 0.6.1 + ZIP Assembly | BC-4.01.001 | P0 | 13 | strict | merged |
-| [STORY-038](stories/STORY-038-pptx-layout-compliance.md) | EPIC-08 | PPTX Layout Compliance: Placeholder Inheritance + Slide IDs + Layouts | BC-4.01.005 | P0 | 8 | strict | Merged |
+| [STORY-038](stories/STORY-038-pptx-layout-compliance.md) | EPIC-08 | PPTX Layout Compliance: Placeholder Inheritance + Slide IDs + Layouts | BC-4.01.005 | P0 | 8 | strict | merged |
 | [STORY-039](stories/STORY-039-pptx-a11y-metadata.md) | EPIC-08 | PPTX Accessibility Metadata + Layout IR Alt-Threading | BC-4.01.004, BC-5.01.005 | P0 | 8 | strict | merged |
 | [STORY-040](stories/STORY-040-pptx-notes-sections-masters.md) | EPIC-08 | PPTX: Speaker Notes + notesMaster1.xml + handoutMaster1.xml | BC-4.01.003, BC-4.01.006 | P0 | 3 | strict | merged |
 | [STORY-041](stories/STORY-041-docx-core-serialization.md) | EPIC-09 | DOCX Core Serialization: report register + ooxmlsdk | BC-4.02.001 | P0 | 8 | strict | merged |
@@ -124,7 +124,7 @@ stories_merged: 57
 | [STORY-084](stories/STORY-084-bundled-section-types.md) | EPIC-21 | Bundled SectionType Implementations | BC-5.02.001 | P0 | 3 | strict | merged |
 | [STORY-085](stories/STORY-085-bundled-inline-formats.md) | EPIC-21 | Bundled DefaultInlineFormat + PPTX OOXML Dog-Fooding Refactor | BC-5.02.001, BC-5.02.002, BC-3.05.001 | P0 | 8 | strict | merged |
 | [STORY-049](stories/STORY-049-plugin-registry-assembly.md) | EPIC-21 | Plugin Registry Assembly (root crate) | BC-5.02.001-002 | P0 | 5 | strict | merged |
-| [STORY-050](stories/STORY-050-e2e-integration-tests.md) | EPIC-21 | End-to-End Integration Test Suite | BC-5.02.001-002 | P0 | 8 | strict | draft |
+| [STORY-050](stories/STORY-050-e2e-integration-tests.md) | EPIC-21 | End-to-End Integration Test Suite | BC-5.02.001-002 | P0 | 8 | strict | merged |
 | [STORY-073](stories/STORY-073-bullets-layout.md) | EPIC-07 | Layout: ContentBlock::Bullets → FrameContent::TextRun frame generation | BC-3.05.001 | P1 | 5 | strict | merged |
 | [STORY-075](stories/STORY-075-brand-loader-footer-detection.md) | EPIC-06 | Brand Loader: Footer Detection from .pptx Slide Master/Layout Placeholders | BC-2.01.001 | P1 | 3 | strict | merged |
 | [STORY-076](stories/STORY-076-brand-srgbclr-transform-extraction.md) | EPIC-06 | Brand Loader: Transform-Aware Theme Color Extraction (srgbClr lumMod/tint/shade) | BC-2.01.001, BC-2.01.003 | P1 | 3 | strict | merged |

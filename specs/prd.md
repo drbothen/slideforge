@@ -162,7 +162,7 @@ Writing Registers, Diagnostics.
 | 5.05 Watch Mode | 5 | 0 | 5 |
 | 5.06 Project Init / Scaffolding | 2 | 0 | 2 |
 
-**Total: 109 BCs — 71 P0, 38 P1, 0 P2.**
+**Total: 112 BCs — 74 P0, 38 P1, 0 P2.**
 
 ---
 

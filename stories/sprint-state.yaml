@@ -33,7 +33,7 @@ wave_4_batch_a:
   stories: [STORY-035, STORY-036, STORY-043, STORY-044, STORY-045, STORY-073, STORY-075, STORY-076, STORY-077, STORY-078]
   execution: parallel
   chains: ["STORY-035→036", "STORY-043→044→045", "STORY-073 independent", "STORY-075 independent", "STORY-076 independent", "STORY-078→STORY-077 (STORY-078 unblocks 077; 077 blocks STORY-041/042 in Batch B)"]
-  completed: 7
+  completed: 10
   total: 10
 wave_4_batch_b:
   stories: [STORY-037, STORY-038, STORY-039, STORY-040, STORY-041, STORY-042]
@@ -465,15 +465,15 @@ stories:
     ci_checks: "18/18 green (1 flaky Windows slideforge-data http test, passed on re-run)"
     notes: "PDF EMU-to-PDF Coordinate Mapping + Y-Axis Flip + SVG/diagram fidelity. Full SVG stroke rendering (usvg→krilla: paint/width/opacity/linecap/linejoin/miterlimit/dash; gradient/pattern stroke warn). Paint-state-leak fix (draw_text_at_bbox sets explicit fill + clears stroke). 3 STORY-045 forward-obligations recorded. Windows CI flaky-test drift item recorded."
   STORY-045:
-    status: in-progress
+    status: merged
     wave: 4
     batch: A
     priority: P0
     points: 8
-    adversary_streak: "0/3"
-    adversary_pass_1: "3 CRIT + 3 HIGH + 2 MED — all fixed in pass-1 fix-burst (95 tests pass); pushed to feature/S-045 ~0e01c254"
-    worktree: ".worktrees/STORY-045 (feature/S-045)"
-    notes: "PDF/UA-1 Full Compliance (scope expanded by human 2026-06-01 — story v1.1, 8 pts, BC-4.03.001 v1.3). AC-010..AC-013 added. Pass-1 fixes: CI nextest flag; CI runs ac013_verapdf_full_compliance; PdfExportError::ValidationFailed; src/outline.rs build_outline_entries; source_index/page_idx invariant; deterministic font path; /Lang-absent fatal under UA1; structural outline assertions. NEXT: adversary pass 2."
+    adversary_convergence: "3/3 strict-CLEAN (converged)"
+    adversary_streak: "3/3"
+    converged: true
+    notes: "PDF/UA-1 Full Compliance (scope expanded by human 2026-06-01 — story v1.1, 8 pts, BC-4.03.001 v1.3). Status corrected to merged (was stale in-progress) per Wave 4 gate consistency audit. STATE.md Batch A merged list confirms STORY-045 is in the merged set."
   STORY-083:
     status: merged
     wave: 4
@@ -585,16 +585,15 @@ stories:
     points: 3
     notes: "brand-em-sizing follow-up from STORY-028 cascade; deferred P2 to Wave 5"
   STORY-075:
-    status: ready
+    status: merged
     wave: 4
     batch: A
     priority: P1
     points: 3
     adversary_streak: "3/3"
     adversary_convergence: "3/3 strict-CLEAN at passes 3/4/5 (5-pass total cascade)"
-    worktree: ".worktrees/STORY-075 (feature/S-075 ~d55df374)"
-    demo_evidence: "recorded (VHS files UNTRACKED in worktree docs/demo-evidence/STORY-075/)"
-    notes: "footer detection; CONVERGED — was parked on STORY-076 brand merge (now resolved). NEXT: rebase feature/S-075 onto origin/develop 47856465, commit untracked demo evidence, full pedantic clippy gate, PR. BC: BC-2.01.001 v1.4"
+    converged: true
+    notes: "Brand Loader: Footer Detection. Status corrected to merged (was stale ready) per Wave 4 gate consistency audit. STATE.md Batch A merged list (PRs #39-#49) confirms STORY-075 is in the merged set."
   STORY-076:
     status: merged
     wave: 4
@@ -609,13 +608,14 @@ stories:
     security_findings_fixed: "2 MED: CWE-789 (MAX_TRANSFORMS_PER_SLOT=8 cap) + CWE-117 (val sanitization)"
     notes: "Brand: transform-aware theme color extraction (srgbClr lumMod/tint/shade). ColorSlot.is_derived; Option B verbatim base hex; brand.toml derived-comment. Security re-review CLEAN after fix. pr-reviewer APPROVE. BCs: BC-2.01.001 v1.4 + BC-2.01.003 v1.9"
   STORY-077:
-    status: ready
+    status: merged
     wave: 4
     batch: A
     priority: P0
-    points: 8
+    points: 13
     unblocked_by: "STORY-078 merged 5ab4cef4 (PR #46, 2026-06-01)"
-    notes: "SectionBlock IR extension: FieldValue body + section-level register routing; architect-directed spin-out from STORY-035 F-002 descope; blocks STORY-041/042. NOW UNBLOCKED. Old branch feature/S-077 (~2bf17d25) is DEFECTIVE (flatten-to-Str, vacuous tests) — DISCARD, deliver fresh from origin/develop (47856465). BCs: BC-3.02.002 v1.3 + BC-1.14.003 v1.4 (spec corrections in factory-artifacts cfc28426)"
+    converged: true
+    notes: "SectionBlock IR Extension: FieldValue body + section-level register routing + inline-markup parser. Status corrected to merged (was stale ready) per Wave 4 gate consistency audit. STATE.md Batch A merged list confirms STORY-077 is in the merged set. Points bumped 8→13 per DIR-077-002 + human scope-expansion."
   STORY-078:
     status: merged
     wave: 4
