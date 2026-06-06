@@ -101,11 +101,13 @@ impl Validator for AltTextValidator {
                     // Restricting here prevents double-fire when Stage 2b emits blocks with alt=None
                     // (thread_media_alt_into_frames maps None → AltText::Unspecified; post-layout
                     // validate_post_layout fires exactly once — BC-5.01.001 postcondition 1).
-                    ContentBlock::Chart(_) | ContentBlock::Image(_) | ContentBlock::Diagram(_) => {},
                     // Non-visual blocks: Text, Bullets, Math, Table — no alt text required.
                     // Tables are text content that is already readable by screen readers
                     // (story spec, STORY-015 line 309). Alt text on tables is not validated.
-                    ContentBlock::Text(_)
+                    ContentBlock::Chart(_)
+                    | ContentBlock::Image(_)
+                    | ContentBlock::Diagram(_)
+                    | ContentBlock::Text(_)
                     | ContentBlock::Bullets(_)
                     | ContentBlock::Math(_)
                     | ContentBlock::Table(_) => {},
@@ -1635,7 +1637,7 @@ mod tests {
     /// - Together they guarantee exactly ONE E-A11-001 per missing-alt Chart/Image/Diagram.
     ///
     /// Red Gate status: `test_bc_5_01_001_ac015_unspecified_chart_frame_fires_e_a11_001`
-    /// already passes (validate_post_layout already handles Unspecified). This new test
+    /// already passes (`validate_post_layout` already handles Unspecified). This new test
     /// adds an explicit count check and also tests Image and Diagram to ensure all three
     /// visual frame types fire the error.
     ///
@@ -1697,13 +1699,11 @@ mod tests {
             .filter(|d| d.code.as_ref() == E_A11_001)
             .count();
         assert_eq!(
-            e_a11_count,
-            3,
+            e_a11_count, 3,
             "Issue 1: validate_post_layout must fire E-A11-001 for each Unspecified \
-             Chart, Image, and Diagram frame. Expected 3, got {}. \
+             Chart, Image, and Diagram frame. Expected 3, got {e_a11_count}. \
              Diagnostics: {diags:?}. \
-             BC-5.01.001 postcondition 1; architect-pass-1 Issue 1.",
-            e_a11_count
+             BC-5.01.001 postcondition 1; architect-pass-1 Issue 1."
         );
     }
 }

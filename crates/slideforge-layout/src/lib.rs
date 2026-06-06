@@ -3051,19 +3051,19 @@ mod tests {
 
     // ── STORY-086 AC-023: tag-over-position invariant ──────────────────────────
 
-    /// AC-023 / BC-4.01.001 v1.2 postcondition 12 — TextTag routing is tag-driven,
+    /// AC-023 / BC-4.01.001 v1.2 postcondition 12 — `TextTag` routing is tag-driven,
     /// NOT position-driven. A `TextTag::Title` block at index 1 (Body at index 0)
     /// must produce `FrameContent::Title` in the title frame regardless of its
     /// position in `Slide.blocks`.
     ///
     /// Red Gate: current layout.rs maps ALL `ContentBlock::Text` → `FrameContent::TextRun`
-    /// regardless of any tag (TextTag is unused). No `FrameContent::Title` is produced.
+    /// regardless of any tag (`TextTag` is unused). No `FrameContent::Title` is produced.
     /// This test asserts that `FrameContent::Title` appears in the frame list for the
     /// reversed-order slide. FAILS because:
-    /// (a) TextTag::Title has no routing in layout.rs
-    /// (b) All ContentBlock::Text → TextRun, never Title
+    /// (a) `TextTag::Title` has no routing in layout.rs
+    /// (b) All `ContentBlock::Text` → `TextRun`, never Title
     ///
-    /// After TextTag routing implementation: TextTag::Title → FrameContent::Title in
+    /// After `TextTag` routing implementation: `TextTag::Title` → `FrameContent::Title` in
     /// the title region frame, regardless of block list position.
     ///
     /// Traces: BC-4.01.001 v1.2 postcondition 12 + invariant 5; AC-023.
@@ -3116,9 +3116,10 @@ mod tests {
         // Assert that at least one frame has FrameContent::Title.
         // RED GATE: current code maps ALL Text → TextRun → no FrameContent::Title → FAILS.
         // After routing: TextTag::Title → FrameContent::Title in the title region slot.
-        let has_title_frame = laid_out.frames.iter().any(|f| {
-            matches!(&f.content, crate::types::FrameContent::Title(_))
-        });
+        let has_title_frame = laid_out
+            .frames
+            .iter()
+            .any(|f| matches!(&f.content, crate::types::FrameContent::Title(_)));
         assert!(
             has_title_frame,
             "AC-023 RED GATE: layout::run must produce at least one FrameContent::Title \
@@ -3142,8 +3143,7 @@ mod tests {
         assert_eq!(
             title_text.as_deref(),
             Some("the title"),
-            "AC-023: FrameContent::Title must carry text 'the title'; got {:?}",
-            title_text
+            "AC-023: FrameContent::Title must carry text 'the title'; got {title_text:?}"
         );
     }
 }

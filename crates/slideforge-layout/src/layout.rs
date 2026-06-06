@@ -40,7 +40,7 @@
 use std::sync::Arc;
 
 use slideforge_types::{
-    AltText, Brand, BulletItem, ContentBlock, Deck, FieldValue, Register, Value,
+    AltText, Brand, BulletItem, ContentBlock, Deck, FieldValue, Register, TextTag, Value,
 };
 
 use crate::error::LayoutError;
@@ -107,6 +107,7 @@ use crate::types::{
 /// # Errors
 ///
 /// Returns [`LayoutError`] on any invariant violation. See variants above.
+#[allow(clippy::too_many_lines)] // STORY-086 TextTag routing expands the inline text pass; refactor deferred to STORY-088
 pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
     // EC-001: reject empty decks.
     if deck.slides.is_empty() {
@@ -299,7 +300,6 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
                     // Body → FrameContent::Body (PPTX type="body", DOCX Normal)
                     // Untagged → FrameContent::TextRun (unchanged, generic text run)
                     // Routing is tag-driven, NOT position-driven (BC-4.01.001 v1.2 postcondition 12).
-                    use slideforge_types::TextTag;
                     let frame_content = match text_block.tag {
                         TextTag::Title => {
                             // Concatenate all inline text for the Title variant (Arc<str> form).
@@ -600,7 +600,7 @@ fn speaker_notes_from_register_content(
 
 /// Extract plain text from a slice of [`slideforge_types::InlineNode`] values into an [`Arc<str>`].
 ///
-/// Used by the TextTag routing pass to produce the `Arc<str>` carried by
+/// Used by the `TextTag` routing pass to produce the `Arc<str>` carried by
 /// `FrameContent::Title` and `FrameContent::Subtitle`. Nested inline formatting
 /// (Bold, Italic, etc.) is flattened to plain text for these variants, which is
 /// semantically correct — the placeholder text is the canonical string label;

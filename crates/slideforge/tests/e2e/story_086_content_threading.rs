@@ -573,9 +573,7 @@ fn test_bc_4_01_001_ac001_pptx_title_in_title_placeholder_not_body() {
     let opts = brand.build_options("pptx", false);
 
     let output = slideforge::build(&source, &opts).unwrap_or_else(|e| {
-        panic!(
-            "AC-001 PLACEMENT: build() with title slide must return Ok; got Err: {e:?}"
-        )
+        panic!("AC-001 PLACEMENT: build() with title slide must return Ok; got Err: {e:?}")
     });
 
     let mut archive = open_zip(&output.bytes, "AC-001-placement");
@@ -586,8 +584,8 @@ fn test_bc_4_01_001_ac001_pptx_title_in_title_placeholder_not_body() {
     // a <p:ph type="title"/> child (or idx="0" by convention).
     // RED GATE: without TextTag routing, layout produces FrameContent::TextRun →
     // serializer renders generic placeholder, no type="title" → FAILS.
-    let has_title_ph = slide_xml.contains(r#"type="title""#)
-        || slide_xml.contains(r#"type=\"title\""#);
+    let has_title_ph =
+        slide_xml.contains(r#"type="title""#) || slide_xml.contains(r#"type=\"title\""#);
     assert!(
         has_title_ph,
         "AC-001 PLACEMENT RED GATE: PPTX slide1.xml must contain a \
@@ -655,9 +653,7 @@ fn test_bc_4_02_001_ac003_docx_title_in_heading1_with_pstyle() {
     let opts = brand.build_options("docx", false);
 
     let output = slideforge::build(source, &opts).unwrap_or_else(|e| {
-        panic!(
-            "AC-003 PLACEMENT: build() with title slide (docx) must return Ok; got Err: {e:?}"
-        )
+        panic!("AC-003 PLACEMENT: build() with title slide (docx) must return Ok; got Err: {e:?}")
     });
 
     let mut archive = open_zip(&output.bytes, "AC-003-placement");

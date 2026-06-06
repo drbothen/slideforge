@@ -2683,7 +2683,9 @@ fn test_f_p3_001_multi_block_body_each_block_has_own_child_index_integration() {
 #[test]
 fn test_f_p4_001_mixed_block_body_text_math_bullets_each_gets_tagged_region() {
     use slideforge_pdf::tag_engine::SlideTagEngine;
-    use slideforge_types::{BulletItem, ContentBlock, InlineNode, MathNode, SourceSpan, TextBlock, TextTag};
+    use slideforge_types::{
+        BulletItem, ContentBlock, InlineNode, MathNode, SourceSpan, TextBlock, TextTag,
+    };
 
     // ── Part 1: tag engine produces 3 distinct child indices ──────────────────
 

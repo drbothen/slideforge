@@ -79,9 +79,9 @@ mod integration_tests {
     ///
     /// Story STORY-017 Test Strategy integration test.
     ///
-    /// NOTE (STORY-086 / ADR-018 v1.2 Decision-3): Pre-layout AltTextValidator::validate()
-    /// is now restricted to ContentBlock::Shape. Image/Chart/Diagram are validated post-layout
-    /// only. Updated to use ContentBlock::Shape to confirm E-A11-001 fires in the pipeline.
+    /// NOTE (STORY-086 / ADR-018 v1.2 Decision-3): Pre-layout `AltTextValidator::validate()`
+    /// is now restricted to `ContentBlock::Shape`. Image/Chart/Diagram are validated post-layout
+    /// only. Updated to use `ContentBlock::Shape` to confirm E-A11-001 fires in the pipeline.
     #[test]
     fn test_full_validation_pipeline() {
         // Build a deck that simultaneously triggers all three validators:
@@ -186,8 +186,8 @@ mod integration_tests {
     /// Verify the integration test also works when label IS valid and lang IS set —
     /// only the missing-alt shape should produce a diagnostic (regression guard).
     ///
-    /// NOTE (STORY-086 / ADR-018 v1.2 Decision-3): Updated to use ContentBlock::Shape
-    /// because pre-layout validate() is now Shape-only.
+    /// NOTE (STORY-086 / ADR-018 v1.2 Decision-3): Updated to use `ContentBlock::Shape`
+    /// because pre-layout `validate()` is now Shape-only.
     #[test]
     fn test_full_validation_pipeline_only_alt_missing() {
         let shape_block = Block {

@@ -668,17 +668,16 @@ fn test_bc_1_16_001_ac007_value_list_produces_content_block_bullets() {
         assert_eq!(
             texts,
             vec!["Item A", "Item B", "Item C"],
-            "AC-007: bullet item text must match declared list elements; got {:?}",
-            texts
+            "AC-007: bullet item text must match declared list elements; got {texts:?}"
         );
     }
 }
 
 // ─── STORY-086 TextTag scaffolding compile tests ───────────────────────────────
 
-/// TextTag enum is defined with 4 variants and the correct derives.
+/// `TextTag` enum is defined with 4 variants and the correct derives.
 ///
-/// This is a COMPILE-TIME contract test. If TextTag is removed or renamed, this
+/// This is a COMPILE-TIME contract test. If `TextTag` is removed or renamed, this
 /// test fails to compile. It also serves as documentation of the canonical variants.
 ///
 /// Traces: STORY-086 scope-expansion; BC-4.01.001 v1.2 postconditions 9–12.
@@ -705,13 +704,17 @@ fn test_bc_1_16_001_texttag_enum_has_four_variants() {
     assert_eq!(set.len(), 1, "TextTag::Title must deduplicate in HashSet");
 
     let cloned = untagged;
-    assert_eq!(cloned, TextTag::Untagged, "TextTag must implement Clone/Copy");
+    assert_eq!(
+        cloned,
+        TextTag::Untagged,
+        "TextTag must implement Clone/Copy"
+    );
 
     let _ = format!("{title:?}"); // must implement Debug
 }
 
-/// TextBlock.tag field is set to TextTag::Untagged by default in all non-Stage-2b
-/// construction sites, and can carry semantic TextTag values when set by Stage 2b.
+/// `TextBlock.tag` field is set to `TextTag::Untagged` by default in all non-Stage-2b
+/// construction sites, and can carry semantic `TextTag` values when set by Stage 2b.
 ///
 /// Traces: STORY-086 scope-expansion; BC-1.16.001 postconditions 1–3.
 #[test]

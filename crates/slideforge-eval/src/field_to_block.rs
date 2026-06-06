@@ -26,7 +26,7 @@ use slideforge_types::{
 ///
 /// Reads resolved field values from every `Slide.fields` in `deck` and
 /// populates `Slide.blocks` with typed [`slideforge_types::ContentBlock`]
-/// entries derived from those fields. This pass runs AFTER [`eval_deck`]
+/// entries derived from those fields. This pass runs AFTER `eval_deck`
 /// completes and BEFORE `layout::run` — it is the single-responsibility bridge
 /// between the semantic IR (field-resolved `Deck`) and the geometric IR
 /// (`LaidOutDeck`).
@@ -78,8 +78,6 @@ use slideforge_types::{
 /// If `Slide.blocks` is already non-empty for a slide, this function
 /// appends to it rather than replacing it. In practice, `eval_deck`
 /// always produces `Slide.blocks = vec![]`, so this is a no-op guard.
-///
-/// [`eval_deck`]: slideforge_eval::eval_deck
 pub fn thread_fields_to_blocks(deck: &mut Deck) {
     for slide in &mut deck.slides {
         // ── 1. Title ─────────────────────────────────────────────────────────
@@ -88,7 +86,9 @@ pub fn thread_fields_to_blocks(deck: &mut Deck) {
         if let Some(text) = extract_str_field(slide, "title")
             && !text.trim().is_empty()
         {
-            slide.blocks.push(make_text_block_tagged(text, TextTag::Title));
+            slide
+                .blocks
+                .push(make_text_block_tagged(text, TextTag::Title));
         }
 
         // ── 2. Subtitle ──────────────────────────────────────────────────────
@@ -97,7 +97,9 @@ pub fn thread_fields_to_blocks(deck: &mut Deck) {
         if let Some(text) = extract_str_field(slide, "subtitle")
             && !text.trim().is_empty()
         {
-            slide.blocks.push(make_text_block_tagged(text, TextTag::Subtitle));
+            slide
+                .blocks
+                .push(make_text_block_tagged(text, TextTag::Subtitle));
         }
 
         // ── 3. Body ──────────────────────────────────────────────────────────
@@ -106,7 +108,9 @@ pub fn thread_fields_to_blocks(deck: &mut Deck) {
         if let Some(text) = extract_str_field(slide, "body")
             && !text.trim().is_empty()
         {
-            slide.blocks.push(make_text_block_tagged(text, TextTag::Body));
+            slide
+                .blocks
+                .push(make_text_block_tagged(text, TextTag::Body));
         }
 
         // ── 4. Bullets ───────────────────────────────────────────────────────
@@ -445,7 +449,7 @@ mod tests {
         }
     }
 
-    /// Issue 1 adjudication (architect-pass-1) — Stage 2b MUST emit ContentBlock::Chart
+    /// Issue 1 adjudication (architect-pass-1) — Stage 2b MUST emit `ContentBlock::Chart`
     /// even when `alt = None`. The chart block carries `AltText::Unspecified` to signal
     /// the post-layout validator that alt resolution is pending.
     ///

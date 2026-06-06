@@ -924,7 +924,9 @@ mod tests {
     #[test]
     fn test_f_p3_001_multi_block_body_records_per_block_child_indices() {
         use krilla::tagging::{Node, TagKind};
-        use slideforge_types::{BulletItem, ContentBlock, InlineNode, SourceSpan, TextBlock, TextTag};
+        use slideforge_types::{
+            BulletItem, ContentBlock, InlineNode, SourceSpan, TextBlock, TextTag,
+        };
 
         let engine = SlideTagEngine::new();
 
