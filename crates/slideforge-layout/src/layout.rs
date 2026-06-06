@@ -269,44 +269,45 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
         deck_warnings.extend(shape_output.warnings);
 
         // Inline text pass: convert ContentBlock::Text and ContentBlock::Bullets blocks
-        // into layout frames, respecting TextTag-driven region-slot filling.
+        // into layout frames, respecting RegionRole-driven region-slot filling.
         //
-        // T6b.1 / BC-4.01.001 v1.2 / ADR-019 Decision 3:
+        // T6b.1 / AC-023 / F-086-P3-HIGH-001 / BC-4.01.001 v1.2 / ADR-019 Decision 3:
         // For tagged text blocks (Title / Subtitle / Body), the implementation FILLS the
-        // first matching FrameContent::Empty region slot pre-allocated by region_frames_for,
+        // matching FrameContent::Empty region slot pre-allocated by region_frames_for,
         // preserving that slot's authored bbox and computing its text_flow in-place.
+        // Slot selection is ROLE-DRIVEN: each TextTag maps to a RegionRole; the search
+        // finds the Empty slot with matching RegionRole, not "first Empty" by position.
+        // This guarantees that TextTag::Title always fills the Title-region slot regardless
+        // of block processing order (AC-023 / EC-007 / BC-4.01.001 v1.2 invariant 5).
         // A new full-page-bbox frame is NEVER appended when a pre-allocated region slot
         // can absorb the tagged content.
         //
-        // Fallback (documented — fires only when no Empty slot remains):
-        // If a slide type genuinely has no remaining Empty region slot for the current
-        // tag (e.g., a future custom slide type with all slots already filled), the
+        // Fallback (documented — fires only when no role-matched or generic slot remains):
+        // If a slide type genuinely has no remaining Empty region slot matching the tag's
+        // role (e.g., a future custom slide type with all slots already filled), the
         // implementation falls back to appending a clamped full-page-bbox frame. This
         // keeps the pipeline non-fatal for unknown extension cases.
         //
         // For ContentBlock::Bullets: one TextRun frame per BulletItem (parent before
         // children, depth-first order). Nesting is structural via BulletItem.children;
         // layout preserves the flat frame sequence for exporters.
-        //
-        // Tag-driven, NOT position-driven (BC-4.01.001 v1.2 postcondition 12):
-        // Slot selection is determined by the TextTag on each block, regardless of
-        // the block's position in Slide.blocks. AC-023 verifies this invariant.
         for block in &slide.blocks {
             match &block.content {
                 ContentBlock::Text(text_block) => {
                     match text_block.tag {
                         // ── Tagged blocks: fill pre-allocated region slot in-place ──────
-                        // Tag-driven, NOT position-driven (AC-023 / BC-4.01.001 v1.2 PC-12).
-                        // Each tag variant searches for the first Empty region slot and fills
-                        // it with the authored bbox, computing text_flow from the inline content.
-                        // Fallback to full-page-bbox append only when no Empty slot exists
-                        // (documents when the fallback fires, so future slide-type authors
-                        // understand the contract).
+                        // Role-driven, NOT position-driven (AC-023 / F-086-P3-HIGH-001 / BC-4.01.001 v1.2 PC-12).
+                        // Each tag variant passes its TextTag to fill_region_slot_or_append, which
+                        // maps the tag to a RegionRole and searches for the Empty slot carrying that role.
+                        // This guarantees that TextTag::Title always fills the Title-role slot regardless
+                        // of block processing order — a Body block arriving before Title cannot claim
+                        // the Title-role slot. Fallback to Generic/append only when no role-matched slot remains.
                         TextTag::Title => {
                             let text = extract_inline_text_str(&text_block.inlines);
                             let content = crate::types::FrameContent::Title(text);
                             fill_region_slot_or_append(
                                 &mut all_frames,
+                                TextTag::Title,
                                 content,
                                 &text_block.inlines,
                                 page_size,
@@ -318,6 +319,7 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
                             let content = crate::types::FrameContent::Subtitle(text);
                             fill_region_slot_or_append(
                                 &mut all_frames,
+                                TextTag::Subtitle,
                                 content,
                                 &text_block.inlines,
                                 page_size,
@@ -334,6 +336,7 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
                                 )]);
                             fill_region_slot_or_append(
                                 &mut all_frames,
+                                TextTag::Body,
                                 content,
                                 &text_block.inlines,
                                 page_size,
@@ -371,6 +374,7 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
                                     text_block.inlines.clone(),
                                 ),
                                 text_flow: None,
+                                region_role: None,
                             });
                         },
                     }
@@ -691,15 +695,17 @@ fn extract_inline_text_recursive(node: &slideforge_types::InlineNode, out: &mut 
     }
 }
 
-/// Fill the first available `FrameContent::Empty` region slot with a tagged content
-/// variant, preserving the slot's authored bbox and computing `text_flow` in-place.
+/// Fill the `FrameContent::Empty` region slot whose [`crate::types::RegionRole`]
+/// matches the given [`TextTag`], preserving the slot's authored bbox and computing
+/// `text_flow` in-place.
 ///
-/// # T6b.1 / BC-4.01.001 v1.2 / ADR-019 Decision 3
+/// # T6b.1 / AC-023 / BC-4.01.001 v1.2 / ADR-019 Decision 3
 ///
-/// `region_frames_for` pre-allocates geometry slots as `FrameContent::Empty`. This
-/// function is the injection point where tagged text content (Title / Subtitle / Body)
-/// claims an Empty slot IN-PLACE, replacing `FrameContent::Empty` with the supplied
-/// `content` variant while preserving the slot's bbox as authored.
+/// `region_frames_for` pre-allocates geometry slots as `FrameContent::Empty`, each
+/// with a `region_role` identifying which semantic content it expects. This function
+/// is the injection point where tagged text content (Title / Subtitle / Body) claims
+/// the CORRECT slot IN-PLACE, replacing `FrameContent::Empty` with the supplied
+/// `content` variant while preserving the slot's authored bbox.
 ///
 /// ## Why this matters for visual parity
 ///
@@ -708,12 +714,23 @@ fn extract_inline_text_recursive(node: &slideforge_types::InlineNode, out: &mut 
 /// the slot would discard this authored geometry and produce incorrect OOXML placeholder
 /// coordinates (visual-parity-contract §Positional layout ±4pt).
 ///
-/// ## Slot selection (tag-driven, NOT position-driven)
+/// ## Slot selection (role-driven, NOT position-driven) — AC-023 / F-086-P3-HIGH-001
 ///
-/// Searches `frames` from index 0 for the first `FrameContent::Empty` entry. The
-/// search is tag-driven: it selects the first unclaimed Empty slot regardless of which
-/// `ContentBlock` triggered the call. This satisfies BC-4.01.001 v1.2 postcondition 12
-/// (tag-driven) and AC-023 (reversed-block order produces the same result).
+/// Selection priority (checked in order):
+/// 1. **Exact role match:** finds the first `FrameContent::Empty` slot whose
+///    `region_role` matches the requested role (`Title` → `RegionRole::Title`,
+///    `Subtitle` → `RegionRole::Subtitle`, `Body` → `RegionRole::Body`).
+/// 2. **Generic fallback:** if no exact-role Empty slot exists, fills the first
+///    `FrameContent::Empty` slot with `region_role == Some(RegionRole::Generic)`
+///    or `region_role == None`. This handles multi-body layouts (e.g., `two_col`
+///    second column) and forward-compatibility with unknown custom types.
+/// 3. **Append fallback:** if no Empty slot exists at all, appends a clamped
+///    full-page-bbox frame. Fires only for slide types that pre-fill all slots
+///    with non-Empty content.
+///
+/// This role-driven selection guarantees that a `TextTag::Title` block arriving
+/// after a `TextTag::Body` block in the input still claims the title-region slot
+/// (AC-023 invariant 5 / EC-007).
 ///
 /// ## Fallback (documented — fires only when no Empty slot remains)
 ///
@@ -729,25 +746,59 @@ fn extract_inline_text_recursive(node: &slideforge_types::InlineNode, out: &mut 
 /// the BC-3.06.003 defensive check (should never occur in practice).
 fn fill_region_slot_or_append(
     frames: &mut Vec<crate::types::Frame>,
+    tag: TextTag,
     content: crate::types::FrameContent,
     inlines: &[slideforge_types::InlineNode],
     page_size: PageSize,
     source_slide_index: usize,
 ) -> Result<(), LayoutError> {
-    // Search for the first Empty region slot (tag-driven, not position-driven).
-    if let Some(slot) = frames
-        .iter_mut()
-        .find(|f| matches!(f.content, crate::types::FrameContent::Empty))
-    {
-        // Fill the slot in-place: replace Empty with the tagged content and
-        // compute text_flow from the inline nodes using the AUTHORED bbox.
+    // Map the TextTag to the expected RegionRole.
+    let expected_role = match tag {
+        TextTag::Title => crate::types::RegionRole::Title,
+        TextTag::Subtitle => crate::types::RegionRole::Subtitle,
+        TextTag::Body => crate::types::RegionRole::Body,
+        // Untagged blocks are never routed through this function — they are
+        // handled separately by the TextTag::Untagged arm in layout::run.
+        TextTag::Untagged => crate::types::RegionRole::Generic,
+    };
+
+    // Phase 1: exact role match — find the first Empty slot with the matching role.
+    // This is the primary path for all tagged blocks (Title / Subtitle / Body).
+    // Order-independent: a Body block processed before a Title block will NOT claim
+    // the Title-role slot; it searches for a Body-role slot instead.
+    let exact_match_idx = frames.iter().position(|f| {
+        matches!(f.content, crate::types::FrameContent::Empty)
+            && f.region_role == Some(expected_role)
+    });
+
+    if let Some(idx) = exact_match_idx {
         let flat_text = collect_plain_text(inlines);
-        slot.text_flow = Some(compute_text_flow(&flat_text, slot.bbox));
-        slot.content = content;
+        let bbox = frames[idx].bbox;
+        frames[idx].text_flow = Some(compute_text_flow(&flat_text, bbox));
+        frames[idx].content = content;
         return Ok(());
     }
 
-    // Fallback: no Empty slot available. Append a clamped full-page-bbox frame.
+    // Phase 2: generic fallback — fill the first Empty slot with Generic or None role.
+    // Handles multi-body layouts where a second Body block fills a Generic column slot
+    // (e.g., `two_col` right column) or an untyped slot in an unknown custom type.
+    let generic_match_idx = frames.iter().position(|f| {
+        matches!(f.content, crate::types::FrameContent::Empty)
+            && matches!(
+                f.region_role,
+                Some(crate::types::RegionRole::Generic) | None
+            )
+    });
+
+    if let Some(idx) = generic_match_idx {
+        let flat_text = collect_plain_text(inlines);
+        let bbox = frames[idx].bbox;
+        frames[idx].text_flow = Some(compute_text_flow(&flat_text, bbox));
+        frames[idx].content = content;
+        return Ok(());
+    }
+
+    // Phase 3: no Empty slot of any kind remains — append a clamped full-page-bbox frame.
     // This fires only when a slide type has no pre-allocated Empty placeholders
     // (e.g., all slots are Image/Chart/Diagram, or a future custom type). It
     // preserves pipeline non-fatality for extension cases.
@@ -773,6 +824,7 @@ fn fill_region_slot_or_append(
         bbox,
         content,
         text_flow,
+        region_role: None,
     });
     Ok(())
 }
@@ -871,6 +923,7 @@ fn push_bullet_frames_inner(
             bbox,
             content: crate::types::FrameContent::TextRun(item.inlines.clone()),
             text_flow: None,
+            region_role: None,
         });
         // Recurse into children (depth-first, source order), incrementing depth.
         push_bullet_frames_inner(

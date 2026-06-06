@@ -1142,6 +1142,7 @@ mod tests {
             },
             content,
             text_flow: None,
+            region_role: None,
         };
 
         // Slide 0 (source_index=0, "title"): Chart with valid alt — no diagnostic expected.
@@ -1244,6 +1245,7 @@ mod tests {
             },
             content,
             text_flow: None,
+            region_role: None,
         };
 
         // Chart frame with AltText::Unspecified — pipeline gap, must fire E-A11-001.
@@ -1318,6 +1320,7 @@ mod tests {
             },
             content,
             text_flow: None,
+            region_role: None,
         };
 
         // Chart frame with AltText::Decorative — author opt-out, must be VALID.
@@ -1376,6 +1379,7 @@ mod tests {
             },
             content,
             text_flow: None,
+            region_role: None,
         };
 
         let slide = LaidOutSlide {
@@ -1662,6 +1666,7 @@ mod tests {
             },
             content,
             text_flow: None,
+            region_role: None,
         };
 
         // One chart, one image, one diagram — all Unspecified.

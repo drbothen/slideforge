@@ -105,6 +105,7 @@ fn make_slide(title: &str) -> LaidOutSlide {
             },
             content: FrameContent::Title(Arc::from(title)),
             text_flow: None,
+            region_role: None,
         }],
         speaker_notes: None,
         register_tags: vec![],

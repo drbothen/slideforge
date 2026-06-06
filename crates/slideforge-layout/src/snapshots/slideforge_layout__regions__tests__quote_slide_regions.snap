@@ -20,6 +20,9 @@ expression: frames
         },
         content: Empty,
         text_flow: None,
+        region_role: Some(
+            Body,
+        ),
     },
     Frame {
         bbox: BoundingBox {
@@ -38,5 +41,8 @@ expression: frames
         },
         content: Empty,
         text_flow: None,
+        region_role: Some(
+            Generic,
+        ),
     },
 ]

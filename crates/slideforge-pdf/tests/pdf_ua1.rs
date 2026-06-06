@@ -147,6 +147,7 @@ fn title_slide(text: &str) -> LaidOutSlide {
             },
             content: FrameContent::Title(Arc::from(text)),
             text_flow: None,
+            region_role: None,
         }],
         speaker_notes: None,
         register_tags: RegisterSet::new(),
@@ -190,6 +191,7 @@ fn title_and_body_slide() -> LaidOutDeck {
                     },
                     content: FrameContent::Title(Arc::from("Title H1 Text")),
                     text_flow: None,
+                    region_role: None,
                 },
                 Frame {
                     bbox: BoundingBox {
@@ -211,6 +213,7 @@ fn title_and_body_slide() -> LaidOutDeck {
                         }]),
                     ]),
                     text_flow: None,
+                    region_role: None,
                 },
             ],
             speaker_notes: None,
@@ -239,6 +242,7 @@ fn figure_slide_with_alt(alt_text: &str) -> LaidOutDeck {
                     },
                     content: FrameContent::Title(Arc::from("Figure Slide")),
                     text_flow: None,
+                    region_role: None,
                 },
                 Frame {
                     bbox: BoundingBox {
@@ -251,6 +255,7 @@ fn figure_slide_with_alt(alt_text: &str) -> LaidOutDeck {
                         alt: slideforge_types::AltText::Provided(Arc::from(alt_text)),
                     },
                     text_flow: None,
+                    region_role: None,
                 },
             ],
             speaker_notes: None,
@@ -281,6 +286,7 @@ fn decorative_only_slide() -> LaidOutDeck {
                     alt: slideforge_types::AltText::Decorative,
                 },
                 text_flow: None,
+                region_role: None,
             }],
             speaker_notes: None,
             register_tags: RegisterSet::new(),
@@ -532,6 +538,7 @@ fn test_bc_4_03_001_diagram_frame_alt_text_from_spec() {
                     alt: slideforge_types::AltText::Decorative,
                 },
                 text_flow: None,
+                region_role: None,
             }],
             speaker_notes: None,
             register_tags: RegisterSet::new(),
@@ -617,6 +624,7 @@ fn test_bc_4_03_001_chart_frame_alt_text_from_spec() {
                     alt: slideforge_types::AltText::Decorative,
                 },
                 text_flow: None,
+                region_role: None,
             }],
             speaker_notes: None,
             register_tags: RegisterSet::new(),
@@ -706,6 +714,7 @@ fn test_bc_4_03_001_body_level_chart_diagram_no_placeholder_alt() {
                 ContentBlock::Diagram(diagram_spec),
             ]),
             text_flow: None,
+            region_role: None,
         }],
         speaker_notes: None,
         register_tags: RegisterSet::new(),
@@ -840,6 +849,7 @@ fn test_bc_4_03_001_decorative_artifact_content_tag_present() {
                     },
                     content: FrameContent::Title(Arc::from("Slide with decorative frame")),
                     text_flow: None,
+                    region_role: None,
                 },
                 Frame {
                     bbox: BoundingBox {
@@ -853,6 +863,7 @@ fn test_bc_4_03_001_decorative_artifact_content_tag_present() {
                         alt: slideforge_types::AltText::Decorative,
                     },
                     text_flow: None,
+                    region_role: None,
                 },
             ],
             speaker_notes: None,
@@ -1116,6 +1127,7 @@ fn test_bc_4_03_001_ua1_export_proxy_validation() {
             },
             content: FrameContent::Title(Arc::from("Quarterly Revenue Report")),
             text_flow: None,
+            region_role: None,
         }],
         speaker_notes: None,
         register_tags: RegisterSet::new(),
@@ -1136,6 +1148,7 @@ fn test_bc_4_03_001_ua1_export_proxy_validation() {
                 },
                 content: FrameContent::Title(Arc::from("Revenue Breakdown")),
                 text_flow: None,
+                region_role: None,
             },
             Frame {
                 bbox: BoundingBox {
@@ -1157,6 +1170,7 @@ fn test_bc_4_03_001_ua1_export_proxy_validation() {
                     },
                 ])]),
                 text_flow: None,
+                region_role: None,
             },
             Frame {
                 bbox: BoundingBox {
@@ -1171,6 +1185,7 @@ fn test_bc_4_03_001_ua1_export_proxy_validation() {
                     )),
                 },
                 text_flow: None,
+                region_role: None,
             },
         ],
         speaker_notes: None,
@@ -1191,6 +1206,7 @@ fn test_bc_4_03_001_ua1_export_proxy_validation() {
             },
             content: FrameContent::Title(Arc::from("Thank You")),
             text_flow: None,
+            region_role: None,
         }],
         speaker_notes: None,
         register_tags: RegisterSet::new(),
@@ -1453,6 +1469,7 @@ fn test_bc_4_03_001_invariant_structure_tree_reading_order() {
                 },
                 content: FrameContent::Title(Arc::from("Title H1")),
                 text_flow: None,
+                region_role: None,
             },
             Frame {
                 bbox: BoundingBox {
@@ -1467,6 +1484,7 @@ fn test_bc_4_03_001_invariant_structure_tree_reading_order() {
                     span: SourceSpan::default(),
                 })]),
                 text_flow: None,
+                region_role: None,
             },
         ],
         speaker_notes: None,
@@ -1593,6 +1611,7 @@ fn test_bc_4_03_001_invariant_every_figure_has_non_empty_alt() {
                 alt: slideforge_types::AltText::Decorative,
             },
             text_flow: None,
+            region_role: None,
         }],
         speaker_notes: None,
         register_tags: RegisterSet::new(),
@@ -2056,6 +2075,7 @@ fn test_bc_4_03_001_subtitle_h2_carries_own_text_as_title_attribute() {
                 },
                 content: FrameContent::Title(Arc::from("Quarterly Review")),
                 text_flow: None,
+                region_role: None,
             },
             Frame {
                 bbox: BoundingBox {
@@ -2066,6 +2086,7 @@ fn test_bc_4_03_001_subtitle_h2_carries_own_text_as_title_attribute() {
                 },
                 content: FrameContent::Subtitle(Arc::from("Q4 2025 Highlights")),
                 text_flow: None,
+                region_role: None,
             },
         ],
         speaker_notes: None,
@@ -2570,6 +2591,7 @@ fn test_f_p3_001_multi_block_body_each_block_has_own_child_index_integration() {
                 },
                 content: FrameContent::Title(Arc::from("Integration Title")),
                 text_flow: None,
+                region_role: None,
             },
             Frame {
                 bbox: BoundingBox {
@@ -2591,6 +2613,7 @@ fn test_f_p3_001_multi_block_body_each_block_has_own_child_index_integration() {
                     }]),
                 ]),
                 text_flow: None,
+                region_role: None,
             },
         ],
         speaker_notes: None,
@@ -2702,6 +2725,7 @@ fn test_f_p4_001_mixed_block_body_text_math_bullets_each_gets_tagged_region() {
                 },
                 content: FrameContent::Title(Arc::from("Mixed-Block Regression")),
                 text_flow: None,
+                region_role: None,
             },
             Frame {
                 bbox: BoundingBox {
@@ -2727,6 +2751,7 @@ fn test_f_p4_001_mixed_block_body_text_math_bullets_each_gets_tagged_region() {
                     }]),
                 ]),
                 text_flow: None,
+                region_role: None,
             },
         ],
         speaker_notes: None,

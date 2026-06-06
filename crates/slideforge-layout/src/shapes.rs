@@ -322,6 +322,7 @@ pub fn layout_shapes(
             bbox,
             content: crate::types::FrameContent::Shape(shape_frame),
             text_flow: None,
+            region_role: None,
         });
     }
 

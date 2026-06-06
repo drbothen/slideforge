@@ -269,6 +269,7 @@ fn test_bc_4_03_002_ac009_font_subset_smaller_than_full_font() {
                 },
                 content: FrameContent::Title(Arc::from("Hi")),
                 text_flow: None,
+                region_role: None,
             }],
             speaker_notes: None,
             register_tags: RegisterSet::new(),

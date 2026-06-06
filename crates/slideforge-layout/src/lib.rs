@@ -906,6 +906,7 @@ mod tests {
             },
             content: FrameContent::TextRun(vec![InlineNode::Xref(Arc::clone(&xref_target))]),
             text_flow: None,
+            region_role: None,
         };
         let laid_out_slide = LaidOutSlide {
             source_index: 0,
@@ -1567,6 +1568,7 @@ mod tests {
             bbox: make_bbox(685_800),
             content: crate::types::FrameContent::Title(Arc::from("Quarterly Revenue")),
             text_flow: None,
+            region_role: None,
         };
         let title_text = collect_frame_text(&title_frame);
         assert!(
@@ -1579,6 +1581,7 @@ mod tests {
             bbox: make_bbox(914_400),
             content: crate::types::FrameContent::Subtitle(Arc::from("FY-2026 Highlights")),
             text_flow: None,
+            region_role: None,
         };
         assert!(
             collect_frame_text(&subtitle_frame).contains("FY-2026 Highlights"),
@@ -1594,6 +1597,7 @@ mod tests {
                 span: SourceSpan::default(),
             })]),
             text_flow: None,
+            region_role: None,
         };
         assert!(
             collect_frame_text(&body_frame).contains("Body visual content"),
@@ -1607,6 +1611,7 @@ mod tests {
                 "TextRun inline text",
             ))]),
             text_flow: None,
+            region_role: None,
         };
         assert!(
             collect_frame_text(&text_run_frame).contains("TextRun inline text"),

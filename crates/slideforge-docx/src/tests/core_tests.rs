@@ -116,6 +116,7 @@ fn make_slide(title: &str, register_content: Vec<RegisteredContent>) -> LaidOutS
             },
             content: FrameContent::Title(Arc::from(title)),
             text_flow: None,
+            region_role: None,
         }],
         speaker_notes: None,
         register_tags: vec![],

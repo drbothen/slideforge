@@ -621,6 +621,7 @@ mod tests {
                 },
                 content: FrameContent::Title(Arc::from("Red Gate Test Slide")),
                 text_flow: None,
+                region_role: None,
             }],
             speaker_notes: None,
             register_tags: RegisterSet::new(),
@@ -686,6 +687,7 @@ mod tests {
                     // Non-decorative title frame.
                     content: FrameContent::Title(Arc::from("Photo Slide")),
                     text_flow: None,
+                    region_role: None,
                 },
                 Frame {
                     bbox: BoundingBox {
@@ -699,6 +701,7 @@ mod tests {
                         alt: slideforge_types::AltText::Decorative,
                     },
                     text_flow: None,
+                    region_role: None,
                 },
             ],
             speaker_notes: None,
@@ -747,6 +750,7 @@ mod tests {
                     )),
                 },
                 text_flow: None,
+                region_role: None,
             }],
             speaker_notes: None,
             register_tags: RegisterSet::new(),
@@ -945,6 +949,7 @@ mod tests {
                     },
                     content: FrameContent::Title(Arc::from("Multi-Block Body Test")),
                     text_flow: None,
+                    region_role: None,
                 },
                 Frame {
                     bbox: BoundingBox {
@@ -966,6 +971,7 @@ mod tests {
                         }]),
                     ]),
                     text_flow: None,
+                    region_role: None,
                 },
             ],
             speaker_notes: None,
@@ -1086,6 +1092,7 @@ mod tests {
                     span: SourceSpan::default(),
                 })]),
                 text_flow: None,
+                region_role: None,
             }],
             speaker_notes: None,
             register_tags: RegisterSet::new(),
