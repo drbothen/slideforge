@@ -361,12 +361,14 @@ fn build_inner(
     // catch panics from third-party brand providers. (EC-003 / AC-008.)
     //
     // AC-007: "brand" is one of the 6 canonical pipeline stage spans.
+    // The `stage` field carries the span name so tests can assert the structured
+    // field value is exactly the canonical name (BC-5.02.001 AC-007 / NFR-032).
     let brand_source = options
         .brand_source
         .as_ref()
         .ok_or(error::BuildError::NoBrandSource)?;
     let brand = {
-        let _span = tracing::info_span!("brand").entered();
+        let _span = tracing::info_span!("brand", stage = "brand").entered();
         tracing::info!("pipeline stage: brand");
 
         // Select the correct provider id based on the BrandSource variant.
@@ -397,8 +399,9 @@ fn build_inner(
     // diagnostics (not just a count) so callers retain file:line:col + hints.
     //
     // AC-007: "parse" is one of the 6 canonical pipeline stage spans.
+    // `stage` field is the canonical span name for structured-field assertions.
     let deck_node = {
-        let _span = tracing::info_span!("parse", source_len = source.len()).entered();
+        let _span = tracing::info_span!("parse", stage = "parse", source_len = source.len()).entered();
         tracing::info!("pipeline stage: parse");
         let mut source_map = SourceMap::new();
         let file_id = source_map.add_file(
@@ -424,8 +427,9 @@ fn build_inner(
     // validator dispatch is complete.
     //
     // AC-007: "evaluate" is one of the 6 canonical pipeline stage spans.
+    // `stage` field is the canonical span name for structured-field assertions.
     let mut deck = {
-        let _span = tracing::info_span!("evaluate").entered();
+        let _span = tracing::info_span!("evaluate", stage = "evaluate").entered();
         tracing::info!("pipeline stage: evaluate");
         let eval_config = EvalConfig::default();
         let mut eval_sink = DiagnosticSink::new();
@@ -453,10 +457,11 @@ fn build_inner(
     // complete before any failure is raised.
     //
     // AC-007: "validate" is one of the 6 canonical pipeline stage spans.
+    // `stage` field is the canonical span name for structured-field assertions.
     let validator_opts = ValidatorOptions::default();
     let mut all_validator_diagnostics: Vec<slideforge_plugin_api::Diagnostic> = vec![];
     {
-        let _span = tracing::info_span!("validate", strict = options.strict).entered();
+        let _span = tracing::info_span!("validate", stage = "validate", strict = options.strict).entered();
         tracing::info!("pipeline stage: validate");
         for validator in registry.iter_validators() {
             let validator_id = validator.id().to_owned();
@@ -513,8 +518,9 @@ fn build_inner(
     // invalid deck becomes BuildError::Layout, not a crash.
     //
     // AC-007: "layout" is one of the 6 canonical pipeline stage spans.
+    // `stage` field is the canonical span name for structured-field assertions.
     let layout_result = {
-        let _span = tracing::info_span!("layout").entered();
+        let _span = tracing::info_span!("layout", stage = "layout").entered();
         tracing::info!("pipeline stage: layout");
         layout_run(&deck, &brand)
     };
@@ -603,8 +609,9 @@ fn build_inner(
     // carries the authoritative file extension declared by the exporter.
     //
     // AC-007: "export" is one of the 6 canonical pipeline stage spans.
+    // `stage` field is the canonical span name for structured-field assertions.
     let (bytes, file_extension) = {
-        let _span = tracing::info_span!("export", format).entered();
+        let _span = tracing::info_span!("export", stage = "export", format).entered();
         tracing::info!("pipeline stage: export");
         let exporter = registry
             .lookup_exporter(format)
