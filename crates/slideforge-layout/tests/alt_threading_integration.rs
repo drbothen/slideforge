@@ -329,7 +329,7 @@ fn test_bc_3_06_039_ac005_image_provided_alt_threads_through_layout_run() {
 /// `ChartSpec.alt` is `None`. The `tracing::warn!` sentinel is emitted per EC-006.
 /// The post-layout validator sees `Unspecified` and emits `E-A11-001` in strict mode.
 #[test]
-fn test_bc_3_06_039_ec006_chart_alt_none_maps_to_decorative() {
+fn test_bc_3_06_039_ec006_chart_alt_none_maps_to_unspecified() {
     // ChartSpec with alt: None — author provided NO alt text.
     let chart_block = ContentBlock::Chart(ChartSpec {
         chart_type: Arc::from("pie"),

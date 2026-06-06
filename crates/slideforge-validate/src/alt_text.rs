@@ -1412,8 +1412,9 @@ mod tests {
     /// when `ContentBlock::Chart.alt == None`, the frame must carry `AltText::Unspecified`
     /// (not `AltText::Decorative`).
     ///
-    /// Red Gate: the STUB `thread_media_alt_into_frames` maps `None → AltText::Decorative`
-    /// (current layout.rs lines 432–440). After fix: `None → AltText::Unspecified`.
+    /// STORY-086 / ADR-019 Decision 5.2 updated the fallback from `None → Decorative`
+    /// to `None → Unspecified`, distinguishing a pipeline gap (no author alt threaded)
+    /// from an explicit decorative opt-out. This test is now GREEN.
     ///
     /// This test constructs a `LaidOutDeck` by calling the real layout pipeline on a
     /// deck with a chart `ContentBlock` where `alt = None`, then asserts the resulting
@@ -1427,9 +1428,7 @@ mod tests {
     fn test_bc_5_01_001_ac013_thread_media_alt_fallback_produces_unspecified() {
         // AC-013 / AC-014 — when ContentBlock::Chart.alt = None,
         // thread_media_alt_into_frames must produce AltText::Unspecified (not Decorative).
-        //
-        // RED GATE: stub maps None → Decorative. This test asserts Unspecified → FAILS.
-        // After fix: None → Unspecified → PASSES.
+        // STORY-086: None → Unspecified (GREEN — fix shipped).
         use slideforge_layout::FrameContent;
         use slideforge_types::{
             AltText, Block, Brand, BrandFonts, BrandPalette, ContentBlock, Deck, DeckMetadata,
@@ -1509,7 +1508,7 @@ mod tests {
             .expect("AC-013: chart slide must produce a FrameContent::Chart frame after layout");
 
         // Assert the alt is Unspecified (not Decorative).
-        // RED GATE: stub maps None → Decorative → this assertion FAILS.
+        // STORY-086: None → Unspecified (GREEN — fix shipped per ADR-019 Decision 5.2).
         assert!(
             matches!(
                 &chart_frame.content,
@@ -1517,10 +1516,9 @@ mod tests {
                     alt: AltText::Unspecified
                 }
             ),
-            "AC-013 / AC-014 Red Gate: when ContentBlock::Chart.alt = None, \
+            "AC-013 / AC-014: when ContentBlock::Chart.alt = None, \
              thread_media_alt_into_frames must produce AltText::Unspecified (not Decorative). \
-             Got: {:?}. Stub maps None → Decorative → FAILS until T4 ships. \
-             BC-5.01.001 EC-004; ADR-019 Decision 5.2.",
+             Got: {:?}. BC-5.01.001 EC-004; ADR-019 Decision 5.2.",
             &chart_frame.content
         );
     }
