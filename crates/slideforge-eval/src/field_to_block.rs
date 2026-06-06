@@ -57,7 +57,7 @@ use slideforge_types::{
 ///
 /// 1. `Slide.fields["decorative"] == Value::Bool(true)` → `ContentBlock.alt = Some(AltText::Decorative)`
 ///    (wins unconditionally, even if `alt` is also set — see W-A11-002 below).
-/// 2. `Slide.fields["alt"] == Value::Str(s)` (non-empty, non-whitespace) → `ContentBlock.alt = Some(AltText::Provided(Arc::from(s)))`
+/// 2. `Slide.fields["alt"] == Value::Str(s)` (non-empty, non-whitespace) → `ContentBlock.alt = Some(AltText::Provided(Arc::from(s.trim())))`
 /// 3. Neither present → `ContentBlock.alt = None`
 ///
 /// When both `decorative: true` AND a non-empty `alt` are present, rule 1 wins
@@ -265,7 +265,7 @@ fn extract_str_field<'s>(slide: &'s slideforge_types::Slide, key: &str) -> Optio
 /// Precedence (BC-1.16.001 PC-12, ADR-019 Decision 4 — decorative-first):
 /// 1. `decorative: true` → `Some(AltText::Decorative)` (decorative opt-out
 ///    wins unconditionally, even when a non-empty `alt` is also present).
-/// 2. `alt "..."` (non-empty after trim) → `Some(AltText::Provided(s))`.
+/// 2. `alt "..."` (non-empty after trim) → `Some(AltText::Provided(Arc::from(s.trim())))`.
 /// 3. Neither → `None`.
 ///
 /// When both `decorative: true` AND a non-empty `alt` are present (conflict
