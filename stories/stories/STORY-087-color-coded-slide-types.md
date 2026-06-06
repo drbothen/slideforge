@@ -4,13 +4,17 @@ traces_to: .factory/stories/STORY-INDEX.md
 story_id: STORY-087
 title: "Color-Coded Slide Types: status, progress_bar, weighted_composite (Registration + LabelCheck WCAG Enforcement)"
 epic: EPIC-01
-wave: 5
+wave: 4
 points: 13
 priority: P1
 tdd_mode: strict
-status: draft
-spec_version: "1.1"
+status: in-progress
+spec_version: "1.2"
 last_updated: "2026-06-06"
+changelog:
+  - version: "1.2"
+    date: "2026-06-06"
+    note: "Wave 5→4 pull-in (human-authorized) to close F-G3-HIGH-003 within Wave 4."
 target_module: slideforge-plugin-api, slideforge-syntax, slideforge-layout, slideforge-validate
 subsystems: [SS-14, SS-01, SS-05, SS-03]
 behavioral_contracts: [BC-1.17.001, BC-1.17.002, BC-1.17.003]
