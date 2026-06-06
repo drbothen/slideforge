@@ -312,7 +312,7 @@ pub fn build(source: &str, options: &BuildOptions) -> Result<BuildOutput, error:
 /// Core pipeline implementation shared by [`build`] and (in tests)
 /// [`build_with_registry`].
 ///
-/// Stages (ADR-016 amended by ADR-018 and ADR-019):
+/// Stages (ADR-016 amended by ADR-018 and ADR-019) — logical dependency order:
 ///
 /// - Stage 1:  Plugin registry assembly
 /// - Stage 2:  DSL parsing (`slideforge-syntax`) → `DeckNode` (AST)
@@ -326,8 +326,14 @@ pub fn build(source: &str, options: &BuildOptions) -> Result<BuildOutput, error:
 /// - Stage 6b: Validate post-layout (`validate_post_layout` on `&LaidOutDeck` — ADR-018 Decision 3)
 /// - Stage 7:  Export (selected exporter plugin)
 ///
-/// Stage 2b is a **pure** (no I/O, deterministic) pass inserted between Stage 2a
-/// and Stage 3. It reads resolved `Slide.fields` and populates `Slide.blocks`
+/// **Physical execution note:** Stage 3 (brand I/O) is executed first in the
+/// function body, before Stage 2 (parse) and Stage 2a/2b (eval/threading), as an
+/// I/O optimization (fail fast on missing brand before spending time parsing).
+/// Stage 2b has no data dependency on brand; the logical stage numbering reflects
+/// semantic dependencies, not physical call order.
+///
+/// Stage 2b is a **pure** (no I/O, deterministic) pass. It reads resolved
+/// `Slide.fields` and populates `Slide.blocks`
 /// with typed `ContentBlock` entries (title, body, subtitle, bullets, chart,
 /// image, diagram), enabling the layout engine and all exporters to produce
 /// content-bearing output. See ADR-019 Decisions 1, 2, and 9 for rationale and
@@ -358,7 +364,8 @@ fn build_inner(
         "build_inner: starting pipeline"
     );
 
-    // Stage 2: load brand via the BrandProvider plugin.
+    // Stage 3 (physical: brand is loaded here, before parse/eval, for I/O efficiency;
+    // logical stage number follows ADR-019 Decision 1): load brand via the BrandProvider plugin.
     //
     // CRIT-1 fix: route by BrandSource variant.
     //
@@ -404,7 +411,7 @@ fn build_inner(
             .map_err(error::BuildError::Brand)?
     };
 
-    // Stage 3: parse the DSL source.
+    // Stage 2: parse the DSL source.
     //
     // M1 fix: on parse failure, carry the full structured DiagnosticSink
     // diagnostics (not just a count) so callers retain file:line:col + hints.
@@ -428,7 +435,7 @@ fn build_inner(
         })?
     };
 
-    // Stage 4: evaluate the AST into a semantic Deck.
+    // Stage 2a: evaluate the AST into a semantic Deck.
     //
     // OBS-1 fix: use a FRESH DiagnosticSink for eval so that EvalFailed
     // carries only eval-phase diagnostics, not residual parse-phase ones.
@@ -456,7 +463,9 @@ fn build_inner(
     //
     // Reads resolved `Slide.fields` and populates `Slide.blocks` with typed
     // `ContentBlock` entries. This is a pure, no-I/O pass that runs after all
-    // `{{ }}` expressions are resolved and before brand load, layout, or validation.
+    // `{{ }}` expressions are resolved (Stage 2a complete) and before layout or
+    // validation. Brand is physically loaded earlier in this function (Stage 3)
+    // as an I/O optimization; Stage 2b has no dependency on brand data.
     //
     // Without this pass, `Slide.blocks` would always be `vec![]` (for_eval.rs:342
     // original deferral), making all three exporters (PPTX, PDF, DOCX) produce
