@@ -388,6 +388,34 @@ all registered types appear in SLIDE_TYPE_KEYWORDS) will fail.
 
 ## D5 (U-088-01, U-088-02, U-088-03) — Parser FieldValue list model
 
+> **CORRECTION — 2026-06-06 (STORY-086 pass-5 / test-writer parser verification):**
+> An earlier version of this resolution (pre-correction) claimed: "The `@var` binding
+> form is confirmed to produce `Value::List` from the existing evaluator … The path
+> `@var items = [...] → eval → Value::List → Stage 2b → ContentBlock::Bullets` is
+> fully exercisable with STORY-086 alone." That claim was FALSE. Verified against
+> `develop@030dec6c` and the STORY-086 worktree HEAD `77092e2a`:
+>
+> - `value_parser()` in `crates/slideforge-syntax/src/parser/deck.rs` (line 66)
+>   handles only scalar field values (Template/Num/Float/Bool/Ident). There is no
+>   list-literal arm; therefore a `vars:` block entry cannot hold a `Value::List`.
+> - The `FieldValue::Inlines` / bullets path in `thread_fields_to_blocks` is
+>   unreachable from any current DSL input.
+> - NO current DSL syntax — neither direct `bullets: ["a","b","c"]` literals NOR
+>   any `@var items = [...]` / vars-block form — produces a `Value::List`. The
+>   `Value::List → ContentBlock::Bullets` Stage-2b mapping is implemented and
+>   load-bearing-tested in STORY-086 via a programmatic unit test
+>   (`field_to_block_unit.rs::test_..._ac007_value_list_produces_content_block_bullets`),
+>   but is NOT reachable from DSL surface syntax until STORY-088 ships.
+> - ALL DSL-level bullets-list syntax (literal and variable-binding) is deferred to
+>   STORY-088 (Wave 5), whose scope MUST cover the `value_parser()` list-literal arm
+>   + eval propagation so that `bullets:` resolves to a `Value::List`. STORY-088
+>   scope is being expanded accordingly (story-writer will update STORY-088 itself).
+> - STORY-086's AC-007 load-bearing coverage is the Stage-2b unit test (programmatic
+>   path only). The e2e bullets DSL fixture is a placeholder pending STORY-088.
+>
+> The decision text below is corrected to reflect this. The per-story summary in
+> the "Threading to eval's Value::List" sub-section has been rewritten accordingly.
+
 ### Real FieldValue (from `crates/slideforge-syntax/src/parser/deck.rs`)
 
 ```rust
@@ -452,14 +480,23 @@ scalar types.
 
 ### Threading to eval's Value::List
 
-In `slideforge-eval`, `FieldValue::List(items)` maps to `Value::List(...)` during
-eval. This is the same pattern as `FieldValue::Literal(Value::*)` → direct passthrough.
-The eval for `FieldValue::List` converts each item to its `Value` equivalent and
-produces `Value::List(values)`.
+In `slideforge-eval`, `FieldValue::List(items)` will map to `Value::List(...)` during
+eval once STORY-088 delivers the `value_parser()` list-literal arm. This follows the
+same pattern as `FieldValue::Literal(Value::*)` → direct passthrough: the eval for
+`FieldValue::List` converts each item to its `Value` equivalent and produces
+`Value::List(values)`.
 
-BC-1.16.001 PC-7 and STORY-086 AC-007 consume `Value::List` from the evaluated deck.
-`FieldValue::List` in the parser is the prerequisite that makes `Value::List` reachable
-from DSL field assignments.
+**Current state (pre-STORY-088):** `Value::List` is reachable ONLY programmatically.
+The Stage-2b mapping `Value::List → ContentBlock::Bullets` is implemented and verified
+by the STORY-086 unit test, but NO DSL input can produce a `Value::List` until
+STORY-088 adds the `FieldValue::List` parser arm. BC-1.16.001 PC-7 and STORY-086
+AC-007 are therefore partially covered: the Stage-2b unit test proves the mapping is
+correct; full DSL-to-bullets end-to-end coverage is deferred to STORY-088.
+
+**STORY-088 is the prerequisite** that makes `Value::List` reachable from DSL field
+assignments. Its scope must include: `FieldValue::List(Vec<FieldValue>)` AST variant,
+`value_parser()` list-literal arm in `deck.rs`, eval handling producing `Value::List`,
+and at least one end-to-end DSL fixture exercising `bullets: ["a", "b", "c"]`.
 
 ### No external research needed
 
