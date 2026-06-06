@@ -148,6 +148,8 @@ Only after all Wave 4 gates pass: begin Wave 5 with STORY-087, STORY-082, STORY-
 | **Workspace tests** | ~3244/3246 pass (2 perf-timing flakes under local CPU contention; 1 pre-existing cold_budget flake tracked under STORY-080) |
 | **factory-artifacts** | PUSHED to remote (origin/factory-artifacts) — human-authorized 2026-06-04. Upstream tracking set. Fresh sessions: clone repo + `git worktree add .factory factory-artifacts`. |
 | **RESUME INSTRUCTION** | Fresh orchestrator: NEXT ACTION = test-writer adds Red Gate tests for STORY-086 TextTag ACs (title→`<p:ph type="title">`, body→body ph, DOCX Heading1 via tag, subtitle, tag-over-position) — must FAIL on current worktree HEAD ba3bcc93. Also: AC-007 variable-binding bullets fixture + Value::List unit test. Then implementer fix-burst (Issues 1/2/3). Then RESUME adversary LOCAL cascade (0/3 → 3 strict-CLEAN). Then demo → PR → security+pr-reviewer → merge. After STORY-086 merges, re-run Gate 3 (adversary) + Gate 5 (holdout) on new develop. Only after re-gate passes, advance to Wave 5. BLK-002 remains OPEN until STORY-086 merges + gates re-pass. |
+| **Pass 1 adversary report** | `.factory/cycles/STORY-086/adversarial-reviews/adversary-STORY-086-pass-1.md` — full finding details (CRIT-001 double-fire analysis, MED-001/002/003, OBS-1..5) |
+| **Architect adjudication** | `.factory/cycles/STORY-086/architect-pass-1-adjudication.md` — Issue 1 (CODE-CONFORMS, emit alt=None blocks + validate() owns Shape only), Issue 2 (TextTag IMPLEMENT NOW, scope 13→21 pts), Issue 3 (bullets → STORY-088, AC-007 var-binding form) |
 
 ---
 
