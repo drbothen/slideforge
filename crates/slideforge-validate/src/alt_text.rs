@@ -57,23 +57,24 @@ impl Validator for AltTextValidator {
 
     /// Stage 5 (pre-layout) alt-text check on the semantic [`Deck`] IR.
     ///
-    /// Iterates `deck.slides[*].blocks` looking for `ContentBlock::Chart`,
-    /// `ContentBlock::Image`, `ContentBlock::Diagram`, and `ContentBlock::Shape`
-    /// entries with missing or blank alt text.
+    /// Iterates `deck.slides[*].blocks` looking for `ContentBlock::Shape` entries
+    /// with missing or blank alt text. **Restricted to Shape blocks only** per
+    /// ADR-018 v1.2 Decision-3 (STORY-086 scope-expansion adjudication).
     ///
-    /// ## Current pipeline state
+    /// ## Scope: Shape only (ADR-018 v1.2 Decision-3)
     ///
-    /// `slideforge-eval` always sets `Slide.blocks = vec![]` (see
-    /// `slideforge_eval::for_eval:342`). `ContentBlock` construction is deferred to
-    /// layout + Wave 3+ stories. As a result, this method currently produces zero
-    /// diagnostics — not because the logic is wrong, but because there are no blocks
-    /// to iterate. The authoritative alt-text enforcement for the current pipeline
-    /// is in [`AltTextValidator::validate_post_layout`] (ADR-018 Decision 3).
+    /// `ContentBlock::Chart`, `ContentBlock::Image`, and `ContentBlock::Diagram`
+    /// are NOT validated here. Stage 2b (STORY-086) populates these blocks with
+    /// `alt = None` when no author alt text is supplied. If the pre-layout pass
+    /// fired on them, it would produce a double-diagnostic alongside the
+    /// post-layout `validate_post_layout()` pass (which fires on
+    /// `AltText::Unspecified` frames). Single-fire is enforced by restricting
+    /// pre-layout scope to Shape, which is NOT a structural-placeholder type in
+    /// regions.rs (shapes are always user-authored via the shape DSL).
     ///
-    /// When a future story populates `Slide.blocks` from eval-time DSL fields,
-    /// this method will provide earlier detection (before layout). Both passes are
-    /// additive: combined diagnostics from Stage 5 and Stage 6b are accumulated
-    /// into one list before the strict-mode gate fires.
+    /// The authoritative alt-text enforcement for Chart/Image/Diagram is in
+    /// [`AltTextValidator::validate_post_layout`] (ADR-018 Decision 3 /
+    /// ADR-019 Decision 5.3).
     fn validate(&self, deck: &Deck, _opts: &ValidatorOptions) -> Vec<Diagnostic> {
         use slideforge_types::ContentBlock;
 
@@ -82,47 +83,10 @@ impl Validator for AltTextValidator {
         for slide in &deck.slides {
             for block in &slide.blocks {
                 match &block.content {
-                    ContentBlock::Image(spec) => {
-                        check_visual_element(
-                            spec.alt.as_ref(),
-                            spec.decorative,
-                            "image",
-                            spec.path.as_ref(),
-                            &spec.span,
-                            &mut diagnostics,
-                        );
-                    },
-                    ContentBlock::Chart(spec) => {
-                        check_visual_element(
-                            spec.alt.as_ref(),
-                            spec.decorative,
-                            "chart",
-                            spec.chart_type.as_ref(),
-                            &spec.span,
-                            &mut diagnostics,
-                        );
-                    },
-                    ContentBlock::Diagram(spec) => {
-                        // Truncate diagram source to first 30 *chars* (not bytes) for the
-                        // identifier. Using byte indexing (&source[..30]) would panic if byte 30
-                        // falls in the middle of a multi-byte UTF-8 character (e.g. CJK labels
-                        // in Mermaid diagrams). chars().take(30) is always char-boundary-safe.
-                        let identifier: std::borrow::Cow<str> = if spec.source.chars().count() > 30
-                        {
-                            let truncated: String = spec.source.chars().take(30).collect();
-                            std::borrow::Cow::Owned(format!("{truncated}…"))
-                        } else {
-                            std::borrow::Cow::Borrowed(spec.source.as_ref())
-                        };
-                        check_visual_element(
-                            spec.alt.as_ref(),
-                            spec.decorative,
-                            "diagram",
-                            identifier.as_ref(),
-                            &spec.span,
-                            &mut diagnostics,
-                        );
-                    },
+                    // Pre-layout scope: Shape only (ADR-018 v1.2 Decision-3).
+                    // Shape blocks are always user-authored (shape DSL) and have no
+                    // structural-placeholder counterpart in regions.rs, so there is no
+                    // risk of double-fire with the post-layout validator.
                     ContentBlock::Shape(spec) => {
                         check_visual_element(
                             spec.alt.as_ref(),
@@ -133,6 +97,11 @@ impl Validator for AltTextValidator {
                             &mut diagnostics,
                         );
                     },
+                    // Chart, Image, Diagram: validated post-layout only (ADR-018 v1.2 Decision-3).
+                    // Restricting here prevents double-fire when Stage 2b emits blocks with alt=None
+                    // (thread_media_alt_into_frames maps None → AltText::Unspecified; post-layout
+                    // validate_post_layout fires exactly once — BC-5.01.001 postcondition 1).
+                    ContentBlock::Chart(_) | ContentBlock::Image(_) | ContentBlock::Diagram(_) => {},
                     // Non-visual blocks: Text, Bullets, Math, Table — no alt text required.
                     // Tables are text content that is already readable by screen readers
                     // (story spec, STORY-015 line 309). Alt text on tables is not validated.
@@ -520,8 +489,10 @@ mod tests {
 
     #[test]
     fn test_bc_5_03_015_missing_alt_single_image() {
-        // 1 image with alt: None, decorative: false → exactly 1 E-A11-001
-        let slide = make_slide(vec![make_image_block(None, false)]);
+        // Pre-layout validate() is now Shape-only (ADR-018 v1.2 Decision-3).
+        // Image blocks are validated post-layout; validate() on an image block → 0 diagnostics.
+        // The behavior-under-test (missing alt fires E-A11-001) is verified via Shape block.
+        let slide = make_slide(vec![make_shape_block(None, false)]);
         let deck = make_deck(vec![slide]);
         let diags = AltTextValidator.validate(&deck, &default_opts());
         assert_eq!(
@@ -535,11 +506,12 @@ mod tests {
 
     #[test]
     fn test_bc_5_03_015_missing_alt_multiple_images() {
-        // 3 images all missing alt → 3 E-A11-001 diagnostics
+        // Pre-layout validate() is Shape-only (ADR-018 v1.2 Decision-3).
+        // Error accumulation is verified via 3 shape blocks (same check_visual_element logic).
         let slide = make_slide(vec![
-            make_image_block(None, false),
-            make_image_block(None, false),
-            make_image_block(None, false),
+            make_shape_block(None, false),
+            make_shape_block(None, false),
+            make_shape_block(None, false),
         ]);
         let deck = make_deck(vec![slide]);
         let diags = AltTextValidator.validate(&deck, &default_opts());
@@ -552,8 +524,9 @@ mod tests {
 
     #[test]
     fn test_bc_5_03_015_empty_string_alt_is_missing() {
-        // alt: Some(AltText::Provided("")) is treated as missing (blank check)
-        let slide = make_slide(vec![make_image_block(
+        // alt: Some(AltText::Provided("")) is treated as missing (blank check).
+        // Pre-layout validate() is Shape-only (ADR-018 v1.2 Decision-3).
+        let slide = make_slide(vec![make_shape_block(
             Some(AltText::Provided(Arc::from(""))),
             false,
         )]);
@@ -569,8 +542,9 @@ mod tests {
 
     #[test]
     fn test_bc_5_03_015_whitespace_only_alt_is_missing() {
-        // alt: Some(AltText::Provided("  ")) is treated as missing
-        let slide = make_slide(vec![make_image_block(
+        // alt: Some(AltText::Provided("  ")) is treated as missing.
+        // Pre-layout validate() is Shape-only (ADR-018 v1.2 Decision-3).
+        let slide = make_slide(vec![make_shape_block(
             Some(AltText::Provided(Arc::from("  "))),
             false,
         )]);
@@ -582,6 +556,20 @@ mod tests {
             "whitespace-only alt should produce E-A11-001; got {diags:?}"
         );
         assert_eq!(diags[0].code.as_ref(), E_A11_001);
+    }
+
+    #[test]
+    fn test_bc_5_03_015_image_block_validate_scope_restricted() {
+        // Confirm that pre-layout validate() produces 0 diagnostics for Image blocks.
+        // Image alt-text enforcement is post-layout only (ADR-018 v1.2 Decision-3).
+        let slide = make_slide(vec![make_image_block(None, false)]);
+        let deck = make_deck(vec![slide]);
+        let diags = AltTextValidator.validate(&deck, &default_opts());
+        assert!(
+            diags.is_empty(),
+            "pre-layout validate() must produce 0 diagnostics for Image blocks \
+             (post-layout only per ADR-018 v1.2 Decision-3); got {diags:?}"
+        );
     }
 
     // ── Present alt — no error ─────────────────────────────────────────────────
@@ -635,7 +623,8 @@ mod tests {
     fn test_bc_5_03_015_alt_and_decorative_together() {
         // alt: Some(Provided("text")), decorative: true → 1 W-A11-002 warning
         // Per BC-3.04.001 v1.5.2 Invariant 11: alt wins over decorative (AC-009 / F-P18-HIGH-001).
-        let slide = make_slide(vec![make_image_block(
+        // Pre-layout validate() is Shape-only (ADR-018 v1.2 Decision-3) — use shape block.
+        let slide = make_slide(vec![make_shape_block(
             Some(AltText::Provided(Arc::from("this alt takes precedence"))),
             true,
         )]);
@@ -663,8 +652,9 @@ mod tests {
         // Per BC-3.04.001 v1.5.2 Invariant 11 (F-P18-HIGH-001). Cross-crate
         // semantic consistency: slideforge-layout::build_shape_frame applies the
         // same "alt wins" rule, producing AltText::Provided(s) when both are set.
+        // Pre-layout validate() is Shape-only (ADR-018 v1.2 Decision-3) — use shape block.
         let alt_text = Arc::from("A meaningful description of the shape");
-        let deck = make_deck(vec![make_slide(vec![make_image_block(
+        let deck = make_deck(vec![make_slide(vec![make_shape_block(
             Some(AltText::Provided(Arc::clone(&alt_text))),
             true,
         )])]);
@@ -711,30 +701,31 @@ mod tests {
 
     #[test]
     fn test_bc_5_03_015_chart_missing_alt() {
-        // chart with alt: None → 1 E-A11-001
+        // Chart blocks are validated post-layout only (ADR-018 v1.2 Decision-3).
+        // Pre-layout validate() produces 0 diagnostics for Chart blocks.
+        // The shape block version confirms the underlying check_visual_element logic still works.
         let slide = make_slide(vec![make_chart_block(None, false)]);
         let deck = make_deck(vec![slide]);
         let diags = AltTextValidator.validate(&deck, &default_opts());
-        assert_eq!(
-            diags.len(),
-            1,
-            "chart missing alt should produce 1 diagnostic; got {diags:?}"
+        assert!(
+            diags.is_empty(),
+            "pre-layout validate() must produce 0 diagnostics for Chart blocks \
+             (post-layout only per ADR-018 v1.2 Decision-3); got {diags:?}"
         );
-        assert_eq!(diags[0].code.as_ref(), E_A11_001);
     }
 
     #[test]
     fn test_bc_5_03_015_diagram_missing_alt() {
-        // diagram with alt: None → 1 E-A11-001
+        // Diagram blocks are validated post-layout only (ADR-018 v1.2 Decision-3).
+        // Pre-layout validate() produces 0 diagnostics for Diagram blocks.
         let slide = make_slide(vec![make_diagram_block(None, false)]);
         let deck = make_deck(vec![slide]);
         let diags = AltTextValidator.validate(&deck, &default_opts());
-        assert_eq!(
-            diags.len(),
-            1,
-            "diagram missing alt should produce 1 diagnostic; got {diags:?}"
+        assert!(
+            diags.is_empty(),
+            "pre-layout validate() must produce 0 diagnostics for Diagram blocks \
+             (post-layout only per ADR-018 v1.2 Decision-3); got {diags:?}"
         );
-        assert_eq!(diags[0].code.as_ref(), E_A11_001);
     }
 
     #[test]
@@ -755,30 +746,33 @@ mod tests {
     #[test]
     fn test_diagram_unicode_source_no_panic() {
         // Diagram source with multi-byte UTF-8 characters (CJK) exceeding 30 bytes.
-        // Byte-indexing at position 30 would panic mid-character; chars().take(30) is safe.
+        // Pre-layout validate() is Shape-only (ADR-018 v1.2 Decision-3) — Diagram blocks
+        // are now skipped. The test verifies no panic occurs even when diagram source is not
+        // inspected at pre-layout stage (chars().take(30) truncation is post-layout path).
         let source = "graph TD; A[\"日本語のラベル\"]-->B[\"中文標籤のテスト\"]";
         let deck = make_deck(vec![make_slide(vec![make_diagram_block_with_source(
             source, None, false,
         )])]);
         let diags = AltTextValidator.validate(&deck, &ValidatorOptions::default());
-        // Should produce E-A11-001 (missing alt) without panicking
-        assert_eq!(
-            diags.len(),
-            1,
-            "expected 1 E-A11-001 diagnostic; got {diags:?}"
+        // Pre-layout validate() skips Diagram — no E-A11-001 here (post-layout fires instead).
+        assert!(
+            diags.is_empty(),
+            "pre-layout validate() must produce 0 diagnostics for Diagram blocks; got {diags:?}"
         );
-        assert_eq!(diags[0].code.as_ref(), E_A11_001);
     }
 
     // ── Error accumulation ─────────────────────────────────────────────────────
 
     #[test]
     fn test_bc_5_03_015_error_accumulation() {
-        // 2 images + 1 diagram all missing alt → 3 E-A11-001 (all accumulated)
+        // Error accumulation: 3 shapes all missing alt → 3 E-A11-001 (all accumulated).
+        // Pre-layout validate() is Shape-only (ADR-018 v1.2 Decision-3).
+        // Image/Diagram blocks now produce 0 diagnostics at pre-layout; shape blocks confirm
+        // the accumulation behavior of check_visual_element is intact.
         let slide = make_slide(vec![
-            make_image_block(None, false),
-            make_image_block(None, false),
-            make_diagram_block(None, false),
+            make_shape_block(None, false),
+            make_shape_block(None, false),
+            make_shape_block(None, false),
         ]);
         let deck = make_deck(vec![slide]);
         let diags = AltTextValidator.validate(&deck, &default_opts());
@@ -794,9 +788,10 @@ mod tests {
 
     #[test]
     fn test_bc_5_03_015_error_accumulation_across_slides() {
-        // 2 slides, each with 1 image missing alt → 2 E-A11-001
-        let slide1 = make_slide(vec![make_image_block(None, false)]);
-        let slide2 = make_slide(vec![make_image_block(None, false)]);
+        // 2 slides, each with 1 shape missing alt → 2 E-A11-001.
+        // Pre-layout validate() is Shape-only (ADR-018 v1.2 Decision-3).
+        let slide1 = make_slide(vec![make_shape_block(None, false)]);
+        let slide2 = make_slide(vec![make_shape_block(None, false)]);
         let deck = make_deck(vec![slide1, slide2]);
         let diags = AltTextValidator.validate(&deck, &default_opts());
         assert_eq!(
@@ -872,17 +867,19 @@ mod tests {
 
     #[test]
     fn test_bc_5_03_015_mixed_valid_and_invalid() {
-        // 1 image with valid alt + 1 image missing alt → exactly 1 error
+        // 1 shape with valid alt + 1 shape missing alt → exactly 1 error.
+        // Pre-layout validate() is Shape-only (ADR-018 v1.2 Decision-3).
+        // Image blocks now produce 0 diagnostics; shape blocks confirm mixed-validity logic.
         let slide = make_slide(vec![
-            make_image_block(Some(AltText::Provided(Arc::from("a logo"))), false),
-            make_image_block(None, false),
+            make_shape_block(Some(AltText::Provided(Arc::from("a logo"))), false),
+            make_shape_block(None, false),
         ]);
         let deck = make_deck(vec![slide]);
         let diags = AltTextValidator.validate(&deck, &default_opts());
         assert_eq!(
             diags.len(),
             1,
-            "only the missing-alt image should produce an error; got {diags:?}"
+            "only the missing-alt shape should produce an error; got {diags:?}"
         );
         assert_eq!(diags[0].code.as_ref(), E_A11_001);
     }
@@ -891,8 +888,9 @@ mod tests {
 
     #[test]
     fn test_bc_5_03_015_error_has_hint() {
-        // E-A11-001 diagnostics must include a correction hint
-        let slide = make_slide(vec![make_image_block(None, false)]);
+        // E-A11-001 diagnostics must include a correction hint.
+        // Pre-layout validate() is Shape-only (ADR-018 v1.2 Decision-3) — use shape block.
+        let slide = make_slide(vec![make_shape_block(None, false)]);
         let deck = make_deck(vec![slide]);
         let diags = AltTextValidator.validate(&deck, &default_opts());
         assert_eq!(diags.len(), 1);
@@ -906,47 +904,59 @@ mod tests {
 
     #[test]
     fn test_error_message_contains_identifier_image() {
-        // E-A11-001 for an image must include the file path as identifier
+        // Pre-layout validate() is Shape-only (ADR-018 v1.2 Decision-3).
+        // Image blocks produce 0 diagnostics at pre-layout; confirm no panic + 0 diags.
         let deck = make_deck(vec![make_slide(vec![make_image_block(None, false)])]);
         let diags = AltTextValidator.validate(&deck, &default_opts());
-        assert_eq!(diags.len(), 1);
         assert!(
-            diags[0].message.contains("'photo.png'"),
-            "error message must contain the image path; got: {}",
-            diags[0].message
+            diags.is_empty(),
+            "pre-layout validate() must produce 0 diagnostics for Image blocks; got {diags:?}"
         );
     }
 
     #[test]
     fn test_error_message_contains_identifier_chart() {
-        // E-A11-001 for a chart must include the chart type as identifier
+        // Pre-layout validate() is Shape-only (ADR-018 v1.2 Decision-3).
+        // Chart blocks produce 0 diagnostics at pre-layout; confirm no panic + 0 diags.
         let deck = make_deck(vec![make_slide(vec![make_chart_block(None, false)])]);
         let diags = AltTextValidator.validate(&deck, &default_opts());
-        assert_eq!(diags.len(), 1);
         assert!(
-            diags[0].message.contains("'bar'"),
-            "error message must contain the chart type; got: {}",
-            diags[0].message
+            diags.is_empty(),
+            "pre-layout validate() must produce 0 diagnostics for Chart blocks; got {diags:?}"
         );
     }
 
     #[test]
     fn test_error_message_contains_identifier_diagram() {
-        // E-A11-001 for a diagram must include truncated source as identifier
+        // Pre-layout validate() is Shape-only (ADR-018 v1.2 Decision-3).
+        // Diagram blocks produce 0 diagnostics at pre-layout; confirm no panic + 0 diags.
         let deck = make_deck(vec![make_slide(vec![make_diagram_block(None, false)])]);
+        let diags = AltTextValidator.validate(&deck, &default_opts());
+        assert!(
+            diags.is_empty(),
+            "pre-layout validate() must produce 0 diagnostics for Diagram blocks; got {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_error_message_contains_identifier_shape() {
+        // E-A11-001 for a shape must include the shape type as identifier.
+        // Shape is the only pre-layout-validated type (ADR-018 v1.2 Decision-3).
+        let deck = make_deck(vec![make_slide(vec![make_shape_block(None, false)])]);
         let diags = AltTextValidator.validate(&deck, &default_opts());
         assert_eq!(diags.len(), 1);
         assert!(
-            diags[0].message.contains("'graph TD; A-->B'"),
-            "error message must contain the diagram source; got: {}",
+            diags[0].message.contains("'rect'"),
+            "error message must contain the shape type 'rect'; got: {}",
             diags[0].message
         );
     }
 
     #[test]
     fn test_warning_message_contains_identifier() {
-        // W-A11-002 for an image must include the file path as identifier
-        let deck = make_deck(vec![make_slide(vec![make_image_block(
+        // W-A11-002 for a shape must include the shape type as identifier.
+        // Pre-layout validate() is Shape-only (ADR-018 v1.2 Decision-3).
+        let deck = make_deck(vec![make_slide(vec![make_shape_block(
             Some(AltText::Provided(Arc::from("alt that wins"))),
             true,
         )])]);
@@ -954,8 +964,8 @@ mod tests {
         assert_eq!(diags.len(), 1);
         assert_eq!(diags[0].code.as_ref(), W_A11_002);
         assert!(
-            diags[0].message.contains("'photo.png'"),
-            "warning message must contain the image path; got: {}",
+            diags[0].message.contains("'rect'"),
+            "warning message must contain the shape type 'rect'; got: {}",
             diags[0].message
         );
     }
@@ -1082,7 +1092,9 @@ mod tests {
 
     #[test]
     fn test_snapshot_alt_error_message() {
-        let deck = make_deck(vec![make_slide(vec![make_image_block(None, false)])]);
+        // Snapshot of E-A11-001 message. Pre-layout validate() is Shape-only
+        // (ADR-018 v1.2 Decision-3) — use shape block to produce the diagnostic.
+        let deck = make_deck(vec![make_slide(vec![make_shape_block(None, false)])]);
         let diags = AltTextValidator.validate(&deck, &default_opts());
         assert_eq!(diags.len(), 1);
         insta::assert_snapshot!(diags[0].message.as_ref());
