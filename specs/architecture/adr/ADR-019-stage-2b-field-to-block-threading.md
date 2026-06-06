@@ -42,6 +42,7 @@ Story A (`slide-field-to-block-threading`).
 |------|---------|--------|--------|
 | 2026-06-05 | v1.0 | architect | Initial ADR. Stage 2b seam contract, fields→blocks mapping, AltText::Unspecified state machine, decorative handling, purity classification, comemo compatibility. |
 | 2026-06-06 | v1.1 | architect | Amendment A: D1 (TextTag→FrameContent layout mapping; exporters unchanged) + D5 (FieldValue::List parser model). See wave4-expanded-scope-uncertainty-resolution.md for full resolution. |
+| 2026-06-06 | v1.2 | architect | Amendment B (STORY-086 pass-5 adjudication F-086-P5-CRIT-001): Decision 4.1 conflict path corrected from alt-first (BC-3.04.001 Inv-11) to decorative-first (BC-1.16.001 PC-12). BC-3.04.001 Inv-11 governs shape DSL path only; media threading at Stage 2b is governed exclusively by BC-1.16.001. W-A11-002 emission site corrected from "pre-layout validator" to "resolve_alt via tracing::warn!" — AltTextValidator.validate() is Shape-only per ADR-018 v1.2 and cannot emit W-A11-002 for charts/images/diagrams. |
 
 ---
 
@@ -332,10 +333,16 @@ No ContentBlock produced (field absent for slide type)
 ```
 
 Author writes both `alt "..."` AND `decorative: true` (conflict):
-  → Stage 2b: `alt` takes precedence per BC-3.04.001 Invariant 11.
-    ContentBlock.alt = Some(AltText::Provided(s)), decorative = true.
-  → validate pre-layout: emits W-A11-002 ("alt takes precedence over decorative").
-  → frame.alt = AltText::Provided(s) — correct alt propagated.
+  → Stage 2b: `decorative` takes precedence per BC-1.16.001 PC-12.
+    ContentBlock.alt = Some(AltText::Decorative), decorative = true.
+    resolve_alt emits tracing::warn!(code = "W-A11-002") at detection time in
+    the threading pass (NOT via the pre-layout validator — AltTextValidator.validate()
+    is restricted to ContentBlock::Shape per ADR-018 v1.2 Decision 3 amendment).
+  → thread_media_alt_into_frames: frame.alt = AltText::Decorative
+  → validate_post_layout: Decorative → VALID (author opt-out; W-A11-002 already emitted).
+  Note: BC-3.04.001 Invariant 11 (alt-wins for shapes) governs the shape DSL path only
+  and does NOT apply to this Stage 2b media threading path. See architect adjudication
+  STORY-086 pass 5 (2026-06-06) for full domain-scoping analysis.
 
 ### Decision 5: regions.rs and thread_media_alt_into_frames Updates
 
