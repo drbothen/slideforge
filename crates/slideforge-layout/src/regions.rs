@@ -21,7 +21,9 @@
 //! `x >= 0`, `y >= 0`, `width > 0`, `height > 0`,
 //! `x + width <= page_width`, `y + height <= page_height`.
 
-use crate::types::{AltText, BoundingBox, Emu, Frame, FrameContent, NormalizedDiagramSvg, RegionRole};
+use crate::types::{
+    AltText, BoundingBox, Emu, Frame, FrameContent, NormalizedDiagramSvg, RegionRole,
+};
 
 /// Produce the canonical [`Frame`] list for a given slide type keyword on the
 /// given page dimensions.

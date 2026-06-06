@@ -230,10 +230,10 @@ pub struct LaidOutSlide {
 ///
 /// `RegionRole` is set by [`crate::regions::region_frames_for`] on each
 /// `FrameContent::Empty` slot to identify which tag of content should claim
-/// that slot. The layout engine's [`crate::layout::fill_region_slot_or_append`]
-/// uses this role — not slot position — to route `TextTag`-bearing blocks into
-/// the correct geometry region, ensuring tag-driven slot selection regardless of
-/// block processing order (AC-023 / BC-4.01.001 v1.2 invariant 5).
+/// that slot. The layout engine's `fill_region_slot_or_append` function in
+/// `layout.rs` uses this role — not slot position — to route `TextTag`-bearing
+/// blocks into the correct geometry region, ensuring tag-driven slot selection
+/// regardless of block processing order (AC-023 / BC-4.01.001 v1.2 invariant 5).
 ///
 /// ## Why this matters
 ///
@@ -303,7 +303,7 @@ pub struct Frame {
     /// The semantic role of this pre-allocated region slot.
     ///
     /// Set by [`crate::regions::region_frames_for`] to enable tag-driven slot
-    /// selection in [`crate::layout::fill_region_slot_or_append`] (AC-023 /
+    /// selection in `layout::fill_region_slot_or_append` (AC-023 /
     /// BC-4.01.001 v1.2 invariant 5). `None` for appended frames (shapes,
     /// inline text runs, dynamically-generated frames) that are not pre-allocated
     /// region slots.
