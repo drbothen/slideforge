@@ -12,7 +12,7 @@ purpose: >
 
 # STORY-086 Zero-Context Resume Playbook
 
-**IMMEDIATE NEXT ACTION: Re-dispatch adversary LOCAL pass 8 (streak 0/3, target 3 consecutive strict-CLEAN).**
+**IMMEDIATE NEXT ACTION: Dispatch adversary LOCAL pass 10 (streak 0/3, target 3 consecutive strict-CLEAN).**
 
 ---
 
@@ -21,12 +21,12 @@ purpose: >
 | Field | Value |
 |-------|-------|
 | develop SHA | `030dec6c` (61 merged PRs; 0 open PRs) |
-| feature/STORY-086 HEAD | `a055345e` (PUSHED to origin/feature/STORY-086) |
-| Workspace tests | 3300/3300 pass, 14 skipped |
+| feature/STORY-086 HEAD | `ccc7a703` (PUSHED to origin/feature/STORY-086) |
+| Workspace tests | 3299/3300 pass, 14 skipped (1 pre-existing cold_budget flake — STORY-080) |
 | Canonical exit gate | CLEAN (fmt + pedantic clippy + RUSTDOCFLAGS doc + nextest) |
-| Adversary LOCAL streak | 0/3 (pass 7 CLEAN(PR-merge) YES / CLEAN(strict) NO; pass 8 never ran — API 529 overload) |
+| Adversary LOCAL streak | 0/3 (pass 8 strict-CLEAN 1/3; pass 9 found F-086-P9-MED-001 + F-086-P9-LOW-001 — REMEDIATED; streak reset 0/3; pass 10 next) |
 | BLK-002 | OPEN — closes on STORY-086 merge + Wave 4 re-gate pass |
-| Key spec versions | BC-1.16.001 v1.3, BC-3.04.001 v1.6, BC-4.01.001 v1.2, BC-4.02.001 v1.2, BC-5.01.001 v1.3, BC-5.02.001 v1.6, error-taxonomy v2.17, ADR-019 v1.3, STORY-086 v1.5, STORY-088 v1.2 (8 pts) |
+| Key spec versions | BC-1.16.001 v1.4, BC-3.04.001 v1.6, BC-4.01.001 v1.2, BC-4.02.001 v1.2, BC-5.01.001 v1.3, BC-5.02.001 v1.6, error-taxonomy v2.17, ADR-019 v1.4, STORY-086 v1.5, STORY-088 v1.2 (8 pts) |
 
 ---
 
@@ -73,7 +73,7 @@ Then confirm HEAD:
 git -C /Users/jmagady/Dev/slideforge/.worktrees/STORY-086 rev-parse HEAD
 ```
 
-Must equal `a055345e` (or a later commit if the cascade advanced this session). If it is a DIFFERENT, unexpected commit, stop and investigate before proceeding.
+Must equal `ccc7a703` (or a later commit if the cascade advanced this session). If it is a DIFFERENT, unexpected commit, stop and investigate before proceeding.
 
 ### 0d. Confirm workspace is still CLEAN
 
@@ -87,7 +87,7 @@ Expected: ~3300 pass, 14 skipped, 0 failures. If failures exist, diagnose before
 
 ## Step 1 — Resume the LOCAL Adversary Cascade
 
-**Current position: streak 0/3. Pass 8 must run next.**
+**Current position: streak 0/3. Pass 10 must run next.**
 
 ### Discipline rules (inline — all must survive context loss)
 
@@ -159,19 +159,19 @@ strict-CLEAN per BC-5.39.001).
 WORKING DIRECTORY (mandatory): /Users/jmagady/Dev/slideforge/.worktrees/STORY-086
 ALL Read/Grep/Glob calls MUST use this absolute worktree path.
 
-STORY-086 feature branch HEAD: <HEAD>
-Review target: git diff origin/develop..<HEAD>
+STORY-086 feature branch HEAD: ccc7a703
+Review target: git diff origin/develop..ccc7a703
   (the complete story diff — not just the latest commit)
 
 CONTRACT VERSIONS IN EFFECT (read from worktree .factory/ paths):
-  BC-1.16.001  v1.3   (.factory/specs/behavioral-contracts/BC-1.16.001-alt-text-enforcement.md)
+  BC-1.16.001  v1.4   (.factory/specs/behavioral-contracts/BC-1.16.001-alt-text-enforcement.md)
   BC-3.04.001  v1.6   (.factory/specs/behavioral-contracts/BC-3.04.001-exporter-contracts.md)
   BC-4.01.001  v1.2   (.factory/specs/behavioral-contracts/BC-4.01.001-pptx-slide-types.md)
   BC-4.02.001  v1.2   (.factory/specs/behavioral-contracts/BC-4.02.001-docx-slide-types.md)
   BC-5.01.001  v1.3   (.factory/specs/behavioral-contracts/BC-5.01.001-validate-contracts.md)
   BC-5.02.001  v1.6   (.factory/specs/behavioral-contracts/BC-5.02.001-plugin-registry.md)
   error-taxonomy v2.17 (.factory/specs/prd-supplements/error-taxonomy.md)
-  ADR-019 v1.3        (.factory/specs/architecture/adr/ADR-019-stage2b-field-threading.md)
+  ADR-019 v1.4        (.factory/specs/architecture/adr/ADR-019-stage2b-field-threading.md)
   STORY-086 v1.5      (.factory/stories/STORY-086-slide-field-to-block-threading.md)
 
 FOCUS AREAS (check all):
@@ -193,11 +193,13 @@ CRITICAL — WORKTREE TYPE PATHS:
   They are NOT on develop/main checkout. If you read types from the main checkout
   you will produce a corrupted finding — use ONLY the worktree path.
 
-PREVIOUSLY FIXED (verified closed in passes 1-7 — do NOT reopen unless new evidence):
+PREVIOUSLY FIXED (verified closed in passes 1-9 — do NOT reopen unless new evidence):
   F-086-P1-CRIT-001 (emit alt=None blocks), P2-MED-001/002, P2-geometry, P3-HIGH-001
   (RegionRole tag-aware slot), P3-MED-001 (FrameContent doc), P4 findings,
   P5-CRIT-001 (decorative-first), P5-MED-001/002, P5-OBS-1, P6-MED-001 (trim storage),
-  P7-MED-001 (BulletItem fields stale BC)
+  P7-MED-001 (BulletItem fields stale BC), P8 (strict-CLEAN — all prior verified closed),
+  P9-MED-001 (phantom ChartSpec.data_source in BC-1.16.001 PC-9 + ADR-019 §3.3 — removed v1.4),
+  P9-LOW-001 (extract_str_field doc comment inaccurate — corrected)
 
 MANDATORY OUTPUT LINES (include verbatim at end of report):
   CLEAN (strict): yes/no
@@ -344,8 +346,8 @@ All paths are under `/Users/jmagady/Dev/slideforge/.factory/` (factory-artifacts
 | Architect adjudication pass-1 | `cycles/STORY-086/architect-pass-1-adjudication.md` | D1 TextTag→FrameContent routing (layout-side), D2-D5 |
 | Architect adjudication pass-5 | `cycles/STORY-086/architect-pass-5-adjudication.md` | Decorative-first canonical; ADR-019 v1.2; W-A11-002 mechanism |
 | Architect adjudication pass-6 | `cycles/STORY-086/architect-pass-6-adjudication.md` | TRIMMED canonical; BC supersedes ADR; ADR-019 v1.3 |
-| ADR-019 v1.3 | `specs/architecture/adr/ADR-019-stage2b-field-threading.md` | Stage 2b post-eval field-to-block threading |
-| BC-1.16.001 v1.3 | `specs/behavioral-contracts/BC-1.16.001-alt-text-enforcement.md` | TextTag, AltText state machine, decorative-first, trim |
+| ADR-019 v1.4 | `specs/architecture/adr/ADR-019-stage2b-field-threading.md` | Stage 2b post-eval field-to-block threading; phantom ChartSpec.data_source removed |
+| BC-1.16.001 v1.4 | `specs/behavioral-contracts/BC-1.16.001-alt-text-enforcement.md` | TextTag, AltText state machine, decorative-first, trim; phantom data_source removed from PC-9 |
 | BC-3.04.001 v1.6 | `specs/behavioral-contracts/BC-3.04.001-exporter-contracts.md` | Inv-11 scoped to shape-DSL path only |
 | BC-4.01.001 v1.2 | `specs/behavioral-contracts/BC-4.01.001-pptx-slide-types.md` | Tag-routing for FrameContent |
 | BC-4.02.001 v1.2 | `specs/behavioral-contracts/BC-4.02.001-docx-slide-types.md` | Tag-routing for FrameContent |

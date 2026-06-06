@@ -37,7 +37,7 @@ wave_5_total_points: 132
 develop_sha: "030dec6c"
 develop_pr_count: 61
 error_taxonomy_version: "v2.17"
-workspace_tests: "~3300 (61 merged PRs; STORY-086 pass-6 remediation: untrimmed content fix (title/subtitle/body/alt) + 4 trim Red Gate tests + whitespace-only-skip regression guard; 3300/3300 pass, 14 skipped, 1 pre-existing cold_budget flake tracked under STORY-080)"
+workspace_tests: "3299/3300 (STORY-086 pass-9 remediation: BC-1.16.001 v1.4 + ADR-019 v1.4 phantom ChartSpec.data_source removed; extract_str_field doc corrected; 3299/3300 pass, 14 skipped, 1 pre-existing cold_budget flake tracked under STORY-080)"
 workspace_test_failures: 0
 ---
 
@@ -55,11 +55,11 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. Generates branded .pptx
 
 ## CURRENT POSITION
 
-Phase 3, **Wave 4 — 21/21 MERGED. Wave 4 gate FAILED. STORY-086 delivery IN PROGRESS (adversary pass 7 RAN — CLEAN (PR-merge) YES, CLEAN (strict) NO; F-086-P7-MED-001: BC-1.16.001 PC-7 described BulletItem{text,level,span} but real type is {inlines,children,span} (code correct; stale BC); PO fix attempt 608ec7b0 CORRUPTED (read develop types, stripped TextTag/AltText::Unspecified); RECOVERED via f2261592 (BC-1.16.001 v1.3 + story-writer 9bbde7c9 STORY-086 v1.5); worktree HEAD unchanged at a055345e; adversary LOCAL pass 8 DISPATCHED; streak 0/3). BLK-002 OPEN.**
+Phase 3, **Wave 4 — 21/21 MERGED. Wave 4 gate FAILED. STORY-086 delivery IN PROGRESS (pass 8 strict-CLEAN streak 1/3; pass 9 found F-086-P9-MED-001 + F-086-P9-LOW-001, both REMEDIATED — BC-1.16.001 v1.4 + ADR-019 v1.4 phantom ChartSpec.data_source removed; worktree HEAD ccc7a703; streak reset to 0/3; pass 10 PENDING). BLK-002 OPEN.**
 
 - `develop` = `030dec6c` (61 merged PRs; origin/develop confirmed). **Open PRs: 0.**
-- Active worktrees: `.worktrees/STORY-086` (feature/STORY-086, HEAD a055345e).
-- Workspace: 3300/3300 pass, 14 skipped (e2e AC-007 bullets intentionally ignored pending STORY-088, SID-1). Canonical exit gate CLEAN: fmt + pedantic clippy + RUSTDOCFLAGS doc + nextest.
+- Active worktrees: `.worktrees/STORY-086` (feature/STORY-086, HEAD ccc7a703).
+- Workspace: 3299/3300 pass, 14 skipped (e2e AC-007 bullets intentionally ignored pending STORY-088, SID-1; 1 pre-existing cold_budget flake tracked under STORY-080). Canonical exit gate CLEAN: fmt + pedantic clippy + RUSTDOCFLAGS doc + nextest.
 - Wave 4 gate ran 2026-06-06. Gate 1 PASS. Gate 2 SKIP (no DTU). Gate 3 FAIL (adversary: 1 CRITICAL + 3 HIGH). Gate 5 FAIL (holdout: mean 0.56 / min_critical 0.30 — both below threshold). Consistency audit FAIL (4 blockers, 8 warnings — swept).
 
 **Wave 4 gate FAILED.** Root cause: eval emits no slide-body ContentBlocks (for_eval.rs:342) — content-EMPTY output across all exporters + a11y strict-gate unsatisfiable even with correct alt.
@@ -69,7 +69,7 @@ Phase 3, **Wave 4 — 21/21 MERGED. Wave 4 gate FAILED. STORY-086 delivery IN PR
 
 ## NEXT ACTIONS (zero-context orchestrator: execute in order)
 
-**STATUS: Wave 4 gate FAILED (2026-06-06). STORY-086 adversary LOCAL pass 7 RAN + REMEDIATED (BC-1.16.001 v1.3; recovery from corrupted v1.2; STORY-086 v1.5). Pass 8 DISPATCHED. Streak 0/3.**
+**STATUS: Wave 4 gate FAILED (2026-06-06). STORY-086 adversary LOCAL pass 8 strict-CLEAN (streak 1/3). Pass 9 found F-086-P9-MED-001 + F-086-P9-LOW-001 — REMEDIATED (BC-1.16.001 v1.4 + ADR-019 v1.4; worktree HEAD ccc7a703). Streak reset to 0/3. Pass 10 PENDING.**
 
 ### Step 1 — DONE: Remediation scoped + de-risked
 
@@ -105,7 +105,16 @@ Pass-7 fix-burst COMPLETE:
 - Worktree HEAD UNCHANGED at a055345e. Workspace 3300/3300 pass, 14 skipped. Exit gate CLEAN.
 - BC-1.16.001 now v1.3. STORY-086 now v1.5.
 
-CURRENT SUB-STEP: feature/STORY-086 PUSHED to origin at a055345e (durable cross-machine). Adversary LOCAL pass 8 PENDING (API 529 overload — never ran; re-dispatch on resume). Streak 0/3, target 3 strict-CLEAN (sequential per LESSON-7). Full procedure in `.factory/cycles/STORY-086/RESUME-PLAYBOOK.md`. Then demo → PR → security-reviewer + pr-reviewer → merge. Then RE-RUN Wave 4 gates (Gate 3 + Gate 5). BLK-002 stays OPEN.
+Pass-8 result: strict-CLEAN (streak 1/3).
+
+Pass-9 fix-burst COMPLETE:
+- F-086-P9-MED-001 (spec): BC-1.16.001 PC-9 + ADR-019 §3.3 had a phantom `data_source` field on ChartSpec (real struct = {chart_type, alt, decorative, span}). FIXED: BC-1.16.001 v1.3→v1.4, ADR-019 v1.3→v1.4 (phantom field removed; code was already correct).
+- F-086-P9-LOW-001 (code doc): `extract_str_field` doc comment in field_to_block.rs was inaccurate. FIXED by implementer, worktree HEAD a055345e → ccc7a703 (docs(eval) commit).
+- Workspace: 3299/3300 pass, 14 skipped, 1 pre-existing cold_budget flake (STORY-080). Full canonical exit gate CLEAN.
+- BC-1.16.001 now v1.4. ADR-019 now v1.4.
+- Streak reset to 0/3.
+
+CURRENT SUB-STEP: feature/STORY-086 HEAD ccc7a703 (PUSHED to origin). Adversary LOCAL pass 10 PENDING. Streak 0/3, target 3 strict-CLEAN (sequential per LESSON-7). Full procedure in `.factory/cycles/STORY-086/RESUME-PLAYBOOK.md`. Then demo → PR → security-reviewer + pr-reviewer → merge. Then RE-RUN Wave 4 gates (Gate 3 + Gate 5). BLK-002 stays OPEN.
 
 ### Step 3 — Re-run failed Wave 4 gates
 
@@ -163,17 +172,17 @@ Only after all Wave 4 gates pass: begin Wave 5 with STORY-087, STORY-082, STORY-
 
 ## Session Resume Checkpoint
 
-**STORY-086 feature/STORY-086 PUSHED to origin at a055345e (durable cross-machine). Pass 8 pending (API 529 overload — never ran). Streak 0/3. ZERO-CONTEXT RESUME: read `.factory/cycles/STORY-086/RESUME-PLAYBOOK.md` and execute from Step 0.**
+**STORY-086 feature/STORY-086 HEAD ccc7a703 PUSHED to origin. Pass 9 REMEDIATED (BC-1.16.001 v1.4, ADR-019 v1.4). Streak 0/3. Pass 10 PENDING. ZERO-CONTEXT RESUME: read `.factory/cycles/STORY-086/RESUME-PLAYBOOK.md` and execute from Step 0.**
 
 | Field | Value |
 |-------|-------|
 | **Date** | 2026-06-06 |
-| **Position** | Wave 4: 21/21 merged. Wave 4 gate FAILED. STORY-086 delivery in progress: LOCAL adversary cascade pass 7 REMEDIATED (BC-1.16.001 v1.3; STORY-086 v1.5). feature/STORY-086 PUSHED to origin at a055345e. Pass 8 never ran (API 529 overload). Streak 0/3. Stories 88 / 545 pts. BLK-002 OPEN. |
+| **Position** | Wave 4: 21/21 merged. Wave 4 gate FAILED. STORY-086 delivery in progress: LOCAL adversary cascade pass 8 strict-CLEAN (1/3); pass 9 found F-086-P9-MED-001 + F-086-P9-LOW-001, REMEDIATED (BC-1.16.001 v1.4 + ADR-019 v1.4 phantom ChartSpec.data_source removed). feature/STORY-086 HEAD ccc7a703 PUSHED to origin. Streak reset 0/3. Pass 10 PENDING. Stories 88 / 545 pts. BLK-002 OPEN. |
 | **develop SHA** | `030dec6c` (61 merged PRs; origin/develop confirmed; 0 open PRs) |
-| **Active worktrees** | `.worktrees/STORY-086` (feature/STORY-086, HEAD a055345e; origin/feature/STORY-086 == a055345e) |
-| **Workspace tests** | 3300/3300 pass, 14 skipped (e2e AC-007 bullets intentionally ignored pending STORY-088; 1 pre-existing cold_budget flake tracked under STORY-080) |
+| **Active worktrees** | `.worktrees/STORY-086` (feature/STORY-086, HEAD ccc7a703; origin/feature/STORY-086 == ccc7a703) |
+| **Workspace tests** | 3299/3300 pass, 14 skipped (e2e AC-007 bullets intentionally ignored pending STORY-088; 1 pre-existing cold_budget flake tracked under STORY-080) |
 | **factory-artifacts** | PUSHED to origin (human-authorized 2026-06-04). Fresh sessions: clone + `git worktree add .factory factory-artifacts`. |
-| **RESUME INSTRUCTION** | **ZERO-CONTEXT RESUME: read `.factory/cycles/STORY-086/RESUME-PLAYBOOK.md` and execute from Step 0. Immediate next action: re-dispatch adversary LOCAL pass 8 (streak 0/3, target 3 strict-CLEAN). After convergence: demo-recorder → pr-manager 9-step → security-reviewer + pr-reviewer (orchestrator dispatches independently) → merge (STANDING MERGE AUTH). After merge: re-run Wave 4 Gate 3 + Gate 5. Only then: Wave 5. BLK-002 OPEN.** |
+| **RESUME INSTRUCTION** | **ZERO-CONTEXT RESUME: read `.factory/cycles/STORY-086/RESUME-PLAYBOOK.md` and execute from Step 0. Immediate next action: dispatch adversary LOCAL pass 10 (streak 0/3, target 3 strict-CLEAN). After convergence: demo-recorder → pr-manager 9-step → security-reviewer + pr-reviewer (orchestrator dispatches independently) → merge (STANDING MERGE AUTH). After merge: re-run Wave 4 Gate 3 + Gate 5. Only then: Wave 5. BLK-002 OPEN.** |
 
 ---
 
@@ -258,6 +267,8 @@ Only after all Wave 4 gates pass: begin Wave 5 with STORY-087, STORY-082, STORY-
 | Date | ID | Decision |
 |------|-----|---------|
 | 2026-06-06 | PROCESS-GAP-WORKTREE-TYPES | [process-gap record for cycle-close] PG-WORKTREE-TYPES: When an agent corrects a spec against code for an IN-FLIGHT worktree story, it MUST read type/code definitions from the worktree (.worktrees/STORY-NNN/), NOT the main checkout (develop, without the unmerged story's additions). PO read develop's types and stripped STORY-086's TextTag/AltText::Unspecified from BC-1.16.001 (commit 608ec7b0). Reverted by recovery commit f2261592 (BC-1.16.001 v1.3 with legitimate PC-7/PC-10 fixes intact). This is the SECOND process-gap this cycle (first: PG-TD060-SCOPE from pass-4). Reinforces LESSON-1/LESSON-16 (worktree-absolute paths). Codify: orchestrator dispatches to spec-correction agents MUST pin the worktree type path for in-flight stories. Anchored for lessons codification + follow-up improvement story when STORY-086 sub-cycle closes. |
+| 2026-06-06 | STORY-086-PASS9 | Adversary LOCAL pass 9 NOT strict-CLEAN — streak reset to 0/3. F-086-P9-MED-001 (spec): BC-1.16.001 PC-9 + ADR-019 §3.3 referenced a phantom `data_source` field on ChartSpec; real struct is {chart_type, alt, decorative, span} — code was already correct, only spec stale. FIXED: BC-1.16.001 v1.3→v1.4, ADR-019 v1.3→v1.4 (phantom field removed from both). F-086-P9-LOW-001 (code doc): `extract_str_field` doc comment in field_to_block.rs was inaccurate. FIXED by implementer; worktree HEAD a055345e→ccc7a703 (docs(eval) commit). Full canonical exit gate CLEAN (3299/3300 pass, 14 skipped, 1 pre-existing cold_budget flake STORY-080). BC-1.16.001 now v1.4. ADR-019 now v1.4. Pass 10 PENDING. |
+| 2026-06-06 | STORY-086-PASS8 | Adversary LOCAL pass 8 RAN: strict-CLEAN (streak 0/3 → 1/3). CLEAN (strict): yes. CLEAN (PR-merge): yes. All prior findings (passes 1-7) verified closed. |
 | 2026-06-06 | STORY-086-PASS7 | Adversary LOCAL pass 7 RAN: CLEAN (PR-merge) YES, CLEAN (strict) NO. Code correct and converged; all prior findings verified closed. F-086-P7-MED-001: BC-1.16.001 PC-7 described BulletItem{text,level,span} but real type is {inlines: Vec<InlineNode>, children: Vec<BulletItem>, span: Span} (code correct; stale BC spec-side fix). Streak stayed 0/3. Remediation: (1) PO fix attempt commit 608ec7b0 (BC-1.16.001 "v1.2") CORRUPTED — PO read types from main checkout (develop, STORY-086 unmerged), wrongly stripped TextTag/TextBlock.tag/AltText::Unspecified (exist only in STORY-086 worktree). (2) RECOVERY commit f2261592: BC-1.16.001 restored to v1.1 content + legitimate fixes applied: PC-7 BulletItem {inlines,children,span}; PC-10 ImageSpec field `path` (real Rust field; DSL keyword stays `src`). Bumped to v1.3; v1.2 marked CORRUPTED in changelog. (3) story-writer commit 9bbde7c9: STORY-086 → v1.5, fixed stale e2e test path (tests/integration/e2e_build_tests.rs → crates/slideforge/tests/e2e/story_086_content_threading.rs). Worktree HEAD UNCHANGED at a055345e. Workspace 3300/3300 pass, 14 skipped. Adversary LOCAL pass 8 dispatched. |
 | 2026-06-06 | STORY-086-PASS6 | Adversary LOCAL pass 6 found F-086-P6-MED-001: implementation stored UNTRIMMED title/subtitle/body/alt content, violating BC-1.16.001 PC-1/PC-4/PC-12 (trimmed canonical). Also exposed spec-vs-spec contradiction: ADR-019 §3.1/§3.3 specified untrimmed Arc::from(s), conflicting with BC trim invariants. Streak stayed 0/3. Remediated: (1) Architect adjudication (commit 8d83884b): BC supersedes ADR for contract semantics per Source-of-Truth Precedence rule; TRIMMED canonical; ADR-019 → v1.3 (§3.1/§3.3 corrected to Arc::from(s.trim())); adjudication doc at `.factory/cycles/STORY-086/architect-pass-6-adjudication.md`. (2) test-writer (commit f8999bde): 4 trim Red Gate tests (title/subtitle/body/chart-alt) + 1 whitespace-only-skip regression guard. (3) implementer (commit a055345e): 2-line trim fix in make_text_block_tagged and resolve_alt; whitespace-only-skip preserved; all 5 trim tests pass; full canonical exit gate CLEAN (3300 pass, 14 skipped). Worktree HEAD a055345e. Adversary LOCAL pass 7 dispatched. |
 | 2026-06-06 | STORY-086-PASS5 | Adversary LOCAL pass 5 found F-086-P5-CRIT-001 + F-086-P5-MED-001/002 + OBS-1 + D5 error. All remediated. Streak reset 0/3. CRIT-001: resolve_alt was alt-first, violating BC-1.16.001 PC-12 decorative-first; inter-BC conflict with BC-3.04.001 Inv-11 adjudicated by architect (decorative-first canonical, ADR-019 v1.2; W-A11-002 tracing::warn! registered in error-taxonomy v2.17 under Accessibility Warnings; BC-3.04.001 v1.6 Inv-11 scoped to shape-DSL path only; BC-1.16.001 v1.1 EC-004 + PC-12 decorative-first + W-A11-002 mechanism). Implementer: resolve_alt decorative-first + W-A11-002 emission (commit 77092e2a); 3 both-set Red Gate tests → green; regression guard. MED-001: AC-020 e2e strengthened (commit 10cd8813). MED-002: EC-004 W-A11-002 mechanism corrected to post-layout (commit 77092e2a). OBS-1: AC-007 e2e rescoped to forward-looking; #[ignore]'d citing STORY-088 per SID-1 (commit 10cd8813). D5 error: @var/vars-block list-literal does NOT parse (architect correction fc549c6e); STORY-088 scope expanded to cover BOTH bullets forms, 5→8 pts, estimated_days 2→3 (story-writer 7e1b9c72). Full exit gate CLEAN (3295 pass, 14 skipped). Pass 6 next. |

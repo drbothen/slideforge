@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.3"
+version: "1.4"
 status: active
 producer: product-owner
 timestamp: 2026-06-05T00:00:00
@@ -18,6 +18,7 @@ modified:
   - "v1.1 — STORY-086 pass-5 adjudication (F-086-P5-CRIT-001, F-086-P5-MED-002): EC-004 mechanism corrected. The prior text stated 'the pre-layout validator emits W-A11-002' — that mechanism is unreachable because AltTextValidator::validate() is Shape-only per ADR-018 v1.2 Decision-3; charts are never validated pre-layout. Corrected: when both decorative: true and a non-empty alt are set, resolve_alt returns AltText::Decorative (decorative wins) AND emits W-A11-002 via tracing::warn!(code = \"W-A11-002\") at Stage-2b resolution time. PC-12 alt-resolution rule reworded to make the decorative-first ordering explicit and unambiguous. No behavioral change — decorative-first was already the canonical postcondition per PC-12."
   - "v1.2 — CORRUPTED (commit 608ec7b0): read types from develop-branch main checkout instead of STORY-086 worktree; erroneously stripped TextTag, TextBlock.tag, and AltText::Unspecified which all exist in the worktree. Superseded by v1.3."
   - "v1.3 — STORY-086 pass-7 recovery: revert erroneous v1.2 (608ec7b0) which stripped TextTag/TextBlock.tag/AltText::Unspecified after reading develop-branch types instead of the STORY-086 worktree. Reapply only the two legitimate fixes verified against worktree types: (1) PC-7 BulletItem struct shape corrected from nonexistent {text, level} fields to real {inlines: Vec<InlineNode>, children: Vec<BulletItem>, span: SourceSpan} per crates/slideforge-types/src/block.rs:84-91 (F-086-P7-MED-001 fix). (2) ImageSpec field corrected from src to path per crates/slideforge-types/src/specs.rs:324 — only the Rust struct field name changes; the DSL keyword the user writes remains src:. TextTag (block.rs:36-59), TextBlock.tag (block.rs:74), and AltText::Unspecified (specs.rs:162) are RETAINED as they exist in the worktree."
+  - "v1.4 — F-086-P9-MED-001 fix: PC-9 ChartSpec produces-clause removed phantom `data_source: ...` field. Real ChartSpec struct (worktree crates/slideforge-types/src/specs.rs:170-191) has exactly four fields: chart_type, alt, decorative, span — no data_source. The postcondition now reflects the actual struct. Implementation in field_to_block.rs:184-189 already correctly omits data_source; this is a spec-to-code alignment (factual type correction). ImageSpec/DiagramSpec/BulletItem field shapes were already corrected in passes 6-7 and are confirmed correct."
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -84,7 +85,7 @@ NOT populated by this threading pass.
 ### Chart / Image / Diagram (Alt Resolution)
 
 9. For each `Slide` with `slide_type == "chart"` (or any registered SlideType with `has_chart: true`):
-   if `fields["chart_type"]` is `FieldValue::Literal(Value::Str(s))`, a `ContentBlock::Chart(ChartSpec { chart_type: Arc::from(s), alt: <alt>, decorative: <decorative>, span, data_source: ... })` is appended, where `<alt>` is resolved per the alt-resolution rule (Postcondition 12).
+   if `fields["chart_type"]` is `FieldValue::Literal(Value::Str(s))`, a `ContentBlock::Chart(ChartSpec { chart_type: Arc::from(s), alt: <alt>, decorative: <decorative>, span })` is appended, where `<alt>` is resolved per the alt-resolution rule (Postcondition 12).
    If `fields["chart_type"]` is absent, emit `tracing::warn!` and skip block construction.
 10. For each `Slide` with `slide_type` in `["image", "screenshot", "bio"]`:
     if `fields["src"]` is `FieldValue::Literal(Value::Str(p))`, a `ContentBlock::Image(ImageSpec { path: Arc::from(p), alt: <alt>, decorative: <decorative>, span })` is appended.
