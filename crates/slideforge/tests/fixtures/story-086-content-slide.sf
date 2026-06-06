@@ -1,0 +1,19 @@
+# STORY-086 fixture: title slide + content slide with body.
+#
+# Used by: AC-002 (PDF text content — Heading + Body paragraph text).
+# Both strings appear in the rendered PDF byte stream.
+#
+# A slide title: is included first to populate DeckMetadata.title for
+# PDF/UA-1 compliance (NoDocumentTitle guard). The content slide carries
+# "Heading" and "Body paragraph text" which the test asserts are present
+# in the PDF output after Stage 2b threads them into ContentBlocks.
+
+slideforge_version "1"
+lang "en-US"
+
+slide title:
+  title "Content Test Deck"
+
+slide content:
+  title "Heading"
+  body "Body paragraph text"

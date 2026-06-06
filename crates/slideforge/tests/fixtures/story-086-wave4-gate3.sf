@@ -1,0 +1,21 @@
+# STORY-086 fixture: Wave 4 Gate 3 re-pass deck.
+#
+# Used by: AC-018 (Wave 4 Gate 3 re-pass — 3-slide deck with title + content +
+# chart-with-alt builds cleanly under strict=true, all formats non-empty).
+#
+# This is the primary failing vector for Gate 3 and Gate 5.
+
+slideforge_version "1"
+lang "en-US"
+
+slide title:
+  title "Annual Review"
+
+slide content:
+  title "Key Findings"
+  body "Performance exceeded targets across all regions."
+
+slide chart:
+  title "Regional Breakdown"
+  chart_type "bar"
+  alt "Bar chart showing regional performance breakdown"

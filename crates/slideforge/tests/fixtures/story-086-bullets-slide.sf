@@ -1,0 +1,14 @@
+# STORY-086 fixture: content slide with title + bullets list.
+#
+# Used by: AC-007 (bullets → ≥3 text runs in PPTX).
+# Each bullet item must appear as a separate <a:r><a:t> run.
+
+slideforge_version "1"
+lang "en-US"
+
+slide content:
+  title "Agenda"
+  bullets:
+    - "Item A"
+    - "Item B"
+    - "Item C"

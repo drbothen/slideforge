@@ -1,0 +1,12 @@
+# STORY-086 fixture: chart slide with decorative: true.
+#
+# Used by: AC-006 (decorative chart → strict Ok, empty descr / PDF Artifact).
+# In strict mode, this must return Ok (no E-A11-001 emitted).
+
+slideforge_version "1"
+lang "en-US"
+
+slide chart:
+  title "Background"
+  chart_type "area"
+  decorative: true

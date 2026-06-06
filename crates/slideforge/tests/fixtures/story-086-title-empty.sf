@@ -1,0 +1,11 @@
+# STORY-086 fixture: slide with explicit empty title string.
+#
+# Used by: AC-008 (empty title → no ContentBlock::Text, no text run in PPTX).
+# An empty title field must be silently skipped; the PPTX must contain no
+# title placeholder text run.
+
+slideforge_version "1"
+lang "en-US"
+
+slide title:
+  title ""

@@ -55,6 +55,11 @@ ordered-float = { workspace = true }
 zip = "=2.3.0"
 
 [[test]]
+# field_to_block_unit.rs — STORY-086 Red Gate unit tests for thread_fields_to_blocks.
+# No feature gates; runs in the default `cargo nextest run -p slideforge-eval` invocation.
+name = "field_to_block_unit"
+
+[[test]]
 # bleed_tests.rs uses `slideforge_eval::BleedChecker`, which is gated behind the
 # `test-utils` feature.  Without `required-features`, `cargo nextest run -p
 # slideforge-eval` (no --features flag) would fail to compile this test binary

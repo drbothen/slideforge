@@ -1239,4 +1239,413 @@ mod tests {
             diags[0].message
         );
     }
+
+    // ── STORY-086: AC-013, AC-014, AC-015 — AltText::Unspecified discrimination ─
+
+    /// AC-015 / BC-5.01.001 postcondition 1 — `AltText::Unspecified` on a chart frame
+    /// fires E-A11-001 in the post-layout validator.
+    ///
+    /// Red Gate: the stub `validate_post_layout` fires E-A11-001 on BOTH `Decorative`
+    /// AND `Unspecified` (both arms push the error). The assertion `count == 1` passes
+    /// against the stub for this specific vector because Unspecified already fires.
+    /// HOWEVER, the semantic intent is that after Stage 2b, `Decorative` MUST NOT fire
+    /// E-A11-001 (it becomes the "valid" state). The AC-015 Red Gate is validated by
+    /// `test_bc_5_01_001_ac015_decorative_frame_no_error` below which FAILS against the stub.
+    ///
+    /// Load-bearing: if the implementer removes the `Unspecified → E-A11-001` arm,
+    /// this test FAILS. Swap `AltText::Unspecified` to `AltText::Provided` → passes → confirms
+    /// the test is genuinely load-bearing on the Unspecified arm.
+    ///
+    /// Traces: BC-5.01.001 postcondition 1; BC-5.02.001 postcondition 7; ADR-019 Decision 5.3.
+    #[test]
+    fn test_bc_5_01_001_ac015_unspecified_chart_frame_fires_e_a11_001() {
+        // AC-015 — chart frame with AltText::Unspecified → E-A11-001 in strict mode.
+        // Red Gate: stub fires on both Decorative AND Unspecified — this test passes NOW.
+        // The paired test `ac015_decorative_frame_no_error` FAILS now and validates the gate.
+        use slideforge_layout::{
+            BoundingBox, Frame, FrameContent, LaidOutDeck, LaidOutSlide, PageSize,
+        };
+        use slideforge_types::{AltText, Emu};
+
+        let make_frame = |content: FrameContent| Frame {
+            bbox: BoundingBox {
+                x: Emu(0),
+                y: Emu(0),
+                width: Emu(1_000_000),
+                height: Emu(500_000),
+            },
+            content,
+            text_flow: None,
+        };
+
+        // Chart frame with AltText::Unspecified — pipeline gap, must fire E-A11-001.
+        let slide = LaidOutSlide {
+            source_index: 0,
+            slide_type_keyword: Arc::from("chart"),
+            frames: vec![make_frame(FrameContent::Chart {
+                alt: AltText::Unspecified,
+            })],
+            speaker_notes: None,
+            register_tags: vec![],
+            register_content: vec![],
+        };
+        let laid_out = LaidOutDeck {
+            page_size: PageSize::default(),
+            slides: vec![slide],
+            sections: vec![],
+            warnings: vec![],
+        };
+
+        let diags = AltTextValidator.validate_post_layout(&laid_out, &default_opts());
+
+        // Must fire exactly one E-A11-001.
+        assert_eq!(
+            diags.len(),
+            1,
+            "AC-015: chart frame with AltText::Unspecified must produce exactly 1 E-A11-001; \
+             got {} diagnostics: {diags:?}. BC-5.01.001 postcondition 1.",
+            diags.len()
+        );
+        assert_eq!(
+            diags[0].code.as_ref(),
+            E_A11_001,
+            "AC-015: diagnostic code must be E-A11-001 for Unspecified chart frame; \
+             got '{}'",
+            diags[0].code
+        );
+        assert_eq!(
+            diags[0].severity,
+            DiagnosticSeverity::Error,
+            "AC-015: diagnostic severity must be Error; got {:?}",
+            diags[0].severity
+        );
+    }
+
+    /// AC-015 / BC-5.01.001 EC-007 — `AltText::Decorative` on a chart frame must NOT
+    /// fire E-A11-001 in the post-layout validator.
+    ///
+    /// Red Gate: the STUB `validate_post_layout` fires E-A11-001 on BOTH `Decorative`
+    /// AND `Unspecified`. After implementation, `Decorative` must be VALID (no error).
+    ///
+    /// This test FAILS against the stub (stub fires on Decorative → diags.len() == 1 != 0).
+    /// It PASSES after the implementer changes the `Decorative` arm to NOT emit E-A11-001.
+    ///
+    /// Traces: BC-5.01.001 EC-007; BC-5.02.001 EC-009; ADR-019 Decision 5.3.
+    #[test]
+    fn test_bc_5_01_001_ac015_decorative_chart_frame_no_error() {
+        // AC-015 — chart frame with AltText::Decorative → no E-A11-001 in strict mode.
+        // RED GATE: stub fires E-A11-001 on Decorative → diags.len() == 1 → FAILS.
+        // After fix: Decorative arm is removed / returns valid → diags.is_empty() → PASSES.
+        use slideforge_layout::{
+            BoundingBox, Frame, FrameContent, LaidOutDeck, LaidOutSlide, PageSize,
+        };
+        use slideforge_types::{AltText, Emu};
+
+        let make_frame = |content: FrameContent| Frame {
+            bbox: BoundingBox {
+                x: Emu(0),
+                y: Emu(0),
+                width: Emu(1_000_000),
+                height: Emu(500_000),
+            },
+            content,
+            text_flow: None,
+        };
+
+        // Chart frame with AltText::Decorative — author opt-out, must be VALID.
+        let slide = LaidOutSlide {
+            source_index: 0,
+            slide_type_keyword: Arc::from("chart"),
+            frames: vec![make_frame(FrameContent::Chart {
+                alt: AltText::Decorative,
+            })],
+            speaker_notes: None,
+            register_tags: vec![],
+            register_content: vec![],
+        };
+        let laid_out = LaidOutDeck {
+            page_size: PageSize::default(),
+            slides: vec![slide],
+            sections: vec![],
+            warnings: vec![],
+        };
+
+        let diags = AltTextValidator.validate_post_layout(&laid_out, &default_opts());
+
+        // Decorative is valid — must produce ZERO diagnostics.
+        // FAILS against stub (stub fires E-A11-001 on Decorative → diags.len() == 1).
+        assert!(
+            diags.is_empty(),
+            "AC-015 Red Gate: chart frame with AltText::Decorative must produce NO diagnostics \
+             (author chose decorative: true). Got {} diagnostics: {diags:?}. \
+             Stub fires E-A11-001 on Decorative — THIS TEST MUST FAIL until T5 (alt_text.rs fix). \
+             BC-5.01.001 EC-007; BC-5.02.001 EC-009; ADR-019 Decision 5.3.",
+            diags.len()
+        );
+    }
+
+    /// AC-015 / BC-5.02.001 postcondition 7 — `AltText::Provided` chart frame is valid.
+    ///
+    /// Red Gate: NOT failing against the stub (Provided is already in the wildcard `_ => {}`
+    /// arm and produces no diagnostic). This is a correctness pin that ensures the `Provided`
+    /// arm is not accidentally broken by the fix.
+    ///
+    /// Traces: BC-5.02.001 postcondition 7; BC-5.01.001 postcondition 1 (negative: no error).
+    #[test]
+    fn test_bc_5_01_001_ac015_provided_chart_frame_no_error() {
+        // AC-015 — chart frame with AltText::Provided → no E-A11-001.
+        use slideforge_layout::{
+            BoundingBox, Frame, FrameContent, LaidOutDeck, LaidOutSlide, PageSize,
+        };
+        use slideforge_types::{AltText, Emu};
+
+        let make_frame = |content: FrameContent| Frame {
+            bbox: BoundingBox {
+                x: Emu(0),
+                y: Emu(0),
+                width: Emu(1_000_000),
+                height: Emu(500_000),
+            },
+            content,
+            text_flow: None,
+        };
+
+        let slide = LaidOutSlide {
+            source_index: 0,
+            slide_type_keyword: Arc::from("chart"),
+            frames: vec![make_frame(FrameContent::Chart {
+                alt: AltText::Provided(Arc::from("Revenue chart alt text")),
+            })],
+            speaker_notes: None,
+            register_tags: vec![],
+            register_content: vec![],
+        };
+        let laid_out = LaidOutDeck {
+            page_size: PageSize::default(),
+            slides: vec![slide],
+            sections: vec![],
+            warnings: vec![],
+        };
+
+        let diags = AltTextValidator.validate_post_layout(&laid_out, &default_opts());
+
+        assert!(
+            diags.is_empty(),
+            "AC-015: chart frame with AltText::Provided must produce no diagnostics; \
+             got {diags:?}. BC-5.02.001 postcondition 7.",
+        );
+    }
+
+    /// AC-013 / BC-5.01.001 invariant 2 — `thread_media_alt_into_frames` fallback:
+    /// when `ContentBlock::Chart.alt == None`, the frame must carry `AltText::Unspecified`
+    /// (not `AltText::Decorative`).
+    ///
+    /// Red Gate: the STUB `thread_media_alt_into_frames` maps `None → AltText::Decorative`
+    /// (current layout.rs lines 432–440). After fix: `None → AltText::Unspecified`.
+    ///
+    /// This test constructs a `LaidOutDeck` by calling the real layout pipeline on a
+    /// deck with a chart ContentBlock where `alt = None`, then asserts the resulting
+    /// chart frame carries `AltText::Unspecified`.
+    ///
+    /// Load-bearing: the frame content type is directly on the production path through
+    /// `thread_media_alt_into_frames` in `slideforge_layout::layout::run`.
+    ///
+    /// Traces: BC-5.01.001 EC-004; ADR-019 Decision 5.2.
+    #[test]
+    fn test_bc_5_01_001_ac013_thread_media_alt_fallback_produces_unspecified() {
+        // AC-013 / AC-014 — when ContentBlock::Chart.alt = None,
+        // thread_media_alt_into_frames must produce AltText::Unspecified (not Decorative).
+        //
+        // RED GATE: stub maps None → Decorative. This test asserts Unspecified → FAILS.
+        // After fix: None → Unspecified → PASSES.
+        use slideforge_layout::FrameContent;
+        use slideforge_types::{
+            AltText, Block, Brand, BrandFonts, BrandPalette, ContentBlock, Deck, DeckMetadata,
+            OrderedMap, Slide, SourceSpan,
+            specs::ChartSpec,
+        };
+
+        // Build a minimal Brand so layout::run can proceed.
+        let brand = Brand {
+            name: Arc::from("test-brand"),
+            palette: BrandPalette {
+                primary: Arc::from("#003087"),
+                secondary: Arc::from("#0066CC"),
+                accent: Arc::from("#FF6B35"),
+                neutral: Arc::from("#F5F5F5"),
+            },
+            fonts: BrandFonts {
+                heading: Arc::from("Arial"),
+                body: Arc::from("Arial"),
+                mono: Arc::from("Courier New"),
+            },
+            layouts: vec![],
+            span: SourceSpan::default(),
+        };
+
+        // Construct a chart slide with a ContentBlock::Chart where alt = None.
+        // This simulates what Stage 2b produces when no alt field is present.
+        let mut fields = OrderedMap::new();
+        fields.insert(
+            Arc::from("chart_type"),
+            slideforge_types::FieldValue::Literal(slideforge_types::Value::Str(Arc::from("bar"))),
+        );
+
+        let slide = Slide {
+            slide_type: Arc::from("chart"),
+            fields,
+            blocks: vec![Block {
+                content: ContentBlock::Chart(ChartSpec {
+                    chart_type: Arc::from("bar"),
+                    alt: None, // ← None: Stage 2b alt-resolution rule → ContentBlock.alt = None
+                    decorative: false,
+                    span: SourceSpan::default(),
+                }),
+                label: None,
+                span: SourceSpan::default(),
+            }],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+            overlay: None,
+            register_content: vec![],
+        };
+        let deck = Deck {
+            slides: vec![slide],
+            vars: OrderedMap::new(),
+            metadata: DeckMetadata {
+                title: None,
+                slideforge_version: Arc::from("0.1.0"),
+                lang: Some(Arc::from("en-US")),
+                author: None,
+                section_order: None,
+            },
+            registers: OrderedMap::new(),
+            section_blocks: vec![],
+        };
+
+        // Run the layout — this calls thread_media_alt_into_frames internally.
+        let laid_out = slideforge_layout::run(&deck, &brand)
+            .expect("layout::run must succeed for a valid chart slide");
+
+        // Find the Chart frame in the laid-out slide.
+        let chart_frame = laid_out.slides[0]
+            .frames
+            .iter()
+            .find(|f| matches!(f.content, FrameContent::Chart { .. }));
+
+        let chart_frame = chart_frame.expect(
+            "AC-013: chart slide must produce a FrameContent::Chart frame after layout"
+        );
+
+        // Assert the alt is Unspecified (not Decorative).
+        // RED GATE: stub maps None → Decorative → this assertion FAILS.
+        assert!(
+            matches!(&chart_frame.content, FrameContent::Chart { alt: AltText::Unspecified }),
+            "AC-013 / AC-014 Red Gate: when ContentBlock::Chart.alt = None, \
+             thread_media_alt_into_frames must produce AltText::Unspecified (not Decorative). \
+             Got: {:?}. Stub maps None → Decorative → FAILS until T4 ships. \
+             BC-5.01.001 EC-004; ADR-019 Decision 5.2.",
+            &chart_frame.content
+        );
+    }
+
+    /// AC-013 / BC-5.01.001 invariant 2 — `regions.rs` structural placeholder sites use
+    /// `AltText::Unspecified`.
+    ///
+    /// A `LaidOutDeck` constructed WITHOUT calling Stage 2b (simulating pre-threading state
+    /// where `Slide.blocks = vec![]`) must have chart frames with `AltText::Unspecified`,
+    /// NOT `AltText::Decorative`. This confirms the region map structural placeholder fix.
+    ///
+    /// Red Gate: the STUB `regions.rs` uses `AltText::Decorative` for structural placeholders.
+    /// After fix: all 5 sites use `AltText::Unspecified`.
+    ///
+    /// Load-bearing: this test directly invokes `layout::run` on a deck with NO blocks (no
+    /// Stage 2b threading), which exercises the `regions.rs` structural placeholder path.
+    ///
+    /// Traces: BC-5.01.001 invariant 2; ADR-019 Decision 5.1.
+    #[test]
+    fn test_bc_5_01_001_ac013_regions_structural_placeholder_is_unspecified() {
+        // AC-013: when no ContentBlock threads alt into the frame,
+        // the structural placeholder from regions.rs must be AltText::Unspecified.
+        //
+        // RED GATE: stub uses Decorative as structural placeholder → FAILS.
+        // After fix: regions.rs uses Unspecified → PASSES.
+        use slideforge_layout::FrameContent;
+        use slideforge_types::{
+            AltText, Brand, BrandFonts, BrandPalette, Deck, DeckMetadata, OrderedMap, Slide,
+            SourceSpan,
+        };
+
+        let brand = Brand {
+            name: Arc::from("test-brand"),
+            palette: BrandPalette {
+                primary: Arc::from("#003087"),
+                secondary: Arc::from("#0066CC"),
+                accent: Arc::from("#FF6B35"),
+                neutral: Arc::from("#F5F5F5"),
+            },
+            fonts: BrandFonts {
+                heading: Arc::from("Arial"),
+                body: Arc::from("Arial"),
+                mono: Arc::from("Courier New"),
+            },
+            layouts: vec![],
+            span: SourceSpan::default(),
+        };
+
+        // Chart slide with NO blocks (no Stage 2b threading — simulates pre-fix state).
+        let mut fields = OrderedMap::new();
+        fields.insert(
+            Arc::from("chart_type"),
+            slideforge_types::FieldValue::Literal(slideforge_types::Value::Str(Arc::from("bar"))),
+        );
+        let slide = Slide {
+            slide_type: Arc::from("chart"),
+            fields,
+            blocks: vec![], // ← NO ContentBlocks: regions.rs structural placeholder used
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+            overlay: None,
+            register_content: vec![],
+        };
+        let deck = Deck {
+            slides: vec![slide],
+            vars: OrderedMap::new(),
+            metadata: DeckMetadata {
+                title: None,
+                slideforge_version: Arc::from("0.1.0"),
+                lang: Some(Arc::from("en-US")),
+                author: None,
+                section_order: None,
+            },
+            registers: OrderedMap::new(),
+            section_blocks: vec![],
+        };
+
+        let laid_out = slideforge_layout::run(&deck, &brand)
+            .expect("layout::run must succeed for chart slide");
+
+        // Find the Chart frame (structural placeholder from regions.rs).
+        let chart_frame = laid_out.slides[0]
+            .frames
+            .iter()
+            .find(|f| matches!(f.content, FrameContent::Chart { .. }));
+
+        let chart_frame = chart_frame.expect(
+            "AC-013: chart slide must produce a FrameContent::Chart frame"
+        );
+
+        // The structural placeholder must be Unspecified (not Decorative).
+        // RED GATE: stub uses Decorative → assertion matches Unspecified → FAILS.
+        assert!(
+            matches!(&chart_frame.content, FrameContent::Chart { alt: AltText::Unspecified }),
+            "AC-013 Red Gate: regions.rs structural placeholder must be AltText::Unspecified, \
+             not AltText::Decorative. Got: {:?}. \
+             Stub uses Decorative → FAILS until T3 ships (regions.rs fix). \
+             BC-5.01.001 invariant 2; ADR-019 Decision 5.1.",
+            &chart_frame.content
+        );
+    }
 }
