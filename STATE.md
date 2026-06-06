@@ -36,7 +36,7 @@ wave_4_total_points: 129
 wave_5_total_points: 114
 develop_sha: "e6f7832d"
 develop_pr_count: 60
-error_taxonomy_version: "v2.13"
+error_taxonomy_version: "v2.14"
 workspace_tests: "~3214 (60 merged PRs; 3214/3215 pass, 1 pre-existing cold_budget flake tracked under STORY-080)"
 workspace_test_failures: 0
 ---
@@ -102,56 +102,25 @@ Gap-4 and deck-level `metadata: title` DSL feature → anchored to future DX/fea
 
 ## NEXT ACTIONS — STORY-050 RESUME PLAN (zero-context orchestrator: execute in order)
 
-**STATUS: Gap-2 Option A AUTHORIZED. BLK-001 RESOLVED. STORY-050 is IN PROGRESS — resume at step 1.**
+**STATUS: Steps 1-3 COMPLETE. Gap-2 spec burst LANDED (ADR-018 accepted; BC-5.02.001 v1.5; BC-5.01.001 v1.2; taxonomy v2.14; STORY-050 spec reconciled). Resume at Step 4 (implementer fix-burst).**
 **Worktree:** `/Users/jmagady/Dev/slideforge/.worktrees/STORY-050` | branch: `feature/STORY-050` (pushed to origin).
 **Red Gate:** committed at `6bbe80fc` — 55 pass / 7 fail (intended Red Gate). Off develop `e6f7832d`.
-**Artifact:** `.factory/specs/story-050-gap-analysis.md` (already committed in factory-artifacts).
+**Artifact:** `.factory/specs/story-050-gap-analysis.md` and `.factory/specs/architecture/adr/ADR-018-post-layout-validation-pass.md` committed to factory-artifacts.
 
-### Step 1 — Architect: Design Gap-2 Option A + produce ADR
+### Step 1 — Architect: Design Gap-2 Option A + produce ADR [DONE]
 
 Dispatch `vsdd-factory:architect` cwd `/Users/jmagady/Dev/slideforge`.
 
-Context: Validators currently run pre-layout (`slideforge/src/lib.rs build_inner ~line 441`) on `Slide.blocks`
-which `slideforge-eval for_eval.rs:342` always leaves empty. `ContentBlock::Chart`/`Image` are only created at
-layout (`slideforge-layout layout.rs:428`), AFTER the validate gate — so `AltTextValidator` never fires.
+ADR-018 produced: `.factory/specs/architecture/adr/ADR-018-post-layout-validation-pass.md` (accepted).
+BC-5.02.001 → v1.5 (additive-defaulted `validate_post_layout` method; post-layout Stage 6b classification; new ECs + test vectors).
+BC-5.01.001 → v1.2 (alt-text enforcement moved to post-layout Stage 6b).
+Error taxonomy → v2.14 (E-A11-001 fires in Stage 6b note).
+ARCH-INDEX.md updated with ADR-018 row. BC-INDEX.md version bumps applied.
+STORY-050 spec reconciled to spec_version 1.1 (ADR-018 + real API names + File Structure matched to disk).
 
-**Option A (authorized):** Add a validation pass AFTER layout (on `LaidOutDeck` / laid-out blocks) so
-ContentBlock-level validators (alt-text, etc.) run where the blocks exist.
+### Step 2 — Product-Owner: BC updates [DONE]
 
-Architect must decide and document:
-- Where the post-layout pass runs (after `layout::run`, before export)
-- The Validator trait/contract change: prefer additive-defaulted method (e.g. `validate_post_layout`) to
-  avoid breaking existing validators — per STORY-085/ADR-017 precedent for `render_with_context`
-- Which validators are pre-layout vs post-layout
-- How strict-mode aggregates errors from both passes
-- Touches: Validator trait in `slideforge-plugin-api` (BC-5.02.001 surface), pipeline stage order (ADR-016 Decision 3)
-- Produces: a new ADR (draft→accepted; human authorization for Option A already granted)
-- Flag any sub-decision still needing human sign-off before implementation
-
-### Step 2 — Product-Owner: BC updates
-
-Dispatch `vsdd-factory:product-owner` cwd `/Users/jmagady/Dev/slideforge`.
-
-- Update BC-5.02.001 (Validator surface — add post-layout validation capability per architect ADR)
-- Update any pipeline/validator BC to reflect post-layout pass
-- Reconcile STORY-050 AC-009 to real flow (alt-text now fires post-layout)
-- Reconcile spec naming test-writer already adapted:
-  - `BuildError` variants are `ParseFailed`/`ValidationFailed` (NOT `ParseErrors`/`ValidationErrors`)
-  - AC-008/EC-005 use 3 separate `build()` calls (no `all_formats()`)
-  - AC-007 = 6 named spans: parse/evaluate/brand/validate/layout/export
-- Bump BC versions
-
-### Step 3 — Story-Writer: Reconcile STORY-050 spec body
-
-Dispatch `vsdd-factory:story-writer` cwd `/Users/jmagady/Dev/slideforge`.
-
-Reconcile `.factory/stories/STORY-050.md` to match reality + the ADR:
-- Real `BuildError` variant names (`ParseFailed`/`ValidationFailed`)
-- `BuildOptions` struct-literal form (convenience ctors DEFERRED to DX story — Gap 4)
-- AC-007 = 6 spans (parse/evaluate/brand/validate/layout/export)
-- AC-009 post-layout alt-text flow per architect ADR
-- File Structure: includes e2e test files actually created, including `multi_format.rs` + `e2e_tests.rs` root
-- Add note: Gap-4 convenience constructors + deck-level `metadata: title` DSL feature deferred to anchored future stories
+### Step 3 — Story-Writer: Reconcile STORY-050 spec body [DONE]
 
 ### Step 4 — Implementer: Fix burst — turn all 7 Red tests green (TDD)
 
@@ -339,6 +308,7 @@ No open blocking issues. BLK-001 resolved (see Decisions Log 2026-06-05 STORY-05
 
 | Date | ID | Decision |
 |------|-----|---------|
+| 2026-06-05 | STORY-050-GAP2-SPEC-BURST | Gap-2 spec burst LANDED (factory-artifacts). ADR-018 (post-layout validation pass) accepted. BC-5.02.001 → v1.5 (additive-defaulted `validate_post_layout` method; post-layout Stage 6b; new ECs + test vectors). BC-5.01.001 → v1.2 (alt-text enforcement moved to Stage 6b). Error taxonomy → v2.14 (E-A11-001 Stage 6b note). ARCH-INDEX.md + BC-INDEX.md updated. STORY-050 spec reconciled to spec_version 1.1 (ADR-018; real BuildError variant names; File Structure matched to disk). NEXT ACTIONS Steps 1-3 DONE — resume at Step 4 (implementer fix-burst in `.worktrees/STORY-050`). |
 | 2026-06-05 | STORY-050-GAP2-AUTHORIZED | Human AUTHORIZED Gap-2 = Option A on 2026-06-05: implement a POST-LAYOUT validation pass so alt-text (and other ContentBlock-level) validators actually fire end-to-end. This is the chosen fix for the CRITICAL "alt required" accessibility guarantee being non-functional. BLK-001 → RESOLVED (Option A authorized). STORY-050 status → in-progress (resume-ready). Red Gate committed at `6bbe80fc` in `.worktrees/STORY-050` (branch `feature/STORY-050`, pushed to origin). Resume at NEXT ACTIONS Step 1 (architect Gap-2 design). |
 | 2026-06-05 | STORY-050-RED-GATE | STORY-050 E2E Red Gate delivered (55 pass / 7 fail; committed at `6bbe80fc`, branch `feature/STORY-050`, pushed to origin). E2E suite surfaced CRITICAL pipeline gaps in already-merged code. Gap 1 (PDF NoDocumentTitle, in-scope, ~5-line fix in eval.rs). Gap 2 (alt-text validation bypassed end-to-end — see STORY-050-GAP2-AUTHORIZED). Gap 3 (observability events vs spans, in-scope). Gap 4 (API ergonomics, defer). Full architect gap analysis: `.factory/specs/story-050-gap-analysis.md`. |
 | 2026-06-05 | STORY-049-MERGE | STORY-049 MERGED PR #60 (e6f7832d, 2026-06-05). 21/21 CI checks green (note: doctest+snapshots failure on default_registry rustdoc example fixed in commit 65ee62e6 before merge); security-reviewer APPROVE/CLEAN; pr-reviewer APPROVE. LOCAL adversary cascade CONVERGED (12 passes, 3/3 strict-CLEAN passes 10-11-12). develop SHA e6f7832d (60 merged PRs). Wave 4: 20/21 merged. Batch C COMPLETE. STORY-050 now UNGATED. |

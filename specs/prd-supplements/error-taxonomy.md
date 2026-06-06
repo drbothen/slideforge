@@ -2,7 +2,7 @@
 document_type: prd-supplement
 supplement_type: error-taxonomy
 level: L3
-version: "2.13"
+version: "2.14"
 status: active
 producer: product-owner
 timestamp: 2026-06-03T00:00:00
@@ -289,6 +289,20 @@ Fatal in strict mode (exit 2). Warning in `--warn-only` mode (but output still p
 | E-A11-003 | cosmetic | 0 | `Missing lang declaration in deck metadata. Defaulting to "en". Screen readers may mispronounce non-English content. Add lang "en-US" (or appropriate BCP-47 tag).` | DI-003, CAP-020 |
 | E-A11-004 | broken | 2 | `WCAG contrast ratio insufficient for text '<excerpt>' at <file>:<line>:<col>: <ratio>:1 (required 4.5:1 for normal text, 3:1 for large text). Consider using a higher-contrast color combination.` | CAP-022 |
 
+Note (E-A11-001 pipeline stage — ADR-018): `E-A11-001` is emitted by `AltTextValidator`
+during the **post-layout validation pass** (Stage 6b per ADR-018, human-authorized 2026-06-05),
+NOT the pre-layout validation pass (Stage 5). This is because `ContentBlock::Chart`,
+`ContentBlock::Image`, and `ContentBlock::Diagram` only exist in `LaidOutDeck.slides[*].frames`
+(created by `layout::run`) and are never present in the pre-layout `Deck` (which always has
+`slides[*].blocks == vec![]` after eval, per `slideforge-eval/src/for_eval.rs:342`).
+`AltTextValidator.validate()` (Stage 5 dispatch) is a no-op stub — this is correct, not a bug.
+Stage 6b diagnostics are accumulated into the same combined diagnostic list as Stage 5 diagnostics,
+and the strict-mode gate fires once on the combined list. A deck with a missing `alt` on a chart
+still produces `Err(BuildError::ValidationFailed)` (exit 2, no output) — the guarantee is upheld;
+only the pipeline stage where enforcement fires has changed. Implementer citation: this note
+supersedes any spec or comment that says E-A11-001 is checked "before layout" — the authoritative
+source is ADR-018 Decision 3.
+
 ---
 
 ## Diagnostic Severity Definitions
@@ -341,3 +355,4 @@ Per DI-018 and BC-1.15.002:
 | 2.11 | 2026-06-02 | product-owner | STORY-077 adversary pass-7 finding F-077-P7-002 — allocated E-PAR-021 (`ParseError::InlineNestingDepthExceeded`) for the parse-stage inline-markup nesting-depth bound in `scan_template_chunks`. Adjudication: E-LAY-005 (`LayoutError::InlineDepthExceeded`) was considered for reuse but rejected — it is stage-specific to layout (fires during `Vec<InlineNode>` traversal, propagates as fatal `Err`, exit 2) and does not accumulate; E-PAR-021 fires at parse time (inside `scan_template_chunks` recursion), accumulates non-fatally for further parsing, and exits 1. Stage-accurate allocation is the established pattern per E-PAR-015/016 vs shape-code collision history. Pre-registration collision check: E-PAR-021 confirmed free in taxonomy and in grep of all `crates/**/*.rs`. Message format: `Inline-markup nesting depth exceeded at <file>:<line>:<col>: depth <N> exceeds maximum of <max>. Flatten or reduce nested inline markup.` Traces to BC-3.02.002, DIR-077-002 §5, CAP-001, STORY-077. |
 | 2.12 | 2026-06-02 | product-owner | STORY-077 adversary pass-9 finding F-077-P9-001 — (1) E-EVL-013 Note broadened: scope expanded from `ref("")`/`"" | ref` (empty-string only) to cover all three no-usable-id conditions: `ref()` zero-arg, `ref("")` empty-string arg, and `ref(expr)` where expr evaluates to empty. All three yield E-EVL-013; no new code allocated (mirrors figref precedent). (2) E-EVL-014 (`EvalError::FootnoteInvalidArg`) registered — new code for `footnote()` called with zero arguments or an argument that evaluates to empty/unusable text in inline-markup section sub-block context; no `InlineNode::Footnote` produced; eval-stage, broken, exit 2, error accumulation continues. E-EVL-014 confirmed free: absent from taxonomy (E-EVL-001 through E-EVL-013 fully accounted for) and from grep of `crates/slideforge-eval/src/error.rs`. Traces to CAP-002, CAP-024, BC-3.02.002, DIR-077-002 §5, STORY-077. |
 | 2.13 | 2026-06-03 | product-owner | STORY-077 follow-up burst (human-authorized 2026-06-03): (1) **E-PAR-022 registered** (`DisallowedLinkUrlScheme`) — parse-stage error for `[text](url)` links with disallowed URL schemes. Allowlist: `http`, `https`, `mailto`. All other schemes (including `javascript:`, `data:`, `vbscript:`, `file:`) and scheme-less URLs are rejected. Relative/anchor links (`#section`, `page.sf`) are NOT a v1 use case — internal cross-references use `{{ ref("id") }}`. Accumulated (same fatal path as E-PAR-019/020/021), exit 1. SEC-002 mandated. (2) **E-PAR-012 re-registered** (active) — re-registered for unterminated `{{ }}` interpolation. The v1.1 retirement was incorrect: `unterminated_interpolation_msg()` in `template.rs` has always emitted `"E-PAR-012"` and continues to do so. No implementer code change required. (3) **E-EVL-007 through E-EVL-011 registered** — taxonomy debt note removed. E-EVL-007 (`TooManySlides`, broken, exit 2), E-EVL-008 (`NotIterable`, broken, exit 2), E-EVL-009 (`LargeDeckWarning`, degraded, exit 0 — warning only), E-EVL-010 (`UnknownSectionType`, broken, exit 2), E-EVL-011 (`UnsupportedBuiltinCall`, broken, exit 2). All five were allocated in `crates/slideforge-eval/src/error.rs`; now formally registered. No code changes required (doc-only). |
+| 2.14 | 2026-06-05 | product-owner | STORY-050 Gap-2 / ADR-018 (human-authorized 2026-06-05): **E-A11-001 pipeline-stage note added.** E-A11-001 is emitted during the post-layout validation pass (Stage 6b, `validate_post_layout(&LaidOutDeck)`) per ADR-018, not the pre-layout pass (Stage 5). Root cause confirmed: `Deck.slides[*].blocks == vec![]` after eval (`for_eval.rs:342`); `FrameContent::Chart/Image/Diagram` only exist in `LaidOutDeck` post-layout. The error code, severity (broken), and exit code (2) are **unchanged** — only the pipeline stage where enforcement fires has changed. Note appended to E-A11-001 documenting this for implementers. This note supersedes any existing spec text or code comment stating E-A11-001 is checked "before layout." BC-5.02.001 v1.5 and BC-5.01.001 v1.2 updated in same burst. |

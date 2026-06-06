@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.4"
+version: "1.5"
 status: draft
 producer: product-owner
 timestamp: 2026-05-24T00:00:00
@@ -15,6 +15,10 @@ capability: CAP-021
 lifecycle_status: active
 introduced: v1.0.0
 modified:
+  - version: "1.5"
+    date: 2026-06-05
+    author: product-owner
+    reason: "STORY-050 Gap-2 / ADR-018 (human-authorized 2026-06-05): Extend Validator surface with additive-defaulted validate_post_layout(&LaidOutDeck, &ValidatorOptions) -> Vec<Diagnostic> method per ADR-018 Decision 2. Add Postcondition 5 (post-layout pass ordering), Postcondition 6 (combined diagnostic list / strict gate fires once), Postcondition 7 (AltTextValidator migration to post-layout), and Invariant 4 (validator classification rule). Add EC-005 (AltTextValidator post-layout) and EC-006 (combined diagnostic collection). Add canonical test vectors TV-P5.1, TV-P5.2, TV-P5.3 for AC-009 alignment. Reconcile AC-009 to use BuildError::ValidationFailed (not ValidationErrors). Reconcile AC-008 to three-separate-build()-calls (not all_formats()). Reconcile AC-007 to 6 named spans."
   - version: "1.4"
     date: 2026-06-05
     author: product-owner
@@ -35,7 +39,7 @@ removed: null
 removal_reason: null
 ---
 
-# BC-5.02.001: All 10 Plugin Trait Surfaces Implemented by Bundled Plugins via the Public Trait API
+# BC-5.02.001: All 10 Plugin Trait Surfaces Implemented by Bundled Plugins via the Public Trait API (Validator Has Pre- and Post-Layout Dispatch)
 
 ## Description
 
@@ -45,6 +49,12 @@ tests using only the public trait API. This verifies that the trait API is compl
 usable, and not a leaky abstraction. The 10 surfaces are: DataSource, Exporter,
 ChartRenderer, DiagramRenderer, Validator, MathRenderer, BrandProvider, SlideType,
 SectionType, InlineFormat.
+
+The `Validator` surface has two dispatch methods: `validate(&Deck, &ValidatorOptions)`
+(pre-layout, Stage 5) and `validate_post_layout(&LaidOutDeck, &ValidatorOptions)`
+(post-layout, Stage 6b). Both methods are called by `build_inner` on every registered
+Validator. `validate_post_layout` carries a complete default no-op body so existing
+implementations compile unchanged (ADR-018, human-authorized 2026-06-05).
 
 ## Preconditions
 
@@ -60,7 +70,8 @@ SectionType, InlineFormat.
    - Exporter: PPTX, DOCX, PDF, HTML exporters
    - ChartRenderer: plotters-backed chart renderer
    - DiagramRenderer: mermaid-rs-renderer (Spike S14 resolution)
-   - Validator: accessibility validator, overflow validator
+   - Validator: accessibility validator (`AltTextValidator`), overflow validator;
+     both dispatch through `validate()` and optionally `validate_post_layout()`
    - MathRenderer: pulldown-latex + KaTeX math renderer
    - BrandProvider: file-based brand provider
    - SlideType: all 31 slide type implementations
@@ -69,6 +80,30 @@ SectionType, InlineFormat.
 3. Each bundled plugin implementation compiles using only the public API exposed by
    `slideforge-plugin-api` — no direct imports of non-plugin-api crate internals.
 4. `cargo test --workspace` passes for all plugin implementations.
+5. **Post-layout validation pass (Stage 6b).** `build_inner` invokes
+   `validate_post_layout(&laid_out, &validator_opts)` on every registered `Validator`
+   AFTER `layout::run` succeeds (Stage 6) and BEFORE the exporter is invoked (Stage 7).
+   Diagnostics from Stage 6b are appended to the same accumulated diagnostic list as
+   Stage 5 (pre-layout) diagnostics.
+   - Stage ordering: Stage 5 (`validate(&Deck)`) → Stage 6 (`layout::run`) →
+     Stage 6b (`validate_post_layout(&LaidOutDeck)`) → Stage 7 (export).
+   - Stage 6b runs unconditionally (not only in strict mode), so validators that
+     override `validate_post_layout` emit warnings even when `strict = false`.
+   - A `BuildError::ValidationFailed` from Stage 5 does NOT abort before Stage 6b —
+     both passes complete fully before the strict-mode gate evaluates the combined list.
+6. **Single strict-mode gate on combined diagnostics.** The strict-mode gate fires
+   exactly once, after Stage 6b completes, on the combined `pre_diags + post_diags`
+   list. Any `DiagnosticSeverity::Error` in the combined list causes
+   `BuildError::ValidationFailed` carrying the full combined diagnostic list
+   (Error + Warning + Info from both passes). Collect-all, not fail-on-first.
+7. **AltTextValidator classification: post-layout only (ADR-018 Decision 3).**
+   `AltTextValidator` overrides `validate_post_layout` to iterate
+   `laid_out.slides[*].frames` for `FrameContent::Chart`, `FrameContent::Image`, and
+   `FrameContent::Diagram` entries whose alt field is missing or decorative-but-not-explicit.
+   `AltTextValidator.validate()` is a no-op stub (correct — `Deck.slides[*].blocks`
+   is always `vec![]` after eval per `for_eval.rs:342`). A deck with a chart slide and
+   no `alt "..."` must return `Err(BuildError::ValidationFailed)` containing at least
+   one diagnostic with `code == "E-A11-001"` when `strict = true`.
 
 ## Invariants
 
@@ -82,10 +117,12 @@ SectionType, InlineFormat.
    - **PERMITTED (additive-defaulted extension):** Adding a new trait method that
      carries a complete default body (i.e., the method has a sensible default
      implementation and existing implementors are NOT required to override it) does not
-     break existing implementations and is allowed. This is how ADR-017 Option A
-     authorizes `InlineFormat::render_with_context(node, format, &InlineRenderContext)`
-     — a new method with a default body that delegates to `render(node, format)` so
-     existing implementors compile unchanged. (ADR-017, human-authorized 2026-06-05)
+     break existing implementations and is allowed. Two authorized instances:
+     - ADR-017 Option A: `InlineFormat::render_with_context(node, format, &InlineRenderContext)`
+       with a default body that delegates to `render(node, format)`. (human-authorized 2026-06-05)
+     - ADR-018 Decision 2: `Validator::validate_post_layout(&LaidOutDeck, &ValidatorOptions) -> Vec<Diagnostic>`
+       with a default no-op body `{ vec![] }`. Existing `Validator` implementations compile
+       unchanged and inherit the no-op. (human-authorized 2026-06-05)
    - **FORBIDDEN (non-additive changes):** Removing or renaming an existing method;
      changing the signature of an existing method (parameter types, return type, or
      generic bounds); adding a new method WITHOUT a default body that forces
@@ -109,6 +146,19 @@ SectionType, InlineFormat.
    Test: `PluginRegistryBuilder::default().build()` (no registrations) MUST return
    `Err(RegistryError::MissingSurface { .. })`.
    Test: `PluginRegistryBuilder` with all 10 surfaces registered MUST return `Ok(..)`.
+4. **Validator classification rule (ADR-018 Decision 4).** Each `Validator`
+   implementation is classified as pre-layout, post-layout, or both, based on which IR
+   it needs:
+   - Pre-layout only (overrides `validate`, keeps default `validate_post_layout`): needs
+     semantic slide fields, zero-slide count, lang presence, or structural invariants
+     resolvable from `Deck` field values. Current members: `ZeroSlideValidator`,
+     `LangValidator`.
+   - Post-layout only (overrides `validate_post_layout`, `validate` returns `vec![]`):
+     needs `ContentBlock`-level data present only in `LaidOutDeck.slides[*].frames`.
+     Current members: `AltTextValidator`.
+   - Both: needs semantic AND geometric data (no current members in v1.0).
+   Future validators (CanvasOverflowValidator, ContrastValidator) MUST be classified at
+   the time they are introduced using this rule.
 
 ## Edge Cases
 
@@ -118,6 +168,10 @@ SectionType, InlineFormat.
 | EC-002 | Plugin API trait method signature change | All implementations updated; compile error otherwise — CI enforces |
 | EC-003 | Plugin registered but panics during execution | Panic is caught at plugin dispatch boundary; returned as E-EXP-NNN error |
 | EC-004 | Two bundled plugins registered for same surface | Both registered; caller selects by name/priority (configurable) |
+| EC-005 | Deck with `slide chart:` and no `alt "..."` built with `strict = true` | `validate_post_layout` on `AltTextValidator` fires after layout; `Err(BuildError::ValidationFailed)` returned carrying at least one `Diagnostic { code: "E-A11-001", .. }` in the combined list |
+| EC-006 | Deck has both a missing `lang` (pre-layout E-A11-003) AND a missing chart `alt` (post-layout E-A11-001) | Both diagnostics appear in the combined list returned by `Err(BuildError::ValidationFailed)`; user sees both errors in one `build()` call without re-running |
+| EC-007 | Existing `Validator` implementation (third-party) compiled against old trait that only had `validate()` | Compiles unchanged; inherits default `validate_post_layout` no-op; no source change required |
+| EC-008 | `AltTextValidator.validate()` called with a `Deck` whose `slides[*].blocks` is `vec![]` (post-eval state) | Returns `vec![]` (no diagnostics); this is correct and intentional — `ContentBlock::Chart/Image/Diagram` are only present post-layout |
 
 ## Canonical Test Vectors
 
@@ -126,6 +180,12 @@ SectionType, InlineFormat.
 | `cargo build --workspace` | 10/10 plugin surfaces compile; 0 trait method errors | happy-path |
 | `cargo test --workspace` | All plugin unit tests pass | happy-path |
 | Minimal test plugin implementing `DataSource` without slideforge-internal imports | Compiles successfully; `cargo test` passes | happy-path (API completeness) |
+| `slideforge::build(FIXTURE_SF, BuildOptions { format: Some("pptx"), strict: true, ..Default::default() })` (3-slide fixture with `lang "en-US"` and `alt` on all visual elements) | `Ok(BuildOutput { bytes: <valid PPTX ZIP> })` — PPTX ZIP archive with `[Content_Types].xml` and `ppt/presentation.xml` present (AC-001) | happy-path (AC-001) |
+| `slideforge::build(FIXTURE_SF, BuildOptions { format: Some("pptx"), strict: true, ..Default::default() })`, `slideforge::build(FIXTURE_SF, BuildOptions { format: Some("docx"), ..Default::default() })`, `slideforge::build(FIXTURE_SF, BuildOptions { format: Some("pdf"), ..Default::default() })` — three separate calls on the same fixture | All three return `Ok(BuildOutput)`; PPTX has 3 slides, DOCX has report body paragraphs, PDF has 3 pages (AC-008 — three separate `build()` calls, no `all_formats()` API) | happy-path (AC-008) |
+| `slideforge::build(MISSING_ALT_FIXTURE_SF, BuildOptions { format: Some("pptx"), strict: true, ..Default::default() })` where fixture has `slide chart:` with no `alt "..."` | `Err(BuildError::ValidationFailed(diagnostics))` where `diagnostics` contains at least one entry with `code == "E-A11-001"`; no output bytes written (AC-009) | error (AC-009) |
+| Same missing-alt fixture with `strict: false` | `Ok(BuildOutput)` — warning emitted via `tracing::warn!`, output produced; `ValidationFailed` NOT returned in warn-only mode (AC-009 warn-only complement) | warn-only (AC-009 complement) |
+| `slideforge::build(FIXTURE_SF, ...)` with `tracing_test` subscriber capturing INFO events (via `RUST_LOG=slideforge=info` filter) | All 6 named pipeline spans present: `parse`, `evaluate`, `brand`, `validate`, `layout`, `export` — in that order (AC-007) | observability (AC-007) |
+| `slideforge::build(INVALID_SYNTAX_SF, BuildOptions { format: Some("pptx"), strict: true, ..Default::default() })` where fixture has known syntax error at line 3 | `Err(BuildError::ParseFailed(errors))` where `errors` is non-empty `Vec<Diagnostic>` each containing `file`, `line`, `col`, `message` fields; line == 3 (AC-006) | error (AC-006) |
 
 ## Verification Properties
 

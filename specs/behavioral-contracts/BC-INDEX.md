@@ -269,7 +269,7 @@ traces_to: domain-spec/L2-INDEX.md
 
 | BC ID | Title | Priority | Status | File |
 |-------|-------|----------|--------|------|
-| BC-5.01.001 | Missing alt on visual element is compile error with element location | P0 | active | [BC-5.01.001.md](BC-5.01.001.md) |
+| BC-5.01.001 | Missing alt on Visual Element Is Compile Error with Element Location (Post-Layout Enforcement via Stage 6b) | P0 | active | [BC-5.01.001.md](BC-5.01.001.md) |
 | BC-5.01.002 | decorative: true opts out of alt requirement; emits empty alt in all formats | P0 | active | [BC-5.01.002.md](BC-5.01.002.md) |
 | BC-5.01.003 | Missing label on color-coded element is compile error | P0 | active | [BC-5.01.003.md](BC-5.01.003.md) |
 | BC-5.01.004 | Missing deck lang declaration produces lint warning; default is "en" | P0 | active | [BC-5.01.004.md](BC-5.01.004.md) |
@@ -279,7 +279,7 @@ traces_to: domain-spec/L2-INDEX.md
 
 | BC ID | Title | Priority | Status | File |
 |-------|-------|----------|--------|------|
-| BC-5.02.001 | All 10 Plugin Trait Surfaces Implemented by Bundled Plugins via the Public Trait API | P0 | active | [BC-5.02.001.md](BC-5.02.001.md) |
+| BC-5.02.001 | All 10 Plugin Trait Surfaces Implemented by Bundled Plugins via the Public Trait API (Validator Has Pre- and Post-Layout Dispatch) | P0 | active | [BC-5.02.001.md](BC-5.02.001.md) |
 | BC-5.02.002 | No bundled plugin bypasses the registered trait interface (dog-fooding guarantee) | P0 | active | [BC-5.02.002.md](BC-5.02.002.md) |
 
 ### 5.03 — Package Management (CAP-025)

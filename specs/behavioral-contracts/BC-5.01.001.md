@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.1"
+version: "1.2"
 status: draft
 producer: product-owner
 timestamp: 2026-05-24T00:00:00
@@ -14,7 +14,11 @@ subsystem: SS-TBD
 capability: CAP-020
 lifecycle_status: active
 introduced: v1.0.0
-modified: []
+modified:
+  - version: "1.2"
+    date: 2026-06-05
+    author: product-owner
+    reason: "STORY-050 Gap-2 / ADR-018 (human-authorized 2026-06-05): Correct Invariant 2 — AltTextValidator now runs POST-layout (Stage 6b) via validate_post_layout(&LaidOutDeck), not pre-layout. Deck.slides[*].blocks is always vec![] after eval (for_eval.rs:342); ContentBlock::Chart/Image/Diagram only exist in LaidOutDeck.slides[*].frames post-layout. The compile-error guarantee is upheld by the post-layout pass, not the pre-layout pass. Description and Postcondition 1 note updated to reflect post-layout enforcement."
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -23,7 +27,7 @@ removed: null
 removal_reason: null
 ---
 
-# BC-5.01.001: Missing alt on Visual Element Is Compile Error with Element Location
+# BC-5.01.001: Missing alt on Visual Element Is Compile Error with Element Location (Post-Layout Enforcement via Stage 6b)
 
 ## Description
 
@@ -33,6 +37,13 @@ the build produces E-A11-001 with the element type, identifier, and source locat
 This is a compile-time contract — accessibility is never deferred to runtime or
 post-processing. The error is fatal in strict mode.
 
+**Pipeline placement (ADR-018):** E-A11-001 is emitted by `AltTextValidator` during
+the **post-layout validation pass** (Stage 6b), not the pre-layout pass (Stage 5).
+`ContentBlock::Chart`, `ContentBlock::Image`, and `ContentBlock::Diagram` are created
+during `layout::run` and exist only in `LaidOutDeck.slides[*].frames` — they are not
+present in the pre-layout `Deck`. The enforcement guarantee is preserved: `build()`
+returns `Err(BuildError::ValidationFailed)` before any output is written.
+
 ## Preconditions
 
 1. A visual element (image, chart slide, diagram slide, or shape with visual content) is declared in the source.
@@ -41,15 +52,22 @@ post-processing. The error is fatal in strict mode.
 
 ## Postconditions
 
-1. E-A11-001 is emitted: `Missing alt text on <element-type> '<identifier>' at <file>:<line>:<col>. Add alt "..." or mark decorative: true`.
-2. Build exits with code 2 (validation error) in strict mode.
-3. No output is produced in strict mode.
-4. In `--warn-only` mode: warning emitted, build continues, output produced.
+1. E-A11-001 is emitted: `Missing alt text on <element-type> '<identifier>' at <file>:<line>:<col>. Add alt "..." or mark decorative: true`. Emitted by `AltTextValidator.validate_post_layout()` during Stage 6b, after `layout::run` produces the `LaidOutDeck`.
+2. Build returns `Err(BuildError::ValidationFailed(diagnostics))` in strict mode, where `diagnostics` contains at least one `Diagnostic { code: "E-A11-001", .. }`. No output is produced.
+3. CLI exits with code 2 (validation error) in strict mode.
+4. In `--warn-only` mode: warning emitted via `tracing::warn!`, build continues, output produced.
 
 ## Invariants
 
 1. Every visual element in the output has EITHER non-empty alt text OR is marked as a PDF Artifact / empty-alt in all output formats. (DI-001)
-2. The alt text requirement is checked BEFORE layout and export — it is part of the validation stage.
+2. **The alt text requirement is enforced POST-layout (Stage 6b) via `validate_post_layout`.**
+   `AltTextValidator` runs as part of the post-layout validation pass (Stage 6b per ADR-018),
+   iterating `LaidOutDeck.slides[*].frames` for `FrameContent::Chart`, `FrameContent::Image`,
+   and `FrameContent::Diagram`. The pre-layout `validate()` call on `AltTextValidator` is a
+   no-op stub (correct — `Deck.slides[*].blocks` is always `vec![]` after eval per
+   `for_eval.rs:342`). The enforcement guarantee — `build()` returns
+   `Err(BuildError::ValidationFailed)` before any output is written — is upheld by Stage 6b,
+   which runs before Stage 7 (export).
 3. `decorative: true` produces empty alt attributes in all output formats (empty string in PPTX `<p:ph altText="">`, empty `/Alt` in PDF Artifact, `alt=""` in HTML).
 4. No output format can contain a visual element with neither alt text nor decorative marker.
 
@@ -68,11 +86,12 @@ post-processing. The error is fatal in strict mode.
 
 | Input | Expected Output | Category |
 |-------|----------------|----------|
-| `image: "photo.png"` with no alt | E-A11-001 at line:col of image declaration | error (TV-7.1) |
-| `image: "photo.png"` with `alt "Team photo from Q3 offsite"` | No error; alt text preserved in all outputs | happy-path |
-| `image: "background.png"` with `decorative: true` | No error; empty alt in all outputs | edge-case (TV-7.3) |
-| `image: "photo.png"` with `alt ""` | E-A11-001 (empty string is not valid alt) | error |
-| `slide diagram:` with no `alt` field | E-A11-001 on the diagram element | error |
+| `image: "photo.png"` with no alt (strict mode) | `Err(BuildError::ValidationFailed)` with `diagnostics[i].code == "E-A11-001"` — no output written | error (TV-7.1) |
+| `image: "photo.png"` with `alt "Team photo from Q3 offsite"` | `Ok(BuildOutput)` — no error; alt text preserved in all outputs | happy-path |
+| `image: "background.png"` with `decorative: true` | `Ok(BuildOutput)` — no error; empty alt in all outputs | edge-case (TV-7.3) |
+| `image: "photo.png"` with `alt ""` (strict mode) | `Err(BuildError::ValidationFailed)` with `code == "E-A11-001"` (empty string is not valid alt) | error |
+| `slide diagram:` with no `alt` field (strict mode) | `Err(BuildError::ValidationFailed)` with `code == "E-A11-001"` on the diagram element | error |
+| `slide chart:` with no `alt` field, `strict = false` | `Ok(BuildOutput)` — warning emitted via `tracing::warn!`, output produced | warn-only |
 
 ## Verification Properties
 
