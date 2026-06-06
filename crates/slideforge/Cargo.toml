@@ -51,7 +51,11 @@ slideforge-plugin-api = { workspace = true }
 
 # STORY-050 E2E test dependencies.
 # tracing-test: capture tracing events for AC-007 observability assertions.
-tracing-test = "=0.2.5"
+# no-env-filter: required for integration tests (tests/ crate) to capture INFO events
+# from the slideforge production crate. Without it, the env_filter uses the integration
+# test crate name ("e2e_tests") as the target prefix, which does not match the
+# production "slideforge::lib" target (STORY-050 Gap 3 / AC-007).
+tracing-test = { version = "=0.2.5", features = ["no-env-filter"] }
 # zip: validate PPTX/DOCX ZIP structure (AC-001, AC-002, AC-008).
 # Same feature set as slideforge-pptx to avoid lzma conflict.
 zip = { version = "=4.2.0", default-features = false, features = ["deflate", "time"] }

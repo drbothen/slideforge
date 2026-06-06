@@ -312,13 +312,24 @@ pub fn build(source: &str, options: &BuildOptions) -> Result<BuildOutput, error:
 /// Core pipeline implementation shared by [`build`] and (in tests)
 /// [`build_with_registry`].
 ///
-/// Stages:
+/// Stages (updated per ADR-018):
+///
 /// 1. Brand loading (provider selected by `BrandSource` variant — CRIT-1 fix)
 /// 2. DSL parsing (`slideforge-syntax`)
 /// 3. AST evaluation (`slideforge-eval`) — uses a FRESH sink (OBS-1 fix)
 /// 4. Validation (all registered validators — CRIT-3)
 /// 5. Layout (`slideforge-layout`)
-/// 6. Export (selected exporter plugin)
+/// 6. Post-layout validation (`validate_post_layout` — ADR-018 Decision 1)
+/// 7. Export (selected exporter plugin)
+///
+/// The function exceeds clippy's default 150-line threshold because each pipeline
+/// stage requires non-trivial dispatch logic with panic-boundary wrapping
+/// (`dispatch_plugin`), diagnostic accumulation, and stage-specific error variant
+/// mapping. Extracting each stage into a free function would scatter the pipeline
+/// DAG across multiple private helpers without improving readability. The
+/// `clippy::too_many_lines` lint is suppressed with documented justification per
+/// CLAUDE.md §Strict Defaults ("documented exceptions only").
+#[allow(clippy::too_many_lines)]
 fn build_inner(
     source: &str,
     options: &BuildOptions,
@@ -503,6 +514,64 @@ fn build_inner(
     // Stage 6: lay out the Deck into a LaidOutDeck.
     tracing::info!(stage = "layout", "build_inner: laying out Deck");
     let laid_out = layout_run(&deck, &brand).map_err(error::BuildError::Layout)?;
+
+    // Stage 6b (ADR-018 Decision 1): post-layout validation pass on LaidOutDeck.
+    //
+    // This pass invokes `validate_post_layout` on every registered Validator,
+    // accumulating diagnostics from `FrameContent::Chart`, `FrameContent::Image`,
+    // and `FrameContent::Diagram` frames — data that only exists in the geometric IR,
+    // not in the semantic Deck passed to Stage 5.
+    //
+    // The post-layout diagnostics are APPENDED to `all_validator_diagnostics`
+    // (collect-all, not fail-on-first per ADR-018 Decision 5). The combined list
+    // from both passes feeds the strict-mode gate exactly once, below.
+    //
+    // H1: Validator::validate_post_layout is a plugin surface — wrap in dispatch_plugin.
+    tracing::info!(
+        stage = "validate_post_layout",
+        "build_inner: running post-layout validators (Stage 6b)"
+    );
+    for validator in registry.iter_validators() {
+        let validator_id = validator.id().to_owned();
+        let post_diags = dispatch::dispatch_plugin(&validator_id, || {
+            validator.validate_post_layout(&laid_out, &validator_opts)
+        })
+        .map_err(error::BuildError::Plugin)?;
+        for diag in &post_diags {
+            tracing::warn!(
+                validator = %validator_id,
+                code = %diag.code,
+                severity = %diag.severity,
+                message = %diag.message,
+                "post-layout validator diagnostic"
+            );
+        }
+        all_validator_diagnostics.extend(post_diags);
+    }
+
+    // Strict-mode gate (ADR-018 Decision 5): evaluate the COMBINED diagnostic list
+    // (Stage 5 + Stage 6b) exactly once. This gate fires here (after Stage 6b),
+    // superseding the pre-layout-only gate that ran above.
+    //
+    // The pre-layout gate already fired on the Stage 5 diagnostics only. Stage 6b
+    // may add new Error-severity diagnostics (e.g., E-A11-001 from missing chart alt).
+    // Re-evaluating the combined list here ensures Stage 6b errors block the build
+    // in strict mode.
+    if options.strict {
+        let has_post_layout_error = all_validator_diagnostics
+            .iter()
+            .any(|d| d.severity == DiagnosticSeverity::Error);
+        if has_post_layout_error {
+            let error_count = all_validator_diagnostics
+                .iter()
+                .filter(|d| d.severity == DiagnosticSeverity::Error)
+                .count();
+            return Err(error::BuildError::ValidationFailed {
+                diagnostics: all_validator_diagnostics,
+                count: error_count,
+            });
+        }
+    }
 
     // Stage 7: select the exporter and produce output bytes.
     //

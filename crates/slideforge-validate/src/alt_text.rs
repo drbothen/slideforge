@@ -11,6 +11,7 @@
 //! | `E-A11-001` | Error | Visual element is missing alt text and is not marked decorative |
 //! | `W-A11-002` | Warning | Visual element has both alt text AND `decorative: true`; alt takes precedence, decorative flag ignored (BC-3.04.001 v1.5.2 Invariant 11) |
 
+use slideforge_layout::{FrameContent, LaidOutDeck};
 use slideforge_plugin_api::{Diagnostic, DiagnosticSeverity, Validator, ValidatorOptions};
 use slideforge_types::{Deck, SourceSpan, specs::AltText};
 
@@ -54,6 +55,25 @@ impl Validator for AltTextValidator {
         "alt-text"
     }
 
+    /// Stage 5 (pre-layout) alt-text check on the semantic [`Deck`] IR.
+    ///
+    /// Iterates `deck.slides[*].blocks` looking for `ContentBlock::Chart`,
+    /// `ContentBlock::Image`, and `ContentBlock::Diagram` entries with missing
+    /// or blank alt text.
+    ///
+    /// ## Current pipeline state
+    ///
+    /// `slideforge-eval` always sets `Slide.blocks = vec![]` (see
+    /// `slideforge_eval::for_eval:342`). `ContentBlock` construction is deferred to
+    /// layout + Wave 3+ stories. As a result, this method currently produces zero
+    /// diagnostics — not because the logic is wrong, but because there are no blocks
+    /// to iterate. The authoritative alt-text enforcement for the current pipeline
+    /// is in [`AltTextValidator::validate_post_layout`] (ADR-018 Decision 3).
+    ///
+    /// When a future story populates `Slide.blocks` from eval-time DSL fields,
+    /// this method will provide earlier detection (before layout). Both passes are
+    /// additive: combined diagnostics from Stage 5 and Stage 6b are accumulated
+    /// into one list before the strict-mode gate fires.
     fn validate(&self, deck: &Deck, _opts: &ValidatorOptions) -> Vec<Diagnostic> {
         use slideforge_types::ContentBlock;
 
@@ -121,6 +141,78 @@ impl Validator for AltTextValidator {
                     | ContentBlock::Math(_)
                     | ContentBlock::Table(_) => {},
                 }
+            }
+        }
+
+        diagnostics
+    }
+
+    /// Stage 6b (post-layout) alt-text check on the geometric [`LaidOutDeck`] IR.
+    ///
+    /// Iterates `laid_out.slides[*].frames` looking for `FrameContent::Chart`,
+    /// `FrameContent::Image`, and `FrameContent::Diagram` entries with
+    /// `AltText::Decorative`. In the current pipeline, `AltText::Decorative` on
+    /// these frame variants is the structural placeholder set by the region map when
+    /// no alt text has been threaded from a `ContentBlock` (ADR-018 §Context;
+    /// `slideforge_eval::for_eval:342`). Since `Slide.blocks` is always `vec![]`
+    /// after eval, no alt text can be threaded before this pass.
+    ///
+    /// A `FrameContent::Chart/Image/Diagram` with `AltText::Decorative` therefore
+    /// indicates a visual element whose author-supplied alt text was absent — the
+    /// authoritative evidence of a missing `alt "..."` in the DSL source.
+    ///
+    /// Emits `E-A11-001` (Error severity) for each such frame. In strict mode,
+    /// these errors cause `BuildError::ValidationFailed`.
+    ///
+    /// ## Future compatibility
+    ///
+    /// When Wave 3+ stories populate `Slide.blocks` from eval-time DSL fields,
+    /// `layout::thread_media_alt_into_frames` will overwrite the placeholder with:
+    /// - `AltText::Provided(s)` for frames with author-supplied alt text.
+    /// - `AltText::Decorative` for frames explicitly marked `decorative: true`.
+    ///
+    /// At that point, this method correctly distinguishes between the two cases:
+    /// `AltText::Decorative` from an explicit DSL `decorative: true` is VALID
+    /// (no error), while an absent alt text frame never reaches this pass as
+    /// `AltText::Decorative` unless it truly is decorative.
+    ///
+    /// Traceability: ADR-018 Decision 3, BC-5.02.001 §Accessibility,
+    /// STORY-050 AC-009, CLAUDE.md §Accessibility ("alt required — compile error").
+    fn validate_post_layout(
+        &self,
+        laid_out: &LaidOutDeck,
+        _opts: &ValidatorOptions,
+    ) -> Vec<Diagnostic> {
+        let mut diagnostics: Vec<Diagnostic> = Vec::new();
+
+        for (slide_index, laid_out_slide) in laid_out.slides.iter().enumerate() {
+            for frame in &laid_out_slide.frames {
+                let slide_type = laid_out_slide.slide_type_keyword.as_ref();
+                match &frame.content {
+                    FrameContent::Chart {
+                        alt: AltText::Decorative,
+                    } => {
+                        // AltText::Decorative on a Chart frame = missing alt text
+                        // (structural placeholder; no ContentBlock threaded it yet).
+                        diagnostics.push(make_error("chart", slide_type, &SourceSpan::default()));
+                    },
+                    FrameContent::Image {
+                        alt: AltText::Decorative,
+                    } => {
+                        diagnostics.push(make_error("image", slide_type, &SourceSpan::default()));
+                    },
+                    FrameContent::Diagram {
+                        alt: AltText::Decorative,
+                        ..
+                    } => {
+                        diagnostics.push(make_error("diagram", slide_type, &SourceSpan::default()));
+                    },
+                    // AltText::Provided(_) — valid alt text, no diagnostic.
+                    // All other FrameContent variants are non-visual or text-bearing.
+                    _ => {},
+                }
+                // suppress unused variable warning for slide_index in future-proofing
+                let _ = slide_index;
             }
         }
 

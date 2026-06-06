@@ -438,7 +438,19 @@ pub fn eval_deck_with_variant(
         .lang
         .as_ref()
         .map(|l| Arc::from(l.value().as_str()));
-    let title = None; // Title is not present in DeckNode (comes from a slide); leave None.
+    // Populate title from the FIRST `slide title:` block that has a resolved `title` field.
+    //
+    // Gap 1 (STORY-050): `DeckMetadata.title` must be non-None for PDF/UA-1 compliance.
+    // The evaluator derives it from the first slide whose `slide_type == "title"` and whose
+    // resolved `title` field is a `FieldValue::Literal(Value::Str(...))`.
+    //
+    // Deck-level `metadata: title` DSL is a deferred feature (Wave 3+). Until then, the
+    // evaluator derives the document title from the first title-type slide as the
+    // architecturally-correct source per ADR-016 Decision 3 + STORY-050 gap analysis.
+    let title: Option<Arc<str>> = slides
+        .iter()
+        .find(|s| s.slide_type.as_ref() == "title")
+        .and_then(|s| s.title_str().map(Arc::from));
 
     let version_str: Arc<str> = deck_node.version.as_ref().map_or_else(
         || Arc::from(FALLBACK_VERSION),

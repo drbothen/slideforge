@@ -2701,6 +2701,7 @@ version = "0.1.0"
 dependencies = [
  "insta",
  "slideforge-eval",
+ "slideforge-layout",
  "slideforge-plugin-api",
  "slideforge-syntax",
  "slideforge-types",
