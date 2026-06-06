@@ -27,8 +27,12 @@ wave_3_gate_adversary_clean_at: "6/7/8"
 wave_3_gate_holdout_must_pass: "5/5 PASS"
 wave_3_gate_tests: 2584
 wave_4_started: 2026-05-31
-wave_4_total_stories: 22
-wave_4_total_points: 150
+wave_4_total_stories: 23
+wave_4_total_points: 163
+wave_4_pull_in_story: STORY-087
+wave_4_pull_in_points: 13
+wave_4_pull_in_authorized: 2026-06-06
+wave_4_pull_in_rationale: "STORY-087 pulled from Wave 5 to close F-G3-HIGH-003 before re-gate; Gate 3 requires zero open HIGHs"
 wave_4_remediation_story: STORY-086
 wave_4_remediation_points: 21
 wave_4_remediation_points_original: 13
@@ -662,8 +666,8 @@ stories:
     gate_obligation: "Must re-pass Wave 4 Gate 3 (strict-mode a11y) + Gate 5 (holdout must-pass ≥0.6) before Wave 5 dispatch"
     notes: "Stage 2b: Post-Eval Field-to-Block Threading Pass + TextTag Routing + AltText::Unspecified. Authorized ADR-019 (human 2026-06-05). Scope expanded (human 2026-06-06): TextTag enum + TextBlock.tag + PPTX title-placeholder routing (BC-4.01.001 v1.2 PC-9-12) + DOCX Heading1 routing (BC-4.02.001 v1.2 PC-8-11) absorbed into story. TextTag follow-up story absorbed (NOT created separately). Bullets direct list-literal syntax deferred to STORY-088 (Wave 5). 7-crate change: slideforge-eval (new module), slideforge-types (AltText::Unspecified + TextTag enum + TextBlock.tag), slideforge-layout (regions.rs 5 sites + thread_media_alt_into_frames 3 sites + layout.rs comment), slideforge-validate (alt_text.rs match arms + comment), slideforge (build_inner Stage 2b call + doc comment), slideforge-pptx (TextTag routing), slideforge-docx (TextTag routing). LESSON-13/LESSON-14 placement assertions (not just presence) required in E2E tests."
   STORY-087:
-    status: draft
-    wave: 5
+    status: in-progress
+    wave: 4
     priority: P1
     points: 13
     epic: EPIC-01
