@@ -716,7 +716,7 @@ mod tests {
     /// `weighted_composite`) perform field validation in `lay_out()`. For these
     /// types, a slide with the minimum required fields is used so `lay_out()`
     /// returns `Ok`. The other 31 types are called with empty fields (their
-    /// lay_out() stubs return `Ok` regardless of fields).
+    /// `lay_out()` stubs return `Ok` regardless of fields).
     #[test]
     fn test_all_31_types_lay_out_returns_ok() {
         use crate::traits::Canvas;
@@ -748,8 +748,14 @@ mod tests {
             let slide = match kw.as_ref() {
                 "status" => {
                     let mut fields = OrderedMap::new();
-                    fields.insert(Arc::from("title"), FieldValue::Literal(Value::Str(Arc::from("Test"))));
-                    fields.insert(Arc::from("label"), FieldValue::Literal(Value::Str(Arc::from("On Track"))));
+                    fields.insert(
+                        Arc::from("title"),
+                        FieldValue::Literal(Value::Str(Arc::from("Test"))),
+                    );
+                    fields.insert(
+                        Arc::from("label"),
+                        FieldValue::Literal(Value::Str(Arc::from("On Track"))),
+                    );
                     Slide {
                         slide_type: Arc::clone(kw),
                         fields,
@@ -763,8 +769,14 @@ mod tests {
                 },
                 "progress_bar" => {
                     let mut fields = OrderedMap::new();
-                    fields.insert(Arc::from("title"), FieldValue::Literal(Value::Str(Arc::from("Progress"))));
-                    fields.insert(Arc::from("label"), FieldValue::Literal(Value::Str(Arc::from("50% done"))));
+                    fields.insert(
+                        Arc::from("title"),
+                        FieldValue::Literal(Value::Str(Arc::from("Progress"))),
+                    );
+                    fields.insert(
+                        Arc::from("label"),
+                        FieldValue::Literal(Value::Str(Arc::from("50% done"))),
+                    );
                     fields.insert(Arc::from("value"), FieldValue::Literal(Value::Int(50)));
                     Slide {
                         slide_type: Arc::clone(kw),
@@ -780,13 +792,25 @@ mod tests {
                 "weighted_composite" => {
                     let mut comp = OrderedMap::new();
                     comp.insert(Arc::from("name"), Value::Str(Arc::from("Quality")));
-                    comp.insert(Arc::from("weight"), Value::Float(ordered_float::OrderedFloat(0.5)));
+                    comp.insert(
+                        Arc::from("weight"),
+                        Value::Float(ordered_float::OrderedFloat(0.5)),
+                    );
                     comp.insert(Arc::from("score"), Value::Int(80));
                     comp.insert(Arc::from("label"), Value::Str(Arc::from("Good")));
                     let mut fields = OrderedMap::new();
-                    fields.insert(Arc::from("title"), FieldValue::Literal(Value::Str(Arc::from("Scorecard"))));
-                    fields.insert(Arc::from("label"), FieldValue::Literal(Value::Str(Arc::from("Overall: Good"))));
-                    fields.insert(Arc::from("components"), FieldValue::Literal(Value::List(vec![Value::Map(comp)])));
+                    fields.insert(
+                        Arc::from("title"),
+                        FieldValue::Literal(Value::Str(Arc::from("Scorecard"))),
+                    );
+                    fields.insert(
+                        Arc::from("label"),
+                        FieldValue::Literal(Value::Str(Arc::from("Overall: Good"))),
+                    );
+                    fields.insert(
+                        Arc::from("components"),
+                        FieldValue::Literal(Value::List(vec![Value::Map(comp)])),
+                    );
                     Slide {
                         slide_type: Arc::clone(kw),
                         fields,

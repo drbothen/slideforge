@@ -93,26 +93,25 @@ impl Validator for LabelCheckValidator {
             // For `weighted_composite` slides, also check per-component labels.
             // Iterate Slide.fields["components"] (a Value::List of Value::Maps).
             // Emit E-A11-002 per component missing its label (accumulate all).
-            if slide.slide_type.as_ref() == "weighted_composite" {
-                if let Some(FieldValue::Literal(Value::List(components))) =
+            if slide.slide_type.as_ref() == "weighted_composite"
+                && let Some(FieldValue::Literal(Value::List(components))) =
                     slide.fields.get("components")
-                {
-                    for comp_val in components {
-                        if let Value::Map(comp_map) = comp_val {
-                            let comp_label_ok = match comp_map.get("label") {
-                                Some(Value::Str(s)) => !is_blank(s.as_ref()),
-                                _ => false,
+            {
+                for comp_val in components {
+                    if let Value::Map(comp_map) = comp_val {
+                        let comp_label_ok = match comp_map.get("label") {
+                            Some(Value::Str(s)) => !is_blank(s.as_ref()),
+                            _ => false,
+                        };
+                        if !comp_label_ok {
+                            let comp_name = match comp_map.get("name") {
+                                Some(Value::Str(s)) => s.as_ref().to_owned(),
+                                _ => String::new(),
                             };
-                            if !comp_label_ok {
-                                let comp_name = match comp_map.get("name") {
-                                    Some(Value::Str(s)) => s.as_ref().to_owned(),
-                                    _ => String::new(),
-                                };
-                                diagnostics.push(make_missing_component_label_error(
-                                    &comp_name,
-                                    &slide.source_span,
-                                ));
-                            }
+                            diagnostics.push(make_missing_component_label_error(
+                                &comp_name,
+                                &slide.source_span,
+                            ));
                         }
                     }
                 }
@@ -694,7 +693,7 @@ mod tests {
             .map(|comp_fv| {
                 // Convert FieldValue::Literal(Value) map to Value::Map(OrderedMap<Arc<str>, Value>)
                 let mut m: OrderedMap<Arc<str>, Value> = OrderedMap::new();
-                for (k, fv) in comp_fv.iter() {
+                for (k, fv) in &comp_fv {
                     if let FieldValue::Literal(v) = fv {
                         m.insert(Arc::clone(k), v.clone());
                     }
@@ -737,8 +736,8 @@ mod tests {
 
     // ── BC-1.17.001 AC-006 / invariant 3 ─────────────────────────────────────
 
-    /// BC-1.17.001 AC-006 / invariant 3: LabelCheck fires E-A11-002 for `status`
-    /// even when `Slide.blocks = vec![]` (pre-Stage-2b). Verifies LabelCheck reads
+    /// BC-1.17.001 AC-006 / invariant 3: `LabelCheck` fires E-A11-002 for `status`
+    /// even when `Slide.blocks = vec![]` (pre-Stage-2b). Verifies `LabelCheck` reads
     /// `Slide.fields["label"]`, NOT `Slide.blocks`.
     ///
     /// This test exercises the Stage 2b independence guarantee. It should PASS at
@@ -749,7 +748,7 @@ mod tests {
         let slide = Slide {
             slide_type: Arc::from("status"),
             fields: OrderedMap::new(), // no label
-            blocks: vec![],             // Stage 2b has NOT populated blocks
+            blocks: vec![],            // Stage 2b has NOT populated blocks
             register: None,
             tags: vec![],
             source_span: SourceSpan::default(),
@@ -774,10 +773,10 @@ mod tests {
     // ── BC-1.17.003 AC-018 / DI-018 accumulation ─────────────────────────────
 
     /// BC-1.17.003 AC-018 / invariant 5 / DI-018: When top-level label is absent
-    /// AND both components are missing labels, LabelCheckValidator must accumulate
+    /// AND both components are missing labels, `LabelCheckValidator` must accumulate
     /// exactly 3 E-A11-002 diagnostics (1 top-level + 2 component).
     ///
-    /// FAILS at Red Gate: component iteration is NOT yet implemented in validate().
+    /// FAILS at Red Gate: component iteration is NOT yet implemented in `validate()`.
     /// Current behavior: emits only 1 E-A11-002 (top-level). Expected: 3.
     #[test]
     fn test_BC_1_17_003_ac018_weighted_composite_accumulates_3_label_errors() {
@@ -804,12 +803,12 @@ mod tests {
 
     // ── BC-1.17.003 AC-022 / invariant 8 ─────────────────────────────────────
 
-    /// BC-1.17.003 AC-022 / invariant 8: LabelCheckValidator iterates
+    /// BC-1.17.003 AC-022 / invariant 8: `LabelCheckValidator` iterates
     /// `Slide.fields["components"]` to check per-component labels.
     /// Top-level label is PRESENT; component 2 is missing its label.
     /// `Slide.blocks = vec![]` (pre-Stage-2b).
     ///
-    /// FAILS at Red Gate: component iteration is NOT yet in validate().
+    /// FAILS at Red Gate: component iteration is NOT yet in `validate()`.
     /// Current behavior: 0 E-A11-002 (top-label present, no component iteration).
     /// Expected: 1 E-A11-002 for the missing component label.
     #[test]
@@ -817,8 +816,10 @@ mod tests {
         let comp_ok = make_component_fv("Quality", Some("Excellent"));
         let comp_no_label = make_component_fv("Price", None); // missing label
         // Top-level label IS present; only one component is missing its label
-        let slide =
-            make_weighted_composite_with_components(Some("Overall: Good"), vec![comp_ok, comp_no_label]);
+        let slide = make_weighted_composite_with_components(
+            Some("Overall: Good"),
+            vec![comp_ok, comp_no_label],
+        );
         assert!(
             slide.blocks.is_empty(),
             "test precondition: blocks must be empty (Stage 2b independence)"
@@ -850,9 +851,9 @@ mod tests {
 
     // ── F-G3-HIGH-003 regression ──────────────────────────────────────────────
 
-    /// F-G3-HIGH-003 regression: `severity_cards` LabelCheck must STILL fire
+    /// F-G3-HIGH-003 regression: `severity_cards` `LabelCheck` must STILL fire
     /// E-A11-002 for a missing label after STORY-087 changes. No regression
-    /// from COLOR_CODED_TYPES modifications.
+    /// from `COLOR_CODED_TYPES` modifications.
     #[test]
     fn test_F_G3_HIGH_003_severity_cards_label_check_regression() {
         let slide = make_color_coded_slide("severity_cards", None, None, None, false);
@@ -877,7 +878,7 @@ mod tests {
     /// must appear in `SLIDE_TYPE_KEYWORDS`.
     ///
     /// Before STORY-087, `"severity_cards"` was in `COLOR_CODED_TYPES` but ABSENT
-    /// from `SLIDE_TYPE_KEYWORDS` (D4 gap), making LabelCheck a dead letter for it.
+    /// from `SLIDE_TYPE_KEYWORDS` (D4 gap), making `LabelCheck` a dead letter for it.
     /// After STORY-087, all 4 entries must be in both sets.
     ///
     /// This test directly closes F-G3-HIGH-003.
@@ -888,15 +889,23 @@ mod tests {
         for color_type in COLOR_CODED_TYPES {
             assert!(
                 is_slide_type_keyword(color_type),
-                "F-G3-HIGH-003 / AC-024: COLOR_CODED_TYPES entry '{}' must be present in \
+                "F-G3-HIGH-003 / AC-024: COLOR_CODED_TYPES entry '{color_type}' must be present in \
                  SLIDE_TYPE_KEYWORDS — otherwise LabelCheck is a dead letter for this type",
-                color_type
             );
         }
         // Explicit membership assertions
-        assert!(COLOR_CODED_TYPES.contains(&"status"), "must contain 'status'");
-        assert!(COLOR_CODED_TYPES.contains(&"progress_bar"), "must contain 'progress_bar'");
-        assert!(COLOR_CODED_TYPES.contains(&"weighted_composite"), "must contain 'weighted_composite'");
+        assert!(
+            COLOR_CODED_TYPES.contains(&"status"),
+            "must contain 'status'"
+        );
+        assert!(
+            COLOR_CODED_TYPES.contains(&"progress_bar"),
+            "must contain 'progress_bar'"
+        );
+        assert!(
+            COLOR_CODED_TYPES.contains(&"weighted_composite"),
+            "must contain 'weighted_composite'"
+        );
         assert!(
             COLOR_CODED_TYPES.contains(&"severity_cards"),
             "must contain 'severity_cards' (D4 gap fix)"
@@ -905,7 +914,7 @@ mod tests {
 
     // ── NFR-021/022/023 positive paths ───────────────────────────────────────
 
-    /// NFR-021: `status` with valid label → LabelCheck emits no E-A11-002.
+    /// NFR-021: `status` with valid label → `LabelCheck` emits no E-A11-002.
     #[test]
     fn test_BC_1_17_001_nfr021_status_with_valid_label_passes_label_check() {
         let slide = make_color_coded_slide("status", Some("On Track"), None, None, false);
@@ -942,7 +951,13 @@ mod tests {
     /// (Component label checking is the AC-022 behavior, tested separately above.)
     #[test]
     fn test_BC_1_17_003_nfr023_weighted_composite_top_label_present_no_top_error() {
-        let slide = make_color_coded_slide("weighted_composite", Some("Overall: Good"), None, None, false);
+        let slide = make_color_coded_slide(
+            "weighted_composite",
+            Some("Overall: Good"),
+            None,
+            None,
+            false,
+        );
         let deck = make_deck(vec![slide]);
         let diags = LabelCheckValidator.validate(&deck, &default_opts());
         let label_errors: Vec<_> = diags

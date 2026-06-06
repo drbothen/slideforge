@@ -1,12 +1,12 @@
 //! Red Gate integration tests for STORY-087: Color-Coded Slide Types.
 //!
-//! Covers BC-1.17.001 (status), BC-1.17.002 (progress_bar), and
-//! BC-1.17.003 (weighted_composite) lay_out() and registration behaviors.
+//! Covers BC-1.17.001 (status), BC-1.17.002 (`progress_bar`), and
+//! BC-1.17.003 (`weighted_composite`) `lay_out()` and registration behaviors.
 //!
 //! ALL tests marked "FAILS at Red Gate" will panic with `todo!()` until the
 //! `lay_out()` implementations are filled in by the implementer.
 //!
-//! LabelCheck tests (AC-006, AC-018, AC-022, F-G3-HIGH-003, NFR-021/022/023)
+//! `LabelCheck` tests (AC-006, AC-018, AC-022, F-G3-HIGH-003, NFR-021/022/023)
 //! live in `crates/slideforge-validate/src/label_check.rs` (correct crate per
 //! project convention: validator tests live near the validator impl).
 //!
@@ -48,9 +48,7 @@ use std::sync::Arc;
 
 use ordered_float::OrderedFloat;
 use slideforge_plugin_api::slide_types::{
-    SlideTypeRegistry,
-    progress_bar::ProgressBarSlideType,
-    status::StatusSlideType,
+    SlideTypeRegistry, progress_bar::ProgressBarSlideType, status::StatusSlideType,
     weighted_composite::WeightedCompositeSlideType,
 };
 use slideforge_plugin_api::traits::{Canvas, LayoutError, SlideType};
@@ -87,10 +85,7 @@ fn stub_canvas() -> Canvas {
 fn make_slide_str(slide_type: &str, fields: Vec<(&str, &str)>) -> Slide {
     let mut field_map = OrderedMap::new();
     for (k, v) in fields {
-        field_map.insert(
-            Arc::from(k),
-            FieldValue::Literal(Value::Str(Arc::from(v))),
-        );
+        field_map.insert(Arc::from(k), FieldValue::Literal(Value::Str(Arc::from(v))));
     }
     Slide {
         slide_type: Arc::from(slide_type),
@@ -112,10 +107,7 @@ fn make_slide_mixed(
 ) -> Slide {
     let mut field_map = OrderedMap::new();
     for (k, v) in str_fields {
-        field_map.insert(
-            Arc::from(k),
-            FieldValue::Literal(Value::Str(Arc::from(v))),
-        );
+        field_map.insert(Arc::from(k), FieldValue::Literal(Value::Str(Arc::from(v))));
     }
     for (k, v) in int_fields {
         field_map.insert(Arc::from(k), FieldValue::Literal(Value::Int(v)));
@@ -189,7 +181,7 @@ fn make_weighted_composite_slide(
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// BC-1.17.001 AC-001: `"status"` is registered in `SlideTypeRegistry::default()`.
-/// Verifies id(), required_fields() (title, label — exactly 2), and layout_name().
+/// Verifies `id()`, `required_fields()` (title, label — exactly 2), and `layout_name()`.
 #[test]
 fn test_BC_1_17_001_ac001_status_keyword_registered() {
     let reg = SlideTypeRegistry::default();
@@ -197,9 +189,17 @@ fn test_BC_1_17_001_ac001_status_keyword_registered() {
         .lookup_by_keyword("status")
         .expect("'status' must be registered in SlideTypeRegistry::default()");
 
-    assert_eq!(st.id(), "status", "StatusSlideType::id() must return \"status\"");
+    assert_eq!(
+        st.id(),
+        "status",
+        "StatusSlideType::id() must return \"status\""
+    );
 
-    let req: Vec<&str> = st.required_fields().iter().map(|f| f.name.as_ref()).collect();
+    let req: Vec<&str> = st
+        .required_fields()
+        .iter()
+        .map(|f| f.name.as_ref())
+        .collect();
     assert!(
         req.contains(&"title"),
         "status required_fields must include 'title'; got: {req:?}"
@@ -242,7 +242,7 @@ fn test_BC_1_17_001_ac002_status_lay_out_ok_with_valid_fields() {
     );
 }
 
-/// BC-1.17.001 AC-002 geometry: lay_out() produces at least 2 frames —
+/// BC-1.17.001 AC-002 geometry: `lay_out()` produces at least 2 frames —
 /// one color indicator (Generic role) and one body frame (Body role).
 ///
 /// FAILS at Red Gate: `lay_out()` is `todo!()` → panic.
@@ -266,7 +266,10 @@ fn test_BC_1_17_001_ac002_status_lay_out_geometry_two_frames() {
         .frames
         .iter()
         .any(|f| f.region_role == Some(RegionRole::Body));
-    assert!(has_body, "must have at least one Body-role frame for the label");
+    assert!(
+        has_body,
+        "must have at least one Body-role frame for the label"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -292,7 +295,7 @@ fn test_BC_1_17_001_ac003_status_lay_out_missing_label_errors() {
         LayoutError::MissingRequiredField { slide_type, field } => {
             assert_eq!(slide_type, "status", "slide_type in error must be 'status'");
             assert_eq!(field, "label", "missing field must be 'label'");
-        }
+        },
         other => panic!(
             "Expected LayoutError::MissingRequiredField {{ field: 'label' }}, got: {other:?}"
         ),
@@ -324,7 +327,7 @@ fn test_BC_1_17_001_ac004_status_lay_out_empty_label_errors() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// BC-1.17.002 AC-007: `"progress_bar"` is registered.
-/// Verifies id(), required_fields() (title, label, value — exactly 3).
+/// Verifies `id()`, `required_fields()` (title, label, value — exactly 3).
 #[test]
 fn test_BC_1_17_002_ac007_progress_bar_keyword_registered() {
     let reg = SlideTypeRegistry::default();
@@ -334,11 +337,19 @@ fn test_BC_1_17_002_ac007_progress_bar_keyword_registered() {
 
     assert_eq!(st.id(), "progress_bar");
 
-    let req: Vec<&str> = st.required_fields().iter().map(|f| f.name.as_ref()).collect();
+    let req: Vec<&str> = st
+        .required_fields()
+        .iter()
+        .map(|f| f.name.as_ref())
+        .collect();
     assert!(req.contains(&"title"), "must include 'title'; got: {req:?}");
     assert!(req.contains(&"label"), "must include 'label'; got: {req:?}");
     assert!(req.contains(&"value"), "must include 'value'; got: {req:?}");
-    assert_eq!(req.len(), 3, "must have exactly 3 required fields; got {req:?}");
+    assert_eq!(
+        req.len(),
+        3,
+        "must have exactly 3 required fields; got {req:?}"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -365,7 +376,7 @@ fn test_BC_1_17_002_ac008_progress_bar_lay_out_ok_with_valid_fields() {
     );
 }
 
-/// BC-1.17.002 AC-008 geometry: lay_out() produces at least 3 frames —
+/// BC-1.17.002 AC-008 geometry: `lay_out()` produces at least 3 frames —
 /// title (Title) + bar background (Generic) + label text (Body).
 ///
 /// FAILS at Red Gate: `lay_out()` is `todo!()` → panic.
@@ -410,7 +421,11 @@ fn test_BC_1_17_002_ac008_progress_bar_lay_out_geometry_three_frames() {
 #[test]
 fn test_BC_1_17_002_ac009_progress_bar_missing_label_errors() {
     let st = ProgressBarSlideType::new();
-    let slide = make_slide_mixed("progress_bar", vec![("title", "Sprint 4")], vec![("value", 75)]);
+    let slide = make_slide_mixed(
+        "progress_bar",
+        vec![("title", "Sprint 4")],
+        vec![("value", 75)],
+    );
     let result = st.lay_out(&slide, &stub_brand(), stub_canvas());
 
     assert!(result.is_err(), "missing label must return Err");
@@ -418,7 +433,7 @@ fn test_BC_1_17_002_ac009_progress_bar_missing_label_errors() {
         LayoutError::MissingRequiredField { slide_type, field } => {
             assert_eq!(slide_type, "progress_bar");
             assert_eq!(field, "label");
-        }
+        },
         other => panic!("Expected MissingRequiredField{{label}}, got: {other:?}"),
     }
 }
@@ -497,14 +512,14 @@ fn test_BC_1_17_002_ac012_progress_bar_value_101_errors() {
             assert_eq!(slide_type, "progress_bar");
             assert_eq!(field, "value");
             assert!(
-                expected_type.contains("0") && expected_type.contains("100"),
+                expected_type.contains('0') && expected_type.contains("100"),
                 "expected_type must describe [0,100]; got: {expected_type}"
             );
             assert!(
                 actual_type.contains("101"),
                 "actual_type must mention 101; got: {actual_type}"
             );
-        }
+        },
         other => panic!("Expected FieldTypeMismatch for value=101, got: {other:?}"),
     }
 }
@@ -529,13 +544,15 @@ fn test_BC_1_17_002_ac013_progress_bar_value_minus1_errors() {
 
     assert!(result.is_err(), "value=-1 must return Err; got Ok");
     match result.unwrap_err() {
-        LayoutError::FieldTypeMismatch { field, actual_type, .. } => {
+        LayoutError::FieldTypeMismatch {
+            field, actual_type, ..
+        } => {
             assert_eq!(field, "value");
             assert!(
                 actual_type.contains("-1"),
                 "actual_type must mention -1; got: {actual_type}"
             );
-        }
+        },
         other => panic!("Expected FieldTypeMismatch for value=-1, got: {other:?}"),
     }
 }
@@ -546,7 +563,7 @@ fn test_BC_1_17_002_ac013_progress_bar_value_minus1_errors() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// BC-1.17.003 AC-014: `"weighted_composite"` is registered.
-/// Verifies id(), required_fields() (title, label, components — exactly 3).
+/// Verifies `id()`, `required_fields()` (title, label, components — exactly 3).
 #[test]
 fn test_BC_1_17_003_ac014_weighted_composite_keyword_registered() {
     let reg = SlideTypeRegistry::default();
@@ -556,11 +573,19 @@ fn test_BC_1_17_003_ac014_weighted_composite_keyword_registered() {
 
     assert_eq!(st.id(), "weighted_composite");
 
-    let req: Vec<&str> = st.required_fields().iter().map(|f| f.name.as_ref()).collect();
+    let req: Vec<&str> = st
+        .required_fields()
+        .iter()
+        .map(|f| f.name.as_ref())
+        .collect();
     assert!(req.contains(&"title"), "must include 'title'");
     assert!(req.contains(&"label"), "must include 'label'");
     assert!(req.contains(&"components"), "must include 'components'");
-    assert_eq!(req.len(), 3, "must have exactly 3 required fields; got {req:?}");
+    assert_eq!(
+        req.len(),
+        3,
+        "must have exactly 3 required fields; got {req:?}"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -585,7 +610,7 @@ fn test_BC_1_17_003_ac015_weighted_composite_lay_out_ok_with_valid_fields() {
     );
 }
 
-/// BC-1.17.003 AC-015 geometry: lay_out() produces at least 7 frames —
+/// BC-1.17.003 AC-015 geometry: `lay_out()` produces at least 7 frames —
 /// title + aggregate label + 5 component row slots.
 ///
 /// FAILS at Red Gate: `lay_out()` is `todo!()` → panic.
@@ -605,9 +630,15 @@ fn test_BC_1_17_003_ac015_weighted_composite_lay_out_geometry_min_frames() {
         "weighted_composite lay_out() must produce >= 7 frames; got {}",
         result.frames.len()
     );
-    let has_title = result.frames.iter().any(|f| f.region_role == Some(RegionRole::Title));
+    let has_title = result
+        .frames
+        .iter()
+        .any(|f| f.region_role == Some(RegionRole::Title));
     assert!(has_title, "must have Title-role frame");
-    let has_body = result.frames.iter().any(|f| f.region_role == Some(RegionRole::Body));
+    let has_body = result
+        .frames
+        .iter()
+        .any(|f| f.region_role == Some(RegionRole::Body));
     assert!(has_body, "must have Body-role frame (aggregate label)");
 }
 
@@ -631,7 +662,7 @@ fn test_BC_1_17_003_ac016_weighted_composite_missing_top_label_errors() {
         LayoutError::MissingRequiredField { slide_type, field } => {
             assert_eq!(slide_type, "weighted_composite");
             assert_eq!(field, "label");
-        }
+        },
         other => panic!("Expected MissingRequiredField{{label}}, got: {other:?}"),
     }
 }
@@ -642,7 +673,7 @@ fn test_BC_1_17_003_ac016_weighted_composite_missing_top_label_errors() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// BC-1.17.003 AC-017: Component missing `label` sub-field returns Err.
-/// Error must identify "weighted_composite" and reference "label" or "component".
+/// Error must identify `"weighted_composite"` and reference "label" or "component".
 ///
 /// FAILS at Red Gate: `lay_out()` is `todo!()` → panic.
 #[test]
@@ -654,23 +685,19 @@ fn test_BC_1_17_003_ac017_weighted_composite_missing_component_label_errors() {
     let result = st.lay_out(&slide, &stub_brand(), stub_canvas());
 
     assert!(result.is_err(), "component missing label must return Err");
-    match result.unwrap_err() {
-        LayoutError::MissingRequiredField { slide_type, field } => {
-            assert_eq!(slide_type, "weighted_composite");
-            assert!(
-                field.contains("label") || field.contains("component"),
-                "field must reference label/component; got: {field}"
-            );
-        }
-        LayoutError::FieldTypeMismatch { slide_type, field, .. } => {
-            assert_eq!(slide_type, "weighted_composite");
-            assert!(
-                field.contains("label") || field.contains("component"),
-                "field must reference label/component; got: {field}"
-            );
-        }
+    let err = result.unwrap_err();
+    let (err_slide_type, err_field) = match &err {
+        LayoutError::MissingRequiredField { slide_type, field }
+        | LayoutError::FieldTypeMismatch {
+            slide_type, field, ..
+        } => (slide_type.as_str(), field.as_str()),
         other => panic!("Expected error for missing component label, got: {other:?}"),
-    }
+    };
+    assert_eq!(err_slide_type, "weighted_composite");
+    assert!(
+        err_field.contains("label") || err_field.contains("component"),
+        "field must reference label/component; got: {err_field}"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -719,14 +746,14 @@ fn test_BC_1_17_003_ac020_weighted_composite_score_101_errors() {
                 "field must identify score/component; got: {field}"
             );
             assert!(
-                expected_type.contains("0") && expected_type.contains("100"),
+                expected_type.contains('0') && expected_type.contains("100"),
                 "expected_type must describe [0,100]; got: {expected_type}"
             );
             assert!(
                 actual_type.contains("101"),
                 "actual_type must mention 101; got: {actual_type}"
             );
-        }
+        },
         other => panic!("Expected FieldTypeMismatch for score=101, got: {other:?}"),
     }
 }
@@ -748,13 +775,15 @@ fn test_BC_1_17_003_ac021_weighted_composite_weight_zero_errors() {
 
     assert!(result.is_err(), "weight=0 must return Err");
     match result.unwrap_err() {
-        LayoutError::FieldTypeMismatch { slide_type, field, .. } => {
+        LayoutError::FieldTypeMismatch {
+            slide_type, field, ..
+        } => {
             assert_eq!(slide_type, "weighted_composite");
             assert!(
                 field.contains("weight") || field.contains("component"),
                 "field must identify weight/component; got: {field}"
             );
-        }
+        },
         other => panic!("Expected FieldTypeMismatch for weight=0, got: {other:?}"),
     }
 }
@@ -765,11 +794,11 @@ fn test_BC_1_17_003_ac021_weighted_composite_weight_zero_errors() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// AC-023 / F-G3-HIGH-003: All three types are registered in `SlideTypeRegistry`.
-/// `lookup_by_keyword` returns `Some` — the UnknownSlideType error path is closed.
+/// `lookup_by_keyword` returns `Some` — the `UnknownSlideType` error path is closed.
 ///
-/// The structural registration check does NOT call lay_out(). This half of AC-023
-/// passes at Red Gate (stubs are wired). The lay_out()-calling half is covered by
-/// the happy-path tests above (which fail at Red Gate with todo!() panic).
+/// The structural registration check does NOT call `lay_out()`. This half of AC-023
+/// passes at Red Gate (stubs are wired). The `lay_out()`-calling half is covered by
+/// the happy-path tests above (which fail at Red Gate with `todo!()` panic).
 #[test]
 fn test_BC_1_17_001_ac023_all_three_types_registered_not_unknown() {
     let reg = SlideTypeRegistry::default();
@@ -804,15 +833,14 @@ fn test_BC_1_17_001_ac023_all_three_types_registered_not_unknown() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// After STORY-087: `SlideTypeRegistry::default()` must register exactly 34 types
-/// (31 original + status + progress_bar + weighted_composite).
-/// `severity_cards` is a keyword but is NOT registered as a SlideType impl.
+/// (31 original + status + `progress_bar` + `weighted_composite`).
+/// `severity_cards` is a keyword but is NOT registered as a `SlideType` impl.
 #[test]
 fn test_BC_1_17_001_registration_count_34_after_story_087() {
     let reg = SlideTypeRegistry::default();
     let count = reg.all_keywords().len();
     assert_eq!(
-        count,
-        34,
+        count, 34,
         "SlideTypeRegistry::default must register exactly 34 slide types after STORY-087; \
          got {count}"
     );

@@ -170,18 +170,15 @@ impl SlideType for WeightedCompositeSlideType {
         let mut errors: Vec<LayoutError> = Vec::new();
 
         for (idx, comp_val) in components.iter().enumerate() {
-            let comp_map = match comp_val {
-                Value::Map(m) => m,
-                _ => {
-                    // Non-map component — report and continue.
-                    errors.push(LayoutError::FieldTypeMismatch {
-                        slide_type: "weighted_composite".to_owned(),
-                        field: format!("components[{idx}]"),
-                        expected_type: "Map".to_owned(),
-                        actual_type: "non-Map value".to_owned(),
-                    });
-                    continue;
-                },
+            let Value::Map(comp_map) = comp_val else {
+                // Non-map component — report and continue.
+                errors.push(LayoutError::FieldTypeMismatch {
+                    slide_type: "weighted_composite".to_owned(),
+                    field: format!("components[{idx}]"),
+                    expected_type: "Map".to_owned(),
+                    actual_type: "non-Map value".to_owned(),
+                });
+                continue;
             };
 
             // BC-1.17.003 postcondition 4 / AC-017: per-component label is required.
@@ -289,7 +286,7 @@ impl SlideType for WeightedCompositeSlideType {
             frames.push(Frame {
                 bbox: BoundingBox {
                     x: Emu(457_200),
-                    y: Emu(row_base_y.0 + i64::try_from(i).unwrap_or(i as i64) * row_gap.0),
+                    y: Emu(row_base_y.0 + i64::from(i) * row_gap.0),
                     width: Emu(8_229_600),
                     height: row_height,
                 },
