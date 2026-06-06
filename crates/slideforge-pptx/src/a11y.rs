@@ -126,6 +126,9 @@ impl AltTextEmbedder {
                         Some(AltDecision::Provided(s.clone()))
                     },
                     slideforge_types::AltText::Decorative => Some(AltDecision::Decorative),
+                    // STORY-086 stub: Unspecified = pipeline placeholder; treat as
+                    // Decorative (Artifact path) until Stage 2b threads real alt.
+                    slideforge_types::AltText::Unspecified => Some(AltDecision::Decorative),
                 },
                 // Text frames and non-visual frames do not get descr attributes.
                 FrameContent::Title(_)

@@ -209,9 +209,14 @@ pub fn layout_shapes(
         let alt = match &shape.alt {
             Some(slideforge_types::AltText::Provided(s)) => Some(Arc::clone(s)),
             Some(slideforge_types::AltText::Decorative) | None => None,
+            // STORY-086 stub: Unspecified means no author alt was threaded; treat as None.
+            Some(slideforge_types::AltText::Unspecified) => None,
         };
-        let decorative =
-            shape.decorative || matches!(&shape.alt, Some(slideforge_types::AltText::Decorative));
+        let decorative = shape.decorative
+            || matches!(
+                &shape.alt,
+                Some(slideforge_types::AltText::Decorative)
+            );
 
         // Pass fill and text from ShapeSpec directly (BC-3.04.001 v1.5.2 schema).
         let fill = shape.fill.clone();
@@ -1827,7 +1832,7 @@ mod tests {
         // Extract values from spec (mirroring layout_shapes extraction at shapes.rs:215-220).
         let alt = match &spec.alt {
             Some(AltText::Provided(s)) => Some(Arc::clone(s)),
-            Some(AltText::Decorative) | None => None,
+            Some(AltText::Decorative) | Some(AltText::Unspecified) | None => None,
         };
         let decorative = spec.decorative || matches!(&spec.alt, Some(AltText::Decorative));
 
@@ -1854,6 +1859,11 @@ mod tests {
             slideforge_types::AltText::Decorative => {
                 panic!(
                     "decorative MUST NOT win when alt is present (BC-3.04.001 v1.5.2 Invariant 11)"
+                );
+            },
+            slideforge_types::AltText::Unspecified => {
+                panic!(
+                    "Unspecified MUST NOT be produced when alt is Provided (Invariant 11)"
                 );
             },
         }

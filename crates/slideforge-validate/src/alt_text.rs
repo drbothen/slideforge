@@ -213,6 +213,20 @@ impl Validator for AltTextValidator {
                     } => {
                         // AltText::Decorative on a Chart frame = missing alt text
                         // (structural placeholder; no ContentBlock threaded it yet).
+                        // NOTE (STORY-086 stub): This arm fires on Decorative.
+                        // After STORY-086 implementation, this arm will be removed
+                        // and replaced by an AltText::Unspecified arm.
+                        diagnostics.push(make_post_layout_error(
+                            "chart",
+                            slide_type,
+                            display_slide,
+                        ));
+                    },
+                    FrameContent::Chart {
+                        alt: AltText::Unspecified,
+                    } => {
+                        // STORY-086 stub: Unspecified arm added for compilation.
+                        // Semantics will be wired in implementation phase.
                         diagnostics.push(make_post_layout_error(
                             "chart",
                             slide_type,
@@ -228,10 +242,31 @@ impl Validator for AltTextValidator {
                             display_slide,
                         ));
                     },
+                    FrameContent::Image {
+                        alt: AltText::Unspecified,
+                    } => {
+                        // STORY-086 stub: Unspecified arm added for compilation.
+                        diagnostics.push(make_post_layout_error(
+                            "image",
+                            slide_type,
+                            display_slide,
+                        ));
+                    },
                     FrameContent::Diagram {
                         alt: AltText::Decorative,
                         ..
                     } => {
+                        diagnostics.push(make_post_layout_error(
+                            "diagram",
+                            slide_type,
+                            display_slide,
+                        ));
+                    },
+                    FrameContent::Diagram {
+                        alt: AltText::Unspecified,
+                        ..
+                    } => {
+                        // STORY-086 stub: Unspecified arm added for compilation.
                         diagnostics.push(make_post_layout_error(
                             "diagram",
                             slide_type,
@@ -317,6 +352,9 @@ fn check_visual_element(
         None => true,
         Some(AltText::Provided(s)) => is_blank(s),
         Some(AltText::Decorative) => false,
+        // STORY-086 stub: Unspecified on ContentBlock.alt means the author did not
+        // supply alt text. Treat as missing (same as None).
+        Some(AltText::Unspecified) => true,
     };
 
     if is_missing {

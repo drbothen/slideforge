@@ -139,12 +139,27 @@ impl NormalizedDiagramSvg {
 /// - `Provided(s)` — non-empty, non-whitespace alt text supplied by the author.
 /// - `Decorative` — element explicitly marked `decorative: true`; the validator
 ///   emits an empty alt string and a PDF Artifact tag in export.
+/// - `Unspecified` — structural pipeline placeholder: no author alt-text data has
+///   been threaded into this frame yet. Used exclusively by `regions.rs` for
+///   structural placeholders and by `thread_media_alt_into_frames` when a
+///   `ContentBlock` has `alt = None`. MUST NOT be used to mean "the author chose
+///   no alt text." The post-layout validator (`AltTextValidator::validate_post_layout`)
+///   treats `Unspecified` as a missing-alt error (`E-A11-001`) in strict mode.
+///   See ADR-019 Decision 4.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AltText {
     /// Non-empty, non-whitespace alt text provided by the author.
     Provided(Arc<str>),
     /// Element explicitly marked `decorative: true`.
     Decorative,
+    /// Structural pipeline placeholder: no author alt-text data has been threaded.
+    ///
+    /// Produced by `regions.rs` frame construction and by `thread_media_alt_into_frames`
+    /// when the corresponding `ContentBlock` has `alt = None`. Triggers `E-A11-001`
+    /// in the post-layout validator when strict mode is active.
+    ///
+    /// See ADR-019 Decision 4 for the AltText state machine.
+    Unspecified,
 }
 
 /// Specification for a chart content block.
