@@ -619,13 +619,12 @@ fn test_bc_4_01_001_ac001_pptx_title_in_title_placeholder_not_body() {
 
     // (b) No non-title shape must contain "My Title".
     for (i, sp) in shapes.iter().enumerate() {
-        if !sp_is_title_placeholder(sp) && sp.contains("My Title") {
-            panic!(
-                "AC-001 CO-LOCATION (b): 'My Title' found in a non-title <p:sp> \
-                 (shape index {i}). Text must appear ONLY inside the title placeholder. \
-                 Offending shape XML: {sp}"
-            );
-        }
+        assert!(
+            sp_is_title_placeholder(sp) || !sp.contains("My Title"),
+            "AC-001 CO-LOCATION (b): 'My Title' found in a non-title <p:sp> \
+             (shape index {i}). Text must appear ONLY inside the title placeholder. \
+             Offending shape XML: {sp}"
+        );
     }
 }
 
@@ -661,9 +660,7 @@ fn test_bc_4_02_001_ac003_docx_title_in_heading1_with_pstyle() {
     let opts = brand.build_options("docx", false);
 
     let output = slideforge::build(source, &opts).unwrap_or_else(|e| {
-        panic!(
-            "AC-003 CO-LOCATION: build() with title slide (docx) must return Ok; got Err: {e:?}"
-        )
+        panic!("AC-003 CO-LOCATION: build() with title slide (docx) must return Ok; got Err: {e:?}")
     });
 
     let mut archive = open_zip(&output.bytes, "AC-003-colocation");
@@ -682,9 +679,7 @@ fn test_bc_4_02_001_ac003_docx_title_in_heading1_with_pstyle() {
     // Both conditions must hold within the SAME <w:p>…</w:p> block.
     let heading1_with_title: Option<&str> = paragraphs
         .iter()
-        .find(|wp| {
-            wp.contains(r#"w:val="Heading1""#) && wp.contains("Report Title")
-        })
+        .find(|wp| wp.contains(r#"w:val="Heading1""#) && wp.contains("Report Title"))
         .map(String::as_str);
 
     assert!(
@@ -730,7 +725,9 @@ fn test_bc_4_01_001_ac019_body_text_in_body_placeholder_not_title() {
     let opts = brand.build_options("pptx", false);
 
     let output = slideforge::build(&source, &opts).unwrap_or_else(|e| {
-        panic!("AC-019 CO-LOCATION: build() with content slide (pptx) must return Ok; got Err: {e:?}")
+        panic!(
+            "AC-019 CO-LOCATION: build() with content slide (pptx) must return Ok; got Err: {e:?}"
+        )
     });
 
     let mut archive = open_zip(&output.bytes, "AC-019-colocation");
@@ -987,11 +984,16 @@ fn test_bc_4_02_001_ac022_docx_subtitle_in_heading2() {
 fn extract_sp_blocks(xml: &str) -> Vec<String> {
     let mut blocks = Vec::new();
     let mut remaining = xml;
-    while let Some(start) = remaining.find("<p:sp>").or_else(|| remaining.find("<p:sp ")) {
+    while let Some(start) = remaining
+        .find("<p:sp>")
+        .or_else(|| remaining.find("<p:sp "))
+    {
         // Find the opening tag end (might be <p:sp> or <p:sp attr="...">)
         let tag_end = remaining[start..].find('>').map(|i| start + i + 1);
         let Some(tag_end) = tag_end else { break };
-        let Some(end_offset) = remaining[tag_end..].find("</p:sp>") else { break };
+        let Some(end_offset) = remaining[tag_end..].find("</p:sp>") else {
+            break;
+        };
         let block_end = tag_end + end_offset + "</p:sp>".len();
         blocks.push(remaining[start..block_end].to_owned());
         remaining = &remaining[block_end..];
@@ -1017,7 +1019,9 @@ fn extract_wp_blocks(xml: &str) -> Vec<String> {
     while let Some(start) = remaining.find("<w:p>").or_else(|| remaining.find("<w:p ")) {
         let tag_end = remaining[start..].find('>').map(|i| start + i + 1);
         let Some(tag_end) = tag_end else { break };
-        let Some(end_offset) = remaining[tag_end..].find("</w:p>") else { break };
+        let Some(end_offset) = remaining[tag_end..].find("</w:p>") else {
+            break;
+        };
         let block_end = tag_end + end_offset + "</w:p>".len();
         blocks.push(remaining[start..block_end].to_owned());
         remaining = &remaining[block_end..];

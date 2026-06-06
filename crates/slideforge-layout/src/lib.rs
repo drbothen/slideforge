@@ -74,7 +74,16 @@ pub use types::{
 #[allow(
     clippy::missing_docs_in_private_items,
     clippy::unwrap_used,
-    clippy::expect_used
+    clippy::expect_used,
+    // doc_markdown: EMU coordinate examples in test doc-comments use x=NNN, y=NNN
+    // patterns that clippy flags as missing backticks. These are test-only doc
+    // comments serving as Red Gate documentation — formatting them as code snippets
+    // would harm readability without adding correctness value.
+    clippy::doc_markdown,
+    // unused_variables: some test doc-level bindings (e.g., page_height) are
+    // retained for reference clarity even when the variable is not read in an
+    // assertion. Test-local documentation bindings are intentional.
+    unused_variables
 )]
 mod tests {
     use std::sync::Arc;
