@@ -745,3 +745,244 @@ fn test_bc_1_16_001_textblock_tag_field_exists_and_defaults_to_untagged() {
         "TextBlock.tag must carry TextTag::Title when set by Stage 2b for title fields"
     );
 }
+
+// ─── F-086-P5-CRIT-001: decorative-first precedence when both `decorative: true`
+//     AND `alt "..."` are set ─────────────────────────────────────────────────────
+
+/// F-086-P5-CRIT-001 / BC-1.16.001 PC-12 / EC-004 — decorative-first precedence.
+///
+/// Canonical outcome (architect pass-5 adjudication): when BOTH `decorative: true`
+/// AND a non-empty `alt "..."` are present, `resolve_alt` MUST return
+/// `AltText::Decorative` (decorative wins). A `tracing::warn!(code = "W-A11-002")`
+/// is also expected to be emitted by the fixed implementation (not asserted here —
+/// no tracing capture utility exists in this crate; the load-bearing assertion is
+/// the `AltText::Decorative` outcome).
+///
+/// ## Red Gate
+///
+/// FAILS on current HEAD 2c677d97: `resolve_alt` is alt-first — it matches
+/// `Some(alt_str)` BEFORE checking `is_decorative`, so the result is
+/// `AltText::Provided("Some description")`. This test will fail with:
+/// `expected AltText::Decorative, got AltText::Provided("Some description")`.
+///
+/// PASSES after the implementer fixes `resolve_alt` to be decorative-first.
+///
+/// ## Log assertion
+///
+/// No W-A11-002 log assertion is added. The crate has no tracing capture utility
+/// (`tracing_test` / `tracing_subscriber::with_default` / similar). Adding a flaky
+/// log-scrape would violate LESSON-17. The load-bearing assertion is purely
+/// behavioural: `spec.alt == Some(AltText::Decorative)`.
+///
+/// Traces: F-086-P5-CRIT-001; BC-1.16.001 PC-12; EC-004.
+#[test]
+fn test_bc_1_16_001_f086_p5_crit001_both_set_chart_decorative_wins() {
+    // F-086-P5-CRIT-001 / BC-1.16.001 PC-12 / EC-004 — decorative-first precedence.
+    //
+    // Setup: chart slide with BOTH `decorative: true` AND `alt "Some description"`.
+    // Expected: ContentBlock::Chart carries AltText::Decorative (decorative wins).
+    // Current code: alt-first → returns AltText::Provided("Some description") → FAILS.
+    let slide = with_alt(
+        with_chart_type(make_slide("chart"), "bar"),
+        "Some description",
+    );
+    // Add decorative: true
+    let mut slide = slide;
+    slide.fields.insert(
+        Arc::from("decorative"),
+        FieldValue::Literal(Value::Bool(true)),
+    );
+
+    let mut deck = make_deck(vec![slide]);
+    thread_fields_to_blocks(&mut deck);
+
+    let chart_blocks: Vec<_> = deck.slides[0]
+        .blocks
+        .iter()
+        .filter(|b| matches!(b.content, ContentBlock::Chart(_)))
+        .collect();
+
+    assert_eq!(
+        chart_blocks.len(),
+        1,
+        "F-086-P5-CRIT-001: chart slide with both decorative+alt must still produce \
+         ContentBlock::Chart; got {} chart blocks",
+        chart_blocks.len()
+    );
+
+    if let ContentBlock::Chart(spec) = &chart_blocks[0].content {
+        // RED GATE: current code returns AltText::Provided("Some description").
+        // After fix: decorative-first → AltText::Decorative.
+        assert_eq!(
+            spec.alt,
+            Some(AltText::Decorative),
+            "F-086-P5-CRIT-001 RED GATE: when both `decorative: true` AND `alt \"Some description\"` \
+             are set, the canonical outcome is AltText::Decorative (decorative-first, architect \
+             pass-5 adjudication). Current code (alt-first) returns AltText::Provided. \
+             BC-1.16.001 PC-12 / EC-004. got: {:?}",
+            spec.alt
+        );
+    } else {
+        panic!(
+            "F-086-P5-CRIT-001: blocks[0] must be ContentBlock::Chart; got {:?}",
+            chart_blocks.first().map(|b| b.content.kind_name())
+        );
+    }
+}
+
+/// F-086-P5-CRIT-001 variant — Image slide: both-set → `AltText::Decorative`.
+///
+/// Same precedence rule as the Chart variant. Tests the `ContentBlock::Image` arm
+/// of `thread_fields_to_blocks` independently.
+///
+/// RED GATE: current alt-first `resolve_alt` → `AltText::Provided` → assertion fails.
+///
+/// Traces: F-086-P5-CRIT-001; BC-1.16.001 PC-12; EC-004.
+#[test]
+fn test_bc_1_16_001_f086_p5_crit001_both_set_image_decorative_wins() {
+    // F-086-P5-CRIT-001 Image variant: image slide with both decorative+alt.
+    let mut slide = make_slide("image");
+    slide.fields.insert(
+        Arc::from("src"),
+        FieldValue::Literal(Value::Str(Arc::from("logo.png"))),
+    );
+    slide.fields.insert(
+        Arc::from("alt"),
+        FieldValue::Literal(Value::Str(Arc::from("Company logo"))),
+    );
+    slide.fields.insert(
+        Arc::from("decorative"),
+        FieldValue::Literal(Value::Bool(true)),
+    );
+
+    let mut deck = make_deck(vec![slide]);
+    thread_fields_to_blocks(&mut deck);
+
+    let image_blocks: Vec<_> = deck.slides[0]
+        .blocks
+        .iter()
+        .filter(|b| matches!(b.content, ContentBlock::Image(_)))
+        .collect();
+
+    assert_eq!(
+        image_blocks.len(),
+        1,
+        "F-086-P5-CRIT-001 Image: image slide with both decorative+alt must produce \
+         ContentBlock::Image; got {} image blocks",
+        image_blocks.len()
+    );
+
+    if let ContentBlock::Image(spec) = &image_blocks[0].content {
+        assert_eq!(
+            spec.alt,
+            Some(AltText::Decorative),
+            "F-086-P5-CRIT-001 Image RED GATE: both decorative+alt on image slide must \
+             yield AltText::Decorative (decorative-first). Current code: alt-first → \
+             AltText::Provided(\"Company logo\"). BC-1.16.001 PC-12. got: {:?}",
+            spec.alt
+        );
+    } else {
+        panic!(
+            "F-086-P5-CRIT-001 Image: blocks must include ContentBlock::Image; got {:?}",
+            image_blocks.first().map(|b| b.content.kind_name())
+        );
+    }
+}
+
+/// F-086-P5-CRIT-001 variant — Diagram slide: both-set → `AltText::Decorative`.
+///
+/// Same precedence rule applied to the `ContentBlock::Diagram` arm.
+///
+/// RED GATE: current alt-first `resolve_alt` → `AltText::Provided` → assertion fails.
+///
+/// Traces: F-086-P5-CRIT-001; BC-1.16.001 PC-12; EC-004.
+#[test]
+fn test_bc_1_16_001_f086_p5_crit001_both_set_diagram_decorative_wins() {
+    // F-086-P5-CRIT-001 Diagram variant: diagram slide with both decorative+alt.
+    let mut slide = make_slide("diagram");
+    slide.fields.insert(
+        Arc::from("source"),
+        FieldValue::Literal(Value::Str(Arc::from("graph TD; A-->B"))),
+    );
+    slide.fields.insert(
+        Arc::from("alt"),
+        FieldValue::Literal(Value::Str(Arc::from("Flowchart showing A to B"))),
+    );
+    slide.fields.insert(
+        Arc::from("decorative"),
+        FieldValue::Literal(Value::Bool(true)),
+    );
+
+    let mut deck = make_deck(vec![slide]);
+    thread_fields_to_blocks(&mut deck);
+
+    let diagram_blocks: Vec<_> = deck.slides[0]
+        .blocks
+        .iter()
+        .filter(|b| matches!(b.content, ContentBlock::Diagram(_)))
+        .collect();
+
+    assert_eq!(
+        diagram_blocks.len(),
+        1,
+        "F-086-P5-CRIT-001 Diagram: diagram slide with both decorative+alt must produce \
+         ContentBlock::Diagram; got {} diagram blocks",
+        diagram_blocks.len()
+    );
+
+    if let ContentBlock::Diagram(spec) = &diagram_blocks[0].content {
+        assert_eq!(
+            spec.alt,
+            Some(AltText::Decorative),
+            "F-086-P5-CRIT-001 Diagram RED GATE: both decorative+alt on diagram slide must \
+             yield AltText::Decorative (decorative-first). Current code: alt-first → \
+             AltText::Provided(\"Flowchart showing A to B\"). BC-1.16.001 PC-12. got: {:?}",
+            spec.alt
+        );
+    } else {
+        panic!(
+            "F-086-P5-CRIT-001 Diagram: blocks must include ContentBlock::Diagram; got {:?}",
+            diagram_blocks.first().map(|b| b.content.kind_name())
+        );
+    }
+}
+
+/// Regression guard: `decorative: true` alone (no alt) STILL produces `AltText::Decorative`.
+///
+/// This is NOT a Red Gate test — it verifies existing correct behavior is preserved
+/// after the fix. The alt-first change must not regress the decorative-only case.
+///
+/// Traces: BC-1.16.001 invariant 3 (decorative-only case must remain correct).
+#[test]
+fn test_bc_1_16_001_decorative_only_still_produces_decorative_after_fix() {
+    // Regression guard: decorative-only (no alt) must still yield AltText::Decorative.
+    // This PASSES on current code and must continue to pass after the decorative-first fix.
+    let mut slide = make_slide("chart");
+    slide.fields.insert(
+        Arc::from("chart_type"),
+        FieldValue::Literal(Value::Str(Arc::from("pie"))),
+    );
+    slide.fields.insert(
+        Arc::from("decorative"),
+        FieldValue::Literal(Value::Bool(true)),
+    );
+    // No "alt" field.
+
+    let mut deck = make_deck(vec![slide]);
+    thread_fields_to_blocks(&mut deck);
+
+    let chart_blocks: Vec<_> = deck.slides[0]
+        .blocks
+        .iter()
+        .filter(|b| matches!(b.content, ContentBlock::Chart(_)))
+        .collect();
+    assert_eq!(chart_blocks.len(), 1, "decorative chart must produce ContentBlock::Chart");
+    if let ContentBlock::Chart(spec) = &chart_blocks[0].content {
+        assert_eq!(
+            spec.alt,
+            Some(AltText::Decorative),
+            "decorative-only (no alt) must yield AltText::Decorative; got {:?}",
+            spec.alt
+        );
+    }
+}

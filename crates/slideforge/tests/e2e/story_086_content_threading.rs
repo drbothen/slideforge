@@ -829,9 +829,16 @@ fn test_bc_4_01_001_ac019_body_text_in_body_placeholder_not_title() {
 /// Traces: BC-4.02.001 v1.2 postcondition 10 + invariant 6; BC-1.16.001 postconditions 1, 4.
 #[test]
 fn test_bc_4_02_001_ac020_docx_body_not_in_heading1_paragraph() {
-    // AC-020: body text "Body paragraph text" must NOT be in Heading1.
-    // RED GATE: current code produces TextRun frames without FrameContent::Title/Body →
-    // document_body.rs positional heuristic may put body in Heading1 → FAILS.
+    // AC-020: body text "Body paragraph text" must NOT be in a Heading1 paragraph.
+    // The "Heading" title text MUST be in a Heading1 paragraph.
+    //
+    // Strengthened (F-086-P5-MED-001): uses extract_wp_blocks to verify co-location
+    // constraints at the <w:p> level, not just document-wide substring presence.
+    // This makes the test load-bearing: it pins that body text routes to a Normal
+    // paragraph (no Heading1 pStyle) while the title routes to Heading1.
+    //
+    // Traces: BC-4.02.001 v1.2 postcondition 10 + invariant 6;
+    //         BC-1.16.001 postconditions 1, 4; F-086-P5-MED-001 / AC-020.
     let brand = BrandTmpDir::new("s086_ac020_docx_body");
     let source = fixture_source("story-086-content-slide.sf");
     let opts = brand.build_options("docx", false);
@@ -843,20 +850,62 @@ fn test_bc_4_02_001_ac020_docx_body_not_in_heading1_paragraph() {
     let mut archive = open_zip(&output.bytes, "AC-020");
     let doc_xml = read_zip_entry(&mut archive, "word/document.xml", "AC-020");
 
-    // Assert "Heading" appears in a Heading1 paragraph.
+    // Parse into individual <w:p>…</w:p> paragraph blocks.
+    let paragraphs = extract_wp_blocks(&doc_xml);
     assert!(
-        doc_xml.contains(r#"w:val="Heading1""#),
-        "AC-020: word/document.xml must contain <w:pStyle w:val=\"Heading1\"/> \
-         for the title 'Heading'. BC-4.02.001 v1.2 postcondition 8."
+        !paragraphs.is_empty(),
+        "AC-020: word/document.xml must contain at least one <w:p> block. \
+         doc_xml (first 400 chars): {:.400}",
+        doc_xml
     );
 
-    // Assert "Body paragraph text" appears in the document.
+    // --- (1) Find the <w:p> containing "Body paragraph text" ---
+    // It MUST exist (body field is present in the fixture).
+    let body_paragraph = paragraphs
+        .iter()
+        .find(|wp| wp.contains("Body paragraph text"));
+
     assert!(
-        doc_xml.contains("Body paragraph text"),
-        "AC-020 RED GATE: word/document.xml must contain 'Body paragraph text'. \
-         Current code: no FrameContent::Body produced → DOCX exporter gets no body → \
-         text may be absent → FAILS. BC-4.02.001 v1.2 postcondition 10. \
-         doc_xml (first 600 chars): {:.600}",
+        body_paragraph.is_some(),
+        "AC-020 MED-001: word/document.xml must contain a <w:p> block with text \
+         'Body paragraph text'. \
+         The body field must produce a DOCX paragraph. \
+         Found {} paragraph(s). BC-4.02.001 v1.2 postcondition 10. \
+         doc_xml (first 800 chars): {:.800}",
+        paragraphs.len(),
+        doc_xml
+    );
+
+    // --- (2) The body <w:p> must NOT contain Heading1 style ---
+    // This is the load-bearing assertion: body text → Normal paragraph, NOT Heading1.
+    if let Some(body_wp) = body_paragraph {
+        assert!(
+            !body_wp.contains(r#"w:val="Heading1""#),
+            "AC-020 MED-001 LOAD-BEARING: the <w:p> block containing 'Body paragraph text' \
+             must NOT have <w:pStyle w:val=\"Heading1\"/>. \
+             Body text must route to a Normal-styled paragraph (TextTag::Body → FrameContent::Body \
+             → DOCX Normal), not Heading1. \
+             BC-4.02.001 v1.2 postcondition 10 + invariant 6. \
+             body_paragraph (first 400 chars): {:.400}",
+            body_wp
+        );
+    }
+
+    // --- (3) The title "Heading" MUST be in a Heading1 <w:p> ---
+    // The content-slide fixture has `title "Heading"` on slide 2.
+    // After TextTag::Title routing, it must appear in a Heading1 paragraph.
+    let heading1_with_title = paragraphs
+        .iter()
+        .find(|wp| wp.contains(r#"w:val="Heading1""#) && wp.contains("Heading"));
+
+    assert!(
+        heading1_with_title.is_some(),
+        "AC-020 MED-001: word/document.xml must contain a <w:p> block with BOTH \
+         <w:pStyle w:val=\"Heading1\"/> AND the text 'Heading' within the same paragraph. \
+         The title field must route to Heading1 via TextTag::Title → FrameContent::Title. \
+         Found {} paragraph(s). BC-4.02.001 v1.2 postcondition 8. \
+         doc_xml (first 800 chars): {:.800}",
+        paragraphs.len(),
         doc_xml
     );
 }

@@ -1,7 +1,35 @@
-# STORY-086 fixture: content slide with title + bullets list.
+# STORY-086 fixture: content slide with title + three named bullet items.
 #
 # Used by: AC-007 (bullets → ≥3 text runs in PPTX).
-# Each bullet item must appear as a separate <a:r><a:t> run.
+# Each named item must appear as a separate <a:r><a:t> run.
+#
+# OBS-1 (F-086-P5): The intended DSL form is:
+#
+#   vars:
+#     items: ["Item A", "Item B", "Item C"]
+#
+#   slide content:
+#     title "Agenda"
+#     bullets: items
+#
+# However, the current vars: block parser (value_parser()) does not support
+# list literals — only Template, Num, Float, Bool, and Ident scalars are
+# recognised. The `bullets: items` form with items resolving to Value::List
+# is therefore unreachable from DSL fixture files with the current parser.
+#
+# Until list-literal support is added to the vars: block parser, this fixture
+# uses title/subtitle/body scalar fields to ensure ≥3 <a:r> runs appear in the
+# PPTX output. These three fields each produce a ContentBlock::Text (not
+# ContentBlock::Bullets), so AC-007 is satisfied via the TextRun path rather than
+# the Value::List → ContentBlock::Bullets path.
+#
+# The direct unit test `test_bc_1_16_001_ac007_value_list_produces_content_block_bullets`
+# in crates/slideforge-eval/tests/field_to_block_unit.rs covers the
+# Value::List → ContentBlock::Bullets path programmatically without DSL parsing.
+#
+# When list literal syntax is added to the parser, this fixture should be
+# updated to the @var form above and the e2e AC-007 test should assert
+# ContentBlock::Bullets specifically (via bullet XML structure).
 
 slideforge_version "1"
 lang "en-US"
