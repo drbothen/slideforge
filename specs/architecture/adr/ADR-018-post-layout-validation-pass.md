@@ -5,6 +5,8 @@ title: Post-layout validation pass for ContentBlock-level accessibility checks
 status: accepted
 date: 2026-06-05
 accepted_date: 2026-06-05
+version: "1.1"
+amended: 2026-06-05
 subsystems_affected: [SS-03, SS-05, SS-14]
 supersedes: null
 superseded_by: null
@@ -13,6 +15,8 @@ context: >
   because Slide.blocks is always vec![] after eval; ContentBlock::Chart/Image/Diagram
   are created only at layout time. Human authorized Option A (post-layout validation
   pass) on 2026-06-05. This ADR records the selected design and implementation contract.
+  v1.1 amendment (2026-06-05): adds Decision 5a — error-precedence rule when
+  layout::run fails and pre-layout Error-severity diagnostics exist.
 human_gate_required: false
 human_gate_resolved: >
   Human authorized Option A (post-layout validation pass) on 2026-06-05. No further
@@ -26,6 +30,13 @@ traces_to: ARCH-INDEX.md
 
 **ACCEPTED.** Human authorized Option A (post-layout validation pass) on 2026-06-05.
 Implementation may proceed without further authorization.
+
+## Amendment Log
+
+| Date | Version | Author | Change |
+|------|---------|--------|--------|
+| 2026-06-05 | v1.0 | architect | Initial ADR. Decisions 1–5 (post-layout validation pass, additive-defaulted `validate_post_layout`, AltTextValidator migration, validator classification rule, strict-mode aggregation contract). |
+| 2026-06-05 | v1.1 | architect | Added Decision 5a: error-precedence rule — when `layout::run` returns `Err` and pre-layout Error-severity diagnostics exist, `build()` returns `BuildError::ValidationFailed` (not `BuildError::Layout`). Root-cause reporting: validation errors take precedence over downstream layout symptoms. This rule was implemented during STORY-050 fix burst; codified here to prevent regression in future refactors and to make EC-001 traceability explicit. Implementation note wording corrected to match as-built STORY-050 worktree code: the pre-layout early-return gate was removed (OBS-5 fix); the single combined gate fires after Stage 6b, not before layout. |
 
 ## Context
 
@@ -243,6 +254,66 @@ before the gate evaluates. A Stage 5 error does NOT abort before Stage 6b.
 AND a missing chart `alt` (post-layout E-A11-001) sees both errors in one
 `build()` call. This is consistent with ADR-012 (error accumulation) and the
 DSL design principle that all errors are surfaced in a single pass.
+
+### Decision 5a: Error-precedence rule when layout fails and pre-layout errors exist
+
+When `layout::run` (Stage 6) returns `Err(LayoutError)` AND pre-layout
+(Stage 5) Error-severity diagnostics already exist in `all_validator_diagnostics`,
+`build()` MUST return `BuildError::ValidationFailed` carrying the full accumulated
+diagnostic list — NOT `BuildError::Layout`. The `LayoutError` is subsumed.
+
+Formal statement:
+
+```
+IF layout::run returns Err(e)
+  AND all_validator_diagnostics.any(|d| d.severity == DiagnosticSeverity::Error)
+THEN return Err(BuildError::ValidationFailed {
+       diagnostics: all_validator_diagnostics,
+       count: error_count,
+     })
+     // LayoutError `e` is consumed and not surfaced.
+
+IF layout::run returns Err(e)
+  AND all_validator_diagnostics.all(|d| d.severity != DiagnosticSeverity::Error)
+THEN return Err(BuildError::Layout(e))
+     // No pre-layout Error diagnostics; layout error is the root cause.
+```
+
+**Rationale (root-cause reporting).** When a deck has zero slides,
+`ZeroSlideValidator` emits `E-LAY-002` (pre-layout Error-severity) AND
+`layout::run` returns `Err(LayoutError::EmptyDeck)`. Both describe the same
+user mistake. `BuildError::Layout(EmptyDeck)` is a downstream symptom of the
+real problem — the deck violates the zero-slide constraint. Returning
+`ValidationFailed` with `E-LAY-002` gives the caller a structured, code-keyed
+diagnostic (actionable: "add at least one slide"). Returning `BuildError::Layout`
+would give a raw layout-engine error that bypasses the diagnostic pipeline
+and breaks the EC-001 contract (BC-5.02.001 / BC-5.01.001 / STORY-050 EC-001).
+
+**Implementation note.** In the as-built STORY-050 pipeline (`build_inner` in
+`slideforge/src/lib.rs`), there is NO pre-layout strict gate. Stage 5 diagnostics
+are collected into `all_validator_diagnostics` (lib.rs:~450–477), then
+`layout::run` executes unconditionally (lib.rs:~516–520), then Stage 6b
+post-layout diagnostics are appended (lib.rs:~557–574), and finally the SINGLE
+combined strict gate fires once, after Stage 6b (lib.rs:~576–593). The
+precedence rule is enforced at the layout-error handling branch in
+`build_inner` (lib.rs:~521–542): if `layout::run` returns `Err` AND
+`all_validator_diagnostics` contains at least one `Error`-severity diagnostic
+AND `strict=true`, `build()` returns `ValidationFailed` (subsuming the layout
+error) at that branch. The combined gate (lib.rs:~576–593) is the single
+decision point for the non-error-with-layout-failure cases. The OBS-5 fix
+removed the former pre-layout early-return gate; this implementation note
+reflects the as-built code.
+
+The precedence rule is written as an explicit contract (not just an implementation
+note) because:
+1. It must hold in ALL future implementations of `build_inner` — e.g., if the
+   pipeline is refactored to run Stage 6b (post-layout validation) and Stage 6
+   in parallel or in a different order.
+2. It is the observable contract that EC-001 (zero-slide deck → `ValidationFailed`
+   with `E-LAY-002`) depends on. If the rule is not explicit, a future refactor
+   could silently break EC-001 by returning `BuildError::Layout(EmptyDeck)` instead.
+3. It documents the deliberate design choice: layout errors are symptoms; validation
+   errors are root causes. The diagnostic pipeline takes precedence.
 
 ## Rationale
 

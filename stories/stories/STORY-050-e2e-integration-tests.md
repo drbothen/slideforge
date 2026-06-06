@@ -19,7 +19,7 @@ depends_on:
   - STORY-049
 blocks: [STORY-055]
 estimated_days: 4
-spec_version: "1.1"
+spec_version: "1.2"
 last_updated: 2026-06-05
 ---
 
@@ -214,8 +214,13 @@ implementation-side fixes required to make the Red Gate tests pass end-to-end.
 ### Gap 1 Fix — PDF NoDocumentTitle (AC-003, AC-008 PDF, EC-005)
 - [ ] Fix `slideforge-eval/src/eval.rs` `eval_deck_with_variant`: after evaluating
   slides, set `DeckMetadata.title` by scanning `slides` for the first slide with a
-  non-empty `title` field (as `Value::Str`). If none found, set fallback
-  `"Untitled Presentation"`. Closes 4 failing PDF tests.
+  non-empty `title` field (as `Value::Str`). If no title slide exists, `title`
+  remains `None` — PDF export then correctly fails PDF/UA-1 with `NoDocumentTitle`,
+  prompting the author to provide a real title. No fabricated/placeholder title
+  (e.g., `"Untitled Presentation"`) is ever emitted; emitting one would constitute
+  an accessibility anti-pattern by defeating the PDF/UA-1 meaningful-title
+  requirement (adjudicated 2026-06-05: fabricated fallback title → a11y
+  anti-pattern). Closes 4 failing PDF tests.
 
 ### Gap 2 Fix — Post-Layout Alt-Text Validation (AC-009) — ADR-018
 - [ ] `crates/slideforge-plugin-api/src/traits/validator.rs`: Add `validate_post_layout`

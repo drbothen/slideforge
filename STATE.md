@@ -102,7 +102,7 @@ Gap-4 and deck-level `metadata: title` DSL feature → anchored to future DX/fea
 
 ## NEXT ACTIONS — STORY-050 RESUME PLAN (zero-context orchestrator: execute in order)
 
-**STATUS: Steps 1-3 COMPLETE. Gap-2 spec burst LANDED (ADR-018 accepted; BC-5.02.001 v1.5; BC-5.01.001 v1.2; taxonomy v2.14; STORY-050 spec reconciled). Resume at Step 4 (implementer fix-burst).**
+**STATUS: Steps 1-4 DONE. Step 5 IN PROGRESS — adversary LOCAL cascade pass 1 complete + remediated (streak 0/3). Next action: adversary pass 2 on `feature/STORY-050` (worktree HEAD `c4e4b26e`).**
 **Worktree:** `/Users/jmagady/Dev/slideforge/.worktrees/STORY-050` | branch: `feature/STORY-050` (pushed to origin).
 **Red Gate:** committed at `6bbe80fc` — 55 pass / 7 fail (intended Red Gate). Off develop `e6f7832d`.
 **Artifact:** `.factory/specs/story-050-gap-analysis.md` and `.factory/specs/architecture/adr/ADR-018-post-layout-validation-pass.md` committed to factory-artifacts.
@@ -225,12 +225,12 @@ Split from STORY-040 (human-authorized 2026-06-04). EPIC-08.
 
 ## Session Resume Checkpoint
 
-**CLEAN-FOR-CONTEXT-CLEAR — STORY-050 resume-ready. Gap-2 Option A authorized. Start at NEXT ACTIONS Step 1.**
+**CLEAN-FOR-CONTEXT-CLEAR — STORY-050 resume-ready. Pass-1 remediated (streak 0/3). Start at NEXT ACTIONS Step 5 (adversary pass 2).**
 
 | Field | Value |
 |-------|-------|
 | **Date** | 2026-06-05 |
-| **Position** | Wave 4: 20/21 merged. STORY-050 IN PROGRESS. Red Gate: 55 pass / 7 fail committed at `6bbe80fc` in `.worktrees/STORY-050` (branch `feature/STORY-050`, pushed to origin). E2E suite exposed CRITICAL pipeline gaps: PDF non-functional since STORY-044 (Gap 1, in-scope); alt-text validation bypassed end-to-end (Gap 2, **Option A authorized 2026-06-05** — post-layout validation pass); Gap 3 (observability spans, in-scope); Gap 4 (API ergonomics, deferred). BLK-001 RESOLVED. Full analysis: `.factory/specs/story-050-gap-analysis.md`. DO NOT delete `.worktrees/STORY-050`. |
+| **Position** | Wave 4: 20/21 merged. STORY-050 IN PROGRESS. Steps 1-4 DONE; Step 5 in progress — adversary pass 1 complete + remediated (streak 0/3); next = adversary pass 2. Worktree HEAD after remediation: `c4e4b26e` (branch `feature/STORY-050`, pushed to origin). All 7 Red Gate tests now green; Gaps 1/2/3 fixed. ADR-018 v1.1; STORY-050 spec v1.2; pass-1 report: `.factory/cycles/STORY-050/adversarial-reviews/adversary-STORY-050-pass-1.md`. OBS-1 (CanvasOverflowValidator inert) tracked as open follow-up. DO NOT delete `.worktrees/STORY-050`. |
 | **develop SHA** | `e6f7832d` (60 merged PRs; origin/develop confirmed) |
 | **Active worktrees** | `/Users/jmagady/Dev/slideforge/.worktrees/STORY-050` on `feature/STORY-050` (Red Gate committed at `6bbe80fc`) |
 | **Open PRs** | 0 |
@@ -274,6 +274,7 @@ No open blocking issues. BLK-001 resolved (see Decisions Log 2026-06-05 STORY-05
 
 | Item | Severity | Target |
 |------|----------|--------|
+| **OBS-1 (STORY-050 pass-1): CanvasOverflowValidator (and ContrastValidator when introduced) reads `Slide.blocks` which is always empty post-eval — functionally inert end-to-end, same class as Gap-2 alt-text bug. Pre-existing in already-merged code; ADR-018 Decision 4 defers post-layout reclassification to when those validators are formally introduced. Target: validator-hardening story before Phase 6.** | MED (latent a11y/correctness gap) | Validator-hardening story before Phase 6 |
 | **[DRIFT-CRITICAL-1] PDF export non-functional since STORY-044 merged.** `eval.rs:441` always sets `DeckMetadata.title = None`; PDF/UA-1 requires non-empty document title → `NoDocumentTitle`. Resolution in progress via STORY-050 Gap 1 fix (~5 lines, eval.rs). Wave 4 gate must verify closure. | CRITICAL | STORY-050 Gap 1 (in progress) |
 | **[DRIFT-CRITICAL-2] Alt-text enforcement non-functional end-to-end since validate gate was wired (STORY-049).** Validator runs pre-layout; `Slide.blocks` always empty at that stage; `alt "..."` declared a compile error in CLAUDE.md but silently passes. Resolution in progress via STORY-050 Gap 2 Option A (post-layout validation pass, authorized 2026-06-05). BLK-001 resolved. Wave 4 gate must verify closure. | CRITICAL | STORY-050 Gap 2 (in progress) |
 | OBS-E (STORY-049 pass-4): STORY-050 E2E must include multi-slide deck with inline formatting + data binding routed through build() to close BC-5.02.002 EC-004 end-to-end — build()'s own tests cover only a trivial title slide (appropriate; E2E owns deep coverage). Anchored to STORY-050 as required scope. | STORY-050 scope | STORY-050 |
@@ -308,6 +309,7 @@ No open blocking issues. BLK-001 resolved (see Decisions Log 2026-06-05 STORY-05
 
 | Date | ID | Decision |
 |------|-----|---------|
+| 2026-06-05 | STORY-050-PASS1 | STORY-050 adversary pass 1 NOT clean (6 findings: F-P1-CRIT-001/HIGH-001/HIGH-002/MED-001/OBS-2/OBS-5). All remediated: CRIT-001+HIGH-001 (Gap 3 span rename + subscriber filter, commit 79d1da2e); HIGH-002 (placeholder blocks removed, 38a1d3bb); MED-001 (tempfile drift, dbcf2bd9); OBS-5 (pre-layout early-return behavior, c4e4b26e); OBS-2 (title fallback anti-pattern — spec amendment, STORY-050 v1.2). ADR-018 → v1.1 (Decision 5a error-precedence rule). OBS-1 (CanvasOverflowValidator inert) tracked as open follow-up (pre-existing; ADR-018 Decision 4 deferral). Streak: 0/3. Next: adversary pass 2 on feature/STORY-050 HEAD c4e4b26e. Pass-1 report: `.factory/cycles/STORY-050/adversarial-reviews/adversary-STORY-050-pass-1.md`. |
 | 2026-06-05 | STORY-050-GAP2-SPEC-BURST | Gap-2 spec burst LANDED (factory-artifacts). ADR-018 (post-layout validation pass) accepted. BC-5.02.001 → v1.5 (additive-defaulted `validate_post_layout` method; post-layout Stage 6b; new ECs + test vectors). BC-5.01.001 → v1.2 (alt-text enforcement moved to Stage 6b). Error taxonomy → v2.14 (E-A11-001 Stage 6b note). ARCH-INDEX.md + BC-INDEX.md updated. STORY-050 spec reconciled to spec_version 1.1 (ADR-018; real BuildError variant names; File Structure matched to disk). NEXT ACTIONS Steps 1-3 DONE — resume at Step 4 (implementer fix-burst in `.worktrees/STORY-050`). |
 | 2026-06-05 | STORY-050-GAP2-AUTHORIZED | Human AUTHORIZED Gap-2 = Option A on 2026-06-05: implement a POST-LAYOUT validation pass so alt-text (and other ContentBlock-level) validators actually fire end-to-end. This is the chosen fix for the CRITICAL "alt required" accessibility guarantee being non-functional. BLK-001 → RESOLVED (Option A authorized). STORY-050 status → in-progress (resume-ready). Red Gate committed at `6bbe80fc` in `.worktrees/STORY-050` (branch `feature/STORY-050`, pushed to origin). Resume at NEXT ACTIONS Step 1 (architect Gap-2 design). |
 | 2026-06-05 | STORY-050-RED-GATE | STORY-050 E2E Red Gate delivered (55 pass / 7 fail; committed at `6bbe80fc`, branch `feature/STORY-050`, pushed to origin). E2E suite surfaced CRITICAL pipeline gaps in already-merged code. Gap 1 (PDF NoDocumentTitle, in-scope, ~5-line fix in eval.rs). Gap 2 (alt-text validation bypassed end-to-end — see STORY-050-GAP2-AUTHORIZED). Gap 3 (observability events vs spans, in-scope). Gap 4 (API ergonomics, defer). Full architect gap analysis: `.factory/specs/story-050-gap-analysis.md`. |
