@@ -1,7 +1,7 @@
 ---
 document_type: resume-playbook
 cycle: STORY-086
-version: "1.0"
+version: "1.1"
 created: 2026-06-06
 status: active
 purpose: >
@@ -12,20 +12,22 @@ purpose: >
 
 # STORY-086 Zero-Context Resume Playbook
 
-**IMMEDIATE NEXT ACTION: Dispatch adversary LOCAL pass 14 (streak 0/3, target 3 consecutive strict-CLEAN).**
+**IMMEDIATE NEXT ACTION: Step 2.3 — Dispatch pr-manager 9-step PR cycle. (Step 1 LOCAL cascade CONVERGED 3/3. Step 2.1 demo DONE. Step 2.2 push DONE. HEAD d9ccaf29.)**
 
 ---
 
-## Ground Truth at Time of Writing (2026-06-06)
+## Ground Truth at Time of Writing (2026-06-06, updated v1.1)
 
 | Field | Value |
 |-------|-------|
 | develop SHA | `030dec6c` (61 merged PRs; 0 open PRs) |
-| feature/STORY-086 HEAD | `91c0c75a` (PUSHED to origin/feature/STORY-086) |
+| feature/STORY-086 HEAD | `d9ccaf29` (PUSHED to origin/feature/STORY-086; demo evidence commit) |
 | Workspace tests | 3303/3303 pass, 14 skipped (1 pre-existing cold_budget flake — STORY-080) |
 | Canonical exit gate | CLEAN (fmt + pedantic clippy + RUSTDOCFLAGS doc + nextest) |
-| Adversary LOCAL streak | 0/3 (pass 13 NOT strict-CLEAN [CLEAN PR-merge = yes] — F-086-P13-OBS-001 LOW: resolve_alt called unconditionally, W-A11-002 fired spuriously on non-media slides — REMEDIATED code-only + tracing-test dev-dep + 3 tests — streak reset 0/3; pass 14 next) |
+| Adversary LOCAL streak | CONVERGED 3/3 (passes 14 CLEAN → 15 CLEAN → 16-rerun CLEAN; pass-16 original VOIDED — see P16-Refutation note below) |
+| Demo evidence | docs/demo-evidence/STORY-086/ — 3 VHS recordings (GIF+WebM+tape) + evidence-report.md (23 ACs mapped) |
 | BLK-002 | OPEN — closes on STORY-086 merge + Wave 4 re-gate pass |
+| Main-checkout target/ | cargo-cleaned (98 GiB freed; disk was at 99%); will cold-rebuild at Wave 4 re-gate |
 | Key spec versions | BC-1.16.001 v1.4, BC-3.04.001 v1.6, BC-4.01.001 v1.2, BC-4.02.001 v1.2, BC-5.01.001 v1.3, BC-5.02.001 v1.6, error-taxonomy v2.17, ADR-019 v1.5, STORY-086 v1.5, STORY-088 v1.2 (8 pts) |
 
 ---
@@ -85,11 +87,32 @@ Expected: ~3300 pass, 14 skipped, 0 failures. If failures exist, diagnose before
 
 ---
 
-## Step 1 — Resume the LOCAL Adversary Cascade
+## Step 1 — LOCAL Adversary Cascade — COMPLETE / CONVERGED 3/3
 
-**Current position: streak 0/3. Pass 14 must run next.**
+**DONE. Streak: 3/3. Passes 14 (strict-CLEAN) → 15 (strict-CLEAN) → 16-rerun (strict-CLEAN). CASCADE CONVERGED per BC-5.39.001.**
 
-### Discipline rules (inline — all must survive context loss)
+**P16-Refutation note (process record):** Pass 16 (original) raised finding F-086-P16-MED-001 claiming "AC-023 has no load-bearing test." This was a FACTUAL ERROR by the adversary. AC-023 (tag-driven RegionRole slot selection preserves geometry under reversed-order input) has two load-bearing RED-GATE tests at:
+- `crates/slideforge-layout/src/lib.rs:3085` — `test_tag_routing_preserves_title_geometry_under_reversed_input`
+- `crates/slideforge-layout/src/lib.rs:3208` — `test_tag_routing_title_body_reversed_colocates_correctly`
+
+The adversary grepped only `layout.rs` (a different file in the crate) and missed the crate's `lib.rs` test module entirely. Pass 16 was VOIDED for reviewer factual error. Re-dispatch with corrected test-location orientation (adversary confirmed the tests exist before re-running); re-run was strict-CLEAN.
+
+**Process-gap candidate PG-TEST-LOCATION (feed to cycle-close S-7.02 codification):**
+> Adversary AC-coverage audits MUST grep the ENTIRE crate for test symbols — including `lib.rs` test modules (`#[cfg(test)] mod tests { ... }` at the bottom of `lib.rs`) AND `tests/` subdirectories — not just a single nominated file. A single-file grep is insufficient for crates where tests live in `lib.rs`. Required sweep pattern:
+> ```bash
+> grep -r "fn test_<ac_symbol>" crates/<crate>/src/ crates/<crate>/tests/ 2>/dev/null
+> ```
+> This gap caused one wasted pass + adversary re-dispatch. Codify in adversary dispatch template FOCUS AREAS as standing instruction.
+
+**Pass 14 historical note:** streak 0/3 → 1/3. All passes 1-13 findings verified closed. No new findings.
+
+**Pass 15 historical note:** streak 1/3 → 2/3. All passes 1-14 verified closed. No new findings.
+
+**Pass 16-rerun historical note:** streak 2/3 → 3/3. Full AC audit: every AC confirmed to have a load-bearing test or documented SID-1 deferral citing STORY-088 + specific test name. CONVERGED.
+
+### Discipline rules (retained for historical reference — cascade complete)
+
+These rules were applied during the cascade (passes 1-16). Retained for any future re-run scenario.
 
 **RULE-SEQ (LESSON-7):** Run passes SEQUENTIALLY — one at a time. Never parallelize passes of the same story. Pass N+1 only after pass N is fully remediated and the canonical exit gate is re-run clean.
 
@@ -147,7 +170,7 @@ All four must pass with zero failures before the next adversary pass.
 
 ### Adversary pass dispatch template (copy-paste ready)
 
-Replace `<HEAD>` with the current worktree HEAD SHA before dispatching. Next pass number is 14.
+NOTE: Cascade is CONVERGED. This template is retained for reference only. If a re-run is ever needed (e.g., after a PR-review-driven code change per LESSON-9), update HEAD to the current worktree HEAD and increment pass number beyond 16.
 
 ```
 ADVERSARY LOCAL PASS [N] — STORY-086
@@ -159,8 +182,8 @@ strict-CLEAN per BC-5.39.001).
 WORKING DIRECTORY (mandatory): /Users/jmagady/Dev/slideforge/.worktrees/STORY-086
 ALL Read/Grep/Glob calls MUST use this absolute worktree path.
 
-STORY-086 feature branch HEAD: 91c0c75a
-Review target: git diff origin/develop..91c0c75a
+STORY-086 feature branch HEAD: d9ccaf29
+Review target: git diff origin/develop..d9ccaf29
   (the complete story diff — not just the latest commit)
 
 CONTRACT VERSIONS IN EFFECT (read from worktree .factory/ paths):
@@ -225,13 +248,13 @@ MANDATORY OUTPUT LINES (include verbatim at end of report):
 
 ---
 
-## Step 2 — Post-Convergence Chain (after 3 strict-CLEAN)
+## Step 2 — Post-Convergence Chain
 
 Execute in this exact order. Do NOT parallelize within a step.
 
-### Step 2.1 — Demo recording
+### Step 2.1 — Demo recording — DONE
 
-Dispatch `vsdd-factory:demo-recorder` for STORY-086.
+Demo recorded. 3 VHS recordings (GIF+WebM+tape) under `docs/demo-evidence/STORY-086/` covering AC-001/002/003/004/005/006/018/019/023. Evidence-report.md maps all 23 ACs. Clippy gate clean. HEAD advanced to d9ccaf29.
 
 **LESSON-15 (mandatory):** After recording, run the FULL canonical clippy on any example binary added:
 
@@ -241,15 +264,11 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings -D clippy::
 
 The `-W clippy::missing_docs_in_private_items` flag is required — example private items need doc comments. CI has failed twice when this flag was omitted (STORY-039, STORY-040).
 
-### Step 2.2 — Push feature branch
+### Step 2.2 — Push feature branch — DONE
 
-```bash
-git -C /Users/jmagady/Dev/slideforge/.worktrees/STORY-086 push origin feature/STORY-086
-```
+`origin/feature/STORY-086` == `d9ccaf29`. Pushed.
 
-Confirm `origin/feature/STORY-086` matches the current worktree HEAD (will be later than `91c0c75a` if cascade produced further fix commits).
-
-### Step 2.3 — PR creation
+### Step 2.3 — PR creation — NEXT ACTION
 
 Dispatch `vsdd-factory:pr-manager` for the 9-step PR cycle. PR targets `develop`. Title follows Conventional Commits format.
 
