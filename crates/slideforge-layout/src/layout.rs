@@ -293,9 +293,38 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
                             bbox,
                         });
                     }
+                    // TextTag-driven routing (STORY-086 / BC-4.01.001 v1.2 / ADR-019 Decision 3):
+                    // Title → FrameContent::Title (PPTX type="title", DOCX Heading1)
+                    // Subtitle → FrameContent::Subtitle (PPTX type="subTitle", DOCX Heading2)
+                    // Body → FrameContent::Body (PPTX type="body", DOCX Normal)
+                    // Untagged → FrameContent::TextRun (unchanged, generic text run)
+                    // Routing is tag-driven, NOT position-driven (BC-4.01.001 v1.2 postcondition 12).
+                    use slideforge_types::TextTag;
+                    let frame_content = match text_block.tag {
+                        TextTag::Title => {
+                            // Concatenate all inline text for the Title variant (Arc<str> form).
+                            let text = extract_inline_text_str(&text_block.inlines);
+                            crate::types::FrameContent::Title(text)
+                        },
+                        TextTag::Subtitle => {
+                            let text = extract_inline_text_str(&text_block.inlines);
+                            crate::types::FrameContent::Subtitle(text)
+                        },
+                        TextTag::Body => {
+                            // Body carries ContentBlock items for rich body content.
+                            // Wrap the text block's content as a single ContentBlock::Text.
+                            // The PPTX serializer's extract_body_text traverses these ContentBlocks.
+                            crate::types::FrameContent::Body(vec![ContentBlock::Text(
+                                text_block.clone(),
+                            )])
+                        },
+                        TextTag::Untagged => {
+                            crate::types::FrameContent::TextRun(text_block.inlines.clone())
+                        },
+                    };
                     all_frames.push(crate::types::Frame {
                         bbox,
-                        content: crate::types::FrameContent::TextRun(text_block.inlines.clone()),
+                        content: frame_content,
                         text_flow: None,
                     });
                 },
@@ -567,6 +596,52 @@ fn speaker_notes_from_register_content(
                 Some(Arc::from(text.as_str()))
             }
         })
+}
+
+/// Extract plain text from a slice of [`slideforge_types::InlineNode`] values into an [`Arc<str>`].
+///
+/// Used by the TextTag routing pass to produce the `Arc<str>` carried by
+/// `FrameContent::Title` and `FrameContent::Subtitle`. Nested inline formatting
+/// (Bold, Italic, etc.) is flattened to plain text for these variants, which is
+/// semantically correct — the placeholder text is the canonical string label;
+/// inline formatting is not preserved in OOXML title placeholders.
+///
+/// Plain text is concatenated in source order. Math nodes are omitted.
+fn extract_inline_text_str(nodes: &[slideforge_types::InlineNode]) -> Arc<str> {
+    let mut out = String::new();
+    for node in nodes {
+        extract_inline_text_recursive(node, &mut out);
+    }
+    Arc::from(out.as_str())
+}
+
+/// Recursive helper for [`extract_inline_text_str`].
+fn extract_inline_text_recursive(node: &slideforge_types::InlineNode, out: &mut String) {
+    use slideforge_types::InlineNode;
+    match node {
+        InlineNode::Plain(s) | InlineNode::Code(s) | InlineNode::Xref(s) => {
+            out.push_str(s);
+        },
+        InlineNode::Bold(children)
+        | InlineNode::Italic(children)
+        | InlineNode::Footnote(children)
+        | InlineNode::Superscript(children)
+        | InlineNode::Subscript(children)
+        | InlineNode::Strikethrough(children)
+        | InlineNode::Highlight(children) => {
+            for child in children {
+                extract_inline_text_recursive(child, out);
+            }
+        },
+        InlineNode::Link { text, .. } => {
+            for child in text {
+                extract_inline_text_recursive(child, out);
+            }
+        },
+        InlineNode::Math(_) => {
+            // Math nodes are not extracted as plain text for title/subtitle frames.
+        },
+    }
 }
 
 /// Recursively emit one [`crate::types::FrameContent::TextRun`] frame per
