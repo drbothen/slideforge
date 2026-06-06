@@ -36,7 +36,7 @@ wave_4_total_points: 129
 wave_5_total_points: 114
 develop_sha: "e6f7832d"
 develop_pr_count: 60
-error_taxonomy_version: "v2.14"
+error_taxonomy_version: "v2.15"
 workspace_tests: "~3242 (60 merged PRs + STORY-050 pass-2 remediation; 3242/3242 pass, 1 pre-existing cold_budget flake tracked under STORY-080)"
 workspace_test_failures: 0
 ---
@@ -55,10 +55,10 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. Generates branded .pptx
 
 ## CURRENT POSITION
 
-Phase 3, **Wave 4 — 20/21 merged. STORY-050 IN PROGRESS (resume-ready). Gap-2 = Option A AUTHORIZED 2026-06-05.**
+Phase 3, **Wave 4 — 20/21 merged. STORY-050 PR #61 OPEN — security+pr-reviewer CLEAN/APPROVE, awaiting CI.**
 
-- `develop` = `e6f7832d` (60 merged PRs; origin/develop confirmed). **Open PRs: 0.**
-- Active worktrees: `.worktrees/STORY-050` (branch `feature/STORY-050`, pushed to origin). Red Gate committed at `6bbe80fc` — 55 pass / 7 fail (intended Red Gate for Gaps 1/2/3). Off develop `e6f7832d`.
+- `develop` = `e6f7832d` (60 merged PRs; origin/develop confirmed). **Open PRs: 1 (PR #61, STORY-050).**
+- Active worktrees: `.worktrees/STORY-050` (branch `feature/STORY-050`, pushed to origin). Worktree HEAD `7f46c946` (post PR-review fix burst). Off develop `e6f7832d`.
 - Workspace: ~3214/3215 pass (1 pre-existing cold_budget flake tracked under STORY-080). 0 CI failures.
 - STORY-049 MERGED PR #60 (e6f7832d, 2026-06-05). 21/21 CI checks green; security-reviewer APPROVE/CLEAN; pr-reviewer APPROVE. LOCAL adversary cascade CONVERGED (12 passes, 3/3 strict-CLEAN).
 - Architect gap analysis committed: `.factory/specs/story-050-gap-analysis.md`.
@@ -102,9 +102,9 @@ Gap-4 and deck-level `metadata: title` DSL feature → anchored to future DX/fea
 
 ## NEXT ACTIONS — STORY-050 RESUME PLAN (zero-context orchestrator: execute in order)
 
-**STATUS: Steps 1-4 DONE. Step 5 DONE — adversary LOCAL cascade CONVERGED (5 passes; 3/3 strict-CLEAN on passes 3-4-5; HEAD `23481e1e`). NEXT ACTION = demo-recorder, then pr-manager PR cycle.**
-**Worktree:** `/Users/jmagady/Dev/slideforge/.worktrees/STORY-050` | branch: `feature/STORY-050` (pushed to origin).
-**Red Gate:** committed at `6bbe80fc` — 55 pass / 7 fail (intended Red Gate). Off develop `e6f7832d`.
+**STATUS: Steps 1-5 DONE. PR #61 OPEN (security APPROVE/CLEAN, pr-reviewer APPROVE/CLEAN). NEXT ACTION = wait for CI → merge when CI-green (STANDING MERGE AUTH) → post-merge state-manager burst → Wave 4 gate.**
+**Worktree:** `/Users/jmagady/Dev/slideforge/.worktrees/STORY-050` | branch: `feature/STORY-050` (pushed to origin, HEAD `7f46c946`).
+**PR:** https://github.com/drbothen/slideforge/pull/61 — awaiting CI.
 **Artifact:** `.factory/specs/story-050-gap-analysis.md` and `.factory/specs/architecture/adr/ADR-018-post-layout-validation-pass.md` committed to factory-artifacts.
 
 ### Step 1 — Architect: Design Gap-2 Option A + produce ADR [DONE]
@@ -225,19 +225,19 @@ Split from STORY-040 (human-authorized 2026-06-04). EPIC-08.
 
 ## Session Resume Checkpoint
 
-**CLEAN-FOR-CONTEXT-CLEAR — STORY-050 LOCAL adversary CONVERGED (3/3). Next action = demo-recorder.**
+**STORY-050 PR #61 OPEN — security+pr-reviewer CLEAN/APPROVE. Awaiting CI → merge → Wave 4 gate.**
 
 | Field | Value |
 |-------|-------|
 | **Date** | 2026-06-05 |
-| **Position** | Wave 4: 20/21 merged. STORY-050 IN PROGRESS. Steps 1-5 DONE (LOCAL adversary CONVERGED — passes 3-4-5 strict-CLEAN, 3/3 per BC-5.39.001). Code HEAD `23481e1e` (branch `feature/STORY-050`, pushed to origin). All 7 Red Gate tests green; Gaps 1/2/3 fixed. ADR-018 v1.1; STORY-050 spec v1.3. Pass reports: passes 1-5 in `.factory/cycles/STORY-050/adversarial-reviews/`. EC-003/EC-002 cross-story deferral tracked in Open Follow-Ups. OBS-1 (CanvasOverflowValidator inert) tracked as open follow-up. DO NOT delete `.worktrees/STORY-050`. |
+| **Position** | Wave 4: 20/21 merged. STORY-050 IN PROGRESS. PR #61 open (https://github.com/drbothen/slideforge/pull/61). Security-reviewer APPROVE/CLEAN; pr-reviewer APPROVE/CLEAN. All findings closed in-scope (SEC-050-001 CWE-116 + 2 pr-reviewer non-blocking items). Worktree HEAD `7f46c946` (branch `feature/STORY-050`, pushed to origin). error-taxonomy → v2.15 (InvalidXmpTitle under E-EXP-003). DO NOT delete `.worktrees/STORY-050`. |
 | **develop SHA** | `e6f7832d` (60 merged PRs; origin/develop confirmed) |
-| **Active worktrees** | `/Users/jmagady/Dev/slideforge/.worktrees/STORY-050` on `feature/STORY-050` (worktree HEAD `23481e1e`) |
-| **Open PRs** | 0 |
+| **Active worktrees** | `/Users/jmagady/Dev/slideforge/.worktrees/STORY-050` on `feature/STORY-050` (worktree HEAD `7f46c946`) |
+| **Open PRs** | 1 — PR #61 (STORY-050, awaiting CI) |
 | **Workspace crates** | 17 (slideforge root crate populated) |
 | **Workspace tests** | ~3242/3242 pass (1 pre-existing cold_budget flake tracked under STORY-080) |
 | **factory-artifacts** | PUSHED to remote (origin/factory-artifacts) — human-authorized 2026-06-04. Upstream tracking set. Fresh sessions: clone repo + `git worktree add .factory factory-artifacts`. |
-| **RESUME INSTRUCTION** | Fresh orchestrator: read STATE.md NEXT ACTIONS. Dispatch `vsdd-factory:demo-recorder` cwd `/Users/jmagady/Dev/slideforge/.worktrees/STORY-050` (branch `feature/STORY-050`, HEAD `23481e1e`). LOCAL adversary CONVERGED — proceed directly to demo step. All artifacts committed+pushed (factory-artifacts + feature/STORY-050). Zero prior context needed — this checkpoint is complete. |
+| **RESUME INSTRUCTION** | Fresh orchestrator: read STATE.md NEXT ACTIONS. PR #61 awaiting CI. When CI-green: merge via STANDING MERGE AUTH (`gh pr merge --squash 61`), then dispatch post-merge state-manager burst + `vsdd-factory:wave-gate` for Wave 4. Zero prior context needed — this checkpoint is complete. |
 
 ---
 
@@ -310,6 +310,7 @@ No open blocking issues. BLK-001 resolved (see Decisions Log 2026-06-05 STORY-05
 
 | Date | ID | Decision |
 |------|-----|---------|
+| 2026-06-05 | STORY-050-SEC | PR #61 security review found SEC-050-001 (IMPORTANT, CWE-116: control-char injection into PDF XMP title via new Gap-1 title derivation, unguarded unlike lang path). FIXED in-scope: `validate_title_for_xmp` guard in slideforge-pdf (commit 8fb680be) + `PdfExportError::InvalidXmpTitle` error variant registered under E-EXP-003 in error-taxonomy (v2.15) + 3 load-bearing tests. Sibling sweep confirmed pptx/docx don't consume title. pr-reviewer 2 non-blocking items (post-layout locator test + enumerate cleanup) also closed in-scope (commits babe815d, 7f46c946). Re-review: security APPROVE/CLEAN, pr-reviewer APPROVE/CLEAN. PR #61 (https://github.com/drbothen/slideforge/pull/61) awaiting CI → merge → post-merge Wave 4 gate (STANDING MERGE AUTH). Worktree HEAD 7f46c946. |
 | 2026-06-05 | STORY-050-CONV | STORY-050 LOCAL adversarial cascade CONVERGED. 5 passes total; passes 3-4-5 strict-CLEAN (3/3 per BC-5.39.001). Code HEAD `23481e1e` on `feature/STORY-050`. Cascade caught 2 real paper-fixes (pass 1: Gap-3 spans never renamed despite implementer claim; pass 2: AC-007 regression guards vacuously true). All Gap-1/2/3 fixes load-bearing. Workspace 3242/3242 (1 pre-existing cold_budget flake); all canonical gates GREEN (orchestrator-verified: clippy pedantic, fmt, doc, doctest, insta). Next: demo-recorder → pr-manager 9-step → security-reviewer + pr-reviewer (independent) → merge (STANDING MERGE AUTH). |
 | 2026-06-05 | STORY-050-PASS2 | STORY-050 adversary pass 2 NOT clean (3 findings: F-050-P2-HIGH-001 + OBS-050-P2-001 + OBS-050-P2-002). HIGH-001: AC-007 regression guard was itself a paper-fix — `stage="<name>"` field never emitted by production `info_span!` calls; tests asserted vacuously. REMEDIATED: added `stage=` structured field to all 6 canonical `info_span!` calls; tests rewritten; load-bearing proof: rename `evaluate`→`eval` made AC-007 FAIL, restore→PASS (commit 5d34b5ae). OBS-001: Gap-1 title None-path zero coverage. REMEDIATED: 3 eval-crate unit tests added (Some-path, None-path no-title-slide, None-path title-slide-without-title-field), all call `eval_deck_with_variant` directly (commit 10112c18). OBS-002: `tempfile` unused in `slideforge` crate. REMEDIATED: removed from crates/slideforge/Cargo.toml; retained in slideforge-brand/data/pdf (real usage confirmed); story spec aligned to v1.3 (commit b253de47). Pre-push gate: 3242/3242 pass (commit 23481e1e). Streak: 0/3. Next: adversary pass 3 on feature/STORY-050 HEAD 23481e1e. Pass-2 report: `.factory/cycles/STORY-050/adversarial-reviews/adversary-STORY-050-pass-2.md`. |
 | 2026-06-05 | STORY-050-PASS1 | STORY-050 adversary pass 1 NOT clean (6 findings: F-P1-CRIT-001/HIGH-001/HIGH-002/MED-001/OBS-2/OBS-5). All remediated: CRIT-001+HIGH-001 (Gap 3 span rename + subscriber filter, commit 79d1da2e); HIGH-002 (placeholder blocks removed, 38a1d3bb); MED-001 (tempfile drift, dbcf2bd9); OBS-5 (pre-layout early-return behavior, c4e4b26e); OBS-2 (title fallback anti-pattern — spec amendment, STORY-050 v1.2). ADR-018 → v1.1 (Decision 5a error-precedence rule). OBS-1 (CanvasOverflowValidator inert) tracked as open follow-up (pre-existing; ADR-018 Decision 4 deferral). Streak: 0/3. Next: adversary pass 2 on feature/STORY-050 HEAD c4e4b26e. Pass-1 report: `.factory/cycles/STORY-050/adversarial-reviews/adversary-STORY-050-pass-1.md`. |
