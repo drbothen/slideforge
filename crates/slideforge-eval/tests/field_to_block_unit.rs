@@ -947,6 +947,283 @@ fn test_bc_1_16_001_f086_p5_crit001_both_set_diagram_decorative_wins() {
     }
 }
 
+// ─── F-086-P6-MED-001 — trimmed storage Red Gate ─────────────────────────────
+//
+// BC-1.16.001 PC-1 / PC-4 / PC-12 require that title, subtitle, body, and alt
+// text are stored TRIMMED in the IR. The current production code stores the raw
+// (untrimmed) value: `make_text_block_tagged(text, tag)` where `text` is the
+// unshorn `&str` from `extract_str_field`, and `resolve_alt` stores
+// `Arc::from(s)` without calling `.trim()` first.
+//
+// Tests 1–4 below MUST FAIL on HEAD 10cd8813 and PASS once the implementer
+// applies `Arc::from(s.trim())` in `make_text_block_tagged` / `resolve_alt`.
+// Test 5 (whitespace-only guard regression) MUST PASS on current HEAD.
+
+/// F-086-P6-MED-001 / BC-1.16.001 PC-1 — title with leading/trailing whitespace
+/// is stored TRIMMED in `InlineNode::Plain`.
+///
+/// ## Red Gate
+///
+/// FAILS on HEAD 10cd8813: `make_text_block_tagged` stores `Arc::from(text)`
+/// where `text == "  Padded Title  "` (untrimmed). The assertion
+/// `assert_eq!(plain_text, "Padded Title")` fails with
+/// observed value `"  Padded Title  "`.
+///
+/// PASSES after implementer applies `Arc::from(s.trim())` in `make_text_block_tagged`.
+///
+/// Traces: F-086-P6-MED-001; BC-1.16.001 PC-1.
+#[test]
+fn test_bc_1_16_001_f086_p6_med001_title_stored_trimmed() {
+    // F-086-P6-MED-001 / BC-1.16.001 PC-1 — trimmed storage Red Gate
+    use slideforge_types::InlineNode;
+
+    let slide = with_title(make_slide("title"), "  Padded Title  ");
+    let mut deck = make_deck(vec![slide]);
+    thread_fields_to_blocks(&mut deck);
+
+    let blocks = &deck.slides[0].blocks;
+    assert_eq!(
+        blocks.len(),
+        1,
+        "F-086-P6-MED-001: title '  Padded Title  ' must produce exactly 1 block; got {}",
+        blocks.len()
+    );
+
+    match &blocks[0].content {
+        ContentBlock::Text(tb) => {
+            let plain_text: String = tb
+                .inlines
+                .iter()
+                .filter_map(|n| {
+                    if let InlineNode::Plain(s) = n {
+                        Some(s.as_ref())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            assert_eq!(
+                plain_text, "Padded Title",
+                "F-086-P6-MED-001 RED GATE: title must be stored TRIMMED. \
+                 BC-1.16.001 PC-1 requires InlineNode::Plain(Arc::from(s.trim())). \
+                 Current code stores untrimmed — observed: {:?}, expected: \"Padded Title\".",
+                plain_text
+            );
+        },
+        other => {
+            panic!(
+                "F-086-P6-MED-001: blocks[0] must be ContentBlock::Text for title; got {:?}",
+                other.kind_name()
+            );
+        },
+    }
+}
+
+/// F-086-P6-MED-001 / BC-1.16.001 PC-4 — subtitle with leading/trailing whitespace
+/// is stored TRIMMED in `InlineNode::Plain`.
+///
+/// ## Red Gate
+///
+/// FAILS on HEAD 10cd8813: observed stored value is `"  Sub  "` (untrimmed).
+/// Expected after fix: `"Sub"`.
+///
+/// Traces: F-086-P6-MED-001; BC-1.16.001 PC-4.
+#[test]
+fn test_bc_1_16_001_f086_p6_med001_subtitle_stored_trimmed() {
+    // F-086-P6-MED-001 / BC-1.16.001 PC-4 — trimmed storage Red Gate
+    use slideforge_types::InlineNode;
+
+    let slide = with_subtitle(make_slide("title"), "  Sub  ");
+    let mut deck = make_deck(vec![slide]);
+    thread_fields_to_blocks(&mut deck);
+
+    let blocks = &deck.slides[0].blocks;
+    assert_eq!(
+        blocks.len(),
+        1,
+        "F-086-P6-MED-001: subtitle '  Sub  ' must produce exactly 1 block; got {}",
+        blocks.len()
+    );
+
+    match &blocks[0].content {
+        ContentBlock::Text(tb) => {
+            let plain_text: String = tb
+                .inlines
+                .iter()
+                .filter_map(|n| {
+                    if let InlineNode::Plain(s) = n {
+                        Some(s.as_ref())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            assert_eq!(
+                plain_text, "Sub",
+                "F-086-P6-MED-001 RED GATE: subtitle must be stored TRIMMED. \
+                 BC-1.16.001 PC-4 requires InlineNode::Plain(Arc::from(s.trim())). \
+                 Current code stores untrimmed — observed: {:?}, expected: \"Sub\".",
+                plain_text
+            );
+        },
+        other => {
+            panic!(
+                "F-086-P6-MED-001: blocks[0] must be ContentBlock::Text for subtitle; got {:?}",
+                other.kind_name()
+            );
+        },
+    }
+}
+
+/// F-086-P6-MED-001 / BC-1.16.001 PC-4 — body with leading/trailing whitespace
+/// is stored TRIMMED in `InlineNode::Plain`.
+///
+/// ## Red Gate
+///
+/// FAILS on HEAD 10cd8813: observed stored value is `"  Body text  "` (untrimmed).
+/// Expected after fix: `"Body text"`.
+///
+/// Traces: F-086-P6-MED-001; BC-1.16.001 PC-4.
+#[test]
+fn test_bc_1_16_001_f086_p6_med001_body_stored_trimmed() {
+    // F-086-P6-MED-001 / BC-1.16.001 PC-4 — trimmed storage Red Gate
+    use slideforge_types::InlineNode;
+
+    let slide = with_body(make_slide("content"), "  Body text  ");
+    let mut deck = make_deck(vec![slide]);
+    thread_fields_to_blocks(&mut deck);
+
+    let blocks = &deck.slides[0].blocks;
+    assert_eq!(
+        blocks.len(),
+        1,
+        "F-086-P6-MED-001: body '  Body text  ' must produce exactly 1 block; got {}",
+        blocks.len()
+    );
+
+    match &blocks[0].content {
+        ContentBlock::Text(tb) => {
+            let plain_text: String = tb
+                .inlines
+                .iter()
+                .filter_map(|n| {
+                    if let InlineNode::Plain(s) = n {
+                        Some(s.as_ref())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            assert_eq!(
+                plain_text, "Body text",
+                "F-086-P6-MED-001 RED GATE: body must be stored TRIMMED. \
+                 BC-1.16.001 PC-4 requires InlineNode::Plain(Arc::from(s.trim())). \
+                 Current code stores untrimmed — observed: {:?}, expected: \"Body text\".",
+                plain_text
+            );
+        },
+        other => {
+            panic!(
+                "F-086-P6-MED-001: blocks[0] must be ContentBlock::Text for body; got {:?}",
+                other.kind_name()
+            );
+        },
+    }
+}
+
+/// F-086-P6-MED-001 / BC-1.16.001 PC-12 — chart alt with leading/trailing whitespace
+/// is stored TRIMMED in `AltText::Provided`.
+///
+/// ## Red Gate
+///
+/// FAILS on HEAD 10cd8813: `resolve_alt` stores `Arc::from(s)` where
+/// `s == "  Bar chart desc  "` (untrimmed). The assertion
+/// `assert_eq!(&*provided_str, "Bar chart desc")` fails with
+/// observed value `"  Bar chart desc  "`.
+///
+/// PASSES after implementer applies `Arc::from(s.trim())` in `resolve_alt`.
+///
+/// Traces: F-086-P6-MED-001; BC-1.16.001 PC-12.
+#[test]
+fn test_bc_1_16_001_f086_p6_med001_chart_alt_stored_trimmed() {
+    // F-086-P6-MED-001 / BC-1.16.001 PC-12 — trimmed alt storage Red Gate
+    // Chart slide: no decorative, alt "  Bar chart desc  " → AltText::Provided("Bar chart desc")
+    let slide = with_alt(
+        with_chart_type(make_slide("chart"), "bar"),
+        "  Bar chart desc  ",
+    );
+    let mut deck = make_deck(vec![slide]);
+    thread_fields_to_blocks(&mut deck);
+
+    let chart_blocks: Vec<_> = deck.slides[0]
+        .blocks
+        .iter()
+        .filter(|b| matches!(b.content, ContentBlock::Chart(_)))
+        .collect();
+    assert_eq!(
+        chart_blocks.len(),
+        1,
+        "F-086-P6-MED-001: chart slide must produce ContentBlock::Chart; got {}",
+        chart_blocks.len()
+    );
+
+    if let ContentBlock::Chart(spec) = &chart_blocks[0].content {
+        match &spec.alt {
+            Some(AltText::Provided(s)) => {
+                assert_eq!(
+                    s.as_ref(),
+                    "Bar chart desc",
+                    "F-086-P6-MED-001 RED GATE: chart alt must be stored TRIMMED. \
+                     BC-1.16.001 PC-12 requires AltText::Provided(Arc::from(s.trim())). \
+                     Current code stores untrimmed — observed: {:?}, expected: \"Bar chart desc\".",
+                    s.as_ref()
+                );
+            },
+            other => {
+                panic!(
+                    "F-086-P6-MED-001: chart alt must be AltText::Provided; got {:?}",
+                    other
+                );
+            },
+        }
+    } else {
+        panic!("F-086-P6-MED-001: blocks[0] must be ContentBlock::Chart");
+    }
+}
+
+/// F-086-P6-MED-001 / BC-1.16.001 PC-1 — whitespace-only title (`"   "`) produces
+/// NO `ContentBlock` (regression guard: trim + empty-skip interaction).
+///
+/// ## Behaviour
+///
+/// The empty-skip guard in production code (`!text.trim().is_empty()`) already handles
+/// this: `"   ".trim() == ""` → guard triggers → no block emitted.
+///
+/// This test MUST PASS on current HEAD 10cd8813 (the guard exists).
+/// It locks the interaction: after the implementer adds `.trim()` to the STORAGE site,
+/// the empty-skip guard must still fire correctly (AC-008 / EC-002 regression).
+///
+/// Traces: F-086-P6-MED-001; BC-1.16.001 PC-1; AC-008; EC-002.
+#[test]
+fn test_bc_1_16_001_f086_p6_med001_whitespace_only_title_skipped_regression() {
+    // F-086-P6-MED-001 / BC-1.16.001 PC-1 / AC-008 / EC-002 — whitespace-only guard
+    // This test PASSES on current HEAD (the guard already exists).
+    // It is included to lock the trim-then-skip interaction after the fix.
+    let slide = with_title(make_slide("title"), "   ");
+    let mut deck = make_deck(vec![slide]);
+    thread_fields_to_blocks(&mut deck);
+
+    let blocks = &deck.slides[0].blocks;
+    assert_eq!(
+        blocks.len(),
+        0,
+        "F-086-P6-MED-001 regression guard: whitespace-only title '   ' must produce 0 blocks. \
+         After trim: '' → empty-skip guard fires → no ContentBlock emitted. \
+         BC-1.16.001 PC-1 / AC-008 / EC-002. Got {} block(s).",
+        blocks.len()
+    );
+}
+
 /// Regression guard: `decorative: true` alone (no alt) STILL produces `AltText::Decorative`.
 ///
 /// This is NOT a Red Gate test — it verifies existing correct behavior is preserved
