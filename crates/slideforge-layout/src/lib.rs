@@ -1186,6 +1186,7 @@ mod tests {
         let xref_target = Arc::from("__nonexistent_slide__");
         let text_block = TextBlock {
             inlines: vec![InlineNode::Xref(Arc::clone(&xref_target))],
+            tag: slideforge_types::TextTag::Untagged,
             span: SourceSpan::default(),
         };
         let block = Block {
@@ -1489,6 +1490,7 @@ mod tests {
 
         let text_block = TextBlock {
             inlines: vec![InlineNode::Plain(Arc::from("hello"))],
+            tag: slideforge_types::TextTag::Untagged,
             span: SourceSpan::default(),
         };
         let block = Block {
@@ -1579,6 +1581,7 @@ mod tests {
             bbox: make_bbox(3_657_600),
             content: crate::types::FrameContent::Body(vec![ContentBlock::Text(TextBlock {
                 inlines: vec![InlineNode::Plain(Arc::from("Body visual content"))],
+                tag: slideforge_types::TextTag::Untagged,
                 span: SourceSpan::default(),
             })]),
             text_flow: None,
@@ -1667,6 +1670,7 @@ mod tests {
             blocks: vec![Block {
                 content: ContentBlock::Text(TextBlock {
                     inlines: vec![InlineNode::Plain(Arc::from(visual_body_text))],
+                    tag: slideforge_types::TextTag::Untagged,
                     span: SourceSpan::default(),
                 }),
                 label: None,
@@ -3043,5 +3047,103 @@ mod tests {
             },
             other => panic!("expected LayoutError::BulletDepthExceeded, got: {other:?}"),
         }
+    }
+
+    // ── STORY-086 AC-023: tag-over-position invariant ──────────────────────────
+
+    /// AC-023 / BC-4.01.001 v1.2 postcondition 12 — TextTag routing is tag-driven,
+    /// NOT position-driven. A `TextTag::Title` block at index 1 (Body at index 0)
+    /// must produce `FrameContent::Title` in the title frame regardless of its
+    /// position in `Slide.blocks`.
+    ///
+    /// Red Gate: current layout.rs maps ALL `ContentBlock::Text` → `FrameContent::TextRun`
+    /// regardless of any tag (TextTag is unused). No `FrameContent::Title` is produced.
+    /// This test asserts that `FrameContent::Title` appears in the frame list for the
+    /// reversed-order slide. FAILS because:
+    /// (a) TextTag::Title has no routing in layout.rs
+    /// (b) All ContentBlock::Text → TextRun, never Title
+    ///
+    /// After TextTag routing implementation: TextTag::Title → FrameContent::Title in
+    /// the title region frame, regardless of block list position.
+    ///
+    /// Traces: BC-4.01.001 v1.2 postcondition 12 + invariant 5; AC-023.
+    #[test]
+    fn test_bc_4_01_001_ac023_texttag_title_is_tag_driven_not_position_driven() {
+        // AC-023: Body at blocks[0], Title at blocks[1] (reversed).
+        // Layout must produce FrameContent::Title regardless of position.
+        // RED GATE: no TextTag routing → no FrameContent::Title produced → FAILS.
+        use slideforge_types::{Block, ContentBlock, InlineNode, TextBlock, TextTag};
+
+        // Build a content slide with blocks in REVERSED order:
+        // blocks[0] = ContentBlock::Text(tag: Body)
+        // blocks[1] = ContentBlock::Text(tag: Title)
+        let body_block = Block {
+            content: ContentBlock::Text(TextBlock {
+                inlines: vec![InlineNode::Plain(Arc::from("body text"))],
+                tag: TextTag::Body,
+                span: SourceSpan::default(),
+            }),
+            label: None,
+            span: SourceSpan::default(),
+        };
+        let title_block = Block {
+            content: ContentBlock::Text(TextBlock {
+                inlines: vec![InlineNode::Plain(Arc::from("the title"))],
+                tag: TextTag::Title,
+                span: SourceSpan::default(),
+            }),
+            label: None,
+            span: SourceSpan::default(),
+        };
+
+        let slide = Slide {
+            slide_type: Arc::from("content"),
+            fields: OrderedMap::new(),
+            // REVERSED: body first, title second
+            blocks: vec![body_block, title_block],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+            overlay: None,
+            register_content: vec![],
+        };
+        let deck = make_deck(vec![slide]);
+        let brand = make_brand();
+
+        let result = run(&deck, &brand).expect("layout::run must succeed for content slide");
+        let laid_out = &result.slides[0];
+
+        // Assert that at least one frame has FrameContent::Title.
+        // RED GATE: current code maps ALL Text → TextRun → no FrameContent::Title → FAILS.
+        // After routing: TextTag::Title → FrameContent::Title in the title region slot.
+        let has_title_frame = laid_out.frames.iter().any(|f| {
+            matches!(&f.content, crate::types::FrameContent::Title(_))
+        });
+        assert!(
+            has_title_frame,
+            "AC-023 RED GATE: layout::run must produce at least one FrameContent::Title \
+             when a ContentBlock::Text with TextTag::Title is present, regardless of its \
+             position in Slide.blocks. \
+             Current code: TextTag is ignored → all ContentBlock::Text → TextRun → \
+             no FrameContent::Title → FAILS until TextTag routing is implemented. \
+             BC-4.01.001 v1.2 postcondition 12 + invariant 5. \
+             Frame count: {}",
+            laid_out.frames.len()
+        );
+
+        // Assert the Title frame carries "the title" text.
+        let title_text: Option<String> = laid_out.frames.iter().find_map(|f| {
+            if let crate::types::FrameContent::Title(s) = &f.content {
+                Some(s.as_ref().to_owned())
+            } else {
+                None
+            }
+        });
+        assert_eq!(
+            title_text.as_deref(),
+            Some("the title"),
+            "AC-023: FrameContent::Title must carry text 'the title'; got {:?}",
+            title_text
+        );
     }
 }

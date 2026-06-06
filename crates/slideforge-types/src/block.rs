@@ -11,6 +11,53 @@ use crate::math::MathNode;
 use crate::span::SourceSpan;
 use crate::specs::{ChartSpec, DiagramSpec, ImageSpec, ShapeSpec, TableSpec};
 
+/// Semantic role of a text paragraph within a slide.
+///
+/// `TextTag` is assigned by Stage 2b (`thread_fields_to_blocks`, ADR-019) when
+/// constructing `ContentBlock::Text` blocks from `Slide.fields`. The layout
+/// engine reads `TextTag` to route text into the correct `FrameContent` variant.
+///
+/// This tag is the **semantic source** (inline IR side). The `FrameContent::Title`,
+/// `::Subtitle`, `::Body` variants are the **geometric carriers** (layout IR side).
+/// The layout mapping (`layout::run` in `slideforge-layout`) is the single
+/// translation point.
+///
+/// ## Routing table
+///
+/// | Tag | `FrameContent` produced | PPTX output | DOCX output |
+/// |-----|------------------------|-------------|-------------|
+/// | `Title` | `FrameContent::Title` | `<p:ph type="title"/>` | `Heading1` |
+/// | `Subtitle` | `FrameContent::Subtitle` | `<p:ph type="subTitle"/>` | `Heading2` |
+/// | `Body` | `FrameContent::Body` | `<p:ph type="body"/>` | Normal |
+/// | `Untagged` | `FrameContent::TextRun` | body or generic | Normal |
+///
+/// See BC-4.01.001 v1.2 postconditions 9–12 and BC-4.02.001 v1.2 postconditions 8–11.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TextTag {
+    /// Primary slide title — maps to `FrameContent::Title`.
+    ///
+    /// Set by Stage 2b (`thread_fields_to_blocks`) when `Slide.fields["title"]`
+    /// is a non-empty string. Routing produces `<p:ph type="title"/>` in PPTX
+    /// and `Heading1` paragraph in DOCX.
+    Title,
+    /// Subtitle or secondary heading — maps to `FrameContent::Subtitle`.
+    ///
+    /// Set by Stage 2b when `Slide.fields["subtitle"]` is a non-empty string.
+    /// Routing produces `<p:ph type="subTitle"/>` in PPTX and `Heading2` in DOCX.
+    Subtitle,
+    /// Body paragraph — maps to `FrameContent::Body`.
+    ///
+    /// Set by Stage 2b when `Slide.fields["body"]` is a non-empty string.
+    /// Routing produces the body placeholder in PPTX and a Normal paragraph in DOCX.
+    Body,
+    /// Generic/untagged paragraph — maps to `FrameContent::TextRun`.
+    ///
+    /// The default for all `TextBlock` construction sites that are NOT Stage 2b.
+    /// Parser output, test helpers, and any site not constructing semantic blocks
+    /// from slide fields MUST use this variant.
+    Untagged,
+}
+
 /// A text paragraph.
 ///
 /// A `TextBlock` is a sequence of inline nodes that form a single paragraph.
@@ -19,6 +66,12 @@ use crate::specs::{ChartSpec, DiagramSpec, ImageSpec, ShapeSpec, TableSpec};
 pub struct TextBlock {
     /// The inline nodes forming this paragraph.
     pub inlines: Vec<InlineNode>,
+    /// Semantic role assigned by Stage 2b (`thread_fields_to_blocks`).
+    ///
+    /// Set by Stage 2b when the block is produced from `Slide.fields`.
+    /// All other construction sites (parser, test helpers) MUST use
+    /// `TextTag::Untagged` as the default.
+    pub tag: TextTag,
     /// Source location.
     pub span: SourceSpan,
 }
@@ -183,6 +236,7 @@ mod tests {
         vec![
             ContentBlock::Text(TextBlock {
                 inlines: vec![],
+                tag: TextTag::Untagged,
                 span: SourceSpan::default(),
             }),
             ContentBlock::Bullets(vec![]),
@@ -274,6 +328,7 @@ mod tests {
     fn test_bc_1_01_005_text_block_fields() {
         let tb = TextBlock {
             inlines: vec![InlineNode::Plain(Arc::from("hello"))],
+            tag: TextTag::Untagged,
             span: SourceSpan::default(),
         };
         assert_eq!(tb.inlines.len(), 1);
@@ -320,6 +375,7 @@ mod tests {
         use crate::inline::InlineNode;
         let block = ContentBlock::Text(TextBlock {
             inlines: vec![InlineNode::Plain(Arc::from("hello"))],
+            tag: TextTag::Untagged,
             span: SourceSpan::default(),
         });
         assert!(

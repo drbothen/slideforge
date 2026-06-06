@@ -902,7 +902,7 @@ mod tests {
     #[test]
     fn test_f_p3_001_multi_block_body_records_per_block_child_indices() {
         use krilla::tagging::{Node, TagKind};
-        use slideforge_types::{BulletItem, ContentBlock, InlineNode, SourceSpan, TextBlock};
+        use slideforge_types::{BulletItem, ContentBlock, InlineNode, SourceSpan, TextBlock, TextTag};
 
         let engine = SlideTagEngine::new();
 
@@ -932,6 +932,7 @@ mod tests {
                     content: FrameContent::Body(vec![
                         ContentBlock::Text(TextBlock {
                             inlines: vec![InlineNode::Plain(Arc::from("Paragraph text"))],
+                            tag: TextTag::Untagged,
                             span: SourceSpan::default(),
                         }),
                         ContentBlock::Bullets(vec![BulletItem {
@@ -1041,7 +1042,7 @@ mod tests {
     #[test]
     fn test_f_p3_001_single_block_body_backward_compat() {
         use krilla::tagging::{Node, TagKind};
-        use slideforge_types::{ContentBlock, InlineNode, SourceSpan, TextBlock};
+        use slideforge_types::{ContentBlock, InlineNode, SourceSpan, TextBlock, TextTag};
 
         let engine = SlideTagEngine::new();
 
@@ -1057,6 +1058,7 @@ mod tests {
                 },
                 content: FrameContent::Body(vec![ContentBlock::Text(TextBlock {
                     inlines: vec![InlineNode::Plain(Arc::from("Single paragraph"))],
+                    tag: TextTag::Untagged,
                     span: SourceSpan::default(),
                 })]),
                 text_flow: None,

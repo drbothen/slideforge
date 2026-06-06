@@ -584,3 +584,161 @@ fn test_bc_5_02_001_ac012_alt_text_unspecified_variant_is_distinct_from_decorati
         "AltText::Unspecified must deduplicate in HashSet"
     );
 }
+
+// ─── AC-007 (scope-expansion): Value::List → ContentBlock::Bullets unit test ──
+
+/// AC-007 / BC-1.16.001 postcondition 7 — `Value::List(items)` in a slide's
+/// `bullets` field produces a `ContentBlock::Bullets` with one `BulletItem`
+/// per list element.
+///
+/// This is the DIRECT unit test path: `thread_fields_to_blocks` with a slide
+/// that has `bullets = Value::List([...])` (as produced by `@var items = [...]`
+/// DSL construct after eval).
+///
+/// Red Gate: `thread_fields_to_blocks` is currently implemented and handles the
+/// `Value::List` path. This test verifies:
+/// 1. The `ContentBlock::Bullets` is produced (not skipped).
+/// 2. The bullet items carry the correct string content.
+/// 3. The block count is exactly 1 (just bullets, no title/subtitle/body on this slide).
+///
+/// Note: This test passes against the CURRENT implementation in ba3bcc93 since
+/// `thread_fields_to_blocks` handles `Value::List`. However, it is a required
+/// test for AC-007 traceability and serves as a regression guard. The E2E test
+/// `test_bc_1_16_001_ac007_bullets_slide_produces_ge3_text_runs_in_pptx` is the
+/// primary Red Gate for AC-007 (fails if layout/exporter don't thread bullets to
+/// `<a:r>` runs).
+///
+/// Traces: BC-1.16.001 postcondition 7; AC-007 variable-binding form.
+#[test]
+fn test_bc_1_16_001_ac007_value_list_produces_content_block_bullets() {
+    // AC-007: @var items = ["A","B","C"] / bullets: items → ContentBlock::Bullets with 3 items.
+    // This tests the Value::List → ContentBlock::Bullets path in thread_fields_to_blocks.
+    let slide = with_bullets(make_slide("content"), &["Item A", "Item B", "Item C"]);
+    let mut deck = make_deck(vec![slide]);
+
+    thread_fields_to_blocks(&mut deck);
+
+    let blocks = &deck.slides[0].blocks;
+
+    // Must have exactly 1 block: the Bullets block (no title/subtitle/body on this slide).
+    // RED GATE: if thread_fields_to_blocks is a no-op stub, blocks = vec![] → FAILS.
+    assert_eq!(
+        blocks.len(),
+        1,
+        "AC-007: slide with only bullets field must produce exactly 1 ContentBlock; \
+         got {}. BC-1.16.001 postcondition 7.",
+        blocks.len()
+    );
+
+    // The block must be ContentBlock::Bullets.
+    assert!(
+        matches!(&blocks[0].content, ContentBlock::Bullets(_)),
+        "AC-007: the produced block must be ContentBlock::Bullets; got {:?}",
+        blocks[0].content.kind_name()
+    );
+
+    // The Bullets block must have 3 items.
+    if let ContentBlock::Bullets(items) = &blocks[0].content {
+        assert_eq!(
+            items.len(),
+            3,
+            "AC-007: ContentBlock::Bullets must have 3 items (one per @var list element); \
+             got {}. Items: {:?}",
+            items.len(),
+            items
+        );
+
+        // Each item's inline text must match the declared bullet string.
+        let texts: Vec<String> = items
+            .iter()
+            .map(|item| {
+                item.inlines
+                    .iter()
+                    .filter_map(|n| {
+                        if let slideforge_types::InlineNode::Plain(s) = n {
+                            Some(s.as_ref().to_owned())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            })
+            .collect();
+
+        assert_eq!(
+            texts,
+            vec!["Item A", "Item B", "Item C"],
+            "AC-007: bullet item text must match declared list elements; got {:?}",
+            texts
+        );
+    }
+}
+
+// ─── STORY-086 TextTag scaffolding compile tests ───────────────────────────────
+
+/// TextTag enum is defined with 4 variants and the correct derives.
+///
+/// This is a COMPILE-TIME contract test. If TextTag is removed or renamed, this
+/// test fails to compile. It also serves as documentation of the canonical variants.
+///
+/// Traces: STORY-086 scope-expansion; BC-4.01.001 v1.2 postconditions 9–12.
+#[test]
+fn test_bc_1_16_001_texttag_enum_has_four_variants() {
+    use slideforge_types::TextTag;
+    // All four variants must exist and be distinct.
+    let title = TextTag::Title;
+    let subtitle = TextTag::Subtitle;
+    let body = TextTag::Body;
+    let untagged = TextTag::Untagged;
+
+    assert_ne!(title, subtitle, "TextTag::Title != Subtitle");
+    assert_ne!(title, body, "TextTag::Title != Body");
+    assert_ne!(title, untagged, "TextTag::Title != Untagged");
+    assert_ne!(subtitle, body, "TextTag::Subtitle != Body");
+    assert_ne!(subtitle, untagged, "TextTag::Subtitle != Untagged");
+    assert_ne!(body, untagged, "TextTag::Body != Untagged");
+
+    // Must implement Hash + Eq + Clone + Debug.
+    let mut set = std::collections::HashSet::new();
+    set.insert(title);
+    set.insert(title); // duplicate
+    assert_eq!(set.len(), 1, "TextTag::Title must deduplicate in HashSet");
+
+    let cloned = untagged;
+    assert_eq!(cloned, TextTag::Untagged, "TextTag must implement Clone/Copy");
+
+    let _ = format!("{title:?}"); // must implement Debug
+}
+
+/// TextBlock.tag field is set to TextTag::Untagged by default in all non-Stage-2b
+/// construction sites, and can carry semantic TextTag values when set by Stage 2b.
+///
+/// Traces: STORY-086 scope-expansion; BC-1.16.001 postconditions 1–3.
+#[test]
+fn test_bc_1_16_001_textblock_tag_field_exists_and_defaults_to_untagged() {
+    use slideforge_types::{InlineNode, TextBlock, TextTag};
+
+    // Non-Stage-2b construction (test helper style) uses Untagged.
+    let untagged_block = TextBlock {
+        inlines: vec![InlineNode::Plain(Arc::from("generic text"))],
+        tag: TextTag::Untagged,
+        span: slideforge_types::SourceSpan::default(),
+    };
+    assert_eq!(
+        untagged_block.tag,
+        TextTag::Untagged,
+        "TextBlock.tag must be TextTag::Untagged for non-Stage-2b construction"
+    );
+
+    // Stage 2b construction uses semantic tags.
+    let title_block = TextBlock {
+        inlines: vec![InlineNode::Plain(Arc::from("Slide Title"))],
+        tag: TextTag::Title,
+        span: slideforge_types::SourceSpan::default(),
+    };
+    assert_eq!(
+        title_block.tag,
+        TextTag::Title,
+        "TextBlock.tag must carry TextTag::Title when set by Stage 2b for title fields"
+    );
+}

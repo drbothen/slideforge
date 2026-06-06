@@ -2276,7 +2276,7 @@ mod tests {
     /// assertion (TD-VSDD-059).
     #[test]
     fn test_f_p2_001_body_blocks_baselines_are_distinct_and_stack_downward() {
-        use slideforge_types::{ContentBlock, InlineNode, SourceSpan, TextBlock};
+        use slideforge_types::{ContentBlock, InlineNode, SourceSpan, TextBlock, TextTag};
 
         use crate::coords::emu_to_pt;
 
@@ -2292,6 +2292,7 @@ mod tests {
         let make_text_block = |s: &'static str| {
             ContentBlock::Text(TextBlock {
                 inlines: vec![InlineNode::Plain(Arc::from(s))],
+                tag: TextTag::Untagged,
                 span: SourceSpan::default(),
             })
         };

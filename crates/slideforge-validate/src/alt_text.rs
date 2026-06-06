@@ -814,9 +814,10 @@ mod tests {
     #[test]
     fn test_bc_5_03_015_text_blocks_no_alt_needed() {
         // deck with only Text blocks → 0 diagnostics
-        use slideforge_types::{InlineNode, block::TextBlock};
+        use slideforge_types::{InlineNode, TextTag, block::TextBlock};
         let text_block = make_block(ContentBlock::Text(TextBlock {
             inlines: vec![InlineNode::Plain(Arc::from("just text"))],
+            tag: TextTag::Untagged,
             span: SourceSpan::default(),
         }));
         let bullets_block = make_block(ContentBlock::Bullets(vec![]));
@@ -1606,6 +1607,91 @@ mod tests {
              Stub uses Decorative → FAILS until T3 ships (regions.rs fix). \
              BC-5.01.001 invariant 2; ADR-019 Decision 5.1.",
             &chart_frame.content
+        );
+    }
+
+    // ── Issue 1 (architect-pass-1): post-layout validate_post_layout is the sole
+    //    validator for Chart/Image/Diagram; fires exactly ONE E-A11-001 for Unspecified ─
+
+    /// Issue 1 / AC-005 — `validate_post_layout` fires exactly ONE E-A11-001 for a
+    /// chart frame with `AltText::Unspecified`.
+    ///
+    /// This test verifies the SINGLE-FIRE guarantee required by AC-005 and the
+    /// Issue 1 adjudication (architect-pass-1). After the fix:
+    /// - `AltTextValidator::validate()` (pre-layout) is restricted to Shape blocks only.
+    /// - `validate_post_layout()` (post-layout) fires E-A11-001 for Unspecified frames.
+    /// - Together they guarantee exactly ONE E-A11-001 per missing-alt Chart/Image/Diagram.
+    ///
+    /// Red Gate status: `test_bc_5_01_001_ac015_unspecified_chart_frame_fires_e_a11_001`
+    /// already passes (validate_post_layout already handles Unspecified). This new test
+    /// adds an explicit count check and also tests Image and Diagram to ensure all three
+    /// visual frame types fire the error.
+    ///
+    /// Traces: AC-005; BC-5.01.001 postcondition 1; BC-5.02.001 postcondition 7;
+    ///         architect-pass-1-adjudication Issue 1 verdict.
+    #[test]
+    fn test_bc_5_01_001_issue1_post_layout_fires_exactly_one_e_a11_001_per_unspecified_frame() {
+        // Issue 1: validate_post_layout must fire exactly 1 E-A11-001 per
+        // Chart/Image/Diagram frame with AltText::Unspecified.
+        // This is already implemented — this test guards against regression.
+        use slideforge_layout::{
+            BoundingBox, Frame, FrameContent, LaidOutDeck, LaidOutSlide, PageSize,
+        };
+        use slideforge_types::{AltText, Emu};
+
+        let make_frame = |content: FrameContent| Frame {
+            bbox: BoundingBox {
+                x: Emu(0),
+                y: Emu(0),
+                width: Emu(1_000_000),
+                height: Emu(500_000),
+            },
+            content,
+            text_flow: None,
+        };
+
+        // One chart, one image, one diagram — all Unspecified.
+        let slide = LaidOutSlide {
+            source_index: 0,
+            slide_type_keyword: Arc::from("chart"),
+            frames: vec![
+                make_frame(FrameContent::Chart {
+                    alt: AltText::Unspecified,
+                }),
+                make_frame(FrameContent::Image {
+                    alt: AltText::Unspecified,
+                }),
+                make_frame(FrameContent::Diagram {
+                    svg: slideforge_types::NormalizedDiagramSvg::empty_placeholder(),
+                    alt: AltText::Unspecified,
+                }),
+            ],
+            speaker_notes: None,
+            register_tags: vec![],
+            register_content: vec![],
+        };
+        let laid_out = LaidOutDeck {
+            page_size: PageSize::default(),
+            slides: vec![slide],
+            sections: vec![],
+            warnings: vec![],
+        };
+
+        let diags = AltTextValidator.validate_post_layout(&laid_out, &default_opts());
+
+        // Must fire exactly 3 E-A11-001 (one per Unspecified frame).
+        let e_a11_count = diags
+            .iter()
+            .filter(|d| d.code.as_ref() == E_A11_001)
+            .count();
+        assert_eq!(
+            e_a11_count,
+            3,
+            "Issue 1: validate_post_layout must fire E-A11-001 for each Unspecified \
+             Chart, Image, and Diagram frame. Expected 3, got {}. \
+             Diagnostics: {diags:?}. \
+             BC-5.01.001 postcondition 1; architect-pass-1 Issue 1.",
+            e_a11_count
         );
     }
 }

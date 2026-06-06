@@ -173,7 +173,7 @@ fn n_slide_deck(n: usize) -> LaidOutDeck {
 
 /// Build a single slide with a title frame + body frame (with bullets).
 fn title_and_body_slide() -> LaidOutDeck {
-    use slideforge_types::{BulletItem, ContentBlock, InlineNode, TextBlock};
+    use slideforge_types::{BulletItem, ContentBlock, InlineNode, TextBlock, TextTag};
 
     LaidOutDeck {
         page_size: default_page_size(),
@@ -201,6 +201,7 @@ fn title_and_body_slide() -> LaidOutDeck {
                     content: FrameContent::Body(vec![
                         ContentBlock::Text(TextBlock {
                             inlines: vec![InlineNode::Plain(Arc::from("Body paragraph text"))],
+                            tag: TextTag::Untagged,
                             span: SourceSpan::default(),
                         }),
                         ContentBlock::Bullets(vec![BulletItem {
@@ -1435,7 +1436,7 @@ fn test_bc_4_03_001_invariant_structure_tree_reading_order() {
     use krilla::tagging::{Node, TagKind};
     use slideforge_layout::LaidOutSlide;
     use slideforge_pdf::SlideTagEngine;
-    use slideforge_types::{BulletItem, ContentBlock, InlineNode, TextBlock};
+    use slideforge_types::{BulletItem, ContentBlock, InlineNode, TextBlock, TextTag};
 
     // Build a 2-frame slide: Title (index 0) → Body with bullets (index 1).
     // The structure tree must list the H1 group BEFORE the L/P group.
@@ -1462,6 +1463,7 @@ fn test_bc_4_03_001_invariant_structure_tree_reading_order() {
                 },
                 content: FrameContent::Body(vec![ContentBlock::Text(TextBlock {
                     inlines: vec![InlineNode::Plain(Arc::from("Paragraph"))],
+                    tag: TextTag::Untagged,
                     span: SourceSpan::default(),
                 })]),
                 text_flow: None,
@@ -2551,7 +2553,7 @@ fn test_bc_4_03_001_ac013_ci_workflow_includes_ignored_flag() {
 #[test]
 fn test_f_p3_001_multi_block_body_each_block_has_own_child_index_integration() {
     use slideforge_pdf::tag_engine::SlideTagEngine;
-    use slideforge_types::{BulletItem, ContentBlock, InlineNode, SourceSpan, TextBlock};
+    use slideforge_types::{BulletItem, ContentBlock, InlineNode, SourceSpan, TextBlock, TextTag};
 
     // Body frame with 2 content blocks: Text + Bullets.
     // This is the "title_and_body_slide" configuration (exercised by AC-013 bullets fixture).
@@ -2579,6 +2581,7 @@ fn test_f_p3_001_multi_block_body_each_block_has_own_child_index_integration() {
                 content: FrameContent::Body(vec![
                     ContentBlock::Text(TextBlock {
                         inlines: vec![InlineNode::Plain(Arc::from("Body paragraph text"))],
+                        tag: TextTag::Untagged,
                         span: SourceSpan::default(),
                     }),
                     ContentBlock::Bullets(vec![BulletItem {
@@ -2680,7 +2683,7 @@ fn test_f_p3_001_multi_block_body_each_block_has_own_child_index_integration() {
 #[test]
 fn test_f_p4_001_mixed_block_body_text_math_bullets_each_gets_tagged_region() {
     use slideforge_pdf::tag_engine::SlideTagEngine;
-    use slideforge_types::{BulletItem, ContentBlock, InlineNode, MathNode, SourceSpan, TextBlock};
+    use slideforge_types::{BulletItem, ContentBlock, InlineNode, MathNode, SourceSpan, TextBlock, TextTag};
 
     // ── Part 1: tag engine produces 3 distinct child indices ──────────────────
 
@@ -2708,6 +2711,7 @@ fn test_f_p4_001_mixed_block_body_text_math_bullets_each_gets_tagged_region() {
                 content: FrameContent::Body(vec![
                     ContentBlock::Text(TextBlock {
                         inlines: vec![InlineNode::Plain(Arc::from("Text paragraph"))],
+                        tag: TextTag::Untagged,
                         span: SourceSpan::default(),
                     }),
                     ContentBlock::Math(MathNode::display(

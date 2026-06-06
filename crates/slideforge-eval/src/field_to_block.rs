@@ -17,7 +17,8 @@
 use std::sync::Arc;
 
 use slideforge_types::{
-    Block, BulletItem, ContentBlock, Deck, FieldValue, InlineNode, SourceSpan, TextBlock, Value,
+    Block, BulletItem, ContentBlock, Deck, FieldValue, InlineNode, SourceSpan, TextBlock, TextTag,
+    Value,
     specs::{AltText, ChartSpec, DiagramSpec, ImageSpec},
 };
 
@@ -318,10 +319,14 @@ fn is_decorative(slide: &slideforge_types::Slide) -> bool {
 }
 
 /// Construct a `Block` wrapping a `ContentBlock::Text` from a plain string.
+///
+/// Uses `TextTag::Untagged` as the default tag. Stage 2b callers must update
+/// the tag to the correct semantic value after construction.
 fn make_text_block(text: &str) -> Block {
     Block {
         content: ContentBlock::Text(TextBlock {
             inlines: vec![InlineNode::Plain(Arc::from(text))],
+            tag: TextTag::Untagged,
             span: SourceSpan::default(),
         }),
         label: None,
@@ -462,13 +467,21 @@ mod tests {
         }
     }
 
+    /// Issue 1 adjudication (architect-pass-1) — Stage 2b MUST emit ContentBlock::Chart
+    /// even when `alt = None`. The chart block carries `AltText::Unspecified` to signal
+    /// the post-layout validator that alt resolution is pending.
+    ///
+    /// RED GATE (Issue 1): this test is INVERTED from the prior version. Current HEAD
+    /// ba3bcc93 does NOT emit a chart block when alt=None — it asserts 0 chart blocks.
+    /// This test now asserts 1 chart block with `alt = None` (which maps to Unspecified
+    /// in the frame). The test will FAIL against the current code that skips the block.
+    ///
+    /// Traces: BC-1.16.001 PC-9; architect-pass-1-adjudication Issue 1 verdict CODE-CONFORMS.
     #[test]
-    fn test_chart_no_alt_skips_block() {
-        // When a chart has no alt and is not decorative, Stage 2b does NOT create
-        // a ContentBlock::Chart. The post-layout validator will fire E-A11-001 via
-        // the AltText::Unspecified structural placeholder from regions.rs.
-        // This prevents double-firing: pre-layout + post-layout both emitting E-A11-001
-        // for the same missing-alt chart (ADR-019 Decision 3.3).
+    fn test_bc_1_16_001_chart_no_alt_emits_block_with_none_alt() {
+        // Issue 1 Red Gate: Stage 2b MUST emit ContentBlock::Chart even when alt=None.
+        // Current code skips the block (anti-double-fire logic) — this MUST be inverted.
+        // After fix: Chart block IS emitted with alt=None (layout maps None→Unspecified).
         let mut slide = make_slide("chart");
         slide.fields.insert(
             Arc::from("chart_type"),
@@ -481,12 +494,28 @@ mod tests {
             .iter()
             .filter(|b| matches!(b.content, ContentBlock::Chart(_)))
             .collect();
-        // No ContentBlock::Chart when alt=None — post-layout handles validation.
+        // RED GATE: current code skips the block → chart_blocks.len() == 0 → FAILS.
+        // After implementation: Stage 2b emits ContentBlock::Chart with alt=None.
         assert_eq!(
             chart_blocks.len(),
-            0,
-            "Stage 2b must NOT create ContentBlock::Chart when alt=None (no alt, not decorative); \
-             post-layout validator catches this via AltText::Unspecified. ADR-019 Decision 3.3."
+            1,
+            "Issue 1 RED GATE: Stage 2b MUST emit ContentBlock::Chart even when alt=None. \
+             Current code skips the block (anti-double-fire logic). \
+             After fix: chart block IS emitted with alt=None (no alt, not decorative). \
+             Pre-layout AltTextValidator::validate() is restricted to Shape blocks only; \
+             post-layout validate_post_layout() fires E-A11-001 for AltText::Unspecified. \
+             BC-1.16.001 PC-9; architect-pass-1 Issue 1 verdict. \
+             Got chart_blocks.len() = {} (expected 1).",
+            chart_blocks.len()
         );
+        // The emitted block must have alt=None (no alt supplied).
+        if let ContentBlock::Chart(spec) = &chart_blocks[0].content {
+            assert!(
+                spec.alt.is_none(),
+                "Issue 1: emitted ContentBlock::Chart must have alt=None when no alt was supplied; \
+                 got alt={:?}",
+                spec.alt
+            );
+        }
     }
 }
