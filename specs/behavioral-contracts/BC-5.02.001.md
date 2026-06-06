@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.5"
+version: "1.6"
 status: draft
 producer: product-owner
 timestamp: 2026-05-24T00:00:00
@@ -15,6 +15,10 @@ capability: CAP-021
 lifecycle_status: active
 introduced: v1.0.0
 modified:
+  - version: "1.6"
+    date: 2026-06-05
+    author: product-owner
+    reason: "ADR-019 (Stage 2b, human-authorized 2026-06-05): Add Postcondition 7 note on AltText::Unspecified — AltTextValidator.validate_post_layout now distinguishes AltText::Unspecified (pipeline gap → E-A11-001) from AltText::Decorative (author opt-out → valid). Update EC-005 and add EC-009. Add canonical test vector for the Unspecified path (chart, no alt, strict → E-A11-001 with Unspecified on frame). The AltTextValidator postcondition clarification documents that Decorative no longer triggers E-A11-001; Unspecified does."
   - version: "1.5"
     date: 2026-06-05
     author: product-owner
@@ -96,14 +100,25 @@ implementations compile unchanged (ADR-018, human-authorized 2026-06-05).
    list. Any `DiagnosticSeverity::Error` in the combined list causes
    `BuildError::ValidationFailed` carrying the full combined diagnostic list
    (Error + Warning + Info from both passes). Collect-all, not fail-on-first.
-7. **AltTextValidator classification: post-layout only (ADR-018 Decision 3).**
+7. **AltTextValidator classification: post-layout only (ADR-018 Decision 3 + ADR-019 Decision 5.3).**
    `AltTextValidator` overrides `validate_post_layout` to iterate
    `laid_out.slides[*].frames` for `FrameContent::Chart`, `FrameContent::Image`, and
-   `FrameContent::Diagram` entries whose alt field is missing or decorative-but-not-explicit.
-   `AltTextValidator.validate()` is a no-op stub (correct — `Deck.slides[*].blocks`
-   is always `vec![]` after eval per `for_eval.rs:342`). A deck with a chart slide and
-   no `alt "..."` must return `Err(BuildError::ValidationFailed)` containing at least
-   one diagnostic with `code == "E-A11-001"` when `strict = true`.
+   `FrameContent::Diagram` entries and inspect their `alt` field against the
+   three-variant `AltText` enum (ADR-019 Decision 4):
+   - `AltText::Unspecified` → **E-A11-001 emitted** (pipeline gap: no author alt-text
+     data was threaded into this frame; structural placeholder never overwritten).
+   - `AltText::Decorative` → **Valid; no diagnostic** (author explicitly wrote
+     `decorative: true` — this is the intended opt-out).
+   - `AltText::Provided(_)` → **Valid; no diagnostic** (author supplied non-empty
+     alt text).
+   `AltTextValidator.validate()` (Stage 5 pre-layout) remains a no-op stub — correct,
+   because `Deck.slides[*].blocks` is always `vec![]` after eval (per `for_eval.rs:342`
+   prior to Stage 2b landing). A deck with a chart slide and no `alt "..."` must return
+   `Err(BuildError::ValidationFailed)` containing at least one diagnostic with
+   `code == "E-A11-001"` when `strict = true`. The frame's `alt` will be
+   `AltText::Unspecified` (set by `thread_media_alt_into_frames` fallback per ADR-019
+   Decision 5.2) — NOT `AltText::Decorative`. `AltText::Decorative` on a frame is
+   ONLY produced when the author explicitly supplied `decorative: true` in the .sf source.
 
 ## Invariants
 
@@ -168,10 +183,11 @@ implementations compile unchanged (ADR-018, human-authorized 2026-06-05).
 | EC-002 | Plugin API trait method signature change | All implementations updated; compile error otherwise — CI enforces |
 | EC-003 | Plugin registered but panics during execution | Panic is caught at plugin dispatch boundary; returned as E-EXP-NNN error |
 | EC-004 | Two bundled plugins registered for same surface | Both registered; caller selects by name/priority (configurable) |
-| EC-005 | Deck with `slide chart:` and no `alt "..."` built with `strict = true` | `validate_post_layout` on `AltTextValidator` fires after layout; `Err(BuildError::ValidationFailed)` returned carrying at least one `Diagnostic { code: "E-A11-001", .. }` in the combined list |
+| EC-005 | Deck with `slide chart:` and no `alt "..."` built with `strict = true` | `validate_post_layout` on `AltTextValidator` fires after layout; the chart frame carries `AltText::Unspecified` (set by `thread_media_alt_into_frames` fallback per ADR-019 Decision 5.2); `Err(BuildError::ValidationFailed)` returned carrying at least one `Diagnostic { code: "E-A11-001", .. }` in the combined list. `AltText::Decorative` is NOT used for this case — the author supplied no decorative intent. |
 | EC-006 | Deck has both a missing `lang` (pre-layout E-A11-003) AND a missing chart `alt` (post-layout E-A11-001) | Both diagnostics appear in the combined list returned by `Err(BuildError::ValidationFailed)`; user sees both errors in one `build()` call without re-running |
 | EC-007 | Existing `Validator` implementation (third-party) compiled against old trait that only had `validate()` | Compiles unchanged; inherits default `validate_post_layout` no-op; no source change required |
 | EC-008 | `AltTextValidator.validate()` called with a `Deck` whose `slides[*].blocks` is `vec![]` (post-eval state) | Returns `vec![]` (no diagnostics); this is correct and intentional — `ContentBlock::Chart/Image/Diagram` are only present post-layout |
+| EC-009 | `slide chart:` with `decorative: true` built with `strict = true` | Frame carries `AltText::Decorative`; `validate_post_layout` sees `Decorative` → no E-A11-001 emitted; `Ok(BuildOutput)` returned. `decorative: true` is a valid WCAG opt-out. This is distinct from EC-005 (missing alt → Unspecified → error). |
 
 ## Canonical Test Vectors
 
@@ -184,6 +200,8 @@ implementations compile unchanged (ADR-018, human-authorized 2026-06-05).
 | `slideforge::build(FIXTURE_SF, BuildOptions { format: Some("pptx"), strict: true, ..Default::default() })`, `slideforge::build(FIXTURE_SF, BuildOptions { format: Some("docx"), ..Default::default() })`, `slideforge::build(FIXTURE_SF, BuildOptions { format: Some("pdf"), ..Default::default() })` — three separate calls on the same fixture | All three return `Ok(BuildOutput)`; PPTX has 3 slides, DOCX has report body paragraphs, PDF has 3 pages (AC-008 — three separate `build()` calls, no `all_formats()` API) | happy-path (AC-008) |
 | `slideforge::build(MISSING_ALT_FIXTURE_SF, BuildOptions { format: Some("pptx"), strict: true, ..Default::default() })` where fixture has `slide chart:` with no `alt "..."` | `Err(BuildError::ValidationFailed(diagnostics))` where `diagnostics` contains at least one entry with `code == "E-A11-001"`; no output bytes written (AC-009) | error (AC-009) |
 | Same missing-alt fixture with `strict: false` | `Ok(BuildOutput)` — warning emitted via `tracing::warn!`, output produced; `ValidationFailed` NOT returned in warn-only mode (AC-009 warn-only complement) | warn-only (AC-009 complement) |
+| `slideforge::build(DECORATIVE_CHART_FIXTURE_SF, BuildOptions { format: Some("pptx"), strict: true, ..Default::default() })` where fixture has `slide chart:` with `decorative: true` and no `alt "..."` | `Ok(BuildOutput)` — `AltText::Decorative` on frame; `validate_post_layout` treats `Decorative` as valid author opt-out; E-A11-001 NOT emitted. Distinguishes `Decorative` (author intent) from `Unspecified` (pipeline gap). | happy-path (Decorative is valid) |
+| `slideforge::build(MISSING_ALT_FIXTURE_SF, ...)` where fixture has `slide chart:` with no `alt "..."` and no `decorative: true` | Frame carries `AltText::Unspecified` after `thread_media_alt_into_frames` fallback (ADR-019 Decision 5.2); `validate_post_layout` emits E-A11-001 on `Unspecified`; `Err(BuildError::ValidationFailed)` returned. | error (Unspecified → E-A11-001) |
 | `slideforge::build(FIXTURE_SF, ...)` with `tracing_test` subscriber capturing INFO events (via `RUST_LOG=slideforge=info` filter) | All 6 named pipeline spans present: `parse`, `evaluate`, `brand`, `validate`, `layout`, `export` — in that order (AC-007) | observability (AC-007) |
 | `slideforge::build(INVALID_SYNTAX_SF, BuildOptions { format: Some("pptx"), strict: true, ..Default::default() })` where fixture has known syntax error at line 3 | `Err(BuildError::ParseFailed(errors))` where `errors` is non-empty `Vec<Diagnostic>` each containing `file`, `line`, `col`, `message` fields; line == 3 (AC-006) | error (AC-006) |
 

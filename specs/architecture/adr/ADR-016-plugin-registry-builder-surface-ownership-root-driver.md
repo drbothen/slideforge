@@ -4,13 +4,22 @@ adr_id: ADR-016
 title: Plugin registry Builder + surface ownership + root-crate pipeline driver
 status: accepted
 date: 2026-06-04
+amended: 2026-06-05
 spike_input: ~
 traces_to: ARCH-INDEX.md
 supersedes: ~
+amended_by: ADR-019
 context: LESSON-13 reconciliation for STORY-049 (Plugin Registry Assembly); three human-approved decisions recorded 2026-06-04.
 ---
 
 # ADR-016: Plugin Registry Builder, Surface Ownership, and Root-Crate Pipeline Driver
+
+## Amendment Log
+
+| Date | Version | Author | Change |
+|------|---------|--------|--------|
+| 2026-06-04 | v1.0 | architect | Initial ADR. PluginRegistryBuilder in plugin-api, SectionType/InlineFormat ownership in plugin-api, root crate as pipeline driver with `build()`. |
+| 2026-06-05 | v1.1 | architect | **ADR-019 amendment.** The pipeline stage enumeration in Decision 3 is extended by the insertion of Stage 2b ("field-to-block threading") between eval (Stage 2a) and brand load (Stage 3). The `build_inner` doc comment in `slideforge/src/lib.rs` must be updated to reflect the full 8-stage sequence (see ADR-019 Decision 1 for the canonical stage numbering). No changes to existing decisions; Stage 2b is purely additive. |
 
 ## Context
 

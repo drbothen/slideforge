@@ -2,10 +2,10 @@
 document_type: prd-supplement
 supplement_type: error-taxonomy
 level: L3
-version: "2.15"
+version: "2.16"
 status: active
 producer: product-owner
-timestamp: 2026-06-03T00:00:00
+timestamp: 2026-06-05T00:00:00
 phase: 1a
 traces_to: .factory/specs/prd.md
 primary_consumers: [implementer, test-writer]
@@ -286,12 +286,12 @@ Fatal in strict mode (exit 2). Warning in `--warn-only` mode (but output still p
 
 | Code | Severity | Exit (strict) | Message Format | Traces To |
 |------|---------|--------------|---------------|-----------|
-| E-A11-001 | broken | 2 | `Missing alt text on <element-type> '<identifier>' at <file>:<line>:<col>. Add alt "..." or mark decorative: true.` | DI-001, CAP-020 |
+| E-A11-001 | broken | 2 | `Missing alt text on <element-type> '<identifier>' at <file>:<line>:<col>. Add alt "..." or decorative: true.` | DI-001, CAP-020 |
 | E-A11-002 | broken | 2 | `Missing label on color-coded element '<type>' '<identifier>' at <file>:<line>:<col>. Color alone must not convey meaning. Add label "...".` | DI-002, CAP-020 |
 | E-A11-003 | cosmetic | 0 | `Missing lang declaration in deck metadata. Defaulting to "en". Screen readers may mispronounce non-English content. Add lang "en-US" (or appropriate BCP-47 tag).` | DI-003, CAP-020 |
 | E-A11-004 | broken | 2 | `WCAG contrast ratio insufficient for text '<excerpt>' at <file>:<line>:<col>: <ratio>:1 (required 4.5:1 for normal text, 3:1 for large text). Consider using a higher-contrast color combination.` | CAP-022 |
 
-Note (E-A11-001 pipeline stage — ADR-018): `E-A11-001` is emitted by `AltTextValidator`
+Note (E-A11-001 trigger — ADR-018 + ADR-019): `E-A11-001` is emitted by `AltTextValidator`
 during the **post-layout validation pass** (Stage 6b per ADR-018, human-authorized 2026-06-05),
 NOT the pre-layout validation pass (Stage 5). This is because `ContentBlock::Chart`,
 `ContentBlock::Image`, and `ContentBlock::Diagram` only exist in `LaidOutDeck.slides[*].frames`
@@ -299,11 +299,36 @@ NOT the pre-layout validation pass (Stage 5). This is because `ContentBlock::Cha
 `slides[*].blocks == vec![]` after eval, per `slideforge-eval/src/for_eval.rs:342`).
 `AltTextValidator.validate()` (Stage 5 dispatch) is a no-op stub — this is correct, not a bug.
 Stage 6b diagnostics are accumulated into the same combined diagnostic list as Stage 5 diagnostics,
-and the strict-mode gate fires once on the combined list. A deck with a missing `alt` on a chart
-still produces `Err(BuildError::ValidationFailed)` (exit 2, no output) — the guarantee is upheld;
-only the pipeline stage where enforcement fires has changed. Implementer citation: this note
-supersedes any spec or comment that says E-A11-001 is checked "before layout" — the authoritative
-source is ADR-018 Decision 3.
+and the strict-mode gate fires once on the combined list.
+
+**Precise trigger condition (ADR-019 Decision 5.3):** E-A11-001 fires when
+`FrameContent::Chart { alt: AltText::Unspecified }`, `FrameContent::Image { alt: AltText::Unspecified }`,
+or `FrameContent::Diagram { alt: AltText::Unspecified }` is found in `validate_post_layout`.
+`AltText::Unspecified` is the third variant of the `AltText` enum (added in ADR-019 Decision 4)
+representing the pipeline placeholder state: "no author alt-text data was threaded into this frame."
+It is produced by:
+- `regions.rs` structural placeholders (all five sites changed from `AltText::Decorative` to
+  `AltText::Unspecified` in ADR-019 Decision 5.1), and
+- `thread_media_alt_into_frames` fallback when the upstream `ContentBlock` has `alt = None`
+  (ADR-019 Decision 5.2).
+
+`AltText::Decorative` — produced when the author explicitly writes `decorative: true` —
+does **NOT** trigger E-A11-001. `AltText::Decorative` is a valid author opt-out;
+`validate_post_layout` treats it as passing. Before ADR-019, `regions.rs` misused
+`AltText::Decorative` as a structural placeholder, causing false-positive E-A11-001 on
+decorative elements. That bug is fixed: the three-variant enum makes the discrimination unambiguous.
+
+**Dual-remedy message:** The message format `"... Add alt \"...\" or decorative: true."` instructs the
+author on both remediation paths: (1) add `alt "description"` for visual content that needs a
+description, or (2) add `decorative: true` for purely decorative content. Both remedies work
+because the threading pass (Stage 2b, ADR-019) reads both `fields["alt"]` and `fields["decorative"]`
+and sets the `ContentBlock.alt` field accordingly — which propagates to `AltText::Provided` or
+`AltText::Decorative` on the frame, neither of which triggers E-A11-001.
+
+A deck with a missing `alt` on a chart (no `alt "..."`, no `decorative: true`) still produces
+`Err(BuildError::ValidationFailed)` (exit 2, no output) — the guarantee is upheld.
+Implementer citation: this note supersedes any spec or comment that says E-A11-001 is
+checked "before layout" — the authoritative sources are ADR-018 Decision 3 and ADR-019 Decision 5.3.
 
 ---
 
@@ -358,4 +383,5 @@ Per DI-018 and BC-1.15.002:
 | 2.12 | 2026-06-02 | product-owner | STORY-077 adversary pass-9 finding F-077-P9-001 — (1) E-EVL-013 Note broadened: scope expanded from `ref("")`/`"" | ref` (empty-string only) to cover all three no-usable-id conditions: `ref()` zero-arg, `ref("")` empty-string arg, and `ref(expr)` where expr evaluates to empty. All three yield E-EVL-013; no new code allocated (mirrors figref precedent). (2) E-EVL-014 (`EvalError::FootnoteInvalidArg`) registered — new code for `footnote()` called with zero arguments or an argument that evaluates to empty/unusable text in inline-markup section sub-block context; no `InlineNode::Footnote` produced; eval-stage, broken, exit 2, error accumulation continues. E-EVL-014 confirmed free: absent from taxonomy (E-EVL-001 through E-EVL-013 fully accounted for) and from grep of `crates/slideforge-eval/src/error.rs`. Traces to CAP-002, CAP-024, BC-3.02.002, DIR-077-002 §5, STORY-077. |
 | 2.13 | 2026-06-03 | product-owner | STORY-077 follow-up burst (human-authorized 2026-06-03): (1) **E-PAR-022 registered** (`DisallowedLinkUrlScheme`) — parse-stage error for `[text](url)` links with disallowed URL schemes. Allowlist: `http`, `https`, `mailto`. All other schemes (including `javascript:`, `data:`, `vbscript:`, `file:`) and scheme-less URLs are rejected. Relative/anchor links (`#section`, `page.sf`) are NOT a v1 use case — internal cross-references use `{{ ref("id") }}`. Accumulated (same fatal path as E-PAR-019/020/021), exit 1. SEC-002 mandated. (2) **E-PAR-012 re-registered** (active) — re-registered for unterminated `{{ }}` interpolation. The v1.1 retirement was incorrect: `unterminated_interpolation_msg()` in `template.rs` has always emitted `"E-PAR-012"` and continues to do so. No implementer code change required. (3) **E-EVL-007 through E-EVL-011 registered** — taxonomy debt note removed. E-EVL-007 (`TooManySlides`, broken, exit 2), E-EVL-008 (`NotIterable`, broken, exit 2), E-EVL-009 (`LargeDeckWarning`, degraded, exit 0 — warning only), E-EVL-010 (`UnknownSectionType`, broken, exit 2), E-EVL-011 (`UnsupportedBuiltinCall`, broken, exit 2). All five were allocated in `crates/slideforge-eval/src/error.rs`; now formally registered. No code changes required (doc-only). |
 | 2.14 | 2026-06-05 | product-owner | STORY-050 Gap-2 / ADR-018 (human-authorized 2026-06-05): **E-A11-001 pipeline-stage note added.** E-A11-001 is emitted during the post-layout validation pass (Stage 6b, `validate_post_layout(&LaidOutDeck)`) per ADR-018, not the pre-layout pass (Stage 5). Root cause confirmed: `Deck.slides[*].blocks == vec![]` after eval (`for_eval.rs:342`); `FrameContent::Chart/Image/Diagram` only exist in `LaidOutDeck` post-layout. The error code, severity (broken), and exit code (2) are **unchanged** — only the pipeline stage where enforcement fires has changed. Note appended to E-A11-001 documenting this for implementers. This note supersedes any existing spec text or code comment stating E-A11-001 is checked "before layout." BC-5.02.001 v1.5 and BC-5.01.001 v1.2 updated in same burst. |
+| 2.16 | 2026-06-05 | product-owner | ADR-019 (Stage 2b, human-authorized 2026-06-05): **E-A11-001 trigger condition precisely documented.** E-A11-001 fires on `AltText::Unspecified` frames (NOT on `AltText::Decorative` frames). `AltText::Unspecified` is the new third enum variant (ADR-019 Decision 4) meaning "structural pipeline placeholder; no author alt-text data threaded." `AltText::Decorative` (author wrote `decorative: true`) is a valid opt-out — `validate_post_layout` now distinguishes these two cases unambiguously. Five `regions.rs` structural placeholder sites changed from `Decorative` to `Unspecified` (ADR-019 Decision 5.1); three `thread_media_alt_into_frames` fallback sites changed from `Decorative` to `Unspecified` (ADR-019 Decision 5.2); three `validate_post_layout` match arms updated accordingly (ADR-019 Decision 5.3). Dual-remedy message note added: "Add alt \"...\" or decorative: true" — both remedies work because Stage 2b (ADR-019) reads both fields and sets ContentBlock.alt → propagates to AltText::Provided or AltText::Decorative on frame → neither triggers E-A11-001. Error code, severity (broken), and exit code (2) are UNCHANGED — only the triggering variant name is narrowed from any-non-Provided to specifically Unspecified. BC-5.01.001 v1.3 and BC-5.02.001 v1.6 updated in same burst. |
 | 2.15 | 2026-06-05 | product-owner | STORY-050 PR #61 security review (SEC-050-001) taxonomy consistency: **E-EXP-003 note added** for `PdfExportError::InvalidXmpTitle`. Confirmed that the analogous PPTX variant `PptxError::InvalidLanguageTag` (SEC-039-001) has no dedicated taxonomy code — it routes through E-EXP-001 as a variant-only pattern. Per consistency-mirror rule: `InvalidXmpTitle` likewise receives no dedicated code; it routes through E-EXP-003 as a variant-only pattern. E-EXP-003 table row updated to cite the variant; explanatory note added documenting the routing, the CWE-116 security context, the parallel with SEC-039-001, and confirming no Rust variant change is required. No new E-EXP-NNN code allocated. |

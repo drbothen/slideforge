@@ -118,6 +118,7 @@ axum process but this is a local development feature, not a deployed service.
 | ADR-016 | Plugin registry Builder + surface ownership + root-crate pipeline driver | Accepted |
 | ADR-017 | InlineFormat relationship context and hyperlink-run ownership boundary | Accepted (2026-06-05) |
 | ADR-018 | Post-layout validation pass for ContentBlock-level accessibility checks | Accepted (2026-06-05) |
+| ADR-019 | Stage 2b — post-eval field-to-block threading pass in slideforge-eval | Accepted (2026-06-05) |
 
 ---
 

@@ -27,8 +27,12 @@ wave_3_gate_adversary_clean_at: "6/7/8"
 wave_3_gate_holdout_must_pass: "5/5 PASS"
 wave_3_gate_tests: 2584
 wave_4_started: 2026-05-31
-wave_4_total_stories: 21
-wave_4_total_points: 129
+wave_4_total_stories: 22
+wave_4_total_points: 142
+wave_4_remediation_story: STORY-086
+wave_4_remediation_points: 13
+wave_4_remediation_authorized: 2026-06-05
+wave_4_remediation_gate_obligation: "STORY-086 must merge and re-pass Gate 3 (strict-mode a11y) + Gate 5 (holdout ≥0.6) before Wave 5 dispatch"
 wave_4_batch_a:
   stories: [STORY-035, STORY-036, STORY-043, STORY-044, STORY-045, STORY-073, STORY-075, STORY-076, STORY-077, STORY-078]
   execution: parallel
@@ -639,3 +643,28 @@ stories:
     priority: P2
     points: 3
     notes: "Test reliability: de-flake http_4xx_not_retried (slideforge-data, connection-count race on Windows) + cold_budget (slideforge-diagrams, timing gate under CI load); BC: BC-1.03.002; EPICs: EPIC-19 (CI); created 2026-06-01 from DI-6 (drift item → story)"
+  STORY-086:
+    status: draft
+    wave: 4
+    wave_designation: "4-REMEDIATION"
+    batch: D
+    priority: P0
+    points: 13
+    epic: EPIC-03
+    depends_on: [STORY-049, STORY-050]
+    blocks: [STORY-046, STORY-055, STORY-056]
+    bcs: [BC-1.16.001, BC-5.02.001, BC-5.01.001]
+    closes_findings: [BLK-002, F-G3-CRIT-001, F-G3-HIGH-001, F-G3-HIGH-002]
+    gate_obligation: "Must re-pass Wave 4 Gate 3 (strict-mode a11y) + Gate 5 (holdout must-pass ≥0.6) before Wave 5 dispatch"
+    notes: "Stage 2b: Post-Eval Field-to-Block Threading Pass + AltText::Unspecified. Authorized ADR-019 (human 2026-06-05). New module: slideforge-eval/src/field_to_block.rs + thread_fields_to_blocks(&mut Deck). Closes systemic content-empty output gap (all exporters). 5-crate change: slideforge-eval (new module), slideforge-types (AltText::Unspecified), slideforge-layout (regions.rs 5 sites + thread_media_alt_into_frames 3 sites + layout.rs comment), slideforge-validate (alt_text.rs match arms + comment), slideforge (build_inner Stage 2b call + doc comment). LESSON-13/LESSON-14 positive content vectors required in E2E tests."
+  STORY-087:
+    status: draft
+    wave: 5
+    priority: P1
+    points: 13
+    epic: EPIC-01
+    depends_on: [STORY-086, STORY-003, STORY-017]
+    blocks: []
+    bcs: [BC-1.17.001, BC-1.17.002, BC-1.17.003]
+    closes_findings: [F-G3-HIGH-003]
+    notes: "Color-Coded Slide Types: status + progress_bar + weighted_composite. Registration in SLIDE_TYPE_KEYWORDS (keywords.rs PHF) + regions.rs region map + SlideType impls in slideforge-plugin-api/src/slide_types/ + LabelCheck component-iteration extension for weighted_composite. Authorized 2026-06-05 per ADR-019 human_gate_resolved. E-A11-002 enforcement via LabelCheckValidator (Stage 5 pre-layout, reads Slide.fields directly — NO Stage 2b dependency). Closes F-G3-HIGH-003 (COLOR_CODED_TYPES dead-guard eliminated). 4-crate change: slideforge-plugin-api (3 new SlideType impls), slideforge-syntax (3 keywords), slideforge-layout (3 region map entries), slideforge-validate (weighted_composite component iteration)."

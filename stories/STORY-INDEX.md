@@ -9,8 +9,8 @@ traces_to:
   - .factory/stories/epics.md
   - .factory/stories/dependency-graph.md
   - .factory/stories/wave-schedule.md
-total_stories: 85
-stories_written: 85
+total_stories: 87
+stories_written: 87
 stories_ready: 0
 stories_in_progress: 0
 stories_merged: 59
@@ -18,7 +18,7 @@ stories_merged: 59
 
 # STORY-INDEX — slideforge v1.0
 
-> Authoritative index of all 85 stories across 6 waves and 21 epics.
+> Authoritative index of all 87 stories across 6 waves and 21 epics.
 > Update `status` and `merged_sha` fields as stories progress.
 > Story files live in `.factory/stories/stories/STORY-NNN-[short].md`.
 >
@@ -33,10 +33,10 @@ stories_merged: 59
 | Wave 1 | 14 | 0 | 0 | 0 | 14 | 0 |
 | Wave 2 | 7 | 0 | 0 | 0 | 7 | 0 |
 | Wave 3 | 17 | 0 | 0 | 0 | 17 | 0 |
-| Wave 4 | 21 | 0 | 0 | 0 | 21 | 0 |
-| Wave 5 | 20 | 20 | 0 | 0 | 0 | 0 |
+| Wave 4 | 22 | 1 | 0 | 0 | 21 | 0 |
+| Wave 5 | 21 | 21 | 0 | 0 | 0 | 0 |
 | Wave 6 | 6 | 6 | 0 | 0 | 0 | 0 |
-| **Total** | **85** | **26** | **0** | **0** | **59** | **0** |
+| **Total** | **87** | **28** | **0** | **0** | **59** | **0** |
 
 ---
 
@@ -130,8 +130,9 @@ stories_merged: 59
 | [STORY-076](stories/STORY-076-brand-srgbclr-transform-extraction.md) | EPIC-06 | Brand Loader: Transform-Aware Theme Color Extraction (srgbClr lumMod/tint/shade) | BC-2.01.001, BC-2.01.003 | P1 | 3 | strict | merged |
 | [STORY-077](stories/STORY-077-section-block-ir-extension.md) | EPIC-18 | SectionBlock IR Extension: FieldValue body + section-level register routing + inline-markup parser | BC-3.02.002, BC-1.14.003 | P0 | 13 | strict | merged |
 | [STORY-078](stories/STORY-078-parser-section-block-syntax.md) | EPIC-02 | Parser: section block syntax (section &lt;type&gt;: ... with sub-blocks) | BC-3.02.002 | P0 | 5 | strict | merged |
+| [STORY-086](stories/STORY-086-slide-field-to-block-threading.md) | EPIC-03 | Stage 2b: Post-Eval Field-to-Block Threading Pass (AltText::Unspecified) | BC-1.16.001, BC-5.02.001, BC-5.01.001 | P0 | 13 | strict | draft |
 
-**Wave 4 total points: 129**
+**Wave 4 total points: 142** _(129 original + 13 STORY-086 remediation; closes BLK-002, F-G3-CRIT-001, F-G3-HIGH-001, F-G3-HIGH-002; must re-pass Gate 3 + Gate 5)_
 
 ---
 
@@ -159,8 +160,9 @@ stories_merged: 59
 | [STORY-080](stories/STORY-080-deflake-cross-platform-tests.md) | EPIC-19 | Test reliability: de-flake http_4xx_not_retried + cold_budget | BC-1.03.002 | P2 | 3 | strict | draft |
 | [STORY-081](stories/STORY-081-slide-level-inline-markup.md) | EPIC-18 | Slide-Level Inline Markup: eval + layout + all-exporter structural formatting | BC-3.02.002 | P0 | 13 | strict | draft |
 | [STORY-082](stories/STORY-082-pptx-slide-sections.md) | EPIC-08 | PPTX: Slide-Grouping Sections (sectionLst) — DSL + IR + Eval + Exporter | BC-4.01.003, BC-1.14.003 | P0 | 5 | strict | draft |
+| [STORY-087](stories/STORY-087-color-coded-slide-types.md) | EPIC-01 | Color-Coded Slide Types: status, progress_bar, weighted_composite (Registration + LabelCheck WCAG Enforcement) | BC-1.17.001, BC-1.17.002, BC-1.17.003 | P1 | 13 | strict | draft |
 
-**Wave 5 total points: 114**
+**Wave 5 total points: 127** _(114 original + 13 STORY-087 color-coded slide types; closes F-G3-HIGH-003)_
 
 ---
 
@@ -196,16 +198,18 @@ All previously Wave TBD stories have been assigned waves per human approval 2026
 | Wave 1 | 14 | 85 | 6.1 |
 | Wave 2 | 7 | 41 | 5.9 |
 | Wave 3 | 17 | 100 | 5.9 |
-| Wave 4 | 21 | 129 | 6.1 |
-| Wave 5 | 20 | 114 | 5.7 |
+| Wave 4 | 22 | 142 | 6.5 |
+| Wave 5 | 21 | 127 | 6.0 |
 | Wave 6 | 6 | 42 | 7.0 |
-| **Total** | **85** | **511** | **6.0** |
+| **Total** | **87** | **537** | **6.2** |
 
 > No story exceeds 13 points. STORY-023 (brand synthesis — 13 pts), STORY-037
 > (PPTX core serialization — 13 pts), STORY-077 (SectionBlock IR + inline-markup parser
-> — 13 pts), and STORY-081 (slide-level inline markup — 13 pts) are the largest stories.
-> All have well-defined scope that warrants their size and were not split further to
-> preserve coherent implementation units. All other stories are 3-8 points.
+> — 13 pts), STORY-081 (slide-level inline markup — 13 pts), STORY-086 (Stage 2b
+> field-to-block threading — 13 pts, Wave 4 remediation), and STORY-087 (color-coded
+> slide types — 13 pts) are the largest stories. All have well-defined scope that
+> warrants their size and were not split further to preserve coherent implementation units.
+> All other stories are 3-8 points.
 >
 > Wave 4 expanded from 13 → 16 stories (85 → 96 pts) per human approval 2026-05-31:
 > STORY-073 (bullets-layout, 5 pts, P1), STORY-075 (footer detection, 3 pts, P1),
@@ -271,6 +275,20 @@ All previously Wave TBD stories have been assigned waves per human approval 2026
 > slideforge-plugin-api + slideforge-pptx — all 12 InlineNode variants × 3 formats + BC-
 > 5.02.002 EC-004 refactor). STORY-049 gains 3 new depends_on entries. ADR-016 governs.
 > Total workspace: 82 → 85 stories, 497 → 511 pts.
+>
+> Wave 4 remediation story added (human-authorized 2026-06-05): STORY-086 (Stage 2b
+> Post-Eval Field-to-Block Threading Pass + AltText::Unspecified, 13 pts, P0, EPIC-03)
+> added as Wave 4 remediation story per ADR-019 acceptance. Closes BLK-002,
+> F-G3-CRIT-001, F-G3-HIGH-001, F-G3-HIGH-002. Must re-pass Wave 4 Gate 3 + Gate 5
+> before Wave 5 advances. Wave 4: 21 → 22 stories, 129 → 142 pts. Total: 85 → 86
+> stories, 511 → 524 pts.
+>
+> Wave 5 expanded per human authorization (2026-06-05): STORY-087 (Color-Coded Slide
+> Types — status + progress_bar + weighted_composite registration + LabelCheck WCAG
+> enforcement, 13 pts, P1, EPIC-01) added per human authorization of three types as
+> v1.0 in-scope (recorded in ADR-019 human_gate_resolved). Closes F-G3-HIGH-003.
+> Depends on STORY-086 (content-correct output required). Wave 5: 20 → 21 stories,
+> 114 → 127 pts. Total: 86 → 87 stories, 524 → 537 pts.
 
 ---
 
@@ -278,8 +296,8 @@ All previously Wave TBD stories have been assigned waves per human approval 2026
 
 | Metric | Count | Status |
 |--------|-------|--------|
-| Total BCs | 112 | — |
-| BCs covered by at least one story | 112 | PASS — 100% (BC-3.02.002 covered by STORY-027 + STORY-077 + STORY-078 + STORY-081; BC-1.14.003 covered by STORY-035 + STORY-077 + STORY-082; BC-1.12.003 covered by STORY-034 + STORY-079; BC-1.03.002 covered by STORY-019 + STORY-080; BC-4.01.003 Half A covered by STORY-040, Half B covered by STORY-082) |
+| Total BCs | 116 | — |
+| BCs covered by at least one story | 116 | PASS — 100% (BC-1.16.001 covered by STORY-086; BC-1.17.001 covered by STORY-087; BC-1.17.002 covered by STORY-087; BC-1.17.003 covered by STORY-087; BC-3.02.002 covered by STORY-027 + STORY-077 + STORY-078 + STORY-081; BC-1.14.003 covered by STORY-035 + STORY-077 + STORY-082; BC-1.12.003 covered by STORY-034 + STORY-079; BC-1.03.002 covered by STORY-019 + STORY-080; BC-4.01.003 Half A covered by STORY-040, Half B covered by STORY-082) |
 | Orphan BCs (no story) | 0 | PASS |
 | Total VPs | 15 | — |
 | VPs covered | 15 | PASS — 100% |

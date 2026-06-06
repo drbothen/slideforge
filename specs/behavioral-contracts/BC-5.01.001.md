@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.2"
+version: "1.3"
 status: draft
 producer: product-owner
 timestamp: 2026-05-24T00:00:00
@@ -15,6 +15,10 @@ capability: CAP-020
 lifecycle_status: active
 introduced: v1.0.0
 modified:
+  - version: "1.3"
+    date: 2026-06-05
+    author: product-owner
+    reason: "ADR-019 (Stage 2b, human-authorized 2026-06-05): Clarify that E-A11-001 fires on AltText::Unspecified (pipeline gap — no author alt-text threaded), NOT on AltText::Decorative (author opt-out — valid). AltText::Unspecified is the new third variant (ADR-019 Decision 4) that distinguishes 'structural placeholder never overwritten' from 'author chose decorative'. Update Description, Postcondition 1, Invariant 2, EC-004, and EC-005 to reference AltText::Unspecified. Add EC-007 for the Decorative-valid path. Bump version."
   - version: "1.2"
     date: 2026-06-05
     author: product-owner
@@ -37,12 +41,22 @@ the build produces E-A11-001 with the element type, identifier, and source locat
 This is a compile-time contract — accessibility is never deferred to runtime or
 post-processing. The error is fatal in strict mode.
 
-**Pipeline placement (ADR-018):** E-A11-001 is emitted by `AltTextValidator` during
-the **post-layout validation pass** (Stage 6b), not the pre-layout pass (Stage 5).
+**Pipeline placement (ADR-018 + ADR-019):** E-A11-001 is emitted by `AltTextValidator`
+during the **post-layout validation pass** (Stage 6b), not the pre-layout pass (Stage 5).
 `ContentBlock::Chart`, `ContentBlock::Image`, and `ContentBlock::Diagram` are created
 during `layout::run` and exist only in `LaidOutDeck.slides[*].frames` — they are not
 present in the pre-layout `Deck`. The enforcement guarantee is preserved: `build()`
 returns `Err(BuildError::ValidationFailed)` before any output is written.
+
+**AltText::Unspecified (ADR-019 Decision 4):** E-A11-001 fires specifically when a
+frame's `alt` field is `AltText::Unspecified` — the pipeline placeholder variant that
+means "no author alt-text data was threaded into this frame." `AltText::Unspecified`
+is produced by `thread_media_alt_into_frames` (layout) when the upstream `ContentBlock`
+has `alt = None` (author supplied neither `alt "..."` nor `decorative: true`), and
+by `regions.rs` structural placeholders that were never overwritten.
+`AltText::Decorative` (author wrote `decorative: true`) is a valid opt-out; it does
+NOT trigger E-A11-001. This distinction is enforced by `validate_post_layout` match
+arms (ADR-019 Decision 5.3).
 
 ## Preconditions
 
@@ -52,7 +66,7 @@ returns `Err(BuildError::ValidationFailed)` before any output is written.
 
 ## Postconditions
 
-1. E-A11-001 is emitted: `Missing alt text on <element-type> '<identifier>' at <file>:<line>:<col>. Add alt "..." or mark decorative: true`. Emitted by `AltTextValidator.validate_post_layout()` during Stage 6b, after `layout::run` produces the `LaidOutDeck`.
+1. E-A11-001 is emitted: `Missing alt text on <element-type> '<identifier>' at <file>:<line>:<col>. Add alt "..." or mark decorative: true`. Emitted by `AltTextValidator.validate_post_layout()` during Stage 6b, after `layout::run` produces the `LaidOutDeck`. The triggering condition is `FrameContent::Chart/Image/Diagram { alt: AltText::Unspecified }` — the pipeline placeholder state indicating no author alt-text was threaded. `AltText::Decorative` frames are valid and do NOT trigger this error.
 2. Build returns `Err(BuildError::ValidationFailed(diagnostics))` in strict mode, where `diagnostics` contains at least one `Diagnostic { code: "E-A11-001", .. }`. No output is produced.
 3. CLI exits with code 2 (validation error) in strict mode.
 4. In `--warn-only` mode: warning emitted via `tracing::warn!`, build continues, output produced.
@@ -60,14 +74,24 @@ returns `Err(BuildError::ValidationFailed)` before any output is written.
 ## Invariants
 
 1. Every visual element in the output has EITHER non-empty alt text OR is marked as a PDF Artifact / empty-alt in all output formats. (DI-001)
-2. **The alt text requirement is enforced POST-layout (Stage 6b) via `validate_post_layout`.**
+2. **The alt text requirement is enforced POST-layout (Stage 6b) via `validate_post_layout`, firing on AltText::Unspecified frames.**
    `AltTextValidator` runs as part of the post-layout validation pass (Stage 6b per ADR-018),
    iterating `LaidOutDeck.slides[*].frames` for `FrameContent::Chart`, `FrameContent::Image`,
-   and `FrameContent::Diagram`. The pre-layout `validate()` call on `AltTextValidator` is a
-   no-op stub (correct — `Deck.slides[*].blocks` is always `vec![]` after eval per
-   `for_eval.rs:342`). The enforcement guarantee — `build()` returns
-   `Err(BuildError::ValidationFailed)` before any output is written — is upheld by Stage 6b,
-   which runs before Stage 7 (export).
+   and `FrameContent::Diagram`. The match logic (ADR-019 Decision 5.3):
+   - `AltText::Unspecified` → E-A11-001 (missing alt; structural pipeline placeholder;
+     no author alt-text data was threaded into this frame).
+   - `AltText::Decorative` → valid (author explicitly wrote `decorative: true`; no error).
+   - `AltText::Provided(_)` → valid (author supplied non-empty alt text; no error).
+   `AltText::Unspecified` is the pipeline placeholder variant introduced in ADR-019 Decision 4
+   to distinguish "structural placeholder never overwritten by author data" from
+   "author chose decorative." Before ADR-019, `AltText::Decorative` was misused as a
+   structural placeholder in `regions.rs`, causing false-positive E-A11-001 on decorative
+   elements. That bug is fixed: `regions.rs` now uses `AltText::Unspecified` for all
+   structural placeholders.
+   The pre-layout `validate()` call on `AltTextValidator` is a no-op stub (correct —
+   `Deck.slides[*].blocks` is always `vec![]` after eval per `for_eval.rs:342`). The
+   enforcement guarantee — `build()` returns `Err(BuildError::ValidationFailed)` before
+   any output is written — is upheld by Stage 6b, which runs before Stage 7 (export).
 3. `decorative: true` produces empty alt attributes in all output formats (empty string in PPTX `<p:ph altText="">`, empty `/Alt` in PDF Artifact, `alt=""` in HTML).
 4. No output format can contain a visual element with neither alt text nor decorative marker.
 
@@ -78,9 +102,10 @@ returns `Err(BuildError::ValidationFailed)` before any output is written.
 | EC-001 | `alt ""` (empty string) | Treated as missing alt text. E-A11-001 emitted. An empty string is not a valid alt text. |
 | EC-002 | `alt " "` (whitespace only) | Treated as missing alt text. Whitespace-only alt text is rejected. |
 | EC-003 | All images on a slide have `decorative: true` (DEC-008) | No E-A11-001. All images produce empty alt in output. No accessibility error. |
-| EC-004 | Chart slide with no `alt` field | E-A11-001 for the chart slide. Chart alt text should describe the data shown. |
-| EC-005 | Diagram slide with no `alt` field | E-A11-001 for the diagram slide. |
-| EC-006 | Image inside a shape: block with no alt | E-A11-001 for the shape's visual content. |
+| EC-004 | Chart slide with no `alt` field and no `decorative: true` | Stage 2b produces `ContentBlock::Chart { alt: None }`; `thread_media_alt_into_frames` maps `None` → `AltText::Unspecified` on the frame; `validate_post_layout` matches `Unspecified` → E-A11-001. Chart alt text should describe the data shown. |
+| EC-005 | Diagram slide with no `alt` field and no `decorative: true` | Same pipeline path as EC-004: frame carries `AltText::Unspecified`; E-A11-001 emitted. |
+| EC-006 | Image inside a shape: block with no alt | E-A11-001 for the shape's visual content. (Shape alt is set at parse time; this follows the BC-3.04.001 Invariant 1 path, not the Stage 2b path.) |
+| EC-007 | Chart slide with `decorative: true` (no `alt "..."`) | Stage 2b produces `ContentBlock::Chart { alt: Some(AltText::Decorative) }`; `thread_media_alt_into_frames` writes `AltText::Decorative` to frame; `validate_post_layout` matches `Decorative` → **valid; no E-A11-001**. This is the correct behavior: author explicitly opted out. |
 
 ## Canonical Test Vectors
 
