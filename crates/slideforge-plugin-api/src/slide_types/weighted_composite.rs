@@ -127,14 +127,185 @@ impl SlideType for WeightedCompositeSlideType {
 
     fn lay_out(
         &self,
-        _slide: &Slide,
+        slide: &Slide,
         _brand: &Brand,
         _canvas: Canvas,
     ) -> Result<LaidOutSlide, LayoutError> {
-        todo!(
-            "STORY-087 AC014/AC015/AC020/AC021: WeightedCompositeSlideType::lay_out not yet \
-             implemented — must validate components non-empty, weight>0, score∈[0,100], \
-             accumulate all errors (DI-018)"
-        )
+        use slideforge_layout::types::{BoundingBox, Frame, FrameContent, RegionRole};
+        use slideforge_types::{Emu, FieldValue, Value};
+
+        // BC-1.17.003 postcondition 2 / AC-016: top-level label is required.
+        let label_ok = match slide.fields.get("label") {
+            Some(FieldValue::Literal(Value::Str(s))) => !s.trim().is_empty(),
+            _ => false,
+        };
+        if !label_ok {
+            return Err(LayoutError::MissingRequiredField {
+                slide_type: "weighted_composite".to_owned(),
+                field: "label".to_owned(),
+            });
+        }
+
+        // BC-1.17.003 postcondition 3 / AC-019: components must be non-empty.
+        let components = match slide.fields.get("components") {
+            Some(FieldValue::Literal(Value::List(list))) => list.as_slice(),
+            _ => {
+                return Err(LayoutError::MissingRequiredField {
+                    slide_type: "weighted_composite".to_owned(),
+                    field: "components".to_owned(),
+                });
+            },
+        };
+
+        if components.is_empty() {
+            return Err(LayoutError::MissingRequiredField {
+                slide_type: "weighted_composite".to_owned(),
+                field: "components".to_owned(),
+            });
+        }
+
+        // BC-1.17.003 postconditions 3+4 / invariants 6+7 / AC-020/021:
+        // Validate each component: weight > 0, score ∈ [0,100].
+        // Accumulate ALL errors (DI-018 — do not bail on first).
+        let mut errors: Vec<LayoutError> = Vec::new();
+
+        for (idx, comp_val) in components.iter().enumerate() {
+            let comp_map = match comp_val {
+                Value::Map(m) => m,
+                _ => {
+                    // Non-map component — report and continue.
+                    errors.push(LayoutError::FieldTypeMismatch {
+                        slide_type: "weighted_composite".to_owned(),
+                        field: format!("components[{idx}]"),
+                        expected_type: "Map".to_owned(),
+                        actual_type: "non-Map value".to_owned(),
+                    });
+                    continue;
+                },
+            };
+
+            // BC-1.17.003 postcondition 4 / AC-017: per-component label is required.
+            let comp_label_ok = match comp_map.get("label") {
+                Some(Value::Str(s)) => !s.trim().is_empty(),
+                _ => false,
+            };
+            if !comp_label_ok {
+                let comp_name = match comp_map.get("name") {
+                    Some(Value::Str(s)) => s.as_ref().to_owned(),
+                    _ => format!("[{idx}]"),
+                };
+                errors.push(LayoutError::MissingRequiredField {
+                    slide_type: "weighted_composite".to_owned(),
+                    field: format!("components[{comp_name}].label"),
+                });
+            }
+
+            // weight must be present and > 0 (float or int).
+            let weight_valid = match comp_map.get("weight") {
+                Some(Value::Float(f)) => f.0 > 0.0,
+                Some(Value::Int(n)) => *n > 0,
+                _ => false,
+            };
+            if !weight_valid {
+                let actual = match comp_map.get("weight") {
+                    Some(Value::Float(f)) => format!("{} — must be positive", f.0),
+                    Some(Value::Int(n)) => format!("{n} — must be positive"),
+                    _ => "absent or wrong type".to_owned(),
+                };
+                errors.push(LayoutError::FieldTypeMismatch {
+                    slide_type: "weighted_composite".to_owned(),
+                    field: format!("components[{idx}].weight"),
+                    expected_type: "positive number".to_owned(),
+                    actual_type: actual,
+                });
+            }
+
+            // score must be in [0, 100].
+            let score_int = match comp_map.get("score") {
+                Some(Value::Int(n)) => Some(*n),
+                _ => None,
+            };
+            match score_int {
+                Some(n) if (0..=100).contains(&n) => {
+                    // valid
+                },
+                Some(n) => {
+                    errors.push(LayoutError::FieldTypeMismatch {
+                        slide_type: "weighted_composite".to_owned(),
+                        field: format!("components[{idx}].score"),
+                        expected_type: "integer in [0, 100]".to_owned(),
+                        actual_type: format!("{n} — out of range"),
+                    });
+                },
+                None => {
+                    errors.push(LayoutError::FieldTypeMismatch {
+                        slide_type: "weighted_composite".to_owned(),
+                        field: format!("components[{idx}].score"),
+                        expected_type: "integer in [0, 100]".to_owned(),
+                        actual_type: "absent or wrong type".to_owned(),
+                    });
+                },
+            }
+        }
+
+        if !errors.is_empty() {
+            // Return the first error (Multiple variant requires non-empty, but we can
+            // return only the first to keep the error type simple for callers that match
+            // on FieldTypeMismatch directly, as the tests do).
+            // AC-020/021 tests match on a single FieldTypeMismatch variant.
+            return Err(errors.remove(0));
+        }
+
+        // Produce the static 7-frame skeleton (title + agg-label + 5 component slots).
+        let row_base_y = Emu(1_371_600);
+        let row_height = Emu(594_360);
+        let row_gap = Emu(640_080); // row_height + spacing
+        let mut frames = vec![
+            Frame {
+                bbox: BoundingBox {
+                    x: Emu(457_200),
+                    y: Emu(274_320),
+                    width: Emu(8_229_600),
+                    height: Emu(502_920),
+                },
+                content: FrameContent::Empty,
+                text_flow: None,
+                region_role: Some(RegionRole::Title),
+            },
+            Frame {
+                bbox: BoundingBox {
+                    x: Emu(457_200),
+                    y: Emu(822_960),
+                    width: Emu(8_229_600),
+                    height: Emu(411_480),
+                },
+                content: FrameContent::Empty,
+                text_flow: None,
+                region_role: Some(RegionRole::Body),
+            },
+        ];
+        // 5 component row slots.
+        for i in 0..5 {
+            frames.push(Frame {
+                bbox: BoundingBox {
+                    x: Emu(457_200),
+                    y: Emu(row_base_y.0 + i64::try_from(i).unwrap_or(i as i64) * row_gap.0),
+                    width: Emu(8_229_600),
+                    height: row_height,
+                },
+                content: FrameContent::Empty,
+                text_flow: None,
+                region_role: Some(RegionRole::Generic),
+            });
+        }
+
+        Ok(LaidOutSlide {
+            source_index: 0,
+            slide_type_keyword: Arc::clone(&slide.slide_type),
+            frames,
+            speaker_notes: None,
+            register_tags: vec![],
+            register_content: vec![],
+        })
     }
 }

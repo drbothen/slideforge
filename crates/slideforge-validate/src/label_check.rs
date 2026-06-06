@@ -89,6 +89,35 @@ impl Validator for LabelCheckValidator {
                 ));
             }
 
+            // BC-1.17.003 postconditions 4+5 / AC-018 / AC-022 / DI-018:
+            // For `weighted_composite` slides, also check per-component labels.
+            // Iterate Slide.fields["components"] (a Value::List of Value::Maps).
+            // Emit E-A11-002 per component missing its label (accumulate all).
+            if slide.slide_type.as_ref() == "weighted_composite" {
+                if let Some(FieldValue::Literal(Value::List(components))) =
+                    slide.fields.get("components")
+                {
+                    for comp_val in components {
+                        if let Value::Map(comp_map) = comp_val {
+                            let comp_label_ok = match comp_map.get("label") {
+                                Some(Value::Str(s)) => !is_blank(s.as_ref()),
+                                _ => false,
+                            };
+                            if !comp_label_ok {
+                                let comp_name = match comp_map.get("name") {
+                                    Some(Value::Str(s)) => s.as_ref().to_owned(),
+                                    _ => String::new(),
+                                };
+                                diagnostics.push(make_missing_component_label_error(
+                                    &comp_name,
+                                    &slide.source_span,
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+
             // Check WCAG AA contrast if both hex fg/bg colors are declared.
             // Brand palette references (non-hex strings) are skipped in Wave 2.
             if !opts.skip_contrast_check {
@@ -146,6 +175,26 @@ fn make_missing_label_error(slide_type: &str, span: &SourceSpan) -> Diagnostic {
         span: span.clone(),
         hint: Some(Arc::from(
             "Color-coded slide types require label \"...\" (WCAG 1.4.1: Use of Color)",
+        )),
+    }
+}
+
+/// Construct an `E-A11-002` error diagnostic for a missing or blank per-component label.
+///
+/// BC-1.17.003 postcondition 4: per-component label is mandatory; missing label
+/// on a component emits E-A11-002 identifying the component by name.
+fn make_missing_component_label_error(comp_name: &str, span: &SourceSpan) -> Diagnostic {
+    Diagnostic {
+        severity: DiagnosticSeverity::Error,
+        code: Arc::from(E_A11_002),
+        message: Arc::from(format!(
+            "Missing label on color-coded element 'weighted_composite.component' \
+             '{comp_name}' at {span}. \
+             Color alone must not convey meaning. Add label \"...\" to this component."
+        )),
+        span: span.clone(),
+        hint: Some(Arc::from(
+            "Each component in weighted_composite requires label \"...\" (WCAG 1.4.1: Use of Color)",
         )),
     }
 }

@@ -98,10 +98,61 @@ impl SlideType for StatusSlideType {
 
     fn lay_out(
         &self,
-        _slide: &Slide,
+        slide: &Slide,
         _brand: &Brand,
         _canvas: Canvas,
     ) -> Result<LaidOutSlide, LayoutError> {
-        todo!("STORY-087 AC001/AC002: StatusSlideType::lay_out not yet implemented")
+        use slideforge_layout::types::{BoundingBox, Frame, FrameContent, RegionRole};
+        use slideforge_types::{Emu, FieldValue, Value};
+
+        // BC-1.17.001 postcondition 2 / AC-003: label is required.
+        // A missing or empty-after-trim label returns MissingRequiredField.
+        let label_ok = match slide.fields.get("label") {
+            Some(FieldValue::Literal(Value::Str(s))) => !s.trim().is_empty(),
+            _ => false,
+        };
+        if !label_ok {
+            return Err(LayoutError::MissingRequiredField {
+                slide_type: "status".to_owned(),
+                field: "label".to_owned(),
+            });
+        }
+
+        // Produce the static two-frame skeleton matching the region map:
+        // Frame 0 — color indicator strip (Generic role)
+        // Frame 1 — label + title body (Body role)
+        let frames = vec![
+            Frame {
+                bbox: BoundingBox {
+                    x: Emu(457_200),
+                    y: Emu(365_760),
+                    width: Emu(685_800),
+                    height: Emu(4_114_800),
+                },
+                content: FrameContent::Empty,
+                text_flow: None,
+                region_role: Some(RegionRole::Generic),
+            },
+            Frame {
+                bbox: BoundingBox {
+                    x: Emu(1_371_600),
+                    y: Emu(365_760),
+                    width: Emu(7_315_200),
+                    height: Emu(4_114_800),
+                },
+                content: FrameContent::Empty,
+                text_flow: None,
+                region_role: Some(RegionRole::Body),
+            },
+        ];
+
+        Ok(LaidOutSlide {
+            source_index: 0,
+            slide_type_keyword: Arc::clone(&slide.slide_type),
+            frames,
+            speaker_notes: None,
+            register_tags: vec![],
+            register_content: vec![],
+        })
     }
 }
