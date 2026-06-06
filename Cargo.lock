@@ -2449,7 +2449,6 @@ dependencies = [
  "slideforge-syntax",
  "slideforge-types",
  "slideforge-validate",
- "tempfile",
  "thiserror 2.0.18",
  "tracing",
  "tracing-test",
