@@ -12,7 +12,7 @@ purpose: >
 
 # STORY-086 Zero-Context Resume Playbook
 
-**IMMEDIATE NEXT ACTION: Dispatch adversary LOCAL pass 13 (streak 0/3, target 3 consecutive strict-CLEAN).**
+**IMMEDIATE NEXT ACTION: Dispatch adversary LOCAL pass 14 (streak 0/3, target 3 consecutive strict-CLEAN).**
 
 ---
 
@@ -21,10 +21,10 @@ purpose: >
 | Field | Value |
 |-------|-------|
 | develop SHA | `030dec6c` (61 merged PRs; 0 open PRs) |
-| feature/STORY-086 HEAD | `82f300db` (PUSHED to origin/feature/STORY-086) |
-| Workspace tests | 3300/3300 pass, 14 skipped (1 pre-existing cold_budget flake — STORY-080) |
+| feature/STORY-086 HEAD | `91c0c75a` (PUSHED to origin/feature/STORY-086) |
+| Workspace tests | 3303/3303 pass, 14 skipped (1 pre-existing cold_budget flake — STORY-080) |
 | Canonical exit gate | CLEAN (fmt + pedantic clippy + RUSTDOCFLAGS doc + nextest) |
-| Adversary LOCAL streak | 0/3 (pass 11 strict-CLEAN — streak reached 1/3; pass 12 found F-086-P12-MED-001 — REMEDIATED code-doc-only — streak reset 0/3; pass 13 next) |
+| Adversary LOCAL streak | 0/3 (pass 13 NOT strict-CLEAN [CLEAN PR-merge = yes] — F-086-P13-OBS-001 LOW: resolve_alt called unconditionally, W-A11-002 fired spuriously on non-media slides — REMEDIATED code-only + tracing-test dev-dep + 3 tests — streak reset 0/3; pass 14 next) |
 | BLK-002 | OPEN — closes on STORY-086 merge + Wave 4 re-gate pass |
 | Key spec versions | BC-1.16.001 v1.4, BC-3.04.001 v1.6, BC-4.01.001 v1.2, BC-4.02.001 v1.2, BC-5.01.001 v1.3, BC-5.02.001 v1.6, error-taxonomy v2.17, ADR-019 v1.5, STORY-086 v1.5, STORY-088 v1.2 (8 pts) |
 
@@ -73,7 +73,7 @@ Then confirm HEAD:
 git -C /Users/jmagady/Dev/slideforge/.worktrees/STORY-086 rev-parse HEAD
 ```
 
-Must equal `82f300db` (or a later commit if the cascade advanced this session). If it is a DIFFERENT, unexpected commit, stop and investigate before proceeding.
+Must equal `91c0c75a` (or a later commit if the cascade advanced this session). If it is a DIFFERENT, unexpected commit, stop and investigate before proceeding.
 
 ### 0d. Confirm workspace is still CLEAN
 
@@ -87,7 +87,7 @@ Expected: ~3300 pass, 14 skipped, 0 failures. If failures exist, diagnose before
 
 ## Step 1 — Resume the LOCAL Adversary Cascade
 
-**Current position: streak 0/3. Pass 13 must run next.**
+**Current position: streak 0/3. Pass 14 must run next.**
 
 ### Discipline rules (inline — all must survive context loss)
 
@@ -147,7 +147,7 @@ All four must pass with zero failures before the next adversary pass.
 
 ### Adversary pass dispatch template (copy-paste ready)
 
-Replace `<HEAD>` with the current worktree HEAD SHA before dispatching. Next pass number is 13.
+Replace `<HEAD>` with the current worktree HEAD SHA before dispatching. Next pass number is 14.
 
 ```
 ADVERSARY LOCAL PASS [N] — STORY-086
@@ -159,8 +159,8 @@ strict-CLEAN per BC-5.39.001).
 WORKING DIRECTORY (mandatory): /Users/jmagady/Dev/slideforge/.worktrees/STORY-086
 ALL Read/Grep/Glob calls MUST use this absolute worktree path.
 
-STORY-086 feature branch HEAD: 82f300db
-Review target: git diff origin/develop..82f300db
+STORY-086 feature branch HEAD: 91c0c75a
+Review target: git diff origin/develop..91c0c75a
   (the complete story diff — not just the latest commit)
 
 CONTRACT VERSIONS IN EFFECT (read from worktree .factory/ paths):
@@ -193,7 +193,7 @@ CRITICAL — WORKTREE TYPE PATHS:
   They are NOT on develop/main checkout. If you read types from the main checkout
   you will produce a corrupted finding — use ONLY the worktree path.
 
-PREVIOUSLY FIXED (verified closed in passes 1-10 — do NOT reopen unless new evidence):
+PREVIOUSLY FIXED (verified closed in passes 1-13 — do NOT reopen unless new evidence):
   F-086-P1-CRIT-001 (emit alt=None blocks), P2-MED-001/002, P2-geometry, P3-HIGH-001
   (RegionRole tag-aware slot), P3-MED-001 (FrameContent doc), P4 findings,
   P5-CRIT-001 (decorative-first), P5-MED-001/002, P5-OBS-1, P6-MED-001 (trim storage),
@@ -204,7 +204,10 @@ PREVIOUSLY FIXED (verified closed in passes 1-10 — do NOT reopen unless new ev
   P10-MED-002 (ADR-019 §3.4 ImageSpec phantom DSL keyword src — replaced with real Rust field path per v1.5),
   P10-MED-003 (field_to_block.rs:60+:268 rustdoc showed untrimmed Arc::from(s) — corrected to Arc::from(s.trim())),
   P11 (strict-CLEAN — all prior findings verified closed),
-  P12-MED-001 (build_inner body stage-comments line 459 misstated brand-vs-threading order, contradicting ADR-019 Decision 1 mandate — body comments renumbered + reconciled with real physical execution order; code-doc-only fix)
+  P12-MED-001 (build_inner body stage-comments line 459 misstated brand-vs-threading order, contradicting ADR-019 Decision 1 mandate — body comments renumbered + reconciled with real physical execution order; code-doc-only fix),
+  P13-OBS-001 (LOW: resolve_alt/is_decorative called unconditionally before slide_type dispatch — W-A11-002 fired spuriously on non-media slides; error-taxonomy v2.17 scopes W-A11-002 to media path only — resolve_alt/is_decorative moved inside chart/image/diagram match arms; tracing-test =0.2.5 dev-dep pinned in slideforge-eval/Cargo.toml; 3 new tests: 2 Red Gate fail-before/pass-after for non-media, 1 media regression guard; code-only fix)
+
+NOTE — new dev-dep in diff: `tracing-test = "=0.2.5"` added to slideforge-eval/Cargo.toml [dev-dependencies]. The adversary diff will include this Cargo.toml hunk — this is expected and correct (pinned per supply-chain policy).
 
 MANDATORY OUTPUT LINES (include verbatim at end of report):
   CLEAN (strict): yes/no
@@ -244,7 +247,7 @@ The `-W clippy::missing_docs_in_private_items` flag is required — example priv
 git -C /Users/jmagady/Dev/slideforge/.worktrees/STORY-086 push origin feature/STORY-086
 ```
 
-Confirm `origin/feature/STORY-086` matches the current worktree HEAD (will be later than `a055345e` if cascade produced fix commits).
+Confirm `origin/feature/STORY-086` matches the current worktree HEAD (will be later than `91c0c75a` if cascade produced further fix commits).
 
 ### Step 2.3 — PR creation
 
