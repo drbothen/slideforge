@@ -1260,3 +1260,203 @@ fn test_bc_1_16_001_decorative_only_still_produces_decorative_after_fix() {
         );
     }
 }
+
+// ─── F-086-P13-OBS-001 — W-A11-002 must NOT fire on non-media slides ──────────
+//
+// error-taxonomy v2.17 W-A11-002 and BC-1.16.001 PC-12 / EC-004 scope the
+// W-A11-002 warning to the Stage-2b MEDIA path (chart/image/diagram) only.
+// When `resolve_alt` is called unconditionally before the slide_type dispatch,
+// it fires W-A11-002 for ANY slide that has both `decorative: true` and a
+// non-empty `alt` — including non-media slides like "content" and "title" where
+// neither field is consumed and no media ContentBlock is emitted.
+//
+// F-086-P13-OBS-001 (LOCAL cascade pass 13) identified this as a spurious
+// emission. The fix moves `resolve_alt`/`is_decorative` inside the media
+// dispatch branches so they are only called for chart/image/diagram slides.
+//
+// ## Red Gate evidence
+//
+// test_f086_p13_obs001_non_media_slide_does_not_emit_w_a11_002 FAILS against
+// the current unconditional-call code (HEAD 82f300db): `resolve_alt(slide)` is
+// called before the slide_type check, so W-A11-002 is emitted even though the
+// slide type is "content" (non-media). `logs_contain("W-A11-002")` returns
+// `true` → `assert!(!logs_contain(...))` fails.
+//
+// After the fix (resolve_alt moved inside media dispatch), `resolve_alt` is not
+// called for non-media slides → W-A11-002 is not emitted → `logs_contain`
+// returns `false` → assertion passes.
+
+/// F-086-P13-OBS-001 — W-A11-002 must NOT fire on a non-media slide.
+///
+/// A "content" slide carrying both `decorative: true` AND a non-empty `alt`
+/// must NOT emit `tracing::warn!(code = "W-A11-002", ...)` because neither
+/// field is consumed (no media `ContentBlock` is built for non-media slide types).
+///
+/// ## Red Gate
+///
+/// FAILS against HEAD 82f300db: `resolve_alt(slide)` is called unconditionally
+/// before the `slide_type` dispatch, so W-A11-002 fires even for "content"
+/// slides. The `assert!(!logs_contain("W-A11-002"))` assertion fails.
+///
+/// PASSES after the fix: `resolve_alt` is called only inside the media branches
+/// (chart/image/diagram), so it is never called for "content" slides.
+///
+/// Traces: F-086-P13-OBS-001; error-taxonomy v2.17 W-A11-002; BC-1.16.001 PC-12 / EC-004.
+#[tracing_test::traced_test]
+#[test]
+fn test_f086_p13_obs001_non_media_slide_does_not_emit_w_a11_002() {
+    // Setup: "content" slide (non-media) with BOTH `decorative: true` AND
+    // a non-empty `alt "A description"`. Neither field is consumed on non-media
+    // slides; W-A11-002 must NOT fire.
+    let mut slide = make_slide("content");
+    slide.fields.insert(
+        Arc::from("title"),
+        FieldValue::Literal(Value::Str(Arc::from("My Content Slide"))),
+    );
+    slide.fields.insert(
+        Arc::from("decorative"),
+        FieldValue::Literal(Value::Bool(true)),
+    );
+    slide.fields.insert(
+        Arc::from("alt"),
+        FieldValue::Literal(Value::Str(Arc::from("A description"))),
+    );
+
+    let mut deck = make_deck(vec![slide]);
+    thread_fields_to_blocks(&mut deck);
+
+    // RED GATE: current code calls resolve_alt unconditionally → W-A11-002 fires.
+    // After fix: resolve_alt is inside media dispatch → NOT called for "content" → no warning.
+    assert!(
+        !logs_contain("W-A11-002"),
+        "F-086-P13-OBS-001 RED GATE: W-A11-002 must NOT fire for a non-media slide ('content'). \
+         error-taxonomy v2.17 W-A11-002 scopes this warning to the MEDIA path only \
+         (chart/image/diagram). Non-media slides do not consume decorative/alt fields \
+         and must not emit the conflict warning. BC-1.16.001 PC-12 / EC-004."
+    );
+
+    // Confirm the slide produced the expected title text block (no regressions).
+    let text_blocks: Vec<_> = deck.slides[0]
+        .blocks
+        .iter()
+        .filter(|b| matches!(b.content, ContentBlock::Text(_)))
+        .collect();
+    assert_eq!(
+        text_blocks.len(),
+        1,
+        "F-086-P13-OBS-001: 'content' slide with title must produce exactly 1 Text block; \
+         got {}",
+        text_blocks.len()
+    );
+
+    // Confirm no media ContentBlock was produced (guard for the fix scope).
+    let media_blocks: Vec<_> = deck.slides[0]
+        .blocks
+        .iter()
+        .filter(|b| {
+            matches!(
+                b.content,
+                ContentBlock::Chart(_) | ContentBlock::Image(_) | ContentBlock::Diagram(_)
+            )
+        })
+        .collect();
+    assert_eq!(
+        media_blocks.len(),
+        0,
+        "F-086-P13-OBS-001: 'content' slide must produce 0 media ContentBlocks; got {}",
+        media_blocks.len()
+    );
+}
+
+/// F-086-P13-OBS-001 variant — "title" slide type: same no-W-A11-002 requirement.
+///
+/// Regression guard: a "title" slide with both `decorative: true` + non-empty `alt`
+/// must NOT emit W-A11-002.
+///
+/// Traces: F-086-P13-OBS-001; BC-1.16.001 PC-12 / EC-004.
+#[tracing_test::traced_test]
+#[test]
+fn test_f086_p13_obs001_title_slide_does_not_emit_w_a11_002() {
+    let mut slide = make_slide("title");
+    slide.fields.insert(
+        Arc::from("title"),
+        FieldValue::Literal(Value::Str(Arc::from("Title Slide"))),
+    );
+    slide.fields.insert(
+        Arc::from("decorative"),
+        FieldValue::Literal(Value::Bool(true)),
+    );
+    slide.fields.insert(
+        Arc::from("alt"),
+        FieldValue::Literal(Value::Str(Arc::from("Inert alt on title slide"))),
+    );
+
+    let mut deck = make_deck(vec![slide]);
+    thread_fields_to_blocks(&mut deck);
+
+    assert!(
+        !logs_contain("W-A11-002"),
+        "F-086-P13-OBS-001 title variant: W-A11-002 must NOT fire for 'title' slide. \
+         BC-1.16.001 PC-12 / EC-004 scope this warning to the MEDIA path only."
+    );
+}
+
+/// F-086-P13-OBS-001 regression guard — media slide (chart) with BOTH fields set
+/// STILL emits W-A11-002 after the fix.
+///
+/// This is NOT a Red Gate test — it verifies that moving `resolve_alt` inside the
+/// media dispatch does NOT suppress the warning on actual media slides. The warning
+/// must still fire when `decorative: true` AND a non-empty `alt` are BOTH set on a
+/// chart slide.
+///
+/// Traces: F-086-P13-OBS-001; BC-1.16.001 PC-12 / EC-004; error-taxonomy v2.17 W-A11-002.
+#[tracing_test::traced_test]
+#[test]
+fn test_f086_p13_obs001_chart_slide_both_set_still_emits_w_a11_002() {
+    // Regression guard: chart slide (MEDIA) with both decorative+alt MUST still warn.
+    // This behavior must be preserved after the F-086-P13-OBS-001 fix.
+    let mut slide = make_slide("chart");
+    slide.fields.insert(
+        Arc::from("chart_type"),
+        FieldValue::Literal(Value::Str(Arc::from("bar"))),
+    );
+    slide.fields.insert(
+        Arc::from("decorative"),
+        FieldValue::Literal(Value::Bool(true)),
+    );
+    slide.fields.insert(
+        Arc::from("alt"),
+        FieldValue::Literal(Value::Str(Arc::from("Revenue chart description"))),
+    );
+
+    let mut deck = make_deck(vec![slide]);
+    thread_fields_to_blocks(&mut deck);
+
+    // W-A11-002 MUST still fire for media slides with both fields set.
+    assert!(
+        logs_contain("W-A11-002"),
+        "F-086-P13-OBS-001 regression guard: W-A11-002 MUST still fire for a chart slide \
+         with both `decorative: true` AND a non-empty `alt`. The fix must not suppress the \
+         warning on actual media slides. BC-1.16.001 PC-12 / EC-004."
+    );
+
+    // Confirm decorative-first outcome is preserved (AltText::Decorative).
+    let chart_blocks: Vec<_> = deck.slides[0]
+        .blocks
+        .iter()
+        .filter(|b| matches!(b.content, ContentBlock::Chart(_)))
+        .collect();
+    assert_eq!(
+        chart_blocks.len(),
+        1,
+        "regression guard: chart slide must still produce ContentBlock::Chart after fix"
+    );
+    if let ContentBlock::Chart(spec) = &chart_blocks[0].content {
+        assert_eq!(
+            spec.alt,
+            Some(AltText::Decorative),
+            "regression guard: decorative-first outcome must be preserved; got {:?}",
+            spec.alt
+        );
+    }
+}

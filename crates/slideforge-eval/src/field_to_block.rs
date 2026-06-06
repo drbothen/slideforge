@@ -62,7 +62,10 @@ use slideforge_types::{
 ///
 /// When both `decorative: true` AND a non-empty `alt` are present, rule 1 wins
 /// and `tracing::warn!(code = "W-A11-002", ...)` is emitted to surface the
-/// conflict to the author (error-taxonomy v2.17 W-A11-002).
+/// conflict to the author (error-taxonomy v2.17 W-A11-002). This warning is
+/// scoped to the MEDIA path only (chart/image/diagram); non-media slides may
+/// carry inert `decorative:` / `alt:` fields without triggering it
+/// (F-086-P13-OBS-001 fix).
 ///
 /// The layout `thread_media_alt_into_frames` function then maps `None` to
 /// `AltText::Unspecified` on the resulting frame (ADR-019 Decision 5).
@@ -160,8 +163,14 @@ pub fn thread_fields_to_blocks(deck: &mut Deck) {
         }
 
         // ── 5. Media (chart / image / diagram) ───────────────────────────────
-        let alt = resolve_alt(slide);
-        let decorative = is_decorative(slide);
+        //
+        // `resolve_alt` and `is_decorative` are called ONLY inside each media
+        // branch — NOT unconditionally here — so that the W-A11-002 warning
+        // (emitted by `resolve_alt` when both `decorative: true` AND a non-empty
+        // `alt` are set) fires only when the slide is actually a media slide.
+        // Non-media slides may carry inert `decorative:` / `alt:` fields without
+        // triggering the conflict warning (F-086-P13-OBS-001 fix;
+        // error-taxonomy v2.17 W-A11-002 scopes this warning to the MEDIA path).
         let slide_type: &str = slide.slide_type.as_ref();
 
         // Chart: slide_type == "chart" (or any ChartRenderer surface type).
@@ -177,6 +186,10 @@ pub fn thread_fields_to_blocks(deck: &mut Deck) {
         // This design change (architect-pass-1-adjudication Issue 1 verdict CODE-CONFORMS)
         // supersedes the prior anti-double-fire skip logic.
         if slide_type == "chart" {
+            // Resolve alt/decorative inside the media branch (F-086-P13-OBS-001):
+            // W-A11-002 fires only for chart slides, not for non-media slides.
+            let alt = resolve_alt(slide);
+            let decorative = is_decorative(slide);
             if let Some(chart_type) = extract_str_field(slide, "chart_type") {
                 // Always emit the ContentBlock::Chart, even when alt=None.
                 // Pre-layout validate() is restricted to Shape; post-layout fires exactly once.
@@ -200,6 +213,9 @@ pub fn thread_fields_to_blocks(deck: &mut Deck) {
             }
         } else if matches!(slide_type, "image" | "screenshot" | "bio") {
             // Image: slide_type in {image, screenshot, bio}.
+            // Resolve alt/decorative inside the media branch (F-086-P13-OBS-001).
+            let alt = resolve_alt(slide);
+            let decorative = is_decorative(slide);
             // Same rule as chart: emit unconditionally; pre-layout validate() is Shape-only.
             if let Some(src) = extract_str_field(slide, "src") {
                 // Always emit the ContentBlock::Image, even when alt=None.
@@ -223,6 +239,9 @@ pub fn thread_fields_to_blocks(deck: &mut Deck) {
             }
         } else if slide_type == "diagram" {
             // Diagram: slide_type == "diagram".
+            // Resolve alt/decorative inside the media branch (F-086-P13-OBS-001).
+            let alt = resolve_alt(slide);
+            let decorative = is_decorative(slide);
             // Same rule as chart/image: emit unconditionally; pre-layout validate() is Shape-only.
             if let Some(source) = extract_str_field(slide, "source") {
                 // Always emit the ContentBlock::Diagram, even when alt=None.
