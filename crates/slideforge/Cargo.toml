@@ -59,6 +59,3 @@ tracing-test = { version = "=0.2.5", features = ["no-env-filter"] }
 # zip: validate PPTX/DOCX ZIP structure (AC-001, AC-002, AC-008).
 # Same feature set as slideforge-pptx to avoid lzma conflict.
 zip = { version = "=4.2.0", default-features = false, features = ["deflate", "time"] }
-# tempfile: not used directly — BrandTmpDir uses std::env::temp_dir() instead.
-# Retained per story spec in case future tests require it.
-tempfile = "=3.27.0"
